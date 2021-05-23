@@ -3,6 +3,12 @@
 [[Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 
+[[BinaryProvider]]
+deps = ["Libdl", "Logging", "SHA"]
+git-tree-sha1 = "ecdec412a9abc8db54c0efc5548c64dfce072058"
+uuid = "b99e7846-7c00-51b0-8f62-c81ae34c0232"
+version = "0.5.10"
+
 [[Compat]]
 deps = ["Base64", "Dates", "DelimitedFiles", "Distributed", "InteractiveUtils", "LibGit2", "Libdl", "LinearAlgebra", "Markdown", "Mmap", "Pkg", "Printf", "REPL", "Random", "SHA", "Serialization", "SharedArrays", "Sockets", "SparseArrays", "Statistics", "Test", "UUIDs", "Unicode"]
 git-tree-sha1 = "e4e2b39db08f967cc1360951f01e8a75ec441cab"
@@ -13,6 +19,17 @@ version = "3.30.0"
 git-tree-sha1 = "3f71217b538d7aaee0b69ab47d9b7724ca8afa0d"
 uuid = "a8cc5b0e-0ffa-5ad4-8c14-923d3ee1735f"
 version = "4.0.4"
+
+[[Cxx]]
+deps = ["BinaryProvider", "Libdl", "REPL"]
+git-tree-sha1 = "71728149f62225470a4ae4260536a98a5009997c"
+uuid = "a0b5b9ef-44b7-5148-a2d1-f6db19f3c3d2"
+version = "0.4.0"
+
+[[DICOM]]
+git-tree-sha1 = "825f5f5c6033f1eec75eb768403044cf09847718"
+uuid = "a26e6606-dd52-5f6a-a97f-4f611373d757"
+version = "0.10.0"
 
 [[DataAPI]]
 git-tree-sha1 = "dfb3b7e89e395be1e25c2ad6d7690dc29cc53b1d"
@@ -87,6 +104,14 @@ deps = ["Logging"]
 git-tree-sha1 = "377252859f740c217b936cebcd918a44f9b53b59"
 uuid = "b5f81e59-6552-4d32-b1f0-c071b021bf89"
 version = "0.1.1"
+
+[[ITK]]
+deps = ["BinaryProvider", "Cxx", "Libdl"]
+git-tree-sha1 = "606dc4717e8be9f9f850e5d00b6e09271df6149b"
+repo-rev = "master"
+repo-url = "https://github.com/cj-mclaughlin/ITK.jl"
+uuid = "c07c4cf6-b85e-11e9-2ee5-393f21797b38"
+version = "0.1.0"
 
 [[InteractiveUtils]]
 deps = ["Markdown"]
