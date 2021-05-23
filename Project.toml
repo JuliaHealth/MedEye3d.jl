@@ -1,2 +1,6 @@
+name = "Probabilistic medical segmentation"
+authors = ["M.D Jakub Mitura"]
+[compat]
+julia = "1.5.4"
 [deps]
 DrWatson = "634d3b9d-ee7a-5ddf-bec9-22491ea816e1"
