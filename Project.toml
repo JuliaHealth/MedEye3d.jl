@@ -1,6 +1,10 @@
 name = "Probabilistic medical segmentation"
 authors = ["M.D Jakub Mitura"]
+
+[deps]
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
+DrWatson = "634d3b9d-ee7a-5ddf-bec9-22491ea816e1"
+
 [compat]
 julia = "1.5.4"
-[deps]
-DrWatson = "634d3b9d-ee7a-5ddf-bec9-22491ea816e1"
