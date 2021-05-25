@@ -2,11 +2,18 @@ name = "Probabilistic medical segmentation"
 authors = ["M.D Jakub Mitura"]
 
 [deps]
+AbstractPlotting = "537997a7-5e4e-5d89-9595-2241ea00577e"
 DICOM = "a26e6606-dd52-5f6a-a97f-4f611373d757"
 DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 DrWatson = "634d3b9d-ee7a-5ddf-bec9-22491ea816e1"
+GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+GeometryTypes = "4d00f742-c7ba-57c2-abde-4428a4b178cb"
+HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
 ITK = "c07c4cf6-b85e-11e9-2ee5-393f21797b38"
+MAT = "23992714-dd62-5051-b70f-ba57cb901cac"
+Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
+Observables = "510215fc-4207-5dde-b226-833fc4488ee2"
 
 [compat]
 julia = "1.5.4"
