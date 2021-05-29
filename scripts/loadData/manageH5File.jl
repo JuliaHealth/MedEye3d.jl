@@ -2,7 +2,6 @@
 module for controlling data stored in Hdf5 filesystem
 
 ```
-module manageH5File 
 
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
@@ -24,4 +23,3 @@ function getExample() ::Array{Number, 3}
     return arr
 end
 
-end
