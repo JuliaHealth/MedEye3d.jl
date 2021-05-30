@@ -12,17 +12,18 @@ using GeometryBasics
 using GeometricalPredicates
 using Distances
 
+include(DrWatson.scriptsdir("structs","forDisplayStructs.jl"))
 
-imageDim = size(arrr)
-maskArr = Observable(BitArray(undef, imageDim))
-singleCtScanDisplay(arrr, maskArr)
+# imageDim = size(arrr)
+# maskArr = Observable(BitArray(undef, imageDim))
+# singleCtScanDisplay(arrr, maskArr)
 
 
 ```@doc
 simple display of single image - only in transverse plane we are adding also a mask  that 
 arrr - main 3 dimensional data representing medical image for example in case of CT each voxel represents value of X ray attenuation
 ```
-function singleCtScanDisplay(arrr ::Array{Number, 3}, maskArr::Observable{BitArray{3}} ) 
+function singleCtScanDisplay(arrr ::Array{Number, 3}, maskArr::Observable{AbstractArray{3}} ) 
   
 imageDim = size(arrr) # dimenstion of the primary image for example CT scan
 slicesNumb =imageDim[3] # number of slices 
@@ -62,14 +63,14 @@ end
 
 ```@doc
 inspired by   https://github.com/JuliaPlots/Makie.jl/issues/810
-Generaly thanks to this function  the viewer is able to respond to clicking on the slices and records it in the supplied 3 dimensional bitarray
+Generaly thanks to this function  the viewer is able to respond to clicking on the slices and records it in the supplied 3 dimensional AbstractArray
   ax - Axis which store our heatmap slices which we want to observe wheather user clicked on them and where
   dims - dimensions of  main image for example CT
   sc - Scene where our axis is
   maskArr - the 3 dimensional bit array  that has exactly the same dimensions as main Array storing image 
   sliceNumb - represents on what slide we are on currently on - ussually it just give information from slider 
 ```
-function indicatorC(ax::Axis,dims::Tuple{Int64, Int64, Int64},sc::Scene,maskArr::Observable{BitArray{3}},sliceNumb::Observable{Any})
+function indicatorC(ax::Axis,dims::Tuple{Int64, Int64, Int64},sc::Scene,maskArr::Observable{AbstractArray{3}},sliceNumb::Observable{Any})
   register_interaction!(ax, :indicator) do event::Makie.MouseEvent, axis
   if event.type === MouseEventTypes.leftclick
     #position from top left corner 
@@ -82,11 +83,11 @@ function indicatorC(ax::Axis,dims::Tuple{Int64, Int64, Int64},sc::Scene,maskArr:
     pixelsNumbInX =dims[1]
     pixelsNumbInY =dims[2]
     #calculating over which image pixel we are
-    calculatedXpixel =  (xMouse/compBoxWidth)*pixelsNumbInX 
-    calculatedYpixel =   (yMouse/compBoxHeight)*pixelsNumbInY 
-    sliceNumbConv = sliceNumb[] 
+    calculatedXpixel =convert(Int32, round( (xMouse/compBoxWidth)*pixelsNumbInX) )
+    calculatedYpixel =  convert(Int32,round( (yMouse/compBoxHeight)*pixelsNumbInY ))
+    sliceNumbConv =convert(Int32,round( sliceNumb[] ))
     #appropriately modyfing wanted pixels in mask array
-    markMaskArrayPatch( maskArr ,Point3D(calculatedXpixel, calculatedYpixel, sliceNumbConv  ))
+    markMaskArrayPatch( maskArr ,CartesianIndex(calculatedXpixel, calculatedYpixel, sliceNumbConv  ),2)
 
 
 
@@ -100,50 +101,29 @@ end
 
 ```@doc
   maskArr - the 3 dimensional bit array  that has exactly the same dimensions as main Array storing image 
-  point - point around which we want to modify the bitArray from 0 to 1
+  point - cartesian coordinates of point around which we want to modify the 3 dimensional array from 0 to 1
 
 ```
-function markMaskArrayPatch(maskArr::Observable{BitArray{3}}, point::Point3D)
-  calculatedXpixel= convert(Int32, round(GeometricalPredicates.getx(point) ))
-  calculatedYpixel= convert(Int32,round(GeometricalPredicates.gety(point) ))
-  sliceNumbConv= convert(Int32,round(GeometricalPredicates.getz(point) ))
+function markMaskArrayPatch(maskArr::Observable{AbstractArray{3}}, pointCart::CartesianIndex{3}, patchSize ::Int64)
 
+  ones = CartesianIndex(patchSize,patchSize,patchSize) # cartesian 3 dimensional index used for calculations to get range of the cartesian indicis to analyze
   maskArrB = maskArr[]
-    
-  maskArrB[calculatedXpixel, calculatedYpixel, sliceNumbConv]=1
-  maskArrB[calculatedXpixel+1, calculatedYpixel+1, sliceNumbConv]=1
-  maskArrB[calculatedXpixel+1, calculatedYpixel-1, sliceNumbConv]=1
-  maskArrB[calculatedXpixel-1, calculatedYpixel+1, sliceNumbConv]=1
-  maskArrB[calculatedXpixel-1, calculatedYpixel-1, sliceNumbConv]=1
-
-
+  for J in (pointCart-ones):(pointCart+ones)
+    diff = J - pointCart # diffrence between dimensions relative to point of origin
+      if cartesianTolinear(diff) <= patchSize
+        maskArrB[J]=1
+      end
   maskArr[] = maskArrB
-
-
-
+    end
 end
 
 
 ```@doc
-  we are looking in given 3 dimensional array closest points in distnace not bigger than dist measure in euclidean distance
-
-  1)create a 3 dimensional matrix  that will have edge equal to distance
-  2)take all cartesian coordinates from it
-  3)add to those cartesian
-
-  arr - the 3 dimensional bit array  that has exactly the same dimensions as main Array storing image 
-  point - point around which we want to modify the bitArray from 0 to 1
-  dist - maximal euclidean distance to which we want  to apply some operations
-  returns series of cartesian coordinates of points closest to given point using euclidean distance measure 
+works only for 3d cartesian coordinates
+  cart - cartesian coordinates of point where we will add the dimensions ...
 ```
-function getIndexesclosestToPoint(arr::BitArray{3}, point::Point3D) 
-  calculatedXpixel= convert(Int32, round(GeometricalPredicates.getx(point) ))
-  calculatedYpixel= convert(Int32,round(GeometricalPredicates.gety(point) ))
-  sliceNumbConv= convert(Int32,round(GeometricalPredicates.getz(point) ))
-
-#
-# - 
-
-
+function cartesianTolinear(pointCart::CartesianIndex{3}) :: Int16
+   abs(pointCart[1])+ abs(pointCart[2])+abs(pointCart[3])
 end
+
 
