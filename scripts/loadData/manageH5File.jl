@@ -2,6 +2,8 @@
 module for controlling data stored in Hdf5 filesystem
 
 ```
+module h5manag
+
 
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
@@ -9,7 +11,21 @@ using HDF5
 include(DrWatson.scriptsdir("structs","forDisplayStructs.jl"))
 
 const pathToHd5 = DrWatson.datadir("hdf5Main", "mainHdDataBaseLiver07.hdf5")
-const g = h5open(pathToHd5, "w")
+const g = h5open(pathToHd5, "r+")
+
+```@doc
+ example study in a form of 3 dimensional array
+```
+function setG(ginput)
+    g=ginput
+end
+
+  
+
+
+function aaa() 
+println("heere")
+end    
 
 ```@doc
 getting example study in a form of 3 dimensional array
@@ -26,7 +42,6 @@ function getExampleLabels() ::Array{Number, 3}
 end
 
 
-"trainingScans"
 ```@doc
 getting subgroups of given group
 ```
@@ -42,9 +57,9 @@ color - RGBA value that will be used in displayed mask
 parameter - type of observable 3 dimensional array used
 return Mask struct with observable 3d array linked to appropriate HDF5 dataset
 ```
-function getOrCreateMaskData(name::String,path::String,dims::Tuple{Int, Int, Int}, color::RGBA ) :: Mask{arrayType} where{arrayType}
+function getOrCreateMaskData(name::String,path::String,dims::Tuple{Int, Int, Int}, color ) :: Mask{arrayType} where{arrayType}
 #1) we need  to establish weather we have a mask of this name in given path
-if name in myGetGroupsNames(g[path]) #where g is our dataset
+if name in myGetGroupsNames(getG()[path]) #where g is our dataset
 #2a) if we have this mas already created we load the data  from it into array
     
 #2b) if such file is not present we create array of given dimensions and save it into given path dataset of given name
@@ -56,12 +71,8 @@ if name in myGetGroupsNames(g[path]) #where g is our dataset
 #5) the struct Mask with appropriate name will be return with given name created/retrieved array, id of HDF5 file anhd given color
 
 end    
+end
+
+end # manag
 
 
-
-function getOrCreateMaskData(dims::Tuple{Int, Int, Int}) :: Observable{arrayType} where{arrayType}
-
-
-# Attributes can be created using
-
-# attributes(parent)[name] = value
