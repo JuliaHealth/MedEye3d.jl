@@ -37,8 +37,6 @@ ax2 = layout[1, 1] = Makie.Axis(scene, backgroundcolor = :transparent)
 
 #control widgets
 sl_x =layout[2, 1]= Makie.Slider(scene, range = 1:1: slicesNumb , startvalue = slicesNumb/2 )
-sl_xb =layout[3, 1]= Makie.Slider(scene, range = 1:1: slicesNumb , startvalue = slicesNumb/2 )
-
 sliderXVal = sl_x.value
 
 
@@ -99,8 +97,6 @@ function indicatorC(ax::Axis,dims::Tuple{Int64, Int64, Int64},sc::Scene,maskArr,
     #print("xMouse: $(xMouse)  yMouse: $(yMouse)   compBoxWidth: $(compBoxWidth)  compBoxHeight: $(compBoxHeight)   calculatedXpixel: $(calculatedXpixel)  calculatedYpixel: $(calculatedYpixel)      pixelsNumbInX  $(pixelsNumbInX)         ") 
   end
   
-
-  return true
 end
 end
 
