@@ -1,57 +1,50 @@
 
 
-using Distributed
 
-function include_remote(path, workers=workers(); mod=Main)
-    open(path) do f
-    text, s = read(f, String), 1
-    while s <= length(text)
-    ex, s = Meta.parse(text, s) # Parse text starting at pos s, return new s
-    for w in workers
-    @spawnat w Core.eval(mod, ex) # Evaluate the expression on workers
-    end
-    end
-    end
-    end
-    
 
-using Pkg
+usingTest(ColorTypes)
+
+#from http://5.9.10.113/65385311/how-to-load-modules-or-scripts-dynamically-at-runtime-with-julia-1-5
+
+function foo(m::AbstractString)
+    include(m * ".jl")
+    Main.eval(Meta.parse("using Main.$m"))
+    mod = getfield(Main, Symbol(m))
+    Base.invokelatest(mod.hello)
+end
+
+Main.eval(Meta.parse("using ColorTypes"))
+
+
+
+
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
-addprocs(2)
+using Distributed
+addprocs(1)
 
-workers()[1]
-
-@everywhere 2 using Pkg
-@everywhere 2 pkg"activate ." # Activate the current directory 
-@everywhere 2 pkg"instantiate"
-@everywhere 2 pkg"precompile"
-@everywhere 2 Pkg.add("ColorTypes")
-@everywhere 2 using ColorTypes
-
-@everywhere 2 Pkg.add("Documenter")
-@everywhere 2 using Documenter
-
-@everywhere 2 Pkg.add("HDF5")
-@everywhere 2 using HDF5
+@everywhere using Pkg
+@everywhere Pkg.instantiate()
 
 using HDF5
 
 dirToH = DrWatson.scriptsdir("loadData","manageH5File.jl")
-
-# include(dirToH)
-# using Main.h5manag
-
-
-include_remote(dirToH)
-@everywhere 2 using Main.h5manag
-
-zz = @spawnat 2 keys(Main.h5manag.aaa())
+dirToWorkerPrepare = DrWatson.scriptsdir("mainPipeline","processesDefinitions","mainProcessDefinition.jl")
+dirToFileStructs = DrWatson.scriptsdir("structs","forFilesEtc.jl")
+include(dirToFileStructs)
 
 
-# @everywhere 2 Main.h5manag.setG($gp)
+
+include(dirToWorkerPrepare)
+include(dirToFileStructs)
+include(dirToH)
+
+using Main.h5manag
+x = initializeWorker(2, ["Documenter", "HDF5","ColorTypes"], [filePathAndModuleName(dirToH,"h5manag")] )
+
+fetch(x)
+
 
 exmpleH = @spawnat 2 Main.h5manag.getExample()
 
 fetch(exmpleH)
-
