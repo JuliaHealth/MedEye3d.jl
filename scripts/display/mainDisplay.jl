@@ -5,12 +5,13 @@ functions responsible for displaying medical image Data
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 using GLMakie
-#using Makie
-#using AbstractPlotting
-using GeometryBasics
+using Makie
+#using GeometryBasics
 using GeometricalPredicates
 using ColorTypes
 using Distributed
+using GLMakie
+
 ## getting id of workers 
 dirToWorkerNumbs = DrWatson.scriptsdir("mainPipeline","processesDefinitions","workerNumbers.jl")
 dirToImageHelper = DrWatson.scriptsdir("display","imageViewerHelper.jl")
@@ -18,8 +19,6 @@ dirToImageHelper = DrWatson.scriptsdir("display","imageViewerHelper.jl")
 include(dirToWorkerNumbs)
 include(dirToImageHelper)
 include(DrWatson.scriptsdir("structs","forDisplayStructs.jl"))
-
-
 
 exmpleH = @spawnat persistenceWorker Main.h5manag.getExample()
 arrr= fetch(exmpleH)
@@ -86,10 +85,7 @@ function indicatorC(ax::Axis,dims::Tuple{Int64, Int64, Int64},sc::Scene,maskArr,
     println("clicked")
     #@async begin
       #appropriately modyfing wanted pixels in mask array
-      @async begin 
-        maskArr[] = imageViewerHelper.calculateMouseAndSetmask(maskArr, event,sc,dims,sliceNumb)
-      end
-      
+   @async calculateMouseAndSetmaskWrap(maskArr, event,sc,dims,sliceNumb)            
     #  
     #  
     #  println("fetched" + fetch(maskA))
@@ -102,7 +98,16 @@ function indicatorC(ax::Axis,dims::Tuple{Int64, Int64, Int64},sc::Scene,maskArr,
   
 end
 end
-
+```@doc
+wrapper for calculateMouseAndSetmask  - from imageViewerHelper module
+  given mouse event modifies mask accordingly
+  maskArr - the 3 dimensional bit array  that has exactly the same dimensions as main Array storing image 
+  event - mouse event passed from Makie
+  sc - scene we are using in Makie
+  ```
+function calculateMouseAndSetmaskWrap(maskArr, event,sc,dims,sliceNumb) 
+  maskArr[] = calculateMouseAndSetmask(maskArr, event,sc,dims,sliceNumb)
+end
 
 
 

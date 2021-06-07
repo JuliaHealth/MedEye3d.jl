@@ -8,12 +8,6 @@ dirToWorkerNumbs = DrWatson.scriptsdir("mainPipeline","processesDefinitions","wo
 include(dirToWorkerNumbs)
 
 
-# @everywhere using Pkg
-# @everywhere Pkg.instantiate()
-
-############## loading worker with persistency management 
-# @everywhere persistenceWorker Pkg.add("HDF5")
-# @everywhere persistenceWorker using HDF5
 
 dirToH = DrWatson.scriptsdir("loadData","manageH5File.jl")
 dirToWorkerPrepare = DrWatson.scriptsdir("mainPipeline","processesDefinitions","mainProcessDefinition.jl")
@@ -25,10 +19,10 @@ include(dirToFileStructs)
 include(dirToH)
 
 using Main.h5manag
-x = initializeWorker(persistenceWorker, ["Documenter", "HDF5","ColorTypes"], [filePathAndModuleName(dirToH,"h5manag")] )
+@async initializeWorker(persistenceWorker, ["Documenter", "HDF5","ColorTypes"], [filePathAndModuleName(dirToH,"h5manag")] )
 
 ## image viewer helper
 
 dirToImageHelper = DrWatson.scriptsdir("display","imageViewerHelper.jl")
-initializeWorker(imageViewerHelperNumb, ["Documenter"], [filePathAndModuleName(dirToImageHelper,"imageViewerHelper")] )
+@async initializeWorker(imageViewerHelperNumb, ["Documenter"], [filePathAndModuleName(dirToImageHelper,"imageViewerHelper")] )
 
