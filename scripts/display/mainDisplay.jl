@@ -39,7 +39,6 @@ slicesNumb =imageDim[3] # number of slices
 #defining layout variables
 scene, layout = GLMakie.layoutscene(resolution = (600, 400))
 ax1 = layout[1, 1] = GLMakie.Axis(scene, backgroundcolor = :transparent)
-ax2 = layout[1, 1] = GLMakie.Axis(scene, backgroundcolor = :transparent)
 
 #control widgets
 sl_x =layout[2, 1]= GLMakie.Slider(scene, range = 1:1: slicesNumb , startvalue = slicesNumb/2 )
@@ -57,10 +56,8 @@ for mask in masks
 end #for 
 
 
-
 #displaying
 layout[1,2]= Colorbar(scene, hm)
-
 scene
 
 end
@@ -80,7 +77,7 @@ function createMaskMap!(mask,sliderXVal,ax1,scene,imageDim)
   GLMakie.translate!(hmB, Vec3f0(0,0,5))  
   #adding ability to be able to add information to mask  where we clicked so in casse of mit matrix we will set the point where we clicked to 1 
   indicatorC(ax1,imageDim,scene,observableArr,sliderXVal)
-  @spawnat persistenceWorker Main.h5manag.saveMaskData!(Int16, mask)
+  #@spawnat persistenceWorker Main.h5manag.saveMaskData!(Int16, mask)
 
 end  
 
@@ -117,7 +114,9 @@ wrapper for calculateMouseAndSetmask  - from imageViewerHelper module
   ```
 function calculateMouseAndSetmaskWrap(maskArr, event,sc,dims,sliceNumb) 
   println("clicked 333")
-  interm = calculateMouseAndSetmask(maskArr, event,sc,dims,sliceNumb)
+  xMouse= Makie.to_world(sc,event.data)[1]
+  yMouse= Makie.to_world(sc,event.data)[2]
+  interm = calculateMouseAndSetmask(maskArr,dims,sliceNumb,xMouse,yMouse )
   maskArr[] = interm
 end
 

@@ -58,3 +58,23 @@ include(dirToImageDisplay)
 #  ,filePathAndModuleName(dirToImageViewer,"MyImgeViewer")] )
 
 
+
+
+
+
+
+exmpleH = @spawnat persistenceWorker Main.h5manag.getExample()
+arrr= fetch(exmpleH)
+
+minimumm = -1000
+
+maximumm = 2000
+imageDim = size(arrr)
+maskF = @spawnat persistenceWorker Main.h5manag.getOrCreateMaskData(Int16, "liverOrganMask", "trainingScans/liver-orig001", imageDim, RGBA(0,0,255,0.4))
+mask = fetch(maskF)
+
+using Main.imageViewerHelper
+using Main.MyImgeViewer
+
+
+singleCtScanDisplay(arrr, [mask],minimumm, maximumm)

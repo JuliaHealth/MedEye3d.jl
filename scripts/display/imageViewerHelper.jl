@@ -6,22 +6,23 @@ using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
 module imageViewerHelper
+using Base: Number
 using Documenter
-using ColorTypes
-using Makie
 export calculateMouseAndSetmask
 export createMedicalImageColorScheme
 # using AbstractPlotting
 ```@doc
   given mouse event modifies mask accordingly
   maskArr - the 3 dimensional bit array  that has exactly the same dimensions as main Array storing image 
-  event - mouse event passed from Makie
-  sc - scene we are using in Makie
+  dims - dimensions of a mask
+  sliceNumb - number of sclice that is currently displaying
+  xMouse - x coordinate where we clicked
+  yMouse - y coordinate where we clicked
+  return modified mask array where we added data  where we clicked
   ```
-function calculateMouseAndSetmask(maskArr, event,sc,dims,sliceNumb)  
+function calculateMouseAndSetmask(maskArr,dims::Tuple{Int64, Int64, Int64},sliceNumb::Number,xMouse::Number,yMouse::Number )  
   #position from top left corner 
-  xMouse= Makie.to_world(sc,event.data)[1]
-  yMouse= Makie.to_world(sc,event.data)[2]
+
   #data about height and width in layout
   compBoxWidth = 510 
   compBoxHeight = 510 
@@ -42,10 +43,12 @@ function calculateMouseAndSetmask(maskArr, event,sc,dims,sliceNumb)
   d=  unique(c)
   #widerInd = unique ∘ collect ∘  Iterators.flatten ∘ Iterators.flatten ∘ map((c->cartesianCoordAroundPoint(c,patchSize)),cartesianCoordAroundPoint(pixelLoc,patchSize) ) 
   static = maskArr[]
-  static[d].=3
-  static[prim].=5
+  imageDim = size(static)
+  e= static[d].=3
+  f= e[prim].=5
+  g= f[pixelLoc]=7
   # markMaskArrayPatchTo!( static,pixelLoc,patchSize,5)
-  return static
+  return g
 end
 
 
@@ -54,9 +57,13 @@ end
   maskArr - the 3 dimensional bit array  that has exactly the same dimensions as main Array storing image 
   point - cartesian coordinates of point around which we want to modify the 3 dimensional array from 0 to 1
   modifies mask array
+  valueToSet - the new value by whic we will modify 
+  return modified array 
 ```
-function markMaskArrayPatchTo!(maskArr, pointCart::CartesianIndex{3}, patchSize ::Int,valueToSet)
-maskArr[cartesianCoordAroundPoint(pointCart,patchSize)]=valueToSet
+function markMaskArrayPatchTo!(maskArr, pointCart::CartesianIndex{3}, patchSize ::Int,valueToSet,imageDim )
+  
+  filter((ind) -> arra[ind] == 0.5, CartesianIndices(arra))
+return maskArr[cartesianCoordAroundPoint(pointCart,patchSize)]=valueToSet
 end
 
 ```@doc
