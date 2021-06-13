@@ -4,11 +4,9 @@ using DrWatson
 dirToFileStructs = DrWatson.scriptsdir("structs","forFilesEtc.jl")
 include(dirToFileStructs)
 
-#dirToFileStructs = DrWatson.scriptsdir("structs","forFilesEtc.jl")
-#include(dirToFileStructs)
+using Main.FileStructs
 using Distributed
 using Pkg
-#using Main.fileStructs
 ```@doc
 given workerid list of packages, list of files to include with module names
 it will initialize all of it to make worker process ready for worker

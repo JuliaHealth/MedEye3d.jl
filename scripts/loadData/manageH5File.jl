@@ -8,30 +8,20 @@ module h5manag
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 using HDF5
-include(DrWatson.scriptsdir("structs","forDisplayStructs.jl"))
+using Main.ForDisplayStructs
+using ColorTypes
+using Parameters
+using Observables
+
 
 const pathToHd5 = DrWatson.datadir("hdf5Main", "mainHdDataBaseLiver07.hdf5")
 const g = h5open(pathToHd5, "r+")
 
 ```@doc
- example study in a form of 3 dimensional array
-```
-function setG(ginput)
-    g=ginput
-end
-
-  
-
-
-function aaa() 
-println("heere")
-end    
-
-```@doc
 getting example study in a form of 3 dimensional array
 ```
 function getExample() ::Array{Number, 3}
-     read(g["trainingScans"]["liver-orig001"]["liver-orig001"])
+     read(g["trainingScans/liver-orig001"]["liver-orig001"])
 end
 
 ```@doc
@@ -57,21 +47,42 @@ color - RGBA value that will be used in displayed mask
 parameter - type of observable 3 dimensional array used
 return Mask struct with observable 3d array linked to appropriate HDF5 dataset
 ```
-function getOrCreateMaskData(name::String,path::String,dims::Tuple{Int, Int, Int}, color ) :: Mask{arrayType} where{arrayType}
+function getOrCreateMaskData(::Type{arrayType}, name::String,path::String,dims::Tuple{Int, Int, Int}, color::RGBA  ) :: Main.ForDisplayStructs.Mask{arrayType} where{arrayType}
+#initializing mask Array Observable
+maskArrOut = Observable(Array{arrayType}(UndefInitializer(), dims))
+maskId= 0    
 #1) we need  to establish weather we have a mask of this name in given path
-if name in myGetGroupsNames(getG()[path]) #where g is our dataset
+if name in keys(g[path]) #where g is our dataset
 #2a) if we have this mas already created we load the data  from it into array
-    
-#2b) if such file is not present we create array of given dimensions and save it into given path dataset of given name
-
-#3) we put the array into observable
-
-#4) we register that on the change of the array the data will be asynchronously persisted in the hdf5 dataset  of given path and given name
-
-#5) the struct Mask with appropriate name will be return with given name created/retrieved array, id of HDF5 file anhd given color
-
+    obj = g[path][name]
+    maskArrOut[]= read(obj)
+    maskId= obj.id
+#2b) if such file is not present we put array of given dimensions and save it into given path dataset of given name
+else
+    g[path][name] = maskArrOut[]
+    maskId= g[path][name].id
 end    
+#5) the struct Mask with appropriate name will be return with given name created/retrieved array, id of HDF5 file anhd given color
+return Main.ForDisplayStructs.Mask{arrayType}(
+            path, #path
+            maskId, #maskId
+            name, #maskName
+            Array{arrayType}(UndefInitializer(), dims), #maskArrayObs
+            color  #colorRGBA 
+            )
+
+  
 end
+
+
+
+```@doc
+saving to hdf5 data from mask object
+```
+function saveMaskDataC!(::Type{arrayType},mask :: Main.ForDisplayStructs.Mask{arrayType}) where{arrayType}
+    g[mask.path][mask.maskName][:,:,:] = mask.maskArrayObs[]
+ end
+
 
 end # manag
 
