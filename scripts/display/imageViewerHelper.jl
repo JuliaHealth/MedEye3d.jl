@@ -42,7 +42,7 @@ function calculateMouseAndSetmask(maskArr, event,sc,dims,sliceNumb)
   d=  unique(c)
   #widerInd = unique ∘ collect ∘  Iterators.flatten ∘ Iterators.flatten ∘ map((c->cartesianCoordAroundPoint(c,patchSize)),cartesianCoordAroundPoint(pixelLoc,patchSize) ) 
   static = maskArr[]
-  static[d].=1
+  static[d].=3
   static[prim].=5
   # markMaskArrayPatchTo!( static,pixelLoc,patchSize,5)
   return static

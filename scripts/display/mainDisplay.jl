@@ -80,7 +80,7 @@ function createMaskMap!(mask,sliderXVal,ax1,scene,imageDim)
   GLMakie.translate!(hmB, Vec3f0(0,0,5))  
   #adding ability to be able to add information to mask  where we clicked so in casse of mit matrix we will set the point where we clicked to 1 
   indicatorC(ax1,imageDim,scene,observableArr,sliderXVal)
-  #@spawnat persistenceWorker Main.h5manag.saveMaskData!(Int16, mask)
+  @spawnat persistenceWorker Main.h5manag.saveMaskData!(Int16, mask)
 
 end  
 
