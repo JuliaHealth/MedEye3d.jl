@@ -70,7 +70,8 @@ sliderXVal - value associated with slider that controls which slice is displayed
 ax1 - axis which is a basis for the Makie Layout
 ```
 function createMaskMap!(mask,sliderXVal,ax1,scene,imageDim)
-  cmwhite = cgrad(range(RGBA(10,10,10,0.01), stop=mask.colorRGBA, length=1000));
+  mask.maskArrayObs[][1,1,:].= 1 # just for proper displaying
+  cmwhite = cgrad(range(RGBA(10,10,10,0.01), stop=mask.colorRGBA, length=10));
   observableArr = mask.maskArrayObs
   currentSliceMask = GLMakie.@lift($observableArr[:,:, convert(Int32,$sliderXVal)])
   hmB= GLMakie.heatmap!(ax1, currentSliceMask ,colormap = cmwhite) 
