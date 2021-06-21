@@ -49,18 +49,19 @@ We supply 3 dimensional matrix of ones  as I and supply all of the coordinates w
 14)We supply to our log normal distributions some mean and covariance and we evaluate pdf on some entries - and compare to the results of log multivariate gaussian from Distributions.jl package
 ```
 
-@testset " checking " begin
-@test 1 == 1
-@test 1 ≈ 1
-end #checking
-
-
 
 ```@doc
-2)Example image $I_i$ with example marking mask $M_i$ will be saved with known number of marked points  x on known slice zSlice
-arr \= getMarkings\($M_i$,$I_i$\) 
-Assert equals length\(arr\) \= x
+2)Example 3 dimensional matrix $I_i$ with example marking mask $M_i$ will be saved with known number of marked points  x on known position
+We will assert thag wefound correctly those points and that 
 ```
+@testset " getCoordinatesOfMarkings " begin 
+A = ones(4,4,4)
+B = ones(4,4,4)
+coords = [CartesianIndex(1,2,3),CartesianIndex(1,4,3) ] 
+A[coords].=7
+@test Main.GaussianPure()
+end # getCoordinatesOfMarkings
+
 
 ```@doc
 For coord in arr 

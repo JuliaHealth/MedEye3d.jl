@@ -73,6 +73,7 @@ logNorC = $log(\frac{1}{2\pi^{\frac{k}{2}} | \Sigma |^{1/2}})$
 Lambda (x)-> llogNorC+ $-\frac{1}{2} *  \mu^T *  invSigma * \mu  $
 ```
 module GaussianPure
+using Base: Number
 using Documenter
 
 
@@ -87,6 +88,10 @@ Out add\(el\)
 	end if
 end for
 ```
+function getCoordinatesOfMarkings(M::Array{Number, 3}, I::Array{Number, 3} ) ::Vector{CartesianIndex{3}} 
+    filter((index)->I[index]==7 ,CartesianIndices(M))
+end    
+
 
 
 ```@doc    
