@@ -27,7 +27,7 @@ simple display of single image - only in transverse plane we are adding also a m
 arrr - main 3 dimensional data representing medical image for example in case of CT each voxel represents value of X ray attenuation
 minimumm, maximumm - approximately minimum and maximum values we can have in our image
 ```
-function singleCtScanDisplay(arrr ::Array{Number, 3}, masks::Vector , minimumm::Int, maximumm::Int) 
+function singleCtScanDisplay(arrr ::Array{Number, 3}, masks::Array , minimumm::Int, maximumm::Int) 
 #we modify 2 pixels just in order to make the color range constant so slices will be displayed in the same windows
 arrr[1,1,:].= minimumm 
 arrr[2,1,:].= maximumm 

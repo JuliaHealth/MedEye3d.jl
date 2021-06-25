@@ -5,6 +5,9 @@ functions responsible for helping in image viewer - those functions are  meant t
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
+
+
+
 module imageViewerHelper
 using Core: print
 using Base: Number
@@ -22,7 +25,8 @@ export createMedicalImageColorScheme
   patchSize - size in pixels of a patch
   return modified mask array where we added data  where we clicked
   ```
-function calculateMouseAndSetmask(maskArr,dims::Tuple{Int64, Int64, Int64},sliceNumb,xMouse::Number,yMouse::Number,patchSize::Int = 2,compBoxWidth::Int = 510 ,compBoxHeight::Int = 510  )  
+function calculateMouseAndSetmask(maskArr,dims::Tuple{Int64, Int64, Int64},sliceNumb
+  ,xMouse::Number,yMouse::Number,patchSize::Int = 2,compBoxWidth::Int = 510 ,compBoxHeight::Int = 510  )  
   #position from top left corner 
 
   #image dimensions - number of pixels  from medical image for example ct scan
@@ -39,9 +43,7 @@ function calculateMouseAndSetmask(maskArr,dims::Tuple{Int64, Int64, Int64},slice
   # calculating indices that surrounds the primary ones
   static = maskArr[]
   imageDim = size(static)
-  return 
-  
-  markMaskArrayPatchTo!(static, cartesianCoordAroundPoint(pixelLoc,patchSize*2),4, imageDim)|>
+  return   markMaskArrayPatchTo!(static, cartesianCoordAroundPoint(pixelLoc,patchSize*2),4, imageDim)|>
   (_x)->markMaskArrayPatchTo!(_x, cartesianCoordAroundPoint(pixelLoc,patchSize),5, imageDim)|>
   (_x)->  markMaskArrayPatchTo!(_x, [pixelLoc],6, imageDim)
 
@@ -55,7 +57,7 @@ end
   valueToSet - the new value by whic we will modify 
   return modified array 
 ```
-function markMaskArrayPatchTo!(maskArr, points::Vector{CartesianIndex{3}},valueToSet::Number,imageDim::Tuple{Int64, Int64, Int64} )
+function markMaskArrayPatchTo!(maskArr, points::Array{CartesianIndex{3}},valueToSet::Number,imageDim::Tuple{Int64, Int64, Int64} )
   #first we filter out all points tha are not in range
   points |>
   (x_)->  filter((ind) ->( ind[1]<= imageDim[1])  && ( ind[2]<= imageDim[2])  && ( ind[3]<= imageDim[3]) && ind[1]>0 && ind[2] >0 && ind[3]>0 , x_) |>
@@ -67,7 +69,7 @@ end
   point - cartesian coordinates of point around which we want the cartesian coordeinates
   return set of cartetian coordinates of given distance -patchSize from a point
 ```
-function cartesianCoordAroundPoint(pointCart::CartesianIndex{3}, patchSize ::Int)::Vector{CartesianIndex{3}}
+function cartesianCoordAroundPoint(pointCart::CartesianIndex{3}, patchSize ::Int)::Array{CartesianIndex{3}}
   ones = CartesianIndex(patchSize,patchSize,patchSize) # cartesian 3 dimensional index used for calculations to get range of the cartesian indicis to analyze
   out = Array{CartesianIndex{3}}(UndefInitializer(), 6+2*patchSize^4)
   index =0
@@ -93,7 +95,6 @@ works only for 3d cartesian coordinates
 function cartesianTolinear(pointCart::CartesianIndex{3}) :: Int16
    abs(pointCart[1])+ abs(pointCart[2])+abs(pointCart[3])
 end
-
 
 
 

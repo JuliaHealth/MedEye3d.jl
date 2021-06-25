@@ -53,10 +53,10 @@ using  Observables
         yMouse = (3*compBoxHeight)/pixelsNumbInY
 
         modified = Main.imageViewerHelper.calculateMouseAndSetmask(Arr,dims,sliceNumb, xMouse,yMouse,1,compBoxWidth, compBoxHeight)  
-        @test modified[3,3,3] == 7 
+        @test modified[3,3,3] == 6 
         @test modified[3,4,3] == 5 
-        @test modified[4,3,4] == 3 
-        @test modified[3,5,3] == 3 
+        @test modified[4,3,4] == 4 
+        @test modified[3,5,3] == 4 
         @test modified[3,3,2] == 5 
     end
 
