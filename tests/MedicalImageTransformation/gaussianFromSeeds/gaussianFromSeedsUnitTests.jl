@@ -11,9 +11,13 @@ using BenchmarkTools
 using Statistics
 using LinearAlgebra
 using Distributions
+using PDMats
+using StaticArrays
+
 
 ```@doc
-2)Example 3 dimensional matrix $I_i$ with example marking mask $M_i$ will be saved with known number of marked points  x on known position
+2\)Example 3 dimensional matrix I with example marking mask M 
+will be saved with known number of marked points  x on known position
 We will assert thag wefound correctly those points and that 
 ```
 @testset " getCoordinatesOfMarkings " begin 
@@ -21,7 +25,7 @@ A = ones(4,4,4)
 B = ones(4,4,4)
 coords = [CartesianIndex(1,2,3),CartesianIndex(1,4,3) ] 
 A[coords].=7
-@test Main.GaussianPure.getCoordinatesOfMarkings(Float64,Float64,B,A) ==coords
+@test Main.GaussianPure.getCoordinatesOfMarkings(Float64,Float64,A,B) ==coords
 end # getCoordinatesOfMarkings
 
 
@@ -158,29 +162,6 @@ end
 
 
 ```@doc
-10\) For vector 1,2,0 mean vector should be 0,1,-1
-```
-@testset "getGaussianMean" begin 
-toCheck= [[[1.,2.,0.], [1.,0.,2.]]]
-coordsList = Main.GaussianPure.allNeededCoord(Main.GaussianPure.getPatchAroundMarks( [CartesianIndex(4,4,4),CartesianIndex(4,3,4) ,CartesianIndex(3,3,3) ] ,1),1)
-I = ones(9,9,9)
-I[CartesianIndex(4,4,4)]=7
-maximum(I)
-patchStats = Main.GaussianPure.calculatePatchStatistics(Float64, Float64 , coordsList, I)
-patchStats[1] = [toCheck[1]]
-featureVect = Main.GaussianPure.calculateFeatureVectors(Float64,patchStats)
-featureVect[1]= [1,-1]
-featureVect[1:2]
-x = featureVect[1]
-
-res = Main.GaussianPure.getGaussianMeans(Float64,featureVect[1:2] )
-@test res[1] == [1,-1]
-
-
-
-end
-
-```@doc
 11\)If we will supply vectors of ones the covariance matrix should have all entries =0
 ```
 @testset "getCovarianceMatrix" begin 
@@ -218,11 +199,8 @@ end
 
 
 @testset "getCovarianceMatricisAndFeatureVectors" begin 
-
-
     @test Main.GaussianPure.getCovarianceMatricisAndFeatureVectors(Float64,[[[1.,1.,1.],[1.,1.,1.]  ]])[1][1] ==SMatrix{2}(0,0,0,0)
     @test Main.GaussianPure.getCovarianceMatricisAndFeatureVectors(Float64, [[  [1.,1], [1.,1.],[1.,1.],[1.,1.] ]] )[1][2] ==[2,2]
-
 end
 
 
@@ -244,17 +222,86 @@ of given dimensionality on the basis of which we will calculate normalizing cons
  will evaluate gaussian pdf with calculated normalizing constant test will be passed
   if calculated values will be always between 0 and 1
 
-
+We also need to establish waether we would also get positive semidefinite covariance matrix as we should
 ```
 
+    @testset "fromFeatureVectorCalculateConstants" begin 
+ 
+function getExampleMvGaussianDats(M,I,coords)
+    M[coords].=7
+    z = 1
+    res = Main.GaussianPure.getConstantsForPDF(Float64,Float64,Float64,M,I ,z)[1]
+    covv =  res[4]
+    covA = ones(2,2)
+    covA[1,1]=covv[1,1]
+    covA[2,2]=covv[2,2]
+    covA[2,1]=covv[2,1]
+    covA[1,2]=covv[1,2]
+    mu =res[1]
+    mvNorm = Distributions.MvNormal(mu,covA)
+    return (res, mvNorm)
+end
 
-@testset "fromFeatureVectorCalculateConstants" begin 
 
 
-    @test Main.GaussianPure.getCovarianceMatricisAndFeatureVectors(Float64,[[[1.,1.,1.],[1.,1.,1.]  ]])[1][1] ==SMatrix{2}(0,0,0,0)
-    @test Main.GaussianPure.getCovarianceMatricisAndFeatureVectors(Float64, [[  [1.,1], [1.,1.],[1.,1.],[1.,1.] ]] )[1][2] ==[2,2]
+function getPdfEvals(xxx,dists)
+        
 
-    fromFeatureVectorCalculateConstants
 
-    end
+    distData = dists[1]
+    mvNormm = dists[2]
 
+
+    distProb = Distributions.pdf(mvNormm, xxx) # we check the probability in mean ... so we know it needs to be high
+
+    centered =  xxx.-distData[1]
+    myProb = exp(distData[3]- (transpose( centered )*distData[2]* centered )/2 )
+
+    return(distProb,myProb)
+end
+
+
+M = rand(15,15,15)
+I = rand(15,15,15)
+coords = [CartesianIndex(5,5,5),CartesianIndex(10,10,10) ] 
+
+dists = getExampleMvGaussianDats(M,I,coords)
+dists[2]
+distData = dists[1]
+xxx = distData[1].+0.1
+
+evals=getPdfEvals(xxx,dists)
+@test evals[1]≈evals[2]
+
+
+## now we will create and "train "
+
+
+d1 = Binomial(300)
+d2 = Normal(50.0,15.0 )
+
+I1 = rand(d1,15,15,15)
+I2 = rand(d2,15,15,15)
+
+
+distsLow = getExampleMvGaussianDats(M,I1,coords)
+distsHigh = getExampleMvGaussianDats(M,I2,coords)
+
+distLowData = distsLow[1]
+xxxB = distLowData[1].+0.1
+xxxC = distsHigh[1][1].+0.1
+
+#checking is it giving higher probability on 
+@test getPdfEvals(xxxB,distsLow)[1] > getPdfEvals(xxxB,distsHigh)[1]
+
+randLow = rand(d1,2)
+randHigh = rand(d2,2)
+
+
+#@test getPdfEvals(randLow,distsLow)[1]>  getPdfEvals(randLow,distsHigh)[1] ||    getPdfEvals(randLow,distsLow)[1]≈ getPdfEvals(randLow,distsHigh)[1]  
+@test getPdfEvals(randHigh,distsLow)[1] <= getPdfEvals(randHigh,distsHigh)[1] ||    getPdfEvals(randHigh,distsLow)[1] ≈ getPdfEvals(randHigh,distsHigh)[1] 
+
+distsLow[2]
+distsHigh[2]
+
+end

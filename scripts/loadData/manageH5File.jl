@@ -47,9 +47,7 @@ color - RGBA value that will be used in displayed mask
 parameter - type of observable 3 dimensional array used
 return Mask struct with observable 3d array linked to appropriate HDF5 dataset
 ```
-function getOrCreateMaskData(::Type{arrayType}, name::String,path::String,
-    dims::Tuple{Int, Int, Int}, color::RGBA  ) :: Main.ForDisplayStructs.Mask{arrayType}
-     where{arrayType}
+function getOrCreateMaskData(::Type{arrayType}, name::String,path::String,dims::Tuple{Int, Int, Int}, color::RGBA  ) :: Main.ForDisplayStructs.Mask{arrayType}     where{arrayType}
 #initializing mask Array Observable
 maskArrOut = Observable(Array{arrayType}(UndefInitializer(), dims))
 maskId= 0    

@@ -14,8 +14,8 @@ using StaticArrays
 ```@doc
 2. By iteratively  searching through the mask M array cartesian coordinates of all entries with value 7 will be returned.
 ```
-function getCoordinatesOfMarkings(::Type{ImageNumb}, ::Type{maskNumb}, M::Array{maskNumb, 3}, I::Array{ImageNumb, 3} )  ::Array{CartesianIndex{3}} where{ImageNumb,maskNumb}
-    return filter((index)->I[index]==7 ,CartesianIndices(M))
+function getCoordinatesOfMarkings(::Type{ImageNumb}, ::Type{maskNumb}, M::Array{maskNumb, 3}, I::Array{ImageNumb, 3} )  ::Vector{CartesianIndex{3}} where{ImageNumb,maskNumb}
+    return filter((index)->M[index]==7 ,CartesianIndices(M))
 end    
 
 ```@doc    
@@ -30,7 +30,7 @@ end
 4. Now we will define the patch where we have set of coordinates q surrounding coordinate i
  in distance not bigger then z
 ```
-function getCartesianAroundPoint(point::CartesianIndex{3},z ::Int)  ::Array{CartesianIndex{3}}
+function getCartesianAroundPoint(point::CartesianIndex{3},z ::Int)  ::Vector{CartesianIndex{3}}
     return Main.imageViewerHelper.cartesianCoordAroundPoint(point,z)
 end    
 
@@ -39,7 +39,7 @@ end
 markings - calculated  earlier in getCoordinatesOfMarkings  z is the size of the patch - it is one of the hyperparameters
 return the patch of pixels around each marked point
 ```
-function getPatchAroundMarks(markings ::Array{CartesianIndex{3}}, z::Int) ::Vector{Vector{CartesianIndex{3}}}
+function getPatchAroundMarks(markings ::Vector{CartesianIndex{3}}, z::Int) ::Vector{Vector{CartesianIndex{3}}}
     return [getCartesianAroundPoint(x,z) for x in markings]
 end    
 ```@doc
@@ -68,7 +68,7 @@ end
 calculatePatchStatistics\(allNeededCoord,I\)
 ```
 function calculatePatchStatistics(a ::Type{Numb},b ::Type{myFloat},allNeededCoord ::Vector{Vector{Vector{CartesianIndex{3}}}},I ::Array{Numb, 3}) ::Vector{Vector{Vector{myFloat}}}  where{Numb, myFloat}
- return [ [getSampleMeanAndStd(a,b, x,I) for x in outer ] for outer in  allNeededCoord]
+    return [ [getSampleMeanAndStd(a,b, x,I) for x in outer ] for outer in  allNeededCoord]
 end
 
 
@@ -85,14 +85,7 @@ given vector with float values it divides sum of this vector  by norm of this ve
 function getSumOverNorm(vect::Vector{myFloat}) ::myFloat  where{ myFloat}
    return sum(vect)/norm(vect,2)
 end
-```@doc
-10.We calculate mean two dimensional array by subtracting from feature vector f
- its mean for each seed point output is means vectors for all gaussians 
 
-```
-function getGaussianMeans(a ::Type{myFloat},featureVectors ::Vector{Vector{myFloat}}) ::Vector{Vector{myFloat}}  where{ myFloat}
-    return [x.-mean(x) for x in featureVectors ] 
-end
 
 ```@doc
 11.
@@ -121,8 +114,8 @@ end
 For convinience we will fuse here a step of creating feature ectors and covariance matrices
 patchStat means and standard deviations related to given seedpoint
 ```
-function getCovarianceMatricisAndFeatureVectors(a ::Type{myFloat},patchStats ::Vector{Vector{Vector{myFloat}}}) ::Vector{Tuple{SMatrix{2, 2, Int64, 4}, Vector{myFloat}}}  where{ myFloat}
-    return [(getCovarianceMatrix(a,patchStat ),calculateFeatureVector(a,patchStat)) for patchStat in patchStats ]
+function getCovarianceMatricisAndFeatureVectors(a ::Type{myFloat},patchStats ::Vector{Vector{Vector{myFloat}}}) ::Vector{Tuple{SMatrix{2, 2, myFloat, 4}, Vector{myFloat}}}  where{ myFloat}
+  return [(getCovarianceMatrix(a,patchStat ),calculateFeatureVector(a,patchStat)) for patchStat in patchStats ]
     
 end
 
@@ -143,18 +136,18 @@ get resultant  vector of normalizing constant mean
 
 
  Return the constants quadriple needed to efficiently calculate gaussians pdfs defined around seed points
-    1. mean vector \( feature vector minus its mean\)
-    2. covariance matrix
-
+ 1. mean vector \( feature vector minus its mean\)
+ 2. covariance matrix inverse
+ 3. log of normalization constant
   ```
 function getConstantsForPDF(floatType ::Type{myFloat},imageTyp ::Type{imageTypeNumb},maskType ::Type{maskTypeNumb} ,M::Array{maskTypeNumb, 3}, I::Array{imageTypeNumb, 3}, z::Int)   where{myFloat,imageTypeNumb,maskTypeNumb }
 
 return getCoordinatesOfMarkings(imageTypeNumb,maskTypeNumb, M,I) |>
 (seedsCoords) ->getPatchAroundMarks(seedsCoords,z ) |>
-(patchCoords) ->allNeededCoord(seedsCoords,z ) |>
+(patchCoords) ->allNeededCoord(patchCoords,z ) |>
 (allCoords) ->calculatePatchStatistics(imageTyp, floatType, allCoords, I)|>
 (patchStats) ->getCovarianceMatricisAndFeatureVectors(imageTyp, patchStats)|>
-(fvSandCovs) ->fromFeatureVectorCalculateConstants(floatType,featureVectors )
+(fvSandCovs) ->fromFeatureVectorCalculateConstants(floatType,fvSandCovs )
 end
 
 ```@doc
@@ -162,16 +155,15 @@ Given covariance matrix and feature vectors tuple calculates needed statistics f
 
 Return the constants quadriple needed to efficiently calculate gaussians pdfs defined around seed points
     1. mean vector \( feature vector minus its mean\)
-    2. covariance matrix
-    3. covariance matrix inverse
-    4. log of normalization constant
+    2. covariance matrix inverse
+    3. log of normalization constant
+    4.covariance matrix
   ```
-function fromFeatureVectorCalculateConstants(floatType ::Type{myFloat}, fvSandCovs ::Vector{Tuple{SMatrix{2, 2, Int64, 4}, Vector{myFloat}}})  where{myFloat }
-
-    return [(fvSandCov[2].-mean(fvSandCov[2]),# mean
-            fvSandCov[1], # covariance matrix
+function fromFeatureVectorCalculateConstants(floatType ::Type{myFloat}, fvSandCovs ::Vector{Tuple{SMatrix{2, 2, myFloat, 4}, Vector{myFloat}}})  where{myFloat }
+    return [(fvSandCov[2],# mean
            inv(fvSandCov[1]), # just 4 numbers no point in cholesky
            getLogNormalConst(floatType,fvSandCov[1],2)# calculating the log of normalizing constant
+           ,fvSandCov[1]
            ) for fvSandCov in  fvSandCovs]
    end
 
