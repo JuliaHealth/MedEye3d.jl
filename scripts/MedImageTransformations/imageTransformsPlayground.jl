@@ -5,131 +5,81 @@ using Distributions
 using CUDA
 using NNlib
 using GPUArrays
-
+using BenchmarkTools
 ```@doc
 Remember to ignore all of the patches that has exactly equal value of whole patch
 
   ```
 
 
-N = 2^20
-x_d = CUDA.fill(1.0f0, N)  # a vector stored on the GPU filled with 1.0 (Float32)
-y_d = CUDA.fill(2.0f0, N)  # a vector stored on the GPU filled with 2.0
+  ```@doc
+according to https://github.com/omlins/ParallelStencil.jl
+
+All the miniapps can be interactively executed within the Julia REPL (this includes the multi-XPU versions when using a single CPU or GPU). Note that for optimal performance the miniapp script of interest <miniapp_code> should be launched from the shell using the project's dependencies --project, disabling array bound checking --check-bounds=no, and using optimization level 3 -O3.
+
+ julia --project --check-bound=no -O3 <miniapp_code>.jl
+
+  
+
+    ```
+
+    const USE_GPU = true
+    using ParallelStencil
+    @static if USE_GPU
+        @init_parallel_stencil(CUDA, Float64, 3);
+    else
+        @init_parallel_stencil(Threads, Float64, 3);
+    end
+    
+    @parallel_indices (ix,iy,iz) function copy3D!(T2, T, Ci)
+        T2[ix,iy,iz] = T[ix,iy,iz] + Ci[ix,iy,iz];
+        return
+    end
+    
+    function memcopy3D()
+    # Numerics
+    nx, ny, nz = 212, 212, 212;                              # Number of gridpoints in dimensions x, y and z
+    nt  = 100;                                               # Number of time steps
+    
+    # Array initializations
+    T   = @zeros(nx, ny, nz);
+    T2  = @zeros(nx, ny, nz);
+    Ci  = @zeros(nx, ny, nz);
+    
+    # Initial conditions
+    Ci .= 1/2.0;
+    T  .= 1.7;
+    T2 .= T;
+    
+    # Time loop
+    for it = 1:nt
+        if (it == 11) global t0=time(); end  # Start measuring time.
+        @parallel copy3D!(T2, T, Ci);
+        T, T2 = T2, T;
+    end
+    time_s=time()-t0
+    
+    # Performance
+    A_eff = (2*1+1)*1/1e9*nx*ny*nz*sizeof(Data.Number);      # Effective main memory access per iteration [GB] (Lower bound of required memory access: T has to be read and written: 2 whole-array memaccess; Ci has to be read: : 1 whole-array memaccess)
+    t_it  = time_s/(nt-10);                                  # Execution time per iteration [s]
+    T_eff = A_eff/t_it;                                      # Effective memory throughput [GB/s]
+    println("time_s=$time_s T_eff=$T_eff");
+    end
+    
+    memcopy3D()
 
 
 
-function gpu_add1!(y, x)
-  for i = 1:length(y)
-      @inbounds y[i] += x[i]
-  end
-  return nothing
-end
-
-fill!(y_d, 2)
-@cuda gpu_add1!(y_d, x_d)
-using Test
-@test all(Array(y_d) .== 3.0f0)
-
-#benchmarking
-function bench_gpu1!(y, x)
-  CUDA.@sync begin
-      @cuda gpu_add1!(y, x)
-  end
-end
 
 
+    
+    nx, ny, nz = 4, 4, 4;                              # Number of gridpoints in dimensions x, y and z
+  
+    # Array initializations
 
-using Latexify
-print(latexify("x+y/(b-2)^2"))
-
-
-
-using NNlib: DenseConvDims
-using Flux 
-# observation one is that the second argument can not be bigger than a first 
-a, b ,c = ones(Float64, 4,2,1), ones(Float64, 2, 2, 1), ones(Float64, 2, 2, 1)
-cdims = DenseConvDims(a, b)
-z = NNlib.depthwiseconv(a, b,c, cdims)
-cdims
-z[1,:,:]
-
-
-da, db = CuArray(a), CuArray(b)
-
-collect(NNlib.conv(da, db, cdims))
-
-# Return the convolution of filter `w` with tensor `x`, overwriting `y` if provided, according
-# to keyword arguments or the convolution descriptor `d`. Optionally perform bias addition,
-# activation and/or scaling:
-
-# All tensors should have the same number of dimensions. If they are less than 4-D their
-# dimensions are assumed to be padded on the left with ones. `x` has size `(X...,Cx,N)` where
-# `(X...)` are the spatial dimensions, `Cx` is the number of input channels, and `N` is the
-# number of instances. `y,z` have size `(Y...,Cy,N)` where `(Y...)` are the spatial dimensions
-# and `Cy` is the number of output channels (`y` and `z` can be the same array). Both `Cx` and
-# `Cy` have to be an exact multiple of `group`.  `w` has size `(W...,Cx÷group,Cy)` where
-# `(W...)` are the filter dimensions. `bias` has size `(1...,Cy,1)`.
-
-
-
-
-using KernelAbstractions, CUDAKernels, Test, CUDA
-using Test
-if has_cuda_gpu()
-    CUDA.allowscalar(false)
-end
-
-
-
-# Simple kernel for matrix multiplication
-@kernel function matmul_kernel!(a, b, c)
-  i, j = @index(Global, NTuple)
-
-  # creating a temporary sum variable for matrix multiplication
-  tmp_sum = zero(eltype(c))
-  for k = 1:size(a)[2]
-      tmp_sum += a[i,k] * b[k, j]
-  end
-
-  c[i,j] = tmp_sum
-end
-
-# Creating a wrapper kernel for launching with error checks
-function matmul!(a, b, c)
-  if size(a)[2] != size(b)[1]
-      println("Matrix size mismatch!")
-      return nothing
-  end
-  if isa(a, Array)
-      kernel! = matmul_kernel!(CPU(),4)
-  else
-      kernel! = matmul_kernel!(KernelAbstractions.CUDADevice,256)
-  end
-  kernel!(a, b, c, ndrange=size(c)) 
-end
-
-a = rand(256,123)
-b = rand(123, 45)
-c = zeros(256, 45)
-
-# beginning CPU tests, returns event
-ev = matmul!(a,b,c)
-wait(ev)
-
-@test isapprox(c, a*b)
-
-# beginning GPU tests
-if has_cuda_gpu()
-  d_a = CuArray(a)
-  d_b = CuArray(b)
-  d_c = CuArray(c)
-
-  ev = matmul!(d_a, d_b, d_c)
-  wait(ev)
-
-  @test isapprox(Array(d_c), a*b)
-end
-KernelAbstractions.CUDADevice()
-
-
-CUDA.versioninfo()
+    @parallel_indices (iy,iz) function bc_x!()
+    print(A[1  , iy, iz])
+    # A[end, iy, iz] = 3
+    return
+    end
+    bc_x!(T)
