@@ -4,15 +4,15 @@ using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 using Conda
 using PyCall
-
+using Pkg
+Pkg.build("HDF5")
+using HDF5
 Conda.pip_interop(true)
 Conda.pip("install", "SimpleITK")
 Conda.pip("install", "h5py")
 
 sitk = pyimport("SimpleITK")
 np= pyimport("numpy")
-h5py= pyimport("h5py")
-
 
 
 
@@ -20,11 +20,11 @@ mainHdfFolder = DrWatson.datadir("hdf5Main")
 mainHdfFile = DrWatson.datadir("hdf5Main", "mainHdDataBaseLiver07.hdf5")
 
 
+f = h5open(mainHdfFile, "w")
 
-f = h5py.File(mainHdfFile, "w")
-trainingScans = f.create_group("trainingScans")
-trainingLabels = f.create_group("trainingLabels")
-testScans = f.create_group("testScans")
+trainingScans = create_group(f, "trainingScans")
+trainingLabels =  create_group(f, "trainingLabels")   
+testScans = create_group(f, "testScans")        
 
 
 
@@ -42,9 +42,9 @@ function getPhysicalLocsandIntesities( image)
     tuples=CartesianIndices(pixels)     |>
     (cartInds)->Tuple.(cartInds) |> # changing into tuples to make it work with sitk
     (x)-> map((t)->(t[1]-1, t[2]-1, t[3]-1  ) ,x) # python is 0 based ...
-    
-    locs =  [tuples[:,1,1], tuples[1,:,1],tuples[1,1,:]  ]  |>#defining location of pixels that we are intrested in location
-    (axes) -> map(axis-> map(tupl-> image.TransformIndexToPhysicalPoint(tupl), axis )  ,axes) # looking for physical locations of 
+ 
+    axes =  [tuples[:,1,1], tuples[1,:,1],tuples[1,1,:]  ] #defining location of pixels that we are intrested in location
+    locs= map(axis-> map(tupl-> maximum([image.TransformIndexToPhysicalPoint(tupl)...]), axis )  ,axes) # looking for physical locations of voxels but we are intrested only in non 0 locations ...
     return (pixels,locs)
 end
 
@@ -52,27 +52,37 @@ end
 
 function addGroups(group,folderPath)
     for shortArr in getListOfMhdFromFolder(folderPath)
-        
-        innerGroup= group.create_group(shortArr[0])
-        dat = sitk.ReadImage(shortArr[1])|>
-            (img)-> getPhysicalLocsandIntesities(img)
-        innerGroup.create_dataset(shortArr[0], data=dat[1])
-        innerGroup.create_dataset(shortArr[0]+"PhysLocs", data=dat[2])
-        
+        dat = sitk.ReadImage(shortArr[2])|>
+        (img)-> getPhysicalLocsandIntesities(img)       
+
+        innerGroup= create_group(group, shortArr[1])
+            write(innerGroup, shortArr[1],dat[1]) 
+            write(innerGroup, shortArr[1]*"PhysLocX" ,dat[2][1]) 
+            write(innerGroup, shortArr[1]*"PhysLocY" ,dat[2][2]) 
+            write(innerGroup, shortArr[1]*"PhysLocZ" ,dat[2][3]) 
+   
+
         print("*")
-        print(shortArr[0])
+        print(shortArr[1])
     end
 end
 
-pathToTrainingScans
-pathToTrainingLabels
-pathToTestScans
+pathToTrainingScans =DrWatson.datadir("liverPrimData","training-scans" ,"scan" )
+pathToTrainingLabels =DrWatson.datadir("liverPrimData","training-labels" ,"label" )
+pathToTestScans =DrWatson.datadir("liverPrimData","test-scans" ,"scan" )
+
 
 addGroups(trainingScans,pathToTrainingScans)
 addGroups(trainingLabels,pathToTrainingLabels)
 addGroups(testScans,pathToTestScans)
 
-f.close()
+close(f)
+
+
+
+dirOfExample = DrWatson.datadir("liverPrimData","training-scans" ,"scan","liver-orig001.mhd" )
+
+pathToTrainingScans =DrWatson.datadir("liverPrimData","training-scans" ,"scan" )
 
 
 
@@ -83,19 +93,33 @@ f.close()
 
 
 
-image = sitk.ReadImage(dirOfExample)
 
-pixels = np.array(sitk.GetArrayViewFromImage(image))
-    
-tuples=CartesianIndices(pixels)     |>
-(cartInds)->Tuple.(cartInds) |> # changing into tuples to make it work with sitk
-(x)-> map((t)->(t[1]-1, t[2]-1, t[3]-1  ) ,x) # python is 0 based ...
-locs =  [tuples[:,1,1], tuples[1,:,1],tuples[1,1,:]  ]  
 
-axes =  [tuples[:,1,1], tuples[1,:,1],tuples[1,1,:]  ] #defining location of pixels that we are intrested in location
-map(axis-> map(tupl-> image.TransformIndexToPhysicalPoint(tupl), axis )  ,axes)
 
-image.TransformIndexToPhysicalPoint(axes[1][5])
+
+shortArr= getListOfMhdFromFolder(pathToTrainingScans)[8]
+group = trainingScans        
+
+
+innerGroup= create_group(group, shortArr[1])
+img = sitk.ReadImage(shortArr[2])
+dat = getPhysicalLocsandIntesities(img)
+
+
+
+write(innerGroup, shortArr[1],dat[1]) 
+write(innerGroup, shortArr[1]*"PhysLocX" ,dat[2][1]) 
+write(innerGroup, shortArr[1]*"PhysLocY" ,dat[2][2]) 
+write(innerGroup, shortArr[1]*"PhysLocZ" ,dat[2][3]) 
+
+
+hcat(dat[2][1],dat[2][2],dat[2][3] )
+
+print("*")
+print(shortArr[1])
+
+
+
 
 
 

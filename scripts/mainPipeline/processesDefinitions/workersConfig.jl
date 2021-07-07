@@ -13,7 +13,15 @@ using ColorSchemeTools
 using Main.workerNumbers
 @everywhere using Pkg
 @everywhere Pkg.add("Parameters")
+@everywhere Pkg.add("Documenter")
+@everywhere Pkg.add("DrWatson")
+
+
 @everywhere using Parameters
+@everywhere using Documenter
+@everywhere using DrWatson
+
+
 
 dirToFileStructs = DrWatson.scriptsdir("structs","forFilesEtc.jl")
 dirToImageStructs = DrWatson.scriptsdir("structs","forDisplayStructs.jl")
@@ -59,10 +67,6 @@ include(dirToImageDisplay)
 
 
 
-
-
-
-
 exmpleH = @spawnat persistenceWorker Main.h5manag.getExample()
 arrr= fetch(exmpleH)
 
@@ -70,11 +74,28 @@ minimumm = -1000
 
 maximumm = 2000
 imageDim = size(arrr)
-maskF = @spawnat persistenceWorker Main.h5manag.getOrCreateMaskData(Int16, "liverOrganMask", "trainingScans/liver-orig001", imageDim, RGBA(0,0,255,0.4))
+maskF = @spawnat persistenceWorker Main.h5manag.getOrCreateMaskData(Int16, "liverOrganMask", "trainingScans/liver-orig005.mhd", imageDim, RGBA(0,0,255,0.4))
 mask = fetch(maskF)
 
 using Main.imageViewerHelper
 using Main.MyImgeViewer
 
+ 
 
 singleCtScanDisplay(arrr, [mask],minimumm, maximumm)
+
+# using GLMakie
+# arrr[1,1,:].= minimumm 
+# arrr[2,1,:].= maximumm 
+
+# arrr[1,:,1].= minimumm 
+# arrr[2,:,1].= maximumm 
+
+# arrr[:,:,1].= minimumm 
+# arrr[:,:,2].= maximumm 
+
+
+# scene, layout = GLMakie.layoutscene(resolution = (600, 400))
+# ax1 = layout[1, 1] = GLMakie.Axis(scene, backgroundcolor = :transparent)
+# GLMakie.heatmap!(ax1, arrr[90,:,:] ,colormap = Main.ManageColorSets.createMedicalImageColorScheme(200,-200,maximumm, minimumm )) 
+# scene

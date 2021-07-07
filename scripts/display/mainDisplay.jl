@@ -28,9 +28,15 @@ arrr - main 3 dimensional data representing medical image for example in case of
 minimumm, maximumm - approximately minimum and maximum values we can have in our image
 ```
 function singleCtScanDisplay(arrr ::Array{Number, 3}, masks::Array , minimumm::Int, maximumm::Int) 
-#we modify 2 pixels just in order to make the color range constant so slices will be displayed in the same windows
+#we modify 2 pixels just in order to make the color range constant so slices will be displayed in the same windows in all projections
 arrr[1,1,:].= minimumm 
 arrr[2,1,:].= maximumm 
+
+arrr[1,:,1].= minimumm 
+arrr[2,:,1].= maximumm 
+
+arrr[:,:,1].= minimumm 
+arrr[:,:,2].= maximumm 
 
 
 imageDim = size(arrr) # dimenstion of the primary image for example CT scan
@@ -47,8 +53,8 @@ sliderXVal = sl_x.value
 ####heatmaps
 
 #main heatmap that holds for example Ct scan
-currentSliceMain = GLMakie.@lift(arrr[:,:, convert(Int32,$sliderXVal)])
-hm = GLMakie.heatmap!(ax1, currentSliceMain ,colormap = Main.ManageColorSets.createMedicalImageColorScheme(200,-200,maximumm, minimumm )) 
+# currentSliceMain = GLMakie.@lift(arrr[convert(Int32,$sliderXVal),:,:])
+# hm = GLMakie.heatmap!(ax1, currentSliceMain ,colormap = Main.ManageColorSets.createMedicalImageColorScheme(200,-200,maximumm, minimumm )) 
 
 #helper heatmaps designed to respond to both changes in slider and changes in the bit matrix
 for mask in masks
@@ -57,7 +63,7 @@ end #for
 
 
 #displaying
-layout[1,2]= Colorbar(scene, hm)
+# layout[1,2]= Colorbar(scene, hm)
 scene
 
 end
@@ -73,9 +79,9 @@ function createMaskMap!(mask,sliderXVal,ax1,scene,imageDim)
   mask.maskArrayObs[][1,1,:].= 1 # just for proper displaying
   cmwhite = cgrad(range(RGBA(10,10,10,0.01), stop=mask.colorRGBA, length=10));
   observableArr = mask.maskArrayObs
-  currentSliceMask = GLMakie.@lift($observableArr[:,:, convert(Int32,$sliderXVal)])
+  currentSliceMask = GLMakie.@lift($observableArr[convert(Int32,$sliderXVal),:,:])
   hmB= GLMakie.heatmap!(ax1, currentSliceMask ,colormap = cmwhite) 
-  GLMakie.translate!(hmB, Vec3f0(0,0,5))  
+  #GLMakie.translate!(hmB, Vec3f0(0,0,10))  
   #adding ability to be able to add information to mask  where we clicked so in casse of mit matrix we will set the point where we clicked to 1 
   indicatorC(ax1,imageDim,scene,observableArr,sliderXVal)
   #@spawnat persistenceWorker Main.h5manag.saveMaskData!(Int16, mask)
@@ -114,10 +120,10 @@ wrapper for calculateMouseAndSetmask  - from imageViewerHelper module
   sc - scene we are using in Makie
   ```
 function calculateMouseAndSetmaskWrap(maskArr, event,sc,dims,sliceNumb) 
-  println("clicked 333")
   xMouse= Makie.to_world(sc,event.data)[1]
   yMouse= Makie.to_world(sc,event.data)[2]
   interm = calculateMouseAndSetmask(maskArr,dims,sliceNumb,xMouse,yMouse )
+  print("clicked")
   maskArr[] = interm
 end
 

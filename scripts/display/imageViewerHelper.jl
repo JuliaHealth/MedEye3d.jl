@@ -43,7 +43,7 @@ function calculateMouseAndSetmask(maskArr,dims::Tuple{Int64, Int64, Int64},slice
   # calculating indices that surrounds the primary ones
   static = maskArr[]
   imageDim = size(static)
-  return   markMaskArrayPatchTo!(static, cartesianCoordAroundPoint(pixelLoc,patchSize*2),4, imageDim)|>
+  return   markMaskArrayPatchTo!(static, cartesianCoordAroundPoint(pixelLoc,patchSize*2),4, imageDim) |>
   (_x)->markMaskArrayPatchTo!(_x, cartesianCoordAroundPoint(pixelLoc,patchSize),5, imageDim)|>
   (_x)->  markMaskArrayPatchTo!(_x, [pixelLoc],6, imageDim)
 
@@ -58,6 +58,9 @@ end
   return modified array 
 ```
 function markMaskArrayPatchTo!(maskArr, points::Array{CartesianIndex{3}},valueToSet::Number,imageDim::Tuple{Int64, Int64, Int64} )
+  print("set value to ")
+  print(valueToSet)
+  print("  ")
   #first we filter out all points tha are not in range
   points |>
   (x_)->  filter((ind) ->( ind[1]<= imageDim[1])  && ( ind[2]<= imageDim[2])  && ( ind[3]<= imageDim[3]) && ind[1]>0 && ind[2] >0 && ind[3]>0 , x_) |>

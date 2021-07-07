@@ -2,7 +2,7 @@
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
-# include(DrWatson.scriptsdir("loadData","manageH5File.jl"))
+include(DrWatson.scriptsdir("loadData","manageH5File.jl"))
 
 
 # singleCtScanDisplay( getExample())
@@ -17,6 +17,7 @@ dirToImageHelper = DrWatson.scriptsdir("display","imageViewerHelper.jl")
 
 include(dirToImageHelper)
 include(DrWatson.scriptsdir("structs","forDisplayStructs.jl"))
+include(DrWatson.scriptsdir("display","manageColorSets.jl"))
 
 
 include(DrWatson.scriptsdir("display","mainDisplay.jl"))

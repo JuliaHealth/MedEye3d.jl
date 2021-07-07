@@ -21,14 +21,14 @@ const g = h5open(pathToHd5, "r+")
 getting example study in a form of 3 dimensional array
 ```
 function getExample() ::Array{Number, 3}
-     read(g["trainingScans/liver-orig001"]["liver-orig001"])
+     read(g["trainingScans/liver-orig005.mhd"]["liver-orig005.mhd"])
 end
 
 ```@doc
 getting example mask in a form of 3 dimensional array
 ```
 function getExampleLabels() ::Array{Number, 3}
-    read(g["trainingLabels"]["liver-seg001"]["liver-seg001"])
+    read(g["trainingLabels"]["liver-seg005.mhd"]["liver-seg005.mhd"])
 end
 
 
