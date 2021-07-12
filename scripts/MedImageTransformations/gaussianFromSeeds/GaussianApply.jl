@@ -1,232 +1,153 @@
 
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
-using Distributions
-using CUDA
-using NNlib
-using KernelAbstractions
 
+```@doc
+module that will apply earlier calculated gaussian multivariate distribution to means and standard deviations  of patches in the image
+  ```
+module applyGaussian 
 ```@doc
 Remember to ignore all of the patches that has exactly equal value of whole patch
 
   ```
+using DrWatson
+@quickactivate "Probabilistic medical segmentation"
+using CUDA
+using ParallelStencil
+using ParallelStencil.FiniteDifferences3D
+using Main.generalUtils
+using KernelAbstractions
+using MacroTools
 
+```@doc
+Configuring the ParallelStencil library 
+  ```
+USE_GPU = true  # Use GPU? If this is set false, then no GPU needs to be available
 
-  using KernelAbstractions, CUDAKernels, CUDA, Test
-  using KernelAbstractions.Extras: @unroll
-  
-  has_cuda_gpu() || exit()
-  CUDA.allowscalar(false)
-  
-
-const nreps = 3
-const N = 2048
-const T = Float32
-
-const TILE_DIM = 32
-const BLOCK_ROWS = 8
-
-
-@kernel function simple_copy_kernel!(output, @Const(input))
-  I, J = @index(Global, NTuple)
-  @inbounds output[I, J] = input[I, J]
-end
-
-
-@kernel function simple_transpose_kernel!(output, @Const(input))
-  I, J = @index(Global, NTuple)
-  @inbounds output[I, J] = input[I, J]
-end
-
-
-
-
-# Local memory variants
-
-@kernel function lmem_copy_kernel!(output, @Const(input), 
-  ::Val{BANK}=Val(1)) where BANK
-I, J = @index(Global, NTuple)
-i, j = @index(Local,  NTuple)
-
-N = @uniform groupsize()[1]
-M = @uniform groupsize()[2]
-
-# +1 to avoid bank conflicts on shared memory
-tile = @localmem eltype(output) (N+BANK, M)
-
-@inbounds tile[i, j] = input[I, J]
-
-@synchronize
-
-@inbounds output[I, J] = tile[i, j]
-end
-
-
-
-@kernel function lmem_transpose_kernel!(output, @Const(input),
-  ::Val{BANK}=Val(1)) where BANK
-gi, gj = @index(Group, NTuple)
-i, j = @index(Local,  NTuple)
-
-N = @uniform groupsize()[1]
-M = @uniform groupsize()[2]
-
-# +1 to avoid bank conflicts on shared memory
-tile = @localmem eltype(output) (N+BANK, M) 
-
-# Manually calculate global indexes
-# Later on we need to pivot the group index
-I = (gi-1) * N + i
-J = (gj-1) * M + j
-
-@inbounds tile[i, j] = input[I, J]
-
-@synchronize
-
-# Pivot the group index
-I = (gj-1) * M + i
-J = (gi-1) * N + j
-
-@inbounds output[I, J] = tile[j, i]
-end
-
-# Local Memory + process multiple elements per lane
-
-@kernel function coalesced_copy_kernel!(output, @Const(input), 
-  ::Val{BANK}=Val(1)) where BANK
-gi, gj = @index(Group, NTuple)
-i, j   = @index(Local, NTuple)
-
-TILE_DIM   = @uniform groupsize()[1]
-BLOCK_ROWS = @uniform groupsize()[2]
-
-# +1 to avoid bank conflicts on shared memory
-tile = @localmem eltype(output) (TILE_DIM+BANK, TILE_DIM)
-
-# Can't use @index(Global), because we use a smaller ndrange
-I = (gi-1) * TILE_DIM + i
-J = (gj-1) * TILE_DIM + j
-
-@unroll for k in 0:BLOCK_ROWS:(TILE_DIM-1)
-@inbounds tile[i, j+k] = input[I, J+k]
-end
-
-@synchronize
-
-@unroll for k in 0:BLOCK_ROWS:(TILE_DIM-1)
-@inbounds output[I, J+k] = tile[i, j+k]
-end
-end
-
-
-
-
-
-@kernel function coalesced_transpose_kernel!(output, @Const(input), 
-  ::Val{BANK}=Val(1)) where BANK
-gi, gj = @index(Group, NTuple)
-i, j   = @index(Local, NTuple)
-
-TILE_DIM   = @uniform groupsize()[1]
-BLOCK_ROWS = @uniform groupsize()[2]
-
-# +1 to avoid bank conflicts on shared memory
-tile = @localmem eltype(output) (TILE_DIM+BANK, TILE_DIM)
-
-# Can't use @index(Global), because we use a smaller ndrange
-I = (gi-1) * TILE_DIM + i
-J = (gj-1) * TILE_DIM + j
-
-@unroll for k in 0:BLOCK_ROWS:(TILE_DIM-1)
-@inbounds tile[i, j+k] = input[I, J+k]
-end
-
-@synchronize
-
-# Transpose block offsets
-I = (gj-1) * TILE_DIM + i
-J = (gi-1) * TILE_DIM + j
-
-@unroll for k in 0:BLOCK_ROWS:(TILE_DIM-1)
-@inbounds output[I, J+k] = tile[j+k, i]
-end
-end
-
-
-# Benchmark simple
-
-for block_dims in ((TILE_DIM, TILE_DIM), (TILE_DIM*TILE_DIM, 1), (1, TILE_DIM*TILE_DIM))
-  for (name, kernel) in ( 
-                          ("copy",      simple_copy_kernel!(CUDADevice(), block_dims)),
-                          ("transpose", simple_transpose_kernel!(CUDADevice(), block_dims)),
-                        )
-      NVTX.@range "Simple $name $block_dims" let
-          input = CUDA.rand(T, (N, N))
-          output = similar(input)
-
-          # compile kernel
-          ev = kernel(input, output, ndrange=size(output))
-          CUDA.@profile begin
-              for rep in 1:nreps
-                ev = kernel(input, output, ndrange=size(output), dependencies=(ev,))
-              end
-              wait(ev)
-          end
-      end
+function configureParSten()  
+  @static if USE_GPU
+      @init_parallel_stencil(CUDA, Float64, 3)
+  else
+      @init_parallel_stencil(Threads, Float64, 3)
   end
 end
 
+configureParSten() 
+
+
+#cartList = cartesianCoordAroundPoint(CartesianIndex(0,0,0),1)
+
+```@doc
+main function that works on the predefined patch - calculates means, standard deviations in order to evaluate gaussian pdf's and choose biggest 
+as inputs we will also get list of arguments we will get 4 arrays , the length of this array will be arbitrary set to 3 - so we will evaluate only 3 points in the organ
+in each list we will sotre 
+  1. mean vector \( feature vector minus its mean\)
+  2. covariance matrix inverse
+  3. log of normalization constant
+  4.covariance matrix
+
+  
+  ```
+  @parallel_indices (ix,iy,iz) function computeMeanStd!(In::Data.Array,indArr)
+      # 4-point Neuman stencil
+      if (ix<=size(Mean,1) && iy<=size(Mean,2) && iz<=size(Mean,3))
+          ixi, iyi, izi = ix+1, iy+1, iz+1
+
+      
+
+            Mean[ix,iy,iz] = (In[ixi-1,iyi  ,izi  ] +
+                              In[ixi-1,iyi  ,izi  ] + In[ixi+1,iyi  ,izi  ] + In[ixi  ,iyi-1,izi  ] + In[ixi  ,iyi+1,izi  ] +
+                              In[ixi  ,iyi  ,izi-1 ] + In[ixi  ,iyi  ,izi+1])/7.0
+    
+            Std[ix,iy,iz]  = ((In[ixi-1,iyi  ,izi  ] - Mean[ix,iy,iz])^2 +
+                              (In[ixi-1,iyi  ,izi  ] - Mean[ix,iy,iz])^2 +
+                              (In[ixi+1,iyi  ,izi  ] - Mean[ix,iy,iz])^2 +
+                              (In[ixi  ,iyi-1,izi  ] - Mean[ix,iy,iz])^2 + 
+                              (In[ixi  ,iyi+1,izi  ] - Mean[ix,iy,iz])^2 +
+                              (In[ixi  ,iyi  ,izi-1] - Mean[ix,iy,iz])^2 + 
+                              (In[ixi  ,iyi  ,izi+1] - Mean[ix,iy,iz])^2)/7.0
+
+      end
+      return
+  end
 
 
 
 
 
-# Benchmark localmem
-for (name, kernel) in ( 
-  ("copy",      lmem_copy_kernel!(CUDADevice(), (TILE_DIM, TILE_DIM))),
-  ("transpose", lmem_transpose_kernel!(CUDADevice(), (TILE_DIM, TILE_DIM))),
-)
-for bank in (true, false)
-NVTX.@range "Localmem $name ($TILE_DIM, $TILE_DIM) bank=$bank" let
-input = CUDA.rand(T, (N, N))
-output = similar(input)
 
-# compile kernel
-ev = kernel(input, output, Val(Int(bank)), ndrange=size(output))
-CUDA.@profile begin
-for rep in 1:nreps
-ev = kernel(input, output, Val(Int(bank)), ndrange=size(output), dependencies=(ev,))
-end
-wait(ev)
-end
-end
-end
+
+  @time   img_process()
+#manuallySet    0.000949 seconds (959 allocations: 38.281 KiB)
+
+
+
+
+       # Numerics
+  nx, ny, nz = 64, 64, 64
+       # Array allocations
+  In    =  @rand(nx  ,ny  ,nz  )
+  MeanC  = @zeros(nx-2,ny-2,nz-2)
+  Std   = @zeros(nx-2,ny-2,nz-2)
+
+
+#we get catrtesian indicies around 0,0,0 cartesian index  
+indArr=   cartesianCoordAroundPoint(CartesianIndex(0,0,0),1) |>
+  (cartIndicises)-> map((ind)->[ind[1],ind[2],ind[3]],cartIndicises) |>
+  (arr) ->CuArray(vecvec_to_matrix(arr))
+
+  ix, iy, iz = 1, 1, 1
+
+
+  KernelAbstractions.Extras.LoopInfo.@unroll for ind in indArr
+
+    print(ind)
+
+  end  
+
+@views function img_process()
+  @parallel computeMeanStd!(MeanC, Std, In,indArr)
+  return
 end
 
-# Benchmark localmem + multiple elements per lane
-for (name, kernel) in ( 
-  ("copy",      coalesced_copy_kernel!(CUDADevice(), (TILE_DIM, BLOCK_ROWS))),
-  ("transpose", coalesced_transpose_kernel!(CUDADevice(), (TILE_DIM, BLOCK_ROWS))),
-)
-for bank in (true, false)
-NVTX.@range "Localmem + multiple elements $name ($TILE_DIM, $BLOCK_ROWS) bank=$bank" let
-input = CUDA.rand(T, (N, N))
-output = similar(input)
+MeanB==MeanC
 
-# We want a number of blocks equivalent to (TILE_DIM, TILE_DIM)
-# but our blocks are (TILE_DIM, BLOCK_ROWS) so we need to remove
-# a factor from the size of the array otherwise we get to many blocks
-block_factor = div(TILE_DIM, BLOCK_ROWS)
-ndrange = (N, div(N, block_factor))
 
-# compile kernel
-ev = kernel(input, output, Val(Int(bank)), ndrange=ndrange)
-CUDA.@profile begin
-for rep in 1:nreps
-ev = kernel(input, output, Val(Int(bank)), ndrange=ndrange, dependencies=(ev,))
+  @time img_process()
+
+
+
+
+
+
+
+
+
+
+  ```@doc
+  point - cartesian coordinates of point around which we want the cartesian coordeinates
+  return set of cartetian coordinates of given distance -patchSize from a point
+```
+function cartesianCoordAroundPoint(pointCart::CartesianIndex{3}, patchSize ::Int)::Array{CartesianIndex{3}}
+  ones = CartesianIndex(patchSize,patchSize,patchSize) # cartesian 3 dimensional index used for calculations to get range of the cartesian indicis to analyze
+  out = Array{CartesianIndex{3}}(UndefInitializer(), 6+2*patchSize^4)
+  index =0
+  for J in (pointCart-ones):(pointCart+ones)
+    diff = J - pointCart # diffrence between dimensions relative to point of origin
+      if cartesianTolinear(diff) <= patchSize
+        index+=1
+        out[index] = J
+      end
+      end
+return out[1:index]
 end
-wait(ev)
+
+```@doc
+works only for 3d cartesian coordinates
+  cart - cartesian coordinates of point where we will add the dimensions ...
+```
+function cartesianTolinear(pointCart::CartesianIndex{3}) :: Int16
+   abs(pointCart[1])+ abs(pointCart[2])+abs(pointCart[3])
 end
-end
-end
-end
+
+
+
+end #applyGaussian

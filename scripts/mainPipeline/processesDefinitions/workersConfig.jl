@@ -82,7 +82,7 @@ using Main.MyImgeViewer
 
  
 
-singleCtScanDisplay(arrr, [mask],minimumm, maximumm)
+singleCtScanDisplay(arrr, [mask],minimumm, maximumm, 2001)
 
 # using GLMakie
 # arrr[1,1,:].= minimumm 

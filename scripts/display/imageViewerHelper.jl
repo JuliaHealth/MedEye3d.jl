@@ -35,6 +35,10 @@ function calculateMouseAndSetmask(maskArr,dims::Tuple{Int64, Int64, Int64},slice
   #calculating over which image pixel we are
   calculatedXpixel =convert(Int32, round( (xMouse/compBoxWidth)*pixelsNumbInX) )
   calculatedYpixel =  convert(Int32,round( (yMouse/compBoxHeight)*pixelsNumbInY ))
+print("  calculatedXpixel ")
+  print(calculatedXpixel)
+print("  calculatedYpixel ")
+  print(calculatedYpixel)
 
   sliceNumbConv =convert(Int32,round( sliceNumb[] ))
   #appropriately modyfing wanted pixels in mask array
@@ -43,9 +47,9 @@ function calculateMouseAndSetmask(maskArr,dims::Tuple{Int64, Int64, Int64},slice
   # calculating indices that surrounds the primary ones
   static = maskArr[]
   imageDim = size(static)
-  return   markMaskArrayPatchTo!(static, cartesianCoordAroundPoint(pixelLoc,patchSize*2),4, imageDim) |>
-  (_x)->markMaskArrayPatchTo!(_x, cartesianCoordAroundPoint(pixelLoc,patchSize),5, imageDim)|>
-  (_x)->  markMaskArrayPatchTo!(_x, [pixelLoc],6, imageDim)
+  return   markMaskArrayPatchTo!(static, cartesianCoordAroundPoint(pixelLoc,patchSize*2),5000, imageDim) |>
+  (_x)->markMaskArrayPatchTo!(_x, cartesianCoordAroundPoint(pixelLoc,patchSize),5000, imageDim)|>
+  (_x)->  markMaskArrayPatchTo!(_x, [pixelLoc],5000, imageDim)
 
 end
 
