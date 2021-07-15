@@ -6,12 +6,20 @@ using ModernGL, GeometryTypes, GLFW
 
 #VERTEX Shader
 function createVertexShader()
-const vsh = """
+vsh = """
 $(get_glsl_version_string())
 layout (location = 0) in vec3 aPos;
-in vec2 position;
-void main() {
-    gl_Position = vec4(position, 0.0, 1.0);
+layout (location = 1) in vec3 aColor;
+layout (location = 2) in vec2 aTexCoord;
+
+out vec3 ourColor;
+out vec2 TexCoord;
+
+void main()
+{
+    gl_Position = vec4(aPos, 1.0);
+    ourColor = aColor;
+    TexCoord = aTexCoord;
 }
 """
 return createShader(vsh, GL_VERTEX_SHADER)
@@ -20,12 +28,20 @@ end
 
 #FRAGMENT shader
 function createFragmentShader()
-const fsh = """
+fsh = """
 $(get_glsl_version_string())
-out vec4 outColor;
-void main() {
-    outColor = vec4(1.0, 0.5, 1.0, 1.0);
+out vec4 FragColor;
+  
+in vec3 ourColor;
+in vec2 TexCoord;
+
+uniform sampler2D ourTexture;
+
+void main()
+{
+    FragColor = texture(ourTexture, TexCoord);
 }
+
 """
 
 return createShader(fsh, GL_FRAGMENT_SHADER)

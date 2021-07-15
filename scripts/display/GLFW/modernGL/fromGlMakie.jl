@@ -1,75 +1,85 @@
 
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
-
-import GLFW
-using ModernGL
-# using SharedArrays
+# Here, we illustrate a pure ModernGL implementation of some polygon drawing
+using ModernGL, GeometryTypes, GLFW
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/ModernGlUtil.jl")
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/basicFunctions.jl")
+include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/shaders.jl")
+include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/squarePoints.jl")
 
+
+
+# Create the window. This sets all the hints and makes the context current.
 window = initializeWindow()
 
-# The data for our rectangle
-data = Point{2,Float32}[(-0.5,  0.5),     # top-left
-( 0.5,  0.5),     # top-right
-( 0.5, -0.5),     # bottom-right
-(-0.5, -0.5)]  
+# The shaders 
+vertex_shader = createVertexShader()
+fragment_shader = createFragmentShader()
 
 
-indicies = Face{3,UInt32}[(0,1,2),          # the first triangle
-(2,3,0)]          # the second triangle
 
 
-# a way to pass data into GPU
-vbo = createDAtaBuffer(data)
+# Connect the shaders by combining them into a program
+shader_program = glCreateProgram()
+glAttachShader(shader_program, vertex_shader)
+glAttachShader(shader_program, fragment_shader)
+#glBindFragDataLocation(shader_program, 0, "outColor") # optional
+
+glLinkProgram(shader_program)
+glUseProgram(shader_program)
 
 
-#controlling elements in order to draw multiple elements - in this case GL_TRIANGLES
 
-ebo = createElementBuffer(indicies)
+###########buffers
 
-
-# Generate a vertex array and array buffer for our data
+#create vertex buffer
 createVertexBuffer()
 
+# Create the Vertex Buffer Objects (VBO)
+
+vbo = createDAtaBuffer(vertices)
+
+# Create the Element Buffer Object (EBO)
+ebo = createElementBuffer(elements)
 
 
-# Create and initialize shaders
-const vsh = """
-$(get_glsl_version_string())
-layout (location = 0) in vec3 aPos;
-in vec2 position;
-void main() {
-    gl_Position = vec4(position, 0.0, 1.0);
-}
-"""
-
-
-
-const fsh = """
-$(get_glsl_version_string())
-out vec4 outColor;
-void main() {
-    outColor = vec4(1.0, 0.5, 1.0, 1.0);
-}
-"""
-
-
-vertexShader = createShader(vsh, GL_VERTEX_SHADER)
-fragmentShader = createShader(fsh, GL_FRAGMENT_SHADER)
-#connecting shaders to create Open Gl program and using it 
-program = createShaderProgram(vertexShader, fragmentShader)
-glUseProgram(program)
-positionAttribute = glGetAttribLocation(program, "position");
-glEnableVertexAttribArray(positionAttribute)
+############ how data should be read from data buffer
 
 
 
-#showing how openGL should read data from buffer in GPU
-#glVertexAttribSetting(positionAttribute)
-glVertexAttribPointer(positionAttribute, 2, GL_FLOAT, false, 0, C_NULL)
+typee = Float32
+
+# position attribute
+glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(typee), C_NULL);
+glEnableVertexAttribArray(0);
+# color attribute
+glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(typee),  Ptr{Nothing}(3 * sizeof(typee)));
+glEnableVertexAttribArray(1);
+# texture coord attribute
+glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(typee),  Ptr{Nothing}(6 * sizeof(typee)));
+glEnableVertexAttribArray(2);
 
 
 
+# glVertexAttribPointer(2, 2,
+#                       GL_FLOAT, GL_FALSE, 0, C_NULL)
+
+# glEnableVertexAttribArray(2)
+
+# width = 5;
+# height = 5;
+
+# texture= createTexture(createData(width,height),width,height)
+
+
+# glBindTexture(GL_TEXTURE_2D, texture[]);
+
+
+
+
+
+
+
+
+
+# Draw while waiting for a close event
 mainRenderingLoop(window)
