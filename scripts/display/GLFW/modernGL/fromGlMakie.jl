@@ -1,11 +1,14 @@
 
 # Here, we illustrate a pure ModernGL implementation of some polygon drawing
-using ModernGL, GeometryTypes, GLFW
+using ModernGL, GeometryTypes, GLFW, GLTF, Quaternions
+
+using CSyntax
+using STBImage.LibSTBImage
+
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/ModernGlUtil.jl")
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/basicFunctions.jl")
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/shaders.jl")
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/squarePoints.jl")
-
 
 
 # Create the window. This sets all the hints and makes the context current.
@@ -59,19 +62,13 @@ glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(typee),  Ptr{Nothing}
 glEnableVertexAttribArray(2);
 
 
+width = 100;
+height = 100;
 
-# glVertexAttribPointer(2, 2,
-#                       GL_FLOAT, GL_FALSE, 0, C_NULL)
-
-# glEnableVertexAttribArray(2)
-
-# width = 5;
-# height = 5;
-
-# texture= createTexture(createData(width,height),width,height)
+texture= createTexture(createData(width,height),width,height)
 
 
-# glBindTexture(GL_TEXTURE_2D, texture[]);
+glBindTexture(GL_TEXTURE_2D, texture[]);
 
 
 

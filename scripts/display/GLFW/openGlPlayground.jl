@@ -1,10 +1,32 @@
-
+using GeometryTypes: maximum, minimum
+using BenchmarkTools
 # Here, we illustrate a pure ModernGL implementation of some polygon drawing
 using ModernGL, GeometryTypes, GLFW
+
+
+
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/ModernGlUtil.jl")
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/basicFunctions.jl")
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/shaders.jl")
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/squarePoints.jl")
+
+
+werePreviousTexture = false
+
+exampleDat = getExample()
+
+#exampleDat = getExampleLabels()
+
+exampleSlice = exampleDat[40,:,:]
+exampleSliceReduced = reduce(vcat,exampleSlice)
+minn = abs(minimum(exampleSliceReduced))
+
+exampleSliceReduced = Float32.(reduce(vcat,exampleSlice))./(maximum(exampleSlice) - minimum(exampleSlice)).+1
+# exampleSliceReduced= exampleSliceReduced./2
+width = size(exampleSlice)[1]
+height = size(exampleSlice)[2]
+
+
 
 
 
@@ -15,6 +37,7 @@ window = initializeWindow()
 vertex_shader = createVertexShader()
 fragment_shader = createFragmentShader()
 
+#GLFW.DestroyWindow(window)
 
 
 
@@ -44,42 +67,75 @@ ebo = createElementBuffer(elements)
 
 ############ how data should be read from data buffer
 
-
-
-typee = Float32
-
-# position attribute
-glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(typee), C_NULL);
-glEnableVertexAttribArray(0);
-# color attribute
-glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(typee),  Ptr{Nothing}(3 * sizeof(typee)));
-glEnableVertexAttribArray(1);
-# texture coord attribute
-glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(typee),  Ptr{Nothing}(6 * sizeof(typee)));
-glEnableVertexAttribArray(2);
-
-
-
-# glVertexAttribPointer(2, 2,
-#                       GL_FLOAT, GL_FALSE, 0, C_NULL)
-
-# glEnableVertexAttribArray(2)
-
-# width = 5;
-# height = 5;
-
-# texture= createTexture(createData(width,height),width,height)
-
-
-# glBindTexture(GL_TEXTURE_2D, texture[]);
-
-
-
-
-
-
-
+encodeDataFromDataBuffer()
 
 
 # Draw while waiting for a close event
-mainRenderingLoop(window)
+#mainRenderingLoop(window, width, height)
+
+glClear()
+# Pulse the background blue
+glClearColor(0.0, 0.0, 0.1 , 1.0)
+#glClear(GL_COLOR_BUFFER_BIT)
+# Draw our triangle
+
+if(werePreviousTexture)
+    glDeleteTextures(1,previousTexture)
+end
+previousTexture= createTexture(exampleSliceReduced,width,height)
+
+
+
+glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+
+# Swap front and back buffers
+GLFW.SwapBuffers(window)
+
+
+
+try
+	while !GLFW.WindowShouldClose(window)
+	
+        GLFW.PollEvents()
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  	end
+finally
+	GLFW.DestroyWindow(window)
+end
+
+
+
+
+
+
+
+
+
+
+
+#############################################3
+
+
+# heatmaptexture= Ref(GLuint(0));
+# glGenTextures(1, heatmaptexture);
+# glBindTexture(GL_TEXTURE_2D, heatmaptexture[]);
+# glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, width, height, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, exampleSliceReduced);
+# glGenerateMipmap(GL_TEXTURE_2D);
+
+# heatmapTextureLocation = glGetUniformLocation(shader_program, "heatmapTexture");
+# heatmapTextureLocation =Ref(GLuint(0));;
+# glUniform1i(heatmapTextureLocation[], 1);
+
+
+# glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST ); #or GL_NEAREST
+# glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+# glActiveTexture(GL_TEXTURE0 + 1);
+# glBindTexture(GL_TEXTURE_2D, heatmaptexture[]);
+
+
+
+
+
+
+
+#######################################

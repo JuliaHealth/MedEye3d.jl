@@ -45,9 +45,10 @@ end
 
 
 
+
 ```@doc
 main rendering loop of open gl    ```
-function mainRenderingLoop(window)
+function mainRenderingLoop(window, textureWidth, textureHeihght)
 # Loop until the user closes the window
 try
 	while !GLFW.WindowShouldClose(window)
@@ -56,14 +57,20 @@ try
         glClearColor(0.0, 0.0, 0.1 , 1.0)
         #glClear(GL_COLOR_BUFFER_BIT)
         # Draw our triangle
+
+        if(werePreviousTexture)
+            glDeleteTextures(1,previousTexture)
+        end
+        previousTexture= createTexture(createData(textureWidth,textureHeihght),textureWidth,textureHeihght)
+        
         glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+        
         # Swap front and back buffers
         GLFW.SwapBuffers(window)
         # Poll for and process events
         GLFW.PollEvents()
 
-		#GLFW.WaitEvents()
-	end
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  	end
 finally
 	GLFW.DestroyWindow(window)
 end
@@ -124,15 +131,32 @@ end
 #     return renderedTexture
 # end
 
+```@doc
+creating GL_LUMINANCE texture \(black and white\)
+```
+# function createTexture()
+#     # The texture we're going to render to
+#     renderedTexture= Ref(GLuint(0));
+#     glGenTextures(1, renderedTexture);
+    
+#     # "Bind" the newly created texture : all future texture functions will modify this texture
+#     glBindTexture(GL_TEXTURE_2D, renderedTexture[]);
+    
+#     # Give an empty image to OpenGL ( the last "0" )
+#     glTexImage2D(GL_TEXTURE_2D, 0,GL_RGB, 1024, 768, 0,GL_RGB, GL_UNSIGNED_BYTE, 0);
+    
+#     # Poor filtering. Needed !
+#     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+#     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+#     return renderedTexture
+# end
+
 
 function createTexture(data, width, height)
-    # borderColor = [ 1.0, 1.0, 0.0, 1.0];
-    # glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);  
+    borderColor = [ 1.0, 1.0, 0.0, 1.0];
+     glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);  
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+ 
 
     
 #The texture we're going to render to
@@ -144,6 +168,12 @@ function createTexture(data, width, height)
     glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE,
      width, height, 0, GL_LUMINANCE, GL_FLOAT, data);
 
+
+     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	
+     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
 return texture
 end
 
@@ -153,3 +183,22 @@ function createData(width,height)
  return  rand(Float32, width*height)
 
 end
+```@doc
+how data should be read from data buffer
+    ```
+function encodeDataFromDataBuffer()
+    typee = Float32
+
+    # position attribute
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(typee), C_NULL);
+    glEnableVertexAttribArray(0);
+    # color attribute
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(typee),  Ptr{Nothing}(3 * sizeof(typee)));
+    glEnableVertexAttribArray(1);
+    # texture coord attribute
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(typee),  Ptr{Nothing}(6 * sizeof(typee)));
+    glEnableVertexAttribArray(2);
+
+end
+
+
