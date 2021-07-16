@@ -166,7 +166,7 @@ function createTexture(data, width, height)
     # int width, height, nrChannels;
     # unsigned char *data = stbi_load("container.jpg", &width, &height, &nrChannels, 0); 
     glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE,
-     width, height, 0, GL_LUMINANCE, GL_FLOAT, data);
+     width, height, 0, GL_RED_INTEGER, GL_FLOAT, data);
 
 
      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	
