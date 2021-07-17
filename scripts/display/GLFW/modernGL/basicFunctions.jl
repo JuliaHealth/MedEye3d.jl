@@ -131,26 +131,8 @@ end
 # end
 
 ```@doc
-creating GL_LUMINANCE texture \(black and white\)
+creating texture that is storing integer values representing attenuation values in case of CT scan
 ```
-# function createTexture()
-#     # The texture we're going to render to
-#     renderedTexture= Ref(GLuint(0));
-#     glGenTextures(1, renderedTexture);
-    
-#     # "Bind" the newly created texture : all future texture functions will modify this texture
-#     glBindTexture(GL_TEXTURE_2D, renderedTexture[]);
-    
-#     # Give an empty image to OpenGL ( the last "0" )
-#     glTexImage2D(GL_TEXTURE_2D, 0,GL_RGB, 1024, 768, 0,GL_RGB, GL_UNSIGNED_BYTE, 0);
-    
-#     # Poor filtering. Needed !
-#     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-#     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-#     return renderedTexture
-# end
-
-
 function createTexture(data, width, height)
 
 #The texture we're going to render to
@@ -166,17 +148,9 @@ function createTexture(data, width, height)
      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
 
-    #  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
-    #  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R16I,
+     width, height, 0, GL_RED_INTEGER, GL_SHORT, data);
 
-    # glTexImage2D(GL_TEXTURE_2D, 0, GL_RED,
-    #  width, height, 0, GL_LUMINANCE, GL_FLOAT, data);
-
-
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32I,
-     width, height, 0, GL_RED_INTEGER, GL_INT, data);
-
-   # glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE16UI_EXT, width, height, 0, GL_LUMINANCE_INTEGER_EXT, GL_UNSIGNED_SHORT, pixels);
 
 
 
@@ -185,12 +159,6 @@ end
 
 
 
-
-function createData(width,height)
-
- return  rand(Float32, width*height)
-
-end
 ```@doc
 how data should be read from data buffer
     ```
@@ -208,3 +176,60 @@ function encodeDataFromDataBuffer()
     glEnableVertexAttribArray(2);
 
 end
+
+```@doc
+loop that collects any events from openGL in case of animations it is rendering loop
+    ```
+function sipmpleeventLoop(window)
+    try
+        while !GLFW.WindowShouldClose(window)
+            glClear()
+          
+           # Poll for and process events
+            GLFW.PollEvents()
+    
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          end
+    finally
+        GLFW.DestroyWindow(window)
+    end
+end
+
+
+"""
+it will generally be invoked on GLFW.PollEvents()  in event loop and now depending on 
+what will be pressed or clicked it will lead to diffrent actions
+"""
+function controllWindowInput(window)
+	GLFW.SetWindowCloseCallback(window, (_) -> GLFW.DestroyWindow(window))
+	#GLFW.SetMouseButtonCallback(window, (_, button, action, mods) -> println("$button $action"))
+
+# Input callbacks
+GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
+	name = GLFW.GetKeyName(key, scancode)
+	if name == nothing
+		println("scancode $scancode ", action)
+	else
+		println("key $name ", action)
+	end
+end)
+
+
+end
+
+"""
+will change display window  so we will be able to see better for example bones ...
+    min_shown_white - value of cut off  - all values above will be shown as white 
+    max_shown_black - value cut off - all values below will be shown as black
+    https://radiopaedia.org/articles/windowing-ct
+    soft tissues: W:350–400 L:20–60 4
+    minimum and maximum possible values of hounsfield units ...
+    int minn = -1024 ;
+    int maxx  = 3071;
+    and we need to pass data to shaders using https://community.khronos.org/t/const-data-from-vertex-shader-to-fragment-shader/66544
+"""
+function changeWindow(min_shown_white,max_shown_black)
+return map(x->(x+ 1024)/(3071+1024),[min_shown_white,max_shown_black])
+
+end
+changeWindow(50,360)
+changeWindow(50,360)[2] - changeWindow(50,360)[1]

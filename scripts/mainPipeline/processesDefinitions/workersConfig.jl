@@ -66,7 +66,6 @@ include(dirToImageDisplay)
 #  ,filePathAndModuleName(dirToImageViewer,"MyImgeViewer")] )
 
 
-
 exmpleH = @spawnat persistenceWorker Main.h5manag.getExample()
 arrr= fetch(exmpleH)
 

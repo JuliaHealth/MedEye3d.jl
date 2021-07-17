@@ -34,9 +34,16 @@ function createFragmentShader()
     out vec4 FragColor;    
     in vec3 ourColor;
 
-    uniform int minn = -1024 ;
-    uniform int maxx  = 3071;
-    uniform int rang = 4095;
+    //values needed to change integer values of computer tomography attenuation to floats representing colors
+    //uniform int minn = -1024 ;
+    //uniform int maxx  = 3071;
+    //uniform int rang = 4095;
+
+    //soft tissues: W:350–400 L:20–60 4
+    uniform int  min_shown_white = 400 ;// value of cut off  - all values above will be shown as white 
+    uniform int  max_shown_black = -200;//value cut off - all values below will be shown as black
+    uniform float displayRange = 600.0;
+
 
 
     uniform isampler2D Texture0;
@@ -45,15 +52,21 @@ function createFragmentShader()
   
     void main()
     {
-      int texel = texture2D(Texture0, TexCoord0).r;
-      float fla = float(texel+1024) ;
-      float fl =  fla/4095.0;
-      
+        int texel = texture2D(Texture0, TexCoord0).r;
+
+    if(texel >min_shown_white){
+        FragColor = vec4(1.0, 1.0, 1.0, 1.0);
+    }
+    else if (texel< max_shown_black){
+        FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+
+    }
+    else{
+      float fla = float(texel-max_shown_black) ;
+      float fl = fla/displayRange ;
       FragColor = vec4(fl, fl, fl, 1.0);
-      // if(texel >600)
-     //    FragColor = vec4(0.0, 0.0, 1.0, 1.0);
-     // else
-     //    FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+    }
+
     }
 
 
