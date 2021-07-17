@@ -11,18 +11,21 @@ include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/di
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/squarePoints.jl")
 
 
-function createModifyData()
-
-	exampleDat = getExample()
-
+function modifyData(exampleDat)
 	#exampleDat = getExampleLabels()
 
 	exampleSlice = exampleDat[40,:,:]
 	exampleSliceReduced = reduce(vcat,exampleSlice)
-	minn = -1024 
+	
+
+
+    minn = -1024 
 	maxx  = 3071
-	exampleSliceReduced = Float32.(reduce(vcat,exampleSlice))./(maximum(exampleSlice) - minimum(exampleSlice)).+1
-	# exampleSliceReduced= exampleSliceReduced./2
+    rang = 4095
+	exampleSliceReduced = Float32.(reduce(vcat,exampleSlice)).-minn
+	exampleSliceReduced = exampleSliceReduced./rang
+
+
 	width = size(exampleSlice)[1]
 	height = size(exampleSlice)[2]
 
@@ -83,8 +86,7 @@ function displayAll(exampleSliceReduced,width, height)
 	# if(werePreviousTexture)
 	# 	glDeleteTextures(1,previousTexture)
 	# end
-	
-    previousTexture= createTexture(exampleSliceReduced,width,height)
+	previousTexture= createTexture(exampleSliceReduced,width,height)
 
 
 
@@ -93,15 +95,8 @@ function displayAll(exampleSliceReduced,width, height)
 	# Swap front and back buffers
 	GLFW.SwapBuffers(window)
 
+    @async sipmpleeventLoop(window)
 
 
-	try
-		while !GLFW.WindowShouldClose(window)
-		
-			GLFW.PollEvents()
-																																																																																																																																																																																																																																																																																																										end
-	finally
-		GLFW.DestroyWindow(window)
-	end
 
 end# displayAll

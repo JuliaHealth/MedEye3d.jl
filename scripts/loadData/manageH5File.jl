@@ -87,3 +87,14 @@ function saveMaskDataC!(::Type{arrayType},mask :: Main.ForDisplayStructs.Mask{ar
 end # manag
 
 
+function sipmpleeventLoop(window)
+	try
+		while !GLFW.WindowShouldClose(window)
+		
+			GLFW.PollEvents()
+																																																																																																																																																																																																																																																																																																										end
+	finally
+		GLFW.DestroyWindow(window)
+	end
+
+end # sipmpleeventLoop

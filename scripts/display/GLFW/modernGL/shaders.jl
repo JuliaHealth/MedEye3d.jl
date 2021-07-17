@@ -33,12 +33,17 @@ out vec4 FragColor;
 in vec3 ourColor;
 in vec2 TexCoord;
 uniform sampler2D ourTexture;
+uniform int minn = -1024 ;
+uniform int maxx  = 3071;
+uniform int rang = 4095;
 void main()
 {
-    float col=texture(ourTexture, TexCoord).r;   // input color
+    float col=texture(ourTexture, TexCoord).r ;   // input color
     FragColor = vec4(col,col,col,1.0f);
 }
 """
+
+
 
 return createShader(fsh, GL_FRAGMENT_SHADER)
 end
