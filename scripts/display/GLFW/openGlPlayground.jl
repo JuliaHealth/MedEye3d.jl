@@ -28,9 +28,6 @@ height = size(exampleSlice)[2]
 
 
 
-
-
-
 # Create the window. This sets all the hints and makes the context current.
 window = initializeWindow()
 

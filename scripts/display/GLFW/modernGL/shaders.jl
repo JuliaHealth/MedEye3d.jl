@@ -35,8 +35,8 @@ in vec2 TexCoord;
 uniform sampler2D ourTexture;
 void main()
 {
-    //float col=texture(ourTexture, TexCoord).r;
-    FragColor = texture(ourTexture, TexCoord);
+    float col=texture(ourTexture, TexCoord).r;   // input color
+    FragColor = vec4(col,col,col,1.0f);
 }
 """
 
