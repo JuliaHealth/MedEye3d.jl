@@ -105,9 +105,9 @@ function displayAll(exampleSliceReduced,width, height)
 
 
 
-  sipmpleeventLoop(window)
+  #sipmpleeventLoop(window)
 
   #GLFW.DestroyWindow(window)
-
+return window
 
 end# displayAll

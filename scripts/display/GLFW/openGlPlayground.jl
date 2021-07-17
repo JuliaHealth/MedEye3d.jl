@@ -18,7 +18,10 @@ include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/lo
 
 exampleDat = h5manag.getExample()
 dat = modifyData(exampleDat)
-displayAll( dat[1],dat[2],dat[3] )
+window = displayAll( dat[1],dat[2],dat[3] )
+
+GLFW.PollEvents()
+GLFW.DestroyWindow(window)
 
 
 # rr= rand(Int32,2*2)
