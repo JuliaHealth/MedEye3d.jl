@@ -159,15 +159,26 @@ function createTexture(data, width, height)
      glBindTexture(GL_TEXTURE_2D, texture[]); 
 
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
-    
 
-    # int width, height, nrChannels;
-    # unsigned char *data = stbi_load("container.jpg", &width, &height, &nrChannels, 0); 
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED,
-     width, height, 0, GL_LUMINANCE, GL_FLOAT, data);
+    #  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+    #  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+
+    # glTexImage2D(GL_TEXTURE_2D, 0, GL_RED,
+    #  width, height, 0, GL_LUMINANCE, GL_FLOAT, data);
+
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32I,
+     width, height, 0, GL_RED_INTEGER, GL_INT, data);
+
+   # glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE16UI_EXT, width, height, 0, GL_LUMINANCE_INTEGER_EXT, GL_UNSIGNED_SHORT, pixels);
+
+
 
 return texture
 end

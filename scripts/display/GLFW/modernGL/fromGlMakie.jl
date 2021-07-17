@@ -17,13 +17,13 @@ function modifyData(exampleDat)
 	exampleSlice = exampleDat[40,:,:]
 	exampleSliceReduced = reduce(vcat,exampleSlice)
 	
+    exampleSliceReduced= Int32.(exampleSliceReduced)
 
-
-    minn = -1024 
-	maxx  = 3071
-    rang = 4095
-	exampleSliceReduced = Float32.(reduce(vcat,exampleSlice)).-minn
-	exampleSliceReduced = exampleSliceReduced./rang
+    # minn = -1024 
+	# maxx  = 3071
+    # rang = 4095
+	# exampleSliceReduced = Float32.(reduce(vcat,exampleSlice)).-minn
+	# exampleSliceReduced = exampleSliceReduced./rang
 
 
 	width = size(exampleSlice)[1]

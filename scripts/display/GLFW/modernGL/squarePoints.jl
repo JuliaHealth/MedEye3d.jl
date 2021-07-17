@@ -29,8 +29,8 @@ positions = Point{2,Float32}[(-0.5,  0.5),     # top-left
 
  vertices = Float32.([
                             # positions          // colors           // texture coords
-                             1.0,  1.0, 0.0,   1.0, 0.0, 0.0,   1.0, 1.0,   # top right
-                             1.0, -1.0, 0.0,   0.0, 1.0, 0.0,   1.0, 0.0,   # bottom right
+                             0.8,  1.0, 0.0,   1.0, 0.0, 0.0,   1.0, 1.0,   # top right
+                             0.8, -1.0, 0.0,   0.0, 1.0, 0.0,   1.0, 0.0,   # bottom right
                             -1.0, -1.0, 0.0,   0.0, 0.0, 1.0,   0.0, 0.0,   # bottom left
                             -1.0,  1.0, 0.0,   1.0, 1.0, 0.0,   0.0, 1.0    # top left 
  ])
