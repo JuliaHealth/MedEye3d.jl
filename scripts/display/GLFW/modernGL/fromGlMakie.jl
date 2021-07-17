@@ -1,9 +1,9 @@
-
+using GeometryTypes: maximum, minimum
+using BenchmarkTools
 # Here, we illustrate a pure ModernGL implementation of some polygon drawing
-using ModernGL, GeometryTypes, GLFW, GLTF, Quaternions
+using ModernGL, GeometryTypes, GLFW
 
-using CSyntax
-using STBImage.LibSTBImage
+
 
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/ModernGlUtil.jl")
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/basicFunctions.jl")
@@ -11,72 +11,97 @@ include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/di
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/squarePoints.jl")
 
 
-# Create the window. This sets all the hints and makes the context current.
-window = initializeWindow()
+function createModifyData()
 
-# The shaders 
-vertex_shader = createVertexShader()
-fragment_shader = createFragmentShader()
+	exampleDat = getExample()
 
+	#exampleDat = getExampleLabels()
 
+	exampleSlice = exampleDat[40,:,:]
+	exampleSliceReduced = reduce(vcat,exampleSlice)
+	minn = -1024 
+	maxx  = 3071
+	exampleSliceReduced = Float32.(reduce(vcat,exampleSlice))./(maximum(exampleSlice) - minimum(exampleSlice)).+1
+	# exampleSliceReduced= exampleSliceReduced./2
+	width = size(exampleSlice)[1]
+	height = size(exampleSlice)[2]
 
-
-# Connect the shaders by combining them into a program
-shader_program = glCreateProgram()
-glAttachShader(shader_program, vertex_shader)
-glAttachShader(shader_program, fragment_shader)
-#glBindFragDataLocation(shader_program, 0, "outColor") # optional
-
-glLinkProgram(shader_program)
-glUseProgram(shader_program)
-
+    return (exampleSliceReduced,width, height )
+end
 
 
-###########buffers
+function displayAll(exampleSliceReduced,width, height)
+	# Create the window. This sets all the hints and makes the context current.
+	window = initializeWindow()
 
-#create vertex buffer
-createVertexBuffer()
+	# The shaders 
+	vertex_shader = createVertexShader()
+	fragment_shader = createFragmentShader()
 
-# Create the Vertex Buffer Objects (VBO)
-
-vbo = createDAtaBuffer(vertices)
-
-# Create the Element Buffer Object (EBO)
-ebo = createElementBuffer(elements)
-
-
-############ how data should be read from data buffer
+	#GLFW.DestroyWindow(window)
 
 
 
-typee = Float32
+	# Connect the shaders by combining them into a program
+	shader_program = glCreateProgram()
+	glAttachShader(shader_program, vertex_shader)
+	glAttachShader(shader_program, fragment_shader)
+	#glBindFragDataLocation(shader_program, 0, "outColor") # optional
 
-# position attribute
-glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(typee), C_NULL);
-glEnableVertexAttribArray(0);
-# color attribute
-glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(typee),  Ptr{Nothing}(3 * sizeof(typee)));
-glEnableVertexAttribArray(1);
-# texture coord attribute
-glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(typee),  Ptr{Nothing}(6 * sizeof(typee)));
-glEnableVertexAttribArray(2);
-
-
-width = 100;
-height = 100;
-
-texture= createTexture(createData(width,height),width,height)
-
-
-glBindTexture(GL_TEXTURE_2D, texture[]);
+	glLinkProgram(shader_program)
+	glUseProgram(shader_program)
 
 
 
+	###########buffers
+
+	#create vertex buffer
+	createVertexBuffer()
+
+	# Create the Vertex Buffer Objects (VBO)
+
+	vbo = createDAtaBuffer(vertices)
+
+	# Create the Element Buffer Object (EBO)
+	ebo = createElementBuffer(elements)
+
+
+	############ how data should be read from data buffer
+
+	encodeDataFromDataBuffer()
+
+
+	# Draw while waiting for a close event
+	#mainRenderingLoop(window, width, height)
+
+	glClear()
+	# Pulse the background blue
+	glClearColor(0.0, 0.0, 0.1 , 1.0)
+	#glClear(GL_COLOR_BUFFER_BIT)
+	# Draw our triangle
+
+	# if(werePreviousTexture)
+	# 	glDeleteTextures(1,previousTexture)
+	# end
+	
+    previousTexture= createTexture(exampleSliceReduced,width,height)
 
 
 
+	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+
+	# Swap front and back buffers
+	GLFW.SwapBuffers(window)
 
 
 
-# Draw while waiting for a close event
-mainRenderingLoop(window)
+	try
+		while !GLFW.WindowShouldClose(window)
+		
+			GLFW.PollEvents()
+																																																																																																																																																																																																																																																																																																										end
+	finally
+		GLFW.DestroyWindow(window)
+	end
+
+end# displayAll
