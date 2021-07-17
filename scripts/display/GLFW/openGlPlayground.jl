@@ -30,6 +30,7 @@ height = size(exampleSlice)[2]
 
 
 
+
 # Create the window. This sets all the hints and makes the context current.
 window = initializeWindow()
 
@@ -101,41 +102,3 @@ try
 finally
 	GLFW.DestroyWindow(window)
 end
-
-
-
-
-
-
-
-
-
-
-
-#############################################3
-
-
-# heatmaptexture= Ref(GLuint(0));
-# glGenTextures(1, heatmaptexture);
-# glBindTexture(GL_TEXTURE_2D, heatmaptexture[]);
-# glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, width, height, 0, GL_RED_INTEGER, GL_UNSIGNED_INT, exampleSliceReduced);
-# glGenerateMipmap(GL_TEXTURE_2D);
-
-# heatmapTextureLocation = glGetUniformLocation(shader_program, "heatmapTexture");
-# heatmapTextureLocation =Ref(GLuint(0));;
-# glUniform1i(heatmapTextureLocation[], 1);
-
-
-# glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST ); #or GL_NEAREST
-# glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-# glActiveTexture(GL_TEXTURE0 + 1);
-# glBindTexture(GL_TEXTURE_2D, heatmaptexture[]);
-
-
-
-
-
-
-
-#######################################

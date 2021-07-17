@@ -1,4 +1,3 @@
-
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
@@ -153,29 +152,32 @@ creating GL_LUMINANCE texture \(black and white\)
 
 
 function createTexture(data, width, height)
-    borderColor = [ 1.0, 1.0, 0.0, 1.0];
-     glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);  
 
- 
-
-    
 #The texture we're going to render to
     texture= Ref(GLuint(0));
      glGenTextures(1, texture);
      glBindTexture(GL_TEXTURE_2D, texture[]); 
-    # int width, height, nrChannels;
-    # unsigned char *data = stbi_load("container.jpg", &width, &height, &nrChannels, 0); 
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE,
-     width, height, 0, GL_RED_INTEGER, GL_FLOAT, data);
 
+
+     borderColor = [ 1.0, 1.0, 0.0, 1.0];
+     glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor);  
 
      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);	
      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
+    
+
+    # int width, height, nrChannels;
+    # unsigned char *data = stbi_load("container.jpg", &width, &height, &nrChannels, 0); 
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE,
+     width, height, 0, GL_LUMINANCE, GL_FLOAT, data);
+
 return texture
 end
+
+
 
 
 function createData(width,height)
@@ -200,5 +202,3 @@ function encodeDataFromDataBuffer()
     glEnableVertexAttribArray(2);
 
 end
-
-
