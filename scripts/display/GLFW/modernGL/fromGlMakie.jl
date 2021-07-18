@@ -15,19 +15,21 @@ include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/di
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/shaders.jl")
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/squarePoints.jl")
 
+"""
+modyfing the image array in a way that will be fiendly to send the the data into display dor transverse display
+data - 3 dimensional array of image data
+dims - dimensions of image
+return array ov vectors where each vector represents data for texture representing single transverse slice
+"""
+function prepareForDisplayOfTransverses(data, dims)
 
-function modifyData(exampleDat)::Tuple{Vector{Int16}, Int64, Int64}
-	#exampleDat = getExampleLabels()
+return	pmap((x)->reduce(vcat,data[x,:,:]) , 1:dims[1])
 
-	exampleSlice = exampleDat[50,:,:]
-	exampleSliceReduced = reduce(vcat,exampleSlice)
-	
-    #exampleSliceReduced= Int32.(exampleSliceReduced)
+end#prepareForDisplay
 
-	width = size(exampleSlice)[1]
-	height = size(exampleSlice)[2]
 
-    return (exampleSliceReduced,width, height )
+function modifyData(exampleDat, slicenumber)
+	    return reduce(vcat,exampleDat[slicenumber,:,:])
 end
 
 
@@ -105,9 +107,19 @@ function displayAll(exampleSliceReduced,width, height)
 
 
 
-  #sipmpleeventLoop(window)
+	t = @task begin;
+		while(!GLFW.WindowShouldClose(window))
+		 sleep(0.1);
+		 glClear()             
+		 # Poll for and process events
+		  GLFW.PollEvents()
+		end
+		end
+	schedule(t)
 
-  #GLFW.DestroyWindow(window)
+
+
+	#GLFW.DestroyWindow(window)
 return window
 
 end# displayAll

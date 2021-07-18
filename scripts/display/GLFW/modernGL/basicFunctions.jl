@@ -181,17 +181,19 @@ end
 loop that collects any events from openGL in case of animations it is rendering loop
     ```
 function sipmpleeventLoop(window)
-    try
-        while !GLFW.WindowShouldClose(window)
-            glClear()
-          
-           # Poll for and process events
-            GLFW.PollEvents()
-    
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          end
-    finally
-        GLFW.DestroyWindow(window)
-    end
+        try
+            while !GLFW.WindowShouldClose(window)
+                glClear()
+              
+               # Poll for and process events
+                GLFW.PollEvents()
+        
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              end
+        finally
+            GLFW.DestroyWindow(window)
+        end
+
+
 end
 
 

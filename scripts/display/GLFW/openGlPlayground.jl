@@ -5,9 +5,11 @@ using DrWatson
 using GLFW: Window
 using BenchmarkTools: minimum
 
+
 dirToWorkerNumbs = DrWatson.scriptsdir("mainPipeline","processesDefinitions","workerNumbers.jl")
 include(dirToWorkerNumbs)
 using Main.workerNumbers
+using Distributed
 
 
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/fromGlMakie.jl")
@@ -17,37 +19,32 @@ include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/lo
 
 
 exampleDat = h5manag.getExample()
-dat = modifyData(exampleDat)
-window = displayAll( dat[1],dat[2],dat[3] )
+dims = size(exampleDat)
 
-GLFW.PollEvents()
+#prepared =  prepareForDisplayOfTransverses(exampleDat, dims)
+datt=  modifyData(exampleDat,45)
+window = displayAll(datt,dims[2],dims[3] )
+
 GLFW.DestroyWindow(window)
 
-
-# rr= rand(Int32,2*2)
-# displayAll(rr, 2,2)
-
-#displayAll(Int16.([1,2,6,9]), 2,2)
-# minn = -1024 ;
-# maxx  = 3071;
-# rang = 4095;
-
-# min_shown_white = 360 
-# max_shown_black = 50
-# dispRAng = min_shown_white-max_shown_black
+# using Distributed
+# using SharedArrays
+# addprocs(2)
 
 
+function waitPrn()
+sleep(500)
+print("ddd")
+sleep(1000)
+print("222")
+end
 
-# function ter(x)
-#     if x<max_shown_black
-#         return 0
-#     elseif x>min_shown_white
-#         return 1
-#     else
-#         return (x-max_shown_black)/dispRAng
-#     end
+@async waitPrn()
 
-# end
-
-# map(ter ,[-200,51 ,215,300, 359, 2000])
-
+t = @task begin;
+    while(true)
+     sleep(15);
+     println("done");
+    end
+    end
+schedule(t)
