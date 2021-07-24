@@ -13,15 +13,8 @@ using Main.workerNumbers
 using Distributed
 
 
-include(DrWatson.scriptsdir("display","GLFW","modernGL","fromGlMakie.jl"))
-include(DrWatson.scriptsdir("display","GLFW","modernGL","textureManag.jl"))
-include(DrWatson.scriptsdir("display","GLFW","modernGL","coordinateDisplay.jl"))
-
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/structs/forDisplayStructs.jl")
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/loadData/manageH5File.jl")
-
-
-scripts/display/GLFW/coordinateDisplay.jl
 using Main.h5manag
 
 
@@ -34,7 +27,32 @@ dims = size(exampleDat)
 widthh=dims[2]
 heightt=dims[3]
 
-#prepared =  prepareForDisplayOfTransverses(exampleDat, dims)
+
+using Revise 
+segmPath = DrWatson.scriptsdir("display","GLFW","SegmentationDisplay.jl")
+include(segmPath)
+includet(segmPath)
+using Main.SegmentationDisplayStr
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -1,33 +1,47 @@
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
+include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
+using Main.PrepareWindowHelpers
+
+include(DrWatson.scriptsdir("display","GLFW","modernGL","OpenGLDisplayUtils.jl"))
+using  Main.OpenGLDisplayUtils
+include(DrWatson.scriptsdir("display","GLFW","startModules","ShadersAndVerticies.jl"))
+
+
+
 module PrepareWindow
+using DrWatson
+@quickactivate "Probabilistic medical segmentation"
 
-export basicRender
-export updateTexture
 export displayAll
-
 
 using ModernGL, GeometryTypes, GLFW
 
-dirToWorkerNumbs = DrWatson.scriptsdir("mainPipeline","processesDefinitions","workerNumbers.jl")
-include(dirToWorkerNumbs)
-
-include(DrWatson.scriptsdir("display","GLFW","modernGL","ModernGlUtil.jl"))
-include(DrWatson.scriptsdir("display","GLFW","modernGL","basicFunctions.jl"))
-include(DrWatson.scriptsdir("display","GLFW","modernGL","shaders.jl"))
-include(DrWatson.scriptsdir("display","GLFW","modernGL","squarePoints.jl"))
-include(DrWatson.scriptsdir("display","GLFW","modernGL","textureManag.jl"))
-
-using Main.BasicOpenGlConfigure
-using Main.workerNumbers
+include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
+using Main.PrepareWindowHelpers
 
 
+include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 
-"""
+include(DrWatson.scriptsdir("display","GLFW","startModules","ShadersAndVerticies.jl"))
+
+include(DrWatson.scriptsdir("display","GLFW","modernGL","OpenGLDisplayUtils.jl"))
+using  Main.OpenGLDisplayUtils
+using Main.ShadersAndVerticies
+
+
+# atomic variable that is enabling stopping async loop of event listening in order to enable othe actions with GLFW context
+stopListening = Threads.Atomic{Bool}(0)
+stopListening[]=false
+
+
+
+displayAllStr="""
 preparing all for displaying the images and responding to mouse and keyboard input
 """
-function displayAll(stopListening)
+@doc displayAllStr
+function displayAll()
 	if(Threads.nthreads()==1) 
 		println("increase number of available threads look into https://docs.julialang.org/en/v1/manual/multi-threading/  or modify for example in vs code extension")
     end
@@ -36,8 +50,10 @@ function displayAll(stopListening)
 	window = initializeWindow()
     
    	# The shaders 
-	vertex_shader = createVertexShader()
-	fragment_shader = createFragmentShader()
+	println(createcontextinfo())
+	gslsStr = get_glsl_version_string()
+	vertex_shader = createVertexShader(gslsStr)
+	fragment_shader = createFragmentShader(gslsStr)
 
 
 	# Connect the shaders by combining them into a program
@@ -52,10 +68,10 @@ function displayAll(stopListening)
 
 	# Create the Vertex Buffer Objects (VBO)
 
-	vbo = createDAtaBuffer(vertices)
+	vbo = createDAtaBuffer(Main.ShadersAndVerticies.vertices)
 
 	# Create the Element Buffer Object (EBO)
-	ebo = createElementBuffer(elements)
+	ebo = createElementBuffer(Main.ShadersAndVerticies.elements)
 
 
 	############ how data should be read from data buffer

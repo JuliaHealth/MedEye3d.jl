@@ -1,11 +1,29 @@
+using DrWatson
+@quickactivate "Probabilistic medical segmentation"
+
 using ModernGL, GeometryTypes, GLFW
+include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 
 #Create and initialize shaders
+module ShadersAndVerticies
+using ModernGL, GeometryTypes, GLFW
+export createVertexShader
+export createFragmentShader
+export positions
+export elements
+export vertices
 
-#VERTEX Shader
-function createVertexShader()
+using DrWatson
+@quickactivate "Probabilistic medical segmentation"
+include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
+
+```@doc
+creating VertexShader  so controlling structures like verticies, quads
+gslString so version of GSLS we are using currently
+  ```
+function createVertexShader(gslString::String)
 vsh = """
-$(get_glsl_version_string())
+$(gslString)
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aColor;
 layout (location = 2) in vec2 aTexCoord;
@@ -23,11 +41,13 @@ return createShader(vsh, GL_VERTEX_SHADER)
 end
 
 
-
-#FRAGMENT shader
-function createFragmentShader()
+```@doc
+creating fragment Shader  so controlling colors and textures  
+gslString so version of GSLS we are using currently
+  ```
+function createFragmentShader(gslString::String)
     fsh = """
-    $(get_glsl_version_string())
+    $(gslString)
     #extension GL_EXT_gpu_shader4 : enable    //Include support for this extension, which defines usampler2D
 
     out vec4 FragColor;    
@@ -90,7 +110,6 @@ function createFragmentShader()
 
 ################### data to display verticies
 
-  
 
 # Now we define another geometry that we will render, a rectangle, this one with an index buffer
 # The positions of the vertices in our rectangle
@@ -109,3 +128,14 @@ elements = Face{3,UInt32}[(0,1,2),          # the first triangle
 (2,3,0)]          # the second triangle
 
 
+
+vertices = Float32.([
+  # positions          // colors           // texture coords
+   0.8,  1.0, 0.0,   1.0, 0.0, 0.0,   1.0, 1.0,   # top right
+   0.8, -1.0, 0.0,   0.0, 1.0, 0.0,   1.0, 0.0,   # bottom right
+  -1.0, -1.0, 0.0,   0.0, 0.0, 1.0,   0.0, 0.0,   # bottom left
+  -1.0,  1.0, 0.0,   1.0, 1.0, 0.0,   0.0, 1.0    # top left 
+])
+
+
+  end #ShadersAndVerticies

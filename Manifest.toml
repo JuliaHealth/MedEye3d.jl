@@ -114,6 +114,12 @@ git-tree-sha1 = "0b0aa9d61456940511416b59a0e902c57b154956"
 uuid = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 version = "0.10.12"
 
+[[CodeTracking]]
+deps = ["InteractiveUtils", "UUIDs"]
+git-tree-sha1 = "8ad457cfeb0bca98732c97958ef81000a543e73e"
+uuid = "da1fd8a2-8d9e-5ec2-8556-3022fb5608a2"
+version = "1.0.5"
+
 [[ColorTypes]]
 deps = ["FixedPointNumbers", "Random"]
 git-tree-sha1 = "32a2b8af383f11cbb65803883837a149d10dfe8a"
@@ -267,6 +273,9 @@ deps = ["Pkg", "Requires", "UUIDs"]
 git-tree-sha1 = "256d8e6188f3f1ebfa1a5d17e072a0efafa8c5bf"
 uuid = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
 version = "1.10.1"
+
+[[FileWatching]]
+uuid = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
 
 [[FillArrays]]
 deps = ["LinearAlgebra", "Random", "SparseArrays"]
@@ -512,6 +521,12 @@ git-tree-sha1 = "d735490ac75c5cb9f1b00d8b5509c11984dc6943"
 uuid = "aacddb02-875f-59d6-b918-886e6ef4fbf8"
 version = "2.1.0+0"
 
+[[JuliaInterpreter]]
+deps = ["CodeTracking", "InteractiveUtils", "Random", "UUIDs"]
+git-tree-sha1 = "31c2eee64c1eee6e8e3f30d5a03d4b5b7086ab29"
+uuid = "aa1ae85d-cabe-5617-a682-6adf51b2e16a"
+version = "0.8.18"
+
 [[KernelAbstractions]]
 deps = ["Adapt", "Cassette", "InteractiveUtils", "MacroTools", "SpecialFunctions", "StaticArrays", "UUIDs"]
 git-tree-sha1 = "5e6c70389c1b1e40adb81664ca8cea6ce8127afc"
@@ -595,6 +610,12 @@ version = "0.2.5"
 
 [[Logging]]
 uuid = "56ddb016-857b-54e1-b83d-db4d58db5568"
+
+[[LoweredCodeUtils]]
+deps = ["JuliaInterpreter"]
+git-tree-sha1 = "4bfb8b57df913f3b28a6bd3bdbebe9a50538e689"
+uuid = "6f1432cf-f94c-5a45-995e-cdbf5db27b0b"
+version = "2.1.0"
 
 [[Lz4_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -837,6 +858,12 @@ deps = ["UUIDs"]
 git-tree-sha1 = "4036a3bd08ac7e968e27c203d45f5fff15020621"
 uuid = "ae029012-a4dd-5104-9daa-d747884805df"
 version = "1.1.3"
+
+[[Revise]]
+deps = ["CodeTracking", "Distributed", "FileWatching", "JuliaInterpreter", "LibGit2", "LoweredCodeUtils", "OrderedCollections", "Pkg", "REPL", "Requires", "UUIDs", "Unicode"]
+git-tree-sha1 = "410bbe13d9a7816e862ed72ac119bda7fb988c08"
+uuid = "295af30f-e4ad-537b-8983-00126c2a3abe"
+version = "3.1.17"
 
 [[Rmath]]
 deps = ["Random", "Rmath_jll"]

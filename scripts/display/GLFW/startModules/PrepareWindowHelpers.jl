@@ -5,8 +5,20 @@ using DrWatson
 It stores set of functions that need to be composed in order to prepare GLFW window and 
 display verticies needed for texture  display
 ```
-module PreperWindowHelpers
+module PrepareWindowHelpers
+using DrWatson
+@quickactivate "Probabilistic medical segmentation"
+
 include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
+
+export createDAtaBuffer
+export createElementBuffer
+export createVertexBuffer
+export encodeDataFromDataBuffer
+export controllWindowInput
+export initializeWindow
+
+
 ```@doc
 data is loaded into a buffer which passes it into thw GPU for futher processing 
     - here the data is just passing the positions of verticies
@@ -20,7 +32,7 @@ function createDAtaBuffer(positions)
     glBindBuffer(GL_ARRAY_BUFFER, vbo[])
     glBufferData(GL_ARRAY_BUFFER, sizeof(positions), positions, GL_STATIC_DRAW)
 return vbo
-end
+end #createDAtaBuffer
 
 
 ```@doc
@@ -32,9 +44,7 @@ function createElementBuffer(elements)
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo[])
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(elements), elements, GL_STATIC_DRAW)
 return ebo
-end
-
-
+end #createElementBuffer
 
 ```@doc
 vertex buffer keeping things simpler
@@ -43,7 +53,7 @@ function createVertexBuffer()
     vao = Ref(GLuint(0))
     glGenVertexArrays(1, vao)
     glBindVertexArray(vao[])
-end
+end #createVertexBuffer
 
 
 glVertexAttribSettingStr= """
@@ -67,7 +77,8 @@ glVertexAttribPointer positionAttribute, 2, GL_FLOAT, false, 0, C_NULL
 function glVertexAttribSetting(positionAttribute)
     glVertexAttribPointer(positionAttribute, 2, GL_FLOAT, false, 0, C_NULL)
 
-end
+end #glVertexAttribSetting
+
 
 
 
@@ -87,27 +98,9 @@ function encodeDataFromDataBuffer()
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(typee),  Ptr{Nothing}(6 * sizeof(typee)));
     glEnableVertexAttribArray(2);
 
-end
-
-```@doc
-loop that collects any events from openGL in case 
-of animations it can be  rendering loop
-    ```
-function sipmpleeventLoop(window)
-        try
-            while !GLFW.WindowShouldClose(window)
-                glClear()
-              
-               # Poll for and process events
-                GLFW.PollEvents()
-        
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              end
-        finally
-            GLFW.DestroyWindow(window)
-        end
+end #encodeDataFromDataBuffer
 
 
-end
 
 
 controllWindowInputDoc = """
@@ -128,6 +121,7 @@ GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
 		println("key $name ", action)
 	end
 end)
+end #controllWindowInputDoc
 
 ```@doc
 modified from ModernGL.jl github page  and GLFW page 
@@ -148,7 +142,7 @@ function initializeWindow()
 	glEnable(GL_TEXTURE_2D);
 	println(createcontextinfo())
 	return window
-	end
+	end #initializeWindow
 
 
 

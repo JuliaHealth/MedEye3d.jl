@@ -1,3 +1,6 @@
+using ModernGL
+using GLFW
+
 function glGenOne(glGenFn)
 	id = GLuint[0]
 	glGenFn(1, id)
@@ -7,6 +10,7 @@ end
 glGenBuffer() = glGenOne(glGenBuffers)
 glGenVertexArray() = glGenOne(glGenVertexArrays)
 glGenTexture() = glGenOne(glGenTextures)
+
 function getInfoLog(obj::GLuint)
 	# Return the info log for obj, whether it be a shader or a program.
 	isShader = glIsShader(obj)

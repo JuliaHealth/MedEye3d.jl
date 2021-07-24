@@ -6,6 +6,11 @@ stores functions needed to create bind and update OpenGl textues
 ```
 module TextureManag
 using  ModernGL
+
+include(DrWatson.scriptsdir("display","GLFW","modernGL","OpenGLDisplayUtils.jl"))
+using  Main.OpenGLDisplayUtils
+
+
 updateTextureString = """
 uploading data to given texture; of given types associated
 """
