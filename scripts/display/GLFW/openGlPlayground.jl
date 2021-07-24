@@ -7,6 +7,13 @@ include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/st
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/loadData/manageH5File.jl")
 using Main.h5manag
 
+include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
+include(DrWatson.scriptsdir("display","GLFW","modernGL","OpenGLDisplayUtils.jl"))
+include(DrWatson.scriptsdir("display","GLFW","startModules","ShadersAndVerticies.jl"))
+pathPrepareWindow = DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindow.jl")
+include(pathPrepareWindow)
+include(DrWatson.scriptsdir("display","GLFW","modernGL","TextureManag.jl"))
+
 
 
 

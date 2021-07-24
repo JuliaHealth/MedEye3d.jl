@@ -1,11 +1,6 @@
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
-include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
-include(DrWatson.scriptsdir("display","GLFW","modernGL","OpenGLDisplayUtils.jl"))
-include(DrWatson.scriptsdir("display","GLFW","startModules","ShadersAndVerticies.jl"))
-
-
 
 module PrepareWindow
 using DrWatson

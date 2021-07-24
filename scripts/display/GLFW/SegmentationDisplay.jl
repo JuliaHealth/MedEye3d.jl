@@ -1,9 +1,7 @@
 
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
-pathPrepareWindow = DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindow.jl")
-include(pathPrepareWindow)
-include(DrWatson.scriptsdir("display","GLFW","modernGL","TextureManag.jl"))
+
 
 # SegmentationDisplayStr = """
 # Main module controlling displaying segmentations image and data

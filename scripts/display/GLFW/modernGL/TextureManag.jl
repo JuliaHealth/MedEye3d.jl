@@ -1,7 +1,4 @@
 using DrWatson
-@quickactivate "Probabilistic medical segmentation"
-include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
-
 
 ```@doc
 stores functions needed to create bind and update OpenGl textues 
@@ -9,10 +6,10 @@ stores functions needed to create bind and update OpenGl textues
 module TextureManag
 using  ModernGL
 using DrWatson
+using  Main.OpenGLDisplayUtils
+
 @quickactivate "Probabilistic medical segmentation"
 
-include(DrWatson.scriptsdir("display","GLFW","modernGL","OpenGLDisplayUtils.jl"))
-using  Main.OpenGLDisplayUtils
 
 
 updateTextureString = """
