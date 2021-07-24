@@ -1,3 +1,55 @@
+using DrWatson
+@quickactivate "Probabilistic medical segmentation"
+
+```@doc
+stores functions needed to create bind and update OpenGl textues 
+```
+module TextureManag
+using  ModernGL
+updateTextureString = """
+uploading data to given texture; of given types associated
+"""
+@doc updateTextureString
+function updateTexture(juliaDataTyp::Type{juliaDataType},width,height,data, textureId,stopListening,pboId, DATA_SIZE,GlNumbType )where{juliaDataType}
+
+	glBindTexture(GL_TEXTURE_2D, textureId[]); 
+	glTexSubImage2D(GL_TEXTURE_2D,0,0,0, width, height, GL_RED_INTEGER, GlNumbType, data);
+
+end
+
+
+
+
+```@doc
+creating texture that is storing integer values representing attenuation values in case of CT scan
+numb - which texture it is - basically important only that diffrent textures would have diffrent numbers
+
+```
+function createTexture(numb::Int,data, width::Int, height::Int,GL_RType =GL_R16I, GlNumbType = GL_SHORT  )
+
+#The texture we're going to render to
+    
+texture= Ref(GLuint(numb));
+    glGenTextures(1, texture);
+    glBindTexture(GL_TEXTURE_2D, texture[]); 
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RType, width, height);
+    glTexSubImage2D(GL_TEXTURE_2D,0,0,0, width, height, GL_RED_INTEGER, GlNumbType, data);
+
+
+return texture
+end
+
+
+########## puts bytes of image into PBO as fas as I get it  copy an image data to texture buffer
+
 
 """
 width -width of the image in  number of pixels 
@@ -15,7 +67,13 @@ end
 
 
 
-"""
+
+
+
+
+
+
+usePixelBuferAndUploadDataStr = """
 adapted from http://www.songho.ca/opengl/gl_pbo.html
 creates single pixel buffer of given type
 pboID - id of the pixel buffer object that was prepared for some particular texture
@@ -27,6 +85,7 @@ subImageDataType - variable used in glTexSubImage2D to tell open Glo what type o
 data one dimensional array o julia type and width*height length
 DATA_SIZE - size of texture in bytes
 """
+@doc usePixelBuferAndUploadDataStr
 function usePixelBuferAndUploadData(
     juliaDataTyp::Type{juliaDataType}
                     ,pboID 
@@ -79,46 +138,10 @@ function usePixelBuferAndUploadData(
 
 end
 
-
-
-########## puts bytes of image into PBO as fas as I get it  copy an image data to texture buffer
-
-
-
-
-```@doc
-creating texture that is storing integer values representing attenuation values in case of CT scan
-numb - which texture it is - basically important only that diffrent textures would have diffrent numbers
-
-```
-function createTexture(numb::Int,data, width::Int, height::Int,GL_RType =GL_R16I, GlNumbType = GL_SHORT  )
-
-#The texture we're going to render to
-    
-texture= Ref(GLuint(numb));
-    glGenTextures(1, texture);
-    glBindTexture(GL_TEXTURE_2D, texture[]); 
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-
-    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RType, width, height);
-    glTexSubImage2D(GL_TEXTURE_2D,0,0,0, width, height, GL_RED_INTEGER, GlNumbType, data);
-
-
-return texture
-end
-
-
-
-
-"""
+updatePixelsStr = """
 adapted from https://github.com/JuliaPlots/GLMakie.jl/blob/2717d812fdc66b283f63d5d97237e8d69e2c1f25/src/GLAbstraction/GLBuffer.jl from unsafe copy
 """
+@doc updatePixelsStr
 function updatePixels(ptr, data,length)
     for i=1:length
         unsafe_store!(ptr,data[i], i)
@@ -126,3 +149,4 @@ function updatePixels(ptr, data,length)
 end
 
 
+end #TextureManag

@@ -1,8 +1,9 @@
-####adapted from https://discourse.julialang.org/t/custom-subject-in-rocket-jl-for-mouse-events-from-glfw/65133/3
+using DrWatson
+@quickactivate "Probabilistic medical segmentation"
 
+module ReactingToInput
 using Rocket
 using GLFW
-
 
 mutable struct ScrollCallbackSubscribable <: Subscribable{Int}
     xoff_previous :: Float64
@@ -17,8 +18,6 @@ function Rocket.on_subscribe!(handler::ScrollCallbackSubscribable, actor)
 end
 
 function (handler::ScrollCallbackSubscribable)(_, xoff, yoff)
-      # I'm not sure how GLFW represents offsets so it might be wrong here
-      # here you actually need to implement your scrolling logic
       if handler.yoff_previous > yoff
           next!(handler.subject, 1)
       else
@@ -28,14 +27,24 @@ function (handler::ScrollCallbackSubscribable)(_, xoff, yoff)
       handler.yoff_previous = yoff
 end
 
-const scrollback = ScrollCallbackSubscribable()
 
-stopListening[]=false
+registerMouseScrollFunctionsStr="""
+uploading data to given texture; of given types associated
+returns subscription in order to enable unsubscribing in the end 
+"""
+@doc registerMouseScrollFunctionsStr
+function registerMouseScrollFunctions()
+
+scrollback = ScrollCallbackSubscribable()
+stopListening[]=true # stoping event listening loop to free the GLFW context
 
 GLFW.SetScrollCallback(window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
 
-# Than later in your application you can do smth like
+subscription = subscribe!(scrollback, (direction) -> println(direction))
 
-subscription = subscribe!(scrollback, (direction) -> 
-updateTexture(Int16,widthh,heightt,exampleLabels[200,:,:], trueLabels,stopListening,pboId, DATA_SIZE,GL_UNSIGNED_BYTE)
-)
+
+stopListening[]=false # reactivate event listening loop
+
+end #registerMouseScrollFunctions
+
+end #ReactToGLFWInpuut

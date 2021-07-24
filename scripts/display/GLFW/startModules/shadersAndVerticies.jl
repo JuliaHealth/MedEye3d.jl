@@ -1,7 +1,5 @@
 using ModernGL, GeometryTypes, GLFW
 
-
-
 #Create and initialize shaders
 
 #VERTEX Shader
@@ -90,25 +88,24 @@ function createFragmentShader()
     
 
 
-# #FRAGMENT shader
-# function createFragmentShader()
-# fsh = """
-# $(get_glsl_version_string())
-# out vec4 FragColor;
+################### data to display verticies
+
   
-# in vec3 ourColor;
-# in vec2 TexCoord;
-# uniform sampler2D ourTexture;
-# uniform int minn = -1024 ;
-# uniform int maxx  = 3071;
-# uniform int rang = 4095;
-# void main()
-# {
-#     float col=texture(ourTexture, TexCoord).r ;   // input color
-#     FragColor = vec4(col,col,col,1.0f);
-# }
-# """
-# return createShader(fsh, GL_FRAGMENT_SHADER)
-# end
+
+# Now we define another geometry that we will render, a rectangle, this one with an index buffer
+# The positions of the vertices in our rectangle
+positions = Point{2,Float32}[(-0.5,  0.5),     # top-left
+( 0.5,  0.5),     # top-right
+( 0.5, -0.5),     # bottom-right
+(-0.5, -0.5)]     # bottom-left
+
+# Specify how vertices are arranged into faces
+# Face{N,T} type specifies a face with N vertices, with index type
+# T (you should choose UInt32), and index-offset O. If you're
+# specifying faces in terms of julia's 1-based indexing, you should set
+# O=0. (If you instead number the vertices starting with 0, set
+# O=-1.)
+elements = Face{3,UInt32}[(0,1,2),          # the first triangle
+(2,3,0)]          # the second triangle
 
 

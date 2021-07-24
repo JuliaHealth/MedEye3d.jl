@@ -1,4 +1,3 @@
-using ModernGL, GeometryTypes, GLFW
 
 
 # Now we define another geometry that we will render, a rectangle, this one with an index buffer

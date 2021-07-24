@@ -13,11 +13,15 @@ using Main.workerNumbers
 using Distributed
 
 
-include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/fromGlMakie.jl")
+include(DrWatson.scriptsdir("display","GLFW","modernGL","fromGlMakie.jl"))
+include(DrWatson.scriptsdir("display","GLFW","modernGL","textureManag.jl"))
+include(DrWatson.scriptsdir("display","GLFW","modernGL","coordinateDisplay.jl"))
+
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/structs/forDisplayStructs.jl")
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/loadData/manageH5File.jl")
-include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/textureManag.jl")
 
+
+scripts/display/GLFW/coordinateDisplay.jl
 using Main.h5manag
 
 
@@ -32,27 +36,6 @@ heightt=dims[3]
 
 #prepared =  prepareForDisplayOfTransverses(exampleDat, dims)
 
-stopListening = Threads.Atomic{Bool}(0)
-stopListening[]=false
-#textureId = displayAll(prepared[45],dims[2],dims[3] )
-window,vertex_shader,fragment_shader ,shader_program = displayAll(stopListening )
-pboId, DATA_SIZE = preparePixelBuffer(Int16,widthh,heightt,0)
-
-
-
-##################
-#clear color buffer
-glClearColor(0.0, 0.0, 0.1 , 1.0)
-#true labels
-glActiveTexture(GL_TEXTURE0 + 1); # active proper texture unit before binding
-glUniform1i(glGetUniformLocation(shader_program, "msk0"), 1);# we first look for uniform sampler in shader - here 
-trueLabels= createTexture(1,exampleLabels[210,:,:],widthh,heightt,GL_R8UI,GL_UNSIGNED_BYTE)#binding texture and populating with data
-#main image
-glActiveTexture(GL_TEXTURE0); # active proper texture unit before binding
-glUniform1i(glGetUniformLocation(shader_program, "Texture0"), 0);# we first look for uniform sampler in shader - here 
-mainTexture= createTexture(0,exampleDat[210,:,:],widthh,heightt,GL_R16I,GL_SHORT)#binding texture and populating with data
-#render
-basicRender()
 
 
 #############

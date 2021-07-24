@@ -1,9 +1,13 @@
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
-using GeometryTypes: maximum, minimum
-using BenchmarkTools
-# Here, we illustrate a pure ModernGL implementation of some polygon drawing
+module PrepareWindow
+
+export basicRender
+export updateTexture
+export displayAll
+
+
 using ModernGL, GeometryTypes, GLFW
 
 dirToWorkerNumbs = DrWatson.scriptsdir("mainPipeline","processesDefinitions","workerNumbers.jl")
@@ -15,7 +19,7 @@ include(DrWatson.scriptsdir("display","GLFW","modernGL","shaders.jl"))
 include(DrWatson.scriptsdir("display","GLFW","modernGL","squarePoints.jl"))
 include(DrWatson.scriptsdir("display","GLFW","modernGL","textureManag.jl"))
 
-
+using Main.BasicOpenGlConfigure
 using Main.workerNumbers
 
 
@@ -66,7 +70,6 @@ function displayAll(stopListening)
 		while(!GLFW.WindowShouldClose(window))
 		sleep(0.1);
 		if(!stopListening[])
-		 glClear()             
 		 # Poll for and process events
 		  GLFW.PollEvents()
 			end
@@ -75,35 +78,13 @@ function displayAll(stopListening)
 	schedule(t)
 
 
-
-	#GLFW.DestroyWindow(window)
 return (window,vertex_shader,fragment_shader ,shader_program)
 
 end# displayAll
 
 
 
-basicRenderDoc = """
-As most functions will deal with just addind the quad to the screen 
-and swapping buffers
-"""
-@doc basicRenderDoc
-function basicRender()
-	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-	# Swap front and back buffers
-	GLFW.SwapBuffers(window)
-
-end
 
 
-"""
-uploading data to given texture; of given types associated
-"""
-function updateTexture(juliaDataTyp::Type{juliaDataType},width,height,data, textureId,stopListening,pboId, DATA_SIZE,GlNumbType )where{juliaDataType}
 
-	glBindTexture(GL_TEXTURE_2D, textureId[]); 
-	glTexSubImage2D(GL_TEXTURE_2D,0,0,0, width, height, GL_RED_INTEGER, GlNumbType, data);
-
-end
-
-
+end #PreperWindow

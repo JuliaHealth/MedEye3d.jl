@@ -1,9 +1,12 @@
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
-
-using GLFW
-using ModernGL
+```@doc
+It stores set of functions that need to be composed in order to prepare GLFW window and 
+display verticies needed for texture  display
+```
+module PreperWindowHelpers
+include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 ```@doc
 data is loaded into a buffer which passes it into thw GPU for futher processing 
     - here the data is just passing the positions of verticies
@@ -126,16 +129,31 @@ GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
 	end
 end)
 
+```@doc
+modified from ModernGL.jl github page  and GLFW page 
+stores primary 
+    ```
+function initializeWindow()
+	GLFW.Init()
+	# OS X-specific GLFW hints to initialize the correct version of OpenGL
+	wh = 600
+	# Create a windowed mode window and its OpenGL context
+	window = GLFW.CreateWindow(wh, wh, "OpenGL Example")
+	# Make the window's context current
+	GLFW.MakeContextCurrent(window)
+	GLFW.ShowWindow(window)
+	GLFW.SetWindowSize(window, wh, wh) # Seems to be necessary to guarantee that window > 0
+	glViewport(0, 0, wh, wh)
+	glDisable(GL_LIGHTING);
+	glEnable(GL_TEXTURE_2D);
+	println(createcontextinfo())
+	return window
+	end
 
-end
-controllScrollingDoc = """
-controll swithing the slices while scrolling
-"""
-@doc controllScrollingDoc
-function controllScrolling( )
 
-pass
-end
+
+
+end # PreperWindowHelpers
 
 
 

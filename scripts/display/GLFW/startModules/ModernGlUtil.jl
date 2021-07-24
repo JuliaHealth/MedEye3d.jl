@@ -128,29 +128,5 @@ end
 
 
 
-
-
-	function initializeWindow()
-		GLFW.Init()
-		# OS X-specific GLFW hints to initialize the correct version of OpenGL
-		wh = 600
-		# Create a windowed mode window and its OpenGL context
-		window = GLFW.CreateWindow(wh, wh, "OpenGL Example")
-		# Make the window's context current
-		GLFW.MakeContextCurrent(window)
-		GLFW.ShowWindow(window)
-		GLFW.SetWindowSize(window, wh, wh) # Seems to be necessary to guarantee that window > 0
-		
-		glViewport(0, 0, wh, wh)
-		
-		glDisable(GL_LIGHTING);
-		glEnable(GL_TEXTURE_2D);
-
-		println(createcontextinfo())
-		return window
-		end
-
-
-
 		    #clear as far as I get buffers
 			glClear() = ccall(@eval(GLFW.GetProcAddress("glClear")), Cvoid, (Cuint,), 0x00004000)
