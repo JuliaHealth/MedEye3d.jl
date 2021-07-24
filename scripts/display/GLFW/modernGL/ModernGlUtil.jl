@@ -91,6 +91,8 @@ function createShaderProgram(f, vertexShader, fragmentShader)
 	end
 	prog
 end
+
+
 createShaderProgram(vertexShader, fragmentShader) = createShaderProgram(prog->0, vertexShader, fragmentShader)
 global GLSL_VERSION = ""
 function createcontextinfo()
@@ -141,6 +143,9 @@ end
 		
 		glViewport(0, 0, wh, wh)
 		
+		glDisable(GL_LIGHTING);
+		glEnable(GL_TEXTURE_2D);
+
 		println(createcontextinfo())
 		return window
 		end

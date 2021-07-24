@@ -29,6 +29,7 @@ ParallelStencil = "94395366-693c-11ea-3b26-d9b7aac5d958"
 Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"
 PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
 Quaternions = "94ee1d12-ae83-5a48-8b1c-48b8ff168ae0"
+Rocket = "df971d30-c9d6-4b37-b8ff-e965b2cb3a40"
 STBImage = "7905c688-fe39-11e9-31c9-6bac3ecc6ce7"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 

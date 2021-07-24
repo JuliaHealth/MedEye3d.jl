@@ -17,7 +17,8 @@ void main()
 {
     gl_Position = vec4(aPos, 1.0);
     ourColor = aColor;
-    TexCoord0 = aTexCoord;
+   TexCoord0 = aTexCoord;
+
 }
 """
 return createShader(vsh, GL_VERTEX_SHADER)
@@ -47,24 +48,37 @@ function createFragmentShader()
 
 
     uniform isampler2D Texture0;
+    uniform isampler2D nuclearMask;
+    uniform isampler2D msk0;
+    uniform isampler2D mask1;
+    uniform isampler2D mask2;
+    
+
+
 
     smooth in vec2 TexCoord0;
   
     void main()
     {
         int texel = texture2D(Texture0, TexCoord0).r;
-
+        int mask0Texel = texture2D(msk0, TexCoord0).r;
+        vec4 FragColorMask0 = vec4(mask0Texel, 0.0, 0.0, 0.5);
+  
     if(texel >min_shown_white){
         FragColor = vec4(1.0, 1.0, 1.0, 1.0);
-    }
+        }
     else if (texel< max_shown_black){
-        FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+        FragColor = vec4(0.0, 0.0, 0.0, 1.0)*FragColorMask0;
 
     }
     else{
       float fla = float(texel-max_shown_black) ;
       float fl = fla/displayRange ;
-      FragColor = vec4(fl, fl, fl, 1.0);
+      if(mask0Texel>0) {
+        FragColor = vec4(fl, fl, fl, 1.0)*FragColorMask0;
+      }else{
+        FragColor = vec4(fl, fl, fl, 1.0);
+      }
     }
 
     }

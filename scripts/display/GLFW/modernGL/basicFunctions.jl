@@ -130,33 +130,6 @@ end
 #     return renderedTexture
 # end
 
-```@doc
-creating texture that is storing integer values representing attenuation values in case of CT scan
-```
-function createTexture(data, width, height)
-
-#The texture we're going to render to
-    texture= Ref(GLuint(0));
-     glGenTextures(1, texture);
-     glBindTexture(GL_TEXTURE_2D, texture[]); 
-
-
-
-     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-
-
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R16I,
-     width, height, 0, GL_RED_INTEGER, GL_SHORT, data);
-
-
-
-
-return texture
-end
-
 
 
 ```@doc
@@ -178,7 +151,8 @@ function encodeDataFromDataBuffer()
 end
 
 ```@doc
-loop that collects any events from openGL in case of animations it is rendering loop
+loop that collects any events from openGL in case 
+of animations it can be  rendering loop
     ```
 function sipmpleeventLoop(window)
         try
@@ -197,13 +171,14 @@ function sipmpleeventLoop(window)
 end
 
 
-"""
+controllWindowInputDoc = """
 it will generally be invoked on GLFW.PollEvents()  in event loop and now depending on 
 what will be pressed or clicked it will lead to diffrent actions
 """
+@doc controllWindowInputDoc
 function controllWindowInput(window)
 	GLFW.SetWindowCloseCallback(window, (_) -> GLFW.DestroyWindow(window))
-	#GLFW.SetMouseButtonCallback(window, (_, button, action, mods) -> println("$button $action"))
+	GLFW.SetMouseButtonCallback(window, (_, button, action, mods) -> println("$button $action"))
 
 # Input callbacks
 GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
@@ -217,21 +192,73 @@ end)
 
 
 end
-
+controllScrollingDoc = """
+controll swithing the slices while scrolling
 """
-will change display window  so we will be able to see better for example bones ...
-    min_shown_white - value of cut off  - all values above will be shown as white 
-    max_shown_black - value cut off - all values below will be shown as black
-    https://radiopaedia.org/articles/windowing-ct
-    soft tissues: W:350–400 L:20–60 4
-    minimum and maximum possible values of hounsfield units ...
-    int minn = -1024 ;
-    int maxx  = 3071;
-    and we need to pass data to shaders using https://community.khronos.org/t/const-data-from-vertex-shader-to-fragment-shader/66544
-"""
-function changeWindow(min_shown_white,max_shown_black)
-return map(x->(x+ 1024)/(3071+1024),[min_shown_white,max_shown_black])
+@doc controllScrollingDoc
+function controllScrolling( )
 
+pass
 end
-changeWindow(50,360)
-changeWindow(50,360)[2] - changeWindow(50,360)[1]
+
+
+
+
+
+
+
+
+
+
+##################################### cleaning memory
+# ///////////////////////////////////////////////////////////////////////////////
+# // clean up shared memory
+# ///////////////////////////////////////////////////////////////////////////////
+# void clearSharedMem()
+# {
+#     // deallocate texture buffer
+#     delete [] imageData;
+#     imageData = 0;
+
+#     // clean up texture
+#     glDeleteTextures(1, &textureId);
+
+#     // clean up PBOs
+#     if(pboSupported)
+#     {
+#         glDeleteBuffers(2, pboIds);
+#     }
+# }
+
+
+
+
+
+
+
+############# simple example of writing text
+
+# ///////////////////////////////////////////////////////////////////////////////
+# // write 2d text using GLUT
+# // The projection matrix must be set to orthogonal before call this function.
+# ///////////////////////////////////////////////////////////////////////////////
+# void drawString(const char *str, int x, int y, float color[4], void *font)
+# {
+#     glPushAttrib(GL_LIGHTING_BIT | GL_CURRENT_BIT); // lighting and color mask
+#     glDisable(GL_LIGHTING);     // need to disable lighting for proper text color
+#     glDisable(GL_TEXTURE_2D);
+
+#     glColor4fv(color);          // set text color
+#     glRasterPos2i(x, y);        // place text position
+
+#     // loop all characters in the string
+#     while(*str)
+#     {
+#         glutBitmapCharacter(font, *str);
+#         ++str;
+#     }
+
+#     glEnable(GL_TEXTURE_2D);
+#     glEnable(GL_LIGHTING);
+#     glPopAttrib();
+# }
