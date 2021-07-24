@@ -15,9 +15,7 @@ using  Main.OpenGLDisplayUtils
 using Main.ShadersAndVerticies
 
 
-# atomic variable that is enabling stopping async loop of event listening in order to enable othe actions with GLFW context
-stopListening = Threads.Atomic{Bool}(0)
-stopListening[]=false
+
 
 
 
@@ -26,6 +24,10 @@ preparing all for displaying the images and responding to mouse and keyboard inp
 """
 @doc displayAllStr
 function displayAll()
+	# atomic variable that is enabling stopping async loop of event listening in order to enable othe actions with GLFW context
+	stopListening = Threads.Atomic{Bool}(0)
+	stopListening[]=false
+
 	if(Threads.nthreads()==1) 
 		println("increase number of available threads look into https://docs.julialang.org/en/v1/manual/multi-threading/  or modify for example in vs code extension")
     end
@@ -78,7 +80,7 @@ function displayAll()
 	schedule(t)
 
 
-return (window,vertex_shader,fragment_shader ,shader_program)
+return (window,vertex_shader,fragment_shader ,shader_program,stopListening)
 
 end# displayAll
 

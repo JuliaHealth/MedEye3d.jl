@@ -1,4 +1,5 @@
 using DrWatson
+@quickactivate "Probabilistic medical segmentation"
 
 ```@doc
 stores functions needed to create bind and update OpenGl textues 
@@ -7,8 +8,10 @@ module TextureManag
 using  ModernGL
 using DrWatson
 using  Main.OpenGLDisplayUtils
+using  Main.ForDisplayStructs
 
-@quickactivate "Probabilistic medical segmentation"
+export initializeTextures
+
 
 
 
@@ -31,11 +34,9 @@ creating texture that is storing integer values representing attenuation values 
 numb - which texture it is - basically important only that diffrent textures would have diffrent numbers
 
 ```
-function createTexture(numb::Int,data, width::Int, height::Int,GL_RType =GL_R16I, GlNumbType = GL_SHORT  )
-
+function createTexture(numb::Int, width::Int, height::Int,GL_RType::UInt32 =GL_R16I)
 #The texture we're going to render to
-    
-texture= Ref(GLuint(numb));
+    texture= Ref(GLuint(numb));
     glGenTextures(1, texture);
     glBindTexture(GL_TEXTURE_2D, texture[]); 
 
@@ -47,7 +48,7 @@ texture= Ref(GLuint(numb));
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
 
     glTexStorage2D(GL_TEXTURE_2D, 1, GL_RType, width, height);
-    glTexSubImage2D(GL_TEXTURE_2D,0,0,0, width, height, GL_RED_INTEGER, GlNumbType, data);
+    #glTexSubImage2D(GL_TEXTURE_2D,0,0,0, width, height, GL_RED_INTEGER, GlNumbType, data);
 
 
 return texture
@@ -55,27 +56,46 @@ end
 
 
 ```@doc
-initializing and drawing the textures on the screen
+initializing textures 
+shader_program- regference to OpenGL program so we will be able to initialize textures
+listOfTextSpecs - list of TextureSpec structs that  holds data needed to 
+it creates textrures as specified, renders them and return the list from  argument augmented by texture Id
 
 ```
+function initializeTextures(shader_program,listOfTextSpecs::Vector{Main.ForDisplayStructs.TextureSpec})::Vector{Main.ForDisplayStructs.TextureSpec}
 
-# ##################
-#clear color buffer
+res = [listOfTextSpecs...]  
+for (index, textSpec ) in enumerate(listOfTextSpecs)
+
+glActiveTexture(GL_TEXTURE0 +index+1); # active proper texture unit before binding
+glUniform1i(glGetUniformLocation(shader_program, textSpec.samplName),index);# we first look for uniform sampler in shader - here 
+textUreId= createTexture(index,textSpec.widthh,textSpec.heightt,textSpec.GL_Rtype)#binding texture and populating with data
+
+res[index]= TextureSpec( textSpec.name, textSpec.widthh,textSpec.heightt
+,textSpec.GL_Rtype , textSpec.OpGlType,textSpec.samplName,textUreId
+
+)  
+end # for
+
+return res
+end #initializeAndDrawTextures
+
+
+
+
+function simpleTextureUpdate
+
+    # stopListening[]=true
 # glClearColor(0.0, 0.0, 0.1 , 1.0)
-# #true labels
-# glActiveTexture(GL_TEXTURE0 + 1); # active proper texture unit before binding
-# glUniform1i(glGetUniformLocation(shader_program, "msk0"), 1);# we first look for uniform sampler in shader - here 
-# trueLabels= createTexture(1,exampleLabels[210,:,:],widthh,heightt,GL_R8UI,GL_UNSIGNED_BYTE)#binding texture and populating with data
-# #main image
-# glActiveTexture(GL_TEXTURE0); # active proper texture unit before binding
-# glUniform1i(glGetUniformLocation(shader_program, "Texture0"), 0);# we first look for uniform sampler in shader - here 
-# mainTexture= createTexture(0,exampleDat[210,:,:],widthh,heightt,GL_R16I,GL_SHORT)#binding texture and populating with data
-# #render
+
+# #update labels
+# updateTexture(Int16,widthh,heightt,exampleLabels[200,:,:], trueLabels,stopListening,pboId, DATA_SIZE,GL_UNSIGNED_BYTE)
+# #update main image
+# updateTexture(Int16,widthh,heightt,exampleDat[200,:,:], mainTexture,stopListening,pboId, DATA_SIZE, GL_SHORT)
 # basicRender()
+# stopListening[]= false
 
-
-
-
+end
 
 
 

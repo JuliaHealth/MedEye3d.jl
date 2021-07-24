@@ -35,11 +35,33 @@ module SegmentationDisplay
 
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
-
+export coordinateDisplay
+using ModernGL
+using GLFW
 using Main.PrepareWindow
 using Main.TextureManag
+using Main.OpenGLDisplayUtils
+using Main.ForDisplayStructs
+
+
+
+```@doc
+coordinating displaying , 
+listOfTextSpecs - holds required data needed to initialize textures
+```
+function coordinateDisplay(listOfTextSpecs::Vector{TextureSpec})
 #We store here needed variables from window and shaders initializations
-window,vertex_shader,fragment_shader ,shader_program = Main.PrepareWindow.displayAll()
+
+window,vertex_shader,fragment_shader ,shader_program,stopListening = Main.PrepareWindow.displayAll()
+#clear color buffer
+glClearColor(0.0, 0.0, 0.1 , 1.0)
+initializeTextures(shader_program,listOfTextSpecs)
+Main.OpenGLDisplayUtils.basicRender(window)
+
+
+end #coordinateDisplay
+
+
 
 #pboId, DATA_SIZE = preparePixelBuffer(Int16,widthh,heightt,0)
 

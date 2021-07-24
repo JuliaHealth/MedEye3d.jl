@@ -4,6 +4,7 @@ using DrWatson
 
 module ForDisplayStructs
 export Mask
+export TextureSpec
 using ColorTypes
 using Parameters
 using Observables
@@ -18,6 +19,21 @@ this struct is parametarized by type of 3 dimensional array that will be used  t
   maskName::String #unique for class not unique for instance for example it can be name of the organ that will be segmented - need to be unique in instance but across instances needs to be named the same
   maskArrayObs::Observable{Array{arrayType}} # observable array used to store information that will be displayed over main image
   colorRGBA::RGBA #associated RGBA  that will be displayed based on the values in maskArrayObs
+end
+
+
+```@doc
+Holding the data needed to create and  later reference the textures
+```
+struct TextureSpec
+  name::String # human readable name by which we can reference texture
+  widthh::Int # width of texture
+  heightt::Int #height of the texture
+  GL_Rtype::UInt32 #GlRtype - for example GL_R8UI or GL_R16I
+  OpGlType ::UInt32 #open gl type - for example GL_UNSIGNED_BYTE or GL_SHORT
+  samplName::String #name of the specified sampler in fragment shader 
+  ID   #id of Texture
+
 end
 
 
