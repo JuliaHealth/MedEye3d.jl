@@ -1,11 +1,15 @@
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
+include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
+
 
 ```@doc
 stores functions needed to create bind and update OpenGl textues 
 ```
 module TextureManag
 using  ModernGL
+using DrWatson
+@quickactivate "Probabilistic medical segmentation"
 
 include(DrWatson.scriptsdir("display","GLFW","modernGL","OpenGLDisplayUtils.jl"))
 using  Main.OpenGLDisplayUtils
@@ -51,6 +55,33 @@ texture= Ref(GLuint(numb));
 
 return texture
 end
+
+
+```@doc
+initializing and drawing the textures on the screen
+
+```
+
+# ##################
+#clear color buffer
+# glClearColor(0.0, 0.0, 0.1 , 1.0)
+# #true labels
+# glActiveTexture(GL_TEXTURE0 + 1); # active proper texture unit before binding
+# glUniform1i(glGetUniformLocation(shader_program, "msk0"), 1);# we first look for uniform sampler in shader - here 
+# trueLabels= createTexture(1,exampleLabels[210,:,:],widthh,heightt,GL_R8UI,GL_UNSIGNED_BYTE)#binding texture and populating with data
+# #main image
+# glActiveTexture(GL_TEXTURE0); # active proper texture unit before binding
+# glUniform1i(glGetUniformLocation(shader_program, "Texture0"), 0);# we first look for uniform sampler in shader - here 
+# mainTexture= createTexture(0,exampleDat[210,:,:],widthh,heightt,GL_R16I,GL_SHORT)#binding texture and populating with data
+# #render
+# basicRender()
+
+
+
+
+
+
+
 
 
 ########## puts bytes of image into PBO as fas as I get it  copy an image data to texture buffer

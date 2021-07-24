@@ -2,10 +2,7 @@ using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
 include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
-using Main.PrepareWindowHelpers
-
 include(DrWatson.scriptsdir("display","GLFW","modernGL","OpenGLDisplayUtils.jl"))
-using  Main.OpenGLDisplayUtils
 include(DrWatson.scriptsdir("display","GLFW","startModules","ShadersAndVerticies.jl"))
 
 
@@ -17,16 +14,8 @@ using DrWatson
 export displayAll
 
 using ModernGL, GeometryTypes, GLFW
-
-include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
 using Main.PrepareWindowHelpers
-
-
 include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
-
-include(DrWatson.scriptsdir("display","GLFW","startModules","ShadersAndVerticies.jl"))
-
-include(DrWatson.scriptsdir("display","GLFW","modernGL","OpenGLDisplayUtils.jl"))
 using  Main.OpenGLDisplayUtils
 using Main.ShadersAndVerticies
 

@@ -1,17 +1,7 @@
-using Distributed: length
-
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
 using GLFW: Window
-using BenchmarkTools: minimum
-using StaticArrays
-
-dirToWorkerNumbs = DrWatson.scriptsdir("mainPipeline","processesDefinitions","workerNumbers.jl")
-include(dirToWorkerNumbs)
-using Main.workerNumbers
-using Distributed
-
 
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/structs/forDisplayStructs.jl")
 include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/loadData/manageH5File.jl")
@@ -21,18 +11,21 @@ using Main.h5manag
 
 
 #data source
-exampleDat = Int16.(Main.h5manag.getExample())
-exampleLabels = UInt8.(Main.h5manag.getExampleLabels())
-dims = size(exampleDat)
-widthh=dims[2]
-heightt=dims[3]
+# exampleDat = Int16.(Main.h5manag.getExample())
+# exampleLabels = UInt8.(Main.h5manag.getExampleLabels())
+# dims = size(exampleDat)
+# widthh=dims[2]
+# heightt=dims[3]
+
+
+
 
 
 using Revise 
 segmPath = DrWatson.scriptsdir("display","GLFW","SegmentationDisplay.jl")
 include(segmPath)
-includet(segmPath)
-using Main.SegmentationDisplayStr
+#includet(segmPath)
+using Main.SegmentationDisplay
 
 
 
