@@ -12,10 +12,9 @@ using  Main.ForDisplayStructs
 export initializeTextures
 
 
-, textSpec::TextureSpec
 
 updateTextureString = """
-uploading data to given texture; of given types associated
+uploading data to given texture; of given types associated - specified in TextureSpec
 """
 @doc updateTextureString
 function updateTexture(data, textSpec::TextureSpec)
@@ -62,13 +61,13 @@ it creates textrures as specified, renders them and return the list from  argume
 function initializeTextures(shader_program,listOfTextSpecs::Vector{Main.ForDisplayStructs.TextureSpec})::Vector{Main.ForDisplayStructs.TextureSpec}
 
 res = [listOfTextSpecs...]  
-for (index, textSpec ) in enumerate(listOfTextSpecs)
-
-glActiveTexture(GL_TEXTURE0 +index+1); # active proper texture unit before binding
+for (ind, textSpec ) in enumerate(listOfTextSpecs)
+    index=ind-1
+glActiveTexture(GL_TEXTURE0 +index); # active proper texture unit before binding
 glUniform1i(glGetUniformLocation(shader_program, textSpec.samplName),index);# we first look for uniform sampler in shader - here 
 textUreId= createTexture(index,textSpec.widthh,textSpec.heightt,textSpec.GL_Rtype)#binding texture and populating with data
 
-res[index]= TextureSpec( textSpec.name, textSpec.widthh,textSpec.heightt
+res[ind]= TextureSpec( textSpec.name, textSpec.widthh,textSpec.heightt
 ,textSpec.GL_Rtype , textSpec.OpGlType,textSpec.samplName,textUreId
 
 )  

@@ -5,6 +5,11 @@ module ReactingToInput
 using Rocket
 using GLFW
 
+ScrollCallbackSubscribableStr="""
+uploading data to given texture; of given types associated
+returns subscription in order to enable unsubscribing in the end 
+"""
+@doc ScrollCallbackSubscribableStr
 mutable struct ScrollCallbackSubscribable <: Subscribable{Int}
     xoff_previous :: Float64
     yoff_previous :: Float64

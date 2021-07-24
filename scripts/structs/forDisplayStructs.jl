@@ -5,10 +5,13 @@ using DrWatson
 module ForDisplayStructs
 export Mask
 export TextureSpec
+export forDisplayObjects
+
 using ColorTypes
 using Parameters
 using Observables
-
+using ModernGL
+using GLFW
 ```@doc
 data needed for definition of mask  - data that will be displayed over main image 
 this struct is parametarized by type of 3 dimensional array that will be used  to store data
@@ -35,6 +38,19 @@ struct TextureSpec
   ID   #id of Texture
 
 end
+
+```@doc
+Defined in order to hold constant objects needed to display images 
+```
+@with_kw struct forDisplayObjects    
+  listOfTextSpecifications::Vector{TextureSpec} = []
+  window = []
+  vertex_shader::UInt32 =1
+  fragment_shader::UInt32=1
+  shader_program::UInt32=1
+  stopListening::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0)
+end
+
 
 
 end #module
