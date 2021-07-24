@@ -36,7 +36,6 @@ stopListening = Threads.Atomic{Bool}(0)
 stopListening[]=false
 #textureId = displayAll(prepared[45],dims[2],dims[3] )
 window,vertex_shader,fragment_shader ,shader_program = displayAll(stopListening )
-
 pboId, DATA_SIZE = preparePixelBuffer(Int16,widthh,heightt,0)
 
 

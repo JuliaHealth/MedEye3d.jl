@@ -8,13 +8,15 @@ using ModernGL, GeometryTypes, GLFW
 
 dirToWorkerNumbs = DrWatson.scriptsdir("mainPipeline","processesDefinitions","workerNumbers.jl")
 include(dirToWorkerNumbs)
-using Main.workerNumbers
 
-include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/ModernGlUtil.jl")
-include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/basicFunctions.jl")
-include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/shaders.jl")
-include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/squarePoints.jl")
-include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/display/GLFW/modernGL/textureManag.jl")
+include(DrWatson.scriptsdir("display","GLFW","modernGL","ModernGlUtil.jl"))
+include(DrWatson.scriptsdir("display","GLFW","modernGL","basicFunctions.jl"))
+include(DrWatson.scriptsdir("display","GLFW","modernGL","shaders.jl"))
+include(DrWatson.scriptsdir("display","GLFW","modernGL","squarePoints.jl"))
+include(DrWatson.scriptsdir("display","GLFW","modernGL","textureManag.jl"))
+
+
+using Main.workerNumbers
 
 
 
@@ -38,14 +40,9 @@ function displayAll(stopListening)
 	shader_program = glCreateProgram()
 	glAttachShader(shader_program, vertex_shader)
 	glAttachShader(shader_program, fragment_shader)
-
 	glLinkProgram(shader_program)
 	glUseProgram(shader_program)
-
-
-
 	###########buffers
-
 	#create vertex buffer
 	createVertexBuffer()
 
@@ -100,7 +97,7 @@ end
 
 
 """
-uploading data to given texture; activating appropriate 
+uploading data to given texture; of given types associated
 """
 function updateTexture(juliaDataTyp::Type{juliaDataType},width,height,data, textureId,stopListening,pboId, DATA_SIZE,GlNumbType )where{juliaDataType}
 

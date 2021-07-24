@@ -32,10 +32,10 @@ const scrollback = ScrollCallbackSubscribable()
 
 stopListening[]=false
 
-
 GLFW.SetScrollCallback(window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
 
 # Than later in your application you can do smth like
 
-subscription = subscribe!(scrollback, (direction) -> updateTexture(Int16,widthh,heightt,exampleLabels[200,:,:], trueLabels,stopListening,pboId, DATA_SIZE,GL_UNSIGNED_BYTE)
+subscription = subscribe!(scrollback, (direction) -> 
+updateTexture(Int16,widthh,heightt,exampleLabels[200,:,:], trueLabels,stopListening,pboId, DATA_SIZE,GL_UNSIGNED_BYTE)
 )
