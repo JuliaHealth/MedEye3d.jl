@@ -43,7 +43,10 @@ using Main.TextureManag
 using Main.OpenGLDisplayUtils
 using Main.ForDisplayStructs
 
+#holds the list of texture specifications with ids
+modulelistOfTextSpecs::Vector{TextureSpec} =[]
 
+window,vertex_shader,fragment_shader ,shader_program,stopListening = Main.PrepareWindow.displayAll()
 
 ```@doc
 coordinating displaying , 
@@ -51,17 +54,31 @@ listOfTextSpecs - holds required data needed to initialize textures
 ```
 function coordinateDisplay(listOfTextSpecs::Vector{TextureSpec})
 #We store here needed variables from window and shaders initializations
+#stopListening - atomic boolean that marks to event listening loop to halt in order to free GLFW context
 
-window,vertex_shader,fragment_shader ,shader_program,stopListening = Main.PrepareWindow.displayAll()
 #clear color buffer
-glClearColor(0.0, 0.0, 0.1 , 1.0)
-initializeTextures(shader_program,listOfTextSpecs)
-Main.OpenGLDisplayUtils.basicRender(window)
 
-
+modulelistOfTextSpecs= initializeTextures(shader_program,listOfTextSpecs)
 end #coordinateDisplay
+```@doc
+coordinating updating all of the images, masks... 
+listOfTextSpecs - holds required data needed to initialize textures - 
+tuples where first entry is name of image that we given in configuration; 
+and second entry is data that we want to pass
 
+```
+function updateImagesDisplayed(listOfDataAndImageNames:: Vector{Tuple{String, Array}})
+    #clearing color buffer
+    glClearColor(0.0, 0.0, 0.1 , 1.0)
+    for updateDat in listOfDataAndImageNames
+        find( (texSpec)-> , modulelistOfTextSpecs)
+        updateTexture()
+    end #for 
+    #render onto the screen
+    Main.OpenGLDisplayUtils.basicRender(window)
+end
 
+[("", rand())]
 
 #pboId, DATA_SIZE = preparePixelBuffer(Int16,widthh,heightt,0)
 

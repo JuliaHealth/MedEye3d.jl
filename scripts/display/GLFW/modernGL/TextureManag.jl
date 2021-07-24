@@ -9,21 +9,18 @@ using  ModernGL
 using DrWatson
 using  Main.OpenGLDisplayUtils
 using  Main.ForDisplayStructs
-
 export initializeTextures
 
 
-
+, textSpec::TextureSpec
 
 updateTextureString = """
 uploading data to given texture; of given types associated
 """
 @doc updateTextureString
-function updateTexture(juliaDataTyp::Type{juliaDataType},width,height,data, textureId,stopListening,pboId, DATA_SIZE,GlNumbType )where{juliaDataType}
-
-	glBindTexture(GL_TEXTURE_2D, textureId[]); 
-	glTexSubImage2D(GL_TEXTURE_2D,0,0,0, width, height, GL_RED_INTEGER, GlNumbType, data);
-
+function updateTexture(data, textSpec::TextureSpec)
+	glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
+	glTexSubImage2D(GL_TEXTURE_2D,0,0,0, textSpec.widthh, textSpec.heightt, GL_RED_INTEGER, textSpec.OpGlType, data);
 end
 
 
@@ -79,26 +76,6 @@ end # for
 
 return res
 end #initializeAndDrawTextures
-
-
-
-
-function simpleTextureUpdate
-
-    # stopListening[]=true
-# glClearColor(0.0, 0.0, 0.1 , 1.0)
-
-# #update labels
-# updateTexture(Int16,widthh,heightt,exampleLabels[200,:,:], trueLabels,stopListening,pboId, DATA_SIZE,GL_UNSIGNED_BYTE)
-# #update main image
-# updateTexture(Int16,widthh,heightt,exampleDat[200,:,:], mainTexture,stopListening,pboId, DATA_SIZE, GL_SHORT)
-# basicRender()
-# stopListening[]= false
-
-end
-
-
-
 
 
 ########## puts bytes of image into PBO as fas as I get it  copy an image data to texture buffer
