@@ -2,27 +2,25 @@ using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
 
-ReactToScrollStr="""
-module that holds functions needed to  react to scrolling
-Generally first we need to pass the GLFW callback to the Rocket obeservable 
+ReactOnMouseClickAndDragSTR="""
+module 
 code adapted from https://discourse.julialang.org/t/custom-subject-in-rocket-jl-for-mouse-events-from-glfw/65133/3
 """
-#@doc ReactToScrollStr
-module ReactToScroll
+#@doc ReactOnMouseClickAndDragSTR
+module ReactOnMouseClickAndDrag
 using Rocket
 using GLFW
 using Main.ForDisplayStructs
 using Main.TextureManag
 using Logging
 
-export reactToScroll
-export registerMouseScrollFunctions
 
-ScrollCallbackSubscribableStr="""
+
+MouseCallbackSubscribableStr="""
 struct that enables reacting to  the input from scrolling
 """
-@doc ScrollCallbackSubscribableStr
-mutable struct ScrollCallbackSubscribable <: Subscribable{Bool}
+@doc MouseCallbackSubscribableStr
+mutable struct MouseCallbackSubscribable <: Subscribable{(CartesianIndex,Bool)}
     subject :: Subject{Bool}
     ScrollCallbackSubscribable() = new(Subject(Bool, scheduler = AsyncScheduler())) # if value is true it means we scroll up if false we scroll down
 end
@@ -72,42 +70,6 @@ end #registerMouseScrollFunctions
 
 
 
-reactToScrollStr = """
-in case of the scroll p true will be send in case of down - false
-in response to it it sets new screen int variable and changes displayed screen
-"""
-@doc reactToScrollStr
-function reactToScroll(isScrollUp::Bool, actor::SyncActor{Any, ActorWithOpenGlObjects})
-    @info "reactToScroll"  isScrollUp #just logging
-    actor.actor.mainForDisplayObjects.stopListening[]=true
-    current = actor.actor.currentDisplayedSlice
-    isScrollUp ? current+=1 : current-=1
-    @info "1"   #just logging
-
-   # we do not want to move outside of possible range of slices
-   lastSlice = actor.actor.mainForDisplayObjects.listOfTextSpecifications[1].slicesNumber
-   @info "2"   #just logging
-
-    if(current<1) current=1 end 
-    if(current>=lastSlice) current=lastSlice end 
-    @info "3"  current  #just logging
-
-    #logic to change displayed screen
-    #we select slice that we are intrested in
-    listOfDataAndImageNames= map(tupl->(tupl[1],tupl[2][current,:,:] ),actor.actor.onScrollData)
-
-    @info "4"   #just logging
-
-updateImagesDisplayed(listOfDataAndImageNames,actor.actor.mainForDisplayObjects )
-         #saving information about current slice for future reference
-         actor.actor.currentDisplayedSlice = current
-         actor.actor.mainForDisplayObjects.stopListening[]=false
-         @info "5"   #just logging
 
 
-end#reactToScroll
-
-
-
-
-end #ReactToScroll
+end #ReactOnMouseClickAndDrag

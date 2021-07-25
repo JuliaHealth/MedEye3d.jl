@@ -92,8 +92,13 @@ Main.ForDisplayStructs.TextureSpec("grandTruthLiverLabel",
 
     Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice )
 
+    current = 90
+    listOfDataAndImageNames= map(tupl->(tupl[1],tupl[2][current,:,:] ),Main.SegmentationDisplay.mainActor.actor.onScrollData)
 
 
+
+    x= sync( ActorWithOpenGlObjects())  SyncActor{Any, ActorWithOpenGlObjects}
+x.actor.currentDisplayedSlice =0 
 
 #############
 

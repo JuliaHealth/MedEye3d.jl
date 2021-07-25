@@ -53,7 +53,7 @@ using Main.ReactingToInput
 using Rocket
 
 #holds actor that is main structure that process inputs from GLFW and reacts to it
-mainActor = ActorWithOpenGlObjects()
+mainActor = sync(ActorWithOpenGlObjects())
 
 
 
