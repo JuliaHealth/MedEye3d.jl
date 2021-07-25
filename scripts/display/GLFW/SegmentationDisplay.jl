@@ -67,7 +67,7 @@ function coordinateDisplay(listOfTextSpecs::Vector{TextureSpec})
 window,vertex_shader,fragment_shader ,shader_program,stopListening = Main.PrepareWindow.displayAll()
 forDispObj =  forDisplayObjects(
     initializeTextures(shader_program,listOfTextSpecs)
-    ,window,vertex_shader,fragment_shader ,shader_program,stopListening
+    ,window,vertex_shader,fragment_shader ,shader_program,stopListening, Threads.Atomic{Bool}(0)
 )
 
 #wrapping the Open Gl and GLFW objects into an observable and passing it to the actor

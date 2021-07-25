@@ -111,18 +111,18 @@ function updateImagesDisplayed(listOfDataAndImageNames, forDisplayConstants)
     
     @info "updateImagesDisplayed"  #just logging
 
-    forDisplayConstants.stopListening[]=true
-    modulelistOfTextSpecs=forDisplayConstants.listOfTextSpecifications
-    #clearing color buffer
-    glClearColor(0.0, 0.0, 0.1 , 1.0)
-    for updateDat in listOfDataAndImageNames
-        findList= findall( (texSpec)-> texSpec.name == updateDat[1], modulelistOfTextSpecs)
-        texSpec = !isempty(findList) ? modulelistOfTextSpecs[findList[1]] : throw(DomainError(findList, "no such name specified in start configuration")) 
-        Main.TextureManag.updateTexture(updateDat[2],texSpec)
-    end #for 
-    #render onto the screen
-    Main.OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
-    forDisplayConstants.stopListening[]=false
+             modulelistOfTextSpecs=forDisplayConstants.listOfTextSpecifications
+            #clearing color buffer
+            glClearColor(0.0, 0.0, 0.1 , 1.0)
+            for updateDat in listOfDataAndImageNames
+                findList= findall( (texSpec)-> texSpec.name == updateDat[1], modulelistOfTextSpecs)
+                texSpec = !isempty(findList) ? modulelistOfTextSpecs[findList[1]] : throw(DomainError(findList, "no such name specified in start configuration")) 
+                Main.TextureManag.updateTexture(updateDat[2],texSpec)
+            end #for 
+            #render onto the screen
+            Main.OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
+            sleep(0.1)
+            forDisplayConstants.stopListening[]=false
 end
 
 

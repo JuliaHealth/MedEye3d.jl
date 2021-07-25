@@ -88,18 +88,10 @@ Main.ForDisplayStructs.TextureSpec("grandTruthLiverLabel",
 #############configuring
     Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate)
 
-
-    Main.SegmentationDisplay.mainActor
-
     Main.SegmentationDisplay.passDataForScrolling(listOfDataAndImageNames)
-
 
     Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice )
 
-
-    includet(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactingToInput.jl"))
-    using Main.ReactingToInput
-    Main.ReactingToInput.registerMouseScrollFunctions(forDisplayConstants.window)
 
 
 

@@ -16,7 +16,7 @@ using Main.TextureManag
 using Logging
 
 export reactToScroll
-
+export registerMouseScrollFunctions
 
 ScrollCallbackSubscribableStr="""
 struct that enables reacting to  the input from scrolling
@@ -24,7 +24,7 @@ struct that enables reacting to  the input from scrolling
 @doc ScrollCallbackSubscribableStr
 mutable struct ScrollCallbackSubscribable <: Subscribable{Bool}
     subject :: Subject{Bool}
-    ScrollCallbackSubscribable() = new(Subject(Bool)) # if value is true it means we scroll up if false we scroll down
+    ScrollCallbackSubscribable() = new(Subject(Bool, scheduler = AsyncScheduler())) # if value is true it means we scroll up if false we scroll down
 end
 
 
@@ -93,7 +93,7 @@ function reactToScroll(isScrollUp::Bool, actor::ActorWithOpenGlObjects)
     #we select slice that we are intrested in
     listOfDataAndImageNames= map(tupl->(tupl[1],tupl[2][current,:,:] ),actor.onScrollData)
 
-    
+
 updateImagesDisplayed(listOfDataAndImageNames,actor.mainForDisplayObjects )
          #saving information about current slice for future reference
     actor.currentDisplayedSlice = current
