@@ -1,18 +1,25 @@
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
 
-using GLFW: Window
 
-include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/structs/forDisplayStructs.jl")
-include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/loadData/manageH5File.jl")
-using Main.h5manag
+     using DrWatson
+     @quickactivate "Probabilistic medical segmentation"
 
-include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
-include(DrWatson.scriptsdir("display","GLFW","modernGL","OpenGLDisplayUtils.jl"))
-include(DrWatson.scriptsdir("display","GLFW","startModules","ShadersAndVerticies.jl"))
-include(DrWatson.scriptsdir("display","GLFW","modernGL","TextureManag.jl") )
-pathPrepareWindow = DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindow.jl")
-include(pathPrepareWindow)
+     using GLFW
+
+     include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/structs/forDisplayStructs.jl")
+     include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/loadData/manageH5File.jl")
+     using Main.h5manag
+
+     include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
+     include(DrWatson.scriptsdir("display","GLFW","modernGL","OpenGLDisplayUtils.jl"))
+     include(DrWatson.scriptsdir("display","GLFW","startModules","ShadersAndVerticies.jl"))
+     include(DrWatson.scriptsdir("display","GLFW","modernGL","TextureManag.jl") )
+     include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindow.jl"))
+
+
+     include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactToScroll.jl") )
+     include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactingToInput.jl") )
+
+
 
 
 #data source
@@ -52,14 +59,42 @@ Main.ForDisplayStructs.TextureSpec("grandTruthLiverLabel",
                 ,0) 
                      
     ]
+   
+   
+   
+    include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactingToInput.jl"))
+    using Main.ReactingToInput
 
+    segmPath = DrWatson.scriptsdir("display","GLFW","SegmentationDisplay.jl")
+    include(segmPath)
     
-    forDisplayConstants = Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate)
 
-    slice = 215
-    listOfDataAndImageNames = [("grandTruthLiverLabel",exampleLabels[slice,:,:]),("mainCTImage",exampleDat[slice,:,:] )]
-    Main.SegmentationDisplay.updateImagesDisplayed(listOfDataAndImageNames
-         ,forDisplayConstants )
+    using Main.ForDisplayStructs
+    using Main.ReactToScroll
+    using Main.SegmentationDisplay
+    using Rocket
+    
+    
+
+
+ slice = 215
+  listOfDataAndImageNamesSlice = [("grandTruthLiverLabel",exampleLabels[slice,:,:]),("mainCTImage",exampleDat[slice,:,:] )]
+
+
+    listOfDataAndImageNames = [("grandTruthLiverLabel",exampleLabels),("mainCTImage",exampleDat)]
+  
+    
+    
+#############configuring
+    Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate)
+
+
+    Main.SegmentationDisplay.mainActor
+
+    Main.SegmentationDisplay.passDataForScrolling(listOfDataAndImageNames)
+
+
+    Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice )
 
 
     includet(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactingToInput.jl"))
@@ -86,6 +121,33 @@ Main.ForDisplayStructs.TextureSpec("grandTruthLiverLabel",
 
 
 
+segmPath = DrWatson.scriptsdir("display","GLFW","SegmentationDisplay.jl")
+include(segmPath)
+
+using Main.ForDisplayStructs
+using Main.ReactToScroll
+using Main.SegmentationDisplay
+using Rocket
+
+
+
+
+
+const scrollback = Main.ReactToScroll.ScrollCallbackSubscribable()
+
+forDisplayConstants = Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate)
+
+Main.ReactToScroll.registerMouseScrollFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)
+
+GLFW.SetScrollCallback(forDisplayConstants.window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
+
+# Than later in your application you can do smth like
+
+subscription = subscribe!(scrollback, (direction) -> println(direction))
+
+
+
+
 
 
 
@@ -107,3 +169,4 @@ keep_actor.mainForDisplayObjects
 # Completed!
 
 println(keep_actor.currentDisplayedSlice)
+

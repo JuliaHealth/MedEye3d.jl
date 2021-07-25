@@ -9,8 +9,10 @@ using  ModernGL
 using DrWatson
 using  Main.OpenGLDisplayUtils
 using  Main.ForDisplayStructs
-export initializeTextures
+using  Logging
 
+export initializeTextures
+export updateImagesDisplayed
 
 
 updateTextureString = """
@@ -97,6 +99,31 @@ end
 
 
 
+updateImagesDisplayedStr =    """
+coordinating updating all of the images, masks... 
+listOfTextSpecs - holds required data needed to initialize textures - 
+tuples where first entry is name of image that we given in configuration; 
+and second entry is data that we want to pass
+forDisplayObjects - stores all needed constants that holds reference to GLFW and OpenGL
+"""
+@doc updateImagesDisplayedStr
+function updateImagesDisplayed(listOfDataAndImageNames, forDisplayConstants)
+    
+    @info "updateImagesDisplayed"  #just logging
+
+    forDisplayConstants.stopListening[]=true
+    modulelistOfTextSpecs=forDisplayConstants.listOfTextSpecifications
+    #clearing color buffer
+    glClearColor(0.0, 0.0, 0.1 , 1.0)
+    for updateDat in listOfDataAndImageNames
+        findList= findall( (texSpec)-> texSpec.name == updateDat[1], modulelistOfTextSpecs)
+        texSpec = !isempty(findList) ? modulelistOfTextSpecs[findList[1]] : throw(DomainError(findList, "no such name specified in start configuration")) 
+        Main.TextureManag.updateTexture(updateDat[2],texSpec)
+    end #for 
+    #render onto the screen
+    Main.OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
+    forDisplayConstants.stopListening[]=false
+end
 
 
 

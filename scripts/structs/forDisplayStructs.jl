@@ -6,12 +6,15 @@ module ForDisplayStructs
 export Mask
 export TextureSpec
 export forDisplayObjects
+export ActorWithOpenGlObjects
 
 using ColorTypes
 using Parameters
 using Observables
 using ModernGL
 using GLFW
+using Rocket
+
 ```@doc
 data needed for definition of mask  - data that will be displayed over main image 
 this struct is parametarized by type of 3 dimensional array that will be used  to store data
@@ -50,6 +53,20 @@ Defined in order to hold constant objects needed to display images
   fragment_shader::UInt32=1
   shader_program::UInt32=1
   stopListening::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0)
+  stopExecution::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0)#it will halt ability to display image for futher display in order to keep OpenGL from blocking - important in case of the scrolling
+end
+
+
+
+
+```@doc
+Actor that is able to store a state to keep needed data for proper display
+```
+mutable struct ActorWithOpenGlObjects <: NextActor{Any}
+    currentDisplayedSlice::Int # stores information what slice number we are currently displaying
+    mainForDisplayObjects::Main.ForDisplayStructs.forDisplayObjects # stores objects needed to  display using OpenGL and GLFW
+    onScrollData::Vector{Tuple{String, Array{T, 3} where T}}
+    ActorWithOpenGlObjects() = new(1,forDisplayObjects(),[])
 end
 
 
