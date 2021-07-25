@@ -67,7 +67,7 @@ glActiveTexture(GL_TEXTURE0 +index); # active proper texture unit before binding
 glUniform1i(glGetUniformLocation(shader_program, textSpec.samplName),index);# we first look for uniform sampler in shader - here 
 textUreId= createTexture(index,textSpec.widthh,textSpec.heightt,textSpec.GL_Rtype)#binding texture and populating with data
 
-res[ind]= TextureSpec( textSpec.name, textSpec.widthh,textSpec.heightt
+res[ind]= TextureSpec( textSpec.name, textSpec.widthh,textSpec.heightt, textSpec.slicesNumber
 ,textSpec.GL_Rtype , textSpec.OpGlType,textSpec.samplName,textUreId
 
 )  
@@ -80,13 +80,14 @@ end #initializeAndDrawTextures
 ########## puts bytes of image into PBO as fas as I get it  copy an image data to texture buffer
 
 
-"""
+preparePixelBufferStr="""
 width -width of the image in  number of pixels 
 height - height of the image in  number of pixels 
 pboNumber - just states which PBO it is
 return reference to the pixel buffer object that we use to upload this texture and data size calculated for this texture
 
 """
+@doc preparePixelBufferStr
 function preparePixelBuffer(juliaDataTyp::Type{juliaDataType},width,height,pboNumber)where{juliaDataType}
     DATA_SIZE = 8 * sizeof(juliaDataTyp) *width * height  # number of bytes our image will have so in 2D it will be width times height times number of bytes needed for used datatype we need to multiply by 8 becouse sizeof() return bytes instead of bits
     pbo = Ref(GLuint(pboNumber))  

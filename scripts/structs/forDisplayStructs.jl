@@ -32,6 +32,7 @@ struct TextureSpec
   name::String # human readable name by which we can reference texture
   widthh::Int # width of texture
   heightt::Int #height of the texture
+  slicesNumber::Int #number of slices available
   GL_Rtype::UInt32 #GlRtype - for example GL_R8UI or GL_R16I
   OpGlType ::UInt32 #open gl type - for example GL_UNSIGNED_BYTE or GL_SHORT
   samplName::String #name of the specified sampler in fragment shader 

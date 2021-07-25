@@ -21,9 +21,7 @@ exampleLabels = UInt8.(Main.h5manag.getExampleLabels())
 dims = size(exampleDat)
 widthh=dims[2]
 heightt=dims[3]
-
-
-
+slicesNumb= dims[1]
 
 using Revise 
 segmPath = DrWatson.scriptsdir("display","GLFW","SegmentationDisplay.jl")
@@ -39,6 +37,7 @@ listOfTexturesToCreate = [
 Main.ForDisplayStructs.TextureSpec("grandTruthLiverLabel",
                  widthh,
                 heightt,
+                slicesNumb,
                 GL_R8UI,
                 GL_UNSIGNED_BYTE,
                 "msk0" 
@@ -46,6 +45,7 @@ Main.ForDisplayStructs.TextureSpec("grandTruthLiverLabel",
                 Main.ForDisplayStructs.TextureSpec("mainCTImage",
                 widthh,
                 heightt,
+                slicesNumb,
                 GL_R16I,
                 GL_SHORT,
                 "Texture0" 
@@ -62,33 +62,48 @@ Main.ForDisplayStructs.TextureSpec("grandTruthLiverLabel",
          ,forDisplayConstants )
 
 
+    includet(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactingToInput.jl"))
+    using Main.ReactingToInput
+    Main.ReactingToInput.registerMouseScrollFunctions(forDisplayConstants.window)
 
 
 
-# ##################
-# #clear color buffer
-# glClearColor(0.0, 0.0, 0.1 , 1.0)
-# #true labels
-# glActiveTexture(GL_TEXTURE0 + 1); # active proper texture unit before binding
-# glUniform1i(glGetUniformLocation(shader_program, "msk0"), 1);# we first look for uniform sampler in shader - here 
-# trueLabels= createTexture(1,exampleLabels[210,:,:],widthh,heightt,GL_R8UI,GL_UNSIGNED_BYTE)#binding texture and populating with data
-# #main image
-# glActiveTexture(GL_TEXTURE0); # active proper texture unit before binding
-# glUniform1i(glGetUniformLocation(shader_program, "Texture0"), 0);# we first look for uniform sampler in shader - here 
-# mainTexture= createTexture(0,exampleDat[210,:,:],widthh,heightt,GL_R16I,GL_SHORT)#binding texture and populating with data
-# #render
-# basicRender()
+#############
 
 
-# #############
-# #order of texture uploads  is important and texture 0 should be last binded as far as I get it 
-# stopListening[]=true
-# glClearColor(0.0, 0.0, 0.1 , 1.0)
-# #update labels
-# updateTexture(Int16,widthh,heightt,exampleLabels[200,:,:], trueLabels,stopListening,pboId, DATA_SIZE,GL_UNSIGNED_BYTE)
-# #update main image
-# updateTexture(Int16,widthh,heightt,exampleDat[200,:,:], mainTexture,stopListening,pboId, DATA_SIZE, GL_SHORT)
-# basicRender()
-# stopListening[]= false
 
 
+# struct StoreActor{D} <: Rocket.Actor{D}
+#     values :: Vector{D}
+
+#     StoreActor{D}() where D = new(Vector{D}())
+# end
+
+
+# Rocket.on_next!(::StoreActor, data::Int)     = println("Int: $data")
+# Rocket.on_next!(::StoreActor, data::Float64) = println("Float64: $data")
+# Rocket.on_next!(::StoreActor, data)          = println("Something else: $data")
+
+
+
+
+
+
+
+#wrapping the Open Gl and GLFW objects into an observable
+forDisplayConstantObesrvable = of(Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate))
+
+keep_actor = ActorWithOpenGlObjects()
+subscribe!(forDisplayConstantObesrvable, keep_actor) # configuring
+
+
+
+source = from([false,false,false,false,false,false])
+subscribe!(source, keep_actor) # imitasting scroll
+
+keep_actor.mainForDisplayObjects
+
+# Logs
+# Completed!
+
+println(keep_actor.currentDisplayedSlice)
