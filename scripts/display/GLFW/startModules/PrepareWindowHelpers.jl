@@ -109,10 +109,10 @@ what will be pressed or clicked it will lead to diffrent actions
 """
 @doc controllWindowInputDoc
 function controllWindowInput(window)
-	GLFW.SetWindowCloseCallback(window, (_) -> GLFW.DestroyWindow(window))
-	GLFW.SetMouseButtonCallback(window, (_, button, action, mods) -> println("$button $action"))
+	# GLFW.SetMouseButtonCallback(window, (_, button, action, mods) -> println("$button $action   $(typeof(button))  $(typeof(action)) "))
+    # GLFW.SetCursorPosCallback(window, (_, x, y) -> println("cursor: $x, $y    $(typeof(x))  $(typeof(y))   "))   
 
-# Input callbacks
+    # Input callbacks
 GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
 	name = GLFW.GetKeyName(key, scancode)
 	if name == nothing
@@ -127,17 +127,16 @@ end #controllWindowInputDoc
 modified from ModernGL.jl github page  and GLFW page 
 stores primary 
     ```
-function initializeWindow()
+function initializeWindow(windowWidth::Int,windowHeight::Int)
 	GLFW.Init()
-	# OS X-specific GLFW hints to initialize the correct version of OpenGL
-	wh = 600
+
 	# Create a windowed mode window and its OpenGL context
-	window = GLFW.CreateWindow(wh, wh, "OpenGL Example")
+	window = GLFW.CreateWindow(windowWidth, windowHeight, "Segmentation Visualization")
 	# Make the window's context current
 	GLFW.MakeContextCurrent(window)
 	GLFW.ShowWindow(window)
-	GLFW.SetWindowSize(window, wh, wh) # Seems to be necessary to guarantee that window > 0
-	glViewport(0, 0, wh, wh)
+	GLFW.SetWindowSize(window, windowWidth, windowHeight) # Seems to be necessary to guarantee that window > 0
+	glViewport(0, 0, windowWidth, windowHeight)
 	glDisable(GL_LIGHTING);
 	glEnable(GL_TEXTURE_2D);
 	println(createcontextinfo())

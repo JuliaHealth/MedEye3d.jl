@@ -17,11 +17,27 @@ export updateImagesDisplayed
 
 updateTextureString = """
 uploading data to given texture; of given types associated - specified in TextureSpec
+if we want to update only part of the texture we need to specify  what 
+Just for reference openGL function definition
+    void glTextureSubImage2D(	
+        GLuint texture,
+         GLint level,
+         GLint xoffset,
+         GLint yoffset,
+         GLsizei width,
+         GLsizei height,
+         GLenum format,
+         GLenum type,
+         const void *pixels);  
 """
 @doc updateTextureString
-function updateTexture(data, textSpec::TextureSpec)
+function updateTexture(data, textSpec::TextureSpec,xoffset=0,
+    yoffset=0,widthh=textSpec.widthh,heightt =textSpec.heightt  )
+
 	glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
-	glTexSubImage2D(GL_TEXTURE_2D,0,0,0, textSpec.widthh, textSpec.heightt, GL_RED_INTEGER, textSpec.OpGlType, data);
+	glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, 
+    heightt, GL_RED_INTEGER, textSpec.OpGlType, data)
+
 end
 
 
@@ -79,6 +95,12 @@ return res
 end #initializeAndDrawTextures
 
 
+
+
+
+
+
+
 ########## puts bytes of image into PBO as fas as I get it  copy an image data to texture buffer
 
 
@@ -109,8 +131,6 @@ forDisplayObjects - stores all needed constants that holds reference to GLFW and
 @doc updateImagesDisplayedStr
 function updateImagesDisplayed(listOfDataAndImageNames, forDisplayConstants)
     
-    @info "updateImagesDisplayed"  #just logging
-
              modulelistOfTextSpecs=forDisplayConstants.listOfTextSpecifications
             #clearing color buffer
             glClearColor(0.0, 0.0, 0.1 , 1.0)

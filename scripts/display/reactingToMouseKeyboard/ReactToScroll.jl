@@ -32,7 +32,7 @@ end
 ```@doc
 configuting Rocket on Subscribe so we get custom handler of input as we see we still need to define actor
 ```
-function Rocket.on_subscribe!(handler::ScrollCallbackSubscribable, actor)
+function Rocket.on_subscribe!(handler::ScrollCallbackSubscribable, actor::SyncActor{Any, ActorWithOpenGlObjects})
     return subscribe!(handler.subject, actor)
 end
 
@@ -57,7 +57,7 @@ stopListening - atomic boolean able to stop the event listening cycle
 return scrollback - that holds boolean subject (observable) to which we can react by subscribing appropriate actor
 """
 @doc registerMouseScrollFunctionsStr
-function registerMouseScrollFunctions(window,stopListening)
+function registerMouseScrollFunctions(window::GLFW.Window,stopListening::Base.Threads.Atomic{Bool})
 
 scrollback = ScrollCallbackSubscribable()
 stopListening[]=true # stoping event listening loop to free the GLFW context
@@ -82,27 +82,22 @@ function reactToScroll(isScrollUp::Bool, actor::SyncActor{Any, ActorWithOpenGlOb
     actor.actor.mainForDisplayObjects.stopListening[]=true
     current = actor.actor.currentDisplayedSlice
     isScrollUp ? current+=1 : current-=1
-    @info "1"   #just logging
 
    # we do not want to move outside of possible range of slices
    lastSlice = actor.actor.mainForDisplayObjects.listOfTextSpecifications[1].slicesNumber
-   @info "2"   #just logging
 
     if(current<1) current=1 end 
     if(current>=lastSlice) current=lastSlice end 
-    @info "3"  current  #just logging
 
     #logic to change displayed screen
     #we select slice that we are intrested in
     listOfDataAndImageNames= map(tupl->(tupl[1],tupl[2][current,:,:] ),actor.actor.onScrollData)
 
-    @info "4"   #just logging
 
 updateImagesDisplayed(listOfDataAndImageNames,actor.actor.mainForDisplayObjects )
          #saving information about current slice for future reference
          actor.actor.currentDisplayedSlice = current
          actor.actor.mainForDisplayObjects.stopListening[]=false
-         @info "5"   #just logging
 
 
 end#reactToScroll

@@ -33,6 +33,7 @@ void main()
 {
     gl_Position = vec4(aPos, 1.0);
     ourColor = aColor;
+  // TexCoord0 = vec2(aTexCoord.y, aTexCoord.x);
    TexCoord0 = aTexCoord;
 
 }

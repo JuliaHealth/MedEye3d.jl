@@ -23,7 +23,7 @@ displayAllStr="""
 preparing all for displaying the images and responding to mouse and keyboard input
 """
 @doc displayAllStr
-function displayAll()
+function displayAll(windowWidth::Int,windowHeight::Int)
 	# atomic variable that is enabling stopping async loop of event listening in order to enable othe actions with GLFW context
 	stopListening = Threads.Atomic{Bool}(0)
 	stopListening[]=false
@@ -31,9 +31,8 @@ function displayAll()
 	if(Threads.nthreads()==1) 
 		println("increase number of available threads look into https://docs.julialang.org/en/v1/manual/multi-threading/  or modify for example in vs code extension")
     end
-    
     # Create the window. This sets all the hints and makes the context current.
-	window = initializeWindow()
+	window = initializeWindow(windowWidth,windowHeight)
     
    	# The shaders 
 	println(createcontextinfo())
@@ -51,20 +50,13 @@ function displayAll()
 	###########buffers
 	#create vertex buffer
 	createVertexBuffer()
-
 	# Create the Vertex Buffer Objects (VBO)
-
 	vbo = createDAtaBuffer(Main.ShadersAndVerticies.vertices)
-
 	# Create the Element Buffer Object (EBO)
 	ebo = createElementBuffer(Main.ShadersAndVerticies.elements)
-
-
 	############ how data should be read from data buffer
-
 	encodeDataFromDataBuffer()
-
-#capturing The data from GLFW
+	#capturing The data from GLFW
 	controllWindowInput(window)
 
 #loop that enables reacting to mouse and keyboards inputs  so every 0.1 seconds it will check GLFW weather any new events happened	
@@ -80,7 +72,7 @@ function displayAll()
 	schedule(t)
 
 
-return (window,vertex_shader,fragment_shader ,shader_program,stopListening)
+return (window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo)
 
 end# displayAll
 

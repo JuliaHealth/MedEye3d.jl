@@ -54,26 +54,50 @@ using Rocket
 
 #holds actor that is main structure that process inputs from GLFW and reacts to it
 mainActor = sync(ActorWithOpenGlObjects())
-
+#collecting all subsciptions  to be able to clean all later
+subscriptions = []
 
 
 coordinateDisplayStr = """
 coordinating displaying - sets needed constants that are storeds in  forDisplayConstants; and configures interactions from GLFW events
 listOfTextSpecs - holds required data needed to initialize textures
+windowWidth::Int,windowHeight::Int - GLFW window dimensions
 """
 @doc coordinateDisplayStr
-function coordinateDisplay(listOfTextSpecs::Vector{TextureSpec})
+function coordinateDisplay(listOfTextSpecs::Vector{TextureSpec}
+                        ,windowWidth::Int32=Int32(800)
+                        ,windowHeight::Int32=Int32(800)
+                        ,imageTextureWidth::Int32
+                        ,imageTextureHeight::Int32 )
 
-window,vertex_shader,fragment_shader ,shader_program,stopListening = Main.PrepareWindow.displayAll()
+window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo = Main.PrepareWindow.displayAll(windowWidth,windowHeight)
+
+#initializing object that holds data reqired for interacting with opengl 
 forDispObj =  forDisplayObjects(
-    initializeTextures(shader_program,listOfTextSpecs)
-    ,window,vertex_shader,fragment_shader ,shader_program,stopListening, Threads.Atomic{Bool}(0)
+    initializeTextures(
+        shader_program,
+        listOfTextSpecs)
+        ,window
+        ,vertex_shader,fragment_shader
+        ,shader_program
+        ,stopListening,
+        Threads.Atomic{Bool}(0)
+        ,vbo[]
+        ,ebo[]
+        ,imageTextureWidth
+        ,imageTextureHeight
+        ,windowWidth
+        ,windowHeight
+        ,0 # number of slices will be set when data for scrolling will come
 )
+#using data from 
+
+#in order to clean up all resources while closing
+GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())
 
 #wrapping the Open Gl and GLFW objects into an observable and passing it to the actor
 forDisplayConstantObesrvable = of(forDispObj)
 subscribe!(forDisplayConstantObesrvable, mainActor) # configuring
-
 registerInteractions()#passing needed subscriptions from GLFW
 
 end #coordinateDisplay
@@ -93,12 +117,13 @@ end
 
 updateSingleImagesDisplayedStr =    """
 enables updating just a single slice that is displayed - do not change what will happen after scrolling
-one need to pass data to actor in vector of tuples whee first entry in tuple is name of texture given in the setup and second is 2 dimensional aray of appropriate type with image data
-
+one need to pass data to actor in 
+listOfDataAndImageNames - vector of tuples whee first entry in tuple is name of texture given in the setup and second is 2 dimensional aray of appropriate type with image data
+sliceNumber - the number to which we set slice in order to later start scrolling the scroll data from this point
 """
 @doc updateSingleImagesDisplayedStr
-function updateSingleImagesDisplayed(listOfDataAndImageNames::Vector{Tuple{String, Array{T, 2} where T}})
-    forDispData = of(listOfDataAndImageNames)
+function updateSingleImagesDisplayed( listOfDataAndImageNames::Vector{Tuple{String, Array{T, 2} where T}}, sliceNumber::Int64=1)
+    forDispData = of((listOfDataAndImageNames,sliceNumber))
     subscribe!(forDispData, mainActor) 
 
 end #updateSingleImagesDisplayed
@@ -111,8 +136,42 @@ by invoking appropriate registering functions and passing to it to the main Acto
 """
 @doc registerInteractionsStr
 function registerInteractions()
-    subscribeGLFWtoActor(mainActor)
+    subscriptionsInner = subscribeGLFWtoActor(mainActor)
+    for el in subscriptionsInner
+        push!(subscriptions,el)
+    end #for
 end
+
+cleanUpStr =    """
+In order to properly close displayer we need to :
+ remove buffers that wer use 
+ remove shaders 
+ remove all textures
+ unsubscibe all of the subscriptions to the mainActor
+ finalize main actor and reinstantiate it
+ close GLFW window
+"""
+@doc cleanUpStr
+function cleanUp()
+    glClearColor(0.0, 0.0, 0.1 , 1.0) # dor a good begining
+    #first we unsubscribe and give couple seconds for processes to stop
+    for sub in subscriptions
+        unsubscribe!(sub)
+    end # for
+    sleep(5)
+    obj = mainActor.actor.mainForDisplayObjects
+    #deleting textures
+    glDeleteTextures(length(obj.listOfTextSpecifications), map(text->text.ID,obj.listOfTextSpecifications));
+    #destroying buffers
+    glDeleteBuffers(2,[obj.vbo,obj.ebo])
+    #detaching shaders
+    glDeleteShader(obj.fragment_shader);
+    glDeleteShader(obj.vertex_shader);
+    #destroying program
+    glDeleteProgram(obj.shader_program)
+    #finalizing and recreating main actor
+    GLFW.DestroyWindow(obj.window)
+end #cleanUp    
 
 
 #pboId, DATA_SIZE = preparePixelBuffer(Int16,widthh,heightt,0)

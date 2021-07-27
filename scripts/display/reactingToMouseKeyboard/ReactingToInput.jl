@@ -35,13 +35,16 @@ end#setUpMainDisplay
 
 updateSingleImagesDisplayedSetUpStr =    """
 enables updating just a single slice that is displayed - do not change what will happen after scrolling
-one need to pass data to actor in vector of tuples whee first entry in tuple is name of texture given in the setup and second is 2 dimensional aray of appropriate type with image data
-
+one need to pass data to actor in 
+tuple where first entry is
+-vector of tuples whee first entry in tuple is name of texture given in the setup and second is 2 dimensional aray of appropriate type with image data
+- Int - second is Int64 - that is marking the screen number to which we wan to set the actor state
 """
 @doc updateSingleImagesDisplayedSetUpStr
-function updateSingleImagesDisplayedSetUp(listOfDataAndImageNames::Vector{Tuple{String, Array{T, 2} where T}} ,actor::SyncActor{Any, ActorWithOpenGlObjects})
+function updateSingleImagesDisplayedSetUp(listOfDataAndImageNamesTuple::Tuple{Vector{Tuple{String, Array{T, 2} where T}},Int64} ,actor::SyncActor{Any, ActorWithOpenGlObjects})
 
-updateImagesDisplayed(listOfDataAndImageNames, actor.actor.mainForDisplayObjects)
+updateImagesDisplayed(listOfDataAndImageNamesTuple[1], actor.actor.mainForDisplayObjects)
+actor.actor.currentDisplayedSlice = listOfDataAndImageNamesTuple[2]
 
 end #updateSingleImagesDisplayed
 
@@ -55,7 +58,8 @@ encapsulated by a function becouse this is configuration of Rocket and needs to 
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Bool) = reactToScroll(data,actor )
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Main.ForDisplayStructs.forDisplayObjects) = setUpMainDisplay(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Vector{Tuple{String, Array{T, 3} where T}}) = setUpForScrollData(data,actor)
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Vector{Tuple{String, Array{T, 2} where T}}) = updateSingleImagesDisplayedSetUp(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Tuple{Vector{Tuple{String, Array{T, 2} where T}},Int64} ) = updateSingleImagesDisplayedSetUp(data,actor)
+#Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::CartesianIndex{2}) = 
 
 Rocket.on_error!(actor::SyncActor{Any, ActorWithOpenGlObjects}, err)      = error(err)
 Rocket.on_complete!(actor::SyncActor{Any, ActorWithOpenGlObjects})        = println("Completed!")

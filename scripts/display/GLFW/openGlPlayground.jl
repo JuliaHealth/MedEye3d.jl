@@ -18,7 +18,7 @@
 
      include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactToScroll.jl") )
      include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactingToInput.jl") )
-
+     include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactOnMouseClickAndDrag.jl") )
 
 
 
@@ -77,7 +77,7 @@ Main.ForDisplayStructs.TextureSpec("grandTruthLiverLabel",
     
 
 
- slice = 215
+ slice = 200
   listOfDataAndImageNamesSlice = [("grandTruthLiverLabel",exampleLabels[slice,:,:]),("mainCTImage",exampleDat[slice,:,:] )]
 
 
@@ -86,22 +86,68 @@ Main.ForDisplayStructs.TextureSpec("grandTruthLiverLabel",
     
     
 #############configuring
-    Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate)
+    Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,1000,800)
 
     Main.SegmentationDisplay.passDataForScrolling(listOfDataAndImageNames)
 
-    Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice )
-
-    current = 90
-    listOfDataAndImageNames= map(tupl->(tupl[1],tupl[2][current,:,:] ),Main.SegmentationDisplay.mainActor.actor.onScrollData)
+    Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice,200 )
 
 
+    window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
+    stopListening = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.stopListening
+    
+    textSpec = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1]
+    textSpecB = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[2]
+
+    
+    imagedims=dims
+    imageWidth = dims[2]
+    imageHeight = dims[3]
+
+    windowDims =     GLFW.GetWindowSize(window)
+    windowWidth = windowDims[1]
+    windowHeight = windowDims[2]
+    
+    quadmaxX = Int32(floor(windowWidth*0.8))
+    quadMaxY = windowHeight # but we need to remember that maximum values are in bottom right corner and beginning is upper left corner
+  
+
+    using Main.OpenGLDisplayUtils
+
+    #working
+    currX = 443
+    currY = 586
+    updateTexture(rand(10,10), textSpecB,
+    Int64(floor( ((currX)/(windowWidth*0.9))*imageWidth)  )
+    ,
+    Int64(floor(  ((windowHeight-currY)/windowHeight)*imageHeight)  )
+    ,5,5 )
+    basicRender(window)
+
+
+
+
+    360*2
+
+720/800
+
+    800 = 512
+
+    (10/800)*
+
+
+
+
+
+
+    Main.SegmentationDisplay.cleanUp()
 
     x= sync( ActorWithOpenGlObjects())  SyncActor{Any, ActorWithOpenGlObjects}
 x.actor.currentDisplayedSlice =0 
 
-#############
 
+
+#############
 
 
 

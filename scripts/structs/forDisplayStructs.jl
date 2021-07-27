@@ -31,14 +31,14 @@ end
 ```@doc
 Holding the data needed to create and  later reference the textures
 ```
-struct TextureSpec
+@with_kw struct TextureSpec
   name::String # human readable name by which we can reference texture
-  widthh::Int # width of texture
-  heightt::Int #height of the texture
-  slicesNumber::Int #number of slices available
+  widthh::Int =0  # width of texture
+  heightt::Int =0 #height of the texture
+  slicesNumber::Int = 0 #number of slices available
   GL_Rtype::UInt32 #GlRtype - for example GL_R8UI or GL_R16I
   OpGlType ::UInt32 #open gl type - for example GL_UNSIGNED_BYTE or GL_SHORT
-  samplName::String #name of the specified sampler in fragment shader 
+  samplName::String #name of the specified sampler in fragment shader  - critical is that in case of using floats we use sampler in case of integers isampler and in case of unsigned integers usampler 
   ID   #id of Texture
 
 end
@@ -53,7 +53,17 @@ Defined in order to hold constant objects needed to display images
   fragment_shader::UInt32=1
   shader_program::UInt32=1
   stopListening::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0)
-  stopExecution::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0)#it will halt ability to display image for futher display in order to keep OpenGL from blocking - important in case of the scrolling
+  stopExecution::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0)#it will halt ability to display image for futher display in order to keep OpenGL from blocking - optional to set
+  vbo::UInt32 =1 #vertex buffer object id
+  ebo::UInt32 =1 #element buffer object id
+  #imageDims 
+  imageTextureWidth::Int32
+  imageTextureHeight::Int32
+  #windowDims
+  windowWidth::Int32
+  windowHeight::Int32  
+  #number of available slices - needed for scrolling needs
+  slicesNumber::Int32
 end
 
 
