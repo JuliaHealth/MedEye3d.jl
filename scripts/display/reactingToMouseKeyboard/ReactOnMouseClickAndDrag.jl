@@ -157,6 +157,7 @@ function reactToMouseDrag(mouseCoord::CartesianIndex{2}, actor::SyncActor{Any, A
         #updating given texture that we are intrested in in place we are intested in 
         calcX = Int64(floor( ((mouseCoord[1])/(obj.windowWidth*0.9))*obj.imageTextureWidth)  )
         calcY = Int64(floor(  ((obj.windowHeight-mouseCoord[2])/obj.windowHeight)*obj.imageTextureHeight)  )       
+        
         # updateTexture(ones(strokeWidth,strokeWidth),  texture   ,
         # Int64(floor( ((mouseCoord[1])/(obj.windowWidth*0.9))*obj.imageTextureWidth)  )- halfStroke # subtracting it to make middle of stroke in pixel we are with mouse on 
         # ,Int64(floor(  ((obj.windowHeight-mouseCoord[2])/obj.windowHeight)*obj.imageTextureHeight)  ) -halfStroke
