@@ -1,9 +1,12 @@
-
+using Rocket: isempty
+##
 
      using DrWatson
      @quickactivate "Probabilistic medical segmentation"
-
+     
+     using Setfield
      using GLFW
+     using ColorTypes
 
      include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/structs/forDisplayStructs.jl")
      include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/loadData/manageH5File.jl")
@@ -17,9 +20,10 @@
 
 
      include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactToScroll.jl") )
-     include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactingToInput.jl") )
      include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactOnMouseClickAndDrag.jl") )
 
+     include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactingToInput.jl") )
+     include(DrWatson.scriptsdir("display","GLFW","SegmentationDisplay.jl"))
 
 
 #data source
@@ -31,8 +35,6 @@ heightt=dims[3]
 slicesNumb= dims[1]
 
 using Revise 
-segmPath = DrWatson.scriptsdir("display","GLFW","SegmentationDisplay.jl")
-include(segmPath)
 using Main.SegmentationDisplay
 #data about textures we want to create
 using  Main.ForDisplayStructs
@@ -41,24 +43,24 @@ using Parameters
 # list of texture specifications, important is that main texture - main image should be specified first
 #Order is important !
 listOfTexturesToCreate = [
-Main.ForDisplayStructs.TextureSpec("grandTruthLiverLabel",
-                 widthh,
-                heightt,
-                slicesNumb,
-                GL_R8UI,
-                GL_UNSIGNED_BYTE,
-                "msk0" 
-                ,0),
-                Main.ForDisplayStructs.TextureSpec("mainCTImage",
-                widthh,
-                heightt,
-                slicesNumb,
-                GL_R16I,
-                GL_SHORT,
-                "Texture0" 
-                ,0) 
-                     
-    ]
+Main.ForDisplayStructs.TextureSpec(
+    name = "grandTruthLiverLabel",
+    colors = [RGB(1.0,0.0,0.0)],
+    GL_Rtype=  GL_R8UI,
+    OpGlType = GL_UNSIGNED_BYTE,
+    samplName = "msk0" ),
+Main.ForDisplayStructs.TextureSpec(
+    name = "mainForModificationsTexture",
+    colors = [RGB(0.0,1.0,0.0)],
+    GL_Rtype=  GL_R8UI,
+    OpGlType = GL_UNSIGNED_BYTE,
+    samplName = "mask1" ),    
+Main.ForDisplayStructs.TextureSpec(
+    name= "mainCTImage",
+    GL_Rtype =  GL_R16I ,
+    OpGlType =  GL_SHORT,
+    samplName = "Texture0")  
+      ]
    
    
    
@@ -84,10 +86,13 @@ Main.ForDisplayStructs.TextureSpec("grandTruthLiverLabel",
     listOfDataAndImageNames = [("grandTruthLiverLabel",exampleLabels),("mainCTImage",exampleDat)]
   
     
-    
-#############configuring
-    Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,1000,800)
+    imagedims=dims
+    imageWidth = dims[2]
+    imageHeight = dims[3]
+#configuring
+    Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,512,512, 1000,800)
 
+ 
     Main.SegmentationDisplay.passDataForScrolling(listOfDataAndImageNames)
 
     Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice,200 )
@@ -99,117 +104,82 @@ Main.ForDisplayStructs.TextureSpec("grandTruthLiverLabel",
     textSpec = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1]
     textSpecB = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[2]
 
-    
-    imagedims=dims
-    imageWidth = dims[2]
-    imageHeight = dims[3]
+    Main.SegmentationDisplay.mainActor.actor.onScrollData
+    push!(Main.SegmentationDisplay.mainActor.actor.textureToModifyVec, textSpec)
+    GLFW.PollEvents()
 
-    windowDims =     GLFW.GetWindowSize(window)
-    windowWidth = windowDims[1]
-    windowHeight = windowDims[2]
+
+#     stopListening[]=false
+
+#     tt= listOfTexturesToCreate[1]
+#     res = Vector{TextureSpec}()
+
+#     push!(res,setproperties(tt, (ID=Ref(UInt32(0)))) )
+
+
+#     isempty([])
+
+
+
+
+
+
+
+
+
+
+#     textSpec.ID
     
-    quadmaxX = Int32(floor(windowWidth*0.8))
-    quadMaxY = windowHeight # but we need to remember that maximum values are in bottom right corner and beginning is upper left corner
+ 
+
+#     windowDims =     GLFW.GetWindowSize(window)
+#     windowWidth = windowDims[1]
+#     windowHeight = windowDims[2]
+
+#     quadmaxX = Int32(floor(windowWidth*0.8))
+#     quadMaxY = windowHeight # but we need to remember that maximum values are in bottom right corner and beginning is upper left corner
   
 
-    using Main.OpenGLDisplayUtils
+#     using Main.OpenGLDisplayUtils
 
-    #working
-    currX = 443
-    currY = 586
-    updateTexture(rand(10,10), textSpecB,
-    Int64(floor( ((currX)/(windowWidth*0.9))*imageWidth)  )
-    ,
-    Int64(floor(  ((windowHeight-currY)/windowHeight)*imageHeight)  )
-    ,5,5 )
-    basicRender(window)
-
-
+#     #working
+#     currX = 443
+#     currY = 586
+#     updateTexture(rand(10,10), textSpecB,
+#     Int64(floor( ((currX)/(windowWidth*0.9))*imageWidth)  )
+#     ,
+#     Int64(floor(  ((windowHeight-currY)/windowHeight)*imageHeight)  )
+#     ,5,5 )
+#     basicRender(window)
 
 
-    360*2
-
-720/800
-
-    800 = 512
-
-    (10/800)*
+#     using Parameters
 
 
 
 
-
-
-    Main.SegmentationDisplay.cleanUp()
-
-    x= sync( ActorWithOpenGlObjects())  SyncActor{Any, ActorWithOpenGlObjects}
-x.actor.currentDisplayedSlice =0 
-
-
-
-#############
-
-
-
-# struct StoreActor{D} <: Rocket.Actor{D}
-#     values :: Vector{D}
-
-#     StoreActor{D}() where D = new(Vector{D}())
-# end
-
-
-# Rocket.on_next!(::StoreActor, data::Int)     = println("Int: $data")
-# Rocket.on_next!(::StoreActor, data::Float64) = println("Float64: $data")
-# Rocket.on_next!(::StoreActor, data)          = println("Something else: $data")
+#     mutable struct ParaB
+#         a::Float64
+#         b::Int
+#         c::Int
+#         d::Int
+#     end
+    
+#     function f!(var, pa::Para)
+#         @unpack a, b = pa # equivalent to: a,b = pa.a,pa.b
+#         out = var + a + b
+#         b = 77
+#         @pack! pa = b # equivalent to: pa.b = b
+#         return out, pa
+#     end
+    
+#     out, pa = f!(7, Para(1,2)) # -> 10.0, Para(1.0, 77)
 
 
 
-segmPath = DrWatson.scriptsdir("display","GLFW","SegmentationDisplay.jl")
-include(segmPath)
+#     using Setfield
+#     pp = ParaB(1.0,2,3,4)
 
-using Main.ForDisplayStructs
-using Main.ReactToScroll
-using Main.SegmentationDisplay
-using Rocket
-
-
-
-
-
-const scrollback = Main.ReactToScroll.ScrollCallbackSubscribable()
-
-forDisplayConstants = Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate)
-
-Main.ReactToScroll.registerMouseScrollFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)
-
-GLFW.SetScrollCallback(forDisplayConstants.window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
-
-# Than later in your application you can do smth like
-
-subscription = subscribe!(scrollback, (direction) -> println(direction))
-
-
-
-
-
-
-
-
-#wrapping the Open Gl and GLFW objects into an observable
-forDisplayConstantObesrvable = of(Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate))
-
-keep_actor = ActorWithOpenGlObjects()
-subscribe!(forDisplayConstantObesrvable, keep_actor) # configuring
-
-
-
-source = from([false,false,false,false,false,false])
-subscribe!(source, keep_actor) # imitasting scroll
-
-keep_actor.mainForDisplayObjects
-
-# Logs
-# Completed!
-
-println(keep_actor.currentDisplayedSlice)
+# setproperties(pp, (a=9.0, b=99))
+# pp
 

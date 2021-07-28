@@ -81,6 +81,8 @@ function createFragmentShader(gslString::String)
     {
         int texel = texture2D(Texture0, TexCoord0).r;
         int mask0Texel = texture2D(msk0, TexCoord0).r;
+        int mask1Texel = texture2D(mask1, TexCoord0).r;
+        
         vec4 FragColorMask0 = vec4(mask0Texel, 0.0, 0.0, 0.5);
   
     if(texel >min_shown_white){

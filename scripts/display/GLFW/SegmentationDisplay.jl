@@ -29,9 +29,13 @@ ReactToScroll.jl
     - functions needed to react to scrolling
     - depends on external: Rocket, GLFW
     - depends on internal : ForDisplayStructs.jl
+ReactOnMouseClickAndDrag.jl   
+    - functions needed to enable mouse interactions 
+    - internal depentdencies: ForDisplayStructs, TextureManag,OpenGLDisplayUtils
+    -external dependencies: Rocket, GLFW
 ReactingToInput.jl - using Rocket.jl (reactivate functional programming ) enables reacting to user input
     - depends on external: Rocket, GLFW
-    - depends on internal : ReactToScroll.jl, ForDisplayStructs.jl
+    - depends on internal : ReactToScroll.jl, ForDisplayStructs.jl 
 OpenGLDisplayUtils.jl - some utility functions used in diffrent parts of program
     - depends on external :GLFW, ModernGL 
 """
@@ -51,6 +55,7 @@ using Main.OpenGLDisplayUtils
 using Main.ForDisplayStructs
 using Main.ReactingToInput
 using Rocket
+using Setfield
 
 #holds actor that is main structure that process inputs from GLFW and reacts to it
 mainActor = sync(ActorWithOpenGlObjects())
@@ -64,41 +69,41 @@ listOfTextSpecs - holds required data needed to initialize textures
 windowWidth::Int,windowHeight::Int - GLFW window dimensions
 """
 @doc coordinateDisplayStr
-function coordinateDisplay(listOfTextSpecs::Vector{TextureSpec}
-                        ,windowWidth::Int32=Int32(800)
-                        ,windowHeight::Int32=Int32(800)
-                        ,imageTextureWidth::Int32
-                        ,imageTextureHeight::Int32 )
+function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.TextureSpec}
+                        ,imageTextureWidth::Int
+                        ,imageTextureHeight::Int
+                        ,windowWidth::Int=Int32(800)
+                        ,windowHeight::Int=Int32(800) )
+ #creating window and event listening loop
+    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo = Main.PrepareWindow.displayAll(windowWidth,windowHeight)
+    #using data from arguments  to fill texture specifications
+    listOfTextSpecsMapped= map((spec)-> setproperties(spec, (widthh= imageTextureWidth, heightt= imageTextureHeight )) 
+                                            ,listOfTextSpecs)
 
-window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo = Main.PrepareWindow.displayAll(windowWidth,windowHeight)
+    #initializing object that holds data reqired for interacting with opengl 
+    forDispObj =  forDisplayObjects(
+        initializeTextures(shader_program, listOfTextSpecsMapped)
+            ,window
+            ,vertex_shader,fragment_shader
+            ,shader_program
+            ,stopListening,
+            Threads.Atomic{Bool}(0)
+            ,vbo[]
+            ,ebo[]
+            ,imageTextureWidth
+            ,imageTextureHeight
+            ,windowWidth
+            ,windowHeight
+            ,0 # number of slices will be set when data for scrolling will come
+    )
 
-#initializing object that holds data reqired for interacting with opengl 
-forDispObj =  forDisplayObjects(
-    initializeTextures(
-        shader_program,
-        listOfTextSpecs)
-        ,window
-        ,vertex_shader,fragment_shader
-        ,shader_program
-        ,stopListening,
-        Threads.Atomic{Bool}(0)
-        ,vbo[]
-        ,ebo[]
-        ,imageTextureWidth
-        ,imageTextureHeight
-        ,windowWidth
-        ,windowHeight
-        ,0 # number of slices will be set when data for scrolling will come
-)
-#using data from 
+    #in order to clean up all resources while closing
+    GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())
 
-#in order to clean up all resources while closing
-GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())
-
-#wrapping the Open Gl and GLFW objects into an observable and passing it to the actor
-forDisplayConstantObesrvable = of(forDispObj)
-subscribe!(forDisplayConstantObesrvable, mainActor) # configuring
-registerInteractions()#passing needed subscriptions from GLFW
+    #wrapping the Open Gl and GLFW objects into an observable and passing it to the actor
+    forDisplayConstantObesrvable = of(forDispObj)
+    subscribe!(forDisplayConstantObesrvable, mainActor) # configuring
+    registerInteractions()#passing needed subscriptions from GLFW
 
 end #coordinateDisplay
 
@@ -109,9 +114,11 @@ onScrollData - list of tuples where first is the name of the texture that we pro
 """
 @doc passDataForScrollingStr
 function passDataForScrolling(onScrollData::Vector{Tuple{String, Array{T, 3} where T}})
-#wrapping the data into an observable and passing it to the actor
-forScrollData = of(onScrollData)
-subscribe!(forScrollData, mainActor) 
+    #as we get data to scroll through we need to save the data about number of slices - important to controll scrolling
+    mainActor.actor.mainForDisplayObjects.listOfTextSpecifications
+    #wrapping the data into an observable and passing it to the actor
+    forScrollData = of(onScrollData)
+    subscribe!(forScrollData, mainActor) 
 end
 
 
@@ -140,6 +147,8 @@ function registerInteractions()
     for el in subscriptionsInner
         push!(subscriptions,el)
     end #for
+
+
 end
 
 cleanUpStr =    """
@@ -153,7 +162,9 @@ In order to properly close displayer we need to :
 """
 @doc cleanUpStr
 function cleanUp()
-    glClearColor(0.0, 0.0, 0.1 , 1.0) # dor a good begining
+    GLFW.DestroyWindow(obj.window)
+
+    glClearColor(0.0, 0.0, 0.1 , 1.0) # for a good begining
     #first we unsubscribe and give couple seconds for processes to stop
     for sub in subscriptions
         unsubscribe!(sub)
@@ -170,7 +181,6 @@ function cleanUp()
     #destroying program
     glDeleteProgram(obj.shader_program)
     #finalizing and recreating main actor
-    GLFW.DestroyWindow(obj.window)
 end #cleanUp    
 
 

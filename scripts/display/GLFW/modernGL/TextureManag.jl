@@ -10,10 +10,10 @@ using DrWatson
 using  Main.OpenGLDisplayUtils
 using  Main.ForDisplayStructs
 using  Logging
-
+using Setfield
 export initializeTextures
 export updateImagesDisplayed
-
+export updateTexture
 
 updateTextureString = """
 uploading data to given texture; of given types associated - specified in TextureSpec
@@ -48,7 +48,7 @@ creating texture that is storing integer values representing attenuation values 
 numb - which texture it is - basically important only that diffrent textures would have diffrent numbers
 
 ```
-function createTexture(numb::Int, width::Int, height::Int,GL_RType::UInt32 =GL_R16I)
+function createTexture(numb::Int, width::Int32, height::Int32,GL_RType::UInt32 =GL_R16I)
 #The texture we're going to render to
     texture= Ref(GLuint(numb));
     glGenTextures(1, texture);
@@ -76,49 +76,24 @@ listOfTextSpecs - list of TextureSpec structs that  holds data needed to
 it creates textrures as specified, renders them and return the list from  argument augmented by texture Id
 
 ```
-function initializeTextures(shader_program,listOfTextSpecs::Vector{Main.ForDisplayStructs.TextureSpec})::Vector{Main.ForDisplayStructs.TextureSpec}
+function initializeTextures(shader_program::UInt32,listOfTextSpecs::Vector{Main.ForDisplayStructs.TextureSpec})::Vector{Main.ForDisplayStructs.TextureSpec}
 
-res = [listOfTextSpecs...]  
+res = Vector{TextureSpec}()
+
 for (ind, textSpec ) in enumerate(listOfTextSpecs)
     index=ind-1
 glActiveTexture(GL_TEXTURE0 +index); # active proper texture unit before binding
 glUniform1i(glGetUniformLocation(shader_program, textSpec.samplName),index);# we first look for uniform sampler in shader - here 
 textUreId= createTexture(index,textSpec.widthh,textSpec.heightt,textSpec.GL_Rtype)#binding texture and populating with data
+@info "textUreId in initializeTextures"  textUreId
 
-res[ind]= TextureSpec( textSpec.name, textSpec.widthh,textSpec.heightt, textSpec.slicesNumber
-,textSpec.GL_Rtype , textSpec.OpGlType,textSpec.samplName,textUreId
+push!(res,setproperties(textSpec, (ID=textUreId)))
 
-)  
+
 end # for
 
 return res
 end #initializeAndDrawTextures
-
-
-
-
-
-
-
-
-########## puts bytes of image into PBO as fas as I get it  copy an image data to texture buffer
-
-
-preparePixelBufferStr="""
-width -width of the image in  number of pixels 
-height - height of the image in  number of pixels 
-pboNumber - just states which PBO it is
-return reference to the pixel buffer object that we use to upload this texture and data size calculated for this texture
-
-"""
-@doc preparePixelBufferStr
-function preparePixelBuffer(juliaDataTyp::Type{juliaDataType},width,height,pboNumber)where{juliaDataType}
-    DATA_SIZE = 8 * sizeof(juliaDataTyp) *width * height  # number of bytes our image will have so in 2D it will be width times height times number of bytes needed for used datatype we need to multiply by 8 becouse sizeof() return bytes instead of bits
-    pbo = Ref(GLuint(pboNumber))  
-    glGenBuffers(1, pbo)
-    return (pbo,DATA_SIZE)
-end
-
 
 
 updateImagesDisplayedStr =    """
@@ -143,6 +118,29 @@ function updateImagesDisplayed(listOfDataAndImageNames, forDisplayConstants)
             Main.OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
             sleep(0.1)
             forDisplayConstants.stopListening[]=false
+end
+
+
+
+
+
+
+########## puts bytes of image into PBO as fas as I get it  copy an image data to texture buffer
+
+
+preparePixelBufferStr="""
+width -width of the image in  number of pixels 
+height - height of the image in  number of pixels 
+pboNumber - just states which PBO it is
+return reference to the pixel buffer object that we use to upload this texture and data size calculated for this texture
+
+"""
+@doc preparePixelBufferStr
+function preparePixelBuffer(juliaDataTyp::Type{juliaDataType},width,height,pboNumber)where{juliaDataType}
+    DATA_SIZE = 8 * sizeof(juliaDataTyp) *width * height  # number of bytes our image will have so in 2D it will be width times height times number of bytes needed for used datatype we need to multiply by 8 becouse sizeof() return bytes instead of bits
+    pbo = Ref(GLuint(pboNumber))  
+    glGenBuffers(1, pbo)
+    return (pbo,DATA_SIZE)
 end
 
 

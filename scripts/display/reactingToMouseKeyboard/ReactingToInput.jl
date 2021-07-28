@@ -7,6 +7,8 @@ using GLFW
 using Main.ReactToScroll
 using Main.ForDisplayStructs
 using Main.TextureManag
+using Main.ReactOnMouseClickAndDrag
+
 export subscribeGLFWtoActor
 
 
@@ -28,6 +30,9 @@ onScroll Data - list of tuples where first is the name of the texture that we pr
 @doc setUpForScrollDataStr
 function setUpForScrollData(onScrollData::Vector{Tuple{String, Array{T, 3} where T}} ,actor::SyncActor{Any, ActorWithOpenGlObjects})
     actor.actor.onScrollData=onScrollData
+    @info "setting number of slices " size(onScrollData[1][2])[1]
+
+    actor.actor.mainForDisplayObjects.slicesNumber= size(onScrollData[1][2])[1]
 
 end#setUpMainDisplay
 
@@ -59,10 +64,18 @@ Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Bool) = rea
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Main.ForDisplayStructs.forDisplayObjects) = setUpMainDisplay(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Vector{Tuple{String, Array{T, 3} where T}}) = setUpForScrollData(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Tuple{Vector{Tuple{String, Array{T, 2} where T}},Int64} ) = updateSingleImagesDisplayedSetUp(data,actor)
-#Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::CartesianIndex{2}) = 
+
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::CartesianIndex{2}) = reactToMouseDrag(data,actor)
 
 Rocket.on_error!(actor::SyncActor{Any, ActorWithOpenGlObjects}, err)      = error(err)
 Rocket.on_complete!(actor::SyncActor{Any, ActorWithOpenGlObjects})        = println("Completed!")
+
+
+```@doc
+In order to enable keyboard shortcuts 
+```
+
+
 
 
 ```@doc
@@ -71,14 +84,17 @@ when GLFW context is ready we need to use this  function in order to register GL
     return list of subscriptions so if we will need it we can unsubscribe
 ```
 function subscribeGLFWtoActor(actor ::SyncActor{Any, ActorWithOpenGlObjects})
+
     #controll scrolling
     forDisplayConstants = actor.actor.mainForDisplayObjects
 
     scrollback= Main.ReactToScroll.registerMouseScrollFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)
     GLFW.SetScrollCallback(forDisplayConstants.window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
+    buttonSubs = registerMouseClickFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)
     scrollSubscription = subscribe!(scrollback, actor)
+    mouseClickSub = subscribe!(buttonSubs, actor)
 
-return [scrollSubscription]
+return [scrollSubscription, mouseClickSub]
 
 end
 

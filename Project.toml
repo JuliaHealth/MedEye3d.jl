@@ -32,6 +32,7 @@ Quaternions = "94ee1d12-ae83-5a48-8b1c-48b8ff168ae0"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 Rocket = "df971d30-c9d6-4b37-b8ff-e965b2cb3a40"
 STBImage = "7905c688-fe39-11e9-31c9-6bac3ecc6ce7"
+Setfield = "efcf1570-3423-57d1-acb7-fd33fddbac46"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]

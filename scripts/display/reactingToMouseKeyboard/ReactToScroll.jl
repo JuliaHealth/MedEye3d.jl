@@ -78,15 +78,15 @@ in response to it it sets new screen int variable and changes displayed screen
 """
 @doc reactToScrollStr
 function reactToScroll(isScrollUp::Bool, actor::SyncActor{Any, ActorWithOpenGlObjects})
-    @info "reactToScroll"  isScrollUp #just logging
     actor.actor.mainForDisplayObjects.stopListening[]=true
     current = actor.actor.currentDisplayedSlice
     isScrollUp ? current+=1 : current-=1
 
    # we do not want to move outside of possible range of slices
-   lastSlice = actor.actor.mainForDisplayObjects.listOfTextSpecifications[1].slicesNumber
+   lastSlice = actor.actor.mainForDisplayObjects.slicesNumber
 
     if(current<1) current=1 end 
+    if(lastSlice<1) lastSlice=1 end 
     if(current>=lastSlice) current=lastSlice end 
 
     #logic to change displayed screen
@@ -97,6 +97,7 @@ function reactToScroll(isScrollUp::Bool, actor::SyncActor{Any, ActorWithOpenGlOb
 updateImagesDisplayed(listOfDataAndImageNames,actor.actor.mainForDisplayObjects )
          #saving information about current slice for future reference
          actor.actor.currentDisplayedSlice = current
+
          actor.actor.mainForDisplayObjects.stopListening[]=false
 
 

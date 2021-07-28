@@ -3,6 +3,7 @@ using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
 module ForDisplayStructs
+using Base: Int32
 export Mask
 export TextureSpec
 export forDisplayObjects
@@ -33,20 +34,24 @@ Holding the data needed to create and  later reference the textures
 ```
 @with_kw struct TextureSpec
   name::String # human readable name by which we can reference texture
-  widthh::Int =0  # width of texture
-  heightt::Int =0 #height of the texture
+  numb::Int32 =-1# needed to enable swithing between textures generally convinient when between 0-9; needed only if texture is to be modified by mouse input
+  colors::Vector{RGB}=[]# needed in case for the masks in order to establish the range of colors we are intrested in in case of binary mask there is no point to supply more than one color (supply Vector with length = 1)
+  strokeWidth::Int32 =Int32(3)#marking how thick should be the line that is left after acting with the mouse ... 
+  isEditable::Bool =false #if true we can modify given  texture using mouse interaction
+  widthh::Int32 =Int32(0)  # width of texture
+  heightt::Int32 =Int32(0)  #height of the texture
   slicesNumber::Int = 0 #number of slices available
   GL_Rtype::UInt32 #GlRtype - for example GL_R8UI or GL_R16I
   OpGlType ::UInt32 #open gl type - for example GL_UNSIGNED_BYTE or GL_SHORT
   samplName::String #name of the specified sampler in fragment shader  - critical is that in case of using floats we use sampler in case of integers isampler and in case of unsigned integers usampler 
-  ID   #id of Texture
-
+  ID::Base.RefValue{UInt32} = Ref(UInt32(0))   #id of Texture
+  isVisible::Bool= true # if false it should be invisible 
 end
 
 ```@doc
 Defined in order to hold constant objects needed to display images 
 ```
-@with_kw struct forDisplayObjects    
+@with_kw mutable struct forDisplayObjects    
   listOfTextSpecifications::Vector{TextureSpec} = []
   window = []
   vertex_shader::UInt32 =1
@@ -56,14 +61,14 @@ Defined in order to hold constant objects needed to display images
   stopExecution::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0)#it will halt ability to display image for futher display in order to keep OpenGL from blocking - optional to set
   vbo::UInt32 =1 #vertex buffer object id
   ebo::UInt32 =1 #element buffer object id
-  #imageDims 
-  imageTextureWidth::Int32
-  imageTextureHeight::Int32
+  #imageDims = texture dimensions
+  imageTextureWidth::Int32=1
+  imageTextureHeight::Int32=1
   #windowDims
-  windowWidth::Int32
-  windowHeight::Int32  
+  windowWidth::Int32=1
+  windowHeight::Int32=1
   #number of available slices - needed for scrolling needs
-  slicesNumber::Int32
+  slicesNumber::Int32=1
 end
 
 
@@ -76,7 +81,8 @@ mutable struct ActorWithOpenGlObjects <: NextActor{Any}
     currentDisplayedSlice::Int # stores information what slice number we are currently displaying
     mainForDisplayObjects::Main.ForDisplayStructs.forDisplayObjects # stores objects needed to  display using OpenGL and GLFW
     onScrollData::Vector{Tuple{String, Array{T, 3} where T}}
-    ActorWithOpenGlObjects() = new(1,forDisplayObjects(),[])
+    textureToModifyVec::Vector{TextureSpec} # texture that we want currently to modify - if list is empty it means that we do not intend to modify any texture
+    ActorWithOpenGlObjects() = new(1,forDisplayObjects(),[],[])
 end
 
 

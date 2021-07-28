@@ -18,8 +18,10 @@ using Rocket
 using GLFW
 using Main.ForDisplayStructs
 using Main.TextureManag
-using Logging
+using Main.OpenGLDisplayUtils
 
+export registerMouseClickFunctions
+export reactToMouseDrag
 
 MouseCallbackSubscribableStr="""
 struct that enables reacting to  the input  from mouse click  and drag the input will be 
@@ -49,6 +51,7 @@ configuting Rocket on Subscribe so we get custom handler of input as we see we s
 # end
 
 function Rocket.on_subscribe!(handler::MouseCallbackSubscribable, actor::SyncActor{Any, ActorWithOpenGlObjects})
+
     return subscribe!(handler.subject, actor)
 end
 
@@ -75,8 +78,7 @@ experiments show that max x,y in window is both 600 if window width and height i
 """
 @doc handlerStr
 function (handler::MouseCallbackSubscribable)( a, x::Float64, y::Float64)
-   # next!(handler.subject, CartesianIndex(Int(x),Int(y)))
-   # if  (handler.isLeftButtonDown && x>=handler.xmin)
+  #  @info "handling mouse position start "   x
    if  (handler.isLeftButtonDown && x>=handler.xmin && x<=handler.xmax && y>=handler.ymin && y<= handler.ymax )
      #sending mouse position only if all conditions are met
      next!(handler.subject, CartesianIndex(Int(x),Int(y)))#sending mouse position only if all conditions are met
@@ -88,7 +90,9 @@ end #handler
 
 @doc handlerStr
 function (handler::MouseCallbackSubscribable)(a, button::GLFW.MouseButton, action::GLFW.Action,m)
+
     handler.isLeftButtonDown = (button==GLFW.MOUSE_BUTTON_1 &&  action==GLFW.PRESS)#so it will stop either as we relese left mouse or click right
+
 end #second handler
 
 
@@ -107,42 +111,62 @@ function registerMouseClickFunctions(window::GLFW.Window
  stopListening[]=true # stoping event listening loop to free the GLFW context
 
   # calculating dimensions of quad becouse it do not occupy whole window
-    windowDims =     GLFW.GetWindowSize(window)
-  width = windowDims[1]
+
+ windowDims =     GLFW.GetWindowSize(window)
+
+ width = windowDims[1]
   height = windowDims[2]
   quadmaxX = Int32(floor(width*0.8))
   quadMaxY = height 
 
-  buttonSubs = MouseCallbackSubscribable(false,0,0,quadmaxX,quadMaxY,
+  mouseButtonSubs = MouseCallbackSubscribable(false,0,0,quadmaxX,quadMaxY,
   Subject((CartesianIndex{2}), scheduler = AsyncScheduler()))
 
 
 # GLFW.SetScrollCallback(window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
-GLFW.SetCursorPosCallback(window, (a, x, y) -> buttonSubs(a,x, y ) )# and  for example : cursor: 29.0, 469.0  types   Float64  Float64   
-GLFW.SetMouseButtonCallback(window, (a, button, action, mods) ->buttonSubs(a,button, action,mods )) # for example types MOUSE_BUTTON_1 PRESS   GLFW.MouseButton  GLFW.Action 
+GLFW.SetCursorPosCallback(window, (a, x, y) -> mouseButtonSubs(a,x, y ) )# and  for example : cursor: 29.0, 469.0  types   Float64  Float64   
+GLFW.SetMouseButtonCallback(window, (a, button, action, mods) ->mouseButtonSubs(a,button, action,mods )) # for example types MOUSE_BUTTON_1 PRESS   GLFW.MouseButton  GLFW.Action 
 
 stopListening[]=false # reactivate event listening loop
 
 #subscription = subscribe!(buttonSubs, (direction) -> println(direction)) -usefull for debugging
 
-return buttonSubs
+return mouseButtonSubs
+
+
 
 end #registerMouseScrollFunctions
 
 
-reactToScrollStr = """
-in case of the scroll p true will be send in case of down - false
-in response to it it sets new screen int variable and changes displayed screen
+reactToMouseDragStr = """
+we use mouse coordinate to modify the texture that is currently active for modifications 
+    - we take information about texture currently active for modifications from variables stored in actor
+    from texture specification we take also its id and its properties ...
 """
-@doc reactToScrollStr
+@doc reactToMouseDragStr
 function reactToMouseDrag(mouseCoord::CartesianIndex{2}, actor::SyncActor{Any, ActorWithOpenGlObjects})
-    actor.actor.mainForDisplayObjects.stopListening[]=true #free GLFW context
-    
+    obj = actor.actor.mainForDisplayObjects
+    obj.stopListening[]=true #free GLFW context
+    textureList = actor.actor.textureToModifyVec
 
+    if (!isempty(textureList))
+        texture= textureList[1]
 
+        strokeWidth = texture.strokeWidth
+        halfStroke =   Int64(floor(strokeWidth/2 ))
+        #updating given texture that we are intrested in in place we are intested in 
 
-    actor.actor.mainForDisplayObjects.stopListening[]=false # reactivete event listening loop
+        updateTexture(ones(strokeWidth,strokeWidth),  texture   ,
+        Int64(floor( ((mouseCoord[1])/(obj.windowWidth*0.9))*obj.imageTextureWidth)  )- halfStroke # subtracting it to make middle of stroke in pixel we are with mouse on 
+        ,Int64(floor(  ((obj.windowHeight-mouseCoord[2])/obj.windowHeight)*obj.imageTextureHeight)  ) -halfStroke
+        ,strokeWidth,strokeWidth )
 
+        basicRender(obj.window)
+
+    end #if 
+    obj.stopListening[]=false # reactivete event listening loop
+
+    #send data for persistent storage TODO() modify for scrolling data 
 
 end#reactToScroll
 
