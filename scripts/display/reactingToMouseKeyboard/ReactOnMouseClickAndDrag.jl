@@ -15,7 +15,7 @@ so we modify the data that is the basis of the mouse interaction mask  and we pa
 #@doc ReactOnMouseClickAndDragSTR
 module ReactOnMouseClickAndDrag
 using Rocket
-using GLFW
+using GLFW, ModernGL
 using Main.ForDisplayStructs
 using Main.TextureManag
 using Main.OpenGLDisplayUtils
@@ -151,17 +151,34 @@ function reactToMouseDrag(mouseCoord::CartesianIndex{2}, actor::SyncActor{Any, A
 
     if (!isempty(textureList))
         texture= textureList[1]
-
+        
         strokeWidth = texture.strokeWidth
         halfStroke =   Int64(floor(strokeWidth/2 ))
         #updating given texture that we are intrested in in place we are intested in 
-
-        updateTexture(ones(strokeWidth,strokeWidth),  texture   ,
-        Int64(floor( ((mouseCoord[1])/(obj.windowWidth*0.9))*obj.imageTextureWidth)  )- halfStroke # subtracting it to make middle of stroke in pixel we are with mouse on 
-        ,Int64(floor(  ((obj.windowHeight-mouseCoord[2])/obj.windowHeight)*obj.imageTextureHeight)  ) -halfStroke
-        ,strokeWidth,strokeWidth )
-
+        calcX = Int64(floor( ((mouseCoord[1])/(obj.windowWidth*0.9))*obj.imageTextureWidth)  )
+        calcY = Int64(floor(  ((obj.windowHeight-mouseCoord[2])/obj.windowHeight)*obj.imageTextureHeight)  )       
+        # updateTexture(ones(strokeWidth,strokeWidth),  texture   ,
+        # Int64(floor( ((mouseCoord[1])/(obj.windowWidth*0.9))*obj.imageTextureWidth)  )- halfStroke # subtracting it to make middle of stroke in pixel we are with mouse on 
+        # ,Int64(floor(  ((obj.windowHeight-mouseCoord[2])/obj.windowHeight)*obj.imageTextureHeight)  ) -halfStroke
+        # ,strokeWidth,strokeWidth )
+ 
+        updateTexture(ones(strokeWidth,strokeWidth),  texture   ,calcX # subtracting it to make middle of stroke in pixel we are with mouse on 
+        ,calcY,strokeWidth,strokeWidth )
+    
+for text in obj.listOfTextSpecifications
+        glBindTexture(GL_TEXTURE_2D, text.ID[]); 
+end #for        
         basicRender(obj.window)
+
+#updating data
+@async begin
+        for datTupl in  actor.actor.onScrollData
+            if(datTupl[1]==texture.name)
+                datTupl[2][actor.actor.currentDisplayedSlice ,calcX,calcY]=1    
+                break
+            end#if
+        end #for
+    end
 
     end #if 
     obj.stopListening[]=false # reactivete event listening loop

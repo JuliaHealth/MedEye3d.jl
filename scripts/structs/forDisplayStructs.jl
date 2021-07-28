@@ -9,12 +9,8 @@ export TextureSpec
 export forDisplayObjects
 export ActorWithOpenGlObjects
 
-using ColorTypes
-using Parameters
-using Observables
-using ModernGL
-using GLFW
-using Rocket
+using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries
+
 
 ```@doc
 data needed for definition of mask  - data that will be displayed over main image 
@@ -85,7 +81,7 @@ mutable struct ActorWithOpenGlObjects <: NextActor{Any}
     ActorWithOpenGlObjects() = new(1,forDisplayObjects(),[],[])
 end
 
-
+Dictionary(["a", "b", "c"], [1, 2, 3])
 
 
 end #module

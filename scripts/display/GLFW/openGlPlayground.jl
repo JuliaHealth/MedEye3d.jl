@@ -63,7 +63,7 @@ Main.ForDisplayStructs.TextureSpec(
       ]
    
    
-   
+      listOfTexturesToCreate
     include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactingToInput.jl"))
     using Main.ReactingToInput
 
@@ -104,7 +104,19 @@ Main.ForDisplayStructs.TextureSpec(
     textSpec = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1]
     textSpecB = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[2]
 
-    Main.SegmentationDisplay.mainActor.actor.onScrollData
+    # currSlice = 40
+    # index = CartesianIndex(2,2)
+    # atName = "grandTruthLiverLabel"
+    # for datTupl in  Main.SegmentationDisplay.mainActor.actor.onScrollData
+    #     if(datTupl[1]==atName)
+    #         print(datTupl[2][currSlice,index]) 
+    #         datTupl[2][currSlice,index]=1    
+    #         break
+    #     end#if
+    # end #for
+
+    # datt= Main.SegmentationDisplay.mainActor.actor.onScrollData[1][2]
+    # datt[197, 286, 514]
     push!(Main.SegmentationDisplay.mainActor.actor.textureToModifyVec, textSpec)
     GLFW.PollEvents()
 
