@@ -50,6 +50,7 @@ function updateSingleImagesDisplayedSetUp(listOfDataAndImageNamesTuple::Tuple{Ve
 
 updateImagesDisplayed(listOfDataAndImageNamesTuple[1], actor.actor.mainForDisplayObjects)
 actor.actor.currentDisplayedSlice = listOfDataAndImageNamesTuple[2]
+actor.actor.isSliceChanged = true # mark for mouse interaction that we changed slice
 
 end #updateSingleImagesDisplayed
 
@@ -65,7 +66,7 @@ Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Main.ForDis
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Vector{Tuple{String, Array{T, 3} where T}}) = setUpForScrollData(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Tuple{Vector{Tuple{String, Array{T, 2} where T}},Int64} ) = updateSingleImagesDisplayedSetUp(data,actor)
 
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::CartesianIndex{2}) = reactToMouseDrag(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Vector{CartesianIndex{2}}) = reactToMouseDrag(data,actor)
 
 Rocket.on_error!(actor::SyncActor{Any, ActorWithOpenGlObjects}, err)      = error(err)
 Rocket.on_complete!(actor::SyncActor{Any, ActorWithOpenGlObjects})        = println("Completed!")

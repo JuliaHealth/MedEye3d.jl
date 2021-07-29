@@ -84,7 +84,7 @@ function reactToScroll(isScrollUp::Bool, actor::SyncActor{Any, ActorWithOpenGlOb
 
    # we do not want to move outside of possible range of slices
    lastSlice = actor.actor.mainForDisplayObjects.slicesNumber
-
+   actor.actor.isSliceChanged = true
     if(current<1) current=1 end 
     if(lastSlice<1) lastSlice=1 end 
     if(current>=lastSlice) current=lastSlice end 

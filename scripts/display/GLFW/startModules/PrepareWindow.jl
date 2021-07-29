@@ -62,7 +62,7 @@ function displayAll(windowWidth::Int,windowHeight::Int)
 #loop that enables reacting to mouse and keyboards inputs  so every 0.1 seconds it will check GLFW weather any new events happened	
 	t = @task begin;
 		while(!GLFW.WindowShouldClose(window))
-		sleep(0.1);
+		sleep(0.01);
 		if(!stopListening[])
 		 # Poll for and process events
 		  GLFW.PollEvents()

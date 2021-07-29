@@ -78,10 +78,10 @@ mutable struct ActorWithOpenGlObjects <: NextActor{Any}
     mainForDisplayObjects::Main.ForDisplayStructs.forDisplayObjects # stores objects needed to  display using OpenGL and GLFW
     onScrollData::Vector{Tuple{String, Array{T, 3} where T}}
     textureToModifyVec::Vector{TextureSpec} # texture that we want currently to modify - if list is empty it means that we do not intend to modify any texture
-    ActorWithOpenGlObjects() = new(1,forDisplayObjects(),[],[])
+    isSliceChanged::Bool # set to true when slice is changed set to false when we start interacting with this slice - thanks to this we know that when we start drawing on one slice and change the slice the line would star a new on new slice
+    ActorWithOpenGlObjects() = new(1,forDisplayObjects(),[],[],false)
 end
 
-Dictionary(["a", "b", "c"], [1, 2, 3])
 
 
 end #module

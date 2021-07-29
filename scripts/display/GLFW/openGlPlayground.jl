@@ -1,11 +1,10 @@
-using Rocket: isempty
-##
 
      using DrWatson
      @quickactivate "Probabilistic medical segmentation"
      
      using Setfield
      using GLFW
+     using ModernGL
      using ColorTypes
 
      include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/structs/forDisplayStructs.jl")
@@ -45,6 +44,7 @@ using Parameters
 listOfTexturesToCreate = [
 Main.ForDisplayStructs.TextureSpec(
     name = "grandTruthLiverLabel",
+    strokeWidth = 5,
     colors = [RGB(1.0,0.0,0.0)],
     GL_Rtype=  GL_R8UI,
     OpGlType = GL_UNSIGNED_BYTE,
@@ -104,32 +104,10 @@ Main.ForDisplayStructs.TextureSpec(
     textSpec = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1]
     textSpecB = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[2]
 
-    # currSlice = 40
-    # index = CartesianIndex(2,2)
-    # atName = "grandTruthLiverLabel"
-    # for datTupl in  Main.SegmentationDisplay.mainActor.actor.onScrollData
-    #     if(datTupl[1]==atName)
-    #         print(datTupl[2][currSlice,index]) 
-    #         datTupl[2][currSlice,index]=1    
-    #         break
-    #     end#if
-    # end #for
-
-    # datt= Main.SegmentationDisplay.mainActor.actor.onScrollData[1][2]
-    # datt[197, 286, 514]
     push!(Main.SegmentationDisplay.mainActor.actor.textureToModifyVec, textSpec)
     GLFW.PollEvents()
 
 
-#     stopListening[]=false
-
-#     tt= listOfTexturesToCreate[1]
-#     res = Vector{TextureSpec}()
-
-#     push!(res,setproperties(tt, (ID=Ref(UInt32(0)))) )
-
-
-#     isempty([])
 
 
 
@@ -137,61 +115,26 @@ Main.ForDisplayStructs.TextureSpec(
 
 
 
+# #adapted from http://www.opengl-tutorial.org/intermediate-tutorials/tutorial-14-render-to-texture/    
+# FramebufferName = Ref(GLuint(0));
+# glGenFramebuffers(1, FramebufferName);
+# glBindFramebuffer(GL_FRAMEBUFFER, FramebufferName);
 
 
+# define renderedTexture
 
-#     textSpec.ID
-    
- 
+# #Set "renderedTexture" as our colour attachement #0
+# glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, renderedTexture, 0);
 
-#     windowDims =     GLFW.GetWindowSize(window)
-#     windowWidth = windowDims[1]
-#     windowHeight = windowDims[2]
+# # Set the list of draw buffers.
+# GLenum DrawBuffers[1] = {GL_COLOR_ATTACHMENT0};
+# glDrawBuffers(1, DrawBuffers); # "1" is the size of DrawBuffers
 
-#     quadmaxX = Int32(floor(windowWidth*0.8))
-#     quadMaxY = windowHeight # but we need to remember that maximum values are in bottom right corner and beginning is upper left corner
-  
-
-#     using Main.OpenGLDisplayUtils
-
-#     #working
-#     currX = 443
-#     currY = 586
-#     updateTexture(rand(10,10), textSpecB,
-#     Int64(floor( ((currX)/(windowWidth*0.9))*imageWidth)  )
-#     ,
-#     Int64(floor(  ((windowHeight-currY)/windowHeight)*imageHeight)  )
-#     ,5,5 )
-#     basicRender(window)
+# #Always check that our framebuffer is ok
+# if(glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+# return false;
 
 
-#     using Parameters
-
-
-
-
-#     mutable struct ParaB
-#         a::Float64
-#         b::Int
-#         c::Int
-#         d::Int
-#     end
-    
-#     function f!(var, pa::Para)
-#         @unpack a, b = pa # equivalent to: a,b = pa.a,pa.b
-#         out = var + a + b
-#         b = 77
-#         @pack! pa = b # equivalent to: pa.b = b
-#         return out, pa
-#     end
-    
-#     out, pa = f!(7, Para(1,2)) # -> 10.0, Para(1.0, 77)
-
-
-
-#     using Setfield
-#     pp = ParaB(1.0,2,3,4)
-
-# setproperties(pp, (a=9.0, b=99))
-# pp
-
+# #Render to our framebuffer
+# glBindFramebuffer(GL_FRAMEBUFFER, FramebufferName);
+# glViewport(0,0,imageWidth,imageHeight); # Render on the whole framebuffer, complete from the lower left corner to the upper right

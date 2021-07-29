@@ -14,21 +14,24 @@ so we modify the data that is the basis of the mouse interaction mask  and we pa
 """
 #@doc ReactOnMouseClickAndDragSTR
 module ReactOnMouseClickAndDrag
+using Rocket: isempty
 using Rocket
 using GLFW, ModernGL
 using Main.ForDisplayStructs
 using Main.TextureManag
 using Main.OpenGLDisplayUtils
-
+using  Dates
+using  Parameters
 export registerMouseClickFunctions
 export reactToMouseDrag
 
 MouseCallbackSubscribableStr="""
 struct that enables reacting to  the input  from mouse click  and drag the input will be 
-    Cartesian index represening (x,y) x and y position  of the mouse - will be recorded only if left mouse button is pressed or keep presssed
+    Cartesian index represening (x,y)
+     x and y position  of the mouse - will be recorded only if left mouse button is pressed or keep presssed
 """
 @doc MouseCallbackSubscribableStr
-mutable struct MouseCallbackSubscribable <: Subscribable{CartesianIndex{2}}
+mutable struct MouseCallbackSubscribable <: Subscribable{Vector{CartesianIndex{2}}}
     #true if left button is presed down - we make it true if the left button is pressed over image and false if mouse get out of the window or we get information about button release
     isLeftButtonDown ::Bool 
     #coordinates marking 4 corners of 
@@ -37,7 +40,16 @@ mutable struct MouseCallbackSubscribable <: Subscribable{CartesianIndex{2}}
     ymin::Int32
     xmax::Int32
     ymax::Int32
-    subject :: Subject{CartesianIndex{2}} # coordinates of mouse 
+#used to draw left button lines (creating lines)
+ #store of the cartesian coordinates that is used to batch actions 
+#- so if mouse is moving rapidly we would store bunch of coordinates and then modify texture in batch
+    coordinatesStoreForLeftClicks ::Vector{CartesianIndex{2}} 
+    lastCoordinate::CartesianIndex{2}#generally when we draw lines we remove points from array above yet w need to leave last one in order to keep continuity of futher line
+
+
+referenceInstance::DateTime# an instance from which we would calculate when to execute batch 
+    
+    subject :: Subject{Vector{CartesianIndex{2}}} # coordinates of mouse 
    
 end
 
@@ -78,12 +90,19 @@ experiments show that max x,y in window is both 600 if window width and height i
 """
 @doc handlerStr
 function (handler::MouseCallbackSubscribable)( a, x::Float64, y::Float64)
+  point = CartesianIndex(Int(x),Int(y))
+  handler.lastCoordinate = point
+  
   #  @info "handling mouse position start "   x
-   if  (handler.isLeftButtonDown && x>=handler.xmin && x<=handler.xmax && y>=handler.ymin && y<= handler.ymax )
-     #sending mouse position only if all conditions are met
-     next!(handler.subject, CartesianIndex(Int(x),Int(y)))#sending mouse position only if all conditions are met
-   else
-    #next!(handler.subject, CartesianIndex(-1,-1))#sending mouse position only if all conditions are met
+  
+  if  (handler.isLeftButtonDown && x>=handler.xmin && x<=handler.xmax && y>=handler.ymin && y<= handler.ymax )
+    push!(handler.coordinatesStoreForLeftClicks,point)
+        if((Dates.now()-handler.referenceInstance).value>100)  
+            #sending mouse position only if all conditions are met
+            next!(handler.subject, handler.coordinatesStoreForLeftClicks)#sending mouse position only if all conditions are met
+            handler.referenceInstance=Dates.now()
+            handler.coordinatesStoreForLeftClicks = [point]
+        end#if
    end#if
 
 end #handler
@@ -91,8 +110,12 @@ end #handler
 @doc handlerStr
 function (handler::MouseCallbackSubscribable)(a, button::GLFW.MouseButton, action::GLFW.Action,m)
 
-    handler.isLeftButtonDown = (button==GLFW.MOUSE_BUTTON_1 &&  action==GLFW.PRESS)#so it will stop either as we relese left mouse or click right
-
+    res=(button==GLFW.MOUSE_BUTTON_1 &&  action==GLFW.PRESS)#so it will stop either as we relese left mouse or click right
+    handler.isLeftButtonDown = res
+    if(res)
+        handler.referenceInstance=Dates.now()
+        handler.coordinatesStoreForLeftClicks = [handler.lastCoordinate]
+    end #if
 end #second handler
 
 
@@ -119,8 +142,8 @@ function registerMouseClickFunctions(window::GLFW.Window
   quadmaxX = Int32(floor(width*0.8))
   quadMaxY = height 
 
-  mouseButtonSubs = MouseCallbackSubscribable(false,0,0,quadmaxX,quadMaxY,
-  Subject((CartesianIndex{2}), scheduler = AsyncScheduler()))
+  mouseButtonSubs = MouseCallbackSubscribable(false,0,0,quadmaxX,quadMaxY,[],CartesianIndex(1,1),Dates.now(),
+  Subject(Vector{CartesianIndex{2}}, scheduler = AsyncScheduler()))
 
 
 # GLFW.SetScrollCallback(window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
@@ -144,7 +167,7 @@ we use mouse coordinate to modify the texture that is currently active for modif
     from texture specification we take also its id and its properties ...
 """
 @doc reactToMouseDragStr
-function reactToMouseDrag(mouseCoord::CartesianIndex{2}, actor::SyncActor{Any, ActorWithOpenGlObjects})
+function reactToMouseDrag(mouseCoords::Vector{CartesianIndex{2}}, actor::SyncActor{Any, ActorWithOpenGlObjects})
     obj = actor.actor.mainForDisplayObjects
     obj.stopListening[]=true #free GLFW context
     textureList = actor.actor.textureToModifyVec
@@ -152,19 +175,33 @@ function reactToMouseDrag(mouseCoord::CartesianIndex{2}, actor::SyncActor{Any, A
     if (!isempty(textureList))
         texture= textureList[1]
         
-        strokeWidth = texture.strokeWidth
-        halfStroke =   Int64(floor(strokeWidth/2 ))
-        #updating given texture that we are intrested in in place we are intested in 
-        calcX = Int64(floor( ((mouseCoord[1])/(obj.windowWidth*0.9))*obj.imageTextureWidth)  )
-        calcY = Int64(floor(  ((obj.windowHeight-mouseCoord[2])/obj.windowHeight)*obj.imageTextureHeight)  )       
-        
+       mappedCoords =  translateMouseToTexture(texture.strokeWidth
+                                                ,mouseCoords
+                                                ,obj.windowWidth
+                                                , obj.windowHeight
+                                                , obj.imageTextureWidth
+                                                , obj.imageTextureHeight
+                                                ,actor.actor.currentDisplayedSlice)
+
+        for datTupl in  actor.actor.onScrollData
+            if(datTupl[1]==texture.name)
+                datTupl[2][mappedCoords].=1 # broadcasting new value to all points that we are intrested in     
+                updateTexture(datTupl[2][actor.actor.currentDisplayedSlice,:,:], texture)
+                break
+            end#if
+        end #for
+
+
         # updateTexture(ones(strokeWidth,strokeWidth),  texture   ,
         # Int64(floor( ((mouseCoord[1])/(obj.windowWidth*0.9))*obj.imageTextureWidth)  )- halfStroke # subtracting it to make middle of stroke in pixel we are with mouse on 
         # ,Int64(floor(  ((obj.windowHeight-mouseCoord[2])/obj.windowHeight)*obj.imageTextureHeight)  ) -halfStroke
         # ,strokeWidth,strokeWidth )
  
-        updateTexture(ones(strokeWidth,strokeWidth),  texture   ,calcX # subtracting it to make middle of stroke in pixel we are with mouse on 
-        ,calcY,strokeWidth,strokeWidth )
+        # updateTexture(ones(strokeWidth,strokeWidth),texture,
+        # calcX -halfStroke      # subtracting it to make middle of stroke in pixel we are with mouse on 
+        # ,calcY- halfStroke,strokeWidth,strokeWidth )
+    
+
     
 for text in obj.listOfTextSpecifications
         glBindTexture(GL_TEXTURE_2D, text.ID[]); 
@@ -172,24 +209,43 @@ end #for
         basicRender(obj.window)
 
 #updating data
-@async begin
-        for datTupl in  actor.actor.onScrollData
-            if(datTupl[1]==texture.name)
-                datTupl[2][actor.actor.currentDisplayedSlice ,calcX,calcY]=1    
-                break
-            end#if
-        end #for
-    end
-
+       
     end #if 
     obj.stopListening[]=false # reactivete event listening loop
 
     #send data for persistent storage TODO() modify for scrolling data 
-
 end#reactToScroll
 
 
+```@doc
+given list of cartesian coordinates and some window/ image characteristics - it translates mouse positions
+to cartesian coordinates of the texture
+strokeWidth - the property connected to the texture marking how thick should be the brush
+mouseCoords - list of coordinates of mouse positions while left button remains pressed
+windowWidth,windowHeight  - dimensions of the GLFW window
+imageTextureWidth, imageTextureHeight - dimension of the texture holding image
+currentDisplayedSlice - the slice we are on now
+return vector of translated cartesian coordinates
+```
+function translateMouseToTexture(strokeWidth::Int32
+                                ,mouseCoords::Vector{CartesianIndex{2}}
+                                ,windowWidth::Int32
+                                ,windowHeight::Int32 
+                                ,imageTextureWidth::Int32 
+                                ,imageTextureHeight::Int32 
+                                ,currentDisplayedSlice::Int64  )
+  
+    halfStroke =   Int64(floor(strokeWidth/2 ))
+    #updating given texture that we are intrested in in place we are intested in 
 
+    return map(c->CartesianIndex(currentDisplayedSlice ,Int64(floor( ((c[1])/(windowWidth*0.9))*imageTextureWidth))
+    , Int64(floor(  ((windowHeight-c[2])/windowHeight)*imageTextureHeight)  )     )
+                               ,mouseCoords)
+
+    # calcX = Int64(floor( ((mouseCoord[1])/(windowWidth*0.9))*imageTextureWidth)  )
+    # calcY = Int64(floor(  ((windowHeight-mouseCoord[2])/windowHeight)*imageTextureHeight)  )       
+ 
+end #translateMouseToTexture
 
 
 
