@@ -116,9 +116,11 @@ function controllWindowInput(window)
 GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
 	name = GLFW.GetKeyName(key, scancode)
 	if name == nothing
-		println("scancode $scancode ", action)
+		println("scancode $scancode  $(typeof(scancode))", action)
 	else
-		println("key $name ", action)
+		println("key $name $(typeof(name))", action)
+		println("key $name $(typeof(name))")
+		println("action $action $(typeof(action))")
 	end
 end)
 end #controllWindowInputDoc

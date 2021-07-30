@@ -15,20 +15,35 @@ using Main.ForDisplayStructs
 using Main.TextureManag
 using Main.OpenGLDisplayUtils
 
-
-
-KeyboardCallbackSubscribableStr="""
+KeyboardCallbackSubscribableStr= """
+Object that enables managing input from keyboard - it stores the information also about
+needed keys wheather they are kept pressed  
+examples of keyboard input 
+    action RELEASE GLFW.Action
+    key s StringPRESS
+    key s String
+    action PRESS GLFW.Action
+    key s StringRELEASE
+    key s String
+    action RELEASE GLFW.Action
 
 """
 @doc KeyboardCallbackSubscribableStr
 mutable struct KeyboardCallbackSubscribable <: Subscribable{CartesianIndex{2}}
+# true when pressed and kept true until released
+    isCtrlPressed::Bool
+    isShiftPressed::Bool
+    isAltPressed::Bool
+
+    lasKeyPressed
 
     subject :: Subject{CartesianIndex{2}} 
    
 end 
 
-
 ```@doc
+
+
 ```
 function Rocket.on_subscribe!(handler::KeyboardCallbackSubscribable, actor::SyncActor{Any, ActorWithOpenGlObjects})
     return subscribe!(handler.subject, actor)

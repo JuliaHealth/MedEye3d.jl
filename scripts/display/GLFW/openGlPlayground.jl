@@ -25,13 +25,7 @@
      include(DrWatson.scriptsdir("display","GLFW","SegmentationDisplay.jl"))
 
 
-#data source
-exampleDat = Int16.(Main.h5manag.getExample())
-exampleLabels = UInt8.(Main.h5manag.getExampleLabels())
-dims = size(exampleDat)
-widthh=dims[2]
-heightt=dims[3]
-slicesNumb= dims[1]
+
 
 using Revise 
 using Main.SegmentationDisplay
@@ -50,12 +44,18 @@ Main.ForDisplayStructs.TextureSpec(
     OpGlType = GL_UNSIGNED_BYTE,
     samplName = "msk0" ),
 Main.ForDisplayStructs.TextureSpec(
-    name = "mainForModificationsTexture",
+    name = "mainForModificationsTexture1",
     colors = [RGB(0.0,1.0,0.0)],
     GL_Rtype=  GL_R8UI,
     OpGlType = GL_UNSIGNED_BYTE,
-    samplName = "mask1" ),    
-Main.ForDisplayStructs.TextureSpec(
+    samplName = "mask1" ),
+    Main.ForDisplayStructs.TextureSpec(
+    name = "mainForModificationsTexture2",
+    colors = [RGB(0.0,0.0,1.0)],
+    GL_Rtype=  GL_R8UI,
+    OpGlType = GL_UNSIGNED_BYTE,
+    samplName = "mask2" )      
+    ,Main.ForDisplayStructs.TextureSpec(
     name= "mainCTImage",
     GL_Rtype =  GL_R16I ,
     OpGlType =  GL_SHORT,
@@ -77,35 +77,71 @@ Main.ForDisplayStructs.TextureSpec(
     using Rocket
     
     
+#data source
+# exampleDat = Int16.(Main.h5manag.getExample())
+# exampleLabels = UInt8.(Main.h5manag.getExampleLabels())
+# dims = size(exampleDat)
+# widthh=dims[2]
+# heightt=dims[3]
+# slicesNumb= dims[1]
+
+#  slice = 200
+#   listOfDataAndImageNamesSlice = [("grandTruthLiverLabel",exampleLabels[slice,:,:]),("mainCTImage",exampleDat[slice,:,:] )]
 
 
- slice = 200
-  listOfDataAndImageNamesSlice = [("grandTruthLiverLabel",exampleLabels[slice,:,:]),("mainCTImage",exampleDat[slice,:,:] )]
-
-
-    listOfDataAndImageNames = [("grandTruthLiverLabel",exampleLabels),("mainCTImage",exampleDat)]
+#     listOfDataAndImageNames = [("grandTruthLiverLabel",exampleLabels),("mainCTImage",exampleDat)]
   
     
-    imagedims=dims
-    imageWidth = dims[2]
-    imageHeight = dims[3]
+#     imagedims=dims
+#     imageWidth = dims[2]
+#     imageHeight = dims[3]
 #configuring
-    Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,512,512, 1000,800)
+   # Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,512,512, 1000,800)
 
  
-    Main.SegmentationDisplay.passDataForScrolling(listOfDataAndImageNames)
+    # Main.SegmentationDisplay.passDataForScrolling(listOfDataAndImageNames)
 
-    Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice,200 )
+    # Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice,200 )
 
 
-    window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
-    stopListening = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.stopListening
+    # window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
+    # stopListening = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.stopListening
     
-    textSpec = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1]
-    textSpecB = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[2]
+  #  textSpec = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1]
+    # textSpecB = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[2]
 
+
+
+    Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,512,512, 1000,800)
+
+mainMaskDummy = zeros(UInt8,10,512,512)
+ctDummy = ones(Int16,10,512,512)# will give white background for testing 
+    listOfDataAndImageNames = [("grandTruthLiverLabel",mainMaskDummy),("mainCTImage",ctDummy ) ]
+    #,("mainForModificationsTexture2",zeros(Int8,10,512,512))
+
+    Main.SegmentationDisplay.passDataForScrolling(listOfDataAndImageNames)
+    slicee = 3
+    listOfDataAndImageNamesSlice = [("grandTruthLiverLabel",mainMaskDummy[slicee,:,:]) ,("mainCTImage",ctDummy[slicee,:,:] )]
+
+
+    Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice,3 )
+    textSpec = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1]
     push!(Main.SegmentationDisplay.mainActor.actor.textureToModifyVec, textSpec)
-    GLFW.PollEvents()
+
+   # Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [listOfTexturesToCreate[1]]
+   ### playing with uniforms
+   program = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.shader_program
+
+   using Glutils
+   @uniforms  colorsMask0, colorsMask1, colorsMask2,isVisibleTexture0, isVisibleMask0,isVisibleMask1,isVisibleMask2 = program
+
+   @uniforms! begin
+
+   isVisibleMask0:= true
+    end
+
+
+   GLFW.PollEvents()
 
 
 

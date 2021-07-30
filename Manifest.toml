@@ -357,6 +357,14 @@ git-tree-sha1 = "07194161fe4e181c6bf51ef2e329ec4e7d050fc4"
 uuid = "4d00f742-c7ba-57c2-abde-4428a4b178cb"
 version = "0.8.4"
 
+[[Glutils]]
+deps = ["ModernGL", "StaticArrays"]
+git-tree-sha1 = "73e8f48e3b3162dbb17cc5675619b04e7e387950"
+repo-rev = "master"
+repo-url = "https://github.com/jorge-brito/Glutils.jl"
+uuid = "ca30e6a0-9c86-4a44-9400-1099a673051c"
+version = "0.1.0"
+
 [[Graphics]]
 deps = ["Colors", "LinearAlgebra", "NaNMath"]
 git-tree-sha1 = "2c1cf4df419938ece72de17f368a021ee162762e"
@@ -738,9 +746,9 @@ version = "1.10.2"
 
 [[OpenMPI_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "Pkg"]
-git-tree-sha1 = "e0914cbfcc96f1b9097ca99cef1ae73a7b0efda9"
+git-tree-sha1 = "a784e5133fc7e204c900f2cf38ed37a92ff9248d"
 uuid = "fe0851c0-eecd-5654-98d4-656369965a5c"
-version = "4.1.1+1"
+version = "4.1.1+2"
 
 [[OpenSSL_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]

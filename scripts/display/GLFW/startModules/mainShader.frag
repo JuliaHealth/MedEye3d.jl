@@ -2,6 +2,7 @@
 
     out vec4 FragColor;    
     in vec3 ourColor;
+    smooth in vec2 TexCoord0;
 
     //values needed to change integer values of computer tomography attenuation to floats representing colors
     //uniform int minn = -1024 ;
@@ -9,36 +10,47 @@
     //uniform int rang = 4095;
 
     //soft tissues: W:350–400 L:20–60 4
-    uniform int  min_shown_white = 400 ;// value of cut off  - all values above will be shown as white 
+
+///////// window control - those uniforms control window of main CT image 
+
+    uniform int  min_shown_white = 0;//400 ;// value of cut off  - all values above will be shown as white 
     uniform int  max_shown_black = -200;//value cut off - all values below will be shown as black
     uniform float displayRange = 600.0;
 
 /////////// samplers
     uniform isampler2D Texture0;
-    uniform isampler2D nuclearMask;
+    uniform isampler2D nuclearMask;// nuclear medicine
     uniform isampler2D msk0;
     uniform isampler2D mask1;
     uniform isampler2D mask2;
-    smooth in vec2 TexCoord0;
-/////////////// color ranges
-    vec3 newVec3Array[3];
-
-
+/////////////// color ranges    --  7 is completely arbitrary if one would want more colrs - it is easy to change
+   uniform vec3[7] colorsMask0;
+   uniform vec3[7] colorsMask1;
+   uniform vec3[7] colorsMask2;
+///////////////visibility controll   --  set of booleans that controll weather the texture will affect final image (visible) or not
+   uniform bool isVisibleTexture0 = true;
+   uniform bool isVisibleNuclearMask = true;
+   uniform bool isVisibleMask0 = true;
+   uniform bool isVisibleMask1=true;
+   uniform bool isVisibleMask2=true;
 
   
 // controlling color display of main image we keep all above some value as white and all below some value as black
-void mainColor(in int texel, out vec4 FragColorMain)
+vec4 mainColor(in int texel)
 {
-    if(texel >min_shown_white){
-        FragColorMain = vec4(1.0, 1.0, 1.0, 1.0);
+    if(!isVisibleTexture0){
+      return vec4(1.0, 1.0, 1.0, 1.0);    
+    }
+    else if(texel >min_shown_white){
+        return vec4(1.0, 1.0, 1.0, 1.0);
         }
     else if (texel< max_shown_black){
-        FragColorMain = vec4(0.0, 0.0, 0.0, 1.0);
+        return vec4(0.0, 0.0, 0.0, 1.0);
    }
     else{
       float fla = float(texel-max_shown_black) ;
       float fl = fla/displayRange ;
-      FragColorMain = vec4(fl, fl, fl, 1.0);
+     return vec4(fl, fl, fl, 1.0);
     }
 }
 //data types adapted from https://www.shaderific.com/glsl-types
@@ -46,13 +58,13 @@ void mainColor(in int texel, out vec4 FragColorMain)
 //the textures with values that are always between 0 and 1 
 //(including binary masks) - if value is greater than 0 and flag of visibility is set to true 
 //the color will affect main color otherwise it would be just passed through the function without any modifications
-void mainColor(in int maskTexel,in vec4 FragColorMain,  out vec4 FragColorMask)
+vec4 maskColor(in int maskTexel,in vec4 FragColorMain ,in bool isVisible ,in vec3[7] colorSet )
 {
-TODo() pass boolean that controlls visibility and pass input color/ colors as mask color
-  if(maskTexel>0) {
-       vec4 FragColorMask0 = vec4(mask0Texel, 0.0, 0.0, 0.5);
-       FragColorMain = vec4(fl, fl, fl, 1.0)*FragColorMask0;
+  if(maskTexel>0 && isVisible) {
+       vec4 FragColorMask0 = vec4(maskTexel, 0.0, 0.0, 0.5);
+       return FragColorMask0*FragColorMain;
     }
+    return FragColorMain;
 }
 
 
@@ -60,28 +72,35 @@ TODo() pass boolean that controlls visibility and pass input color/ colors as ma
 
     void main()
     {
+        vec4 FragColorA;    
+
         int texel = texture2D(Texture0, TexCoord0).r;
         int mask0Texel = texture2D(msk0, TexCoord0).r;
         int mask1Texel = texture2D(mask1, TexCoord0).r;
-        
-        vec4 FragColorMask0 = vec4(mask0Texel, 0.0, 0.0, 0.5);
-  
-    if(texel >min_shown_white){
-        FragColor = vec4(1.0, 1.0, 1.0, 1.0);
-        }
-    else if (texel< max_shown_black){
-        FragColor = vec4(0.0, 0.0, 0.0, 1.0)*FragColorMask0;
+        int mask2Texel = texture2D(mask1, TexCoord0).r;
 
-    }
-    else{
-      float fla = float(texel-max_shown_black) ;
-      float fl = fla/displayRange ;
-      if(mask0Texel>0) {
-        FragColor = vec4(fl, fl, fl, 1.0)*FragColorMask0;
-      }else{
-        FragColor = vec4(fl, fl, fl, 1.0);
-      }
-    }
+       FragColorA = mainColor(texel);
+       FragColorA =  maskColor(mask0Texel,FragColorA,isVisibleMask0, colorsMask0);
+       FragColorA =  maskColor(mask1Texel,FragColorA,isVisibleMask1, colorsMask1);
+       FragColorA =  maskColor(mask2Texel,FragColorA,isVisibleMask2, colorsMask2);
+    
+    FragColor = FragColorA;
+    // if(texel >min_shown_white){
+    //     FragColor = vec4(1.0, 1.0, 1.0, 1.0);
+    //     }
+    // else if (texel< max_shown_black){
+    //     FragColor = vec4(0.0, 0.0, 0.0, 1.0)*FragColorMask0;
+
+    // }
+    // else{
+    //   float fla = float(texel-max_shown_black) ;
+    //   float fl = fla/displayRange ;
+    //   if(mask0Texel>0) {
+    //     FragColor = vec4(fl, fl, fl, 1.0)*FragColorMask0;
+    //   }else{
+    //     FragColor = vec4(fl, fl, fl, 1.0);
+    //   }
+    // }
 
     }
 

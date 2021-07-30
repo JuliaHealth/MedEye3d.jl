@@ -185,6 +185,7 @@ function reactToMouseDrag(mouseCoords::Vector{CartesianIndex{2}}, actor::SyncAct
 
         for datTupl in  actor.actor.onScrollData
             if(datTupl[1]==texture.name)
+                @info "texture to update " texture.name 
                 datTupl[2][mappedCoords].=1 # broadcasting new value to all points that we are intrested in     
                 updateTexture(datTupl[2][actor.actor.currentDisplayedSlice,:,:], texture)
                 break
