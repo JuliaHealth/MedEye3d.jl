@@ -240,8 +240,8 @@ function translateMouseToTexture(strokeWidth::Int32
     #updating given texture that we are intrested in in place we are intested in 
 
     return map(c->CartesianIndex(currentDisplayedSlice ,Int64(floor( ((c[1])/(windowWidth*0.9))*imageTextureWidth))
-    , Int64(floor(  ((windowHeight-c[2])/windowHeight)*imageTextureHeight)  )     )
-                               ,mouseCoords)
+    , Int64(floor(  ((windowHeight-c[2])/windowHeight)*imageTextureHeight)  )     ),mouseCoords)                                                    |>
+      (x)->filter(it->it[1]>0 && it[2]>0 && it[3]>0 ,x)        # we do not want to try access it in point 0 as julia is 1 indexed                 
 
     # calcX = Int64(floor( ((mouseCoord[1])/(windowWidth*0.9))*imageTextureWidth)  )
     # calcY = Int64(floor(  ((windowHeight-mouseCoord[2])/windowHeight)*imageTextureHeight)  )       

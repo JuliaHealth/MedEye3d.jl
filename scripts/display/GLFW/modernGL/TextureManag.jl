@@ -5,15 +5,10 @@ using DrWatson
 stores functions needed to create bind and update OpenGl textues 
 ```
 module TextureManag
-using  ModernGL
-using DrWatson
-using  Main.OpenGLDisplayUtils
-using  Main.ForDisplayStructs
-using  Logging
-using Setfield
-export initializeTextures
-export updateImagesDisplayed
-export updateTexture
+using Base: Float16
+using  ModernGL ,DrWatson,  Main.OpenGLDisplayUtils, Main.ForDisplayStructs
+using  Main.Uniforms, Logging,Setfield, Glutils
+export initializeTextures, updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
 
 updateTextureString = """
 uploading data to given texture; of given types associated - specified in TextureSpec
@@ -78,22 +73,41 @@ it creates textrures as specified, renders them and return the list from  argume
 ```
 function initializeTextures(shader_program::UInt32,listOfTextSpecs::Vector{Main.ForDisplayStructs.TextureSpec})::Vector{Main.ForDisplayStructs.TextureSpec}
 
-res = Vector{TextureSpec}()
+    res = Vector{TextureSpec}()
 
-for (ind, textSpec ) in enumerate(listOfTextSpecs)
-    index=ind-1
-glActiveTexture(GL_TEXTURE0 +index); # active proper texture unit before binding
-glUniform1i(glGetUniformLocation(shader_program, textSpec.samplName),index);# we first look for uniform sampler in shader - here 
-textUreId= createTexture(index,textSpec.widthh,textSpec.heightt,textSpec.GL_Rtype)#binding texture and populating with data
-@info "textUreId in initializeTextures"  textUreId
-
-push!(res,setproperties(textSpec, (ID=textUreId)))
+    for (ind, textSpec ) in enumerate(listOfTextSpecs)
+        index=ind-1
+        #we need to get access to sampler
+        samplerRefNumb = 0
 
 
-end # for
+        glActiveTexture(GL_TEXTURE0 +index); # active proper texture unit before binding
+        glUniform1i(samplerRefNumb,index);# we first look for uniform sampler in shader  
+        textUreId= createTexture(index,textSpec.widthh,textSpec.heightt,textSpec.GL_Rtype)#binding texture and populating with data
+        @info "textUreId in initializeTextures"  textUreId
 
-return res
+        push!(res,setproperties(textSpec, (ID=textUreId)))
+
+
+    end # for
+
+    return res
 end #initializeAndDrawTextures
+
+
+
+function getReferenceTosampler(textSpec::Main.ForDisplayStructs.TextureSpec)::Int32
+    if(!textSpec.isMainImage) return  !textSpec.uniforms.samplerRef  end#if
+    #if we are here it is main image 
+       if typeOfMainSampler==1
+            return textSpec.uniforms.isamplerRef
+        elseif typeOfMainSampler==2
+            return textSpec.uniforms.usamplerRef
+        else
+            return textSpec.uniforms.fsamplerRef
+        end
+
+end#getReferenceTosampler
 
 
 updateImagesDisplayedStr =    """
@@ -122,6 +136,91 @@ end
 
 
 
+assignUniformsAndTypesToMaskstr =    """
+on the basis of the type supplied in texture characteristic
+it supplies given set of uniforms to it 
+It would also assign proper openGl types to given julia data type
+uniformsStructs - list of pairs where first entry  is a type of sampler like Int/Uint/Float and second is struct with references to uniforms 
+textSpecs - list of texture specificaton that we want to enrich by adding information about uniforms
+return list of texture specifications enriched by information about uniforms 
+"""
+@doc assignUniformsAndTypesToMaskstr
+function assignUniformsAndTypesToMasks(uniformsStructs::Vector{Pair{DataType, MaskTextureUniforms}}
+                             ,textSpecs::Vector{Main.ForDisplayStructs.TextureSpec}
+                             ,mainImageUniforms::MainImageUniforms)::Vector{Main.ForDisplayStructs.TextureSpec}
+
+return map(x-> chooseBestUniforms(uniformsStructs,mainImageUniforms,x) , textSpecs) |>
+            (mapped)-> map(x->setProperOpenGlTypes(x)  ,mapped)
+
+
+end#assignUniformsToMasks
+
+
+
+chooseBestUniformsStr =    """
+helper for assignUniformsToMasks - it looks for single best uniforms set for the texture spec
+on the basis of the type supplied in texture characteristic
+it supplies given set of uniforms to it 
+uniformsStructs - list of pairs where first entry  is a type of sampler like Int/Uint/Float and second is struct with references to uniforms 
+textSpec - texture specificaton that we want to enrich by adding information about uniforms
+return list of texture specifications enriched by information about uniforms 
+"""
+@doc chooseBestUniformsStr
+function chooseBestUniforms(uniformsStructs::Vector{Pair{DataType, MaskTextureUniforms}}
+                             ,textSpec::Main.ForDisplayStructs.TextureSpec
+                             ,mainImageUniforms::MainImageUniforms)::Main.ForDisplayStructs.TextureSpec
+
+    for strucPair in uniformsStructs
+        # we need to have the same supertypes for example abstract float ... and the struct can not be already in use
+        if (supertype(strucPair[1])== supertype(textSpec.dataType) && strucPair[2].isUsed==false)
+            if (!textSpec.isMainImage) #also for main image we have separate set of uniforms 
+                strucPair[2].isUsed==true #so it would not be used by other texture 
+                setMaskColor(textSpec.color,strucPair[2] ) # setting the proper color as uniform
+                return   setproperties(textSpec, (uniforms=strucPair[2])) 
+            end#if if we got here it is main image 
+                modifMainUnifs = setProperTypeOfMainSamplerRef(textSpec,mainImageUniforms)
+                setCTWindow(textSpec.min_shown_white,textSpec.max_shown_black, strucPair[2] )# we set window for displaying
+                return   setproperties(textSpec, (uniforms=modifMainUnifs)) 
+        end #if 
+        
+        
+    end #for
+    throw(DomainError(uniformsStructs, "no available samplers for this data type - add some manually to the fragment shader and Uniforms.jl check also is the type is supported - supported types - Int8,16,32 UInt 8,16,32 float16,32")) 
+
+end#assignUniformsToMasks
+
+
+function setProperTypeOfMainSamplerRef(texSpec::TextureSpec, mainUnifs::MainImageUniforms)::MainImageUniforms
+    
+    if supertype(Int)== supertype(texSpec.dataType)
+        setTypeOfMainSampler!(1, mainUnifs)
+        return  setproperties(mainUnifs, (typeOfMainSamplerValue=1))
+    elseif supertype(UInt)== supertype(texSpec.dataType)
+        setTypeOfMainSampler!(2, mainUnifs)
+        return  setproperties(mainUnifs, (typeOfMainSamplerValue=2))
+    else
+        setTypeOfMainSampler!(3, mainUnifs)
+        return  setproperties(mainUnifs, (typeOfMainSamplerValue=3))
+    end
+
+end#setProperTypeOfMainSamplerRef
+
+setProperOpenGlTypesStr = """
+On the basis of the type associated to texture we set proper open Gl types associated 
+based on https://www.khronos.org/registry/OpenGL-Refpages/gl4/html/glTexImage2D.xhtml
+and https://www.khronos.org/opengl/wiki/OpenGL_Type
+"""
+@doc setProperOpenGlTypesStr
+function setProperOpenGlTypes(textSpec::Main.ForDisplayStructs.TextureSpec)::Main.ForDisplayStructs.TextureSpec
+    if(isa(textSpec.dataType, Float16 )) return  setproperties(textSpec, (GL_Rtype= GL_R16F ,OpGlType= GLhalf ))     end 
+    if(isa(textSpec.dataType, Float32 )) return  setproperties(textSpec, (GL_Rtype= GL_R32F ,OpGlType= GLfloat))     end 
+    if(isa(textSpec.dataType, Int8 )) return  setproperties(textSpec, (GL_Rtype= GL_R8I ,OpGlType= GLbyte ))     end 
+    if(isa(textSpec.dataType, UInt8 )) return  setproperties(textSpec, (GL_Rtype= GL_R8UI,OpGlType= GLubyte ))     end 
+    if(isa(textSpec.dataType, Int16 )) return  setproperties(textSpec, (GL_Rtype= GL_R16I,OpGlType= GLshort ))     end 
+    if(isa(textSpec.dataType, UInt16 )) return  setproperties(textSpec, (GL_Rtype=GL_R16UI ,OpGlType=GLushort))     end 
+    if(isa(textSpec.dataType, Int32 )) return  setproperties(textSpec, (GL_Rtype= GL_R32I,OpGlType= GLint ))     end 
+    if(isa(textSpec.dataType, UInt32 )) return  setproperties(textSpec, (GL_Rtype=GL_R32UI ,OpGlType= GLuint))     end 
+end#
 
 
 
@@ -133,7 +232,6 @@ width -width of the image in  number of pixels
 height - height of the image in  number of pixels 
 pboNumber - just states which PBO it is
 return reference to the pixel buffer object that we use to upload this texture and data size calculated for this texture
-
 """
 @doc preparePixelBufferStr
 function preparePixelBuffer(juliaDataTyp::Type{juliaDataType},width,height,pboNumber)where{juliaDataType}

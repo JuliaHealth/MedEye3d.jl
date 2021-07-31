@@ -47,15 +47,8 @@ using DrWatson
 export coordinateDisplay
 export passDataForScrolling
 
-using ModernGL
-using GLFW
-using Main.PrepareWindow
-using Main.TextureManag
-using Main.OpenGLDisplayUtils
-using Main.ForDisplayStructs
-using Main.ReactingToInput
-using Rocket
-using Setfield
+using ModernGL, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUtils, Main.ForDisplayStructs,Main.Uniforms
+using Main.ReactingToInput, Rocket, Setfield
 
 #holds actor that is main structure that process inputs from GLFW and reacts to it
 mainActor = sync(ActorWithOpenGlObjects())
@@ -66,6 +59,7 @@ subscriptions = []
 coordinateDisplayStr = """
 coordinating displaying - sets needed constants that are storeds in  forDisplayConstants; and configures interactions from GLFW events
 listOfTextSpecs - holds required data needed to initialize textures
+keeps also references to needed uniforms etc.
 windowWidth::Int,windowHeight::Int - GLFW window dimensions
 """
 @doc coordinateDisplayStr
@@ -76,15 +70,20 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
                         ,windowHeight::Int=Int32(800) )
  #creating window and event listening loop
     window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo = Main.PrepareWindow.displayAll(windowWidth,windowHeight)
-    #using data from arguments  to fill texture specifications
-    listOfTextSpecsMapped= map((spec)-> setproperties(spec, (widthh= imageTextureWidth, heightt= imageTextureHeight )) 
-                                            ,listOfTextSpecs)
+
+    #as we already has shader program ready we can  now initialize uniforms 
+    masksTuplList, mainImageUnifs = createStructsDict(shader_program)
+    # than we set those uniforms, open gl types and using data from arguments  to fill texture specifications
+    listOfTextSpecsMapped= assignUniformsAndTypesToMasks(masksTuplList,listOfTextSpecs, mainImageUnifs ) |> 
+    (specs)-> map((spec)-> setproperties(spec, (widthh= imageTextureWidth, heightt= imageTextureHeight )) 
+                                            ,specs)
 
     #initializing object that holds data reqired for interacting with opengl 
     forDispObj =  forDisplayObjects(
         initializeTextures(shader_program, listOfTextSpecsMapped)
             ,window
-            ,vertex_shader,fragment_shader
+            ,vertex_shader
+            ,fragment_shader
             ,shader_program
             ,stopListening,
             Threads.Atomic{Bool}(0)
@@ -95,6 +94,7 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
             ,windowWidth
             ,windowHeight
             ,0 # number of slices will be set when data for scrolling will come
+            ,mainImageUnifs
     )
 
     #in order to clean up all resources while closing

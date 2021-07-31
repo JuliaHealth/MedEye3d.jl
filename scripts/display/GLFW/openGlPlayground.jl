@@ -1,3 +1,4 @@
+using Base: Int16
 
      using DrWatson
      @quickactivate "Probabilistic medical segmentation"
@@ -13,10 +14,16 @@
 
      include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
      include(DrWatson.scriptsdir("display","GLFW","modernGL","OpenGLDisplayUtils.jl"))
-     include(DrWatson.scriptsdir("display","GLFW","startModules","ShadersAndVerticies.jl"))
+     include(DrWatson.scriptsdir("display","GLFW","shadersEtc","ShadersAndVerticies.jl"))
+
+     include(DrWatson.scriptsdir("display","GLFW","shadersEtc","Uniforms.jl"))
+
+     
      include(DrWatson.scriptsdir("display","GLFW","modernGL","TextureManag.jl") )
      include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindow.jl"))
+     
 
+ 
 
      include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactToScroll.jl") )
      include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactOnMouseClickAndDrag.jl") )
@@ -38,28 +45,23 @@ using Parameters
 listOfTexturesToCreate = [
 Main.ForDisplayStructs.TextureSpec(
     name = "grandTruthLiverLabel",
+    dataType= UInt8,
     strokeWidth = 5,
-    colors = [RGB(1.0,0.0,0.0)],
-    GL_Rtype=  GL_R8UI,
-    OpGlType = GL_UNSIGNED_BYTE,
-    samplName = "msk0" ),
+    color = RGB(1.0,0.0,0.0),
+   ),
 Main.ForDisplayStructs.TextureSpec(
     name = "mainForModificationsTexture1",
-    colors = [RGB(0.0,1.0,0.0)],
-    GL_Rtype=  GL_R8UI,
-    OpGlType = GL_UNSIGNED_BYTE,
-    samplName = "mask1" ),
+    dataType= UInt8,
+    color = RGB(0.0,1.0,0.0),
+   ),
     Main.ForDisplayStructs.TextureSpec(
     name = "mainForModificationsTexture2",
-    colors = [RGB(0.0,0.0,1.0)],
-    GL_Rtype=  GL_R8UI,
-    OpGlType = GL_UNSIGNED_BYTE,
-    samplName = "mask2" )      
+    dataType= UInt8,
+    color = RGB(0.0,0.0,1.0),
+     )      
     ,Main.ForDisplayStructs.TextureSpec(
     name= "mainCTImage",
-    GL_Rtype =  GL_R16I ,
-    OpGlType =  GL_SHORT,
-    samplName = "Texture0")  
+    dataType= Int16,)  
       ]
    
    
@@ -112,10 +114,23 @@ Main.ForDisplayStructs.TextureSpec(
 
 
 
-    Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,512,512, 1000,800)
+    Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,40,40, 1000,800)
 
-mainMaskDummy = zeros(UInt8,10,512,512)
-ctDummy = ones(Int16,10,512,512)# will give white background for testing 
+
+
+   ### playing with uniforms
+   program = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.shader_program
+
+    
+
+
+
+###### main data ...
+
+
+
+mainMaskDummy = zeros(UInt8,10,40,40)
+ctDummy = ones(Int16,10,40,40)# will give white background for testing 
     listOfDataAndImageNames = [("grandTruthLiverLabel",mainMaskDummy),("mainCTImage",ctDummy ) ]
     #,("mainForModificationsTexture2",zeros(Int8,10,512,512))
 
@@ -129,21 +144,61 @@ ctDummy = ones(Int16,10,512,512)# will give white background for testing
     push!(Main.SegmentationDisplay.mainActor.actor.textureToModifyVec, textSpec)
 
    # Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [listOfTexturesToCreate[1]]
-   ### playing with uniforms
-   program = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.shader_program
-
-   using Glutils
-   @uniforms  colorsMask0, colorsMask1, colorsMask2,isVisibleTexture0, isVisibleMask0,isVisibleMask1,isVisibleMask2 = program
-
-   @uniforms! begin
-
-   isVisibleMask0:= true
-    end
+  
+  
+  
 
 
    GLFW.PollEvents()
 
 
+
+
+
+
+#    supertype(Int16)
+#    supertype(UInt16)
+
+#    supertype(Float32)
+
+#    supertype(Int)==supertype(Int16)
+   
+#    supertype(Flo)==supertype(Int16)
+
+
+# widen(widen(widen(Int16)))
+
+
+
+
+
+#    @enum C a b c
+   
+#    fieldnames(C)
+   
+#    @enum uniformForShader(colorsMask0, colorsMask1, colorsMask2,isVisibleTexture0, isVisibleMask0,isVisibleMask1,isVisibleMask2)
+
+#    using Glutils
+#    @uniforms  (colorsMask0, colorsMask1, colorsMask2,isVisibleTexture0, isVisibleMask0,isVisibleMask1,isVisibleMask2) = program
+
+#    c = Cfloat[0.0, 1.0, 0.0, 1.0]
+
+#  colorSet =   [c,c,c ,c,c,c ,c]
+
+
+#    @uniforms! begin
+#    colorsMask0:=c
+#    colorsMask1:=c
+#    colorsMask2:=c
+#    #isVisibleMask0:= true
+#     end
+
+# struct zz 
+# a::Int
+# b::Float32
+# b::Float32
+
+# end
 
 
 

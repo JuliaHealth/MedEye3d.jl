@@ -3,11 +3,8 @@ using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
 module ForDisplayStructs
-using Base: Int32
-export Mask
-export TextureSpec
-export forDisplayObjects
-export ActorWithOpenGlObjects
+using Base: Int32, isvisible
+export Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, TextureUniforms,MainImageUniforms, MaskTextureUniforms
 
 using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries
 
@@ -23,25 +20,67 @@ this struct is parametarized by type of 3 dimensional array that will be used  t
   maskArrayObs::Observable{Array{arrayType}} # observable array used to store information that will be displayed over main image
   colorRGBA::RGBA #associated RGBA  that will be displayed based on the values in maskArrayObs
 end
+```@doc
+hold reference numbers that will be used to access and modify given uniform value in a shader
+```
+abstract type TextureUniforms end
 
+
+```@doc
+hold reference numbers that will be used to access and modify given uniform value
+In order to have easy fast access to the values set the most recent values will also be stored inside
+In order to improve usability  we will also save with what data type this mask is associated 
+for example Int, uint, float etc
+```
+@with_kw mutable struct MaskTextureUniforms <: TextureUniforms
+samplerRef ::Int32 =Int32(0) #reference to sampler of the texture
+colorsMaskRef ::Int32 =Int32(0) #reference to uniform holding color of this mask
+isVisibleRef::Int32 =Int32(0)# reference to uniform that points weather we 
+isUsed::Bool =false# marking is it used by some texture and should not be reused
+end
+
+```@doc
+Holding references to uniforms used to controll main image
+```
+@with_kw struct MainImageUniforms<: TextureUniforms
+isamplerRef ::Int32 =Int32(0) #reference to integer  sampler of the texture
+usamplerRef ::Int32 =Int32(0) #reference to unsigned integer sampler of the texture
+fsamplerRef ::Int32 =Int32(0) #reference to float sampler of the texture
+typeOfMainSamplerRef ::Int32 =Int32(0) #reference to integrer tha will point which sampler should be used 1 will mean integer, 2 will mean uint and 3 float
+typeOfMainSamplerValue ::Int32 =Int32(0) #value of integrer that will point which sampler should be used 1 will mean integer, 2 will mean uint and 3 float
+isVisibleRef::Int32 =Int32(0)# reference to uniform that points weather we 
+# uniforms controlling windowing
+min_shown_white::Int32 =Int32(0)
+max_shown_black::Int32 =Int32(0)
+displayRange::Int32 =Int32(0)
+
+end
 
 ```@doc
 Holding the data needed to create and  later reference the textures
 ```
 @with_kw struct TextureSpec
-  name::String # human readable name by which we can reference texture
-  numb::Int32 =-1# needed to enable swithing between textures generally convinient when between 0-9; needed only if texture is to be modified by mouse input
-  colors::Vector{RGB}=[]# needed in case for the masks in order to establish the range of colors we are intrested in in case of binary mask there is no point to supply more than one color (supply Vector with length = 1)
+  name::String                #human readable name by which we can reference texture
+  numb::Int32 =-1             #needed to enable swithing between textures generally convinient when between 0-9; needed only if texture is to be modified by mouse input
+  dataType::Type              #type of data that will be used Int/uint/float
+  isMainImage ::Bool = false  #true if this texture represents main image
+  isSecondaryMain ::Bool = false # true if it holds some other important information that is not mask - used for example in case of nuclear imagiing studies
+  isContinuusMask ::Bool = false # in case of masks if mask is continuus color display will be a bit diffrent
+  color::RGB = RGB(0.0,0.0,0.0) #needed in case for the masks in order to establish the range of colors we are intrested in in case of binary mask there is no point to supply more than one color (supply Vector with length = 1)
+  colorSet::Vector{RGB}=[]    #set of colors that can be used for mask with continous values
   strokeWidth::Int32 =Int32(3)#marking how thick should be the line that is left after acting with the mouse ... 
-  isEditable::Bool =false #if true we can modify given  texture using mouse interaction
-  widthh::Int32 =Int32(0)  # width of texture
-  heightt::Int32 =Int32(0)  #height of the texture
-  slicesNumber::Int = 0 #number of slices available
-  GL_Rtype::UInt32 #GlRtype - for example GL_R8UI or GL_R16I
-  OpGlType ::UInt32 #open gl type - for example GL_UNSIGNED_BYTE or GL_SHORT
-  samplName::String #name of the specified sampler in fragment shader  - critical is that in case of using floats we use sampler in case of integers isampler and in case of unsigned integers usampler 
+  isEditable::Bool =false     #if true we can modify given  texture using mouse interaction
+  widthh::Int32 =Int32(0)     #width of texture
+  heightt::Int32 =Int32(0)    #height of the texture
+  slicesNumber::Int = 0       #number of slices available
+  GL_Rtype::UInt32 =GL_R8UI           #GlRtype - for example GL_R8UI or GL_R16I
+  OpGlType ::UInt32 =GL_UNSIGNED_BYTE          #open gl type - for example GL_UNSIGNED_BYTE or GL_SHORT
   ID::Base.RefValue{UInt32} = Ref(UInt32(0))   #id of Texture
-  isVisible::Bool= true # if false it should be invisible 
+  isVisible::Bool= true       #if false it should be invisible 
+  uniforms::TextureUniforms=MaskTextureUniforms()# holds values needed to control uniforms in a shader
+  #used in case this is main image and we want to set window
+  min_shown_white::Int32 =0
+  max_shown_black::Int32 =-200
 end
 
 ```@doc
@@ -53,7 +92,7 @@ Defined in order to hold constant objects needed to display images
   vertex_shader::UInt32 =1
   fragment_shader::UInt32=1
   shader_program::UInt32=1
-  stopListening::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0)
+  stopListening::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0)# enables unlocking GLFW context for futher actions
   stopExecution::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0)#it will halt ability to display image for futher display in order to keep OpenGL from blocking - optional to set
   vbo::UInt32 =1 #vertex buffer object id
   ebo::UInt32 =1 #element buffer object id
@@ -65,8 +104,8 @@ Defined in order to hold constant objects needed to display images
   windowHeight::Int32=1
   #number of available slices - needed for scrolling needs
   slicesNumber::Int32=1
+  mainImageUniforms::MainImageUniforms = MainImageUniforms()# struct with references to main image
 end
-
 
 
 
@@ -81,7 +120,6 @@ mutable struct ActorWithOpenGlObjects <: NextActor{Any}
     isSliceChanged::Bool # set to true when slice is changed set to false when we start interacting with this slice - thanks to this we know that when we start drawing on one slice and change the slice the line would star a new on new slice
     ActorWithOpenGlObjects() = new(1,forDisplayObjects(),[],[],false)
 end
-
 
 
 end #module

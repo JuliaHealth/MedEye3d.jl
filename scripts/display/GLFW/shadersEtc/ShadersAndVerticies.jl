@@ -21,7 +21,8 @@ using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 
-fragmentShaderFileDir = DrWatson.scriptsdir("display","GLFW","startModules","mainShader.frag")
+fragmentShaderFileDir = DrWatson.scriptsdir("display","GLFW","shadersEtc","mainShader.frag")
+
 
 
 ```@doc
