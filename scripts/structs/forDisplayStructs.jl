@@ -32,11 +32,10 @@ In order to have easy fast access to the values set the most recent values will 
 In order to improve usability  we will also save with what data type this mask is associated 
 for example Int, uint, float etc
 ```
-@with_kw mutable struct MaskTextureUniforms <: TextureUniforms
+@with_kw struct MaskTextureUniforms <: TextureUniforms
 samplerRef ::Int32 =Int32(0) #reference to sampler of the texture
 colorsMaskRef ::Int32 =Int32(0) #reference to uniform holding color of this mask
 isVisibleRef::Int32 =Int32(0)# reference to uniform that points weather we 
-isUsed::Bool =false# marking is it used by some texture and should not be reused
 end
 
 ```@doc

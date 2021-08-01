@@ -145,7 +145,12 @@ ctDummy = ones(Int16,10,40,40)# will give white background for testing
 
     Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice,3 )
     textSpec = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1]
+    
     push!(Main.SegmentationDisplay.mainActor.actor.textureToModifyVec, textSpec)
+
+    setMaskColor(RGB(1.0,1.0,1.0) ,textSpec.uniforms)
+    setTextureVisibility(false ,textSpec.uniforms)
+
 
    # Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [listOfTexturesToCreate[1]]
   

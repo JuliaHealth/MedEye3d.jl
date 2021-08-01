@@ -3,7 +3,6 @@
 managing  uniform values - global values in shaders
 """
 module Uniforms
-using Base: Int32, isvisible
 using Glutils
 using Main.ForDisplayStructs
 using Dictionaries
