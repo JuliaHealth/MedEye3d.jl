@@ -167,8 +167,8 @@ return list of texture specifications enriched by information about uniforms
 """
 @doc chooseBestUniformsStr
 function chooseBestUniforms(uniformsStructs::Vector{Pair{DataType, MaskTextureUniforms}}
-                             ,textSpec::Main.ForDisplayStructs.TextureSpec
-                             ,mainImageUniforms::MainImageUniforms)::Main.ForDisplayStructs.TextureSpec
+                            ,mainImageUniforms::MainImageUniforms
+                            ,textSpec::Main.ForDisplayStructs.TextureSpec)::Main.ForDisplayStructs.TextureSpec
 
     for strucPair in uniformsStructs
         # we need to have the same supertypes for example abstract float ... and the struct can not be already in use
@@ -176,8 +176,9 @@ function chooseBestUniforms(uniformsStructs::Vector{Pair{DataType, MaskTextureUn
             if (!textSpec.isMainImage) #also for main image we have separate set of uniforms 
                 strucPair[2].isUsed==true #so it would not be used by other texture 
                 setMaskColor(textSpec.color,strucPair[2] ) # setting the proper color as uniform
+                setTextureVisibility(textSpec.isVisible,strucPair[2] ) # setting the mask as visible
                 return   setproperties(textSpec, (uniforms=strucPair[2])) 
-            end#if if we got here it is main image 
+            end#if - if we got here it is main image 
                 modifMainUnifs = setProperTypeOfMainSamplerRef(textSpec,mainImageUniforms)
                 setCTWindow(textSpec.min_shown_white,textSpec.max_shown_black, strucPair[2] )# we set window for displaying
                 return   setproperties(textSpec, (uniforms=modifMainUnifs)) 
@@ -212,14 +213,16 @@ and https://www.khronos.org/opengl/wiki/OpenGL_Type
 """
 @doc setProperOpenGlTypesStr
 function setProperOpenGlTypes(textSpec::Main.ForDisplayStructs.TextureSpec)::Main.ForDisplayStructs.TextureSpec
-    if(isa(textSpec.dataType, Float16 )) return  setproperties(textSpec, (GL_Rtype= GL_R16F ,OpGlType= GLhalf ))     end 
-    if(isa(textSpec.dataType, Float32 )) return  setproperties(textSpec, (GL_Rtype= GL_R32F ,OpGlType= GLfloat))     end 
-    if(isa(textSpec.dataType, Int8 )) return  setproperties(textSpec, (GL_Rtype= GL_R8I ,OpGlType= GLbyte ))     end 
-    if(isa(textSpec.dataType, UInt8 )) return  setproperties(textSpec, (GL_Rtype= GL_R8UI,OpGlType= GLubyte ))     end 
-    if(isa(textSpec.dataType, Int16 )) return  setproperties(textSpec, (GL_Rtype= GL_R16I,OpGlType= GLshort ))     end 
-    if(isa(textSpec.dataType, UInt16 )) return  setproperties(textSpec, (GL_Rtype=GL_R16UI ,OpGlType=GLushort))     end 
-    if(isa(textSpec.dataType, Int32 )) return  setproperties(textSpec, (GL_Rtype= GL_R32I,OpGlType= GLint ))     end 
-    if(isa(textSpec.dataType, UInt32 )) return  setproperties(textSpec, (GL_Rtype=GL_R32UI ,OpGlType= GLuint))     end 
+    if(textSpec.dataType== Float16 ) return  setproperties(textSpec, (GL_Rtype= GL_R16F ,OpGlType= GL_HALF_FLOAT ))     end 
+    if(textSpec.dataType== Float32 ) return  setproperties(textSpec, (GL_Rtype= GL_R32F ,OpGlType= GL_FLOAT))     end 
+    if(textSpec.dataType== Int8 ) return  setproperties(textSpec, (GL_Rtype= GL_R8I ,OpGlType= GL_BYTE ))     end 
+    if(textSpec.dataType== UInt8 ) return  setproperties(textSpec, (GL_Rtype= GL_R8UI,OpGlType= GL_UNSIGNED_BYTE ))     end 
+    if(textSpec.dataType== Int16 ) return  setproperties(textSpec, (GL_Rtype= GL_R16I,OpGlType= GL_SHORT ))     end 
+    if(textSpec.dataType== UInt16) return  setproperties(textSpec, (GL_Rtype=GL_R16UI ,OpGlType=GL_UNSIGNED_SHORT))     end 
+    if(textSpec.dataType== Int32 ) return  setproperties(textSpec, (GL_Rtype= GL_R32I,OpGlType= GL_INT ))     end 
+    if(textSpec.dataType== UInt32) return  setproperties(textSpec, (GL_Rtype=GL_R32UI ,OpGlType= GL_UNSIGNED_INT))     end 
+
+    throw(DomainError(textSpec, "type  of texture is not supported - supported types - Int8,16,32 UInt 8,16,32 float16,32")) 
 end#
 
 

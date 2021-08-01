@@ -73,8 +73,8 @@ Holding the data needed to create and  later reference the textures
   widthh::Int32 =Int32(0)     #width of texture
   heightt::Int32 =Int32(0)    #height of the texture
   slicesNumber::Int = 0       #number of slices available
-  GL_Rtype::UInt32 =GL_R8UI           #GlRtype - for example GL_R8UI or GL_R16I
-  OpGlType ::UInt32 =GL_UNSIGNED_BYTE          #open gl type - for example GL_UNSIGNED_BYTE or GL_SHORT
+  GL_Rtype::UInt32 =UInt32(0)           #GlRtype - for example GL_R8UI or GL_R16I
+  OpGlType ::UInt32 =UInt32(0)          #open gl type - for example GL_UNSIGNED_BYTE or GL_SHORT
   ID::Base.RefValue{UInt32} = Ref(UInt32(0))   #id of Texture
   isVisible::Bool= true       #if false it should be invisible 
   uniforms::TextureUniforms=MaskTextureUniforms()# holds values needed to control uniforms in a shader

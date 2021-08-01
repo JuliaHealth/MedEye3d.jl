@@ -195,7 +195,23 @@ vec4 fmainColor(in float texel)
 //the textures with values that are always between 0 and 1 
 //(including binary masks) - if value is greater than 0 and flag of visibility is set to true 
 //the color will affect main color otherwise it would be just passed through the function without any modifications
-vec4 maskColor(in uint maskTexel,in vec4 FragColorMain ,in bool isVisible ,in vec4 color  )
+vec4 umaskColor(in uint maskTexel,in vec4 FragColorMain ,in bool isVisible ,in vec4 color  )
+{
+  if(maskTexel>0 && isVisible) {
+       return   color*FragColorMain ;//vec4(maskTexel, 0.0, 0.0, 0.5);
+    }
+    return FragColorMain;
+}
+
+vec4 imaskColor(in int maskTexel,in vec4 FragColorMain ,in bool isVisible ,in vec4 color  )
+{
+  if(maskTexel>0 && isVisible) {
+       return   color*FragColorMain ;//vec4(maskTexel, 0.0, 0.0, 0.5);
+    }
+    return FragColorMain;
+}
+
+vec4 fmaskColor(in float maskTexel,in vec4 FragColorMain ,in bool isVisible ,in vec4 color  )
 {
   if(maskTexel>0 && isVisible) {
        return   color*FragColorMain ;//vec4(maskTexel, 0.0, 0.0, 0.5);
@@ -211,45 +227,45 @@ vec4 maskColor(in uint maskTexel,in vec4 FragColorMain ,in bool isVisible ,in ve
         vec4 FragColorA; 
         //depending on texture type we need to use diffrent samplers
            if(typeOfMainSampler==1){
-                FragColorA = imainColor(texture2D(Texture0, TexCoord0).r) ; }
-            else if( typeOfMainSampler ==2){ 
-                FragColorA = umainColor(texture2D(Texture0, TexCoord0).r); }
+                FragColorA = imainColor(texture2D(iTexture0, TexCoord0).r) ; }
+            else if(typeOfMainSampler ==2){ 
+                FragColorA = umainColor(texture2D(uTexture0, TexCoord0).r); }
             else{
-                FragColorA = imainColor(texture2D(Texture0, TexCoord0).r); }            
+                FragColorA = fmainColor(texture2D(fTexture0, TexCoord0).r); }            
             
     //we pass all masks so all would be available in case the mask would not be used it would not affect the image  
     //uints
-    FragColorA=maskColor(texture2D(uImask0, TexCoord0).r,FragColorA,uIisVisk0, uIcolorMask0);
-    FragColorA=maskColor(texture2D(uImask1, TexCoord0).r,FragColorA,uIisVisk1, uIcolorMask1);
-    FragColorA=maskColor(texture2D(uImask2, TexCoord0).r,FragColorA,uIisVisk2, uIcolorMask2);
-    FragColorA=maskColor(texture2D(uImask3, TexCoord0).r,FragColorA,uIisVisk3, uIcolorMask3);
-    FragColorA=maskColor(texture2D(uImask4, TexCoord0).r,FragColorA,uIisVisk4, uIcolorMask4);
-    FragColorA=maskColor(texture2D(uImask5, TexCoord0).r,FragColorA,uIisVisk5, uIcolorMask5);
-    FragColorA=maskColor(texture2D(uImask6, TexCoord0).r,FragColorA,uIisVisk6, uIcolorMask6);
-    FragColorA=maskColor(texture2D(uImask7, TexCoord0).r,FragColorA,uIisVisk7, uIcolorMask7);
-    FragColorA=maskColor(texture2D(uImask8, TexCoord0).r,FragColorA,uIisVisk8, uIcolorMask8);
+    FragColorA=umaskColor(texture2D(uImask0, TexCoord0).r,FragColorA,uIisVisk0, uIcolorMask0);
+    FragColorA=umaskColor(texture2D(uImask1, TexCoord0).r,FragColorA,uIisVisk1, uIcolorMask1);
+    FragColorA=umaskColor(texture2D(uImask2, TexCoord0).r,FragColorA,uIisVisk2, uIcolorMask2);
+    FragColorA=umaskColor(texture2D(uImask3, TexCoord0).r,FragColorA,uIisVisk3, uIcolorMask3);
+    FragColorA=umaskColor(texture2D(uImask4, TexCoord0).r,FragColorA,uIisVisk4, uIcolorMask4);
+    FragColorA=umaskColor(texture2D(uImask5, TexCoord0).r,FragColorA,uIisVisk5, uIcolorMask5);
+    FragColorA=umaskColor(texture2D(uImask6, TexCoord0).r,FragColorA,uIisVisk6, uIcolorMask6);
+    FragColorA=umaskColor(texture2D(uImask7, TexCoord0).r,FragColorA,uIisVisk7, uIcolorMask7);
+    FragColorA=umaskColor(texture2D(uImask8, TexCoord0).r,FragColorA,uIisVisk8, uIcolorMask8);
   
     //int
-    FragColorA=maskColor(texture2D(imask0, TexCoord0).r,FragColorA,iisVisk0, icolorMask0);
-    FragColorA=maskColor(texture2D(imask1, TexCoord0).r,FragColorA,iisVisk1, icolorMask1);
-    FragColorA=maskColor(texture2D(imask2, TexCoord0).r,FragColorA,iisVisk2, icolorMask2);
-    FragColorA=maskColor(texture2D(imask3, TexCoord0).r,FragColorA,iisVisk3, icolorMask3);
-    FragColorA=maskColor(texture2D(imask4, TexCoord0).r,FragColorA,iisVisk4, icolorMask4);
-    FragColorA=maskColor(texture2D(imask5, TexCoord0).r,FragColorA,iisVisk5, icolorMask5);
-    FragColorA=maskColor(texture2D(imask6, TexCoord0).r,FragColorA,iisVisk6, icolorMask6);
-    FragColorA=maskColor(texture2D(imask7, TexCoord0).r,FragColorA,iisVisk7, icolorMask7);
-    FragColorA=maskColor(texture2D(imask8, TexCoord0).r,FragColorA,iisVisk8, icolorMask8);
+    FragColorA=imaskColor(texture2D(imask0, TexCoord0).r,FragColorA,iisVisk0, icolorMask0);
+    FragColorA=imaskColor(texture2D(imask1, TexCoord0).r,FragColorA,iisVisk1, icolorMask1);
+    FragColorA=imaskColor(texture2D(imask2, TexCoord0).r,FragColorA,iisVisk2, icolorMask2);
+    FragColorA=imaskColor(texture2D(imask3, TexCoord0).r,FragColorA,iisVisk3, icolorMask3);
+    FragColorA=imaskColor(texture2D(imask4, TexCoord0).r,FragColorA,iisVisk4, icolorMask4);
+    FragColorA=imaskColor(texture2D(imask5, TexCoord0).r,FragColorA,iisVisk5, icolorMask5);
+    FragColorA=imaskColor(texture2D(imask6, TexCoord0).r,FragColorA,iisVisk6, icolorMask6);
+    FragColorA=imaskColor(texture2D(imask7, TexCoord0).r,FragColorA,iisVisk7, icolorMask7);
+    FragColorA=imaskColor(texture2D(imask8, TexCoord0).r,FragColorA,iisVisk8, icolorMask8);
 
     //float
-    FragColorA=maskColor(texture2D(umask0, TexCoord0).r,FragColorA,fisVisk0, fcolorMask0);
-    FragColorA=maskColor(texture2D(umask1, TexCoord0).r,FragColorA,fisVisk1, fcolorMask1);
-    FragColorA=maskColor(texture2D(umask2, TexCoord0).r,FragColorA,fisVisk2, fcolorMask2);
-    FragColorA=maskColor(texture2D(umask3, TexCoord0).r,FragColorA,fisVisk3, fcolorMask3);
-    FragColorA=maskColor(texture2D(umask4, TexCoord0).r,FragColorA,fisVisk4, fcolorMask4);
-    FragColorA=maskColor(texture2D(umask5, TexCoord0).r,FragColorA,fisVisk5, fcolorMask5);
-    FragColorA=maskColor(texture2D(umask6, TexCoord0).r,FragColorA,fisVisk6, fcolorMask6);
-    FragColorA=maskColor(texture2D(umask7, TexCoord0).r,FragColorA,fisVisk7, fcolorMask7);
-    FragColorA=maskColor(texture2D(imask8, TexCoord0).r,FragColorA,fisVisk8, fcolorMask8);
+    FragColorA=fmaskColor(texture2D(fmask0, TexCoord0).r,FragColorA,fisVisk0, fcolorMask0);
+    FragColorA=fmaskColor(texture2D(fmask1, TexCoord0).r,FragColorA,fisVisk1, fcolorMask1);
+    FragColorA=fmaskColor(texture2D(fmask2, TexCoord0).r,FragColorA,fisVisk2, fcolorMask2);
+    FragColorA=fmaskColor(texture2D(fmask3, TexCoord0).r,FragColorA,fisVisk3, fcolorMask3);
+    FragColorA=fmaskColor(texture2D(fmask4, TexCoord0).r,FragColorA,fisVisk4, fcolorMask4);
+    FragColorA=fmaskColor(texture2D(fmask5, TexCoord0).r,FragColorA,fisVisk5, fcolorMask5);
+    FragColorA=fmaskColor(texture2D(fmask6, TexCoord0).r,FragColorA,fisVisk6, fcolorMask6);
+    FragColorA=fmaskColor(texture2D(fmask7, TexCoord0).r,FragColorA,fisVisk7, fcolorMask7);
+    FragColorA=fmaskColor(texture2D(fmask8, TexCoord0).r,FragColorA,fisVisk8, fcolorMask8);
 
 
     FragColor = FragColorA;

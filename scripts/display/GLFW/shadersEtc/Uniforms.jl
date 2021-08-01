@@ -111,22 +111,25 @@ function createStructsDict(program::UInt32) ::Tuple{Vector{Pair{DataType, MaskTe
     ,Int => MaskTextureUniforms( samplerRef =imask7, isVisibleRef=iisVisk7, colorsMaskRef =icolorMask7) 
     ,Int => MaskTextureUniforms( samplerRef =imask8, isVisibleRef=iisVisk8, colorsMaskRef =icolorMask8) 
     #float
-    ,Float => MaskTextureUniforms( samplerRef =umask0, isVisibleRef=fisVisk0, colorsMaskRef =fcolorMask0) 
-    ,Float => MaskTextureUniforms( samplerRef =umask1, isVisibleRef=fisVisk1, colorsMaskRef =fcolorMask1) 
-    ,Float => MaskTextureUniforms( samplerRef =umask2, isVisibleRef=fisVisk2, colorsMaskRef =fcolorMask2) 
-    ,Float => MaskTextureUniforms( samplerRef =umask3, isVisibleRef=fisVisk3, colorsMaskRef =fcolorMask3) 
-    ,Float => MaskTextureUniforms( samplerRef =umask4, isVisibleRef=fisVisk4, colorsMaskRef =fcolorMask4) 
-    ,Float => MaskTextureUniforms( samplerRef =umask5, isVisibleRef=fisVisk5, colorsMaskRef =fcolorMask5) 
-    ,Float => MaskTextureUniforms( samplerRef =umask6, isVisibleRef=fisVisk6, colorsMaskRef =fcolorMask6) 
-    ,Float => MaskTextureUniforms( samplerRef =umask7, isVisibleRef=fisVisk7, colorsMaskRef =fcolorMask7) 
-    ,Float => MaskTextureUniforms( samplerRef =imask8, isVisibleRef=fisVisk8, colorsMaskRef =fcolorMask8) ]
+    ,Float32 => MaskTextureUniforms( samplerRef =fmask0, isVisibleRef=fisVisk0, colorsMaskRef =fcolorMask0) 
+    ,Float32 => MaskTextureUniforms( samplerRef =fmask1, isVisibleRef=fisVisk1, colorsMaskRef =fcolorMask1) 
+    ,Float32 => MaskTextureUniforms( samplerRef =fmask2, isVisibleRef=fisVisk2, colorsMaskRef =fcolorMask2) 
+    ,Float32 => MaskTextureUniforms( samplerRef =fmask3, isVisibleRef=fisVisk3, colorsMaskRef =fcolorMask3) 
+    ,Float32 => MaskTextureUniforms( samplerRef =fmask4, isVisibleRef=fisVisk4, colorsMaskRef =fcolorMask4) 
+    ,Float32 => MaskTextureUniforms( samplerRef =fmask5, isVisibleRef=fisVisk5, colorsMaskRef =fcolorMask5) 
+    ,Float32 => MaskTextureUniforms( samplerRef =fmask6, isVisibleRef=fisVisk6, colorsMaskRef =fcolorMask6) 
+    ,Float32 => MaskTextureUniforms( samplerRef =fmask7, isVisibleRef=fisVisk7, colorsMaskRef =fcolorMask7) 
+    ,Float32 => MaskTextureUniforms( samplerRef =fmask8, isVisibleRef=fisVisk8, colorsMaskRef =fcolorMask8) ]
 
-    mainImageUnifs = MainImageUniforms( samplerRef =Texture0
-                                    ,isVisibleRef = isVisibleTexture0
+    mainImageUnifs = MainImageUniforms( isamplerRef =iTexture0
+                                    ,usamplerRef = uTexture0
+                                    ,fsamplerRef = fTexture0
+                                    ,typeOfMainSamplerRef = typeOfMainSampler
                                     ,min_shown_white = min_shown_white
                                     ,max_shown_black = max_shown_black
                                     ,displayRange = displayRange
             )
+
    return (masksTuplList,mainImageUnifs)  
                      
 

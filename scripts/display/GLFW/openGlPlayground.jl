@@ -47,25 +47,29 @@ Main.ForDisplayStructs.TextureSpec(
     name = "grandTruthLiverLabel",
     dataType= UInt8,
     strokeWidth = 5,
-    color = RGB(1.0,0.0,0.0),
+    color = RGB(1.0,0.0,0.0)
    ),
 Main.ForDisplayStructs.TextureSpec(
     name = "mainForModificationsTexture1",
     dataType= UInt8,
-    color = RGB(0.0,1.0,0.0),
+    color = RGB(0.0,1.0,0.0)
    ),
     Main.ForDisplayStructs.TextureSpec(
     name = "mainForModificationsTexture2",
     dataType= UInt8,
-    color = RGB(0.0,0.0,1.0),
+    color = RGB(0.0,0.0,1.0)
      )      
     ,Main.ForDisplayStructs.TextureSpec(
     name= "mainCTImage",
-    dataType= Int16,)  
+    dataType= Int16)  
       ]
    
-   
-      listOfTexturesToCreate
+      textSpec=listOfTexturesToCreate[1]
+      setproperties(textSpec, (GL_Rtype= GL_R8UI,OpGlType= GL_UNSIGNED_BYTE ))
+
+
+
+      
     include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactingToInput.jl"))
     using Main.ReactingToInput
 
