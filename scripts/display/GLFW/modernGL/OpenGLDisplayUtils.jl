@@ -18,4 +18,3 @@ end
 
 
 end #openGLDisplayUtils
-

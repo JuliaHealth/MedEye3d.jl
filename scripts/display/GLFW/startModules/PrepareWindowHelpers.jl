@@ -53,6 +53,7 @@ function createVertexBuffer()
     vao = Ref(GLuint(0))
     glGenVertexArrays(1, vao)
     glBindVertexArray(vao[])
+    return vao
 end #createVertexBuffer
 
 

@@ -48,7 +48,7 @@ export coordinateDisplay
 export passDataForScrolling
 
 using ModernGL, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUtils, Main.ForDisplayStructs,Main.Uniforms
-using Main.ReactingToInput, Rocket, Setfield
+using Main.ReactingToInput, Rocket, Setfield, Logging
 
 #holds actor that is main structure that process inputs from GLFW and reacts to it
 mainActor = sync(ActorWithOpenGlObjects())
@@ -69,18 +69,16 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
                         ,windowWidth::Int=Int32(800)
                         ,windowHeight::Int=Int32(800) )
  #creating window and event listening loop
-    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo = Main.PrepareWindow.displayAll(windowWidth,windowHeight)
+    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo = Main.PrepareWindow.displayAll(windowWidth,windowHeight,listOfTextSpecs)
 
-    #as we already has shader program ready we can  now initialize uniforms 
-    masksTuplList, mainImageUnifs = createStructsDict(shader_program)
     # than we set those uniforms, open gl types and using data from arguments  to fill texture specifications
-    listOfTextSpecsMapped= assignUniformsAndTypesToMasks(masksTuplList,listOfTextSpecs, mainImageUnifs ) |> 
-    (specs)-> map((spec)-> setproperties(spec, (widthh= imageTextureWidth, heightt= imageTextureHeight )) 
-                                            ,specs)
-
+    mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program) 
+    listOfTextSpecsMapped=map((spec)-> setproperties(spec, (widthh= imageTextureWidth, heightt= imageTextureHeight )) 
+                                            ,listOfTextSpecsMapped)
+    @info "listOfTextSpecsMapped" listOfTextSpecsMapped
     #initializing object that holds data reqired for interacting with opengl 
     forDispObj =  forDisplayObjects(
-        initializeTextures(shader_program, listOfTextSpecsMapped)
+        initializeTextures(listOfTextSpecsMapped)
             ,window
             ,vertex_shader
             ,fragment_shader

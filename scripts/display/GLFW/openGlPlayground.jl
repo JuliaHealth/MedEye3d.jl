@@ -7,23 +7,25 @@ using Base: Int16
      using GLFW
      using ModernGL
      using ColorTypes
+     using Glutils
 
      include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/structs/forDisplayStructs.jl")
      include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/loadData/manageH5File.jl")
      using Main.h5manag
+     include(DrWatson.scriptsdir("display","GLFW","shadersEtc","CustomFragShad.jl"))
 
      include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
      include(DrWatson.scriptsdir("display","GLFW","modernGL","OpenGLDisplayUtils.jl"))
      include(DrWatson.scriptsdir("display","GLFW","shadersEtc","ShadersAndVerticies.jl"))
+     include(DrWatson.scriptsdir("display","GLFW","shadersEtc","ShadersAndVerticiesForText.jl"))
+
+
 
      include(DrWatson.scriptsdir("display","GLFW","shadersEtc","Uniforms.jl"))
-
      
      include(DrWatson.scriptsdir("display","GLFW","modernGL","TextureManag.jl") )
      include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindow.jl"))
-     
-
- 
+      
 
      include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactToScroll.jl") )
      include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactOnMouseClickAndDrag.jl") )
@@ -61,11 +63,9 @@ Main.ForDisplayStructs.TextureSpec(
      )      
     ,Main.ForDisplayStructs.TextureSpec(
     name= "mainCTImage",
+    isMainImage = true,
     dataType= Int16)  
       ]
-   
-      textSpec=listOfTexturesToCreate[1]
-      setproperties(textSpec, (GL_Rtype= GL_R8UI,OpGlType= GL_UNSIGNED_BYTE ))
 
 
 
@@ -110,7 +110,7 @@ Main.ForDisplayStructs.TextureSpec(
     # Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice,200 )
 
 
-    # window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
+#  window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
     # stopListening = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.stopListening
     
   #  textSpec = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1]
@@ -121,36 +121,119 @@ Main.ForDisplayStructs.TextureSpec(
     Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,40,40, 1000,800)
 
 
-
    ### playing with uniforms
    program = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.shader_program
-
+   shader_program =program
     
 
 
 
 ###### main data ...
 
+# mainForModificationsTexture1Dat =UInt8.(round.(rand(10,40,40)))
+# mainForModificationsTexture2Dat= UInt8.(round.(rand(10,40,40)))
 
+
+mainForModificationsTexture1Dat =zeros(UInt8,10,40,40)
+mainForModificationsTexture2Dat= zeros(UInt8,10,40,40)
 
 mainMaskDummy = zeros(UInt8,10,40,40)
+
+# mainForModificationsTexture1Dat =rand(UInt8,10,40,40)
+# mainForModificationsTexture2Dat= rand(UInt8,10,40,40)
+
+# mainMaskDummy = rand(UInt8,10,40,40)
+
 ctDummy = ones(Int16,10,40,40)# will give white background for testing 
-    listOfDataAndImageNames = [("grandTruthLiverLabel",mainMaskDummy),("mainCTImage",ctDummy ) ]
+    listOfDataAndImageNames = [("grandTruthLiverLabel",mainMaskDummy)
+    ,("mainCTImage",ctDummy )  
+    ,("mainForModificationsTexture2",mainForModificationsTexture2Dat) 
+    ,("mainForModificationsTexture1",mainForModificationsTexture1Dat) ]
     #,("mainForModificationsTexture2",zeros(Int8,10,512,512))
 
     Main.SegmentationDisplay.passDataForScrolling(listOfDataAndImageNames)
     slicee = 3
-    listOfDataAndImageNamesSlice = [("grandTruthLiverLabel",mainMaskDummy[slicee,:,:]) ,("mainCTImage",ctDummy[slicee,:,:] )]
+    listOfDataAndImageNamesSlice = [ ("grandTruthLiverLabel",mainMaskDummy[slicee,:,:]) ,  ("mainForModificationsTexture2",mainForModificationsTexture2Dat[slicee,:,:]) 
+      ,("mainForModificationsTexture1",mainForModificationsTexture1Dat[slicee,:,:]) 
+    ,("mainCTImage",ctDummy[slicee,:,:] )]
 
 
-    Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice,3 )
-    textSpec = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1]
+    # listOfDataAndImageNamesSlice = [ ("grandTruthLiverLabel",a) ,      ("mainForModificationsTexture2",UInt16.(a)) 
+    #   ,("mainForModificationsTexture1",a)   ,("mainCTImage",a)]
+
+
+
+
+    window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
     
-    push!(Main.SegmentationDisplay.mainActor.actor.textureToModifyVec, textSpec)
+    Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice,3 )
 
-    setMaskColor(RGB(1.0,1.0,1.0) ,textSpec.uniforms)
-    setTextureVisibility(false ,textSpec.uniforms)
+    textSpec = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[3]
+    
+    Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [textSpec]
 
+    using Main.Uniforms, Main.OpenGLDisplayUtils
+
+    glClearColor(0.0, 0.0, 0.1 , 1.0)
+    glActiveTexture(GL_TEXTURE0 +2); # active proper texture unit before binding
+    glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
+    setMaskColor(RGB(1.0,0.0,0.0) ,textSpec.uniforms)
+    setTextureVisibility(true ,textSpec.uniforms)
+  
+    basicRender(window)
+
+    setCTWindow(Int32(-1), Int32(-1),Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[4].uniforms)
+
+
+
+
+# using Main.CustomFragShad
+#     strr= Main.CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate)
+#     for st in split(strr, "\n")
+#     @info st
+#     end
+#     using Main.ShadersAndVerticies
+
+
+ #  Main.ShadersAndVerticies.createFragmentShader("", listOfTexturesToCreate)
+
+  #   textSpec
+
+  #   @uniforms  (min_shown_white, max_shown_black, displayRange,
+  #   iTexture0, uTexture0, fTexture0, typeOfMainSampler, isVisibleTexture0
+  #   ,nuclearMask,isVisibleNuclearMask,
+  #   uImask0,          uImask1,
+  #         uImask2,          uImask3,          uImask4,          uImask5,          uImask6,          uImask7,          uImask8,
+  #         imask0,          imask1,          imask2,          imask3,          imask4,          imask5,          imask6,          imask7,          imask8,          fmask0,
+  #         fmask1,          fmask2,          fmask3,          fmask4,          fmask5,          fmask6,          fmask7,          fmask8,         uIcolorMask0,         uIcolorMask1,
+  #        uIcolorMask2,         uIcolorMask3,         uIcolorMask4,         uIcolorMask5,         uIcolorMask6,         uIcolorMask7,         uIcolorMask8,         icolorMask0,
+  #        icolorMask1,         icolorMask2,         icolorMask3,         icolorMask4,         icolorMask5,         icolorMask6,         icolorMask7,         icolorMask8,
+  #        fcolorMask0,         fcolorMask1,         fcolorMask2,         fcolorMask3,         fcolorMask4,         fcolorMask5,         fcolorMask6,         fcolorMask7,
+  #        fcolorMask8,        isVisibleTexture0,        isVisibleNuclearMask,                  uIisVisk0,       uIisVisk1,       uIisVisk2,       uIisVisk3,       uIisVisk4,
+  #      uIisVisk5,       uIisVisk6,       uIisVisk7,       uIisVisk8,       iisVisk0,       iisVisk1,       iisVisk2,       iisVisk3,       iisVisk4,       iisVisk5,       iisVisk6,
+  #      iisVisk7,       iisVisk8,       fisVisk0,       fisVisk1,       fisVisk2,       fisVisk3,       fisVisk4,       fisVisk5,       fisVisk6,       fisVisk7,       fisVisk8) = program
+    
+
+
+  #      glGetUniformLocation(program, "uImask0")
+  #      uIisVisk0
+  #   ##
+  #   @uniforms! begin
+  #   uIisVisk0:=false
+  #   uIisVisk1:=false
+  #   uIisVisk2:=false
+  #   uIisVisk3:=false
+  #   uIisVisk4:=false
+  #   uIisVisk5:=false
+  #   uIisVisk6:=false
+  #   uIisVisk7:=false
+  #   uIisVisk8:=false
+  # end
+
+
+
+    ##
+  #  glUniform1i(textSpec.uniforms.isVisibleRef,false);
 
    # Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [listOfTexturesToCreate[1]]
   
@@ -159,82 +242,3 @@ ctDummy = ones(Int16,10,40,40)# will give white background for testing
 
 
    GLFW.PollEvents()
-
-
-
-
-
-
-#    supertype(Int16)
-#    supertype(UInt16)
-
-#    supertype(Float32)
-
-#    supertype(Int)==supertype(Int16)
-   
-#    supertype(Flo)==supertype(Int16)
-
-
-# widen(widen(widen(Int16)))
-
-
-
-
-
-#    @enum C a b c
-   
-#    fieldnames(C)
-   
-#    @enum uniformForShader(colorsMask0, colorsMask1, colorsMask2,isVisibleTexture0, isVisibleMask0,isVisibleMask1,isVisibleMask2)
-
-#    using Glutils
-#    @uniforms  (colorsMask0, colorsMask1, colorsMask2,isVisibleTexture0, isVisibleMask0,isVisibleMask1,isVisibleMask2) = program
-
-#    c = Cfloat[0.0, 1.0, 0.0, 1.0]
-
-#  colorSet =   [c,c,c ,c,c,c ,c]
-
-
-#    @uniforms! begin
-#    colorsMask0:=c
-#    colorsMask1:=c
-#    colorsMask2:=c
-#    #isVisibleMask0:= true
-#     end
-
-# struct zz 
-# a::Int
-# b::Float32
-# b::Float32
-
-# end
-
-
-
-
-
-
-
-# #adapted from http://www.opengl-tutorial.org/intermediate-tutorials/tutorial-14-render-to-texture/    
-# FramebufferName = Ref(GLuint(0));
-# glGenFramebuffers(1, FramebufferName);
-# glBindFramebuffer(GL_FRAMEBUFFER, FramebufferName);
-
-
-# define renderedTexture
-
-# #Set "renderedTexture" as our colour attachement #0
-# glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, renderedTexture, 0);
-
-# # Set the list of draw buffers.
-# GLenum DrawBuffers[1] = {GL_COLOR_ATTACHMENT0};
-# glDrawBuffers(1, DrawBuffers); # "1" is the size of DrawBuffers
-
-# #Always check that our framebuffer is ok
-# if(glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
-# return false;
-
-
-# #Render to our framebuffer
-# glBindFramebuffer(GL_FRAMEBUFFER, FramebufferName);
-# glViewport(0,0,imageWidth,imageHeight); # Render on the whole framebuffer, complete from the lower left corner to the upper right

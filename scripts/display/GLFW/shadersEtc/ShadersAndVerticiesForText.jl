@@ -7,24 +7,17 @@ include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 
 
 #Create and initialize shaders
-module ShadersAndVerticies
+module ShadersAndVerticiesForText
 using ModernGL, GeometryTypes, GLFW,Main.ForDisplayStructs, Main.CustomFragShad
 
 
-export createFragmentShader
-export positions
-export elements
-export vertices
-export createVertexShader
+
 
 
 
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
-
-fragmentShaderFileDir = DrWatson.scriptsdir("display","GLFW","shadersEtc","mainShader.frag")
-
 
 
 ```@doc
@@ -53,23 +46,30 @@ end
 
 
 ```@doc
-loading th shader from file- so we have better experience writing shader in separate file
-```
-function getShaderFileText(path::String)
-f = open(path)
-return  join(readlines(f), "\n") 
-end #getShaderFileText
-
-getShaderFileText(fragmentShaderFileDir)
-
-```@doc
 creating fragment Shader  so controlling colors and textures  
 gslString so version of GSLS we are using currently
   ```
-function createFragmentShader(gslString::String,listOfTexturesToCreate::Vector{TextureSpec})
+function createFragmentShader(gslString::String)
     fsh = """
     $(gslString)
-    $(Main.CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate))  
+
+    #extension GL_EXT_gpu_shader4 : enable    //Include support for this extension, which defines usampler2D
+
+    out vec4 FragColor;    
+    in vec3 ourColor;
+    smooth in vec2 TexCoord0;
+
+    uniform usampler2D TextTexture1;
+
+    void main() {
+     if(texture2D(TextTexture1, TexCoord0).r >0){
+      FragColor = vec4(1.0,1.0,1.0,1.0);  }
+  else{
+    FragColor = vec4(0.0,0.0,0.0,1.0);
+
+    }
+    }
+
     """
     return createShader(fsh, GL_FRAGMENT_SHADER)
     end
@@ -78,13 +78,6 @@ function createFragmentShader(gslString::String,listOfTexturesToCreate::Vector{T
 
 ################### data to display verticies
 
-
-# Now we define another geometry that we will render, a rectangle, this one with an index buffer
-# The positions of the vertices in our rectangle
-positions = Point{2,Float32}[(-0.5,  0.5),     # top-left
-( 0.5,  0.5),     # top-right
-( 0.5, -0.5),     # bottom-right
-(-0.5, -0.5)]     # bottom-left
 
 # Specify how vertices are arranged into faces
 # Face{N,T} type specifies a face with N vertices, with index type
@@ -97,13 +90,14 @@ elements = Face{3,UInt32}[(0,1,2),          # the first triangle
 
 
 
-vertices = Float32.([
+verticesB = Float32.([
   # positions          // colors           // texture coords
-   0.8,  1.0, 0.0,   1.0, 0.0, 0.0,   1.0, 1.0,   # top right
-   0.8, -1.0, 0.0,   0.0, 1.0, 0.0,   1.0, 0.0,   # bottom right
-  -1.0, -1.0, 0.0,   0.0, 0.0, 1.0,   0.0, 0.0,   # bottom left
-  -1.0,  1.0, 0.0,   1.0, 1.0, 0.0,   0.0, 1.0    # top left 
-])
+   1.0,  1.0, 0.0,   1.0, 0.0, 0.0,   1.0, 1.0,   # top right
+   1.0, -1.0, 0.0,   0.0, 1.0, 0.0,   1.0, 0.0,   # bottom right
+   0.8, -1.0, 0.0,   0.0, 0.0, 1.0,   0.0, 0.0,   # bottom left
+   0.8,  1.0, 0.0,   1.0, 1.0, 0.0,   0.0, 1.0    # top left 
+   ])
+
 
 
 

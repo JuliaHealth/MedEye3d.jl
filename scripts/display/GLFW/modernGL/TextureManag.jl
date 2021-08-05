@@ -7,7 +7,7 @@ stores functions needed to create bind and update OpenGl textues
 module TextureManag
 using Base: Float16
 using  ModernGL ,DrWatson,  Main.OpenGLDisplayUtils, Main.ForDisplayStructs
-using  Main.Uniforms, Logging,Setfield, Glutils
+using  Main.Uniforms, Logging,Setfield, Glutils,Logging, Main.CustomFragShad
 export initializeTextures, updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
 
 updateTextureString = """
@@ -26,9 +26,7 @@ Just for reference openGL function definition
          const void *pixels);  
 """
 @doc updateTextureString
-function updateTexture(data, textSpec::TextureSpec,xoffset=0,
-    yoffset=0,widthh=textSpec.widthh,heightt =textSpec.heightt  )
-
+function updateTexture(data, textSpec::TextureSpec,xoffset=0,yoffset=0,widthh=textSpec.widthh,heightt =textSpec.heightt  )
 	glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
 	glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, 
     heightt, GL_RED_INTEGER, textSpec.OpGlType, data)
@@ -64,6 +62,7 @@ return texture
 end
 
 
+
 ```@doc
 initializing textures 
 shader_program- regference to OpenGL program so we will be able to initialize textures
@@ -71,7 +70,7 @@ listOfTextSpecs - list of TextureSpec structs that  holds data needed to
 it creates textrures as specified, renders them and return the list from  argument augmented by texture Id
 
 ```
-function initializeTextures(shader_program::UInt32,listOfTextSpecs::Vector{Main.ForDisplayStructs.TextureSpec})::Vector{Main.ForDisplayStructs.TextureSpec}
+function initializeTextures(listOfTextSpecs::Vector{Main.ForDisplayStructs.TextureSpec})::Vector{Main.ForDisplayStructs.TextureSpec}
 
     res = Vector{TextureSpec}()
 
@@ -79,7 +78,6 @@ function initializeTextures(shader_program::UInt32,listOfTextSpecs::Vector{Main.
         index=ind-1
         #we need to get access to sampler
         samplerRefNumb = 0
-
 
         glActiveTexture(GL_TEXTURE0 +index); # active proper texture unit before binding
         glUniform1i(samplerRefNumb,index);# we first look for uniform sampler in shader  
@@ -95,19 +93,6 @@ function initializeTextures(shader_program::UInt32,listOfTextSpecs::Vector{Main.
 end #initializeAndDrawTextures
 
 
-
-function getReferenceTosampler(textSpec::Main.ForDisplayStructs.TextureSpec)::Int32
-    if(!textSpec.isMainImage) return  !textSpec.uniforms.samplerRef  end#if
-    #if we are here it is main image 
-       if typeOfMainSampler==1
-            return textSpec.uniforms.isamplerRef
-        elseif typeOfMainSampler==2
-            return textSpec.uniforms.usamplerRef
-        else
-            return textSpec.uniforms.fsamplerRef
-        end
-
-end#getReferenceTosampler
 
 
 updateImagesDisplayedStr =    """
@@ -130,7 +115,6 @@ function updateImagesDisplayed(listOfDataAndImageNames, forDisplayConstants)
             end #for 
             #render onto the screen
             Main.OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
-            sleep(0.1)
             forDisplayConstants.stopListening[]=false
 end
 
@@ -145,66 +129,48 @@ textSpecs - list of texture specificaton that we want to enrich by adding inform
 return list of texture specifications enriched by information about uniforms 
 """
 @doc assignUniformsAndTypesToMaskstr
-function assignUniformsAndTypesToMasks(uniformsStructs::Vector{Pair{DataType, MaskTextureUniforms}}
-                             ,textSpecs::Vector{Main.ForDisplayStructs.TextureSpec}
-                             ,mainImageUniforms::MainImageUniforms)::Vector{Main.ForDisplayStructs.TextureSpec}
+function assignUniformsAndTypesToMasks(textSpecs::Vector{Main.ForDisplayStructs.TextureSpec},shader_program::UInt32)
+    mainTexture,notMainTextures=   divideTexteuresToMainAndRest(textSpecs)
+#main texture uniforms
+n= mainTexture.name
+mainUnifs =MainImageUniforms(
+    samplerName= n
+    ,samplerRef = glGetUniformLocation(shader_program, n)
+    ,isVisibleRef = glGetUniformLocation(shader_program, "$(n)isVisible")
+    ,min_shown_white= glGetUniformLocation(shader_program, "min_shown_white")
+   , max_shown_black= glGetUniformLocation(shader_program, "max_shown_black")
+    ,displayRange=glGetUniformLocation(shader_program, "displayRange")
+)
+maintext = setproperties(mainTexture, (uniforms= mainUnifs ))
+# joining main and not main textures data 
+mapped= [ map(x-> setUniforms(x,shader_program) , notMainTextures)..., maintext]
 
-return map(x-> chooseBestUniforms(uniformsStructs,mainImageUniforms,x) , textSpecs) |>
-            (mapped)-> map(x->setProperOpenGlTypes(x)  ,mapped)
+return  (mainUnifs, map(x->setProperOpenGlTypes(x),mapped))
 
 
 end#assignUniformsToMasks
 
 
+setUniformsStr =    """
+helper for assignUniformsToMasks 
+On the basis of the name of the Texture it will assign the informs referencs to it 
+- uniforms for main image will be set separately
 
-chooseBestUniformsStr =    """
-helper for assignUniformsToMasks - it looks for single best uniforms set for the texture spec
-on the basis of the type supplied in texture characteristic
-it supplies given set of uniforms to it 
-uniformsStructs - list of pairs where first entry  is a type of sampler like Int/Uint/Float and second is struct with references to uniforms 
-textSpec - texture specificaton that we want to enrich by adding information about uniforms
-return list of texture specifications enriched by information about uniforms 
 """
-@doc chooseBestUniformsStr
-function chooseBestUniforms(uniformsStructs::Vector{Pair{DataType, MaskTextureUniforms}}
-                            ,mainImageUniforms::MainImageUniforms
-                            ,textSpec::Main.ForDisplayStructs.TextureSpec)::Main.ForDisplayStructs.TextureSpec
+@doc setUniformsStr
+function setUniforms(textSpec::Main.ForDisplayStructs.TextureSpec,shader_program::UInt32)::Main.ForDisplayStructs.TextureSpec
+    
+    n= textSpec.name
+    unifs = MaskTextureUniforms(samplerName= n
+                        ,samplerRef= glGetUniformLocation(shader_program, n)
+                        ,colorsMaskRef=glGetUniformLocation(shader_program, "$(n)ColorMask") 
+                        ,isVisibleRef=glGetUniformLocation(shader_program, "$(n)isVisible"))
 
-    for strucPair in uniformsStructs
-        # we need to have the same supertypes for example abstract float ... and the struct can not be already in use
-        if (supertype(strucPair[1])== supertype(textSpec.dataType) && strucPair[2].isUsed==false)
-            if (!textSpec.isMainImage) #also for main image we have separate set of uniforms 
-                strucPair[2].isUsed==true #so it would not be used by other texture 
-                setMaskColor(textSpec.color,strucPair[2] ) # setting the proper color as uniform
-                setTextureVisibility(textSpec.isVisible,strucPair[2] ) # setting the mask as visible
-                return   setproperties(textSpec, (uniforms=strucPair[2])) 
-            end#if - if we got here it is main image 
-                modifMainUnifs = setProperTypeOfMainSamplerRef(textSpec,mainImageUniforms)
-                setCTWindow(textSpec.min_shown_white,textSpec.max_shown_black, strucPair[2] )# we set window for displaying
-                return   setproperties(textSpec, (uniforms=modifMainUnifs)) 
-        end #if 
-        
-        
-    end #for
-    throw(DomainError(uniformsStructs, "no available samplers for this data type - add some manually to the fragment shader and Uniforms.jl check also is the type is supported - supported types - Int8,16,32 UInt 8,16,32 float16,32")) 
+    return setproperties(textSpec, (uniforms= unifs ))
 
 end#assignUniformsToMasks
 
 
-function setProperTypeOfMainSamplerRef(texSpec::TextureSpec, mainUnifs::MainImageUniforms)::MainImageUniforms
-    
-    if supertype(Int)== supertype(texSpec.dataType)
-        setTypeOfMainSampler!(1, mainUnifs)
-        return  setproperties(mainUnifs, (typeOfMainSamplerValue=1))
-    elseif supertype(UInt)== supertype(texSpec.dataType)
-        setTypeOfMainSampler!(2, mainUnifs)
-        return  setproperties(mainUnifs, (typeOfMainSamplerValue=2))
-    else
-        setTypeOfMainSampler!(3, mainUnifs)
-        return  setproperties(mainUnifs, (typeOfMainSamplerValue=3))
-    end
-
-end#setProperTypeOfMainSamplerRef
 
 setProperOpenGlTypesStr = """
 On the basis of the type associated to texture we set proper open Gl types associated 

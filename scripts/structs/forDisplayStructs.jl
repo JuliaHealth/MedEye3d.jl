@@ -33,6 +33,7 @@ In order to improve usability  we will also save with what data type this mask i
 for example Int, uint, float etc
 ```
 @with_kw struct MaskTextureUniforms <: TextureUniforms
+samplerName::String =""#name of the sampler - mainly for debugging purposes
 samplerRef ::Int32 =Int32(0) #reference to sampler of the texture
 colorsMaskRef ::Int32 =Int32(0) #reference to uniform holding color of this mask
 isVisibleRef::Int32 =Int32(0)# reference to uniform that points weather we 
@@ -42,17 +43,13 @@ end
 Holding references to uniforms used to controll main image
 ```
 @with_kw struct MainImageUniforms<: TextureUniforms
-isamplerRef ::Int32 =Int32(0) #reference to integer  sampler of the texture
-usamplerRef ::Int32 =Int32(0) #reference to unsigned integer sampler of the texture
-fsamplerRef ::Int32 =Int32(0) #reference to float sampler of the texture
-typeOfMainSamplerRef ::Int32 =Int32(0) #reference to integrer tha will point which sampler should be used 1 will mean integer, 2 will mean uint and 3 float
-typeOfMainSamplerValue ::Int32 =Int32(0) #value of integrer that will point which sampler should be used 1 will mean integer, 2 will mean uint and 3 float
+samplerName::String =""#name of the sampler - mainly for debugging purposes
+samplerRef ::Int32 =Int32(0) #reference to   sampler of the texture
 isVisibleRef::Int32 =Int32(0)# reference to uniform that points weather we 
 # uniforms controlling windowing
 min_shown_white::Int32 =Int32(0)
 max_shown_black::Int32 =Int32(0)
 displayRange::Int32 =Int32(0)
-
 end
 
 ```@doc
@@ -78,7 +75,7 @@ Holding the data needed to create and  later reference the textures
   isVisible::Bool= true       #if false it should be invisible 
   uniforms::TextureUniforms=MaskTextureUniforms()# holds values needed to control uniforms in a shader
   #used in case this is main image and we want to set window
-  min_shown_white::Int32 =0
+  min_shown_white::Int32 =400
   max_shown_black::Int32 =-200
 end
 
