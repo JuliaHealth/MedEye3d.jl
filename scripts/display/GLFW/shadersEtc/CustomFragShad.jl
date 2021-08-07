@@ -35,11 +35,14 @@ function createCustomFramgentShader(listOfTexturesToCreate::Vector{TextureSpec})
 masksConstsants= map( x-> addMasksStrings(x), notMainTextures) |> 
 (strings)-> join(strings, "")
 
+#$(addMaskColorFunc())
 
  return """
 $(initialStrings())
 $(addMainTextureStrings(mainTexture))
 $masksConstsants
+
+
 $(mainFuncString(mainTexture,notMainTextures))
  """
 end #createCustomFramgentShader
@@ -67,9 +70,10 @@ function addMainTextureStrings(mainTexture::TextureSpec)::String
     mainImageName= mainTexture.name
     return """
     uniform $(addSamplerStr(mainTexture, mainImageName)); // main image sampler
-    uniform bool isVisible$(mainImageName) = true; // controllin main texture visibility
+    uniform int $(mainImageName)isVisible = 1; // controllin main texture visibility
 
     $(addWindowingFunc(mainTexture))
+
     """
 end #addMainTextureStrings
 
@@ -102,6 +106,42 @@ function addTypeStr(textur::TextureSpec)::String
     end
 end #addTypeStr
 
+```@doc
+adding function enabling controll of the masks color
+```
+function addMaskColorFunc()
+return """
+
+
+vec4 umaskColor(in uint maskTexel ,in bool isVisible ,in vec4 color  )
+{
+  if(maskTexel>0.0 && isVisible==true) {
+       return   color;
+    }
+    return vec4(0.0, 0.0, 0.0, 0.0);
+    }
+
+vec4 imaskColor(in int maskTexel,in bool isVisible ,in vec4 color  )
+{
+  if(maskTexel>0.0 && isVisible==true) {
+    return   color;
+    }
+    return vec4(0.0, 0.0, 0.0, 0.0);
+    }
+
+vec4 fmaskColor(in float maskTexel,in bool isVisible ,in vec4 color  )
+{
+  if(maskTexel>0.0 && isVisible==true) {
+    return   color;
+    }
+    return vec4(0.0, 0.0, 0.0, 0.0);
+}
+
+
+"""
+
+
+end#addMaskColorFunc
 
 
 ```@doc
@@ -116,8 +156,8 @@ function addWindowingFunc(textur::TextureSpec)::String
    //in case of $typeStr texture  controlling color display of main image we keep all above some value as white and all below some value as black
    vec4 mainColor(in $typeStr texel)
    {
-       if(!isVisible$(mainImageName)){
-         return vec4(1.0, 1.0, 1.0, 1.0);    
+       if($(mainImageName)isVisible==0){
+           return vec4(0.0, 0.0, 0.0, 1.0);
        }
        else if(texel >min_shown_white){
            return vec4(1.0, 1.0, 1.0, 1.0);
@@ -146,8 +186,8 @@ function addMasksStrings(textur::TextureSpec)
 return """
 
 uniform $(addSamplerStr(textur,textName )); // mask image sampler
-uniform vec4 $(textName)ColorMask; //controlling colors
-uniform bool $(textName)isVisible= false; // controlling visibility
+uniform vec4 $(textName)ColorMask= vec4(0.4,0.7,0.8,0.9); //controlling colors
+uniform int $(textName)isVisible= 0; // controlling visibility
 
 """
 end#addMasksStrings
@@ -164,20 +204,37 @@ function mainFuncString( mainTexture::TextureSpec,notMainTextures::Vector{Textur
     masksInfluences= map( x-> setMaskInfluence(x), notMainTextures) |> 
                     (strings)-> join(strings, "")
 
+   lll = length(notMainTextures)+1                 
+   
+   sumColorR= map( x-> " ($(x.name)ColorMask.r *  $(x.name)Res) ", notMainTextures) |> 
+                    (strings)-> join(strings, " + ")     
+   sumColorG= map( x-> " ($(x.name)ColorMask.g  * $(x.name)Res) ", notMainTextures) |> 
+                    (strings)-> join(strings, " + ")     
+   sumColorB= map( x-> " ($(x.name)ColorMask.b  * $(x.name)Res) ", notMainTextures) |> 
+                    (strings)-> join(strings, " + ")     
+
     return """
     void main()
-    {        
-    vec4 FragColorA; 
-    FragColorA = mainColor(texture2D($(mainImageName), TexCoord0).r) ; 
-    $(masksInfluences)
+    {      
+$(masksInfluences)
 
-    FragColor = FragColorA;
+
+ vec4 $(mainImageName)Res = mainColor(texture2D($(mainImageName), TexCoord0).r);
+  FragColor = vec4(($(sumColorR)
+  +$(mainImageName)Res.r
+   )/$(lll) 
+  ,($(sumColorG)
+  +$(mainImageName)Res.g)
+  /$(lll), 
+  ($(sumColorB)
+  +$(mainImageName)Res.b )
+  /$(lll), 
+  1.0  ); //long  product, if mask is invisible it just has full transparency
+
     }
 
     """
 end#mainFuncString
-
-
 
 
 ```@doc
@@ -188,12 +245,30 @@ function setMaskInfluence(textur::TextureSpec)
 
 return """
 
-if( texture2D($(textName), TexCoord0).r >0 && $(textName)isVisible==true) {
-    FragColorA= $(textName)ColorMask * FragColorA;
- }
+$(addTypeStr(textur)) $(textName)Res = texture2D($(textName), TexCoord0).r * $(textName)isVisible  ;
 
 """
 end#xxx
+
+
+
+```@doc
+on the basis of texture type gives proper function controlling color of the mask 
+```
+function chooseColorFonuction(textur::TextureSpec)::String
+
+    if supertype(Int)== supertype(textur.dataType)
+        return "imaskColor"
+    elseif supertype(UInt)== supertype(textur.dataType)
+        return "umaskColor"
+    else # so float ...
+        return "fmaskColor"
+    end
+end#chooseColorFonuction
+
+
+
+
 
 
 ```@doc

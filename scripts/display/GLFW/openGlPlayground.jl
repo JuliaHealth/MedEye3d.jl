@@ -46,23 +46,32 @@ using Parameters
 #Order is important !
 listOfTexturesToCreate = [
 Main.ForDisplayStructs.TextureSpec(
-    name = "grandTruthLiverLabel",
+    name = "mainLab",
     dataType= UInt8,
     strokeWidth = 5,
     color = RGB(1.0,0.0,0.0)
    ),
 Main.ForDisplayStructs.TextureSpec(
-    name = "mainForModificationsTexture1",
+    name = "testLab1",
+    numb= Int32(1),
     dataType= UInt8,
     color = RGB(0.0,1.0,0.0)
    ),
     Main.ForDisplayStructs.TextureSpec(
-    name = "mainForModificationsTexture2",
+    name = "testLab2",
+    numb= Int32(2),
     dataType= UInt8,
     color = RGB(0.0,0.0,1.0)
-     )      
-    ,Main.ForDisplayStructs.TextureSpec(
-    name= "mainCTImage",
+     ),
+     Main.ForDisplayStructs.TextureSpec(
+      name = "textText",
+      isTextTexture = true,
+      dataType= UInt8,
+      color = RGB(0.0,0.0,1.0)
+    ),
+    Main.ForDisplayStructs.TextureSpec(
+    name= "CTIm",
+    numb= Int32(3),
     isMainImage = true,
     dataType= Int16)  
       ]
@@ -92,10 +101,10 @@ Main.ForDisplayStructs.TextureSpec(
 # slicesNumb= dims[1]
 
 #  slice = 200
-#   listOfDataAndImageNamesSlice = [("grandTruthLiverLabel",exampleLabels[slice,:,:]),("mainCTImage",exampleDat[slice,:,:] )]
+#   listOfDataAndImageNamesSlice = [("mainLab",exampleLabels[slice,:,:]),("CTIm",exampleDat[slice,:,:] )]
 
 
-#     listOfDataAndImageNames = [("grandTruthLiverLabel",exampleLabels),("mainCTImage",exampleDat)]
+#     listOfDataAndImageNames = [("mainLab",exampleLabels),("CTIm",exampleDat)]
   
     
 #     imagedims=dims
@@ -130,115 +139,109 @@ Main.ForDisplayStructs.TextureSpec(
 
 ###### main data ...
 
-# mainForModificationsTexture1Dat =UInt8.(round.(rand(10,40,40)))
-# mainForModificationsTexture2Dat= UInt8.(round.(rand(10,40,40)))
 
 
-mainForModificationsTexture1Dat =zeros(UInt8,10,40,40)
-mainForModificationsTexture2Dat= zeros(UInt8,10,40,40)
 
-mainMaskDummy = zeros(UInt8,10,40,40)
 
-# mainForModificationsTexture1Dat =rand(UInt8,10,40,40)
-# mainForModificationsTexture2Dat= rand(UInt8,10,40,40)
+testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+testLab2Dat= UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+
+mainMaskDummy = UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+# testLab1Dat =rand(UInt8,10,40,40)
+# testLab2Dat= rand(UInt8,10,40,40)
 
 # mainMaskDummy = rand(UInt8,10,40,40)
 
-ctDummy = ones(Int16,10,40,40)# will give white background for testing 
-    listOfDataAndImageNames = [("grandTruthLiverLabel",mainMaskDummy)
-    ,("mainCTImage",ctDummy )  
-    ,("mainForModificationsTexture2",mainForModificationsTexture2Dat) 
-    ,("mainForModificationsTexture1",mainForModificationsTexture1Dat) ]
-    #,("mainForModificationsTexture2",zeros(Int8,10,512,512))
+
+ctDummy =  Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,10,40,40)))# will give white background for testing 
+    listOfDataAndImageNames = [("mainLab",mainMaskDummy)
+    ,("CTIm",ctDummy )  
+    ,("testLab2",testLab2Dat) 
+    ,("testLab1",testLab1Dat) ]
+    #,("testLab2",zeros(Int8,10,512,512))
 
     Main.SegmentationDisplay.passDataForScrolling(listOfDataAndImageNames)
+
     slicee = 3
-    listOfDataAndImageNamesSlice = [ ("grandTruthLiverLabel",mainMaskDummy[slicee,:,:]) ,  ("mainForModificationsTexture2",mainForModificationsTexture2Dat[slicee,:,:]) 
-      ,("mainForModificationsTexture1",mainForModificationsTexture1Dat[slicee,:,:]) 
-    ,("mainCTImage",ctDummy[slicee,:,:] )]
+    listOfDataAndImageNamesSlice = [ ("mainLab",mainMaskDummy[slicee,:,:]) ,  ("testLab2",testLab2Dat[slicee,:,:]) 
+      ,("testLab1",testLab1Dat[slicee,:,:]) 
+    ,("CTIm",ctDummy[slicee,:,:] )]
 
 
-    # listOfDataAndImageNamesSlice = [ ("grandTruthLiverLabel",a) ,      ("mainForModificationsTexture2",UInt16.(a)) 
-    #   ,("mainForModificationsTexture1",a)   ,("mainCTImage",a)]
+aa=zeros(40,40)
+bb=zeros(40,40)
+cc=zeros(40,40)
+aa[1,1]=1
+bb[1,1]=1
+cc[1,1]=1
 
+    listOfDataAndImageNamesSlice = [ ("mainLab",aa) ,
+      ("testLab2",bb) 
+      ,("testLab1",cc)     ,("CTIm",ctDummy[slicee,:,:] )]
+
+
+       Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice,3 )
 
 
 
     window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
     
-    Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice,3 )
 
-    textSpec = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[3]
+    textLiverMain = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1]
+    textureB = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[2]
+    textureC = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[3]
+    textTexture = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[4]
+    textureCt = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5]
     
-    Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [textSpec]
-
-    using Main.Uniforms, Main.OpenGLDisplayUtils
-
-    glClearColor(0.0, 0.0, 0.1 , 1.0)
-    glActiveTexture(GL_TEXTURE0 +2); # active proper texture unit before binding
-    glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
-    setMaskColor(RGB(1.0,0.0,0.0) ,textSpec.uniforms)
-    setTextureVisibility(true ,textSpec.uniforms)
-  
-    basicRender(window)
-
-    setCTWindow(Int32(-1), Int32(-1),Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[4].uniforms)
+    Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [textLiverMain]
+    dattt = Main.SegmentationDisplay.mainActor.actor.onScrollData[4][2]
+maximum(dattt)
 
 
 
+updateTexture(dattt,textureB )
 
-# using Main.CustomFragShad
-#     strr= Main.CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate)
-#     for st in split(strr, "\n")
-#     @info st
-#     end
-#     using Main.ShadersAndVerticies
+basicRender(window)
 
+using Main.Uniforms, Main.OpenGLDisplayUtils
 
- #  Main.ShadersAndVerticies.createFragmentShader("", listOfTexturesToCreate)
-
-  #   textSpec
-
-  #   @uniforms  (min_shown_white, max_shown_black, displayRange,
-  #   iTexture0, uTexture0, fTexture0, typeOfMainSampler, isVisibleTexture0
-  #   ,nuclearMask,isVisibleNuclearMask,
-  #   uImask0,          uImask1,
-  #         uImask2,          uImask3,          uImask4,          uImask5,          uImask6,          uImask7,          uImask8,
-  #         imask0,          imask1,          imask2,          imask3,          imask4,          imask5,          imask6,          imask7,          imask8,          fmask0,
-  #         fmask1,          fmask2,          fmask3,          fmask4,          fmask5,          fmask6,          fmask7,          fmask8,         uIcolorMask0,         uIcolorMask1,
-  #        uIcolorMask2,         uIcolorMask3,         uIcolorMask4,         uIcolorMask5,         uIcolorMask6,         uIcolorMask7,         uIcolorMask8,         icolorMask0,
-  #        icolorMask1,         icolorMask2,         icolorMask3,         icolorMask4,         icolorMask5,         icolorMask6,         icolorMask7,         icolorMask8,
-  #        fcolorMask0,         fcolorMask1,         fcolorMask2,         fcolorMask3,         fcolorMask4,         fcolorMask5,         fcolorMask6,         fcolorMask7,
-  #        fcolorMask8,        isVisibleTexture0,        isVisibleNuclearMask,                  uIisVisk0,       uIisVisk1,       uIisVisk2,       uIisVisk3,       uIisVisk4,
-  #      uIisVisk5,       uIisVisk6,       uIisVisk7,       uIisVisk8,       iisVisk0,       iisVisk1,       iisVisk2,       iisVisk3,       iisVisk4,       iisVisk5,       iisVisk6,
-  #      iisVisk7,       iisVisk8,       fisVisk0,       fisVisk1,       fisVisk2,       fisVisk3,       fisVisk4,       fisVisk5,       fisVisk6,       fisVisk7,       fisVisk8) = program
     
+textLiverMain.uniforms.colorsMaskRef
+textTexture.uniforms.colorsMaskRef
 
 
-  #      glGetUniformLocation(program, "uImask0")
-  #      uIisVisk0
-  #   ##
-  #   @uniforms! begin
-  #   uIisVisk0:=false
-  #   uIisVisk1:=false
-  #   uIisVisk2:=false
-  #   uIisVisk3:=false
-  #   uIisVisk4:=false
-  #   uIisVisk5:=false
-  #   uIisVisk6:=false
-  #   uIisVisk7:=false
-  #   uIisVisk8:=false
-  # end
+  setTextureVisibility(true ,textLiverMain.uniforms)
+  setMaskColor(RGB(1.0,1.0,0.0) ,textLiverMain.uniforms)
+
+  setMaskColor(RGB(0.0,1.0,0.0) ,textTexture.uniforms)
+  setTextureVisibility(true ,textTexture.uniforms)
+
+    setMaskColor(RGB(1.0,0.0,0.5) ,textureC.uniforms)
+    setTextureVisibility(true ,textureC.uniforms)
+
+
+    setMaskColor(RGB(0.5,0.5,0.0) ,textureB.uniforms)
+    setTextureVisibility(true ,textureB.uniforms)
+  setTextureVisibility(true,textureCt.uniforms)
+
+
+  #   basicRender(window)
+
+ setCTWindow(Int32(0), Int32(0),Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5].uniforms)
 
 
 
-    ##
-  #  glUniform1i(textSpec.uniforms.isVisibleRef,false);
 
-   # Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [listOfTexturesToCreate[1]]
-  
-  
-  
+using Main.CustomFragShad
+    strr= Main.CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate)
+    for st in split(strr, "\n")
+    @info st
+    end
+    using Main.ShadersAndVerticies
 
+
+
+
+maximum(arr)
 
    GLFW.PollEvents()

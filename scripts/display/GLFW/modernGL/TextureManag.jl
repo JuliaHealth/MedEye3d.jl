@@ -30,7 +30,7 @@ function updateTexture(data, textSpec::TextureSpec,xoffset=0,yoffset=0,widthh=te
 	glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
 	glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, 
     heightt, GL_RED_INTEGER, textSpec.OpGlType, data)
-
+    glBindTexture(GL_TEXTURE_2D, 0)
 end
 
 
@@ -80,7 +80,7 @@ function initializeTextures(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textu
         samplerRefNumb = 0
 
         glActiveTexture(GL_TEXTURE0 +index); # active proper texture unit before binding
-        glUniform1i(samplerRefNumb,index);# we first look for uniform sampler in shader  
+        #glUniform1i(samplerRefNumb,index);# we first look for uniform sampler in shader  
         textUreId= createTexture(index,textSpec.widthh,textSpec.heightt,textSpec.GL_Rtype)#binding texture and populating with data
         @info "textUreId in initializeTextures"  textUreId
 
@@ -104,7 +104,8 @@ forDisplayObjects - stores all needed constants that holds reference to GLFW and
 """
 @doc updateImagesDisplayedStr
 function updateImagesDisplayed(listOfDataAndImageNames, forDisplayConstants)
-    
+   
+        forDisplayConstants.stopListening[]=true
              modulelistOfTextSpecs=forDisplayConstants.listOfTextSpecifications
             #clearing color buffer
             glClearColor(0.0, 0.0, 0.1 , 1.0)

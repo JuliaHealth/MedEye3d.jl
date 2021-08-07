@@ -42,22 +42,10 @@ sets visibility of the texture
 ```
 function setTextureVisibility(isvisible::Bool, uniformsStore ::TextureUniforms)
     @uniforms! begin
-    uniformsStore.isVisibleRef:=isvisible
+    uniformsStore.isVisibleRef:= isvisible ? 1 : 0
     end
 
 end#setTextureVisibility
-
-
-```@doc
-sets typeOfMainSampler - value needed to choose proper sampler for main image
-```
-function setTypeOfMainSampler!(typeOfMainSamplerNumb::Int32, uniformsStore ::MainImageUniforms)
-    @uniforms! begin
-    uniformsStore.typeOfMainSamplerRef:=typeOfMainSamplerNumb
-    end
-
-end#setTextureVisibility
-
 
 
 

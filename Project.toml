@@ -38,6 +38,7 @@ Rocket = "df971d30-c9d6-4b37-b8ff-e965b2cb3a40"
 STBImage = "7905c688-fe39-11e9-31c9-6bac3ecc6ce7"
 Setfield = "efcf1570-3423-57d1-acb7-fd33fddbac46"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 StringBuilders = "db12335b-fddc-5e1b-b0ee-42071d21ae50"
 
 [compat]

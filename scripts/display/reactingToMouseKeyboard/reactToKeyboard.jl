@@ -29,15 +29,14 @@ examples of keyboard input
 
 """
 @doc KeyboardCallbackSubscribableStr
-mutable struct KeyboardCallbackSubscribable <: Subscribable{CartesianIndex{2}}
+mutable struct KeyboardCallbackSubscribable <: Subscribable{KeyboardStruct}
 # true when pressed and kept true until released
-    isCtrlPressed::Bool
-    isShiftPressed::Bool
-    isAltPressed::Bool
-
-    lasKeyPressed
-
-    subject :: Subject{CartesianIndex{2}} 
+# true if corresponding keys are kept pressed and become flase when relesed
+    isCtrlPressed::Bool # left - scancode 37 right 105 - Int32
+    isShiftPressed::Bool  # left - scancode 50 right 62- Int32
+    isAltPressed::Bool# left - scancode 64 right 108- Int32
+    lastKeyPressed::String # last pressed key 
+    subject :: Subject{KeyboardStruct} 
    
 end 
 
@@ -54,8 +53,9 @@ handlerStr="""
 
 """
 @doc handlerStr
-function (handler::KeyboardCallbackSubscribable)( a, x::Float64, y::Float64)
-   # next!(handler.subject, CartesianIndex(Int(x),Int(y)))
+function (handler::KeyboardCallbackSubscribable)(str:String)
+    handler.lastKeyPressed = str
+   next!(handler.subject, KeyboardStruct(handler.isCtrlPressed, handler.isShiftPressed,handler., handler.   )  )
  
 end #handler
 
@@ -82,7 +82,7 @@ reactToKeyboardStr = """
 
 """
 @doc reactToKeyboardStr
-function reactToKeyboard(mouseCoord::CartesianIndex{2}, actor::SyncActor{Any, ActorWithOpenGlObjects})
+function reactToKeyboard(keybInfo::KeyboardStruct, actor::SyncActor{Any, ActorWithOpenGlObjects})
     
     obj = actor.actor.mainForDisplayObjects
     

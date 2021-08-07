@@ -137,11 +137,6 @@ verticesB = Float32.([
    0.8,  1.0, 0.0,   1.0, 1.0, 0.0,   0.0, 1.0    # top left 
    ])
 
-using Main.PrepareWindowHelpers
-using Main.OpenGLDisplayUtils
-using Main.TextureManag
-using Main.ShadersAndVerticiesForText
-using Glutils
 
 
 
@@ -162,17 +157,12 @@ glAttachShader(shader_program, fragment_shaderB)
 glLinkProgram(shader_program)
 glUseProgram(shader_program)
 
-vbo = createDAtaBuffer(Main.ShadersAndVerticiesForText.verticesB)
-# Create the Element Buffer Object (EBO)
-ebo = createElementBuffer(Main.ShadersAndVerticiesForText.elements)
-############ how data should be read from data buffer
-encodeDataFromDataBuffer()
 
     
 
 ############### end basics
 
-texture = TextureManag.createTexture(8,Int32(200),Int32(800),GL_R8UI)
+texture = TextureManag.createTexture(1,Int32(200),Int32(800),GL_R8I)
 
 glActiveTexture(GL_TEXTURE0 +8); # active proper texture unit before binding
 glBindTexture(GL_TEXTURE_2D, texture[]); 
@@ -180,6 +170,45 @@ glBindTexture(GL_TEXTURE_2D, texture[]);
 samplerRefNumb= glGetUniformLocation(shader_program, "TextTexture1")
 glUniform1i(samplerRefNumb,1);# we first look for uniform sampler in shader  
 
-dat = rand(UInt8,200,800)
-glTexSubImage2D(GL_TEXTURE_2D,0,0,0, 200, 800, GL_R8UI, GL_UNSIGNED_BYTE, dat);
+
+using Main.PrepareWindowHelpers
+using Main.OpenGLDisplayUtils
+using Main.TextureManag
+using Main.ShadersAndVerticiesForText
+using Glutils
+using FreeTypeAbstraction
+
+
+# vbo = createDAtaBuffer(Main.ShadersAndVerticiesForText.verticesB)
+# # Create the Element Buffer Object (EBO)
+# ebo = createElementBuffer(Main.ShadersAndVerticiesForText.elements)
+# ############ how data should be read from data buffer
+# encodeDataFromDataBuffer()
+
+
+
+face = FreeTypeAbstraction.findfont("hack";  additional_fonts= datadir("fonts"))
+img, extent = renderface(face, 'C', 64)
+
+# render a string into an existing matrix
+a = renderstring!(
+    zeros(UInt8, 40, 40),
+    "uuuuuuu1111",
+    face,
+    5,
+    5,
+    5,
+    valign = :vbottom,
+)
+
+
+
+
 basicRender(window)
+
+
+vbo = createDAtaBuffer(Main.ShadersAndVerticies.vertices)
+	# Create the Element Buffer Object (EBO)
+	ebo = createElementBuffer(Main.ShadersAndVerticies.elements)
+	############ how data should be read from data buffer
+	encodeDataFromDataBuffer()

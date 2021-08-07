@@ -4,7 +4,7 @@ using DrWatson
 
 module ForDisplayStructs
 using Base: Int32, isvisible
-export Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, TextureUniforms,MainImageUniforms, MaskTextureUniforms
+export Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms
 
 using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries
 
@@ -60,6 +60,7 @@ Holding the data needed to create and  later reference the textures
   numb::Int32 =-1             #needed to enable swithing between textures generally convinient when between 0-9; needed only if texture is to be modified by mouse input
   dataType::Type              #type of data that will be used Int/uint/float
   isMainImage ::Bool = false  #true if this texture represents main image
+  isTextTexture ::Bool = false  #true if this texture represents texture that is supposed to hold text
   isSecondaryMain ::Bool = false # true if it holds some other important information that is not mask - used for example in case of nuclear imagiing studies
   isContinuusMask ::Bool = false # in case of masks if mask is continuus color display will be a bit diffrent
   color::RGB = RGB(0.0,0.0,0.0) #needed in case for the masks in order to establish the range of colors we are intrested in in case of binary mask there is no point to supply more than one color (supply Vector with length = 1)
@@ -117,6 +118,14 @@ mutable struct ActorWithOpenGlObjects <: NextActor{Any}
     ActorWithOpenGlObjects() = new(1,forDisplayObjects(),[],[],false)
 end
 
+```@doc
+Holding necessery data to controll keyboard shortcuts```
+@with_kw struct KeyboardStruct
+  isCtrlPressed::Bool # left - scancode 37 right 105 - Int32
+  isShiftPressed::Bool  # left - scancode 50 right 62- Int32
+  isAltPressed::Bool# left - scancode 64 right 108- Int32
+  lastKeyPressed::String # last pressed key 
+end
 
 end #module
 
