@@ -118,9 +118,10 @@ GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
 	name = GLFW.GetKeyName(key, scancode)
 	if name == nothing
 		println("scancode $scancode  $(typeof(scancode))", action)
+        println("action $action $(typeof(action))")
+
 	else
 		println("key $name $(typeof(name))", action)
-		println("key $name $(typeof(name))")
 		println("action $action $(typeof(action))")
 	end
 end)

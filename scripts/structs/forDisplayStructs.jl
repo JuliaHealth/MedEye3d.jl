@@ -124,7 +124,12 @@ Holding necessery data to controll keyboard shortcuts```
   isCtrlPressed::Bool # left - scancode 37 right 105 - Int32
   isShiftPressed::Bool  # left - scancode 50 right 62- Int32
   isAltPressed::Bool# left - scancode 64 right 108- Int32
-  lastKeyPressed::String # last pressed key 
+  isEnterPressed::Bool# scancode 36
+  lastKeysPressed::Vector{String} # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
+ #informations about what triggered sending this particular struct to the  actor
+  mostRecentScanCode ::Int32
+  mostRecentKeyName ::String
+  mostRecentAction ::GLFW.Action
 end
 
 end #module

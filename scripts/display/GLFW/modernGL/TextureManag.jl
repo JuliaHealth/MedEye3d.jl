@@ -80,7 +80,7 @@ function initializeTextures(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textu
         samplerRefNumb = 0
 
         glActiveTexture(GL_TEXTURE0 +index); # active proper texture unit before binding
-        #glUniform1i(samplerRefNumb,index);# we first look for uniform sampler in shader  
+        glUniform1i(samplerRefNumb,index);# we first look for uniform sampler in shader  
         textUreId= createTexture(index,textSpec.widthh,textSpec.heightt,textSpec.GL_Rtype)#binding texture and populating with data
         @info "textUreId in initializeTextures"  textUreId
 
@@ -191,6 +191,7 @@ function setProperOpenGlTypes(textSpec::Main.ForDisplayStructs.TextureSpec)::Mai
 
     throw(DomainError(textSpec, "type  of texture is not supported - supported types - Int8,16,32 UInt 8,16,32 float16,32")) 
 end#
+
 
 
 

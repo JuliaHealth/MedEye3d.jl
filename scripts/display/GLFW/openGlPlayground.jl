@@ -220,8 +220,8 @@ textTexture.uniforms.colorsMaskRef
     setTextureVisibility(true ,textureC.uniforms)
 
 
-    setMaskColor(RGB(0.5,0.5,0.0) ,textureB.uniforms)
-    setTextureVisibility(true ,textureB.uniforms)
+  setMaskColor(RGB(0.5,0.5,0.0) ,textureB.uniforms)
+  setTextureVisibility(true ,textureB.uniforms)
   setTextureVisibility(true,textureCt.uniforms)
 
 
@@ -240,8 +240,27 @@ using Main.CustomFragShad
     using Main.ShadersAndVerticies
 
 
+using Main.ForDisplayStructs
+    
+  ks =KeyboardStruct(false,false,false, false, [],Int32(3),"", GLFW.PRESS)
+  ks2=setproperties(ks, (isCtrlPressed=true))
+
+    
+    scCode = @match ks begin
+      KeyboardStruct(false,false,false, false, [],Int32(3),"", GLFW.PRESS) => print("ctrl false")
+      KeyboardStruct(true,false,false, false, [],Int32(3),"", GLFW.PRESS) => print("ctrl true")
+      _ => "notImp" # not Important
+   end
+    
 
 
-maximum(arr)
+
+x = Option("hi new")
+
+bar(Option())
+
 
    GLFW.PollEvents()
+
+
+

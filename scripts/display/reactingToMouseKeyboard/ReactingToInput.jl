@@ -2,12 +2,7 @@ using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
 module ReactingToInput
-using Rocket
-using GLFW
-using Main.ReactToScroll
-using Main.ForDisplayStructs
-using Main.TextureManag
-using Main.ReactOnMouseClickAndDrag
+using Rocket, GLFW, Main.ReactToScroll, Main.ForDisplayStructs, Main.TextureManag, Main.ReactOnMouseClickAndDrag, Main.ReactOnKeyboard
 
 export subscribeGLFWtoActor
 
@@ -65,8 +60,8 @@ Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Bool) = rea
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Main.ForDisplayStructs.forDisplayObjects) = setUpMainDisplay(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Vector{Tuple{String, Array{T, 3} where T}}) = setUpForScrollData(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Tuple{Vector{Tuple{String, Array{T, 2} where T}},Int64} ) = updateSingleImagesDisplayedSetUp(data,actor)
-
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Vector{CartesianIndex{2}}) = reactToMouseDrag(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::KeyboardStruct) = reactToKeyboard(data,actor)
 
 Rocket.on_error!(actor::SyncActor{Any, ActorWithOpenGlObjects}, err)      = error(err)
 Rocket.on_complete!(actor::SyncActor{Any, ActorWithOpenGlObjects})        = println("Completed!")
@@ -91,11 +86,15 @@ function subscribeGLFWtoActor(actor ::SyncActor{Any, ActorWithOpenGlObjects})
 
     scrollback= Main.ReactToScroll.registerMouseScrollFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)
     GLFW.SetScrollCallback(forDisplayConstants.window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
+
+    keyBoardAct = registerKeyboardFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)
     buttonSubs = registerMouseClickFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)
+  
+    keyboardSub = subscribe!(scrollback, keyBoardAct)
     scrollSubscription = subscribe!(scrollback, actor)
     mouseClickSub = subscribe!(buttonSubs, actor)
 
-return [scrollSubscription, mouseClickSub]
+return [scrollSubscription,mouseClickSub,keyboardSub]
 
 end
 

@@ -9,11 +9,8 @@ module coordinating response to the  keyboard input - mainly shortcuts that  hel
 """
 #@doc ReactOnKeyboardSTR
 module ReactOnKeyboard
-using Rocket
-using GLFW
-using Main.ForDisplayStructs
-using Main.TextureManag
-using Main.OpenGLDisplayUtils
+using Rocket, GLFW, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils, Main.Uniforms, Match, Parameters,DataTypesBasic
+export reactToKeyboard , registerKeyboardFunctions
 
 KeyboardCallbackSubscribableStr= """
 Object that enables managing input from keyboard - it stores the information also about
@@ -35,14 +32,13 @@ mutable struct KeyboardCallbackSubscribable <: Subscribable{KeyboardStruct}
     isCtrlPressed::Bool # left - scancode 37 right 105 - Int32
     isShiftPressed::Bool  # left - scancode 50 right 62- Int32
     isAltPressed::Bool# left - scancode 64 right 108- Int32
-    lastKeyPressed::String # last pressed key 
+    isEnterPressed::Bool# scancode 36
+    lastKeysPressed::Vector{String} # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
     subject :: Subject{KeyboardStruct} 
-   
 end 
 
 ```@doc
-
-
+will "tell" what functions should be invoked in order to process keyboard input 
 ```
 function Rocket.on_subscribe!(handler::KeyboardCallbackSubscribable, actor::SyncActor{Any, ActorWithOpenGlObjects})
     return subscribe!(handler.subject, actor)
@@ -50,53 +46,192 @@ end
 
 
 handlerStr="""
-
+given pressed keys lik 1-9 and all letters resulting key is encoded as string and will be passed here
+handler object responsible for capturing action 
+str - name of key lik 1,5 f,.j ... but not ctrl shift etc
+action - for example key press or release
+scancode - if key do not have short name like ctrl ... it has scancode
 """
 @doc handlerStr
-function (handler::KeyboardCallbackSubscribable)(str:String)
-    handler.lastKeyPressed = str
-   next!(handler.subject, KeyboardStruct(handler.isCtrlPressed, handler.isShiftPressed,handler., handler.   )  )
- 
+function (handler::KeyboardCallbackSubscribable)(str:String, action::GLFW.Action)
+   if( (action==GLFW.PRESS)  ) 
+        push!(handler.lastKeysPressed ,str)
+        # res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed
+        #         , isShiftPressed= handler.isShiftPressed
+        #         ,isAltPressed= handler.isAltPressed
+        #         ,isEnterPressed= handler.isEnterPressed 
+        #         ,lastKeysPressed= handler.lastKeysPressed 
+        #         ,mostRecentScanCode = -1 # just marking it as empty
+        #         ,mostRecentKeyName = str
+        #         ,mostRecentAction = action) 
+        # if(shouldBeExecuted(res)) 
+        #     next!(handler.subject,res ) 
+        #     handler.lastKeysPressed=[] 
+        # end#if 
+
+   end#if
 end #handler
 
 @doc handlerStr
-function (handler::KeyboardCallbackSubscribable)(a, button::GLFW.MouseButton, action::GLFW.Action,m)
+function (handler::KeyboardCallbackSubscribable)(scancode ::Int32, action::GLFW.Action)
+    #1 pressed , 2 released -1 sth else
+    act =  @match action begin
+        GLFW.PRESS => 1
+        GLFW.RELEASE => 2
+        _ => -1
+    end
+
+    if(act>0)# so we have press or relese 
+        scCode = @match scancode begin
+            Int32(37) => handler.isCtrlPressed= (act==1)
+            Int32(105) => handler.isCtrlPressed= (act==1)
+            Int32(50) => handler.isShiftPressed= (act==1)
+            Int32(62) => handler.isShiftPressed=( act==1)
+            Int32(64) => handler.isAltPressed= (act==1)
+            Int32(108) => handler.isAltPressed= (act==1)
+            Int32(36) => handler.isEnterPressed= (act==1)
+            _ => "notImp" # not Important
+         end
+            res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed
+                    , isShiftPressed= handler.isShiftPressed
+                    ,isAltPressed= handler.isAltPressed
+                    ,isEnterPressed= handler.isEnterPressed 
+                    ,lastKeysPressed= handler.lastKeysPressed 
+                    ,mostRecentScanCode = scancode
+                    ,mostRecentKeyName = "" # just marking it as empty
+                    ,mostRecentAction = action
+                    ) 
+            
+
+            if(shouldBeExecuted(res))
+                handler.lastKeysPressed=[] 
+                next!(handler.subject, res ) 
+            end#if 
+
+    end#if    
+  
+
 end #second handler
 
 
 
 registerKeyboardFunctionsStr="""
-
+registering functions to the GLFW
+window - GLFW window with Visualization
+stopListening - atomic boolean enabling unlocking GLFW context
 """
 @doc registerKeyboardFunctionsStr
-function registerKeyboardFunctions(window::GLFW.Window
-                                    ,stopListening::Base.Threads.Atomic{Bool}
-                                    )
+function registerKeyboardFunctions(window::GLFW.Window,stopListening::Base.Threads.Atomic{Bool}    )
+
+    stopListening[]=true # stoping event listening loop to free the GLFW context
+                           
+    keyboardSubs = MouseCallbackSubscribable(false,false,false,
+    Subject(Vector{KeyboardStruct}, scheduler = AsyncScheduler()))
+                                  
+        GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
+        name = GLFW.GetKeyName(key, scancode)
+        if name == nothing
+            keyboardSubs(scancode,action )                                                        
+        else
+            keyboardSubs(name,action)
+        end
+        end)
+
+   stopListening[]=false # reactivate event listening loop
 
 return keyboardSubs
 
 end #registerKeyboardFunctions
 
 
-reactToKeyboardStr = """
+```@doc
+Registering function how should behave to deal with result of search for texture related to keyboard input 
+```
+function setVisOnKey(textSpecObs::Identity{TextureSpec}) 
+   textSpec =  textSpecObs.value
+    if(textSpec.isCtrlPressed)    
+        setTextureVisibility(false,textSpec.uniforms )
+    else if(textSpec.isShiftPressed)  
+        setTextureVisibility(true,textSpec.uniforms )
+    end #if
 
+end #setVisOnKey
+
+setVisOnKey(a::Const{Nothing}) = "" # just doindg nothing in case of empty option
+
+
+reactToKeyboardStr = """
+Given keyInfo struct wit information about pressed keys it can process them to make some actions  - generally activating keyboard shortcuts
+shift + number - make mask associated with given number visible
+ctrl + number -  make mask associated with given number invisible 
 """
 @doc reactToKeyboardStr
-function reactToKeyboard(keybInfo::KeyboardStruct, actor::SyncActor{Any, ActorWithOpenGlObjects})
-    
+function reactToKeyboard(keyInfo::KeyboardStruct, actor::SyncActor{Any, ActorWithOpenGlObjects})
+    #we got this only when ctrl/shift/als is released or enter is pressed
     obj = actor.actor.mainForDisplayObjects
-    
     obj.stopListening[]=true #free GLFW context
     
-    
+    keys = keyInfo.lastKeysPressed
+
+    if(isnumeric(keys[1][1])) 
+        findTextureBasedOnNumbStr(parse(Int64,keys[1])) |>
+        x->setVisOnKey(x)
+    end#if
     
     obj.stopListening[]=false # reactivete event listening loop
-
-    #send data for persistent storage TODO() modify for scrolling data 
 
 end#reactToKeyboard
 
 
+
+```@doc
+return true in case the combination of keys should invoke some action
+```
+function shouldBeExecuted(keyInfo::KeyboardStruct)::Bool
+    
+    act =  @match keyInfo.mostRecentAction begin
+        GLFW.PRESS => 1
+        GLFW.RELEASE => 2
+        _ => -1
+    end
+
+    if(act0)# so we have press or relese 
+        @match keyInfo.mostRecentScanCode begin
+            Int32(37) => return act==2 # returning true if we relese key
+            Int32(105) => return act==2
+            Int32(50) => return act==2
+            Int32(62) => return act==2
+            Int32(64) => return act==2
+            Int32(108) => return act==2
+            Int32(36) => return act==1 # returning true if enter is pressed
+            _ => "notImp" # not Important
+         end
+   # if we got here we did not found anything intresting      
+return false
+
+end#shouldBeExecuted
+
+
+
+
+
+findTextureBasedOnNumbStr="""
+given number from keyboard input it return array With texture that holds the texture specification we are looking for 
+listOfTextSpecifications - list with all registered Texture specifications
+numb - string that may represent number - if it does not function will return empty option
+return Option - either Texture specification or empty Option 
+"""
+@doc findTextureBasedOnNumbStr
+function findTextureBasedOnNumb(  listOfTextSpecifications::Vector{TextureSpec} ,numb::Int32  )::Option
+
+    indList = findAll(x->x.numb== numb, listOfTextSpecifications)
+    if(!isempty(indList))
+        return Option(listOfTextSpecifications[indList[1]])
+    end#if
+    #if we are here it mean no such texture was found    
+        return Option()
+
+end #findTextureBasedOnNumb
 
 
 
