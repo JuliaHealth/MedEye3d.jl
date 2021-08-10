@@ -103,7 +103,7 @@ and second entry is data that we want to pass
 forDisplayObjects - stores all needed constants that holds reference to GLFW and OpenGL
 """
 @doc updateImagesDisplayedStr
-function updateImagesDisplayed(listOfDataAndImageNames, forDisplayConstants)
+function updateImagesDisplayed(listOfDataAndImageNames, forDisplayConstants::forDisplayObjects)
    
         forDisplayConstants.stopListening[]=true
              modulelistOfTextSpecs=forDisplayConstants.listOfTextSpecifications

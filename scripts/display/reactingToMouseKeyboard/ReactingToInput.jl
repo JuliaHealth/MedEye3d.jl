@@ -67,11 +67,6 @@ Rocket.on_error!(actor::SyncActor{Any, ActorWithOpenGlObjects}, err)      = erro
 Rocket.on_complete!(actor::SyncActor{Any, ActorWithOpenGlObjects})        = println("Completed!")
 
 
-```@doc
-In order to enable keyboard shortcuts 
-```
-
-
 
 
 ```@doc

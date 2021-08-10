@@ -102,6 +102,7 @@ Defined in order to hold constant objects needed to display images
   #number of available slices - needed for scrolling needs
   slicesNumber::Int32=1
   mainImageUniforms::MainImageUniforms = MainImageUniforms()# struct with references to main image
+  fragment_shader_words::Int32=1 #reference to fragment shader used to display text
 end
 
 

@@ -37,15 +37,19 @@ function displayAll(windowWidth::Int,windowHeight::Int,listOfTexturesToCreate::V
    	# The shaders 
 	println(createcontextinfo())
 	gslsStr = get_glsl_version_string()
+
 	vertex_shader = createVertexShader(gslsStr)
-	fragment_shader = createFragmentShader(gslsStr,listOfTexturesToCreate)
+	fragment_shader_main = createFragmentShader(gslsStr,listOfTexturesToCreate)
+	
+	fragment_shader_words = ShadersAndVerticiesForText.createFragmentShader(gslsStr)
 
 
 	# Connect the shaders by combining them into a program
 	shader_program = glCreateProgram()
 
 	glAttachShader(shader_program, vertex_shader)
-	glAttachShader(shader_program, fragment_shader)
+	glAttachShader(shader_program, fragment_shader_main)
+	
 	glLinkProgram(shader_program)
 	glUseProgram(shader_program)
 	
@@ -74,7 +78,7 @@ function displayAll(windowWidth::Int,windowHeight::Int,listOfTexturesToCreate::V
 	schedule(t)
 
 
-return (window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo)
+return (window,vertex_shader,fragment_shader_main ,shader_program,stopListening,vbo,ebo,fragment_shader_words)
 
 end# displayAll
 

@@ -69,7 +69,7 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
                         ,windowWidth::Int=Int32(800)
                         ,windowHeight::Int=Int32(800) )
  #creating window and event listening loop
-    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo = Main.PrepareWindow.displayAll(windowWidth,windowHeight,listOfTextSpecs)
+    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words = Main.PrepareWindow.displayAll(windowWidth,windowHeight,listOfTextSpecs)
 
     # than we set those uniforms, open gl types and using data from arguments  to fill texture specifications
     mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program) 
@@ -93,6 +93,7 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
             ,windowHeight
             ,0 # number of slices will be set when data for scrolling will come
             ,mainImageUnifs
+            ,fragment_shader_words
     )
 
     #in order to clean up all resources while closing
