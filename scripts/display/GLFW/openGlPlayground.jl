@@ -3,10 +3,7 @@ using Base: Int16
      using DrWatson
      @quickactivate "Probabilistic medical segmentation"
      
-     using Setfield
-     using GLFW
-     using ModernGL
-     using ColorTypes
+     using Setfield, GLFW, ModernGL, ColorTypes
 
      include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/structs/forDisplayStructs.jl")
      include("/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/scripts/loadData/manageH5File.jl")
