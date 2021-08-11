@@ -4,9 +4,9 @@ using DrWatson
 
 module ForDisplayStructs
 using Base: Int32, isvisible
-export Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, TextureUniforms,MainImageUniforms, MaskTextureUniforms
+export Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms
 
-using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries
+using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries,FreeTypeAbstraction
 
 
 ```@doc
@@ -33,6 +33,7 @@ In order to improve usability  we will also save with what data type this mask i
 for example Int, uint, float etc
 ```
 @with_kw struct MaskTextureUniforms <: TextureUniforms
+samplerName::String =""#name of the sampler - mainly for debugging purposes
 samplerRef ::Int32 =Int32(0) #reference to sampler of the texture
 colorsMaskRef ::Int32 =Int32(0) #reference to uniform holding color of this mask
 isVisibleRef::Int32 =Int32(0)# reference to uniform that points weather we 
@@ -42,17 +43,13 @@ end
 Holding references to uniforms used to controll main image
 ```
 @with_kw struct MainImageUniforms<: TextureUniforms
-isamplerRef ::Int32 =Int32(0) #reference to integer  sampler of the texture
-usamplerRef ::Int32 =Int32(0) #reference to unsigned integer sampler of the texture
-fsamplerRef ::Int32 =Int32(0) #reference to float sampler of the texture
-typeOfMainSamplerRef ::Int32 =Int32(0) #reference to integrer tha will point which sampler should be used 1 will mean integer, 2 will mean uint and 3 float
-typeOfMainSamplerValue ::Int32 =Int32(0) #value of integrer that will point which sampler should be used 1 will mean integer, 2 will mean uint and 3 float
+samplerName::String =""#name of the sampler - mainly for debugging purposes
+samplerRef ::Int32 =Int32(0) #reference to   sampler of the texture
 isVisibleRef::Int32 =Int32(0)# reference to uniform that points weather we 
 # uniforms controlling windowing
 min_shown_white::Int32 =Int32(0)
 max_shown_black::Int32 =Int32(0)
 displayRange::Int32 =Int32(0)
-
 end
 
 ```@doc
@@ -63,6 +60,7 @@ Holding the data needed to create and  later reference the textures
   numb::Int32 =-1             #needed to enable swithing between textures generally convinient when between 0-9; needed only if texture is to be modified by mouse input
   dataType::Type              #type of data that will be used Int/uint/float
   isMainImage ::Bool = false  #true if this texture represents main image
+  isTextTexture ::Bool = false  #true if this texture represents texture that is supposed to hold text
   isSecondaryMain ::Bool = false # true if it holds some other important information that is not mask - used for example in case of nuclear imagiing studies
   isContinuusMask ::Bool = false # in case of masks if mask is continuus color display will be a bit diffrent
   color::RGB = RGB(0.0,0.0,0.0) #needed in case for the masks in order to establish the range of colors we are intrested in in case of binary mask there is no point to supply more than one color (supply Vector with length = 1)
@@ -78,7 +76,7 @@ Holding the data needed to create and  later reference the textures
   isVisible::Bool= true       #if false it should be invisible 
   uniforms::TextureUniforms=MaskTextureUniforms()# holds values needed to control uniforms in a shader
   #used in case this is main image and we want to set window
-  min_shown_white::Int32 =0
+  min_shown_white::Int32 =400
   max_shown_black::Int32 =-200
 end
 
@@ -104,6 +102,7 @@ Defined in order to hold constant objects needed to display images
   #number of available slices - needed for scrolling needs
   slicesNumber::Int32=1
   mainImageUniforms::MainImageUniforms = MainImageUniforms()# struct with references to main image
+
 end
 
 
@@ -117,9 +116,35 @@ mutable struct ActorWithOpenGlObjects <: NextActor{Any}
     onScrollData::Vector{Tuple{String, Array{T, 3} where T}}
     textureToModifyVec::Vector{TextureSpec} # texture that we want currently to modify - if list is empty it means that we do not intend to modify any texture
     isSliceChanged::Bool # set to true when slice is changed set to false when we start interacting with this slice - thanks to this we know that when we start drawing on one slice and change the slice the line would star a new on new slice
+    textDispObj::ForWordsDispStruct# set of objects and constants needed for text diplay
     ActorWithOpenGlObjects() = new(1,forDisplayObjects(),[],[],false)
 end
 
+```@doc
+Holding necessery data to controll keyboard shortcuts```
+@with_kw struct KeyboardStruct
+  isCtrlPressed::Bool # left - scancode 37 right 105 - Int32
+  isShiftPressed::Bool  # left - scancode 50 right 62- Int32
+  isAltPressed::Bool# left - scancode 64 right 108- Int32
+  isEnterPressed::Bool# scancode 36
+  lastKeysPressed::Vector{String} # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
+ #informations about what triggered sending this particular struct to the  actor
+  mostRecentScanCode ::Int32
+  mostRecentKeyName ::String
+  mostRecentAction ::GLFW.Action
+end
+
+
+```@doc
+Holding necessery data to display text  - like font related
+```
+@with_kw mutable struct ForWordsDispStruct
+fontFace::FTFont # font we will use to display text
+textureSpec::TextureSpec # texture specification of texture used to display text 
+fragment_shader_words::Int32=1 #reference to fragment shader used to display text
+vbo_words::Int32=1 #reference to vertex buffer object used to display text
+
+end #ForWordsDispStruct
 
 end #module
 

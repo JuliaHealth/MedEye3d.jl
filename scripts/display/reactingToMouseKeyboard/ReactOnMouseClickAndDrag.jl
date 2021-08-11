@@ -127,8 +127,7 @@ imageWidth adn imageHeight are the dimensions of textures that we use to display
 """
 @doc registerMouseClickFunctionsStr
 function registerMouseClickFunctions(window::GLFW.Window
-                                    ,stopListening::Base.Threads.Atomic{Bool}
-                                    )
+                                    ,stopListening::Base.Threads.Atomic{Bool}      )
 
 
  stopListening[]=true # stoping event listening loop to free the GLFW context
