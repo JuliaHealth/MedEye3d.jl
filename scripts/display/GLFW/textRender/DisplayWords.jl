@@ -9,16 +9,16 @@ using FreeTypeAbstraction, ModernGL, Main.PrepareWindowHelpers, Main.OpenGLDispl
 
 include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 
-export coordDisplayWords
+export coordDisplayWords,createTextureForWords
 
 ```@doc
 coordinating displaying of given text - function will be invoked by main actor holding all of the necessery data to enable displaying
 ```
-function coordDisplayWords(dispObj::forDisplayObjects)
-    bindAndActivateForText()
+function coordDisplayWords(dispObj::forDisplayObjects, wordsDispObj::ForWordsDispStruct)
+    bindAndActivateForText(dispObj.shader_program, wordsDispObj.fragment_shader_words,wordsDispObj.vbo_words )
     bindAndDisplayTexture()
     addTextToTexture()
-    reactivateMainObj()
+    reactivateMainObj(dispObj.shader_program, dispObj.fragment_shader, dispObj.vbo)
 
 end#coordDisplayWords    
 
@@ -27,13 +27,15 @@ First We need to bind fragment shader created to deal with text and supply the v
     shader_program- reference to shader program
     fragment_shader_words - reference to shader associated with text displaying
 ```
-function bindAndActivateForText(shader_program::Int32,fragment_shader_words::Int32 )
+function bindAndActivateForText(shader_program::Int32,fragment_shader_words::Int32 ,vbo_words::Int32 )
     glAttachShader(shader_program, fragment_shader_words)
     glLinkProgram(shader_program)
     glUseProgram(shader_program)
+    
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_words[])
+    glBufferData(GL_ARRAY_BUFFER, sizeof(Main.ShadersAndVerticiesForText.verticesB), Main.ShadersAndVerticiesForText.verticesB, GL_STATIC_DRAW)
 
-
-
+	encodeDataFromDataBuffer()
 end #bindAndActivateForText
 
 
@@ -52,6 +54,7 @@ FreeTypeAbstraction library
 function addTextToTexture()
 
     face = FreeTypeAbstraction.findfont("hack";  additional_fonts= datadir("fonts"))
+    typeof(face)
     img, extent = renderface(face, 'C', 64)
     
     
@@ -76,9 +79,25 @@ Finally in order to enable later proper display of the images we need to reactiv
 shader_program- reference to shader program
 fragment_shader_main- reference to shader associated with main images
 ```
-function reactivateMainObj(shader_program::Int32,fragment_shader_main::Int32 )
+function reactivateMainObj(shader_program::Int32,fragment_shader_main::Int32, vbo_main::Int32 )
+    glAttachShader(shader_program, fragment_shader_words)
+    glLinkProgram(shader_program)
+    glUseProgram(shader_program)
 
+    glBindBuffer(GL_ARRAY_BUFFER, vbo_words[])
+    glBufferData(GL_ARRAY_BUFFER, sizeof(Main.ShadersAndVerticies.vertices), Main.ShadersAndVerticies.vertices, GL_STATIC_DRAW)
+    
+    encodeDataFromDataBuffer()
 end #reactivateMainObj
+
+
+
+```@doc
+Creates and initialize texture that will be used for displaying text
+```
+function createTextureForWords()::TextureSpec
+
+end#createTextureForWords
 
 
 end#DisplayWords

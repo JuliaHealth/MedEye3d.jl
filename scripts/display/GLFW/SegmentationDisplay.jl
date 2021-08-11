@@ -47,7 +47,7 @@ using DrWatson
 export coordinateDisplay
 export passDataForScrolling
 
-using ModernGL, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUtils, Main.ForDisplayStructs,Main.Uniforms
+using ModernGL, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUtils, Main.ForDisplayStructs,Main.Uniforms, Main.DisplayWords
 using Main.ReactingToInput, Rocket, Setfield, Logging
 
 #holds actor that is main structure that process inputs from GLFW and reacts to it
@@ -66,10 +66,10 @@ windowWidth::Int,windowHeight::Int - GLFW window dimensions
 function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.TextureSpec}
                         ,imageTextureWidth::Int
                         ,imageTextureHeight::Int
-                        ,windowWidth::Int=Int32(800)
+                        ,windowWidth::Int=Int32(1000)
                         ,windowHeight::Int=Int32(800) )
  #creating window and event listening loop
-    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words = Main.PrepareWindow.displayAll(windowWidth,windowHeight,listOfTextSpecs)
+    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words = Main.PrepareWindow.displayAll(windowWidth,windowHeight,listOfTextSpecs)
 
     # than we set those uniforms, open gl types and using data from arguments  to fill texture specifications
     mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program) 
@@ -93,8 +93,9 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
             ,windowHeight
             ,0 # number of slices will be set when data for scrolling will come
             ,mainImageUnifs
-            ,fragment_shader_words
     )
+
+
 
     #in order to clean up all resources while closing
     GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())
@@ -102,6 +103,9 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
     #wrapping the Open Gl and GLFW objects into an observable and passing it to the actor
     forDisplayConstantObesrvable = of(forDispObj)
     subscribe!(forDisplayConstantObesrvable, mainActor) # configuring
+    #passing for text display object 
+    subscribe!(of(prepareForDispStruct(fragment_shader_words,vbo_words)),mainActor )
+
     registerInteractions()#passing needed subscriptions from GLFW
 
 end #coordinateDisplay
@@ -149,6 +153,21 @@ function registerInteractions()
 
 
 end
+
+```@doc
+Preparing ForWordsDispStruct that will be needed for proper displaying of texts
+    fragment_shader_words - reference to fragment shader used to display text
+    vbo_words - vertex buffer object used to display words
+```
+function prepareForDispStruct(fragment_shader_words::Int32, vbo_words::Int32) ::ForWordsDispStruct
+    return ForWordsDispStruct(
+            fontFace = FreeTypeAbstraction.findfont("hack";  additional_fonts= datadir("fonts"))
+            ,textureSpec = createTextureForWords()
+            ,fragment_shader_words= fragment_shader_words
+            ,vbo_words=vbo_words
+         )
+end#prepereForDispStruct
+
 
 cleanUpStr =    """
 In order to properly close displayer we need to :

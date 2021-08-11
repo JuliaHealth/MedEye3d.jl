@@ -58,6 +58,12 @@ function displayAll(windowWidth::Int,windowHeight::Int,listOfTexturesToCreate::V
 	createVertexBuffer()
 	# Create the Vertex Buffer Objects (VBO)
 	vbo = createDAtaBuffer(Main.ShadersAndVerticies.vertices)
+
+	vbo_words = Ref(GLuint(1))   # initial value is irrelevant, just allocate space
+    glGenBuffers(1, vbo_words)
+  
+
+
 	# Create the Element Buffer Object (EBO)
 	ebo = createElementBuffer(Main.ShadersAndVerticies.elements)
 	############ how data should be read from data buffer
@@ -78,7 +84,7 @@ function displayAll(windowWidth::Int,windowHeight::Int,listOfTexturesToCreate::V
 	schedule(t)
 
 
-return (window,vertex_shader,fragment_shader_main ,shader_program,stopListening,vbo,ebo,fragment_shader_words)
+return (window,vertex_shader,fragment_shader_main ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words)
 
 end# displayAll
 

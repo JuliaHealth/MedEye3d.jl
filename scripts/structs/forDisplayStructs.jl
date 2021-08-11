@@ -6,7 +6,7 @@ module ForDisplayStructs
 using Base: Int32, isvisible
 export Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms
 
-using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries
+using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries,FreeTypeAbstraction
 
 
 ```@doc
@@ -102,7 +102,7 @@ Defined in order to hold constant objects needed to display images
   #number of available slices - needed for scrolling needs
   slicesNumber::Int32=1
   mainImageUniforms::MainImageUniforms = MainImageUniforms()# struct with references to main image
-  fragment_shader_words::Int32=1 #reference to fragment shader used to display text
+
 end
 
 
@@ -116,6 +116,7 @@ mutable struct ActorWithOpenGlObjects <: NextActor{Any}
     onScrollData::Vector{Tuple{String, Array{T, 3} where T}}
     textureToModifyVec::Vector{TextureSpec} # texture that we want currently to modify - if list is empty it means that we do not intend to modify any texture
     isSliceChanged::Bool # set to true when slice is changed set to false when we start interacting with this slice - thanks to this we know that when we start drawing on one slice and change the slice the line would star a new on new slice
+    textDispObj::ForWordsDispStruct# set of objects and constants needed for text diplay
     ActorWithOpenGlObjects() = new(1,forDisplayObjects(),[],[],false)
 end
 
@@ -132,6 +133,18 @@ Holding necessery data to controll keyboard shortcuts```
   mostRecentKeyName ::String
   mostRecentAction ::GLFW.Action
 end
+
+
+```@doc
+Holding necessery data to display text  - like font related
+```
+@with_kw mutable struct ForWordsDispStruct
+fontFace::FTFont # font we will use to display text
+textureSpec::TextureSpec # texture specification of texture used to display text 
+fragment_shader_words::Int32=1 #reference to fragment shader used to display text
+vbo_words::Int32=1 #reference to vertex buffer object used to display text
+
+end #ForWordsDispStruct
 
 end #module
 
