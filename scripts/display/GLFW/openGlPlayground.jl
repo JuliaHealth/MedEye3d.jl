@@ -3,42 +3,12 @@ using Base: Int16
      using DrWatson
      @quickactivate "Probabilistic medical segmentation"
      
-     using Setfield, GLFW, ModernGL, ColorTypes
+     include(DrWatson.scriptsdir("display","GLFW","includeAll.jl"))
 
-
-     include(DrWatson.scriptsdir("structs","forDisplayStructs.jl"))
     #  include(DrWatson.scriptsdir("loadData","manageH5File.jl"))
     #  using Main.h5manag
 
 
-     include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
-     include(DrWatson.scriptsdir("display","GLFW","shadersEtc","CustomFragShad.jl"))
-
-     include(DrWatson.scriptsdir("display","GLFW","modernGL","OpenGLDisplayUtils.jl"))
-     include(DrWatson.scriptsdir("display","GLFW","shadersEtc","ShadersAndVerticies.jl"))
-     include(DrWatson.scriptsdir("display","GLFW","shadersEtc","ShadersAndVerticiesForText.jl"))
-     include(DrWatson.scriptsdir("display","GLFW","shadersEtc","Uniforms.jl"))
-
-
-     
-     include(DrWatson.scriptsdir("display","GLFW","modernGL","TextureManag.jl") )
-     include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindow.jl"))
-
-     
-
-     include(DrWatson.scriptsdir("display","GLFW","textRender","DisplayWords.jl"))
-     
-
- 
-
-     include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactToScroll.jl") )
-     include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactOnMouseClickAndDrag.jl") )
-     include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","reactToKeyboard.jl") )
-
-     include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactingToInput.jl") )
-     include(DrWatson.scriptsdir("display","GLFW","SegmentationDisplay.jl"))
-
-     
      
      
      using Revise 
@@ -84,11 +54,9 @@ using Base: Int16
      
      
            
-         include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactingToInput.jl"))
          using Main.ReactingToInput
      
-         segmPath = DrWatson.scriptsdir("display","GLFW","SegmentationDisplay.jl")
-         include(segmPath)
+       
          
      
          using Main.ForDisplayStructs
@@ -132,7 +100,7 @@ using Base: Int16
      
      
      
-         Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,40,40, 1000,800)
+         Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,40,40, 300,300)
      
      
         ### playing with uniforms
@@ -173,17 +141,8 @@ using Base: Int16
          ,("CTIm",ctDummy[slicee,:,:] )]
      
      
-     aa=zeros(40,40)
-     bb=zeros(40,40)
-     cc=zeros(40,40)
-     aa[1,1]=1
-     bb[1,1]=1
-     cc[1,1]=1
-     
-         listOfDataAndImageNamesSlice = [ ("mainLab",aa) ,
-           ("testLab2",bb) 
-           ,("testLab1",cc)     ,("CTIm",ctDummy[slicee,:,:] )]
-     
+
+
      
             Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice,3 )
      
@@ -198,25 +157,19 @@ using Base: Int16
          textTexture = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[4]
          textureCt = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5]
          
-         Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [textLiverMain]
+         Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [textureC]
          dattt = Main.SegmentationDisplay.mainActor.actor.onScrollData[4][2]
      maximum(dattt)
      
      
+
      
-     updateTexture(dattt,textureB )
+     using Main.Uniforms, Main.OpenGLDisplayUtils, Main.OpenGLDisplayUtils
      
-     basicRender(window)
-     
-     using Main.Uniforms, Main.OpenGLDisplayUtils
-     
-         
-     textLiverMain.uniforms.colorsMaskRef
-     textTexture.uniforms.colorsMaskRef
-     
+
      
        setTextureVisibility(true ,textLiverMain.uniforms)
-       setMaskColor(RGB(1.0,1.0,0.0) ,textLiverMain.uniforms)
+       setMaskColor(RGB(1.0,0.0,0.0) ,textLiverMain.uniforms)
      
        setMaskColor(RGB(0.0,1.0,0.0) ,textTexture.uniforms)
        setTextureVisibility(true ,textTexture.uniforms)
@@ -227,15 +180,36 @@ using Base: Int16
      
        setMaskColor(RGB(0.5,0.5,0.0) ,textureB.uniforms)
        setTextureVisibility(true ,textureB.uniforms)
-       setTextureVisibility(true,textureCt.uniforms)
      
      
-       #   basicRender(window)
      
       setCTWindow(Int32(0), Int32(0),Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5].uniforms)
      
      
+
+      textLiverMain.ID
+      textureB.ID
      
+      aa=zeros(UInt8,40,40)
+      bb=zeros(UInt8,40,40)
+      cc=zeros(UInt8,40,40)
+      aa[3,1]=1
+      bb[3,1]=1
+      cc[1,1]=1
+        
+      #liverMain
+      glActiveTexture(GL_TEXTURE0+1 ); # active proper texture unit before binding
+      glBindTexture(GL_TEXTURE_2D, textureB.ID[])
+      glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,textureB.OpGlType,cc)
+      basicRender(window)
+
+      # glActiveTexture(GL_TEXTURE0 +3); # active proper texture unit before binding
+      # glBindTexture(GL_TEXTURE_2D, textureB.ID[])
+      # glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,textureB.OpGlType,aa)
+      # basicRender(window)
+
+
+
      
      using Main.CustomFragShad
          strr= Main.CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate)
@@ -247,4 +221,155 @@ using Base: Int16
     
      
         GLFW.PollEvents()
+     ############
+     using DrWatson
+     @quickactivate "Probabilistic medical segmentation"
      
+     include(DrWatson.scriptsdir("display","GLFW","includeAll.jl"))
+
+
+
+
+     using ModernGL, GeometryTypes, GLFW
+     using Main.PrepareWindowHelpers
+     include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
+     using  Main.OpenGLDisplayUtils
+     using Main.ShadersAndVerticies, Main.ForDisplayStructs,Main.ShadersAndVerticiesForText
+     using ColorTypes,Main.TextureManag
+ 
+  window = initializeWindow(200,200)
+
+  listOfTexturesToCreate = [
+    Main.ForDisplayStructs.TextureSpec(
+        name = "mainLab",
+        dataType= UInt8,
+        strokeWidth = 5,
+        color = RGB(1.0,0.0,0.0)
+       ),
+    Main.ForDisplayStructs.TextureSpec(
+        name = "testLab1",
+        numb= Int32(1),
+        dataType= UInt8,
+        color = RGB(0.0,1.0,0.0)
+       ),
+        Main.ForDisplayStructs.TextureSpec(
+        name = "testLab2",
+        numb= Int32(2),
+        dataType= UInt8,
+        color = RGB(0.0,0.0,1.0)
+         ),
+         Main.ForDisplayStructs.TextureSpec(
+          name = "textText",
+          isTextTexture = true,
+          dataType= UInt8,
+          color = RGB(0.0,0.0,1.0)
+        ),
+        Main.ForDisplayStructs.TextureSpec(
+        name= "CTIm",
+        numb= Int32(3),
+        isMainImage = true,
+        dataType= Int16)  
+          ]
+    
+
+   	# The shaders 
+	println(createcontextinfo())
+	gslsStr = get_glsl_version_string()
+
+	vertex_shader = createVertexShader(gslsStr)
+	fragment_shader_main = createFragmentShader(gslsStr,listOfTexturesToCreate)
+	
+		# Connect the shaders by combining them into a program
+	shader_program = glCreateProgram()
+
+	glAttachShader(shader_program, vertex_shader)
+	glAttachShader(shader_program, fragment_shader_main)
+	
+	glLinkProgram(shader_program)
+	glUseProgram(shader_program)
+	
+	###########buffers
+	#create vertex buffer
+	createVertexBuffer()
+	# Create the Vertex Buffer Objects (VBO)
+	vbo = createDAtaBuffer(Main.ShadersAndVerticies.vertices)
+
+	# Create the Element Buffer Object (EBO)
+	ebo = createElementBuffer(Main.ShadersAndVerticies.elements)
+	############ how data should be read from data buffer
+	encodeDataFromDataBuffer()
+
+  GLFW.PollEvents()
+
+     textureLiver = createTexture(0,Int32(40),Int32(40), GL_R8UI)
+     textureSecond = createTexture(0,Int32(40),Int32(40), GL_R8UI)
+    
+  
+    
+     aa=zeros(UInt8,40,40)
+     bb=zeros(UInt8,40,40)
+
+     aa[2,1]=1
+
+     bb[1,1]=1
+
+     livSamplerRef=  glGetUniformLocation(shader_program, "mainLab")
+     secSamplerRef= glGetUniformLocation(shader_program, "testLab1")
+
+     glUniform1i(livSamplerRef, 0) # read from active texture 0
+     glUniform1i(secSamplerRef, 1) # read from active texture 1
+     
+     # load texture
+
+
+     
+     glActiveTexture(GL_TEXTURE0)
+     glBindTexture(GL_TEXTURE_2D, textureLiver[])
+     glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,aa)
+     basicRender(window)
+
+     glBindTexture(GL_TEXTURE_2D, textureSecond[])
+     glActiveTexture(GL_TEXTURE1)
+     glBindTexture(GL_TEXTURE_2D, textureSecond[])
+     glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,bb)
+     basicRender(window)
+
+
+
+    #  glActiveTexture(GL_TEXTURE0)
+    #  glBindTexture(GL_TEXTURE_2D, textureLiver[])
+    #  glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,aa)
+    #  basicRender(window)
+
+    #  glBindTexture(GL_TEXTURE_2D, textureSecond[])
+    #  glActiveTexture(GL_TEXTURE1)
+    #  glBindTexture(GL_TEXTURE_2D, textureSecond[])
+    #  glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,bb)
+    #  basicRender(window)
+
+
+
+
+using Glutils
+     @uniforms! begin
+
+    glGetUniformLocation(shader_program, "mainLabColorMask"):= Cfloat[1.0, 0.0, 0.0, 0.8]
+     glGetUniformLocation(shader_program, "testLab1ColorMask"):= Cfloat[0.0, 1.0, 0.0, 0.8]
+   
+     glGetUniformLocation(shader_program, "mainLabisVisible"):= 1
+     glGetUniformLocation(shader_program, "testLab1isVisible"):= 1
+    end
+
+
+     glActiveTexture(GL_TEXTURE0); # active proper texture unit before binding
+     glBindTexture(GL_TEXTURE_2D, textureLiver[])
+    # glUniform1i(samplerRefNumb,index);# we first look for uniform sampler in shader  
+     glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,aa)
+     basicRender(window)
+
+
+     glActiveTexture(GL_TEXTURE1); # active proper texture unit before binding
+     glBindTexture(GL_TEXTURE_2D, textureSecond[])
+    # glUniform1i(samplerRefNumb,index);# we first look for uniform sampler in shader  
+     glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,bb)
+     basicRender(window)

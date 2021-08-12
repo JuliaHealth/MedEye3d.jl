@@ -8,7 +8,7 @@ module TextureManag
 using Base: Float16
 using  ModernGL ,DrWatson,  Main.OpenGLDisplayUtils, Main.ForDisplayStructs
 using  Main.Uniforms, Logging,Setfield, Glutils,Logging, Main.CustomFragShad
-export initializeTextures, updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
+export initializeTextures,createTexture, updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
 
 updateTextureString = """
 uploading data to given texture; of given types associated - specified in TextureSpec
@@ -28,9 +28,7 @@ Just for reference openGL function definition
 @doc updateTextureString
 function updateTexture(data, textSpec::TextureSpec,xoffset=0,yoffset=0,widthh=textSpec.widthh,heightt =textSpec.heightt  )
 	glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
-	glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, 
-    heightt, GL_RED_INTEGER, textSpec.OpGlType, data)
-    glBindTexture(GL_TEXTURE_2D, 0)
+	glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, data)
 end
 
 
@@ -43,7 +41,7 @@ numb - which texture it is - basically important only that diffrent textures wou
 ```
 function createTexture(numb::Int, width::Int32, height::Int32,GL_RType::UInt32 =GL_R16I)
 #The texture we're going to render to
-    texture= Ref(GLuint(numb));
+    texture= Ref(GLuint(0));
     glGenTextures(1, texture);
     glBindTexture(GL_TEXTURE_2D, texture[]); 
 
