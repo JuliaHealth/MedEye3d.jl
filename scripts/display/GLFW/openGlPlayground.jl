@@ -5,7 +5,7 @@ using Base: Int16
      
      include(DrWatson.scriptsdir("display","GLFW","includeAll.jl"))
 
-    #  include(DrWatson.scriptsdir("loadData","manageH5File.jl"))
+     #  include(DrWatson.scriptsdir("loadData","manageH5File.jl"))
     #  using Main.h5manag
 
 
@@ -15,7 +15,7 @@ using Base: Int16
      using Main.SegmentationDisplay
      #data about textures we want to create
      using  Main.ForDisplayStructs
-     using Parameters
+     using Parameters, ColorTypes
      
      # list of texture specifications, important is that main texture - main image should be specified first
      #Order is important !
@@ -116,18 +116,20 @@ using Base: Int16
      
      
      
-     testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
-     testLab2Dat= UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+    #  testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+    #  testLab2Dat= UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
      
-     mainMaskDummy = UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
-     # testLab1Dat =rand(UInt8,10,40,40)
-     # testLab2Dat= rand(UInt8,10,40,40)
+    #  mainMaskDummy = UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+#    ctDummy =  Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,10,40,40)))# will give white background for testing 
+
+    testLab1Dat =ones(UInt8,10,40,40)
+     testLab2Dat= ones(UInt8,10,40,40)
      
-     # mainMaskDummy = rand(UInt8,10,40,40)
+     mainMaskDummy = ones(UInt8,10,40,40)
      
      
-     ctDummy =  Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,10,40,40)))# will give white background for testing 
-         listOfDataAndImageNames = [("mainLab",mainMaskDummy)
+     ctDummy = ones(Int16,10,40,40)
+             listOfDataAndImageNames = [("mainLab",mainMaskDummy)
          ,("CTIm",ctDummy )  
          ,("testLab2",testLab2Dat) 
          ,("testLab1",testLab1Dat) ]
@@ -157,7 +159,7 @@ using Base: Int16
          textTexture = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[4]
          textureCt = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5]
          
-         Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [textureC]
+         Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [textureB]
          dattt = Main.SegmentationDisplay.mainActor.actor.onScrollData[4][2]
      maximum(dattt)
      
@@ -169,7 +171,7 @@ using Base: Int16
 
      
        setTextureVisibility(true ,textLiverMain.uniforms)
-       setMaskColor(RGB(1.0,0.0,0.0) ,textLiverMain.uniforms)
+       setMaskColor(RGB(0.8,0.0,0.1) ,textLiverMain.uniforms)
      
        setMaskColor(RGB(0.0,1.0,0.0) ,textTexture.uniforms)
        setTextureVisibility(true ,textTexture.uniforms)
@@ -187,30 +189,103 @@ using Base: Int16
      
      
 
-      textLiverMain.ID
-      textureB.ID
+     aa=zeros(UInt8,40,40)
+     bb=zeros(UInt8,40,40)
+
+    #  aa[1,1]=1
+    #  bb[2,2]=1
+
+
+    bb[1,1]=1
+    #  bb[2,1]=1
+    #  bb[2,5]=1
+
+
+     cc= convert(Vector{Tuple{String, Array{T, 2} where T}} ,[ ("mainLab",aa),("testLab2",bb) ])
+
+
+     Main.SegmentationDisplay.updateSingleImagesDisplayed(convert(Vector{Tuple{String, Array{T, 2} where T}}
+      ,[ ("mainLab",aa),("testLab1",bb) ])
+     ,3 )
+
+     #    listOfDataAndImageNamesSlice = [ ("mainLab",mainMaskDummy[slicee,:,:])
+  #     ,  ("testLab2",testLab2Dat[slicee,:,:]) 
+  #    ,("testLab1",testLab1Dat[slicee,:,:]) 
+  #  ,("CTIm",ctDummy[slicee,:,:] )]
+
+
+
+
+cc = zeros(3,3,3)
+xx = [CartesianIndex(1,1),CartesianIndex(1,2)]
+cc[3,xx].=1
+cc
+cc[3,:,:]
+
+  mouseCoords= [CartesianIndex(150,150), CartesianIndex(100,150)]
+
+  obj =  Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects
+  obj.stopListening[]=true #free GLFW context
+  textureList =  [textureB]
+
+  if (!isempty(textureList))
+      texture= textureList[1]
+      
+     mappedCoords =  translateMouseToTexture(texture.strokeWidth
+                                              ,mouseCoords
+                                              ,obj.windowWidth
+                                              , obj.windowHeight
+                                              , obj.imageTextureWidth
+                                              , obj.imageTextureHeight
+                                              ,Main.SegmentationDisplay.mainActor.actor.currentDisplayedSlice)
+
+bb[mappedCoords].=1
+bb[mappedCoords]
+
+ data = Main.SegmentationDisplay.mainActor.actor.onScrollData[1][2]
+ maximum(aa)
+ updateTexture(bb, texture)
+
+                                              for datTupl in   Main.SegmentationDisplay.mainActor.actor.onScrollData
+          if(datTupl[1]==texture.name)
+              datTupl[2][mappedCoords].=1 # broadcasting new value to all points that we are intrested in     
+              updateTexture(datTupl[2][ Main.SegmentationDisplay.mainActor.actor.currentDisplayedSlice,:,:], texture)
+              break
+          end#if
+      end #for
+
+
+       
+      basicRender(obj.window)
      
-      aa=zeros(UInt8,40,40)
-      bb=zeros(UInt8,40,40)
-      cc=zeros(UInt8,40,40)
-      aa[3,1]=1
-      bb[3,1]=1
-      cc[1,1]=1
-        
-      #liverMain
-      glActiveTexture(GL_TEXTURE0+1 ); # active proper texture unit before binding
-      glBindTexture(GL_TEXTURE_2D, textureB.ID[])
-      glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,textureB.OpGlType,cc)
-      basicRender(window)
+  end #if 
+  obj.stopListening[]=false # reactivete event listening loop
 
-      # glActiveTexture(GL_TEXTURE0 +3); # active proper texture unit before binding
-      # glBindTexture(GL_TEXTURE_2D, textureB.ID[])
-      # glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,textureB.OpGlType,aa)
-      # basicRender(window)
+
 
 
 
      
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
      using Main.CustomFragShad
          strr= Main.CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate)
          for st in split(strr, "\n")
@@ -222,117 +297,89 @@ using Base: Int16
      
         GLFW.PollEvents()
      ############
-     using DrWatson
-     @quickactivate "Probabilistic medical segmentation"
+#      using DrWatson
+#      @quickactivate "Probabilistic medical segmentation"
      
-     include(DrWatson.scriptsdir("display","GLFW","includeAll.jl"))
+#      include(DrWatson.scriptsdir("display","GLFW","includeAll.jl"))
 
 
 
 
-     using ModernGL, GeometryTypes, GLFW
-     using Main.PrepareWindowHelpers
-     include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
-     using  Main.OpenGLDisplayUtils
-     using Main.ShadersAndVerticies, Main.ForDisplayStructs,Main.ShadersAndVerticiesForText
-     using ColorTypes,Main.TextureManag
- 
-  window = initializeWindow(200,200)
+    #  using ModernGL, GeometryTypes, GLFW
+    #  using Main.PrepareWindowHelpers
+    #  include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
+    #  using  Main.OpenGLDisplayUtils
+    #  using Main.ShadersAndVerticies, Main.ForDisplayStructs,Main.ShadersAndVerticiesForText
+    #  using ColorTypes,Main.TextureManag, Main.PrepareWindow, Setfield
+#  using  Main.Uniforms
 
-  listOfTexturesToCreate = [
-    Main.ForDisplayStructs.TextureSpec(
-        name = "mainLab",
-        dataType= UInt8,
-        strokeWidth = 5,
-        color = RGB(1.0,0.0,0.0)
-       ),
-    Main.ForDisplayStructs.TextureSpec(
-        name = "testLab1",
-        numb= Int32(1),
-        dataType= UInt8,
-        color = RGB(0.0,1.0,0.0)
-       ),
-        Main.ForDisplayStructs.TextureSpec(
-        name = "testLab2",
-        numb= Int32(2),
-        dataType= UInt8,
-        color = RGB(0.0,0.0,1.0)
-         ),
-         Main.ForDisplayStructs.TextureSpec(
-          name = "textText",
-          isTextTexture = true,
-          dataType= UInt8,
-          color = RGB(0.0,0.0,1.0)
-        ),
-        Main.ForDisplayStructs.TextureSpec(
-        name= "CTIm",
-        numb= Int32(3),
-        isMainImage = true,
-        dataType= Int16)  
-          ]
+
+#      listOfTexturesToCreate = [
+#       Main.ForDisplayStructs.TextureSpec(  name = "mainLab",          dataType= UInt8,          strokeWidth = 5,          color = RGB(1.0,0.0,0.0)         ),      Main.ForDisplayStructs.TextureSpec(          name = "testLab1",          numb= Int32(1),          dataType= UInt8,          color = RGB(0.0,1.0,0.0)         ),
+#           Main.ForDisplayStructs.TextureSpec(          name = "testLab2",          numb= Int32(2),          dataType= UInt8,          color = RGB(0.0,0.0,1.0)           ),           Main.ForDisplayStructs.TextureSpec(            name = "textText",            isTextTexture = true,            dataType= UInt8,            color = RGB(0.0,0.0,1.0)          ),          Main.ForDisplayStructs.TextureSpec(          name= "CTIm",          numb= Int32(3),          isMainImage = true,          dataType= Int16)              ]
+      
+
+
+
+#      window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words = Main.PrepareWindow.displayAll(200,200,listOfTexturesToCreate)
+
+#      # than we set those uniforms, open gl types and using data from arguments  to fill texture specifications
+#      mainImageUnifs,listOfTextSpecsMapped= SegmentationDisplay.assignUniformsAndTypesToMasks(listOfTexturesToCreate,shader_program) 
+#       listOfTextSpecsMapped=map((spec)-> setproperties(spec, (widthh= 40, heightt= 40 )) 
+#                                               ,listOfTextSpecsMapped)
+#       listOfTextSpecsMapped=   initializeTextures(listOfTextSpecsMapped)
+
+
+
+
+#                                              stopListening[]=true
+#   GLFW.PollEvents()
+
+#      textureLiver = listOfTextSpecsMapped[1].ID
+#      textureSecond =  listOfTextSpecsMapped[2].ID
     
-
-   	# The shaders 
-	println(createcontextinfo())
-	gslsStr = get_glsl_version_string()
-
-	vertex_shader = createVertexShader(gslsStr)
-	fragment_shader_main = createFragmentShader(gslsStr,listOfTexturesToCreate)
-	
-		# Connect the shaders by combining them into a program
-	shader_program = glCreateProgram()
-
-	glAttachShader(shader_program, vertex_shader)
-	glAttachShader(shader_program, fragment_shader_main)
-	
-	glLinkProgram(shader_program)
-	glUseProgram(shader_program)
-	
-	###########buffers
-	#create vertex buffer
-	createVertexBuffer()
-	# Create the Vertex Buffer Objects (VBO)
-	vbo = createDAtaBuffer(Main.ShadersAndVerticies.vertices)
-
-	# Create the Element Buffer Object (EBO)
-	ebo = createElementBuffer(Main.ShadersAndVerticies.elements)
-	############ how data should be read from data buffer
-	encodeDataFromDataBuffer()
-
-  GLFW.PollEvents()
-
-     textureLiver = createTexture(0,Int32(40),Int32(40), GL_R8UI)
-     textureSecond = createTexture(0,Int32(40),Int32(40), GL_R8UI)
+#      listOfTextSpecsMapped[2].actTextrureNumb
     
-  
-    
-     aa=zeros(UInt8,40,40)
-     bb=zeros(UInt8,40,40)
+#      aa=zeros(UInt8,40,40)
+#      bb=zeros(UInt8,40,40)
 
-     aa[2,1]=1
+#      aa[2,1]=1
+#      aa[2,2]=1
+#      aa[3,3]=1
 
-     bb[1,1]=1
+#      bb[1,1]=1
+#      bb[2,1]=1
+#      bb[2,5]=1
 
-     livSamplerRef=  glGetUniformLocation(shader_program, "mainLab")
-     secSamplerRef= glGetUniformLocation(shader_program, "testLab1")
+#      livSamplerRef=  listOfTextSpecsMapped[1].uniforms.samplerRef
+#      secSamplerRef= listOfTextSpecsMapped[2].uniforms.samplerRef
 
-     glUniform1i(livSamplerRef, 0) # read from active texture 0
-     glUniform1i(secSamplerRef, 1) # read from active texture 1
+#       glUniform1i(livSamplerRef, 0) # read from active texture 0
+#       glUniform1i(secSamplerRef, 1) # read from active texture 1
      
-     # load texture
+#      # load texture
+
+#      setTextureVisibility(true , listOfTextSpecsMapped[1].uniforms)
+#      setMaskColor(RGB(1.0,0.0,0.0) , listOfTextSpecsMapped[1].uniforms)
+   
+#      setTextureVisibility(true ,listOfTextSpecsMapped[2].uniforms)
+#      setMaskColor(RGB(0.0,1.0,0.0) ,listOfTextSpecsMapped[2].uniforms)
+   
 
 
-     
-     glActiveTexture(GL_TEXTURE0)
-     glBindTexture(GL_TEXTURE_2D, textureLiver[])
-     glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,aa)
-     basicRender(window)
 
-     glBindTexture(GL_TEXTURE_2D, textureSecond[])
-     glActiveTexture(GL_TEXTURE1)
-     glBindTexture(GL_TEXTURE_2D, textureSecond[])
-     glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,bb)
-     basicRender(window)
+#     glClearColor(0.0, 0.0, 0.1 , 1.0)
+
+#      glActiveTexture(GL_TEXTURE0)
+#      glBindTexture(GL_TEXTURE_2D, textureLiver[])
+#      glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,aa)
+   
+
+#      glActiveTexture(GL_TEXTURE1)
+#      glBindTexture(GL_TEXTURE_2D, textureSecond[])
+#      glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,bb)
+#      basicRender(window)
+#      stopListening[]=false
 
 
 
@@ -350,26 +397,201 @@ using Base: Int16
 
 
 
-using Glutils
-     @uniforms! begin
 
-    glGetUniformLocation(shader_program, "mainLabColorMask"):= Cfloat[1.0, 0.0, 0.0, 0.8]
-     glGetUniformLocation(shader_program, "testLab1ColorMask"):= Cfloat[0.0, 1.0, 0.0, 0.8]
+
+
+    #  glActiveTexture(GL_TEXTURE0); # active proper texture unit before binding
+    #  glBindTexture(GL_TEXTURE_2D, textureLiver[])
+    # # glUniform1i(samplerRefNumb,index);# we first look for uniform sampler in shader  
+    #  glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,aa)
+    #  basicRender(window)
+
+
+    #  glActiveTexture(GL_TEXTURE1); # active proper texture unit before binding
+    #  glBindTexture(GL_TEXTURE_2D, textureSecond[])
+    # # glUniform1i(samplerRefNumb,index);# we first look for uniform sampler in shader  
+    #  glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,bb)
+    #  basicRender(window)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#      using DrWatson
+#      @quickactivate "Probabilistic medical segmentation"
+     
+#      include(DrWatson.scriptsdir("display","GLFW","includeAll.jl"))
+
+
+
+
+#      using ModernGL, GeometryTypes, GLFW
+#      using Main.PrepareWindowHelpers
+#      include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
+#      using  Main.OpenGLDisplayUtils
+#      using Main.ShadersAndVerticies, Main.ForDisplayStructs,Main.ShadersAndVerticiesForText
+#      using ColorTypes,Main.TextureManag
+ 
+#   window = initializeWindow(200,200)
+
+#   listOfTexturesToCreate = [
+#     Main.ForDisplayStructs.TextureSpec(
+#         name = "mainLab",
+#         dataType= UInt8,
+#         strokeWidth = 5,
+#         color = RGB(1.0,0.0,0.0)
+#        ),
+#     Main.ForDisplayStructs.TextureSpec(
+#         name = "testLab1",
+#         numb= Int32(1),
+#         dataType= UInt8,
+#         color = RGB(0.0,1.0,0.0)
+#        ),
+#         Main.ForDisplayStructs.TextureSpec(
+#         name = "testLab2",
+#         numb= Int32(2),
+#         dataType= UInt8,
+#         color = RGB(0.0,0.0,1.0)
+#          ),
+#          Main.ForDisplayStructs.TextureSpec(
+#           name = "textText",
+#           isTextTexture = true,
+#           dataType= UInt8,
+#           color = RGB(0.0,0.0,1.0)
+#         ),
+#         Main.ForDisplayStructs.TextureSpec(
+#         name= "CTIm",
+#         numb= Int32(3),
+#         isMainImage = true,
+#         dataType= Int16)  
+#           ]
+    
+
+#    	# The shaders 
+# 	println(createcontextinfo())
+# 	gslsStr = get_glsl_version_string()
+
+# 	vertex_shader = createVertexShader(gslsStr)
+# 	fragment_shader_main = createFragmentShader(gslsStr,listOfTexturesToCreate)
+	
+# 		# Connect the shaders by combining them into a program
+# 	shader_program = glCreateProgram()
+
+# 	glAttachShader(shader_program, vertex_shader)
+# 	glAttachShader(shader_program, fragment_shader_main)
+	
+# 	glLinkProgram(shader_program)
+# 	glUseProgram(shader_program)
+	
+# 	###########buffers
+# 	#create vertex buffer
+# 	createVertexBuffer()
+# 	# Create the Vertex Buffer Objects (VBO)
+# 	vbo = createDAtaBuffer(Main.ShadersAndVerticies.vertices)
+
+# 	# Create the Element Buffer Object (EBO)
+# 	ebo = createElementBuffer(Main.ShadersAndVerticies.elements)
+# 	############ how data should be read from data buffer
+# 	encodeDataFromDataBuffer()
+
+#   GLFW.PollEvents()
+
+#      textureLiver = createTexture(0,Int32(40),Int32(40), GL_R8UI)
+#      textureSecond = createTexture(0,Int32(40),Int32(40), GL_R8UI)
+    
+  
+    
+#      aa=zeros(UInt8,40,40)
+#      bb=zeros(UInt8,40,40)
+
+#      aa[2,1]=1
+#      aa[2,2]=1
+#      aa[2,3]=1
+
+#      bb[1,1]=1
+#      bb[2,1]=1
+#      bb[2,5]=1
+
+#      livSamplerRef=  glGetUniformLocation(shader_program, "mainLab")
+#      secSamplerRef= glGetUniformLocation(shader_program, "testLab1")
+
+#      glUniform1i(livSamplerRef, 0) # read from active texture 0
+#      glUniform1i(secSamplerRef, 1) # read from active texture 1
+     
+#      # load texture
+
+
+     
+#      glActiveTexture(GL_TEXTURE0)
+#      glBindTexture(GL_TEXTURE_2D, textureLiver[])
+#      glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,aa)
    
-     glGetUniformLocation(shader_program, "mainLabisVisible"):= 1
-     glGetUniformLocation(shader_program, "testLab1isVisible"):= 1
-    end
+
+#      glActiveTexture(GL_TEXTURE1)
+#      glBindTexture(GL_TEXTURE_2D, textureSecond[])
+#      glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,bb)
+#      basicRender(window)
 
 
-     glActiveTexture(GL_TEXTURE0); # active proper texture unit before binding
-     glBindTexture(GL_TEXTURE_2D, textureLiver[])
-    # glUniform1i(samplerRefNumb,index);# we first look for uniform sampler in shader  
-     glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,aa)
-     basicRender(window)
+
+#     #  glActiveTexture(GL_TEXTURE0)
+#     #  glBindTexture(GL_TEXTURE_2D, textureLiver[])
+#     #  glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,aa)
+#     #  basicRender(window)
+
+#     #  glBindTexture(GL_TEXTURE_2D, textureSecond[])
+#     #  glActiveTexture(GL_TEXTURE1)
+#     #  glBindTexture(GL_TEXTURE_2D, textureSecond[])
+#     #  glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,bb)
+#     #  basicRender(window)
 
 
-     glActiveTexture(GL_TEXTURE1); # active proper texture unit before binding
-     glBindTexture(GL_TEXTURE_2D, textureSecond[])
-    # glUniform1i(samplerRefNumb,index);# we first look for uniform sampler in shader  
-     glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,bb)
-     basicRender(window)
+
+
+# using Glutils
+#      @uniforms! begin
+
+#     glGetUniformLocation(shader_program, "mainLabColorMask"):= Cfloat[1.0, 0.3, 0.0, 0.8]
+#      glGetUniformLocation(shader_program, "testLab1ColorMask"):= Cfloat[0.3, 1.0, 0.0, 0.8]
+   
+#      glGetUniformLocation(shader_program, "mainLabisVisible"):= 1
+#      glGetUniformLocation(shader_program, "testLab1isVisible"):= 1
+#     end
+
+
+#      glActiveTexture(GL_TEXTURE0); # active proper texture unit before binding
+#      glBindTexture(GL_TEXTURE_2D, textureLiver[])
+#     # glUniform1i(samplerRefNumb,index);# we first look for uniform sampler in shader  
+#      glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,aa)
+#      basicRender(window)
+
+
+#      glActiveTexture(GL_TEXTURE1); # active proper texture unit before binding
+#      glBindTexture(GL_TEXTURE_2D, textureSecond[])
+#     # glUniform1i(samplerRefNumb,index);# we first look for uniform sampler in shader  
+#      glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,bb)
+#      basicRender(window)

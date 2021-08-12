@@ -184,8 +184,7 @@ function reactToMouseDrag(mouseCoords::Vector{CartesianIndex{2}}, actor::SyncAct
 
         for datTupl in  actor.actor.onScrollData
             if(datTupl[1]==texture.name)
-                @info "texture to update " texture.name 
-                datTupl[2][mappedCoords].=1 # broadcasting new value to all points that we are intrested in     
+                datTupl[2][actor.actor.currentDisplayedSlice][mappedCoords].=1 # broadcasting new value to all points that we are intrested in     
                 updateTexture(datTupl[2][actor.actor.currentDisplayedSlice,:,:], texture)
                 break
             end#if
@@ -203,9 +202,9 @@ function reactToMouseDrag(mouseCoords::Vector{CartesianIndex{2}}, actor::SyncAct
     
 
     
-for text in obj.listOfTextSpecifications
-        glBindTexture(GL_TEXTURE_2D, text.ID[]); 
-end #for        
+# for text in obj.listOfTextSpecifications
+#         glBindTexture(GL_TEXTURE_2D, text.ID[]); 
+# end #for        
         basicRender(obj.window)
 
 #updating data
@@ -238,9 +237,9 @@ function translateMouseToTexture(strokeWidth::Int32
     halfStroke =   Int64(floor(strokeWidth/2 ))
     #updating given texture that we are intrested in in place we are intested in 
 
-    return map(c->CartesianIndex(currentDisplayedSlice ,Int64(floor( ((c[1])/(windowWidth*0.9))*imageTextureWidth))
+    return map(c->CartesianIndex(Int64(floor( ((c[1])/(windowWidth*0.9))*imageTextureWidth))
     , Int64(floor(  ((windowHeight-c[2])/windowHeight)*imageTextureHeight)  )     ),mouseCoords)                                                    |>
-      (x)->filter(it->it[1]>0 && it[2]>0 && it[3]>0 ,x)        # we do not want to try access it in point 0 as julia is 1 indexed                 
+      (x)->filter(it->it[1]>=0 && it[2]>=0 ,x)        # we do not want to try access it in point 0 as julia is 1 indexed                 
 
     # calcX = Int64(floor( ((mouseCoord[1])/(windowWidth*0.9))*imageTextureWidth)  )
     # calcY = Int64(floor(  ((windowHeight-mouseCoord[2])/windowHeight)*imageTextureHeight)  )       

@@ -27,7 +27,9 @@ Just for reference openGL function definition
 """
 @doc updateTextureString
 function updateTexture(data, textSpec::TextureSpec,xoffset=0,yoffset=0,widthh=textSpec.widthh,heightt =textSpec.heightt  )
-	glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
+
+    glActiveTexture(textSpec.actTextrureNumb); # active proper texture unit before binding
+    glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
 	glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, data)
 end
 
@@ -74,15 +76,14 @@ function initializeTextures(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textu
 
     for (ind, textSpec ) in enumerate(listOfTextSpecs)
         index=ind-1
-        #we need to get access to sampler
-        samplerRefNumb = 0
-
-        glActiveTexture(GL_TEXTURE0 +index); # active proper texture unit before binding
-        glUniform1i(samplerRefNumb,index);# we first look for uniform sampler in shader  
         textUreId= createTexture(index,textSpec.widthh,textSpec.heightt,textSpec.GL_Rtype)#binding texture and populating with data
         @info "textUreId in initializeTextures"  textUreId
+       
+        actTextrureNumb = getProperGL_TEXTURE(index)
+        glActiveTexture(actTextrureNumb)
+        glUniform1i(textSpec.uniforms.samplerRef,index);# we first look for uniform sampler in shader  
 
-        push!(res,setproperties(textSpec, (ID=textUreId)))
+        push!(res,setproperties(textSpec, (ID=textUreId, actTextrureNumb=actTextrureNumb)))
 
 
     end # for
@@ -91,7 +92,12 @@ function initializeTextures(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textu
 end #initializeAndDrawTextures
 
 
-
+```@doc
+associates GL_TEXTURE UInt32 to given index 
+```
+function getProperGL_TEXTURE(index::Int)::UInt32
+    return eval(Meta.parse("GL_TEXTURE$(index)"))
+end#getProperGL_TEXTURE
 
 updateImagesDisplayedStr =    """
 coordinating updating all of the images, masks... 

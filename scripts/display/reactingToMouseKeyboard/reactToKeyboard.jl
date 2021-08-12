@@ -194,7 +194,7 @@ function shouldBeExecuted(keyInfo::KeyboardStruct)::Bool
         _ => -1
     end
 
-    if(act0)# so we have press or relese 
+    if(act)# so we have press or relese 
         @match keyInfo.mostRecentScanCode begin
             Int32(37) => return act==2 # returning true if we relese key
             Int32(105) => return act==2

@@ -72,6 +72,7 @@ Holding the data needed to create and  later reference the textures
   slicesNumber::Int = 0       #number of slices available
   GL_Rtype::UInt32 =UInt32(0)           #GlRtype - for example GL_R8UI or GL_R16I
   OpGlType ::UInt32 =UInt32(0)          #open gl type - for example GL_UNSIGNED_BYTE or GL_SHORT
+  actTextrureNumb ::UInt32 =UInt32(0)          #usefull to be able to activate the texture using GL_Activetexture - with proper open GL constant
   ID::Base.RefValue{UInt32} = Ref(UInt32(0))   #id of Texture
   isVisible::Bool= true       #if false it should be invisible 
   uniforms::TextureUniforms=MaskTextureUniforms()# holds values needed to control uniforms in a shader
