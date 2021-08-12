@@ -48,7 +48,7 @@ export coordinateDisplay
 export passDataForScrolling
 
 using ModernGL, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUtils, Main.ForDisplayStructs,Main.Uniforms, Main.DisplayWords
-using Main.ReactingToInput, Rocket, Setfield, Logging
+using Main.ReactingToInput, Rocket, Setfield, Logging, Main.ShadersAndVerticiesForText,FreeTypeAbstraction,Main.DisplayWords
 
 #holds actor that is main structure that process inputs from GLFW and reacts to it
 mainActor = sync(ActorWithOpenGlObjects())
@@ -159,7 +159,7 @@ Preparing ForWordsDispStruct that will be needed for proper displaying of texts
     fragment_shader_words - reference to fragment shader used to display text
     vbo_words - vertex buffer object used to display words
 ```
-function prepareForDispStruct(fragment_shader_words::Int32, vbo_words::Int32) ::ForWordsDispStruct
+function prepareForDispStruct(fragment_shader_words::UInt32, vbo_words::Base.RefValue{UInt32}) ::ForWordsDispStruct
     return ForWordsDispStruct(
             fontFace = FreeTypeAbstraction.findfont("hack";  additional_fonts= datadir("fonts"))
             ,textureSpec = createTextureForWords()

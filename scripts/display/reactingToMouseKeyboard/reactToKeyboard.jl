@@ -53,7 +53,7 @@ action - for example key press or release
 scancode - if key do not have short name like ctrl ... it has scancode
 """
 @doc handlerStr
-function (handler::KeyboardCallbackSubscribable)(str:String, action::GLFW.Action)
+function (handler::KeyboardCallbackSubscribable)(str::String, action::GLFW.Action)
    if( (action==GLFW.PRESS)  ) 
         push!(handler.lastKeysPressed ,str)
         # res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed
@@ -83,13 +83,13 @@ function (handler::KeyboardCallbackSubscribable)(scancode ::Int32, action::GLFW.
 
     if(act>0)# so we have press or relese 
         scCode = @match scancode begin
-            Int32(37) => handler.isCtrlPressed= (act==1)
-            Int32(105) => handler.isCtrlPressed= (act==1)
-            Int32(50) => handler.isShiftPressed= (act==1)
-            Int32(62) => handler.isShiftPressed=( act==1)
-            Int32(64) => handler.isAltPressed= (act==1)
-            Int32(108) => handler.isAltPressed= (act==1)
-            Int32(36) => handler.isEnterPressed= (act==1)
+            Int32(37) => (handler.isCtrlPressed= (act==1) )
+            Int32(105) => (handler.isCtrlPressed= (act==1))
+            Int32(50) =>( handler.isShiftPressed= (act==1))
+            Int32(62) =>( handler.isShiftPressed=( act==1))
+            Int32(64) =>( handler.isAltPressed= (act==1))
+            Int32(108) => (handler.isAltPressed= (act==1))
+            Int32(36) =>( handler.isEnterPressed= (act==1))
             _ => "notImp" # not Important
          end
             res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed
@@ -125,8 +125,7 @@ function registerKeyboardFunctions(window::GLFW.Window,stopListening::Base.Threa
 
     stopListening[]=true # stoping event listening loop to free the GLFW context
                            
-    keyboardSubs = MouseCallbackSubscribable(false,false,false,
-    Subject(Vector{KeyboardStruct}, scheduler = AsyncScheduler()))
+    keyboardSubs = KeyboardCallbackSubscribable(false,false,false,false,[], Subject(KeyboardStruct, scheduler = AsyncScheduler()))
                                   
         GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
         name = GLFW.GetKeyName(key, scancode)
@@ -151,7 +150,7 @@ function setVisOnKey(textSpecObs::Identity{TextureSpec})
    textSpec =  textSpecObs.value
     if(textSpec.isCtrlPressed)    
         setTextureVisibility(false,textSpec.uniforms )
-    else if(textSpec.isShiftPressed)  
+    elseif(textSpec.isShiftPressed)  
         setTextureVisibility(true,textSpec.uniforms )
     end #if
 
@@ -205,7 +204,8 @@ function shouldBeExecuted(keyInfo::KeyboardStruct)::Bool
             Int32(108) => return act==2
             Int32(36) => return act==1 # returning true if enter is pressed
             _ => "notImp" # not Important
-         end
+         end#match
+        end#if     
    # if we got here we did not found anything intresting      
 return false
 

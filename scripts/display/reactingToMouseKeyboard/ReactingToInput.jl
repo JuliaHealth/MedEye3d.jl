@@ -2,7 +2,8 @@ using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
 module ReactingToInput
-using Rocket, GLFW, Main.ReactToScroll, Main.ForDisplayStructs, Main.TextureManag, Main.ReactOnMouseClickAndDrag, Main.ReactOnKeyboard
+using Rocket, GLFW, Main.ReactToScroll, Main.ForDisplayStructs, Main.TextureManag,
+ Main.ReactOnMouseClickAndDrag, Main.ReactOnKeyboard
 
 export subscribeGLFWtoActor
 
@@ -94,7 +95,7 @@ function subscribeGLFWtoActor(actor ::SyncActor{Any, ActorWithOpenGlObjects})
     keyBoardAct = registerKeyboardFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)
     buttonSubs = registerMouseClickFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)
   
-    keyboardSub = subscribe!(scrollback, keyBoardAct)
+    keyboardSub = subscribe!(keyBoardAct, actor)
     scrollSubscription = subscribe!(scrollback, actor)
     mouseClickSub = subscribe!(buttonSubs, actor)
 

@@ -111,7 +111,7 @@ function updateImagesDisplayed(listOfDataAndImageNames, forDisplayConstants::for
             glClearColor(0.0, 0.0, 0.1 , 1.0)
             for updateDat in listOfDataAndImageNames
                 findList= findall( (texSpec)-> texSpec.name == updateDat[1], modulelistOfTextSpecs)
-                texSpec = !isempty(findList) ? modulelistOfTextSpecs[findList[1]] : throw(DomainError(findList, "no such name specified in start configuration")) 
+                texSpec = !isempty(findList) ? modulelistOfTextSpecs[findList[1]] : throw(DomainError(findList, "no such name specified in start configuration - $( updateDat[1])")) 
                 Main.TextureManag.updateTexture(updateDat[2],texSpec)
             end #for 
             #render onto the screen

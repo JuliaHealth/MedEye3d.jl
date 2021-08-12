@@ -12,7 +12,7 @@ using ModernGL, GeometryTypes, GLFW
 using Main.PrepareWindowHelpers
 include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 using  Main.OpenGLDisplayUtils
-using Main.ShadersAndVerticies, Main.ForDisplayStructs
+using Main.ShadersAndVerticies, Main.ForDisplayStructs,Main.ShadersAndVerticiesForText
 
 
 

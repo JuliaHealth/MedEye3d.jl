@@ -4,7 +4,7 @@ using DrWatson
 
 module ForDisplayStructs
 using Base: Int32, isvisible
-export Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms
+export Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms,ForWordsDispStruct
 
 using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries,FreeTypeAbstraction
 
@@ -105,6 +105,16 @@ Defined in order to hold constant objects needed to display images
 
 end
 
+```@doc
+Holding necessery data to display text  - like font related
+```
+@with_kw mutable struct ForWordsDispStruct
+fontFace::FTFont # font we will use to display text
+textureSpec::TextureSpec # texture specification of texture used to display text 
+fragment_shader_words::UInt32=1 #reference to fragment shader used to display text
+vbo_words::Base.RefValue{UInt32}=Ref(UInt32(1)) #reference to vertex buffer object used to display text
+
+end #ForWordsDispStruct
 
 
 ```@doc
@@ -135,16 +145,6 @@ Holding necessery data to controll keyboard shortcuts```
 end
 
 
-```@doc
-Holding necessery data to display text  - like font related
-```
-@with_kw mutable struct ForWordsDispStruct
-fontFace::FTFont # font we will use to display text
-textureSpec::TextureSpec # texture specification of texture used to display text 
-fragment_shader_words::Int32=1 #reference to fragment shader used to display text
-vbo_words::Int32=1 #reference to vertex buffer object used to display text
-
-end #ForWordsDispStruct
 
 end #module
 

@@ -51,12 +51,6 @@ git-tree-sha1 = "ffabdf5297c9038973a0a3724132aa269f38c448"
 uuid = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 version = "1.1.0"
 
-[[BinaryProvider]]
-deps = ["Libdl", "Logging", "SHA"]
-git-tree-sha1 = "ecdec412a9abc8db54c0efc5548c64dfce072058"
-uuid = "b99e7846-7c00-51b0-8f62-c81ae34c0232"
-version = "0.5.10"
-
 [[BitFlags]]
 git-tree-sha1 = "4d8a9dfb7bbbd24666678cbce14397cdcf9a6f9a"
 uuid = "d1d4a3ce-64b1-5f1a-9ba4-7e7e69966f35"
@@ -977,12 +971,6 @@ version = "1.0.2"
 
 [[SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
-
-[[STBImage]]
-deps = ["BinaryProvider", "CSyntax", "Libdl"]
-path = "/home/jakub/.julia/dev/STBImage"
-uuid = "7905c688-fe39-11e9-31c9-6bac3ecc6ce7"
-version = "0.1.0"
 
 [[Serialization]]
 uuid = "9e88b42a-f829-5b0c-bbe9-9e923198166b"

@@ -1,3 +1,6 @@
 {
-    "python.pythonPath": "/home/jakub/.julia/conda/3/bin/python"
+    "python.pythonPath": "/home/jakub/.julia/conda/3/bin/python",
+    "scm.inputFontSize": 10,
+    "editor.fontSize": 12,
+    "editor.codeLensFontSize": 12
 }
