@@ -1,25 +1,13 @@
-using Base: Int16
+
 
      using DrWatson
      @quickactivate "Probabilistic medical segmentation"
-     
      include(DrWatson.scriptsdir("display","GLFW","includeAll.jl"))
 
-     #  include(DrWatson.scriptsdir("loadData","manageH5File.jl"))
-    #  using Main.h5manag
-
-
-     
-     
-     using Revise 
-     using Main.SegmentationDisplay
-     #data about textures we want to create
-     using  Main.ForDisplayStructs
-     using Parameters, ColorTypes
-     
-     # list of texture specifications, important is that main texture - main image should be specified first
-     #Order is important !
-     listOfTexturesToCreate = [
+     using Main.ForDisplayStructs,ColorTypes, Dictionaries
+     using  Main.ReactToScroll, Main.SegmentationDisplay,Main.Uniforms, Main.OpenGLDisplayUtils
+     using Rocket  , Main.DataStructs, Main.StructsManag,Main.TextureManag, Main.SegmentationDisplay
+  listOfTexturesToCreate = [
      Main.ForDisplayStructs.TextureSpec(
          name = "mainLab",
          dataType= UInt8,
@@ -49,254 +37,94 @@ using Base: Int16
          numb= Int32(3),
          isMainImage = true,
          dataType= Int16)  
-           ]
-     
-     
-     
-           
-         using Main.ReactingToInput
-     
-       
-         
-     
-         using Main.ForDisplayStructs
-         using Main.ReactToScroll
-         using Main.SegmentationDisplay
-         using Rocket
-         
-         
-     #data source
-     # exampleDat = Int16.(Main.h5manag.getExample())
-     # exampleLabels = UInt8.(Main.h5manag.getExampleLabels())
-     # dims = size(exampleDat)
-     # widthh=dims[2]
-     # heightt=dims[3]
-     # slicesNumb= dims[1]
-     
-     #  slice = 200
-     #   listOfDataAndImageNamesSlice = [("mainLab",exampleLabels[slice,:,:]),("CTIm",exampleDat[slice,:,:] )]
-     
-     
-     #     listOfDataAndImageNames = [("mainLab",exampleLabels),("CTIm",exampleDat)]
-       
-         
-     #     imagedims=dims
-     #     imageWidth = dims[2]
-     #     imageHeight = dims[3]
-     #configuring
-        # Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,512,512, 1000,800)
-     
-      
-         # Main.SegmentationDisplay.passDataForScrolling(listOfDataAndImageNames)
-     
-         # Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice,200 )
-     
-     
-     #  window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
-         # stopListening = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.stopListening
-         
-       #  textSpec = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1]
-         # textSpecB = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[2]
-     
-     
-     
-         Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,40,40, 300,300)
-     
-     
-        ### playing with uniforms
-        program = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.shader_program
-        shader_program =program
-         
-     
-     
-     
-     ###### main data ...
-     
-     
-     
-     
-     
-    #  testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
-    #  testLab2Dat= UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
-     
-    #  mainMaskDummy = UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
-#    ctDummy =  Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,10,40,40)))# will give white background for testing 
+  ]
+  #   
 
-    testLab1Dat =ones(UInt8,10,40,40)
-     testLab2Dat= ones(UInt8,10,40,40)
-     
-     mainMaskDummy = ones(UInt8,10,40,40)
-     
-     
-     ctDummy = ones(Int16,10,40,40)
-             listOfDataAndImageNames = [("mainLab",mainMaskDummy)
-         ,("CTIm",ctDummy )  
-         ,("testLab2",testLab2Dat) 
-         ,("testLab1",testLab1Dat) ]
-         #,("testLab2",zeros(Int8,10,512,512))
-     
-         Main.SegmentationDisplay.passDataForScrolling(listOfDataAndImageNames)
-     
-         slicee = 3
-         listOfDataAndImageNamesSlice = [ ("mainLab",mainMaskDummy[slicee,:,:]) ,  ("testLab2",testLab2Dat[slicee,:,:]) 
-           ,("testLab1",testLab1Dat[slicee,:,:]) 
-         ,("CTIm",ctDummy[slicee,:,:] )]
-     
-     
+  Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,40,40, 300,300)
+   
+ mainMaskDummy = UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+ testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+ testLab2Dat= UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+    
+ ctDummy =  Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,10,40,40)))# will give white background for testing 
 
 
-     
-            Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice,3 )
-     
-     
-     
-         window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
-         
-     
+   slicesDat=  [ThreeDimRawDat{UInt8}(UInt8,"mainLab",mainMaskDummy)
+     ,ThreeDimRawDat{Int16}(Int16,"CTIm",ctDummy)
+     ,ThreeDimRawDat{UInt8}(UInt8,"testLab2",testLab2Dat)
+     ,ThreeDimRawDat{UInt8}(UInt8,"testLab1",testLab1Dat)  ]
+     mainScrollDat = FullScrollableDat(dimensionToScroll=1,dataToScroll= slicesDat )
+
+
+    Main.SegmentationDisplay.passDataForScrolling(mainScrollDat)
+
+    
+
+    singleSliceDat = [
+      TwoDimRawDat{UInt8}(UInt8,"mainLab", UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,40,40))))
+     ,TwoDimRawDat{Int16}(Int16,"CTIm",Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,40,40))))
+     ,TwoDimRawDat{UInt8}(UInt8,"testLab2",UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,40,40))))
+     ,TwoDimRawDat{UInt8}(UInt8,"testLab1",UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,40,40)))) 
+    ]
+
+    exampleSingleSliceDat = SingleSliceDat(listOfDataAndImageNames=singleSliceDat)
+    Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat)
+
+
+    window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
+
+    GLFW.PollEvents()
+
+ 
          textLiverMain = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1]
          textureB = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[2]
          textureC = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[3]
          textTexture = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[4]
          textureCt = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5]
          
-         Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [textureB]
-         dattt = Main.SegmentationDisplay.mainActor.actor.onScrollData[4][2]
-     maximum(dattt)
-     
-     
-
-     
-     using Main.Uniforms, Main.OpenGLDisplayUtils, Main.OpenGLDisplayUtils
-     
-
-     
-       setTextureVisibility(true ,textLiverMain.uniforms)
-       setMaskColor(RGB(0.8,0.0,0.1) ,textLiverMain.uniforms)
-     
-       setMaskColor(RGB(0.0,1.0,0.0) ,textTexture.uniforms)
-       setTextureVisibility(true ,textTexture.uniforms)
-     
-         setMaskColor(RGB(1.0,0.0,0.5) ,textureC.uniforms)
-         setTextureVisibility(true ,textureC.uniforms)
-     
-     
-       setMaskColor(RGB(0.5,0.5,0.0) ,textureB.uniforms)
-       setTextureVisibility(true ,textureB.uniforms)
-     
-     
-     
-      setCTWindow(Int32(0), Int32(0),Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5].uniforms)
-     
-     
-
-     aa=zeros(UInt8,40,40)
-     bb=zeros(UInt8,40,40)
-
-    #  aa[1,1]=1
-    #  bb[2,2]=1
-
-
-    bb[1,1]=1
-    #  bb[2,1]=1
-    #  bb[2,5]=1
-
-
-     cc= convert(Vector{Tuple{String, Array{T, 2} where T}} ,[ ("mainLab",aa),("testLab2",bb) ])
-
-
-     Main.SegmentationDisplay.updateSingleImagesDisplayed(convert(Vector{Tuple{String, Array{T, 2} where T}}
-      ,[ ("mainLab",aa),("testLab1",bb) ])
-     ,3 )
-
-     #    listOfDataAndImageNamesSlice = [ ("mainLab",mainMaskDummy[slicee,:,:])
-  #     ,  ("testLab2",testLab2Dat[slicee,:,:]) 
-  #    ,("testLab1",testLab1Dat[slicee,:,:]) 
-  #  ,("CTIm",ctDummy[slicee,:,:] )]
-
-
-
-
-cc = zeros(3,3,3)
-xx = [CartesianIndex(1,1),CartesianIndex(1,2)]
-cc[3,xx].=1
-cc
-cc[3,:,:]
-
-  mouseCoords= [CartesianIndex(150,150), CartesianIndex(100,150)]
-
-  obj =  Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects
-  obj.stopListening[]=true #free GLFW context
-  textureList =  [textureB]
-
-  if (!isempty(textureList))
-      texture= textureList[1]
-      
-     mappedCoords =  translateMouseToTexture(texture.strokeWidth
-                                              ,mouseCoords
-                                              ,obj.windowWidth
-                                              , obj.windowHeight
-                                              , obj.imageTextureWidth
-                                              , obj.imageTextureHeight
-                                              ,Main.SegmentationDisplay.mainActor.actor.currentDisplayedSlice)
-
-bb[mappedCoords].=1
-bb[mappedCoords]
-
- data = Main.SegmentationDisplay.mainActor.actor.onScrollData[1][2]
- maximum(aa)
- updateTexture(bb, texture)
-
-                                              for datTupl in   Main.SegmentationDisplay.mainActor.actor.onScrollData
-          if(datTupl[1]==texture.name)
-              datTupl[2][mappedCoords].=1 # broadcasting new value to all points that we are intrested in     
-              updateTexture(datTupl[2][ Main.SegmentationDisplay.mainActor.actor.currentDisplayedSlice,:,:], texture)
-              break
-          end#if
-      end #for
-
-
-       
-      basicRender(obj.window)
-     
-  end #if 
-  obj.stopListening[]=false # reactivete event listening loop
-
-
-
-
-
-     
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-     using Main.CustomFragShad
-         strr= Main.CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate)
-         for st in split(strr, "\n")
-         @info st
-         end
-         using Main.ShadersAndVerticies
-     
+         Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [textLiverMain]
     
-     
-        GLFW.PollEvents()
-     ############
+
+
+        #  setTextureVisibility(true ,textLiverMain.uniforms)
+        #  setMaskColor(RGB(1.0,0.0,0.0) ,textLiverMain.uniforms)
+       
+        #  setMaskColor(RGB(0.0,1.0,0.0) ,textTexture.uniforms)
+        #  setTextureVisibility(true ,textTexture.uniforms)
+       
+        #    setMaskColor(RGB(1.0,0.0,0.5) ,textureC.uniforms)
+        #    setTextureVisibility(true ,textureC.uniforms)
+       
+       
+        #  setMaskColor(RGB(0.5,0.5,0.0) ,textureB.uniforms)
+        #  setTextureVisibility(true ,textureB.uniforms)
+       
+       
+       
+        # setCTWindow(Int32(0), Int32(0),Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5].uniforms)
+       
+        basicRender(window)
+
+
+
+
+
+         GLFW.PollEvents()
+
+
+
+#     zz = ThreeDimRawDat{UInt8}(UInt8,"mainLab",ones(UInt8,10,40,40))
+
+#    twoModded =  threeToTwoDimm(UInt8, 2, 1, zz)
+
+#   sl =  modSlice!(twoModded, [CartesianIndex(1,1), CartesianIndex(1,2)],UInt8(2) )
+
+#  coords= [CartesianIndex(1,1), CartesianIndex(1,2)]
+
+#  ddd = modifySliceFull!(mainScrollDat, 1,coords,"mainLab",UInt8(5))
+
+#  getSlicesNumber(mainScrollDat)
+
 #      using DrWatson
 #      @quickactivate "Probabilistic medical segmentation"
      
@@ -594,4 +422,323 @@ bb[mappedCoords]
 #      glBindTexture(GL_TEXTURE_2D, textureSecond[])
 #     # glUniform1i(samplerRefNumb,index);# we first look for uniform sampler in shader  
 #      glTexSubImage2D(GL_TEXTURE_2D,0,0,0,40,40, GL_RED_INTEGER,GL_UNSIGNED_BYTE,bb)
-#      basicRender(window)
+#      basicRender(window))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# using Base: Int16
+
+#      using DrWatson
+#      @quickactivate "Probabilistic medical segmentation"
+     
+#      include(DrWatson.scriptsdir("display","GLFW","includeAll.jl"))
+
+#      #  include(DrWatson.scriptsdir("loadData","manageH5File.jl"))
+#     #  using Main.h5manag
+
+
+     
+     
+#      using Revise 
+#      using Main.SegmentationDisplay
+#      #data about textures we want to create
+#      using  Main.ForDisplayStructs
+#      using Parameters, ColorTypes
+     
+#      # list of texture specifications, important is that main texture - main image should be specified first
+#      #Order is important !
+#      listOfTexturesToCreate = [
+#      Main.ForDisplayStructs.TextureSpec(
+#          name = "mainLab",
+#          dataType= UInt8,
+#          strokeWidth = 5,
+#          color = RGB(1.0,0.0,0.0)
+#         ),
+#      Main.ForDisplayStructs.TextureSpec(
+#          name = "testLab1",
+#          numb= Int32(1),
+#          dataType= UInt8,
+#          color = RGB(0.0,1.0,0.0)
+#         ),
+#          Main.ForDisplayStructs.TextureSpec(
+#          name = "testLab2",
+#          numb= Int32(2),
+#          dataType= UInt8,
+#          color = RGB(0.0,0.0,1.0)
+#           ),
+#           Main.ForDisplayStructs.TextureSpec(
+#            name = "textText",
+#            isTextTexture = true,
+#            dataType= UInt8,
+#            color = RGB(0.0,0.0,1.0)
+#          ),
+#          Main.ForDisplayStructs.TextureSpec(
+#          name= "CTIm",
+#          numb= Int32(3),
+#          isMainImage = true,
+#          dataType= Int16)  
+#            ]
+     
+     
+     
+           
+#          using Main.ReactingToInput
+     
+       
+         
+     
+#          using Main.ForDisplayStructs
+#          using Main.ReactToScroll
+#          using Main.SegmentationDisplay
+#          using Rocket
+         
+         
+#      #data source
+#      # exampleDat = Int16.(Main.h5manag.getExample())
+#      # exampleLabels = UInt8.(Main.h5manag.getExampleLabels())
+#      # dims = size(exampleDat)
+#      # widthh=dims[2]
+#      # heightt=dims[3]
+#      # slicesNumb= dims[1]
+     
+#      #  slice = 200
+#      #   listOfDataAndImageNamesSlice = [("mainLab",exampleLabels[slice,:,:]),("CTIm",exampleDat[slice,:,:] )]
+     
+     
+#      #     listOfDataAndImageNames = [("mainLab",exampleLabels),("CTIm",exampleDat)]
+       
+         
+#      #     imagedims=dims
+#      #     imageWidth = dims[2]
+#      #     imageHeight = dims[3]
+#      #configuring
+#         # Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,512,512, 1000,800)
+     
+      
+#          # Main.SegmentationDisplay.passDataForScrolling(listOfDataAndImageNames)
+     
+#          # Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice,200 )
+     
+     
+#      #  window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
+#          # stopListening = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.stopListening
+         
+#        #  textSpec = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1]
+#          # textSpecB = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[2]
+     
+     
+     
+#          Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,40,40, 300,300)
+     
+     
+#         ### playing with uniforms
+#         program = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.shader_program
+#         shader_program =program
+         
+     
+     
+     
+#      ###### main data ...
+     
+     
+     
+     
+     
+#     #  testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+#     #  testLab2Dat= UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+     
+#     #  mainMaskDummy = UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+# #    ctDummy =  Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,10,40,40)))# will give white background for testing 
+
+#     testLab1Dat =ones(UInt8,10,40,40)
+#      testLab2Dat= ones(UInt8,10,40,40)
+     
+#      mainMaskDummy = ones(UInt8,10,40,40)
+     
+     
+#      ctDummy = ones(Int16,10,40,40)
+#              listOfDataAndImageNames = [("mainLab",mainMaskDummy)
+#          ,("CTIm",ctDummy )  
+#          ,("testLab2",testLab2Dat) 
+#          ,("testLab1",testLab1Dat) ]
+#          #,("testLab2",zeros(Int8,10,512,512))
+     
+#          Main.SegmentationDisplay.passDataForScrolling(listOfDataAndImageNames)
+     
+#          slicee = 3
+#          listOfDataAndImageNamesSlice = [ ("mainLab",mainMaskDummy[slicee,:,:]) ,  ("testLab2",testLab2Dat[slicee,:,:]) 
+#            ,("testLab1",testLab1Dat[slicee,:,:]) 
+#          ,("CTIm",ctDummy[slicee,:,:] )]
+     
+     
+
+
+     
+#             Main.SegmentationDisplay.updateSingleImagesDisplayed(listOfDataAndImageNamesSlice,3 )
+     
+     
+     
+#          window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
+         
+     
+#          textLiverMain = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1]
+#          textureB = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[2]
+#          textureC = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[3]
+#          textTexture = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[4]
+#          textureCt = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5]
+         
+#          Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [textureB]
+#          dattt = Main.SegmentationDisplay.mainActor.actor.onScrollData[4][2]
+#      maximum(dattt)
+     
+     
+
+     
+#      using Main.Uniforms, Main.OpenGLDisplayUtils, Main.OpenGLDisplayUtils
+     
+
+     
+      #  setTextureVisibility(true ,textLiverMain.uniforms)
+      #  setMaskColor(RGB(0.8,0.0,0.1) ,textLiverMain.uniforms)
+     
+      #  setMaskColor(RGB(0.0,1.0,0.0) ,textTexture.uniforms)
+      #  setTextureVisibility(true ,textTexture.uniforms)
+     
+      #    setMaskColor(RGB(1.0,0.0,0.5) ,textureC.uniforms)
+      #    setTextureVisibility(true ,textureC.uniforms)
+     
+     
+      #  setMaskColor(RGB(0.5,0.5,0.0) ,textureB.uniforms)
+      #  setTextureVisibility(true ,textureB.uniforms)
+     
+     
+     
+      # setCTWindow(Int32(0), Int32(0),Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5].uniforms)
+     
+     
+
+#      aa=zeros(UInt8,40,40)
+#      bb=zeros(UInt8,40,40)
+
+#     #  aa[1,1]=1
+#     #  bb[2,2]=1
+
+
+#     bb[1,1]=1
+#     #  bb[2,1]=1
+#     #  bb[2,5]=1
+
+
+#      cc= convert(Vector{Tuple{String, Array{T, 2} where T}} ,[ ("mainLab",aa),("testLab2",bb) ])
+
+
+#      Main.SegmentationDisplay.updateSingleImagesDisplayed(convert(Vector{Tuple{String, Array{T, 2} where T}}
+#       ,[ ("mainLab",aa),("testLab1",bb) ])
+#      ,3 )
+
+#      #    listOfDataAndImageNamesSlice = [ ("mainLab",mainMaskDummy[slicee,:,:])
+#   #     ,  ("testLab2",testLab2Dat[slicee,:,:]) 
+#   #    ,("testLab1",testLab1Dat[slicee,:,:]) 
+#   #  ,("CTIm",ctDummy[slicee,:,:] )]
+
+
+
+
+# cc = zeros(3,3,3)
+# xx = [CartesianIndex(1,1),CartesianIndex(1,2)]
+# cc[3,xx].=1
+# cc
+# cc[3,:,:]
+
+#   mouseCoords= [CartesianIndex(150,150), CartesianIndex(100,150)]
+
+#   obj =  Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects
+#   obj.stopListening[]=true #free GLFW context
+#   textureList =  [textureB]
+
+#   if (!isempty(textureList))
+#       texture= textureList[1]
+      
+#      mappedCoords =  translateMouseToTexture(texture.strokeWidth
+#                                               ,mouseCoords
+#                                               ,obj.windowWidth
+#                                               , obj.windowHeight
+#                                               , obj.imageTextureWidth
+#                                               , obj.imageTextureHeight
+#                                               ,Main.SegmentationDisplay.mainActor.actor.currentDisplayedSlice)
+
+# bb[mappedCoords].=1
+# bb[mappedCoords]
+
+#  data = Main.SegmentationDisplay.mainActor.actor.onScrollData[1][2]
+#  maximum(aa)
+#  updateTexture(bb, texture)
+
+#                                               for datTupl in   Main.SegmentationDisplay.mainActor.actor.onScrollData
+#           if(datTupl[1]==texture.name)
+#               datTupl[2][mappedCoords].=1 # broadcasting new value to all points that we are intrested in     
+#               updateTexture(datTupl[2][ Main.SegmentationDisplay.mainActor.actor.currentDisplayedSlice,:,:], texture)
+#               break
+#           end#if
+#       end #for
+
+
+       
+#       basicRender(obj.window)
+     
+#   end #if 
+#   obj.stopListening[]=false # reactivete event listening loop
+
+
+
+
+
+     
+
+
+
+
+
+
+
+#      using Main.CustomFragShad
+#          strr= Main.CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate)
+#          for st in split(strr, "\n")
+#          @info st
+#          end
+#          using Main.ShadersAndVerticies
+     
+    
+     

@@ -47,8 +47,9 @@ using DrWatson
 export coordinateDisplay
 export passDataForScrolling
 
-using ModernGL, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUtils, Main.ForDisplayStructs,Main.Uniforms, Main.DisplayWords
-using Main.ReactingToInput, Rocket, Setfield, Logging, Main.ShadersAndVerticiesForText,FreeTypeAbstraction,Main.DisplayWords
+using ModernGL, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUtils, Main.ForDisplayStructs,Main.Uniforms, Main.DisplayWords, Dictionaries
+using Main.ReactingToInput, Rocket, Setfield, Logging, Main.ShadersAndVerticiesForText,FreeTypeAbstraction,Main.DisplayWords, Main.DataStructs, Main.StructsManag
+
 
 #holds actor that is main structure that process inputs from GLFW and reacts to it
 mainActor = sync(ActorWithOpenGlObjects())
@@ -93,6 +94,7 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
             ,windowHeight
             ,0 # number of slices will be set when data for scrolling will come
             ,mainImageUnifs
+            ,Dictionary{String, Int64}()
     )
 
 
@@ -113,12 +115,10 @@ end #coordinateDisplay
 
 passDataForScrollingStr =    """
 is used to pass into the actor data that will be used for scrolling
-onScrollData - list of tuples where first is the name of the texture that we provided and second is associated data (3 dimensional array of appropriate type)
+onScrollData - struct holding between others list of tuples where first is the name of the texture that we provided and second is associated data (3 dimensional array of appropriate type)
 """
 @doc passDataForScrollingStr
-function passDataForScrolling(onScrollData::Vector{Tuple{String, Array{T, 3} where T}})
-    #as we get data to scroll through we need to save the data about number of slices - important to controll scrolling
-    mainActor.actor.mainForDisplayObjects.listOfTextSpecifications
+function passDataForScrolling(onScrollData::FullScrollableDat)
     #wrapping the data into an observable and passing it to the actor
     forScrollData = of(onScrollData)
     subscribe!(forScrollData, mainActor) 
@@ -128,12 +128,12 @@ end
 updateSingleImagesDisplayedStr =    """
 enables updating just a single slice that is displayed - do not change what will happen after scrolling
 one need to pass data to actor in 
-listOfDataAndImageNames - vector of tuples whee first entry in tuple is name of texture given in the setup and second is 2 dimensional aray of appropriate type with image data
+listOfDataAndImageNames - struct holding  tuples where first entry in tuple is name of texture given in the setup and second is 2 dimensional aray of appropriate type with image data
 sliceNumber - the number to which we set slice in order to later start scrolling the scroll data from this point
 """
 @doc updateSingleImagesDisplayedStr
-function updateSingleImagesDisplayed( listOfDataAndImageNames::Vector{Tuple{String, Array{T, 2} where T}}, sliceNumber::Int64=1)
-    forDispData = of((listOfDataAndImageNames,sliceNumber))
+function updateSingleImagesDisplayed( listOfDataAndImageNames::SingleSliceDat)
+    forDispData = of(listOfDataAndImageNames)
     subscribe!(forDispData, mainActor) 
 
 end #updateSingleImagesDisplayed

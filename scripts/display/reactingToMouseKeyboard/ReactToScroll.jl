@@ -9,11 +9,7 @@ code adapted from https://discourse.julialang.org/t/custom-subject-in-rocket-jl-
 """
 #@doc ReactToScrollStr
 module ReactToScroll
-using Rocket
-using GLFW
-using Main.ForDisplayStructs
-using Main.TextureManag
-using Logging
+using Rocket, GLFW, Main.ForDisplayStructs, Main.TextureManag,Logging, Main.DataStructs, Main.StructsManag
 
 export reactToScroll
 export registerMouseScrollFunctions
@@ -91,14 +87,18 @@ function reactToScroll(isScrollUp::Bool, actor::SyncActor{Any, ActorWithOpenGlOb
 
     #logic to change displayed screen
     #we select slice that we are intrested in
-    listOfDataAndImageNames= map(tupl->(tupl[1],tupl[2][current,:,:] ),actor.actor.onScrollData)
+    singleSlDat= actor.actor.onScrollData.dataToScroll|>
+    (scrDat)-> map(threeDimDat->threeToTwoDimm(threeDimDat.type,Int64(current),actor.actor.onScrollData.dimensionToScroll,threeDimDat ),scrDat) |>
+    (twoDimList)-> SingleSliceDat(listOfDataAndImageNames=twoDimList,sliceNumber=current )
+    
+     updateImagesDisplayed(singleSlDat,actor.actor.mainForDisplayObjects )
 
+     actor.actor.currentlyDispDat=singleSlDat
 
-updateImagesDisplayed(listOfDataAndImageNames,actor.actor.mainForDisplayObjects )
          #saving information about current slice for future reference
-         actor.actor.currentDisplayedSlice = current
+    actor.actor.currentDisplayedSlice = current
 
-         actor.actor.mainForDisplayObjects.stopListening[]=false
+   actor.actor.mainForDisplayObjects.stopListening[]=false
 
 
 end#reactToScroll

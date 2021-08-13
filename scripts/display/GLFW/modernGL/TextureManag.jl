@@ -7,7 +7,7 @@ stores functions needed to create bind and update OpenGl textues
 module TextureManag
 using Base: Float16
 using  ModernGL ,DrWatson,  Main.OpenGLDisplayUtils, Main.ForDisplayStructs
-using  Main.Uniforms, Logging,Setfield, Glutils,Logging, Main.CustomFragShad
+using  Main.Uniforms, Logging,Setfield, Glutils,Logging, Main.CustomFragShad, Main.DataStructs
 export initializeTextures,createTexture, updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
 
 updateTextureString = """
@@ -26,7 +26,13 @@ Just for reference openGL function definition
          const void *pixels);  
 """
 @doc updateTextureString
-function updateTexture(data, textSpec::TextureSpec,xoffset=0,yoffset=0,widthh=textSpec.widthh,heightt =textSpec.heightt  )
+function updateTexture(::Type{Tt}
+                    ,data::Matrix{Tt}
+                    ,textSpec::TextureSpec
+                    ,xoffset::Int=0
+                    ,yoffset::Int=0
+                    ,widthh::Int32=textSpec.widthh
+                    ,heightt::Int32 =textSpec.heightt) where{Tt}
 
     glActiveTexture(textSpec.actTextrureNumb); # active proper texture unit before binding
     glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
@@ -73,7 +79,8 @@ it creates textrures as specified, renders them and return the list from  argume
 function initializeTextures(listOfTextSpecs::Vector{Main.ForDisplayStructs.TextureSpec})::Vector{Main.ForDisplayStructs.TextureSpec}
 
     res = Vector{TextureSpec}()
-
+       
+  
     for (ind, textSpec ) in enumerate(listOfTextSpecs)
         index=ind-1
         textUreId= createTexture(index,textSpec.widthh,textSpec.heightt,textSpec.GL_Rtype)#binding texture and populating with data
@@ -82,6 +89,12 @@ function initializeTextures(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textu
         actTextrureNumb = getProperGL_TEXTURE(index)
         glActiveTexture(actTextrureNumb)
         glUniform1i(textSpec.uniforms.samplerRef,index);# we first look for uniform sampler in shader  
+        # we set uniforms of visibility and colors according to specified in configuration
+        if(!textSpec.isMainImage) setMaskColor(textSpec.color ,textSpec.uniforms)   end
+        
+        
+        setTextureVisibility(textSpec.isVisible ,textSpec.uniforms)
+
 
         push!(res,setproperties(textSpec, (ID=textUreId, actTextrureNumb=actTextrureNumb)))
 
@@ -101,22 +114,20 @@ end#getProperGL_TEXTURE
 
 updateImagesDisplayedStr =    """
 coordinating updating all of the images, masks... 
-listOfTextSpecs - holds required data needed to initialize textures - 
-tuples where first entry is name of image that we given in configuration; 
-and second entry is data that we want to pass
+singleSliceDat - holds data we want to use for update
 forDisplayObjects - stores all needed constants that holds reference to GLFW and OpenGL
 """
 @doc updateImagesDisplayedStr
-function updateImagesDisplayed(listOfDataAndImageNames, forDisplayConstants::forDisplayObjects)
-   
+function updateImagesDisplayed(singleSliceDat::SingleSliceDat, forDisplayConstants::forDisplayObjects)
+
         forDisplayConstants.stopListening[]=true
              modulelistOfTextSpecs=forDisplayConstants.listOfTextSpecifications
-            #clearing color buffer
+             #clearing color buffer
             glClearColor(0.0, 0.0, 0.1 , 1.0)
-            for updateDat in listOfDataAndImageNames
-                findList= findall( (texSpec)-> texSpec.name == updateDat[1], modulelistOfTextSpecs)
+            for updateDat in singleSliceDat.listOfDataAndImageNames
+                findList= findall( (texSpec)-> texSpec.name == updateDat.name, modulelistOfTextSpecs)
                 texSpec = !isempty(findList) ? modulelistOfTextSpecs[findList[1]] : throw(DomainError(findList, "no such name specified in start configuration - $( updateDat[1])")) 
-                Main.TextureManag.updateTexture(updateDat[2],texSpec)
+                Main.TextureManag.updateTexture(updateDat.type,updateDat.dat,texSpec)
             end #for 
             #render onto the screen
             Main.OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
@@ -138,6 +149,7 @@ function assignUniformsAndTypesToMasks(textSpecs::Vector{Main.ForDisplayStructs.
     mainTexture,notMainTextures=   divideTexteuresToMainAndRest(textSpecs)
 #main texture uniforms
 n= mainTexture.name
+
 mainUnifs =MainImageUniforms(
     samplerName= n
     ,samplerRef = glGetUniformLocation(shader_program, n)
@@ -146,6 +158,9 @@ mainUnifs =MainImageUniforms(
    , max_shown_black= glGetUniformLocation(shader_program, "max_shown_black")
     ,displayRange=glGetUniformLocation(shader_program, "displayRange")
 )
+setCTWindow(mainTexture.min_shown_white,mainTexture.max_shown_black,mainUnifs)
+
+
 maintext = setproperties(mainTexture, (uniforms= mainUnifs ))
 # joining main and not main textures data 
 mapped= [ map(x-> setUniforms(x,shader_program) , notMainTextures)..., maintext]

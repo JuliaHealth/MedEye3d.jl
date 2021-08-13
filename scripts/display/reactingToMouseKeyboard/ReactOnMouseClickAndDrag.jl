@@ -14,14 +14,8 @@ so we modify the data that is the basis of the mouse interaction mask  and we pa
 """
 #@doc ReactOnMouseClickAndDragSTR
 module ReactOnMouseClickAndDrag
-using Rocket: isempty
-using Rocket
-using GLFW, ModernGL
-using Main.ForDisplayStructs
-using Main.TextureManag
-using Main.OpenGLDisplayUtils
-using  Dates
-using  Parameters
+using Rocket, GLFW, ModernGL, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils
+using  Dates, Parameters, Main.DataStructs, Main.StructsManag
 export registerMouseClickFunctions
 export reactToMouseDrag
 
@@ -145,13 +139,10 @@ function registerMouseClickFunctions(window::GLFW.Window
   Subject(Vector{CartesianIndex{2}}, scheduler = AsyncScheduler()))
 
 
-# GLFW.SetScrollCallback(window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
 GLFW.SetCursorPosCallback(window, (a, x, y) -> mouseButtonSubs(a,x, y ) )# and  for example : cursor: 29.0, 469.0  types   Float64  Float64   
 GLFW.SetMouseButtonCallback(window, (a, button, action, mods) ->mouseButtonSubs(a,button, action,mods )) # for example types MOUSE_BUTTON_1 PRESS   GLFW.MouseButton  GLFW.Action 
 
 stopListening[]=false # reactivate event listening loop
-
-#subscription = subscribe!(buttonSubs, (direction) -> println(direction)) -usefull for debugging
 
 return mouseButtonSubs
 
@@ -173,7 +164,8 @@ function reactToMouseDrag(mouseCoords::Vector{CartesianIndex{2}}, actor::SyncAct
 
     if (!isempty(textureList))
         texture= textureList[1]
-        
+    
+        # two dimensional coordinates on plane of intrest (current slice)
        mappedCoords =  translateMouseToTexture(texture.strokeWidth
                                                 ,mouseCoords
                                                 ,obj.windowWidth
@@ -181,14 +173,21 @@ function reactToMouseDrag(mouseCoords::Vector{CartesianIndex{2}}, actor::SyncAct
                                                 , obj.imageTextureWidth
                                                 , obj.imageTextureHeight
                                                 ,actor.actor.currentDisplayedSlice)
+        
 
-        for datTupl in  actor.actor.onScrollData
-            if(datTupl[1]==texture.name)
-                datTupl[2][actor.actor.currentDisplayedSlice][mappedCoords].=1 # broadcasting new value to all points that we are intrested in     
-                updateTexture(datTupl[2][actor.actor.currentDisplayedSlice,:,:], texture)
-                break
-            end#if
-        end #for
+       twoDimDat= actor.actor.currentlyDispDat|> # accessing currently displayed data
+       (singSl)-> singSl.listOfDataAndImageNames[singSl.nameIndexes[texture.name]] #accessing the texture data we want to modify
+       
+       modSlice!(twoDimDat, mappedCoords, convert(twoDimDat.type,1))|> # modifying data associated with texture
+       (sliceDat)-> updateTexture(twoDimDat.type,sliceDat, texture)
+    
+       #    for datTupl in  actor.actor.onScrollData
+    #         if(datTupl[1]==texture.name)
+    #             datTupl[2][actor.actor.currentDisplayedSlice][mappedCoords].=1 # broadcasting new value to all points that we are intrested in     
+    #             updateTexture(datTupl[2][actor.actor.currentDisplayedSlice,:,:], texture)
+    #             break
+    #         end#if
+    #     end #for
 
 
         # updateTexture(ones(strokeWidth,strokeWidth),  texture   ,
@@ -239,11 +238,8 @@ function translateMouseToTexture(strokeWidth::Int32
 
     return map(c->CartesianIndex(Int64(floor( ((c[1])/(windowWidth*0.9))*imageTextureWidth))
     , Int64(floor(  ((windowHeight-c[2])/windowHeight)*imageTextureHeight)  )     ),mouseCoords)                                                    |>
-      (x)->filter(it->it[1]>=0 && it[2]>=0 ,x)        # we do not want to try access it in point 0 as julia is 1 indexed                 
+      (x)->filter(it->it[1]>0 && it[2]>0 ,x)        # we do not want to try access it in point 0 as julia is 1 indexed                 
 
-    # calcX = Int64(floor( ((mouseCoord[1])/(windowWidth*0.9))*imageTextureWidth)  )
-    # calcY = Int64(floor(  ((windowHeight-mouseCoord[2])/windowHeight)*imageTextureHeight)  )       
- 
 end #translateMouseToTexture
 
 

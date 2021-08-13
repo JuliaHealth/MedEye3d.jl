@@ -3,7 +3,7 @@ using DrWatson
 
 module ReactingToInput
 using Rocket, GLFW, Main.ReactToScroll, Main.ForDisplayStructs, Main.TextureManag,
- Main.ReactOnMouseClickAndDrag, Main.ReactOnKeyboard
+ Main.ReactOnMouseClickAndDrag, Main.ReactOnKeyboard, Main.DataStructs, Main.StructsManag
 
 export subscribeGLFWtoActor
 
@@ -30,11 +30,13 @@ onScroll Data - list of tuples where first is the name of the texture that we pr
 
 """
 @doc setUpForScrollDataStr
-function setUpForScrollData(onScrollData::Vector{Tuple{String, Array{T, 3} where T}} ,actor::SyncActor{Any, ActorWithOpenGlObjects})
-    actor.actor.onScrollData=onScrollData
-    @info "setting number of slices " size(onScrollData[1][2])[1]
+function setUpForScrollData(onScrollData::FullScrollableDat ,actor::SyncActor{Any, ActorWithOpenGlObjects})
+    actor.actor.mainForDisplayObjects.stopListening[]=true
 
-    actor.actor.mainForDisplayObjects.slicesNumber= size(onScrollData[1][2])[1]
+    actor.actor.onScrollData=onScrollData
+    actor.actor.mainForDisplayObjects.slicesNumber= getSlicesNumber(onScrollData)
+    
+    actor.actor.mainForDisplayObjects.stopListening[]=false
 
 end#setUpMainDisplay
 
@@ -43,16 +45,19 @@ end#setUpMainDisplay
 updateSingleImagesDisplayedSetUpStr =    """
 enables updating just a single slice that is displayed - do not change what will happen after scrolling
 one need to pass data to actor in 
-tuple where first entry is
+struct that holds tuple where first entry is
 -vector of tuples whee first entry in tuple is name of texture given in the setup and second is 2 dimensional aray of appropriate type with image data
 - Int - second is Int64 - that is marking the screen number to which we wan to set the actor state
 """
 @doc updateSingleImagesDisplayedSetUpStr
-function updateSingleImagesDisplayedSetUp(listOfDataAndImageNamesTuple::Tuple{Vector{Tuple{String, Array{T, 2} where T}},Int64} ,actor::SyncActor{Any, ActorWithOpenGlObjects})
-
-updateImagesDisplayed(listOfDataAndImageNamesTuple[1], actor.actor.mainForDisplayObjects)
-actor.actor.currentDisplayedSlice = listOfDataAndImageNamesTuple[2]
-actor.actor.isSliceChanged = true # mark for mouse interaction that we changed slice
+function updateSingleImagesDisplayedSetUp(singleSliceDat::SingleSliceDat ,actor::SyncActor{Any, ActorWithOpenGlObjects})
+    actor.actor.mainForDisplayObjects.stopListening[]=true
+    updateImagesDisplayed(singleSliceDat, actor.actor.mainForDisplayObjects)
+    actor.actor.currentlyDispDat=singleSliceDat
+    actor.actor.currentDisplayedSlice = singleSliceDat.sliceNumber
+    actor.actor.isSliceChanged = true # mark for mouse interaction that we changed slice
+   
+    actor.actor.mainForDisplayObjects.stopListening[]=false
 
 end #updateSingleImagesDisplayed
 
@@ -68,8 +73,8 @@ Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Main.ForDis
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Main.ForDisplayStructs.ForWordsDispStruct) = setUpWordsDisplay(data,actor)
 
 
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Vector{Tuple{String, Array{T, 3} where T}}) = setUpForScrollData(data,actor)
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Tuple{Vector{Tuple{String, Array{T, 2} where T}},Int64} ) = updateSingleImagesDisplayedSetUp(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::FullScrollableDat) = setUpForScrollData(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::SingleSliceDat) = updateSingleImagesDisplayedSetUp(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Vector{CartesianIndex{2}}) = reactToMouseDrag(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::KeyboardStruct) = reactToKeyboard(data,actor)
 

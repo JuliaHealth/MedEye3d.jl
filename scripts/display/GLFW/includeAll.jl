@@ -1,7 +1,13 @@
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
+include(DrWatson.scriptsdir("structs","FromSegmentationEvaluation.jl"))
+include(DrWatson.scriptsdir("structs","DataStructs.jl"))
 include(DrWatson.scriptsdir("structs","forDisplayStructs.jl"))
+
+include(DrWatson.scriptsdir("loadData","StructsManag.jl"))
+
+
 include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
 include(DrWatson.scriptsdir("display","GLFW","shadersEtc","CustomFragShad.jl"))
 

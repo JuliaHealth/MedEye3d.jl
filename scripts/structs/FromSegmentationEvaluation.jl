@@ -5,15 +5,16 @@ using DrWatson
 
 module BasicStructs
 using Parameters
+export ImageConstants, ConfigurtationStruct, ResultMetrics
 ```@doc
 constants associated with image over which we will evaluate segmentations
 ```
 @with_kw struct ImageConstants
-    mvspx ::double # Voxelspacing x 
-    mvspy::double # Voxelspacing y
-    mvspz::double #mean Voxelspacing z
-    isZConst::bool # true if slices thickness is the same in all image
-    ZPositions::Vector{Double} # array of true physical positions (in mm) of slices relative to the begining - used in case we have variable thickness of slices
+    mvspx ::Float64 # Voxelspacing x 
+    mvspy::Float64 # Voxelspacing y
+    mvspz::Float64 #mean Voxelspacing z
+    isZConst::Bool # true if slices thickness is the same in all image
+    ZPositions::Vector{Float64} # array of true physical positions (in mm) of slices relative to the begining - used in case we have variable thickness of slices
     numberOfVox::Int64 # number of voxels in image
 end #ImageConstants
 ```@doc

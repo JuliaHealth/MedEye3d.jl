@@ -54,7 +54,11 @@ scancode - if key do not have short name like ctrl ... it has scancode
 """
 @doc handlerStr
 function (handler::KeyboardCallbackSubscribable)(str::String, action::GLFW.Action)
-   if( (action==GLFW.PRESS)  ) 
+    @info "key " str
+
+    if( (action==instances(GLFW.Action)[2])  ) 
+
+
         push!(handler.lastKeysPressed ,str)
         # res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed
         #         , isShiftPressed= handler.isShiftPressed
@@ -72,24 +76,32 @@ function (handler::KeyboardCallbackSubscribable)(str::String, action::GLFW.Actio
    end#if
 end #handler
 
+GLFW.PRESS
+
 @doc handlerStr
 function (handler::KeyboardCallbackSubscribable)(scancode ::Int32, action::GLFW.Action)
     #1 pressed , 2 released -1 sth else
     act =  @match action begin
-        GLFW.PRESS => 1
-        GLFW.RELEASE => 2
+        instances(GLFW.Action)[2] => 1
+        instances(GLFW.Action)[1] => 2
         _ => -1
     end
 
-    if(act>0)# so we have press or relese 
+
+    instances(GLFW.Action)[1]
+    if(act>0)# so we have press or relese
+         
+        @info "pressed scancode " scancode
+        @info "pressed action " action
+
         scCode = @match scancode begin
-            Int32(37) => (handler.isCtrlPressed= (act==1) )
-            Int32(105) => (handler.isCtrlPressed= (act==1))
-            Int32(50) =>( handler.isShiftPressed= (act==1))
-            Int32(62) =>( handler.isShiftPressed=( act==1))
-            Int32(64) =>( handler.isAltPressed= (act==1))
-            Int32(108) => (handler.isAltPressed= (act==1))
-            Int32(36) =>( handler.isEnterPressed= (act==1))
+            GLFW.KEY_RIGHT_CONTROL=> (handler.isCtrlPressed= (act==1) )
+            GLFW.KEY_LEFT_CONTROL => (handler.isCtrlPressed= (act==1))
+            GLFW.KEY_LEFT_SHIFT =>( handler.isShiftPressed= (act==1))
+            GLFW.KEY_RIGHT_SHIFT =>( handler.isShiftPressed=( act==1))
+            GLFW.KEY_RIGHT_ALT =>( handler.isAltPressed= (act==1))
+            GLFW.KEY_LEFT_ALT => (handler.isAltPressed= (act==1))
+            GLFW.KEY_ENTER =>( handler.isEnterPressed= (act==1))
             _ => "notImp" # not Important
          end
             res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed
@@ -130,7 +142,7 @@ function registerKeyboardFunctions(window::GLFW.Window,stopListening::Base.Threa
         GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
         name = GLFW.GetKeyName(key, scancode)
         if name == nothing
-            keyboardSubs(scancode,action )                                                        
+            keyboardSubs(scancode,action)                                                        
         else
             keyboardSubs(name,action)
         end
@@ -166,6 +178,8 @@ ctrl + number -  make mask associated with given number invisible
 """
 @doc reactToKeyboardStr
 function reactToKeyboard(keyInfo::KeyboardStruct, actor::SyncActor{Any, ActorWithOpenGlObjects})
+    
+    @info keyInfo
     #we got this only when ctrl/shift/als is released or enter is pressed
     obj = actor.actor.mainForDisplayObjects
     obj.stopListening[]=true #free GLFW context
@@ -188,23 +202,28 @@ return true in case the combination of keys should invoke some action
 ```
 function shouldBeExecuted(keyInfo::KeyboardStruct)::Bool
     
-    act =  @match keyInfo.mostRecentAction begin
-        GLFW.PRESS => 1
-        GLFW.RELEASE => 2
+   act =  @match keyInfo.mostRecentAction begin
+        instances(GLFW.Action)[2] => 1
+        instances(GLFW.Action)[1] => 2
         _ => -1
     end
-
-    if(act)# so we have press or relese 
-        @match keyInfo.mostRecentScanCode begin
-            Int32(37) => return act==2 # returning true if we relese key
-            Int32(105) => return act==2
-            Int32(50) => return act==2
-            Int32(62) => return act==2
-            Int32(64) => return act==2
-            Int32(108) => return act==2
-            Int32(36) => return act==1 # returning true if enter is pressed
-            _ => "notImp" # not Important
+    if(act>0)# so we have press or relese 
+        @info "matching scan code " keyInfo.mostRecentScanCode
+        @info "matching act " act
+      res =  @match keyInfo.mostRecentScanCode begin
+      GLFW.KEY_RIGHT_CONTROL => return act==2 # returning true if we relese key
+      GLFW.KEY_LEFT_CONTROL => return act==2
+      GLFW.KEY_LEFT_SHIFT => return act==2
+      GLFW.KEY_RIGHT_SHIFT=> return act==2
+      GLFW.KEY_RIGHT_ALT => return act==2
+      GLFW.KEY_LEFT_ALT => return act==2
+      GLFW.KEY_ENTER  => return act==1 # returning true if enter is pressed
+            _ => false # not Important
          end#match
+         @info res
+         return res
+
+        
         end#if     
    # if we got here we did not found anything intresting      
 return false

@@ -6,7 +6,7 @@ module ForDisplayStructs
 using Base: Int32, isvisible
 export Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms,ForWordsDispStruct
 
-using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries,FreeTypeAbstraction
+using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries,FreeTypeAbstraction, Main.DataStructs
 
 
 ```@doc
@@ -56,9 +56,9 @@ end
 Holding the data needed to create and  later reference the textures
 ```
 @with_kw struct TextureSpec
-  name::String                #human readable name by which we can reference texture
+  name::String=""                #human readable name by which we can reference texture
   numb::Int32 =-1             #needed to enable swithing between textures generally convinient when between 0-9; needed only if texture is to be modified by mouse input
-  dataType::Type              #type of data that will be used Int/uint/float
+  dataType::Type = UInt8             #type of data that will be used Int/uint/float
   isMainImage ::Bool = false  #true if this texture represents main image
   isTextTexture ::Bool = false  #true if this texture represents texture that is supposed to hold text
   isSecondaryMain ::Bool = false # true if it holds some other important information that is not mask - used for example in case of nuclear imagiing studies
@@ -81,11 +81,23 @@ Holding the data needed to create and  later reference the textures
   max_shown_black::Int32 =-200
 end
 
+
+```@doc
+given Vector of TextureSpecs
+it creates dictionary where keys are associated names 
+and values are indicies where they are found in a list 
+```
+function getLocationDict(listt)::Dictionary{String, Int64}
+   return Dictionary(map(it->it.name,listt),collect(eachindex(listt)))
+    
+end#getLocationDict
+
+
 ```@doc
 Defined in order to hold constant objects needed to display images 
 ```
 @with_kw mutable struct forDisplayObjects    
-  listOfTextSpecifications::Vector{TextureSpec} = []
+  listOfTextSpecifications::Vector{TextureSpec} = [TextureSpec()]
   window = []
   vertex_shader::UInt32 =1
   fragment_shader::UInt32=1
@@ -103,6 +115,7 @@ Defined in order to hold constant objects needed to display images
   #number of available slices - needed for scrolling needs
   slicesNumber::Int32=1
   mainImageUniforms::MainImageUniforms = MainImageUniforms()# struct with references to main image
+  TextureIndexes::Dictionary{String, Int64}= getLocationDict(listOfTextSpecifications)  #gives a way of efficient querying by supplying dictionary where key is a name we are intrested in and a key is index where it is located in our array
 
 end
 
@@ -110,8 +123,8 @@ end
 Holding necessery data to display text  - like font related
 ```
 @with_kw mutable struct ForWordsDispStruct
-fontFace::FTFont # font we will use to display text
-textureSpec::TextureSpec # texture specification of texture used to display text 
+fontFace::FTFont=FTFont(Ptr{FreeTypeAbstraction.FreeType.__JL_FT_FaceRec_}(),false) # font we will use to display text
+textureSpec::TextureSpec =TextureSpec() # texture specification of texture used to display text 
 fragment_shader_words::UInt32=1 #reference to fragment shader used to display text
 vbo_words::Base.RefValue{UInt32}=Ref(UInt32(1)) #reference to vertex buffer object used to display text
 
@@ -121,28 +134,28 @@ end #ForWordsDispStruct
 ```@doc
 Actor that is able to store a state to keep needed data for proper display
 ```
-mutable struct ActorWithOpenGlObjects <: NextActor{Any}
-    currentDisplayedSlice::Int # stores information what slice number we are currently displaying
-    mainForDisplayObjects::Main.ForDisplayStructs.forDisplayObjects # stores objects needed to  display using OpenGL and GLFW
-    onScrollData::Vector{Tuple{String, Array{T, 3} where T}}
-    textureToModifyVec::Vector{TextureSpec} # texture that we want currently to modify - if list is empty it means that we do not intend to modify any texture
-    isSliceChanged::Bool # set to true when slice is changed set to false when we start interacting with this slice - thanks to this we know that when we start drawing on one slice and change the slice the line would star a new on new slice
-    textDispObj::ForWordsDispStruct# set of objects and constants needed for text diplay
-    ActorWithOpenGlObjects() = new(1,forDisplayObjects(),[],[],false)
+@with_kw mutable struct ActorWithOpenGlObjects <: NextActor{Any}
+    currentDisplayedSlice::Int=1 # stores information what slice number we are currently displaying
+    mainForDisplayObjects::Main.ForDisplayStructs.forDisplayObjects=forDisplayObjects() # stores objects needed to  display using OpenGL and GLFW
+    onScrollData::FullScrollableDat = FullScrollableDat()
+    textureToModifyVec::Vector{TextureSpec}=[] # texture that we want currently to modify - if list is empty it means that we do not intend to modify any texture
+    isSliceChanged::Bool= false # set to true when slice is changed set to false when we start interacting with this slice - thanks to this we know that when we start drawing on one slice and change the slice the line would star a new on new slice
+    textDispObj::ForWordsDispStruct =ForWordsDispStruct()# set of objects and constants needed for text diplay
+    currentlyDispDat::SingleSliceDat =SingleSliceDat() # holds the data displayed or in case of scrollable data view for accessing it
 end
 
 ```@doc
 Holding necessery data to controll keyboard shortcuts```
 @with_kw struct KeyboardStruct
-  isCtrlPressed::Bool # left - scancode 37 right 105 - Int32
-  isShiftPressed::Bool  # left - scancode 50 right 62- Int32
-  isAltPressed::Bool# left - scancode 64 right 108- Int32
-  isEnterPressed::Bool# scancode 36
-  lastKeysPressed::Vector{String} # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
+  isCtrlPressed::Bool = false# left - scancode 37 right 105 - Int32
+  isShiftPressed::Bool = false # left - scancode 50 right 62- Int32
+  isAltPressed::Bool= false# left - scancode 64 right 108- Int32
+  isEnterPressed::Bool= false# scancode 36
+  lastKeysPressed::Vector{String}=[] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
  #informations about what triggered sending this particular struct to the  actor
-  mostRecentScanCode ::Int32
-  mostRecentKeyName ::String
-  mostRecentAction ::GLFW.Action
+  mostRecentScanCode ::Int32=Int32(1)
+  mostRecentKeyName ::String=""
+  mostRecentAction ::GLFW.Action= GLFW.RELEASE
 end
 
 
