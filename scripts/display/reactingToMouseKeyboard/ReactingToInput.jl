@@ -44,7 +44,7 @@ function setUpWordsDisplay(textDispObject::Main.ForDisplayStructs.ForWordsDispSt
     
     actor.actor.textDispObj=textDispObjectiNITIALIZED
     # now reactivating the main vbo and shader program
-    # reactivateMainObj(actor.actor.mainForDisplayObjects.shader_program, actor.actor.mainForDisplayObjects.vbo)
+    reactivateMainObj(actor.actor.mainForDisplayObjects.shader_program, actor.actor.mainForDisplayObjects.vbo)
     actor.actor.mainForDisplayObjects.stopListening[]=false
 
 end#setUpWordsDisplay

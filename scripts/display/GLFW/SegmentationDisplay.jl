@@ -62,20 +62,22 @@ coordinating displaying - sets needed constants that are storeds in  forDisplayC
 listOfTextSpecs - holds required data needed to initialize textures
 keeps also references to needed uniforms etc.
 windowWidth::Int,windowHeight::Int - GLFW window dimensions
+fractionOfMainIm - how much of width should be taken by the main image
 """
 @doc coordinateDisplayStr
 function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.TextureSpec}
+                        ,fractionOfMainIm::Float64
                         ,imageTextureWidth::Int
                         ,imageTextureHeight::Int
-                        ,windowWidth::Int=1000
-                        ,windowHeight::Int=800 
+                        ,windowWidth::Int=1200
+                        ,windowHeight::Int= Int(round(windowWidth*fractionOfMainIm))
                         ,textTexturewidthh::Int32=Int32(1000)
                         ,textTextureheightt::Int32=Int32(10000)
                         )
 
                         
  #creating window and event listening loop
-    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words = Main.PrepareWindow.displayAll(windowWidth,windowHeight,listOfTextSpecs)
+    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words = Main.PrepareWindow.displayAll(windowWidth,windowHeight,listOfTextSpecs,fractionOfMainIm)
 
     # than we set those uniforms, open gl types and using data from arguments  to fill texture specifications
     mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program) 

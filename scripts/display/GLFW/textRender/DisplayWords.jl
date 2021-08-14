@@ -42,7 +42,6 @@ In order to be able to display texture with text we need to activate main shader
     fragment_shader_words - reference to shader associated with text displaying
 ```
 function activateForTextDisp(shader_program_words::UInt32,vbo_words::Base.RefValue{UInt32} )
-    glLinkProgram(shader_program_words)
     glUseProgram(shader_program_words)
     glBindBuffer(GL_ARRAY_BUFFER, vbo_words[])
     glBufferData(GL_ARRAY_BUFFER, sizeof(Main.ShadersAndVerticiesForText.verticesB), Main.ShadersAndVerticiesForText.verticesB, GL_STATIC_DRAW)
@@ -95,11 +94,10 @@ function reactivateMainObj(shader_program::UInt32
                             ,vbo_main::UInt32 )
   
    # glLinkProgram(shader_program)
-    glUseProgram(shader_program)
 
     # glAttachShader(shader_program, fragment_shader_main)
     # glAttachShader(shader_program, vertex_shader)
-   
+    glUseProgram(shader_program)
     glBindBuffer(GL_ARRAY_BUFFER, vbo_main[])
     glBufferData(GL_ARRAY_BUFFER, sizeof(Main.ShadersAndVerticies.vertices), Main.ShadersAndVerticies.vertices, GL_STATIC_DRAW)
     encodeDataFromDataBuffer()
@@ -118,8 +116,8 @@ Creates and initialize texture that will be used for displaying text
     """
 @doc createTextureForWordsStr
 function createTextureForWords(numberOfActiveTextUnits::Int
-                                ,widthh::Int32 =Int32(1000)
-                                ,heightt::Int32=Int32(10000)
+                                ,widthh::Int32 =Int32(100)
+                                ,heightt::Int32=Int32(1000)
                                 ,shader_program_words::UInt32=UInt32(0) )::TextureSpec
 @info "numberOfActiveTextUnits+1" numberOfActiveTextUnits+1
 #    texId=createTexture(0,widthh, heightt,GL_R8UI)

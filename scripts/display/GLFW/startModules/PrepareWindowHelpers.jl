@@ -88,7 +88,7 @@ how data should be read from data buffer
     ```
 function encodeDataFromDataBuffer()
     typee = Float32
-
+    
     # position attribute
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(typee), C_NULL);
     glEnableVertexAttribArray(0);

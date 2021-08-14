@@ -5,9 +5,9 @@
      include(DrWatson.scriptsdir("display","GLFW","includeAll.jl"))
      include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 
-     using Main.ForDisplayStructs,ColorTypes, Dictionaries,Main.DisplayWords, Setfield
+     using Main.ForDisplayStructs,ColorTypes,CoordinateTransformations, Rotations,Dictionaries,Main.DisplayWords, Setfield
      using  Main.ReactToScroll, Main.SegmentationDisplay,Main.Uniforms, Main.OpenGLDisplayUtils
-     using Rocket ,GLFW , Main.DataStructs, Main.StructsManag,Main.TextureManag, Main.SegmentationDisplay
+     using FreeTypeAbstraction,Rocket ,GLFW , Main.DataStructs, Main.StructsManag,Main.TextureManag, Main.SegmentationDisplay
   listOfTexturesToCreate = [
      Main.ForDisplayStructs.TextureSpec(
          name = "mainLab",
@@ -41,7 +41,7 @@
   ]
   #   
 
-  Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,40,40, 300,300)
+  Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,0.75,40,40, 900,900)
    
 #  mainMaskDummy = UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
 #  testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
@@ -96,21 +96,49 @@
 
 
 
+         activateForTextDisp( wordsDispObj.shader_program_words, wordsDispObj.vbo_words )
 
-  
+
+
+         face = wordsDispObj.fontFace
+         img, extent = renderface(face, 'C', 120)
+
          dispObj.stopListening[]= true
-    glClearColor(0.0, 0.0, 0.1 , 1.0)
-    glBindTexture(GL_TEXTURE_2D, 0); 
-   # bindAndActivateForText(wordsDispObj.shader_program_words ,    wordsDispObj.fragment_shader_words,wordsDispObj.vbo_words,dispObj.vertex_shader )
+         glClearColor(0.0, 0.0, 0.1 , 1.0)
     
+
+
+
+         
+   dispObj.stopListening[]= true
+    data = zeros(UInt8,1000,1000)
    
-    
-    wordsDispObj.textureSpec.ID
-    activateForTextDisp( wordsDispObj.shader_program_words, wordsDispObj.vbo_words )
-    updateTexture(UInt8, ones(UInt8,1000,10000),wordsDispObj.textureSpec)
+
+# render a string into an existing matrix
+a = renderstring!(
+     data,
+    "a q ",
+    face,
+    17, 17, 17,
+
+)
+# a= circshift(a, (-1,1))
+a =transpose(reverse(a; dims=(1)))
+# pixelsize = 3
+# x0, y0 = 10, 10
+# a=renderstring!(data, "uuuuuuu1111", face, pixelsize, x0, y0, halign=:hright)
+
+   updateTexture(UInt8,a,wordsDispObj.textureSpec,0,800,Int32(100),Int32(100) ) #,0,0,Int32(100),Int32(100)
+   a= a[end:-1:1,end:-1:1]
+
+  #  updateTexture(UInt8,data,textLiverMain)
+
     basicRender(window)
 
     dispObj.stopListening[]= false
+    # dispObj.stopListening[]= true
+
+
 
 
 
