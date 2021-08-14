@@ -34,9 +34,9 @@ function threeToTwoDimm(typ::Type{T}
                 ,slice::Int
                 ,sliceDim::Int
                 ,threedimDat::ThreeDimRawDat{T})::TwoDimRawDat{T} where {T}
-                arr=[":",":",":"]
-                arr[sliceDim]="$slice"
-               return TwoDimRawDat{T}(typ,threedimDat.name,view(threedimDat.dat,eval(Meta.parse(arr[1])),eval(Meta.parse(arr[2])),eval(Meta.parse(arr[3]))   )   )
+         
+
+               return TwoDimRawDat{T}(typ,threedimDat.name,selectdim(threedimDat.dat, sliceDim, slice)   )
 end#ThreeToTwoDimm
 
 

@@ -67,10 +67,15 @@ windowWidth::Int,windowHeight::Int - GLFW window dimensions
 function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.TextureSpec}
                         ,imageTextureWidth::Int
                         ,imageTextureHeight::Int
-                        ,windowWidth::Int=Int32(1000)
-                        ,windowHeight::Int=Int32(800) )
+                        ,windowWidth::Int=1000
+                        ,windowHeight::Int=800 
+                        ,textTexturewidthh::Int32=Int32(1000)
+                        ,textTextureheightt::Int32=Int32(10000)
+                        )
+
+                        
  #creating window and event listening loop
-    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words = Main.PrepareWindow.displayAll(windowWidth,windowHeight,listOfTextSpecs)
+    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words = Main.PrepareWindow.displayAll(windowWidth,windowHeight,listOfTextSpecs)
 
     # than we set those uniforms, open gl types and using data from arguments  to fill texture specifications
     mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program) 
@@ -78,8 +83,12 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
                                             ,listOfTextSpecsMapped)
     @info "listOfTextSpecsMapped" listOfTextSpecsMapped
     #initializing object that holds data reqired for interacting with opengl 
+    initializedTextures =  initializeTextures(listOfTextSpecsMapped)
+    numbDict = filter(x-> x.numb>=0,initializedTextures) |>
+    (filtered)-> Dictionary(map(it->it.numb,filtered),collect(eachindex(filtered))) # a way for fast query using assigned numbers
+
     forDispObj =  forDisplayObjects(
-        initializeTextures(listOfTextSpecsMapped)
+        initializedTextures
             ,window
             ,vertex_shader
             ,fragment_shader
@@ -94,8 +103,8 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
             ,windowHeight
             ,0 # number of slices will be set when data for scrolling will come
             ,mainImageUnifs
-            ,Dictionary{String, Int64}()
-    )
+            ,Dictionary(map(it->it.name,initializedTextures),collect(eachindex(initializedTextures)))
+            ,numbDict    )
 
 
 
@@ -106,9 +115,19 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
     forDisplayConstantObesrvable = of(forDispObj)
     subscribe!(forDisplayConstantObesrvable, mainActor) # configuring
     #passing for text display object 
-    subscribe!(of(prepareForDispStruct(fragment_shader_words,vbo_words)),mainActor )
+    forTextDispStruct = prepareForDispStruct(length(initializedTextures)
+                                            ,fragment_shader_words
+                                            ,vbo_words
+                                            ,shader_program_words
+                                            ,window
+                                            ,textTexturewidthh
+                                            ,textTextureheightt
+                                            ,forDispObj)
 
+    subscribe!(of(forTextDispStruct),mainActor )
+                                    
     registerInteractions()#passing needed subscriptions from GLFW
+
 
 end #coordinateDisplay
 
@@ -156,16 +175,44 @@ end
 
 ```@doc
 Preparing ForWordsDispStruct that will be needed for proper displaying of texts
+    numberOfActiveTextUnits - number of textures already used - so we we will know what is still free 
     fragment_shader_words - reference to fragment shader used to display text
     vbo_words - vertex buffer object used to display words
-```
-function prepareForDispStruct(fragment_shader_words::UInt32, vbo_words::Base.RefValue{UInt32}) ::ForWordsDispStruct
-    return ForWordsDispStruct(
+    shader_program_words - shader program associated with displaying text
+    widthh, heightt - size of the texture - the bigger the higher resolution, but higher computation cost
+
+return prepared for displayStruct    
+    ```
+function prepareForDispStruct(numberOfActiveTextUnits::Int
+                            ,fragment_shader_words::UInt32
+                            ,vbo_words::Base.RefValue{UInt32}
+                            ,shader_program_words::UInt32
+                            ,window
+                            ,widthh::Int32 =Int32(1000)
+                            ,heightt::Int32=Int32(10000)
+                            ,forDispObj::forDisplayObjects=forDisplayObjects()
+                            ) ::ForWordsDispStruct
+      #in order to corectly bind all we need to activate proper OpenGl objects
+    #   bindAndActivateForText(shader_program_words
+    #                         ,fragment_shader_words
+    #                         ,vbo_words 
+    #                         ,forDispObj.vertex_shader)
+      res =  ForWordsDispStruct(
             fontFace = FreeTypeAbstraction.findfont("hack";  additional_fonts= datadir("fonts"))
-            ,textureSpec = createTextureForWords()
+            ,textureSpec = createTextureForWords(numberOfActiveTextUnits
+                                                 ,widthh
+                                                 ,heightt 
+                                                 ,shader_program_words )
             ,fragment_shader_words= fragment_shader_words
             ,vbo_words=vbo_words
+            ,shader_program_words=shader_program_words
          )
+     #reactivating main objects so other binding will work well    
+        #  reactivateMainObj(forDispObj.shader_program
+        #                  ,forDispObj.fragment_shader 
+        #                  ,forDispObj.vertex_shader 
+        #                  ,forDispObj.vbo  )
+    return res
 end#prepereForDispStruct
 
 

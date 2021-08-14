@@ -8,7 +8,7 @@ module TextureManag
 using Base: Float16
 using  ModernGL ,DrWatson,  Main.OpenGLDisplayUtils, Main.ForDisplayStructs
 using  Main.Uniforms, Logging,Setfield, Glutils,Logging, Main.CustomFragShad, Main.DataStructs
-export initializeTextures,createTexture, updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
+export initializeTextures,createTexture, getProperGL_TEXTURE,updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
 
 updateTextureString = """
 uploading data to given texture; of given types associated - specified in TextureSpec
@@ -27,7 +27,7 @@ Just for reference openGL function definition
 """
 @doc updateTextureString
 function updateTexture(::Type{Tt}
-                    ,data::Matrix{Tt}
+                    ,data::AbstractArray
                     ,textSpec::TextureSpec
                     ,xoffset::Int=0
                     ,yoffset::Int=0
@@ -36,7 +36,7 @@ function updateTexture(::Type{Tt}
 
     glActiveTexture(textSpec.actTextrureNumb); # active proper texture unit before binding
     glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
-	glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, data)
+	glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, collect(data))
 end
 
 

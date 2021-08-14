@@ -3,10 +3,11 @@
      using DrWatson
      @quickactivate "Probabilistic medical segmentation"
      include(DrWatson.scriptsdir("display","GLFW","includeAll.jl"))
+     include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 
-     using Main.ForDisplayStructs,ColorTypes, Dictionaries
+     using Main.ForDisplayStructs,ColorTypes, Dictionaries,Main.DisplayWords, Setfield
      using  Main.ReactToScroll, Main.SegmentationDisplay,Main.Uniforms, Main.OpenGLDisplayUtils
-     using Rocket  , Main.DataStructs, Main.StructsManag,Main.TextureManag, Main.SegmentationDisplay
+     using Rocket ,GLFW , Main.DataStructs, Main.StructsManag,Main.TextureManag, Main.SegmentationDisplay
   listOfTexturesToCreate = [
      Main.ForDisplayStructs.TextureSpec(
          name = "mainLab",
@@ -42,9 +43,13 @@
 
   Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,40,40, 300,300)
    
- mainMaskDummy = UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
- testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
- testLab2Dat= UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+#  mainMaskDummy = UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+#  testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+#  testLab2Dat= UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+
+ mainMaskDummy =  zeros(UInt8,10,40,40)
+ testLab1Dat = zeros(UInt8,10,40,40)
+ testLab2Dat=  zeros(UInt8,10,40,40)
     
  ctDummy =  Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,10,40,40)))# will give white background for testing 
 
@@ -59,8 +64,7 @@
     Main.SegmentationDisplay.passDataForScrolling(mainScrollDat)
 
     
-
-    singleSliceDat = [
+        singleSliceDat = [
       TwoDimRawDat{UInt8}(UInt8,"mainLab", UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,40,40))))
      ,TwoDimRawDat{Int16}(Int16,"CTIm",Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,40,40))))
      ,TwoDimRawDat{UInt8}(UInt8,"testLab2",UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,40,40))))
@@ -82,36 +86,177 @@
          textTexture = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[4]
          textureCt = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5]
          
-         Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [textLiverMain]
+         Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [textureC]
+        
+         dispObj= Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects
+         wordsDispObj= Main.SegmentationDisplay.mainActor.actor.textDispObj
+         stopList = dispObj.stopListening[]
+
+
+
+
+
+
+  
+         dispObj.stopListening[]= true
+    glClearColor(0.0, 0.0, 0.1 , 1.0)
+    glBindTexture(GL_TEXTURE_2D, 0); 
+   # bindAndActivateForText(wordsDispObj.shader_program_words ,    wordsDispObj.fragment_shader_words,wordsDispObj.vbo_words,dispObj.vertex_shader )
     
+   
+    
+    wordsDispObj.textureSpec.ID
+    activateForTextDisp( wordsDispObj.shader_program_words, wordsDispObj.vbo_words )
+    updateTexture(UInt8, ones(UInt8,1000,10000),wordsDispObj.textureSpec)
+    basicRender(window)
+
+    dispObj.stopListening[]= false
 
 
-        #  setTextureVisibility(true ,textLiverMain.uniforms)
-        #  setMaskColor(RGB(1.0,0.0,0.0) ,textLiverMain.uniforms)
+
+
+    reactivateMainObj(dispObj.shader_program ,dispObj.vbo  )
+
+
+
+Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat)
+basicRender(window)
+
+GLFW.PollEvents()
+#     glUseProgram(shader_program_words)
+#     glBindBuffer(GL_ARRAY_BUFFER, vbo_words[])
+#     glBufferData(GL_ARRAY_BUFFER, sizeof(Main.ShadersAndVerticiesForText.verticesB), Main.ShadersAndVerticiesForText.verticesB, GL_STATIC_DRAW)
+#   	encodeDataFromDataBuffer()
+
+
+#     glClearColor(0.0, 0.0, 0.1 , 1.0)
+
+#          stopList= true
+        #  bindAndActivateForText(wordsDispObj.shader_program_words ,
+        #   wordsDispObj.fragment_shader_words,wordsDispObj.vbo_words,dispObj.vertex_shader )
+#          basicRender(window)
+#          texId =  createTexture(0,Int32(1000), Int32(10000),GL_R8UI)
+#          textSpec = wordsDispObj.textureSpec
+#          textSpec= setproperties(textSpec,(ID=texId) )
+
+#          samplerRef= glGetUniformLocation(wordsDispObj.shader_program_words, "TextTexture1")
+#          glUniform1i(samplerRef,length(listOfTexturesToCreate)+1)
+
+
+
+
+
+
+#          textSpec= wordsDispObj.textureSpec
+
+
+#          data = ones(UInt8,1000,10000)
+#          glActiveTexture(textSpec.actTextrureNumb); # active proper texture unit before binding
+#          glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
+#          glTexSubImage2D(GL_TEXTURE_2D,0,0,0, 1000, 10000, GL_RED_INTEGER, textSpec.OpGlType, collect(data))
+
+#          basicRender(window)
+
+#         # texId=  createTexture(0,Int32(100), Int32(1000),GL_R8UI)
+#         # indexOfActiveText = 8
+
+
+#         # widthh=Int32(100)
+#         # heightt =Int32(1000)
+#         # textureSpec= setproperties(wordsDispObj.textureSpec, 
+#         # (ID=texId ,actTextrureNumb =getProperGL_TEXTURE(indexOfActiveText)
+#         # ,OpGlType =GL_UNSIGNED_BYTE
+#         # ,widthh = widthh
+#         # ,heightt=heightt ))
+        
+#         # textureSpec.OpGlType == GL_UNSIGNED_BYTE
+#         # textureSpec.actTextrureNumb == GL_TEXTURE8
+
+
+
+        
+#         data= ones(UInt8,100,1000)
+
+#         xoffset=0
+#         yoffset=0
+#         widthh=textSpec.widthh
+#         heightt =textSpec.heightt
+
+#         glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
+#         glActiveTexture(textSpec.actTextrureNumb); # active proper texture unit before binding
+#         glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, collect(data))
+#         basicRender(window)
+
+
+#         glBindTexture(GL_TEXTURE_2D, texId[]); 
+#         samplerRef= glGetUniformLocation(wordsDispObj.shader_program_words, "TextTexture1")
+#         glUniform1i(samplerRef,indexOfActiveText);
        
-        #  setMaskColor(RGB(0.0,1.0,0.0) ,textTexture.uniforms)
-        #  setTextureVisibility(true ,textTexture.uniforms)
+#         glBindTexture(GL_TEXTURE_2D, texId[]); 
+#         glActiveTexture(GL_TEXTURE8);
+#         data= zeros(UInt8,100,1000)
+#         glTexSubImage2D(GL_TEXTURE_2D,0,0,0, 100, 1000, GL_RED_INTEGER, GL_UNSIGNED_BYTE, collect(data))     
+#         basicRender(window)
+
+#         updateTexture(UInt8, ones(UInt8,100,1000),wordsDispObj.textureSpec)
+#         basicRender(window)
+
+
+#         updateTexture(UInt8, zeros(UInt8,100,1000),textureSpec)
+#         basicRender(window)
+
+#         updateTexture(UInt8, zeros(UInt8,100,1000),textureSpec)
+#         basicRender(window)
+
+#         glClearColor(0.0, 0.0, 0.1 , 1.0)
+#         updateTexture(UInt8, zeros(UInt8,100,1000),textureSpec)
+#         basicRender(window)
+
+#         stopList= false
+
+#         # zz= ThreeDimRawDat{UInt8}(UInt8,"mainLab",mainMaskDummy)   
+#         # sa= zz.dat
+#         # maximum(sa)
+#         # tD= threeToTwoDimm(zz.type,2,2,zz  )
+#         # slll= collect(modSlice!(tD, [CartesianIndex(1,1)], UInt8(3)))
+#         # maximum(tD.dat)
+#         # maximum(sa)
+
+
+
+#         #  setTextureVisibility(true ,textLiverMain.uniforms)
+
+#         #  setMaskColor(RGB(1.0,0.0,0.0) ,textLiverMain.uniforms)
        
-        #    setMaskColor(RGB(1.0,0.0,0.5) ,textureC.uniforms)
-        #    setTextureVisibility(true ,textureC.uniforms)
+#         #  setMaskColor(RGB(0.0,1.0,0.0) ,textTexture.uniforms)
+#         #  setTextureVisibility(true ,textTexture.uniforms)
+       
+#         #    setMaskColor(RGB(1.0,0.0,0.5) ,textureC.uniforms)
+#         #    setTextureVisibility(true ,textureC.uniforms)
        
        
-        #  setMaskColor(RGB(0.5,0.5,0.0) ,textureB.uniforms)
-        #  setTextureVisibility(true ,textureB.uniforms)
+#         #  setMaskColor(RGB(0.5,0.5,0.0) ,textureB.uniforms)
+#         #  setTextureVisibility(true ,textureB.uniforms)
        
        
        
-        # setCTWindow(Int32(0), Int32(0),Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5].uniforms)
+#         # setCTWindow(Int32(0), Int32(0),Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5].uniforms)
        
-        basicRender(window)
 
 
 
 
 
-         GLFW.PollEvents()
+
+#          GLFW.PollEvents()
 
 
+# z=zeros(3,3,3)
+
+# selectdim(z,1,1)
+# TwoDimRawDat()
+
+        #  setVisOnKey(Option(listOfTexturesToCreate[1]))
 
 #     zz = ThreeDimRawDat{UInt8}(UInt8,"mainLab",ones(UInt8,10,40,40))
 

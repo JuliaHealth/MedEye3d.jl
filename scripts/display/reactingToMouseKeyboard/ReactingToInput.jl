@@ -2,8 +2,7 @@ using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
 module ReactingToInput
-using Rocket, GLFW, Main.ReactToScroll, Main.ForDisplayStructs, Main.TextureManag,
- Main.ReactOnMouseClickAndDrag, Main.ReactOnKeyboard, Main.DataStructs, Main.StructsManag
+using Rocket, GLFW,ModernGL,Setfield, Main.ReactToScroll, Main.ForDisplayStructs, Main.TextureManag, Main.ReactOnMouseClickAndDrag, Main.ReactOnKeyboard, Main.DataStructs, Main.StructsManag, Main.DisplayWords
 
 export subscribeGLFWtoActor
 
@@ -12,15 +11,42 @@ export subscribeGLFWtoActor
 adding the data into about openGL and GLFW context to enable proper display
 ```
 function setUpMainDisplay(mainForDisplayObjects::Main.ForDisplayStructs.forDisplayObjects,actor::SyncActor{Any, ActorWithOpenGlObjects})
+    actor.actor.mainForDisplayObjects.stopListening[]=true
+
     actor.actor.mainForDisplayObjects=mainForDisplayObjects
+    actor.actor.mainForDisplayObjects.stopListening[]=false
 
 end#setUpMainDisplay
 
 ```@doc
 adding the data needed for text display
+    it also configures texture that is build for text display
 ```
 function setUpWordsDisplay(textDispObject::Main.ForDisplayStructs.ForWordsDispStruct,actor::SyncActor{Any, ActorWithOpenGlObjects})
-    actor.actor.textDispObj=textDispObject
+
+    actor.actor.mainForDisplayObjects.stopListening[]=true
+
+    bindAndActivateForText(textDispObject.shader_program_words 
+    , textDispObject.fragment_shader_words
+    ,textDispObject.vbo_words
+    ,actor.actor.mainForDisplayObjects.vertex_shader )
+
+    texId =  createTexture(0,textDispObject.textureSpec.widthh 
+                            ,textDispObject.textureSpec.heightt
+                            ,GL_R8UI)
+
+    textSpec= setproperties(textDispObject.textureSpec,(ID=texId) )
+
+    samplerRef= glGetUniformLocation(textDispObject.shader_program_words, "TextTexture1")
+    
+    glUniform1i(samplerRef,length(actor.actor.mainForDisplayObjects.listOfTextSpecifications)+1)
+    textDispObjectiNITIALIZED= setproperties(textDispObject,(textureSpec=textSpec) )
+    
+    actor.actor.textDispObj=textDispObjectiNITIALIZED
+    # now reactivating the main vbo and shader program
+    # reactivateMainObj(actor.actor.mainForDisplayObjects.shader_program, actor.actor.mainForDisplayObjects.vbo)
+    actor.actor.mainForDisplayObjects.stopListening[]=false
+
 end#setUpWordsDisplay
 
 

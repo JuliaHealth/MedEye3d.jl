@@ -38,15 +38,31 @@ function displayAll(windowWidth::Int,windowHeight::Int,listOfTexturesToCreate::V
 	println(createcontextinfo())
 	gslsStr = get_glsl_version_string()
 
+
 	vertex_shader = createVertexShader(gslsStr)
 	fragment_shader_main = createFragmentShader(gslsStr,listOfTexturesToCreate)
 	
+
+
+##for control of text display
 	fragment_shader_words = ShadersAndVerticiesForText.createFragmentShader(gslsStr)
+	shader_program_words = glCreateProgram()
+	glAttachShader(shader_program_words, fragment_shader_words)
+	glAttachShader(shader_program_words, vertex_shader)
+
+	
+	vbo_words = Ref(GLuint(1))   # initial value is irrelevant, just allocate space
+    glGenBuffers(1, vbo_words)
+##for control of text display
+  
+
+
 
 
 	# Connect the shaders by combining them into a program
 	shader_program = glCreateProgram()
 
+	
 	glAttachShader(shader_program, vertex_shader)
 	glAttachShader(shader_program, fragment_shader_main)
 	
@@ -59,9 +75,8 @@ function displayAll(windowWidth::Int,windowHeight::Int,listOfTexturesToCreate::V
 	# Create the Vertex Buffer Objects (VBO)
 	vbo = createDAtaBuffer(Main.ShadersAndVerticies.vertices)
 
-	vbo_words = Ref(GLuint(1))   # initial value is irrelevant, just allocate space
-    glGenBuffers(1, vbo_words)
-  
+
+
 
 
 	# Create the Element Buffer Object (EBO)
@@ -84,7 +99,7 @@ function displayAll(windowWidth::Int,windowHeight::Int,listOfTexturesToCreate::V
 	schedule(t)
 
 
-return (window,vertex_shader,fragment_shader_main ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words)
+return (window,vertex_shader,fragment_shader_main ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words)
 
 end# displayAll
 

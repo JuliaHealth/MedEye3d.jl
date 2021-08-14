@@ -19,18 +19,18 @@ struct is mutable becouse in case of the masks data can be changed multiple time
 @with_kw mutable struct TwoDimRawDat{T} <: RawDataToDisp
    type::Type{T}= UInt8# easy access to type
    name::String=""#associated name
-   dat::Array{T, 2}=ones(type,2,2)# raw pixel data
+   dat::AbstractArray{T, 2}=ones(type,2,2)# raw pixel data
 end#2DimRawDat
 
 
 ```@doc
-3 dimensional ata for displaying single slice
+3 dimensional data for displaying single slice
 struct is mutable becouse in case of the masks data can be changed multiple times and rapidly   
 ```
 @with_kw mutable struct ThreeDimRawDat{T} <: RawDataToDisp
    type::Type{T}= UInt8# easy access to type
    name::String=""#associated name
-   dat::Array{T, 3}=ones(type,2,2,2)# raw voxel data
+   dat::AbstractArray{T, 3}=ones(type,2,2,2)# raw voxel data
 end#2DimRawDat
 
 ```@doc

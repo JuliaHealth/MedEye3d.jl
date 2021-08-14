@@ -132,7 +132,7 @@ function registerMouseClickFunctions(window::GLFW.Window
 
  width = windowDims[1]
   height = windowDims[2]
-  quadmaxX = Int32(floor(width*0.8))
+  quadmaxX = Int32(floor(width*0.9))
   quadMaxY = height 
 
   mouseButtonSubs = MouseCallbackSubscribable(false,0,0,quadmaxX,quadMaxY,[],CartesianIndex(1,1),Dates.now(),

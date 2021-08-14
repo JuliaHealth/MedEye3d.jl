@@ -115,8 +115,8 @@ Defined in order to hold constant objects needed to display images
   #number of available slices - needed for scrolling needs
   slicesNumber::Int32=1
   mainImageUniforms::MainImageUniforms = MainImageUniforms()# struct with references to main image
-  TextureIndexes::Dictionary{String, Int64}= getLocationDict(listOfTextSpecifications)  #gives a way of efficient querying by supplying dictionary where key is a name we are intrested in and a key is index where it is located in our array
-
+  TextureIndexes::Dictionary{String, Int64}=Dictionary{String, Int64}()  #gives a way of efficient querying by supplying dictionary where key is a name we are intrested in and a key is index where it is located in our array
+  numIndexes::Dictionary{Int32, Int64} =Dictionary{Int32, Int64}() # a way for fast query using assigned numbers
 end
 
 ```@doc
@@ -127,7 +127,7 @@ fontFace::FTFont=FTFont(Ptr{FreeTypeAbstraction.FreeType.__JL_FT_FaceRec_}(),fal
 textureSpec::TextureSpec =TextureSpec() # texture specification of texture used to display text 
 fragment_shader_words::UInt32=1 #reference to fragment shader used to display text
 vbo_words::Base.RefValue{UInt32}=Ref(UInt32(1)) #reference to vertex buffer object used to display text
-
+shader_program_words::UInt32=1
 end #ForWordsDispStruct
 
 
@@ -153,7 +153,7 @@ Holding necessery data to controll keyboard shortcuts```
   isEnterPressed::Bool= false# scancode 36
   lastKeysPressed::Vector{String}=[] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
  #informations about what triggered sending this particular struct to the  actor
-  mostRecentScanCode ::Int32=Int32(1)
+  mostRecentScanCode ::GLFW.Key=GLFW.KEY_KP_4
   mostRecentKeyName ::String=""
   mostRecentAction ::GLFW.Action= GLFW.RELEASE
 end

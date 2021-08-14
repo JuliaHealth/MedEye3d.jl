@@ -59,14 +59,14 @@ function createFragmentShader(gslString::String)
     in vec3 ourColor;
     smooth in vec2 TexCoord0;
 
-    uniform isampler2D TextTexture1;
+    uniform usampler2D TextTexture1;
     void main() {
 
-    int text1Texel = texture2D(TextTexture1, TexCoord0).r ;
+    uint text1Texel = texture2D(TextTexture1, TexCoord0).r ;
 
      if(text1Texel > 0){
-      FragColor = vec4(1.0,0.0,0.0,1.0);  }
-       else if (texture2D(TextTexture1, TexCoord0).r<1000) {
+      FragColor = vec4(1.0,0.0,1.0,1.0);  }
+       else {
     FragColor = vec4(0.0,1.0,0.0,1.0);
 
     }
