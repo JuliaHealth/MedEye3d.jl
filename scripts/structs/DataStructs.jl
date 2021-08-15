@@ -81,8 +81,48 @@ struct is mutable becouse in case of the masks data can be changed multiple time
 end #fullScrollableDat
 
 
+```@doc
+struct holding  data needed for calculating proper mouse position , 
+getting proper size for the texture depending on image dimensions 
+getting into account  proportions of diffrent parts of display
+usefull stats for proper text display
+```
+@with_kw mutable struct CalcDimsStruct
+ #imageDims = texture dimensions of main image texture
+ imageTextureWidth::Int32=Int32(1)
+ imageTextureHeight::Int32=Int32(1)
+ #windowDims
+ windowWidth::Int32=Int32(1)
+ windowHeight::Int32=Int32(1)
+ #required ratios - set ratios we want to achieve
+ fractionOfMainIm::Float32= Float32(1.0) # needed for controlling  how much space we want for text
+ heightToWithRatio::Float32= Float32(1.0) # needed to take into account proper height to width ratio, so main texture would not get srtetched unnatrurally
+#some statistics of a window
+ avWindWidtForMain::Int32= Int32(round(windowWidth*fractionOfMainIm ))# how many units we have for the main image in window in width - in case of height  main image will have all height it requires
+ avWindHeightForMain::Int32 = windowHeight # how much of height is available for main image
+ avMainImRatio::Float32= Float32(windowHeight/avWindWidtForMain )# without any change it will give ratio between available height and width of place for main image - later we will compare it to actual required ratio of image
+#basic data for corrections required for display and calculating mouse positions 
+correCtedWindowQuadHeight::Int32  = avMainImRatio# corrected main quad height in window coordinate system 
+correCtedWindowQuadWidth::Int32  = avWindWidtForMain# corrected main quad width in window coordinate system 
+# now we still need ratio of the resulting quad window size after corrections relative to  total window size
+quadToTotalHeightRatio::Float32= correCtedWindowQuadHeight/avWindHeightForMain
+quadToTotalWidthRatio::Float32= correCtedWindowQuadWidth/avWindWidtForMain
+#opengl corrections - used from top bottom left and right - remember that in open gl max height and width is 2!
+widthCorr::Float32=0.0
+heightCorr::Float32=0.0
+#and analogical in window coordinates
+windowWidthCorr::Int32=Int32(round( (widthCorr/2)*windowWidth))
+windowHeightCorr::Int32= Int32(round((heightCorr/2)*windowHeight))
 
+#calculated vertex positions for main quads 
+mainImageQuadVert::Vector{Float32}= [] # vertex positions of main quad
+wordsImageQuadVert::Vector{Float32} =[]# vertex positions of text display quad
 
+#calculated sizes for glBufferData
+mainQuadVertSize::Int64 = sizeof(mainImageQuadVert)
+wordsQuadVertSize::Int64 = sizeof(wordsImageQuadVert)
+
+end#CalcDimsStruct
 
 end# DataStructs
 

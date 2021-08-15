@@ -14,7 +14,7 @@ using ModernGL, GeometryTypes, GLFW,Main.ForDisplayStructs, Main.CustomFragShad
 export createFragmentShader
 export positions
 export elements
-export vertices
+export getMainVerticies
 export createVertexShader
 
 
@@ -23,7 +23,8 @@ using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 
-fragmentShaderFileDir = DrWatson.scriptsdir("display","GLFW","shadersEtc","mainShader.frag")
+#in case one want to put shader gsls file into separate file
+#fragmentShaderFileDir = DrWatson.scriptsdir("display","GLFW","shadersEtc","mainShader.frag")
 
 
 
@@ -78,14 +79,6 @@ function createFragmentShader(gslString::String,listOfTexturesToCreate::Vector{T
 
 ################### data to display verticies
 
-
-# Now we define another geometry that we will render, a rectangle, this one with an index buffer
-# The positions of the vertices in our rectangle
-positions = Point{2,Float32}[(-0.5,  0.5),     # top-left
-( 0.5,  0.5),     # top-right
-( 0.5, -0.5),     # bottom-right
-(-0.5, -0.5)]     # bottom-left
-
 # Specify how vertices are arranged into faces
 # Face{N,T} type specifies a face with N vertices, with index type
 # T (you should choose UInt32), and index-offset O. If you're
@@ -94,16 +87,6 @@ positions = Point{2,Float32}[(-0.5,  0.5),     # top-left
 # O=-1.)
 elements = Face{3,UInt32}[(0,1,2),          # the first triangle
 (2,3,0)]          # the second triangle
-
-
-
-vertices = Float32.([
-  # positions          // colors           // texture coords
-   0.8,  1.0, 0.0,   1.0, 0.0, 0.0,   1.0, 1.0,   # top right
-   0.8, -1.0, 0.0,   0.0, 1.0, 0.0,   1.0, 0.0,   # bottom right
-  -1.0, -1.0, 0.0,   0.0, 0.0, 1.0,   0.0, 0.0,   # bottom left
-  -1.0,  1.0, 0.0,   1.0, 1.0, 0.0,   0.0, 1.0    # top left 
-])
 
 
 

@@ -21,9 +21,12 @@ using Main.ShadersAndVerticies, Main.ForDisplayStructs,Main.ShadersAndVerticiesF
 
 displayAllStr="""
 preparing all for displaying the images and responding to mouse and keyboard input
+	windowWidth, windowHeight - initial dimensiona of GLFW window
+	fractionOfMainIm - how much of width should be taken by the main image
 """
 @doc displayAllStr
-function displayAll(windowWidth::Int,windowHeight::Int,listOfTexturesToCreate::Vector{TextureSpec})
+function displayAll(listOfTexturesToCreate::Vector{TextureSpec}
+					,calcDimsStruct::CalcDimsStruct)
 	# atomic variable that is enabling stopping async loop of event listening in order to enable othe actions with GLFW context
 	stopListening = Threads.Atomic{Bool}(0)
 	stopListening[]=false
@@ -32,7 +35,7 @@ function displayAll(windowWidth::Int,windowHeight::Int,listOfTexturesToCreate::V
 		println("increase number of available threads look into https://docs.julialang.org/en/v1/manual/multi-threading/  or modify for example in vs code extension")
     end
     # Create the window. This sets all the hints and makes the context current.
-	window = initializeWindow(windowWidth,windowHeight)
+	window = initializeWindow(calcDimsStruct.windowWidth,calcDimsStruct.windowHeight)
     
    	# The shaders 
 	println(createcontextinfo())
@@ -42,8 +45,6 @@ function displayAll(windowWidth::Int,windowHeight::Int,listOfTexturesToCreate::V
 	vertex_shader = createVertexShader(gslsStr)
 	fragment_shader_main = createFragmentShader(gslsStr,listOfTexturesToCreate)
 	
-
-
 ##for control of text display
 	fragment_shader_words = ShadersAndVerticiesForText.createFragmentShader(gslsStr)
 	shader_program_words = glCreateProgram()
@@ -55,9 +56,6 @@ function displayAll(windowWidth::Int,windowHeight::Int,listOfTexturesToCreate::V
     glGenBuffers(1, vbo_words)
 ##for control of text display
   
-
-
-
 
 	# Connect the shaders by combining them into a program
 	shader_program = glCreateProgram()
@@ -73,11 +71,7 @@ function displayAll(windowWidth::Int,windowHeight::Int,listOfTexturesToCreate::V
 	#create vertex buffer
 	createVertexBuffer()
 	# Create the Vertex Buffer Objects (VBO)
-	vbo = createDAtaBuffer(Main.ShadersAndVerticies.vertices)
-
-
-
-
+	vbo = createDAtaBuffer(calcDimsStruct.mainImageQuadVert)
 
 	# Create the Element Buffer Object (EBO)
 	ebo = createElementBuffer(Main.ShadersAndVerticies.elements)

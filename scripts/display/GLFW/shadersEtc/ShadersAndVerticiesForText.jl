@@ -10,7 +10,7 @@ include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 module ShadersAndVerticiesForText
 using ModernGL, GeometryTypes, GLFW,Main.ForDisplayStructs, Main.CustomFragShad
 
-
+export getWordsVerticies
 
 
 
@@ -90,16 +90,15 @@ function createFragmentShader(gslString::String)
 elements = Face{3,UInt32}[(0,1,2),          # the first triangle
 (2,3,0)]          # the second triangle
 
-
-
-verticesB = Float32.([
-  # positions          // colors           // texture coords
-   1.0,  1.0, 0.0,   1.0, 0.0, 0.0,   1.0, 1.0,   # top right
-   1.0, -1.0, 0.0,   0.0, 1.0, 0.0,   1.0, 0.0,   # bottom right
-   0.8, -1.0, 0.0,   0.0, 0.0, 1.0,   0.0, 0.0,   # bottom left
-   0.8,  1.0, 0.0,   1.0, 1.0, 0.0,   0.0, 1.0    # top left 
+function getWordsVerticies(fractionOfMainIm::Float32)::Vector{Float32}
+return  Float32.([
+  # positions                     // colors           // texture coords
+   1.0,  1.0, 0.0,                 1.0, 0.0, 0.0,   1.0, 1.0,   # top right
+   1.0, -1.0, 0.0,                0.0, 1.0, 0.0,   1.0, 0.0,   # bottom right
+   fractionOfMainIm*2, -1.0, 0.0,   0.0, 0.0, 1.0,   0.0, 0.0,   # bottom left
+   fractionOfMainIm*2,  1.0, 0.0,   1.0, 1.0, 0.0,   0.0, 1.0    # top left 
    ])
-
+end #getWordsVerticies
 
 
 

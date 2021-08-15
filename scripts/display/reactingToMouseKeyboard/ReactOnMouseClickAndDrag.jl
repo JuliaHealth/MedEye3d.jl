@@ -87,7 +87,7 @@ function (handler::MouseCallbackSubscribable)( a, x::Float64, y::Float64)
   point = CartesianIndex(Int(x),Int(y))
   handler.lastCoordinate = point
   
-  #  @info "handling mouse position start "   x
+ @info "handling mouse position  "   point
   
   if  (handler.isLeftButtonDown && x>=handler.xmin && x<=handler.xmax && y>=handler.ymin && y<= handler.ymax )
     push!(handler.coordinatesStoreForLeftClicks,point)
@@ -121,23 +121,23 @@ imageWidth adn imageHeight are the dimensions of textures that we use to display
 """
 @doc registerMouseClickFunctionsStr
 function registerMouseClickFunctions(window::GLFW.Window
-                                    ,stopListening::Base.Threads.Atomic{Bool}      )
+                                    ,stopListening::Base.Threads.Atomic{Bool}
+                                    ,calcD::CalcDimsStruct     )
 
 
  stopListening[]=true # stoping event listening loop to free the GLFW context
 
-  # calculating dimensions of quad becouse it do not occupy whole window
 
- windowDims =     GLFW.GetWindowSize(window)
-
- width = windowDims[1]
-  height = windowDims[2]
-  quadmaxX = Int32(floor(width*0.9))
-  quadMaxY = height 
-
-  mouseButtonSubs = MouseCallbackSubscribable(false,0,0,quadmaxX,quadMaxY,[],CartesianIndex(1,1),Dates.now(),
-  Subject(Vector{CartesianIndex{2}}, scheduler = AsyncScheduler()))
-
+ # calculating dimensions of quad becouse it do not occupy whole window, and we want to react only to those mouse positions that are on main image quad
+  mouseButtonSubs = MouseCallbackSubscribable(isLeftButtonDown=false
+                                        ,xmin=windowWidthCorr
+                                        ,ymin=windowHeightCorr
+                                        ,xmax=calcD.avWindWidtForMain-calcD.windowWidthCorr
+                                        ,ymax=calcD.avWindHeightForMain-calcD.windowHeightCorr
+                                        ,coordinatesStoreForLeftClicks=[]
+                                        ,lastCoordinate=CartesianIndex(1,1)
+                                        ,referenceInstance=Dates.now()
+                                        ,subject=Subject(Vector{CartesianIndex{2}}  ,scheduler = AsyncScheduler()))
 
 GLFW.SetCursorPosCallback(window, (a, x, y) -> mouseButtonSubs(a,x, y ) )# and  for example : cursor: 29.0, 469.0  types   Float64  Float64   
 GLFW.SetMouseButtonCallback(window, (a, button, action, mods) ->mouseButtonSubs(a,button, action,mods )) # for example types MOUSE_BUTTON_1 PRESS   GLFW.MouseButton  GLFW.Action 
@@ -168,13 +168,9 @@ function reactToMouseDrag(mouseCoords::Vector{CartesianIndex{2}}, actor::SyncAct
         # two dimensional coordinates on plane of intrest (current slice)
        mappedCoords =  translateMouseToTexture(texture.strokeWidth
                                                 ,mouseCoords
-                                                ,obj.windowWidth
-                                                , obj.windowHeight
-                                                , obj.imageTextureWidth
-                                                , obj.imageTextureHeight
-                                                ,actor.actor.currentDisplayedSlice)
+                                                ,actor.actor.calcDimsStruct)
         
-
+        @info "mappedCoords" mappedCoords
        twoDimDat= actor.actor.currentlyDispDat|> # accessing currently displayed data
        (singSl)-> singSl.listOfDataAndImageNames[singSl.nameIndexes[texture.name]] #accessing the texture data we want to modify
        
@@ -220,24 +216,19 @@ given list of cartesian coordinates and some window/ image characteristics - it 
 to cartesian coordinates of the texture
 strokeWidth - the property connected to the texture marking how thick should be the brush
 mouseCoords - list of coordinates of mouse positions while left button remains pressed
-windowWidth,windowHeight  - dimensions of the GLFW window
-imageTextureWidth, imageTextureHeight - dimension of the texture holding image
-currentDisplayedSlice - the slice we are on now
+calcDims - set of values usefull for calculating mouse position
 return vector of translated cartesian coordinates
 ```
 function translateMouseToTexture(strokeWidth::Int32
                                 ,mouseCoords::Vector{CartesianIndex{2}}
-                                ,windowWidth::Int32
-                                ,windowHeight::Int32 
-                                ,imageTextureWidth::Int32 
-                                ,imageTextureHeight::Int32 
-                                ,currentDisplayedSlice::Int64  )
+                                ,calcD::CalcDimsStruct )
   
+
     halfStroke =   Int64(floor(strokeWidth/2 ))
     #updating given texture that we are intrested in in place we are intested in 
 
-    return map(c->CartesianIndex(Int64(floor( ((c[1])/(windowWidth*0.9))*imageTextureWidth))
-    , Int64(floor(  ((windowHeight-c[2])/windowHeight)*imageTextureHeight)  )     ),mouseCoords)                                                    |>
+    return map(c->CartesianIndex(Int64(floor( ((c[1]- calcD.windowWidthCorr)/(calcD.correCtedWindowQuadWidth))*calcD.imageTextureWidth))
+    , Int64(floor(  ((calcD.correCtedWindowQuadHeight-c[2]+calcD.windowHeightCorr)/calcD.correCtedWindowQuadHeight)*calcD..imageTextureHeight)  )     ),mouseCoords)                                                    |>
       (x)->filter(it->it[1]>0 && it[2]>0 ,x)        # we do not want to try access it in point 0 as julia is 1 indexed                 
 
 end #translateMouseToTexture

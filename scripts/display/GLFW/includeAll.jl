@@ -10,6 +10,7 @@ include(DrWatson.scriptsdir("loadData","StructsManag.jl"))
 
 include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
 include(DrWatson.scriptsdir("display","GLFW","shadersEtc","CustomFragShad.jl"))
+include(DrWatson.scriptsdir("generalUtils","MultiDimArrUtil.jl"))
 
 include(DrWatson.scriptsdir("display","GLFW","modernGL","OpenGLDisplayUtils.jl"))
 include(DrWatson.scriptsdir("display","GLFW","shadersEtc","ShadersAndVerticies.jl"))

@@ -103,21 +103,15 @@ Defined in order to hold constant objects needed to display images
   fragment_shader::UInt32=1
   shader_program::UInt32=1
   stopListening::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0)# enables unlocking GLFW context for futher actions
-  stopExecution::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0)#it will halt ability to display image for futher display in order to keep OpenGL from blocking - optional to set
   vbo::UInt32 =1 #vertex buffer object id
   ebo::UInt32 =1 #element buffer object id
-  #imageDims = texture dimensions
-  imageTextureWidth::Int32=1
-  imageTextureHeight::Int32=1
-  #windowDims
-  windowWidth::Int32=1
-  windowHeight::Int32=1
-  #number of available slices - needed for scrolling needs
   slicesNumber::Int32=1
   mainImageUniforms::MainImageUniforms = MainImageUniforms()# struct with references to main image
   TextureIndexes::Dictionary{String, Int64}=Dictionary{String, Int64}()  #gives a way of efficient querying by supplying dictionary where key is a name we are intrested in and a key is index where it is located in our array
   numIndexes::Dictionary{Int32, Int64} =Dictionary{Int32, Int64}() # a way for fast query using assigned numbers
+
 end
+
 
 ```@doc
 Holding necessery data to display text  - like font related
@@ -142,7 +136,8 @@ Actor that is able to store a state to keep needed data for proper display
     isSliceChanged::Bool= false # set to true when slice is changed set to false when we start interacting with this slice - thanks to this we know that when we start drawing on one slice and change the slice the line would star a new on new slice
     textDispObj::ForWordsDispStruct =ForWordsDispStruct()# set of objects and constants needed for text diplay
     currentlyDispDat::SingleSliceDat =SingleSliceDat() # holds the data displayed or in case of scrollable data view for accessing it
-end
+    calcDimsStruct::CalcDimsStruct   #data for calculations of necessary constants needed to calculate window size , mouse position ...
+  end
 
 ```@doc
 Holding necessery data to controll keyboard shortcuts```

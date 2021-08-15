@@ -2,7 +2,8 @@ using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
 module ReactingToInput
-using Rocket, GLFW,ModernGL,Setfield, Main.ReactToScroll, Main.ForDisplayStructs, Main.TextureManag, Main.ReactOnMouseClickAndDrag, Main.ReactOnKeyboard, Main.DataStructs, Main.StructsManag, Main.DisplayWords
+using Rocket, GLFW,ModernGL,Setfield, Main.ReactToScroll, Main.ForDisplayStructs
+using Main.TextureManag, Main.ReactOnMouseClickAndDrag, Main.ReactOnKeyboard, Main.DataStructs, Main.StructsManag, Main.DisplayWords
 
 export subscribeGLFWtoActor
 
@@ -26,10 +27,11 @@ function setUpWordsDisplay(textDispObject::Main.ForDisplayStructs.ForWordsDispSt
 
     actor.actor.mainForDisplayObjects.stopListening[]=true
 
-    bindAndActivateForText(textDispObject.shader_program_words 
+
+     bindAndActivateForText(textDispObject.shader_program_words 
     , textDispObject.fragment_shader_words
     ,textDispObject.vbo_words
-    ,actor.actor.mainForDisplayObjects.vertex_shader )
+    ,actor.actor.calcDimsStruct)
 
     texId =  createTexture(0,textDispObject.textureSpec.widthh 
                             ,textDispObject.textureSpec.heightt
@@ -44,7 +46,10 @@ function setUpWordsDisplay(textDispObject::Main.ForDisplayStructs.ForWordsDispSt
     
     actor.actor.textDispObj=textDispObjectiNITIALIZED
     # now reactivating the main vbo and shader program
-    reactivateMainObj(actor.actor.mainForDisplayObjects.shader_program, actor.actor.mainForDisplayObjects.vbo)
+    reactivateMainObj(actor.actor.mainForDisplayObjects.shader_program
+    , actor.actor.mainForDisplayObjects.vbo
+    ,actor.actor.calcDimsStruct    )
+    
     actor.actor.mainForDisplayObjects.stopListening[]=false
 
 end#setUpWordsDisplay
@@ -65,6 +70,20 @@ function setUpForScrollData(onScrollData::FullScrollableDat ,actor::SyncActor{An
     actor.actor.mainForDisplayObjects.stopListening[]=false
 
 end#setUpMainDisplay
+
+
+setUpCalcDimsStructStr= """
+add data needed for proper calculations of mouse, verticies positions ... etc
+"""
+@doc setUpCalcDimsStructStr
+function setUpCalcDimsStruct(calcDim::CalcDimsStruct ,actor::SyncActor{Any, ActorWithOpenGlObjects})
+    actor.actor.mainForDisplayObjects.stopListening[]=true
+
+    actor.actor.calcDimsStruct =calcDim
+    
+    actor.actor.mainForDisplayObjects.stopListening[]=false
+
+end#setUpCalcDimsStruct
 
 
 
@@ -97,6 +116,7 @@ encapsulated by a function becouse this is configuration of Rocket and needs to 
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Bool) = reactToScroll(data,actor )
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Main.ForDisplayStructs.forDisplayObjects) = setUpMainDisplay(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Main.ForDisplayStructs.ForWordsDispStruct) = setUpWordsDisplay(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::CalcDimsStruct) = setUpCalcDimsStruct(data,actor)
 
 
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::FullScrollableDat) = setUpForScrollData(data,actor)
@@ -124,7 +144,7 @@ function subscribeGLFWtoActor(actor ::SyncActor{Any, ActorWithOpenGlObjects})
     GLFW.SetScrollCallback(forDisplayConstants.window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
 
     keyBoardAct = registerKeyboardFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)
-    buttonSubs = registerMouseClickFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)
+    buttonSubs = registerMouseClickFunctions(forDisplayConstants.window,forDisplayConstants.stopListening,actor.actor.calcDimsStruct )
   
     keyboardSub = subscribe!(keyBoardAct, actor)
     scrollSubscription = subscribe!(scrollback, actor)

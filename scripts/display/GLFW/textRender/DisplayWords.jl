@@ -6,7 +6,7 @@ Module controlling displaying of the text associated with the segmentation
 - either text releted to all slices or just a single one currently displayed or both
 """
 module DisplayWords
-using FreeTypeAbstraction,Main.ForDisplayStructs, ModernGL, ColorTypes,Main.PrepareWindowHelpers, Main.OpenGLDisplayUtils. Main.TextureManag,  Main.ShadersAndVerticiesForText, Glutils, DrWatson
+using FreeTypeAbstraction,Main.ForDisplayStructs, ModernGL, ColorTypes,Main.PrepareWindowHelpers, Main.OpenGLDisplayUtils. Main.TextureManag, Main.ShadersAndVerticies, Main.ShadersAndVerticiesForText, Glutils, DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
 include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
@@ -22,7 +22,7 @@ First We need to bind fragment shader created to deal with text and supply the v
 function bindAndActivateForText(shader_program_words::UInt32
                                 ,fragment_shader_words::UInt32 
                                 ,vbo_words::Base.RefValue{UInt32}
-                                ,vertex_shader::UInt32 )
+                                ,calcDim::CalcDimsStruct)
     
     glLinkProgram(shader_program_words)
     glUseProgram(shader_program_words)
@@ -31,7 +31,7 @@ function bindAndActivateForText(shader_program_words::UInt32
 	glAttachShader(shader_program_words, vertex_shader)
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo_words[])
-    glBufferData(GL_ARRAY_BUFFER, sizeof(Main.ShadersAndVerticiesForText.verticesB), Main.ShadersAndVerticiesForText.verticesB, GL_STATIC_DRAW)
+    glBufferData(GL_ARRAY_BUFFER,calcDim.mainQuadVertSize , calcDim.mainImageQuadVert, GL_STATIC_DRAW)
 
 	encodeDataFromDataBuffer()
 end #bindAndActivateForText
@@ -41,10 +41,12 @@ In order to be able to display texture with text we need to activate main shader
     shader_program- reference to shader program
     fragment_shader_words - reference to shader associated with text displaying
 ```
-function activateForTextDisp(shader_program_words::UInt32,vbo_words::Base.RefValue{UInt32} )
+function activateForTextDisp(shader_program_words::UInt32
+                            ,vbo_words::Base.RefValue{UInt32} 
+                            ,calcDim::CalcDimsStruct)
     glUseProgram(shader_program_words)
     glBindBuffer(GL_ARRAY_BUFFER, vbo_words[])
-    glBufferData(GL_ARRAY_BUFFER, sizeof(Main.ShadersAndVerticiesForText.verticesB), Main.ShadersAndVerticiesForText.verticesB, GL_STATIC_DRAW)
+    glBufferData(GL_ARRAY_BUFFER, calcDim.wordsQuadVertSize  ,calcDim.wordsImageQuadVert , GL_STATIC_DRAW)
 
 	encodeDataFromDataBuffer()
 
@@ -91,17 +93,13 @@ shader_program- reference to shader program
 fragment_shader_main- reference to shader associated with main images
 ```
 function reactivateMainObj(shader_program::UInt32
-                            ,vbo_main::UInt32 )
+                            ,vbo_main::UInt32
+                            ,calcDim::CalcDimsStruct)
   
-   # glLinkProgram(shader_program)
-
-    # glAttachShader(shader_program, fragment_shader_main)
-    # glAttachShader(shader_program, vertex_shader)
     glUseProgram(shader_program)
     glBindBuffer(GL_ARRAY_BUFFER, vbo_main[])
-    glBufferData(GL_ARRAY_BUFFER, sizeof(Main.ShadersAndVerticies.vertices), Main.ShadersAndVerticies.vertices, GL_STATIC_DRAW)
+    glBufferData(GL_ARRAY_BUFFER,calcDim.mainQuadVertSize, calcDim.mainImageQuadVert, GL_STATIC_DRAW)
     encodeDataFromDataBuffer()
-
 
 end #reactivateMainObj
 

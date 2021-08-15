@@ -47,7 +47,7 @@ using DrWatson
 export coordinateDisplay
 export passDataForScrolling
 
-using ModernGL, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUtils, Main.ForDisplayStructs,Main.Uniforms, Main.DisplayWords, Dictionaries
+using ModernGL,MultiDimArrUtil, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUtils, Main.ForDisplayStructs,Main.Uniforms, Main.DisplayWords, Dictionaries
 using Main.ReactingToInput, Rocket, Setfield, Logging, Main.ShadersAndVerticiesForText,FreeTypeAbstraction,Main.DisplayWords, Main.DataStructs, Main.StructsManag
 
 
@@ -63,21 +63,36 @@ listOfTextSpecs - holds required data needed to initialize textures
 keeps also references to needed uniforms etc.
 windowWidth::Int,windowHeight::Int - GLFW window dimensions
 fractionOfMainIm - how much of width should be taken by the main image
+heightToWithRatio - needed for proper display of main texture - so it would not be stretched ...
 """
 @doc coordinateDisplayStr
 function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.TextureSpec}
-                        ,fractionOfMainIm::Float64
+                        ,fractionOfMainIm::Float32
+                        ,heightToWithRatio::Float32
                         ,imageTextureWidth::Int
                         ,imageTextureHeight::Int
                         ,windowWidth::Int=1200
                         ,windowHeight::Int= Int(round(windowWidth*fractionOfMainIm))
                         ,textTexturewidthh::Int32=Int32(1000)
-                        ,textTextureheightt::Int32=Int32(10000)
-                        )
+                        ,textTextureheightt::Int32=Int32(10000) )
+
+
+   #calculations of necessary constants needed to calculate window size , mouse position ...
+   calcDimStruct= CalcDimsStruct(imageTextureWidth=imageTextureWidth
+                  ,imageTextureHeight=imageTextureHeight
+                  ,windowWidth=windowWidth 
+                  ,windowHeight=windowHeight 
+                  ,fractionOfMainIm=fractionOfMainIm
+                  ,heightToWithRatio=heightToWithRatio 
+                  ,wordsImageQuadVert=Main.ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm)  
+                  ,wordsQuadVertSize= sizeof(Main.ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm))) |>
+   (calcDim)-> getMainVerticies(calcDimStruct)
+
+   subscribe!(of(calcDim),mainActor )
 
                         
  #creating window and event listening loop
-    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words = Main.PrepareWindow.displayAll(windowWidth,windowHeight,listOfTextSpecs,fractionOfMainIm)
+    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words = Main.PrepareWindow.displayAll(listOfTextSpecs,calcDimStruct )
 
     # than we set those uniforms, open gl types and using data from arguments  to fill texture specifications
     mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program) 
@@ -86,6 +101,7 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
     @info "listOfTextSpecsMapped" listOfTextSpecsMapped
     #initializing object that holds data reqired for interacting with opengl 
     initializedTextures =  initializeTextures(listOfTextSpecsMapped)
+   
     numbDict = filter(x-> x.numb>=0,initializedTextures) |>
     (filtered)-> Dictionary(map(it->it.numb,filtered),collect(eachindex(filtered))) # a way for fast query using assigned numbers
 
@@ -95,18 +111,14 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
             ,vertex_shader
             ,fragment_shader
             ,shader_program
-            ,stopListening,
-            Threads.Atomic{Bool}(0)
+            ,stopListening
             ,vbo[]
             ,ebo[]
-            ,imageTextureWidth
-            ,imageTextureHeight
-            ,windowWidth
-            ,windowHeight
-            ,0 # number of slices will be set when data for scrolling will come
             ,mainImageUnifs
             ,Dictionary(map(it->it.name,initializedTextures),collect(eachindex(initializedTextures)))
-            ,numbDict    )
+            ,numbDict 
+   )
+
 
 
 

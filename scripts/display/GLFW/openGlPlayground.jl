@@ -40,9 +40,18 @@
          dataType= Int16)  
   ]
   #   
-
-  Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,0.75,40,40, 900,900)
+  fractionOfMainIm= Float32(0.5)
+  heightToWithRatio=Float32(2)
+  Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,fractionOfMainIm,heightToWithRatio,40,40,1000)
    
+width = 1000
+height = 500
+
+widthOfSpace = 750
+
+
+ww= 500/(690-160)
+
 #  mainMaskDummy = UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
 #  testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
 #  testLab2Dat= UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
@@ -96,7 +105,8 @@
 
 
 
-         activateForTextDisp( wordsDispObj.shader_program_words, wordsDispObj.vbo_words )
+         activateForTextDisp( wordsDispObj.shader_program_words
+         , wordsDispObj.vbo_words,fractionOfMainIm,heightToWithRatio )
 
 
 
@@ -143,7 +153,7 @@ a =transpose(reverse(a; dims=(1)))
 
 
 
-    reactivateMainObj(dispObj.shader_program ,dispObj.vbo  )
+    reactivateMainObj(dispObj.shader_program ,dispObj.vbo,fractionOfMainIm  )
 
 
 
