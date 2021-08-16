@@ -73,10 +73,8 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
                         ,imageTextureHeight::Int
                         ,windowWidth::Int=1200
                         ,windowHeight::Int= Int(round(windowWidth*fractionOfMainIm))
-                        ,textTexturewidthh::Int32=Int32(10000)
-                        ,textTextureheightt::Int32=Int32( round((windowHeight/(windowWidth*(1-fractionOfMainIm)) ))*textTexturewidthh))
-
-
+                        ,textTexturewidthh::Int32=Int32(2000)
+                        ,textTextureheightt::Int32= Int32( round((windowHeight/(windowWidth*(1-fractionOfMainIm)) ))*textTexturewidthh)) 
    #calculations of necessary constants needed to calculate window size , mouse position ...
    calcDimStruct= CalcDimsStruct(imageTextureWidth=imageTextureWidth
                   ,imageTextureHeight=imageTextureHeight

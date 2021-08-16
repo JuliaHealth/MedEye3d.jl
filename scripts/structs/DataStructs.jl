@@ -5,7 +5,7 @@ structs helping managing and storing data
 """
 module DataStructs
 using Parameters, Main.BasicStructs, Dictionaries
-export  CalcDimsStruct,RawDataToDisp,TwoDimRawDat, ThreeDimRawDat, DataToDisp,FullScrollableDat,SingleSliceDat
+export SimpleLineTextStruct, CalcDimsStruct,RawDataToDisp,TwoDimRawDat, ThreeDimRawDat, DataToDisp,FullScrollableDat,SingleSliceDat,SimpleLineTextStruct
 
 ```@doc
 hold raw Data that can be send to be displayed 
@@ -51,6 +51,17 @@ hold Data that can be send to be displayed with required metadata
 abstract type DataToDisp end
 
 
+```@doc
+Struct holding line of text with some text metadata
+```
+@with_kw mutable struct SimpleLineTextStruct
+    text::String = "" #text to be displayed 
+    fontSize::Int = 110 # size of letters
+    extraLineSpace::Int = 1 # if left to 1 we will get standard line spacing if more distance to line below will increase
+end#simpleTextStruct
+
+
+
 FullScrollableDatStr="""
 Data that can be displayed and scrolled (so we have multiple slices)
 struct is mutable becouse in case of the masks data can be changed multiple times and rapidly
@@ -60,8 +71,8 @@ struct is mutable becouse in case of the masks data can be changed multiple time
     dimensionToScroll::Int= 3 # by which dimension we should scroll so for example if set to 3 one and we have slice number x we will get data A by A[:,:,x] if dimensionToScroll = 2 ->A[:,x,:]...
     dataToScroll::Vector{ThreeDimRawDat}=[ThreeDimRawDat()] # tuples where first entry is name of image that we given in configuration, and second entry is data that we want to pass
 # data to display in form of a list Of tuples where first entry will be used as headtitle for the data that is an value ;second entry -  value is a vector where each entry will be displayed in separate line
-    mainTextToDisp::Tuple{String, Vector{String}} = ("",[]) # text that will be displayd for all data (scrolling will not affect it)
-    sliceTextToDisp::Vector{Tuple{String, Vector{String}}}=[] # text that will be associated with given slice - length of this needs to be the same as  number of slices we want to scroll through
+    mainTextToDisp::Vector{SimpleLineTextStruct}=[] # data about text that is to be displayed - text that will be displayd for all data (scrolling will not affect it)
+    sliceTextToDisp::Vector{Vector{SimpleLineTextStruct}}=[] # text that will be associated with given slice - length of this needs to be the same as  number of slices we want to scroll through
     #all metrics that were not measured and are possible in ResultMetrics struct will have associated value = -1
     segmMetr::ResultMetrics=ResultMetrics() #results of metrics for whole 3d image
     segmMetrs::Vector{ResultMetrics}=[] #results of metrics for each slice - array needs to be of the same size as number of slices in passed data
@@ -75,7 +86,7 @@ struct is mutable becouse in case of the masks data can be changed multiple time
 ```
 @with_kw mutable struct SingleSliceDat<: DataToDisp
     listOfDataAndImageNames::Vector{TwoDimRawDat}=[TwoDimRawDat()]   # tuples where first entry is name of image that we given in configuration, and second entry is data that we want to pass
-    textToDisp::Tuple{String, Vector{String}} =  ("",[])# data to display in form of a list Of tuples where first entry will be used as headtitle for the data that is an value ;second entry -  value is a vector where each entry will be displayed in separate line
+    textToDisp::Vector{SimpleLineTextStruct}=[] # data about text that is to be displayed
     segmMetr::ResultMetrics=ResultMetrics() #results metrics associated with this slice 
     nameIndexes::Dictionary{String, Int64}= getLocationDict(listOfDataAndImageNames)  #gives a way of efficient querying by supplying dictionary where key is a name we are intrested in and a key is index where it is located in our array
     sliceNumber::Int=1 # if we want it to be tamporarly  associated with some slice in scrollable data
@@ -88,7 +99,7 @@ getting proper size for the texture depending on image dimensions
 getting into account  proportions of diffrent parts of display
 usefull stats for proper text display
 ```
-@with_kw mutable struct CalcDimsStruct
+@with_kw  struct CalcDimsStruct
  #imageDims = texture dimensions of main image texture
  imageTextureWidth::Int32=Int32(1)
  imageTextureHeight::Int32=Int32(1)

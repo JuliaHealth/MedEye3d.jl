@@ -65,9 +65,9 @@ function createFragmentShader(gslString::String)
     uint text1Texel = texture2D(TextTexture1, TexCoord0).r ;
 
      if(text1Texel > 0){
-      FragColor = vec4(1.0,0.0,1.0,1.0);  }
+      FragColor = vec4(0.0,0.0,0.0,1.0);  }
        else {
-    FragColor = vec4(0.0,1.0,0.0,1.0);
+    FragColor = vec4(1.0,1.0,1.0,1.0);
 
     }
     }

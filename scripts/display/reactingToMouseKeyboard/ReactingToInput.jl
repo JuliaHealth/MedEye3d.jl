@@ -38,8 +38,6 @@ function setUpWordsDisplay(textDispObject::Main.ForDisplayStructs.ForWordsDispSt
                             ,textDispObject.textureSpec.heightt
                             ,GL_R8UI)
 
-    @info "words texture width" textDispObject.textureSpec.widthh 
-    @info "words texture heightt" textDispObject.textureSpec.heightt 
     textSpec= setproperties(textDispObject.textureSpec,(ID=texId) )
 
     samplerRef= glGetUniformLocation(textDispObject.shader_program_words, "TextTexture1")
@@ -49,6 +47,8 @@ function setUpWordsDisplay(textDispObject::Main.ForDisplayStructs.ForWordsDispSt
     
     actor.actor.textDispObj=textDispObjectiNITIALIZED
     # now reactivating the main vbo and shader program
+
+
     reactivateMainObj(actor.actor.mainForDisplayObjects.shader_program
     , actor.actor.mainForDisplayObjects.vbo
     ,actor.actor.calcDimsStruct    )

@@ -43,8 +43,10 @@
   fractionOfMainIm= Float32(0.8)
   heightToWithRatio=Float32(0.5)
 
+  textureHeight = 400
+  textureWidth = 400
 
-  Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,fractionOfMainIm,heightToWithRatio,40,40,1000)
+  Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,fractionOfMainIm,heightToWithRatio,textureHeight,textureWidth,1000)
    
 
 
@@ -52,11 +54,11 @@
 #  testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
 #  testLab2Dat= UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
 
- mainMaskDummy =  zeros(UInt8,10,40,40)
- testLab1Dat = zeros(UInt8,10,40,40)
- testLab2Dat=  zeros(UInt8,10,40,40)
+ mainMaskDummy =  zeros(UInt8,10,textureWidth,textureHeight)
+ testLab1Dat = zeros(UInt8,10,textureWidth,textureHeight)
+ testLab2Dat=  zeros(UInt8,10,textureWidth,textureHeight)
     
- ctDummy =  Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,10,40,40)))# will give white background for testing 
+ ctDummy =  Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,10,textureWidth,textureHeight)))# will give white background for testing 
 
 
    slicesDat=  [ThreeDimRawDat{UInt8}(UInt8,"mainLab",mainMaskDummy)
@@ -70,17 +72,16 @@
 
     
         singleSliceDat = [
-      TwoDimRawDat{UInt8}(UInt8,"mainLab", UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,40,40))))
-     ,TwoDimRawDat{Int16}(Int16,"CTIm",Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,40,40))))
-     ,TwoDimRawDat{UInt8}(UInt8,"testLab2",UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,40,40))))
-     ,TwoDimRawDat{UInt8}(UInt8,"testLab1",UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,40,40)))) 
+      TwoDimRawDat{UInt8}(UInt8,"mainLab", UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,textureWidth,textureHeight))))
+     ,TwoDimRawDat{Int16}(Int16,"CTIm",Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,textureWidth,textureHeight))))
+     ,TwoDimRawDat{UInt8}(UInt8,"testLab2",UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,textureWidth,textureHeight))))
+     ,TwoDimRawDat{UInt8}(UInt8,"testLab1",UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,textureWidth,textureHeight)))) 
     ]
 
     exampleSingleSliceDat = SingleSliceDat(listOfDataAndImageNames=singleSliceDat)
     Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat)
 
 
-    window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
 
     GLFW.PollEvents()
 
@@ -91,8 +92,10 @@
          textTexture = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[4]
          textureCt = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5]
          
-         Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [textureC]
-        
+         Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [textLiverMain]
+         
+         window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
+
          dispObj= Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects
          wordsDispObj= Main.SegmentationDisplay.mainActor.actor.textDispObj
          stopList = dispObj.stopListening[]
@@ -110,39 +113,136 @@
         activateForTextDisp( wordsDispObj.shader_program_words , wordsDispObj.vbo_words,calcDim)
 
         face = wordsDispObj.fontFace
-        img, extent = renderface(face, 'C', 120)
-       
-         
-   dispObj.stopListening[]= true
-    #data = ones(UInt8,calcDim.imageTextureHeight,calcDim.imageTextureWidth)
-    data = zeros(UInt8,10000,40000)
-   
+        img, extent = renderface(face, 'C', 200)
+        calcDim.textTextureheightt
+        calcDim.textTexturewidthh
+##     
+        
+#    dispObj.stopListening[]= true
+#     #data = ones(UInt8,calcDim.imageTextureHeight,calcDim.imageTextureWidth)
+#     data = zeros(UInt8,2000,8000)
+  
+# # render a string into an existing matrix
+# a = renderstring!(data, "Dice Score - 200", face,  200, 200, 200)
 
-# render a string into an existing matrix
-a = renderstring!(
-     data,
-    "aq",
-    face,
-    50, 50, 50,
-
-)
-
-#a =transpose(reverse(a; dims=(1)))
+# a =transpose(reverse(a; dims=(1)))
+# updateTexture(UInt8,a,wordsDispObj.textureSpec,0,0 ) #  ,Int32(10000),Int32(1000)
+# basicRender(window)
+# dispObj.stopListening[]= false
+#     # dispObj.stopListening[]= true
 
 
-   updateTexture(UInt8,data,wordsDispObj.textureSpec,data) # ,0,0,Int32(10000),Int32(1000)
 
-  #  updateTexture(UInt8,data,textLiverMain)
+    # lineTextureWidth = 2000
+    # lineTextureHeight = 2000
+    
+    # dispObj.stopListening[]= true
+    #     #data = ones(UInt8,calcDim.imageTextureHeight,calcDim.imageTextureWidth)
+    # data = zeros(UInt8,lineTextureWidth,lineTextureHeight)
+      
+    # # render a string into an existing matrix
+    # a = renderstring!(zeros(UInt8,lineTextureWidth,lineTextureHeight), "Dice Score  200", face,  110, 110, 110,valign = :vtop, halign = :hleft)
+    
+    # a =collect(transpose(reverse(a; dims=(1))))
+        
+    # updateTexture(UInt8,a,wordsDispObj.textureSpec,0,200,Int32(lineTextureWidth),Int32(lineTextureHeight )) #  ,Int32(10000),Int32(1000)
+    # updateTexture(UInt8,a,wordsDispObj.textureSpec,0,0,Int32(lineTextureWidth),Int32(lineTextureHeight )) #  ,Int32(10000),Int32(1000)
+
+    # basicRender(window)
+    # dispObj.stopListening[]= false
+
+
+
+    
+
+
+
+
+    lineTextureWidth = 2000
+    lineTextureHeight = 2000
+    
+    dispObj.stopListening[]= true
+        #data = ones(UInt8,calcDim.imageTextureHeight,calcDim.imageTextureWidth)
+    data = zeros(UInt8,lineTextureWidth,lineTextureHeight)
+      
+    # render a string into an existing matrix
+    a = renderstring!(zeros(UInt8,lineTextureWidth,lineTextureHeight), "Line 1 score", face,  110, 110, 110,valign = :vtop, halign = :hleft)
+    b = renderstring!(zeros(UInt8,lineTextureWidth,lineTextureHeight), "Line 2 score", face,  110, 110, 110,valign = :vtop, halign = :hleft)
+    b = vcat(a[1:200,:] ,b[1:200,:] ) 
+    b =collect(transpose(reverse(b; dims=(1))))
+        
+    #updateTexture(UInt8,b,wordsDispObj.textureSpec,0,0,Int32(lineTextureWidth),Int32(lineTextureHeight )) #  ,Int32(10000),Int32(1000)
+    updateTexture(UInt8,b,wordsDispObj.textureSpec,0,7600,Int32(2000),Int32(400)) #  ,Int32(10000),Int32(1000)
 
     basicRender(window)
-
     dispObj.stopListening[]= false
-    # dispObj.stopListening[]= true
+
+
+
+    lineTextureWidth = 2000
+    lineTextureHeight = 2000
+    
+
+    struct1 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
+    struct2 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
+    struct3 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
+    struct4 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
+    struct4 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
+    struct5 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
+    struct6 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
+    struct7 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
+    struct8 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
+    struct9 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
+    struct10 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
+    struct11 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
+
+    strList = [struct1,struct2,struct3,struct4,struct5,struct6,struct7,struct6,struct7,struct7,struct4,struct5,struct6,struct7,struct6,struct7]
+    #,struct5,struct6,struct7,struct8,struct9,struct10,struct11
+    
+
+
+
+#    res =  hcat(renderSingleLineOfText(struct1,lineTextureWidth, face )
+#   ,renderSingleLineOfText(struct2,lineTextureWidth, face )
+#   ,renderSingleLineOfText(struct3,lineTextureWidth, face )
+#     )
+#     maximum(res)
+# sz = size(res)
+
+# # updateTexture(UInt8,b,wordsDispObj.textureSpec,0,7600,Int32(size(res)[1]),Int32(size(res)[2])) #  ,Int32(10000),Int32(1000)
+#     updateTexture(UInt8,res,wordsDispObj.textureSpec,0,2000,Int32(sz[1]),Int32(sz[2])) #  ,Int32(10000),Int32(1000)
+dispObj.stopListening[]= true
+strListB= textLinesFromStrings(["asasfkajshalkjdhs", "3w7gqaw76dgabs89y3p8w", "ahsd78oy3o821hbf", "9823bv67asfasdlasjpdaus"])
+  d=   addTextToTexture(wordsDispObj,strListB, calcDim )
+
+    basicRender(window)
+    dispObj.stopListening[]= false
 
 
 
 
 
+
+
+
+
+    dispObj.stopListening[]= true
+
+    updateTexture(UInt8, zeros(UInt8,2000,8000),wordsDispObj.textureSpec) #  ,Int32(10000),Int32(1000)
+   basicRender(window)
+    dispObj.stopListening[]= false
+
+
+
+
+
+    matrlist = map(x-> renderSingleLineOfText(x,Int32(2000),face) ,strList) 
+    matr=  reduce( hcat  ,matrlist)
+
+
+
+
+##
 
     reactivateMainObj(dispObj.shader_program ,dispObj.vbo,calcDim  )
 

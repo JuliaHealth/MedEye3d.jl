@@ -11,7 +11,7 @@ using FreeTypeAbstraction,Main.ForDisplayStructs,Main.DataStructs , ModernGL, Co
 
 include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 
-export activateForTextDisp,bindAndActivateForText,reactivateMainObj, createTextureForWords,bindAndActivateForText, bindAndDisplayTexture
+export addTextToTexture,renderSingleLineOfText,activateForTextDisp,bindAndActivateForText,reactivateMainObj, createTextureForWords,bindAndActivateForText, bindAndDisplayTexture
 
 
 ```@doc
@@ -54,38 +54,63 @@ function activateForTextDisp(shader_program_words::UInt32
 end#activateForTextDisp
 
 ```@doc
-one need to bind and activate appropriate objects like VBO and use the appropriate shader program to make text display possible
+Given  vector of SimpleLineTextStructs it will return matrix of data that will be used 
+to display text 
+wordsDispObj - object wit needed constants to display text
 ```
-function bindAndDisplayTexture(textSpec::TextureSpec)
-
-end #bindAndDisplayTExture
-
+function addTextToTexture(wordsDispObj::ForWordsDispStruct
+                          ,lines::Vector{SimpleLineTextStruct}
+                          ,calcDimStruct::CalcDimsStruct)
+    textureWidth = calcDimStruct.textTexturewidthh
+    fontFace= wordsDispObj.fontFace
+    
+    matr=  map(x-> renderSingleLineOfText(x,textureWidth,fontFace) ,lines) |>
+    (xl)-> reduce( hcat  ,xl)
+    
+    sz= size(matr)
+@info "Int32(sz[1])" Int32(sz[1])
+@info "Int32(sz[2])" Int32(sz[2])
+    updateTexture(UInt8
+                ,matr
+                ,wordsDispObj.textureSpec
+                ,0
+                ,calcDimStruct.textTextureheightt-sz[2]
+                ,Int32(sz[1])
+                ,Int32(sz[2])) #  ,Int32(10000),Int32(1000)
+    return matr
+end #addTextToTexture
 
 ```@doc
-Third we need to populate bound texture with data associated with text  - in order to render The text into  texture we will use 
-FreeTypeAbstraction library
+Given  single SimpleLineTextStruct it will return matrix of data that will be used  by addTextToTexture function
+    to display text 
+    texLine - source od data
+    textureWidth - available width for a line
+    fontFace - font we use
 ```
-function addTextToTexture()
+function renderSingleLineOfText(texLine::SimpleLineTextStruct
+                                ,textureWidth::Int32
+                                ,fontFace::FTFont)
+   return  renderstring!(zeros(UInt8,textureWidth,textureWidth) #::Matrix{UInt8}
+                ,texLine.text
+                ,fontFace
+                ,texLine.fontSize
+                ,texLine.fontSize
+                ,texLine.fontSize
+                ,valign = :vtop
+                ,halign = :hleft) |>
+    (matr)-> matr[1: Int(round(texLine.fontSize*2*texLine.extraLineSpace)),: ] |>
+    (smallerMatr)->collect(transpose(reverse(smallerMatr; dims=(1)))) # getting proper text alignment
 
-    face = FreeTypeAbstraction.findfont("hack";  additional_fonts= datadir("fonts"))
-    typeof(face)
-    img, extent = renderface(face, 'C', 64)
-    
-    
-    
-    # render a string into an existing matrix
-    a = renderstring!(
-        zeros(UInt8, 40, 40),
-        "ilililililil",
-        face,
-        5,
-        5,
-        5,
-        valign = :vbottom,
-    )
+end #renderSingleLineOfText    
+
+```@doc
+utility function that enables creating list of  text line structs from list of strings
+```
+function  textLinesFromStrings(strs::Vector{String} ) ::Vector{SimpleLineTextStruct}
+    return map(x->  SimpleLineTextStruct(text=x,fontSize= 120,extraLineSpace=1  ) ,strs)
+end
 
 
-end #bindAndDisplayTExture
 
 
 ```@doc
@@ -135,6 +160,9 @@ function createTextureForWords(numberOfActiveTextUnits::Int
             ,OpGlType =GL_UNSIGNED_BYTE
         )
 end#createTextureForWords
+
+
+
 
 
 end#DisplayWords

@@ -85,11 +85,15 @@ function reactToScroll(isScrollUp::Bool, actor::SyncActor{Any, ActorWithOpenGlOb
     if(lastSlice<1) lastSlice=1 end 
     if(current>=lastSlice) current=lastSlice end 
 
+     
+
     #logic to change displayed screen
     #we select slice that we are intrested in
     singleSlDat= actor.actor.onScrollData.dataToScroll|>
     (scrDat)-> map(threeDimDat->threeToTwoDimm(threeDimDat.type,Int64(current),actor.actor.onScrollData.dimensionToScroll,threeDimDat ),scrDat) |>
-    (twoDimList)-> SingleSliceDat(listOfDataAndImageNames=twoDimList,sliceNumber=current )
+    (twoDimList)-> SingleSliceDat(listOfDataAndImageNames=twoDimList
+                                ,sliceNumber=current
+                                ,textToDisp = getTextForCurrentSlice(actor.actor.onScrollData, current)  )
     
      updateImagesDisplayed(singleSlDat,actor.actor.mainForDisplayObjects )
 
@@ -103,7 +107,15 @@ function reactToScroll(isScrollUp::Bool, actor::SyncActor{Any, ActorWithOpenGlOb
 
 end#reactToScroll
 
-
+```@doc
+we need to check wether scrolling dat contains some text that can be used for this particular slice display if not we will return only mainTextToDisp
+```
+function getTextForCurrentSlice(scrollDat::FullScrollableDat, sliceNumb::Int)::Vector{SimpleLineTextStruct}
+    if( length(scrollDat.sliceTextToDisp)>=sliceNumb  ) 
+        return vcat(scrollDat.mainTextToDisp ,  scrollDat.sliceTextToDisp[sliceNumb] )
+    end#if    
+        return scrollDat.mainTextToDisp 
+end#getTextForCurrentSlice
 
 
 end #ReactToScroll

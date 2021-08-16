@@ -164,12 +164,13 @@ function reactToMouseDrag(mouseCoords::Vector{CartesianIndex{2}}, actor::SyncAct
     if (!isempty(textureList))
         texture= textureList[1]
     
+
         # two dimensional coordinates on plane of intrest (current slice)
        mappedCoords =  translateMouseToTexture(texture.strokeWidth
                                                 ,mouseCoords
                                                 ,actor.actor.calcDimsStruct)
-        
-        # @info "mappedCoords" mappedCoords
+        @info "mouseCoords"  mouseCoords
+        @info "mappedCoords" mappedCoords
        twoDimDat= actor.actor.currentlyDispDat|> # accessing currently displayed data
        (singSl)-> singSl.listOfDataAndImageNames[singSl.nameIndexes[texture.name]] #accessing the texture data we want to modify
        
