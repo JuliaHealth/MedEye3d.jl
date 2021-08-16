@@ -61,7 +61,7 @@ f = open(path)
 return  join(readlines(f), "\n") 
 end #getShaderFileText
 
-getShaderFileText(fragmentShaderFileDir)
+#getShaderFileText(fragmentShaderFileDir)
 
 ```@doc
 creating fragment Shader  so controlling colors and textures  

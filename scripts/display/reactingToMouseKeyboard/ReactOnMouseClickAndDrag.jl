@@ -14,7 +14,7 @@ so we modify the data that is the basis of the mouse interaction mask  and we pa
 """
 #@doc ReactOnMouseClickAndDragSTR
 module ReactOnMouseClickAndDrag
-using Rocket, GLFW, ModernGL, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils
+using Parameters, Rocket, GLFW, ModernGL, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils
 using  Dates, Parameters, Main.DataStructs, Main.StructsManag
 export registerMouseClickFunctions
 export reactToMouseDrag
@@ -25,7 +25,7 @@ struct that enables reacting to  the input  from mouse click  and drag the input
      x and y position  of the mouse - will be recorded only if left mouse button is pressed or keep presssed
 """
 @doc MouseCallbackSubscribableStr
-mutable struct MouseCallbackSubscribable <: Subscribable{Vector{CartesianIndex{2}}}
+@with_kw  mutable struct MouseCallbackSubscribable <: Subscribable{Vector{CartesianIndex{2}}}
     #true if left button is presed down - we make it true if the left button is pressed over image and false if mouse get out of the window or we get information about button release
     isLeftButtonDown ::Bool 
     #coordinates marking 4 corners of 
@@ -87,7 +87,6 @@ function (handler::MouseCallbackSubscribable)( a, x::Float64, y::Float64)
   point = CartesianIndex(Int(x),Int(y))
   handler.lastCoordinate = point
   
- @info "handling mouse position  "   point
   
   if  (handler.isLeftButtonDown && x>=handler.xmin && x<=handler.xmax && y>=handler.ymin && y<= handler.ymax )
     push!(handler.coordinatesStoreForLeftClicks,point)
@@ -130,11 +129,11 @@ function registerMouseClickFunctions(window::GLFW.Window
 
  # calculating dimensions of quad becouse it do not occupy whole window, and we want to react only to those mouse positions that are on main image quad
   mouseButtonSubs = MouseCallbackSubscribable(isLeftButtonDown=false
-                                        ,xmin=windowWidthCorr
-                                        ,ymin=windowHeightCorr
-                                        ,xmax=calcD.avWindWidtForMain-calcD.windowWidthCorr
-                                        ,ymax=calcD.avWindHeightForMain-calcD.windowHeightCorr
-                                        ,coordinatesStoreForLeftClicks=[]
+                                        ,xmin=Int32(calcD.windowWidthCorr)
+                                        ,ymin=Int32(calcD.windowHeightCorr)
+                                        ,xmax=Int32(calcD.avWindWidtForMain-calcD.windowWidthCorr)
+                                        ,ymax=Int32(calcD.avWindHeightForMain-calcD.windowHeightCorr)
+                                        ,coordinatesStoreForLeftClicks=Vector{CartesianIndex{2}}()
                                         ,lastCoordinate=CartesianIndex(1,1)
                                         ,referenceInstance=Dates.now()
                                         ,subject=Subject(Vector{CartesianIndex{2}}  ,scheduler = AsyncScheduler()))
@@ -170,44 +169,18 @@ function reactToMouseDrag(mouseCoords::Vector{CartesianIndex{2}}, actor::SyncAct
                                                 ,mouseCoords
                                                 ,actor.actor.calcDimsStruct)
         
-        @info "mappedCoords" mappedCoords
+        # @info "mappedCoords" mappedCoords
        twoDimDat= actor.actor.currentlyDispDat|> # accessing currently displayed data
        (singSl)-> singSl.listOfDataAndImageNames[singSl.nameIndexes[texture.name]] #accessing the texture data we want to modify
        
        modSlice!(twoDimDat, mappedCoords, convert(twoDimDat.type,1))|> # modifying data associated with texture
        (sliceDat)-> updateTexture(twoDimDat.type,sliceDat, texture)
-    
-       #    for datTupl in  actor.actor.onScrollData
-    #         if(datTupl[1]==texture.name)
-    #             datTupl[2][actor.actor.currentDisplayedSlice][mappedCoords].=1 # broadcasting new value to all points that we are intrested in     
-    #             updateTexture(datTupl[2][actor.actor.currentDisplayedSlice,:,:], texture)
-    #             break
-    #         end#if
-    #     end #for
 
-
-        # updateTexture(ones(strokeWidth,strokeWidth),  texture   ,
-        # Int64(floor( ((mouseCoord[1])/(obj.windowWidth*0.9))*obj.imageTextureWidth)  )- halfStroke # subtracting it to make middle of stroke in pixel we are with mouse on 
-        # ,Int64(floor(  ((obj.windowHeight-mouseCoord[2])/obj.windowHeight)*obj.imageTextureHeight)  ) -halfStroke
-        # ,strokeWidth,strokeWidth )
- 
-        # updateTexture(ones(strokeWidth,strokeWidth),texture,
-        # calcX -halfStroke      # subtracting it to make middle of stroke in pixel we are with mouse on 
-        # ,calcY- halfStroke,strokeWidth,strokeWidth )
-    
-
-    
-# for text in obj.listOfTextSpecifications
-#         glBindTexture(GL_TEXTURE_2D, text.ID[]); 
-# end #for        
         basicRender(obj.window)
 
-#updating data
-       
+
     end #if 
     obj.stopListening[]=false # reactivete event listening loop
-
-    #send data for persistent storage TODO() modify for scrolling data 
 end#reactToScroll
 
 
@@ -227,12 +200,25 @@ function translateMouseToTexture(strokeWidth::Int32
     halfStroke =   Int64(floor(strokeWidth/2 ))
     #updating given texture that we are intrested in in place we are intested in 
 
-    return map(c->CartesianIndex(Int64(floor( ((c[1]- calcD.windowWidthCorr)/(calcD.correCtedWindowQuadWidth))*calcD.imageTextureWidth))
-    , Int64(floor(  ((calcD.correCtedWindowQuadHeight-c[2]+calcD.windowHeightCorr)/calcD.correCtedWindowQuadHeight)*calcD..imageTextureHeight)  )     ),mouseCoords)                                                    |>
-      (x)->filter(it->it[1]>0 && it[2]>0 ,x)        # we do not want to try access it in point 0 as julia is 1 indexed                 
+    return map(c->CartesianIndex( getNewX(c[1],calcD),  getNewY(c[2] ,calcD)) ,mouseCoords)  |>
+             (x)->filter(it->it[1]>0 && it[2]>0 ,x)        # we do not want to try access it in point 0 as julia is 1 indexed                 
 
 end #translateMouseToTexture
 
+```@doc
+helper function for translateMouseToTexture
+```
+function getNewX(x::Int,calcD::CalcDimsStruct)::Int
+  # first we subtract windowWidthCorr as in window the image do not need to start at the begining  of the window
+   return Int64(floor( ((x- calcD.windowWidthCorr)/(calcD.correCtedWindowQuadWidth))*calcD.imageTextureWidth))
+end#getNewX
 
+```@doc
+helper function for translateMouseToTexture
+```
+function getNewY(y::Int,calcD::CalcDimsStruct)::Int
+    Int64(floor(  ((calcD.correCtedWindowQuadHeight-y+calcD.windowHeightCorr)/calcD.correCtedWindowQuadHeight)*calcD.imageTextureHeight)  )     
+   
+end#getNewY
 
 end #ReactOnMouseClickAndDrag

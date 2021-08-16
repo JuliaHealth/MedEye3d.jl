@@ -6,7 +6,7 @@ Module controlling displaying of the text associated with the segmentation
 - either text releted to all slices or just a single one currently displayed or both
 """
 module DisplayWords
-using FreeTypeAbstraction,Main.ForDisplayStructs, ModernGL, ColorTypes,Main.PrepareWindowHelpers, Main.OpenGLDisplayUtils. Main.TextureManag, Main.ShadersAndVerticies, Main.ShadersAndVerticiesForText, Glutils, DrWatson
+using FreeTypeAbstraction,Main.ForDisplayStructs,Main.DataStructs , ModernGL, ColorTypes,Main.PrepareWindowHelpers, Main.OpenGLDisplayUtils. Main.TextureManag, Main.ShadersAndVerticies, Main.ShadersAndVerticiesForText, Glutils, DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
 include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
@@ -21,6 +21,7 @@ First We need to bind fragment shader created to deal with text and supply the v
 ```
 function bindAndActivateForText(shader_program_words::UInt32
                                 ,fragment_shader_words::UInt32 
+                                ,vertex_shader::UInt32 
                                 ,vbo_words::Base.RefValue{UInt32}
                                 ,calcDim::CalcDimsStruct)
     

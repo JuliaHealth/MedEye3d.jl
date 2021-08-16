@@ -40,17 +40,13 @@
          dataType= Int16)  
   ]
   #   
-  fractionOfMainIm= Float32(0.5)
-  heightToWithRatio=Float32(2)
+  fractionOfMainIm= Float32(0.8)
+  heightToWithRatio=Float32(0.5)
+
+
   Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,fractionOfMainIm,heightToWithRatio,40,40,1000)
    
-width = 1000
-height = 500
 
-widthOfSpace = 750
-
-
-ww= 500/(690-160)
 
 #  mainMaskDummy = UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
 #  testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
@@ -100,46 +96,41 @@ ww= 500/(690-160)
          dispObj= Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects
          wordsDispObj= Main.SegmentationDisplay.mainActor.actor.textDispObj
          stopList = dispObj.stopListening[]
+        calcDim = Main.SegmentationDisplay.mainActor.actor.calcDimsStruct
 
 
 
 
 
-         activateForTextDisp( wordsDispObj.shader_program_words
-         , wordsDispObj.vbo_words,fractionOfMainIm,heightToWithRatio )
 
 
+        #  dispObj.stopListening[]= true
+        #  glClearColor(0.0, 0.0, 0.1 , 1.0)
+        dispObj.stopListening[]= true
+        activateForTextDisp( wordsDispObj.shader_program_words , wordsDispObj.vbo_words,calcDim)
 
-         face = wordsDispObj.fontFace
-         img, extent = renderface(face, 'C', 120)
-
-         dispObj.stopListening[]= true
-         glClearColor(0.0, 0.0, 0.1 , 1.0)
-    
-
-
-
+        face = wordsDispObj.fontFace
+        img, extent = renderface(face, 'C', 120)
+       
          
    dispObj.stopListening[]= true
-    data = zeros(UInt8,1000,1000)
+    #data = ones(UInt8,calcDim.imageTextureHeight,calcDim.imageTextureWidth)
+    data = zeros(UInt8,10000,40000)
    
 
 # render a string into an existing matrix
 a = renderstring!(
      data,
-    "a q ",
+    "aq",
     face,
-    17, 17, 17,
+    50, 50, 50,
 
 )
-# a= circshift(a, (-1,1))
-a =transpose(reverse(a; dims=(1)))
-# pixelsize = 3
-# x0, y0 = 10, 10
-# a=renderstring!(data, "uuuuuuu1111", face, pixelsize, x0, y0, halign=:hright)
 
-   updateTexture(UInt8,a,wordsDispObj.textureSpec,0,800,Int32(100),Int32(100) ) #,0,0,Int32(100),Int32(100)
-   a= a[end:-1:1,end:-1:1]
+#a =transpose(reverse(a; dims=(1)))
+
+
+   updateTexture(UInt8,data,wordsDispObj.textureSpec,data) # ,0,0,Int32(10000),Int32(1000)
 
   #  updateTexture(UInt8,data,textLiverMain)
 
@@ -153,7 +144,7 @@ a =transpose(reverse(a; dims=(1)))
 
 
 
-    reactivateMainObj(dispObj.shader_program ,dispObj.vbo,fractionOfMainIm  )
+    reactivateMainObj(dispObj.shader_program ,dispObj.vbo,calcDim  )
 
 
 
@@ -161,6 +152,29 @@ Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat)
 basicRender(window)
 
 GLFW.PollEvents()
+
+
+
+
+fractionOfMainIm= Float32(0.5)
+heightToWithRatio=Float32(2)
+width = 1000
+height = 500
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #     glUseProgram(shader_program_words)
 #     glBindBuffer(GL_ARRAY_BUFFER, vbo_words[])
 #     glBufferData(GL_ARRAY_BUFFER, sizeof(Main.ShadersAndVerticiesForText.verticesB), Main.ShadersAndVerticiesForText.verticesB, GL_STATIC_DRAW)

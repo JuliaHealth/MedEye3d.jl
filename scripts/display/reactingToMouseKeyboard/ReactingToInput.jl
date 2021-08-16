@@ -30,6 +30,7 @@ function setUpWordsDisplay(textDispObject::Main.ForDisplayStructs.ForWordsDispSt
 
      bindAndActivateForText(textDispObject.shader_program_words 
     , textDispObject.fragment_shader_words
+    ,actor.actor.mainForDisplayObjects.vertex_shader
     ,textDispObject.vbo_words
     ,actor.actor.calcDimsStruct)
 
@@ -37,6 +38,8 @@ function setUpWordsDisplay(textDispObject::Main.ForDisplayStructs.ForWordsDispSt
                             ,textDispObject.textureSpec.heightt
                             ,GL_R8UI)
 
+    @info "words texture width" textDispObject.textureSpec.widthh 
+    @info "words texture heightt" textDispObject.textureSpec.heightt 
     textSpec= setproperties(textDispObject.textureSpec,(ID=texId) )
 
     samplerRef= glGetUniformLocation(textDispObject.shader_program_words, "TextTexture1")
@@ -63,9 +66,9 @@ onScroll Data - list of tuples where first is the name of the texture that we pr
 @doc setUpForScrollDataStr
 function setUpForScrollData(onScrollData::FullScrollableDat ,actor::SyncActor{Any, ActorWithOpenGlObjects})
     actor.actor.mainForDisplayObjects.stopListening[]=true
-
+    
+    onScrollData.slicesNumber= getSlicesNumber(onScrollData)
     actor.actor.onScrollData=onScrollData
-    actor.actor.mainForDisplayObjects.slicesNumber= getSlicesNumber(onScrollData)
     
     actor.actor.mainForDisplayObjects.stopListening[]=false
 

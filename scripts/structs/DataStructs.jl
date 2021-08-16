@@ -5,7 +5,7 @@ structs helping managing and storing data
 """
 module DataStructs
 using Parameters, Main.BasicStructs, Dictionaries
-export  RawDataToDisp,TwoDimRawDat, ThreeDimRawDat, DataToDisp,FullScrollableDat,SingleSliceDat
+export  CalcDimsStruct,RawDataToDisp,TwoDimRawDat, ThreeDimRawDat, DataToDisp,FullScrollableDat,SingleSliceDat
 
 ```@doc
 hold raw Data that can be send to be displayed 
@@ -66,6 +66,7 @@ struct is mutable becouse in case of the masks data can be changed multiple time
     segmMetr::ResultMetrics=ResultMetrics() #results of metrics for whole 3d image
     segmMetrs::Vector{ResultMetrics}=[] #results of metrics for each slice - array needs to be of the same size as number of slices in passed data
     nameIndexes::Dictionary{String, Int64}= getLocationDict(dataToScroll)  #gives a way of efficient querying by supplying dictionary where key is a name we are intrested in and a key is index where it is located in our array
+    slicesNumber::Int32=1# number of available slices
 end #fullScrollableDat
 
 ```@doc
@@ -91,9 +92,12 @@ usefull stats for proper text display
  #imageDims = texture dimensions of main image texture
  imageTextureWidth::Int32=Int32(1)
  imageTextureHeight::Int32=Int32(1)
+ #exture dimensions of texture for displaying text
+ textTexturewidthh::Int32=Int32(1)
+ textTextureheightt::Int32=Int32(1)
  #windowDims
- windowWidth::Int32=Int32(1)
- windowHeight::Int32=Int32(1)
+ windowWidth::Int64=1
+ windowHeight::Int64=1
  #required ratios - set ratios we want to achieve
  fractionOfMainIm::Float32= Float32(1.0) # needed for controlling  how much space we want for text
  heightToWithRatio::Float32= Float32(1.0) # needed to take into account proper height to width ratio, so main texture would not get srtetched unnatrurally

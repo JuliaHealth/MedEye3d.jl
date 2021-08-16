@@ -47,7 +47,7 @@ using DrWatson
 export coordinateDisplay
 export passDataForScrolling
 
-using ModernGL,MultiDimArrUtil, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUtils, Main.ForDisplayStructs,Main.Uniforms, Main.DisplayWords, Dictionaries
+using ModernGL,Main.MultiDimArrUtil, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUtils, Main.ForDisplayStructs,Main.Uniforms, Main.DisplayWords, Dictionaries
 using Main.ReactingToInput, Rocket, Setfield, Logging, Main.ShadersAndVerticiesForText,FreeTypeAbstraction,Main.DisplayWords, Main.DataStructs, Main.StructsManag
 
 
@@ -73,8 +73,8 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
                         ,imageTextureHeight::Int
                         ,windowWidth::Int=1200
                         ,windowHeight::Int= Int(round(windowWidth*fractionOfMainIm))
-                        ,textTexturewidthh::Int32=Int32(1000)
-                        ,textTextureheightt::Int32=Int32(10000) )
+                        ,textTexturewidthh::Int32=Int32(10000)
+                        ,textTextureheightt::Int32=Int32( round((windowHeight/(windowWidth*(1-fractionOfMainIm)) ))*textTexturewidthh))
 
 
    #calculations of necessary constants needed to calculate window size , mouse position ...
@@ -85,10 +85,12 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
                   ,fractionOfMainIm=fractionOfMainIm
                   ,heightToWithRatio=heightToWithRatio 
                   ,wordsImageQuadVert=Main.ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm)  
-                  ,wordsQuadVertSize= sizeof(Main.ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm))) |>
-   (calcDim)-> getMainVerticies(calcDimStruct)
+                  ,wordsQuadVertSize= sizeof(Main.ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm))
+                  ,textTexturewidthh=textTexturewidthh
+                  ,textTextureheightt=textTextureheightt ) |>
+   (calcDim)-> getMainVerticies(calcDim)
 
-   subscribe!(of(calcDim),mainActor )
+   subscribe!(of(calcDimStruct),mainActor )
 
                         
  #creating window and event listening loop
@@ -106,17 +108,17 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
     (filtered)-> Dictionary(map(it->it.numb,filtered),collect(eachindex(filtered))) # a way for fast query using assigned numbers
 
     forDispObj =  forDisplayObjects(
-        initializedTextures
-            ,window
-            ,vertex_shader
-            ,fragment_shader
-            ,shader_program
-            ,stopListening
-            ,vbo[]
-            ,ebo[]
-            ,mainImageUnifs
-            ,Dictionary(map(it->it.name,initializedTextures),collect(eachindex(initializedTextures)))
-            ,numbDict 
+            listOfTextSpecifications=initializedTextures
+            ,window= window
+            ,vertex_shader= vertex_shader
+            ,fragment_shader= fragment_shader
+            ,shader_program= shader_program
+            ,stopListening= stopListening
+            ,vbo= vbo[]
+            ,ebo= ebo[]
+            ,mainImageUniforms= mainImageUnifs
+            ,TextureIndexes= Dictionary(map(it->it.name,initializedTextures),collect(eachindex(initializedTextures)))
+            ,numIndexes= numbDict 
    )
 
 
@@ -202,8 +204,8 @@ function prepareForDispStruct(numberOfActiveTextUnits::Int
                             ,vbo_words::Base.RefValue{UInt32}
                             ,shader_program_words::UInt32
                             ,window
-                            ,widthh::Int32 =Int32(1000)
-                            ,heightt::Int32=Int32(10000)
+                            ,widthh::Int32 =Int32(1)
+                            ,heightt::Int32=Int32(1)
                             ,forDispObj::forDisplayObjects=forDisplayObjects()
                             ) ::ForWordsDispStruct
       #in order to corectly bind all we need to activate proper OpenGl objects
@@ -261,29 +263,6 @@ function cleanUp()
     glDeleteProgram(obj.shader_program)
     #finalizing and recreating main actor
 end #cleanUp    
-
-
-#pboId, DATA_SIZE = preparePixelBuffer(Int16,widthh,heightt,0)
-
-# ##################
-#clear color buffer
-# glClearColor(0.0, 0.0, 0.1 , 1.0)
-# #true labels
-# glActiveTexture(GL_TEXTURE0 + 1); # active proper texture unit before binding
-# glUniform1i(glGetUniformLocation(shader_program, "msk0"), 1);# we first look for uniform sampler in shader - here 
-# trueLabels= createTexture(1,exampleLabels[210,:,:],widthh,heightt,GL_R8UI,GL_UNSIGNED_BYTE)#binding texture and populating with data
-# #main image
-# glActiveTexture(GL_TEXTURE0); # active proper texture unit before binding
-# glUniform1i(glGetUniformLocation(shader_program, "Texture0"), 0);# we first look for uniform sampler in shader - here 
-# mainTexture= createTexture(0,exampleDat[210,:,:],widthh,heightt,GL_R16I,GL_SHORT)#binding texture and populating with data
-# #render
-# basicRender()
-
-
-
-############clean up
-
-#remember to unsubscribe; remove textures; clear buffers and close window
 
 
 

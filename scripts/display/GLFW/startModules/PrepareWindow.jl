@@ -11,7 +11,7 @@ export displayAll
 using ModernGL, GeometryTypes, GLFW
 using Main.PrepareWindowHelpers
 include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
-using  Main.OpenGLDisplayUtils
+using  Main.OpenGLDisplayUtils, Main.DataStructs
 using Main.ShadersAndVerticies, Main.ForDisplayStructs,Main.ShadersAndVerticiesForText
 
 

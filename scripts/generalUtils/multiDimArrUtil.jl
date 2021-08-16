@@ -6,7 +6,7 @@ utilities for dealing with multidimensional arrays - it includes calculating the
 """
 module MultiDimArrUtil
 
-using Setfield
+using Setfield,  Main.ForDisplayStructs,  Main.DataStructs
 export getMainVerticies
 
 
@@ -61,18 +61,19 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
         widthCorr=abs(quadToTotalWidthRatio-avQuadToTotalWidthRatio)
     end # if isWidthToBeCorrected
 
+    correctedWidthForTextAccounting = (-1+ calcDimStruct.fractionOfMainIm*2)
     #as in OpenGl we start from -1 and end at 1 those ratios needs to be doubled in order to translate them in the OPEN Gl coordinate system yet we will achieve this doubling by just adding the corrections from both sides
     #hence we do not need  to multiply by 2 becose we get from -1 to 1 so total is 2 
       res =  Float32.([
       # positions                  // colors           // texture coords
-      calcDimStruct.fractionOfMainIm*2-widthCorr,  1.0-heightCorr, 0.0,   1.0, 0.0, 0.0,   1.0, 1.0,   # top right
-      calcDimStruct.fractionOfMainIm*2-widthCorr, -1.0+heightCorr, 0.0,   0.0, 1.0, 0.0,   1.0, 0.0,   # bottom right
+      correctedWidthForTextAccounting-widthCorr,  1.0-heightCorr, 0.0,   1.0, 0.0, 0.0,   1.0, 1.0,   # top right
+      correctedWidthForTextAccounting-widthCorr, -1.0+heightCorr, 0.0,   0.0, 1.0, 0.0,   1.0, 0.0,   # bottom right
       -1.0+widthCorr, -1.0+heightCorr, 0.0,                0.0, 0.0, 1.0,   0.0, 0.0,   # bottom left
       -1.0+widthCorr,  1.0-heightCorr, 0.0,                1.0, 1.0, 0.0,   0.0, 1.0    # top left 
     ])
 
-    windowWidthCorr=Int32(round( (widthCorr/2)*windowWidth))
-    windowHeightCorr= Int32(round((heightCorr/2)*windowHeight))
+    windowWidthCorr=Int32(round( (widthCorr/2)*calcDimStruct.windowWidth))
+    windowHeightCorr= Int32(round((heightCorr/2)*calcDimStruct.windowHeight))
    
    
 

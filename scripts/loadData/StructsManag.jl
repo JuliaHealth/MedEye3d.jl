@@ -65,8 +65,8 @@ end#modifySliceFull!
 ```@doc
 Return number of slices present in on slice data - takes into account slices dimensions
 ```
-function getSlicesNumber(data::FullScrollableDat)::Int
-return size(data.dataToScroll[1].dat)[data.dimensionToScroll]
+function getSlicesNumber(data::FullScrollableDat)::Int32
+return Int32(size(data.dataToScroll[1].dat)[data.dimensionToScroll])
 end#getSlicesNumber
 
 end#StructsManag

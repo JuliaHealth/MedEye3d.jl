@@ -105,7 +105,6 @@ Defined in order to hold constant objects needed to display images
   stopListening::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0)# enables unlocking GLFW context for futher actions
   vbo::UInt32 =1 #vertex buffer object id
   ebo::UInt32 =1 #element buffer object id
-  slicesNumber::Int32=1
   mainImageUniforms::MainImageUniforms = MainImageUniforms()# struct with references to main image
   TextureIndexes::Dictionary{String, Int64}=Dictionary{String, Int64}()  #gives a way of efficient querying by supplying dictionary where key is a name we are intrested in and a key is index where it is located in our array
   numIndexes::Dictionary{Int32, Int64} =Dictionary{Int32, Int64}() # a way for fast query using assigned numbers
@@ -136,7 +135,7 @@ Actor that is able to store a state to keep needed data for proper display
     isSliceChanged::Bool= false # set to true when slice is changed set to false when we start interacting with this slice - thanks to this we know that when we start drawing on one slice and change the slice the line would star a new on new slice
     textDispObj::ForWordsDispStruct =ForWordsDispStruct()# set of objects and constants needed for text diplay
     currentlyDispDat::SingleSliceDat =SingleSliceDat() # holds the data displayed or in case of scrollable data view for accessing it
-    calcDimsStruct::CalcDimsStruct   #data for calculations of necessary constants needed to calculate window size , mouse position ...
+    calcDimsStruct::CalcDimsStruct=CalcDimsStruct()   #data for calculations of necessary constants needed to calculate window size , mouse position ...
   end
 
 ```@doc

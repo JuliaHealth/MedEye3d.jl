@@ -91,12 +91,14 @@ elements = Face{3,UInt32}[(0,1,2),          # the first triangle
 (2,3,0)]          # the second triangle
 
 function getWordsVerticies(fractionOfMainIm::Float32)::Vector{Float32}
-return  Float32.([
+  correctedWidthForTextAccounting = (-1+ fractionOfMainIm*2)
+
+  return  Float32.([
   # positions                     // colors           // texture coords
    1.0,  1.0, 0.0,                 1.0, 0.0, 0.0,   1.0, 1.0,   # top right
    1.0, -1.0, 0.0,                0.0, 1.0, 0.0,   1.0, 0.0,   # bottom right
-   fractionOfMainIm*2, -1.0, 0.0,   0.0, 0.0, 1.0,   0.0, 0.0,   # bottom left
-   fractionOfMainIm*2,  1.0, 0.0,   1.0, 1.0, 0.0,   0.0, 1.0    # top left 
+   correctedWidthForTextAccounting, -1.0, 0.0,   0.0, 0.0, 1.0,   0.0, 0.0,   # bottom left
+   correctedWidthForTextAccounting,  1.0, 0.0,   1.0, 1.0, 0.0,   0.0, 1.0    # top left 
    ])
 end #getWordsVerticies
 
