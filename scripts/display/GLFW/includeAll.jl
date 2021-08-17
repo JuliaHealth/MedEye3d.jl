@@ -17,11 +17,11 @@ include(DrWatson.scriptsdir("display","GLFW","shadersEtc","ShadersAndVerticies.j
 include(DrWatson.scriptsdir("display","GLFW","shadersEtc","ShadersAndVerticiesForText.jl"))
 include(DrWatson.scriptsdir("display","GLFW","shadersEtc","Uniforms.jl"))
 
+include(DrWatson.scriptsdir("display","GLFW","textRender","DisplayWords.jl"))
 
 include(DrWatson.scriptsdir("display","GLFW","modernGL","TextureManag.jl") )
 include(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindow.jl"))
 
-include(DrWatson.scriptsdir("display","GLFW","textRender","DisplayWords.jl"))
 
 
 include(DrWatson.scriptsdir("display","reactingToMouseKeyboard","ReactToScroll.jl") )

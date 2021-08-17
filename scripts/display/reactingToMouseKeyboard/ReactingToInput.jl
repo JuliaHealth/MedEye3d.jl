@@ -100,7 +100,11 @@ struct that holds tuple where first entry is
 @doc updateSingleImagesDisplayedSetUpStr
 function updateSingleImagesDisplayedSetUp(singleSliceDat::SingleSliceDat ,actor::SyncActor{Any, ActorWithOpenGlObjects})
     actor.actor.mainForDisplayObjects.stopListening[]=true
-    updateImagesDisplayed(singleSliceDat, actor.actor.mainForDisplayObjects)
+    updateImagesDisplayed(singleSliceDat
+                        , actor.actor.mainForDisplayObjects
+                        , actor.actor.textDispObj
+                        , actor.actor.calcDimsStruct  )
+                        
     actor.actor.currentlyDispDat=singleSliceDat
     actor.actor.currentDisplayedSlice = singleSliceDat.sliceNumber
     actor.actor.isSliceChanged = true # mark for mouse interaction that we changed slice

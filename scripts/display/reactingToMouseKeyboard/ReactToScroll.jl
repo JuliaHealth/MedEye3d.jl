@@ -93,9 +93,12 @@ function reactToScroll(isScrollUp::Bool, actor::SyncActor{Any, ActorWithOpenGlOb
     (scrDat)-> map(threeDimDat->threeToTwoDimm(threeDimDat.type,Int64(current),actor.actor.onScrollData.dimensionToScroll,threeDimDat ),scrDat) |>
     (twoDimList)-> SingleSliceDat(listOfDataAndImageNames=twoDimList
                                 ,sliceNumber=current
-                                ,textToDisp = getTextForCurrentSlice(actor.actor.onScrollData, current)  )
+                                ,textToDisp = getTextForCurrentSlice(actor.actor.onScrollData, Int32(current))  )
     
-     updateImagesDisplayed(singleSlDat,actor.actor.mainForDisplayObjects )
+     updateImagesDisplayed(singleSlDat
+                        ,actor.actor.mainForDisplayObjects
+                        ,actor.actor.textDispObj
+                        ,actor.actor.calcDimsStruct       )
 
      actor.actor.currentlyDispDat=singleSlDat
 
@@ -110,11 +113,11 @@ end#reactToScroll
 ```@doc
 we need to check wether scrolling dat contains some text that can be used for this particular slice display if not we will return only mainTextToDisp
 ```
-function getTextForCurrentSlice(scrollDat::FullScrollableDat, sliceNumb::Int)::Vector{SimpleLineTextStruct}
+function getTextForCurrentSlice(scrollDat::FullScrollableDat, sliceNumb::Int32)::Vector{SimpleLineTextStruct}
     if( length(scrollDat.sliceTextToDisp)>=sliceNumb  ) 
-        return vcat(scrollDat.mainTextToDisp ,  scrollDat.sliceTextToDisp[sliceNumb] )
+        return  copy(vcat(scrollDat.mainTextToDisp ,  scrollDat.sliceTextToDisp[sliceNumb] ))
     end#if    
-        return scrollDat.mainTextToDisp 
+        return copy(scrollDat.mainTextToDisp )
 end#getTextForCurrentSlice
 
 

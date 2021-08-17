@@ -115,12 +115,13 @@ end
 ```@doc
 Holding necessery data to display text  - like font related
 ```
-@with_kw mutable struct ForWordsDispStruct
+@with_kw struct ForWordsDispStruct
 fontFace::FTFont=FTFont(Ptr{FreeTypeAbstraction.FreeType.__JL_FT_FaceRec_}(),false) # font we will use to display text
 textureSpec::TextureSpec =TextureSpec() # texture specification of texture used to display text 
 fragment_shader_words::UInt32=1 #reference to fragment shader used to display text
 vbo_words::Base.RefValue{UInt32}=Ref(UInt32(1)) #reference to vertex buffer object used to display text
 shader_program_words::UInt32=1
+
 end #ForWordsDispStruct
 
 

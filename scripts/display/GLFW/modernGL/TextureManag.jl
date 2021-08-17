@@ -7,8 +7,8 @@ stores functions needed to create bind and update OpenGl textues
 module TextureManag
 using Base: Float16
 using  ModernGL ,DrWatson,  Main.OpenGLDisplayUtils, Main.ForDisplayStructs
-using  Main.Uniforms, Logging,Setfield, Glutils,Logging, Main.CustomFragShad, Main.DataStructs
-export initializeTextures,createTexture, getProperGL_TEXTURE,updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
+using  Main.Uniforms, Logging,Setfield, Glutils,Logging, Main.CustomFragShad, Main.DataStructs, Main.DisplayWords
+export addTextToTexture,initializeTextures,createTexture, getProperGL_TEXTURE,updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
 
 updateTextureString = """
 uploading data to given texture; of given types associated - specified in TextureSpec
@@ -116,7 +116,10 @@ singleSliceDat - holds data we want to use for update
 forDisplayObjects - stores all needed constants that holds reference to GLFW and OpenGL
 """
 @doc updateImagesDisplayedStr
-function updateImagesDisplayed(singleSliceDat::SingleSliceDat, forDisplayConstants::forDisplayObjects)
+function updateImagesDisplayed(singleSliceDat::SingleSliceDat
+                            ,forDisplayConstants::forDisplayObjects
+                            ,wordsDispObj::ForWordsDispStruct
+                            ,calcDimStruct::CalcDimsStruct )
 
         forDisplayConstants.stopListening[]=true
              modulelistOfTextSpecs=forDisplayConstants.listOfTextSpecifications
@@ -127,8 +130,30 @@ function updateImagesDisplayed(singleSliceDat::SingleSliceDat, forDisplayConstan
                 texSpec = !isempty(findList) ? modulelistOfTextSpecs[findList[1]] : throw(DomainError(findList, "no such name specified in start configuration - $( updateDat[1])")) 
                 Main.TextureManag.updateTexture(updateDat.type,updateDat.dat,texSpec)
             end #for 
+            #render text associated with this slice
+            activateForTextDisp(
+                wordsDispObj.shader_program_words
+                ,wordsDispObj.vbo_words
+                ,calcDimStruct)
+                glClearColor(0.0, 0.0, 0.1 , 1.0)
+
+            addTextToTexture(wordsDispObj
+                            ,singleSliceDat.textToDisp
+                            ,calcDimStruct )
+
+            #   updateTexture(UInt8, zeros(UInt8,2000,8000),wordsDispObj.textureSpec) #  ,Int32(10000),Int32(1000)
+              glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+
+
+
+            reactivateMainObj(forDisplayConstants.shader_program
+                            ,forDisplayConstants.vbo
+                            ,calcDimStruct )
+
+
             #render onto the screen
             Main.OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
+
             forDisplayConstants.stopListening[]=false
 end
 
@@ -210,6 +235,32 @@ function setProperOpenGlTypes(textSpec::Main.ForDisplayStructs.TextureSpec)::Mai
 end#
 
 
+
+```@doc
+Given  vector of SimpleLineTextStructs it will return matrix of data that will be used 
+to display text 
+wordsDispObj - object wit needed constants to display text
+```
+function addTextToTexture(wordsDispObj::ForWordsDispStruct
+                          ,lines::Vector{SimpleLineTextStruct}
+                          ,calcDimStruct::CalcDimsStruct)
+    textureWidth = calcDimStruct.textTexturewidthh
+    fontFace= wordsDispObj.fontFace
+    
+    matrPrim=  map(x-> renderSingleLineOfText(x,textureWidth,fontFace) ,reverse(lines)) |>
+    (xl)-> reduce( hcat  ,xl)
+    
+    sz= size(matrPrim)
+    # below just to clear any data from texture uploaded before
+    matr= hcat(calcDimStruct.textTextureZeros[:,sz[2]:size(calcDimStruct.textTextureZeros)[2]-1] ,matrPrim  )
+
+    updateTexture(UInt8
+                ,matr
+                ,wordsDispObj.textureSpec
+                ,0
+                ,0) #  ,Int32(10000),Int32(1000)
+    return matr
+end #addTextToTexture
 
 
 

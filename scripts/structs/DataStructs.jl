@@ -106,6 +106,7 @@ usefull stats for proper text display
  #exture dimensions of texture for displaying text
  textTexturewidthh::Int32=Int32(1)
  textTextureheightt::Int32=Int32(1)
+ textTextureZeros::Matrix{UInt8}= zeros(UInt8,textTexturewidthh, textTextureheightt ) # used in order to refresh the text texture
  #windowDims
  windowWidth::Int64=1
  windowHeight::Int64=1

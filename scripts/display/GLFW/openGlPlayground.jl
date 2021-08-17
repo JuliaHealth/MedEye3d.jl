@@ -65,23 +65,40 @@
      ,ThreeDimRawDat{Int16}(Int16,"CTIm",ctDummy)
      ,ThreeDimRawDat{UInt8}(UInt8,"testLab2",testLab2Dat)
      ,ThreeDimRawDat{UInt8}(UInt8,"testLab1",testLab1Dat)  ]
-     mainScrollDat = FullScrollableDat(dimensionToScroll=1,dataToScroll= slicesDat )
+
+     mainLines= textLinesFromStrings(["main Line1", "main Line 2"])
+     supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:10 )
 
 
-    Main.SegmentationDisplay.passDataForScrolling(mainScrollDat)
 
-    
-        singleSliceDat = [
+     singleSliceDat = [
       TwoDimRawDat{UInt8}(UInt8,"mainLab", UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,textureWidth,textureHeight))))
      ,TwoDimRawDat{Int16}(Int16,"CTIm",Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,textureWidth,textureHeight))))
      ,TwoDimRawDat{UInt8}(UInt8,"testLab2",UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,textureWidth,textureHeight))))
      ,TwoDimRawDat{UInt8}(UInt8,"testLab1",UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,textureWidth,textureHeight)))) 
     ]
+    sislines= textLinesFromStrings(["asd Line1", "as Line 2", "main Line 2", "main Line 2", "main Line 2",  "uuuuuuuuuuuuuuuuuu"])
 
-    exampleSingleSliceDat = SingleSliceDat(listOfDataAndImageNames=singleSliceDat)
+
+    exampleSingleSliceDat = SingleSliceDat(listOfDataAndImageNames=singleSliceDat
+                                            ,textToDisp=sislines)
+
     Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat)
 
 
+
+
+
+     mainScrollDat = FullScrollableDat(dimensionToScroll=1
+                                      ,dataToScroll= slicesDat
+                                      ,mainTextToDisp= mainLines
+                                      ,sliceTextToDisp=supplLines )
+
+
+    Main.SegmentationDisplay.passDataForScrolling(mainScrollDat)
+
+    
+ 
 
     GLFW.PollEvents()
 
@@ -113,49 +130,7 @@
         activateForTextDisp( wordsDispObj.shader_program_words , wordsDispObj.vbo_words,calcDim)
 
         face = wordsDispObj.fontFace
-        img, extent = renderface(face, 'C', 200)
-        calcDim.textTextureheightt
-        calcDim.textTexturewidthh
-##     
-        
-#    dispObj.stopListening[]= true
-#     #data = ones(UInt8,calcDim.imageTextureHeight,calcDim.imageTextureWidth)
-#     data = zeros(UInt8,2000,8000)
-  
-# # render a string into an existing matrix
-# a = renderstring!(data, "Dice Score - 200", face,  200, 200, 200)
-
-# a =transpose(reverse(a; dims=(1)))
-# updateTexture(UInt8,a,wordsDispObj.textureSpec,0,0 ) #  ,Int32(10000),Int32(1000)
-# basicRender(window)
-# dispObj.stopListening[]= false
-#     # dispObj.stopListening[]= true
-
-
-
-    # lineTextureWidth = 2000
-    # lineTextureHeight = 2000
-    
-    # dispObj.stopListening[]= true
-    #     #data = ones(UInt8,calcDim.imageTextureHeight,calcDim.imageTextureWidth)
-    # data = zeros(UInt8,lineTextureWidth,lineTextureHeight)
-      
-    # # render a string into an existing matrix
-    # a = renderstring!(zeros(UInt8,lineTextureWidth,lineTextureHeight), "Dice Score  200", face,  110, 110, 110,valign = :vtop, halign = :hleft)
-    
-    # a =collect(transpose(reverse(a; dims=(1))))
-        
-    # updateTexture(UInt8,a,wordsDispObj.textureSpec,0,200,Int32(lineTextureWidth),Int32(lineTextureHeight )) #  ,Int32(10000),Int32(1000)
-    # updateTexture(UInt8,a,wordsDispObj.textureSpec,0,0,Int32(lineTextureWidth),Int32(lineTextureHeight )) #  ,Int32(10000),Int32(1000)
-
-    # basicRender(window)
-    # dispObj.stopListening[]= false
-
-
-
-    
-
-
+ 
 
 
     lineTextureWidth = 2000
@@ -176,6 +151,8 @@
 
     basicRender(window)
     dispObj.stopListening[]= false
+
+
 
 
 
@@ -213,7 +190,7 @@
 #     updateTexture(UInt8,res,wordsDispObj.textureSpec,0,2000,Int32(sz[1]),Int32(sz[2])) #  ,Int32(10000),Int32(1000)
 dispObj.stopListening[]= true
 strListB= textLinesFromStrings(["asasfkajshalkjdhs", "3w7gqaw76dgabs89y3p8w", "ahsd78oy3o821hbf", "9823bv67asfasdlasjpdaus"])
-  d=   addTextToTexture(wordsDispObj,strListB, calcDim )
+  d=   addTextToTextureB(wordsDispObj,strListB, calcDim )
 
     basicRender(window)
     dispObj.stopListening[]= false
@@ -233,33 +210,133 @@ strListB= textLinesFromStrings(["asasfkajshalkjdhs", "3w7gqaw76dgabs89y3p8w", "a
     dispObj.stopListening[]= false
 
 
+    GLFW.PollEvents()
 
-
-
-    matrlist = map(x-> renderSingleLineOfText(x,Int32(2000),face) ,strList) 
-    matr=  reduce( hcat  ,matrlist)
-
-
-
-
-##
-
-    reactivateMainObj(dispObj.shader_program ,dispObj.vbo,calcDim  )
+ reactivateMainObj(dispObj.shader_program ,dispObj.vbo,calcDim  )
 
 
 
 Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat)
 basicRender(window)
 
-GLFW.PollEvents()
+
+
+#     juliaDataType= UInt8
+#     toSend = ones(UInt8,2000,8000)
+#     toSendFlat = reduce(vcat,toSend)
+#     pboIds= [Ref(GLuint(0))] 
+#     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboIds[1][]);
+# #    glBufferData(GL_PIXEL_UNPACK_BUFFER, sizeof(toSend), 0, GL_STREAM_DRAW);
+#     glBufferData(GL_PIXEL_UNPACK_BUFFER, sizeof(toSendFlat), Ptr{juliaDataType}(), GL_STREAM_DRAW);
+
+#     # bind the texture and PBO
+#     textureId =wordsDispObj.textureSpec.ID
+#     glActiveTexture(wordsDispObj.textureSpec.actTextrureNumb); # active proper texture unit before binding
+#     glBindTexture(GL_TEXTURE_2D, textureId[]);
+#     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboIds[1][]);
+   
+#     # update data directly on the mapped buffer - this is internal function implemented below
+#     ptrB = Ptr{juliaDataType}(glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY))
+#     for i=1:length(toSend)
+#         unsafe_store!(ptrB, toSend[i], i)
+#     end
+
+#     basicRender(window)
+ 
+
+
+#     // copy pixels from PBO to texture object
+#     // Use offset instead of ponter.
+#     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, PIXEL_FORMAT, GL_UNSIGNED_BYTE, 0);
+
+
+# ######### pixel buffer objects test
+
+
+
+# DATA_SIZE = 8 * sizeof(juliaDataTyp) *width * height  # number of bytes our image will have so in 2D it will be width times height times number of bytes needed for used datatype we need to multiply by 8 becouse sizeof() return bytes instead of bits
+# pbo = Ref(GLuint(pboNumber))  
+# glGenBuffers(1, pbo)
+
+
+# # glBindBuffer(GL_PIXEL_PACK_BUFFER, pbos[i]);
+# # glBufferData(GL_PIXEL_PACK_BUFFER, nbytes, NULL, GL_STREAM_READ);
+
+# # glReadPixels(0, 0, width, height, fmt, GL_UNSIGNED_BYTE, 0);   # When a GL_PIXEL_PACK_BUFFER is bound, the last 0 is used as offset into the buffer to read into. */
 
 
 
 
-fractionOfMainIm= Float32(0.5)
-heightToWithRatio=Float32(2)
-width = 1000
-height = 500
+# glBindTexture(GL_TEXTURE_2D,textureId[]); 
+# # copy pixels from PBO to texture object
+# # Use offset instead of pointer.
+# # glTexSubImage2D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, GLsizei(width), GLsizei(height),  GL_RED_INTEGER, GL_SHORT, Ptr{juliaDataTyp}());
+
+# glTexSubImage2D(GL_TEXTURE_2D,0,0,0, width, height, GL_RED_INTEGER, subImageDataType, Ptr{juliaDataType}());
+
+
+# # bind the PBO
+# glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboID[]);
+
+
+# # Note that glMapBuffer() causes sync issue.
+# # If GPU is working with this buffer, glMapBuffer() will wait(stall)
+# # until GPU to finish its job. To avoid waiting (idle), you can call
+# # first glBufferData() with NULL pointer before glMapBuffer().
+# # If you do that, the previous data in PBO will be discarded and
+# # glMapBuffer() returns a new allocated pointer immediately
+# # even if GPU is still working with the previous data.
+# glBufferData(GL_PIXEL_UNPACK_BUFFER, DATA_SIZE, Ptr{juliaDataType}(), GL_STREAM_DRAW);
+
+# # map the buffer object into client's memory
+# glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY)
+
+ 
+# ptr = Ptr{juliaDataType}(glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY))
+# # update data directly on the mapped buffer - this is internal function implemented below
+
+# updatePixels(ptr,data,length(data));
+
+# glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER); # release the mapped buffer
+
+# # it is good idea to release PBOs with ID 0 after use.
+# # Once bound with 0, all pixel operations are back to normal ways.
+# glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+
+
+
+
+
+
+
+
+
+
+
+#     matrlist = map(x-> renderSingleLineOfText(x,Int32(2000),face) ,strList) 
+#     matr=  reduce( hcat  ,matrlist)
+
+
+
+
+# ##
+
+  # reactivateMainObj(dispObj.shader_program ,dispObj.vbo,calcDim  )
+
+
+
+# Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat)
+# basicRender(window)
+
+# GLFW.PollEvents()
+
+
+
+
+# fractionOfMainIm= Float32(0.5)
+# heightToWithRatio=Float32(2)
+# width = 1000
+# height = 500
 
 
 
@@ -1039,3 +1116,4 @@ height = 500
      
     
      
+    

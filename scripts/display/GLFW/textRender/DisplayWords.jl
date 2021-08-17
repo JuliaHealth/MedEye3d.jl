@@ -6,12 +6,12 @@ Module controlling displaying of the text associated with the segmentation
 - either text releted to all slices or just a single one currently displayed or both
 """
 module DisplayWords
-using FreeTypeAbstraction,Main.ForDisplayStructs,Main.DataStructs , ModernGL, ColorTypes,Main.PrepareWindowHelpers, Main.OpenGLDisplayUtils. Main.TextureManag, Main.ShadersAndVerticies, Main.ShadersAndVerticiesForText, Glutils, DrWatson
+using FreeTypeAbstraction,Main.ForDisplayStructs,Main.DataStructs , ModernGL, ColorTypes,Main.PrepareWindowHelpers,  Main.ShadersAndVerticies, Main.ShadersAndVerticiesForText, Glutils, DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
 include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 
-export addTextToTexture,renderSingleLineOfText,activateForTextDisp,bindAndActivateForText,reactivateMainObj, createTextureForWords,bindAndActivateForText, bindAndDisplayTexture
+export textLinesFromStrings,renderSingleLineOfText,activateForTextDisp,bindAndActivateForText,reactivateMainObj, createTextureForWords,bindAndActivateForText, bindAndDisplayTexture
 
 
 ```@doc
@@ -53,32 +53,7 @@ function activateForTextDisp(shader_program_words::UInt32
 
 end#activateForTextDisp
 
-```@doc
-Given  vector of SimpleLineTextStructs it will return matrix of data that will be used 
-to display text 
-wordsDispObj - object wit needed constants to display text
-```
-function addTextToTexture(wordsDispObj::ForWordsDispStruct
-                          ,lines::Vector{SimpleLineTextStruct}
-                          ,calcDimStruct::CalcDimsStruct)
-    textureWidth = calcDimStruct.textTexturewidthh
-    fontFace= wordsDispObj.fontFace
-    
-    matr=  map(x-> renderSingleLineOfText(x,textureWidth,fontFace) ,lines) |>
-    (xl)-> reduce( hcat  ,xl)
-    
-    sz= size(matr)
-@info "Int32(sz[1])" Int32(sz[1])
-@info "Int32(sz[2])" Int32(sz[2])
-    updateTexture(UInt8
-                ,matr
-                ,wordsDispObj.textureSpec
-                ,0
-                ,calcDimStruct.textTextureheightt-sz[2]
-                ,Int32(sz[1])
-                ,Int32(sz[2])) #  ,Int32(10000),Int32(1000)
-    return matr
-end #addTextToTexture
+
 
 ```@doc
 Given  single SimpleLineTextStruct it will return matrix of data that will be used  by addTextToTexture function
@@ -135,19 +110,15 @@ Creates and initialize texture that will be used for displaying text
    !!!! important we need to first bind shader program for text display before we will  invoke this function
     numberOfActiveTextUnits - number of textures already used - so we we will know what is still free 
     widthh, heightt - size of the texture - the bigger the higher resolution, but higher computation cost
-    shader_program_words- reference to shader used to  display text
+    actTextrureNumb -proper OpenGL active texture 
     return fully initialized texture; also it assigne texture to appropriate sampler
     """
 @doc createTextureForWordsStr
 function createTextureForWords(numberOfActiveTextUnits::Int
                                 ,widthh::Int32 =Int32(100)
                                 ,heightt::Int32=Int32(1000)
-                                ,shader_program_words::UInt32=UInt32(0) )::TextureSpec
+                                ,actTextrureNumb::UInt32=UInt32(0) )::TextureSpec
 @info "numberOfActiveTextUnits+1" numberOfActiveTextUnits+1
-#    texId=createTexture(0,widthh, heightt,GL_R8UI)
-#    glBindTexture(GL_TEXTURE_2D, texId[]); 
-#    samplerRef= glGetUniformLocation(shader_program_words, "TextTexture1")
-#    glUniform1i(samplerRef,numberOfActiveTextUnits+1);
     return Main.ForDisplayStructs.TextureSpec(
             name = "textText"
             ,isTextTexture = true
@@ -156,7 +127,7 @@ function createTextureForWords(numberOfActiveTextUnits::Int
             ,widthh=widthh
             ,heightt=heightt
             #,ID=texId
-            ,actTextrureNumb =getProperGL_TEXTURE(numberOfActiveTextUnits+1)
+            ,actTextrureNumb =actTextrureNumb
             ,OpGlType =GL_UNSIGNED_BYTE
         )
 end#createTextureForWords

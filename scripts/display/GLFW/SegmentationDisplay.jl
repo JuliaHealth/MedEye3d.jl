@@ -216,7 +216,7 @@ function prepareForDispStruct(numberOfActiveTextUnits::Int
             ,textureSpec = createTextureForWords(numberOfActiveTextUnits
                                                  ,widthh
                                                  ,heightt 
-                                                 ,shader_program_words )
+                                                 ,getProperGL_TEXTURE(numberOfActiveTextUnits+1) )
             ,fragment_shader_words= fragment_shader_words
             ,vbo_words=vbo_words
             ,shader_program_words=shader_program_words
