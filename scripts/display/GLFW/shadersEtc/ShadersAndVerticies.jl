@@ -67,10 +67,13 @@ end #getShaderFileText
 creating fragment Shader  so controlling colors and textures  
 gslString so version of GSLS we are using currently
   ```
-function createFragmentShader(gslString::String,listOfTexturesToCreate::Vector{TextureSpec})
+function createFragmentShader(gslString::String
+                          ,listOfTexturesToCreate::Vector{TextureSpec}	
+                          ,maskToSubtractFrom::TextureSpec
+                          ,maskWeAreSubtracting ::TextureSpec)
     fsh = """
     $(gslString)
-    $(Main.CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate))  
+    $(Main.CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate,maskToSubtractFrom,maskWeAreSubtracting))  
     """
     return createShader(fsh, GL_FRAGMENT_SHADER)
     end

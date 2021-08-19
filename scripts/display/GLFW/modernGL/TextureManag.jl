@@ -8,7 +8,7 @@ module TextureManag
 using Base: Float16
 using  ModernGL ,DrWatson,  Main.OpenGLDisplayUtils, Main.ForDisplayStructs
 using  Main.Uniforms, Logging,Setfield, Glutils,Logging, Main.CustomFragShad, Main.DataStructs, Main.DisplayWords
-export addTextToTexture,initializeTextures,createTexture, getProperGL_TEXTURE,updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
+export activateTextures,addTextToTexture,initializeTextures,createTexture, getProperGL_TEXTURE,updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
 
 updateTextureString = """
 uploading data to given texture; of given types associated - specified in TextureSpec
@@ -74,7 +74,7 @@ listOfTextSpecs - list of TextureSpec structs that  holds data needed to
 it creates textrures as specified, renders them and return the list from  argument augmented by texture Id
 
 ```
-function initializeTextures(listOfTextSpecs::Vector{Main.ForDisplayStructs.TextureSpec})::Vector{Main.ForDisplayStructs.TextureSpec}
+function initializeTextures(listOfTextSpecs::Vector{TextureSpec})::Vector{TextureSpec}
 
     res = Vector{TextureSpec}()
        
@@ -94,13 +94,35 @@ function initializeTextures(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textu
         setTextureVisibility(textSpec.isVisible ,textSpec.uniforms)
 
 
-        push!(res,setproperties(textSpec, (ID=textUreId, actTextrureNumb=actTextrureNumb)))
+        push!(res,setproperties(textSpec, (ID=textUreId, actTextrureNumb=actTextrureNumb,associatedActiveNumer=index )))
 
 
     end # for
 
     return res
 end #initializeAndDrawTextures
+
+
+activateTexturesStr = """
+activating textures that were already initialized in order to be able to use them with diffrent shader program 
+shader_program- regference to OpenGL program so we will be able to activate  textures
+listOfTextSpecs - list of TextureSpec structs that  holds data needed to bind textures to shader program (Hovewer this new shader program have to keep the same uniforms)
+return unmodified textures
+"""
+@doc activateTexturesStr
+function activateTextures(listOfTextSpecs::Vector{TextureSpec} )::Vector{TextureSpec}
+      
+  
+    for (ind, textSpec ) in enumerate(listOfTextSpecs)
+        glUniform1i(textSpec.uniforms.samplerRef,textSpec.associatedActiveNumer);# we first look for uniform sampler in shader  
+        # we set uniforms of visibility and colors according to specified in configuration
+        if(!textSpec.isMainImage) setMaskColor(textSpec.color ,textSpec.uniforms)   end      
+        setTextureVisibility(textSpec.isVisible ,textSpec.uniforms)
+    end # for
+
+    return listOfTextSpecs
+
+end#activateTextures
 
 
 ```@doc
@@ -135,15 +157,23 @@ function updateImagesDisplayed(singleSliceDat::SingleSliceDat
                 wordsDispObj.shader_program_words
                 ,wordsDispObj.vbo_words
                 ,calcDimStruct)
-                glClearColor(0.0, 0.0, 0.1 , 1.0)
+            glClearColor(0.0, 0.0, 0.1 , 1.0)
 
-            addTextToTexture(wordsDispObj
+            matr= addTextToTexture(wordsDispObj
                             ,singleSliceDat.textToDisp
                             ,calcDimStruct )
 
             #   updateTexture(UInt8, zeros(UInt8,2000,8000),wordsDispObj.textureSpec) #  ,Int32(10000),Int32(1000)
-              glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+            
+            # GLFW.SwapBuffers(window)
+            # updateTexture(UInt8
+            # ,matr
+            # ,wordsDispObj.textureSpec
+            # ,0
+            # ,0)
 
+            # glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
 
 
             reactivateMainObj(forDisplayConstants.shader_program
@@ -180,6 +210,14 @@ mainUnifs =MainImageUniforms(
     ,min_shown_white= glGetUniformLocation(shader_program, "min_shown_white")
    , max_shown_black= glGetUniformLocation(shader_program, "max_shown_black")
     ,displayRange=glGetUniformLocation(shader_program, "displayRange")
+    ,isMaskDiffrenceVis=glGetUniformLocation(shader_program, "isMaskDiffrenceVis")
+    ,maskAIndex=glGetUniformLocation(shader_program, "maskAIndex")
+    ,maskBIndex=glGetUniformLocation(shader_program, "maskBIndex")
+    ,minNuclearMaskVal=glGetUniformLocation(shader_program, "minNuclearMaskVal")
+    ,maxNuclearMaskVal=glGetUniformLocation(shader_program, "maxNuclearMaskVal")
+    ,rangeOfNuclearMaskVal=glGetUniformLocation(shader_program, "rangeOfNuclearMaskVal")
+    ,nuclearMaskSampler=glGetUniformLocation(shader_program, "nuclearMaskSampler")
+    ,isNuclearMaskVis=glGetUniformLocation(shader_program, "isNuclearMaskVis")
 )
 setCTWindow(mainTexture.min_shown_white,mainTexture.max_shown_black,mainUnifs)
 

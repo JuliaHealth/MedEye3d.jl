@@ -6,7 +6,7 @@ module PrepareWindow
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
-export displayAll
+export displayAll,createAndInitShaderProgram
 
 using ModernGL, GeometryTypes, GLFW
 using Main.PrepareWindowHelpers
@@ -43,7 +43,11 @@ function displayAll(listOfTexturesToCreate::Vector{TextureSpec}
 
 
 	vertex_shader = createVertexShader(gslsStr)
-	fragment_shader_main = createFragmentShader(gslsStr,listOfTexturesToCreate)
+	
+	someExampleMask = filter(textSpec-> !textSpec.isMainImage && !textSpec.isSecondaryMain ,listOfTexturesToCreate)[1]
+	fragment_shader_main,shader_program= createAndInitShaderProgram(vertex_shader,listOfTexturesToCreate,someExampleMask,someExampleMask,gslsStr  )
+	
+	glUseProgram(shader_program)
 	
 ##for control of text display
 	fragment_shader_words = ShadersAndVerticiesForText.createFragmentShader(gslsStr)
@@ -57,17 +61,7 @@ function displayAll(listOfTexturesToCreate::Vector{TextureSpec}
 ##for control of text display
   
 
-	# Connect the shaders by combining them into a program
-	shader_program = glCreateProgram()
-
-	
-	glAttachShader(shader_program, vertex_shader)
-	glAttachShader(shader_program, fragment_shader_main)
-	
-	glLinkProgram(shader_program)
-	glUseProgram(shader_program)
-	
-	###########buffers
+###########buffers
 	#create vertex buffer
 	createVertexBuffer()
 	# Create the Vertex Buffer Objects (VBO)
@@ -98,7 +92,22 @@ return (window,vertex_shader,fragment_shader_main ,shader_program,stopListening,
 end# displayAll
 
 
+```@doc
+On the basis of information from listOfTexturesToCreate it creates specialized shader program
+```
+function createAndInitShaderProgram(vertex_shader::UInt32
+	,listOfTexturesToCreate::Vector{TextureSpec}
+	,maskToSubtractFrom::TextureSpec
+	,maskWeAreSubtracting ::TextureSpec
+	,gslsStr::String)::Tuple{UInt32, UInt32}
+			fragment_shader = createFragmentShader(gslsStr,listOfTexturesToCreate,maskToSubtractFrom,maskWeAreSubtracting)
+			shader_program = glCreateProgram()
+			glAttachShader(shader_program, fragment_shader)
+			glAttachShader(shader_program, vertex_shader)
+			glLinkProgram(shader_program)
+return fragment_shader,shader_program
 
+end#createShaderProgram
 
 
 

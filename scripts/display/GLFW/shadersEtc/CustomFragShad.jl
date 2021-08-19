@@ -30,7 +30,11 @@ We will in couple steps create code for fragment shader that will be based on th
 listOfTexturesToCreate - list of textures on the basis of which we will create custom fragment shader code
 
   ```
-function createCustomFramgentShader(listOfTexturesToCreate::Vector{TextureSpec})::String
+function createCustomFramgentShader(listOfTexturesToCreate::Vector{TextureSpec}
+                                    ,maskToSubtrastFrom::TextureSpec
+                                    ,maskWeAreSubtracting::TextureSpec
+    
+                                     )::String
     mainTexture, notMainTextures=divideTexteuresToMainAndRest(listOfTexturesToCreate)
 masksConstsants= map( x-> addMasksStrings(x), notMainTextures) |> 
 (strings)-> join(strings, "")
@@ -39,11 +43,17 @@ masksConstsants= map( x-> addMasksStrings(x), notMainTextures) |>
 
  return """
 $(initialStrings())
+
+
+$(addUniformsForNuclearAndSubtr())
+
 $(addMainTextureStrings(mainTexture))
 $masksConstsants
 
+$( getMasksSubtractionFunction(maskToSubtrastFrom,maskWeAreSubtracting))
 
-$(mainFuncString(mainTexture,notMainTextures))
+
+$(mainFuncString(mainTexture,notMainTextures,maskToSubtrastFrom,maskWeAreSubtracting))
  """
 end #createCustomFramgentShader
 
@@ -106,42 +116,7 @@ function addTypeStr(textur::TextureSpec)::String
     end
 end #addTypeStr
 
-```@doc
-adding function enabling controll of the masks color
-```
-function addMaskColorFunc()
-return """
 
-
-vec4 umaskColor(in uint maskTexel ,in bool isVisible ,in vec4 color  )
-{
-  if(maskTexel>0.0 && isVisible==true) {
-       return   color;
-    }
-    return vec4(0.0, 0.0, 0.0, 0.0);
-    }
-
-vec4 imaskColor(in int maskTexel,in bool isVisible ,in vec4 color  )
-{
-  if(maskTexel>0.0 && isVisible==true) {
-    return   color;
-    }
-    return vec4(0.0, 0.0, 0.0, 0.0);
-    }
-
-vec4 fmaskColor(in float maskTexel,in bool isVisible ,in vec4 color  )
-{
-  if(maskTexel>0.0 && isVisible==true) {
-    return   color;
-    }
-    return vec4(0.0, 0.0, 0.0, 0.0);
-}
-
-
-"""
-
-
-end#addMaskColorFunc
 
 
 ```@doc
@@ -197,7 +172,10 @@ end#addMasksStrings
 ```@doc
 controlling main function - basically we need to return proper FragColor which represents pixel color in given spot
 ```
-function mainFuncString( mainTexture::TextureSpec,notMainTextures::Vector{TextureSpec})::String
+function mainFuncString( mainTexture::TextureSpec
+                        ,notMainTextures::Vector{TextureSpec}
+                        ,maskToSubtrastFrom::TextureSpec
+                        ,maskWeAreSubtracting::TextureSpec)::String
 
     mainImageName= mainTexture.name
 
@@ -213,22 +191,25 @@ function mainFuncString( mainTexture::TextureSpec,notMainTextures::Vector{Textur
    sumColorB= map( x-> " ($(x.name)ColorMask.b  * $(x.name)Res) ", notMainTextures) |> 
                     (strings)-> join(strings, " + ")     
 
+   isVisibleList=  map( x-> " $(x.name)isVisible ", notMainTextures) |> 
+   (strings)-> join(strings, " + ")                  
     return """
     void main()
     {      
 $(masksInfluences)
 
 
+uint todiv = $(isVisibleList)+ $(mainImageName)isVisible+ isMaskDiffrenceVis;
  vec4 $(mainImageName)Res = mainColor(texture2D($(mainImageName), TexCoord0).r);
   FragColor = vec4(($(sumColorR)
-  +$(mainImageName)Res.r
-   )/$(lll) 
+  +$(mainImageName)Res.r+rdiffrenceColor($(maskToSubtrastFrom.name)Res ,$(maskWeAreSubtracting.name)Res )
+   )/todiv
   ,($(sumColorG)
-  +$(mainImageName)Res.g)
-  /$(lll), 
+  +$(mainImageName)Res.g+gdiffrenceColor($(maskToSubtrastFrom.name)Res ,$(maskWeAreSubtracting.name)Res ))
+  /todiv, 
   ($(sumColorB)
-  +$(mainImageName)Res.b )
-  /$(lll), 
+  +$(mainImageName)Res.b+bdiffrenceColor($(maskToSubtrastFrom.name)Res ,$(maskWeAreSubtracting.name)Res ) )
+  /todiv, 
   1.0  ); //long  product, if mask is invisible it just has full transparency
 
     }
@@ -273,8 +254,6 @@ end#chooseColorFonuction
 
 ```@doc
 used to display and debug  output - output can be also additionally checked using this tool http://evanw.github.io/glslx/
-
-
 ```
 function debuggingOutput(listOfTexturesToCreate)
     strr= Main.CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate)
@@ -283,6 +262,144 @@ function debuggingOutput(listOfTexturesToCreate)
     end
 end#
 
+
+getMasksSubtractionFunctionStr= """
+used in order to enable subtracting one mask from the other - hence displaying 
+pixels where value of mask a is present but mask b not (order is important)
+automatically both masks will be set to be invisible and only the diffrence displayed
+
+In order to achieve this  we need to have all of the samplers references stored in a list 
+1) we need to set both masks yo invisible - it will be done from outside the shader
+2) we set also from outside uniform marking visibility of diffrence to true
+3) also from outside we need to set which texture to subtract from which we will achieve this by setting maskAtoSubtr and maskBtoSubtr int uniforms
+    those integers will mark which samplers function will use
+4) in shader function will be treated as any other mask and will give contribution to output color multiplied by its visibility(0 or 1)    
+5) inside the function color will be defined as multiplication of two colors of mask A and mask B - colors will be acessed similarly to samplers
+6) color will be returned only if value associated with  maskA is greater than mask B and proportional to this difffrence
+
+In order to provide maximum performance and avoid branching inside shader multiple shader programs will be attached and one choosed  that will use diffrence needed
+maskToSubtrastFrom,maskWeAreSubtracting - specifications o textures we are operating on 
+"""
+@doc getMasksSubtractionFunctionStr
+function getMasksSubtractionFunction(maskToSubtrastFrom::TextureSpec
+                                    ,maskWeAreSubtracting::TextureSpec)::String
+
+  #letter - r g or b - will create specialized functions for r g and b colors
+
+
+return map(letter-> """
+
+float $(letter)diffrenceColor($(addTypeStr(maskToSubtrastFrom)) maskkA,$(addTypeStr(maskWeAreSubtracting)) maskkB)
+{
+  return 0.0;//(($(maskToSubtrastFrom.name)ColorMask.$(letter) + $(maskWeAreSubtracting.name)ColorMask.$(letter))/2) *( maskkA-maskkB  );
+}
+
+""",["r","g","b"]  )|>  x->join(x)
+
+end #getMasksSubtractionFunction
+
+getNuclearMaskFunctionStr =  """
+Enable displaying nuclear medicine data by applying smoothly canging colors
+to floating point data
+1)in confguration phase we need to have minimum, maximum and range of possible values associated with nuclear mask
+2)as uniform we would need to have set of vec4's - those will be used  to display colors 
+3)colors will be set with algorithm presented below
+    a)range will be divided into sections (value ranges) wich numbers will equal  length of colors vector - 1
+    b)in each section  the output color will be mix of 2 colors one associated with this section and with next one 
+        - contribution  of the color associated with given section will  vary from 100% at the begining of the section to 0%   
+        in the end where 100% of color will be associated with color of next section
+    
+"""
+@doc getNuclearMaskFunctionStr
+function getNuclearMaskFunction()
+
+end#getNuclearMaskFunction
+
+
+
+
+
+
+
+
+addUniformsForNuclearAndSubtrStr= """
+Add uniforms necessary for operation of mask subtraction and  for proper display of nuclear medicine masks
+"""
+@doc addUniformsForNuclearAndSubtrStr
+function addUniformsForNuclearAndSubtr()::String
+return """
+// for mask difference display
+uniform int isMaskDiffrenceVis=0 ;//1 if we want to display mask difference
+uniform int maskAIndex=0 ;//marks index of first mask we want to get diffrence visualized
+uniform int maskBIndex=0 ;//marks index of second mask we want to get diffrence visualized
+//for nuclear mask properdisplay
+uniform float minNuclearMaskVal = 0.0;//minimum possible value of nuclear mask
+uniform float maxNuclearMaskVal = 0.0;//maximum possible value of nuclear mask
+uniform float rangeOfNuclearMaskVal = 0.0;//precalculated maximum - minimum  possible values of nuclear mask
+uniform sampler2D nuclearMaskSampler;
+uniform int isNuclearMaskVis = 0;	
+
+"""	
+end#addUniformsForNuclearAndSubtr
+
+
+
+
+# createReferenceListsStr= """
+# On the basis of the list of textures characteristics  it creates the vector of references to 
+# Samplers
+# Colors associated with samplers
+# """
+# @doc createReferenceListsStr
+# function createReferenceLists(listOfTexturesTocreate::Vector{TextureSpec})::String
+# 	samplerStrings= map(textSpec->  textSpec.name  ,listOfTexturesTocreate ) |> (samplers)->  join(samplers, ",")
+# 	colorStrings= map(textSpec-> "$(textSpec.name)ColorMask"  ,listOfTexturesTocreate ) |> (colors)->  join(colors, ",")
+# lengthh=  length(listOfTexturesTocreate)
+
+# return """
+# uniform vec4[] colorsArr = vec4[$(lengthh)]($(colorStrings));
+# uniform gsampler2D[] samplersArr = gsampler2D[$(lengthh)]($(samplerStrings));//gsampler2D is a supertype of usampler2d isampler2d ...
+# """
+# end #createReferenceLists
+
+
+
+# ```@doc
+# adding function enabling controll of the masks color
+# ```
+# function addMaskColorFunc()
+# return """
+
+
+# vec4 umaskColor(in uint maskTexel ,in bool isVisible ,in vec4 color  )
+# {
+#   if(maskTexel>0.0 && isVisible==true) {
+#        return   color;
+#     }
+#     return vec4(0.0, 0.0, 0.0, 0.0);
+#     }
+
+# vec4 imaskColor(in int maskTexel,in bool isVisible ,in vec4 color  )
+# {
+#   if(maskTexel>0.0 && isVisible==true) {
+#     return   color;
+#     }
+#     return vec4(0.0, 0.0, 0.0, 0.0);
+#     }
+
+# vec4 fmaskColor(in float maskTexel,in bool isVisible ,in vec4 color  )
+# {
+#   if(maskTexel>0.0 && isVisible==true) {
+#     return   color;
+#     }
+#     return vec4(0.0, 0.0, 0.0, 0.0);
+# }
+
+
+# """
+
+
+# end#addMaskColorFunc
 
 
 end #CustomFragShad module

@@ -66,7 +66,7 @@ fractionOfMainIm - how much of width should be taken by the main image
 heightToWithRatio - needed for proper display of main texture - so it would not be stretched ...
 """
 @doc coordinateDisplayStr
-function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.TextureSpec}
+function coordinateDisplay(listOfTextSpecsPrim::Vector{Main.ForDisplayStructs.TextureSpec}
                         ,fractionOfMainIm::Float32
                         ,heightToWithRatio::Float32
                         ,imageTextureWidth::Int
@@ -75,7 +75,9 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
                         ,windowHeight::Int= Int(round(windowWidth*fractionOfMainIm))
                         ,textTexturewidthh::Int32=Int32(2000)
                         ,textTextureheightt::Int32= Int32( round((windowHeight/(windowWidth*(1-fractionOfMainIm)) ))*textTexturewidthh)) 
-   #calculations of necessary constants needed to calculate window size , mouse position ...
+   #setting number to texture that will be needed in shader configuration
+   listOfTextSpecs= map(x->setproperties(x[2],(whichCreated=x[1])),enumerate(listOfTextSpecsPrim))
+    #calculations of necessary constants needed to calculate window size , mouse position ...
    calcDimStruct= CalcDimsStruct(imageTextureWidth=imageTextureWidth
                   ,imageTextureHeight=imageTextureHeight
                   ,windowWidth=windowWidth 
@@ -90,7 +92,7 @@ function coordinateDisplay(listOfTextSpecs::Vector{Main.ForDisplayStructs.Textur
 
    subscribe!(of(calcDimStruct),mainActor )
 
-                        
+   listOfTextSpecs                    
  #creating window and event listening loop
     window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words = Main.PrepareWindow.displayAll(listOfTextSpecs,calcDimStruct )
 

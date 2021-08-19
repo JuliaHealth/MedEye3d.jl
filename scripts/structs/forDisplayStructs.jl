@@ -50,15 +50,27 @@ isVisibleRef::Int32 =Int32(0)# reference to uniform that points weather we
 min_shown_white::Int32 =Int32(0)
 max_shown_black::Int32 =Int32(0)
 displayRange::Int32 =Int32(0)
+# uniforms controlling  displaying masks diffrence
+isMaskDiffrenceVis::Int32 =Int32(0)
+maskAIndex::Int32 =Int32(0)
+maskBIndex::Int32 =Int32(0)
+#uniforms controlling nuclear image display
+minNuclearMaskVal::Int32 =Int32(0)
+maxNuclearMaskVal::Int32 =Int32(0)
+rangeOfNuclearMaskVal::Int32 =Int32(0)
+nuclearMaskSampler::Int32 =Int32(0)
+isNuclearMaskVis::Int32 =Int32(0)
+
 end
 
 ```@doc
 Holding the data needed to create and  later reference the textures
 ```
 @with_kw struct TextureSpec
-  name::String=""                #human readable name by which we can reference texture
-  numb::Int32 =-1             #needed to enable swithing between textures generally convinient when between 0-9; needed only if texture is to be modified by mouse input
-  dataType::Type = UInt8             #type of data that will be used Int/uint/float
+  name::String=""               #human readable name by which we can reference texture
+  numb::Int32 =-1               #needed to enable swithing between textures generally convinient when between 0-9; needed only if texture is to be modified by mouse input
+  whichCreated::Int32 =-1       #marks which one this texture was when created - so first in list second ... - needed for convinient accessing uniforms in shaders
+  dataType::Type = UInt8        #type of data that will be used Int/uint/float
   isMainImage ::Bool = false  #true if this texture represents main image
   isTextTexture ::Bool = false  #true if this texture represents texture that is supposed to hold text
   isSecondaryMain ::Bool = false # true if it holds some other important information that is not mask - used for example in case of nuclear imagiing studies
@@ -73,6 +85,7 @@ Holding the data needed to create and  later reference the textures
   GL_Rtype::UInt32 =UInt32(0)           #GlRtype - for example GL_R8UI or GL_R16I
   OpGlType ::UInt32 =UInt32(0)          #open gl type - for example GL_UNSIGNED_BYTE or GL_SHORT
   actTextrureNumb ::UInt32 =UInt32(0)          #usefull to be able to activate the texture using GL_Activetexture - with proper open GL constant
+  associatedActiveNumer ::Int64 =Int64(0)          #usefull to be able to activate the texture using GL_Activetexture - with proper open GL constant
   ID::Base.RefValue{UInt32} = Ref(UInt32(0))   #id of Texture
   isVisible::Bool= true       #if false it should be invisible 
   uniforms::TextureUniforms=MaskTextureUniforms()# holds values needed to control uniforms in a shader

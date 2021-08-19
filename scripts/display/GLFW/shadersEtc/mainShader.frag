@@ -467,3 +467,96 @@ vec4 fmaskColor(in float maskTexel,in vec4 FragColorMain ,in bool isVisible ,in 
     +CTImRes.b ) /3, 1.0  ); //long  product, if mask is invisible it just has full transparency
   
       }
+
+
+
+
+
+
+
+        out vec4 FragColor;
+  in vec3 ourColor;
+  smooth in vec2 TexCoord0;
+  uniform int  min_shown_white = 400;//400 ;// value of cut off  - all values above will be shown as white
+  uniform int  max_shown_black = -200;//value cut off - all values below will be shown as black
+  uniform float displayRange = 600.0;
+  
+  // for mask difference display
+  uniform int isMaskDiffrenceVis=0 ;//1 if we want to display mask difference
+  uniform int maskAIndex=0 ;//marks index of first mask we want to get diffrence visualized
+  uniform int maskBIndex=0 ;//marks index of second mask we want to get diffrence visualized
+  //for nuclear mask properdisplay
+  uniform float minNuclearMaskVal = 0.0;//minimum possible value of nuclear mask
+  uniform float maxNuclearMaskVal = 0.0;//maximum possible value of nuclear mask
+  uniform float rangeOfNuclearMaskVal = 0.0;//precalculated maximum - minimum  possible values of nuclear mask
+  uniform sampler nuclearMaskSampler;
+  uniform isNuclearMaskVis = 0;
+  
+  uniform isampler2D CTIm; // main image sampler
+  uniform int CTImisVisible = 1; // controllin main texture visibility
+  //in case of int texture  controlling color display of main image we keep all above some value as white and all below some value as black
+  vec4 mainColor(in int texel)
+  {
+      if(CTImisVisible==0){
+                 return vec4(0.0, 0.0, 0.0, 1.0);
+      }
+      else if(texel >min_shown_white){
+                 return vec4(1.0, 1.0, 1.0, 1.0);
+                            }
+                                   else if (texel< max_shown_black){
+          return vec4(0.0, 0.0, 0.0, 1.0);
+                }
+                       else{
+        float fla = float(texel-max_shown_black) ;
+        float fl = fla/displayRange ;
+       return vec4(fl, fl, fl, 1.0);
+      }
+  }
+  
+  
+  uniform usampler2D mainLab; // mask image sampler
+  uniform vec4 mainLabColorMask= vec4(0.4,0.7,0.8,0.9); //controlling colors
+  uniform int mainLabisVisible= 0; // controlling visibility
+  uniform usampler2D testLab1; // mask image sampler
+  uniform vec4 testLab1ColorMask= vec4(0.4,0.7,0.8,0.9); //controlling colors
+  uniform int testLab1isVisible= 0; // controlling visibility
+  uniform usampler2D testLab2; // mask image sampler
+  uniform vec4 testLab2ColorMask= vec4(0.4,0.7,0.8,0.9); //controlling colors
+  uniform int testLab2isVisible= 0; // controlling visibility
+  uniform usampler2D textText; // mask image sampler
+  uniform vec4 textTextColorMask= vec4(0.4,0.7,0.8,0.9); //controlling colors
+  uniform int textTextisVisible= 0; // controlling visibility
+  
+  float rdiffrenceColor(uint maskkA,uint maskkB)
+  {
+    return ((mainLabColorMask.r + testLab1ColorMask.r)/2) *( maskkA-maskkB  );
+  }
+  float gdiffrenceColor(uint maskkA,uint maskkB)
+  {
+    return ((mainLabColorMask.g + testLab1ColorMask.g)/2) *( maskkA-maskkB  );
+  }
+  float bdiffrenceColor(uint maskkA,uint maskkB)
+  {
+    return ((mainLabColorMask.b + testLab1ColorMask.b)/2) *( maskkA-maskkB  );
+  }
+  
+      void main()
+      {
+  uint mainLabRes = texture2D(mainLab, TexCoord0).r * mainLabisVisible  ;
+  uint testLab1Res = texture2D(testLab1, TexCoord0).r * testLab1isVisible  ;
+  uint testLab2Res = texture2D(testLab2, TexCoord0).r * testLab2isVisible  ;
+  uint textTextRes = texture2D(textText, TexCoord0).r * textTextisVisible  ;
+  
+  uint todiv =  mainLabisVisible  +  testLab1isVisible  +  testLab2isVisible  +  textTextisVisible + CTImisVisible+ isMaskDiffrenceVis;
+   vec4 CTImRes = mainColor(texture2D(CTIm, TexCoord0).r);
+    FragColor = vec4(( (mainLabColorMask.r *  mainLabRes)  +  (testLab1ColorMask.r *  testLab1Res)  +  (testLab2ColorMask.r *  testLab2Res)  +  (textTextColorMask.r *  textTextRes)
+    +CTImRes.r+rdiffrenceColor(mainLabRes ,testLab1Res )
+     )/todiv
+    ,( (mainLabColorMask.g  * mainLabRes)  +  (testLab1ColorMask.g  * testLab1Res)  +  (testLab2ColorMask.g  * testLab2Res)  +  (textTextColorMask.g  * textTextRes)
+    +CTImRes.g+gdiffrenceColor(mainLabRes ,testLab1Res ))
+    /todiv,
+    ( (mainLabColorMask.b  * mainLabRes)  +  (testLab1ColorMask.b  * testLab1Res)  +  (testLab2ColorMask.b  * testLab2Res)  +  (textTextColorMask.b  * textTextRes)
+    +CTImRes.b+bdiffrenceColor(mainLabRes ,testLab1Res ) )
+    /todiv,
+    1.0  ); //long  product, if mask is invisible it just has full transparency
+      }

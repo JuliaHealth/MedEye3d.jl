@@ -5,35 +5,37 @@
      include(DrWatson.scriptsdir("display","GLFW","includeAll.jl"))
      include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 
-     using Main.ForDisplayStructs,ColorTypes,CoordinateTransformations, Rotations,Dictionaries,Main.DisplayWords, Setfield
-     using  Main.ReactToScroll, Main.SegmentationDisplay,Main.Uniforms, Main.OpenGLDisplayUtils
+     using Main.ShadersAndVerticies,ModernGL, GeometryTypes, GLFW, Main.ForDisplayStructs,ColorTypes,CoordinateTransformations, Rotations,Dictionaries,Main.DisplayWords, Setfield
+     using Main.CustomFragShad, Main.PrepareWindowHelpers, Main.ReactToScroll, Main.SegmentationDisplay,Main.Uniforms, Main.OpenGLDisplayUtils
      using FreeTypeAbstraction,Rocket ,GLFW , Main.DataStructs, Main.StructsManag,Main.TextureManag, Main.SegmentationDisplay
-  listOfTexturesToCreate = [
-     Main.ForDisplayStructs.TextureSpec(
+ using Main.PrepareWindow,Glutils, Main.ForDisplayStructs, Dictionaries, Parameters, ColorTypes
+
+     listOfTexturesToCreate = [
+     TextureSpec(
          name = "mainLab",
          dataType= UInt8,
          strokeWidth = 5,
          color = RGB(1.0,0.0,0.0)
         ),
-     Main.ForDisplayStructs.TextureSpec(
+     TextureSpec(
          name = "testLab1",
          numb= Int32(1),
          dataType= UInt8,
          color = RGB(0.0,1.0,0.0)
         ),
-         Main.ForDisplayStructs.TextureSpec(
+        TextureSpec(
          name = "testLab2",
          numb= Int32(2),
          dataType= UInt8,
          color = RGB(0.0,0.0,1.0)
           ),
-          Main.ForDisplayStructs.TextureSpec(
+         TextureSpec(
            name = "textText",
            isTextTexture = true,
            dataType= UInt8,
            color = RGB(0.0,0.0,1.0)
          ),
-         Main.ForDisplayStructs.TextureSpec(
+        TextureSpec(
          name= "CTIm",
          numb= Int32(3),
          isMainImage = true,
@@ -43,8 +45,8 @@
   fractionOfMainIm= Float32(0.8)
   heightToWithRatio=Float32(0.5)
 
-  textureHeight = 400
-  textureWidth = 400
+  textureHeight = 40
+  textureWidth = 40
 
   Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,fractionOfMainIm,heightToWithRatio,textureHeight,textureWidth,1000)
    
@@ -118,84 +120,190 @@
          stopList = dispObj.stopListening[]
         calcDim = Main.SegmentationDisplay.mainActor.actor.calcDimsStruct
 
+        actor =  Main.SegmentationDisplay.mainActor
+     
+      
+     listOfTextSpecs= map(x->setproperties(x[2],(whichCreated=x[1])),enumerate(listOfTexturesToCreate))
+
+     println(createcontextinfo())
+      gslsStr = get_glsl_version_string()
+
+        fsh = """
+        $(gslsStr)
+        $(createCustomFramgentShader(listOfTextSpecs,textLiverMain,textureB))  
+        """
+       fragShader= createShader(fsh, GL_FRAGMENT_SHADER)
+      
+
+  GLFW.PollEvents()
 
 
 
 
 
 
-        #  dispObj.stopListening[]= true
-        #  glClearColor(0.0, 0.0, 0.1 , 1.0)
-        dispObj.stopListening[]= true
-        activateForTextDisp( wordsDispObj.shader_program_words , wordsDispObj.vbo_words,calcDim)
+  
 
-        face = wordsDispObj.fontFace
+         for st in split(fsh, "\n")
+         @info st
+         end
+     
+
+
+
+
+         vertex_shader = dispObj.vertex_shader
+     
+         println(createcontextinfo())
+         gslsStr = get_glsl_version_string()
+         listOfTextSpecsc=  Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications
+
+         fragment_shade,shader_prog= createAndInitShaderProgram(dispObj.vertex_shader,  listOfTextSpecsc,textLiverMain,textureB,gslsStr)
+         activateTextures(listOfTextSpecsc )
+
+         glUseProgram(shader_prog)
+         glBindBuffer(GL_ARRAY_BUFFER, dispObj.vbo[])
+         glBufferData(GL_ARRAY_BUFFER, calcDim.mainQuadVertSize  ,calcDim.mainImageQuadVert , GL_STATIC_DRAW)
+              encodeDataFromDataBuffer()
+
+         @uniforms! begin
+         dispObj.mainImageUniforms.isMaskDiffrenceVis:=1
+                end
+
+                
+        basicRender(window)
+
+                setTextureVisibility(false,textLiverMain.uniforms )
+                setTextureVisibility(false,textureB.uniforms )
+                basicRender(window)
+
+                # handler = KeyboardCallbackSubscribable(false,false,false,false,["a1"], Subject(KeyboardStruct, scheduler = AsyncScheduler()))
+
+
+# scancode =GLFW.KEY_RIGHT_CONTROL
+# act=1
+
+# scCode = @match scancode begin
+#   GLFW.KEY_RIGHT_CONTROL=> (handler.isCtrlPressed= (act==1); "ctrl" )
+#   GLFW.KEY_LEFT_CONTROL => (handler.isCtrlPressed= (act==1); "ctrl")
+#   GLFW.KEY_LEFT_SHIFT =>( handler.isShiftPressed= (act==1); "shift")
+#   GLFW.KEY_RIGHT_SHIFT =>( handler.isShiftPressed=( act==1); "shift")
+#   GLFW.KEY_RIGHT_ALT =>( handler.isAltPressed= (act==1); "alt")
+#   GLFW.KEY_LEFT_ALT => (handler.isAltPressed= (act==1); "alt")
+#   GLFW.KEY_ENTER =>( handler.isEnterPressed= (act==1); "enter")
+#   _ => "notImp" # not Important
+# end
+#   res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed || scCode=="ctrl" 
+#           , isShiftPressed= handler.isShiftPressed ||scCode=="shift" 
+#           ,isAltPressed= handler.isAltPressed ||scCode=="alt"
+#           ,isEnterPressed= handler.isEnterPressed 
+#           ,lastKeysPressed= handler.lastKeysPressed 
+#           ,mostRecentScanCode = scancode
+#           ,mostRecentKeyName = "" # just marking it as empty
+#           ) 
+  
+# pp = strToNumber(res.lastKeysPressed)
+# processKeysInfo(pp,actor,KeyboardStruct(lastKeysPressed= ["a", "1"]))
+
+
+#  join(res.lastKeysPressed)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#   for tpair in enumerate(listOfTexturesToCreate)
+#     tpair[2].whichCreated = tpair[1]
+#   end#for
+
+
+
+
+#         #  dispObj.stopListening[]= true
+#         #  glClearColor(0.0, 0.0, 0.1 , 1.0)
+#         dispObj.stopListening[]= true
+#         activateForTextDisp( wordsDispObj.shader_program_words , wordsDispObj.vbo_words,calcDim)
+
+#         face = wordsDispObj.fontFace
  
 
 
-    lineTextureWidth = 2000
-    lineTextureHeight = 2000
+#     lineTextureWidth = 2000
+#     lineTextureHeight = 2000
     
-    dispObj.stopListening[]= true
-        #data = ones(UInt8,calcDim.imageTextureHeight,calcDim.imageTextureWidth)
-    data = zeros(UInt8,lineTextureWidth,lineTextureHeight)
+#     dispObj.stopListening[]= true
+#         #data = ones(UInt8,calcDim.imageTextureHeight,calcDim.imageTextureWidth)
+#     data = zeros(UInt8,lineTextureWidth,lineTextureHeight)
       
-    # render a string into an existing matrix
-    a = renderstring!(zeros(UInt8,lineTextureWidth,lineTextureHeight), "Line 1 score", face,  110, 110, 110,valign = :vtop, halign = :hleft)
-    b = renderstring!(zeros(UInt8,lineTextureWidth,lineTextureHeight), "Line 2 score", face,  110, 110, 110,valign = :vtop, halign = :hleft)
-    b = vcat(a[1:200,:] ,b[1:200,:] ) 
-    b =collect(transpose(reverse(b; dims=(1))))
+#     # render a string into an existing matrix
+#     a = renderstring!(zeros(UInt8,lineTextureWidth,lineTextureHeight), "Line 1 score", face,  110, 110, 110,valign = :vtop, halign = :hleft)
+#     b = renderstring!(zeros(UInt8,lineTextureWidth,lineTextureHeight), "Line 2 score", face,  110, 110, 110,valign = :vtop, halign = :hleft)
+#     b = vcat(a[1:200,:] ,b[1:200,:] ) 
+#     b =collect(transpose(reverse(b; dims=(1))))
         
-    #updateTexture(UInt8,b,wordsDispObj.textureSpec,0,0,Int32(lineTextureWidth),Int32(lineTextureHeight )) #  ,Int32(10000),Int32(1000)
-    updateTexture(UInt8,b,wordsDispObj.textureSpec,0,7600,Int32(2000),Int32(400)) #  ,Int32(10000),Int32(1000)
+#     #updateTexture(UInt8,b,wordsDispObj.textureSpec,0,0,Int32(lineTextureWidth),Int32(lineTextureHeight )) #  ,Int32(10000),Int32(1000)
+#     updateTexture(UInt8,b,wordsDispObj.textureSpec,0,7600,Int32(2000),Int32(400)) #  ,Int32(10000),Int32(1000)
 
-    basicRender(window)
-    dispObj.stopListening[]= false
-
-
+#     basicRender(window)
+#     dispObj.stopListening[]= false
 
 
+#     strToNumber("11sfdsdf")
+  
 
-    lineTextureWidth = 2000
-    lineTextureHeight = 2000
+
+#     lineTextureWidth = 2000
+#     lineTextureHeight = 2000
     
 
-    struct1 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
-    struct2 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
-    struct3 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
-    struct4 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
-    struct4 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
-    struct5 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
-    struct6 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
-    struct7 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
-    struct8 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
-    struct9 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
-    struct10 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
-    struct11 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
+#     struct1 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
+#     struct2 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
+#     struct3 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
+#     struct4 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
+#     struct4 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
+#     struct5 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
+#     struct6 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
+#     struct7 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
+#     struct8 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
+#     struct9 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
+#     struct10 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
+#     struct11 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
 
-    strList = [struct1,struct2,struct3,struct4,struct5,struct6,struct7,struct6,struct7,struct7,struct4,struct5,struct6,struct7,struct6,struct7]
-    #,struct5,struct6,struct7,struct8,struct9,struct10,struct11
+#     strList = [struct1,struct2,struct3,struct4,struct5,struct6,struct7,struct6,struct7,struct7,struct4,struct5,struct6,struct7,struct6,struct7]
+#     #,struct5,struct6,struct7,struct8,struct9,struct10,struct11
     
 
 
 
-#    res =  hcat(renderSingleLineOfText(struct1,lineTextureWidth, face )
-#   ,renderSingleLineOfText(struct2,lineTextureWidth, face )
-#   ,renderSingleLineOfText(struct3,lineTextureWidth, face )
-#     )
-#     maximum(res)
-# sz = size(res)
+# #    res =  hcat(renderSingleLineOfText(struct1,lineTextureWidth, face )
+# #   ,renderSingleLineOfText(struct2,lineTextureWidth, face )
+# #   ,renderSingleLineOfText(struct3,lineTextureWidth, face )
+# #     )
+# #     maximum(res)
+# # sz = size(res)
 
-# # updateTexture(UInt8,b,wordsDispObj.textureSpec,0,7600,Int32(size(res)[1]),Int32(size(res)[2])) #  ,Int32(10000),Int32(1000)
-#     updateTexture(UInt8,res,wordsDispObj.textureSpec,0,2000,Int32(sz[1]),Int32(sz[2])) #  ,Int32(10000),Int32(1000)
-dispObj.stopListening[]= true
-strListB= textLinesFromStrings(["asasfkajshalkjdhs", "3w7gqaw76dgabs89y3p8w", "ahsd78oy3o821hbf", "9823bv67asfasdlasjpdaus"])
-  d=   addTextToTextureB(wordsDispObj,strListB, calcDim )
+# # # updateTexture(UInt8,b,wordsDispObj.textureSpec,0,7600,Int32(size(res)[1]),Int32(size(res)[2])) #  ,Int32(10000),Int32(1000)
+# #     updateTexture(UInt8,res,wordsDispObj.textureSpec,0,2000,Int32(sz[1]),Int32(sz[2])) #  ,Int32(10000),Int32(1000)
+# dispObj.stopListening[]= true
+# strListB= textLinesFromStrings(["asasfkajshalkjdhs", "3w7gqaw76dgabs89y3p8w", "ahsd78oy3o821hbf", "9823bv67asfasdlasjpdaus"])
+#   d=   addTextToTextureB(wordsDispObj,strListB, calcDim )
 
-    basicRender(window)
-    dispObj.stopListening[]= false
-
-
+#     basicRender(window)
+#     dispObj.stopListening[]= false
 
 
 
@@ -203,21 +311,23 @@ strListB= textLinesFromStrings(["asasfkajshalkjdhs", "3w7gqaw76dgabs89y3p8w", "a
 
 
 
-    dispObj.stopListening[]= true
-
-    updateTexture(UInt8, zeros(UInt8,2000,8000),wordsDispObj.textureSpec) #  ,Int32(10000),Int32(1000)
-   basicRender(window)
-    dispObj.stopListening[]= false
 
 
-    GLFW.PollEvents()
+#     dispObj.stopListening[]= true
 
- reactivateMainObj(dispObj.shader_program ,dispObj.vbo,calcDim  )
+#     updateTexture(UInt8, zeros(UInt8,2000,8000),wordsDispObj.textureSpec) #  ,Int32(10000),Int32(1000)
+#    basicRender(window)
+#     dispObj.stopListening[]= false
+
+
+#     GLFW.PollEvents()
+
+#  reactivateMainObj(dispObj.shader_program ,dispObj.vbo,calcDim  )
 
 
 
-Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat)
-basicRender(window)
+# Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat)
+# basicRender(window)
 
 
 

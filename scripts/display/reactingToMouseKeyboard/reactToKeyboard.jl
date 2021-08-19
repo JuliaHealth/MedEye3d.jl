@@ -57,19 +57,6 @@ function (handler::KeyboardCallbackSubscribable)(str::String, action::GLFW.Actio
 
     if( (action==instances(GLFW.Action)[2])  ) 
         push!(handler.lastKeysPressed ,str)
-        # res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed
-        #         , isShiftPressed= handler.isShiftPressed
-        #         ,isAltPressed= handler.isAltPressed
-        #         ,isEnterPressed= handler.isEnterPressed 
-        #         ,lastKeysPressed= handler.lastKeysPressed 
-        #         ,mostRecentScanCode = -1 # just marking it as empty
-        #         ,mostRecentKeyName = str
-        #         ,mostRecentAction = action) 
-        # if(shouldBeExecuted(res)) 
-        #     next!(handler.subject,res ) 
-        #     handler.lastKeysPressed=[] 
-        # end#if 
-
    end#if
 end #handler
 
@@ -84,23 +71,21 @@ function (handler::KeyboardCallbackSubscribable)(scancode ::GLFW.Key, action::GL
         _ => -1
     end
 
-
-    instances(GLFW.Action)[1]
-    if(act>0)# so we have press or relese
-         
+   if(act>0)# so we have press or relese
+       
          scCode = @match scancode begin
-            GLFW.KEY_RIGHT_CONTROL=> (handler.isCtrlPressed= (act==1) )
-            GLFW.KEY_LEFT_CONTROL => (handler.isCtrlPressed= (act==1))
-            GLFW.KEY_LEFT_SHIFT =>( handler.isShiftPressed= (act==1))
-            GLFW.KEY_RIGHT_SHIFT =>( handler.isShiftPressed=( act==1))
-            GLFW.KEY_RIGHT_ALT =>( handler.isAltPressed= (act==1))
-            GLFW.KEY_LEFT_ALT => (handler.isAltPressed= (act==1))
-            GLFW.KEY_ENTER =>( handler.isEnterPressed= (act==1))
+            GLFW.KEY_RIGHT_CONTROL=> (handler.isCtrlPressed= (act==1); "ctrl" )
+            GLFW.KEY_LEFT_CONTROL => (handler.isCtrlPressed= (act==1); "ctrl")
+            GLFW.KEY_LEFT_SHIFT =>( handler.isShiftPressed= (act==1); "shift")
+            GLFW.KEY_RIGHT_SHIFT =>( handler.isShiftPressed=( act==1); "shift")
+            GLFW.KEY_RIGHT_ALT =>( handler.isAltPressed= (act==1); "alt")
+            GLFW.KEY_LEFT_ALT => (handler.isAltPressed= (act==1); "alt")
+            GLFW.KEY_ENTER =>( handler.isEnterPressed= (act==1); "enter")
             _ => "notImp" # not Important
          end
-            res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed
-                    , isShiftPressed= handler.isShiftPressed
-                    ,isAltPressed= handler.isAltPressed
+            res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed || scCode=="ctrl" 
+                    , isShiftPressed= handler.isShiftPressed ||scCode=="shift" 
+                    ,isAltPressed= handler.isAltPressed ||scCode=="alt"
                     ,isEnterPressed= handler.isEnterPressed 
                     ,lastKeysPressed= handler.lastKeysPressed 
                     ,mostRecentScanCode = scancode
@@ -109,7 +94,7 @@ function (handler::KeyboardCallbackSubscribable)(scancode ::GLFW.Key, action::GL
                     ) 
             
 
-            if(shouldBeExecuted(res))
+            if(shouldBeExecuted(res,act))
                 next!(handler.subject, res ) 
                 handler.lastKeysPressed=[] 
 
@@ -154,8 +139,7 @@ end #registerKeyboardFunctions
 Registering function how should behave to deal with result of search for texture related to keyboard input 
 ```
 function setVisOnKey(textSpecObs::Identity{TextureSpec},keyInfo::KeyboardStruct  , actor::SyncActor{Any, ActorWithOpenGlObjects}) 
-    @info "setVisOnKey"
-    @info "keyInfo"
+
    textSpec =  textSpecObs.value
     if(keyInfo.isCtrlPressed)    
         setTextureVisibility(false,textSpec.uniforms )
@@ -170,7 +154,22 @@ function setVisOnKey(textSpecObs::Identity{TextureSpec},keyInfo::KeyboardStruct 
 
 end #setVisOnKey
 
-setVisOnKey(a::Const{Nothing},keyInfo::KeyboardStruct ) = "" # just doindg nothing in case of empty option
+setVisOnKey(a::Const{Nothing},keyInfo::KeyboardStruct ) = "" # just doing nothing in case of empty option
+
+
+```@doc
+processing information from keys - the instance of this function will be chosen on
+the basis mainly of multiple dispatch
+```
+function processKeysInfo(numb::Identity{Int32},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct )
+    opt = findTextureBasedOnNumb(actor.actor.mainForDisplayObjects.listOfTextSpecifications
+    , numb.value
+    ,actor.actor.mainForDisplayObjects.numIndexes ) 
+setVisOnKey( opt,keyInfo , actor)
+basicRender(actor.actor.mainForDisplayObjects.window)
+end #processKeysInfo
+
+processKeysInfo(a::Const{Nothing},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) = "" # just doing nothing in case of empty option
 
 
 reactToKeyboardStr = """
@@ -181,28 +180,16 @@ ctrl + number -  make mask associated with given number invisible
 @doc reactToKeyboardStr
 function reactToKeyboard(keyInfo::KeyboardStruct
                         , actor::SyncActor{Any, ActorWithOpenGlObjects})
-    
-
-    actor.actor.mainForDisplayObjects.stopListening[]=true #free GLFW context
-                    
+                      
     #we got this only when ctrl/shift/als is released or enter is pressed
     obj = actor.actor.mainForDisplayObjects
     obj.stopListening[]=true #free GLFW context
-    
-    keys = keyInfo.lastKeysPressed
 
-    if(!isempty(keys))
-        if(isnumeric(keys[1][1])) 
-           opt = findTextureBasedOnNumb(actor.actor.mainForDisplayObjects.listOfTextSpecifications
-                                        , parse(Int32,keys[1]) 
-                                        ,actor.actor.mainForDisplayObjects.numIndexes ) 
-           setVisOnKey( opt,keyInfo , actor)
-           basicRender(actor.actor.mainForDisplayObjects.window)
-        end#if
-    end#if
+    # processing here on is based on multiple dispatch mainly 
+    processKeysInfo(strToNumber(keyInfo.lastKeysPressed),actor,keyInfo)
     
+
     obj.stopListening[]=false # reactivete event listening loop
-    actor.actor.mainForDisplayObjects.stopListening[]=false #free GLFW context
 
 end#reactToKeyboard
 
@@ -212,13 +199,8 @@ end#reactToKeyboard
 ```@doc
 return true in case the combination of keys should invoke some action
 ```
-function shouldBeExecuted(keyInfo::KeyboardStruct)::Bool
+function shouldBeExecuted(keyInfo::KeyboardStruct, act::Int64)::Bool
     
-   act =  @match keyInfo.mostRecentAction begin
-        instances(GLFW.Action)[2] => 1
-        instances(GLFW.Action)[1] => 2
-        _ => -1
-    end
     if(act>0)# so we have press or relese 
         res =  @match keyInfo.mostRecentScanCode begin
       GLFW.KEY_RIGHT_CONTROL => return act==2 # returning true if we relese key
@@ -251,20 +233,23 @@ return Option - either Texture specification or empty Option
 function findTextureBasedOnNumb(listOfTextSpecifications::Vector{TextureSpec} 
                                 ,numb::Int32
                                 ,dict::Dictionary{Int32, Int64})::Option
-    @info "findTextureBasedOnNumb" numb
-    @info "dict" dict
     if(haskey(dict, numb))
-        @info "found"
         return Option(listOfTextSpecifications[dict[numb]])
     end#if
     #if we are here it mean no such texture was found    
-    @info "not found"
-   
-        return Option()
+    return Option()
 
 end #findTextureBasedOnNumb
 
 
+```@doc
+Given string it checks each character weather is numeric - gets substring of all numeric characters and parses it into integer
+```
+function strToNumber(str::Vector{String})::Option{Int32}
+	filtered =  filter(x->isnumeric(x) , join(str) )
+    if(isempty(filtered))  return Option()  end
+	return   Option(parse(Int32, filtered))
+end#strToNumber
 
 
 end #ReactOnMouseClickAndDrag
