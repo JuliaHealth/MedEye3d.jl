@@ -94,7 +94,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{Main.ForDisplayStructs.Te
 
    listOfTextSpecs                    
  #creating window and event listening loop
-    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words = Main.PrepareWindow.displayAll(listOfTextSpecs,calcDimStruct )
+    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words,gslsStr = Main.PrepareWindow.displayAll(listOfTextSpecs,calcDimStruct )
 
     # than we set those uniforms, open gl types and using data from arguments  to fill texture specifications
     mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program) 
@@ -119,6 +119,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{Main.ForDisplayStructs.Te
             ,mainImageUniforms= mainImageUnifs
             ,TextureIndexes= Dictionary(map(it->it.name,initializedTextures),collect(eachindex(initializedTextures)))
             ,numIndexes= numbDict 
+            ,gslsStr=gslsStr
    )
 
 

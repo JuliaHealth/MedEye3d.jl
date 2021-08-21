@@ -1,14 +1,10 @@
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
-using ModernGL, GeometryTypes, GLFW
-include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
-
-
 
 #Create and initialize shaders
 module ShadersAndVerticies
-using ModernGL, GeometryTypes, GLFW,Main.ForDisplayStructs, Main.CustomFragShad
+using ModernGL, GeometryTypes, GLFW,Main.ForDisplayStructs, Main.CustomFragShad, Main.ModernGlUtil
 
 
 export createFragmentShader
@@ -16,16 +12,6 @@ export positions
 export elements
 export getMainVerticies
 export createVertexShader
-
-
-
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
-include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
-
-#in case one want to put shader gsls file into separate file
-#fragmentShaderFileDir = DrWatson.scriptsdir("display","GLFW","shadersEtc","mainShader.frag")
-
 
 
 ```@doc

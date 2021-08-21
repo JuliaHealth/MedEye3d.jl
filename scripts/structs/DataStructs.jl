@@ -54,7 +54,7 @@ abstract type DataToDisp end
 ```@doc
 Struct holding line of text with some text metadata
 ```
-@with_kw mutable struct SimpleLineTextStruct
+@with_kw struct SimpleLineTextStruct
     text::String = "" #text to be displayed 
     fontSize::Int = 110 # size of letters
     extraLineSpace::Int = 1 # if left to 1 we will get standard line spacing if more distance to line below will increase

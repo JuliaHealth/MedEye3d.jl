@@ -308,165 +308,6 @@ vec4 fmaskColor(in float maskTexel,in vec4 FragColorMain ,in bool isVisible ,in 
 
 
 
-  
-  #extension GL_EXT_gpu_shader4 : enable    //Include support for this extension, which defines usampler2D
-  out vec4 FragColor;    
-  smooth in vec2 TexCoord0;
-  uniform int  min_shown_white = 400;//400 ;// value of cut off  - all values above will be shown as white 
-  uniform int  max_shown_black = -200;//value cut off - all values below will be shown as black
-  uniform float displayRange = 600.0;
-  
-  uniform isampler2D mainCTImage; // main image sampler
-  uniform bool isVisiblemainCTImage = true; // controllin main texture visibility
-  
-  
-  //in case of int texture  controlling color display of main image we keep all above some value as white and all below some value as black
-  vec4 mainColor(in int texel)
-  {
-      if(!isVisiblemainCTImage){
-        return vec4(1.0, 1.0, 1.0, 1.0);    
-      }
-      else if(texel >min_shown_white){
-          return vec4(1.0, 1.0, 1.0, 1.0);
-          }
-      else if (texel< max_shown_black){
-          return vec4(0.0, 0.0, 0.0, 1.0);
-     }
-      else{
-        float fla = float(texel-max_shown_black) ;
-        float fl = fla/displayRange ;
-       return vec4(fl, fl, fl, 1.0);
-      }
-  }
-  
-  
-  
-  
-  
-  uniform usampler2D grandTruthLiverLabel; // mask image sampler
-  uniform vec4 grandTruthLiverLabelColorMask= vec4(0.4,0.7,0.8,0.9); //controlling colors
-  uniform bool grandTruthLiverLabelisVisible= true; // controlling visibility
-  
-  
-  uniform usampler2D mainForModificationsTexture1; // mask image sampler
-  uniform vec4 mainForModificationsTexture1ColorMask= vec4(0.4,0.7,0.8,0.9); //controlling colors
-  uniform bool mainForModificationsTexture1isVisible= true; // controlling visibility
-  
-  
-  uniform usampler2D mainForModificationsTexture2; // mask image sampler
-  uniform vec4 mainForModificationsTexture2ColorMask= vec4(0.4,0.7,0.8,0.9); //controlling colors
-  uniform bool mainForModificationsTexture2isVisible= true; // controlling visibility
-  
-  
-  uniform usampler2D textTexture; // mask image sampler
-  uniform vec4 textTextureColorMask= vec4(0.4,0.7,0.8,0.9); //controlling colors
-  uniform bool textTextureisVisible= true; // controlling visibility
-  
-  
-  
-  
-  
-  vec4 umaskColor(in uint maskTexel ,in bool isVisible ,in vec4 color  )
-  {
-    if(maskTexel>0.0 && isVisible==true) {
-         return   color;
-      }
-      return vec4(0.0, 0.0, 0.0, 0.0);
-      }
-  
-  vec4 imaskColor(in int maskTexel,in bool isVisible ,in vec4 color  )
-  {
-    if(maskTexel>0.0 && isVisible==true) {
-      return   color;
-      }
-      return vec4(0.0, 0.0, 0.0, 0.0);
-      }
-  
-  vec4 fmaskColor(in float maskTexel,in bool isVisible ,in vec4 color  )
-  {
-    if(maskTexel>0.0 && isVisible==true) {
-      return   color;
-      }
-      return vec4(0.0, 0.0, 0.0, 0.0);
-  }
-  
-  
-  
-  
-     void main()
-     {      
-  
-  vec4 FragColorA= mainColor(texture2D(mainCTImage, TexCoord0).r)+  umaskColor( texture2D(grandTruthLiverLabel, TexCoord0).r ,grandTruthLiverLabelisVisible,grandTruthLiverLabelColorMask  )
-  *umaskColor( texture2D(mainForModificationsTexture1, TexCoord0).r ,mainForModificationsTexture1isVisible,mainForModificationsTexture1ColorMask  )
-  *umaskColor( texture2D(mainForModificationsTexture2, TexCoord0).r ,mainForModificationsTexture2isVisible,mainForModificationsTexture2ColorMask  )
-  *umaskColor( texture2D(textTexture, TexCoord0).r ,textTextureisVisible,textTextureColorMask  )
-  ;
-   FragColor = FragColorA ; //long  product, if mask is invisible it just has full transparency
-  
-     }
-
-
-
-
-  #extension GL_EXT_gpu_shader4 : enable    //Include support for this extension, which defines usampler2D
-  out vec4 FragColor;    
-  in vec3 ourColor;
-  smooth in vec2 TexCoord0;
-  uniform int  min_shown_white = 400;//400 ;// value of cut off  - all values above will be shown as white 
-  uniform int  max_shown_black = -200;//value cut off - all values below will be shown as black
-  uniform float displayRange = 600.0;
-  
-  uniform isampler2D CTIm; // main image sampler
-  uniform int CTImisVisible = 1; // controllin main texture visibility
-  
-  
-  //in case of int texture  controlling color display of main image we keep all above some value as white and all below some value as black
-  vec4 mainColor(in int texel)
-  {
-      if(CTImisVisible==0){
-          return vec4(0.0, 0.0, 0.0, 1.0);
-      }
-      else if(texel >min_shown_white){
-          return vec4(1.0, 1.0, 1.0, 1.0);
-          }
-      else if (texel< max_shown_black){
-          return vec4(0.0, 0.0, 0.0, 1.0);
-     }
-      else{
-        float fla = float(texel-max_shown_black) ;
-        float fl = fla/displayRange ;
-       return vec4(fl, fl, fl, 1.0);
-      }
-  }
-  
-   
-  
-  
-  uniform usampler2D mainLab; // mask image sampler
-  uniform vec4 mainLabColorMask= vec4(0.4,0.7,0.8,0.9); //controlling colors
-  uniform int mainLabisVisible= 1; // controlling visibility
-  
-  
-  uniform usampler2D testLab1; // mask image sampler
-  uniform vec4 testLab1ColorMask= vec4(0.4,0.7,0.8,0.9); //controlling colors
-  uniform int testLab1isVisible= 1; // controlling visibility
-   
-  
-  
-      void main()
-      {      
-  
-  uint mainLabRes = texture2D(mainLab, TexCoord0).r * mainLabisVisible  ;
-    
-  uint testLab1Res = texture2D(testLab1, TexCoord0).r * testLab1isVisible  ;
-  
-   vec4 CTImRes = mainColor(texture2D(CTIm, TexCoord0).r);
-    FragColor = vec4(( (mainLabColorMask.r *  mainLabRes)  +  (testLab1ColorMask.r *  testLab1Res) 
-    +CTImRes.r )/3  ,( (mainLabColorMask.g  * mainLabRes)  +  (testLab1ColorMask.g  * testLab1Res) 
-    +CTImRes.g) /3, ( (mainLabColorMask.b  * mainLabRes)  +  (testLab1ColorMask.b  * testLab1Res) 
-    +CTImRes.b ) /3, 1.0  ); //long  product, if mask is invisible it just has full transparency
-  
-      }
 
 
 
@@ -474,89 +315,181 @@ vec4 fmaskColor(in float maskTexel,in vec4 FragColorMain ,in bool isVisible ,in 
 
 
 
-        out vec4 FragColor;
-  in vec3 ourColor;
-  smooth in vec2 TexCoord0;
-  uniform int  min_shown_white = 400;//400 ;// value of cut off  - all values above will be shown as white
-  uniform int  max_shown_black = -200;//value cut off - all values below will be shown as black
-  uniform float displayRange = 600.0;
-  
-  // for mask difference display
-  uniform int isMaskDiffrenceVis=0 ;//1 if we want to display mask difference
-  uniform int maskAIndex=0 ;//marks index of first mask we want to get diffrence visualized
-  uniform int maskBIndex=0 ;//marks index of second mask we want to get diffrence visualized
-  //for nuclear mask properdisplay
-  uniform float minNuclearMaskVal = 0.0;//minimum possible value of nuclear mask
-  uniform float maxNuclearMaskVal = 0.0;//maximum possible value of nuclear mask
-  uniform float rangeOfNuclearMaskVal = 0.0;//precalculated maximum - minimum  possible values of nuclear mask
-  uniform sampler nuclearMaskSampler;
-  uniform isNuclearMaskVis = 0;
-  
-  uniform isampler2D CTIm; // main image sampler
-  uniform int CTImisVisible = 1; // controllin main texture visibility
-  //in case of int texture  controlling color display of main image we keep all above some value as white and all below some value as black
-  vec4 mainColor(in int texel)
-  {
-      if(CTImisVisible==0){
-                 return vec4(0.0, 0.0, 0.0, 1.0);
-      }
-      else if(texel >min_shown_white){
-                 return vec4(1.0, 1.0, 1.0, 1.0);
-                            }
-                                   else if (texel< max_shown_black){
-          return vec4(0.0, 0.0, 0.0, 1.0);
-                }
-                       else{
-        float fla = float(texel-max_shown_black) ;
-        float fl = fla/displayRange ;
-       return vec4(fl, fl, fl, 1.0);
-      }
-  }
-  
-  
-  uniform usampler2D mainLab; // mask image sampler
-  uniform vec4 mainLabColorMask= vec4(0.4,0.7,0.8,0.9); //controlling colors
-  uniform int mainLabisVisible= 0; // controlling visibility
-  uniform usampler2D testLab1; // mask image sampler
-  uniform vec4 testLab1ColorMask= vec4(0.4,0.7,0.8,0.9); //controlling colors
-  uniform int testLab1isVisible= 0; // controlling visibility
-  uniform usampler2D testLab2; // mask image sampler
-  uniform vec4 testLab2ColorMask= vec4(0.4,0.7,0.8,0.9); //controlling colors
-  uniform int testLab2isVisible= 0; // controlling visibility
-  uniform usampler2D textText; // mask image sampler
-  uniform vec4 textTextColorMask= vec4(0.4,0.7,0.8,0.9); //controlling colors
-  uniform int textTextisVisible= 0; // controlling visibility
-  
-  float rdiffrenceColor(uint maskkA,uint maskkB)
-  {
-    return ((mainLabColorMask.r + testLab1ColorMask.r)/2) *( maskkA-maskkB  );
-  }
-  float gdiffrenceColor(uint maskkA,uint maskkB)
-  {
-    return ((mainLabColorMask.g + testLab1ColorMask.g)/2) *( maskkA-maskkB  );
-  }
-  float bdiffrenceColor(uint maskkA,uint maskkB)
-  {
-    return ((mainLabColorMask.b + testLab1ColorMask.b)/2) *( maskkA-maskkB  );
-  }
-  
-      void main()
-      {
-  uint mainLabRes = texture2D(mainLab, TexCoord0).r * mainLabisVisible  ;
-  uint testLab1Res = texture2D(testLab1, TexCoord0).r * testLab1isVisible  ;
-  uint testLab2Res = texture2D(testLab2, TexCoord0).r * testLab2isVisible  ;
-  uint textTextRes = texture2D(textText, TexCoord0).r * textTextisVisible  ;
-  
-  uint todiv =  mainLabisVisible  +  testLab1isVisible  +  testLab2isVisible  +  textTextisVisible + CTImisVisible+ isMaskDiffrenceVis;
-   vec4 CTImRes = mainColor(texture2D(CTIm, TexCoord0).r);
-    FragColor = vec4(( (mainLabColorMask.r *  mainLabRes)  +  (testLab1ColorMask.r *  testLab1Res)  +  (testLab2ColorMask.r *  testLab2Res)  +  (textTextColorMask.r *  textTextRes)
-    +CTImRes.r+rdiffrenceColor(mainLabRes ,testLab1Res )
-     )/todiv
-    ,( (mainLabColorMask.g  * mainLabRes)  +  (testLab1ColorMask.g  * testLab1Res)  +  (testLab2ColorMask.g  * testLab2Res)  +  (textTextColorMask.g  * textTextRes)
-    +CTImRes.g+gdiffrenceColor(mainLabRes ,testLab1Res ))
-    /todiv,
-    ( (mainLabColorMask.b  * mainLabRes)  +  (testLab1ColorMask.b  * testLab1Res)  +  (testLab2ColorMask.b  * testLab2Res)  +  (textTextColorMask.b  * textTextRes)
-    +CTImRes.b+bdiffrenceColor(mainLabRes ,testLab1Res ) )
-    /todiv,
-    1.0  ); //long  product, if mask is invisible it just has full transparency
-      }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+[ Info: #extension GL_EXT_gpu_shader4 : enable    //Include support for this extension, which defines usampler2D
+[ Info: out vec4 FragColor;
+[ Info: in vec3 ourColor;
+[ Info: smooth in vec2 TexCoord0;
+[ Info: uniform int  min_shown_white = 400;//400 ;// value of cut off  - all values above will be shown as white
+[ Info: uniform int  max_shown_black = -200;//value cut off - all values below will be shown as black
+[ Info: uniform float displayRange = 600.0;
+[ Info: 
+[ Info: 
+[ Info: 
+[ Info: // for mask difference display
+[ Info: uniform int isMaskDiffrenceVis=0 ;//1 if we want to display mask difference
+[ Info: uniform int maskAIndex=0 ;//marks index of first mask we want to get diffrence visualized
+[ Info: uniform int maskBIndex=0 ;//marks index of second mask we want to get diffrence visualized
+[ Info: 
+[ Info: 
+[ Info: uniform isampler2D CTIm; // main image sampler
+[ Info: uniform int CTImisVisible = 1; // controllin main texture visibility
+[ Info: 
+[ Info: 
+[ Info: //in case of int texture  controlling color display of main image we keep all above some value as white and all below some value as black
+[ Info: vec4 mainColor(in int texel)
+[ Info: {
+[ Info:     if(CTImisVisible==0){
+[ Info:         return vec4(0.0, 0.0, 0.0, 1.0);
+[ Info:     }
+[ Info:     else if(texel >min_shown_white){
+[ Info:         return vec4(1.0, 1.0, 1.0, 1.0);
+[ Info:         }
+[ Info:     else if (texel< max_shown_black){
+[ Info:         return vec4(0.0, 0.0, 0.0, 1.0);
+[ Info:    }
+[ Info:     else{
+[ Info:       float fl = float(texel-max_shown_black)/displayRange ;
+[ Info:      return vec4(fl, fl, fl, 1.0);
+[ Info:     }
+[ Info: }
+[ Info: 
+[ Info: 
+[ Info: 
+[ Info: 
+[ Info: 
+[ Info: uniform usampler2D mainLab; // mask image sampler
+[ Info: uniform vec4 mainLabColorMask= vec4(0.0,0.0,0.0,0.0); //controlling colors
+[ Info: uniform int mainLabisVisible= 0; // controlling visibility
+[ Info: 
+[ Info: uniform uint  mainLabminValue= 0; // minimum possible value set in configuration
+[ Info: uniform uint  mainLabmaxValue= 1; // maximum possible value set in configuration
+[ Info: uniform uint  mainLabValueRange= 1; // range of possible values calculated from above
+[ Info: 
+[ Info: 
+[ Info: uniform usampler2D testLab1; // mask image sampler
+[ Info: uniform vec4 testLab1ColorMask= vec4(0.0,0.0,0.0,0.0); //controlling colors
+[ Info: uniform int testLab1isVisible= 0; // controlling visibility
+[ Info: 
+[ Info: uniform uint  testLab1minValue= 0; // minimum possible value set in configuration
+[ Info: uniform uint  testLab1maxValue= 1; // maximum possible value set in configuration
+[ Info: uniform uint  testLab1ValueRange= 1; // range of possible values calculated from above
+[ Info: 
+[ Info: 
+[ Info: uniform usampler2D testLab2; // mask image sampler
+[ Info: uniform vec4 testLab2ColorMask= vec4(0.0,0.0,0.0,0.0); //controlling colors
+[ Info: uniform int testLab2isVisible= 0; // controlling visibility
+[ Info: 
+[ Info: uniform uint  testLab2minValue= 0; // minimum possible value set in configuration
+[ Info: uniform uint  testLab2maxValue= 1; // maximum possible value set in configuration
+[ Info: uniform uint  testLab2ValueRange= 1; // range of possible values calculated from above
+[ Info: 
+[ Info: 
+[ Info: uniform sampler2D nuclearMask; // mask image sampler
+[ Info: uniform vec4[3] nuclearMaskColorMask  = vec4[3](vec4(0.0,0.0,0.0,1.0),vec4(0.0,0.0,1.0 ,1.0),vec4(1.0,0.0,0.0 ,1.0));// we add one so later function operating on this will make easier
+[ Info: uniform int nuclearMaskisVisible= 0; // controlling visibility
+[ Info: 
+[ Info: uniform float  nuclearMaskminValue= 0.0; // minimum possible value set in configuration
+[ Info: uniform float  nuclearMaskmaxValue= 2.0; // maximum possible value set in configuration
+[ Info: uniform float  nuclearMaskValueRange= 2.0; // range of possible values calculated from above
+[ Info: 
+[ Info: 
+[ Info: 
+[ Info: 
+[ Info: float rnuclearMaskgetColorForMultiColor(float texelRes) {
+[ Info:         float normalized = (texelRes/float(nuclearMaskValueRange))*3;
+[ Info:         uint index = uint(floor(normalized)) ;// so we normalize floor  in order to get index of color from color list
+[ Info:         float[3] colorFloats = float[3](0.0,0.0,1.0   )  ;
+[ Info:         float normalizedColorPercent= float(index)-normalized ;
+[ Info:         return texelRes;//colorFloats[index +1]*normalizedColorPercent+colorFloats[index]*(1- normalizedColorPercent);//so we get color from current section and closer we are to the end of this section the bigger influence of this color, the closer we are to the begining the bigger the influence of previous section color
+[ Info: }
+[ Info: 
+[ Info: 
+[ Info: 
+[ Info: float gnuclearMaskgetColorForMultiColor(float texelRes) {
+[ Info:         float normalized = (texelRes/float(nuclearMaskValueRange))*3;
+[ Info:         uint index = uint(floor(normalized)) ;// so we normalize floor  in order to get index of color from color list
+[ Info:         float[3] colorFloats = float[3](0.0,0.0,0.0   )  ;
+[ Info:         float normalizedColorPercent= float(index)-normalized ;
+[ Info:         return texelRes;//colorFloats[index +1]*normalizedColorPercent+colorFloats[index]*(1- normalizedColorPercent);//so we get color from current section and closer we are to the end of this section the bigger influence of this color, the closer we are to the begining the bigger the influence of previous section color
+[ Info: }
+[ Info: 
+[ Info: 
+[ Info: 
+[ Info: float bnuclearMaskgetColorForMultiColor(float texelRes) {
+[ Info:         float normalized = (texelRes/float(nuclearMaskValueRange))*3;
+[ Info:         uint index = uint(floor(normalized)) ;// so we normalize floor  in order to get index of color from color list
+[ Info:         float[3] colorFloats = float[3](0.0,1.0,0.0   )  ;
+[ Info:         float normalizedColorPercent= float(index)-normalized ;
+[ Info:         return texelRes;//colorFloats[index +1]*normalizedColorPercent+colorFloats[index]*(1- normalizedColorPercent);//so we get color from current section and closer we are to the end of this section the bigger influence of this color, the closer we are to the begining the bigger the influence of previous section color
+[ Info: }
+[ Info: 
+[ Info: 
+[ Info: 
+[ Info: float rdiffrenceColor(uint maskkA,uint maskkB)
+[ Info: {
+[ Info:   return   max(float(maskkA)-float(maskkB),0.0)*((mainLabColorMask.r + testLab1ColorMask.r)/2)*isMaskDiffrenceVis;
+[ Info: }
+[ Info: 
+[ Info: 
+[ Info: float gdiffrenceColor(uint maskkA,uint maskkB)
+[ Info: {
+[ Info:   return   max(float(maskkA)-float(maskkB),0.0)*((mainLabColorMask.g + testLab1ColorMask.g)/2)*isMaskDiffrenceVis;
+[ Info: }
+[ Info: 
+[ Info: 
+[ Info: float bdiffrenceColor(uint maskkA,uint maskkB)
+[ Info: {
+[ Info:   return   max(float(maskkA)-float(maskkB),0.0)*((mainLabColorMask.b + testLab1ColorMask.b)/2)*isMaskDiffrenceVis;
+[ Info: }
+[ Info: 
+[ Info: 
+[ Info: 
+[ Info: 
+[ Info:     void main()
+[ Info:     {
+[ Info: 
+[ Info: uint mainLabRes = texture2D(mainLab, TexCoord0).r * mainLabisVisible  ;
+[ Info: 
+[ Info: 
+[ Info: uint testLab1Res = texture2D(testLab1, TexCoord0).r * testLab1isVisible  ;
+[ Info: 
+[ Info: 
+[ Info: uint testLab2Res = texture2D(testLab2, TexCoord0).r * testLab2isVisible  ;
+[ Info: 
+[ Info: 
+[ Info: float nuclearMaskRes = texture2D(nuclearMask, TexCoord0).r * nuclearMaskisVisible  ;
+[ Info: 
+[ Info: 
+[ Info: 
+[ Info: 
+[ Info: uint todiv =  mainLabisVisible  +  testLab1isVisible  +  testLab2isVisible  +  nuclearMaskisVisible + CTImisVisible+ isMaskDiffrenceVis;
+[ Info:  vec4 CTImRes = mainColor(texture2D(CTIm, TexCoord0).r);
+[ Info:    FragColor = vec4(( (mainLabColorMask.r *  mainLabRes)  +  (testLab1ColorMask.r *  testLab1Res)  +  (testLab2ColorMask.r *  testLab2Res) +rnuclearMaskgetColorForMultiColor(nuclearMaskRes)
+[ Info:    +CTImRes.r+rdiffrenceColor(texture2D(mainLab, TexCoord0).r ,texture2D(testLab1, TexCoord0).r )
+[ Info:     )/todiv
+[ Info:    ,( (mainLabColorMask.g  * mainLabRes)  +  (testLab1ColorMask.g  * testLab1Res)  +  (testLab2ColorMask.g  * testLab2Res) +gnuclearMaskgetColorForMultiColor(nuclearMaskRes)
+[ Info:    +CTImRes.g+gdiffrenceColor(texture2D(mainLab, TexCoord0).r ,texture2D(testLab1, TexCoord0).r ))
+[ Info:    /todiv,
+[ Info:    ( (mainLabColorMask.b  * mainLabRes)  +  (testLab1ColorMask.b  * testLab1Res)  +  (testLab2ColorMask.b  * testLab2Res) +bnuclearMaskgetColorForMultiColor(nuclearMaskRes)
+[ Info:    +CTImRes.b+bdiffrenceColor(texture2D(mainLab, TexCoord0).r ,texture2D(testLab1, TexCoord0).r ) )
+[ Info:    /todiv,
+[ Info:    1.0  ); //long  product, if mask is invisible it just has full transparency
+[ Info: 
+[ Info:     }
+[ Info: 
+[ Info: 
+[ Info: 

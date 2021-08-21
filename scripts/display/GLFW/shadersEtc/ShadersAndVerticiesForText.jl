@@ -1,23 +1,13 @@
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
-using ModernGL, GeometryTypes, GLFW
-include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
-
-
 
 #Create and initialize shaders
 module ShadersAndVerticiesForText
-using ModernGL, GeometryTypes, GLFW,Main.ForDisplayStructs, Main.CustomFragShad
+using ModernGL, GeometryTypes, GLFW,Main.ForDisplayStructs, Main.CustomFragShad, Main.ModernGlUtil
 
 export getWordsVerticies
 
-
-
-
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
-include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 
 
 ```@doc

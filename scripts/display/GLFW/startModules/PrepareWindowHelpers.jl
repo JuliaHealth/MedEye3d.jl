@@ -8,8 +8,7 @@ display verticies needed for texture  display
 module PrepareWindowHelpers
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
-
-include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
+using Main.ModernGlUtil, GLFW,ModernGL
 
 export createDAtaBuffer
 export createElementBuffer

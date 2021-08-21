@@ -1,3 +1,9 @@
+using DrWatson
+@quickactivate "Probabilistic medical segmentation"
+
+module ModernGlUtil
+export createcontextinfo,glGenTexture,glGenVertexArray,glGenBuffer,getInfoLog,validateShader,glErrorMessage,get_glsl_version_string,createShaderProgram,createShaderProgram,createShader,glCheckError
+
 using ModernGL
 using GLFW
 
@@ -10,6 +16,9 @@ end
 glGenBuffer() = glGenOne(glGenBuffers)
 glGenVertexArray() = glGenOne(glGenVertexArrays)
 glGenTexture() = glGenOne(glGenTextures)
+
+
+
 
 function getInfoLog(obj::GLuint)
 	# Return the info log for obj, whether it be a shader or a program.
@@ -38,6 +47,8 @@ function validateShader(shader)
 	glGetShaderiv(shader, GL_COMPILE_STATUS, success)
 	success[] == GL_TRUE
 end
+
+
 function glErrorMessage()
 # Return a string representing the current OpenGL error flag, or the empty string if there's no error.
 	err = glGetError()
@@ -48,6 +59,9 @@ function glErrorMessage()
 	err == GL_INVALID_FRAMEBUFFER_OPERATION ? "GL_INVALID_FRAMEBUFFER_OPERATION: The framebuffer object is not complete. The offending command is ignored and has no other side effect than to set the error flag." :
 	err == GL_OUT_OF_MEMORY ? "GL_OUT_OF_MEMORY: There is not enough memory left to execute the command. The state of the GL is undefined, except for the state of the error flags, after this error is recorded." : "Unknown OpenGL error with error code $err."
 end
+
+
+
 function glCheckError(actionName="")
 	message = glErrorMessage()
 	if length(message) > 0
@@ -58,6 +72,10 @@ function glCheckError(actionName="")
 		end
 	end
 end
+
+
+
+
 function createShader(source, typ)
 # Create the shader
 	shader = glCreateShader(typ)::GLuint
@@ -71,6 +89,9 @@ function createShader(source, typ)
 	!validateShader(shader) && error("Shader creation error: ", getInfoLog(shader))
 	shader
 end
+
+
+
 function createShaderProgram(f, vertexShader, fragmentShader)
 	# Create, link then return a shader program for the given shaders.
 	# Create the shader program
@@ -99,6 +120,7 @@ end
 
 createShaderProgram(vertexShader, fragmentShader) = createShaderProgram(prog->0, vertexShader, fragmentShader)
 global GLSL_VERSION = ""
+
 function createcontextinfo()
 	global GLSL_VERSION
 	glsl = split(unsafe_string(glGetString(GL_SHADING_LANGUAGE_VERSION)), ['.', ' '])
@@ -134,3 +156,6 @@ end
 
 		    #clear as far as I get buffers
 			glClear() = ccall(@eval(GLFW.GetProcAddress("glClear")), Cvoid, (Cuint,), 0x00004000)
+
+
+end#ModernGlUtil

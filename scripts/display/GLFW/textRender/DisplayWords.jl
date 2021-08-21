@@ -6,10 +6,9 @@ Module controlling displaying of the text associated with the segmentation
 - either text releted to all slices or just a single one currently displayed or both
 """
 module DisplayWords
-using FreeTypeAbstraction,Main.ForDisplayStructs,Main.DataStructs , ModernGL, ColorTypes,Main.PrepareWindowHelpers,  Main.ShadersAndVerticies, Main.ShadersAndVerticiesForText, Glutils, DrWatson
+using FreeTypeAbstraction,Main.ForDisplayStructs,Main.DataStructs,Main.ModernGlUtil , ModernGL, ColorTypes,Main.PrepareWindowHelpers,  Main.ShadersAndVerticies, Main.ShadersAndVerticiesForText, Glutils, DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
-include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 
 export textLinesFromStrings,renderSingleLineOfText,activateForTextDisp,bindAndActivateForText,reactivateMainObj, createTextureForWords,bindAndActivateForText, bindAndDisplayTexture
 
@@ -119,10 +118,8 @@ function createTextureForWords(numberOfActiveTextUnits::Int
                                 ,heightt::Int32=Int32(1000)
                                 ,actTextrureNumb::UInt32=UInt32(0) )::TextureSpec
 @info "numberOfActiveTextUnits+1" numberOfActiveTextUnits+1
-    return Main.ForDisplayStructs.TextureSpec(
+    return Main.ForDisplayStructs.TextureSpec{UInt8}(
             name = "textText"
-            ,isTextTexture = true
-            ,dataType= UInt8
             ,color = RGB(0.0,0.0,1.0)
             ,widthh=widthh
             ,heightt=heightt

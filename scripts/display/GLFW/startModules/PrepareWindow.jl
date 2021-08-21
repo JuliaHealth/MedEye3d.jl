@@ -3,16 +3,13 @@ using DrWatson
 
 
 module PrepareWindow
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
 
 export displayAll,createAndInitShaderProgram
 
 using ModernGL, GeometryTypes, GLFW
 using Main.PrepareWindowHelpers
-include(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
-using  Main.OpenGLDisplayUtils, Main.DataStructs
-using Main.ShadersAndVerticies, Main.ForDisplayStructs,Main.ShadersAndVerticiesForText
+using  Main.OpenGLDisplayUtils, Main.DataStructs,Logging
+using Main.ShadersAndVerticies, Main.ForDisplayStructs,Main.ShadersAndVerticiesForText, Main.ModernGlUtil
 
 
 
@@ -44,8 +41,11 @@ function displayAll(listOfTexturesToCreate::Vector{TextureSpec}
 
 	vertex_shader = createVertexShader(gslsStr)
 	
-	someExampleMask = filter(textSpec-> !textSpec.isMainImage && !textSpec.isSecondaryMain ,listOfTexturesToCreate)[1]
-	fragment_shader_main,shader_program= createAndInitShaderProgram(vertex_shader,listOfTexturesToCreate,someExampleMask,someExampleMask,gslsStr  )
+	masks = filter(textSpec-> !textSpec.isMainImage ,listOfTexturesToCreate)
+	someExampleMask = masks[1]
+	someExampleMaskB = masks[2]
+	@info "masks set for subtraction $(someExampleMask.name)" someExampleMaskB.name
+	fragment_shader_main,shader_program= createAndInitShaderProgram(vertex_shader,listOfTexturesToCreate,someExampleMask,someExampleMaskB,gslsStr  )
 	
 	glUseProgram(shader_program)
 	
@@ -87,7 +87,7 @@ function displayAll(listOfTexturesToCreate::Vector{TextureSpec}
 	schedule(t)
 
 
-return (window,vertex_shader,fragment_shader_main ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words)
+return (window,vertex_shader,fragment_shader_main ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words,gslsStr)
 
 end# displayAll
 

@@ -9,7 +9,7 @@ module coordinating response to the  keyboard input - mainly shortcuts that  hel
 """
 #@doc ReactOnKeyboardSTR
 module ReactOnKeyboard
-using Rocket, GLFW,Dictionaries, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils, Main.Uniforms, Match, Parameters,DataTypesBasic
+using Main.DisplayWords, Setfield,Main.PrepareWindow,Glutils, Rocket, GLFW,Dictionaries, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils, Main.Uniforms, Match, Parameters,DataTypesBasic
 export reactToKeyboard , registerKeyboardFunctions
 
 KeyboardCallbackSubscribableStr= """
@@ -33,6 +33,8 @@ mutable struct KeyboardCallbackSubscribable <: Subscribable{KeyboardStruct}
     isShiftPressed::Bool  # left - scancode 50 right 62- Int32
     isAltPressed::Bool# left - scancode 64 right 108- Int32
     isEnterPressed::Bool# scancode 36
+    isTAbPressed::Bool# scancode 36
+    isSpacePressed::Bool# scancode 36
     lastKeysPressed::Vector{String} # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
     subject :: Subject{KeyboardStruct} 
 end 
@@ -80,12 +82,16 @@ function (handler::KeyboardCallbackSubscribable)(scancode ::GLFW.Key, action::GL
             GLFW.KEY_RIGHT_SHIFT =>( handler.isShiftPressed=( act==1); "shift")
             GLFW.KEY_RIGHT_ALT =>( handler.isAltPressed= (act==1); "alt")
             GLFW.KEY_LEFT_ALT => (handler.isAltPressed= (act==1); "alt")
+            GLFW.KEY_SPACE => (handler.isSpacePressed= (act==1); "space")
+            GLFW.KEY_TAB => (handler.isTAbPressed= (act==1); "tab")
             GLFW.KEY_ENTER =>( handler.isEnterPressed= (act==1); "enter")
             _ => "notImp" # not Important
          end
             res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed || scCode=="ctrl" 
                     , isShiftPressed= handler.isShiftPressed ||scCode=="shift" 
                     ,isAltPressed= handler.isAltPressed ||scCode=="alt"
+                    ,isSpacePressed= handler.isSpacePressed ||scCode=="space"
+                    ,isTAbPressed= handler.isTAbPressed ||scCode=="tab"
                     ,isEnterPressed= handler.isEnterPressed 
                     ,lastKeysPressed= handler.lastKeysPressed 
                     ,mostRecentScanCode = scancode
@@ -117,7 +123,7 @@ function registerKeyboardFunctions(window::GLFW.Window,stopListening::Base.Threa
 
     stopListening[]=true # stoping event listening loop to free the GLFW context
                            
-    keyboardSubs = KeyboardCallbackSubscribable(false,false,false,false,[], Subject(KeyboardStruct, scheduler = AsyncScheduler()))
+    keyboardSubs = KeyboardCallbackSubscribable(false,false,false,false,false,false,[], Subject(KeyboardStruct, scheduler = AsyncScheduler()))
                                   
         GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
         name = GLFW.GetKeyName(key, scancode)
@@ -135,12 +141,14 @@ return keyboardSubs
 end #registerKeyboardFunctions
 
 
-```@doc
-Registering function how should behave to deal with result of search for texture related to keyboard input 
-```
-function setVisOnKey(textSpecObs::Identity{TextureSpec},keyInfo::KeyboardStruct  , actor::SyncActor{Any, ActorWithOpenGlObjects}) 
 
-   textSpec =  textSpecObs.value
+
+```@doc
+processing information from keys - the instance of this function will be chosen on
+the basis mainly of multiple dispatch
+```
+function processKeysInfo(textSpecObs::Identity{TextureSpec},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct )
+    textSpec =  textSpecObs.value
     if(keyInfo.isCtrlPressed)    
         setTextureVisibility(false,textSpec.uniforms )
         @info " set visibility of $(textSpec.name) to false" 
@@ -150,32 +158,107 @@ function setVisOnKey(textSpecObs::Identity{TextureSpec},keyInfo::KeyboardStruct 
     elseif(keyInfo.isAltPressed)  
         actor.actor.textureToModifyVec= [textSpec]
         @info " set texture for manual modifications to  $(textSpec.name)"    
+        
     end #if
-
-end #setVisOnKey
-
-setVisOnKey(a::Const{Nothing},keyInfo::KeyboardStruct ) = "" # just doing nothing in case of empty option
-
-
-```@doc
-processing information from keys - the instance of this function will be chosen on
-the basis mainly of multiple dispatch
-```
-function processKeysInfo(numb::Identity{Int32},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct )
-    opt = findTextureBasedOnNumb(actor.actor.mainForDisplayObjects.listOfTextSpecifications
-    , numb.value
-    ,actor.actor.mainForDisplayObjects.numIndexes ) 
-setVisOnKey( opt,keyInfo , actor)
 basicRender(actor.actor.mainForDisplayObjects.window)
 end #processKeysInfo
 
+
+```@doc
+for case when we want to subtract two masks
+```
+function processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec}, Identity{TextureSpec}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct )
+    textSpecs =  maskNumbs.value
+    maskA = textSpecs[1].value
+    maskB = textSpecs[2].value
+    
+    if(keyInfo.isCtrlPressed)    # when we want to stop displaying diffrence
+        @uniforms! begin
+        actor.actor.mainForDisplayObjects.mainImageUniforms.isMaskDiffrenceVis:=0
+               end
+        setTextureVisibility(true,maskA.uniforms )
+        setTextureVisibility(true,maskB.uniforms )
+
+    elseif(keyInfo.isShiftPressed)  # when we want to display diffrence
+        displayMaskDiffrence(maskA,maskB,actor )
+    end #if
+basicRender(actor.actor.mainForDisplayObjects.window)
+   
+
+end#processKeysInfo
+
+
 processKeysInfo(a::Const{Nothing},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) = "" # just doing nothing in case of empty option
+processKeysInfo(a::Identity{Tuple{Const{Nothing}, Identity{TextureSpec}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) = "" # just doing nothing in case of empty option
+processKeysInfo(a::Identity{Tuple{Const{Nothing}, Const{Nothing}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) = "" # just doing nothing in case of empty option
+processKeysInfo(a::Identity{Tuple{ Identity{TextureSpec}, Const{Nothing}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) = "" # just doing nothing in case of empty option
+
+
+
+displayMaskDiffrenceStr= """
+SUBTRACTIN MASKS
+used in order to enable subtracting one mask from the other - hence displaying 
+pixels where value of mask a is present but mask b not (order is important)
+automatically both masks will be set to be invisible and only the diffrence displayed
+
+In order to achieve this  we need to have all of the samplers references stored in a list 
+1) we need to set both masks to invisible - it will be done from outside the shader
+2) we set also from outside uniform marking visibility of diffrence to true
+3) also from outside we need to set which texture to subtract from which we will achieve this by setting maskAtoSubtr and maskBtoSubtr int uniforms
+    those integers will mark which samplers function will use
+4) in shader function will be treated as any other mask and will give contribution to output color multiplied by its visibility(0 or 1)    
+5) inside the function color will be defined as multiplication of two colors of mask A and mask B - colors will be acessed similarly to samplers
+6) color will be returned only if value associated with  maskA is greater than mask B and proportional to this difffrence
+
+In order to provide maximum performance and avoid branching inside shader multiple shader programs will be attached and one choosed  that will use diffrence needed
+maskToSubtrastFrom,maskWeAreSubtracting - specifications o textures we are operating on 
+"""
+@doc displayMaskDiffrenceStr
+function displayMaskDiffrence(maskA::TextureSpec, maskB::TextureSpec,actor::SyncActor{Any, ActorWithOpenGlObjects})
+ #defining variables
+
+ dispObj = actor.actor.mainForDisplayObjects
+ vertex_shader = dispObj.vertex_shader
+ listOfTextSpecsc=  actor.actor.mainForDisplayObjects.listOfTextSpecifications
+ fragment_shade,shader_prog= createAndInitShaderProgram(dispObj.vertex_shader,  listOfTextSpecsc,maskA,maskB,dispObj.gslsStr)
+ # saving new variables to the actor
+ newForDisp = setproperties(dispObj,(shader_program=shader_prog,fragment_shader=fragment_shade ) )
+ actor.actor.mainForDisplayObjects=newForDisp
+ #making all ready to display
+ reactivateMainObj(shader_prog, newForDisp.vbo,actor.actor.calcDimsStruct  )
+ activateTextures(listOfTextSpecsc )
+ #making diffrence visible
+ @uniforms! begin
+ dispObj.mainImageUniforms.isMaskDiffrenceVis:=1
+        end
+ setTextureVisibility(false,maskA.uniforms )
+ setTextureVisibility(false,maskB.uniforms )
+
+
+end#displayMaskDiffrence
+
+
+
+```@doc
+invoked when we want to undo last performed action 
+```
+function processKeysInfo(numb::Identity{Tuple{Bool}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct )
+
+
+end#processKeysInfo
+
 
 
 reactToKeyboardStr = """
 Given keyInfo struct wit information about pressed keys it can process them to make some actions  - generally activating keyboard shortcuts
 shift + number - make mask associated with given number visible
 ctrl + number -  make mask associated with given number invisible 
+alt + number -  make mask associated with given number active for mouse interaction 
+tab + number - sets the number that will be  used as an input to masks modified by mouse
+shift + numberA + "-"(minus sign) +numberB  - display diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B invisible
+ctrl + numberA + "-"(minus sign) +numberB  - stops displaying diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B visible
+space + 1 or 2 or 3 - change the plane of view (transverse, coronal, sagittal)
+ctrl + z - undo last action
 """
 @doc reactToKeyboardStr
 function reactToKeyboard(keyInfo::KeyboardStruct
@@ -186,7 +269,7 @@ function reactToKeyboard(keyInfo::KeyboardStruct
     obj.stopListening[]=true #free GLFW context
 
     # processing here on is based on multiple dispatch mainly 
-    processKeysInfo(strToNumber(keyInfo.lastKeysPressed),actor,keyInfo)
+    processKeysInfo(parseString(keyInfo.lastKeysPressed,actor),actor,keyInfo)
     
 
     obj.stopListening[]=false # reactivete event listening loop
@@ -209,18 +292,20 @@ function shouldBeExecuted(keyInfo::KeyboardStruct, act::Int64)::Bool
       GLFW.KEY_RIGHT_SHIFT=> return act==2
       GLFW.KEY_RIGHT_ALT => return act==2
       GLFW.KEY_LEFT_ALT => return act==2
+      GLFW.KEY_SPACE => return act==2
+      GLFW.KEY_TAB => return act==2
       GLFW.KEY_ENTER  => return act==1 # returning true if enter is pressed
             _ => false # not Important
          end#match
          @info res
          return res
-
-        
+ 
         end#if     
    # if we got here we did not found anything intresting      
 return false
 
 end#shouldBeExecuted
+
 
 
 
@@ -237,18 +322,44 @@ function findTextureBasedOnNumb(listOfTextSpecifications::Vector{TextureSpec}
         return Option(listOfTextSpecifications[dict[numb]])
     end#if
     #if we are here it mean no such texture was found    
+    @info "no texture associated with this number" numb
     return Option()
 
 end #findTextureBasedOnNumb
 
 
 ```@doc
-Given string it checks each character weather is numeric - gets substring of all numeric characters and parses it into integer
+Given string it parser it to given object on the basis of with and multiple dispatch futher actions will be done
+it checks each character weather is numeric - gets substring of all numeric characters and parses it into integer
+listOfTextSpecifications - list with all registered Texture specifications
+return option of diffrent type depending on input
 ```
-function strToNumber(str::Vector{String})::Option{Int32}
-	filtered =  filter(x->isnumeric(x) , join(str) )
-    if(isempty(filtered))  return Option()  end
-	return   Option(parse(Int32, filtered))
+function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlObjects} )::Option{}
+    joined = join(str)
+	filtered =  filter(x->isnumeric(x) , joined )
+    listOfTextSpecs = actor.actor.mainForDisplayObjects.listOfTextSpecifications
+    searchDict = actor.actor.mainForDisplayObjects.numIndexes
+    if(occursin("z" , joined) )
+        return Option(true)
+
+    elseif(isempty(filtered))#nothing to be done   
+        return Option()
+     # in case we want to display diffrence of two masks   
+    elseif(occursin("-" , joined))
+
+     mapped = map(splitted-> filter(x->isnumeric(x) , splitted) ,split(joined,"-")) |>
+      (filtered)-> filter(it-> it!="", filtered) |>
+      (filtered)->map(it->parse(Int32,it)  ,filtered)
+        if(length(mapped)==2)
+            textSpectOptions = map(it->findTextureBasedOnNumb(listOfTextSpecs,it, searchDict )  ,mapped )
+            return Option( (textSpectOptions[1],textSpectOptions[2])  )
+         
+        end#if    
+        return Option()
+    # in case we want to undo last action
+    end#if
+        #in case we have single number
+	return   findTextureBasedOnNumb(listOfTextSpecs,parse(Int32,filtered), searchDict ) 
 end#strToNumber
 
 

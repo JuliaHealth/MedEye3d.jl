@@ -4,7 +4,7 @@ using DrWatson
 
 module ForDisplayStructs
 using Base: Int32, isvisible
-export Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms,ForWordsDispStruct
+export parameter_type,Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms,ForWordsDispStruct
 
 using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries,FreeTypeAbstraction, Main.DataStructs
 
@@ -66,15 +66,13 @@ end
 ```@doc
 Holding the data needed to create and  later reference the textures
 ```
-@with_kw struct TextureSpec
+@with_kw struct TextureSpec{T}
   name::String=""               #human readable name by which we can reference texture
   numb::Int32 =-1               #needed to enable swithing between textures generally convinient when between 0-9; needed only if texture is to be modified by mouse input
   whichCreated::Int32 =-1       #marks which one this texture was when created - so first in list second ... - needed for convinient accessing uniforms in shaders
-  dataType::Type = UInt8        #type of data that will be used Int/uint/float
   isMainImage ::Bool = false  #true if this texture represents main image
-  isTextTexture ::Bool = false  #true if this texture represents texture that is supposed to hold text
-  isSecondaryMain ::Bool = false # true if it holds some other important information that is not mask - used for example in case of nuclear imagiing studies
-  isContinuusMask ::Bool = false # in case of masks if mask is continuus color display will be a bit diffrent
+  isNuclearMask ::Bool = false # used for example in case of nuclear imagiing studies
+  isContinuusMask ::Bool = false # in case of masks if mask is continuus color display we set multiple colors in a vector
   color::RGB = RGB(0.0,0.0,0.0) #needed in case for the masks in order to establish the range of colors we are intrested in in case of binary mask there is no point to supply more than one color (supply Vector with length = 1)
   colorSet::Vector{RGB}=[]    #set of colors that can be used for mask with continous values
   strokeWidth::Int32 =Int32(3)#marking how thick should be the line that is left after acting with the mouse ... 
@@ -92,8 +90,12 @@ Holding the data needed to create and  later reference the textures
   #used in case this is main image and we want to set window
   min_shown_white::Int32 =400
   max_shown_black::Int32 =-200
+  minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask, and second entry is maximum possible value for this mask
 end
 
+#utility function to check type associated
+parameter_type(::Type{TextureSpec{T}}) where {T} = T
+parameter_type(x::TextureSpec) = parameter_type(typeof(x))
 
 ```@doc
 given Vector of TextureSpecs
@@ -109,7 +111,7 @@ end#getLocationDict
 ```@doc
 Defined in order to hold constant objects needed to display images 
 ```
-@with_kw mutable struct forDisplayObjects    
+@with_kw  struct forDisplayObjects    
   listOfTextSpecifications::Vector{TextureSpec} = [TextureSpec()]
   window = []
   vertex_shader::UInt32 =1
@@ -121,7 +123,7 @@ Defined in order to hold constant objects needed to display images
   mainImageUniforms::MainImageUniforms = MainImageUniforms()# struct with references to main image
   TextureIndexes::Dictionary{String, Int64}=Dictionary{String, Int64}()  #gives a way of efficient querying by supplying dictionary where key is a name we are intrested in and a key is index where it is located in our array
   numIndexes::Dictionary{Int32, Int64} =Dictionary{Int32, Int64}() # a way for fast query using assigned numbers
-
+  gslsStr::String="" # string giving information about used openg gl gsls version
 end
 
 
@@ -130,7 +132,7 @@ Holding necessery data to display text  - like font related
 ```
 @with_kw struct ForWordsDispStruct
 fontFace::FTFont=FTFont(Ptr{FreeTypeAbstraction.FreeType.__JL_FT_FaceRec_}(),false) # font we will use to display text
-textureSpec::TextureSpec =TextureSpec() # texture specification of texture used to display text 
+textureSpec::TextureSpec =TextureSpec{UInt8}() # texture specification of texture used to display text 
 fragment_shader_words::UInt32=1 #reference to fragment shader used to display text
 vbo_words::Base.RefValue{UInt32}=Ref(UInt32(1)) #reference to vertex buffer object used to display text
 shader_program_words::UInt32=1
@@ -159,6 +161,8 @@ Holding necessery data to controll keyboard shortcuts```
   isShiftPressed::Bool = false # left - scancode 50 right 62- Int32
   isAltPressed::Bool= false# left - scancode 64 right 108- Int32
   isEnterPressed::Bool= false# scancode 36
+  isTAbPressed::Bool= false#
+  isSpacePressed::Bool= false# 
   lastKeysPressed::Vector{String}=[] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
  #informations about what triggered sending this particular struct to the  actor
   mostRecentScanCode ::GLFW.Key=GLFW.KEY_KP_4
