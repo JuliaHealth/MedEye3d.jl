@@ -171,8 +171,8 @@ function reactToMouseDrag(mouseCoords::Vector{CartesianIndex{2}}, actor::SyncAct
                                                 ,actor.actor.calcDimsStruct)
        twoDimDat= actor.actor.currentlyDispDat|> # accessing currently displayed data
        (singSl)-> singSl.listOfDataAndImageNames[singSl.nameIndexes[texture.name]] #accessing the texture data we want to modify
-       
-       modSlice!(twoDimDat, mappedCoords, convert(twoDimDat.type,1))|> # modifying data associated with texture
+       toSet =  convert( parameter_type(texture) ,actor.actor.valueForMasToSet.value)
+       modSlice!(twoDimDat, mappedCoords, convert(twoDimDat.type, toSet ))|> # modifying data associated with texture
        (sliceDat)-> updateTexture(twoDimDat.type,sliceDat, texture)
 
         basicRender(obj.window)

@@ -42,7 +42,16 @@ function updateTexture(::Type{Tt}
     else
 	    glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, collect(data))
 
-    end    
+    end  
+    
+    # if((parameter_type(textSpec)== Float16) || (parameter_type(textSpec)== Float32))
+    #     glTexImage2D(GL_TEXTURE_2D,0,0,0, widthh, heightt, GL_RED, textSpec.OpGlType, collect(data))
+    # else
+    #     glTexImage2D(GL_TEXTURE_2D,0,0,0, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, collect(data))
+        
+    # end  
+
+    
 end
 
 
@@ -53,7 +62,11 @@ creating texture that is storing integer values representing attenuation values 
 numb - which texture it is - basically important only that diffrent textures would have diffrent numbers
 
 ```
-function createTexture(numb::Int, width::Int32, height::Int32,GL_RType::UInt32 =GL_R16I)
+function createTexture(juliaDataType::Type{juliaDataTyp}
+                        , width::Int32
+                        , height::Int32
+                        ,GL_RType::UInt32 =GL_R8UI
+                        ,OpGlType= GL_UNSIGNED_BYTE) where {juliaDataTyp}
 #The texture we're going to render to
     texture= Ref(GLuint(0));
     glGenTextures(1, texture);
@@ -68,6 +81,12 @@ function createTexture(numb::Int, width::Int32, height::Int32,GL_RType::UInt32 =
 
     glTexStorage2D(GL_TEXTURE_2D, 1, GL_RType, width, height);
 
+# if((juliaDataType== Float16) || (juliaDataType== Float32))
+#     glTexImage2D(GL_TEXTURE_2D,0,0,0, width, height, GL_RED, OpGlType, Ptr{juliaDataTyp}())
+# else
+#     glTexImage2D(GL_TEXTURE_2D,0,0,0, width, height, GL_RED_INTEGER, OpGlType, Ptr{juliaDataTyp}())
+# end 
+    
 return texture
 end
 
@@ -87,7 +106,7 @@ function initializeTextures(listOfTextSpecs::Vector{TextureSpec})::Vector{Textur
   
     for (ind, textSpec ) in enumerate(listOfTextSpecs)
         index=ind-1
-        textUreId= createTexture(index,textSpec.widthh,textSpec.heightt,textSpec.GL_Rtype)#binding texture and populating with data
+        textUreId= createTexture(parameter_type(textSpec),textSpec.widthh,textSpec.heightt,textSpec.GL_Rtype,textSpec.OpGlType )#binding texture and populating with data
         @info "textUreId in initializeTextures"  textUreId
        
         actTextrureNumb = getProperGL_TEXTURE(index)
@@ -147,7 +166,8 @@ forDisplayObjects - stores all needed constants that holds reference to GLFW and
 function updateImagesDisplayed(singleSliceDat::SingleSliceDat
                             ,forDisplayConstants::forDisplayObjects
                             ,wordsDispObj::ForWordsDispStruct
-                            ,calcDimStruct::CalcDimsStruct )
+                            ,calcDimStruct::CalcDimsStruct
+                            ,valueForMaskToSett::valueForMasToSetStruct )
 
         forDisplayConstants.stopListening[]=true
              modulelistOfTextSpecs=forDisplayConstants.listOfTextSpecifications
@@ -166,22 +186,12 @@ function updateImagesDisplayed(singleSliceDat::SingleSliceDat
             glClearColor(0.0, 0.0, 0.1 , 1.0)
 
             matr= addTextToTexture(wordsDispObj
-                            ,singleSliceDat.textToDisp
+                            ,[singleSliceDat.textToDisp...,valueForMaskToSett.text]
                             ,calcDimStruct )
 
             #   updateTexture(UInt8, zeros(UInt8,2000,8000),wordsDispObj.textureSpec) #  ,Int32(10000),Int32(1000)
             glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-            
-            # GLFW.SwapBuffers(window)
-            # updateTexture(UInt8
-            # ,matr
-            # ,wordsDispObj.textureSpec
-            # ,0
-            # ,0)
-
-            # glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-
-
+           
             reactivateMainObj(forDisplayConstants.shader_program
                             ,forDisplayConstants.vbo
                             ,calcDimStruct )

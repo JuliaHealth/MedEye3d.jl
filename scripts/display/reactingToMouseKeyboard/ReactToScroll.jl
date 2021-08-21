@@ -95,10 +95,12 @@ function reactToScroll(isScrollUp::Bool, actor::SyncActor{Any, ActorWithOpenGlOb
                                 ,sliceNumber=current
                                 ,textToDisp = getTextForCurrentSlice(actor.actor.onScrollData, Int32(current))  )
     
+
      updateImagesDisplayed(singleSlDat
                         ,actor.actor.mainForDisplayObjects
                         ,actor.actor.textDispObj
-                        ,actor.actor.calcDimsStruct       )
+                        ,actor.actor.calcDimsStruct 
+                        ,actor.actor.valueForMasToSet      )
 
      actor.actor.currentlyDispDat=singleSlDat
 

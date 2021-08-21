@@ -9,7 +9,7 @@ module coordinating response to the  keyboard input - mainly shortcuts that  hel
 """
 #@doc ReactOnKeyboardSTR
 module ReactOnKeyboard
-using Main.DisplayWords, Setfield,Main.PrepareWindow,Glutils, Rocket, GLFW,Dictionaries, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils, Main.Uniforms, Match, Parameters,DataTypesBasic
+using Main.DisplayWords, Setfield,Main.PrepareWindow,  Main.DataStructs ,Glutils, Rocket, GLFW,Dictionaries, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils, Main.Uniforms, Match, Parameters,DataTypesBasic
 export reactToKeyboard , registerKeyboardFunctions
 
 KeyboardCallbackSubscribableStr= """
@@ -147,7 +147,7 @@ end #registerKeyboardFunctions
 processing information from keys - the instance of this function will be chosen on
 the basis mainly of multiple dispatch
 ```
-function processKeysInfo(textSpecObs::Identity{TextureSpec},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct )
+function processKeysInfo(textSpecObs::Identity{TextureSpec{T}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct )where T
     textSpec =  textSpecObs.value
     if(keyInfo.isCtrlPressed)    
         setTextureVisibility(false,textSpec.uniforms )
@@ -157,8 +157,7 @@ function processKeysInfo(textSpecObs::Identity{TextureSpec},actor::SyncActor{Any
         @info " set visibility of $(textSpec.name) to true" 
     elseif(keyInfo.isAltPressed)  
         actor.actor.textureToModifyVec= [textSpec]
-        @info " set texture for manual modifications to  $(textSpec.name)"    
-        
+        @info " set texture for manual modifications to  $(textSpec.name)"       
     end #if
 basicRender(actor.actor.mainForDisplayObjects.window)
 end #processKeysInfo
@@ -167,7 +166,7 @@ end #processKeysInfo
 ```@doc
 for case when we want to subtract two masks
 ```
-function processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec}, Identity{TextureSpec}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct )
+function processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec{T}}, Identity{TextureSpec{T}}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T
     textSpecs =  maskNumbs.value
     maskA = textSpecs[1].value
     maskB = textSpecs[2].value
@@ -188,10 +187,35 @@ basicRender(actor.actor.mainForDisplayObjects.window)
 end#processKeysInfo
 
 
+```@doc
+in case we want to  get new number set for manual modifications
+
+```
+function processKeysInfo(numbb::Identity{Int64},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T
+
+    @info "in  processKeysInfo for tab " numbb.value
+    valueForMasToSett = valueForMasToSetStruct(value = numbb.value)
+    @info "2"
+    actor.actor.valueForMasToSet =valueForMasToSett
+    actor.actor.currentlyDispDat.textToDisp= [valueForMasToSett.text,actor.actor.currentlyDispDat.textToDisp...]
+    @info "3"
+
+    updateImagesDisplayed(actor.actor.currentlyDispDat
+    , actor.actor.mainForDisplayObjects
+    , actor.actor.textDispObj
+    , actor.actor.calcDimsStruct ,valueForMasToSett )
+    @info "4"
+
+  
+
+end#processKeysInfo
+
+
+
 processKeysInfo(a::Const{Nothing},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) = "" # just doing nothing in case of empty option
-processKeysInfo(a::Identity{Tuple{Const{Nothing}, Identity{TextureSpec}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) = "" # just doing nothing in case of empty option
+processKeysInfo(a::Identity{Tuple{Const{Nothing}, Identity{TextureSpec{T}}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T = "" # just doing nothing in case of empty option
 processKeysInfo(a::Identity{Tuple{Const{Nothing}, Const{Nothing}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) = "" # just doing nothing in case of empty option
-processKeysInfo(a::Identity{Tuple{ Identity{TextureSpec}, Const{Nothing}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) = "" # just doing nothing in case of empty option
+processKeysInfo(a::Identity{Tuple{ Identity{TextureSpec{T}}, Const{Nothing}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T = "" # just doing nothing in case of empty option
 
 
 
@@ -269,7 +293,7 @@ function reactToKeyboard(keyInfo::KeyboardStruct
     obj.stopListening[]=true #free GLFW context
 
     # processing here on is based on multiple dispatch mainly 
-    processKeysInfo(parseString(keyInfo.lastKeysPressed,actor),actor,keyInfo)
+    processKeysInfo(parseString(keyInfo.lastKeysPressed,actor,keyInfo),actor,keyInfo)
     
 
     obj.stopListening[]=false # reactivete event listening loop
@@ -322,7 +346,7 @@ function findTextureBasedOnNumb(listOfTextSpecifications::Vector{TextureSpec}
         return Option(listOfTextSpecifications[dict[numb]])
     end#if
     #if we are here it mean no such texture was found    
-    @info "no texture associated with this number" numb
+     @info "no texture associated with this number" numb
     return Option()
 
 end #findTextureBasedOnNumb
@@ -334,7 +358,7 @@ it checks each character weather is numeric - gets substring of all numeric char
 listOfTextSpecifications - list with all registered Texture specifications
 return option of diffrent type depending on input
 ```
-function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlObjects} )::Option{}
+function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlObjects} ,keyInfo::KeyboardStruct)::Option{}
     joined = join(str)
 	filtered =  filter(x->isnumeric(x) , joined )
     listOfTextSpecs = actor.actor.mainForDisplayObjects.listOfTextSpecifications
@@ -344,6 +368,9 @@ function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlOb
 
     elseif(isempty(filtered))#nothing to be done   
         return Option()
+    elseif(keyInfo.isTAbPressed && !isempty(filtered))# when we want to set new value for manual mask change 
+        @info "Sending number" parse(Int64,filtered)
+        return Option(parse(Int64,filtered))    
      # in case we want to display diffrence of two masks   
     elseif(occursin("-" , joined))
 

@@ -34,9 +34,9 @@ function setUpWordsDisplay(textDispObject::Main.ForDisplayStructs.ForWordsDispSt
     ,textDispObject.vbo_words
     ,actor.actor.calcDimsStruct)
 
-    texId =  createTexture(0,textDispObject.textureSpec.widthh 
+    texId =  createTexture(UInt8,textDispObject.textureSpec.widthh 
                             ,textDispObject.textureSpec.heightt
-                            ,GL_R8UI)
+                            ,GL_R8UI,GL_UNSIGNED_BYTE)
 
     textSpec= setproperties(textDispObject.textureSpec,(ID=texId) )
 
@@ -90,6 +90,24 @@ end#setUpCalcDimsStruct
 
 
 
+```@doc
+sets value we are setting to the  active mask vie mause interaction, in case mask is modifiable 
+```
+function setUpvalueForMasToSet(valueForMasToSett::valueForMasToSetStruct ,actor::SyncActor{Any, ActorWithOpenGlObjects})
+    actor.actor.mainForDisplayObjects.stopListening[]=true
+
+    actor.actor.valueForMasToSet =valueForMasToSett
+    
+    updateImagesDisplayed(actor.actor.currentlyDispDat
+    , actor.actor.mainForDisplayObjects
+    , actor.actor.textDispObj
+    , actor.actor.calcDimsStruct ,valueForMasToSett )
+
+    actor.actor.mainForDisplayObjects.stopListening[]=false
+
+end#setUpvalueForMasToSet
+
+
 updateSingleImagesDisplayedSetUpStr =    """
 enables updating just a single slice that is displayed - do not change what will happen after scrolling
 one need to pass data to actor in 
@@ -103,7 +121,9 @@ function updateSingleImagesDisplayedSetUp(singleSliceDat::SingleSliceDat ,actor:
     updateImagesDisplayed(singleSliceDat
                         , actor.actor.mainForDisplayObjects
                         , actor.actor.textDispObj
-                        , actor.actor.calcDimsStruct  )
+                        , actor.actor.calcDimsStruct
+                        ,actor.actor.valueForMasToSet  )
+     
                         
     actor.actor.currentlyDispDat=singleSliceDat
     actor.actor.currentDisplayedSlice = singleSliceDat.sliceNumber
@@ -124,6 +144,7 @@ Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Bool) = rea
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Main.ForDisplayStructs.forDisplayObjects) = setUpMainDisplay(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Main.ForDisplayStructs.ForWordsDispStruct) = setUpWordsDisplay(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::CalcDimsStruct) = setUpCalcDimsStruct(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::valueForMasToSetStruct) = setUpvalueForMasToSet(data,actor)
 
 
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::FullScrollableDat) = setUpForScrollData(data,actor)

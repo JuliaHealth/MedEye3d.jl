@@ -5,7 +5,7 @@ structs helping managing and storing data
 """
 module DataStructs
 using Parameters, Main.BasicStructs, Dictionaries
-export SimpleLineTextStruct, CalcDimsStruct,RawDataToDisp,TwoDimRawDat, ThreeDimRawDat, DataToDisp,FullScrollableDat,SingleSliceDat,SimpleLineTextStruct
+export valueForMasToSetStruct,SimpleLineTextStruct, CalcDimsStruct,RawDataToDisp,TwoDimRawDat, ThreeDimRawDat, DataToDisp,FullScrollableDat,SingleSliceDat,SimpleLineTextStruct
 
 ```@doc
 hold raw Data that can be send to be displayed 
@@ -139,6 +139,23 @@ mainQuadVertSize::Int64 = sizeof(mainImageQuadVert)
 wordsQuadVertSize::Int64 = sizeof(wordsImageQuadVert)
 
 end#CalcDimsStruct
+
+```@doc
+simple struct that when passed is giving information about what should be current value we are setting to the mask
+```
+@with_kw struct valueForMasToSetStruct
+    value::Int64=1# value that will be used to set  pixels where we would interact with mouse
+    text::SimpleLineTextStruct = SimpleLineTextStruct(text= "value of mask to set is  $(value)")
+end#valueForMasToSetStruct
+
+
+```@doc
+simple struct that when passed is giving information about what should be current value we are setting to the mask
+```
+@with_kw struct  DataToScrollDims
+
+end#DataToScrollDims    
+
 
 end# DataStructs
 

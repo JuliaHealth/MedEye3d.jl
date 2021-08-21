@@ -152,6 +152,7 @@ Actor that is able to store a state to keep needed data for proper display
     textDispObj::ForWordsDispStruct =ForWordsDispStruct()# set of objects and constants needed for text diplay
     currentlyDispDat::SingleSliceDat =SingleSliceDat() # holds the data displayed or in case of scrollable data view for accessing it
     calcDimsStruct::CalcDimsStruct=CalcDimsStruct()   #data for calculations of necessary constants needed to calculate window size , mouse position ...
+    valueForMasToSet::valueForMasToSetStruct=valueForMasToSetStruct() # value that will be used to set  pixels where we would interact with mouse
   end
 
 ```@doc

@@ -163,7 +163,6 @@
 
 
 
-
         struct ExStruct{T}end
 
         x = ExStruct{Int8}()
