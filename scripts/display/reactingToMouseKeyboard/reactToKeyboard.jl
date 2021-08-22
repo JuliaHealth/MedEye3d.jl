@@ -9,7 +9,7 @@ module coordinating response to the  keyboard input - mainly shortcuts that  hel
 """
 #@doc ReactOnKeyboardSTR
 module ReactOnKeyboard
-using Main.DisplayWords, Setfield,Main.PrepareWindow,  Main.DataStructs ,Glutils, Rocket, GLFW,Dictionaries, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils, Main.Uniforms, Match, Parameters,DataTypesBasic
+using Main.DisplayWords,Main.StructsManag, Setfield,Main.PrepareWindow,  Main.DataStructs ,Glutils, Rocket, GLFW,Dictionaries, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils, Main.Uniforms, Match, Parameters,DataTypesBasic
 export reactToKeyboard , registerKeyboardFunctions
 
 KeyboardCallbackSubscribableStr= """
@@ -193,20 +193,66 @@ in case we want to  get new number set for manual modifications
 ```
 function processKeysInfo(numbb::Identity{Int64},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T
 
-    @info "in  processKeysInfo for tab " numbb.value
     valueForMasToSett = valueForMasToSetStruct(value = numbb.value)
-    @info "2"
     actor.actor.valueForMasToSet =valueForMasToSett
     actor.actor.currentlyDispDat.textToDisp= [valueForMasToSett.text,actor.actor.currentlyDispDat.textToDisp...]
-    @info "3"
 
     updateImagesDisplayed(actor.actor.currentlyDispDat
     , actor.actor.mainForDisplayObjects
     , actor.actor.textDispObj
     , actor.actor.calcDimsStruct ,valueForMasToSett )
-    @info "4"
 
   
+
+end#processKeysInfo
+
+
+```@doc
+In case we want to change the dimansion of scrolling so for example from transverse 
+```
+function processKeysInfo(toScrollDat::Identity{DataToScrollDims},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T
+
+    newCalcDim= getHeightToWidthRatio(actor.actor.calcDimsStruct,toScrollDat.value )
+    #we need to change textures only if dimensions do not match
+    if(actor.actor.calcDimsStruct.imageTextureWidth=newCalcDim.imageTextureWidth  || actor.actor.calcDimsStruct.imageTextureHeight!=newCalcDim.imageTextureHeight )
+        # first we need to update information about dimensions etc 
+        
+        newestCalcDim= getMainVerticies(newCalcDim)
+        actor.actor.calcDimsStruct = newestCalcDim
+        #next we need to delete all textures and create new ones 
+        textSpecs = actor.actor.mainForDisplayObjects.listOfTextSpecifications
+        arr = [map(it->it.ID[],textSpecs)]
+        glDeleteTextures(length(textSpecs), arr)# deleting
+        #getting new 
+        initializeTextures(textSpecs,newCalcDim)
+
+
+    end#if
+
+#in case dimensions match we need only to update dimension to scroll
+actor.actor.onScrollData.dimensionToScroll = toScrollDat.dimensionToScroll
+#getting  the slice of intrest based on last recorded mouse position 
+
+current=actor.actor.lastRecordedMousePosition[toScrollDat.dimensionToScroll]
+#displaying all
+singleSlDat= actor.actor.onScrollData.dataToScroll|>
+(scrDat)-> map(threeDimDat->threeToTwoDimm(threeDimDat.type,Int64(current),actor.actor.onScrollData.dimensionToScroll,threeDimDat ),scrDat) |>
+(twoDimList)-> SingleSliceDat(listOfDataAndImageNames=twoDimList
+                            ,sliceNumber=current
+                            ,textToDisp = getTextForCurrentSlice(actor.actor.onScrollData, Int32(current))  )
+
+
+ updateImagesDisplayed(singleSlDat
+                    ,actor.actor.mainForDisplayObjects
+                    ,actor.actor.textDispObj
+                    ,actor.actor.calcDimsStruct 
+                    ,actor.actor.valueForMasToSet      )
+
+ actor.actor.currentlyDispDat=singleSlDat
+
+     #saving information about current slice for future reference
+actor.actor.currentDisplayedSlice = current
+
 
 end#processKeysInfo
 

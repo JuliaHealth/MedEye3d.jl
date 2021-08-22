@@ -48,10 +48,13 @@
   fractionOfMainIm= Float32(0.8);
   heightToWithRatio=Float32(0.5);
 
+  texureDepth =10;
   textureHeight = 40;
   textureWidth = 40;
 
-  Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate,fractionOfMainIm,heightToWithRatio,textureHeight,textureWidth,1000)
+  datToScrollDims= DataToScrollDims(imageSize= (texureDepth,textureWidth,textureHeight),voxelSize= (1.0,1.0,0.3), dimensionToScroll = 1 )
+
+  Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate ,fractionOfMainIm ,datToScrollDims ,1000)
    
 
 
@@ -60,12 +63,16 @@
 #  testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
 #  testLab2Dat= UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
 
- mainMaskDummy =  zeros(UInt8,10,textureWidth,textureHeight);
- testLab1Dat = zeros(UInt8,10,textureWidth,textureHeight);
- testLab2Dat=  zeros(UInt8,10,textureWidth,textureHeight);
- nuclearMaskDat =abs.(rand(Float32,10,textureWidth,textureHeight));    
- nuclearMaskDat = nuclearMaskDat./maximum(nuclearMaskDat)   
- ctDummy =  Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,10,textureWidth,textureHeight)));# will give white background for testing 
+ mainMaskDummy =  zeros(UInt8,texureDepth,textureWidth,textureHeight);
+ testLab1Dat = zeros(UInt8,texureDepth,textureWidth,textureHeight);
+ testLab2Dat=  zeros(UInt8,texureDepth,textureWidth,textureHeight);
+ nuclearMaskDat =abs.(rand(Float32,texureDepth,textureWidth,textureHeight));    
+ nuclearMaskDat = nuclearMaskDat./maximum(nuclearMaskDat)   ;
+ ctDummy =  Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,texureDepth,textureWidth,textureHeight)));# will give white background for testing 
+
+
+ typeof(size(mainMaskDummy))
+
 
 
    slicesDat=  [ThreeDimRawDat{UInt8}(UInt8,"mainLab",mainMaskDummy)
@@ -76,8 +83,8 @@
      
      ];
 
-     mainLines= textLinesFromStrings(["main Line1", "main Line 2"])
-     supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:10 );
+     mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
+     supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:texureDepth );
 
 
 
@@ -158,19 +165,22 @@
         basicRender(window)
 
 
+     dat =ones(10,11,12)
+
      
+     dataToScrollDims= DataToScrollDims(imageSize= (10,11,12),voxelSize= (1.0,1.0,0.3), dimensionToScroll = 1 )
+
+     selectdim(dat, dataToScrollDims.dimensionToScroll, 2) 
+
+```@doc
+Based on DataToScrollDims it will enrich passed CalcDimsStruct texture width, height and  heightToWithRatio
+based on data passed from DataToScrollDims
+```
+
+ress= getHeightToWidthRatio(calcDim,dataToScrollDims)
 
 
-
-
-        struct ExStruct{T}end
-
-        x = ExStruct{Int8}()
-        parameter_type(::Type{ExStruct{T}}) where {T} = T
-        parameter_type(x::ExStruct) = parameter_type(typeof(x))
-
-        parameter_type(x)
-
+#getHeightToWidthRatio
   #    listOfTextSpecs= map(x->setproperties(x[2],(whichCreated=x[1])),enumerate(listOfTexturesToCreate))
 
   #    println(createcontextinfo())
@@ -191,6 +201,16 @@
   #        @info st
   #        end
      
+function aaa()
+  @info "aa"
+end
+
+function bbb()
+  @info "bbb"
+end
+
+dd = [ aaa,bbb]
+
 
 
 

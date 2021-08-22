@@ -5,7 +5,7 @@ structs helping managing and storing data
 """
 module DataStructs
 using Parameters, Main.BasicStructs, Dictionaries
-export valueForMasToSetStruct,SimpleLineTextStruct, CalcDimsStruct,RawDataToDisp,TwoDimRawDat, ThreeDimRawDat, DataToDisp,FullScrollableDat,SingleSliceDat,SimpleLineTextStruct
+export DataToScrollDims,valueForMasToSetStruct,SimpleLineTextStruct, CalcDimsStruct,RawDataToDisp,TwoDimRawDat, ThreeDimRawDat, DataToDisp,FullScrollableDat,SingleSliceDat,SimpleLineTextStruct
 
 ```@doc
 hold raw Data that can be send to be displayed 
@@ -61,6 +61,19 @@ Struct holding line of text with some text metadata
 end#simpleTextStruct
 
 
+```@doc
+stores additional data about full dimensions of scrollable dat - this is necessery for switching slicing plane orientation efficiently
+```
+@with_kw struct  DataToScrollDims
+    imageSize::Tuple{Int64, Int64, Int64} = (1,1,1)#amount of voxels in each dimensions
+    voxelSize::Tuple{Float64, Float64, Float64}  = (1.0,1.0,1.0)#physical size of each pixel
+    dimensionToScroll::Int= 3 # by which dimension we should scroll so for example if set to 3 one and we have slice number x we will get data A by A[:,:,x] if dimensionToScroll = 2 ->A[:,x,:]...
+
+end#DataToScrollDims    
+
+
+
+
 
 FullScrollableDatStr="""
 Data that can be displayed and scrolled (so we have multiple slices)
@@ -68,6 +81,7 @@ struct is mutable becouse in case of the masks data can be changed multiple time
 """
 @doc FullScrollableDatStr
 @with_kw mutable struct FullScrollableDat<: DataToDisp
+    dataToScrollDims::DataToScrollDims=DataToScrollDims()#stores additional data about full dimensions of scrollable dat - this is necessery for switching slicing plane orientation efficiently
     dimensionToScroll::Int= 3 # by which dimension we should scroll so for example if set to 3 one and we have slice number x we will get data A by A[:,:,x] if dimensionToScroll = 2 ->A[:,x,:]...
     dataToScroll::Vector{ThreeDimRawDat}=[ThreeDimRawDat()] # tuples where first entry is name of image that we given in configuration, and second entry is data that we want to pass
 # data to display in form of a list Of tuples where first entry will be used as headtitle for the data that is an value ;second entry -  value is a vector where each entry will be displayed in separate line
@@ -148,13 +162,6 @@ simple struct that when passed is giving information about what should be curren
     text::SimpleLineTextStruct = SimpleLineTextStruct(text= "value of mask to set is  $(value)")
 end#valueForMasToSetStruct
 
-
-```@doc
-simple struct that when passed is giving information about what should be current value we are setting to the mask
-```
-@with_kw struct  DataToScrollDims
-
-end#DataToScrollDims    
 
 
 end# DataStructs

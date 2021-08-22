@@ -99,14 +99,15 @@ listOfTextSpecs - list of TextureSpec structs that  holds data needed to
 it creates textrures as specified, renders them and return the list from  argument augmented by texture Id
 
 ```
-function initializeTextures(listOfTextSpecs::Vector{TextureSpec})::Vector{TextureSpec}
+function initializeTextures(listOfTextSpecs::Vector{TextureSpec}
+                            ,calcDimStruct ::CalcDimsStruct)::Vector{TextureSpec}
 
     res = Vector{TextureSpec}()
        
   
     for (ind, textSpec ) in enumerate(listOfTextSpecs)
         index=ind-1
-        textUreId= createTexture(parameter_type(textSpec),textSpec.widthh,textSpec.heightt,textSpec.GL_Rtype,textSpec.OpGlType )#binding texture and populating with data
+        textUreId= createTexture(parameter_type(textSpec),calcDimStruct.imageTextureWidth,calcDimStruct.imageTextureHeight,textSpec.GL_Rtype,textSpec.OpGlType )#binding texture and populating with data
         @info "textUreId in initializeTextures"  textUreId
        
         actTextrureNumb = getProperGL_TEXTURE(index)

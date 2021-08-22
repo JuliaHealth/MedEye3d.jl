@@ -47,7 +47,7 @@ using DrWatson
 export coordinateDisplay
 export passDataForScrolling
 
-using ModernGL,Main.MultiDimArrUtil, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUtils, Main.ForDisplayStructs,Main.Uniforms, Main.DisplayWords, Dictionaries
+using ModernGL, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUtils, Main.ForDisplayStructs,Main.Uniforms, Main.DisplayWords, Dictionaries
 using Main.ReactingToInput, Rocket, Setfield, Logging, Main.ShadersAndVerticiesForText,FreeTypeAbstraction,Main.DisplayWords, Main.DataStructs, Main.StructsManag
 
 
@@ -66,11 +66,9 @@ fractionOfMainIm - how much of width should be taken by the main image
 heightToWithRatio - needed for proper display of main texture - so it would not be stretched ...
 """
 @doc coordinateDisplayStr
-function coordinateDisplay(listOfTextSpecsPrim::Vector{Main.ForDisplayStructs.TextureSpec}
+function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
                         ,fractionOfMainIm::Float32
-                        ,heightToWithRatio::Float32
-                        ,imageTextureWidth::Int
-                        ,imageTextureHeight::Int
+                        ,dataToScrollDims::DataToScrollDims=DataToScrollDims()#stores additional data about full dimensions of scrollable dat - this is necessery for switching slicing plane orientation efficiently
                         ,windowWidth::Int=1200
                         ,windowHeight::Int= Int(round(windowWidth*fractionOfMainIm))
                         ,textTexturewidthh::Int32=Int32(2000)
@@ -78,31 +76,27 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{Main.ForDisplayStructs.Te
    #setting number to texture that will be needed in shader configuration
    listOfTextSpecs= map(x->setproperties(x[2],(whichCreated=x[1])),enumerate(listOfTextSpecsPrim))
     #calculations of necessary constants needed to calculate window size , mouse position ...
-   calcDimStruct= CalcDimsStruct(imageTextureWidth=imageTextureWidth
-                  ,imageTextureHeight=imageTextureHeight
-                  ,windowWidth=windowWidth 
+   calcDimStruct= CalcDimsStruct(windowWidth=windowWidth 
                   ,windowHeight=windowHeight 
                   ,fractionOfMainIm=fractionOfMainIm
-                  ,heightToWithRatio=heightToWithRatio 
                   ,wordsImageQuadVert=Main.ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm)  
                   ,wordsQuadVertSize= sizeof(Main.ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm))
                   ,textTexturewidthh=textTexturewidthh
                   ,textTextureheightt=textTextureheightt ) |>
+   (calcDim)-> getHeightToWidthRatio(calcDim,dataToScrollDims )|>
    (calcDim)-> getMainVerticies(calcDim)
 
    subscribe!(of(calcDimStruct),mainActor )
 
-   listOfTextSpecs                    
  #creating window and event listening loop
     window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words,gslsStr = Main.PrepareWindow.displayAll(listOfTextSpecs,calcDimStruct )
 
     # than we set those uniforms, open gl types and using data from arguments  to fill texture specifications
     mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program) 
-    listOfTextSpecsMapped=map((spec)-> setproperties(spec, (widthh= imageTextureWidth, heightt= imageTextureHeight )) 
-                                            ,listOfTextSpecsMapped)
+
     @info "listOfTextSpecsMapped" listOfTextSpecsMapped
     #initializing object that holds data reqired for interacting with opengl 
-    initializedTextures =  initializeTextures(listOfTextSpecsMapped)
+    initializedTextures =  initializeTextures(listOfTextSpecsMapped,calcDimStruct)
    
     numbDict = filter(x-> x.numb>=0,initializedTextures) |>
     (filtered)-> Dictionary(map(it->it.numb,filtered),collect(eachindex(filtered))) # a way for fast query using assigned numbers

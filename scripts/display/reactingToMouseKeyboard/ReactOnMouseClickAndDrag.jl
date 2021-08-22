@@ -25,9 +25,10 @@ struct that enables reacting to  the input  from mouse click  and drag the input
      x and y position  of the mouse - will be recorded only if left mouse button is pressed or keep presssed
 """
 @doc MouseCallbackSubscribableStr
-@with_kw  mutable struct MouseCallbackSubscribable <: Subscribable{Vector{CartesianIndex{2}}}
+@with_kw  mutable struct MouseCallbackSubscribable <: Subscribable{MouseStruct}
     #true if left button is presed down - we make it true if the left button is pressed over image and false if mouse get out of the window or we get information about button release
     isLeftButtonDown ::Bool 
+    isRightButtonDown ::Bool 
     #coordinates marking 4 corners of 
     #the quad that displays our medical image with the masks
     xmin::Int32
@@ -43,7 +44,7 @@ struct that enables reacting to  the input  from mouse click  and drag the input
 
 referenceInstance::DateTime# an instance from which we would calculate when to execute batch 
     
-    subject :: Subject{Vector{CartesianIndex{2}}} # coordinates of mouse 
+    subject :: Subject{MouseStruct} # coordinates of mouse 
    
 end
 
@@ -92,10 +93,20 @@ function (handler::MouseCallbackSubscribable)( a, x::Float64, y::Float64)
     push!(handler.coordinatesStoreForLeftClicks,point)
         if((Dates.now()-handler.referenceInstance).value>100)  
             #sending mouse position only if all conditions are met
-            next!(handler.subject, handler.coordinatesStoreForLeftClicks)#sending mouse position only if all conditions are met
+            next!(handler.subject,MouseStruct( 
+                isLeftButtonDown=handler.isLeftButtonDown
+                ,isRightButtonDown=handler.isRightButtonDown
+               ,lastCoordinates=  handler.coordinatesStoreForLeftClicks))#sending mouse position only if all conditions are met
             handler.referenceInstance=Dates.now()
             handler.coordinatesStoreForLeftClicks = [point]
         end#if
+    #now we also get intrested about  right clicks becouse they help to controll 
+    elseif(handler.isRightButtonDown)  
+        next!(handler.subject,MouseStruct( 
+            isLeftButtonDown=handler.isLeftButtonDown
+            ,isRightButtonDown=handler.isRightButtonDown
+           ,lastCoordinates=  [point]))#sending mouse position only if all conditions are met
+
    end#if
 
 end #handler
@@ -105,6 +116,8 @@ function (handler::MouseCallbackSubscribable)(a, button::GLFW.MouseButton, actio
 
     res=(button==GLFW.MOUSE_BUTTON_1 &&  action==GLFW.PRESS)#so it will stop either as we relese left mouse or click right
     handler.isLeftButtonDown = res
+    handler.isRightButtonDown = (button==GLFW.MOUSE_BUTTON_2 &&  action==GLFW.PRESS)
+
     if(res)
         handler.referenceInstance=Dates.now()
         handler.coordinatesStoreForLeftClicks = [handler.lastCoordinate]
@@ -129,14 +142,15 @@ function registerMouseClickFunctions(window::GLFW.Window
 
  # calculating dimensions of quad becouse it do not occupy whole window, and we want to react only to those mouse positions that are on main image quad
   mouseButtonSubs = MouseCallbackSubscribable(isLeftButtonDown=false
+                                        ,isRightButtonDown=false
                                         ,xmin=Int32(calcD.windowWidthCorr)
                                         ,ymin=Int32(calcD.windowHeightCorr)
                                         ,xmax=Int32(calcD.avWindWidtForMain-calcD.windowWidthCorr)
                                         ,ymax=Int32(calcD.avWindHeightForMain-calcD.windowHeightCorr)
-                                        ,coordinatesStoreForLeftClicks=Vector{CartesianIndex{2}}()
+                                        ,coordinatesStoreForLeftClicks=MouseStruct()
                                         ,lastCoordinate=CartesianIndex(1,1)
                                         ,referenceInstance=Dates.now()
-                                        ,subject=Subject(Vector{CartesianIndex{2}}  ,scheduler = AsyncScheduler()))
+                                        ,subject=Subject(MouseStruct  ,scheduler = AsyncScheduler()))
 
 GLFW.SetCursorPosCallback(window, (a, x, y) -> mouseButtonSubs(a,x, y ) )# and  for example : cursor: 29.0, 469.0  types   Float64  Float64   
 GLFW.SetMouseButtonCallback(window, (a, button, action, mods) ->mouseButtonSubs(a,button, action,mods )) # for example types MOUSE_BUTTON_1 PRESS   GLFW.MouseButton  GLFW.Action 
@@ -156,12 +170,12 @@ we use mouse coordinate to modify the texture that is currently active for modif
     from texture specification we take also its id and its properties ...
 """
 @doc reactToMouseDragStr
-function reactToMouseDrag(mouseCoords::Vector{CartesianIndex{2}}, actor::SyncActor{Any, ActorWithOpenGlObjects})
+function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any, ActorWithOpenGlObjects})
     obj = actor.actor.mainForDisplayObjects
     obj.stopListening[]=true #free GLFW context
     textureList = actor.actor.textureToModifyVec
-
-    if (!isempty(textureList))
+    mouseCoords= mousestr.lastCoordinates
+    if (!isempty(textureList)  && mouseCoords.isLeftButtonDown && textureList[1].isEditable)
         texture= textureList[1]
     
 
@@ -176,8 +190,8 @@ function reactToMouseDrag(mouseCoords::Vector{CartesianIndex{2}}, actor::SyncAct
        (sliceDat)-> updateTexture(twoDimDat.type,sliceDat, texture)
 
         basicRender(obj.window)
-
-
+    elseif( mouseCoords.isRightButtonDown  )
+        actor.actor.lastRecordedMousePosition = mouseCoords[1]
     end #if 
     obj.stopListening[]=false # reactivete event listening loop
 end#reactToScroll
@@ -192,7 +206,7 @@ calcDims - set of values usefull for calculating mouse position
 return vector of translated cartesian coordinates
 ```
 function translateMouseToTexture(strokeWidth::Int32
-                                ,mouseCoords::Vector{CartesianIndex{2}}
+                                ,mouseCoords::MouseStruct
                                 ,calcD::CalcDimsStruct )
   
 

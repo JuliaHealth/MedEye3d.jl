@@ -117,12 +117,9 @@ function createTextureForWords(numberOfActiveTextUnits::Int
                                 ,widthh::Int32 =Int32(100)
                                 ,heightt::Int32=Int32(1000)
                                 ,actTextrureNumb::UInt32=UInt32(0) )::TextureSpec
-@info "numberOfActiveTextUnits+1" numberOfActiveTextUnits+1
     return Main.ForDisplayStructs.TextureSpec{UInt8}(
             name = "textText"
             ,color = RGB(0.0,0.0,1.0)
-            ,widthh=widthh
-            ,heightt=heightt
             #,ID=texId
             ,actTextrureNumb =actTextrureNumb
             ,OpGlType =GL_UNSIGNED_BYTE

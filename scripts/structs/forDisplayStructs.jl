@@ -4,7 +4,7 @@ using DrWatson
 
 module ForDisplayStructs
 using Base: Int32, isvisible
-export parameter_type,Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms,ForWordsDispStruct
+export MouseStruct,parameter_type,Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms,ForWordsDispStruct
 
 using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries,FreeTypeAbstraction, Main.DataStructs
 
@@ -77,9 +77,6 @@ Holding the data needed to create and  later reference the textures
   colorSet::Vector{RGB}=[]    #set of colors that can be used for mask with continous values
   strokeWidth::Int32 =Int32(3)#marking how thick should be the line that is left after acting with the mouse ... 
   isEditable::Bool =false     #if true we can modify given  texture using mouse interaction
-  widthh::Int32 =Int32(0)     #width of texture
-  heightt::Int32 =Int32(0)    #height of the texture
-  slicesNumber::Int = 0       #number of slices available
   GL_Rtype::UInt32 =UInt32(0)           #GlRtype - for example GL_R8UI or GL_R16I
   OpGlType ::UInt32 =UInt32(0)          #open gl type - for example GL_UNSIGNED_BYTE or GL_SHORT
   actTextrureNumb ::UInt32 =UInt32(0)          #usefull to be able to activate the texture using GL_Activetexture - with proper open GL constant
@@ -153,6 +150,7 @@ Actor that is able to store a state to keep needed data for proper display
     currentlyDispDat::SingleSliceDat =SingleSliceDat() # holds the data displayed or in case of scrollable data view for accessing it
     calcDimsStruct::CalcDimsStruct=CalcDimsStruct()   #data for calculations of necessary constants needed to calculate window size , mouse position ...
     valueForMasToSet::valueForMasToSetStruct=valueForMasToSetStruct() # value that will be used to set  pixels where we would interact with mouse
+    lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1,1,1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
   end
 
 ```@doc
@@ -170,7 +168,14 @@ Holding necessery data to controll keyboard shortcuts```
   mostRecentKeyName ::String=""
   mostRecentAction ::GLFW.Action= GLFW.RELEASE
 end
-
+```@doc
+Holding necessery data to controll mouse interaction
+```
+@with_kw struct MouseStruct
+  isLeftButtonDown ::Bool = false # true if left button was pressed and not yet released
+  isRightButtonDown ::Bool = false# true if right button was pressed and not yet released
+  lastCoordinates::CartesianIndex{2} = [] # list of accumulated mouse coordinates
+end#MouseStruct
 
 
 end #module
