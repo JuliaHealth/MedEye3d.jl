@@ -15,20 +15,21 @@
          strokeWidth = 5,
          color = RGB(1.0,0.0,0.0)
          ,minAndMaxValue= UInt8.([0,1])
+      ,isEditable = true
         ),
      TextureSpec{UInt8}(
          name = "testLab1",
          numb= Int32(1),
          color = RGB(0.0,1.0,0.0)
          ,minAndMaxValue= UInt8.([0,1])
-
+         ,isEditable = true
         ),
         TextureSpec{UInt8}(
          name = "testLab2",
          numb= Int32(2),
          color = RGB(0.0,0.0,1.0)
          ,minAndMaxValue= UInt8.([0,1])
-
+         ,isEditable = true
           ),
          TextureSpec{Float32}(
            name = "nuclearMaskking",
@@ -36,7 +37,7 @@
            isContinuusMask= true,
            colorSet = [RGB(0.0,0.0,1.0),RGB(1.0,0.0,0.0)]
            ,minAndMaxValue= Float32.([0.0,2.0])
-
+           ,isEditable = true
          ),
         TextureSpec{Int16}(
          name= "CTIm",
@@ -48,11 +49,11 @@
   fractionOfMainIm= Float32(0.8);
   heightToWithRatio=Float32(0.5);
 
-  texureDepth =10;
+  texureDepth =40;
   textureHeight = 40;
   textureWidth = 40;
 
-  datToScrollDims= DataToScrollDims(imageSize= (texureDepth,textureWidth,textureHeight),voxelSize= (1.0,1.0,0.3), dimensionToScroll = 1 )
+  datToScrollDims= DataToScrollDims(imageSize= (texureDepth,textureWidth,textureHeight),voxelSize= (1.0,1.0,0.3), dimensionToScroll = 3 )
 
   Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate ,fractionOfMainIm ,datToScrollDims ,1000)
    
@@ -107,7 +108,8 @@
 
 
 
-     mainScrollDat = FullScrollableDat(dimensionToScroll=1
+     mainScrollDat = FullScrollableDat(dataToScrollDims =DataToScrollDims(imageSize= (texureDepth,textureWidth,textureHeight),voxelSize= (1.0,1.0,0.3), dimensionToScroll = 3 )
+                                      ,dimensionToScroll=1
                                       ,dataToScroll= slicesDat
                                       ,mainTextToDisp= mainLines
                                       ,sliceTextToDisp=supplLines );
@@ -115,13 +117,13 @@
 
     Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);
 
-    
  
 
     GLFW.PollEvents()
 
  
          textLiverMain = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1];
+
          textureB = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[2];
          textureC = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[3];
          nuclearTexture = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[4];
@@ -134,11 +136,26 @@
          dispObj= Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects;
          wordsDispObj= Main.SegmentationDisplay.mainActor.actor.textDispObj;
          stopList = dispObj.stopListening[];
-        calcDim = Main.SegmentationDisplay.mainActor.actor.calcDimsStruct;
+         calcDim = Main.SegmentationDisplay.mainActor.actor.calcDimsStruct;
 
-        actor =  Main.SegmentationDisplay.mainActor.actor;
-     
+         actor =  Main.SegmentationDisplay.mainActor.actor;
+         length(  actor.forUndoVector)
+
+
+        function aad()
+           print("asd ")
+        end 
+        import  FunctionWrappers
  
+        f1 = @inferred F64AnyFunc(identity)
+
+        f1 = FunctionWrappers.F64F64Func(sin)
+        f2 = @inferred F64F64Func(f1)
+
+         addToforUndoVector(actor,()-> print("asd "))
+         
+ 
+         actor.lastRecordedMousePosition
 
         setTextureVisibility(false,textLiverMain.uniforms )
         setTextureVisibility(false,textureB.uniforms )
@@ -168,9 +185,9 @@
      dat =ones(10,11,12)
 
      
-     dataToScrollDims= DataToScrollDims(imageSize= (10,11,12),voxelSize= (1.0,1.0,0.3), dimensionToScroll = 1 )
-
-     selectdim(dat, dataToScrollDims.dimensionToScroll, 2) 
+     dataToScrollDims= DataToScrollDims(imageSize= (10,11,12),voxelSize= (1.0,1.0,0.3), dimensionToScroll = 2 )
+    
+     cartTwoToThree(dataToScrollDims,Int32(5),CartesianIndex(1,2))
 
 ```@doc
 Based on DataToScrollDims it will enrich passed CalcDimsStruct texture width, height and  heightToWithRatio
@@ -179,7 +196,8 @@ based on data passed from DataToScrollDims
 
 ress= getHeightToWidthRatio(calcDim,dataToScrollDims)
 
-
+arr= [0x00000001, 0x00000002, 0x00000003, 0x00000004, 0x00000005]
+glDeleteTextures(length(arr), arr)
 #getHeightToWidthRatio
   #    listOfTextSpecs= map(x->setproperties(x[2],(whichCreated=x[1])),enumerate(listOfTexturesToCreate))
 
@@ -211,8 +229,11 @@ end
 
 dd = [ aaa,bbb]
 
+for func in dd
+  func()
+end  
 
-
+typeof(dd)
 
          dispObj.stopListening[]= true
          maskA = textureB

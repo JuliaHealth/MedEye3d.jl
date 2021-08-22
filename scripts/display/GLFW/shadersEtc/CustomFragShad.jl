@@ -54,10 +54,6 @@ $( getMasksSubtractionFunction(maskToSubtrastFrom,maskWeAreSubtracting))
 
 $(mainFuncString(mainTexture,notMainTextures,maskToSubtrastFrom,maskWeAreSubtracting))
  """
-#TODO(remove)
-for st in split(res, "\n")
-    @info st
-end
 
 return res    
 

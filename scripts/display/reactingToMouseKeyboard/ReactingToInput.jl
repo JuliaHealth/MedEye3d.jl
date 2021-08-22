@@ -34,8 +34,8 @@ function setUpWordsDisplay(textDispObject::Main.ForDisplayStructs.ForWordsDispSt
     ,textDispObject.vbo_words
     ,actor.actor.calcDimsStruct)
 
-    texId =  createTexture(UInt8,textDispObject.textureSpec.widthh 
-                            ,textDispObject.textureSpec.heightt
+    texId =  createTexture(UInt8,actor.actor.calcDimsStruct.textTexturewidthh
+                            ,actor.actor.calcDimsStruct.textTextureheightt
                             ,GL_R8UI,GL_UNSIGNED_BYTE)
 
     textSpec= setproperties(textDispObject.textureSpec,(ID=texId) )
@@ -149,7 +149,7 @@ Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::valueForMas
 
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::FullScrollableDat) = setUpForScrollData(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::SingleSliceDat) = updateSingleImagesDisplayedSetUp(data,actor)
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Vector{CartesianIndex{2}}) = reactToMouseDrag(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::MouseStruct) = reactToMouseDrag(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::KeyboardStruct) = reactToKeyboard(data,actor)
 
 Rocket.on_error!(actor::SyncActor{Any, ActorWithOpenGlObjects}, err)      = error(err)

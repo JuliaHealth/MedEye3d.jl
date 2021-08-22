@@ -9,7 +9,7 @@ module coordinating response to the  keyboard input - mainly shortcuts that  hel
 """
 #@doc ReactOnKeyboardSTR
 module ReactOnKeyboard
-using Main.DisplayWords,Main.StructsManag, Setfield,Main.PrepareWindow,  Main.DataStructs ,Glutils, Rocket, GLFW,Dictionaries, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils, Main.Uniforms, Match, Parameters,DataTypesBasic
+using ModernGL,Main.DisplayWords,Main.StructsManag, Setfield,Main.PrepareWindow,  Main.DataStructs ,Glutils, Rocket, GLFW,Dictionaries, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils, Main.Uniforms, Match, Parameters,DataTypesBasic
 export reactToKeyboard , registerKeyboardFunctions
 
 KeyboardCallbackSubscribableStr= """
@@ -152,12 +152,21 @@ function processKeysInfo(textSpecObs::Identity{TextureSpec{T}},actor::SyncActor{
     if(keyInfo.isCtrlPressed)    
         setTextureVisibility(false,textSpec.uniforms )
         @info " set visibility of $(textSpec.name) to false" 
+        #to enabling undoing it 
+        addToforUndoVector(actor, ()->setTextureVisibility(true,textSpec.uniforms )   )
     elseif(keyInfo.isShiftPressed)  
         setTextureVisibility(true,textSpec.uniforms )
         @info " set visibility of $(textSpec.name) to true" 
+       #to enabling undoing it 
+       addToforUndoVector(actor, ()->setTextureVisibility(false,textSpec.uniforms )   )
+
     elseif(keyInfo.isAltPressed)  
+        oldTex = actor.actor.textureToModifyVec
         actor.actor.textureToModifyVec= [textSpec]
-        @info " set texture for manual modifications to  $(textSpec.name)"       
+        @info " set texture for manual modifications to  $(textSpec.name)"
+       if(!isempty(oldTex))
+        addToforUndoVector(actor, ()->begin actor.actor.textureToModifyVec=oldTex[0] end)
+       end
     end #if
 basicRender(actor.actor.mainForDisplayObjects.window)
 end #processKeysInfo
@@ -172,19 +181,30 @@ function processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec{T}}, Ide
     maskB = textSpecs[2].value
     
     if(keyInfo.isCtrlPressed)    # when we want to stop displaying diffrence
-        @uniforms! begin
-        actor.actor.mainForDisplayObjects.mainImageUniforms.isMaskDiffrenceVis:=0
-               end
-        setTextureVisibility(true,maskA.uniforms )
-        setTextureVisibility(true,maskB.uniforms )
+        undoDiffrence(actor,maskA,maskB )
+        addToforUndoVector(actor, ()->displayMaskDiffrence(maskA,maskB,actor ) )
 
     elseif(keyInfo.isShiftPressed)  # when we want to display diffrence
         displayMaskDiffrence(maskA,maskB,actor )
+        addToforUndoVector(actor, ()-> undoDiffrence(actor,maskA,maskB ))
+
     end #if
 basicRender(actor.actor.mainForDisplayObjects.window)
    
 
 end#processKeysInfo
+```@doc
+for case  we want to undo subtracting two masks
+```
+function undoDiffrence(actor::SyncActor{Any, ActorWithOpenGlObjects},maskA,maskB )
+    @uniforms! begin
+    actor.actor.mainForDisplayObjects.mainImageUniforms.isMaskDiffrenceVis:=0
+           end
+setTextureVisibility(true,maskA.uniforms )
+setTextureVisibility(true,maskB.uniforms )
+end#undoDiffrence
+
+
 
 
 ```@doc
@@ -194,64 +214,113 @@ in case we want to  get new number set for manual modifications
 function processKeysInfo(numbb::Identity{Int64},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T
 
     valueForMasToSett = valueForMasToSetStruct(value = numbb.value)
+    old = actor.actor.valueForMasToSet.dimensionToScroll
     actor.actor.valueForMasToSet =valueForMasToSett
-    actor.actor.currentlyDispDat.textToDisp= [valueForMasToSett.text,actor.actor.currentlyDispDat.textToDisp...]
 
     updateImagesDisplayed(actor.actor.currentlyDispDat
     , actor.actor.mainForDisplayObjects
     , actor.actor.textDispObj
     , actor.actor.calcDimsStruct ,valueForMasToSett )
+# for undoing action
+    addToforUndoVector(actor, ()-> processKeysInfo( Option(old),actor, keyInfo ))
 
-  
 
 end#processKeysInfo
+
+
+
+```@doc
+In order to enable undoing last action we just invoke last function from list 
+```
+function processKeysInfo(numbb::Identity{Bool},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T
+
+    pop!(actor.actor.forUndoVector)()
+
+end#processKeysInfo
+
+
 
 
 ```@doc
 In case we want to change the dimansion of scrolling so for example from transverse 
 ```
-function processKeysInfo(toScrollDat::Identity{DataToScrollDims},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T
+function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T
+    toScrollDat= toScrollDatPrim.value
 
-    newCalcDim= getHeightToWidthRatio(actor.actor.calcDimsStruct,toScrollDat.value )
+
+    newCalcDim= getHeightToWidthRatio(actor.actor.calcDimsStruct,toScrollDat )|>
+                    getMainVerticies
+     actor.actor.calcDimsStruct = newCalcDim
+#In order to make the  background black  before we will render quad of possibly diffrent dimensions we will set all to invisible - and obtain black background
+textSpecs = actor.actor.mainForDisplayObjects.listOfTextSpecifications
+
+for textSpec in textSpecs
+    setTextureVisibility(false,textSpec.uniforms )
+end#for    
+basicRender(actor.actor.mainForDisplayObjects.window)
+
+
     #we need to change textures only if dimensions do not match
-    if(actor.actor.calcDimsStruct.imageTextureWidth=newCalcDim.imageTextureWidth  || actor.actor.calcDimsStruct.imageTextureHeight!=newCalcDim.imageTextureHeight )
+  #  if(actor.actor.calcDimsStruct.imageTextureWidth!=newCalcDim.imageTextureWidth  || actor.actor.calcDimsStruct.imageTextureHeight!=newCalcDim.imageTextureHeight )
         # first we need to update information about dimensions etc 
-        
-        newestCalcDim= getMainVerticies(newCalcDim)
-        actor.actor.calcDimsStruct = newestCalcDim
+
+
         #next we need to delete all textures and create new ones 
-        textSpecs = actor.actor.mainForDisplayObjects.listOfTextSpecifications
-        arr = [map(it->it.ID[],textSpecs)]
-        glDeleteTextures(length(textSpecs), arr)# deleting
+
+        arr = map(it->it.ID[],textSpecs)
+
+        glDeleteTextures(length(arr), arr)# deleting
+
         #getting new 
         initializeTextures(textSpecs,newCalcDim)
 
+   # end#if
 
-    end#if
+old = actor.actor.onScrollData.dimensionToScroll
 
-#in case dimensions match we need only to update dimension to scroll
 actor.actor.onScrollData.dimensionToScroll = toScrollDat.dimensionToScroll
+
+actor.actor.onScrollData.slicesNumber = getSlicesNumber(actor.actor.onScrollData)
 #getting  the slice of intrest based on last recorded mouse position 
 
 current=actor.actor.lastRecordedMousePosition[toScrollDat.dimensionToScroll]
+
 #displaying all
+
+
 singleSlDat= actor.actor.onScrollData.dataToScroll|>
-(scrDat)-> map(threeDimDat->threeToTwoDimm(threeDimDat.type,Int64(current),actor.actor.onScrollData.dimensionToScroll,threeDimDat ),scrDat) |>
+(scrDat)-> map(threeDimDat->threeToTwoDimm(threeDimDat.type,Int64(current),toScrollDat.dimensionToScroll,threeDimDat ),scrDat) |>
 (twoDimList)-> SingleSliceDat(listOfDataAndImageNames=twoDimList
                             ,sliceNumber=current
                             ,textToDisp = getTextForCurrentSlice(actor.actor.onScrollData, Int32(current))  )
 
+                            # glFinish()
+                            # glFlush()
+                            # glClearColor(0.0, 0.0, 0.0 , 1.0)
+                            # GLFW.SwapBuffers(actor.actor.mainForDisplayObjects.window)
 
- updateImagesDisplayed(singleSlDat
+dispObj = actor.actor.mainForDisplayObjects
+#for displaying new quad - to accomodate new proportions
+reactivateMainObj(dispObj.shader_program, dispObj.vbo,newCalcDim  )
+basicRender(actor.actor.mainForDisplayObjects.window)
+
+
+updateImagesDisplayed(singleSlDat
                     ,actor.actor.mainForDisplayObjects
                     ,actor.actor.textDispObj
-                    ,actor.actor.calcDimsStruct 
+                    ,newCalcDim 
                     ,actor.actor.valueForMasToSet      )
 
- actor.actor.currentlyDispDat=singleSlDat
 
+
+
+
+ #@info "singleSlDat" singleSlDat
      #saving information about current slice for future reference
 actor.actor.currentDisplayedSlice = current
+# to enbling getting back
+
+addToforUndoVector(actor, ()-> processKeysInfo( Option(old),actor, keyInfo ))
 
 
 end#processKeysInfo
@@ -367,7 +436,7 @@ function shouldBeExecuted(keyInfo::KeyboardStruct, act::Int64)::Bool
       GLFW.KEY_ENTER  => return act==1 # returning true if enter is pressed
             _ => false # not Important
          end#match
-         @info res
+
          return res
  
         end#if     
@@ -414,9 +483,14 @@ function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlOb
 
     elseif(isempty(filtered))#nothing to be done   
         return Option()
-    elseif(keyInfo.isTAbPressed && !isempty(filtered))# when we want to set new value for manual mask change 
+    # when we want to set new value for manual mask change     
+    elseif(keyInfo.isTAbPressed && !isempty(filtered))
         @info "Sending number" parse(Int64,filtered)
-        return Option(parse(Int64,filtered))    
+        return Option(parse(Int64,filtered))
+    #in case we want to change the dimension of plane for slicing data     
+    elseif(keyInfo.isSpacePressed && !isempty(filtered)  &&  parse(Int64,filtered)<4)
+        @info "changing plane of slicing to " parse(Int64,filtered)
+        return Option(setproperties(actor.actor.onScrollData.dataToScrollDims ,  (dimensionToScroll= parse(Int64,filtered)) )    )            
      # in case we want to display diffrence of two masks   
     elseif(occursin("-" , joined))
 

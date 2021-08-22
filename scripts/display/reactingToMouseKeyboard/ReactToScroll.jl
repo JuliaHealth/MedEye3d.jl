@@ -9,7 +9,7 @@ code adapted from https://discourse.julialang.org/t/custom-subject-in-rocket-jl-
 """
 #@doc ReactToScrollStr
 module ReactToScroll
-using Rocket, GLFW, Main.ForDisplayStructs, Main.TextureManag,Logging, Main.DataStructs, Main.StructsManag
+using Main.DisplayWords,Rocket, GLFW, Main.ForDisplayStructs, Main.TextureManag,Logging, Main.DataStructs, Main.StructsManag
 
 export reactToScroll
 export registerMouseScrollFunctions
@@ -106,21 +106,16 @@ function reactToScroll(isScrollUp::Bool, actor::SyncActor{Any, ActorWithOpenGlOb
 
          #saving information about current slice for future reference
     actor.actor.currentDisplayedSlice = current
+    
+    #enable undoing the action
+    addToforUndoVector(actor, ()-> reactToScroll(!isScrollUp, actor ))
 
    actor.actor.mainForDisplayObjects.stopListening[]=false
 
 
 end#reactToScroll
 
-```@doc
-we need to check wether scrolling dat contains some text that can be used for this particular slice display if not we will return only mainTextToDisp
-```
-function getTextForCurrentSlice(scrollDat::FullScrollableDat, sliceNumb::Int32)::Vector{SimpleLineTextStruct}
-    if( length(scrollDat.sliceTextToDisp)>=sliceNumb  ) 
-        return  copy(vcat(scrollDat.mainTextToDisp ,  scrollDat.sliceTextToDisp[sliceNumb] ))
-    end#if    
-        return copy(scrollDat.mainTextToDisp )
-end#getTextForCurrentSlice
+
 
 
 end #ReactToScroll

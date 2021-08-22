@@ -10,7 +10,7 @@ using FreeTypeAbstraction,Main.ForDisplayStructs,Main.DataStructs,Main.ModernGlU
 @quickactivate "Probabilistic medical segmentation"
 
 
-export textLinesFromStrings,renderSingleLineOfText,activateForTextDisp,bindAndActivateForText,reactivateMainObj, createTextureForWords,bindAndActivateForText, bindAndDisplayTexture
+export getTextForCurrentSlice,textLinesFromStrings,renderSingleLineOfText,activateForTextDisp,bindAndActivateForText,reactivateMainObj, createTextureForWords,bindAndActivateForText, bindAndDisplayTexture
 
 
 ```@doc
@@ -126,7 +126,15 @@ function createTextureForWords(numberOfActiveTextUnits::Int
         )
 end#createTextureForWords
 
-
+```@doc
+we need to check wether scrolling dat contains some text that can be used for this particular slice display if not we will return only mainTextToDisp
+```
+function getTextForCurrentSlice(scrollDat::FullScrollableDat, sliceNumb::Int32)::Vector{SimpleLineTextStruct}
+    if( length(scrollDat.sliceTextToDisp)>=sliceNumb  ) 
+        return  copy(vcat(scrollDat.mainTextToDisp ,  scrollDat.sliceTextToDisp[sliceNumb] ))
+    end#if    
+        return copy(scrollDat.mainTextToDisp )
+end#getTextForCurrentSlice
 
 
 

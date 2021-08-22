@@ -336,6 +336,11 @@ git-tree-sha1 = "19d0f1e234c13bbfd75258e55c52aa1d876115f5"
 uuid = "663a7486-cb36-511b-a19d-713bb74d65c9"
 version = "0.9.2"
 
+[[FunctionWrappers]]
+git-tree-sha1 = "241552bc2209f0fa068b6415b1942cc0aa486bcc"
+uuid = "069b7b12-0de2-55c6-9aab-29f3d0a68a2e"
+version = "1.1.2"
+
 [[Future]]
 deps = ["Random"]
 uuid = "9fa8497b-333b-5362-9e8d-4d0656e87820"

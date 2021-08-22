@@ -29,11 +29,14 @@ Just for reference openGL function definition
 function updateTexture(::Type{Tt}
                     ,data::AbstractArray
                     ,textSpec::TextureSpec
-                    ,xoffset::Int=0
-                    ,yoffset::Int=0
-                    ,widthh::Int32=textSpec.widthh
-                    ,heightt::Int32 =textSpec.heightt) where{Tt}
+                    ,xoffset::Int
+                    ,yoffset::Int
+                    ,widthh::Int32
+                    ,heightt::Int32) where{Tt}
 
+
+
+    glClear(GL_COLOR_BUFFER_BIT)
     glActiveTexture(textSpec.actTextrureNumb); # active proper texture unit before binding
     glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
    
@@ -67,6 +70,8 @@ function createTexture(juliaDataType::Type{juliaDataTyp}
                         , height::Int32
                         ,GL_RType::UInt32 =GL_R8UI
                         ,OpGlType= GL_UNSIGNED_BYTE) where {juliaDataTyp}
+
+
 #The texture we're going to render to
     texture= Ref(GLuint(0));
     glGenTextures(1, texture);
@@ -173,18 +178,18 @@ function updateImagesDisplayed(singleSliceDat::SingleSliceDat
         forDisplayConstants.stopListening[]=true
              modulelistOfTextSpecs=forDisplayConstants.listOfTextSpecifications
              #clearing color buffer
-            glClearColor(0.0, 0.0, 0.1 , 1.0)
+           # glClearColor(0.0, 0.0, 0.1 , 1.0)
             for updateDat in singleSliceDat.listOfDataAndImageNames
                 findList= findall( (texSpec)-> texSpec.name == updateDat.name, modulelistOfTextSpecs)
                 texSpec = !isempty(findList) ? modulelistOfTextSpecs[findList[1]] : throw(DomainError(findList, "no such name specified in start configuration - $( updateDat[1])")) 
-                Main.TextureManag.updateTexture(updateDat.type,updateDat.dat,texSpec)
+                Main.TextureManag.updateTexture(updateDat.type,updateDat.dat,texSpec,0,0,calcDimStruct.imageTextureWidth,calcDimStruct.imageTextureHeight )
             end #for 
             #render text associated with this slice
             activateForTextDisp(
                 wordsDispObj.shader_program_words
                 ,wordsDispObj.vbo_words
                 ,calcDimStruct)
-            glClearColor(0.0, 0.0, 0.1 , 1.0)
+          #  glClearColor(0.0, 0.0, 0.1 , 1.0)
 
             matr= addTextToTexture(wordsDispObj
                             ,[singleSliceDat.textToDisp...,valueForMaskToSett.text]
@@ -315,7 +320,9 @@ function addTextToTexture(wordsDispObj::ForWordsDispStruct
                 ,matr
                 ,wordsDispObj.textureSpec
                 ,0
-                ,0) #  ,Int32(10000),Int32(1000)
+                ,0
+                ,calcDimStruct.textTexturewidthh
+                ,calcDimStruct.textTextureheightt) #  ,Int32(10000),Int32(1000)
     return matr
 end #addTextToTexture
 

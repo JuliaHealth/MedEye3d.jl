@@ -151,6 +151,8 @@ Actor that is able to store a state to keep needed data for proper display
     calcDimsStruct::CalcDimsStruct=CalcDimsStruct()   #data for calculations of necessary constants needed to calculate window size , mouse position ...
     valueForMasToSet::valueForMasToSetStruct=valueForMasToSetStruct() # value that will be used to set  pixels where we would interact with mouse
     lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1,1,1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
+    forUndoVector::AbstractArray=[] # holds lambda functions that when invoked will  undo last operations
+    maxLengthOfForUndoVector::Int64 = 10 # number controls how many step at maximum we can get back
   end
 
 ```@doc
@@ -167,6 +169,7 @@ Holding necessery data to controll keyboard shortcuts```
   mostRecentScanCode ::GLFW.Key=GLFW.KEY_KP_4
   mostRecentKeyName ::String=""
   mostRecentAction ::GLFW.Action= GLFW.RELEASE
+
 end
 ```@doc
 Holding necessery data to controll mouse interaction
@@ -174,7 +177,7 @@ Holding necessery data to controll mouse interaction
 @with_kw struct MouseStruct
   isLeftButtonDown ::Bool = false # true if left button was pressed and not yet released
   isRightButtonDown ::Bool = false# true if right button was pressed and not yet released
-  lastCoordinates::CartesianIndex{2} = [] # list of accumulated mouse coordinates
+  lastCoordinates::Vector{CartesianIndex{2}} = [] # list of accumulated mouse coordinates
 end#MouseStruct
 
 

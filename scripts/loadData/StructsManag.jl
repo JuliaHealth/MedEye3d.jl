@@ -5,7 +5,7 @@ utilities for dealing data structs like FullScrollableDat or SingleSliceDat
 """
 module StructsManag
 using  Setfield,  Main.ForDisplayStructs,  Main.DataStructs
-export getHeightToWidthRatio,threeToTwoDimm,modSlice!, threeToTwoDimm,modifySliceFull!,getSlicesNumber,getMainVerticies
+export addToforUndoVector,cartTwoToThree,getHeightToWidthRatio,threeToTwoDimm,modSlice!, threeToTwoDimm,modifySliceFull!,getSlicesNumber,getMainVerticies
 
 ```@doc
 given two dim dat it sets points in given coordinates in given slice to given value
@@ -83,9 +83,50 @@ function getHeightToWidthRatio( calcDim::CalcDimsStruct ,dataToScrollDims::DataT
                               ,heightToWithRatio =  dataToScrollDims.voxelSize[toSelect[1]]/dataToScrollDims.voxelSize[toSelect[2]]
                               ,textTextureZeros= calcDim.textTextureZeros  
   ))
-end
+end#getHeightToWidthRatio
 
 
+
+```@doc
+Based on DataToScrollDims ,2 dim cartesian coordinate and  slice number it gives 3 dimensional coordinate of mouse position
+```
+function cartTwoToThree(dataToScrollDims::DataToScrollDims 
+                           ,sliceNumber::Int
+                           ,cartIn::CartesianIndex{2})::CartesianIndex{3}
+  toSelect= filter(it-> it!=dataToScrollDims.dimensionToScroll , [1,2,3] )# will be used to get texture width and height
+resArr= [1,1,1]
+
+resArr[dataToScrollDims.dimensionToScroll]=Int64(sliceNumber)
+resArr[toSelect[1]] = cartIn[1]
+resArr[toSelect[2]] = cartIn[2]
+  return CartesianIndex(resArr[1],resArr[2],resArr[3]  )
+end#cartTwoToThree
+
+
+
+
+```@doc
+Given function and actor it passes the function to forUndoVector -
+   in case the length of the vector is too big the last element woill be removed
+```
+function addToforUndoVector(actor::ActorWithOpenGlObjects 
+                           ,fun)
+
+    append!(fun,actor.forUndoVector)
+
+    if(length(actor.forUndoVector) >actor.maxLengthOfForUndoVector )
+      popfirst!(actor.maxLengthOfForUndoVector)
+    end  
+
+end#addToforUndoVector
+
+
+aa = [1,2,3]
+append!(aa,5)
+popfirst!(aa)
+pop!(aa)
+aa
+aa[end]
 
 ```@doc
 calculates proper dimensions form main quad display on the basis of data stored in CalcDimsStruct 
@@ -171,4 +212,5 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
 
 
 end#StructsManag
+
 

@@ -105,7 +105,7 @@ function (handler::MouseCallbackSubscribable)( a, x::Float64, y::Float64)
         next!(handler.subject,MouseStruct( 
             isLeftButtonDown=handler.isLeftButtonDown
             ,isRightButtonDown=handler.isRightButtonDown
-           ,lastCoordinates=  [point]))#sending mouse position only if all conditions are met
+           ,lastCoordinates= [point] ))#sending mouse position only if all conditions are met
 
    end#if
 
@@ -113,6 +113,7 @@ end #handler
 
 @doc handlerStr
 function (handler::MouseCallbackSubscribable)(a, button::GLFW.MouseButton, action::GLFW.Action,m)
+    
 
     res=(button==GLFW.MOUSE_BUTTON_1 &&  action==GLFW.PRESS)#so it will stop either as we relese left mouse or click right
     handler.isLeftButtonDown = res
@@ -147,7 +148,7 @@ function registerMouseClickFunctions(window::GLFW.Window
                                         ,ymin=Int32(calcD.windowHeightCorr)
                                         ,xmax=Int32(calcD.avWindWidtForMain-calcD.windowWidthCorr)
                                         ,ymax=Int32(calcD.avWindHeightForMain-calcD.windowHeightCorr)
-                                        ,coordinatesStoreForLeftClicks=MouseStruct()
+                                        ,coordinatesStoreForLeftClicks=[]
                                         ,lastCoordinate=CartesianIndex(1,1)
                                         ,referenceInstance=Dates.now()
                                         ,subject=Subject(MouseStruct  ,scheduler = AsyncScheduler()))
@@ -175,23 +176,39 @@ function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any, ActorWith
     obj.stopListening[]=true #free GLFW context
     textureList = actor.actor.textureToModifyVec
     mouseCoords= mousestr.lastCoordinates
-    if (!isempty(textureList)  && mouseCoords.isLeftButtonDown && textureList[1].isEditable)
+    if (!isempty(textureList)  && mousestr.isLeftButtonDown && textureList[1].isEditable)
         texture= textureList[1]
-    
-
+        calcDim =  actor.actor.calcDimsStruct
         # two dimensional coordinates on plane of intrest (current slice)
        mappedCoords =  translateMouseToTexture(texture.strokeWidth
                                                 ,mouseCoords
                                                 ,actor.actor.calcDimsStruct)
+
        twoDimDat= actor.actor.currentlyDispDat|> # accessing currently displayed data
        (singSl)-> singSl.listOfDataAndImageNames[singSl.nameIndexes[texture.name]] #accessing the texture data we want to modify
+      
        toSet =  convert( parameter_type(texture) ,actor.actor.valueForMasToSet.value)
        modSlice!(twoDimDat, mappedCoords, convert(twoDimDat.type, toSet ))|> # modifying data associated with texture
-       (sliceDat)-> updateTexture(twoDimDat.type,sliceDat, texture)
+       (sliceDat)-> updateTexture(twoDimDat.type,sliceDat, texture,0,0,calcDim.imageTextureWidth,calcDim.imageTextureHeight  )
 
         basicRender(obj.window)
-    elseif( mouseCoords.isRightButtonDown  )
-        actor.actor.lastRecordedMousePosition = mouseCoords[1]
+        #to enable undoing we just set the point we modified back to 0 
+        addToforUndoVector(actor, ()-> begin
+        modSlice!(twoDimDat, mappedCoords, 0)|> # modifying data associated with texture
+        (sliceDat)-> updateTexture(twoDimDat.type,sliceDat, texture,0,0,calcDim.imageTextureWidth,calcDim.imageTextureHeight  )
+         basicRender(obj.window)
+      
+    end)
+
+    elseif( mousestr.isRightButtonDown  )
+        #we save data about right click position in order to change the slicing plane accordingly
+        mappedCoords =  translateMouseToTexture(Int32(1)
+        ,mouseCoords
+        ,actor.actor.calcDimsStruct)
+
+        actor.actor.lastRecordedMousePosition = cartTwoToThree(actor.actor.onScrollData.dataToScrollDims 
+                                                                ,actor.actor.currentDisplayedSlice
+                                                               ,mappedCoords[1]    )   
     end #if 
     obj.stopListening[]=false # reactivete event listening loop
 end#reactToScroll
@@ -206,7 +223,7 @@ calcDims - set of values usefull for calculating mouse position
 return vector of translated cartesian coordinates
 ```
 function translateMouseToTexture(strokeWidth::Int32
-                                ,mouseCoords::MouseStruct
+                                ,mouseCoords::Vector{CartesianIndex{2}}
                                 ,calcD::CalcDimsStruct )
   
 
