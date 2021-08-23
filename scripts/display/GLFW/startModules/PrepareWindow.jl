@@ -1,7 +1,3 @@
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
-
-
 module PrepareWindow
 
 export displayAll,createAndInitShaderProgram

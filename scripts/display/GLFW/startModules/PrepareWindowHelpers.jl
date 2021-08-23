@@ -1,6 +1,3 @@
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
-
 """
 It stores set of functions that need to be composed in order to prepare GLFW window and 
 display verticies needed for texture  display

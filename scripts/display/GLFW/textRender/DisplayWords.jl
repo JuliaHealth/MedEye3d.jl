@@ -1,6 +1,3 @@
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
-
 """
 Module controlling displaying of the text associated with the segmentation 
 - either text releted to all slices or just a single one currently displayed or both

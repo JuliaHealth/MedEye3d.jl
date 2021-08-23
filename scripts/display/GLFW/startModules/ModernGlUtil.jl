@@ -1,5 +1,3 @@
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
 """
 copied from ModernGL github repository
 """

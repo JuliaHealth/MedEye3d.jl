@@ -1,6 +1,3 @@
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
-
 """
 functions that will enable creation of long String that will be the code for custom fragment shader that will be suited for defined textures
 """

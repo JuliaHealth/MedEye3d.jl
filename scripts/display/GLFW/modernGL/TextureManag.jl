@@ -1,6 +1,3 @@
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
-
 """
 stores functions needed to create bind and update OpenGl textues 
 """

@@ -1,6 +1,3 @@
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
-
 
 #Create and initialize shaders
 module ShadersAndVerticiesForText
