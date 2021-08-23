@@ -194,7 +194,7 @@ function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any, ActorWith
         basicRender(obj.window)
         #to enable undoing we just set the point we modified back to 0 
         addToforUndoVector(actor, ()-> begin
-        modSlice!(twoDimDat, mappedCoords, 0)|> # modifying data associated with texture
+        modSlice!(twoDimDat, mappedCoords,  convert(twoDimDat.type, 0 ))|> # modifying data associated with texture
         (sliceDat)-> updateTexture(twoDimDat.type,sliceDat, texture,0,0,calcDim.imageTextureWidth,calcDim.imageTextureHeight  )
          basicRender(obj.window)
       

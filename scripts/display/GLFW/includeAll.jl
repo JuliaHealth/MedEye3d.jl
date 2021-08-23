@@ -1,11 +1,10 @@
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
-"""
-just including all necessery files  for display
-"""
-using Revise
-includet(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 
+using Revise
+
+
+includet(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 
 includet(DrWatson.scriptsdir("structs","FromSegmentationEvaluation.jl"))
 includet(DrWatson.scriptsdir("structs","DataStructs.jl"))

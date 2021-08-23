@@ -150,27 +150,34 @@ the basis mainly of multiple dispatch
 function processKeysInfo(textSpecObs::Identity{TextureSpec{T}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct )where T
     textSpec =  textSpecObs.value
     if(keyInfo.isCtrlPressed)    
-        setTextureVisibility(false,textSpec.uniforms )
+        setVisAndRender(false,actor.actor,textSpec.uniforms )
         @info " set visibility of $(textSpec.name) to false" 
         #to enabling undoing it 
-        addToforUndoVector(actor, ()->setTextureVisibility(true,textSpec.uniforms )   )
+        addToforUndoVector(actor, ()-> setVisAndRender(true,actor.actor,textSpec.uniforms )    )
     elseif(keyInfo.isShiftPressed)  
-        setTextureVisibility(true,textSpec.uniforms )
+        setVisAndRender(true,actor.actor,textSpec.uniforms )
         @info " set visibility of $(textSpec.name) to true" 
        #to enabling undoing it 
-       addToforUndoVector(actor, ()->setTextureVisibility(false,textSpec.uniforms )   )
+       addToforUndoVector(actor, ()->setVisAndRender(false,actor.actor,textSpec.uniforms )   )
 
     elseif(keyInfo.isAltPressed)  
         oldTex = actor.actor.textureToModifyVec
         actor.actor.textureToModifyVec= [textSpec]
         @info " set texture for manual modifications to  $(textSpec.name)"
        if(!isempty(oldTex))
-        addToforUndoVector(actor, ()->begin actor.actor.textureToModifyVec=oldTex[0] end)
+       addToforUndoVector(actor, ()->begin  @info actor.actor.textureToModifyVec=[oldTex[1]] end)
        end
     end #if
-basicRender(actor.actor.mainForDisplayObjects.window)
 end #processKeysInfo
 
+"""
+sets  visibility and render the result to the screen
+"""
+function setVisAndRender(isVis::Bool,actor::ActorWithOpenGlObjects,unifs::MaskTextureUniforms )
+    setTextureVisibility(isVis,unifs )
+    basicRender(actor.mainForDisplayObjects.window)
+
+end#setVisAndRender
 
 ```@doc
 for case when we want to subtract two masks
@@ -189,7 +196,6 @@ function processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec{T}}, Ide
         addToforUndoVector(actor, ()-> undoDiffrence(actor,maskA,maskB ))
 
     end #if
-basicRender(actor.actor.mainForDisplayObjects.window)
    
 
 end#processKeysInfo
@@ -202,6 +208,8 @@ function undoDiffrence(actor::SyncActor{Any, ActorWithOpenGlObjects},maskA,maskB
            end
 setTextureVisibility(true,maskA.uniforms )
 setTextureVisibility(true,maskB.uniforms )
+basicRender(actor.actor.mainForDisplayObjects.window)
+
 end#undoDiffrence
 
 
@@ -209,9 +217,13 @@ end#undoDiffrence
 
 ```@doc
 in case we want to  get new number set for manual modifications
-
+    toBeSavedForBack - just marks weather we wat to save the info how to undo latest action
+    - false if we invoke it from undoing 
 ```
-function processKeysInfo(numbb::Identity{Int64},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T
+function processKeysInfo(numbb::Identity{Int64}
+                        ,actor::SyncActor{Any, ActorWithOpenGlObjects}
+                        ,keyInfo::KeyboardStruct 
+                        ,toBeSavedForBack::Bool = true) where T
 
     valueForMasToSett = valueForMasToSetStruct(value = numbb.value)
     old = actor.actor.valueForMasToSet.dimensionToScroll
@@ -222,8 +234,9 @@ function processKeysInfo(numbb::Identity{Int64},actor::SyncActor{Any, ActorWithO
     , actor.actor.textDispObj
     , actor.actor.calcDimsStruct ,valueForMasToSett )
 # for undoing action
-    addToforUndoVector(actor, ()-> processKeysInfo( Option(old),actor, keyInfo ))
-
+if(toBeSavedForBack)
+    addToforUndoVector(actor, ()-> processKeysInfo( Option(old),actor, keyInfo,false ))
+end
 
 end#processKeysInfo
 
@@ -243,8 +256,13 @@ end#processKeysInfo
 
 ```@doc
 In case we want to change the dimansion of scrolling so for example from transverse 
+    toBeSavedForBack - just marks weather we wat to save the info how to undo latest action
+    - false if we invoke it from undoing 
 ```
-function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T
+function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}
+                    ,actor::SyncActor{Any, ActorWithOpenGlObjects}
+                    ,keyInfo::KeyboardStruct
+                    ,toBeSavedForBack::Bool = true ) where T
     toScrollDat= toScrollDatPrim.value
 
 
@@ -319,9 +337,9 @@ updateImagesDisplayed(singleSlDat
      #saving information about current slice for future reference
 actor.actor.currentDisplayedSlice = current
 # to enbling getting back
-
-addToforUndoVector(actor, ()-> processKeysInfo( Option(old),actor, keyInfo ))
-
+if(toBeSavedForBack)
+    addToforUndoVector(actor, ()-> processKeysInfo( Option(old),actor, keyInfo,false ))
+end#if
 
 end#processKeysInfo
 
@@ -372,6 +390,7 @@ function displayMaskDiffrence(maskA::TextureSpec, maskB::TextureSpec,actor::Sync
         end
  setTextureVisibility(false,maskA.uniforms )
  setTextureVisibility(false,maskB.uniforms )
+ basicRender(actor.actor.mainForDisplayObjects.window)
 
 
 end#displayMaskDiffrence

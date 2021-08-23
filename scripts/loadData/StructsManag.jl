@@ -4,7 +4,7 @@ using DrWatson
 utilities for dealing data structs like FullScrollableDat or SingleSliceDat
 """
 module StructsManag
-using  Setfield,  Main.ForDisplayStructs,  Main.DataStructs
+using  Setfield,  Main.ForDisplayStructs,  Main.DataStructs, Rocket
 export addToforUndoVector,cartTwoToThree,getHeightToWidthRatio,threeToTwoDimm,modSlice!, threeToTwoDimm,modifySliceFull!,getSlicesNumber,getMainVerticies
 
 ```@doc
@@ -109,24 +109,19 @@ end#cartTwoToThree
 Given function and actor it passes the function to forUndoVector -
    in case the length of the vector is too big the last element woill be removed
 ```
-function addToforUndoVector(actor::ActorWithOpenGlObjects 
+function addToforUndoVector(actor::SyncActor{Any, ActorWithOpenGlObjects} 
                            ,fun)
 
-    append!(fun,actor.forUndoVector)
+   push!(actor.actor.forUndoVector,fun)
 
-    if(length(actor.forUndoVector) >actor.maxLengthOfForUndoVector )
-      popfirst!(actor.maxLengthOfForUndoVector)
+    if(length(actor.actor.forUndoVector) >actor.actor.maxLengthOfForUndoVector )
+      popfirst!(actor.actor.forUndoVector)
     end  
 
 end#addToforUndoVector
 
 
-aa = [1,2,3]
-append!(aa,5)
-popfirst!(aa)
-pop!(aa)
-aa
-aa[end]
+
 
 ```@doc
 calculates proper dimensions form main quad display on the basis of data stored in CalcDimsStruct 

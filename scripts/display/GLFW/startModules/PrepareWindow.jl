@@ -76,7 +76,7 @@ function displayAll(listOfTexturesToCreate::Vector{TextureSpec}
 #loop that enables reacting to mouse and keyboards inputs  so every 0.1 seconds it will check GLFW weather any new events happened	
 	t = @task begin;
 		while(!GLFW.WindowShouldClose(window))
-		sleep(0.001);
+		sleep(0.005);
 		if(!stopListening[])
 		 # Poll for and process events
 		  GLFW.PollEvents()

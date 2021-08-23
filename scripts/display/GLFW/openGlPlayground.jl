@@ -60,6 +60,7 @@
 
 
 
+
 #  mainMaskDummy = UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
 #  testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
 #  testLab2Dat= UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
@@ -142,9 +143,19 @@
          length(  actor.forUndoVector)
 
 
-        function aad()
+
+         popfirst!(actor.forUndoVector)
+
+
+         arr = Vector{Function}()
+         push!(arr,()->print("asd "))
+pop!(actor.forUndoVector)()
+
+
+         function aa()
            print("asd ")
         end 
+
         import  FunctionWrappers
  
         f1 = @inferred F64AnyFunc(identity)

@@ -68,12 +68,15 @@ end #registerMouseScrollFunctions
 
 
 
-reactToScrollStr = """
+"""
 in case of the scroll p true will be send in case of down - false
 in response to it it sets new screen int variable and changes displayed screen
+toBeSavedForBack - just marks weather we wat to save the info how to undo latest action
+ - false if we invoke it from undoing 
 """
-@doc reactToScrollStr
-function reactToScroll(isScrollUp::Bool, actor::SyncActor{Any, ActorWithOpenGlObjects})
+function reactToScroll(isScrollUp::Bool
+                    ,actor::SyncActor{Any, ActorWithOpenGlObjects}
+                    ,toBeSavedForBack::Bool = true)
     actor.actor.mainForDisplayObjects.stopListening[]=true
     current = actor.actor.currentDisplayedSlice
     isScrollUp ? current+=1 : current-=1
@@ -108,8 +111,10 @@ function reactToScroll(isScrollUp::Bool, actor::SyncActor{Any, ActorWithOpenGlOb
     actor.actor.currentDisplayedSlice = current
     
     #enable undoing the action
-    addToforUndoVector(actor, ()-> reactToScroll(!isScrollUp, actor ))
-
+    if(toBeSavedForBack)
+        func = ()->  reactToScroll(!isScrollUp, actor,false )
+        addToforUndoVector(actor,func  )
+    end
    actor.actor.mainForDisplayObjects.stopListening[]=false
 
 
@@ -117,5 +122,7 @@ end#reactToScroll
 
 
 
+z = ()->print(2)
+z()
 
 end #ReactToScroll

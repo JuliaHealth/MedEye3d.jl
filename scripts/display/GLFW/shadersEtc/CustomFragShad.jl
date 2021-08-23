@@ -337,7 +337,6 @@ to floating point data
         in the end where 100% of color will be associated with color of next section
     
 """
-@doc getNuclearMaskFunctionStr
 function getNuclearMaskFunctions(continuusColorTextSpecs::Vector{TextureSpec} )::String
    #Check in which range we are without if
    #Important first color in color list needs to be doubled in order to make algorithm cleaner - so we will start from index 1 and always there would be some previous index
