@@ -91,7 +91,7 @@ function (handler::MouseCallbackSubscribable)( a, x::Float64, y::Float64)
   
   if  (handler.isLeftButtonDown && x>=handler.xmin && x<=handler.xmax && y>=handler.ymin && y<= handler.ymax )
     push!(handler.coordinatesStoreForLeftClicks,point)
-        if((Dates.now()-handler.referenceInstance).value>100)  
+        if((Dates.now()-handler.referenceInstance).value>200)  
             #sending mouse position only if all conditions are met
             next!(handler.subject,MouseStruct( 
                 isLeftButtonDown=handler.isLeftButtonDown
@@ -191,7 +191,8 @@ function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any, ActorWith
        modSlice!(twoDimDat, mappedCoords, convert(twoDimDat.type, toSet ))|> # modifying data associated with texture
        (sliceDat)-> updateTexture(twoDimDat.type,sliceDat, texture,0,0,calcDim.imageTextureWidth,calcDim.imageTextureHeight  )
 
-        basicRender(obj.window)
+       glClear(GL_COLOR_BUFFER_BIT)
+       basicRender(obj.window)
         #to enable undoing we just set the point we modified back to 0 
         addToforUndoVector(actor, ()-> begin
         modSlice!(twoDimDat, mappedCoords,  convert(twoDimDat.type, 0 ))|> # modifying data associated with texture

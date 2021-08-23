@@ -35,7 +35,6 @@ function updateTexture(::Type{Tt}
 
 
 
-    glClear(GL_COLOR_BUFFER_BIT)
     glActiveTexture(textSpec.actTextrureNumb); # active proper texture unit before binding
     glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
    

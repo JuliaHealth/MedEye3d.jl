@@ -226,7 +226,7 @@ function processKeysInfo(numbb::Identity{Int64}
                         ,toBeSavedForBack::Bool = true) where T
 
     valueForMasToSett = valueForMasToSetStruct(value = numbb.value)
-    old = actor.actor.valueForMasToSet.dimensionToScroll
+    old = actor.actor.valueForMasToSet.value
     actor.actor.valueForMasToSet =valueForMasToSett
 
     updateImagesDisplayed(actor.actor.currentlyDispDat
@@ -246,9 +246,9 @@ end#processKeysInfo
 In order to enable undoing last action we just invoke last function from list 
 ```
 function processKeysInfo(numbb::Identity{Bool},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T
-
-    pop!(actor.actor.forUndoVector)()
-
+    if(!isempty(actor.actor.forUndoVector))
+     pop!(actor.actor.forUndoVector)()
+    end
 end#processKeysInfo
 
 
@@ -265,6 +265,7 @@ function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}
                     ,toBeSavedForBack::Bool = true ) where T
     toScrollDat= toScrollDatPrim.value
 
+    old = actor.actor.onScrollData.dimensionToScroll
 
     newCalcDim= getHeightToWidthRatio(actor.actor.calcDimsStruct,toScrollDat )|>
                     getMainVerticies
@@ -294,7 +295,6 @@ basicRender(actor.actor.mainForDisplayObjects.window)
 
    # end#if
 
-old = actor.actor.onScrollData.dimensionToScroll
 
 actor.actor.onScrollData.dimensionToScroll = toScrollDat.dimensionToScroll
 
@@ -320,8 +320,8 @@ singleSlDat= actor.actor.onScrollData.dataToScroll|>
 dispObj = actor.actor.mainForDisplayObjects
 #for displaying new quad - to accomodate new proportions
 reactivateMainObj(dispObj.shader_program, dispObj.vbo,newCalcDim  )
-basicRender(actor.actor.mainForDisplayObjects.window)
 
+glClear(GL_COLOR_BUFFER_BIT)
 
 updateImagesDisplayed(singleSlDat
                     ,actor.actor.mainForDisplayObjects
