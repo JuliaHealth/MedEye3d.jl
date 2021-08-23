@@ -1,9 +1,4 @@
-
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
-
-
-SegmentationDisplayStr = """
+"""
 Main module controlling displaying segmentations image and data
 
 Description of nthe file structure
@@ -39,17 +34,16 @@ ReactingToInput.jl - using Rocket.jl (reactivate functional programming ) enable
 OpenGLDisplayUtils.jl - some utility functions used in diffrent parts of program
     - depends on external :GLFW, ModernGL 
 """
-# @doc SegmentationDisplayStr
 module SegmentationDisplay
 
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
 export coordinateDisplay
 export passDataForScrolling
 
 using ModernGL, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUtils, Main.ForDisplayStructs,Main.Uniforms, Main.DisplayWords, Dictionaries
 using Main.ReactingToInput, Rocket, Setfield, Logging, Main.ShadersAndVerticiesForText,FreeTypeAbstraction,Main.DisplayWords, Main.DataStructs, Main.StructsManag
 
+using DrWatson
+@quickactivate "Julia Med 3d"
 
 #holds actor that is main structure that process inputs from GLFW and reacts to it
 mainActor = sync(ActorWithOpenGlObjects())
@@ -57,7 +51,7 @@ mainActor = sync(ActorWithOpenGlObjects())
 subscriptions = []
 
 
-coordinateDisplayStr = """
+"""
 coordinating displaying - sets needed constants that are storeds in  forDisplayConstants; and configures interactions from GLFW events
 listOfTextSpecs - holds required data needed to initialize textures
 keeps also references to needed uniforms etc.
@@ -65,7 +59,6 @@ windowWidth::Int,windowHeight::Int - GLFW window dimensions
 fractionOfMainIm - how much of width should be taken by the main image
 heightToWithRatio - needed for proper display of main texture - so it would not be stretched ...
 """
-@doc coordinateDisplayStr
 function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
                         ,fractionOfMainIm::Float32
                         ,dataToScrollDims::DataToScrollDims=DataToScrollDims()#stores additional data about full dimensions of scrollable dat - this is necessery for switching slicing plane orientation efficiently
@@ -142,12 +135,10 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
 
 end #coordinateDisplay
 
-
-passDataForScrollingStr =    """
+"""
 is used to pass into the actor data that will be used for scrolling
 onScrollData - struct holding between others list of tuples where first is the name of the texture that we provided and second is associated data (3 dimensional array of appropriate type)
 """
-@doc passDataForScrollingStr
 function passDataForScrolling(onScrollData::FullScrollableDat)
     #wrapping the data into an observable and passing it to the actor
     forScrollData = of(onScrollData)
@@ -155,13 +146,12 @@ function passDataForScrolling(onScrollData::FullScrollableDat)
 end
 
 
-updateSingleImagesDisplayedStr =    """
+"""
 enables updating just a single slice that is displayed - do not change what will happen after scrolling
 one need to pass data to actor in 
 listOfDataAndImageNames - struct holding  tuples where first entry in tuple is name of texture given in the setup and second is 2 dimensional aray of appropriate type with image data
 sliceNumber - the number to which we set slice in order to later start scrolling the scroll data from this point
 """
-@doc updateSingleImagesDisplayedStr
 function updateSingleImagesDisplayed( listOfDataAndImageNames::SingleSliceDat)
     forDispData = of(listOfDataAndImageNames)
     subscribe!(forDispData, mainActor) 
@@ -169,12 +159,10 @@ function updateSingleImagesDisplayed( listOfDataAndImageNames::SingleSliceDat)
 end #updateSingleImagesDisplayed
 
 
-
-registerInteractionsStr =    """
+ """
 is using the actor that is instantiated in this module and connects it to GLFW context
 by invoking appropriate registering functions and passing to it to the main Actor controlling input
 """
-@doc registerInteractionsStr
 function registerInteractions()
     subscriptionsInner = subscribeGLFWtoActor(mainActor)
     for el in subscriptionsInner
@@ -184,7 +172,7 @@ function registerInteractions()
 
 end
 
-```@doc
+"""
 Preparing ForWordsDispStruct that will be needed for proper displaying of texts
     numberOfActiveTextUnits - number of textures already used - so we we will know what is still free 
     fragment_shader_words - reference to fragment shader used to display text
@@ -193,7 +181,7 @@ Preparing ForWordsDispStruct that will be needed for proper displaying of texts
     widthh, heightt - size of the texture - the bigger the higher resolution, but higher computation cost
 
 return prepared for displayStruct    
-    ```
+"""
 function prepareForDispStruct(numberOfActiveTextUnits::Int
                             ,fragment_shader_words::UInt32
                             ,vbo_words::Base.RefValue{UInt32}
@@ -203,11 +191,7 @@ function prepareForDispStruct(numberOfActiveTextUnits::Int
                             ,heightt::Int32=Int32(1)
                             ,forDispObj::forDisplayObjects=forDisplayObjects()
                             ) ::ForWordsDispStruct
-      #in order to corectly bind all we need to activate proper OpenGl objects
-    #   bindAndActivateForText(shader_program_words
-    #                         ,fragment_shader_words
-    #                         ,vbo_words 
-    #                         ,forDispObj.vertex_shader)
+
       res =  ForWordsDispStruct(
             fontFace = FreeTypeAbstraction.findfont("hack";  additional_fonts= datadir("fonts"))
             ,textureSpec = createTextureForWords(numberOfActiveTextUnits
@@ -218,16 +202,12 @@ function prepareForDispStruct(numberOfActiveTextUnits::Int
             ,vbo_words=vbo_words
             ,shader_program_words=shader_program_words
          )
-     #reactivating main objects so other binding will work well    
-        #  reactivateMainObj(forDispObj.shader_program
-        #                  ,forDispObj.fragment_shader 
-        #                  ,forDispObj.vertex_shader 
-        #                  ,forDispObj.vbo  )
+
     return res
 end#prepereForDispStruct
 
 
-cleanUpStr =    """
+"""
 In order to properly close displayer we need to :
  remove buffers that wer use 
  remove shaders 
@@ -236,7 +216,6 @@ In order to properly close displayer we need to :
  finalize main actor and reinstantiate it
  close GLFW window
 """
-@doc cleanUpStr
 function cleanUp()
     GLFW.DestroyWindow(obj.window)
 

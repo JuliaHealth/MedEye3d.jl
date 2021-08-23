@@ -2,12 +2,11 @@ using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
 
-ReactToScrollStr="""
+"""
 module that holds functions needed to  react to scrolling
 Generally first we need to pass the GLFW callback to the Rocket obeservable 
 code adapted from https://discourse.julialang.org/t/custom-subject-in-rocket-jl-for-mouse-events-from-glfw/65133/3
 """
-#@doc ReactToScrollStr
 module ReactToScroll
 using Main.DisplayWords,Rocket, GLFW, Main.ForDisplayStructs, Main.TextureManag,Logging, Main.DataStructs, Main.StructsManag
 
@@ -25,19 +24,18 @@ end
 
 
 
-```@doc
+"""
 configuting Rocket on Subscribe so we get custom handler of input as we see we still need to define actor
-```
+"""
 function Rocket.on_subscribe!(handler::ScrollCallbackSubscribable, actor::SyncActor{Any, ActorWithOpenGlObjects})
     return subscribe!(handler.subject, actor)
 end
 
 
 
-handlerStr="""
+"""
 we define how handler should act on the subject - observable so it will pass event onto subject
 """
-@doc handlerStr
 function (handler::ScrollCallbackSubscribable)(_, xoff, yoff)
           next!(handler.subject, yoff==1.0)#true if we scroll up
 end
@@ -45,14 +43,13 @@ end
 
 
 
-registerMouseScrollFunctionsStr="""
+"""
 uploading data to given texture; of given types associated
 returns subscription in order to enable unsubscribing in the end 
 window - GLFW window 
 stopListening - atomic boolean able to stop the event listening cycle
 return scrollback - that holds boolean subject (observable) to which we can react by subscribing appropriate actor
 """
-@doc registerMouseScrollFunctionsStr
 function registerMouseScrollFunctions(window::GLFW.Window,stopListening::Base.Threads.Atomic{Bool})
 
 scrollback = ScrollCallbackSubscribable()

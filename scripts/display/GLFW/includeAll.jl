@@ -10,20 +10,20 @@ includet(DrWatson.scriptsdir("structs","FromSegmentationEvaluation.jl"))
 includet(DrWatson.scriptsdir("structs","DataStructs.jl"))
 includet(DrWatson.scriptsdir("structs","forDisplayStructs.jl"))
 
-includet(DrWatson.scriptsdir("loadData","StructsManag.jl"))
+includet(DrWatson.scriptsdir("display","GLFW","DispUtils","StructsManag.jl"))
 
 
 includet(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
 includet(DrWatson.scriptsdir("display","GLFW","shadersEtc","CustomFragShad.jl"))
 
-includet(DrWatson.scriptsdir("display","GLFW","modernGL","OpenGLDisplayUtils.jl"))
+includet(DrWatson.scriptsdir("display","GLFW","DispUtils","OpenGLDisplayUtils.jl"))
 includet(DrWatson.scriptsdir("display","GLFW","shadersEtc","ShadersAndVerticies.jl"))
 includet(DrWatson.scriptsdir("display","GLFW","shadersEtc","ShadersAndVerticiesForText.jl"))
 includet(DrWatson.scriptsdir("display","GLFW","shadersEtc","Uniforms.jl"))
 
 includet(DrWatson.scriptsdir("display","GLFW","textRender","DisplayWords.jl"))
 
-includet(DrWatson.scriptsdir("display","GLFW","modernGL","TextureManag.jl") )
+includet(DrWatson.scriptsdir("display","GLFW","DispUtils","TextureManag.jl") )
 includet(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindow.jl"))
 
 

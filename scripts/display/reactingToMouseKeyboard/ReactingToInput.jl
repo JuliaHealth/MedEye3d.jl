@@ -1,5 +1,3 @@
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
 
 module ReactingToInput
 using Rocket, GLFW,ModernGL,Setfield, Main.ReactToScroll, Main.ForDisplayStructs
@@ -58,12 +56,11 @@ function setUpWordsDisplay(textDispObject::Main.ForDisplayStructs.ForWordsDispSt
 end#setUpWordsDisplay
 
 
-setUpForScrollDataStr= """
+"""
 adding the data about 3 dimensional arrays that will be source of data used for scrolling behaviour
 onScroll Data - list of tuples where first is the name of the texture that we provided and second is associated data (3 dimensional array of appropriate type)
 
 """
-@doc setUpForScrollDataStr
 function setUpForScrollData(onScrollData::FullScrollableDat ,actor::SyncActor{Any, ActorWithOpenGlObjects})
     actor.actor.mainForDisplayObjects.stopListening[]=true
     
@@ -75,10 +72,9 @@ function setUpForScrollData(onScrollData::FullScrollableDat ,actor::SyncActor{An
 end#setUpMainDisplay
 
 
-setUpCalcDimsStructStr= """
+"""
 add data needed for proper calculations of mouse, verticies positions ... etc
 """
-@doc setUpCalcDimsStructStr
 function setUpCalcDimsStruct(calcDim::CalcDimsStruct ,actor::SyncActor{Any, ActorWithOpenGlObjects})
     actor.actor.mainForDisplayObjects.stopListening[]=true
 
@@ -108,14 +104,13 @@ function setUpvalueForMasToSet(valueForMasToSett::valueForMasToSetStruct ,actor:
 end#setUpvalueForMasToSet
 
 
-updateSingleImagesDisplayedSetUpStr =    """
+"""
 enables updating just a single slice that is displayed - do not change what will happen after scrolling
 one need to pass data to actor in 
 struct that holds tuple where first entry is
 -vector of tuples whee first entry in tuple is name of texture given in the setup and second is 2 dimensional aray of appropriate type with image data
 - Int - second is Int64 - that is marking the screen number to which we wan to set the actor state
 """
-@doc updateSingleImagesDisplayedSetUpStr
 function updateSingleImagesDisplayedSetUp(singleSliceDat::SingleSliceDat ,actor::SyncActor{Any, ActorWithOpenGlObjects})
     actor.actor.mainForDisplayObjects.stopListening[]=true
     updateImagesDisplayed(singleSliceDat

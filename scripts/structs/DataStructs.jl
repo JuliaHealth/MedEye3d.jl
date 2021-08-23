@@ -1,5 +1,3 @@
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
 """
 structs helping managing and storing data
 """
@@ -7,15 +5,15 @@ module DataStructs
 using Parameters, Main.BasicStructs, Dictionaries
 export DataToScrollDims,valueForMasToSetStruct,SimpleLineTextStruct, CalcDimsStruct,RawDataToDisp,TwoDimRawDat, ThreeDimRawDat, DataToDisp,FullScrollableDat,SingleSliceDat,SimpleLineTextStruct
 
-```@doc
+"""
 hold raw Data that can be send to be displayed 
-```
+"""
 abstract type RawDataToDisp end
 
-```@doc
+"""
 2 dimensional ata for displaying single slice
 struct is mutable becouse in case of the masks data can be changed multiple times and rapidly   
-```
+"""
 @with_kw mutable struct TwoDimRawDat{T} <: RawDataToDisp
    type::Type{T}= UInt8# easy access to type
    name::String=""#associated name
@@ -23,20 +21,20 @@ struct is mutable becouse in case of the masks data can be changed multiple time
 end#2DimRawDat
 
 
-```@doc
+"""
 3 dimensional data for displaying single slice
 struct is mutable becouse in case of the masks data can be changed multiple times and rapidly   
-```
+"""
 @with_kw mutable struct ThreeDimRawDat{T} <: RawDataToDisp
    type::Type{T}= UInt8# easy access to type
    name::String=""#associated name
    dat::AbstractArray{T, 3}=ones(type,2,2,2)# raw voxel data
 end#2DimRawDat
 
-```@doc
+"""
 given Vector of tuples where first is string and second is RawDataToDisp
 it creates dictionary where keys are those strings - names and values are indicies where they are found
-```
+"""
 function getLocationDict(listt)::Dictionary{String, Int64}
    return Dictionary(map(it->it.name,listt),collect(eachindex(listt)))
     
@@ -45,15 +43,15 @@ end#getLocationDict
 
 
 
-```@doc
+"""
 hold Data that can be send to be displayed with required metadata
-```
+"""
 abstract type DataToDisp end
 
 
-```@doc
+"""
 Struct holding line of text with some text metadata
-```
+"""
 @with_kw struct SimpleLineTextStruct
     text::String = "" #text to be displayed 
     fontSize::Int = 110 # size of letters
@@ -61,9 +59,9 @@ Struct holding line of text with some text metadata
 end#simpleTextStruct
 
 
-```@doc
+"""
 stores additional data about full dimensions of scrollable dat - this is necessery for switching slicing plane orientation efficiently
-```
+"""
 @with_kw struct  DataToScrollDims
     imageSize::Tuple{Int64, Int64, Int64} = (1,1,1)#amount of voxels in each dimensions
     voxelSize::Tuple{Float64, Float64, Float64}  = (1.0,1.0,1.0)#physical size of each pixel
@@ -75,11 +73,10 @@ end#DataToScrollDims
 
 
 
-FullScrollableDatStr="""
+"""
 Data that can be displayed and scrolled (so we have multiple slices)
 struct is mutable becouse in case of the masks data can be changed multiple times and rapidly
 """
-@doc FullScrollableDatStr
 @with_kw mutable struct FullScrollableDat<: DataToDisp
     dataToScrollDims::DataToScrollDims=DataToScrollDims()#stores additional data about full dimensions of scrollable dat - this is necessery for switching slicing plane orientation efficiently
     dimensionToScroll::Int= 3 # by which dimension we should scroll so for example if set to 3 one and we have slice number x we will get data A by A[:,:,x] if dimensionToScroll = 2 ->A[:,x,:]...
@@ -94,10 +91,10 @@ struct is mutable becouse in case of the masks data can be changed multiple time
     slicesNumber::Int32=1# number of available slices
 end #fullScrollableDat
 
-```@doc
+"""
 Data for displaying single slice
 struct is mutable becouse in case of the masks data can be changed multiple times and rapidly   
-```
+"""
 @with_kw mutable struct SingleSliceDat<: DataToDisp
     listOfDataAndImageNames::Vector{TwoDimRawDat}=[TwoDimRawDat()]   # tuples where first entry is name of image that we given in configuration, and second entry is data that we want to pass
     textToDisp::Vector{SimpleLineTextStruct}=[] # data about text that is to be displayed
@@ -107,12 +104,12 @@ struct is mutable becouse in case of the masks data can be changed multiple time
 end #fullScrollableDat
 
 
-```@doc
+"""
 struct holding  data needed for calculating proper mouse position , 
 getting proper size for the texture depending on image dimensions 
 getting into account  proportions of diffrent parts of display
 usefull stats for proper text display
-```
+"""
 @with_kw  struct CalcDimsStruct
  #imageDims = texture dimensions of main image texture
  imageTextureWidth::Int32=Int32(1)
@@ -154,9 +151,9 @@ wordsQuadVertSize::Int64 = sizeof(wordsImageQuadVert)
 
 end#CalcDimsStruct
 
-```@doc
+"""
 simple struct that when passed is giving information about what should be current value we are setting to the mask
-```
+"""
 @with_kw struct valueForMasToSetStruct
     value::Int64=1# value that will be used to set  pixels where we would interact with mouse
     text::SimpleLineTextStruct = SimpleLineTextStruct(text= "value of mask to set is  $(value)")

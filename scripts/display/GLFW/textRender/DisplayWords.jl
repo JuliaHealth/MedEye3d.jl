@@ -4,7 +4,7 @@ Module controlling displaying of the text associated with the segmentation
 """
 module DisplayWords
 using FreeTypeAbstraction,Main.ForDisplayStructs,Main.DataStructs,Main.ModernGlUtil , ModernGL, ColorTypes,Main.PrepareWindowHelpers,  Main.ShadersAndVerticies, Main.ShadersAndVerticiesForText, Glutils, DrWatson
-@quickactivate "Probabilistic medical segmentation"
+@quickactivate "Julia Med 3d"
 
 
 export getTextForCurrentSlice,textLinesFromStrings,renderSingleLineOfText,activateForTextDisp,bindAndActivateForText,reactivateMainObj, createTextureForWords,bindAndActivateForText, bindAndDisplayTexture

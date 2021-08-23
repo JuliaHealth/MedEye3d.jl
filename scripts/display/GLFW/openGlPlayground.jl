@@ -1,10 +1,10 @@
 
 
      using DrWatson
-     @quickactivate "Probabilistic medical segmentation"
+     @quickactivate "Julia Med 3d"
      include(DrWatson.scriptsdir("display","GLFW","includeAll.jl"))
 
-     using Main.ModernGlUtil, Match, Parameters,DataTypesBasic,Main.ShadersAndVerticies,ModernGL, GeometryTypes, GLFW, Main.ForDisplayStructs,ColorTypes,CoordinateTransformations, Rotations,Dictionaries,Main.DisplayWords, Setfield
+     using Main.ModernGlUtil, Match, Parameters,DataTypesBasic,Main.ShadersAndVerticies,ModernGL, GeometryTypes, GLFW, Main.ForDisplayStructs,ColorTypes, Dictionaries,Main.DisplayWords, Setfield
      using Main.CustomFragShad, Main.PrepareWindowHelpers, Main.ReactToScroll, Main.SegmentationDisplay,Main.Uniforms, Main.OpenGLDisplayUtils
      using FreeTypeAbstraction,Rocket ,GLFW , Main.DataStructs, Main.StructsManag,Main.TextureManag, Main.SegmentationDisplay
  using Main.PrepareWindow,Glutils, Main.ForDisplayStructs, Dictionaries, Parameters, ColorTypes
@@ -213,6 +213,34 @@ ress= getHeightToWidthRatio(calcDim,dataToScrollDims)
 
 arr= [0x00000001, 0x00000002, 0x00000003, 0x00000004, 0x00000005]
 glDeleteTextures(length(arr), arr)
+
+
+
+
+
+
+1+1
+
+
+add BenchmarkTools ,ColorTypes , Conda  , DataTypesBasic  , Dictionaries  , Distributed  , Documenter , DocumenterTools , DrWatson , FreeType  , FreeTypeAbstraction  , GLFW  ,  HDF5  , Match , ModernGL , Observables  , Parameters , PyCall , Revise , Rocket  , Setfield  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #getHeightToWidthRatio
   #    listOfTextSpecs= map(x->setproperties(x[2],(whichCreated=x[1])),enumerate(listOfTexturesToCreate))
 

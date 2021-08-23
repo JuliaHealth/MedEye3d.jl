@@ -1,9 +1,5 @@
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
 
-
-
-ReactOnKeyboardSTR="""
+"""
 code adapted from https://discourse.julialang.org/t/custom-subject-in-rocket-jl-for-mouse-events-from-glfw/65133/3
 module coordinating response to the  keyboard input - mainly shortcuts that  helps controlling  active/visible texture2D
 """
@@ -25,7 +21,6 @@ examples of keyboard input
     action RELEASE GLFW.Action
 
 """
-@doc KeyboardCallbackSubscribableStr
 mutable struct KeyboardCallbackSubscribable <: Subscribable{KeyboardStruct}
 # true when pressed and kept true until released
 # true if corresponding keys are kept pressed and become flase when relesed
@@ -39,22 +34,21 @@ mutable struct KeyboardCallbackSubscribable <: Subscribable{KeyboardStruct}
     subject :: Subject{KeyboardStruct} 
 end 
 
-```@doc
+"""
 will "tell" what functions should be invoked in order to process keyboard input 
-```
+"""
 function Rocket.on_subscribe!(handler::KeyboardCallbackSubscribable, actor::SyncActor{Any, ActorWithOpenGlObjects})
     return subscribe!(handler.subject, actor)
 end
 
 
-handlerStr="""
+"""
 given pressed keys lik 1-9 and all letters resulting key is encoded as string and will be passed here
 handler object responsible for capturing action 
 str - name of key lik 1,5 f,.j ... but not ctrl shift etc
 action - for example key press or release
 scancode - if key do not have short name like ctrl ... it has scancode
 """
-@doc handlerStr
 function (handler::KeyboardCallbackSubscribable)(str::String, action::GLFW.Action)
 
     if( (action==instances(GLFW.Action)[2])  ) 
@@ -64,7 +58,6 @@ end #handler
 
 GLFW.PRESS
 
-@doc handlerStr
 function (handler::KeyboardCallbackSubscribable)(scancode ::GLFW.Key, action::GLFW.Action)
     #1 pressed , 2 released -1 sth else
     act =  @match action begin
@@ -113,12 +106,11 @@ end #second handler
 
 
 
-registerKeyboardFunctionsStr="""
+"""
 registering functions to the GLFW
 window - GLFW window with Visualization
 stopListening - atomic boolean enabling unlocking GLFW context
 """
-@doc registerKeyboardFunctionsStr
 function registerKeyboardFunctions(window::GLFW.Window,stopListening::Base.Threads.Atomic{Bool}    )
 
     stopListening[]=true # stoping event listening loop to free the GLFW context
@@ -143,10 +135,10 @@ end #registerKeyboardFunctions
 
 
 
-```@doc
+"""
 processing information from keys - the instance of this function will be chosen on
 the basis mainly of multiple dispatch
-```
+"""
 function processKeysInfo(textSpecObs::Identity{TextureSpec{T}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct )where T
     textSpec =  textSpecObs.value
     if(keyInfo.isCtrlPressed)    
@@ -179,9 +171,9 @@ function setVisAndRender(isVis::Bool,actor::ActorWithOpenGlObjects,unifs::MaskTe
 
 end#setVisAndRender
 
-```@doc
+"""
 for case when we want to subtract two masks
-```
+"""
 function processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec{T}}, Identity{TextureSpec{T}}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T
     textSpecs =  maskNumbs.value
     maskA = textSpecs[1].value
@@ -199,9 +191,9 @@ function processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec{T}}, Ide
    
 
 end#processKeysInfo
-```@doc
+"""
 for case  we want to undo subtracting two masks
-```
+"""
 function undoDiffrence(actor::SyncActor{Any, ActorWithOpenGlObjects},maskA,maskB )
     @uniforms! begin
     actor.actor.mainForDisplayObjects.mainImageUniforms.isMaskDiffrenceVis:=0
@@ -215,11 +207,11 @@ end#undoDiffrence
 
 
 
-```@doc
+"""
 in case we want to  get new number set for manual modifications
     toBeSavedForBack - just marks weather we wat to save the info how to undo latest action
     - false if we invoke it from undoing 
-```
+"""
 function processKeysInfo(numbb::Identity{Int64}
                         ,actor::SyncActor{Any, ActorWithOpenGlObjects}
                         ,keyInfo::KeyboardStruct 
@@ -242,9 +234,9 @@ end#processKeysInfo
 
 
 
-```@doc
+"""
 In order to enable undoing last action we just invoke last function from list 
-```
+"""
 function processKeysInfo(numbb::Identity{Bool},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T
     if(!isempty(actor.actor.forUndoVector))
      pop!(actor.actor.forUndoVector)()
@@ -254,11 +246,11 @@ end#processKeysInfo
 
 
 
-```@doc
+"""
 In case we want to change the dimansion of scrolling so for example from transverse 
     toBeSavedForBack - just marks weather we wat to save the info how to undo latest action
     - false if we invoke it from undoing 
-```
+"""
 function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}
                     ,actor::SyncActor{Any, ActorWithOpenGlObjects}
                     ,keyInfo::KeyboardStruct
@@ -352,7 +344,7 @@ processKeysInfo(a::Identity{Tuple{ Identity{TextureSpec{T}}, Const{Nothing}}},ac
 
 
 
-displayMaskDiffrenceStr= """
+"""
 SUBTRACTIN MASKS
 used in order to enable subtracting one mask from the other - hence displaying 
 pixels where value of mask a is present but mask b not (order is important)
@@ -370,7 +362,6 @@ In order to achieve this  we need to have all of the samplers references stored 
 In order to provide maximum performance and avoid branching inside shader multiple shader programs will be attached and one choosed  that will use diffrence needed
 maskToSubtrastFrom,maskWeAreSubtracting - specifications o textures we are operating on 
 """
-@doc displayMaskDiffrenceStr
 function displayMaskDiffrence(maskA::TextureSpec, maskB::TextureSpec,actor::SyncActor{Any, ActorWithOpenGlObjects})
  #defining variables
 
@@ -397,9 +388,9 @@ end#displayMaskDiffrence
 
 
 
-```@doc
+"""
 invoked when we want to undo last performed action 
-```
+"""
 function processKeysInfo(numb::Identity{Tuple{Bool}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct )
 
 
@@ -407,7 +398,7 @@ end#processKeysInfo
 
 
 
-reactToKeyboardStr = """
+"""
 Given keyInfo struct wit information about pressed keys it can process them to make some actions  - generally activating keyboard shortcuts
 shift + number - make mask associated with given number visible
 ctrl + number -  make mask associated with given number invisible 
@@ -418,7 +409,6 @@ ctrl + numberA + "-"(minus sign) +numberB  - stops displaying diffrence between 
 space + 1 or 2 or 3 - change the plane of view (transverse, coronal, sagittal)
 ctrl + z - undo last action
 """
-@doc reactToKeyboardStr
 function reactToKeyboard(keyInfo::KeyboardStruct
                         , actor::SyncActor{Any, ActorWithOpenGlObjects})
                       
@@ -437,9 +427,9 @@ end#reactToKeyboard
 
 
 
-```@doc
+"""
 return true in case the combination of keys should invoke some action
-```
+"""
 function shouldBeExecuted(keyInfo::KeyboardStruct, act::Int64)::Bool
     
     if(act>0)# so we have press or relese 
@@ -467,12 +457,12 @@ end#shouldBeExecuted
 
 
 
-```@doc
+"""
 given number from keyboard input it return array With texture that holds the texture specification we are looking for 
 listOfTextSpecifications - list with all registered Texture specifications
 numb - string that may represent number - if it does not function will return empty option
 return Option - either Texture specification or empty Option 
-```
+"""
 function findTextureBasedOnNumb(listOfTextSpecifications::Vector{TextureSpec} 
                                 ,numb::Int32
                                 ,dict::Dictionary{Int32, Int64})::Option
@@ -486,12 +476,12 @@ function findTextureBasedOnNumb(listOfTextSpecifications::Vector{TextureSpec}
 end #findTextureBasedOnNumb
 
 
-```@doc
+"""
 Given string it parser it to given object on the basis of with and multiple dispatch futher actions will be done
 it checks each character weather is numeric - gets substring of all numeric characters and parses it into integer
 listOfTextSpecifications - list with all registered Texture specifications
 return option of diffrent type depending on input
-```
+"""
 function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlObjects} ,keyInfo::KeyboardStruct)::Option{}
     joined = join(str)
 	filtered =  filter(x->isnumeric(x) , joined )

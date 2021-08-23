@@ -1,8 +1,6 @@
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
 
 
-ReactOnMouseClickAndDragSTR="""
+"""
 module 
 code adapted from https://discourse.julialang.org/t/custom-subject-in-rocket-jl-for-mouse-events-from-glfw/65133/3
 it is design to help processing data from 
@@ -12,19 +10,17 @@ The main function is to mark the interaction of the mouse to be saved in appropr
 so we modify the data that is the basis of the mouse interaction mask  and we pass the data on so appropriate part of the texture would be modified to be displayed on screen
 
 """
-#@doc ReactOnMouseClickAndDragSTR
 module ReactOnMouseClickAndDrag
 using Parameters, Rocket, GLFW, ModernGL, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils
 using  Dates, Parameters, Main.DataStructs, Main.StructsManag
 export registerMouseClickFunctions
 export reactToMouseDrag
 
-MouseCallbackSubscribableStr="""
+"""
 struct that enables reacting to  the input  from mouse click  and drag the input will be 
     Cartesian index represening (x,y)
      x and y position  of the mouse - will be recorded only if left mouse button is pressed or keep presssed
 """
-@doc MouseCallbackSubscribableStr
 @with_kw  mutable struct MouseCallbackSubscribable <: Subscribable{MouseStruct}
     #true if left button is presed down - we make it true if the left button is pressed over image and false if mouse get out of the window or we get information about button release
     isLeftButtonDown ::Bool 
@@ -50,9 +46,9 @@ end
 
 
 
-```@doc
+"""
 configuting Rocket on Subscribe so we get custom handler of input as we see we still need to define actor
-```
+"""
 # function Rocket.on_subscribe!(handler::MouseCallbackSubscribable, actor::SyncActor{Any, ActorWithOpenGlObjects})
 #     return subscribe!(handler.subject, actor)
 # end
@@ -62,8 +58,7 @@ function Rocket.on_subscribe!(handler::MouseCallbackSubscribable, actor::SyncAct
     return subscribe!(handler.subject, actor)
 end
 
-
-handlerStr="""
+"""
 we define how handler should act on the subject - observable so it will pass event onto subject - here we have 2 events that we want to be ready for - mouse button press
 example of possible inputs that we would be intrested in 
 for example : cursor: 29.0, 469.0  types   Float64  Float64   
@@ -83,7 +78,6 @@ experiments show that max x,y in window is both 600 if window width and height i
   defaoul it is occupying 100% of y axis and first left 80% of x axis
   hence we can calculate max height to equal the height of the window 
 """
-@doc handlerStr
 function (handler::MouseCallbackSubscribable)( a, x::Float64, y::Float64)
   point = CartesianIndex(Int(x),Int(y))
   handler.lastCoordinate = point
@@ -111,7 +105,6 @@ function (handler::MouseCallbackSubscribable)( a, x::Float64, y::Float64)
 
 end #handler
 
-@doc handlerStr
 function (handler::MouseCallbackSubscribable)(a, button::GLFW.MouseButton, action::GLFW.Action,m)
     
 
@@ -127,12 +120,11 @@ end #second handler
 
 
 
-registerMouseClickFunctionsStr="""
+"""
 we pass coordinate of cursor only when isLeftButtonDown is true and we make it true 
 if left button is presed down - we make it true if the left button is pressed over image and false if mouse get out of the window or we get information about button release
 imageWidth adn imageHeight are the dimensions of textures that we use to display 
 """
-@doc registerMouseClickFunctionsStr
 function registerMouseClickFunctions(window::GLFW.Window
                                     ,stopListening::Base.Threads.Atomic{Bool}
                                     ,calcD::CalcDimsStruct     )
@@ -165,12 +157,11 @@ return mouseButtonSubs
 end #registerMouseScrollFunctions
 
 
-reactToMouseDragStr = """
+ """
 we use mouse coordinate to modify the texture that is currently active for modifications 
     - we take information about texture currently active for modifications from variables stored in actor
     from texture specification we take also its id and its properties ...
 """
-@doc reactToMouseDragStr
 function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any, ActorWithOpenGlObjects})
     obj = actor.actor.mainForDisplayObjects
     obj.stopListening[]=true #free GLFW context
@@ -215,14 +206,14 @@ function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any, ActorWith
 end#reactToScroll
 
 
-```@doc
+"""
 given list of cartesian coordinates and some window/ image characteristics - it translates mouse positions
 to cartesian coordinates of the texture
 strokeWidth - the property connected to the texture marking how thick should be the brush
 mouseCoords - list of coordinates of mouse positions while left button remains pressed
 calcDims - set of values usefull for calculating mouse position
 return vector of translated cartesian coordinates
-```
+"""
 function translateMouseToTexture(strokeWidth::Int32
                                 ,mouseCoords::Vector{CartesianIndex{2}}
                                 ,calcD::CalcDimsStruct )
@@ -236,17 +227,17 @@ function translateMouseToTexture(strokeWidth::Int32
 
 end #translateMouseToTexture
 
-```@doc
+"""
 helper function for translateMouseToTexture
-```
+"""
 function getNewX(x::Int,calcD::CalcDimsStruct)::Int
   # first we subtract windowWidthCorr as in window the image do not need to start at the begining  of the window
    return Int64(floor( ((x- calcD.windowWidthCorr)/(calcD.correCtedWindowQuadWidth))*calcD.imageTextureWidth))
 end#getNewX
 
-```@doc
+"""
 helper function for translateMouseToTexture
-```
+"""
 function getNewY(y::Int,calcD::CalcDimsStruct)::Int
     Int64(floor(  ((calcD.correCtedWindowQuadHeight-y+calcD.windowHeightCorr)/calcD.correCtedWindowQuadHeight)*calcD.imageTextureHeight)  )     
    

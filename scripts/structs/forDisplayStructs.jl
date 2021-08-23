@@ -1,7 +1,3 @@
-
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
-
 module ForDisplayStructs
 using Base: Int32, isvisible
 export MouseStruct,parameter_type,Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms,ForWordsDispStruct
@@ -9,10 +5,10 @@ export MouseStruct,parameter_type,Mask,TextureSpec,forDisplayObjects, ActorWithO
 using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries,FreeTypeAbstraction, Main.DataStructs
 
 
-```@doc
+"""
 data needed for definition of mask  - data that will be displayed over main image 
 this struct is parametarized by type of 3 dimensional array that will be used  to store data
-```
+"""
 @with_kw  struct Mask{arrayType}
   path::String #path to this file in Hdf5
   maskId::Int64 #unique associated with id taken from Hdf5 file system
@@ -20,18 +16,18 @@ this struct is parametarized by type of 3 dimensional array that will be used  t
   maskArrayObs::Observable{Array{arrayType}} # observable array used to store information that will be displayed over main image
   colorRGBA::RGBA #associated RGBA  that will be displayed based on the values in maskArrayObs
 end
-```@doc
+"""
 hold reference numbers that will be used to access and modify given uniform value in a shader
-```
+"""
 abstract type TextureUniforms end
 
 
-```@doc
+"""
 hold reference numbers that will be used to access and modify given uniform value
 In order to have easy fast access to the values set the most recent values will also be stored inside
 In order to improve usability  we will also save with what data type this mask is associated 
 for example Int, uint, float etc
-```
+"""
 @with_kw struct MaskTextureUniforms <: TextureUniforms
 samplerName::String =""#name of the sampler - mainly for debugging purposes
 samplerRef ::Int32 =Int32(0) #reference to sampler of the texture
@@ -39,9 +35,9 @@ colorsMaskRef ::Int32 =Int32(0) #reference to uniform holding color of this mask
 isVisibleRef::Int32 =Int32(0)# reference to uniform that points weather we 
 end
 
-```@doc
+"""
 Holding references to uniforms used to controll main image
-```
+"""
 @with_kw struct MainImageUniforms<: TextureUniforms
 samplerName::String =""#name of the sampler - mainly for debugging purposes
 samplerRef ::Int32 =Int32(0) #reference to   sampler of the texture
@@ -63,9 +59,9 @@ isNuclearMaskVis::Int32 =Int32(0)
 
 end
 
-```@doc
+"""
 Holding the data needed to create and  later reference the textures
-```
+"""
 @with_kw struct TextureSpec{T}
   name::String=""               #human readable name by which we can reference texture
   numb::Int32 =-1               #needed to enable swithing between textures generally convinient when between 0-9; needed only if texture is to be modified by mouse input
@@ -94,20 +90,20 @@ end
 parameter_type(::Type{TextureSpec{T}}) where {T} = T
 parameter_type(x::TextureSpec) = parameter_type(typeof(x))
 
-```@doc
+"""
 given Vector of TextureSpecs
 it creates dictionary where keys are associated names 
 and values are indicies where they are found in a list 
-```
+"""
 function getLocationDict(listt)::Dictionary{String, Int64}
    return Dictionary(map(it->it.name,listt),collect(eachindex(listt)))
     
 end#getLocationDict
 
 
-```@doc
+"""
 Defined in order to hold constant objects needed to display images 
-```
+"""
 @with_kw  struct forDisplayObjects    
   listOfTextSpecifications::Vector{TextureSpec} = [TextureSpec()]
   window = []
@@ -124,9 +120,9 @@ Defined in order to hold constant objects needed to display images
 end
 
 
-```@doc
+"""
 Holding necessery data to display text  - like font related
-```
+"""
 @with_kw struct ForWordsDispStruct
 fontFace::FTFont=FTFont(Ptr{FreeTypeAbstraction.FreeType.__JL_FT_FaceRec_}(),false) # font we will use to display text
 textureSpec::TextureSpec =TextureSpec{UInt8}() # texture specification of texture used to display text 
@@ -137,9 +133,9 @@ shader_program_words::UInt32=1
 end #ForWordsDispStruct
 
 
-```@doc
+"""
 Actor that is able to store a state to keep needed data for proper display
-```
+"""
 @with_kw mutable struct ActorWithOpenGlObjects <: NextActor{Any}
     currentDisplayedSlice::Int=1 # stores information what slice number we are currently displaying
     mainForDisplayObjects::Main.ForDisplayStructs.forDisplayObjects=forDisplayObjects() # stores objects needed to  display using OpenGL and GLFW
@@ -155,8 +151,8 @@ Actor that is able to store a state to keep needed data for proper display
     maxLengthOfForUndoVector::Int64 = 10 # number controls how many step at maximum we can get back
   end
 
-```@doc
-Holding necessery data to controll keyboard shortcuts```
+"""
+Holding necessery data to controll keyboard shortcuts"""
 @with_kw struct KeyboardStruct
   isCtrlPressed::Bool = false# left - scancode 37 right 105 - Int32
   isShiftPressed::Bool = false # left - scancode 50 right 62- Int32
@@ -171,9 +167,9 @@ Holding necessery data to controll keyboard shortcuts```
   mostRecentAction ::GLFW.Action= GLFW.RELEASE
 
 end
-```@doc
+"""
 Holding necessery data to controll mouse interaction
-```
+"""
 @with_kw struct MouseStruct
   isLeftButtonDown ::Bool = false # true if left button was pressed and not yet released
   isRightButtonDown ::Bool = false# true if right button was pressed and not yet released

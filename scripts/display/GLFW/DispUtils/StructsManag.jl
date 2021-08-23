@@ -1,5 +1,8 @@
 using DrWatson
-@quickactivate "Probabilistic medical segmentation"
+@quickactivate "Julia Med 3d"
+
+using ColorTypes
+
 """
 utilities for dealing data structs like FullScrollableDat or SingleSliceDat
 """
