@@ -143,6 +143,10 @@
          length(  actor.forUndoVector)
 
 
+         C:\Users\1\Documents\GitHub\Probabilistic-medical-segmentation\.vscode
+
+         using DocumenterTools
+         DocumenterTools.generate()
 
          popfirst!(actor.forUndoVector)
 
