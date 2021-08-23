@@ -16,12 +16,11 @@ using Main.ShadersAndVerticies, Main.ForDisplayStructs,Main.ShadersAndVerticiesF
 
 
 
-displayAllStr="""
-preparing all for displaying the images and responding to mouse and keyboard input
-	windowWidth, windowHeight - initial dimensiona of GLFW window
-	fractionOfMainIm - how much of width should be taken by the main image
 """
-@doc displayAllStr
+preparing all for displaying the images and responding to mouse and keyboard input
+	listOfTexturesToCreate- list of texture specifications needed to for example create optimal shader
+	calcDimsStruct - holds important data about verticies, textures dimensions etc.
+"""
 function displayAll(listOfTexturesToCreate::Vector{TextureSpec}
 					,calcDimsStruct::CalcDimsStruct)
 	# atomic variable that is enabling stopping async loop of event listening in order to enable othe actions with GLFW context
@@ -92,9 +91,9 @@ return (window,vertex_shader,fragment_shader_main ,shader_program,stopListening,
 end# displayAll
 
 
-```@doc
+"""
 On the basis of information from listOfTexturesToCreate it creates specialized shader program
-```
+"""
 function createAndInitShaderProgram(vertex_shader::UInt32
 	,listOfTexturesToCreate::Vector{TextureSpec}
 	,maskToSubtractFrom::TextureSpec

@@ -11,11 +11,11 @@ using ModernGL, GeometryTypes, GLFW, Main.ForDisplayStructs, ColorTypes
 export createCustomFramgentShader,divideTexteuresToMainAndRest,addSamplerStr
 
 
-```@doc
-We divide textures into main imae texture and the rest
+"""
+We divide textures into main image texture and the rest
 listOfTexturesToCreate - list of textures on the basis of which we will create custom fragment shader code
-returns 3tuple where fist entr is the main image texture specification and second is rest of textures
-  ```
+returns tuple where fist entr is the main image texture specification and second is rest of textures
+  """
 function divideTexteuresToMainAndRest(listOfTexturesToCreate::Vector{TextureSpec})::Tuple{TextureSpec, Vector{TextureSpec}}
     mainTexture =   filter(it->it.isMainImage,listOfTexturesToCreate )[1] # main image texture
     notMainTextures = filter(it->!it.isMainImage,listOfTexturesToCreate) # textures associated with not main
@@ -25,11 +25,11 @@ end #divideTexteuresToMainAndRest
 
 
 
-```@doc
+"""
 We will in couple steps create code for fragment shader that will be based on the texture definitions we gave 
 listOfTexturesToCreate - list of textures on the basis of which we will create custom fragment shader code
-
-  ```
+maskToSubtrastFrom,maskWeAreSubtracting - texture specifications used in order to generate code needed to diplay diffrence between those two masks - every time we want diffrent diffrence we will need to recreate shader invoking this function
+"""
 function createCustomFramgentShader(listOfTexturesToCreate::Vector{TextureSpec}
                                     ,maskToSubtrastFrom::TextureSpec
                                     ,maskWeAreSubtracting::TextureSpec )::String
@@ -37,7 +37,6 @@ function createCustomFramgentShader(listOfTexturesToCreate::Vector{TextureSpec}
 masksConstsants= map( x-> addMasksStrings(x), notMainTextures) |> 
 (strings)-> join(strings, "")
 
-#$(addMaskColorFunc())
 continuusColorMasks =   filter(it->it.isContinuusMask,listOfTexturesToCreate ) # main image texture
 
  res =  """
@@ -59,9 +58,9 @@ return res
 
 end #createCustomFramgentShader
 
-```@doc
+"""
 some initial constants that are the same irrespective of textures
-```
+"""
 function initialStrings()::String
 return """ 
 #extension GL_EXT_gpu_shader4 : enable    //Include support for this extension, which defines usampler2D
@@ -74,10 +73,10 @@ uniform float displayRange = 600.0;
 """
 end #initialStrings
 
-```@doc
+"""
 managing main texture and on the basis of the type  we will initialize diffrent variables
 mainTexture - specification of a texture related to main image
-  ```
+  """
 function addMainTextureStrings(mainTexture::TextureSpec)::String
     mainImageName= mainTexture.name
     return """
@@ -90,9 +89,9 @@ function addMainTextureStrings(mainTexture::TextureSpec)::String
 end #addMainTextureStrings
 
 
-```@doc
+"""
 setting string representing sampler depending on type
-```
+"""
 function addSamplerStr(textur::TextureSpec, samplerName::String)::String
    
     if supertype(Int)== supertype(parameter_type(textur))
@@ -105,8 +104,9 @@ function addSamplerStr(textur::TextureSpec, samplerName::String)::String
 end #addSamplerStr
 
 
-```@doc
-giving variable name associated with given type```
+"""
+giving variable name associated with given type
+"""
 function addTypeStr(textur::TextureSpec)::String
    
     if supertype(Int)== supertype(parameter_type(textur))
@@ -121,9 +121,9 @@ end #addTypeStr
 
 
 
-```@doc
+"""
 giving string representing main function defining how windowing of main image should be performed
-```
+"""
 function addWindowingFunc(textur::TextureSpec)::String
     typeStr = addTypeStr(textur)
     mainImageName= textur.name
@@ -154,9 +154,9 @@ end #addWindowingFunc
 
 
 
-```@doc
-Adding string necessary for managing of masks textures
-```
+"""
+Adding string necessary for managing uniforms of masks textures
+"""
 function addMasksStrings(textur::TextureSpec)
     textName = textur.name
 return """
@@ -171,16 +171,18 @@ uniform $(addTypeStr(textur))  $(textName)ValueRange= $(textur.minAndMaxValue[2]
 
 """
 end#addMasksStrings
-```@doc
+
+
+"""
 Adding uniforms resopnsible for colors associated with given mask 
-```
+"""
 function addColorUniform(textur::TextureSpec)
     #in case of multiple colors used by single mask like in case of nuclearm medicine mask
     if(textur.isContinuusMask)   
-        colors = textur.colorSet
-        colLen= length(colors)+1
-        colorStrings = join(map(it ->"vec4($(it.r),$(it.g),$(it.b) ,1.0)" , colors) ,",")
-        return "uniform vec4[$(colLen)] $(textur.name)ColorMask  = vec4[$(colLen)](vec4(0.0,0.0,0.0,1.0),$(colorStrings));// we add one so later function operating on this will make easier"
+        # colors = textur.colorSet
+        # colLen= length(colors)+1
+        # colorStrings = join(map(it ->"vec4($(it.r),$(it.g),$(it.b) ,1.0)" , colors) ,",")
+        # return "uniform vec4[$(colLen)] $(textur.name)ColorMask  = vec4[$(colLen)](vec4(0.0,0.0,0.0,1.0),$(colorStrings));// we add one so later function operating on this will make easier"
     end  
     #in case mask uses only single color  
     return "uniform vec4 $(textur.name)ColorMask= vec4(0.0,0.0,0.0,0.0); //controlling colors"
@@ -190,9 +192,10 @@ end#addColorUniform
 
 
 
-```@doc
+"""
 controlling main function - basically we need to return proper FragColor which represents pixel color in given spot
-```
+we generete separately r,g and b values by adding contributions from all textures    
+"""
 function mainFuncString( mainTexture::TextureSpec
                         ,notMainTextures::Vector{TextureSpec}
                         ,maskToSubtrastFrom::TextureSpec
@@ -253,9 +256,9 @@ uint todiv = $(isVisibleList)+ $(mainImageName)isVisible+ isMaskDiffrenceVis;
 end#mainFuncString
 
 
-```@doc
-setting conditional logic of masks - it should not affect final color if the associatedvaleue is above 0 and is visible string is set to true
-```
+"""
+Givin value from texture f the texture is set to be visible otherwise 0 
+"""
 function setMaskInfluence(textur::TextureSpec)
     textName = textur.name
 
@@ -264,13 +267,13 @@ return """
 $(addTypeStr(textur)) $(textName)Res = texture2D($(textName), TexCoord0).r * $(textName)isVisible  ;
 
 """
-end#xxx
+end#setMaskInfluence
 
 
 
-```@doc
+"""
 on the basis of texture type gives proper function controlling color of the mask 
-```
+"""
 function chooseColorFonuction(textur::TextureSpec)::String
 
     if supertype(Int)== supertype(parameter_type(textur))
@@ -287,9 +290,9 @@ end#chooseColorFonuction
 
 
 
-```@doc
+"""
 used to display and debug  output - output can be also additionally checked using this tool http://evanw.github.io/glslx/
-```
+"""
 function debuggingOutput(listOfTexturesToCreate)
     strr= Main.CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate)
     for st in split(strr, "\n")
@@ -298,29 +301,19 @@ function debuggingOutput(listOfTexturesToCreate)
 end#
 
 
-getMasksSubtractionFunctionStr= """
+ """
 used in order to enable subtracting one mask from the other - hence displaying 
 pixels where value of mask a is present but mask b not (order is important)
 automatically both masks will be set to be invisible and only the diffrence displayed
 
-In order to achieve this  we need to have all of the samplers references stored in a list 
-1) we need to set both masks to invisible - it will be done from outside the shader
-2) we set also from outside uniform marking visibility of diffrence to true
-3) also from outside we need to set which texture to subtract from which we will achieve this by setting maskAtoSubtr and maskBtoSubtr int uniforms
-    those integers will mark which samplers function will use
-4) in shader function will be treated as any other mask and will give contribution to output color multiplied by its visibility(0 or 1)    
-5) inside the function color will be defined as multiplication of two colors of mask A and mask B - colors will be acessed similarly to samplers
-6) color will be returned only if value associated with  maskA is greater than mask B and proportional to this difffrence
 
 In order to provide maximum performance and avoid branching inside shader multiple shader programs will be attached and one choosed  that will use diffrence needed
 maskToSubtrastFrom,maskWeAreSubtracting - specifications o textures we are operating on 
 """
-@doc getMasksSubtractionFunctionStr
 function getMasksSubtractionFunction(maskToSubtrastFrom::TextureSpec
                                     ,maskWeAreSubtracting::TextureSpec)::String
 
   #letter - r g or b - will create specialized functions for r g and b colors
-
 
 return map(letter-> """
 
@@ -332,9 +325,8 @@ float $(letter)diffrenceColor($(addTypeStr(maskToSubtrastFrom)) maskkA,$(addType
 """,["r","g","b"]  )|>  x->join(x)
 
 end #getMasksSubtractionFunction
-
-getNuclearMaskFunctionStr =  """
-Enable displaying nuclear medicine data by applying smoothly canging colors
+"""
+Enable displaying for example nuclear medicine data by applying smoothly changing colors
 to floating point data
 1)in confguration phase we need to have minimum, maximum and range of possible values associated with nuclear mask
 2)as uniform we would need to have set of vec4's - those will be used  to display colors 
@@ -350,7 +342,6 @@ function getNuclearMaskFunctions(continuusColorTextSpecs::Vector{TextureSpec} ):
    #Check in which range we are without if
    #Important first color in color list needs to be doubled in order to make algorithm cleaner - so we will start from index 1 and always there would be some previous index
     
-   #
    tuples= map(x->[ (x.name,[ [a.r,a.g,a.b] for a in x.colorSet  ],"r" ,1),(x.name,[[a.r,a.g,a.b] for a in x.colorSet  ],"g",2),(x.name,[[a.r,a.g,a.b] for a in x.colorSet  ],"b",3)],continuusColorTextSpecs)
   
    if(!isempty(tuples)) tuples=  reduce(vcat,tuples) end
@@ -379,10 +370,9 @@ end#getNuclearMaskFunction
 
 
 
-addUniformsForNuclearAndSubtrStr= """
+"""
 Add uniforms necessary for operation of mask subtraction and  for proper display of nuclear medicine masks
 """
-@doc addUniformsForNuclearAndSubtrStr
 function addUniformsForNuclearAndSubtr()::String
 return """
 // for mask difference display
@@ -395,61 +385,6 @@ end#addUniformsForNuclearAndSubtr
 
 
 
-# createReferenceListsStr= """
-# On the basis of the list of textures characteristics  it creates the vector of references to 
-# Samplers
-# Colors associated with samplers
-# """
-# @doc createReferenceListsStr
-# function createReferenceLists(listOfTexturesTocreate::Vector{TextureSpec})::String
-# 	samplerStrings= map(textSpec->  textSpec.name  ,listOfTexturesTocreate ) |> (samplers)->  join(samplers, ",")
-# 	colorStrings= map(textSpec-> "$(textSpec.name)ColorMask"  ,listOfTexturesTocreate ) |> (colors)->  join(colors, ",")
-# lengthh=  length(listOfTexturesTocreate)
-
-# return """
-# uniform vec4[] colorsArr = vec4[$(lengthh)]($(colorStrings));
-# uniform gsampler2D[] samplersArr = gsampler2D[$(lengthh)]($(samplerStrings));//gsampler2D is a supertype of usampler2d isampler2d ...
-# """
-# end #createReferenceLists
-
-
-
-# ```@doc
-# adding function enabling controll of the masks color
-# ```
-# function addMaskColorFunc()
-# return """
-
-
-# vec4 umaskColor(in uint maskTexel ,in bool isVisible ,in vec4 color  )
-# {
-#   if(maskTexel>0.0 && isVisible==true) {
-#        return   color;
-#     }
-#     return vec4(0.0, 0.0, 0.0, 0.0);
-#     }
-
-# vec4 imaskColor(in int maskTexel,in bool isVisible ,in vec4 color  )
-# {
-#   if(maskTexel>0.0 && isVisible==true) {
-#     return   color;
-#     }
-#     return vec4(0.0, 0.0, 0.0, 0.0);
-#     }
-
-# vec4 fmaskColor(in float maskTexel,in bool isVisible ,in vec4 color  )
-# {
-#   if(maskTexel>0.0 && isVisible==true) {
-#     return   color;
-#     }
-#     return vec4(0.0, 0.0, 0.0, 0.0);
-# }
-
-
-# """
-
-
-# end#addMaskColorFunc
 
 
 end #CustomFragShad module

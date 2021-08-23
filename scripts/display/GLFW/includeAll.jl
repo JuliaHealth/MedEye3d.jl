@@ -1,6 +1,8 @@
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
-
+"""
+just including all necessery files  for display
+"""
 using Revise
 includet(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
 

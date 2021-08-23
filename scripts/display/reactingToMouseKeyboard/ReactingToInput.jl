@@ -8,9 +8,9 @@ using Main.TextureManag, Main.ReactOnMouseClickAndDrag, Main.ReactOnKeyboard, Ma
 export subscribeGLFWtoActor
 
 
-```@doc
-adding the data into about openGL and GLFW context to enable proper display
-```
+"""
+adding the data into about openGL and GLFW context to enable proper display of main image and masks
+"""
 function setUpMainDisplay(mainForDisplayObjects::Main.ForDisplayStructs.forDisplayObjects,actor::SyncActor{Any, ActorWithOpenGlObjects})
     actor.actor.mainForDisplayObjects.stopListening[]=true
 
@@ -19,10 +19,10 @@ function setUpMainDisplay(mainForDisplayObjects::Main.ForDisplayStructs.forDispl
 
 end#setUpMainDisplay
 
-```@doc
-adding the data needed for text display
+"""
+adding the data needed for text display; also activates appropriate quad for the display
     it also configures texture that is build for text display
-```
+"""
 function setUpWordsDisplay(textDispObject::Main.ForDisplayStructs.ForWordsDispStruct,actor::SyncActor{Any, ActorWithOpenGlObjects})
 
     actor.actor.mainForDisplayObjects.stopListening[]=true
@@ -90,9 +90,9 @@ end#setUpCalcDimsStruct
 
 
 
-```@doc
+"""
 sets value we are setting to the  active mask vie mause interaction, in case mask is modifiable 
-```
+"""
 function setUpvalueForMasToSet(valueForMasToSett::valueForMasToSetStruct ,actor::SyncActor{Any, ActorWithOpenGlObjects})
     actor.actor.mainForDisplayObjects.stopListening[]=true
 
@@ -158,11 +158,11 @@ Rocket.on_complete!(actor::SyncActor{Any, ActorWithOpenGlObjects})        = prin
 
 
 
-```@doc
+"""
 when GLFW context is ready we need to use this  function in order to register GLFW events to Rocket actor - we use subscription for this
     actor - Roctet actor that holds objects needed for display like window etc...  
     return list of subscriptions so if we will need it we can unsubscribe
-```
+"""
 function subscribeGLFWtoActor(actor ::SyncActor{Any, ActorWithOpenGlObjects})
 
     #controll scrolling

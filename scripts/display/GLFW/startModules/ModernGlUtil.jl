@@ -1,6 +1,8 @@
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
-
+"""
+copied from ModernGL github repository
+"""
 module ModernGlUtil
 export createcontextinfo,glGenTexture,glGenVertexArray,glGenBuffer,getInfoLog,validateShader,glErrorMessage,get_glsl_version_string,createShaderProgram,createShaderProgram,createShader,glCheckError
 

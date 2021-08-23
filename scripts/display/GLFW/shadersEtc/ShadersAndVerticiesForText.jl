@@ -10,10 +10,10 @@ export getWordsVerticies
 
 
 
-```@doc
+"""
 creating VertexShader  so controlling structures like verticies, quads
 gslString so version of GSLS we are using currently
-  ```
+  """
 function createVertexShader(gslString::String)
 vsh = """
 $(gslString)
@@ -35,10 +35,10 @@ return createShader(vsh, GL_VERTEX_SHADER)
 end
 
 
-```@doc
+"""
 creating fragment Shader  so controlling colors and textures  
 gslString so version of GSLS we are using currently
-  ```
+  """
 function createFragmentShader(gslString::String)
     fsh = """
     $(gslString)
@@ -80,6 +80,10 @@ function createFragmentShader(gslString::String)
 elements = Face{3,UInt32}[(0,1,2),          # the first triangle
 (2,3,0)]          # the second triangle
 
+
+"""
+generetes verticies for quad used for displaying text
+"""
 function getWordsVerticies(fractionOfMainIm::Float32)::Vector{Float32}
   correctedWidthForTextAccounting = (-1+ fractionOfMainIm*2)
 

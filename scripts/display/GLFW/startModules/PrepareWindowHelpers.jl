@@ -1,10 +1,10 @@
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
 
-```@doc
+"""
 It stores set of functions that need to be composed in order to prepare GLFW window and 
 display verticies needed for texture  display
-```
+"""
 module PrepareWindowHelpers
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
@@ -18,13 +18,13 @@ export controllWindowInput
 export initializeWindow
 
 
-```@doc
+"""
 data is loaded into a buffer which passes it into thw GPU for futher processing 
     - here the data is just passing the positions of verticies
     GL_STREAM_DRAW the data is set only once and used by the GPU at most a few times. 
     GL_STATIC_DRAW the data is set only once and used many times. 
     GL_DYNAMIC_DRAW the data is changed a lot and used many times.
-    ```
+    """
 function createDAtaBuffer(positions)
     vbo = Ref(GLuint(0))   # initial value is irrelevant, just allocate space
     glGenBuffers(1, vbo)
@@ -34,9 +34,9 @@ return vbo
 end #createDAtaBuffer
 
 
-```@doc
+"""
 Similar to the VBO we bind the EBO and copy the indices into the buffer with glBufferData. 
-    ```
+    """
 function createElementBuffer(elements)
     ebo = Ref(GLuint(0))
     glGenBuffers(1, ebo)
@@ -45,9 +45,9 @@ function createElementBuffer(elements)
 return ebo
 end #createElementBuffer
 
-```@doc
+"""
 vertex buffer keeping things simpler
-    ```
+    """
 function createVertexBuffer()
     vao = Ref(GLuint(0))
     glGenVertexArrays(1, vao)
@@ -82,9 +82,9 @@ end #glVertexAttribSetting
 
 
 
-```@doc
+"""
 how data should be read from data buffer
-    ```
+    """
 function encodeDataFromDataBuffer()
     typee = Float32
     
@@ -102,15 +102,11 @@ end #encodeDataFromDataBuffer
 
 
 
-
-controllWindowInputDoc = """
+"""
 it will generally be invoked on GLFW.PollEvents()  in event loop and now depending on 
 what will be pressed or clicked it will lead to diffrent actions
 """
-@doc controllWindowInputDoc
 function controllWindowInput(window)
-	# GLFW.SetMouseButtonCallback(window, (_, button, action, mods) -> println("$button $action   $(typeof(button))  $(typeof(action)) "))
-    # GLFW.SetCursorPosCallback(window, (_, x, y) -> println("cursor: $x, $y    $(typeof(x))  $(typeof(y))   "))   
 
     # Input callbacks
 GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
@@ -126,10 +122,10 @@ GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
 end)
 end #controllWindowInputDoc
 
-```@doc
+"""
 modified from ModernGL.jl github page  and GLFW page 
 stores primary 
-    ```
+    """
 function initializeWindow(windowWidth::Int,windowHeight::Int)
 	GLFW.Init()
 

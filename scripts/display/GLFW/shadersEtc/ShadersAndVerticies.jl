@@ -14,10 +14,10 @@ export getMainVerticies
 export createVertexShader
 
 
-```@doc
+"""
 creating VertexShader  so controlling structures like verticies, quads
 gslString so version of GSLS we are using currently
-  ```
+  """
 function createVertexShader(gslString::String)
 vsh = """
 $(gslString)
@@ -39,20 +39,19 @@ return createShader(vsh, GL_VERTEX_SHADER)
 end
 
 
-```@doc
-loading th shader from file- so we have better experience writing shader in separate file
-```
+"""
+loading the shader from file- so we have better experience writing shader in separate file (can be used if we do not use Custom frag shader)
+"""
 function getShaderFileText(path::String)
 f = open(path)
 return  join(readlines(f), "\n") 
 end #getShaderFileText
 
-#getShaderFileText(fragmentShaderFileDir)
 
-```@doc
+"""
 creating fragment Shader  so controlling colors and textures  
 gslString so version of GSLS we are using currently
-  ```
+  """
 function createFragmentShader(gslString::String
                           ,listOfTexturesToCreate::Vector{TextureSpec}	
                           ,maskToSubtractFrom::TextureSpec
