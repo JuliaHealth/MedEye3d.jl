@@ -131,25 +131,8 @@ includet("""C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\
 
 
 
-         point = CartesianIndex(5,5)
-
-         addStrokeWidth(point,2)
-     
-         typeof(point)
-         zerod = point-CartesianIndex(1,1)
-     
-         strokeW = 2
-         CartesianIndices((-strokeW:strokeW,-strokeW:strokeW)) |>
-         list->list.+zerod|>
-         added-> filter(x-> ( abs(zerod[1]- x[1]) + abs(x[2] -zerod[2]))<strokeW  ,added )
-     
-
-
-
-
-
-
-
+         setCTWindow(Int32(0),Int32(-1000), dispObj.mainImageUniforms)
+         basicRender(window)
 
 
 
@@ -288,6 +271,9 @@ size(CtDatPrim[:,7,:])
 sizz = size(sliceee)
 
 	    glTexSubImage2D(GL_TEXTURE_2D,0,0,0, sizz[1], sizz[2], GL_RED_INTEGER,GL_R16I, sliceee)
+    
+    
+      setCTWindow(Int32(-500),Int32(500), dispObj.mainImageUniforms)
       basicRender(window)
 
      #    updateTexture(Int16,sliceee,CTImTexture,0,0,calcDim.imageTextureWidth,calcDim.imageTextureHeight )

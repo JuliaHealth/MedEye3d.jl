@@ -30,6 +30,9 @@ mutable struct KeyboardCallbackSubscribable <: Subscribable{KeyboardStruct}
     isEnterPressed::Bool# scancode 36
     isTAbPressed::Bool# scancode 36
     isSpacePressed::Bool# scancode 36
+    isF1Pressed::Bool
+    isF2Pressed::Bool
+    isF3Pressed::Bool
     lastKeysPressed::Vector{String} # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
     subject :: Subject{KeyboardStruct} 
 end 
@@ -78,19 +81,28 @@ function (handler::KeyboardCallbackSubscribable)(scancode ::GLFW.Key, action::GL
             GLFW.KEY_SPACE => (handler.isSpacePressed= (act==1); "space")
             GLFW.KEY_TAB => (handler.isTAbPressed= (act==1); "tab")
             GLFW.KEY_ENTER =>( handler.isEnterPressed= (act==1); "enter")
+            GLFW.KEY_F1 =>( handler.isEnterPressed= (act==1); "f1")
+            GLFW.KEY_F2 =>( handler.isEnterPressed= (act==1); "f2")
+            GLFW.KEY_F3 =>( handler.isEnterPressed= (act==1); "f3")
             _ => "notImp" # not Important
+
+    
+            
+
          end
             res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed || scCode=="ctrl" 
                     , isShiftPressed= handler.isShiftPressed ||scCode=="shift" 
                     ,isAltPressed= handler.isAltPressed ||scCode=="alt"
                     ,isSpacePressed= handler.isSpacePressed ||scCode=="space"
                     ,isTAbPressed= handler.isTAbPressed ||scCode=="tab"
+                    ,isF1Pressed= handler.isF1Pressed ||scCode=="f1"
+                    ,isF2Pressed= handler.isF2Pressed ||scCode=="f2"
+                    ,isF3Pressed= handler.isF3Pressed ||scCode=="f3"
                     ,isEnterPressed= handler.isEnterPressed 
                     ,lastKeysPressed= handler.lastKeysPressed 
                     ,mostRecentScanCode = scancode
                     ,mostRecentKeyName = "" # just marking it as empty
-                    ,mostRecentAction = action
-                    ) 
+                    ,mostRecentAction = action) 
             
 
             if(shouldBeExecuted(res,act))
@@ -245,6 +257,65 @@ end#processKeysInfo
 
 
 
+"""
+when shift plus will be pressed it will increase stroke width
+when shift minus will be pressed it will increase stroke width
+"""
+function processKeysInfo(annot::Identity{AnnotationStruct}
+    ,actor::SyncActor{Any, ActorWithOpenGlObjects}
+    ,keyInfo::KeyboardStruct 
+    ,toBeSavedForBack::Bool = true) where T
+
+    textureList = actor.actor.textureToModifyVec
+    if (!isempty(textureList))
+        texture= textureList[1]
+        oldsWidth = texture.strokeWidth
+        texture.strokeWidth= oldsWidth+=annot.value.strokeWidthChange
+        # for undoing action
+        if(toBeSavedForBack)
+        addToforUndoVector(actor, ()-> processKeysInfo( Option(AnnotationStruct(oldsWidth)),actor, keyInfo,false ))
+        end#if
+    end#if
+
+end#processKeysInfo
+
+
+"""
+KEY_F1 - will display wide window for bone Int32(1000),Int32(-1000)
+KEY_F1 - will display window for soft tissues Int32(400),Int32(-200)
+KEY_F1 - will display wide window for lung viewing  Int32(0),Int32(-1000)
+"""
+function processKeysInfo(wind::Identity{WindowControlStruct}
+    ,actor::SyncActor{Any, ActorWithOpenGlObjects}
+    ,keyInfo::KeyboardStruct 
+    ,toBeSavedForBack::Bool = true) where T
+    #we have some predefined windows
+    windowStruct =  @match wind.value.letterCode begin
+        "F1" => WindowControlStruct("F1",Int32(1000), Int32(-1000) )
+        "F2" => WindowControlStruct("F2",Int32(400), Int32(-200) )
+        "F3" => WindowControlStruct("F3",Int32(0), Int32(-1000) )
+        _ => wind.value
+    end
+    #updating current windowing object and getting reference to old
+    old = actor.actor.mainForDisplayObjects.windowControlStruct 
+    actor.actor.mainForDisplayObjects.windowControlStruct =windowStruct
+
+    # setting window and showig it 
+    setCTWindow(windowStruct.min_shown_white,windowStruct.max_shown_black, dispObj.mainImageUniforms)
+    basicRender(actor.actor.mainForDisplayObjects.window)
+   
+       # for undoing action
+    if(toBeSavedForBack)
+         addToforUndoVector(actor, ()-> processKeysInfo( Option(old),actor, keyInfo,false ))
+    end
+
+end#processKeysInfo
+
+
+
+
+
+
 
 """
 In case we want to change the dimansion of scrolling so for example from transverse 
@@ -346,7 +417,7 @@ processKeysInfo(a::Identity{Tuple{ Identity{TextureSpec{T}}, Const{Nothing}}},ac
 
 
 """
-SUBTRACTIN MASKS
+SUBTRACTING MASKS
 used in order to enable subtracting one mask from the other - hence displaying 
 pixels where value of mask a is present but mask b not (order is important)
 automatically both masks will be set to be invisible and only the diffrence displayed
@@ -384,18 +455,9 @@ function displayMaskDiffrence(maskA::TextureSpec, maskB::TextureSpec,actor::Sync
  setTextureVisibility(false,maskB.uniforms )
  basicRender(actor.actor.mainForDisplayObjects.window)
 
-
 end#displayMaskDiffrence
 
 
-
-"""
-invoked when we want to undo last performed action 
-"""
-function processKeysInfo(numb::Identity{Tuple{Bool}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct )
-
-
-end#processKeysInfo
 
 
 
@@ -409,6 +471,8 @@ shift + numberA + "-"(minus sign) +numberB  - display diffrence between masks as
 ctrl + numberA + "-"(minus sign) +numberB  - stops displaying diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B visible
 space + 1 or 2 or 3 - change the plane of view (transverse, coronal, sagittal)
 ctrl + z - undo last action
+tab +/- increase or decrease stroke width
+F1, F2 ... - swith between defined window display characteristics - like min shown white and mx shown black ...
 """
 function reactToKeyboard(keyInfo::KeyboardStruct
                         , actor::SyncActor{Any, ActorWithOpenGlObjects})
@@ -428,11 +492,14 @@ end#reactToKeyboard
 
 
 
+
+
 """
 return true in case the combination of keys should invoke some action
 """
 function shouldBeExecuted(keyInfo::KeyboardStruct, act::Int64)::Bool
-    
+    @info keyInfo.mostRecentScanCode
+
     if(act>0)# so we have press or relese 
         res =  @match keyInfo.mostRecentScanCode begin
       GLFW.KEY_RIGHT_CONTROL => return act==2 # returning true if we relese key
@@ -443,7 +510,10 @@ function shouldBeExecuted(keyInfo::KeyboardStruct, act::Int64)::Bool
       GLFW.KEY_LEFT_ALT => return act==2
       GLFW.KEY_SPACE => return act==2
       GLFW.KEY_TAB => return act==2
-      GLFW.KEY_ENTER  => return act==1 # returning true if enter is pressed
+      GLFW.KEY_ENTER  => return act==1 # returning true if pressed pressed
+      GLFW.KEY_F1  => return act==1 
+      GLFW.KEY_F2  => return act==1 
+      GLFW.KEY_F3  => return act==1
             _ => false # not Important
          end#match
 
@@ -488,9 +558,22 @@ function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlOb
 	filtered =  filter(x->isnumeric(x) , joined )
     listOfTextSpecs = actor.actor.mainForDisplayObjects.listOfTextSpecifications
     searchDict = actor.actor.mainForDisplayObjects.numIndexes
-    if(occursin("z" , joined) )
-        return Option(true)
+    # for controlling window
+    if(keyInfo.isF1Pressed)
+        return Option(WindowControlStruct(letterCode="F1"))
+    elseif(keyInfo.isF2Pressed)
+        return Option(WindowControlStruct(letterCode="F2"))
+    elseif(keyInfo.isF3Pressed)
+        return Option(WindowControlStruct(letterCode="F3"))
 
+    # for undoing actions            
+    elseif(occursin("z" , joined) )
+        return Option(true)
+    # for control of stroke width    
+    elseif(keyInfo.isTAbPressed && !isempty(filtered) && occursin("+" , joined) )
+        return  Option(AnnotationStruct(1))
+    elseif(keyInfo.isTAbPressed && !isempty(filtered) && occursin("-" , joined) )
+        return  Option(AnnotationStruct(-1))
     elseif(isempty(filtered))#nothing to be done   
         return Option()
     # when we want to set new value for manual mask change     

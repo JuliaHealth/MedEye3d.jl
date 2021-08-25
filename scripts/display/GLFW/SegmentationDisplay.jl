@@ -65,7 +65,8 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
                         ,windowWidth::Int=1200
                         ,windowHeight::Int= Int(round(windowWidth*fractionOfMainIm))
                         ,textTexturewidthh::Int32=Int32(2000)
-                        ,textTextureheightt::Int32= Int32( round((windowHeight/(windowWidth*(1-fractionOfMainIm)) ))*textTexturewidthh)) 
+                        ,textTextureheightt::Int32= Int32( round((windowHeight/(windowWidth*(1-fractionOfMainIm)) ))*textTexturewidthh)
+                        ,windowControlStruct::WindowControlStruct=WindowControlStruct()) 
    #setting number to texture that will be needed in shader configuration
    listOfTextSpecs= map(x->setproperties(x[2],(whichCreated=x[1])),enumerate(listOfTextSpecsPrim))
     #calculations of necessary constants needed to calculate window size , mouse position ...
@@ -85,7 +86,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
     window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words,gslsStr = Main.PrepareWindow.displayAll(listOfTextSpecs,calcDimStruct )
 
     # than we set those uniforms, open gl types and using data from arguments  to fill texture specifications
-    mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program) 
+    mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program,windowControlStruct) 
 
     @info "listOfTextSpecsMapped" listOfTextSpecsMapped
     #initializing object that holds data reqired for interacting with opengl 
@@ -107,6 +108,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
             ,TextureIndexes= Dictionary(map(it->it.name,initializedTextures),collect(eachindex(initializedTextures)))
             ,numIndexes= numbDict 
             ,gslsStr=gslsStr
+            ,windowControlStruct=windowControlStruct
    )
 
 

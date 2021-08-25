@@ -195,7 +195,9 @@ It would also assign proper openGl types to given julia data type, and pass data
 textSpecs - list of texture specificaton that we want to enrich by adding information about uniforms
 return list of texture specifications enriched by information about uniforms 
 """
-function assignUniformsAndTypesToMasks(textSpecs::Vector{Main.ForDisplayStructs.TextureSpec},shader_program::UInt32)
+function assignUniformsAndTypesToMasks(textSpecs::Vector{Main.ForDisplayStructs.TextureSpec}
+                ,shader_program::UInt32
+                ,windowControlStruct::WindowControlStruct)
     mainTexture,notMainTextures=   divideTexteuresToMainAndRest(textSpecs)
 #main texture uniforms
 n= mainTexture.name
@@ -216,7 +218,7 @@ mainUnifs =MainImageUniforms(
     ,nuclearMaskSampler=glGetUniformLocation(shader_program, "nuclearMaskSampler")
     ,isNuclearMaskVis=glGetUniformLocation(shader_program, "isNuclearMaskVis")
 )
-setCTWindow(mainTexture.min_shown_white,mainTexture.max_shown_black,mainUnifs)
+setCTWindow(windowControlStruct.min_shown_white,windowControlStruct.max_shown_black,mainUnifs)
 
 maintext = setproperties(mainTexture, (uniforms= mainUnifs ))
 # joining main and not main textures data 
