@@ -127,7 +127,7 @@ function registerKeyboardFunctions(window::GLFW.Window,stopListening::Base.Threa
 
     stopListening[]=true # stoping event listening loop to free the GLFW context
                            
-    keyboardSubs = KeyboardCallbackSubscribable(false,false,false,false,false,false,[], Subject(KeyboardStruct, scheduler = AsyncScheduler()))
+    keyboardSubs = KeyboardCallbackSubscribable(false,false,false,false,false,false,false,false,false,[], Subject(KeyboardStruct, scheduler = AsyncScheduler()))
                                   
         GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
         name = GLFW.GetKeyName(key, scancode)
@@ -177,7 +177,7 @@ end #processKeysInfo
 """
 sets  visibility and render the result to the screen
 """
-function setVisAndRender(isVis::Bool,actor::ActorWithOpenGlObjects,unifs::MaskTextureUniforms )
+function setVisAndRender(isVis::Bool,actor::ActorWithOpenGlObjects,unifs::TextureUniforms )
     setTextureVisibility(isVis,unifs )
     basicRender(actor.mainForDisplayObjects.window)
 
@@ -290,18 +290,21 @@ function processKeysInfo(wind::Identity{WindowControlStruct}
     ,keyInfo::KeyboardStruct 
     ,toBeSavedForBack::Bool = true) where T
     #we have some predefined windows
+
+
     windowStruct =  @match wind.value.letterCode begin
-        "F1" => WindowControlStruct("F1",Int32(1000), Int32(-1000) )
-        "F2" => WindowControlStruct("F2",Int32(400), Int32(-200) )
-        "F3" => WindowControlStruct("F3",Int32(0), Int32(-1000) )
-        _ => wind.value
-    end
+    "F1" => WindowControlStruct("F1",Int32(1000), Int32(-1000) )
+    "F2" => WindowControlStruct("F2",Int32(400), Int32(-200) )
+    "F3" => WindowControlStruct("F3",Int32(0), Int32(-1000) )
+    _ => wind.value
+        end
+
     #updating current windowing object and getting reference to old
     old = actor.actor.mainForDisplayObjects.windowControlStruct 
-    actor.actor.mainForDisplayObjects.windowControlStruct =windowStruct
+    actor.actor.mainForDisplayObjects= setproperties(actor.actor.mainForDisplayObjects,(windowControlStruct =windowStruct))
 
     # setting window and showig it 
-    setCTWindow(windowStruct.min_shown_white,windowStruct.max_shown_black, dispObj.mainImageUniforms)
+    setCTWindow(windowStruct.min_shown_white,windowStruct.max_shown_black, actor.actor.mainForDisplayObjects.mainImageUniforms)
     basicRender(actor.actor.mainForDisplayObjects.window)
    
        # for undoing action
@@ -498,8 +501,6 @@ end#reactToKeyboard
 return true in case the combination of keys should invoke some action
 """
 function shouldBeExecuted(keyInfo::KeyboardStruct, act::Int64)::Bool
-    @info keyInfo.mostRecentScanCode
-
     if(act>0)# so we have press or relese 
         res =  @match keyInfo.mostRecentScanCode begin
       GLFW.KEY_RIGHT_CONTROL => return act==2 # returning true if we relese key
@@ -570,9 +571,9 @@ function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlOb
     elseif(occursin("z" , joined) )
         return Option(true)
     # for control of stroke width    
-    elseif(keyInfo.isTAbPressed && !isempty(filtered) && occursin("+" , joined) )
+    elseif(keyInfo.isTAbPressed && !isempty(joined) && occursin("+" , joined) )
         return  Option(AnnotationStruct(1))
-    elseif(keyInfo.isTAbPressed && !isempty(filtered) && occursin("-" , joined) )
+    elseif(keyInfo.isTAbPressed && !isempty(joined) && occursin("-" , joined) )
         return  Option(AnnotationStruct(-1))
     elseif(isempty(filtered))#nothing to be done   
         return Option()
