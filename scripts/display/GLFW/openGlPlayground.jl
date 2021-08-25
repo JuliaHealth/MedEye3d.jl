@@ -16,12 +16,13 @@ includet("""C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\
      listOfTexturesToCreate = [
      TextureSpec{UInt8}(
          name = "goldStandardLiver",
+         numb= Int32(1),
          color = RGB(1.0,0.0,0.0)
          ,minAndMaxValue= UInt8.([0,1])
         ),
      TextureSpec{UInt8}(
          name = "manualModif",
-         numb= Int32(1),
+         numb= Int32(2),
          color = RGB(0.0,1.0,0.0)
          ,minAndMaxValue= UInt8.([0,1])
          ,isEditable = true
@@ -44,7 +45,7 @@ includet("""C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\
 
   labelsDat = h5manag.getExampleLabels(UInt8) #vcat(zeros(UInt8,401,512,512),h5manag.getExampleLabels(UInt8));#reduce(vcat,h5manag.getExampleLabels(UInt8))
   CtDat = CtDatPrim#reduce(vcat,CtDatPrim)
-   toMod = zeros(UInt8,size(CtDat));
+   toMod = copy(labelsDat)   #zeros(UInt8,size(CtDat));
 
 
 
