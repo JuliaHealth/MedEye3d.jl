@@ -62,7 +62,7 @@ end
 """
 Holding the data needed to create and  later reference the textures
 """
-@with_kw struct TextureSpec{T}
+@with_kw mutable struct TextureSpec{T}
   name::String=""               #human readable name by which we can reference texture
   numb::Int32 =-1               #needed to enable swithing between textures generally convinient when between 0-9; needed only if texture is to be modified by mouse input
   whichCreated::Int32 =-1       #marks which one this texture was when created - so first in list second ... - needed for convinient accessing uniforms in shaders
@@ -80,9 +80,6 @@ Holding the data needed to create and  later reference the textures
   ID::Base.RefValue{UInt32} = Ref(UInt32(0))   #id of Texture
   isVisible::Bool= true       #if false it should be invisible 
   uniforms::TextureUniforms=MaskTextureUniforms()# holds values needed to control uniforms in a shader
-  #used in case this is main image and we want to set window
-  min_shown_white::Int32 =400
-  max_shown_black::Int32 =-200
   minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask, and second entry is maximum possible value for this mask
 end
 
@@ -117,6 +114,7 @@ Defined in order to hold constant objects needed to display images
   TextureIndexes::Dictionary{String, Int64}=Dictionary{String, Int64}()  #gives a way of efficient querying by supplying dictionary where key is a name we are intrested in and a key is index where it is located in our array
   numIndexes::Dictionary{Int32, Int64} =Dictionary{Int32, Int64}() # a way for fast query using assigned numbers
   gslsStr::String="" # string giving information about used openg gl gsls version
+  windowControlStruct::WindowControlStruct=WindowControlStruct()# holding data usefull to controll display window
 end
 
 
@@ -160,6 +158,10 @@ Holding necessery data to controll keyboard shortcuts"""
   isEnterPressed::Bool= false# scancode 36
   isTAbPressed::Bool= false#
   isSpacePressed::Bool= false# 
+  isF1Pressed::Bool= false
+  isF2Pressed::Bool= false
+  isF3Pressed::Bool= false
+
   lastKeysPressed::Vector{String}=[] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
  #informations about what triggered sending this particular struct to the  actor
   mostRecentScanCode ::GLFW.Key=GLFW.KEY_KP_4
