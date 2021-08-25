@@ -149,8 +149,8 @@ Actor that is able to store a state to keep needed data for proper display
     lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1,1,1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
     forUndoVector::AbstractArray=[] # holds lambda functions that when invoked will  undo last operations
     maxLengthOfForUndoVector::Int64 = 10 # number controls how many step at maximum we can get back
+    isBusy::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0) # used to indicate by some functions that actor is busy and some interactions should be ceased
   end
-
 """
 Holding necessery data to controll keyboard shortcuts"""
 @with_kw struct KeyboardStruct

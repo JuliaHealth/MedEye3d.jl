@@ -1,7 +1,7 @@
 
 module ReactingToInput
 using Rocket, GLFW,ModernGL,Setfield, Main.ReactToScroll, Main.ForDisplayStructs
-using Main.TextureManag, Main.ReactOnMouseClickAndDrag, Main.ReactOnKeyboard, Main.DataStructs, Main.StructsManag, Main.DisplayWords
+using Main.TextureManag,DataTypesBasic, Main.ReactOnMouseClickAndDrag, Main.ReactOnKeyboard, Main.DataStructs, Main.StructsManag, Main.DisplayWords
 
 export subscribeGLFWtoActor
 
@@ -66,7 +66,8 @@ function setUpForScrollData(onScrollData::FullScrollableDat ,actor::SyncActor{An
     
     onScrollData.slicesNumber= getSlicesNumber(onScrollData)
     actor.actor.onScrollData=onScrollData
-    
+    #In order to refresh all in case we would change the texture dimensions ...
+  processKeysInfo(Option(onScrollData.dataToScrollDims),actor,KeyboardStruct()  )
     actor.actor.mainForDisplayObjects.stopListening[]=false
 
 end#setUpMainDisplay
@@ -135,7 +136,7 @@ configuring actor using multiple dispatch mechanism in order to connect input to
 encapsulated by a function becouse this is configuration of Rocket and needs to be global
 """
 
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Bool) = reactToScroll(data,actor )
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Int64) = reactToScroll(data,actor )
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Main.ForDisplayStructs.forDisplayObjects) = setUpMainDisplay(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Main.ForDisplayStructs.ForWordsDispStruct) = setUpWordsDisplay(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::CalcDimsStruct) = setUpCalcDimsStruct(data,actor)
@@ -148,7 +149,7 @@ Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::MouseStruct
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::KeyboardStruct) = reactToKeyboard(data,actor)
 
 Rocket.on_error!(actor::SyncActor{Any, ActorWithOpenGlObjects}, err)      = error(err)
-Rocket.on_complete!(actor::SyncActor{Any, ActorWithOpenGlObjects})        = println("Completed!")
+Rocket.on_complete!(actor::SyncActor{Any, ActorWithOpenGlObjects})        = ""
 
 
 
@@ -163,11 +164,11 @@ function subscribeGLFWtoActor(actor ::SyncActor{Any, ActorWithOpenGlObjects})
     #controll scrolling
     forDisplayConstants = actor.actor.mainForDisplayObjects
 
-    scrollback= Main.ReactToScroll.registerMouseScrollFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)
+    scrollback= Main.ReactToScroll.registerMouseScrollFunctions(forDisplayConstants.window,forDisplayConstants.stopListening,actor.actor.isBusy)
     GLFW.SetScrollCallback(forDisplayConstants.window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
 
     keyBoardAct = registerKeyboardFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)
-    buttonSubs = registerMouseClickFunctions(forDisplayConstants.window,forDisplayConstants.stopListening,actor.actor.calcDimsStruct )
+    buttonSubs = registerMouseClickFunctions(forDisplayConstants.window,forDisplayConstants.stopListening,actor.actor.calcDimsStruct,actor.actor.isBusy )
   
     keyboardSub = subscribe!(keyBoardAct, actor)
     scrollSubscription = subscribe!(scrollback, actor)

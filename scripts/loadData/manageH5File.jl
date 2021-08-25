@@ -20,15 +20,15 @@ const g = h5open(pathToHd5, "r+")
 ```@doc
 getting example study in a form of 3 dimensional array
 ```
-function getExample() ::Array{Number, 3}
-     read(g["trainingScans/liver-orig005.mhd"]["liver-orig005.mhd"])
+function getExample(typ::Type{Tt}) ::Array{Tt, 3} where Tt
+     read(g["trainingScans/liver-orig006.mhd"]["liver-orig006.mhd"])
 end
 
 ```@doc
 getting example mask in a form of 3 dimensional array
 ```
-function getExampleLabels() ::Array{Number, 3}
-    read(g["trainingLabels"]["liver-seg005.mhd"]["liver-seg005.mhd"])
+function getExampleLabels(typ::Type{T}) ::Array{T, 3} where T
+    read(g["trainingLabels"]["liver-seg006.mhd"]["liver-seg006.mhd"])
 end
 
 

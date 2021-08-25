@@ -1,44 +1,32 @@
 
 
      using DrWatson
-     @quickactivate "Julia Med 3d"
+     @quickactivate "JuliaMed3d"
+     using Revise
      include(DrWatson.scriptsdir("display","GLFW","includeAll.jl"))
-
+includet("""C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\scripts\\loadData\\manageH5File.jl""")
      using Main.ModernGlUtil, Match, Parameters,DataTypesBasic,Main.ShadersAndVerticies,ModernGL, GeometryTypes, GLFW, Main.ForDisplayStructs,ColorTypes, Dictionaries,Main.DisplayWords, Setfield
      using Main.CustomFragShad, Main.PrepareWindowHelpers, Main.ReactToScroll, Main.SegmentationDisplay,Main.Uniforms, Main.OpenGLDisplayUtils
      using FreeTypeAbstraction,Rocket ,GLFW , Main.DataStructs, Main.StructsManag,Main.TextureManag, Main.SegmentationDisplay
- using Main.PrepareWindow,Glutils, Main.ForDisplayStructs, Dictionaries, Parameters, ColorTypes
+ using Main.PrepareWindow,Glutils, Main.ForDisplayStructs, Dictionaries, Parameters, ColorTypes, Main.h5manag
+
+
+
 
      listOfTexturesToCreate = [
      TextureSpec{UInt8}(
-         name = "mainLab",
-         strokeWidth = 5,
+         name = "goldStandardLiver",
          color = RGB(1.0,0.0,0.0)
          ,minAndMaxValue= UInt8.([0,1])
-      ,isEditable = true
         ),
      TextureSpec{UInt8}(
-         name = "testLab1",
+         name = "manualModif",
          numb= Int32(1),
          color = RGB(0.0,1.0,0.0)
          ,minAndMaxValue= UInt8.([0,1])
          ,isEditable = true
         ),
-        TextureSpec{UInt8}(
-         name = "testLab2",
-         numb= Int32(2),
-         color = RGB(0.0,0.0,1.0)
-         ,minAndMaxValue= UInt8.([0,1])
-         ,isEditable = true
-          ),
-         TextureSpec{Float32}(
-           name = "nuclearMaskking",
-           isNuclearMask= true,
-           isContinuusMask= true,
-           colorSet = [RGB(0.0,0.0,1.0),RGB(1.0,0.0,0.0)]
-           ,minAndMaxValue= Float32.([0.0,2.0])
-           ,isEditable = true
-         ),
+
         TextureSpec{Int16}(
          name= "CTIm",
          numb= Int32(3),
@@ -47,69 +35,43 @@
   ];
   #   
   fractionOfMainIm= Float32(0.8);
-  heightToWithRatio=Float32(0.5);
 
-  texureDepth =40;
-  textureHeight = 40;
-  textureWidth = 40;
 
-  datToScrollDims= DataToScrollDims(imageSize= (texureDepth,textureWidth,textureHeight),voxelSize= (1.0,1.0,0.3), dimensionToScroll = 3 )
+  CtDatPrim = h5manag.getExample(Int16);
 
-  Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate ,fractionOfMainIm ,datToScrollDims ,1000)
+  size(CtDatPrim)   
+  CtDat = CtDatPrim#vcat(zeros(Int16,401,512,512), CtDatPrim)
+
+  labelsDat = h5manag.getExampleLabels(UInt8) #vcat(zeros(UInt8,401,512,512),h5manag.getExampleLabels(UInt8));#reduce(vcat,h5manag.getExampleLabels(UInt8))
+  CtDat = CtDatPrim#reduce(vcat,CtDatPrim)
+   toMod = zeros(UInt8,size(CtDat));
+
+
+
+  spacingList= read(h5manag.g["trainingLabels"]["liver-seg006.mhd"]["liver-seg006Spacing"]);
+  spacingTuple= (spacingList[1],spacingList[2],spacingList[3]);
+
+  datToScrollDims= DataToScrollDims(imageSize=  size(CtDatPrim) ,voxelSize= spacingTuple , dimensionToScroll = 3 );
+
+  Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate ,fractionOfMainIm ,datToScrollDims ,1000);
    
 
+  Main.SegmentationDisplay.mainActor.actor.currentDisplayedSlice=40
 
-
-
-#  mainMaskDummy = UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
-#  testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
-#  testLab2Dat= UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
-
- mainMaskDummy =  zeros(UInt8,texureDepth,textureWidth,textureHeight);
- testLab1Dat = zeros(UInt8,texureDepth,textureWidth,textureHeight);
- testLab2Dat=  zeros(UInt8,texureDepth,textureWidth,textureHeight);
- nuclearMaskDat =abs.(rand(Float32,texureDepth,textureWidth,textureHeight));    
- nuclearMaskDat = nuclearMaskDat./maximum(nuclearMaskDat)   ;
- ctDummy =  Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,texureDepth,textureWidth,textureHeight)));# will give white background for testing 
-
-
- typeof(size(mainMaskDummy))
-
-
-
-   slicesDat=  [ThreeDimRawDat{UInt8}(UInt8,"mainLab",mainMaskDummy)
-     ,ThreeDimRawDat{Int16}(Int16,"CTIm",ctDummy)
-     ,ThreeDimRawDat{UInt8}(UInt8,"testLab2",testLab2Dat)
-     ,ThreeDimRawDat{UInt8}(UInt8,"testLab1",testLab1Dat)  
-     ,ThreeDimRawDat{Float32}(Float32,"nuclearMaskking",nuclearMaskDat)  
-     
-     ];
+   slicesDat=  [ThreeDimRawDat{UInt8}(UInt8,"goldStandardLiver",labelsDat)
+     ,ThreeDimRawDat{Int16}(Int16,"CTIm",CtDat)
+     ,ThreeDimRawDat{UInt8}(UInt8,"manualModif",toMod)
+      ];
 
      mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
-     supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:texureDepth );
-
-
-
-     singleSliceDat = [
-      TwoDimRawDat{UInt8}(UInt8,"mainLab", UInt8.(map(xx-> (xx >0 ? 1 : 0), zeros(Int8,textureWidth,textureHeight))))
-     ,TwoDimRawDat{Int16}(Int16,"CTIm",Int16.(map(xx-> (xx >0 ? 1 : 0), zeros(Int16,textureWidth,textureHeight))))
-     ,TwoDimRawDat{UInt8}(UInt8,"testLab2",UInt8.(map(xx-> (xx >0 ? 1 : 0), zeros(Int8,textureWidth,textureHeight))))
-     ,TwoDimRawDat{UInt8}(UInt8,"testLab1",UInt8.(map(xx-> (xx >0 ? 1 : 0), zeros(Int8,textureWidth,textureHeight)))) 
-     ,TwoDimRawDat{Float32}(Float32,"nuclearMaskking", nuclearMaskDat[1,:,:]) 
-    ];
-    sislines= textLinesFromStrings(["asd Line1", "as Line 2", "main Line 2", "main Line 2", "main Line 2",  "uuuuuuuuuuuuuuuuuu"]);
-
-
-    exampleSingleSliceDat = SingleSliceDat(listOfDataAndImageNames=singleSliceDat
-                                            ,textToDisp=sislines);
-
-    Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat);
+     supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(CtDatPrim)[3] );
 
 
 
 
 
-     mainScrollDat = FullScrollableDat(dataToScrollDims =DataToScrollDims(imageSize= (texureDepth,textureWidth,textureHeight),voxelSize= (1.0,1.0,0.3), dimensionToScroll = 3 )
+
+     mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDims
                                       ,dimensionToScroll=1
                                       ,dataToScroll= slicesDat
                                       ,mainTextToDisp= mainLines
@@ -119,6 +81,24 @@
     Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);
 
  
+
+    # sislines= textLinesFromStrings(["asd Line1", "as Line 2", "main Line 2", "main Line 2", "main Line 2",  "uuuuuuuuuuuuuuuuuu"]);
+
+    # exampleSingleSliceDat= slicesDat|>
+    # (scrDat)-> map(threeDimDat->threeToTwoDimm(threeDimDat.type,Int64(40),1,threeDimDat ),scrDat) |>
+    # # (twoDimList)->map(tdim->transpose(dat),twoDimList )
+    # (twoDimList)-> SingleSliceDat(listOfDataAndImageNames=twoDimList
+    #                             ,sliceNumber=Int64(40)
+    #                             ,textToDisp =sislines  )
+
+
+
+    # # exampleSingleSliceDat = SingleSliceDat(listOfDataAndImageNames=singleSliceDat
+    # #                                         ,textToDisp=sislines);
+
+    # Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat);
+
+
 
     GLFW.PollEvents()
 
@@ -137,16 +117,203 @@
          dispObj= Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects;
          wordsDispObj= Main.SegmentationDisplay.mainActor.actor.textDispObj;
          stopList = dispObj.stopListening[];
-         calcDim = Main.SegmentationDisplay.mainActor.actor.calcDimsStruct;
 
          actor =  Main.SegmentationDisplay.mainActor.actor;
-         length(  actor.forUndoVector)
+         shader_program = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.shader_program
+
+         calcDim = Main.SegmentationDisplay.mainActor.actor.calcDimsStruct;
+
+         size(CtDat)
 
 
-         C:\Users\1\Documents\GitHub\Probabilistic-medical-segmentation\.vscode
+
+
+
+
+
+         point = CartesianIndex(5,5)
+
+         addStrokeWidth(point,2)
+     
+         typeof(point)
+         zerod = point-CartesianIndex(1,1)
+     
+         strokeW = 2
+         CartesianIndices((-strokeW:strokeW,-strokeW:strokeW)) |>
+         list->list.+zerod|>
+         added-> filter(x-> ( abs(zerod[1]- x[1]) + abs(x[2] -zerod[2]))<strokeW  ,added )
+     
+
+
+
+
+
+
+
+
+
+
+
+         CtDatPrim 
+         labelsDat
+         CtDat 
+         toMod 
+       size(toMod)
+
+       ff= zeros(2,3,4)
+
+permutedims(ff, (1,2,3))
+permutedims(ff, (1,2,3))
+permutedims(ff, (1,2,3))
+
+(1,2,3)
+(3,2,1)
+(3,1,2)
+(1,3,2)
+     
+       function changeDims(arr)
+  
+        res=  permutedims(arr, (3,2,1))
+        sizz= size(res)
+        for i in 1:sizz[1]
+          res[i,:,:] =  reverse(res[i,:,:])
+       end# 
+
+     for i in 1:sizz[2]
+        res[:,i,:] =  reverse(res[:,i,:])
+     end# 
+
+      return res
+      end
+
+      newMod = collect(changeDims(toMod))
+      newCT =  collect(changeDims(CtDat))
+      newlabelsDat = collect( changeDims(labelsDat))
+     
+     
+      slicesDatB=  [ThreeDimRawDat{UInt8}(UInt8,"goldStandardLiver",newlabelsDat)
+      ,ThreeDimRawDat{Int16}(Int16,"CTIm",newCT)
+      ,ThreeDimRawDat{UInt8}(UInt8,"manualModif",newMod)
+       ];
+       spacingTupleB= (spacingList[1],spacingList[2],spacingList[3]);
+
+       datToScrollDimsB= DataToScrollDims(imageSize=  size(newCT) ,voxelSize= spacingTupleB , dimensionToScroll = 3 );
+
+            mainScrollDatB = FullScrollableDat(dataToScrollDims =datToScrollDimsB
+                                             ,dimensionToScroll=1
+                                             ,dataToScroll= slicesDatB
+                                             ,mainTextToDisp= mainLines
+                                             ,sliceTextToDisp=supplLines );
+       
+       
+           Main.SegmentationDisplay.passDataForScrolling(mainScrollDatB);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+         dimensionToScroll = 2
+         dat = zeros(2,4,6)
+         sizz = size(dat)
+         toSelect= filter(it-> it!=dimensionToScroll , [1,2,3] )# will be used to get texture width and height
+        
+        width= sizz[toSelect[2]]
+        height= sizz[toSelect[1]]
+        dat[:,2,:]
+        
+        selectdim(dat,dimensionToScroll, 3 )
+
+
+size(CtDatPrim[:,7,:])
+
+        datToScrollDims= DataToScrollDims(imageSize=  size(CtDatPrim) ,voxelSize= spacingTuple , dimensionToScroll = 2 );
+
+        getHeightToWidthRatio(CalcDimsStruct(),datToScrollDims )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+         textLiverMain
+         textureB
+        CTImTexture =  textureC # data in CtDatPrim
+
+        textLiverMain.actTextrureNumb
+        textureB.actTextrureNumb
+        CTImTexture.actTextrureNumb
+
+
+        CTImTexture.GL_Rtype==  GL_R16I
+        CTImTexture.OpGlType== GL_SHORT
+       loc = glGetUniformLocation(shader_program, "CTIm")
+
+        CTImTexture
+      #  setTextureVisibility(true,CTImTexture.uniforms )
+
+      GL_TEXTURE8
+      glBindTexture(GL_TEXTURE_2D, CTImTexture.ID[]); 
+      glUniform1i(0,8)
+      glActiveTexture(GL_TEXTURE8); # active proper texture unit before binding
+      glBindTexture(GL_TEXTURE_2D, CTImTexture.ID[]); 
+      sliceee = CtDatPrim[40,:,:]
+sizz = size(sliceee)
+
+	    glTexSubImage2D(GL_TEXTURE_2D,0,0,0, sizz[1], sizz[2], GL_RED_INTEGER,GL_R16I, sliceee)
+      basicRender(window)
+
+     #    updateTexture(Int16,sliceee,CTImTexture,0,0,calcDim.imageTextureWidth,calcDim.imageTextureHeight )
+
+     dispObj.stopListening[]= true
+     textur = createTexture(Int16, Int32(512), Int32(512),GL_R16I, GL_SHORT )
+     glBindTexture(GL_TEXTURE_2D,textur[]); 
+     glUniform1i(0,8)
+     glActiveTexture(GL_TEXTURE8); # active proper texture unit before binding
+     glBindTexture(GL_TEXTURE_2D,textur[]); 
+     glTexSubImage2D(GL_TEXTURE_2D,0,0,0, 512, 512, GL_RED_INTEGER,GL_R16I, collect(sliceee))
+
+     setCTWindow(Int32(-500),Int32(500), dispObj.mainImageUniforms)
+     basicRender(window)
+
+     dispObj.mainImageUniforms
+
+     GLFW.PollEvents()
+
+     dispObj.stopListening[]= false
+
+
+
 
          using DocumenterTools
-         DocumenterTools.generate()
+         DocumenterTools.generate(name = "Julia Med 3d")
 
          popfirst!(actor.forUndoVector)
 
@@ -224,11 +391,79 @@ glDeleteTextures(length(arr), arr)
 
 add BenchmarkTools ,ColorTypes , Conda  , DataTypesBasic  , Dictionaries  , Distributed  , Documenter , DocumenterTools , DrWatson , FreeType  , FreeTypeAbstraction  , GLFW  ,  HDF5  , Match , ModernGL , Observables  , Parameters , PyCall , Revise , Rocket  , Setfield  
 
+        # TextureSpec{UInt8}(
+        #  name = "testLab2",
+        #  numb= Int32(2),
+        #  color = RGB(0.0,0.0,1.0)
+        #  ,minAndMaxValue= UInt8.([0,1])
+        #  ,isEditable = true
+        #   ),
+        #  TextureSpec{Float32}(
+        #    name = "nuclearMaskking",
+        #    isNuclearMask= true,
+        #    isContinuusMask= true,
+        #    colorSet = [RGB(0.0,0.0,1.0),RGB(1.0,0.0,0.0)]
+        #    ,minAndMaxValue= Float32.([0.0,2.0])
+        #    ,isEditable = true
+        #  ),
+
+
+ #similar(Array{UInt8}, axes(CtDat))
+  # texureDepth =40;
+  # textureHeight = 40;
+  # textureWidth = 40;
+#  mainMaskDummy = UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+#  testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+#  testLab2Dat= UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+
+#  mainMaskDummy =  zeros(UInt8,texureDepth,textureWidth,textureHeight);
+#  testLab1Dat = zeros(UInt8,texureDepth,textureWidth,textureHeight);
+#  testLab2Dat=  zeros(UInt8,texureDepth,textureWidth,textureHeight);
+#  nuclearMaskDat =abs.(rand(Float32,texureDepth,textureWidth,textureHeight));    
+#  nuclearMaskDat = nuclearMaskDat./maximum(nuclearMaskDat)   ;
+#  ctDummy =  Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,texureDepth,textureWidth,textureHeight)));# will give white background for testing 
 
 
 
 
+typeof(toMod)
 
+
+
+"goldStandardLiver" UInt8
+"manualModif" UInt8
+"CTIm" Int16
+
+  #  slicesDat=  [ThreeDimRawDat{UInt8}(UInt8,"mainLab",mainMaskDummy)
+  #    ,ThreeDimRawDat{Int16}(Int16,"CTIm",ctDummy)
+  #    ,ThreeDimRawDat{UInt8}(UInt8,"testLab2",testLab2Dat)
+  #    ,ThreeDimRawDat{UInt8}(UInt8,"testLab1",testLab1Dat)  
+  #    ,ThreeDimRawDat{Float32}(Float32,"nuclearMaskking",nuclearMaskDat)  
+  #     ];
+
+
+
+    #  singleSliceDat = [
+    #   TwoDimRawDat{UInt8}(UInt8,"mainLab", UInt8.(map(xx-> (xx >0 ? 1 : 0), zeros(Int8,textureWidth,textureHeight))))
+    #  ,TwoDimRawDat{Int16}(Int16,"CTIm",Int16.(map(xx-> (xx >0 ? 1 : 0), zeros(Int16,textureWidth,textureHeight))))
+    #  ,TwoDimRawDat{UInt8}(UInt8,"testLab2",UInt8.(map(xx-> (xx >0 ? 1 : 0), zeros(Int8,textureWidth,textureHeight))))
+    #  ,TwoDimRawDat{UInt8}(UInt8,"testLab1",UInt8.(map(xx-> (xx >0 ? 1 : 0), zeros(Int8,textureWidth,textureHeight)))) 
+    #  ,TwoDimRawDat{Float32}(Float32,"nuclearMaskking", nuclearMaskDat[1,:,:]) 
+    # ];
+    # sislines= textLinesFromStrings(["asd Line1", "as Line 2", "main Line 2", "main Line 2", "main Line 2",  "uuuuuuuuuuuuuuuuuu"]);
+
+    # singleSlDat= actor.actor.onScrollData.dataToScroll|>
+    # (scrDat)-> map(threeDimDat->threeToTwoDimm(threeDimDat.type,Int64(current),actor.actor.onScrollData.dimensionToScroll,threeDimDat ),scrDat) |>
+    # (twoDimList)-> SingleSliceDat(listOfDataAndImageNames=twoDimList
+    #                             ,sliceNumber=current
+    #                             ,textToDisp = getTextForCurrentSlice(actor.actor.onScrollData, Int32(current))  )
+
+
+
+    # # exampleSingleSliceDat = SingleSliceDat(listOfDataAndImageNames=singleSliceDat
+    # #                                         ,textToDisp=sislines);
+
+    # Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat);
 
 
 

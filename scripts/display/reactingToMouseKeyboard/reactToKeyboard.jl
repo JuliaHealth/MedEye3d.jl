@@ -6,7 +6,7 @@ module coordinating response to the  keyboard input - mainly shortcuts that  hel
 #@doc ReactOnKeyboardSTR
 module ReactOnKeyboard
 using ModernGL,Main.DisplayWords,Main.StructsManag, Setfield,Main.PrepareWindow,  Main.DataStructs ,Glutils, Rocket, GLFW,Dictionaries, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils, Main.Uniforms, Match, Parameters,DataTypesBasic
-export reactToKeyboard , registerKeyboardFunctions
+export reactToKeyboard , registerKeyboardFunctions,processKeysInfo
 
 KeyboardCallbackSubscribableStr= """
 Object that enables managing input from keyboard - it stores the information also about
@@ -251,6 +251,7 @@ In case we want to change the dimansion of scrolling so for example from transve
     toBeSavedForBack - just marks weather we wat to save the info how to undo latest action
     - false if we invoke it from undoing 
 """
+
 function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}
                     ,actor::SyncActor{Any, ActorWithOpenGlObjects}
                     ,keyInfo::KeyboardStruct

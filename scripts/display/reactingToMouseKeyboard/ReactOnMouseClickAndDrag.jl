@@ -36,10 +36,9 @@ struct that enables reacting to  the input  from mouse click  and drag the input
 #- so if mouse is moving rapidly we would store bunch of coordinates and then modify texture in batch
     coordinatesStoreForLeftClicks ::Vector{CartesianIndex{2}} 
     lastCoordinate::CartesianIndex{2}#generally when we draw lines we remove points from array above yet w need to leave last one in order to keep continuity of futher line
+    isBusy::Base.Threads.Atomic{Bool} # indicate to check weather the system is ready to receive the input
 
-
-referenceInstance::DateTime# an instance from which we would calculate when to execute batch 
-    
+   
     subject :: Subject{MouseStruct} # coordinates of mouse 
    
 end
@@ -82,16 +81,15 @@ function (handler::MouseCallbackSubscribable)( a, x::Float64, y::Float64)
   point = CartesianIndex(Int(x),Int(y))
   handler.lastCoordinate = point
   
-  
+
   if  (handler.isLeftButtonDown && x>=handler.xmin && x<=handler.xmax && y>=handler.ymin && y<= handler.ymax )
-    push!(handler.coordinatesStoreForLeftClicks,point)
-        if((Dates.now()-handler.referenceInstance).value>200)  
+    push!(handler.coordinatesStoreForLeftClicks,point) # putting coordinate to the list it will be processed when context will be ready
+        if(!handler.isBusy[])  
             #sending mouse position only if all conditions are met
             next!(handler.subject,MouseStruct( 
                 isLeftButtonDown=handler.isLeftButtonDown
                 ,isRightButtonDown=handler.isRightButtonDown
                ,lastCoordinates=  handler.coordinatesStoreForLeftClicks))#sending mouse position only if all conditions are met
-            handler.referenceInstance=Dates.now()
             handler.coordinatesStoreForLeftClicks = [point]
         end#if
     #now we also get intrested about  right clicks becouse they help to controll 
@@ -113,7 +111,6 @@ function (handler::MouseCallbackSubscribable)(a, button::GLFW.MouseButton, actio
     handler.isRightButtonDown = (button==GLFW.MOUSE_BUTTON_2 &&  action==GLFW.PRESS)
 
     if(res)
-        handler.referenceInstance=Dates.now()
         handler.coordinatesStoreForLeftClicks = [handler.lastCoordinate]
     end #if
 end #second handler
@@ -127,7 +124,8 @@ imageWidth adn imageHeight are the dimensions of textures that we use to display
 """
 function registerMouseClickFunctions(window::GLFW.Window
                                     ,stopListening::Base.Threads.Atomic{Bool}
-                                    ,calcD::CalcDimsStruct     )
+                                    ,calcD::CalcDimsStruct
+                                    ,isBusy::Base.Threads.Atomic{Bool}     )
 
 
  stopListening[]=true # stoping event listening loop to free the GLFW context
@@ -142,7 +140,7 @@ function registerMouseClickFunctions(window::GLFW.Window
                                         ,ymax=Int32(calcD.avWindHeightForMain-calcD.windowHeightCorr)
                                         ,coordinatesStoreForLeftClicks=[]
                                         ,lastCoordinate=CartesianIndex(1,1)
-                                        ,referenceInstance=Dates.now()
+                                        ,isBusy=isBusy
                                         ,subject=Subject(MouseStruct  ,scheduler = AsyncScheduler()))
 
 GLFW.SetCursorPosCallback(window, (a, x, y) -> mouseButtonSubs(a,x, y ) )# and  for example : cursor: 29.0, 469.0  types   Float64  Float64   
@@ -165,6 +163,7 @@ we use mouse coordinate to modify the texture that is currently active for modif
 function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any, ActorWithOpenGlObjects})
     obj = actor.actor.mainForDisplayObjects
     obj.stopListening[]=true #free GLFW context
+    actor.actor.isBusy[]=true# mark that OpenGL is busy
     textureList = actor.actor.textureToModifyVec
     mouseCoords= mousestr.lastCoordinates
     if (!isempty(textureList)  && mousestr.isLeftButtonDown && textureList[1].isEditable)
@@ -202,6 +201,7 @@ function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any, ActorWith
                                                                 ,actor.actor.currentDisplayedSlice
                                                                ,mappedCoords[1]    )   
     end #if 
+    actor.actor.isBusy[]=false # we can do sth in opengl
     obj.stopListening[]=false # reactivete event listening loop
 end#reactToScroll
 
@@ -216,16 +216,29 @@ return vector of translated cartesian coordinates
 """
 function translateMouseToTexture(strokeWidth::Int32
                                 ,mouseCoords::Vector{CartesianIndex{2}}
-                                ,calcD::CalcDimsStruct )
+                                ,calcD::CalcDimsStruct )::Vector{CartesianIndex{2}}
   
 
     halfStroke =   Int64(floor(strokeWidth/2 ))
     #updating given texture that we are intrested in in place we are intested in 
 
-    return map(c->CartesianIndex( getNewX(c[1],calcD),  getNewY(c[2] ,calcD)) ,mouseCoords)  |>
-             (x)->filter(it->it[1]>0 && it[2]>0 ,x)        # we do not want to try access it in point 0 as julia is 1 indexed                 
-
+    return    map(c->CartesianIndex( getNewX(c[1],calcD),  getNewY(c[2] ,calcD)) ,mouseCoords)  |>
+    (x)->filter(it->it[1]>0 && it[2]>0 ,x)  |>      # we do not want to try access it in point 0 as julia is 1 indexed                 
+   (filteredList) -> map(point-> addStrokeWidth(point,Int64(strokeWidth) ) , filteredList) |>  # adding some points around the point of choice so will be better visible
+   (matrix)->reduce(vcat, matrix)# when we added some oints around we got list of lists so now we need to flatten it out
+   unique # we want only unique elements
 end #translateMouseToTexture
+
+"""
+adding the width to the stroke so we will be able to controll how thicly we are painting ...
+"""
+function addStrokeWidth(point::CartesianIndex{2},strokeW::Int64  )
+    return CartesianIndices((-strokeW:strokeW,-strokeW:strokeW)) |> # set of cartesian indices that we will filter ot later
+    list->list.+point|> # making coordinates around point of intrest
+    added-> filter(x-> ( abs(point[1]- x[1]) + abs(x[2] -point[2]))<strokeW  ,added )# filtering to distant points
+end#addStrokeWidth
+
+
 
 """
 helper function for translateMouseToTexture

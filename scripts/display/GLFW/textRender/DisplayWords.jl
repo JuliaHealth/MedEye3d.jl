@@ -4,7 +4,7 @@ Module controlling displaying of the text associated with the segmentation
 """
 module DisplayWords
 using FreeTypeAbstraction,Main.ForDisplayStructs,Main.DataStructs,Main.ModernGlUtil , ModernGL, ColorTypes,Main.PrepareWindowHelpers,  Main.ShadersAndVerticies, Main.ShadersAndVerticiesForText, Glutils, DrWatson
-@quickactivate "Julia Med 3d"
+@quickactivate "JuliaMed3d"
 
 
 export getTextForCurrentSlice,textLinesFromStrings,renderSingleLineOfText,activateForTextDisp,bindAndActivateForText,reactivateMainObj, createTextureForWords,bindAndActivateForText, bindAndDisplayTexture
@@ -42,7 +42,7 @@ In order to be able to display texture with text we need to activate main shader
 function activateForTextDisp(shader_program_words::UInt32
                             ,vbo_words::Base.RefValue{UInt32} 
                             ,calcDim::CalcDimsStruct)
-    glUseProgram(shader_program_words)
+   glUseProgram(shader_program_words)
     glBindBuffer(GL_ARRAY_BUFFER, vbo_words[])
     glBufferData(GL_ARRAY_BUFFER, calcDim.wordsQuadVertSize  ,calcDim.wordsImageQuadVert , GL_STATIC_DRAW)
 

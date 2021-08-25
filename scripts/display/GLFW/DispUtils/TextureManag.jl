@@ -39,6 +39,7 @@ function updateTexture(::Type{Tt}
         glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED, textSpec.OpGlType, collect(data))
     else
 	    glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, collect(data))
+	   # glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, reduce(vcat,data))
 
     end  
     
@@ -160,7 +161,7 @@ function updateImagesDisplayed(singleSliceDat::SingleSliceDat
             for updateDat in singleSliceDat.listOfDataAndImageNames
                 findList= findall( (texSpec)-> texSpec.name == updateDat.name, modulelistOfTextSpecs)
                 texSpec = !isempty(findList) ? modulelistOfTextSpecs[findList[1]] : throw(DomainError(findList, "no such name specified in start configuration - $( updateDat[1])")) 
-                Main.TextureManag.updateTexture(updateDat.type,updateDat.dat,texSpec,0,0,calcDimStruct.imageTextureWidth,calcDimStruct.imageTextureHeight )
+                updateTexture(updateDat.type,updateDat.dat,texSpec,0,0,calcDimStruct.imageTextureWidth,calcDimStruct.imageTextureHeight )
             end #for 
             #render text associated with this slice
             activateForTextDisp(
@@ -181,7 +182,7 @@ function updateImagesDisplayed(singleSliceDat::SingleSliceDat
 
             #render onto the screen
             Main.OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
-
+            glFinish()
             forDisplayConstants.stopListening[]=false
 end
 

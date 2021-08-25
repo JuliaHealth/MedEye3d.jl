@@ -191,8 +191,10 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
    
    
 
-    return setproperties(calcDimStruct, (correCtedWindowQuadHeight= correCtedWindowQuadHeight
-                                        ,correCtedWindowQuadWidth= correCtedWindowQuadWidth
+
+
+    return setproperties(calcDimStruct, (correCtedWindowQuadHeight= Int32(round(correCtedWindowQuadHeight))
+                                        ,correCtedWindowQuadWidth= Int32(round(correCtedWindowQuadWidth))
                                         ,quadToTotalHeightRatio=quadToTotalHeightRatio
                                         ,quadToTotalWidthRatio=quadToTotalWidthRatio
                                         ,widthCorr=widthCorr

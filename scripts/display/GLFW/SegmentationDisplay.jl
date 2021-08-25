@@ -43,7 +43,7 @@ using ModernGL, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUt
 using Main.ReactingToInput, Rocket, Setfield, Logging, Main.ShadersAndVerticiesForText,FreeTypeAbstraction,Main.DisplayWords, Main.DataStructs, Main.StructsManag
 
 using DrWatson
-@quickactivate "Julia Med 3d"
+@quickactivate "JuliaMed3d"
 
 #holds actor that is main structure that process inputs from GLFW and reacts to it
 mainActor = sync(ActorWithOpenGlObjects())
@@ -217,25 +217,27 @@ In order to properly close displayer we need to :
  close GLFW window
 """
 function cleanUp()
+    obj = mainActor.actor.mainForDisplayObjects
+    glFlush()
     GLFW.DestroyWindow(obj.window)
 
-    glClearColor(0.0, 0.0, 0.1 , 1.0) # for a good begining
-    #first we unsubscribe and give couple seconds for processes to stop
-    for sub in subscriptions
-        unsubscribe!(sub)
-    end # for
-    sleep(5)
-    obj = mainActor.actor.mainForDisplayObjects
-    #deleting textures
-    glDeleteTextures(length(obj.listOfTextSpecifications), map(text->text.ID,obj.listOfTextSpecifications));
-    #destroying buffers
-    glDeleteBuffers(2,[obj.vbo,obj.ebo])
-    #detaching shaders
-    glDeleteShader(obj.fragment_shader);
-    glDeleteShader(obj.vertex_shader);
-    #destroying program
-    glDeleteProgram(obj.shader_program)
-    #finalizing and recreating main actor
+    # glClearColor(0.0, 0.0, 0.1 , 1.0) # for a good begining
+    # #first we unsubscribe and give couple seconds for processes to stop
+    # for sub in subscriptions
+    #     unsubscribe!(sub)
+    # end # for
+    # sleep(5)
+    # obj = mainActor.actor.mainForDisplayObjects
+    # #deleting textures
+    # glDeleteTextures(length(obj.listOfTextSpecifications), map(text->text.ID,obj.listOfTextSpecifications));
+    # #destroying buffers
+    # glDeleteBuffers(2,[obj.vbo,obj.ebo])
+    # #detaching shaders
+    # glDeleteShader(obj.fragment_shader);
+    # glDeleteShader(obj.vertex_shader);
+    # #destroying program
+    # glDeleteProgram(obj.shader_program)
+    # #finalizing and recreating main actor
 end #cleanUp    
 
 

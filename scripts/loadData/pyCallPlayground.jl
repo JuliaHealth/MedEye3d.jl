@@ -1,7 +1,7 @@
 using Base: String
 
 using DrWatson
-@quickactivate "Probabilistic medical segmentation"
+@quickactivate "JuliaMed3d"
 using Conda
 using PyCall
 using Pkg
@@ -36,9 +36,20 @@ function getListOfMhdFromFolder(folderPath::String) ::Vector{Vector{AbstractStri
 end
 
 #Return intensity of all voxels and physical location of pixels of each x,y and z axis so the result will be 2 dimensional array
-function getPhysicalLocsandIntesities( image)
+function getPhysicalLocsandIntesities( image, type::Type)
     pixels = np.array(sitk.GetArrayViewFromImage(image))
-    
+    pixels = convert(Array{type, 3},pixels)
+    pixels=  permutedims(pixels, (3,2,1))
+    sizz=size(pixels)
+    for i in 1:sizz[1]
+        pixels[i,:,:] =  reverse(pixels[i,:,:])
+     end# 
+
+   for i in 1:sizz[2]
+    pixels[:,i,:] =  reverse(pixels[:,i,:])
+   end# 
+
+
     tuples=CartesianIndices(pixels)     |>
     (cartInds)->Tuple.(cartInds) |> # changing into tuples to make it work with sitk
     (x)-> map((t)->(t[1]-1, t[2]-1, t[3]-1  ) ,x) # python is 0 based ...
@@ -50,18 +61,19 @@ end
 
 
 
-function addGroups(group,folderPath)
+function addGroups(group,folderPath, type::Type)
     for shortArr in getListOfMhdFromFolder(folderPath)
-        dat = sitk.ReadImage(shortArr[2])|>
-        (img)-> getPhysicalLocsandIntesities(img)       
-
+        img = sitk.ReadImage(shortArr[2])
+        dat = getPhysicalLocsandIntesities(img,type)       
+        spacings = img.GetSpacing()
+        spaCingList = [spacings[1],spacings[2],spacings[3]]
         innerGroup= create_group(group, shortArr[1])
-            write(innerGroup, shortArr[1],dat[1]) 
-            write(innerGroup, shortArr[1]*"PhysLocX" ,dat[2][1]) 
-            write(innerGroup, shortArr[1]*"PhysLocY" ,dat[2][2]) 
-            write(innerGroup, shortArr[1]*"PhysLocZ" ,dat[2][3]) 
-   
-
+        write(innerGroup, shortArr[1],dat[1]) 
+        write(innerGroup, shortArr[1]*"PhysLocX" ,dat[2][1]) 
+        write(innerGroup, shortArr[1]*"PhysLocY" ,dat[2][2]) 
+        write(innerGroup, shortArr[1]*"PhysLocZ" ,dat[2][3]) 
+        write(innerGroup, shortArr[1]*"Spacing" ,spaCingList) 
+        
         print("*")
         print(shortArr[1])
     end
@@ -72,16 +84,29 @@ pathToTrainingLabels =DrWatson.datadir("liverPrimData","training-labels" ,"label
 pathToTestScans =DrWatson.datadir("liverPrimData","test-scans" ,"scan" )
 
 
-addGroups(trainingScans,pathToTrainingScans)
-addGroups(trainingLabels,pathToTrainingLabels)
-addGroups(testScans,pathToTestScans)
+addGroups(trainingScans,pathToTrainingScans, Int16)
+addGroups(trainingLabels,pathToTrainingLabels, UInt8)
+addGroups(testScans,pathToTestScans, Int16)
 
 close(f)
 
 
 
-dirOfExample = DrWatson.datadir("liverPrimData","training-scans" ,"scan","liver-orig001.mhd" )
+########PET CT upload
 
+
+
+
+
+
+
+
+
+
+
+
+dirOfExample = DrWatson.datadir("liverPrimData","training-scans" ,"scan","liver-orig001.mhd" )
+pixels = np.array(np.uint16,sitk.GetArrayViewFromImage(image))
 pathToTrainingScans =DrWatson.datadir("liverPrimData","training-scans" ,"scan" )
 
 
@@ -103,9 +128,26 @@ group = trainingScans
 
 innerGroup= create_group(group, shortArr[1])
 img = sitk.ReadImage(shortArr[2])
-dat = getPhysicalLocsandIntesities(img)
+dat = getPhysicalLocsandIntesities(img,Int16)
 
 
+datt =sitk.GetArrayViewFromImage(img)
+jDat = Int16.(np.array(datt))
+
+sizeof(np.array(datt))
+sizeof(jDat)
+
+d = create_dataset(innerGroup, "aaa", Int)
+
+b = create_dataset(innerGroup, "bdgy", jDat,dtype= Int16)
+
+
+typeof(jDat)
+convert( Matrix{Int32} ,datt )
+
+reduce(hcat,dat)
+
+size(dat)
 
 write(innerGroup, shortArr[1],dat[1]) 
 write(innerGroup, shortArr[1]*"PhysLocX" ,dat[2][1]) 
