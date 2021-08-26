@@ -13,6 +13,10 @@ using ModernGL,Main.DisplayWords,Rocket, GLFW, Main.ForDisplayStructs, Main.Text
 export reactToScroll
 export registerMouseScrollFunctions
 
+
+scrollHandler= nothing # used only in case of profiling
+
+
 ScrollCallbackSubscribableStr="""
 struct that enables reacting to  the input from scrolling
 """
@@ -65,7 +69,7 @@ function registerMouseScrollFunctions(window::GLFW.Window
 stopListening[]=true # stoping event listening loop to free the GLFW context
 
 scrollback = ScrollCallbackSubscribable( isBusy,0 ,Subject(Int64, scheduler = AsyncScheduler()))
-
+scrollHandler= scrollback
 GLFW.SetScrollCallback(window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
 
 stopListening[]=false # reactivate event listening loop

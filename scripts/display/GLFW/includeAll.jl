@@ -1,7 +1,9 @@
 using DrWatson
-@quickactivate "Probabilistic medical segmentation"
+@quickactivate "NuclearEye"
 
 using Revise
+
+includet(DrWatson.scriptsdir("loadData","DicomManage.jl"))
 
 
 includet(DrWatson.scriptsdir("display","GLFW","startModules","ModernGlUtil.jl"))
@@ -11,7 +13,7 @@ includet(DrWatson.scriptsdir("structs","DataStructs.jl"))
 includet(DrWatson.scriptsdir("structs","forDisplayStructs.jl"))
 
 includet(DrWatson.scriptsdir("display","GLFW","DispUtils","StructsManag.jl"))
-
+includet(DrWatson.scriptsdir("loadData","manageH5File.jl"))
 
 includet(DrWatson.scriptsdir("display","GLFW","startModules","PrepareWindowHelpers.jl"))
 includet(DrWatson.scriptsdir("display","GLFW","shadersEtc","CustomFragShad.jl"))

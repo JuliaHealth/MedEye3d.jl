@@ -1,7 +1,7 @@
 using Base: String
 
 using DrWatson
-@quickactivate "JuliaMed3d"
+@quickactivate "NuclearEye"
 using Conda
 using PyCall
 using Pkg
@@ -13,7 +13,6 @@ Conda.pip("install", "h5py")
 
 sitk = pyimport("SimpleITK")
 np= pyimport("numpy")
-
 
 
 mainHdfFolder = DrWatson.datadir("hdf5Main")
