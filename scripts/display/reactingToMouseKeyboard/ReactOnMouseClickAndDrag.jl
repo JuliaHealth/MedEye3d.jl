@@ -16,6 +16,8 @@ using  Dates, Parameters, Main.DataStructs, Main.StructsManag
 export registerMouseClickFunctions
 export reactToMouseDrag
 
+mouseClickHandler= nothing # used only in case of the benchmarking to simulate user interaction
+
 """
 struct that enables reacting to  the input  from mouse click  and drag the input will be 
     Cartesian index represening (x,y)
@@ -80,11 +82,11 @@ experiments show that max x,y in window is both 600 if window width and height i
 function (handler::MouseCallbackSubscribable)( a, x::Float64, y::Float64)
   point = CartesianIndex(Int(x),Int(y))
   handler.lastCoordinate = point
-  
 
   if  (handler.isLeftButtonDown && x>=handler.xmin && x<=handler.xmax && y>=handler.ymin && y<= handler.ymax )
     push!(handler.coordinatesStoreForLeftClicks,point) # putting coordinate to the list it will be processed when context will be ready
         if(!handler.isBusy[])  
+
             #sending mouse position only if all conditions are met
             next!(handler.subject,MouseStruct( 
                 isLeftButtonDown=handler.isLeftButtonDown
@@ -142,6 +144,8 @@ function registerMouseClickFunctions(window::GLFW.Window
                                         ,lastCoordinate=CartesianIndex(1,1)
                                         ,isBusy=isBusy
                                         ,subject=Subject(MouseStruct  ,scheduler = AsyncScheduler()))
+
+mouseClickHandler=mouseButtonSubs
 
 GLFW.SetCursorPosCallback(window, (a, x, y) -> mouseButtonSubs(a,x, y ) )# and  for example : cursor: 29.0, 469.0  types   Float64  Float64   
 GLFW.SetMouseButtonCallback(window, (a, button, action, mods) ->mouseButtonSubs(a,button, action,mods )) # for example types MOUSE_BUTTON_1 PRESS   GLFW.MouseButton  GLFW.Action 

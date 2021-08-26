@@ -8,6 +8,8 @@ module ReactOnKeyboard
 using ModernGL,Main.DisplayWords,Main.StructsManag, Setfield,Main.PrepareWindow,  Main.DataStructs ,Glutils, Rocket, GLFW,Dictionaries, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils, Main.Uniforms, Match, Parameters,DataTypesBasic
 export reactToKeyboard , registerKeyboardFunctions,processKeysInfo
 
+keyboardHandler= nothing # used only in case of profiling
+
 KeyboardCallbackSubscribableStr= """
 Object that enables managing input from keyboard - it stores the information also about
 needed keys wheather they are kept pressed  
@@ -128,7 +130,7 @@ function registerKeyboardFunctions(window::GLFW.Window,stopListening::Base.Threa
     stopListening[]=true # stoping event listening loop to free the GLFW context
                            
     keyboardSubs = KeyboardCallbackSubscribable(false,false,false,false,false,false,false,false,false,[], Subject(KeyboardStruct, scheduler = AsyncScheduler()))
-                                  
+    keyboardHandler =keyboardSubs                             
         GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
         name = GLFW.GetKeyName(key, scancode)
         if name == nothing

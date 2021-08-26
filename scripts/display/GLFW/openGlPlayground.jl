@@ -1,69 +1,20 @@
 
 
      using DrWatson
-     @quickactivate "JuliaMed3d"
+     @quickactivate "NuclearEye"
      using Revise
      include(DrWatson.scriptsdir("display","GLFW","includeAll.jl"))
-#includet("""C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\scripts\\loadData\\manageH5File.jl""")
      using Main.ModernGlUtil, Match, Parameters,DataTypesBasic,Main.ShadersAndVerticies,ModernGL, GeometryTypes, GLFW, Main.ForDisplayStructs,ColorTypes, Dictionaries,Main.DisplayWords, Setfield
      using Main.CustomFragShad, Main.PrepareWindowHelpers, Main.ReactToScroll, Main.SegmentationDisplay,Main.Uniforms, Main.OpenGLDisplayUtils
      using FreeTypeAbstraction,Rocket ,GLFW , Main.DataStructs, Main.StructsManag,Main.TextureManag, Main.SegmentationDisplay
- using Main.PrepareWindow,Glutils, Main.ForDisplayStructs, Dictionaries, Parameters, ColorTypes #, Main.h5manag
+ using Main.PrepareWindow,Glutils, Main.ForDisplayStructs, Dictionaries, Parameters, ColorTypes , Main.h5manag
 
 
 
 
-     listOfTexturesToCreate = [
-     TextureSpec{UInt8}(
-         name = "goldStandardLiver",
-         numb= Int32(1),
-         color = RGB(1.0,0.0,0.0)
-         ,minAndMaxValue= UInt8.([0,1])
-        ),
-     TextureSpec{UInt8}(
-         name = "manualModif",
-         numb= Int32(2),
-         color = RGB(0.0,1.0,0.0)
-         ,minAndMaxValue= UInt8.([0,1])
-         ,isEditable = true
-        ),
-
-        TextureSpec{Int16}(
-         name= "CTIm",
-         numb= Int32(3),
-         isMainImage = true,
-         minAndMaxValue= Int16.([0,100]))  
-  ];
-  #   
-  fractionOfMainIm= Float32(0.8);
 
 
-  # CtDatPrim = h5manag.getExample(Int16);
-
-  # size(CtDatPrim)   
-  # CtDat = CtDatPrim#vcat(zeros(Int16,401,512,512), CtDatPrim)
-
-  # labelsDat = h5manag.getExampleLabels(UInt8) #vcat(zeros(UInt8,401,512,512),h5manag.getExampleLabels(UInt8));#reduce(vcat,h5manag.getExampleLabels(UInt8))
-  # CtDat = CtDatPrim#reduce(vcat,CtDatPrim)
-  #  toMod = copy(labelsDat)   #zeros(UInt8,size(CtDat));
-
-
-
-  # spacingList= read(h5manag.g["trainingLabels"]["liver-seg006.mhd"]["liver-seg006Spacing"]);
-  # spacingTuple= (spacingList[1],spacingList[2],spacingList[3]);
-
-  # datToScrollDims= DataToScrollDims(imageSize=  size(CtDatPrim) ,voxelSize= spacingTuple , dimensionToScroll = 3 );
-
-  # Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate ,fractionOfMainIm ,datToScrollDims ,1000);
-
-
-  # Main.SegmentationDisplay.mainActor.actor.currentDisplayedSlice=40
-
-  # mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
-  # supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(CtDatPrim)[3] );
-
-
-   
+ 
 #####################
 
 
@@ -85,11 +36,19 @@ np= pyimport("numpy")
 
 
 ########
+# interpolation adapted from https://discourse.itk.org/t/compose-image-from-different-modality-with-different-number-of-slices/2286/8
 
 #dirOfExample = DrWatson.datadir("PETCT","manifest-1608669183333" ,"Lung-PET-CT-Dx","Lung_Dx-G0045","05-08-2011-NA-PET01PTheadlung Adult-09984","10.000000-Thorax  1.0  B70f-66628" )
 #dirOfExample = DrWatson.datadir("data","PETphd","slicerExp" ,"CT","ScalarVolume_17")
-dirOfExample ="C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\CT\\ScalarVolume_17"
-dirOfExamplePET ="C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\PETCT\\ScalarVolume_11"
+# dirOfExample ="C:\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\PETB\\ScalarVolume_17"
+# dirOfExamplePET ="C:\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\PETCT\\ScalarVolume_11"
+dirOfExample ="C:\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\all17\\bad17NL-bad17NL\\20150518-PET^1_PET_CT_WholeBody_140_70_Recon (Adult)\\4-CT AC WB  1.5  B30f"
+dirOfExamplePET ="C:\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\all17\\bad17NL-bad17NL\\20150518-PET^1_PET_CT_WholeBody_140_70_Recon (Adult)\\3-PET WB"
+
+
+
+
+
 
 # data\\PETphd\\slicerExp\\CT\\ScalarVolume_17
 
@@ -99,92 +58,395 @@ reader = sitk.ImageSeriesReader()
 dicom_names = reader.GetGDCMSeriesFileNames(dirOfExample)
 reader.SetFileNames(dicom_names)
 
-image = reader.Execute()
-pixelss = np.array(sitk.GetArrayViewFromImage(image))
+ctImage = reader.Execute()
+pixelss = np.array(sitk.GetArrayViewFromImage(ctImage))
 
-spacings = image.GetSpacing()
-spacingListB = [spacings[1],spacings[2],spacings[3]]
+spacingsCt = ctImage.GetSpacing()
+spacingListCT = [spacingsCt[1],spacingsCt[2],spacingsCt[3]]
 
 
 
 dicom_namesPET = reader.GetGDCMSeriesFileNames(dirOfExamplePET)
+reader = sitk.ImageSeriesReader()
+
 reader.SetFileNames(dicom_namesPET)
 
-image = reader.Execute()
-pixelsPET = np.array(sitk.GetArrayViewFromImage(image))
+imagePET = reader.Execute()
+pixelsPET = np.array(sitk.GetArrayViewFromImage(imagePET))
 
-spacings = image.GetSpacing()
-spacingListB = [spacings[1],spacings[2],spacings[3]]
-
-size(pixelsPET)
-
-maximum(pixelss)
-
-
-
-###########
-dirOfExample ="C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\CT\\ScalarVolume_17"
-dirOfExamplePET ="C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\PETCT\\ScalarVolume_11"
-
-
-using Main.DicomManage
-
-dirOfExampleFull = "C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\bad45Y\\DICOM\\21071306"
-
-ctDcms = load_dicom(dirOfExampleFull)
-petDcms = load_dicom(dirOfExamplePET)
-
-
-
-ct = sort_slices(ctDcms[1])
-
-#################
-
-newCT =  collect(pixelss)
-newMod = zeros(UInt8,size(newCT));
-newlabelsDat = zeros(UInt8,size(newCT));
+spacingsPET = imagePET.GetSpacing()
+spacingListPET = [spacingsPET[1],spacingsPET[2],spacingsPET[3]]
 
 
 
 
+# Resample PET onto CT grid using default interpolator and identity transformation.
 
-spacingTupleB= (spacingListB[1],spacingListB[2],spacingListB[3]);
+function permuteAndReverse(pixels)
+  pixels=  permutedims(pixels, (3,2,1))
+  sizz=size(pixels)
+  for i in 1:sizz[1]
+      pixels[i,:,:] =  reverse(pixels[i,:,:])
+  end# 
 
-datToScrollDimsB= DataToScrollDims(imageSize=  size(newCT) ,voxelSize= spacingTupleB , dimensionToScroll = 3 );
+  for i in 1:sizz[2]
+  pixels[:,i,:] =  reverse(pixels[:,i,:])
+  end# 
+  return pixels
+end#permuteAndReverse
+
+pet_image_resampled = sitk.Resample(imagePET, ctImage)
+
+resampledPet = pet_image_resampled
+pixelsResampled = np.array(sitk.GetArrayViewFromImage(resampledPet))
+
+pixelsResampled = permuteAndReverse(pixelsResampled)
+pixelssB = permuteAndReverse(pixelss)
+
+typeof(pixelssB)
+typeof(pixelsResampled)
+
+datToScrollDimsB= DataToScrollDims(imageSize=  size(pixelsResampled) ,voxelSize= spacingsCt , dimensionToScroll = 3 );
 
 
 
-Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate ,fractionOfMainIm ,datToScrollDimsB ,1000);
+
+listOfTexturesToCreateB = [
+  TextureSpec{Float32}(
+      name = "PET",
+      isNuclearMask=true,
+      isContinuusMask=true,
+      numb= Int32(1),
+      colorSet = [RGB(1.0,1.0,0.0),RGB(1.0,0.0,0.0),RGB(1.0,0.0,0.0) ]
+      ,minAndMaxValue= Float32.([-2000,8000])
+     ),
+  TextureSpec{UInt8}(
+      name = "manualModif",
+      numb= Int32(2),
+      color = RGB(0.0,1.0,0.0)
+      ,minAndMaxValue= UInt8.([0,1])
+      ,isEditable = true
+     ),
+
+     TextureSpec{Int16}(
+      name= "CTIm",
+      numb= Int32(3),
+      isMainImage = true,
+      minAndMaxValue= Int16.([0,100]))  
+];
+#   
+fractionOfMainIm= Float32(0.8);
+
+
+
+Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreateB ,fractionOfMainIm ,datToScrollDimsB ,1000);
 
 
 Main.SegmentationDisplay.mainActor.actor.currentDisplayedSlice=40
 
 mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
-supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(newCT)[3] );
-
-
- 
+supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(pixelsResampled)[3] );
 
 
 
 
-#########
 
 
-slicesDatB=  [ThreeDimRawDat{UInt8}(UInt8,"goldStandardLiver",newlabelsDat)
-,ThreeDimRawDat{Int16}(Int16,"CTIm",newCT)
-,ThreeDimRawDat{UInt8}(UInt8,"manualModif",newMod)
+# slicesDatB=  [ThreeDimRawDat{Int16}(Int16,"goldStandardLiver",pixelsResampledB)
+# ,ThreeDimRawDat{Int16}(Int16,"CTIm",pixelssB)
+# ,ThreeDimRawDat{UInt8}(UInt8,"manualModif",zeros(UInt8,size(pixelssB)  ))
+#  ];
+slicesDatB=  [ThreeDimRawDat{Float32}(Float32,"PET",pixelsResampled)
+,ThreeDimRawDat{Int16}(Int16,"CTIm",pixelssB)
+,ThreeDimRawDat{UInt8}(UInt8,"manualModif",zeros(UInt8,size(pixelsResampled)))
  ];
 
 
-      mainScrollDatB = FullScrollableDat(dataToScrollDims =datToScrollDimsB
-                                       ,dimensionToScroll=1
-                                       ,dataToScroll= slicesDatB
-                                       ,mainTextToDisp= mainLines
-                                       ,sliceTextToDisp=supplLines );
+mainScrollDatB = FullScrollableDat(dataToScrollDims =datToScrollDimsB
+                                 ,dimensionToScroll=1
+                                 ,dataToScroll= slicesDatB
+                                 ,mainTextToDisp= mainLines
+                                 ,sliceTextToDisp=supplLines );
+
+
+Main.SegmentationDisplay.passDataForScrolling(mainScrollDatB);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  #####################################  main liver data get
+
+
+
+
+  listOfTexturesToCreate = [
+    TextureSpec{UInt8}(
+        name = "goldStandardLiver",
+        numb= Int32(1),
+        color = RGB(1.0,0.0,0.0)
+        ,minAndMaxValue= UInt8.([0,1])
+       ),
+    TextureSpec{UInt8}(
+        name = "manualModif",
+        numb= Int32(2),
+        color = RGB(0.0,1.0,0.0)
+        ,minAndMaxValue= UInt8.([0,1])
+        ,isEditable = true
+       ),
+
+       TextureSpec{Int16}(
+        name= "CTIm",
+        numb= Int32(3),
+        isMainImage = true,
+        minAndMaxValue= Int16.([0,100]))  
+ ];
+ #   
+ fractionOfMainIm= Float32(0.8);
+
+
+
+
+  CtDatPrim = h5manag.getExample(Int16);
+
+  size(CtDatPrim)   
+  CtDat = CtDatPrim#vcat(zeros(Int16,401,512,512), CtDatPrim)
+
+  labelsDat = h5manag.getExampleLabels(UInt8) #vcat(zeros(UInt8,401,512,512),h5manag.getExampleLabels(UInt8));#reduce(vcat,h5manag.getExampleLabels(UInt8))
+  CtDat = CtDatPrim#reduce(vcat,CtDatPrim)
+   toMod = copy(labelsDat)   #zeros(UInt8,size(CtDat));
+
+
+
+  spacingList= read(h5manag.g["trainingLabels"]["liver-seg006.mhd"]["liver-seg006Spacing"]);
+  spacingTuple= (spacingList[1],spacingList[2],spacingList[3]);
+
+
+
+  datToScrollDims= DataToScrollDims(imageSize=  size(CtDatPrim) ,voxelSize= spacingTuple , dimensionToScroll = 3 );
+
+  Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate ,fractionOfMainIm ,datToScrollDims ,1000);
+
+
+  Main.SegmentationDisplay.mainActor.actor.currentDisplayedSlice=40
+
+  mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
+  supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(CtDatPrim)[3] );
+
+
+
+  slicesDat=  [ThreeDimRawDat{UInt8}(UInt8,"goldStandardLiver",labelsDat)
+  ,ThreeDimRawDat{Int16}(Int16,"CTIm",CtDat)
+  ,ThreeDimRawDat{UInt8}(UInt8,"manualModif",toMod)
+   ];
+
+
+  mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDims
+                                   ,dimensionToScroll=1
+                                   ,dataToScroll= slicesDat
+                                   ,mainTextToDisp= mainLines
+                                   ,sliceTextToDisp=supplLines );
+
+
+ Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# ###########
+# dirOfExample ="C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\CT\\ScalarVolume_17"
+# dirOfExamplePET ="C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\PETCT\\ScalarVolume_11"
+
+
+using Main.DicomManage
+dirOfExampleCt = "C:\\Users\\1\\Downloads\\bad17NL\\bad17NL\\DICOM\\21071210\\40420004" #\\DICOM\\21071306
+dirOfExamplePet = "C:\\Users\\1\\Downloads\\bad17NL\\bad17NL\\DICOM\\21071210\\40420005" #\\DICOM\\21071306
+#dirOfExampleFull = "C:\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\bad45Y\\DICOM\\21071306" #\\DICOM\\21071306
+# dirOfExampleFull = "D:\\bad45Y" #\\DICOM\\21071306
+ctDcms = load_dicom(dirOfExampleCt)
+petDcms = load_dicom(dirOfExamplePet)
+
+
+
+ct = sort_slices(ctDcms[1])
+pet= sort_slices(petDcms[1])
+interp_ct = interpolate_to(ct, pet)
+
+pet_voxels = pet.pixeldata
+ct_voxels = interp_ct
+
+
+size(pet_voxels)
+size(ct_voxels)
+
+petVoxelsType= typeof(pet_voxels[1])
+CTvoxelsType = typeof(ct_voxels[1])
+
+datToScrollDimsB= DataToScrollDims(imageSize=  size(ct_voxels) ,voxelSize= (1.0,1.0,1.0) , dimensionToScroll = 3 );
+
+
+
+listOfTexturesToCreateB = [
+  TextureSpec{petVoxelsType}(
+      name = "PET",
+      isNuclearMask=true,
+      isContinuusMask=true,
+      numb= Int32(1),
+      colorSet = [RGB(1.0,1.0,0.0),RGB(1.0,0.0,0.0) ]
+      ,minAndMaxValue= convert(Vector{petVoxelsType}, [-2000,4000])
+     ),
+  TextureSpec{UInt8}(
+      name = "manualModif",
+      numb= Int32(2),
+      color = RGB(0.0,1.0,0.0)
+      ,minAndMaxValue= UInt8.([0,1])
+      ,isEditable = true
+     ),
+
+     TextureSpec{UInt16}(
+      name= "CTIm",
+      numb= Int32(3),
+      isMainImage = true,
+      minAndMaxValue= UInt16.([0,100]))  
+];
+#   
+fractionOfMainIm= Float32(0.8);
+
+
+
+Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreateB ,fractionOfMainIm ,datToScrollDimsB ,1000);
+
+
+Main.SegmentationDisplay.mainActor.actor.currentDisplayedSlice=40
+
+mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
+supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(ct_voxels)[3] );
+
+
+
+
+
+# slicesDatB=  [ThreeDimRawDat{Int16}(Int16,"goldStandardLiver",pixelsResampledB)
+# ,ThreeDimRawDat{Int16}(Int16,"CTIm",pixelssB)
+# ,ThreeDimRawDat{UInt8}(UInt8,"manualModif",zeros(UInt8,size(pixelssB)  ))
+#  ];
+slicesDatB=  [ThreeDimRawDat{Float32}(Float32,"PET",ct_voxels)
+,ThreeDimRawDat{UInt16}(UInt16,"CTIm",pet_voxels)
+,ThreeDimRawDat{UInt8}(UInt8,"manualModif",zeros(UInt8,size(ct_voxels)))
+ ];
+
+
+mainScrollDatB = FullScrollableDat(dataToScrollDims =datToScrollDimsB
+                                 ,dimensionToScroll=1
+                                 ,dataToScroll= slicesDatB
+                                 ,mainTextToDisp= mainLines
+                                 ,sliceTextToDisp=supplLines );
+
+
+Main.SegmentationDisplay.passDataForScrolling(mainScrollDatB);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# #################
+
+# newCT =  collect(pixelss)
+# newMod = zeros(UInt8,size(newCT));
+# newlabelsDat = zeros(UInt8,size(newCT));
+
+
+
+
+
+# spacingTupleB= (spacingListB[1],spacingListB[2],spacingListB[3]);
+
+# datToScrollDimsB= DataToScrollDims(imageSize=  size(newCT) ,voxelSize= spacingTupleB , dimensionToScroll = 3 );
+
+
+
+# Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate ,fractionOfMainIm ,datToScrollDimsB ,1000);
+
+
+# Main.SegmentationDisplay.mainActor.actor.currentDisplayedSlice=40
+
+# mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
+# supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(newCT)[3] );
+
+
+ 
+
+
+
+
+# #########
+
+
+# slicesDatB=  [ThreeDimRawDat{UInt8}(UInt8,"goldStandardLiver",newlabelsDat)
+# ,ThreeDimRawDat{Int16}(Int16,"CTIm",newCT)
+# ,ThreeDimRawDat{UInt8}(UInt8,"manualModif",newMod)
+#  ];
+
+
+#       mainScrollDatB = FullScrollableDat(dataToScrollDims =datToScrollDimsB
+#                                        ,dimensionToScroll=1
+#                                        ,dataToScroll= slicesDatB
+#                                        ,mainTextToDisp= mainLines
+#                                        ,sliceTextToDisp=supplLines );
  
  
-     Main.SegmentationDisplay.passDataForScrolling(mainScrollDatB);
+#      Main.SegmentationDisplay.passDataForScrolling(mainScrollDatB);
 
 
 
@@ -194,20 +456,20 @@ slicesDatB=  [ThreeDimRawDat{UInt8}(UInt8,"goldStandardLiver",newlabelsDat)
 
 
 
-  #  slicesDat=  [ThreeDimRawDat{UInt8}(UInt8,"goldStandardLiver",labelsDat)
-  #    ,ThreeDimRawDat{Int16}(Int16,"CTIm",CtDat)
-  #    ,ThreeDimRawDat{UInt8}(UInt8,"manualModif",toMod)
-  #     ];
+#    slicesDat=  [ThreeDimRawDat{UInt8}(UInt8,"goldStandardLiver",labelsDat)
+#      ,ThreeDimRawDat{Int16}(Int16,"CTIm",CtDat)
+#      ,ThreeDimRawDat{UInt8}(UInt8,"manualModif",toMod)
+#       ];
 
 
-  #    mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDims
-  #                                     ,dimensionToScroll=1
-  #                                     ,dataToScroll= slicesDat
-  #                                     ,mainTextToDisp= mainLines
-  #                                     ,sliceTextToDisp=supplLines );
+#      mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDims
+#                                       ,dimensionToScroll=1
+#                                       ,dataToScroll= slicesDat
+#                                       ,mainTextToDisp= mainLines
+#                                       ,sliceTextToDisp=supplLines );
 
 
-  #   Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);
+#     Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);
 
 
 
