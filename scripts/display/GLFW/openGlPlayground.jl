@@ -4,11 +4,11 @@
      @quickactivate "JuliaMed3d"
      using Revise
      include(DrWatson.scriptsdir("display","GLFW","includeAll.jl"))
-includet("""C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\scripts\\loadData\\manageH5File.jl""")
+#includet("""C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\scripts\\loadData\\manageH5File.jl""")
      using Main.ModernGlUtil, Match, Parameters,DataTypesBasic,Main.ShadersAndVerticies,ModernGL, GeometryTypes, GLFW, Main.ForDisplayStructs,ColorTypes, Dictionaries,Main.DisplayWords, Setfield
      using Main.CustomFragShad, Main.PrepareWindowHelpers, Main.ReactToScroll, Main.SegmentationDisplay,Main.Uniforms, Main.OpenGLDisplayUtils
      using FreeTypeAbstraction,Rocket ,GLFW , Main.DataStructs, Main.StructsManag,Main.TextureManag, Main.SegmentationDisplay
- using Main.PrepareWindow,Glutils, Main.ForDisplayStructs, Dictionaries, Parameters, ColorTypes, Main.h5manag
+ using Main.PrepareWindow,Glutils, Main.ForDisplayStructs, Dictionaries, Parameters, ColorTypes #, Main.h5manag
 
 
 
@@ -38,656 +38,747 @@ includet("""C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\
   fractionOfMainIm= Float32(0.8);
 
 
-  CtDatPrim = h5manag.getExample(Int16);
+  # CtDatPrim = h5manag.getExample(Int16);
 
-  size(CtDatPrim)   
-  CtDat = CtDatPrim#vcat(zeros(Int16,401,512,512), CtDatPrim)
+  # size(CtDatPrim)   
+  # CtDat = CtDatPrim#vcat(zeros(Int16,401,512,512), CtDatPrim)
 
-  labelsDat = h5manag.getExampleLabels(UInt8) #vcat(zeros(UInt8,401,512,512),h5manag.getExampleLabels(UInt8));#reduce(vcat,h5manag.getExampleLabels(UInt8))
-  CtDat = CtDatPrim#reduce(vcat,CtDatPrim)
-   toMod = copy(labelsDat)   #zeros(UInt8,size(CtDat));
+  # labelsDat = h5manag.getExampleLabels(UInt8) #vcat(zeros(UInt8,401,512,512),h5manag.getExampleLabels(UInt8));#reduce(vcat,h5manag.getExampleLabels(UInt8))
+  # CtDat = CtDatPrim#reduce(vcat,CtDatPrim)
+  #  toMod = copy(labelsDat)   #zeros(UInt8,size(CtDat));
 
 
 
-  spacingList= read(h5manag.g["trainingLabels"]["liver-seg006.mhd"]["liver-seg006Spacing"]);
-  spacingTuple= (spacingList[1],spacingList[2],spacingList[3]);
+  # spacingList= read(h5manag.g["trainingLabels"]["liver-seg006.mhd"]["liver-seg006Spacing"]);
+  # spacingTuple= (spacingList[1],spacingList[2],spacingList[3]);
 
-  datToScrollDims= DataToScrollDims(imageSize=  size(CtDatPrim) ,voxelSize= spacingTuple , dimensionToScroll = 3 );
+  # datToScrollDims= DataToScrollDims(imageSize=  size(CtDatPrim) ,voxelSize= spacingTuple , dimensionToScroll = 3 );
 
-  Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate ,fractionOfMainIm ,datToScrollDims ,1000);
+  # Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate ,fractionOfMainIm ,datToScrollDims ,1000);
+
+
+  # Main.SegmentationDisplay.mainActor.actor.currentDisplayedSlice=40
+
+  # mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
+  # supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(CtDatPrim)[3] );
+
+
    
-
-  Main.SegmentationDisplay.mainActor.actor.currentDisplayedSlice=40
-
-   slicesDat=  [ThreeDimRawDat{UInt8}(UInt8,"goldStandardLiver",labelsDat)
-     ,ThreeDimRawDat{Int16}(Int16,"CTIm",CtDat)
-     ,ThreeDimRawDat{UInt8}(UInt8,"manualModif",toMod)
-      ];
-
-     mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
-     supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(CtDatPrim)[3] );
+#####################
 
 
+using Base: String
+
+using DrWatson
+@quickactivate "JuliaMed3d"
+using Conda
+using PyCall
+using Pkg
+Pkg.build("HDF5")
+using HDF5
+Conda.pip_interop(true)
+Conda.pip("install", "SimpleITK")
+Conda.pip("install", "h5py")
+
+sitk = pyimport("SimpleITK")
+np= pyimport("numpy")
+
+
+########
+
+#dirOfExample = DrWatson.datadir("PETCT","manifest-1608669183333" ,"Lung-PET-CT-Dx","Lung_Dx-G0045","05-08-2011-NA-PET01PTheadlung Adult-09984","10.000000-Thorax  1.0  B70f-66628" )
+#dirOfExample = DrWatson.datadir("data","PETphd","slicerExp" ,"CT","ScalarVolume_17")
+dirOfExample ="C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\CT\\ScalarVolume_17"
+dirOfExamplePET ="C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\PETCT\\ScalarVolume_11"
+
+# data\\PETphd\\slicerExp\\CT\\ScalarVolume_17
+
+# C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\CT\\ScalarVolume_17
+
+reader = sitk.ImageSeriesReader()
+dicom_names = reader.GetGDCMSeriesFileNames(dirOfExample)
+reader.SetFileNames(dicom_names)
+
+image = reader.Execute()
+pixelss = np.array(sitk.GetArrayViewFromImage(image))
+
+spacings = image.GetSpacing()
+spacingListB = [spacings[1],spacings[2],spacings[3]]
+
+
+
+dicom_namesPET = reader.GetGDCMSeriesFileNames(dirOfExamplePET)
+reader.SetFileNames(dicom_namesPET)
+
+image = reader.Execute()
+pixelsPET = np.array(sitk.GetArrayViewFromImage(image))
+
+spacings = image.GetSpacing()
+spacingListB = [spacings[1],spacings[2],spacings[3]]
+
+size(pixelsPET)
+
+maximum(pixelss)
+
+
+
+###########
+dirOfExample ="C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\CT\\ScalarVolume_17"
+dirOfExamplePET ="C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\PETCT\\ScalarVolume_11"
+
+
+using Main.DicomManage
+
+dirOfExampleFull = "C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\bad45Y\\DICOM\\21071306"
+
+ctDcms = load_dicom(dirOfExampleFull)
+petDcms = load_dicom(dirOfExamplePET)
+
+
+
+ct = sort_slices(ctDcms[1])
+
+#################
+
+newCT =  collect(pixelss)
+newMod = zeros(UInt8,size(newCT));
+newlabelsDat = zeros(UInt8,size(newCT));
 
 
 
 
-     mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDims
-                                      ,dimensionToScroll=1
-                                      ,dataToScroll= slicesDat
-                                      ,mainTextToDisp= mainLines
-                                      ,sliceTextToDisp=supplLines );
+
+spacingTupleB= (spacingListB[1],spacingListB[2],spacingListB[3]);
+
+datToScrollDimsB= DataToScrollDims(imageSize=  size(newCT) ,voxelSize= spacingTupleB , dimensionToScroll = 3 );
 
 
-    Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);
+
+Main.SegmentationDisplay.coordinateDisplay(listOfTexturesToCreate ,fractionOfMainIm ,datToScrollDimsB ,1000);
+
+
+Main.SegmentationDisplay.mainActor.actor.currentDisplayedSlice=40
+
+mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
+supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(newCT)[3] );
+
 
  
 
-    # sislines= textLinesFromStrings(["asd Line1", "as Line 2", "main Line 2", "main Line 2", "main Line 2",  "uuuuuuuuuuuuuuuuuu"]);
-
-    # exampleSingleSliceDat= slicesDat|>
-    # (scrDat)-> map(threeDimDat->threeToTwoDimm(threeDimDat.type,Int64(40),1,threeDimDat ),scrDat) |>
-    # # (twoDimList)->map(tdim->transpose(dat),twoDimList )
-    # (twoDimList)-> SingleSliceDat(listOfDataAndImageNames=twoDimList
-    #                             ,sliceNumber=Int64(40)
-    #                             ,textToDisp =sislines  )
 
 
 
-    # # exampleSingleSliceDat = SingleSliceDat(listOfDataAndImageNames=singleSliceDat
-    # #                                         ,textToDisp=sislines);
-
-    # Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat);
+#########
 
 
+slicesDatB=  [ThreeDimRawDat{UInt8}(UInt8,"goldStandardLiver",newlabelsDat)
+,ThreeDimRawDat{Int16}(Int16,"CTIm",newCT)
+,ThreeDimRawDat{UInt8}(UInt8,"manualModif",newMod)
+ ];
 
-    GLFW.PollEvents()
 
+      mainScrollDatB = FullScrollableDat(dataToScrollDims =datToScrollDimsB
+                                       ,dimensionToScroll=1
+                                       ,dataToScroll= slicesDatB
+                                       ,mainTextToDisp= mainLines
+                                       ,sliceTextToDisp=supplLines );
  
-         textLiverMain = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1];
-
-         textureB = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[2];
-         textureC = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[3];
-         nuclearTexture = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[4];
-         textureCt = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5];
-         
-         Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [textLiverMain];
-         
-         window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window;
-
-         dispObj= Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects;
-         wordsDispObj= Main.SegmentationDisplay.mainActor.actor.textDispObj;
-         stopList = dispObj.stopListening[];
-
-         actor =  Main.SegmentationDisplay.mainActor.actor;
-         shader_program = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.shader_program
-
-         calcDim = Main.SegmentationDisplay.mainActor.actor.calcDimsStruct;
-
-         size(CtDat)
-
-
-
-
-
-
-
-         setCTWindow(Int32(0),Int32(-1000), dispObj.mainImageUniforms)
-         basicRender(window)
-
-
-
-
-         CtDatPrim 
-         labelsDat
-         CtDat 
-         toMod 
-       size(toMod)
-
-       ff= zeros(2,3,4)
-
-permutedims(ff, (1,2,3))
-permutedims(ff, (1,2,3))
-permutedims(ff, (1,2,3))
-
-(1,2,3)
-(3,2,1)
-(3,1,2)
-(1,3,2)
-     
-       function changeDims(arr)
-  
-        res=  permutedims(arr, (3,2,1))
-        sizz= size(res)
-        for i in 1:sizz[1]
-          res[i,:,:] =  reverse(res[i,:,:])
-       end# 
-
-     for i in 1:sizz[2]
-        res[:,i,:] =  reverse(res[:,i,:])
-     end# 
-
-      return res
-      end
-
-      newMod = collect(changeDims(toMod))
-      newCT =  collect(changeDims(CtDat))
-      newlabelsDat = collect( changeDims(labelsDat))
-     
-     
-      slicesDatB=  [ThreeDimRawDat{UInt8}(UInt8,"goldStandardLiver",newlabelsDat)
-      ,ThreeDimRawDat{Int16}(Int16,"CTIm",newCT)
-      ,ThreeDimRawDat{UInt8}(UInt8,"manualModif",newMod)
-       ];
-       spacingTupleB= (spacingList[1],spacingList[2],spacingList[3]);
-
-       datToScrollDimsB= DataToScrollDims(imageSize=  size(newCT) ,voxelSize= spacingTupleB , dimensionToScroll = 3 );
-
-            mainScrollDatB = FullScrollableDat(dataToScrollDims =datToScrollDimsB
-                                             ,dimensionToScroll=1
-                                             ,dataToScroll= slicesDatB
-                                             ,mainTextToDisp= mainLines
-                                             ,sliceTextToDisp=supplLines );
-       
-       
-           Main.SegmentationDisplay.passDataForScrolling(mainScrollDatB);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-         dimensionToScroll = 2
-         dat = zeros(2,4,6)
-         sizz = size(dat)
-         toSelect= filter(it-> it!=dimensionToScroll , [1,2,3] )# will be used to get texture width and height
-        
-        width= sizz[toSelect[2]]
-        height= sizz[toSelect[1]]
-        dat[:,2,:]
-        
-        selectdim(dat,dimensionToScroll, 3 )
-
-
-size(CtDatPrim[:,7,:])
-
-        datToScrollDims= DataToScrollDims(imageSize=  size(CtDatPrim) ,voxelSize= spacingTuple , dimensionToScroll = 2 );
-
-        getHeightToWidthRatio(CalcDimsStruct(),datToScrollDims )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-         textLiverMain
-         textureB
-        CTImTexture =  textureC # data in CtDatPrim
-
-        textLiverMain.actTextrureNumb
-        textureB.actTextrureNumb
-        CTImTexture.actTextrureNumb
-
-
-        CTImTexture.GL_Rtype==  GL_R16I
-        CTImTexture.OpGlType== GL_SHORT
-       loc = glGetUniformLocation(shader_program, "CTIm")
-
-        CTImTexture
-      #  setTextureVisibility(true,CTImTexture.uniforms )
-
-      GL_TEXTURE8
-      glBindTexture(GL_TEXTURE_2D, CTImTexture.ID[]); 
-      glUniform1i(0,8)
-      glActiveTexture(GL_TEXTURE8); # active proper texture unit before binding
-      glBindTexture(GL_TEXTURE_2D, CTImTexture.ID[]); 
-      sliceee = CtDatPrim[40,:,:]
-sizz = size(sliceee)
-
-	    glTexSubImage2D(GL_TEXTURE_2D,0,0,0, sizz[1], sizz[2], GL_RED_INTEGER,GL_R16I, sliceee)
-    
-    
-      setCTWindow(Int32(-500),Int32(500), dispObj.mainImageUniforms)
-      basicRender(window)
-
-     #    updateTexture(Int16,sliceee,CTImTexture,0,0,calcDim.imageTextureWidth,calcDim.imageTextureHeight )
-
-     dispObj.stopListening[]= true
-     textur = createTexture(Int16, Int32(512), Int32(512),GL_R16I, GL_SHORT )
-     glBindTexture(GL_TEXTURE_2D,textur[]); 
-     glUniform1i(0,8)
-     glActiveTexture(GL_TEXTURE8); # active proper texture unit before binding
-     glBindTexture(GL_TEXTURE_2D,textur[]); 
-     glTexSubImage2D(GL_TEXTURE_2D,0,0,0, 512, 512, GL_RED_INTEGER,GL_R16I, collect(sliceee))
-
-     setCTWindow(Int32(-500),Int32(500), dispObj.mainImageUniforms)
-     basicRender(window)
-
-     dispObj.mainImageUniforms
-
-     GLFW.PollEvents()
-
-     dispObj.stopListening[]= false
-
-
-
-
-         using DocumenterTools
-         DocumenterTools.generate(name = "Julia Med 3d")
-
-         popfirst!(actor.forUndoVector)
-
-
-         arr = Vector{Function}()
-         push!(arr,()->print("asd "))
-pop!(actor.forUndoVector)()
-
-
-         function aa()
-           print("asd ")
-        end 
-
-        import  FunctionWrappers
  
-        f1 = @inferred F64AnyFunc(identity)
-
-        f1 = FunctionWrappers.F64F64Func(sin)
-        f2 = @inferred F64F64Func(f1)
-
-         addToforUndoVector(actor,()-> print("asd "))
-         
- 
-         actor.lastRecordedMousePosition
-
-        setTextureVisibility(false,textLiverMain.uniforms )
-        setTextureVisibility(false,textureB.uniforms )
-        setTextureVisibility(false,textureC.uniforms )
-        setTextureVisibility(false,textureCt.uniforms )
-        
-        setTextureVisibility(false,nuclearTexture.uniforms )
-        
-        basicRender(window)
-
-
-        setTextureVisibility(true,nuclearTexture.uniforms )
-
-        basicRender(window)
-
-
-
-        setTextureVisibility(true,textLiverMain.uniforms )
-        setTextureVisibility(true,textureB.uniforms )
-        setTextureVisibility(true,textureC.uniforms )
-        
-        setTextureVisibility(true,nuclearTexture.uniforms )
-
-        basicRender(window)
-
-
-     dat =ones(10,11,12)
-
-     
-     dataToScrollDims= DataToScrollDims(imageSize= (10,11,12),voxelSize= (1.0,1.0,0.3), dimensionToScroll = 2 )
-    
-     cartTwoToThree(dataToScrollDims,Int32(5),CartesianIndex(1,2))
-
-```@doc
-Based on DataToScrollDims it will enrich passed CalcDimsStruct texture width, height and  heightToWithRatio
-based on data passed from DataToScrollDims
-```
-
-ress= getHeightToWidthRatio(calcDim,dataToScrollDims)
-
-arr= [0x00000001, 0x00000002, 0x00000003, 0x00000004, 0x00000005]
-glDeleteTextures(length(arr), arr)
+     Main.SegmentationDisplay.passDataForScrolling(mainScrollDatB);
 
 
 
 
 
 
-1+1
-
-
-add BenchmarkTools ,ColorTypes , Conda  , DataTypesBasic  , Dictionaries  , Distributed  , Documenter , DocumenterTools , DrWatson , FreeType  , FreeTypeAbstraction  , GLFW  ,  HDF5  , Match , ModernGL , Observables  , Parameters , PyCall , Revise , Rocket  , Setfield  
-
-        # TextureSpec{UInt8}(
-        #  name = "testLab2",
-        #  numb= Int32(2),
-        #  color = RGB(0.0,0.0,1.0)
-        #  ,minAndMaxValue= UInt8.([0,1])
-        #  ,isEditable = true
-        #   ),
-        #  TextureSpec{Float32}(
-        #    name = "nuclearMaskking",
-        #    isNuclearMask= true,
-        #    isContinuusMask= true,
-        #    colorSet = [RGB(0.0,0.0,1.0),RGB(1.0,0.0,0.0)]
-        #    ,minAndMaxValue= Float32.([0.0,2.0])
-        #    ,isEditable = true
-        #  ),
-
-
- #similar(Array{UInt8}, axes(CtDat))
-  # texureDepth =40;
-  # textureHeight = 40;
-  # textureWidth = 40;
-#  mainMaskDummy = UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
-#  testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
-#  testLab2Dat= UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
-
-#  mainMaskDummy =  zeros(UInt8,texureDepth,textureWidth,textureHeight);
-#  testLab1Dat = zeros(UInt8,texureDepth,textureWidth,textureHeight);
-#  testLab2Dat=  zeros(UInt8,texureDepth,textureWidth,textureHeight);
-#  nuclearMaskDat =abs.(rand(Float32,texureDepth,textureWidth,textureHeight));    
-#  nuclearMaskDat = nuclearMaskDat./maximum(nuclearMaskDat)   ;
-#  ctDummy =  Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,texureDepth,textureWidth,textureHeight)));# will give white background for testing 
 
 
 
-
-typeof(toMod)
-
-
-
-"goldStandardLiver" UInt8
-"manualModif" UInt8
-"CTIm" Int16
-
-  #  slicesDat=  [ThreeDimRawDat{UInt8}(UInt8,"mainLab",mainMaskDummy)
-  #    ,ThreeDimRawDat{Int16}(Int16,"CTIm",ctDummy)
-  #    ,ThreeDimRawDat{UInt8}(UInt8,"testLab2",testLab2Dat)
-  #    ,ThreeDimRawDat{UInt8}(UInt8,"testLab1",testLab1Dat)  
-  #    ,ThreeDimRawDat{Float32}(Float32,"nuclearMaskking",nuclearMaskDat)  
+  #  slicesDat=  [ThreeDimRawDat{UInt8}(UInt8,"goldStandardLiver",labelsDat)
+  #    ,ThreeDimRawDat{Int16}(Int16,"CTIm",CtDat)
+  #    ,ThreeDimRawDat{UInt8}(UInt8,"manualModif",toMod)
   #     ];
 
 
+  #    mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDims
+  #                                     ,dimensionToScroll=1
+  #                                     ,dataToScroll= slicesDat
+  #                                     ,mainTextToDisp= mainLines
+  #                                     ,sliceTextToDisp=supplLines );
 
-    #  singleSliceDat = [
-    #   TwoDimRawDat{UInt8}(UInt8,"mainLab", UInt8.(map(xx-> (xx >0 ? 1 : 0), zeros(Int8,textureWidth,textureHeight))))
-    #  ,TwoDimRawDat{Int16}(Int16,"CTIm",Int16.(map(xx-> (xx >0 ? 1 : 0), zeros(Int16,textureWidth,textureHeight))))
-    #  ,TwoDimRawDat{UInt8}(UInt8,"testLab2",UInt8.(map(xx-> (xx >0 ? 1 : 0), zeros(Int8,textureWidth,textureHeight))))
-    #  ,TwoDimRawDat{UInt8}(UInt8,"testLab1",UInt8.(map(xx-> (xx >0 ? 1 : 0), zeros(Int8,textureWidth,textureHeight)))) 
-    #  ,TwoDimRawDat{Float32}(Float32,"nuclearMaskking", nuclearMaskDat[1,:,:]) 
-    # ];
-    # sislines= textLinesFromStrings(["asd Line1", "as Line 2", "main Line 2", "main Line 2", "main Line 2",  "uuuuuuuuuuuuuuuuuu"]);
 
-    # singleSlDat= actor.actor.onScrollData.dataToScroll|>
-    # (scrDat)-> map(threeDimDat->threeToTwoDimm(threeDimDat.type,Int64(current),actor.actor.onScrollData.dimensionToScroll,threeDimDat ),scrDat) |>
-    # (twoDimList)-> SingleSliceDat(listOfDataAndImageNames=twoDimList
-    #                             ,sliceNumber=current
-    #                             ,textToDisp = getTextForCurrentSlice(actor.actor.onScrollData, Int32(current))  )
+  #   Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);
 
 
 
-    # # exampleSingleSliceDat = SingleSliceDat(listOfDataAndImageNames=singleSliceDat
-    # #                                         ,textToDisp=sislines);
+  #   GLFW.PollEvents()
 
-    # Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat);
+ 
+  #        textLiverMain = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[1];
 
+  #        textureB = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[2];
+  #        textureC = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[3];
+  #        nuclearTexture = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[4];
+  #        textureCt = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5];
+         
+  #        Main.SegmentationDisplay.mainActor.actor.textureToModifyVec= [textLiverMain];
+         
+  #        window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window;
 
+  #        dispObj= Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects;
+  #        wordsDispObj= Main.SegmentationDisplay.mainActor.actor.textDispObj;
+  #        stopList = dispObj.stopListening[];
 
+  #        actor =  Main.SegmentationDisplay.mainActor.actor;
+  #        shader_program = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.shader_program
 
+  #        calcDim = Main.SegmentationDisplay.mainActor.actor.calcDimsStruct;
 
-
-
-
-
-
-
-
-#getHeightToWidthRatio
-  #    listOfTextSpecs= map(x->setproperties(x[2],(whichCreated=x[1])),enumerate(listOfTexturesToCreate))
-
-  #    println(createcontextinfo())
-  #     gslsStr = get_glsl_version_string()
-
-  #       fsh = """
-  #       $(gslsStr)
-  #       $(createCustomFramgentShader(listOfTextSpecs,textLiverMain,textureB))  
-  #       """
-  #      fragShader= createShader(fsh, GL_FRAGMENT_SHADER)
-      
-
-  # GLFW.PollEvents()
+  #        size(CtDat)
 
 
 
-  #        for st in split(fsh, "\n")
-  #        @info st
-  #        end
+
+
      
-function aaa()
-  @info "aa"
-end
+  #      function changeDims(arr)
+  
+  #       res=  permutedims(arr, (3,2,1))
+  #       sizz= size(res)
+  #       for i in 1:sizz[1]
+  #         res[i,:,:] =  reverse(res[i,:,:])
+  #      end# 
 
-function bbb()
-  @info "bbb"
-end
+  #    for i in 1:sizz[2]
+  #       res[:,i,:] =  reverse(res[:,i,:])
+  #    end# 
 
-dd = [ aaa,bbb]
+  #     return res
+  #     end
 
-for func in dd
-  func()
-end  
-
-typeof(dd)
-
-         dispObj.stopListening[]= true
-         maskA = textureB
-         maskB = textureC
-  vertex_shader = dispObj.vertex_shader
+  #     newMod = collect(changeDims(toMod))
+  #     newCT =  collect(changeDims(CtDat))
+  #     newlabelsDat = collect( changeDims(labelsDat))
      
-         println(createcontextinfo())
-         gslsStr = get_glsl_version_string()
-         listOfTextSpecsc=  Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications
+     
+  #     slicesDatB=  [ThreeDimRawDat{UInt8}(UInt8,"goldStandardLiver",newlabelsDat)
+  #     ,ThreeDimRawDat{Int16}(Int16,"CTIm",newCT)
+  #     ,ThreeDimRawDat{UInt8}(UInt8,"manualModif",newMod)
+  #      ];
+  #      spacingTupleB= (spacingList[1],spacingList[2],spacingList[3]);
 
-         fragment_shade,shader_prog= createAndInitShaderProgram(dispObj.vertex_shader,  listOfTextSpecsc,maskA,maskB,gslsStr)
-         activateTextures(listOfTextSpecsc )
+  #      datToScrollDimsB= DataToScrollDims(imageSize=  size(newCT) ,voxelSize= spacingTupleB , dimensionToScroll = 3 );
 
-
-newForDisp = setproperties(dispObj,(shader_program=shader_prog,fragment_shader=fragment_shade ) )
-
-actor.mainForDisplayObjects=newForDisp
-
-
-        #  glBindBuffer(GL_ARRAY_BUFFER, dispObj.vbo[])
-        #  glBufferData(GL_ARRAY_BUFFER, calcDim.mainQuadVertSize  ,calcDim.mainImageQuadVert , GL_STATIC_DRAW)
-        #       encodeDataFromDataBuffer()
-reactivateMainObj(shader_prog, newForDisp.vbo,actor.calcDimsStruct  )
-activateTextures(listOfTextSpecsc )
-
-# basicRender(window)
-
-
-        # glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-        # # Swap front and back buffers
-        # GLFW.SwapBuffers(window)
-      
-
-         @uniforms! begin
-         dispObj.mainImageUniforms.isMaskDiffrenceVis:=1
-                end
-      #  basicRender(window)
-
-
-      #  setTextureVisibility(true,textureB.uniforms )
-      #  setTextureVisibility(true,textLiverMain.uniforms )
-      #  basicRender(window)
-       setTextureVisibility(true,textLiverMain.uniforms )
-       setTextureVisibility(true,textureB.uniforms )
+  #           mainScrollDatB = FullScrollableDat(dataToScrollDims =datToScrollDimsB
+  #                                            ,dimensionToScroll=1
+  #                                            ,dataToScroll= slicesDatB
+  #                                            ,mainTextToDisp= mainLines
+  #                                            ,sliceTextToDisp=supplLines );
        
-       setTextureVisibility(true,nuclearTexture.uniforms )
-       basicRender(window)
-
-
-       dispObj.stopListening[]= false
-
-
-
-
-  # continuusColorTextSpecs= listOfTexturesToCreate
-  # tuples= map(x->[ (x.name,[ [a.r,a.g,a.b] for a in x.colorSet  ],"r" ,1),(x.name,[[a.r,a.g,a.b] for a in x.colorSet  ],"g",2),(x.name,[[a.r,a.g,a.b] for a in x.colorSet  ],"b",3)],continuusColorTextSpecs)|> list-> reduce(vcat,list)
-  # tuples[1]
-  # getNuclearMaskFunctions(continuusColorTextSpecs)
-
- 
-                # handler = KeyboardCallbackSubscribable(false,false,false,false,["a1"], Subject(KeyboardStruct, scheduler = AsyncScheduler()))
-
-
-# scancode =GLFW.KEY_RIGHT_CONTROL
-# act=1
-
-# scCode = @match scancode begin
-#   GLFW.KEY_RIGHT_CONTROL=> (handler.isCtrlPressed= (act==1); "ctrl" )
-#   GLFW.KEY_LEFT_CONTROL => (handler.isCtrlPressed= (act==1); "ctrl")
-#   GLFW.KEY_LEFT_SHIFT =>( handler.isShiftPressed= (act==1); "shift")
-#   GLFW.KEY_RIGHT_SHIFT =>( handler.isShiftPressed=( act==1); "shift")
-#   GLFW.KEY_RIGHT_ALT =>( handler.isAltPressed= (act==1); "alt")
-#   GLFW.KEY_LEFT_ALT => (handler.isAltPressed= (act==1); "alt")
-#   GLFW.KEY_ENTER =>( handler.isEnterPressed= (act==1); "enter")
-#   _ => "notImp" # not Important
-# end
-#   res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed || scCode=="ctrl" 
-#           , isShiftPressed= handler.isShiftPressed ||scCode=="shift" 
-#           ,isAltPressed= handler.isAltPressed ||scCode=="alt"
-#           ,isEnterPressed= handler.isEnterPressed 
-#           ,lastKeysPressed= handler.lastKeysPressed 
-#           ,mostRecentScanCode = scancode
-#           ,mostRecentKeyName = "" # just marking it as empty
-#           ) 
-  
-# pp = strToNumber(res.lastKeysPressed)
-# processKeysInfo(pp,actor,KeyboardStruct(lastKeysPressed= ["a", "1"]))
-
-
-#  join(res.lastKeysPressed)
+       
+  #          Main.SegmentationDisplay.passDataForScrolling(mainScrollDatB);
 
 
 
 
 
+###############
+     
 
 
 
 
-
-
-
-
-
-
-
-
-
-
-#   for tpair in enumerate(listOfTexturesToCreate)
-#     tpair[2].whichCreated = tpair[1]
-#   end#for
-
-
-
-
-#         #  dispObj.stopListening[]= true
-#         #  glClearColor(0.0, 0.0, 0.1 , 1.0)
-#         dispObj.stopListening[]= true
-  activateForTextDisp( wordsDispObj.shader_program_words , wordsDispObj.vbo_words,calcDim)
-
-  face = wordsDispObj.fontFace
- 
-
-
-    lineTextureWidth = 2000
-    lineTextureHeight = 2000
-    
-    dispObj.stopListening[]= true
-        #data = ones(UInt8,calcDim.imageTextureHeight,calcDim.imageTextureWidth)
-    data = zeros(UInt8,lineTextureWidth,lineTextureHeight)
-      
-    # render a string into an existing matrix
-    a = renderstring!(zeros(UInt8,lineTextureWidth,lineTextureHeight), "Line 1 score", face,  110, 110, 110,valign = :vtop, halign = :hleft)
-    b = renderstring!(zeros(UInt8,lineTextureWidth,lineTextureHeight), "Line 2 score", face,  110, 110, 110,valign = :vtop, halign = :hleft)
-    b = vcat(a[1:200,:] ,b[1:200,:] ) 
-    b =collect(transpose(reverse(b; dims=(1))))
+#          dimensionToScroll = 2
+#          dat = zeros(2,4,6)
+#          sizz = size(dat)
+#          toSelect= filter(it-> it!=dimensionToScroll , [1,2,3] )# will be used to get texture width and height
         
-    #updateTexture(UInt8,b,wordsDispObj.textureSpec,0,0,Int32(lineTextureWidth),Int32(lineTextureHeight )) #  ,Int32(10000),Int32(1000)
-    updateTexture(UInt8,b,wordsDispObj.textureSpec,0,7600,Int32(2000),Int32(400)) #  ,Int32(10000),Int32(1000)
+#         width= sizz[toSelect[2]]
+#         height= sizz[toSelect[1]]
+#         dat[:,2,:]
+        
+#         selectdim(dat,dimensionToScroll, 3 )
 
-    basicRender(window)
-    dispObj.stopListening[]= false
+
+# size(CtDatPrim[:,7,:])
+
+#         datToScrollDims= DataToScrollDims(imageSize=  size(CtDatPrim) ,voxelSize= spacingTuple , dimensionToScroll = 2 );
+
+#         getHeightToWidthRatio(CalcDimsStruct(),datToScrollDims )
 
 
-#     strToNumber("11sfdsdf")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#          textLiverMain
+#          textureB
+#         CTImTexture =  textureC # data in CtDatPrim
+
+#         textLiverMain.actTextrureNumb
+#         textureB.actTextrureNumb
+#         CTImTexture.actTextrureNumb
+
+
+#         CTImTexture.GL_Rtype==  GL_R16I
+#         CTImTexture.OpGlType== GL_SHORT
+#        loc = glGetUniformLocation(shader_program, "CTIm")
+
+#         CTImTexture
+#       #  setTextureVisibility(true,CTImTexture.uniforms )
+
+#       GL_TEXTURE8
+#       glBindTexture(GL_TEXTURE_2D, CTImTexture.ID[]); 
+#       glUniform1i(0,8)
+#       glActiveTexture(GL_TEXTURE8); # active proper texture unit before binding
+#       glBindTexture(GL_TEXTURE_2D, CTImTexture.ID[]); 
+#       sliceee = CtDatPrim[40,:,:]
+# sizz = size(sliceee)
+
+# 	    glTexSubImage2D(GL_TEXTURE_2D,0,0,0, sizz[1], sizz[2], GL_RED_INTEGER,GL_R16I, sliceee)
+    
+    
+#       setCTWindow(Int32(-500),Int32(500), dispObj.mainImageUniforms)
+#       basicRender(window)
+
+#      #    updateTexture(Int16,sliceee,CTImTexture,0,0,calcDim.imageTextureWidth,calcDim.imageTextureHeight )
+
+#      dispObj.stopListening[]= true
+#      textur = createTexture(Int16, Int32(512), Int32(512),GL_R16I, GL_SHORT )
+#      glBindTexture(GL_TEXTURE_2D,textur[]); 
+#      glUniform1i(0,8)
+#      glActiveTexture(GL_TEXTURE8); # active proper texture unit before binding
+#      glBindTexture(GL_TEXTURE_2D,textur[]); 
+#      glTexSubImage2D(GL_TEXTURE_2D,0,0,0, 512, 512, GL_RED_INTEGER,GL_R16I, collect(sliceee))
+
+#      setCTWindow(Int32(-500),Int32(500), dispObj.mainImageUniforms)
+#      basicRender(window)
+
+#      dispObj.mainImageUniforms
+
+#      GLFW.PollEvents()
+
+#      dispObj.stopListening[]= false
+
+
+
+
+#          using DocumenterTools
+#          DocumenterTools.generate(name = "Julia Med 3d")
+
+#          popfirst!(actor.forUndoVector)
+
+
+#          arr = Vector{Function}()
+#          push!(arr,()->print("asd "))
+# pop!(actor.forUndoVector)()
+
+
+#          function aa()
+#            print("asd ")
+#         end 
+
+#         import  FunctionWrappers
+ 
+#         f1 = @inferred F64AnyFunc(identity)
+
+#         f1 = FunctionWrappers.F64F64Func(sin)
+#         f2 = @inferred F64F64Func(f1)
+
+#          addToforUndoVector(actor,()-> print("asd "))
+         
+ 
+#          actor.lastRecordedMousePosition
+
+#         setTextureVisibility(false,textLiverMain.uniforms )
+#         setTextureVisibility(false,textureB.uniforms )
+#         setTextureVisibility(false,textureC.uniforms )
+#         setTextureVisibility(false,textureCt.uniforms )
+        
+#         setTextureVisibility(false,nuclearTexture.uniforms )
+        
+#         basicRender(window)
+
+
+#         setTextureVisibility(true,nuclearTexture.uniforms )
+
+#         basicRender(window)
+
+
+
+#         setTextureVisibility(true,textLiverMain.uniforms )
+#         setTextureVisibility(true,textureB.uniforms )
+#         setTextureVisibility(true,textureC.uniforms )
+        
+#         setTextureVisibility(true,nuclearTexture.uniforms )
+
+#         basicRender(window)
+
+
+#      dat =ones(10,11,12)
+
+     
+#      dataToScrollDims= DataToScrollDims(imageSize= (10,11,12),voxelSize= (1.0,1.0,0.3), dimensionToScroll = 2 )
+    
+#      cartTwoToThree(dataToScrollDims,Int32(5),CartesianIndex(1,2))
+
+# ```@doc
+# Based on DataToScrollDims it will enrich passed CalcDimsStruct texture width, height and  heightToWithRatio
+# based on data passed from DataToScrollDims
+# ```
+
+# ress= getHeightToWidthRatio(calcDim,dataToScrollDims)
+
+# arr= [0x00000001, 0x00000002, 0x00000003, 0x00000004, 0x00000005]
+# glDeleteTextures(length(arr), arr)
+
+
+
+
+
+
+# 1+1
+
+
+# add BenchmarkTools ,ColorTypes , Conda  , DataTypesBasic  , Dictionaries  , Distributed  , Documenter , DocumenterTools , DrWatson , FreeType  , FreeTypeAbstraction  , GLFW  ,  HDF5  , Match , ModernGL , Observables  , Parameters , PyCall , Revise , Rocket  , Setfield  
+
+#         # TextureSpec{UInt8}(
+#         #  name = "testLab2",
+#         #  numb= Int32(2),
+#         #  color = RGB(0.0,0.0,1.0)
+#         #  ,minAndMaxValue= UInt8.([0,1])
+#         #  ,isEditable = true
+#         #   ),
+#         #  TextureSpec{Float32}(
+#         #    name = "nuclearMaskking",
+#         #    isNuclearMask= true,
+#         #    isContinuusMask= true,
+#         #    colorSet = [RGB(0.0,0.0,1.0),RGB(1.0,0.0,0.0)]
+#         #    ,minAndMaxValue= Float32.([0.0,2.0])
+#         #    ,isEditable = true
+#         #  ),
+
+
+#  #similar(Array{UInt8}, axes(CtDat))
+#   # texureDepth =40;
+#   # textureHeight = 40;
+#   # textureWidth = 40;
+# #  mainMaskDummy = UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+# #  testLab1Dat =UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+# #  testLab2Dat= UInt8.(map(xx-> (xx >0 ? 1 : 0), rand(Int8,10,40,40)))
+
+# #  mainMaskDummy =  zeros(UInt8,texureDepth,textureWidth,textureHeight);
+# #  testLab1Dat = zeros(UInt8,texureDepth,textureWidth,textureHeight);
+# #  testLab2Dat=  zeros(UInt8,texureDepth,textureWidth,textureHeight);
+# #  nuclearMaskDat =abs.(rand(Float32,texureDepth,textureWidth,textureHeight));    
+# #  nuclearMaskDat = nuclearMaskDat./maximum(nuclearMaskDat)   ;
+# #  ctDummy =  Int16.(map(xx-> (xx >0 ? 1 : 0), rand(Int16,texureDepth,textureWidth,textureHeight)));# will give white background for testing 
+
+#     # sislines= textLinesFromStrings(["asd Line1", "as Line 2", "main Line 2", "main Line 2", "main Line 2",  "uuuuuuuuuuuuuuuuuu"]);
+#     # exampleSingleSliceDat= slicesDat|>
+#     # (scrDat)-> map(threeDimDat->threeToTwoDimm(threeDimDat.type,Int64(40),1,threeDimDat ),scrDat) |>
+#     # # (twoDimList)->map(tdim->transpose(dat),twoDimList )
+#     # (twoDimList)-> SingleSliceDat(listOfDataAndImageNames=twoDimList
+#     #                             ,sliceNumber=Int64(40)
+#     #                             ,textToDisp =sislines  )
+
+
+
+#     # # exampleSingleSliceDat = SingleSliceDat(listOfDataAndImageNames=singleSliceDat
+#     # #                                         ,textToDisp=sislines);
+
+#     # Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat);
+
+
+
+
+
+# typeof(toMod)
+
+
+
+# "goldStandardLiver" UInt8
+# "manualModif" UInt8
+# "CTIm" Int16
+
+#   #  slicesDat=  [ThreeDimRawDat{UInt8}(UInt8,"mainLab",mainMaskDummy)
+#   #    ,ThreeDimRawDat{Int16}(Int16,"CTIm",ctDummy)
+#   #    ,ThreeDimRawDat{UInt8}(UInt8,"testLab2",testLab2Dat)
+#   #    ,ThreeDimRawDat{UInt8}(UInt8,"testLab1",testLab1Dat)  
+#   #    ,ThreeDimRawDat{Float32}(Float32,"nuclearMaskking",nuclearMaskDat)  
+#   #     ];
+
+
+
+#     #  singleSliceDat = [
+#     #   TwoDimRawDat{UInt8}(UInt8,"mainLab", UInt8.(map(xx-> (xx >0 ? 1 : 0), zeros(Int8,textureWidth,textureHeight))))
+#     #  ,TwoDimRawDat{Int16}(Int16,"CTIm",Int16.(map(xx-> (xx >0 ? 1 : 0), zeros(Int16,textureWidth,textureHeight))))
+#     #  ,TwoDimRawDat{UInt8}(UInt8,"testLab2",UInt8.(map(xx-> (xx >0 ? 1 : 0), zeros(Int8,textureWidth,textureHeight))))
+#     #  ,TwoDimRawDat{UInt8}(UInt8,"testLab1",UInt8.(map(xx-> (xx >0 ? 1 : 0), zeros(Int8,textureWidth,textureHeight)))) 
+#     #  ,TwoDimRawDat{Float32}(Float32,"nuclearMaskking", nuclearMaskDat[1,:,:]) 
+#     # ];
+#     # sislines= textLinesFromStrings(["asd Line1", "as Line 2", "main Line 2", "main Line 2", "main Line 2",  "uuuuuuuuuuuuuuuuuu"]);
+
+#     # singleSlDat= actor.actor.onScrollData.dataToScroll|>
+#     # (scrDat)-> map(threeDimDat->threeToTwoDimm(threeDimDat.type,Int64(current),actor.actor.onScrollData.dimensionToScroll,threeDimDat ),scrDat) |>
+#     # (twoDimList)-> SingleSliceDat(listOfDataAndImageNames=twoDimList
+#     #                             ,sliceNumber=current
+#     #                             ,textToDisp = getTextForCurrentSlice(actor.actor.onScrollData, Int32(current))  )
+
+
+
+#     # # exampleSingleSliceDat = SingleSliceDat(listOfDataAndImageNames=singleSliceDat
+#     # #                                         ,textToDisp=sislines);
+
+#     # Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat);
+
+
+
+
+
+
+
+
+
+
+
+
+# #getHeightToWidthRatio
+#   #    listOfTextSpecs= map(x->setproperties(x[2],(whichCreated=x[1])),enumerate(listOfTexturesToCreate))
+
+#   #    println(createcontextinfo())
+#   #     gslsStr = get_glsl_version_string()
+
+#   #       fsh = """
+#   #       $(gslsStr)
+#   #       $(createCustomFramgentShader(listOfTextSpecs,textLiverMain,textureB))  
+#   #       """
+#   #      fragShader= createShader(fsh, GL_FRAGMENT_SHADER)
+      
+
+#   # GLFW.PollEvents()
+
+
+
+#   #        for st in split(fsh, "\n")
+#   #        @info st
+#   #        end
+     
+# function aaa()
+#   @info "aa"
+# end
+
+# function bbb()
+#   @info "bbb"
+# end
+
+# dd = [ aaa,bbb]
+
+# for func in dd
+#   func()
+# end  
+
+# typeof(dd)
+
+#          dispObj.stopListening[]= true
+#          maskA = textureB
+#          maskB = textureC
+#   vertex_shader = dispObj.vertex_shader
+     
+#          println(createcontextinfo())
+#          gslsStr = get_glsl_version_string()
+#          listOfTextSpecsc=  Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications
+
+#          fragment_shade,shader_prog= createAndInitShaderProgram(dispObj.vertex_shader,  listOfTextSpecsc,maskA,maskB,gslsStr)
+#          activateTextures(listOfTextSpecsc )
+
+
+# newForDisp = setproperties(dispObj,(shader_program=shader_prog,fragment_shader=fragment_shade ) )
+
+# actor.mainForDisplayObjects=newForDisp
+
+
+#         #  glBindBuffer(GL_ARRAY_BUFFER, dispObj.vbo[])
+#         #  glBufferData(GL_ARRAY_BUFFER, calcDim.mainQuadVertSize  ,calcDim.mainImageQuadVert , GL_STATIC_DRAW)
+#         #       encodeDataFromDataBuffer()
+# reactivateMainObj(shader_prog, newForDisp.vbo,actor.calcDimsStruct  )
+# activateTextures(listOfTextSpecsc )
+
+# # basicRender(window)
+
+
+#         # glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+#         # # Swap front and back buffers
+#         # GLFW.SwapBuffers(window)
+      
+
+#          @uniforms! begin
+#          dispObj.mainImageUniforms.isMaskDiffrenceVis:=1
+#                 end
+#       #  basicRender(window)
+
+
+#       #  setTextureVisibility(true,textureB.uniforms )
+#       #  setTextureVisibility(true,textLiverMain.uniforms )
+#       #  basicRender(window)
+#        setTextureVisibility(true,textLiverMain.uniforms )
+#        setTextureVisibility(true,textureB.uniforms )
+       
+#        setTextureVisibility(true,nuclearTexture.uniforms )
+#        basicRender(window)
+
+
+#        dispObj.stopListening[]= false
+
+
+
+
+#   # continuusColorTextSpecs= listOfTexturesToCreate
+#   # tuples= map(x->[ (x.name,[ [a.r,a.g,a.b] for a in x.colorSet  ],"r" ,1),(x.name,[[a.r,a.g,a.b] for a in x.colorSet  ],"g",2),(x.name,[[a.r,a.g,a.b] for a in x.colorSet  ],"b",3)],continuusColorTextSpecs)|> list-> reduce(vcat,list)
+#   # tuples[1]
+#   # getNuclearMaskFunctions(continuusColorTextSpecs)
+
+ 
+#                 # handler = KeyboardCallbackSubscribable(false,false,false,false,["a1"], Subject(KeyboardStruct, scheduler = AsyncScheduler()))
+
+
+# # scancode =GLFW.KEY_RIGHT_CONTROL
+# # act=1
+
+# # scCode = @match scancode begin
+# #   GLFW.KEY_RIGHT_CONTROL=> (handler.isCtrlPressed= (act==1); "ctrl" )
+# #   GLFW.KEY_LEFT_CONTROL => (handler.isCtrlPressed= (act==1); "ctrl")
+# #   GLFW.KEY_LEFT_SHIFT =>( handler.isShiftPressed= (act==1); "shift")
+# #   GLFW.KEY_RIGHT_SHIFT =>( handler.isShiftPressed=( act==1); "shift")
+# #   GLFW.KEY_RIGHT_ALT =>( handler.isAltPressed= (act==1); "alt")
+# #   GLFW.KEY_LEFT_ALT => (handler.isAltPressed= (act==1); "alt")
+# #   GLFW.KEY_ENTER =>( handler.isEnterPressed= (act==1); "enter")
+# #   _ => "notImp" # not Important
+# # end
+# #   res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed || scCode=="ctrl" 
+# #           , isShiftPressed= handler.isShiftPressed ||scCode=="shift" 
+# #           ,isAltPressed= handler.isAltPressed ||scCode=="alt"
+# #           ,isEnterPressed= handler.isEnterPressed 
+# #           ,lastKeysPressed= handler.lastKeysPressed 
+# #           ,mostRecentScanCode = scancode
+# #           ,mostRecentKeyName = "" # just marking it as empty
+# #           ) 
   
+# # pp = strToNumber(res.lastKeysPressed)
+# # processKeysInfo(pp,actor,KeyboardStruct(lastKeysPressed= ["a", "1"]))
+
+
+# #  join(res.lastKeysPressed)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# #   for tpair in enumerate(listOfTexturesToCreate)
+# #     tpair[2].whichCreated = tpair[1]
+# #   end#for
+
+
+
+
+# #         #  dispObj.stopListening[]= true
+# #         #  glClearColor(0.0, 0.0, 0.1 , 1.0)
+# #         dispObj.stopListening[]= true
+#   activateForTextDisp( wordsDispObj.shader_program_words , wordsDispObj.vbo_words,calcDim)
+
+#   face = wordsDispObj.fontFace
+ 
 
 
 #     lineTextureWidth = 2000
 #     lineTextureHeight = 2000
     
+#     dispObj.stopListening[]= true
+#         #data = ones(UInt8,calcDim.imageTextureHeight,calcDim.imageTextureWidth)
+#     data = zeros(UInt8,lineTextureWidth,lineTextureHeight)
+      
+#     # render a string into an existing matrix
+#     a = renderstring!(zeros(UInt8,lineTextureWidth,lineTextureHeight), "Line 1 score", face,  110, 110, 110,valign = :vtop, halign = :hleft)
+#     b = renderstring!(zeros(UInt8,lineTextureWidth,lineTextureHeight), "Line 2 score", face,  110, 110, 110,valign = :vtop, halign = :hleft)
+#     b = vcat(a[1:200,:] ,b[1:200,:] ) 
+#     b =collect(transpose(reverse(b; dims=(1))))
+        
+#     #updateTexture(UInt8,b,wordsDispObj.textureSpec,0,0,Int32(lineTextureWidth),Int32(lineTextureHeight )) #  ,Int32(10000),Int32(1000)
+#     updateTexture(UInt8,b,wordsDispObj.textureSpec,0,7600,Int32(2000),Int32(400)) #  ,Int32(10000),Int32(1000)
 
-#     struct1 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
-#     struct2 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
-#     struct3 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
-#     struct4 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
-#     struct4 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
-#     struct5 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
-#     struct6 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
-#     struct7 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
-#     struct8 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
-#     struct9 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
-#     struct10 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
-#     struct11 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
+#     basicRender(window)
+#     dispObj.stopListening[]= false
 
-#     strList = [struct1,struct2,struct3,struct4,struct5,struct6,struct7,struct6,struct7,struct7,struct4,struct5,struct6,struct7,struct6,struct7]
-#     #,struct5,struct6,struct7,struct8,struct9,struct10,struct11
+
+# #     strToNumber("11sfdsdf")
+  
+
+
+# #     lineTextureWidth = 2000
+# #     lineTextureHeight = 2000
+    
+
+# #     struct1 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
+# #     struct2 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
+# #     struct3 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
+# #     struct4 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
+# #     struct4 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
+# #     struct5 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
+# #     struct6 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
+# #     struct7 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
+# #     struct8 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
+# #     struct9 = SimpleLineTextStruct(text= "testing line 1",fontSize= 110,extraLineSpace=1  )
+# #     struct10 = SimpleLineTextStruct(text= "testing line 2",fontSize= 110,extraLineSpace=1  )
+# #     struct11 = SimpleLineTextStruct(text= "testing line 3",fontSize= 110,extraLineSpace=1  )
+
+# #     strList = [struct1,struct2,struct3,struct4,struct5,struct6,struct7,struct6,struct7,struct7,struct4,struct5,struct6,struct7,struct6,struct7]
+# #     #,struct5,struct6,struct7,struct8,struct9,struct10,struct11
     
 
 
 
-# #    res =  hcat(renderSingleLineOfText(struct1,lineTextureWidth, face )
-# #   ,renderSingleLineOfText(struct2,lineTextureWidth, face )
-# #   ,renderSingleLineOfText(struct3,lineTextureWidth, face )
-# #     )
-# #     maximum(res)
-# # sz = size(res)
+# # #    res =  hcat(renderSingleLineOfText(struct1,lineTextureWidth, face )
+# # #   ,renderSingleLineOfText(struct2,lineTextureWidth, face )
+# # #   ,renderSingleLineOfText(struct3,lineTextureWidth, face )
+# # #     )
+# # #     maximum(res)
+# # # sz = size(res)
 
-# # # updateTexture(UInt8,b,wordsDispObj.textureSpec,0,7600,Int32(size(res)[1]),Int32(size(res)[2])) #  ,Int32(10000),Int32(1000)
-# #     updateTexture(UInt8,res,wordsDispObj.textureSpec,0,2000,Int32(sz[1]),Int32(sz[2])) #  ,Int32(10000),Int32(1000)
-# dispObj.stopListening[]= true
-# strListB= textLinesFromStrings(["asasfkajshalkjdhs", "3w7gqaw76dgabs89y3p8w", "ahsd78oy3o821hbf", "9823bv67asfasdlasjpdaus"])
-#   d=   addTextToTextureB(wordsDispObj,strListB, calcDim )
+# # # # updateTexture(UInt8,b,wordsDispObj.textureSpec,0,7600,Int32(size(res)[1]),Int32(size(res)[2])) #  ,Int32(10000),Int32(1000)
+# # #     updateTexture(UInt8,res,wordsDispObj.textureSpec,0,2000,Int32(sz[1]),Int32(sz[2])) #  ,Int32(10000),Int32(1000)
+# # dispObj.stopListening[]= true
+# # strListB= textLinesFromStrings(["asasfkajshalkjdhs", "3w7gqaw76dgabs89y3p8w", "ahsd78oy3o821hbf", "9823bv67asfasdlasjpdaus"])
+# #   d=   addTextToTextureB(wordsDispObj,strListB, calcDim )
 
-#     basicRender(window)
-#     dispObj.stopListening[]= false
-
-
+# #     basicRender(window)
+# #     dispObj.stopListening[]= false
 
 
 
@@ -695,107 +786,107 @@ activateTextures(listOfTextSpecsc )
 
 
 
-#     dispObj.stopListening[]= true
-
-#     updateTexture(UInt8, zeros(UInt8,2000,8000),wordsDispObj.textureSpec) #  ,Int32(10000),Int32(1000)
-#    basicRender(window)
-#     dispObj.stopListening[]= false
 
 
-#     GLFW.PollEvents()
+# #     dispObj.stopListening[]= true
 
-#  reactivateMainObj(dispObj.shader_program ,dispObj.vbo,calcDim  )
+# #     updateTexture(UInt8, zeros(UInt8,2000,8000),wordsDispObj.textureSpec) #  ,Int32(10000),Int32(1000)
+# #    basicRender(window)
+# #     dispObj.stopListening[]= false
 
 
+# #     GLFW.PollEvents()
 
-# Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat)
-# basicRender(window)
+# #  reactivateMainObj(dispObj.shader_program ,dispObj.vbo,calcDim  )
 
 
 
-#     juliaDataType= UInt8
-#     toSend = ones(UInt8,2000,8000)
-#     toSendFlat = reduce(vcat,toSend)
-#     pboIds= [Ref(GLuint(0))] 
-#     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboIds[1][]);
-# #    glBufferData(GL_PIXEL_UNPACK_BUFFER, sizeof(toSend), 0, GL_STREAM_DRAW);
-#     glBufferData(GL_PIXEL_UNPACK_BUFFER, sizeof(toSendFlat), Ptr{juliaDataType}(), GL_STREAM_DRAW);
+# # Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat)
+# # basicRender(window)
 
-#     # bind the texture and PBO
-#     textureId =wordsDispObj.textureSpec.ID
-#     glActiveTexture(wordsDispObj.textureSpec.actTextrureNumb); # active proper texture unit before binding
-#     glBindTexture(GL_TEXTURE_2D, textureId[]);
-#     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboIds[1][]);
+
+
+# #     juliaDataType= UInt8
+# #     toSend = ones(UInt8,2000,8000)
+# #     toSendFlat = reduce(vcat,toSend)
+# #     pboIds= [Ref(GLuint(0))] 
+# #     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboIds[1][]);
+# # #    glBufferData(GL_PIXEL_UNPACK_BUFFER, sizeof(toSend), 0, GL_STREAM_DRAW);
+# #     glBufferData(GL_PIXEL_UNPACK_BUFFER, sizeof(toSendFlat), Ptr{juliaDataType}(), GL_STREAM_DRAW);
+
+# #     # bind the texture and PBO
+# #     textureId =wordsDispObj.textureSpec.ID
+# #     glActiveTexture(wordsDispObj.textureSpec.actTextrureNumb); # active proper texture unit before binding
+# #     glBindTexture(GL_TEXTURE_2D, textureId[]);
+# #     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboIds[1][]);
    
-#     # update data directly on the mapped buffer - this is internal function implemented below
-#     ptrB = Ptr{juliaDataType}(glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY))
-#     for i=1:length(toSend)
-#         unsafe_store!(ptrB, toSend[i], i)
-#     end
+# #     # update data directly on the mapped buffer - this is internal function implemented below
+# #     ptrB = Ptr{juliaDataType}(glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY))
+# #     for i=1:length(toSend)
+# #         unsafe_store!(ptrB, toSend[i], i)
+# #     end
 
-#     basicRender(window)
+# #     basicRender(window)
  
 
 
-#     // copy pixels from PBO to texture object
-#     // Use offset instead of ponter.
-#     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, PIXEL_FORMAT, GL_UNSIGNED_BYTE, 0);
+# #     // copy pixels from PBO to texture object
+# #     // Use offset instead of ponter.
+# #     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMAGE_WIDTH, IMAGE_HEIGHT, PIXEL_FORMAT, GL_UNSIGNED_BYTE, 0);
 
 
-# ######### pixel buffer objects test
-
-
-
-# DATA_SIZE = 8 * sizeof(juliaDataTyp) *width * height  # number of bytes our image will have so in 2D it will be width times height times number of bytes needed for used datatype we need to multiply by 8 becouse sizeof() return bytes instead of bits
-# pbo = Ref(GLuint(pboNumber))  
-# glGenBuffers(1, pbo)
-
-
-# # glBindBuffer(GL_PIXEL_PACK_BUFFER, pbos[i]);
-# # glBufferData(GL_PIXEL_PACK_BUFFER, nbytes, NULL, GL_STREAM_READ);
-
-# # glReadPixels(0, 0, width, height, fmt, GL_UNSIGNED_BYTE, 0);   # When a GL_PIXEL_PACK_BUFFER is bound, the last 0 is used as offset into the buffer to read into. */
+# # ######### pixel buffer objects test
 
 
 
-
-# glBindTexture(GL_TEXTURE_2D,textureId[]); 
-# # copy pixels from PBO to texture object
-# # Use offset instead of pointer.
-# # glTexSubImage2D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, GLsizei(width), GLsizei(height),  GL_RED_INTEGER, GL_SHORT, Ptr{juliaDataTyp}());
-
-# glTexSubImage2D(GL_TEXTURE_2D,0,0,0, width, height, GL_RED_INTEGER, subImageDataType, Ptr{juliaDataType}());
+# # DATA_SIZE = 8 * sizeof(juliaDataTyp) *width * height  # number of bytes our image will have so in 2D it will be width times height times number of bytes needed for used datatype we need to multiply by 8 becouse sizeof() return bytes instead of bits
+# # pbo = Ref(GLuint(pboNumber))  
+# # glGenBuffers(1, pbo)
 
 
-# # bind the PBO
-# glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboID[]);
+# # # glBindBuffer(GL_PIXEL_PACK_BUFFER, pbos[i]);
+# # # glBufferData(GL_PIXEL_PACK_BUFFER, nbytes, NULL, GL_STREAM_READ);
+
+# # # glReadPixels(0, 0, width, height, fmt, GL_UNSIGNED_BYTE, 0);   # When a GL_PIXEL_PACK_BUFFER is bound, the last 0 is used as offset into the buffer to read into. */
 
 
-# # Note that glMapBuffer() causes sync issue.
-# # If GPU is working with this buffer, glMapBuffer() will wait(stall)
-# # until GPU to finish its job. To avoid waiting (idle), you can call
-# # first glBufferData() with NULL pointer before glMapBuffer().
-# # If you do that, the previous data in PBO will be discarded and
-# # glMapBuffer() returns a new allocated pointer immediately
-# # even if GPU is still working with the previous data.
-# glBufferData(GL_PIXEL_UNPACK_BUFFER, DATA_SIZE, Ptr{juliaDataType}(), GL_STREAM_DRAW);
 
-# # map the buffer object into client's memory
-# glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY)
+
+# # glBindTexture(GL_TEXTURE_2D,textureId[]); 
+# # # copy pixels from PBO to texture object
+# # # Use offset instead of pointer.
+# # # glTexSubImage2D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, GLsizei(width), GLsizei(height),  GL_RED_INTEGER, GL_SHORT, Ptr{juliaDataTyp}());
+
+# # glTexSubImage2D(GL_TEXTURE_2D,0,0,0, width, height, GL_RED_INTEGER, subImageDataType, Ptr{juliaDataType}());
+
+
+# # # bind the PBO
+# # glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboID[]);
+
+
+# # # Note that glMapBuffer() causes sync issue.
+# # # If GPU is working with this buffer, glMapBuffer() will wait(stall)
+# # # until GPU to finish its job. To avoid waiting (idle), you can call
+# # # first glBufferData() with NULL pointer before glMapBuffer().
+# # # If you do that, the previous data in PBO will be discarded and
+# # # glMapBuffer() returns a new allocated pointer immediately
+# # # even if GPU is still working with the previous data.
+# # glBufferData(GL_PIXEL_UNPACK_BUFFER, DATA_SIZE, Ptr{juliaDataType}(), GL_STREAM_DRAW);
+
+# # # map the buffer object into client's memory
+# # glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY)
 
  
-# ptr = Ptr{juliaDataType}(glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY))
-# # update data directly on the mapped buffer - this is internal function implemented below
+# # ptr = Ptr{juliaDataType}(glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY))
+# # # update data directly on the mapped buffer - this is internal function implemented below
 
-# updatePixels(ptr,data,length(data));
+# # updatePixels(ptr,data,length(data));
 
-# glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER); # release the mapped buffer
+# # glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER); # release the mapped buffer
 
-# # it is good idea to release PBOs with ID 0 after use.
-# # Once bound with 0, all pixel operations are back to normal ways.
-# glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-
-
+# # # it is good idea to release PBOs with ID 0 after use.
+# # # Once bound with 0, all pixel operations are back to normal ways.
+# # glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
 
 
 
@@ -805,32 +896,32 @@ activateTextures(listOfTextSpecsc )
 
 
 
-#     matrlist = map(x-> renderSingleLineOfText(x,Int32(2000),face) ,strList) 
-#     matr=  reduce( hcat  ,matrlist)
+
+
+# #     matrlist = map(x-> renderSingleLineOfText(x,Int32(2000),face) ,strList) 
+# #     matr=  reduce( hcat  ,matrlist)
 
 
 
 
-# ##
+# # ##
 
-  # reactivateMainObj(dispObj.shader_program ,dispObj.vbo,calcDim  )
-
-
-
-# Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat)
-# basicRender(window)
-
-# GLFW.PollEvents()
+#   # reactivateMainObj(dispObj.shader_program ,dispObj.vbo,calcDim  )
 
 
 
+# # Main.SegmentationDisplay.updateSingleImagesDisplayed(exampleSingleSliceDat)
+# # basicRender(window)
 
-# fractionOfMainIm= Float32(0.5)
-# heightToWithRatio=Float32(2)
-# width = 1000
-# height = 500
+# # GLFW.PollEvents()
 
 
+
+
+# # fractionOfMainIm= Float32(0.5)
+# # heightToWithRatio=Float32(2)
+# # width = 1000
+# # height = 500
 
 
 
@@ -844,124 +935,126 @@ activateTextures(listOfTextSpecsc )
 
 
 
-#     glUseProgram(shader_program_words)
-#     glBindBuffer(GL_ARRAY_BUFFER, vbo_words[])
-#     glBufferData(GL_ARRAY_BUFFER, sizeof(Main.ShadersAndVerticiesForText.verticesB), Main.ShadersAndVerticiesForText.verticesB, GL_STATIC_DRAW)
-#   	encodeDataFromDataBuffer()
 
 
-#     glClearColor(0.0, 0.0, 0.1 , 1.0)
-
-#          stopList= true
-        #  bindAndActivateForText(wordsDispObj.shader_program_words ,
-        #   wordsDispObj.fragment_shader_words,wordsDispObj.vbo_words,dispObj.vertex_shader )
-#          basicRender(window)
-#          texId =  createTexture(0,Int32(1000), Int32(10000),GL_R8UI)
-#          textSpec = wordsDispObj.textureSpec
-#          textSpec= setproperties(textSpec,(ID=texId) )
-
-#          samplerRef= glGetUniformLocation(wordsDispObj.shader_program_words, "TextTexture1")
-#          glUniform1i(samplerRef,length(listOfTexturesToCreate)+1)
+# #     glUseProgram(shader_program_words)
+# #     glBindBuffer(GL_ARRAY_BUFFER, vbo_words[])
+# #     glBufferData(GL_ARRAY_BUFFER, sizeof(Main.ShadersAndVerticiesForText.verticesB), Main.ShadersAndVerticiesForText.verticesB, GL_STATIC_DRAW)
+# #   	encodeDataFromDataBuffer()
 
 
+# #     glClearColor(0.0, 0.0, 0.1 , 1.0)
+
+# #          stopList= true
+#         #  bindAndActivateForText(wordsDispObj.shader_program_words ,
+#         #   wordsDispObj.fragment_shader_words,wordsDispObj.vbo_words,dispObj.vertex_shader )
+# #          basicRender(window)
+# #          texId =  createTexture(0,Int32(1000), Int32(10000),GL_R8UI)
+# #          textSpec = wordsDispObj.textureSpec
+# #          textSpec= setproperties(textSpec,(ID=texId) )
+
+# #          samplerRef= glGetUniformLocation(wordsDispObj.shader_program_words, "TextTexture1")
+# #          glUniform1i(samplerRef,length(listOfTexturesToCreate)+1)
 
 
 
 
-#          textSpec= wordsDispObj.textureSpec
 
 
-#          data = ones(UInt8,1000,10000)
-#          glActiveTexture(textSpec.actTextrureNumb); # active proper texture unit before binding
-#          glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
-#          glTexSubImage2D(GL_TEXTURE_2D,0,0,0, 1000, 10000, GL_RED_INTEGER, textSpec.OpGlType, collect(data))
-
-#          basicRender(window)
-
-#         # texId=  createTexture(0,Int32(100), Int32(1000),GL_R8UI)
-#         # indexOfActiveText = 8
+# #          textSpec= wordsDispObj.textureSpec
 
 
-#         # widthh=Int32(100)
-#         # heightt =Int32(1000)
-#         # textureSpec= setproperties(wordsDispObj.textureSpec, 
-#         # (ID=texId ,actTextrureNumb =getProperGL_TEXTURE(indexOfActiveText)
-#         # ,OpGlType =GL_UNSIGNED_BYTE
-#         # ,widthh = widthh
-#         # ,heightt=heightt ))
+# #          data = ones(UInt8,1000,10000)
+# #          glActiveTexture(textSpec.actTextrureNumb); # active proper texture unit before binding
+# #          glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
+# #          glTexSubImage2D(GL_TEXTURE_2D,0,0,0, 1000, 10000, GL_RED_INTEGER, textSpec.OpGlType, collect(data))
+
+# #          basicRender(window)
+
+# #         # texId=  createTexture(0,Int32(100), Int32(1000),GL_R8UI)
+# #         # indexOfActiveText = 8
+
+
+# #         # widthh=Int32(100)
+# #         # heightt =Int32(1000)
+# #         # textureSpec= setproperties(wordsDispObj.textureSpec, 
+# #         # (ID=texId ,actTextrureNumb =getProperGL_TEXTURE(indexOfActiveText)
+# #         # ,OpGlType =GL_UNSIGNED_BYTE
+# #         # ,widthh = widthh
+# #         # ,heightt=heightt ))
         
-#         # textureSpec.OpGlType == GL_UNSIGNED_BYTE
-#         # textureSpec.actTextrureNumb == GL_TEXTURE8
+# #         # textureSpec.OpGlType == GL_UNSIGNED_BYTE
+# #         # textureSpec.actTextrureNumb == GL_TEXTURE8
 
 
 
         
-#         data= ones(UInt8,100,1000)
+# #         data= ones(UInt8,100,1000)
 
-#         xoffset=0
-#         yoffset=0
-#         widthh=textSpec.widthh
-#         heightt =textSpec.heightt
+# #         xoffset=0
+# #         yoffset=0
+# #         widthh=textSpec.widthh
+# #         heightt =textSpec.heightt
 
-#         glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
-#         glActiveTexture(textSpec.actTextrureNumb); # active proper texture unit before binding
-#         glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, collect(data))
-#         basicRender(window)
+# #         glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
+# #         glActiveTexture(textSpec.actTextrureNumb); # active proper texture unit before binding
+# #         glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, collect(data))
+# #         basicRender(window)
 
 
-#         glBindTexture(GL_TEXTURE_2D, texId[]); 
-#         samplerRef= glGetUniformLocation(wordsDispObj.shader_program_words, "TextTexture1")
-#         glUniform1i(samplerRef,indexOfActiveText);
+# #         glBindTexture(GL_TEXTURE_2D, texId[]); 
+# #         samplerRef= glGetUniformLocation(wordsDispObj.shader_program_words, "TextTexture1")
+# #         glUniform1i(samplerRef,indexOfActiveText);
        
-#         glBindTexture(GL_TEXTURE_2D, texId[]); 
-#         glActiveTexture(GL_TEXTURE8);
-#         data= zeros(UInt8,100,1000)
-#         glTexSubImage2D(GL_TEXTURE_2D,0,0,0, 100, 1000, GL_RED_INTEGER, GL_UNSIGNED_BYTE, collect(data))     
-#         basicRender(window)
+# #         glBindTexture(GL_TEXTURE_2D, texId[]); 
+# #         glActiveTexture(GL_TEXTURE8);
+# #         data= zeros(UInt8,100,1000)
+# #         glTexSubImage2D(GL_TEXTURE_2D,0,0,0, 100, 1000, GL_RED_INTEGER, GL_UNSIGNED_BYTE, collect(data))     
+# #         basicRender(window)
 
-#         updateTexture(UInt8, ones(UInt8,100,1000),wordsDispObj.textureSpec)
-#         basicRender(window)
-
-
-#         updateTexture(UInt8, zeros(UInt8,100,1000),textureSpec)
-#         basicRender(window)
-
-#         updateTexture(UInt8, zeros(UInt8,100,1000),textureSpec)
-#         basicRender(window)
-
-#         glClearColor(0.0, 0.0, 0.1 , 1.0)
-#         updateTexture(UInt8, zeros(UInt8,100,1000),textureSpec)
-#         basicRender(window)
-
-#         stopList= false
-
-#         # zz= ThreeDimRawDat{UInt8}(UInt8,"mainLab",mainMaskDummy)   
-#         # sa= zz.dat
-#         # maximum(sa)
-#         # tD= threeToTwoDimm(zz.type,2,2,zz  )
-#         # slll= collect(modSlice!(tD, [CartesianIndex(1,1)], UInt8(3)))
-#         # maximum(tD.dat)
-#         # maximum(sa)
+# #         updateTexture(UInt8, ones(UInt8,100,1000),wordsDispObj.textureSpec)
+# #         basicRender(window)
 
 
+# #         updateTexture(UInt8, zeros(UInt8,100,1000),textureSpec)
+# #         basicRender(window)
 
-#         #  setTextureVisibility(true ,textLiverMain.uniforms)
+# #         updateTexture(UInt8, zeros(UInt8,100,1000),textureSpec)
+# #         basicRender(window)
 
-#         #  setMaskColor(RGB(1.0,0.0,0.0) ,textLiverMain.uniforms)
+# #         glClearColor(0.0, 0.0, 0.1 , 1.0)
+# #         updateTexture(UInt8, zeros(UInt8,100,1000),textureSpec)
+# #         basicRender(window)
+
+# #         stopList= false
+
+# #         # zz= ThreeDimRawDat{UInt8}(UInt8,"mainLab",mainMaskDummy)   
+# #         # sa= zz.dat
+# #         # maximum(sa)
+# #         # tD= threeToTwoDimm(zz.type,2,2,zz  )
+# #         # slll= collect(modSlice!(tD, [CartesianIndex(1,1)], UInt8(3)))
+# #         # maximum(tD.dat)
+# #         # maximum(sa)
+
+
+
+# #         #  setTextureVisibility(true ,textLiverMain.uniforms)
+
+# #         #  setMaskColor(RGB(1.0,0.0,0.0) ,textLiverMain.uniforms)
        
-#         #  setMaskColor(RGB(0.0,1.0,0.0) ,textTexture.uniforms)
-#         #  setTextureVisibility(true ,textTexture.uniforms)
+# #         #  setMaskColor(RGB(0.0,1.0,0.0) ,textTexture.uniforms)
+# #         #  setTextureVisibility(true ,textTexture.uniforms)
        
-#         #    setMaskColor(RGB(1.0,0.0,0.5) ,textureC.uniforms)
-#         #    setTextureVisibility(true ,textureC.uniforms)
-       
-       
-#         #  setMaskColor(RGB(0.5,0.5,0.0) ,textureB.uniforms)
-#         #  setTextureVisibility(true ,textureB.uniforms)
+# #         #    setMaskColor(RGB(1.0,0.0,0.5) ,textureC.uniforms)
+# #         #    setTextureVisibility(true ,textureC.uniforms)
        
        
+# #         #  setMaskColor(RGB(0.5,0.5,0.0) ,textureB.uniforms)
+# #         #  setTextureVisibility(true ,textureB.uniforms)
        
-#         # setCTWindow(Int32(0), Int32(0),Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5].uniforms)
+       
+       
+# #         # setCTWindow(Int32(0), Int32(0),Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.listOfTextSpecifications[5].uniforms)
        
 
 
@@ -969,7 +1062,7 @@ activateTextures(listOfTextSpecsc )
 
 
 
-#          GLFW.PollEvents()
+# #          GLFW.PollEvents()
 
 
 # z=zeros(3,3,3)

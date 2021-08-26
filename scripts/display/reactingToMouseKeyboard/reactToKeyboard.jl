@@ -354,8 +354,9 @@ basicRender(actor.actor.mainForDisplayObjects.window)
         #next we need to delete all textures and create new ones 
 
         arr = map(it->it.ID[],textSpecs)
+glFinish()# make open gl ready for work
 
-        glDeleteTextures(length(arr), arr)# deleting
+glDeleteTextures(length(arr), arr)# deleting
 
         #getting new 
         initializeTextures(textSpecs,newCalcDim)

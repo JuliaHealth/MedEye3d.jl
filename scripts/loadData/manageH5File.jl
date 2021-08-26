@@ -6,7 +6,7 @@ module h5manag
 
 
 using DrWatson
-@quickactivate "Probabilistic medical segmentation"
+@quickactivate "JuliaMed3d"
 using HDF5
 using Main.ForDisplayStructs
 using ColorTypes
