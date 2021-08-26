@@ -1,3 +1,3 @@
-# Julia Med 3d.jl
+# NuclearEye.jl
 
-Documentation for Julia Med 3d.jl
+Documentation for NuclearEye.jl

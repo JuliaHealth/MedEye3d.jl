@@ -1,10 +1,10 @@
 using Documenter
-using Julia Med 3d
+using NuclearEye
 
 makedocs(
-    sitename = "Julia Med 3d",
+    sitename = "NuclearEye",
     format = Documenter.HTML(),
-    modules = [Julia Med 3d]
+    modules = [NuclearEye]
 )
 
 # Documenter can also automatically deploy documentation to gh-pages.

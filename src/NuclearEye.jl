@@ -1,4 +1,4 @@
-module JuliaMed3d
+module NuclearEye
 
 greet() = print("Hello World!")
 

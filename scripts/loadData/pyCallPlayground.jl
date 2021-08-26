@@ -92,18 +92,31 @@ close(f)
 
 
 
-########PET CT upload
+########PET CT upload downloaded from 
+#https://wiki.cancerimagingarchive.net/pages/viewpage.action?pageId=70224216
+#dirOfExample = DrWatson.datadir("PETCT","manifest-1608669183333" ,"Lung-PET-CT-Dx","Lung_Dx-A0001","04-04-2007-NA-Chest-07990","2.000000-5mm-40805" )
+dirOfExample = DrWatson.datadir("data","PETphd","bad45Y" )
+#"data","PETphd","bad45Y","DICOM","21071306","51440000"
+
+reader = sitk.ImageSeriesReader()
+dicom_names = reader.GetGDCMSeriesFileNames(dirOfExample)
+reader.SetFileNames(dicom_names)
+
+image = reader.Execute()
+pixelss = np.array(sitk.GetArrayViewFromImage(image))
+
+spacings = image.GetSpacing()
+spacingListB = [spacings[1],spacings[2],spacings[3]]
+
+size(pixelss)
+
+maximum(pixelss)
 
 
 
 
 
-
-
-
-
-
-
+###old experiments
 
 dirOfExample = DrWatson.datadir("liverPrimData","training-scans" ,"scan","liver-orig001.mhd" )
 pixels = np.array(np.uint16,sitk.GetArrayViewFromImage(image))
