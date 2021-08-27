@@ -3,7 +3,7 @@
 managing  uniform values - global values in shaders
 """
 module Uniforms
-using Glutils, Main.ForDisplayStructs, Dictionaries, Parameters, ColorTypes
+using Glutils,  ForDisplayStructs, Dictionaries, Parameters, ColorTypes
 
 export createStructsDict, setCTWindow,setMaskColor,setTextureVisibility, setTypeOfMainSampler!
 

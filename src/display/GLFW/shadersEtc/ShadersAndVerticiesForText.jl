@@ -1,7 +1,7 @@
 
 #Create and initialize shaders
 module ShadersAndVerticiesForText
-using ModernGL, GeometryTypes, GLFW,Main.ForDisplayStructs, Main.CustomFragShad, Main.ModernGlUtil
+using ModernGL, GeometryTypes, GLFW, ForDisplayStructs,  CustomFragShad,  ModernGlUtil
 
 export getWordsVerticies
 

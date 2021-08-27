@@ -3,9 +3,9 @@ module PrepareWindow
 export displayAll,createAndInitShaderProgram
 
 using ModernGL, GeometryTypes, GLFW
-using Main.PrepareWindowHelpers
-using  Main.OpenGLDisplayUtils, Main.DataStructs,Logging
-using Main.ShadersAndVerticies, Main.ForDisplayStructs,Main.ShadersAndVerticiesForText, Main.ModernGlUtil
+using  PrepareWindowHelpers
+using   OpenGLDisplayUtils,  DataStructs,Logging
+using  ShadersAndVerticies,  ForDisplayStructs, ShadersAndVerticiesForText,  ModernGlUtil
 
 
 
@@ -63,7 +63,7 @@ function displayAll(listOfTexturesToCreate::Vector{TextureSpec}
 	vbo = createDAtaBuffer(calcDimsStruct.mainImageQuadVert)
 
 	# Create the Element Buffer Object (EBO)
-	ebo = createElementBuffer(Main.ShadersAndVerticies.elements)
+	ebo = createElementBuffer( ShadersAndVerticies.elements)
 	############ how data should be read from data buffer
 	encodeDataFromDataBuffer()
 	#capturing The data from GLFW

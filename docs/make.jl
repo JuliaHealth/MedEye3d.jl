@@ -4,7 +4,7 @@ using NuclearMedEye
 makedocs(
     sitename = "NuclearMedEye",
     format = Documenter.HTML(),
-    modules = [NuclearEye]
+    modules = [NuclearEye,SegmentationDisplay,ReactingToInput,reactToKeyboard,ReactOnMouseClickAndDrag,ReactToScroll,PrepareWindow,TextureManag,DisplayWords,Uniforms,ShadersAndVerticiesForText,ShadersAndVerticies,OpenGLDisplayUtils, CustomFragShad, PrepareWindowHelpers, StructsManag,forDisplayStructs,DataStructs,FromSegmentationEvaluation,ModernGlUtil]
 )
 
 # Documenter can also automatically deploy documentation to gh-pages.

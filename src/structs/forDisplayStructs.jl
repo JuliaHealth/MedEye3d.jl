@@ -2,7 +2,7 @@ module ForDisplayStructs
 using Base: Int32, isvisible
 export MouseStruct,parameter_type,Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms,ForWordsDispStruct
 
-using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries,FreeTypeAbstraction, Main.DataStructs
+using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries,FreeTypeAbstraction,  DataStructs
 
 
 """
@@ -136,7 +136,7 @@ Actor that is able to store a state to keep needed data for proper display
 """
 @with_kw mutable struct ActorWithOpenGlObjects <: NextActor{Any}
     currentDisplayedSlice::Int=1 # stores information what slice number we are currently displaying
-    mainForDisplayObjects::Main.ForDisplayStructs.forDisplayObjects=forDisplayObjects() # stores objects needed to  display using OpenGL and GLFW
+    mainForDisplayObjects:: ForDisplayStructs.forDisplayObjects=forDisplayObjects() # stores objects needed to  display using OpenGL and GLFW
     onScrollData::FullScrollableDat = FullScrollableDat()
     textureToModifyVec::Vector{TextureSpec}=[] # texture that we want currently to modify - if list is empty it means that we do not intend to modify any texture
     isSliceChanged::Bool= false # set to true when slice is changed set to false when we start interacting with this slice - thanks to this we know that when we start drawing on one slice and change the slice the line would star a new on new slice

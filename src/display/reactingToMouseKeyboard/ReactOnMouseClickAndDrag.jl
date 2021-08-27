@@ -11,8 +11,8 @@ so we modify the data that is the basis of the mouse interaction mask  and we pa
 
 """
 module ReactOnMouseClickAndDrag
-using Parameters, Rocket, GLFW, ModernGL, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils
-using  Dates, Parameters, Main.DataStructs, Main.StructsManag
+using Parameters, Rocket, GLFW, ModernGL,  ForDisplayStructs, TextureManag,  OpenGLDisplayUtils
+using  Dates, Parameters,  DataStructs,  StructsManag
 export registerMouseClickFunctions
 export reactToMouseDrag
 

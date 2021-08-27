@@ -7,7 +7,7 @@ using ColorTypes
 utilities for dealing data structs like FullScrollableDat or SingleSliceDat
 """
 module StructsManag
-using  Setfield,  Main.ForDisplayStructs,  Main.DataStructs, Rocket
+using  Setfield,   ForDisplayStructs,   DataStructs, Rocket
 export addToforUndoVector,cartTwoToThree,getHeightToWidthRatio,threeToTwoDimm,modSlice!, threeToTwoDimm,modifySliceFull!,getSlicesNumber,getMainVerticies
 
 ```@doc

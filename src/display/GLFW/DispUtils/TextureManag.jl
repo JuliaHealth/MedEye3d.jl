@@ -3,8 +3,8 @@ stores functions needed to create bind and update OpenGl textues
 """
 module TextureManag
 using Base: Float16
-using  ModernGL ,DrWatson,  Main.OpenGLDisplayUtils, Main.ForDisplayStructs
-using  Main.Uniforms, Logging,Setfield, Glutils,Logging, Main.CustomFragShad, Main.DataStructs, Main.DisplayWords
+using  ModernGL ,DrWatson,   OpenGLDisplayUtils,  ForDisplayStructs
+using   Uniforms, Logging,Setfield, Glutils,Logging,  CustomFragShad,  DataStructs,  DisplayWords
 export activateTextures,addTextToTexture,initializeTextures,createTexture, getProperGL_TEXTURE,updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
 
 """
@@ -181,7 +181,7 @@ function updateImagesDisplayed(singleSliceDat::SingleSliceDat
 
 
             #render onto the screen
-            Main.OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
+             OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
             glFinish()
             forDisplayConstants.stopListening[]=false
 end
@@ -195,7 +195,7 @@ It would also assign proper openGl types to given julia data type, and pass data
 textSpecs - list of texture specificaton that we want to enrich by adding information about uniforms
 return list of texture specifications enriched by information about uniforms 
 """
-function assignUniformsAndTypesToMasks(textSpecs::Vector{Main.ForDisplayStructs.TextureSpec}
+function assignUniformsAndTypesToMasks(textSpecs::Vector{ ForDisplayStructs.TextureSpec}
                 ,shader_program::UInt32
                 ,windowControlStruct::WindowControlStruct)
     mainTexture,notMainTextures=   divideTexteuresToMainAndRest(textSpecs)
@@ -236,7 +236,7 @@ On the basis of the name of the Texture it will assign the informs referencs to 
 - uniforms for main image will be set separately
 
 """
-function setUniforms(textSpec::Main.ForDisplayStructs.TextureSpec,shader_program::UInt32)::Main.ForDisplayStructs.TextureSpec
+function setUniforms(textSpec:: ForDisplayStructs.TextureSpec,shader_program::UInt32):: ForDisplayStructs.TextureSpec
     
     n= textSpec.name
     unifs = MaskTextureUniforms(samplerName= n
@@ -255,7 +255,7 @@ On the basis of the type associated to texture we set proper open Gl types assoc
 based on https://www.khronos.org/registry/OpenGL-Refpages/gl4/html/glTexImage2D.xhtml
 and https://www.khronos.org/opengl/wiki/OpenGL_Type
 """
-function setProperOpenGlTypes(textSpec::Main.ForDisplayStructs.TextureSpec)::Main.ForDisplayStructs.TextureSpec
+function setProperOpenGlTypes(textSpec:: ForDisplayStructs.TextureSpec):: ForDisplayStructs.TextureSpec
     if(parameter_type(textSpec)== Float16 ) return  setproperties(textSpec, (GL_Rtype= GL_R16F ,OpGlType= GL_HALF_FLOAT ))     end 
     if(parameter_type(textSpec)== Float32 ) return  setproperties(textSpec, (GL_Rtype= GL_R32F ,OpGlType= GL_FLOAT))     end 
     if(parameter_type(textSpec)== Int8 ) return  setproperties(textSpec, (GL_Rtype= GL_R8I ,OpGlType= GL_BYTE ))     end 

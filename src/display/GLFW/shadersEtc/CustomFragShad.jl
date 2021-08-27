@@ -3,7 +3,7 @@ functions that will enable creation of long String that will be the code for cus
 """
 module CustomFragShad
 
-using ModernGL, GeometryTypes, GLFW, Main.ForDisplayStructs, ColorTypes
+using ModernGL, GeometryTypes, GLFW,  ForDisplayStructs, ColorTypes
 
 export createCustomFramgentShader,divideTexteuresToMainAndRest,addSamplerStr
 
@@ -290,15 +290,15 @@ end#chooseColorFonuction
 
 
 
-"""
-used to display and debug  output - output can be also additionally checked using this tool http://evanw.github.io/glslx/
-"""
-function debuggingOutput(listOfTexturesToCreate)
-    strr= Main.CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate)
-    for st in split(strr, "\n")
-    @info st
-    end
-end#
+# """
+# used to display and debug  output - output can be also additionally checked using this tool http://evanw.github.io/glslx/
+# """
+# function debuggingOutput(listOfTexturesToCreate)
+#     strr=  CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate)
+#     for st in split(strr, "\n")
+#     @info st
+#     end
+# end#
 
 
  """
