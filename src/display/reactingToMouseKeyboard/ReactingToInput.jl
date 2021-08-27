@@ -1,7 +1,7 @@
 
 module ReactingToInput
-using Rocket, GLFW,ModernGL,Setfield, Main.ReactToScroll, Main.ForDisplayStructs
-using Main.TextureManag,DataTypesBasic, Main.ReactOnMouseClickAndDrag, Main.ReactOnKeyboard, Main.DataStructs, Main.StructsManag, Main.DisplayWords
+using Rocket, GLFW,ModernGL,Setfield,  ReactToScroll,  ForDisplayStructs
+using  TextureManag,DataTypesBasic,  ReactOnMouseClickAndDrag,  ReactOnKeyboard,  DataStructs,  StructsManag,  DisplayWords
 
 export subscribeGLFWtoActor
 
@@ -9,7 +9,7 @@ export subscribeGLFWtoActor
 """
 adding the data into about openGL and GLFW context to enable proper display of main image and masks
 """
-function setUpMainDisplay(mainForDisplayObjects::Main.ForDisplayStructs.forDisplayObjects,actor::SyncActor{Any, ActorWithOpenGlObjects})
+function setUpMainDisplay(mainForDisplayObjects:: ForDisplayStructs.forDisplayObjects,actor::SyncActor{Any, ActorWithOpenGlObjects})
     actor.actor.mainForDisplayObjects.stopListening[]=true
 
     actor.actor.mainForDisplayObjects=mainForDisplayObjects
@@ -21,7 +21,7 @@ end#setUpMainDisplay
 adding the data needed for text display; also activates appropriate quad for the display
     it also configures texture that is build for text display
 """
-function setUpWordsDisplay(textDispObject::Main.ForDisplayStructs.ForWordsDispStruct,actor::SyncActor{Any, ActorWithOpenGlObjects})
+function setUpWordsDisplay(textDispObject:: ForDisplayStructs.ForWordsDispStruct,actor::SyncActor{Any, ActorWithOpenGlObjects})
 
     actor.actor.mainForDisplayObjects.stopListening[]=true
 
@@ -137,8 +137,8 @@ encapsulated by a function becouse this is configuration of Rocket and needs to 
 """
 
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Int64) = reactToScroll(data,actor )
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Main.ForDisplayStructs.forDisplayObjects) = setUpMainDisplay(data,actor)
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Main.ForDisplayStructs.ForWordsDispStruct) = setUpWordsDisplay(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data:: ForDisplayStructs.forDisplayObjects) = setUpMainDisplay(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data:: ForDisplayStructs.ForWordsDispStruct) = setUpWordsDisplay(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::CalcDimsStruct) = setUpCalcDimsStruct(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::valueForMasToSetStruct) = setUpvalueForMasToSet(data,actor)
 
@@ -164,7 +164,7 @@ function subscribeGLFWtoActor(actor ::SyncActor{Any, ActorWithOpenGlObjects})
     #controll scrolling
     forDisplayConstants = actor.actor.mainForDisplayObjects
 
-    scrollback= Main.ReactToScroll.registerMouseScrollFunctions(forDisplayConstants.window,forDisplayConstants.stopListening,actor.actor.isBusy)
+    scrollback=  ReactToScroll.registerMouseScrollFunctions(forDisplayConstants.window,forDisplayConstants.stopListening,actor.actor.isBusy)
     GLFW.SetScrollCallback(forDisplayConstants.window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
 
     keyBoardAct = registerKeyboardFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)

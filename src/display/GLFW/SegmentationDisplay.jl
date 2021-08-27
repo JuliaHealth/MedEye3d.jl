@@ -39,8 +39,8 @@ module SegmentationDisplay
 export coordinateDisplay
 export passDataForScrolling
 
-using ModernGL, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUtils, Main.ForDisplayStructs,Main.Uniforms, Main.DisplayWords, Dictionaries
-using Main.ReactingToInput, Rocket, Setfield, Logging, Main.ShadersAndVerticiesForText,FreeTypeAbstraction,Main.DisplayWords, Main.DataStructs, Main.StructsManag
+using ModernGL, GLFW,  PrepareWindow,  TextureManag, OpenGLDisplayUtils,  ForDisplayStructs, Uniforms,  DisplayWords, Dictionaries
+using  ReactingToInput, Rocket, Setfield, Logging,  ShadersAndVerticiesForText,FreeTypeAbstraction, DisplayWords,  DataStructs,  StructsManag
 
 using DrWatson
 @quickactivate "NuclearMedEye"
@@ -73,8 +73,8 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
    calcDimStruct= CalcDimsStruct(windowWidth=windowWidth 
                   ,windowHeight=windowHeight 
                   ,fractionOfMainIm=fractionOfMainIm
-                  ,wordsImageQuadVert=Main.ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm)  
-                  ,wordsQuadVertSize= sizeof(Main.ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm))
+                  ,wordsImageQuadVert= ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm)  
+                  ,wordsQuadVertSize= sizeof( ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm))
                   ,textTexturewidthh=textTexturewidthh
                   ,textTextureheightt=textTextureheightt ) |>
    (calcDim)-> getHeightToWidthRatio(calcDim,dataToScrollDims )|>
@@ -83,7 +83,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
    subscribe!(of(calcDimStruct),mainActor )
 
  #creating window and event listening loop
-    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words,gslsStr = Main.PrepareWindow.displayAll(listOfTextSpecs,calcDimStruct )
+    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words,gslsStr =  PrepareWindow.displayAll(listOfTextSpecs,calcDimStruct )
 
     # than we set those uniforms, open gl types and using data from arguments  to fill texture specifications
     mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program,windowControlStruct) 

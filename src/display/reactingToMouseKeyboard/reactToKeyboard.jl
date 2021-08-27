@@ -5,7 +5,7 @@ module coordinating response to the  keyboard input - mainly shortcuts that  hel
 """
 #@doc ReactOnKeyboardSTR
 module ReactOnKeyboard
-using ModernGL,Main.DisplayWords,Main.StructsManag, Setfield,Main.PrepareWindow,  Main.DataStructs ,Glutils, Rocket, GLFW,Dictionaries, Main.ForDisplayStructs,Main.TextureManag, Main.OpenGLDisplayUtils, Main.Uniforms, Match, Parameters,DataTypesBasic
+using ModernGL, DisplayWords, StructsManag, Setfield, PrepareWindow,   DataStructs ,Glutils, Rocket, GLFW,Dictionaries,  ForDisplayStructs, TextureManag,  OpenGLDisplayUtils,  Uniforms, Match, Parameters,DataTypesBasic
 export reactToKeyboard , registerKeyboardFunctions,processKeysInfo
 
 keyboardHandler= nothing # used only in case of profiling
