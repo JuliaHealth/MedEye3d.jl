@@ -348,7 +348,10 @@ function getNuclearMaskFunctions(continuusColorTextSpecs::Vector{TextureSpec} ):
   
    return join(map(x->"""  
 
-float $(x[3])$(x[1])getColorForMultiColor(float texelRes) {
+float $(x[3])$(x[1])getColorForMultiColor(float innertexelRes) {
+
+
+ float texelRes=  clamp(innertexelRes, $(x[1])minValue,$(x[1])maxValue );
         float normalized = (texelRes/float($(x[1])ValueRange))*$(length(x[2])+1);
         uint indexx = uint(floor(normalized)) ;// so we normalize floor  in order to get index of color from color list
         float[$(length(x[2])+1)] colorFloats = float[$(length(x[2])+1)](0.0,$( map(it->it[x[4]],x[2])|> (fls)-> join(fls,",")    )   )  ;
@@ -363,7 +366,15 @@ float $(x[3])$(x[1])getColorForMultiColor(float texelRes) {
 end#getNuclearMaskFunction
 
 
-
+# if( innertexelRes < $(x[1])minValue  ){
+#     texelRes = $(x[1])minValue;
+#       }
+#       else if(innertexelRes > $(x[1])maxValue ){
+#     texelRes = $(x[1])maxValue ;
+#           }
+#       else{
+#     texelRes = innertexelRes ;
+#    }    
 
 
 

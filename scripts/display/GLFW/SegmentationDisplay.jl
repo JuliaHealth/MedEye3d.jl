@@ -43,7 +43,7 @@ using ModernGL, GLFW, Main.PrepareWindow, Main.TextureManag,Main.OpenGLDisplayUt
 using Main.ReactingToInput, Rocket, Setfield, Logging, Main.ShadersAndVerticiesForText,FreeTypeAbstraction,Main.DisplayWords, Main.DataStructs, Main.StructsManag
 
 using DrWatson
-@quickactivate "NuclearEye"
+@quickactivate "NuclearMedEye"
 
 #holds actor that is main structure that process inputs from GLFW and reacts to it
 mainActor = sync(ActorWithOpenGlObjects())

@@ -1,3 +1,3 @@
-# NuclearEye.jl
+# NuclearMedEye.jl
 
-Documentation for NuclearEye.jl
+Documentation for NuclearMedEye.jl

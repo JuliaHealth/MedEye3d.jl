@@ -1,7 +1,7 @@
 
 
      using DrWatson
-     @quickactivate "NuclearEye"
+     @quickactivate "NuclearMedEye"
      using Revise
      include(DrWatson.scriptsdir("display","GLFW","includeAll.jl"))
      using Main.ModernGlUtil, Match, Parameters,DataTypesBasic,Main.ShadersAndVerticies,ModernGL, GeometryTypes, GLFW, Main.ForDisplayStructs,ColorTypes, Dictionaries,Main.DisplayWords, Setfield
@@ -20,8 +20,7 @@
 
 using Base: String
 
-using DrWatson
-@quickactivate "JuliaMed3d"
+
 using Conda
 using PyCall
 using Pkg
@@ -62,7 +61,7 @@ ctImage = reader.Execute()
 pixelss = np.array(sitk.GetArrayViewFromImage(ctImage))
 
 spacingsCt = ctImage.GetSpacing()
-spacingListCT = [spacingsCt[1],spacingsCt[2],spacingsCt[3]]
+spacingListCT = [spacingsCt[3],spacingsCt[2],spacingsCt[1]]
 
 
 
@@ -106,7 +105,7 @@ pixelssB = permuteAndReverse(pixelss)
 typeof(pixelssB)
 typeof(pixelsResampled)
 
-datToScrollDimsB= DataToScrollDims(imageSize=  size(pixelsResampled) ,voxelSize= spacingsCt , dimensionToScroll = 3 );
+datToScrollDimsB= DataToScrollDims(imageSize=  size(pixelsResampled) ,voxelSize= (spacingListPET[1],spacingListPET[2],spacingListPET[3]) , dimensionToScroll = 3 );
 
 
 
@@ -117,8 +116,8 @@ listOfTexturesToCreateB = [
       isNuclearMask=true,
       isContinuusMask=true,
       numb= Int32(1),
-      colorSet = [RGB(1.0,1.0,0.0),RGB(1.0,0.0,0.0),RGB(1.0,0.0,0.0) ]
-      ,minAndMaxValue= Float32.([-2000,8000])
+      colorSet = [RGB(0.0,0.0,0.0),RGB(1.0,1.0,0.0),RGB(1.0,0.5,0.0),RGB(1.0,0.0,0.0) ,RGB(1.0,0.0,0.0)]
+      ,minAndMaxValue= Float32.([200,8000])
      ),
   TextureSpec{UInt8}(
       name = "manualModif",
