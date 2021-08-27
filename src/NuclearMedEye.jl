@@ -1,4 +1,4 @@
-module NuclearEye
+module NuclearMedEye
 
 greet() = print("Hello World!")
 

@@ -1,5 +1,5 @@
 using DrWatson
-@quickactivate "NuclearEye"
+@quickactivate "NuclearMedEye"
 
 using Revise
 

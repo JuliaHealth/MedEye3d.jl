@@ -6,7 +6,7 @@ module h5manag
 
 
 using DrWatson
-@quickactivate "JuliaMed3d"
+@quickactivate "NuclearMedEye"
 using HDF5
 using Main.ForDisplayStructs
 using ColorTypes

@@ -34,11 +34,13 @@ return 2 dimensional array  wrapper -TwoDimRawDat  object representing slice of 
 !! important returned TwoDimRawDat holds view to the original 3 dimensional data  
 ```
 function threeToTwoDimm(typ::Type{T}
-                ,slice::Int
+                ,sliceInner::Int
                 ,sliceDim::Int
                 ,threedimDat::ThreeDimRawDat{T})::TwoDimRawDat{T} where {T}
          
-
+maxSlice =size(threedimDat.dat)[sliceDim]
+slice= sliceInner 
+if(sliceInner>maxSlice) slice=maxSlice   end
                return TwoDimRawDat{T}(typ,threedimDat.name,selectdim(threedimDat.dat, sliceDim, slice)   )
 end#ThreeToTwoDimm
 

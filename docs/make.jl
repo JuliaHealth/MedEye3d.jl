@@ -1,8 +1,8 @@
 using Documenter
-using NuclearEye
+using NuclearMedEye
 
 makedocs(
-    sitename = "NuclearEye",
+    sitename = "NuclearMedEye",
     format = Documenter.HTML(),
     modules = [NuclearEye]
 )
