@@ -232,8 +232,8 @@ end#processKeysInfo
 
 
 """
-when shift plus will be pressed it will increase stroke width
-when shift minus will be pressed it will increase stroke width
+when tab plus will be pressed it will increase stroke width
+when tab minus will be pressed it will increase stroke width
 """
 function processKeysInfo(annot::Identity{AnnotationStruct}
     ,actor::SyncActor{Any, ActorWithOpenGlObjects}
@@ -256,8 +256,8 @@ end#processKeysInfo
 
 """
 KEY_F1 - will display wide window for bone Int32(1000),Int32(-1000)
-KEY_F1 - will display window for soft tissues Int32(400),Int32(-200)
-KEY_F1 - will display wide window for lung viewing  Int32(0),Int32(-1000)
+KEY_F2 - will display window for soft tissues Int32(400),Int32(-200)
+KEY_F3 - will display wide window for lung viewing  Int32(0),Int32(-1000)
 """
 function processKeysInfo(wind::Identity{WindowControlStruct}
     ,actor::SyncActor{Any, ActorWithOpenGlObjects}
@@ -450,7 +450,7 @@ ctrl + numberA + "-"(minus sign) +numberB  - stops displaying diffrence between 
 space + 1 or 2 or 3 - change the plane of view (transverse, coronal, sagittal)
 ctrl + z - undo last action
 tab +/- increase or decrease stroke width
-F1, F2 ... - swith between defined window display characteristics - like min shown white and mx shown black ...
+F1, F2 ... - switch between defined window display characteristics - like min shown white and mx shown black ...
 """
 function reactToKeyboard(keyInfo::KeyboardStruct
                         , actor::SyncActor{Any, ActorWithOpenGlObjects})
@@ -558,7 +558,6 @@ function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlOb
         return Option(parse(Int64,filtered))
     #in case we want to change the dimension of plane for slicing data     
     elseif(keyInfo.isSpacePressed && !isempty(filtered)  &&  parse(Int64,filtered)<4)
-        @info "changing plane of slicing to " parse(Int64,filtered)
         return Option(setproperties(actor.actor.onScrollData.dataToScrollDims ,  (dimensionToScroll= parse(Int64,filtered)) )    )            
      # in case we want to display diffrence of two masks   
     elseif(occursin("-" , joined))

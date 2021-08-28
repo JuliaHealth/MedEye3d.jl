@@ -189,11 +189,14 @@ function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any, ActorWith
         mappedCoords =  translateMouseToTexture(Int32(1)
         ,mouseCoords
         ,actor.actor.calcDimsStruct)
+                        mappedCorrd= mappedCoords
+                        if(!isempty(mappedCorrd))
+                                actor.actor.lastRecordedMousePosition = cartTwoToThree(actor.actor.onScrollData.dataToScrollDims 
+                                                                                        ,actor.actor.currentDisplayedSlice
+                                                                                    , mappedCoords[1]   )   
 
-        actor.actor.lastRecordedMousePosition = cartTwoToThree(actor.actor.onScrollData.dataToScrollDims 
-                                                                ,actor.actor.currentDisplayedSlice
-                                                               ,mappedCoords[1]    )   
-    end #if 
+                        end#if
+     end #if 
     actor.actor.isBusy[]=false # we can do sth in opengl
     obj.stopListening[]=false # reactivete event listening loop
 end#..ReactToScroll
@@ -212,13 +215,16 @@ function translateMouseToTexture(strokeWidth::Int32
                                 ,calcD::CalcDimsStruct )::Vector{CartesianIndex{2}}
   
 
-    return  map(c->CartesianIndex( getNewX(c[1],calcD),  getNewY(c[2] ,calcD)) ,mouseCoords)  |>
-    (x)->filter(it->it[1]>0 && it[2]>0 ,x)  |>      # we do not want to try access it in point 0 as julia is 1 indexed                 
-   (filteredList) -> map(point-> addStrokeWidth(point,Int64(strokeWidth) ) , filteredList) |>  # adding some points around the point of choice so will be better visible
-   (matrix)->reduce(vcat, matrix)|># when we added some oints around we got list of lists so now we need to flatten it out
-   unique|> # we want only unique elements
-   uniq-> filter(it-> it[1]>0 && it[1]<calcD.imageTextureWidth && it[2]>0 && it[2]<calcD.imageTextureHeight  ,uniq)
-     # as we add new points they may end up getting outside the texture; we need to filter those out
+    filteredList= map(c->CartesianIndex( getNewX(c[1],calcD),  getNewY(c[2] ,calcD)) ,mouseCoords)  |>
+    (x)->filter(it->it[1]>0 && it[2]>0 ,x)       # we do not want to try access it in point 0 as julia is 1 indexed                 
+   if(!isempty(filteredList)) 
+    return map(point-> addStrokeWidth(point,Int64(strokeWidth) ) , filteredList) |>  # adding some points around the point of choice so will be better visible
+    (matrix)->reduce(vcat, matrix)|># when we added some oints around we got list of lists so now we need to flatten it out
+    unique|> # we want only unique elements
+    uniq-> filter(it-> it[1]>0 && it[1]<calcD.imageTextureWidth && it[2]>0 && it[2]<calcD.imageTextureHeight  ,uniq)     # as we add new points they may end up getting outside the texture; we need to filter those out
+   end #if 
+   #if we are here we do not have anything meaningfull else to return
+   return Vector{CartesianIndex{2}}()
 end #translateMouseToTexture
 
 """
