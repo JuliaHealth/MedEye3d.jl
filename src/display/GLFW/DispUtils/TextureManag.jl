@@ -96,7 +96,6 @@ function initializeTextures(listOfTextSpecs::Vector{TextureSpec}
     for (ind, textSpec ) in enumerate(listOfTextSpecs)
         index=ind-1
         textUreId= createTexture(parameter_type(textSpec),calcDimStruct.imageTextureWidth,calcDimStruct.imageTextureHeight,textSpec.GL_Rtype,textSpec.OpGlType )#binding texture and populating with data
-        @info "textUreId in initializeTextures"  textUreId
        
         actTextrureNumb = getProperGL_TEXTURE(index)
         glActiveTexture(actTextrureNumb)

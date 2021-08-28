@@ -71,8 +71,8 @@ function setUpForScrollData(onScrollData::FullScrollableDat ,actor::SyncActor{An
       #so  It will precalculate some data and later mouse modification will be swift
       oldd = actor.actor.valueForMasToSet 
       
-      actor.actor.valueForMasToSet = valueForMasToSetStruct(0)
-      ReactOnMouseClickAndDrag.reactToMouseDrag(MouseStruct(true,false, [CartesianIndex(1,1)]),actor )
+      actor.actor.valueForMasToSet = valueForMasToSetStruct(value = 0)
+      ReactOnMouseClickAndDrag.reactToMouseDrag(MouseStruct(true,false, [CartesianIndex(5,5)]),actor )
       actor.actor.valueForMasToSet = oldd
 
   actor.actor.mainForDisplayObjects.stopListening[]=false

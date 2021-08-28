@@ -4,6 +4,7 @@ authors = ["M.D Jakub Mitura <53857487+jakubMitura14@users.noreply.github.com>"]
 version = "0.1.0"
 
 [deps]
+BenchmarkPlots = "ab8c0f59-4072-4e0d-8f91-a91e1495eb26"
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 ColorTypes = "3da002f7-5984-5a60-b8a6-cbb66c0b333f"
 Conda = "8f4d0f93-b110-5947-807f-2305c1781a2d"
@@ -29,3 +30,4 @@ PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 Rocket = "df971d30-c9d6-4b37-b8ff-e965b2cb3a40"
 Setfield = "efcf1570-3423-57d1-acb7-fd33fddbac46"
+StatsPlots = "f3b207a7-027a-5e70-b257-86293d7955fd"

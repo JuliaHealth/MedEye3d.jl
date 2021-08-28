@@ -35,42 +35,6 @@ makedocs(
 
 
 
-using NuclearMedEye
-
-using Base: String
-
-
-using Conda
-using PyCall
-using Pkg
-Pkg.build("HDF5")
-using HDF5
-Conda.pip_interop(true)
-Conda.pip("install", "SimpleITK")
-Conda.pip("install", "h5py")
-
-sitk = pyimport("SimpleITK")
-np= pyimport("numpy")
-
-
-########
-# interpolation adapted from https://discourse.itk.org/t/compose-image-from-different-modality-with-different-number-of-slices/2286/8
-
-#dirOfExample = DrWatson.datadir("PETCT","manifest-1608669183333" ,"Lung-PET-CT-Dx","Lung_Dx-G0045","05-08-2011-NA-PET01PTheadlung Adult-09984","10.000000-Thorax  1.0  B70f-66628" )
-#dirOfExample = DrWatson.datadir("data","PETphd","slicerExp" ,"CT","ScalarVolume_17")
-# dirOfExample ="C:\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\PETB\\ScalarVolume_17"
-# dirOfExamplePET ="C:\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\PETCT\\ScalarVolume_11"
-dirOfExample ="C:\\GitHub\\JuliaMedPipe\\data\\PETphd\\slicerExp\\all17\\bad17NL-bad17NL\\20150518-PET^1_PET_CT_WholeBody_140_70_Recon (Adult)\\4-CT AC WB  1.5  B30f"
-dirOfExamplePET ="C:\\GitHub\\JuliaMedPipe\\data\\PETphd\\slicerExp\\all17\\bad17NL-bad17NL\\20150518-PET^1_PET_CT_WholeBody_140_70_Recon (Adult)\\3-PET WB"
-
-
-
-
-
-
-# data\\PETphd\\slicerExp\\CT\\ScalarVolume_17
-
-# C:\\Users\\1\\Documents\\GitHub\\Probabilistic-medical-segmentation\\data\\PETphd\\slicerExp\\CT\\ScalarVolume_17
 
 reader = sitk.ImageSeriesReader()
 dicom_names = reader.GetGDCMSeriesFileNames(dirOfExample)
@@ -167,10 +131,12 @@ SegmentationDisplay.coordinateDisplay(listOfTexturesToCreateB ,fractionOfMainIm 
 SegmentationDisplay.mainActor.actor.currentDisplayedSlice=40
 import NuclearMedEye.DisplayWords.textLinesFromStrings
 import NuclearMedEye.DataStructs.ThreeDimRawDat
+import NuclearMedEye.DataStructs.DataToScrollDims
 import NuclearMedEye.DataStructs.FullScrollableDat
 import NuclearMedEye.ForDisplayStructs.KeyboardStruct
 import NuclearMedEye.ForDisplayStructs.MouseStruct
 import NuclearMedEye.ForDisplayStructs.ActorWithOpenGlObjects
+import NuclearMedEye.OpenGLDisplayUtils
 
 mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
 supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(pixelsResampled)[3] );
@@ -205,12 +171,7 @@ syncActor = Main.SegmentationDisplay.mainActor
 # keyboardCallbackSubscribable = Main.SegmentationDisplay.mainActor.actor.keyboardCallbackSubscribable
 # scrollCallbackSubscribable = Main.SegmentationDisplay.mainActor.actor.scrollCallbackSubscribable
 
-using GLFW,DataTypesBasic
-
-
-GLFW.PollEvents()
-
-
+using GLFW,DataTypesBasic, ModernGL,Setfield
 using BenchmarkTools
 
 BenchmarkTools.DEFAULT_PARAMETERS.samples = 100
@@ -220,48 +181,56 @@ BenchmarkTools.DEFAULT_PARAMETERS.gcsample = true
 #Cross Section plane translation
 
 
-#will need to divide by 2 
 function toBenchmarkScroll(toSc) 
     NuclearMedEye.ReactToScroll.reactToScroll(toSc ,syncActor, false)
 end
 
-  rand(1:10,10,10)
 
 
-#Response to mouse interaction
-carts = [CartesianIndex(12,13),CartesianIndex(12,15),CartesianIndex(12,18),CartesianIndex(2,10),CartesianIndex(2,14)]
 
-
-function toBenchmarkPaint()
+function toBenchmarkPaint(carts)
     NuclearMedEye.ReactOnMouseClickAndDrag.reactToMouseDrag(MouseStruct(true,false, carts),syncActor )
 end
 
 
-#Response to section plane change
-function toBenchmarkPaint()
-    NuclearMedEye.ReactOnKeyboard.processKeysInfo(Option(DataToScrollDims(dimensionToScroll=1)),syncActor,KeyboardStruct(),false    )
-    NuclearMedEye.ReactOnKeyboard.processKeysInfo(Option(DataToScrollDims(dimensionToScroll=2)),syncActor,KeyboardStruct(),false    )
+
+function toBenchmarkPlaneTranslation(toScroll)
+    NuclearMedEye.ReactOnKeyboard.processKeysInfo(Option(toScroll),syncActor,KeyboardStruct(),false    )
+    OpenGLDisplayUtils.basicRender(syncActor.actor.mainForDisplayObjects.window)
+    glFinish()
+end
+
+
+function prepareRAndomCart(randInt) 
+    return [CartesianIndex(12+randInt,13+randInt),CartesianIndex(12+randInt,15+randInt),CartesianIndex(12+randInt,18+randInt),CartesianIndex(2+randInt,10+randInt),CartesianIndex(2+randInt,14+randInt)]
 end
 
 
 
-dragHandl = NuclearMedEye.ReactOnMouseClickAndDrag.mouseClickHandler
+#we want some integers but not 0
+sc = @benchmarkable toBenchmarkScroll(y) setup=(y = filter(it->it!=0, rand(-5:5,20))[1]  )
 
-@btime 1+1
+paint =  @benchmarkable toBenchmarkPaint(y) setup=(y =  prepareRAndomCart(rand(1:40,1)[1]  ))  
 
-GLFW.SetCursorPos(window,100,100)
+translations =  @benchmarkable toBenchmarkPlaneTranslation(y) setup=(y = setproperties(syncActor.actor.onScrollData.dataToScrollDims,  (dimensionToScroll=rand(1:3,2)[1])) )  
+
+# scRes = run(sc)
+# paintRes = run(paint)
+# translationsRes = run(translations)
+
+using BenchmarkPlots, StatsPlots
+# Define a parent BenchmarkGroup to contain our suite
+suite = BenchmarkGroup()
+suite["PET/CT"] = BenchmarkGroup(["string", "unicode"])
+suite["CTOnly"] = BenchmarkGroup(["string", "unicode"])
+
+suite["PET/CT"]["scrolling"] = sc
+suite["PET/CT"]["mouse interactions"] = paint
+suite["PET/CT"]["plane orient. change"] = translations
 
 
+resSuite = run(suite)
+plot(resSuite)
 
 
-
-
-
-
-
-
-
-
-
-
-
+BenchmarkPlots.plot(suite)
