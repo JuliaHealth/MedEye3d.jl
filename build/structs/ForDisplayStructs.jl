@@ -1,6 +1,6 @@
 module ForDisplayStructs
 using Base: Int32, isvisible
-export ScrollCallbackSubscribable, KeyboardCallbackSubscribable, MouseCallbackSubscribable,MouseStruct,parameter_type,Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms,ForWordsDispStruct
+export MouseStruct,parameter_type,Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms,ForWordsDispStruct
 
 using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries,FreeTypeAbstraction, ..DataStructs
 
@@ -166,17 +166,40 @@ shader_program_words::UInt32=1
 end #ForWordsDispStruct
 
 
+"""
+Actor that is able to store a state to keep needed data for proper display
+
+  currentDisplayedSlice::Int=1 # stores information what slice number we are currently displaying
+    mainForDisplayObjects:: forDisplayObjects=forDisplayObjects() # stores objects needed to  display using OpenGL and GLFW
+    onScrollData::FullScrollableDat = FullScrollableDat()
+    textureToModifyVec::Vector{TextureSpec}=[] # texture that we want currently to modify - if list is empty it means that we do not intend to modify any texture
+    isSliceChanged::Bool= false # set to true when slice is changed set to false when we start interacting with this slice - thanks to this we know that when we start drawing on one slice and change the slice the line would star a new on new slice
+    textDispObj::ForWordsDispStruct =ForWordsDispStruct()# set of objects and constants needed for text diplay
+    currentlyDispDat::SingleSliceDat =SingleSliceDat() # holds the data displayed or in case of scrollable data view for accessing it
+    calcDimsStruct::CalcDimsStruct=CalcDimsStruct()   #data for calculations of necessary constants needed to calculate window size , mouse position ...
+    valueForMasToSet::valueForMasToSetStruct=valueForMasToSetStruct() # value that will be used to set  pixels where we would interact with mouse
+    lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1,1,1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
+    forUndoVector::AbstractArray=[] # holds lambda functions that when invoked will  undo last operations
+    maxLengthOfForUndoVector::Int64 = 10 # number controls how many step at maximum we can get back
+    isBusy::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0) # used to indicate by some functions that actor is busy and some interactions should be ceased
 
 
-
-
-
-
-
-
-
-
-
+"""
+@with_kw mutable struct ActorWithOpenGlObjects <: NextActor{Any}
+    currentDisplayedSlice::Int=1 # stores information what slice number we are currently displaying
+    mainForDisplayObjects:: forDisplayObjects=forDisplayObjects() # stores objects needed to  display using OpenGL and GLFW
+    onScrollData::FullScrollableDat = FullScrollableDat()
+    textureToModifyVec::Vector{TextureSpec}=[] # texture that we want currently to modify - if list is empty it means that we do not intend to modify any texture
+    isSliceChanged::Bool= false # set to true when slice is changed set to false when we start interacting with this slice - thanks to this we know that when we start drawing on one slice and change the slice the line would star a new on new slice
+    textDispObj::ForWordsDispStruct =ForWordsDispStruct()# set of objects and constants needed for text diplay
+    currentlyDispDat::SingleSliceDat =SingleSliceDat() # holds the data displayed or in case of scrollable data view for accessing it
+    calcDimsStruct::CalcDimsStruct=CalcDimsStruct()   #data for calculations of necessary constants needed to calculate window size , mouse position ...
+    valueForMasToSet::valueForMasToSetStruct=valueForMasToSetStruct() # value that will be used to set  pixels where we would interact with mouse
+    lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1,1,1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
+    forUndoVector::AbstractArray=[] # holds lambda functions that when invoked will  undo last operations
+    maxLengthOfForUndoVector::Int64 = 10 # number controls how many step at maximum we can get back
+    isBusy::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0) # used to indicate by some functions that actor is busy and some interactions should be ceased
+  end
 """
 Holding necessery data to controll keyboard shortcuts
 
@@ -223,122 +246,6 @@ Holding necessery data to controll mouse interaction
   isRightButtonDown ::Bool = false# true if right button was pressed and not yet released
   lastCoordinates::Vector{CartesianIndex{2}} = [] # list of accumulated mouse coordinates
 end#MouseStruct
-
-
-
-"""
-struct that enables reacting to  the input  from mouse click  and drag the input will be 
-    Cartesian index represening (x,y)
-     x and y position  of the mouse - will be recorded only if left mouse button is pressed or keep presssed
-"""
-@with_kw  mutable struct MouseCallbackSubscribable <: Subscribable{MouseStruct}
-    #true if left button is presed down - we make it true if the left button is pressed over image and false if mouse get out of the window or we get information about button release
-    isLeftButtonDown ::Bool 
-    isRightButtonDown ::Bool 
-    #coordinates marking 4 corners of 
-    #the quad that displays our medical image with the masks
-    xmin::Int32
-    ymin::Int32
-    xmax::Int32
-    ymax::Int32
-#used to draw left button lines (creating lines)
- #store of the cartesian coordinates that is used to batch actions 
-#- so if mouse is moving rapidly we would store bunch of coordinates and then modify texture in batch
-    coordinatesStoreForLeftClicks ::Vector{CartesianIndex{2}} 
-    lastCoordinate::CartesianIndex{2}#generally when we draw lines we remove points from array above yet w need to leave last one in order to keep continuity of futher line
-    isBusy::Base.Threads.Atomic{Bool} # indicate to check weather the system is ready to receive the input
-
-   
-    subject :: Subject{MouseStruct} # coordinates of mouse 
-   
-end
-
-
-"""
-Object that enables managing input from keyboard - it stores the information also about
-needed keys wheather they are kept pressed  
-examples of keyboard input 
-    action RELEASE GLFW.Action
-    key s StringPRESS
-    key s String
-    action PRESS GLFW.Action
-    key s StringRELEASE
-    key s String
-    action RELEASE GLFW.Action
-
-"""
-mutable struct KeyboardCallbackSubscribable <: Subscribable{KeyboardStruct}
-# true when pressed and kept true until released
-# true if corresponding keys are kept pressed and become flase when relesed
-    isCtrlPressed::Bool # left - scancode 37 right 105 - Int32
-    isShiftPressed::Bool  # left - scancode 50 right 62- Int32
-    isAltPressed::Bool# left - scancode 64 right 108- Int32
-    isEnterPressed::Bool# scancode 36
-    isTAbPressed::Bool# scancode 36
-    isSpacePressed::Bool# scancode 36
-    isF1Pressed::Bool
-    isF2Pressed::Bool
-    isF3Pressed::Bool
-    lastKeysPressed::Vector{String} # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
-    subject :: Subject{KeyboardStruct} 
-end 
-
-
-
-
-"""
-struct that enables reacting to  the input from scrolling
-"""
-mutable struct ScrollCallbackSubscribable <: Subscribable{Int64}
-    isBusy::Base.Threads.Atomic{Bool} # indicate to check weather the system is ready to receive the input
-    numberToSend::Int64# number  that will indicate how many slices to skip and in positive or negative direction
-    subject :: Subject{Int64}
-end
-
-
-
-
-
-
-
-
-
-"""
-Actor that is able to store a state to keep needed data for proper display
-
-  currentDisplayedSlice::Int=1 # stores information what slice number we are currently displaying
-    mainForDisplayObjects:: forDisplayObjects=forDisplayObjects() # stores objects needed to  display using OpenGL and GLFW
-    onScrollData::FullScrollableDat = FullScrollableDat()
-    textureToModifyVec::Vector{TextureSpec}=[] # texture that we want currently to modify - if list is empty it means that we do not intend to modify any texture
-    isSliceChanged::Bool= false # set to true when slice is changed set to false when we start interacting with this slice - thanks to this we know that when we start drawing on one slice and change the slice the line would star a new on new slice
-    textDispObj::ForWordsDispStruct =ForWordsDispStruct()# set of objects and constants needed for text diplay
-    currentlyDispDat::SingleSliceDat =SingleSliceDat() # holds the data displayed or in case of scrollable data view for accessing it
-    calcDimsStruct::CalcDimsStruct=CalcDimsStruct()   #data for calculations of necessary constants needed to calculate window size , mouse position ...
-    valueForMasToSet::valueForMasToSetStruct=valueForMasToSetStruct() # value that will be used to set  pixels where we would interact with mouse
-    lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1,1,1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
-    forUndoVector::AbstractArray=[] # holds lambda functions that when invoked will  undo last operations
-    maxLengthOfForUndoVector::Int64 = 10 # number controls how many step at maximum we can get back
-    isBusy::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0) # used to indicate by some functions that actor is busy and some interactions should be ceased
-
-
-"""
-@with_kw mutable struct ActorWithOpenGlObjects <: NextActor{Any}
-    currentDisplayedSlice::Int=1 # stores information what slice number we are currently displaying
-    mainForDisplayObjects:: forDisplayObjects=forDisplayObjects() # stores objects needed to  display using OpenGL and GLFW
-    onScrollData::FullScrollableDat = FullScrollableDat()
-    textureToModifyVec::Vector{TextureSpec}=[] # texture that we want currently to modify - if list is empty it means that we do not intend to modify any texture
-    isSliceChanged::Bool= false # set to true when slice is changed set to false when we start interacting with this slice - thanks to this we know that when we start drawing on one slice and change the slice the line would star a new on new slice
-    textDispObj::ForWordsDispStruct =ForWordsDispStruct()# set of objects and constants needed for text diplay
-    currentlyDispDat::SingleSliceDat =SingleSliceDat() # holds the data displayed or in case of scrollable data view for accessing it
-    calcDimsStruct::CalcDimsStruct=CalcDimsStruct()   #data for calculations of necessary constants needed to calculate window size , mouse position ...
-    valueForMasToSet::valueForMasToSetStruct=valueForMasToSetStruct() # value that will be used to set  pixels where we would interact with mouse
-    lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1,1,1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
-    forUndoVector::AbstractArray=[] # holds lambda functions that when invoked will  undo last operations
-    maxLengthOfForUndoVector::Int64 = 10 # number controls how many step at maximum we can get back
-    isBusy::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0) # used to indicate by some functions that actor is busy and some interactions should be ceased
-    end
-
-
 
 
 end #module

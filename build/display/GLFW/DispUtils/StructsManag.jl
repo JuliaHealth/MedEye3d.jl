@@ -20,7 +20,7 @@ function modSlice!(data::TwoDimRawDat{T}
                 ,coords::Vector{CartesianIndex{2}}
                 ,value::T ) where {T}
    data.dat[coords].=value
-   data
+   data.dat
 end#modSlice
 
 

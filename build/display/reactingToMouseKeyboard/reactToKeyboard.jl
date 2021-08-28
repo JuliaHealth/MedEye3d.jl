@@ -8,7 +8,36 @@ module ReactOnKeyboard
 using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow,   ..DataStructs ,Glutils, Rocket, GLFW,Dictionaries,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils,  ..Uniforms, Match, Parameters,DataTypesBasic
 export reactToKeyboard , registerKeyboardFunctions,processKeysInfo
 
+keyboardHandler= nothing # used only in case of profiling
 
+KeyboardCallbackSubscribableStr= """
+Object that enables managing input from keyboard - it stores the information also about
+needed keys wheather they are kept pressed  
+examples of keyboard input 
+    action RELEASE GLFW.Action
+    key s StringPRESS
+    key s String
+    action PRESS GLFW.Action
+    key s StringRELEASE
+    key s String
+    action RELEASE GLFW.Action
+
+"""
+mutable struct KeyboardCallbackSubscribable <: Subscribable{KeyboardStruct}
+# true when pressed and kept true until released
+# true if corresponding keys are kept pressed and become flase when relesed
+    isCtrlPressed::Bool # left - scancode 37 right 105 - Int32
+    isShiftPressed::Bool  # left - scancode 50 right 62- Int32
+    isAltPressed::Bool# left - scancode 64 right 108- Int32
+    isEnterPressed::Bool# scancode 36
+    isTAbPressed::Bool# scancode 36
+    isSpacePressed::Bool# scancode 36
+    isF1Pressed::Bool
+    isF2Pressed::Bool
+    isF3Pressed::Bool
+    lastKeysPressed::Vector{String} # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
+    subject :: Subject{KeyboardStruct} 
+end 
 
 """
 will "tell" what functions should be invoked in order to process keyboard input 
@@ -101,9 +130,8 @@ function registerKeyboardFunctions(window::GLFW.Window,stopListening::Base.Threa
     stopListening[]=true # stoping event listening loop to free the GLFW context
                            
     keyboardSubs = KeyboardCallbackSubscribable(false,false,false,false,false,false,false,false,false,[], Subject(KeyboardStruct, scheduler = AsyncScheduler()))
-
-
-    GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
+    keyboardHandler =keyboardSubs                             
+        GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
         name = GLFW.GetKeyName(key, scancode)
         if name == nothing
             keyboardSubs(key,action)                                                        

@@ -113,9 +113,6 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
 
 
 
-    #finding some texture that can be modifid and set as one active for modifications
- 
-       mainActor.actor.textureToModifyVec = filter(it->it.isEditable ,initializedTextures)
 
     #in order to clean up all resources while closing
     GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())

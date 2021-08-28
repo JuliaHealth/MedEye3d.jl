@@ -68,14 +68,7 @@ function setUpForScrollData(onScrollData::FullScrollableDat ,actor::SyncActor{An
     actor.actor.onScrollData=onScrollData
     #In order to refresh all in case we would change the texture dimensions ...
   processKeysInfo(Option(onScrollData.dataToScrollDims),actor,KeyboardStruct()  )
-      #so  It will precalculate some data and later mouse modification will be swift
-      oldd = actor.actor.valueForMasToSet 
-      
-      actor.actor.valueForMasToSet = valueForMasToSetStruct(0)
-      ReactOnMouseClickAndDrag.reactToMouseDrag(MouseStruct(true,false, [CartesianIndex(1,1)]),actor )
-      actor.actor.valueForMasToSet = oldd
-
-  actor.actor.mainForDisplayObjects.stopListening[]=false
+    actor.actor.mainForDisplayObjects.stopListening[]=false
 
 end#setUpMainDisplay
 
@@ -175,15 +168,11 @@ function subscribeGLFWtoActor(actor ::SyncActor{Any, ActorWithOpenGlObjects})
     GLFW.SetScrollCallback(forDisplayConstants.window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
 
     keyBoardAct = registerKeyboardFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)
-    buttonSubs  = registerMouseClickFunctions(forDisplayConstants.window,forDisplayConstants.stopListening,actor.actor.calcDimsStruct,actor.actor.isBusy )
+    buttonSubs = registerMouseClickFunctions(forDisplayConstants.window,forDisplayConstants.stopListening,actor.actor.calcDimsStruct,actor.actor.isBusy )
   
-
-
     keyboardSub = subscribe!(keyBoardAct, actor)
     scrollSubscription = subscribe!(scrollback, actor)
     mouseClickSub = subscribe!(buttonSubs, actor)
-
-
 
 return [scrollSubscription,mouseClickSub,keyboardSub]
 
