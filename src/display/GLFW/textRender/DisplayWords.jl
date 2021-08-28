@@ -3,8 +3,7 @@ Module controlling displaying of the text associated with the segmentation
 - either text releted to all slices or just a single one currently displayed or both
 """
 module DisplayWords
-using FreeTypeAbstraction, ForDisplayStructs, DataStructs, ModernGlUtil , ModernGL, ColorTypes, PrepareWindowHelpers,   ShadersAndVerticies,  ShadersAndVerticiesForText, Glutils, DrWatson
-@quickactivate "JuliaMed3d"
+using FreeTypeAbstraction, ..ForDisplayStructs, ..DataStructs, ..ModernGlUtil , ModernGL, ColorTypes, ..PrepareWindowHelpers,   ..ShadersAndVerticies,  ..ShadersAndVerticiesForText, Glutils, DrWatson
 
 
 export getTextForCurrentSlice,textLinesFromStrings,renderSingleLineOfText,activateForTextDisp,bindAndActivateForText,reactivateMainObj, createTextureForWords,bindAndActivateForText, bindAndDisplayTexture
@@ -114,7 +113,7 @@ function createTextureForWords(numberOfActiveTextUnits::Int
                                 ,widthh::Int32 =Int32(100)
                                 ,heightt::Int32=Int32(1000)
                                 ,actTextrureNumb::UInt32=UInt32(0) )::TextureSpec
-    return  ForDisplayStructs.TextureSpec{UInt8}(
+    return  TextureSpec{UInt8}(
             name = "textText"
             ,color = RGB(0.0,0.0,1.0)
             #,ID=texId

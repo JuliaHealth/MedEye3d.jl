@@ -3,8 +3,8 @@ stores functions needed to create bind and update OpenGl textues
 """
 module TextureManag
 using Base: Float16
-using  ModernGL ,DrWatson,   OpenGLDisplayUtils,  ForDisplayStructs
-using   Uniforms, Logging,Setfield, Glutils,Logging,  CustomFragShad,  DataStructs,  DisplayWords
+using  ModernGL ,DrWatson,   ..OpenGLDisplayUtils,  ..ForDisplayStructs
+using   ..Uniforms, Logging,Setfield, Glutils,Logging,  ..CustomFragShad,  ..DataStructs,  ..DisplayWords
 export activateTextures,addTextToTexture,initializeTextures,createTexture, getProperGL_TEXTURE,updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
 
 """
@@ -101,7 +101,7 @@ function initializeTextures(listOfTextSpecs::Vector{TextureSpec}
         actTextrureNumb = getProperGL_TEXTURE(index)
         glActiveTexture(actTextrureNumb)
         glUniform1i(textSpec.uniforms.samplerRef,index);# we first look for uniform sampler in shader  
-        # we set uniforms of visibility and colors according to specified in configuration
+        # we set ..Uniforms of visibility and colors according to specified in configuration
         if(!textSpec.isMainImage) setMaskColor(textSpec.color ,textSpec.uniforms)   end
         
         
@@ -119,7 +119,7 @@ end #initializeAndDrawTextures
 """
 activating textures that were already initialized in order to be able to use them with diffrent shader program 
 shader_program- regference to OpenGL program so we will be able to activate  textures
-listOfTextSpecs - list of TextureSpec structs that  holds data needed to bind textures to shader program (Hovewer this new shader program have to keep the same uniforms)
+listOfTextSpecs - list of TextureSpec structs that  holds data needed to bind textures to shader program (Hovewer this new shader program have to keep the same ..Uniforms)
 return unmodified textures
 """
 function activateTextures(listOfTextSpecs::Vector{TextureSpec} )::Vector{TextureSpec}
@@ -127,7 +127,7 @@ function activateTextures(listOfTextSpecs::Vector{TextureSpec} )::Vector{Texture
     for (ind, textSpec ) in enumerate(listOfTextSpecs)
         glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
         glUniform1i(textSpec.uniforms.samplerRef,textSpec.associatedActiveNumer);# we first look for uniform sampler in shader  
-        # we set uniforms of visibility and colors according to specified in configuration
+        # we set ..Uniforms of visibility and colors according to specified in configuration
         if(!textSpec.isMainImage) setMaskColor(textSpec.color ,textSpec.uniforms)   end      
         setTextureVisibility(textSpec.isVisible ,textSpec.uniforms)
     end # for
@@ -190,16 +190,16 @@ end
 
 """
 on the basis of the type supplied in texture characteristic
-it supplies given set of uniforms to it 
+it supplies given set of ..Uniforms to it 
 It would also assign proper openGl types to given julia data type, and pass data from texture specification to opengl context
-textSpecs - list of texture specificaton that we want to enrich by adding information about uniforms
-return list of texture specifications enriched by information about uniforms 
+textSpecs - list of texture specificaton that we want to enrich by adding information about ..Uniforms
+return list of texture specifications enriched by information about ..Uniforms 
 """
-function assignUniformsAndTypesToMasks(textSpecs::Vector{ ForDisplayStructs.TextureSpec}
+function assignUniformsAndTypesToMasks(textSpecs::Vector{TextureSpec}
                 ,shader_program::UInt32
                 ,windowControlStruct::WindowControlStruct)
     mainTexture,notMainTextures=   divideTexteuresToMainAndRest(textSpecs)
-#main texture uniforms
+#main texture ..Uniforms
 n= mainTexture.name
 
 mainUnifs =MainImageUniforms(
@@ -222,21 +222,21 @@ setCTWindow(windowControlStruct.min_shown_white,windowControlStruct.max_shown_bl
 
 maintext = setproperties(mainTexture, (uniforms= mainUnifs ))
 # joining main and not main textures data 
-mapped= [ map(x-> setUniforms(x,shader_program) , notMainTextures)..., maintext]
+mapped= [ map(x-> setuniforms(x,shader_program) , notMainTextures)..., maintext]
 
 return  (mainUnifs, map(x->setProperOpenGlTypes(x),mapped))
 
 
-end#assignUniformsToMasks
+end#assign..UniformsToMasks
 
 
  """
-helper for assignUniformsToMasks 
+helper for assign..UniformsToMasks 
 On the basis of the name of the Texture it will assign the informs referencs to it 
-- uniforms for main image will be set separately
+- ..Uniforms for main image will be set separately
 
 """
-function setUniforms(textSpec:: ForDisplayStructs.TextureSpec,shader_program::UInt32):: ForDisplayStructs.TextureSpec
+function setuniforms(textSpec:: TextureSpec,shader_program::UInt32):: TextureSpec
     
     n= textSpec.name
     unifs = MaskTextureUniforms(samplerName= n
@@ -246,7 +246,7 @@ function setUniforms(textSpec:: ForDisplayStructs.TextureSpec,shader_program::UI
 
     return setproperties(textSpec, (uniforms= unifs ))
 
-end#assignUniformsToMasks
+end#assign..UniformsToMasks
 
 
 
@@ -255,7 +255,7 @@ On the basis of the type associated to texture we set proper open Gl types assoc
 based on https://www.khronos.org/registry/OpenGL-Refpages/gl4/html/glTexImage2D.xhtml
 and https://www.khronos.org/opengl/wiki/OpenGL_Type
 """
-function setProperOpenGlTypes(textSpec:: ForDisplayStructs.TextureSpec):: ForDisplayStructs.TextureSpec
+function setProperOpenGlTypes(textSpec:: TextureSpec):: TextureSpec
     if(parameter_type(textSpec)== Float16 ) return  setproperties(textSpec, (GL_Rtype= GL_R16F ,OpGlType= GL_HALF_FLOAT ))     end 
     if(parameter_type(textSpec)== Float32 ) return  setproperties(textSpec, (GL_Rtype= GL_R32F ,OpGlType= GL_FLOAT))     end 
     if(parameter_type(textSpec)== Int8 ) return  setproperties(textSpec, (GL_Rtype= GL_R8I ,OpGlType= GL_BYTE ))     end 
@@ -401,4 +401,4 @@ end #addTextToTexture
 # end
 
 
-end #TextureManag
+end #..TextureManag

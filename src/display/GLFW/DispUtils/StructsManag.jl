@@ -7,7 +7,7 @@ using ColorTypes
 utilities for dealing data structs like FullScrollableDat or SingleSliceDat
 """
 module StructsManag
-using  Setfield,   ForDisplayStructs,   DataStructs, Rocket
+using  Setfield,   ..ForDisplayStructs,   ..DataStructs, Rocket
 export addToforUndoVector,cartTwoToThree,getHeightToWidthRatio,threeToTwoDimm,modSlice!, threeToTwoDimm,modifySliceFull!,getSlicesNumber,getMainVerticies
 
 ```@doc
@@ -20,7 +20,7 @@ function modSlice!(data::TwoDimRawDat{T}
                 ,coords::Vector{CartesianIndex{2}}
                 ,value::T ) where {T}
    data.dat[coords].=value
-   data.dat
+   data
 end#modSlice
 
 

@@ -1,7 +1,7 @@
 
 #Create and initialize shaders
 module ShadersAndVerticies
-using ModernGL, GeometryTypes, GLFW, ForDisplayStructs,  CustomFragShad,  ModernGlUtil
+using ModernGL, GeometryTypes, GLFW, ..ForDisplayStructs,  ..CustomFragShad,  ..ModernGlUtil
 
 
 export createFragmentShader
@@ -55,7 +55,7 @@ function createFragmentShader(gslString::String
                           ,maskWeAreSubtracting ::TextureSpec)
     fsh = """
     $(gslString)
-    $( CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate,maskToSubtractFrom,maskWeAreSubtracting))  
+    $( createCustomFramgentShader(listOfTexturesToCreate,maskToSubtractFrom,maskWeAreSubtracting))  
     """
     return createShader(fsh, GL_FRAGMENT_SHADER)
     end
@@ -76,4 +76,4 @@ elements = Face{3,UInt32}[(0,1,2),          # the first triangle
 
 
 
-  end #ShadersAndVerticies
+  end #..ShadersAndVerticies

@@ -5,7 +5,7 @@ display verticies needed for texture  display
 module PrepareWindowHelpers
 using DrWatson
 @quickactivate "Probabilistic medical segmentation"
-using  ModernGlUtil, GLFW,ModernGL
+using  ..ModernGlUtil, GLFW,ModernGL
 
 export createDAtaBuffer
 export createElementBuffer

@@ -3,7 +3,7 @@ functions that will enable creation of long String that will be the code for cus
 """
 module CustomFragShad
 
-using ModernGL, GeometryTypes, GLFW,  ForDisplayStructs, ColorTypes
+using ModernGL, GeometryTypes, GLFW,  ..ForDisplayStructs, ColorTypes
 
 export createCustomFramgentShader,divideTexteuresToMainAndRest,addSamplerStr
 
@@ -155,7 +155,7 @@ end #addWindowingFunc
 
 
 """
-Adding string necessary for managing uniforms of masks textures
+Adding string necessary for managing ..Uniforms of masks textures
 """
 function addMasksStrings(textur::TextureSpec)
     textName = textur.name
@@ -174,7 +174,7 @@ end#addMasksStrings
 
 
 """
-Adding uniforms resopnsible for colors associated with given mask 
+Adding ..Uniforms resopnsible for colors associated with given mask 
 """
 function addColorUniform(textur::TextureSpec)
     #in case of multiple colors used by single mask like in case of nuclearm medicine mask
@@ -294,7 +294,7 @@ end#chooseColorFonuction
 # used to display and debug  output - output can be also additionally checked using this tool http://evanw.github.io/glslx/
 # """
 # function debuggingOutput(listOfTexturesToCreate)
-#     strr=  CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate)
+#     strr=  ..CustomFragShad.createCustomFramgentShader(listOfTexturesToCreate)
 #     for st in split(strr, "\n")
 #     @info st
 #     end
@@ -381,7 +381,7 @@ end#getNuclearMaskFunction
 
 
 """
-Add uniforms necessary for operation of mask subtraction and  for proper display of nuclear medicine masks
+Add ..Uniforms necessary for operation of mask subtraction and  for proper display of nuclear medicine masks
 """
 function addUniformsForNuclearAndSubtr()::String
 return """
@@ -390,11 +390,11 @@ uniform int isMaskDiffrenceVis=0 ;//1 if we want to display mask difference
 uniform int maskAIndex=0 ;//marks index of first mask we want to get diffrence visualized
 uniform int maskBIndex=0 ;//marks index of second mask we want to get diffrence visualized
 """	
-end#addUniformsForNuclearAndSubtr
+end#add..UniformsForNuclearAndSubtr
 
 
 
 
 
 
-end #CustomFragShad module
+end #..CustomFragShad module

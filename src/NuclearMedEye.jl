@@ -1,5 +1,5 @@
 module NuclearMedEye
-
+import Logging
 
 
 include(joinpath( "display","GLFW","startModules","ModernGlUtil.jl"))
@@ -32,7 +32,6 @@ include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard.jl") )
 include(joinpath( "display","reactingToMouseKeyboard","ReactingToInput.jl") )
 include(joinpath( "display","GLFW","SegmentationDisplay.jl"))
 
-using SegmentationDisplay
 
 greet() = print("Hello World!")
 

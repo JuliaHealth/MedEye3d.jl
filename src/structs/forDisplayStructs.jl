@@ -1,8 +1,8 @@
 module ForDisplayStructs
 using Base: Int32, isvisible
-export MouseStruct,parameter_type,Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms,ForWordsDispStruct
+export ScrollCallbackSubscribable, KeyboardCallbackSubscribable, MouseCallbackSubscribable,MouseStruct,parameter_type,Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms,ForWordsDispStruct
 
-using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries,FreeTypeAbstraction,  DataStructs
+using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries,FreeTypeAbstraction, ..DataStructs
 
 
 """
@@ -36,21 +36,21 @@ isVisibleRef::Int32 =Int32(0)# reference to uniform that points weather we
 end
 
 """
-Holding references to uniforms used to controll main image
+Holding references to ..Uniforms used to controll main image
 """
 @with_kw struct MainImageUniforms<: TextureUniforms
 samplerName::String =""#name of the sampler - mainly for debugging purposes
 samplerRef ::Int32 =Int32(0) #reference to   sampler of the texture
 isVisibleRef::Int32 =Int32(0)# reference to uniform that points weather we 
-# uniforms controlling windowing
+# ..Uniforms controlling windowing
 min_shown_white::Int32 =Int32(0)
 max_shown_black::Int32 =Int32(0)
 displayRange::Int32 =Int32(0)
-# uniforms controlling  displaying masks diffrence
+# ..Uniforms controlling  displaying masks diffrence
 isMaskDiffrenceVis::Int32 =Int32(0)
 maskAIndex::Int32 =Int32(0)
 maskBIndex::Int32 =Int32(0)
-#uniforms controlling nuclear image display
+#..Uniforms controlling nuclear image display
 minNuclearMaskVal::Int32 =Int32(0)
 maxNuclearMaskVal::Int32 =Int32(0)
 rangeOfNuclearMaskVal::Int32 =Int32(0)
@@ -61,11 +61,31 @@ end
 
 """
 Holding the data needed to create and  later reference the textures
+
+name::String=""               #human readable name by which we can reference texture
+numb::Int32 =-1               #needed to enable swithing between textures generally convinient when between 0-9; needed only if texture is to be modified by mouse input
+whichCreated::Int32 =-1       #marks which one this texture was when created - so first in list second ... - needed for convinient accessing ..Uniforms in shaders
+isMainImage ::Bool = false  #true if this texture represents main image
+isNuclearMask ::Bool = false # used for example in case of nuclear imagiing studies
+isContinuusMask ::Bool = false # in case of masks if mask is continuus color display we set multiple colors in a vector
+color::RGB = RGB(0.0,0.0,0.0) #needed in case for the masks in order to establish the range of colors we are intrested in in case of binary mask there is no point to supply more than one color (supply Vector with length = 1)
+colorSet::Vector{RGB}=[]    #set of colors that can be used for mask with continous values
+strokeWidth::Int32 =Int32(3)#marking how thick should be the line that is left after acting with the mouse ... 
+isEditable::Bool =false     #if true we can modify given  texture using mouse interaction
+GL_Rtype::UInt32 =UInt32(0)           #GlRtype - for example GL_R8UI or GL_R16I
+OpGlType ::UInt32 =UInt32(0)          #open gl type - for example GL_UNSIGNED_BYTE or GL_SHORT
+actTextrureNumb ::UInt32 =UInt32(0)          #usefull to be able to activate the texture using GL_Activetexture - with proper open GL constant
+associatedActiveNumer ::Int64 =Int64(0)          #usefull to be able to activate the texture using GL_Activetexture - with proper open GL constant
+ID::Base.RefValue{UInt32} = Ref(UInt32(0))   #id of Texture
+isVisible::Bool= true       #if false it should be invisible 
+uniforms::TextureUniforms=MaskTextureUniforms()# holds values needed to control ..Uniforms in a shader
+minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask, and second entry is maximum possible value for this mask
+
 """
 @with_kw mutable struct TextureSpec{T}
   name::String=""               #human readable name by which we can reference texture
   numb::Int32 =-1               #needed to enable swithing between textures generally convinient when between 0-9; needed only if texture is to be modified by mouse input
-  whichCreated::Int32 =-1       #marks which one this texture was when created - so first in list second ... - needed for convinient accessing uniforms in shaders
+  whichCreated::Int32 =-1       #marks which one this texture was when created - so first in list second ... - needed for convinient accessing ..Uniforms in shaders
   isMainImage ::Bool = false  #true if this texture represents main image
   isNuclearMask ::Bool = false # used for example in case of nuclear imagiing studies
   isContinuusMask ::Bool = false # in case of masks if mask is continuus color display we set multiple colors in a vector
@@ -79,7 +99,7 @@ Holding the data needed to create and  later reference the textures
   associatedActiveNumer ::Int64 =Int64(0)          #usefull to be able to activate the texture using GL_Activetexture - with proper open GL constant
   ID::Base.RefValue{UInt32} = Ref(UInt32(0))   #id of Texture
   isVisible::Bool= true       #if false it should be invisible 
-  uniforms::TextureUniforms=MaskTextureUniforms()# holds values needed to control uniforms in a shader
+  uniforms::TextureUniforms=MaskTextureUniforms()# holds values needed to control ..Uniforms in a shader
   minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask, and second entry is maximum possible value for this mask
 end
 
@@ -100,6 +120,21 @@ end#getLocationDict
 
 """
 Defined in order to hold constant objects needed to display images 
+listOfTextSpecifications::Vector{TextureSpec} = [TextureSpec()]
+window = []
+vertex_shader::UInt32 =1
+fragment_shader::UInt32=1
+shader_program::UInt32=1
+stopListening::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0)# enables unlocking GLFW context for futher actions
+vbo::UInt32 =1 #vertex buffer object id
+ebo::UInt32 =1 #element buffer object id
+mainImageUniforms::MainImageUniforms = MainImageUniforms()# struct with references to main image
+TextureIndexes::Dictionary{String, Int64}=Dictionary{String, Int64}()  #gives a way of efficient querying by supplying dictionary where key is a name we are intrested in and a key is index where it is located in our array
+numIndexes::Dictionary{Int32, Int64} =Dictionary{Int32, Int64}() # a way for fast query using assigned numbers
+gslsStr::String="" # string giving information about used openg gl gsls version
+windowControlStruct::WindowControlStruct=WindowControlStruct()# holding data usefull to controll display window
+
+
 """
 @with_kw  struct forDisplayObjects    
   listOfTextSpecifications::Vector{TextureSpec} = [TextureSpec()]
@@ -131,26 +166,37 @@ shader_program_words::UInt32=1
 end #ForWordsDispStruct
 
 
+
+
+
+
+
+
+
+
+
+
+
 """
-Actor that is able to store a state to keep needed data for proper display
+Holding necessery data to controll keyboard shortcuts
+
+isCtrlPressed::Bool = false# left - scancode 37 right 105 - Int32
+isShiftPressed::Bool = false # left - scancode 50 right 62- Int32
+isAltPressed::Bool= false# left - scancode 64 right 108- Int32
+isEnterPressed::Bool= false# scancode 36
+isTAbPressed::Bool= false#
+isSpacePressed::Bool= false# 
+isF1Pressed::Bool= false
+isF2Pressed::Bool= false
+isF3Pressed::Bool= false
+
+lastKeysPressed::Vector{String}=[] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
+#informations about what triggered sending this particular struct to the  actor
+mostRecentScanCode ::GLFW.Key=GLFW.KEY_KP_4
+mostRecentKeyName ::String=""
+mostRecentAction ::GLFW.Action= GLFW.RELEASE
+
 """
-@with_kw mutable struct ActorWithOpenGlObjects <: NextActor{Any}
-    currentDisplayedSlice::Int=1 # stores information what slice number we are currently displaying
-    mainForDisplayObjects:: ForDisplayStructs.forDisplayObjects=forDisplayObjects() # stores objects needed to  display using OpenGL and GLFW
-    onScrollData::FullScrollableDat = FullScrollableDat()
-    textureToModifyVec::Vector{TextureSpec}=[] # texture that we want currently to modify - if list is empty it means that we do not intend to modify any texture
-    isSliceChanged::Bool= false # set to true when slice is changed set to false when we start interacting with this slice - thanks to this we know that when we start drawing on one slice and change the slice the line would star a new on new slice
-    textDispObj::ForWordsDispStruct =ForWordsDispStruct()# set of objects and constants needed for text diplay
-    currentlyDispDat::SingleSliceDat =SingleSliceDat() # holds the data displayed or in case of scrollable data view for accessing it
-    calcDimsStruct::CalcDimsStruct=CalcDimsStruct()   #data for calculations of necessary constants needed to calculate window size , mouse position ...
-    valueForMasToSet::valueForMasToSetStruct=valueForMasToSetStruct() # value that will be used to set  pixels where we would interact with mouse
-    lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1,1,1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
-    forUndoVector::AbstractArray=[] # holds lambda functions that when invoked will  undo last operations
-    maxLengthOfForUndoVector::Int64 = 10 # number controls how many step at maximum we can get back
-    isBusy::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0) # used to indicate by some functions that actor is busy and some interactions should be ceased
-  end
-"""
-Holding necessery data to controll keyboard shortcuts"""
 @with_kw struct KeyboardStruct
   isCtrlPressed::Bool = false# left - scancode 37 right 105 - Int32
   isShiftPressed::Bool = false # left - scancode 50 right 62- Int32
@@ -177,6 +223,122 @@ Holding necessery data to controll mouse interaction
   isRightButtonDown ::Bool = false# true if right button was pressed and not yet released
   lastCoordinates::Vector{CartesianIndex{2}} = [] # list of accumulated mouse coordinates
 end#MouseStruct
+
+
+
+"""
+struct that enables reacting to  the input  from mouse click  and drag the input will be 
+    Cartesian index represening (x,y)
+     x and y position  of the mouse - will be recorded only if left mouse button is pressed or keep presssed
+"""
+@with_kw  mutable struct MouseCallbackSubscribable <: Subscribable{MouseStruct}
+    #true if left button is presed down - we make it true if the left button is pressed over image and false if mouse get out of the window or we get information about button release
+    isLeftButtonDown ::Bool 
+    isRightButtonDown ::Bool 
+    #coordinates marking 4 corners of 
+    #the quad that displays our medical image with the masks
+    xmin::Int32
+    ymin::Int32
+    xmax::Int32
+    ymax::Int32
+#used to draw left button lines (creating lines)
+ #store of the cartesian coordinates that is used to batch actions 
+#- so if mouse is moving rapidly we would store bunch of coordinates and then modify texture in batch
+    coordinatesStoreForLeftClicks ::Vector{CartesianIndex{2}} 
+    lastCoordinate::CartesianIndex{2}#generally when we draw lines we remove points from array above yet w need to leave last one in order to keep continuity of futher line
+    isBusy::Base.Threads.Atomic{Bool} # indicate to check weather the system is ready to receive the input
+
+   
+    subject :: Subject{MouseStruct} # coordinates of mouse 
+   
+end
+
+
+"""
+Object that enables managing input from keyboard - it stores the information also about
+needed keys wheather they are kept pressed  
+examples of keyboard input 
+    action RELEASE GLFW.Action
+    key s StringPRESS
+    key s String
+    action PRESS GLFW.Action
+    key s StringRELEASE
+    key s String
+    action RELEASE GLFW.Action
+
+"""
+mutable struct KeyboardCallbackSubscribable <: Subscribable{KeyboardStruct}
+# true when pressed and kept true until released
+# true if corresponding keys are kept pressed and become flase when relesed
+    isCtrlPressed::Bool # left - scancode 37 right 105 - Int32
+    isShiftPressed::Bool  # left - scancode 50 right 62- Int32
+    isAltPressed::Bool# left - scancode 64 right 108- Int32
+    isEnterPressed::Bool# scancode 36
+    isTAbPressed::Bool# scancode 36
+    isSpacePressed::Bool# scancode 36
+    isF1Pressed::Bool
+    isF2Pressed::Bool
+    isF3Pressed::Bool
+    lastKeysPressed::Vector{String} # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
+    subject :: Subject{KeyboardStruct} 
+end 
+
+
+
+
+"""
+struct that enables reacting to  the input from scrolling
+"""
+mutable struct ScrollCallbackSubscribable <: Subscribable{Int64}
+    isBusy::Base.Threads.Atomic{Bool} # indicate to check weather the system is ready to receive the input
+    numberToSend::Int64# number  that will indicate how many slices to skip and in positive or negative direction
+    subject :: Subject{Int64}
+end
+
+
+
+
+
+
+
+
+
+"""
+Actor that is able to store a state to keep needed data for proper display
+
+  currentDisplayedSlice::Int=1 # stores information what slice number we are currently displaying
+    mainForDisplayObjects:: forDisplayObjects=forDisplayObjects() # stores objects needed to  display using OpenGL and GLFW
+    onScrollData::FullScrollableDat = FullScrollableDat()
+    textureToModifyVec::Vector{TextureSpec}=[] # texture that we want currently to modify - if list is empty it means that we do not intend to modify any texture
+    isSliceChanged::Bool= false # set to true when slice is changed set to false when we start interacting with this slice - thanks to this we know that when we start drawing on one slice and change the slice the line would star a new on new slice
+    textDispObj::ForWordsDispStruct =ForWordsDispStruct()# set of objects and constants needed for text diplay
+    currentlyDispDat::SingleSliceDat =SingleSliceDat() # holds the data displayed or in case of scrollable data view for accessing it
+    calcDimsStruct::CalcDimsStruct=CalcDimsStruct()   #data for calculations of necessary constants needed to calculate window size , mouse position ...
+    valueForMasToSet::valueForMasToSetStruct=valueForMasToSetStruct() # value that will be used to set  pixels where we would interact with mouse
+    lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1,1,1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
+    forUndoVector::AbstractArray=[] # holds lambda functions that when invoked will  undo last operations
+    maxLengthOfForUndoVector::Int64 = 10 # number controls how many step at maximum we can get back
+    isBusy::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0) # used to indicate by some functions that actor is busy and some interactions should be ceased
+
+
+"""
+@with_kw mutable struct ActorWithOpenGlObjects <: NextActor{Any}
+    currentDisplayedSlice::Int=1 # stores information what slice number we are currently displaying
+    mainForDisplayObjects:: forDisplayObjects=forDisplayObjects() # stores objects needed to  display using OpenGL and GLFW
+    onScrollData::FullScrollableDat = FullScrollableDat()
+    textureToModifyVec::Vector{TextureSpec}=[] # texture that we want currently to modify - if list is empty it means that we do not intend to modify any texture
+    isSliceChanged::Bool= false # set to true when slice is changed set to false when we start interacting with this slice - thanks to this we know that when we start drawing on one slice and change the slice the line would star a new on new slice
+    textDispObj::ForWordsDispStruct =ForWordsDispStruct()# set of objects and constants needed for text diplay
+    currentlyDispDat::SingleSliceDat =SingleSliceDat() # holds the data displayed or in case of scrollable data view for accessing it
+    calcDimsStruct::CalcDimsStruct=CalcDimsStruct()   #data for calculations of necessary constants needed to calculate window size , mouse position ...
+    valueForMasToSet::valueForMasToSetStruct=valueForMasToSetStruct() # value that will be used to set  pixels where we would interact with mouse
+    lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1,1,1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
+    forUndoVector::AbstractArray=[] # holds lambda functions that when invoked will  undo last operations
+    maxLengthOfForUndoVector::Int64 = 10 # number controls how many step at maximum we can get back
+    isBusy::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0) # used to indicate by some functions that actor is busy and some interactions should be ceased
+    end
+
+
 
 
 end #module

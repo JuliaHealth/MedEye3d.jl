@@ -2,8 +2,8 @@
 structs helping managing and storing data
 """
 module DataStructs
-include(joinpath("BasicStructs.jl"))
-using Parameters, BasicStructs, Dictionaries
+using ..BasicStructs
+using Parameters,  Dictionaries
 export WindowControlStruct,AnnotationStruct,DataToScrollDims,valueForMasToSetStruct,SimpleLineTextStruct, CalcDimsStruct,RawDataToDisp,TwoDimRawDat, ThreeDimRawDat, DataToDisp,FullScrollableDat,SingleSliceDat,SimpleLineTextStruct
 
 """

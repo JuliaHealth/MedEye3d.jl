@@ -3,9 +3,9 @@ module PrepareWindow
 export displayAll,createAndInitShaderProgram
 
 using ModernGL, GeometryTypes, GLFW
-using  PrepareWindowHelpers
-using   OpenGLDisplayUtils,  DataStructs,Logging
-using  ShadersAndVerticies,  ForDisplayStructs, ShadersAndVerticiesForText,  ModernGlUtil
+using  ..PrepareWindowHelpers
+using   ..OpenGLDisplayUtils,  ..DataStructs,Logging
+using  ..ShadersAndVerticies,  ..ForDisplayStructs, ..ShadersAndVerticiesForText,  ..ModernGlUtil
 
 
 

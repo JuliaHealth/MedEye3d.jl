@@ -8,24 +8,11 @@ Generally first we need to pass the GLFW callback to the Rocket obeservable
 code adapted from https://discourse.julialang.org/t/custom-subject-in-rocket-jl-for-mouse-events-from-glfw/65133/3
 """
 module ReactToScroll
-using ModernGL, DisplayWords,Rocket, GLFW,  ForDisplayStructs,  TextureManag,Logging,  DataStructs,  StructsManag
+using ModernGL, ..DisplayWords,Rocket, GLFW,  ..ForDisplayStructs,  ..TextureManag,Logging,  ..DataStructs,  ..StructsManag
 
 export reactToScroll
 export registerMouseScrollFunctions
 
-
-scrollHandler= nothing # used only in case of profiling
-
-
-ScrollCallbackSubscribableStr="""
-struct that enables reacting to  the input from scrolling
-"""
-@doc ScrollCallbackSubscribableStr
-mutable struct ScrollCallbackSubscribable <: Subscribable{Int64}
-    isBusy::Base.Threads.Atomic{Bool} # indicate to check weather the system is ready to receive the input
-    numberToSend::Int64# number  that will indicate how many slices to skip and in positive or negative direction
-    subject :: Subject{Int64}
-end
 
 
 
@@ -69,7 +56,6 @@ function registerMouseScrollFunctions(window::GLFW.Window
 stopListening[]=true # stoping event listening loop to free the GLFW context
 
 scrollback = ScrollCallbackSubscribable( isBusy,0 ,Subject(Int64, scheduler = AsyncScheduler()))
-scrollHandler= scrollback
 GLFW.SetScrollCallback(window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
 
 stopListening[]=false # reactivate event listening loop
@@ -96,6 +82,7 @@ function reactToScroll(scrollNumb::Int64
                     ,toBeSavedForBack::Bool = true)
     actor.actor.mainForDisplayObjects.stopListening[]=true
     current = actor.actor.currentDisplayedSlice
+    old = current
     current+=scrollNumb
     #isScrollUp ? current+=1 : current-=1
 
@@ -127,7 +114,7 @@ function reactToScroll(scrollNumb::Int64
         actor.actor.currentDisplayedSlice = current
         #enable undoing the action
         if(toBeSavedForBack)
-            func = ()->  reactToScroll(!isScrollUp, actor,false )
+            func = ()->  reactToScroll(old-=scrollNumb, actor,false )
             addToforUndoVector(actor,func  )
         end
 
@@ -140,7 +127,6 @@ end#reactToScroll
 
 
 
-z = ()->print(2)
-z()
+
 
 end #ReactToScroll

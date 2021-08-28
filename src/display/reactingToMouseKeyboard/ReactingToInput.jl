@@ -1,7 +1,7 @@
 
 module ReactingToInput
-using Rocket, GLFW,ModernGL,Setfield,  ReactToScroll,  ForDisplayStructs
-using  TextureManag,DataTypesBasic,  ReactOnMouseClickAndDrag,  ReactOnKeyboard,  DataStructs,  StructsManag,  DisplayWords
+using Rocket, GLFW,ModernGL,Setfield,  ..ReactToScroll,  ..ForDisplayStructs
+using  ..TextureManag,DataTypesBasic,  ..ReactOnMouseClickAndDrag,  ..ReactOnKeyboard,  ..DataStructs,  ..StructsManag,  ..DisplayWords
 
 export subscribeGLFWtoActor
 
@@ -9,7 +9,7 @@ export subscribeGLFWtoActor
 """
 adding the data into about openGL and GLFW context to enable proper display of main image and masks
 """
-function setUpMainDisplay(mainForDisplayObjects:: ForDisplayStructs.forDisplayObjects,actor::SyncActor{Any, ActorWithOpenGlObjects})
+function setUpMainDisplay(mainForDisplayObjects:: forDisplayObjects,actor::SyncActor{Any, ActorWithOpenGlObjects})
     actor.actor.mainForDisplayObjects.stopListening[]=true
 
     actor.actor.mainForDisplayObjects=mainForDisplayObjects
@@ -21,7 +21,7 @@ end#setUpMainDisplay
 adding the data needed for text display; also activates appropriate quad for the display
     it also configures texture that is build for text display
 """
-function setUpWordsDisplay(textDispObject:: ForDisplayStructs.ForWordsDispStruct,actor::SyncActor{Any, ActorWithOpenGlObjects})
+function setUpWordsDisplay(textDispObject:: ForWordsDispStruct,actor::SyncActor{Any, ActorWithOpenGlObjects})
 
     actor.actor.mainForDisplayObjects.stopListening[]=true
 
@@ -68,7 +68,14 @@ function setUpForScrollData(onScrollData::FullScrollableDat ,actor::SyncActor{An
     actor.actor.onScrollData=onScrollData
     #In order to refresh all in case we would change the texture dimensions ...
   processKeysInfo(Option(onScrollData.dataToScrollDims),actor,KeyboardStruct()  )
-    actor.actor.mainForDisplayObjects.stopListening[]=false
+      #so  It will precalculate some data and later mouse modification will be swift
+      oldd = actor.actor.valueForMasToSet 
+      
+      actor.actor.valueForMasToSet = valueForMasToSetStruct(0)
+      ReactOnMouseClickAndDrag.reactToMouseDrag(MouseStruct(true,false, [CartesianIndex(1,1)]),actor )
+      actor.actor.valueForMasToSet = oldd
+
+  actor.actor.mainForDisplayObjects.stopListening[]=false
 
 end#setUpMainDisplay
 
@@ -137,8 +144,8 @@ encapsulated by a function becouse this is configuration of Rocket and needs to 
 """
 
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Int64) = reactToScroll(data,actor )
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data:: ForDisplayStructs.forDisplayObjects) = setUpMainDisplay(data,actor)
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data:: ForDisplayStructs.ForWordsDispStruct) = setUpWordsDisplay(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data:: forDisplayObjects) = setUpMainDisplay(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data:: ForWordsDispStruct) = setUpWordsDisplay(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::CalcDimsStruct) = setUpCalcDimsStruct(data,actor)
 Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::valueForMasToSetStruct) = setUpvalueForMasToSet(data,actor)
 
@@ -168,11 +175,15 @@ function subscribeGLFWtoActor(actor ::SyncActor{Any, ActorWithOpenGlObjects})
     GLFW.SetScrollCallback(forDisplayConstants.window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
 
     keyBoardAct = registerKeyboardFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)
-    buttonSubs = registerMouseClickFunctions(forDisplayConstants.window,forDisplayConstants.stopListening,actor.actor.calcDimsStruct,actor.actor.isBusy )
+    buttonSubs  = registerMouseClickFunctions(forDisplayConstants.window,forDisplayConstants.stopListening,actor.actor.calcDimsStruct,actor.actor.isBusy )
   
+
+
     keyboardSub = subscribe!(keyBoardAct, actor)
     scrollSubscription = subscribe!(scrollback, actor)
     mouseClickSub = subscribe!(buttonSubs, actor)
+
+
 
 return [scrollSubscription,mouseClickSub,keyboardSub]
 

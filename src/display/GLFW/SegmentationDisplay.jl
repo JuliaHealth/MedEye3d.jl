@@ -2,36 +2,36 @@
 Main module controlling displaying segmentations image and data
 
 Description of nthe file structure
-ModernGlUtil.jl 
+..ModernGlUtil.jl 
     - copied utility functions from ModernGl.jl  
     - depends on external : ModernGL and  GLFW
 PreperWindowHelpers.jl 
     - futher abstractions used in PreperWindow
-    - depends on ModernGlUtil.jl 
-shadersAndVerticies.jl 
+    - depends on ..ModernGlUtil.jl 
+..ShadersAndVerticies.jl 
     -store constant values of shader code and constant needed to render shapes
     -depends on external: ModernGL, GeometryTypes, GLFW
     -needs to be invoked only after initializeWindow() is invoked from PreperWindowHelpers module - becouse GLFW context mus be ready
-PrepareWindow.jl 
+..PrepareWindow.jl 
     - collects functions and data and creates configured window with shapes needed to display textures and configures listening to mouse and keybourd inputs
-    - depends on internal:ModernGlUtil,PreperWindowHelpers,shadersAndVerticies,OpenGLDisplayUtils
+    - depends on internal:..ModernGlUtil,PreperWindowHelpers,..ShadersAndVerticies,..OpenGLDisplayUtils
     - depends on external:ModernGL, GeometryTypes, GLFW
-TextureManag.jl 
+....TextureManag.jl 
     - as image + masks are connacted by shaders into single texture this module  by controlling textures controlls image display
     - depends on external: ModernGL
-    - depends on internal :OpenGLDisplayUtils
-ReactToScroll.jl
+    - depends on internal :..OpenGLDisplayUtils
+..ReactToScroll.jl
     - functions needed to react to scrolling
     - depends on external: Rocket, GLFW
-    - depends on internal : ForDisplayStructs.jl
-ReactOnMouseClickAndDrag.jl   
+    - depends on internal : ..ForDisplayStructs.jl
+..ReactOnMouseClickAndDrag.jl   
     - functions needed to enable mouse interactions 
-    - internal depentdencies: ForDisplayStructs, TextureManag,OpenGLDisplayUtils
+    - internal depentdencies: ..ForDisplayStructs, ..TextureManag,..OpenGLDisplayUtils
     -external dependencies: Rocket, GLFW
-ReactingToInput.jl - using Rocket.jl (reactivate functional programming ) enables reacting to user input
+..ReactingToInput.jl - using Rocket.jl (reactivate functional programming ) enables reacting to user input
     - depends on external: Rocket, GLFW
-    - depends on internal : ReactToScroll.jl, ForDisplayStructs.jl 
-OpenGLDisplayUtils.jl - some utility functions used in diffrent parts of program
+    - depends on internal : ..ReactToScroll.jl, ..ForDisplayStructs.jl 
+..OpenGLDisplayUtils.jl - some utility functions used in diffrent parts of program
     - depends on external :GLFW, ModernGL 
 """
 module SegmentationDisplay
@@ -39,8 +39,8 @@ module SegmentationDisplay
 export coordinateDisplay
 export passDataForScrolling
 
-using ModernGL, GLFW,  PrepareWindow,  TextureManag, OpenGLDisplayUtils,  ForDisplayStructs, Uniforms,  DisplayWords, Dictionaries
-using  ReactingToInput, Rocket, Setfield, Logging,  ShadersAndVerticiesForText,FreeTypeAbstraction, DisplayWords,  DataStructs,  StructsManag
+using ModernGL, GLFW,  ..PrepareWindow,  ..TextureManag, ..OpenGLDisplayUtils,  ..ForDisplayStructs, ..Uniforms,  ..DisplayWords, Dictionaries
+using  ..ReactingToInput, Rocket, Setfield, Logging,  ..ShadersAndVerticiesForText,FreeTypeAbstraction, ..DisplayWords,  ..DataStructs,  ..StructsManag
 
 using DrWatson
 @quickactivate "NuclearMedEye"
@@ -54,7 +54,7 @@ subscriptions = []
 """
 coordinating displaying - sets needed constants that are storeds in  forDisplayConstants; and configures interactions from GLFW events
 listOfTextSpecs - holds required data needed to initialize textures
-keeps also references to needed uniforms etc.
+keeps also references to needed ..Uniforms etc.
 windowWidth::Int,windowHeight::Int - GLFW window dimensions
 fractionOfMainIm - how much of width should be taken by the main image
 heightToWithRatio - needed for proper display of main texture - so it would not be stretched ...
@@ -85,7 +85,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
  #creating window and event listening loop
     window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words,gslsStr =  PrepareWindow.displayAll(listOfTextSpecs,calcDimStruct )
 
-    # than we set those uniforms, open gl types and using data from arguments  to fill texture specifications
+    # than we set those ..Uniforms, open gl types and using data from arguments  to fill texture specifications
     mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program,windowControlStruct) 
 
     @info "listOfTextSpecsMapped" listOfTextSpecsMapped
@@ -113,6 +113,9 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
 
 
 
+    #finding some texture that can be modifid and set as one active for modifications
+ 
+       mainActor.actor.textureToModifyVec = filter(it->it.isEditable ,initializedTextures)
 
     #in order to clean up all resources while closing
     GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())

@@ -5,39 +5,10 @@ module coordinating response to the  keyboard input - mainly shortcuts that  hel
 """
 #@doc ReactOnKeyboardSTR
 module ReactOnKeyboard
-using ModernGL, DisplayWords, StructsManag, Setfield, PrepareWindow,   DataStructs ,Glutils, Rocket, GLFW,Dictionaries,  ForDisplayStructs, TextureManag,  OpenGLDisplayUtils,  Uniforms, Match, Parameters,DataTypesBasic
+using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow,   ..DataStructs ,Glutils, Rocket, GLFW,Dictionaries,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils,  ..Uniforms, Match, Parameters,DataTypesBasic
 export reactToKeyboard , registerKeyboardFunctions,processKeysInfo
 
-keyboardHandler= nothing # used only in case of profiling
 
-KeyboardCallbackSubscribableStr= """
-Object that enables managing input from keyboard - it stores the information also about
-needed keys wheather they are kept pressed  
-examples of keyboard input 
-    action RELEASE GLFW.Action
-    key s StringPRESS
-    key s String
-    action PRESS GLFW.Action
-    key s StringRELEASE
-    key s String
-    action RELEASE GLFW.Action
-
-"""
-mutable struct KeyboardCallbackSubscribable <: Subscribable{KeyboardStruct}
-# true when pressed and kept true until released
-# true if corresponding keys are kept pressed and become flase when relesed
-    isCtrlPressed::Bool # left - scancode 37 right 105 - Int32
-    isShiftPressed::Bool  # left - scancode 50 right 62- Int32
-    isAltPressed::Bool# left - scancode 64 right 108- Int32
-    isEnterPressed::Bool# scancode 36
-    isTAbPressed::Bool# scancode 36
-    isSpacePressed::Bool# scancode 36
-    isF1Pressed::Bool
-    isF2Pressed::Bool
-    isF3Pressed::Bool
-    lastKeysPressed::Vector{String} # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
-    subject :: Subject{KeyboardStruct} 
-end 
 
 """
 will "tell" what functions should be invoked in order to process keyboard input 
@@ -130,8 +101,9 @@ function registerKeyboardFunctions(window::GLFW.Window,stopListening::Base.Threa
     stopListening[]=true # stoping event listening loop to free the GLFW context
                            
     keyboardSubs = KeyboardCallbackSubscribable(false,false,false,false,false,false,false,false,false,[], Subject(KeyboardStruct, scheduler = AsyncScheduler()))
-    keyboardHandler =keyboardSubs                             
-        GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
+
+
+    GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
         name = GLFW.GetKeyName(key, scancode)
         if name == nothing
             keyboardSubs(key,action)                                                        
@@ -188,7 +160,7 @@ end#setVisAndRender
 """
 for case when we want to subtract two masks
 """
-function processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec{T}}, Identity{TextureSpec{T}}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T
+function processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec{T}}, Identity{TextureSpec{G}}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where {T,G}
     textSpecs =  maskNumbs.value
     maskA = textSpecs[1].value
     maskB = textSpecs[2].value
@@ -392,7 +364,7 @@ dispObj = actor.actor.mainForDisplayObjects
 reactivateMainObj(dispObj.shader_program, dispObj.vbo,newCalcDim  )
 
 glClear(GL_COLOR_BUFFER_BIT)
-
+actor.actor.currentlyDispDat=singleSlDat = singleSlDat
 updateImagesDisplayed(singleSlDat
                     ,actor.actor.mainForDisplayObjects
                     ,actor.actor.textDispObj
@@ -431,7 +403,7 @@ automatically both masks will be set to be invisible and only the diffrence disp
 In order to achieve this  we need to have all of the samplers references stored in a list 
 1) we need to set both masks to invisible - it will be done from outside the shader
 2) we set also from outside uniform marking visibility of diffrence to true
-3) also from outside we need to set which texture to subtract from which we will achieve this by setting maskAtoSubtr and maskBtoSubtr int uniforms
+3) also from outside we need to set which texture to subtract from which we will achieve this by setting maskAtoSubtr and maskBtoSubtr int ..Uniforms
     those integers will mark which samplers function will use
 4) in shader function will be treated as any other mask and will give contribution to output color multiplied by its visibility(0 or 1)    
 5) inside the function color will be defined as multiplication of two colors of mask A and mask B - colors will be acessed similarly to samplers
@@ -441,26 +413,26 @@ In order to provide maximum performance and avoid branching inside shader multip
 maskToSubtrastFrom,maskWeAreSubtracting - specifications o textures we are operating on 
 """
 function displayMaskDiffrence(maskA::TextureSpec, maskB::TextureSpec,actor::SyncActor{Any, ActorWithOpenGlObjects})
- #defining variables
-
- dispObj = actor.actor.mainForDisplayObjects
- vertex_shader = dispObj.vertex_shader
- listOfTextSpecsc=  actor.actor.mainForDisplayObjects.listOfTextSpecifications
- fragment_shade,shader_prog= createAndInitShaderProgram(dispObj.vertex_shader,  listOfTextSpecsc,maskA,maskB,dispObj.gslsStr)
- # saving new variables to the actor
- newForDisp = setproperties(dispObj,(shader_program=shader_prog,fragment_shader=fragment_shade ) )
- actor.actor.mainForDisplayObjects=newForDisp
- #making all ready to display
- reactivateMainObj(shader_prog, newForDisp.vbo,actor.actor.calcDimsStruct  )
- activateTextures(listOfTextSpecsc )
- #making diffrence visible
- @uniforms! begin
- dispObj.mainImageUniforms.isMaskDiffrenceVis:=1
-        end
- setTextureVisibility(false,maskA.uniforms )
- setTextureVisibility(false,maskB.uniforms )
- basicRender(actor.actor.mainForDisplayObjects.window)
-
+    if(!maskA.isMainImage && !maskB.isMainImage)
+        #defining variables
+        dispObj = actor.actor.mainForDisplayObjects
+        vertex_shader = dispObj.vertex_shader
+        listOfTextSpecsc=  actor.actor.mainForDisplayObjects.listOfTextSpecifications
+        fragment_shade,shader_prog= createAndInitShaderProgram(dispObj.vertex_shader,  listOfTextSpecsc,maskA,maskB,dispObj.gslsStr)
+        # saving new variables to the actor
+        newForDisp = setproperties(dispObj,(shader_program=shader_prog,fragment_shader=fragment_shade ) )
+        actor.actor.mainForDisplayObjects=newForDisp
+        #making all ready to display
+        reactivateMainObj(shader_prog, newForDisp.vbo,actor.actor.calcDimsStruct  )
+        activateTextures(listOfTextSpecsc )
+        #making diffrence visible
+        @uniforms! begin
+        dispObj.mainImageUniforms.isMaskDiffrenceVis:=1
+                end
+        setTextureVisibility(false,maskA.uniforms )
+        setTextureVisibility(false,maskB.uniforms )
+        basicRender(actor.actor.mainForDisplayObjects.window)
+    end#if
 end#displayMaskDiffrence
 
 
@@ -607,4 +579,4 @@ function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlOb
 end#strToNumber
 
 
-end #ReactOnMouseClickAndDrag
+end #..ReactOnMouseClickAndDrag
