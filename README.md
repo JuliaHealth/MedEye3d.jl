@@ -6,6 +6,8 @@ Image segmentation in the medical domain has mul-tiple use cases.  Most importan
 
 
 Image below just represents limitless possibilities of color ranges, and that thanks to OpenGl even theorethically complex data to display will render nearly instantenously. 
+
+
 ![image](https://user-images.githubusercontent.com/53857487/131262103-4662bf13-11ca-42a7-836e-a89eb6d17c82.png)
 
 ##
