@@ -1,6 +1,6 @@
 # NuclearMedEye
 
-######### Defining Helper Functions and imports
+## Defining Helper Functions and imports
 
 #I use Simple ITK as most robust
 using NuclearMedEye, Conda,PyCall,Pkg
@@ -169,7 +169,7 @@ left click and drag - will mark active texture (look below - set with alt ...)
 right click and drag - sets remembered position - when we will change plane of crossection
      for example from tranverse to coonal this point will be also visible on new plane
 
-all keyboard shortcuts will be activated on RELEASE of keys or by pressing enter while still pressing
+all keyboard shortcuts will be activated on RELEASE of keys or by pressing enter while still pressing other; +,- and z keys acts also like enter 
 
 shift + number - make mask associated with given number visible
 ctrl + number -  make mask associated with given number invisible 
@@ -185,6 +185,17 @@ tab +/- increase or decrease stroke width
 F1 - will display wide window for bone Int32(1000),Int32(-1000)
 F2 - will display window for soft tissues Int32(400),Int32(-200)
 F3 - will display wide window for lung viewing  Int32(0),Int32(-1000)
+KEY_F1 - will display wide window for bone Int32(1000),Int32(-1000)
+KEY_F2 - will display window for soft tissues Int32(400),Int32(-200)
+KEY_F3 - will display wide window for lung viewing  Int32(0),Int32(-1000)
+KEY_F4,  KEY_F5 -
+    sets minimum (F4) and maximum (KEY_F5) value for display (with combination of + and minus signs - to increase or decrease given treshold) - 
+        in case of continuus colors it will clamp values - so all above max will be equaled to max ; and min if smallert than min
+        in case of main CT mask - it will controll min shown white and max shown black
+        in case of maks with single color associated we will step data so if data is outside the rande it will return 0 - so will not affect display
+
+
+
 """
 
 
