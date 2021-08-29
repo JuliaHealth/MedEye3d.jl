@@ -191,30 +191,60 @@ right click and drag - sets remembered position - when we will change plane of c
 all keyboard shortcuts will be activated on RELEASE of keys or by pressing enter while still pressing other; +,- and z keys acts also like enter 
 
 shift + number - make mask associated with given number visible
+
+
 ctrl + number -  make mask associated with given number invisible 
+
+
 alt + number -  make mask associated with given number active for mouse interaction 
+
+
 tab + number - sets the number that will be  used as an input to masks modified by mouse
-    when tab plus (and then no number) will be pressed it will increase stroke width
-    when tab minus (and then no number) will be pressed it will increase stroke width
+  
+  when tab plus (and then no number) will be pressed it will increase stroke width
+  
+  when tab minus (and then no number) will be pressed it will increase stroke width
+    
+    
 shift + numberA + "-"(minus sign) +numberB  - display diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B invisible
+
+
 ctrl + numberA + "-"(minus sign) +numberB  - stops displaying diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B visible
+
+
 space + 1 or 2 or 3 - change the plane of view (transverse, coronal, sagittal)
+
+
 ctrl + z - undo last action
+
+
 tab +/- increase or decrease stroke width
+
+
 F1 - will display wide window for bone Int32(1000),Int32(-1000)
+
+
 F2 - will display window for soft tissues Int32(400),Int32(-200)
+
+
 F3 - will display wide window for lung viewing  Int32(0),Int32(-1000)
-KEY_F1 - will display wide window for bone Int32(1000),Int32(-1000)
-KEY_F2 - will display window for soft tissues Int32(400),Int32(-200)
-KEY_F3 - will display wide window for lung viewing  Int32(0),Int32(-1000)
+
 KEY_F4,  KEY_F5 -
+    
     sets minimum (F4) and maximum (KEY_F5) value for display (with combination of + and minus signs - to increase or decrease given treshold) - 
-        in case of continuus colors it will clamp values - so all above max will be equaled to max ; and min if smallert than min
-        in case of main CT mask - it will controll min shown white and max shown black
-        in case of maks with single color associated we will step data so if data is outside the rande it will return 0 - so will not affect display
-KEY_F6 - controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%
-      if plus is pressed it will increse contribution by 0.1  
-      if minus is pressed it will decrease contribution by 0.1  
+      
+      in case of continuus colors it will clamp values - so all above max will be equaled to max ; and min if smallert than min
+     
+     in case of main CT mask - it will controll min shown white and max shown black
+     
+     in case of maks with single color associated we will step data so if data is outside the rande it will return 0 - so will not affect display
+KEY_F6 - controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are 
+
+visible their corresponding influence to pixel color is 33%
+  
+  if plus is pressed it will increse contribution by 0.1  
+  
+  if minus is pressed it will decrease contribution by 0.1  
 
 
 
