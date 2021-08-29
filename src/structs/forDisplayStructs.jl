@@ -33,6 +33,9 @@ samplerName::String =""#name of the sampler - mainly for debugging purposes
 samplerRef ::Int32 =Int32(0) #reference to sampler of the texture
 colorsMaskRef ::Int32 =Int32(0) #reference to uniform holding color of this mask
 isVisibleRef::Int32 =Int32(0)# reference to uniform that points weather we 
+maskMinValue::Int32 =Int32(0)# minimum value associated with possible value of mask
+maskMAxValue::Int32 =Int32(0)# maximum value associated with possible value of mask
+maskRangeValue::Int32 =Int32(0)# range of values associated with possible value of mask
 end
 
 """
@@ -48,15 +51,6 @@ max_shown_black::Int32 =Int32(0)
 displayRange::Int32 =Int32(0)
 # ..Uniforms controlling  displaying masks diffrence
 isMaskDiffrenceVis::Int32 =Int32(0)
-maskAIndex::Int32 =Int32(0)
-maskBIndex::Int32 =Int32(0)
-#..Uniforms controlling nuclear image display
-minNuclearMaskVal::Int32 =Int32(0)
-maxNuclearMaskVal::Int32 =Int32(0)
-rangeOfNuclearMaskVal::Int32 =Int32(0)
-nuclearMaskSampler::Int32 =Int32(0)
-isNuclearMaskVis::Int32 =Int32(0)
-
 end
 
 """
@@ -207,7 +201,11 @@ mostRecentAction ::GLFW.Action= GLFW.RELEASE
   isF1Pressed::Bool= false
   isF2Pressed::Bool= false
   isF3Pressed::Bool= false
-
+  isF4Pressed::Bool= false
+  isF5Pressed::Bool= false
+  isPlusPressed::Bool= false
+  isMinusPressed::Bool= false
+  isZPressed::Bool= false
   lastKeysPressed::Vector{String}=[] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
  #informations about what triggered sending this particular struct to the  actor
   mostRecentScanCode ::GLFW.Key=GLFW.KEY_KP_4
@@ -267,20 +265,25 @@ examples of keyboard input
     action RELEASE GLFW.Action
 
 """
-mutable struct KeyboardCallbackSubscribable <: Subscribable{KeyboardStruct}
+@with_kw mutable struct KeyboardCallbackSubscribable <: Subscribable{KeyboardStruct}
 # true when pressed and kept true until released
 # true if corresponding keys are kept pressed and become flase when relesed
-    isCtrlPressed::Bool # left - scancode 37 right 105 - Int32
-    isShiftPressed::Bool  # left - scancode 50 right 62- Int32
-    isAltPressed::Bool# left - scancode 64 right 108- Int32
-    isEnterPressed::Bool# scancode 36
-    isTAbPressed::Bool# scancode 36
-    isSpacePressed::Bool# scancode 36
-    isF1Pressed::Bool
-    isF2Pressed::Bool
-    isF3Pressed::Bool
-    lastKeysPressed::Vector{String} # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
-    subject :: Subject{KeyboardStruct} 
+    isCtrlPressed::Bool= false # left - scancode 37 right 105 - Int32
+    isShiftPressed::Bool = false # left - scancode 50 right 62- Int32
+    isAltPressed::Bool= false# left - scancode 64 right 108- Int32
+    isEnterPressed::Bool= false# scancode 36
+    isTAbPressed::Bool= false# scancode 36
+    isSpacePressed::Bool= false# scancode 36
+    isF1Pressed::Bool= false
+    isF2Pressed::Bool= false
+    isF3Pressed::Bool= false
+    isF4Pressed::Bool= false
+    isF5Pressed::Bool= false
+    isPlusPressed::Bool= false
+    isMinusPressed::Bool= false
+    isZPressed::Bool= false
+    lastKeysPressed::Vector{String}=[] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
+    subject :: Subject{KeyboardStruct} =Subject(KeyboardStruct, scheduler = AsyncScheduler())
 end 
 
 

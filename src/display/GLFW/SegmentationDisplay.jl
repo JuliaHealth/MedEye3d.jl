@@ -35,7 +35,6 @@ PreperWindowHelpers.jl
     - depends on external :GLFW, ModernGL 
 """
 module SegmentationDisplay
-
 export coordinateDisplay
 export passDataForScrolling
 
@@ -68,8 +67,12 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
                         ,textTextureheightt::Int32= Int32( round((windowHeight/(windowWidth*(1-fractionOfMainIm)) ))*textTexturewidthh)
                         ,windowControlStruct::WindowControlStruct=WindowControlStruct()) 
    #setting number to texture that will be needed in shader configuration
+
+
    listOfTextSpecs= map(x->setproperties(x[2],(whichCreated=x[1])),enumerate(listOfTextSpecsPrim))
-    #calculations of necessary constants needed to calculate window size , mouse position ...
+   
+   
+   #calculations of necessary constants needed to calculate window size , mouse position ...
    calcDimStruct= CalcDimsStruct(windowWidth=windowWidth 
                   ,windowHeight=windowHeight 
                   ,fractionOfMainIm=fractionOfMainIm

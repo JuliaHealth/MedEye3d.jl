@@ -5,7 +5,7 @@ managing  uniform values - global values in shaders
 module Uniforms
 using Glutils,  ..ForDisplayStructs, Dictionaries, Parameters, ColorTypes
 
-export createStructsDict, setCTWindow,setMaskColor,setTextureVisibility, setTypeOfMainSampler!
+export coontrolMinMaxUniformVals,createStructsDict, setCTWindow,setMaskColor,setTextureVisibility, setTypeOfMainSampler!
 
 
 
@@ -44,7 +44,24 @@ function setTextureVisibility(isvisible::Bool, uniformsStore ::TextureUniforms)
 end#setTextureVisibility
 
 
+"""
+sets minimum and maximum value for display - 
+    in case of continuus colors it will clamp values - so all above max will be equaled to max ; and min if smallert than min
+    in case of main CT mask - it will controll min shown white and max shown black
+    in case of maks with single color associated we will step data so if data is outside the rande it will return 0 - so will not affect display
+"""
+function coontrolMinMaxUniformVals(textur::TextureSpec
+                                ,uniformsStore ::MaskTextureUniforms)
+    newMin=textur.minAndMaxValue[1]
+    newMax=textur.minAndMaxValue[2]
+                                
+    @uniforms! begin
+    uniformsStore.maskMinValue:= newMin
+    uniformsStore.maskMAxValue:= newMax
+    uniformsStore.maskRangeValue:= newMax-newMin
+    end
 
+end#coontrolMinMaxUniformVals
 
 
 end #module

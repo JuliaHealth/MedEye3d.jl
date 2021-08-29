@@ -209,13 +209,6 @@ mainUnifs =MainImageUniforms(
    , max_shown_black= glGetUniformLocation(shader_program, "max_shown_black")
     ,displayRange=glGetUniformLocation(shader_program, "displayRange")
     ,isMaskDiffrenceVis=glGetUniformLocation(shader_program, "isMaskDiffrenceVis")
-    ,maskAIndex=glGetUniformLocation(shader_program, "maskAIndex")
-    ,maskBIndex=glGetUniformLocation(shader_program, "maskBIndex")
-    ,minNuclearMaskVal=glGetUniformLocation(shader_program, "minNuclearMaskVal")
-    ,maxNuclearMaskVal=glGetUniformLocation(shader_program, "maxNuclearMaskVal")
-    ,rangeOfNuclearMaskVal=glGetUniformLocation(shader_program, "rangeOfNuclearMaskVal")
-    ,nuclearMaskSampler=glGetUniformLocation(shader_program, "nuclearMaskSampler")
-    ,isNuclearMaskVis=glGetUniformLocation(shader_program, "isNuclearMaskVis")
 )
 setCTWindow(windowControlStruct.min_shown_white,windowControlStruct.max_shown_black,mainUnifs)
 
@@ -241,6 +234,9 @@ function setuniforms(textSpec:: TextureSpec,shader_program::UInt32):: TextureSpe
     unifs = MaskTextureUniforms(samplerName= n
                         ,samplerRef= glGetUniformLocation(shader_program, n)
                         ,colorsMaskRef=glGetUniformLocation(shader_program, "$(n)ColorMask") 
+                        ,maskMinValue=glGetUniformLocation(shader_program, "$(n)minValue") 
+                        ,maskMAxValue=glGetUniformLocation(shader_program, "$(n)maxValue") 
+                        ,maskRangeValue=glGetUniformLocation(shader_program, "$(n)ValueRange") 
                         ,isVisibleRef=glGetUniformLocation(shader_program, "$(n)isVisible"))
 
     return setproperties(textSpec, (uniforms= unifs ))
