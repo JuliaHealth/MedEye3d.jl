@@ -169,7 +169,10 @@ struct holding data usefull to controll display window
     #values represented in shader and controlling window of display 
     min_shown_white::Int32 =400
     max_shown_black::Int32 =-200
-
+    toIncrease::Bool= false#true if we intend to increse a treshold value
+    toDecrease::Bool= false#true if we intend to decrese a treshold value
+    upper::Bool= false#true if we intend to modify upper treshold
+    lower::Bool= false#true if we intend to modify lower treshold
 end#windowControlStruct
 
 """

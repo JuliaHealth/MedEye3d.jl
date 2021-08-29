@@ -51,9 +51,9 @@ $( getMasksSubtractionFunction(maskToSubtrastFrom,maskWeAreSubtracting))
 $(mainFuncString(mainTexture,notMainTextures,maskToSubtrastFrom,maskWeAreSubtracting))
  """
 # uncomment for debugging
- #  for st in split(res, "\n")
-#     @info st
-#     end
+  for st in split(res, "\n")
+    @info st
+    end
 return res    
 
 end #createCustomFramgentShader
@@ -210,13 +210,16 @@ function mainFuncString( mainTexture::TextureSpec
                     (strings)-> join(strings, "")
 
    lll = length(notMainTextures)+1                 
-   
-   sumColorR= map( x-> " ($(x.name)ColorMask.r *  $(x.name)Res) ", notMainTexturesNotCont) |> 
-                    (strings)-> join(strings, " + ")     
-   sumColorG= map( x-> " ($(x.name)ColorMask.g  * $(x.name)Res) ", notMainTexturesNotCont) |> 
-                    (strings)-> join(strings, " + ")     
-   sumColorB= map( x-> " ($(x.name)ColorMask.b  * $(x.name)Res) ", notMainTexturesNotCont) |> 
-                    (strings)-> join(strings, " + ")     
+   #The step function returns 0.0 if x is smaller than edge and otherwise 1.0.
+
+   sumColors = map(letter-> 
+                    map( x-> " ($(x.name)ColorMask.$(letter) * ( $(x.name)Res  * step($(x.name)minValue,$(x.name)Res) * step($(x.name)Res ,$(x.name)maxValue ))/$(x.name)ValueRange ) "
+                        , notMainTexturesNotCont) |> 
+   (strings)-> join(strings, " + ")              ,["r", "g", "b"]) 
+
+   sumColorR= sumColors[1]    
+   sumColorG= sumColors[2]   
+   sumColorB= sumColors[3]
 
 
 

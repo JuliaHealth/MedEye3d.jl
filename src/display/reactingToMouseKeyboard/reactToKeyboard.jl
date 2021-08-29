@@ -57,10 +57,18 @@ function (handler::KeyboardCallbackSubscribable)(scancode ::GLFW.Key, action::GL
             GLFW.KEY_F1 =>( handler.isEnterPressed= (act==1); "f1")
             GLFW.KEY_F2 =>( handler.isEnterPressed= (act==1); "f2")
             GLFW.KEY_F3 =>( handler.isEnterPressed= (act==1); "f3")
+            GLFW.KEY_F4 =>( handler.isF4Pressed= (act==1); "f4")
+            GLFW.KEY_F5 =>( handler.isF5Pressed= (act==1); "f5")
+            GLFW.KEY_Z =>( handler.isZPressed= (act==1); "z")
+            
+            GLFW.KEY_KP_ADD =>( handler.isPlusPressed= (act==1); "+")
+            GLFW.KEY_EQUAL =>( handler.isPlusPressed= (act==1); "+")
+
+            GLFW.KEY_KP_SUBTRACT =>( handler.isMinusPressed= (act==1); "-")
+            GLFW.KEY_MINUS =>( handler.isMinusPressed= (act==1); "-")
             _ => "notImp" # not Important
 
     
-            
 
          end
             res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed || scCode=="ctrl" 
@@ -71,6 +79,16 @@ function (handler::KeyboardCallbackSubscribable)(scancode ::GLFW.Key, action::GL
                     ,isF1Pressed= handler.isF1Pressed ||scCode=="f1"
                     ,isF2Pressed= handler.isF2Pressed ||scCode=="f2"
                     ,isF3Pressed= handler.isF3Pressed ||scCode=="f3"
+                    ,isF4Pressed= handler.isF4Pressed ||scCode=="f4"
+                    ,isF5Pressed= handler.isF5Pressed ||scCode=="f5"
+
+                    ,isZPressed= handler.isZPressed ||scCode=="z"
+
+                    ,isPlusPressed= handler.isPlusPressed ||scCode=="+"
+                    ,isPlusPressed= handler.isPlusPressed ||scCode=="+"
+                    ,isMinusPressed= handler.isMinusPressed ||scCode=="-"
+                    ,isMinusPressed= handler.isMinusPressed ||scCode=="-"
+
                     ,isEnterPressed= handler.isEnterPressed 
                     ,lastKeysPressed= handler.lastKeysPressed 
                     ,mostRecentScanCode = scancode
@@ -100,12 +118,12 @@ function registerKeyboardFunctions(window::GLFW.Window,stopListening::Base.Threa
 
     stopListening[]=true # stoping event listening loop to free the GLFW context
                            
-    keyboardSubs = KeyboardCallbackSubscribable(false,false,false,false,false,false,false,false,false,[], Subject(KeyboardStruct, scheduler = AsyncScheduler()))
+    keyboardSubs = KeyboardCallbackSubscribable()
 
 
     GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
         name = GLFW.GetKeyName(key, scancode)
-        if name == nothing
+        if name === nothing || name =="+" || name =="-"
             keyboardSubs(key,action)                                                        
         else
             keyboardSubs(name,action)
@@ -264,23 +282,32 @@ function processKeysInfo(wind::Identity{WindowControlStruct}
     ,keyInfo::KeyboardStruct 
     ,toBeSavedForBack::Bool = true) where T
     #we have some predefined windows
-
+    joined = join(keyInfo.lastKeysPressed)
+    @info " wind.value" wind.value
+    textureList = actor.actor.textureToModifyVec
 
     windowStruct =  @match wind.value.letterCode begin
-    "F1" => WindowControlStruct("F1",Int32(1000), Int32(-1000) )
-    "F2" => WindowControlStruct("F2",Int32(400), Int32(-200) )
-    "F3" => WindowControlStruct("F3",Int32(0), Int32(-1000) )
+    "F1" => WindowControlStruct(letterCode="F1",min_shown_white=Int32(1000), max_shown_black=Int32(-1000) )
+    "F2" => WindowControlStruct(letterCode="F2",min_shown_white=Int32(400), max_shown_black=Int32(-200) )
+    "F3" => WindowControlStruct(letterCode="F3",min_shown_white=Int32(0),max_shown_black= Int32(-1000) )
+    "F4" => WindowControlStruct(letterCode="F4", toIncrease= keyInfo.isPlusPressed, toDecrease= keyInfo.isMinusPressed,lower=true )
+    "F5" => WindowControlStruct(letterCode="F5",  toIncrease= keyInfo.isPlusPressed,toDecrease=keyInfo.isMinusPressed,upper=true)
     _ => wind.value
         end
 
-    #updating current windowing object and getting reference to old
+        #updating current windowing object and getting reference to old
     old = actor.actor.mainForDisplayObjects.windowControlStruct 
     actor.actor.mainForDisplayObjects= setproperties(actor.actor.mainForDisplayObjects,(windowControlStruct =windowStruct))
 
+    #in case we pressed F4 or F5 we want to manually change the window
+    if( !isempty(textureList) && (windowStruct.toIncrease || windowStruct.toDecrease    ) )
+        setTextureWindow(textureList[1], windowStruct)
+    else
     # setting window and showig it 
     setCTWindow(windowStruct.min_shown_white,windowStruct.max_shown_black, actor.actor.mainForDisplayObjects.mainImageUniforms)
+    end#if    
+    #to display change
     basicRender(actor.actor.mainForDisplayObjects.window)
-   
        # for undoing action
     if(toBeSavedForBack)
          addToforUndoVector(actor, ()-> processKeysInfo( Option(old),actor, keyInfo,false ))
@@ -288,10 +315,41 @@ function processKeysInfo(wind::Identity{WindowControlStruct}
 
 end#processKeysInfo
 
+"""
+sets minimum and maximum value for display - 
+    in case of continuus colors it will clamp values - so all above max will be equaled to max ; and min if smallert than min
+    in case of main CT mask - it will controll min shown white and max shown black
+    in case of maks with single color associated we will step data so if data is outside the rande it will return 0 - so will not affect display
+"""
+function setTextureWindow(textur::TextureSpec, windStr::WindowControlStruct)
+   unifs = textur.uniforms
+   oldTresholds =  textur.minAndMaxValue
+   
+    if(windStr.lower)
+        oldTresholds[1]= getNewTresholdValue(oldTresholds[1],windStr)
+    elseif(windStr.upper)   
+        oldTresholds[2]= getNewTresholdValue(oldTresholds[2],windStr)
+    end#ifs
+    #if we deal with main image
+    if(textur.isMainImage)
+    
+    end
+
+end#    setTextureWindow
 
 
+"""
+helper function for setTextureWindow on the basis of given boolean it will adjust the number representing texture treshold
+"""
+function getNewTresholdValue(numb::T,windStr::WindowControlStruct )::T where T
+    if(windStr.toIncrease)
+        return numb+1
+    elseif(windStr.toDecrease)     
+        return numb-1
+    end#ifs 
 
-
+    return numb   
+end #getNewTresholdValue   
 
 
 """
@@ -445,8 +503,8 @@ shift + number - make mask associated with given number visible
 ctrl + number -  make mask associated with given number invisible 
 alt + number -  make mask associated with given number active for mouse interaction 
 tab + number - sets the number that will be  used as an input to masks modified by mouse
-shift + numberA + "-"(minus sign) +numberB  - display diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B invisible
-ctrl + numberA + "-"(minus sign) +numberB  - stops displaying diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B visible
+shift + numberA + "m" +numberB  - display diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B invisible
+ctrl + numberA + "m" +numberB  - stops displaying diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B visible
 space + 1 or 2 or 3 - change the plane of view (transverse, coronal, sagittal)
 ctrl + z - undo last action
 tab +/- increase or decrease stroke width
@@ -490,6 +548,18 @@ function shouldBeExecuted(keyInfo::KeyboardStruct, act::Int64)::Bool
       GLFW.KEY_F1  => return act==1 
       GLFW.KEY_F2  => return act==1 
       GLFW.KEY_F3  => return act==1
+      GLFW.KEY_F4  => return act==2
+      GLFW.KEY_F5  => return act==2
+
+
+      GLFW.KEY_KP_ADD =>return act==1 
+      GLFW.KEY_EQUAL =>return act==1 
+
+      GLFW.KEY_KP_SUBTRACT =>return act==1 
+      GLFW.KEY_MINUS =>return act==1 
+      GLFW.KEY_Z =>return act==1 
+
+
             _ => false # not Important
          end#match
 
@@ -541,14 +611,18 @@ function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlOb
         return Option(WindowControlStruct(letterCode="F2"))
     elseif(keyInfo.isF3Pressed)
         return Option(WindowControlStruct(letterCode="F3"))
+    elseif(keyInfo.isF4Pressed)
+        return Option(WindowControlStruct(letterCode="F4"))
+    elseif(keyInfo.isF5Pressed)
+        return Option(WindowControlStruct(letterCode="F5"))
 
     # for undoing actions            
-    elseif(occursin("z" , joined) )
+    elseif(keyInfo.isZPressed )
         return Option(true)
     # for control of stroke width    
-    elseif(keyInfo.isTAbPressed && !isempty(joined) && occursin("+" , joined) )
+    elseif(keyInfo.isTAbPressed && !isempty(joined) && keyInfo.isPlusPressed)
         return  Option(AnnotationStruct(1))
-    elseif(keyInfo.isTAbPressed && !isempty(joined) && occursin("-" , joined) )
+    elseif(keyInfo.isTAbPressed && !isempty(joined) && keyInfo.isMinusPressed )
         return  Option(AnnotationStruct(-1))
     elseif(isempty(filtered))#nothing to be done   
         return Option()
@@ -560,9 +634,9 @@ function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlOb
     elseif(keyInfo.isSpacePressed && !isempty(filtered)  &&  parse(Int64,filtered)<4)
         return Option(setproperties(actor.actor.onScrollData.dataToScrollDims ,  (dimensionToScroll= parse(Int64,filtered)) )    )            
      # in case we want to display diffrence of two masks   
-    elseif(occursin("-" , joined))
+    elseif(occursin("m" , joined))
 
-     mapped = map(splitted-> filter(x->isnumeric(x) , splitted) ,split(joined,"-")) |>
+     mapped = map(splitted-> filter(x->isnumeric(x) , splitted) ,split(joined,"m")) |>
       (filtered)-> filter(it-> it!="", filtered) |>
       (filtered)->map(it->parse(Int32,it)  ,filtered)
         if(length(mapped)==2)
