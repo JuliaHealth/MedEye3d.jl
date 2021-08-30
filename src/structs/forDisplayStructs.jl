@@ -36,6 +36,7 @@ isVisibleRef::Int32 =Int32(0)# reference to uniform that points weather we
 maskMinValue::Int32 =Int32(0)# minimum value associated with possible value of mask
 maskMAxValue::Int32 =Int32(0)# maximum value associated with possible value of mask
 maskRangeValue::Int32 =Int32(0)# range of values associated with possible value of mask
+maskContribution::Int32 =Int32(0)# controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%
 end
 
 """
@@ -51,6 +52,8 @@ max_shown_black::Int32 =Int32(0)
 displayRange::Int32 =Int32(0)
 # ..Uniforms controlling  displaying masks diffrence
 isMaskDiffrenceVis::Int32 =Int32(0)
+mainImageContribution::Float32= 1.0 # controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%
+
 end
 
 """
@@ -95,6 +98,7 @@ minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask
   isVisible::Bool= true       #if false it should be invisible 
   uniforms::TextureUniforms=MaskTextureUniforms()# holds values needed to control ..Uniforms in a shader
   minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask, and second entry is maximum possible value for this mask
+  maskContribution::Float32= 1.0 # controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%
 end
 
 #utility function to check type associated
@@ -203,6 +207,7 @@ mostRecentAction ::GLFW.Action= GLFW.RELEASE
   isF3Pressed::Bool= false
   isF4Pressed::Bool= false
   isF5Pressed::Bool= false
+  isF6Pressed::Bool= false
   isPlusPressed::Bool= false
   isMinusPressed::Bool= false
   isZPressed::Bool= false
@@ -255,7 +260,7 @@ end
 """
 Object that enables managing input from keyboard - it stores the information also about
 needed keys wheather they are kept pressed  
-examples of keyboard input 
+examples of keyboard input (raw GLFW input we process below)
     action RELEASE GLFW.Action
     key s StringPRESS
     key s String
@@ -279,6 +284,7 @@ examples of keyboard input
     isF3Pressed::Bool= false
     isF4Pressed::Bool= false
     isF5Pressed::Bool= false
+    isF6Pressed::Bool= false
     isPlusPressed::Bool= false
     isMinusPressed::Bool= false
     isZPressed::Bool= false
@@ -337,7 +343,7 @@ Actor that is able to store a state to keep needed data for proper display
     valueForMasToSet::valueForMasToSetStruct=valueForMasToSetStruct() # value that will be used to set  pixels where we would interact with mouse
     lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1,1,1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
     forUndoVector::AbstractArray=[] # holds lambda functions that when invoked will  undo last operations
-    maxLengthOfForUndoVector::Int64 = 10 # number controls how many step at maximum we can get back
+    maxLengthOfForUndoVector::Int64 = 15 # number controls how many step at maximum we can get back
     isBusy::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0) # used to indicate by some functions that actor is busy and some interactions should be ceased
     end
 

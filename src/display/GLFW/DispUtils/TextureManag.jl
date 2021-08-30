@@ -209,6 +209,7 @@ mainUnifs =MainImageUniforms(
    , max_shown_black= glGetUniformLocation(shader_program, "max_shown_black")
     ,displayRange=glGetUniformLocation(shader_program, "displayRange")
     ,isMaskDiffrenceVis=glGetUniformLocation(shader_program, "isMaskDiffrenceVis")
+    ,mainImageContribution=glGetUniformLocation(shader_program, "mainImageContribution")
 )
 setCTWindow(windowControlStruct.min_shown_white,windowControlStruct.max_shown_black,mainUnifs)
 
@@ -237,7 +238,8 @@ function setuniforms(textSpec:: TextureSpec,shader_program::UInt32):: TextureSpe
                         ,maskMinValue=glGetUniformLocation(shader_program, "$(n)minValue") 
                         ,maskMAxValue=glGetUniformLocation(shader_program, "$(n)maxValue") 
                         ,maskRangeValue=glGetUniformLocation(shader_program, "$(n)ValueRange") 
-                        ,isVisibleRef=glGetUniformLocation(shader_program, "$(n)isVisible"))
+                        ,isVisibleRef=glGetUniformLocation(shader_program, "$(n)isVisible")
+                        ,maskContribution=glGetUniformLocation(shader_program, "$(n)maskContribution"))
 
     return setproperties(textSpec, (uniforms= unifs ))
 

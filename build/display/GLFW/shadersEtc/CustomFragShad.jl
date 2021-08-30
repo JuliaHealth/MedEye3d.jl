@@ -51,9 +51,9 @@ $( getMasksSubtractionFunction(maskToSubtrastFrom,maskWeAreSubtracting))
 $(mainFuncString(mainTexture,notMainTextures,maskToSubtrastFrom,maskWeAreSubtracting))
  """
 # uncomment for debugging
- #  for st in split(res, "\n")
-#     @info st
-#     end
+  for st in split(res, "\n")
+    @info st
+    end
 return res    
 
 end #createCustomFramgentShader
@@ -70,6 +70,7 @@ smooth in vec2 TexCoord0;
 uniform int  min_shown_white = 400;//400 ;// value of cut off  - all values above will be shown as white 
 uniform int  max_shown_black = -200;//value cut off - all values below will be shown as black
 uniform float displayRange = 600.0;
+uniform float mainImageContribution = 1.0;//controll main image contribution to color
 """
 end #initialStrings
 
@@ -168,6 +169,7 @@ uniform int $(textName)isVisible= 0; // controlling visibility
 uniform $(addTypeStr(textur))  $(textName)minValue= $(textur.minAndMaxValue[1]); // minimum possible value set in configuration
 uniform $(addTypeStr(textur))  $(textName)maxValue= $(textur.minAndMaxValue[2]); // maximum possible value set in configuration
 uniform $(addTypeStr(textur))  $(textName)ValueRange= $(textur.minAndMaxValue[2] -textur.minAndMaxValue[1] ); // range of possible values calculated from above
+uniform float  $(textName)maskContribution=1.0; //controls contribution of mask to output color
 
 """
 end#addMasksStrings
@@ -210,13 +212,16 @@ function mainFuncString( mainTexture::TextureSpec
                     (strings)-> join(strings, "")
 
    lll = length(notMainTextures)+1                 
-   
-   sumColorR= map( x-> " ($(x.name)ColorMask.r *  $(x.name)Res) ", notMainTexturesNotCont) |> 
-                    (strings)-> join(strings, " + ")     
-   sumColorG= map( x-> " ($(x.name)ColorMask.g  * $(x.name)Res) ", notMainTexturesNotCont) |> 
-                    (strings)-> join(strings, " + ")     
-   sumColorB= map( x-> " ($(x.name)ColorMask.b  * $(x.name)Res) ", notMainTexturesNotCont) |> 
-                    (strings)-> join(strings, " + ")     
+   #The step function returns 0.0 if x is smaller than edge and otherwise 1.0.
+
+   sumColors = map(letter-> 
+                    map( x-> "  $(x.name)ColorMask.$(letter) * ( $(x.name)Res  * step($(x.name)minValue,$(x.name)Res) * step($(x.name)Res ,$(x.name)maxValue ))/ $(x.name)ValueRange "
+                        , notMainTexturesNotCont) |> 
+   (strings)-> join(strings, " + ")              ,["r", "g", "b"]) 
+
+   sumColorR= sumColors[1]    
+   sumColorG= sumColors[2]   
+   sumColorB= sumColors[3]
 
 
 
@@ -227,9 +232,9 @@ function mainFuncString( mainTexture::TextureSpec
    sumColorBCont= map( x->"b$(x.name)getColorForMultiColor($(x.name)Res)", notMainTexturesCont) |> 
                     (strings)-> join(strings, " + ")     
 
+                    
 
-
-   isVisibleList=  map( x-> " $(x.name)isVisible ", notMainTextures) |> 
+   isVisibleList=  map( x-> "$(x.name)isVisible *$(x.name)maskContribution", notMainTextures) |> 
    (strings)-> join(strings, " + ")                  
     return """
     void main()
@@ -237,16 +242,16 @@ function mainFuncString( mainTexture::TextureSpec
 $(masksInfluences)
 
 
-uint todiv = $(isVisibleList)+ $(mainImageName)isVisible+ isMaskDiffrenceVis;
+float todiv = $(isVisibleList) + $(mainImageName)isVisible*mainImageContribution+ isMaskDiffrenceVis;
  vec4 $(mainImageName)Res = mainColor(texture2D($(mainImageName), TexCoord0).r);
    FragColor = vec4(($(sumColorR)+$(sumColorRCont)
-   +$(mainImageName)Res.r+rdiffrenceColor(texture2D($(maskToSubtrastFrom.name), TexCoord0).r ,texture2D($(maskWeAreSubtracting.name), TexCoord0).r )
+   +$(mainImageName)Res.r*mainImageContribution+rdiffrenceColor(texture2D($(maskToSubtrastFrom.name), TexCoord0).r ,texture2D($(maskWeAreSubtracting.name), TexCoord0).r )
     )/todiv
    ,($(sumColorG)+$(sumColorGCont)
-   +$(mainImageName)Res.g+gdiffrenceColor(texture2D($(maskToSubtrastFrom.name), TexCoord0).r ,texture2D($(maskWeAreSubtracting.name), TexCoord0).r ))
+   +$(mainImageName)Res.g*mainImageContribution+gdiffrenceColor(texture2D($(maskToSubtrastFrom.name), TexCoord0).r ,texture2D($(maskWeAreSubtracting.name), TexCoord0).r ))
    /todiv, 
    ($(sumColorB)+$(sumColorBCont)
-   +$(mainImageName)Res.b+bdiffrenceColor(texture2D($(maskToSubtrastFrom.name), TexCoord0).r ,texture2D($(maskWeAreSubtracting.name), TexCoord0).r ) )
+   +$(mainImageName)Res.b*mainImageContribution+bdiffrenceColor(texture2D($(maskToSubtrastFrom.name), TexCoord0).r ,texture2D($(maskWeAreSubtracting.name), TexCoord0).r ) )
    /todiv, 
    1.0  ); //long  product, if mask is invisible it just has full transparency
 
@@ -257,14 +262,14 @@ end#mainFuncString
 
 
 """
-Givin value from texture f the texture is set to be visible otherwise 0 
+Giving value from texture f the texture is set to be visible otherwise 0 
 """
 function setMaskInfluence(textur::TextureSpec)
     textName = textur.name
 
 return """
 
-$(addTypeStr(textur)) $(textName)Res = texture2D($(textName), TexCoord0).r * $(textName)isVisible  ;
+float $(textName)Res = texture2D($(textName), TexCoord0).r * $(textName)isVisible*$(textName)maskContribution ;
 
 """
 end#setMaskInfluence
@@ -356,7 +361,7 @@ float $(x[3])$(x[1])getColorForMultiColor(float innertexelRes) {
         uint indexx = uint(floor(normalized)) ;// so we normalize floor  in order to get index of color from color list
         float[$(length(x[2])+1)] colorFloats = float[$(length(x[2])+1)](0.0,$( map(it->it[x[4]],x[2])|> (fls)-> join(fls,",")    )   )  ;
         float normalizedColorPercent= normalized-float(indexx) ;
-        return colorFloats[indexx +1]*normalizedColorPercent+colorFloats[indexx]*(1- normalizedColorPercent);//so we get color from current section and closer we are to the end of this section the bigger influence of this color, the closer we are to the begining the bigger the influence of previous section color
+        return  clamp(colorFloats[indexx +1]*normalizedColorPercent+colorFloats[indexx]*(1- normalizedColorPercent) ,0.0,1.0 );//so we get color from current section and closer we are to the end of this section the bigger influence of this color, the closer we are to the begining the bigger the influence of previous section color
 }
 
         """ ,  tuples  )," ")
@@ -387,8 +392,8 @@ function addUniformsForNuclearAndSubtr()::String
 return """
 // for mask difference display
 uniform int isMaskDiffrenceVis=0 ;//1 if we want to display mask difference
-uniform int maskAIndex=0 ;//marks index of first mask we want to get diffrence visualized
-uniform int maskBIndex=0 ;//marks index of second mask we want to get diffrence visualized
+//uniform int maskAIndex=0 ;//marks index of first mask we want to get diffrence visualized
+//uniform int maskBIndex=0 ;//marks index of second mask we want to get diffrence visualized
 """	
 end#add..UniformsForNuclearAndSubtr
 
@@ -398,3 +403,5 @@ end#add..UniformsForNuclearAndSubtr
 
 
 end #..CustomFragShad module
+
+

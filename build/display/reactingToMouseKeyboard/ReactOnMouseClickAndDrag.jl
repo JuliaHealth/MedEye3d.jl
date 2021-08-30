@@ -11,39 +11,12 @@ so we modify the data that is the basis of the mouse interaction mask  and we pa
 
 """
 module ReactOnMouseClickAndDrag
-using Parameters, Rocket, GLFW, ModernGL,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils
+using Parameters, Rocket,Setfield, GLFW, ModernGL,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils
 using  Dates, Parameters,  ..DataStructs,  ..StructsManag
 export registerMouseClickFunctions
 export reactToMouseDrag
 
-mouseClickHandler= nothing # used only in case of the benchmarking to simulate user interaction
 
-"""
-struct that enables reacting to  the input  from mouse click  and drag the input will be 
-    Cartesian index represening (x,y)
-     x and y position  of the mouse - will be recorded only if left mouse button is pressed or keep presssed
-"""
-@with_kw  mutable struct MouseCallbackSubscribable <: Subscribable{MouseStruct}
-    #true if left button is presed down - we make it true if the left button is pressed over image and false if mouse get out of the window or we get information about button release
-    isLeftButtonDown ::Bool 
-    isRightButtonDown ::Bool 
-    #coordinates marking 4 corners of 
-    #the quad that displays our medical image with the masks
-    xmin::Int32
-    ymin::Int32
-    xmax::Int32
-    ymax::Int32
-#used to draw left button lines (creating lines)
- #store of the cartesian coordinates that is used to batch actions 
-#- so if mouse is moving rapidly we would store bunch of coordinates and then modify texture in batch
-    coordinatesStoreForLeftClicks ::Vector{CartesianIndex{2}} 
-    lastCoordinate::CartesianIndex{2}#generally when we draw lines we remove points from array above yet w need to leave last one in order to keep continuity of futher line
-    isBusy::Base.Threads.Atomic{Bool} # indicate to check weather the system is ready to receive the input
-
-   
-    subject :: Subject{MouseStruct} # coordinates of mouse 
-   
-end
 
 
 
@@ -145,7 +118,6 @@ function registerMouseClickFunctions(window::GLFW.Window
                                         ,isBusy=isBusy
                                         ,subject=Subject(MouseStruct  ,scheduler = AsyncScheduler()))
 
-mouseClickHandler=mouseButtonSubs
 
 GLFW.SetCursorPosCallback(window, (a, x, y) -> mouseButtonSubs(a,x, y ) )# and  for example : cursor: 29.0, 469.0  types   Float64  Float64   
 GLFW.SetMouseButtonCallback(window, (a, button, action, mods) ->mouseButtonSubs(a,button, action,mods )) # for example types MOUSE_BUTTON_1 PRESS   GLFW.MouseButton  GLFW.Action 
@@ -173,38 +145,58 @@ function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any, ActorWith
     if (!isempty(textureList)  && mousestr.isLeftButtonDown && textureList[1].isEditable)
         texture= textureList[1]
         calcDim =  actor.actor.calcDimsStruct
+
         # two dimensional coordinates on plane of intrest (current slice)
        mappedCoords =  translateMouseToTexture(texture.strokeWidth
                                                 ,mouseCoords
                                                 ,actor.actor.calcDimsStruct)
 
+     
+
        twoDimDat= actor.actor.currentlyDispDat|> # accessing currently displayed data
        (singSl)-> singSl.listOfDataAndImageNames[singSl.nameIndexes[texture.name]] #accessing the texture data we want to modify
       
-       toSet =  convert( parameter_type(texture) ,actor.actor.valueForMasToSet.value)
-       modSlice!(twoDimDat, mappedCoords, convert(twoDimDat.type, toSet ))|> # modifying data associated with texture
-       (sliceDat)-> updateTexture(twoDimDat.type,sliceDat, texture,0,0,calcDim.imageTextureWidth,calcDim.imageTextureHeight  )
 
-       glClear(GL_COLOR_BUFFER_BIT)
-       basicRender(obj.window)
+
+       toSet =  convert( parameter_type(texture) ,actor.actor.valueForMasToSet.value)
+       sliceDat= modSlice!(twoDimDat, mappedCoords, convert(twoDimDat.type, toSet )) # modifying data associated with texture
+      
+       
+     #  updateTexture(twoDimDat.type,sliceDat, texture,0,0,calcDim.imageTextureWidth,calcDim.imageTextureHeight  )
+
+     singleSliceDat = setproperties(actor.actor.currentlyDispDat,( listOfDataAndImageNames=[ sliceDat ] ))
+
+
+
+   updateImagesDisplayed(singleSliceDat
+                        ,actor.actor.mainForDisplayObjects
+                        ,actor.actor.textDispObj
+                        ,actor.actor.calcDimsStruct
+                        ,actor.actor.valueForMasToSet  )
+    
+    
+
+
+
         #to enable undoing we just set the point we modified back to 0 
         addToforUndoVector(actor, ()-> begin
         modSlice!(twoDimDat, mappedCoords,  convert(twoDimDat.type, 0 ))|> # modifying data associated with texture
-        (sliceDat)-> updateTexture(twoDimDat.type,sliceDat, texture,0,0,calcDim.imageTextureWidth,calcDim.imageTextureHeight  )
-         basicRender(obj.window)
-      
-    end)
+        (sliceDat)-> updateTexture(twoDimDat.type,sliceDat.dat, texture,0,0,calcDim.imageTextureWidth,calcDim.imageTextureHeight  )
+         basicRender(obj.window) end)
 
     elseif( mousestr.isRightButtonDown  )
         #we save data about right click position in order to change the slicing plane accordingly
         mappedCoords =  translateMouseToTexture(Int32(1)
         ,mouseCoords
         ,actor.actor.calcDimsStruct)
+                        mappedCorrd= mappedCoords
+                        if(!isempty(mappedCorrd))
+                                actor.actor.lastRecordedMousePosition = cartTwoToThree(actor.actor.onScrollData.dataToScrollDims 
+                                                                                        ,actor.actor.currentDisplayedSlice
+                                                                                    , mappedCoords[1]   )   
 
-        actor.actor.lastRecordedMousePosition = cartTwoToThree(actor.actor.onScrollData.dataToScrollDims 
-                                                                ,actor.actor.currentDisplayedSlice
-                                                               ,mappedCoords[1]    )   
-    end #if 
+                        end#if
+     end #if 
     actor.actor.isBusy[]=false # we can do sth in opengl
     obj.stopListening[]=false # reactivete event listening loop
 end#..ReactToScroll
@@ -223,19 +215,16 @@ function translateMouseToTexture(strokeWidth::Int32
                                 ,calcD::CalcDimsStruct )::Vector{CartesianIndex{2}}
   
 
-
-    xmin=calcD.windowWidthCorr
-    ymin=calcD.windowHeightCorr
-    xmax=calcD.avWindWidtForMain-calcD.windowWidthCorr
-    ymax=calcD.avWindHeightForMain-calcD.windowHeightCorr
-
-
-    return    map(c->CartesianIndex( getNewX(c[1],calcD),  getNewY(c[2] ,calcD)) ,mouseCoords)  |>
-    (x)->filter(it->it[1]>0 && it[2]>0 ,x)  |>      # we do not want to try access it in point 0 as julia is 1 indexed                 
-   (filteredList) -> map(point-> addStrokeWidth(point,Int64(strokeWidth) ) , filteredList) |>  # adding some points around the point of choice so will be better visible
-   (matrix)->reduce(vcat, matrix)# when we added some oints around we got list of lists so now we need to flatten it out
-   unique |># we want only unique elements
-   uniq-> filter(it-> it[1]>xmin && it[1]<xmax && it[2]>ymin && it[it]<ymax  ,uniq)    # as we add new points they may end up getting outside the texture; we need to filter those out
+    filteredList= map(c->CartesianIndex( getNewX(c[1],calcD),  getNewY(c[2] ,calcD)) ,mouseCoords)  |>
+    (x)->filter(it->it[1]>0 && it[2]>0 ,x)       # we do not want to try access it in point 0 as julia is 1 indexed                 
+   if(!isempty(filteredList)) 
+    return map(point-> addStrokeWidth(point,Int64(strokeWidth) ) , filteredList) |>  # adding some points around the point of choice so will be better visible
+    (matrix)->reduce(vcat, matrix)|># when we added some oints around we got list of lists so now we need to flatten it out
+    unique|> # we want only unique elements
+    uniq-> filter(it-> it[1]>0 && it[1]<calcD.imageTextureWidth && it[2]>0 && it[2]<calcD.imageTextureHeight  ,uniq)     # as we add new points they may end up getting outside the texture; we need to filter those out
+   end #if 
+   #if we are here we do not have anything meaningfull else to return
+   return Vector{CartesianIndex{2}}()
 end #translateMouseToTexture
 
 """
@@ -247,8 +236,8 @@ function addStrokeWidth(point::CartesianIndex{2},strokeW::Int64  )
     added-> filter(x-> ( abs(point[1]- x[1]) + abs(x[2] -point[2]))<strokeW  ,added )# filtering to distant points
 end#addStrokeWidth
 
-
-
+xx = CartesianIndex(2,2)
+xx[1]
 """
 helper function for translateMouseToTexture
 """

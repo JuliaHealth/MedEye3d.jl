@@ -66,9 +66,12 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
                         ,textTexturewidthh::Int32=Int32(2000)
                         ,textTextureheightt::Int32= Int32( round((windowHeight/(windowWidth*(1-fractionOfMainIm)) ))*textTexturewidthh)
                         ,windowControlStruct::WindowControlStruct=WindowControlStruct()) 
+
+   #in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
+    if( typeof(mainActor.actor.mainForDisplayObjects.window)== GLFW.Window  )
+        cleanUp()
+    end#if    
    #setting number to texture that will be needed in shader configuration
-
-
    listOfTextSpecs= map(x->setproperties(x[2],(whichCreated=x[1])),enumerate(listOfTextSpecsPrim))
    
    
@@ -226,6 +229,7 @@ In order to properly close displayer we need to :
 """
 function cleanUp()
     obj = mainActor.actor.mainForDisplayObjects
+    glDeleteTextures(length(obj.listOfTextSpecifications), map(text->text.ID,obj.listOfTextSpecifications));
     glFlush()
     GLFW.DestroyWindow(obj.window)
 
@@ -237,7 +241,6 @@ function cleanUp()
     # sleep(5)
     # obj = mainActor.actor.mainForDisplayObjects
     # #deleting textures
-    # glDeleteTextures(length(obj.listOfTextSpecifications), map(text->text.ID,obj.listOfTextSpecifications));
     # #destroying buffers
     # glDeleteBuffers(2,[obj.vbo,obj.ebo])
     # #detaching shaders

@@ -173,6 +173,7 @@ struct holding data usefull to controll display window
     toDecrease::Bool= false#true if we intend to decrese a treshold value
     upper::Bool= false#true if we intend to modify upper treshold
     lower::Bool= false#true if we intend to modify lower treshold
+    maskContributionToChange::Bool= false#true if we intend to modify mask contribution
 end#windowControlStruct
 
 """

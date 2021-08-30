@@ -1,8 +1,25 @@
+# MedEye3d.jl
+# MedEye3d
+Main goal of the package is conviniently visualize 3d medical imaging to make segmentation simpler
 
-######### Defining Helper Functions and imports
+## Some oficial introduction - you can skip it
 
+Image segmentation in the medical domain has mul-tiple use cases.  Most importantly it enables delin-eation of physiological and pathological structures,in  order  to  confirm  or  reject  some  diagnostic  hy-pothesis.   In  case  of  all  segmentation  problems,  avery  important  step  in  evaluation  of  the  segmen-tation algorithm output is visual inspection.  Suchinspection enables researchers that are responsiblefor creating and or evaluating developed algorithmsto easily spot problems, and compare different algo-rithms in more detailed ways than can be achievedby usage of segmentation metrics alone.  Howeverin order for such in development visual evaluationto be useful it needs to meet some usage criteria.It needs to be easily integrable to the program-ming language and libraries used by researchers.Performance  of  the  tool  must  be  adequate  inorder to suit the iterative process of algorithm de-velopment and refinement.Representation accuracy must be sufficient forthe task at hand.  It should not require an exces-sive amount of computational resources, in order tominimize its influence on running algorithms.Support for in memory data structures (arrays)should be convenient. Needs  to  provide  possibility  of  simple  manualannotations,  on given mask and ability to controlvisibility and visual representation of given mask.Should provide also the possibility to display somemetadata in text format like segmentation metricsfor example DICE score.Ideally  it  should  be  also  open  source  and  welldocumented in order to enable users to modify itaccording to the task at hand.In  order  to  address  all  of  those  issues  in  themedical domain and Julia language ecosystem thedescribed below package was developed.
+
+
+Image below just represents limitless possibilities of color ranges, and that thanks to OpenGl even theorethically complex data to display will render nearly instantenously. 
+
+
+![image](https://user-images.githubusercontent.com/53857487/131262103-4662bf13-11ca-42a7-836e-a89eb6d17c82.png)
+
+##
+Below the functionality of the package will be described on the basis of some examples
+In case of any questions, feature requests, or propositions of cooperation  post them here on Github or contact me via LinkedIn linkedin.com/in/jakub-mitura-7b2013151
+
+## Defining Helper Functions and imports
+```
 #I use Simple ITK as most robust
-using MedEye3d, Conda,PyCall,Pkg
+using NuclearMedEye, Conda,PyCall,Pkg
 
 Conda.pip_interop(true)
 Conda.pip("install", "SimpleITK")
@@ -10,20 +27,24 @@ Conda.pip("install", "h5py")
 sitk = pyimport("SimpleITK")
 np= pyimport("numpy")
 
-import MedEye3d
-import MedEye3d.ForDisplayStructs
-import MedEye3d.ForDisplayStructs.TextureSpec
+import NuclearMedEye
+import NuclearMedEye.ForDisplayStructs
+import NuclearMedEye.ForDisplayStructs.TextureSpec
 using ColorTypes
-import MedEye3d.SegmentationDisplay
+import NuclearMedEye.SegmentationDisplay
 
-import MedEye3d.DataStructs.ThreeDimRawDat
-import MedEye3d.DataStructs.DataToScrollDims
-import MedEye3d.DataStructs.FullScrollableDat
-import MedEye3d.ForDisplayStructs.KeyboardStruct
-import MedEye3d.ForDisplayStructs.MouseStruct
-import MedEye3d.ForDisplayStructs.ActorWithOpenGlObjects
-import MedEye3d.OpenGLDisplayUtils
+import NuclearMedEye.DataStructs.ThreeDimRawDat
+import NuclearMedEye.DataStructs.DataToScrollDims
+import NuclearMedEye.DataStructs.FullScrollableDat
+import NuclearMedEye.ForDisplayStructs.KeyboardStruct
+import NuclearMedEye.ForDisplayStructs.MouseStruct
+import NuclearMedEye.ForDisplayStructs.ActorWithOpenGlObjects
+import NuclearMedEye.OpenGLDisplayUtils
+```
 
+Helper functions used to upload data - those will be enclosed (with many more) in a package that Is currently in development - 3dMedPipe 
+
+```
 """
 given directory (dirString) to file/files it will return the simple ITK image for futher processing
 isMHD when true - data in form of folder with dicom files
@@ -67,14 +88,14 @@ function getPixelsAndSpacing(image)
     spacings = image.GetSpacing()
     return ( permuteAndReverse(pixelsArr), spacings  )
 end#getPixelsAndSpacing
+```
 
+Directories - obviously you need to provide path to place where it is stored on your disk. You can download PET/CT data from. You can download example data from https://wwsi365-my.sharepoint.com/:f:/g/personal/s9956jm_ms_wwsi_edu_pl/EstYmEuRHqZNlFIlPBzhbQIBvMwQBJks2lUcCSWgwCYSOg?e=nfW95Q
 
-
-# directories of PET/CT Data - from not published (yet) dataset - single example available from https://wwsi365-my.sharepoint.com/:f:/g/personal/s9956jm_ms_wwsi_edu_pl/Eq3cL7Md5bhPvnUlFLAMKZAB3nsbl6Q18fG96iVajvnNqA?e=bzX68X
+```
+# directories of PET/CT Data - from https://wiki.cancerimagingarchive.net/display/Public/Head-Neck-PET-CT
 dirOfExample ="C:\\GitHub\\JuliaMedPipe\\data\\PETphd\\slicerExp\\all17\\bad17NL-bad17NL\\20150518-PET^1_PET_CT_WholeBody_140_70_Recon (Adult)\\4-CT AC WB  1.5  B30f"
 dirOfExamplePET ="C:\\GitHub\\JuliaMedPipe\\data\\PETphd\\slicerExp\\all17\\bad17NL-bad17NL\\20150518-PET^1_PET_CT_WholeBody_140_70_Recon (Adult)\\3-PET WB"
-
-
 
 # in most cases dimensions of PET and CT data arrays will be diffrent in order to make possible to display them we need to resample and make dimensions equal
 imagePET= getImageFromDirectory(dirOfExamplePET,false,true)
@@ -87,8 +108,8 @@ petPixels, petSpacing =getPixelsAndSpacing(pet_image_resampled)
 petPixels = Float32.(petPixels)
 
 # we need to pass some metadata about image array size and voxel dimensions to enable proper display
-datToScrollDimsB= MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixels) ,voxelSize=ctSpacing, dimensionToScroll = 3 );
-# example of texture specification used - we need to describe all arrays we want to display
+datToScrollDimsB= NuclearMedEye.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixels) ,voxelSize=ctSpacing, dimensionToScroll = 3 );
+# example of texture specification used - we need to describe all arrays we want to display, to see all possible configurations look into TextureSpec struct docs .
 textureSpecificationsPETCT = [
   TextureSpec{Float32}(
       name = "PET",
@@ -97,7 +118,7 @@ textureSpecificationsPETCT = [
       isContinuusMask=true,
       #by the number 1 we will reference this data by for example making it visible or not
       numb= Int32(1),
-      colorSet = [RGB(0.0,0.0,0.0),RGB(1.0,1.0,0.0),RGB(1.0,0.5,0.0),RGB(1.0,0.0,0.0)]
+      colorSet = [RGB(0.0,0.0,0.0),RGB(1.0,1.0,0.0),RGB(1.0,0.5,0.0),RGB(1.0,0.0,0.0) ,RGB(1.0,0.0,0.0)]
       #display cutoff all values below 200 will be set 2000 and above 8000 to 8000 but only in display - source array will not be modified
       ,minAndMaxValue= Float32.([200,8000])
      ),
@@ -123,19 +144,20 @@ textLinesFromStrings() where we pass resies of strings, if we want we can also e
 mainLines - will be displayed over all slices
 supplLines - will be displayed over each slice where is defined - below just dummy data
 """
-import MedEye3d.DisplayWords.textLinesFromStrings
+import NuclearMedEye.DisplayWords.textLinesFromStrings
 
 mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
 supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(ctPixels)[3] );
+```
 
-"""
+
 If we want to pass 3 dimensional array of scrollable data we need to supply it via vector ThreeDimRawDat's struct
 utility function to make creation of those easier is getThreeDims which creates series of ThreeDimRawDat from list of tuples where
     first entry is String and second entry is 3 dimensional array with data 
     strings needs to be the same as we  defined in texture specifications at the bagining
     data arrays needs to be o the same size and be of the same type we specified in texture specification
-"""
-import MedEye3d.StructsManag.getThreeDims
+```
+import NuclearMedEye.StructsManag.getThreeDims
 
 tupleVect = [("PET",petPixels) ,("CTIm",ctPixels),("manualModif",zeros(UInt8,size(petPixels)) ) ]
 slicesDat= getThreeDims(tupleVect )
@@ -148,19 +170,21 @@ mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDimsB
                                  ,mainTextToDisp= mainLines
                                  ,sliceTextToDisp=supplLines );
 
-
-"""
+```
 This function prepares all for display; 1000 in the end is responsible for setting window width for more look into SegmentationDisplay.coordinateDisplay
-"""
+```
 SegmentationDisplay.coordinateDisplay(textureSpecificationsPETCT ,fractionOfMainIm ,datToScrollDimsB ,1000);
-"""
-as all is ready we can finally display image 
-"""
+```
+As all is ready we can finally display image 
+```
 Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);
-#########Interactions
+```
+So after invoking this function one should see image sth like below
 
+![image](https://user-images.githubusercontent.com/53857487/131359926-56d2ac89-1754-4b05-9c38-3c00d990c404.png)
 
-"""
+## Interactions
+
 Next all Interactions are done either by mouse or by keyboard shortcuts
 
 left click and drag - will mark active texture (look below - set with alt ...) 
@@ -168,34 +192,62 @@ left click and drag - will mark active texture (look below - set with alt ...)
 right click and drag - sets remembered position - when we will change plane of crossection
      for example from tranverse to coonal this point will be also visible on new plane
 
-all keyboard shortcuts will be activated on RELEASE of keys or by pressing enter while still pressing
+all keyboard shortcuts will be activated on RELEASE of keys or by pressing enter while still pressing other; +,- and z keys acts also like enter 
 
 shift + number - make mask associated with given number visible
+
+
 ctrl + number -  make mask associated with given number invisible 
+
+
 alt + number -  make mask associated with given number active for mouse interaction 
+
+
 tab + number - sets the number that will be  used as an input to masks modified by mouse
-    when tab plus (and then no number) will be pressed it will increase stroke width
-    when tab minus (and then no number) will be pressed it will increase stroke width
+  
+  when tab plus (and then no number) will be pressed it will increase stroke width
+  
+  when tab minus (and then no number) will be pressed it will increase stroke width
+    
+    
 shift + numberA + "-"(minus sign) +numberB  - display diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B invisible
+
+
 ctrl + numberA + "-"(minus sign) +numberB  - stops displaying diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B visible
+
+
 space + 1 or 2 or 3 - change the plane of view (transverse, coronal, sagittal)
+
+
 ctrl + z - undo last action
+
+
 tab +/- increase or decrease stroke width
+
+
 F1 - will display wide window for bone Int32(1000),Int32(-1000)
+
+
 F2 - will display window for soft tissues Int32(400),Int32(-200)
+
+
 F3 - will display wide window for lung viewing  Int32(0),Int32(-1000)
-KEY_F4,  KEY_F5 -
-    sets minimum (F4) and maximum (KEY_F5) value for display (with combination of + and minus signs - to increase or decrease given treshold) - 
-        in case of continuus colors it will clamp values - so all above max will be equaled to max ; and min if smallert than min
-        in case of main CT mask - it will controll min shown white and max shown black
-        in case of maks with single color associated we will step data so if data is outside the rande it will return 0 - so will not affect display
 
-"""
+F4,  F5 sets minimum (F4) and maximum (KEY_F5) value for display (with combination of + and minus signs - to increase or decrease given treshold) - 
+
+In case of continuus colors it will clamp values - so all above max will be equaled to max ; and min if smallert than min
+
+In case of main CT mask - it will controll min shown white and max shown black
+
+In case of maks with single color associated we will step data so if data is outside the rande it will return 0 - so will not affect display
+F6 - controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%  if plus is pressed it will increse contribution by 0.1   if minus is pressed it will decrease contribution by 0.1  
 
 
-######### Benchmark PET/CT  
-#For transparency I include Below code used to benchark  PET/CT data
 
+## Benchmark PET/CT  
+
+For transparency I include Below code used to benchark  PET/CT data
+```
 window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
 syncActor = Main.SegmentationDisplay.mainActor
 
@@ -208,17 +260,17 @@ BenchmarkTools.DEFAULT_PARAMETERS.gcsample = true
 
 
 function toBenchmarkScroll(toSc) 
-    MedEye3d.ReactToScroll.reactToScroll(toSc ,syncActor, false)
+    NuclearMedEye.ReactToScroll.reactToScroll(toSc ,syncActor, false)
 end
 
 
 function toBenchmarkPaint(carts)
-    MedEye3d.ReactOnMouseClickAndDrag.reactToMouseDrag(MouseStruct(true,false, carts),syncActor )
+    NuclearMedEye.ReactOnMouseClickAndDrag.reactToMouseDrag(MouseStruct(true,false, carts),syncActor )
 end
 
 
 function toBenchmarkPlaneTranslation(toScroll)
-    MedEye3d.ReactOnKeyboard.processKeysInfo(Option(toScroll),syncActor,KeyboardStruct(),false    )
+    NuclearMedEye.ReactOnKeyboard.processKeysInfo(Option(toScroll),syncActor,KeyboardStruct(),false    )
     OpenGLDisplayUtils.basicRender(syncActor.actor.mainForDisplayObjects.window)
     glFinish()
 end
@@ -244,25 +296,29 @@ translationsPETCT = run(translations)
 
 
 plot(scrollingPETCT)
+```
+If all will be ready you should see sth like on the image below
 
 
-#### PURE CT image exaple , MHD files  taken from https://sliver07.grand-challenge.org/
-
+##  PURE CT image exaple , MHD file
+Files  taken from https://sliver07.grand-challenge.org/
+As previosly adjust path to your case
+```
 exampleLabel = "C:\\GitHub\\JuliaMedPipe\\data\\liverPrimData\\training-labels\\label\\liver-seg002.mhd"
 exampleCTscann = "C:\\GitHub\\JuliaMedPipe\\data\\liverPrimData\\training-scans\\scan\\liver-orig002.mhd"
-
-# loading data
+```
+Loading data
+``` 
 imagePureCT= getImageFromDirectory(exampleCTscann,true,false)
 imageMask= getImageFromDirectory(exampleLabel,true,false)
 
-
 ctPixelsPure, ctSpacingPure = getPixelsAndSpacing(imagePureCT)
 maskPixels, maskSpacing =getPixelsAndSpacing(imageMask)
+```
+We need to pass some metadata about image array size and voxel dimensions to enable proper display
 
-
-
-# we need to pass some metadata about image array size and voxel dimensions to enable proper display
-datToScrollDimsB= MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixelsPure) ,voxelSize=ctSpacingPure, dimensionToScroll = 3 );
+```
+datToScrollDimsB= NuclearMedEye.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixelsPure) ,voxelSize=ctSpacingPure, dimensionToScroll = 3 );
 # example of texture specification used - we need to describe all arrays we want to display
 listOfTexturesSpec = [
     TextureSpec{UInt8}(
@@ -285,23 +341,24 @@ listOfTexturesSpec = [
         isMainImage = true,
         minAndMaxValue= Int16.([0,100]))  
  ];
-# We need also to specify how big part of the screen should be occupied by the main image and how much by text fractionOfMainIm= Float32(0.8);
+``` 
+We need also to specify how big part of the screen should be occupied by the main image and how much by text fractionOfMainIm= Float32(0.8);
+```
 fractionOfMainIm= Float32(0.8);
 """
 If we want to display some text we need to pass it as a vector of SimpleLineTextStructs 
 """
-import MedEye3d.DisplayWords.textLinesFromStrings
+import NuclearMedEye.DisplayWords.textLinesFromStrings
 
 mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
 supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(ctPixelsPure)[3] );
 
 """
 If we want to pass 3 dimensional array of scrollable data"""
-import MedEye3d.StructsManag.getThreeDims
+import NuclearMedEye.StructsManag.getThreeDims
 
 tupleVect = [("goldStandardLiver",maskPixels) ,("CTIm",ctPixelsPure),("manualModif",zeros(UInt8,size(ctPixelsPure)) ) ]
 slicesDat= getThreeDims(tupleVect )
-
 
 """
 Holds data necessary to display scrollable data
@@ -313,18 +370,18 @@ mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDimsB
                                  ,sliceTextToDisp=supplLines );
 
 
-"""
+```
 This function prepares all for display; 1000 in the end is responsible for setting window width for more look into SegmentationDisplay.coordinateDisplay
-"""
+```
 SegmentationDisplay.coordinateDisplay(listOfTexturesSpec ,fractionOfMainIm ,datToScrollDimsB ,1000);
-"""
-as all is ready we can finally display image 
-"""
+```
+As all is ready we can finally display image 
+```
 Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);
 
-
-###########next part of benchmark
-
+```
+## Next part of benchmark for pure CT
+```
 #we want some integers but not 0
 scPureCt = @benchmarkable toBenchmarkScroll(y) setup=(y = filter(it->it!=0, rand(-5:5,20))[1]  )
 
@@ -348,13 +405,39 @@ using BenchmarkPlots, StatsPlots
 scrollingPureCT = run(scB)
 mouseInteractionPureCT = run(paintB)
 translationsPureCT = run(translationsB)
+```
+When all will be ok and you will scroll up  you should see sth like below
+
+![soft_liv](https://user-images.githubusercontent.com/53857487/131261997-8e62851d-6589-4f41-8baf-9ca89b03a6da.png)
 
 
 
 
 
- using GLFW
- GLFW.PollEvents()
-
-
-
+```@autodocs
+Modules = [NuclearMedEye,NuclearMedEye.SegmentationDisplay
+    ,NuclearMedEye.ReactingToInput
+    ,NuclearMedEye.ReactOnKeyboard
+    ,NuclearMedEye.ReactOnMouseClickAndDrag
+    ,NuclearMedEye.ReactToScroll
+    ,NuclearMedEye.PrepareWindow
+    ,NuclearMedEye.TextureManag
+    ,NuclearMedEye.DisplayWords
+    ,NuclearMedEye.Uniforms
+    ,NuclearMedEye.ShadersAndVerticiesForText
+    ,NuclearMedEye.ShadersAndVerticies
+    ,NuclearMedEye.OpenGLDisplayUtils
+    ,NuclearMedEye.CustomFragShad
+    ,NuclearMedEye.PrepareWindowHelpers
+    ,NuclearMedEye.StructsManag
+    ,NuclearMedEye.ForDisplayStructs
+    ,NuclearMedEye.DataStructs
+    ,NuclearMedEye.BasicStructs
+    ,NuclearMedEye.ModernGlUtil
+    ,NuclearMedEye.MaskDiffrence
+    ,NuclearMedEye.KeyboardVisibility
+    ,NuclearMedEye.OtherKeyboardActions
+    ,NuclearMedEye.WindowControll
+    ,NuclearMedEye.ChangePlane]
+Order   = [:module,:function, :type,:constant]
+```
