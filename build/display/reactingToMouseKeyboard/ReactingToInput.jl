@@ -2,7 +2,7 @@
 module ReactingToInput
 using Rocket, GLFW,ModernGL,Setfield,  ..ReactToScroll,  ..ForDisplayStructs
 using  ..TextureManag,DataTypesBasic,  ..ReactOnMouseClickAndDrag,  ..ReactOnKeyboard,  ..DataStructs,  ..StructsManag,  ..DisplayWords
-
+using ..MaskDiffrence, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane
 export subscribeGLFWtoActor
 
 
@@ -67,8 +67,15 @@ function setUpForScrollData(onScrollData::FullScrollableDat ,actor::SyncActor{An
     onScrollData.slicesNumber= getSlicesNumber(onScrollData)
     actor.actor.onScrollData=onScrollData
     #In order to refresh all in case we would change the texture dimensions ...
-  processKeysInfo(Option(onScrollData.dataToScrollDims),actor,KeyboardStruct()  )
-    actor.actor.mainForDisplayObjects.stopListening[]=false
+    ChangePlane.processKeysInfo(Option(onScrollData.dataToScrollDims),actor,KeyboardStruct()  )
+      #so  It will precalculate some data and later mouse modification will be swift
+      oldd = actor.actor.valueForMasToSet 
+      
+      actor.actor.valueForMasToSet = valueForMasToSetStruct(value = 0)
+      ReactOnMouseClickAndDrag.reactToMouseDrag(MouseStruct(true,false, [CartesianIndex(5,5)]),actor )
+      actor.actor.valueForMasToSet = oldd
+
+  actor.actor.mainForDisplayObjects.stopListening[]=false
 
 end#setUpMainDisplay
 
@@ -168,11 +175,15 @@ function subscribeGLFWtoActor(actor ::SyncActor{Any, ActorWithOpenGlObjects})
     GLFW.SetScrollCallback(forDisplayConstants.window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
 
     keyBoardAct = registerKeyboardFunctions(forDisplayConstants.window,forDisplayConstants.stopListening)
-    buttonSubs = registerMouseClickFunctions(forDisplayConstants.window,forDisplayConstants.stopListening,actor.actor.calcDimsStruct,actor.actor.isBusy )
+    buttonSubs  = registerMouseClickFunctions(forDisplayConstants.window,forDisplayConstants.stopListening,actor.actor.calcDimsStruct,actor.actor.isBusy )
   
+
+
     keyboardSub = subscribe!(keyBoardAct, actor)
     scrollSubscription = subscribe!(scrollback, actor)
     mouseClickSub = subscribe!(buttonSubs, actor)
+
+
 
 return [scrollSubscription,mouseClickSub,keyboardSub]
 

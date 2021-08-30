@@ -2,7 +2,7 @@
 module ReactingToInput
 using Rocket, GLFW,ModernGL,Setfield,  ..ReactToScroll,  ..ForDisplayStructs
 using  ..TextureManag,DataTypesBasic,  ..ReactOnMouseClickAndDrag,  ..ReactOnKeyboard,  ..DataStructs,  ..StructsManag,  ..DisplayWords
-
+using ..MaskDiffrence, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane
 export subscribeGLFWtoActor
 
 
@@ -67,7 +67,7 @@ function setUpForScrollData(onScrollData::FullScrollableDat ,actor::SyncActor{An
     onScrollData.slicesNumber= getSlicesNumber(onScrollData)
     actor.actor.onScrollData=onScrollData
     #In order to refresh all in case we would change the texture dimensions ...
-  processKeysInfo(Option(onScrollData.dataToScrollDims),actor,KeyboardStruct()  )
+    ChangePlane.processKeysInfo(Option(onScrollData.dataToScrollDims),actor,KeyboardStruct()  )
       #so  It will precalculate some data and later mouse modification will be swift
       oldd = actor.actor.valueForMasToSet 
       

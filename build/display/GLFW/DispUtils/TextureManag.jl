@@ -96,7 +96,6 @@ function initializeTextures(listOfTextSpecs::Vector{TextureSpec}
     for (ind, textSpec ) in enumerate(listOfTextSpecs)
         index=ind-1
         textUreId= createTexture(parameter_type(textSpec),calcDimStruct.imageTextureWidth,calcDimStruct.imageTextureHeight,textSpec.GL_Rtype,textSpec.OpGlType )#binding texture and populating with data
-        @info "textUreId in initializeTextures"  textUreId
        
         actTextrureNumb = getProperGL_TEXTURE(index)
         glActiveTexture(actTextrureNumb)
@@ -210,13 +209,7 @@ mainUnifs =MainImageUniforms(
    , max_shown_black= glGetUniformLocation(shader_program, "max_shown_black")
     ,displayRange=glGetUniformLocation(shader_program, "displayRange")
     ,isMaskDiffrenceVis=glGetUniformLocation(shader_program, "isMaskDiffrenceVis")
-    ,maskAIndex=glGetUniformLocation(shader_program, "maskAIndex")
-    ,maskBIndex=glGetUniformLocation(shader_program, "maskBIndex")
-    ,minNuclearMaskVal=glGetUniformLocation(shader_program, "minNuclearMaskVal")
-    ,maxNuclearMaskVal=glGetUniformLocation(shader_program, "maxNuclearMaskVal")
-    ,rangeOfNuclearMaskVal=glGetUniformLocation(shader_program, "rangeOfNuclearMaskVal")
-    ,nuclearMaskSampler=glGetUniformLocation(shader_program, "nuclearMaskSampler")
-    ,isNuclearMaskVis=glGetUniformLocation(shader_program, "isNuclearMaskVis")
+    ,mainImageContribution=glGetUniformLocation(shader_program, "mainImageContribution")
 )
 setCTWindow(windowControlStruct.min_shown_white,windowControlStruct.max_shown_black,mainUnifs)
 
@@ -242,7 +235,11 @@ function setuniforms(textSpec:: TextureSpec,shader_program::UInt32):: TextureSpe
     unifs = MaskTextureUniforms(samplerName= n
                         ,samplerRef= glGetUniformLocation(shader_program, n)
                         ,colorsMaskRef=glGetUniformLocation(shader_program, "$(n)ColorMask") 
-                        ,isVisibleRef=glGetUniformLocation(shader_program, "$(n)isVisible"))
+                        ,maskMinValue=glGetUniformLocation(shader_program, "$(n)minValue") 
+                        ,maskMAxValue=glGetUniformLocation(shader_program, "$(n)maxValue") 
+                        ,maskRangeValue=glGetUniformLocation(shader_program, "$(n)ValueRange") 
+                        ,isVisibleRef=glGetUniformLocation(shader_program, "$(n)isVisible")
+                        ,maskContribution=glGetUniformLocation(shader_program, "$(n)maskContribution"))
 
     return setproperties(textSpec, (uniforms= unifs ))
 

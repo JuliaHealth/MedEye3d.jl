@@ -8,7 +8,7 @@ utilities for dealing data structs like FullScrollableDat or SingleSliceDat
 """
 module StructsManag
 using  Setfield,   ..ForDisplayStructs,   ..DataStructs, Rocket
-export addToforUndoVector,cartTwoToThree,getHeightToWidthRatio,threeToTwoDimm,modSlice!, threeToTwoDimm,modifySliceFull!,getSlicesNumber,getMainVerticies
+export getThreeDims,addToforUndoVector,cartTwoToThree,getHeightToWidthRatio,threeToTwoDimm,modSlice!, threeToTwoDimm,modifySliceFull!,getSlicesNumber,getMainVerticies
 
 ```@doc
 given two dim dat it sets points in given coordinates in given slice to given value
@@ -20,7 +20,7 @@ function modSlice!(data::TwoDimRawDat{T}
                 ,coords::Vector{CartesianIndex{2}}
                 ,value::T ) where {T}
    data.dat[coords].=value
-   data.dat
+   data
 end#modSlice
 
 
@@ -125,6 +125,19 @@ function addToforUndoVector(actor::SyncActor{Any, ActorWithOpenGlObjects}
 
 end#addToforUndoVector
 
+
+```@doc
+utility function to create series of ThreeDimRawDat from list of tuples where
+first entry is String and second entry is 3 dimensional array with data 
+```
+function getThreeDims(list )
+
+  return map(tupl->ThreeDimRawDat{typeof(tupl[2][1])}(typeof(tupl[2][1]),tupl[1],tupl[2]) ,list)
+
+end#getThreeDims
+
+
+# parameter_type(x::TextureSpec) = parameter_type(typeof(x))
 
 
 

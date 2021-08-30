@@ -1,6 +1,6 @@
 module ForDisplayStructs
 using Base: Int32, isvisible
-export MouseStruct,parameter_type,Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms,ForWordsDispStruct
+export ScrollCallbackSubscribable, KeyboardCallbackSubscribable, MouseCallbackSubscribable,MouseStruct,parameter_type,Mask,TextureSpec,forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct,TextureUniforms,MainImageUniforms, MaskTextureUniforms,ForWordsDispStruct
 
 using ColorTypes,Parameters,Observables,ModernGL,GLFW,Rocket, Dictionaries,FreeTypeAbstraction, ..DataStructs
 
@@ -33,6 +33,10 @@ samplerName::String =""#name of the sampler - mainly for debugging purposes
 samplerRef ::Int32 =Int32(0) #reference to sampler of the texture
 colorsMaskRef ::Int32 =Int32(0) #reference to uniform holding color of this mask
 isVisibleRef::Int32 =Int32(0)# reference to uniform that points weather we 
+maskMinValue::Int32 =Int32(0)# minimum value associated with possible value of mask
+maskMAxValue::Int32 =Int32(0)# maximum value associated with possible value of mask
+maskRangeValue::Int32 =Int32(0)# range of values associated with possible value of mask
+maskContribution::Int32 =Int32(0)# controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%
 end
 
 """
@@ -48,14 +52,7 @@ max_shown_black::Int32 =Int32(0)
 displayRange::Int32 =Int32(0)
 # ..Uniforms controlling  displaying masks diffrence
 isMaskDiffrenceVis::Int32 =Int32(0)
-maskAIndex::Int32 =Int32(0)
-maskBIndex::Int32 =Int32(0)
-#..Uniforms controlling nuclear image display
-minNuclearMaskVal::Int32 =Int32(0)
-maxNuclearMaskVal::Int32 =Int32(0)
-rangeOfNuclearMaskVal::Int32 =Int32(0)
-nuclearMaskSampler::Int32 =Int32(0)
-isNuclearMaskVis::Int32 =Int32(0)
+mainImageContribution::Float32= 1.0 # controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%
 
 end
 
@@ -101,6 +98,7 @@ minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask
   isVisible::Bool= true       #if false it should be invisible 
   uniforms::TextureUniforms=MaskTextureUniforms()# holds values needed to control ..Uniforms in a shader
   minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask, and second entry is maximum possible value for this mask
+  maskContribution::Float32= 1.0 # controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%
 end
 
 #utility function to check type associated
@@ -166,6 +164,154 @@ shader_program_words::UInt32=1
 end #ForWordsDispStruct
 
 
+
+
+
+
+
+
+
+
+
+
+
+"""
+Holding necessery data to controll keyboard shortcuts
+
+isCtrlPressed::Bool = false# left - scancode 37 right 105 - Int32
+isShiftPressed::Bool = false # left - scancode 50 right 62- Int32
+isAltPressed::Bool= false# left - scancode 64 right 108- Int32
+isEnterPressed::Bool= false# scancode 36
+isTAbPressed::Bool= false#
+isSpacePressed::Bool= false# 
+isF1Pressed::Bool= false
+isF2Pressed::Bool= false
+isF3Pressed::Bool= false
+
+lastKeysPressed::Vector{String}=[] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
+#informations about what triggered sending this particular struct to the  actor
+mostRecentScanCode ::GLFW.Key=GLFW.KEY_KP_4
+mostRecentKeyName ::String=""
+mostRecentAction ::GLFW.Action= GLFW.RELEASE
+
+"""
+@with_kw struct KeyboardStruct
+  isCtrlPressed::Bool = false# left - scancode 37 right 105 - Int32
+  isShiftPressed::Bool = false # left - scancode 50 right 62- Int32
+  isAltPressed::Bool= false# left - scancode 64 right 108- Int32
+  isEnterPressed::Bool= false# scancode 36
+  isTAbPressed::Bool= false#
+  isSpacePressed::Bool= false# 
+  isF1Pressed::Bool= false
+  isF2Pressed::Bool= false
+  isF3Pressed::Bool= false
+  isF4Pressed::Bool= false
+  isF5Pressed::Bool= false
+  isF6Pressed::Bool= false
+  isPlusPressed::Bool= false
+  isMinusPressed::Bool= false
+  isZPressed::Bool= false
+  lastKeysPressed::Vector{String}=[] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
+ #informations about what triggered sending this particular struct to the  actor
+  mostRecentScanCode ::GLFW.Key=GLFW.KEY_KP_4
+  mostRecentKeyName ::String=""
+  mostRecentAction ::GLFW.Action= GLFW.RELEASE
+
+end
+"""
+Holding necessery data to controll mouse interaction
+"""
+@with_kw struct MouseStruct
+  isLeftButtonDown ::Bool = false # true if left button was pressed and not yet released
+  isRightButtonDown ::Bool = false# true if right button was pressed and not yet released
+  lastCoordinates::Vector{CartesianIndex{2}} = [] # list of accumulated mouse coordinates
+end#MouseStruct
+
+
+
+"""
+struct that enables reacting to  the input  from mouse click  and drag the input will be 
+    Cartesian index represening (x,y)
+     x and y position  of the mouse - will be recorded only if left mouse button is pressed or keep presssed
+"""
+@with_kw  mutable struct MouseCallbackSubscribable <: Subscribable{MouseStruct}
+    #true if left button is presed down - we make it true if the left button is pressed over image and false if mouse get out of the window or we get information about button release
+    isLeftButtonDown ::Bool 
+    isRightButtonDown ::Bool 
+    #coordinates marking 4 corners of 
+    #the quad that displays our medical image with the masks
+    xmin::Int32
+    ymin::Int32
+    xmax::Int32
+    ymax::Int32
+#used to draw left button lines (creating lines)
+ #store of the cartesian coordinates that is used to batch actions 
+#- so if mouse is moving rapidly we would store bunch of coordinates and then modify texture in batch
+    coordinatesStoreForLeftClicks ::Vector{CartesianIndex{2}} 
+    lastCoordinate::CartesianIndex{2}#generally when we draw lines we remove points from array above yet w need to leave last one in order to keep continuity of futher line
+    isBusy::Base.Threads.Atomic{Bool} # indicate to check weather the system is ready to receive the input
+
+   
+    subject :: Subject{MouseStruct} # coordinates of mouse 
+   
+end
+
+
+"""
+Object that enables managing input from keyboard - it stores the information also about
+needed keys wheather they are kept pressed  
+examples of keyboard input (raw GLFW input we process below)
+    action RELEASE GLFW.Action
+    key s StringPRESS
+    key s String
+    action PRESS GLFW.Action
+    key s StringRELEASE
+    key s String
+    action RELEASE GLFW.Action
+
+"""
+@with_kw mutable struct KeyboardCallbackSubscribable <: Subscribable{KeyboardStruct}
+# true when pressed and kept true until released
+# true if corresponding keys are kept pressed and become flase when relesed
+    isCtrlPressed::Bool= false # left - scancode 37 right 105 - Int32
+    isShiftPressed::Bool = false # left - scancode 50 right 62- Int32
+    isAltPressed::Bool= false# left - scancode 64 right 108- Int32
+    isEnterPressed::Bool= false# scancode 36
+    isTAbPressed::Bool= false# scancode 36
+    isSpacePressed::Bool= false# scancode 36
+    isF1Pressed::Bool= false
+    isF2Pressed::Bool= false
+    isF3Pressed::Bool= false
+    isF4Pressed::Bool= false
+    isF5Pressed::Bool= false
+    isF6Pressed::Bool= false
+    isPlusPressed::Bool= false
+    isMinusPressed::Bool= false
+    isZPressed::Bool= false
+    lastKeysPressed::Vector{String}=[] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
+    subject :: Subject{KeyboardStruct} =Subject(KeyboardStruct, scheduler = AsyncScheduler())
+end 
+
+
+
+
+"""
+struct that enables reacting to  the input from scrolling
+"""
+mutable struct ScrollCallbackSubscribable <: Subscribable{Int64}
+    isBusy::Base.Threads.Atomic{Bool} # indicate to check weather the system is ready to receive the input
+    numberToSend::Int64# number  that will indicate how many slices to skip and in positive or negative direction
+    subject :: Subject{Int64}
+end
+
+
+
+
+
+
+
+
+
 """
 Actor that is able to store a state to keep needed data for proper display
 
@@ -197,55 +343,11 @@ Actor that is able to store a state to keep needed data for proper display
     valueForMasToSet::valueForMasToSetStruct=valueForMasToSetStruct() # value that will be used to set  pixels where we would interact with mouse
     lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1,1,1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
     forUndoVector::AbstractArray=[] # holds lambda functions that when invoked will  undo last operations
-    maxLengthOfForUndoVector::Int64 = 10 # number controls how many step at maximum we can get back
+    maxLengthOfForUndoVector::Int64 = 15 # number controls how many step at maximum we can get back
     isBusy::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0) # used to indicate by some functions that actor is busy and some interactions should be ceased
-  end
-"""
-Holding necessery data to controll keyboard shortcuts
+    end
 
-isCtrlPressed::Bool = false# left - scancode 37 right 105 - Int32
-isShiftPressed::Bool = false # left - scancode 50 right 62- Int32
-isAltPressed::Bool= false# left - scancode 64 right 108- Int32
-isEnterPressed::Bool= false# scancode 36
-isTAbPressed::Bool= false#
-isSpacePressed::Bool= false# 
-isF1Pressed::Bool= false
-isF2Pressed::Bool= false
-isF3Pressed::Bool= false
 
-lastKeysPressed::Vector{String}=[] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
-#informations about what triggered sending this particular struct to the  actor
-mostRecentScanCode ::GLFW.Key=GLFW.KEY_KP_4
-mostRecentKeyName ::String=""
-mostRecentAction ::GLFW.Action= GLFW.RELEASE
-
-"""
-@with_kw struct KeyboardStruct
-  isCtrlPressed::Bool = false# left - scancode 37 right 105 - Int32
-  isShiftPressed::Bool = false # left - scancode 50 right 62- Int32
-  isAltPressed::Bool= false# left - scancode 64 right 108- Int32
-  isEnterPressed::Bool= false# scancode 36
-  isTAbPressed::Bool= false#
-  isSpacePressed::Bool= false# 
-  isF1Pressed::Bool= false
-  isF2Pressed::Bool= false
-  isF3Pressed::Bool= false
-
-  lastKeysPressed::Vector{String}=[] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
- #informations about what triggered sending this particular struct to the  actor
-  mostRecentScanCode ::GLFW.Key=GLFW.KEY_KP_4
-  mostRecentKeyName ::String=""
-  mostRecentAction ::GLFW.Action= GLFW.RELEASE
-
-end
-"""
-Holding necessery data to controll mouse interaction
-"""
-@with_kw struct MouseStruct
-  isLeftButtonDown ::Bool = false # true if left button was pressed and not yet released
-  isRightButtonDown ::Bool = false# true if right button was pressed and not yet released
-  lastCoordinates::Vector{CartesianIndex{2}} = [] # list of accumulated mouse coordinates
-end#MouseStruct
 
 
 end #module

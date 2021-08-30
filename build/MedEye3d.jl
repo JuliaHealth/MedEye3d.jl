@@ -1,6 +1,5 @@
-module NuclearMedEye
+module MedEye3d
 import Logging
-
 
 include(joinpath( "display","GLFW","startModules","ModernGlUtil.jl"))
 
@@ -27,7 +26,14 @@ include(joinpath( "display","GLFW","startModules","PrepareWindow.jl"))
 
 include(joinpath( "display","reactingToMouseKeyboard","ReactToScroll.jl") )
 include(joinpath( "display","reactingToMouseKeyboard","ReactOnMouseClickAndDrag.jl") )
-include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard.jl") )
+
+
+include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","MaskDiffrence.jl") )
+include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","KeyboardVisibility.jl") )
+include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","OtherKeyboardActions.jl") )
+include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","WindowControll.jl") )
+include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","ChangePlane.jl") )
+include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","reactToKeyboard.jl") )
 
 include(joinpath( "display","reactingToMouseKeyboard","ReactingToInput.jl") )
 include(joinpath( "display","GLFW","SegmentationDisplay.jl"))

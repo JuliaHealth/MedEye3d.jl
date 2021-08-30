@@ -2,7 +2,7 @@
 ######### Defining Helper Functions and imports
 
 #I use Simple ITK as most robust
-using NuclearMedEye, Conda,PyCall,Pkg
+using MedEye3d, Conda,PyCall,Pkg
 
 Conda.pip_interop(true)
 Conda.pip("install", "SimpleITK")
@@ -10,19 +10,19 @@ Conda.pip("install", "h5py")
 sitk = pyimport("SimpleITK")
 np= pyimport("numpy")
 
-import NuclearMedEye
-import NuclearMedEye.ForDisplayStructs
-import NuclearMedEye.ForDisplayStructs.TextureSpec
+import MedEye3d
+import MedEye3d.ForDisplayStructs
+import MedEye3d.ForDisplayStructs.TextureSpec
 using ColorTypes
-import NuclearMedEye.SegmentationDisplay
+import MedEye3d.SegmentationDisplay
 
-import NuclearMedEye.DataStructs.ThreeDimRawDat
-import NuclearMedEye.DataStructs.DataToScrollDims
-import NuclearMedEye.DataStructs.FullScrollableDat
-import NuclearMedEye.ForDisplayStructs.KeyboardStruct
-import NuclearMedEye.ForDisplayStructs.MouseStruct
-import NuclearMedEye.ForDisplayStructs.ActorWithOpenGlObjects
-import NuclearMedEye.OpenGLDisplayUtils
+import MedEye3d.DataStructs.ThreeDimRawDat
+import MedEye3d.DataStructs.DataToScrollDims
+import MedEye3d.DataStructs.FullScrollableDat
+import MedEye3d.ForDisplayStructs.KeyboardStruct
+import MedEye3d.ForDisplayStructs.MouseStruct
+import MedEye3d.ForDisplayStructs.ActorWithOpenGlObjects
+import MedEye3d.OpenGLDisplayUtils
 
 """
 given directory (dirString) to file/files it will return the simple ITK image for futher processing
@@ -70,7 +70,7 @@ end#getPixelsAndSpacing
 
 
 
-# directories of PET/CT Data - from not published (yet) dataset 
+# directories of PET/CT Data - from not published (yet) dataset - single example available from https://wwsi365-my.sharepoint.com/:f:/g/personal/s9956jm_ms_wwsi_edu_pl/Eq3cL7Md5bhPvnUlFLAMKZAB3nsbl6Q18fG96iVajvnNqA?e=bzX68X
 dirOfExample ="C:\\GitHub\\JuliaMedPipe\\data\\PETphd\\slicerExp\\all17\\bad17NL-bad17NL\\20150518-PET^1_PET_CT_WholeBody_140_70_Recon (Adult)\\4-CT AC WB  1.5  B30f"
 dirOfExamplePET ="C:\\GitHub\\JuliaMedPipe\\data\\PETphd\\slicerExp\\all17\\bad17NL-bad17NL\\20150518-PET^1_PET_CT_WholeBody_140_70_Recon (Adult)\\3-PET WB"
 
@@ -87,7 +87,7 @@ petPixels, petSpacing =getPixelsAndSpacing(pet_image_resampled)
 petPixels = Float32.(petPixels)
 
 # we need to pass some metadata about image array size and voxel dimensions to enable proper display
-datToScrollDimsB= NuclearMedEye.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixels) ,voxelSize=ctSpacing, dimensionToScroll = 3 );
+datToScrollDimsB= MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixels) ,voxelSize=ctSpacing, dimensionToScroll = 3 );
 # example of texture specification used - we need to describe all arrays we want to display
 textureSpecificationsPETCT = [
   TextureSpec{Float32}(
@@ -97,7 +97,7 @@ textureSpecificationsPETCT = [
       isContinuusMask=true,
       #by the number 1 we will reference this data by for example making it visible or not
       numb= Int32(1),
-      colorSet = [RGB(0.0,0.0,0.0),RGB(1.0,1.0,0.0),RGB(1.0,0.5,0.0),RGB(1.0,0.0,0.0) ,RGB(1.0,0.0,0.0)]
+      colorSet = [RGB(0.0,0.0,0.0),RGB(1.0,1.0,0.0),RGB(1.0,0.5,0.0),RGB(1.0,0.0,0.0)]
       #display cutoff all values below 200 will be set 2000 and above 8000 to 8000 but only in display - source array will not be modified
       ,minAndMaxValue= Float32.([200,8000])
      ),
@@ -123,7 +123,7 @@ textLinesFromStrings() where we pass resies of strings, if we want we can also e
 mainLines - will be displayed over all slices
 supplLines - will be displayed over each slice where is defined - below just dummy data
 """
-import NuclearMedEye.DisplayWords.textLinesFromStrings
+import MedEye3d.DisplayWords.textLinesFromStrings
 
 mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
 supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(ctPixels)[3] );
@@ -135,7 +135,7 @@ utility function to make creation of those easier is getThreeDims which creates 
     strings needs to be the same as we  defined in texture specifications at the bagining
     data arrays needs to be o the same size and be of the same type we specified in texture specification
 """
-import NuclearMedEye.StructsManag.getThreeDims
+import MedEye3d.StructsManag.getThreeDims
 
 tupleVect = [("PET",petPixels) ,("CTIm",ctPixels),("manualModif",zeros(UInt8,size(petPixels)) ) ]
 slicesDat= getThreeDims(tupleVect )
@@ -184,6 +184,12 @@ tab +/- increase or decrease stroke width
 F1 - will display wide window for bone Int32(1000),Int32(-1000)
 F2 - will display window for soft tissues Int32(400),Int32(-200)
 F3 - will display wide window for lung viewing  Int32(0),Int32(-1000)
+KEY_F4,  KEY_F5 -
+    sets minimum (F4) and maximum (KEY_F5) value for display (with combination of + and minus signs - to increase or decrease given treshold) - 
+        in case of continuus colors it will clamp values - so all above max will be equaled to max ; and min if smallert than min
+        in case of main CT mask - it will controll min shown white and max shown black
+        in case of maks with single color associated we will step data so if data is outside the rande it will return 0 - so will not affect display
+
 """
 
 
@@ -202,17 +208,17 @@ BenchmarkTools.DEFAULT_PARAMETERS.gcsample = true
 
 
 function toBenchmarkScroll(toSc) 
-    NuclearMedEye.ReactToScroll.reactToScroll(toSc ,syncActor, false)
+    MedEye3d.ReactToScroll.reactToScroll(toSc ,syncActor, false)
 end
 
 
 function toBenchmarkPaint(carts)
-    NuclearMedEye.ReactOnMouseClickAndDrag.reactToMouseDrag(MouseStruct(true,false, carts),syncActor )
+    MedEye3d.ReactOnMouseClickAndDrag.reactToMouseDrag(MouseStruct(true,false, carts),syncActor )
 end
 
 
 function toBenchmarkPlaneTranslation(toScroll)
-    NuclearMedEye.ReactOnKeyboard.processKeysInfo(Option(toScroll),syncActor,KeyboardStruct(),false    )
+    MedEye3d.ReactOnKeyboard.processKeysInfo(Option(toScroll),syncActor,KeyboardStruct(),false    )
     OpenGLDisplayUtils.basicRender(syncActor.actor.mainForDisplayObjects.window)
     glFinish()
 end
@@ -256,7 +262,7 @@ maskPixels, maskSpacing =getPixelsAndSpacing(imageMask)
 
 
 # we need to pass some metadata about image array size and voxel dimensions to enable proper display
-datToScrollDimsB= NuclearMedEye.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixelsPure) ,voxelSize=ctSpacingPure, dimensionToScroll = 3 );
+datToScrollDimsB= MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixelsPure) ,voxelSize=ctSpacingPure, dimensionToScroll = 3 );
 # example of texture specification used - we need to describe all arrays we want to display
 listOfTexturesSpec = [
     TextureSpec{UInt8}(
@@ -284,14 +290,14 @@ fractionOfMainIm= Float32(0.8);
 """
 If we want to display some text we need to pass it as a vector of SimpleLineTextStructs 
 """
-import NuclearMedEye.DisplayWords.textLinesFromStrings
+import MedEye3d.DisplayWords.textLinesFromStrings
 
 mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
 supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(ctPixelsPure)[3] );
 
 """
 If we want to pass 3 dimensional array of scrollable data"""
-import NuclearMedEye.StructsManag.getThreeDims
+import MedEye3d.StructsManag.getThreeDims
 
 tupleVect = [("goldStandardLiver",maskPixels) ,("CTIm",ctPixelsPure),("manualModif",zeros(UInt8,size(ctPixelsPure)) ) ]
 slicesDat= getThreeDims(tupleVect )
@@ -342,5 +348,13 @@ using BenchmarkPlots, StatsPlots
 scrollingPureCT = run(scB)
 mouseInteractionPureCT = run(paintB)
 translationsPureCT = run(translationsB)
+
+
+
+
+
+ using GLFW
+ GLFW.PollEvents()
+
 
 
