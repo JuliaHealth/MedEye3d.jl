@@ -108,7 +108,7 @@ petPixels = Float32.(petPixels)
 
 # we need to pass some metadata about image array size and voxel dimensions to enable proper display
 datToScrollDimsB= NuclearMedEye.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixels) ,voxelSize=ctSpacing, dimensionToScroll = 3 );
-# example of texture specification used - we need to describe all arrays we want to display
+# example of texture specification used - we need to describe all arrays we want to display, to see all possible configurations look into TextureSpec struct docs .
 textureSpecificationsPETCT = [
   TextureSpec{Float32}(
       name = "PET",
@@ -229,22 +229,14 @@ F2 - will display window for soft tissues Int32(400),Int32(-200)
 
 F3 - will display wide window for lung viewing  Int32(0),Int32(-1000)
 
-KEY_F4,  KEY_F5 -
-    
-    sets minimum (F4) and maximum (KEY_F5) value for display (with combination of + and minus signs - to increase or decrease given treshold) - 
-      
-      in case of continuus colors it will clamp values - so all above max will be equaled to max ; and min if smallert than min
-     
-     in case of main CT mask - it will controll min shown white and max shown black
-     
-     in case of maks with single color associated we will step data so if data is outside the rande it will return 0 - so will not affect display
-KEY_F6 - controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are 
+F4,  F5 sets minimum (F4) and maximum (KEY_F5) value for display (with combination of + and minus signs - to increase or decrease given treshold) - 
 
-visible their corresponding influence to pixel color is 33%
-  
-  if plus is pressed it will increse contribution by 0.1  
-  
-  if minus is pressed it will decrease contribution by 0.1  
+In case of continuus colors it will clamp values - so all above max will be equaled to max ; and min if smallert than min
+
+In case of main CT mask - it will controll min shown white and max shown black
+
+In case of maks with single color associated we will step data so if data is outside the rande it will return 0 - so will not affect display
+F6 - controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%  if plus is pressed it will increse contribution by 0.1   if minus is pressed it will decrease contribution by 0.1  
 
 
 
