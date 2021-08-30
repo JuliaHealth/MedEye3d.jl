@@ -1,38 +1,6 @@
 """
 Main module controlling displaying segmentations image and data
 
-Description of nthe file structure
-..ModernGlUtil.jl 
-    - copied utility functions from ModernGl.jl  
-    - depends on external : ModernGL and  GLFW
-PreperWindowHelpers.jl 
-    - futher abstractions used in PreperWindow
-    - depends on ..ModernGlUtil.jl 
-..ShadersAndVerticies.jl 
-    -store constant values of shader code and constant needed to render shapes
-    -depends on external: ModernGL, GeometryTypes, GLFW
-    -needs to be invoked only after initializeWindow() is invoked from PreperWindowHelpers module - becouse GLFW context mus be ready
-..PrepareWindow.jl 
-    - collects functions and data and creates configured window with shapes needed to display textures and configures listening to mouse and keybourd inputs
-    - depends on internal:..ModernGlUtil,PreperWindowHelpers,..ShadersAndVerticies,..OpenGLDisplayUtils
-    - depends on external:ModernGL, GeometryTypes, GLFW
-....TextureManag.jl 
-    - as image + masks are connacted by shaders into single texture this module  by controlling textures controlls image display
-    - depends on external: ModernGL
-    - depends on internal :..OpenGLDisplayUtils
-..ReactToScroll.jl
-    - functions needed to react to scrolling
-    - depends on external: Rocket, GLFW
-    - depends on internal : ..ForDisplayStructs.jl
-..ReactOnMouseClickAndDrag.jl   
-    - functions needed to enable mouse interactions 
-    - internal depentdencies: ..ForDisplayStructs, ..TextureManag,..OpenGLDisplayUtils
-    -external dependencies: Rocket, GLFW
-..ReactingToInput.jl - using Rocket.jl (reactivate functional programming ) enables reacting to user input
-    - depends on external: Rocket, GLFW
-    - depends on internal : ..ReactToScroll.jl, ..ForDisplayStructs.jl 
-..OpenGLDisplayUtils.jl - some utility functions used in diffrent parts of program
-    - depends on external :GLFW, ModernGL 
 """
 module SegmentationDisplay
 export coordinateDisplay

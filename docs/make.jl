@@ -7,7 +7,8 @@ using MedEye3d
 makedocs(
     sitename = "MedEye3d",
     format = Documenter.HTML(),
-    modules = [MedEye3d,MedEye3d.SegmentationDisplay
+    modules = [MedEye3d
+    ,MedEye3d.SegmentationDisplay
     ,MedEye3d.ReactingToInput
     ,MedEye3d.ReactOnKeyboard
     ,MedEye3d.ReactOnMouseClickAndDrag
