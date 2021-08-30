@@ -89,7 +89,7 @@ function getPixelsAndSpacing(image)
 end#getPixelsAndSpacing
 ```
 
-Directories - obviously you need to provide path to place where it is stored on your disk. You can download PET/CT data from. You can download example data from https://wwsi365-my.sharepoint.com/:f:/g/personal/s9956jm_ms_wwsi_edu_pl/EstYmEuRHqZNlFIlPBzhbQIBvMwQBJks2lUcCSWgwCYSOg?e=nfW95Q
+Directories - obviously you need to provide path to place where it is stored on your disk. You can download PET/CT data from. You can download example data from https://wwsi365-my.sharepoint.com/:f:/g/personal/s9956jm_ms_wwsi_edu_pl/Eq3cL7Md5bhPvnUlFLAMKZAB3nsbl6Q18fG96iVajvnNqA?e=bzX68X
 
 ```
 # directories of PET/CT Data - from https://wiki.cancerimagingarchive.net/display/Public/Head-Neck-PET-CT
@@ -183,6 +183,8 @@ So after invoking this function one should see image sth like below
 ![image](https://user-images.githubusercontent.com/53857487/131359926-56d2ac89-1754-4b05-9c38-3c00d990c404.png)
 
 ## Interactions
+
+Interactions are summarized in video https://youtu.be/tv7-nGiik-w
 
 Next all Interactions are done either by mouse or by keyboard shortcuts
 
