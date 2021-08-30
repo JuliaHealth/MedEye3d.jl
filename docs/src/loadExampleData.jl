@@ -80,14 +80,14 @@ dirOfExamplePET ="C:\\GitHub\\JuliaMedPipe\\data\\PETphd\\slicerExp\\all17\\bad1
 imagePET= getImageFromDirectory(dirOfExamplePET,false,true)
 ctImage= getImageFromDirectory(dirOfExample,false,true)
 pet_image_resampled = sitk.Resample(imagePET, ctImage)
-
+purePetPixels, PurePetSpacing = getPixelsAndSpacing(imagePET)
 ctPixels, ctSpacing = getPixelsAndSpacing(ctImage)
 # In my case PET data holds 64 bit floats what is unsupported by Opengl
 petPixels, petSpacing =getPixelsAndSpacing(pet_image_resampled)
 petPixels = Float32.(petPixels)
 
 # we need to pass some metadata about image array size and voxel dimensions to enable proper display
-datToScrollDimsB= MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixels) ,voxelSize=ctSpacing, dimensionToScroll = 3 );
+datToScrollDimsB= MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixels) ,voxelSize=PurePetSpacing, dimensionToScroll = 3 );
 # example of texture specification used - we need to describe all arrays we want to display
 textureSpecificationsPETCT = [
   TextureSpec{Float32}(
@@ -152,7 +152,7 @@ mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDimsB
 """
 This function prepares all for display; 1000 in the end is responsible for setting window width for more look into SegmentationDisplay.coordinateDisplay
 """
-SegmentationDisplay.coordinateDisplay(textureSpecificationsPETCT ,fractionOfMainIm ,datToScrollDimsB ,1000);
+SegmentationDisplay.coordinateDisplay(textureSpecificationsPETCT ,fractionOfMainIm ,datToScrollDimsB ,1200);
 """
 as all is ready we can finally display image 
 """
