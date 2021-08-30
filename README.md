@@ -1,4 +1,4 @@
-# 3dMedEye
+# MedEye3d
 Main goal of the package is conviniently visualize 3d medical imaging to make segmentation simpler
 
 ## Some oficial introduction - you can skip it
