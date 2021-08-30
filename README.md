@@ -1,10 +1,6 @@
 # MedEye3d
 Main goal of the package is conviniently visualize 3d medical imaging to make segmentation simpler
 
-## Some oficial introduction - you can skip it
-
-Image segmentation in the medical domain has mul-tiple use cases.  Most importantly it enables delin-eation of physiological and pathological structures,in  order  to  confirm  or  reject  some  diagnostic  hy-pothesis.   In  case  of  all  segmentation  problems,  avery  important  step  in  evaluation  of  the  segmen-tation algorithm output is visual inspection.  Suchinspection enables researchers that are responsiblefor creating and or evaluating developed algorithmsto easily spot problems, and compare different algo-rithms in more detailed ways than can be achievedby usage of segmentation metrics alone.  Howeverin order for such in development visual evaluationto be useful it needs to meet some usage criteria.It needs to be easily integrable to the program-ming language and libraries used by researchers.Performance  of  the  tool  must  be  adequate  inorder to suit the iterative process of algorithm de-velopment and refinement.Representation accuracy must be sufficient forthe task at hand.  It should not require an exces-sive amount of computational resources, in order tominimize its influence on running algorithms.Support for in memory data structures (arrays)should be convenient. Needs  to  provide  possibility  of  simple  manualannotations,  on given mask and ability to controlvisibility and visual representation of given mask.Should provide also the possibility to display somemetadata in text format like segmentation metricsfor example DICE score.Ideally  it  should  be  also  open  source  and  welldocumented in order to enable users to modify itaccording to the task at hand.In  order  to  address  all  of  those  issues  in  themedical domain and Julia language ecosystem thedescribed below package was developed.
-
 
 Image below just represents limitless possibilities of color ranges, and that thanks to OpenGl even theorethically complex data to display will render nearly instantenously. 
 
