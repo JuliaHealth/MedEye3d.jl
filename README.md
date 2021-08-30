@@ -184,6 +184,8 @@ So after invoking this function one should see image sth like below
 
 ## Interactions
 
+Interactions are summarized in video https://youtu.be/tv7-nGiik-w
+
 Next all Interactions are done either by mouse or by keyboard shortcuts
 
 left click and drag - will mark active texture (look below - set with alt ...) 
