@@ -384,14 +384,6 @@ git-tree-sha1 = "7bf67e9a481712b3dbe9cb3dac852dc4b1162e02"
 uuid = "7746bdde-850d-59dc-9ae8-88ece973131d"
 version = "2.68.3+0"
 
-[[Glutils]]
-deps = ["ModernGL", "StaticArrays"]
-git-tree-sha1 = "73e8f48e3b3162dbb17cc5675619b04e7e387950"
-repo-rev = "master"
-repo-url = "https://github.com/jorge-brito/Glutils.jl"
-uuid = "ca30e6a0-9c86-4a44-9400-1099a673051c"
-version = "0.1.0"
-
 [[Graphite2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "344bf40dcab1073aca04aa0df4fb092f920e4011"
