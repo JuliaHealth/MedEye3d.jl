@@ -3,9 +3,236 @@
 managing  uniform values - global values in shaders
 """
 module Uniforms
-using Glutils,Rocket,  ..ForDisplayStructs, Dictionaries, Parameters, ColorTypes
+using StaticArrays,ModernGL,Rocket,  ..ForDisplayStructs, Dictionaries, Parameters, ColorTypes
 
 export changeMainTextureContribution,changeTextureContribution,coontrolMinMaxUniformVals,createStructsDict, setCTWindow,setMaskColor,setTextureVisibility, setTypeOfMainSampler!
+export @uniforms
+export @uniforms!
+
+
+########## this from https://github.com/jorge-brito/Glutils.jl/blob/4b7da5895a3e927792994ad0b6643498a8125362/src/utils.jl
+struct TypeRef{T} end
+
+Base.adjoint(x::Ref) = x[]
+Base.adjoint(::Type{T}) where {T} = TypeRef{T}()
+Base.getindex(::TypeRef{T}) where {T} = Ref{T}()
+Base.getindex(::TypeRef{T}, x::S) where {T, S} = Ref{T}(x)
+
+const SymString = Union{AbstractString, Symbol}
+
+macro map(expr...)
+    T, ex =
+        if length(expr) == 1
+            nothing, first(expr)
+        else 
+            first(expr), last(expr)
+    end
+
+    args = map(ex.args) do arg
+        if Meta.isexpr(arg, :(=))
+            key, value = arg.args
+            return :( $(QuoteNode(key)) => $value )
+        elseif Meta.isexpr(arg, :(:=))
+            key, value = arg.args
+            return :( $key => $value )
+        else
+            error("Invalid syntax for @map, expected expression of type `foo = bar` or `foo := bar`")
+        end
+    end
+    
+    result =
+        if isnothing(T)
+            Expr(:call, :Dict, args...)
+        else
+            Expr(:call, Expr(:curly, :Dict, T.args...), args...)
+        end
+    
+    return esc(result)
+end
+
+const GL_ENUM_TYPE = @map Symbol, GLenum {
+    GLboolean = GL_BOOL,
+    GLchar    = GL_BYTE,
+    GLdouble  = GL_DOUBLE,
+    GLfloat   = GL_FLOAT,
+    GLint     = GL_INT,
+    GLshort   = GL_SHORT,
+    GLubyte   = GL_UNSIGNED_BYTE,
+    GLuint    = GL_UNSIGNED_INT,
+    GLushort  = GL_UNSIGNED_SHORT,
+}
+
+macro genumof(type)
+    :( GL_ENUM_TYPE[ $(QuoteNode(type)) ] )
+end
+
+genumof(::Type{Cint})    = GL_INT
+genumof(::Type{Cchar})   = GL_BYTE
+genumof(::Type{Cfloat})  = GL_FLOAT
+genumof(::Type{Cshort})  = GL_SHORT
+genumof(::Type{Int64})   = GL_DOUBLE
+genumof(::Type{Cuint})   = GL_UNSIGNED_INT
+genumof(::Type{Cuchar})  = GL_UNSIGNED_BYTE
+genumof(::Type{Cushort}) = GL_UNSIGNED_SHORT
+
+gbool(x::GLenum) = x == GL_TRUE
+gbool(x::Bool) = x ? GL_TRUE : GL_FALSE
+
+"""
+        @g_str(name) -> GLenum
+Returns a OpenGL constant.
+# Examples
+```julia
+g"bool" == GL_BOOL
+g"Texture 2D" == GL_TEXTURE_2D
+g"Clamp.to.edge" == GL_CLAMP_TO_EDGE
+g"texture-wrap-t" == GL_TEXTURE_WRAP_T
+```
+"""
+macro g_str(ex)
+    name = uppercase(replace(ex, r"(\s|\.|\-)+" => "_"))
+    esc( Symbol("GL_$name") )
+end
+
+
+
+############# part below directly copied from https://github.com/jorge-brito/Glutils.jl/blob/master/src/uniforms.jl
+
+# this function is used to get the 
+# suffix of the glUniform function
+# for the correct type
+_type_suffix(::Type{<:Bool}) = "i"
+_type_suffix(::Type{<:Signed}) = "i"
+_type_suffix(::Type{<:Unsigned}) = "ui"
+_type_suffix(::Type{<:AbstractFloat}) = "f"
+
+"""
+        uniform!(location, values...) -> Nothing
+Set the uniform `vec` variable at `location`.
+# Examples
+```julia
+myuniform = getuniform(program, "someUniform")
+# set float vec3
+uniform!(myuniform, 1.0, 1.0, 0.5)
+# set float vec4
+uniform!(myuniform, Cfloat[1, 2, 3, 4])
+# set a 4x4 matrix
+uniform!(myuniform, rand(Cfloat, 4, 4))
+```
+"""
+function uniform! end
+
+@generated function uniform!(location::GLint, values::Vararg{T, N}) where {N, T <: Real}
+    suffix = _type_suffix(T)
+    glFunc = Symbol("glUniform$(N)$suffix")
+    return :( $(glFunc)(location, values...) )
+end
+
+@generated function uniform!(location::GLint, vector::SVector{N, T}) where {N, T <: Real}
+    suffix = _type_suffix(T)
+    glFunc = Symbol("glUniform$(N)$(suffix)v")
+    return :( $(glFunc)(location, 1, vector) )
+end
+
+@generated function uniform!(location::GLint, matrix::SMatrix{N, M, T}, transposed::Bool = false) where {N, M, T <: Real}
+    glFunc = Symbol(
+        if N == M
+            "glUniformMatrix$(N)fv"
+        else
+            "glUniformMatrix$(N)x$(M)fv"
+        end
+    )
+    return :( $(glFunc)(location, 1, transposed, Cfloat[matrix...]) )
+end
+
+function uniform!(location::GLint, vector::AbstractVector{T}) where {T <: Real}
+    N = length(vector)
+    uniform!(location, SVector{N, T}(vector...))
+end
+
+function uniform!(location::GLint, matrix::AbstractMatrix{T}, transposed::Bool = false) where {T <: Real}
+    N, M = size(matrix)
+    uniform!(location, SMatrix{N, M, T}(matrix), transposed)
+end
+"""
+        getuniform(program, name) -> GLint
+Gets the location of the uniform variable
+identified by `name`.
+"""
+getuniform(program::GLuint, name::SymString) = glGetUniformLocation(program, string(name))
+"""
+        @uniforms foo, bar, ... = program
+Get the location of `foo`, `bar` and `etc` from `program`,
+and assign each uniform to the corresponding variable.
+This macro transform the following expression:
+```julia
+@uniforms foo, bar, qux: baz = program
+```
+Into:
+```julia
+foo = getuniform(program, :foo)
+bar = getuniform(program, :bar)
+qux = getuniform(program, :baz)
+```
+You can also rename the variables as following:
+```julia
+@uniforms a: foo, b: bar = program
+```
+The variable `a` contains the location of `foo`,
+and `b` contains the loctation of `bar`.
+"""
+macro uniforms(ex)
+    @assert ex.head == :(=)
+    program = esc(ex.args[2])
+    if !Meta.isexpr(ex.args[1], :tuple)
+        args = [ex.args[1]]
+    else
+        args = ex.args[1].args
+    end
+    return Expr(:block,
+        map(args) do arg
+            if arg isa Symbol
+                alias, name = arg, arg
+            elseif Meta.isexpr(arg, :(=))
+                alias, name = arg.args
+            elseif Meta.isexpr(arg, :call)
+                alias, name = arg.args[2:3]
+            end
+            return Expr(:(=), esc(alias), Expr(:call, :getuniform, program, QuoteNode(name)))
+        end...
+    )
+end
+
+macro uniforms!(ex)
+    args = ex.args
+    for i in eachindex(args)
+        if Meta.isexpr(args[i], :(:=))
+            name, value = args[i].args
+            args[i] = Expr(:call, :uniform!, name, value)
+        end
+    end
+    return esc(Expr(:block, args...))
+end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+############### my original part
+
+
+
+
 
 
 
@@ -94,6 +321,13 @@ function changeMainTextureContribution(textur::TextureSpec, change::Float32,acto
     end#if
 
 end#changeTextureContribution
+
+
+
+
+
+
+
 
 
 end #module

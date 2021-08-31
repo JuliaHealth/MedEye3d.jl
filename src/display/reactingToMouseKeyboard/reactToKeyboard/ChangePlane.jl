@@ -2,7 +2,7 @@
 controls changing plane for example from transverse to saggital ...
 """
 module ChangePlane
-using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow,   ..DataStructs ,Glutils, Rocket, GLFW,Dictionaries,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils,  ..Uniforms, Match, Parameters,DataTypesBasic   
+using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow,   ..DataStructs , Rocket, GLFW,Dictionaries,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils,  ..Uniforms, Match, Parameters,DataTypesBasic   
 
 """
 In case we want to change the dimansion of scrolling so for example from transverse 
@@ -95,3 +95,5 @@ end#if
 
 end#processKeysInfo
 end#ChangePlane
+
+
