@@ -11,7 +11,7 @@ Image below just represents limitless possibilities of color ranges, and that th
 Below the functionality of the package will be described on the basis of some examples
 In case of any questions, feature requests, or propositions of cooperation  post them here on Github or contact me via LinkedIn linkedin.com/in/jakub-mitura-7b2013151
 
-You can also look into my preprint of the **article** describing this package https://www.overleaf.com/read/dwzpdwrgspts
+You can also look into my **article** that is currently in review describing this package https://www.overleaf.com/read/dwzpdwrgspts - If you have any thoughts, comments or propositions of improvemens  about the article please let me know for example via linkedin.com/in/jakub-mitura-7b2013151 or here on github.
 
 ## Defining Helper Functions and imports
 ```
