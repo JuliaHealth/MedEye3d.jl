@@ -4,7 +4,7 @@ stores functions needed to create bind and update OpenGl textues
 module TextureManag
 using Base: Float16
 using  ModernGL ,DrWatson,   ..OpenGLDisplayUtils,  ..ForDisplayStructs
-using   ..Uniforms, Logging,Setfield, Glutils,Logging,  ..CustomFragShad,  ..DataStructs,  ..DisplayWords
+using   ..Uniforms, Logging,Setfield, Logging,  ..CustomFragShad,  ..DataStructs,  ..DisplayWords
 export activateTextures,addTextToTexture,initializeTextures,createTexture, getProperGL_TEXTURE,updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
 
 """
