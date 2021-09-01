@@ -71,8 +71,8 @@ end#getPixelsAndSpacing
 
 
 # directories of PET/CT Data - from not published (yet) dataset - single example available from https://wwsi365-my.sharepoint.com/:f:/g/personal/s9956jm_ms_wwsi_edu_pl/Eq3cL7Md5bhPvnUlFLAMKZAB3nsbl6Q18fG96iVajvnNqA?e=bzX68X
-dirOfExample ="C:\\GitHub\\JuliaMedPipe\\data\\PETphd\\slicerExp\\all17\\bad17NL-bad17NL\\20150518-PET^1_PET_CT_WholeBody_140_70_Recon (Adult)\\4-CT AC WB  1.5  B30f"
-dirOfExamplePET ="C:\\GitHub\\JuliaMedPipe\\data\\PETphd\\slicerExp\\all17\\bad17NL-bad17NL\\20150518-PET^1_PET_CT_WholeBody_140_70_Recon (Adult)\\3-PET WB"
+dirOfExample ="/home/jakub/Downloads/OneDrive_1_8-30-2021/4-CT AC WB  1.5  B30f"
+dirOfExamplePET ="/home/jakub/Downloads/OneDrive_1_8-30-2021/3-PET WB"
 
 
 
@@ -135,7 +135,18 @@ utility function to make creation of those easier is getThreeDims which creates 
     strings needs to be the same as we  defined in texture specifications at the bagining
     data arrays needs to be o the same size and be of the same type we specified in texture specification
 """
-import MedEye3d.StructsManag.getThreeDims
+import MedEye3d.StructsManag
+tupleVect = [("PET",petPixels) ,("CTIm",ctPixels),("manualModif",zeros(UInt8,size(petPixels)) ) ]
+slicesDat= MedEye3d.StructsManag.getThreeDims(tupleVect )
+"""
+Holds data necessary to display scrollable data
+"""
+mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDimsB
+                                 ,dimensionToScroll=1 # what is the dimension of plane we will look into at the beginning for example transverse, coronal ...
+                                 ,dataToScroll= slicesDat
+                                 ,mainTextToDisp= mainLines
+                                 ,sliceTextToDisp=supplLines );
+
 
 tupleVect = [("PET",petPixels) ,("CTIm",ctPixels),("manualModif",zeros(UInt8,size(petPixels)) ) ]
 slicesDat= getThreeDims(tupleVect )
@@ -248,8 +259,8 @@ plot(scrollingPETCT)
 
 #### PURE CT image exaple , MHD files  taken from https://sliver07.grand-challenge.org/
 
-exampleLabel = "C:\\GitHub\\JuliaMedPipe\\data\\liverPrimData\\training-labels\\label\\liver-seg002.mhd"
-exampleCTscann = "C:\\GitHub\\JuliaMedPipe\\data\\liverPrimData\\training-scans\\scan\\liver-orig002.mhd"
+exampleLabel = "/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/data/liverPrimData/training-labels/label/liver-seg002.mhd"
+exampleCTscann = "/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/data/liverPrimData/training-scans/scan/liver-orig002.mhd"
 
 # loading data
 imagePureCT= getImageFromDirectory(exampleCTscann,true,false)
@@ -300,7 +311,7 @@ If we want to pass 3 dimensional array of scrollable data"""
 import MedEye3d.StructsManag.getThreeDims
 
 tupleVect = [("goldStandardLiver",maskPixels) ,("CTIm",ctPixelsPure),("manualModif",zeros(UInt8,size(ctPixelsPure)) ) ]
-slicesDat= getThreeDims(tupleVect )
+slicesDat= MedEye3d.StructsManag.getThreeDims(tupleVect )
 
 
 """
