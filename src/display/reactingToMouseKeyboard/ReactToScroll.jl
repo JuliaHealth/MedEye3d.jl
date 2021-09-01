@@ -1,6 +1,3 @@
-using DrWatson
-@quickactivate "Probabilistic medical segmentation"
-
 
 """
 module that holds functions needed to  react to scrolling

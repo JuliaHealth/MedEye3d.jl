@@ -10,7 +10,7 @@ using ModernGL, GLFW,  ..PrepareWindow,  ..TextureManag, ..OpenGLDisplayUtils,  
 using  ..ReactingToInput, Rocket, Setfield, Logging,  ..ShadersAndVerticiesForText,FreeTypeAbstraction, ..DisplayWords,  ..DataStructs,  ..StructsManag
 
 using DrWatson
-@quickactivate "NuclearMedEye"
+@quickactivate "MedEye3d"
 
 #holds actor that is main structure that process inputs from GLFW and reacts to it
 mainActor = sync(ActorWithOpenGlObjects())

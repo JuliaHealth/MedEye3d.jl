@@ -1,5 +1,3 @@
-using DrWatson
-@quickactivate "Julia Med 3d"
 
 using ColorTypes
 
