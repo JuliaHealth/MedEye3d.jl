@@ -11,6 +11,8 @@ Image below just represents limitless possibilities of color ranges, and that th
 Below the functionality of the package will be described on the basis of some examples
 In case of any questions, feature requests, or propositions of cooperation  post them here on Github or contact me via LinkedIn linkedin.com/in/jakub-mitura-7b2013151
 
+You can also look into my preprint of the **article** describing this package https://www.overleaf.com/read/dwzpdwrgspts
+
 ## Defining Helper Functions and imports
 ```
 #I use Simple ITK as most robust
@@ -406,4 +408,43 @@ translationsPureCT = run(translationsB)
 When all will be ok and you will scroll up  you should see sth like below
 
 ![soft_liv](https://user-images.githubusercontent.com/53857487/131261997-8e62851d-6589-4f41-8baf-9ca89b03a6da.png)
+
+
+
+References (numbers are assoiated with the article that is in review - here just to state  them)
+
+[1]    Jeff  Bezanson  et  al.  “Julia:  A  fresh  approach  to  numerical  computing”.  In:SIAM  Review59.1(2017),  pp.  65–98.doi:10.1137/141000671.url:https://epubs.siam.org/doi/10.1137/141000671.
+
+[2]    George Datseris et al. “DrWatson: the perfect sidekick for your scientific inquiries”. In:Journal ofOpen Source Software5.54 (2020), p. 2673.doi:10.21105/joss.02673.url:https://doi.org/10.21105/joss.02673.7
+
+
+[3]    Bagaev Dmitry.Rocket.jl. 2021.url:https://github.com/biaslab/Rocket.jl.
+
+[4]    Andy Ferris.Dictionaries.jl. 2021.url:https://github.com/andyferris/Dictionaries.jl.
+
+[5]    jorge-brito.Glutils.jl. 2021.url:https://github.com/jorge-brito/Glutils.jl.
+
+[6]    Ron Kikinis, Steve Pieper, and Kirby Vosburgh.3D Slicer: A Platform for Subject-Specific ImageAnalysis,  Visualization,  and  Clinical  Support.  Vol.  3.  Jan.  2014,  pp.  277–289.isbn:  978-1-4614-7656-6.doi:10.1007/978-1-4614-7657-3_19.
+
+[7]    Andreas  Markus  Loening  and  Sanjiv  Sam  Gambhir.  “AMIDE:  A  Free  Software  Tool  for  Multi-modality Medical Image Analysis”. In:Molecular Imaging2.3 (2003), p. 15353500200303133.doi:10.1162/15353500200303133.
+
+[8]    Mauro.Parameters.jl. 2021.url:https://github.com/mauro3/Parameters.jl.
+
+[9]    Jarrett Revels.BenchmarkTools.jl. 2021.url:https://github.com/JuliaCI/BenchmarkTools.jl.
+
+[10]    aaalexandrov SimonDanisch.FreeTypeAbstraction.jl. 2021.url:https://github.com/JuliaGraphics/FreeTypeAbstraction.jl.
+
+[11]    o-jasper  SimonDanisch  rennis250.ModernGL.jl.  2021.url:https : / / github . com / JuliaGL /ModernGL.jl.
+
+[12]    Physycians SPSK4.Sample PET/CT Data. 2021.url:https://wwsi365-my.sharepoint.com/:f:/g/personal/s9956jm_ms_wwsi_edu_pl/Eq3cL7Md5bhPvnUlFLAMKZAB3nsbl6Q18fG96iVajvnNqA?e=bzX68X.
+
+[13]    Kevin Squire.Match.jl. 2021.url:https://github.com/kmsquire/Match.jl.
+
+[14]    Martin Styner Tobias Heimann Bram van Ginneken.SILVER07. 2021.url:http://www.sliver07.org/.
+
+[15]    Jan Weidner.Setfield.jl. 2021.url:https://github.com/jw3126/Setfield.jl.
+
+[16]    Mason Woo et al.OpenGL programming guide: the official guide to learning OpenGL, version 1.2.Addison-Wesley Longman Publishing Co., Inc., 1999.
+
+
 
