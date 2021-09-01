@@ -42,3 +42,14 @@ include(joinpath( "display","GLFW","SegmentationDisplay.jl"))
 greet() = print("Hello World!")
 
 end # module
+
+
+
+# Registration pull request created: JuliaRegistries/General/43883
+
+# After the above pull request is merged, it is recommended that a tag is created on this repository for the registered package version.
+
+# This will be done automatically if the Julia TagBot GitHub Action is installed, or can be done manually through the github interface, or via:
+
+# git tag -a v0.1.0 -m "<description of version>" adf9b527e95ae0de193efdf9e14fd48fc045210f
+# git push origin v0.1.0
