@@ -1,4 +1,3 @@
-
 ######### Defining Helper Functions and imports
 
 #I use Simple ITK as most robust
@@ -80,14 +79,14 @@ dirOfExamplePET ="/home/jakub/Downloads/OneDrive_1_8-30-2021/3-PET WB"
 imagePET= getImageFromDirectory(dirOfExamplePET,false,true)
 ctImage= getImageFromDirectory(dirOfExample,false,true)
 pet_image_resampled = sitk.Resample(imagePET, ctImage)
-
+purePetPixels, PurePetSpacing = getPixelsAndSpacing(imagePET)
 ctPixels, ctSpacing = getPixelsAndSpacing(ctImage)
 # In my case PET data holds 64 bit floats what is unsupported by Opengl
 petPixels, petSpacing =getPixelsAndSpacing(pet_image_resampled)
 petPixels = Float32.(petPixels)
 
 # we need to pass some metadata about image array size and voxel dimensions to enable proper display
-datToScrollDimsB= MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixels) ,voxelSize=ctSpacing, dimensionToScroll = 3 );
+datToScrollDimsB= MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixels) ,voxelSize=PurePetSpacing, dimensionToScroll = 3 );
 # example of texture specification used - we need to describe all arrays we want to display
 textureSpecificationsPETCT = [
   TextureSpec{Float32}(
@@ -163,7 +162,7 @@ mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDimsB
 """
 This function prepares all for display; 1000 in the end is responsible for setting window width for more look into SegmentationDisplay.coordinateDisplay
 """
-SegmentationDisplay.coordinateDisplay(textureSpecificationsPETCT ,fractionOfMainIm ,datToScrollDimsB ,1000);
+SegmentationDisplay.coordinateDisplay(textureSpecificationsPETCT ,fractionOfMainIm ,datToScrollDimsB ,1200);
 """
 as all is ready we can finally display image 
 """
@@ -173,14 +172,11 @@ Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);
 
 """
 Next all Interactions are done either by mouse or by keyboard shortcuts
-
 left click and drag - will mark active texture (look below - set with alt ...) 
     if it is set to be modifiable in the texture specifications, to the set value and size (by tab...)
 right click and drag - sets remembered position - when we will change plane of crossection
      for example from tranverse to coonal this point will be also visible on new plane
-
 all keyboard shortcuts will be activated on RELEASE of keys or by pressing enter while still pressing
-
 shift + number - make mask associated with given number visible
 ctrl + number -  make mask associated with given number invisible 
 alt + number -  make mask associated with given number active for mouse interaction 
@@ -200,8 +196,9 @@ KEY_F4,  KEY_F5 -
         in case of continuus colors it will clamp values - so all above max will be equaled to max ; and min if smallert than min
         in case of main CT mask - it will controll min shown white and max shown black
         in case of maks with single color associated we will step data so if data is outside the rande it will return 0 - so will not affect display
-
 """
+
+
 
 
 ######### Benchmark PET/CT  
