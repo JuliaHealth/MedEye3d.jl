@@ -170,7 +170,7 @@ function prepareForDispStruct(numberOfActiveTextUnits::Int
                             ) ::ForWordsDispStruct
 
       res =  ForWordsDispStruct(
-            fontFace = FreeTypeAbstraction.findfont("hack";  additional_fonts= "fonts")
+            fontFace = FreeTypeAbstraction.findfont("hack";  additional_fonts= "src/fonts")
             ,textureSpec = createTextureForWords(numberOfActiveTextUnits
                                                  ,widthh
                                                  ,heightt 
