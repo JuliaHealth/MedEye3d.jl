@@ -1,6 +1,23 @@
 module MedEye3d
 import Logging
 
+
+export MedEye3d.ForDisplayStructs
+export MedEye3d.ForDisplayStructs.TextureSpec
+export MedEye3d.SegmentationDisplay
+
+export MedEye3d.DataStructs.ThreeDimRawDat
+export MedEye3d.DataStructs.DataToScrollDims
+export MedEye3d.DataStructs.FullScrollableDat
+export MedEye3d.ForDisplayStructs.KeyboardStruct
+export MedEye3d.ForDisplayStructs.MouseStruct
+export MedEye3d.ForDisplayStructs.ActorWithOpenGlObjects
+export MedEye3d.OpenGLDisplayUtils
+export MedEye3d.DisplayWords.textLinesFromStrings
+export MedEye3d.StructsManag
+export MedEye3d.DisplayWords.textLinesFromStrings
+export MedEye3d.StructsManag.getThreeDims
+
 include(joinpath( "display","GLFW","startModules","ModernGlUtil.jl"))
 
 include(joinpath( "structs","BasicStructs.jl"))

@@ -3,7 +3,7 @@ Module controlling displaying of the text associated with the segmentation
 - either text releted to all slices or just a single one currently displayed or both
 """
 module DisplayWords
-using FreeTypeAbstraction, ..ForDisplayStructs, ..DataStructs, ..ModernGlUtil , ModernGL, ColorTypes, ..PrepareWindowHelpers,   ..ShadersAndVerticies,  ..ShadersAndVerticiesForText,  DrWatson
+using FreeTypeAbstraction, ..ForDisplayStructs, ..DataStructs, ..ModernGlUtil , ModernGL, ColorTypes, ..PrepareWindowHelpers,   ..ShadersAndVerticies,  ..ShadersAndVerticiesForText
 
 
 export getTextForCurrentSlice,textLinesFromStrings,renderSingleLineOfText,activateForTextDisp,bindAndActivateForText,reactivateMainObj, createTextureForWords,bindAndActivateForText, bindAndDisplayTexture
