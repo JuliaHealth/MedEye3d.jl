@@ -9,6 +9,8 @@ export passDataForScrolling
 using ModernGL, GLFW,  ..PrepareWindow,  ..TextureManag, ..OpenGLDisplayUtils,  ..ForDisplayStructs, ..Uniforms,  ..DisplayWords, Dictionaries
 using  ..ReactingToInput, Rocket, Setfield, Logging,  ..ShadersAndVerticiesForText,FreeTypeAbstraction, ..DisplayWords,  ..DataStructs,  ..StructsManag
 
+using DrWatson
+@quickactivate "MedEye3d"
 
 #holds actor that is main structure that process inputs from GLFW and reacts to it
 mainActor = sync(ActorWithOpenGlObjects())
@@ -168,8 +170,9 @@ function prepareForDispStruct(numberOfActiveTextUnits::Int
                             ,heightt::Int32=Int32(1)
                             ,forDispObj::forDisplayObjects=forDisplayObjects()
                             ) ::ForWordsDispStruct
+
       res =  ForWordsDispStruct(
-            fontFace = FreeTypeAbstraction.findfont("hack";  additional_fonts= joinpath("src","display","GLFW","fonts"))
+            fontFace = FreeTypeAbstraction.findfont("hack";  additional_fonts= datadir("fonts"))
             ,textureSpec = createTextureForWords(numberOfActiveTextUnits
                                                  ,widthh
                                                  ,heightt 

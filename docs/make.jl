@@ -37,4 +37,3 @@ makedocs(
     ]
 )
 
-pkgs["StaticArrays"]
