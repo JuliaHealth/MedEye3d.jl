@@ -7,7 +7,7 @@ export coordinateDisplay
 export passDataForScrolling
 
 using ModernGL, GLFW,  ..PrepareWindow,  ..TextureManag, ..OpenGLDisplayUtils,  ..ForDisplayStructs, ..Uniforms,  ..DisplayWords, Dictionaries
-using  ..ReactingToInput, Rocket, Setfield, Logging,  ..ShadersAndVerticiesForText, .FreeTypeAbstraction, ..DisplayWords,  ..DataStructs,  ..StructsManag
+using  ..ReactingToInput, Rocket, Setfield, Logging,  ..ShadersAndVerticiesForText, FreeTypeAbstraction, ..DisplayWords,  ..DataStructs,  ..StructsManag
 
 
 
