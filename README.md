@@ -1,7 +1,7 @@
 # MedEye3d
 Main goal of the package is conviniently visualize 3d medical imaging to make segmentation simpler
 
-##Package in early development - currently have problem with  font artifact - will be resolved withing next days
+## Package in early development - currently have problem with  font artifact - will be resolved withing next days
 
 Image below just represents limitless possibilities of color ranges, and that thanks to OpenGl even theorethically complex data to display will render nearly instantenously. 
 
