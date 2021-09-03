@@ -1,5 +1,4 @@
 
-
 """
 module that holds functions needed to  react to scrolling
 Generally first we need to pass the GLFW callback to the Rocket obeservable 

@@ -1,6 +1,23 @@
 module MedEye3d
 import Logging
 
+
+export  ForDisplayStructs
+# export  ForDisplayStructs.TextureSpec
+export  SegmentationDisplay
+
+# export  DataStructs.ThreeDimRawDat
+# export  DataStructs.DataToScrollDims
+# export  DataStructs.FullScrollableDat
+# export  ForDisplayStructs.KeyboardStruct
+# export  ForDisplayStructs.MouseStruct
+# export  ForDisplayStructs.ActorWithOpenGlObjects
+export  OpenGLDisplayUtils
+# export  DisplayWords.textLinesFromStrings
+export  StructsManag
+# export  DisplayWords.textLinesFromStrings
+# export  StructsManag.getThreeDims
+
 include(joinpath( "display","GLFW","startModules","ModernGlUtil.jl"))
 
 include(joinpath( "structs","BasicStructs.jl"))
@@ -42,14 +59,3 @@ include(joinpath( "display","GLFW","SegmentationDisplay.jl"))
 greet() = print("Hello World!")
 
 end # module
-
-
-
-# Registration pull request created: JuliaRegistries/General/43883
-
-# After the above pull request is merged, it is recommended that a tag is created on this repository for the registered package version.
-
-# This will be done automatically if the Julia TagBot GitHub Action is installed, or can be done manually through the github interface, or via:
-
-# git tag -a v0.1.0 -m "<description of version>" adf9b527e95ae0de193efdf9e14fd48fc045210f
-# git push origin v0.1.0
