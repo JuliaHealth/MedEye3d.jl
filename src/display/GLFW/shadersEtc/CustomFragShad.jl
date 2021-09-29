@@ -242,7 +242,7 @@ function mainFuncString( mainTexture::TextureSpec
 $(masksInfluences)
 
 
-float todiv = $(isVisibleList) + $(mainImageName)isVisible*mainImageContribution+ isMaskDiffrenceVis;
+float todiv = $(isVisibleList) + $(mainImageName)isVisible*mainImageContribution+ isMaskDiffrenceVis+5;
  vec4 $(mainImageName)Res = mainColor(texture2D($(mainImageName), TexCoord0).r);
    FragColor = vec4(($(sumColorR)+$(sumColorRCont)
    +$(mainImageName)Res.r*mainImageContribution+rdiffrenceColor(texture2D($(maskToSubtrastFrom.name), TexCoord0).r ,texture2D($(maskWeAreSubtracting.name), TexCoord0).r )

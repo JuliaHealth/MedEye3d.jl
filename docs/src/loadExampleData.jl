@@ -70,9 +70,8 @@ end#getPixelsAndSpacing
 
 
 # directories of PET/CT Data - from not published (yet) dataset - single example available from https://wwsi365-my.sharepoint.com/:f:/g/personal/s9956jm_ms_wwsi_edu_pl/Eq3cL7Md5bhPvnUlFLAMKZAB3nsbl6Q18fG96iVajvnNqA?e=bzX68X
-dirOfExample ="/home/jakub/Downloads/OneDrive_1_8-30-2021/4-CT AC WB  1.5  B30f"
-dirOfExamplePET ="/home/jakub/Downloads/OneDrive_1_8-30-2021/3-PET WB"
-
+dirOfExample ="C:\\Users\\xfl5\\Downloads\\OneDrive_1_16-09-2021\\4-CT AC WB  1.5  B30f"
+dirOfExamplePET ="C:\\Users\\xfl5\\Downloads\\OneDrive_1_16-09-2021\\OneDrive_1_8-30-2021/3-PET WB"
 
 
 # in most cases dimensions of PET and CT data arrays will be diffrent in order to make possible to display them we need to resample and make dimensions equal
