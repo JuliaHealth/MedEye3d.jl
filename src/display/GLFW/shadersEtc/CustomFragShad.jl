@@ -242,7 +242,7 @@ function mainFuncString( mainTexture::TextureSpec
 $(masksInfluences)
 
 
-float todiv = $(isVisibleList) + $(mainImageName)isVisible*mainImageContribution+ isMaskDiffrenceVis+5;
+float todiv = $(isVisibleList) + $(mainImageName)isVisible*mainImageContribution+ isMaskDiffrenceVis;
  vec4 $(mainImageName)Res = mainColor(texture2D($(mainImageName), TexCoord0).r);
    FragColor = vec4(($(sumColorR)+$(sumColorRCont)
    +$(mainImageName)Res.r*mainImageContribution+rdiffrenceColor(texture2D($(maskToSubtrastFrom.name), TexCoord0).r ,texture2D($(maskWeAreSubtracting.name), TexCoord0).r )
@@ -361,7 +361,7 @@ float $(x[3])$(x[1])getColorForMultiColor(float innertexelRes) {
         uint indexx = uint(floor(normalized)) ;// so we normalize floor  in order to get index of color from color list
         float[$(length(x[2])+1)] colorFloats = float[$(length(x[2])+1)](0.0,$( map(it->it[x[4]],x[2])|> (fls)-> join(fls,",")    )   )  ;
         float normalizedColorPercent= normalized-float(indexx) ;
-        return  clamp(colorFloats[indexx +1]*normalizedColorPercent+colorFloats[indexx]*(1- normalizedColorPercent) ,0.0,1.0 );//so we get color from current section and closer we are to the end of this section the bigger influence of this color, the closer we are to the begining the bigger the influence of previous section color
+        return colorFloats[indexx +1]*normalizedColorPercent+colorFloats[indexx]*(1- normalizedColorPercent);//so we get color from current section and closer we are to the end of this section the bigger influence of this color, the closer we are to the begining the bigger the influence of previous section color
 }
 
         """ ,  tuples  )," ")
