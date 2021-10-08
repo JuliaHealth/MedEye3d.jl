@@ -149,9 +149,14 @@ end#getPixelsAndSpacing
 
 
 # directories of PET/CT Data - from not published (yet) dataset - single example available from https://wwsi365-my.sharepoint.com/:f:/g/personal/s9956jm_ms_wwsi_edu_pl/Eq3cL7Md5bhPvnUlFLAMKZAB3nsbl6Q18fG96iVajvnNqA?e=bzX68X
+<<<<<<< HEAD
 dirOfExample ="C:\\GitHub\\JuliaMedPipe\\data\\PETphd\\slicerExp\\all17\\bad17NL-bad17NL\\20150518-PET^1_PET_CT_WholeBody_140_70_Recon (Adult)\\4-CT AC WB  1.5  B30f"
 dirOfExamplePET ="C:\\GitHub\\JuliaMedPipe\\data\\PETphd\\slicerExp\\all17\\bad17NL-bad17NL\\20150518-PET^1_PET_CT_WholeBody_140_70_Recon (Adult)\\3-PET WB"
 
+=======
+dirOfExample ="C:\\Users\\xfl5\\Downloads\\OneDrive_1_16-09-2021\\4-CT AC WB  1.5  B30f"
+dirOfExamplePET ="C:\\Users\\xfl5\\Downloads\\OneDrive_1_16-09-2021\\OneDrive_1_8-30-2021/3-PET WB"
+>>>>>>> d6bdd74755b294c584392795590229f4c70995f8
 
 
 # in most cases dimensions of PET and CT data arrays will be diffrent in order to make possible to display them we need to resample and make dimensions equal
