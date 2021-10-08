@@ -107,10 +107,12 @@ pet_image_resampled = sitk.Resample(imagePET, ctImage)
 ctPixels, ctSpacing = getPixelsAndSpacing(ctImage)
 # In my case PET data holds 64 bit floats what is unsupported by Opengl
 petPixels, petSpacing =getPixelsAndSpacing(pet_image_resampled)
+purePetPixels, PurePetSpacing = getPixelsAndSpacing(imagePET)
+
 petPixels = Float32.(petPixels)
 
 # we need to pass some metadata about image array size and voxel dimensions to enable proper display
-datToScrollDimsB= MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixels) ,voxelSize=ctSpacing, dimensionToScroll = 3 );
+datToScrollDimsB= MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixels) ,voxelSize=PurePetSpacing, dimensionToScroll = 3 );
 # example of texture specification used - we need to describe all arrays we want to display, to see all possible configurations look into TextureSpec struct docs .
 textureSpecificationsPETCT = [
   TextureSpec{Float32}(
