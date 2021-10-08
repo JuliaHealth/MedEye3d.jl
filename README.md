@@ -42,6 +42,8 @@ import MedEye3d.ForDisplayStructs.KeyboardStruct
 import MedEye3d.ForDisplayStructs.MouseStruct
 import MedEye3d.ForDisplayStructs.ActorWithOpenGlObjects
 import MedEye3d.OpenGLDisplayUtils
+import MedEye3d.DisplayWords.textLinesFromStrings
+import MedEye3d.StructsManag.getThreeDims
 ```
 
 Helper functions used to upload data - those will be enclosed (with many more) in a package that Is currently in development - 3dMedPipe 
