@@ -45,15 +45,94 @@ becouse Julia arrays is column wise contiguus in memory and open GL expects row 
 pixels - 3 dimensional array of pixel data 
 """
 function permuteAndReverse(pixels)
+    sizz=size(pixels)
+
+1#
+2# all upside down
+3
+21# on 3 dim correct
+12
+13
+23
+32# liver on the left
+32
+23
+123
+321# 3 upside down
+312
+213# 1,2 good ; 3 upside down
+231
+
+321 ; 2#3 upside down
+
+321 ; 1#3 ok 1 upside down
+2;12 # 3 ok 1 and 2 upside down
+
+2; 13 # 3 upside down
+2; 3# 3 ok 1 and 2 upside down
+2;2# 1,2, ok 3 upside down
+2;23# liver on the left evrywhere
+
+32;1 # all upside down
+32;21 # 3 left to right
+32;213 # 3 left to right
+32;13# 3 is ok 1 and 2 upside down
+32;1 # 3 upside down
+
+
+
+
+32; 3#- upside down
+21 ; 1 #- upside down
+
+# for i in 1:sizz[3]
+#     pixels[:,:,i] =  reverse(pixels[:,:,i])
+#     end# 
+
+#  for i in 1:sizz[2]
+#     pixels[:,i,:] =  reverse(pixels[:,i,:])
+#     end# 
+
+#     for i in 1:sizz[1]
+#         pixels[i,:,:] =  reverse(pixels[i,:,:])
+#     end# 
+
+
+  
     pixels=  permutedims(pixels, (3,2,1))
     sizz=size(pixels)
+
+
     for i in 1:sizz[1]
-        pixels[i,:,:] =  reverse(pixels[i,:,:])
+        for j in 1:sizz[3]
+            pixels[i,:,j] =  reverse(pixels[i,:,j])
+        end# 
     end# 
+
+
+
+    # for i in 1:sizz[1]
+    #     pixels[i,:,:] =  reverse(pixels[i,:,:])
+    # end# 
+
+
+
+    # for i in 1:sizz[1]
+    #     pixels[i,:,:] =  reverse(pixels[i,:,:])
+    # end# 
   
-    for i in 1:sizz[2]
-    pixels[:,i,:] =  reverse(pixels[:,i,:])
-    end# 
+    # for i in 1:sizz[2]
+    # pixels[:,i,:] =  reverse(pixels[:,i,:])
+    # end# 
+
+    # for i in 1:sizz[1]
+    #     pixels[i,:,:] =  reverse(pixels[i,:,:])
+    # end# 
+
+
+
+            
+
     return pixels
   end#permuteAndReverse
 
@@ -70,8 +149,8 @@ end#getPixelsAndSpacing
 
 
 # directories of PET/CT Data - from not published (yet) dataset - single example available from https://wwsi365-my.sharepoint.com/:f:/g/personal/s9956jm_ms_wwsi_edu_pl/Eq3cL7Md5bhPvnUlFLAMKZAB3nsbl6Q18fG96iVajvnNqA?e=bzX68X
-dirOfExample ="/home/jakub/Downloads/OneDrive_1_8-30-2021/4-CT AC WB  1.5  B30f"
-dirOfExamplePET ="/home/jakub/Downloads/OneDrive_1_8-30-2021/3-PET WB"
+dirOfExample ="C:\\GitHub\\JuliaMedPipe\\data\\PETphd\\slicerExp\\all17\\bad17NL-bad17NL\\20150518-PET^1_PET_CT_WholeBody_140_70_Recon (Adult)\\4-CT AC WB  1.5  B30f"
+dirOfExamplePET ="C:\\GitHub\\JuliaMedPipe\\data\\PETphd\\slicerExp\\all17\\bad17NL-bad17NL\\20150518-PET^1_PET_CT_WholeBody_140_70_Recon (Adult)\\3-PET WB"
 
 
 
@@ -148,7 +227,7 @@ mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDimsB
 
 
 tupleVect = [("PET",petPixels) ,("CTIm",ctPixels),("manualModif",zeros(UInt8,size(petPixels)) ) ]
-slicesDat= getThreeDims(tupleVect )
+slicesDat=  MedEye3d.StructsManag.getThreeDims(tupleVect )
 """
 Holds data necessary to display scrollable data
 """
@@ -167,6 +246,8 @@ SegmentationDisplay.coordinateDisplay(textureSpecificationsPETCT ,fractionOfMain
 as all is ready we can finally display image 
 """
 Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);
+Main.SegmentationDisplay.mainActor.actor.currentDisplayedSlice = 800
+
 #########Interactions
 
 
@@ -201,168 +282,168 @@ KEY_F4,  KEY_F5 -
 
 
 
-######### Benchmark PET/CT  
-#For transparency I include Below code used to benchark  PET/CT data
+# ######### Benchmark PET/CT  
+# #For transparency I include Below code used to benchark  PET/CT data
 
-window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
-syncActor = Main.SegmentationDisplay.mainActor
+# window = Main.SegmentationDisplay.mainActor.actor.mainForDisplayObjects.window
+# syncActor = Main.SegmentationDisplay.mainActor
 
-using GLFW,DataTypesBasic, ModernGL,Setfield
-using BenchmarkTools
+# using GLFW,DataTypesBasic, ModernGL,Setfield
+# using BenchmarkTools
 
-BenchmarkTools.DEFAULT_PARAMETERS.samples = 100
-BenchmarkTools.DEFAULT_PARAMETERS.seconds =5000
-BenchmarkTools.DEFAULT_PARAMETERS.gcsample = true
-
-
-function toBenchmarkScroll(toSc) 
-    MedEye3d.ReactToScroll.reactToScroll(toSc ,syncActor, false)
-end
+# BenchmarkTools.DEFAULT_PARAMETERS.samples = 100
+# BenchmarkTools.DEFAULT_PARAMETERS.seconds =5000
+# BenchmarkTools.DEFAULT_PARAMETERS.gcsample = true
 
 
-function toBenchmarkPaint(carts)
-    MedEye3d.ReactOnMouseClickAndDrag.reactToMouseDrag(MouseStruct(true,false, carts),syncActor )
-end
+# function toBenchmarkScroll(toSc) 
+#     MedEye3d.ReactToScroll.reactToScroll(toSc ,syncActor, false)
+# end
 
 
-function toBenchmarkPlaneTranslation(toScroll)
-    MedEye3d.ReactOnKeyboard.processKeysInfo(Option(toScroll),syncActor,KeyboardStruct(),false    )
-    OpenGLDisplayUtils.basicRender(syncActor.actor.mainForDisplayObjects.window)
-    glFinish()
-end
+# function toBenchmarkPaint(carts)
+#     MedEye3d.ReactOnMouseClickAndDrag.reactToMouseDrag(MouseStruct(true,false, carts),syncActor )
+# end
 
 
-function prepareRAndomCart(randInt) 
-    return [CartesianIndex(12+randInt,13+randInt),CartesianIndex(12+randInt,15+randInt),CartesianIndex(12+randInt,18+randInt),CartesianIndex(2+randInt,10+randInt),CartesianIndex(2+randInt,14+randInt)]
-end
-
-#we want some integers but not 0
-sc = @benchmarkable toBenchmarkScroll(y) setup=(y = filter(it->it!=0, rand(-5:5,20))[1]  )
-
-paint =  @benchmarkable toBenchmarkPaint(y) setup=(y =  prepareRAndomCart(rand(1:40,1)[1]  ))  
-
-translations =  @benchmarkable toBenchmarkPlaneTranslation(y) setup=(y = setproperties(syncActor.actor.onScrollData.dataToScrollDims,  (dimensionToScroll=rand(1:3,2)[1])) )  
-
-using BenchmarkPlots, StatsPlots
-# Define a parent BenchmarkGroup to contain our suite
-
-scrollingPETCT = run(sc)
-mouseInteractionPETCT = run(paint)
-translationsPETCT = run(translations)
+# function toBenchmarkPlaneTranslation(toScroll)
+#     MedEye3d.ReactOnKeyboard.processKeysInfo(Option(toScroll),syncActor,KeyboardStruct(),false    )
+#     OpenGLDisplayUtils.basicRender(syncActor.actor.mainForDisplayObjects.window)
+#     glFinish()
+# end
 
 
-plot(scrollingPETCT)
+# function prepareRAndomCart(randInt) 
+#     return [CartesianIndex(12+randInt,13+randInt),CartesianIndex(12+randInt,15+randInt),CartesianIndex(12+randInt,18+randInt),CartesianIndex(2+randInt,10+randInt),CartesianIndex(2+randInt,14+randInt)]
+# end
+
+# #we want some integers but not 0
+# sc = @benchmarkable toBenchmarkScroll(y) setup=(y = filter(it->it!=0, rand(-5:5,20))[1]  )
+
+# paint =  @benchmarkable toBenchmarkPaint(y) setup=(y =  prepareRAndomCart(rand(1:40,1)[1]  ))  
+
+# translations =  @benchmarkable toBenchmarkPlaneTranslation(y) setup=(y = setproperties(syncActor.actor.onScrollData.dataToScrollDims,  (dimensionToScroll=rand(1:3,2)[1])) )  
+
+# using BenchmarkPlots, StatsPlots
+# # Define a parent BenchmarkGroup to contain our suite
+
+# scrollingPETCT = run(sc)
+# mouseInteractionPETCT = run(paint)
+# translationsPETCT = run(translations)
 
 
-#### PURE CT image exaple , MHD files  taken from https://sliver07.grand-challenge.org/
-
-exampleLabel = "/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/data/liverPrimData/training-labels/label/liver-seg002.mhd"
-exampleCTscann = "/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/data/liverPrimData/training-scans/scan/liver-orig002.mhd"
-
-# loading data
-imagePureCT= getImageFromDirectory(exampleCTscann,true,false)
-imageMask= getImageFromDirectory(exampleLabel,true,false)
+# plot(scrollingPETCT)
 
 
-ctPixelsPure, ctSpacingPure = getPixelsAndSpacing(imagePureCT)
-maskPixels, maskSpacing =getPixelsAndSpacing(imageMask)
+# #### PURE CT image exaple , MHD files  taken from https://sliver07.grand-challenge.org/
+
+# exampleLabel = "/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/data/liverPrimData/training-labels/label/liver-seg002.mhd"
+# exampleCTscann = "/home/jakub/JuliaProjects/Probabilistic-medical-segmentation/data/liverPrimData/training-scans/scan/liver-orig002.mhd"
+
+# # loading data
+# imagePureCT= getImageFromDirectory(exampleCTscann,true,false)
+# imageMask= getImageFromDirectory(exampleLabel,true,false)
 
 
-
-# we need to pass some metadata about image array size and voxel dimensions to enable proper display
-datToScrollDimsB= MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixelsPure) ,voxelSize=ctSpacingPure, dimensionToScroll = 3 );
-# example of texture specification used - we need to describe all arrays we want to display
-listOfTexturesSpec = [
-    TextureSpec{UInt8}(
-        name = "goldStandardLiver",
-        numb= Int32(1),
-        color = RGB(1.0,0.0,0.0)
-        ,minAndMaxValue= Int8.([0,1])
-       ),
-    TextureSpec{UInt8}(
-        name = "manualModif",
-        numb= Int32(2),
-        color = RGB(0.0,1.0,0.0)
-        ,minAndMaxValue= UInt8.([0,1])
-        ,isEditable = true
-       ),
-
-       TextureSpec{Int16}(
-        name= "CTIm",
-        numb= Int32(3),
-        isMainImage = true,
-        minAndMaxValue= Int16.([0,100]))  
- ];
-# We need also to specify how big part of the screen should be occupied by the main image and how much by text fractionOfMainIm= Float32(0.8);
-fractionOfMainIm= Float32(0.8);
-"""
-If we want to display some text we need to pass it as a vector of SimpleLineTextStructs 
-"""
-import MedEye3d.DisplayWords.textLinesFromStrings
-
-mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
-supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(ctPixelsPure)[3] );
-
-"""
-If we want to pass 3 dimensional array of scrollable data"""
-import MedEye3d.StructsManag.getThreeDims
-
-tupleVect = [("goldStandardLiver",maskPixels) ,("CTIm",ctPixelsPure),("manualModif",zeros(UInt8,size(ctPixelsPure)) ) ]
-slicesDat= MedEye3d.StructsManag.getThreeDims(tupleVect )
-
-
-"""
-Holds data necessary to display scrollable data
-"""
-mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDimsB
-                                 ,dimensionToScroll=1 # what is the dimension of plane we will look into at the beginning for example transverse, coronal ...
-                                 ,dataToScroll= slicesDat
-                                 ,mainTextToDisp= mainLines
-                                 ,sliceTextToDisp=supplLines );
-
-
-"""
-This function prepares all for display; 1000 in the end is responsible for setting window width for more look into SegmentationDisplay.coordinateDisplay
-"""
-SegmentationDisplay.coordinateDisplay(listOfTexturesSpec ,fractionOfMainIm ,datToScrollDimsB ,1000);
-"""
-as all is ready we can finally display image 
-"""
-Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);
-
-
-###########next part of benchmark
-
-#we want some integers but not 0
-scPureCt = @benchmarkable toBenchmarkScroll(y) setup=(y = filter(it->it!=0, rand(-5:5,20))[1]  )
-
-paintPureCt =  @benchmarkable toBenchmarkPaint(y) setup=(y =  prepareRAndomCart(rand(1:40,1)[1]  ))  
-
-translationsPureCt =  @benchmarkable toBenchmarkPlaneTranslation(y) setup=(y = setproperties(syncActor.actor.onScrollData.dataToScrollDims,  (dimensionToScroll=rand(1:3,2)[1])) )  
-
-using BenchmarkPlots, StatsPlots
+# ctPixelsPure, ctSpacingPure = getPixelsAndSpacing(imagePureCT)
+# maskPixels, maskSpacing =getPixelsAndSpacing(imageMask)
 
 
 
-scB = @benchmarkable toBenchmarkScroll(y) setup=(y = filter(it->it!=0, rand(-5:5,20))[1]  )
+# # we need to pass some metadata about image array size and voxel dimensions to enable proper display
+# datToScrollDimsB= MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=  size(ctPixelsPure) ,voxelSize=ctSpacingPure, dimensionToScroll = 3 );
+# # example of texture specification used - we need to describe all arrays we want to display
+# listOfTexturesSpec = [
+#     TextureSpec{UInt8}(
+#         name = "goldStandardLiver",
+#         numb= Int32(1),
+#         color = RGB(1.0,0.0,0.0)
+#         ,minAndMaxValue= Int8.([0,1])
+#        ),
+#     TextureSpec{UInt8}(
+#         name = "manualModif",
+#         numb= Int32(2),
+#         color = RGB(0.0,1.0,0.0)
+#         ,minAndMaxValue= UInt8.([0,1])
+#         ,isEditable = true
+#        ),
 
-paintB =  @benchmarkable toBenchmarkPaint(y) setup=(y =  prepareRAndomCart(rand(1:40,1)[1]  ))  
+#        TextureSpec{Int16}(
+#         name= "CTIm",
+#         numb= Int32(3),
+#         isMainImage = true,
+#         minAndMaxValue= Int16.([0,100]))  
+#  ];
+# # We need also to specify how big part of the screen should be occupied by the main image and how much by text fractionOfMainIm= Float32(0.8);
+# fractionOfMainIm= Float32(0.8);
+# """
+# If we want to display some text we need to pass it as a vector of SimpleLineTextStructs 
+# """
+# import MedEye3d.DisplayWords.textLinesFromStrings
 
-translationsB =  @benchmarkable toBenchmarkPlaneTranslation(y) setup=(y = setproperties(syncActor.actor.onScrollData.dataToScrollDims,  (dimensionToScroll=rand(1:3,2)[1])) )  
+# mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
+# supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(ctPixelsPure)[3] );
 
-using BenchmarkPlots, StatsPlots
-# Define a parent BenchmarkGroup to contain our suite
+# """
+# If we want to pass 3 dimensional array of scrollable data"""
+# import MedEye3d.StructsManag.getThreeDims
 
-scrollingPureCT = run(scB)
-mouseInteractionPureCT = run(paintB)
-translationsPureCT = run(translationsB)
-
-
-
+# tupleVect = [("goldStandardLiver",maskPixels) ,("CTIm",ctPixelsPure),("manualModif",zeros(UInt8,size(ctPixelsPure)) ) ]
+# slicesDat= MedEye3d.StructsManag.getThreeDims(tupleVect )
 
 
- using GLFW
- GLFW.PollEvents()
+# """
+# Holds data necessary to display scrollable data
+# """
+# mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDimsB
+#                                  ,dimensionToScroll=1 # what is the dimension of plane we will look into at the beginning for example transverse, coronal ...
+#                                  ,dataToScroll= slicesDat
+#                                  ,mainTextToDisp= mainLines
+#                                  ,sliceTextToDisp=supplLines );
+
+
+# """
+# This function prepares all for display; 1000 in the end is responsible for setting window width for more look into SegmentationDisplay.coordinateDisplay
+# """
+# SegmentationDisplay.coordinateDisplay(listOfTexturesSpec ,fractionOfMainIm ,datToScrollDimsB ,1000);
+# """
+# as all is ready we can finally display image 
+# """
+# Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);
+
+
+# ###########next part of benchmark
+
+# #we want some integers but not 0
+# scPureCt = @benchmarkable toBenchmarkScroll(y) setup=(y = filter(it->it!=0, rand(-5:5,20))[1]  )
+
+# paintPureCt =  @benchmarkable toBenchmarkPaint(y) setup=(y =  prepareRAndomCart(rand(1:40,1)[1]  ))  
+
+# translationsPureCt =  @benchmarkable toBenchmarkPlaneTranslation(y) setup=(y = setproperties(syncActor.actor.onScrollData.dataToScrollDims,  (dimensionToScroll=rand(1:3,2)[1])) )  
+
+# using BenchmarkPlots, StatsPlots
+
+
+
+# scB = @benchmarkable toBenchmarkScroll(y) setup=(y = filter(it->it!=0, rand(-5:5,20))[1]  )
+
+# paintB =  @benchmarkable toBenchmarkPaint(y) setup=(y =  prepareRAndomCart(rand(1:40,1)[1]  ))  
+
+# translationsB =  @benchmarkable toBenchmarkPlaneTranslation(y) setup=(y = setproperties(syncActor.actor.onScrollData.dataToScrollDims,  (dimensionToScroll=rand(1:3,2)[1])) )  
+
+# using BenchmarkPlots, StatsPlots
+# # Define a parent BenchmarkGroup to contain our suite
+
+# scrollingPureCT = run(scB)
+# mouseInteractionPureCT = run(paintB)
+# translationsPureCT = run(translationsB)
+
+
+
+
+
+#  using GLFW
+#  GLFW.PollEvents()
 
 
 
