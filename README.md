@@ -1,6 +1,12 @@
 # MedEye3d
 Main goal of the package is conviniently visualize 3d medical imaging to make segmentation simpler
 
+In order to use package just type in Repl
+
+```
+]add MedEye3d
+```
+
 Image below just represents limitless possibilities of color ranges, and that thanks to OpenGl even theorethically complex data to display will render nearly instantenously. 
 
 
@@ -66,11 +72,9 @@ function permuteAndReverse(pixels)
     pixels=  permutedims(pixels, (3,2,1))
     sizz=size(pixels)
     for i in 1:sizz[1]
-        pixels[i,:,:] =  reverse(pixels[i,:,:])
-    end# 
-  
-    for i in 1:sizz[2]
-    pixels[:,i,:] =  reverse(pixels[:,i,:])
+        for j in 1:sizz[3]
+            pixels[i,:,j] =  reverse(pixels[i,:,j])
+        end# 
     end# 
     return pixels
   end#permuteAndReverse

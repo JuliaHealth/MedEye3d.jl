@@ -51,9 +51,9 @@ $( getMasksSubtractionFunction(maskToSubtrastFrom,maskWeAreSubtracting))
 $(mainFuncString(mainTexture,notMainTextures,maskToSubtrastFrom,maskWeAreSubtracting))
  """
 # uncomment for debugging
-#   for st in split(res, "\n")
-#     @info st
-#     end
+  for st in split(res, "\n")
+    @info st
+    end
 return res    
 
 end #createCustomFramgentShader
@@ -361,8 +361,10 @@ float $(x[3])$(x[1])getColorForMultiColor(float innertexelRes) {
         uint indexx = uint(floor(normalized)) ;// so we normalize floor  in order to get index of color from color list
         float[$(length(x[2])+1)] colorFloats = float[$(length(x[2])+1)](0.0,$( map(it->it[x[4]],x[2])|> (fls)-> join(fls,",")    )   )  ;
         float normalizedColorPercent= normalized-float(indexx) ;
-        return  clamp(colorFloats[indexx +1]*normalizedColorPercent+colorFloats[indexx]*(1- normalizedColorPercent) ,0.0,1.0 );//so we get color from current section and closer we are to the end of this section the bigger influence of this color, the closer we are to the begining the bigger the influence of previous section color
-}
+        //return  clamp( colorFloats[indexx]*(1- normalizedColorPercent),0.0,1.0 );//so we get color from current section and closer we are to the end of this section the bigger influence of this color, the closer we are to the begining the bigger the influence of previous section color
+        return  clamp(colorFloats[indexx +1]*normalizedColorPercent  +  colorFloats[indexx]*(1- normalizedColorPercent) ,0.0,1.0 );//so we get color from current section and closer we are to the end of this section the bigger influence of this color, the closer we are to the begining the bigger the influence of previous section color
+
+        }
 
         """ ,  tuples  )," ")
         
