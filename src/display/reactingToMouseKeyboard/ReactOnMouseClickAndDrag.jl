@@ -17,9 +17,6 @@ export registerMouseClickFunctions
 export reactToMouseDrag
 
 
-
-
-
 """
 configuting Rocket on Subscribe so we get custom handler of input as we see we still need to define actor
 """

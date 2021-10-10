@@ -2,7 +2,7 @@
 module ReactingToInput
 using Rocket, GLFW,ModernGL,Setfield,  ..ReactToScroll,  ..ForDisplayStructs
 using  ..TextureManag,DataTypesBasic,  ..ReactOnMouseClickAndDrag,  ..ReactOnKeyboard,  ..DataStructs,  ..StructsManag,  ..DisplayWords
-using ..MaskDiffrence, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane
+using ..KeyboardMouseHelper,..MaskDiffrence, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane
 export subscribeGLFWtoActor
 
 

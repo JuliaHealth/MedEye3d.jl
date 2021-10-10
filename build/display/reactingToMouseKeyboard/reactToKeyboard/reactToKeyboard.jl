@@ -6,7 +6,7 @@ module coordinating response to the  keyboard input - mainly shortcuts that  hel
 #@doc ReactOnKeyboardSTR
 module ReactOnKeyboard
 using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow,   ..DataStructs , Rocket, GLFW,Dictionaries,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils,  ..Uniforms, Match, Parameters,DataTypesBasic
-using ..MaskDiffrence, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane
+using ..KeyboardMouseHelper,..MaskDiffrence, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane
 export reactToKeyboard , registerKeyboardFunctions,processKeysInfo
 
 
