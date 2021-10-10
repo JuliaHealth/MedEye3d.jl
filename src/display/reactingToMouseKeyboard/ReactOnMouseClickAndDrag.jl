@@ -11,7 +11,7 @@ so we modify the data that is the basis of the mouse interaction mask  and we pa
 
 """
 module ReactOnMouseClickAndDrag
-using Parameters, Rocket,Setfield, GLFW, ModernGL,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils
+using Logging, Parameters, Rocket,Setfield, GLFW, ModernGL,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils
 using  Dates, Parameters,  ..DataStructs,  ..StructsManag
 export registerMouseClickFunctions
 export reactToMouseDrag
@@ -184,15 +184,16 @@ function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any, ActorWith
     elseif( mousestr.isRightButtonDown  )
         #we save data about right click position in order to change the slicing plane accordingly
         mappedCoords =  translateMouseToTexture(Int32(1)
-        ,mouseCoords
-        ,actor.actor.calcDimsStruct)
-                        mappedCorrd= mappedCoords
-                        if(!isempty(mappedCorrd))
-                                actor.actor.lastRecordedMousePosition = cartTwoToThree(actor.actor.onScrollData.dataToScrollDims 
-                                                                                        ,actor.actor.currentDisplayedSlice
-                                                                                    , mappedCoords[1]   )   
+                    ,mouseCoords
+                    ,actor.actor.calcDimsStruct)
+        mappedCorrd= mappedCoords
+        if(!isempty(mappedCorrd))
+            cartMapped= cartTwoToThree(actor.actor.onScrollData.dataToScrollDims 
+            ,actor.actor.currentDisplayedSlice
+        , mappedCoords[1]   )  
 
-                        end#if
+            actor.actor.lastRecordedMousePosition =  cartMapped
+        end#if
      end #if 
     actor.actor.isBusy[]=false # we can do sth in opengl
     obj.stopListening[]=false # reactivete event listening loop

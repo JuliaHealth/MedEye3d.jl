@@ -5,7 +5,7 @@ using ColorTypes
 utilities for dealing data structs like FullScrollableDat or SingleSliceDat
 """
 module StructsManag
-using  Setfield,   ..ForDisplayStructs,   ..DataStructs, Rocket
+using  Logging, Setfield,   ..ForDisplayStructs,   ..DataStructs, Rocket
 export getThreeDims,addToforUndoVector,cartTwoToThree,getHeightToWidthRatio,threeToTwoDimm,modSlice!, threeToTwoDimm,modifySliceFull!,getSlicesNumber,getMainVerticies
 
 ```@doc
@@ -96,12 +96,17 @@ Based on DataToScrollDims ,2 dim cartesian coordinate and  slice number it gives
 function cartTwoToThree(dataToScrollDims::DataToScrollDims 
                            ,sliceNumber::Int
                            ,cartIn::CartesianIndex{2})::CartesianIndex{3}
-  toSelect= filter(it-> it!=dataToScrollDims.dimensionToScroll , [1,2,3] )# will be used to get texture width and height
+
+
+ toSelect= filter(it-> it!=dataToScrollDims.dimensionToScroll , [1,2,3] )# will be used to get texture width and height
 resArr= [1,1,1]
 
-resArr[dataToScrollDims.dimensionToScroll]=Int64(sliceNumber)
+
 resArr[toSelect[1]] = cartIn[1]
 resArr[toSelect[2]] = cartIn[2]
+resArr[dataToScrollDims.dimensionToScroll]=Int64(sliceNumber)
+
+
   return CartesianIndex(resArr[1],resArr[2],resArr[3]  )
 end#cartTwoToThree
 
