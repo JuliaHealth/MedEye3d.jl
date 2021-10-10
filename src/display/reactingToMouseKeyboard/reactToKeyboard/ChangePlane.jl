@@ -5,7 +5,7 @@ module ChangePlane
 using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow,   ..DataStructs , Rocket, GLFW,Dictionaries,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils,  ..Uniforms, Match, Parameters,DataTypesBasic   
 
 """
-In case we want to change the dimansion of scrolling so for example from transverse 
+In case we want to change the dimansion of scrolling so for example from transverse to coronal ...
     toBeSavedForBack - just marks weather we wat to save the info how to undo latest action
     - false if we invoke it from undoing 
 """
@@ -49,6 +49,7 @@ glDeleteTextures(length(arr), arr)# deleting
 
 
 actor.actor.onScrollData.dimensionToScroll = toScrollDat.dimensionToScroll
+actor.actor.onScrollData.dataToScrollDims = toScrollDat
 
 actor.actor.onScrollData.slicesNumber = getSlicesNumber(actor.actor.onScrollData)
 #getting  the slice of intrest based on last recorded mouse position 
@@ -84,8 +85,6 @@ updateImagesDisplayed(singleSlDat
 
 
 
-
- #@info "singleSlDat" singleSlDat
      #saving information about current slice for future reference
 actor.actor.currentDisplayedSlice = current
 # to enbling getting back

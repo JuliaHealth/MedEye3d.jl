@@ -17,9 +17,7 @@ function processKeysInfo(isTobeFast::Identity{Tuple{Bool,Bool}}
                         isTobeFastVal = isTobeFast.value[1]
     #passing information to actor that we should do now fast scrolling
     # actor.actor.mainForDisplayObjects= setproperties .isFastScroll = isTobeFastVal
-    @info " in processKeysInfo"
-    @info actor.actor.mainForDisplayObjects=setproperties(actor.actor.mainForDisplayObjects, (isFastScroll=isTobeFastVal))
-    actor.actor.mainForDisplayObjects=setproperties(actor.actor.mainForDisplayObjects, (isFastScroll=isTobeFastVal))
+       actor.actor.mainForDisplayObjects=setproperties(actor.actor.mainForDisplayObjects, (isFastScroll=isTobeFastVal))
 # for undoing action
 if(toBeSavedForBack)
     addToforUndoVector(actor, ()-> processKeysInfo( Option((!isTobeFastVal,false)),actor, keyInfo,false ))

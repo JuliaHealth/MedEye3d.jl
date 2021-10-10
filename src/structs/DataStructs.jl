@@ -63,7 +63,7 @@ end#simpleTextStruct
 """
 stores additional data about full dimensions of scrollable dat - this is necessery for switching slicing plane orientation efficiently
 """
-@with_kw struct  DataToScrollDims
+@with_kw mutable  struct  DataToScrollDims
     imageSize::Tuple{Int64, Int64, Int64} = (1,1,1)#amount of voxels in each dimensions
     voxelSize::Tuple{Float64, Float64, Float64}  = (1.0,1.0,1.0)#physical size of each pixel
     dimensionToScroll::Int= 3 # by which dimension we should scroll so for example if set to 3 one and we have slice number x we will get data A by A[:,:,x] if dimensionToScroll = 2 ->A[:,x,:]...
