@@ -129,7 +129,7 @@ function registerKeyboardFunctions(window::GLFW.Window,stopListening::Base.Threa
 
     GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
         name = GLFW.GetKeyName(key, scancode)
-        if name === nothing || name =="+" || name =="-" || name =="z"
+        if name === nothing || name =="+" || name =="-" || name =="z"  || name =="f"  || name =="s"
             keyboardSubs(key,action)                                                        
         else
             keyboardSubs(name,action)
@@ -179,7 +179,11 @@ F1, F2 ... - switch between defined window display characteristics - like min sh
 """
 function reactToKeyboard(keyInfo::KeyboardStruct
                         , actor::SyncActor{Any, ActorWithOpenGlObjects})
-                      
+    
+                        
+   @info "keyInfo in reactToKeyboard" keyInfo
+
+
     #we got this only when ctrl/shift/als is released or enter is pressed
     obj = actor.actor.mainForDisplayObjects
     obj.stopListening[]=true #free GLFW context
@@ -290,8 +294,10 @@ function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlOb
     elseif(keyInfo.isZPressed )
         return Option(true)
     elseif(keyInfo.isFPressed )
+        @info " f pressed in parseString "
         return Option((true,false))
     elseif(keyInfo.isSPressed )
+        @info " s pressed in parseString "
         return Option((false,true))
     # for control of stroke width    
     elseif(keyInfo.isTAbPressed &&  keyInfo.isPlusPressed)
