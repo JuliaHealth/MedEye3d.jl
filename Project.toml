@@ -1,10 +1,9 @@
 name = "MedEye3d"
 uuid = "48a1af7b-3279-4eeb-8f2b-7ca229bb51b1"
 authors = ["M.D Jakub Mitura <53857487+jakubMitura14@users.noreply.github.com>"]
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
-BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 ColorTypes = "3da002f7-5984-5a60-b8a6-cbb66c0b333f"
 DataTypesBasic = "83eed652-29e8-11e9-12da-a7c29d64ffc9"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
