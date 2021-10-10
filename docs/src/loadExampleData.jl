@@ -149,3 +149,4 @@ Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);
 using GLFW
 GLFW.PollEvents()
 
+# SegmentationDisplay

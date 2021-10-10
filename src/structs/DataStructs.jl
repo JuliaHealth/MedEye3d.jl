@@ -102,7 +102,7 @@ struct is mutable becouse in case of the masks data can be changed multiple time
     segmMetr::ResultMetrics=ResultMetrics() #results metrics associated with this slice 
     nameIndexes::Dictionary{String, Int64}= getLocationDict(listOfDataAndImageNames)  #gives a way of efficient querying by supplying dictionary where key is a name we are intrested in and a key is index where it is located in our array
     sliceNumber::Int=1 # if we want it to be tamporarly  associated with some slice in scrollable data
-end #fullScrollableDat
+end #SingleSliceDat
 
 
 """

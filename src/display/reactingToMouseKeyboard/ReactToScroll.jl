@@ -85,12 +85,15 @@ function reactToScroll(scrollNumb::Int64
         current+=scrollNumb
     else
         current+=scrollNumb*10
-    end    
+    end
+    
+    
     #isScrollUp ? current+=1 : current-=1
 
    # we do not want to move outside of possible range of slices
    lastSlice = actor.actor.onScrollData.slicesNumber
    if(lastSlice>1)
+
     actor.actor.isSliceChanged = true
     actor.actor.isBusy[] = true
         if(current<1) current=1 end 
@@ -103,18 +106,22 @@ function reactToScroll(scrollNumb::Int64
         (twoDimList)-> SingleSliceDat(listOfDataAndImageNames=twoDimList
                                     ,sliceNumber=current
                                     ,textToDisp = getTextForCurrentSlice(actor.actor.onScrollData, Int32(current))  )
-        
+
         updateImagesDisplayed(singleSlDat
                             ,actor.actor.mainForDisplayObjects
                             ,actor.actor.textDispObj
                             ,actor.actor.calcDimsStruct 
                             ,actor.actor.valueForMasToSet      )
 
-        actor.actor.currentlyDispDat=singleSlDat
-        # updating the last mouse position so when we will change plane it will better show actual position
-        currentDim = actor.actor.onScrollData.dataToScrollDims.dimensionToScroll
-        actor.actor.lastRecordedMousePosition[currentDim]=current
 
+
+        actor.actor.currentlyDispDat=singleSlDat
+        # updating the last mouse position so when we will change plane it will better show actual position       
+        currentDim =Int64(actor.actor.onScrollData.dataToScrollDims.dimensionToScroll)
+        lastMouse = actor.actor.lastRecordedMousePosition
+        locArr = [lastMouse[1],lastMouse[2],lastMouse[3]]
+        locArr[currentDim]= current
+        actor.actor.lastRecordedMousePosition=CartesianIndex(locArr[1],locArr[2],locArr[3])
             #saving information about current slice for future reference
         actor.actor.currentDisplayedSlice = current
         #enable undoing the action
