@@ -148,6 +148,7 @@ windowControlStruct::WindowControlStruct=WindowControlStruct()# holding data use
   numIndexes::Dictionary{Int32, Int64} =Dictionary{Int32, Int64}() # a way for fast query using assigned numbers
   gslsStr::String="" # string giving information about used openg gl gsls version
   windowControlStruct::WindowControlStruct=WindowControlStruct()# holding data usefull to controll display window
+  isFastScroll::Bool= false # set by f letter to true and by s to normal - slow
 end
 
 
@@ -211,6 +212,8 @@ mostRecentAction ::GLFW.Action= GLFW.RELEASE
   isPlusPressed::Bool= false
   isMinusPressed::Bool= false
   isZPressed::Bool= false
+  isFPressed::Bool= false
+  isSPressed::Bool= false
   lastKeysPressed::Vector{String}=[] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
  #informations about what triggered sending this particular struct to the  actor
   mostRecentScanCode ::GLFW.Key=GLFW.KEY_KP_4
@@ -288,6 +291,8 @@ examples of keyboard input (raw GLFW input we process below)
     isPlusPressed::Bool= false
     isMinusPressed::Bool= false
     isZPressed::Bool= false
+    isFPressed::Bool= false
+    isSPressed::Bool= false
     lastKeysPressed::Vector{String}=[] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
     subject :: Subject{KeyboardStruct} =Subject(KeyboardStruct, scheduler = AsyncScheduler())
 end 
@@ -345,9 +350,9 @@ Actor that is able to store a state to keep needed data for proper display
     forUndoVector::AbstractArray=[] # holds lambda functions that when invoked will  undo last operations
     maxLengthOfForUndoVector::Int64 = 15 # number controls how many step at maximum we can get back
     isBusy::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0) # used to indicate by some functions that actor is busy and some interactions should be ceased
-    end
+  end
 
-
+  
 
 
 end #module

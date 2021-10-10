@@ -80,7 +80,12 @@ function reactToScroll(scrollNumb::Int64
     actor.actor.mainForDisplayObjects.stopListening[]=true
     current = actor.actor.currentDisplayedSlice
     old = current
-    current+=scrollNumb
+    #when shift is pressed scrolling is 10 times faster
+    if(!actor.actor.mainForDisplayObjects.isFastScroll)
+        current+=scrollNumb
+    else
+        current+=scrollNumb*10
+    end    
     #isScrollUp ? current+=1 : current-=1
 
    # we do not want to move outside of possible range of slices
@@ -106,6 +111,9 @@ function reactToScroll(scrollNumb::Int64
                             ,actor.actor.valueForMasToSet      )
 
         actor.actor.currentlyDispDat=singleSlDat
+        # updating the last mouse position so when we will change plane it will better show actual position
+        currentDim = actor.actor.onScrollData.dataToScrollDims.dimensionToScroll
+        actor.actor.lastRecordedMousePosition[currentDim]=current
 
             #saving information about current slice for future reference
         actor.actor.currentDisplayedSlice = current

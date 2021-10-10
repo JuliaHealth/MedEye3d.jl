@@ -6,7 +6,7 @@ module coordinating response to the  keyboard input - mainly shortcuts that  hel
 #@doc ReactOnKeyboardSTR
 module ReactOnKeyboard
 using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow,   ..DataStructs , Rocket, GLFW,Dictionaries,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils,  ..Uniforms, Match, Parameters,DataTypesBasic
-using ..MaskDiffrence, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane
+using ..KeyboardMouseHelper,..MaskDiffrence, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane
 export reactToKeyboard , registerKeyboardFunctions,processKeysInfo
 
 
@@ -62,6 +62,9 @@ function (handler::KeyboardCallbackSubscribable)(scancode ::GLFW.Key, action::GL
             GLFW.KEY_F5 =>( handler.isF5Pressed= (act==1); "f5")
             GLFW.KEY_F6 =>( handler.isF6Pressed= (act==1); "f6")
             GLFW.KEY_Z =>( handler.isZPressed= (act==1); "z")
+
+            GLFW.KEY_F =>( handler.isFPressed= (act==1); "f")
+            GLFW.KEY_S =>( handler.isSPressed= (act==1); "s")
             
             GLFW.KEY_KP_ADD =>( handler.isPlusPressed= (act==1); "+")
             GLFW.KEY_EQUAL =>( handler.isPlusPressed= (act==1); "+")
@@ -86,6 +89,8 @@ function (handler::KeyboardCallbackSubscribable)(scancode ::GLFW.Key, action::GL
                     ,isF6Pressed= handler.isF6Pressed ||scCode=="f6"
 
                     ,isZPressed= handler.isZPressed ||scCode=="z"
+                    ,isFPressed= handler.isFPressed ||scCode=="f"
+                    ,isSPressed= handler.isSPressed ||scCode=="s"
 
                     ,isPlusPressed= handler.isPlusPressed ||scCode=="+"
                     ,isMinusPressed= handler.isMinusPressed ||scCode=="-"
@@ -150,6 +155,9 @@ processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec{T}}, Identity{Tex
 processKeysInfo(numbb::Identity{Int64}     ,actor::SyncActor{Any, ActorWithOpenGlObjects}  ,keyInfo::KeyboardStruct    ,toBeSavedForBack::Bool = true) where T = OtherKeyboardActions.processKeysInfo(numbb,actor,keyInfo,toBeSavedForBack   )
 processKeysInfo(numbb::Identity{Bool},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T = OtherKeyboardActions.processKeysInfoUndo( numbb, actor,keyInfo  )
 processKeysInfo(annot::Identity{AnnotationStruct}  ,actor::SyncActor{Any, ActorWithOpenGlObjects} ,keyInfo::KeyboardStruct ,toBeSavedForBack::Bool = true) where T = OtherKeyboardActions.processKeysInfo(annot,actor,keyInfo,toBeSavedForBack  )
+
+processKeysInfo(isTobeFast::Identity{Tuple{Bool,Bool}}  ,actor::SyncActor{Any, ActorWithOpenGlObjects} ,keyInfo::KeyboardStruct ,toBeSavedForBack::Bool = true) where T = KeyboardMouseHelper.processKeysInfo(isTobeFast,actor,keyInfo,toBeSavedForBack  )
+
 processKeysInfo(wind::Identity{WindowControlStruct} ,actor::SyncActor{Any, ActorWithOpenGlObjects}  ,keyInfo::KeyboardStruct  ,toBeSavedForBack::Bool = true) where T = WindowControll.processKeysInfo(wind,actor,keyInfo,toBeSavedForBack)
 
 
@@ -175,7 +183,6 @@ function reactToKeyboard(keyInfo::KeyboardStruct
     #we got this only when ctrl/shift/als is released or enter is pressed
     obj = actor.actor.mainForDisplayObjects
     obj.stopListening[]=true #free GLFW context
-
     # processing here on is based on multiple dispatch mainly 
     processKeysInfo(parseString(keyInfo.lastKeysPressed,actor,keyInfo),actor,keyInfo)
     
@@ -218,6 +225,8 @@ function shouldBeExecuted(keyInfo::KeyboardStruct, act::Int64)::Bool
       GLFW.KEY_KP_SUBTRACT =>return act==1 
       GLFW.KEY_MINUS =>return act==1 
       GLFW.KEY_Z =>return act==1 
+      GLFW.KEY_F =>return act==1 
+      GLFW.KEY_S =>return act==1 
 
 
             _ => false # not Important
@@ -280,6 +289,10 @@ function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlOb
     # for undoing actions            
     elseif(keyInfo.isZPressed )
         return Option(true)
+    elseif(keyInfo.isFPressed )
+        return Option((true,false))
+    elseif(keyInfo.isSPressed )
+        return Option((false,true))
     # for control of stroke width    
     elseif(keyInfo.isTAbPressed &&  keyInfo.isPlusPressed)
         return  Option(AnnotationStruct(1))

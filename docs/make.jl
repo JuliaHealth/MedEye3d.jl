@@ -30,6 +30,7 @@ makedocs(
     ,MedEye3d.MaskDiffrence
     ,MedEye3d.KeyboardVisibility
     ,MedEye3d.OtherKeyboardActions
+    ,MedEye3d.KeyboardMouseHelper
     ,MedEye3d.WindowControll
     ,MedEye3d.ChangePlane
     

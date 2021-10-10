@@ -146,6 +146,6 @@ SegmentationDisplay.coordinateDisplay(textureSpecificationsPETCT ,fractionOfMain
 
 Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);
 
-
-
+using GLFW
+GLFW.PollEvents()
 
