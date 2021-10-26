@@ -200,6 +200,10 @@ right click and drag - sets remembered position - when we will change plane of c
 
 all keyboard shortcuts will be activated on RELEASE of keys or by pressing enter while still pressing other; +,- and z keys acts also like enter 
 
+f key - fast scrolling
+
+s key - slow scrolling
+
 shift + number - make mask associated with given number visible
 
 
