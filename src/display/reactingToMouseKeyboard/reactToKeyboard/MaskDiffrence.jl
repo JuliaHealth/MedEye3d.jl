@@ -74,9 +74,10 @@ function displayMaskDiffrence(maskA::TextureSpec, maskB::TextureSpec,actor::Sync
         reactivateMainObj(shader_prog, newForDisp.vbo,actor.actor.calcDimsStruct  )
         activateTextures(listOfTextSpecsc )
         #making diffrence visible
-        @uniforms! begin
-        dispObj.mainImageUniforms.isMaskDiffrenceVis:=1
-                end
+        isMaskDiffViss(dispObj.mainImageUniforms.isMaskDiffrenceVis)
+        # @uniforms! begin
+        # dispObj.mainImageUniforms.isMaskDiffrenceVis:=1
+        #         end
         setTextureVisibility(false,maskA.uniforms )
         setTextureVisibility(false,maskB.uniforms )
         basicRender(actor.actor.mainForDisplayObjects.window)
