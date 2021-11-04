@@ -5,7 +5,7 @@ managing  uniform values - global values in shaders
 module Uniforms
 using StaticArrays,ModernGL,Rocket,  ..ForDisplayStructs, Dictionaries, Parameters, ColorTypes
 
-export changeMainTextureContribution,changeTextureContribution,coontrolMinMaxUniformVals,createStructsDict, setCTWindow,setMaskColor,setTextureVisibility, setTypeOfMainSampler!
+export isMaskDiffViss,changeMainTextureContribution,changeTextureContribution,coontrolMinMaxUniformVals,createStructsDict, setCTWindow,setMaskColor,setTextureVisibility, setTypeOfMainSampler!
 export @uniforms
 export @uniforms!
 
@@ -122,19 +122,19 @@ uniform!(myuniform, rand(Cfloat, 4, 4))
 """
 function uniform! end
 
-@generated function uniform!(location::GLint, values::Vararg{T, N}) where {N, T <: Real}
+@generated function uniform!(location, values::Vararg{T, N}) where {N, T <: Real}
     suffix = _type_suffix(T)
     glFunc = Symbol("glUniform$(N)$suffix")
     return :( $(glFunc)(location, values...) )
 end
 
-@generated function uniform!(location::GLint, vector::SVector{N, T}) where {N, T <: Real}
+@generated function uniform!(location, vector::SVector{N, T}) where {N, T <: Real}
     suffix = _type_suffix(T)
     glFunc = Symbol("glUniform$(N)$(suffix)v")
     return :( $(glFunc)(location, 1, vector) )
 end
 
-@generated function uniform!(location::GLint, matrix::SMatrix{N, M, T}, transposed::Bool = false) where {N, M, T <: Real}
+@generated function uniform!(location, matrix::SMatrix{N, M, T}, transposed::Bool = false) where {N, M, T <: Real}
     glFunc = Symbol(
         if N == M
             "glUniformMatrix$(N)fv"
@@ -145,12 +145,12 @@ end
     return :( $(glFunc)(location, 1, transposed, Cfloat[matrix...]) )
 end
 
-function uniform!(location::GLint, vector::AbstractVector{T}) where {T <: Real}
+function uniform!(location, vector::AbstractVector{T}) where {T <: Real}
     N = length(vector)
     uniform!(location, SVector{N, T}(vector...))
 end
 
-function uniform!(location::GLint, matrix::AbstractMatrix{T}, transposed::Bool = false) where {T <: Real}
+function uniform!(location, matrix::AbstractMatrix{T}, transposed::Bool = false) where {T <: Real}
     N, M = size(matrix)
     uniform!(location, SMatrix{N, M, T}(matrix), transposed)
 end
@@ -159,7 +159,7 @@ end
 Gets the location of the uniform variable
 identified by `name`.
 """
-getuniform(program::GLuint, name::SymString) = glGetUniformLocation(program, string(name))
+getuniform(program, name::SymString) = glGetUniformLocation(program, string(name))
 """
         @uniforms foo, bar, ... = program
 Get the location of `foo`, `bar` and `etc` from `program`,
@@ -258,6 +258,18 @@ function setMaskColor(color::RGB, uniformsStore ::MaskTextureUniforms)
     end
 
 end#setMaskColor
+
+"""
+sets color of the mask
+
+"""
+function isMaskDiffViss( isMaskDiffrenceVisUnifs)
+    @uniforms! begin
+    isMaskDiffrenceVisUnifs:=1
+    end
+
+end#isMaskDiffViss
+
 
 
 """

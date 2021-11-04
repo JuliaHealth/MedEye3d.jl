@@ -61,7 +61,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
     # than we set those ..Uniforms, open gl types and using data from arguments  to fill texture specifications
     mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program,windowControlStruct) 
 
-    @info "listOfTextSpecsMapped" listOfTextSpecsMapped
+    #@info "listOfTextSpecsMapped" listOfTextSpecsMapped
     #initializing object that holds data reqired for interacting with opengl 
     initializedTextures =  initializeTextures(listOfTextSpecsMapped,calcDimStruct)
    
