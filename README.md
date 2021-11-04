@@ -200,6 +200,10 @@ right click and drag - sets remembered position - when we will change plane of c
 
 all keyboard shortcuts will be activated on RELEASE of keys or by pressing enter while still pressing other; +,- and z keys acts also like enter 
 
+f key - fast scrolling
+
+s key - slow scrolling
+
 shift + number - make mask associated with given number visible
 
 
@@ -216,7 +220,7 @@ tab + number - sets the number that will be  used as an input to masks modified 
   when tab minus (and then no number) will be pressed it will increase stroke width
     
     
-shift + numberA + "-"(minus sign) +numberB  - display diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B invisible
+shift + numberA + "m"(m letter) +numberB  - display diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B invisible
 
 
 ctrl + numberA + "-"(minus sign) +numberB  - stops displaying diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B visible
