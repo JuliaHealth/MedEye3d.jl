@@ -37,9 +37,9 @@ function displayAll(listOfTexturesToCreate::Vector{TextureSpec}
 	vertex_shader = createVertexShader(gslsStr)
 	
 	masks = filter(textSpec-> !textSpec.isMainImage ,listOfTexturesToCreate)
-	someExampleMask = masks[1]
-	someExampleMaskB = masks[2]
-	@info "masks set for subtraction $(someExampleMask.name)" someExampleMaskB.name
+	someExampleMask = masks[begin]
+	someExampleMaskB = masks[end]
+	# @info "masks set for subtraction $(someExampleMask.name)" someExampleMaskB.name
 	fragment_shader_main,shader_program= createAndInitShaderProgram(vertex_shader,listOfTexturesToCreate,someExampleMask,someExampleMaskB,gslsStr  )
 	
 	glUseProgram(shader_program)

@@ -117,12 +117,7 @@ textureSpecificationsPETCT = [
 ];
 # We need also to specify how big part of the screen should be occupied by the main image and how much by text fractionOfMainIm= Float32(0.8);
 fractionOfMainIm= Float32(0.8);
-"""
-If we want to display some text we need to pass it as a vector of SimpleLineTextStructs - utility function to achieve this is 
-textLinesFromStrings() where we pass resies of strings, if we want we can also edit those structs to controll size of text and space to next line look into SimpleLineTextStruct doc
-mainLines - will be displayed over all slices
-supplLines - will be displayed over each slice where is defined - below just dummy data
-"""
+
 import MedEye3d.DisplayWords.textLinesFromStrings
 
 mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
