@@ -416,9 +416,6 @@ scrollingPureCT = run(scB)
 mouseInteractionPureCT = run(paintB)
 translationsPureCT = run(translationsB)
 ```
-When all will be ok and you will scroll up  you should see sth like below
-
-![soft_liv](https://user-images.githubusercontent.com/53857487/131261997-8e62851d-6589-4f41-8baf-9ca89b03a6da.png)
 
 
 
