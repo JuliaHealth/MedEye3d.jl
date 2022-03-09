@@ -13,19 +13,19 @@ function processKeysInfo(textSpecObs::Identity{TextureSpec{T}},actor::SyncActor{
     textSpec =  textSpecObs.value
     if(keyInfo.isCtrlPressed)    
         setVisAndRender(false,actor.actor,textSpec.uniforms )
-        @info " set visibility of $(textSpec.name) to false" 
+        #@info " set visibility of $(textSpec.name) to false" 
         #to enabling undoing it 
         addToforUndoVector(actor, ()-> setVisAndRender(true,actor.actor,textSpec.uniforms )    )
     elseif(keyInfo.isShiftPressed)  
         setVisAndRender(true,actor.actor,textSpec.uniforms )
-        @info " set visibility of $(textSpec.name) to true" 
+        #@info " set visibility of $(textSpec.name) to true" 
        #to enabling undoing it 
        addToforUndoVector(actor, ()->setVisAndRender(false,actor.actor,textSpec.uniforms )   )
 
     elseif(keyInfo.isAltPressed)  
         oldTex = actor.actor.textureToModifyVec
         actor.actor.textureToModifyVec= [textSpec]
-        @info " set texture for manual modifications to  $(textSpec.name)"
+        #@info " set texture for manual modifications to  $(textSpec.name)"
        if(!isempty(oldTex))
        addToforUndoVector(actor, ()->begin  @info actor.actor.textureToModifyVec=[oldTex[1]] end)
        end

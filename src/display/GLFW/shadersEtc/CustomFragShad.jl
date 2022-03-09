@@ -51,9 +51,9 @@ $( getMasksSubtractionFunction(maskToSubtrastFrom,maskWeAreSubtracting))
 $(mainFuncString(mainTexture,notMainTextures,maskToSubtrastFrom,maskWeAreSubtracting))
  """
 # uncomment for debugging
-  for st in split(res, "\n")
-    @info st
-    end
+#   for st in split(res, "\n")
+#     @info st
+#     end
 return res    
 
 end #createCustomFramgentShader
