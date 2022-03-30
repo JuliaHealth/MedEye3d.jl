@@ -420,6 +420,22 @@ mouseInteractionPureCT = run(paintB)
 translationsPureCT = run(translationsB)
 ```
 
+If You will find usefull my work please cite it 
+```
+@Article{Mitura2021,
+  author   = {Mitura, Jakub and Chrapko, Beata E.},
+  journal  = {Zeszyty Naukowe WWSI},
+  title    = {{3D Medical Segmentation Visualization in Julia with MedEye3d}},
+  year     = {2021},
+  number   = {25},
+  pages    = {57--67},
+  volume   = {15},
+  doi      = {10.26348/znwwsi.25.57},
+  keywords = {OpenGl, Computer Tomagraphy, PET/CT, medical image annotation, medical image visualization},
+}
+
+```
+
 
 
 References (numbers are assoiated with the article that is in review - here just to state  them)
