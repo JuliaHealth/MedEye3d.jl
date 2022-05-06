@@ -10,6 +10,11 @@ In order to use package just type in Repl
 ]add MedEye3d
 ```
 
+the tool is part of bigger framework - example in link below
+https://github.com/jakubMitura14/MedPipe3DTutorial
+
+
+
 Image below just represents limitless possibilities of color ranges, and that thanks to OpenGl even theorethically complex data to display will render nearly instantenously. 
 
 
