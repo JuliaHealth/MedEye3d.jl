@@ -87,7 +87,7 @@ initializing textures  - so we basically execute specification for configuration
 listOfTextSpecs - list of TextureSpec structs that  holds data needed to 
 calcDimStruct - struct holding necessery data about taxture dimensions, quad propertiess etc.
 """
-function initializeTextures(listOfTextSpecs::Vector{TextureSpec}
+function initializeTextures(listOfTextSpecs
                             ,calcDimStruct ::CalcDimsStruct)::Vector{TextureSpec}
 
     res = Vector{TextureSpec}()
