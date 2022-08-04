@@ -199,21 +199,22 @@ function assignUniformsAndTypesToMasks(textSpecs::Vector{TextureSpec}
                 ,windowControlStruct::WindowControlStruct)
     mainTexture,notMainTextures=   divideTexteuresToMainAndRest(textSpecs)
 #main texture ..Uniforms
-n= mainTexture.name
+if(mainTexture!=0)
+    n= mainTexture.name
 
-mainUnifs =MainImageUniforms(
-    samplerName= n
-    ,samplerRef = glGetUniformLocation(shader_program, n)
-    ,isVisibleRef = glGetUniformLocation(shader_program, "$(n)isVisible")
-    ,min_shown_white= glGetUniformLocation(shader_program, "min_shown_white")
-   , max_shown_black= glGetUniformLocation(shader_program, "max_shown_black")
-    ,displayRange=glGetUniformLocation(shader_program, "displayRange")
-    ,isMaskDiffrenceVis=glGetUniformLocation(shader_program, "isMaskDiffrenceVis")
-    ,mainImageContribution=glGetUniformLocation(shader_program, "mainImageContribution")
-)
-setCTWindow(windowControlStruct.min_shown_white,windowControlStruct.max_shown_black,mainUnifs)
-
-maintext = setproperties(mainTexture, (uniforms= mainUnifs ))
+    mainUnifs =MainImageUniforms(
+        samplerName= n
+        ,samplerRef = glGetUniformLocation(shader_program, n)
+        ,isVisibleRef = glGetUniformLocation(shader_program, "$(n)isVisible")
+        ,min_shown_white= glGetUniformLocation(shader_program, "min_shown_white")
+    , max_shown_black= glGetUniformLocation(shader_program, "max_shown_black")
+        ,displayRange=glGetUniformLocation(shader_program, "displayRange")
+        ,isMaskDiffrenceVis=glGetUniformLocation(shader_program, "isMaskDiffrenceVis")
+        ,mainImageContribution=glGetUniformLocation(shader_program, "mainImageContribution")
+    )
+    setCTWindow(windowControlStruct.min_shown_white,windowControlStruct.max_shown_black,mainUnifs)
+    maintext = setproperties(mainTexture, (uniforms= mainUnifs ))
+end#if
 # joining main and not main textures data 
 mapped= [ map(x-> setuniforms(x,shader_program) , notMainTextures)..., maintext]
 
