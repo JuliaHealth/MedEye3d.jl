@@ -23,6 +23,7 @@ include(joinpath( "display","GLFW","startModules","ModernGlUtil.jl"))
 include(joinpath( "structs","BasicStructs.jl"))
 include(joinpath( "structs","DataStructs.jl"))
 include(joinpath( "structs","ForDisplayStructs.jl"))
+include(joinpath( "structs","distinctColorsSaved.jl"))
 
 include(joinpath( "display","GLFW","DispUtils","StructsManag.jl"))
 
@@ -56,7 +57,10 @@ include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","reactTo
 
 
 include(joinpath( "display","reactingToMouseKeyboard","ReactingToInput.jl") )
+include(joinpath( "higherAbstractions","visualizationFromHdf5","visualizationFromHdf5.jl"))
+
 include(joinpath( "display","GLFW","SegmentationDisplay.jl"))
+
 
 
 greet() = print("Hello World!")
