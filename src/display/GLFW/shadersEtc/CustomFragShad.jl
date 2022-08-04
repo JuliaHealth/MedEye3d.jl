@@ -13,8 +13,14 @@ We divide textures into main image texture and the rest
 listOfTexturesToCreate - list of textures on the basis of which we will create custom fragment shader code
 returns tuple where fist entr is the main image texture specification and second is rest of textures
   """
-function divideTexteuresToMainAndRest(listOfTexturesToCreate::Vector{TextureSpec})::Tuple{TextureSpec, Vector{TextureSpec}}
-    mainTexture =   filter(it->it.isMainImage,listOfTexturesToCreate )[1] # main image texture
+function divideTexteuresToMainAndRest(listOfTexturesToCreate::Vector{TextureSpec})
+    mainTexture = 0
+
+    mainTextureList =   filter(it->it.isMainImage,listOfTexturesToCreate ) # main image texture
+    if(length(mainTextureList)>0)
+        mainTexture=mainTextureList[1]
+    end    
+
     notMainTextures = filter(it->!it.isMainImage,listOfTexturesToCreate) # textures associated with not main
 return (mainTexture, notMainTextures)
 end #divideTexteuresToMainAndRest
@@ -78,14 +84,20 @@ end #initialStrings
 managing main texture and on the basis of the type  we will initialize diffrent variables
 mainTexture - specification of a texture related to main image
   """
-function addMainTextureStrings(mainTexture::TextureSpec)::String
-    mainImageName= mainTexture.name
-    return """
-    uniform $(addSamplerStr(mainTexture, mainImageName)); // main image sampler
-    uniform int $(mainImageName)isVisible = 1; // controllin main texture visibility
+function addMainTextureStrings(mainTexture)::String
+    #we add something only if there is main texture specified
+    if(mainTexture!=0)
+        mainImageName= mainTexture.name
+        return """
+        uniform $(addSamplerStr(mainTexture, mainImageName)); // main image sampler
+        uniform int $(mainImageName)isVisible = 1; // controllin main texture visibility
 
-    $(addWindowingFunc(mainTexture))
+        $(addWindowingFunc(mainTexture))
 
+        """
+    end#if
+    return """ 
+    
     """
 end #addMainTextureStrings
 
@@ -198,12 +210,15 @@ end#addColorUniform
 controlling main function - basically we need to return proper FragColor which represents pixel color in given spot
 we generete separately r,g and b values by adding contributions from all textures    
 """
-function mainFuncString( mainTexture::TextureSpec
+function mainFuncString( mainTexture
                         ,notMainTextures::Vector{TextureSpec}
                         ,maskToSubtrastFrom::TextureSpec
                         ,maskWeAreSubtracting::TextureSpec)::String
-
-    mainImageName= mainTexture.name
+    
+    mainImageName=0
+    if(mainTexture!=0)
+        mainImageName= mainTexture.name
+    end#if
 
     notMainTexturesNotCont = filter(it->!it.isContinuusMask ,notMainTextures)#only single color associated
     notMainTexturesCont = filter(it->it.isContinuusMask ,notMainTextures)#multiple colors associated
@@ -242,16 +257,16 @@ function mainFuncString( mainTexture::TextureSpec
 $(masksInfluences)
 
 
-float todiv = $(isVisibleList) + $(mainImageName)isVisible*mainImageContribution+ isMaskDiffrenceVis;
- vec4 $(mainImageName)Res = mainColor(texture2D($(mainImageName), TexCoord0).r);
+float todiv = $(isVisibleList) $(mainVisContrib(mainImageName)) ;
+ $(getMainImageRes(mainImageName))
    FragColor = vec4(($(sumColorR)+$(sumColorRCont)
-   +$(mainImageName)Res.r*mainImageContribution+rdiffrenceColor(texture2D($(maskToSubtrastFrom.name), TexCoord0).r ,texture2D($(maskWeAreSubtracting.name), TexCoord0).r )
+   +   $(getmainImageR(mainImageName))    +rdiffrenceColor(texture2D($(maskToSubtrastFrom.name), TexCoord0).r ,texture2D($(maskWeAreSubtracting.name), TexCoord0).r )
     )/todiv
    ,($(sumColorG)+$(sumColorGCont)
-   +$(mainImageName)Res.g*mainImageContribution+gdiffrenceColor(texture2D($(maskToSubtrastFrom.name), TexCoord0).r ,texture2D($(maskWeAreSubtracting.name), TexCoord0).r ))
+   + $(getmainImageG(mainImageName))  +gdiffrenceColor(texture2D($(maskToSubtrastFrom.name), TexCoord0).r ,texture2D($(maskWeAreSubtracting.name), TexCoord0).r ))
    /todiv, 
    ($(sumColorB)+$(sumColorBCont)
-   +$(mainImageName)Res.b*mainImageContribution+bdiffrenceColor(texture2D($(maskToSubtrastFrom.name), TexCoord0).r ,texture2D($(maskWeAreSubtracting.name), TexCoord0).r ) )
+   + $(getmainImageB(mainImageName)) +bdiffrenceColor(texture2D($(maskToSubtrastFrom.name), TexCoord0).r ,texture2D($(maskWeAreSubtracting.name), TexCoord0).r ) )
    /todiv, 
    1.0  ); //long  product, if mask is invisible it just has full transparency
 
@@ -259,6 +274,61 @@ float todiv = $(isVisibleList) + $(mainImageName)isVisible*mainImageContribution
 
     """
 end#mainFuncString
+
+
+"""
+contribution of main image to final visualization
+"""
+function mainVisContrib(mainImageName)
+    if(mainImageName!=0)
+        return "+ $(mainImageName)isVisible*mainImageContribution+ isMaskDiffrenceVis"
+
+    end    
+    return " "
+end
+
+function getMainImageRes(mainImageName)
+    if(mainImageName!=0)
+        return " vec4 $(mainImageName)Res = mainColor(texture2D($(mainImageName), TexCoord0).r); "
+
+    end    
+    return " "
+
+end#getMainImageRes
+
+
+"""
+contributions to each image given the main texture exist
+"""
+function getmainImageR(mainImageName)
+    if(mainImageName!=0)
+        return " $(mainImageName)Res.r*mainImageContribution "
+
+    end    
+    return " "
+end
+
+
+function getmainImageG(mainImageName)
+    if(mainImageName!=0)
+        return " $(mainImageName)Res.g*mainImageContribution "
+
+    end    
+    return " "
+end
+
+
+function getmainImageB(mainImageName)
+    if(mainImageName!=0)
+        return " $(mainImageName)Res.b*mainImageContribution "
+
+    end    
+    return " "
+end
+
+
+
+
 
 
 """
