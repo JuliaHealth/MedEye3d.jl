@@ -199,8 +199,8 @@ function assignUniformsAndTypesToMasks(textSpecs::Vector{TextureSpec}
                 ,windowControlStruct::WindowControlStruct)
     mainTexture,notMainTextures=   divideTexteuresToMainAndRest(textSpecs)
 #main texture ..Uniforms
-mapped= [ map(x-> setuniforms(x,shader_program) , notMainTextures)]
 if(mainTexture!=0)
+
     n= mainTexture.name
 
     mainUnifs =MainImageUniforms(
@@ -214,16 +214,15 @@ if(mainTexture!=0)
         ,mainImageContribution=glGetUniformLocation(shader_program, "mainImageContribution")
     )
     setCTWindow(windowControlStruct.min_shown_white,windowControlStruct.max_shown_black,mainUnifs)
+
     maintext = setproperties(mainTexture, (uniforms= mainUnifs ))
+    # joining main and not main textures data 
     mapped= [ map(x-> setuniforms(x,shader_program) , notMainTextures)..., maintext]
 
-
-end#if
-# joining main and not main textures data 
-
-
-return  (mainUnifs, map(x->setProperOpenGlTypes(x),mapped))
-
+    return  (mainUnifs, map(x->setProperOpenGlTypes(x),mapped))
+end
+mapped= map(x-> setuniforms(x,shader_program) , notMainTextures)
+return  (ForDisplayStructs.MainImageUniforms(), map(x->setProperOpenGlTypes(x),mapped))
 
 end#assign..UniformsToMasks
 
