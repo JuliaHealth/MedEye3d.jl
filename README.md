@@ -7,6 +7,15 @@ newer simpler example together with some extras in https://github.com/jakubMitur
 
 
 
+
+
+
+
+
+
+
+
+
 Detailed description can be found in published article 
 http://zeszyty-naukowe.wwsi.edu.pl/zeszyty/zeszyt25/Jakub_Mitura_Beata_E.Chrapko_WWSI_nr_25.pdf
 
