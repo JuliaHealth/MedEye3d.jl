@@ -209,7 +209,7 @@ spacingList = attributes(group)["spacing"][]
 spacing=(Float32(spacingList[1]),Float32(spacingList[2]),Float32(spacingList[3]))
 
 
-datToScrollDimsB= MedEye3d.ForDisplayStructs.DataToScrollDims(
+datToScrollDimsB= ForDisplayStructs.DataToScrollDims(
     imageSize=  imageSize
     ,voxelSize=spacing
     ,dimensionToScroll = 3 );
