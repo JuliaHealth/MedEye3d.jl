@@ -159,7 +159,6 @@ end#for
 #preinitialized placeholders
  textureSpecifications::Vector{TextureSpec}=Vector(undef,length(imagesMasks)+toAddAddedTextures)
 
- print(textureSpecifications)
 
 
  tupleVect=Vector(undef,length(imagesMasks)+toAddAddedTextures)
@@ -208,7 +207,7 @@ end#for
 
 
 
-#print(textureSpecifications) #TODO (remove)
+print(textureSpecifications) #TODO (remove)
 
 spacingList = attributes(group)["spacing"][]
 spacing=(Float32(spacingList[1]),Float32(spacingList[2]),Float32(spacingList[3]))
