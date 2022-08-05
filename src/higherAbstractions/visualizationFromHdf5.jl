@@ -158,6 +158,10 @@ end#for
 
 #preinitialized placeholders
  textureSpecifications::Vector{TextureSpec}=Vector(undef,length(imagesMasks)+toAddAddedTextures)
+
+ print(textureSpecifications)
+
+
  tupleVect=Vector(undef,length(imagesMasks)+toAddAddedTextures)
 
  index = 0;
