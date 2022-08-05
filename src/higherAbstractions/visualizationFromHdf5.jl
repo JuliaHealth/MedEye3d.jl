@@ -232,11 +232,11 @@ mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDimsB
                                  ,mainTextToDisp= mainLines
                                  ,sliceTextToDisp=supplLines );
 
-                                 SegmentationDisplay.coordinateDisplay(textureSpecifications
+                                 coordinateDisplay(textureSpecifications
                                  ,fractionOfMainIm ,datToScrollDimsB ,1000);
 
 
-                                 SegmentationDisplay.passDataForScrolling(mainScrollDat);
+                                 passDataForScrolling(mainScrollDat);
 
 return mainScrollDat
 
