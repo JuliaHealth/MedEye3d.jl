@@ -57,9 +57,9 @@ include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","reactTo
 
 
 include(joinpath( "display","reactingToMouseKeyboard","ReactingToInput.jl") )
-include(joinpath( "higherAbstractions","visualizationFromHdf5.jl"))
 
 include(joinpath( "display","GLFW","SegmentationDisplay.jl"))
+include(joinpath( "higherAbstractions","visualizationFromHdf5.jl"))
 
 
 
