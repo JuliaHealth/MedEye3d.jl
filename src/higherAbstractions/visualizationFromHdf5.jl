@@ -38,6 +38,7 @@ using   ..OpenGLDisplayUtils,  ..ForDisplayStructs,..TextureManag
 using MedEval3D
 using MedEval3D.BasicStructs
 using MedEval3D.MainAbstractions
+using ..SegmentationDisplay
 
 """
 simply open dataset
