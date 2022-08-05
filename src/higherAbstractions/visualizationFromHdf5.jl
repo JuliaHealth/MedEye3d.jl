@@ -140,7 +140,7 @@ function loadFromHdf5Prim(fid, patienGroupName::String
   group = fid[patienGroupName]
  #strings holding the arrays holding data about given patient
  imagesMasks = keys(group)
-@log "imagesMasks $(imagesMasks) "
+print("imagesMasks $(imagesMasks) ")
 
 #adding one spot to be able to get manually modifiable mask
  imageSize::Tuple{Int64,Int64,Int64}= (0,0,0)
