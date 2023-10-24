@@ -21,7 +21,6 @@ Observables = "510215fc-4207-5dde-b226-833fc4488ee2"
 Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"
 Rocket = "df971d30-c9d6-4b37-b8ff-e965b2cb3a40"
 Setfield = "efcf1570-3423-57d1-acb7-fd33fddbac46"
-StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
 ColorTypes = "0.10.12"
@@ -39,5 +38,4 @@ Observables = "0.4.0"
 Parameters = "0.12.2"
 Rocket = "1.3.15"
 Setfield = "0.7.1"
-StaticArrays = "1.2.12"
 julia = "1.6"
