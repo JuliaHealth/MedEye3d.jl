@@ -20,6 +20,8 @@ Observables = "510215fc-4207-5dde-b226-833fc4488ee2"
 Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"
 Rocket = "df971d30-c9d6-4b37-b8ff-e965b2cb3a40"
 Setfield = "efcf1570-3423-57d1-acb7-fd33fddbac46"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+
 
 [compat]
 ColorTypes = "0.11.4"
@@ -36,4 +38,5 @@ Parameters = "0.12.3"
 Rocket = "1.7.2"
 Setfield = "0.2.0, 0.5.4,0.8.0 ,0.7.1, 1.0.0, 1.1.1"
 HDF5 = "0.17.1"
+StaticArrays = "1.6.5"
 julia = "1.9"
