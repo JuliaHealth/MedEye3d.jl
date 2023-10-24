@@ -3,7 +3,7 @@
 managing  uniform values - global values in shaders
 """
 module Uniforms
-using ModernGL,Rocket,  ..ForDisplayStructs, Dictionaries, Parameters, ColorTypes
+using StaticArrays,ModernGL,Rocket,  ..ForDisplayStructs, Dictionaries, Parameters, ColorTypes
 
 export isMaskDiffViss,changeMainTextureContribution,changeTextureContribution,coontrolMinMaxUniformVals,createStructsDict, setCTWindow,setMaskColor,setTextureVisibility, setTypeOfMainSampler!
 export @uniforms
