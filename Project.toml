@@ -21,6 +21,7 @@ Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"
 Rocket = "df971d30-c9d6-4b37-b8ff-e965b2cb3a40"
 Setfield = "efcf1570-3423-57d1-acb7-fd33fddbac46"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+MedEval3D = "07fe485e-7252-451c-a484-d20a4cdbbf79"
 
 
 [compat]
@@ -39,4 +40,5 @@ Rocket = "1.7.2"
 Setfield = "0.2.0, 0.5.4,0.8.0 ,0.7.1, 1.0.0, 1.1.1"
 HDF5 = "0.17.1"
 StaticArrays = "1.5.0"
+MedEval3D = "0.2.0"
 julia = "1.9"
