@@ -62,9 +62,9 @@ include(joinpath( "display","GLFW","SegmentationDisplay.jl"))
 include(joinpath( "higherAbstractions","visualizationFromHdf5.jl"))
 
 
-using Pkg 
-ENV["MODERNGL_DEBUGGING"] = "true"
-Pkg.build("ModernGL")
+# using Pkg 
+# ENV["MODERNGL_DEBUGGING"] = "true"
+# Pkg.build("ModernGL")
 
 greet() = print("Hello from medEye")
 
