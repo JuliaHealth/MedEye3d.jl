@@ -70,6 +70,8 @@ some initial constants that are the same irrespective of textures
 function initialStrings()::String
 return """ 
 #extension GL_EXT_gpu_shader4 : enable    //Include support for this extension, which defines usampler2D
+#extension GL_ARB_explicit_uniform_location : require
+
 out vec4 FragColor;    
 in vec3 ourColor;
 smooth in vec2 TexCoord0;
