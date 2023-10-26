@@ -66,11 +66,12 @@ end #createCustomFramgentShader
 
 """
 some initial constants that are the same irrespective of textures
+very begining taken from :
+    https://community.khronos.org/t/problem-with-layout-syntax/69034/5
 """
 function initialStrings()::String
 return """ 
-#extension GL_EXT_gpu_shader4 : enable    //Include support for this extension, which defines usampler2D
-#extension GL_ARB_explicit_uniform_location : require
+#version 430
 
 out vec4 FragColor;    
 in vec3 ourColor;

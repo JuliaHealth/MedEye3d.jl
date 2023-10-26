@@ -16,8 +16,12 @@ creating VertexShader  so controlling structures like verticies, quads
 gslString so version of GSLS we are using currently
   """
 function createVertexShader(gslString::String)
+  # $(gslString)
+
 vsh = """
-$(gslString)
+#extension GL_ARB_explicit_uniform_location : require
+
+
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aColor;
 layout (location = 2) in vec2 aTexCoord;
@@ -53,8 +57,11 @@ function createFragmentShader(gslString::String
                           ,listOfTexturesToCreate::Vector{TextureSpec}	
                           ,maskToSubtractFrom::TextureSpec
                           ,maskWeAreSubtracting ::TextureSpec)
+                          
+    # $(gslString)
     fsh = """
-    $(gslString)
+    #extension GL_ARB_explicit_uniform_location : require
+    
     $( createCustomFramgentShader(listOfTexturesToCreate,maskToSubtractFrom,maskWeAreSubtracting))  
     """
     return createShader(fsh, GL_FRAGMENT_SHADER)
