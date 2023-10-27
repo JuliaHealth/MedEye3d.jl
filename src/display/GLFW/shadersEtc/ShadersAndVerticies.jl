@@ -18,7 +18,7 @@ gslString so version of GSLS we are using currently
 function createVertexShader(gslString::String)
   # $(gslString)
 print("gggggggggg gslString $(gslString)")
-vsh = """#version 450
+vsh = """$(gslString)
 
 
 layout (location = 0) in vec3 aPos;

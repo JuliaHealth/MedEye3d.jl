@@ -132,7 +132,7 @@ function initializeWindow(windowWidth::Int,windowHeight::Int)
 		name = "Segmentation Visualization",
 		resolution = (windowWidth, windowHeight),
 		debugging = false,
-		major = 4,
+		major = 3,
 		minor = 3# this is what GLVisualize needs to offer all features
 	)
 
