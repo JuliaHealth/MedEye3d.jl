@@ -17,10 +17,9 @@ gslString so version of GSLS we are using currently
   """
 function createVertexShader(gslString::String)
   # $(gslString)
-
+print("gggggggggg gslString $(gslString)")
 vsh = """
-#extension GL_ARB_explicit_uniform_location : require;
-
+$(gslString)
 
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aColor;
@@ -60,8 +59,9 @@ function createFragmentShader(gslString::String
                           
     # $(gslString)
     fsh = """
-    #extension GL_ARB_explicit_uniform_location : require;
-    
+    #version 330
+    #extension GL_ARB_explicit_uniform_location : require
+
     $( createCustomFramgentShader(listOfTexturesToCreate,maskToSubtractFrom,maskWeAreSubtracting))  
     """
     return createShader(fsh, GL_FRAGMENT_SHADER)
