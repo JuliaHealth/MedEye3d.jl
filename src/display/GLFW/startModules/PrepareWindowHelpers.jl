@@ -128,7 +128,7 @@ function initializeWindow(windowWidth::Int,windowHeight::Int)
 	# Create a windowed mode window and its OpenGL context
 	window = GLFW.CreateWindow(windowWidth, windowHeight, "Segmentation Visualization")
 
-    print("aaaaaaaaaaaaa $(GetVersion())")
+    print("aaaaaaaaaaaaa $(GLFW.GetVersion())")
 	# Make the window's context current
 	GLFW.MakeContextCurrent(window)
 	GLFW.ShowWindow(window)
