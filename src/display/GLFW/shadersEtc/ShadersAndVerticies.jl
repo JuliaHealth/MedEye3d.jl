@@ -60,10 +60,8 @@ function createFragmentShader(gslString::String
                           
     # $(gslString)
     print("fffff fffff $(gslString)")
-    fsh = """
-    $(gslString)
-
-    $( createCustomFramgentShader(listOfTexturesToCreate,maskToSubtractFrom,maskWeAreSubtracting))  
+    fsh = """$(gslString)
+$( createCustomFramgentShader(listOfTexturesToCreate,maskToSubtractFrom,maskWeAreSubtracting))  
     """
     return createShader(fsh, GL_FRAGMENT_SHADER)
     end
