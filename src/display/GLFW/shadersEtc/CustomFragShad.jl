@@ -71,8 +71,6 @@ very begining taken from :
 """
 function initialStrings()::String
 return """ 
-#version 430
-
 out vec4 FragColor;    
 in vec3 ourColor;
 smooth in vec2 TexCoord0;

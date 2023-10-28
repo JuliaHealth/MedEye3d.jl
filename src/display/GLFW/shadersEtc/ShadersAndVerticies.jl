@@ -18,7 +18,7 @@ gslString so version of GSLS we are using currently
 function createVertexShader(gslString::String)
   # $(gslString)
 vsh = """
-#version 460
+$(gslString)
 
 
 layout (location = 0) in vec3 aPos;
@@ -62,7 +62,7 @@ function createFragmentShader(gslString::String
     # $(gslString)
 
     fsh = """
-#version 460
+$(gslString)
 $( createCustomFramgentShader(listOfTexturesToCreate,maskToSubtractFrom,maskWeAreSubtracting))  
     """
     print("fffff fffff $(fsh)")
