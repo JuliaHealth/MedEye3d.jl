@@ -19,7 +19,6 @@ function createVertexShader(gslString::String)
   # $(gslString)
 vsh = """
 $(gslString)
-#extension GL_ARB_explicit_uniform_location : require
 
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aColor;
@@ -62,7 +61,6 @@ function createFragmentShader(gslString::String
 
     fsh = """
 $(gslString)
-#extension GL_ARB_explicit_uniform_location : require
 
 $( createCustomFramgentShader(listOfTexturesToCreate,maskToSubtractFrom,maskWeAreSubtracting))  
     """
