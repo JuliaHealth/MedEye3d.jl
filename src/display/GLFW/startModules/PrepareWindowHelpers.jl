@@ -126,15 +126,15 @@ function initializeWindow(windowWidth::Int,windowHeight::Int)
 	GLFW.Init()
 
 	# Create a windowed mode window and its OpenGL context
-	window = GLFW.CreateWindow(windowWidth, windowHeight, "Segmentation Visualization")
+	# window = GLFW.CreateWindow(windowWidth, windowHeight, "Segmentation Visualization")
 
-    # window = GLFW.Window(
-	# 	name = "Segmentation Visualization",
-	# 	resolution = (windowWidth, windowHeight),
-	# 	debugging = false,
-	# 	major = 3,
-	# 	minor = 3# this is what GLVisualize needs to offer all features
-	# )
+    window = GLFW.Window(
+		name = "Segmentation Visualization",
+		resolution = (windowWidth, windowHeight),
+		debugging = false,
+		major = 4,
+		minor = 5# this is what GLVisualize needs to offer all features
+	)
 
     print("aaaaaaaaaaaaa $(GLFW.GetVersion())")
 	# Make the window's context current

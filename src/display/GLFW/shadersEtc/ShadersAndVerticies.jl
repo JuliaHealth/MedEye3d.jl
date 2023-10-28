@@ -40,7 +40,6 @@ print("gggggggggg  vsh $(vsh) \n  gslString $(gslString)")
 return createShader(vsh, GL_VERTEX_SHADER)
 end
 
-
 """
 loading the shader from file- so we have better experience writing shader in separate file (can be used if we do not use Custom frag shader)
 """
