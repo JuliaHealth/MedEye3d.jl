@@ -133,7 +133,7 @@ function initializeWindow(windowWidth::Int,windowHeight::Int)
 		resolution = (windowWidth, windowHeight),
 		debugging = false,
 		major = 4,
-		minor = 5# this is what GLVisualize needs to offer all features
+		minor = 3# this is what GLVisualize needs to offer all features
 	)
 
     print("aaaaaaaaaaaaa $(GLFW.GetVersion())")
