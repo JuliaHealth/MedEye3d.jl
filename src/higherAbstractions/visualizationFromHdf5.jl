@@ -275,7 +275,7 @@ function getDefaultTextureSpec(dataTypeStr::String,maskName::String ,index::Int,
      )
  
   elseif(dataTypeStr=="contLabel") 
-    return TextureSpec{typp}(
+    return TextureSpec{Float32}(
       name = maskName,
       isContinuusMask=true,
       colorSet = [getSomeColor(listOfColorUsed),getSomeColor(listOfColorUsed)]
