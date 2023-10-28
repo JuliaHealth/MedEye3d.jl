@@ -139,6 +139,8 @@ function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any, ActorWith
     actor.actor.isBusy[]=true# mark that OpenGL is busy
     textureList = actor.actor.textureToModifyVec
     mouseCoords= mousestr.lastCoordinates
+
+    @info "mouse detected" 
     if (!isempty(textureList)  && mousestr.isLeftButtonDown && textureList[1].isEditable)
         texture= textureList[1]
         calcDim =  actor.actor.calcDimsStruct
