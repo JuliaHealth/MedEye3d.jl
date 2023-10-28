@@ -20,6 +20,8 @@ function createVertexShader(gslString::String)
 print("gggggggggg gslString $(gslString)")
 vsh = """
 $(gslString)
+
+
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aColor;
 layout (location = 2) in vec2 aTexCoord;
@@ -57,6 +59,7 @@ function createFragmentShader(gslString::String
                           ,maskWeAreSubtracting ::TextureSpec)
                           
     # $(gslString)
+    print("fffff fffff $(gslString)")
     fsh = """
     $(gslString)
 
