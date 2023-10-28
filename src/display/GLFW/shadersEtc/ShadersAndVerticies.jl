@@ -57,7 +57,7 @@ function createFragmentShader(gslString::String
                           ,maskWeAreSubtracting ::TextureSpec)
                           
     # $(gslString)
-    vsh = """
+    fsh = """
     $(gslString)
 
     $( createCustomFramgentShader(listOfTexturesToCreate,maskToSubtractFrom,maskWeAreSubtracting))  
