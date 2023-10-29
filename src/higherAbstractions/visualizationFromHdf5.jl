@@ -251,6 +251,7 @@ return mainScrollDat
 function getDefaultTextureSpec(dataTypeStr::String,maskName::String ,index::Int,listOfColorUsed
       , typp, min, max,voxels)::TextureSpec
 
+  print(" mmmmmmmmmmmm maskName $(maskName) min $(min) max $(max)  ")    
   if(dataTypeStr=="CT")
     return TextureSpec{typp}(
       name= maskName,
