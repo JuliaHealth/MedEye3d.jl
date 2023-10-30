@@ -99,7 +99,8 @@ function registerMouseClickFunctions(window::GLFW.Window, stopListening::Base.Th
     # calculating dimensions of quad becouse it do not occupy whole window, and we want to react only to those mouse positions that are on main image quad
     mouseButtonSubs = MouseCallbackSubscribable(isLeftButtonDown=false, isRightButtonDown=false, xmin=Int32(calcD.windowWidthCorr), ymin=Int32(calcD.windowHeightCorr), xmax=Int32(calcD.avWindWidtForMain - calcD.windowWidthCorr), ymax=Int32(calcD.avWindHeightForMain - calcD.windowHeightCorr), coordinatesStoreForLeftClicks=[], lastCoordinate=CartesianIndex(1, 1), isBusy=isBusy
     # , subject=Subject(MouseStruct, scheduler=Rocket.ThreadsScheduler()))
-    ,subject=Subject(MouseStruct  ,scheduler = AsyncScheduler()))
+    ,subject=Subject(MouseStruct  ,scheduler = AsyncScheduler_spawned()))
+    # ,subject=Subject(MouseStruct  ,scheduler = AsyncScheduler()))
 
 
     GLFW.SetCursorPosCallback(window, (a, x, y) -> mouseButtonSubs(a, x, y))# and  for example : cursor: 29.0, 469.0  types   Float64  Float64   
