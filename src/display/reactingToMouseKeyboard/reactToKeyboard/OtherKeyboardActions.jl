@@ -14,6 +14,8 @@ function processKeysInfo(numbb::Identity{Int64}
                         ,keyInfo::KeyboardStruct 
                         ,toBeSavedForBack::Bool = true) where T
 
+    
+    @info "setting up manual modification numberr $(numbb)  "
     valueForMasToSett = valueForMasToSetStruct(value = numbb.value)
     old = actor.actor.valueForMasToSet.value
     actor.actor.valueForMasToSet =valueForMasToSett
