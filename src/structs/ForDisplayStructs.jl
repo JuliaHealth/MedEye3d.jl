@@ -294,7 +294,8 @@ examples of keyboard input (raw GLFW input we process below)
     isFPressed::Bool= false
     isSPressed::Bool= false
     lastKeysPressed::Vector{String}=[] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
-    subject :: Subject{KeyboardStruct} =Subject(KeyboardStruct, scheduler = AsyncScheduler())
+    # subject :: Subject{KeyboardStruct} =Subject(KeyboardStruct, scheduler = AsyncScheduler())
+    subject :: Subject{KeyboardStruct} =Subject(KeyboardStruct, scheduler = ThreadsScheduler())
 end 
 
 
