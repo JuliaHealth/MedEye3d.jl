@@ -6,7 +6,7 @@ utilities for dealing data structs like FullScrollableDat or SingleSliceDat
 """
 module StructsManag
 using  Setfield,   ..ForDisplayStructs,   ..DataStructs, Rocket
-export getThreeDims,addToforUndoVector,cartTwoToThree,getHeightToWidthRatio,threeToTwoDimm,modSlice!, threeToTwoDimm,modifySliceFull!,getSlicesNumber,getMainVerticies
+export getThreeDims,addToforUndoVector,cartTwoToThree,getHeightToWidthRatio,threeToTwoDimm,modSlice!, threeToTwoDimm,modifySliceFull!,getSlicesNumber,getMainVerticies,AsyncScheduler_spawned
 
 ```@doc
 given two dim dat it sets points in given coordinates in given slice to given value
@@ -225,6 +225,164 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
     
 
     end #getMainVerticies
+
+
+
+
+
+
+
+####################### adapted from https://github.com/biaslab/Rocket.jl/blob/8aa557c90717bed9d24e36cc6b147dcc076d6b67/src/schedulers/async.jl
+
+
+
+
+
+
+    import Base: show, similar
+
+    """
+        AsyncScheduler_spawned
+    
+    `AsyncScheduler_spawned` executes scheduled actions asynchronously and uses `Channel` object to order different actions on a single asynchronous task
+    """
+    struct AsyncScheduler_spawned{N} <: AbstractScheduler end
+    
+    Base.show(io::IO, ::AsyncScheduler_spawned) = print(io, "AsyncScheduler_spawned()")
+    
+    function AsyncScheduler_spawned(size::Int = typemax(Int))
+        return AsyncScheduler_spawned{size}()
+    end
+    
+    Base.similar(::AsyncScheduler_spawned{N}) where N = AsyncScheduler_spawned{N}()
+    
+    makeinstance(::Type{D}, ::AsyncScheduler_spawned{N}) where { D, N } = AsyncScheduler_spawnedInstance{D}(N)
+    
+    instancetype(::Type{D}, ::Type{<:AsyncScheduler_spawned}) where D = AsyncScheduler_spawnedInstance{D}
+    
+    struct AsyncScheduler_spawnedDataMessage{D}
+        data :: D
+    end
+    
+    struct AsyncScheduler_spawnedErrorMessage
+        err
+    end
+    
+    struct AsyncScheduler_spawnedCompleteMessage end
+    
+    const AsyncScheduler_spawnedMessage{D} = Union{AsyncScheduler_spawnedDataMessage{D}, AsyncScheduler_spawnedErrorMessage, AsyncScheduler_spawnedCompleteMessage}
+    
+    mutable struct AsyncScheduler_spawnedInstance{D}
+        channel        :: Channel{AsyncScheduler_spawnedMessage{D}}
+        isunsubscribed :: Bool
+        subscription   :: Teardown
+    
+        AsyncScheduler_spawnedInstance{D}(size::Int = typemax(Int)) where D = begin
+            return new(Channel{AsyncScheduler_spawnedMessage{D}}(size, spawn=true), false, voidTeardown)
+        end
+    end
+    
+    isunsubscribed(instance::AsyncScheduler_spawnedInstance) = instance.isunsubscribed
+    getchannel(instance::AsyncScheduler_spawnedInstance) = instance.channel
+    
+    function dispose(instance::AsyncScheduler_spawnedInstance)
+        if !isunsubscribed(instance)
+            instance.isunsubscribed = true
+            close(instance.channel)
+            @async begin
+                unsubscribe!(instance.subscription)
+            end
+        end
+    end
+    
+    function __process_channeled_message(instance::AsyncScheduler_spawnedInstance{D}, message::AsyncScheduler_spawnedDataMessage{D}, actor) where D
+        on_next!(actor, message.data)
+    end
+    
+    function __process_channeled_message(instance::AsyncScheduler_spawnedInstance, message::AsyncScheduler_spawnedErrorMessage, actor)
+        on_error!(actor, message.err)
+        dispose(instance)
+    end
+    
+    function __process_channeled_message(instance::AsyncScheduler_spawnedInstance, message::AsyncScheduler_spawnedCompleteMessage, actor)
+        on_complete!(actor)
+        dispose(instance)
+    end
+    
+    struct AsyncScheduler_spawnedSubscription{ H <: AsyncScheduler_spawnedInstance } <: Teardown
+        instance :: H
+    end
+    
+    Base.show(io::IO, ::AsyncScheduler_spawnedSubscription) = print(io, "AsyncScheduler_spawnedSubscription()")
+    
+    as_teardown(::Type{ <: AsyncScheduler_spawnedSubscription}) = UnsubscribableTeardownLogic()
+    
+    function on_unsubscribe!(subscription::AsyncScheduler_spawnedSubscription)
+        dispose(subscription.instance)
+        return nothing
+    end
+    
+    function scheduled_subscription!(source, actor, instance::AsyncScheduler_spawnedInstance)
+        subscription = AsyncScheduler_spawnedSubscription(instance)
+    
+        channeling_task = @async begin
+            while !isunsubscribed(instance)
+                message = take!(getchannel(instance))
+                if !isunsubscribed(instance)
+                    __process_channeled_message(instance, message, actor)
+                end
+            end
+        end
+    
+        subscription_task = @async begin
+            if !isunsubscribed(instance)
+                tmp = on_subscribe!(source, actor, instance)
+                if !isunsubscribed(instance)
+                    subscription.instance.subscription = tmp
+                else
+                    unsubscribe!(tmp)
+                end
+            end
+        end
+    
+        bind(getchannel(instance), channeling_task)
+    
+        return subscription
+    end
+    
+    function scheduled_next!(actor, value::D, instance::AsyncScheduler_spawnedInstance{D}) where { D }
+        put!(getchannel(instance), AsyncScheduler_spawnedDataMessage{D}(value))
+    end
+    
+    function scheduled_error!(actor, err, instance::AsyncScheduler_spawnedInstance)
+        put!(getchannel(instance), AsyncScheduler_spawnedErrorMessage(err))
+    end
+    
+    function scheduled_complete!(actor, instance::AsyncScheduler_spawnedInstance)
+        put!(getchannel(instance), AsyncScheduler_spawnedCompleteMessage())
+    end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
