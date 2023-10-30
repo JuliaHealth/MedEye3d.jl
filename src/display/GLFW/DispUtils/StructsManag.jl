@@ -376,10 +376,6 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
     
     Base.show(io::IO, ::SubjectListener) = print(io, "SubjectListener()")
     
-    ##
-    function convert(::Rocket.Subject, subj::MedEye3d.StructsManag.Subject)
-        return subj
-    end    
 
     """
         Subject(::Type{D}; scheduler::H = AsapScheduler())
@@ -407,6 +403,13 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
         return Subject{D, H, instancetype(D, H)}(scheduler)
     end
     
+
+    ##
+    function convert(::Rocket.Subject, subj::Subject)
+        return subj
+    end    
+
+
     Base.show(io::IO, ::Subject{D, H}) where { D, H } = print(io, "Subject($D, $H)")
     
     Base.similar(subject::Subject{D, H}) where { D, H } = Subject(D; scheduler = similar(subject.scheduler))
