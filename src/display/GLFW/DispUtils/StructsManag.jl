@@ -377,7 +377,10 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
     Base.show(io::IO, ::SubjectListener) = print(io, "SubjectListener()")
     
     ##
-    
+    function convert(::Rocket.Subject, subj::MedEye3d.StructsManag.Subject)
+        return subj
+    end    
+
     """
         Subject(::Type{D}; scheduler::H = AsapScheduler())
     
