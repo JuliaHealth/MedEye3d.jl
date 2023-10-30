@@ -397,10 +397,10 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
         isfailed    :: Bool
         lasterror   :: Any
     
-        Subject{D, H, I}(scheduler::H) where { D, H <: AbstractScheduler, I } = new(Rocket.List(SubjectListener{I}), scheduler, true, false, false, nothing)
+        Subject{D, H, I}(scheduler::H) where { D, H <: Rocket.AbstractScheduler, I } = new(Rocket.List(SubjectListener{I}), scheduler, true, false, false, nothing)
     end
     
-    function Subject(::Type{D}; scheduler::H = AsapScheduler()) where { D, H <: AbstractScheduler }
+    function Subject(::Type{D}; scheduler::H = AsapScheduler()) where { D, H <: Rocket.AbstractScheduler }
         return Subject{D, H, instancetype(D, H)}(scheduler)
     end
     
@@ -493,13 +493,13 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
     ##
     
     """
-        SubjectFactory(scheduler::H) where { H <: AbstractScheduler }
+        SubjectFactory(scheduler::H) where { H <: Rocket.AbstractScheduler }
     
     A base subject factory that creates an instance of Subject with specified scheduler.
     
     See also: [`AbstractSubjectFactory`](@ref), [`Subject`](@ref)
     """
-    struct SubjectFactory{ H <: Rocket.AbstractScheduler } <: AbstractSubjectFactory
+    struct SubjectFactory{ H <: Rocket.Rocket.AbstractScheduler } <: AbstractSubjectFactory
         scheduler :: H
     end
     
