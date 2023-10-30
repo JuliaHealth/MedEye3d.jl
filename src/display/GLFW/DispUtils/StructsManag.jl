@@ -246,7 +246,7 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
     
     `AsyncScheduler_spawned` executes scheduled actions asynchronously and uses `Channel` object to order different actions on a single asynchronous task
     """
-    struct AsyncScheduler_spawned{N} <: AbstractScheduler end
+    struct AsyncScheduler_spawned{N} <: Rocket.AbstractScheduler end
     
     Base.show(io::IO, ::AsyncScheduler_spawned) = print(io, "AsyncScheduler_spawned()")
     
