@@ -136,7 +136,6 @@ function initializeWindow(windowWidth::Int,windowHeight::Int)
 	# 	minor = 3# this is what GLVisualize needs to offer all features
 	# )
 
-    print("aaaaaaaaaaaaa $(GLFW.GetVersion())")
 	# Make the window's context current
 	GLFW.MakeContextCurrent(window)
 	GLFW.ShowWindow(window)
