@@ -64,7 +64,7 @@ $(gslString)
 
 $( createCustomFramgentShader(listOfTexturesToCreate,maskToSubtractFrom,maskWeAreSubtracting))  
     """
-    # print("fffff fffff $(fsh)")
+    print("fffff fffff $(fsh)")
 
     return createShader(fsh, GL_FRAGMENT_SHADER)
     end
