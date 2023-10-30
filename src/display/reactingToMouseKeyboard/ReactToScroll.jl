@@ -52,7 +52,8 @@ function registerMouseScrollFunctions(window::GLFW.Window
 
 stopListening[]=true # stoping event listening loop to free the GLFW context
 
-scrollback = ScrollCallbackSubscribable( isBusy,0 ,Subject(Int64, scheduler = AsyncScheduler()))
+# scrollback = ScrollCallbackSubscribable( isBusy,0 ,Subject(Int64, scheduler = AsyncScheduler()))
+scrollback = ScrollCallbackSubscribable( isBusy,0 ,Subject(Int64, scheduler = ThreadsScheduler()))
 GLFW.SetScrollCallback(window, (a, xoff, yoff) -> scrollback(a, xoff, yoff))
 
 stopListening[]=false # reactivate event listening loop

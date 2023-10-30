@@ -113,7 +113,8 @@ function registerMouseClickFunctions(window::GLFW.Window
                                         ,coordinatesStoreForLeftClicks=[]
                                         ,lastCoordinate=CartesianIndex(1,1)
                                         ,isBusy=isBusy
-                                        ,subject=Subject(MouseStruct  ,scheduler = AsyncScheduler()))
+                                        ,subject=Subject(MouseStruct  ,scheduler = ThreadsScheduler()))
+                                        # ,subject=Subject(MouseStruct  ,scheduler = AsyncScheduler()))
 
 
 GLFW.SetCursorPosCallback(window, (a, x, y) -> mouseButtonSubs(a,x, y ) )# and  for example : cursor: 29.0, 469.0  types   Float64  Float64   
