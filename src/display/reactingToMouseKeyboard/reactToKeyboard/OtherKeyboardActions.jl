@@ -22,8 +22,8 @@ function processKeysInfo(numbb::Identity{Int64}
 
     # in case we increase number it should not be outside of the possible values
     if(!isempty(textureList))
-        @info max(Float32(textureList[1].minAndMaxValue[2]),Float32(numbb ))
-        textureList[1].minAndMaxValue[2]= max(Float32(textureList[1].minAndMaxValue[2]),Float32(numbb ))
+        @info max(Float32(textureList[1].minAndMaxValue[2]),Float32(numbb.value ))
+        textureList[1].minAndMaxValue[2]= max(Float32(textureList[1].minAndMaxValue[2]),Float32(numbb.value ))
 
         
     end#if    
