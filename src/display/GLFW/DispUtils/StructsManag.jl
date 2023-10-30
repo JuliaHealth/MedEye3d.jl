@@ -390,14 +390,14 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
     See also: [`SubjectFactory`](@ref), [`ReplaySubject`](@ref), [`BehaviorSubject`](@ref), [`safe`](@ref)
     """
     mutable struct Subject{D, H, I} <: Rocket.AbstractSubject{D}
-        listeners   :: List{SubjectListener{I}}
+        listeners   :: Rocket.List{SubjectListener{I}}
         scheduler   :: H
         isactive    :: Bool
         iscompleted :: Bool
         isfailed    :: Bool
         lasterror   :: Any
     
-        Subject{D, H, I}(scheduler::H) where { D, H <: AbstractScheduler, I } = new(List(SubjectListener{I}), scheduler, true, false, false, nothing)
+        Subject{D, H, I}(scheduler::H) where { D, H <: AbstractScheduler, I } = new(Rocket.List(SubjectListener{I}), scheduler, true, false, false, nothing)
     end
     
     function Subject(::Type{D}; scheduler::H = AsapScheduler()) where { D, H <: AbstractScheduler }
