@@ -475,7 +475,7 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
     ##
     
     mutable struct SubjectSubscription <: Rocket.Teardown
-        listener_node :: Union{Nothing, ListNode}
+        listener_node :: Union{Nothing, Rocket.ListNode}
     end
     
     as_teardown(::Type{ <: SubjectSubscription }) = UnsubscribableTeardownLogic()
