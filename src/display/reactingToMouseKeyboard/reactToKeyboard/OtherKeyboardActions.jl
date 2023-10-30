@@ -29,6 +29,7 @@ function processKeysInfo(numbb::Identity{Int64}
     # in case we increase number it should not be outside of the possible values
     if(!isempty(textureList))
         @info "5"
+        @info max(textureList[1].minAndMaxValue[2],numbb )
         textureList[1].minAndMaxValue[2]= max(textureList[1].minAndMaxValue[2],numbb )
     @info "6"
 
