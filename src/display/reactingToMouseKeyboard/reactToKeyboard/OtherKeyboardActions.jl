@@ -17,13 +17,22 @@ function processKeysInfo(numbb::Identity{Int64}
     
     @info "setting up manual modification numberr $(numbb)  "
     valueForMasToSett = valueForMasToSetStruct(value = numbb.value)
+    @info "1"
     old = actor.actor.valueForMasToSet.value
+    @info "2"
     actor.actor.valueForMasToSet =valueForMasToSett
+    @info "3"
 
     textureList= actor.actor.textureToModifyVec
+    @info "4"
+
     # in case we increase number it should not be outside of the possible values
     if(!isempty(textureList))
+        @info "5"
         textureList[1].minAndMaxValue[2]= max(textureList[1].minAndMaxValue[2],numbb )
+    @info "6"
+
+        
     end#if    
 
 
