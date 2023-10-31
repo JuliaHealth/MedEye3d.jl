@@ -6,7 +6,7 @@ utilities for dealing data structs like FullScrollableDat or SingleSliceDat
 """
 module StructsManag
 using  Setfield,   ..ForDisplayStructs,   ..DataStructs, Rocket
-export getThreeDims,addToforUndoVector,cartTwoToThree,getHeightToWidthRatio,threeToTwoDimm,modSlice!, threeToTwoDimm,modifySliceFull!,getSlicesNumber,getMainVerticies,AsyncScheduler_spawned
+export getThreeDims,addToforUndoVector,cartTwoToThree,getHeightToWidthRatio,threeToTwoDimm,modSlice!, threeToTwoDimm,modifySliceFull!,getSlicesNumber,getMainVerticies
 
 ```@doc
 given two dim dat it sets points in given coordinates in given slice to given value
@@ -239,279 +239,283 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
 
 
 
-    import Base: show, similar
-
-    """
-        AsyncScheduler_spawned
-    
-    `AsyncScheduler_spawned` executes scheduled actions asynchronously and uses `Channel` object to order different actions on a single asynchronous task
-    """
-    struct AsyncScheduler_spawned{N} <: Rocket.AbstractScheduler end
-    
-    Base.show(io::IO, ::AsyncScheduler_spawned) = print(io, "AsyncScheduler_spawned()")
-    
-    function AsyncScheduler_spawned(size::Int = typemax(Int))
-        return AsyncScheduler_spawned{size}()
-    end
-    
-    Base.similar(::AsyncScheduler_spawned{N}) where N = AsyncScheduler_spawned{N}()
-    
-    makeinstance(::Type{D}, ::AsyncScheduler_spawned{N}) where { D, N } = AsyncScheduler_spawnedInstance{D}(N)
-    
-    instancetype(::Type{D}, ::Type{<:AsyncScheduler_spawned}) where D = AsyncScheduler_spawnedInstance{D}
-    
-    struct AsyncScheduler_spawnedDataMessage{D}
-        data :: D
-    end
-    
-    struct AsyncScheduler_spawnedErrorMessage
-        err
-    end
-    
-    struct AsyncScheduler_spawnedCompleteMessage end
-    
-    const AsyncScheduler_spawnedMessage{D} = Union{AsyncScheduler_spawnedDataMessage{D}, AsyncScheduler_spawnedErrorMessage, AsyncScheduler_spawnedCompleteMessage}
-    
-    mutable struct AsyncScheduler_spawnedInstance{D}
-        channel        :: Channel{AsyncScheduler_spawnedMessage{D}}
-        isunsubscribed :: Bool
-        subscription   :: Teardown
-    
-        AsyncScheduler_spawnedInstance{D}(size::Int = typemax(Int)) where D = begin
-            return new(Channel{AsyncScheduler_spawnedMessage{D}}(size, spawn=true), false, voidTeardown)
-        end
-    end
-    
-    isunsubscribed(instance::AsyncScheduler_spawnedInstance) = instance.isunsubscribed
-    getchannel(instance::AsyncScheduler_spawnedInstance) = instance.channel
-    
-    function dispose(instance::AsyncScheduler_spawnedInstance)
-        if !isunsubscribed(instance)
-            instance.isunsubscribed = true
-            close(instance.channel)
-            @async begin
-                unsubscribe!(instance.subscription)
-            end
-        end
-    end
-    
-    function __process_channeled_message(instance::AsyncScheduler_spawnedInstance{D}, message::AsyncScheduler_spawnedDataMessage{D}, actor) where D
-        on_next!(actor, message.data)
-    end
-    
-    function __process_channeled_message(instance::AsyncScheduler_spawnedInstance, message::AsyncScheduler_spawnedErrorMessage, actor)
-        on_error!(actor, message.err)
-        dispose(instance)
-    end
-    
-    function __process_channeled_message(instance::AsyncScheduler_spawnedInstance, message::AsyncScheduler_spawnedCompleteMessage, actor)
-        on_complete!(actor)
-        dispose(instance)
-    end
-    
-    struct AsyncScheduler_spawnedSubscription{ H <: AsyncScheduler_spawnedInstance } <: Teardown
-        instance :: H
-    end
-    
-    Base.show(io::IO, ::AsyncScheduler_spawnedSubscription) = print(io, "AsyncScheduler_spawnedSubscription()")
-    
-    as_teardown(::Type{ <: AsyncScheduler_spawnedSubscription}) = UnsubscribableTeardownLogic()
-    
-    function on_unsubscribe!(subscription::AsyncScheduler_spawnedSubscription)
-        dispose(subscription.instance)
-        return nothing
-    end
-    
-    function scheduled_subscription!(source, actor, instance::AsyncScheduler_spawnedInstance)
-        subscription = AsyncScheduler_spawnedSubscription(instance)
-    
-        channeling_task = @async begin
-            while !isunsubscribed(instance)
-                message = take!(getchannel(instance))
-                if !isunsubscribed(instance)
-                    __process_channeled_message(instance, message, actor)
-                end
-            end
-        end
-    
-        subscription_task = @async begin
-            if !isunsubscribed(instance)
-                tmp = on_subscribe!(source, actor, instance)
-                if !isunsubscribed(instance)
-                    subscription.instance.subscription = tmp
-                else
-                    unsubscribe!(tmp)
-                end
-            end
-        end
-    
-        bind(getchannel(instance), channeling_task)
-    
-        return subscription
-    end
-    
-    function scheduled_next!(actor, value::D, instance::AsyncScheduler_spawnedInstance{D}) where { D }
-        put!(getchannel(instance), AsyncScheduler_spawnedDataMessage{D}(value))
-    end
-    
-    function scheduled_error!(actor, err, instance::AsyncScheduler_spawnedInstance)
-        put!(getchannel(instance), AsyncScheduler_spawnedErrorMessage(err))
-    end
-    
-    function scheduled_complete!(actor, instance::AsyncScheduler_spawnedInstance)
-        put!(getchannel(instance), AsyncScheduler_spawnedCompleteMessage())
-    end
 
 
 
 
-    import Base: show, similar
+    # import Base: show, similar
 
-    ##
+    # """
+    #     AsyncScheduler_spawned
     
-    struct SubjectListener{I}
-        schedulerinstance :: I
-        actor
-    end
+    # `AsyncScheduler_spawned` executes scheduled actions asynchronously and uses `Channel` object to order different actions on a single asynchronous task
+    # """
+    # struct AsyncScheduler_spawned{N} <: Rocket.AbstractScheduler end
     
-    Base.show(io::IO, ::SubjectListener) = print(io, "SubjectListener()")
+    # Base.show(io::IO, ::AsyncScheduler_spawned) = print(io, "AsyncScheduler_spawned()")
+    
+    # function AsyncScheduler_spawned(size::Int = typemax(Int))
+    #     return AsyncScheduler_spawned{size}()
+    # end
+    
+    # Base.similar(::AsyncScheduler_spawned{N}) where N = AsyncScheduler_spawned{N}()
+    
+    # makeinstance(::Type{D}, ::AsyncScheduler_spawned{N}) where { D, N } = AsyncScheduler_spawnedInstance{D}(N)
+    
+    # instancetype(::Type{D}, ::Type{<:AsyncScheduler_spawned}) where D = AsyncScheduler_spawnedInstance{D}
+    
+    # struct AsyncScheduler_spawnedDataMessage{D}
+    #     data :: D
+    # end
+    
+    # struct AsyncScheduler_spawnedErrorMessage
+    #     err
+    # end
+    
+    # struct AsyncScheduler_spawnedCompleteMessage end
+    
+    # const AsyncScheduler_spawnedMessage{D} = Union{AsyncScheduler_spawnedDataMessage{D}, AsyncScheduler_spawnedErrorMessage, AsyncScheduler_spawnedCompleteMessage}
+    
+    # mutable struct AsyncScheduler_spawnedInstance{D}
+    #     channel        :: Channel{AsyncScheduler_spawnedMessage{D}}
+    #     isunsubscribed :: Bool
+    #     subscription   :: Teardown
+    
+    #     AsyncScheduler_spawnedInstance{D}(size::Int = typemax(Int)) where D = begin
+    #         return new(Channel{AsyncScheduler_spawnedMessage{D}}(size, spawn=true), false, voidTeardown)
+    #     end
+    # end
+    
+    # isunsubscribed(instance::AsyncScheduler_spawnedInstance) = instance.isunsubscribed
+    # getchannel(instance::AsyncScheduler_spawnedInstance) = instance.channel
+    
+    # function dispose(instance::AsyncScheduler_spawnedInstance)
+    #     if !isunsubscribed(instance)
+    #         instance.isunsubscribed = true
+    #         close(instance.channel)
+    #         @async begin
+    #             unsubscribe!(instance.subscription)
+    #         end
+    #     end
+    # end
+    
+    # function __process_channeled_message(instance::AsyncScheduler_spawnedInstance{D}, message::AsyncScheduler_spawnedDataMessage{D}, actor) where D
+    #     on_next!(actor, message.data)
+    # end
+    
+    # function __process_channeled_message(instance::AsyncScheduler_spawnedInstance, message::AsyncScheduler_spawnedErrorMessage, actor)
+    #     on_error!(actor, message.err)
+    #     dispose(instance)
+    # end
+    
+    # function __process_channeled_message(instance::AsyncScheduler_spawnedInstance, message::AsyncScheduler_spawnedCompleteMessage, actor)
+    #     on_complete!(actor)
+    #     dispose(instance)
+    # end
+    
+    # struct AsyncScheduler_spawnedSubscription{ H <: AsyncScheduler_spawnedInstance } <: Teardown
+    #     instance :: H
+    # end
+    
+    # Base.show(io::IO, ::AsyncScheduler_spawnedSubscription) = print(io, "AsyncScheduler_spawnedSubscription()")
+    
+    # as_teardown(::Type{ <: AsyncScheduler_spawnedSubscription}) = UnsubscribableTeardownLogic()
+    
+    # function on_unsubscribe!(subscription::AsyncScheduler_spawnedSubscription)
+    #     dispose(subscription.instance)
+    #     return nothing
+    # end
+    
+    # function scheduled_subscription!(source, actor, instance::AsyncScheduler_spawnedInstance)
+    #     subscription = AsyncScheduler_spawnedSubscription(instance)
+    
+    #     channeling_task = @async begin
+    #         while !isunsubscribed(instance)
+    #             message = take!(getchannel(instance))
+    #             if !isunsubscribed(instance)
+    #                 __process_channeled_message(instance, message, actor)
+    #             end
+    #         end
+    #     end
+    
+    #     subscription_task = @async begin
+    #         if !isunsubscribed(instance)
+    #             tmp = on_subscribe!(source, actor, instance)
+    #             if !isunsubscribed(instance)
+    #                 subscription.instance.subscription = tmp
+    #             else
+    #                 unsubscribe!(tmp)
+    #             end
+    #         end
+    #     end
+    
+    #     bind(getchannel(instance), channeling_task)
+    
+    #     return subscription
+    # end
+    
+    # function scheduled_next!(actor, value::D, instance::AsyncScheduler_spawnedInstance{D}) where { D }
+    #     put!(getchannel(instance), AsyncScheduler_spawnedDataMessage{D}(value))
+    # end
+    
+    # function scheduled_error!(actor, err, instance::AsyncScheduler_spawnedInstance)
+    #     put!(getchannel(instance), AsyncScheduler_spawnedErrorMessage(err))
+    # end
+    
+    # function scheduled_complete!(actor, instance::AsyncScheduler_spawnedInstance)
+    #     put!(getchannel(instance), AsyncScheduler_spawnedCompleteMessage())
+    # end
+
+
+
+
+    # import Base: show, similar
+
+    # ##
+    
+    # struct SubjectListener{I}
+    #     schedulerinstance :: I
+    #     actor
+    # end
+    
+    # Base.show(io::IO, ::SubjectListener) = print(io, "SubjectListener()")
     
 
-    """
-        Subject(::Type{D}; scheduler::H = AsapScheduler())
+    # """
+    #     Subject(::Type{D}; scheduler::H = AsapScheduler())
     
-    A Subject is a special type of Observable that allows values to be multicasted to many Observers. Subjects are like EventEmitters.
-    Every Subject is an Observable and an Actor. You can subscribe to a Subject, and you can call `next!` to feed values as well as `error!` and `complete!`.
+    # A Subject is a special type of Observable that allows values to be multicasted to many Observers. Subjects are like EventEmitters.
+    # Every Subject is an Observable and an Actor. You can subscribe to a Subject, and you can call `next!` to feed values as well as `error!` and `complete!`.
     
-    Note: By convention, every actor subscribed to a Subject observable is not allowed to throw exceptions during `next!`, `error!` and `complete!` calls. 
-    Doing so would lead to undefined behaviour. Use `safe()` operator to bypass this rule. 
+    # Note: By convention, every actor subscribed to a Subject observable is not allowed to throw exceptions during `next!`, `error!` and `complete!` calls. 
+    # Doing so would lead to undefined behaviour. Use `safe()` operator to bypass this rule. 
     
-    See also: [`SubjectFactory`](@ref), [`ReplaySubject`](@ref), [`BehaviorSubject`](@ref), [`safe`](@ref)
-    """
-    mutable struct Subject{D, H, I} <: Rocket.AbstractSubject{D}
-        listeners   :: Rocket.List{SubjectListener{I}}
-        scheduler   :: H
-        isactive    :: Bool
-        iscompleted :: Bool
-        isfailed    :: Bool
-        lasterror   :: Any
+    # See also: [`SubjectFactory`](@ref), [`ReplaySubject`](@ref), [`BehaviorSubject`](@ref), [`safe`](@ref)
+    # """
+    # mutable struct Subject{D, H, I} <: Rocket.AbstractSubject{D}
+    #     listeners   :: Rocket.List{SubjectListener{I}}
+    #     scheduler   :: H
+    #     isactive    :: Bool
+    #     iscompleted :: Bool
+    #     isfailed    :: Bool
+    #     lasterror   :: Any
     
-        Subject{D, H, I}(scheduler::H) where { D, H <: Rocket.AbstractScheduler, I } = new(Rocket.List(SubjectListener{I}), scheduler, true, false, false, nothing)
-    end
+    #     Subject{D, H, I}(scheduler::H) where { D, H <: Rocket.AbstractScheduler, I } = new(Rocket.List(SubjectListener{I}), scheduler, true, false, false, nothing)
+    # end
     
-    function Subject(::Type{D}; scheduler::H = AsapScheduler()) where { D, H <: Rocket.AbstractScheduler }
-        return Subject{D, H, instancetype(D, H)}(scheduler)
-    end
+    # function Subject(::Type{D}; scheduler::H = AsapScheduler()) where { D, H <: Rocket.AbstractScheduler }
+    #     return Subject{D, H, instancetype(D, H)}(scheduler)
+    # end
     
 
-    ##
-    function convert(::Rocket.Subject, subj::Subject)
-        return subj
-    end    
+    # ##
+    # function convert(::Rocket.Subject, subj::Subject)
+    #     return subj
+    # end    
 
 
-    Base.show(io::IO, ::Subject{D, H}) where { D, H } = print(io, "Subject($D, $H)")
+    # Base.show(io::IO, ::Subject{D, H}) where { D, H } = print(io, "Subject($D, $H)")
     
-    Base.similar(subject::Subject{D, H}) where { D, H } = Subject(D; scheduler = similar(subject.scheduler))
+    # Base.similar(subject::Subject{D, H}) where { D, H } = Subject(D; scheduler = similar(subject.scheduler))
     
-    ##
+    # ##
     
-    isactive(subject::Subject)    = subject.isactive
-    iscompleted(subject::Subject) = subject.iscompleted
-    isfailed(subject::Subject)    = subject.isfailed
-    lasterror(subject::Subject)   = subject.lasterror
+    # isactive(subject::Subject)    = subject.isactive
+    # iscompleted(subject::Subject) = subject.iscompleted
+    # isfailed(subject::Subject)    = subject.isfailed
+    # lasterror(subject::Subject)   = subject.lasterror
     
-    setinactive!(subject::Subject)       = subject.isactive    = false
-    setcompleted!(subject::Subject)      = subject.iscompleted = true
-    setfailed!(subject::Subject)         = subject.isfailed    = true
-    setlasterror!(subject::Subject, err) = subject.lasterror   = err
+    # setinactive!(subject::Subject)       = subject.isactive    = false
+    # setcompleted!(subject::Subject)      = subject.iscompleted = true
+    # setfailed!(subject::Subject)         = subject.isfailed    = true
+    # setlasterror!(subject::Subject, err) = subject.lasterror   = err
     
-    ##
+    # ##
     
-    function on_next!(subject::Subject{D, H, I}, data::D) where { D, H, I }
-        for listener in subject.listeners
-            scheduled_next!(listener.actor, data, listener.schedulerinstance)
-        end
-    end
+    # function on_next!(subject::Subject{D, H, I}, data::D) where { D, H, I }
+    #     for listener in subject.listeners
+    #         scheduled_next!(listener.actor, data, listener.schedulerinstance)
+    #     end
+    # end
     
-    function on_error!(subject::Subject, err)
-        if isactive(subject)
-            setinactive!(subject)
-            setfailed!(subject)
-            setlasterror!(subject, err)
-            for listener in subject.listeners
-                scheduled_error!(listener.actor, err, listener.schedulerinstance)
-            end
-            empty!(subject.listeners)
-        end
-    end
+    # function on_error!(subject::Subject, err)
+    #     if isactive(subject)
+    #         setinactive!(subject)
+    #         setfailed!(subject)
+    #         setlasterror!(subject, err)
+    #         for listener in subject.listeners
+    #             scheduled_error!(listener.actor, err, listener.schedulerinstance)
+    #         end
+    #         empty!(subject.listeners)
+    #     end
+    # end
     
-    function on_complete!(subject::Subject)
-        if isactive(subject)
-            setinactive!(subject)
-            setcompleted!(subject)
-            for listener in subject.listeners
-                scheduled_complete!(listener.actor, listener.schedulerinstance)
-            end
-            empty!(subject.listeners)
-        end
-    end
+    # function on_complete!(subject::Subject)
+    #     if isactive(subject)
+    #         setinactive!(subject)
+    #         setcompleted!(subject)
+    #         for listener in subject.listeners
+    #             scheduled_complete!(listener.actor, listener.schedulerinstance)
+    #         end
+    #         empty!(subject.listeners)
+    #     end
+    # end
     
-    ##
+    # ##
     
-    function on_subscribe!(subject::Subject{D}, actor) where { D }
-        if isfailed(subject)
-            error!(actor, lasterror(subject))
-            return SubjectSubscription(nothing)
-        elseif iscompleted(subject)
-            complete!(actor)
-            return SubjectSubscription(nothing)
-        else
-            instance = makeinstance(D, subject.scheduler)
-            return scheduled_subscription!(subject, actor, instance)
-        end
-    end
+    # function on_subscribe!(subject::Subject{D}, actor) where { D }
+    #     if isfailed(subject)
+    #         error!(actor, lasterror(subject))
+    #         return SubjectSubscription(nothing)
+    #     elseif iscompleted(subject)
+    #         complete!(actor)
+    #         return SubjectSubscription(nothing)
+    #     else
+    #         instance = makeinstance(D, subject.scheduler)
+    #         return scheduled_subscription!(subject, actor, instance)
+    #     end
+    # end
     
-    function on_subscribe!(subject::Subject, actor, instance)
-        listener      = SubjectListener(instance, actor)
-        listener_node = pushnode!(subject.listeners, listener)
-        return SubjectSubscription(listener_node)
-    end
+    # function on_subscribe!(subject::Subject, actor, instance)
+    #     listener      = SubjectListener(instance, actor)
+    #     listener_node = pushnode!(subject.listeners, listener)
+    #     return SubjectSubscription(listener_node)
+    # end
     
-    ##
+    # ##
     
-    mutable struct SubjectSubscription <: Rocket.Teardown
-        listener_node :: Union{Nothing, Rocket.ListNode}
-    end
+    # mutable struct SubjectSubscription <: Rocket.Teardown
+    #     listener_node :: Union{Nothing, Rocket.ListNode}
+    # end
     
-    as_teardown(::Type{ <: SubjectSubscription }) = UnsubscribableTeardownLogic()
+    # as_teardown(::Type{ <: SubjectSubscription }) = UnsubscribableTeardownLogic()
     
-    function on_unsubscribe!(subscription::SubjectSubscription)
-        if subscription.listener_node !== nothing
-            remove(subscription.listener_node)
-            subscription.listener_node = nothing
-        end
-        return nothing
-    end
+    # function on_unsubscribe!(subscription::SubjectSubscription)
+    #     if subscription.listener_node !== nothing
+    #         remove(subscription.listener_node)
+    #         subscription.listener_node = nothing
+    #     end
+    #     return nothing
+    # end
     
-    Base.show(io::IO, ::SubjectSubscription) = print(io, "SubjectSubscription()")
+    # Base.show(io::IO, ::SubjectSubscription) = print(io, "SubjectSubscription()")
     
-    ##
+    # ##
     
-    """
-        SubjectFactory(scheduler::H) where { H <: Rocket.AbstractScheduler }
+    # """
+    #     SubjectFactory(scheduler::H) where { H <: Rocket.AbstractScheduler }
     
-    A base subject factory that creates an instance of Subject with specified scheduler.
+    # A base subject factory that creates an instance of Subject with specified scheduler.
     
-    See also: [`AbstractSubjectFactory`](@ref), [`Subject`](@ref)
-    """
-    struct SubjectFactory{ H <: Rocket.Rocket.AbstractScheduler } <: AbstractSubjectFactory
-        scheduler :: H
-    end
+    # See also: [`AbstractSubjectFactory`](@ref), [`Subject`](@ref)
+    # """
+    # struct SubjectFactory{ H <: Rocket.Rocket.AbstractScheduler } <: AbstractSubjectFactory
+    #     scheduler :: H
+    # end
     
-    create_subject(::Type{L}, factory::SubjectFactory) where L = Subject(L, scheduler = similar(factory.scheduler))
+    # create_subject(::Type{L}, factory::SubjectFactory) where L = Subject(L, scheduler = similar(factory.scheduler))
     
-    Base.show(io::IO, ::SubjectFactory{H}) where H = print(io, "SubjectFactory($H)")
+    # Base.show(io::IO, ::SubjectFactory{H}) where H = print(io, "SubjectFactory($H)")
     
 
 
