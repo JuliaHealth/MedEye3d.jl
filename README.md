@@ -262,6 +262,7 @@ F2 - will display window for soft tissues Int32(400),Int32(-200)
 
 F3 - will display wide window for lung viewing  Int32(0),Int32(-1000)
 
+Before changing the window activate first the layer you want to modify - for example use Alt+1
 F4,  F5 sets minimum (F4) and maximum (KEY_F5) value for display (with combination of + and minus signs - to increase or decrease given treshold) - 
 
 In case of continuus colors it will clamp values - so all above max will be equaled to max ; and min if smallert than min
