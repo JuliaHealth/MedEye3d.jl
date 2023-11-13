@@ -245,12 +245,6 @@ tab + number - sets the number that will be  used as an input to masks modified 
   when tab minus (and then no number) will be pressed it will increase stroke width
     
     
-shift + numberA + "m"(m letter) +numberB  - display diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B invisible
-
-
-ctrl + numberA + "-"(minus sign) +numberB  - stops displaying diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B visible
-
-
 space + 1 or 2 or 3 - change the plane of view (transverse, coronal, sagittal)
 
 
