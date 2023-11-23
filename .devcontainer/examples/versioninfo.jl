@@ -1,0 +1,2 @@
+using CUDA
+CUDA.versioninfo()

@@ -34,7 +34,6 @@ void main()
 
 }
 """
-# print("gggggggggg  vsh $(vsh) \n  gslString $(gslString)")
 
 return createShader(vsh, GL_VERTEX_SHADER)
 end
@@ -63,10 +62,8 @@ function createFragmentShader(gslString::String
 $(gslString)
 
 $( createCustomFramgentShader(listOfTexturesToCreate,maskToSubtractFrom,maskWeAreSubtracting))  
-    """
+"""
 
-    print("fffff fffff $(fsh)")
-    print("************")
     for line in eachline(IOBuffer(fsh))
       println(line)
     end

@@ -1,0 +1,73 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the README at:
+// https://github.com/microsoft/vscode-dev-containers/tree/v0.234.0/containers/python-3
+{
+	"name": "forPicaiDocker",
+	"build": {
+		"dockerfile": "Dockerfile",
+		"context": "",
+		"args": { 
+			// Update 'VARIANT' to pick a Python version: 3, 3.10, 3.9, 3.8, 3.7, 3.6
+			// Append -bullseye or -buster to pin to an OS version.
+			// Use -bullseye variants on local on arm64/Apple Silicon.
+			//"VARIANT": "3.8",
+			// Options
+			//"NODE_VERSION": "none"
+		}
+	},
+
+	// Set *default* container specific settings.json values on container create.
+	"settings": { 
+		//"python.defaultInterpreterPath": "/usr/lib/python3.8"
+		// "python.linting.enabled": true,
+		// "python.linting.pylintEnabled": true,
+		// "python.formatting.autopep8Path": "/usr/local/py-utils/bin/autopep8",
+		// "python.formatting.blackPath": "/usr/local/py-utils/bin/black",
+		// "python.formatting.yapfPath": "/usr/local/py-utils/bin/yapf",
+		// "python.linting.banditPath": "/usr/local/py-utils/bin/bandit",
+		// "python.linting.flake8Path": "/usr/local/py-utils/bin/flake8",
+		// "python.linting.mypyPath": "/usr/local/py-utils/bin/mypy",
+		// "python.linting.pycodestylePath": "/usr/local/py-utils/bin/pycodestyle",
+		// "python.linting.pydocstylePath": "/usr/local/py-utils/bin/pydocstyle",
+		// "python.linting.pylintPath": "/usr/local/py-utils/bin/pylint"
+	},
+	"runArgs": [
+		"--init", "--gpus", "all"
+        ,"--ipc", "host",
+        "--net", "host", 
+		"--privileged" ,
+        "-e", "DISPLAY=${env:DISPLAY}",
+        "-v", "/tmp/.X11-unix:/tmp/.X11-unix"
+		],
+	// Add the IDs of extensions you want installed when the container is created.
+	"extensions": [
+		"ms-python.python",
+		"julialang.language-julia",
+		"ms-toolsai.jupyter",
+		"ms-azuretools.vscode-docker",
+		"github.copilot",
+        "github.copilot-chat",
+        "github.copilot-labs"
+		// "ms-python.vscode-pylance"
+	],
+	"mounts": [
+		"source=/media/jm/hddData1/datasets/Task09_Spleen,target=/home/data,type=bind,consistency=cached"
+	  ],
+
+	// Use 'forwardPorts' to make a list of ports inside the container available locally.
+	// "forwardPorts": [],
+
+	// Use 'postCreateCommand' to run commands after the container is created.
+	// "postCreateCommand": "pip3 install --user -r requirements.txt",
+
+	// Comment out to connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
+	//"remoteUser": "vscode",
+	"features": {
+		//"git": "latest",
+		// "git-lfs": "latest",
+		 //"github-cli": "latest",
+		 //from https://github.com/cli/cli/issues/6175
+		 "ghcr.io/devcontainers/features/github-cli:1": {}//"jupyterlab": "latest"
+	}
+	// "postStartCommand": "/docker-entrypoint.sh"
+
+}

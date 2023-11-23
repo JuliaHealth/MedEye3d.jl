@@ -12,7 +12,8 @@ so we modify the data that is the basis of the mouse interaction mask  and we pa
 """
 module ReactOnMouseClickAndDrag
 using Logging, Parameters, Rocket, Setfield, GLFW, ModernGL, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils
-using Dates, Parameters, ..DataStructs, ..StructsManag
+using Dates, Parameters, ..DataStructs, ..StructsManag,Logging, Base.Threads
+import Logging, Base.Threads
 export registerMouseClickFunctions
 export reactToMouseDrag
 
@@ -115,27 +116,34 @@ function registerMouseClickFunctions(window::GLFW.Window, stopListening::Base.Th
 end #registerMouseScrollFunctions
 
 
+
+mouseCoords_channel=Base.Channel{MouseStruct}(100)
+
+
 """
-we use mouse coordinate to modify the texture that is currently active for modifications 
-    - we take information about texture currently active for modifications from variables stored in actor
-    from texture specification we take also its id and its properties ...
+used when we want to save some manual modifications
 """
-function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any,ActorWithOpenGlObjects})
-    obj = actor.actor.mainForDisplayObjects
-    obj.stopListening[] = true #free GLFW context
-    actor.actor.isBusy[] = true# mark that OpenGL is busy
-    textureList = actor.actor.textureToModifyVec
-    mouseCoords = mousestr.lastCoordinates
+# function react_to_draw(textureList,actor,mouseCoords_channel)
+function react_to_draw(textureList,actor,obj)
+    # sleep(0.1);
+    # @info "react_to_draw after sleep" isready(mouseCoords_channel)
+    texture = textureList[1]
+    calcDim = actor.actor.calcDimsStruct
 
-    if (!isempty(textureList) && mousestr.isLeftButtonDown && textureList[1].isEditable)
-        texture = textureList[1]
-        calcDim = actor.actor.calcDimsStruct
+    # mouseCoords=take!(mouseCoords_channel).lastCoordinates
+    # mappedCoords=translateMouseToTexture(texture.strokeWidth, mouseCoords, actor.actor.calcDimsStruct)
+    # # two dimensional coordinates on plane of intrest (current slice)
+    mappedCoords=Vector{CartesianIndex{2}}()
+    is_sth_in=false
+    while(isready(mouseCoords_channel) )
+        is_sth_in=true
+        mouseCoords=take!(mouseCoords_channel).lastCoordinates
+        append!( mappedCoords,translateMouseToTexture(texture.strokeWidth, mouseCoords, actor.actor.calcDimsStruct))
+    end
+    # @info "react_to_draw after channel" mappedCoords
 
-        # two dimensional coordinates on plane of intrest (current slice)
-        mappedCoords = translateMouseToTexture(texture.strokeWidth, mouseCoords, actor.actor.calcDimsStruct)
-
-
-
+    # is_sth_in=true
+    if(is_sth_in)
         twoDimDat = actor.actor.currentlyDispDat |> # accessing currently displayed data
                     (singSl) -> singSl.listOfDataAndImageNames[singSl.nameIndexes[texture.name]] #accessing the texture data we want to modify
 
@@ -163,6 +171,30 @@ function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any,ActorWithO
             (sliceDat) -> updateTexture(twoDimDat.type, sliceDat.dat, texture, 0, 0, calcDim.imageTextureWidth, calcDim.imageTextureHeight)
             basicRender(obj.window)
         end)
+
+    end#if    
+    
+end#react_to_draw    
+
+
+"""
+we use mouse coordinate to modify the texture that is currently active for modifications 
+    - we take information about texture currently active for modifications from variables stored in actor
+    from texture specification we take also its id and its properties ...
+"""
+function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any,ActorWithOpenGlObjects})
+    obj = actor.actor.mainForDisplayObjects
+    obj.stopListening[] = true #free GLFW context
+    actor.actor.isBusy[] = true# mark that OpenGL is busy
+    textureList = actor.actor.textureToModifyVec
+    mouseCoords = mousestr.lastCoordinates
+
+    if (!isempty(textureList) && mousestr.isLeftButtonDown && textureList[1].isEditable)
+        put!(mouseCoords_channel, mousestr)
+
+        # @spawn :interactive react_to_draw(textureList,actor,mouseCoords)
+        @spawn :interactive react_to_draw(textureList,actor,obj)
+
 
     elseif (mousestr.isRightButtonDown)
         #we save data about right click position in order to change the slicing plane accordingly

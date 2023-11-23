@@ -1,6 +1,7 @@
 module PrepareWindow
 
 export displayAll,createAndInitShaderProgram
+using Base.Threads
 
 using ModernGL, GeometryTypes, GLFW
 using  ..PrepareWindowHelpers
@@ -19,6 +20,13 @@ preparing all for displaying the images and responding to mouse and keyboard inp
 """
 function displayAll(listOfTexturesToCreate::Vector{TextureSpec}
 					,calcDimsStruct::CalcDimsStruct)
+
+	if(nthreads(:interactive)==0)
+		@error " MedEye3D above version 0.5.6 requires setting of the interactive Thread (feature available from Julia 1.9 ) one can set it in linux by enviromental variable export JULIA_NUM_THREADS=3,1 where 1 after the coma is the interactive thread and 3 is the number of the other threads available on your machine; or start julia like this julia --threads 3,1; you can also use the docker container prepared by the author from  https://github.com/jakubMitura14/MedPipe3DTutorial. . More about interactive THreads on https://docs.julialang.org/en/v1/manual/multi-threading/"
+		throw(error())
+
+	end #if    
+	
 	# atomic variable that is enabling stopping async loop of event listening in order to enable othe actions with GLFW context
 	stopListening = Threads.Atomic{Bool}(0)
 	stopListening[]=false
