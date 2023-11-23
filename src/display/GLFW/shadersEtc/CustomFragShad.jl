@@ -45,7 +45,6 @@ continuusColorMasks =   filter(it->it.isContinuusMask,listOfTexturesToCreate ) #
  res =  """
 $(initialStrings())
 
-
 $(addUniformsForNuclearAndSubtr())
 
 $(addMainTextureStrings(mainTexture))

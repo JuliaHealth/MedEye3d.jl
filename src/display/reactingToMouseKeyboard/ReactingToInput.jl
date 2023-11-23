@@ -2,7 +2,7 @@
 module ReactingToInput
 using Rocket, GLFW,ModernGL,Setfield,  ..ReactToScroll,  ..ForDisplayStructs
 using  ..TextureManag,DataTypesBasic,  ..ReactOnMouseClickAndDrag,  ..ReactOnKeyboard,  ..DataStructs,  ..StructsManag,  ..DisplayWords
-using ..MaskDiffrence, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane
+using ..MaskDiffrence, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane, Base.Threads
 export subscribeGLFWtoActor
 
 
@@ -137,29 +137,40 @@ function updateSingleImagesDisplayedSetUp(singleSliceDat::SingleSliceDat ,actor:
 end #updateSingleImagesDisplayed
 
 
+# function spawn_wrapper(fun,data,actor)
+# return @spawn :interactive fun(data,actor)
+#     end
 
 """
 configuring actor using multiple dispatch mechanism in order to connect input to proper functions; this is not 
 encapsulated by a function becouse this is configuration of Rocket and needs to be global
 """
 
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Int64) = reactToScroll(data,actor )
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data:: forDisplayObjects) = setUpMainDisplay(data,actor)
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data:: ForWordsDispStruct) = setUpWordsDisplay(data,actor)
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::CalcDimsStruct) = setUpCalcDimsStruct(data,actor)
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::valueForMasToSetStruct) = setUpvalueForMasToSet(data,actor)
 
 
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::FullScrollableDat) = setUpForScrollData(data,actor)
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::SingleSliceDat) = updateSingleImagesDisplayedSetUp(data,actor)
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::MouseStruct) = reactToMouseDrag(data,actor)
-Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::KeyboardStruct) = reactToKeyboard(data,actor)
-
+# Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Int64) =  data,actor -> spawn_wrapper(reactToScroll,data,actor)
+# Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data:: forDisplayObjects) =  data,actor ->setUpMainDisplay(data,actor)
+# Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data:: ForWordsDispStruct) =  data,actor ->setUpWordsDisplay(data,actor)
+# Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::CalcDimsStruct) = data,actor -> setUpCalcDimsStruct(data,actor)
+# Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::valueForMasToSetStruct) =  data,actor -> spawn_wrapper(setUpvalueForMasToSet,data,actor)
+# Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::FullScrollableDat) =  data,actor -> spawn_wrapper(setUpForScrollData,data,actor)
+# Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::SingleSliceDat) =  data,actor -> spawn_wrapper(updateSingleImagesDisplayedSetUp,data,actor)
+# Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::MouseStruct) =  data,actor -> spawn_wrapper(reactToMouseDrag,data,actor)
+# Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::KeyboardStruct) =  data,actor -> spawn_wrapper(reactToKeyboard,data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::Int64) =  reactToScroll(data,actor )
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data:: forDisplayObjects) =  setUpMainDisplay(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data:: ForWordsDispStruct) =  setUpWordsDisplay(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::CalcDimsStruct) =  setUpCalcDimsStruct(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::valueForMasToSetStruct) =  setUpvalueForMasToSet(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::FullScrollableDat) =  setUpForScrollData(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::SingleSliceDat) =  updateSingleImagesDisplayedSetUp(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::MouseStruct) =  reactToMouseDrag(data,actor)
+Rocket.on_next!(actor::SyncActor{Any, ActorWithOpenGlObjects}, data::KeyboardStruct) =  reactToKeyboard(data,actor)
 Rocket.on_error!(actor::SyncActor{Any, ActorWithOpenGlObjects}, err)      = error(err)
 Rocket.on_complete!(actor::SyncActor{Any, ActorWithOpenGlObjects})        = ""
 
 
-
+# @spawn :interactive
 
 """
 when GLFW context is ready we need to use this  function in order to register GLFW events to Rocket actor - we use subscription for this

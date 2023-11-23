@@ -3,9 +3,10 @@ stores functions needed to create bind and update OpenGl textues
 """
 module TextureManag
 using Base: Float16
-using  ModernGL ,   ..OpenGLDisplayUtils,  ..ForDisplayStructs
+using  ModernGL ,   ..OpenGLDisplayUtils,  ..ForDisplayStructs,Base.Threads
 using   ..Uniforms, Logging,Setfield, Logging,  ..CustomFragShad,  ..DataStructs,  ..DisplayWords
 export activateTextures,addTextToTexture,initializeTextures,createTexture, getProperGL_TEXTURE,updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
+using Base.Threads
 
 """
 uploading data to given texture; of given types associated - specified in TextureSpec
@@ -31,17 +32,18 @@ function updateTexture(::Type{Tt}
                     ,heightt::Int32) where{Tt}
 
 
+    @spawn :interactive begin
+        glActiveTexture(textSpec.actTextrureNumb); # active proper texture unit before binding
+        glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
+    
+        if((parameter_type(textSpec)== Float16) || (parameter_type(textSpec)== Float32))
+            glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED, textSpec.OpGlType, collect(data))
+        else
+            glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, collect(data))
+        # glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, reduce(vcat,data))
 
-    glActiveTexture(textSpec.actTextrureNumb); # active proper texture unit before binding
-    glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
-   
-    if((parameter_type(textSpec)== Float16) || (parameter_type(textSpec)== Float32))
-        glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED, textSpec.OpGlType, collect(data))
-    else
-	    glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, collect(data))
-	   # glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, reduce(vcat,data))
-
-    end  
+        end  
+    end
     
 
    
@@ -149,6 +151,15 @@ singleSliceDat - holds data we want to use for update
 forDisplayObjects - stores all needed constants that holds reference to GLFW and OpenGL
 """
 function updateImagesDisplayed(singleSliceDat::SingleSliceDat
+                            ,forDisplayConstants::forDisplayObjects
+                            ,wordsDispObj::ForWordsDispStruct
+                            ,calcDimStruct::CalcDimsStruct
+                            ,valueForMaskToSett::valueForMasToSetStruct )
+
+                            @spawn :interactive updateImagesDisplayed_inner(singleSliceDat,forDisplayConstants,wordsDispObj,calcDimStruct,valueForMaskToSett)
+end
+
+function updateImagesDisplayed_inner(singleSliceDat::SingleSliceDat
                             ,forDisplayConstants::forDisplayObjects
                             ,wordsDispObj::ForWordsDispStruct
                             ,calcDimStruct::CalcDimsStruct

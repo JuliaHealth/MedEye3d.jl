@@ -4,6 +4,8 @@ for case when we want to subtract two masks
 """
 module MaskDiffrence
 using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow,   ..DataStructs , Rocket, GLFW,Dictionaries,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils,  ..Uniforms, Match, Parameters,DataTypesBasic
+using Logging
+import ..Uniforms
 export undoDiffrence,displayMaskDiffrence
 """
 for case when we want to subtract two masks
@@ -18,7 +20,8 @@ function processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec{T}}, Ide
         addToforUndoVector(actor, ()->displayMaskDiffrence(maskA,maskB,actor ) )
 
     elseif(keyInfo.isShiftPressed)  # when we want to display diffrence
-        displayMaskDiffrence(maskA,maskB,actor )
+        @info "diffffrence"
+        @info displayMaskDiffrence(maskA,maskB,actor )
         addToforUndoVector(actor, ()-> undoDiffrence(actor,maskA,maskB ))
 
     end #if
@@ -29,7 +32,7 @@ end#processKeysInfo
 for case  we want to undo subtracting two masks
 """
 function undoDiffrence(actor::SyncActor{Any, ActorWithOpenGlObjects},maskA,maskB )
-    @uniforms! begin
+    Uniforms.@uniforms! begin
     actor.actor.mainForDisplayObjects.mainImageUniforms.isMaskDiffrenceVis:=0
            end
 setTextureVisibility(true,maskA.uniforms )

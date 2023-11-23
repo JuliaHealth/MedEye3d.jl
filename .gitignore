@@ -414,3 +414,5 @@ $RECYCLE.BIN/
 
 ## Acknowledgements
 # Many thanks to `https://gitignore.io/`, written and maintained by Joe Blau, which contributed much material to this gitignore file.
+docs/src/volume-0.nii.gz
+docs/src/ScalarVolume_0/
