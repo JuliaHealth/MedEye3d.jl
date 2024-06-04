@@ -412,32 +412,171 @@ When all will be ok and you will scroll up  you should see sth like below
 
 
 
-
-
-```@autodocs
-Modules = [NuclearMedEye,NuclearMedEye.SegmentationDisplay
-    ,NuclearMedEye.ReactingToInput
-    ,NuclearMedEye.ReactOnKeyboard
-    ,NuclearMedEye.ReactOnMouseClickAndDrag
-    ,NuclearMedEye.ReactToScroll
-    ,NuclearMedEye.PrepareWindow
-    ,NuclearMedEye.TextureManag
-    ,NuclearMedEye.DisplayWords
-    ,NuclearMedEye.Uniforms
-    ,NuclearMedEye.ShadersAndVerticiesForText
-    ,NuclearMedEye.ShadersAndVerticies
-    ,NuclearMedEye.OpenGLDisplayUtils
-    ,NuclearMedEye.CustomFragShad
-    ,NuclearMedEye.PrepareWindowHelpers
-    ,NuclearMedEye.StructsManag
-    ,NuclearMedEye.ForDisplayStructs
-    ,NuclearMedEye.DataStructs
-    ,NuclearMedEye.BasicStructs
-    ,NuclearMedEye.ModernGlUtil
-    ,NuclearMedEye.MaskDiffrence
-    ,NuclearMedEye.KeyboardVisibility
-    ,NuclearMedEye.OtherKeyboardActions
-    ,NuclearMedEye.WindowControll
-    ,NuclearMedEye.ChangePlane]
-Order   = [:module,:function, :type,:constant]
+```@docs
+MedEye3d.WindowControll.setTextureWindow
+MedEye3d.CustomFragShad.addColorUniform
+MedEye3d.WindowControll.highTreshDown
+MedEye3d.ReactToScroll.registerMouseScrollFunctions
+MedEye3d.DisplayWords.activateForTextDisp
+MedEye3d.MaskDiffrence.displayMaskDiffrence
+MedEye3d.SegmentationDisplay.updateSingleImagesDisplayed
+MedEye3d.CustomFragShad.addUniformsForNuclearAndSubtr
+MedEye3d.ChangePlane
+MedEye3d.SegmentationDisplay
+MedEye3d.MaskDiffrence.processKeysInfo
+MedEye3d.DataStructs.CalcDimsStruct
+MedEye3d.CustomFragShad.getNuclearMaskFunctions
+MedEye3d.ReactOnMouseClickAndDrag.registerMouseClickFunctions
+MedEye3d.WindowControll.maskContrUp
+MedEye3d.ReactingToInput.subscribeGLFWtoActor
+MedEye3d.visualizationFromHdf5.loadFromHdf5Prim
+MedEye3d.ReactOnMouseClickAndDrag.reactToMouseDrag
+MedEye3d.CustomFragShad.addMasksStrings
+MedEye3d.StructsManag
+MedEye3d.ReactToScroll.reactToScroll
+MedEye3d.TextureManag.updateImagesDisplayed
+MedEye3d.TextureManag.addTextToTexture
+MedEye3d.Uniforms.@g_str
+MedEye3d.WindowControll.processKeysInfo
+MedEye3d.OtherKeyboardActions.processKeysInfo
+MedEye3d.Uniforms.setTextureVisibility
+MedEye3d.DataStructs.TwoDimRawDat
+MedEye3d.visualizationFromHdf5.writeGroupAttribute
+MedEye3d.WindowControll
+MedEye3d.DataStructs.DataToScrollDims
+MedEye3d.CustomFragShad
+MedEye3d.ShadersAndVerticies.createVertexShader
+MedEye3d.visualizationFromHdf5.getSomeColor
+MedEye3d.ForDisplayStructs.TextureUniforms
+MedEye3d.ReactingToInput.setUpvalueForMasToSet
+MedEye3d.ForDisplayStructs.ScrollCallbackSubscribable
+MedEye3d.ForDisplayStructs.MainImageUniforms
+MedEye3d.TextureManag.updateTexture
+MedEye3d.TextureManag
+MedEye3d.ReactOnKeyboard.registerKeyboardFunctions
+MedEye3d.DataStructs.ThreeDimRawDat
+MedEye3d.distinctColorsSaved.listOfColors
+MedEye3d.ShadersAndVerticies.getShaderFileText
+MedEye3d.Uniforms.@uniforms
+MedEye3d.DisplayWords.getTextForCurrentSlice
+MedEye3d.ReactOnKeyboard.findTextureBasedOnNumb
+MedEye3d.SegmentationDisplay.passDataForScrolling
+MedEye3d.ReactOnKeyboard.shouldBeExecuted
+MedEye3d.visualizationFromHdf5.getGroupOrCreate
+MedEye3d.PrepareWindowHelpers.encodeDataFromDataBuffer
+MedEye3d.WindowControll.lowTreshDown
+MedEye3d.ReactingToInput.setUpCalcDimsStruct
+MedEye3d.ReactingToInput.setUpForScrollData
+MedEye3d.CustomFragShad.initialStrings
+MedEye3d.CustomFragShad.getMasksSubtractionFunction
+MedEye3d.visualizationFromHdf5.openHDF5
+MedEye3d.DataStructs
+MedEye3d.PrepareWindowHelpers
+MedEye3d.DisplayWords.createTextureForWords
+MedEye3d.WindowControll.primaryModificationsOfWindContr
+MedEye3d.ForDisplayStructs.MaskTextureUniforms
+MedEye3d.DataStructs.SingleSliceDat
+MedEye3d.SegmentationDisplay.prepareForDispStruct
+MedEye3d.KeyboardVisibility
+MedEye3d.PrepareWindowHelpers.initializeWindow
+MedEye3d.visualizationFromHdf5.giveStringsFromResultMetrics
+MedEye3d.ForDisplayStructs.forDisplayObjects
+MedEye3d.ReactOnMouseClickAndDrag
+MedEye3d.MaskDiffrence
+MedEye3d.PrepareWindowHelpers.createElementBuffer
+MedEye3d.DataStructs.FullScrollableDat
+MedEye3d.KeyboardVisibility.processKeysInfo
+MedEye3d.ReactOnMouseClickAndDrag.getNewY
+MedEye3d.Uniforms.getuniform
+MedEye3d.MaskDiffrence.undoDiffrence
+MedEye3d.DisplayWords.bindAndActivateForText
+MedEye3d.CustomFragShad.mainFuncString
+MedEye3d.TextureManag.setuniforms
+MedEye3d.distinctColorsSaved.longColorList
+MedEye3d.BasicStructs.ImageConstants
+MedEye3d.ReactingToInput.updateSingleImagesDisplayedSetUp
+MedEye3d.TextureManag.setProperOpenGlTypes
+MedEye3d.ReactOnMouseClickAndDrag.translateMouseToTexture
+MedEye3d.ModernGlUtil
+MedEye3d.DisplayWords.textLinesFromStrings
+MedEye3d.WindowControll.lowTreshUp
+MedEye3d.DataStructs.RawDataToDisp
+MedEye3d.CustomFragShad.mainVisContrib
+MedEye3d.TextureManag.getProperGL_TEXTURE
+MedEye3d.KeyboardMouseHelper
+MedEye3d.ReactingToInput.setUpMainDisplay
+MedEye3d.PrepareWindow.createAndInitShaderProgram
+MedEye3d.OtherKeyboardActions.processKeysInfoUndo
+MedEye3d.CustomFragShad.addSamplerStr
+MedEye3d.CustomFragShad.setMaskInfluence
+MedEye3d.DisplayWords.renderSingleLineOfText
+MedEye3d.PrepareWindowHelpers.controllWindowInput
+MedEye3d.CustomFragShad.chooseColorFonuction
+MedEye3d.DataStructs.valueForMasToSetStruct
+MedEye3d.BasicStructs.ResultMetrics
+MedEye3d.ForDisplayStructs.MouseStruct
+MedEye3d.CustomFragShad.createCustomFramgentShader
+MedEye3d.CustomFragShad.getmainImageR
+MedEye3d.DataStructs.AnnotationStruct
+MedEye3d.PrepareWindow.displayAll
+MedEye3d.KeyboardVisibility.setVisAndRender
+MedEye3d.ForDisplayStructs.TextureSpec
+MedEye3d.WindowControll.highTreshUp
+MedEye3d.ShadersAndVerticiesForText.createVertexShader
+MedEye3d.Uniforms.coontrolMinMaxUniformVals
+MedEye3d.TextureManag.assignUniformsAndTypesToMasks
+MedEye3d.KeyboardMouseHelper.processKeysInfo
+MedEye3d.CustomFragShad.divideTexteuresToMainAndRest
+MedEye3d.BasicStructs.ConfigurtationStruct
+MedEye3d.ReactOnMouseClickAndDrag.addStrokeWidth
+MedEye3d.DataStructs.WindowControlStruct
+MedEye3d.DisplayWords
+MedEye3d.WindowControll.getNewTresholdChangeValue
+MedEye3d.StructsManag.modifySliceFull!
+MedEye3d.Uniforms.changeTextureContribution
+MedEye3d.ForDisplayStructs.KeyboardStruct
+MedEye3d.ForDisplayStructs.MouseCallbackSubscribable
+MedEye3d.ForDisplayStructs.ForWordsDispStruct
+MedEye3d.ForDisplayStructs.getLocationDict
+MedEye3d.ForDisplayStructs.Mask
+MedEye3d.OtherKeyboardActions
+MedEye3d.ReactToScroll
+MedEye3d.Uniforms
+MedEye3d.CustomFragShad.addTypeStr
+MedEye3d.TextureManag.activateTextures
+MedEye3d.Uniforms.uniform!
+MedEye3d.visualizationFromHdf5.permuteAndReverse
+MedEye3d.visualizationFromHdf5.getDefaultTextureSpec
+MedEye3d.ReactingToInput.setUpWordsDisplay
+MedEye3d.SegmentationDisplay.coordinateDisplay
+MedEye3d.DataStructs.DataToDisp
+MedEye3d.DataStructs.SimpleLineTextStruct
+MedEye3d.WindowControll.dispatchToFunctions
+MedEye3d.CustomFragShad.addMainTextureStrings
+MedEye3d.ReactOnKeyboard.parseString
+MedEye3d.DisplayWords.reactivateMainObj
+MedEye3d.visualizationFromHdf5.refresh
+MedEye3d.Uniforms.isMaskDiffViss
+MedEye3d.ReactOnKeyboard.reactToKeyboard
+MedEye3d.PrepareWindowHelpers.glVertexAttribSetting
+MedEye3d.Uniforms.setCTWindow
+MedEye3d.ShadersAndVerticiesForText.createFragmentShader
+MedEye3d.ReactOnMouseClickAndDrag.getNewX
+MedEye3d.SegmentationDisplay.cleanUp
+MedEye3d.ShadersAndVerticiesForText.getWordsVerticies
+MedEye3d.ShadersAndVerticies.createFragmentShader
+MedEye3d.WindowControll.setmainWindow
+MedEye3d.PrepareWindowHelpers.createVertexBuffer
+MedEye3d.TextureManag.createTexture
+MedEye3d.OpenGLDisplayUtils.basicRender
+MedEye3d.WindowControll.maskContrDown
+MedEye3d.ForDisplayStructs.KeyboardCallbackSubscribable
+MedEye3d.SegmentationDisplay.registerInteractions
+MedEye3d.Uniforms.setMaskColor
+MedEye3d.DataStructs.getLocationDict
+MedEye3d.CustomFragShad.addWindowingFunc
+MedEye3d.PrepareWindowHelpers.createDAtaBuffer
+MedEye3d.ForDisplayStructs.ActorWithOpenGlObjects
+MedEye3d.TextureManag.initializeTextures
+Rocket.on_subscribe!
 ```
