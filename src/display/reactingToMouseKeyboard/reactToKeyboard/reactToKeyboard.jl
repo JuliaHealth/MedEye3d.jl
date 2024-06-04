@@ -37,45 +37,64 @@ GLFW.PRESS
 
 function (handler::KeyboardCallbackSubscribable)(scancode ::GLFW.Key, action::GLFW.Action)
     #1 pressed , 2 released -1 sth else
-    act =  @match action begin
-        instances(GLFW.Action)[2] => 1
-        instances(GLFW.Action)[1] => 2
-        _ => -1
+    if action == GLFW.RELEASE
+        act = 1
+    elseif action == GLFW.PRESS
+        act = 2
+    else
+        act = -1
     end
 
    if(act>0)# so we have press or relese
        
-         scCode = @match scancode begin
-            GLFW.KEY_RIGHT_CONTROL=> (handler.isCtrlPressed= (act==1); "ctrl" )
-            GLFW.KEY_LEFT_CONTROL => (handler.isCtrlPressed= (act==1); "ctrl")
-            GLFW.KEY_LEFT_SHIFT =>( handler.isShiftPressed= (act==1); "shift")
-            GLFW.KEY_RIGHT_SHIFT =>( handler.isShiftPressed=( act==1); "shift")
-            GLFW.KEY_RIGHT_ALT =>( handler.isAltPressed= (act==1); "alt")
-            GLFW.KEY_LEFT_ALT => (handler.isAltPressed= (act==1); "alt")
-            GLFW.KEY_SPACE => (handler.isSpacePressed= (act==1); "space")
-            GLFW.KEY_TAB => (handler.isTAbPressed= (act==1); "tab")
-            GLFW.KEY_ENTER =>( handler.isEnterPressed= (act==1); "enter")
-            GLFW.KEY_F1 =>( handler.isEnterPressed= (act==1); "f1")
-            GLFW.KEY_F2 =>( handler.isEnterPressed= (act==1); "f2")
-            GLFW.KEY_F3 =>( handler.isEnterPressed= (act==1); "f3")
-            GLFW.KEY_F4 =>( handler.isF4Pressed= (act==1); "f4")
-            GLFW.KEY_F5 =>( handler.isF5Pressed= (act==1); "f5")
-            GLFW.KEY_F6 =>( handler.isF6Pressed= (act==1); "f6")
-            GLFW.KEY_Z =>( handler.isZPressed= (act==1); "z")
-
-            GLFW.KEY_F =>( handler.isFPressed= (act==1); "f")
-            GLFW.KEY_S =>( handler.isSPressed= (act==1); "s")
-            
-            GLFW.KEY_KP_ADD =>( handler.isPlusPressed= (act==1); "+")
-            GLFW.KEY_EQUAL =>( handler.isPlusPressed= (act==1); "+")
-
-            GLFW.KEY_KP_SUBTRACT =>( handler.isMinusPressed= (act==1); "-")
-            GLFW.KEY_MINUS =>( handler.isMinusPressed= (act==1); "-")
-            _ => "notImp" # not Important
-
-    
-
-         end
+        if scancode == GLFW.KEY_RIGHT_CONTROL || scancode == GLFW.KEY_LEFT_CONTROL
+            handler.isCtrlPressed = (act == 1)
+            scCode = "ctrl"
+        elseif scancode == GLFW.KEY_LEFT_SHIFT || scancode == GLFW.KEY_RIGHT_SHIFT
+            handler.isShiftPressed = (act == 1)
+            scCode = "shift"
+        elseif scancode == GLFW.KEY_RIGHT_ALT || scancode == GLFW.KEY_LEFT_ALT
+            handler.isAltPressed = (act == 1)
+            scCode = "alt"
+        elseif scancode == GLFW.KEY_SPACE
+            handler.isSpacePressed = (act == 1)
+            scCode = "space"
+        elseif scancode == GLFW.KEY_TAB
+            handler.isTabPressed = (act == 1)
+            scCode = "tab"
+        elseif scancode == GLFW.KEY_ENTER
+            handler.isEnterPressed = (act == 1)
+            scCode = "enter"
+        elseif scancode == GLFW.KEY_F1 || scancode == GLFW.KEY_F2 || scancode == GLFW.KEY_F3
+            handler.isEnterPressed = (act == 1)
+            scCode = "f1"
+        elseif scancode == GLFW.KEY_F4
+            handler.isF4Pressed = (act == 1)
+            scCode = "f4"
+        elseif scancode == GLFW.KEY_F5
+            handler.isF5Pressed = (act == 1)
+            scCode = "f5"
+        elseif scancode == GLFW.KEY_F6
+            handler.isF6Pressed = (act == 1)
+            scCode = "f6"
+        elseif scancode == GLFW.KEY_Z
+            handler.isZPressed = (act == 1)
+            scCode = "z"
+        elseif scancode == GLFW.KEY_F
+            handler.isFPressed = (act == 1)
+            scCode = "f"
+        elseif scancode == GLFW.KEY_S
+            handler.isSPressed = (act == 1)
+            scCode = "s"
+        elseif scancode == GLFW.KEY_KP_ADD || scancode == GLFW.KEY_EQUAL
+            handler.isPlusPressed = (act == 1)
+            scCode = "+"
+        elseif scancode == GLFW.KEY_KP_SUBTRACT || scancode == GLFW.KEY_MINUS
+            handler.isMinusPressed = (act == 1)
+            scCode = "-"
+        else
+            scCode = "notImp"
+        end
             res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed || scCode=="ctrl" 
                     , isShiftPressed= handler.isShiftPressed ||scCode=="shift" 
                     ,isAltPressed= handler.isAltPressed ||scCode=="alt"
@@ -201,39 +220,13 @@ return true in case the combination of keys should invoke some action
 """
 function shouldBeExecuted(keyInfo::KeyboardStruct, act::Int64)::Bool
     if(act>0)# so we have press or relese 
-        res =  @match keyInfo.mostRecentScanCode begin
-      GLFW.KEY_RIGHT_CONTROL => return act==2 # returning true if we relese key
-      GLFW.KEY_LEFT_CONTROL => return act==2
-      GLFW.KEY_LEFT_SHIFT => return act==2
-      GLFW.KEY_RIGHT_SHIFT=> return act==2
-      GLFW.KEY_RIGHT_ALT => return act==2
-      GLFW.KEY_LEFT_ALT => return act==2
-      GLFW.KEY_SPACE => return act==2
-      GLFW.KEY_TAB => return act==2
-      GLFW.KEY_ENTER  => return act==1 # returning true if pressed pressed
-      GLFW.KEY_F1  => return act==1 
-      GLFW.KEY_F2  => return act==1 
-      GLFW.KEY_F3  => return act==1
-      GLFW.KEY_F4  => return act==2
-      GLFW.KEY_F5  => return act==2
-      GLFW.KEY_F6  => return act==2
-
-
-      GLFW.KEY_KP_ADD =>return act==1 
-      GLFW.KEY_EQUAL =>return act==1 
-
-      GLFW.KEY_KP_SUBTRACT =>return act==1 
-      GLFW.KEY_MINUS =>return act==1 
-      GLFW.KEY_Z =>return act==1 
-      GLFW.KEY_F =>return act==1 
-      GLFW.KEY_S =>return act==1 
-
-
-            _ => false # not Important
-         end#match
-
-         return res
- 
+        if keyInfo.mostRecentScanCode in [GLFW.KEY_RIGHT_CONTROL, GLFW.KEY_LEFT_CONTROL, GLFW.KEY_LEFT_SHIFT, GLFW.KEY_RIGHT_SHIFT, GLFW.KEY_RIGHT_ALT, GLFW.KEY_LEFT_ALT, GLFW.KEY_SPACE, GLFW.KEY_TAB, GLFW.KEY_F4, GLFW.KEY_F5, GLFW.KEY_F6]
+            return act == 2
+        elseif keyInfo.mostRecentScanCode in [GLFW.KEY_ENTER, GLFW.KEY_F1, GLFW.KEY_F2, GLFW.KEY_F3, GLFW.KEY_KP_ADD, GLFW.KEY_EQUAL, GLFW.KEY_KP_SUBTRACT, GLFW.KEY_MINUS, GLFW.KEY_Z, GLFW.KEY_F, GLFW.KEY_S]
+            return act == 1
+        else
+            return false
+        end 
         end#if     
    # if we got here we did not found anything intresting      
 return false
