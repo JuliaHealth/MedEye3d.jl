@@ -22,16 +22,8 @@ import MedEye3d.ForDisplayStructs.ActorWithOpenGlObjects
 import MedEye3d.OpenGLDisplayUtils
 import MedEye3d.DisplayWords.textLinesFromStrings
 import MedEye3d.StructsManag.getThreeDims
-```
 
-Helper functions used to upload data - those will be enclosed (with many more) in a package that Is currently in development - 3dMedPipe 
 
-```
-"""
-given directory (dirString) to file/files it will return the simple ITK image for futher processing
-isMHD when true - data in form of folder with dicom files
-isMHD  when true - we deal with MHD data
-"""
 function getImageFromDirectory(dirString,isMHD::Bool, isDicomList::Bool)
     #simpleITK object used to read from disk 
     reader = sitk.ImageSeriesReader()
@@ -44,10 +36,7 @@ function getImageFromDirectory(dirString,isMHD::Bool, isDicomList::Bool)
     end
 end#getPixelDataAndSpacing
 
-"""
-becouse Julia arrays is column wise contiguus in memory and open GL expects row wise we need to rotate and flip images 
-pixels - 3 dimensional array of pixel data 
-"""
+
 function permuteAndReverse(pixels)
     pixels=  permutedims(pixels, (3,2,1))
     sizz=size(pixels)
@@ -59,21 +48,13 @@ function permuteAndReverse(pixels)
     return pixels
   end#permuteAndReverse
 
-"""
-given simple ITK image it reads associated pixel data - and transforms it by permuteAndReverse functions
-it will also return voxel spacing associated with the image
-"""
+
 function getPixelsAndSpacing(image)
     pixelsArr = np.array(sitk.GetArrayViewFromImage(image))# we need numpy in order for pycall to automatically change it into julia array
     spacings = image.GetSpacing()
     return ( permuteAndReverse(pixelsArr), spacings  )
 end#getPixelsAndSpacing
-```
 
-directories of PET/CT Data - from https://wiki.cancerimagingarchive.net/display/Public/Head-Neck-PET-CT
-
-
-```
 # directories to adapt
 dirOfExample ="/home/hurtbadly/Downloads/ct_soft_pat_3_sudy_0.nii.gz"
 dirOfExamplePET ="/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
@@ -121,43 +102,28 @@ textureSpecificationsPETCT = [
 ];
 # We need also to specify how big part of the screen should be occupied by the main image and how much by text fractionOfMainIm= Float32(0.8);
 fractionOfMainIm= Float32(0.8);
-"""
-If we want to display some text we need to pass it as a vector of SimpleLineTextStructs - utility function to achieve this is 
-textLinesFromStrings() where we pass resies of strings, if we want we can also edit those structs to controll size of text and space to next line look into SimpleLineTextStruct doc
-mainLines - will be displayed over all slices
-supplLines - will be displayed over each slice where is defined - below just dummy data
-"""
+
 import MedEye3d.DisplayWords.textLinesFromStrings
 
 mainLines= textLinesFromStrings(["main Line1", "main Line 2"]);
 supplLines=map(x->  textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 in $(x)"]), 1:size(ctPixels)[3] );
-```
 
 
-If we want to pass 3 dimensional array of scrollable data we need to supply it via vector ThreeDimRawDat's struct
-utility function to make creation of those easier is getThreeDims which creates series of ThreeDimRawDat from list of tuples where
-    first entry is String and second entry is 3 dimensional array with data 
-    strings needs to be the same as we  defined in texture specifications at the bagining
-    data arrays needs to be o the same size and be of the same type we specified in texture specification
-```
 import MedEye3d.StructsManag.getThreeDims
 
 tupleVect = [("PET",petPixels) ,("CTIm",ctPixels),("manualModif",zeros(UInt8,size(petPixels)) ) ]
 slicesDat= getThreeDims(tupleVect )
-"""
-Holds data necessary to display scrollable data
-"""
+
 mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDimsB
                                  ,dimensionToScroll=1 # what is the dimension of plane we will look into at the beginning for example transverse, coronal ...
                                  ,dataToScroll= slicesDat
                                  ,mainTextToDisp= mainLines
                                  ,sliceTextToDisp=supplLines );
 
-```
-This function prepares all for display; 1000 in the end is responsible for setting window width for more look into SegmentationDisplay.coordinateDisplay
-```
+# function prepares all for display; 1000 in the end is responsible for setting window width for more look into SegmentationDisplay.coordinateDisplay
+
 SegmentationDisplay.coordinateDisplay(textureSpecificationsPETCT ,fractionOfMainIm ,datToScrollDimsB ,1000);
-```
-As all is ready we can finally display image 
-```
+
+# As all is ready we can finally display image 
+
 Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);

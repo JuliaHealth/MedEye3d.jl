@@ -28,7 +28,7 @@ scancode - if key do not have short name like ctrl ... it has scancode
 """
 function (handler::KeyboardCallbackSubscribable)(str::String, action::GLFW.Action)
 
-    if( (action==instances(GLFW.Action)[2])  ) 
+    if( (action==collect(instances(GLFW.Action))[2])  ) 
         push!(handler.lastKeysPressed ,str)
    end#if
 end #handler
@@ -37,16 +37,18 @@ GLFW.PRESS
 
 function (handler::KeyboardCallbackSubscribable)(scancode ::GLFW.Key, action::GLFW.Action)
     #1 pressed , 2 released -1 sth else
-    if action == GLFW.RELEASE
+    second_action = collect(instances(GLFW.Action))[2]
+    first_action =  collect(instances(GLFW.Action))[1]
+    if action == second_action
         act = 1
-    elseif action == GLFW.PRESS
+    elseif action == first_action
         act = 2
     else
         act = -1
     end
 
    if(act>0)# so we have press or relese
-       
+
         if scancode == GLFW.KEY_RIGHT_CONTROL || scancode == GLFW.KEY_LEFT_CONTROL
             handler.isCtrlPressed = (act == 1)
             scCode = "ctrl"
@@ -220,6 +222,7 @@ return true in case the combination of keys should invoke some action
 """
 function shouldBeExecuted(keyInfo::KeyboardStruct, act::Int64)::Bool
     if(act>0)# so we have press or relese 
+  
         if keyInfo.mostRecentScanCode in [GLFW.KEY_RIGHT_CONTROL, GLFW.KEY_LEFT_CONTROL, GLFW.KEY_LEFT_SHIFT, GLFW.KEY_RIGHT_SHIFT, GLFW.KEY_RIGHT_ALT, GLFW.KEY_LEFT_ALT, GLFW.KEY_SPACE, GLFW.KEY_TAB, GLFW.KEY_F4, GLFW.KEY_F5, GLFW.KEY_F6]
             return act == 2
         elseif keyInfo.mostRecentScanCode in [GLFW.KEY_ENTER, GLFW.KEY_F1, GLFW.KEY_F2, GLFW.KEY_F3, GLFW.KEY_KP_ADD, GLFW.KEY_EQUAL, GLFW.KEY_KP_SUBTRACT, GLFW.KEY_MINUS, GLFW.KEY_Z, GLFW.KEY_F, GLFW.KEY_S]
