@@ -42,8 +42,8 @@ function getPixelsAndSpacing(image)
     return ( permuteAndReverse(pixelsArr), spacings  )
 end#getPixelsAndSpacing
 
-dirOfExample ="/home/hurtbadly/Downloads/ct_soft_pat_3_sudy_0.nii.gz"
-dirOfExamplePET ="/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
+dirOfExample ="D:/mingw_installation/home/hurtbadly/Downloads/ct_soft_pat_3_sudy_0.nii.gz"
+dirOfExamplePET ="D:/mingw_installation/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
 
 
 imagePET= getImageFromDirectory(dirOfExamplePET,false,true)
