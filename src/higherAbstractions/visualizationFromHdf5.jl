@@ -306,7 +306,7 @@ end #getArrByName
 
 
 function calculateAndDisplay(preparedDict,mainScrollDat::FullScrollableDat
-  , conf::ConfigurationStruct,numberToLookFor,goldArr,algoOutputGPU)
+  , conf::ConfigurtationStruct,numberToLookFor,goldArr,algoOutputGPU)
   res= calcMetricGlobal(preparedDict,conf,goldArr,algoOutputGPU,numberToLookFor)
   append!(mainScrollDat.mainTextToDisp, textLinesFromStrings(giveStringsFromResultMetrics(res,conf)) )
 
@@ -319,7 +319,7 @@ end
 """
 supplied ResultMetrics struct will return list of strings with results
 """
-function giveStringsFromResultMetrics(res,conf::ConfigurationStruct)::Vector{String}
+function giveStringsFromResultMetrics(res,conf::ConfigurtationStruct)::Vector{String}
   output = []
   if(conf.dice)
     append!(output,["dice $(res.dice)"])
