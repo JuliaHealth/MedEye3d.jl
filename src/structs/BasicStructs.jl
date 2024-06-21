@@ -17,7 +17,7 @@ end #ImageConstants
 configuration struct that when passed will marks what kind of metrics we are intrested in
 
     """
-@with_kw struct ConfigurationStruct
+@with_kw struct ConfigurtationStruct
     anyFuzzy::Bool = false# is any of the metric calculated fuzzy
 
 

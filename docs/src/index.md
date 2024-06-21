@@ -534,7 +534,7 @@ MedEye3d.Uniforms.coontrolMinMaxUniformVals
 MedEye3d.TextureManag.assignUniformsAndTypesToMasks
 MedEye3d.KeyboardMouseHelper.processKeysInfo
 MedEye3d.CustomFragShad.divideTexteuresToMainAndRest
-MedEye3d.BasicStructs.ConfigurationStruct
+MedEye3d.BasicStructs.ConfigurtationStruct
 MedEye3d.ReactOnMouseClickAndDrag.addStrokeWidth
 MedEye3d.DataStructs.WindowControlStruct
 MedEye3d.DisplayWords
