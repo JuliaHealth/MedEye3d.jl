@@ -56,8 +56,8 @@ function getPixelsAndSpacing(image)
 end#getPixelsAndSpacing
 
 # directories to adapt
-dirOfExample ="/home/hurtbadly/Downloads/ct_soft_pat_3_sudy_0.nii.gz"
-dirOfExamplePET ="/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
+dirOfExample ="D:/mingw_installation/home/hurtbadly/Downloads/ct_soft_pat_3_sudy_0.nii.gz"
+dirOfExamplePET ="D:/mingw_installation/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
 
 # in most cases dimensions of PET and CT data arrays will be diffrent in order to make possible to display them we need to resample and make dimensions equal
 imagePET= getImageFromDirectory(dirOfExamplePET,true,false)

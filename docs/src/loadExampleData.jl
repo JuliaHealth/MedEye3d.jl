@@ -538,7 +538,8 @@ function f()
 end    
 
 for i in 1:200
-    @spawn :interactive f()
+   #@spawn :interactive 
+   f()
 end
 a
 

@@ -193,7 +193,8 @@ function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any,ActorWithO
         put!(mouseCoords_channel, mousestr)
 
         # @spawn :interactive react_to_draw(textureList,actor,mouseCoords)
-        @spawn :interactive react_to_draw(textureList,actor,obj)
+        #@spawn :interactive
+        react_to_draw(textureList,actor,obj)
 
 
     elseif (mousestr.isRightButtonDown)

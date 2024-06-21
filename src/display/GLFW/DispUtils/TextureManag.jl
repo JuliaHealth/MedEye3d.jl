@@ -32,7 +32,7 @@ function updateTexture(::Type{Tt}
                     ,heightt::Int32) where{Tt}
 
 
-    @spawn :interactive begin
+ #   @spawn :interactive begin
         glActiveTexture(textSpec.actTextrureNumb); # active proper texture unit before binding
         glBindTexture(GL_TEXTURE_2D, textSpec.ID[]); 
     
@@ -43,7 +43,7 @@ function updateTexture(::Type{Tt}
         # glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, reduce(vcat,data))
 
         end  
-    end
+  #  end
     
 
    
@@ -156,7 +156,8 @@ function updateImagesDisplayed(singleSliceDat::SingleSliceDat
                             ,calcDimStruct::CalcDimsStruct
                             ,valueForMaskToSett::valueForMasToSetStruct )
 
-                            @spawn :interactive updateImagesDisplayed_inner(singleSliceDat,forDisplayConstants,wordsDispObj,calcDimStruct,valueForMaskToSett)
+                            #@spawn :interactive
+                            updateImagesDisplayed_inner(singleSliceDat,forDisplayConstants,wordsDispObj,calcDimStruct,valueForMaskToSett)
 end
 
 function updateImagesDisplayed_inner(singleSliceDat::SingleSliceDat
