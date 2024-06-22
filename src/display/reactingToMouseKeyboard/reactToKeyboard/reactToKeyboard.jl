@@ -12,7 +12,7 @@ export reactToKeyboard , registerKeyboardFunctions,processKeysInfo
 
 
 """
-will "tell" what functions should be invoked in order to process keyboard input 
+will "tell" what functions should be invoked in order to process keyboard input
 """
 function Rocket.on_subscribe!(handler::KeyboardCallbackSubscribable, actor::SyncActor{Any, ActorWithOpenGlObjects})
     return subscribe!(handler.subject, actor)
@@ -21,14 +21,14 @@ end
 
 """
 given pressed keys lik 1-9 and all letters resulting key is encoded as string and will be passed here
-handler object responsible for capturing action 
+handler object responsible for capturing action
 str - name of key lik 1,5 f,.j ... but not ctrl shift etc
 action - for example key press or release
 scancode - if key do not have short name like ctrl ... it has scancode
 """
 function (handler::KeyboardCallbackSubscribable)(str::String, action::GLFW.Action)
 
-    if( (action==collect(instances(GLFW.Action))[2])  ) 
+    if( (action==collect(instances(GLFW.Action))[2])  )
         push!(handler.lastKeysPressed ,str)
    end#if
 end #handler
@@ -97,8 +97,8 @@ function (handler::KeyboardCallbackSubscribable)(scancode ::GLFW.Key, action::GL
         else
             scCode = "notImp"
         end
-            res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed || scCode=="ctrl" 
-                    , isShiftPressed= handler.isShiftPressed ||scCode=="shift" 
+            res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed || scCode=="ctrl"
+                    , isShiftPressed= handler.isShiftPressed ||scCode=="shift"
                     ,isAltPressed= handler.isAltPressed ||scCode=="alt"
                     ,isSpacePressed= handler.isSpacePressed ||scCode=="space"
                     ,isTAbPressed= handler.isTAbPressed ||scCode=="tab"
@@ -116,21 +116,21 @@ function (handler::KeyboardCallbackSubscribable)(scancode ::GLFW.Key, action::GL
                     ,isPlusPressed= handler.isPlusPressed ||scCode=="+"
                     ,isMinusPressed= handler.isMinusPressed ||scCode=="-"
 
-                    ,isEnterPressed= handler.isEnterPressed 
-                    ,lastKeysPressed= handler.lastKeysPressed 
+                    ,isEnterPressed= handler.isEnterPressed
+                    ,lastKeysPressed= handler.lastKeysPressed
                     ,mostRecentScanCode = scancode
                     ,mostRecentKeyName = "" # just marking it as empty
-                    ,mostRecentAction = action) 
-            
+                    ,mostRecentAction = action)
+
 
             if(shouldBeExecuted(res,act))
-                next!(handler.subject, res ) 
-                handler.lastKeysPressed=[] 
+                next!(handler.subject, res )
+                handler.lastKeysPressed=[]
 
-            end#if 
+            end#if
 
-    end#if    
-  
+    end#if
+
 
 end #second handler
 
@@ -144,14 +144,14 @@ stopListening - atomic boolean enabling unlocking GLFW context
 function registerKeyboardFunctions(window::GLFW.Window,stopListening::Base.Threads.Atomic{Bool}    )
 
     stopListening[]=true # stoping event listening loop to free the GLFW context
-                           
+
     keyboardSubs = KeyboardCallbackSubscribable()
 
 
     GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
         name = GLFW.GetKeyName(key, scancode)
         if name === nothing || name =="+" || name =="-" || name =="z"  || name =="f"  || name =="s"
-            keyboardSubs(key,action)                                                        
+            keyboardSubs(key,action)
         else
             keyboardSubs(name,action)
         end
@@ -188,8 +188,8 @@ processKeysInfo(wind::Identity{WindowControlStruct} ,actor::SyncActor{Any, Actor
 """
 Given keyInfo struct wit information about pressed keys it can process them to make some actions  - generally activating keyboard shortcuts
 shift + number - make mask associated with given number visible
-ctrl + number -  make mask associated with given number invisible 
-alt + number -  make mask associated with given number active for mouse interaction 
+ctrl + number -  make mask associated with given number invisible
+alt + number -  make mask associated with given number active for mouse interaction
 tab + number - sets the number that will be  used as an input to masks modified by mouse
 shift + numberA + "m" +numberB  - display diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B invisible
 ctrl + numberA + "m" +numberB  - stops displaying diffrence between masks associated with numberA and numberB - also it makes automaticall mask A and B visible
@@ -200,13 +200,13 @@ F1, F2 ... - switch between defined window display characteristics - like min sh
 """
 function reactToKeyboard(keyInfo::KeyboardStruct
                         , actor::SyncActor{Any, ActorWithOpenGlObjects})
-                            
+
     #we got this only when ctrl/shift/als is released or enter is pressed
     obj = actor.actor.mainForDisplayObjects
     obj.stopListening[]=true #free GLFW context
-    # processing here on is based on multiple dispatch mainly 
+    # processing here on is based on multiple dispatch mainly
     processKeysInfo(parseString(keyInfo.lastKeysPressed,actor,keyInfo),actor,keyInfo)
-    
+
 
     obj.stopListening[]=false # reactivete event listening loop
 
@@ -221,17 +221,17 @@ end#reactToKeyboard
 return true in case the combination of keys should invoke some action
 """
 function shouldBeExecuted(keyInfo::KeyboardStruct, act::Int64)::Bool
-    if(act>0)# so we have press or relese 
-  
+    if(act>0)# so we have press or relese
+
         if keyInfo.mostRecentScanCode in [GLFW.KEY_RIGHT_CONTROL, GLFW.KEY_LEFT_CONTROL, GLFW.KEY_LEFT_SHIFT, GLFW.KEY_RIGHT_SHIFT, GLFW.KEY_RIGHT_ALT, GLFW.KEY_LEFT_ALT, GLFW.KEY_SPACE, GLFW.KEY_TAB, GLFW.KEY_F4, GLFW.KEY_F5, GLFW.KEY_F6]
             return act == 2
         elseif keyInfo.mostRecentScanCode in [GLFW.KEY_ENTER, GLFW.KEY_F1, GLFW.KEY_F2, GLFW.KEY_F3, GLFW.KEY_KP_ADD, GLFW.KEY_EQUAL, GLFW.KEY_KP_SUBTRACT, GLFW.KEY_MINUS, GLFW.KEY_Z, GLFW.KEY_F, GLFW.KEY_S]
             return act == 1
         else
             return false
-        end 
-        end#if     
-   # if we got here we did not found anything intresting      
+        end
+        end#if
+   # if we got here we did not found anything intresting
 return false
 
 end#shouldBeExecuted
@@ -240,18 +240,18 @@ end#shouldBeExecuted
 
 
 """
-given number from keyboard input it return array With texture that holds the texture specification we are looking for 
+given number from keyboard input it return array With texture that holds the texture specification we are looking for
 listOfTextSpecifications - list with all registered Texture specifications
 numb - string that may represent number - if it does not function will return empty option
-return Option - either Texture specification or empty Option 
+return Option - either Texture specification or empty Option
 """
-function findTextureBasedOnNumb(listOfTextSpecifications::Vector{TextureSpec} 
+function findTextureBasedOnNumb(listOfTextSpecifications::Vector{TextureSpec}
                                 ,numb::Int32
                                 ,dict::Dictionary{Int32, Int64})::Option
     if(haskey(dict, numb))
         return Option(listOfTextSpecifications[dict[numb]])
     end#if
-    #if we are here it mean no such texture was found    
+    #if we are here it mean no such texture was found
      @info "no texture associated with this number" numb
     return Option()
 
@@ -282,27 +282,27 @@ function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlOb
         return Option(WindowControlStruct(letterCode="F5"))
     elseif(keyInfo.isF6Pressed)
         return Option(WindowControlStruct(letterCode="F6"))
-    # for undoing actions            
+    # for undoing actions
     elseif(keyInfo.isZPressed )
         return Option(true)
     elseif(keyInfo.isFPressed )
         return Option((true,false))
     elseif(keyInfo.isSPressed )
         return Option((false,true))
-    # for control of stroke width    
+    # for control of stroke width
     elseif(keyInfo.isTAbPressed &&  keyInfo.isPlusPressed)
         return  Option(AnnotationStruct(1))
     elseif(keyInfo.isTAbPressed && keyInfo.isMinusPressed )
         return  Option(AnnotationStruct(-1))
-    elseif(isempty(filtered))#nothing to be done   
+    elseif(isempty(filtered))#nothing to be done
         return Option()
-    # when we want to set new value for manual mask change     
+    # when we want to set new value for manual mask change
     elseif(keyInfo.isTAbPressed && !isempty(filtered))
         return Option(parse(Int64,filtered))
-    #in case we want to change the dimension of plane for slicing data     
+    #in case we want to change the dimension of plane for slicing data
     elseif(keyInfo.isSpacePressed && !isempty(filtered)  &&  parse(Int64,filtered)<4)
-        return Option(setproperties(actor.actor.onScrollData.dataToScrollDims ,  (dimensionToScroll= parse(Int64,filtered)) )    )            
-     # in case we want to display diffrence of two masks   
+        return Option(setproperties(actor.actor.onScrollData.dataToScrollDims ,  (dimensionToScroll= parse(Int64,filtered)) )    )
+     # in case we want to display diffrence of two masks
     elseif(occursin("m" , joined))
 
      mapped = map(splitted-> filter(x->isnumeric(x) , splitted) ,split(joined,"m")) |>
@@ -311,13 +311,13 @@ function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlOb
         if(length(mapped)==2)
             textSpectOptions = map(it->findTextureBasedOnNumb(listOfTextSpecs,it, searchDict )  ,mapped )
             return Option( (textSpectOptions[1],textSpectOptions[2])  )
-         
-        end#if    
+
+        end#if
         return Option()
     # in case we want to undo last action
     end#if
         #in case we have single number
-	return   findTextureBasedOnNumb(listOfTextSpecs,parse(Int32,filtered), searchDict ) 
+	return   findTextureBasedOnNumb(listOfTextSpecs,parse(Int32,filtered), searchDict )
 end#strToNumber
 
 
