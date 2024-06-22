@@ -1,7 +1,7 @@
 module ForDisplayStructs
 using Base: Int32, isvisible
 export ScrollCallbackSubscribable, KeyboardCallbackSubscribable, MouseCallbackSubscribable, MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct, TextureUniforms, MainImageUniforms, MaskTextureUniforms, ForWordsDispStruct
-
+export logChannelData
 using ColorTypes, Parameters, Observables, ModernGL, GLFW, Rocket, Dictionaries, FreeTypeAbstraction, ..DataStructs
 
 
@@ -351,11 +351,17 @@ Actor that is able to store a state to keep needed data for proper display
   forUndoVector::AbstractArray = [] # holds lambda functions that when invoked will  undo last operations
   maxLengthOfForUndoVector::Int64 = 15 # number controls how many step at maximum we can get back
   isBusy::Base.Threads.Atomic{Bool} = Threads.Atomic{Bool}(0) # used to indicate by some functions that actor is busy and some interactions should be ceased
-  threadChannel::Base.Channel{T=Any} = Channel{T=Any}(size=10000, taskref=nothing, spawn=false, threadpool=:interactive)
+  threadChannel::Base.Channel{Any} = Channel{Any}(1000) #needs to be initialized by the user explicitly.
 end
 
 
 
+function logChannelData(actor::SyncActor{Any,ActorWithOpenGlObjects})
+  while true
+      data = take!(actor.actor.threadChannel)
+      @info "Data from channel: $data"
+  end
+end
 
 end #module
 

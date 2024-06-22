@@ -141,7 +141,7 @@ registering functions to the GLFW
 window - GLFW window with Visualization
 stopListening - atomic boolean enabling unlocking GLFW context
 """
-function registerKeyboardFunctions(window::GLFW.Window,stopListening::Base.Threads.Atomic{Bool}    )
+function registerKeyboardFunctions(window::GLFW.Window,stopListening::Base.Threads.Atomic{Bool}, actor::SyncActor{Any, ActorWithOpenGlObjects})
 
     stopListening[]=true # stoping event listening loop to free the GLFW context
 
@@ -151,9 +151,9 @@ function registerKeyboardFunctions(window::GLFW.Window,stopListening::Base.Threa
     GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
         name = GLFW.GetKeyName(key, scancode)
         if name === nothing || name =="+" || name =="-" || name =="z"  || name =="f"  || name =="s"
-            keyboardSubs(key,action)
+            put!(actor.actor.threadChannel, (scancode, action))
         else
-            keyboardSubs(name,action)
+            put!(actor.actor.threadChannel, (name, action))
         end
         end)
 

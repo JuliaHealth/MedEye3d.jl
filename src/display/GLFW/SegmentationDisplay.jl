@@ -32,21 +32,21 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
                         ,windowHeight::Int= Int(round(windowWidth*fractionOfMainIm))
                         ,textTexturewidthh::Int32=Int32(2000)
                         ,textTextureheightt::Int32= Int32( round((windowHeight/(windowWidth*(1-fractionOfMainIm)) ))*textTexturewidthh)
-                        ,windowControlStruct::WindowControlStruct=WindowControlStruct()) 
+                        ,windowControlStruct::WindowControlStruct=WindowControlStruct())
 
    #in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
     if( typeof(mainActor.actor.mainForDisplayObjects.window)== GLFW.Window  )
         cleanUp()
-    end#if    
+    end#if
    #setting number to texture that will be needed in shader configuration
    listOfTextSpecs::Vector{TextureSpec}= map(x->setproperties(x[2],(whichCreated=x[1])),enumerate(listOfTextSpecsPrim))
-   
-   
+
+
    #calculations of necessary constants needed to calculate window size , mouse position ...
-   calcDimStruct= CalcDimsStruct(windowWidth=windowWidth 
-                  ,windowHeight=windowHeight 
+   calcDimStruct= CalcDimsStruct(windowWidth=windowWidth
+                  ,windowHeight=windowHeight
                   ,fractionOfMainIm=fractionOfMainIm
-                  ,wordsImageQuadVert= ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm)  
+                  ,wordsImageQuadVert= ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm)
                   ,wordsQuadVertSize= sizeof( ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm))
                   ,textTexturewidthh=textTexturewidthh
                   ,textTextureheightt=textTextureheightt ) |>
@@ -59,12 +59,12 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
     window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words,gslsStr =  PrepareWindow.displayAll(listOfTextSpecs,calcDimStruct )
 
     # than we set those ..Uniforms, open gl types and using data from arguments  to fill texture specifications
-    mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program,windowControlStruct) 
+    mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program,windowControlStruct)
 
     #@info "listOfTextSpecsMapped" listOfTextSpecsMapped
-    #initializing object that holds data reqired for interacting with opengl 
+    #initializing object that holds data reqired for interacting with opengl
     initializedTextures =  initializeTextures(listOfTextSpecsMapped,calcDimStruct)
-   
+
     numbDict = filter(x-> x.numb>=0,initializedTextures) |>
     (filtered)-> Dictionary(map(it->it.numb,filtered),collect(eachindex(filtered))) # a way for fast query using assigned numbers
 
@@ -79,7 +79,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
             ,ebo= ebo[]
             ,mainImageUniforms= mainImageUnifs
             ,TextureIndexes= Dictionary(map(it->it.name,initializedTextures),collect(eachindex(initializedTextures)))
-            ,numIndexes= numbDict 
+            ,numIndexes= numbDict
             ,gslsStr=gslsStr
             ,windowControlStruct=windowControlStruct
    )
@@ -87,7 +87,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
 
 
     #finding some texture that can be modifid and set as one active for modifications
- 
+
        mainActor.actor.textureToModifyVec = filter(it->it.isEditable ,initializedTextures)
 
     #in order to clean up all resources while closing
@@ -96,7 +96,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
     #wrapping the Open Gl and GLFW objects into an observable and passing it to the actor
     forDisplayConstantObesrvable = of(forDispObj)
     subscribe!(forDisplayConstantObesrvable, mainActor) # configuring
-    #passing for text display object 
+    #passing for text display object
     forTextDispStruct = prepareForDispStruct(length(initializedTextures)
                                             ,fragment_shader_words
                                             ,vbo_words
@@ -107,9 +107,9 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
                                             ,forDispObj)
 
     subscribe!(of(forTextDispStruct),mainActor )
-                                    
-    registerInteractions()#passing needed subscriptions from GLFW
 
+    registerInteractions()#passing needed subscriptions from GLFW
+    Threads.@spawn logChannelData(mainActor)
 
 end #coordinateDisplay
 
@@ -120,19 +120,19 @@ onScrollData - struct holding between others list of tuples where first is the n
 function passDataForScrolling(onScrollData::FullScrollableDat)
     #wrapping the data into an observable and passing it to the actor
     forScrollData = of(onScrollData)
-    subscribe!(forScrollData, mainActor) 
+    subscribe!(forScrollData, mainActor)
 end
 
 
 """
 enables updating just a single slice that is displayed - do not change what will happen after scrolling
-one need to pass data to actor in 
+one need to pass data to actor in
 listOfDataAndImageNames - struct holding  tuples where first entry in tuple is name of texture given in the setup and second is 2 dimensional aray of appropriate type with image data
 sliceNumber - the number to which we set slice in order to later start scrolling the scroll data from this point
 """
 function updateSingleImagesDisplayed( listOfDataAndImageNames::SingleSliceDat)
     forDispData = of(listOfDataAndImageNames)
-    subscribe!(forDispData, mainActor) 
+    subscribe!(forDispData, mainActor)
 
 end #updateSingleImagesDisplayed
 
@@ -152,13 +152,13 @@ end
 
 """
 Preparing ForWordsDispStruct that will be needed for proper displaying of texts
-    numberOfActiveTextUnits - number of textures already used - so we we will know what is still free 
+    numberOfActiveTextUnits - number of textures already used - so we we will know what is still free
     fragment_shader_words - reference to fragment shader used to display text
     vbo_words - vertex buffer object used to display words
     shader_program_words - shader program associated with displaying text
     widthh, heightt - size of the texture - the bigger the higher resolution, but higher computation cost
 
-return prepared for displayStruct    
+return prepared for displayStruct
 """
 function prepareForDispStruct(numberOfActiveTextUnits::Int
                             ,fragment_shader_words::UInt32
@@ -174,7 +174,7 @@ function prepareForDispStruct(numberOfActiveTextUnits::Int
             fontFace = FTFont(joinpath(dirname(dirname(pathof(FreeTypeAbstraction))),"test","hack_regular.ttf") )   #FreeTypeAbstraction.findfont("hack";  additional_fonts= datadir("fonts"))
             ,textureSpec = createTextureForWords(numberOfActiveTextUnits
                                                  ,widthh
-                                                 ,heightt 
+                                                 ,heightt
                                                  ,getProperGL_TEXTURE(numberOfActiveTextUnits+1) )
             ,fragment_shader_words= fragment_shader_words
             ,vbo_words=vbo_words
@@ -187,8 +187,8 @@ end#prepereForDispStruct
 
 """
 In order to properly close displayer we need to :
- remove buffers that wer use 
- remove shaders 
+ remove buffers that wer use
+ remove shaders
  remove all textures
  unsubscibe all of the subscriptions to the mainActor
  finalize main actor and reinstantiate it
@@ -216,7 +216,7 @@ function cleanUp()
     # #destroying program
     # glDeleteProgram(obj.shader_program)
     # #finalizing and recreating main actor
-end #cleanUp    
+end #cleanUp
 
 
 
