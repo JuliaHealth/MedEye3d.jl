@@ -1,8 +1,8 @@
 module ForDisplayStructs
 using Base: Int32, isvisible
-export ScrollCallbackSubscribable, KeyboardCallbackSubscribable, MouseCallbackSubscribable, MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct, TextureUniforms, MainImageUniforms, MaskTextureUniforms, ForWordsDispStruct
-export logChannelData
-using ColorTypes, Parameters, Observables, ModernGL, GLFW, Rocket, Dictionaries, FreeTypeAbstraction, ..DataStructs
+export MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, StateDataFields, KeyboardStruct, TextureUniforms, MainImageUniforms, MaskTextureUniforms, ForWordsDispStruct, MainMedEye3d
+export ScrollChannelDataStruct
+using ColorTypes, Parameters, Observables, ModernGL, GLFW, Dictionaries, FreeTypeAbstraction, ..DataStructs
 
 
 """
@@ -123,7 +123,6 @@ window = []
 vertex_shader::UInt32 =1
 fragment_shader::UInt32=1
 shader_program::UInt32=1
-stopListening::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0)# enables unlocking GLFW context for futher actions
 vbo::UInt32 =1 #vertex buffer object id
 ebo::UInt32 =1 #element buffer object id
 mainImageUniforms::MainImageUniforms = MainImageUniforms()# struct with references to main image
@@ -140,7 +139,6 @@ windowControlStruct::WindowControlStruct=WindowControlStruct()# holding data use
   vertex_shader::UInt32 = 1
   fragment_shader::UInt32 = 1
   shader_program::UInt32 = 1
-  stopListening::Base.Threads.Atomic{Bool} = Threads.Atomic{Bool}(0)# enables unlocking GLFW context for futher actions
   vbo::UInt32 = 1 #vertex buffer object id
   ebo::UInt32 = 1 #element buffer object id
   mainImageUniforms::MainImageUniforms = MainImageUniforms()# struct with references to main image
@@ -163,17 +161,6 @@ Holding necessery data to display text  - like font related
   shader_program_words::UInt32 = 1
 
 end #ForWordsDispStruct
-
-
-
-
-
-
-
-
-
-
-
 
 
 """
@@ -231,93 +218,6 @@ Holding necessery data to controll mouse interaction
 end#MouseStruct
 
 
-
-"""
-struct that enables reacting to  the input  from mouse click  and drag the input will be
-    Cartesian index represening (x,y)
-     x and y position  of the mouse - will be recorded only if left mouse button is pressed or keep presssed
-"""
-@with_kw mutable struct MouseCallbackSubscribable <: Subscribable{MouseStruct}
-  #true if left button is presed down - we make it true if the left button is pressed over image and false if mouse get out of the window or we get information about button release
-  isLeftButtonDown::Bool
-  isRightButtonDown::Bool
-  #coordinates marking 4 corners of
-  #the quad that displays our medical image with the masks
-  xmin::Int32
-  ymin::Int32
-  xmax::Int32
-  ymax::Int32
-  #used to draw left button lines (creating lines)
-  #store of the cartesian coordinates that is used to batch actions
-  #- so if mouse is moving rapidly we would store bunch of coordinates and then modify texture in batch
-  coordinatesStoreForLeftClicks::Vector{CartesianIndex{2}}
-  lastCoordinate::CartesianIndex{2}#generally when we draw lines we remove points from array above yet w need to leave last one in order to keep continuity of futher line
-  isBusy::Base.Threads.Atomic{Bool} # indicate to check weather the system is ready to receive the input
-
-
-  subject::Subject{MouseStruct} # coordinates of mouse
-
-end
-
-
-"""
-Object that enables managing input from keyboard - it stores the information also about
-needed keys wheather they are kept pressed
-examples of keyboard input (raw GLFW input we process below)
-    action RELEASE GLFW.Action
-    key s StringPRESS
-    key s String
-    action PRESS GLFW.Action
-    key s StringRELEASE
-    key s String
-    action RELEASE GLFW.Action
-
-"""
-@with_kw mutable struct KeyboardCallbackSubscribable <: Subscribable{KeyboardStruct}
-  # true when pressed and kept true until released
-  # true if corresponding keys are kept pressed and become flase when relesed
-  isCtrlPressed::Bool = false # left - scancode 37 right 105 - Int32
-  isShiftPressed::Bool = false # left - scancode 50 right 62- Int32
-  isAltPressed::Bool = false# left - scancode 64 right 108- Int32
-  isEnterPressed::Bool = false# scancode 36
-  isTAbPressed::Bool = false# scancode 36
-  isSpacePressed::Bool = false# scancode 36
-  isF1Pressed::Bool = false
-  isF2Pressed::Bool = false
-  isF3Pressed::Bool = false
-  isF4Pressed::Bool = false
-  isF5Pressed::Bool = false
-  isF6Pressed::Bool = false
-  isPlusPressed::Bool = false
-  isMinusPressed::Bool = false
-  isZPressed::Bool = false
-  isFPressed::Bool = false
-  isSPressed::Bool = false
-  lastKeysPressed::Vector{String} = [] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
-  subject :: Subject{KeyboardStruct} =Subject(KeyboardStruct, scheduler = AsyncScheduler())
-  # subject::Subject{KeyboardStruct} = Subject(KeyboardStruct, scheduler=Rocket.ThreadsScheduler())
-end
-
-
-
-
-"""
-struct that enables reacting to  the input from scrolling
-"""
-mutable struct ScrollCallbackSubscribable <: Subscribable{Int64}
-  isBusy::Base.Threads.Atomic{Bool} # indicate to check weather the system is ready to receive the input
-  numberToSend::Int64# number  that will indicate how many slices to skip and in positive or negative direction
-  subject::Subject{Int64}
-end
-
-
-
-
-
-
-
-
-
 """
 Actor that is able to store a state to keep needed data for proper display
 
@@ -337,7 +237,7 @@ Actor that is able to store a state to keep needed data for proper display
 
 
 """
-@with_kw mutable struct ActorWithOpenGlObjects <: NextActor{Any}
+@with_kw mutable struct StateDataFields
   currentDisplayedSlice::Int = 1 # stores information what slice number we are currently displaying
   mainForDisplayObjects::forDisplayObjects = forDisplayObjects() # stores objects needed to  display using OpenGL and GLFW
   onScrollData::FullScrollableDat = FullScrollableDat()
@@ -350,18 +250,15 @@ Actor that is able to store a state to keep needed data for proper display
   lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1, 1, 1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
   forUndoVector::AbstractArray = [] # holds lambda functions that when invoked will  undo last operations
   maxLengthOfForUndoVector::Int64 = 15 # number controls how many step at maximum we can get back
-  isBusy::Base.Threads.Atomic{Bool} = Threads.Atomic{Bool}(0) # used to indicate by some functions that actor is busy and some interactions should be ceased
-  threadChannel::Base.Channel{Any} = Channel{Any}(1000) #needs to be initialized by the user explicitly.
 end
 
-
-
-function logChannelData(actor::SyncActor{Any,ActorWithOpenGlObjects})
-  while true
-      data = take!(actor.actor.threadChannel)
-      @info "Data from channel: $data"
-  end
+"""
+Structure for MainMedEye3d, initialized with keyword arguments in coordinateDisplay (initialization function)
+"""
+@with_kw mutable struct MainMedEye3d
+channel :: Base.Channel{Any}
 end
+
 
 end #module
 

@@ -24,7 +24,7 @@ macro map(expr...)
     T, ex =
         if length(expr) == 1
             nothing, first(expr)
-        else 
+        else
             first(expr), last(expr)
     end
 
@@ -39,14 +39,14 @@ macro map(expr...)
             error("Invalid syntax for @map, expected expression of type `foo = bar` or `foo := bar`")
         end
     end
-    
+
     result =
         if isnothing(T)
             Expr(:call, :Dict, args...)
         else
             Expr(:call, Expr(:curly, :Dict, T.args...), args...)
         end
-    
+
     return esc(result)
 end
 
@@ -98,7 +98,7 @@ end
 
 ############# part below directly copied from https://github.com/jorge-brito/Glutils.jl/blob/master/src/uniforms.jl
 
-# this function is used to get the 
+# this function is used to get the
 # suffix of the glUniform function
 # for the correct type
 _type_suffix(::Type{<:Bool}) = "i"
@@ -284,7 +284,7 @@ end#setTextureVisibility
 
 
 """
-sets minimum and maximum value for display - 
+sets minimum and maximum value for display -
     in case of continuus colors it will clamp values - so all above max will be equaled to max ; and min if smallert than min
     in case of main CT mask - it will controll min shown white and max shown black
     in case of maks with single color associated we will step data so if data is outside the rande it will return 0 - so will not affect display
@@ -294,7 +294,7 @@ function coontrolMinMaxUniformVals(textur::TextureSpec)
     newMax=textur.minAndMaxValue[2]
     uniformsStore= textur.uniforms
     range = newMax-newMin
-    if(range<1) range=1 end#if  
+    if(range<1) range=1 end#if
 
     @uniforms! begin
     uniformsStore.maskMinValue:= newMin
@@ -306,15 +306,15 @@ end#coontrolMinMaxUniformVals
 
 """
 controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%
-      if plus is pressed it will increse contribution by 0.1  
-      if minus is pressed it will decrease contribution by 0.1 
-it also modifies given TextureSpec          
+      if plus is pressed it will increse contribution by 0.1
+      if minus is pressed it will decrease contribution by 0.1
+it also modifies given TextureSpec
 change - how should the texture spec be modified
 """
 function changeTextureContribution(textur::TextureSpec, change::Float32)
     newValue= textur.maskContribution + change
     if(newValue>=0 &&newValue <=1)
-        textur.maskContribution =  newValue 
+        textur.maskContribution =  newValue
         @uniforms! begin
         textur.uniforms.maskContribution:= newValue
 
@@ -323,10 +323,10 @@ function changeTextureContribution(textur::TextureSpec, change::Float32)
 
 end#changeTextureContribution
 
-function changeMainTextureContribution(textur::TextureSpec, change::Float32,actor::SyncActor{Any, ActorWithOpenGlObjects} )
+function changeMainTextureContribution(textur::TextureSpec, change::Float32,stateObject::StateDataFields )
     newValue= textur.maskContribution + change
     if(newValue>=0 &&newValue <=1)
-        textur.maskContribution =  newValue 
+        textur.maskContribution =  newValue
         @uniforms! begin
         actor.actor.mainForDisplayObjects.mainImageUniforms.mainImageContribution:= newValue
         end#@uniforms!

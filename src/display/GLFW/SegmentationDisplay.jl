@@ -7,147 +7,61 @@ export coordinateDisplay
 export passDataForScrolling
 
 using ModernGL, GLFW,  ..PrepareWindow,  ..TextureManag, ..OpenGLDisplayUtils,  ..ForDisplayStructs, ..Uniforms,  ..DisplayWords, Dictionaries
-using  ..ReactingToInput, Rocket, Setfield, Logging,  ..ShadersAndVerticiesForText, FreeTypeAbstraction, ..DisplayWords,  ..DataStructs,  ..StructsManag
+using  ..ReactingToInput, Setfield, Logging,  ..ShadersAndVerticiesForText, FreeTypeAbstraction, ..DisplayWords,  ..DataStructs,  ..StructsManag
 
 
+#  do not copy it into the consumer function
+"""
+configuring consumer function on_next! function using multiple dispatch mechanism in order to connect input to proper functions
+"""
+on_next!(stateObject::StateDataFields, data::Int64) =  reactToScroll(data,stateObject )
+on_next!(stateObject::StateDataFields, data:: forDisplayObjects) =  setUpMainDisplay(data,stateObject)
+on_next!(stateObject::StateDataFields, data:: ForWordsDispStruct) =  setUpWordsDisplay(data,stateObject)
+on_next!(stateObject::StateDataFields, data::CalcDimsStruct) =  setUpCalcDimsStruct(data,stateObject)
+on_next!(stateObject::StateDataFields, data::valueForMasToSetStruct) =  setUpvalueForMasToSet(data,stateObject)
+on_next!(stateObject::StateDataFields, data::FullScrollableDat) =  setUpForScrollData(data,stateObject)
+on_next!(stateObject::StateDataFields, data::SingleSliceDat) =  updateSingleImagesDisplayedSetUp(data,stateObject)
+on_next!(stateObject::StateDataFields, data::MouseStruct) =  reactToMouseDrag(data,stateObject)
+on_next!(stateObject::StateDataFields, data::KeyboardStruct) =  reactToKeyboard(data,stateObject)
+# on_error!(stateObject::StateDataFields, err)      = error(err)
+# on_complete!(stateObject::StateDataFields)        = ""
 
-#holds actor that is main structure that process inputs from GLFW and reacts to it
-mainActor = sync(ActorWithOpenGlObjects())
-#collecting all subsciptions  to be able to clean all later
-subscriptions = []
+
 
 
 """
-coordinating displaying - sets needed constants that are storeds in  forDisplayConstants; and configures interactions from GLFW events
-listOfTextSpecs - holds required data needed to initialize textures
-keeps also references to needed ..Uniforms etc.
-windowWidth::Int,windowHeight::Int - GLFW window dimensions
-fractionOfMainIm - how much of width should be taken by the main image
-heightToWithRatio - needed for proper display of main texture - so it would not be stretched ...
+Main consumer function
 """
-function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
-                        ,fractionOfMainIm::Float32
-                        ,dataToScrollDims::DataToScrollDims=DataToScrollDims()#stores additional data about full dimensions of scrollable dat - this is necessery for switching slicing plane orientation efficiently
-                        ,windowWidth::Int=1200
-                        ,windowHeight::Int= Int(round(windowWidth*fractionOfMainIm))
-                        ,textTexturewidthh::Int32=Int32(2000)
-                        ,textTextureheightt::Int32= Int32( round((windowHeight/(windowWidth*(1-fractionOfMainIm)) ))*textTexturewidthh)
-                        ,windowControlStruct::WindowControlStruct=WindowControlStruct())
+function consumer(state::StateDataFields, mainChannel::Base.Channel{Any})
+    stateInstance = state#initlizaton of state
+    while true
+        channelData = take!(mainChannel)
+        on_next!(stateInstance, channelData)
+    end
+end
 
-   #in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
-    if( typeof(mainActor.actor.mainForDisplayObjects.window)== GLFW.Window  )
-        cleanUp()
-    end#if
-   #setting number to texture that will be needed in shader configuration
-   listOfTextSpecs::Vector{TextureSpec}= map(x->setproperties(x[2],(whichCreated=x[1])),enumerate(listOfTextSpecsPrim))
-
-
-   #calculations of necessary constants needed to calculate window size , mouse position ...
-   calcDimStruct= CalcDimsStruct(windowWidth=windowWidth
-                  ,windowHeight=windowHeight
-                  ,fractionOfMainIm=fractionOfMainIm
-                  ,wordsImageQuadVert= ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm)
-                  ,wordsQuadVertSize= sizeof( ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm))
-                  ,textTexturewidthh=textTexturewidthh
-                  ,textTextureheightt=textTextureheightt ) |>
-   (calcDim)-> getHeightToWidthRatio(calcDim,dataToScrollDims )|>
-   (calcDim)-> getMainVerticies(calcDim)
-
-   subscribe!(of(calcDimStruct),mainActor )
-
- #creating window and event listening loop
-    window,vertex_shader,fragment_shader ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words,gslsStr =  PrepareWindow.displayAll(listOfTextSpecs,calcDimStruct )
-
-    # than we set those ..Uniforms, open gl types and using data from arguments  to fill texture specifications
-    mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program,windowControlStruct)
-
-    #@info "listOfTextSpecsMapped" listOfTextSpecsMapped
-    #initializing object that holds data reqired for interacting with opengl
-    initializedTextures =  initializeTextures(listOfTextSpecsMapped,calcDimStruct)
-
-    numbDict = filter(x-> x.numb>=0,initializedTextures) |>
-    (filtered)-> Dictionary(map(it->it.numb,filtered),collect(eachindex(filtered))) # a way for fast query using assigned numbers
-
-    forDispObj =  forDisplayObjects(
-            listOfTextSpecifications=initializedTextures
-            ,window= window
-            ,vertex_shader= vertex_shader
-            ,fragment_shader= fragment_shader
-            ,shader_program= shader_program
-            ,stopListening= stopListening
-            ,vbo= vbo[]
-            ,ebo= ebo[]
-            ,mainImageUniforms= mainImageUnifs
-            ,TextureIndexes= Dictionary(map(it->it.name,initializedTextures),collect(eachindex(initializedTextures)))
-            ,numIndexes= numbDict
-            ,gslsStr=gslsStr
-            ,windowControlStruct=windowControlStruct
-   )
-
-
-
-    #finding some texture that can be modifid and set as one active for modifications
-
-       mainActor.actor.textureToModifyVec = filter(it->it.isEditable ,initializedTextures)
-
-    #in order to clean up all resources while closing
-    GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())
-
-    #wrapping the Open Gl and GLFW objects into an observable and passing it to the actor
-    forDisplayConstantObesrvable = of(forDispObj)
-    subscribe!(forDisplayConstantObesrvable, mainActor) # configuring
-    #passing for text display object
-    forTextDispStruct = prepareForDispStruct(length(initializedTextures)
-                                            ,fragment_shader_words
-                                            ,vbo_words
-                                            ,shader_program_words
-                                            ,window
-                                            ,textTexturewidthh
-                                            ,textTextureheightt
-                                            ,forDispObj)
-
-    subscribe!(of(forTextDispStruct),mainActor )
-
-    registerInteractions()#passing needed subscriptions from GLFW
-    Threads.@spawn logChannelData(mainActor)
-
-end #coordinateDisplay
 
 """
 is used to pass into the actor data that will be used for scrolling
 onScrollData - struct holding between others list of tuples where first is the name of the texture that we provided and second is associated data (3 dimensional array of appropriate type)
 """
-function passDataForScrolling(onScrollData::FullScrollableDat)
-    #wrapping the data into an observable and passing it to the actor
-    forScrollData = of(onScrollData)
-    subscribe!(forScrollData, mainActor)
+
+function passDataForScrolling(mainMedEye3dInstance :: MainMedEye3d, onScrollData::FullScrollableDat)
+"""
+put data onto the channel, matching types with on_next.
+"""
+    #modify here the data for passing onto the channel
+    put!(mainMedEye3dInstance.channel, onScrollData)
 end
 
-
-"""
-enables updating just a single slice that is displayed - do not change what will happen after scrolling
-one need to pass data to actor in
-listOfDataAndImageNames - struct holding  tuples where first entry in tuple is name of texture given in the setup and second is 2 dimensional aray of appropriate type with image data
-sliceNumber - the number to which we set slice in order to later start scrolling the scroll data from this point
-"""
-function updateSingleImagesDisplayed( listOfDataAndImageNames::SingleSliceDat)
-    forDispData = of(listOfDataAndImageNames)
-    subscribe!(forDispData, mainActor)
-
-end #updateSingleImagesDisplayed
 
 
  """
 is using the actor that is instantiated in this module and connects it to GLFW context
 by invoking appropriate registering functions and passing to it to the main Actor controlling input
 """
-function registerInteractions()
-    subscriptionsInner = subscribeGLFWtoActor(mainActor)
-    for el in subscriptionsInner
-        push!(subscriptions,el)
-    end #for
-
-
+function registerInteractions(stateInstance::StateDataFields, mainMedEye3dInstance::MainMedEye3d)
+  subscribeGLFWtoActor(stateInstance, mainMedEye3dInstance)
 end
 
 """
@@ -185,6 +99,7 @@ function prepareForDispStruct(numberOfActiveTextUnits::Int
 end#prepereForDispStruct
 
 
+
 """
 In order to properly close displayer we need to :
  remove buffers that wer use
@@ -194,8 +109,8 @@ In order to properly close displayer we need to :
  finalize main actor and reinstantiate it
  close GLFW window
 """
-function cleanUp()
-    obj = mainActor.actor.mainForDisplayObjects
+function cleanUp(stateInstance::StateDataFields)
+    obj = stateInstance.mainForDisplayObjects
     glDeleteTextures(length(obj.listOfTextSpecifications), map(text->text.ID,obj.listOfTextSpecifications));
     glFlush()
     GLFW.DestroyWindow(obj.window)
@@ -219,5 +134,98 @@ function cleanUp()
 end #cleanUp
 
 
+
+
+"""
+coordinating displaying - sets needed constants that are storeds in  forDisplayConstants; and configures interactions from GLFW events
+listOfTextSpecs - holds required data needed to initialize textures
+keeps also references to needed ..Uniforms etc.
+windowWidth::Int,windowHeight::Int - GLFW window dimensions
+fractionOfMainIm - how much of width should be taken by the main image
+heightToWithRatio - needed for proper display of main texture - so it would not be stretched ...
+"""
+function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
+                        ,fractionOfMainIm::Float32
+                        ,dataToScrollDims::DataToScrollDims=DataToScrollDims()#stores additional data about full dimensions of scrollable dat - this is necessery for switching slicing plane orientation efficiently
+                        ,windowWidth::Int=1200
+                        ,windowHeight::Int= Int(round(windowWidth*fractionOfMainIm))
+                        ,textTexturewidthh::Int32=Int32(2000)
+                        ,textTextureheightt::Int32= Int32( round((windowHeight/(windowWidth*(1-fractionOfMainIm)) ))*textTexturewidthh)
+                        ,windowControlStruct::WindowControlStruct=WindowControlStruct())
+    stateInstance = StateDataFields() #initlization of state
+    mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(consumer,1000; spawn=false, threadpool=nothing))
+   #in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
+    if( typeof(stateInstance.mainForDisplayObjects.window)== GLFW.Window  )
+        cleanUp(stateInstance)
+    end#if
+   #setting number to texture that will be needed in shader configuration
+   listOfTextSpecs::Vector{TextureSpec}= map(x->setproperties(x[2],(whichCreated=x[1])),enumerate(listOfTextSpecsPrim))
+
+
+   #calculations of necessary constants needed to calculate window size , mouse position ...
+   calcDimStruct= CalcDimsStruct(windowWidth=windowWidth
+                  ,windowHeight=windowHeight
+                  ,fractionOfMainIm=fractionOfMainIm
+                  ,wordsImageQuadVert= ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm)
+                  ,wordsQuadVertSize= sizeof( ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm))
+                  ,textTexturewidthh=textTexturewidthh
+                  ,textTextureheightt=textTextureheightt ) |>
+   (calcDim)-> getHeightToWidthRatio(calcDim,dataToScrollDims )|>
+   (calcDim)-> getMainVerticies(calcDim)
+
+
+
+ #creating window and event listening loop
+    window,vertex_shader,fragment_shader ,shader_program,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words,gslsStr =  PrepareWindow.displayAll(listOfTextSpecs,calcDimStruct )
+
+    # than we set those ..Uniforms, open gl types and using data from arguments  to fill texture specifications
+    mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program,windowControlStruct)
+
+    #@info "listOfTextSpecsMapped" listOfTextSpecsMapped
+    #initializing object that holds data reqired for interacting with opengl
+    initializedTextures =  initializeTextures(listOfTextSpecsMapped,calcDimStruct)
+
+    numbDict = filter(x-> x.numb>=0,initializedTextures) |>
+    (filtered)-> Dictionary(map(it->it.numb,filtered),collect(eachindex(filtered))) # a way for fast query using assigned numbers
+
+    forDispObj =  forDisplayObjects(
+            listOfTextSpecifications=initializedTextures
+            ,window= window
+            ,vertex_shader= vertex_shader
+            ,fragment_shader= fragment_shader
+            ,shader_program= shader_program
+            ,vbo= vbo[]
+            ,ebo= ebo[]
+            ,mainImageUniforms= mainImageUnifs
+            ,TextureIndexes= Dictionary(map(it->it.name,initializedTextures),collect(eachindex(initializedTextures)))
+            ,numIndexes= numbDict
+            ,gslsStr=gslsStr
+            ,windowControlStruct=windowControlStruct
+   )
+    #finding some texture that can be modifid and set as one active for modifications
+
+    stateInstance.textureToModifyVec = filter(it->it.isEditable ,initializedTextures)
+
+    #in order to clean up all resources while closing
+    GLFW.SetWindowCloseCallback(window, (_) -> cleanUp(stateInstance))
+
+
+    #passing for text display object
+    forTextDispStruct = prepareForDispStruct(length(initializedTextures)
+                                            ,fragment_shader_words
+                                            ,vbo_words
+                                            ,shader_program_words
+                                            ,window
+                                            ,textTexturewidthh
+                                            ,textTextureheightt
+                                            ,forDispObj)
+
+
+
+
+    registerInteractions(stateInstance, mainMedEye3dInstance)#passing needed subscriptions from GLFW
+    errormonitor(@async consumer(stateInstance, mainMedEye3dInstance.channel))
+    return mainMedEye3dInstance
+end #coordinateDisplay
 
 end #SegmentationDisplay

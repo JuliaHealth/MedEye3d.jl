@@ -18,14 +18,13 @@ import MedEye3d.DataStructs.DataToScrollDims
 import MedEye3d.DataStructs.FullScrollableDat
 import MedEye3d.ForDisplayStructs.KeyboardStruct
 import MedEye3d.ForDisplayStructs.MouseStruct
-import MedEye3d.ForDisplayStructs.ActorWithOpenGlObjects
 import MedEye3d.OpenGLDisplayUtils
 import MedEye3d.DisplayWords.textLinesFromStrings
 import MedEye3d.StructsManag.getThreeDims
 
 
 function getImageFromDirectory(dirString,isMHD::Bool, isDicomList::Bool)
-    #simpleITK object used to read from disk 
+    #simpleITK object used to read from disk
     reader = sitk.ImageSeriesReader()
     if(isDicomList)# data in form of folder with dicom files
         dicom_names = reader.GetGDCMSeriesFileNames(dirString)
@@ -43,8 +42,8 @@ function permuteAndReverse(pixels)
     for i in 1:sizz[1]
         for j in 1:sizz[3]
             pixels[i,:,j] =  reverse(pixels[i,:,j])
-        end# 
-    end# 
+        end#
+    end#
     return pixels
   end#permuteAndReverse
 
@@ -98,7 +97,7 @@ textureSpecificationsPETCT = [
       name= "CTIm",
       numb= Int32(3),
       isMainImage = true,
-      minAndMaxValue= Int16.([0,100]))  
+      minAndMaxValue= Int16.([0,100]))
 ];
 # We need also to specify how big part of the screen should be occupied by the main image and how much by text fractionOfMainIm= Float32(0.8);
 fractionOfMainIm= Float32(0.8);
@@ -122,8 +121,8 @@ mainScrollDat = FullScrollableDat(dataToScrollDims =datToScrollDimsB
 
 # function prepares all for display; 1000 in the end is responsible for setting window width for more look into SegmentationDisplay.coordinateDisplay
 
-SegmentationDisplay.coordinateDisplay(textureSpecificationsPETCT ,fractionOfMainIm ,datToScrollDimsB ,1000);
+mainMedEye3d = SegmentationDisplay.coordinateDisplay(textureSpecificationsPETCT ,fractionOfMainIm ,datToScrollDimsB ,1000);
 
-# As all is ready we can finally display image 
+# As all is ready we can finally display image
 
-Main.SegmentationDisplay.passDataForScrolling(mainScrollDat);
+Main.SegmentationDisplay.passDataForScrolling(mainMedEye3d ,mainScrollDat);

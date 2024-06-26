@@ -26,7 +26,7 @@ import ..DataStructs.DataToScrollDims
 import ..DataStructs.FullScrollableDat
 import ..ForDisplayStructs.KeyboardStruct
 import ..ForDisplayStructs.MouseStruct
-import ..ForDisplayStructs.ActorWithOpenGlObjects
+# import ..ForDisplayStructs.ActorWithOpenGlObjects
 import ..OpenGLDisplayUtils
 import ..DisplayWords.textLinesFromStrings
 import ..StructsManag.getThreeDims

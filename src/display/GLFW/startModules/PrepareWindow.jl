@@ -25,44 +25,41 @@ function displayAll(listOfTexturesToCreate::Vector{TextureSpec}
 		@error " MedEye3D above version 0.5.6 requires setting of the interactive Thread (feature available from Julia 1.9 ) one can set it in linux by enviromental variable export JULIA_NUM_THREADS=3,1 where 1 after the coma is the interactive thread and 3 is the number of the other threads available on your machine; or start julia like this julia --threads 3,1; you can also use the docker container prepared by the author from  https://github.com/jakubMitura14/MedPipe3DTutorial. . More about interactive THreads on https://docs.julialang.org/en/v1/manual/multi-threading/"
 		throw(error())
 
-	end #if    
-	
-	# atomic variable that is enabling stopping async loop of event listening in order to enable othe actions with GLFW context
-	stopListening = Threads.Atomic{Bool}(0)
-	stopListening[]=false
+	end #if
 
-	if(Threads.nthreads()==1) 
+
+	if(Threads.nthreads()==1)
 		println("increase number of available threads look into https://docs.julialang.org/en/v1/manual/multi-threading/  or modify for example in vs code extension")
     end
     # Create the window. This sets all the hints and makes the context current.
 	window = initializeWindow(calcDimsStruct.windowWidth,calcDimsStruct.windowHeight)
-    
-   	# The shaders 
+
+   	# The shaders
 	println(createcontextinfo())
 	gslsStr = get_glsl_version_string()
 
 
 	vertex_shader = createVertexShader(gslsStr)
-	
+
 	masks = filter(textSpec-> !textSpec.isMainImage ,listOfTexturesToCreate)
 	someExampleMask = masks[begin]
 	someExampleMaskB = masks[end]
 	# @info "masks set for subtraction $(someExampleMask.name)" someExampleMaskB.name
 	fragment_shader_main,shader_program= createAndInitShaderProgram(vertex_shader,listOfTexturesToCreate,someExampleMask,someExampleMaskB,gslsStr  )
-	
+
 	glUseProgram(shader_program)
-	
+
 ##for control of text display
 	fragment_shader_words = ShadersAndVerticiesForText.createFragmentShader(gslsStr)
 	shader_program_words = glCreateProgram()
 	glAttachShader(shader_program_words, fragment_shader_words)
 	glAttachShader(shader_program_words, vertex_shader)
 
-	
+
 	vbo_words = Ref(GLuint(1))   # initial value is irrelevant, just allocate space
     glGenBuffers(1, vbo_words)
 ##for control of text display
-  
+
 
 ###########buffers
 	#create vertex buffer
@@ -77,20 +74,18 @@ function displayAll(listOfTexturesToCreate::Vector{TextureSpec}
 	#capturing The data from GLFW
 	controllWindowInput(window)
 
-#loop that enables reacting to mouse and keyboards inputs  so every 0.1 seconds it will check GLFW weather any new events happened	
+#loop that enables reacting to mouse and keyboards inputs  so every 0.1 seconds it will check GLFW weather any new events happened
 	t = @task begin;
 		while(!GLFW.WindowShouldClose(window))
 		sleep(0.005);
-		if(!stopListening[])
 		 # Poll for and process events
 		  GLFW.PollEvents()
-			end
 		end
 		end
 	schedule(t)
 
 
-return (window,vertex_shader,fragment_shader_main ,shader_program,stopListening,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words,gslsStr)
+return (window,vertex_shader,fragment_shader_main ,shader_program,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words,gslsStr)
 
 end# displayAll
 
