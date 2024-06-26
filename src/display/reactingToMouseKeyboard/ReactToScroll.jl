@@ -5,38 +5,10 @@ Generally first we need to pass the GLFW callback to the Rocket obeservable
 code adapted from https://discourse.julialang.org/t/custom-subject-in-rocket-jl-for-mouse-events-from-glfw/65133/3
 """
 module ReactToScroll
-using ModernGL, ..DisplayWords, Rocket, GLFW, ..ForDisplayStructs, ..TextureManag, Logging, ..DataStructs, ..StructsManag
+using ModernGL, ..DisplayWords, GLFW, ..ForDisplayStructs, ..TextureManag, Logging, ..DataStructs, ..StructsManag
 
 export reactToScroll
 export registerMouseScrollFunctions
-
-
-
-
-
-"""
-configuting Rocket on Subscribe so we get custom handler of input as we see we still need to define actor
-"""
-function Rocket.on_subscribe!(handler::ScrollCallbackSubscribable, actor::SyncActor{Any,ActorWithOpenGlObjects})
-    return subscribe!(handler.subject, actor)
-end
-
-
-
-"""
-we define how handler should act on the subject - observable so it will pass event onto subject
-If we will scroll fast number will change much  and we will skip some slices
-"""
-function (handler::ScrollCallbackSubscribable)(_, xoff, yoff)
-
-    if (!handler.isBusy[]) # if program is ready to repsond
-        handler.numberToSend = 0
-        next!(handler.subject, Int64(handler.numberToSend + yoff))#true if we scroll up
-    else
-        handler.numberToSend += yoff
-    end
-end
-
 
 
 
@@ -45,32 +17,14 @@ end
 uploading data to given texture; of given types associated
 returns subscription in order to enable unsubscribing in the end
 window - GLFW window
-stopListening - atomic boolean able to stop the event listening cycle
 return scrollback - that holds boolean subject (observable) to which we can react by subscribing appropriate actor
 """
-function registerMouseScrollFunctions(window::GLFW.Window, stopListening::Base.Threads.Atomic{Bool}, isBusy::Base.Threads.Atomic{Bool}, actor::SyncActor{Any,ActorWithOpenGlObjects})
-
-    stopListening[] = true # stoping event listening loop to free the GLFW context
-
-    # scrollback = ScrollCallbackSubscribable( isBusy,0 ,StructsManag.Subject(Int64, scheduler = AsyncScheduler_spawned()))
-    scrollback = ScrollCallbackSubscribable( isBusy,0 ,Subject(Int64, scheduler = AsyncScheduler()))
-    # scrollback = ScrollCallbackSubscribable(isBusy, 0, Subject(Int64, scheduler=Rocket.ThreadsScheduler()))
+function registerMouseScrollFunctions(window::GLFW.Window, mainChannel :: Base.Channel{Any})
     GLFW.SetScrollCallback(window, (a, xoff, yoff) -> begin
-    put!(actor.actor.threadChannel, (xoff,yoff))
+    put!(mainChannel, (a, xoff, yoff) -> Int64(yoff)) #if there is type distortion in the channel, we can implement custom struct types
 end)
 
-    stopListening[] = false # reactivate event listening loop
-
-
-    return scrollback
-
 end #registerMouseScrollFunctions
-
-"""
-captures information send from handler that scroll was executed by the
-"""
-
-
 
 
 """
@@ -79,13 +33,12 @@ in response to it it sets new screen int variable and changes displayed screen
 toBeSavedForBack - just marks weather we wat to save the info how to undo latest action
  - false if we invoke it from undoing
 """
-function reactToScroll(scrollNumb::Int64, actor::SyncActor{Any,ActorWithOpenGlObjects}, toBeSavedForBack::Bool=true)
-    actor.actor.mainForDisplayObjects.stopListening[] = true
-    current = actor.actor.currentDisplayedSlice
+function reactToScroll(scrollNumb::Int64, mainState::StateDataFields, toBeSavedForBack::Bool=true)
+    current = mainState.currentDisplayedSlice
     old = current
     #when shift is pressed scrolling is 10 times faster
 
-    if (!actor.actor.mainForDisplayObjects.isFastScroll)
+    if (!mainState.mainForDisplayObjects.isFastScroll)
         current += scrollNumb
     else
         current += scrollNumb * 10
@@ -95,11 +48,10 @@ function reactToScroll(scrollNumb::Int64, actor::SyncActor{Any,ActorWithOpenGlOb
     #isScrollUp ? current+=1 : current-=1
 
     # we do not want to move outside of possible range of slices
-    lastSlice = actor.actor.onScrollData.slicesNumber
+    lastSlice = mainState.onScrollData.slicesNumber
     if (lastSlice > 1)
 
-        actor.actor.isSliceChanged = true
-        actor.actor.isBusy[] = true
+        mainState.isSliceChanged = true
         if (current < 1)
             current = 1
         end
@@ -111,34 +63,31 @@ function reactToScroll(scrollNumb::Int64, actor::SyncActor{Any,ActorWithOpenGlOb
         end
         #logic to change displayed screen
         #we select slice that we are intrested in
-        singleSlDat = actor.actor.onScrollData.dataToScroll |>
-                      (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(current), actor.actor.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
-                                  (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=current, textToDisp=getTextForCurrentSlice(actor.actor.onScrollData, Int32(current)))
+        singleSlDat = mainState.onScrollData.dataToScroll |>
+                      (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(current), mainState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
+                                  (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=current, textToDisp=getTextForCurrentSlice(mainState.onScrollData, Int32(current)))
 
 
-                                  updateImagesDisplayed(singleSlDat, actor.actor.mainForDisplayObjects, actor.actor.textDispObj, actor.actor.calcDimsStruct, actor.actor.valueForMasToSet)
+                                  updateImagesDisplayed(singleSlDat, mainState.mainForDisplayObjects, mainState.textDispObj, mainState.calcDimsStruct, mainState.valueForMasToSet)
 
 
 
-        actor.actor.currentlyDispDat = singleSlDat
+        mainState.currentlyDispDat = singleSlDat
         # updating the last mouse position so when we will change plane it will better show actual position
-        currentDim = Int64(actor.actor.onScrollData.dataToScrollDims.dimensionToScroll)
-        lastMouse = actor.actor.lastRecordedMousePosition
+        currentDim = Int64(mainState.onScrollData.dataToScrollDims.dimensionToScroll)
+        lastMouse = mainState.lastRecordedMousePosition
         locArr = [lastMouse[1], lastMouse[2], lastMouse[3]]
         locArr[currentDim] = current
-        actor.actor.lastRecordedMousePosition = CartesianIndex(locArr[1], locArr[2], locArr[3])
+        mainState.lastRecordedMousePosition = CartesianIndex(locArr[1], locArr[2], locArr[3])
         #saving information about current slice for future reference
-        actor.actor.currentDisplayedSlice = current
+        mainState.currentDisplayedSlice = current
         #enable undoing the action
         if (toBeSavedForBack)
-            func = () -> reactToScroll(old -= scrollNumb, actor, false)
-            addToforUndoVector(actor, func)
+            func = () -> reactToScroll(old -= scrollNumb, mainState, false)
+            addToforUndoVector(mainState, func)
         end
 
     end#if
-    actor.actor.isBusy[] = false
-    actor.actor.mainForDisplayObjects.stopListening[] = false
-
 
 end#reactToScroll
 

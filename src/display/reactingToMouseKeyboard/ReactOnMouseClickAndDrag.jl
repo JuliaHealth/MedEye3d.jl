@@ -11,78 +11,11 @@ so we modify the data that is the basis of the mouse interaction mask  and we pa
 
 """
 module ReactOnMouseClickAndDrag
-using Logging, Parameters, Rocket, Setfield, GLFW, ModernGL, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils
+using Logging, Parameters, Setfield, GLFW, ModernGL, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils
 using Dates, Parameters, ..DataStructs, ..StructsManag,Logging, Base.Threads
 import Logging, Base.Threads
 export registerMouseClickFunctions
 export reactToMouseDrag
-
-
-"""
-configuting Rocket on Subscribe so we get custom handler of input as we see we still need to define actor
-"""
-# function Rocket.on_subscribe!(handler::MouseCallbackSubscribable, actor::SyncActor{Any, ActorWithOpenGlObjects})
-#     return subscribe!(handler.subject, actor)
-# end
-
-function Rocket.on_subscribe!(handler::MouseCallbackSubscribable, actor::SyncActor{Any,ActorWithOpenGlObjects})
-
-    return subscribe!(handler.subject, actor)
-end
-
-"""
-we define how handler should act on the subject - observable so it will pass event onto subject - here we have 2 events that we want to be ready for - mouse button press
-example of possible inputs that we would be intrested in
-for example : cursor: 29.0, 469.0  types   Float64  Float64
-for example  MOUSE_BUTTON_1 PRESS    types GLFW.MouseButton  GLFW.Action
-             MOUSE_BUTTON_1 RELEASE  types GLFW.MouseButton  GLFW.Action
-We get two overloads so we will be able to respond with single handler to both mouse click and mouse position
-Enum GLFW.Action:
-RELEASE = 0
-PRESS = 1
-REPEAT = 2
-Enum GLFW.MouseButton:
-MOUSE_BUTTON_1 = 0
-MOUSE_BUTTON_2 = 1
-
-experiments show that max x,y in window is both 600 if window width and height is 600
- so in order to specify weather we are over aour quad we need to know how big is primary quad -
-  defaoul it is occupying 100% of y axis and first left 80% of x axis
-  hence we can calculate max height to equal the height of the window
-"""
-function (handler::MouseCallbackSubscribable)(a, x::Float64, y::Float64)
-    point = CartesianIndex(Int(x), Int(y))
-    handler.lastCoordinate = point
-
-    if (handler.isLeftButtonDown && x >= handler.xmin && x <= handler.xmax && y >= handler.ymin && y <= handler.ymax)
-        push!(handler.coordinatesStoreForLeftClicks, point) # putting coordinate to the list it will be processed when context will be ready
-        if (!handler.isBusy[])
-
-            #sending mouse position only if all conditions are met
-            next!(handler.subject, MouseStruct(
-                isLeftButtonDown=handler.isLeftButtonDown, isRightButtonDown=handler.isRightButtonDown, lastCoordinates=handler.coordinatesStoreForLeftClicks))#sending mouse position only if all conditions are met
-            handler.coordinatesStoreForLeftClicks = [point]
-        end#if
-    #now we also get intrested about  right clicks becouse they help to controll
-    elseif (handler.isRightButtonDown)
-        next!(handler.subject, MouseStruct(
-            isLeftButtonDown=handler.isLeftButtonDown, isRightButtonDown=handler.isRightButtonDown, lastCoordinates=[point]))#sending mouse position only if all conditions are met
-
-    end#if
-
-end #handler
-
-function (handler::MouseCallbackSubscribable)(a, button::GLFW.MouseButton, action::GLFW.Action, m)
-
-
-    res = (button == GLFW.MOUSE_BUTTON_1 && action == GLFW.PRESS)#so it will stop either as we relese left mouse or click right
-    handler.isLeftButtonDown = res
-    handler.isRightButtonDown = (button == GLFW.MOUSE_BUTTON_2 && action == GLFW.PRESS)
-
-    if (res)
-        handler.coordinatesStoreForLeftClicks = [handler.lastCoordinate]
-    end #if
-end #second handler
 
 
 
@@ -91,31 +24,16 @@ we pass coordinate of cursor only when isLeftButtonDown is true and we make it t
 if left button is presed down - we make it true if the left button is pressed over image and false if mouse get out of the window or we get information about button release
 imageWidth adn imageHeight are the dimensions of textures that we use to display
 """
-function registerMouseClickFunctions(window::GLFW.Window, stopListening::Base.Threads.Atomic{Bool}, calcD::CalcDimsStruct, isBusy::Base.Threads.Atomic{Bool}, actor::SyncActor{Any, ActorWithOpenGlObjects})
-
-
-    stopListening[] = true # stoping event listening loop to free the GLFW context
-
+function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct, mainChannel::Base.Channel{Any})
 
     # calculating dimensions of quad becouse it do not occupy whole window, and we want to react only to those mouse positions that are on main image quad
-    mouseButtonSubs = MouseCallbackSubscribable(isLeftButtonDown=false, isRightButtonDown=false, xmin=Int32(calcD.windowWidthCorr), ymin=Int32(calcD.windowHeightCorr), xmax=Int32(calcD.avWindWidtForMain - calcD.windowWidthCorr), ymax=Int32(calcD.avWindHeightForMain - calcD.windowHeightCorr), coordinatesStoreForLeftClicks=[], lastCoordinate=CartesianIndex(1, 1), isBusy=isBusy
-    # , subject=Subject(MouseStruct, scheduler=Rocket.ThreadsScheduler()))
-    # ,subject=StructsManag.Subject(MouseStruct  ,scheduler = AsyncScheduler_spawned()))
-    ,subject=Subject(MouseStruct  ,scheduler = AsyncScheduler()))
-
 
     GLFW.SetCursorPosCallback(window, (a, x, y) -> begin
-put!(actor.actor.threadChannel, (a,x,y))
+put!(mainChannel, (a,x,y))
 end)# and  for example : cursor: 29.0, 469.0  types   Float64  Float64
     GLFW.SetMouseButtonCallback(window, (a, button, action, mods) -> begin
-put!(actor.actor.threadChannel, (a, button, action, mods))
+put!(mainChannel, (a, button, action, mods))
 end) # for example types MOUSE_BUTTON_1 PRESS   GLFW.MouseButton  GLFW.Action
-
-    stopListening[] = false # reactivate event listening loop
-
-    return mouseButtonSubs
-
-
 
 end #registerMouseScrollFunctions
 
@@ -128,11 +46,11 @@ mouseCoords_channel=Base.Channel{MouseStruct}(100)
 used when we want to save some manual modifications
 """
 # function react_to_draw(textureList,actor,mouseCoords_channel)
-function react_to_draw(textureList,actor,obj)
+function react_to_draw(textureList,stateObject,obj)
     # sleep(0.1);
     # @info "react_to_draw after sleep" isready(mouseCoords_channel)
     texture = textureList[1]
-    calcDim = actor.actor.calcDimsStruct
+    calcDim = stateObject.calcDimsStruct
 
     # mouseCoords=take!(mouseCoords_channel).lastCoordinates
     # mappedCoords=translateMouseToTexture(texture.strokeWidth, mouseCoords, actor.actor.calcDimsStruct)
@@ -142,35 +60,35 @@ function react_to_draw(textureList,actor,obj)
     while(isready(mouseCoords_channel) )
         is_sth_in=true
         mouseCoords=take!(mouseCoords_channel).lastCoordinates
-        append!( mappedCoords,translateMouseToTexture(texture.strokeWidth, mouseCoords, actor.actor.calcDimsStruct))
+        append!( mappedCoords,translateMouseToTexture(texture.strokeWidth, mouseCoords, stateObject.calcDimsStruct))
     end
     # @info "react_to_draw after channel" mappedCoords
 
     # is_sth_in=true
     if(is_sth_in)
-        twoDimDat = actor.actor.currentlyDispDat |> # accessing currently displayed data
+        twoDimDat = stateObject.currentlyDispDat |> # accessing currently displayed data
                     (singSl) -> singSl.listOfDataAndImageNames[singSl.nameIndexes[texture.name]] #accessing the texture data we want to modify
 
 
 
-        toSet = convert(parameter_type(texture), actor.actor.valueForMasToSet.value)
+        toSet = convert(parameter_type(texture), stateObject.valueForMasToSet.value)
         sliceDat = modSlice!(twoDimDat, mappedCoords, convert(twoDimDat.type, toSet)) # modifying data associated with texture
 
 
         #  updateTexture(twoDimDat.type,sliceDat, texture,0,0,calcDim.imageTextureWidth,calcDim.imageTextureHeight  )
 
-        singleSliceDat = setproperties(actor.actor.currentlyDispDat, (listOfDataAndImageNames = [sliceDat]))
+        singleSliceDat = setproperties(stateObject.currentlyDispDat, (listOfDataAndImageNames = [sliceDat]))
 
 
 
-        updateImagesDisplayed(singleSliceDat, actor.actor.mainForDisplayObjects, actor.actor.textDispObj, actor.actor.calcDimsStruct, actor.actor.valueForMasToSet)
+        updateImagesDisplayed(singleSliceDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, stateObject.calcDimsStruct, stateObject.valueForMasToSet)
 
 
 
 
 
         #to enable undoing we just set the point we modified back to 0
-        addToforUndoVector(actor, () -> begin
+        addToforUndoVector(stateObject, () -> begin
             modSlice!(twoDimDat, mappedCoords, convert(twoDimDat.type, 0)) |> # modifying data associated with texture
             (sliceDat) -> updateTexture(twoDimDat.type, sliceDat.dat, texture, 0, 0, calcDim.imageTextureWidth, calcDim.imageTextureHeight)
             basicRender(obj.window)
@@ -186,11 +104,9 @@ we use mouse coordinate to modify the texture that is currently active for modif
     - we take information about texture currently active for modifications from variables stored in actor
     from texture specification we take also its id and its properties ...
 """
-function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any,ActorWithOpenGlObjects})
-    obj = actor.actor.mainForDisplayObjects
-    obj.stopListening[] = true #free GLFW context
-    actor.actor.isBusy[] = true# mark that OpenGL is busy
-    textureList = actor.actor.textureToModifyVec
+function reactToMouseDrag(mousestr::MouseStruct, mainState::StateDataFields)
+    obj = mainState.mainForDisplayObjects
+    textureList = mainState.textureToModifyVec
     mouseCoords = mousestr.lastCoordinates
 
     if (!isempty(textureList) && mousestr.isLeftButtonDown && textureList[1].isEditable)
@@ -198,21 +114,19 @@ function reactToMouseDrag(mousestr::MouseStruct, actor::SyncActor{Any,ActorWithO
 
         # @spawn :interactive react_to_draw(textureList,actor,mouseCoords)
         #@spawn :interactive
-        react_to_draw(textureList,actor,obj)
+        react_to_draw(textureList,mainState,obj)
 
 
     elseif (mousestr.isRightButtonDown)
         #we save data about right click position in order to change the slicing plane accordingly
-        mappedCoords = translateMouseToTexture(Int32(1), mouseCoords, actor.actor.calcDimsStruct)
+        mappedCoords = translateMouseToTexture(Int32(1), mouseCoords, mainState.calcDimsStruct)
         mappedCorrd = mappedCoords
         if (!isempty(mappedCorrd))
-            cartMapped = cartTwoToThree(actor.actor.onScrollData.dataToScrollDims, actor.actor.currentDisplayedSlice, mappedCoords[1])
+            cartMapped = cartTwoToThree(mainState.onScrollData.dataToScrollDims, mainState.currentDisplayedSlice, mappedCoords[1])
 
-            actor.actor.lastRecordedMousePosition = cartMapped
+            mainState.lastRecordedMousePosition = cartMapped
         end#if
     end #if
-    actor.actor.isBusy[] = false # we can do sth in opengl
-    obj.stopListening[] = false # reactivete event listening loop
 end#..ReactToScroll
 
 

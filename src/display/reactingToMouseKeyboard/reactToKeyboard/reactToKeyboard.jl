@@ -5,181 +5,124 @@ module coordinating response to the  keyboard input - mainly shortcuts that  hel
 """
 #@doc ReactOnKeyboardSTR
 module ReactOnKeyboard
-using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow,   ..DataStructs , Rocket, GLFW,Dictionaries,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils,  ..Uniforms, Match, Parameters,DataTypesBasic
+using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow,   ..DataStructs , GLFW,Dictionaries,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils,  ..Uniforms, Match, Parameters,DataTypesBasic
 using ..KeyboardMouseHelper,..MaskDiffrence, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane
 export reactToKeyboard , registerKeyboardFunctions,processKeysInfo
 
 
-
-"""
-will "tell" what functions should be invoked in order to process keyboard input
-"""
-function Rocket.on_subscribe!(handler::KeyboardCallbackSubscribable, actor::SyncActor{Any, ActorWithOpenGlObjects})
-    return subscribe!(handler.subject, actor)
-end
-
-
-"""
-given pressed keys lik 1-9 and all letters resulting key is encoded as string and will be passed here
-handler object responsible for capturing action
-str - name of key lik 1,5 f,.j ... but not ctrl shift etc
-action - for example key press or release
-scancode - if key do not have short name like ctrl ... it has scancode
-"""
-function (handler::KeyboardCallbackSubscribable)(str::String, action::GLFW.Action)
-
-    if( (action==collect(instances(GLFW.Action))[2])  )
-        push!(handler.lastKeysPressed ,str)
-   end#if
-end #handler
-
-GLFW.PRESS
-
-function (handler::KeyboardCallbackSubscribable)(scancode ::GLFW.Key, action::GLFW.Action)
-    #1 pressed , 2 released -1 sth else
-    second_action = collect(instances(GLFW.Action))[2]
-    first_action =  collect(instances(GLFW.Action))[1]
-    if action == second_action
-        act = 1
-    elseif action == first_action
-        act = 2
-    else
-        act = -1
-    end
-
-   if(act>0)# so we have press or relese
-
-        if scancode == GLFW.KEY_RIGHT_CONTROL || scancode == GLFW.KEY_LEFT_CONTROL
-            handler.isCtrlPressed = (act == 1)
-            scCode = "ctrl"
-        elseif scancode == GLFW.KEY_LEFT_SHIFT || scancode == GLFW.KEY_RIGHT_SHIFT
-            handler.isShiftPressed = (act == 1)
-            scCode = "shift"
-        elseif scancode == GLFW.KEY_RIGHT_ALT || scancode == GLFW.KEY_LEFT_ALT
-            handler.isAltPressed = (act == 1)
-            scCode = "alt"
-        elseif scancode == GLFW.KEY_SPACE
-            handler.isSpacePressed = (act == 1)
-            scCode = "space"
-        elseif scancode == GLFW.KEY_TAB
-            handler.isTabPressed = (act == 1)
-            scCode = "tab"
-        elseif scancode == GLFW.KEY_ENTER
-            handler.isEnterPressed = (act == 1)
-            scCode = "enter"
-        elseif scancode == GLFW.KEY_F1 || scancode == GLFW.KEY_F2 || scancode == GLFW.KEY_F3
-            handler.isEnterPressed = (act == 1)
-            scCode = "f1"
-        elseif scancode == GLFW.KEY_F4
-            handler.isF4Pressed = (act == 1)
-            scCode = "f4"
-        elseif scancode == GLFW.KEY_F5
-            handler.isF5Pressed = (act == 1)
-            scCode = "f5"
-        elseif scancode == GLFW.KEY_F6
-            handler.isF6Pressed = (act == 1)
-            scCode = "f6"
-        elseif scancode == GLFW.KEY_Z
-            handler.isZPressed = (act == 1)
-            scCode = "z"
-        elseif scancode == GLFW.KEY_F
-            handler.isFPressed = (act == 1)
-            scCode = "f"
-        elseif scancode == GLFW.KEY_S
-            handler.isSPressed = (act == 1)
-            scCode = "s"
-        elseif scancode == GLFW.KEY_KP_ADD || scancode == GLFW.KEY_EQUAL
-            handler.isPlusPressed = (act == 1)
-            scCode = "+"
-        elseif scancode == GLFW.KEY_KP_SUBTRACT || scancode == GLFW.KEY_MINUS
-            handler.isMinusPressed = (act == 1)
-            scCode = "-"
-        else
-            scCode = "notImp"
-        end
-            res = KeyboardStruct(isCtrlPressed=handler.isCtrlPressed || scCode=="ctrl"
-                    , isShiftPressed= handler.isShiftPressed ||scCode=="shift"
-                    ,isAltPressed= handler.isAltPressed ||scCode=="alt"
-                    ,isSpacePressed= handler.isSpacePressed ||scCode=="space"
-                    ,isTAbPressed= handler.isTAbPressed ||scCode=="tab"
-                    ,isF1Pressed= handler.isF1Pressed ||scCode=="f1"
-                    ,isF2Pressed= handler.isF2Pressed ||scCode=="f2"
-                    ,isF3Pressed= handler.isF3Pressed ||scCode=="f3"
-                    ,isF4Pressed= handler.isF4Pressed ||scCode=="f4"
-                    ,isF5Pressed= handler.isF5Pressed ||scCode=="f5"
-                    ,isF6Pressed= handler.isF6Pressed ||scCode=="f6"
-
-                    ,isZPressed= handler.isZPressed ||scCode=="z"
-                    ,isFPressed= handler.isFPressed ||scCode=="f"
-                    ,isSPressed= handler.isSPressed ||scCode=="s"
-
-                    ,isPlusPressed= handler.isPlusPressed ||scCode=="+"
-                    ,isMinusPressed= handler.isMinusPressed ||scCode=="-"
-
-                    ,isEnterPressed= handler.isEnterPressed
-                    ,lastKeysPressed= handler.lastKeysPressed
-                    ,mostRecentScanCode = scancode
-                    ,mostRecentKeyName = "" # just marking it as empty
-                    ,mostRecentAction = action)
-
-
-            if(shouldBeExecuted(res,act))
-                next!(handler.subject, res )
-                handler.lastKeysPressed=[]
-
-            end#if
-
-    end#if
-
-
-end #second handler
 
 
 
 """
 registering functions to the GLFW
 window - GLFW window with Visualization
-stopListening - atomic boolean enabling unlocking GLFW context
 """
-function registerKeyboardFunctions(window::GLFW.Window,stopListening::Base.Threads.Atomic{Bool}, actor::SyncActor{Any, ActorWithOpenGlObjects})
-
-    stopListening[]=true # stoping event listening loop to free the GLFW context
-
-    keyboardSubs = KeyboardCallbackSubscribable()
-
+function registerKeyboardFunctions(window::GLFW.Window, mainChannel::Base.Channel{Any})
 
     GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
         name = GLFW.GetKeyName(key, scancode)
-        if name === nothing || name =="+" || name =="-" || name =="z"  || name =="f"  || name =="s"
-            put!(actor.actor.threadChannel, (scancode, action))
+
+        act = nothing
+        scCode = nothing
+        second_action = collect(instances(GLFW.Action))[2]
+        first_action =  collect(instances(GLFW.Action))[1]
+        if action == second_action
+            act = 1
+        elseif action == first_action
+            act = 2
         else
-            put!(actor.actor.threadChannel, (name, action))
+            act = -1
         end
-        end)
 
-   stopListening[]=false # reactivate event listening loop
+       if(act>0)# so we have press or relese
 
-return keyboardSubs
+            if scancode == GLFW.KEY_RIGHT_CONTROL || scancode == GLFW.KEY_LEFT_CONTROL
+                scCode = "ctrl"
+            elseif scancode == GLFW.KEY_LEFT_SHIFT || scancode == GLFW.KEY_RIGHT_SHIFT
+                scCode = "shift"
+            elseif scancode == GLFW.KEY_RIGHT_ALT || scancode == GLFW.KEY_LEFT_ALT
+                scCode = "alt"
+            elseif scancode == GLFW.KEY_SPACE
+                scCode = "space"
+            elseif scancode == GLFW.KEY_TAB
+                scCode = "tab"
+            elseif scancode == GLFW.KEY_ENTER
+                scCode = "enter"
+            elseif scancode == GLFW.KEY_F1 || scancode == GLFW.KEY_F2 || scancode == GLFW.KEY_F3
+                scCode = "f1"
+            elseif scancode == GLFW.KEY_F4
+                scCode = "f4"
+            elseif scancode == GLFW.KEY_F5
+                scCode = "f5"
+            elseif scancode == GLFW.KEY_F6
+                scCode = "f6"
+            elseif scancode == GLFW.KEY_Z
+                scCode = "z"
+            elseif scancode == GLFW.KEY_F
+                scCode = "f"
+            elseif scancode == GLFW.KEY_S
+                scCode = "s"
+            elseif scancode == GLFW.KEY_KP_ADD || scancode == GLFW.KEY_EQUAL
+                scCode = "+"
+            elseif scancode == GLFW.KEY_KP_SUBTRACT || scancode == GLFW.KEY_MINUS
+                scCode = "-"
+            else
+                scCode = "notImp"
+            end
+            res = KeyboardStruct(scCode=="ctrl"
+                        ,scCode=="shift"
+                        ,scCode=="alt"
+                        ,scCode=="space"
+                        ,scCode=="tab"
+                        ,scCode=="f1"
+                        ,scCode=="f2"
+                        ,scCode=="f3"
+                        ,scCode=="f4"
+                        ,scCode=="f5"
+                        ,scCode=="f6"
 
+                        ,scCode=="z"
+                        ,scCode=="f"
+                        ,scCode=="s"
+
+                        ,scCode=="+"
+                        ,scCode=="-"
+
+                        ,isEnterPressed= ""#handler.isEnterPressed ISSUE
+                        ,lastKeysPressed= ""#handler.lastKeysPressed ISSUE
+                        ,mostRecentScanCode = scancode
+                        ,mostRecentKeyName = "" # just marking it as empty
+                        ,mostRecentAction = action)
+
+
+
+
+            if name === nothing || name =="+" || name =="-" || name =="z"  || name =="f"  || name =="s"
+                put!(mainChannel, res)
+            else
+                put!(mainChannel, res)
+            end
+        end
+    end)
 end #registerKeyboardFunctions
 
 
 #multiple dispatch controls what will be invoked
-processKeysInfo(a::Const{Nothing},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) = "" # just doing nothing in case of empty option
-processKeysInfo(a::Identity{Tuple{Const{Nothing}, Identity{TextureSpec{T}}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T = "" # just doing nothing in case of empty option
-processKeysInfo(a::Identity{Tuple{Const{Nothing}, Const{Nothing}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) = "" # just doing nothing in case of empty option
-processKeysInfo(a::Identity{Tuple{ Identity{TextureSpec{T}}, Const{Nothing}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T = "" # just doing nothing in case of empty option
+processKeysInfo(a::Const{Nothing},stateObject::StateDataFields,keyInfo::KeyboardStruct ) = "" # just doing nothing in case of empty option
+processKeysInfo(a::Identity{Tuple{Const{Nothing}, Identity{TextureSpec{T}}}},stateObject::StateDataFields,keyInfo::KeyboardStruct ) where T = "" # just doing nothing in case of empty option
+processKeysInfo(a::Identity{Tuple{Const{Nothing}, Const{Nothing}}},stateObject::StateDataFields,keyInfo::KeyboardStruct ) = "" # just doing nothing in case of empty option
+processKeysInfo(a::Identity{Tuple{ Identity{TextureSpec{T}}, Const{Nothing}}},stateObject::StateDataFields,keyInfo::KeyboardStruct ) where T = "" # just doing nothing in case of empty option
 #just passing definitions from submodules
-processKeysInfo(textSpecObs::Identity{TextureSpec{T}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T = KeyboardVisibility.processKeysInfo(textSpecObs,actor,keyInfo)
-processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct,toBeSavedForBack::Bool = true ) where T = ChangePlane.processKeysInfo(toScrollDatPrim,actor, keyInfo, toBeSavedForBack )
-processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec{T}}, Identity{TextureSpec{G}}}},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where {T,G} = MaskDiffrence.processKeysInfo(maskNumbs,actor,keyInfo)
-processKeysInfo(numbb::Identity{Int64}     ,actor::SyncActor{Any, ActorWithOpenGlObjects}  ,keyInfo::KeyboardStruct    ,toBeSavedForBack::Bool = true) where T = OtherKeyboardActions.processKeysInfo(numbb,actor,keyInfo,toBeSavedForBack   )
-processKeysInfo(numbb::Identity{Bool},actor::SyncActor{Any, ActorWithOpenGlObjects},keyInfo::KeyboardStruct ) where T = OtherKeyboardActions.processKeysInfoUndo( numbb, actor,keyInfo  )
-processKeysInfo(annot::Identity{AnnotationStruct}  ,actor::SyncActor{Any, ActorWithOpenGlObjects} ,keyInfo::KeyboardStruct ,toBeSavedForBack::Bool = true) where T = OtherKeyboardActions.processKeysInfo(annot,actor,keyInfo,toBeSavedForBack  )
+processKeysInfo(textSpecObs::Identity{TextureSpec{T}},stateObject::StateDataFields,keyInfo::KeyboardStruct ) where T = KeyboardVisibility.processKeysInfo(textSpecObs,stateObject,keyInfo)
+processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims},stateObject::StateDataFields,keyInfo::KeyboardStruct,toBeSavedForBack::Bool = true ) where T = ChangePlane.processKeysInfo(toScrollDatPrim,stateObject, keyInfo, toBeSavedForBack )
+processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec{T}}, Identity{TextureSpec{G}}}},stateObject::StateDataFields,keyInfo::KeyboardStruct ) where {T,G} = MaskDiffrence.processKeysInfo(maskNumbs,stateObject,keyInfo)
+processKeysInfo(numbb::Identity{Int64}     ,stateObject::StateDataFields  ,keyInfo::KeyboardStruct    ,toBeSavedForBack::Bool = true) where T = OtherKeyboardActions.processKeysInfo(numbb,stateObject,keyInfo,toBeSavedForBack   )
+processKeysInfo(numbb::Identity{Bool},stateObject::StateDataFields,keyInfo::KeyboardStruct ) where T = OtherKeyboardActions.processKeysInfoUndo( numbb, stateObject,keyInfo  )
+processKeysInfo(annot::Identity{AnnotationStruct}  ,stateObject::StateDataFields ,keyInfo::KeyboardStruct ,toBeSavedForBack::Bool = true) where T = OtherKeyboardActions.processKeysInfo(annot,stateObject,keyInfo,toBeSavedForBack  )
 
-processKeysInfo(isTobeFast::Identity{Tuple{Bool,Bool}}  ,actor::SyncActor{Any, ActorWithOpenGlObjects} ,keyInfo::KeyboardStruct ,toBeSavedForBack::Bool = true) where T = KeyboardMouseHelper.processKeysInfo(isTobeFast,actor,keyInfo,toBeSavedForBack  )
+# processKeysInfo(isTobeFast::Identity{Tuple{Bool,Bool}}  ,actor::SyncActor{Any, ActorWithOpenGlObjects} ,keyInfo::KeyboardStruct ,toBeSavedForBack::Bool = true) where T = KeyboardMouseHelper.processKeysInfo(isTobeFast,actor,keyInfo,toBeSavedForBack  )
 
-processKeysInfo(wind::Identity{WindowControlStruct} ,actor::SyncActor{Any, ActorWithOpenGlObjects}  ,keyInfo::KeyboardStruct  ,toBeSavedForBack::Bool = true) where T = WindowControll.processKeysInfo(wind,actor,keyInfo,toBeSavedForBack)
+# processKeysInfo(wind::Identity{WindowControlStruct} ,actor::SyncActor{Any, ActorWithOpenGlObjects}  ,keyInfo::KeyboardStruct  ,toBeSavedForBack::Bool = true) where T = WindowControll.processKeysInfo(wind,actor,keyInfo,toBeSavedForBack)
 
 
 
@@ -199,17 +142,12 @@ tab +/- increase or decrease stroke width
 F1, F2 ... - switch between defined window display characteristics - like min shown white and mx shown black ...
 """
 function reactToKeyboard(keyInfo::KeyboardStruct
-                        , actor::SyncActor{Any, ActorWithOpenGlObjects})
+                        , mainState::StateDataFields)
 
     #we got this only when ctrl/shift/als is released or enter is pressed
-    obj = actor.actor.mainForDisplayObjects
-    obj.stopListening[]=true #free GLFW context
+    obj = mainState.mainForDisplayObjects
     # processing here on is based on multiple dispatch mainly
-    processKeysInfo(parseString(keyInfo.lastKeysPressed,actor,keyInfo),actor,keyInfo)
-
-
-    obj.stopListening[]=false # reactivete event listening loop
-
+    processKeysInfo(parseString(keyInfo.lastKeysPressed,mainState,keyInfo),mainState,keyInfo)
 end#reactToKeyboard
 
 
@@ -264,11 +202,11 @@ it checks each character weather is numeric - gets substring of all numeric char
 listOfTextSpecifications - list with all registered Texture specifications
 return option of diffrent type depending on input
 """
-function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlObjects} ,keyInfo::KeyboardStruct)::Option{}
+function parseString(str::Vector{String},stateObject::StateDataFields ,keyInfo::KeyboardStruct)::Option{}
     joined = join(str)
 	filtered =  filter(x->isnumeric(x) , joined )
-    listOfTextSpecs = actor.actor.mainForDisplayObjects.listOfTextSpecifications
-    searchDict = actor.actor.mainForDisplayObjects.numIndexes
+    listOfTextSpecs = stateObject.mainForDisplayObjects.listOfTextSpecifications
+    searchDict = stateObject.mainForDisplayObjects.numIndexes
     # for controlling window
     if(keyInfo.isF1Pressed)
         return Option(WindowControlStruct(letterCode="F1"))
@@ -301,7 +239,7 @@ function parseString(str::Vector{String},actor::SyncActor{Any, ActorWithOpenGlOb
         return Option(parse(Int64,filtered))
     #in case we want to change the dimension of plane for slicing data
     elseif(keyInfo.isSpacePressed && !isempty(filtered)  &&  parse(Int64,filtered)<4)
-        return Option(setproperties(actor.actor.onScrollData.dataToScrollDims ,  (dimensionToScroll= parse(Int64,filtered)) )    )
+        return Option(setproperties(stateObject.onScrollData.dataToScrollDims ,  (dimensionToScroll= parse(Int64,filtered)) )    )
      # in case we want to display diffrence of two masks
     elseif(occursin("m" , joined))
 
