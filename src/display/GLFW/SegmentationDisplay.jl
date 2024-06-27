@@ -21,12 +21,17 @@ on_next!(stateObject::StateDataFields, data::CalcDimsStruct) =  setUpCalcDimsStr
 on_next!(stateObject::StateDataFields, data::valueForMasToSetStruct) =  setUpvalueForMasToSet(data,stateObject)
 on_next!(stateObject::StateDataFields, data::FullScrollableDat) =  setUpForScrollData(data,stateObject)
 on_next!(stateObject::StateDataFields, data::SingleSliceDat) =  updateSingleImagesDisplayedSetUp(data,stateObject)
-on_next!(stateObject::StateDataFields, data::MouseStruct) =  reactToMouseDrag(data,stateObject)
-on_next!(stateObject::StateDataFields, data::KeyboardStruct) =  reactToKeyboard(data,stateObject)
+on_next!(stateObject::StateDataFields, data::MouseStruct) =  reactToMouseDrag(data,stateObject) #needs modification , with the react_to_draw, data of vectorStruct (MoustStruct)
+on_next!(stateObject::StateDataFields, data::KeyInputFields) =  reactToKeyInput(data,stateObject)
 on_error!(stateObject::StateDataFields, err)      = error(err)
 on_complete!(stateObject::StateDataFields)        = ""
 
 
+"""
+for single moustStruct we invoke onnext with reactToMouseDrag
+fonr vector of mousestruct we invoke react_to_draw
+both react functions are independent do not relate them
+"""
 
 
 """
@@ -124,11 +129,16 @@ end #cleanUp
 
 """
 Main consumer function to process data takes from the channel
+    we need to do aggregation in the while loop, for mouse drag and annotation by fetch
+
+
 """
 function consumer(mainChannel::Base.Channel{Any})
     stateInstance = StateDataFields()
     while true
         channelData = take!(mainChannel)
+        # get the aggregation here, only when the type is mouseStruct.
+        println(channelData)
         on_next!(stateInstance, channelData)
     end
 end
@@ -151,8 +161,8 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
                         ,windowControlStruct::WindowControlStruct=WindowControlStruct())
 
 
-    # mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(consumer,1000; spawn=false, threadpool=nothing))
-    mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(1000))
+    mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(consumer,1000; spawn=false, threadpool=nothing))
+    # mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(1000))
    #in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
     # if( typeof(stateInstance.mainForDisplayObjects.window)== GLFW.Window  )
     #     cleanUp(stateInstance)
@@ -222,7 +232,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
     put!(mainMedEye3dInstance.channel, forTextDispStruct)
 
     registerInteractions(window,mainMedEye3dInstance)#passing needed subscriptions from GLFW
-    errormonitor(@async consumer(mainMedEye3dInstance.channel))
+    # errormonitor(@async consumer(mainMedEye3dInstance.channel))
     return mainMedEye3dInstance
 end #coordinateDisplay
 

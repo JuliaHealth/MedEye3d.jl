@@ -7,7 +7,7 @@ module coordinating response to the  keyboard input - mainly shortcuts that  hel
 module ReactOnKeyboard
 using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow,   ..DataStructs , GLFW,Dictionaries,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils,  ..Uniforms, Match, Parameters,DataTypesBasic
 using ..KeyboardMouseHelper,..MaskDiffrence, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane
-export reactToKeyboard , registerKeyboardFunctions,processKeysInfo
+export reactToKeyInput, reactToKeyboard , registerKeyboardFunctions,processKeysInfo
 
 
 
@@ -20,89 +20,10 @@ window - GLFW window with Visualization
 function registerKeyboardFunctions(window::GLFW.Window, mainChannel::Base.Channel{Any})
 
     GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
-        name = GLFW.GetKeyName(key, scancode)
-
-        act = nothing
-        scCode = nothing
-        second_action = collect(instances(GLFW.Action))[2]
-        first_action =  collect(instances(GLFW.Action))[1]
-        if action == second_action
-            act = 1
-        elseif action == first_action
-            act = 2
-        else
-            act = -1
-        end
-
-       if(act>0)# so we have press or relese
-
-            if scancode == GLFW.KEY_RIGHT_CONTROL || scancode == GLFW.KEY_LEFT_CONTROL
-                scCode = "ctrl"
-            elseif scancode == GLFW.KEY_LEFT_SHIFT || scancode == GLFW.KEY_RIGHT_SHIFT
-                scCode = "shift"
-            elseif scancode == GLFW.KEY_RIGHT_ALT || scancode == GLFW.KEY_LEFT_ALT
-                scCode = "alt"
-            elseif scancode == GLFW.KEY_SPACE
-                scCode = "space"
-            elseif scancode == GLFW.KEY_TAB
-                scCode = "tab"
-            elseif scancode == GLFW.KEY_ENTER
-                scCode = "enter"
-            elseif scancode == GLFW.KEY_F1 || scancode == GLFW.KEY_F2 || scancode == GLFW.KEY_F3
-                scCode = "f1"
-            elseif scancode == GLFW.KEY_F4
-                scCode = "f4"
-            elseif scancode == GLFW.KEY_F5
-                scCode = "f5"
-            elseif scancode == GLFW.KEY_F6
-                scCode = "f6"
-            elseif scancode == GLFW.KEY_Z
-                scCode = "z"
-            elseif scancode == GLFW.KEY_F
-                scCode = "f"
-            elseif scancode == GLFW.KEY_S
-                scCode = "s"
-            elseif scancode == GLFW.KEY_KP_ADD || scancode == GLFW.KEY_EQUAL
-                scCode = "+"
-            elseif scancode == GLFW.KEY_KP_SUBTRACT || scancode == GLFW.KEY_MINUS
-                scCode = "-"
-            else
-                scCode = "notImp"
-            end
-            res = KeyboardStruct(scCode=="ctrl"
-                        ,scCode=="shift"
-                        ,scCode=="alt"
-                        ,scCode=="space"
-                        ,scCode=="tab"
-                        ,scCode=="f1"
-                        ,scCode=="f2"
-                        ,scCode=="f3"
-                        ,scCode=="f4"
-                        ,scCode=="f5"
-                        ,scCode=="f6"
-
-                        ,scCode=="z"
-                        ,scCode=="f"
-                        ,scCode=="s"
-
-                        ,scCode=="+"
-                        ,scCode=="-"
-
-                        ,isEnterPressed= ""#handler.isEnterPressed ISSUE
-                        ,lastKeysPressed= ""#handler.lastKeysPressed ISSUE
-                        ,mostRecentScanCode = scancode
-                        ,mostRecentKeyName = "" # just marking it as empty
-                        ,mostRecentAction = action)
-
-
-
-
-            if name === nothing || name =="+" || name =="-" || name =="z"  || name =="f"  || name =="s"
-                put!(mainChannel, res)
-            else
-                put!(mainChannel, res)
-            end
-        end
+    println(scancode, action)
+    keyInputInstance = KeyInputFields(scancode, action)
+    println(keyInputInstance)
+    put!(mainChannel, keyInputInstance)
     end)
 end #registerKeyboardFunctions
 
@@ -151,7 +72,123 @@ function reactToKeyboard(keyInfo::KeyboardStruct
 end#reactToKeyboard
 
 
+"""
+Function reactToKeyInput, handled keyboardStruct modification with the keyInput data
+passed through the channel
+"""
+function reactToKeyInput(keyInputInfo::KeyInputFields, mainState::StateDataFields)
+    println("working or not ?")
+    @info collect(instances(GLFW.Action))[2]
+    @info collect(instances(GLFW.Action))[1]
+    second_action = collect(instances(GLFW.Action))[2]
+    first_action =  collect(instances(GLFW.Action))[1]
+    act = nothing
+    if keyInputInfo.action == second_action
+        act = 1
+    elseif keyInputInfo.action == first_action
+        act = 2
+    else
+        act = -1
+    end
+    println("look here $act" )
+   if(act>0)# so we have press or relese
 
+        isCtrlPressed = false
+        isShiftPressed = false
+        isAltPressed = false
+        isSpacePressed = false
+        isTabPressed = false
+        isF1Pressed = false
+        isF2Pressed = false
+        isF3Pressed = false
+        isF4Pressed = false
+        isF5Pressed = false
+        isF6Pressed = false
+        isZPressed = false
+        isFPressed = false
+        isSPressed = false
+        isPlusPressed = false
+        isMinusPressed = false
+        isEnterPressed = false
+        scCode = ""
+        if keyInputInfo.scancode == GLFW.KEY_RIGHT_CONTROL || keyInputInfo.scancode == GLFW.KEY_LEFT_CONTROL
+            isCtrlPressed = (act == 1)
+            scCode = "ctrl"
+
+
+        elseif keyInputInfo.scancode == GLFW.KEY_LEFT_SHIFT || keyInputInfo.scancode == GLFW.KEY_RIGHT_SHIFT
+            isShiftPressed = (act == 1)
+            scCode = "shift"
+
+        elseif keyInputInfo.scancode == GLFW.KEY_RIGHT_ALT || keyInputInfo.scancode == GLFW.KEY_LEFT_ALT
+            isAltPressed = (act == 1)
+            scCode = "alt"
+
+
+        elseif keyInputInfo.scancode == GLFW.KEY_SPACE
+            isSpacePressed = (act == 1)
+            scCode = "space"
+        elseif keyInputInfo.scancode == GLFW.KEY_TAB
+            isTabPressed = (act == 1)
+            scCode = "tab"
+        elseif keyInputInfo.scancode == GLFW.KEY_ENTER
+            isEnterPressed = (act == 1)
+            scCode = "enter"
+        elseif keyInputInfo.scancode == GLFW.KEY_F1 || keyInputInfo.scancode == GLFW.KEY_F2 || keyInputInfo.scancode == GLFW.KEY_F3
+            isEnterPressed = (act == 1)
+            scCode = "f1"
+        elseif keyInputInfo.scancode == GLFW.KEY_F4
+            isF4Pressed = (act == 1)
+            scCode = "f4"
+        elseif keyInputInfo.scancode == GLFW.KEY_F5
+            isF5Pressed = (act == 1)
+            scCode = "f5"
+        elseif keyInputInfo.scancode == GLFW.KEY_F6
+            isF6Pressed = (act == 1)
+            scCode = "f6"
+        elseif keyInputInfo.scancode == GLFW.KEY_Z
+            isZPressed = (act == 1)
+            scCode = "z"
+        elseif keyInputInfo.scancode == GLFW.KEY_F
+            isFPressed = (act == 1)
+            scCode = "f"
+        elseif keyInputInfo.scancode == GLFW.KEY_S
+            isSPressed = (act == 1)
+            scCode = "s"
+        elseif keyInputInfo.scancode == GLFW.KEY_KP_ADD || keyInputInfo.scancode == GLFW.KEY_EQUAL
+            isPlusPressed = (act == 1)
+            scCode = "+"
+        elseif keyInputInfo.scancode == GLFW.KEY_KP_SUBTRACT || keyInputInfo.scancode == GLFW.KEY_MINUS
+            isMinusPressed = (act == 1)
+            scCode = "-"
+        else
+            scCode = "notImp"
+        end
+        mainState.fieldKeyboardStruct.isCtrlPressed = isCtrlPressed || scCode=="ctrl"
+        mainState.fieldKeyboardStruct.isShiftPressed = isShiftPressed || scCode=="shift"
+        mainState.fieldKeyboardStruct.isAltPressed = isAltPressed || scCode=="alt"
+        mainState.fieldKeyboardStruct.isSpacePressed = isSpacePressed || scCode=="space"
+        mainState.fieldKeyboardStruct.isTabPressed = isTabPressed || scCode=="tab"
+        mainState.fieldKeyboardStruct.isF1Pressed = isF1Pressed || scCode=="f1"
+        mainState.fieldKeyboardStruct.isF2Pressed = isF2Pressed || scCode=="f2"
+        mainState.fieldKeyboardStruct.isF3Pressed = isF3Pressed || scCode=="f3"
+        mainState.fieldKeyboardStruct.isF4Pressed = isF4Pressed || scCode=="f4"
+        mainState.fieldKeyboardStruct.isF5Pressed = isF5Pressed || scCode=="f5"
+        mainState.fieldKeyboardStruct.isF6Pressed = isF6Pressed || scCode=="f6"
+        mainState.fieldKeyboardStruct.isZPressed = isZPressed || scCode=="z"
+        mainState.fieldKeyboardStruct.isFPressed = isFPressed || scCode=="f"
+        mainState.fieldKeyboardStruct.isSPressed = isSPressed || scCode=="s"
+        mainState.fieldKeyboardStruct.isPlusPressed = isPlusPressed || scCode=="+"
+        mainState.fieldKeyboardStruct.isMinusPressed = isMinusPressed || scCode=="-"
+        mainState.fieldKeyboardStruct.isEnterPressed = isEnterPressed
+        mainState.fieldKeyboardStruct.lastKeysPressed = keyInputInfo.lastKeysPressed
+        mainState.fieldKeyboardStruct.mostRecentScanCode = keyInputInfo.scancode
+        mainState.fieldKeyboardStruct.mostRecentKeyName = "" # just marking it as empty
+        mainState.fieldKeyboardStruct.mostRecentAction = act
+
+    end
+    reactToKeyboard(mainState.fieldKeyboardStruct, mainState)
+end
 
 
 
