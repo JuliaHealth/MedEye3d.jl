@@ -40,6 +40,8 @@ end #registerMouseScrollFunctions
 
 
 mouseCoords_channel=Base.Channel{MouseStruct}(100)
+# we can fetch! on the channel, what is the next thing line, if the mouseStruct, check previous one by fetch. If it mouseStruct, aggregate those 2 and fetch the next one
+#fetch in while loop, until no more mouseStructs, then we have the last one, and we can react to it
 
 
 """
@@ -55,6 +57,14 @@ function react_to_draw(textureList,stateObject,obj)
     # mouseCoords=take!(mouseCoords_channel).lastCoordinates
     # mappedCoords=translateMouseToTexture(texture.strokeWidth, mouseCoords, actor.actor.calcDimsStruct)
     # # two dimensional coordinates on plane of intrest (current slice)
+
+    """
+    get a list of MouseStruct from fetch and take!
+    map each MouseStruct using translateMouseToTexture
+    result will be mappedCoords, in react_to_draw
+    check whether the length of the mappedCoords is greater than 0
+
+    """
     mappedCoords=Vector{CartesianIndex{2}}()
     is_sth_in=false
     while(isready(mouseCoords_channel) )
@@ -114,8 +124,10 @@ function reactToMouseDrag(mousestr::MouseStruct, mainState::StateDataFields)
 
         # @spawn :interactive react_to_draw(textureList,actor,mouseCoords)
         #@spawn :interactive
-        react_to_draw(textureList,mainState,obj)
-
+        # react_to_draw(textureList,mainState,obj) (needs to be removed)
+        """
+        remove everything below if above elseif
+        """
 
     elseif (mousestr.isRightButtonDown)
         #we save data about right click position in order to change the slicing plane accordingly

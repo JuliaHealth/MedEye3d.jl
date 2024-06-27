@@ -1,7 +1,6 @@
 module ForDisplayStructs
 using Base: Int32, isvisible
-export MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, StateDataFields, KeyboardStruct, TextureUniforms, MainImageUniforms, MaskTextureUniforms, ForWordsDispStruct, MainMedEye3d
-export ScrollChannelDataStruct
+export MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, StateDataFields, KeyboardStruct, KeyInputFields, TextureUniforms, MainImageUniforms, MaskTextureUniforms, ForWordsDispStruct, MainMedEye3d
 using ColorTypes, Parameters, Observables, ModernGL, GLFW, Dictionaries, FreeTypeAbstraction, ..DataStructs
 
 
@@ -219,6 +218,15 @@ end#MouseStruct
 
 
 """
+Structure for handling key input
+"""
+struct KeyInputFields
+scancode
+action
+end
+
+
+"""
 Actor that is able to store a state to keep needed data for proper display
 
   currentDisplayedSlice::Int=1 # stores information what slice number we are currently displaying
@@ -250,6 +258,7 @@ Actor that is able to store a state to keep needed data for proper display
   lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1, 1, 1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
   forUndoVector::AbstractArray = [] # holds lambda functions that when invoked will  undo last operations
   maxLengthOfForUndoVector::Int64 = 15 # number controls how many step at maximum we can get back
+  fieldKeyboardStruct :: KeyboardStruct = KeyboardStruct()
 end
 
 """
