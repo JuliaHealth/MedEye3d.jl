@@ -7,8 +7,8 @@ export coordinateDisplay
 export passDataForScrolling
 
 using ModernGL, GLFW,  ..PrepareWindow,  ..TextureManag, ..OpenGLDisplayUtils,  ..ForDisplayStructs, ..Uniforms,  ..DisplayWords, Dictionaries
-using  ..ReactingToInput, Setfield, Logging,  ..ShadersAndVerticiesForText, FreeTypeAbstraction, ..DisplayWords,  ..DataStructs,  ..StructsManag
-
+using  ..ReactingToInput, ..ReactToScroll, Setfield, Logging,  ..ShadersAndVerticiesForText, FreeTypeAbstraction, ..DisplayWords,  ..DataStructs,  ..StructsManag
+using ..ReactOnKeyboard
 
 #  do not copy it into the consumer function
 """
@@ -23,22 +23,10 @@ on_next!(stateObject::StateDataFields, data::FullScrollableDat) =  setUpForScrol
 on_next!(stateObject::StateDataFields, data::SingleSliceDat) =  updateSingleImagesDisplayedSetUp(data,stateObject)
 on_next!(stateObject::StateDataFields, data::MouseStruct) =  reactToMouseDrag(data,stateObject)
 on_next!(stateObject::StateDataFields, data::KeyboardStruct) =  reactToKeyboard(data,stateObject)
-# on_error!(stateObject::StateDataFields, err)      = error(err)
-# on_complete!(stateObject::StateDataFields)        = ""
+on_error!(stateObject::StateDataFields, err)      = error(err)
+on_complete!(stateObject::StateDataFields)        = ""
 
 
-
-
-"""
-Main consumer function
-"""
-function consumer(state::StateDataFields, mainChannel::Base.Channel{Any})
-    stateInstance = state#initlizaton of state
-    while true
-        channelData = take!(mainChannel)
-        on_next!(stateInstance, channelData)
-    end
-end
 
 
 """
@@ -60,8 +48,8 @@ end
 is using the actor that is instantiated in this module and connects it to GLFW context
 by invoking appropriate registering functions and passing to it to the main Actor controlling input
 """
-function registerInteractions(stateInstance::StateDataFields, mainMedEye3dInstance::MainMedEye3d)
-  subscribeGLFWtoActor(stateInstance, mainMedEye3dInstance)
+function registerInteractions(window::GLFW.Window, mainMedEye3dInstance::MainMedEye3d)
+  subscribeGLFWtoActor(window,mainMedEye3dInstance)
 end
 
 """
@@ -134,7 +122,16 @@ function cleanUp(stateInstance::StateDataFields)
 end #cleanUp
 
 
-
+"""
+Main consumer function to process data takes from the channel
+"""
+function consumer(mainChannel::Base.Channel{Any})
+    stateInstance = StateDataFields()
+    while true
+        channelData = take!(mainChannel)
+        on_next!(stateInstance, channelData)
+    end
+end
 
 """
 coordinating displaying - sets needed constants that are storeds in  forDisplayConstants; and configures interactions from GLFW events
@@ -152,15 +149,16 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
                         ,textTexturewidthh::Int32=Int32(2000)
                         ,textTextureheightt::Int32= Int32( round((windowHeight/(windowWidth*(1-fractionOfMainIm)) ))*textTexturewidthh)
                         ,windowControlStruct::WindowControlStruct=WindowControlStruct())
-    stateInstance = StateDataFields() #initlization of state
-    mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(consumer,1000; spawn=false, threadpool=nothing))
+
+
+    # mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(consumer,1000; spawn=false, threadpool=nothing))
+    mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(1000))
    #in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
-    if( typeof(stateInstance.mainForDisplayObjects.window)== GLFW.Window  )
-        cleanUp(stateInstance)
-    end#if
+    # if( typeof(stateInstance.mainForDisplayObjects.window)== GLFW.Window  )
+    #     cleanUp(stateInstance)
+    # end#if
    #setting number to texture that will be needed in shader configuration
    listOfTextSpecs::Vector{TextureSpec}= map(x->setproperties(x[2],(whichCreated=x[1])),enumerate(listOfTextSpecsPrim))
-
 
    #calculations of necessary constants needed to calculate window size , mouse position ...
    calcDimStruct= CalcDimsStruct(windowWidth=windowWidth
@@ -172,7 +170,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
                   ,textTextureheightt=textTextureheightt ) |>
    (calcDim)-> getHeightToWidthRatio(calcDim,dataToScrollDims )|>
    (calcDim)-> getMainVerticies(calcDim)
-
+   put!(mainMedEye3dInstance.channel, calcDimStruct)
 
 
  #creating window and event listening loop
@@ -203,11 +201,12 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
             ,windowControlStruct=windowControlStruct
    )
     #finding some texture that can be modifid and set as one active for modifications
+    put!(mainMedEye3dInstance.channel, forDispObj)
 
-    stateInstance.textureToModifyVec = filter(it->it.isEditable ,initializedTextures)
+    # stateInstance.textureToModifyVec = filter(it->it.isEditable ,initializedTextures)
 
     #in order to clean up all resources while closing
-    GLFW.SetWindowCloseCallback(window, (_) -> cleanUp(stateInstance))
+    # GLFW.SetWindowCloseCallback(window, (_) -> cleanUp(stateInstance))
 
 
     #passing for text display object
@@ -220,11 +219,10 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
                                             ,textTextureheightt
                                             ,forDispObj)
 
+    put!(mainMedEye3dInstance.channel, forTextDispStruct)
 
-
-
-    registerInteractions(stateInstance, mainMedEye3dInstance)#passing needed subscriptions from GLFW
-    errormonitor(@async consumer(stateInstance, mainMedEye3dInstance.channel))
+    registerInteractions(window,mainMedEye3dInstance)#passing needed subscriptions from GLFW
+    errormonitor(@async consumer(mainMedEye3dInstance.channel))
     return mainMedEye3dInstance
 end #coordinateDisplay
 

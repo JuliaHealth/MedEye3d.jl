@@ -3,7 +3,7 @@ module ReactingToInput
 using GLFW,ModernGL,Setfield,  ..ReactToScroll,  ..ForDisplayStructs
 using  ..TextureManag,DataTypesBasic,  ..ReactOnMouseClickAndDrag,  ..ReactOnKeyboard,  ..DataStructs,  ..StructsManag,  ..DisplayWords
 using ..MaskDiffrence, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane, Base.Threads
-export subscribeGLFWtoActor
+export subscribeGLFWtoActor, setUpForScrollData, setUpCalcDimsStruct, setUpWordsDisplay, setUpMainDisplay, setUpvalueForMasToSet, updateSingleImagesDisplayedSetUp
 
 
 """
@@ -127,17 +127,15 @@ when GLFW context is ready we need to use this  function in order to register GL
     actor - Roctet actor that holds objects needed for display like window etc...
     return list of subscriptions so if we will need it we can unsubscribe
 """
-function subscribeGLFWtoActor(stateObject::StateDataFields, mainMedEye3dObject::MainMedEye3d)
+function subscribeGLFWtoActor(window::GLFW.Window, mainMedEye3dObject::MainMedEye3d)
 
-    #controll scrolling
-    forDisplayConstants = stateObject.mainForDisplayObjects
 
-    ReactToScroll.registerMouseScrollFunctions(forDisplayConstants.window, mainMedEye3dObject.channel)
-    GLFW.SetScrollCallback(forDisplayConstants.window, (a, xoff, yoff) -> begin
-        put!(mainMedEye3dObject.channel, (a, xoff, yoff)-> Int64(yoff))
+    ReactToScroll.registerMouseScrollFunctions(window, mainMedEye3dObject.channel)
+    GLFW.SetScrollCallback(window, (a, xoff, yoff) -> begin
+        put!(mainMedEye3dObject.channel,Int64(yoff))
     end)
 
-    keyBoardAct = registerKeyboardFunctions(forDisplayConstants.window,mainMedEye3dObject.channel)
+    keyBoardAct = registerKeyboardFunctions(window,mainMedEye3dObject.channel)
     # buttonSubs  = registerMouseClickFunctions(forDisplayConstants.window, stateObject.calcDimsStruct, mainMedEye3dObject.channel)
 
 end

@@ -21,7 +21,7 @@ return scrollback - that holds boolean subject (observable) to which we can reac
 """
 function registerMouseScrollFunctions(window::GLFW.Window, mainChannel :: Base.Channel{Any})
     GLFW.SetScrollCallback(window, (a, xoff, yoff) -> begin
-    put!(mainChannel, (a, xoff, yoff) -> Int64(yoff)) #if there is type distortion in the channel, we can implement custom struct types
+    put!(mainChannel, Int64(yoff)) #if there is type distortion in the channel, we can implement custom struct types
 end)
 
 end #registerMouseScrollFunctions
