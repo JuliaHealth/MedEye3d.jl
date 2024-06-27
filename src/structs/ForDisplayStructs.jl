@@ -133,7 +133,7 @@ windowControlStruct::WindowControlStruct=WindowControlStruct()# holding data use
 
 
 """
-@with_kw struct forDisplayObjects
+@with_kw mutable struct forDisplayObjects
   listOfTextSpecifications::Vector{TextureSpec} = [TextureSpec()]
   window = []
   vertex_shader::UInt32 = 1

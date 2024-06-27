@@ -50,7 +50,7 @@ glDeleteTextures(length(arr), arr)# deleting
 
 stateObject.onScrollData.dimensionToScroll = toScrollDat.dimensionToScroll
 stateObject.onScrollData.dataToScrollDims = toScrollDat
-stateObject.onScrollData.slicesNumber = getSlicesNumber(actor.actor.onScrollData)
+stateObject.onScrollData.slicesNumber = getSlicesNumber(stateObject.onScrollData)
 #getting  the slice of intrest based on last recorded mouse position
 
 current=stateObject.lastRecordedMousePosition[toScrollDat.dimensionToScroll]
@@ -88,7 +88,7 @@ updateImagesDisplayed(singleSlDat
 stateObject.currentDisplayedSlice = current
 # to enbling getting back
 if(toBeSavedForBack)
-    addToforUndoVector(mainState, ()-> processKeysInfo( Option(old),mainState, keyInfo,false ))
+    addToforUndoVector(stateObject, ()-> processKeysInfo( Option(old),stateObject, keyInfo,false ))
 end#if
 
 end#processKeysInfo

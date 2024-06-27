@@ -156,7 +156,7 @@ function updateImagesDisplayed(singleSliceDat::SingleSliceDat
                             ,calcDimStruct::CalcDimsStruct
                             ,valueForMaskToSett::valueForMasToSetStruct )
 
-                            #@spawn :interactive
+
                             updateImagesDisplayed_inner(singleSliceDat,forDisplayConstants,wordsDispObj,calcDimStruct,valueForMaskToSett)
 end
 
