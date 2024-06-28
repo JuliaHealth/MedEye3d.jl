@@ -182,7 +182,7 @@ mostRecentKeyName ::String=""
 mostRecentAction ::GLFW.Action= GLFW.RELEASE
 
 """
-@with_kw struct KeyboardStruct
+@with_kw mutable struct KeyboardStruct
   isCtrlPressed::Bool = false# left - scancode 37 right 105 - Int32
   isShiftPressed::Bool = false # left - scancode 50 right 62- Int32
   isAltPressed::Bool = false# left - scancode 64 right 108- Int32
@@ -202,7 +202,7 @@ mostRecentAction ::GLFW.Action= GLFW.RELEASE
   isSPressed::Bool = false
   lastKeysPressed::Vector{String} = [] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
   #informations about what triggered sending this particular struct to the  actor
-  mostRecentScanCode::GLFW.Key = GLFW.KEY_KP_4
+  mostRecentScanCode::Int32 = Int32(GLFW.KEY_KP_4)
   mostRecentKeyName::String = ""
   mostRecentAction::GLFW.Action = GLFW.RELEASE
 
@@ -220,9 +220,9 @@ end#MouseStruct
 """
 Structure for handling key input
 """
-struct KeyInputFields
-scancode
-action
+@with_kw struct KeyInputFields
+scancode::Int32
+action::GLFW.Action
 end
 
 
