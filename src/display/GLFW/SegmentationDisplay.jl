@@ -102,29 +102,7 @@ In order to properly close displayer we need to :
  finalize main actor and reinstantiate it
  close GLFW window
 """
-function cleanUp(stateInstance::StateDataFields)
-    obj = stateInstance.mainForDisplayObjects
-    glDeleteTextures(length(obj.listOfTextSpecifications), map(text->text.ID,obj.listOfTextSpecifications));
-    glFlush()
-    GLFW.DestroyWindow(obj.window)
 
-    # glClearColor(0.0, 0.0, 0.1 , 1.0) # for a good begining
-    # #first we unsubscribe and give couple seconds for processes to stop
-    # for sub in subscriptions
-    #     unsubscribe!(sub)
-    # end # for
-    # sleep(5)
-    # obj = mainActor.actor.mainForDisplayObjects
-    # #deleting textures
-    # #destroying buffers
-    # glDeleteBuffers(2,[obj.vbo,obj.ebo])
-    # #detaching shaders
-    # glDeleteShader(obj.fragment_shader);
-    # glDeleteShader(obj.vertex_shader);
-    # #destroying program
-    # glDeleteProgram(obj.shader_program)
-    # #finalizing and recreating main actor
-end #cleanUp
 
 
 """
@@ -133,15 +111,7 @@ Main consumer function to process data takes from the channel
 
 
 """
-function consumer(mainChannel::Base.Channel{Any})
-    stateInstance = StateDataFields()
-    while true
-        channelData = take!(mainChannel)
-        # get the aggregation here, only when the type is mouseStruct.
-        println(channelData)
-        on_next!(stateInstance, channelData)
-    end
-end
+
 
 """
 coordinating displaying - sets needed constants that are storeds in  forDisplayConstants; and configures interactions from GLFW events
@@ -160,13 +130,6 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
                         ,textTextureheightt::Int32= Int32( round((windowHeight/(windowWidth*(1-fractionOfMainIm)) ))*textTexturewidthh)
                         ,windowControlStruct::WindowControlStruct=WindowControlStruct())
 
-
-    mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(consumer,1000; spawn=false, threadpool=nothing))
-    # mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(1000))
-   #in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
-    # if( typeof(stateInstance.mainForDisplayObjects.window)== GLFW.Window  )
-    #     cleanUp(stateInstance)
-    # end#if
    #setting number to texture that will be needed in shader configuration
    listOfTextSpecs::Vector{TextureSpec}= map(x->setproperties(x[2],(whichCreated=x[1])),enumerate(listOfTextSpecsPrim))
 
@@ -180,7 +143,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
                   ,textTextureheightt=textTextureheightt ) |>
    (calcDim)-> getHeightToWidthRatio(calcDim,dataToScrollDims )|>
    (calcDim)-> getMainVerticies(calcDim)
-   put!(mainMedEye3dInstance.channel, calcDimStruct)
+#    put!(mainMedEye3dInstance.channel, calcDimStruct)
 
 
  #creating window and event listening loop
@@ -211,12 +174,9 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
             ,windowControlStruct=windowControlStruct
    )
     #finding some texture that can be modifid and set as one active for modifications
-    put!(mainMedEye3dInstance.channel, forDispObj)
-
-    # stateInstance.textureToModifyVec = filter(it->it.isEditable ,initializedTextures)
-
+    # put!(mainMedEye3dInstance.channel, forDispObj)
     #in order to clean up all resources while closing
-    # GLFW.SetWindowCloseCallback(window, (_) -> cleanUp(stateInstance))
+
 
 
     #passing for text display object
@@ -229,7 +189,36 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
                                             ,textTextureheightt
                                             ,forDispObj)
 
+    # put!(mainMedEye3dInstance.channel, forTextDispStruct)
+    function consumer(mainChannel::Base.Channel{Any})
+
+        stateInstance = StateDataFields()
+        stateInstance.textureToModifyVec = filter(it->it.isEditable ,initializedTextures)
+        #    in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
+        function cleanUp()
+            obj = stateInstance.mainForDisplayObjects
+            glDeleteTextures(length(obj.listOfTextSpecifications), map(text->text.ID,obj.listOfTextSpecifications));
+            glFlush()
+            GLFW.DestroyWindow(obj.window)
+        end #cleanUp
+
+        if( typeof(stateInstance.mainForDisplayObjects.window)== GLFW.Window  )
+            cleanUp()
+        end#
+        GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())
+        while true
+            channelData = take!(mainChannel)
+            # get the aggregation here, only when the type is mouseStruct.
+            on_next!(stateInstance, channelData)
+        end
+    end
+
+    mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(consumer,1000; spawn=false, threadpool=nothing))
+    # mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(1000))
+    put!(mainMedEye3dInstance.channel, calcDimStruct)
+    put!(mainMedEye3dInstance.channel, forDispObj)
     put!(mainMedEye3dInstance.channel, forTextDispStruct)
+
 
     registerInteractions(window,mainMedEye3dInstance)#passing needed subscriptions from GLFW
     # errormonitor(@async consumer(mainMedEye3dInstance.channel))

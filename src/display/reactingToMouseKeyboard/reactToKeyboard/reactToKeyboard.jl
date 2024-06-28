@@ -5,7 +5,8 @@ module coordinating response to the  keyboard input - mainly shortcuts that  hel
 """
 #@doc ReactOnKeyboardSTR
 module ReactOnKeyboard
-using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow,   ..DataStructs , GLFW,Dictionaries,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils,  ..Uniforms, Match, Parameters,DataTypesBasic
+using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow,   ..DataStructs , GLFW,Dictionaries,  ..ForDisplayStructs, ..TextureManag,  ..OpenGLDisplayUtils,  ..Uniforms
+using Match, Parameters, DataTypesBasic
 using ..KeyboardMouseHelper,..MaskDiffrence, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane
 export reactToKeyInput, reactToKeyboard , registerKeyboardFunctions,processKeysInfo
 
@@ -18,10 +19,9 @@ registering functions to the GLFW
 window - GLFW window with Visualization
 """
 function registerKeyboardFunctions(window::GLFW.Window, mainChannel::Base.Channel{Any})
-
     GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
-    println(scancode, action)
-    keyInputInstance = KeyInputFields(scancode, action)
+    @info "information from the registerKeyboardFunction : scancode : $key, action : $action"
+    keyInputInstance = KeyInputFields(scancode=Int32(key), action=action)
     println(keyInputInstance)
     put!(mainChannel, keyInputInstance)
     end)
@@ -40,10 +40,9 @@ processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec{T}}, Identity{Tex
 processKeysInfo(numbb::Identity{Int64}     ,stateObject::StateDataFields  ,keyInfo::KeyboardStruct    ,toBeSavedForBack::Bool = true) where T = OtherKeyboardActions.processKeysInfo(numbb,stateObject,keyInfo,toBeSavedForBack   )
 processKeysInfo(numbb::Identity{Bool},stateObject::StateDataFields,keyInfo::KeyboardStruct ) where T = OtherKeyboardActions.processKeysInfoUndo( numbb, stateObject,keyInfo  )
 processKeysInfo(annot::Identity{AnnotationStruct}  ,stateObject::StateDataFields ,keyInfo::KeyboardStruct ,toBeSavedForBack::Bool = true) where T = OtherKeyboardActions.processKeysInfo(annot,stateObject,keyInfo,toBeSavedForBack  )
+processKeysInfo(isTobeFast::Identity{Tuple{Bool,Bool}}  ,stateObject::StateDataFields ,keyInfo::KeyboardStruct ,toBeSavedForBack::Bool = true) where T = KeyboardMouseHelper.processKeysInfo(isTobeFast,stateObject,keyInfo,toBeSavedForBack  )
 
-# processKeysInfo(isTobeFast::Identity{Tuple{Bool,Bool}}  ,actor::SyncActor{Any, ActorWithOpenGlObjects} ,keyInfo::KeyboardStruct ,toBeSavedForBack::Bool = true) where T = KeyboardMouseHelper.processKeysInfo(isTobeFast,actor,keyInfo,toBeSavedForBack  )
-
-# processKeysInfo(wind::Identity{WindowControlStruct} ,actor::SyncActor{Any, ActorWithOpenGlObjects}  ,keyInfo::KeyboardStruct  ,toBeSavedForBack::Bool = true) where T = WindowControll.processKeysInfo(wind,actor,keyInfo,toBeSavedForBack)
+processKeysInfo(wind::Identity{WindowControlStruct} ,stateObject::StateDataFields  ,keyInfo::KeyboardStruct  ,toBeSavedForBack::Bool = true) where T = WindowControll.processKeysInfo(wind,stateObject,keyInfo,toBeSavedForBack)
 
 
 
@@ -64,7 +63,6 @@ F1, F2 ... - switch between defined window display characteristics - like min sh
 """
 function reactToKeyboard(keyInfo::KeyboardStruct
                         , mainState::StateDataFields)
-
     #we got this only when ctrl/shift/als is released or enter is pressed
     obj = mainState.mainForDisplayObjects
     # processing here on is based on multiple dispatch mainly
@@ -77,115 +75,93 @@ Function reactToKeyInput, handled keyboardStruct modification with the keyInput 
 passed through the channel
 """
 function reactToKeyInput(keyInputInfo::KeyInputFields, mainState::StateDataFields)
-    println("working or not ?")
-    @info collect(instances(GLFW.Action))[2]
-    @info collect(instances(GLFW.Action))[1]
-    second_action = collect(instances(GLFW.Action))[2]
-    first_action =  collect(instances(GLFW.Action))[1]
+    keyReleaseAction = collect(instances(GLFW.Action))[1]
+    keyPressAction =  collect(instances(GLFW.Action))[2]
     act = nothing
-    if keyInputInfo.action == second_action
+    if keyInputInfo.action == keyReleaseAction
         act = 1
-    elseif keyInputInfo.action == first_action
+    elseif keyInputInfo.action == keyPressAction
         act = 2
     else
         act = -1
     end
-    println("look here $act" )
-   if(act>0)# so we have press or relese
 
-        isCtrlPressed = false
-        isShiftPressed = false
-        isAltPressed = false
-        isSpacePressed = false
-        isTabPressed = false
-        isF1Pressed = false
-        isF2Pressed = false
-        isF3Pressed = false
-        isF4Pressed = false
-        isF5Pressed = false
-        isF6Pressed = false
-        isZPressed = false
-        isFPressed = false
-        isSPressed = false
-        isPlusPressed = false
-        isMinusPressed = false
-        isEnterPressed = false
+   if (act > 0)# so we have press or relese
         scCode = ""
-        if keyInputInfo.scancode == GLFW.KEY_RIGHT_CONTROL || keyInputInfo.scancode == GLFW.KEY_LEFT_CONTROL
-            isCtrlPressed = (act == 1)
+        if keyInputInfo.scancode == Int32(GLFW.KEY_RIGHT_CONTROL) || keyInputInfo.scancode == Int32(GLFW.KEY_LEFT_CONTROL)
             scCode = "ctrl"
 
-
-        elseif keyInputInfo.scancode == GLFW.KEY_LEFT_SHIFT || keyInputInfo.scancode == GLFW.KEY_RIGHT_SHIFT
-            isShiftPressed = (act == 1)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_LEFT_SHIFT) || keyInputInfo.scancode == Int32(GLFW.KEY_RIGHT_SHIFT)
             scCode = "shift"
 
-        elseif keyInputInfo.scancode == GLFW.KEY_RIGHT_ALT || keyInputInfo.scancode == GLFW.KEY_LEFT_ALT
-            isAltPressed = (act == 1)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_RIGHT_ALT) || keyInputInfo.scancode == Int32(GLFW.KEY_LEFT_ALT)
             scCode = "alt"
 
-
-        elseif keyInputInfo.scancode == GLFW.KEY_SPACE
-            isSpacePressed = (act == 1)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_SPACE)
             scCode = "space"
-        elseif keyInputInfo.scancode == GLFW.KEY_TAB
-            isTabPressed = (act == 1)
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_TAB)
             scCode = "tab"
-        elseif keyInputInfo.scancode == GLFW.KEY_ENTER
-            isEnterPressed = (act == 1)
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_ENTER)
             scCode = "enter"
-        elseif keyInputInfo.scancode == GLFW.KEY_F1 || keyInputInfo.scancode == GLFW.KEY_F2 || keyInputInfo.scancode == GLFW.KEY_F3
-            isEnterPressed = (act == 1)
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_F1) || keyInputInfo.scancode == Int32(GLFW.KEY_F2) || keyInputInfo.scancode == Int32(GLFW.KEY_F3)
             scCode = "f1"
-        elseif keyInputInfo.scancode == GLFW.KEY_F4
-            isF4Pressed = (act == 1)
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_F4)
             scCode = "f4"
-        elseif keyInputInfo.scancode == GLFW.KEY_F5
-            isF5Pressed = (act == 1)
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_F5)
             scCode = "f5"
-        elseif keyInputInfo.scancode == GLFW.KEY_F6
-            isF6Pressed = (act == 1)
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_F6)
             scCode = "f6"
-        elseif keyInputInfo.scancode == GLFW.KEY_Z
-            isZPressed = (act == 1)
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_Z)
             scCode = "z"
-        elseif keyInputInfo.scancode == GLFW.KEY_F
-            isFPressed = (act == 1)
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_F)
             scCode = "f"
-        elseif keyInputInfo.scancode == GLFW.KEY_S
-            isSPressed = (act == 1)
+
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_S)
             scCode = "s"
-        elseif keyInputInfo.scancode == GLFW.KEY_KP_ADD || keyInputInfo.scancode == GLFW.KEY_EQUAL
-            isPlusPressed = (act == 1)
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_KP_ADD) || keyInputInfo.scancode == Int32(GLFW.KEY_EQUAL)
             scCode = "+"
-        elseif keyInputInfo.scancode == GLFW.KEY_KP_SUBTRACT || keyInputInfo.scancode == GLFW.KEY_MINUS
-            isMinusPressed = (act == 1)
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_KP_SUBTRACT) || keyInputInfo.scancode == Int32(GLFW.KEY_MINUS)
             scCode = "-"
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_1)
+            scCode = "1"
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_2)
+            scCode = "2"
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_3)
+            scCode = "3"
         else
             scCode = "notImp"
         end
-        mainState.fieldKeyboardStruct.isCtrlPressed = isCtrlPressed || scCode=="ctrl"
-        mainState.fieldKeyboardStruct.isShiftPressed = isShiftPressed || scCode=="shift"
-        mainState.fieldKeyboardStruct.isAltPressed = isAltPressed || scCode=="alt"
-        mainState.fieldKeyboardStruct.isSpacePressed = isSpacePressed || scCode=="space"
-        mainState.fieldKeyboardStruct.isTabPressed = isTabPressed || scCode=="tab"
-        mainState.fieldKeyboardStruct.isF1Pressed = isF1Pressed || scCode=="f1"
-        mainState.fieldKeyboardStruct.isF2Pressed = isF2Pressed || scCode=="f2"
-        mainState.fieldKeyboardStruct.isF3Pressed = isF3Pressed || scCode=="f3"
-        mainState.fieldKeyboardStruct.isF4Pressed = isF4Pressed || scCode=="f4"
-        mainState.fieldKeyboardStruct.isF5Pressed = isF5Pressed || scCode=="f5"
-        mainState.fieldKeyboardStruct.isF6Pressed = isF6Pressed || scCode=="f6"
-        mainState.fieldKeyboardStruct.isZPressed = isZPressed || scCode=="z"
-        mainState.fieldKeyboardStruct.isFPressed = isFPressed || scCode=="f"
-        mainState.fieldKeyboardStruct.isSPressed = isSPressed || scCode=="s"
-        mainState.fieldKeyboardStruct.isPlusPressed = isPlusPressed || scCode=="+"
-        mainState.fieldKeyboardStruct.isMinusPressed = isMinusPressed || scCode=="-"
-        mainState.fieldKeyboardStruct.isEnterPressed = isEnterPressed
-        mainState.fieldKeyboardStruct.lastKeysPressed = keyInputInfo.lastKeysPressed
-        mainState.fieldKeyboardStruct.mostRecentScanCode = keyInputInfo.scancode
-        mainState.fieldKeyboardStruct.mostRecentKeyName = "" # just marking it as empty
-        mainState.fieldKeyboardStruct.mostRecentAction = act
+        mainState.fieldKeyboardStruct.isCtrlPressed = (act == 1) && scCode=="ctrl"
+        mainState.fieldKeyboardStruct.isShiftPressed = (act == 1) && scCode=="shift"
+        mainState.fieldKeyboardStruct.isAltPressed = (act == 1) && scCode=="alt"
+        mainState.fieldKeyboardStruct.isSpacePressed = (act == 1) && scCode=="space"
+        mainState.fieldKeyboardStruct.isTAbPressed = (act == 1) && scCode=="tab"
+        mainState.fieldKeyboardStruct.isEnterPressed = (act == 1) && scCode=="enter"
+        mainState.fieldKeyboardStruct.isF1Pressed = (act == 1) && scCode=="f1"
+        mainState.fieldKeyboardStruct.isF4Pressed = (act == 1) && scCode=="f4"
+        mainState.fieldKeyboardStruct.isF5Pressed = (act == 1) && scCode=="f5"
+        mainState.fieldKeyboardStruct.isF6Pressed = (act == 1) && scCode=="f6"
+        mainState.fieldKeyboardStruct.isZPressed = (act == 1) && scCode=="z"
+        mainState.fieldKeyboardStruct.isFPressed = (act == 1) && scCode=="f"
+        mainState.fieldKeyboardStruct.isSPressed = (act == 1) && scCode=="s"
+        mainState.fieldKeyboardStruct.isPlusPressed = (act == 1) && scCode=="+"
+        mainState.fieldKeyboardStruct.isMinusPressed = (act == 1) && scCode=="-"
 
+        push!(mainState.fieldKeyboardStruct.lastKeysPressed, scCode)
     end
     reactToKeyboard(mainState.fieldKeyboardStruct, mainState)
 end
@@ -198,9 +174,11 @@ return true in case the combination of keys should invoke some action
 function shouldBeExecuted(keyInfo::KeyboardStruct, act::Int64)::Bool
     if(act>0)# so we have press or relese
 
-        if keyInfo.mostRecentScanCode in [GLFW.KEY_RIGHT_CONTROL, GLFW.KEY_LEFT_CONTROL, GLFW.KEY_LEFT_SHIFT, GLFW.KEY_RIGHT_SHIFT, GLFW.KEY_RIGHT_ALT, GLFW.KEY_LEFT_ALT, GLFW.KEY_SPACE, GLFW.KEY_TAB, GLFW.KEY_F4, GLFW.KEY_F5, GLFW.KEY_F6]
+        if keyInfo.mostRecentScanCode in [Int32(GLFW.KEY_RIGHT_CONTROL), Int32(GLFW.KEY_LEFT_CONTROL), Int32(GLFW.KEY_LEFT_SHIFT), Int32(GLFW.KEY_RIGHT_SHIFT), Int32(GLFW.KEY_RIGHT_ALT), Int32(GLFW.KEY_LEFT_ALT), Int32(GLFW.KEY_SPACE),
+            Int32(GLFW.KEY_TAB), Int32(GLFW.KEY_F4), Int32(GLFW.KEY_F5), Int32(GLFW.KEY_F6)]
             return act == 2
-        elseif keyInfo.mostRecentScanCode in [GLFW.KEY_ENTER, GLFW.KEY_F1, GLFW.KEY_F2, GLFW.KEY_F3, GLFW.KEY_KP_ADD, GLFW.KEY_EQUAL, GLFW.KEY_KP_SUBTRACT, GLFW.KEY_MINUS, GLFW.KEY_Z, GLFW.KEY_F, GLFW.KEY_S]
+        elseif keyInfo.mostRecentScanCode in [Int32(GLFW.KEY_ENTER), Int32(GLFW.KEY_F1), Int32(GLFW.KEY_F2), Int32(GLFW.KEY_F3), Int32(GLFW.KEY_KP_ADD), Int32(GLFW.KEY_EQUAL),
+            Int32(GLFW.KEY_KP_SUBTRACT), Int32(GLFW.KEY_MINUS), Int32(GLFW.KEY_Z), Int32(GLFW.KEY_F), Int32(GLFW.KEY_S)]
             return act == 1
         else
             return false
@@ -242,6 +220,7 @@ return option of diffrent type depending on input
 function parseString(str::Vector{String},stateObject::StateDataFields ,keyInfo::KeyboardStruct)::Option{}
     joined = join(str)
 	filtered =  filter(x->isnumeric(x) , joined )
+    println("here you go filtered with numeric ",  filtered)
     listOfTextSpecs = stateObject.mainForDisplayObjects.listOfTextSpecifications
     searchDict = stateObject.mainForDisplayObjects.numIndexes
     # for controlling window
@@ -275,8 +254,8 @@ function parseString(str::Vector{String},stateObject::StateDataFields ,keyInfo::
     elseif(keyInfo.isTAbPressed && !isempty(filtered))
         return Option(parse(Int64,filtered))
     #in case we want to change the dimension of plane for slicing data
-    elseif(keyInfo.isSpacePressed && !isempty(filtered)  &&  parse(Int64,filtered)<4)
-        return Option(setproperties(stateObject.onScrollData.dataToScrollDims ,  (dimensionToScroll= parse(Int64,filtered)) )    )
+    elseif(keyInfo.isSpacePressed && !isempty(filtered)  &&  parse(Int64,filtered[length(filtered)])<4)
+        return Option(setproperties(stateObject.onScrollData.dataToScrollDims ,  (dimensionToScroll= parse(Int64,filtered[length(filtered)])) )    )
      # in case we want to display diffrence of two masks
     elseif(occursin("m" , joined))
 

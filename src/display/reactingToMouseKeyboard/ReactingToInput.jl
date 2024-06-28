@@ -1,6 +1,6 @@
 
 module ReactingToInput
-using GLFW,ModernGL,Setfield,  ..ReactToScroll,  ..ForDisplayStructs
+using GLFW,ModernGL,Setfield,  ..ReactToScroll,  ..ForDisplayStructs, ..ReactOnKeyboard
 using  ..TextureManag,DataTypesBasic,  ..ReactOnMouseClickAndDrag,  ..ReactOnKeyboard,  ..DataStructs,  ..StructsManag,  ..DisplayWords
 using ..MaskDiffrence, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane, Base.Threads
 export subscribeGLFWtoActor, setUpForScrollData, setUpCalcDimsStruct, setUpWordsDisplay, setUpMainDisplay, setUpvalueForMasToSet, updateSingleImagesDisplayedSetUp
@@ -135,7 +135,7 @@ function subscribeGLFWtoActor(window::GLFW.Window, mainMedEye3dObject::MainMedEy
         put!(mainMedEye3dObject.channel,Int64(yoff))
     end)
 
-    keyBoardAct = registerKeyboardFunctions(window,mainMedEye3dObject.channel)
+    ReactOnKeyboard.registerKeyboardFunctions(window,mainMedEye3dObject.channel)
     # buttonSubs  = registerMouseClickFunctions(forDisplayConstants.window, stateObject.calcDimsStruct, mainMedEye3dObject.channel)
 
 end
