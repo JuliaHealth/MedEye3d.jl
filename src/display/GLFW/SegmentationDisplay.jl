@@ -53,8 +53,8 @@ end
 is using the actor that is instantiated in this module and connects it to GLFW context
 by invoking appropriate registering functions and passing to it to the main Actor controlling input
 """
-function registerInteractions(window::GLFW.Window, mainMedEye3dInstance::MainMedEye3d)
-  subscribeGLFWtoActor(window,mainMedEye3dInstance)
+function registerInteractions(window::GLFW.Window, mainMedEye3dInstance::MainMedEye3d, calcDimStruct::CalcDimsStruct)
+  subscribeGLFWtoActor(window,mainMedEye3dInstance, calcDimStruct)
 end
 
 """
@@ -209,7 +209,14 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
         while true
             channelData = take!(mainChannel)
             # get the aggregation here, only when the type is mouseStruct.
-            on_next!(stateInstance, channelData)
+            if typeof(channelData) == MouseStruct
+                left = channelData.isLeftButtonDown
+                right = channelData.isRightButtonDown
+                pos = channelData.lastCoordinates
+                @info "$left $right $pos"
+            else
+                on_next!(stateInstance, channelData)
+            end
         end
     end
 
@@ -220,7 +227,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
     put!(mainMedEye3dInstance.channel, forTextDispStruct)
 
 
-    registerInteractions(window,mainMedEye3dInstance)#passing needed subscriptions from GLFW
+    registerInteractions(window,mainMedEye3dInstance, calcDimStruct)#passing needed subscriptions from GLFW
     # errormonitor(@async consumer(mainMedEye3dInstance.channel))
     return mainMedEye3dInstance
 end #coordinateDisplay

@@ -20,9 +20,9 @@ window - GLFW window with Visualization
 """
 function registerKeyboardFunctions(window::GLFW.Window, mainChannel::Base.Channel{Any})
     GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
-    @info "information from the registerKeyboardFunction : scancode : $key, action : $action"
+    # @info "information from the registerKeyboardFunction : scancode : $key, action : $action"
     keyInputInstance = KeyInputFields(scancode=Int32(key), action=action)
-    println(keyInputInstance)
+    # println(keyInputInstance)
     put!(mainChannel, keyInputInstance)
     end)
 end #registerKeyboardFunctions
