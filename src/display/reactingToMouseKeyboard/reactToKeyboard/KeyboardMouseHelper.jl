@@ -3,8 +3,8 @@ functions that enable modyfing of reactions to mouse using keyboard
 for example by pressing f and s we can controll wheather we have fast or slow scroll
 """
 module KeyboardMouseHelper
-using ..StructsManag, Logging, Setfield, ..PrepareWindow, ..DataStructs, Rocket, GLFW, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms
-using Match, Parameters, DataTypesBasic
+using ..StructsManag, Logging, Setfield, ..PrepareWindow, ..DataStructs, GLFW, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms
+using Parameters, DataTypesBasic
 
 
 """

@@ -74,6 +74,7 @@ function react_to_draw(textureList, stateObject, mouseStructArray::Vector{MouseS
     texture = textureList[1]
     calcDim = stateObject.calcDimsStruct
 
+    @info mouseStructArray
     # mouseCoords=take!(mouseCoords_channel).lastCoordinates
     # mappedCoords=translateMouseToTexture(texture.strokeWidth, mouseCoords, actor.actor.calcDimsStruct)
     # # two dimensional coordinates on plane of intrest (current slice)

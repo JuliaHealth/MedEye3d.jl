@@ -2,7 +2,7 @@
 functions that controll window - so basically treshords for mask display
 """
 module WindowControll
-using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow, ..DataStructs, GLFW, Dictionaries, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms, Match, Parameters, DataTypesBasic
+using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow, ..DataStructs, GLFW, Dictionaries, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms, Parameters, DataTypesBasic
 export setTextureWindow, getNewTresholdValue
 
 """
@@ -22,9 +22,11 @@ function processKeysInfo(wind::Identity{WindowControlStruct}, stateObject::State
     #we have some predefined windows
     joined = join(keyInfo.lastKeysPressed)
 
+    @info "process keys info of window control for f1 "
     old = stateObject.mainForDisplayObjects.windowControlStruct
     windowStruct = primaryModificationsOfWindContr(wind.value, keyInfo)
 
+    @info "info from just above the call to the dispatchToFunctions"
     dispatchToFunctions(windowStruct, stateObject, keyInfo)
 
     #to display change
@@ -42,14 +44,20 @@ end#processKeysInfo
 On the basis of the input WindowControlStruct and keyInfo it makes necessary primary modifications to WindowControlStruct
 """
 function primaryModificationsOfWindContr(windowStruct::WindowControlStruct, keyInfo::KeyboardStruct)::WindowControlStruct
-    return @match windowStruct.letterCode begin
-        "F1" => WindowControlStruct(letterCode="F1", min_shown_white=Int32(1000), max_shown_black=Int32(-1000))
-        "F2" => WindowControlStruct(letterCode="F2", min_shown_white=Int32(400), max_shown_black=Int32(-200))
-        "F3" => WindowControlStruct(letterCode="F3", min_shown_white=Int32(0), max_shown_black=Int32(-1000))
-        "F4" => WindowControlStruct(letterCode="F4", toIncrease=keyInfo.isPlusPressed, toDecrease=keyInfo.isMinusPressed, lower=true)
-        "F5" => WindowControlStruct(letterCode="F5", toIncrease=keyInfo.isPlusPressed, toDecrease=keyInfo.isMinusPressed, upper=true)
-        "F6" => WindowControlStruct(letterCode="F6", toIncrease=keyInfo.isPlusPressed, toDecrease=keyInfo.isMinusPressed, maskContributionToChange=true)
-        _ => windowStruct
+    if windowStruct.letterCode == "F1"
+        return WindowControlStruct(letterCode="F1", min_shown_white=Int32(1000), max_shown_black=Int32(-1000))
+    elseif windowStruct.letterCode == "F2"
+        return WindowControlStruct(letterCode="F2", min_shown_white=Int32(400), max_shown_black=Int32(-200))
+    elseif windowStruct.letterCode == "F3"
+        return WindowControlStruct(letterCode="F3", min_shown_white=Int32(0), max_shown_black=Int32(-1000))
+    elseif windowStruct.letterCode == "F4"
+        return WindowControlStruct(letterCode="F4", toIncrease=keyInfo.isPlusPressed, toDecrease=keyInfo.isMinusPressed, lower=true)
+    elseif windowStruct.letterCode == "F5"
+        return WindowControlStruct(letterCode="F5", toIncrease=keyInfo.isPlusPressed, toDecrease=keyInfo.isMinusPressed, upper=true)
+    elseif windowStruct.letterCode == "F6"
+        return WindowControlStruct(letterCode="F6", toIncrease=keyInfo.isPlusPressed, toDecrease=keyInfo.isMinusPressed, maskContributionToChange=true)
+    else
+        return windowStruct
     end
 
 end   #primaryModificationsOfWindContr
@@ -59,27 +67,34 @@ Based on window struct and key info it will controll  which function should be i
 
 """
 function dispatchToFunctions(windowStruct::WindowControlStruct, stateObject::StateDataFields, keyInfo::KeyboardStruct)
-
-    mainWindows = @match (windowStruct.letterCode) begin
-        "F1" => (setmainWindow(stateObject, windowStruct), "Fsth")
-        "F2" => (setmainWindow(stateObject, windowStruct), "Fsth")
-        "F3" => (setmainWindow(stateObject, windowStruct), "Fsth")
-        bad => "nothing"
-    end#match
-
+    @info "beginneing of the dispatch function"
+    mainWindows = nothing
+    if windowStruct.letterCode == "F1"
+        mainWindows = (setmainWindow(stateObject, windowStruct), "Fsth")
+    elseif windowStruct.letterCode == "F2"
+        mainWindows = (setmainWindow(stateObject, windowStruct), "Fsth")
+    elseif windowStruct.letterCode == "F3"
+        mainWindows = (setmainWindow(stateObject, windowStruct), "Fsth")
+    else
+        mainWindows = "nothing"
+    end
     textureList = stateObject.textureToModifyVec
-    currentWindowInActor = stateObject.mainForDisplayObjects.windowControlStruct
+    currentWindowInState = stateObject.mainForDisplayObjects.windowControlStruct
     if (mainWindows == "nothing" && !isempty(textureList))
         textur = textureList[1]
-        matched = @match (windowStruct.letterCode, windowStruct.toIncrease, windowStruct.toDecrease) begin
-            ("F4", true, false) => lowTreshUp(windowStruct, stateObject, textur, currentWindowInActor)
-            ("F4", false, true) => lowTreshDown(windowStruct, stateObject, textur, currentWindowInActor)
-            ("F5", false, true) => highTreshDown(windowStruct, stateObject, textur, currentWindowInActor)
-            ("F5", true, false) => highTreshUp(windowStruct, stateObject, textur, currentWindowInActor)
-            ("F6", true, false) => maskContrUp(windowStruct, stateObject, textur, currentWindowInActor)
-            ("F6", false, true) => maskContrDown(windowStruct, stateObject, textur, currentWindowInActor)
-            bad => "nothing"
-        end#match
+        if windowStruct.letterCode == "F4" && windowStruct.toIncrease && !windowStruct.toDecrease
+            lowTreshUp(windowStruct, stateObject, textur, currentWindowInState)
+        elseif windowStruct.letterCode == "F4" && !windowStruct.toIncrease && windowStruct.toDecrease
+            lowTreshDown(windowStruct, stateObject, textur, currentWindowInState)
+        elseif windowStruct.letterCode == "F5" && !windowStruct.toIncrease && windowStruct.toDecrease
+            highTreshDown(windowStruct, stateObject, textur, currentWindowInState)
+        elseif windowStruct.letterCode == "F5" && windowStruct.toIncrease && !windowStruct.toDecrease
+            highTreshUp(windowStruct, stateObject, textur, currentWindowInState)
+        elseif windowStruct.letterCode == "F6" && windowStruct.toIncrease && !windowStruct.toDecrease
+            maskContrUp(windowStruct, stateObject, textur, currentWindowInState)
+        elseif windowStruct.letterCode == "F6" && !windowStruct.toIncrease && windowStruct.toDecrease
+            maskContrDown(windowStruct, stateObject, textur, currentWindowInState)
+        end
     else
         #updating current windowing object and getting reference to old
         stateObject.mainForDisplayObjects = setproperties(stateObject.mainForDisplayObjects, (windowControlStruct = windowStruct))
@@ -175,8 +190,9 @@ set main window - min shown white and max shown black on the basis of textur dat
 """
 function setmainWindow(stateObject::StateDataFields, windowStruct::WindowControlStruct)
     #updating current windowing object and getting reference to old
+    @info "we are inside of setMainWindow"
     setCTWindow(windowStruct.min_shown_white, windowStruct.max_shown_black, stateObject.mainForDisplayObjects.mainImageUniforms)
-    stateObject.mainForDisplayObjects = setproperties(stateObject.mainForDisplayObject, (windowControlStruct = windowStruct))
+    stateObject.mainForDisplayObjects = setproperties(stateObject.mainForDisplayObjects, (windowControlStruct = windowStruct))
 end#setmainWindow
 
 

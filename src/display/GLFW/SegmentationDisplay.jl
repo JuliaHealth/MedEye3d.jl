@@ -165,19 +165,14 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}, fractionOfM
             cleanUp()
         end#
         GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())
-
         mouseStructInstanceArray::Vector{MouseStruct} = []
         while !shouldStop[1]
+            # mouseStructInstanceArray::Vector{MouseStruct} = []
             channelDataWithFetch = fetch(mainChannel)
             channelData = take!(mainChannel)
             # get the aggregation here, only when the type is mouseStruct.
             if (typeof(channelDataWithFetch) == MouseStruct && channelDataWithFetch.isLeftButtonDown)
                 push!(mouseStructInstanceArray, channelDataWithFetch)
-                @info "the stuf till here is working"
-                texturedata = stateInstance.textureToModifyVec
-
-                @info typeof(stateInstance.textureToModifyVec)
-                @info typeof(mouseStructInstanceArray)
                 on_next!(stateInstance, stateInstance.textureToModifyVec, mouseStructInstanceArray)
             else
                 on_next!(stateInstance, channelData)
