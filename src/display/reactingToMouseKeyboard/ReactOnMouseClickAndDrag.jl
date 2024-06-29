@@ -12,10 +12,11 @@ so we modify the data that is the basis of the mouse interaction mask  and we pa
 """
 module ReactOnMouseClickAndDrag
 using Logging, Parameters, Setfield, GLFW, ModernGL, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils
-using Dates, Parameters, ..DataStructs, ..StructsManag,Logging, Base.Threads
+using Dates, Parameters, ..DataStructs, ..StructsManag, Logging, Base.Threads
 import Logging, Base.Threads
 export registerMouseClickFunctions
 export reactToMouseDrag
+export react_to_draw
 
 
 
@@ -34,28 +35,28 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
     mouseStructInstance = MouseStruct()
 
     GLFW.SetCursorPosCallback(window, (a, x, y) -> begin
-    if (mouseStructInstance.isLeftButtonDown && x >= xmin && x <= xmax && y >= ymin && y <= ymax)
-    point = CartesianIndex(Int(x), Int(y))
-    mouseStructInstance.lastCoordinates = [point]
-    put!(mainChannel, mouseStructInstance)
+        if (mouseStructInstance.isLeftButtonDown && x >= xmin && x <= xmax && y >= ymin && y <= ymax)
+            point = CartesianIndex(Int(x), Int(y))
+            mouseStructInstance.lastCoordinates = [point]
+            put!(mainChannel, mouseStructInstance)
 
-    end
-end)# and  for example : cursor: 29.0, 469.0  types   Float64  Float64
+        end
+    end)# and  for example : cursor: 29.0, 469.0  types   Float64  Float64
     GLFW.SetMouseButtonCallback(window, (a, button, action, mods) -> begin
-    leftMouseButtonDownResult = (button == GLFW.MOUSE_BUTTON_1 && action == GLFW.PRESS)
-    mouseStructInstance.isLeftButtonDown = leftMouseButtonDownResult
+        leftMouseButtonDownResult = (button == GLFW.MOUSE_BUTTON_1 && action == GLFW.PRESS)
+        mouseStructInstance.isLeftButtonDown = leftMouseButtonDownResult
 
-    rightMouseButtonDownResult = (button == GLFW.MOUSE_BUTTON_2 && action == GLFW.PRESS)
-    mouseStructInstance.isRightButtonDown = rightMouseButtonDownResult
+        rightMouseButtonDownResult = (button == GLFW.MOUSE_BUTTON_2 && action == GLFW.PRESS)
+        mouseStructInstance.isRightButtonDown = rightMouseButtonDownResult
 
-    # put!(mainChannel, mouseStructInstance)
-end) # for example types MOUSE_BUTTON_1 PRESS   GLFW.MouseButton  GLFW.Action
+        # put!(mainChannel, mouseStructInstance)
+    end) # for example types MOUSE_BUTTON_1 PRESS   GLFW.MouseButton  GLFW.Action
 
 end #registerMouseScrollFunctions
 
 
 
-mouseCoords_channel=Base.Channel{MouseStruct}(100)
+mouseCoords_channel = Base.Channel{MouseStruct}(100)
 # we can fetch! on the channel, what is the next thing line, if the mouseStruct, check previous one by fetch. If it mouseStruct, aggregate those 2 and fetch the next one
 #fetch in while loop, until no more mouseStructs, then we have the last one, and we can react to it
 
@@ -64,9 +65,12 @@ mouseCoords_channel=Base.Channel{MouseStruct}(100)
 used when we want to save some manual modifications
 """
 # function react_to_draw(textureList,actor,mouseCoords_channel)
-function react_to_draw(textureList,stateObject,obj)
+function react_to_draw(textureList, stateObject, mouseStructArray::Vector{MouseStruct})
     # sleep(0.1);
     # @info "react_to_draw after sleep" isready(mouseCoords_channel)
+
+
+    @info "we are fully inside of the react_to_draw function"
     texture = textureList[1]
     calcDim = stateObject.calcDimsStruct
 
@@ -79,48 +83,46 @@ function react_to_draw(textureList,stateObject,obj)
     map each MouseStruct using translateMouseToTexture
     result will be mappedCoords, in react_to_draw
     check whether the length of the mappedCoords is greater than 0
-
     """
-    mappedCoords=Vector{CartesianIndex{2}}()
-    is_sth_in=false
-    while(isready(mouseCoords_channel) )
-        is_sth_in=true
-        mouseCoords=take!(mouseCoords_channel).lastCoordinates
-        append!( mappedCoords,translateMouseToTexture(texture.strokeWidth, mouseCoords, stateObject.calcDimsStruct))
+    mappedCoords = Vector{CartesianIndex{2}}()
+    for mouseStruct in mouseStructArray
+        mouseCoords = mouseStruct.lastCoordinates
+        append!(mappedCoords, translateMouseToTexture(texture.strokeWidth, mouseCoords, stateObject.calcDimsStruct))
     end
+    # append!(mappedCoords, translateMouseToTexture(texture.strokeWidth, mouseCoords, stateObject.calcDimsStruct))
+
     # @info "react_to_draw after channel" mappedCoords
 
     # is_sth_in=true
-    if(is_sth_in)
-        twoDimDat = stateObject.currentlyDispDat |> # accessing currently displayed data
-                    (singSl) -> singSl.listOfDataAndImageNames[singSl.nameIndexes[texture.name]] #accessing the texture data we want to modify
+
+    twoDimDat = stateObject.currentlyDispDat |> # accessing currently displayed data
+                (singSl) -> singSl.listOfDataAndImageNames[singSl.nameIndexes[texture.name]] #accessing the texture data we want to modify
 
 
 
-        toSet = convert(parameter_type(texture), stateObject.valueForMasToSet.value)
-        sliceDat = modSlice!(twoDimDat, mappedCoords, convert(twoDimDat.type, toSet)) # modifying data associated with texture
+    toSet = convert(parameter_type(texture), stateObject.valueForMasToSet.value)
+    sliceDat = modSlice!(twoDimDat, mappedCoords, convert(twoDimDat.type, toSet)) # modifying data associated with texture
 
 
-        #  updateTexture(twoDimDat.type,sliceDat, texture,0,0,calcDim.imageTextureWidth,calcDim.imageTextureHeight  )
+    #  updateTexture(twoDimDat.type,sliceDat, texture,0,0,calcDim.imageTextureWidth,calcDim.imageTextureHeight  )
 
-        singleSliceDat = setproperties(stateObject.currentlyDispDat, (listOfDataAndImageNames = [sliceDat]))
-
-
-
-        updateImagesDisplayed(singleSliceDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, stateObject.calcDimsStruct, stateObject.valueForMasToSet)
+    singleSliceDat = setproperties(stateObject.currentlyDispDat, (listOfDataAndImageNames = [sliceDat]))
 
 
 
+    updateImagesDisplayed(singleSliceDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, stateObject.calcDimsStruct, stateObject.valueForMasToSet)
 
 
-        #to enable undoing we just set the point we modified back to 0
-        addToforUndoVector(stateObject, () -> begin
-            modSlice!(twoDimDat, mappedCoords, convert(twoDimDat.type, 0)) |> # modifying data associated with texture
-            (sliceDat) -> updateTexture(twoDimDat.type, sliceDat.dat, texture, 0, 0, calcDim.imageTextureWidth, calcDim.imageTextureHeight)
-            basicRender(obj.window)
-        end)
 
-    end#if
+
+
+    #to enable undoing we just set the point we modified back to 0
+    # addToforUndoVector(stateObject, () -> begin
+    #     modSlice!(twoDimDat, mappedCoords, convert(twoDimDat.type, 0)) |> # modifying data associated with texture
+    #     (sliceDat) -> updateTexture(twoDimDat.type, sliceDat.dat, texture, 0, 0, calcDim.imageTextureWidth, calcDim.imageTextureHeight)
+    #     basicRender(obj.window)
+    # end)
+    @info "everything executed fine "
 
 end#react_to_draw
 
@@ -135,14 +137,14 @@ function reactToMouseDrag(mousestr::MouseStruct, mainState::StateDataFields)
     textureList = mainState.textureToModifyVec
     mouseCoords = mousestr.lastCoordinates
 
-        #we save data about right click position in order to change the slicing plane accordingly
+    #we save data about right click position in order to change the slicing plane accordingly
     mappedCoords = translateMouseToTexture(Int32(1), mouseCoords, mainState.calcDimsStruct)
     mappedCorrd = mappedCoords
     if (!isempty(mappedCorrd))
         cartMapped = cartTwoToThree(mainState.onScrollData.dataToScrollDims, mainState.currentDisplayedSlice, mappedCoords[1])
 
         mainState.lastRecordedMousePosition = cartMapped
-        end#if
+    end#if
 
 end#..ReactToScroll
 
