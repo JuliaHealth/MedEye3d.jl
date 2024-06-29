@@ -38,6 +38,7 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
     point = CartesianIndex(Int(x), Int(y))
     mouseStructInstance.lastCoordinates = [point]
     put!(mainChannel, mouseStructInstance)
+
     end
 end)# and  for example : cursor: 29.0, 469.0  types   Float64  Float64
     GLFW.SetMouseButtonCallback(window, (a, button, action, mods) -> begin

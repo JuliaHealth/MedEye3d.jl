@@ -149,6 +149,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
  #creating window and event listening loop
     window,vertex_shader,fragment_shader ,shader_program,vbo,ebo,fragment_shader_words,vbo_words,shader_program_words,gslsStr =  PrepareWindow.displayAll(listOfTextSpecs,calcDimStruct )
 
+    GLFW.MakeContextCurrent(window)
     # than we set those ..Uniforms, open gl types and using data from arguments  to fill texture specifications
     mainImageUnifs,listOfTextSpecsMapped= assignUniformsAndTypesToMasks(listOfTextSpecs,shader_program,windowControlStruct)
 
@@ -191,7 +192,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
 
     # put!(mainMedEye3dInstance.channel, forTextDispStruct)
     function consumer(mainChannel::Base.Channel{Any})
-
+        shouldStop  = [false]
         stateInstance = StateDataFields()
         stateInstance.textureToModifyVec = filter(it->it.isEditable ,initializedTextures)
         #    in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
@@ -200,13 +201,15 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}
             glDeleteTextures(length(obj.listOfTextSpecifications), map(text->text.ID,obj.listOfTextSpecifications));
             glFlush()
             GLFW.DestroyWindow(obj.window)
+            shouldStop[1] = true
+            GLFW.Terminate()
         end #cleanUp
 
         if( typeof(stateInstance.mainForDisplayObjects.window)== GLFW.Window  )
             cleanUp()
         end#
         GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())
-        while true
+        while !shouldStop[1]
             channelData = take!(mainChannel)
             # get the aggregation here, only when the type is mouseStruct.
             if typeof(channelData) == MouseStruct
