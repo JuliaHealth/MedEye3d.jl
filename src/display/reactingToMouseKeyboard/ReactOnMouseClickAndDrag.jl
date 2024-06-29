@@ -25,14 +25,29 @@ if left button is presed down - we make it true if the left button is pressed ov
 imageWidth adn imageHeight are the dimensions of textures that we use to display
 """
 function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct, mainChannel::Base.Channel{Any})
+    xmin = Int32(calcD.windowWidthCorr)
+    xmax = Int32(calcD.avWindWidtForMain - calcD.windowWidthCorr)
 
+    ymin = Int32(calcD.windowHeightCorr)
+    ymax = Int32(calcD.avWindHeightForMain - calcD.windowHeightCorr)
     # calculating dimensions of quad becouse it do not occupy whole window, and we want to react only to those mouse positions that are on main image quad
+    mouseStructInstance = MouseStruct()
 
     GLFW.SetCursorPosCallback(window, (a, x, y) -> begin
-put!(mainChannel, (a,x,y))
+    if (mouseStructInstance.isLeftButtonDown && x >= xmin && x <= xmax && y >= ymin && y <= ymax)
+    point = CartesianIndex(Int(x), Int(y))
+    mouseStructInstance.lastCoordinates = [point]
+    put!(mainChannel, mouseStructInstance)
+    end
 end)# and  for example : cursor: 29.0, 469.0  types   Float64  Float64
     GLFW.SetMouseButtonCallback(window, (a, button, action, mods) -> begin
-put!(mainChannel, (a, button, action, mods))
+    leftMouseButtonDownResult = (button == GLFW.MOUSE_BUTTON_1 && action == GLFW.PRESS)
+    mouseStructInstance.isLeftButtonDown = leftMouseButtonDownResult
+
+    rightMouseButtonDownResult = (button == GLFW.MOUSE_BUTTON_2 && action == GLFW.PRESS)
+    mouseStructInstance.isRightButtonDown = rightMouseButtonDownResult
+
+    # put!(mainChannel, mouseStructInstance)
 end) # for example types MOUSE_BUTTON_1 PRESS   GLFW.MouseButton  GLFW.Action
 
 end #registerMouseScrollFunctions
@@ -119,26 +134,15 @@ function reactToMouseDrag(mousestr::MouseStruct, mainState::StateDataFields)
     textureList = mainState.textureToModifyVec
     mouseCoords = mousestr.lastCoordinates
 
-    if (!isempty(textureList) && mousestr.isLeftButtonDown && textureList[1].isEditable)
-        put!(mouseCoords_channel, mousestr)
-
-        # @spawn :interactive react_to_draw(textureList,actor,mouseCoords)
-        #@spawn :interactive
-        # react_to_draw(textureList,mainState,obj) (needs to be removed)
-        """
-        remove everything below if above elseif
-        """
-
-    elseif (mousestr.isRightButtonDown)
         #we save data about right click position in order to change the slicing plane accordingly
-        mappedCoords = translateMouseToTexture(Int32(1), mouseCoords, mainState.calcDimsStruct)
-        mappedCorrd = mappedCoords
-        if (!isempty(mappedCorrd))
-            cartMapped = cartTwoToThree(mainState.onScrollData.dataToScrollDims, mainState.currentDisplayedSlice, mappedCoords[1])
+    mappedCoords = translateMouseToTexture(Int32(1), mouseCoords, mainState.calcDimsStruct)
+    mappedCorrd = mappedCoords
+    if (!isempty(mappedCorrd))
+        cartMapped = cartTwoToThree(mainState.onScrollData.dataToScrollDims, mainState.currentDisplayedSlice, mappedCoords[1])
 
-            mainState.lastRecordedMousePosition = cartMapped
+        mainState.lastRecordedMousePosition = cartMapped
         end#if
-    end #if
+
 end#..ReactToScroll
 
 

@@ -210,7 +210,7 @@ end
 """
 Holding necessery data to controll mouse interaction
 """
-@with_kw struct MouseStruct
+@with_kw mutable struct MouseStruct
   isLeftButtonDown::Bool = false # true if left button was pressed and not yet released
   isRightButtonDown::Bool = false# true if right button was pressed and not yet released
   lastCoordinates::Vector{CartesianIndex{2}} = [] # list of accumulated mouse coordinates

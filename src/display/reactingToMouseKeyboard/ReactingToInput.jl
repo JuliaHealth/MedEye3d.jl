@@ -127,7 +127,7 @@ when GLFW context is ready we need to use this  function in order to register GL
     actor - Roctet actor that holds objects needed for display like window etc...
     return list of subscriptions so if we will need it we can unsubscribe
 """
-function subscribeGLFWtoActor(window::GLFW.Window, mainMedEye3dObject::MainMedEye3d)
+function subscribeGLFWtoActor(window::GLFW.Window, mainMedEye3dObject::MainMedEye3d, calcDim::CalcDimsStruct)
 
 
     ReactToScroll.registerMouseScrollFunctions(window, mainMedEye3dObject.channel)
@@ -136,7 +136,7 @@ function subscribeGLFWtoActor(window::GLFW.Window, mainMedEye3dObject::MainMedEy
     end)
 
     ReactOnKeyboard.registerKeyboardFunctions(window,mainMedEye3dObject.channel)
-    # buttonSubs  = registerMouseClickFunctions(forDisplayConstants.window, stateObject.calcDimsStruct, mainMedEye3dObject.channel)
+    ReactOnMouseClickAndDrag.registerMouseClickFunctions(window, calcDim, mainMedEye3dObject.channel)
 
 end
 
