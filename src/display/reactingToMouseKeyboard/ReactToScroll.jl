@@ -19,10 +19,10 @@ returns subscription in order to enable unsubscribing in the end
 window - GLFW window
 return scrollback - that holds boolean subject (observable) to which we can react by subscribing appropriate actor
 """
-function registerMouseScrollFunctions(window::GLFW.Window, mainChannel :: Base.Channel{Any})
+function registerMouseScrollFunctions(window::GLFW.Window, mainChannel::Base.Channel{Any})
     GLFW.SetScrollCallback(window, (a, xoff, yoff) -> begin
-    put!(mainChannel, Int64(yoff)) #if there is type distortion in the channel, we can implement custom struct types
-end)
+        put!(mainChannel, Int64(yoff)) #if there is type distortion in the channel, we can implement custom struct types
+    end)
 
 end #registerMouseScrollFunctions
 
@@ -68,7 +68,7 @@ function reactToScroll(scrollNumb::Int64, mainState::StateDataFields, toBeSavedF
                                   (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=current, textToDisp=getTextForCurrentSlice(mainState.onScrollData, Int32(current)))
 
 
-                                  updateImagesDisplayed(singleSlDat, mainState.mainForDisplayObjects, mainState.textDispObj, mainState.calcDimsStruct, mainState.valueForMasToSet)
+        updateImagesDisplayed(singleSlDat, mainState.mainForDisplayObjects, mainState.textDispObj, mainState.calcDimsStruct, mainState.valueForMasToSet)
 
 
 
@@ -82,10 +82,10 @@ function reactToScroll(scrollNumb::Int64, mainState::StateDataFields, toBeSavedF
         #saving information about current slice for future reference
         mainState.currentDisplayedSlice = current
         #enable undoing the action
-        if (toBeSavedForBack)
-            func = () -> reactToScroll(old -= scrollNumb, mainState, false)
-            addToforUndoVector(mainState, func)
-        end
+        # if (toBeSavedForBack)
+        #     func = () -> reactToScroll(old -= scrollNumb, mainState, false)
+        #     addToforUndoVector(mainState, func)
+        # end
 
     end#if
 
