@@ -21,7 +21,7 @@ on_next!(stateObject::StateDataFields, data::CalcDimsStruct) = setUpCalcDimsStru
 on_next!(stateObject::StateDataFields, data::valueForMasToSetStruct) = setUpvalueForMasToSet(data, stateObject)
 on_next!(stateObject::StateDataFields, data::FullScrollableDat) = setUpForScrollData(data, stateObject)
 on_next!(stateObject::StateDataFields, data::SingleSliceDat) = updateSingleImagesDisplayedSetUp(data, stateObject)
-on_next!(stateObject::StateDataFields, data::Vector{TextureSpec}, mouseStructArrayData::Vector{MouseStruct}) = react_to_draw(data, stateObject, mouseStructArrayData)
+on_next!(stateObject::StateDataFields, data::Vector{MouseStruct}) = react_to_draw(data, stateObject)
 on_next!(stateObject::StateDataFields, data::MouseStruct) = reactToMouseDrag(data, stateObject) #needs modification , with the react_to_draw, data of vectorStruct (MoustStruct)
 on_next!(stateObject::StateDataFields, data::KeyInputFields) = reactToKeyInput(data, stateObject)
 on_error!(stateObject::StateDataFields, err) = error(err)
@@ -79,27 +79,6 @@ function prepareForDispStruct(numberOfActiveTextUnits::Int, fragment_shader_word
 end#prepereForDispStruct
 
 
-
-"""
-In order to properly close displayer we need to :
- remove buffers that wer use
- remove shaders
- remove all textures
- unsubscibe all of the subscriptions to the mainActor
- finalize main actor and reinstantiate it
- close GLFW window
-"""
-
-
-
-"""
-Main consumer function to process data takes from the channel
-    we need to do aggregation in the while loop, for mouse drag and annotation by fetch
-
-
-"""
-
-
 """
 coordinating displaying - sets needed constants that are storeds in  forDisplayConstants; and configures interactions from GLFW events
 listOfTextSpecs - holds required data needed to initialize textures
@@ -146,6 +125,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}, fractionOfM
     #passing for text display object
     forTextDispStruct = prepareForDispStruct(length(initializedTextures), fragment_shader_words, vbo_words, shader_program_words, window, textTexturewidthh, textTextureheightt, forDispObj)
 
+
     # put!(mainMedEye3dInstance.channel, forTextDispStruct)
     function consumer(mainChannel::Base.Channel{Any})
         shouldStop = [false]
@@ -165,22 +145,23 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}, fractionOfM
             cleanUp()
         end#
         GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())
-        mouseStructInstanceArray::Vector{MouseStruct} = []
+
         while !shouldStop[1]
-            # mouseStructInstanceArray::Vector{MouseStruct} = []
-            channelDataWithFetch = fetch(mainChannel)
             channelData = take!(mainChannel)
             # get the aggregation here, only when the type is mouseStruct.
-            if (typeof(channelDataWithFetch) == MouseStruct && channelDataWithFetch.isLeftButtonDown)
-                push!(mouseStructInstanceArray, channelDataWithFetch)
-                on_next!(stateInstance, stateInstance.textureToModifyVec, mouseStructInstanceArray)
-            else
-                on_next!(stateInstance, channelData)
+            if typeof(channelData) == MouseStruct
+                mouseStructAggregationArray::Vector{MouseStruct} = [channelData]
+                while !isempty(mainChannel) && typeof(fetch(mainChannel)) == MouseStruct
+                    push!(mouseStructAggregationArray, take!(mainChannel))
+                end
+                channelData = mouseStructAggregationArray
             end
-        end
-    end
+            on_next!(stateInstance, channelData)
 
-    mainMedEye3dInstance = MainMedEye3d(channel=Base.Channel{Any}(consumer, 1000; spawn=false, threadpool=nothing))
+        end
+    end #end of consumer
+
+    mainMedEye3dInstance = MainMedEye3d(channel=Base.Channel{Any}(consumer, 1000; spawn=false, threadpool=:interactive))
     # mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(1000))
     put!(mainMedEye3dInstance.channel, calcDimStruct)
     put!(mainMedEye3dInstance.channel, forDispObj)

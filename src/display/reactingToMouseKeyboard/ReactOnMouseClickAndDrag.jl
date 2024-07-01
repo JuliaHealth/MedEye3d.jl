@@ -65,16 +65,13 @@ mouseCoords_channel = Base.Channel{MouseStruct}(100)
 used when we want to save some manual modifications
 """
 # function react_to_draw(textureList,actor,mouseCoords_channel)
-function react_to_draw(textureList, stateObject, mouseStructArray::Vector{MouseStruct})
+function react_to_draw(mouseStructArray::Vector{MouseStruct}, stateObject)
     # sleep(0.1);
     # @info "react_to_draw after sleep" isready(mouseCoords_channel)
-
-
-    @info "we are fully inside of the react_to_draw function"
-    texture = textureList[1]
+    texture = stateObject.textureToModifyVec[1]
     calcDim = stateObject.calcDimsStruct
 
-    @info mouseStructArray
+
     # mouseCoords=take!(mouseCoords_channel).lastCoordinates
     # mappedCoords=translateMouseToTexture(texture.strokeWidth, mouseCoords, actor.actor.calcDimsStruct)
     # # two dimensional coordinates on plane of intrest (current slice)
@@ -112,19 +109,6 @@ function react_to_draw(textureList, stateObject, mouseStructArray::Vector{MouseS
 
 
     updateImagesDisplayed(singleSliceDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, stateObject.calcDimsStruct, stateObject.valueForMasToSet)
-
-
-
-
-
-    #to enable undoing we just set the point we modified back to 0
-    # addToforUndoVector(stateObject, () -> begin
-    #     modSlice!(twoDimDat, mappedCoords, convert(twoDimDat.type, 0)) |> # modifying data associated with texture
-    #     (sliceDat) -> updateTexture(twoDimDat.type, sliceDat.dat, texture, 0, 0, calcDim.imageTextureWidth, calcDim.imageTextureHeight)
-    #     basicRender(obj.window)
-    # end)
-    @info "everything executed fine "
-
 end#react_to_draw
 
 
