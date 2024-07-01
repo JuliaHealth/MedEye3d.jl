@@ -1,12 +1,11 @@
 module ForDisplayStructs
 using Base: Int32, isvisible
-export ScrollCallbackSubscribable, KeyboardCallbackSubscribable, MouseCallbackSubscribable, MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, ActorWithOpenGlObjects, KeyboardStruct, TextureUniforms, MainImageUniforms, MaskTextureUniforms, ForWordsDispStruct
-
-using ColorTypes, Parameters, Observables, ModernGL, GLFW, Rocket, Dictionaries, FreeTypeAbstraction, ..DataStructs
+export MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, StateDataFields, KeyboardStruct, KeyInputFields, TextureUniforms, MainImageUniforms, MaskTextureUniforms, ForWordsDispStruct, MainMedEye3d
+using ColorTypes, Parameters, Observables, ModernGL, GLFW, Dictionaries, FreeTypeAbstraction, ..DataStructs
 
 
 """
-data needed for definition of mask  - data that will be displayed over main image 
+data needed for definition of mask  - data that will be displayed over main image
 this struct is parametarized by type of 3 dimensional array that will be used  to store data
 """
 @with_kw struct Mask{arrayType}
@@ -25,14 +24,14 @@ abstract type TextureUniforms end
 """
 hold reference numbers that will be used to access and modify given uniform value
 In order to have easy fast access to the values set the most recent values will also be stored inside
-In order to improve usability  we will also save with what data type this mask is associated 
+In order to improve usability  we will also save with what data type this mask is associated
 for example Int, uint, float etc
 """
 @with_kw struct MaskTextureUniforms <: TextureUniforms
   samplerName::String = ""#name of the sampler - mainly for debugging purposes
   samplerRef::Int32 = Int32(0) #reference to sampler of the texture
   colorsMaskRef::Int32 = Int32(0) #reference to uniform holding color of this mask
-  isVisibleRef::Int32 = Int32(0)# reference to uniform that points weather we 
+  isVisibleRef::Int32 = Int32(0)# reference to uniform that points weather we
   maskMinValue::Int32 = Int32(0)# minimum value associated with possible value of mask
   maskMAxValue::Int32 = Int32(0)# maximum value associated with possible value of mask
   maskRangeValue::Int32 = Int32(0)# range of values associated with possible value of mask
@@ -45,7 +44,7 @@ Holding references to ..Uniforms used to controll main image
 @with_kw struct MainImageUniforms <: TextureUniforms
   samplerName::String = ""#name of the sampler - mainly for debugging purposes
   samplerRef::Int32 = Int32(0) #reference to   sampler of the texture
-  isVisibleRef::Int32 = Int32(0)# reference to uniform that points weather we 
+  isVisibleRef::Int32 = Int32(0)# reference to uniform that points weather we
   # ..Uniforms controlling windowing
   min_shown_white::Int32 = Int32(0)
   max_shown_black::Int32 = Int32(0)
@@ -67,14 +66,14 @@ isNuclearMask ::Bool = false # used for example in case of nuclear imagiing stud
 isContinuusMask ::Bool = false # in case of masks if mask is continuus color display we set multiple colors in a vector
 color::RGB = RGB(0.0,0.0,0.0) #needed in case for the masks in order to establish the range of colors we are intrested in in case of binary mask there is no point to supply more than one color (supply Vector with length = 1)
 colorSet::Vector{RGB}=[]    #set of colors that can be used for mask with continous values
-strokeWidth::Int32 =Int32(3)#marking how thick should be the line that is left after acting with the mouse ... 
+strokeWidth::Int32 =Int32(3)#marking how thick should be the line that is left after acting with the mouse ...
 isEditable::Bool =false     #if true we can modify given  texture using mouse interaction
 GL_Rtype::UInt32 =UInt32(0)           #GlRtype - for example GL_R8UI or GL_R16I
 OpGlType ::UInt32 =UInt32(0)          #open gl type - for example GL_UNSIGNED_BYTE or GL_SHORT
 actTextrureNumb ::UInt32 =UInt32(0)          #usefull to be able to activate the texture using GL_Activetexture - with proper open GL constant
 associatedActiveNumer ::Int64 =Int64(0)          #usefull to be able to activate the texture using GL_Activetexture - with proper open GL constant
 ID::Base.RefValue{UInt32} = Ref(UInt32(0))   #id of Texture
-isVisible::Bool= true       #if false it should be invisible 
+isVisible::Bool= true       #if false it should be invisible
 uniforms::TextureUniforms=MaskTextureUniforms()# holds values needed to control ..Uniforms in a shader
 minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask, and second entry is maximum possible value for this mask
 
@@ -88,14 +87,14 @@ minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask
   isContinuusMask::Bool = false # in case of masks if mask is continuus color display we set multiple colors in a vector
   color::RGB = RGB(0.0, 0.0, 0.0) #needed in case for the masks in order to establish the range of colors we are intrested in in case of binary mask there is no point to supply more than one color (supply Vector with length = 1)
   colorSet::Vector{RGB} = []    #set of colors that can be used for mask with continous values
-  strokeWidth::Int32 = Int32(3)#marking how thick should be the line that is left after acting with the mouse ... 
+  strokeWidth::Int32 = Int32(3)#marking how thick should be the line that is left after acting with the mouse ...
   isEditable::Bool = false     #if true we can modify given  texture using mouse interaction
   GL_Rtype::UInt32 = UInt32(0)           #GlRtype - for example GL_R8UI or GL_R16I
   OpGlType::UInt32 = UInt32(0)          #open gl type - for example GL_UNSIGNED_BYTE or GL_SHORT
   actTextrureNumb::UInt32 = UInt32(0)          #usefull to be able to activate the texture using GL_Activetexture - with proper open GL constant
   associatedActiveNumer::Int64 = Int64(0)          #usefull to be able to activate the texture using GL_Activetexture - with proper open GL constant
   ID::Base.RefValue{UInt32} = Ref(UInt32(0))   #id of Texture
-  isVisible::Bool = true       #if false it should be invisible 
+  isVisible::Bool = true       #if false it should be invisible
   uniforms::TextureUniforms = MaskTextureUniforms()# holds values needed to control ..Uniforms in a shader
   minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask, and second entry is maximum possible value for this mask
   maskContribution::Float32 = 1.0 # controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%
@@ -107,8 +106,8 @@ parameter_type(x::TextureSpec) = parameter_type(typeof(x))
 
 """
 given Vector of TextureSpecs
-it creates dictionary where keys are associated names 
-and values are indicies where they are found in a list 
+it creates dictionary where keys are associated names
+and values are indicies where they are found in a list
 """
 function getLocationDict(listt)::Dictionary{String,Int64}
   return Dictionary(map(it -> it.name, listt), collect(eachindex(listt)))
@@ -117,13 +116,12 @@ end#getLocationDict
 
 
 """
-Defined in order to hold constant objects needed to display images 
+Defined in order to hold constant objects needed to display images
 listOfTextSpecifications::Vector{TextureSpec} = [TextureSpec()]
 window = []
 vertex_shader::UInt32 =1
 fragment_shader::UInt32=1
 shader_program::UInt32=1
-stopListening::Base.Threads.Atomic{Bool}= Threads.Atomic{Bool}(0)# enables unlocking GLFW context for futher actions
 vbo::UInt32 =1 #vertex buffer object id
 ebo::UInt32 =1 #element buffer object id
 mainImageUniforms::MainImageUniforms = MainImageUniforms()# struct with references to main image
@@ -134,13 +132,12 @@ windowControlStruct::WindowControlStruct=WindowControlStruct()# holding data use
 
 
 """
-@with_kw struct forDisplayObjects
+@with_kw mutable struct forDisplayObjects
   listOfTextSpecifications::Vector{TextureSpec} = [TextureSpec()]
   window = []
   vertex_shader::UInt32 = 1
   fragment_shader::UInt32 = 1
   shader_program::UInt32 = 1
-  stopListening::Base.Threads.Atomic{Bool} = Threads.Atomic{Bool}(0)# enables unlocking GLFW context for futher actions
   vbo::UInt32 = 1 #vertex buffer object id
   ebo::UInt32 = 1 #element buffer object id
   mainImageUniforms::MainImageUniforms = MainImageUniforms()# struct with references to main image
@@ -157,23 +154,12 @@ Holding necessery data to display text  - like font related
 """
 @with_kw struct ForWordsDispStruct
   fontFace::FTFont = FTFont(Ptr{FreeTypeAbstraction.FreeType.__JL_FT_FaceRec_}(), false) # font we will use to display text
-  textureSpec::TextureSpec = TextureSpec{UInt8}() # texture specification of texture used to display text 
+  textureSpec::TextureSpec = TextureSpec{UInt8}() # texture specification of texture used to display text
   fragment_shader_words::UInt32 = 1 #reference to fragment shader used to display text
   vbo_words::Base.RefValue{UInt32} = Ref(UInt32(1)) #reference to vertex buffer object used to display text
   shader_program_words::UInt32 = 1
 
 end #ForWordsDispStruct
-
-
-
-
-
-
-
-
-
-
-
 
 
 """
@@ -184,7 +170,7 @@ isShiftPressed::Bool = false # left - scancode 50 right 62- Int32
 isAltPressed::Bool= false# left - scancode 64 right 108- Int32
 isEnterPressed::Bool= false# scancode 36
 isTAbPressed::Bool= false#
-isSpacePressed::Bool= false# 
+isSpacePressed::Bool= false#
 isF1Pressed::Bool= false
 isF2Pressed::Bool= false
 isF3Pressed::Bool= false
@@ -196,13 +182,13 @@ mostRecentKeyName ::String=""
 mostRecentAction ::GLFW.Action= GLFW.RELEASE
 
 """
-@with_kw struct KeyboardStruct
+@with_kw mutable struct KeyboardStruct
   isCtrlPressed::Bool = false# left - scancode 37 right 105 - Int32
   isShiftPressed::Bool = false # left - scancode 50 right 62- Int32
   isAltPressed::Bool = false# left - scancode 64 right 108- Int32
   isEnterPressed::Bool = false# scancode 36
   isTAbPressed::Bool = false#
-  isSpacePressed::Bool = false# 
+  isSpacePressed::Bool = false#
   isF1Pressed::Bool = false
   isF2Pressed::Bool = false
   isF3Pressed::Bool = false
@@ -216,7 +202,7 @@ mostRecentAction ::GLFW.Action= GLFW.RELEASE
   isSPressed::Bool = false
   lastKeysPressed::Vector{String} = [] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
   #informations about what triggered sending this particular struct to the  actor
-  mostRecentScanCode::GLFW.Key = GLFW.KEY_KP_4
+  mostRecentScanCode::Int32 = Int32(GLFW.KEY_KP_4)
   mostRecentKeyName::String = ""
   mostRecentAction::GLFW.Action = GLFW.RELEASE
 
@@ -224,98 +210,20 @@ end
 """
 Holding necessery data to controll mouse interaction
 """
-@with_kw struct MouseStruct
+@with_kw mutable struct MouseStruct
   isLeftButtonDown::Bool = false # true if left button was pressed and not yet released
   isRightButtonDown::Bool = false# true if right button was pressed and not yet released
   lastCoordinates::Vector{CartesianIndex{2}} = [] # list of accumulated mouse coordinates
 end#MouseStruct
 
 
-
 """
-struct that enables reacting to  the input  from mouse click  and drag the input will be 
-    Cartesian index represening (x,y)
-     x and y position  of the mouse - will be recorded only if left mouse button is pressed or keep presssed
+Structure for handling key input
 """
-@with_kw mutable struct MouseCallbackSubscribable <: Subscribable{MouseStruct}
-  #true if left button is presed down - we make it true if the left button is pressed over image and false if mouse get out of the window or we get information about button release
-  isLeftButtonDown::Bool
-  isRightButtonDown::Bool
-  #coordinates marking 4 corners of 
-  #the quad that displays our medical image with the masks
-  xmin::Int32
-  ymin::Int32
-  xmax::Int32
-  ymax::Int32
-  #used to draw left button lines (creating lines)
-  #store of the cartesian coordinates that is used to batch actions 
-  #- so if mouse is moving rapidly we would store bunch of coordinates and then modify texture in batch
-  coordinatesStoreForLeftClicks::Vector{CartesianIndex{2}}
-  lastCoordinate::CartesianIndex{2}#generally when we draw lines we remove points from array above yet w need to leave last one in order to keep continuity of futher line
-  isBusy::Base.Threads.Atomic{Bool} # indicate to check weather the system is ready to receive the input
-
-
-  subject::Subject{MouseStruct} # coordinates of mouse 
-
+@with_kw struct KeyInputFields
+scancode::Int32
+action::GLFW.Action
 end
-
-
-"""
-Object that enables managing input from keyboard - it stores the information also about
-needed keys wheather they are kept pressed  
-examples of keyboard input (raw GLFW input we process below)
-    action RELEASE GLFW.Action
-    key s StringPRESS
-    key s String
-    action PRESS GLFW.Action
-    key s StringRELEASE
-    key s String
-    action RELEASE GLFW.Action
-
-"""
-@with_kw mutable struct KeyboardCallbackSubscribable <: Subscribable{KeyboardStruct}
-  # true when pressed and kept true until released
-  # true if corresponding keys are kept pressed and become flase when relesed
-  isCtrlPressed::Bool = false # left - scancode 37 right 105 - Int32
-  isShiftPressed::Bool = false # left - scancode 50 right 62- Int32
-  isAltPressed::Bool = false# left - scancode 64 right 108- Int32
-  isEnterPressed::Bool = false# scancode 36
-  isTAbPressed::Bool = false# scancode 36
-  isSpacePressed::Bool = false# scancode 36
-  isF1Pressed::Bool = false
-  isF2Pressed::Bool = false
-  isF3Pressed::Bool = false
-  isF4Pressed::Bool = false
-  isF5Pressed::Bool = false
-  isF6Pressed::Bool = false
-  isPlusPressed::Bool = false
-  isMinusPressed::Bool = false
-  isZPressed::Bool = false
-  isFPressed::Bool = false
-  isSPressed::Bool = false
-  lastKeysPressed::Vector{String} = [] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
-  subject :: Subject{KeyboardStruct} =Subject(KeyboardStruct, scheduler = AsyncScheduler())
-  # subject::Subject{KeyboardStruct} = Subject(KeyboardStruct, scheduler=Rocket.ThreadsScheduler())
-end
-
-
-
-
-"""
-struct that enables reacting to  the input from scrolling
-"""
-mutable struct ScrollCallbackSubscribable <: Subscribable{Int64}
-  isBusy::Base.Threads.Atomic{Bool} # indicate to check weather the system is ready to receive the input
-  numberToSend::Int64# number  that will indicate how many slices to skip and in positive or negative direction
-  subject::Subject{Int64}
-end
-
-
-
-
-
-
-
 
 
 """
@@ -337,7 +245,7 @@ Actor that is able to store a state to keep needed data for proper display
 
 
 """
-@with_kw mutable struct ActorWithOpenGlObjects <: NextActor{Any}
+@with_kw mutable struct StateDataFields
   currentDisplayedSlice::Int = 1 # stores information what slice number we are currently displaying
   mainForDisplayObjects::forDisplayObjects = forDisplayObjects() # stores objects needed to  display using OpenGL and GLFW
   onScrollData::FullScrollableDat = FullScrollableDat()
@@ -350,10 +258,15 @@ Actor that is able to store a state to keep needed data for proper display
   lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1, 1, 1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
   forUndoVector::AbstractArray = [] # holds lambda functions that when invoked will  undo last operations
   maxLengthOfForUndoVector::Int64 = 15 # number controls how many step at maximum we can get back
-  isBusy::Base.Threads.Atomic{Bool} = Threads.Atomic{Bool}(0) # used to indicate by some functions that actor is busy and some interactions should be ceased
+  fieldKeyboardStruct :: KeyboardStruct = KeyboardStruct()
 end
 
-
+"""
+Structure for MainMedEye3d, initialized with keyword arguments in coordinateDisplay (initialization function)
+"""
+@with_kw mutable struct MainMedEye3d
+channel :: Base.Channel{Any}
+end
 
 
 end #module
