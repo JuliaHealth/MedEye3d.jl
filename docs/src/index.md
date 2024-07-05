@@ -426,6 +426,7 @@ MedEye3d.WindowControll.highTreshDown
 MedEye3d.ReactToScroll.registerMouseScrollFunctions
 MedEye3d.DisplayWords.activateForTextDisp
 MedEye3d.MaskDiffrence.displayMaskDiffrence
+MedEye3d.SegmentationDisplay.updateSingleImagesDisplayed
 MedEye3d.CustomFragShad.addUniformsForNuclearAndSubtr
 MedEye3d.ChangePlane
 MedEye3d.SegmentationDisplay
@@ -434,6 +435,7 @@ MedEye3d.DataStructs.CalcDimsStruct
 MedEye3d.CustomFragShad.getNuclearMaskFunctions
 MedEye3d.ReactOnMouseClickAndDrag.registerMouseClickFunctions
 MedEye3d.WindowControll.maskContrUp
+MedEye3d.ReactingToInput.subscribeGLFWtoActor
 MedEye3d.visualizationFromHdf5.loadFromHdf5Prim
 MedEye3d.ReactOnMouseClickAndDrag.reactToMouseDrag
 MedEye3d.CustomFragShad.addMasksStrings
@@ -454,6 +456,7 @@ MedEye3d.ShadersAndVerticies.createVertexShader
 MedEye3d.visualizationFromHdf5.getSomeColor
 MedEye3d.ForDisplayStructs.TextureUniforms
 MedEye3d.ReactingToInput.setUpvalueForMasToSet
+MedEye3d.ForDisplayStructs.ScrollCallbackSubscribable
 MedEye3d.ForDisplayStructs.MainImageUniforms
 MedEye3d.TextureManag.updateTexture
 MedEye3d.TextureManag
@@ -464,6 +467,7 @@ MedEye3d.ShadersAndVerticies.getShaderFileText
 MedEye3d.Uniforms.@uniforms
 MedEye3d.DisplayWords.getTextForCurrentSlice
 MedEye3d.ReactOnKeyboard.findTextureBasedOnNumb
+MedEye3d.SegmentationDisplay.passDataForScrolling
 MedEye3d.ReactOnKeyboard.shouldBeExecuted
 MedEye3d.visualizationFromHdf5.getGroupOrCreate
 MedEye3d.PrepareWindowHelpers.encodeDataFromDataBuffer
@@ -538,6 +542,7 @@ MedEye3d.WindowControll.getNewTresholdChangeValue
 MedEye3d.StructsManag.modifySliceFull!
 MedEye3d.Uniforms.changeTextureContribution
 MedEye3d.ForDisplayStructs.KeyboardStruct
+MedEye3d.ForDisplayStructs.MouseCallbackSubscribable
 MedEye3d.ForDisplayStructs.ForWordsDispStruct
 MedEye3d.ForDisplayStructs.getLocationDict
 MedEye3d.ForDisplayStructs.Mask
@@ -564,6 +569,7 @@ MedEye3d.PrepareWindowHelpers.glVertexAttribSetting
 MedEye3d.Uniforms.setCTWindow
 MedEye3d.ShadersAndVerticiesForText.createFragmentShader
 MedEye3d.ReactOnMouseClickAndDrag.getNewX
+MedEye3d.SegmentationDisplay.cleanUp
 MedEye3d.ShadersAndVerticiesForText.getWordsVerticies
 MedEye3d.ShadersAndVerticies.createFragmentShader
 MedEye3d.WindowControll.setmainWindow
@@ -571,15 +577,13 @@ MedEye3d.PrepareWindowHelpers.createVertexBuffer
 MedEye3d.TextureManag.createTexture
 MedEye3d.OpenGLDisplayUtils.basicRender
 MedEye3d.WindowControll.maskContrDown
+MedEye3d.ForDisplayStructs.KeyboardCallbackSubscribable
 MedEye3d.SegmentationDisplay.registerInteractions
 MedEye3d.Uniforms.setMaskColor
 MedEye3d.DataStructs.getLocationDict
 MedEye3d.CustomFragShad.addWindowingFunc
 MedEye3d.PrepareWindowHelpers.createDAtaBuffer
+MedEye3d.ForDisplayStructs.ActorWithOpenGlObjects
 MedEye3d.TextureManag.initializeTextures
-MedEye3d.ForDisplayStructs.MainMedEye3d
-MedEye3d.SegmentationDisplay.on_next!
-MedEye3d.ForDisplayStructs.KeyInputFields
-MedEye3d.ForDisplayStructs.StateDataFields
-MedEye3d.ReactOnKeyboard.reactToKeyInput
+Rocket.on_subscribe!
 ```

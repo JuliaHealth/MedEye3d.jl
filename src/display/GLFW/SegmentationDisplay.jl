@@ -29,6 +29,13 @@ on_complete!(stateObject::StateDataFields) = ""
 
 
 """
+for single moustStruct we invoke onnext with reactToMouseDrag
+fonr vector of mousestruct we invoke react_to_draw
+both react functions are independent do not relate them
+"""
+
+
+"""
 is used to pass into the actor data that will be used for scrolling
 onScrollData - struct holding between others list of tuples where first is the name of the texture that we provided and second is associated data (3 dimensional array of appropriate type)
 """
