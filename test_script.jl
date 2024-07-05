@@ -1,6 +1,15 @@
 using MedImages
 #I use Simple ITK as most robust
 using MedEye3d, Conda, PyCall, Pkg
+
+Conda.pip_interop(true)
+Conda.pip("install", "SimpleITK")
+Conda.pip("install", "h5py")
+sitk = pyimport("SimpleITK")
+np = pyimport("numpy")
+
+
+
 import MedEye3d
 import MedEye3d.ForDisplayStructs
 import MedEye3d.ForDisplayStructs.TextureSpec
@@ -17,7 +26,7 @@ import MedEye3d.DisplayWords.textLinesFromStrings
 import MedEye3d.StructsManag.getThreeDims
 
 function getImageFromDirectory(dirString, isMHD::Bool, isDicomList::Bool)
-    #simpleITK object used to read from disk
+    #simpleITK object used to read from disk 
     medimage_object = MedImages.load_image(dirString)
     return medimage_object
 end
@@ -29,8 +38,8 @@ function permuteAndReverse(pixels)
     for i in 1:sizz[1]
         for j in 1:sizz[3]
             pixels[i, :, j] = reverse(pixels[i, :, j])
-        end#
-    end#
+        end# 
+    end# 
     return pixels
 end#permuteAndReverse
 
