@@ -69,6 +69,7 @@ petPixels, petSpacing = getPixelsAndSpacing(pet_image_resampled)
 purePetPixels, PurePetSpacing = getPixelsAndSpacing(imagePET)
 
 petPixels = Float32.(petPixels)
+ctPixels = Float32.(ctPixels)
 
 # we need to pass some metadata about image array size and voxel dimensions to enable proper display
 datToScrollDimsB = MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=size(ctPixels), voxelSize=PurePetSpacing, dimensionToScroll=3);
@@ -89,7 +90,7 @@ textureSpecificationsPETCT = [
         name="manualModif",
         numb=Int32(2),
         color=RGB(0.0, 1.0, 0.0), minAndMaxValue=UInt8.([0, 1]), isEditable=true
-    ), TextureSpec{Int16}(
+    ), TextureSpec{Float32}(
         name="CTIm",
         numb=Int32(3),
         isMainImage=true,
