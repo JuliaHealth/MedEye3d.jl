@@ -3,10 +3,10 @@ Main module controlling displaying segmentations image and data
 
 """
 module SegmentationDisplay
-export coordinateDisplay
-export passDataForScrolling
+export loadRegisteredImages
+export summonVisualizer
 
-using ModernGL, GLFW, ..PrepareWindow, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords, Dictionaries
+using ColorTypes, MedImages, ModernGL, GLFW, ..PrepareWindow, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords, Dictionaries
 using ..ReactingToInput, ..ReactToScroll, Setfield, Logging, ..ShadersAndVerticiesForText, FreeTypeAbstraction, ..DisplayWords, ..DataStructs, ..StructsManag
 using ..ReactOnKeyboard, ..ReactOnMouseClickAndDrag
 
@@ -27,12 +27,6 @@ on_next!(stateObject::StateDataFields, data::KeyInputFields) = reactToKeyInput(d
 on_error!(stateObject::StateDataFields, err) = error(err)
 on_complete!(stateObject::StateDataFields) = ""
 
-
-"""
-for single moustStruct we invoke onnext with reactToMouseDrag
-fonr vector of mousestruct we invoke react_to_draw
-both react functions are independent do not relate them
-"""
 
 
 """
@@ -173,4 +167,71 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}, fractionOfM
     return mainMedEye3dInstance
 end #coordinateDisplay
 
+
+"""
+Defining some default textures for PET, CT and ManualModif, subject to change
+"""
+function getDefaultTexture(studyType::String)
+    if studyType == "PET"
+        return TextureSpec{Float32}(name="PET", isNuclearMask=true, isContinuusMask=true, numb=Int32(1), colorSet=[RGB(0.0, 0.0, 0.0), RGB(1.0, 1.0, 0.0), RGB(1.0, 0.5, 0.0), RGB(1.0, 0.0, 0.0), RGB(1.0, 0.0, 0.0)], minAndMaxValue=Float32.([200, 8000]))
+    elseif studyType == "CT"
+        return TextureSpec{Float32}(name="CTIm", numb=Int32(3), isMainImage=true, minAndMaxValue=Int16.([0, 100]))
+    elseif studyType == "ManualModif"
+        return TextureSpec{UInt8}(name="manualModif", numb=Int32(2), color=RGB(0.0, 1.0, 0.0), minAndMaxValue=UInt8.([0, 1]), isEditable=true)
+    end
+end
+
+
+"""
+Loading Nifti volumes or Dicom Series with MedImages.jl package
+Currently, there is only support for 1 image load and visualization at a time, Subjected to change
+"""
+function loadRegisteredImages(studySrc::String)
+    #loading images from the directory
+    medImageDataInstance = MedImages.load_image(studySrc)
+    voxelData = medImageDataInstance.voxel_data
+    spacings = medImageDataInstance.spacing
+    #permuting the voxelData to some default orientation, such that the image is not inverted or sideways
+    voxelData = permutedims(voxelData, (1, 2, 3)) #previously in the test script the default was (3, 2, 1)
+    sizeInfo = size(voxelData)
+    for outerNum in 1:sizeInfo[1]
+        for innerNum in 1:sizeInfo[3]
+            voxelData[outerNum, :, innerNum] = reverse(voxelData[outerNum, :, innerNum])
+        end
+    end
+
+    return (medImageDataInstance, Float32.(voxelData), spacings) #conversion of the voxel data to Float32. for openGL compatibility
+end
+
+
+
+
+"""
+High Level Initialisation function for the visualizer
+"""
+function summonVisualizer(medImageData::MedImages.MedImage, voxelDataForUniforms::Array{Float32}, spacing::Tuple{Float64,Float64,Float64}, studyType::String)
+    textureSpecArray::Vector{TextureSpec} = []
+    voxelDataTupleVector = []
+    if studyType == "PET"
+        textureSpecArray = [getDefaultTexture("PET"), getDefaultTexture("ManualModif")]
+        voxelDataTupleVector = [("PET", voxelDataForUniforms), ("manualModif", zeros(UInt8, size(voxelDataForUniforms)))]
+    elseif studyType == "CT"
+        textureSpecArray = [getDefaultTexture("CT"), getDefaultTexture("ManualModif")]
+        voxelDataTupleVector = [("CTIm", voxelDataForUniforms), ("manualModif", zeros(UInt8, size(voxelDataForUniforms)))]
+    end
+
+    datToScrollDimsB = DataToScrollDims(imageSize=size(voxelDataForUniforms), voxelSize=spacing, dimensionToScroll=3)
+    mainLines = textLinesFromStrings(["main line 1", "main line 2"])
+    supplLines = map(x -> textLinesFromStrings(["sub line 1 in $(x)", "sub line 2 in $(x)"]), 1:size(voxelDataForUniforms)[3])
+
+    sliceData = getThreeDims(voxelDataTupleVector)
+    mainScrollData = FullScrollableDat(dataToScrollDims=datToScrollDimsB, dimensionToScroll=1, dataToScroll=sliceData, mainTextToDisp=mainLines, sliceTextToDisp=supplLines)
+    fractionOfMainImage = Float32(0.8)
+    medEye3dInstance = coordinateDisplay(textureSpecArray, fractionOfMainImage, datToScrollDimsB, 1000)
+    passDataForScrolling(medEye3dInstance, mainScrollData)
+end
+
+
+
 end #SegmentationDisplay
+

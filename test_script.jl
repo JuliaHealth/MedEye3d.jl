@@ -1,15 +1,17 @@
+
+"""
+
+DUAL IMAGES DISPLAY OVERLAYED ON TOP OF EACH OTHER ALLOWING FOR BETTER STUDY ANALYSIS
+
+ISSUE, THE MAIN IMAGE DATA ARGUMENT TO THE DataToScrolLDims struct for imageSize results in segmentation fault, if we pass other pixel data it works as intended.
+"""
+
+
+
+
 using MedImages
 #I use Simple ITK as most robust
 using MedEye3d, Conda, PyCall, Pkg
-
-Conda.pip_interop(true)
-Conda.pip("install", "SimpleITK")
-Conda.pip("install", "h5py")
-sitk = pyimport("SimpleITK")
-np = pyimport("numpy")
-
-
-
 import MedEye3d
 import MedEye3d.ForDisplayStructs
 import MedEye3d.ForDisplayStructs.TextureSpec
@@ -26,20 +28,20 @@ import MedEye3d.DisplayWords.textLinesFromStrings
 import MedEye3d.StructsManag.getThreeDims
 
 function getImageFromDirectory(dirString, isMHD::Bool, isDicomList::Bool)
-    #simpleITK object used to read from disk 
+    #simpleITK object used to read from disk
     medimage_object = MedImages.load_image(dirString)
     return medimage_object
 end
 #getPixelDataAndSpacing
 
 function permuteAndReverse(pixels)
-    pixels = permutedims(pixels, (3, 2, 1))
+    pixels = permutedims(pixels, (1, 2, 3))
     sizz = size(pixels)
     for i in 1:sizz[1]
         for j in 1:sizz[3]
             pixels[i, :, j] = reverse(pixels[i, :, j])
-        end# 
-    end# 
+        end#
+    end#
     return pixels
 end#permuteAndReverse
 
@@ -50,13 +52,13 @@ function getPixelsAndSpacing(image)
     return (permuteAndReverse(pixelsArr), spacings)
 end#getPixelsAndSpacing
 
-dirOfExample = "/home/hurtbadly/Downloads/ct_soft_pat_3_sudy_0.nii.gz"
-dirOfExamplePET = "/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
+dirOfExample = "D:/mingw_installation/home/hurtbadly/Downloads/ct_soft_pat_3_sudy_0.nii.gz"
+dirOfExamplePET = "D:/mingw_installation/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
 
 
 imagePET = getImageFromDirectory(dirOfExamplePET, false, true)
 ctImage = getImageFromDirectory(dirOfExample, false, true)
-pet_image_resampled = MedImages.resample_to_image(imagePET, ctImage, MedImages.Nearest_neighbour_en)
+pet_image_resampled = MedImages.resample_to_image(imagePET, ctImage, MedImages.B_spline_en)
 
 
 ctPixels, ctSpacing = getPixelsAndSpacing(ctImage)
@@ -64,10 +66,12 @@ ctPixels, ctSpacing = getPixelsAndSpacing(ctImage)
 petPixels, petSpacing = getPixelsAndSpacing(pet_image_resampled)
 purePetPixels, PurePetSpacing = getPixelsAndSpacing(imagePET)
 
-# petPixels = Float32.(petPixels)
+petPixels = Float32.(petPixels)
+ctPixels = Float32.(ctPixels)
 
 
 
+#IF WE PUT THE imageSize = size(ctPixels) then we seem to be having a segmentation fault error
 datToScrollDimsB = MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=size(ctPixels), voxelSize=PurePetSpacing, dimensionToScroll=3);
 # example of texture specification used - we need to describe all arrays we want to display, to see all possible configurations look into TextureSpec struct docs .
 textureSpecificationsPETCT = [
@@ -86,7 +90,7 @@ textureSpecificationsPETCT = [
         name="manualModif",
         numb=Int32(2),
         color=RGB(0.0, 1.0, 0.0), minAndMaxValue=UInt8.([0, 1]), isEditable=true
-    ), TextureSpec{Int16}(
+    ), TextureSpec{Float32}(
         name="CTIm",
         numb=Int32(3),
         isMainImage=true,
