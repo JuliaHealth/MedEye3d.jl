@@ -35,14 +35,14 @@ processKeysInfo(a::Identity{Tuple{Const{Nothing},Const{Nothing}}}, stateObject::
 processKeysInfo(a::Identity{Tuple{Identity{TextureSpec{T}},Const{Nothing}}}, stateObject::StateDataFields, keyInfo::KeyboardStruct) where {T} = "" # just doing nothing in case of empty option
 #just passing definitions from submodules
 processKeysInfo(textSpecObs::Identity{TextureSpec{T}}, stateObject::StateDataFields, keyInfo::KeyboardStruct) where {T} = KeyboardVisibility.processKeysInfo(textSpecObs, stateObject, keyInfo)
-processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T} = ChangePlane.processKeysInfo(toScrollDatPrim, stateObject, keyInfo, toBeSavedForBack)
+processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) = ChangePlane.processKeysInfo(toScrollDatPrim, stateObject, keyInfo, toBeSavedForBack)
 processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec{T}},Identity{TextureSpec{G}}}}, stateObject::StateDataFields, keyInfo::KeyboardStruct) where {T,G} = MaskDiffrence.processKeysInfo(maskNumbs, stateObject, keyInfo)
-processKeysInfo(numbb::Identity{Int64}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T} = OtherKeyboardActions.processKeysInfo(numbb, stateObject, keyInfo, toBeSavedForBack)
-processKeysInfo(numbb::Identity{Bool}, stateObject::StateDataFields, keyInfo::KeyboardStruct) where {T} = OtherKeyboardActions.processKeysInfoUndo(numbb, stateObject, keyInfo)
-processKeysInfo(annot::Identity{AnnotationStruct}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T} = OtherKeyboardActions.processKeysInfo(annot, stateObject, keyInfo, toBeSavedForBack)
-processKeysInfo(isTobeFast::Identity{Tuple{Bool,Bool}}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T} = KeyboardMouseHelper.processKeysInfo(isTobeFast, stateObject, keyInfo, toBeSavedForBack)
+processKeysInfo(numbb::Identity{Int64}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) = OtherKeyboardActions.processKeysInfo(numbb, stateObject, keyInfo, toBeSavedForBack)
+processKeysInfo(numbb::Identity{Bool}, stateObject::StateDataFields, keyInfo::KeyboardStruct)  = OtherKeyboardActions.processKeysInfoUndo(numbb, stateObject, keyInfo)
+processKeysInfo(annot::Identity{AnnotationStruct}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true)  = OtherKeyboardActions.processKeysInfo(annot, stateObject, keyInfo, toBeSavedForBack)
+processKeysInfo(isTobeFast::Identity{Tuple{Bool,Bool}}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true)  = KeyboardMouseHelper.processKeysInfo(isTobeFast, stateObject, keyInfo, toBeSavedForBack)
 
-processKeysInfo(wind::Identity{WindowControlStruct}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T} = WindowControll.processKeysInfo(wind, stateObject, keyInfo, toBeSavedForBack)
+processKeysInfo(wind::Identity{WindowControlStruct}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) = WindowControll.processKeysInfo(wind, stateObject, keyInfo, toBeSavedForBack)
 
 
 
