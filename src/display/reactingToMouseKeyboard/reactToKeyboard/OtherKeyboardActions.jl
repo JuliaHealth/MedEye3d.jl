@@ -9,7 +9,7 @@ in case we want to  get new number set for manual modifications
     toBeSavedForBack - just marks weather we wat to save the info how to undo latest action
     - false if we invoke it from undoing
 """
-function processKeysInfo(numbb::Identity{Int64}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T}
+function processKeysInfo(numbb::Identity{Int64}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true)
 
     @info "nnnnn $(numbb.value)"
     valueForMasToSett = valueForMasToSetStruct(value=numbb.value)
@@ -39,7 +39,7 @@ end#processKeysInfo
 """
 In order to enable undoing last action we just invoke last function from list
 """
-function processKeysInfoUndo(numbb::Identity{Bool}, stateObject::StateDataFields, keyInfo::KeyboardStruct) where {T}
+function processKeysInfoUndo(numbb::Identity{Bool}, stateObject::StateDataFields, keyInfo::KeyboardStruct)
     if (!isempty(stateObject.forUndoVector))
         pop!(stateObject.forUndoVector)()
     end
@@ -51,7 +51,7 @@ end#processKeysInfo
 when tab plus will be pressed it will increase stroke width
 when tab minus will be pressed it will increase stroke width
 """
-function processKeysInfo(annot::Identity{AnnotationStruct}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T}
+function processKeysInfo(annot::Identity{AnnotationStruct}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true)
 
     textureList = stateObject.textureToModifyVec
     if (!isempty(textureList))

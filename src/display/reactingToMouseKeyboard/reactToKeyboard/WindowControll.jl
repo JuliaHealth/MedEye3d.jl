@@ -18,7 +18,7 @@ KEY_F6 - controlls contribution  of given mask to the overall image - maximum va
       if plus is pressed it will increse contribution by 0.1
       if minus is pressed it will decrease contribution by 0.1
 """
-function processKeysInfo(wind::Identity{WindowControlStruct}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T}
+function processKeysInfo(wind::Identity{WindowControlStruct}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true)
     #we have some predefined windows
     joined = join(keyInfo.lastKeysPressed)
 

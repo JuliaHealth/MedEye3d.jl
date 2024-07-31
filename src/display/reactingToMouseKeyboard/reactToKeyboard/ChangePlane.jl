@@ -10,7 +10,7 @@ In case we want to change the dimansion of scrolling so for example from transve
     - false if we invoke it from undoing
 """
 
-function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T}
+function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true)
     toScrollDat = toScrollDatPrim.value
 
     old = stateObject.onScrollData.dimensionToScroll

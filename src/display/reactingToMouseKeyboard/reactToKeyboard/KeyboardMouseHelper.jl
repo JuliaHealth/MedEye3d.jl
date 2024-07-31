@@ -10,7 +10,7 @@ using Parameters, DataTypesBasic
 """
 For controlling the  fast scroll  on pressing normal f key and stopping it on n key
 """
-function processKeysInfo(isTobeFast::Identity{Tuple{Bool,Bool}}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T}
+function processKeysInfo(isTobeFast::Identity{Tuple{Bool,Bool}}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true)
 
     isTobeFastVal = isTobeFast.value[1]
     # isTobeFastVal = isTobeFastVal && !isTobeFast.value[2]
