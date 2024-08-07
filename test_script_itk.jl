@@ -1,3 +1,6 @@
+#NOTE: this scripts works in the presence of the mainImage concept in MedEye3d
+
+
 #I use Simple ITK as most robust
 using MedEye3d, Conda, PyCall, Pkg
 

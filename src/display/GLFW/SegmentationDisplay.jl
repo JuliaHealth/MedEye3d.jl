@@ -171,10 +171,10 @@ end #coordinateDisplay
 """
 Defining some default textures for PET, CT and ManualModif, subject to change
 """
-function getDefaultTexture(studyType::String)
-    if studyType == "PET"
+function getDefaultTexture(studyType::Any)
+    if studyType == MedImages.MedImage_data_struct.PET_type
         return TextureSpec{Float32}(name="PET", isNuclearMask=true, isContinuusMask=true, numb=Int32(1), colorSet=[RGB(0.0, 0.0, 0.0), RGB(1.0, 1.0, 0.0), RGB(1.0, 0.5, 0.0), RGB(1.0, 0.0, 0.0), RGB(1.0, 0.0, 0.0)], minAndMaxValue=Float32.([200, 8000]))
-    elseif studyType == "CT"
+    elseif studyType == MedImages.MedImage_data_struct.CT_type
         return TextureSpec{Float32}(name="CTIm", numb=Int32(3), isMainImage=true, minAndMaxValue=Int16.([0, 100]))
     elseif studyType == "ManualModif"
         return TextureSpec{UInt8}(name="manualModif", numb=Int32(2), color=RGB(0.0, 1.0, 0.0), minAndMaxValue=UInt8.([0, 1]), isEditable=true)
@@ -186,21 +186,28 @@ end
 Loading Nifti volumes or Dicom Series with MedImages.jl package
 Currently, there is only support for 1 image load and visualization at a time, Subjected to change
 """
-function loadRegisteredImages(studySrc::String)
-    #loading images from the directory
-    medImageDataInstance = MedImages.load_image(studySrc)
-    voxelData = medImageDataInstance.voxel_data
-    spacings = medImageDataInstance.spacing
-    #permuting the voxelData to some default orientation, such that the image is not inverted or sideways
-    voxelData = permutedims(voxelData, (1, 2, 3)) #previously in the test script the default was (3, 2, 1)
-    sizeInfo = size(voxelData)
-    for outerNum in 1:sizeInfo[1]
-        for innerNum in 1:sizeInfo[3]
-            voxelData[outerNum, :, innerNum] = reverse(voxelData[outerNum, :, innerNum])
+function loadRegisteredImages(studySrc::Vector{String})
+
+    medImageDataInstances::Vector{MedImages.MedImage} = []
+    for studySrcPath in studySrc
+        #loading images from the directory
+        medImageDataInstance = MedImages.load_image(studySrcPath)
+        #permuting the voxelData to some default orientation, such that the image is not inverted or sideways
+        medImageDataInstance.voxel_data = permutedims(medImageDataInstance.voxel_data, (1, 2, 3)) #previously in the test script the default was (3, 2, 1)
+        sizeInfo = size(medImageDataInstance.voxel_data)
+        for outerNum in 1:sizeInfo[1]
+            for innerNum in 1:sizeInfo[3]
+                medImageDataInstance.voxel_data[outerNum, :, innerNum] = reverse(medImageDataInstance.voxel_data[outerNum, :, innerNum])
+            end
         end
+        #Float conversion happens here for voxelData, currently only Floats are supported to keep it simple
+        medImageDataInstance.voxel_data = Float32.(medImageDataInstance.voxel_data) #conversion of the voxel data in the original Medimage struct to Float32. for openGL compatibility
+
+
+        push!(medImageDataInstances, medImageDataInstance)
     end
 
-    return (medImageDataInstance, Float32.(voxelData), spacings) #conversion of the voxel data to Float32. for openGL compatibility
+    return medImageDataInstances
 end
 
 
@@ -209,20 +216,43 @@ end
 """
 High Level Initialisation function for the visualizer
 """
-function summonVisualizer(medImageData::MedImages.MedImage, voxelDataForUniforms::Array{Float32}, spacing::Tuple{Float64,Float64,Float64}, studyType::String)
+function summonVisualizer(medImageData::Vector{MedImages.MedImage})
+
+
+    #NOTE : for overlaid images, they need to be resampled first
+    #NOIE : Dicom is currently not supported, due to the lack of support for Dicom in MedImages.jl
+
+
     textureSpecArray::Vector{TextureSpec} = []
-    voxelDataTupleVector = []
-    if studyType == "PET"
-        textureSpecArray = [getDefaultTexture("PET"), getDefaultTexture("ManualModif")]
-        voxelDataTupleVector = [("PET", voxelDataForUniforms), ("manualModif", zeros(UInt8, size(voxelDataForUniforms)))]
-    elseif studyType == "CT"
-        textureSpecArray = [getDefaultTexture("CT"), getDefaultTexture("ManualModif")]
-        voxelDataTupleVector = [("CTIm", voxelDataForUniforms), ("manualModif", zeros(UInt8, size(voxelDataForUniforms)))]
+    voxelDataTupleVector::Vector{Any} = []
+    spacings::Vector{Tuple{Float64,Float64,Float64}} = []
+
+    for medImage in medImageData
+        if medImage.image_type == MedImages.MedImage_data_struct.PET_type
+            push!(textureSpecArray, getDefaultTexture(MedImages.MedImage_data_struct.PET_type))
+            push!(voxelDataTupleVector, ("PET", medImage.voxel_data))
+            push!(spacings, medImage.spacing)
+        elseif medImage.image_type == MedImages.MedImage_data_struct.CT_type
+            push!(textureSpecArray, getDefaultTexture(MedImages.MedImage_data_struct.CT_type))
+            push!(voxelDataTupleVector, ("CTIm", medImage.voxel_data))
+            push!(spacings, medImage.spacing)
+        end
+
     end
 
-    datToScrollDimsB = DataToScrollDims(imageSize=size(voxelDataForUniforms), voxelSize=spacing, dimensionToScroll=3)
+
+    #Texture specification for manual modification Mask
+    insert!(textureSpecArray, 2, getDefaultTexture("ManualModif"))
+
+
+    voxelDataForUniforms::Vector{Array{Float32}} = map(x -> x[2], voxelDataTupleVector)
+
+    #Since there are repeating Tuples for Manual Modif, we need to ensure only a unique ones exist based on the first loaded image
+    insert!(voxelDataTupleVector, 2, ("manualModif", zeros(UInt8, size(voxelDataForUniforms[1]))))
+
+    datToScrollDimsB = DataToScrollDims(imageSize=size(voxelDataForUniforms[1]), voxelSize=spacings[1], dimensionToScroll=3)
     mainLines = textLinesFromStrings(["main line 1", "main line 2"])
-    supplLines = map(x -> textLinesFromStrings(["sub line 1 in $(x)", "sub line 2 in $(x)"]), 1:size(voxelDataForUniforms)[3])
+    supplLines = map(x -> textLinesFromStrings(["sub line 1 in $(x)", "sub line 2 in $(x)"]), 1:size(voxelDataForUniforms[1])[3])
 
     sliceData = getThreeDims(voxelDataTupleVector)
     mainScrollData = FullScrollableDat(dataToScrollDims=datToScrollDimsB, dimensionToScroll=1, dataToScroll=sliceData, mainTextToDisp=mainLines, sliceTextToDisp=supplLines)
