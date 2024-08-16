@@ -3,11 +3,11 @@ Main module controlling displaying segmentations image and data
 
 """
 module SegmentationDisplay
-export loadRegisteredImages
-export summonVisualizer
+export loadRegisteredImages, summonVisualizer, coordinateDisplay, passDataForScrolling
 
-using ColorTypes, MedImages, ModernGL, GLFW, ..PrepareWindow, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords, Dictionaries
-using ..ReactingToInput, ..ReactToScroll, Setfield, Logging, ..ShadersAndVerticiesForText, FreeTypeAbstraction, ..DisplayWords, ..DataStructs, ..StructsManag
+using ColorTypes, MedImages, ModernGL, GLFW, Dictionaries, Logging, Setfield, FreeTypeAbstraction, Statistics
+using ..PrepareWindow, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords
+using ..ReactingToInput, ..ReactToScroll, ..ShadersAndVerticiesForText, ..DisplayWords, ..DataStructs, ..StructsManag
 using ..ReactOnKeyboard, ..ReactOnMouseClickAndDrag
 
 #  do not copy it into the consumer function
@@ -90,6 +90,9 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}, fractionOfM
     calcDimStruct = CalcDimsStruct(windowWidth=windowWidth, windowHeight=windowHeight, fractionOfMainIm=fractionOfMainIm, wordsImageQuadVert=ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm), wordsQuadVertSize=sizeof(ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm)), textTexturewidthh=textTexturewidthh, textTextureheightt=textTextureheightt) |>
                     (calcDim) -> getHeightToWidthRatio(calcDim, dataToScrollDims) |>
                                  (calcDim) -> getMainVerticies(calcDim)
+
+
+
     #    put!(mainMedEye3dInstance.channel, calcDimStruct)
 
 
@@ -98,7 +101,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}, fractionOfM
 
     GLFW.MakeContextCurrent(window)
     # than we set those ..Uniforms, open gl types and using data from arguments  to fill texture specifications
-    mainImageUnifs, listOfTextSpecsMapped = assignUniformsAndTypesToMasks(listOfTextSpecs, shader_program, windowControlStruct)
+    listOfTextSpecsMapped = assignUniformsAndTypesToMasks(listOfTextSpecs, shader_program, windowControlStruct)
 
     #@info "listOfTextSpecsMapped" listOfTextSpecsMapped
     #initializing object that holds data reqired for interacting with opengl
@@ -108,7 +111,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}, fractionOfM
                (filtered) -> Dictionary(map(it -> it.numb, filtered), collect(eachindex(filtered))) # a way for fast query using assigned numbers
 
     forDispObj = forDisplayObjects(
-        listOfTextSpecifications=initializedTextures, window=window, vertex_shader=vertex_shader, fragment_shader=fragment_shader, shader_program=shader_program, vbo=vbo[], ebo=ebo[], mainImageUniforms=mainImageUnifs, TextureIndexes=Dictionary(map(it -> it.name, initializedTextures), collect(eachindex(initializedTextures))), numIndexes=numbDict, gslsStr=gslsStr, windowControlStruct=windowControlStruct
+        listOfTextSpecifications=initializedTextures, window=window, vertex_shader=vertex_shader, fragment_shader=fragment_shader, shader_program=shader_program, vbo=vbo[], ebo=ebo[], imageUniforms=listOfTextSpecsMapped[1].uniforms, TextureIndexes=Dictionary(map(it -> it.name, initializedTextures), collect(eachindex(initializedTextures))), numIndexes=numbDict, gslsStr=gslsStr, windowControlStruct=windowControlStruct
     )
     #finding some texture that can be modifid and set as one active for modifications
     # put!(mainMedEye3dInstance.channel, forDispObj)
@@ -164,6 +167,7 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}, fractionOfM
 
     registerInteractions(window, mainMedEye3dInstance, calcDimStruct)#passing needed subscriptions from GLFW
     # errormonitor(@async consumer(mainMedEye3dInstance.channel))
+
     return mainMedEye3dInstance
 end #coordinateDisplay
 
@@ -173,11 +177,11 @@ Defining some default textures for PET, CT and ManualModif, subject to change
 """
 function getDefaultTexture(studyType::Any)
     if studyType == MedImages.MedImage_data_struct.PET_type
-        return TextureSpec{Float32}(name="PET", isNuclearMask=true, isContinuusMask=true, numb=Int32(1), colorSet=[RGB(0.0, 0.0, 0.0), RGB(1.0, 1.0, 0.0), RGB(1.0, 0.5, 0.0), RGB(1.0, 0.0, 0.0), RGB(1.0, 0.0, 0.0)], minAndMaxValue=Float32.([200, 8000]))
+        return TextureSpec{Float32}(name="PET", studyType="PET", isContinuusMask=true, numb=Int32(1), colorSet=[RGB(0.0, 0.0, 0.0), RGB(1.0, 1.0, 0.0), RGB(1.0, 0.5, 0.0), RGB(1.0, 0.0, 0.0), RGB(1.0, 0.0, 0.0)], minAndMaxValue=Float32.([200, 8000]))
     elseif studyType == MedImages.MedImage_data_struct.CT_type
-        return TextureSpec{Float32}(name="CTIm", numb=Int32(3), isMainImage=true, minAndMaxValue=Int16.([0, 100]))
+        return TextureSpec{Float32}(name="CTIm", studyType="CT", numb=Int32(3), color=RGB(1.0, 1.0, 1.0), minAndMaxValue=Float32.([-200, 400]))
     elseif studyType == "ManualModif"
-        return TextureSpec{UInt8}(name="manualModif", numb=Int32(2), color=RGB(0.0, 1.0, 0.0), minAndMaxValue=UInt8.([0, 1]), isEditable=true)
+        return TextureSpec{Float32}(name="manualModif", numb=Int32(2), color=RGB(0.0, 1.0, 0.0), minAndMaxValue=Float32.([0, 1]), isEditable=true)
     end
 end
 
@@ -240,6 +244,13 @@ function summonVisualizer(medImageData::Vector{MedImages.MedImage})
 
     end
 
+    #for correct display and windowing for PET we do (median -std /2) for min and (median + std * 2) for max
+
+    for textur in textureSpecArray
+        if textur.studyType == "PET"
+            textur.minAndMaxValue = Float32.([median(voxelDataTupleVector[1][2]) - std(voxelDataTupleVector[1][2]) / 2, median(voxelDataTupleVector[1][2]) + std(voxelDataTupleVector[1][2]) * 2])
+        end
+    end
 
     #Texture specification for manual modification Mask
     insert!(textureSpecArray, 2, getDefaultTexture("ManualModif"))
@@ -248,7 +259,7 @@ function summonVisualizer(medImageData::Vector{MedImages.MedImage})
     voxelDataForUniforms::Vector{Array{Float32}} = map(x -> x[2], voxelDataTupleVector)
 
     #Since there are repeating Tuples for Manual Modif, we need to ensure only a unique ones exist based on the first loaded image
-    insert!(voxelDataTupleVector, 2, ("manualModif", zeros(UInt8, size(voxelDataForUniforms[1]))))
+    insert!(voxelDataTupleVector, 2, ("manualModif", zeros(Float32, size(voxelDataForUniforms[1]))))
 
     datToScrollDimsB = DataToScrollDims(imageSize=size(voxelDataForUniforms[1]), voxelSize=spacings[1], dimensionToScroll=3)
     mainLines = textLinesFromStrings(["main line 1", "main line 2"])
@@ -257,6 +268,17 @@ function summonVisualizer(medImageData::Vector{MedImages.MedImage})
     sliceData = getThreeDims(voxelDataTupleVector)
     mainScrollData = FullScrollableDat(dataToScrollDims=datToScrollDimsB, dimensionToScroll=1, dataToScroll=sliceData, mainTextToDisp=mainLines, sliceTextToDisp=supplLines)
     fractionOfMainImage = Float32(0.8)
+
+    # Few assertions to ensure correct types between the textureSpecification type and the voxel data type
+    for (textureSpec, tupleVector) in zip(textureSpecArray, voxelDataTupleVector)
+        @assert typeof(textureSpec) == TextureSpec{Float32}
+        # @info typeof(voxelData)
+        @assert typeof(tupleVector[2]) == Array{Float32,3}
+
+        @assert textureSpec.name == tupleVector[1]
+        # @info typeof(voxelData)
+    end
+
     medEye3dInstance = coordinateDisplay(textureSpecArray, fractionOfMainImage, datToScrollDimsB, 1000)
     passDataForScrolling(medEye3dInstance, mainScrollData)
 end
