@@ -5,7 +5,8 @@ Generally first we need to pass the GLFW callback to the Rocket obeservable
 code adapted from https://discourse.julialang.org/t/custom-subject-in-rocket-jl-for-mouse-events-from-glfw/65133/3
 """
 module ReactToScroll
-using ModernGL, ..DisplayWords, GLFW, ..ForDisplayStructs, ..TextureManag, Logging, ..DataStructs, ..StructsManag
+using ModernGL, GLFW, Logging
+using ..DisplayWords, ..ForDisplayStructs, ..TextureManag, ..DataStructs, ..StructsManag
 
 export reactToScroll
 export registerMouseScrollFunctions

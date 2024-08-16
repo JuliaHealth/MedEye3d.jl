@@ -42,31 +42,39 @@ function getPixelsAndSpacing(image)
     return (permuteAndReverse(pixelsArr), spacings)
 end#getPixelsAndSpacing
 
+niftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/volume-0.nii.gz"
 dirOfExample = "D:/mingw_installation/home/hurtbadly/Downloads/ct_soft_pat_3_sudy_0.nii.gz"
 dirOfExamplePET = "D:/mingw_installation/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
+resample_image = "D:/mingw_installation/home/hurtbadly/Downloads/Output Volume.nii.gz"
+resample_image_extreme_spacing = "D:/mingw_installation/home/hurtbadly/Downloads/Output Volume_1.nii.gz"
 
-
-ctImage = getImageFromDirectory(dirOfExample, false, true)
+ctImage = getImageFromDirectory(resample_image_extreme_spacing, false, true)
 
 ctPixels, ctSpacing = getPixelsAndSpacing(ctImage)
+# ctSpacing = (ctSpacing[3], ctSpacing[2], ctSpacing[1]) # @info ctSpacing
 
+@info ctSpacing
 ctPixels = Float32.(ctPixels)
-
+# ctPixels = ctPixels .- minimum(ctPixels)
+# ctPixels = ctPixels ./ maximum(ctPixels)
+# ctPixels = rand(Float32, size(ctPixels))
 
 
 #IF WE PUT THE imageSize = size(ctPixels) then we seem to be having a segmentation fault error
 datToScrollDimsB = MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=size(ctPixels), voxelSize=ctSpacing, dimensionToScroll=3);
 # example of texture specification used - we need to describe all arrays we want to display, to see all possible configurations look into TextureSpec struct docs .
-textureSpecificationsPETCT = [
-    TextureSpec{UInt8}(
+textureSpecificationsPETCT::Vector{TextureSpec} = [
+    TextureSpec{Float32}(
         name="manualModif",
         numb=Int32(2),
-        color=RGB(0.0, 1.0, 0.0), minAndMaxValue=UInt8.([0, 1]), isEditable=true
+        color=RGB(0.0, 1.0, 0.0), minAndMaxValue=Float32.([0, 1]), isEditable=true
     ), TextureSpec{Float32}(
         name="CTIm",
         numb=Int32(3),
-        isMainImage=true,
-        minAndMaxValue=Int16.([0, 100]))
+        studyType="CT",
+        # isMainImage=true,
+        color=RGB(1.0, 1.0, 1.0),
+        minAndMaxValue=Float32.([0, 100]))
 ]
 fractionOfMainIm = Float32(0.8);
 
@@ -77,7 +85,7 @@ supplLines = map(x -> textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 
 
 import MedEye3d.StructsManag.getThreeDims
 
-tupleVect = [("CTIm", ctPixels), ("manualModif", zeros(UInt8, size(ctPixels)))]
+tupleVect = [("CTIm", ctPixels), ("manualModif", zeros(Float32, size(ctPixels)))]
 slicesDat = getThreeDims(tupleVect)
 """
 Holds data necessary to display scrollable data

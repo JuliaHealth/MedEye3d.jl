@@ -1,8 +1,8 @@
 module ForDisplayStructs
 using Base: Int32, isvisible
-export MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, StateDataFields, KeyboardStruct, KeyInputFields, TextureUniforms, MainImageUniforms, MaskTextureUniforms, ForWordsDispStruct, MainMedEye3d
-using ColorTypes, Parameters, Observables, ModernGL, GLFW, Dictionaries, FreeTypeAbstraction, ..DataStructs
-
+export MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, StateDataFields, KeyboardStruct, KeyInputFields, TextureUniforms, MaskTextureUniforms, ForWordsDispStruct, MainMedEye3d
+using ColorTypes, Parameters, Observables, ModernGL, GLFW, Dictionaries, FreeTypeAbstraction
+using ..DataStructs
 
 """
 data needed for definition of mask  - data that will be displayed over main image
@@ -27,33 +27,17 @@ In order to have easy fast access to the values set the most recent values will 
 In order to improve usability  we will also save with what data type this mask is associated
 for example Int, uint, float etc
 """
-@with_kw struct MaskTextureUniforms <: TextureUniforms
+@with_kw mutable struct MaskTextureUniforms <: TextureUniforms
   samplerName::String = ""#name of the sampler - mainly for debugging purposes
   samplerRef::Int32 = Int32(0) #reference to sampler of the texture
   colorsMaskRef::Int32 = Int32(0) #reference to uniform holding color of this mask
   isVisibleRef::Int32 = Int32(0)# reference to uniform that points weather we
-  maskMinValue::Int32 = Int32(0)# minimum value associated with possible value of mask
-  maskMAxValue::Int32 = Int32(0)# maximum value associated with possible value of mask
-  maskRangeValue::Int32 = Int32(0)# range of values associated with possible value of mask
-  maskContribution::Int32 = Int32(0)# controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%
+  maskMinValue::Float32 = Float32(0)# minimum value associated with possible value of mask
+  maskMAxValue::Float32 = Float32(0)# maximum value associated with possible value of mask
+  maskRangeValue::Float32 = Float32(0)# range of values associated with possible value of mask
+  maskContribution::Float32 = Float32(0)# controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%
 end
 
-"""
-Holding references to ..Uniforms used to controll main image
-"""
-@with_kw struct MainImageUniforms <: TextureUniforms
-  samplerName::String = ""#name of the sampler - mainly for debugging purposes
-  samplerRef::Int32 = Int32(0) #reference to   sampler of the texture
-  isVisibleRef::Int32 = Int32(0)# reference to uniform that points weather we
-  # ..Uniforms controlling windowing
-  min_shown_white::Int32 = Int32(0)
-  max_shown_black::Int32 = Int32(0)
-  displayRange::Int32 = Int32(0)
-  # ..Uniforms controlling  displaying masks diffrence
-  isMaskDiffrenceVis::Int32 = Int32(0)
-  mainImageContribution::Float32 = 1.0 # controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%
-
-end
 
 """
 Holding the data needed to create and  later reference the textures
@@ -98,6 +82,7 @@ minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask
   uniforms::TextureUniforms = MaskTextureUniforms()# holds values needed to control ..Uniforms in a shader
   minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask, and second entry is maximum possible value for this mask
   maskContribution::Float32 = 1.0 # controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%
+  studyType::String = "" #type of the study - for example CT, MRI, PET, SPECT
 end
 
 #utility function to check type associated
@@ -140,7 +125,7 @@ windowControlStruct::WindowControlStruct=WindowControlStruct()# holding data use
   shader_program::UInt32 = 1
   vbo::UInt32 = 1 #vertex buffer object id
   ebo::UInt32 = 1 #element buffer object id
-  mainImageUniforms::MainImageUniforms = MainImageUniforms()# struct with references to main image
+  imageUniforms::MaskTextureUniforms = MaskTextureUniforms() #we can pass all texture uniforms here, ideally we would like to make it a vector
   TextureIndexes::Dictionary{String,Int64} = Dictionary{String,Int64}()  #gives a way of efficient querying by supplying dictionary where key is a name we are intrested in and a key is index where it is located in our array
   numIndexes::Dictionary{Int32,Int64} = Dictionary{Int32,Int64}() # a way for fast query using assigned numbers
   gslsStr::String = "" # string giving information about used openg gl gsls version
@@ -195,6 +180,9 @@ mostRecentAction ::GLFW.Action= GLFW.RELEASE
   isF4Pressed::Bool = false
   isF5Pressed::Bool = false
   isF6Pressed::Bool = false
+  isF7Pressed::Bool = false
+  isF8Pressed::Bool = false
+  isF9Pressed::Bool = false
   isPlusPressed::Bool = false
   isMinusPressed::Bool = false
   isZPressed::Bool = false
@@ -207,6 +195,7 @@ mostRecentAction ::GLFW.Action= GLFW.RELEASE
   mostRecentAction::GLFW.Action = GLFW.RELEASE
 
 end
+
 """
 Holding necessery data to controll mouse interaction
 """
@@ -221,8 +210,8 @@ end#MouseStruct
 Structure for handling key input
 """
 @with_kw struct KeyInputFields
-scancode::Int32
-action::GLFW.Action
+  scancode::Int32
+  action::GLFW.Action
 end
 
 
@@ -258,14 +247,14 @@ Actor that is able to store a state to keep needed data for proper display
   lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1, 1, 1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
   forUndoVector::AbstractArray = [] # holds lambda functions that when invoked will  undo last operations
   maxLengthOfForUndoVector::Int64 = 15 # number controls how many step at maximum we can get back
-  fieldKeyboardStruct :: KeyboardStruct = KeyboardStruct()
+  fieldKeyboardStruct::KeyboardStruct = KeyboardStruct()
 end
 
 """
 Structure for MainMedEye3d, initialized with keyword arguments in coordinateDisplay (initialization function)
 """
 @with_kw mutable struct MainMedEye3d
-channel :: Base.Channel{Any}
+  channel::Base.Channel{Any}
 end
 
 

@@ -1,13 +1,9 @@
 module PrepareWindow
 
+using Base.Threads, ModernGL, GeometryTypes, GLFW, Logging
+using ..PrepareWindowHelpers, ..OpenGLDisplayUtils, ..DataStructs, ..ShadersAndVerticies, ..ForDisplayStructs, ..ShadersAndVerticiesForText, ..ModernGlUtil
+
 export displayAll, createAndInitShaderProgram
-using Base.Threads
-
-using ModernGL, GeometryTypes, GLFW
-using ..PrepareWindowHelpers
-using ..OpenGLDisplayUtils, ..DataStructs, Logging
-using ..ShadersAndVerticies, ..ForDisplayStructs, ..ShadersAndVerticiesForText, ..ModernGlUtil
-
 
 
 
@@ -40,11 +36,12 @@ function displayAll(listOfTexturesToCreate::Vector{TextureSpec}, calcDimsStruct:
 
     vertex_shader = createVertexShader(gslsStr)
 
-    masks = filter(textSpec -> !textSpec.isMainImage, listOfTexturesToCreate)
-    someExampleMask = masks[begin]
-    someExampleMaskB = masks[end]
+    # masks = filter(textSpec -> !textSpec.isMainImage, listOfTexturesToCreate)
+    # someExampleMask = masks[begin]
+    # someExampleMaskB = masks[end]
     # @info "masks set for subtraction $(someExampleMask.name)" someExampleMaskB.name
-    fragment_shader_main, shader_program = createAndInitShaderProgram(vertex_shader, listOfTexturesToCreate, someExampleMask, someExampleMaskB, gslsStr)
+    # fragment_shader_main, shader_program = createAndInitShaderProgram(vertex_shader, listOfTexturesToCreate, someExampleMask, someExampleMaskB, gslsStr)
+    fragment_shader_main, shader_program = createAndInitShaderProgram(vertex_shader, listOfTexturesToCreate, gslsStr)
 
     glUseProgram(shader_program)
 
@@ -92,8 +89,8 @@ end# displayAll
 """
 On the basis of information from listOfTexturesToCreate it creates specialized shader program
 """
-function createAndInitShaderProgram(vertex_shader::UInt32, listOfTexturesToCreate::Vector{TextureSpec}, maskToSubtractFrom::TextureSpec, maskWeAreSubtracting::TextureSpec, gslsStr::String)::Tuple{UInt32,UInt32}
-    fragment_shader = createFragmentShader(gslsStr, listOfTexturesToCreate, maskToSubtractFrom, maskWeAreSubtracting)
+function createAndInitShaderProgram(vertex_shader::UInt32, listOfTexturesToCreate::Vector{TextureSpec}, gslsStr::String)::Tuple{UInt32,UInt32}
+    fragment_shader = ShadersAndVerticies.createFragmentShader(gslsStr, listOfTexturesToCreate)
     shader_program = glCreateProgram()
     glAttachShader(shader_program, fragment_shader)
     glAttachShader(shader_program, vertex_shader)

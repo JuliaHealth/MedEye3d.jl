@@ -48,7 +48,7 @@ include(joinpath("display", "reactingToMouseKeyboard", "ReactOnMouseClickAndDrag
 
 include(joinpath("display", "reactingToMouseKeyboard", "reactToKeyboard", "KeyboardMouseHelper.jl"))
 
-include(joinpath("display", "reactingToMouseKeyboard", "reactToKeyboard", "MaskDiffrence.jl"))
+# include(joinpath("display", "reactingToMouseKeyboard", "reactToKeyboard", "MaskDiffrence.jl"))
 include(joinpath("display", "reactingToMouseKeyboard", "reactToKeyboard", "KeyboardVisibility.jl"))
 include(joinpath("display", "reactingToMouseKeyboard", "reactToKeyboard", "OtherKeyboardActions.jl"))
 include(joinpath("display", "reactingToMouseKeyboard", "reactToKeyboard", "WindowControll.jl"))

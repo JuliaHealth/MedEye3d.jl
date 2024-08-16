@@ -26,6 +26,7 @@ import MedEye3d.ForDisplayStructs.MouseStruct
 import MedEye3d.OpenGLDisplayUtils
 import MedEye3d.DisplayWords.textLinesFromStrings
 import MedEye3d.StructsManag.getThreeDims
+using Statistics
 
 function getImageFromDirectory(dirString, isMHD::Bool, isDicomList::Bool)
     #simpleITK object used to read from disk
@@ -58,7 +59,7 @@ dirOfExamplePET = "D:/mingw_installation/home/hurtbadly/Downloads/pet_orig_pat_3
 
 imagePET = getImageFromDirectory(dirOfExamplePET, false, true)
 ctImage = getImageFromDirectory(dirOfExample, false, true)
-pet_image_resampled = MedImages.resample_to_image(imagePET, ctImage, MedImages.B_spline_en)
+pet_image_resampled = MedImages.Resample_to_target.resample_to_image(imagePET, ctImage, MedImages.MedImage_data_struct.B_spline_en)
 
 
 ctPixels, ctSpacing = getPixelsAndSpacing(ctImage)
@@ -73,28 +74,33 @@ ctPixels = Float32.(ctPixels)
 
 #IF WE PUT THE imageSize = size(ctPixels) then we seem to be having a segmentation fault error
 datToScrollDimsB = MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=size(ctPixels), voxelSize=PurePetSpacing, dimensionToScroll=3);
+
+purePetMedian = Statistics.median(petPixels)
+purePetStd = Statistics.std(petPixels)
+
 # example of texture specification used - we need to describe all arrays we want to display, to see all possible configurations look into TextureSpec struct docs .
-textureSpecificationsPETCT = [
+textureSpecificationsPETCT::Vector{TextureSpec} = [
     TextureSpec{Float32}(
         name="PET",
-        isNuclearMask=true,
         # we point out that we will supply multiple colors
         isContinuusMask=true,
         #by the number 1 we will reference this data by for example making it visible or not
+        studyType="PET",
         numb=Int32(1),
         colorSet=[RGB(0.0, 0.0, 0.0), RGB(1.0, 1.0, 0.0), RGB(1.0, 0.5, 0.0), RGB(1.0, 0.0, 0.0), RGB(1.0, 0.0, 0.0)]
         #display cutoff all values below 200 will be set 2000 and above 8000 to 8000 but only in display - source array will not be modified
-        , minAndMaxValue=Float32.([200, 8000])
+        , minAndMaxValue=Float32.([(purePetMedian - purePetStd / 2), (purePetMedian + purePetStd * 2)])
     ),
-    TextureSpec{UInt8}(
+    TextureSpec{Float32}(
         name="manualModif",
         numb=Int32(2),
-        color=RGB(0.0, 1.0, 0.0), minAndMaxValue=UInt8.([0, 1]), isEditable=true
+        color=RGB(0.0, 1.0, 0.0), minAndMaxValue=Float32.([0, 1]), isEditable=true
     ), TextureSpec{Float32}(
         name="CTIm",
+        studyType="CT",
         numb=Int32(3),
-        isMainImage=true,
-        minAndMaxValue=Int16.([0, 100]))
+        color=RGB(1.0, 1.0, 1.0),
+        minAndMaxValue=Float32.([0, 100]))
 ]
 fractionOfMainIm = Float32(0.8);
 
@@ -105,7 +111,7 @@ supplLines = map(x -> textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 
 
 import MedEye3d.StructsManag.getThreeDims
 
-tupleVect = [("PET", petPixels), ("CTIm", ctPixels), ("manualModif", zeros(UInt8, size(petPixels)))]
+tupleVect = [("PET", petPixels), ("CTIm", ctPixels), ("manualModif", zeros(Float32, size(petPixels)))]
 slicesDat = getThreeDims(tupleVect)
 """
 Holds data necessary to display scrollable data
