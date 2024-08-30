@@ -257,6 +257,15 @@ Structure for MainMedEye3d, initialized with keyword arguments in coordinateDisp
   channel::Base.Channel{Any}
 end
 
+# @with_kw mutable struct setVoxelArray
+#   activeNumb::Union{Vector{Int32},Int32} = Int32(1)
+#   data::Array{Float32} = Array{Float32}()
+# end
+
+# @with_kw mutable struct getVoxelArray
+#   activeNum::Union{Vector{Int32},Int32} = Int32(1)
+# end
+
 
 end #module
 

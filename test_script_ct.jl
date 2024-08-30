@@ -39,6 +39,7 @@ end#permuteAndReverse
 function getPixelsAndSpacing(image)
     pixelsArr = image.voxel_data #we need numpy in order for pycall to automatically change it into julia array
     spacings = image.spacing
+    # spacings = (spacings[3], spacings[2], spacings[1])
     return (permuteAndReverse(pixelsArr), spacings)
 end#getPixelsAndSpacing
 
@@ -47,6 +48,7 @@ dirOfExample = "D:/mingw_installation/home/hurtbadly/Downloads/ct_soft_pat_3_sud
 dirOfExamplePET = "D:/mingw_installation/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
 resample_image = "D:/mingw_installation/home/hurtbadly/Downloads/Output Volume.nii.gz"
 resample_image_extreme_spacing = "D:/mingw_installation/home/hurtbadly/Downloads/Output Volume_1.nii.gz"
+extreme_test_one = "D:/mingw_installation/home/hurtbadly/Downloads/extreme_test_one.nii.gz"
 
 ctImage = getImageFromDirectory(resample_image_extreme_spacing, false, true)
 
@@ -85,7 +87,9 @@ supplLines = map(x -> textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 
 
 import MedEye3d.StructsManag.getThreeDims
 
-tupleVect = [("CTIm", ctPixels), ("manualModif", zeros(Float32, size(ctPixels)))]
+manualModifPixels = zeros(Float32, size(ctPixels))
+# manualModifPixels[:, 50:100, 50:100] .= 1.0
+tupleVect = [("CTIm", ctPixels), ("manualModif", manualModifPixels)]
 slicesDat = getThreeDims(tupleVect)
 """
 Holds data necessary to display scrollable data

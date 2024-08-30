@@ -236,7 +236,7 @@ return option of diffrent type depending on input
 function parseString(str::Vector{String}, stateObject::StateDataFields, keyInfo::KeyboardStruct)::Option{}
     joined = join(str)
     filtered = filter(x -> isnumeric(x), joined)
-    println("here you go filtered with numeric ", filtered)
+    # println("here you go filtered with numeric ", filtered)
     listOfTextSpecs = stateObject.mainForDisplayObjects.listOfTextSpecifications
     searchDict = stateObject.mainForDisplayObjects.numIndexes
     # for controlling window

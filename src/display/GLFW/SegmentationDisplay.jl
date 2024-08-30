@@ -3,7 +3,7 @@ Main module controlling displaying segmentations image and data
 
 """
 module SegmentationDisplay
-export loadRegisteredImages, summonVisualizer, coordinateDisplay, passDataForScrolling
+export loadRegisteredImages, displayImage, coordinateDisplay, passDataForScrolling
 
 using ColorTypes, MedImages, ModernGL, GLFW, Dictionaries, Logging, Setfield, FreeTypeAbstraction, Statistics
 using ..PrepareWindow, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords
@@ -34,7 +34,10 @@ is used to pass into the actor data that will be used for scrolling
 onScrollData - struct holding between others list of tuples where first is the name of the texture that we provided and second is associated data (3 dimensional array of appropriate type)
 """
 
-function passDataForScrolling(mainMedEye3dInstance::MainMedEye3d, onScrollData::FullScrollableDat)
+function passDataForScrolling(
+    mainMedEye3dInstance::MainMedEye3d,
+    onScrollData::FullScrollableDat
+)
     """
     put data onto the channel, matching types with on_next.
     """
@@ -48,7 +51,11 @@ end
 is using the actor that is instantiated in this module and connects it to GLFW context
 by invoking appropriate registering functions and passing to it to the main Actor controlling input
 """
-function registerInteractions(window::GLFW.Window, mainMedEye3dInstance::MainMedEye3d, calcDimStruct::CalcDimsStruct)
+function registerInteractions(
+    window::GLFW.Window,
+    mainMedEye3dInstance::MainMedEye3d,
+    calcDimStruct::CalcDimsStruct
+)
     subscribeGLFWtoActor(window, mainMedEye3dInstance, calcDimStruct)
 end
 
@@ -62,7 +69,15 @@ Preparing ForWordsDispStruct that will be needed for proper displaying of texts
 
 return prepared for displayStruct
 """
-function prepareForDispStruct(numberOfActiveTextUnits::Int, fragment_shader_words::UInt32, vbo_words::Base.RefValue{UInt32}, shader_program_words::UInt32, window, widthh::Int32=Int32(1), heightt::Int32=Int32(1), forDispObj::forDisplayObjects=forDisplayObjects()
+function prepareForDispStruct(
+    numberOfActiveTextUnits::Int,
+    fragment_shader_words::UInt32,
+    vbo_words::Base.RefValue{UInt32},
+    shader_program_words::UInt32,
+    window,
+    widthh::Int32=Int32(1),
+    heightt::Int32=Int32(1),
+    forDispObj::forDisplayObjects=forDisplayObjects()
 )::ForWordsDispStruct
 
     res = ForWordsDispStruct(
@@ -81,18 +96,34 @@ windowWidth::Int,windowHeight::Int - GLFW window dimensions
 fractionOfMainIm - how much of width should be taken by the main image
 heightToWithRatio - needed for proper display of main texture - so it would not be stretched ...
 """
-function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}, fractionOfMainIm::Float32, dataToScrollDims::DataToScrollDims=DataToScrollDims(), windowWidth::Int=1200, windowHeight::Int=Int(round(windowWidth * fractionOfMainIm)), textTexturewidthh::Int32=Int32(2000), textTextureheightt::Int32=Int32(round((windowHeight / (windowWidth * (1 - fractionOfMainIm)))) * textTexturewidthh), windowControlStruct::WindowControlStruct=WindowControlStruct())
+function coordinateDisplay(
+    listOfTextSpecsPrim::Vector{TextureSpec},
+    fractionOfMainIm::Float32,
+    dataToScrollDims::DataToScrollDims=DataToScrollDims(),
+    windowWidth::Int=1200,
+    windowHeight::Int=Int(round(windowWidth * fractionOfMainIm)),
+    textTexturewidthh::Int32=Int32(2000),
+    textTextureheightt::Int32=Int32(round((windowHeight / (windowWidth * (1 - fractionOfMainIm)))) * textTexturewidthh),
+    windowControlStruct::WindowControlStruct=WindowControlStruct())
 
     #setting number to texture that will be needed in shader configuration
+    #enumerate function returns index,value pair of each item in an array, here for the TextureSpecStruct, setting the whichCreated field to the current index
     listOfTextSpecs::Vector{TextureSpec} = map(x -> setproperties(x[2], (whichCreated = x[1])), enumerate(listOfTextSpecsPrim))
 
     #calculations of necessary constants needed to calculate window size , mouse position ...
-    calcDimStruct = CalcDimsStruct(windowWidth=windowWidth, windowHeight=windowHeight, fractionOfMainIm=fractionOfMainIm, wordsImageQuadVert=ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm), wordsQuadVertSize=sizeof(ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm)), textTexturewidthh=textTexturewidthh, textTextureheightt=textTextureheightt) |>
+    calcDimStruct = CalcDimsStruct(
+        windowWidth=windowWidth,
+        windowHeight=windowHeight,
+        fractionOfMainIm=fractionOfMainIm,
+        wordsImageQuadVert=ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm),
+        wordsQuadVertSize=sizeof(ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm)),
+        textTexturewidthh=textTexturewidthh,
+        textTextureheightt=textTextureheightt) |>
                     (calcDim) -> getHeightToWidthRatio(calcDim, dataToScrollDims) |>
                                  (calcDim) -> getMainVerticies(calcDim)
 
 
-
+    @info "babe look here" calcDimStruct.heightToWithRatio
     #    put!(mainMedEye3dInstance.channel, calcDimStruct)
 
 
@@ -111,7 +142,19 @@ function coordinateDisplay(listOfTextSpecsPrim::Vector{TextureSpec}, fractionOfM
                (filtered) -> Dictionary(map(it -> it.numb, filtered), collect(eachindex(filtered))) # a way for fast query using assigned numbers
 
     forDispObj = forDisplayObjects(
-        listOfTextSpecifications=initializedTextures, window=window, vertex_shader=vertex_shader, fragment_shader=fragment_shader, shader_program=shader_program, vbo=vbo[], ebo=ebo[], imageUniforms=listOfTextSpecsMapped[1].uniforms, TextureIndexes=Dictionary(map(it -> it.name, initializedTextures), collect(eachindex(initializedTextures))), numIndexes=numbDict, gslsStr=gslsStr, windowControlStruct=windowControlStruct
+        listOfTextSpecifications=initializedTextures,
+        window=window,
+        vertex_shader=vertex_shader,
+        fragment_shader=fragment_shader,
+        shader_program=shader_program,
+        vbo=vbo[],
+        ebo=ebo[],
+        imageUniforms=listOfTextSpecsMapped[1].uniforms,
+        TextureIndexes=Dictionary(map(it -> it.name, initializedTextures),
+            collect(eachindex(initializedTextures))),
+        numIndexes=numbDict,
+        gslsStr=gslsStr,
+        windowControlStruct=windowControlStruct
     )
     #finding some texture that can be modifid and set as one active for modifications
     # put!(mainMedEye3dInstance.channel, forDispObj)
@@ -175,27 +218,65 @@ end #coordinateDisplay
 """
 Defining some default textures for PET, CT and ManualModif, subject to change
 """
-function getDefaultTexture(studyType::Any)
+function getDefaultTexture(
+    studyType::Union{MedImages.MedImage_data_struct.Image_type,String},
+    numbIndex::Int32
+)
     if studyType == MedImages.MedImage_data_struct.PET_type
-        return TextureSpec{Float32}(name="PET", studyType="PET", isContinuusMask=true, numb=Int32(1), colorSet=[RGB(0.0, 0.0, 0.0), RGB(1.0, 1.0, 0.0), RGB(1.0, 0.5, 0.0), RGB(1.0, 0.0, 0.0), RGB(1.0, 0.0, 0.0)], minAndMaxValue=Float32.([200, 8000]))
+        return TextureSpec{Float32}(
+            name="PET",
+            studyType="PET",
+            isContinuusMask=true,
+            numb=numbIndex,
+            colorSet=[RGB(0.0, 0.0, 0.0), RGB(1.0, 1.0, 0.0), RGB(1.0, 0.5, 0.0), RGB(1.0, 0.0, 0.0), RGB(1.0, 0.0, 0.0)],
+            minAndMaxValue=Float32.([200, 8000])
+        )
     elseif studyType == MedImages.MedImage_data_struct.CT_type
-        return TextureSpec{Float32}(name="CTIm", studyType="CT", numb=Int32(3), color=RGB(1.0, 1.0, 1.0), minAndMaxValue=Float32.([-200, 400]))
+        return TextureSpec{Float32}(
+            name="CTIm",
+            studyType="CT",
+            numb=numbIndex,
+            color=RGB(1.0, 1.0, 1.0),
+            minAndMaxValue=Float32.([0, 100])
+        )
     elseif studyType == "ManualModif"
-        return TextureSpec{Float32}(name="manualModif", numb=Int32(2), color=RGB(0.0, 1.0, 0.0), minAndMaxValue=Float32.([0, 1]), isEditable=true)
+        return TextureSpec{Float32}(
+            name="manualModif",
+            numb=Int32(2),
+            color=RGB(0.0, 1.0, 0.0),
+            minAndMaxValue=Float32.([0, 1]),
+            isEditable=true
+        )
+
+    else
+        return TextureSpec{Float32}(
+            name="default",
+            studyType="CT",
+            numb=Int32(4),
+            colorSet=[RGB(0.0, 0.0, 0.0), RGB(1.0, 1.0, 1.0)]
+        )
     end
 end
-
 
 """
 Loading Nifti volumes or Dicom Series with MedImages.jl package
 Currently, there is only support for 1 image load and visualization at a time, Subjected to change
 """
-function loadRegisteredImages(studySrc::Vector{String})
+function loadRegisteredImages(
+    studySrc::Union{Vector{String},String}
+)
 
     medImageDataInstances::Vector{MedImages.MedImage} = []
-    for studySrcPath in studySrc
-        #loading images from the directory
-        medImageDataInstance = MedImages.load_image(studySrcPath)
+
+    if typeof(studySrc) == String
+        push!(medImageDataInstances, MedImages.load_image(studySrc))
+    elseif typeof(studySrc) == Vector{String}
+        for studySrcPath in studySrc
+            push!(medImageDataInstances, MedImages.load_image(studySrcPath))
+        end
+    end
+
+    for medImageDataInstance in medImageDataInstances
         #permuting the voxelData to some default orientation, such that the image is not inverted or sideways
         medImageDataInstance.voxel_data = permutedims(medImageDataInstance.voxel_data, (1, 2, 3)) #previously in the test script the default was (3, 2, 1)
         sizeInfo = size(medImageDataInstance.voxel_data)
@@ -205,11 +286,9 @@ function loadRegisteredImages(studySrc::Vector{String})
             end
         end
         #Float conversion happens here for voxelData, currently only Floats are supported to keep it simple
-        medImageDataInstance.voxel_data = Float32.(medImageDataInstance.voxel_data) #conversion of the voxel data in the original Medimage struct to Float32. for openGL compatibility
-
-
-        push!(medImageDataInstances, medImageDataInstance)
+        medImageDataInstance.voxel_data = Float32.(medImageDataInstance.voxel_data)
     end
+
 
     return medImageDataInstances
 end
@@ -220,28 +299,31 @@ end
 """
 High Level Initialisation function for the visualizer
 """
-function summonVisualizer(medImageData::Vector{MedImages.MedImage})
+function displayImage(
+    studySrc::Union{Vector{String},String},
+    textureSpecArray::Vector{TextureSpec}=Vector{TextureSpec}(),
+    voxelDataTupleVector::Vector{Any}=[],
+    spacings::Vector{Tuple{Float64,Float64,Float64}}=Vector{Tuple{Float64,Float64,Float64}}(),
+    fractionOfMainImage::Float32=Float32(0.8)
+)
 
-
+    medImageData::Vector{MedImages.MedImage} = loadRegisteredImages(studySrc)
     #NOTE : for overlaid images, they need to be resampled first
     #NOIE : Dicom is currently not supported, due to the lack of support for Dicom in MedImages.jl
 
+    if isempty(textureSpecArray) && isempty(voxelDataTupleVector) && isempty(spacings)
+        for (index, medImage) in enumerate(medImageData)
+            if medImage.image_type == MedImages.MedImage_data_struct.PET_type
+                push!(textureSpecArray, getDefaultTexture(MedImages.MedImage_data_struct.PET_type, Int32(index)))
+                push!(voxelDataTupleVector, ("PET", medImage.voxel_data))
+                push!(spacings, medImage.spacing)
+            elseif medImage.image_type == MedImages.MedImage_data_struct.CT_type
+                push!(textureSpecArray, getDefaultTexture(MedImages.MedImage_data_struct.CT_type, Int32(index)))
+                push!(voxelDataTupleVector, ("CTIm", medImage.voxel_data))
+                push!(spacings, medImage.spacing)
+            end
 
-    textureSpecArray::Vector{TextureSpec} = []
-    voxelDataTupleVector::Vector{Any} = []
-    spacings::Vector{Tuple{Float64,Float64,Float64}} = []
-
-    for medImage in medImageData
-        if medImage.image_type == MedImages.MedImage_data_struct.PET_type
-            push!(textureSpecArray, getDefaultTexture(MedImages.MedImage_data_struct.PET_type))
-            push!(voxelDataTupleVector, ("PET", medImage.voxel_data))
-            push!(spacings, medImage.spacing)
-        elseif medImage.image_type == MedImages.MedImage_data_struct.CT_type
-            push!(textureSpecArray, getDefaultTexture(MedImages.MedImage_data_struct.CT_type))
-            push!(voxelDataTupleVector, ("CTIm", medImage.voxel_data))
-            push!(spacings, medImage.spacing)
         end
-
     end
 
     #for correct display and windowing for PET we do (median -std /2) for min and (median + std * 2) for max
@@ -253,7 +335,7 @@ function summonVisualizer(medImageData::Vector{MedImages.MedImage})
     end
 
     #Texture specification for manual modification Mask
-    insert!(textureSpecArray, 2, getDefaultTexture("ManualModif"))
+    insert!(textureSpecArray, 2, getDefaultTexture("ManualModif", Int32(2)))
 
 
     voxelDataForUniforms::Vector{Array{Float32}} = map(x -> x[2], voxelDataTupleVector)
@@ -267,7 +349,6 @@ function summonVisualizer(medImageData::Vector{MedImages.MedImage})
 
     sliceData = getThreeDims(voxelDataTupleVector)
     mainScrollData = FullScrollableDat(dataToScrollDims=datToScrollDimsB, dimensionToScroll=1, dataToScroll=sliceData, mainTextToDisp=mainLines, sliceTextToDisp=supplLines)
-    fractionOfMainImage = Float32(0.8)
 
     # Few assertions to ensure correct types between the textureSpecification type and the voxel data type
     for (textureSpec, tupleVector) in zip(textureSpecArray, voxelDataTupleVector)
@@ -279,11 +360,45 @@ function summonVisualizer(medImageData::Vector{MedImages.MedImage})
         # @info typeof(voxelData)
     end
 
-    medEye3dInstance = coordinateDisplay(textureSpecArray, fractionOfMainImage, datToScrollDimsB, 1000)
-    passDataForScrolling(medEye3dInstance, mainScrollData)
+    medEye3dChannelInstance = coordinateDisplay(textureSpecArray, fractionOfMainImage, datToScrollDimsB, 1000)
+    passDataForScrolling(medEye3dChannelInstance, mainScrollData)
+    return medEye3dChannelInstance
 end
 
 
+# """
+# set and get function for modifying and accessing the current displayed voxel array data
+#     new on_next with an observer,
+# """
+# function getDisplayedData(mainChannel::Base.Channel{Any})
+
+# end
+
+# function setDisplayedData(mainChannel::Base.Channel{Any})
+# end
+
+
+"""
+In order to test check if u have anything on manualModifArray,
+annotate something and check if the data is on the manualModifArray
+
+    second
+    get the image, add the noise to the image, send it back and see the change
+"""
+
+"""
+create a new Structs
+
+struct get voxel array
+    numbActive::Union{Int,Vector{Int}}
+end
+
+
+struct set voxel array
+    numbActive::Union{Int,Vector{Int}}
+    data::Array{Float32}
+end
+"""
 
 end #SegmentationDisplay
 
