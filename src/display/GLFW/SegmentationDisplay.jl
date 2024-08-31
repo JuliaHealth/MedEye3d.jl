@@ -5,10 +5,10 @@ Main module controlling displaying segmentations image and data
 module SegmentationDisplay
 export loadRegisteredImages, displayImage, coordinateDisplay, passDataForScrolling
 
-using ColorTypes, MedImages, ModernGL, GLFW, Dictionaries, Logging, Setfield, FreeTypeAbstraction, Statistics
+using ColorTypes, MedImages, ModernGL, GLFW, Dictionaries, Logging, Setfield, FreeTypeAbstraction, Statistics, Observables
 using ..PrepareWindow, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords
 using ..ReactingToInput, ..ReactToScroll, ..ShadersAndVerticiesForText, ..DisplayWords, ..DataStructs, ..StructsManag
-using ..ReactOnKeyboard, ..ReactOnMouseClickAndDrag
+using ..ReactOnKeyboard, ..ReactOnMouseClickAndDrag, ..DisplayDataManag
 
 #  do not copy it into the consumer function
 """
@@ -24,9 +24,10 @@ on_next!(stateObject::StateDataFields, data::SingleSliceDat) = updateSingleImage
 on_next!(stateObject::StateDataFields, data::Vector{MouseStruct}) = react_to_draw(data, stateObject)
 on_next!(stateObject::StateDataFields, data::MouseStruct) = reactToMouseDrag(data, stateObject) #needs modification , with the react_to_draw, data of vectorStruct (MoustStruct)
 on_next!(stateObject::StateDataFields, data::KeyInputFields) = reactToKeyInput(data, stateObject)
+on_next!(stateObject::StateDataFields, data::DisplayedVoxels) = retrieveVoxelArray(data, stateObject)
+on_next!(stateObject::StateDataFields, data::CustomDisplayedVoxels) = depositVoxelArray(data, stateObject)
 on_error!(stateObject::StateDataFields, err) = error(err)
 on_complete!(stateObject::StateDataFields) = ""
-
 
 
 """
@@ -122,8 +123,6 @@ function coordinateDisplay(
                     (calcDim) -> getHeightToWidthRatio(calcDim, dataToScrollDims) |>
                                  (calcDim) -> getMainVerticies(calcDim)
 
-
-    @info "babe look here" calcDimStruct.heightToWithRatio
     #    put!(mainMedEye3dInstance.channel, calcDimStruct)
 
 
@@ -172,6 +171,7 @@ function coordinateDisplay(
         stateInstance = StateDataFields()
         stateInstance.textureToModifyVec = filter(it -> it.isEditable, initializedTextures)
         #    in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
+
         function cleanUp()
             obj = stateInstance.mainForDisplayObjects
             glDeleteTextures(length(obj.listOfTextSpecifications), map(text -> text.ID, obj.listOfTextSpecifications))
@@ -185,6 +185,9 @@ function coordinateDisplay(
             cleanUp()
         end#
         GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())
+
+
+
 
         while !shouldStop[1]
             channelData = take!(mainChannel)
@@ -361,44 +364,17 @@ function displayImage(
     end
 
     medEye3dChannelInstance = coordinateDisplay(textureSpecArray, fractionOfMainImage, datToScrollDimsB, 1000)
+
+
+
+    #Populating the fields for mainMedEye3dInstance
+    medEye3dChannelInstance.voxelArrayShapes = map(x -> size(x[2]), voxelDataTupleVector)
+    medEye3dChannelInstance.voxelArrayTypes = map(x -> typeof(x[2][1, 1, 1]), voxelDataTupleVector) #getting the type of the first element
+
+
     passDataForScrolling(medEye3dChannelInstance, mainScrollData)
     return medEye3dChannelInstance
 end
 
 
-# """
-# set and get function for modifying and accessing the current displayed voxel array data
-#     new on_next with an observer,
-# """
-# function getDisplayedData(mainChannel::Base.Channel{Any})
-
-# end
-
-# function setDisplayedData(mainChannel::Base.Channel{Any})
-# end
-
-
-"""
-In order to test check if u have anything on manualModifArray,
-annotate something and check if the data is on the manualModifArray
-
-    second
-    get the image, add the noise to the image, send it back and see the change
-"""
-
-"""
-create a new Structs
-
-struct get voxel array
-    numbActive::Union{Int,Vector{Int}}
-end
-
-
-struct set voxel array
-    numbActive::Union{Int,Vector{Int}}
-    data::Array{Float32}
-end
-"""
-
 end #SegmentationDisplay
-
