@@ -70,7 +70,7 @@ end#setUpMainDisplay
 add data needed for proper calculations of mouse, verticies positions ... etc
 """
 function setUpCalcDimsStruct(calcDim::CalcDimsStruct, mainState::StateDataFields)
-    @info calcDim
+    # @info calcDim
     mainState.calcDimsStruct = calcDim
 
 end#setUpCalcDimsStruct

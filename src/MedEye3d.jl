@@ -58,9 +58,10 @@ include(joinpath("display", "reactingToMouseKeyboard", "reactToKeyboard", "React
 
 
 include(joinpath("display", "reactingToMouseKeyboard", "ReactingToInput.jl"))
-
+include(joinpath("higherAbstractions", "DisplayDataManag.jl"))
 include(joinpath("display", "GLFW", "SegmentationDisplay.jl"))
 include(joinpath("higherAbstractions", "visualizationFromHdf5.jl"))
+
 
 #checking weather we have some interactive thread reserved
 if (VERSION < v"1.8")

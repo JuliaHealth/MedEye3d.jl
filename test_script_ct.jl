@@ -50,7 +50,7 @@ resample_image = "D:/mingw_installation/home/hurtbadly/Downloads/Output Volume.n
 resample_image_extreme_spacing = "D:/mingw_installation/home/hurtbadly/Downloads/Output Volume_1.nii.gz"
 extreme_test_one = "D:/mingw_installation/home/hurtbadly/Downloads/extreme_test_one.nii.gz"
 
-ctImage = getImageFromDirectory(resample_image_extreme_spacing, false, true)
+ctImage = getImageFromDirectory(extreme_test_one, false, true)
 
 ctPixels, ctSpacing = getPixelsAndSpacing(ctImage)
 # ctSpacing = (ctSpacing[3], ctSpacing[2], ctSpacing[1]) # @info ctSpacing
@@ -88,7 +88,7 @@ supplLines = map(x -> textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 
 import MedEye3d.StructsManag.getThreeDims
 
 manualModifPixels = zeros(Float32, size(ctPixels))
-# manualModifPixels[:, 50:100, 50:100] .= 1.0
+manualModifPixels[50:100, 50:100, 50:100] .= 1.0
 tupleVect = [("CTIm", ctPixels), ("manualModif", manualModifPixels)]
 slicesDat = getThreeDims(tupleVect)
 """

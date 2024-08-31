@@ -215,7 +215,7 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
   #corrections that will be added on both sides (in case of height correction top and bottom in case of width correction left and right)
   # to achieve required ratio
 
-  @info calcDimStruct
+  # @info calcDimStruct
 
   widthCorr = 0.0
   heightCorr = 0.0

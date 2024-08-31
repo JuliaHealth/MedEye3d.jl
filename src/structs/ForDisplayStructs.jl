@@ -1,7 +1,8 @@
 module ForDisplayStructs
 using Base: Int32, isvisible
 export MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, StateDataFields, KeyboardStruct, KeyInputFields, TextureUniforms, MaskTextureUniforms, ForWordsDispStruct, MainMedEye3d
-using ColorTypes, Parameters, Observables, ModernGL, GLFW, Dictionaries, FreeTypeAbstraction
+export DisplayedVoxels, CustomDisplayedVoxels
+using ColorTypes, Parameters, Observables, ModernGL, GLFW, Dictionaries, FreeTypeAbstraction, Observables
 using ..DataStructs
 
 """
@@ -255,17 +256,19 @@ Structure for MainMedEye3d, initialized with keyword arguments in coordinateDisp
 """
 @with_kw mutable struct MainMedEye3d
   channel::Base.Channel{Any}
+  voxelArrayShapes::Vector{Tuple{Int64,Int64,Int64}} = Vector{Tuple}()
+  voxelArrayTypes::Vector{Any} = Vector{Any}()
 end
 
-# @with_kw mutable struct setVoxelArray
-#   activeNumb::Union{Vector{Int32},Int32} = Int32(1)
-#   data::Array{Float32} = Array{Float32}()
-# end
+@with_kw mutable struct DisplayedVoxels
+  activeNumb::Union{Vector{Int32},Int32} = Int32(1)
+  voxelData::Vector{Array{Float32,3}} = Vector{Array{Float32,3}}()
+end
 
-# @with_kw mutable struct getVoxelArray
-#   activeNum::Union{Vector{Int32},Int32} = Int32(1)
-# end
-
+@with_kw mutable struct CustomDisplayedVoxels
+  voxelData::Vector{Array{Float32,3}} = Vector{Array{Float32,3}}()
+  # scrollDat::FullScrollableDat = FullScrollableDat()
+end
 
 end #module
 
