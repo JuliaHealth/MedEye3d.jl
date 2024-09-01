@@ -1,14 +1,11 @@
 
 #Create and initialize shaders
 module ShadersAndVerticies
-using ModernGL, GeometryTypes, GLFW, ..ForDisplayStructs,  ..CustomFragShad,  ..ModernGlUtil
+using ModernGL, GeometryTypes, GLFW
+using ..ForDisplayStructs, ..CustomFragShad, ..ModernGlUtil
 
 
-export createFragmentShader
-export positions
-export elements
-export getMainVerticies
-export createVertexShader
+export createFragmentShader, positions, elements, getMainVerticies, createVertexShader
 
 
 """
@@ -17,61 +14,58 @@ gslString so version of GSLS we are using currently
   """
 function createVertexShader(gslString::String)
   # $(gslString)
-vsh = """
-$(gslString)
+  vsh = """
+  $(gslString)
 
-layout (location = 0) in vec3 aPos;
-layout (location = 1) in vec3 aColor;
-layout (location = 2) in vec2 aTexCoord;
-out vec3 ourColor;
-smooth out vec2 TexCoord0;
-void main()
-{
-    gl_Position = vec4(aPos, 1.0);
-    ourColor = aColor;
- //  TexCoord0 = vec2(-aTexCoord.y, aTexCoord.x);
-   TexCoord0 = aTexCoord;
+  layout (location = 0) in vec3 aPos;
+  layout (location = 1) in vec3 aColor;
+  layout (location = 2) in vec2 aTexCoord;
+  out vec3 ourColor;
+  smooth out vec2 TexCoord0;
+  void main()
+  {
+      gl_Position = vec4(aPos, 1.0);
+      ourColor = aColor;
+   //  TexCoord0 = vec2(-aTexCoord.y, aTexCoord.x);
+     TexCoord0 = aTexCoord;
 
-}
-"""
+  }
+  """
 
-return createShader(vsh, GL_VERTEX_SHADER)
+  return createShader(vsh, GL_VERTEX_SHADER)
 end
 
 """
 loading the shader from file- so we have better experience writing shader in separate file (can be used if we do not use Custom frag shader)
 """
 function getShaderFileText(path::String)
-f = open(path)
-return  join(readlines(f), "\n") 
+  f = open(path)
+  return join(readlines(f), "\n")
 end #getShaderFileText
 
 
 """
-creating fragment Shader  so controlling colors and textures  
+creating fragment Shader  so controlling colors and textures
 gslString so version of GSLS we are using currently
   """
-function createFragmentShader(gslString::String
-                          ,listOfTexturesToCreate::Vector{TextureSpec}	
-                          ,maskToSubtractFrom::TextureSpec
-                          ,maskWeAreSubtracting ::TextureSpec)
-                          
-    # $(gslString)
+function createFragmentShader(gslString::String, listOfTexturesToCreate::Vector{TextureSpec})
 
-    fsh = """
+  # $(gslString)
+
+  fsh = """
 $(gslString)
 
-$( createCustomFramgentShader(listOfTexturesToCreate,maskToSubtractFrom,maskWeAreSubtracting))  
+$( createCustomFramgentShader(listOfTexturesToCreate))
 """
 
-    for line in eachline(IOBuffer(fsh))
-      println(line)
-    end
+  for line in eachline(IOBuffer(fsh))
+    println(line)
+  end
 
 
-    return createShader(fsh, GL_FRAGMENT_SHADER)
-    end
-    
+  return createShader(fsh, GL_FRAGMENT_SHADER)
+end
+
 
 
 ################### data to display verticies
@@ -82,10 +76,10 @@ $( createCustomFramgentShader(listOfTexturesToCreate,maskToSubtractFrom,maskWeAr
 # specifying faces in terms of julia's 1-based indexing, you should set
 # O=0. (If you instead number the vertices starting with 0, set
 # O=-1.)
-elements = Face{3,UInt32}[(0,1,2),          # the first triangle
-(2,3,0)]          # the second triangle
+elements = Face{3,UInt32}[(0, 1, 2),          # the first triangle
+  (2, 3, 0)]          # the second triangle
 
 
 
 
-  end #..ShadersAndVerticies
+end #..ShadersAndVerticies

@@ -425,18 +425,18 @@ MedEye3d.CustomFragShad.addColorUniform
 MedEye3d.WindowControll.highTreshDown
 MedEye3d.ReactToScroll.registerMouseScrollFunctions
 MedEye3d.DisplayWords.activateForTextDisp
-MedEye3d.MaskDiffrence.displayMaskDiffrence
+<!-- MedEye3d.MaskDiffrence.displayMaskDiffrence -->
 MedEye3d.SegmentationDisplay.updateSingleImagesDisplayed
 MedEye3d.CustomFragShad.addUniformsForNuclearAndSubtr
 MedEye3d.ChangePlane
 MedEye3d.SegmentationDisplay
-MedEye3d.MaskDiffrence.processKeysInfo
+<!-- MedEye3d.MaskDiffrence.processKeysInfo -->
 MedEye3d.DataStructs.CalcDimsStruct
 MedEye3d.CustomFragShad.getNuclearMaskFunctions
 MedEye3d.ReactOnMouseClickAndDrag.registerMouseClickFunctions
 MedEye3d.WindowControll.maskContrUp
 MedEye3d.ReactingToInput.subscribeGLFWtoActor
-MedEye3d.visualizationFromHdf5.loadFromHdf5Prim
+MedEye3d.visualizationFromHdf5.loadFromHdf5Prims
 MedEye3d.ReactOnMouseClickAndDrag.reactToMouseDrag
 MedEye3d.CustomFragShad.addMasksStrings
 MedEye3d.StructsManag
@@ -489,13 +489,13 @@ MedEye3d.PrepareWindowHelpers.initializeWindow
 MedEye3d.visualizationFromHdf5.giveStringsFromResultMetrics
 MedEye3d.ForDisplayStructs.forDisplayObjects
 MedEye3d.ReactOnMouseClickAndDrag
-MedEye3d.MaskDiffrence
+<!-- MedEye3d.MaskDiffrence -->
 MedEye3d.PrepareWindowHelpers.createElementBuffer
 MedEye3d.DataStructs.FullScrollableDat
 MedEye3d.KeyboardVisibility.processKeysInfo
 MedEye3d.ReactOnMouseClickAndDrag.getNewY
 MedEye3d.Uniforms.getuniform
-MedEye3d.MaskDiffrence.undoDiffrence
+<!-- MedEye3d.MaskDiffrence.undoDiffrence -->
 MedEye3d.DisplayWords.bindAndActivateForText
 MedEye3d.CustomFragShad.mainFuncString
 MedEye3d.TextureManag.setuniforms
@@ -563,7 +563,7 @@ MedEye3d.CustomFragShad.addMainTextureStrings
 MedEye3d.ReactOnKeyboard.parseString
 MedEye3d.DisplayWords.reactivateMainObj
 MedEye3d.visualizationFromHdf5.refresh
-MedEye3d.Uniforms.isMaskDiffViss
+<!-- MedEye3d.Uniforms.isMaskDiffViss -->
 MedEye3d.ReactOnKeyboard.reactToKeyboard
 MedEye3d.PrepareWindowHelpers.glVertexAttribSetting
 MedEye3d.Uniforms.setCTWindow

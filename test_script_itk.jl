@@ -1,5 +1,9 @@
+#NOTE: this scripts works in the presence of the mainImage concept in MedEye3d
+
+
 #I use Simple ITK as most robust
 using MedEye3d, Conda, PyCall, Pkg
+using Statistics
 
 Conda.pip_interop(true)
 Conda.pip("install", "SimpleITK")
@@ -69,31 +73,37 @@ petPixels, petSpacing = getPixelsAndSpacing(pet_image_resampled)
 purePetPixels, PurePetSpacing = getPixelsAndSpacing(imagePET)
 
 petPixels = Float32.(petPixels)
+ctPixels = Float32.(ctPixels)
 
 # we need to pass some metadata about image array size and voxel dimensions to enable proper display
 datToScrollDimsB = MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=size(ctPixels), voxelSize=PurePetSpacing, dimensionToScroll=3);
+
+
+purePetMedian = median(petPixels)
+purePetStd = std(petPixels)
 # example of texture specification used - we need to describe all arrays we want to display, to see all possible configurations look into TextureSpec struct docs .
-textureSpecificationsPETCT = [
+textureSpecificationsPETCT::Vector{TextureSpec} = [
     TextureSpec{Float32}(
         name="PET",
-        isNuclearMask=true,
         # we point out that we will supply multiple colors
         isContinuusMask=true,
         #by the number 1 we will reference this data by for example making it visible or not
         numb=Int32(1),
+        studyType="PET",
         colorSet=[RGB(0.0, 0.0, 0.0), RGB(1.0, 1.0, 0.0), RGB(1.0, 0.5, 0.0), RGB(1.0, 0.0, 0.0), RGB(1.0, 0.0, 0.0)]
         #display cutoff all values below 200 will be set 2000 and above 8000 to 8000 but only in display - source array will not be modified
-        , minAndMaxValue=Float32.([200, 8000])
+        , minAndMaxValue=Float32.([(purePetMedian - purePetStd / 2), (purePetMedian + purePetStd * 2)])
     ),
-    TextureSpec{UInt8}(
+    TextureSpec{Float32}(
         name="manualModif",
         numb=Int32(2),
-        color=RGB(0.0, 1.0, 0.0), minAndMaxValue=UInt8.([0, 1]), isEditable=true
-    ), TextureSpec{Int16}(
+        color=RGB(0.0, 1.0, 0.0), minAndMaxValue=Float32.([0, 1]), isEditable=true
+    ), TextureSpec{Float32}(
         name="CTIm",
+        studyType="CT",
         numb=Int32(3),
-        isMainImage=true,
-        minAndMaxValue=Int16.([0, 100]))
+        color=RGB(1.0, 1.0, 1.0),
+        minAndMaxValue=Float32.([0, 100]))
 ];
 # We need also to specify how big part of the screen should be occupied by the main image and how much by text fractionOfMainIm= Float32(0.8);
 fractionOfMainIm = Float32(0.8);
@@ -106,7 +116,7 @@ supplLines = map(x -> textLinesFromStrings(["sub  Line 1 in $(x)", "sub  Line 2 
 
 import MedEye3d.StructsManag.getThreeDims
 
-tupleVect = [("PET", petPixels), ("CTIm", ctPixels), ("manualModif", zeros(UInt8, size(petPixels)))]
+tupleVect = [("PET", petPixels), ("CTIm", ctPixels), ("manualModif", zeros(Float32, size(petPixels)))]
 slicesDat = getThreeDims(tupleVect)
 
 mainScrollDat = FullScrollableDat(dataToScrollDims=datToScrollDimsB, dimensionToScroll=1, dataToScroll=slicesDat, mainTextToDisp=mainLines, sliceTextToDisp=supplLines);
