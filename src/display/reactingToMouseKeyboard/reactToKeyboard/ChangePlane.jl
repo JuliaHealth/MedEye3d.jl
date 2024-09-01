@@ -2,7 +2,8 @@
 controls changing plane for example from transverse to saggital ...
 """
 module ChangePlane
-using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow, ..DataStructs, GLFW, Dictionaries, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms, Parameters, DataTypesBasic
+using ModernGL, GLFW, Dictionaries, Parameters, DataTypesBasic, Setfield
+using ..DisplayWords, ..StructsManag, ..PrepareWindow, ..DataStructs, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms
 
 """
 In case we want to change the dimansion of scrolling so for example from transverse to coronal ...
@@ -10,7 +11,9 @@ In case we want to change the dimansion of scrolling so for example from transve
     - false if we invoke it from undoing
 """
 
-function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T}
+function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true)
+
+
     toScrollDat = toScrollDatPrim.value
 
     old = stateObject.onScrollData.dimensionToScroll
@@ -40,6 +43,7 @@ function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObjec
     glDeleteTextures(length(arr), arr)# deleting
 
     #getting new
+
     initializeTextures(textSpecs, newCalcDim)
 
     # end#if
@@ -66,12 +70,17 @@ function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObjec
 
     dispObj = stateObject.mainForDisplayObjects
     #for displaying new quad - to accomodate new proportions
+
     reactivateMainObj(dispObj.shader_program, dispObj.vbo, newCalcDim)
 
-    glClear(GL_COLOR_BUFFER_BIT)
-    stateObject.currentlyDispDat = singleSlDat = singleSlDat
-    updateImagesDisplayed(singleSlDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, newCalcDim, stateObject.valueForMasToSet)
 
+
+    glClear(GL_COLOR_BUFFER_BIT)
+
+
+    stateObject.currentlyDispDat = singleSlDat = singleSlDat
+
+    updateImagesDisplayed(singleSlDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, newCalcDim, stateObject.valueForMasToSet)
 
 
 
@@ -81,6 +90,7 @@ function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObjec
     # if(toBeSavedForBack)
     #     addToforUndoVector(stateObject, ()-> processKeysInfo( Option(old),stateObject, keyInfo,false ))
     # end
+
 
 end#processKeysInfo
 end#ChangePlane

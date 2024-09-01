@@ -3,7 +3,8 @@
 managing  uniform values - global values in shaders
 """
 module Uniforms
-using StaticArrays, ModernGL, ..ForDisplayStructs, Dictionaries, Parameters, ColorTypes
+using StaticArrays, ModernGL, Dictionaries, Parameters, ColorTypes
+using ..ForDisplayStructs
 
 export isMaskDiffViss, changeMainTextureContribution, changeTextureContribution, coontrolMinMaxUniformVals, createStructsDict, setCTWindow, setMaskColor, setTextureVisibility, setTypeOfMainSampler!
 export @uniforms
@@ -233,22 +234,17 @@ end
 
 
 
-
-
-
-"""
-function cotrolling the window  for displaying CT scan  - min white and max max_shown_black
-    uniformsStore - instantiated object holding references to uniforms controlling displayed window
- """
-function setCTWindow(min_shown_whiteInner::Int32, max_shown_blackInner::Int32, uniformsStore::MainImageUniforms)
-    println("THIS IS THE ERROR SETCTWINDOW")
-    @uniforms! begin
-        uniformsStore.min_shown_white := min_shown_whiteInner
-        uniformsStore.max_shown_black := max_shown_blackInner
-        uniformsStore.displayRange := Float32(min_shown_whiteInner - max_shown_blackInner)
-    end
-    println(" THIS IS NOT CAUSING ISSUE SECTWINDOW")
-end
+# """
+# function cotrolling the window  for displaying CT scan  - min white and max max_shown_black
+#     uniformsStore - instantiated object holding references to uniforms controlling displayed window
+#  """
+# function setCTWindow(min_shown_whiteInner::Int32, max_shown_blackInner::Int32, uniformsStore::MainImageUniforms)
+#     @uniforms! begin
+#         uniformsStore.min_shown_white := min_shown_whiteInner
+#         uniformsStore.min_shown_black := max_shown_blackInner
+#         uniformsStore.displayrange := Float32(min_shown_whiteInner - max_shown_blackInner)
+#     end
+# end
 
 """
 sets color of the mask
@@ -261,16 +257,16 @@ function setMaskColor(color::RGB, uniformsStore::MaskTextureUniforms)
 
 end#setMaskColor
 
-"""
-sets color of the mask
+# """
+# sets color of the mask
 
-"""
-function isMaskDiffViss(isMaskDiffrenceVisUnifs)
-    @uniforms! begin
-        isMaskDiffrenceVisUnifs := 1
-    end
+# """
+# function isMaskDiffViss(isMaskDiffrenceVisUnifs)
+#     @uniforms! begin
+#         isMaskDiffrenceVisUnifs := 1
+#     end
 
-end#isMaskDiffViss
+# end#isMaskDiffViss
 
 
 

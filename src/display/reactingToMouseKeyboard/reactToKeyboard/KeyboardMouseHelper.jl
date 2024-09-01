@@ -3,14 +3,15 @@ functions that enable modyfing of reactions to mouse using keyboard
 for example by pressing f and s we can controll wheather we have fast or slow scroll
 """
 module KeyboardMouseHelper
-using ..StructsManag, Logging, Setfield, ..PrepareWindow, ..DataStructs, GLFW, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms
-using Parameters, DataTypesBasic
+
+using ..StructsManag, ..PrepareWindow, ..DataStructs, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms
+using Parameters, DataTypesBasic, Logging, Setfield, GLFW
 
 
 """
 For controlling the  fast scroll  on pressing normal f key and stopping it on n key
 """
-function processKeysInfo(isTobeFast::Identity{Tuple{Bool,Bool}}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T}
+function processKeysInfo(isTobeFast::Identity{Tuple{Bool,Bool}}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true)
 
     isTobeFastVal = isTobeFast.value[1]
     # isTobeFastVal = isTobeFastVal && !isTobeFast.value[2]

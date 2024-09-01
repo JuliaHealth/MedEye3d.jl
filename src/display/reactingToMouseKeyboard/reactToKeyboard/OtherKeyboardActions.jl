@@ -2,16 +2,17 @@
 functions to controll stroke width , setting which texture is currently active and actions undoing
 """
 module OtherKeyboardActions
-using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow, ..DataStructs, GLFW, Dictionaries, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms, Parameters, DataTypesBasic
+using ModernGL, Setfield, GLFW, Dictionaries, Parameters, DataTypesBasic
+using ..DisplayWords, ..StructsManag, ..PrepareWindow, ..DataStructs, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms
 
 """
 in case we want to  get new number set for manual modifications
     toBeSavedForBack - just marks weather we wat to save the info how to undo latest action
     - false if we invoke it from undoing
 """
-function processKeysInfo(numbb::Identity{Int64}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T}
+function processKeysInfo(numbb::Identity{Int64}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true)
 
-    @info "nnnnn $(numbb.value)"
+    # @info "nnnnn $(numbb.value)"
     valueForMasToSett = valueForMasToSetStruct(value=numbb.value)
     old = stateObject.valueForMasToSet.value
     stateObject.valueForMasToSet = valueForMasToSett
@@ -19,7 +20,7 @@ function processKeysInfo(numbb::Identity{Int64}, stateObject::StateDataFields, k
 
     # in case we increase number it should not be outside of the possible values
     if (!isempty(textureList))
-        @info max(Float32(textureList[1].minAndMaxValue[2]), Float32(numbb.value))
+        # @info max(Float32(textureList[1].minAndMaxValue[2]), Float32(numbb.value))
         textureList[1].minAndMaxValue[2] = max(Float32(textureList[1].minAndMaxValue[2]), Float32(numbb.value))
 
 
@@ -39,7 +40,7 @@ end#processKeysInfo
 """
 In order to enable undoing last action we just invoke last function from list
 """
-function processKeysInfoUndo(numbb::Identity{Bool}, stateObject::StateDataFields, keyInfo::KeyboardStruct) where {T}
+function processKeysInfoUndo(numbb::Identity{Bool}, stateObject::StateDataFields, keyInfo::KeyboardStruct)
     if (!isempty(stateObject.forUndoVector))
         pop!(stateObject.forUndoVector)()
     end
@@ -51,7 +52,7 @@ end#processKeysInfo
 when tab plus will be pressed it will increase stroke width
 when tab minus will be pressed it will increase stroke width
 """
-function processKeysInfo(annot::Identity{AnnotationStruct}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T}
+function processKeysInfo(annot::Identity{AnnotationStruct}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true)
 
     textureList = stateObject.textureToModifyVec
     if (!isempty(textureList))

@@ -5,9 +5,10 @@ module coordinating response to the  keyboard input - mainly shortcuts that  hel
 """
 #@doc ReactOnKeyboardSTR
 module ReactOnKeyboard
-using ModernGL, ..DisplayWords, ..StructsManag, Setfield, ..PrepareWindow, ..DataStructs, GLFW, Dictionaries, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms
-using Parameters, DataTypesBasic
-using ..KeyboardMouseHelper, ..MaskDiffrence, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane
+using ModernGL, Setfield, GLFW, Dictionaries, Parameters, DataTypesBasic
+using ..DisplayWords, ..StructsManag, ..PrepareWindow, ..DataStructs, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms
+using ..KeyboardMouseHelper, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane
+# using ..MaskDiffrence
 export reactToKeyInput, reactToKeyboard, registerKeyboardFunctions, processKeysInfo
 
 
@@ -35,14 +36,14 @@ processKeysInfo(a::Identity{Tuple{Const{Nothing},Const{Nothing}}}, stateObject::
 processKeysInfo(a::Identity{Tuple{Identity{TextureSpec{T}},Const{Nothing}}}, stateObject::StateDataFields, keyInfo::KeyboardStruct) where {T} = "" # just doing nothing in case of empty option
 #just passing definitions from submodules
 processKeysInfo(textSpecObs::Identity{TextureSpec{T}}, stateObject::StateDataFields, keyInfo::KeyboardStruct) where {T} = KeyboardVisibility.processKeysInfo(textSpecObs, stateObject, keyInfo)
-processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T} = ChangePlane.processKeysInfo(toScrollDatPrim, stateObject, keyInfo, toBeSavedForBack)
-processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec{T}},Identity{TextureSpec{G}}}}, stateObject::StateDataFields, keyInfo::KeyboardStruct) where {T,G} = MaskDiffrence.processKeysInfo(maskNumbs, stateObject, keyInfo)
-processKeysInfo(numbb::Identity{Int64}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T} = OtherKeyboardActions.processKeysInfo(numbb, stateObject, keyInfo, toBeSavedForBack)
-processKeysInfo(numbb::Identity{Bool}, stateObject::StateDataFields, keyInfo::KeyboardStruct) where {T} = OtherKeyboardActions.processKeysInfoUndo(numbb, stateObject, keyInfo)
-processKeysInfo(annot::Identity{AnnotationStruct}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T} = OtherKeyboardActions.processKeysInfo(annot, stateObject, keyInfo, toBeSavedForBack)
-processKeysInfo(isTobeFast::Identity{Tuple{Bool,Bool}}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T} = KeyboardMouseHelper.processKeysInfo(isTobeFast, stateObject, keyInfo, toBeSavedForBack)
+processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) = ChangePlane.processKeysInfo(toScrollDatPrim, stateObject, keyInfo, toBeSavedForBack)
+# processKeysInfo(maskNumbs::Identity{Tuple{Identity{TextureSpec{T}},Identity{TextureSpec{G}}}}, stateObject::StateDataFields, keyInfo::KeyboardStruct) where {T,G} = MaskDiffrence.processKeysInfo(maskNumbs, stateObject, keyInfo)
+processKeysInfo(numbb::Identity{Int64}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) = OtherKeyboardActions.processKeysInfo(numbb, stateObject, keyInfo, toBeSavedForBack)
+processKeysInfo(numbb::Identity{Bool}, stateObject::StateDataFields, keyInfo::KeyboardStruct) = OtherKeyboardActions.processKeysInfoUndo(numbb, stateObject, keyInfo)
+processKeysInfo(annot::Identity{AnnotationStruct}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) = OtherKeyboardActions.processKeysInfo(annot, stateObject, keyInfo, toBeSavedForBack)
+processKeysInfo(isTobeFast::Identity{Tuple{Bool,Bool}}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) = KeyboardMouseHelper.processKeysInfo(isTobeFast, stateObject, keyInfo, toBeSavedForBack)
 
-processKeysInfo(wind::Identity{WindowControlStruct}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) where {T} = WindowControll.processKeysInfo(wind, stateObject, keyInfo, toBeSavedForBack)
+processKeysInfo(wind::Identity{WindowControlStruct}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) = WindowControll.processKeysInfo(wind, stateObject, keyInfo, toBeSavedForBack)
 
 
 
@@ -105,8 +106,12 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainState::StateDataField
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_ENTER)
             scCode = "enter"
 
-        elseif keyInputInfo.scancode == Int32(GLFW.KEY_F1) || keyInputInfo.scancode == Int32(GLFW.KEY_F2) || keyInputInfo.scancode == Int32(GLFW.KEY_F3)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_F1)
             scCode = "f1"
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_F2)
+            scCode = "f2"
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_F3)
+            scCode = "f3"
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F4)
             scCode = "f4"
@@ -116,6 +121,15 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainState::StateDataField
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F6)
             scCode = "f6"
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_F7)
+            scCode = "f7"
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_F8)
+            scCode = "f8"
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_F9)
+            scCode = "f9"
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_Z)
             scCode = "z"
@@ -151,13 +165,18 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainState::StateDataField
         mainState.fieldKeyboardStruct.isTAbPressed = (act == 1) && scCode == "tab"
         mainState.fieldKeyboardStruct.isEnterPressed = (act == 1) && scCode == "enter"
         mainState.fieldKeyboardStruct.isF1Pressed = (act == 1) && scCode == "f1"
+        mainState.fieldKeyboardStruct.isF2Pressed = (act == 1) && scCode == "f2"
+        mainState.fieldKeyboardStruct.isF3Pressed = (act == 1) && scCode == "f3"
         mainState.fieldKeyboardStruct.isF4Pressed = (act == 1) && scCode == "f4"
         mainState.fieldKeyboardStruct.isF5Pressed = (act == 1) && scCode == "f5"
         mainState.fieldKeyboardStruct.isF6Pressed = (act == 1) && scCode == "f6"
+        mainState.fieldKeyboardStruct.isF7Pressed = (act == 1) && scCode == "f7"
+        mainState.fieldKeyboardStruct.isF8Pressed = (act == 1) && scCode == "f8"
+        mainState.fieldKeyboardStruct.isF9Pressed = (act == 1) && scCode == "f9"
         mainState.fieldKeyboardStruct.isZPressed = (act == 1) && scCode == "z"
         mainState.fieldKeyboardStruct.isFPressed = (act == 1) && scCode == "f"
         mainState.fieldKeyboardStruct.isSPressed = (act == 1) && scCode == "s"
-        mainState.fieldKeyboardStruct.isPlusPressed = (act == 1) && scCode == "+"
+        mainState.fieldKeyboardStruct.isPlusPressed = scCode == (act == 1) && scCode == "+"
         mainState.fieldKeyboardStruct.isMinusPressed = (act == 1) && scCode == "-"
 
         push!(mainState.fieldKeyboardStruct.lastKeysPressed, scCode)
@@ -202,7 +221,7 @@ function findTextureBasedOnNumb(listOfTextSpecifications::Vector{TextureSpec}, n
         return Option(listOfTextSpecifications[dict[numb]])
     end#if
     #if we are here it mean no such texture was found
-    @info "no texture associated with this number" numb
+    # @info "no texture associated with this number" numb
     return Option()
 
 end #findTextureBasedOnNumb
@@ -217,7 +236,7 @@ return option of diffrent type depending on input
 function parseString(str::Vector{String}, stateObject::StateDataFields, keyInfo::KeyboardStruct)::Option{}
     joined = join(str)
     filtered = filter(x -> isnumeric(x), joined)
-    println("here you go filtered with numeric ", filtered)
+    # println("here you go filtered with numeric ", filtered)
     listOfTextSpecs = stateObject.mainForDisplayObjects.listOfTextSpecifications
     searchDict = stateObject.mainForDisplayObjects.numIndexes
     # for controlling window
@@ -233,6 +252,12 @@ function parseString(str::Vector{String}, stateObject::StateDataFields, keyInfo:
         return Option(WindowControlStruct(letterCode="F5"))
     elseif (keyInfo.isF6Pressed)
         return Option(WindowControlStruct(letterCode="F6"))
+    elseif (keyInfo.isF7Pressed)
+        return Option(WindowControlStruct(letterCode="F7"))
+    elseif (keyInfo.isF8Pressed)
+        return Option(WindowControlStruct(letterCode="F8"))
+    elseif (keyInfo.isF9Pressed)
+        return Option(WindowControlStruct(letterCode="F9"))
         # for undoing actions
     elseif (keyInfo.isZPressed)
         return Option(true)
