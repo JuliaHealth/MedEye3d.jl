@@ -149,6 +149,7 @@ usefull stats for proper text display
     #calculated sizes for glBufferData
     mainQuadVertSize::Int64 = sizeof(mainImageQuadVert)
     wordsQuadVertSize::Int64 = sizeof(wordsImageQuadVert)
+    corrected_width = 1.0
 
 end#CalcDimsStruct
 
