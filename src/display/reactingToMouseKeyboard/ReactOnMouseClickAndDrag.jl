@@ -174,14 +174,27 @@ helper function for translateMouseToTexture
 """
 function getNewX(x::Int, calcD::CalcDimsStruct)::Int
     # first we subtract windowWidthCorr as in window the image do not need to start at the begining  of the window
-    return Int64(floor(((x - calcD.windowWidthCorr) / (calcD.correCtedWindowQuadWidth)) * calcD.imageTextureWidth))
+    
+    
+    # 1) subtract from x the offset that is corrected width times widthCorr/2
+    # 2) divide it by total width of the image taking into account offset from both sides
+    # 3) now we have coordinate in range between 0 and 1 - relative coorde
+    # 4) we get it to texture coordinates by multiplying by texture width
+    # 5) we take min of texture width and result to clip it to max value
+    # 6) we get max of 1 and result to avoid numbers less then 1
+    
+
+    return max(1, min(Int64(round(((x - (calcD.widthCorr * (calcD.corrected_width / 2))) / (calcD.corrected_width * (1 - calcD.widthCorr))) * calcD.imageTextureWidth)), calcD.imageTextureWidth))
 end#getNewX
 
 """
 helper function for translateMouseToTexture
 """
 function getNewY(y::Int, calcD::CalcDimsStruct)::Int
-    Int64(floor(((calcD.correCtedWindowQuadHeight - y + calcD.windowHeightCorr) / calcD.correCtedWindowQuadHeight) * calcD.imageTextureHeight))
+    rounded_value = calcD.imageTextureHeight - round(((y - (calcD.heightCorr * (calcD.windowHeight / 2))) / (calcD.windowHeight * (1 - calcD.heightCorr))) * calcD.imageTextureHeight)
+
+    clamped_value = clamp(rounded_value, 1, calcD.imageTextureHeight)
+    return Int64(clamped_value)
 
 end#getNewY
 
