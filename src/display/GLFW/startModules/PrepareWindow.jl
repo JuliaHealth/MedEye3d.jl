@@ -6,15 +6,12 @@ using ..PrepareWindowHelpers, ..OpenGLDisplayUtils, ..DataStructs, ..ShadersAndV
 export displayAll, createAndInitShaderProgram
 
 
-
-
-
 """
 preparing all for displaying the images and responding to mouse and keyboard input
 	listOfTexturesToCreate- list of texture specifications needed to for example create optimal shader
 	calcDimsStruct - holds important data about verticies, textures dimensions etc.
 """
-function displayAll(listOfTexturesToCreate::Vector{TextureSpec}, calcDimsStruct::CalcDimsStruct)
+function displayAll(calcDimsStruct::CalcDimsStruct)
 
     if (nthreads(:interactive) == 0)
         @error " MedEye3D above version 0.5.6 requires setting of the interactive Thread (feature available from Julia 1.9 ) one can set it in linux by enviromental variable export JULIA_NUM_THREADS=3,1 where 1 after the coma is the interactive thread and 3 is the number of the other threads available on your machine; or start julia like this julia --threads 3,1; you can also use the docker container prepared by the author from  https://github.com/jakubMitura14/MedPipe3DTutorial. . More about interactive THreads on https://docs.julialang.org/en/v1/manual/multi-threading/"
@@ -41,9 +38,8 @@ function displayAll(listOfTexturesToCreate::Vector{TextureSpec}, calcDimsStruct:
     # someExampleMaskB = masks[end]
     # @info "masks set for subtraction $(someExampleMask.name)" someExampleMaskB.name
     # fragment_shader_main, shader_program = createAndInitShaderProgram(vertex_shader, listOfTexturesToCreate, someExampleMask, someExampleMaskB, gslsStr)
-    fragment_shader_main, shader_program = createAndInitShaderProgram(vertex_shader, listOfTexturesToCreate, gslsStr)
+    # fragment_shader_main, shader_program = createAndInitShaderProgram(vertex_shader, listOfTexturesToCreate, gslsStr)
 
-    glUseProgram(shader_program)
 
     ##for control of text display
     fragment_shader_words = ShadersAndVerticiesForText.createFragmentShader(gslsStr)
@@ -61,7 +57,7 @@ function displayAll(listOfTexturesToCreate::Vector{TextureSpec}, calcDimsStruct:
     #create vertex buffer
     createVertexBuffer()
     # Create the Vertex Buffer Objects (VBO)
-    vbo = createDAtaBuffer(calcDimsStruct.mainImageQuadVert)
+    # vbo = createDAtaBuffer(calcDimsStruct.mainImageQuadVert)
 
     # Create the Element Buffer Object (EBO)
     ebo = createElementBuffer(ShadersAndVerticies.elements)
@@ -80,8 +76,7 @@ function displayAll(listOfTexturesToCreate::Vector{TextureSpec}, calcDimsStruct:
     end
     schedule(t)
 
-
-    return (window, vertex_shader, fragment_shader_main, shader_program, vbo, ebo, fragment_shader_words, vbo_words, shader_program_words, gslsStr)
+    return (window, vertex_shader, ebo, fragment_shader_words, vbo_words, shader_program_words, gslsStr)
 
 end# displayAll
 
@@ -89,13 +84,24 @@ end# displayAll
 """
 On the basis of information from listOfTexturesToCreate it creates specialized shader program
 """
-function createAndInitShaderProgram(vertex_shader::UInt32, listOfTexturesToCreate::Vector{TextureSpec}, gslsStr::String)::Tuple{UInt32,UInt32}
-    fragment_shader = ShadersAndVerticies.createFragmentShader(gslsStr, listOfTexturesToCreate)
+function createAndInitShaderProgram(vertex_shader::UInt32, listOfTexturesToCreate::Vector{TextureSpec{Float32}}, gslsStr::String, calcDimsStruct::CalcDimsStruct, num)
+
+    fragment_shader = nothing
+    if num == 1
+        fragment_shader = ShadersAndVerticies.createFragmentShader(gslsStr, listOfTexturesToCreate, "green")
+    else
+        fragment_shader = ShadersAndVerticies.createFragmentShader(gslsStr, listOfTexturesToCreate, "red")
+
+    end
+
     shader_program = glCreateProgram()
     glAttachShader(shader_program, fragment_shader)
     glAttachShader(shader_program, vertex_shader)
     glLinkProgram(shader_program)
-    return fragment_shader, shader_program
+    vbo = createDAtaBuffer(calcDimsStruct.mainImageQuadVert)
+    glUseProgram(shader_program)
+
+    return (fragment_shader, shader_program, vbo)
 
 end#createShaderProgram
 

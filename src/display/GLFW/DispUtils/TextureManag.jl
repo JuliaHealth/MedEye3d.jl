@@ -150,7 +150,7 @@ function updateImagesDisplayed(singleSliceDat::SingleSliceDat, forDisplayConstan
 end
 
 function updateImagesDisplayed_inner(singleSliceDat::SingleSliceDat, forDisplayConstants::forDisplayObjects, wordsDispObj::ForWordsDispStruct, calcDimStruct::CalcDimsStruct, valueForMaskToSett::valueForMasToSetStruct)
-    # @info "top of updateimaegsDisplayed_inner"
+
     modulelistOfTextSpecs = forDisplayConstants.listOfTextSpecifications
 
     for updateDat in singleSliceDat.listOfDataAndImageNames
@@ -160,17 +160,17 @@ function updateImagesDisplayed_inner(singleSliceDat::SingleSliceDat, forDisplayC
     end #for
     #render text associated with this slice
 
-    # @info "above activate for text display"
+
     activateForTextDisp(
         wordsDispObj.shader_program_words, wordsDispObj.vbo_words, calcDimStruct)
 
 
-    # @info "below activate for text display"
+
     matr = addTextToTexture(wordsDispObj, [singleSliceDat.textToDisp..., valueForMaskToSett.text], calcDimStruct)
 
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
 
-    # @info "inside updateImagesDisplayed_inner"
+
 
     reactivateMainObj(forDisplayConstants.shader_program, forDisplayConstants.vbo, calcDimStruct)
 
@@ -189,7 +189,7 @@ It would also assign proper openGl types to given julia data type, and pass data
 textSpecs - list of texture specificaton that we want to enrich by adding information about ..Uniforms
 return list of texture specifications enriched by information about ..Uniforms
 """
-function assignUniformsAndTypesToMasks(textSpecs::Vector{TextureSpec}, shader_program::UInt32, windowControlStruct::WindowControlStruct)
+function assignUniformsAndTypesToMasks(textSpecs::Vector{TextureSpec{Float32}}, shader_program::UInt32)
 
 
     mapped = map(x -> setuniforms(x, shader_program), textSpecs)

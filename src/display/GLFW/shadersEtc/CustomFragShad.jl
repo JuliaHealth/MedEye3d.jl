@@ -15,7 +15,7 @@ We will in couple steps create code for fragment shader that will be based on th
 listOfTexturesToCreate - list of textures on the basis of which we will create custom fragment shader code
 maskToSubtrastFrom,maskWeAreSubtracting - texture specifications used in order to generate code needed to diplay diffrence between those two masks - every time we want diffrent diffrence we will need to recreate shader invoking this function
 """
-function createCustomFramgentShader(listOfTexturesToCreate::Vector{TextureSpec})::String
+function createCustomFramgentShader(listOfTexturesToCreate::Vector{TextureSpec{Float32}}, color)::String
 
 
     lengthOfTextures = length(listOfTexturesToCreate)
@@ -26,7 +26,7 @@ function createCustomFramgentShader(listOfTexturesToCreate::Vector{TextureSpec})
     res = """
   $(initialStrings())
   $masksConstants
-  $(mainFuncString(listOfTexturesToCreate))
+  $(mainFuncString(listOfTexturesToCreate, color))
    """
     # uncomment for debugging
     #   for st in split(res, "\n")
@@ -54,7 +54,7 @@ end #initialStrings
 """
 setting string representing sampler depending on type
 """
-function addSamplerStr(textur::TextureSpec, samplerName::String)::String
+function addSamplerStr(textur::TextureSpec{Float32}, samplerName::String)::String
 
     if supertype(Int) == supertype(parameter_type(textur))
         return "isampler2D $(samplerName)"
@@ -69,7 +69,7 @@ end #addSamplerStr
 """
 giving variable name associated with given type
 """
-function addTypeStr(textur::TextureSpec)::String
+function addTypeStr(textur::TextureSpec{Float32})::String
 
     if supertype(Int) == supertype(parameter_type(textur))
         return "int"
@@ -86,7 +86,7 @@ end #addTypeStr
 """
 Adding string necessary for managing ..Uniforms of masks textures
 """
-function addMasksStrings(textur::TextureSpec, lengthOfTextures)
+function addMasksStrings(textur::TextureSpec{Float32}, lengthOfTextures)
     textName = textur.name
     return """
 
@@ -106,7 +106,7 @@ end#addMasksStrings
 """
 Adding ..Uniforms resopnsible for colors associated with given mask
 """
-function addColorUniform(textur::TextureSpec)
+function addColorUniform(textur::TextureSpec{Float32})
     #in case of multiple colors used by single mask like in case of nuclearm medicine mask
     if (textur.isContinuusMask)
         # colors = textur.colorSet
@@ -126,7 +126,7 @@ end#addColorUniform
 controlling main function - basically we need to return proper FragColor which represents pixel color in given spot
 we generete separately r,g and b values by adding contributions from all textures
 """
-function mainFuncString(textures::Vector{TextureSpec})::String
+function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
 
 
 
@@ -179,31 +179,77 @@ function mainFuncString(textures::Vector{TextureSpec})::String
     isVisibleList = map(x -> "$(x.name)isVisible *$(x.name)maskContribution", textures) |>
                     (strings) -> join(strings, " + ")
 
+
     return """
-float changeClip(float min, float max, float value, float color, float range) {
-    if (value < min) {
-        return min;
-    } else if (value > max) {
-        return max;
-    } else {
-        return color * (value/ range);
+    float changeClip(float min, float max, float value, float color, float range) {
+        if (value < min) {
+            return min;
+        } else if (value > max) {
+            return max;
+        } else {
+            return color * (value/ range);
+        }
     }
-}
-$(getMultiColorMaskFunctions(texturesCont))
+    $(getMultiColorMaskFunctions(texturesCont))
 
-void main() {
-$(masksInfluences)
+    void main() {
+    $(masksInfluences)
 
-float todiv = $(isVisibleList);
-FragColor = vec4(($(sumColorR) + $(sumColorRCont)) / todiv,
+    float todiv = $(isVisibleList);
+    FragColor = vec4(($(sumColorR) + $(sumColorRCont)) / todiv,
                  ($(sumColorG) + $(sumColorGCont)) / todiv,
                  ($(sumColorB) + $(sumColorBCont)) / todiv,
                  1.0); // long product, if mask is invisible it just has full transparency
-}
-"""
+
+
+    }
+    """
+
+
+    #     if color == "green"
+    #         return """
+    # float changeClip(float min, float max, float value, float color, float range) {
+    #     if (value < min) {
+    #         return min;
+    #     } else if (value > max) {
+    #         return max;
+    #     } else {
+    #         return color * (value/ range);
+    #     }
+    # }
+    # $(getMultiColorMaskFunctions(texturesCont))
+
+    # void main() {
+    # $(masksInfluences)
+
+    # float todiv = $(isVisibleList);
+    # FragColor = vec4(0.0,1.0,0.0,1.0);
+    # }
+    # """
+
+    #     else
+
+    #         return """
+    #         float changeClip(float min, float max, float value, float color, float range) {
+    #             if (value < min) {
+    #                 return min;
+    #             } else if (value > max) {
+    #                 return max;
+    #             } else {
+    #                 return color * (value/ range);
+    #             }
+    #         }
+    #         $(getMultiColorMaskFunctions(texturesCont))
+
+    #         void main() {
+    #         $(masksInfluences)
+
+    #         float todiv = $(isVisibleList);
+    #         FragColor = vec4(1.0,0.0,0.0,1.0);
+    #         }
+    #         """
+    #     end
 end#mainFuncString
-
-
 
 
 
@@ -216,7 +262,7 @@ end#mainFuncString
 """
 Giving value from texture f the texture is set to be visible otherwise 0
 """
-function setMaskInfluence(textur::TextureSpec)
+function setMaskInfluence(textur::TextureSpec{Float32})
     textName = textur.name
 
     return """
@@ -231,7 +277,7 @@ end#setMaskInfluence
 """
 on the basis of texture type gives proper function controlling color of the mask
 """
-function chooseColorFonuction(textur::TextureSpec)::String
+function chooseColorFonuction(textur::TextureSpec{Float32})::String
 
     if supertype(Int) == supertype(parameter_type(textur))
         return "imaskColor"
@@ -293,7 +339,7 @@ end#chooseColorFonuction
 #         in the end where 100% of color will be associated with color of next section
 
 # """
-function getMultiColorMaskFunctions(continuusColorTextSpecs::Vector{TextureSpec})::String
+function getMultiColorMaskFunctions(continuusColorTextSpecs::Vector{TextureSpec{Float32}})::String
     #Check in which range we are without if
     #Important first color in color list needs to be doubled in order to make algorithm cleaner - so we will start from index 1 and always there would be some previous index
 

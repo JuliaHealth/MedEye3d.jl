@@ -18,8 +18,9 @@ function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObjec
 
     old = stateObject.onScrollData.dimensionToScroll
 
-    newCalcDim = getHeightToWidthRatio(stateObject.calcDimsStruct, toScrollDat) |>
-                 getMainVerticies
+    ratioSetcalcDim = getHeightToWidthRatio(stateObject.calcDimsStruct, toScrollDat)
+    newCalcDim = getMainVerticies(ratioSetcalcDim, stateObject.displayMode, stateObject.imagePosition)
+
     stateObject.calcDimsStruct = newCalcDim
     #In order to make the  background black  before we will render quad of possibly diffrent dimensions we will set all to invisible - and obtain black background
     textSpecs = stateObject.mainForDisplayObjects.listOfTextSpecifications
