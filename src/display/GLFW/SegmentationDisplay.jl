@@ -551,10 +551,10 @@ function displayImage(
 
     elseif typeof(textureSpecArray) == Vector{Vector{TextureSpec}}
 
-        for texturVector in textureSpecArray
+	    for (index,texturVector) in enumerate(textureSpecArray)
             for textur in texturVector
                 if textur.studyType == "PET"
-                    textur.minAndMaxValue = Float32.([median(voxelDataTupleVector[1][2]) - std(voxelDataTupleVector[1][2]) / 2, median(voxelDataTupleVector[1][2]) + std(voxelDataTupleVector[1][2]) * 2])
+			textur.minAndMaxValue = Float32.([median(voxelDataTupleVector[index][1][2]) - std(voxelDataTupleVector[index][1][2]) / 2, median(voxelDataTupleVector[index][1][2]) + std(voxelDataTupleVector[index][1][2]) * 2])
                 end
             end
         end

@@ -11,8 +11,8 @@ petNiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/pet_orig_pat_3_s
 newImage = "D:/mingw_installation/home/hurtbadly/Downloads/volume-0.nii.gz"
 strangeSpacingImage = "D:/mingw_installation/home/hurtbadly/Downloads/Output Volume_1.nii.gz"
 extremeTestImage = "D:/mingw_installation/home/hurtbadly/Downloads/extreme_test_one.nii.gz"
-medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[ctNiftiImage], [ctNiftiImage]])
-# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([ctNiftiImage])
+medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[petNiftiImage], [petNiftiImage]])
+#medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([petNiftiImage])
 
 #for SIngle you are strictly only supposed to pass it like : [image_ct, imagep]
 
