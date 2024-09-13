@@ -1,9 +1,19 @@
 module ForDisplayStructs
 using Base: Int32, isvisible
 export MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, StateDataFields, KeyboardStruct, KeyInputFields, TextureUniforms, MaskTextureUniforms, ForWordsDispStruct, MainMedEye3d
-export DisplayedVoxels, CustomDisplayedVoxels
+export DisplayedVoxels, CustomDisplayedVoxels, DisplayMode, SingleImage, MultiImage
 using ColorTypes, Parameters, Observables, ModernGL, GLFW, Dictionaries, FreeTypeAbstraction, Observables
 using ..DataStructs
+
+
+"""
+Display mode of the visualizer : SingleImage or MultiImage
+"""
+@enum DisplayMode begin
+  SingleImage
+  MultiImage
+end
+
 
 """
 data needed for definition of mask  - data that will be displayed over main image
@@ -132,6 +142,7 @@ windowControlStruct::WindowControlStruct=WindowControlStruct()# holding data use
   gslsStr::String = "" # string giving information about used openg gl gsls version
   windowControlStruct::WindowControlStruct = WindowControlStruct()# holding data usefull to controll display window
   isFastScroll::Bool = false # set by f letter to true and by s to normal - slow
+  imagePos::Int64 = 1
 end
 
 
@@ -249,6 +260,8 @@ Actor that is able to store a state to keep needed data for proper display
   forUndoVector::AbstractArray = [] # holds lambda functions that when invoked will  undo last operations
   maxLengthOfForUndoVector::Int64 = 15 # number controls how many step at maximum we can get back
   fieldKeyboardStruct::KeyboardStruct = KeyboardStruct()
+  displayMode::DisplayMode = SingleImage
+  imagePosition::Int64 = 1
 end
 
 """
@@ -258,6 +271,9 @@ Structure for MainMedEye3d, initialized with keyword arguments in coordinateDisp
   channel::Base.Channel{Any}
   voxelArrayShapes::Vector{Tuple{Int64,Int64,Int64}} = Vector{Tuple}()
   voxelArrayTypes::Vector{Any} = Vector{Any}()
+  textDispObj::ForWordsDispStruct = ForWordsDispStruct()# set of objects and constants needed for text diplay
+  states::Vector{StateDataFields} = Vector{StateDataFields}()
+  displayMode::DisplayMode = SingleImage
 end
 
 @with_kw mutable struct DisplayedVoxels
@@ -269,6 +285,7 @@ end
   voxelData::Vector{Array{Float32,3}} = Vector{Array{Float32,3}}()
   # scrollDat::FullScrollableDat = FullScrollableDat()
 end
+
 
 end #module
 

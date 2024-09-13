@@ -221,7 +221,7 @@ function findTextureBasedOnNumb(listOfTextSpecifications::Vector{TextureSpec}, n
         return Option(listOfTextSpecifications[dict[numb]])
     end#if
     #if we are here it mean no such texture was found
-    # @info "no texture associated with this number" numb
+    @info "no texture associated with this number" numb
     return Option()
 
 end #findTextureBasedOnNumb
