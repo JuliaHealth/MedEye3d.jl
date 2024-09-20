@@ -2,6 +2,7 @@ module PrepareWindow
 
 using Base.Threads, ModernGL, GeometryTypes, GLFW, Logging
 using ..PrepareWindowHelpers, ..OpenGLDisplayUtils, ..DataStructs, ..ShadersAndVerticies, ..ForDisplayStructs, ..ShadersAndVerticiesForText, ..ModernGlUtil
+using ..sv_shaders_etc
 
 export displayAll, createAndInitShaderProgram
 
@@ -59,7 +60,8 @@ function displayAll(listOfTexturesToCreate::Vector{TextureSpec}, calcDimsStruct:
 
     ###########buffers
     #create vertex buffer
-    createVertexBuffer()
+    VAO=createVertexBuffer()#### supervoxel
+
     # Create the Vertex Buffer Objects (VBO)
     vbo = createDAtaBuffer(calcDimsStruct.mainImageQuadVert)
 
@@ -70,10 +72,15 @@ function displayAll(listOfTexturesToCreate::Vector{TextureSpec}, calcDimsStruct:
     #capturing The data from GLFW
     controllWindowInput(window)
 
+
+
+    shader_program_sv, vertices_sv,num_triangles_sv=for_sv_shader(VAO)
+    
     #loop that enables reacting to mouse and keyboards inputs  so every 0.1 seconds it will check GLFW weather any new events happened
     t = @task begin
         while (!GLFW.WindowShouldClose(window))
             sleep(0.001)
+
             # Poll for and process events
             GLFW.PollEvents()
         end
@@ -81,7 +88,7 @@ function displayAll(listOfTexturesToCreate::Vector{TextureSpec}, calcDimsStruct:
     schedule(t)
 
 
-    return (window, vertex_shader, fragment_shader_main, shader_program, vbo, ebo, fragment_shader_words, vbo_words, shader_program_words, gslsStr)
+    return (window, vertex_shader, fragment_shader_main, shader_program, vbo, ebo, fragment_shader_words, vbo_words, shader_program_words, gslsStr,VAO)#####superVoxel added VAO to return
 
 end# displayAll
 

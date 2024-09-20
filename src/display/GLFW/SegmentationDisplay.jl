@@ -9,6 +9,8 @@ using ColorTypes, MedImages, ModernGL, GLFW, Dictionaries, Logging, Setfield, Fr
 using ..PrepareWindow, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords
 using ..ReactingToInput, ..ReactToScroll, ..ShadersAndVerticiesForText, ..DisplayWords, ..DataStructs, ..StructsManag
 using ..ReactOnKeyboard, ..ReactOnMouseClickAndDrag, ..DisplayDataManag
+using ..sv_shaders_etc
+
 
 #  do not copy it into the consumer function
 """
@@ -127,7 +129,9 @@ function coordinateDisplay(
 
 
     #creating window and event listening loop
-    window, vertex_shader, fragment_shader, shader_program, vbo, ebo, fragment_shader_words, vbo_words, shader_program_words, gslsStr = PrepareWindow.displayAll(listOfTextSpecs, calcDimStruct)
+
+    #### supervoxel added VAO in line below
+    window, vertex_shader, fragment_shader, shader_program, vbo, ebo, fragment_shader_words, vbo_words, shader_program_words, gslsStr,VAO = PrepareWindow.displayAll(listOfTextSpecs, calcDimStruct)
 
     GLFW.MakeContextCurrent(window)
     # than we set those ..Uniforms, open gl types and using data from arguments  to fill texture specifications

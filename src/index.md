@@ -442,3 +442,6 @@ Modules = [MedEye3d
     ,MedEye3d.ChangePlane]
 Order   = [:module,:function, :type,:constant]
 ```
+
+
+@workspace you are OPENGL graphics and Julia programming expert. Given array of tetrahedrons that are encored as  3 dimensional array where first dimension is index of tetrahedron secod is index of one of the 4 points in tetrahedron and last dimension is encoding x,y,z coordinates. Get a crossection of all tetrahedrons that are crossing a plane that is perpendicular to the x or y or z axis and is in distance d from the center. Render then all lines and points that indicate the crossection of the borders of tetrahedrons on this plane using Opengl. Work step by step implementing each step as a separate function.  

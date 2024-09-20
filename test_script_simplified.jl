@@ -6,11 +6,11 @@ using MedEye3d
 # https://drive.google.com/file/d/1PqHTQXOVTWx0FQSDE0oH4hRKNCE9jCx8/view?usp=drive_link
 #modify paths to your downloaded data accordingly
 
-ctNiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/ct_soft_pat_3_sudy_0.nii.gz"
-petNiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
-newImage = "D:/mingw_installation/home/hurtbadly/Downloads/volume-0.nii.gz"
-strangeSpacingImage = "D:/mingw_installation/home/hurtbadly/Downloads/Output Volume_1.nii.gz"
-extremeTestImage = "D:/mingw_installation/home/hurtbadly/Downloads/extreme_test_one.nii.gz"
+ctNiftiImage = "/media/jm/hddData/projects/MedEye3d.jl/docs/src/data/Example_ct.nii.gz"
+# petNiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
+# newImage = "D:/mingw_installation/home/hurtbadly/Downloads/volume-0.nii.gz"
+# strangeSpacingImage = "D:/mingw_installation/home/hurtbadly/Downloads/Output Volume_1.nii.gz"
+# extremeTestImage = "D:/mingw_installation/home/hurtbadly/Downloads/extreme_test_one.nii.gz"
 medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(ctNiftiImage)
 
 displayData = MedEye3d.DisplayDataManag.getDisplayedData(medEyeStruct, [Int32(1), Int32(2)]) #passing the active texture number

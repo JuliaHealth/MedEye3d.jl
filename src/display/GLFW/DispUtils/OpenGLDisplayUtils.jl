@@ -14,6 +14,7 @@ and swapping buffers
 """
 function basicRender(window)
 		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+
 		# Swap front and back buffers
 		GLFW.SwapBuffers(window)
 end

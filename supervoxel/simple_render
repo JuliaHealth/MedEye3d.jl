@@ -1,0 +1,179 @@
+using ModernGL
+using GLFW
+
+# Vertex shader source code
+const vertex_shader_source = """
+#version 330 core
+layout (location = 0) in vec3 aPos;
+void main()
+{
+    gl_Position = vec4(aPos, 1.0);
+}
+"""
+
+# Fragment shader source code
+const fragment_shader_source = """
+#version 330 core
+out vec4 FragColor;
+void main()
+{
+    FragColor = vec4(1.0, 0.5, 0.2, 1.0);
+}
+"""
+
+function compile_shader(source::String, shader_type::GLenum)
+    shader = glCreateShader(shader_type)
+    glShaderSource(shader, 1, [source], C_NULL)
+    glCompileShader(shader)
+
+    # Check for compilation errors
+    success = Ref{GLint}(0)
+    glGetShaderiv(shader, GL_COMPILE_STATUS, success)
+    if success[] == GL_FALSE
+        info_log = Array{GLchar}(undef, 512)
+        glGetShaderInfoLog(shader, 512, C_NULL, info_log)
+        error("Shader compilation failed: ", String(info_log))
+    end
+
+    return shader
+end
+
+function create_shader_program(vertex_source::String, fragment_source::String)
+    vertex_shader = compile_shader(vertex_source, GL_VERTEX_SHADER)
+    fragment_shader = compile_shader(fragment_source, GL_FRAGMENT_SHADER)
+
+    shader_program = glCreateProgram()
+    glAttachShader(shader_program, vertex_shader)
+    glAttachShader(shader_program, fragment_shader)
+    glLinkProgram(shader_program)
+
+    # Check for linking errors
+    success = Ref{GLint}(0)
+    glGetProgramiv(shader_program, GL_LINK_STATUS, success)
+    if success[] == GL_FALSE
+        info_log = Array{GLchar}(undef, 512)
+        glGetProgramInfoLog(shader_program, 512, C_NULL, info_log)
+        error("Shader program linking failed: ", String(info_log))
+    end
+
+    glDeleteShader(vertex_shader)
+    glDeleteShader(fragment_shader)
+
+    return shader_program
+end
+
+function main()
+    if !GLFW.Init()
+        error("Failed to initialize GLFW")
+    end
+
+    window = GLFW.CreateWindow(800, 600, "OpenGL Triangle")
+    if window == C_NULL
+        error("Failed to create GLFW window")
+    end
+
+    GLFW.MakeContextCurrent(window)
+
+    vertices = [
+        # First triangle
+        0.0f0, 0.5f0, 0.0f0,
+        -0.5f0, -0.5f0, 0.0f0,
+        0.5f0, -0.5f0, 0.0f0,
+        # Second triangle
+        0.5f0, 0.5f0, 0.0f0,
+        1.0f0, -0.5f0, 0.0f0,
+        0.0f0, -0.5f0, 0.0f0
+    ]
+
+    indices = [
+        0, 1, 2,  # First triangle
+        3, 4, 5   # Second triangle
+    ]
+
+    VAO = Ref{GLuint}(0)
+    VBO = Ref{GLuint}(0)
+    EBO = Ref{GLuint}(0)
+    glGenVertexArrays(1, VAO)
+    glGenBuffers(1, VBO)
+    glGenBuffers(1, EBO)
+
+    glBindVertexArray(VAO[])
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO[])
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW)
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO[])
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW)
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(GLfloat), C_NULL)
+    glEnableVertexAttribArray(0)
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0)
+    glBindVertexArray(0)
+
+    shader_program = create_shader_program(vertex_shader_source, fragment_shader_source)
+
+    while !GLFW.WindowShouldClose(window)
+        glClear(GL_COLOR_BUFFER_BIT)
+
+        glUseProgram(shader_program)
+        glBindVertexArray(VAO[])
+
+        # Draw the first triangle filled
+        glPolygonMode(GL_FRONT_AND_BACK, GL_FILL)
+        glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_INT, C_NULL)
+
+        # Draw the second triangle outlined
+        glPolygonMode(GL_FRONT_AND_BACK, GL_LINE)
+        glDrawElements(GL_TRIANGLES, 3, GL_UNSIGNED_INT, Ptr{nothing}(3 * sizeof(GLuint)))
+
+        glBindVertexArray(0)
+
+        GLFW.SwapBuffers(window)
+        GLFW.PollEvents()
+    end
+
+    glDeleteVertexArrays(1, VAO)
+    glDeleteBuffers(1, VBO)
+    glDeleteBuffers(1, EBO)
+
+    GLFW.Terminate()
+end
+
+main()
+
+
+
+You are Julia and opengl epxert. Currently we are displaying filled triangles with this code """
+"""
+data is loaded into a buffer which passes it into thw GPU for futher processing
+    - here the data is just passing the positions of verticies
+    GL_STREAM_DRAW the data is set only once and used by the GPU at most a few times.
+    GL_STATIC_DRAW the data is set only once and used many times.
+    GL_DYNAMIC_DRAW the data is changed a lot and used many times.
+    """
+function createDAtaBuffer(positions)
+    vbo = Ref(GLuint(0))   # initial value is irrelevant, just allocate space
+    glGenBuffers(1, vbo)
+    glBindBuffer(GL_ARRAY_BUFFER, vbo[])
+    glBufferData(GL_ARRAY_BUFFER, sizeof(positions), positions, GL_STATIC_DRAW)
+    return vbo
+end #createDAtaBuffer
+
+elements = Face{3,UInt32}[(0, 1, 2),          # the first triangle
+  (2, 3, 0)]          # the second triangle
+
+
+
+  positions= Float32.([
+    # positions                     // colors           // texture coords
+    1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0,   # top right
+    1.0, -1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0,   # bottom right
+     -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,   # bottom left
+    1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0    # top left
+  ])
+
+
+vbo_words = Ref(GLuint(1))   # initial value is irrelevant, just allocate space
+glGenBuffers(1, vbo_words)
+ebo = createElementBuffer(ShadersAndVerticies.elements)""" we want additionally to display a line from -0.5,-0.5 to 0.5,0.5 an line should be yellow
