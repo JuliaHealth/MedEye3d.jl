@@ -112,7 +112,7 @@ function createShader(source, typ)
     glCompileShader(shader)
     # Check for errors
     # !validateShader(shader) && error("Shader creation error: ", getInfoLog(shader))
-    shader
+    return shader
 end
 
 function createAndInitShaderProgram(vertex_shader::UInt32)::Tuple{UInt32,UInt32}
@@ -186,12 +186,6 @@ end
 
 
 
-function basicRender(window)
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-
-    # Swap front and back buffers
-    GLFW.SwapBuffers(window)
-end
 
 function getProperGL_TEXTURE(index::Int)::UInt32
     return eval(Meta.parse("GL_TEXTURE$(index)"))
@@ -239,8 +233,37 @@ glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
 glUseProgram(shader_program)
 glBindBuffer(GL_ARRAY_BUFFER, vbo[])
 glBufferData(GL_ARRAY_BUFFER, sizeof(mainImageQuadVert), mainImageQuadVert, GL_STATIC_DRAW) 
-encodeDataFromDataBuffer()
 
+# Draw line
+glBindBuffer(GL_ARRAY_BUFFER, 0)
+
+
+vertices = [0.5, 0.5, 0.1,  # top right
+            0.5, -0.5, 0.1,  # bottom right
+            -0.5, -0.5, 0.1,  # bottom left
+            -0.5, 0.5, 0.1]  # top left
+
+glBindBuffer(GL_ARRAY_BUFFER, vbo[]);
+glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 12 * sizeof(Float32), Ptr{Nothing}(12 * sizeof(Float32)))
+
+
+glEnableVertexAttribArray(0);
+
+glBindBuffer(GL_ARRAY_BUFFER, 0); 
+# glBindVertexArray(0); 
+
+glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+
+
+glDrawElements(GL_LINES, 6, GL_UNSIGNED_INT, C_NULL)
+
+
+
+
+# Swap front and back buffers
+GLFW.SwapBuffers(window)
 #render onto the screen
 basicRender(window)
 glFinish()
