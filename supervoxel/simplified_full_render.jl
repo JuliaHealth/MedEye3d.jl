@@ -54,18 +54,20 @@ const fragment_shader_source = """
 
     void main() {
 
-    float CTImRes = texture2D(CTIm, TexCoord0).r * CTImisVisible*CTImmaskContribution ;
+    float CTImRes = texture2D(CTIm, TexCoord0).r+0.1;
 
 
 
     float todiv = CTImisVisible *CTImmaskContribution;
-    FragColor = vec4((  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.r,CTImValueRange)  + 0.0) / todiv,
-                    (  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.g,CTImValueRange)  + 0.0) / todiv,
-                    (  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.b,CTImValueRange)  + 0.0) / todiv,
-                    1.0); // long product, if mask is invisible it just has full transparency
+    FragColor = vec4(CTImRes,0.0,0.0,  1.0); // long product, if mask is invisible it just has full transparency
     }
-    """
 
+    """
+    # FragColor = vec4((  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.r,CTImValueRange)  + 0.0) / todiv,
+    #                 (  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.g,CTImValueRange)  + 0.0) / todiv,
+    #                 (  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.b,CTImValueRange)  + 0.0) / todiv,
+    #                 1.0); // long product, if mask is invisible it just has full transparency
+    # }
 
 
 fid = h5open("/media/jm/hddData/projects/MedEye3d.jl/docs/src/data/ct_pixels.h5", "r")
@@ -76,8 +78,8 @@ elements = Face{3,UInt32}[(0, 1, 2),          # the first triangle
 
   mainImageQuadVert = Float32.([
     # positions                  // colors           // texture coords
-    1.0, 1.0 , 0.0, 1.0, 0.0, 0.0, 1.0, 1.0,   # top right
-    1.0, -1.0 , 0.0, 0.0, 1.0, 0.0, 1.0, 0.0,   # bottom right
+    0.9, 1.0 , 0.0, 1.0, 0.0, 0.0, 1.0, 1.0,   # top right
+    0.9, -1.0 , 0.0, 0.0, 1.0, 0.0, 1.0, 0.0,   # bottom right
     -1.0 , -1.0 , 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,   # bottom left
     -1.0 , 1.0 , 0.0, 1.0, 1.0, 0.0, 0.0, 1.0    # top left
   ])
@@ -238,16 +240,18 @@ maskContribution=glGetUniformLocation(shader_program, "$(n)maskContribution")
 
 #data from hdf5
 dat= Float32.(read(fid, "data")[:,:,20])
+dat=rand(Float32,size(dat)[1],size(dat)[2])
+
 #setup texture
 textUreId=createTexture(Float32,Int32(size(dat)[1]),Int32(size(dat)[2]), GL_R32F, GL_FLOAT)
 index=0
 actTextrureNumb = getProperGL_TEXTURE(index)
-glActiveTexture(actTextrureNumb)
+glActiveTexture(textUreId[])
 glUniform1i(samplerRef, index)
 
-glActiveTexture(actTextrureNumb) # active proper texture unit before binding
+# glActiveTexture(actTextrureNumb) # active proper texture unit before binding
 ID=Ref(UInt32(0))
-glBindTexture(GL_TEXTURE_2D, ID[])
+glBindTexture(GL_TEXTURE_2D, textUreId[])
 xoffset=0
 yoffset=0
 widthh=size(dat)[1]
