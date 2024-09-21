@@ -49,9 +49,14 @@ void main()
     FragColor = vec4(1.0, 1.0, 0.0, 1.0); // Yellow color
 }
 """
-
-# Compile vertex shader
-vertex_shader = glCreateShader(GL_VERTEX_SHADER)
+fragment_shader_source_line = """
+  #version 330 core
+  out vec4 FragColor;
+  void main()
+  {
+      FragColor = vec4(1.0, 0.0, 0.0, 1.0); // Yellow color
+  }
+  """
 function createShader(source, typ)
     # Create the shader
     shader = glCreateShader(typ)::GLuint
@@ -66,67 +71,114 @@ function createShader(source, typ)
     return shader
 end
 
+function createAndInitShaderProgram(vertex_shader::UInt32, fragment_shader_source)::Tuple{UInt32,UInt32}
+    fragment_shader = createShader(fragment_shader_source, GL_FRAGMENT_SHADER)
+    shader_program = glCreateProgram()
+    glAttachShader(shader_program, fragment_shader)
+    glAttachShader(shader_program, vertex_shader)
+    glLinkProgram(shader_program)
+    return fragment_shader, shader_program
+end
+
 vertex_shader = createShader(vertex_shader_source, GL_VERTEX_SHADER)
-fragment_shader= createShader(fragment_shader_source, GL_FRAGMENT_SHADER)
+fragment_shader_main, rectangle_shader_program = createAndInitShaderProgram(vertex_shader, fragment_shader_source)
+fragment_shader_line, line_shader_program = createAndInitShaderProgram(vertex_shader, fragment_shader_source_line)
 
-# Link shaders into a shader program
-shader_program = glCreateProgram()
-glAttachShader(shader_program, vertex_shader)
-glAttachShader(shader_program, fragment_shader)
-glLinkProgram(shader_program)
 
-# Check for linking errors
-# glGetProgramiv(shader_program, GL_LINK_STATUS, success)
-# if success[] == GL_FALSE
-#     error("ERROR::SHADER::PROGRAM::LINKING_FAILED")
-# end
 
-# Delete the shaders as they're linked into our program now and no longer necessary
-glDeleteShader(vertex_shader)
-glDeleteShader(fragment_shader)
+# Vertex data for a rectangle
+rectangle_vertices = Float32[
+    0.5, 0.5, 0.0, 1.0, 1.0,  # top right
+    0.5, -0.5, 0.0, 1.0, 0.0,  # bottom right
+    -0.5, -0.5, 0.0, 0.0, 0.0,  # bottom left
+    -0.5, 0.5, 0.0, 0.0, 1.0   # top left
+]
 
-# Generate and bind a Vertex Array Object
-vao = Ref(GLuint(0))
-glGenVertexArrays(1, vao)
+# Indices for the rectangle
+rectangle_indices = UInt32[
+    0, 1, 3,  # First triangle
+    1, 2, 3   # Second triangle
+]
+
+# Vertex data for lines
+line_vertices = Float32[
+    0.8, 0.3, 0.0,  # top right
+    0.3, -0.8, 0.0,  # bottom right
+    -0.8, -0.8, 0.0,  # bottom left
+    -0.8, 0.8, 0.0   # top left
+]
+
+# Indices for drawing lines
+line_indices = UInt32[
+    0, 1,  # Line from top right to bottom right
+    2, 3   # Line from bottom left to top left
+]
+
+# Generate and bind VAO for rectangle
+rectangle_vao = Ref(GLuint(0))
+glGenVertexArrays(1, rectangle_vao)
+glBindVertexArray(rectangle_vao[])
+
+# Generate and bind VBO for rectangle
+rectangle_vbo = Ref(GLuint(0))
+glGenBuffers(1, rectangle_vbo)
+glBindBuffer(GL_ARRAY_BUFFER, rectangle_vbo[])
+glBufferData(GL_ARRAY_BUFFER, sizeof(rectangle_vertices), rectangle_vertices, GL_STATIC_DRAW)
+
+# Generate and bind EBO for rectangle
+rectangle_ebo = Ref(GLuint(0))
+glGenBuffers(1, rectangle_ebo)
+glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, rectangle_ebo[])
+glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(rectangle_indices), rectangle_indices, GL_STATIC_DRAW)
+
+# Set vertex attribute pointers for rectangle
+glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(Float32), Ptr{Nothing}(0))
+glEnableVertexAttribArray(0)
+glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(Float32), Ptr{Nothing}(3 * sizeof(Float32)))
+glEnableVertexAttribArray(1)
+
+# Unbind the VAO for rectangle
 glBindVertexArray(0)
-glBindVertexArray(vao[])
 
-# Generate and bind a Vertex Buffer Object
-vbo = Ref(GLuint(0))
-glGenBuffers(1, vbo)
-glBindBuffer(GL_ARRAY_BUFFER, 0)
-glBindBuffer(GL_ARRAY_BUFFER, vbo[])
-glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW)
+# Generate and bind VAO for lines
+line_vao = Ref(GLuint(0))
+glGenVertexArrays(1, line_vao)
+glBindVertexArray(line_vao[])
 
-# Generate and bind an Element Buffer Object
-ebo = Ref(GLuint(0))
-glGenBuffers(1, ebo)
-glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0)
-glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo[])
-glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW)
+# Generate and bind VBO for lines
+line_vbo = Ref(GLuint(0))
+glGenBuffers(1, line_vbo)
+glBindBuffer(GL_ARRAY_BUFFER, line_vbo[])
+glBufferData(GL_ARRAY_BUFFER, sizeof(line_vertices), line_vertices, GL_STATIC_DRAW)
 
-# Set vertex attribute pointers
+# Generate and bind EBO for lines
+line_ebo = Ref(GLuint(0))
+glGenBuffers(1, line_ebo)
+glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, line_ebo[])
+glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(line_indices), line_indices, GL_STATIC_DRAW)
+
+# Set vertex attribute pointers for lines
 glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(Float32), Ptr{Nothing}(0))
 glEnableVertexAttribArray(0)
 
-# Unbind the VBO (the VAO will remember the settings)
-glBindBuffer(GL_ARRAY_BUFFER, 0)
+# Unbind the VAO for lines
 glBindVertexArray(0)
-glBindVertexArray(vao[])
+
 # Function to render the scene
 function render()
     glClear(GL_COLOR_BUFFER_BIT)
 
-    # Use the shader program
-    glUseProgram(shader_program)
+    # Render the rectangle with texture
+    glUseProgram(rectangle_shader_program)
+    glBindVertexArray(rectangle_vao[])
+    # glBindTexture(GL_TEXTURE_2D, texture)
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+    glBindVertexArray(0)
 
-    # Use the VAO
-    glBindVertexArray(vao[])
-
-    # Draw the lines
+    # Render the lines
+    glUseProgram(line_shader_program)
+    glBindVertexArray(line_vao[])
     glDrawElements(GL_LINES, 4, GL_UNSIGNED_INT, C_NULL)
-
-    # Unbind the VAO
     glBindVertexArray(0)
 end
 
