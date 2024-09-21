@@ -1,4 +1,4 @@
-using ModernGL, GLFW
+using ModernGL, GLFW,HDF5
 
 function initializeWindow(windowWidth::Int, windowHeight::Int)
     GLFW.Init()
@@ -43,18 +43,50 @@ void main()
 # Fragment shader source code
 fragment_shader_source = """
 #version 330 core
-out vec4 FragColor;
-void main()
-{
-    FragColor = vec4(1.0, 1.0, 0.0, 1.0); // Yellow color
-}
+    #version 460
+
+
+    out vec4 FragColor;
+    in vec3 ourColor;
+    smooth in vec2 TexCoord0;
+
+
+    uniform sampler2D CTIm; // mask image sampler
+    uniform vec4 CTImColorMask= vec4(1.0,1.0,1.0,1.0); //controlling colors
+    uniform int CTImisVisible= 1; // controlling visibility
+
+    uniform float  CTImminValue= 0.0; // minimum possible value set in configuration
+    uniform float  CTImmaxValue= 100.0; // maximum possible value set in configuration
+    uniform float  CTImValueRange= 100.0; // range of possible values calculated from above
+    uniform float  CTImmaskContribution=1.0; //controls contribution of mask to output color
+
+
+    float changeClip(float min, float max, float value, float color, float range) {
+        if (value < min) {
+            return min;
+        } else if (value > max) {
+            return max;
+        } else {
+            return color * (value/ range);
+        }
+    }
+
+    void main() {
+
+    float CTImRes = texture2D(CTIm, TexCoord0).r;
+
+  FragColor = vec4((  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.r,CTImValueRange)  + 0.0),
+                    (  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.g,CTImValueRange)  + 0.0),
+                    (  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.b,CTImValueRange)  + 0.0),
+                    1.0);
+                        }
 """
 fragment_shader_source_line = """
   #version 330 core
   out vec4 FragColor;
   void main()
   {
-      FragColor = vec4(1.0, 0.0, 0.0, 1.0); // Yellow color
+      FragColor = vec4(1.0, 1.0, 0.0, 1.0); // Yellow color
   }
   """
 function createShader(source, typ)
@@ -88,10 +120,11 @@ fragment_shader_line, line_shader_program = createAndInitShaderProgram(vertex_sh
 
 # Vertex data for a rectangle
 rectangle_vertices = Float32[
-    0.5, 0.5, 0.0, 1.0, 1.0,  # top right
-    0.5, -0.5, 0.0, 1.0, 0.0,  # bottom right
-    -0.5, -0.5, 0.0, 0.0, 0.0,  # bottom left
-    -0.5, 0.5, 0.0, 0.0, 1.0   # top left
+    # positions                  // colors           // texture coords
+    0.9, 1.0 , 0.0, 1.0, 0.0, 0.0, 1.0, 1.0,   # top right
+    0.9, -1.0 , 0.0, 0.0, 1.0, 0.0, 1.0, 0.0,   # bottom right
+    -1.0 , -1.0 , 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,   # bottom left
+    -1.0 , 1.0 , 0.0, 1.0, 1.0, 0.0, 0.0, 1.0    # top left
 ]
 
 # Indices for the rectangle
@@ -132,10 +165,17 @@ glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, rectangle_ebo[])
 glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(rectangle_indices), rectangle_indices, GL_STATIC_DRAW)
 
 # Set vertex attribute pointers for rectangle
-glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(Float32), Ptr{Nothing}(0))
+typee = Float32
+
+# position attribute
+glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(typee), C_NULL)
 glEnableVertexAttribArray(0)
-glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(Float32), Ptr{Nothing}(3 * sizeof(Float32)))
+# color attribute
+glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(typee), Ptr{Nothing}(3 * sizeof(typee)))
 glEnableVertexAttribArray(1)
+# texture coord attribute
+glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(typee), Ptr{Nothing}(6 * sizeof(typee)))
+glEnableVertexAttribArray(2)
 
 # Unbind the VAO for rectangle
 glBindVertexArray(0)
@@ -164,14 +204,71 @@ glEnableVertexAttribArray(0)
 # Unbind the VAO for lines
 glBindVertexArray(0)
 
+
+
+function createTexture(juliaDataType::Type{juliaDataTyp}, width::Int32, height::Int32, GL_RType::UInt32=GL_R8UI, OpGlType=GL_UNSIGNED_BYTE) where {juliaDataTyp}
+
+
+    #The texture we're going to render to
+    texture = Ref(GLuint(0))
+    glGenTextures(1, texture)
+    glBindTexture(GL_TEXTURE_2D, texture[])
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0)
+    #we just assign storage
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RType, width, height)
+
+
+    return texture
+end
+
+
+
+
+function getProperGL_TEXTURE(index::Int)::UInt32
+    return eval(Meta.parse("GL_TEXTURE$(index)"))
+end#getProperGL_TEXTURE
+
+
+
+
+#uniforms
+n= "CTIm"
+samplerName=n
+
+#data from hdf5
+fid = h5open("/media/jm/hddData/projects/MedEye3d.jl/docs/src/data/ct_pixels.h5", "r")
+dat= Float32.(read(fid, "data")[:,:,20])
+
+textUreId=createTexture(Float32,Int32(size(dat)[1]),Int32(size(dat)[2]), GL_R32F, GL_FLOAT)
+index=0
+
+glActiveTexture(textUreId[])
+
+
+xoffset=0
+yoffset=0
+widthh=size(dat)[1]
+heightt=size(dat)[2]
+
+
+
+
 # Function to render the scene
 function render()
     glClear(GL_COLOR_BUFFER_BIT)
 
     # Render the rectangle with texture
     glUseProgram(rectangle_shader_program)
+    samplerRef=glGetUniformLocation(rectangle_shader_program, n)
+    glUniform1i(samplerRef, index)
     glBindVertexArray(rectangle_vao[])
-    # glBindTexture(GL_TEXTURE_2D, texture)
+    glBindTexture(GL_TEXTURE_2D, textUreId[])
+    glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, widthh, heightt, GL_RED, GL_FLOAT, collect(dat))
+
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
     glBindVertexArray(0)
 

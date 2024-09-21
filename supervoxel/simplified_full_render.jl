@@ -54,7 +54,7 @@ const fragment_shader_source = """
 
     void main() {
 
-    float CTImRes = texture2D(CTIm, TexCoord0).r+0.1;
+    float CTImRes = texture2D(CTIm, TexCoord0).r;
 
 
 
