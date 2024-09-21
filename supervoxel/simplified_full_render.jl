@@ -59,9 +59,11 @@ const fragment_shader_source = """
 
 
     float todiv = CTImisVisible *CTImmaskContribution;
-    FragColor = vec4(CTImRes,0.0,0.0,  1.0); // long product, if mask is invisible it just has full transparency
+    FragColor = vec4((  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.r,CTImValueRange)  + 0.0) / todiv,
+                    (  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.g,CTImValueRange)  + 0.0) / todiv,
+                    (  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.b,CTImValueRange)  + 0.0) / todiv,
+                    1.0); // long product, if mask is invisible it just has full transparency
     }
-
     """
     # FragColor = vec4((  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.r,CTImValueRange)  + 0.0) / todiv,
     #                 (  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.g,CTImValueRange)  + 0.0) / todiv,
@@ -182,23 +184,7 @@ function createTexture(juliaDataType::Type{juliaDataTyp}, width::Int32, height::
     return texture
 end
 
-"""
-how data should be read from data buffer
-    """
-function encodeDataFromDataBuffer()
-    typee = Float32
 
-    # position attribute
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(typee), C_NULL)
-    glEnableVertexAttribArray(0)
-    # color attribute
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(typee), Ptr{Nothing}(3 * sizeof(typee)))
-    glEnableVertexAttribArray(1)
-    # texture coord attribute
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(typee), Ptr{Nothing}(6 * sizeof(typee)))
-    glEnableVertexAttribArray(2)
-
-end #encodeDataFromDataBuffer
 
 function basicRender(window)
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
@@ -228,29 +214,17 @@ GLFW.MakeContextCurrent(window)
 n= "CTIm"
 samplerName=n
 samplerRef=glGetUniformLocation(shader_program, n)
-colorsMaskRef=glGetUniformLocation(shader_program, "$(n)ColorMask")
-maskMinValue=glGetUniformLocation(shader_program, "$(n)minValue")
-maskMAxValue=glGetUniformLocation(shader_program, "$(n)maxValue")
-maskRangeValue=glGetUniformLocation(shader_program, "$(n)ValueRange")
-isVisibleRef=glGetUniformLocation(shader_program, "$(n)isVisible")
-maskContribution=glGetUniformLocation(shader_program, "$(n)maskContribution")
-
-
-
 
 #data from hdf5
 dat= Float32.(read(fid, "data")[:,:,20])
-dat=rand(Float32,size(dat)[1],size(dat)[2])
 
 #setup texture
 textUreId=createTexture(Float32,Int32(size(dat)[1]),Int32(size(dat)[2]), GL_R32F, GL_FLOAT)
 index=0
-actTextrureNumb = getProperGL_TEXTURE(index)
+
 glActiveTexture(textUreId[])
 glUniform1i(samplerRef, index)
 
-# glActiveTexture(actTextrureNumb) # active proper texture unit before binding
-ID=Ref(UInt32(0))
 glBindTexture(GL_TEXTURE_2D, textUreId[])
 xoffset=0
 yoffset=0
@@ -261,8 +235,6 @@ glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, widthh, heightt, GL_RED, GL_
 
 
 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-
-# @info "inside updateImagesDisplayed_inner"
 
 glUseProgram(shader_program)
 glBindBuffer(GL_ARRAY_BUFFER, vbo[])
