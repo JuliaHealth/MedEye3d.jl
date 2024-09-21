@@ -88,17 +88,20 @@ glDeleteShader(fragment_shader)
 # Generate and bind a Vertex Array Object
 vao = Ref(GLuint(0))
 glGenVertexArrays(1, vao)
+glBindVertexArray(0)
 glBindVertexArray(vao[])
 
 # Generate and bind a Vertex Buffer Object
 vbo = Ref(GLuint(0))
 glGenBuffers(1, vbo)
+glBindBuffer(GL_ARRAY_BUFFER, 0)
 glBindBuffer(GL_ARRAY_BUFFER, vbo[])
 glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW)
 
 # Generate and bind an Element Buffer Object
 ebo = Ref(GLuint(0))
 glGenBuffers(1, ebo)
+glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0)
 glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo[])
 glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW)
 
@@ -109,7 +112,7 @@ glEnableVertexAttribArray(0)
 # Unbind the VBO (the VAO will remember the settings)
 glBindBuffer(GL_ARRAY_BUFFER, 0)
 glBindVertexArray(0)
-
+glBindVertexArray(vao[])
 # Function to render the scene
 function render()
     glClear(GL_COLOR_BUFFER_BIT)

@@ -115,7 +115,7 @@ function createShader(source, typ)
     return shader
 end
 
-function createAndInitShaderProgram(vertex_shader::UInt32)::Tuple{UInt32,UInt32}
+function createAndInitShaderProgram(vertex_shader::UInt32,fragment_shader_source)::Tuple{UInt32,UInt32}
     fragment_shader = createShader(fragment_shader_source, GL_FRAGMENT_SHADER) 
     shader_program = glCreateProgram()
     glAttachShader(shader_program, fragment_shader)
@@ -194,8 +194,9 @@ end#getProperGL_TEXTURE
 
 window = initializeWindow(1000,1000)
 vertex_shader = createShader(vertex_shader_code, GL_VERTEX_SHADER)
-fragment_shader_main, shader_program = createAndInitShaderProgram(vertex_shader)
+fragment_shader_main, shader_program = createAndInitShaderProgram(vertex_shader,fragment_shader_source)
 glUseProgram(shader_program)
+
 VAO=createVertexBuffer()
 
 vbo = createDAtaBuffer(mainImageQuadVert)
@@ -234,37 +235,64 @@ glUseProgram(shader_program)
 glBindBuffer(GL_ARRAY_BUFFER, vbo[])
 glBufferData(GL_ARRAY_BUFFER, sizeof(mainImageQuadVert), mainImageQuadVert, GL_STATIC_DRAW) 
 
+
+
+###draw texture 
+glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+GLFW.SwapBuffers(window)
+
+
 # Draw line
 glBindBuffer(GL_ARRAY_BUFFER, 0)
+# Vertex data for a line
+vertices = Float32[
+    0.5, 0.5, 0.1,  # top right
+    0.5, -0.5, 0.1,  # bottom right
+    -0.5, -0.5, 0.1,  # bottom left
+    -0.5, 0.5, 0.1   # top left
+]
 
+# Indices for drawing lines
+indices = UInt32[
+    0, 1,  # Line from top right to bottom right
+    2, 3   # Line from bottom left to top left
+]
+vao = Ref(GLuint(0))
+glGenVertexArrays(1, vao)
+glBindVertexArray(0)
+glBindVertexArray(vao[])
 
-vertices = [0.5, 0.5, 0.1,  # top right
-            0.5, -0.5, 0.1,  # bottom right
-            -0.5, -0.5, 0.1,  # bottom left
-            -0.5, 0.5, 0.1]  # top left
+# Generate and bind a Vertex Buffer Object
+vbo = Ref(GLuint(0))
+glGenBuffers(1, vbo)
+glBindBuffer(GL_ARRAY_BUFFER, 0)
+glBindBuffer(GL_ARRAY_BUFFER, vbo[])
+glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW)
 
-glBindBuffer(GL_ARRAY_BUFFER, vbo[]);
-glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+# Generate and bind an Element Buffer Object
+ebo = Ref(GLuint(0))
+glGenBuffers(1, ebo)
+glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0)
+glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo[])
+glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW)
 
-glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 12 * sizeof(Float32), Ptr{Nothing}(12 * sizeof(Float32)))
+# Set vertex attribute pointers
+glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(Float32), Ptr{Nothing}(0))
+glEnableVertexAttribArray(0)
 
-
-glEnableVertexAttribArray(0);
-
-glBindBuffer(GL_ARRAY_BUFFER, 0); 
-# glBindVertexArray(0); 
-
-glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-
-
-glDrawElements(GL_LINES, 6, GL_UNSIGNED_INT, C_NULL)
-
-
-
+# Unbind the VBO (the VAO will remember the settings)
+glBindBuffer(GL_ARRAY_BUFFER, 0)
+glBindVertexArray(0)
+glBindVertexArray(vao[])
+glClear(GL_COLOR_BUFFER_BIT)
+glDrawElements(GL_LINES, 4, GL_UNSIGNED_INT, C_NULL)
+glBindVertexArray(0)
 
 # Swap front and back buffers
 GLFW.SwapBuffers(window)
+
+
 #render onto the screen
-basicRender(window)
+# basicRender(window)
 glFinish()
 
