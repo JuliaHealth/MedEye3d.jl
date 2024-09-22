@@ -1,130 +1,26 @@
-using ModernGL, GLFW,HDF5
-
+using ModernGL
+using GLFW,HDF5
+using GeometryTypes
 function initializeWindow(windowWidth::Int, windowHeight::Int)
     GLFW.Init()
-    # Create a windowed mode window and its OpenGL context
     window = GLFW.CreateWindow(windowWidth, windowHeight, "Segmentation Visualization")
-    # Make the window's context current
     GLFW.MakeContextCurrent(window)
     GLFW.ShowWindow(window)
-    GLFW.SetWindowSize(window, windowWidth, windowHeight) # Seems to be necessary to guarantee that window > 0
+    GLFW.SetWindowSize(window, windowWidth, windowHeight)
     glViewport(0, 0, windowWidth, windowHeight)
     glDisable(GL_LIGHTING)
     glEnable(GL_TEXTURE_2D)
     return window
-end #initializeWindow
+end
 
 window = initializeWindow(800, 600)
 
-# Vertex data for a line
-vertices = Float32[
-    0.5, 0.5, 0.0,  # top right
-    0.5, -0.5, 0.0,  # bottom right
-    -0.5, -0.5, 0.0,  # bottom left
-    -0.5, 0.5, 0.0   # top left
-]
-
-# Indices for drawing lines
-indices = UInt32[
-    0, 1,  # Line from top right to bottom right
-    2, 3   # Line from bottom left to top left
-]
-
-# Vertex shader source code
-vertex_shader_source = """
-#version 330 core
-layout (location = 0) in vec3 aPos;
-void main()
-{
-    gl_Position = vec4(aPos, 1.0);
-}
-"""
-
-# Fragment shader source code
-fragment_shader_source = """
-#version 330 core
-    #version 460
-
-
-    out vec4 FragColor;
-    in vec3 ourColor;
-    smooth in vec2 TexCoord0;
-
-
-    uniform sampler2D CTIm; // mask image sampler
-    uniform vec4 CTImColorMask= vec4(1.0,1.0,1.0,1.0); //controlling colors
-    uniform int CTImisVisible= 1; // controlling visibility
-
-    uniform float  CTImminValue= 0.0; // minimum possible value set in configuration
-    uniform float  CTImmaxValue= 100.0; // maximum possible value set in configuration
-    uniform float  CTImValueRange= 100.0; // range of possible values calculated from above
-    uniform float  CTImmaskContribution=1.0; //controls contribution of mask to output color
-
-
-    float changeClip(float min, float max, float value, float color, float range) {
-        if (value < min) {
-            return min;
-        } else if (value > max) {
-            return max;
-        } else {
-            return color * (value/ range);
-        }
-    }
-
-    void main() {
-
-    float CTImRes = texture2D(CTIm, TexCoord0).r;
-
-  FragColor = vec4((  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.r,CTImValueRange)  + 0.0),
-                    (  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.g,CTImValueRange)  + 0.0),
-                    (  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.b,CTImValueRange)  + 0.0),
-                    1.0);
-                        }
-"""
-fragment_shader_source_line = """
-  #version 330 core
-  out vec4 FragColor;
-  void main()
-  {
-      FragColor = vec4(1.0, 1.0, 0.0, 1.0); // Yellow color
-  }
-  """
-function createShader(source, typ)
-    # Create the shader
-    shader = glCreateShader(typ)::GLuint
-    if shader == 0
-        error("Error creating shader: ", glErrorMessage())
-    end
-    # Compile the shader
-    glShaderSource(shader, 1, convert(Ptr{UInt8}, pointer([convert(Ptr{GLchar}, pointer(source))])), C_NULL)
-    glCompileShader(shader)
-    # Check for errors
-    # !validateShader(shader) && error("Shader creation error: ", getInfoLog(shader))
-    return shader
-end
-
-function createAndInitShaderProgram(vertex_shader::UInt32, fragment_shader_source)::Tuple{UInt32,UInt32}
-    fragment_shader = createShader(fragment_shader_source, GL_FRAGMENT_SHADER)
-    shader_program = glCreateProgram()
-    glAttachShader(shader_program, fragment_shader)
-    glAttachShader(shader_program, vertex_shader)
-    glLinkProgram(shader_program)
-    return fragment_shader, shader_program
-end
-
-vertex_shader = createShader(vertex_shader_source, GL_VERTEX_SHADER)
-fragment_shader_main, rectangle_shader_program = createAndInitShaderProgram(vertex_shader, fragment_shader_source)
-fragment_shader_line, line_shader_program = createAndInitShaderProgram(vertex_shader, fragment_shader_source_line)
-
-
-
 # Vertex data for a rectangle
 rectangle_vertices = Float32[
-    # positions                  // colors           // texture coords
-    0.9, 1.0 , 0.0, 1.0, 0.0, 0.0, 1.0, 1.0,   # top right
-    0.9, -1.0 , 0.0, 0.0, 1.0, 0.0, 1.0, 0.0,   # bottom right
-    -1.0 , -1.0 , 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,   # bottom left
-    -1.0 , 1.0 , 0.0, 1.0, 1.0, 0.0, 0.0, 1.0    # top left
+    0.9, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0,   # top right
+    0.9, -1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0,   # bottom right
+    -1.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,  # bottom left
+    -1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0    # top left
 ]
 
 # Indices for the rectangle
@@ -135,8 +31,8 @@ rectangle_indices = UInt32[
 
 # Vertex data for lines
 line_vertices = Float32[
-    0.8, 0.3, 0.0,  # top right
-    0.3, -0.8, 0.0,  # bottom right
+    0.2, 0.0, 0.0,  # top right
+    0.0, -0.2, 0.0,  # bottom right
     -0.8, -0.8, 0.0,  # bottom left
     -0.8, 0.8, 0.0   # top left
 ]
@@ -146,6 +42,98 @@ line_indices = UInt32[
     0, 1,  # Line from top right to bottom right
     2, 3   # Line from bottom left to top left
 ]
+
+# Vertex shader source code
+vertex_shader_source = """
+#version 330 core
+layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aColor;
+layout (location = 2) in vec2 aTexCoord;
+out vec3 ourColor;
+out vec2 TexCoord;
+void main()
+{
+    gl_Position = vec4(aPos, 1.0);
+    ourColor = aColor;
+    TexCoord = aTexCoord;
+}
+"""
+
+# Fragment shader source code
+fragment_shader_source = """
+#version 330 core
+out vec4 FragColor;
+in vec3 ourColor;
+in vec2 TexCoord;
+uniform sampler2D CTIm;
+
+uniform vec4 CTImColorMask = vec4(1.0, 1.0, 1.0, 1.0); // controlling colors
+uniform int CTImisVisible = 1; // controlling visibility
+
+uniform float CTImminValue = 0.0; // minimum possible value set in configuration
+uniform float CTImmaxValue = 100.0; // maximum possible value set in configuration
+uniform float CTImValueRange = 100.0; // range of possible values calculated from above
+uniform float CTImmaskContribution = 1.0; // controls contribution of mask to output color
+
+float changeClip(float min, float max, float value, float color, float range) {
+    if (value < min) {
+        return color * (min / range);
+    } else if (value > max) {
+        return color * (max / range);
+    } else {
+        return color * (value / range);
+    }
+}
+
+void main() {
+    vec4 texColor = texture(CTIm, TexCoord);
+    float CTImRes = texColor.r; // Assuming the texture is in red channel
+ FragColor = vec4((  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.r,CTImValueRange)  + 0.0) ,
+                    (  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.g,CTImValueRange)  + 0.0),
+                    (  changeClip(CTImminValue,CTImmaxValue,CTImRes,CTImColorMask.b,CTImValueRange)  + 0.0) ,
+                    1.0);
+}
+"""
+#    FragColor = texture(CTIm, TexCoord);
+
+fragment_shader_source_line = """
+#version 330 core
+out vec4 FragColor;
+
+
+
+
+void main()
+{
+    FragColor = vec4(1.0, 1.0, 0.0, 1.0); // Yellow color
+}
+"""
+
+function createShader(source, typ)
+    shader = glCreateShader(typ)::GLuint
+    glShaderSource(shader, 1, convert(Ptr{UInt8}, pointer([convert(Ptr{GLchar}, pointer(source))])), C_NULL)
+    glCompileShader(shader)
+    return shader
+end
+
+function createAndInitShaderProgram(vertex_shader::UInt32, fragment_shader_source)::Tuple{UInt32,UInt32}
+    fragment_shader = createShader(fragment_shader_source, GL_FRAGMENT_SHADER)
+    shader_program = glCreateProgram()
+    glAttachShader(shader_program, vertex_shader)
+    glAttachShader(shader_program, fragment_shader)
+    glLinkProgram(shader_program)
+    return fragment_shader, shader_program
+end
+
+vertex_shader = createShader(vertex_shader_source, GL_VERTEX_SHADER)
+fragment_shader_main, rectangle_shader_program = createAndInitShaderProgram(vertex_shader, fragment_shader_source)
+n = "CTIm"
+samplerName = n
+samplerRef=glGetUniformLocation(rectangle_shader_program,samplerName)
+glUniform1i(samplerRef, 0)
+
+
+fragment_shader_line, line_shader_program = createAndInitShaderProgram(vertex_shader, fragment_shader_source_line)
 
 # Generate and bind VAO for rectangle
 rectangle_vao = Ref(GLuint(0))
@@ -204,56 +192,40 @@ glEnableVertexAttribArray(0)
 # Unbind the VAO for lines
 glBindVertexArray(0)
 
-
-
-function createTexture(juliaDataType::Type{juliaDataTyp}, width::Int32, height::Int32, GL_RType::UInt32=GL_R8UI, OpGlType=GL_UNSIGNED_BYTE) where {juliaDataTyp}
-
-
-    #The texture we're going to render to
+function createTexture(juliaDataType::Type{juliaDataTyp}, width::Int32, height::Int32, GL_RType::UInt32=GL_R32F, OpGlType=GL_FLOAT) where {juliaDataTyp}
     texture = Ref(GLuint(0))
     glGenTextures(1, texture)
     glBindTexture(GL_TEXTURE_2D, texture[])
-
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0)
-    #we just assign storage
     glTexStorage2D(GL_TEXTURE_2D, 1, GL_RType, width, height)
-
-
     return texture
 end
 
 
-
-
 function getProperGL_TEXTURE(index::Int)::UInt32
     return eval(Meta.parse("GL_TEXTURE$(index)"))
-end#getProperGL_TEXTURE
+end
+
+# Uniforms
 
 
 
-
-#uniforms
-n= "CTIm"
-samplerName=n
-
-#data from hdf5
+# Data from HDF5
 fid = h5open("/media/jm/hddData/projects/MedEye3d.jl/docs/src/data/ct_pixels.h5", "r")
-dat= Float32.(read(fid, "data")[:,:,20])
+dat = Float32.(read(fid, "data")[:,:,20])
+# dat=rand(Float32,size(dat)[1],size(dat)[2])
+close(fid)
 
-textUreId=createTexture(Float32,Int32(size(dat)[1]),Int32(size(dat)[2]), GL_R32F, GL_FLOAT)
-index=0
-
-glActiveTexture(textUreId[])
+textUreId = createTexture(Float32, Int32(size(dat)[1]), Int32(size(dat)[2]), GL_R32F, GL_FLOAT)
 
 
-xoffset=0
-yoffset=0
-widthh=size(dat)[1]
-heightt=size(dat)[2]
-
+xoffset = 0
+yoffset = 0
+widthh = size(dat)[1]
+heightt = size(dat)[2]
 
 
 
@@ -263,9 +235,9 @@ function render()
 
     # Render the rectangle with texture
     glUseProgram(rectangle_shader_program)
-    samplerRef=glGetUniformLocation(rectangle_shader_program, n)
-    glUniform1i(samplerRef, index)
+
     glBindVertexArray(rectangle_vao[])
+    glActiveTexture(textUreId[])
     glBindTexture(GL_TEXTURE_2D, textUreId[])
     glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, widthh, heightt, GL_RED, GL_FLOAT, collect(dat))
 

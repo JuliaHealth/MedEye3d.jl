@@ -43,9 +43,9 @@ const fragment_shader_source = """
 
     float changeClip(float min, float max, float value, float color, float range) {
         if (value < min) {
-            return min;
+            return color * (min/ range);
         } else if (value > max) {
-            return max;
+            return color * (max/ range);
         } else {
             return color * (value/ range);
         }
