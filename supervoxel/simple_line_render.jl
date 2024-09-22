@@ -254,3 +254,26 @@ end
 # Main loop
 render()
 GLFW.SwapBuffers(window)
+
+
+
+
+You are opengl expert . Write an algorithm that would be able to get a crossection of the set of triangle with a given plane. 
+The plane will be perpendicular to either x,y or z axis and will be in distance d from the center. hence the arguments to the functions would be 
+"plane_axis" (x y or z) ; d (distance of the plane to the center of coordinate system) ; triangle_arr (tensor where first dimension is triangle index and seconf is x,y,z coordinate of a given point) 
+In algorithm you need to first verify weather triangle and plane intersect; 
+if yes define the coordinates of the line sections that are created when the intersecting plane intersects the triangle .
+ You will return those coordinates as a result in a format as in example below 
+"""vertices = Float32[
+    0.5, 0.5, 0.1,  # top right
+    0.5, -0.5, 0.1,  # bottom right
+    -0.5, -0.5, 0.1,  # bottom left
+    -0.5, 0.5, 0.1   # top left
+]
+
+# Indices for drawing lines
+indices = UInt32[
+    0, 1,  # Line from top right to bottom right
+    2, 3   # Line from bottom left to top left
+]"""
+In this example e have 2 lines first is using point 0 and 1 so starts at "0.5, 0.5, 0.1" and end at "0.5, -0.5, 0.1" and second starts at "-0.5, -0.5, 0.1" and end at "-0.5, 0.5, 0.1" in indicies list you can reuse the points if two line sections share the same point .

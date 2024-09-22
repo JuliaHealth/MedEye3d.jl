@@ -257,6 +257,8 @@ indices = UInt32[
     0, 1,  # Line from top right to bottom right
     2, 3   # Line from bottom left to top left
 ]
+
+
 vao = Ref(GLuint(0))
 glGenVertexArrays(1, vao)
 glBindVertexArray(0)
