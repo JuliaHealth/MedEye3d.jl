@@ -14,20 +14,20 @@ using ..ReactOnKeyboard, ..ReactOnMouseClickAndDrag, ..DisplayDataManag
 """
 configuring consumer function on_next! function using multiple dispatch mechanism in order to connect input to proper functions
 """
-on_next!(stateObject::StateDataFields, data::Int64) = reactToScroll(data, stateObject)
-on_next!(stateObject::StateDataFields, data::forDisplayObjects) = setUpMainDisplay(data, stateObject)
-on_next!(stateObject::StateDataFields, data::ForWordsDispStruct) = setUpWordsDisplay(data, stateObject)
-on_next!(stateObject::StateDataFields, data::CalcDimsStruct) = setUpCalcDimsStruct(data, stateObject)
-on_next!(stateObject::StateDataFields, data::valueForMasToSetStruct) = setUpvalueForMasToSet(data, stateObject)
-on_next!(stateObject::StateDataFields, data::FullScrollableDat) = setUpForScrollData(data, stateObject)
-on_next!(stateObject::StateDataFields, data::SingleSliceDat) = updateSingleImagesDisplayedSetUp(data, stateObject)
-on_next!(stateObject::StateDataFields, data::Vector{MouseStruct}) = react_to_draw(data, stateObject)
-on_next!(stateObject::StateDataFields, data::MouseStruct) = reactToMouseDrag(data, stateObject) #needs modification , with the react_to_draw, data of vectorStruct (MoustStruct)
-on_next!(stateObject::StateDataFields, data::KeyInputFields) = reactToKeyInput(data, stateObject)
-on_next!(stateObject::StateDataFields, data::DisplayedVoxels) = retrieveVoxelArray(data, stateObject)
-on_next!(stateObject::StateDataFields, data::CustomDisplayedVoxels) = depositVoxelArray(data, stateObject)
-on_error!(stateObject::StateDataFields, err) = error(err)
-on_complete!(stateObject::StateDataFields) = ""
+on_next!(stateObjects::Vector{StateDataFields}, data::Int64) = reactToScroll(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::forDisplayObjects) = setUpMainDisplay(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::ForWordsDispStruct) = setUpWordsDisplay(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::CalcDimsStruct) = setUpCalcDimsStruct(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::valueForMasToSetStruct) = setUpvalueForMasToSet(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::FullScrollableDat) = setUpForScrollData(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::SingleSliceDat) = updateSingleImagesDisplayedSetUp(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::Vector{MouseStruct}) = react_to_draw(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MouseStruct) = reactToMouseDrag(data, stateObjects) #needs modification , with the react_to_draw, data of vectorStruct (MoustStruct)
+on_next!(stateObjects::Vector{StateDataFields}, data::KeyInputFields) = reactToKeyInput(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::DisplayedVoxels) = retrieveVoxelArray(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::CustomDisplayedVoxels) = depositVoxelArray(data, stateObjects)
+on_error!(stateObjects::Vector{StateDataFields}, err) = error(err)
+on_complete!(stateObjects::Vector{StateDataFields}) = ""
 
 
 
@@ -261,7 +261,12 @@ function coordinateDisplay(
     # put!(mainMedEye3dInstance.channel, forTextDispStruct)
     function consumer(mainChannel::Base.Channel{Any})
         shouldStop = [false]
-        stateInstances::Vector{StateDataFields} = [StateDataFields(displayMode=displayMode, imagePosition=index) for (index, _) in enumerate(initializedTextures)]
+        stateInstances::Vector{StateDataFields} = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index) for (index, _) in enumerate(initializedTextures)]
+        #Setting second state information to be 0, because we need to access information from the first state only
+        if length(stateInstances) > 1 && displayMode == MultiImage
+            stateInstances[2].switchIndex = 0
+        end
+
 
         foreach(enumerate(stateInstances)) do (index, stateInstance)
             stateInstance.textureToModifyVec = filter(it -> it.isEditable, initializedTextures[index])
@@ -294,28 +299,29 @@ function coordinateDisplay(
 
         while !shouldStop[1]
             channelData = take!(mainChannel)
-            stateInstance = stateInstances[1] #by default the first state
             # get the aggregation here, only when the type is mouseStruct.
             if typeof(channelData) == MouseStruct
-                mouseStructAggregationArray::Vector{MouseStruct} = [channelData]
-                while !isempty(mainChannel) && typeof(fetch(mainChannel)) == MouseStruct
-                    push!(mouseStructAggregationArray, take!(mainChannel))
+                if (channelData.isLeftButtonDown)
+                    mouseStructAggregationArray::Vector{MouseStruct} = [channelData]
+                    while !isempty(mainChannel) && typeof(fetch(mainChannel)) == MouseStruct
+                        push!(mouseStructAggregationArray, take!(mainChannel))
+                    end
+                    channelData = mouseStructAggregationArray
                 end
-                channelData = mouseStructAggregationArray
 
             elseif typeof(channelData) == CalcDimsStruct || typeof(channelData) == forDisplayObjects || typeof(channelData) == FullScrollableDat
-                stateInstance = channelData.imagePos > 1 ? stateInstances[2] : stateInstances[1]  #Setting the current State to modify to be for the left or the right image
+                stateInstances[1].switchIndex = channelData.imagePos > 1 ? 2 : 1  #Setting the current State to modify to be for the left or the right image
 
             elseif typeof(channelData) == ForWordsDispStruct && displayMode == MultiImage
-                if stateInstance == stateInstances[1]
-                    on_next!(stateInstances[2], channelData)
-                elseif stateInstance == stateInstances[2]
-                    on_next!(stateInstances[1], channelData)
+                if stateInstances[1].switchIndex == 1
+                    stateInstances[1].switchIndex = 2
+                    on_next!(stateInstances, channelData)
+                elseif stateInstances[1].switchIndex == 2
+                    stateInstances[1].switchIndex == 1
+                    on_next!(stateInstances, channelData)
                 end
             end
-
-
-            on_next!(stateInstance, channelData)
+            on_next!(stateInstances, channelData)
 
         end
     end #end of consumer
@@ -328,7 +334,7 @@ function coordinateDisplay(
     ask should we put all of the calcDimsStructs in the channel or just the first one
     adapt registerInteractions
 
-    Ask mitura how to update the textDispObj for all, since its a field of mainMedEye3d, and not stateInstance how to put it in onnext?
+    Ask Dr.mitura how to update the textDispObj for all, since its a field of mainMedEye3d, and not stateInstance how to put it in onnext?
     """
 
     foreach(calcDimStructs) do currentCalcDim
@@ -470,7 +476,8 @@ function displayImage(
     textureSpecArray::Union{Vector{TextureSpec},Vector{Vector{TextureSpec}}}=Vector{TextureSpec}(),
     voxelDataTupleVector::Union{Vector{Any},Vector{Vector{Any}}}=[],
     spacings::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
-    fractionOfMainImage::Float32=Float32(0.8)
+    fractionOfMainImage::Float32=Float32(0.8),
+    windowWidth::Int=1000
 )
 
 
@@ -551,10 +558,10 @@ function displayImage(
 
     elseif typeof(textureSpecArray) == Vector{Vector{TextureSpec}}
 
-	    for (index,texturVector) in enumerate(textureSpecArray)
+        for (index, texturVector) in enumerate(textureSpecArray)
             for textur in texturVector
                 if textur.studyType == "PET"
-			textur.minAndMaxValue = Float32.([median(voxelDataTupleVector[index][1][2]) - std(voxelDataTupleVector[index][1][2]) / 2, median(voxelDataTupleVector[index][1][2]) + std(voxelDataTupleVector[index][1][2]) * 2])
+                    textur.minAndMaxValue = Float32.([median(voxelDataTupleVector[index][1][2]) - std(voxelDataTupleVector[index][1][2]) / 2, median(voxelDataTupleVector[index][1][2]) + std(voxelDataTupleVector[index][1][2]) * 2])
                 end
             end
         end
@@ -572,7 +579,7 @@ function displayImage(
     end
 
 
-    @info "look here" typeof(voxelDataTupleVector) typeof(voxelDataTupleVector[1]) voxelDataTupleVector[1]
+    # @info "look here" typeof(voxelDataTupleVector) typeof(voxelDataTupleVector[1]) voxelDataTupleVector[1]
     # voxelDataForUniforms::Union{Vector{Array{Float32,3}},Vector{Vector{Array{Float32,3}}}} = map(x -> map(tup -> tup[2], x), voxelDataTupleVector)
     voxelDataForUniforms::Union{Vector{Array{Float32,3}},Vector{Vector{Array{Float32,3}}}} = typeof(voxelDataTupleVector) == Vector{Any} ? map(tuple -> tuple[2], voxelDataTupleVector) : map(innerVector -> map(tuple -> tuple[2], innerVector), voxelDataTupleVector)
 
@@ -661,7 +668,7 @@ function displayImage(
 
 
 
-    medEye3dChannelInstance = coordinateDisplay(textureSpecArray, fractionOfMainImage, datToScrollDimsB, 1000)
+    medEye3dChannelInstance = coordinateDisplay(textureSpecArray, fractionOfMainImage, datToScrollDimsB, windowWidth)
 
 
 

@@ -11,7 +11,8 @@ export subscribeGLFWtoActor, setUpForScrollData, setUpCalcDimsStruct, setUpWords
 """
 adding the data into about openGL and GLFW context to enable proper display of main image and masks
 """
-function setUpMainDisplay(mainForDisplayObjects::forDisplayObjects, mainState::StateDataFields)
+function setUpMainDisplay(mainForDisplayObjects::forDisplayObjects, mainStates::Vector{StateDataFields})
+    mainState = mainStates[mainStates[1].switchIndex]
     mainState.mainForDisplayObjects = mainForDisplayObjects
 end#setUpMainDisplay
 
@@ -19,7 +20,8 @@ end#setUpMainDisplay
 adding the data needed for text display; also activates appropriate quad for the display
     it also configures texture that is build for text display
 """
-function setUpWordsDisplay(textDispObject::ForWordsDispStruct, mainState::StateDataFields)
+function setUpWordsDisplay(textDispObject::ForWordsDispStruct, mainStates::Vector{StateDataFields})
+    mainState = mainStates[mainStates[1].switchIndex]
 
     bindAndActivateForText(textDispObject.shader_program_words, textDispObject.fragment_shader_words, mainState.mainForDisplayObjects.vertex_shader, textDispObject.vbo_words, mainState.calcDimsStruct)
 
@@ -45,8 +47,9 @@ adding the data about 3 dimensional arrays that will be source of data used for 
 onScroll Data - list of tuples where first is the name of the texture that we provided and second is associated data (3 dimensional array of appropriate type)
 
 """
-function setUpForScrollData(onScrollData::FullScrollableDat, mainState::StateDataFields)
+function setUpForScrollData(onScrollData::FullScrollableDat, mainStates::Vector{StateDataFields})
 
+    mainState = mainStates[mainStates[1].switchIndex]
 
 
     onScrollData.slicesNumber = getSlicesNumber(onScrollData)
@@ -57,7 +60,7 @@ function setUpForScrollData(onScrollData::FullScrollableDat, mainState::StateDat
     oldd = mainState.valueForMasToSet
 
     mainState.valueForMasToSet = valueForMasToSetStruct(value=0)
-    ReactOnMouseClickAndDrag.reactToMouseDrag(MouseStruct(true, false, [CartesianIndex(5, 5)]), mainState)
+    ReactOnMouseClickAndDrag.reactToMouseDrag(MouseStruct(isLeftButtonDown=true, isRightButtonDown=false, lastCoordinates=[CartesianIndex(5, 5)]), mainStates)
     mainState.valueForMasToSet = oldd
 
 
@@ -69,8 +72,9 @@ end#setUpMainDisplay
 """
 add data needed for proper calculations of mouse, verticies positions ... etc
 """
-function setUpCalcDimsStruct(calcDim::CalcDimsStruct, mainState::StateDataFields)
+function setUpCalcDimsStruct(calcDim::CalcDimsStruct, mainStates::Vector{StateDataFields})
     # @info calcDim
+    mainState = mainStates[mainStates[1].switchIndex]
     mainState.calcDimsStruct = calcDim
 
 end#setUpCalcDimsStruct
@@ -80,7 +84,8 @@ end#setUpCalcDimsStruct
 """
 sets value we are setting to the  active mask vie mause interaction, in case mask is modifiable
 """
-function setUpvalueForMasToSet(valueForMasToSett::valueForMasToSetStruct, mainState::StateDataFields)
+function setUpvalueForMasToSet(valueForMasToSett::valueForMasToSetStruct, mainStates::Vector{StateDataFields})
+    mainState = mainStates[mainStates[1].switchIndex]
 
     mainState.valueForMasToSet = valueForMasToSett
 
@@ -96,7 +101,8 @@ struct that holds tuple where first entry is
 -vector of tuples whee first entry in tuple is name of texture given in the setup and second is 2 dimensional aray of appropriate type with image data
 - Int - second is Int64 - that is marking the screen number to which we wan to set the actor state
 """
-function updateSingleImagesDisplayedSetUp(singleSliceDat::SingleSliceDat, mainState::StateDataFields)
+function updateSingleImagesDisplayedSetUp(singleSliceDat::SingleSliceDat, mainStates::Vector{StateDataFields})
+    mainState = mainStates[mainStates[1].switchIndex]
     updateImagesDisplayed(singleSliceDat, mainState.mainForDisplayObjects, mainState.textDispObj, mainState.calcDimsStruct, mainState.valueForMasToSet)
 
 

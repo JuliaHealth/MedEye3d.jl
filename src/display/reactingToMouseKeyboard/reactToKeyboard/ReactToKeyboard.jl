@@ -74,7 +74,9 @@ end#reactToKeyboard
 Function reactToKeyInput, handled keyboardStruct modification with the keyInput data
 passed through the channel
 """
-function reactToKeyInput(keyInputInfo::KeyInputFields, mainState::StateDataFields)
+function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateDataFields})
+    mainState = mainStates[mainStates[1].switchIndex]
+
     keyReleaseAction = collect(instances(GLFW.Action))[1]
     keyPressAction = collect(instances(GLFW.Action))[2]
     act = nothing
