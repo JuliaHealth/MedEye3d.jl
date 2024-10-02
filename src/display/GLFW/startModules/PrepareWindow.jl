@@ -24,6 +24,8 @@ function displayAll(calcDimsStruct::CalcDimsStruct)
         println("increase number of available threads look into https://docs.julialang.org/en/v1/manual/multi-threading/  or modify for example in vs code extension")
     end
     # Create the window. This sets all the hints and makes the context current.
+
+
     window = initializeWindow(calcDimsStruct.windowWidth, calcDimsStruct.windowHeight)
 
     # The shaders

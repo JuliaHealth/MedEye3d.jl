@@ -208,7 +208,7 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
   #hence we do not need  to multiply by 2 becose we get from -1 to 1 so total is 2
   # @info "texel_width $(texel_width) texel_height $(texel_height) texel_ratio  $(texel_ratio) calcDimStruct.heightToWithRatio $(calcDimStruct.heightToWithRatio)  isWidthToBeCorrected $(isWidthToBeCorrected) isHeightToBeCorrected $(isHeightToBeCorrected) calcDimStruct.imageTextureWidth $(calcDimStruct.imageTextureWidth) calcDimStruct.imageTextureHeight $(calcDimStruct.imageTextureHeight) "
 
-  @info "correctedWidthForTextAccounting" correctedWidthForTextAccounting
+  # @info "correctedWidthForTextAccounting" correctedWidthForTextAccounting
 
 
   res = Float32.([
@@ -229,8 +229,8 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
   textBeginning *= 2 #in normal coordinate
   textBeginning = ((textBeginning) * 2) - 1 # conversion back to openGL coordinate system from normal coordinate system
 
-  @info textBeginning
-  @info "Original width corr" widthCorr
+  # @info textBeginning
+  # @info "Original width corr" widthCorr
 
   if displayMode == MultiImage
     widthCorr /= 4
@@ -238,7 +238,7 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
 
 
 
-    @info widthCorr
+    # @info widthCorr
     if imagePos == 1    #LEFT IMAGE
       res[1] = normalCorrectedTextAccounting - widthCorr # top right
       res[9] = normalCorrectedTextAccounting - widthCorr# bottom right
@@ -258,7 +258,7 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
   end
 
 
-  @info res[1], res[9], res[17], res[25]
+  # @info res[1], res[9], res[17], res[25]
 
 
 

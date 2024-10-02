@@ -262,6 +262,7 @@ Actor that is able to store a state to keep needed data for proper display
   fieldKeyboardStruct::KeyboardStruct = KeyboardStruct()
   displayMode::DisplayMode = SingleImage
   imagePosition::Int64 = 1
+  switchIndex::Int = 1
 end
 
 """

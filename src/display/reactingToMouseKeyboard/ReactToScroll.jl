@@ -34,7 +34,9 @@ in response to it it sets new screen int variable and changes displayed screen
 toBeSavedForBack - just marks weather we wat to save the info how to undo latest action
  - false if we invoke it from undoing
 """
-function reactToScroll(scrollNumb::Int64, mainState::StateDataFields, toBeSavedForBack::Bool=true)
+function reactToScroll(scrollNumb::Int64, mainStates::Vector{StateDataFields}, toBeSavedForBack::Bool=true)
+    mainState = mainStates[mainStates[1].switchIndex] #getting information from the first state
+
     current = mainState.currentDisplayedSlice
     old = current
     #when shift is pressed scrolling is 10 times faster

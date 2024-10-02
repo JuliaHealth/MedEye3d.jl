@@ -37,9 +37,9 @@ function invoked on on_next
 """
 function retrieveVoxelArray(
     activeTexture::DisplayedVoxels,
-    stateData::StateDataFields
+    stateData::Vector{StateDataFields}
 )
-
+    stateData = stateData[stateData[1].switchIndex]
     if typeof(activeTexture.activeNumb) == Int32
         activeTexture.voxelData[1][:, :, :] = stateData.onScrollData.dataToScroll[activeTexture.activeNumb].dat
     else
@@ -70,9 +70,9 @@ end
 
 function depositVoxelArray(
     modifiedData::CustomDisplayedVoxels,
-    stateData::StateDataFields
+    stateData::Vector{StateDataFields}
 )
-
+    stateData = stateDate[stateData[1].switchIndex]
     for (index, modifArray) in enumerate(modifiedData.voxelData)
         stateData.onScrollData.dataToScroll[index].dat = modifArray
     end
