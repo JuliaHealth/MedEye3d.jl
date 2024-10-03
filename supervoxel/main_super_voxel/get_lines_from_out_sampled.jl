@@ -1,5 +1,5 @@
 using HDF5
-using Statistics
+using Statistics,LinearAlgebra
 
 
 
@@ -40,7 +40,10 @@ function get_cross_section(axis_index::Int, d::Float64, triangle_arr)
         end
 
         if length(intersection_points) == 2
-            push!(cross_section_lines, intersection_points)
+            distance = norm(intersection_points[1] - intersection_points[2])
+            # if(distance>0.1 && distance<5)#TODO adapt
+                push!(cross_section_lines, intersection_points)
+            # end
         end
     end
 
@@ -57,32 +60,32 @@ function get_example_sv_to_render()
 
 
     #given axis and plane we will look for the triangles that points are less then radius times 2 from the plane
-    axis=1
-    plane_dist=10.0
+    axis=3
+    plane_dist=14.0
     radiuss = (Float32(3.5), Float32(3.5), Float32(3.5))
 
     #in order for a triangle to intersect the plane it has to have at least one point on one side of the plane and at least one point on the other side
-    bool_ind=Bool.( Bool.((tetr_dat[:, 1, axis] .< (plane_dist)).*(tetr_dat[:, 2, axis] .> (plane_dist)))
-    .|| Bool.((tetr_dat[:, 2, axis] .< (plane_dist)).*(tetr_dat[:, 3, axis] .> (plane_dist)))
-    .|| Bool.((tetr_dat[:, 3, axis] .< (plane_dist)).*(tetr_dat[:, 1, axis] .> (plane_dist)))    
-    )
+    # bool_ind=Bool.( Bool.((tetr_dat[:, 1, axis] .< (plane_dist)).*(tetr_dat[:, 2, axis] .> (plane_dist)))
+    # .|| Bool.((tetr_dat[:, 2, axis] .< (plane_dist)).*(tetr_dat[:, 3, axis] .> (plane_dist)))
+    # .|| Bool.((tetr_dat[:, 3, axis] .< (plane_dist)).*(tetr_dat[:, 1, axis] .> (plane_dist)))    
+    # )
 
     #filter out too long lines
-    bool_ind_b=Bool.( Bool.(abs.((tetr_dat[:, 1, axis]).-(tetr_dat[:, 2, axis] )).<(maximum(radiuss)*2))
-    .&& Bool.(abs.((tetr_dat[:, 2, axis] ).-(tetr_dat[:, 3, axis])).<(maximum(radiuss)*2))
-    .&& Bool.(abs.((tetr_dat[:, 3, axis] ).-(tetr_dat[:, 1, axis])).<(maximum(radiuss)*2) )   
-    )
-    #filter out too short lines
-    bool_ind_c=Bool.( Bool.(abs.((tetr_dat[:, 1, axis]).-(tetr_dat[:, 2, axis] )).>(0.01))
-    .&& Bool.(abs.((tetr_dat[:, 2, axis] ).-(tetr_dat[:, 3, axis])).>(0.0))
-    .&& Bool.(abs.((tetr_dat[:, 3, axis] ).-(tetr_dat[:, 1, axis])).>(0.0) )   
-    )
+    # bool_ind_b=Bool.( Bool.(abs.((tetr_dat[:, 1, axis]).-(tetr_dat[:, 2, axis] )).<(maximum(radiuss)*2))
+    # .&& Bool.(abs.((tetr_dat[:, 2, axis] ).-(tetr_dat[:, 3, axis])).<(maximum(radiuss)*2))
+    # .&& Bool.(abs.((tetr_dat[:, 3, axis] ).-(tetr_dat[:, 1, axis])).<(maximum(radiuss)*2) )   
+    # )
+    # #filter out too short lines
+    # bool_ind_c=Bool.( Bool.(abs.((tetr_dat[:, 1, axis]).-(tetr_dat[:, 2, axis] )).>(0.01))
+    # .&& Bool.(abs.((tetr_dat[:, 2, axis] ).-(tetr_dat[:, 3, axis])).>(0.0))
+    # .&& Bool.(abs.((tetr_dat[:, 3, axis] ).-(tetr_dat[:, 1, axis])).>(0.0) )   
+    # )
 
 
-    bool_ind=bool_ind.&&bool_ind_b.&&bool_ind_c
+    # bool_ind=bool_ind.&&bool_ind_b.&&bool_ind_c
     # #we will only consider the triangles that intersect the plane
-    relevant_triangles=tetr_dat[bool_ind,:,:]
-
+    # relevant_triangles=tetr_dat[bool_ind,:,:]
+    relevant_triangles=tetr_dat
 
     # # relevant_triangles[:,:,1]
     # relevant_triangles[50,:,:]
@@ -92,10 +95,16 @@ function get_example_sv_to_render()
 
     line_coords=get_cross_section(axis, plane_dist, relevant_triangles)
     line_coords=reduce(vcat,line_coords)
-    line_coords2d=map(el->[el[2],el[3],0.0],line_coords)
+    line_coords2d=map(el->[el[1],el[2],0.0],line_coords)#TODO adapt to changing axes
     line_coords2d=vcat(line_coords2d...)
     line_coords2d=Float32.(line_coords2d)
-    line_indices=UInt32.(collect(1:length(line_coords2d)))
+    #GETTING TO OPENGL COORDINATE system
+    line_coords2d=line_coords2d.-minimum(line_coords2d)
+    line_coords2d=line_coords2d./maximum(line_coords2d)
+    line_coords2d=line_coords2d.*2
+    line_coords2d=line_coords2d.-1
+
+    line_indices=UInt32.(collect(0:(size(line_coords2d,1)-1)))
     imm=fb["im"][Int(plane_dist),:,:]
     close(fb)
 
