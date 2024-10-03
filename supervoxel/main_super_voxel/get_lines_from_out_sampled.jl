@@ -43,10 +43,13 @@ using KernelAbstractions
                 base_index=(index-1)*2*3
                 res_arr[base_index+1]=intersection_points[1][1]#TODO adapt to changing axes
                 res_arr[base_index+2]=intersection_points[1][2]
-                res_arr[base_index+3]=1.0
+                res_arr[base_index+3]=intersection_points[1][3]
                 res_arr[base_index+4]=intersection_points[2][1]
                 res_arr[base_index+5]=intersection_points[2][2]
-                res_arr[base_index+6]=1.0
+                res_arr[base_index+6]=intersection_points[1][3]
+
+                res_arr[base_index+axis_index]=0.0
+                res_arr[base_index+axis_index*2]=0.0
 
 
             
@@ -102,29 +105,19 @@ function get_example_sv_to_render()
     dev = get_backend(res)
     get_cross_section(dev, 128)(axis, plane_dist,relevant_triangles,res, ndrange=(size(relevant_triangles,1)))
     KernelAbstractions.synchronize(dev)
-    line_coords2d=res
-    # line_coords2d=reshape(relevant_triangles[:,:,1:2],(size(relevant_triangles,1)*size(relevant_triangles,2)*2))
 
-
-
-
-    # line_coords=get_cross_section(axis, plane_dist, relevant_triangles)
-    # line_coords=reduce(vcat,line_coords)
-    # line_coords2d=map(el->[el[1],el[2],0.0],line_coords)
-    # line_coords2d=vcat(line_coords2d...)
-    # line_coords2d=Float32.(line_coords2d)
     #GETTING TO OPENGL COORDINATE system
-    line_coords2d=line_coords2d.-minimum(line_coords2d)
-    line_coords2d=line_coords2d./maximum(line_coords2d)
-    line_coords2d=line_coords2d.*2
-    line_coords2d=line_coords2d.-1
+    res=res.-minimum(res)
+    res=res./maximum(res)
+    res=res.*2
+    res=res.-1
     
 
     line_indices=UInt32.(collect(0:(size(relevant_triangles,1)*4)))
     imm=fb["im"][Int(plane_dist),:,:]
     close(fb)
 
-    return imm, line_coords2d, line_indices
+    return imm, res, line_indices
 end
 
 
