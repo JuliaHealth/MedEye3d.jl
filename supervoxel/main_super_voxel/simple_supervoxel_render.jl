@@ -1,6 +1,9 @@
 using ModernGL
 using GLFW,HDF5
 using GeometryTypes
+using Revise
+includet("/media/jm/hddData/projects/MedEye3d.jl/supervoxel/main_super_voxel/get_lines_from_out_sampled.jl")
+
 function initializeWindow(windowWidth::Int, windowHeight::Int)
     GLFW.Init()
     window = GLFW.CreateWindow(windowWidth, windowHeight, "Segmentation Visualization")
@@ -29,19 +32,24 @@ rectangle_indices = UInt32[
     1, 2, 3   # Second triangle
 ]
 
+imm, line_vertices, line_indices=get_example_sv_to_render()
+
+
+
+line_indices
 # Vertex data for lines
-line_vertices = Float32[
-    0.1, 0.0, 0.0,  # top right
-    -0.1, 0.0, 0.0,  # bottom right
-    0.0, -0.1, 0.0,  # bottom left
-    0.0, 0.1, 0.0   # top left
-]
+# line_vertices = Float32[
+#     0.1, 0.0, 0.0,  # top right
+#     -0.1, 0.0, 0.0,  # bottom right
+#     0.0, -0.1, 0.0,  # bottom left
+#     0.0, 0.1, 0.0   # top left
+# ]
 
 # Indices for drawing lines
-line_indices = UInt32[
-    0, 1,  # Line from top right to bottom right
-    2, 3   # Line from bottom left to top left
-]
+# line_indices = UInt32[
+#     0, 1,  # Line from top right to bottom right
+#     2, 3   # Line from bottom left to top left
+# ]
 
 # Vertex shader source code
 vertex_shader_source = """
@@ -70,9 +78,9 @@ uniform sampler2D CTIm;
 uniform vec4 CTImColorMask = vec4(1.0, 1.0, 1.0, 1.0); // controlling colors
 uniform int CTImisVisible = 1; // controlling visibility
 
-uniform float CTImminValue = 0.0; // minimum possible value set in configuration
-uniform float CTImmaxValue = 100.0; // maximum possible value set in configuration
-uniform float CTImValueRange = 100.0; // range of possible values calculated from above
+uniform float CTImminValue = -100.0; // minimum possible value set in configuration
+uniform float CTImmaxValue = 300.0; // maximum possible value set in configuration
+uniform float CTImValueRange = 400.0; // range of possible values calculated from above
 uniform float CTImmaskContribution = 1.0; // controls contribution of mask to output color
 
 float changeClip(float min, float max, float value, float color, float range) {
@@ -211,10 +219,11 @@ end
 
 # Uniforms
 # Data from HDF5
-fid = h5open("/media/jm/hddData/projects/MedEye3d.jl/docs/src/data/ct_pixels.h5", "r")
-dat = Float32.(read(fid, "data")[:,:,20])
+# fid = h5open("/media/jm/hddData/projects/MedEye3d.jl/docs/src/data/ct_pixels.h5", "r")
+dat = Float32.(imm)
+
 # dat=rand(Float32,size(dat)[1],size(dat)[2])
-close(fid)
+# close(fid)
 
 textUreId = createTexture(Float32, Int32(size(dat)[1]), Int32(size(dat)[2]), GL_R32F, GL_FLOAT)
 
@@ -244,7 +253,7 @@ function render()
     # Render the lines
     glUseProgram(line_shader_program)
     glBindVertexArray(line_vao[])
-    glDrawElements(GL_LINES, 4, GL_UNSIGNED_INT, C_NULL)
+    glDrawElements(GL_LINES, Int(round(length(line_indices)  )), GL_UNSIGNED_INT, C_NULL)
     glBindVertexArray(0)
 end
 
@@ -253,24 +262,3 @@ render()
 GLFW.SwapBuffers(window)
 
 
-
-
-# You are opengl expert . Write an algorithm that would be able to get a crossection of the set of triangle with a given plane. 
-# The plane will be perpendicular to either x,y or z axis and will be in distance d from the center. hence the arguments to the functions would be 
-# "plane_axis" (x y or z) ; d (distance of the plane to the center of coordinate system) ; triangle_arr (tensor where first dimension is triangle index and seconf is x,y,z coordinate of a given point) 
-# In algorithm you need to first verify weather triangle and plane intersect; 
-# if yes define the coordinates of the line sections that are created when the intersecting plane intersects the triangle .
-#  You will return those coordinates as a result in a format as in example below 
-# """vertices = Float32[
-#     0.5, 0.5, 0.1,  # top right
-#     0.5, -0.5, 0.1,  # bottom right
-#     -0.5, -0.5, 0.1,  # bottom left
-#     -0.5, 0.5, 0.1   # top left
-# ]
-
-# # Indices for drawing lines
-# indices = UInt32[
-#     0, 1,  # Line from top right to bottom right
-#     2, 3   # Line from bottom left to top left
-# ]"""
-# In this example e have 2 lines first is using point 0 and 1 so starts at "0.5, 0.5, 0.1" and end at "0.5, -0.5, 0.1" and second starts at "-0.5, -0.5, 0.1" and end at "-0.5, 0.5, 0.1" in indicies list you can reuse the points if two line sections share the same point .
