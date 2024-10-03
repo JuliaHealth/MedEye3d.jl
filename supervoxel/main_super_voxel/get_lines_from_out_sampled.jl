@@ -48,7 +48,7 @@ function get_cross_section(axis_index::Int, d::Float64, triangle_arr)
 end
 
 
-# function get_example_sv_to_render()
+function get_example_sv_to_render()
     h5_path_b = "/media/jm/hddData/projects/MedEye3d.jl/docs/src/data/locc.h5"
     fb = h5open(h5_path_b, "r")
     #we want only external triangles so we ignore the sv center
@@ -62,36 +62,27 @@ end
     radiuss = (Float32(3.5), Float32(3.5), Float32(3.5))
 
     #in order for a triangle to intersect the plane it has to have at least one point on one side of the plane and at least one point on the other side
-    # bool_ind=Bool.( Bool.((tetr_dat[:, 1, axis] .< (plane_dist)).*(tetr_dat[:, 2, axis] .> (plane_dist)))
-    # .|| Bool.((tetr_dat[:, 2, axis] .< (plane_dist)).*(tetr_dat[:, 3, axis] .> (plane_dist)))
-    # .|| Bool.((tetr_dat[:, 3, axis] .< (plane_dist)).*(tetr_dat[:, 1, axis] .> (plane_dist)))    
-    # )
+    bool_ind=Bool.( Bool.((tetr_dat[:, 1, axis] .< (plane_dist)).*(tetr_dat[:, 2, axis] .> (plane_dist)))
+    .|| Bool.((tetr_dat[:, 2, axis] .< (plane_dist)).*(tetr_dat[:, 3, axis] .> (plane_dist)))
+    .|| Bool.((tetr_dat[:, 3, axis] .< (plane_dist)).*(tetr_dat[:, 1, axis] .> (plane_dist)))    
+    )
 
-    bool_ind1=Bool.((tetr_dat[:, 1, axis] .< (plane_dist)).*(tetr_dat[:, 2, axis] .> (plane_dist)))
-    bool_ind2= Bool.((tetr_dat[:, 2, axis] .< (plane_dist)).*(tetr_dat[:, 3, axis] .> (plane_dist)))
-    bool_ind3= Bool.((tetr_dat[:, 3, axis] .< (plane_dist)).*(tetr_dat[:, 1, axis] .> (plane_dist)))    
-    relevant_lines_1=tetr_dat[bool_ind1,1:2,:]
-    relevant_lines_2=tetr_dat[bool_ind2,2:3,:]
-    relevant_lines_3=tetr_dat[bool_ind2,[true,false,true],:]
-    relevant_lines=vcat(relevant_lines_1,relevant_lines_2,relevant_lines_3)
+    #filter out too long lines
+    bool_ind_b=Bool.( Bool.(abs.((tetr_dat[:, 1, axis]).-(tetr_dat[:, 2, axis] )).<(maximum(radiuss)*2))
+    .&& Bool.(abs.((tetr_dat[:, 2, axis] ).-(tetr_dat[:, 3, axis])).<(maximum(radiuss)*2))
+    .&& Bool.(abs.((tetr_dat[:, 3, axis] ).-(tetr_dat[:, 1, axis])).<(maximum(radiuss)*2) )   
+    )
+    #filter out too short lines
+    bool_ind_c=Bool.( Bool.(abs.((tetr_dat[:, 1, axis]).-(tetr_dat[:, 2, axis] )).>(0.01))
+    .&& Bool.(abs.((tetr_dat[:, 2, axis] ).-(tetr_dat[:, 3, axis])).>(0.0))
+    .&& Bool.(abs.((tetr_dat[:, 3, axis] ).-(tetr_dat[:, 1, axis])).>(0.0) )   
+    )
 
-    #filtering out all pathologically big lines #TODO investigate why they are there
-    relevant_lines=relevant_lines[Bool.(abs.((relevant_lines[:, 1, axis]).-(relevant_lines[:, 2, axis] )).<(maximum(radiuss)*2)),:,:]
-    #filtering out all pathologically short lines
-    relevant_lines=relevant_lines[Bool.(abs.((relevant_lines[:, 1, axis]).-(relevant_lines[:, 2, axis] )).>(0.01)),:,:]
 
-    # line_length=abs.((relevant_lines[:, 1, axis]).-(relevant_lines[:, 2, axis] ))
-    # minimum(line_length)
-    # mean(line_length)
-
-    # bool_ind_b=Bool.( Bool.(abs.((tetr_dat[:, 1, axis]).-(tetr_dat[:, 2, axis] )).<(maximum(radiuss)*2))
-    # .&& Bool.(abs.((tetr_dat[:, 2, axis] ).-(tetr_dat[:, 3, axis])).<(maximum(radiuss)*2))
-    # .&& Bool.(abs.((tetr_dat[:, 3, axis] ).-(tetr_dat[:, 1, axis])).<(maximum(radiuss)*2) )   
-    # )
-    
-    # bool_ind=bool_ind.&&bool_ind_b
+    bool_ind=bool_ind.&&bool_ind_b.&&bool_ind_c
     # #we will only consider the triangles that intersect the plane
-    # relevant_triangles=tetr_dat[bool_ind,:,:]
+    relevant_triangles=tetr_dat[bool_ind,:,:]
+
 
     # # relevant_triangles[:,:,1]
     # relevant_triangles[50,:,:]
@@ -108,17 +99,17 @@ end
     imm=fb["im"][Int(plane_dist),:,:]
     close(fb)
 
-    # return imm, line_coords2d, line_indices
-# end
+    return imm, line_coords2d, line_indices
+end
 
 
 
-You are Geometry and Julia programming expert, given a tensor of line sections where first dimension is line section index 
-second is point index in line index and third x,y,z coordinate of a given point
-, write an algorithm that would be able to get a point of a crossection of the set of lines with a given plane
-. The plane will be perpendicular to either x,y or z axis and will be in distance d from the center
-. hence the arguments to the functions would be "axis" (x y or z) ; 
-d (distance of the plane to the center of coordinate system) ; line_arr (tensor where first dimension is line index second point index and third is x,y,z coordinate of a given point)
+# You are Geometry and Julia programming expert, given a tensor of line sections where first dimension is line section index 
+# second is point index in line index and third x,y,z coordinate of a given point
+# , write an algorithm that would be able to get a point of a crossection of the set of lines with a given plane
+# . The plane will be perpendicular to either x,y or z axis and will be in distance d from the center
+# . hence the arguments to the functions would be "axis" (x y or z) ; 
+# d (distance of the plane to the center of coordinate system) ; line_arr (tensor where first dimension is line index second point index and third is x,y,z coordinate of a given point)
 
 
 
