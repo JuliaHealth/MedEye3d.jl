@@ -40,16 +40,32 @@ using KernelAbstractions
         # if length(intersection_points) == 2
             # distance = norm(intersection_points[1] - intersection_points[2])
                 # push!(cross_section_lines, intersection_points)
-                base_index=(index-1)*2*3
-                res_arr[base_index+1]=intersection_points[1][1]#TODO adapt to changing axes
-                res_arr[base_index+2]=intersection_points[1][2]
-                res_arr[base_index+3]=intersection_points[1][3]
-                res_arr[base_index+4]=intersection_points[2][1]
-                res_arr[base_index+5]=intersection_points[2][2]
-                res_arr[base_index+6]=intersection_points[1][3]
 
-                res_arr[base_index+axis_index]=0.0
-                res_arr[base_index+axis_index*2]=0.0
+                if(axis_index==1)
+                    ind1=2
+                    ind2=3
+                end
+
+                if(axis_index==2)
+                    ind1=1
+                    ind2=3
+                end
+                if(axis_index==3)
+                    ind1=1
+                    ind2=2
+                end
+
+
+                base_index=(index-1)*2*3
+                res_arr[base_index+1]=intersection_points[1][ind1]
+                res_arr[base_index+2]=intersection_points[1][ind2]
+                res_arr[base_index+3]=1.0
+                res_arr[base_index+4]=intersection_points[2][ind1]
+                res_arr[base_index+5]=intersection_points[2][ind2]
+                res_arr[base_index+6]=1.0
+
+                # res_arr[base_index+axis_index]=0.0
+                # res_arr[base_index+axis_index+3]=0.0
 
 
             
@@ -70,9 +86,8 @@ function get_example_sv_to_render()
 
     #given axis and plane we will look for the triangles that points are less then radius times 2 from the plane
     axis=3
-    plane_dist=14.0
-    radiuss = (Float32(3.5), Float32(3.5), Float32(3.5))
-
+    plane_dist=41.0
+    radiuss = (Float32(4.5), Float32(4.5), Float32(4.5))
     #in order for a triangle to intersect the plane it has to have at least one point on one side of the plane and at least one point on the other side
     bool_ind=Bool.( Bool.((tetr_dat[:, 1, axis] .< (plane_dist)).*(tetr_dat[:, 2, axis] .> (plane_dist)))
     .|| Bool.((tetr_dat[:, 2, axis] .< (plane_dist)).*(tetr_dat[:, 3, axis] .> (plane_dist)))
@@ -113,8 +128,17 @@ function get_example_sv_to_render()
     res=res.-1
     
 
-    line_indices=UInt32.(collect(0:(size(relevant_triangles,1)*4)))
-    imm=fb["im"][Int(plane_dist),:,:]
+    line_indices=UInt32.(collect(0:(size(relevant_triangles,1)*16)))
+    # line_indices=UInt32.(collect(0:(size(relevant_triangles,1)*4)))
+    if(axis==1)
+        imm=fb["im"][Int(plane_dist),:,:]
+    end
+    if(axis==2)
+        imm=fb["im"][:,Int(plane_dist),:]
+    end
+    if(axis==3)
+        imm=fb["im"][:,:,Int(plane_dist)]
+    end
     close(fb)
 
     return imm, res, line_indices

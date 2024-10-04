@@ -1,5 +1,5 @@
 using ModernGL
-using GLFW,HDF5
+using GLFW, HDF5
 using GeometryTypes
 using Revise
 includet("/media/jm/hddData/projects/MedEye3d.jl/supervoxel/main_super_voxel/get_lines_from_out_sampled.jl")
@@ -32,7 +32,7 @@ rectangle_indices = UInt32[
     1, 2, 3   # Second triangle
 ]
 
-imm, line_vertices, line_indices=get_example_sv_to_render()
+imm, line_vertices, line_indices = get_example_sv_to_render()
 
 
 
@@ -137,7 +137,7 @@ vertex_shader = createShader(vertex_shader_source, GL_VERTEX_SHADER)
 fragment_shader_main, rectangle_shader_program = createAndInitShaderProgram(vertex_shader, fragment_shader_source)
 n = "CTIm"
 samplerName = n
-samplerRef=glGetUniformLocation(rectangle_shader_program,samplerName)
+samplerRef = glGetUniformLocation(rectangle_shader_program, samplerName)
 glUniform1i(samplerRef, 0)
 
 
@@ -253,7 +253,7 @@ function render()
     # Render the lines
     glUseProgram(line_shader_program)
     glBindVertexArray(line_vao[])
-    glDrawElements(GL_LINES, Int(round(length(line_indices)/2 )), GL_UNSIGNED_INT, C_NULL)
+    glDrawElements(GL_LINES, Int(round(length(line_indices) / 2)), GL_UNSIGNED_INT, C_NULL)
     # glDrawElements(GL_LINES, 50, GL_UNSIGNED_INT, C_NULL)
     glBindVertexArray(0)
 end
