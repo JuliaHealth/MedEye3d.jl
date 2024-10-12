@@ -70,7 +70,7 @@ for exp in 1:7
     dummy_hp=Dict("lr"=>rand(0.0001:0.0001:0.1),"batch_size"=>rand(1:10:100),"epochs"=>rand(1:10:100))
     # dummy_metrics=Dict("accuracy"=>rand(0.1:0.1:0.9),"loss"=>rand(0.1:0.1:0.9))
     write_hparams!(tf, dummy_hp, ["accuracy"])
-    for step in 1:10
+    for step in 1:100
     # Vertex data for lines
         fl=rand_float_between_neg1_and_1()
         line_vertices = Float32[
