@@ -48,14 +48,12 @@ include(joinpath("display", "reactingToMouseKeyboard", "ReactOnMouseClickAndDrag
 
 include(joinpath("display", "reactingToMouseKeyboard", "reactToKeyboard", "KeyboardMouseHelper.jl"))
 
-# include(joinpath("display", "reactingToMouseKeyboard", "reactToKeyboard", "MaskDiffrence.jl"))
-include(joinpath("display", "reactingToMouseKeyboard", "reactToKeyboard", "KeyboardVisibility.jl"))
-include(joinpath("display", "reactingToMouseKeyboard", "reactToKeyboard", "OtherKeyboardActions.jl"))
-include(joinpath("display", "reactingToMouseKeyboard", "reactToKeyboard", "WindowControll.jl"))
-include(joinpath("display", "reactingToMouseKeyboard", "reactToKeyboard", "ChangePlane.jl"))
-include(joinpath("display", "reactingToMouseKeyboard", "reactToKeyboard", "ReactToKeyboard.jl"))
-
-
+include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","MaskDiffrence.jl") )
+include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","KeyboardVisibility.jl") )
+include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","OtherKeyboardActions.jl") )
+include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","WindowControll.jl") )
+include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","ChangePlane.jl") )
+include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","reactToKeyboard.jl") )
 
 include(joinpath("display", "reactingToMouseKeyboard", "ReactingToInput.jl"))
 include(joinpath("higherAbstractions", "DisplayDataManag.jl"))
