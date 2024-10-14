@@ -22,11 +22,12 @@ function getDisplayedData(
     end
     put!(medEyeStruct.channel, displayedTextureInfo)
     totalSleep = 0
-
+    @info "Program going in sleep"
     while ((mean(displayedTextureInfo.voxelData[1]) == -1) || totalSleep > 5.0)
         sleep(0.1)
         totalSleep += 0.0
     end
+    @info "Program out of sleep"
     return typeof(textNumb) == Int32 ? displayedTextureInfo.voxelData[1] : displayedTextureInfo.voxelData
 end
 
@@ -34,12 +35,15 @@ end
 
 """
 function invoked on on_next
+Since the voxel array modification feature is only provided in single image display,
+the switchIndex attribute of the stateData will be defaulted to 1
 """
 function retrieveVoxelArray(
     activeTexture::DisplayedVoxels,
     stateData::Vector{StateDataFields}
 )
     stateData = stateData[stateData[1].switchIndex]
+
     if typeof(activeTexture.activeNumb) == Int32
         activeTexture.voxelData[1][:, :, :] = stateData.onScrollData.dataToScroll[activeTexture.activeNumb].dat
     else
@@ -67,12 +71,16 @@ function setDisplayedData(
 end
 
 
-
+"""
+Function for the deposition of the modified voxels on the screen.
+Since the voxel array modification feature is only provided in single image display,
+the switchIndex attribute of the stateData will be defaulted to 1
+"""
 function depositVoxelArray(
     modifiedData::CustomDisplayedVoxels,
     stateData::Vector{StateDataFields}
 )
-    stateData = stateDate[stateData[1].switchIndex]
+    stateData = stateData[stateData[1].switchIndex]
     for (index, modifArray) in enumerate(modifiedData.voxelData)
         stateData.onScrollData.dataToScroll[index].dat = modifArray
     end

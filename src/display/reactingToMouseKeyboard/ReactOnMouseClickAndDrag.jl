@@ -13,7 +13,7 @@ so we modify the data that is the basis of the mouse interaction mask  and we pa
 module ReactOnMouseClickAndDrag
 using Logging, Parameters, Setfield, GLFW, ModernGL, Dates, Parameters, Logging, Base.Threads
 using ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils
-using ..DataStructs, ..StructsManag
+using ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForLine
 import Logging, Base.Threads
 export registerMouseClickFunctions
 export reactToMouseDrag
@@ -137,7 +137,7 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, stateObjects::Vect
 
 
 
-    updateImagesDisplayed(singleSliceDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, stateObject.calcDimsStruct, stateObject.valueForMasToSet)
+    updateImagesDisplayed(singleSliceDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, stateObject.calcDimsStruct, stateObject.valueForMasToSet, stateObject.crosshairFields, stateObject.mainRectFields)
 end#react_to_draw
 
 """
@@ -154,7 +154,9 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
     #we save data about right click position in order to change the slicing plane accordingly
     textBeginning, midPoint, imageRange = openGlSystemVals(mainState.calcDimsStruct.fractionOfMainIm, mainState.calcDimsStruct.windowWidth)
     cursorXPosOpenGl = (mouseCoords[1][1] / mainState.calcDimsStruct.windowWidth) * 2 - 1
+    cursorYPosOpenGl = (mouseCoords[1][2] / mainState.calcDimsStruct.windowHeight) * 2 - 1
     # @info "x " cursorXPosOpenGl
+    # @info "y " cursorYPosOpenGl
     # @info "mid" midPoint
     if length(mainStates) > 1 #only in multiImage mode
         if cursorXPosOpenGl > midPoint
@@ -166,7 +168,8 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
         end
     end
 
-
+    #Dynamically moving crosshair on the screen based on mouse position
+    ShadersAndVerticiesForLine.updateCrosshairPosition(cursorXPosOpenGl, cursorYPosOpenGl, mainState.crosshairFields, mainState.mainRectFields)
 
     # if (mousestr.isLeftButtonDown)
     #     mappedCoords = translateMouseToTexture(Int32(1), mouseCoords, mainState.calcDimsStruct)

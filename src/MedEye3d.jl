@@ -34,6 +34,7 @@ include(joinpath("display", "GLFW", "shadersEtc", "CustomFragShad.jl"))
 include(joinpath("display", "GLFW", "DispUtils", "OpenGLDisplayUtils.jl"))
 include(joinpath("display", "GLFW", "shadersEtc", "ShadersAndVerticies.jl"))
 include(joinpath("display", "GLFW", "shadersEtc", "ShadersAndVerticiesForText.jl"))
+include(joinpath("display", "GLFW", "shadersEtc", "ShadersAndVerticiesForLine.jl"))
 include(joinpath("display", "GLFW", "shadersEtc", "Uniforms.jl"))
 
 include(joinpath("display", "GLFW", "textRender", "DisplayWords.jl"))

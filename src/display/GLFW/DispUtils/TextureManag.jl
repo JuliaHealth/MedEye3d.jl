@@ -3,9 +3,12 @@ stores functions needed to create bind and update OpenGl textues
 """
 module TextureManag
 using Base: Float16
+using GLFW
 using ModernGL, Base.Threads, Logging, Setfield
-using ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..CustomFragShad, ..DataStructs, ..DisplayWords
+using ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..CustomFragShad, ..DataStructs, ..DisplayWords, ..ShadersAndVerticiesForLine
 export activateTextures, addTextToTexture, initializeTextures, createTexture, getProperGL_TEXTURE, updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
+
+
 
 
 """
@@ -139,17 +142,39 @@ function getProperGL_TEXTURE(index::Int)::UInt32
 end#getProperGL_TEXTURE
 
 """
+Defines the switching of vao buffers for the rendering of
+dynamic crosshair
+"""
+function crosshairDisplay(crosshair::GlShaderAndBufferFields, mainRect::GlShaderAndBufferFields, forDisplayConstants::forDisplayObjects)
+    #render onto the screen
+    # OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL) #taken out from the basicRender
+    ############################################
+    glBindVertexArray(0) #unbinding the vao for main rect
+    glUseProgram(crosshair.shaderProgram)
+    glBindVertexArray(crosshair.vao[]) #binding the vao for crosshair
+    glDrawElements(GL_LINES, 4, GL_UNSIGNED_INT, C_NULL)
+    glBindVertexArray(0) #unbinding the vao for crosshair
+    glBindVertexArray(mainRect.vao[])
+    ############################################
+
+    GLFW.SwapBuffers(forDisplayConstants.window) #from basic render function
+
+end
+
+
+"""
 coordinating updating all of the images, masks...
 singleSliceDat - holds data we want to use for update
 forDisplayObjects - stores all needed constants that holds reference to GLFW and OpenGL
 """
-function updateImagesDisplayed(singleSliceDat::SingleSliceDat, forDisplayConstants::forDisplayObjects, wordsDispObj::ForWordsDispStruct, calcDimStruct::CalcDimsStruct, valueForMaskToSett::valueForMasToSetStruct)
+function updateImagesDisplayed(singleSliceDat::SingleSliceDat, forDisplayConstants::forDisplayObjects, wordsDispObj::ForWordsDispStruct, calcDimStruct::CalcDimsStruct, valueForMaskToSett::valueForMasToSetStruct, crosshair::GlShaderAndBufferFields, mainRect::GlShaderAndBufferFields)
 
 
-    updateImagesDisplayed_inner(singleSliceDat, forDisplayConstants, wordsDispObj, calcDimStruct, valueForMaskToSett)
+    updateImagesDisplayed_inner(singleSliceDat, forDisplayConstants, wordsDispObj, calcDimStruct, valueForMaskToSett, crosshair, mainRect)
 end
 
-function updateImagesDisplayed_inner(singleSliceDat::SingleSliceDat, forDisplayConstants::forDisplayObjects, wordsDispObj::ForWordsDispStruct, calcDimStruct::CalcDimsStruct, valueForMaskToSett::valueForMasToSetStruct)
+function updateImagesDisplayed_inner(singleSliceDat::SingleSliceDat, forDisplayConstants::forDisplayObjects, wordsDispObj::ForWordsDispStruct, calcDimStruct::CalcDimsStruct, valueForMaskToSett::valueForMasToSetStruct, crosshair::GlShaderAndBufferFields, mainRect::GlShaderAndBufferFields)
 
     modulelistOfTextSpecs = forDisplayConstants.listOfTextSpecifications
 
@@ -164,8 +189,6 @@ function updateImagesDisplayed_inner(singleSliceDat::SingleSliceDat, forDisplayC
     activateForTextDisp(
         wordsDispObj.shader_program_words, wordsDispObj.vbo_words, calcDimStruct)
 
-
-
     matr = addTextToTexture(wordsDispObj, [singleSliceDat.textToDisp..., valueForMaskToSett.text], calcDimStruct)
 
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
@@ -175,8 +198,11 @@ function updateImagesDisplayed_inner(singleSliceDat::SingleSliceDat, forDisplayC
     reactivateMainObj(forDisplayConstants.shader_program, forDisplayConstants.vbo, calcDimStruct)
 
 
-    #render onto the screen
-    OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
+    # if in singleImage
+    # OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
+    # else
+    crosshairDisplay(crosshair, mainRect, forDisplayConstants)
+
     glFinish()
 end
 

@@ -6,8 +6,8 @@ module SegmentationDisplay
 export loadRegisteredImages, displayImage, coordinateDisplay, passDataForScrolling
 
 using ColorTypes, MedImages, ModernGL, GLFW, Dictionaries, Logging, Setfield, FreeTypeAbstraction, Statistics, Observables
-using ..PrepareWindow, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords
-using ..ReactingToInput, ..ReactToScroll, ..ShadersAndVerticiesForText, ..DisplayWords, ..DataStructs, ..StructsManag
+using ..PrepareWindow, ..PrepareWindowHelpers, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords
+using ..ReactingToInput, ..ReactToScroll, ..ShadersAndVerticiesForText, ..ShadersAndVerticiesForLine, ..DisplayWords, ..DataStructs, ..StructsManag
 using ..ReactOnKeyboard, ..ReactOnMouseClickAndDrag, ..DisplayDataManag
 
 #  do not copy it into the consumer function
@@ -187,7 +187,9 @@ function coordinateDisplay(
     #creating window and event listening loop
 
     #we can pass the first calcDimStruct here, since we need to get the window height and width which is same across all the calcDims
-    window, vertex_shader, ebo, fragment_shader_words, vbo_words, shader_program_words, gslsStr = PrepareWindow.displayAll(calcDimStructs[1])
+    window, vertex_shader, vao, ebo, fragment_shader_words, vbo_words, shader_program_words, gslsStr = PrepareWindow.displayAll(calcDimStructs[1])
+
+
 
     fragmentShaderVector = []
     shaderProgramVector = []
@@ -205,6 +207,55 @@ function coordinateDisplay(
         push!(listOfTextSpecsMapped, assignUniformsAndTypesToMasks(typeof(listOfTextSpecs) == Vector{TextureSpec{Float32}} ? listOfTextSpecs : listOfTextSpecs[index], shaderProgramVector[index]))
         # @info "look here" index calcDimStruct.mainImageQuadVert
     end
+
+
+
+    """
+    begin crosshair line rendering statements
+
+    Crosshair constraints :
+    1. Only in multi-image display mode
+    2. Share the same crosshair with both the states
+    3. Reveal slices in the same spatial area as the image from our mouse cursor.
+    4. Reduce the size of the crosshair
+    5. Make sure the correct vbo in multi-image are modified , initialize them properly in the relevanat states
+    """
+    glBindVertexArray(0) #unbinding vao for the main rect
+    fragment_shader_line, shader_program_line = ShadersAndVerticiesForLine.createAndInitLineShaderProgram(vertex_shader)
+    vao_line = PrepareWindowHelpers.createVertexBuffer()
+    vbo_line = PrepareWindowHelpers.createCrosshairDAtaBuffer(ShadersAndVerticiesForLine.line_vertices)
+    ebo_line = PrepareWindowHelpers.createElementBuffer(ShadersAndVerticiesForLine.line_indices)
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(Float32), Ptr{Nothing}(0))
+    glEnableVertexAttribArray(0)
+
+    glBindVertexArray(0) #unbinding vao for the crosshair
+    glBindVertexArray(vao[]) #binding vao for the main rect
+
+    crosshair = GlShaderAndBufferFields(
+        shaderProgram=shader_program_line,
+        fragmentShader=fragment_shader_line,
+        vao=vao_line,
+        vbo=vbo_line,
+        ebo=ebo_line
+    )
+
+    mainRect = GlShaderAndBufferFields(
+        vao=vao,
+        vbo=vboVector[1],
+        ebo=ebo
+    )
+    """
+    end crosshair
+    """
+
+
+
+
+
+
+
+
 
     GLFW.MakeContextCurrent(window)
     # than we set those ..Uniforms, open gl types and using data from arguments  to fill texture specifications
@@ -255,13 +306,33 @@ function coordinateDisplay(
 
     #passing for text display object
     #hardcoding text for now for the left image display
-    forTextDispStruct = prepareForDispStruct(length(initializedTextures[1]), fragment_shader_words, vbo_words, shader_program_words, window, textTexturewidthh, textTextureheightt, forDispObjs[1])
+    # forTextDispStruct = prepareForDispStruct(length(initializedTextures[1]), fragment_shader_words, vbo_words, shader_program_words, window, textTexturewidthh, textTextureheightt, forDispObjs[1])
+    forTextDispStructs::Vector{ForWordsDispStruct} = Vector{ForWordsDispStruct}()
+    foreach(enumerate(initializedTextures)) do (index, initTextureVector)
+        push!(forTextDispStructs, prepareForDispStruct(
+            length(initTextureVector),
+            fragment_shader_words,
+            vbo_words,
+            shader_program_words,
+            window,
+            textTexturewidthh,
+            textTextureheightt,
+            forDispObjs[index]
+        ))
+    end
+
+
+    """
+    Stuff added for crosshair line rendering
+    """
+
+
 
 
     # put!(mainMedEye3dInstance.channel, forTextDispStruct)
     function consumer(mainChannel::Base.Channel{Any})
         shouldStop = [false]
-        stateInstances::Vector{StateDataFields} = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index) for (index, _) in enumerate(initializedTextures)]
+        stateInstances::Vector{StateDataFields} = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, crosshairFields=crosshair, mainRectFields=mainRect) for (index, _) in enumerate(initializedTextures)]
         #Setting second state information to be 0, because we need to access information from the first state only
         if length(stateInstances) > 1 && displayMode == MultiImage
             stateInstances[2].switchIndex = 0
@@ -292,10 +363,6 @@ function coordinateDisplay(
         end#
         GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())
 
-        """
-        pass state which is currrently active, from our mouse coordinates, selecting the active state and passing to on_next!
-        """
-
 
         while !shouldStop[1]
             channelData = take!(mainChannel)
@@ -312,21 +379,22 @@ function coordinateDisplay(
             elseif typeof(channelData) == CalcDimsStruct || typeof(channelData) == forDisplayObjects || typeof(channelData) == FullScrollableDat
                 stateInstances[1].switchIndex = channelData.imagePos > 1 ? 2 : 1  #Setting the current State to modify to be for the left or the right image
 
-            elseif typeof(channelData) == ForWordsDispStruct && displayMode == MultiImage
-                if stateInstances[1].switchIndex == 1
-                    stateInstances[1].switchIndex = 2
-                    on_next!(stateInstances, channelData)
-                elseif stateInstances[1].switchIndex == 2
-                    stateInstances[1].switchIndex == 1
-                    on_next!(stateInstances, channelData)
-                end
+                # elseif typeof(channelData) == ForWordsDispStruct && displayMode == MultiImage
+                #     if stateInstances[1].switchIndex == 1
+                #         stateInstances[1].switchIndex = 2
+                #         on_next!(stateInstances, channelData)
+                #     elseif stateInstances[1].switchIndex == 2
+                #         stateInstances[1].switchIndex == 1
+                #         on_next!(stateInstances, channelData)
+                #     end
             end
+
             on_next!(stateInstances, channelData)
 
         end
     end #end of consumer
 
-    mainMedEye3dInstance = MainMedEye3d(channel=Base.Channel{Any}(consumer, 1000; spawn=false, threadpool=:interactive), textDispObj=forTextDispStruct, displayMode=displayMode)
+    mainMedEye3dInstance = MainMedEye3d(channel=Base.Channel{Any}(consumer, 1000; spawn=false, threadpool=:interactive), textDispObj=forTextDispStructs[1], displayMode=displayMode)
     # mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(1000))
 
     """
@@ -348,7 +416,7 @@ function coordinateDisplay(
 
 
 
-    put!(mainMedEye3dInstance.channel, forTextDispStruct)
+    put!(mainMedEye3dInstance.channel, forTextDispStructs[1])
 
 
 
@@ -435,7 +503,7 @@ function loadRegisteredImages(
 
         for medImageDataInstance in medImageDataInstances
             #permuting the voxelData to some default orientation, such that the image is not inverted or sideways
-            medImageDataInstance.voxel_data = permutedims(medImageDataInstance.voxel_data, (1, 2, 3)) #previously in the test script the default was (3, 2, 1)
+            medImageDataInstance.voxel_data = permutedims(medImageDataInstance.voxel_data, (3, 2, 1)) #previously in the test script the default was (3, 2, 1)
             sizeInfo = size(medImageDataInstance.voxel_data)
             for outerNum in 1:sizeInfo[1]
                 for innerNum in 1:sizeInfo[3]
@@ -449,7 +517,7 @@ function loadRegisteredImages(
     elseif typeof(medImageDataInstances) == Vector{Vector{MedImages.MedImage}}
         for medImageInnerVector in medImageDataInstances
             for medImageDataInstance in medImageInnerVector
-                medImageDataInstance.voxel_data = permutedims(medImageDataInstance.voxel_data, (1, 2, 3)) #previously in the test script the default was (3, 2, 1)
+                medImageDataInstance.voxel_data = permutedims(medImageDataInstance.voxel_data, (3, 2, 1)) #previously in the test script the default was (3, 2, 1)
                 sizeInfo = size(medImageDataInstance.voxel_data)
                 for outerNum in 1:sizeInfo[1]
                     for innerNum in 1:sizeInfo[3]
@@ -637,12 +705,6 @@ function displayImage(
     end
 
 
-
-
-
-
-
-
     # Few assertions to ensure correct types between the textureSpecification type and the voxel data type
 
     if typeof(textureSpecArray) == Vector{TextureSpec}
@@ -672,9 +734,17 @@ function displayImage(
 
 
 
-    #Populating the fields for mainMedEye3dInstance
-    # medEye3dChannelInstance.voxelArrayShapes = map(x -> size(x[2]), voxelDataTupleVector)
-    # medEye3dChannelInstance.voxelArrayTypes = map(x -> typeof(x[2][1, 1, 1]), voxelDataTupleVector) #getting the type of the first element
+    # Populating the fields for mainMedEye3dInstance
+    # try
+    displayMode = getDisplayMode(textureSpecArray)
+
+    if displayMode == SingleImage
+        medEye3dChannelInstance.voxelArrayShapes = map(x -> size(x[2]), voxelDataTupleVector)
+        medEye3dChannelInstance.voxelArrayTypes = map(x -> typeof(x[2][1, 1, 1]), voxelDataTupleVector) #getting the type of the first element
+    else
+        @info "On Screen Voxel modification is currently only supported in Single image display mode."
+    end
+
 
 
     passDataForScrolling(medEye3dChannelInstance, mainScrollData)
@@ -686,14 +756,16 @@ end #SegmentationDisplay
 
 
 """
-assert the length of the displayImage argument  passed by the user is 2 , we do not support more than that
+NOTE: in mutli-image only one image modality at a time can be visualized simultaneously. Either pet or ct.
 return stuff similar to words_display for each calcDimStruct in the vector of calcDims
-
-instantiate forDispObj twice for left and right and put with the correct stateInstance in the onnext function
-make changes to put forTextDispStruct in the mainMedEye3dInstanc
-
-add a field in OnScrollData to store information about the image being left displayed or r ight displayed based on the index of the TextureSpecs
-parameterize passData for scrolling to accomodate Vectors of mainScrollData and put all of the mainScrolData in the channel
-Create multiple stateInstances in consumer function
-add a check in the consumer function, to pass the onnext function left or right state instances based on the info from the onScrollData
+make changes to put forTextDispStruct in the mainMedEye3dInstance
+allow user access to voxel modification in the case of single Image display  [DONE]
+fix text rendering when in multi image
+Add support for dynamic crosshair rendering on passive image
+add support for supervoxel line rendering and sobel filter
+Dynamic allocation of texture number no matter if the images are overlaid or not
+Correct windowing for ct images f1, f2,f3
+Test overlaid images in single Image and multi-image
+With Crosshair rendering added, the keymaps for setting visiblity does not work
+With Crosshair rendering added, the keymaps for changing windowing does not work
 """
