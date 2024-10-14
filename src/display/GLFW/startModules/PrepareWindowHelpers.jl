@@ -8,7 +8,7 @@ using ..ModernGlUtil
 using GLFW, ModernGL
 
 
-export createDAtaBuffer, createElementBuffer, createVertexBuffer, encodeDataFromDataBuffer, controllWindowInput, initializeWindow
+export createDAtaBuffer, createCrosshairDAtaBuffer, createElementBuffer, createVertexBuffer, encodeDataFromDataBuffer, controllWindowInput, initializeWindow
 
 
 
@@ -26,6 +26,21 @@ function createDAtaBuffer(positions)
     glBufferData(GL_ARRAY_BUFFER, sizeof(positions), positions, GL_STATIC_DRAW)
     return vbo
 end #createDAtaBuffer
+
+
+"""
+Dynamic data buffer vbo for crosshair display
+    vbo is dynamic
+    for ebo its unnecessary to make it dynamic since the indices that make
+    up the crosshair remain constant.
+"""
+function createCrosshairDAtaBuffer(positions)
+    vbo = Ref(GLuint(0))   # initial value is irrelevant, just allocate space
+    glGenBuffers(1, vbo)
+    glBindBuffer(GL_ARRAY_BUFFER, vbo[])
+    glBufferData(GL_ARRAY_BUFFER, sizeof(positions), positions, GL_DYNAMIC_DRAW)
+    return vbo
+end
 
 
 """

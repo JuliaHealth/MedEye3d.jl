@@ -1,7 +1,7 @@
 module ForDisplayStructs
 using Base: Int32, isvisible
 export MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, StateDataFields, KeyboardStruct, KeyInputFields, TextureUniforms, MaskTextureUniforms, ForWordsDispStruct, MainMedEye3d
-export DisplayedVoxels, CustomDisplayedVoxels, DisplayMode, SingleImage, MultiImage
+export DisplayedVoxels, CustomDisplayedVoxels, DisplayMode, SingleImage, MultiImage, GlShaderAndBufferFields
 using ColorTypes, Parameters, Observables, ModernGL, GLFW, Dictionaries, FreeTypeAbstraction, Observables
 using ..DataStructs
 
@@ -228,6 +228,19 @@ end
 
 
 """
+Fields for the display of crosshair on screen
+"""
+@with_kw mutable struct GlShaderAndBufferFields
+  shaderProgram::UInt32 = UInt32(1)
+  fragmentShader::UInt32 = UInt32(1)
+  vao::Union{Ref{UInt32},Int32} = Int32(1)
+  vbo::Union{Ref{UInt32},Int32} = Int32(1)
+  ebo::Union{Ref{UInt32},Int32} = Int32(1)
+end
+
+
+
+"""
 Actor that is able to store a state to keep needed data for proper display
 
   currentDisplayedSlice::Int=1 # stores information what slice number we are currently displaying
@@ -263,6 +276,8 @@ Actor that is able to store a state to keep needed data for proper display
   displayMode::DisplayMode = SingleImage
   imagePosition::Int64 = 1
   switchIndex::Int = 1
+  mainRectFields::GlShaderAndBufferFields = GlShaderAndBufferFields()
+  crosshairFields::GlShaderAndBufferFields = GlShaderAndBufferFields()
 end
 
 """
@@ -286,7 +301,4 @@ end
   voxelData::Vector{Array{Float32,3}} = Vector{Array{Float32,3}}()
   # scrollDat::FullScrollableDat = FullScrollableDat()
 end
-
-
 end #module
-

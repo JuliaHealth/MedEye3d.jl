@@ -57,7 +57,7 @@ function displayAll(calcDimsStruct::CalcDimsStruct)
 
     ###########buffers
     #create vertex buffer
-    createVertexBuffer()
+    vao = createVertexBuffer()
     # Create the Vertex Buffer Objects (VBO)
     # vbo = createDAtaBuffer(calcDimsStruct.mainImageQuadVert)
 
@@ -78,7 +78,7 @@ function displayAll(calcDimsStruct::CalcDimsStruct)
     end
     schedule(t)
 
-    return (window, vertex_shader, ebo, fragment_shader_words, vbo_words, shader_program_words, gslsStr)
+    return (window, vertex_shader, vao, ebo, fragment_shader_words, vbo_words, shader_program_words, gslsStr)
 
 end# displayAll
 
