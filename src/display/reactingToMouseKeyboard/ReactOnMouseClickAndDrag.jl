@@ -184,7 +184,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
         end
         texPosY = Float64(getNewY(y, calcD))
 
-        ShadersAndVerticiesForLine.updateCrosshairPosition(texPosX, texPosY, mainState.crosshairFields, mainState.mainRectFields, mainState.mainForDisplayObjects, mainState.currentDisplayedSlice, passiveState.currentDisplayedSlice, mainState.onScrollData.dataToScrollDims.dimensionToScroll, passiveState.onScrollData.dataToScrollDims.dimensionToScroll, mainState.spacingsValue, passiveState.spacingsValue, mainState.originValue, passiveState.originValue, mainState.imagePosition, mainState.calcDimsStruct, passiveState.calcDimsStruct)
+        ShadersAndVerticiesForLine.updateCrosshairPosition(texPosX, texPosY, mainState.crosshairFields, mainState.mainRectFields, mainState.mainForDisplayObjects, mainState.currentDisplayedSlice, passiveState.currentDisplayedSlice, mainState.onScrollData.dataToScrollDims.dimensionToScroll, passiveState.onScrollData.dataToScrollDims.dimensionToScroll, mainState.spacingsValue, passiveState.spacingsValue, mainState.originValue, passiveState.originValue, mainState.imagePosition, mainState.calcDimsStruct, passiveState.calcDimsStruct, passiveState)
     end
 
     #Dynamically moving crosshair on the screen based on mouse position, only if in multiImage mode, so simply shove it in above if block
