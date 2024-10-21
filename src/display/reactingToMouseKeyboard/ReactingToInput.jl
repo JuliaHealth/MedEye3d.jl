@@ -89,7 +89,7 @@ function setUpvalueForMasToSet(valueForMasToSett::valueForMasToSetStruct, mainSt
 
     mainState.valueForMasToSet = valueForMasToSett
 
-    updateImagesDisplayed(mainState.currentlyDispDat, mainState.mainForDisplayObjects, mainState.textDispObj, mainState.calcDimsStruct, valueForMasToSett, mainState.crosshairFields, mainState.mainRectFields)
+    updateImagesDisplayed(mainState.currentlyDispDat, mainState.mainForDisplayObjects, mainState.textDispObj, mainState.calcDimsStruct, valueForMasToSett, mainState.crosshairFields, mainState.mainRectFields, mainState.displayMode)
 
 end#setUpvalueForMasToSet
 
@@ -103,7 +103,7 @@ struct that holds tuple where first entry is
 """
 function updateSingleImagesDisplayedSetUp(singleSliceDat::SingleSliceDat, mainStates::Vector{StateDataFields})
     mainState = mainStates[mainStates[1].switchIndex]
-    updateImagesDisplayed(singleSliceDat, mainState.mainForDisplayObjects, mainState.textDispObj, mainState.calcDimsStruct, mainState.valueForMasToSet, mainState.crosshairFields, mainState.mainRectFields)
+    updateImagesDisplayed(singleSliceDat, mainState.mainForDisplayObjects, mainState.textDispObj, mainState.calcDimsStruct, mainState.valueForMasToSet, mainState.crosshairFields, mainState.mainRectFields, mainState.displayMode)
 
 
     mainState.currentlyDispDat = singleSliceDat

@@ -16,9 +16,9 @@ extremeTestImage = "D:/mingw_installation/home/hurtbadly/Downloads/extreme_test_
 NOTE : only one type of modality at a time in multi-image is supported.
 """
 
-medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[ctNiftiImage], [strangeSpacingImage]]) #multi image displays
+medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[petNiftiImage], [petNiftiImage]]) #multi image displays
 # medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([ctNiftiImage]) #singleImageDisplay
-# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(petNiftiImage)
+# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(ctNiftiImage)
 #for SIngle you are strictly only supposed to pass it like : [image_ct, imagep]
 
 # displayData = MedEye3d.DisplayDataManag.getDisplayedData(medEyeStruct, [Int32(1), Int32(2)]) #passing the active texture number

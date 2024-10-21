@@ -137,7 +137,7 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, stateObjects::Vect
 
 
 
-    updateImagesDisplayed(singleSliceDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, stateObject.calcDimsStruct, stateObject.valueForMasToSet, stateObject.crosshairFields, stateObject.mainRectFields)
+    updateImagesDisplayed(singleSliceDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, stateObject.calcDimsStruct, stateObject.valueForMasToSet, stateObject.crosshairFields, stateObject.mainRectFields, stateObject.displayMode)
 end#react_to_draw
 
 """
@@ -146,7 +146,6 @@ we use mouse coordinate to modify the texture that is currently active for modif
     from texture specification we take also its id and its properties ...
 """
 function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFields})
-
     mainState = mainStates[1] #first State for holding switch index information
     # obj = mainState.mainForDisplayObjects
     # textureList = mainState.textureToModifyVec
@@ -154,7 +153,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
     #we save data about right click position in order to change the slicing plane accordingly
     textBeginning, midPoint, imageRange = openGlSystemVals(mainState.calcDimsStruct.fractionOfMainIm, mainState.calcDimsStruct.windowWidth)
     cursorXPosOpenGl = (mouseCoords[1][1] / mainState.calcDimsStruct.windowWidth) * 2 - 1
-    cursorYPosOpenGl = (mouseCoords[1][2] / mainState.calcDimsStruct.windowHeight) * 2 - 1
+    cursorYPosOpenGl = ((mouseCoords[1][2] / mainState.calcDimsStruct.windowHeight) * 2 - 1) * -1
     # @info "x " cursorXPosOpenGl
     # @info "y " cursorYPosOpenGl
     # @info "mid" midPoint
@@ -166,11 +165,29 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             # @info cursorXPosOpenGl
             mainState.switchIndex = 1
         end
+
+        #switching the index here to log real space point from the left or right images for crosshair rendering
+        mainState = mainStates[mainState.switchIndex]
+        passiveState = mainState == mainStates[1] ? mainStates[2] : mainStates[1]
+
+        #Conversion of mouse coordinates to multi-image specific texture coordinates
+        #LEFT IMAGE
+        texPosX = Nothing
+        texPosY = Nothing
+        calcD = mainState.calcDimsStruct
+        x, y = (mouseCoords[1][1], mouseCoords[1][2])
+        if mainState.imagePosition == 1
+            texPosX = max(1, min(Float64(round(((x - calcD.widthCorr / 2) / (calcD.corrected_width / 2 + calcD.widthCorr)) * calcD.imageTextureWidth)), calcD.imageTextureWidth))
+            #RIGHT IMAGE
+        elseif mainState.imagePosition == 2
+            texPosX = max(1, min(Float64(round(((x - (calcD.widthCorr / 2 + (calcD.corrected_width / 2))) / (calcD.corrected_width / 2 + calcD.widthCorr)) * calcD.imageTextureWidth)), calcD.imageTextureWidth))
+        end
+        texPosY = Float64(getNewY(y, calcD))
+
+        ShadersAndVerticiesForLine.updateCrosshairPosition(texPosX, texPosY, mainState.crosshairFields, mainState.mainRectFields, mainState.mainForDisplayObjects, mainState.currentDisplayedSlice, passiveState.currentDisplayedSlice, mainState.onScrollData.dataToScrollDims.dimensionToScroll, passiveState.onScrollData.dataToScrollDims.dimensionToScroll, mainState.spacingsValue, passiveState.spacingsValue, mainState.originValue, passiveState.originValue, mainState.imagePosition, mainState.calcDimsStruct, passiveState.calcDimsStruct)
     end
 
-    #Dynamically moving crosshair on the screen based on mouse position
-    ShadersAndVerticiesForLine.updateCrosshairPosition(cursorXPosOpenGl, cursorYPosOpenGl, mainState.crosshairFields, mainState.mainRectFields)
-
+    #Dynamically moving crosshair on the screen based on mouse position, only if in multiImage mode, so simply shove it in above if block
     # if (mousestr.isLeftButtonDown)
     #     mappedCoords = translateMouseToTexture(Int32(1), mouseCoords, mainState.calcDimsStruct)
     #     mappedCorrd = mappedCoords
@@ -217,8 +234,8 @@ function addStrokeWidth(point::CartesianIndex{2}, strokeW::Int64)
                    added -> filter(x -> (abs(point[1] - x[1]) + abs(x[2] - point[2])) < strokeW, added)# filtering to distant points
 end#addStrokeWidth
 
-xx = CartesianIndex(2, 2)
-xx[1]
+# xx = CartesianIndex(2, 2)
+# xx[1]
 """
 helper function for translateMouseToTexture
 """
@@ -233,8 +250,14 @@ function getNewX(x::Int, calcD::CalcDimsStruct)::Int
     # 5) we take min of texture width and result to clip it to max value
     # 6) we get max of 1 and result to avoid numbers less then 1
 
-
     return max(1, min(Int64(round(((x - (calcD.widthCorr * (calcD.corrected_width / 2))) / (calcD.corrected_width * (1 - calcD.widthCorr))) * calcD.imageTextureWidth)), calcD.imageTextureWidth))
+
+    # In multi - image annotations for
+    # LEFT IMAGE
+    # return max(1,min(Int64(round(((x - calcD.widthCorr/2) / (calcD.corrected_width/2 + calcD.widthCorr)) * calcD.imageTextureWidth)), calcD.imageTextureWidth))
+    # RIGHT IMAGE
+    # return max(1, min(Int64(round(((x - (calcD.widthCorr / 2 + (calcD.corrected_width / 2))) / (calcD.corrected_width / 2 + calcD.widthCorr)) * calcD.imageTextureWidth)), calcD.imageTextureWidth))
+
 end#getNewX
 
 """
@@ -249,3 +272,17 @@ function getNewY(y::Int, calcD::CalcDimsStruct)::Int
 end#getNewY
 
 end #ReactOnMouseClickAndDrag
+
+
+
+"""
+left image
+
+return max(1,min(Int64(round(((x - calcD.widthCorr/2) / (calcD.corrected_width/2 + calcD.widthCorr)) * calcD.imageTextureWidth)), calcD.imageTextureWidth))
+
+
+right image
+return max(1, min(Int64(round(((x - (calcD.widthCorr / 2 + (calcD.corrected_width / 2))) / (calcD.corrected_width / 2 + calcD.widthCorr)) * calcD.imageTextureWidth)), calcD.imageTextureWidth))
+
+
+"""

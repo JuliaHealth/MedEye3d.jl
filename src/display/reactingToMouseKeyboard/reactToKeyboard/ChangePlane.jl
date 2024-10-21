@@ -81,7 +81,7 @@ function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObjec
 
     stateObject.currentlyDispDat = singleSlDat = singleSlDat
 
-    updateImagesDisplayed(singleSlDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, newCalcDim, stateObject.valueForMasToSet, stateObject.crosshairFields, stateObject.mainRectFields)
+    updateImagesDisplayed(singleSlDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, newCalcDim, stateObject.valueForMasToSet, stateObject.crosshairFields, stateObject.mainRectFields, stateObject.displayMode)
 
 
 

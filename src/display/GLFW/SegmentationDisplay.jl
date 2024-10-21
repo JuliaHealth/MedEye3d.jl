@@ -42,11 +42,11 @@ function passDataForScrolling(
     mainMedEye3dInstance::MainMedEye3d,
     onScrollData::Union{FullScrollableDat,Vector{FullScrollableDat}}
 )
-    """
-    put data onto the channel, matching types with on_next.
+    # """
+    # put data onto the channel, matching types with on_next.
 
-    put the data in the onScrollData which screen need to be
-    """
+    # put the data in the onScrollData which screen need to be
+    # """
 
     #modify here the data for passing onto the channel
     if typeof(onScrollData) == FullScrollableDat
@@ -125,6 +125,53 @@ end
 
 
 """
+Carries out the initialization of shader and buffers for
+crosshair
+"""
+function initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader_words, vbo_words, shader_program_words)
+
+    # glBindVertexArray(0) #unbinding vao for the main rect
+    fragment_shader_line, shader_program_line = ShadersAndVerticiesForLine.createAndInitLineShaderProgram(vertex_shader)
+    vao_line = PrepareWindowHelpers.createVertexBuffer()
+    vbo_line = PrepareWindowHelpers.createCrosshairDAtaBuffer(ShadersAndVerticiesForLine.line_vertices)
+    ebo_line = PrepareWindowHelpers.createElementBuffer(ShadersAndVerticiesForLine.line_indices)
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(Float32), Ptr{Nothing}(0))
+    glEnableVertexAttribArray(0)
+
+    # glBindVertexArray(0) #unbinding vao for the crosshair
+    glBindVertexArray(vao[]) #binding vao for the main rect
+
+    crosshair::GlShaderAndBufferFields = GlShaderAndBufferFields(
+        shaderProgram=shader_program_line,
+        fragmentShader=fragment_shader_line,
+        vao=vao_line,
+        vbo=vbo_line,
+        ebo=ebo_line
+    )
+
+    #we are not initializing shaderProgram in mainRects
+    mainRects::Vector{GlShaderAndBufferFields} = []
+    foreach(enumerate(vboVector)) do (index, vbo)
+        push!(mainRects, GlShaderAndBufferFields(
+            vao=vao,
+            vbo=vbo,
+            ebo=ebo
+        ))
+    end
+
+
+    textFields = GlShaderAndBufferFields(
+        shaderProgram=shader_program_words,
+        fragmentShader=fragment_shader_words,
+        vbo=vbo_words
+    )
+
+    return (crosshair, mainRects, textFields)
+end
+
+
+"""
 coordinating displaying - sets needed constants that are storeds in  forDisplayConstants; and configures interactions from GLFW events
 listOfTextSpecs - holds required data needed to initialize textures
 keeps also references to needed ..Uniforms etc.
@@ -136,11 +183,14 @@ function coordinateDisplay(
     listOfTextSpecsPrim::Union{Vector{TextureSpec},Vector{Vector{TextureSpec}}},
     fractionOfMainIm::Float32,
     dataToScrollDims::Union{DataToScrollDims,Vector{DataToScrollDims}}=DataToScrollDims(),
+    spacing::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
+    origin::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
     windowWidth::Int=1200,
     windowHeight::Int=Int(round(windowWidth * fractionOfMainIm)),
     textTexturewidthh::Int32=Int32(2000),
     textTextureheightt::Int32=Int32(round((windowHeight / (windowWidth * (1 - fractionOfMainIm)))) * textTexturewidthh),
-    windowControlStruct::WindowControlStruct=WindowControlStruct())
+    windowControlStruct::WindowControlStruct=WindowControlStruct()
+)
 
 
     displayMode = getDisplayMode(listOfTextSpecsPrim)
@@ -220,39 +270,18 @@ function coordinateDisplay(
     4. Reduce the size of the crosshair
     5. Make sure the correct vbo in multi-image are modified , initialize them properly in the relevanat states
     """
-    glBindVertexArray(0) #unbinding vao for the main rect
-    fragment_shader_line, shader_program_line = ShadersAndVerticiesForLine.createAndInitLineShaderProgram(vertex_shader)
-    vao_line = PrepareWindowHelpers.createVertexBuffer()
-    vbo_line = PrepareWindowHelpers.createCrosshairDAtaBuffer(ShadersAndVerticiesForLine.line_vertices)
-    ebo_line = PrepareWindowHelpers.createElementBuffer(ShadersAndVerticiesForLine.line_indices)
 
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(Float32), Ptr{Nothing}(0))
-    glEnableVertexAttribArray(0)
+    #Crosshair display only in multi-image mode
+    crosshair = Nothing
+    mainRects = Nothing
+    textFields = Nothing
+    if displayMode == MultiImage
+        crosshair, mainRects, textFields = initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader_words, vbo_words, shader_program_words)
+    end
 
-    glBindVertexArray(0) #unbinding vao for the crosshair
-    glBindVertexArray(vao[]) #binding vao for the main rect
-
-    crosshair = GlShaderAndBufferFields(
-        shaderProgram=shader_program_line,
-        fragmentShader=fragment_shader_line,
-        vao=vao_line,
-        vbo=vbo_line,
-        ebo=ebo_line
-    )
-
-    mainRect = GlShaderAndBufferFields(
-        vao=vao,
-        vbo=vboVector[1],
-        ebo=ebo
-    )
     """
     end crosshair
     """
-
-
-
-
-
 
 
 
@@ -322,17 +351,19 @@ function coordinateDisplay(
     end
 
 
-    """
-    Stuff added for crosshair line rendering
-    """
-
 
 
 
     # put!(mainMedEye3dInstance.channel, forTextDispStruct)
     function consumer(mainChannel::Base.Channel{Any})
         shouldStop = [false]
-        stateInstances::Vector{StateDataFields} = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, crosshairFields=crosshair, mainRectFields=mainRect) for (index, _) in enumerate(initializedTextures)]
+        stateInstances::Vector{StateDataFields} = Vector{StateDataFields}()
+        if displayMode == MultiImage
+            # Initialization of GlShaderAndBufferFields for crosshair so different StateDataFields in multi-image mode
+            stateInstances = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, crosshairFields=crosshair, mainRectFields=mainRects[index], textFields=textFields, spacingsValue=spacing[index], originValue=origin[index]) for (index, _) in enumerate(initializedTextures)]
+        else
+            stateInstances = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, spacingsValue=spacing[index], originValue=origin[index]) for (index, _) in enumerate(initializedTextures)]
+        end
         #Setting second state information to be 0, because we need to access information from the first state only
         if length(stateInstances) > 1 && displayMode == MultiImage
             stateInstances[2].switchIndex = 0
@@ -378,15 +409,6 @@ function coordinateDisplay(
 
             elseif typeof(channelData) == CalcDimsStruct || typeof(channelData) == forDisplayObjects || typeof(channelData) == FullScrollableDat
                 stateInstances[1].switchIndex = channelData.imagePos > 1 ? 2 : 1  #Setting the current State to modify to be for the left or the right image
-
-                # elseif typeof(channelData) == ForWordsDispStruct && displayMode == MultiImage
-                #     if stateInstances[1].switchIndex == 1
-                #         stateInstances[1].switchIndex = 2
-                #         on_next!(stateInstances, channelData)
-                #     elseif stateInstances[1].switchIndex == 2
-                #         stateInstances[1].switchIndex == 1
-                #         on_next!(stateInstances, channelData)
-                #     end
             end
 
             on_next!(stateInstances, channelData)
@@ -397,13 +419,6 @@ function coordinateDisplay(
     mainMedEye3dInstance = MainMedEye3d(channel=Base.Channel{Any}(consumer, 1000; spawn=false, threadpool=:interactive), textDispObj=forTextDispStructs[1], displayMode=displayMode)
     # mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(1000))
 
-    """
-    START FROM DOWN below
-    ask should we put all of the calcDimsStructs in the channel or just the first one
-    adapt registerInteractions
-
-    Ask Dr.mitura how to update the textDispObj for all, since its a field of mainMedEye3d, and not stateInstance how to put it in onnext?
-    """
 
     foreach(calcDimStructs) do currentCalcDim
         put!(mainMedEye3dInstance.channel, currentCalcDim)
@@ -471,8 +486,8 @@ function getDefaultTexture(
 end
 
 """
-Loading Nifti volumes or Dicom Series with MedImages.jl package
-Currently, there is only support for 1 image load and visualization at a time, Subjected to change
+Loading Nifti volumes or Dicom Series with MedImages.jl package.
+Single Image or Multi-Image display supported.
 """
 function loadRegisteredImages(
     studySrc::Union{Vector{String},String,Vector{Vector{String}}}
@@ -544,6 +559,7 @@ function displayImage(
     textureSpecArray::Union{Vector{TextureSpec},Vector{Vector{TextureSpec}}}=Vector{TextureSpec}(),
     voxelDataTupleVector::Union{Vector{Any},Vector{Vector{Any}}}=[],
     spacings::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
+    origins::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
     fractionOfMainImage::Float32=Float32(0.8),
     windowWidth::Int=1000
 )
@@ -567,6 +583,7 @@ function displayImage(
         textureSpecArray = typeof(studySrc) == Vector{Vector{String}} ? Vector{Vector{TextureSpec}}() : Vector{TextureSpec}()
         voxelDataTupleVector = typeof(studySrc) == Vector{Vector{String}} ? Vector{Vector{Any}}() : Vector{Any}()
         spacings = typeof(studySrc) == Vector{Vector{String}} ? Vector{Vector{Tuple{Float64,Float64,Float64}}}() : Vector{Tuple{Float64,Float64,Float64}}()
+        origins = typeof(studySrc) == Vector{Vector{String}} ? Vector{Vector{Tuple{Float64,Float64,Float64}}}() : Vector{Tuple{Float64,Float64,Float64}}()
 
         if typeof(medImageData) == Vector{MedImages.MedImage}
             for (index, medImage) in enumerate(medImageData)
@@ -574,10 +591,12 @@ function displayImage(
                     push!(textureSpecArray, getDefaultTexture(MedImages.MedImage_data_struct.PET_type, Int32(index)))
                     push!(voxelDataTupleVector, ("PET", medImage.voxel_data))
                     push!(spacings, medImage.spacing)
+                    push!(origins, medImage.origin)
                 elseif medImage.image_type == MedImages.MedImage_data_struct.CT_type
                     push!(textureSpecArray, getDefaultTexture(MedImages.MedImage_data_struct.CT_type, Int32(index)))
                     push!(voxelDataTupleVector, ("CTIm", medImage.voxel_data))
                     push!(spacings, medImage.spacing)
+                    push!(origins, medImage.origin)
                 end
 
             end
@@ -587,28 +606,32 @@ function displayImage(
                 for (innerIndex, medImage) in enumerate(medImageInnerVector)
 
 
-                    """
-                    check to ensure No texture has number 2, since it is reserved for ManualModif
-                    """
+                    #==
+                     check to ensure No texture has number 2, since it is reserved for ManualModif
+                    ==#
                     innerIndex = innerIndex == 2 ? innerIndex + 1 : innerIndex
 
                     innerTextureSpecArray::Vector{TextureSpec} = Vector{TextureSpec}()
                     innerVoxelDataTupleVector::Vector{Any} = Vector{Any}()
                     innerSpacings::Vector{Tuple{Float64,Float64,Float64}} = Vector{Tuple{Float64,Float64,Float64}}()
+                    innerOrigins::Vector{Tuple{Float64,Float64,Float64}} = Vector{Tuple{Float64,Float64,Float64}}()
 
                     if medImage.image_type == MedImages.MedImage_data_struct.PET_type
                         push!(innerTextureSpecArray, getDefaultTexture(MedImages.MedImage_data_struct.PET_type, Int32(innerIndex)))
                         push!(innerVoxelDataTupleVector, ("PET", medImage.voxel_data))
                         push!(innerSpacings, medImage.spacing)
+                        push!(innerOrigins, medImage.origin)
                     elseif medImage.image_type == MedImages.MedImage_data_struct.CT_type
                         push!(innerTextureSpecArray, getDefaultTexture(MedImages.MedImage_data_struct.CT_type, Int32(innerIndex)))
                         push!(innerVoxelDataTupleVector, ("CTIm", medImage.voxel_data))
                         push!(innerSpacings, medImage.spacing)
+                        push!(innerOrigins, medImage.origin)
                     end
 
                     push!(textureSpecArray, innerTextureSpecArray)
                     push!(voxelDataTupleVector, innerVoxelDataTupleVector)
                     push!(spacings, innerSpacings)
+                    push!(origins, innerOrigins)
                 end
             end
 
@@ -693,7 +716,7 @@ function displayImage(
     mainScrollData::Union{FullScrollableDat,Vector{FullScrollableDat}} = typeof(voxelDataTupleVector) == Vector{Vector{Any}} ? Vector{FullScrollableDat}() : FullScrollableDat()
     if typeof(voxelDataTupleVector) == Vector{Any}
         sliceDatad = getThreeDims(voxelDataTupleVector)
-        @info typeof(sliceDatad)
+        # @info typeof(sliceDatad)
         sliceData = sliceDatad
         mainScrollData = FullScrollableDat(dataToScrollDims=datToScrollDimsB, dimensionToScroll=1, dataToScroll=sliceData, mainTextToDisp=mainLines, sliceTextToDisp=supplLines)
 
@@ -729,8 +752,7 @@ function displayImage(
     end
 
 
-
-    medEye3dChannelInstance = coordinateDisplay(textureSpecArray, fractionOfMainImage, datToScrollDimsB, windowWidth)
+    medEye3dChannelInstance = coordinateDisplay(textureSpecArray, fractionOfMainImage, datToScrollDimsB, spacings, origins, windowWidth)
 
 
 
@@ -739,10 +761,11 @@ function displayImage(
     displayMode = getDisplayMode(textureSpecArray)
 
     if displayMode == SingleImage
+        @info "!! Crosshair rendering is currently only supported in Multi image display mode !!"
         medEye3dChannelInstance.voxelArrayShapes = map(x -> size(x[2]), voxelDataTupleVector)
         medEye3dChannelInstance.voxelArrayTypes = map(x -> typeof(x[2][1, 1, 1]), voxelDataTupleVector) #getting the type of the first element
     else
-        @info "On Screen Voxel modification is currently only supported in Single image display mode."
+        @info "!! On Screen Voxel modification is currently only supported in Single image display mode !!"
     end
 
 
@@ -756,7 +779,17 @@ end #SegmentationDisplay
 
 
 """
-NOTE: in mutli-image only one image modality at a time can be visualized simultaneously. Either pet or ct.
+DOCS::
+Usage of interactive thread
+In mutli-image only one image modality at a time can be visualized simultaneously. Either pet or ct.
+During the initilization of states in consumer not all the fields of GlShaderAndBufferFields are populated. (for eg mainRectFields.shaderProgram)
+Annotations are not saved and are cannot be undone.
+Crosshair rendering is only supported in multi-image display mode.
+Annotations are only supported in single-image display mode.
+Disabling the concept of overlaid images in multi-image display mode. Thought manual-modification masks are working.
+Advise Users to restart their Julia REPL session once they are done with the visualization
+
+NOTS:
 return stuff similar to words_display for each calcDimStruct in the vector of calcDims
 make changes to put forTextDispStruct in the mainMedEye3dInstance
 allow user access to voxel modification in the case of single Image display  [DONE]
