@@ -145,36 +145,75 @@ end#getProperGL_TEXTURE
 Defines the switching of vao buffers for the rendering of
 dynamic crosshair
 """
+# function crosshairDisplay(crosshair::GlShaderAndBufferFields, mainRect::GlShaderAndBufferFields, forDisplayConstants::forDisplayObjects)
+#     #render onto the screen
+#     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL) #taken out from the basicRender
+#     ############################################
+#     # glBindVertexArray(0) #unbinding the vao for main rect
+#     # glUseProgram(crosshair.shaderProgram)
+#     glBindVertexArray(crosshair.vao[]) #binding the vao for crosshair
+#     glDrawElements(GL_LINES, 4, GL_UNSIGNED_INT, C_NULL)
+
+#     glBindVertexArray(0)
+#     # glUseProgram(mainRect.shaderProgram) #unbinding the vao for crosshair
+#     glBindVertexArray(mainRect.vao[])
+#     ############################################
+
+#     GLFW.SwapBuffers(forDisplayConstants.window) #from basic render function
+
+# end
 function crosshairDisplay(crosshair::GlShaderAndBufferFields, mainRect::GlShaderAndBufferFields, forDisplayConstants::forDisplayObjects)
-    #render onto the screen
-    # OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL) #taken out from the basicRender
-    ############################################
-    glBindVertexArray(0) #unbinding the vao for main rect
+    # Render main image
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+
+    # Switch to crosshair shader and render crosshair
     glUseProgram(crosshair.shaderProgram)
-    glBindVertexArray(crosshair.vao[]) #binding the vao for crosshair
+    glBindVertexArray(crosshair.vao[])
     glDrawElements(GL_LINES, 4, GL_UNSIGNED_INT, C_NULL)
-    glBindVertexArray(0) #unbinding the vao for crosshair
+
+    # Switch back to main shader program
+    # using the shader program from the mainRect causes the image render to disappear, so better use the one from forDisplayConstants !!
+    glUseProgram(forDisplayConstants.shader_program)
     glBindVertexArray(mainRect.vao[])
-    ############################################
 
-    GLFW.SwapBuffers(forDisplayConstants.window) #from basic render function
-
+    GLFW.SwapBuffers(forDisplayConstants.window)
 end
-
-
 """
 coordinating updating all of the images, masks...
 singleSliceDat - holds data we want to use for update
 forDisplayObjects - stores all needed constants that holds reference to GLFW and OpenGL
 """
-function updateImagesDisplayed(singleSliceDat::SingleSliceDat, forDisplayConstants::forDisplayObjects, wordsDispObj::ForWordsDispStruct, calcDimStruct::CalcDimsStruct, valueForMaskToSett::valueForMasToSetStruct, crosshair::GlShaderAndBufferFields, mainRect::GlShaderAndBufferFields)
+function updateImagesDisplayed(
+    singleSliceDat::SingleSliceDat,
+    forDisplayConstants::forDisplayObjects,
+    wordsDispObj::ForWordsDispStruct,
+    calcDimStruct::CalcDimsStruct,
+    valueForMaskToSett::valueForMasToSetStruct,
+    crosshair::GlShaderAndBufferFields,
+    mainRect::GlShaderAndBufferFields,
+    displayMode::DisplayMode)
 
 
-    updateImagesDisplayed_inner(singleSliceDat, forDisplayConstants, wordsDispObj, calcDimStruct, valueForMaskToSett, crosshair, mainRect)
+    updateImagesDisplayed_inner(
+        singleSliceDat,
+        forDisplayConstants,
+        wordsDispObj,
+        calcDimStruct,
+        valueForMaskToSett,
+        crosshair,
+        mainRect,
+        displayMode)
 end
 
-function updateImagesDisplayed_inner(singleSliceDat::SingleSliceDat, forDisplayConstants::forDisplayObjects, wordsDispObj::ForWordsDispStruct, calcDimStruct::CalcDimsStruct, valueForMaskToSett::valueForMasToSetStruct, crosshair::GlShaderAndBufferFields, mainRect::GlShaderAndBufferFields)
+function updateImagesDisplayed_inner(
+    singleSliceDat::SingleSliceDat,
+    forDisplayConstants::forDisplayObjects,
+    wordsDispObj::ForWordsDispStruct,
+    calcDimStruct::CalcDimsStruct,
+    valueForMaskToSett::valueForMasToSetStruct,
+    crosshair::GlShaderAndBufferFields,
+    mainRect::GlShaderAndBufferFields,
+    displayMode::DisplayMode)
 
     modulelistOfTextSpecs = forDisplayConstants.listOfTextSpecifications
 
@@ -193,15 +232,15 @@ function updateImagesDisplayed_inner(singleSliceDat::SingleSliceDat, forDisplayC
 
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
 
-
-
     reactivateMainObj(forDisplayConstants.shader_program, forDisplayConstants.vbo, calcDimStruct)
 
 
-    # if in singleImage
-    # OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
-    # else
-    crosshairDisplay(crosshair, mainRect, forDisplayConstants)
+    #only display crosshair in multi-image display mode
+    # if displayMode == SingleImage
+    OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
+    # elseif displayMode == MultiImage
+    # crosshairDisplay(crosshair, mainRect, forDisplayConstants) #[source of issue in multi image and images do no apeear]
+    # end
 
     glFinish()
 end
@@ -401,3 +440,4 @@ end #addTextToTexture
 
 
 end #..TextureManag
+

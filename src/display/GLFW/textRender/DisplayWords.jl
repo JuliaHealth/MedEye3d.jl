@@ -100,7 +100,6 @@ shader_program- reference to shader program
 fragment_shader_main- reference to shader associated with main images
 """
 function reactivateMainObj(shader_program::UInt32, vbo_main::UInt32, calcDim::CalcDimsStruct)
-
     glUseProgram(shader_program)
     glBindBuffer(GL_ARRAY_BUFFER, vbo_main[])
     glBufferData(GL_ARRAY_BUFFER, calcDim.mainQuadVertSize, calcDim.mainImageQuadVert, GL_STATIC_DRAW)
