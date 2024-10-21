@@ -1,6 +1,6 @@
 module ShadersAndVerticiesForLine
 using ModernGL, GeometryTypes, GLFW
-using ..ForDisplayStructs, ..CustomFragShad, ..ModernGlUtil, ..PrepareWindowHelpers, ..DataStructs
+using ..ForDisplayStructs, ..CustomFragShad, ..ModernGlUtil, ..PrepareWindowHelpers, ..DataStructs, ..TextureManag
 
 export createAndInitLineShaderProgram, updateCrosshairPosition
 
@@ -131,7 +131,7 @@ end
 Updating the values of the crosshair verticies to get dynamic
 crosshair display
 """
-function updateCrosshairPosition(x, y, crosshair, mainRect, forDisplayConstants, currentSlice, passiveCurrentSlice, scrollDimension, passiveScrollDimension, spacing, passiveSpacing, origin, passiveOrigin, activeImagePosition, activeCalcD, passiveCalcD)
+function updateCrosshairPosition(x, y, crosshair, mainRect, forDisplayConstants, currentSlice, passiveCurrentSlice, scrollDimension, passiveScrollDimension, spacing, passiveSpacing, origin, passiveOrigin, activeImagePosition, activeCalcD, passiveCalcD, passiveState)
 
     activeRealPoint = realSpacePoint(x, y, currentSlice, scrollDimension, spacing, origin)
     passiveTexturePoint = passiveTexPoint(activeRealPoint, passiveSpacing, passiveOrigin)
@@ -176,6 +176,9 @@ function updateCrosshairPosition(x, y, crosshair, mainRect, forDisplayConstants,
         passiveOpenGlX, passiveOpenGlY+0.05, 0.0
     ]
     updateCrosshairBuffer(new_vertices, crosshair)
+
+    updateImagesDisplayed(passiveState.currentlyDispDat, passiveState.mainForDisplayObjects, passiveState.textDispObj, passiveState.calcDimsStruct, passiveState.valueForMasToSet, passiveState.crosshairFields, passiveState.mainRectFields, passiveState.displayMode)
+
     renderLines(forDisplayConstants, crosshair, mainRect)
 end
 
@@ -186,9 +189,10 @@ end
 
 """
 Next steps :
-Provide the rendering of passive image with mouse move
-skip a certain number of slices
-Make sure the shape of both the images loaded are same, if not make them same with the additional zeros
+Provide the rendering of passive image with mouse move [DONE]
+skip a certain number of slices [IN PROGRESS]
+Make sure the shape of both the images loaded are same, if not make them same with the additional zeros [IN PROGRESS]
+By the way remember to save crosshair position in state In mouse change position and in on scroll
 """
 
 

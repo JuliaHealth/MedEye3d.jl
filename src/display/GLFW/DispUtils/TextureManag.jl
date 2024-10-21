@@ -5,7 +5,7 @@ module TextureManag
 using Base: Float16
 using GLFW
 using ModernGL, Base.Threads, Logging, Setfield
-using ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..CustomFragShad, ..DataStructs, ..DisplayWords, ..ShadersAndVerticiesForLine
+using ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..CustomFragShad, ..DataStructs, ..DisplayWords
 export activateTextures, addTextToTexture, initializeTextures, createTexture, getProperGL_TEXTURE, updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
 
 
@@ -219,8 +219,12 @@ function updateImagesDisplayed_inner(
 
     for updateDat in singleSliceDat.listOfDataAndImageNames
         findList = findall((texSpec) -> texSpec.name == updateDat.name, modulelistOfTextSpecs)
-        texSpec = !isempty(findList) ? modulelistOfTextSpecs[findList[1]] : throw(DomainError(findList, "no such name specified in start configuration - $( updateDat[1])"))
-        updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight)
+        # texSpec = !isempty(findList) ? modulelistOfTextSpecs[findList[1]] : throw(DomainError(findList, "no such name specified in start configuration - $( updateDat[1])"))
+        texSpec = Nothing
+        if !isempty(findList)
+            texSpec = modulelistOfTextSpecs[findList[1]]
+            updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight)
+        end
     end #for
     #render text associated with this slice
 
