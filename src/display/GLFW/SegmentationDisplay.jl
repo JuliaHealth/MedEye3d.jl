@@ -578,7 +578,7 @@ function displayImage(
     #NOTE : for overlaid images, they need to be resampled first
     #NOIE : Dicom is currently not supported, due to the lack of support for Dicom in MedImages.jl
 
-    if isempty(textureSpecArray) && isempty(voxelDataTupleVector) && isempty(spacings)
+    if isempty(textureSpecArray) && isempty(voxelDataTupleVector) && isempty(spacings) && isempty(origins)
         #Reassigning textureSpecArray, voxelDataTupleVector, spacings  depending upong the typeof studySrc
         textureSpecArray = typeof(studySrc) == Vector{Vector{String}} ? Vector{Vector{TextureSpec}}() : Vector{TextureSpec}()
         voxelDataTupleVector = typeof(studySrc) == Vector{Vector{String}} ? Vector{Vector{Any}}() : Vector{Any}()
