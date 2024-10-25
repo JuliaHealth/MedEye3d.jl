@@ -788,6 +788,8 @@ Crosshair rendering is only supported in multi-image display mode.
 Annotations are only supported in single-image display mode.
 Disabling the concept of overlaid images in multi-image display mode. Thought manual-modification masks are working.
 Advise Users to restart their Julia REPL session once they are done with the visualization
+Advise Users to only change the plane of the left image in multi-image display for crosshair display.
+
 
 NOTS:
 return stuff similar to words_display for each calcDimStruct in the vector of calcDims
@@ -801,4 +803,5 @@ Correct windowing for ct images f1, f2,f3
 Test overlaid images in single Image and multi-image
 With Crosshair rendering added, the keymaps for setting visiblity does not work
 With Crosshair rendering added, the keymaps for changing windowing does not work
+Allow People to load and visualize custom annotations masks [manual modifications]
 """
