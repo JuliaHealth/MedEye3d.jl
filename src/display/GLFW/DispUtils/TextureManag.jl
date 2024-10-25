@@ -228,7 +228,6 @@ function updateImagesDisplayed_inner(
     end #for
     #render text associated with this slice
 
-
     activateForTextDisp(
         wordsDispObj.shader_program_words, wordsDispObj.vbo_words, calcDimStruct)
 

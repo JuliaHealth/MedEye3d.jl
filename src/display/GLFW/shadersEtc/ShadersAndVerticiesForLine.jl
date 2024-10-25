@@ -1,6 +1,6 @@
 module ShadersAndVerticiesForLine
 using ModernGL, GeometryTypes, GLFW
-using ..ForDisplayStructs, ..CustomFragShad, ..ModernGlUtil, ..PrepareWindowHelpers, ..DataStructs, ..TextureManag
+using ..ForDisplayStructs, ..CustomFragShad, ..ModernGlUtil, ..PrepareWindowHelpers, ..DataStructs, ..TextureManag, ..BasicStructs, ..StructsManag, ..DisplayWords
 
 export createAndInitLineShaderProgram, updateCrosshairPosition
 
@@ -126,6 +126,59 @@ function passiveTexToWindY(tex_y::Float64, calcD::CalcDimsStruct)
 end
 
 
+function skipSlice(mainState, scrollNumb)
+    current = mainState.currentDisplayedSlice
+    old = current
+    #when shift is pressed scrolling is 10 times faster
+
+    current = scrollNumb
+
+
+    #isScrollUp ? current+=1 : current-=1
+
+    # we do not want to move outside of possible range of slices
+    lastSlice = mainState.onScrollData.slicesNumber
+    if (lastSlice > 1)
+
+        mainState.isSliceChanged = true
+        if (current < 1)
+            current = 1
+        end
+        if (lastSlice < 1)
+            lastSlice = 1
+        end
+        if (current >= lastSlice)
+            current = lastSlice
+        end
+        #logic to change displayed screen
+        #we select slice that we are intrested in
+        singleSlDat = mainState.onScrollData.dataToScroll |>
+                      (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(current), mainState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
+                                  (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=current, textToDisp=getTextForCurrentSlice(mainState.onScrollData, Int32(current)))
+
+
+        # updateImagesDisplayed(singleSlDat, mainState.mainForDisplayObjects, mainState.textDispObj, mainState.calcDimsStruct, mainState.valueForMasToSet, mainState.crosshairFields, mainState.mainRectFields, mainState.displayMode)
+
+
+
+        mainState.currentlyDispDat = singleSlDat
+        # updating the last mouse position so when we will change plane it will better show actual position
+        currentDim = Int64(mainState.onScrollData.dataToScrollDims.dimensionToScroll)
+        lastMouse = mainState.lastRecordedMousePosition
+        locArr = [lastMouse[1], lastMouse[2], lastMouse[3]]
+        locArr[currentDim] = current
+        mainState.lastRecordedMousePosition = CartesianIndex(locArr[1], locArr[2], locArr[3])
+        #saving information about current slice for future reference
+        mainState.currentDisplayedSlice = current
+        #enable undoing the action
+        # if (toBeSavedForBack)
+        #     func = () -> reactToScroll(old -= scrollNumb, mainState, false)
+        #     addToforUndoVector(mainState, func)
+        # end
+
+    end#if
+end
+
 
 """
 Updating the values of the crosshair verticies to get dynamic
@@ -168,6 +221,9 @@ function updateCrosshairPosition(x, y, crosshair, mainRect, forDisplayConstants,
 
     passiveOpenGlX = (passiveOpenGlX / passiveCalcD.windowWidth) * 2 - 1
     passiveOpenGlY = ((passiveOpenGlY / passiveCalcD.windowHeight) * 2 - 1) * -1
+
+    # @info passiveScrollNumb
+    # @info Int(passiveScrollNumb)
     # Update crosshair vertices
     new_vertices = Float32[
         passiveOpenGlX-0.05, passiveOpenGlY, 0.0,
@@ -177,6 +233,7 @@ function updateCrosshairPosition(x, y, crosshair, mainRect, forDisplayConstants,
     ]
     updateCrosshairBuffer(new_vertices, crosshair)
 
+    skipSlice(passiveState, Int64(passiveScrollNumb))
     updateImagesDisplayed(passiveState.currentlyDispDat, passiveState.mainForDisplayObjects, passiveState.textDispObj, passiveState.calcDimsStruct, passiveState.valueForMasToSet, passiveState.crosshairFields, passiveState.mainRectFields, passiveState.displayMode)
 
     renderLines(forDisplayConstants, crosshair, mainRect)
@@ -190,9 +247,13 @@ end
 """
 Next steps :
 Provide the rendering of passive image with mouse move [DONE]
-skip a certain number of slices [IN PROGRESS]
+skip a certain number of slices   [DONE]
 Make sure the shape of both the images loaded are same, if not make them same with the additional zeros [IN PROGRESS]
-By the way remember to save crosshair position in state In mouse change position and in on scroll
+By the way remember to save crosshair position in state In mouse change position and in on scroll ![REDUNDANT]!
+Scroll on the images and decide whether for the images to scroll simultaneously or update the position of the crosshair on scroll [DONE]
+Reset the image or render a black color in the window in both the single image and multi-image mode to remove and rendered artifacts.
+Precalculate verticies for supervoxel from main_supervoxel folder in sv_try branch
+Render dynamic lines on test slice data on email, and display lines with the passed verticies.
 """
 
 
