@@ -34,7 +34,7 @@ Dynamic data buffer vbo for crosshair display
     for ebo its unnecessary to make it dynamic since the indices that make
     up the crosshair remain constant.
 """
-function createCrosshairDAtaBuffer(positions)
+function createDynamicDAtaBuffer(positions)
     vbo = Ref(GLuint(0))   # initial value is irrelevant, just allocate space
     glGenBuffers(1, vbo)
     glBindBuffer(GL_ARRAY_BUFFER, vbo[])

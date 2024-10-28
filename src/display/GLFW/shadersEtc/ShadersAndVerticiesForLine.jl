@@ -233,7 +233,7 @@ function updateCrosshairPosition(x, y, crosshair, mainRect, forDisplayConstants,
     ]
     updateCrosshairBuffer(new_vertices, crosshair)
 
-    skipSlice(passiveState, Int64(passiveScrollNumb))
+    skipSlice(passiveState, round(Int64, passiveScrollNumb)) #Adding round fixed Inexact error during conversion from float to Int
     updateImagesDisplayed(passiveState.currentlyDispDat, passiveState.mainForDisplayObjects, passiveState.textDispObj, passiveState.calcDimsStruct, passiveState.valueForMasToSet, passiveState.crosshairFields, passiveState.mainRectFields, passiveState.displayMode)
 
     renderLines(forDisplayConstants, crosshair, mainRect)

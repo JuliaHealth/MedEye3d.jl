@@ -38,6 +38,7 @@ include(joinpath("display", "GLFW", "shadersEtc", "Uniforms.jl"))
 include(joinpath("display", "GLFW", "textRender", "DisplayWords.jl"))
 include(joinpath("display", "GLFW", "DispUtils", "TextureManag.jl"))
 include(joinpath("display", "GLFW", "shadersEtc", "ShadersAndVerticiesForLine.jl"))
+include(joinpath("display", "GLFW", "shadersEtc", "ShadersAndVerticiesForSupervoxels.jl"))
 include(joinpath("display", "GLFW", "startModules", "PrepareWindow.jl"))
 
 
