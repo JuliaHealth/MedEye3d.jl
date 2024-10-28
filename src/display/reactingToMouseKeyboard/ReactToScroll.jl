@@ -6,7 +6,7 @@ code adapted from https://discourse.julialang.org/t/custom-subject-in-rocket-jl-
 """
 module ReactToScroll
 using ModernGL, GLFW, Logging
-using ..DisplayWords, ..ForDisplayStructs, ..TextureManag, ..DataStructs, ..StructsManag
+using ..DisplayWords, ..ForDisplayStructs, ..TextureManag, ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForSupervoxels
 
 export reactToScroll
 export registerMouseScrollFunctions
@@ -72,6 +72,28 @@ function reactToScroll(scrollNumb::Int64, mainStates::Vector{StateDataFields}, t
 
 
         updateImagesDisplayed(singleSlDat, mainState.mainForDisplayObjects, mainState.textDispObj, mainState.calcDimsStruct, mainState.valueForMasToSet, mainState.crosshairFields, mainState.mainRectFields, mainState.displayMode)
+
+
+
+
+        """
+        Added by me recently for testing
+        Add a check here to only invoke this in singelImage display mode
+        """
+
+        if mainState.displayMode == SingleImage
+            ShadersAndVerticiesForSupervoxels.renderSupervoxelLines(mainState.mainForDisplayObjects, mainState.supervoxelFields, mainState.mainRectFields)
+        end
+        """
+        END
+        """
+
+
+
+
+
+
+
 
 
 

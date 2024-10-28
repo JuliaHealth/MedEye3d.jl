@@ -7,7 +7,7 @@ export loadRegisteredImages, displayImage, coordinateDisplay, passDataForScrolli
 
 using ColorTypes, MedImages, ModernGL, GLFW, Dictionaries, Logging, Setfield, FreeTypeAbstraction, Statistics, Observables
 using ..PrepareWindow, ..PrepareWindowHelpers, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords
-using ..ReactingToInput, ..ReactToScroll, ..ShadersAndVerticiesForText, ..ShadersAndVerticiesForLine, ..DisplayWords, ..DataStructs, ..StructsManag
+using ..ReactingToInput, ..ReactToScroll, ..ShadersAndVerticiesForText, ..ShadersAndVerticiesForLine, ..ShadersAndVerticiesForSupervoxels, ..DisplayWords, ..DataStructs, ..StructsManag
 using ..ReactOnKeyboard, ..ReactOnMouseClickAndDrag, ..DisplayDataManag
 
 #  do not copy it into the consumer function
@@ -126,6 +126,41 @@ end
 
 """
 Carries out the initialization of shader and buffers for
+SuperVoxels
+"""
+function initializeSupervoxels(vertex_shader, vao, ebo, vboVector)
+    vbo = vboVector[1] #Sinlge single image mode only rect vertex buffer
+    fragment_shader_supervoxel, shader_program_supervoxel = ShadersAndVerticiesForSupervoxels.createAndInitSupervoxelLineShaderProgram(vertex_shader)
+    vao_supervoxel = PrepareWindowHelpers.createVertexBuffer()
+    vbo_supervoxel = PrepareWindowHelpers.createDynamicDAtaBuffer(ShadersAndVerticiesForSupervoxels.supervoxel_vertices)
+    ebo_supervoxel = PrepareWindowHelpers.createElementBuffer(ShadersAndVerticiesForSupervoxels.supervoxel_indices)
+
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(Float32), Ptr{Nothing}(0))
+    glEnableVertexAttribArray(0)
+
+    glBindVertexArray(vao[])
+
+    superVoxels::GlShaderAndBufferFields = GlShaderAndBufferFields(
+        shaderProgram=shader_program_supervoxel,
+        fragmentShader=fragment_shader_supervoxel,
+        vao=vao_supervoxel,
+        vbo=vbo_supervoxel,
+        ebo=ebo_supervoxel
+    )
+
+
+    mainRect::GlShaderAndBufferFields = GlShaderAndBufferFields(
+        vao=vao,
+        vbo=vbo,
+        ebo=ebo
+    )
+
+    return (superVoxels, mainRect)
+end
+
+
+"""
+Carries out the initialization of shader and buffers for
 crosshair
 """
 function initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader_words, vbo_words, shader_program_words)
@@ -133,7 +168,7 @@ function initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader
     # glBindVertexArray(0) #unbinding vao for the main rect
     fragment_shader_line, shader_program_line = ShadersAndVerticiesForLine.createAndInitLineShaderProgram(vertex_shader)
     vao_line = PrepareWindowHelpers.createVertexBuffer()
-    vbo_line = PrepareWindowHelpers.createCrosshairDAtaBuffer(ShadersAndVerticiesForLine.line_vertices)
+    vbo_line = PrepareWindowHelpers.createDynamicDAtaBuffer(ShadersAndVerticiesForLine.line_vertices)
     ebo_line = PrepareWindowHelpers.createElementBuffer(ShadersAndVerticiesForLine.line_indices)
 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(Float32), Ptr{Nothing}(0))
@@ -272,11 +307,13 @@ function coordinateDisplay(
     """
 
     #Crosshair display only in multi-image mode
-    crosshair = Nothing
-    mainRects = Nothing
-    textFields = Nothing
+    crosshair, mainRects, textFields = (Nothing, Nothing, Nothing)
+
+    supervoxel, mainRect = (Nothing, Nothing)
     if displayMode == MultiImage
         crosshair, mainRects, textFields = initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader_words, vbo_words, shader_program_words)
+    elseif displayMode == SingleImage
+        supervoxel, mainRect = initializeSupervoxels(vertex_shader, vao, ebo, vboVector)
     end
 
     """
@@ -362,7 +399,7 @@ function coordinateDisplay(
             # Initialization of GlShaderAndBufferFields for crosshair so different StateDataFields in multi-image mode
             stateInstances = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, crosshairFields=crosshair, mainRectFields=mainRects[index], textFields=textFields, spacingsValue=spacing[index], originValue=origin[index]) for (index, _) in enumerate(initializedTextures)]
         else
-            stateInstances = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, spacingsValue=spacing[index], originValue=origin[index]) for (index, _) in enumerate(initializedTextures)]
+            stateInstances = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, spacingsValue=spacing[index], originValue=origin[index], supervoxelFields=supervoxel, mainRectFields=mainRect) for (index, _) in enumerate(initializedTextures)]
         end
         #Setting second state information to be 0, because we need to access information from the first state only
         if length(stateInstances) > 1 && displayMode == MultiImage
