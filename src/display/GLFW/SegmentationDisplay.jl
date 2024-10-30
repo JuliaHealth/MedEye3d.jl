@@ -841,4 +841,5 @@ Test overlaid images in single Image and multi-image
 With Crosshair rendering added, the keymaps for setting visiblity does not work
 With Crosshair rendering added, the keymaps for changing windowing does not work
 Allow People to load and visualize custom annotations masks [manual modifications]
-"""
+In shader and vertices for supervoxels, during the calculation of vertices for supervoxels, make sure to use Float32 for calculation.
+ """

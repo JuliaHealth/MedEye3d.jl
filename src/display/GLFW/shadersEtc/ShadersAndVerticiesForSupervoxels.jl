@@ -121,7 +121,7 @@ function get_example_sv_to_render()
 
 
     #given axis and plane we will look for the triangles that points are less then radius times 2 from the plane
-    axis = 3
+    axis = 2
     plane_dist = 41.0
     radiuss = (Float32(4.5), Float32(4.5), Float32(4.5))
     #in order for a triangle to intersect the plane it has to have at least one point on one side of the plane and at least one point on the other side
@@ -158,10 +158,19 @@ function get_example_sv_to_render()
     KernelAbstractions.synchronize(dev)
 
     #GETTING TO OPENGL COORDINATE system
+    #NOTE : For floating point number calculation please use Float32 instead of Float64 to prevent straight lines
+
+    res = res .+ 1
+    res = res ./ 2
     res = res .- minimum(res)
     res = res ./ maximum(res)
-    res = res .* 2
+    res = res .* Float32(1.6)
     res = res .- 1
+
+
+
+    # @info "min" minimum(res)
+    # @info "max" maximum(res)
 
 
     line_indices = UInt32.(collect(0:(size(relevant_triangles, 1)*16)))
@@ -177,12 +186,14 @@ function get_example_sv_to_render()
     end
     close(fb)
 
+
+
     return imm, res, line_indices
 end
 
 
 
-imm, supervoxel_vertices, supervoxel_indices = get_example_sv_to_render()
+# imm, supervoxel_vertices, supervoxel_indices = get_example_sv_to_render()
 
 function renderSupervoxelLines(forDisplayConstants, supervoxel, mainRect)
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
@@ -225,3 +236,9 @@ end
 
 
 end
+
+
+"""
+Stuff to do :
+coordinates are from -1 to 1 if text is right 20 percent of a viewer you need to transform coordinate system of verticies to be from minus 1 to 0.6 ; so first add on then divide by 2 then multiply by 1.6 (of course calculate this value) and subtract 1. The image should be the one from hdf5 just load it as medimage with spacing 1 1 1
+"""
