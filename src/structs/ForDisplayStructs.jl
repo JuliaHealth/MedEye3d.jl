@@ -282,6 +282,7 @@ Actor that is able to store a state to keep needed data for proper display
   spacingsValue::Union{Vector{Tuple{Float64,Float64,Float64}},Tuple{Float64,Float64,Float64}} = [(1.0, 1.0, 1.0)]
   originValue::Union{Vector{Tuple{Float64,Float64,Float64}},Tuple{Float64,Float64,Float64}} = [(1.0, 1.0, 1.0)]
   supervoxelFields::GlShaderAndBufferFields = GlShaderAndBufferFields()
+  supervoxelVertAndInd::Dict{String,Vector} = Dict("supervoxel_vertices" => [], "supervoxel_indices" => [])
 end
 
 """

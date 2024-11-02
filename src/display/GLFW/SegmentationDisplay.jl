@@ -128,12 +128,12 @@ end
 Carries out the initialization of shader and buffers for
 SuperVoxels
 """
-function initializeSupervoxels(vertex_shader, vao, ebo, vboVector)
+function initializeSupervoxels(vertex_shader, vao, ebo, vboVector, svVertAndInd)
     vbo = vboVector[1] #Sinlge single image mode only rect vertex buffer
     fragment_shader_supervoxel, shader_program_supervoxel = ShadersAndVerticiesForSupervoxels.createAndInitSupervoxelLineShaderProgram(vertex_shader)
     vao_supervoxel = PrepareWindowHelpers.createVertexBuffer()
-    vbo_supervoxel = PrepareWindowHelpers.createDynamicDAtaBuffer(ShadersAndVerticiesForSupervoxels.supervoxel_vertices)
-    ebo_supervoxel = PrepareWindowHelpers.createElementBuffer(ShadersAndVerticiesForSupervoxels.supervoxel_indices)
+    vbo_supervoxel = PrepareWindowHelpers.createDynamicDAtaBuffer(svVertAndInd["supervoxel_vertices"])
+    ebo_supervoxel = PrepareWindowHelpers.createElementBuffer(svVertAndInd["supervoxel_indices"])
 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(Float32), Ptr{Nothing}(0))
     glEnableVertexAttribArray(0)
@@ -220,6 +220,7 @@ function coordinateDisplay(
     dataToScrollDims::Union{DataToScrollDims,Vector{DataToScrollDims}}=DataToScrollDims(),
     spacing::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
     origin::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
+    svVertAndInd::Dict{String,Vector}=Dict{String,Vector}("supervoxel_vertices" => [], "supervoxel_indices" => []),
     windowWidth::Int=1200,
     windowHeight::Int=Int(round(windowWidth * fractionOfMainIm)),
     textTexturewidthh::Int32=Int32(2000),
@@ -313,7 +314,7 @@ function coordinateDisplay(
     if displayMode == MultiImage
         crosshair, mainRects, textFields = initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader_words, vbo_words, shader_program_words)
     elseif displayMode == SingleImage
-        supervoxel, mainRect = initializeSupervoxels(vertex_shader, vao, ebo, vboVector)
+        supervoxel, mainRect = initializeSupervoxels(vertex_shader, vao, ebo, vboVector, svVertAndInd)
     end
 
     """
@@ -399,7 +400,7 @@ function coordinateDisplay(
             # Initialization of GlShaderAndBufferFields for crosshair so different StateDataFields in multi-image mode
             stateInstances = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, crosshairFields=crosshair, mainRectFields=mainRects[index], textFields=textFields, spacingsValue=spacing[index], originValue=origin[index]) for (index, _) in enumerate(initializedTextures)]
         else
-            stateInstances = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, spacingsValue=spacing[index], originValue=origin[index], supervoxelFields=supervoxel, mainRectFields=mainRect) for (index, _) in enumerate(initializedTextures)]
+            stateInstances = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, spacingsValue=spacing[index], originValue=origin[index], supervoxelFields=supervoxel, mainRectFields=mainRect, supervoxelVertAndInd=svVertAndInd) for (index, _) in enumerate(initializedTextures)]
         end
         #Setting second state information to be 0, because we need to access information from the first state only
         if length(stateInstances) > 1 && displayMode == MultiImage
@@ -592,13 +593,14 @@ end
 High Level Initialisation function for the visualizer
 """
 function displayImage(
-    studySrc::Union{Vector{String},String,Vector{Vector{String}}},
-    textureSpecArray::Union{Vector{TextureSpec},Vector{Vector{TextureSpec}}}=Vector{TextureSpec}(),
+    studySrc::Union{Vector{String},String,Vector{Vector{String}}}
+    ; textureSpecArray::Union{Vector{TextureSpec},Vector{Vector{TextureSpec}}}=Vector{TextureSpec}(),
     voxelDataTupleVector::Union{Vector{Any},Vector{Vector{Any}}}=[],
     spacings::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
     origins::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
     fractionOfMainImage::Float32=Float32(0.8),
-    windowWidth::Int=1000
+    windowWidth::Int=1000,
+    svVertAndInd::Dict{String,Vector}=Dict{String,Vector}("supervoxel_vertices" => [], "supervoxel_indices" => [])
 )
 
 
@@ -789,7 +791,7 @@ function displayImage(
     end
 
 
-    medEye3dChannelInstance = coordinateDisplay(textureSpecArray, fractionOfMainImage, datToScrollDimsB, spacings, origins, windowWidth)
+    medEye3dChannelInstance = coordinateDisplay(textureSpecArray, fractionOfMainImage, datToScrollDimsB, spacings, origins, svVertAndInd, windowWidth)
 
 
 
@@ -798,9 +800,10 @@ function displayImage(
     displayMode = getDisplayMode(textureSpecArray)
 
     if displayMode == SingleImage
-        @info "!! Crosshair rendering is currently only supported in Multi image display mode !!"
         medEye3dChannelInstance.voxelArrayShapes = map(x -> size(x[2]), voxelDataTupleVector)
         medEye3dChannelInstance.voxelArrayTypes = map(x -> typeof(x[2][1, 1, 1]), voxelDataTupleVector) #getting the type of the first element
+
+        @info "!! Crosshair rendering is currently only supported in Multi image display mode !!"
     else
         @info "!! On Screen Voxel modification is currently only supported in Single image display mode !!"
     end
@@ -826,7 +829,7 @@ Annotations are only supported in single-image display mode.
 Disabling the concept of overlaid images in multi-image display mode. Thought manual-modification masks are working.
 Advise Users to restart their Julia REPL session once they are done with the visualization
 Advise Users to only change the plane of the left image in multi-image display for crosshair display.
-
+ADvise users when willing to display hdf5 data first convert into nifti with the function and then display normally
 
 NOTS:
 return stuff similar to words_display for each calcDimStruct in the vector of calcDims
