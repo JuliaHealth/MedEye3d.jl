@@ -1,10 +1,94 @@
 module ShadersAndVerticiesForSupervoxels
-using HDF5, Statistics, LinearAlgebra, KernelAbstractions
+using HDF5, Statistics, LinearAlgebra, KernelAbstractions, NIfTI
 using ModernGL, GeometryTypes, GLFW
 using ..ForDisplayStructs, ..CustomFragShad, ..ModernGlUtil, ..PrepareWindowHelpers, ..DataStructs, ..TextureManag, ..BasicStructs, ..StructsManag, ..DisplayWords
-export createAndInitSupervoxelLineShaderProgram, renderSupervoxelLines
+export createAndInitSupervoxelLineShaderProgram, renderSupervoxelLines, populateNiftiWithH5, get_example_sv_to_render
 
+"""
+Function for loading hdf5 data within nifti files for display in the visualizer
+The function defaults to the first dataset found in the HDF5 file source.
+In order to load HDF5 files with medeye3d, first please convert it into its equivalent Nifti source and then load the nifti file
+"""
+function populateNiftiWithH5(input_nifti_path::String, hdf5_path::String, output_nifti_path::String, dataset::String="")
+    # Load the original NIfTI file
+    nii = niread(input_nifti_path)
 
+    # Load the HDF5 data
+    h5 = h5open(hdf5_path, "r")
+
+    # Find the first dataset in the HDF5 file
+    function find_first_dataset(group)
+        for name in keys(group)
+            obj = group[name]
+            if isa(obj, HDF5.Dataset)
+                return obj
+            elseif isa(obj, HDF5.Group)
+                result = find_first_dataset(obj)
+                if result !== nothing
+                    return result
+                end
+            end
+        end
+        return nothing
+    end
+
+    priority_dataset = nothing
+    new_data = nothing
+    if isempty(dataset)
+        priority_dataset = find_first_dataset(h5)
+        if priority_dataset === nothing
+            error("No datasets found in the HDF5 file")
+        end
+
+        if ndims(priority_dataset) != 3
+            error("Unsupported dataset dimensionality: ", ndims(first_dataset), ". Only 3-dimensional datasets are supported.")
+        end
+        # Load the data from the first dataset
+    else
+        priority_dataset = dataset
+    end
+
+    new_data = priority_dataset[:, :, :]
+    # Assume spacing, origin, and direction are stored as attributes
+    spacing = try
+        attr(priority_dataset, "spacing")
+    catch
+        [1.0, 1.0, 1.0]  # Default spacing if not found
+    end
+
+    origin = try
+        attr(priority_dataset, "origin")
+    catch
+        [0.0, 0.0, 0.0]  # Default origin if not found
+    end
+
+    direction = try
+        attr(priority_dataset, "direction")
+    catch
+        [1.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0]  # Default direction if not found
+    end
+
+    close(h5)
+
+    # Create a new NIfTI object with the same header but new data
+    new_nii = NIVolume(
+        nii.header,     # Keep the original header
+        new_data        # Replace with new data
+    )
+
+    # Update the header with spacing, origin, and direction
+    new_nii.header.pixdim = (new_nii.header.pixdim[1], Float32(spacing[1]), Float32(spacing[2]), Float32(spacing[3]), new_nii.header.pixdim[5], new_nii.header.pixdim[6], new_nii.header.pixdim[7], new_nii.header.pixdim[8])
+    new_nii.header.qoffset_x, new_nii.header.qoffset_y, new_nii.header.qoffset_z = Float32.(origin)
+
+    # Update the srow matrices based on direction
+    new_nii.header.srow_x = (Float32(direction[1, 1]), Float32(direction[1, 2]), Float32(direction[1, 3]), Float32(origin[1]))
+    new_nii.header.srow_y = (Float32(direction[2, 1]), Float32(direction[2, 2]), Float32(direction[2, 3]), Float32(origin[2]))
+    new_nii.header.srow_z = (Float32(direction[3, 1]), Float32(direction[3, 2]), Float32(direction[3, 3]), Float32(origin[3]))
+
+    # Save the new NIfTI file
+    niwrite(output_nifti_path, new_nii)
+    println("Successfully created new NIfTI file at: ", output_nifti_path)
+end
 
 
 """
@@ -112,17 +196,16 @@ end
 end
 
 
-function get_example_sv_to_render()
-    h5_path_b = "D:/mingw_installation/home/hurtbadly/Downloads/locc.h5"
-    fb = h5open(h5_path_b, "r")
+function get_example_sv_to_render(h5_path::String, dataset::String)
+    fb = h5open(h5_path, "r")
     #we want only external triangles so we ignore the sv center
     # we also ignore interpolated variance value here
-    tetr_dat = fb["tetr_dat"][:, 2:4, 1:3, 1]
+    tetr_dat = fb[dataset][:, 2:4, 1:3, 1]
 
 
     #given axis and plane we will look for the triangles that points are less then radius times 2 from the plane
-    axis = 2
-    plane_dist = 41.0
+    axis = 3
+    plane_dist = 125.0
     radiuss = (Float32(4.5), Float32(4.5), Float32(4.5))
     #in order for a triangle to intersect the plane it has to have at least one point on one side of the plane and at least one point on the other side
     bool_ind = Bool.(Bool.((tetr_dat[:, 1, axis] .< (plane_dist)) .* (tetr_dat[:, 2, axis] .> (plane_dist)))
@@ -175,34 +258,34 @@ function get_example_sv_to_render()
 
     line_indices = UInt32.(collect(0:(size(relevant_triangles, 1)*16)))
     # line_indices=UInt32.(collect(0:(size(relevant_triangles,1)*4)))
-    if (axis == 1)
-        imm = fb["im"][Int(plane_dist), :, :]
-    end
-    if (axis == 2)
-        imm = fb["im"][:, Int(plane_dist), :]
-    end
-    if (axis == 3)
-        imm = fb["im"][:, :, Int(plane_dist)]
-    end
+    # if (axis == 1)
+    #     imm = fb["im"][Int(plane_dist), :, :]
+    # end
+    # if (axis == 2)
+    #     imm = fb["im"][:, Int(plane_dist), :]
+    # end
+    # if (axis == 3)
+    #     imm = fb["im"][:, :, Int(plane_dist)]
+    # end
     close(fb)
 
 
 
-    return imm, res, line_indices
+    # return imm, res, line_indices
+    return Dict("supervoxel_vertices" => res, "supervoxel_indices" => line_indices)
 end
 
 
 
-# imm, supervoxel_vertices, supervoxel_indices = get_example_sv_to_render()
 
-function renderSupervoxelLines(forDisplayConstants, supervoxel, mainRect)
+function renderSupervoxelLines(forDisplayConstants, supervoxel, mainRect, svVertAndInd)
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
 
     # Switch to crosshair shader and render crosshair
     glUseProgram(supervoxel.shaderProgram)
     glBindVertexArray(supervoxel.vao[])
     # glDrawElements(GL_LINES, 4, GL_UNSIGNED_INT, C_NULL)
-    glDrawElements(GL_LINES, Int(round(length(supervoxel_indices) / 2)), GL_UNSIGNED_INT, C_NULL)
+    glDrawElements(GL_LINES, Int(round(length(svVertAndInd["supervoxel_indices"]) / 2)), GL_UNSIGNED_INT, C_NULL)
 
     # Switch back to main shader program
     # using the shader program from the mainRect causes the image render to disappear, so better use the one from forDisplayConstants !!

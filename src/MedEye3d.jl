@@ -16,6 +16,7 @@ export SegmentationDisplay
 export OpenGLDisplayUtils
 # export  DisplayWords.textLinesFromStrings
 export StructsManag
+export ShadersAndVerticiesForSuperVoxels
 # export  DisplayWords.textLinesFromStrings
 # export  StructsManag.getThreeDims
 

@@ -82,7 +82,7 @@ function reactToScroll(scrollNumb::Int64, mainStates::Vector{StateDataFields}, t
         """
 
         if mainState.displayMode == SingleImage
-            ShadersAndVerticiesForSupervoxels.renderSupervoxelLines(mainState.mainForDisplayObjects, mainState.supervoxelFields, mainState.mainRectFields)
+            ShadersAndVerticiesForSupervoxels.renderSupervoxelLines(mainState.mainForDisplayObjects, mainState.supervoxelFields, mainState.mainRectFields, mainState.supervoxelVertAndInd)
         end
         """
         END
