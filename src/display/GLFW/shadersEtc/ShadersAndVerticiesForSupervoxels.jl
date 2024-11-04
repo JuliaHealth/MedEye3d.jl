@@ -205,7 +205,7 @@ function get_example_sv_to_render(h5_path::String, dataset::String)
 
     #given axis and plane we will look for the triangles that points are less then radius times 2 from the plane
     axis = 3
-    plane_dist = 125.0
+    plane_dist = 41.0
     radiuss = (Float32(4.5), Float32(4.5), Float32(4.5))
     #in order for a triangle to intersect the plane it has to have at least one point on one side of the plane and at least one point on the other side
     bool_ind = Bool.(Bool.((tetr_dat[:, 1, axis] .< (plane_dist)) .* (tetr_dat[:, 2, axis] .> (plane_dist)))
@@ -236,6 +236,9 @@ function get_example_sv_to_render(h5_path::String, dataset::String)
     # Int(round(minimum(relevant_triangles[:,:,1])))
 
     res = Float32.(zeros(size(relevant_triangles, 1) * 2 * 3))
+
+    # @info size(res)
+
     dev = get_backend(res)
     get_cross_section(dev, 128)(axis, plane_dist, relevant_triangles, res, ndrange=(size(relevant_triangles, 1)))
     KernelAbstractions.synchronize(dev)
@@ -247,7 +250,14 @@ function get_example_sv_to_render(h5_path::String, dataset::String)
     res = res ./ 2
     res = res .- minimum(res)
     res = res ./ maximum(res)
-    res = res .* Float32(1.6)
+
+    sizeRes = size(res)[1]
+    res = reshape(res, (Int(round(sizeRes / 2)), 2))
+    res[:, 1] = res[:, 1] .* Float32(2) #broadcast multiplication
+    res[:, 2] = res[:, 2] .* Float32(2)
+
+    # res = res .* Float32(1.6) #redundant
+    res = reshape(res, sizeRes)
     res = res .- 1
 
 

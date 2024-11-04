@@ -598,7 +598,7 @@ function displayImage(
     voxelDataTupleVector::Union{Vector{Any},Vector{Vector{Any}}}=[],
     spacings::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
     origins::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
-    fractionOfMainImage::Float32=Float32(0.8),
+    fractionOfMainImage::Float32=Float32(1.0),
     windowWidth::Int=1000,
     svVertAndInd::Dict{String,Vector}=Dict{String,Vector}("supervoxel_vertices" => [], "supervoxel_indices" => [])
 )

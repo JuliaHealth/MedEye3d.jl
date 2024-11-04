@@ -215,6 +215,8 @@ function updateImagesDisplayed_inner(
     mainRect::GlShaderAndBufferFields,
     displayMode::DisplayMode)
 
+
+
     modulelistOfTextSpecs = forDisplayConstants.listOfTextSpecifications
 
     for updateDat in singleSliceDat.listOfDataAndImageNames
