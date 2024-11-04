@@ -50,8 +50,7 @@ resample_image = "D:/mingw_installation/home/hurtbadly/Downloads/Output Volume.n
 resample_image_extreme_spacing = "D:/mingw_installation/home/hurtbadly/Downloads/Output Volume_1.nii.gz"
 extreme_test_one = "D:/mingw_installation/home/hurtbadly/Downloads/extreme_test_one.nii.gz"
 
-ctImage = getImageFromDirectory(extreme_test_one, false, true)
-
+ctImage = getImageFromDirectory(dirOfExample, false, true)
 ctPixels, ctSpacing = getPixelsAndSpacing(ctImage)
 # ctSpacing = (ctSpacing[3], ctSpacing[2], ctSpacing[1]) # @info ctSpacing
 
