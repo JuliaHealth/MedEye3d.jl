@@ -19,7 +19,7 @@ NOTE : only one type of modality at a time in multi-image is supported.
 """
 
 #For single image display
-# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([ctNiftiImage]) #singleImageDisplay
+medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([ctNiftiImage]) #singleImageDisplay
 #or we can also just passa the path itself
 # medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(petNiftiImage) #singleImageDisplay
 
@@ -39,18 +39,21 @@ NOTE : only one type of modality at a time in multi-image is supported.
 # supervoxelDict = MedEye3d.ShadersAndVerticiesForSupervoxels.get_example_sv_to_render(h5File, "tetr_dat")
 # medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(h5NiftiImage, svVertAndInd=supervoxelDict)
 
+#This is for when we have a ctNiftiImage and we were testing modifying the display data from hdf5 so we sill image and supervoxels
+# displayData[1][1:128, 1:128, 1:128] = fb["im"][:, :, :]
+
+
 
 #For modification of display data
 
-# displayData = MedEye3d.DisplayDataManag.getDisplayedData(medEyeStruct, [Int32(1)]) #passing the active texture number
+displayData = MedEye3d.DisplayDataManag.getDisplayedData(medEyeStruct, [Int32(1), Int32(2)]) #passing the active texture number
 
 # #we need to check if the return type of the displayData is a single Array{Float32,3} or a vector{Array{Float32,3}}
 # # now in this case we are setting random noise over the manualModif Texture voxel layer, and the manualModif texture defaults to 2 for active number
 
-# displayData[1][1:128, 1:128, 1:128] = fb["im"][:, :, :]
-# # displayData[2][:, :, :] = randn(Float32, size(displayData[2]))
+displayData[2][:, :, :] = randn(Float32, size(displayData[2]))
 
 # # @info "look here" typeof(displayData)
-# MedEye3d.DisplayDataManag.setDisplayedData(medEyeStruct, displayData)
+MedEye3d.DisplayDataManag.setDisplayedData(medEyeStruct, displayData)
 
 
