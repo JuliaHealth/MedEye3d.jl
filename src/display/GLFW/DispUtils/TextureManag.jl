@@ -3,9 +3,12 @@ stores functions needed to create bind and update OpenGl textues
 """
 module TextureManag
 using Base: Float16
+using GLFW
 using ModernGL, Base.Threads, Logging, Setfield
 using ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..CustomFragShad, ..DataStructs, ..DisplayWords
 export activateTextures, addTextToTexture, initializeTextures, createTexture, getProperGL_TEXTURE, updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
+
+
 
 
 """
@@ -139,44 +142,111 @@ function getProperGL_TEXTURE(index::Int)::UInt32
 end#getProperGL_TEXTURE
 
 """
+Defines the switching of vao buffers for the rendering of
+dynamic crosshair
+"""
+# function crosshairDisplay(crosshair::GlShaderAndBufferFields, mainRect::GlShaderAndBufferFields, forDisplayConstants::forDisplayObjects)
+#     #render onto the screen
+#     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL) #taken out from the basicRender
+#     ############################################
+#     # glBindVertexArray(0) #unbinding the vao for main rect
+#     # glUseProgram(crosshair.shaderProgram)
+#     glBindVertexArray(crosshair.vao[]) #binding the vao for crosshair
+#     glDrawElements(GL_LINES, 4, GL_UNSIGNED_INT, C_NULL)
+
+#     glBindVertexArray(0)
+#     # glUseProgram(mainRect.shaderProgram) #unbinding the vao for crosshair
+#     glBindVertexArray(mainRect.vao[])
+#     ############################################
+
+#     GLFW.SwapBuffers(forDisplayConstants.window) #from basic render function
+
+# end
+function crosshairDisplay(crosshair::GlShaderAndBufferFields, mainRect::GlShaderAndBufferFields, forDisplayConstants::forDisplayObjects)
+    # Render main image
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+
+    # Switch to crosshair shader and render crosshair
+    glUseProgram(crosshair.shaderProgram)
+    glBindVertexArray(crosshair.vao[])
+    glDrawElements(GL_LINES, 4, GL_UNSIGNED_INT, C_NULL)
+
+    # Switch back to main shader program
+    # using the shader program from the mainRect causes the image render to disappear, so better use the one from forDisplayConstants !!
+    glUseProgram(forDisplayConstants.shader_program)
+    glBindVertexArray(mainRect.vao[])
+
+    GLFW.SwapBuffers(forDisplayConstants.window)
+end
+"""
 coordinating updating all of the images, masks...
 singleSliceDat - holds data we want to use for update
 forDisplayObjects - stores all needed constants that holds reference to GLFW and OpenGL
 """
-function updateImagesDisplayed(singleSliceDat::SingleSliceDat, forDisplayConstants::forDisplayObjects, wordsDispObj::ForWordsDispStruct, calcDimStruct::CalcDimsStruct, valueForMaskToSett::valueForMasToSetStruct)
+function updateImagesDisplayed(
+    singleSliceDat::SingleSliceDat,
+    forDisplayConstants::forDisplayObjects,
+    wordsDispObj::ForWordsDispStruct,
+    calcDimStruct::CalcDimsStruct,
+    valueForMaskToSett::valueForMasToSetStruct,
+    crosshair::GlShaderAndBufferFields,
+    mainRect::GlShaderAndBufferFields,
+    displayMode::DisplayMode)
 
 
-    updateImagesDisplayed_inner(singleSliceDat, forDisplayConstants, wordsDispObj, calcDimStruct, valueForMaskToSett)
+    updateImagesDisplayed_inner(
+        singleSliceDat,
+        forDisplayConstants,
+        wordsDispObj,
+        calcDimStruct,
+        valueForMaskToSett,
+        crosshair,
+        mainRect,
+        displayMode)
 end
 
-function updateImagesDisplayed_inner(singleSliceDat::SingleSliceDat, forDisplayConstants::forDisplayObjects, wordsDispObj::ForWordsDispStruct, calcDimStruct::CalcDimsStruct, valueForMaskToSett::valueForMasToSetStruct)
-    # @info "top of updateimaegsDisplayed_inner"
+function updateImagesDisplayed_inner(
+    singleSliceDat::SingleSliceDat,
+    forDisplayConstants::forDisplayObjects,
+    wordsDispObj::ForWordsDispStruct,
+    calcDimStruct::CalcDimsStruct,
+    valueForMaskToSett::valueForMasToSetStruct,
+    crosshair::GlShaderAndBufferFields,
+    mainRect::GlShaderAndBufferFields,
+    displayMode::DisplayMode)
+
+
+
     modulelistOfTextSpecs = forDisplayConstants.listOfTextSpecifications
 
     for updateDat in singleSliceDat.listOfDataAndImageNames
         findList = findall((texSpec) -> texSpec.name == updateDat.name, modulelistOfTextSpecs)
-        texSpec = !isempty(findList) ? modulelistOfTextSpecs[findList[1]] : throw(DomainError(findList, "no such name specified in start configuration - $( updateDat[1])"))
-        updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight)
+        # texSpec = !isempty(findList) ? modulelistOfTextSpecs[findList[1]] : throw(DomainError(findList, "no such name specified in start configuration - $( updateDat[1])"))
+        texSpec = Nothing
+        if !isempty(findList)
+            texSpec = modulelistOfTextSpecs[findList[1]]
+            updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight)
+        end
     end #for
     #render text associated with this slice
 
-    # @info "above activate for text display"
     activateForTextDisp(
         wordsDispObj.shader_program_words, wordsDispObj.vbo_words, calcDimStruct)
 
-
-    # @info "below activate for text display"
     matr = addTextToTexture(wordsDispObj, [singleSliceDat.textToDisp..., valueForMaskToSett.text], calcDimStruct)
 
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
 
-    # @info "inside updateImagesDisplayed_inner"
-
     reactivateMainObj(forDisplayConstants.shader_program, forDisplayConstants.vbo, calcDimStruct)
 
 
-    #render onto the screen
+    #only display crosshair in multi-image display mode
+    # if displayMode == SingleImage
     OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
+    # elseif displayMode == MultiImage
+    # crosshairDisplay(crosshair, mainRect, forDisplayConstants) #[source of issue in multi image and images do no apeear]
+    # end
+
     glFinish()
 end
 
@@ -189,7 +259,7 @@ It would also assign proper openGl types to given julia data type, and pass data
 textSpecs - list of texture specificaton that we want to enrich by adding information about ..Uniforms
 return list of texture specifications enriched by information about ..Uniforms
 """
-function assignUniformsAndTypesToMasks(textSpecs::Vector{TextureSpec}, shader_program::UInt32, windowControlStruct::WindowControlStruct)
+function assignUniformsAndTypesToMasks(textSpecs::Vector{TextureSpec{Float32}}, shader_program::UInt32)
 
 
     mapped = map(x -> setuniforms(x, shader_program), textSpecs)
@@ -375,3 +445,4 @@ end #addTextToTexture
 
 
 end #..TextureManag
+

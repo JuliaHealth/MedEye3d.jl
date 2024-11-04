@@ -136,174 +136,27 @@ calculates proper dimensions form main quad display on the basis of data stored 
 some of the values calculated will be needed for futher derivations for example those that will  calculate mouse positions
 reurn CalcDimsStruct enriched by new data
     ```
-# function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
-#   #corrections that will be added on both sides (in case of height correction top and bottom in case of width correction left and right)
-#   # to achieve required ratio
-
-#   # spacing = (2.0, 0.5, 5.0)
-#   # spacing = (5.0, 0.703125, 0.703125)
-#   # spacing = (1.0, 0.9765625, 0.9765625)
-#   # spacing = (3.0, 2.0, 1.0)
-#   # spacing = (2.0, 4.0728, 4.0728)
-#   # calcDimStruct.heightToWithRatio = 2.5
-#   # @info calcDimStruct.heightToWithRatio
-
-#   widthCorr = 0.0
-#   heightCorr = 0.0
-
-#   correCtedWindowQuadHeight = calcDimStruct.avWindHeightForMain
-#   correCtedWindowQuadWidth = calcDimStruct.avWindWidtForMain
-#   isWidthToBeCorrected = false
-#   isHeightToBeCorrected = false
-
-
-#   #first one need to check weather current height to width ratio is as we want it  and if not  is it to high or to low
-#   if (calcDimStruct.avMainImRatio > calcDimStruct.heightToWithRatio)
-#     #if we have to big height to width ratio we need to reduce size of acual quad from top and bottom
-#     # we know that we would not need to change width  hence we will use the width to calculate the quad height
-#     correCtedWindowQuadHeight = calcDimStruct.heightToWithRatio * calcDimStruct.avWindWidtForMain
-#     isHeightToBeCorrected = true
-#   end# if to heigh
-
-#   if (calcDimStruct.avMainImRatio < calcDimStruct.heightToWithRatio)
-#     #if we have to low height to width ratio we need to reduce size of acual quad from left and right
-#     # we know that we would not need to change height  hence we will use height to calculate the quad height
-#     correCtedWindowQuadWidth = calcDimStruct.avWindHeightForMain / calcDimStruct.heightToWithRatio
-#     isWidthToBeCorrected = true
-#   end# if to wide
-
-#   # now we still need ratio of the resulting quad window size after corrections relative to  total window size
-#   quadToTotalHeightRatio = correCtedWindowQuadHeight / calcDimStruct.windowHeight
-#   quadToTotalWidthRatio = correCtedWindowQuadWidth / calcDimStruct.windowWidth
-
-#   # original ratios of available space of main image to total window dimensions
-#   avQuadToTotalHeightRatio = calcDimStruct.avWindHeightForMain / calcDimStruct.windowHeight
-#   avQuadToTotalWidthRatio = calcDimStruct.avWindWidtForMain / calcDimStruct.windowWidth
-#   # if those would be equal to corrected ones we would just start from the  bottom left corner and create quad from there - yet now we need to calculate corrections based on the diffrence of quantities just above and corrected ones
-
-#   if (isHeightToBeCorrected)
-#     heightCorr = abs(quadToTotalHeightRatio - avQuadToTotalHeightRatio)
-#   end # if isHeightToBeCorrected
-
-#   if (isWidthToBeCorrected)
-#     widthCorr = abs(quadToTotalWidthRatio - avQuadToTotalWidthRatio)
-#   end # if isWidthToBeCorrected
-
-#   correctedWidthForTextAccounting = (-1 + calcDimStruct.fractionOfMainIm * 2)
-#   #as in OpenGl we start from -1 and end at 1 those ratios needs to be doubled in order to translate them in the OPEN Gl coordinate system yet we will achieve this doubling by just adding the corrections from both sides
-#   #hence we do not need  to multiply by 2 becose we get from -1 to 1 so total is 2
-#   res = Float32.([
-#     # positions                  // colors           // texture coords
-#     correctedWidthForTextAccounting - widthCorr, 1.0 - heightCorr, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0,   # top right
-#     correctedWidthForTextAccounting - widthCorr, -1.0 + heightCorr, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0,   # bottom right
-#     -1.0 + widthCorr, -1.0 + heightCorr, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,   # bottom left
-#     -1.0 + widthCorr, 1.0 - heightCorr, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0    # top left
-#   ])
-
-#   windowWidthCorr = Int32(round((widthCorr / 2) * calcDimStruct.windowWidth))
-#   windowHeightCorr = Int32(round((heightCorr / 2) * calcDimStruct.windowHeight))
-
-#   return setproperties(calcDimStruct, (correCtedWindowQuadHeight=Int32(round(correCtedWindowQuadHeight)), correCtedWindowQuadWidth=Int32(round(correCtedWindowQuadWidth)), quadToTotalHeightRatio=quadToTotalHeightRatio, quadToTotalWidthRatio=quadToTotalWidthRatio, widthCorr=widthCorr, heightCorr=heightCorr, mainImageQuadVert=res, mainQuadVertSize=sizeof(res), windowWidthCorr=windowWidthCorr, windowHeightCorr=windowHeightCorr
-#   ))
-
-
-
-# end #getMainVerticies
-
-
-function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
+function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMode, imagePos::Int64)::CalcDimsStruct
   #corrections that will be added on both sides (in case of height correction top and bottom in case of width correction left and right)
   # to achieve required ratio
 
   # @info calcDimStruct
-
   widthCorr = 0.0
   heightCorr = 0.0
+
   #1) we get actual available width by multiplying fraction of main image by total width
-  corrected_width = calcDimStruct.fractionOfMainIm * calcDimStruct.windowWidth
+  #this gets halved , times 0.5 only in the case of multi image display
+
+  corrected_width = displayMode == SingleImage ? calcDimStruct.fractionOfMainIm * calcDimStruct.windowWidth : (calcDimStruct.fractionOfMainIm * calcDimStruct.windowWidth)
   #2) we get the width of a texel by dividing the corrected width by the width of the size of associated array; simmilar with size
   texel_width = corrected_width / calcDimStruct.imageTextureWidth
   texel_height = calcDimStruct.windowHeight / calcDimStruct.imageTextureHeight
   #3) we get the ratio of the width to height of the texel
   texel_ratio = texel_height / texel_width
 
-  isHeightToBeCorrected = false
-  isWidthToBeCorrected = false
 
-  #4) we compare it to ratio calculated from the spacing
-  # if (texel_ratio > calcDimStruct.heightToWithRatio)
-  #   #simply it is too high
-  #   #if we have to big height to width texel ratio we need to reduce size of acual quad from top and bottom
-  #   # we know that we would not need to change width  hence we will use the width to calculate the quad height
-  #   ratio_div = calcDimStruct.heightToWithRatio / texel_ratio
-  #   heightCorr = (1 - ratio_div) #these are the offsets, we have control over offset
-  #   isHeightToBeCorrected = true
-  # else#if to heigh
-  #   #if we have to low height to width ratio we need to reduce size of acual quad from left and right
-  #   # we know that we would not need to change height  hence we will use height to calculate the quad height
-  #   ratio_div = texel_ratio / calcDimStruct.heightToWithRatio
-  #   widthCorr = (1 - ratio_div)
-  #   isWidthToBeCorrected = true
-  # end# if to wide
-
-
-
-
-
-
-
-
-
-
-
-
-
-  # if (texel_ratio > calcDimStruct.heightToWithRatio)
-  #   # The image is too tall, we need to reduce the height
-  #   ratio_div = calcDimStruct.heightToWithRatio / texel_ratio
-  #   heightCorr = 1 - ratio_div
-  #   widthCorr = 0.0
-  #   isHeightToBeCorrected = true
-  #   isWidthToBeCorrected = false
-  # else
-  #   # The image is too wide, we need to reduce the width
-  #   ratio_div = texel_ratio / calcDimStruct.heightToWithRatio
-  #   widthCorr = 1 - ratio_div
-  #   heightCorr = 0.0
-  #   isWidthToBeCorrected = true
-  #   isHeightToBeCorrected = false
-  # end
-
-  # # Adjust the corrections to ensure the desired ratio
-  # target_ratio = calcDimStruct.heightToWithRatio
-  # current_ratio = (calcDimStruct.windowHeight * (1 - heightCorr)) / (corrected_width * (1 - widthCorr))
-
-  # if isHeightToBeCorrected
-  #   heightCorr = 1 - (target_ratio / current_ratio) * (1 - heightCorr)
-  # else
-  #   widthCorr = 1 - (current_ratio / target_ratio) * (1 - widthCorr)
-  # end
-
-  # # Ensure corrections are within valid range
-  # heightCorr = max(0.0, min(1.0, heightCorr))
-  # widthCorr = max(0.0, min(1.0, widthCorr))
-
-
-
-
-
-
-
-
-
-
-
-
-
-  corrected_width = calcDimStruct.fractionOfMainIm * calcDimStruct.windowWidth
-  texel_width = corrected_width / calcDimStruct.imageTextureWidth
-  texel_height = calcDimStruct.windowHeight / calcDimStruct.imageTextureHeight
-  texel_ratio = texel_height / texel_width
+  # @info "corrected_width" corrected_width
+  # @info "texel_ratio" texel_ratio
 
   target_ratio = calcDimStruct.heightToWithRatio
   current_ratio = calcDimStruct.windowHeight / corrected_width
@@ -311,71 +164,27 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
   if current_ratio > target_ratio
     # Need to reduce height
     heightCorr = 1 - (target_ratio / current_ratio)
-    widthCorr = 0.0
   else
     # Need to reduce width
     widthCorr = 1 - (current_ratio / target_ratio)
-    heightCorr = 0.0
   end
+
+
+  widthCorr = 1 - (calcDimStruct.windowHeight * calcDimStruct.imageTextureWidth) / (calcDimStruct.heightToWithRatio * calcDimStruct.imageTextureHeight * corrected_width)
+
+  # Calculate heightCorr using widthCorr
+  heightCorr = 1 - (calcDimStruct.heightToWithRatio * calcDimStruct.imageTextureHeight * corrected_width * (1 - widthCorr)) / (calcDimStruct.windowHeight * calcDimStruct.imageTextureWidth)
+
 
   # Calculate the new dimensions
   new_height = calcDimStruct.windowHeight * (1 - heightCorr)
   new_width = corrected_width * (1 - widthCorr)
-
-  # Recalculate the ratio
-  recalc_texel_ratio = new_height / new_width
-
-  # If there's still a discrepancy, adjust further
-  if !isapprox(recalc_texel_ratio, target_ratio, rtol=1e-6)
-    if recalc_texel_ratio > target_ratio
-      new_height = new_width * target_ratio
-      heightCorr = 1 - (new_height / calcDimStruct.windowHeight)
-    else
-      new_width = new_height / target_ratio
-      widthCorr = 1 - (new_width / corrected_width)
-    end
-  end
+  recalc_texel_ratio = (new_height / calcDimStruct.imageTextureHeight) / (new_width / calcDimStruct.imageTextureWidth)
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-  @info "texel_width $(texel_width) texel_height $(texel_height) texel_ratio  $(texel_ratio) calcDimStruct.heightToWithRatio $(calcDimStruct.heightToWithRatio)  isHeightToBeCorrected $(isHeightToBeCorrected)"
-  # widthCorr=0.0
-  # heightCorr=0.0
   correCtedWindowQuadHeight = calcDimStruct.avWindHeightForMain
   correCtedWindowQuadWidth = calcDimStruct.avWindWidtForMain
-  # isWidthToBeCorrected = false
-  # isHeightToBeCorrected = false
-  # original_h_to_w=calcDimsStruct.windowHeight/calcDimsStruct.windowWidth
-  # @log info "calcDimsStruct.windowHeight $(calcDimsStruct .windowHeight) calcDimsStruct.windowWidth $(calcDimsStruct.windowWidth) original_h_to_w $(original_h_to_w) "
-  # imageTextureWidth
-  # imageTextureHeight
-  # intended_h_to_w=0.1
-  # #first one need to check weather current height to width ratio is as we want it  and if not  is it to high or to low
-
-
-
-
   if (calcDimStruct.avMainImRatio > calcDimStruct.heightToWithRatio)
     #if we have to big height to width ratio we need to reduce size of acual quad from top and bottom
     # we know that we would not need to change width  hence we will use the width to calculate the quad height
@@ -392,20 +201,15 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
   # # now we still need ratio of the resulting quad window size after corrections relative to  total window size
   quadToTotalHeightRatio = correCtedWindowQuadHeight / calcDimStruct.windowHeight
   quadToTotalWidthRatio = correCtedWindowQuadWidth / calcDimStruct.windowWidth
-  # # original ratios of available space of main image to total window dimensions
-  # avQuadToTotalHeightRatio = calcDimStruct.avWindHeightForMain / calcDimStruct.windowHeight
-  # avQuadToTotalWidthRatio = calcDimStruct.avWindWidtForMain / calcDimStruct.windowWidth
-  # # if those would be equal to corrected ones we would just start from the  bottom left corner and create quad from there - yet now we need to calculate corrections based on the diffrence of quantities just above and corrected ones
-  # if(isHeightToBeCorrected)
-  #     heightCorr=abs(quadToTotalHeightRatio-avQuadToTotalHeightRatio)
-  # end # if isHeightToBeCorrected
-  # if(isWidthToBeCorrected)
-  #     widthCorr=abs(quadToTotalWidthRatio-avQuadToTotalWidthRatio)
-  # end # if isWidthToBeCorrected
-  correctedWidthForTextAccounting = (-1 + calcDimStruct.fractionOfMainIm * 2)
+
+
+  correctedWidthForTextAccounting = displayMode == SingleImage ? (-1 + calcDimStruct.fractionOfMainIm * 2) : (-1 + (corrected_width / calcDimStruct.windowWidth) * 2)
   #as in OpenGl we start from -1 and end at 1 those ratios needs to be doubled in order to translate them in the OPEN Gl coordinate system yet we will achieve this doubling by just adding the corrections from both sides
   #hence we do not need  to multiply by 2 becose we get from -1 to 1 so total is 2
-  @info "texel_width $(texel_width) texel_height $(texel_height) texel_ratio  $(texel_ratio) calcDimStruct.heightToWithRatio $(calcDimStruct.heightToWithRatio)  isWidthToBeCorrected $(isWidthToBeCorrected) isHeightToBeCorrected $(isHeightToBeCorrected) calcDimStruct.imageTextureWidth $(calcDimStruct.imageTextureWidth) calcDimStruct.imageTextureHeight $(calcDimStruct.imageTextureHeight) "
+  # @info "texel_width $(texel_width) texel_height $(texel_height) texel_ratio  $(texel_ratio) calcDimStruct.heightToWithRatio $(calcDimStruct.heightToWithRatio)  isWidthToBeCorrected $(isWidthToBeCorrected) isHeightToBeCorrected $(isHeightToBeCorrected) calcDimStruct.imageTextureWidth $(calcDimStruct.imageTextureWidth) calcDimStruct.imageTextureHeight $(calcDimStruct.imageTextureHeight) "
+
+  # @info "correctedWidthForTextAccounting" correctedWidthForTextAccounting
+
 
   res = Float32.([
     # positions                  // colors           // texture coords
@@ -416,25 +220,62 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct)::CalcDimsStruct
   ])
 
 
+  normalCorrectedTextAccounting = (correctedWidthForTextAccounting + 1) / 2  #converion from opengl to normal
+  normalCorrectedTextAccounting /= 2 #havling the available width
+  normalCorrectedTextAccounting = (normalCorrectedTextAccounting * 2) - 1 #conversion from normal to opengl
 
-  #heightCorr and widthCorr are the offsets
-  #the coordinate in the plane is from -1 to 1
 
-  restSpaceHeight = 1 - heightCorr
-  restSpaceWidth = 1 - widthCorr
-  multipliedHeight = restSpaceHeight * calcDimStruct.windowHeight #and why are we multiplying with the calcDimStruct.windowHeight specifically?
-  mulitipliedWidth = restSpaceWidth * corrected_width #can u explain why me multiply with corrected_width here?
-  recalc_texel_ratio = multipliedHeight / mulitipliedWidth
-  @info "recalc_texel_ratio" recalc_texel_ratio
-  @info "height_to_withratio" calcDimStruct.heightToWithRatio
+  textBeginning = (normalCorrectedTextAccounting + 1) / 2 #reverse direction from opengL to normal coordinate
+  textBeginning *= 2 #in normal coordinate
+  textBeginning = ((textBeginning) * 2) - 1 # conversion back to openGL coordinate system from normal coordinate system
+
+  # @info textBeginning
+  # @info "Original width corr" widthCorr
+
+  if displayMode == MultiImage
+    widthCorr /= 4
+    heightCorr /= 2
+
+
+
+    # @info widthCorr
+    if imagePos == 1    #LEFT IMAGE
+      res[1] = normalCorrectedTextAccounting - widthCorr # top right
+      res[9] = normalCorrectedTextAccounting - widthCorr# bottom right
+      res[17] = -1 + widthCorr# bottom left
+      res[25] = -1 + widthCorr#top left
+    end
+
+    if imagePos > 1 #Right Image since the index starts from 1, which is left image
+      # res[1] = abs(correctedWidthForTextAccounting * 3) # top right
+      # res[9] = abs(correctedWidthForTextAccounting * 3) # bottom right
+
+      res[1] = textBeginning - widthCorr # top right
+      res[9] = textBeginning - widthCorr# bottom right
+      res[17] = normalCorrectedTextAccounting + widthCorr# bottom left
+      res[25] = normalCorrectedTextAccounting + widthCorr# top left
+    end
+  end
+
+
+  # @info res[1], res[9], res[17], res[25]
+
+
+
+  # @info "texel_ratio" texel_ratio
+  # @info "recalc_texel_ratio" recalc_texel_ratio
+  # @info "height_to_withratio" calcDimStruct.heightToWithRatio
+
+  # @info "here width" corrected_width
 
   windowWidthCorr = Int32(round((widthCorr / 2) * calcDimStruct.windowWidth))
   windowHeightCorr = Int32(round((heightCorr / 2) * calcDimStruct.windowHeight))
-  return setproperties(calcDimStruct, (correCtedWindowQuadHeight=Int32(round(correCtedWindowQuadHeight)), correCtedWindowQuadWidth=Int32(round(correCtedWindowQuadWidth)), quadToTotalHeightRatio=quadToTotalHeightRatio, quadToTotalWidthRatio=quadToTotalWidthRatio, widthCorr=widthCorr, heightCorr=heightCorr, mainImageQuadVert=res, mainQuadVertSize=sizeof(res), windowWidthCorr=windowWidthCorr, windowHeightCorr=windowHeightCorr
+
+
+  return setproperties(calcDimStruct, (correCtedWindowQuadHeight=Int32(round(correCtedWindowQuadHeight)), correCtedWindowQuadWidth=Int32(round(correCtedWindowQuadWidth)), quadToTotalHeightRatio=quadToTotalHeightRatio, quadToTotalWidthRatio=quadToTotalWidthRatio, widthCorr=widthCorr, heightCorr=heightCorr, mainImageQuadVert=res, mainQuadVertSize=sizeof(res), windowWidthCorr=windowWidthCorr, windowHeightCorr=windowHeightCorr, corrected_width=corrected_width
   ))
+
 end #getMainVerticies
-
-
 
 
 # function correctRatios(texel_ratio, heightToWidthRatio, windowHeight, corrected_width)

@@ -27,7 +27,7 @@ function processKeysInfo(numbb::Identity{Int64}, stateObject::StateDataFields, k
     end#if
 
 
-    updateImagesDisplayed(stateObject.currentlyDispDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, stateObject.calcDimsStruct, valueForMasToSett)
+    updateImagesDisplayed(stateObject.currentlyDispDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, stateObject.calcDimsStruct, valueForMasToSett, stateObject.crosshairFields, stateObject.mainRectFields, stateObject.displayMode)
     # for undoing action
     # if(toBeSavedForBack)
     #     addToforUndoVector(stateObject, ()-> processKeysInfo( Option(old),stateObject, keyInfo,false ))

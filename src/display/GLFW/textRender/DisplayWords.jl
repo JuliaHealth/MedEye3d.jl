@@ -54,11 +54,35 @@ Given  single SimpleLineTextStruct it will return matrix of data that will be us
     fontFace - font we use
 """
 function renderSingleLineOfText(texLine::SimpleLineTextStruct, textureWidth::Int32, fontFace::FTFont)
-    return renderstring!(zeros(UInt8, textureWidth, textureWidth), texLine.text, fontFace, texLine.fontSize, texLine.fontSize, texLine.fontSize, valign=:vtop, halign=:hleft) |>
-           (matr) -> matr[1:Int(round(texLine.fontSize * 2 * texLine.extraLineSpace)), :] |>
-                     (smallerMatr) -> collect(transpose(reverse(smallerMatr; dims=(1)))) # getting proper text alignment
+    # return renderstring!(zeros(UInt8, textureWidth, textureWidth), texLine.text, fontFace, texLine.fontSize, texLine.fontSize, texLine.fontSize, valign=:vtop, halign=:hleft) |>
+    #        (matr) -> matr[1:Int(round(texLine.fontSize * 2 * texLine.extraLineSpace)), :] |>
+    #                  (smallerMatr) -> collect(transpose(reverse(smallerMatr; dims=(1)))) # getting proper text alignment
 
-end #renderSingleLineOfText
+
+
+
+
+
+    safeSize = max(min(texLine.fontSize, 200), 8)  # Limit size between 8 and 200
+
+    try
+        rendered = renderstring!(zeros(UInt8, textureWidth, textureWidth),
+            texLine.text,
+            fontFace,
+            safeSize,
+            safeSize,
+            safeSize,
+            valign=:vtop,
+            halign=:hleft)
+
+        height = min(Int(round(safeSize * 2 * texLine.extraLineSpace)), size(rendered, 1))
+        return collect(transpose(reverse(rendered[1:height, :]; dims=(1))))
+    catch e
+        # @warn "Failed to render text: $(texLine.text). Error: $e"
+        return zeros(UInt8, textureWidth, Int(round(safeSize * 2 * texLine.extraLineSpace)))
+    end
+end
+#renderSingleLineOfText
 
 """
 utility function that enables creating list of  text line structs from list of strings
@@ -76,7 +100,6 @@ shader_program- reference to shader program
 fragment_shader_main- reference to shader associated with main images
 """
 function reactivateMainObj(shader_program::UInt32, vbo_main::UInt32, calcDim::CalcDimsStruct)
-
     glUseProgram(shader_program)
     glBindBuffer(GL_ARRAY_BUFFER, vbo_main[])
     glBufferData(GL_ARRAY_BUFFER, calcDim.mainQuadVertSize, calcDim.mainImageQuadVert, GL_STATIC_DRAW)

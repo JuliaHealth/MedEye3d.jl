@@ -90,6 +90,7 @@ struct is mutable becouse in case of the masks data can be changed multiple time
     segmMetrs::Vector{ResultMetrics} = [] #results of metrics for each slice - array needs to be of the same size as number of slices in passed data
     nameIndexes::Dictionary{String,Int64} = getLocationDict(dataToScroll)  #gives a way of efficient querying by supplying dictionary where key is a name we are intrested in and a key is index where it is located in our array
     slicesNumber::Int32 = 1# number of available slices
+    imagePos::Int64 = 1 # position of the image in the display
 end #fullScrollableDat
 
 """
@@ -149,7 +150,9 @@ usefull stats for proper text display
     #calculated sizes for glBufferData
     mainQuadVertSize::Int64 = sizeof(mainImageQuadVert)
     wordsQuadVertSize::Int64 = sizeof(wordsImageQuadVert)
+    corrected_width = 1.0 #Necessary for calculating proper mouse position
 
+    imagePos::Int64 = 1 #Left or right image
 end#CalcDimsStruct
 
 """

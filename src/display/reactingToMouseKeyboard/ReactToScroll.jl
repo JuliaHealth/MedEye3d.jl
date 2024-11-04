@@ -6,7 +6,7 @@ code adapted from https://discourse.julialang.org/t/custom-subject-in-rocket-jl-
 """
 module ReactToScroll
 using ModernGL, GLFW, Logging
-using ..DisplayWords, ..ForDisplayStructs, ..TextureManag, ..DataStructs, ..StructsManag
+using ..DisplayWords, ..ForDisplayStructs, ..TextureManag, ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForSupervoxels
 
 export reactToScroll
 export registerMouseScrollFunctions
@@ -34,7 +34,9 @@ in response to it it sets new screen int variable and changes displayed screen
 toBeSavedForBack - just marks weather we wat to save the info how to undo latest action
  - false if we invoke it from undoing
 """
-function reactToScroll(scrollNumb::Int64, mainState::StateDataFields, toBeSavedForBack::Bool=true)
+function reactToScroll(scrollNumb::Int64, mainStates::Vector{StateDataFields}, toBeSavedForBack::Bool=true)
+    mainState = mainStates[mainStates[1].switchIndex] #getting information from the first state
+
     current = mainState.currentDisplayedSlice
     old = current
     #when shift is pressed scrolling is 10 times faster
@@ -69,7 +71,29 @@ function reactToScroll(scrollNumb::Int64, mainState::StateDataFields, toBeSavedF
                                   (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=current, textToDisp=getTextForCurrentSlice(mainState.onScrollData, Int32(current)))
 
 
-        updateImagesDisplayed(singleSlDat, mainState.mainForDisplayObjects, mainState.textDispObj, mainState.calcDimsStruct, mainState.valueForMasToSet)
+        updateImagesDisplayed(singleSlDat, mainState.mainForDisplayObjects, mainState.textDispObj, mainState.calcDimsStruct, mainState.valueForMasToSet, mainState.crosshairFields, mainState.mainRectFields, mainState.displayMode)
+
+
+
+
+        """
+        Added by me recently for testing
+        Add a check here to only invoke this in singelImage display mode
+        """
+
+        if mainState.displayMode == SingleImage
+            ShadersAndVerticiesForSupervoxels.renderSupervoxelLines(mainState.mainForDisplayObjects, mainState.supervoxelFields, mainState.mainRectFields, mainState.supervoxelVertAndInd)
+        end
+        """
+        END
+        """
+
+
+
+
+
+
+
 
 
 

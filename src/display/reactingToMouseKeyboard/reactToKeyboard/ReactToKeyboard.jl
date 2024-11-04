@@ -74,7 +74,9 @@ end#reactToKeyboard
 Function reactToKeyInput, handled keyboardStruct modification with the keyInput data
 passed through the channel
 """
-function reactToKeyInput(keyInputInfo::KeyInputFields, mainState::StateDataFields)
+function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateDataFields})
+    mainState = mainStates[mainStates[1].switchIndex]
+
     keyReleaseAction = collect(instances(GLFW.Action))[1]
     keyPressAction = collect(instances(GLFW.Action))[2]
     act = nothing
@@ -221,7 +223,7 @@ function findTextureBasedOnNumb(listOfTextSpecifications::Vector{TextureSpec}, n
         return Option(listOfTextSpecifications[dict[numb]])
     end#if
     #if we are here it mean no such texture was found
-    # @info "no texture associated with this number" numb
+    @info "no texture associated with this number" numb
     return Option()
 
 end #findTextureBasedOnNumb
