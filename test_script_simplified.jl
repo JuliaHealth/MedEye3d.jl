@@ -1,5 +1,4 @@
 using MedEye3d
-using HDF5, NIfTI
 #Data downloaded from the following google drive links :
 
 # https://drive.google.com/file/d/1Segr6BC_ma9bKNmM8lzUBaJLQChkAWKA/view?usp=drive_link
@@ -19,35 +18,37 @@ h5NiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/hdf5.nii.gz"
 NOTE : only one type of modality at a time in multi-image is supported.
 """
 
-
-
-# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[ctNiftiImage], [ctNiftiImage]]) #multi image displays
+#For single image display
 # medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([ctNiftiImage]) #singleImageDisplay
-# imm, res, line_indices = MedEye3d.ShaderAndVerticiesForSuperVoxels.get_example_sv_to_render()
-# @info "Slice : 41 , Axis : 3 , Plane : Transversal"
-# @info imm
-# @info res
-# @info line_indices
+#or we can also just passa the path itself
+# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(petNiftiImage) #singleImageDisplay
 
 
-supervoxelDict = MedEye3d.ShadersAndVerticiesForSupervoxels.get_example_sv_to_render(h5File, "tetr_dat")
+#For multi image display
+# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[ctNiftiImage], [ctNiftiImage]]) #multi image displays
 
-# @info typeof(supervoxel_vertices) #Vector{FLoat32}
-# @info typeof(supervoxel_indices) #Vector{UInt32}
+# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([ctNiftiImage]) #singleImageDisplay
 
-medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(h5NiftiImage, svVertAndInd=supervoxelDict)
-# #for SIngle you are strictly only supposed to pass it like : [image_ct, imagep]
+
+#Supervoxels
+#For conversion of h5 to nifti
+# MedEye3d.ShadersAndVerticiesForSupervoxels.populateNiftiWithH5(ctNiftiImage, h5File, h5NiftiImage)
+
+#for visualization
+
+# supervoxelDict = MedEye3d.ShadersAndVerticiesForSupervoxels.get_example_sv_to_render(h5File, "tetr_dat")
+# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(h5NiftiImage, svVertAndInd=supervoxelDict)
+
+
+#For modification of display data
 
 # displayData = MedEye3d.DisplayDataManag.getDisplayedData(medEyeStruct, [Int32(1)]) #passing the active texture number
 
-
 # #we need to check if the return type of the displayData is a single Array{Float32,3} or a vector{Array{Float32,3}}
 # # now in this case we are setting random noise over the manualModif Texture voxel layer, and the manualModif texture defaults to 2 for active number
-# fb = h5open(h5File, "r")
 
 # displayData[1][1:128, 1:128, 1:128] = fb["im"][:, :, :]
 # # displayData[2][:, :, :] = randn(Float32, size(displayData[2]))
-
 
 # # @info "look here" typeof(displayData)
 # MedEye3d.DisplayDataManag.setDisplayedData(medEyeStruct, displayData)
