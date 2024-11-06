@@ -54,7 +54,7 @@ include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","Keyboar
 include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","OtherKeyboardActions.jl") )
 include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","WindowControll.jl") )
 include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","ChangePlane.jl") )
-include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","reactToKeyboard.jl") )
+include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","ReactToKeyboard.jl") )
 
 include(joinpath("display", "reactingToMouseKeyboard", "ReactingToInput.jl"))
 include(joinpath("higherAbstractions", "DisplayDataManag.jl"))
