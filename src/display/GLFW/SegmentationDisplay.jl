@@ -845,4 +845,6 @@ With Crosshair rendering added, the keymaps for setting visiblity does not work
 With Crosshair rendering added, the keymaps for changing windowing does not work
 Allow People to load and visualize custom annotations masks [manual modifications]
 In shader and vertices for supervoxels, during the calculation of vertices for supervoxels, make sure to use Float32 for calculation.
- """
+Add a sample nifti file in the supervoxel directory, since the function seem to be modifying the original nifti input image
+Fix text rendering in single Image display , which is sprouting from reactToScroll.jl file with rendering for supervoxels.
+"""
