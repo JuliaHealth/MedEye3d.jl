@@ -86,7 +86,7 @@ function get_example_sv_to_render()
 
     #given axis and plane we will look for the triangles that points are less then radius times 2 from the plane
     axis=3
-    plane_dist=41.0
+    plane_dist=22.0
     radiuss = (Float32(4.5), Float32(4.5), Float32(4.5))
     #in order for a triangle to intersect the plane it has to have at least one point on one side of the plane and at least one point on the other side
     bool_ind=Bool.( Bool.((tetr_dat[:, 1, axis] .< (plane_dist)).*(tetr_dat[:, 2, axis] .> (plane_dist)))
