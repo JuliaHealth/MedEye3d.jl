@@ -162,7 +162,7 @@ end
 h5_path_b = "/media/jm/hddData/projects/MedEye3d.jl/docs/src/data/locc.h5"
 
 axis=3
-plane_dist=19.0
+plane_dist=22.0
 radiuss = (Float32(4.5), Float32(4.5), Float32(4.5))
 
 fb = h5open(h5_path_b, "r")

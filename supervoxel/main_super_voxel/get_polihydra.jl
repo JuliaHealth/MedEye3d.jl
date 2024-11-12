@@ -24,11 +24,14 @@ function lines_from_triangles(tensor)
     p1 = tensor[:, :, 1, :]
     p2 = tensor[:, :, 2, :]
     p3 = tensor[:, :, 3, :]
+    p1 = reshape(p1, size(p1, 1), size(p1, 2), 1, size(p1, 3))
+    p2 = reshape(p2, size(p2, 1), size(p2, 2), 1, size(p2, 3))
+    p3 = reshape(p3, size(p3, 1), size(p3, 2), 1, size(p3, 3))
 
     # Form lines
-    l1 = cat(p1, p2, dims=4)
-    l2 = cat(p2, p3, dims=4)
-    l3 = cat(p3, p1, dims=4)
+    l1 = cat(p1, p2, dims=3)
+    l2 = cat(p2, p3, dims=3)
+    l3 = cat(p3, p1, dims=3)
 
     # Concatenate lines
     lines = cat(l1, l2, l3, dims=3)
@@ -89,9 +92,7 @@ function get_intersection_point_augmented(tetr_dat, axis, plane_dist)
     intersection_points_aug[:,2]=intersection_points_aug[:,2]./maximum(intersection_points_aug[:,2])
     intersection_points_aug[:,3]=intersection_points_aug[:,3]./maximum(intersection_points_aug[:,3])
     
-    
     intersection_points_aug[:,1:3]=intersection_points_aug[:,1:3].*2
-
     intersection_points_aug[:,1:3]=intersection_points_aug[:,1:3].-1
         
     return intersection_points_aug
@@ -143,3 +144,69 @@ end
 
 
 
+
+
+
+
+
+
+
+
+h5_path_b = "/media/jm/hddData/projects/MedEye3d.jl/docs/src/data/locc.h5"
+
+axis=2
+plane_dist=41.0
+radiuss = (Float32(4.5), Float32(4.5), Float32(4.5))
+
+fb = h5open(h5_path_b, "r")
+#we want only external triangles so we ignore the sv center
+# we also ignore interpolated variance value here
+tetr_dat=fb["tetr_dat"][:,2:4,1:3,:]
+#we need to reshape the data to have sv index as first dimension and index of tetrahedron in sv as a second
+
+
+tetr_s=size(tetr_dat)
+batch_size=tetr_s[end]
+tetr_dat = reshape(tetr_dat, (get_num_tetr_in_sv(), Int(round(tetr_s[1] / get_num_tetr_in_sv())), tetr_s[2], tetr_s[3], batch_size))
+
+
+tetr_dat=permutedims(tetr_dat, [2, 1, 3, 4, 5])
+#lets combine it into lines
+
+#we will work one per batch
+tetr_dat=tetr_dat[:,:,:,:,1]
+lines_tetr_dat=lines_from_triangles(tetr_dat)
+
+
+tetr_dat[1,1,1,:]
+lines_tetr_dat[1,1,:,:]
+
+#adding index of super voxel to last dimension
+lines_tetr_dat=add_first_dim_index(lines_tetr_dat)
+#now we can get intersection points with the plane of the lines we defined above
+#in order for a triangle to intersect the plane it has to have at least one point on one side of the plane and at least one point on the other side
+bool_ind=Bool.(Bool.((lines_tetr_dat[:,:, 1, axis] .< (plane_dist)).*(lines_tetr_dat[:,:, 2, axis] .> (plane_dist))) .||
+                Bool.((lines_tetr_dat[:,:, 2, axis] .< (plane_dist)).*(lines_tetr_dat[:,:, 1, axis] .> (plane_dist))))
+
+#we have only lines that are relevant to the plane
+relevant_lines=Float32.(lines_tetr_dat[bool_ind,:,:])
+d1=relevant_lines[:,1,axis].-plane_dist
+d2=relevant_lines[:,2,axis].-plane_dist
+t=d1 / (d1 - d2)
+intersection_points = relevant_lines[:,1,1:3] + t * (relevant_lines[:,2,1:3]- relevant_lines[:,1,1:3])
+
+intersection_points_aug=cat(intersection_points,relevant_lines[:,1,4],dims=2)
+#sorted by supervoxel index
+intersection_points_aug = intersection_points_aug[sortperm(intersection_points_aug[:, end]), :]
+
+#get to opengl coordinates
+intersection_points_aug[:,1]=intersection_points_aug[:,1].-minimum(intersection_points_aug[:,1])
+intersection_points_aug[:,2]=intersection_points_aug[:,2].-minimum(intersection_points_aug[:,2])
+intersection_points_aug[:,3]=intersection_points_aug[:,3].-minimum(intersection_points_aug[:,3])
+
+intersection_points_aug[:,1]=intersection_points_aug[:,1]./maximum(intersection_points_aug[:,1])
+intersection_points_aug[:,2]=intersection_points_aug[:,2]./maximum(intersection_points_aug[:,2])
+intersection_points_aug[:,3]=intersection_points_aug[:,3]./maximum(intersection_points_aug[:,3])
+
+intersection_points_aug[:,1:3]=intersection_points_aug[:,1:3].*2
+intersection_points_aug[:,1:3]=intersection_points_aug[:,1:3].-1
