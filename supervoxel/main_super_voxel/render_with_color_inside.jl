@@ -1,31 +1,49 @@
 using ModernGL
-using GLFW
-using LinearAlgebra, Revise
+using GLFW,Revise
 includet("/media/jm/hddData/projects/MedEye3d.jl/supervoxel/main_super_voxel/get_polihydra.jl")
 
-# Vertex shader source
-const vertex_source = """
+function initialize_window(width::Int, height::Int, title::String)
+    if !GLFW.Init()
+        error("Failed to initialize GLFW")
+    end
+    window = GLFW.CreateWindow(width, height, title)
+    if window == C_NULL
+        error("Failed to create GLFW window")
+    end
+    GLFW.MakeContextCurrent(window)
+    glViewport(0, 0, width, height)
+    return window
+end
+
+
+const vertex_shader_source = """
 #version 330 core
 layout(location = 0) in vec3 position;
-layout(location = 1) in vec3 color;
-out vec3 fragColor;
+layout(location = 1) in int polygonIndex;
 
-void main() {
+flat out int polyIndex;
+
+void main()
+{
     gl_Position = vec4(position, 1.0);
-    fragColor = color;
+    polyIndex = polygonIndex;
 }
 """
 
-# Fragment shader source
-const fragment_source = """
+
+const fragment_shader_source = """
 #version 330 core
-in vec3 fragColor;
+flat in int polyIndex;
 out vec4 outColor;
 
-void main() {
-    outColor = vec4(fragColor, 1.0);
+uniform vec3 colors[100];
+
+void main()
+{
+    outColor = vec4(colors[polyIndex%100], 1.0);
 }
 """
+
 
 function create_shader(source, shader_type)
     shader = glCreateShader(shader_type)
@@ -46,10 +64,12 @@ function create_shader(source, shader_type)
     return shader
 end
 
-function create_program()
+
+# Compile shaders and create a shader program
+function create_shader_program()
     # Create and compile shaders
-    vertex_shader = create_shader(vertex_source, GL_VERTEX_SHADER)
-    fragment_shader = create_shader(fragment_source, GL_FRAGMENT_SHADER)
+    vertex_shader = create_shader(vertex_shader_source, GL_VERTEX_SHADER)
+    fragment_shader = create_shader(fragment_shader_source, GL_FRAGMENT_SHADER)
     
     # Create and link program
     program = glCreateProgram()
@@ -75,116 +95,126 @@ function create_program()
     return program
 end
 
-function render_polyhedrons(polyhedron_dict)
-    # Initialize GLFW
-    if !GLFW.Init()
-        error("Failed to initialize GLFW")
+function prepare_data(all_res)
+    vertices = Float32[]
+    indices = UInt32[]
+    colors = Float32[]
+    polygon_indices = Int32[]
+    vertex_offset = 0
+
+    for (polygon_index, polygon) in enumerate(all_res)
+        # Generate a unique color for each polygon
+        color = Float32[
+            sin(0.3 * polygon_index) * 0.5 + 0.5,
+            sin(0.5 * polygon_index) * 0.5 + 0.5,
+            sin(0.7 * polygon_index) * 0.5 + 0.5
+        ]
+        append!(colors, color)
+
+        for triangle in polygon
+            for vertex in triangle
+                append!(vertices, Float32.(vertex)...)
+                push!(polygon_indices, polygon_index - 1)  # Zero-based indexing for shader
+            end
+            push!(indices, UInt32(vertex_offset), UInt32(vertex_offset + 1), UInt32(vertex_offset + 2))
+            vertex_offset += 3
+        end
     end
 
-    # Create window
-    window = GLFW.CreateWindow(800, 600, "Polyhedrons Visualization")
-    if window == C_NULL
-        GLFW.Terminate()
-        error("Failed to create GLFW window")
-    end
+    return vertices, indices, colors, polygon_indices
+end
 
-    GLFW.MakeContextCurrent(window)
 
-    # Create shader program
-    program = create_program()
-    glUseProgram(program)
 
-    # Main render loop
+function upload_data(vertices, indices, polygon_indices)
+    VAO = Ref{GLuint}(0)
+    VBO = Ref{GLuint}(0)
+    EBO = Ref{GLuint}(0)
+    PBO = Ref{GLuint}(0)
+
+    glGenVertexArrays(1, VAO)
+    glGenBuffers(1, VBO)
+    glGenBuffers(1, EBO)
+    glGenBuffers(1, PBO)
+
+    glBindVertexArray(VAO[])
+
+    # Vertex positions
+    glBindBuffer(GL_ARRAY_BUFFER, VBO[])
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW)
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, C_NULL)
+    glEnableVertexAttribArray(0)
+
+    # Polygon indices for color
+    glBindBuffer(GL_ARRAY_BUFFER, PBO[])
+    glBufferData(GL_ARRAY_BUFFER, sizeof(polygon_indices), polygon_indices, GL_STATIC_DRAW)
+    glVertexAttribIPointer(1, 1, GL_INT, 0, C_NULL)
+    glEnableVertexAttribArray(1)
+
+    # Element indices
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO[])
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW)
+
+    return VAO[]
+end
+
+
+function render(window, shader_program, VAO, colors, num_indices)
+    glUseProgram(shader_program)
+
+    # Set colors uniform
+    color_location = glGetUniformLocation(shader_program, "colors")
+    glUniform3fv(color_location, length(colors) ÷ 3, colors)
+
     while !GLFW.WindowShouldClose(window)
+        GLFW.PollEvents()
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
-        # For each supervoxel index and its points
-        for (sv_index, points) in polyhedron_dict
-            print(" ******* **** ")
-            # Generate color based on supervoxel index
-            color = Float32[
-                sin(sv_index * 0.3) * 0.5 + 0.5,
-                sin(sv_index * 0.5) * 0.5 + 0.5,
-                sin(sv_index * 0.7) * 0.5 + 0.5
-            ]
-
-            # Convert points to Float32 array
-            vertices = Float32[]
-            colors = Float32[]
-            
-            # Add vertices and colors
-            for i in 1:size(points, 1)
-                append!(vertices, points[i, :])
-                append!(colors, color)
-            end
-
-            # Create and bind VAO
-            vao = GLuint[0]
-            glGenVertexArrays(1, vao)
-            glBindVertexArray(vao[1])
-
-            # Create and bind vertex buffer
-            vbo = GLuint[0]
-            glGenBuffers(1, vbo)
-            glBindBuffer(GL_ARRAY_BUFFER, vbo[1])
-            glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW)
-            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, C_NULL)
-            glEnableVertexAttribArray(0)
-
-            # Create and bind color buffer
-            cbo = GLuint[0]
-            glGenBuffers(1, cbo)
-            glBindBuffer(GL_ARRAY_BUFFER, cbo[1])
-            glBufferData(GL_ARRAY_BUFFER, sizeof(colors), colors, GL_STATIC_DRAW)
-            glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, C_NULL)
-            glEnableVertexAttribArray(1)
-
-            # Draw the polyhedron
-            glDrawArrays(GL_TRIANGLE_STRIP, 0, length(vertices) ÷ 3)
-
-            # Cleanup
-            glBindBuffer(GL_ARRAY_BUFFER, 0)
-            glBindVertexArray(0)
-            glDeleteBuffers(1, vbo)
-            glDeleteBuffers(1, cbo)
-            glDeleteVertexArrays(1, vao)
-        end
+        glBindVertexArray(VAO)
+        glDrawElements(GL_TRIANGLES, num_indices, GL_UNSIGNED_INT, C_NULL)
 
         GLFW.SwapBuffers(window)
-        GLFW.PollEvents()
     end
 
-    GLFW.DestroyWindow(window)
+    glDeleteVertexArrays(1, Ref(VAO))
+    glDeleteProgram(shader_program)
     GLFW.Terminate()
 end
 
 
+function main(all_res)
+    window = initialize_window(800, 600, "Polygon Rendering")
+    shader_program = create_shader_program()
+    vertices, indices, colors, polygon_indices = prepare_data(all_res)
+    VAO = upload_data(vertices, indices, polygon_indices)
+    num_indices = length(indices)
+    render(window, shader_program, VAO, colors, num_indices)
+end
+
+# Example usage (replace `all_res` with your actual data)
+# all_res = [
+#     [  # Polygon 1
+#         [ (0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, 1.0, 0.0) ],  # Triangle 1
+#         # ... more triangles
+#     ],
+#     [  # Polygon 2
+#         [ (0.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0) ],  # Triangle 1
+#         # ... more triangles
+#     ],
+#     # ... more polygons
+# ]
+
 h5_path_b = "/media/jm/hddData/projects/MedEye3d.jl/docs/src/data/locc.h5"
-
-axis=3
-plane_dist=22.0
-radiuss = (Float32(4.5), Float32(4.5), Float32(4.5))
-
 fb = h5open(h5_path_b, "r")
 #we want only external triangles so we ignore the sv center
 # we also ignore interpolated variance value here
-tetr_dat=fb["tetr_dat"][:,2:4,1:3,:]
-#we need to reshape the data to have sv index as first dimension and index of tetrahedron in sv as a second
+tetr_dat=fb["tetr_dat"][:,2:4,1:3,1]
 
-tetr_s=size(tetr_dat)
-batch_size=tetr_s[end]
-tetr_dat = reshape(tetr_dat, (get_num_tetr_in_sv(), Int(round(tetr_s[1] / get_num_tetr_in_sv())), tetr_s[2], tetr_s[3], batch_size))
-intersection_points_aug=get_intersection_point_augmented(tetr_dat, axis, plane_dist)
+axis=3
+plane_dist=25.0
+radiuss = (Float32(4.5), Float32(4.5), Float32(4.5))
 
-minimum(intersection_points_aug[:,1])
-maximum(intersection_points_aug[:,1])
-minimum(intersection_points_aug[:,2])
-maximum(intersection_points_aug[:,2])
-minimum(intersection_points_aug[:,3])
-maximum(intersection_points_aug[:,3])
+all_res=main_get_poligon_data(tetr_dat, axis, plane_dist, radiuss)
 
 
-polyhedron_dict=create_supervoxel_dict(intersection_points_aug)
-
-
-render_polyhedrons(polyhedron_dict)
+main(all_res)
