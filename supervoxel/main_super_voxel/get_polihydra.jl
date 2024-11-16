@@ -9,76 +9,82 @@ using GLMakie
 using StatsBase, DelaunayTriangulation
 
 
-@kernel function get_cross_section(axis_index::Int, d::Float64, triangle_arr, res_arr)
-    index = @index(Global)
+function get_cross_section(axis_index::Int, d::Float64, triangle_arr, res_arr,index)
     # Determine the axis index
-    cross_section_lines = []
+    # cross_section_lines = []
     # Iterate through each triangle
     # for i in 1:size(triangle_arr, 1)
-    triangle = triangle_arr[index, :, :]
-    points = [triangle[j, :] for j in 1:3]
+    # triangle = triangle_arr[index, :, :]
+    # Extract triangle points without allocations
+    point_a = @view triangle_arr[index, 1, :]
+    point_b = @view triangle_arr[index, 2, :]
+    point_c = @view triangle_arr[index, 3, :]
 
-    # Check if the triangle intersects the plane
-    distances = [point[axis_index] - d for point in points]
-    # signs = sign.(distances)
+    # Compute distances from the plane for each point
+    dist_a = point_a[axis_index] - d
+    dist_b = point_b[axis_index] - d
+    dist_c = point_c[axis_index] - d
 
-    # if length(unique(signs)) == 1
-    #     # All points are on the same side of the plane, no intersection
-    #     continue
-    # end
 
-    # Compute intersection points
-    intersection_points = []
-    for j in 1:3
-        p1 = points[j]
-        p2 = points[mod1(j + 1, 3)]
-        d1 = distances[j]
-        d2 = distances[mod1(j + 1, 3)]
+    # Initialize number of intersections
+    num_intersections = 0
 
-        if sign(d1) != sign(d2)
-            t = d1 / (d1 - d2)
-            intersection_point = p1 + t * (p2 - p1)
-            push!(intersection_points, intersection_point)
-        end
-    end
-
-    # if length(intersection_points) == 2
-    # distance = norm(intersection_points[1] - intersection_points[2])
-    # push!(cross_section_lines, intersection_points)
-
-    if (axis_index == 1)
+    # Determine indices based on axis_index
+    if axis_index == 1
         ind1 = 2
         ind2 = 3
-    end
-
-    if (axis_index == 2)
+    elseif axis_index == 2
         ind1 = 1
         ind2 = 3
-    end
-    if (axis_index == 3)
+    else  # axis_index == 3
         ind1 = 1
         ind2 = 2
     end
 
+    # Calculate base index for res_arr
+    base_index = (index - 1) * 8  # 8 elements per triangle (2 points * 4 values each)
 
-    base_index = (index - 1) * 2 * 4
-    res_arr[base_index+1] = intersection_points[1][ind1]
-    res_arr[base_index+2] = intersection_points[1][ind2]
-    res_arr[base_index+3] = 1.0
-    res_arr[base_index+4] = intersection_points[1][4]
-    res_arr[base_index+5] = intersection_points[2][ind1]
-    res_arr[base_index+6] = intersection_points[2][ind2]
-    res_arr[base_index+7] = 1.0
-    res_arr[base_index+8] = intersection_points[2][4]
+    # Edge from point_a to point_b
+    if dist_a * dist_b < 0
+        t = dist_a / (dist_a - dist_b)
+        num_intersections += 1
+        offset = (num_intersections - 1) * 4  # 0 for first point, 4 for second point
+        res_arr[base_index + offset + 1] = point_a[ind1] + t * (point_b[ind1] - point_a[ind1])
+        res_arr[base_index + offset + 2] = point_a[ind2] + t * (point_b[ind2] - point_a[ind2])
+        res_arr[base_index + offset + 3] = 1.0
+        res_arr[base_index + offset + 4] = point_a[4]  # Supervoxel index or other attribute
+    end
 
-    # res_arr[base_index+axis_index]=0.0
-    # res_arr[base_index+axis_index+3]=0.0
+    # Edge from point_b to point_c
+    if dist_b * dist_c < 0
+        t = dist_b / (dist_b - dist_c)
+        num_intersections += 1
+        offset = (num_intersections - 1) * 4
+        res_arr[base_index + offset + 1] = point_b[ind1] + t * (point_c[ind1] - point_b[ind1])
+        res_arr[base_index + offset + 2] = point_b[ind2] + t * (point_c[ind2] - point_b[ind2])
+        res_arr[base_index + offset + 3] = 1.0
+        res_arr[base_index + offset + 4] = point_b[4]
+    end
 
+    # Edge from point_c to point_a
+    if dist_c * dist_a < 0
+        t = dist_c / (dist_c - dist_a)
+        num_intersections += 1
+        offset = (num_intersections - 1) * 4
+        res_arr[base_index + offset + 1] = point_c[ind1] + t * (point_a[ind1] - point_c[ind1])
+        res_arr[base_index + offset + 2] = point_c[ind2] + t * (point_a[ind2] - point_c[ind2])
+        res_arr[base_index + offset + 3] = 1.0
+        res_arr[base_index + offset + 4] = point_c[4]
+    end
 
+    # Optional: Handle cases with fewer than two intersections
+    if num_intersections < 2
+        for i in (num_intersections + 1):2
+            offset = (i - 1) * 4
+            res_arr[base_index + offset + 1:base_index + offset + 4] .= 0.0
+        end
+    end
 
-    # end
-    # end
-    # end
 
 end
 
@@ -248,23 +254,7 @@ function get_trianglesss(points, boundary_nodes, reverse_order, just_edges, nust
     return res
 end
 
-# function convert_edges_to_indices(points, edges)
-#     # Assign indices to points
-#     point_indices = Dict{Tuple{Float64, Float64}, Int}()
-#     for (index, point) in enumerate(points)
-#         point_indices[(point[1], point[2])] = index
-#     end
 
-#     # Transform edges to use point indices
-#     indexed_edges = []
-#     for edge in edges
-#         idx1 = point_indices[(edge[1][1], edge[1][2])]
-#         idx2 = point_indices[(edge[2][1], edge[2][2])]
-#         push!(indexed_edges, [idx1, idx2])
-#     end
-
-#     return indexed_edges
-# end
 
 function transform_edges_to_indices(edges, points)
     # Step 1: Create dictionary mapping points to indices
@@ -336,9 +326,14 @@ function main_get_poligon_data(tetr_dat, axis, plane_dist, radiuss)
 
 
     res = Float32.(zeros(size(relevant_triangles, 1) * 2 * 4))
-    dev = get_backend(res)
-    get_cross_section(dev, 128)(axis, plane_dist, relevant_triangles, res, ndrange=(size(relevant_triangles, 1)))
-    KernelAbstractions.synchronize(dev)
+    # dev = get_backend(res)
+    # get_cross_section(dev, 128)(axis, plane_dist, relevant_triangles, res, ndrange=(size(relevant_triangles, 1)))
+    # KernelAbstractions.synchronize(dev)
+
+    #non parallelized version
+    for i in 1:size(relevant_triangles, 1)
+        get_cross_section(axis, plane_dist, relevant_triangles, res, i)
+    end    
     res_shape = size(res)
     secc = Int(round(res_shape[1] / 8))
     res_reshaped = reshape(res, (8, secc))
@@ -459,13 +454,16 @@ function main_get_poligon_data(tetr_dat, axis, plane_dist, radiuss)
                         print("  **** **** ")
                     else
                         res = map(el_list -> map(el -> (el[1], el[2], 0.0), el_list), res)
-                        push!(all_res, res)
+                        push!(all_res, (curr_sv_index,res))
 
                     end
                 else
+                    # if(length(points_prim)>2)
 
-                    tri = DelaunayTriangulation.triangulate(points_prim; segments=unordered_edges_ind,check_arguments=false)
-                    res = map(inds -> [get_point(tri, inds[1]), get_point(tri, inds[2]), get_point(tri, inds[3])], collect(get_triangles(tri)))
+                    #     tri = DelaunayTriangulation.triangulate(points_prim; segments=unordered_edges_ind,check_arguments=false)
+                    #     res = map(inds -> [get_point(tri, inds[1]), get_point(tri, inds[2]), get_point(tri, inds[3])], collect(get_triangles(tri)))
+                    #     push!(all_res, (curr_sv_index,res))
+                    # end
 
                 end
 
@@ -477,6 +475,27 @@ function main_get_poligon_data(tetr_dat, axis, plane_dist, radiuss)
     # Returns
     return all_res
 end
+
+
+function get_sv_mean(out_sampled_points)
+    sizz_out = size(out_sampled_points)#(65856, 9, 5)
+    batch_size = size(out_sampled_points)[end]#(65856, 9, 5)
+    num_sv = Int(round(sizz_out[1] / get_num_tetr_in_sv()))
+    
+    out_sampled_points = reshape(out_sampled_points[:, :, 1:2, :], (get_num_tetr_in_sv(), Int(round(sizz_out[1] / get_num_tetr_in_sv())), sizz_out[2], 2, batch_size))
+    out_sampled_points = permutedims(out_sampled_points, [2, 1, 3, 4, 5])
+    values_big = reshape(out_sampled_points[:, :, :, 1, :], num_sv, get_num_tetr_in_sv() * 9, batch_size)
+    weights_big = reshape(out_sampled_points[:, :, :, 2, :], num_sv, get_num_tetr_in_sv() * 9, batch_size)
+    
+    big_weighted_values = values_big .* weights_big
+    big_weighted_values_summed = sum(big_weighted_values, dims=2)
+    
+    big_weights_sum = sum(weights_big, dims=2)
+    
+    big_mean_weighted = big_weighted_values_summed ./ big_weights_sum
+    return big_mean_weighted
+
+end   
 
 
 # h5_path_b = "/media/jm/hddData/projects/MedEye3d.jl/docs/src/data/locc.h5"
@@ -530,38 +549,3 @@ end
 # end
 
 
-
-
-
-
-# points= [(0.812509298324585, 0.4302481412887573), (0.8127681016921997, 0.43092548847198486), (0.8123469352722168, 0.42950439453125), (0.8123157024383545, 0.4278137683868408), (0.8103928565979004, 0.43031346797943115), (0.8098775148391724, 0.4321378469467163), (0.812493085861206, 0.43406808376312256), (0.812493085861206, 0.43406808376312256)] 
-
-# transform_edges_to_indices(edges, points)
-
-# unordered_edges_ind =Set([(6, 5), (7, 8), (8, 9), (3, 6), (5, 7), (9, 10), (10, 10), (3, 10)])  
-# tri = DelaunayTriangulation.triangulate(points; segments=unordered_edges_ind, check_arguments=false)
-
-
-
-# a = (0.0, 0.0)
-# b = (0.0, 1.0)
-# c = (0.0, 2.5)
-# d = (2.0, 0.0)
-# e = (6.0, 0.0)
-# f = (8.0, 0.0)
-# g = (8.0, 0.5)
-# h = (7.5, 1.0)
-# i = (4.0, 1.0)
-# j = (4.0, 2.5)
-# k = (8.0, 2.5)
-# pts = [a, b, c, d, e, f, g, h, i, j, k]
-# C = Set([(2, 1), (2, 11), (2, 7), (2, 5)])
-# cons_tri = triangulate(pts; segments = C)
-
-
-# boundary_points=[[[0.8125093, 0.43024814], [0.8127681, 0.4309255]], [[0.8127681, 0.4309255], [0.81234694, 0.4295044]], [[0.81234694, 0.4295044], [0.8123157, 0.42781377]], [[0.8123157, 0.42781377], [0.81039286, 0.43031347]], [[0.81039286, 0.43031347], [0.8098775, 0.43213785]], [[0.8098775, 0.43213785], [0.8124931, 0.43406808]], [[0.8124931, 0.43406808], [0.8124931, 0.43406808]], [[0.8125093, 0.43024814], [0.8124931, 0.43406808]]]  
-
-# points= [(0.812509298324585, 0.4302481412887573), (0.8127681016921997, 0.43092548847198486), (0.8123469352722168, 0.42950439453125), (0.8123157024383545, 0.4278137683868408), (0.8103928565979004, 0.43031346797943115), (0.8098775148391724, 0.4321378469467163), (0.812493085861206, 0.43406808376312256), (0.812493085861206, 0.43406808376312256)] 
-# ii,_=transform_edges_to_indices(boundary_points, points)
-# ii=Set([ii...])
-# tri = DelaunayTriangulation.triangulate(points; segments=ii, check_arguments=false)

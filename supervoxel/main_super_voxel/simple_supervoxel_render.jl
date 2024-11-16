@@ -219,11 +219,16 @@ end
 
 # Uniforms
 # Data from HDF5
-# fid = h5open("/media/jm/hddData/projects/MedEye3d.jl/docs/src/data/ct_pixels.h5", "r")
-# dat = Float32.(imm)
+fid = h5open("/media/jm/hddData/projects/MedEye3d.jl/docs/src/data/locc.h5", "r")
+imm = read(fid["im"])
+keys(fid)
+axis = 3
+plane_dist = 25.0
 
-dat=rand(Float32,128,128).*100
-# close(fid)
+dat = Float32.(imm)
+dat=dat[:,:,Int(plane_dist)]
+# dat=rand(Float32,128,128).*100
+close(fid)
 
 textUreId = createTexture(Float32, Int32(size(dat)[1]), Int32(size(dat)[2]), GL_R32F, GL_FLOAT)
 
