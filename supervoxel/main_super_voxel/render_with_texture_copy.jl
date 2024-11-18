@@ -31,6 +31,12 @@ void main()
 """
 
 
+TODO do sth like here - so get coords between 0 and 1 
+// Convert polyIndex to texture coordinate between 0.0 and 1.0
+float coord = float(polyIndex) / (textureSize(tex_1d, 0) - 1);
+float amplitude = texture(tex_1d, coord).r;
+
+
 const fragment_shader_source = """
 #version 330 core
 
@@ -56,10 +62,17 @@ void main() {
     
     // Convert polyIndex to texture coordinate between 0.0 and 1.0
     float coord = float(polyIndex) / (textureSize(tex_1d, 0) - 1);
-    float amplitude = texture(tex_1d, coord).r;
     
     // Create 2D sinusoid pattern
-    const float frequency = 60.0;  // Adjust this value to change wave frequency
+    int t=5;
+    int sin_i=1;
+
+    //float amplitude = texelFetch(sin_p_tex, ivec2(polyIndex, 4), 0).r;
+    float amplitude =1.0;
+    float wavelength = texelFetch(texture_bank_tex, ivec3(t, sin_i, 4), 0).r;
+    
+
+    float frequency = 1 / wavelength;  // Adjust this value to change wave frequency
     float wave = amplitude * sin(frequency * screenPos.x) * sin(frequency * screenPos.y);
     
     // Scale wave to [0,1] range
@@ -69,7 +82,8 @@ void main() {
     //((sin(2 * π / (texture_bank_p[t,sin_i,4]*max_wavelength) * ((TexCoord[1]) * cos(texture_bank_p[t,sin_i,1]*2*π) + (TexCoord[2]) * cos(texture_bank_p[t,sin_i,2]*2*π) + (1.0) * cos(texture_bank_p[t,sin_i,3]*2*π)))+(sin_p[polyIndex,4] *max_amplitude))*(texture_bank_p[t,sin_i,5]*max_amplitude)*multiplier)*sin_p[polyIndex, t+5 ]
 
 
-    outColor = vec4(wave, wave, wave, 1.0);
+    outColor = vec4(wavelength, wavelength, wavelength, 1.0);
+    //outColor = vec4(wave, wave, wave, 1.0);
 
     //outColor = vec4(final_color, final_color, final_color, 1.0);
 }
