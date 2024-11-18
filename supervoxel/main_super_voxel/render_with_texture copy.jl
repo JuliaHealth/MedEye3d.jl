@@ -35,14 +35,26 @@ const fragment_shader_source = """
 #version 330 core
 
 uniform sampler1D tex_1d;
+uniform vec2 windowSize;
 flat in int polyIndex;
 out vec4 outColor;
 
 void main() {
+    // Get screen coordinates
+    vec2 screenPos = gl_FragCoord.xy / windowSize;  // Now using uniform windowSize
+    
     // Convert polyIndex to texture coordinate between 0.0 and 1.0
     float coord = float(polyIndex) / (textureSize(tex_1d, 0) - 1);
-    float value = texture(tex_1d, coord).r;
-    outColor = vec4(value, value, value, 1.0);
+    float amplitude = texture(tex_1d, coord).r;
+    
+    // Create 2D sinusoid pattern
+    const float frequency = 60.0;  // Adjust this value to change wave frequency
+    float wave = amplitude * sin(frequency * screenPos.x) * sin(frequency * screenPos.y);
+    
+    // Scale wave to [0,1] range
+    wave = wave * 0.5 + 0.5;
+    
+    outColor = vec4(wave, wave, wave, 1.0);
 }
 """
 
@@ -168,6 +180,11 @@ function render(window, shader_program, VAO, colors, num_indices, tex_1d)
     color_location = glGetUniformLocation(shader_program, "colors")
     glUniform3fv(color_location, length(colors) ÷ 3, colors)
 
+    # Set window size uniform
+    window_size_location = glGetUniformLocation(shader_program, "windowSize")
+    width, height = GLFW.GetWindowSize(window)
+    glUniform2f(window_size_location, Float32(width), Float32(height))
+
     # Bind the texture and set the uniform
     glActiveTexture(GL_TEXTURE0)
     glBindTexture(GL_TEXTURE_1D, tex_1d)
@@ -189,11 +206,12 @@ function render(window, shader_program, VAO, colors, num_indices, tex_1d)
 end
 
 
-function main(all_res, sv_means)
+function main(all_res, sv_means,windowWidth,windowHeight)
     window = initialize_window(800, 600, "Polygon Rendering")
     shader_program = create_shader_program()
     vertices, indices, colors, polygon_indices = prepare_data(all_res)
     VAO = upload_data(vertices, indices, polygon_indices)
+    print("\n ppppppppp $(size(polygon_indices))  max  $(maximum(polygon_indices)) \n")
     num_indices = length(indices)
 
     # Initialize a 1D texture with sv_means data
@@ -239,5 +257,5 @@ radiuss = (Float32(4.5), Float32(4.5), Float32(4.5))
 
 all_res = main_get_poligon_data(tetr_dat, axis, plane_dist, radiuss)
 
-
-main(all_res, sv_means)
+windowWidth,windowHeight=800,800
+main(all_res, sv_means,windowWidth,windowHeight)
