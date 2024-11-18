@@ -49,31 +49,55 @@ out vec4 outColor;
 
 void main() {
     vec2 TexCoord = gl_FragCoord.xy / windowSize;
-    float final_color = 0.0;
+
+
+     // Get screen coordinates
+    vec2 screenPos = gl_FragCoord.xy / windowSize;  // Now using uniform windowSize
     
-    for(int t = 0; t < num_texture_banks; t++) {
-        for(int sin_i = 0; sin_i < num_sinusoids_per_bank; sin_i++) {  // Fixed variable
-            vec4 bank_params = texelFetch(texture_bank_tex, ivec3(t, sin_i, 0), 0);
-            float wavelength = texelFetch(texture_bank_tex, ivec3(t, sin_i, 4), 0).r;
-            
-            float sin_p_amplitude = texelFetch(sin_p_tex, ivec2(polyIndex, 4), 0).r;
-            float sin_p_multiplier = texelFetch(sin_p_tex, ivec2(polyIndex, t+5), 0).r;
-            
-            float wave = sin(2.0 * 3.14159 / (wavelength * max_wavelength) * 
-                           (TexCoord.x * cos(bank_params.x * 2.0 * 3.14159) + 
-                            TexCoord.y * cos(bank_params.y * 2.0 * 3.14159) + 
-                            cos(bank_params.z * 2.0 * 3.14159)));
-            
-            final_color += ((wave + (sin_p_amplitude * max_amplitude)) * 
-                          (bank_params.w * max_amplitude) * 
-                          multiplier) * sin_p_multiplier;
-        }
-    }
+    // Convert polyIndex to texture coordinate between 0.0 and 1.0
+    float coord = float(polyIndex) / (textureSize(tex_1d, 0) - 1);
+    float amplitude = texture(tex_1d, coord).r;
     
-    final_color = final_color * 0.5 + 0.5;  // normalize to [0,1]
-    outColor = vec4(final_color, final_color, final_color, 1.0);
+    // Create 2D sinusoid pattern
+    const float frequency = 60.0;  // Adjust this value to change wave frequency
+    float wave = amplitude * sin(frequency * screenPos.x) * sin(frequency * screenPos.y);
+    
+    // Scale wave to [0,1] range
+    wave = wave * 0.5 + 0.5;
+    
+
+    //((sin(2 * π / (texture_bank_p[t,sin_i,4]*max_wavelength) * ((TexCoord[1]) * cos(texture_bank_p[t,sin_i,1]*2*π) + (TexCoord[2]) * cos(texture_bank_p[t,sin_i,2]*2*π) + (1.0) * cos(texture_bank_p[t,sin_i,3]*2*π)))+(sin_p[polyIndex,4] *max_amplitude))*(texture_bank_p[t,sin_i,5]*max_amplitude)*multiplier)*sin_p[polyIndex, t+5 ]
+
+
+    outColor = vec4(wave, wave, wave, 1.0);
+
+    //outColor = vec4(final_color, final_color, final_color, 1.0);
 }
 """
+
+
+# float final_color = 0.0;
+    
+# for(int t = 0; t < num_texture_banks; t++) {
+#     for(int sin_i = 0; sin_i < num_sinusoids_per_bank; sin_i++) {  // Fixed variable
+#         vec4 bank_params = texelFetch(texture_bank_tex, ivec3(t, sin_i, 0), 0);
+#         float wavelength = texelFetch(texture_bank_tex, ivec3(t, sin_i, 4), 0).r;
+        
+#         float sin_p_amplitude = texelFetch(sin_p_tex, ivec2(polyIndex, 4), 0).r;
+#         float sin_p_multiplier = texelFetch(sin_p_tex, ivec2(polyIndex, t+5), 0).r;
+        
+#         float wave = sin(2.0 * 3.14159 / (wavelength * max_wavelength) * 
+#                        (TexCoord.x * cos(bank_params.x * 2.0 * 3.14159) + 
+#                         TexCoord.y * cos(bank_params.y * 2.0 * 3.14159) + 
+#                         cos(bank_params.z * 2.0 * 3.14159)));
+        
+#         final_color += ((wave + (sin_p_amplitude * max_amplitude)) * 
+#                       (bank_params.w * max_amplitude) * 
+#                       multiplier) * sin_p_multiplier;
+#     }
+# }
+
+# final_color = final_color * 0.5 + 0.5;  // normalize to [0,1]
 
 
 function create_shader(source, shader_type)
@@ -212,6 +236,7 @@ function render(window, shader_program, VAO, colors, num_indices, tex_1d, sin_p_
     glUniform1i(glGetUniformLocation(shader_program, "texture_bank_tex"), 2)
 
     while !GLFW.WindowShouldClose(window)
+        print("****** ")
         GLFW.PollEvents()
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
@@ -231,9 +256,8 @@ function main(all_res, sv_means, windowWidth, windowHeight, texture_bank_p, sin_
     window = initialize_window(windowWidth, windowHeight, "Polygon Rendering")
     shader_program = create_shader_program()
     vertices, indices, colors, polygon_indices = prepare_data(all_res)
-    num_indices = length(indices)  # Added this line
     VAO = upload_data(vertices, indices, polygon_indices)
-    
+    num_indices=length(indices)
     # Create textures
     tex_1d = Ref{GLuint}()
     sin_p_tex = Ref{GLuint}()
