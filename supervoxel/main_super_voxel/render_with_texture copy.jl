@@ -30,31 +30,61 @@ void main()
 }
 """
 
+"""
+Fragment shader should take into account the poligon index that is indicating which parameters of sinusoids to use for texture generation.
+main equation is :((sin(2 * π / (texture_bank_p[t,sin_i,4]*max_wavelength) * ((TexCoord[1]) * cos(texture_bank_p[t,sin_i,1]*2*π) + (TexCoord[2]) * cos(texture_bank_p[t,sin_i,2]*2*π) + (1.0) * cos(texture_bank_p[t,sin_i,3]*2*π)))+(sin_p[polyIndex,4] *max_amplitude))*(texture_bank_p[t,sin_i,5]*max_amplitude)*multiplier)*sin_p[polyIndex, t+5 ]
+part of the parameters are stored in the texture_bank_p and part in sin_p arrays both should be encoded as two dimensional textures and passed to the shader 
+polyIndex is intended to be integer value that is used to index the texture values from passed texture parameters  ; num_texture_banks and num_sinusoids_per_bank are used and should be loaded as uniforms
+TexCoord - is coordinate of 2 dimensional texture that is covering current shape its values should be between beg_image, and end Image uniforms (for first dimension beg_image_x, end_image_x
+, for second dimension beg_image_y, end_image_y) TexCoord[1] and TexCoord[2] apart from being in the specified range should take into account location in the whole window not only in the current shape 
+"""
 
 const fragment_shader_source = """
 #version 330 core
 
 uniform sampler1D tex_1d;
+uniform sampler2D sin_p_tex;
+uniform sampler3D texture_bank_tex;
 uniform vec2 windowSize;
+uniform int num_texture_banks;
+uniform int num_sinusoids_per_bank;
+uniform float max_wavelength;
+uniform float max_amplitude;
+uniform float multiplier;
+
 flat in int polyIndex;
 out vec4 outColor;
 
 void main() {
-    // Get screen coordinates
-    vec2 screenPos = gl_FragCoord.xy / windowSize;  // Now using uniform windowSize
+    vec2 TexCoord = gl_FragCoord.xy / windowSize;
+    float final_color = 0.0;
     
-    // Convert polyIndex to texture coordinate between 0.0 and 1.0
-    float coord = float(polyIndex) / (textureSize(tex_1d, 0) - 1);
-    float amplitude = texture(tex_1d, coord).r;
+    for(int t = 0; t < num_texture_banks; t++) {
+        for(int sin_i = 0; sin_i < num_sinusoids_per_bank; sin_i++) {
+            // Access texture_bank_p parameters using 3D texture
+            vec4 bank_params = texelFetch(texture_bank_tex, 
+                                        ivec3(t, sin_i, 0), 0);
+            float bank_amplitude = texelFetch(texture_bank_tex, 
+                                           ivec3(t, sin_i, 4), 0).r;
+            
+            // Access sin_p parameters using 2D texture
+            float sin_p_amplitude = texelFetch(sin_p_tex, 
+                                             ivec2(polyIndex, 4), 0).r;
+            float sin_p_multiplier = texelFetch(sin_p_tex, 
+                                              ivec2(polyIndex, t+5), 0).r;
+            
+            float wave = sin(2.0 * 3.14159 / (bank_params.w * max_wavelength) * 
+                           (TexCoord.x * cos(bank_params.x * 2.0 * 3.14159) + 
+                            TexCoord.y * cos(bank_params.y * 2.0 * 3.14159) + 
+                            1.0 * cos(bank_params.z * 2.0 * 3.14159)));
+                            
+            final_color += ((wave + (sin_p_amplitude * max_amplitude)) * 
+                           (bank_amplitude * max_amplitude) * 
+                           multiplier) * sin_p_multiplier;
+        }
+    }
     
-    // Create 2D sinusoid pattern
-    const float frequency = 60.0;  // Adjust this value to change wave frequency
-    float wave = amplitude * sin(frequency * screenPos.x) * sin(frequency * screenPos.y);
-    
-    // Scale wave to [0,1] range
-    wave = wave * 0.5 + 0.5;
-    
-    outColor = vec4(wave, wave, wave, 1.0);
+    outColor = vec4(final_color, final_color, final_color, 1.0);
 }
 """
 
@@ -173,8 +203,21 @@ function upload_data(vertices, indices, polygon_indices)
 end
 
 
-function render(window, shader_program, VAO, colors, num_indices, tex_1d)
+function render(window, shader_program, VAO, colors, num_indices, tex_1d, sin_p_tex, texture_bank_tex)
     glUseProgram(shader_program)
+
+    # Bind textures to different texture units
+    glActiveTexture(GL_TEXTURE0)
+    glBindTexture(GL_TEXTURE_1D, tex_1d)
+    glUniform1i(glGetUniformLocation(shader_program, "tex_1d"), 0)
+
+    glActiveTexture(GL_TEXTURE1)
+    glBindTexture(GL_TEXTURE_2D, sin_p_tex)
+    glUniform1i(glGetUniformLocation(shader_program, "sin_p_tex"), 1)
+
+    glActiveTexture(GL_TEXTURE2)
+    glBindTexture(GL_TEXTURE_3D, texture_bank_tex)
+    glUniform1i(glGetUniformLocation(shader_program, "texture_bank_tex"), 2)
 
     # Set colors uniform
     color_location = glGetUniformLocation(shader_program, "colors")
@@ -184,11 +227,6 @@ function render(window, shader_program, VAO, colors, num_indices, tex_1d)
     window_size_location = glGetUniformLocation(shader_program, "windowSize")
     width, height = GLFW.GetWindowSize(window)
     glUniform2f(window_size_location, Float32(width), Float32(height))
-
-    # Bind the texture and set the uniform
-    glActiveTexture(GL_TEXTURE0)
-    glBindTexture(GL_TEXTURE_1D, tex_1d)
-    glUniform1i(glGetUniformLocation(shader_program, "tex_1d"), 0)
 
     while !GLFW.WindowShouldClose(window)
         GLFW.PollEvents()
@@ -206,36 +244,10 @@ function render(window, shader_program, VAO, colors, num_indices, tex_1d)
 end
 
 
-function main(all_res, sv_means,windowWidth,windowHeight)
-    window = initialize_window(800, 600, "Polygon Rendering")
+function main(all_res, sv_means,windowWidth,windowHeight,texture_bank_p,sin_p)
+    window = initialize_window(windowWidth, windowHeight, "Polygon Rendering")
     shader_program = create_shader_program()
     vertices, indices, colors, polygon_indices = prepare_data(all_res)
-    VAO = upload_data(vertices, indices, polygon_indices)
-    print("\n ppppppppp $(size(polygon_indices))  max  $(maximum(polygon_indices)) \n")
-    num_indices = length(indices)
-
-    # Initialize a 1D texture with sv_means data
-    tex_1d = Ref{GLuint}()
-    glGenTextures(1, tex_1d)
-    glBindTexture(GL_TEXTURE_1D, tex_1d[])
-    glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
-    glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
-    glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
-    glTexImage1D(GL_TEXTURE_1D, 0, GL_R32F, length(sv_means), 0, GL_RED, GL_FLOAT, pointer(sv_means))
-
-    render(window, shader_program, VAO, colors, num_indices, tex_1d[])
-end
-
-# Example usage (replace `all_res` with your actual data)
-# all_res = [
-#     [  # Polygon 1
-#         [ (0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.5, 1.0, 0.0) ],  # Triangle 1
-#         # ... more triangles
-#     ],
-#     [  # Polygon 2
-#         [ (0.0, 0.0, 0.0), (1.0, 1.0, 0.0), (0.0, 1.0, 0.0) ],  # Triangle 1
-#         # ... more triangles
-#     ],
 #     # ... more polygons
 # ]
 
@@ -257,5 +269,28 @@ radiuss = (Float32(4.5), Float32(4.5), Float32(4.5))
 
 all_res = main_get_poligon_data(tetr_dat, axis, plane_dist, radiuss)
 
+
+
+function get_num_tetr_in_sv()
+    return 48
+end
+
+
+
+### prepare data for texture
+sizz_out = size(out_sampled_points)
+batch_size = sizz_out[end]
+n_tetr = get_num_tetr_in_sv()
+num_sv = Int(round(sizz_out[1] / n_tetr))
+
+texture_bank_p = rand(Float32, num_texture_banks, num_sinusoids_per_bank, 5)
+
+sin_p = rand(Float32, sizz_out[1], num_texture_banks + 6) .* 2
+sin_p_a = sin_p[:, 1:5]
+sin_p_b = softmax(sin_p[:, 6:end], dims=2)
+sin_p = cat(sin_p_a, sin_p_b, dims=2)
+
+
+
 windowWidth,windowHeight=800,800
-main(all_res, sv_means,windowWidth,windowHeight)
+main(all_res, sv_means,windowWidth,windowHeight,texture_bank_p,sin_p)
