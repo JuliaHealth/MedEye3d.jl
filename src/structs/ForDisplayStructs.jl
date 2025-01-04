@@ -297,11 +297,19 @@ Structure for MainMedEye3d, initialized with keyword arguments in coordinateDisp
   displayMode::DisplayMode = SingleImage
 end
 
+
+"""
+Struct for holding information necessary for attaining the texture along with its voxel data
+"""
 @with_kw mutable struct DisplayedVoxels
   activeNumb::Union{Vector{Int32},Int32} = Int32(1)
   voxelData::Vector{Array{Float32,3}} = Vector{Array{Float32,3}}()
 end
 
+
+"""
+Struct for holding the user generated voxel data
+"""
 @with_kw mutable struct CustomDisplayedVoxels
   voxelData::Vector{Array{Float32,3}} = Vector{Array{Float32,3}}()
   # scrollDat::FullScrollableDat = FullScrollableDat()
