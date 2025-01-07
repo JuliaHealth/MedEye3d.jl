@@ -5,7 +5,7 @@ using MedEye3d
 # https://drive.google.com/file/d/1PqHTQXOVTWx0FQSDE0oH4hRKNCE9jCx8/view?usp=drive_link
 #modify paths to your downloaded data accordingly
 
-ctNiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/ct_soft_pat_3_sudy_0.nii.gz"
+ctNiftiImage = "/home/hurtbadly/Downloads/ct_soft_pat_3_sudy_0.nii.gz"
 petNiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
 newImage = "D:/mingw_installation/home/hurtbadly/Downloads/volume-0.nii.gz"
 strangeSpacingImage = "D:/mingw_installation/home/hurtbadly/Downloads/Output Volume_1.nii.gz"
@@ -19,20 +19,20 @@ NOTE : only one type of modality at a time in multi-image is supported.
 """
 
 #For single image display
-medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([ctNiftiImage]) #singleImageDisplay
+medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([(ctNiftiImage, "CT")]) #singleImageDisplay
 #or we can also just passa the path itself
-# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(petNiftiImage) #singleImageDisplay
+#medEyeStruct = MedEye3d.SegmentationDisplay.displayImage((petNiftiImage,"PET")) #singleImageDisplay
 
 
 #For multi image display
-# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[ctNiftiImage], [ctNiftiImage]]) #multi image displays
+#medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[(ctNiftiImage, "CT")], [(ctNiftiImage, "CT")]]) #multi image displays
 
-# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([ctNiftiImage]) #singleImageDisplay
+#medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([(ctNiftiImage, "CT")]) #singleImageDisplay
 
 
 #Supervoxels
 #For conversion of h5 to nifti
-# MedEye3d.ShadersAndVerticiesForSupervoxels.populateNiftiWithH5(ctNiftiImage, h5File, h5NiftiImage)
+#MedEye3d.ShadersAndVerticiesForSupervoxels.populateNiftiWithH5(ctNiftiImage, h5File, h5NiftiImage)
 
 #for visualization
 
@@ -46,14 +46,14 @@ medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([ctNiftiImage]) #single
 
 #For modification of display data
 
-displayData = MedEye3d.DisplayDataManag.getDisplayedData(medEyeStruct, [Int32(1), Int32(2)]) #passing the active texture number
+#displayData = MedEye3d.DisplayDataManag.getDisplayedData(medEyeStruct, [Int32(1), Int32(2)]) #passing the active texture number
 
 # #we need to check if the return type of the displayData is a single Array{Float32,3} or a vector{Array{Float32,3}}
 # # now in this case we are setting random noise over the manualModif Texture voxel layer, and the manualModif texture defaults to 2 for active number
 
-displayData[2][:, :, :] = randn(Float32, size(displayData[2]))
+#displayData[2][:, :, :] = randn(Float32, size(displayData[2]))
 
 # # @info "look here" typeof(displayData)
-MedEye3d.DisplayDataManag.setDisplayedData(medEyeStruct, displayData)
+#MedEye3d.DisplayDataManag.setDisplayedData(medEyeStruct, displayData)
 
 
