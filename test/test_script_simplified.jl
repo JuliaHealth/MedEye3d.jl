@@ -6,26 +6,39 @@ using MedEye3d
 #modify paths to your downloaded data accordingly
 
 ctNiftiImage = "/home/hurtbadly/Downloads/ct_soft_pat_3_sudy_0.nii.gz"
-petNiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
+petNiftiImage = "/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
 newImage = "D:/mingw_installation/home/hurtbadly/Downloads/volume-0.nii.gz"
 strangeSpacingImage = "D:/mingw_installation/home/hurtbadly/Downloads/Output Volume_1.nii.gz"
 extremeTestImage = "D:/mingw_installation/home/hurtbadly/Downloads/extreme_test_one.nii.gz"
 bmaNiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/bma.nii.gz"
 h5File = "D:/mingw_installation/home/hurtbadly/Downloads/locc.h5"
 h5NiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/hdf5.nii.gz"
+firstDicomImage = "/home/hurtbadly/Desktop/julia_stuff/medical_imaging/MedImages.jl/test_data/ScalarVolume_0"
 
 """
 NOTE : only one type of modality at a time in multi-image is supported.
 """
 
-#For single image display
-medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([(ctNiftiImage, "CT")]) #singleImageDisplay
-#or we can also just passa the path itself
-#medEyeStruct = MedEye3d.SegmentationDisplay.displayImage((petNiftiImage,"PET")) #singleImageDisplay
+# For Single Image Mode
+dicomImageArg = (firstDicomImage,"CT")
+petImageArg = (petNiftiImage, "PET")
+ctImageArg = (ctNiftiImage, "CT")
+
+# -- Overlaid images in SIngle image mode
+petOverlaidImagesArg = [ctImageArg, petImageArg]
 
 
 #For multi image display
-#medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[(ctNiftiImage, "CT")], [(ctNiftiImage, "CT")]]) #multi image displays
+dicomImagesArg = [[dicomImageArg],[dicomImageArg]]
+petImagesArg = [[petImageArg], [petImageArg]]
+niftiImagesArg = [[ctImageArg],[ctImageArg]]
+
+# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(dicomImageArg) #singleImageDisplay
+# or we can also just passa the path itself
+medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(petOverlaidImagesArg) #singleImageDisplay
+
+
+# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(petImagesArg) #multi image displays
 
 #medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([(ctNiftiImage, "CT")]) #singleImageDisplay
 

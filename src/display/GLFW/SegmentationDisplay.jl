@@ -615,8 +615,7 @@ function displayImage(
 
     medImageData::Union{Vector{MedImages.MedImage},Vector{Vector{MedImages.MedImage}}} = loadRegisteredImages(studySrc)
     #NOTE : for overlaid images, they need to be resampled first
-    #NOIE : Dicom is currently not supported, due to the lack of support for Dicom in MedImages.jl
-
+    
     if isempty(textureSpecArray) && isempty(voxelDataTupleVector) && isempty(spacings) && isempty(origins)
         #Reassigning textureSpecArray, voxelDataTupleVector, spacings  depending upong the typeof studySrc
         textureSpecArray = typeof(studySrc) == Vector{Vector{Tuple{String,String}}} ? Vector{Vector{TextureSpec}}() : Vector{TextureSpec}()
@@ -830,6 +829,7 @@ Disabling the concept of overlaid images in multi-image display mode. Thought ma
 Advise Users to restart their Julia REPL session once they are done with the visualization
 Advise Users to only change the plane of the left image in multi-image display for crosshair display.
 ADvise users when willing to display hdf5 data first convert into nifti with the function and then display normally
+Loading of DICOM Series is Supported now 
 
 NOTS:
 return stuff similar to words_display for each calcDimStruct in the vector of calcDims
