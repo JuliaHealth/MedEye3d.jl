@@ -528,23 +528,23 @@ Loading Nifti volumes or Dicom Series with MedImages.jl package.
 Single Image or Multi-Image display supported.
 """
 function loadRegisteredImages(
-    studySrc::Union{Vector{String},String,Vector{Vector{String}}}
+    studySrc::Union{Vector{Tuple{String,String}},Tuple{String,String},Vector{Vector{Tuple{String,String}}}}
 )
 
-    medImageDataInstances::Union{Vector{MedImages.MedImage},Vector{Vector{MedImages.MedImage}}} = typeof(studySrc) == Vector{Vector{String}} ? Vector{Vector{MedImages.MedImage}}() : Vector{MedImages.MedImage}()
+medImageDataInstances::Union{Vector{MedImages.MedImage},Vector{Vector{MedImages.MedImage}}} = typeof(studySrc) == Vector{Vector{Tuple{String,String}}} ? Vector{Vector{MedImages.MedImage}}() : Vector{MedImages.MedImage}()
 
-    if typeof(studySrc) == String
-        push!(medImageDataInstances, MedImages.load_image(studySrc))
-    elseif typeof(studySrc) == Vector{String}
+if typeof(studySrc) == Tuple{String,String}
+  push!(medImageDataInstances, MedImages.Load_and_save.load_image(studySrc[1], studySrc[2]))
+elseif typeof(studySrc) == Vector{Tuple{String,String}}
         for studySrcPath in studySrc
-            push!(medImageDataInstances, MedImages.load_image(studySrcPath))
+          push!(medImageDataInstances, MedImages.Load_and_save.load_image(studySrcPath[1], studySrcPath[2]))
         end
 
-    elseif typeof(studySrc) == Vector{Vector{String}}
+      elseif typeof(studySrc) == Vector{Vector{Tuple{String,String}}}
         for studySrcVector in studySrc
             medImageInnerVector::Vector{MedImages.MedImage} = Vector{MedImages.MedImage}()
             for studySrcPath in studySrcVector
-                push!(medImageInnerVector, MedImages.load_image(studySrcPath))
+              push!(medImageInnerVector, MedImages.Load_and_save.load_image(studySrcPath[1],studySrcPath[2]))
             end
             push!(medImageDataInstances, medImageInnerVector)
         end
@@ -552,36 +552,36 @@ function loadRegisteredImages(
 
 
 
-    if typeof(medImageDataInstances) == Vector{MedImages.MedImage}
+if typeof(medImageDataInstances) == Vector{MedImages.MedImage}
 
-        for medImageDataInstance in medImageDataInstances
-            #permuting the voxelData to some default orientation, such that the image is not inverted or sideways
-            medImageDataInstance.voxel_data = permutedims(medImageDataInstance.voxel_data, (3, 2, 1)) #previously in the test script the default was (3, 2, 1)
-            sizeInfo = size(medImageDataInstance.voxel_data)
-            for outerNum in 1:sizeInfo[1]
-                for innerNum in 1:sizeInfo[3]
-                    medImageDataInstance.voxel_data[outerNum, :, innerNum] = reverse(medImageDataInstance.voxel_data[outerNum, :, innerNum])
-                end
-            end
-            #Float conversion happens here for voxelData, currently only Floats are supported to keep it simple
-            medImageDataInstance.voxel_data = Float32.(medImageDataInstance.voxel_data)
-        end
+for medImageDataInstance in medImageDataInstances
+#permuting the voxelData to some default orientation, such that the image is not inverted or sideways
+#medImageDataInstance.voxel_data = permutedims(medImageDataInstance.voxel_data, (3, 2, 1)) #previously in the test script the default was (3, 2, 1)
+sizeInfo = size(medImageDataInstance.voxel_data)
+for outerNum in 1:sizeInfo[1]
+for innerNum in 1:sizeInfo[3]
+medImageDataInstance.voxel_data[outerNum, :, innerNum] = reverse(medImageDataInstance.voxel_data[outerNum, :, innerNum])
+end
+end
+#Float conversion happens here for voxelData, currently only Floats are supported to keep it simple
+medImageDataInstance.voxel_data = Float32.(medImageDataInstance.voxel_data)
+end
 
-    elseif typeof(medImageDataInstances) == Vector{Vector{MedImages.MedImage}}
-        for medImageInnerVector in medImageDataInstances
-            for medImageDataInstance in medImageInnerVector
-                medImageDataInstance.voxel_data = permutedims(medImageDataInstance.voxel_data, (3, 2, 1)) #previously in the test script the default was (3, 2, 1)
-                sizeInfo = size(medImageDataInstance.voxel_data)
-                for outerNum in 1:sizeInfo[1]
-                    for innerNum in 1:sizeInfo[3]
-                        medImageDataInstance.voxel_data[outerNum, :, innerNum] = reverse(medImageDataInstance.voxel_data[outerNum, :, innerNum])
-                    end
-                end
-                #Float conversion happens here for voxelData, currently only Floats are supported to keep it simple
-                medImageDataInstance.voxel_data = Float32.(medImageDataInstance.voxel_data)
-            end
-        end
-    end
+elseif typeof(medImageDataInstances) == Vector{Vector{MedImages.MedImage}}
+for medImageInnerVector in medImageDataInstances
+for medImageDataInstance in medImageInnerVector
+#medImageDataInstance.voxel_data = permutedims(medImageDataInstance.voxel_data, (3, 2, 1)) #previously in the test script the default was (3, 2, 1)
+sizeInfo = size(medImageDataInstance.voxel_data)
+for outerNum in 1:sizeInfo[1]
+for innerNum in 1:sizeInfo[3]
+medImageDataInstance.voxel_data[outerNum, :, innerNum] = reverse(medImageDataInstance.voxel_data[outerNum, :, innerNum])
+end
+end
+#Float conversion happens here for voxelData, currently only Floats are supported to keep it simple
+medImageDataInstance.voxel_data = Float32.(medImageDataInstance.voxel_data)
+end
+end
+end
 
     return medImageDataInstances #returns the vector of MedImages or a Vector of Vector of MedImages
 end
@@ -593,7 +593,7 @@ end
 High Level Initialisation function for the visualizer
 """
 function displayImage(
-    studySrc::Union{Vector{String},String,Vector{Vector{String}}}
+    studySrc::Union{Vector{Tuple{String,String}},Tuple{String,String},Vector{Vector{Tuple{String,String}}}}
     ; textureSpecArray::Union{Vector{TextureSpec},Vector{Vector{TextureSpec}}}=Vector{TextureSpec}(),
     voxelDataTupleVector::Union{Vector{Any},Vector{Vector{Any}}}=[],
     spacings::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
@@ -605,7 +605,7 @@ function displayImage(
 
 
     #asserting that the length of the studySrc is 2, if it is a multi-dimensions vector
-    if typeof(studySrc) == Vector{Vector{String}}
+    if typeof(studySrc) == Vector{Vector{Tuple{String,String}}}
         try
             @assert length(studySrc) == 2
         catch assertionError
@@ -615,14 +615,13 @@ function displayImage(
 
     medImageData::Union{Vector{MedImages.MedImage},Vector{Vector{MedImages.MedImage}}} = loadRegisteredImages(studySrc)
     #NOTE : for overlaid images, they need to be resampled first
-    #NOIE : Dicom is currently not supported, due to the lack of support for Dicom in MedImages.jl
-
+    
     if isempty(textureSpecArray) && isempty(voxelDataTupleVector) && isempty(spacings) && isempty(origins)
         #Reassigning textureSpecArray, voxelDataTupleVector, spacings  depending upong the typeof studySrc
-        textureSpecArray = typeof(studySrc) == Vector{Vector{String}} ? Vector{Vector{TextureSpec}}() : Vector{TextureSpec}()
-        voxelDataTupleVector = typeof(studySrc) == Vector{Vector{String}} ? Vector{Vector{Any}}() : Vector{Any}()
-        spacings = typeof(studySrc) == Vector{Vector{String}} ? Vector{Vector{Tuple{Float64,Float64,Float64}}}() : Vector{Tuple{Float64,Float64,Float64}}()
-        origins = typeof(studySrc) == Vector{Vector{String}} ? Vector{Vector{Tuple{Float64,Float64,Float64}}}() : Vector{Tuple{Float64,Float64,Float64}}()
+        textureSpecArray = typeof(studySrc) == Vector{Vector{Tuple{String,String}}} ? Vector{Vector{TextureSpec}}() : Vector{TextureSpec}()
+        voxelDataTupleVector = typeof(studySrc) == Vector{Vector{Tuple{String,String}}} ? Vector{Vector{Any}}() : Vector{Any}()
+        spacings = typeof(studySrc) == Vector{Vector{Tuple{String,String}}} ? Vector{Vector{Tuple{Float64,Float64,Float64}}}() : Vector{Tuple{Float64,Float64,Float64}}()
+        origins = typeof(studySrc) == Vector{Vector{Tuple{String,String}}} ? Vector{Vector{Tuple{Float64,Float64,Float64}}}() : Vector{Tuple{Float64,Float64,Float64}}()
 
         if typeof(medImageData) == Vector{MedImages.MedImage}
             for (index, medImage) in enumerate(medImageData)
@@ -830,6 +829,7 @@ Disabling the concept of overlaid images in multi-image display mode. Thought ma
 Advise Users to restart their Julia REPL session once they are done with the visualization
 Advise Users to only change the plane of the left image in multi-image display for crosshair display.
 ADvise users when willing to display hdf5 data first convert into nifti with the function and then display normally
+Loading of DICOM Series is Supported now 
 
 NOTS:
 return stuff similar to words_display for each calcDimStruct in the vector of calcDims

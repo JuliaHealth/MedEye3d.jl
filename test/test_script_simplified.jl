@@ -5,34 +5,47 @@ using MedEye3d
 # https://drive.google.com/file/d/1PqHTQXOVTWx0FQSDE0oH4hRKNCE9jCx8/view?usp=drive_link
 #modify paths to your downloaded data accordingly
 
-ctNiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/ct_soft_pat_3_sudy_0.nii.gz"
-petNiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
+ctNiftiImage = "/home/hurtbadly/Downloads/ct_soft_pat_3_sudy_0.nii.gz"
+petNiftiImage = "/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
 newImage = "D:/mingw_installation/home/hurtbadly/Downloads/volume-0.nii.gz"
 strangeSpacingImage = "D:/mingw_installation/home/hurtbadly/Downloads/Output Volume_1.nii.gz"
 extremeTestImage = "D:/mingw_installation/home/hurtbadly/Downloads/extreme_test_one.nii.gz"
 bmaNiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/bma.nii.gz"
 h5File = "D:/mingw_installation/home/hurtbadly/Downloads/locc.h5"
 h5NiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/hdf5.nii.gz"
+firstDicomImage = "/home/hurtbadly/Desktop/julia_stuff/medical_imaging/MedImages.jl/test_data/ScalarVolume_0"
 
 """
 NOTE : only one type of modality at a time in multi-image is supported.
 """
 
-#For single image display
-medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([ctNiftiImage]) #singleImageDisplay
-#or we can also just passa the path itself
-# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(petNiftiImage) #singleImageDisplay
+# For Single Image Mode
+dicomImageArg = (firstDicomImage,"CT")
+petImageArg = (petNiftiImage, "PET")
+ctImageArg = (ctNiftiImage, "CT")
+
+# -- Overlaid images in SIngle image mode
+petOverlaidImagesArg = [ctImageArg, petImageArg]
 
 
 #For multi image display
-# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[ctNiftiImage], [ctNiftiImage]]) #multi image displays
+dicomImagesArg = [[dicomImageArg],[dicomImageArg]]
+petImagesArg = [[petImageArg], [petImageArg]]
+niftiImagesArg = [[ctImageArg],[ctImageArg]]
 
-# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([ctNiftiImage]) #singleImageDisplay
+# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(dicomImageArg) #singleImageDisplay
+# or we can also just passa the path itself
+medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(petOverlaidImagesArg) #singleImageDisplay
+
+
+# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(petImagesArg) #multi image displays
+
+#medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([(ctNiftiImage, "CT")]) #singleImageDisplay
 
 
 #Supervoxels
 #For conversion of h5 to nifti
-# MedEye3d.ShadersAndVerticiesForSupervoxels.populateNiftiWithH5(ctNiftiImage, h5File, h5NiftiImage)
+#MedEye3d.ShadersAndVerticiesForSupervoxels.populateNiftiWithH5(ctNiftiImage, h5File, h5NiftiImage)
 
 #for visualization
 
@@ -46,14 +59,14 @@ medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([ctNiftiImage]) #single
 
 #For modification of display data
 
-displayData = MedEye3d.DisplayDataManag.getDisplayedData(medEyeStruct, [Int32(1), Int32(2)]) #passing the active texture number
+#displayData = MedEye3d.DisplayDataManag.getDisplayedData(medEyeStruct, [Int32(1), Int32(2)]) #passing the active texture number
 
 # #we need to check if the return type of the displayData is a single Array{Float32,3} or a vector{Array{Float32,3}}
 # # now in this case we are setting random noise over the manualModif Texture voxel layer, and the manualModif texture defaults to 2 for active number
 
-displayData[2][:, :, :] = randn(Float32, size(displayData[2]))
+#displayData[2][:, :, :] = randn(Float32, size(displayData[2]))
 
 # # @info "look here" typeof(displayData)
-MedEye3d.DisplayDataManag.setDisplayedData(medEyeStruct, displayData)
+#MedEye3d.DisplayDataManag.setDisplayedData(medEyeStruct, displayData)
 
 
