@@ -1,0 +1,1 @@
+# Here goes information about integrating the MedImages API with your backend
