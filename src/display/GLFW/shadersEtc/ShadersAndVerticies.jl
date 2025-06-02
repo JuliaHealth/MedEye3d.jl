@@ -58,11 +58,10 @@ $(gslString)
 $( createCustomFramgentShader(listOfTexturesToCreate, color))
 """
 
-  for line in eachline(IOBuffer(fsh))
-    println(line)
-  end
-
-
+# For debugging shaders
+  # for line in eachline(IOBuffer(fsh))
+     # println(line)
+  # end
   return createShader(fsh, GL_FRAGMENT_SHADER)
 end
 

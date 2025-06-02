@@ -21,7 +21,7 @@ function displayAll(calcDimsStruct::CalcDimsStruct)
 
 
     if (Threads.nthreads() == 1)
-        println("increase number of available threads look into https://docs.julialang.org/en/v1/manual/multi-threading/  or modify for example in vs code extension")
+        @warn "increase number of available threads look into https://docs.julialang.org/en/v1/manual/multi-threading/  or modify for example in vs code extension"
     end
     # Create the window. This sets all the hints and makes the context current.
 
@@ -29,7 +29,7 @@ function displayAll(calcDimsStruct::CalcDimsStruct)
     window = initializeWindow(calcDimsStruct.windowWidth, calcDimsStruct.windowHeight)
 
     # The shaders
-    println(createcontextinfo())
+    createcontextinfo()
     gslsStr = get_glsl_version_string()
 
 

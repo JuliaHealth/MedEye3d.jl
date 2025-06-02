@@ -70,32 +70,17 @@ function reactToScroll(scrollNumb::Int64, mainStates::Vector{StateDataFields}, t
                       (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(current), mainState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
                                   (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=current, textToDisp=getTextForCurrentSlice(mainState.onScrollData, Int32(current)))
 
-
         updateImagesDisplayed(singleSlDat, mainState.mainForDisplayObjects, mainState.textDispObj, mainState.calcDimsStruct, mainState.valueForMasToSet, mainState.crosshairFields, mainState.mainRectFields, mainState.displayMode)
-
-
-
 
         """
         Added by me recently for testing
         Add a check here to only invoke this in singelImage display mode
         """
 
-        if mainState.displayMode == SingleImage
-            ShadersAndVerticiesForSupervoxels.renderSupervoxelLines(mainState.mainForDisplayObjects, mainState.supervoxelFields, mainState.mainRectFields, mainState.supervoxelVertAndInd)
+        if mainState.displayMode == SingleImage && !isempty(mainState.allSupervoxels)
+            current_slice_sv = getSvCurrentSlice(mainState.allSupervoxels, current)
+            ShadersAndVerticiesForSupervoxels.renderSupervoxelLines(mainState.mainForDisplayObjects, mainState.supervoxelFields, mainState.mainRectFields, current_slice_sv)
         end
-        """
-        END
-        """
-
-
-
-
-
-
-
-
-
 
         mainState.currentlyDispDat = singleSlDat
         # updating the last mouse position so when we will change plane it will better show actual position
@@ -116,8 +101,17 @@ function reactToScroll(scrollNumb::Int64, mainStates::Vector{StateDataFields}, t
 
 end#reactToScroll
 
+function getSvCurrentSlice(all_supervoxels::Dict{Int, Dict{String,Any}}, slice_number)
+    if haskey(all_supervoxels, slice_number)
+        return all_supervoxels[slice_number]
+    else
+        return Dict{String,Any}(
+            "supervoxel_vertices" => Float32[],
+            "supervoxel_indices" => UInt32[],
+            "slice_position" => Float64(slice_number)
+            )
 
-
-
+    end
+end
 
 end #ReactToScroll

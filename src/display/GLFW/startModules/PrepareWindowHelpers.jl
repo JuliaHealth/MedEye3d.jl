@@ -9,8 +9,8 @@ using GLFW, ModernGL
 
 
 export createDAtaBuffer, createCrosshairDAtaBuffer, createElementBuffer, createVertexBuffer, encodeDataFromDataBuffer, controllWindowInput, initializeWindow
-
-
+export createDynamicDataBuffer, createDynamicElementBuffer
+export createDynamicDAtaBuffer
 
 """
 data is loaded into a buffer which passes it into thw GPU for futher processing
@@ -40,6 +40,38 @@ function createDynamicDAtaBuffer(positions)
     glBindBuffer(GL_ARRAY_BUFFER, vbo[])
     glBufferData(GL_ARRAY_BUFFER, sizeof(positions), positions, GL_DYNAMIC_DRAW)
     return vbo
+end
+
+"""
+Dynamic data buffer vbo for crosshair display
+    vbo is dynamic
+    for ebo its unnecessary to make it dynamic since the indices that make
+    up the crosshair remain constant.
+"""
+function createDynamicDataBuffer(data::Vector{Float32})
+    vbo = Ref{UInt32}(0)
+    glGenBuffers(1, vbo)
+    glBindBuffer(GL_ARRAY_BUFFER, vbo[])
+    if !isempty(data)
+        glBufferData(GL_ARRAY_BUFFER, sizeof(data), data, GL_DYNAMIC_DRAW)
+    else
+        # Create empty buffer that can be resized later
+        glBufferData(GL_ARRAY_BUFFER, 0, C_NULL, GL_DYNAMIC_DRAW)
+    end
+    return vbo
+end
+
+function createDynamicElementBuffer(indices::Vector{UInt32})
+    ebo = Ref{UInt32}(0)
+    glGenBuffers(1, ebo)
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo[])
+    if !isempty(indices)
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_DYNAMIC_DRAW)
+    else
+        # Create empty buffer that can be resized later
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, 0, C_NULL, GL_DYNAMIC_DRAW)
+    end
+    return ebo
 end
 
 
