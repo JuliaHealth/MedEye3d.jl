@@ -194,28 +194,6 @@ function updateImagesDisplayed(
     displayMode::DisplayMode)
 
 
-    updateImagesDisplayed_inner(
-        singleSliceDat,
-        forDisplayConstants,
-        wordsDispObj,
-        calcDimStruct,
-        valueForMaskToSett,
-        crosshair,
-        mainRect,
-        displayMode)
-end
-
-function updateImagesDisplayed_inner(
-    singleSliceDat::SingleSliceDat,
-    forDisplayConstants::forDisplayObjects,
-    wordsDispObj::ForWordsDispStruct,
-    calcDimStruct::CalcDimsStruct,
-    valueForMaskToSett::valueForMasToSetStruct,
-    crosshair::GlShaderAndBufferFields,
-    mainRect::GlShaderAndBufferFields,
-    displayMode::DisplayMode)
-
-
 
     modulelistOfTextSpecs = forDisplayConstants.listOfTextSpecifications
 
@@ -238,8 +216,6 @@ function updateImagesDisplayed_inner(
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
 
     reactivateMainObj(forDisplayConstants.shader_program, forDisplayConstants.vbo, calcDimStruct)
-
-
     #only display crosshair in multi-image display mode
     # if displayMode == SingleImage
     OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
@@ -249,7 +225,6 @@ function updateImagesDisplayed_inner(
 
     glFinish()
 end
-
 
 
 """

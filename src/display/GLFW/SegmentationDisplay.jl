@@ -124,16 +124,34 @@ function getDisplayMode(listOfTextSpecs::Union{Vector{TextureSpec},Vector{Vector
 end
 
 
+
 """
 Carries out the initialization of shader and buffers for
 SuperVoxels
 """
-function initializeSupervoxels(vertex_shader, vao, ebo, vboVector, svVertAndInd)
-    vbo = vboVector[1] #Sinlge single image mode only rect vertex buffer
+function initializeSupervoxels(vertex_shader, vao, ebo, vboVector, allSupervoxels)
+    vbo = vboVector[1] # Single image mode only rect vertex buffer
     fragment_shader_supervoxel, shader_program_supervoxel = ShadersAndVerticiesForSupervoxels.createAndInitSupervoxelLineShaderProgram(vertex_shader)
     vao_supervoxel = PrepareWindowHelpers.createVertexBuffer()
-    vbo_supervoxel = PrepareWindowHelpers.createDynamicDAtaBuffer(svVertAndInd["supervoxel_vertices"])
-    ebo_supervoxel = PrepareWindowHelpers.createElementBuffer(svVertAndInd["supervoxel_indices"])
+
+    # Create initial empty buffers since we'll update them dynamically during scroll
+    # Get a sample supervoxel data to initialize buffers, or use empty arrays
+    initial_vertices = Float32[]
+    initial_indices = UInt32[]
+
+    # If we have supervoxel data, use the first slice as initial data
+    if !isempty(allSupervoxels)
+        first_slice_key = minimum(keys(allSupervoxels))
+        first_slice_data = allSupervoxels[first_slice_key]
+        if haskey(first_slice_data, "supervoxel_vertices") && haskey(first_slice_data, "supervoxel_indices")
+            initial_vertices = first_slice_data["supervoxel_vertices"]
+            initial_indices = first_slice_data["supervoxel_indices"]
+        end
+    end
+
+    # Create dynamic buffers
+    vbo_supervoxel = PrepareWindowHelpers.createDynamicDataBuffer(initial_vertices)
+    ebo_supervoxel = PrepareWindowHelpers.createDynamicElementBuffer(initial_indices)
 
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(Float32), Ptr{Nothing}(0))
     glEnableVertexAttribArray(0)
@@ -147,7 +165,6 @@ function initializeSupervoxels(vertex_shader, vao, ebo, vboVector, svVertAndInd)
         vbo=vbo_supervoxel,
         ebo=ebo_supervoxel
     )
-
 
     mainRect::GlShaderAndBufferFields = GlShaderAndBufferFields(
         vao=vao,
@@ -221,11 +238,13 @@ function coordinateDisplay(
     spacing::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
     origin::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
     svVertAndInd::Dict{String,Vector}=Dict{String,Vector}("supervoxel_vertices" => [], "supervoxel_indices" => []),
+    allSupervoxels::Dict{Int, Dict{String, Any}} = Dict{Int, Dict{String, Any}}(),
     windowWidth::Int=1200,
     windowHeight::Int=Int(round(windowWidth * fractionOfMainIm)),
     textTexturewidthh::Int32=Int32(2000),
     textTextureheightt::Int32=Int32(round((windowHeight / (windowWidth * (1 - fractionOfMainIm)))) * textTexturewidthh),
-    windowControlStruct::WindowControlStruct=WindowControlStruct()
+    windowControlStruct::WindowControlStruct=WindowControlStruct(),
+
 )
 
 
@@ -314,15 +333,8 @@ function coordinateDisplay(
     if displayMode == MultiImage
         crosshair, mainRects, textFields = initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader_words, vbo_words, shader_program_words)
     elseif displayMode == SingleImage
-        supervoxel, mainRect = initializeSupervoxels(vertex_shader, vao, ebo, vboVector, svVertAndInd)
+        supervoxel, mainRect = initializeSupervoxels(vertex_shader, vao, ebo, vboVector, allSupervoxels)
     end
-
-    """
-    end crosshair
-    """
-
-
-
 
     GLFW.MakeContextCurrent(window)
     # than we set those ..Uniforms, open gl types and using data from arguments  to fill texture specifications
@@ -400,7 +412,7 @@ function coordinateDisplay(
             # Initialization of GlShaderAndBufferFields for crosshair so different StateDataFields in multi-image mode
             stateInstances = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, crosshairFields=crosshair, mainRectFields=mainRects[index], textFields=textFields, spacingsValue=spacing[index], originValue=origin[index]) for (index, _) in enumerate(initializedTextures)]
         else
-            stateInstances = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, spacingsValue=spacing[index], originValue=origin[index], supervoxelFields=supervoxel, mainRectFields=mainRect, supervoxelVertAndInd=svVertAndInd) for (index, _) in enumerate(initializedTextures)]
+            stateInstances = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, spacingsValue=spacing[index], originValue=origin[index], supervoxelFields=supervoxel, mainRectFields=mainRect, allSupervoxels=allSupervoxels) for (index, _) in enumerate(initializedTextures)]
         end
         #Setting second state information to be 0, because we need to access information from the first state only
         if length(stateInstances) > 1 && displayMode == MultiImage
@@ -600,7 +612,8 @@ function displayImage(
     origins::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
     fractionOfMainImage::Float32=Float32(0.8),
     windowWidth::Int=1000,
-    svVertAndInd::Dict{String,Vector}=Dict{String,Vector}("supervoxel_vertices" => [], "supervoxel_indices" => [])
+    svVertAndInd::Dict{String,Vector}=Dict{String,Vector}("supervoxel_vertices" => [], "supervoxel_indices" => []),
+    all_supervoxels::Dict{Int,Dict{String,Any}}=Dict{Int, Dict{String,Any}}()
 )
 
 
@@ -615,7 +628,7 @@ function displayImage(
 
     medImageData::Union{Vector{MedImages.MedImage},Vector{Vector{MedImages.MedImage}}} = loadRegisteredImages(studySrc)
     #NOTE : for overlaid images, they need to be resampled first
-    
+
     if isempty(textureSpecArray) && isempty(voxelDataTupleVector) && isempty(spacings) && isempty(origins)
         #Reassigning textureSpecArray, voxelDataTupleVector, spacings  depending upong the typeof studySrc
         textureSpecArray = typeof(studySrc) == Vector{Vector{Tuple{String,String}}} ? Vector{Vector{TextureSpec}}() : Vector{TextureSpec}()
@@ -790,7 +803,8 @@ function displayImage(
     end
 
 
-    medEye3dChannelInstance = coordinateDisplay(textureSpecArray, fractionOfMainImage, datToScrollDimsB, spacings, origins, svVertAndInd, windowWidth)
+
+    medEye3dChannelInstance = coordinateDisplay(textureSpecArray, fractionOfMainImage, datToScrollDimsB, spacings, origins, svVertAndInd, all_supervoxels, windowWidth)
 
 
 
@@ -829,7 +843,7 @@ Disabling the concept of overlaid images in multi-image display mode. Thought ma
 Advise Users to restart their Julia REPL session once they are done with the visualization
 Advise Users to only change the plane of the left image in multi-image display for crosshair display.
 ADvise users when willing to display hdf5 data first convert into nifti with the function and then display normally
-Loading of DICOM Series is Supported now 
+Loading of DICOM Series is Supported now
 
 NOTS:
 return stuff similar to words_display for each calcDimStruct in the vector of calcDims
