@@ -32,7 +32,7 @@ petOverlaidImagesArg = [ctImageArg, petImageArg]
 # petImagesArg = [[petImageArg], [petImageArg]]
 # niftiImagesArg = [[ctImageArg],[ctImageArg]]
 
-smedEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[petImageArg], [petImageArg]]) #singleImageDisplay
+# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(petImageArg) #singleImageDisplay
 
 # or we can also just passa the path itself
 # medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(ctImageArg) #singleImageDisplay
@@ -46,11 +46,11 @@ smedEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[petImageArg], [petIm
 # Supervoxels
 # For conversion of h5 to nifti
 # MedEye3d.ShadersAndVerticiesForSupervoxels.populateNiftiWithH5(ctNiftiImage, h5File, h5NiftiImage)
-
+#
 # for visualization
 
-# supervoxelDict = MedEye3d.ShadersAndVerticiesForSupervoxels.processVerticesAndIndicesForSv(h5File, "tetr_dat")
-# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(h5ImageArg; all_supervoxels=supervoxelDict)
+supervoxelDict = MedEye3d.ShadersAndVerticiesForSupervoxels.processVerticesAndIndicesForSv(h5File, "tetr_dat")
+medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(h5ImageArg; all_supervoxels=supervoxelDict)
 
 # This is for when we have a ctNiftiImage and we were testing modifying the display data from hdf5 so we sill image and supervoxels
 # displayData[1][1:128, 1:128, 1:128] = fb["im"][:, :, :]

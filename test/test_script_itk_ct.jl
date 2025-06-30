@@ -66,24 +66,24 @@ dirOfExample = "D:/mingw_installation/home/hurtbadly/Downloads/ct_soft_pat_3_sud
 dirOfExamplePET = "D:/mingw_installation/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
 
 # in most cases dimensions of PET and CT data arrays will be diffrent in order to make possible to display them we need to resample and make dimensions equal
-# imagePET = getImageFromDirectory(dirOfExamplePET, true, false)
+imagePET = getImageFromDirectory(dirOfExamplePET, true, false)
 ctImage = getImageFromDirectory(resample_image, true, false)
-# pet_image_resampled = sitk.Resample(imagePET, ctImage)
+pet_image_resampled = sitk.Resample(imagePET, ctImage)
 
 ctPixels, ctSpacing = getPixelsAndSpacing(ctImage)
 # In my case PET data holds 64 bit floats what is unsupported by Opengl
-# petPixels, petSpacing = getPixelsAndSpacing(pet_image_resampled)
-# purePetPixels, PurePetSpacing = getPixelsAndSpacing(imagePET)
+petPixels, petSpacing = getPixelsAndSpacing(pet_image_resampled)
+purePetPixels, PurePetSpacing = getPixelsAndSpacing(imagePET)
 
-# petPixels = Float32.(petPixels)
+petPixels = Float32.(petPixels)
 ctPixels = Float32.(ctPixels)
 
 # we need to pass some metadata about image array size and voxel dimensions to enable proper display
 datToScrollDimsB = MedEye3d.ForDisplayStructs.DataToScrollDims(imageSize=size(ctPixels), voxelSize=ctSpacing, dimensionToScroll=3);
 
 
-# purePetMedian = median(petPixels)
-# purePetStd = std(petPixels)
+purePetMedian = median(petPixels)
+purePetStd = std(petPixels)
 # example of texture specification used - we need to describe all arrays we want to display, to see all possible configurations look into TextureSpec struct docs .
 textureSpecificationsPETCT::Vector{TextureSpec} = [
     TextureSpec{Float32}(
