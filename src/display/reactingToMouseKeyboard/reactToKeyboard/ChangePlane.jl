@@ -3,7 +3,7 @@ controls changing plane for example from transverse to saggital ...
 """
 module ChangePlane
 using ModernGL, GLFW, Dictionaries, Parameters, DataTypesBasic, Setfield
-using ..DisplayWords, ..StructsManag, ..PrepareWindow, ..DataStructs, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms
+using ..DisplayWords, ..StructsManag, ..PrepareWindow, ..DataStructs, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms, ..ReactToScroll, ..ShadersAndVerticiesForSupervoxels
 
 """
 In case we want to change the dimansion of scrolling so for example from transverse to coronal ...
@@ -53,6 +53,12 @@ function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObjec
     stateObject.onScrollData.dimensionToScroll = toScrollDat.dimensionToScroll
     stateObject.onScrollData.dataToScrollDims = toScrollDat
     stateObject.onScrollData.slicesNumber = getSlicesNumber(stateObject.onScrollData)
+    if stateObject.displayMode == SingleImage && !isempty(stateObject.allSupervoxels)
+        current = stateObject.lastRecordedMousePosition[toScrollDat.dimensionToScroll]
+        # current_slice_sv = ReactToScroll.getSvCurrentSlice(stateObject.allSupervoxels, current, stateObject)
+        ShadersAndVerticiesForSupervoxels.renderSupervoxelLines(stateObject.mainForDisplayObjects, stateObject.supervoxelFields, stateObject.mainRectFields, stateObject.allSupervoxels, toScrollDat.dimensionToScroll, current)
+    end
+
     #getting  the slice of intrest based on last recorded mouse position
 
     current = stateObject.lastRecordedMousePosition[toScrollDat.dimensionToScroll]
