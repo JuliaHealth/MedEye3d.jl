@@ -4,8 +4,8 @@ using MedEye3d
 # https://drive.google.com/file/d/1Segr6BC_ma9bKNmM8lzUBaJLQChkAWKA/view?usp=drive_link
 # https://drive.google.com/file/d/1PqHTQXOVTWx0FQSDE0oH4hRKNCE9jCx8/view?usp=drive_link
 #modify paths to your downloaded data accordingly
-ctNiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/ct_soft_pat_3_sudy_0.nii.gz"
-petNiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
+ctNiftiImage = "/home/hurtbadly/Downloads/ct_soft_pat_3_sudy_0.nii.gz"
+petNiftiImage = "/home/hurtbadly/Downloads/pet_orig_pat_3_sudy_0.nii.gz"
 newImage = "D:/mingw_installation/home/hurtbadly/Downloads/volume-0.nii.gz"
 strangeSpacingImage = "D:/mingw_installation/home/hurtbadly/Downloads/Output Volume_1.nii.gz"
 extremeTestImage = "D:/mingw_installation/home/hurtbadly/Downloads/extreme_test_one.nii.gz"
@@ -35,10 +35,10 @@ petOverlaidImagesArg = [ctImageArg, petImageArg]
 # medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(petImageArg) #singleImageDisplay
 
 # or we can also just pass a the path itself
-#medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(ctImageArg) #singleImageDisplay
+# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(ctImageArg) #singleImageDisplay
 
 
-# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[ctImageArg], [ctImageArg]]) #multi image displays
+medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[ctImageArg], [ctImageArg]]) #multi image displays
 
 # medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([(ctNiftiImage, "CT")]) #singleImageDisplay
 
@@ -48,8 +48,8 @@ petOverlaidImagesArg = [ctImageArg, petImageArg]
 # MedEye3d.ShadersAndVerticiesForSupervoxels.populateNiftiWithH5(ctNiftiImage, h5File, h5NiftiImage)
 #
 # for visualization
- supervoxelDict = MedEye3d.ShadersAndVerticiesForSupervoxels.processVerticesAndIndicesForSv(h5File, "tetr_dat")
- medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(h5ImageArg; all_supervoxels=supervoxelDict)
+#  supervoxelDict = MedEye3d.ShadersAndVerticiesForSupervoxels.processVerticesAndIndicesForSv(h5File, "tetr_dat")
+#  medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(h5ImageArg; all_supervoxels=supervoxelDict)
 
 # This is for when we have a ctNiftiImage and we were testing modifying the display data from hdf5 so we sill image and supervoxels
 # displayData[1][1:128, 1:128, 1:128] = fb["im"][:, :, :]

@@ -292,7 +292,7 @@ function coordinateDisplay(
     #creating window and event listening loop
 
     #we can pass the first calcDimStruct here, since we need to get the window height and width which is same across all the calcDims
-    window, vertex_shader, vao, ebo, fragment_shader_words, vbo_words, shader_program_words, gslsStr = PrepareWindow.displayAll(calcDimStructs[1])
+    window, vertex_shader, vao, ebo, fragment_shader_words, vbo_words, shader_program_words, gslsStr, stopChannel = PrepareWindow.displayAll(calcDimStructs[1])
 
 
 
@@ -425,19 +425,48 @@ function coordinateDisplay(
         end
         #    in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
 
+
         function cleanUp()
-            objs = []
-            foreach(stateInstances) do stateInstance
-                push!(objs, stateInstance.mainForDisplayObjects)
+            
+            # Step 1: Stop the polling task FIRST
+            try
+                put!(stopChannel, true)
+                sleep(0.05)  # Give more time for task to stop
+            catch e
+                @warn "Error stopping polling task: $e"
             end
-            foreach(objs) do obj
-                glDeleteTextures(length(obj.listOfTextSpecifications), map(text -> text.ID, obj.listOfTextSpecifications))
+            
+            # Step 2: Clean up OpenGL resources
+            try
+                objs = []
+                foreach(stateInstances) do stateInstance
+                    push!(objs, stateInstance.mainForDisplayObjects)
+                end
+                foreach(objs) do obj
+                    try
+                        glDeleteTextures(length(obj.listOfTextSpecifications), map(text -> text.ID, obj.listOfTextSpecifications))
+                    catch e
+                        @warn "Error deleting textures: $e"
+                    end
+                end
                 glFlush()
-                GLFW.DestroyWindow(obj.window)
+    
+            catch e
+                @warn "Error cleaning OpenGL resources: $e"
             end
-            shouldStop[1] = true
-            GLFW.Terminate()
-        end #cleanUp
+            
+            # Step 3: Close the window
+            try
+                GLFW.SetWindowShouldClose(window, true)
+                sleep(0.02)
+                GLFW.DestroyWindow(window)
+            catch e
+                @warn "Error destroying window: $e"
+            end
+            
+            # Step 4: Mark as should stop
+            shouldStop[1] = true      
+        end
 
         if (typeof(stateInstances[1].mainForDisplayObjects.window) == GLFW.Window) #harcoded check to get only the first stateInstance since the window is same for all
             cleanUp()
