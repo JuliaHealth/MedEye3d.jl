@@ -10,8 +10,8 @@ newImage = "D:/mingw_installation/home/hurtbadly/Downloads/volume-0.nii.gz"
 strangeSpacingImage = "D:/mingw_installation/home/hurtbadly/Downloads/Output Volume_1.nii.gz"
 extremeTestImage = "D:/mingw_installation/home/hurtbadly/Downloads/extreme_test_one.nii.gz"
 bmaNiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/bma.nii.gz"
-h5File = "D:/mingw_installation/home/hurtbadly/Downloads/locc.h5"
-h5NiftiImage = "D:/mingw_installation/home/hurtbadly/Downloads/hdf5.nii.gz"
+h5File = "/home/hurtbadly/Downloads/locc.h5"
+h5NiftiImage = "/home/hurtbadly/Downloads/hdf5.nii.gz"
 firstDicomImage = "D:\\mingw_installation\\home\\hurtbadly\\Desktop\\julia_stuff\\MedImages.jl\\test_data\\ScalarVolume_0\\"
 
 """
@@ -35,7 +35,7 @@ petOverlaidImagesArg = [ctImageArg, petImageArg]
 # medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(petImageArg) #singleImageDisplay
 
 # or we can also just pass a the path itself
-medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(ctImageArg) #singleImageDisplay
+#medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(ctImageArg) #singleImageDisplay
 
 
 # medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[ctImageArg], [ctImageArg]]) #multi image displays
@@ -48,9 +48,8 @@ medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(ctImageArg) #singleImag
 # MedEye3d.ShadersAndVerticiesForSupervoxels.populateNiftiWithH5(ctNiftiImage, h5File, h5NiftiImage)
 #
 # for visualization
-
-# supervoxelDict = MedEye3d.ShadersAndVerticiesForSupervoxels.processVerticesAndIndicesForSv(h5File, "tetr_dat")
-# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(h5ImageArg; all_supervoxels=supervoxelDict)
+ supervoxelDict = MedEye3d.ShadersAndVerticiesForSupervoxels.processVerticesAndIndicesForSv(h5File, "tetr_dat")
+ medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(h5ImageArg; all_supervoxels=supervoxelDict)
 
 # This is for when we have a ctNiftiImage and we were testing modifying the display data from hdf5 so we sill image and supervoxels
 # displayData[1][1:128, 1:128, 1:128] = fb["im"][:, :, :]
