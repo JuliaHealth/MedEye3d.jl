@@ -150,13 +150,24 @@ end
 Holding necessery data to display text  - like font related
 """
 @with_kw struct ForWordsDispStruct
-  fontFace::FTFont = FTFont(Ptr{FreeTypeAbstraction.FreeType.__JL_FT_FaceRec_}(), false) # font we will use to display text
+    fontFace::Union{FTFont, Nothing} = begin
+        try
+            # Check if we should disable fonts
+            if haskey(ENV, "JULIA_FREETYPE_NO_FONTCONFIG")
+                nothing
+            else
+                FTFont()
+            end
+        catch e
+            @warn "Font initialization failed, disabling text rendering: $e"
+            nothing
+        end
+    end
   textureSpec::TextureSpec = TextureSpec{UInt8}() # texture specification of texture used to display text
   fragment_shader_words::UInt32 = 1 #reference to fragment shader used to display text
   vbo_words::Base.RefValue{UInt32} = Ref(UInt32(1)) #reference to vertex buffer object used to display text
   shader_program_words::UInt32 = 1
-
-end #ForWordsDispStruct
+end
 
 
 """
