@@ -32,13 +32,13 @@ petOverlaidImagesArg = [ctImageArg, petImageArg]
 # petImagesArg = [[petImageArg], [petImageArg]]
 # niftiImagesArg = [[ctImageArg],[ctImageArg]]
 
-# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(petImageArg) #singleImageDisplay
+medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(petImageArg) #singleImageDisplay
 
 # or we can also just pass a the path itself
 # medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(ctImageArg) #singleImageDisplay
 
 
-medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[ctImageArg], [ctImageArg]]) #multi image displays
+# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[ctImageArg], [ctImageArg]]) #multi image displays
 
 # medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([(ctNiftiImage, "CT")]) #singleImageDisplay
 
@@ -67,5 +67,9 @@ medEyeStruct = MedEye3d.SegmentationDisplay.displayImage([[ctImageArg], [ctImage
 
 # @info "look here" typeof(displayData)
 # MedEye3d.DisplayDataManag.setDisplayedData(medEyeStruct, displayData)
+
+
+# Overlaid images arg
+# medEyeStruct = MedEye3d.SegmentationDisplay.displayImage(petOverlaidImagesArg)
 
 
