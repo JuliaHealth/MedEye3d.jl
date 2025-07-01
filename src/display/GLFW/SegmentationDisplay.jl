@@ -238,7 +238,7 @@ function coordinateDisplay(
     spacing::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
     origin::Union{Vector{Tuple{Float64,Float64,Float64}},Vector{Vector{Tuple{Float64,Float64,Float64}}}}=Vector{Tuple{Float64,Float64,Float64}}(),
     svVertAndInd::Dict{String,Vector}=Dict{String,Vector}("supervoxel_vertices" => [], "supervoxel_indices" => []),
-    allSupervoxels::Dict{Int, Dict{String, Any}} = Dict{Int, Dict{String, Any}}(),
+    allSupervoxels::Dict{Int,Dict{Int, Dict{String, Any}}} = Dict{Int, Dict{Int, Dict{String, Any}}}(),
     windowWidth::Int=1200,
     windowHeight::Int=Int(round(windowWidth * fractionOfMainIm)),
     textTexturewidthh::Int32=Int32(2000),
@@ -613,7 +613,7 @@ function displayImage(
     fractionOfMainImage::Float32=Float32(0.8),
     windowWidth::Int=1000,
     svVertAndInd::Dict{String,Vector}=Dict{String,Vector}("supervoxel_vertices" => [], "supervoxel_indices" => []),
-    all_supervoxels::Dict{Int,Dict{String,Any}}=Dict{Int, Dict{String,Any}}()
+    all_supervoxels::Dict{Int, Dict{Int,Dict{String,Any}}}=Dict{Int,Dict{Int, Dict{String,Any}}}()
 )
 
 

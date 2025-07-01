@@ -76,11 +76,17 @@ function reactToScroll(scrollNumb::Int64, mainStates::Vector{StateDataFields}, t
         Added by me recently for testing
         Add a check here to only invoke this in singelImage display mode
         """
-
-        if mainState.displayMode == SingleImage && !isempty(mainState.allSupervoxels)
-            current_slice_sv = getSvCurrentSlice(mainState.allSupervoxels, current)
-            ShadersAndVerticiesForSupervoxels.renderSupervoxelLines(mainState.mainForDisplayObjects, mainState.supervoxelFields, mainState.mainRectFields, current_slice_sv)
-        end
+        # Inside the reactToScroll function, find this section:
+if mainState.displayMode == SingleImage && !isempty(mainState.allSupervoxels)
+    # Change this line:
+    # current = mainState.lastRecordedMousePosition[toScrollDat.dimensionToScroll]
+    ShadersAndVerticiesForSupervoxels.renderSupervoxelLines(mainState.mainForDisplayObjects, mainState.supervoxelFields, mainState.mainRectFields,
+    mainState.allSupervoxels, mainState.onScrollData.dimensionToScroll, current)
+end
+        # if mainState.displayMode == SingleImage && !isempty(mainState.allSupervoxels)
+        #     current_slice_sv = getSvCurrentSlice(mainState.allSupervoxels, current)
+        #     ShadersAndVerticiesForSupervoxels.renderSupervoxelLines(mainState.mainForDisplayObjects, mainState.supervoxelFields, mainState.mainRectFields, current_slice_sv)
+        # end
 
         mainState.currentlyDispDat = singleSlDat
         # updating the last mouse position so when we will change plane it will better show actual position
@@ -100,18 +106,49 @@ function reactToScroll(scrollNumb::Int64, mainStates::Vector{StateDataFields}, t
     end#if
 
 end#reactToScroll
+function getSvCurrentSlice(all_supervoxels::Dict{Int, Dict{Int, Dict{String,Any}}}, slice_number, mainState=nothing)
+    # Get the current axis
+    current_axis = mainState !== nothing ? mainState.onScrollData.dimensionToScroll : 3
 
-function getSvCurrentSlice(all_supervoxels::Dict{Int, Dict{String,Any}}, slice_number)
-    if haskey(all_supervoxels, slice_number)
-        return all_supervoxels[slice_number]
-    else
+    # Check if we have supervoxels for this axis
+    if !haskey(all_supervoxels, current_axis)
         return Dict{String,Any}(
             "supervoxel_vertices" => Float32[],
             "supervoxel_indices" => UInt32[],
             "slice_position" => Float64(slice_number)
-            )
-
+        )
     end
+
+    # Get the supervoxels for the current axis
+    axis_supervoxels = all_supervoxels[current_axis]
+
+    # Find the closest slice
+    slice_positions = [sv["slice_position"] for (_, sv) in axis_supervoxels]
+    if isempty(slice_positions)
+        return Dict{String,Any}(
+            "supervoxel_vertices" => Float32[],
+            "supervoxel_indices" => UInt32[],
+            "slice_position" => Float64(slice_number)
+        )
+    end
+
+    closest_slice_key = argmin(abs.(collect(keys(axis_supervoxels)) .- slice_number))
+    slice_key = collect(keys(axis_supervoxels))[closest_slice_key]
+
+    return axis_supervoxels[slice_key]
 end
+
+# function getSvCurrentSlice(all_supervoxels::Dict{Int, Dict{String,Any}}, slice_number)
+#     if haskey(all_supervoxels, slice_number)
+#         return all_supervoxels[slice_number]
+#     else
+#         return Dict{String,Any}(
+#             "supervoxel_vertices" => Float32[],
+#             "supervoxel_indices" => UInt32[],
+#             "slice_position" => Float64(slice_number)
+#             )
+
+#     end
+# end
 
 end #ReactToScroll
