@@ -4,7 +4,7 @@ Main module controlling displaying segmentations image and data
 """
 module SegmentationDisplay
 export loadRegisteredImages, displayImage, coordinateDisplay, passDataForScrolling
-
+using Dates, PyCall
 using ColorTypes, MedImages, ModernGL, GLFW, Dictionaries, Logging, Setfield, FreeTypeAbstraction, Statistics, Observables
 using ..PrepareWindow, ..PrepareWindowHelpers, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords
 using ..ReactingToInput, ..ReactToScroll, ..ShadersAndVerticiesForText, ..ShadersAndVerticiesForLine, ..ShadersAndVerticiesForSupervoxels, ..DisplayWords, ..DataStructs, ..StructsManag
@@ -28,10 +28,6 @@ on_next!(stateObjects::Vector{StateDataFields}, data::DisplayedVoxels) = retriev
 on_next!(stateObjects::Vector{StateDataFields}, data::CustomDisplayedVoxels) = depositVoxelArray(data, stateObjects)
 on_error!(stateObjects::Vector{StateDataFields}, err) = error(err)
 on_complete!(stateObjects::Vector{StateDataFields}) = ""
-
-
-
-
 
 
 """
@@ -251,7 +247,27 @@ function coordinateDisplay(
     displayMode = getDisplayMode(listOfTextSpecsPrim)
     #setting number to texture that will be needed in shader configuration
     #enumerate function returns index,value pair of each item in an array, here for the TextureSpecStruct, setting the whichCreated field to the current index
-    listOfTextSpecs::Union{Vector{TextureSpec{Float32}},Vector{Vector{TextureSpec{Float32}}}} = (typeof(listOfTextSpecsPrim) == Vector{TextureSpec}) ? map(x -> setproperties(x[2], (whichCreated = x[1])), enumerate(listOfTextSpecsPrim)) : map(innerVector -> map(x -> setproperties(x[2], (whichCreated = x[1])), enumerate(innerVector)), listOfTextSpecsPrim)
+    listOfTextSpecs::Union{Vector{TextureSpec{Float32}},Vector{Vector{TextureSpec{Float32}}}} = begin
+        if typeof(listOfTextSpecsPrim) == Vector{TextureSpec}
+            # For single image mode with potential overlaid images
+            counter = 1
+            map(textSpec -> begin
+                result = setproperties(textSpec, (whichCreated = counter))
+                counter += 1
+                result
+            end, listOfTextSpecsPrim)
+        else
+            # For multi-image mode
+            map(innerVector -> begin
+                counter = 1
+                map(textSpec -> begin
+                    result = setproperties(textSpec, (whichCreated = counter))
+                    counter += 1
+                    result
+                end, innerVector)
+            end, listOfTextSpecsPrim)
+        end
+    end
 
     #calculations of necessary constants needed to calculate window size , mouse position ...
 
@@ -353,10 +369,28 @@ function coordinateDisplay(
 
     numbDicts = []
     foreach(initializedTextures) do initializedTexture
-        push!(numbDicts, filter(x -> x.numb >= 0, initializedTexture) |>
-                         (filtered) -> Dictionary(map(it -> it.numb, filtered), collect(eachindex(filtered)))) # a way for fast query using assigned numbers
+        filteredTextures = filter(x -> x.numb >= 0, initializedTexture)
+        
+        # Check for duplicate numbers and fix them
+        usedNumbers = Set{Int32}()
+        fixedTextures = map(tex -> begin
+            if tex.numb in usedNumbers
+                # Find next available number
+                newNumb = tex.numb
+                while newNumb in usedNumbers
+                    newNumb += 1
+                end
+                push!(usedNumbers, newNumb)
+                setproperties(tex, (numb = newNumb))
+            else
+                push!(usedNumbers, tex.numb)
+                tex
+            end
+        end, filteredTextures)
+        
+        push!(numbDicts, Dictionary(map(it -> it.numb, fixedTextures), collect(eachindex(fixedTextures))))
     end
-
+  
 
     forDispObjs::Vector{forDisplayObjects} = Vector{forDisplayObjects}()
     foreach(enumerate(initializedTextures)) do (index, initTextureVector)
@@ -572,61 +606,81 @@ function loadRegisteredImages(
     studySrc::Union{Vector{Tuple{String,String}},Tuple{String,String},Vector{Vector{Tuple{String,String}}}}
 )
 
-medImageDataInstances::Union{Vector{MedImages.MedImage},Vector{Vector{MedImages.MedImage}}} = typeof(studySrc) == Vector{Vector{Tuple{String,String}}} ? Vector{Vector{MedImages.MedImage}}() : Vector{MedImages.MedImage}()
+    medImageDataInstances::Union{Vector{MedImages.MedImage},Vector{Vector{MedImages.MedImage}}} = typeof(studySrc) == Vector{Vector{Tuple{String,String}}} ? Vector{Vector{MedImages.MedImage}}() : Vector{MedImages.MedImage}()
 
-if typeof(studySrc) == Tuple{String,String}
-  push!(medImageDataInstances, MedImages.Load_and_save.load_image(studySrc[1], studySrc[2]))
-elseif typeof(studySrc) == Vector{Tuple{String,String}}
+    # FIRST: Load all the images
+    if typeof(studySrc) == Tuple{String,String}
+        push!(medImageDataInstances, MedImages.Load_and_save.load_image(studySrc[1], studySrc[2]))
+    elseif typeof(studySrc) == Vector{Tuple{String,String}}
         for studySrcPath in studySrc
-          push!(medImageDataInstances, MedImages.Load_and_save.load_image(studySrcPath[1], studySrcPath[2]))
+            push!(medImageDataInstances, MedImages.Load_and_save.load_image(studySrcPath[1], studySrcPath[2]))
         end
-
-      elseif typeof(studySrc) == Vector{Vector{Tuple{String,String}}}
+    elseif typeof(studySrc) == Vector{Vector{Tuple{String,String}}}
         for studySrcVector in studySrc
             medImageInnerVector::Vector{MedImages.MedImage} = Vector{MedImages.MedImage}()
             for studySrcPath in studySrcVector
-              push!(medImageInnerVector, MedImages.Load_and_save.load_image(studySrcPath[1],studySrcPath[2]))
+                push!(medImageInnerVector, MedImages.Load_and_save.load_image(studySrcPath[1], studySrcPath[2]))
             end
             push!(medImageDataInstances, medImageInnerVector)
         end
     end
 
+    # SECOND: Now handle resampling for overlaid images (AFTER loading)
+    if typeof(studySrc) == Vector{Tuple{String,String}} && length(studySrc) > 1
+        @info "Detected overlaid images with $(length(studySrc)) images"
+        
+        # Use the first image (typically CT) as reference
+        reference_image = medImageDataInstances[1] 
+        reference_size = size(reference_image.voxel_data)
+        
+        for i in 2:length(medImageDataInstances)
+            current_size = size(medImageDataInstances[i].voxel_data)
+            if current_size != reference_size
+                @info "Image $(i) size $(current_size) differs from reference $(reference_size)"
+                @info "Resampling using SimpleITK..."
+                medImageDataInstances[i] = resample_to_reference_sitk(medImageDataInstances[i], reference_image)
+                @info "SimpleITK resampling completed for image $(i)"
+            else
+                @info "Image $(i) already matches reference dimensions"
+            end
+        end
+        
+        @info "All images now have matching dimensions: $(size(medImageDataInstances[1].voxel_data))"
+    end
 
+    # THIRD: Apply orientation corrections and type conversions
+    if typeof(medImageDataInstances) == Vector{MedImages.MedImage}
+        for medImageDataInstance in medImageDataInstances
+            #permuting the voxelData to some default orientation, such that the image is not inverted or sideways
+            #medImageDataInstance.voxel_data = permutedims(medImageDataInstance.voxel_data, (3, 2, 1)) #previously in the test script the default was (3, 2, 1)
+            sizeInfo = size(medImageDataInstance.voxel_data)
+            for outerNum in 1:sizeInfo[1]
+                for innerNum in 1:sizeInfo[3]
+                    medImageDataInstance.voxel_data[outerNum, :, innerNum] = reverse(medImageDataInstance.voxel_data[outerNum, :, innerNum])
+                end
+            end
+            #Float conversion happens here for voxelData, currently only Floats are supported to keep it simple
+            medImageDataInstance.voxel_data = Float32.(medImageDataInstance.voxel_data)
+        end
 
-if typeof(medImageDataInstances) == Vector{MedImages.MedImage}
-
-for medImageDataInstance in medImageDataInstances
-#permuting the voxelData to some default orientation, such that the image is not inverted or sideways
-#medImageDataInstance.voxel_data = permutedims(medImageDataInstance.voxel_data, (3, 2, 1)) #previously in the test script the default was (3, 2, 1)
-sizeInfo = size(medImageDataInstance.voxel_data)
-for outerNum in 1:sizeInfo[1]
-for innerNum in 1:sizeInfo[3]
-medImageDataInstance.voxel_data[outerNum, :, innerNum] = reverse(medImageDataInstance.voxel_data[outerNum, :, innerNum])
-end
-end
-#Float conversion happens here for voxelData, currently only Floats are supported to keep it simple
-medImageDataInstance.voxel_data = Float32.(medImageDataInstance.voxel_data)
-end
-
-elseif typeof(medImageDataInstances) == Vector{Vector{MedImages.MedImage}}
-for medImageInnerVector in medImageDataInstances
-for medImageDataInstance in medImageInnerVector
-#medImageDataInstance.voxel_data = permutedims(medImageDataInstance.voxel_data, (3, 2, 1)) #previously in the test script the default was (3, 2, 1)
-sizeInfo = size(medImageDataInstance.voxel_data)
-for outerNum in 1:sizeInfo[1]
-for innerNum in 1:sizeInfo[3]
-medImageDataInstance.voxel_data[outerNum, :, innerNum] = reverse(medImageDataInstance.voxel_data[outerNum, :, innerNum])
-end
-end
-#Float conversion happens here for voxelData, currently only Floats are supported to keep it simple
-medImageDataInstance.voxel_data = Float32.(medImageDataInstance.voxel_data)
-end
-end
-end
+    elseif typeof(medImageDataInstances) == Vector{Vector{MedImages.MedImage}}
+        for medImageInnerVector in medImageDataInstances
+            for medImageDataInstance in medImageInnerVector
+                #medImageDataInstance.voxel_data = permutedims(medImageDataInstance.voxel_data, (3, 2, 1)) #previously in the test script the default was (3, 2, 1)
+                sizeInfo = size(medImageDataInstance.voxel_data)
+                for outerNum in 1:sizeInfo[1]
+                    for innerNum in 1:sizeInfo[3]
+                        medImageDataInstance.voxel_data[outerNum, :, innerNum] = reverse(medImageDataInstance.voxel_data[outerNum, :, innerNum])
+                    end
+                end
+                #Float conversion happens here for voxelData, currently only Floats are supported to keep it simple
+                medImageDataInstance.voxel_data = Float32.(medImageDataInstance.voxel_data)
+            end
+        end
+    end
 
     return medImageDataInstances #returns the vector of MedImages or a Vector of Vector of MedImages
 end
-
 
 
 
@@ -655,7 +709,7 @@ function displayImage(
         end
     end
 
-    medImageData::Union{Vector{MedImages.MedImage},Vector{Vector{MedImages.MedImage}}} = loadRegisteredImages(studySrc)
+    medImageData::Union{Vector{MedImages.MedImage},Vector{Vector{MedImages.MedImage}}} = loadRegisteredImages_ITK_Style(studySrc)
     #NOTE : for overlaid images, they need to be resampled first
 
     if isempty(textureSpecArray) && isempty(voxelDataTupleVector) && isempty(spacings) && isempty(origins)
@@ -749,6 +803,48 @@ function displayImage(
         end
     end
 
+
+        # // In displayImage function, after manual modification insertion:
+    if typeof(textureSpecArray) == Vector{TextureSpec}
+            if typeof(studySrc) == Vector{Tuple{String, String}} && length(studySrc) > 1
+            # Fix the PET texture to have numb=3 instead of 2
+            for (index, texture) in enumerate(textureSpecArray)
+                if texture.studyType == "PET"
+                    textureSpecArray[index] = setproperties(texture, (numb = Int32(3),))  # Give PET unique number
+                    @info "Fixed PET texture numb to 3"
+                end
+            end
+            
+            # Fix PET intensity range
+            for (index, textur) in enumerate(textureSpecArray)
+                if textur.studyType == "PET"
+                    pet_data = voxelDataTupleVector[2][2]  # PET is second image
+                    positive_pet = pet_data[pet_data .> 0]
+                    if !isempty(positive_pet)
+                        # Use a higher threshold to exclude very low values
+                        pet_threshold = quantile(positive_pet, 0.05)  # Bottom 5% threshold
+                        pet_max = quantile(positive_pet, 0.95)        # Top 5% threshold
+                        textureSpecArray[index] = setproperties(textur, (
+                minAndMaxValue = Float32.([pet_threshold, pet_max]),
+                maskContribution = Float32(1.0),  # Full contribution
+                isVisible = true,
+                colorSet = [
+                    RGB(0.0, 0.0, 0.0),      # Transparent for very low values
+                    RGB(0.0, 0.0, 0.8),      # Dark blue
+                    RGB(0.0, 0.8, 0.8),      # Cyan
+                    RGB(0.0, 1.0, 0.0),      # Green
+                    RGB(1.0, 1.0, 0.0),      # Yellow
+                    RGB(1.0, 0.5, 0.0),      # Orange
+                    RGB(1.0, 0.0, 0.0)       # Bright red
+                ]
+            ))
+        
+                        @info "Fixed PET range to: $(textureSpecArray[index].minAndMaxValue)"
+                    end
+                end
+            end
+        end
+    end
 
     # @info "look here" typeof(voxelDataTupleVector) typeof(voxelDataTupleVector[1]) voxelDataTupleVector[1]
     # voxelDataForUniforms::Union{Vector{Array{Float32,3}},Vector{Vector{Array{Float32,3}}}} = map(x -> map(tup -> tup[2], x), voxelDataTupleVector)
@@ -857,6 +953,84 @@ function displayImage(
 end
 
 
+
+
+###################################################################################################
+function loadRegisteredImages_ITK_Style(
+    studySrc::Union{Vector{Tuple{String,String}},Tuple{String,String},Vector{Vector{Tuple{String,String}}}}
+)
+    
+    if typeof(studySrc) == Vector{Tuple{String,String}} && length(studySrc) > 1
+        @info "Loading overlaid images using ITK-style workflow"
+        
+        # Import SimpleITK like in ITK script
+        sitk = pyimport("SimpleITK")
+        
+        # Load images using SimpleITK directly (like ITK script)
+        ctPath = studySrc[1][1]
+        petPath = studySrc[2][1]
+        
+        @info "Loading CT: $ctPath"
+        @info "Loading PET: $petPath"
+        
+        # Load with SimpleITK (exact same as ITK script)
+        ctImage_sitk = sitk.ReadImage(ctPath)
+        petImage_sitk = sitk.ReadImage(petPath)
+        
+        @info "CT size from SITK: $(ctImage_sitk.GetSize())"
+        @info "PET size from SITK: $(petImage_sitk.GetSize())"
+        @info "CT spacing from SITK: $(ctImage_sitk.GetSpacing())"
+        @info "PET spacing from SITK: $(petImage_sitk.GetSpacing())"
+        
+        # Resample PET to CT space (exact same as ITK script)
+        @info "Resampling PET to CT space..."
+        pet_image_resampled = sitk.Resample(petImage_sitk, ctImage_sitk)
+        
+        # Convert to arrays with ITK's permuteAndReverse (exact same as ITK script)
+        ctPixels = permuteAndReverse(sitk.GetArrayFromImage(ctImage_sitk))
+        petPixels = permuteAndReverse(sitk.GetArrayFromImage(pet_image_resampled))
+        
+        @info "Final CT size: $(size(ctPixels))"
+        @info "Final PET size: $(size(petPixels))"
+        
+        # Create MedImage objects with ITK data
+        ctMedImage = createMedImageFromITK(ctPixels, ctImage_sitk, "CT", ctPath)
+        petMedImage = createMedImageFromITK(petPixels, pet_image_resampled, "PET", petPath)
+        
+        return [ctMedImage, petMedImage]
+    else
+        # Fall back to original method for single images
+        return loadRegisteredImages(studySrc)
+    end
+end
+
+# Helper function to create MedImage from ITK data (like ITK script does)
+function createMedImageFromITK(pixels, sitk_image, image_type, file_path)
+    return MedImages.MedImage(
+        voxel_data=Float32.(pixels),
+        spacing=Tuple(sitk_image.GetSpacing()),
+        origin=Tuple(sitk_image.GetOrigin()),
+        direction=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),  # Default identity
+        image_type=image_type == "CT" ? MedImages.MedImage_data_struct.CT_type : MedImages.MedImage_data_struct.PET_type,
+        image_subtype=image_type == "CT" ? MedImages.MedImage_data_struct.CT_subtype : MedImages.MedImage_data_struct.FDG_subtype,
+        date_of_saving=now(),
+        acquistion_time=now(),
+        patient_id="itk_loaded"
+    )
+end
+
+# Use the exact permuteAndReverse from ITK script
+function permuteAndReverse(pixels)
+    pixels = permutedims(pixels, (3, 2, 1))
+    sizz = size(pixels)
+    for i in 1:sizz[1]
+        for j in 1:sizz[3]
+            pixels[i, :, j] = reverse(pixels[i, :, j])
+        end
+    end
+    return pixels
+end
+####################################################################################################
 end #SegmentationDisplay
 
 
