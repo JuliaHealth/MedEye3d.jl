@@ -128,34 +128,20 @@ we generete separately r,g and b values by adding contributions from all texture
 """
 function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
 
-
-
     texturesNotCont = filter(it -> !it.isContinuusMask, textures)#only single color associated
     texturesCont = filter(it -> length(it.colorSet) > 1, textures)#multiple colors associated
 
     masksInfluences = map(x -> setMaskInfluence(x), textures) |>
                       (strings) -> join(strings, "")
 
-
-    #The step function returns 0.0 if x is smaller than edge and otherwise 1.0.
-
-    # sumColors = map(letter ->
-    #         map(x -> "  $(x.name)ColorMask.$(letter) * ( $(x.name)Res  * step($(x.name)minValue,$(x.name)Res) )/ $(x.name)ValueRange ", texturesNotCont) |>
-    #         (strings) -> join(strings, " + "), ["r", "g", "b"])
-
-
-    # sumColorR = sumColors[1]
-    # sumColorG = sumColors[2]
-    # sumColorB = sumColors[3]
-
     sumColors = map(letter ->
             map(x -> "  changeClip($(x.name)minValue,$(x.name)maxValue,$(x.name)Res,$(x.name)ColorMask.$(letter),$(x.name)ValueRange) ", texturesNotCont) |>
             (strings) -> join(strings, " + "), ["r", "g", "b"])
 
-
     sumColorR = sumColors[1]
     sumColorG = sumColors[2]
     sumColorB = sumColors[3]
+    
     sumColorRCont = map(x -> "r$(x.name)getColorForMultiColor($(x.name)Res)", texturesCont) |>
                     (strings) -> join(strings, " + ")
     sumColorGCont = map(x -> "g$(x.name)getColorForMultiColor($(x.name)Res)", texturesCont) |>
@@ -163,23 +149,23 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
     sumColorBCont = map(x -> "b$(x.name)getColorForMultiColor($(x.name)Res)", texturesCont) |>
                     (strings) -> join(strings, " + ")
 
-    # Initialization sumColorRCont, sumColorGCont, sumColorBCont to 0.0 if they return an empty string
-    if isempty(sumColorRCont) || isempty(sumColorBCont) || isempty(sumColorGCont)
+    # Fix empty string handling
+    if isempty(sumColorRCont)
         sumColorRCont = "0.0"
         sumColorGCont = "0.0"
         sumColorBCont = "0.0"
-
-    elseif isempty(sumColorR) || isempty(sumColorB) || isempty(sumColorG)
+    end
+    
+    if isempty(sumColorR)
         sumColorR = "0.0"
         sumColorG = "0.0"
         sumColorB = "0.0"
-
     end
 
     isVisibleList = map(x -> "$(x.name)isVisible *$(x.name)maskContribution", textures) |>
                     (strings) -> join(strings, " + ")
 
-
+    # ALWAYS process textures properly - remove hardcoded colors
     return """
     float changeClip(float min, float max, float value, float color, float range) {
         if (value < min) {
@@ -193,63 +179,144 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
     $(getMultiColorMaskFunctions(texturesCont))
 
     void main() {
-    $(masksInfluences)
+        $(masksInfluences)
 
-    float todiv = $(isVisibleList);
-    FragColor = vec4(($(sumColorR) + $(sumColorRCont)) / todiv,
-                 ($(sumColorG) + $(sumColorGCont)) / todiv,
-                 ($(sumColorB) + $(sumColorBCont)) / todiv,
-                 1.0); // long product, if mask is invisible it just has full transparency
-
-
+        float todiv = max($(isVisibleList), 0.001); // Prevent division by zero
+        
+        // Always process the actual texture data
+        FragColor = vec4(
+            ($(sumColorR) + $(sumColorRCont)) / todiv,
+            ($(sumColorG) + $(sumColorGCont)) / todiv,
+            ($(sumColorB) + $(sumColorBCont)) / todiv,
+            1.0
+        );
     }
     """
+end
+# function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
 
 
-    #     if color == "green"
-    #         return """
-    # float changeClip(float min, float max, float value, float color, float range) {
-    #     if (value < min) {
-    #         return min;
-    #     } else if (value > max) {
-    #         return max;
-    #     } else {
-    #         return color * (value/ range);
-    #     }
-    # }
-    # $(getMultiColorMaskFunctions(texturesCont))
 
-    # void main() {
-    # $(masksInfluences)
+#     texturesNotCont = filter(it -> !it.isContinuusMask, textures)#only single color associated
+#     texturesCont = filter(it -> length(it.colorSet) > 1, textures)#multiple colors associated
 
-    # float todiv = $(isVisibleList);
-    # FragColor = vec4(0.0,1.0,0.0,1.0);
-    # }
-    # """
+#     masksInfluences = map(x -> setMaskInfluence(x), textures) |>
+#                       (strings) -> join(strings, "")
 
-    #     else
 
-    #         return """
-    #         float changeClip(float min, float max, float value, float color, float range) {
-    #             if (value < min) {
-    #                 return min;
-    #             } else if (value > max) {
-    #                 return max;
-    #             } else {
-    #                 return color * (value/ range);
-    #             }
-    #         }
-    #         $(getMultiColorMaskFunctions(texturesCont))
+#     #The step function returns 0.0 if x is smaller than edge and otherwise 1.0.
 
-    #         void main() {
-    #         $(masksInfluences)
+#     # sumColors = map(letter ->
+#     #         map(x -> "  $(x.name)ColorMask.$(letter) * ( $(x.name)Res  * step($(x.name)minValue,$(x.name)Res) )/ $(x.name)ValueRange ", texturesNotCont) |>
+#     #         (strings) -> join(strings, " + "), ["r", "g", "b"])
 
-    #         float todiv = $(isVisibleList);
-    #         FragColor = vec4(1.0,0.0,0.0,1.0);
-    #         }
-    #         """
-    #     end
-end#mainFuncString
+
+#     # sumColorR = sumColors[1]
+#     # sumColorG = sumColors[2]
+#     # sumColorB = sumColors[3]
+
+#     sumColors = map(letter ->
+#             map(x -> "  changeClip($(x.name)minValue,$(x.name)maxValue,$(x.name)Res,$(x.name)ColorMask.$(letter),$(x.name)ValueRange) ", texturesNotCont) |>
+#             (strings) -> join(strings, " + "), ["r", "g", "b"])
+
+
+#     sumColorR = sumColors[1]
+#     sumColorG = sumColors[2]
+#     sumColorB = sumColors[3]
+#     sumColorRCont = map(x -> "r$(x.name)getColorForMultiColor($(x.name)Res)", texturesCont) |>
+#                     (strings) -> join(strings, " + ")
+#     sumColorGCont = map(x -> "g$(x.name)getColorForMultiColor($(x.name)Res)", texturesCont) |>
+#                     (strings) -> join(strings, " + ")
+#     sumColorBCont = map(x -> "b$(x.name)getColorForMultiColor($(x.name)Res)", texturesCont) |>
+#                     (strings) -> join(strings, " + ")
+
+#     # Initialization sumColorRCont, sumColorGCont, sumColorBCont to 0.0 if they return an empty string
+#     if isempty(sumColorRCont) || isempty(sumColorBCont) || isempty(sumColorGCont)
+#         sumColorRCont = "0.0"
+#         sumColorGCont = "0.0"
+#         sumColorBCont = "0.0"
+
+#     elseif isempty(sumColorR) || isempty(sumColorB) || isempty(sumColorG)
+#         sumColorR = "0.0"
+#         sumColorG = "0.0"
+#         sumColorB = "0.0"
+
+#     end
+
+#     isVisibleList = map(x -> "$(x.name)isVisible *$(x.name)maskContribution", textures) |>
+#                     (strings) -> join(strings, " + ")
+
+
+#     return """
+#     float changeClip(float min, float max, float value, float color, float range) {
+#         if (value < min) {
+#             return min;
+#         } else if (value > max) {
+#             return max;
+#         } else {
+#             return color * (value/ range);
+#         }
+#     }
+#     $(getMultiColorMaskFunctions(texturesCont))
+
+#     void main() {
+#     $(masksInfluences)
+
+#     float todiv = $(isVisibleList);
+#     FragColor = vec4(($(sumColorR) + $(sumColorRCont)) / todiv,
+#                  ($(sumColorG) + $(sumColorGCont)) / todiv,
+#                  ($(sumColorB) + $(sumColorBCont)) / todiv,
+#                  1.0); // long product, if mask is invisible it just has full transparency
+
+
+#     }
+#     """
+
+
+#     #     if color == "green"
+#     #         return """
+#     # float changeClip(float min, float max, float value, float color, float range) {
+#     #     if (value < min) {
+#     #         return min;
+#     #     } else if (value > max) {
+#     #         return max;
+#     #     } else {
+#     #         return color * (value/ range);
+#     #     }
+#     # }
+#     # $(getMultiColorMaskFunctions(texturesCont))
+
+#     # void main() {
+#     # $(masksInfluences)
+
+#     # float todiv = $(isVisibleList);
+#     # FragColor = vec4(0.0,1.0,0.0,1.0);
+#     # }
+#     # """
+
+#     #     else
+
+#     #         return """
+#     #         float changeClip(float min, float max, float value, float color, float range) {
+#     #             if (value < min) {
+#     #                 return min;
+#     #             } else if (value > max) {
+#     #                 return max;
+#     #             } else {
+#     #                 return color * (value/ range);
+#     #             }
+#     #         }
+#     #         $(getMultiColorMaskFunctions(texturesCont))
+
+#     #         void main() {
+#     #         $(masksInfluences)
+
+#     #         float todiv = $(isVisibleList);
+#     #         FragColor = vec4(1.0,0.0,0.0,1.0);
+#     #         }
+#     #         """
+#     #     end
+# end#mainFuncString
 
 
 

@@ -21,7 +21,7 @@ function displayAll(calcDimsStruct::CalcDimsStruct)
 
 
     if (Threads.nthreads() == 1)
-        println("increase number of available threads look into https://docs.julialang.org/en/v1/manual/multi-threading/  or modify for example in vs code extension")
+        @warn "increase number of available threads look into https://docs.julialang.org/en/v1/manual/multi-threading/  or modify for example in vs code extension"
     end
     # Create the window. This sets all the hints and makes the context current.
 
@@ -29,7 +29,7 @@ function displayAll(calcDimsStruct::CalcDimsStruct)
     window = initializeWindow(calcDimsStruct.windowWidth, calcDimsStruct.windowHeight)
 
     # The shaders
-    println(createcontextinfo())
+    createcontextinfo()
     gslsStr = get_glsl_version_string()
 
 
@@ -69,16 +69,10 @@ function displayAll(calcDimsStruct::CalcDimsStruct)
     controllWindowInput(window)
 
     #loop that enables reacting to mouse and keyboards inputs  so every 0.1 seconds it will check GLFW weather any new events happened
-    t = @task begin
-        while (!GLFW.WindowShouldClose(window))
-            sleep(0.001)
-            # Poll for and process events
-            GLFW.PollEvents()
-        end
-    end
-    schedule(t)
+    pollingTask, stopChannel = createPollingTask(window)
+    schedule(pollingTask)
 
-    return (window, vertex_shader, vao, ebo, fragment_shader_words, vbo_words, shader_program_words, gslsStr)
+    return (window, vertex_shader, vao, ebo, fragment_shader_words, vbo_words, shader_program_words, gslsStr, stopChannel)
 
 end# displayAll
 
@@ -106,6 +100,44 @@ function createAndInitShaderProgram(vertex_shader::UInt32, listOfTexturesToCreat
     return (fragment_shader, shader_program, vbo)
 
 end#createShaderProgram
+
+
+"""
+Polling task creation
+"""
+function createPollingTask(window::GLFW.Window)
+    stopChannel = Channel{Bool}(1)
+    
+    t = @task begin
+        try
+            while true
+                # Check for stop signal first
+                if isready(stopChannel)
+                    take!(stopChannel)
+                    break
+                end
+                
+                # Check if window should close
+                if GLFW.WindowShouldClose(window)
+                    break
+                end
+                
+                sleep(0.001)
+                
+                # Final check before polling
+                if !isready(stopChannel) && !GLFW.WindowShouldClose(window)
+                    GLFW.PollEvents()
+                end
+            end
+        catch e
+            @debug "GLFW polling task terminated: $e"
+        finally
+            @debug "GLFW polling task ended"
+        end
+    end
+    
+    return (t, stopChannel)
+end
 
 
 

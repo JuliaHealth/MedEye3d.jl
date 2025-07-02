@@ -150,13 +150,24 @@ end
 Holding necessery data to display text  - like font related
 """
 @with_kw struct ForWordsDispStruct
-  fontFace::FTFont = FTFont(Ptr{FreeTypeAbstraction.FreeType.__JL_FT_FaceRec_}(), false) # font we will use to display text
+    fontFace::Union{FTFont, Nothing} = begin
+        try
+            # Check if we should disable fonts
+            if haskey(ENV, "JULIA_FREETYPE_NO_FONTCONFIG")
+                nothing
+            else
+                FTFont()
+            end
+        catch e
+            @warn "Font initialization failed, disabling text rendering: $e"
+            nothing
+        end
+    end
   textureSpec::TextureSpec = TextureSpec{UInt8}() # texture specification of texture used to display text
   fragment_shader_words::UInt32 = 1 #reference to fragment shader used to display text
   vbo_words::Base.RefValue{UInt32} = Ref(UInt32(1)) #reference to vertex buffer object used to display text
   shader_program_words::UInt32 = 1
-
-end #ForWordsDispStruct
+end
 
 
 """
@@ -283,6 +294,7 @@ Actor that is able to store a state to keep needed data for proper display
   originValue::Union{Vector{Tuple{Float64,Float64,Float64}},Tuple{Float64,Float64,Float64}} = [(1.0, 1.0, 1.0)]
   supervoxelFields::GlShaderAndBufferFields = GlShaderAndBufferFields()
   supervoxelVertAndInd::Dict{String,Vector} = Dict("supervoxel_vertices" => [], "supervoxel_indices" => [])
+  allSupervoxels::Dict{Int, Dict{Int, Dict{String,Any}}} = Dict{Int, Dict{Int, Dict{String, Any}}}()
 end
 
 """
