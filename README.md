@@ -5,7 +5,6 @@
 
 [![JuliaHealth](https://img.shields.io/badge/Julia-Health-purple.svg)](https://juliahealth.org)
 [![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://juliahealth.org/MedEye3d.jl)
-[![Build Status](https://github.com/JuliaHealth/MedEye3d.jl/workflows/CI/badge.svg)](https://github.com/JuliaHealth/MedEye3d.jl/actions)
 
 </div>
 
