@@ -129,8 +129,8 @@ save_image(voxel_data, metadata, "./custom_dicom_output", true)
 
 ### Summary
 
-1. **Input DICOM** → Convert to LPS NIfTI using the orientation script
-2. **Process** → Use MedImages.jl for analysis and modifications
-3. **Output DICOM** → Use ITKIOWrapper.jl to convert back to DICOM format
+1. **Input DICOM** -> Convert to LPS NIfTI using the orientation script
+2. **Process** -> Use MedImages.jl for analysis and modifications
+3. **Output DICOM** -> Use ITKIOWrapper.jl to convert back to DICOM format
 
 Once your images are in LPS orientation, you can use them seamlessly with MedImages.jl for optimal performance and compatibility, and easily convert between NIfTI and DICOM formats as needed for your workflow.
