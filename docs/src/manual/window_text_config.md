@@ -2,6 +2,12 @@
 
 MedEye3d.jl allows for flexible configuration of the visualization window and a dedicated area for displaying text, such as metrics, metadata, or instructions.
 
+## Quick Start Tutorial
+
+For a complete tutorial with the Spleen dataset from Medical Decathlon, see:
+- [Window Size and Text Configuration Tutorial](../tutorials/tutorial_window_text.jl)
+- [Comprehensive Guide](./window_text_configuration_tutorial.md)
+
 ## Window Dimensions
 
 The window size is configured using `windowWidth` and `windowHeight` parameters in the `coordinateDisplay` function (or `displayImage`). 
@@ -82,3 +88,18 @@ scrollData = FullScrollableDat(
     sliceTextToDisp = sliceSpecificText
 )
 ```
+
+## Best Practices
+
+1. **Window Size**: Use 1200x800 for standard desktops, 800x600 for compact views
+2. **Text Allocation**: Use 70-80% image space for visual tasks, 50-60% when text is critical
+3. **Text Content**: Keep global text concise (5-10 lines), use slice-specific text for dynamic info
+4. **Performance**: Larger windows require more GPU resources
+
+## Complete Example with Spleen Dataset
+
+See the [tutorial file](../tutorials/tutorial_window_text.jl) for a complete example using the Medical Decathlon Spleen dataset, including:
+- Loading NIfTI files
+- Configuring window size and text space
+- Displaying MedEval metrics
+- Setting up texture specifications for proper display
