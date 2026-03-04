@@ -5,7 +5,7 @@ MedEye3d.jl allows for flexible configuration of the visualization window and a 
 ## Quick Start Tutorial
 
 For a complete tutorial with the Spleen dataset from Medical Decathlon, see:
-- [Window Size and Text Configuration Tutorial](../tutorials/tutorial_window_text.jl)
+- [Window Size and Text Configuration Tutorial](https://github.com/JuliaHealth/MedEye3d.jl/blob/main/tutorials/tutorial_window_text.jl)
 - [Comprehensive Guide](./window_text_configuration_tutorial.md)
 
 ## Window Dimensions
@@ -98,7 +98,7 @@ scrollData = FullScrollableDat(
 
 ## Complete Example with Spleen Dataset
 
-See the [tutorial file](../tutorials/tutorial_window_text.jl) for a complete example using the Medical Decathlon Spleen dataset, including:
+See the [tutorial file](https://github.com/JuliaHealth/MedEye3d.jl/blob/main/tutorials/tutorial_window_text.jl) for a complete example using the Medical Decathlon Spleen dataset, including:
 - Loading NIfTI files
 - Configuring window size and text space
 - Displaying MedEval metrics
