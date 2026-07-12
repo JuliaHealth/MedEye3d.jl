@@ -32,6 +32,7 @@ function updateTexture(::Type{Tt}, data::AbstractArray, textSpec::TextureSpec, x
     #   @spawn :interactive begin
     glActiveTexture(textSpec.actTextrureNumb) # active proper texture unit before binding
     glBindTexture(GL_TEXTURE_2D, textSpec.ID[])
+    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0)
 
     if ((parameter_type(textSpec) == Float16) || (parameter_type(textSpec) == Float32))
         glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, widthh, heightt, GL_RED, textSpec.OpGlType, collect(data))
@@ -68,8 +69,10 @@ function createTexture(juliaDataType::Type{juliaDataTyp}, width::Int32, height::
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0)
-    #we just assign storage
-    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RType, width, height)
+    #we just assign storage using glTexImage2D to ensure OpenGL 3.3 compatibility
+    format = (GL_RType == GL_R8UI || GL_RType == GL_R16UI || GL_RType == GL_R32UI || GL_RType == GL_R8I || GL_RType == GL_R16I || GL_RType == GL_R32I) ? GL_RED_INTEGER : GL_RED
+    
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RType, width, height, 0, format, OpGlType, C_NULL)
 
 
     return texture
@@ -101,6 +104,11 @@ function initializeTextures(listOfTextSpecs, calcDimStruct::CalcDimsStruct)::Vec
 
 
         setTextureVisibility(textSpec.isVisible, textSpec.uniforms)
+        changeTextureContribution(textSpec, textSpec.maskContribution)
+        
+        if !isempty(textSpec.minAndMaxValue)
+            coontrolMinMaxUniformVals(textSpec)
+        end
 
 
         push!(res, setproperties(textSpec, (ID=textUreId, actTextrureNumb=actTextrureNumb, associatedActiveNumer=index)))

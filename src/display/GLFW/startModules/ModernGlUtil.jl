@@ -82,7 +82,11 @@ function createShader(source, typ)
         error("Error creating shader: ", glErrorMessage())
     end
     # Compile the shader
-    glShaderSource(shader, 1, convert(Ptr{UInt8}, pointer([convert(Ptr{GLchar}, pointer(source))])), C_NULL)
+    src_ptr = pointer(source)
+    ptr_array = [src_ptr]
+    GC.@preserve source ptr_array begin
+        glShaderSource(shader, 1, convert(Ptr{Ptr{UInt8}}, pointer(ptr_array)), C_NULL)
+    end
     glCompileShader(shader)
     # Check for errors
     !validateShader(shader) && error("Shader creation error: ", getInfoLog(shader))

@@ -16,9 +16,7 @@ creating fragment Shader  so controlling colors and textures
 gslString so version of GSLS we are using currently
   """
 function createFragmentShader(gslString::String)
-  fsh = """
-  $(gslString)
-
+  fsh = """$(gslString)
   #extension GL_EXT_gpu_shader4 : enable    //Include support for this extension, which defines usampler2D
 
   out vec4 FragColor;
@@ -28,7 +26,7 @@ function createFragmentShader(gslString::String)
   uniform usampler2D TextTexture1;
   void main() {
 
-  uint text1Texel = texture2D(TextTexture1, TexCoord0).r ;
+  uint text1Texel = texture(TextTexture1, TexCoord0).r ;
 
    if(text1Texel > 0){
     FragColor = vec4(0.0,0.0,0.0,1.0);  }

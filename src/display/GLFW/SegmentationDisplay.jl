@@ -115,7 +115,11 @@ function getDisplayMode(listOfTextSpecs::Union{Vector{TextureSpec},Vector{Vector
     if typeof(listOfTextSpecs) == Vector{TextureSpec}
         return SingleImage
     elseif typeof(listOfTextSpecs) == Vector{Vector{TextureSpec}}
-        return MultiImage
+        if length(listOfTextSpecs) == 4
+            return QuadImage
+        else
+            return MultiImage
+        end
     end
 end
 
@@ -346,7 +350,7 @@ function coordinateDisplay(
     crosshair, mainRects, textFields = (Nothing, Nothing, Nothing)
 
     supervoxel, mainRect = (Nothing, Nothing)
-    if displayMode == MultiImage
+    if displayMode == MultiImage || displayMode == QuadImage
         crosshair, mainRects, textFields = initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader_words, vbo_words, shader_program_words)
     elseif displayMode == SingleImage
         supervoxel, mainRect = initializeSupervoxels(vertex_shader, vao, ebo, vboVector, allSupervoxels)
@@ -363,6 +367,7 @@ function coordinateDisplay(
     #initializing object that holds data reqired for interacting with opengl
     initializedTextures::Vector{Vector{TextureSpec}} = []
     foreach(enumerate(listOfTextSpecsMapped)) do (index, mappedTextSpecVector)
+        glUseProgram(shaderProgramVector[index])
         push!(initializedTextures, initializeTextures(mappedTextSpecVector, calcDimStructs[index]))
     end
 
@@ -387,11 +392,9 @@ function coordinateDisplay(
                 tex
             end
         end, filteredTextures)
-        
         push!(numbDicts, Dictionary(map(it -> it.numb, fixedTextures), collect(eachindex(fixedTextures))))
     end
   
-
     forDispObjs::Vector{forDisplayObjects} = Vector{forDisplayObjects}()
     foreach(enumerate(initializedTextures)) do (index, initTextureVector)
         push!(forDispObjs, forDisplayObjects(
@@ -434,29 +437,67 @@ function coordinateDisplay(
         ))
     end
 
+    # wait we need to parse rect texture display obj !!!
 
+    rectTextDispObjs::Vector{ForWordsDispStruct} = Vector{ForWordsDispStruct}()
+    if displayMode == SingleImage
+        foreach(enumerate(initializedTextures)) do (index, initTextureVector)
+            push!(rectTextDispObjs, prepareForDispStruct(
+                length(initTextureVector),
+                fragment_shader_words,
+                vbo_words,
+                shader_program_words,
+                window,
+                textTexturewidthh,
+                textTextureheightt,
+                forDispObjs[index]
+            ))
+        end
+    end
 
+    states = map(x -> StateDataFields(
+            textDispObj=forTextDispStructs[x],
+            mainForDisplayObjects=forDispObjs[typeof(dataToScrollDims) == Vector{DataToScrollDims} ? x : 1],
+            calcDimsStruct=calcDimStructs[x],
+            displayMode=displayMode,
+            imagePosition=x,
+            switchIndex=x,
+            mainRectFields=displayMode == SingleImage ? mainRect : mainRects[x],
+            crosshairFields=displayMode == SingleImage ? GlShaderAndBufferFields() : crosshair,
+            textFields=displayMode == SingleImage ? GlShaderAndBufferFields() : textFields,
+            spacingsValue=spacing[x],
+            originValue=origin[x],
+            supervoxelFields=displayMode == SingleImage ? supervoxel : GlShaderAndBufferFields(),
+            allSupervoxels=allSupervoxels
+        ), 1:length(forDispObjs))
 
+    stateInstances::Vector{StateDataFields} = states
 
-    # put!(mainMedEye3dInstance.channel, forTextDispStruct)
+    if (length(stateInstances) > 1)
+        #we need to mark the crosshair for the first state as invisible
+        # stateInstances[1].mainRectFields.isVisible = false
+        for i in 2:length(stateInstances)
+            stateInstances[i].switchIndex = 0
+        end
+    end
+
+    #Setting second state information to be 0, because we need to access information from the first state only
+    if length(stateInstances) > 1 && displayMode == MultiImage
+        stateInstances[2].switchIndex = 0
+    end
+    if length(stateInstances) > 1 && displayMode == QuadImage
+        for i in 2:length(stateInstances)
+            stateInstances[i].switchIndex = 0
+        end
+    end
+
+    foreach(enumerate(stateInstances)) do (index, stateInstance)
+        stateInstance.textureToModifyVec = filter(it -> it.isEditable, initializedTextures[index])
+    end
+
     function consumer(mainChannel::Base.Channel{Any})
         shouldStop = [false]
-        stateInstances::Vector{StateDataFields} = Vector{StateDataFields}()
-        if displayMode == MultiImage
-            # Initialization of GlShaderAndBufferFields for crosshair so different StateDataFields in multi-image mode
-            stateInstances = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, crosshairFields=crosshair, mainRectFields=mainRects[index], textFields=textFields, spacingsValue=spacing[index], originValue=origin[index]) for (index, _) in enumerate(initializedTextures)]
-        else
-            stateInstances = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, spacingsValue=spacing[index], originValue=origin[index], supervoxelFields=supervoxel, mainRectFields=mainRect, allSupervoxels=allSupervoxels) for (index, _) in enumerate(initializedTextures)]
-        end
-        #Setting second state information to be 0, because we need to access information from the first state only
-        if length(stateInstances) > 1 && displayMode == MultiImage
-            stateInstances[2].switchIndex = 0
-        end
-
-
-        foreach(enumerate(stateInstances)) do (index, stateInstance)
-            stateInstance.textureToModifyVec = filter(it -> it.isEditable, initializedTextures[index])
-        end
+        
         #    in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
 
 
@@ -502,34 +543,37 @@ function coordinateDisplay(
             shouldStop[1] = true      
         end
 
-        if (typeof(stateInstances[1].mainForDisplayObjects.window) == GLFW.Window) #harcoded check to get only the first stateInstance since the window is same for all
-            cleanUp()
-        end#
+        # We do not call cleanUp here, because it would immediately close the window we just created!
         GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())
 
 
         while !shouldStop[1]
-            channelData = take!(mainChannel)
-            # get the aggregation here, only when the type is mouseStruct.
-            if typeof(channelData) == MouseStruct
-                if (channelData.isLeftButtonDown)
-                    mouseStructAggregationArray::Vector{MouseStruct} = [channelData]
-                    while !isempty(mainChannel) && typeof(fetch(mainChannel)) == MouseStruct
-                        push!(mouseStructAggregationArray, take!(mainChannel))
+            try
+                channelData = take!(mainChannel)
+                
+                # get the aggregation here, only when the type is mouseStruct.
+                if typeof(channelData) == MouseStruct
+                    if (channelData.isLeftButtonDown)
+                        mouseStructAggregationArray::Vector{MouseStruct} = [channelData]
+                        while !isempty(mainChannel) && typeof(fetch(mainChannel)) == MouseStruct
+                            push!(mouseStructAggregationArray, take!(mainChannel))
+                        end
+                        channelData = mouseStructAggregationArray
                     end
-                    channelData = mouseStructAggregationArray
+
+                elseif typeof(channelData) == CalcDimsStruct || typeof(channelData) == forDisplayObjects || typeof(channelData) == FullScrollableDat
+                    stateInstances[1].switchIndex = channelData.imagePos
                 end
 
-            elseif typeof(channelData) == CalcDimsStruct || typeof(channelData) == forDisplayObjects || typeof(channelData) == FullScrollableDat
-                stateInstances[1].switchIndex = channelData.imagePos > 1 ? 2 : 1  #Setting the current State to modify to be for the left or the right image
+                on_next!(stateInstances, channelData)
+            catch e
+                @error "CONSUMER TASK CRASHED:" exception=(e, catch_backtrace())
+                shouldStop[1] = true
             end
-
-            on_next!(stateInstances, channelData)
-
         end
     end #end of consumer
 
-    mainMedEye3dInstance = MainMedEye3d(channel=Base.Channel{Any}(consumer, 1000; spawn=false, threadpool=:interactive), textDispObj=forTextDispStructs[1], displayMode=displayMode)
+    mainMedEye3dInstance = MainMedEye3d(channel=Base.Channel{Any}(consumer, 1000; spawn=false, threadpool=:interactive), textDispObj=forTextDispStructs[1], displayMode=displayMode, states=stateInstances)
     # mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(1000))
 
 
@@ -549,7 +593,78 @@ function coordinateDisplay(
 
 
     registerInteractions(window, mainMedEye3dInstance, calcDimStructs)#passing needed subscriptions from GLFW
-    # errormonitor(@async consumer(mainMedEye3dInstance.channel))
+    # Initialize the Lesion Metadata Window with hooks
+    try
+        active_lesion = Observable("Lesion 1")
+        ui_hooks = Dict{Symbol, Observable}(
+            :scroll => Observable(0),
+            :windowing => Observable((-160.0f0, 240.0f0)),
+            :paint_val => Observable(1),
+            :sync_lesion => Observable(false)
+        )
+        
+        # Windowing Listener
+        on(ui_hooks[:windowing]) do (min_val, max_val)
+            for state in mainMedEye3dInstance.states
+                for tex in state.mainForDisplayObjects.listOfTextSpecifications
+                    if !tex.isNuclearMask && !tex.isContinuusMask
+                        tex.minAndMaxValue = [min_val, max_val]
+                    end
+                end
+            end
+        end
+
+        # Paint / Erase Listener
+        on(ui_hooks[:paint_val]) do val
+            for state in mainMedEye3dInstance.states
+                state.valueForMasToSet.value = val
+            end
+        end
+
+        # Scroll Listener (Mock, MedEye uses GLFW natively)
+        on(ui_hooks[:scroll]) do val
+            # Can push to main channel if needed
+            println("Scroll button clicked: \$val")
+        end
+
+        # Lesion Spatial Sync Listener
+        on(ui_hooks[:sync_lesion]) do _
+            if length(mainMedEye3dInstance.states) > 1
+                tp0_state = mainMedEye3dInstance.states[1]
+                tp1_state = mainMedEye3dInstance.states[2] # Target
+                
+                pos_tp0 = tp0_state.lastRecordedMousePosition
+                spacing_tp0 = tp0_state.spacingsValue[1]
+                origin_tp0 = tp0_state.originValue[1]
+                
+                # Physical = Origin + (VoxelIndex - 1) * Spacing
+                phys_x = origin_tp0[1] + (pos_tp0[1] - 1) * spacing_tp0[1]
+                phys_y = origin_tp0[2] + (pos_tp0[2] - 1) * spacing_tp0[2]
+                phys_z = origin_tp0[3] + (pos_tp0[3] - 1) * spacing_tp0[3]
+                
+                # Map back to Voxel Coordinates in TP1
+                spacing_tp1 = tp1_state.spacingsValue[1]
+                origin_tp1 = tp1_state.originValue[1]
+                
+                vox_x = round(Int, (phys_x - origin_tp1[1]) / spacing_tp1[1]) + 1
+                vox_y = round(Int, (phys_y - origin_tp1[2]) / spacing_tp1[2]) + 1
+                vox_z = round(Int, (phys_z - origin_tp1[3]) / spacing_tp1[3]) + 1
+                
+                mapped_pos = CartesianIndex(vox_x, vox_y, vox_z)
+                
+                println("Mapped lesion from TP0 \$pos_tp0 -> physical (\$phys_x, \$phys_y, \$phys_z) -> TP1 \$mapped_pos")
+            else
+                println("Need at least 2 images loaded to sync lesions.")
+            end
+        end
+
+        # Try to invoke the Makie UI window
+        if isdefined(Main, :LesionMetadataWindow)
+            Main.LesionMetadataWindow.create_metadata_window(active_lesion, ui_hooks)
+        end
+    catch e
+        @warn "Could not initialize LesionMetadataWindow: \$e"
+    end
 
     return mainMedEye3dInstance
 end #coordinateDisplay
@@ -696,16 +811,17 @@ function displayImage(
     fractionOfMainImage::Float32=Float32(0.8),
     windowWidth::Int=1000,
     svVertAndInd::Dict{String,Vector}=Dict{String,Vector}("supervoxel_vertices" => [], "supervoxel_indices" => []),
-    all_supervoxels::Dict{Int, Dict{Int,Dict{String,Any}}}=Dict{Int,Dict{Int, Dict{String,Any}}}()
+    all_supervoxels::Dict{Int,Dict{Int, Dict{String, Any}}} = Dict{Int, Dict{Int, Dict{String, Any}}}(),
+    quadView::Bool=false
 )
 
 
     #asserting that the length of the studySrc is 2, if it is a multi-dimensions vector
-    if typeof(studySrc) == Vector{Vector{Tuple{String,String}}}
+    if typeof(studySrc) == Vector{Vector{Tuple{String,String}}} && !quadView
         try
-            @assert length(studySrc) == 2
+            @assert length(studySrc) == 2 || length(studySrc) == 4
         catch assertionError
-            @error "MedEye3d.jl currently do not support more than 2 images for comparison." assertionError
+            @error "MedEye3d.jl currently do not support more than 2 images for comparison, unless quadView is true." assertionError
         end
     end
 
