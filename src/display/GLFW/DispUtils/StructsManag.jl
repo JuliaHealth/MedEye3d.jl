@@ -121,9 +121,7 @@ utility function to create series of ThreeDimRawDat from list of tuples where
 first entry is String and second entry is 3 dimensional array with data
 ```
 function getThreeDims(list)
-
   return map(tupl -> ThreeDimRawDat{typeof(tupl[2][1])}(typeof(tupl[2][1]), tupl[1], tupl[2]), list)
-
 end#getThreeDims
 
 
@@ -210,7 +208,6 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
 
   # @info "correctedWidthForTextAccounting" correctedWidthForTextAccounting
 
-
   res = Float32.([
     # positions                  // colors           // texture coords
     correctedWidthForTextAccounting - widthCorr, 1.0 - heightCorr, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0,   # top right
@@ -236,8 +233,6 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
     widthCorr /= 4
     heightCorr /= 2
 
-
-
     # @info widthCorr
     if imagePos == 1    #LEFT IMAGE
       res[1] = normalCorrectedTextAccounting - widthCorr # top right
@@ -255,8 +250,36 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
       res[17] = normalCorrectedTextAccounting + widthCorr# bottom left
       res[25] = normalCorrectedTextAccounting + widthCorr# top left
     end
-  end
+  elseif displayMode == QuadImage
+    widthCorr /= 4
+    heightCorr /= 4
+    
+    # y coordinates (indices: 2=top right, 10=bottom right, 18=bottom left, 26=top left)
+    if imagePos == 1 || imagePos == 2 # Top half
+      res[2] = 1.0 - heightCorr
+      res[10] = 0.0 + heightCorr
+      res[18] = 0.0 + heightCorr
+      res[26] = 1.0 - heightCorr
+    else # Bottom half
+      res[2] = 0.0 - heightCorr
+      res[10] = -1.0 + heightCorr
+      res[18] = -1.0 + heightCorr
+      res[26] = 0.0 - heightCorr
+    end
 
+    # x coordinates (indices: 1=top right, 9=bottom right, 17=bottom left, 25=top left)
+    if imagePos == 1 || imagePos == 3 # Left half
+      res[1] = normalCorrectedTextAccounting - widthCorr
+      res[9] = normalCorrectedTextAccounting - widthCorr
+      res[17] = -1.0 + widthCorr
+      res[25] = -1.0 + widthCorr
+    else # Right half
+      res[1] = textBeginning - widthCorr
+      res[9] = textBeginning - widthCorr
+      res[17] = normalCorrectedTextAccounting + widthCorr
+      res[25] = normalCorrectedTextAccounting + widthCorr
+    end
+  end
 
   # @info res[1], res[9], res[17], res[25]
 

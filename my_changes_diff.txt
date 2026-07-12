@@ -1,0 +1,1194 @@
+diff --git a/.devcontainer/Dockerfile b/.devcontainer/Dockerfile
+old mode 100755
+new mode 100644
+index ec565b1..4636441
+--- a/.devcontainer/Dockerfile
++++ b/.devcontainer/Dockerfile
+@@ -1,15 +1,10 @@
+ #adapted from https://github.com/JuliaGPU/julia-ngc
+ # ARG IMAGE=nvidia/cuda:12.1.1-devel-ubuntu20.04
+-FROM nvidia/cudagl:11.3.0-devel
+-
+-
+-ARG JULIA_RELEASE=1.9
+-ARG JULIA_VERSION=1.9.0-rc3
++FROM nvidia/cuda:12.1.1-devel-ubuntu22.04
+ 
+ ENV DEBIAN_FRONTEND=noninteractive
+ 
+ # julia
+-
+ RUN apt-get update && \
+     DEBIAN_FRONTEND=noninteractive \
+     apt-get install --yes --no-install-recommends \
+@@ -18,24 +13,15 @@ RUN apt-get update && \
+     apt-get clean && \
+     rm -rf /var/lib/apt/lists/*
+ 
+-RUN curl -s -L https://julialang-s3.julialang.org/bin/linux/x64/${JULIA_RELEASE}/julia-${JULIA_VERSION}-linux-x86_64.tar.gz | \
+-    tar -C /usr/local -x -z --strip-components=1 -f -
+-
+-
+-
+ RUN apt-get update && \
+     apt-get install -y software-properties-common && \
+-    add-apt-repository -y ppa:deadsnakes/ppa && \
+-    apt-get update && \
+-    apt install -y python3.10 && \
+-    apt-get install -y  python3.10-dev
++    apt install -y python3 && \
++    apt-get install -y python3-dev python3-distutils
+     
+ RUN curl -fSsL -O https://bootstrap.pypa.io/get-pip.py && \
+-    python3.10 get-pip.py && \
++    python3 get-pip.py && \
+     rm get-pip.py
+ 
+-
+-
+ RUN apt-get update -q -y && \
+         DEBIAN_FRONTEND=noninteractive \
+         apt-get install -q -y --allow-change-held-packages\
+@@ -63,16 +49,9 @@ RUN apt-get update -q -y && \
+         octave\
+         kmod\
+         zlib1g\
+-        python-dev\
++        python3-dev\
+         bzip2\
+         cmake\
+-        cuda-command-line-tools-11.3 \
+-        libcublas-11.3 \
+-        cuda-nvrtc-11.3\
+-        libcufft-11.3 \
+-        libcurand-11.3 \
+-        libcusolver-11.3 \
+-        libcusparse-11.3 \
+         libfreetype6-dev \
+         curl\
+         libzmq3-dev \
+@@ -118,8 +97,7 @@ RUN apt-get update -q -y && \
+         ffmpeg && \
+         apt-get install -q -y --reinstall ca-certificates
+ 
+-
+-RUN python3 -m pip  --no-cache-dir install install --no-cache-dir \
++RUN python3 -m pip install --no-cache-dir \
+     gdown==3.3.1 monai==1.3.0
+ 
+ RUN apt-get install --yes --no-install-recommends wget build-essential libcurl4 && \
+@@ -127,8 +105,17 @@ RUN apt-get install --yes --no-install-recommends wget build-essential libcurl4
+     tar -xvf curl-7.81.0.tar.gz && cd curl-7.81.0 && \
+     ./configure --with-openssl && make && make install
+ 
++COPY download_data.py /workspace/download_data.py
++RUN python3 /workspace/download_data.py
++
++RUN python3 -m pip install --no-cache-dir SimpleITK
++
++ARG JULIA_RELEASE=1.12
++ARG JULIA_VERSION=1.12.5
++RUN curl -s -L https://julialang-s3.julialang.org/bin/linux/x64/${JULIA_RELEASE}/julia-${JULIA_VERSION}-linux-x86_64.tar.gz | \
++    tar -C /usr/local -x -z --strip-components=1 -f -
+ 
+-COPY Project.toml Manifest.toml LocalPreferences.toml /usr/local/share/julia/environments/v${JULIA_RELEASE}/
++COPY Project.toml LocalPreferences.toml /usr/local/share/julia/environments/v${JULIA_RELEASE}/
+ 
+ RUN JULIA_DEPOT_PATH=/usr/local/share/julia \ 
+     julia -e 'using Pkg; Pkg.instantiate(); Pkg.API.precompile()'
+@@ -144,47 +131,19 @@ RUN JULIA_DEPOT_PATH=/usr/local/share/julia \
+ # however, for that script to run, we need to start with only the system depot active.
+ ENV JULIA_DEPOT_PATH=/usr/local/share/julia
+ COPY startup.jl /usr/local/share/julia/config/
+-# RUN julia -e 'using Pkg ;ENV["MODERNGL_DEBUGGING"] = "true"; Pkg.build("ModernGL")'
+-
+-
+-
+-
+-
+ 
+ # user environment
+-
+-# we use a single folder, /data, as the user depot regardless of the actual user
+-# (i.e., to be compatible with `docker run --user`, which might not have a $HOME)
+-
+ RUN mkdir -m 0777 /data
+ RUN mkdir $HOME/data
+ 
+ ENV JULIA_HISTORY=/data/logs/repl_history.jl
+-#TODO set up dynamically after start
+ ENV LD_LIBRARY_PATH=""
+-# RUN mkdir $HOME/data_decathlon &&\
+-# cd $HOME/data_decathlon &&\
+-# wget https://raw.githubusercontent.com/pavanjadhaw/gdown.pl/master/gdown.pl && chmod u+x gdown.pl &&\
+-# ./gdown https://drive.google.com/file/d/1jyVGUGyxKBXV6_9ivuZapQS8eUJXCIpu/view?usp=sharing
+-
+-COPY download_data.py /workspace/download_data.py
+-
+-RUN python3 /workspace/download_data.py
+-
+ 
+ # setup enviromental variables for Julia multithreading keeping one interactive thread
+ COPY setup_threads.sh  /etc/profile.d/
+ 
+-# COPY initt.jl $HOME/initt.jl
+-# RUN chmod +x $HOME/initt.jl
+-
+-
+ WORKDIR "/workspace"
+ COPY examples /workspace/examples
+ 
+ ENTRYPOINT ["/usr/local/bin/julia"]
+ CMD ["sleep", "infinity"]
+-
+-
+-
+-# /workspaces/MedEye3d.jl/.devcontainer/initt.jl
+\ No newline at end of file
+diff --git a/.devcontainer/Manifest.toml b/.devcontainer/Manifest.toml
+deleted file mode 100755
+index 9e7ca68..0000000
+--- a/.devcontainer/Manifest.toml
++++ /dev/null
+@@ -1,428 +0,0 @@
+-# This file is machine-generated - editing it directly is not advised
+-
+-julia_version = "1.9.0-rc3"
+-manifest_format = "2.0"
+-project_hash = "f8b32d341f37701b4e50310a1cba5ca58be031bb"
+-
+-[[deps.AbstractFFTs]]
+-deps = ["LinearAlgebra"]
+-git-tree-sha1 = "16b6dbc4cf7caee4e1e75c49485ec67b667098a0"
+-uuid = "621f4979-c628-5d54-868e-fcf4e3e8185c"
+-version = "1.3.1"
+-weakdeps = ["ChainRulesCore"]
+-
+-    [deps.AbstractFFTs.extensions]
+-    AbstractFFTsChainRulesCoreExt = "ChainRulesCore"
+-
+-[[deps.Adapt]]
+-deps = ["LinearAlgebra", "Requires"]
+-git-tree-sha1 = "cc37d689f599e8df4f464b2fa3870ff7db7492ef"
+-uuid = "79e6a3ab-5dfb-504d-930d-738a2a938a0e"
+-version = "3.6.1"
+-weakdeps = ["StaticArrays"]
+-
+-    [deps.Adapt.extensions]
+-    AdaptStaticArraysExt = "StaticArrays"
+-
+-[[deps.ArgTools]]
+-uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
+-version = "1.1.1"
+-
+-[[deps.Artifacts]]
+-uuid = "56f22d72-fd6d-98f1-02f0-08ddc0907c33"
+-
+-[[deps.Atomix]]
+-deps = ["UnsafeAtomics"]
+-git-tree-sha1 = "c06a868224ecba914baa6942988e2f2aade419be"
+-uuid = "a9b6321e-bd34-4604-b9c9-b65b8de01458"
+-version = "0.1.0"
+-
+-[[deps.BFloat16s]]
+-deps = ["LinearAlgebra", "Printf", "Random", "Test"]
+-git-tree-sha1 = "dbf84058d0a8cbbadee18d25cf606934b22d7c66"
+-uuid = "ab4f0b2a-ad5b-11e8-123f-65d77653426b"
+-version = "0.4.2"
+-
+-[[deps.Base64]]
+-uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
+-
+-[[deps.CEnum]]
+-git-tree-sha1 = "eb4cb44a499229b3b8426dcfb5dd85333951ff90"
+-uuid = "fa961155-64e5-5f13-b03f-caf6b980ea82"
+-version = "0.4.2"
+-
+-[[deps.CUDA]]
+-deps = ["AbstractFFTs", "Adapt", "BFloat16s", "CEnum", "CUDA_Driver_jll", "CUDA_Runtime_Discovery", "CUDA_Runtime_jll", "CompilerSupportLibraries_jll", "ExprTools", "GPUArrays", "GPUCompiler", "KernelAbstractions", "LLVM", "LazyArtifacts", "Libdl", "LinearAlgebra", "Logging", "Preferences", "Printf", "Random", "Random123", "RandomNumbers", "Reexport", "Requires", "SparseArrays", "SpecialFunctions", "UnsafeAtomicsLLVM"]
+-git-tree-sha1 = "280893f920654ebfaaaa1999fbd975689051f890"
+-uuid = "052768ef-5323-5732-b1bb-66c8b64840ba"
+-version = "4.2.0"
+-
+-[[deps.CUDA_Driver_jll]]
+-deps = ["Artifacts", "JLLWrappers", "LazyArtifacts", "Libdl", "Pkg"]
+-git-tree-sha1 = "498f45593f6ddc0adff64a9310bb6710e851781b"
+-uuid = "4ee394cb-3365-5eb0-8335-949819d2adfc"
+-version = "0.5.0+1"
+-
+-[[deps.CUDA_Runtime_Discovery]]
+-deps = ["Libdl"]
+-git-tree-sha1 = "bcc4a23cbbd99c8535a5318455dcf0f2546ec536"
+-uuid = "1af6417a-86b4-443c-805f-a4643ffb695f"
+-version = "0.2.2"
+-
+-[[deps.CUDA_Runtime_jll]]
+-deps = ["Artifacts", "CUDA_Driver_jll", "JLLWrappers", "LazyArtifacts", "Libdl", "TOML"]
+-git-tree-sha1 = "5248d9c45712e51e27ba9b30eebec65658c6ce29"
+-uuid = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"
+-version = "0.6.0+0"
+-
+-[[deps.ChainRulesCore]]
+-deps = ["Compat", "LinearAlgebra", "SparseArrays"]
+-git-tree-sha1 = "c6d890a52d2c4d55d326439580c3b8d0875a77d9"
+-uuid = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+-version = "1.15.7"
+-
+-[[deps.ChangesOfVariables]]
+-deps = ["LinearAlgebra", "Test"]
+-git-tree-sha1 = "f84967c4497e0e1955f9a582c232b02847c5f589"
+-uuid = "9e997f8a-9a97-42d5-a9f1-ce6bfc15e2c0"
+-version = "0.1.7"
+-
+-[[deps.Compat]]
+-deps = ["UUIDs"]
+-git-tree-sha1 = "7a60c856b9fa189eb34f5f8a6f6b5529b7942957"
+-uuid = "34da2185-b29b-5c13-b0c7-acf172513d20"
+-version = "4.6.1"
+-weakdeps = ["Dates", "LinearAlgebra"]
+-
+-    [deps.Compat.extensions]
+-    CompatLinearAlgebraExt = "LinearAlgebra"
+-
+-[[deps.CompilerSupportLibraries_jll]]
+-deps = ["Artifacts", "Libdl"]
+-uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
+-version = "1.0.2+0"
+-
+-[[deps.Dates]]
+-deps = ["Printf"]
+-uuid = "ade2ca70-3891-5945-98fb-dc099432e06a"
+-
+-[[deps.DocStringExtensions]]
+-deps = ["LibGit2"]
+-git-tree-sha1 = "2fb1e02f2b635d0845df5d7c167fec4dd739b00d"
+-uuid = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
+-version = "0.9.3"
+-
+-[[deps.Downloads]]
+-deps = ["ArgTools", "FileWatching", "LibCURL", "NetworkOptions"]
+-uuid = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
+-version = "1.6.0"
+-
+-[[deps.ExprTools]]
+-git-tree-sha1 = "c1d06d129da9f55715c6c212866f5b1bddc5fa00"
+-uuid = "e2ba6199-217a-4e67-a87a-7c52f15ade04"
+-version = "0.1.9"
+-
+-[[deps.FileWatching]]
+-uuid = "7b1f6079-737a-58dc-b8bc-7a2ca5c1b5ee"
+-
+-[[deps.GPUArrays]]
+-deps = ["Adapt", "GPUArraysCore", "LLVM", "LinearAlgebra", "Printf", "Random", "Reexport", "Serialization", "Statistics"]
+-git-tree-sha1 = "9ade6983c3dbbd492cf5729f865fe030d1541463"
+-uuid = "0c68f7d7-f131-5f86-a1c3-88cf8149b2d7"
+-version = "8.6.6"
+-
+-[[deps.GPUArraysCore]]
+-deps = ["Adapt"]
+-git-tree-sha1 = "1cd7f0af1aa58abc02ea1d872953a97359cb87fa"
+-uuid = "46192b85-c4d5-4398-a991-12ede77f4527"
+-version = "0.1.4"
+-
+-[[deps.GPUCompiler]]
+-deps = ["ExprTools", "InteractiveUtils", "LLVM", "Libdl", "Logging", "Scratch", "TimerOutputs", "UUIDs"]
+-git-tree-sha1 = "e9a9173cd77e16509cdf9c1663fda19b22a518b7"
+-uuid = "61eb1bfa-7361-4325-ad38-22787b887f55"
+-version = "0.19.3"
+-
+-[[deps.InteractiveUtils]]
+-deps = ["Markdown"]
+-uuid = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
+-
+-[[deps.InverseFunctions]]
+-deps = ["Test"]
+-git-tree-sha1 = "6667aadd1cdee2c6cd068128b3d226ebc4fb0c67"
+-uuid = "3587e190-3f89-42d0-90ee-14403ec27112"
+-version = "0.1.9"
+-
+-[[deps.IrrationalConstants]]
+-git-tree-sha1 = "630b497eafcc20001bba38a4651b327dcfc491d2"
+-uuid = "92d709cd-6900-40b7-9082-c6be49f344b6"
+-version = "0.2.2"
+-
+-[[deps.JLLWrappers]]
+-deps = ["Preferences"]
+-git-tree-sha1 = "abc9885a7ca2052a736a600f7fa66209f96506e1"
+-uuid = "692b3bcd-3c85-4b1f-b108-f13ce0eb3210"
+-version = "1.4.1"
+-
+-[[deps.KernelAbstractions]]
+-deps = ["Adapt", "Atomix", "InteractiveUtils", "LinearAlgebra", "MacroTools", "PrecompileTools", "SparseArrays", "StaticArrays", "UUIDs", "UnsafeAtomics", "UnsafeAtomicsLLVM"]
+-git-tree-sha1 = "47be64f040a7ece575c2b5f53ca6da7b548d69f4"
+-uuid = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+-version = "0.9.4"
+-
+-[[deps.LLVM]]
+-deps = ["CEnum", "LLVMExtra_jll", "Libdl", "Printf", "Unicode"]
+-git-tree-sha1 = "a8960cae30b42b66dd41808beb76490519f6f9e2"
+-uuid = "929cbde3-209d-540e-8aea-75f648917ca0"
+-version = "5.0.0"
+-
+-[[deps.LLVMExtra_jll]]
+-deps = ["Artifacts", "JLLWrappers", "LazyArtifacts", "Libdl", "TOML"]
+-git-tree-sha1 = "09b7505cc0b1cee87e5d4a26eea61d2e1b0dcd35"
+-uuid = "dad2f222-ce93-54a1-a47d-0025e8a3acab"
+-version = "0.0.21+0"
+-
+-[[deps.LazyArtifacts]]
+-deps = ["Artifacts", "Pkg"]
+-uuid = "4af54fe1-eca0-43a8-85a7-787d91b784e3"
+-
+-[[deps.LibCURL]]
+-deps = ["LibCURL_jll", "MozillaCACerts_jll"]
+-uuid = "b27032c2-a3e7-50c8-80cd-2d36dbcbfd21"
+-version = "0.6.3"
+-
+-[[deps.LibCURL_jll]]
+-deps = ["Artifacts", "LibSSH2_jll", "Libdl", "MbedTLS_jll", "Zlib_jll", "nghttp2_jll"]
+-uuid = "deac9b47-8bc7-5906-a0fe-35ac56dc84c0"
+-version = "7.84.0+0"
+-
+-[[deps.LibGit2]]
+-deps = ["Base64", "NetworkOptions", "Printf", "SHA"]
+-uuid = "76f85450-5226-5b5a-8eaa-529ad045b433"
+-
+-[[deps.LibSSH2_jll]]
+-deps = ["Artifacts", "Libdl", "MbedTLS_jll"]
+-uuid = "29816b5a-b9ab-546f-933c-edad1886dfa8"
+-version = "1.10.2+0"
+-
+-[[deps.Libdl]]
+-uuid = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
+-
+-[[deps.LinearAlgebra]]
+-deps = ["Libdl", "OpenBLAS_jll", "libblastrampoline_jll"]
+-uuid = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+-
+-[[deps.LogExpFunctions]]
+-deps = ["DocStringExtensions", "IrrationalConstants", "LinearAlgebra"]
+-git-tree-sha1 = "0a1b7c2863e44523180fdb3146534e265a91870b"
+-uuid = "2ab3a3ac-af41-5b50-aa03-7779005ae688"
+-version = "0.3.23"
+-weakdeps = ["ChainRulesCore", "ChangesOfVariables", "InverseFunctions"]
+-
+-    [deps.LogExpFunctions.extensions]
+-    LogExpFunctionsChainRulesCoreExt = "ChainRulesCore"
+-    LogExpFunctionsChangesOfVariablesExt = "ChangesOfVariables"
+-    LogExpFunctionsInverseFunctionsExt = "InverseFunctions"
+-
+-[[deps.Logging]]
+-uuid = "56ddb016-857b-54e1-b83d-db4d58db5568"
+-
+-[[deps.MacroTools]]
+-deps = ["Markdown", "Random"]
+-git-tree-sha1 = "42324d08725e200c23d4dfb549e0d5d89dede2d2"
+-uuid = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
+-version = "0.5.10"
+-
+-[[deps.Markdown]]
+-deps = ["Base64"]
+-uuid = "d6f4376e-aef5-505a-96c1-9c027394607a"
+-
+-[[deps.MbedTLS_jll]]
+-deps = ["Artifacts", "Libdl"]
+-uuid = "c8ffd9c3-330d-5841-b78e-0817d7145fa1"
+-version = "2.28.2+0"
+-
+-[[deps.MozillaCACerts_jll]]
+-uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
+-version = "2022.10.11"
+-
+-[[deps.NetworkOptions]]
+-uuid = "ca575930-c2e3-43a9-ace4-1e988b2c1908"
+-version = "1.2.0"
+-
+-[[deps.OpenBLAS_jll]]
+-deps = ["Artifacts", "CompilerSupportLibraries_jll", "Libdl"]
+-uuid = "4536629a-c528-5b80-bd46-f80d51c5b363"
+-version = "0.3.21+4"
+-
+-[[deps.OpenLibm_jll]]
+-deps = ["Artifacts", "Libdl"]
+-uuid = "05823500-19ac-5b8b-9628-191a04bc5112"
+-version = "0.8.1+0"
+-
+-[[deps.OpenSpecFun_jll]]
+-deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl", "Pkg"]
+-git-tree-sha1 = "13652491f6856acfd2db29360e1bbcd4565d04f1"
+-uuid = "efe28fd5-8261-553b-a9e1-b2916fc3738e"
+-version = "0.5.5+0"
+-
+-[[deps.Pkg]]
+-deps = ["Artifacts", "Dates", "Downloads", "FileWatching", "LibGit2", "Libdl", "Logging", "Markdown", "Printf", "REPL", "Random", "SHA", "Serialization", "TOML", "Tar", "UUIDs", "p7zip_jll"]
+-uuid = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
+-version = "1.9.0"
+-
+-[[deps.PrecompileTools]]
+-deps = ["Preferences"]
+-git-tree-sha1 = "d0984cc886c48e5a165705ce65236dc2ec467b91"
+-uuid = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
+-version = "1.1.0"
+-
+-[[deps.Preferences]]
+-deps = ["TOML"]
+-git-tree-sha1 = "7eb1686b4f04b82f96ed7a4ea5890a4f0c7a09f1"
+-uuid = "21216c6a-2e73-6563-6e65-726566657250"
+-version = "1.4.0"
+-
+-[[deps.Printf]]
+-deps = ["Unicode"]
+-uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+-
+-[[deps.REPL]]
+-deps = ["InteractiveUtils", "Markdown", "Sockets", "Unicode"]
+-uuid = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
+-
+-[[deps.Random]]
+-deps = ["SHA", "Serialization"]
+-uuid = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+-
+-[[deps.Random123]]
+-deps = ["Random", "RandomNumbers"]
+-git-tree-sha1 = "552f30e847641591ba3f39fd1bed559b9deb0ef3"
+-uuid = "74087812-796a-5b5d-8853-05524746bad3"
+-version = "1.6.1"
+-
+-[[deps.RandomNumbers]]
+-deps = ["Random", "Requires"]
+-git-tree-sha1 = "043da614cc7e95c703498a491e2c21f58a2b8111"
+-uuid = "e6cf234a-135c-5ec9-84dd-332b85af5143"
+-version = "1.5.3"
+-
+-[[deps.Reexport]]
+-git-tree-sha1 = "45e428421666073eab6f2da5c9d310d99bb12f9b"
+-uuid = "189a3867-3050-52da-a836-e630ba90ab69"
+-version = "1.2.2"
+-
+-[[deps.Requires]]
+-deps = ["UUIDs"]
+-git-tree-sha1 = "838a3a4188e2ded87a4f9f184b4b0d78a1e91cb7"
+-uuid = "ae029012-a4dd-5104-9daa-d747884805df"
+-version = "1.3.0"
+-
+-[[deps.SHA]]
+-uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
+-version = "0.7.0"
+-
+-[[deps.Scratch]]
+-deps = ["Dates"]
+-git-tree-sha1 = "30449ee12237627992a99d5e30ae63e4d78cd24a"
+-uuid = "6c6a2e73-6563-6170-7368-637461726353"
+-version = "1.2.0"
+-
+-[[deps.Serialization]]
+-uuid = "9e88b42a-f829-5b0c-bbe9-9e923198166b"
+-
+-[[deps.Sockets]]
+-uuid = "6462fe0b-24de-5631-8697-dd941f90decc"
+-
+-[[deps.SparseArrays]]
+-deps = ["Libdl", "LinearAlgebra", "Random", "Serialization", "SuiteSparse_jll"]
+-uuid = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+-
+-[[deps.SpecialFunctions]]
+-deps = ["IrrationalConstants", "LogExpFunctions", "OpenLibm_jll", "OpenSpecFun_jll"]
+-git-tree-sha1 = "ef28127915f4229c971eb43f3fc075dd3fe91880"
+-uuid = "276daf66-3868-5448-9aa4-cd146d93841b"
+-version = "2.2.0"
+-weakdeps = ["ChainRulesCore"]
+-
+-    [deps.SpecialFunctions.extensions]
+-    SpecialFunctionsChainRulesCoreExt = "ChainRulesCore"
+-
+-[[deps.StaticArrays]]
+-deps = ["LinearAlgebra", "Random", "StaticArraysCore", "Statistics"]
+-git-tree-sha1 = "c262c8e978048c2b095be1672c9bee55b4619521"
+-uuid = "90137ffa-7385-5640-81b9-e52037218182"
+-version = "1.5.24"
+-
+-[[deps.StaticArraysCore]]
+-git-tree-sha1 = "6b7ba252635a5eff6a0b0664a41ee140a1c9e72a"
+-uuid = "1e83bf80-4336-4d27-bf5d-d5a4f845583c"
+-version = "1.4.0"
+-
+-[[deps.Statistics]]
+-deps = ["LinearAlgebra", "SparseArrays"]
+-uuid = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+-version = "1.9.0"
+-
+-[[deps.SuiteSparse_jll]]
+-deps = ["Artifacts", "Libdl", "Pkg", "libblastrampoline_jll"]
+-uuid = "bea87d4a-7f5b-5778-9afe-8cc45184846c"
+-version = "5.10.1+6"
+-
+-[[deps.TOML]]
+-deps = ["Dates"]
+-uuid = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
+-version = "1.0.3"
+-
+-[[deps.Tar]]
+-deps = ["ArgTools", "SHA"]
+-uuid = "a4e569a6-e804-4fa4-b0f3-eef7a1d5b13e"
+-version = "1.10.0"
+-
+-[[deps.Test]]
+-deps = ["InteractiveUtils", "Logging", "Random", "Serialization"]
+-uuid = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+-
+-[[deps.TimerOutputs]]
+-deps = ["ExprTools", "Printf"]
+-git-tree-sha1 = "f548a9e9c490030e545f72074a41edfd0e5bcdd7"
+-uuid = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
+-version = "0.5.23"
+-
+-[[deps.UUIDs]]
+-deps = ["Random", "SHA"]
+-uuid = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
+-
+-[[deps.Unicode]]
+-uuid = "4ec0a83e-493e-50e2-b9ac-8f72acf5a8f5"
+-
+-[[deps.UnsafeAtomics]]
+-git-tree-sha1 = "6331ac3440856ea1988316b46045303bef658278"
+-uuid = "013be700-e6cd-48c3-b4a1-df204f14c38f"
+-version = "0.2.1"
+-
+-[[deps.UnsafeAtomicsLLVM]]
+-deps = ["LLVM", "UnsafeAtomics"]
+-git-tree-sha1 = "ea37e6066bf194ab78f4e747f5245261f17a7175"
+-uuid = "d80eeb9a-aca5-4d75-85e5-170c8b632249"
+-version = "0.1.2"
+-
+-[[deps.Zlib_jll]]
+-deps = ["Libdl"]
+-uuid = "83775a58-1f1d-513f-b197-d71354ab007a"
+-version = "1.2.13+0"
+-
+-[[deps.libblastrampoline_jll]]
+-deps = ["Artifacts", "Libdl"]
+-uuid = "8e850b90-86db-534c-a0d3-1478176c7d93"
+-version = "5.7.0+0"
+-
+-[[deps.nghttp2_jll]]
+-deps = ["Artifacts", "Libdl"]
+-uuid = "8e850ede-7688-5339-a07c-302acd2aaf8d"
+-version = "1.48.0+0"
+-
+-[[deps.p7zip_jll]]
+-deps = ["Artifacts", "Libdl"]
+-uuid = "3f19e933-33d8-53b3-aaab-bd5110c3b7a0"
+-version = "17.4.0+0"
+\ No newline at end of file
+diff --git a/.devcontainer/devcontainer.json b/.devcontainer/devcontainer.json
+index 49723ed..31794f7 100755
+--- a/.devcontainer/devcontainer.json
++++ b/.devcontainer/devcontainer.json
+@@ -50,7 +50,7 @@
+ 		// "ms-python.vscode-pylance"
+ 	],
+ 	"mounts": [
+-		"source=/media/jm/hddData/datasets/Task09_Spleen,target=/home/data,type=bind,consistency=cached"
++		// "source=/media/jm/hddData/datasets/Task09_Spleen,target=/home/data,type=bind,consistency=cached"
+ 	  ],
+ 
+ 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
+diff --git a/Project.toml b/Project.toml
+index 03a5289..7e830d3 100755
+--- a/Project.toml
++++ b/Project.toml
+@@ -1,7 +1,7 @@
+ name = "MedEye3d"
+ uuid = "48a1af7b-3279-4eeb-8f2b-7ca229bb51b1"
+-authors = ["M.D Jakub Mitura <53857487+jakubMitura14@users.noreply.github.com>"]
+ version = "0.5.8"
++authors = ["M.D Jakub Mitura <53857487+jakubMitura14@users.noreply.github.com>"]
+ 
+ [deps]
+ ColorTypes = "3da002f7-5984-5a60-b8a6-cbb66c0b333f"
+@@ -13,6 +13,7 @@ DocumenterVitepress = "4710194d-e776-4893-9690-8d956a29c365"
+ FreeType = "b38be410-82b0-50bf-ab77-7b57e271db43"
+ FreeTypeAbstraction = "663a7486-cb36-511b-a19d-713bb74d65c9"
+ GLFW = "f7f18e0c-5ee9-5ccd-a5bf-e8befd85ed98"
++GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+ GeometryTypes = "4d00f742-c7ba-57c2-abde-4428a4b178cb"
+ HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+ KernelAbstractions = "63c18a36-062a-441e-b654-da1e3ab1ce7c"
+@@ -20,7 +21,7 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+ Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
+ MedImages = "fbff095b-7891-4fc4-b5e5-3cd99b9dd225"
+ ModernGL = "66fc600b-dfda-50eb-8b99-91cfa97b1301"
+-NIfTI ="a3a9e032-41b5-5fc4-967a-a6b7a19844d3"
++NIfTI = "a3a9e032-41b5-5fc4-967a-a6b7a19844d3"
+ Observables = "510215fc-4207-5dde-b226-833fc4488ee2"
+ Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"
+ PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
+@@ -37,6 +38,7 @@ FreeTypeAbstraction = ">=0.10.0"
+ GLFW = ">=3.4.1"
+ GeometryTypes = ">=0.8.5"
+ HDF5 = ">=0.17.1"
++MedImages = "2.0.1"
+ ModernGL = ">=1.1.5"
+ Observables = ">=0.5.4"
+ Parameters = ">=0.12.3"
+diff --git a/src/MedEye3d.jl b/src/MedEye3d.jl
+index 4f0ec78..783aa3c 100755
+--- a/src/MedEye3d.jl
++++ b/src/MedEye3d.jl
+@@ -60,6 +60,7 @@ include(joinpath("display", "reactingToMouseKeyboard", "ReactingToInput.jl"))
+ include(joinpath("higherAbstractions", "DisplayDataManag.jl"))
+ include(joinpath("display", "GLFW", "SegmentationDisplay.jl"))
+ #include(joinpath("higherAbstractions", "visualizationFromHdf5.jl"))
++include(joinpath("display", "LesionMetadataWindow.jl"))
+ 
+ 
+ #checking weather we have some interactive thread reserved
+diff --git a/src/display/GLFW/DispUtils/StructsManag.jl b/src/display/GLFW/DispUtils/StructsManag.jl
+index aacdad8..af3e9a0 100755
+--- a/src/display/GLFW/DispUtils/StructsManag.jl
++++ b/src/display/GLFW/DispUtils/StructsManag.jl
+@@ -121,9 +121,11 @@ utility function to create series of ThreeDimRawDat from list of tuples where
+ first entry is String and second entry is 3 dimensional array with data
+ ```
+ function getThreeDims(list)
+-
++  println("getThreeDims called with list length: ", length(list))
++  for (i, tupl) in enumerate(list)
++      println("getThreeDims list[$i] tuple[1] = '", tupl[1], "' (typeof: ", typeof(tupl[1]), ")")
++  end
+   return map(tupl -> ThreeDimRawDat{typeof(tupl[2][1])}(typeof(tupl[2][1]), tupl[1], tupl[2]), list)
+-
+ end#getThreeDims
+ 
+ 
+@@ -211,6 +213,8 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
+   # @info "correctedWidthForTextAccounting" correctedWidthForTextAccounting
+ 
+ 
++  @info "DIMS" windowHeight=calcDimStruct.windowHeight imageTextureWidth=calcDimStruct.imageTextureWidth heightToWithRatio=calcDimStruct.heightToWithRatio imageTextureHeight=calcDimStruct.imageTextureHeight corrected_width=corrected_width widthCorr=widthCorr heightCorr=heightCorr
++
+   res = Float32.([
+     # positions                  // colors           // texture coords
+     correctedWidthForTextAccounting - widthCorr, 1.0 - heightCorr, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0,   # top right
+@@ -236,8 +240,6 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
+     widthCorr /= 4
+     heightCorr /= 2
+ 
+-
+-
+     # @info widthCorr
+     if imagePos == 1    #LEFT IMAGE
+       res[1] = normalCorrectedTextAccounting - widthCorr # top right
+@@ -255,8 +257,42 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
+       res[17] = normalCorrectedTextAccounting + widthCorr# bottom left
+       res[25] = normalCorrectedTextAccounting + widthCorr# top left
+     end
++  elseif displayMode == QuadImage
++    widthCorr /= 4
++    heightCorr /= 4
++    
++    # y coordinates (indices: 2=top right, 10=bottom right, 18=bottom left, 26=top left)
++    if imagePos == 1 || imagePos == 2 # Top half
++      res[2] = 1.0 - heightCorr
++      res[10] = 0.0 + heightCorr
++      res[18] = 0.0 + heightCorr
++      res[26] = 1.0 - heightCorr
++    else # Bottom half
++      res[2] = 0.0 - heightCorr
++      res[10] = -1.0 + heightCorr
++      res[18] = -1.0 + heightCorr
++      res[26] = 0.0 - heightCorr
++    end
++
++    # x coordinates (indices: 1=top right, 9=bottom right, 17=bottom left, 25=top left)
++    if imagePos == 1 || imagePos == 3 # Left half
++      res[1] = normalCorrectedTextAccounting - widthCorr
++      res[9] = normalCorrectedTextAccounting - widthCorr
++      res[17] = -1.0 + widthCorr
++      res[25] = -1.0 + widthCorr
++    else # Right half
++      res[1] = textBeginning - widthCorr
++      res[9] = textBeginning - widthCorr
++      res[17] = normalCorrectedTextAccounting + widthCorr
++      res[25] = normalCorrectedTextAccounting + widthCorr
++    end
+   end
+ 
++  println("Quad vertices for imagePos $imagePos:")
++  for i in 1:4
++    base = (i-1)*8
++    println("  Vertex $i: x=", res[base+1], " y=", res[base+2], " z=", res[base+3], " texX=", res[base+7], " texY=", res[base+8])
++  end
+ 
+   # @info res[1], res[9], res[17], res[25]
+ 
+diff --git a/src/display/GLFW/DispUtils/TextureManag.jl b/src/display/GLFW/DispUtils/TextureManag.jl
+index 590c9ff..9fc2091 100755
+--- a/src/display/GLFW/DispUtils/TextureManag.jl
++++ b/src/display/GLFW/DispUtils/TextureManag.jl
+@@ -32,9 +32,26 @@ function updateTexture(::Type{Tt}, data::AbstractArray, textSpec::TextureSpec, x
+     #   @spawn :interactive begin
+     glActiveTexture(textSpec.actTextrureNumb) # active proper texture unit before binding
+     glBindTexture(GL_TEXTURE_2D, textSpec.ID[])
++    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0)
+ 
+     if ((parameter_type(textSpec) == Float16) || (parameter_type(textSpec) == Float32))
++        err_before = glGetError()
++        println("updateTexture Float32 path: widthh=$widthh, heightt=$heightt, xoffset=$xoffset, yoffset=$yoffset, ID=$(textSpec.ID[]), actTextNumb=$(textSpec.actTextrureNumb), data_size=$(size(data))")
++        
++        # Get texture dimensions using glGetTexLevelParameteriv
++        tex_w = Ref{GLint}(0)
++        tex_h = Ref{GLint}(0)
++        tex_format = Ref{GLint}(0)
++        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, tex_w)
++        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, tex_h)
++        glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, tex_format)
++        println("Actual texture in VRAM: width=$(tex_w[]), height=$(tex_h[]), format=$(tex_format[])")
++
+         glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, widthh, heightt, GL_RED, textSpec.OpGlType, collect(data))
++        err_after = glGetError()
++        if err_after != 0
++            println("glTexSubImage2D failed! err_before: ", err_before, ", err_after: ", err_after)
++        end
+     else
+         glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, collect(data))
+         # glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, reduce(vcat,data))
+@@ -68,8 +85,18 @@ function createTexture(juliaDataType::Type{juliaDataTyp}, width::Int32, height::
+     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0)
+     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0)
+-    #we just assign storage
+-    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RType, width, height)
++    #we just assign storage using glTexImage2D to ensure OpenGL 3.3 compatibility
++    format = (GL_RType == GL_R8UI || GL_RType == GL_R16UI || GL_RType == GL_R32UI || GL_RType == GL_R8I || GL_RType == GL_R16I || GL_RType == GL_R32I) ? GL_RED_INTEGER : GL_RED
++    
++    println("createTexture: allocating texture ", texture[], " with width=", width, ", height=", height, ", GL_RType=", GL_RType, ", format=", format)
++    
++    while glGetError() != 0 end
++    glTexImage2D(GL_TEXTURE_2D, 0, GL_RType, width, height, 0, format, OpGlType, C_NULL)
++    err = glGetError()
++    if err != 0
++        println("ERROR in createTexture: glTexImage2D failed with ", err, " for width ", width, " height ", height, " GL_RType ", GL_RType, " format ", format)
++    end
++
+ 
+ 
+     return texture
+@@ -101,6 +128,11 @@ function initializeTextures(listOfTextSpecs, calcDimStruct::CalcDimsStruct)::Vec
+ 
+ 
+         setTextureVisibility(textSpec.isVisible, textSpec.uniforms)
++        changeTextureContribution(textSpec, textSpec.maskContribution)
++        
++        if !isempty(textSpec.minAndMaxValue)
++            coontrolMinMaxUniformVals(textSpec)
++        end
+ 
+ 
+         push!(res, setproperties(textSpec, (ID=textUreId, actTextrureNumb=actTextrureNumb, associatedActiveNumer=index)))
+diff --git a/src/display/GLFW/SegmentationDisplay.jl b/src/display/GLFW/SegmentationDisplay.jl
+index b917d76..8f1b444 100755
+--- a/src/display/GLFW/SegmentationDisplay.jl
++++ b/src/display/GLFW/SegmentationDisplay.jl
+@@ -115,7 +115,11 @@ function getDisplayMode(listOfTextSpecs::Union{Vector{TextureSpec},Vector{Vector
+     if typeof(listOfTextSpecs) == Vector{TextureSpec}
+         return SingleImage
+     elseif typeof(listOfTextSpecs) == Vector{Vector{TextureSpec}}
+-        return MultiImage
++        if length(listOfTextSpecs) == 4
++            return QuadImage
++        else
++            return MultiImage
++        end
+     end
+ end
+ 
+@@ -346,7 +350,7 @@ function coordinateDisplay(
+     crosshair, mainRects, textFields = (Nothing, Nothing, Nothing)
+ 
+     supervoxel, mainRect = (Nothing, Nothing)
+-    if displayMode == MultiImage
++    if displayMode == MultiImage || displayMode == QuadImage
+         crosshair, mainRects, textFields = initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader_words, vbo_words, shader_program_words)
+     elseif displayMode == SingleImage
+         supervoxel, mainRect = initializeSupervoxels(vertex_shader, vao, ebo, vboVector, allSupervoxels)
+@@ -363,6 +367,7 @@ function coordinateDisplay(
+     #initializing object that holds data reqired for interacting with opengl
+     initializedTextures::Vector{Vector{TextureSpec}} = []
+     foreach(enumerate(listOfTextSpecsMapped)) do (index, mappedTextSpecVector)
++        glUseProgram(shaderProgramVector[index])
+         push!(initializedTextures, initializeTextures(mappedTextSpecVector, calcDimStructs[index]))
+     end
+ 
+@@ -387,10 +392,10 @@ function coordinateDisplay(
+                 tex
+             end
+         end, filteredTextures)
+-        
+         push!(numbDicts, Dictionary(map(it -> it.numb, fixedTextures), collect(eachindex(fixedTextures))))
+     end
+   
++    @info "Type of window before forDispObjs: $(typeof(window))"
+ 
+     forDispObjs::Vector{forDisplayObjects} = Vector{forDisplayObjects}()
+     foreach(enumerate(initializedTextures)) do (index, initTextureVector)
+@@ -411,6 +416,7 @@ function coordinateDisplay(
+             imagePos=index
+         ))
+     end
++    @info "Type of forDispObjs[1].window after creation: $(typeof(forDispObjs[1].window))"
+     #finding some texture that can be modifid and set as one active for modifications
+     # put!(mainMedEye3dInstance.channel, forDispObj)
+     #in order to clean up all resources while closing
+@@ -434,29 +440,68 @@ function coordinateDisplay(
+         ))
+     end
+ 
++    # wait we need to parse rect texture display obj !!!
+ 
++    rectTextDispObjs::Vector{ForWordsDispStruct} = Vector{ForWordsDispStruct}()
++    if displayMode == SingleImage
++        foreach(enumerate(initializedTextures)) do (index, initTextureVector)
++            push!(rectTextDispObjs, prepareForDispStruct(
++                length(initTextureVector),
++                fragment_shader_words,
++                vbo_words,
++                shader_program_words,
++                window,
++                textTexturewidthh,
++                textTextureheightt,
++                forDispObjs[index]
++            ))
++        end
++    end
+ 
+-
+-
+-    # put!(mainMedEye3dInstance.channel, forTextDispStruct)
+-    function consumer(mainChannel::Base.Channel{Any})
+-        shouldStop = [false]
+-        stateInstances::Vector{StateDataFields} = Vector{StateDataFields}()
+-        if displayMode == MultiImage
+-            # Initialization of GlShaderAndBufferFields for crosshair so different StateDataFields in multi-image mode
+-            stateInstances = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, crosshairFields=crosshair, mainRectFields=mainRects[index], textFields=textFields, spacingsValue=spacing[index], originValue=origin[index]) for (index, _) in enumerate(initializedTextures)]
+-        else
+-            stateInstances = [StateDataFields(displayMode=displayMode, imagePosition=index, switchIndex=index, spacingsValue=spacing[index], originValue=origin[index], supervoxelFields=supervoxel, mainRectFields=mainRect, allSupervoxels=allSupervoxels) for (index, _) in enumerate(initializedTextures)]
++    states = map(x -> StateDataFields(
++            textDispObj=forTextDispStructs[x],
++            mainForDisplayObjects=forDispObjs[typeof(dataToScrollDims) == Vector{DataToScrollDims} ? x : 1],
++            calcDimsStruct=calcDimStructs[x],
++            displayMode=displayMode,
++            imagePosition=x,
++            switchIndex=x,
++            mainRectFields=displayMode == SingleImage ? mainRect : mainRects[x],
++            crosshairFields=displayMode == SingleImage ? GlShaderAndBufferFields() : crosshair,
++            textFields=displayMode == SingleImage ? GlShaderAndBufferFields() : textFields,
++            spacingsValue=spacing[x],
++            originValue=origin[x],
++            supervoxelFields=displayMode == SingleImage ? supervoxel : GlShaderAndBufferFields(),
++            allSupervoxels=allSupervoxels
++        ), 1:length(forDispObjs))
++
++    stateInstances::Vector{StateDataFields} = states
++    @info "Type of stateInstances[1].mainForDisplayObjects.window: $(typeof(stateInstances[1].mainForDisplayObjects.window))"
++
++    if (length(stateInstances) > 1)
++        #we need to mark the crosshair for the first state as invisible
++        # stateInstances[1].mainRectFields.isVisible = false
++        for i in 2:length(stateInstances)
++            stateInstances[i].switchIndex = 0
+         end
+-        #Setting second state information to be 0, because we need to access information from the first state only
+-        if length(stateInstances) > 1 && displayMode == MultiImage
+-            stateInstances[2].switchIndex = 0
++    end
++
++    #Setting second state information to be 0, because we need to access information from the first state only
++    if length(stateInstances) > 1 && displayMode == MultiImage
++        stateInstances[2].switchIndex = 0
++    end
++    if length(stateInstances) > 1 && displayMode == QuadImage
++        for i in 2:length(stateInstances)
++            stateInstances[i].switchIndex = 0
+         end
++    end
+ 
++    foreach(enumerate(stateInstances)) do (index, stateInstance)
++        stateInstance.textureToModifyVec = filter(it -> it.isEditable, initializedTextures[index])
++    end
+ 
+-        foreach(enumerate(stateInstances)) do (index, stateInstance)
+-            stateInstance.textureToModifyVec = filter(it -> it.isEditable, initializedTextures[index])
+-        end
++    function consumer(mainChannel::Base.Channel{Any})
++        shouldStop = [false]
++        
+         #    in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
+ 
+ 
+@@ -502,34 +547,38 @@ function coordinateDisplay(
+             shouldStop[1] = true      
+         end
+ 
+-        if (typeof(stateInstances[1].mainForDisplayObjects.window) == GLFW.Window) #harcoded check to get only the first stateInstance since the window is same for all
+-            cleanUp()
+-        end#
++        # We do not call cleanUp here, because it would immediately close the window we just created!
+         GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())
+ 
+ 
+         while !shouldStop[1]
+-            channelData = take!(mainChannel)
+-            # get the aggregation here, only when the type is mouseStruct.
+-            if typeof(channelData) == MouseStruct
+-                if (channelData.isLeftButtonDown)
+-                    mouseStructAggregationArray::Vector{MouseStruct} = [channelData]
+-                    while !isempty(mainChannel) && typeof(fetch(mainChannel)) == MouseStruct
+-                        push!(mouseStructAggregationArray, take!(mainChannel))
++            try
++                channelData = take!(mainChannel)
++                @info "CONSUMER TOOK $(typeof(channelData))"
++                
++                # get the aggregation here, only when the type is mouseStruct.
++                if typeof(channelData) == MouseStruct
++                    if (channelData.isLeftButtonDown)
++                        mouseStructAggregationArray::Vector{MouseStruct} = [channelData]
++                        while !isempty(mainChannel) && typeof(fetch(mainChannel)) == MouseStruct
++                            push!(mouseStructAggregationArray, take!(mainChannel))
++                        end
++                        channelData = mouseStructAggregationArray
+                     end
+-                    channelData = mouseStructAggregationArray
++
++                elseif typeof(channelData) == CalcDimsStruct || typeof(channelData) == forDisplayObjects || typeof(channelData) == FullScrollableDat
++                    stateInstances[1].switchIndex = channelData.imagePos
+                 end
+ 
+-            elseif typeof(channelData) == CalcDimsStruct || typeof(channelData) == forDisplayObjects || typeof(channelData) == FullScrollableDat
+-                stateInstances[1].switchIndex = channelData.imagePos > 1 ? 2 : 1  #Setting the current State to modify to be for the left or the right image
++                on_next!(stateInstances, channelData)
++            catch e
++                @error "CONSUMER TASK CRASHED:" exception=(e, catch_backtrace())
++                shouldStop[1] = true
+             end
+-
+-            on_next!(stateInstances, channelData)
+-
+         end
+     end #end of consumer
+ 
+-    mainMedEye3dInstance = MainMedEye3d(channel=Base.Channel{Any}(consumer, 1000; spawn=false, threadpool=:interactive), textDispObj=forTextDispStructs[1], displayMode=displayMode)
++    mainMedEye3dInstance = MainMedEye3d(channel=Base.Channel{Any}(consumer, 1000; spawn=false, threadpool=:interactive), textDispObj=forTextDispStructs[1], displayMode=displayMode, states=stateInstances)
+     # mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(1000))
+ 
+ 
+@@ -549,7 +598,78 @@ function coordinateDisplay(
+ 
+ 
+     registerInteractions(window, mainMedEye3dInstance, calcDimStructs)#passing needed subscriptions from GLFW
+-    # errormonitor(@async consumer(mainMedEye3dInstance.channel))
++    # Initialize the Lesion Metadata Window with hooks
++    try
++        active_lesion = Observable("Lesion 1")
++        ui_hooks = Dict{Symbol, Observable}(
++            :scroll => Observable(0),
++            :windowing => Observable((-160.0f0, 240.0f0)),
++            :paint_val => Observable(1),
++            :sync_lesion => Observable(false)
++        )
++        
++        # Windowing Listener
++        on(ui_hooks[:windowing]) do (min_val, max_val)
++            for state in mainMedEye3dInstance.states
++                for tex in state.mainForDisplayObjects.listOfTextSpecifications
++                    if !tex.isNuclearMask && !tex.isContinuusMask
++                        tex.minAndMaxValue = [min_val, max_val]
++                    end
++                end
++            end
++        end
++
++        # Paint / Erase Listener
++        on(ui_hooks[:paint_val]) do val
++            for state in mainMedEye3dInstance.states
++                state.valueForMasToSet.value = val
++            end
++        end
++
++        # Scroll Listener (Mock, MedEye uses GLFW natively)
++        on(ui_hooks[:scroll]) do val
++            # Can push to main channel if needed
++            println("Scroll button clicked: \$val")
++        end
++
++        # Lesion Spatial Sync Listener
++        on(ui_hooks[:sync_lesion]) do _
++            if length(mainMedEye3dInstance.states) > 1
++                tp0_state = mainMedEye3dInstance.states[1]
++                tp1_state = mainMedEye3dInstance.states[2] # Target
++                
++                pos_tp0 = tp0_state.lastRecordedMousePosition
++                spacing_tp0 = tp0_state.spacingsValue[1]
++                origin_tp0 = tp0_state.originValue[1]
++                
++                # Physical = Origin + (VoxelIndex - 1) * Spacing
++                phys_x = origin_tp0[1] + (pos_tp0[1] - 1) * spacing_tp0[1]
++                phys_y = origin_tp0[2] + (pos_tp0[2] - 1) * spacing_tp0[2]
++                phys_z = origin_tp0[3] + (pos_tp0[3] - 1) * spacing_tp0[3]
++                
++                # Map back to Voxel Coordinates in TP1
++                spacing_tp1 = tp1_state.spacingsValue[1]
++                origin_tp1 = tp1_state.originValue[1]
++                
++                vox_x = round(Int, (phys_x - origin_tp1[1]) / spacing_tp1[1]) + 1
++                vox_y = round(Int, (phys_y - origin_tp1[2]) / spacing_tp1[2]) + 1
++                vox_z = round(Int, (phys_z - origin_tp1[3]) / spacing_tp1[3]) + 1
++                
++                mapped_pos = CartesianIndex(vox_x, vox_y, vox_z)
++                
++                println("Mapped lesion from TP0 \$pos_tp0 -> physical (\$phys_x, \$phys_y, \$phys_z) -> TP1 \$mapped_pos")
++            else
++                println("Need at least 2 images loaded to sync lesions.")
++            end
++        end
++
++        # Try to invoke the Makie UI window
++        if isdefined(Main, :LesionMetadataWindow)
++            Main.LesionMetadataWindow.create_metadata_window(active_lesion, ui_hooks)
++        end
++    catch e
++        @warn "Could not initialize LesionMetadataWindow: \$e"
++    end
+ 
+     return mainMedEye3dInstance
+ end #coordinateDisplay
+@@ -696,16 +816,17 @@ function displayImage(
+     fractionOfMainImage::Float32=Float32(0.8),
+     windowWidth::Int=1000,
+     svVertAndInd::Dict{String,Vector}=Dict{String,Vector}("supervoxel_vertices" => [], "supervoxel_indices" => []),
+-    all_supervoxels::Dict{Int, Dict{Int,Dict{String,Any}}}=Dict{Int,Dict{Int, Dict{String,Any}}}()
++    all_supervoxels::Dict{Int,Dict{Int, Dict{String, Any}}} = Dict{Int, Dict{Int, Dict{String, Any}}}(),
++    quadView::Bool=false
+ )
+ 
+ 
+     #asserting that the length of the studySrc is 2, if it is a multi-dimensions vector
+-    if typeof(studySrc) == Vector{Vector{Tuple{String,String}}}
++    if typeof(studySrc) == Vector{Vector{Tuple{String,String}}} && !quadView
+         try
+-            @assert length(studySrc) == 2
++            @assert length(studySrc) == 2 || length(studySrc) == 4
+         catch assertionError
+-            @error "MedEye3d.jl currently do not support more than 2 images for comparison." assertionError
++            @error "MedEye3d.jl currently do not support more than 2 images for comparison, unless quadView is true." assertionError
+         end
+     end
+ 
+diff --git a/src/display/GLFW/shadersEtc/CustomFragShad.jl b/src/display/GLFW/shadersEtc/CustomFragShad.jl
+index a52735e..e457e03 100755
+--- a/src/display/GLFW/shadersEtc/CustomFragShad.jl
++++ b/src/display/GLFW/shadersEtc/CustomFragShad.jl
+@@ -334,7 +334,7 @@ function setMaskInfluence(textur::TextureSpec{Float32})
+ 
+     return """
+ 
+-    float $(textName)Res = texture2D($(textName), TexCoord0).r * $(textName)isVisible*$(textName)maskContribution ;
++    float $(textName)Res = texture($(textName), TexCoord0).r * $(textName)isVisible*$(textName)maskContribution ;
+ 
+     """
+ end#setMaskInfluence
+diff --git a/src/display/GLFW/shadersEtc/ShadersAndVerticies.jl b/src/display/GLFW/shadersEtc/ShadersAndVerticies.jl
+index 04c2bfa..59b70df 100755
+--- a/src/display/GLFW/shadersEtc/ShadersAndVerticies.jl
++++ b/src/display/GLFW/shadersEtc/ShadersAndVerticies.jl
+@@ -14,9 +14,7 @@ gslString so version of GSLS we are using currently
+   """
+ function createVertexShader(gslString::String)
+   # $(gslString)
+-  vsh = """
+-  $(gslString)
+-
++  vsh = """$(gslString)
+   layout (location = 0) in vec3 aPos;
+   layout (location = 1) in vec3 aColor;
+   layout (location = 2) in vec2 aTexCoord;
+diff --git a/src/display/GLFW/shadersEtc/ShadersAndVerticiesForText.jl b/src/display/GLFW/shadersEtc/ShadersAndVerticiesForText.jl
+index 3d969b9..889b11c 100755
+--- a/src/display/GLFW/shadersEtc/ShadersAndVerticiesForText.jl
++++ b/src/display/GLFW/shadersEtc/ShadersAndVerticiesForText.jl
+@@ -16,9 +16,7 @@ creating fragment Shader  so controlling colors and textures
+ gslString so version of GSLS we are using currently
+   """
+ function createFragmentShader(gslString::String)
+-  fsh = """
+-  $(gslString)
+-
++  fsh = """$(gslString)
+   #extension GL_EXT_gpu_shader4 : enable    //Include support for this extension, which defines usampler2D
+ 
+   out vec4 FragColor;
+@@ -28,7 +26,7 @@ function createFragmentShader(gslString::String)
+   uniform usampler2D TextTexture1;
+   void main() {
+ 
+-  uint text1Texel = texture2D(TextTexture1, TexCoord0).r ;
++  uint text1Texel = texture(TextTexture1, TexCoord0).r ;
+ 
+    if(text1Texel > 0){
+     FragColor = vec4(0.0,0.0,0.0,1.0);  }
+diff --git a/src/display/GLFW/startModules/ModernGlUtil.jl b/src/display/GLFW/startModules/ModernGlUtil.jl
+index 5bccbe1..daba9ca 100755
+--- a/src/display/GLFW/startModules/ModernGlUtil.jl
++++ b/src/display/GLFW/startModules/ModernGlUtil.jl
+@@ -81,8 +81,14 @@ function createShader(source, typ)
+     if shader == 0
+         error("Error creating shader: ", glErrorMessage())
+     end
++    @info "Compiling shader of type: $typ"
++    @info source
+     # Compile the shader
+-    glShaderSource(shader, 1, convert(Ptr{UInt8}, pointer([convert(Ptr{GLchar}, pointer(source))])), C_NULL)
++    src_ptr = pointer(source)
++    ptr_array = [src_ptr]
++    GC.@preserve source ptr_array begin
++        glShaderSource(shader, 1, convert(Ptr{Ptr{UInt8}}, pointer(ptr_array)), C_NULL)
++    end
+     glCompileShader(shader)
+     # Check for errors
+     !validateShader(shader) && error("Shader creation error: ", getInfoLog(shader))
+diff --git a/src/display/reactingToMouseKeyboard/reactToKeyboard/ChangePlane.jl b/src/display/reactingToMouseKeyboard/reactToKeyboard/ChangePlane.jl
+index 78c8d31..3f8d07e 100755
+--- a/src/display/reactingToMouseKeyboard/reactToKeyboard/ChangePlane.jl
++++ b/src/display/reactingToMouseKeyboard/reactToKeyboard/ChangePlane.jl
+@@ -44,8 +44,8 @@ function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObjec
+     glDeleteTextures(length(arr), arr)# deleting
+ 
+     #getting new
+-
+-    initializeTextures(textSpecs, newCalcDim)
++    glUseProgram(stateObject.mainForDisplayObjects.shader_program)
++    stateObject.mainForDisplayObjects.listOfTextSpecifications = initializeTextures(textSpecs, newCalcDim)
+ 
+     # end#if
+ 
+diff --git a/src/structs/ForDisplayStructs.jl b/src/structs/ForDisplayStructs.jl
+index 528af02..409cb3c 100755
+--- a/src/structs/ForDisplayStructs.jl
++++ b/src/structs/ForDisplayStructs.jl
+@@ -1,7 +1,7 @@
+ module ForDisplayStructs
+ using Base: Int32, isvisible
+ export MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, StateDataFields, KeyboardStruct, KeyInputFields, TextureUniforms, MaskTextureUniforms, ForWordsDispStruct, MainMedEye3d
+-export DisplayedVoxels, CustomDisplayedVoxels, DisplayMode, SingleImage, MultiImage, GlShaderAndBufferFields
++export DisplayedVoxels, CustomDisplayedVoxels, DisplayMode, SingleImage, MultiImage, QuadImage, GlShaderAndBufferFields
+ using ColorTypes, Parameters, Observables, ModernGL, GLFW, Dictionaries, FreeTypeAbstraction, Observables
+ using ..DataStructs
+ 
+@@ -12,6 +12,7 @@ Display mode of the visualizer : SingleImage or MultiImage
+ @enum DisplayMode begin
+   SingleImage
+   MultiImage
++  QuadImage
+ end
+ 
+ 

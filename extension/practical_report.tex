@@ -1,0 +1,948 @@
+\documentclass[a4paper,10pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{graphicx}
+\graphicspath{{fig/}}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage[table]{xcolor}
+\usepackage{caption}
+\usepackage{listings}
+
+\geometry{margin=1.5cm}
+
+\definecolor{slicerblue}{HTML}{0056b3}
+\definecolor{slicercode}{HTML}{f0f0f0}
+
+\lstset{
+    backgroundcolor=\color{slicercode},
+    basicstyle=\footnotesize\ttfamily,
+    breaklines=true,
+    frame=single
+}
+
+\hypersetup{colorlinks=true, linkcolor=slicerblue, urlcolor=slicerblue}
+
+\title{\textbf{Slicer Lesion Text Extension: Comprehensive Technical \& Functional Guide}}
+\author{Jakub Mitura}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This document serves as the exhaustive, definitive reference for the Slicer Lesion Text Extension. It covers every UI element, longitudinal tracking logic, local segmentation tools, AI-driven reporting, data persistence formats, preprocessing pipelines, and codebase architecture. No detail has been omitted, ensuring developers and clinicians have a complete understanding of the system.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{System Architecture \& Initial State}
+The extension is built on a modular Python architecture within 3D Slicer. It utilizes a custom MRML attribute-based storage system to persist metadata directly within the scene's segmentation nodes, eliminating the need for an external database.
+
+\textbf{Example Integration (Module Initialization):}
+\begin{lstlisting}[language=Python]
+class LesionMetadataWidget(ScriptedLoadableModuleWidget):
+    def setup(self):
+        ScriptedLoadableModuleWidget.setup(self)
+        # 1. Load the UI file
+        self.uiWidget = slicer.util.loadUI(self.resourcePath('UI/LesionMetadata.ui'))
+        self.layout.addWidget(self.uiWidget)
+        self.ui = slicer.util.childWidgetVariables(self.uiWidget)
+        
+        # 2. Attach MRML Node Listeners
+        self.addObserver(slicer.mrmlScene, slicer.mrmlScene.NodeAddedEvent, self.onSceneEvent)
+        self.addObserver(slicer.mrmlScene, slicer.mrmlScene.NodeRemovedEvent, self.onSceneEvent)
+\end{lstlisting}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{panel_active_full.png}
+    \caption[Active interface state with loaded clinical data]{Active interface state with loaded clinical data showing the primary layout. \textbf{Analysis of Visible Fields:} 
+    1. \textbf{Category}: A drop-down to classify the anatomical domain of the lesion (e.g., Bone Meta, Lymph Node Meta, Prostate, Organ Meta) which dynamically reconfigures the options for the rest of the fields. 
+    2. \textbf{Lesion tracking name?}: A persistent text identifier (e.g., "Lesion 1") that binds this lesion across multiple chronological timepoints.
+    3. \textbf{Management}: Indicates clinical action (Biopsy, Monitor, Ignore).
+    4. \textbf{SUV Q}: A semi-quantitative metabolic thresholding field comparing lesion uptake to physiological baselines (e.g., $SUV_{max}$ $>$ liver).
+    5. \textbf{Alter}: Defines the primary pathological alteration or suspicion level (e.g., Typical metastasis vs. Equivocal finding).
+    6. \textbf{Inside}: Describes the internal matrix density (e.g., Sclerotic, Lytic, Necrotic, Cystic).
+    7. \textbf{Borders}: Characterizes the lesion margins (e.g., Smooth, Spiculated, Moth-Eaten) indicating aggressiveness.
+    8. \textbf{Around A (Marrow)}: Evaluates immediate adjacent marrow infiltration.
+    9. \textbf{Around B (Periosteum)}: Evaluates cortical breakthrough or callus formation.
+    10. \textbf{Around C (Soft Tissue)}: Assesses extramural reactions like edema or perivesical fat stranding.
+    11. \textbf{Shape}: Morphological orientation (e.g., Round, Oval, Teardrop).
+    12. \textbf{Other (RadLex)}: A dynamic list box for appending multiple standardized semantic properties.
+    13. \textbf{Radiological Report Output}: A read-only text box where the final LLM-generated narrative paragraph is injected after pressing 'Generate'.}
+\end{figure}
+
+\section{Detailed Interface Breakdown}
+The UI is dynamically generated and divided into several functional areas.
+
+\subsection{Normal vs. Comparison Mode}
+\begin{itemize}
+    \item \textbf{Normal Mode (Single Study Mode)}: The UI presents metadata fields for the currently selected lesion in the active mask node. In this mode, the viewport layout is configured to display a single study. When navigating through the segment list, the extension ensures that \textbf{only a single lesion is displayed and focused at a time}. The 2D slice views (Red, Green, Yellow) instantly center on the 3D centroid of the selected lesion, reducing visual clutter and allowing the clinician to evaluate one isolated finding before moving to the next.
+    \item \textbf{Comparison Mode (Longitudinal)}: When multiple timepoints are detected, the clinician can click the "Compare" button to switch the UI into Comparison Mode, enabling the \textbf{Longitudinal Sync Engine}. The layout manager dynamically splits the viewport to show \textbf{1 image per time point side-by-side} (e.g., TP0 in the left viewer and TP1 in the right viewer). As the clinician selects a lesion in the baseline scan, the system automatically synchronizes the crosshairs so that the \textbf{corresponding lesion in the different time point} is displayed simultaneously in the adjacent viewport. This dual-display ensures perfect spatial correlation without manual slice scrolling.
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{single.png}
+    \caption{Single Study Mode: Displaying a single lesion isolated and centered in the viewport. Notice that the segmentation of the current time point also includes the segmentation of the bone surface and the closest area of bone marrow.}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{dual.png}
+    \caption{Comparison Mode: Displaying 1 image per time point side-by-side (TP0 vs TP1), synchronizing the crosshairs on the corresponding lesions. The system accurately maps and displays the corresponding lesion segmentation on the second time point in the right viewport. Additionally, in bone lesion cases, one can easily switch on and off the visibility of specific segmentations (the main lesion, bone surface, and bone marrow) to better analyze the region.}
+\end{figure}
+
+\subsection{Viewport Control \& Navigation}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.5\textwidth]{orientation_buttons.png}
+    \caption[Viewport orientation and navigation controls]{Viewport orientation and navigation controls. \textbf{Analysis of Visible Buttons:}
+    1. \textbf{$<<$ Prev Lesion} and \textbf{Next Lesion $>>$}: Centrally locks the 2D crosshairs on the centroid of the adjacent sequential lesion within the active mask node.
+    2. \textbf{$<<$ Prev TP} and \textbf{Next TP $>>$}: Cycles the active viewport data (CT, PET, and Segmentation nodes) to the previous or subsequent chronological scan (e.g., jumping from baseline to 6-month follow-up).
+    3. \textbf{Refresh List}: Forces a UI resynchronization to parse newly generated or externally modified segmentations.
+    4. \textbf{Compare Volumes}: Instantly splits the 3D layout into a dual-pane view, locking spatial crosshairs between TP0 and TP1 for simultaneous longitudinal assessment.
+    5. \textbf{Axial, Coronal, Sagittal}: Quick-access macros that maximize the respective 2D slice view to fill the screen, temporarily hiding the 3D render window.
+    6. \textbf{Toggle Lesion}: Instantly hides or reveals the active 3D mask overlay without deleting it, allowing the clinician to evaluate underlying tissue density.
+    7. \textbf{Category Filter Checkboxes (Prostate, Bone Meta, Organ Meta, Lymph Node)}: Actively filters the displayed list of segments based on their assigned anatomical category, allowing the reader to review a specific subset of lesions sequentially without clutter.}
+\end{figure}
+
+\subsection{Segmentation Mini Manager}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{active_section_segmentation_mini_manager.png}
+    \caption{The Segmentation Mini Manager offering high-throughput AI hooks, synchronization tools, and manual brush overrides.}
+\end{figure}
+The extension embeds a fully functional \textbf{Segmentation Mini Manager} directly below the primary metadata fields. This manager abstracts away Slicer's complex Segment Editor, providing a streamlined, high-throughput toolkit specifically designed for radiological oncology:
+\begin{itemize}
+    \item \textbf{Paint \& Erase}: Traditional manual brush overrides. These are automatically configured with optimized spherical brush parameters for fine-tuning boundaries near complex physiological uptake regions (e.g., bladder margins).
+    \item \textbf{Add New Lesion (Auto-PET)}: The primary interactive AI hook. Clicking this engages a seed-point listener; when the clinician clicks on a metabolic hotspot in the PET view, the system extracts a local patch and triggers the HELPNet 3D AI (or classical region-growing) to automatically encapsulate the tumor volume.
+    \item \textbf{Gen Manual}: A fallback tool for extremely ill-defined margins where AI struggles. It allows the clinician to place multiple boundary control points, with the system interpolating the 3D volume between them.
+    \item \textbf{Sync Missing Lesions across TPs (Auto-PET)}: A powerful longitudinal macro. It projects the coordinates of all known lesions from the baseline scan into the current follow-up scan using the elastic transform. It then evaluates the physical distance in \textbf{real coordinate space} between the lesions, adjusting for any registration transforms. If the closest lesion in the follow-up scan exceeds the \textbf{maximum bounding box diameter} of the baseline lesion, the system identifies the lesion as "unmapped". It then automatically queries the HELPNet AI at those registered coordinates to generate a new segmentation in the follow-up, capturing tumor progression or recurrence without requiring manual re-clicking.
+\end{itemize}
+
+\subsection{Active Data Settings}
+The \textbf{Active Data Settings} collapsible panel allows the clinician or researcher to manually inspect and override the input nodes currently utilized by the extension's algorithms. 
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{active_section_active_data_settings.png}
+    \caption{Active Data Settings panel displaying the underlying node pointers and longitudinal transform linkages.}
+\end{figure}
+
+\begin{itemize}
+    \item \textbf{PET/SUV \& CT Node Selectors}: Defines the scalar volume nodes used by the HELPNet AI and region-growing algorithms to calculate SUVmax and tissue boundaries.
+    \item \textbf{Lesion Mask}: Specifies which segmentation node the user is actively injecting metadata into. 
+    \item \textbf{Anatomy Atlas}: Specifies the structural constraint mask (e.g., bone marrow segmentation from Skellytour) utilized to constrain tumor growth and identify physiological uptake.
+    \item \textbf{To Next TP \& To Prev TP Transform Selectors}: Defines the non-linear elastic transforms used by the longitudinal mapping engine to project lesion coordinates back and forth across time.
+    \item \textbf{Manual Map Linkage}: Allows the clinician to explicitly bind a selected lesion in the baseline scan to a designated lesion in a follow-up scan, permanently overriding the automatic proximity-based tracking.
+\end{itemize}
+
+\section{Metadata Fields \& Classification}
+The metadata schema is rigorously defined in \texttt{data/def.json}. The UI dynamically generates input fields based on this schema.
+
+\subsection{Recent Schema Enhancements}
+\begin{itemize}
+    \item \textbf{Management Field}: Added to all lesions. It provides clinical action options including: \textit{monitoring}, \textit{next study in 1, 2, 6, 13, 18, 24, or 36 months}, \textit{FDG PET CT}, \textit{MRI}, \textit{Contrast CT}, \textit{Biopsy}, or \textit{None} (which is the default).
+    \item \textbf{SUV Q Field}: Modified to function strictly as a \textbf{single-choice} radio button / combo box to prevent contradictory quantitative assertions. Note: TZ (Transition Zone) uptake options are only presented if the lesion is classified within the prostate.
+    \item \textbf{Alter Field}: The "Unspecified Bone Uptake (UBU)" classification was logically moved from the \textit{SUV Q} category into the \textit{Alter} category to better represent its status as an alternative diagnostic hypothesis rather than a hard quantitative metric.
+    \item \textbf{Other Field (RadLex Keys)}: Expanded to pull from all available RadLex dictionary keys, providing comprehensive semantic tagging beyond a restricted subset.
+\end{itemize}
+
+\textbf{Example Integration (Dynamic UI Generation from Schema):}
+\begin{lstlisting}[language=Python]
+import json
+
+# 1. Load the definitive schema
+with open("data/def.json", "r") as f:
+    schema = json.load(f)
+
+# 2. Populate the 'Management' combo box dynamically
+management_options = schema["Properties"]["Management"]["Enum"]
+self.ui.managementComboBox.clear()
+for option in management_options:
+    self.ui.managementComboBox.addItem(option)
+\end{lstlisting}
+
+\subsection{Exhaustive Morphological Field Breakdown (Borders, Inside, Around)}
+The GUI provides highly specific drop-down selections that characterize the internal matrix, the margin interface, and the surrounding tissue reactions. These fields dynamically adapt their clinical relevance based on whether the lesion is in a bone, lymph node, prostate, or solid organ.
+
+\subsubsection{1. Inner Texture / Density / Attenuation (Inside)}
+This field describes the internal matrix (Hounsfield Units) of the lesion.
+\begin{itemize}
+    \item \textbf{Bone Lesions}: Options include \textit{Sclerotic/Blastic/Ivory (>1000 HU)} indicating typical prostate metastasis or enostosis; \textit{Lytic/Lucent} indicating bone destruction; \textit{Mixed Lytic \& Sclerotic}; or \textit{Ground-Glass / Fibrous (70-130 HU)} which is classic for fibrous dysplasia.
+    \item \textbf{Solid Organs (Liver/Pancreas)}: Options include \textit{Fluid-Filled/Cystic (Water Density)} differentiating simple cysts from solid visceral masses; \textit{Fat Density / Trapped Fat} pointing to benign hemangiomas; or \textit{Central Necrosis (Low Density)} which is highly suspicious for malignant tumor cores.
+    \item \textbf{Lymph Nodes}: Internal necrosis (\textit{Central Necrosis}) is a highly suspicious signature for nodal metastases, easily selectable from this list.
+    \item \textbf{Lungs}: Matrix options include \textit{Reticular/Septal Thickening}, \textit{Traction Bronchiectasis}, and \textit{Honeycombing} to define pulmonary patterns.
+\end{itemize}
+
+\subsubsection{2. Border and Margin (Borders)}
+This field defines the outer transition zone, reflecting the biological growth rate and local aggressiveness.
+\begin{itemize}
+    \item \textbf{Bone Lesions}: \textit{Reactive Sclerotic Rim} indicates a slow-growing or effectively treated metastasis; \textit{Ill-Defined / Permeative / Moth-Eaten} indicates highly aggressive osteolytic destruction; \textit{Spiculated / Feathered} is pathognomonic for benign bone islands blending into host trabeculae.
+    \item \textbf{Solid Organs / Soft Tissue}: \textit{Smooth / Well-Defined Margins} suggest encapsulation (benign cysts or slow-growing nodules); \textit{Serpiginous (Snake-like) Margin} is a classic descriptor for bone infarctions but can also describe complex organ lesions.
+    \item \textbf{Prostate/Rectum}: \textit{Overhanging Edges (Apple Core)} is a classic descriptor for annular luminal narrowing in the rectum or colon.
+\end{itemize}
+
+\subsubsection{3. Surrounding Changes (Around / Extramural Reactions)}
+This category is subdivided into three critical parts to evaluate how the lesion interacts with its local environment:
+\begin{itemize}
+    \item \textbf{Part A: Relation to Bone Marrow}: Critical for skeletal lesions. \textit{Infiltrative (Replaces Marrow Fat)} obliterates trabeculae (T1 hypointense on MRI), highly specific for metastasis. \textit{Non-Infiltrative (Spares Marrow Fat)} points to benign mimics like enostosis.
+    \item \textbf{Part B: Periosteal Reaction}: Evaluates cortical surface responses. \textit{None} implies stability; \textit{Thick / Solid Reaction (Callus)} implies chronic stress or healing; \textit{Aggressive / Sunburst / Spiculated} or \textit{Codman Triangle} signifies rapid malignant breakthrough (e.g., osteosarcoma).
+    \item \textbf{Part C: Other Structural \& Soft Tissue Changes}: \textit{Cortical Breakthrough} or \textit{Soft-Tissue Edema (Halo Sign)} indicates aggressive spread. In pelvic evaluation, \textit{Perivesical Fat Stranding} or \textit{Direct Bladder/Rectal Infiltration} denote T3b/T4 extraprostatic extension. Specialized options like \textit{Dural Tail Sign} or \textit{Vacuum Cleft Sign} isolate specific benign/malignant traps.
+\end{itemize}
+
+\subsubsection{4. Shape \& Orientation}
+\begin{itemize}
+    \item \textbf{Lymph Nodes}: Nodes typically maintain an \textit{Oval / Bean-Shaped} geometry. A shift to \textit{Round} (L/T ratio $<$ 2) is a highly suspicious marker of metastatic infiltration.
+    \item \textbf{Sympathetic Ganglia (Mimics)}: Selected as \textit{Teardrop / Comma-Shaped} which molds to fascia, avoiding false positive lymph node calls.
+    \item \textbf{Bone Islands / Fractures}: Often oriented \textit{Parallel to the Long Axis of Bone} (enostosis) or \textit{Horizontal} (stress fractures).
+\end{itemize}
+
+\section{Comprehensive GUI Control Reference}
+Beyond metadata input, the extension panel acts as a centralized command hub for viewing, segmenting, preprocessing, and mapping. Below is the exhaustive reference of all interactive controls available in the UI.
+
+\subsection{1. Viewport \& Windowing Controls}
+These tools ensure the user can instantly optimize the 3D Slicer layout and contrast for the current anatomical target.
+\begin{itemize}
+    \item \textbf{Axial / Coronal / Sagittal Buttons}: Force the red, green, or yellow slice views to maximize and take over the 2D display area for focused assessment.
+    \item \textbf{Toggle Lesion Button}: Rapidly toggles the visibility of the active 3D segmentation overlay on and off, allowing the clinician to evaluate the underlying raw CT/PET tissue without occlusion.
+    \item \textbf{CT Window Presets}:
+    \begin{itemize}
+        \item \textbf{Soft Tissue Button}: Adjusts the CT window/level to standard abdomen/pelvis settings (e.g., W:400, L:40) to evaluate visceral organ spread or lymph nodes.
+        \item \textbf{Bone Button}: Sharpens the contrast (e.g., W:1500, L:300) to evaluate osteolytic/osteoblastic cortical and trabecular changes.
+        \item \textbf{Lung Button}: Maximizes lung parenchyma visibility (e.g., W:1500, L:-600) to inspect for pulmonary micrometastases or traction bronchiectasis.
+    \end{itemize}
+\end{itemize}
+
+\subsection{2. Lesion Filtering \& Management}
+In patients with widespread systemic disease, the segment list can become overwhelming.
+\begin{itemize}
+    \item \textbf{Category Checkboxes (\texttt{checkProstate}, \texttt{checkBoneMeta}, \texttt{checkOrganMeta}, \texttt{checkLymphNodeMeta})}: Actively filters the displayed list of segments based on their assigned anatomical category, allowing the reader to review all bone lesions consecutively, followed by lymph nodes, etc.
+    \item \textbf{Refresh List Button}: Forces a resynchronization between the active MRML segmentation node and the UI list.
+    \item \textbf{Compare Volumes Button}: Engages the Dual-TP Synchronization engine, splitting the layout and locking the crosshairs between baseline and follow-up scans.
+    \item \textbf{Map Link Button}: Manually establishes a \texttt{LinkedTo} relation between the actively selected segment in TP0 and the selected segment in TP1, overriding auto-detection.
+\end{itemize}
+
+\subsection{3. Local Segmentation \& Refinement Toolkit}
+The \textbf{Segmentation Mini Manager} provides a streamlined subset of Slicer's Segment Editor, directly embedded in the extension panel.
+\begin{itemize}
+    \item \textbf{Add New Lesion (Auto-PET) Button}: The primary workflow trigger. The clinician clicks a metabolic hotspot; the system calculates standard SUV thresholds and uses region-growing algorithms to automatically encapsulate the lesion volume.
+    \item \textbf{Sync Missing Lesions across TPs (Auto-PET) Button}: Specifically triggers the HELPNet AI to cross-reference coordinates from a previous scan and generate segmentation masks for lesions that may have vanished or shrunk below visual threshold in the current scan.
+    \item \textbf{Gen Manual Button}: Used when AI detection is insufficient due to complex boundaries. The clinician places multiple \textit{Control Points} around a lesion, and the system interpolates the surrounding volume.
+    \item \textbf{Paint / Erase Buttons}: Traditional brush tools for fine-tuning AI-generated boundaries, especially useful near physiological uptake regions (e.g., separating a prostate tumor from adjacent bladder activity).
+\end{itemize}
+
+\subsection{4. Advanced Metadata \& RadLex Controls}
+\begin{itemize}
+    \item \textbf{Add Property / Remove Selected Buttons}: Manage the \texttt{Other (RadLex Keys)} array. Clicking \textit{Add Property} pushes a new semantic key into the active segment's JSON payload, while \textit{Remove} pops it off.
+    \item \textbf{Add Custom Field Button}: Allows the user to arbitrarily define a new Key-Value pair on the fly that wasn't included in \texttt{def.json}.
+    \item \textbf{Generate Button}: Compiles all active tags and sends the asynchronous payload to the LLM backend to draft the narrative radiological report block.
+\end{itemize}
+
+\subsection{5. Preprocessing \& Automation Pipeline Controls}
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{active_section_preprocessing_and_scene_management.png}
+    \caption{The Preprocessing and Scene Management controls, handling headless automation, bone masks, and MRB exports.}
+\end{figure}
+These controls manage the heavy background orchestration of the scene.
+\begin{itemize}
+    \item \textbf{Auto-run preprocessing on scene load (Checkbox)}: If checked, the extension will automatically initialize the pipeline when a new `.mrb` file is dropped into Slicer.
+    \item \textbf{Run Full Preprocessing (Skellytour + HelpNet Sync) Button}: Manually triggers the exhaustive preprocessing sequence: exporting CTs, running the external Skellytour subprocess for whole-body bone masks, importing results, and auto-syncing known lesion locations via HELPNet.
+    \item \textbf{Show Skellytour Bone Segmentation (Checkbox)}: Toggles the visibility of the massive, scene-wide bone mask generated by the preprocessing step, which is used as a spatial reference for identifying skeletal metastases.
+    \item \textbf{Save Scene as Preprocessed MRB... Button}: Executes a scene save operation explicitly tagging the file as preprocessed, preventing redundant execution of the heavy AI models in future viewing sessions.
+\end{itemize}
+
+\section{Radiological Reporting \& Narrative Generation}
+The extension transforms structured metadata into natural language using an integrated Large Language Model (LLM) pipeline.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.6\textwidth]{active_section_radiological_report.png}
+    \caption{Active Reporting Panel showing input and output descriptions.}
+\end{figure}
+
+\subsection{LLM Integration Workflow}
+Triggered by the \texttt{onGenerateDescription} function (located in \texttt{./LesionMetadata.py}):
+\begin{enumerate}
+    \item \textbf{Data Aggregation}: The system gathers all current segment tags (Location, SUVmax, Texture, RadLex, Custom Fields).
+    \item \textbf{Prompt Engineering}: A structured prompt is constructed: \textit{"Translate these medical parameters into a formal radiological report section: [METADATA]"}.
+    \item \textbf{Asynchronous Request}: The request is sent to a HIPAA-compliant LLM endpoint (via \texttt{src/utils/diz\_api.py}).
+    \item \textbf{Metadata Re-Injection}: The generated text is saved back into the segment's \texttt{RadiologicalReportOutput} tag, ensuring it is preserved.
+\end{enumerate}
+
+\textbf{Example Integration (Programmatic Report Generation):}
+\begin{lstlisting}[language=Python]
+import json
+import urllib.request
+
+# 1. Build Payload from MRML Tags
+segment = segmentationNode.GetSegmentation().GetSegment(segmentId)
+payload = {
+    "SUV max": segment.GetTag("SUV Q", vtk.reference("")).get(),
+    "Location": segment.GetTag("Organ/Anatomy", vtk.reference("")).get(),
+    "Modifiers": json.loads(segment.GetTag("Other", vtk.reference("[]")).get())
+}
+
+# 2. Fire Async LLM Request
+prompt = f"Write a radiology report section for: {json.dumps(payload)}"
+# (In practice, this is handled by diz_api.query_llm_async)
+
+# 3. Save result back to MRML
+segment.SetTag("RadiologicalReportOutput", "Generated text...")
+\end{lstlisting}
+
+\section{Longitudinal Tracking \& Lesion Mapping}
+Mapping lesions across chronological scans is the core of the tracking functionality.
+
+\subsection{Mapping Multiplicity}
+The underlying MRML tag architecture natively supports complex relationships:
+\begin{itemize}
+    \item \textbf{1-to-1 Mapping}: The primary mode.
+    \item \textbf{One-to-Many}: A single baseline lesion can be linked to multiple follow-up segments (e.g., representing a node that fragmented or spread).
+    \item \textbf{Many-to-One}: Multiple satellite lesions in TP0 can point to a single larger confluent mass in TP1.
+\end{itemize}
+
+\subsection{Lesion Identification Across Different Time Points}
+The system does not rely on static bounding boxes to track tumors across baseline and follow-up scans. Instead, when navigating in Comparison Mode, the \texttt{findEquivalentLesion()} engine dynamically identifies corresponding lesions using a rigid 4-step hierarchical algorithm:
+
+\begin{enumerate}
+    \item \textbf{Explicit Manual Linkage (Highest Priority)}: 
+    The engine first checks the source lesion's MRML tags for an explicit override. If a clinician previously used the 'Link' button, the system finds \texttt{LinkedTo\_[DstNodeID]} = \texttt{Segment\_ID}. If this tag exists, it immediately returns the exact target lesion, completely bypassing any spatial or name-based logic. This allows clinicians to explicitly link lesions that have drastically moved or completely changed shape.
+
+    \item \textbf{Exact Name Matching (Secondary Priority)}: 
+    If no manual tag is found, the engine queries the target timepoint's mask node for any segment sharing the exact same string name (e.g., \texttt{"Lesion 1"}). Because tracking names are automatically propagated during lesion creation, this effectively catches 90\% of naturally tracked lesions.
+
+    \item \textbf{Centroid Proximity Thresholding (Fallback)}: 
+    If a lesion was renamed or imported from an external system without matching names, the engine falls back to 3D spatial mathematics:
+    \begin{itemize}
+        \item It calculates the 3D center of mass (centroid) of the source lesion.
+        \item It applies the source node's parent \texttt{vtkMRMLTransformNode} to map the centroid into absolute World Coordinates.
+        \item It calculates the world centroids of every lesion in the target timepoint.
+        \item It identifies the target lesion with the absolute minimum Euclidean distance (\texttt{np.linalg.norm}) from the source centroid.
+        \item If this minimum distance is strictly \textbf{$< 20.0$ mm}, the system confidently assumes equivalence and dynamically links them on the fly.
+    \end{itemize}
+
+    \item \textbf{Elastic Coordinate Projection (Missing Lesions)}: 
+    If all above checks fail (meaning the lesion genuinely does not exist in the follow-up scan yet), the engine does \textit{not} just return an error. Instead, it takes the source centroid and passes it through the provided B-Spline Elastic Transform matrix (using \texttt{TransformFloatPoint()}). It returns \texttt{None} for the segment ID, but returns the mathematically projected \texttt{[x, y, z]} biological coordinate where the tumor \textit{should} be in the follow-up. This projected coordinate is exactly what the \textbf{Sync Missing Lesions} macro uses to auto-fire the AI in the new scan.
+\end{enumerate}
+
+\textbf{Example Integration (Using the Equivalence Engine):}
+\begin{lstlisting}[language=Python]
+logic = slicer.modules.lesionmetadata.logic()
+
+# Attempt to find the matching lesion in TP1
+target_id, projected_coords = logic.findEquivalentLesion(
+    srcNode=tp0_mask_node,
+    srcId="Segment_1",
+    dstNode=tp1_mask_node,
+    transformNode=elastic_transform_node,
+    invertTransform=False
+)
+
+if target_id is not None:
+    print(f"Found match! ID: {target_id}")
+else:
+    print(f"Lesion missing. AI should be fired at: {projected_coords}")
+\end{lstlisting}
+
+\subsection{Manual Adaptation of Mapping}
+The \textbf{Manual Mapping} UI section allows clinicians to override automation. By selecting a source segment in TP0 and a target segment in TP1 and clicking \textbf{Link}, the system creates a bi-directional tag reference:
+\begin{itemize}
+    \item \texttt{SegA.SetTag("LinkedTo\_NodeB", "ID\_B")}
+    \item \texttt{SegB.SetTag("LinkedTo\_NodeA", "ID\_A")}
+\end{itemize}
+This allows users to define explicit one-to-many or many-to-one chains.
+
+\textbf{Example Integration (Manual Mapping Enforcement):}
+\begin{lstlisting}[language=Python]
+# To explicitly link TP0 Lesion to TP1 Lesion without the GUI
+segA = tp0_node.GetSegmentation().GetSegment("Segment_1")
+segB = tp1_node.GetSegmentation().GetSegment("Segment_2")
+
+# Bi-directional tracking tags
+segA.SetTag(f"LinkedTo_{tp1_node.GetID()}", "Segment_2")
+segB.SetTag(f"LinkedTo_{tp0_node.GetID()}", "Segment_1")
+
+# Enforce tracking name consistency
+segB.SetTag("Lesion tracking name?", segA.GetTag("Lesion tracking name?", vtk.reference("")).get())
+\end{lstlisting}
+
+\section{Data Storage \& Metadata Schema}
+The extension utilizes a \textbf{No-Database Architecture}. All data is persisted directly within the 3D Slicer scene (`.mrb` file).
+
+\subsection{MRML Segment Tags}
+Each lesion's data is stored as a set of key-value pairs (Tags) attached to its specific \texttt{vtkMRMLSegmentationNode} segment.
+\begin{itemize}
+    \item \textbf{Standard Fields}: Direct string mapping (e.g., \texttt{LesionSource: Manual}).
+    \item \textbf{Custom Fields}: Arbitrary keys prefixed to allow for user-defined attributes.
+\end{itemize}
+
+\subsection{Concrete Format: Metadata \& Lesion Association}
+For multi-select fields (e.g., multiple RadLex properties) or complex structures, the extension serializes Python arrays into \textbf{JSON-formatted strings} before executing \texttt{seg.SetTag(key, json\_str)}. This is the critical format that ensures complex hierarchical relationships are preserved within the flat tag structure of the MRML node.
+
+Below is an explicit representation of the metadata format extracted from a single lesion's MRML tags (e.g., a lesion in TP1 linked back to TP0):
+
+\begin{lstlisting}[caption=Example of a single Lesion Segment's MRML Tag Payload]
+{
+  "Lesion tracking name?": "Lesion 1",
+  "LesionSource": "Automatic",
+  "Management": "Biopsy",
+  "SUV Q": "SUV max < liver",
+  "Alter": "Unspecified bone uptake",
+  "Other": "[\"RID5961 - Sclerotic\", \"RID432 - Irregular\"]",
+  "LinkedTo_vtkMRMLSegmentationNode1": "Segment_1",
+  "RadiologicalReportOutput": "The lesion located in..."
+}
+\end{lstlisting}
+
+\textbf{Example Integration (Reading \& Writing JSON Tags):}
+\begin{lstlisting}[language=Python]
+import json
+segment = segmentationNode.GetSegmentation().GetSegment(segmentId)
+
+# --- WRITING DATA ---
+# Simple string field
+segment.SetTag("LesionSource", "Manual")
+
+# Complex array field (Requires JSON serialization)
+radlex_terms = ["RID5961 - Sclerotic", "RID432 - Irregular"]
+segment.SetTag("Other", json.dumps(radlex_terms))
+
+# --- READING DATA ---
+ref = vtk.reference("")
+if segment.GetTag("Other", ref):
+    # Parse the JSON string back into a Python list
+    saved_terms = json.loads(ref.get())
+    print(saved_terms[0]) # Outputs: RID5961 - Sclerotic
+\end{lstlisting}
+
+\subsubsection*{Persisting Many-to-One and One-to-Many Associations}
+The system implicitly supports complex multiplicity without a relational database by utilizing bi-directional topology and grouping keys:
+\begin{itemize}
+    \item \textbf{Many-to-One (Convergence)}: If \textit{Lesion B} and \textit{Lesion C} in TP1 both represent satellite fragments of a single \textit{Lesion A} in TP0, the manual mapping engine applies \texttt{"LinkedTo\_NodeTP0": "Segment\_A"} to \textit{both} B and C. Querying TP1 reveals the many-to-one relationship back to TP0.
+    \item \textbf{One-to-Many (Divergence)}: Similarly, if \textit{Lesion A} in TP0 splits into \textit{Lesion B} and \textit{Lesion C} in TP1, the reverse tags (\textit{Lesion B} $\rightarrow$ \textit{Lesion A} and \textit{Lesion C} $\rightarrow$ \textit{Lesion A}) preserve the topology. Furthermore, the \texttt{"Lesion tracking name?"} tag (e.g., "Lesion 1") is automatically propagated across all mapped lesions, establishing a unified cohort identifier that bridges across timepoints regardless of fragmentation or convergence.
+\end{itemize}
+
+\subsection{Modifying MRB Files Directly Without Slicer}
+Because the entire metadata schema is embedded via standard MRML tags, developers can computationally mass-edit lesion metadata and mappings without ever launching 3D Slicer or initializing an embedded Python environment. This is highly useful for automated data curation or migrating legacy mappings into the new tracking system.
+
+A Slicer \texttt{.mrb} (Medical Reality Bundle) file is structurally just a standard ZIP archive.
+\begin{enumerate}
+    \item \textbf{Extract the Archive}: Unzip the \texttt{.mrb} file using standard archival tools (e.g., \texttt{unzip patient\_study.mrb -d /tmp/patient\_study}).
+    \item \textbf{Locate the XML Structure}: Inside the extracted directory, open the master \texttt{.mrml} file using any XML parser (like Python's \texttt{xml.etree.ElementTree} or \texttt{lxml}).
+    \item \textbf{Target Segmentation Nodes}: Search for \texttt{<Segmentation>} tags. Inside these, you will find \texttt{<Segment>} blocks corresponding to individual lesions.
+    \item \textbf{Modify the Tags}: Edit the \texttt{tags="..."} string attribute. For example, to manually force Lesion 3 in TP1 to map to Lesion 1 in TP0, inject the linkage tag: \texttt{tags="... LinkedTo\_vtkMRMLSegmentationNode1:Segment\_1 ..."}. To edit the tracking name, inject \texttt{Lesion tracking name?:Lesion 1}.
+    \item \textbf{Repackage}: Re-zip the contents of the directory (ensuring the \texttt{.mrml} and \texttt{Data} folder remain at the root of the archive) and change the extension back to \texttt{.mrb}.
+\end{enumerate}
+When the modified \texttt{.mrb} is subsequently loaded into Slicer, the Lesion Text Extension will natively read the updated tags, and the GUI will reflect the altered mappings and metadata instantly.
+
+\section{Technical Automation: Preprocessing}
+The preprocessing workflow is an intensive orchestration stage that prepares the scene.
+
+\subsection{The Preprocessing Bash Script}
+\texttt{src/main/preprocess\_scene.sh} is the entry point for server-side batch processing. It uses the \texttt{--no-main-window} flag to execute Slicer headlessly, launching \texttt{src/main/preprocess\_scene.py}.
+
+\textbf{Example Integration (Headless Execution):}
+\begin{lstlisting}[language=bash]
+# Execute the preprocessing pipeline on a headless server without a GUI
+/opt/Slicer/Slicer \
+    --no-splash \
+    --no-main-window \
+    --python-script src/main/preprocess_scene.py \
+    --vol /data/patient_1/CT.nii.gz \
+    --pet /data/patient_1/PET.nii.gz \
+    --out /data/patient_1/preprocessed.mrb
+\end{lstlisting}
+
+\subsection{Execution Sequence \& Memory Optimization}
+Within \texttt{LesionMetadataWidget.runFullPreprocessing()} (located in \texttt{./LesionMetadata.py}):
+\begin{itemize}
+    \item \textbf{Scene Mapping}: \texttt{logic.mapSceneData()} (located in \texttt{./LesionMetadata.py}) parses the scene to identify CT, PET, and Segmentation nodes mapped to their respective timepoints (\texttt{tp\_map}).
+    \item \textbf{Resource Optimization (Clear-Run-Reload)}: Because AI inference (like Skellytour) is highly memory-intensive, the CT volumes are exported to temporary NIfTI files. The scene is cleared from RAM.
+    \item \textbf{Skellytour Integration}: A subprocess executes the bone segmentation on the exported volumes.
+    \item \textbf{Scene Reload}: The original scene is reloaded, and the newly generated bone masks are merged in.
+    \item \textbf{Synchronization}: \texttt{runSyncMissingLesionsSync()} (located in \texttt{./LesionMetadata.py}) projects lesions found in TP0 into TP1 using registration transforms, creating empty placeholder segments if they shrank or resolved.
+\end{itemize}
+
+\textbf{Example Integration (Memory-Safe Subprocess Hook):}
+\begin{lstlisting}[language=Python]
+import subprocess
+import slicer
+
+# 1. Clear massive CT arrays from Slicer's RAM
+slicer.mrmlScene.Clear(0)
+
+# 2. Execute heavy AI model (e.g., Skellytour) in an isolated process
+subprocess.run([
+    "python3", "run_skellytour.py", 
+    "--input", "/tmp/ct_export.nii.gz",
+    "--output", "/tmp/bone_mask.nii.gz"
+], check=True)
+
+# 3. Reload Slicer Scene and import newly generated mask
+slicer.util.loadScene("/tmp/saved_state.mrb")
+slicer.util.loadLabelVolume("/tmp/bone_mask.nii.gz")
+\end{lstlisting}
+
+\section{Advanced Preprocessing \& Extension Integration Guide}
+To maintain compatibility when introducing new AI models or preprocessing scripts, developers must integrate tightly with the extension's data structures (MRML nodes, \texttt{tp\_map}, and tag dictionaries).
+
+\subsection{1. Initializing Custom Segmentation Masks}
+\textbf{Target File}: \texttt{LesionMetadata.py} \\
+\textbf{Target Function}: \texttt{LesionMetadataWidget.runFullPreprocessing()} or custom module hook. \\
+If you have an external preprocessing script (e.g., a custom nnUNet model) that generates a raw NIfTI labelmap, you must correctly initialize it into the Slicer MRML scene so the extension recognizes it as a manageable lesion:
+\begin{enumerate}
+    \item \textbf{Load Volume}: Load the labelmap as a \texttt{vtkMRMLLabelMapVolumeNode}.
+    \item \textbf{Get Target Node}: Retrieve the active \texttt{vtkMRMLSegmentationNode} for the correct timepoint using \texttt{logic.mapSceneData()}.
+    \item \textbf{Import}: Use Slicer's internal logic to convert the volume into a valid segment:
+    \begin{lstlisting}[language=Python]
+segmentId = segmentationNode.GetSegmentation().AddEmptySegment("", "New_Lesion")
+segmentIds = vtk.vtkStringArray()
+segmentIds.InsertNextValue(segmentId)
+slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelmapNode, segmentationNode, segmentIds)
+    \end{lstlisting}
+\end{enumerate}
+
+\subsection{2. Applying Rigid and Elastic Registration Transforms}
+\textbf{Target File}: \texttt{LesionMetadata.py} \\
+\textbf{Target Functions}: \texttt{LesionMetadataWidget.onCompareBtn()} (Rigid) and \texttt{LesionMetadataLogic.findEquivalentLesion()} (Elastic). \\
+When dealing with longitudinal data, alignment is critical. The extension differentiates between \textbf{Rigid} (for visual display) and \textbf{Elastic} (for coordinate tracking) transforms:
+\begin{itemize}
+    \item \textbf{Rigid Transforms (Display Alignment)}: Used to visually align all follow-up images (TP1, TP2) to the baseline (TP0) without deforming the voxel data. This is applied directly to the node: \texttt{volumeNode.SetAndObserveTransformNodeID(rigidTransformNode.GetID())}.
+    \item \textbf{Elastic/Deformable Transforms (Lesion Tracking)}: Used strictly for calculating where a coordinate in TP0 physically moved to in TP1 due to patient positioning or weight changes. Do \textit{not} apply this to the display nodes. Instead, mathematically pass the 3D coordinate through the transform:
+    \begin{lstlisting}[language=Python]
+transformToParent = vtk.vtkGeneralTransform()
+elasticTransformNode.GetTransformToWorld(transformToParent)
+mapped_pt = transformToParent.TransformFloatPoint(original_pt)
+    \end{lstlisting}
+\end{itemize}
+
+\subsection{3. Programmatically Creating New Lesions}
+\textbf{Target File}: \texttt{LesionMetadata.py} \\
+\textbf{Target Functions}: \texttt{LesionMetadataLogic.runHelpNetSegmentationAtCoords()} and \texttt{LesionMetadataWidget.updateGUIFromObject()}. \\
+To expose your custom script to the UI's auto-metadata and cross-timepoint linkage systems, you must invoke the extension's core function: \texttt{runHelpNetSegmentationAtCoords(coords, segmentationNode, segmentId, petNode, ctNode)}.
+\begin{itemize}
+    \item If \texttt{segmentId} is passed as \texttt{None}, the function will automatically create a new segment, run the AI, apply the result, and inherit default RadLex tags.
+    \item After creation, you must call \texttt{self.updateGUIFromObject(segmentationNode, segmentId)} to force the UI panel to populate the metadata fields for the new lesion.
+\end{itemize}
+
+\textbf{Example Integration:}
+\begin{lstlisting}[language=Python]
+# 1. Define a world coordinate [R, A, S]
+hotspot_ras = [15.5, -42.0, 108.5]
+
+# 2. Invoke the engine (passing None for segmentId forces creation)
+logic = slicer.modules.lesionmetadata.logic()
+new_segment_id = logic.runHelpNetSegmentationAtCoords(
+    coords=hotspot_ras,
+    segmentationNode=tp_mask_node,
+    segmentId=None,
+    petNode=tp_pet_node,
+    ctNode=tp_ct_node
+)
+
+# 3. Force the GUI to recognize and display the new lesion
+widget = slicer.modules.lesionmetadata.widgetRepresentation().self()
+widget.updateGUIFromObject(tp_mask_node, new_segment_id)
+\end{lstlisting}
+
+\subsection{4. Batch Processing of New Lesions (Fiducial Workflow)}
+\textbf{Target File}: \texttt{LesionMetadata.py} \\
+\textbf{Target Function}: \texttt{LesionMetadataWidget.onGenManualLesions()} \\
+To optimize clinician throughput and avoid waiting for the AI inference pipeline to run after every single click, the extension supports a batch-processing workflow:
+\begin{enumerate}
+    \item \textbf{Place Markups}: The clinician uses Slicer's standard Fiducial tool (crosshairs icon in the top toolbar) to drop multiple point markers across the image on every visible metabolic hotspot. These are stored internally in a \texttt{vtkMRMLMarkupsFiducialNode} named \texttt{Manual\_Clicks}.
+    \item \textbf{Execute Batch}: The clinician clicks the \textbf{Gen Manual} button in the Segmentation Mini Manager (beneath the metadata fields).
+    \item \textbf{Sequential Queuing}: The system captures all fiducial coordinates, instantly creates empty placeholder lesions in the mask node (tagging them as \texttt{LesionSource: Manual}), and completely clears the fiducials from the screen to reduce visual clutter.
+    \item \textbf{Background Processing}: The extension then automatically feeds each coordinate sequentially into the \texttt{runHelpNetSegmentationAtCoords()} engine. The clinician can step away or continue reviewing the scan while the system systematically generates 3D volumetric segmentations for the entire batch.
+\end{enumerate}
+
+\textbf{Example Integration (Executing Batch Programmatically):}
+\begin{lstlisting}[language=Python]
+# If you have an external script that generates 100 coordinates:
+fid_node = slicer.mrmlScene.GetFirstNodeByName("Manual_Clicks")
+if not fid_node:
+    fid_node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode", "Manual_Clicks")
+
+# Programmatically inject points
+for coord in generated_coordinates:
+    fid_node.AddControlPointWorld(vtk.vtkVector3d(coord[0], coord[1], coord[2]))
+
+# Trigger the GUI's batch background processor
+widget = slicer.modules.lesionmetadata.widgetRepresentation().self()
+widget.onGenManualLesions()
+\end{lstlisting}
+
+\subsection{5. Step-by-Step HELPNet Integration \& Patch Extraction}
+\textbf{Target File}: \texttt{LesionMetadata.py} $\rightarrow$ \texttt{LesionMetadataLogic.runHelpNetSegmentationAtCoords()} \\
+\textbf{Model Path}: \texttt{src/helpnet\_inference\_bundle/run\_inference.py} \\
+If you wish to bypass the UI and call HELPNet manually in an advanced script, you must provide data in the exact format the PyTorch checkpoint expects:
+\begin{enumerate}
+    \item \textbf{Checkpoint Loading}: The model expects \texttt{helpnet\_model\_final.pt} located in \path{src/helpnet_inference_bundle/checkpoints/}.
+    \item \textbf{Coordinate Conversion}: Slicer uses RAS coordinates, while SimpleITK uses LPS. You must invert the X and Y axes of the seed point: \texttt{lps = [-ras[0], -ras[1], ras[2]]}.
+    \item \textbf{Strict $64 \times 64 \times 64$ Patch Extraction}:
+    \begin{itemize}
+        \item Convert the LPS point to a voxel index via \texttt{TransformPhysicalPointToIndex}.
+        \item Pad the entire CT volume by 32 voxels with \texttt{-1000 HU} (Air) and the PET volume with \texttt{0.0 SUV} to prevent Out-Of-Bounds errors near the skin boundary.
+        \item Slice exactly a $[64, 64, 64]$ bounding box centered on the padded index.
+    \end{itemize}
+    \item \textbf{Point Mask Generation}: Generate an empty $(64,64,64)$ numpy array and set exactly one voxel at the center \texttt{[32, 32, 32]} to \texttt{1.0}.
+    \item \textbf{Inference}: Pass the CT patch, PET patch, and Point Mask to the model (via OpenIGTLink vector stacking or subprocess NIfTI files).
+\end{enumerate}
+
+\textbf{Example Integration (SimpleITK Extraction):}
+\begin{lstlisting}[language=Python]
+import SimpleITK as sitk
+import numpy as np
+
+# Invert Slicer's RAS to SimpleITK's LPS
+seed_lps = [-ras_pt[0], -ras_pt[1], ras_pt[2]]
+
+# Load volume and find voxel index
+ct_img = sitk.ReadImage("/tmp/ct.nii.gz")
+idx = ct_img.TransformPhysicalPointToIndex(seed_lps)
+
+# Extract 64x64x64 cube using sitk slice indexing
+# Note: sitk uses [x,y,z] for indexing, but numpy arrays are [z,y,x]
+patch = ct_img[
+    idx[0]-32 : idx[0]+32,
+    idx[1]-32 : idx[1]+32,
+    idx[2]-32 : idx[2]+32
+]
+
+# Generate 64x64x64 Point Mask
+mask_np = np.zeros((64, 64, 64), dtype=np.uint8)
+mask_np[32, 32, 32] = 1 # Center voxel
+\end{lstlisting}
+
+\subsection{6. Manual Testing Protocol}
+To manually verify that your advanced preprocessing integration works:
+\begin{enumerate}
+    \item \textbf{Inspect the Patches}: After running your script, locate \texttt{ct\_patch.nii.gz} and \texttt{pet\_patch.nii.gz} in the system \texttt{/tmp/} directory. Drag them into Slicer and verify that the exact center of the volume visually aligns with the lesion hotspot.
+    \item \textbf{Test the Transform}: Drop a fiducial marker on a lesion in TP0. Run your elastic transform script. Verify that the newly generated fiducial in TP1 lands exactly on the corresponding biological structure.
+    \item \textbf{Verify GUI Hook}: Click on the newly generated segment in the Slicer Data module. The LesionMetadata panel should instantly populate. If it remains blank, you failed to fire the \texttt{updateGUIFromObject} observer.
+\end{enumerate}
+
+\textbf{Example Integration (Automated UI Hook Validation):}
+\begin{lstlisting}[language=Python]
+# Execute to verify the observer is listening correctly
+widget = slicer.modules.lesionmetadata.widgetRepresentation().self()
+segment_id = "Segment_1"
+node = slicer.util.getNode("Segmentation_TP0")
+
+# Simulate a user click in the Data Module
+widget.updateGUIFromObject(node, segment_id)
+
+# Assert that the active tracking name field populated
+assert widget.trackingNameEdit.text != "", "GUI hook failed to populate data!"
+\end{lstlisting}
+
+\subsection{7. Timepoint Mapping and Transforms Engine}
+\textbf{Target File}: \texttt{LesionMetadata.py} \\
+\textbf{Target Function}: \texttt{LesionMetadataLogic.mapSceneData()} \\
+The extension builds its temporal understanding dynamically by scanning the MRML scene using the \texttt{logic.mapSceneData()} function (located in \texttt{./LesionMetadata.py}). If you are integrating a custom pipeline, you must ensure your nodes conform to these naming conventions, or you must modify the function.
+
+\subsubsection*{How Timepoints are Extracted}
+The logic relies on a regex parser: \texttt{re.findall(r'\textbackslash{}d+', node.GetName())}. It assigns the \textit{last} numeric digit found in the node's name as its Timepoint ID (e.g., \texttt{CT\_TP0} $\rightarrow$ 0; \texttt{SUV\_Followup\_1} $\rightarrow$ 1). Nodes without numbers default to TP0.
+
+\textbf{Example Integration (Modifying Timepoint Extraction Logic):}
+If your institution names files by date (e.g., \texttt{CT\_20240115}), replace the internal \texttt{get\_tp()} parser:
+\begin{lstlisting}[language=Python]
+# Target File: LesionMetadata.py -> logic.mapSceneData()
+import re
+
+# Modified Logic (Parsing dates to sequential integers):
+def get_tp(node_name):
+    dates = re.findall(r'20\d{6}', node_name) # Match YYYYMMDD
+    if not dates: return 0
+    # Map chronological dates to 0, 1, 2...
+    return global_date_list.index(dates[-1])
+\end{lstlisting}
+
+\subsubsection*{How Files are Classified within a Timepoint}
+Once grouped by Timepoint ID, the nodes are assigned to specific roles in the \texttt{tp\_map[TP\_ID]} dictionary based on keyword matching:
+\begin{itemize}
+    \item \textbf{CT}: Name must contain \texttt{CT} (but strictly exclude \texttt{SPECT} and \texttt{SKELLYTOUR}).
+    \item \textbf{PET}: Name must contain \texttt{SUV}, \texttt{PET}, \texttt{SPECT}, or \texttt{NM}.
+    \item \textbf{Labels (Anatomical Atlas)}: Segmentation node containing \texttt{TS}, \texttt{TOTAL}, \texttt{LABEL}, or \texttt{SEGMENTATION} (e.g., TotalSegmentator outputs).
+    \item \textbf{Masks (Lesions)}: Any Segmentation node that does not match the \textit{Labels} criteria.
+\end{itemize}
+
+\subsubsection*{How Transforms are Associated}
+Currently, the system scans all \texttt{vtkMRMLTransformNode} objects (ignoring internal Slicer view transforms like \texttt{red}, \texttt{green}, etc.). It assigns a single master registration transform to \texttt{tp\_map[0]['TransformNext']}. 
+The selection is based on a rigid priority hierarchy embedded in the transform's name:
+\begin{enumerate}
+    \item Name contains \texttt{followup} (Highest Priority)
+    \item Name contains \texttt{baseline} (Secondary Priority)
+    \item Any other valid transform (Fallback)
+\end{enumerate}
+
+\subsubsection*{How to Modify for Rigid vs. Elastic Pipelines}
+If your advanced preprocessing pipeline outputs \textit{two} different transforms---a Rigid transform for visual alignment and an Elastic (B-Spline) transform for biological lesion tracking---you must modify the \texttt{mapSceneData()} function (located in \texttt{./LesionMetadata.py}):
+
+\textbf{Example implementation:}
+\begin{lstlisting}[language=Python]
+def mapSceneData(self):
+    # ... previous logic ...
+    trans = [slicer.mrmlScene.GetNodesByClass("vtkMRMLTransformNode").GetItemAsObject(i) for i in range(slicer.mrmlScene.GetNodesByClass("vtkMRMLTransformNode").GetNumberOfItems())]
+    for t in trans:
+        name_lower = t.GetName().lower()
+        if any(x in name_lower for x in ["red", "green", "yellow", "slice"]): continue
+        if 0 not in tp_map: tp_map[0] = {}
+        
+        # Modified logic to store both Rigid and Elastic separately
+        if "rigid" in name_lower:
+            tp_map[0]['TransformRigid'] = t
+        elif "elastic" in name_lower or "bspline" in name_lower:
+            tp_map[0]['TransformElastic'] = t
+        # Original fallback priority logic
+        else:
+            current_t = tp_map[0].get('TransformNext')
+            if current_t is None or ("followup" in name_lower and "followup" not in current_t.GetName().lower()):
+                tp_map[0]['TransformNext'] = t
+\end{lstlisting}
+
+\begin{enumerate}
+    \item Edit the transform loop (approx. line 6064 in \texttt{./LesionMetadata.py}) as shown above.
+    \item Then, modify \texttt{LesionMetadataWidget.updateGUIFromObject()} (also in \texttt{./LesionMetadata.py}) to push the \texttt{TransformRigid} to the volume node, and \texttt{TransformElastic} to the crosshair syncing logic.
+\end{enumerate}
+\subsubsection*{Multi-View Registration and Visibility Isolation}
+When Comparison Mode is activated (via \texttt{onCompareVolumes()} in \texttt{./LesionMetadata.py}), Slicer forces a dual-viewport layout (Red and Yellow). The system retrieves the master registration transform (\texttt{tp\_map[0]['TransformNext']}) and applies it dynamically to all nodes belonging to the follow-up timepoint (\texttt{yellow\_data}, i.e., TP1). This projects the TP1 CT, PET, and Segmentation Masks into the coordinate space of the baseline (TP0), ensuring perfect visual alignment across the two side-by-side viewports.
+
+However, because both TP0 and TP1 segmentations are overlapping in the same coordinate space after the transform is applied, Slicer's default behavior of broadcasting segmentations to all viewports globally would cause severe visual clutter and the illusion of misregistration. To prevent this, the code enforces two layers of \textbf{visibility isolation constraints}:
+
+\textbf{1. Viewport-Level Isolation}:
+\begin{lstlisting}[language=Python]
+# Ensure the mask only displays on its designated viewport (e.g., 'Red' or 'Yellow')
+disp = mask.GetDisplayNode()
+disp.RemoveAllViewNodeIDs()
+disp.AddViewNodeID(slice_node.GetID())
+\end{lstlisting}
+This guarantees that the baseline segmentations only appear on the left and the follow-up segmentations only appear on the right.
+
+\textbf{2. Segment-Level Isolation (\texttt{isolateLesionVisibility})}:
+Because a single \texttt{vtkMRMLSegmentationNode} can contain dozens of mapped lesions, we only want to display the \textit{currently active} lesion (and its corresponding pair in TP1). The \texttt{isolateLesionVisibility()} function iterates through all segments in the mask. It sets the visibility flag (\texttt{SetSegmentVisibility}) to \texttt{False} for everything except:
+\begin{itemize}
+    \item The active lesion segment.
+    \item If the active lesion is a \textbf{bone lesion}, it dynamically preserves the visibility of the corresponding \textit{Bone Marrow} and \textit{Bone Surface} helper segments that were generated by Skellytour.
+\end{itemize}
+This dual-layer isolation approach ensures that the clinician sees exactly one mapped lesion per time point (plus relevant anatomical boundaries) without overwhelming the screen.
+
+
+\subsection{8. Ingesting External JSON Metadata and Associations}
+If your clinic utilizes an external database, external AI pipeline, or global staging system that pre-computes lesion relationships and metadata, you can bypass the manual GUI entirely by programmatically ingesting this data into the MRML structure \textbf{before} exporting the final \texttt{.mrb} file. 
+
+This ensures that when the clinician loads the bundle, the Lesion Text Extension instantly recognizes all pre-computed AI classifications, RadLex tags, and tracking topologies.
+
+\subsubsection*{Ingestion Workflow}
+\begin{enumerate}
+    \item \textbf{Load the Scene}: Initialize the raw masks and volumes into Slicer (or within the headless \texttt{preprocess\_scene.py} script).
+    \item \textbf{Parse the JSON Payload}: Load the external JSON dict mapping Lesion IDs (or unique Names) to their metadata properties.
+    \item \textbf{Match and Inject}: Iterate over the Slicer \texttt{vtkMRMLSegmentationNode} segments, matching them to the JSON keys, and use \texttt{SetTag} to inject the data.
+    \item \textbf{Save MRB}: Execute \texttt{slicer.util.saveScene()} to lock the injected tags into the archive.
+\end{enumerate}
+
+\textbf{Example Integration (External Database Ingestion):}
+\begin{lstlisting}[language=Python]
+import json
+import slicer
+import vtk
+
+# 1. External payload (e.g., fetched from a REST API or local file)
+external_db_payload = """
+{
+  "Lesion 1": {
+    "Category": "Bone meta",
+    "Management": "Biopsy",
+    "LinkedTo": "Segment_3_in_TP1",
+    "Other": ["RID5961 - Sclerotic"]
+  }
+}
+"""
+metadata_db = json.loads(external_db_payload)
+
+# 2. Retrieve the active mask node
+mask_node = slicer.util.getNode("Segmentation_TP0")
+segmentation = mask_node.GetSegmentation()
+
+# 3. Iterate over the Slicer segments and inject external data
+for i in range(segmentation.GetNumberOfSegments()):
+    segment_id = segmentation.GetNthSegmentID(i)
+    segment = segmentation.GetSegment(segment_id)
+    segment_name = segment.GetName()
+    
+    # If the database has data for this lesion
+    if segment_name in metadata_db:
+        db_record = metadata_db[segment_name]
+        
+        # Inject standard string tags
+        segment.SetTag("Category", db_record.get("Category", ""))
+        segment.SetTag("Management", db_record.get("Management", ""))
+        
+        # Inject explicit linkage tag (bypassing equivalence engine)
+        if "LinkedTo" in db_record:
+            # Assuming you know the target node ID (e.g. vtkMRMLSegmentationNode2)
+            # In a real script, map this dynamically using logic.mapSceneData()
+            target_node_id = "vtkMRMLSegmentationNode2"
+            segment.SetTag(f"LinkedTo_{target_node_id}", db_record["LinkedTo"])
+            
+        # Serialize and inject complex array tags
+        if "Other" in db_record:
+            segment.SetTag("Other", json.dumps(db_record["Other"]))
+
+# 4. Save the fully annotated scene to the final MRB
+slicer.util.saveScene("/data/patient_1/preprocessed.mrb")
+\end{lstlisting}
+
+\section{Next Steps \& Future Development Roadmap}
+
+\subsection{1. Pre-computed Longitudinal Mapping \& Auto-Segmentation via HELPNet}
+Currently, lesions are identified and segmented interactively. The next iteration of the preprocessing script will:
+\begin{itemize}
+    \item Automatically detect lesions in a baseline scan using an initial detection model.
+    \item Immediately map those coordinates to all follow-up time points using the elastic registration.
+    \item Fire the \texttt{HELPNet} AI natively during the headless preprocessing stage to generate the volumetric masks for both the baseline and all follow-ups, assigning metadata before the \texttt{.mrb} is ever created.
+    \item For \textbf{bone lesions}, the preprocessing script will explicitly generate bone surface and bone marrow segmentations (e.g., using Skellytour outputs) to accurately define boundaries, providing a highly localized constraint mask for the tumor.
+\end{itemize}
+
+\textbf{Proposed Implementation (Batch HELPNet in Preprocessing):} \\
+\textit{Target File: \texttt{./LesionMetadata.py}}
+\begin{lstlisting}[language=Python]
+for coords in baseline_lesion_centroids:
+    # 1. Segment in Baseline
+    base_id = logic.runHelpNetSegmentationAtCoords(coords, tp0_mask, None, tp0_pet, tp0_ct)
+    
+    # 2. Map coordinates to TP1 via Elastic Transform
+    tp1_coords = logic.applyElasticTransform(coords, tp_map[0]['TransformElastic'])
+    
+    # 3. Segment in TP1
+    followup_id = logic.runHelpNetSegmentationAtCoords(tp1_coords, tp1_mask, None, tp1_pet, tp1_ct)
+    
+    # 4. Enforce structural constraint using bone surface (Skellytour)
+    logic.applyBoneSurfaceConstraint(tp0_mask, base_id, skellytour_mask)
+\end{lstlisting}
+
+\subsection{2. Loading Historical Radiological Reports}
+To improve the context provided to the LLM, the pipeline will ingest dictations and historical text reports directly from the RIS/PACS. These reports will be embedded into the MRML scene as raw text nodes or JSON metadata, allowing the extension's text-generation engine to cross-reference historical measurements or prior clinical suspicions.
+
+\textbf{Proposed Implementation (Ingesting Reports):}
+\begin{lstlisting}[language=Python]
+# Load raw dictation text from RIS/PACS
+dictation_text = "Metastatic prostate cancer. Suspicious lytic lesion in L4."
+
+# Inject directly into the mask node's existing attributes so the UI recognizes it
+mask_node = slicer.util.getNode("Segmentation_TP0")
+mask_node.SetAttribute("RadiologicalReport", dictation_text)
+
+# When the clinician selects this mask, the 'Input Description' 
+# QTextEdit field in the extension's GUI will automatically populate.
+\end{lstlisting}
+
+\subsection{3. Semantic Filtering of False Positives}
+Instead of destructively deleting false positive lesions during AI detection, a semantic filter will be introduced in the preprocessing phase.
+\begin{itemize}
+    \item Lesions deemed highly likely to be physiological uptake or noise will be flagged with a specific metadata tag (e.g., \texttt{SemanticFilter: Hidden}).
+    \item A new toggle button will be added to the Slicer extension GUI allowing the clinician to dynamically show or hide these "filtered out" lesions, ensuring no data is lost and allowing quick rescue of false negatives.
+\end{itemize}
+
+\textbf{Proposed Implementation (Semantic Filtering Flag):} \\
+\textit{Target File: \texttt{./LesionMetadata.py}}
+\begin{lstlisting}[language=Python]
+# In the external preprocessing script:
+if is_physiological_uptake(lesion_volume, location):
+    segment.SetTag("SemanticFilter", "Hidden")
+
+# In the Extension UI (Toggle Button Hook):
+def onToggleFilteredLesions(self, show_hidden):
+    segmentation = mask_node.GetSegmentation()
+    for i in range(segmentation.GetNumberOfSegments()):
+        seg = segmentation.GetNthSegment(i)
+        if seg.GetTag("SemanticFilter") == "Hidden":
+            # Toggle 3D display visibility without deleting underlying data
+            display_node.SetSegmentVisibility(seg.GetName(), show_hidden)
+\end{lstlisting}
+
+\subsection{4. Pre-computed Elastic Registration Associations}
+Rather than calculating spatial proximity or projecting coordinates dynamically via the GUI's \texttt{findEquivalentLesion()} engine, the headless preprocessing script will pre-compute these longitudinal associations based strictly on the elastic registration. It will inject the exact \texttt{LinkedTo\_[NodeID]} MRML tags directly into the segment metadata. By the time the user opens the study, all one-to-many and many-to-one mapping topologies are already persistently defined.
+
+\textbf{Proposed Implementation (Pre-computing Links):}
+\begin{lstlisting}[language=Python]
+# Pre-computed mapping derived from elastic registration
+# Bypasses the need for findEquivalentLesion() to run dynamically
+baseline_segment.SetTag("LinkedTo_vtkMRMLSegmentationNode2", "Segment_1")
+followup_segment.SetTag("LinkedTo_vtkMRMLSegmentationNode1", "Segment_1")
+\end{lstlisting}
+
+\subsection{5. Unifying Functions for Interactive Lesion Addition}
+When a clinician manually adds a new lesion in the GUI, the backend functions called must trigger the same downstream cascades as the headless preprocessing script. 
+
+\textbf{Where the Functions Reside:}
+The interactive addition hooks are located in \texttt{./LesionMetadata.py} under the widget class:
+\begin{itemize}
+    \item \texttt{LesionMetadataWidget.onActivateSemiAutoPaint()}: Handles single-click lesion generation using Auto-PET.
+    \item \texttt{LesionMetadataWidget.onGenManualLesions()}: Handles batch lesion generation from multiple fiducial markers.
+\end{itemize}
+
+\textbf{How to Adapt Them:}
+Currently, these functions successfully generate the lesion mask in the active timepoint by calling \texttt{logic.runHelpNetSegmentationAtCoords()}, but they do not propagate the lesion to other chronological scans. To unify this behavior, these functions must be adapted to automatically trigger the existing longitudinal synchronization engine immediately after creation.
+
+\textbf{Proposed Adaptation (Appending Sync Logic to GUI Hooks):}
+\begin{lstlisting}[language=Python]
+# In LesionMetadataWidget.onActivateSemiAutoPaint() 
+# (and similarly at the end of onGenManualLesions batch processing):
+
+def onActivateSemiAutoPaint_Callback(self, caller, event):
+    # ... existing code that extracts coordinates ...
+    
+    # 1. Existing functionality: Generate lesion in current mask
+    new_id = logic.runHelpNetSegmentationAtCoords(coords, active_mask, None, active_pet, active_ct)
+    
+    # 2. NEW ADAPTATION: Trigger mapping to all future time points instantly
+    # This pushes the newly created lesion across the elastic transforms
+    logic.runSyncMissingLesionsSync()
+    
+    # 3. Refresh GUI to populate newly assigned auto-metadata
+    self.updateGUIFromObject(active_mask, new_id)
+\end{lstlisting}
+
+\subsection{Integration Architecture for External DICOM Pipelines}
+If you are developing a completely new preprocessing script that operates natively on raw DICOM files (prior to Slicer creating an MRB), integration relies on a decoupled architecture. Because the Slicer extension cannot directly call functions inside an isolated external DICOM pipeline (since we do not have access to these proprietary scripts), the handoff must occur via an intermediate JSON payload and NIfTI mask files:
+
+\begin{enumerate}
+    \item \textbf{External DICOM Pipeline Execution}: Your pipeline runs natively on the raw DICOM server. It performs rigid and elastic registration, runs HELPNet to detect and track lesions across timepoints, masks against bone surfaces, and flags false positives.
+    \item \textbf{Generating the Payload}: The pipeline outputs the final predicted masks as \texttt{.nii.gz} files and generates a master \texttt{metadata\_associations.json} file. This JSON contains the \texttt{LinkedTo} mapping logic, semantic filter flags, and preliminary metadata classifications for every predicted lesion.
+    \item \textbf{MRB Assembly via Slicer Headless}: You execute Slicer in headless mode (\texttt{Slicer --no-main-window --python-script assemble\_mrb.py}). This lightweight script loads your raw DICOMs, your \texttt{.nii.gz} masks, and parses your JSON file.
+    \item \textbf{Tag Injection}: The script iterates through the loaded masks, using Slicer's \texttt{segment.SetTag()} to inject the tags defined in your JSON exactly as described in Section 8.
+    \item \textbf{Handoff}: The script calls \texttt{slicer.util.saveScene("final.mrb")}. When the clinician opens this MRB, the Lesion Text Extension instantly recognizes all tracking associations, filtered states, and metadata without needing to know that the heavy computation was done entirely outside of Slicer on raw DICOMs.
+\end{enumerate}
+
+\section{Codebase Reference Table}
+\begin{table}[H]
+\centering
+\footnotesize
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Functionality} & \textbf{Code File} & \textbf{Key Function(s)} \\ \midrule
+\rowcolor{slicercode} Main UI \& Layout Setup & \texttt{LesionMetadata.py} & \texttt{LesionMetadataWidget.setup()} \\
+Dynamic Fields Schema & \texttt{data/def.json} & \textit{JSON Configuration File} \\
+\rowcolor{slicercode} Field Update Logic & \texttt{LesionMetadata.py} & \texttt{updateDynamicFields()} \\
+Manual Overrides / Mapping & \texttt{LesionMetadata.py} & \texttt{onApplyLinkage()} \\
+\rowcolor{slicercode} Preprocessing Orchestration & \texttt{LesionMetadata.py} & \texttt{runFullPreprocessing()} \\
+Longitudinal Sync Engine & \texttt{LesionMetadata.py} & \texttt{logic.syncLesionsAcrossTimepoints()} \\
+\rowcolor{slicercode} Equivalence Engine & \texttt{LesionMetadata.py} & \texttt{findEquivalentLesion()} \\
+Semi-Auto Segmentation & \texttt{LesionMetadata.py} & \texttt{onActivateSemiAutoPaint()} \\
+\rowcolor{slicercode} Bone Analysis (Skellytour) & \texttt{LesionMetadata.py} & \texttt{logic.runSkellytour()} \\
+Report Generation LLM & \texttt{LesionMetadata.py} & \texttt{logic.generateRadReport()} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}

@@ -1,7 +1,7 @@
 module ForDisplayStructs
 using Base: Int32, isvisible
 export MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, StateDataFields, KeyboardStruct, KeyInputFields, TextureUniforms, MaskTextureUniforms, ForWordsDispStruct, MainMedEye3d
-export DisplayedVoxels, CustomDisplayedVoxels, DisplayMode, SingleImage, MultiImage, GlShaderAndBufferFields
+export DisplayedVoxels, CustomDisplayedVoxels, DisplayMode, SingleImage, MultiImage, QuadImage, GlShaderAndBufferFields
 using ColorTypes, Parameters, Observables, ModernGL, GLFW, Dictionaries, FreeTypeAbstraction, Observables
 using ..DataStructs
 
@@ -12,6 +12,7 @@ Display mode of the visualizer : SingleImage or MultiImage
 @enum DisplayMode begin
   SingleImage
   MultiImage
+  QuadImage
 end
 
 

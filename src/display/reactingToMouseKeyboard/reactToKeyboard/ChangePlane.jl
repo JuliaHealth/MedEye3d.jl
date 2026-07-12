@@ -44,8 +44,8 @@ function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObjec
     glDeleteTextures(length(arr), arr)# deleting
 
     #getting new
-
-    initializeTextures(textSpecs, newCalcDim)
+    glUseProgram(stateObject.mainForDisplayObjects.shader_program)
+    stateObject.mainForDisplayObjects.listOfTextSpecifications = initializeTextures(textSpecs, newCalcDim)
 
     # end#if
 

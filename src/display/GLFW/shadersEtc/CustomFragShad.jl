@@ -334,7 +334,7 @@ function setMaskInfluence(textur::TextureSpec{Float32})
 
     return """
 
-    float $(textName)Res = texture2D($(textName), TexCoord0).r * $(textName)isVisible*$(textName)maskContribution ;
+    float $(textName)Res = texture($(textName), TexCoord0).r * $(textName)isVisible*$(textName)maskContribution ;
 
     """
 end#setMaskInfluence
