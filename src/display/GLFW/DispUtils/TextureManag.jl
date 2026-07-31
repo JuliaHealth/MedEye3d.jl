@@ -119,27 +119,27 @@ function initializeTextures(listOfTextSpecs, calcDimStruct::CalcDimsStruct)::Vec
     return res
 end #initializeAndDrawTextures
 
-# """
-# activating textures that were already initialized in order to be able to use them with diffrent shader program
-# shader_program- regference to OpenGL program so we will be able to activate  textures
-# listOfTextSpecs - list of TextureSpec structs that  holds data needed to bind textures to shader program (Hovewer this new shader program have to keep the same ..Uniforms)
-# return unmodified textures
-# """
-# function activateTextures(listOfTextSpecs::Vector{TextureSpec})::Vector{TextureSpec}
-
-#     for (ind, textSpec) in enumerate(listOfTextSpecs)
-#         glBindTexture(GL_TEXTURE_2D, textSpec.ID[])
-#         glUniform1i(textSpec.uniforms.samplerRef, textSpec.associatedActiveNumer)# we first look for uniform sampler in shader
-#         # we set ..Uniforms of visibility and colors according to specified in configuration
-#         if (!textSpec.isMainImage)
-#             setMaskColor(textSpec.color, textSpec.uniforms)
-#         end
-#         setTextureVisibility(textSpec.isVisible, textSpec.uniforms)
-#     end # for
-
-#     return listOfTextSpecs
-
-# end#activateTextures
+"""
+activating textures that were already initialized in order to be able to use them with diffrent shader program
+shader_program- regference to OpenGL program so we will be able to activate  textures
+listOfTextSpecs - list of TextureSpec structs that  holds data needed to bind textures to shader program (Hovewer this new shader program have to keep the same ..Uniforms)
+return unmodified textures
+"""
+function activateTextures(listOfTextSpecs::Vector{TextureSpec})::Vector{TextureSpec}
+    for textSpec in listOfTextSpecs
+        glActiveTexture(textSpec.actTextrureNumb)
+        glBindTexture(GL_TEXTURE_2D, textSpec.ID[])
+        
+        glUniform1i(textSpec.uniforms.samplerRef, textSpec.associatedActiveNumer)
+        setMaskColor(textSpec.color, textSpec.uniforms)
+        setTextureVisibility(textSpec.isVisible, textSpec.uniforms)
+        changeTextureContribution(textSpec, textSpec.maskContribution)
+        if !isempty(textSpec.minAndMaxValue)
+            coontrolMinMaxUniformVals(textSpec)
+        end
+    end
+    return listOfTextSpecs
+end#activateTextures
 
 
 """

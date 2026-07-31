@@ -156,27 +156,22 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
   # @info "corrected_width" corrected_width
   # @info "texel_ratio" texel_ratio
 
-  target_ratio = calcDimStruct.heightToWithRatio
-  current_ratio = calcDimStruct.windowHeight / corrected_width
+  ratio_desired = calcDimStruct.heightToWithRatio * (calcDimStruct.imageTextureHeight / calcDimStruct.imageTextureWidth)
+  ratio_actual = calcDimStruct.windowHeight / corrected_width
 
-  if current_ratio > target_ratio
-    # Need to reduce height
-    heightCorr = 1 - (target_ratio / current_ratio)
+  if ratio_actual > ratio_desired
+    # Window is too tall compared to the image. Shrink height.
+    heightCorr = 1.0 - (ratio_desired / ratio_actual)
+    widthCorr = 0.0
   else
-    # Need to reduce width
-    widthCorr = 1 - (current_ratio / target_ratio)
+    # Window is too wide compared to the image. Shrink width.
+    widthCorr = 1.0 - (ratio_actual / ratio_desired)
+    heightCorr = 0.0
   end
 
-
-  widthCorr = 1 - (calcDimStruct.windowHeight * calcDimStruct.imageTextureWidth) / (calcDimStruct.heightToWithRatio * calcDimStruct.imageTextureHeight * corrected_width)
-
-  # Calculate heightCorr using widthCorr
-  heightCorr = 1 - (calcDimStruct.heightToWithRatio * calcDimStruct.imageTextureHeight * corrected_width * (1 - widthCorr)) / (calcDimStruct.windowHeight * calcDimStruct.imageTextureWidth)
-
-
   # Calculate the new dimensions
-  new_height = calcDimStruct.windowHeight * (1 - heightCorr)
-  new_width = corrected_width * (1 - widthCorr)
+  new_height = calcDimStruct.windowHeight * (1.0 - heightCorr)
+  new_width = corrected_width * (1.0 - widthCorr)
   recalc_texel_ratio = (new_height / calcDimStruct.imageTextureHeight) / (new_width / calcDimStruct.imageTextureWidth)
 
 
@@ -251,33 +246,36 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
       res[25] = normalCorrectedTextAccounting + widthCorr# top left
     end
   elseif displayMode == QuadImage
-    widthCorr /= 4
-    heightCorr /= 4
+    # For QuadImage, each panel takes exactly one quadrant.
+    # The quadrant has half the width and half the height of the full screen.
+    # So the empty space on each side is half of the full-screen empty space.
+    wc = widthCorr / 2.0
+    hc = heightCorr / 2.0
     
     # y coordinates (indices: 2=top right, 10=bottom right, 18=bottom left, 26=top left)
-    if imagePos == 1 || imagePos == 2 # Top half
-      res[2] = 1.0 - heightCorr
-      res[10] = 0.0 + heightCorr
-      res[18] = 0.0 + heightCorr
-      res[26] = 1.0 - heightCorr
-    else # Bottom half
-      res[2] = 0.0 - heightCorr
-      res[10] = -1.0 + heightCorr
-      res[18] = -1.0 + heightCorr
-      res[26] = 0.0 - heightCorr
+    if imagePos == 1 || imagePos == 2 # Top half (Y from 0.0 to 1.0)
+      res[2] = 1.0 - hc
+      res[10] = 0.0 + hc
+      res[18] = 0.0 + hc
+      res[26] = 1.0 - hc
+    else # Bottom half (Y from -1.0 to 0.0)
+      res[2] = 0.0 - hc
+      res[10] = -1.0 + hc
+      res[18] = -1.0 + hc
+      res[26] = 0.0 - hc
     end
 
     # x coordinates (indices: 1=top right, 9=bottom right, 17=bottom left, 25=top left)
-    if imagePos == 1 || imagePos == 3 # Left half
-      res[1] = normalCorrectedTextAccounting - widthCorr
-      res[9] = normalCorrectedTextAccounting - widthCorr
-      res[17] = -1.0 + widthCorr
-      res[25] = -1.0 + widthCorr
-    else # Right half
-      res[1] = textBeginning - widthCorr
-      res[9] = textBeginning - widthCorr
-      res[17] = normalCorrectedTextAccounting + widthCorr
-      res[25] = normalCorrectedTextAccounting + widthCorr
+    if imagePos == 1 || imagePos == 3 # Left half (X from -1.0 to 0.0)
+      res[1] = 0.0 - wc
+      res[9] = 0.0 - wc
+      res[17] = -1.0 + wc
+      res[25] = -1.0 + wc
+    else # Right half (X from 0.0 to 1.0)
+      res[1] = 1.0 - wc
+      res[9] = 1.0 - wc
+      res[17] = 0.0 + wc
+      res[25] = 0.0 + wc
     end
   end
 

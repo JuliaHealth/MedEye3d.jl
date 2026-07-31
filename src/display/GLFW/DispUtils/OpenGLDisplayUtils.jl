@@ -16,8 +16,7 @@ Incorporating rendering for crosshair
 # end
 
 function basicRender(window)
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-    # Swap front and back buffers
-    GLFW.SwapBuffers(window)
+    # We disable individual render and swap here, because we want to render all panels
+    # and swap once at the end of the event loop in the consumer.
 end
 end #..OpenGLDisplayUtils
