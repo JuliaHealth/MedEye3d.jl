@@ -242,7 +242,7 @@ function coordinateDisplay(
     windowWidth::Int=1200,
     windowHeight::Int=Int(round(windowWidth * fractionOfMainIm)),
     textTexturewidthh::Int32=Int32(2000),
-    textTextureheightt::Int32=Int32(round((windowHeight / (windowWidth * (1 - fractionOfMainIm)))) * textTexturewidthh),
+    textTextureheightt::Int32= fractionOfMainIm >= 1.0 ? Int32(1) : Int32(round((windowHeight / (windowWidth * (1 - fractionOfMainIm)))) * textTexturewidthh),
     windowControlStruct::WindowControlStruct=WindowControlStruct(),
 
 )
@@ -566,6 +566,34 @@ function coordinateDisplay(
                 end
 
                 on_next!(stateInstances, channelData)
+                
+                if !shouldStop[1]
+                    glClear(GL_COLOR_BUFFER_BIT)
+                    for state in stateInstances
+                        # Rebind main VAO before each panel render - crosshair rendering
+                        # switches to a different VAO which corrupts subsequent panel draws
+                        glBindVertexArray(vao[])
+                        
+                        # draw text
+                        activateForTextDisp(state.textDispObj.shader_program_words, state.textDispObj.vbo_words, state.calcDimsStruct)
+                        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+                        
+                        # draw main
+                        reactivateMainObj(state.mainForDisplayObjects.shader_program, state.mainForDisplayObjects.vbo, state.calcDimsStruct)
+                        activateTextures(state.mainForDisplayObjects.listOfTextSpecifications)
+                        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+                        
+                        # draw crosshairs if needed
+                        if state.displayMode == MultiImage || state.displayMode == QuadImage
+                            if state.crosshairFields !== nothing && state.crosshairFields.shaderProgram != 0
+                                glUseProgram(state.crosshairFields.shaderProgram)
+                                glBindVertexArray(state.crosshairFields.vao[])
+                                glDrawElements(GL_LINES, 4, GL_UNSIGNED_INT, C_NULL)
+                            end
+                        end
+                    end
+                    GLFW.SwapBuffers(window)
+                end
             catch e
                 @error "CONSUMER TASK CRASHED:" exception=(e, catch_backtrace())
                 shouldStop[1] = true
@@ -812,7 +840,8 @@ function displayImage(
     windowWidth::Int=1000,
     svVertAndInd::Dict{String,Vector}=Dict{String,Vector}("supervoxel_vertices" => [], "supervoxel_indices" => []),
     all_supervoxels::Dict{Int,Dict{Int, Dict{String, Any}}} = Dict{Int, Dict{Int, Dict{String, Any}}}(),
-    quadView::Bool=false
+    quadView::Bool=false,
+    dimensionsToScroll::Union{Int, Vector{Int}}=3
 )
 
 
@@ -989,16 +1018,19 @@ function displayImage(
 
 
     if typeof(voxelDataForUniforms) == Vector{Array{Float32,3}} #Our data is in Float32 format in 3 dimensions
-        datToScrollDimsB = DataToScrollDims(imageSize=size(voxelDataForUniforms[1]), voxelSize=spacings[1], dimensionToScroll=3)
+        dimToScroll = typeof(dimensionsToScroll) <: Vector ? dimensionsToScroll[1] : dimensionsToScroll
+        datToScrollDimsB = DataToScrollDims(imageSize=size(voxelDataForUniforms[1]), voxelSize=spacings[1], dimensionToScroll=dimToScroll)
         mainLines = textLinesFromStrings(["main line 1", "main line 2"])
-        supplLines = map(x -> textLinesFromStrings(["sub line 1 in $(x)", "sub line 2 in $(x)"]), 1:size(voxelDataForUniforms[1])[3])
+        supplLines = map(x -> textLinesFromStrings(["sub line 1 in $(x)", "sub line 2 in $(x)"]), 1:size(voxelDataForUniforms[1])[dimToScroll])
 
     elseif typeof(voxelDataForUniforms) == Vector{Vector{Array{Float32,3}}}
         for (index, innerVector) in enumerate(voxelDataForUniforms)
-            push!(datToScrollDimsB, DataToScrollDims(imageSize=size(innerVector[1]), voxelSize=spacings[index][1], dimensionToScroll=3))
+            dimToScroll = typeof(dimensionsToScroll) <: Vector ? dimensionsToScroll[index] : dimensionsToScroll
+            push!(datToScrollDimsB, DataToScrollDims(imageSize=size(innerVector[1]), voxelSize=spacings[index][1], dimensionToScroll=dimToScroll))
         end
         mainLines = textLinesFromStrings(["main line 1", "main line 2"])
-        supplLines = map(x -> textLinesFromStrings(["sub line 1 in $(x)", "sub line 2 in $(x)"]), 1:size(voxelDataForUniforms[1][1])[3]) #change this added [1] bcuz to get the first vector
+        dimToScroll0 = typeof(dimensionsToScroll) <: Vector ? dimensionsToScroll[1] : dimensionsToScroll
+        supplLines = map(x -> textLinesFromStrings(["sub line 1 in $(x)", "sub line 2 in $(x)"]), 1:size(voxelDataForUniforms[1][1])[dimToScroll0]) #change this added [1] bcuz to get the first vector
 
     end
 
@@ -1010,12 +1042,20 @@ function displayImage(
         sliceDatad = getThreeDims(voxelDataTupleVector)
         # @info typeof(sliceDatad)
         sliceData = sliceDatad
-        mainScrollData = FullScrollableDat(dataToScrollDims=datToScrollDimsB, dimensionToScroll=1, dataToScroll=sliceData, mainTextToDisp=mainLines, sliceTextToDisp=supplLines)
-
+        dimToScroll = typeof(dimensionsToScroll) <: Vector ? dimensionsToScroll[1] : dimensionsToScroll
+        mainScrollData = FullScrollableDat(dataToScrollDims=datToScrollDimsB, dimensionToScroll=dimToScroll, dataToScroll=sliceData, mainTextToDisp=mainLines, sliceTextToDisp=supplLines)
     elseif typeof(voxelDataTupleVector) == Vector{Vector{Any}}
         for (index, innerVector) in enumerate(voxelDataTupleVector)
             push!(sliceData, getThreeDims(innerVector))
-            push!(mainScrollData, FullScrollableDat(dataToScrollDims=datToScrollDimsB[index], dimensionToScroll=1, dataToScroll=sliceData[index], mainTextToDisp=mainLines, sliceTextToDisp=supplLines))
+        end
+    end
+
+    if typeof(voxelDataForUniforms[1]) <: Vector
+        # so we have multiple planes per image
+        mainScrollData = Vector{FullScrollableDat}()
+        for (index, innerVector) in enumerate(voxelDataForUniforms)
+            dimToScroll = typeof(dimensionsToScroll) <: Vector ? dimensionsToScroll[index] : dimensionsToScroll
+            push!(mainScrollData, FullScrollableDat(dataToScrollDims=datToScrollDimsB[index], dimensionToScroll=dimToScroll, dataToScroll=sliceData[index], mainTextToDisp=mainLines, sliceTextToDisp=supplLines))
         end
     end
 

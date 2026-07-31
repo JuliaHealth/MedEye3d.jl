@@ -135,18 +135,18 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
                       (strings) -> join(strings, "")
 
     sumColors = map(letter ->
-            map(x -> "  changeClip($(x.name)minValue,$(x.name)maxValue,$(x.name)Res,$(x.name)ColorMask.$(letter),$(x.name)ValueRange) ", texturesNotCont) |>
+            map(x -> "  (changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.$(letter), $(x.name)ValueRange) * $(x.name)isVisible * $(x.isMainImage ? "1.0" : "$(x.name)maskContribution * float(abs($(x.name)Res) > 0.00001)")) ", texturesNotCont) |>
             (strings) -> join(strings, " + "), ["r", "g", "b"])
 
     sumColorR = sumColors[1]
     sumColorG = sumColors[2]
     sumColorB = sumColors[3]
     
-    sumColorRCont = map(x -> "r$(x.name)getColorForMultiColor($(x.name)Res)", texturesCont) |>
+    sumColorRCont = map(x -> "(r$(x.name)getColorForMultiColor($(x.name)Res) * $(x.name)isVisible * $(x.isMainImage ? "1.0" : "$(x.name)maskContribution * float(abs($(x.name)Res) > 0.00001)"))", texturesCont) |>
                     (strings) -> join(strings, " + ")
-    sumColorGCont = map(x -> "g$(x.name)getColorForMultiColor($(x.name)Res)", texturesCont) |>
+    sumColorGCont = map(x -> "(g$(x.name)getColorForMultiColor($(x.name)Res) * $(x.name)isVisible * $(x.isMainImage ? "1.0" : "$(x.name)maskContribution * float(abs($(x.name)Res) > 0.00001)"))", texturesCont) |>
                     (strings) -> join(strings, " + ")
-    sumColorBCont = map(x -> "b$(x.name)getColorForMultiColor($(x.name)Res)", texturesCont) |>
+    sumColorBCont = map(x -> "(b$(x.name)getColorForMultiColor($(x.name)Res) * $(x.name)isVisible * $(x.isMainImage ? "1.0" : "$(x.name)maskContribution * float(abs($(x.name)Res) > 0.00001)"))", texturesCont) |>
                     (strings) -> join(strings, " + ")
 
     # Fix empty string handling
@@ -162,18 +162,18 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
         sumColorB = "0.0"
     end
 
-    isVisibleList = map(x -> "$(x.name)isVisible *$(x.name)maskContribution", textures) |>
+    isVisibleList = map(x -> x.isMainImage ? "$(x.name)isVisible" : "(abs($(x.name)Res) > 0.00001 ? $(x.name)isVisible * $(x.name)maskContribution : 0.0)", textures) |>
                     (strings) -> join(strings, " + ")
 
     # ALWAYS process textures properly - remove hardcoded colors
     return """
     float changeClip(float min, float max, float value, float color, float range) {
-        if (value < min) {
-            return min;
-        } else if (value > max) {
-            return max;
+        if (value <= min) {
+            return 0.0;
+        } else if (value >= max) {
+            return color;
         } else {
-            return color * (value/ range);
+            return color * ((value - min) / range);
         }
     }
     $(getMultiColorMaskFunctions(texturesCont))
@@ -334,7 +334,7 @@ function setMaskInfluence(textur::TextureSpec{Float32})
 
     return """
 
-    float $(textName)Res = texture($(textName), TexCoord0).r * $(textName)isVisible*$(textName)maskContribution ;
+    float $(textName)Res = texture($(textName), TexCoord0).r;
 
     """
 end#setMaskInfluence
@@ -423,7 +423,7 @@ function getMultiColorMaskFunctions(continuusColorTextSpecs::Vector{TextureSpec{
 
 
     float texelRes=  clamp(innertexelRes, $(x[1])minValue,$(x[1])maxValue );
-           float normalized = (texelRes/float($(x[1])ValueRange))*$(length(x[2])+1);
+           float normalized = ((texelRes - $(x[1])minValue)/float($(x[1])ValueRange))*$(length(x[2])+1);
            uint indexx = uint(floor(normalized)) ;// so we normalize floor  in order to get index of color from color list
            float[$(length(x[2])+1)] colorFloats = float[$(length(x[2])+1)](0.0,$( map(it->it[x[4]],x[2])|> (fls)-> join(fls,",")    )   )  ;
            float normalizedColorPercent= normalized-float(indexx) ;

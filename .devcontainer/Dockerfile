@@ -9,9 +9,16 @@ RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive \
     apt-get install --yes --no-install-recommends \
                     # basic stuff
-                    curl ca-certificates nano && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+                    curl \
+    git \
+    unzip \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    xvfb \
+    scrot \
+    x11-utils \
+    xdotool \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update && \
     apt-get install -y software-properties-common && \
