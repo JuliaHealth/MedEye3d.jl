@@ -247,35 +247,37 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
     end
   elseif displayMode == QuadImage
     # For QuadImage, each panel takes exactly one quadrant.
-    # The quadrant has half the width and half the height of the full screen.
-    # So the empty space on each side is half of the full-screen empty space.
     wc = widthCorr / 2.0
     hc = heightCorr / 2.0
     
+    # Global scale and shift to avoid top app bar
+    scale = 0.90f0
+    yOffset = -0.10f0
+    
     # y coordinates (indices: 2=top right, 10=bottom right, 18=bottom left, 26=top left)
     if imagePos == 1 || imagePos == 2 # Top half (Y from 0.0 to 1.0)
-      res[2] = 1.0 - hc
-      res[10] = 0.0 + hc
-      res[18] = 0.0 + hc
-      res[26] = 1.0 - hc
+      res[2] = (1.0f0 - hc) * scale + yOffset
+      res[10] = (0.0f0 + hc) * scale + yOffset
+      res[18] = (0.0f0 + hc) * scale + yOffset
+      res[26] = (1.0f0 - hc) * scale + yOffset
     else # Bottom half (Y from -1.0 to 0.0)
-      res[2] = 0.0 - hc
-      res[10] = -1.0 + hc
-      res[18] = -1.0 + hc
-      res[26] = 0.0 - hc
+      res[2] = (0.0f0 - hc) * scale + yOffset
+      res[10] = (-1.0f0 + hc) * scale + yOffset
+      res[18] = (-1.0f0 + hc) * scale + yOffset
+      res[26] = (0.0f0 - hc) * scale + yOffset
     end
 
     # x coordinates (indices: 1=top right, 9=bottom right, 17=bottom left, 25=top left)
     if imagePos == 1 || imagePos == 3 # Left half (X from -1.0 to 0.0)
-      res[1] = 0.0 - wc
-      res[9] = 0.0 - wc
-      res[17] = -1.0 + wc
-      res[25] = -1.0 + wc
+      res[1] = (0.0f0 - wc) * scale
+      res[9] = (0.0f0 - wc) * scale
+      res[17] = (-1.0f0 + wc) * scale
+      res[25] = (-1.0f0 + wc) * scale
     else # Right half (X from 0.0 to 1.0)
-      res[1] = 1.0 - wc
-      res[9] = 1.0 - wc
-      res[17] = 0.0 + wc
-      res[25] = 0.0 + wc
+      res[1] = (1.0f0 - wc) * scale
+      res[9] = (1.0f0 - wc) * scale
+      res[17] = (0.0f0 + wc) * scale
+      res[25] = (0.0f0 + wc) * scale
     end
   end
 

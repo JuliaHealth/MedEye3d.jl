@@ -13,7 +13,7 @@ so we modify the data that is the basis of the mouse interaction mask  and we pa
 module ReactOnMouseClickAndDrag
 using Logging, Parameters, Setfield, GLFW, ModernGL, Dates, Parameters, Logging, Base.Threads
 using ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils
-using ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForLine
+using ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForLine, ..ReactToScroll, ..DisplayWords
 import Logging, Base.Threads
 export registerMouseClickFunctions
 export reactToMouseDrag
@@ -60,6 +60,12 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
     ymax = Int32(calcD.avWindHeightForMain - calcD.windowHeightCorr)
     # calculating dimensions of quad becouse it do not occupy whole window, and we want to react only to those mouse positions that are on main image quad
     mouseStructInstance = MouseStruct()
+    
+    # Query actual GLFW window size (may differ from requested size due to WM resize)
+    actualW, actualH = GLFW.GetWindowSize(window)
+    mouseStructInstance.actualWindowWidth = Int(actualW)
+    mouseStructInstance.actualWindowHeight = Int(actualH)
+    @info "GLFW actual window size: $(actualW)x$(actualH) vs stored: $(calcD.windowWidth)x$(calcD.windowHeight)"
 
     GLFW.SetCursorPosCallback(window, (a, x, y) -> begin
         # if (mouseStructInstance.isLeftButtonDown && x >= xmin && x <= xmax && y >= ymin && y <= ymax)
@@ -77,7 +83,7 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
         rightMouseButtonDownResult = (button == GLFW.MOUSE_BUTTON_2 && action == GLFW.PRESS)
         mouseStructInstance.isRightButtonDown = rightMouseButtonDownResult
 
-        # put!(mainChannel, mouseStructInstance)
+        put!(mainChannel, mouseStructInstance)
     end) # for example types MOUSE_BUTTON_1 PRESS   GLFW.MouseButton  GLFW.Action
 
 end #registerMouseScrollFunctions
@@ -150,14 +156,166 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
     # obj = mainState.mainForDisplayObjects
     # textureList = mainState.textureToModifyVec
     mouseCoords = mousestr.lastCoordinates
-    #we save data about right click position in order to change the slicing plane accordingly
-    textBeginning, midPoint, imageRange = openGlSystemVals(mainState.calcDimsStruct.fractionOfMainIm, mainState.calcDimsStruct.windowWidth)
-    cursorXPosOpenGl = (mouseCoords[1][1] / mainState.calcDimsStruct.windowWidth) * 2 - 1
-    cursorYPosOpenGl = ((mouseCoords[1][2] / mainState.calcDimsStruct.windowHeight) * 2 - 1) * -1
-    # @info "x " cursorXPosOpenGl
-    # @info "y " cursorYPosOpenGl
-    # @info "mid" midPoint
-    if length(mainStates) > 1 #only in multiImage mode
+    
+    # Guard: if no coordinates yet, skip
+    if isempty(mouseCoords)
+        return
+    end
+    
+    # 1. Update switchIndex based on mouse position (for scrolling and right-click)
+    if length(mainStates) == 4 # QuadImage mode
+        # viewportW/H = requested window size used in glViewport (defines NDC→pixel mapping)
+        viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
+        viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
+        # actualW/H = GLFW content area (may be smaller if WM resized window to fit screen)
+        actualW = mousestr.actualWindowWidth > 0 ? Float64(mousestr.actualWindowWidth) : viewportW
+        actualH = mousestr.actualWindowHeight > 0 ? Float64(mousestr.actualWindowHeight) : viewportH
+        x, y = (mouseCoords[1][1], mouseCoords[1][2])
+        
+        # Convert mouse to NDC accounting for viewport vs content area mismatch
+        # Mouse: (0,0)=top-left of content area, (actualW, actualH)=bottom-right
+        # Viewport: (0,0)=bottom-left, (viewportW, viewportH)=top-right
+        # viewport_px_x = x, viewport_px_y = actualH - y (flip Y)
+        # NDC_x = 2 * viewport_px_x / viewportW - 1
+        # NDC_y = 2 * viewport_px_y / viewportH - 1
+        mouseGlX = (x * 2.0 / viewportW) - 1.0
+        mouseGlY = ((actualH - y) * 2.0 / viewportH) - 1.0
+        
+        # Compute panel split dynamically from actual vertex positions
+        topVerts = mainStates[1].calcDimsStruct.mainImageQuadVert
+        botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
+        topPanelBottom = Float64(min(topVerts[10], topVerts[18]))
+        botPanelTop = Float64(max(botVerts[2], botVerts[26]))
+        glMidY = (topPanelBottom + botPanelTop) / 2.0
+        
+        if x < actualW / 2.0 && mouseGlY > glMidY
+            mainState.switchIndex = 1
+        elseif x >= actualW / 2.0 && mouseGlY > glMidY
+            mainState.switchIndex = 2
+        elseif x < actualW / 2.0 && mouseGlY <= glMidY
+            mainState.switchIndex = 3
+        else
+            mainState.switchIndex = 4
+        end
+    elseif length(mainStates) > 1
+        textBeginning, midPoint, imageRange = openGlSystemVals(mainState.calcDimsStruct.fractionOfMainIm, mainState.calcDimsStruct.windowWidth)
+        cursorXPosOpenGl = (mouseCoords[1][1] / mainState.calcDimsStruct.windowWidth) * 2 - 1
+        if cursorXPosOpenGl > midPoint
+            mainState.switchIndex = 2
+        elseif cursorXPosOpenGl < midPoint
+            mainState.switchIndex = 1
+        end
+    end
+    
+    # 2. Right-click cross-plane jumping
+    if mousestr.isRightButtonDown && length(mainStates) == 4 # QuadImage mode
+        viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
+        viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
+        actualW = mousestr.actualWindowWidth > 0 ? Float64(mousestr.actualWindowWidth) : viewportW
+        actualH = mousestr.actualWindowHeight > 0 ? Float64(mousestr.actualWindowHeight) : viewportH
+        x, y = (mouseCoords[1][1], mouseCoords[1][2])
+        clickedPanel = mainState.switchIndex
+
+        # Read actual rendered vertex positions from the panel's calcDimsStruct
+        verts = mainStates[clickedPanel].calcDimsStruct.mainImageQuadVert
+        glLeft   = Float64(min(verts[17], verts[25]))
+        glRight  = Float64(max(verts[1], verts[9]))
+        glBottom = Float64(min(verts[10], verts[18]))
+        glTop    = Float64(max(verts[2], verts[26]))
+        
+        # Convert click to OpenGL NDC accounting for viewport vs content area mismatch
+        glX = (x * 2.0 / viewportW) - 1.0
+        glY = ((actualH - y) * 2.0 / viewportH) - 1.0
+        
+        # Map click to OpenGL texture coordinates (s, t) within vertex bounds
+        # s: 0=left edge, 1=right edge
+        # t: 0=bottom of quad (array row 1), 1=top of quad (array row texH)
+        # Clicks in padding zone clamp to nearest image edge
+        s = clamp((glX - glLeft) / (glRight - glLeft), 0.0, 1.0)
+        t = clamp((glY - glBottom) / (glTop - glBottom), 0.0, 1.0)
+
+        texW = Float64(mainStates[clickedPanel].calcDimsStruct.imageTextureWidth)
+        texH = Float64(mainStates[clickedPanel].calcDimsStruct.imageTextureHeight)
+        
+        # s=0 → col 1, s=1 → col texW
+        texX = clamp(round(Int, s * texW), 1, Int(texW))
+        
+        # texY mapping (same for ALL panels):
+        # t=1 (top of quad) → texY=texH (last row) — matches getNewY behavior
+        # t=0 (bottom)      → texY=1 (first row)
+        texY = clamp(round(Int, t * texH), 1, Int(texH))
+        
+        # Detect if click is in padding zone
+        inPadding = (glX < glLeft || glX > glRight || glY < glBottom || glY > glTop)
+        # Convert vertex bounds to mouse pixel coords for debug display
+        imgTopPx = round(Int, actualH - (glTop + 1.0) / 2.0 * viewportH)
+        imgBotPx = round(Int, actualH - (glBottom + 1.0) / 2.0 * viewportH)
+        imgLeftPx = round(Int, (glLeft + 1.0) / 2.0 * viewportW)
+        imgRightPx = round(Int, (glRight + 1.0) / 2.0 * viewportW)
+        
+        @info "RIGHT-CLICK: panel=$clickedPanel windowXY=($x,$y) inPadding=$inPadding viewport=$(Int(viewportW))x$(Int(viewportH)) actual=$(Int(actualW))x$(Int(actualH))"
+        @info "  Image mouse-pixel bounds: top=$imgTopPx bot=$imgBotPx left=$imgLeftPx right=$imgRightPx"
+        @info "  glXY=($glX,$glY) bounds=(L=$glLeft,R=$glRight,B=$glBottom,T=$glTop)"
+        @info "  s=$s t=$t texX=$texX texY=$texY texW=$texW texH=$texH"
+        
+        currentSlice = mainStates[clickedPanel].currentDisplayedSlice
+        
+        # Map texture coordinates back to original volume coordinates
+        # Panel 1 & 2 (Axial): data = (origX, origY, origZ), texture shows (origX, origY)
+        # Panel 3 (Sagittal): data = permutedims(iso, (2,3,1)) = (origY, origZ, origX)
+        #   texture shows (origY, origZ), slice = origX
+        # Panel 4 (Coronal): data = permutedims(iso, (1,3,2)) = (origX, origZ, origY)
+        #   texture shows (origX, origZ), slice = origY
+        if clickedPanel == 1 || clickedPanel == 2
+            origX, origY, origZ = texX, texY, currentSlice
+        elseif clickedPanel == 3  # Sagittal
+            origY, origZ, origX = texX, texY, currentSlice
+        else # Bottom-Right (4) (Coronal)
+            origX, origZ, origY = texX, texY, currentSlice
+        end
+        
+        @info "  origX=$origX origY=$origY origZ=$origZ currentSlice=$currentSlice"
+        @info "  Axial scrolls Z(1-$(mainStates[1].onScrollData.slicesNumber)) Sag scrolls origX(1-$(mainStates[3].onScrollData.slicesNumber)) Cor scrolls origY(1-$(mainStates[4].onScrollData.slicesNumber))"
+        
+        # Jump other panels to the corresponding slices
+        # Panel 1 & 2 scroll through Z (origZ), Panel 3 scrolls through origX, Panel 4 scrolls through origY
+        targets = [(1, origZ), (2, origZ), (3, origX), (4, origY)]
+        
+        for (panelIdx, targetSlice) in targets
+            if panelIdx != clickedPanel
+                panelState = mainStates[panelIdx]
+                currSlice = panelState.currentDisplayedSlice
+                @info "  Panel $panelIdx: current=$currSlice target=$targetSlice"
+                if targetSlice != currSlice
+                    # Clamp target to valid range
+                    lastSlice = panelState.onScrollData.slicesNumber
+                    newSlice = clamp(targetSlice, 1, lastSlice)
+                    
+                    # Extract new 2D slice from 3D data
+                    singleSlDat = panelState.onScrollData.dataToScroll |>
+                        (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(newSlice), panelState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
+                        (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=newSlice, textToDisp=getTextForCurrentSlice(panelState.onScrollData, Int32(newSlice)))
+                    
+                    # Upload new texture data to GPU (without rendering/SwapBuffers)
+                    for updateDat in singleSlDat.listOfDataAndImageNames
+                        findList = findall((texSpec) -> texSpec.name == updateDat.name, panelState.mainForDisplayObjects.listOfTextSpecifications)
+                        if !isempty(findList)
+                            texSpec = panelState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
+                            updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, panelState.calcDimsStruct.imageTextureWidth, panelState.calcDimsStruct.imageTextureHeight)
+                        end
+                    end
+                    
+                    # Update state (slice number and display data)
+                    panelState.currentlyDispDat = singleSlDat
+                    panelState.currentDisplayedSlice = newSlice
+                    panelState.isSliceChanged = true
+                end
+            end
+        end
+    end
+
+    # 3. Crosshair rendering for multi-image modes
+    if length(mainStates) > 1 && length(mainStates) != 4 #only in multiImage mode (but NOT QuadImage)
         if cursorXPosOpenGl > midPoint
             # @info cursorXPosOpenGl
             mainState.switchIndex = 2
