@@ -2,6 +2,7 @@ module ForDisplayStructs
 using Base: Int32, isvisible
 export MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, StateDataFields, KeyboardStruct, KeyInputFields, TextureUniforms, MaskTextureUniforms, ForWordsDispStruct, MainMedEye3d
 export DisplayedVoxels, CustomDisplayedVoxels, DisplayMode, SingleImage, MultiImage, QuadImage, GlShaderAndBufferFields
+export DoubleClickEvent
 using ColorTypes, Parameters, Observables, ModernGL, GLFW, Dictionaries, FreeTypeAbstraction, Observables
 using ..DataStructs
 
@@ -230,6 +231,17 @@ Holding necessery data to controll mouse interaction
   actualWindowWidth::Int = 0  # actual GLFW window content area width
   actualWindowHeight::Int = 0  # actual GLFW window content area height
 end#MouseStruct
+
+"""
+Event fired when a double left-click is detected.
+Dispatched as a dedicated type via on_next! — same pattern as KeyInputFields, MouseStruct, etc.
+"""
+@with_kw mutable struct DoubleClickEvent
+  x::Int = 0                    # cursor x at time of click
+  y::Int = 0                    # cursor y at time of click
+  actualWindowWidth::Int = 0
+  actualWindowHeight::Int = 0
+end#DoubleClickEvent
 
 
 """

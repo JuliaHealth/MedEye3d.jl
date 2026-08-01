@@ -18,6 +18,8 @@ import Logging, Base.Threads
 export registerMouseClickFunctions
 export reactToMouseDrag
 export react_to_draw
+export reactToDoubleClick
+export DoubleClickEvent
 
 """
 Calculates OpenGl coordinate system values for
@@ -52,6 +54,9 @@ we pass coordinate of cursor only when isLeftButtonDown is true and we make it t
 if left button is presed down - we make it true if the left button is pressed over image and false if mouse get out of the window or we get information about button release
 imageWidth adn imageHeight are the dimensions of textures that we use to display
 """
+# Module-level timestamp for double-click detection (avoids GLFW.GetTime which doesn't exist in Julia GLFW.jl)
+const lastLeftClickTimestamp = Ref{Float64}(0.0)
+
 function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct, mainChannel::Base.Channel{Any})
     xmin = Int32(calcD.windowWidthCorr)
     xmax = Int32(calcD.avWindWidtForMain - calcD.windowWidthCorr)
@@ -72,7 +77,14 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
         if (x >= xmin && x <= xmax && y >= ymin && y <= ymax)
             point = CartesianIndex(Int(x), Int(y))
             mouseStructInstance.lastCoordinates = [point]
-            put!(mainChannel, mouseStructInstance)
+            # Snapshot into a new struct so later callbacks cannot overwrite this message
+            put!(mainChannel, MouseStruct(
+                isLeftButtonDown  = mouseStructInstance.isLeftButtonDown,
+                isRightButtonDown = mouseStructInstance.isRightButtonDown,
+                lastCoordinates   = [point],
+                actualWindowWidth  = mouseStructInstance.actualWindowWidth,
+                actualWindowHeight = mouseStructInstance.actualWindowHeight,
+            ))
 
         end
     end)# and  for example : cursor: 29.0, 469.0  types   Float64  Float64
@@ -83,7 +95,31 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
         rightMouseButtonDownResult = (button == GLFW.MOUSE_BUTTON_2 && action == GLFW.PRESS)
         mouseStructInstance.isRightButtonDown = rightMouseButtonDownResult
 
-        put!(mainChannel, mouseStructInstance)
+        # Double-click detection: fire a dedicated DoubleClickEvent into the channel.
+        # Uses time() (Base Julia) — GLFW.GetTime() does not exist in Julia's GLFW.jl.
+        if leftMouseButtonDownResult
+            now = time()
+            if (now - lastLeftClickTimestamp[]) < 0.35  # 350ms threshold
+                # Fire DoubleClickEvent — its own dispatch type, not embedded in MouseStruct
+                coords = mouseStructInstance.lastCoordinates
+                put!(mainChannel, DoubleClickEvent(
+                    x = isempty(coords) ? 0 : coords[1][1],
+                    y = isempty(coords) ? 0 : coords[1][2],
+                    actualWindowWidth  = mouseStructInstance.actualWindowWidth,
+                    actualWindowHeight = mouseStructInstance.actualWindowHeight,
+                ))
+            end
+            lastLeftClickTimestamp[] = now
+        end
+
+        # Snapshot regular mouse event (for right-click and position tracking)
+        put!(mainChannel, MouseStruct(
+            isLeftButtonDown  = mouseStructInstance.isLeftButtonDown,
+            isRightButtonDown = mouseStructInstance.isRightButtonDown,
+            lastCoordinates   = mouseStructInstance.lastCoordinates,
+            actualWindowWidth  = mouseStructInstance.actualWindowWidth,
+            actualWindowHeight = mouseStructInstance.actualWindowHeight,
+        ))
     end) # for example types MOUSE_BUTTON_1 PRESS   GLFW.MouseButton  GLFW.Action
 
 end #registerMouseScrollFunctions
@@ -93,6 +129,15 @@ end #registerMouseScrollFunctions
 mouseCoords_channel = Base.Channel{MouseStruct}(100)
 # we can fetch! on the channel, what is the next thing line, if the mouseStruct, check previous one by fetch. If it mouseStruct, aggregate those 2 and fetch the next one
 #fetch in while loop, until no more mouseStructs, then we have the last one, and we can react to it
+
+# Double-click zoom state for QuadImage mode
+mutable struct QuadZoomState
+    isZoomed::Bool
+    zoomedPanel::Int
+    savedVerts::Vector{Vector{Float32}}
+    savedVertSizes::Vector{Int64}
+end
+const quadZoomState = QuadZoomState(false, 0, Vector{Float32}[], Int64[])
 
 
 """
@@ -157,58 +202,55 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
     # textureList = mainState.textureToModifyVec
     mouseCoords = mousestr.lastCoordinates
     
-    # Guard: if no coordinates yet, skip
-    if isempty(mouseCoords)
-        return
-    end
-    
-    # 1. Update switchIndex based on mouse position (for scrolling and right-click)
-    if length(mainStates) == 4 # QuadImage mode
-        # viewportW/H = requested window size used in glViewport (defines NDC→pixel mapping)
-        viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
-        viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
-        # actualW/H = GLFW content area (may be smaller if WM resized window to fit screen)
-        actualW = mousestr.actualWindowWidth > 0 ? Float64(mousestr.actualWindowWidth) : viewportW
-        actualH = mousestr.actualWindowHeight > 0 ? Float64(mousestr.actualWindowHeight) : viewportH
-        x, y = (mouseCoords[1][1], mouseCoords[1][2])
-        
-        # Convert mouse to NDC accounting for viewport vs content area mismatch
-        # Mouse: (0,0)=top-left of content area, (actualW, actualH)=bottom-right
-        # Viewport: (0,0)=bottom-left, (viewportW, viewportH)=top-right
-        # viewport_px_x = x, viewport_px_y = actualH - y (flip Y)
-        # NDC_x = 2 * viewport_px_x / viewportW - 1
-        # NDC_y = 2 * viewport_px_y / viewportH - 1
-        mouseGlX = (x * 2.0 / viewportW) - 1.0
-        mouseGlY = ((actualH - y) * 2.0 / viewportH) - 1.0
-        
-        # Compute panel split dynamically from actual vertex positions
-        topVerts = mainStates[1].calcDimsStruct.mainImageQuadVert
-        botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
-        topPanelBottom = Float64(min(topVerts[10], topVerts[18]))
-        botPanelTop = Float64(max(botVerts[2], botVerts[26]))
-        glMidY = (topPanelBottom + botPanelTop) / 2.0
-        
-        if x < actualW / 2.0 && mouseGlY > glMidY
-            mainState.switchIndex = 1
-        elseif x >= actualW / 2.0 && mouseGlY > glMidY
-            mainState.switchIndex = 2
-        elseif x < actualW / 2.0 && mouseGlY <= glMidY
-            mainState.switchIndex = 3
-        else
-            mainState.switchIndex = 4
+    # 1. Update switchIndex based on mouse position — needs coords
+    if !isempty(mouseCoords)
+        if length(mainStates) == 4 # QuadImage mode
+            if quadZoomState.isZoomed
+                # When zoomed, always target the zoomed panel
+                mainState.switchIndex = quadZoomState.zoomedPanel
+            else
+                # viewportW/H = requested window size used in glViewport (defines NDC→pixel mapping)
+                viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
+                viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
+                # actualW/H = GLFW content area (may be smaller if WM resized window to fit screen)
+                actualW = mousestr.actualWindowWidth > 0 ? Float64(mousestr.actualWindowWidth) : viewportW
+                actualH = mousestr.actualWindowHeight > 0 ? Float64(mousestr.actualWindowHeight) : viewportH
+                x, y = (mouseCoords[1][1], mouseCoords[1][2])
+                
+                # Convert mouse to NDC accounting for viewport vs content area mismatch
+                mouseGlX = (x * 2.0 / viewportW) - 1.0
+                mouseGlY = ((actualH - y) * 2.0 / viewportH) - 1.0
+                
+                # Compute panel split dynamically from actual vertex positions
+                topVerts = mainStates[1].calcDimsStruct.mainImageQuadVert
+                botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
+                topPanelBottom = Float64(min(topVerts[10], topVerts[18]))
+                botPanelTop = Float64(max(botVerts[2], botVerts[26]))
+                glMidY = (topPanelBottom + botPanelTop) / 2.0
+                
+                if x < actualW / 2.0 && mouseGlY > glMidY
+                    mainState.switchIndex = 1
+                elseif x >= actualW / 2.0 && mouseGlY > glMidY
+                    mainState.switchIndex = 2
+                elseif x < actualW / 2.0 && mouseGlY <= glMidY
+                    mainState.switchIndex = 3
+                else
+                    mainState.switchIndex = 4
+                end
+            end
+        elseif length(mainStates) > 1
+            textBeginning, midPoint, imageRange = openGlSystemVals(mainState.calcDimsStruct.fractionOfMainIm, mainState.calcDimsStruct.windowWidth)
+            cursorXPosOpenGl = (mouseCoords[1][1] / mainState.calcDimsStruct.windowWidth) * 2 - 1
+            if cursorXPosOpenGl > midPoint
+                mainState.switchIndex = 2
+            elseif cursorXPosOpenGl < midPoint
+                mainState.switchIndex = 1
+            end
         end
-    elseif length(mainStates) > 1
-        textBeginning, midPoint, imageRange = openGlSystemVals(mainState.calcDimsStruct.fractionOfMainIm, mainState.calcDimsStruct.windowWidth)
-        cursorXPosOpenGl = (mouseCoords[1][1] / mainState.calcDimsStruct.windowWidth) * 2 - 1
-        if cursorXPosOpenGl > midPoint
-            mainState.switchIndex = 2
-        elseif cursorXPosOpenGl < midPoint
-            mainState.switchIndex = 1
-        end
-    end
+    end # end !isempty(mouseCoords) for panel detection
     
-    # 2. Right-click cross-plane jumping
-    if mousestr.isRightButtonDown && length(mainStates) == 4 # QuadImage mode
+    # 2. Right-click cross-plane jumping — needs coords
+    if !isempty(mouseCoords) && mousestr.isRightButtonDown && length(mainStates) == 4 # QuadImage mode
         viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
         viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
         actualW = mousestr.actualWindowWidth > 0 ? Float64(mousestr.actualWindowWidth) : viewportW
@@ -312,15 +354,17 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 end
             end
         end
-    end
+    end # end right-click handler
 
-    # 3. Crosshair rendering for multi-image modes
-    if length(mainStates) > 1 && length(mainStates) != 4 #only in multiImage mode (but NOT QuadImage)
-        if cursorXPosOpenGl > midPoint
-            # @info cursorXPosOpenGl
+    # 3. Crosshair rendering for multi-image modes (needs coords, MultiImage only)
+    if !isempty(mouseCoords) && length(mainStates) > 1 && length(mainStates) != 4 #only in multiImage mode (but NOT QuadImage)
+        textBeginning2, midPoint2, imageRange2 = openGlSystemVals(mainState.calcDimsStruct.fractionOfMainIm, mainState.calcDimsStruct.windowWidth)
+        cursorXPosOpenGl2 = (mouseCoords[1][1] / mainState.calcDimsStruct.windowWidth) * 2 - 1
+        if cursorXPosOpenGl2 > midPoint2
+            # @info cursorXPosOpenGl2
             mainState.switchIndex = 2
-        elseif cursorXPosOpenGl < midPoint
-            # @info cursorXPosOpenGl
+        elseif cursorXPosOpenGl2 < midPoint2
+            # @info cursorXPosOpenGl2
             mainState.switchIndex = 1
         end
 
@@ -358,6 +402,69 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
     # @info "Mouse drag coordinates  : " mappedCoords
 
 end#..ReactToScroll
+
+
+"""
+Handles double-click panel zoom toggle in QuadImage mode.
+Dispatched via on_next!(states, data::DoubleClickEvent) — same pattern as all other event types.
+"""
+function reactToDoubleClick(event::DoubleClickEvent, mainStates::Vector{StateDataFields})
+    length(mainStates) == 4 || return  # QuadImage only
+
+    # Determine which panel was clicked from cursor position
+    viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
+    viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
+    actualW = event.actualWindowWidth > 0 ? Float64(event.actualWindowWidth) : viewportW
+    actualH = event.actualWindowHeight > 0 ? Float64(event.actualWindowHeight) : viewportH
+
+    clickedPanel = if quadZoomState.isZoomed
+        quadZoomState.zoomedPanel  # when zoomed, always target the zoomed panel
+    else
+        glY = ((actualH - event.y) * 2.0 / viewportH) - 1.0
+        topVerts = mainStates[1].calcDimsStruct.mainImageQuadVert
+        botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
+        glMidY = (Float64(min(topVerts[10], topVerts[18])) + Float64(max(botVerts[2], botVerts[26]))) / 2.0
+        if event.x < actualW / 2.0 && glY > glMidY; 1
+        elseif event.x >= actualW / 2.0 && glY > glMidY; 2
+        elseif event.x < actualW / 2.0 && glY <= glMidY; 3
+        else; 4
+        end
+    end
+
+    if !quadZoomState.isZoomed
+        @info "DOUBLE-CLICK ZOOM IN: panel=$clickedPanel"
+        quadZoomState.savedVerts = [copy(s.calcDimsStruct.mainImageQuadVert) for s in mainStates]
+        quadZoomState.savedVertSizes = [s.calcDimsStruct.mainQuadVertSize for s in mainStates]
+        quadZoomState.zoomedPanel = clickedPanel
+        quadZoomState.isZoomed = true
+
+        zoomedCalcDim = getMainVerticies(mainStates[clickedPanel].calcDimsStruct, SingleImage, 1)
+        mainStates[clickedPanel].calcDimsStruct = setproperties(
+            mainStates[clickedPanel].calcDimsStruct,
+            (mainImageQuadVert = zoomedCalcDim.mainImageQuadVert,
+             mainQuadVertSize  = zoomedCalcDim.mainQuadVertSize))
+
+        offscreen = Float32.([-10,-10,0,0,0,0,0,0, -10,-10,0,0,0,0,0,0,
+                               -10,-10,0,0,0,0,0,0, -10,-10,0,0,0,0,0,0])
+        for i in 1:4
+            if i != clickedPanel
+                mainStates[i].calcDimsStruct = setproperties(
+                    mainStates[i].calcDimsStruct,
+                    (mainImageQuadVert = offscreen,
+                     mainQuadVertSize  = sizeof(offscreen)))
+            end
+        end
+    else
+        @info "DOUBLE-CLICK ZOOM OUT: restoring 4-pane"
+        for i in 1:4
+            mainStates[i].calcDimsStruct = setproperties(
+                mainStates[i].calcDimsStruct,
+                (mainImageQuadVert = quadZoomState.savedVerts[i],
+                 mainQuadVertSize  = quadZoomState.savedVertSizes[i]))
+        end
+        quadZoomState.isZoomed = false
+    end
+end#reactToDoubleClick
 
 
 """
