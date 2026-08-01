@@ -22,7 +22,8 @@ on_next!(stateObjects::Vector{StateDataFields}, data::valueForMasToSetStruct) = 
 on_next!(stateObjects::Vector{StateDataFields}, data::FullScrollableDat) = setUpForScrollData(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SingleSliceDat) = updateSingleImagesDisplayedSetUp(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::Vector{MouseStruct}) = react_to_draw(data, stateObjects)
-on_next!(stateObjects::Vector{StateDataFields}, data::MouseStruct) = reactToMouseDrag(data, stateObjects) #needs modification , with the react_to_draw, data of vectorStruct (MoustStruct)
+on_next!(stateObjects::Vector{StateDataFields}, data::MouseStruct) = reactToMouseDrag(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::DoubleClickEvent) = reactToDoubleClick(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::KeyInputFields) = reactToKeyInput(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::DisplayedVoxels) = retrieveVoxelArray(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::CustomDisplayedVoxels) = depositVoxelArray(data, stateObjects)
@@ -553,7 +554,24 @@ function coordinateDisplay(
                 
                 # get the aggregation here, only when the type is mouseStruct.
                 if typeof(channelData) == MouseStruct
-                    if (channelData.isLeftButtonDown)
+                    # Coalesce rapid mouse movements: drain stale intermediate moves,
+                    # but never skip right-clicks (they must be processed).
+                    # DoubleClickEvent arrives as a distinct type, not via isDoubleClick flag.
+                    while !isempty(mainChannel) && typeof(fetch(mainChannel)) == MouseStruct
+                        peeked = fetch(mainChannel)
+                        # Stop draining if the next item is an action event (not just a move)
+                        if peeked.isRightButtonDown
+                            break
+                        end
+                        # Also stop if the current item is an action event
+                        if channelData.isRightButtonDown
+                            break
+                        end
+                        channelData = take!(mainChannel)  # discard stale move, keep latest
+                    end
+
+                    # Left-button drag aggregation for mask painting.
+                    if channelData.isLeftButtonDown
                         mouseStructAggregationArray::Vector{MouseStruct} = [channelData]
                         while !isempty(mainChannel) && typeof(fetch(mainChannel)) == MouseStruct
                             push!(mouseStructAggregationArray, take!(mainChannel))

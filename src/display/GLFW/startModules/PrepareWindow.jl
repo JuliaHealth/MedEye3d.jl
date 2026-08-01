@@ -130,9 +130,9 @@ function createPollingTask(window::GLFW.Window)
                 end
             end
         catch e
-            @debug "GLFW polling task terminated: $e"
+            @warn "GLFW polling task error: $e" exception=(e, catch_backtrace())
         finally
-            @debug "GLFW polling task ended"
+            @info "GLFW polling task ended"
         end
     end
     
