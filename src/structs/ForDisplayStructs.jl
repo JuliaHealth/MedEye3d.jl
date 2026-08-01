@@ -227,6 +227,8 @@ Holding necessery data to controll mouse interaction
   isLeftButtonDown::Bool = false # true if left button was pressed and not yet released
   isRightButtonDown::Bool = false# true if right button was pressed and not yet released
   lastCoordinates::Vector{CartesianIndex{2}} = [] # list of accumulated mouse coordinates
+  actualWindowWidth::Int = 0  # actual GLFW window content area width
+  actualWindowHeight::Int = 0  # actual GLFW window content area height
 end#MouseStruct
 
 
