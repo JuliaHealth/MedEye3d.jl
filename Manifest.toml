@@ -2105,7 +2105,7 @@ version = "0.5.8"
 
 [[deps.MedImages]]
 deps = ["Accessors", "Atomix", "BenchmarkTools", "CSV", "CUDA", "ChainRulesCore", "ColorTypes", "Combinatorics", "ComponentArrays", "CoordinateTransformations", "DataFrames", "Dates", "Dictionaries", "DifferentialEquations", "Documenter", "DocumenterVitepress", "Enzyme", "FiniteDifferences", "Flux", "ForwardDiff", "Functors", "HDF5", "ImageTransformations", "Interpolations", "JLD", "JSON", "KernelAbstractions", "LinearAlgebra", "Lux", "LuxCUDA", "MPI", "NIfTI", "NNlib", "Optimisers", "Optimization", "OptimizationOptimJL", "OptimizationOptimisers", "OrdinaryDiffEq", "Parameters", "ProgressMeter", "PyCall", "Random", "Rotations", "SciMLSensitivity", "Setfield", "StaticArrays", "Statistics", "Tracker", "UUIDs", "Zygote"]
-git-tree-sha1 = "435b55a9c4a05280e7596794d6a94fb606382b04"
+git-tree-sha1 = "c2b51ded1d2f7f8900893a79a7759863a88420f2"
 repo-rev = "main"
 repo-url = "https://github.com/JuliaHealth/MedImages.jl.git"
 uuid = "fbff095b-7891-4fc4-b5e5-3cd99b9dd225"
