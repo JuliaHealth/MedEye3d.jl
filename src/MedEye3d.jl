@@ -25,6 +25,9 @@ include(joinpath("display", "GLFW", "startModules", "ModernGlUtil.jl"))
 include(joinpath("structs", "BasicStructs.jl"))
 include(joinpath("structs", "DataStructs.jl"))
 include(joinpath("structs", "ForDisplayStructs.jl"))
+include(joinpath("structs", "MakieEvents.jl"))
+using .MakieEvents
+export MakieEvents
 include(joinpath("structs", "distinctColorsSaved.jl"))
 
 include(joinpath("display", "GLFW", "DispUtils", "StructsManag.jl"))
@@ -57,11 +60,15 @@ include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","ChangeP
 include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","ReactToKeyboard.jl") )
 
 include(joinpath("display", "reactingToMouseKeyboard", "ReactingToInput.jl"))
+include(joinpath("display", "InferenceClient.jl"))
+using .InferenceClient
+include(joinpath("display", "LesionAssociation.jl"))
+using .LesionAssociation
 include(joinpath("higherAbstractions", "DisplayDataManag.jl"))
 include(joinpath("display", "GLFW", "SegmentationDisplay.jl"))
 #include(joinpath("higherAbstractions", "visualizationFromHdf5.jl"))
 include(joinpath("display", "LesionMetadataWindow.jl"))
-
+include(joinpath("display", "HeuristicsEngine.jl"))
 
 #checking weather we have some interactive thread reserved
 if (VERSION < v"1.8")

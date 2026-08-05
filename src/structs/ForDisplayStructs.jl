@@ -6,6 +6,9 @@ export DoubleClickEvent
 using ColorTypes, Parameters, Observables, ModernGL, GLFW, Dictionaries, FreeTypeAbstraction, Observables
 using ..DataStructs
 
+struct ToggleSyncScroll end
+export ToggleSyncScroll
+
 
 """
 Display mode of the visualizer : SingleImage or MultiImage
@@ -145,6 +148,7 @@ windowControlStruct::WindowControlStruct=WindowControlStruct()# holding data use
   windowControlStruct::WindowControlStruct = WindowControlStruct()# holding data usefull to controll display window
   isFastScroll::Bool = false # set by f letter to true and by s to normal - slow
   imagePos::Int64 = 1
+  isSyncScrollOn::Bool = true # toggled by pressing c
 end
 
 
@@ -213,6 +217,7 @@ mostRecentAction ::GLFW.Action= GLFW.RELEASE
   isZPressed::Bool = false
   isFPressed::Bool = false
   isSPressed::Bool = false
+  isCPressed::Bool = false
   lastKeysPressed::Vector{String} = [] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
   #informations about what triggered sending this particular struct to the  actor
   mostRecentScanCode::Int32 = Int32(GLFW.KEY_KP_4)

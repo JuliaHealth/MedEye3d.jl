@@ -57,9 +57,9 @@ $( createCustomFramgentShader(listOfTexturesToCreate, color))
 """
 
 # For debugging shaders
-  # for line in eachline(IOBuffer(fsh))
-     # println(line)
-  # end
+  for (idx, line) in enumerate(eachline(IOBuffer(fsh)))
+     println(idx, ": ", line)
+  end
   return createShader(fsh, GL_FRAGMENT_SHADER)
 end
 

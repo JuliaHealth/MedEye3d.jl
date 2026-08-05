@@ -251,8 +251,8 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
     hc = heightCorr / 2.0
     
     # Global scale and shift to avoid top app bar
-    scale = 0.90f0
-    yOffset = -0.10f0
+    scale = 1.0f0
+    yOffset = 0.0f0
     
     # y coordinates (indices: 2=top right, 10=bottom right, 18=bottom left, 26=top left)
     if imagePos == 1 || imagePos == 2 # Top half (Y from 0.0 to 1.0)

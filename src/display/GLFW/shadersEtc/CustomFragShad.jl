@@ -134,46 +134,72 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
     masksInfluences = map(x -> setMaskInfluence(x), textures) |>
                       (strings) -> join(strings, "")
 
-    sumColors = map(letter ->
-            map(x -> "  (changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.$(letter), $(x.name)ValueRange) * $(x.name)isVisible * $(x.isMainImage ? "1.0" : "$(x.name)maskContribution * float(abs($(x.name)Res) > 0.00001)")) ", texturesNotCont) |>
-            (strings) -> join(strings, " + "), ["r", "g", "b"])
-
-    sumColorR = sumColors[1]
-    sumColorG = sumColors[2]
-    sumColorB = sumColors[3]
-    
-    sumColorRCont = map(x -> "(r$(x.name)getColorForMultiColor($(x.name)Res) * $(x.name)isVisible * $(x.isMainImage ? "1.0" : "$(x.name)maskContribution * float(abs($(x.name)Res) > 0.00001)"))", texturesCont) |>
-                    (strings) -> join(strings, " + ")
-    sumColorGCont = map(x -> "(g$(x.name)getColorForMultiColor($(x.name)Res) * $(x.name)isVisible * $(x.isMainImage ? "1.0" : "$(x.name)maskContribution * float(abs($(x.name)Res) > 0.00001)"))", texturesCont) |>
-                    (strings) -> join(strings, " + ")
-    sumColorBCont = map(x -> "(b$(x.name)getColorForMultiColor($(x.name)Res) * $(x.name)isVisible * $(x.isMainImage ? "1.0" : "$(x.name)maskContribution * float(abs($(x.name)Res) > 0.00001)"))", texturesCont) |>
+    # Construct the shader using proper alpha blending for masks
+    isVisibleList = map(x -> x.isMainImage ? "$(x.name)isVisible" : "0.0", textures) |>
                     (strings) -> join(strings, " + ")
 
-    # Fix empty string handling
-    if isempty(sumColorRCont)
-        sumColorRCont = "0.0"
-        sumColorGCont = "0.0"
-        sumColorBCont = "0.0"
+    mainR = map(x -> x.isMainImage ? "changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.r, $(x.name)ValueRange) * $(x.name)isVisible" : "", texturesNotCont) |> filter(x -> !isempty(x)) |> (strings) -> join(strings, " + ")
+    mainG = map(x -> x.isMainImage ? "changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.g, $(x.name)ValueRange) * $(x.name)isVisible" : "", texturesNotCont) |> filter(x -> !isempty(x)) |> (strings) -> join(strings, " + ")
+    mainB = map(x -> x.isMainImage ? "changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.b, $(x.name)ValueRange) * $(x.name)isVisible" : "", texturesNotCont) |> filter(x -> !isempty(x)) |> (strings) -> join(strings, " + ")
+
+    if isempty(mainR)
+        mainR = "0.0"
+        mainG = "0.0"
+        mainB = "0.0"
     end
     
-    if isempty(sumColorR)
-        sumColorR = "0.0"
-        sumColorG = "0.0"
-        sumColorB = "0.0"
+    # Create the string for applying masks over the main color
+    maskApplyCode = ""
+    for x in texturesNotCont
+        if !x.isMainImage
+            maskApplyCode *= """
+                if ($(x.name)isVisible == 1 && abs($(x.name)Res) > 0.00001) {
+                    float alpha = $(x.name)maskContribution * (abs($(x.name)Res) > 0.00001 ? 1.0 : 0.0);
+                    // Use a higher alpha if it's the active lesion mask
+                    if ($(x.name)minValue == $(x.name)maxValue && $(x.name)Res >= $(x.name)minValue) {
+                        alpha = 1.0;
+                    } else if (alpha > 0.0) {
+                        alpha = clamp(alpha * 2.0, 0.5, 1.0); // Boost visibility
+                    }
+                    vec3 maskColor = vec3(
+                        changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.r, $(x.name)ValueRange),
+                        changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.g, $(x.name)ValueRange),
+                        changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.b, $(x.name)ValueRange)
+                    );
+                    if (maskColor != vec3(0.0)) {
+                        baseColor = mix(baseColor, maskColor, alpha);
+                    }
+                }
+            """
+        end
     end
-
-    isVisibleList = map(x -> x.isMainImage ? "$(x.name)isVisible" : "(abs($(x.name)Res) > 0.00001 ? $(x.name)isVisible * $(x.name)maskContribution : 0.0)", textures) |>
-                    (strings) -> join(strings, " + ")
-
-    # ALWAYS process textures properly - remove hardcoded colors
+    
+    for x in texturesCont
+        if !x.isMainImage
+            maskApplyCode *= """
+                if ($(x.name)isVisible == 1 && abs($(x.name)Res) > 0.00001) {
+                    float alpha = $(x.name)maskContribution;
+                    alpha = clamp(alpha * 2.0, 0.5, 1.0); // Boost visibility
+                    vec3 maskColor = vec3(
+                        r$(x.name)getColorForMultiColor($(x.name)Res),
+                        g$(x.name)getColorForMultiColor($(x.name)Res),
+                        b$(x.name)getColorForMultiColor($(x.name)Res)
+                    );
+                    if (maskColor != vec3(0.0)) {
+                        baseColor = mix(baseColor, maskColor, alpha);
+                    }
+                }
+            """
+        end
+    end
     return """
-    float changeClip(float min, float max, float value, float color, float range) {
-        if (value <= min) {
+    float changeClip(float minVal, float maxVal, float value, float color, float range) {
+        if (value < minVal) {
             return 0.0;
-        } else if (value >= max) {
+        } else if (value >= maxVal) {
             return color;
         } else {
-            return color * ((value - min) / range);
+            return color * ((value - minVal) / max(range, 0.001));
         }
     }
     $(getMultiColorMaskFunctions(texturesCont))
@@ -183,13 +209,17 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
 
         float todiv = max($(isVisibleList), 0.001); // Prevent division by zero
         
-        // Always process the actual texture data
-        FragColor = vec4(
-            ($(sumColorR) + $(sumColorRCont)) / todiv,
-            ($(sumColorG) + $(sumColorGCont)) / todiv,
-            ($(sumColorB) + $(sumColorBCont)) / todiv,
-            1.0
+        // Base color from main image
+        vec3 baseColor = vec3(
+            ($(mainR)) / todiv,
+            ($(mainG)) / todiv,
+            ($(mainB)) / todiv
         );
+        
+        // Apply masks
+        $(maskApplyCode)
+
+        FragColor = vec4(baseColor, 1.0);
     }
     """
 end

@@ -102,6 +102,44 @@ end
         #     func = () -> reactToScroll(old -= scrollNumb, mainState, false)
         #     addToforUndoVector(mainState, func)
         # end
+        
+        # Multiview synchronization
+        if length(mainStates) > 1 && mainState.mainForDisplayObjects.isSyncScrollOn
+            for panelIdx in 1:length(mainStates)
+                if panelIdx != mainStates[1].switchIndex
+                    panelState = mainStates[panelIdx]
+                    targetDim = panelState.onScrollData.dataToScrollDims.dimensionToScroll
+                    targetSlice = locArr[targetDim]
+                    
+                    if targetSlice != panelState.currentDisplayedSlice || panelState.currentlyDispDat === nothing
+                        # clamp
+                        lastSlice = panelState.onScrollData.slicesNumber
+                        newSlice = clamp(targetSlice, 1, lastSlice)
+                        
+                        # update texture data (singleSlDat logic duplicated manually)
+                        singleSlDatSync = panelState.onScrollData.dataToScroll |>
+                            (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(newSlice), panelState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
+                            (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=newSlice, textToDisp=getTextForCurrentSlice(panelState.onScrollData, Int32(newSlice)))
+                        
+                        panelState.currentlyDispDat = singleSlDatSync
+                        panelState.currentDisplayedSlice = newSlice
+                        panelState.isSliceChanged = true
+                        
+                        # upload textures to GPU without SwapBuffers
+                        for updateDat in singleSlDatSync.listOfDataAndImageNames
+                            findList = findall((texSpec) -> texSpec.name == updateDat.name, panelState.mainForDisplayObjects.listOfTextSpecifications)
+                            if !isempty(findList)
+                                texSpec = panelState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
+                                updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, panelState.calcDimsStruct.imageTextureWidth, panelState.calcDimsStruct.imageTextureHeight)
+                            end
+                        end
+                        
+                        # also update panelState.lastRecordedMousePosition to keep them in sync
+                        panelState.lastRecordedMousePosition = CartesianIndex(locArr[1], locArr[2], locArr[3])
+                    end
+                end
+            end
+        end
 
     end#if
 
