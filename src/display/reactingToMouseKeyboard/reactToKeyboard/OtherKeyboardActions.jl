@@ -67,4 +67,12 @@ function processKeysInfo(annot::Identity{AnnotationStruct}, stateObject::StateDa
 
 end#processKeysInfo
 
+"""
+Toggle cross-sync scrolling behavior
+"""
+function processKeysInfo(annot::Identity{ToggleSyncScroll}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true)
+    stateObject.mainForDisplayObjects.isSyncScrollOn = !stateObject.mainForDisplayObjects.isSyncScrollOn
+    @info "Synchronized scrolling in multi-view is now: " stateObject.mainForDisplayObjects.isSyncScrollOn
+end#processKeysInfo
+
 end#OtherKeyboardActions

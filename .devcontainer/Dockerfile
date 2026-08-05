@@ -105,7 +105,7 @@ RUN apt-get update -q -y && \
         apt-get install -q -y --reinstall ca-certificates
 
 RUN python3 -m pip install --no-cache-dir \
-    gdown==3.3.1 monai==1.3.0
+    gdown==3.3.1 monai==1.3.0 nibabel torch
 
 RUN apt-get install --yes --no-install-recommends wget build-essential libcurl4 && \
     wget https://curl.se/download/curl-7.81.0.tar.gz && \

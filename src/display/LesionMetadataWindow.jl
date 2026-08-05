@@ -1,176 +1,816 @@
+"""
+LesionMetadataWindow — Julia port of the Slicer Lesion Text Extension annotation panel.
+
+Architecture:
+  - Reads annotation schema from extension/data/def.json  (20 questions, matches Python source)
+  - Reads RadLex ontology from extension/data/RadLex.csv  (~45k terms, cached to 2000 for performance)
+  - Renders a GLMakie Figure with per-question comboboxes (Menu) or textboxes
+  - Persists annotations as JSON in ~/medeye3d_lesion_annotations.json
+  - Exposes Observables for integration with the MedEye3d GLFW viewer channel
+
+Usage:
+    win = LesionMetadataWindow.create_metadata_window(
+        active_lesion_id,   # Observable{String}
+        lesion_ids,         # Observable{Vector{String}}
+        ui_hooks            # Dict{Symbol,Observable}
+    )
+
+ui_hooks keys:
+    :scroll      => Observable{Int}           — set ±1 to scroll a slice
+    :windowing   => Observable{Tuple{Float32,Float32}} — (min,max) CT window
+    :paint_val   => Observable{Int}           — 1=paint 0=erase
+    :sync_lesion => Observable{Bool}          — trigger lesion sync
+"""
 module LesionMetadataWindow
 
 using GLMakie
 using Observables
+using JSON
+using HDF5
+using Dates
+using Dates
+using ..MakieEvents
 
-export create_metadata_window
+abstract type DBMessage end
+struct SaveDBMessage <: DBMessage
+    db::Dict
+    global_app_state::Dict
+    path_json::String
+    path_hdf5::String
+end
+struct LoadDBMessage <: DBMessage
+    path_json::String
+    reply_channel::Channel{Dict}
+end
 
-const CATEGORIES = ["Bone Meta", "Lymph Node Meta", "Prostate", "Organ Meta"]
-const MANAGEMENT = ["Monitor", "Next study in 1 month", "Next study in 2 months", "Next study in 6 months", "Next study in 13 months", "Next study in 18 months", "Next study in 24 months", "Next study in 36 months", "FDG PET CT", "MRI", "Contrast CT", "Biopsy", "None"]
-const SUV_Q = ["SUV max < liver", "SUV max > liver", "SUV max = liver", "Unspecified bone uptake"]
-const INSIDE = ["Sclerotic/Blastic/Ivory (>1000 HU)", "Lytic/Lucent", "Mixed Lytic & Sclerotic", "Ground-Glass / Fibrous (70-130 HU)", "Fluid-Filled/Cystic (Water Density)", "Fat Density / Trapped Fat", "Central Necrosis (Low Density)"]
-const BORDERS = ["Smooth / Well-Defined Margins", "Spiculated / Feathered", "Moth-Eaten", "Reactive Sclerotic Rim", "Ill-Defined / Permeative", "Serpiginous (Snake-like) Margin", "Overhanging Edges (Apple Core)"]
-const AROUND_A = ["Infiltrative (Replaces Marrow Fat)", "Non-Infiltrative (Spares Marrow Fat)"]
-const AROUND_B = ["None", "Thick / Solid Reaction (Callus)", "Aggressive / Sunburst / Spiculated", "Codman Triangle"]
-const AROUND_C = ["Cortical Breakthrough", "Soft-Tissue Edema (Halo Sign)", "Perivesical Fat Stranding", "Direct Bladder/Rectal Infiltration", "Dural Tail Sign", "Vacuum Cleft Sign"]
-const SHAPES = ["Oval / Bean-Shaped", "Round", "Teardrop / Comma-Shaped", "Parallel to the Long Axis of Bone", "Horizontal"]
+export create_metadata_window, load_annotations, save_annotations
 
-function create_metadata_window(active_lesion_id::Observable{String}, ui_hooks::Dict{Symbol, Observable})
-    fig = Figure(resolution = (800, 1000), backgroundcolor = :white)
+# ─── Paths ────────────────────────────────────────────────────────────────────
+const _PKG_ROOT      = joinpath(@__DIR__, "..", "..", "extension", "data")
+const DEF_JSON_PATH  = joinpath(_PKG_ROOT, "def.json")
+const RADLEX_CSV_PATH= joinpath(_PKG_ROOT, "RadLex.csv")
+const DEFAULT_SAVE_PATH = joinpath(homedir(), "medeye3d_lesion_annotations.json")
+const DEFAULT_HDF5_PATH = joinpath(homedir(), "medeye3d_lesion_annotations.h5")
 
-    # Main Layout
-    gl = GridLayout(fig[1, 1], alignmode = Outside(10))
+# ─── Schema ───────────────────────────────────────────────────────────────────
+struct QuestionDef
+    short::String
+    full::String
+    options::Vector{String}
+    categories::Vector{String}
+    mode::String
+    default_answer::String
+end
 
-    Label(gl[1, 1:3], "Slicer Lesion Text Extension (Julia Port)", textsize = 24, font = "bold", halign = :center)
+const _schema_cache = Ref{Vector{QuestionDef}}(QuestionDef[])
 
-    row = 2
-    # Viewport & Windowing Panel
-    Label(gl[row, 1:3], "Viewport Controls", font="bold")
-    row += 1
-    btn_prev_slice = Button(gl[row, 1], label="<< Prev Slice")
-    btn_next_slice = Button(gl[row, 2], label="Next Slice >>")
-    btn_toggle_lesion = Button(gl[row, 3], label="Toggle Lesion")
-    on(btn_prev_slice.clicks) do _ ui_hooks[:scroll][] = -1 end
-    on(btn_next_slice.clicks) do _ ui_hooks[:scroll][] = 1 end
+function load_schema()::Vector{QuestionDef}
+    isempty(_schema_cache[]) || return _schema_cache[]
+    if !isfile(DEF_JSON_PATH)
+        @warn "def.json not found at $(DEF_JSON_PATH) — using built-in fallback schema"
+        _schema_cache[] = _builtin_schema()
+        return _schema_cache[]
+    end
+    raw = JSON.parse(read(DEF_JSON_PATH, String))
+    result = QuestionDef[]
+    for q in raw
+        # JSON.parse returns String keys
+        short_q = get(q, "short q", get(q, "short_q", ""))
+        opts = String[string(s) for s in get(q, "allowed_answer", Any[])]
+        cats = String[string(c) for c in get(q, "category",       Any[])]
+        push!(result, QuestionDef(
+            string(short_q),
+            string(get(q, "full", "")),
+            opts,
+            cats,
+            string(get(q, "meta_or_prostate", "both")),
+            string(get(q, "default_answer", ""))
+        ))
+    end
+    _schema_cache[] = result
+    return result
+end
 
-    row += 1
-    btn_axial = Button(gl[row, 1], label="Axial")
-    btn_coronal = Button(gl[row, 2], label="Coronal")
-    btn_sagittal = Button(gl[row, 3], label="Sagittal")
+function _builtin_schema()
+    [
+        QuestionDef("Radioligand Type","Radioligand used",
+            ["68Ga-PSMA-11","18F-PSMA-1007","18F-DCFPyL","Other"],
+            ["Technical Parameters"],"both","68Ga-PSMA-11"),
+        QuestionDef("Lesion tracking name?","Anatomical descriptor",
+            String[],["Identification"],"both",""),
+        QuestionDef("Anatomic Location","Primary anatomical site",
+            ["Prostate Gland","Axial Skeleton","Appendicular Skeleton",
+             "Pelvic Lymph Node","Distant Lymph Node","Solid Organ / Viscera",
+             "General Soft Tissue","Blood Vessel","Other"],
+            ["Location"],"both",""),
+        QuestionDef("Inner Texture / Density / Attenuation","Internal density",
+            ["Sclerotic / Blastic","Lytic / Lucent","Mixed Lytic & Sclerotic",
+             "Ground-Glass / Fibrous","Fluid-Filled / Cystic","Fat Density","Central Necrosis"],
+            ["Morphology"],"both",""),
+        QuestionDef("Border and Margin","Margin character",
+            ["Smooth / Well-Defined","Spiculated / Feathered","Moth-Eaten",
+             "Ill-Defined / Permeative","Reactive Sclerotic Rim"],
+            ["Morphology"],"both",""),
+        QuestionDef("Lesion Shape","3D morphology",
+            ["Oval / Bean-Shaped","Round","Teardrop","Lobulated","Irregular"],
+            ["Morphology"],"both",""),
+        QuestionDef("Certainty","Diagnostic certainty",
+            ["High (>90%)","Medium (50-90%)","Low (<50%)"],
+            ["Final Assessment"],"both",""),
+        QuestionDef("Comment","Free-text comment",String[],["Reporting"],"both",""),
+    ]
+end
 
-    row += 1
-    Label(gl[row, 1:3], "CT Window Presets", font="bold")
-    row += 1
-    btn_soft_tissue = Button(gl[row, 1], label="Soft Tissue")
-    btn_bone = Button(gl[row, 2], label="Bone")
-    btn_lung = Button(gl[row, 3], label="Lung")
-    
-    # Soft Tissue (W:400, L:40) -> Min: -160, Max: 240
-    on(btn_soft_tissue.clicks) do _ ui_hooks[:windowing][] = (-160.0f0, 240.0f0) end
-    # Bone (W:1500, L:300) -> Min: -450, Max: 1050
-    on(btn_bone.clicks) do _ ui_hooks[:windowing][] = (-450.0f0, 1050.0f0) end
-    # Lung (W:1500, L:-600) -> Min: -1350, Max: 150
-    on(btn_lung.clicks) do _ ui_hooks[:windowing][] = (-1350.0f0, 150.0f0) end
+# ─── RadLex ──────────────────────────────────────────────────────────────────
+const _radlex_cache = Ref{Vector{String}}(String[])
+const RADLEX_MAX_TERMS = 2000
 
-    row += 1
-    Label(gl[row, 1:3], "Segmentation Mini Manager", font="bold")
-    row += 1
-    btn_add_auto = Button(gl[row, 1], label="Add Auto-PET")
-    btn_gen_manual = Button(gl[row, 2], label="Gen Manual")
-    btn_sync = Button(gl[row, 3], label="Sync Lesion")
-    on(btn_sync.clicks) do _ ui_hooks[:sync_lesion][] = true end
-
-    row += 1
-    btn_paint = Button(gl[row, 1], label="Paint")
-    btn_erase = Button(gl[row, 2], label="Erase")
-    on(btn_paint.clicks) do _ ui_hooks[:paint_val][] = 1 end
-    on(btn_erase.clicks) do _ ui_hooks[:paint_val][] = 0 end
-
-    row += 1
-    Label(gl[row, 1], "Active Lesion ID:", font="bold", halign=:right)
-    Label(gl[row, 2], @lift(string($active_lesion_id)), halign=:left)
-
-    row += 1
-    # Dropdowns for metadata
-    Label(gl[row, 1], "Category:", halign=:right)
-    menu_category = Menu(gl[row, 2], options = CATEGORIES)
-
-    row += 1
-    Label(gl[row, 1], "Management:", halign=:right)
-    menu_management = Menu(gl[row, 2], options = MANAGEMENT)
-
-    row += 1
-    Label(gl[row, 1], "SUV Q:", halign=:right)
-    menu_suvq = Menu(gl[row, 2], options = SUV_Q)
-
-    row += 1
-    Label(gl[row, 1], "Inside (Matrix/Density):", halign=:right)
-    menu_inside = Menu(gl[row, 2], options = INSIDE)
-
-    row += 1
-    Label(gl[row, 1], "Borders (Margins):", halign=:right)
-    menu_borders = Menu(gl[row, 2], options = BORDERS)
-
-    row += 1
-    Label(gl[row, 1], "Around A (Marrow):", halign=:right)
-    menu_around_a = Menu(gl[row, 2], options = AROUND_A)
-
-    row += 1
-    Label(gl[row, 1], "Around B (Periosteum):", halign=:right)
-    menu_around_b = Menu(gl[row, 2], options = AROUND_B)
-
-    row += 1
-    Label(gl[row, 1], "Around C (Extramural):", halign=:right)
-    menu_around_c = Menu(gl[row, 2], options = AROUND_C)
-
-    row += 1
-    Label(gl[row, 1], "Shape:", halign=:right)
-    menu_shape = Menu(gl[row, 2], options = SHAPES)
-
-    row += 1
-    Label(gl[row, 1], "Other (RadLex):", halign=:right)
-    textbox_radlex = Textbox(gl[row, 2], placeholder = "e.g., RID5961 - Sclerotic")
-
-    row += 1
-    # Save button
-    save_button = Button(gl[row, 1:2], label = "Save Metadata to Memory")
-    
-    row += 1
-    # Textbox for AI Radiological Report Output
-    Label(gl[row, 1:2], "Radiological Report Output:", font="bold", halign=:left)
-    row += 1
-    report_output = Textbox(gl[row, 1:2], width = 600, height = 150, text = "Click Generate to create report...")
-    row += 1
-    generate_button = Button(gl[row, 1:2], label = "Generate Report (Mock AI)")
-
-    # Example interactions / data storage dict (In reality this maps to MRML/Segments)
-    lesion_db = Dict{String, Dict{String, Any}}()
-
-    # Callback when Active Lesion Changes
-    on(active_lesion_id) do id
-        if !haskey(lesion_db, id)
-            lesion_db[id] = Dict{String, Any}()
+function load_radlex()::Vector{String}
+    isempty(_radlex_cache[]) || return _radlex_cache[]
+    terms = String[]
+    if isfile(RADLEX_CSV_PATH)
+        for (i, line) in enumerate(eachline(RADLEX_CSV_PATH))
+            i == 1 && continue   # skip header
+            parts = split(line, ','; limit = 4)
+            length(parts) >= 2 || continue
+            rid   = strip(parts[1])
+            label = strip(parts[2])
+            (isempty(rid) || isempty(label)) && continue
+            push!(terms, "$(rid) - $(label)")
+            length(terms) >= RADLEX_MAX_TERMS && break
         end
-        # Load from DB
-        data = lesion_db[id]
-        menu_category.selection[] = get(data, "Category", nothing)
-        menu_management.selection[] = get(data, "Management", nothing)
-        menu_suvq.selection[] = get(data, "SUV Q", nothing)
-        menu_inside.selection[] = get(data, "Inside", nothing)
-        menu_borders.selection[] = get(data, "Borders", nothing)
-        menu_around_a.selection[] = get(data, "Around A", nothing)
-        menu_around_b.selection[] = get(data, "Around B", nothing)
-        menu_around_c.selection[] = get(data, "Around C", nothing)
-        menu_shape.selection[] = get(data, "Shape", nothing)
-        textbox_radlex.stored_string[] = get(data, "Other", "")
+        @info "Loaded $(length(terms)) RadLex terms"
+    else
+        @warn "RadLex CSV not found at $(RADLEX_CSV_PATH)"
+    end
+    _radlex_cache[] = sort(terms)
+    return _radlex_cache[]
+end
+
+# ─── Persistence ─────────────────────────────────────────────────────────────
+function load_annotations(path::String = DEFAULT_SAVE_PATH)::Dict{String,Dict{String,Any}}
+    isfile(path) || return Dict{String,Dict{String,Any}}()
+    try
+        raw = JSON.parse(read(path, String))
+        out = Dict{String,Dict{String,Any}}()
+        for (k, v) in raw
+            if v isa AbstractDict
+                inner = Dict{String,Any}()
+                for (ik, iv) in v
+                    inner[string(ik)] = iv
+                end
+                out[string(k)] = inner
+            end
+        end
+        return out
+    catch e
+        @warn "Cannot load annotations from $(path): $(e)"
+        return Dict{String,Dict{String,Any}}()
+    end
+end
+
+function save_annotations_hdf5(db::Dict, path::String=DEFAULT_HDF5_PATH)
+    try
+        h5open(path, "w") do file
+            for (id, lesion_data) in db
+                g = create_group(file, string(id))
+                for (k, v) in lesion_data
+                    write(g, string(k), string(v))
+                end
+            end
+        end
+        @info "Annotations saved to HDF5 → $path"
+    catch e
+        @error "Failed to save annotations to HDF5" exception=(e, catch_backtrace())
+    end
+end
+
+function save_annotations(db::Dict,
+                          path::String = DEFAULT_SAVE_PATH)
+    try
+        open(path, "w") do io
+            JSON.print(io, db, 2)
+        end
+        @info "Annotations saved → $(path)  ($(length(db)) lesions)"
+    catch e
+        @warn "Cannot save annotations: $(e)"
+    end
+end
+
+# ─── UI helpers ──────────────────────────────────────────────────────────────
+function all_categories(schema::Vector{QuestionDef})::Vector{String}
+    cats = Set{String}()
+    for q in schema, c in q.categories; push!(cats, c) end
+    result = sort(collect(cats))
+    pushfirst!(result, "All")
+    return result
+end
+
+# ─── Main window ─────────────────────────────────────────────────────────────
+function create_metadata_window(
+        active_lesion_id::Observable{String},
+        lesion_ids::Observable{Vector{String}},
+        channel::Base.Channel;
+        save_path::String = DEFAULT_SAVE_PATH,
+        ui_hooks::Dict{Symbol, Observable} = Dict{Symbol, Observable}())
+
+    schema   = load_schema()
+    radlex   = load_radlex()
+    all_cats = all_categories(schema)
+
+    # In-memory DB
+    lesion_db = Observable{Dict}(Dict{String,Dict{String,Any}}())
+
+    db_channel = Channel{Any}(32)
+    @async begin
+        for msg in db_channel
+            if msg isa SaveDBMessage
+                try
+                    db_to_save = copy(msg.db)
+                    db_to_save["_GlobalAppState"] = msg.global_app_state
+                    save_annotations(db_to_save, msg.path_json)
+                    save_annotations_hdf5(msg.db, msg.path_hdf5)
+                catch e
+                    @warn "Database save failed" e
+                end
+            elseif msg isa LoadDBMessage
+                try
+                    db = load_annotations(msg.path_json)
+                    put!(msg.reply_channel, db)
+                catch e
+                    @warn "Database load failed" e
+                    put!(msg.reply_channel, Dict{String,Dict{String,Any}}())
+                end
+            end
+        end
+    end
+    
+    # Load initial db asynchronously
+    @async begin
+        reply = Channel{Dict}(1)
+        put!(db_channel, LoadDBMessage(save_path, reply))
+        lesion_db[] = take!(reply)
     end
 
-    # Callback for Save button
-    on(save_button.clicks) do _
-        id = active_lesion_id[]
-        lesion_db[id] = Dict(
-            "Category" => menu_category.selection[],
-            "Management" => menu_management.selection[],
-            "SUV Q" => menu_suvq.selection[],
-            "Inside" => menu_inside.selection[],
-            "Borders" => menu_borders.selection[],
-            "Around A" => menu_around_a.selection[],
-            "Around B" => menu_around_b.selection[],
-            "Around C" => menu_around_c.selection[],
-            "Shape" => menu_shape.selection[],
-            "Other" => textbox_radlex.stored_string[]
-        )
-        println("Saved metadata for lesion \$id")
+    # ── Theme ──────────────────────────────────────────────────────────────
+    BG      = RGBf(0.10, 0.12, 0.15)
+    BG_PNL  = RGBf(0.13, 0.15, 0.19)
+    ACCENT  = RGBf(0.20, 0.60, 1.00)
+    TXT     = :white
+    SUBTXT  = RGBf(0.70, 0.75, 0.80)
+    GRN     = RGBf(0.15, 0.45, 0.15)
+    RED_BTN = RGBf(0.50, 0.10, 0.10)
+    BLU_BTN = RGBf(0.20, 0.35, 0.60)
+
+    # ── Figure ──────────────────────────────────────────────────────────────
+    fig = Figure(size = (920, 1600), backgroundcolor = BG)
+    g   = GridLayout(fig[1,1], tellheight = false)
+    rowgap!(g, 3)
+    colgap!(g, 4)
+    r = [0]  # row counter as array for mutation in closures
+    nr!() = (r[1] += 1; r[1])
+
+    # ── Header ──────────────────────────────────────────────────────────────
+    Label(g[nr!(), 1:4], "Lesion Annotation Panel",
+        fontsize = 22, font = :bold, color = ACCENT, halign = :center, tellwidth = false)
+    Label(g[nr!(), 1:4],
+        "Julia port of Slicer Lesion Text Extension  |  $(length(schema)) annotation fields from def.json",
+        fontsize = 11, color = SUBTXT, halign = :center, tellwidth = false)
+
+    # ── Section helper ──────────────────────────────────────────────────────
+    function begin_section!(title)
+        is_open = Observable(true)
+        header_r = nr!()
+        btn = Button(g[header_r, 1:4], label = @lift($is_open ? "▼  $(title)" : "▶  $(title)"),
+            buttoncolor = BG, labelcolor = ACCENT, fontsize = 12, font = :bold, halign = :center)
+        
+        start_row = r[1] + 1
+        return (is_open, start_row, header_r, btn)
+    end
+    
+    function end_section!(sec_data)
+        is_open, start_row, header_r, btn = sec_data
+        end_row = r[1]
+        
+        on(btn.clicks) do _
+            is_open[] = !is_open[]
+            for i in start_row:end_row
+                if is_open[]
+                    rowsize!(g, i, Auto())
+                else
+                    rowsize!(g, i, Fixed(0))
+                end
+            end
+            
+            for c in g.content
+                if c.span.rows.start >= start_row && c.span.rows.stop <= end_row
+                    if hasproperty(c.content, :visible)
+                        c.content.visible[] = is_open[]
+                    end
+                end
+            end
+        end
     end
 
-    # Callback for Generate button
-    on(generate_button.clicks) do _
+    # ── Lesion Navigation ────────────────────────────────────────────────────
+    sec_nav = begin_section!("Lesion Navigation")
+    nav_r = nr!()
+    btn_prev = Button(g[nav_r, 1], label = "<< Prev",
+        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    les_menu = Menu(g[nav_r, 2:3],
+        options = @lift(isempty($lesion_ids) ? ["(none)"] : $lesion_ids),
+        fontsize = 11)
+    btn_next = Button(g[nav_r, 4], label = "Next >>",
+        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+
+    on(les_menu.selection) do sel
+        sel === nothing && return
+        s = string(sel)
+        s == active_lesion_id[] || (active_lesion_id[] = s)
+    end
+    on(active_lesion_id) do id
+        opts = lesion_ids[]
+        isempty(opts) && return
+        idx = findfirst(==(id), opts)
+        idx === nothing && return
+        les_menu.i_selected[] = idx
+    end
+    on(btn_prev.clicks) do _
+        opts = lesion_ids[]; isempty(opts) && return
+        idx = findfirst(==(active_lesion_id[]), opts)
+        idx === nothing && return
+        active_lesion_id[] = opts[max(1, idx-1)]
+    end
+    on(btn_next.clicks) do _
+        opts = lesion_ids[]; isempty(opts) && return
+        idx = findfirst(==(active_lesion_id[]), opts)
+        idx === nothing && return
+        active_lesion_id[] = opts[min(length(opts), idx+1)]
+    end
+
+    end_section!(sec_nav)
+
+    # ── Viewport Controls ────────────────────────────────────────────────────
+    sec_view = begin_section!("Viewport & Windowing")
+    
+    vc0_r = nr!()
+    btn_ax  = Button(g[vc0_r, 1], label = "Axial",    buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    btn_cor = Button(g[vc0_r, 2], label = "Coronal",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    btn_sag = Button(g[vc0_r, 3], label = "Sagittal", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    btn_cv  = Button(g[vc0_r, 4], label = "Compare",  buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 11)
+
+    on(btn_ax.clicks) do _; put!(channel, ChangePlaneEvent(:Axial)) end
+    on(btn_cor.clicks) do _; put!(channel, ChangePlaneEvent(:Coronal)) end
+    on(btn_sag.clicks) do _; put!(channel, ChangePlaneEvent(:Sagittal)) end
+    
+    cv_active = Ref(false)
+    on(btn_cv.clicks) do _
+        cv_active[] = !cv_active[]
+        btn_cv.buttoncolor[] = cv_active[] ? GRN : BLU_BTN
+        put!(channel, CompareTimePointsEvent(cv_active[]))
+    end
+
+    vc_r = nr!()
+    btn_ps = Button(g[vc_r, 1], label = "<< Slice",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    btn_ns = Button(g[vc_r, 2], label = "Slice >>",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    btn_pt = Button(g[vc_r, 3], label = "<< TP",     buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    btn_nt = Button(g[vc_r, 4], label = "TP >>",     buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    on(btn_ps.clicks) do _; put!(channel, Int64(-1)) end
+    on(btn_ns.clicks) do _; put!(channel, Int64(1)) end
+    on(btn_pt.clicks) do _; put!(channel, ChangeTimePointEvent(-1)) end
+    on(btn_nt.clicks) do _; put!(channel, ChangeTimePointEvent(1)) end
+
+    vc2_r = nr!()
+    btn_tl = Button(g[vc2_r, 1:2], label = "Toggle Lesion Overlay", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    btn_rf = Button(g[vc2_r, 3:4], label = "Refresh List",          buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    on(btn_tl.clicks) do _; put!(channel, ToggleLesionEvent()) end
+    on(btn_rf.clicks) do _; put!(channel, RefreshListEvent()) end
+
+    vc3_r = nr!()
+    btn_single = Button(g[vc3_r, 1:2], label = "Show Active Single", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    btn_all = Button(g[vc3_r, 3:4], label = "Show All Lesions",      buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    on(btn_single.clicks) do _
+        # extract lesion id integer safely
+        id_str = active_lesion_id[]
+        m = match(r"\d+", id_str)
+        if m !== nothing
+            put!(channel, ShowSingleLesionEvent(parse(Int, m.match)))
+        end
+    end
+    on(btn_all.clicks) do _
+        put!(channel, ShowSingleLesionEvent(0))
+    end
+
+    ct_r = nr!()
+    Label(g[ct_r, 1], "CT Preset:", fontsize = 11, color = SUBTXT, halign = :right)
+    btn_soft = Button(g[ct_r, 2], label = "Soft Tissue", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_bone = Button(g[ct_r, 3], label = "Bone",        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_lung = Button(g[ct_r, 4], label = "Lung",        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    on(btn_soft.clicks) do _; put!(channel, WindowingEvent(-160.0f0,  240.0f0)) end
+    on(btn_bone.clicks) do _; put!(channel, WindowingEvent(-450.0f0, 1050.0f0)) end
+    on(btn_lung.clicks) do _; put!(channel, WindowingEvent(-1350.0f0, 150.0f0)) end
+
+    end_section!(sec_view)
+
+    # ── Segmentation Mini Manager ────────────────────────────────────────────
+    sec_seg = begin_section!("Segmentation Mini Manager")
+    pe_r = nr!()
+    btn_paint = Button(g[pe_r, 1], label = "Paint", buttoncolor = GRN,   labelcolor = TXT, fontsize = 11)
+    btn_erase = Button(g[pe_r, 2], label = "Erase", buttoncolor = RED_BTN, labelcolor = TXT, fontsize = 11)
+    on(btn_paint.clicks) do _; put!(channel, PaintValEvent(1)) end
+    on(btn_erase.clicks) do _; put!(channel, PaintValEvent(0)) end
+
+    algo_r = nr!()
+    Label(g[algo_r, 1], "Algorithm:", halign=:left, fontsize=11, color=TXT)
+    algo_combo = Menu(g[algo_r, 2:4], options = ["HELPNet (AI)", "NNInteractive", "Traditional (PETTumor)"], default = "HELPNet (AI)", fontsize = 10)
+
+    btn_add_ai = Button(g[nr!(), 1:4], label = "Add Lesion (Auto-PET)", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    on(btn_add_ai.clicks) do _; put!(channel, AddAutoPetEvent(algo_combo.selection[])) end
+
+    ai_r = nr!()
+    btn_sync_ai = Button(g[ai_r, 1:2], label = "Sync Missing (Auto-PET)", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    btn_map_link = Button(g[nr!(), 1:4], label = "Map Link", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    on(btn_map_link.clicks) do _; put!(channel, MapLinkEvent(active_lesion_id[])) end
+    btn_gen_man = Button(g[ai_r, 3:4], label = "Gen Manual", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    on(btn_sync_ai.clicks) do _; put!(channel, SyncMissingEvent()) end
+    on(btn_gen_man.clicks) do _; put!(channel, GenManualEvent()) end
+
+    end_section!(sec_seg)
+
+    # ── Category Filter ──────────────────────────────────────────────────────
+    sec_fields = begin_section!("Annotation Fields")
+    cf_r = nr!()
+    Label(g[cf_r, 1], "Filter category:", fontsize = 11, color = SUBTXT, halign = :right)
+    cat_menu = Menu(g[cf_r, 2:4], options = all_cats, fontsize = 11)
+    active_cat = Observable("All")
+    on(cat_menu.selection) do sel; sel !== nothing && (active_cat[] = string(sel)) end
+
+    # ── Annotation Fields (one row per question) ──────────────────────────────
+    field_widgets = Dict{String, Any}()
+
+    for q in schema
+        q_r = nr!()
+        Label(g[q_r, 1], q.short * ":",
+            fontsize = 11, font = :bold, color = TXT,
+            halign = :right, tellwidth = false)
+
+        if isempty(q.options)
+            tb = Textbox(g[q_r, 2:4],
+                placeholder = isempty(q.default_answer) ? "..." : q.default_answer,
+                fontsize = 11)
+            field_widgets[q.short] = tb
+        else
+            opts_obs = Observable(String["- select -"; q.options])
+            m = Menu(g[q_r, 2:3], options = opts_obs, fontsize = 11)
+            field_widgets[q.short] = m
+            
+            btn_add_opt = Button(g[q_r, 4], label = "+", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=11)
+            
+            tb_new_row = nr!()
+            tb_new = Textbox(g[tb_new_row, 2:3], placeholder="Type new & press Enter...", fontsize=11)
+            rowsize!(g, tb_new_row, Fixed(0))
+            
+            tb_new_visible = Observable(false)
+            
+            on(btn_add_opt.clicks) do _
+                tb_new_visible[] = !tb_new_visible[]
+                if tb_new_visible[]
+                    rowsize!(g, tb_new_row, Auto())
+                    tb_new.stored_string[] = ""
+                else
+                    rowsize!(g, tb_new_row, Fixed(0))
+                end
+            end
+            
+            on(tb_new.stored_string) do val
+                val = strip(val)
+                if !isempty(val) && !(val in opts_obs[])
+                    new_opts = copy(opts_obs[])
+                    push!(new_opts, val)
+                    opts_obs[] = new_opts
+                    m.selection[] = val
+                end
+                rowsize!(g, tb_new_row, Fixed(0))
+                tb_new_visible[] = false
+            end
+        end
+
+        # Compact tooltip
+        if !isempty(q.full) && length(q.full) > 8
+            tip = length(q.full) > 100 ? q.full[1:100] * "..." : q.full
+            Label(g[nr!(), 2:4], tip,
+                fontsize = 9, color = SUBTXT, halign = :left,
+                tellwidth = false, word_wrap = true)
+        end
+    end
+
+    end_section!(sec_fields)
+
+    # ── RadLex Multi-Value Panel ──────────────────────────────────────────────
+    sec_radlex = begin_section!("RadLex Ontology Properties")
+    radlex_selected = Observable(String[])
+
+    rl_r = nr!()
+    Label(g[rl_r, 1], "Search:", fontsize = 11, color = SUBTXT, halign = :right)
+    rl_search = Textbox(g[rl_r, 2:3], placeholder = "type to filter RadLex terms...", fontsize = 11)
+    btn_rl_add = Button(g[rl_r, 4], label = "+ Add",
+        buttoncolor = GRN, labelcolor = TXT, fontsize = 11)
+
+    radlex_filtered = Observable(length(radlex) > 200 ? radlex[1:200] : radlex)
+    rl_menu = Menu(g[nr!(), 1:4], options = radlex_filtered, fontsize = 10)
+
+    on(rl_search.stored_string) do txt
+        t = strip(txt)
+        if isempty(t)
+            radlex_filtered[] = length(radlex) > 200 ? radlex[1:200] : radlex
+        else
+            tl = lowercase(t)
+            hits = filter(s -> occursin(tl, lowercase(s)), radlex)
+            radlex_filtered[] = length(hits) > 200 ? hits[1:200] : hits
+        end
+    end
+    on(btn_rl_add.clicks) do _
+        sel = rl_menu.selection[]
+        sel === nothing && return
+        s = string(sel)
+        cur = copy(radlex_selected[])
+        s in cur || push!(cur, s)
+        radlex_selected[] = cur
+    end
+
+    Label(g[nr!(), 1:4], "Selected RadLex terms:",
+        fontsize = 11, color = SUBTXT, halign = :left, tellwidth = false)
+
+    RL_SLOTS = 8
+    rl_slot_row_start = r[1] + 1
+    rl_labels = [Label(g[rl_slot_row_start + i - 1, 1:3], "",
+                    fontsize = 10, color = TXT, halign = :left, tellwidth = false)
+                 for i in 1:RL_SLOTS]
+    rl_rm_btns = [Button(g[rl_slot_row_start + i - 1, 4], label = "x",
+                    buttoncolor = RED_BTN, labelcolor = TXT, fontsize = 10, width = 30)
+                  for i in 1:RL_SLOTS]
+    r[1] = rl_slot_row_start + RL_SLOTS - 1
+
+    on(radlex_selected) do terms
+        for i in 1:RL_SLOTS
+            rl_labels[i].text[] = i <= length(terms) ? terms[i] : ""
+        end
+    end
+    for i in 1:RL_SLOTS
+        on(rl_rm_btns[i].clicks) do _
+            cur = copy(radlex_selected[])
+            i <= length(cur) && deleteat!(cur, i)
+            radlex_selected[] = cur
+        end
+    end
+
+    end_section!(sec_radlex)
+
+    # ── Custom Key-Value Fields ───────────────────────────────────────────────
+    sec_custom = begin_section!("Custom Key-Value Fields")
+    custom_db = Observable(Dict{String,String}())
+
+    ck_r = nr!()
+    Label(g[ck_r, 1], "Key:", fontsize = 11, color = SUBTXT, halign = :right)
+    ck_tb = Textbox(g[ck_r, 2], placeholder = "field name", fontsize = 11)
+    Label(g[ck_r, 3], "Value:", fontsize = 11, color = SUBTXT, halign = :right)
+    cv_tb = Textbox(g[ck_r, 4], placeholder = "value", fontsize = 11)
+
+    btn_add_c = Button(g[nr!(), 4], label = "+ Add Custom Field",
+        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    on(btn_add_c.clicks) do _
+        k = strip(ck_tb.stored_string[])
+        v = strip(cv_tb.stored_string[])
+        isempty(k) && return
+        d = copy(custom_db[])
+        d[k] = v
+        custom_db[] = d
+    end
+
+    end_section!(sec_custom)
+
+    # ── Active Data Settings ──────────────────────────────────────────────────
+    sec_ads = begin_section!("Active Data Settings")
+    ads_r1 = nr!()
+    Label(g[ads_r1, 1], "PET/SUV Node:", fontsize = 11, color = SUBTXT, halign = :right)
+    Menu(g[ads_r1, 2], options = ["Auto", "SUV_PET_Image_0", "SUV_PET_Image_1"], fontsize = 11)
+    Label(g[ads_r1, 3], "CT Node:", fontsize = 11, color = SUBTXT, halign = :right)
+    Menu(g[ads_r1, 4], options = ["Auto", "Fixed_CT_Volume_0", "Fixed_CT_Volume_1"], fontsize = 11)
+
+    ads_r2 = nr!()
+    Label(g[ads_r2, 1], "Lesion Mask:", fontsize = 11, color = SUBTXT, halign = :right)
+    Menu(g[ads_r2, 2], options = ["Auto", "Segmentation_0", "Segmentation_1"], fontsize = 11)
+    Label(g[ads_r2, 3], "Anatomy Atlas:", fontsize = 11, color = SUBTXT, halign = :right)
+    Menu(g[ads_r2, 4], options = ["None", "Bone_Mask", "Organ_Mask"], fontsize = 11)
+
+    ads_r3 = nr!()
+    Label(g[ads_r3, 1], "To Next TP Xform:", fontsize = 11, color = SUBTXT, halign = :right)
+    Menu(g[ads_r3, 2], options = ["None", "Elastic_Transform_0_to_1"], fontsize = 11)
+    Label(g[ads_r3, 3], "To Prev TP Xform:", fontsize = 11, color = SUBTXT, halign = :right)
+    Menu(g[ads_r3, 4], options = ["None", "Elastic_Transform_1_to_0"], fontsize = 11)
+
+    btn_map_link = Button(g[nr!(), 1:4], label = "Explicitly Map Selected Lesions (Link)", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 11)
+    on(btn_map_link.clicks) do _; put!(channel, MapLinkEvent()) end
+
+    end_section!(sec_ads)
+
+    # ── Preprocessing & Automation ────────────────────────────────────────────
+    sec_pre = begin_section!("Preprocessing & Scene Management")
+    pre_r1 = nr!()
+    tog_autorun = Toggle(g[pre_r1, 1], active=false)
+    Label(g[pre_r1, 2:4], "Auto-run preprocessing on scene load", fontsize = 11, color = TXT, halign = :left)
+    on(tog_autorun.active) do val; put!(channel, AutoRunPreprocessEvent(val)) end
+
+    btn_run_full = Button(g[nr!(), 1:4], label = "Run Full Preprocessing (Skellytour + HelpNet Sync)", buttoncolor = GRN, labelcolor = TXT, fontsize = 11)
+    on(btn_run_full.clicks) do _; put!(channel, RunPreprocessEvent()) end
+
+    pre_r2 = nr!()
+    tog_skelly = Toggle(g[pre_r2, 1], active=false)
+    Label(g[pre_r2, 2:4], "Show Skellytour Bone Segmentation", fontsize = 11, color = TXT, halign = :left)
+    on(tog_skelly.active) do val; put!(channel, ShowBoneMaskEvent(val)) end
+
+    btn_save_mrb = Button(g[nr!(), 1:4], label = "Save Scene as Preprocessed MRB...", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    on(btn_save_mrb.clicks) do _; put!(channel, SaveMRBEvent()) end
+
+    end_section!(sec_pre)
+
+    # ── Persistence ──────────────────────────────────────────────────────────
+    sec_persist = begin_section!("Save & Load")
+    sv_r = nr!()
+    btn_save = Button(g[sv_r, 1:2], label = "Save Annotations",
+        buttoncolor = GRN, labelcolor = TXT, fontsize = 12)
+    btn_load = Button(g[sv_r, 3:4], label = "Load Annotations",
+        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 12)
+    status_lbl = Label(g[nr!(), 1:4], "",
+        fontsize = 11, color = RGBf(0.4, 0.9, 0.4), halign = :left, tellwidth = false)
+
+    end_section!(sec_persist)
+
+    # ── Report Panel ─────────────────────────────────────────────────────────
+    sec_report = begin_section!("Radiological Report Output")
+    Label(g[nr!(), 1:4], "Original Dictation:", fontsize = 11, color = SUBTXT, halign = :left)
+    dict_tb = Textbox(g[nr!(), 1:4], placeholder = "Enter radiological dictation here...", fontsize = 11)
+    
+    Label(g[nr!(), 1:4], "Generated Description:", fontsize = 11, color = SUBTXT, halign = :left)
+    rpt_tb = Textbox(g[nr!(), 1:4],
+        placeholder = "Click 'Generate Report' to build structured summary...",
+        fontsize = 10)
+    gen_r = nr!()
+    btn_gen = Button(g[gen_r, 1:2], label = "Generate Report",
+        buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 12)
+
+    end_section!(sec_report)
+
+    # ── Collect / apply UI state ──────────────────────────────────────────────
+    function collect_state()::Dict{String,String}
+        d = Dict{String,String}()
+        for q in schema
+            w = get(field_widgets, q.short, nothing)
+            w === nothing && continue
+            if w isa Textbox
+                v = strip(w.stored_string[])
+                isempty(v) || (d[q.short] = v)
+            elseif w isa Menu
+                sel = w.selection[]
+                sel === nothing && continue
+                s = string(sel)
+                (isempty(s) || s == "- select -") && continue
+                d[q.short] = s
+            end
+        end
+        rl = radlex_selected[]
+        isempty(rl) || (d["RadLex"] = join(rl, " | "))
+        for (k, v) in custom_db[]
+            d["Custom:$(k)"] = v
+        end
+        v_dict = strip(dict_tb.stored_string[])
+        isempty(v_dict) || (d["RadiologicalDictation"] = v_dict)
+        v_rpt = strip(rpt_tb.stored_string[])
+        isempty(v_rpt) || (d["RadiologicalReportOutput"] = v_rpt)
+        return d
+    end
+
+    function apply_state(data::Dict{String,String})
+        for q in schema
+            w = get(field_widgets, q.short, nothing)
+            w === nothing && continue
+            val = get(data, q.short, nothing)
+            if w isa Textbox
+                w.stored_string[] = val === nothing ? "" : val
+            elseif w isa Menu
+                if val !== nothing
+                    opts = w.options[]
+                    idx = findfirst(==(val), opts)
+                    idx !== nothing && (w.i_selected[] = idx)
+                else
+                    w.i_selected[] = 1   # reset to "- select -"
+                end
+            end
+        end
+        rl_raw = get(data, "RadLex", "")
+        radlex_selected[] = isempty(rl_raw) ? String[] : String.(split(rl_raw, " | "))
+        cdb = Dict{String,String}()
+        for (k, v) in data
+            startswith(k, "Custom:") && (cdb[k[8:end]] = v)
+        end
+        custom_db[] = cdb
+        dict_tb.stored_string[] = get(data, "RadiologicalDictation", "")
+        rpt_tb.stored_string[] = get(data, "RadiologicalReportOutput", "")
+    end
+
+    # ── Wire callbacks ────────────────────────────────────────────────────────
+    on(active_lesion_id) do id
+        db = lesion_db[]
+        apply_state(get(db, id, Dict{String,String}()))
+        m = match(r"\d+", id)
+        if m !== nothing
+            put!(channel, SyncLesionEvent(parse(Int, m.match)))
+        end
+    end
+
+    on(btn_save.clicks) do _
         id = active_lesion_id[]
-        report_output.stored_string[] = "The lesion (\$id) located in the \$(menu_category.selection[]) shows a \$(menu_borders.selection[]) margin and a \$(menu_shape.selection[]) shape. Management plan: \$(menu_management.selection[])."
+        db = copy(lesion_db[])
+        db[id] = collect_state()
+        lesion_db[] = db
+        put!(db_channel, SaveDBMessage(db, Dict{String,Any}(), save_path, DEFAULT_HDF5_PATH))
+        status_lbl.text[] = "Saved at $(Dates.format(Dates.now(), "HH:MM:SS"))"
+    end
+
+    on(btn_load.clicks) do _
+        @async begin
+            reply = Channel{Dict}(1)
+            put!(db_channel, LoadDBMessage(save_path, reply))
+            db = take!(reply)
+            lesion_db[] = db
+            apply_state(get(db, active_lesion_id[], Dict{String,String}()))
+            status_lbl.text[] = "Loaded $(length(db)) lesion(s)"
+        end
+    end
+
+    on(btn_gen.clicks) do _
+        id   = active_lesion_id[]
+        data = collect_state()
+        lines = ["=== Structured Radiological Report ===",
+                 "Lesion ID: $(id)", ""]
+        dictation = get(data, "RadiologicalDictation", "")
+        if !isempty(dictation)
+            push!(lines, "Dictation: $(dictation)", "")
+        end
+        for q in schema
+            v = get(data, q.short, ""); isempty(v) && continue
+            push!(lines, "* $(q.short): $(v)")
+        end
+        rl = get(data, "RadLex", "")
+        isempty(rl) || push!(lines, "* RadLex Properties: $(rl)")
+        for (k, v) in data
+            startswith(k, "Custom:") && push!(lines, "* $(k[8:end]): $(v)")
+        end
+        push!(lines, "", "Generated: $(Dates.format(Dates.now(), "yyyy-mm-dd HH:MM:SS"))")
+        
+        # In a real environment we would send 'lines' to DIZ LLM API here
+        # For now, we simulate the DIZ API generated text
+        generated_text = join(lines, "\n") * "\n[DIZ LLM Translated Output]"
+        rpt_tb.stored_string[] = generated_text
+        
+        # Trigger autosave update
+        id = active_lesion_id[]
+        db = copy(lesion_db[])
+        db[id] = collect_state()
+        lesion_db[] = db
+    end
+
+    # Auto-save logic
+    global_app_state = Dict{String, Any}("windowing" => (0.0f0, 0.0f0))
+    if haskey(ui_hooks, :windowing)
+        on(ui_hooks[:windowing]) do val
+            global_app_state["windowing"] = val
+        end
+    end
+    
+    # Auto-update lesion_db on dictation and custom changes to ensure background task catches it
+    on(dict_tb.stored_string) do _
+        id = active_lesion_id[]
+        db = copy(lesion_db[])
+        db[id] = collect_state()
+        lesion_db[] = db
+    end
+
+    @async begin
+        last_save_time = time()
+        while true
+            sleep(5.0)
+            try
+                db = lesion_db[]
+                put!(db_channel, SaveDBMessage(db, global_app_state, save_path, DEFAULT_HDF5_PATH))
+            catch e
+                @warn "Background autosave enqueue failed" e
+            end
+        end
     end
 
     display(fig)
-    return fig
+    return (fig = fig, lesion_db = lesion_db)
 end
 
-end
+end # module LesionMetadataWindow

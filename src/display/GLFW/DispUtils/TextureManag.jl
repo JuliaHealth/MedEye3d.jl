@@ -34,12 +34,13 @@ function updateTexture(::Type{Tt}, data::AbstractArray, textSpec::TextureSpec, x
     glBindTexture(GL_TEXTURE_2D, textSpec.ID[])
     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0)
 
+    actual_width = size(data, 1)
+    actual_height = size(data, 2)
+    
     if ((parameter_type(textSpec) == Float16) || (parameter_type(textSpec) == Float32))
-        glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, widthh, heightt, GL_RED, textSpec.OpGlType, collect(data))
+        glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, actual_width, actual_height, GL_RED, textSpec.OpGlType, collect(data))
     else
-        glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, collect(data))
-        # glTexSubImage2D(GL_TEXTURE_2D,0,xoffset,yoffset, widthh, heightt, GL_RED_INTEGER, textSpec.OpGlType, reduce(vcat,data))
-
+        glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, actual_width, actual_height, GL_RED_INTEGER, textSpec.OpGlType, collect(data))
     end
     #  end
 
@@ -67,6 +68,7 @@ function createTexture(juliaDataType::Type{juliaDataTyp}, width::Int32, height::
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0)
     #we just assign storage using glTexImage2D to ensure OpenGL 3.3 compatibility

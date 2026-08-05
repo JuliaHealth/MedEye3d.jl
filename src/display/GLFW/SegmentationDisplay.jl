@@ -9,6 +9,9 @@ using ColorTypes, MedImages, ModernGL, GLFW, Dictionaries, Logging, Setfield, Fr
 using ..PrepareWindow, ..PrepareWindowHelpers, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords
 using ..ReactingToInput, ..ReactToScroll, ..ShadersAndVerticiesForText, ..ShadersAndVerticiesForLine, ..ShadersAndVerticiesForSupervoxels, ..DisplayWords, ..DataStructs, ..StructsManag
 using ..ReactOnKeyboard, ..ReactOnMouseClickAndDrag, ..DisplayDataManag
+using ..MakieEvents
+include("MakieEventHandlers.jl")
+using .MakieEventHandlers
 
 #  do not copy it into the consumer function
 """
@@ -27,6 +30,23 @@ on_next!(stateObjects::Vector{StateDataFields}, data::DoubleClickEvent) = reactT
 on_next!(stateObjects::Vector{StateDataFields}, data::KeyInputFields) = reactToKeyInput(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::DisplayedVoxels) = retrieveVoxelArray(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::CustomDisplayedVoxels) = depositVoxelArray(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::ChangePlaneEvent) = reactToChangePlane(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::CompareTimePointsEvent) = reactToCompareTimePoints(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::ShowSingleLesionEvent) = reactToShowSingleLesion(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::WindowingEvent) = reactToWindowing(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::PaintValEvent) = reactToPaintVal(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::SyncLesionEvent) = reactToSyncLesion(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::ChangeTimePointEvent) = reactToChangeTimePoint(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::ToggleLesionEvent) = reactToToggleLesion(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::RefreshListEvent) = reactToRefreshList(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::AddAutoPetEvent) = reactToAddAutoPet(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::SyncMissingEvent) = reactToSyncMissing(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::GenManualEvent) = reactToGenManual(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MapLinkEvent) = reactToMapLink(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::AutoRunPreprocessEvent) = reactToAutoRunPreprocess(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::RunPreprocessEvent) = reactToRunPreprocess(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::ShowBoneMaskEvent) = reactToShowBoneMask(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::SaveMRBEvent) = reactToSaveMRB(data, stateObjects)
 on_error!(stateObjects::Vector{StateDataFields}, err) = error(err)
 on_complete!(stateObjects::Vector{StateDataFields}) = ""
 
@@ -583,34 +603,45 @@ function coordinateDisplay(
                     stateInstances[1].switchIndex = channelData.imagePos
                 end
 
-                on_next!(stateInstances, channelData)
+                old_ctx = GLFW.GetCurrentContext()
+                if old_ctx.handle != window.handle
+                    GLFW.MakeContextCurrent(window)
+                end
                 
-                if !shouldStop[1]
-                    glClear(GL_COLOR_BUFFER_BIT)
-                    for state in stateInstances
-                        # Rebind main VAO before each panel render - crosshair rendering
-                        # switches to a different VAO which corrupts subsequent panel draws
-                        glBindVertexArray(vao[])
-                        
-                        # draw text
-                        activateForTextDisp(state.textDispObj.shader_program_words, state.textDispObj.vbo_words, state.calcDimsStruct)
-                        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-                        
-                        # draw main
-                        reactivateMainObj(state.mainForDisplayObjects.shader_program, state.mainForDisplayObjects.vbo, state.calcDimsStruct)
-                        activateTextures(state.mainForDisplayObjects.listOfTextSpecifications)
-                        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-                        
-                        # draw crosshairs if needed
-                        if state.displayMode == MultiImage || state.displayMode == QuadImage
-                            if state.crosshairFields !== nothing && state.crosshairFields.shaderProgram != 0
-                                glUseProgram(state.crosshairFields.shaderProgram)
-                                glBindVertexArray(state.crosshairFields.vao[])
-                                glDrawElements(GL_LINES, 4, GL_UNSIGNED_INT, C_NULL)
+                try
+                    on_next!(stateInstances, channelData)
+                    
+                    if !shouldStop[1]
+                        glClear(GL_COLOR_BUFFER_BIT)
+                        for state in stateInstances
+                            # Rebind main VAO before each panel render - crosshair rendering
+                            # switches to a different VAO which corrupts subsequent panel draws
+                            glBindVertexArray(vao[])
+                            
+                            # draw text
+                            activateForTextDisp(state.textDispObj.shader_program_words, state.textDispObj.vbo_words, state.calcDimsStruct)
+                            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+                            
+                            # draw main
+                            reactivateMainObj(state.mainForDisplayObjects.shader_program, state.mainForDisplayObjects.vbo, state.calcDimsStruct)
+                            activateTextures(state.mainForDisplayObjects.listOfTextSpecifications)
+                            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+                            
+                            # draw crosshairs if needed
+                            if state.displayMode == MultiImage || state.displayMode == QuadImage
+                                if state.crosshairFields !== nothing && state.crosshairFields.shaderProgram != 0
+                                    glUseProgram(state.crosshairFields.shaderProgram)
+                                    glBindVertexArray(state.crosshairFields.vao[])
+                                    glDrawElements(GL_LINES, 4, GL_UNSIGNED_INT, C_NULL)
+                                end
                             end
                         end
+                        GLFW.SwapBuffers(window)
                     end
-                    GLFW.SwapBuffers(window)
+                finally
+                    if old_ctx.handle != window.handle
+                        GLFW.MakeContextCurrent(old_ctx)
+                    end
                 end
             catch e
                 @error "CONSUMER TASK CRASHED:" exception=(e, catch_backtrace())
@@ -639,79 +670,6 @@ function coordinateDisplay(
 
 
     registerInteractions(window, mainMedEye3dInstance, calcDimStructs)#passing needed subscriptions from GLFW
-    # Initialize the Lesion Metadata Window with hooks
-    try
-        active_lesion = Observable("Lesion 1")
-        ui_hooks = Dict{Symbol, Observable}(
-            :scroll => Observable(0),
-            :windowing => Observable((-160.0f0, 240.0f0)),
-            :paint_val => Observable(1),
-            :sync_lesion => Observable(false)
-        )
-        
-        # Windowing Listener
-        on(ui_hooks[:windowing]) do (min_val, max_val)
-            for state in mainMedEye3dInstance.states
-                for tex in state.mainForDisplayObjects.listOfTextSpecifications
-                    if !tex.isNuclearMask && !tex.isContinuusMask
-                        tex.minAndMaxValue = [min_val, max_val]
-                    end
-                end
-            end
-        end
-
-        # Paint / Erase Listener
-        on(ui_hooks[:paint_val]) do val
-            for state in mainMedEye3dInstance.states
-                state.valueForMasToSet.value = val
-            end
-        end
-
-        # Scroll Listener (Mock, MedEye uses GLFW natively)
-        on(ui_hooks[:scroll]) do val
-            # Can push to main channel if needed
-            println("Scroll button clicked: \$val")
-        end
-
-        # Lesion Spatial Sync Listener
-        on(ui_hooks[:sync_lesion]) do _
-            if length(mainMedEye3dInstance.states) > 1
-                tp0_state = mainMedEye3dInstance.states[1]
-                tp1_state = mainMedEye3dInstance.states[2] # Target
-                
-                pos_tp0 = tp0_state.lastRecordedMousePosition
-                spacing_tp0 = tp0_state.spacingsValue[1]
-                origin_tp0 = tp0_state.originValue[1]
-                
-                # Physical = Origin + (VoxelIndex - 1) * Spacing
-                phys_x = origin_tp0[1] + (pos_tp0[1] - 1) * spacing_tp0[1]
-                phys_y = origin_tp0[2] + (pos_tp0[2] - 1) * spacing_tp0[2]
-                phys_z = origin_tp0[3] + (pos_tp0[3] - 1) * spacing_tp0[3]
-                
-                # Map back to Voxel Coordinates in TP1
-                spacing_tp1 = tp1_state.spacingsValue[1]
-                origin_tp1 = tp1_state.originValue[1]
-                
-                vox_x = round(Int, (phys_x - origin_tp1[1]) / spacing_tp1[1]) + 1
-                vox_y = round(Int, (phys_y - origin_tp1[2]) / spacing_tp1[2]) + 1
-                vox_z = round(Int, (phys_z - origin_tp1[3]) / spacing_tp1[3]) + 1
-                
-                mapped_pos = CartesianIndex(vox_x, vox_y, vox_z)
-                
-                println("Mapped lesion from TP0 \$pos_tp0 -> physical (\$phys_x, \$phys_y, \$phys_z) -> TP1 \$mapped_pos")
-            else
-                println("Need at least 2 images loaded to sync lesions.")
-            end
-        end
-
-        # Try to invoke the Makie UI window
-        if isdefined(Main, :LesionMetadataWindow)
-            Main.LesionMetadataWindow.create_metadata_window(active_lesion, ui_hooks)
-        end
-    catch e
-        @warn "Could not initialize LesionMetadataWindow: \$e"
-    end
-
     return mainMedEye3dInstance
 end #coordinateDisplay
 
@@ -809,11 +767,28 @@ function loadRegisteredImages(
         @info "All images now have matching dimensions: $(size(medImageDataInstances[1].voxel_data))"
     end
 
+    # INTERMEDIATE: Increase resolution by 2 times by default for all images loaded
+    if typeof(medImageDataInstances) == Vector{MedImages.MedImage}
+        for (i, medImage) in enumerate(medImageDataInstances)
+            @info "Applying default 2x resolution increase to image $(i) by resampling..."
+            new_sp = (medImage.spacing[1]/2.0, medImage.spacing[2]/2.0, medImage.spacing[3]/2.0)
+            medImageDataInstances[i] = MedImages.Resample_to_target.resample_to_spacing(medImage, new_sp, MedImages.MedImage_data_struct.Linear_en, 0.0)
+        end
+    elseif typeof(medImageDataInstances) == Vector{Vector{MedImages.MedImage}}
+        for i in 1:length(medImageDataInstances)
+            for j in 1:length(medImageDataInstances[i])
+                @info "Applying default 2x resolution increase to image $(i),$(j) by resampling..."
+                medImage = medImageDataInstances[i][j]
+                new_sp = (medImage.spacing[1]/2.0, medImage.spacing[2]/2.0, medImage.spacing[3]/2.0)
+                medImageDataInstances[i][j] = MedImages.Resample_to_target.resample_to_spacing(medImage, new_sp, MedImages.MedImage_data_struct.Linear_en, 0.0)
+            end
+        end
+    end
+
     # THIRD: Apply orientation corrections and type conversions
     if typeof(medImageDataInstances) == Vector{MedImages.MedImage}
         for medImageDataInstance in medImageDataInstances
             #permuting the voxelData to some default orientation, such that the image is not inverted or sideways
-            #medImageDataInstance.voxel_data = permutedims(medImageDataInstance.voxel_data, (3, 2, 1)) #previously in the test script the default was (3, 2, 1)
             sizeInfo = size(medImageDataInstance.voxel_data)
             for outerNum in 1:sizeInfo[1]
                 for innerNum in 1:sizeInfo[3]
@@ -866,7 +841,7 @@ function displayImage(
     #asserting that the length of the studySrc is 2, if it is a multi-dimensions vector
     if typeof(studySrc) == Vector{Vector{Tuple{String,String}}} && !quadView
         try
-            @assert length(studySrc) == 2 || length(studySrc) == 4
+            @assert isempty(studySrc) || length(studySrc) == 2 || length(studySrc) == 4
         catch assertionError
             @error "MedEye3d.jl currently do not support more than 2 images for comparison, unless quadView is true." assertionError
         end
@@ -1170,6 +1145,15 @@ function loadRegisteredImages_ITK_Style(
         # Create MedImage objects with ITK data
         ctMedImage = createMedImageFromITK(ctPixels, ctImage_sitk, "CT", ctPath)
         petMedImage = createMedImageFromITK(petPixels, pet_image_resampled, "PET", petPath)
+        
+        # Increase resolution by 2 times by default (spacing / 2.0)
+        @info "Applying default 2x resolution increase by resampling to half spacing..."
+        new_sp = (ctMedImage.spacing[1]/2.0, ctMedImage.spacing[2]/2.0, ctMedImage.spacing[3]/2.0)
+        ctMedImage = MedImages.Resample_to_target.resample_to_spacing(ctMedImage, new_sp, MedImages.MedImage_data_struct.Linear_en, 0.0)
+        petMedImage = MedImages.Resample_to_target.resample_to_spacing(petMedImage, new_sp, MedImages.MedImage_data_struct.Linear_en, 0.0)
+        
+        @info "New 2x resolution CT size: $(size(ctMedImage.voxel_data)) with spacing $(ctMedImage.spacing)"
+        @info "New 2x resolution PET size: $(size(petMedImage.voxel_data)) with spacing $(petMedImage.spacing)"
         
         return [ctMedImage, petMedImage]
     else

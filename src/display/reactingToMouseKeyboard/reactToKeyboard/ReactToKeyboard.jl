@@ -143,6 +143,9 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_S)
             scCode = "s"
 
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_C)
+            scCode = "c"
+
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_KP_ADD) || keyInputInfo.scancode == Int32(GLFW.KEY_EQUAL)
             scCode = "+"
 
@@ -178,6 +181,7 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
         mainState.fieldKeyboardStruct.isZPressed = (act == 1) && scCode == "z"
         mainState.fieldKeyboardStruct.isFPressed = (act == 1) && scCode == "f"
         mainState.fieldKeyboardStruct.isSPressed = (act == 1) && scCode == "s"
+        mainState.fieldKeyboardStruct.isCPressed = (act == 1) && scCode == "c"
         mainState.fieldKeyboardStruct.isPlusPressed = scCode == (act == 1) && scCode == "+"
         mainState.fieldKeyboardStruct.isMinusPressed = (act == 1) && scCode == "-"
 
@@ -198,7 +202,7 @@ function shouldBeExecuted(keyInfo::KeyboardStruct, act::Int64)::Bool
             Int32(GLFW.KEY_TAB), Int32(GLFW.KEY_F4), Int32(GLFW.KEY_F5), Int32(GLFW.KEY_F6)]
             return act == 2
         elseif keyInfo.mostRecentScanCode in [Int32(GLFW.KEY_ENTER), Int32(GLFW.KEY_F1), Int32(GLFW.KEY_F2), Int32(GLFW.KEY_F3), Int32(GLFW.KEY_KP_ADD), Int32(GLFW.KEY_EQUAL),
-            Int32(GLFW.KEY_KP_SUBTRACT), Int32(GLFW.KEY_MINUS), Int32(GLFW.KEY_Z), Int32(GLFW.KEY_F), Int32(GLFW.KEY_S)]
+            Int32(GLFW.KEY_KP_SUBTRACT), Int32(GLFW.KEY_MINUS), Int32(GLFW.KEY_Z), Int32(GLFW.KEY_F), Int32(GLFW.KEY_S), Int32(GLFW.KEY_C)]
             return act == 1
         else
             return false
@@ -241,6 +245,11 @@ function parseString(str::Vector{String}, stateObject::StateDataFields, keyInfo:
     # println("here you go filtered with numeric ", filtered)
     listOfTextSpecs = stateObject.mainForDisplayObjects.listOfTextSpecifications
     searchDict = stateObject.mainForDisplayObjects.numIndexes
+    
+    if (keyInfo.isCPressed)
+        return Option(ToggleSyncScroll())
+    end
+    
     # for controlling window
     if (keyInfo.isF1Pressed)
         return Option(WindowControlStruct(letterCode="F1"))

@@ -159,47 +159,24 @@ mainMedEye3dInstance = SegmentationDisplay.displayImage(
 
 # Start Makie Control Window
 println("Starting Makie Control Window...")
-fig = Figure(size=(400, 300))
-layout = fig[1, 1] = GridLayout()
 
-ax_btn = Button(fig, label="Axial", buttoncolor=:lightblue)
-cor_btn = Button(fig, label="Coronal", buttoncolor=:lightblue)
-sag_btn = Button(fig, label="Sagittal", buttoncolor=:lightblue)
-layout[1, 1:3] = [ax_btn, cor_btn, sag_btn]
+using MedEye3d.LesionMetadataWindow
+using MedEye3d.InferenceClient
+using Observables
 
-compare_toggle = Toggle(fig, active=true)
-layout[2, 1] = Label(fig, "Compare TP1/TP2:")
-layout[2, 2] = compare_toggle
+# Start background Python inference worker
+InferenceClient.start_python_worker(joinpath(@__DIR__, "python_worker.py"))
 
-layout[3, 1] = Label(fig, "Single Lesion ID (0=All):")
-lesion_slider = Slider(fig, range=0:20, startvalue=0)
-layout[3, 2:3] = lesion_slider
+active_lesion = Observable("Lesion 1")
+lesion_ids = Observable(["Lesion 1", "Lesion 2"])
 
-# Event callbacks dispatching to mainChannel
-on(ax_btn.clicks) do _
-    put!(mainMedEye3dInstance.channel, ChangePlaneEvent(:Axial))
-end
-on(cor_btn.clicks) do _
-    put!(mainMedEye3dInstance.channel, ChangePlaneEvent(:Coronal))
-end
-on(sag_btn.clicks) do _
-    put!(mainMedEye3dInstance.channel, ChangePlaneEvent(:Sagittal))
-end
+# Launch the Slicer Extension native port GUI, passing the actor channel directly
+win = LesionMetadataWindow.create_metadata_window(active_lesion, lesion_ids, mainMedEye3dInstance.channel)
 
-on(compare_toggle.active) do active
-    put!(mainMedEye3dInstance.channel, CompareTimePointsEvent(active))
-end
+# Make TP2 invisible initially (Compare off)
+put!(mainMedEye3dInstance.channel, CompareTimePointsEvent(false))
 
-on(lesion_slider.value) do val
-    put!(mainMedEye3dInstance.channel, ShowSingleLesionEvent(val))
-end
-
-# Make TP2 invisible if compare is false initially
-if !compare_toggle.active[]
-    put!(mainMedEye3dInstance.channel, CompareTimePointsEvent(false))
-end
-
-screen = display(fig)
+screen = display(win.fig)
 
 # Keep script alive
 wait(screen)
