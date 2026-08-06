@@ -5,8 +5,35 @@ utilities for dealing data structs like FullScrollableDat or SingleSliceDat
 module StructsManag
 using Setfield, ColorTypes
 using ..ForDisplayStructs, ..DataStructs
-export getThreeDims, addToforUndoVector, cartTwoToThree, getHeightToWidthRatio, threeToTwoDimm, modSlice!, threeToTwoDimm, modifySliceFull!, getSlicesNumber, getMainVerticies
+export getThreeDims, addToforUndoVector, cartTwoToThree, getHeightToWidthRatio, threeToTwoDimm, modSlice!, threeToTwoDimm, modifySliceFull!, getSlicesNumber, getMainVerticies, getTextureCoordinatesFromScreen
 
+"""
+Calculates texture coordinates from screen coordinates, accounting for viewport zoom/pan/padding.
+"""
+function getTextureCoordinatesFromScreen(x::Real, y::Real, calcDimsStruct::CalcDimsStruct, actualW::Float64, actualH::Float64)
+    viewportW = Float64(calcDimsStruct.windowWidth)
+    viewportH = Float64(calcDimsStruct.windowHeight)
+    
+    glX = (x * 2.0 / viewportW) - 1.0
+    glY = ((actualH - y) * 2.0 / viewportH) - 1.0
+    
+    verts = calcDimsStruct.mainImageQuadVert
+    glLeft   = Float64(min(verts[17], verts[25]))
+    glRight  = Float64(max(verts[1], verts[9]))
+    glBottom = Float64(min(verts[10], verts[18]))
+    glTop    = Float64(max(verts[2], verts[26]))
+    
+    s = clamp((glX - glLeft) / (glRight - glLeft), 0.0, 1.0)
+    t = clamp((glY - glBottom) / (glTop - glBottom), 0.0, 1.0)
+    
+    texW = Float64(calcDimsStruct.imageTextureWidth)
+    texH = Float64(calcDimsStruct.imageTextureHeight)
+    
+    texX = clamp(round(Int, s * texW), 1, Int(texW))
+    texY = clamp(round(Int, t * texH), 1, Int(texH))
+    
+    return texX, texY
+end
 ```@doc
 given two dim dat it sets points in given coordinates in given slice to given value
 coords - coordinates in a plane of chosen slice to modify

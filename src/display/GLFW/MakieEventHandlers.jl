@@ -13,7 +13,6 @@ export reactToWindowing, reactToPaintVal, reactToSyncLesion
 export reactToChangeTimePoint, reactToToggleLesion, reactToRefreshList
 export reactToAddAutoPet, reactToSyncMissing, reactToGenManual
 export reactToMapLink, reactToAutoRunPreprocess, reactToRunPreprocess, reactToShowBoneMask, reactToSaveMRB
-
 using ...InferenceClient
 using ...LesionAssociation
 using ModernGL
@@ -50,45 +49,90 @@ function reactToChangePlane(data::ChangePlaneEvent, stateObjects::Vector{StateDa
     stateObjects[1].switchIndex = old_idx
 end
 
-function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Vector{StateDataFields})
-    if length(stateObjects) >= 2
-        for textSpec in stateObjects[2].mainForDisplayObjects.listOfTextSpecifications
-            textSpec.isVisible = data.compare
-            
-            ModernGL.glUseProgram(stateObjects[2].mainForDisplayObjects.shader_program)
-            Uniforms.setTextureVisibility(textSpec.isVisible, textSpec.uniforms)
+function updateQuadVertices!(stateObject::StateDataFields, layout::Symbol)
+    calcDimStruct = stateObject.calcDimsStruct
+    wc = calcDimStruct.widthCorr / 2.0f0
+    hc = calcDimStruct.heightCorr / 2.0f0
+    
+    res = copy(calcDimStruct.mainImageQuadVert)
+    
+    if layout == :Hidden
+        res[1], res[9], res[17], res[25] = 0.0f0, 0.0f0, 0.0f0, 0.0f0
+        res[2], res[10], res[18], res[26] = 0.0f0, 0.0f0, 0.0f0, 0.0f0
+    else
+        # Y coordinates
+        if layout == :TopLeft || layout == :TopRight
+            res[2] = (1.0f0 - hc)
+            res[10] = (0.0f0 + hc)
+            res[18] = (0.0f0 + hc)
+            res[26] = (1.0f0 - hc)
+        elseif layout == :BottomLeft || layout == :BottomRight
+            res[2] = (0.0f0 - hc)
+            res[10] = (-1.0f0 + hc)
+            res[18] = (-1.0f0 + hc)
+            res[26] = (0.0f0 - hc)
+        elseif layout == :LeftHalf || layout == :RightHalf
+            res[2] = (1.0f0 - hc)
+            res[10] = (-1.0f0 + hc)
+            res[18] = (-1.0f0 + hc)
+            res[26] = (1.0f0 - hc)
         end
-        # The render loop will use the updated uniforms in `activateForMainDisp` ?
-        # Actually `activateForMainDisp` loops over `listOfTextSpecifications` and calls `setSingleTextureVisib(textSpec.uniforms, textSpec.isVisible)`
+        
+        # X coordinates
+        if layout == :TopLeft || layout == :BottomLeft
+            res[1] = (0.0f0 - wc)
+            res[9] = (0.0f0 - wc)
+            res[17] = (-1.0f0 + wc)
+            res[25] = (-1.0f0 + wc)
+        elseif layout == :TopRight || layout == :BottomRight
+            res[1] = (1.0f0 - wc)
+            res[9] = (1.0f0 - wc)
+            res[17] = (0.0f0 + wc)
+            res[25] = (0.0f0 + wc)
+        elseif layout == :LeftHalf
+            res[1] = (0.0f0 - wc)
+            res[9] = (0.0f0 - wc)
+            res[17] = (-1.0f0 + wc)
+            res[25] = (-1.0f0 + wc)
+        elseif layout == :RightHalf
+            res[1] = (1.0f0 - wc)
+            res[9] = (1.0f0 - wc)
+            res[17] = (0.0f0 + wc)
+            res[25] = (0.0f0 + wc)
+        end
+    end
+    
+    stateObject.calcDimsStruct = Setfield.setproperties(calcDimStruct, (mainImageQuadVert = res,))
+    
+    ModernGL.glBindBuffer(ModernGL.GL_ARRAY_BUFFER, stateObject.mainForDisplayObjects.vbo)
+    ModernGL.glBufferData(ModernGL.GL_ARRAY_BUFFER, sizeof(res), res, ModernGL.GL_STATIC_DRAW)
+end
+
+function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Vector{StateDataFields})
+    if length(stateObjects) >= 5
+        if data.compare
+            # 2-pane view
+            updateQuadVertices!(stateObjects[1], :LeftHalf)
+            updateQuadVertices!(stateObjects[5], :RightHalf)
+            updateQuadVertices!(stateObjects[2], :Hidden)
+            updateQuadVertices!(stateObjects[3], :Hidden)
+            updateQuadVertices!(stateObjects[4], :Hidden)
+        else
+            # 4-pane view
+            updateQuadVertices!(stateObjects[1], :TopLeft)
+            updateQuadVertices!(stateObjects[2], :TopRight)
+            updateQuadVertices!(stateObjects[3], :BottomLeft)
+            updateQuadVertices!(stateObjects[4], :BottomRight)
+            updateQuadVertices!(stateObjects[5], :Hidden)
+        end
     end
 end
 
 function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vector{StateDataFields})
-    old_idx = stateObjects[1].switchIndex
-    for (idx, stateObject) in enumerate(stateObjects)
-        if data.lesion_id > 0
-            for (scrIdx, scrDat) in enumerate(stateObject.onScrollData.dataToScroll)
-                texSpec = stateObject.mainForDisplayObjects.listOfTextSpecifications[scrIdx]
-                if texSpec.name == "Mask" || texSpec.name == "manualModif"
-                    indices = findall(x -> isapprox(x, Float32(data.lesion_id), atol=0.1f0), scrDat.dat)
-                    if !isempty(indices)
-                        center = round.(Int, Tuple(sum(indices)) ./ length(indices))
-                        stateObject.lastRecordedMousePosition = CartesianIndex(center[1], center[2], center[3])
-                        
-                        dim = stateObject.onScrollData.dimensionToScroll
-                        stateObject.currentDisplayedSlice = center[dim]
-                        
-                        stateObjects[1].switchIndex = idx
-                        ReactToScroll.reactToScroll(0, stateObjects, false)
-                        @info "Navigated to lesion $(data.lesion_id) at center $center in window $idx"
-                        break
-                    end
-                end
-            end
-        end
-        
+    changed = false
+    for stateObject in stateObjects
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-            if !textSpec.isMainImage && !textSpec.isContinuusMask
+            if textSpec.isMultiDiscreteMask || textSpec.name == "Mask"
                 if data.lesion_id == 0
                     textSpec.minAndMaxValue = Float32.([1.0, 1000.0])
                 else
@@ -98,16 +142,18 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
                 # Push uniform update for min/max
                 ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
                 Uniforms.coontrolMinMaxUniformVals(textSpec)
+                changed = true
             end
         end
     end
-    stateObjects[1].switchIndex = old_idx
+    @info "Show single lesion: $(data.lesion_id == 0 ? "all" : string(data.lesion_id))"
+    return changed
 end
 
 function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFields})
     for state in stateObjects
         for tex in state.mainForDisplayObjects.listOfTextSpecifications
-            if !tex.isNuclearMask && !tex.isContinuusMask
+            if tex.isMainImage
                 tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
                 
                 # Push uniform update for min/max
@@ -125,10 +171,24 @@ function reactToPaintVal(data::PaintValEvent, stateObjects::Vector{StateDataFiel
 end
 
 function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateDataFields})
+    changed = false
     old_idx = stateObjects[1].switchIndex
     old_sync = stateObjects[1].mainForDisplayObjects.isSyncScrollOn
     for stateObject in stateObjects
         stateObject.mainForDisplayObjects.isSyncScrollOn = false
+        
+        # NEW: Toggle single lesion visibility mask
+        for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
+            if textSpec.isMultiDiscreteMask || textSpec.name == "Mask"
+                if data.lesion_id > 0
+                    textSpec.minAndMaxValue = Float32.([data.lesion_id, data.lesion_id])
+                else
+                    textSpec.minAndMaxValue = Float32.([1.0, 1000.0])
+                end
+                ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
+                Uniforms.coontrolMinMaxUniformVals(textSpec)
+            end
+        end
     end
     for (idx, stateObject) in enumerate(stateObjects)
         if data.lesion_id > 0
@@ -139,7 +199,15 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                     # Using isapprox for Float32 comparison since mask might be float
                     indices = findall(x -> isapprox(x, Float32(data.lesion_id), atol=0.1f0), scrDat.dat)
                     if !isempty(indices)
-                        found_center = round.(Int, Tuple(sum(indices)) ./ length(indices))
+                        # Extract the 3D mask matching the lesion
+                        mask = isapprox.(scrDat.dat, Float32(data.lesion_id), atol=0.1f0)
+                        
+                        # Sum over axes to find the slice with the maximum area
+                        best_x = argmax(sum(mask, dims=(2, 3)))[1]
+                        best_y = argmax(sum(mask, dims=(1, 3)))[2]
+                        best_z = argmax(sum(mask, dims=(1, 2)))[3]
+                        
+                        found_center = [best_x, best_y, best_z]
                         break
                     end
                 end
@@ -152,6 +220,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                 
                 stateObjects[1].switchIndex = idx
                 ReactToScroll.reactToScroll(0, stateObjects, false)
+                changed = true
                 @info "Synced active lesion $(data.lesion_id) at center $found_center in window $idx"
             else
                 if idx > 1 && length(stateObjects) > 0
@@ -170,12 +239,20 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                     vox_z = round(Int, (phys_z - origin_tp1[3]) / spacing_tp1[3]) + 1
                     
                     mapped_pos = CartesianIndex(vox_x, vox_y, vox_z)
-                    stateObject.lastRecordedMousePosition = mapped_pos
+                    if idx == 1 || idx == 2
+                        stateObject.lastRecordedMousePosition = mapped_pos
+                    elseif idx == 3
+                        stateObject.lastRecordedMousePosition = CartesianIndex(vox_y, vox_z, vox_x)
+                    else
+                        stateObject.lastRecordedMousePosition = CartesianIndex(vox_x, vox_z, vox_y)
+                    end
+                    
                     dim = stateObject.onScrollData.dimensionToScroll
                     stateObject.currentDisplayedSlice = mapped_pos[dim]
                     
                     stateObjects[1].switchIndex = idx
                     ReactToScroll.reactToScroll(0, stateObjects, false)
+                    changed = true
                     @info "Mapped lesion $(data.lesion_id) via physical coordinates to window $idx: $mapped_pos"
                 end
             end
@@ -185,6 +262,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         stateObject.mainForDisplayObjects.isSyncScrollOn = old_sync
     end
     stateObjects[1].switchIndex = old_idx
+    return changed
 end
 
 function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector{StateDataFields})
@@ -194,7 +272,7 @@ end
 function reactToToggleLesion(data::ToggleLesionEvent, stateObjects::Vector{StateDataFields})
     for stateObject in stateObjects
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-            if !textSpec.isMainImage && !textSpec.isContinuusMask
+            if textSpec.isMultiDiscreteMask
                 textSpec.isVisible = !textSpec.isVisible
                 
                 # We must also push this uniform update to the GPU immediately!
@@ -205,6 +283,8 @@ function reactToToggleLesion(data::ToggleLesionEvent, stateObjects::Vector{State
         end
     end
 end
+
+
 
 function reactToRefreshList(data::RefreshListEvent, stateObjects::Vector{StateDataFields})
     @info "Refreshing lesion list..."

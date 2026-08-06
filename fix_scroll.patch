@@ -1,0 +1,46 @@
+--- src/display/reactingToMouseKeyboard/ReactToScroll.jl
++++ src/display/reactingToMouseKeyboard/ReactToScroll.jl
+@@ -107,17 +107,31 @@
+             if length(mainStates) == 4
+                 clickedPanel = mainStates[1].switchIndex
+                 
+-                # Always use the current crosshair position (where the user last clicked or synced)
+-                activePos = mainState.lastRecordedMousePosition
+-                if clickedPanel == 1 || clickedPanel == 2 # Axial
+-                    origX, origY = activePos[1], activePos[2]
+-                    origZ = current
+-                elseif clickedPanel == 3  # Sagittal (permuted 2,3,1)
+-                    origY, origZ = activePos[1], activePos[2]
+-                    origX = current
+-                else # Bottom-Right (4) (Coronal) (permuted 1,3,2)
+-                    origX, origZ = activePos[1], activePos[2]
+-                    origY = current
++                if scrollNumb != 0
++                    # When scrolling, jump other views to the geometric center of this view
++                    texW = Float64(mainState.calcDimsStruct.imageTextureWidth)
++                    texH = Float64(mainState.calcDimsStruct.imageTextureHeight)
++                    texX = clamp(round(Int, texW / 2.0), 1, Int(texW))
++                    texY = clamp(round(Int, texH / 2.0), 1, Int(texH))
++                    
++                    if clickedPanel == 1 || clickedPanel == 2 # Axial
++                        origX, origY, origZ = texX, texY, current
++                    elseif clickedPanel == 3  # Sagittal
++                        origY, origZ, origX = texX, texY, current
++                    else # Bottom-Right (4) (Coronal)
++                        origX, origZ, origY = texX, texY, current
++                    end
++                else
++                    # When jumping (Next Lesion / Right Click), use the updated crosshair position
++                    activePos = mainState.lastRecordedMousePosition
++                    if clickedPanel == 1 || clickedPanel == 2 # Axial
++                        origX, origY = activePos[1], activePos[2]
++                        origZ = current
++                    elseif clickedPanel == 3  # Sagittal (permuted 2,3,1)
++                        origY, origZ = activePos[1], activePos[2]
++                        origX = current
++                    else # Bottom-Right (4) (Coronal) (permuted 1,3,2)
++                        origX, origZ = activePos[1], activePos[2]
++                        origY = current
+                 end
+                 
+                 targets = [(1, origZ), (2, origZ), (3, origX), (4, origY)]

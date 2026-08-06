@@ -4,9 +4,9 @@ Main module controlling displaying segmentations image and data
 """
 module SegmentationDisplay
 export loadRegisteredImages, displayImage, coordinateDisplay, passDataForScrolling
-using Dates, PyCall
+using Dates
 using ColorTypes, MedImages, ModernGL, GLFW, Dictionaries, Logging, Setfield, FreeTypeAbstraction, Statistics, Observables
-using ..PrepareWindow, ..PrepareWindowHelpers, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords
+using ..PrepareWindow, ..PrepareWindowHelpers, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords, ..distinctColorsSaved
 using ..ReactingToInput, ..ReactToScroll, ..ShadersAndVerticiesForText, ..ShadersAndVerticiesForLine, ..ShadersAndVerticiesForSupervoxels, ..DisplayWords, ..DataStructs, ..StructsManag
 using ..ReactOnKeyboard, ..ReactOnMouseClickAndDrag, ..DisplayDataManag
 using ..MakieEvents
@@ -38,6 +38,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::PaintValEvent) = reactToPa
 on_next!(stateObjects::Vector{StateDataFields}, data::SyncLesionEvent) = reactToSyncLesion(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ChangeTimePointEvent) = reactToChangeTimePoint(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ToggleLesionEvent) = reactToToggleLesion(data, stateObjects)
+
 on_next!(stateObjects::Vector{StateDataFields}, data::RefreshListEvent) = reactToRefreshList(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::AddAutoPetEvent) = reactToAddAutoPet(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SyncMissingEvent) = reactToSyncMissing(data, stateObjects)
@@ -201,9 +202,7 @@ end
 Carries out the initialization of shader and buffers for
 crosshair
 """
-function initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader_words, vbo_words, shader_program_words)
-
-    # glBindVertexArray(0) #unbinding vao for the main rect
+function createCrosshairFields(vertex_shader)
     fragment_shader_line, shader_program_line = ShadersAndVerticiesForLine.createAndInitLineShaderProgram(vertex_shader)
     vao_line = PrepareWindowHelpers.createVertexBuffer()
     vbo_line = PrepareWindowHelpers.createDynamicDAtaBuffer(ShadersAndVerticiesForLine.line_vertices)
@@ -212,16 +211,22 @@ function initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(Float32), Ptr{Nothing}(0))
     glEnableVertexAttribArray(0)
 
-    # glBindVertexArray(0) #unbinding vao for the crosshair
-    glBindVertexArray(vao[]) #binding vao for the main rect
-
-    crosshair::GlShaderAndBufferFields = GlShaderAndBufferFields(
+    return GlShaderAndBufferFields(
         shaderProgram=shader_program_line,
         fragmentShader=fragment_shader_line,
         vao=vao_line,
         vbo=vbo_line,
         ebo=ebo_line
     )
+end
+
+function initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader_words, vbo_words, shader_program_words)
+
+    # glBindVertexArray(0) #unbinding vao for the main rect
+    crosshairs = [createCrosshairFields(vertex_shader) for _ in 1:length(vboVector)]
+
+    # glBindVertexArray(0) #unbinding vao for the crosshair
+    glBindVertexArray(vao[]) #binding vao for the main rect
 
     #we are not initializing shaderProgram in mainRects
     mainRects::Vector{GlShaderAndBufferFields} = []
@@ -240,7 +245,7 @@ function initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader
         vbo=vbo_words
     )
 
-    return (crosshair, mainRects, textFields)
+    return (crosshairs, mainRects, textFields)
 end
 
 
@@ -368,11 +373,11 @@ function coordinateDisplay(
     """
 
     #Crosshair display only in multi-image mode
-    crosshair, mainRects, textFields = (Nothing, Nothing, Nothing)
+    crosshairs, mainRects, textFields = (Nothing, Nothing, Nothing)
 
     supervoxel, mainRect = (Nothing, Nothing)
     if displayMode == MultiImage || displayMode == QuadImage
-        crosshair, mainRects, textFields = initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader_words, vbo_words, shader_program_words)
+        crosshairs, mainRects, textFields = initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader_words, vbo_words, shader_program_words)
     elseif displayMode == SingleImage
         supervoxel, mainRect = initializeSupervoxels(vertex_shader, vao, ebo, vboVector, allSupervoxels)
     end
@@ -484,7 +489,7 @@ function coordinateDisplay(
             imagePosition=x,
             switchIndex=x,
             mainRectFields=displayMode == SingleImage ? mainRect : mainRects[x],
-            crosshairFields=displayMode == SingleImage ? GlShaderAndBufferFields() : crosshair,
+            crosshairFields=displayMode == SingleImage ? GlShaderAndBufferFields() : crosshairs[x],
             textFields=displayMode == SingleImage ? GlShaderAndBufferFields() : textFields,
             spacingsValue=spacing[x],
             originValue=origin[x],
@@ -516,57 +521,60 @@ function coordinateDisplay(
         stateInstance.textureToModifyVec = filter(it -> it.isEditable, initializedTextures[index])
     end
 
-    function consumer(mainChannel::Base.Channel{Any})
-        shouldStop = [false]
-        
-        #    in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
-
-
-        function cleanUp()
-            
-            # Step 1: Stop the polling task FIRST
-            try
-                put!(stopChannel, true)
-                sleep(0.05)  # Give more time for task to stop
-            catch e
-                @warn "Error stopping polling task: $e"
-            end
-            
-            # Step 2: Clean up OpenGL resources
-            try
-                objs = []
-                foreach(stateInstances) do stateInstance
-                    push!(objs, stateInstance.mainForDisplayObjects)
-                end
-                foreach(objs) do obj
-                    try
-                        glDeleteTextures(length(obj.listOfTextSpecifications), map(text -> text.ID, obj.listOfTextSpecifications))
-                    catch e
-                        @warn "Error deleting textures: $e"
-                    end
-                end
-                glFlush()
+    shouldStop = [false]
     
-            catch e
-                @warn "Error cleaning OpenGL resources: $e"
-            end
-            
-            # Step 3: Close the window
-            try
-                GLFW.SetWindowShouldClose(window, true)
-                sleep(0.02)
-                GLFW.DestroyWindow(window)
-            catch e
-                @warn "Error destroying window: $e"
-            end
-            
-            # Step 4: Mark as should stop
-            shouldStop[1] = true      
+    #    in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
+
+
+    function cleanUp()
+        
+        # Step 1: Stop the polling task FIRST
+        try
+            put!(stopChannel, true)
+            sleep(0.05)  # Give more time for task to stop
+        catch e
+            @warn "Error stopping polling task: $e"
         end
+        
+        # Step 2: Clean up OpenGL resources
+        try
+            # Re-bind context to main thread for OpenGL cleanup
+            GLFW.MakeContextCurrent(window)
+            
+            objs = []
+            foreach(stateInstances) do stateInstance
+                push!(objs, stateInstance.mainForDisplayObjects)
+            end
+            foreach(objs) do obj
+                try
+                    glDeleteTextures(length(obj.listOfTextSpecifications), map(text -> text.ID, obj.listOfTextSpecifications))
+                catch e
+                    @warn "Error deleting textures: $e"
+                end
+            end
+            glFlush()
 
-        # We do not call cleanUp here, because it would immediately close the window we just created!
-        GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())
+        catch e
+            @warn "Error cleaning OpenGL resources: $e"
+        end
+        
+        # Step 3: Close the window
+        try
+            GLFW.SetWindowShouldClose(window, true)
+            sleep(0.02)
+            GLFW.DestroyWindow(window)
+        catch e
+            @warn "Error destroying window: $e"
+        end
+        
+        # Step 4: Mark as should stop
+        shouldStop[1] = true      
+    end
 
+    # We do not call cleanUp here, because it would immediately close the window we just created!
+    GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())
+
+    function consumer(mainChannel::Base.Channel{Any})
 
         while !shouldStop[1]
             try
@@ -626,15 +634,6 @@ function coordinateDisplay(
                             reactivateMainObj(state.mainForDisplayObjects.shader_program, state.mainForDisplayObjects.vbo, state.calcDimsStruct)
                             activateTextures(state.mainForDisplayObjects.listOfTextSpecifications)
                             glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-                            
-                            # draw crosshairs if needed
-                            if state.displayMode == MultiImage || state.displayMode == QuadImage
-                                if state.crosshairFields !== nothing && state.crosshairFields.shaderProgram != 0
-                                    glUseProgram(state.crosshairFields.shaderProgram)
-                                    glBindVertexArray(state.crosshairFields.vao[])
-                                    glDrawElements(GL_LINES, 4, GL_UNSIGNED_INT, C_NULL)
-                                end
-                            end
                         end
                         GLFW.SwapBuffers(window)
                     end
@@ -650,7 +649,10 @@ function coordinateDisplay(
         end
     end #end of consumer
 
-    mainMedEye3dInstance = MainMedEye3d(channel=Base.Channel{Any}(consumer, 1000; spawn=false, threadpool=:interactive), textDispObj=forTextDispStructs[1], displayMode=displayMode, states=stateInstances)
+    # Release context from the main thread so the background consumer task can claim it
+    GLFW.MakeContextCurrent(GLFW.Window(C_NULL))
+    
+    mainMedEye3dInstance = MainMedEye3d(channel=Base.Channel{Any}(consumer, 1000; spawn=true, threadpool=:default), textDispObj=forTextDispStructs[1], displayMode=displayMode, states=stateInstances)
     # mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(1000))
 
 
@@ -699,11 +701,13 @@ function getDefaultTexture(
             minAndMaxValue=Float32.([0, 100])
         )
     elseif studyType == "ManualModif"
+        colors_mapped = map(c -> RGB(c[1]/255, c[2]/255, c[3]/255), distinctColorsSaved.listOfColors)
         return TextureSpec{Float32}(
             name="manualModif",
             numb=Int32(2),
-            color=RGB(0.0, 1.0, 0.0),
-            minAndMaxValue=Float32.([0, 1]),
+            isMultiDiscreteMask=true,
+            colorSet=colors_mapped,
+            minAndMaxValue=Float32.([0, length(colors_mapped)]),
             isEditable=true
         )
 
@@ -847,7 +851,7 @@ function displayImage(
         end
     end
 
-    medImageData::Union{Vector{MedImages.MedImage},Vector{Vector{MedImages.MedImage}}} = loadRegisteredImages_ITK_Style(studySrc)
+    medImageData::Union{Vector{MedImages.MedImage},Vector{Vector{MedImages.MedImage}}} = loadRegisteredImages(studySrc)
     #NOTE : for overlaid images, they need to be resampled first
 
     if isempty(textureSpecArray) && isempty(voxelDataTupleVector) && isempty(spacings) && isempty(origins)
@@ -1104,90 +1108,6 @@ end
 
 
 
-###################################################################################################
-function loadRegisteredImages_ITK_Style(
-    studySrc::Union{Vector{Tuple{String,String}},Tuple{String,String},Vector{Vector{Tuple{String,String}}}}
-)
-    
-    if typeof(studySrc) == Vector{Tuple{String,String}} && length(studySrc) > 1
-        @info "Loading overlaid images using ITK-style workflow"
-        
-        # Import SimpleITK like in ITK script
-        sitk = pyimport("SimpleITK")
-        
-        # Load images using SimpleITK directly (like ITK script)
-        ctPath = studySrc[1][1]
-        petPath = studySrc[2][1]
-        
-        @info "Loading CT: $ctPath"
-        @info "Loading PET: $petPath"
-        
-        # Load with SimpleITK (exact same as ITK script)
-        ctImage_sitk = sitk.ReadImage(ctPath)
-        petImage_sitk = sitk.ReadImage(petPath)
-        
-        @info "CT size from SITK: $(ctImage_sitk.GetSize())"
-        @info "PET size from SITK: $(petImage_sitk.GetSize())"
-        @info "CT spacing from SITK: $(ctImage_sitk.GetSpacing())"
-        @info "PET spacing from SITK: $(petImage_sitk.GetSpacing())"
-        
-        # Resample PET to CT space (exact same as ITK script)
-        @info "Resampling PET to CT space..."
-        pet_image_resampled = sitk.Resample(petImage_sitk, ctImage_sitk)
-        
-        # Convert to arrays with ITK's permuteAndReverse (exact same as ITK script)
-        ctPixels = permuteAndReverse(sitk.GetArrayFromImage(ctImage_sitk))
-        petPixels = permuteAndReverse(sitk.GetArrayFromImage(pet_image_resampled))
-        
-        @info "Final CT size: $(size(ctPixels))"
-        @info "Final PET size: $(size(petPixels))"
-        
-        # Create MedImage objects with ITK data
-        ctMedImage = createMedImageFromITK(ctPixels, ctImage_sitk, "CT", ctPath)
-        petMedImage = createMedImageFromITK(petPixels, pet_image_resampled, "PET", petPath)
-        
-        # Increase resolution by 2 times by default (spacing / 2.0)
-        @info "Applying default 2x resolution increase by resampling to half spacing..."
-        new_sp = (ctMedImage.spacing[1]/2.0, ctMedImage.spacing[2]/2.0, ctMedImage.spacing[3]/2.0)
-        ctMedImage = MedImages.Resample_to_target.resample_to_spacing(ctMedImage, new_sp, MedImages.MedImage_data_struct.Linear_en, 0.0)
-        petMedImage = MedImages.Resample_to_target.resample_to_spacing(petMedImage, new_sp, MedImages.MedImage_data_struct.Linear_en, 0.0)
-        
-        @info "New 2x resolution CT size: $(size(ctMedImage.voxel_data)) with spacing $(ctMedImage.spacing)"
-        @info "New 2x resolution PET size: $(size(petMedImage.voxel_data)) with spacing $(petMedImage.spacing)"
-        
-        return [ctMedImage, petMedImage]
-    else
-        # Fall back to original method for single images
-        return loadRegisteredImages(studySrc)
-    end
-end
-
-# Helper function to create MedImage from ITK data (like ITK script does)
-function createMedImageFromITK(pixels, sitk_image, image_type, file_path)
-    return MedImages.MedImage(
-        voxel_data=Float32.(pixels),
-        spacing=Tuple(sitk_image.GetSpacing()),
-        origin=Tuple(sitk_image.GetOrigin()),
-        direction=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),  # Default identity
-        image_type=image_type == "CT" ? MedImages.MedImage_data_struct.CT_type : MedImages.MedImage_data_struct.PET_type,
-        image_subtype=image_type == "CT" ? MedImages.MedImage_data_struct.CT_subtype : MedImages.MedImage_data_struct.FDG_subtype,
-        date_of_saving=now(),
-        acquistion_time=now(),
-        patient_id="itk_loaded"
-    )
-end
-
-# Use the exact permuteAndReverse from ITK script
-function permuteAndReverse(pixels)
-    pixels = permutedims(pixels, (3, 2, 1))
-    sizz = size(pixels)
-    for i in 1:sizz[1]
-        for j in 1:sizz[3]
-            pixels[i, :, j] = reverse(pixels[i, :, j])
-        end
-    end
-    return pixels
-end
 ####################################################################################################
 end #SegmentationDisplay
 

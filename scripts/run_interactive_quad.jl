@@ -1,5 +1,6 @@
 using Pkg
 Pkg.activate(".")
+Pkg.instantiate()
 
 using MedEye3d
 using MedEye3d.ForDisplayStructs

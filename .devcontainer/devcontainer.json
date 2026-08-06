@@ -50,6 +50,7 @@
 		// "ms-python.vscode-pylance"
 	],
 	"mounts": [
+		"source=${localWorkspaceFolder}/../MedImages.jl,target=/workspaces/MedImages.jl,type=bind,consistency=cached"
 		// "source=/media/jm/hddData/datasets/Task09_Spleen,target=/home/data,type=bind,consistency=cached"
 	  ],
 

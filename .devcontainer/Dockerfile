@@ -117,8 +117,8 @@ RUN python3 /workspace/download_data.py
 
 RUN python3 -m pip install --no-cache-dir SimpleITK
 
-ARG JULIA_RELEASE=1.12
-ARG JULIA_VERSION=1.12.5
+ARG JULIA_RELEASE=1.11
+ARG JULIA_VERSION=1.11.3
 RUN curl -s -L https://julialang-s3.julialang.org/bin/linux/x64/${JULIA_RELEASE}/julia-${JULIA_VERSION}-linux-x86_64.tar.gz | \
     tar -C /usr/local -x -z --strip-components=1 -f -
 

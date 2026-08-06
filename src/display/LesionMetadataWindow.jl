@@ -199,10 +199,28 @@ end
 
 # ─── UI helpers ──────────────────────────────────────────────────────────────
 function all_categories(schema::Vector{QuestionDef})::Vector{String}
-    cats = Set{String}()
-    for q in schema, c in q.categories; push!(cats, c) end
-    result = sort(collect(cats))
-    pushfirst!(result, "All")
+    # Fixed order to match the Slicer extension layout
+    SLICER_ORDER = [
+        "Technical Parameters",
+        "Identification",
+        "Location",
+        "Morphology",
+        "Quantitative",
+        "Clinical Context",
+        "Prostate Analysis",
+        "Final Assessment",
+        "Reporting",
+    ]
+    cats_in_schema = Set{String}()
+    for q in schema, c in q.categories; push!(cats_in_schema, c) end
+    # Use Slicer order, then append any extra categories
+    result = String[]
+    for cat in SLICER_ORDER
+        cat in cats_in_schema && push!(result, cat)
+    end
+    for cat in sort(collect(cats_in_schema))
+        cat in result || push!(result, cat)
+    end
     return result
 end
 
@@ -252,6 +270,9 @@ function create_metadata_window(
         lesion_db[] = take!(reply)
     end
 
+    # Helper for safely extracting and stripping text from Makie Textboxes
+    _safe_strip(x) = x === nothing ? "" : String(strip(x))
+
     # ── Theme ──────────────────────────────────────────────────────────────
     BG      = RGBf(0.10, 0.12, 0.15)
     BG_PNL  = RGBf(0.13, 0.15, 0.19)
@@ -264,9 +285,10 @@ function create_metadata_window(
 
     # ── Figure ──────────────────────────────────────────────────────────────
     fig = Figure(size = (920, 1600), backgroundcolor = BG)
-    g   = GridLayout(fig[1,1], tellheight = false)
+    g   = GridLayout(fig[1,1], tellheight = false, halign = :left, valign = :top)
     rowgap!(g, 3)
     colgap!(g, 4)
+    colsize!(g, 1, Auto())
     r = [0]  # row counter as array for mutation in closures
     nr!() = (r[1] += 1; r[1])
 
@@ -278,11 +300,11 @@ function create_metadata_window(
         fontsize = 11, color = SUBTXT, halign = :center, tellwidth = false)
 
     # ── Section helper ──────────────────────────────────────────────────────
-    function begin_section!(title)
-        is_open = Observable(true)
+    function begin_section!(title; default_open=true)
+        is_open = Observable(default_open)
         header_r = nr!()
         btn = Button(g[header_r, 1:4], label = @lift($is_open ? "▼  $(title)" : "▶  $(title)"),
-            buttoncolor = BG, labelcolor = ACCENT, fontsize = 12, font = :bold, halign = :center)
+            buttoncolor = BG, labelcolor = ACCENT, fontsize = 12, font = :bold, halign = :left)
         
         start_row = r[1] + 1
         return (is_open, start_row, header_r, btn)
@@ -302,10 +324,15 @@ function create_metadata_window(
                 end
             end
             
+            # Zero/restore row gaps to eliminate empty space between collapsed headers
+            for i in (start_row > 1 ? start_row - 1 : start_row):min(end_row, r[1] - 1)
+                rowgap!(g, i, is_open[] ? 3 : 0)
+            end
+            
             for c in g.content
                 if c.span.rows.start >= start_row && c.span.rows.stop <= end_row
-                    if hasproperty(c.content, :visible)
-                        c.content.visible[] = is_open[]
+                    if hasproperty(c.content, :blockscene)
+                        c.content.blockscene.visible[] = is_open[]
                     end
                 end
             end
@@ -339,13 +366,13 @@ function create_metadata_window(
         opts = lesion_ids[]; isempty(opts) && return
         idx = findfirst(==(active_lesion_id[]), opts)
         idx === nothing && return
-        active_lesion_id[] = opts[max(1, idx-1)]
+        active_lesion_id[] = opts[idx == 1 ? length(opts) : idx-1]
     end
     on(btn_next.clicks) do _
         opts = lesion_ids[]; isempty(opts) && return
         idx = findfirst(==(active_lesion_id[]), opts)
         idx === nothing && return
-        active_lesion_id[] = opts[min(length(opts), idx+1)]
+        active_lesion_id[] = opts[idx == length(opts) ? 1 : idx+1]
     end
 
     end_section!(sec_nav)
@@ -400,6 +427,9 @@ function create_metadata_window(
     on(btn_all.clicks) do _
         put!(channel, ShowSingleLesionEvent(0))
     end
+    
+    vc4_r = nr!()
+
 
     ct_r = nr!()
     Label(g[ct_r, 1], "CT Preset:", fontsize = 11, color = SUBTXT, halign = :right)
@@ -412,99 +442,115 @@ function create_metadata_window(
 
     end_section!(sec_view)
 
-    # ── Segmentation Mini Manager ────────────────────────────────────────────
-    sec_seg = begin_section!("Segmentation Mini Manager")
-    pe_r = nr!()
-    btn_paint = Button(g[pe_r, 1], label = "Paint", buttoncolor = GRN,   labelcolor = TXT, fontsize = 11)
-    btn_erase = Button(g[pe_r, 2], label = "Erase", buttoncolor = RED_BTN, labelcolor = TXT, fontsize = 11)
-    on(btn_paint.clicks) do _; put!(channel, PaintValEvent(1)) end
-    on(btn_erase.clicks) do _; put!(channel, PaintValEvent(0)) end
-
-    algo_r = nr!()
-    Label(g[algo_r, 1], "Algorithm:", halign=:left, fontsize=11, color=TXT)
-    algo_combo = Menu(g[algo_r, 2:4], options = ["HELPNet (AI)", "NNInteractive", "Traditional (PETTumor)"], default = "HELPNet (AI)", fontsize = 10)
-
-    btn_add_ai = Button(g[nr!(), 1:4], label = "Add Lesion (Auto-PET)", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
-    on(btn_add_ai.clicks) do _; put!(channel, AddAutoPetEvent(algo_combo.selection[])) end
-
-    ai_r = nr!()
-    btn_sync_ai = Button(g[ai_r, 1:2], label = "Sync Missing (Auto-PET)", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
-    btn_map_link = Button(g[nr!(), 1:4], label = "Map Link", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
-    on(btn_map_link.clicks) do _; put!(channel, MapLinkEvent(active_lesion_id[])) end
-    btn_gen_man = Button(g[ai_r, 3:4], label = "Gen Manual", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
-    on(btn_sync_ai.clicks) do _; put!(channel, SyncMissingEvent()) end
-    on(btn_gen_man.clicks) do _; put!(channel, GenManualEvent()) end
-
-    end_section!(sec_seg)
-
-    # ── Category Filter ──────────────────────────────────────────────────────
-    sec_fields = begin_section!("Annotation Fields")
-    cf_r = nr!()
-    Label(g[cf_r, 1], "Filter category:", fontsize = 11, color = SUBTXT, halign = :right)
-    cat_menu = Menu(g[cf_r, 2:4], options = all_cats, fontsize = 11)
-    active_cat = Observable("All")
-    on(cat_menu.selection) do sel; sel !== nothing && (active_cat[] = string(sel)) end
-
-    # ── Annotation Fields (one row per question) ──────────────────────────────
+    # ── Annotation Fields by Category ──────────────────────────────────────────
     field_widgets = Dict{String, Any}()
 
+    # Group questions by their primary category
+    questions_by_cat = Dict{String, Vector{QuestionDef}}()
     for q in schema
-        q_r = nr!()
-        Label(g[q_r, 1], q.short * ":",
-            fontsize = 11, font = :bold, color = TXT,
-            halign = :right, tellwidth = false)
+        cat = isempty(q.categories) ? "Uncategorized" : q.categories[1]
+        if !haskey(questions_by_cat, cat)
+            questions_by_cat[cat] = QuestionDef[]
+        end
+        push!(questions_by_cat[cat], q)
+    end
+    
+    # Render a section for each category in order
+    for cat in all_cats
+        haskey(questions_by_cat, cat) || continue
+        qs = questions_by_cat[cat]
+        
+        # We start sections collapsed to conserve space, unless specified otherwise
+        is_default_open = cat == "Final Assessment" || cat == "Identification"
+        sec_cat = begin_section!("Annotation: " * cat; default_open=is_default_open)
+        
+        for q in qs
+            q_r = nr!()
+            Label(g[q_r, 1], q.short * ":",
+                fontsize = 11, font = :bold, color = TXT,
+                halign = :right, tellwidth = false)
 
-        if isempty(q.options)
-            tb = Textbox(g[q_r, 2:4],
-                placeholder = isempty(q.default_answer) ? "..." : q.default_answer,
-                fontsize = 11)
-            field_widgets[q.short] = tb
-        else
-            opts_obs = Observable(String["- select -"; q.options])
-            m = Menu(g[q_r, 2:3], options = opts_obs, fontsize = 11)
-            field_widgets[q.short] = m
-            
-            btn_add_opt = Button(g[q_r, 4], label = "+", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=11)
-            
-            tb_new_row = nr!()
-            tb_new = Textbox(g[tb_new_row, 2:3], placeholder="Type new & press Enter...", fontsize=11)
-            rowsize!(g, tb_new_row, Fixed(0))
-            
-            tb_new_visible = Observable(false)
-            
-            on(btn_add_opt.clicks) do _
-                tb_new_visible[] = !tb_new_visible[]
-                if tb_new_visible[]
-                    rowsize!(g, tb_new_row, Auto())
-                    tb_new.stored_string[] = ""
-                else
+            if isempty(q.options)
+                tb = Textbox(g[q_r, 2:4],
+                    placeholder = isempty(q.default_answer) ? "..." : q.default_answer,
+                    fontsize = 11)
+                field_widgets[q.short] = tb
+            else
+                opts_obs = Observable(String["- select -"; q.options])
+                m = Menu(g[q_r, 2:3], options = opts_obs, fontsize = 11)
+                field_widgets[q.short] = m
+                
+                btn_add_opt = Button(g[q_r, 4], label = "+", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=11)
+                
+                tb_new_row = nr!()
+                tb_new = Textbox(g[tb_new_row, 2:3], placeholder="Type new & press Enter...", fontsize=11)
+                rowsize!(g, tb_new_row, Fixed(0))
+                tb_new.blockscene.visible[] = false  # hide at creation
+                if tb_new_row > 1
+                    rowgap!(g, tb_new_row - 1, 0)
+                end
+                
+                tb_new_visible = Observable(false)
+                
+                on(btn_add_opt.clicks) do _
+                    tb_new_visible[] = !tb_new_visible[]
+                    if tb_new_visible[]
+                        rowsize!(g, tb_new_row, Auto())
+                        tb_new.blockscene.visible[] = true
+                        if tb_new_row > 1; rowgap!(g, tb_new_row - 1, 3); end
+                        tb_new.stored_string[] = ""
+                    else
+                        rowsize!(g, tb_new_row, Fixed(0))
+                        tb_new.blockscene.visible[] = false
+                        if tb_new_row > 1; rowgap!(g, tb_new_row - 1, 0); end
+                    end
+                end
+                
+                on(tb_new.stored_string) do val
+                    val = _safe_strip(val)
+                    if !isempty(val) && !(val in opts_obs[])
+                        new_opts = copy(opts_obs[])
+                        push!(new_opts, val)
+                        opts_obs[] = new_opts
+                        m.selection[] = val
+                    end
                     rowsize!(g, tb_new_row, Fixed(0))
+                    tb_new.blockscene.visible[] = false
+                    if tb_new_row > 1; rowgap!(g, tb_new_row - 1, 0); end
+                    tb_new_visible[] = false
                 end
             end
-            
-            on(tb_new.stored_string) do val
-                val = strip(val)
-                if !isempty(val) && !(val in opts_obs[])
-                    new_opts = copy(opts_obs[])
-                    push!(new_opts, val)
-                    opts_obs[] = new_opts
-                    m.selection[] = val
-                end
-                rowsize!(g, tb_new_row, Fixed(0))
-                tb_new_visible[] = false
+
+            # Compact tooltip
+            if !isempty(q.full) && length(q.full) > 8
+                tip = length(q.full) > 100 ? q.full[1:100] * "..." : q.full
+                Label(g[nr!(), 2:4], tip,
+                    fontsize = 9, color = SUBTXT, halign = :left,
+                    tellwidth = false, word_wrap = true)
             end
         end
-
-        # Compact tooltip
-        if !isempty(q.full) && length(q.full) > 8
-            tip = length(q.full) > 100 ? q.full[1:100] * "..." : q.full
-            Label(g[nr!(), 2:4], tip,
-                fontsize = 9, color = SUBTXT, halign = :left,
-                tellwidth = false, word_wrap = true)
+        
+        end_section!(sec_cat)
+        
+        # Apply the default_open collapse state immediately
+        if !is_default_open
+            is_open, start_row, header_r, btn = sec_cat
+            for i in start_row:r[1]
+                rowsize!(g, i, Fixed(0))
+            end
+            # Zero row gaps for collapsed rows
+            for i in (start_row > 1 ? start_row - 1 : start_row):min(r[1], r[1] - 1)
+                rowgap!(g, i, 0)
+            end
+            for c in g.content
+                if c.span.rows.start >= start_row && c.span.rows.stop <= r[1]
+                    if hasproperty(c.content, :blockscene)
+                        c.content.blockscene.visible[] = false
+                    end
+                end
+            end
         end
     end
-
-    end_section!(sec_fields)
 
     # ── RadLex Multi-Value Panel ──────────────────────────────────────────────
     sec_radlex = begin_section!("RadLex Ontology Properties")
@@ -520,7 +566,7 @@ function create_metadata_window(
     rl_menu = Menu(g[nr!(), 1:4], options = radlex_filtered, fontsize = 10)
 
     on(rl_search.stored_string) do txt
-        t = strip(txt)
+        t = _safe_strip(txt)
         if isempty(t)
             radlex_filtered[] = length(radlex) > 200 ? radlex[1:200] : radlex
         else
@@ -579,8 +625,8 @@ function create_metadata_window(
     btn_add_c = Button(g[nr!(), 4], label = "+ Add Custom Field",
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
     on(btn_add_c.clicks) do _
-        k = strip(ck_tb.stored_string[])
-        v = strip(cv_tb.stored_string[])
+        k = _safe_strip(ck_tb.stored_string[])
+        v = _safe_strip(cv_tb.stored_string[])
         isempty(k) && return
         d = copy(custom_db[])
         d[k] = v
@@ -588,6 +634,31 @@ function create_metadata_window(
     end
 
     end_section!(sec_custom)
+
+    # ── Segmentation Mini Manager ────────────────────────────────────────────
+    sec_seg = begin_section!("Segmentation Mini Manager")
+    pe_r = nr!()
+    btn_paint = Button(g[pe_r, 1], label = "Paint", buttoncolor = GRN,   labelcolor = TXT, fontsize = 11)
+    btn_erase = Button(g[pe_r, 2], label = "Erase", buttoncolor = RED_BTN, labelcolor = TXT, fontsize = 11)
+    on(btn_paint.clicks) do _; put!(channel, PaintValEvent(1)) end
+    on(btn_erase.clicks) do _; put!(channel, PaintValEvent(0)) end
+
+    algo_r = nr!()
+    Label(g[algo_r, 1], "Algorithm:", halign=:left, fontsize=11, color=TXT)
+    algo_combo = Menu(g[algo_r, 2:4], options = ["HELPNet (AI)", "NNInteractive", "Traditional (PETTumor)"], default = "HELPNet (AI)", fontsize = 10)
+
+    btn_add_ai = Button(g[nr!(), 1:4], label = "Add Lesion (Auto-PET)", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    on(btn_add_ai.clicks) do _; put!(channel, AddAutoPetEvent(algo_combo.selection[])) end
+
+    ai_r = nr!()
+    btn_sync_ai = Button(g[ai_r, 1:2], label = "Sync Missing (Auto-PET)", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    btn_map_link = Button(g[nr!(), 1:4], label = "Map Link", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    on(btn_map_link.clicks) do _; put!(channel, MapLinkEvent(active_lesion_id[])) end
+    btn_gen_man = Button(g[ai_r, 3:4], label = "Gen Manual", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    on(btn_sync_ai.clicks) do _; put!(channel, SyncMissingEvent()) end
+    on(btn_gen_man.clicks) do _; put!(channel, GenManualEvent()) end
+
+    end_section!(sec_seg)
 
     # ── Active Data Settings ──────────────────────────────────────────────────
     sec_ads = begin_section!("Active Data Settings")
@@ -668,7 +739,7 @@ function create_metadata_window(
             w = get(field_widgets, q.short, nothing)
             w === nothing && continue
             if w isa Textbox
-                v = strip(w.stored_string[])
+                v = _safe_strip(w.stored_string[])
                 isempty(v) || (d[q.short] = v)
             elseif w isa Menu
                 sel = w.selection[]
@@ -683,14 +754,14 @@ function create_metadata_window(
         for (k, v) in custom_db[]
             d["Custom:$(k)"] = v
         end
-        v_dict = strip(dict_tb.stored_string[])
+        v_dict = _safe_strip(dict_tb.stored_string[])
         isempty(v_dict) || (d["RadiologicalDictation"] = v_dict)
-        v_rpt = strip(rpt_tb.stored_string[])
+        v_rpt = _safe_strip(rpt_tb.stored_string[])
         isempty(v_rpt) || (d["RadiologicalReportOutput"] = v_rpt)
         return d
     end
 
-    function apply_state(data::Dict{String,String})
+    function apply_state(data::AbstractDict)
         for q in schema
             w = get(field_widgets, q.short, nothing)
             w === nothing && continue
