@@ -168,7 +168,9 @@ using Observables
 InferenceClient.start_python_worker(joinpath(@__DIR__, "python_worker.py"))
 
 active_lesion = Observable("Lesion 1")
-lesion_ids = Observable(["Lesion 1", "Lesion 2"])
+max_lesion = Int(maximum(mask_vol))
+lesion_list = max_lesion > 0 ? ["Lesion $i" for i in 1:max_lesion] : ["Lesion 1"]
+lesion_ids = Observable(lesion_list)
 
 # Launch the Slicer Extension native port GUI, passing the actor channel directly
 win = LesionMetadataWindow.create_metadata_window(active_lesion, lesion_ids, mainMedEye3dInstance.channel)

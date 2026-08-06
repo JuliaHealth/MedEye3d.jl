@@ -204,7 +204,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
     
     # 1. Update switchIndex based on mouse position — needs coords
     if !isempty(mouseCoords)
-        if length(mainStates) == 4 # QuadImage mode
+        if length(mainStates) >= 4 # QuadImage mode
             if quadZoomState.isZoomed
                 # When zoomed, always target the zoomed panel
                 mainState.switchIndex = quadZoomState.zoomedPanel
@@ -250,7 +250,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
     end # end !isempty(mouseCoords) for panel detection
     
     # 2. Right-click cross-plane jumping — needs coords
-    if !isempty(mouseCoords) && mousestr.isRightButtonDown && length(mainStates) == 4 # QuadImage mode
+    if !isempty(mouseCoords) && mousestr.isRightButtonDown && length(mainStates) >= 4 # QuadImage mode
         viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
         viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
         actualW = mousestr.actualWindowWidth > 0 ? Float64(mousestr.actualWindowWidth) : viewportW
@@ -259,46 +259,10 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
         clickedPanel = mainState.switchIndex
 
         # Read actual rendered vertex positions from the panel's calcDimsStruct
-        verts = mainStates[clickedPanel].calcDimsStruct.mainImageQuadVert
-        glLeft   = Float64(min(verts[17], verts[25]))
-        glRight  = Float64(max(verts[1], verts[9]))
-        glBottom = Float64(min(verts[10], verts[18]))
-        glTop    = Float64(max(verts[2], verts[26]))
+        texX, texY = getTextureCoordinatesFromScreen(x, y, mainStates[clickedPanel].calcDimsStruct, actualW, actualH)
         
-        # Convert click to OpenGL NDC accounting for viewport vs content area mismatch
-        glX = (x * 2.0 / viewportW) - 1.0
-        glY = ((actualH - y) * 2.0 / viewportH) - 1.0
-        
-        # Map click to OpenGL texture coordinates (s, t) within vertex bounds
-        # s: 0=left edge, 1=right edge
-        # t: 0=bottom of quad (array row 1), 1=top of quad (array row texH)
-        # Clicks in padding zone clamp to nearest image edge
-        s = clamp((glX - glLeft) / (glRight - glLeft), 0.0, 1.0)
-        t = clamp((glY - glBottom) / (glTop - glBottom), 0.0, 1.0)
-
-        texW = Float64(mainStates[clickedPanel].calcDimsStruct.imageTextureWidth)
-        texH = Float64(mainStates[clickedPanel].calcDimsStruct.imageTextureHeight)
-        
-        # s=0 → col 1, s=1 → col texW
-        texX = clamp(round(Int, s * texW), 1, Int(texW))
-        
-        # texY mapping (same for ALL panels):
-        # t=1 (top of quad) → texY=texH (last row) — matches getNewY behavior
-        # t=0 (bottom)      → texY=1 (first row)
-        texY = clamp(round(Int, t * texH), 1, Int(texH))
-        
-        # Detect if click is in padding zone
-        inPadding = (glX < glLeft || glX > glRight || glY < glBottom || glY > glTop)
-        # Convert vertex bounds to mouse pixel coords for debug display
-        imgTopPx = round(Int, actualH - (glTop + 1.0) / 2.0 * viewportH)
-        imgBotPx = round(Int, actualH - (glBottom + 1.0) / 2.0 * viewportH)
-        imgLeftPx = round(Int, (glLeft + 1.0) / 2.0 * viewportW)
-        imgRightPx = round(Int, (glRight + 1.0) / 2.0 * viewportW)
-        
-        @info "RIGHT-CLICK: panel=$clickedPanel windowXY=($x,$y) inPadding=$inPadding viewport=$(Int(viewportW))x$(Int(viewportH)) actual=$(Int(actualW))x$(Int(actualH))"
-        @info "  Image mouse-pixel bounds: top=$imgTopPx bot=$imgBotPx left=$imgLeftPx right=$imgRightPx"
-        @info "  glXY=($glX,$glY) bounds=(L=$glLeft,R=$glRight,B=$glBottom,T=$glTop)"
-        @info "  s=$s t=$t texX=$texX texY=$texY texW=$texW texH=$texH"
+        @info "RIGHT-CLICK: panel=$clickedPanel windowXY=($x,$y) viewport=$(Int(viewportW))x$(Int(viewportH)) actual=$(Int(actualW))x$(Int(actualH))"
+        @info "  texX=$texX texY=$texY"
         
         currentSlice = mainStates[clickedPanel].currentDisplayedSlice
         
@@ -316,12 +280,26 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             origX, origZ, origY = texX, texY, currentSlice
         end
         
+        # Ensure lastRecordedMousePosition is updated for ALL panels so scroll sync knows the intersection!
+        for i in 1:length(mainStates)
+            if i == 1 || i == 2 || i == 5
+                mainStates[i].lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
+            elseif i == 3
+                mainStates[i].lastRecordedMousePosition = CartesianIndex(origY, origZ, origX)
+            else
+                mainStates[i].lastRecordedMousePosition = CartesianIndex(origX, origZ, origY)
+            end
+        end
+        
         @info "  origX=$origX origY=$origY origZ=$origZ currentSlice=$currentSlice"
         @info "  Axial scrolls Z(1-$(mainStates[1].onScrollData.slicesNumber)) Sag scrolls origX(1-$(mainStates[3].onScrollData.slicesNumber)) Cor scrolls origY(1-$(mainStates[4].onScrollData.slicesNumber))"
         
         # Jump other panels to the corresponding slices
-        # Panel 1 & 2 scroll through Z (origZ), Panel 3 scrolls through origX, Panel 4 scrolls through origY
+        # Panel 1, 2 & 5 scroll through Z (origZ), Panel 3 scrolls through origX, Panel 4 scrolls through origY
         targets = [(1, origZ), (2, origZ), (3, origX), (4, origY)]
+        if length(mainStates) >= 5
+            push!(targets, (5, origZ))
+        end
         
         for (panelIdx, targetSlice) in targets
             if panelIdx != clickedPanel
@@ -354,40 +332,11 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 end
             end
         end
+        
+
     end # end right-click handler
 
-    # 3. Crosshair rendering for multi-image modes (needs coords, MultiImage only)
-    if !isempty(mouseCoords) && length(mainStates) > 1 && length(mainStates) != 4 #only in multiImage mode (but NOT QuadImage)
-        textBeginning2, midPoint2, imageRange2 = openGlSystemVals(mainState.calcDimsStruct.fractionOfMainIm, mainState.calcDimsStruct.windowWidth)
-        cursorXPosOpenGl2 = (mouseCoords[1][1] / mainState.calcDimsStruct.windowWidth) * 2 - 1
-        if cursorXPosOpenGl2 > midPoint2
-            # @info cursorXPosOpenGl2
-            mainState.switchIndex = 2
-        elseif cursorXPosOpenGl2 < midPoint2
-            # @info cursorXPosOpenGl2
-            mainState.switchIndex = 1
-        end
 
-        #switching the index here to log real space point from the left or right images for crosshair rendering
-        mainState = mainStates[mainState.switchIndex]
-        passiveState = mainState == mainStates[1] ? mainStates[2] : mainStates[1]
-
-        #Conversion of mouse coordinates to multi-image specific texture coordinates
-        #LEFT IMAGE
-        texPosX = Nothing
-        texPosY = Nothing
-        calcD = mainState.calcDimsStruct
-        x, y = (mouseCoords[1][1], mouseCoords[1][2])
-        if mainState.imagePosition == 1
-            texPosX = max(1, min(Float64(round(((x - calcD.widthCorr / 2) / (calcD.corrected_width / 2 + calcD.widthCorr)) * calcD.imageTextureWidth)), calcD.imageTextureWidth))
-            #RIGHT IMAGE
-        elseif mainState.imagePosition == 2
-            texPosX = max(1, min(Float64(round(((x - (calcD.widthCorr / 2 + (calcD.corrected_width / 2))) / (calcD.corrected_width / 2 + calcD.widthCorr)) * calcD.imageTextureWidth)), calcD.imageTextureWidth))
-        end
-        texPosY = Float64(getNewY(y, calcD))
-
-        ShadersAndVerticiesForLine.updateCrosshairPosition(texPosX, texPosY, mainState.crosshairFields, mainState.mainRectFields, mainState.mainForDisplayObjects, mainState.currentDisplayedSlice, passiveState.currentDisplayedSlice, mainState.onScrollData.dataToScrollDims.dimensionToScroll, passiveState.onScrollData.dataToScrollDims.dimensionToScroll, mainState.spacingsValue, passiveState.spacingsValue, mainState.originValue, passiveState.originValue, mainState.imagePosition, mainState.calcDimsStruct, passiveState.calcDimsStruct, passiveState)
-    end
 
     #Dynamically moving crosshair on the screen based on mouse position, only if in multiImage mode, so simply shove it in above if block
     # if (mousestr.isLeftButtonDown)
@@ -409,7 +358,9 @@ Handles double-click panel zoom toggle in QuadImage mode.
 Dispatched via on_next!(states, data::DoubleClickEvent) — same pattern as all other event types.
 """
 function reactToDoubleClick(event::DoubleClickEvent, mainStates::Vector{StateDataFields})
-    length(mainStates) == 4 || return  # QuadImage only
+    if length(mainStates) < 4
+        return
+    end
 
     # Determine which panel was clicked from cursor position
     viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
@@ -444,14 +395,12 @@ function reactToDoubleClick(event::DoubleClickEvent, mainStates::Vector{StateDat
             (mainImageQuadVert = zoomedCalcDim.mainImageQuadVert,
              mainQuadVertSize  = zoomedCalcDim.mainQuadVertSize))
 
-        offscreen = Float32.([-10,-10,0,0,0,0,0,0, -10,-10,0,0,0,0,0,0,
-                               -10,-10,0,0,0,0,0,0, -10,-10,0,0,0,0,0,0])
         for i in 1:4
             if i != clickedPanel
                 mainStates[i].calcDimsStruct = setproperties(
                     mainStates[i].calcDimsStruct,
-                    (mainImageQuadVert = offscreen,
-                     mainQuadVertSize  = sizeof(offscreen)))
+                    (mainImageQuadVert = Float32[0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0],
+                     mainQuadVertSize = 32 * sizeof(Float32)))
             end
         end
     else

@@ -128,8 +128,9 @@ we generete separately r,g and b values by adding contributions from all texture
 """
 function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
 
-    texturesNotCont = filter(it -> !it.isContinuusMask, textures)#only single color associated
-    texturesCont = filter(it -> length(it.colorSet) > 1, textures)#multiple colors associated
+    texturesNotCont = filter(it -> !it.isContinuusMask && !it.isMultiDiscreteMask, textures)#only single color associated
+    texturesCont = filter(it -> it.isContinuusMask, textures)#multiple colors associated
+    texturesDiscrete = filter(it -> it.isMultiDiscreteMask, textures)#discrete integer maps
 
     masksInfluences = map(x -> setMaskInfluence(x), textures) |>
                       (strings) -> join(strings, "")
@@ -156,17 +157,28 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
                 if ($(x.name)isVisible == 1 && abs($(x.name)Res) > 0.00001) {
                     float alpha = $(x.name)maskContribution * (abs($(x.name)Res) > 0.00001 ? 1.0 : 0.0);
                     // Use a higher alpha if it's the active lesion mask
-                    if ($(x.name)minValue == $(x.name)maxValue && $(x.name)Res >= $(x.name)minValue) {
-                        alpha = 1.0;
+                    if ($(x.name)minValue == $(x.name)maxValue) {
+                        if (abs($(x.name)Res - $(x.name)minValue) < 0.1) {
+                            alpha = 1.0;
+                        } else {
+                            alpha = 0.0;
+                        }
                     } else if (alpha > 0.0) {
                         alpha = clamp(alpha * 2.0, 0.5, 1.0); // Boost visibility
                     }
-                    vec3 maskColor = vec3(
-                        changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.r, $(x.name)ValueRange),
-                        changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.g, $(x.name)ValueRange),
-                        changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.b, $(x.name)ValueRange)
-                    );
-                    if (maskColor != vec3(0.0)) {
+                    vec3 maskColor = vec3(0.0);
+                    if (alpha > 0.0) {
+                        if ($(x.name)minValue == $(x.name)maxValue) {
+                            maskColor = vec3($(x.name)ColorMask.r, $(x.name)ColorMask.g, $(x.name)ColorMask.b);
+                        } else {
+                            maskColor = vec3(
+                                changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.r, $(x.name)ValueRange),
+                                changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.g, $(x.name)ValueRange),
+                                changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.b, $(x.name)ValueRange)
+                            );
+                        }
+                    }
+                    if (maskColor != vec3(0.0) && alpha > 0.0) {
                         baseColor = mix(baseColor, maskColor, alpha);
                     }
                 }
@@ -192,6 +204,29 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
             """
         end
     end
+
+    for x in texturesDiscrete
+        if !x.isMainImage
+            maskApplyCode *= """
+                if ($(x.name)isVisible == 1 && abs($(x.name)Res) > 0.00001) {
+                    if ($(x.name)minValue < $(x.name)maxValue || abs($(x.name)Res - $(x.name)minValue) < 0.1) {
+                        float alpha = $(x.name)maskContribution;
+                        alpha = clamp(alpha * 2.0, 0.5, 1.0); // Boost visibility
+                        vec3 maskColor = vec3(
+                            r$(x.name)getColorForDiscreteColor($(x.name)Res),
+                            g$(x.name)getColorForDiscreteColor($(x.name)Res),
+                            b$(x.name)getColorForDiscreteColor($(x.name)Res)
+                        );
+                        if (maskColor != vec3(0.0)) {
+                            baseColor = mix(baseColor, maskColor, alpha);
+                        }
+                    }
+                }
+            """
+        end
+    end
+
+    
     return """
     float changeClip(float minVal, float maxVal, float value, float color, float range) {
         if (value < minVal) {
@@ -203,6 +238,7 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
         }
     }
     $(getMultiColorMaskFunctions(texturesCont))
+    $(getMultiDiscreteColorMaskFunctions(texturesDiscrete))
 
     void main() {
         $(masksInfluences)
@@ -467,6 +503,28 @@ function getMultiColorMaskFunctions(continuusColorTextSpecs::Vector{TextureSpec{
 
 
 end#getNuclearMaskFunction
+
+
+function getMultiDiscreteColorMaskFunctions(discreteColorTextSpecs::Vector{TextureSpec{Float32}})::String
+    tuples = map(x -> [(x.name, [[a.r, a.g, a.b] for a in x.colorSet], "r", 1), (x.name, [[a.r, a.g, a.b] for a in x.colorSet], "g", 2), (x.name, [[a.r, a.g, a.b] for a in x.colorSet], "b", 3)], discreteColorTextSpecs)
+
+    if (!isempty(tuples))
+        tuples = reduce(vcat, tuples)
+    end
+
+    return join(map(x -> """
+
+   float $(x[3])$(x[1])getColorForDiscreteColor(float innertexelRes) {
+       uint val = uint(round(innertexelRes));
+       if (val == 0u) {
+           return 0.0;
+       }
+       uint indexx = ((val - 1u) % uint($(length(x[2])))) + 1u;
+       float[$(length(x[2])+1)] colorFloats = float[$(length(x[2])+1)](0.0,$( map(it->it[x[4]],x[2])|> (fls)-> join(fls,",")    )   )  ;
+       return colorFloats[indexx];
+   }
+   """, tuples), " ")
+end
 
 
 # if( innertexelRes < $(x[1])minValue  ){

@@ -64,6 +64,7 @@ whichCreated::Int32 =-1       #marks which one this texture was when created - s
 isMainImage ::Bool = false  #true if this texture represents main image
 isNuclearMask ::Bool = false # used for example in case of nuclear imagiing studies
 isContinuusMask ::Bool = false # in case of masks if mask is continuus color display we set multiple colors in a vector
+isMultiDiscreteMask ::Bool = false # in case of integer labels we map each integer to a distinct color from colorSet
 color::RGB = RGB(0.0,0.0,0.0) #needed in case for the masks in order to establish the range of colors we are intrested in in case of binary mask there is no point to supply more than one color (supply Vector with length = 1)
 colorSet::Vector{RGB}=[]    #set of colors that can be used for mask with continous values
 strokeWidth::Int32 =Int32(3)#marking how thick should be the line that is left after acting with the mouse ...
@@ -85,6 +86,7 @@ minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask
   isMainImage::Bool = false  #true if this texture represents main image
   isNuclearMask::Bool = false # used for example in case of nuclear imagiing studies
   isContinuusMask::Bool = false # in case of masks if mask is continuus color display we set multiple colors in a vector
+  isMultiDiscreteMask::Bool = false # in case of integer labels we map each integer to a distinct color from colorSet
   color::RGB = RGB(0.0, 0.0, 0.0) #needed in case for the masks in order to establish the range of colors we are intrested in in case of binary mask there is no point to supply more than one color (supply Vector with length = 1)
   colorSet::Vector{RGB} = []    #set of colors that can be used for mask with continous values
   strokeWidth::Int32 = Int32(3)#marking how thick should be the line that is left after acting with the mouse ...
@@ -149,6 +151,7 @@ windowControlStruct::WindowControlStruct=WindowControlStruct()# holding data use
   isFastScroll::Bool = false # set by f letter to true and by s to normal - slow
   imagePos::Int64 = 1
   isSyncScrollOn::Bool = true # toggled by pressing c
+  isCrosshairVisible::Bool = false # toggled by Makie GUI
 end
 
 

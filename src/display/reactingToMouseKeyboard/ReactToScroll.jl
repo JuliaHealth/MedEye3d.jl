@@ -6,7 +6,7 @@ code adapted from https://discourse.julialang.org/t/custom-subject-in-rocket-jl-
 """
 module ReactToScroll
 using ModernGL, GLFW, Logging
-using ..DisplayWords, ..ForDisplayStructs, ..TextureManag, ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForSupervoxels
+using ..DisplayWords, ..ForDisplayStructs, ..TextureManag, ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForSupervoxels, ..ShadersAndVerticiesForLine
 
 export reactToScroll
 export registerMouseScrollFunctions
@@ -105,37 +105,110 @@ end
         
         # Multiview synchronization
         if length(mainStates) > 1 && mainState.mainForDisplayObjects.isSyncScrollOn
-            for panelIdx in 1:length(mainStates)
-                if panelIdx != mainStates[1].switchIndex
-                    panelState = mainStates[panelIdx]
-                    targetDim = panelState.onScrollData.dataToScrollDims.dimensionToScroll
-                    targetSlice = locArr[targetDim]
-                    
-                    if targetSlice != panelState.currentDisplayedSlice || panelState.currentlyDispDat === nothing
-                        # clamp
-                        lastSlice = panelState.onScrollData.slicesNumber
-                        newSlice = clamp(targetSlice, 1, lastSlice)
+            if length(mainStates) >= 4
+                clickedPanel = mainStates[1].switchIndex
+                
+                # Use the current crosshair position (where the user last clicked or synced)
+                activePos = mainState.lastRecordedMousePosition
+                if clickedPanel == 1 || clickedPanel == 2 # Axial
+                    origX, origY = activePos[1], activePos[2]
+                    origZ = current
+                elseif clickedPanel == 3  # Sagittal (permuted 2,3,1)
+                    origY, origZ = activePos[1], activePos[2]
+                    origX = current
+                else # Bottom-Right (4) (Coronal) (permuted 1,3,2)
+                    origX, origZ = activePos[1], activePos[2]
+                    origY = current
+                end
+                
+                # Panel 1, 2, 5 scroll Z (origZ), Panel 3 scrolls origX, Panel 4 scrolls origY
+                targets = [(1, origZ), (2, origZ), (3, origX), (4, origY)]
+                if length(mainStates) >= 5
+                    push!(targets, (5, origZ))
+                end
+                
+                # Update lastRecordedMousePosition for all panels to ensure crosshairs synchronize!
+                for i in 1:length(mainStates)
+                    if i == 1 || i == 2 || i == 5
+                        mainStates[i].lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
+                    elseif i == 3
+                        mainStates[i].lastRecordedMousePosition = CartesianIndex(origY, origZ, origX)
+                    else
+                        mainStates[i].lastRecordedMousePosition = CartesianIndex(origX, origZ, origY)
+                    end
+                end
+                
+                for (panelIdx, targetSlice) in targets
+                    if panelIdx != clickedPanel
+                        panelState = mainStates[panelIdx]
+                        currSlice = panelState.currentDisplayedSlice
                         
-                        # update texture data (singleSlDat logic duplicated manually)
-                        singleSlDatSync = panelState.onScrollData.dataToScroll |>
-                            (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(newSlice), panelState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
-                            (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=newSlice, textToDisp=getTextForCurrentSlice(panelState.onScrollData, Int32(newSlice)))
-                        
-                        panelState.currentlyDispDat = singleSlDatSync
-                        panelState.currentDisplayedSlice = newSlice
-                        panelState.isSliceChanged = true
-                        
-                        # upload textures to GPU without SwapBuffers
-                        for updateDat in singleSlDatSync.listOfDataAndImageNames
-                            findList = findall((texSpec) -> texSpec.name == updateDat.name, panelState.mainForDisplayObjects.listOfTextSpecifications)
-                            if !isempty(findList)
-                                texSpec = panelState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
-                                updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, panelState.calcDimsStruct.imageTextureWidth, panelState.calcDimsStruct.imageTextureHeight)
+                        if targetSlice != currSlice || panelState.currentlyDispDat === nothing
+                            lastSlice = panelState.onScrollData.slicesNumber
+                            newSlice = clamp(targetSlice, 1, lastSlice)
+                            
+                            singleSlDatSync = panelState.onScrollData.dataToScroll |>
+                                (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(newSlice), panelState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
+                                (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=newSlice, textToDisp=getTextForCurrentSlice(panelState.onScrollData, Int32(newSlice)))
+                            
+                            panelState.currentlyDispDat = singleSlDatSync
+                            panelState.currentDisplayedSlice = newSlice
+                            panelState.isSliceChanged = true
+                            
+                            for updateDat in singleSlDatSync.listOfDataAndImageNames
+                                findList = findall((texSpec) -> texSpec.name == updateDat.name, panelState.mainForDisplayObjects.listOfTextSpecifications)
+                                if !isempty(findList)
+                                    texSpec = panelState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
+                                    updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, panelState.calcDimsStruct.imageTextureWidth, panelState.calcDimsStruct.imageTextureHeight)
+                                end
                             end
                         end
                         
-                        # also update panelState.lastRecordedMousePosition to keep them in sync
-                        panelState.lastRecordedMousePosition = CartesianIndex(locArr[1], locArr[2], locArr[3])
+                        # UPDATE lastRecordedMousePosition for the synced panels
+                        if panelIdx == 1 || panelIdx == 2
+                            panelState.lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
+                        elseif panelIdx == 3
+                            panelState.lastRecordedMousePosition = CartesianIndex(origY, origZ, origX)
+                        else
+                            panelState.lastRecordedMousePosition = CartesianIndex(origX, origZ, origY)
+                        end
+                    end
+                end
+                
+
+            else
+                for panelIdx in 1:length(mainStates)
+                    if panelIdx != mainStates[1].switchIndex
+                        panelState = mainStates[panelIdx]
+                        targetDim = panelState.onScrollData.dataToScrollDims.dimensionToScroll
+                        targetSlice = locArr[targetDim]
+                        
+                        if targetSlice != panelState.currentDisplayedSlice || panelState.currentlyDispDat === nothing
+                            # clamp
+                            lastSlice = panelState.onScrollData.slicesNumber
+                            newSlice = clamp(targetSlice, 1, lastSlice)
+                            
+                            # update texture data (singleSlDat logic duplicated manually)
+                            singleSlDatSync = panelState.onScrollData.dataToScroll |>
+                                (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(newSlice), panelState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
+                                (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=newSlice, textToDisp=getTextForCurrentSlice(panelState.onScrollData, Int32(newSlice)))
+                            
+                            panelState.currentlyDispDat = singleSlDatSync
+                            panelState.currentDisplayedSlice = newSlice
+                            panelState.isSliceChanged = true
+                            
+                            # upload textures to GPU without SwapBuffers
+                            for updateDat in singleSlDatSync.listOfDataAndImageNames
+                                findList = findall((texSpec) -> texSpec.name == updateDat.name, panelState.mainForDisplayObjects.listOfTextSpecifications)
+                                if !isempty(findList)
+                                    texSpec = panelState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
+                                    updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, panelState.calcDimsStruct.imageTextureWidth, panelState.calcDimsStruct.imageTextureHeight)
+                                end
+                            end
+                            
+                            # also update panelState.lastRecordedMousePosition to keep them in sync
+                            panelState.lastRecordedMousePosition = CartesianIndex(locArr[1], locArr[2], locArr[3])
+                        end
                     end
                 end
             end

@@ -35,6 +35,7 @@ end
 
 struct ToggleLesionEvent end
 struct RefreshListEvent end
+
 struct AddAutoPetEvent 
     algorithm::String
 end

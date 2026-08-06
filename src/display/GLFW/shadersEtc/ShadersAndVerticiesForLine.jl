@@ -2,7 +2,7 @@ module ShadersAndVerticiesForLine
 using ModernGL, GeometryTypes, GLFW
 using ..ForDisplayStructs, ..CustomFragShad, ..ModernGlUtil, ..PrepareWindowHelpers, ..DataStructs, ..TextureManag, ..BasicStructs, ..StructsManag, ..DisplayWords
 
-export createAndInitLineShaderProgram, updateCrosshairPosition
+export createAndInitLineShaderProgram, updateCrosshairPosition, calculateCrosshairVertices, updateCrosshairBuffer
 
 
 #These are the openGl vertex coordinates for crosshair in 3d space
@@ -108,16 +108,16 @@ end
 
 
 
-function passiveTexToWindRightX(tex_x::Float64, calcD::CalcDimsStruct)
+function passiveTexToWindRightX(tex_x, calcD::CalcDimsStruct)
     window_x = (tex_x / calcD.imageTextureWidth) * (calcD.corrected_width / 2 + calcD.widthCorr) +
                (calcD.widthCorr / 2 + (calcD.corrected_width / 2))
     return round(Int64, window_x)
 end
-function passiveTexToWindLeftX(tex_x::Float64, calcD::CalcDimsStruct)
+function passiveTexToWindLeftX(tex_x, calcD::CalcDimsStruct)
     window_x = (tex_x / calcD.imageTextureWidth) * (calcD.corrected_width / 2 + calcD.widthCorr) + calcD.widthCorr / 2
     return round(Int64, window_x)
 end
-function passiveTexToWindY(tex_y::Float64, calcD::CalcDimsStruct)
+function passiveTexToWindY(tex_y, calcD::CalcDimsStruct)
     window_y = calcD.windowHeight - (
         (tex_y / calcD.imageTextureHeight) * (calcD.windowHeight * (1 - calcD.heightCorr)) +
         (calcD.heightCorr * (calcD.windowHeight / 2))
@@ -225,18 +225,82 @@ function updateCrosshairPosition(x, y, crosshair, mainRect, forDisplayConstants,
     # @info passiveScrollNumb
     # @info Int(passiveScrollNumb)
     # Update crosshair vertices
-    new_vertices = Float32[
-        passiveOpenGlX-0.05, passiveOpenGlY, 0.0,
-        passiveOpenGlX+0.05, passiveOpenGlY, 0.0,
-        passiveOpenGlX, passiveOpenGlY-0.05, 0.0,
-        passiveOpenGlX, passiveOpenGlY+0.05, 0.0
-    ]
+    new_vertices = calculateCrosshairVertices(passiveX, passiveY, passiveScrollNumb, passiveScrollDimension, passiveCalcD, activeImagePosition)
     updateCrosshairBuffer(new_vertices, crosshair)
 
     skipSlice(passiveState, round(Int64, passiveScrollNumb)) #Adding round fixed Inexact error during conversion from float to Int
     updateImagesDisplayed(passiveState.currentlyDispDat, passiveState.mainForDisplayObjects, passiveState.textDispObj, passiveState.calcDimsStruct, passiveState.valueForMasToSet, passiveState.crosshairFields, passiveState.mainRectFields, passiveState.displayMode)
 
     renderLines(forDisplayConstants, crosshair, mainRect)
+end
+
+"""
+Calculates the NDC vertices for the crosshair given the texture coordinates
+"""
+function calculateCrosshairVertices(texX, texY, texZ, scrollDimension, calcD::CalcDimsStruct, activeImagePosition::Int=1)
+    passiveWindowX = activeImagePosition == 1 ? passiveTexToWindRightX(texX, calcD) : passiveTexToWindLeftX(texX, calcD)
+    passiveWindowY = passiveTexToWindY(texY, calcD)
+
+    passiveWindowPoint = [Nothing, Nothing, Nothing]
+    if scrollDimension == 1
+        passiveWindowPoint = [texZ, passiveWindowX, passiveWindowY]
+    elseif scrollDimension == 2
+        passiveWindowPoint = [passiveWindowX, texZ, passiveWindowY]
+    elseif scrollDimension == 3
+        passiveWindowPoint = [passiveWindowX, passiveWindowY, texZ]
+    end
+
+    passiveOpenGlX, passiveOpenGlY = [Nothing, Nothing]
+    if scrollDimension == 1
+        passiveOpenGlX, passiveOpenGlY = (passiveWindowPoint[2], passiveWindowPoint[3])
+    elseif scrollDimension == 2
+        passiveOpenGlX, passiveOpenGlY = (passiveWindowPoint[1], passiveWindowPoint[3])
+    elseif scrollDimension == 3
+        passiveOpenGlX, passiveOpenGlY = (passiveWindowPoint[1], passiveWindowPoint[2])
+    end
+
+    passiveOpenGlX = (passiveOpenGlX / calcD.windowWidth) * 2 - 1
+    passiveOpenGlY = ((passiveOpenGlY / calcD.windowHeight) * 2 - 1) * -1
+
+    return Float32[
+        passiveOpenGlX-0.05, passiveOpenGlY, 0.0,
+        passiveOpenGlX+0.05, passiveOpenGlY, 0.0,
+        passiveOpenGlX, passiveOpenGlY-0.05, 0.0,
+        passiveOpenGlX, passiveOpenGlY+0.05, 0.0
+    ]
+end
+
+"""
+Helper function specifically for QuadImage to compute vertices given CartesianIndex
+"""
+function calculateCrosshairVertices(activePos::CartesianIndex{3}, panelIdx::Int, calcD::CalcDimsStruct)
+    # Mapping activePos (X,Y,Z) to panel's texture coordinates
+    # Panel 1 & 2 (Axial): shows X,Y
+    # Panel 3 (Sagittal): shows Y,Z (permuted 2,3,1 => dimToScroll=3)
+    # Panel 4 (Coronal): shows X,Z (permuted 1,3,2 => dimToScroll=3)
+    
+    texX, texY, texZ = (0, 0, 0)
+    if panelIdx == 1 || panelIdx == 2
+        texX = activePos[1]
+        texY = activePos[2]
+        texZ = activePos[3]
+    elseif panelIdx == 3
+        texX = activePos[2]
+        texY = activePos[3]
+        texZ = activePos[1]
+    elseif panelIdx == 4
+        texX = activePos[1]
+        texY = activePos[3]
+        texZ = activePos[2]
+    end
+    
+    # ActiveImagePosition is basically used to check if it's the right or left side of the window
+    # In QuadImage: panel 1 (top-left) => Left, panel 2 (top-right) => Right
+    # panel 3 (bottom-left) => Left, panel 4 (bottom-right) => Right
+    imgPos = (panelIdx == 1 || panelIdx == 3) ? 2 : 1
+    
+    # In QuadImage, scrollDimension is always 3 for all panels
+    return calculateCrosshairVertices(texX, texY, texZ, 3, calcD, imgPos)
 end
 
 end
