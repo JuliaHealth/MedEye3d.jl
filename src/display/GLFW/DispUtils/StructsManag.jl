@@ -5,7 +5,7 @@ utilities for dealing data structs like FullScrollableDat or SingleSliceDat
 module StructsManag
 using Setfield, ColorTypes
 using ..ForDisplayStructs, ..DataStructs
-export getThreeDims, addToforUndoVector, cartTwoToThree, getHeightToWidthRatio, threeToTwoDimm, modSlice!, threeToTwoDimm, modifySliceFull!, getSlicesNumber, getMainVerticies, getTextureCoordinatesFromScreen
+export getThreeDims, addToforUndoVector, cartTwoToThree, getHeightToWidthRatio, threeToTwoDimm, modSlice!, threeToTwoDimm, modifySliceFull!, getSlicesNumber, getMainVerticies, getTextureCoordinatesFromScreen, applyZoomPan
 
 """
 Calculates texture coordinates from screen coordinates, accounting for viewport zoom/pan/padding.
@@ -28,11 +28,61 @@ function getTextureCoordinatesFromScreen(x::Real, y::Real, calcDimsStruct::CalcD
     
     texW = Float64(calcDimsStruct.imageTextureWidth)
     texH = Float64(calcDimsStruct.imageTextureHeight)
+    zoom = Float64(calcDimsStruct.zoom)
     
-    texX = clamp(round(Int, s * texW), 1, Int(texW))
-    texY = clamp(round(Int, t * texH), 1, Int(texH))
+    # Reverse the data-level zoom/pan transform to get original voxel coords
+    viewW = texW / zoom
+    viewH = texH / zoom
+    cx = texW / 2.0 + Float64(calcDimsStruct.panX) * texW
+    cy = texH / 2.0 + Float64(calcDimsStruct.panY) * texH
+    x1 = clamp(cx - viewW / 2.0, 1.0, texW - viewW + 1.0)
+    y1 = clamp(cy - viewH / 2.0, 1.0, texH - viewH + 1.0)
+    
+    texX = clamp(round(Int, x1 + s * viewW), 1, Int(texW))
+    texY = clamp(round(Int, y1 + t * viewH), 1, Int(texH))
     
     return texX, texY
+end
+
+"""
+Apply zoom and pan to a 2D slice by cropping a subregion and upscaling via nearest-neighbor.
+zoom: zoom factor (1.0 = no zoom, 2.0 = 2x zoom)
+panX, panY: pan offsets in normalized coordinates (-0.5 to 0.5)
+"""
+function applyZoomPan(slice::AbstractMatrix{T}, zoom::Float32, panX::Float32, panY::Float32) where T
+    if zoom <= 1.0f0 && panX == 0.0f0 && panY == 0.0f0
+        return slice  # No-op fast path
+    end
+    
+    h, w = size(slice)
+    
+    # Size of the visible window in data coordinates
+    viewW = max(1, round(Int, w / zoom))
+    viewH = max(1, round(Int, h / zoom))
+    viewW = clamp(viewW, 1, w)
+    viewH = clamp(viewH, 1, h)
+    
+    # Center + pan offset (pan is in normalized coords, convert to pixels)
+    cx = w ÷ 2 + round(Int, panX * w)
+    cy = h ÷ 2 + round(Int, panY * h)
+    
+    # Compute crop region, clamped to array bounds
+    x1 = clamp(cx - viewW ÷ 2, 1, w - viewW + 1)
+    y1 = clamp(cy - viewH ÷ 2, 1, h - viewH + 1)
+    x2 = x1 + viewW - 1
+    y2 = y1 + viewH - 1
+    
+    cropped = slice[y1:y2, x1:x2]
+    
+    # Nearest-neighbor upscale to original dimensions
+    result = similar(slice)
+    for j in 1:w, i in 1:h
+        si = clamp(round(Int, (i - 1) * viewH / h) + 1, 1, viewH)
+        sj = clamp(round(Int, (j - 1) * viewW / w) + 1, 1, viewW)
+        result[i, j] = cropped[si, sj]
+    end
+    
+    return result
 end
 ```@doc
 given two dim dat it sets points in given coordinates in given slice to given value
@@ -278,8 +328,8 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
     hc = heightCorr / 2.0
     
     # Global scale and shift to avoid top app bar
-    scale = 1.0f0
-    yOffset = 0.0f0
+    scale = 0.90f0
+    yOffset = -0.10f0
     
     # y coordinates (indices: 2=top right, 10=bottom right, 18=bottom left, 26=top left)
     if imagePos == 1 || imagePos == 2 # Top half (Y from 0.0 to 1.0)

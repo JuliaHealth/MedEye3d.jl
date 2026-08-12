@@ -6,9 +6,9 @@ code adapted from https://discourse.julialang.org/t/custom-subject-in-rocket-jl-
 """
 module ReactToScroll
 using ModernGL, GLFW, Logging
-using ..DisplayWords, ..ForDisplayStructs, ..TextureManag, ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForSupervoxels, ..ShadersAndVerticiesForLine
+using ..DisplayWords, ..ForDisplayStructs, ..TextureManag, ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForSupervoxels, ..ShadersAndVerticiesForLine, ..MakieEvents
 
-export reactToScroll
+export reactToScroll, reactToScrollZoom
 export registerMouseScrollFunctions
 
 
@@ -22,10 +22,38 @@ return scrollback - that holds boolean subject (observable) to which we can reac
 """
 function registerMouseScrollFunctions(window::GLFW.Window, mainChannel::Base.Channel{Any})
     GLFW.SetScrollCallback(window, (a, xoff, yoff) -> begin
-        put!(mainChannel, Int64(yoff)) #if there is type distortion in the channel, we can implement custom struct types
+        if GLFW.GetKey(window, GLFW.KEY_LEFT_SHIFT) == GLFW.PRESS || GLFW.GetKey(window, GLFW.KEY_RIGHT_SHIFT) == GLFW.PRESS
+            put!(mainChannel, ScrollZoomEvent(Float64(yoff)))
+        else
+            put!(mainChannel, Int64(yoff))
+        end
     end)
-
 end #registerMouseScrollFunctions
+
+function reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFields})
+    mainState = mainStates[mainStates[1].switchIndex]
+    
+    # Zoom factor: 1.1 for each scroll tick
+    zoomFactor = data.zoom_delta > 0 ? 1.1f0 : (1.0f0 / 1.1f0)
+    
+    # Increase zoom, clamp between 1.0 (no zoom) and 20.0
+    newZoom = clamp(mainState.calcDimsStruct.zoom * zoomFactor, 1.0f0, 20.0f0)
+    
+    # If zoom hits 1.0, reset panning as well to keep it clean
+    if newZoom == 1.0f0
+        mainState.calcDimsStruct.panX = 0.0f0
+        mainState.calcDimsStruct.panY = 0.0f0
+    end
+    
+    mainState.calcDimsStruct.zoom = newZoom
+    @info "Zoom: $(newZoom)x (panel=$(mainStates[1].switchIndex))"
+    
+    # Re-render the current slice — reactToScroll with 0 scrollNumb will
+    # re-extract the same slice and call updateImagesDisplayed, which 
+    # applies applyZoomPan internally.
+    reactToScroll(0, mainStates, false)
+end
+
 
 
 """
@@ -159,7 +187,8 @@ end
                                 findList = findall((texSpec) -> texSpec.name == updateDat.name, panelState.mainForDisplayObjects.listOfTextSpecifications)
                                 if !isempty(findList)
                                     texSpec = panelState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
-                                    updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, panelState.calcDimsStruct.imageTextureWidth, panelState.calcDimsStruct.imageTextureHeight)
+                                    transformedDat = applyZoomPan(updateDat.dat, panelState.calcDimsStruct.zoom, panelState.calcDimsStruct.panX, panelState.calcDimsStruct.panY)
+                                    updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, panelState.calcDimsStruct.imageTextureWidth, panelState.calcDimsStruct.imageTextureHeight)
                                 end
                             end
                         end
@@ -202,7 +231,8 @@ end
                                 findList = findall((texSpec) -> texSpec.name == updateDat.name, panelState.mainForDisplayObjects.listOfTextSpecifications)
                                 if !isempty(findList)
                                     texSpec = panelState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
-                                    updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, panelState.calcDimsStruct.imageTextureWidth, panelState.calcDimsStruct.imageTextureHeight)
+                                    transformedDat = applyZoomPan(updateDat.dat, panelState.calcDimsStruct.zoom, panelState.calcDimsStruct.panX, panelState.calcDimsStruct.panY)
+                                    updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, panelState.calcDimsStruct.imageTextureWidth, panelState.calcDimsStruct.imageTextureHeight)
                                 end
                             end
                             

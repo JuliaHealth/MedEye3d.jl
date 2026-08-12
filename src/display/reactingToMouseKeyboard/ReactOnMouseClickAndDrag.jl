@@ -89,11 +89,14 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
         end
     end)# and  for example : cursor: 29.0, 469.0  types   Float64  Float64
     GLFW.SetMouseButtonCallback(window, (a, button, action, mods) -> begin
+        # Only update the flag for the button that actually changed
+        if button == GLFW.MOUSE_BUTTON_1
+            mouseStructInstance.isLeftButtonDown = (action == GLFW.PRESS)
+        elseif button == GLFW.MOUSE_BUTTON_2
+            mouseStructInstance.isRightButtonDown = (action == GLFW.PRESS)
+        end
+        
         leftMouseButtonDownResult = (button == GLFW.MOUSE_BUTTON_1 && action == GLFW.PRESS)
-        mouseStructInstance.isLeftButtonDown = leftMouseButtonDownResult
-
-        rightMouseButtonDownResult = (button == GLFW.MOUSE_BUTTON_2 && action == GLFW.PRESS)
-        mouseStructInstance.isRightButtonDown = rightMouseButtonDownResult
 
         # Double-click detection: fire a dedicated DoubleClickEvent into the channel.
         # Uses time() (Base Julia) — GLFW.GetTime() does not exist in Julia's GLFW.jl.
@@ -217,25 +220,45 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 actualH = mousestr.actualWindowHeight > 0 ? Float64(mousestr.actualWindowHeight) : viewportH
                 x, y = (mouseCoords[1][1], mouseCoords[1][2])
                 
-                # Convert mouse to NDC accounting for viewport vs content area mismatch
-                mouseGlX = (x * 2.0 / viewportW) - 1.0
-                mouseGlY = ((actualH - y) * 2.0 / viewportH) - 1.0
+                # Detect compare mode: panels 3+4 are hidden (vertices zeroed out)
+                # In compare mode, left half = panel 1, right half = panel 5
+                is_compare = false
+                if length(mainStates) >= 5
+                    botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
+                    if !isempty(botVerts) && all(v -> v == 0.0f0, botVerts[1:2])  # first X,Y coords are 0 = hidden
+                        is_compare = true
+                    end
+                end
                 
-                # Compute panel split dynamically from actual vertex positions
-                topVerts = mainStates[1].calcDimsStruct.mainImageQuadVert
-                botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
-                topPanelBottom = Float64(min(topVerts[10], topVerts[18]))
-                botPanelTop = Float64(max(botVerts[2], botVerts[26]))
-                glMidY = (topPanelBottom + botPanelTop) / 2.0
-                
-                if x < actualW / 2.0 && mouseGlY > glMidY
-                    mainState.switchIndex = 1
-                elseif x >= actualW / 2.0 && mouseGlY > glMidY
-                    mainState.switchIndex = 2
-                elseif x < actualW / 2.0 && mouseGlY <= glMidY
-                    mainState.switchIndex = 3
+                if is_compare
+                    # Compare mode: left = panel 1, right = panel 5
+                    if x < actualW / 2.0
+                        mainState.switchIndex = 1
+                    else
+                        mainState.switchIndex = 5
+                    end
                 else
-                    mainState.switchIndex = 4
+                    # Quad view mode: standard 4-panel layout
+                    # Convert mouse to NDC accounting for viewport vs content area mismatch
+                    mouseGlX = (x * 2.0 / viewportW) - 1.0
+                    mouseGlY = ((actualH - y) * 2.0 / viewportH) - 1.0
+                    
+                    # Compute panel split dynamically from actual vertex positions
+                    topVerts = mainStates[1].calcDimsStruct.mainImageQuadVert
+                    botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
+                    topPanelBottom = Float64(min(topVerts[10], topVerts[18]))
+                    botPanelTop = Float64(max(botVerts[2], botVerts[26]))
+                    glMidY = (topPanelBottom + botPanelTop) / 2.0
+                    
+                    if x < actualW / 2.0 && mouseGlY > glMidY
+                        mainState.switchIndex = 1
+                    elseif x >= actualW / 2.0 && mouseGlY > glMidY
+                        mainState.switchIndex = 2
+                    elseif x < actualW / 2.0 && mouseGlY <= glMidY
+                        mainState.switchIndex = 3
+                    else
+                        mainState.switchIndex = 4
+                    end
                 end
             end
         elseif length(mainStates) > 1
@@ -249,7 +272,14 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
         end
     end # end !isempty(mouseCoords) for panel detection
     
-    # 2. Right-click cross-plane jumping — needs coords
+    # If the right mouse button is released, clear the pan drag state
+    if !mousestr.isRightButtonDown
+        for state in mainStates
+            empty!(state.lastPanDragCoords)
+        end
+    end
+
+    # 2. Right-click cross-plane jumping or panning
     if !isempty(mouseCoords) && mousestr.isRightButtonDown && length(mainStates) >= 4 # QuadImage mode
         viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
         viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
@@ -257,83 +287,109 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
         actualH = mousestr.actualWindowHeight > 0 ? Float64(mousestr.actualWindowHeight) : viewportH
         x, y = (mouseCoords[1][1], mouseCoords[1][2])
         clickedPanel = mainState.switchIndex
-
-        # Read actual rendered vertex positions from the panel's calcDimsStruct
-        texX, texY = getTextureCoordinatesFromScreen(x, y, mainStates[clickedPanel].calcDimsStruct, actualW, actualH)
         
-        @info "RIGHT-CLICK: panel=$clickedPanel windowXY=($x,$y) viewport=$(Int(viewportW))x$(Int(viewportH)) actual=$(Int(actualW))x$(Int(actualH))"
-        @info "  texX=$texX texY=$texY"
+        panelState = mainStates[clickedPanel]
         
-        currentSlice = mainStates[clickedPanel].currentDisplayedSlice
-        
-        # Map texture coordinates back to original volume coordinates
-        # Panel 1 & 2 (Axial): data = (origX, origY, origZ), texture shows (origX, origY)
-        # Panel 3 (Sagittal): data = permutedims(iso, (2,3,1)) = (origY, origZ, origX)
-        #   texture shows (origY, origZ), slice = origX
-        # Panel 4 (Coronal): data = permutedims(iso, (1,3,2)) = (origX, origZ, origY)
-        #   texture shows (origX, origZ), slice = origY
-        if clickedPanel == 1 || clickedPanel == 2
-            origX, origY, origZ = texX, texY, currentSlice
-        elseif clickedPanel == 3  # Sagittal
-            origY, origZ, origX = texX, texY, currentSlice
-        else # Bottom-Right (4) (Coronal)
-            origX, origZ, origY = texX, texY, currentSlice
-        end
-        
-        # Ensure lastRecordedMousePosition is updated for ALL panels so scroll sync knows the intersection!
-        for i in 1:length(mainStates)
-            if i == 1 || i == 2 || i == 5
-                mainStates[i].lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
-            elseif i == 3
-                mainStates[i].lastRecordedMousePosition = CartesianIndex(origY, origZ, origX)
-            else
-                mainStates[i].lastRecordedMousePosition = CartesianIndex(origX, origZ, origY)
+        if isempty(panelState.lastPanDragCoords)
+            # Initial press: Do the jump!
+            panelState.lastPanDragCoords = [CartesianIndex(Int(round(x)), Int(round(y)))]
+            
+            # Read actual rendered vertex positions from the panel's calcDimsStruct
+            texX, texY = getTextureCoordinatesFromScreen(x, y, panelState.calcDimsStruct, actualW, actualH)
+            
+            @info "RIGHT-CLICK: panel=$clickedPanel windowXY=($x,$y) viewport=$(Int(viewportW))x$(Int(viewportH)) actual=$(Int(actualW))x$(Int(actualH))"
+            @info "  texX=$texX texY=$texY"
+            
+            currentSlice = panelState.currentDisplayedSlice
+            
+            # Map texture coordinates back to original volume coordinates
+            # Panel 1 & 2 (Axial): data = (origX, origY, origZ), texture shows (origX, origY)
+            # Panel 3 (Sagittal): data = permutedims(iso, (2,3,1)) = (origY, origZ, origX)
+            #   texture shows (origY, origZ), slice = origX
+            # Panel 4 (Coronal): data = permutedims(iso, (1,3,2)) = (origX, origZ, origY)
+            #   texture shows (origX, origZ), slice = origY
+            if clickedPanel == 1 || clickedPanel == 2
+                origX, origY, origZ = texX, texY, currentSlice
+            elseif clickedPanel == 3  # Sagittal
+                origY, origZ, origX = texX, texY, currentSlice
+            else # Bottom-Right (4) (Coronal)
+                origX, origZ, origY = texX, texY, currentSlice
             end
-        end
-        
-        @info "  origX=$origX origY=$origY origZ=$origZ currentSlice=$currentSlice"
-        @info "  Axial scrolls Z(1-$(mainStates[1].onScrollData.slicesNumber)) Sag scrolls origX(1-$(mainStates[3].onScrollData.slicesNumber)) Cor scrolls origY(1-$(mainStates[4].onScrollData.slicesNumber))"
-        
-        # Jump other panels to the corresponding slices
-        # Panel 1, 2 & 5 scroll through Z (origZ), Panel 3 scrolls through origX, Panel 4 scrolls through origY
-        targets = [(1, origZ), (2, origZ), (3, origX), (4, origY)]
-        if length(mainStates) >= 5
-            push!(targets, (5, origZ))
-        end
-        
-        for (panelIdx, targetSlice) in targets
-            if panelIdx != clickedPanel
-                panelState = mainStates[panelIdx]
-                currSlice = panelState.currentDisplayedSlice
-                @info "  Panel $panelIdx: current=$currSlice target=$targetSlice"
-                if targetSlice != currSlice
-                    # Clamp target to valid range
-                    lastSlice = panelState.onScrollData.slicesNumber
+            
+            # Ensure lastRecordedMousePosition is updated for ALL panels so scroll sync knows the intersection!
+            for i in 1:length(mainStates)
+                if i == 1 || i == 2 || i == 5
+                    mainStates[i].lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
+                elseif i == 3
+                    mainStates[i].lastRecordedMousePosition = CartesianIndex(origY, origZ, origX)
+                else
+                    mainStates[i].lastRecordedMousePosition = CartesianIndex(origX, origZ, origY)
+                end
+            end
+            
+            @info "  origX=$origX origY=$origY origZ=$origZ currentSlice=$currentSlice"
+            @info "  Axial scrolls Z(1-$(mainStates[1].onScrollData.slicesNumber)) Sag scrolls origX(1-$(mainStates[3].onScrollData.slicesNumber)) Cor scrolls origY(1-$(mainStates[4].onScrollData.slicesNumber))"
+            
+            # Jump other panels to the corresponding slices
+            # Panel 1, 2 & 5 scroll through Z (origZ), Panel 3 scrolls through origX, Panel 4 scrolls through origY
+            targets = [(1, origZ), (2, origZ), (3, origX), (4, origY)]
+            if length(mainStates) >= 5
+                push!(targets, (5, origZ))
+            end
+            
+            for (panelIdx, targetSlice) in targets
+                if panelIdx != clickedPanel
+                    otherState = mainStates[panelIdx]
+                    
+                    # Read max slices for clamp
+                    lastSlice = otherState.onScrollData.slicesNumber
                     newSlice = clamp(targetSlice, 1, lastSlice)
                     
-                    # Extract new 2D slice from 3D data
-                    singleSlDat = panelState.onScrollData.dataToScroll |>
-                        (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(newSlice), panelState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
-                        (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=newSlice, textToDisp=getTextForCurrentSlice(panelState.onScrollData, Int32(newSlice)))
+                    # Always synchronize data so that crosshairs stay locked
+                    singleSlDat = otherState.onScrollData.dataToScroll |>
+                        (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(newSlice), otherState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
+                        (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=newSlice, textToDisp=getTextForCurrentSlice(otherState.onScrollData, Int32(newSlice)))
                     
                     # Upload new texture data to GPU (without rendering/SwapBuffers)
                     for updateDat in singleSlDat.listOfDataAndImageNames
-                        findList = findall((texSpec) -> texSpec.name == updateDat.name, panelState.mainForDisplayObjects.listOfTextSpecifications)
+                        findList = findall((texSpec) -> texSpec.name == updateDat.name, otherState.mainForDisplayObjects.listOfTextSpecifications)
                         if !isempty(findList)
-                            texSpec = panelState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
-                            updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, panelState.calcDimsStruct.imageTextureWidth, panelState.calcDimsStruct.imageTextureHeight)
+                            texSpec = otherState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
+                            transformedDat = applyZoomPan(updateDat.dat, otherState.calcDimsStruct.zoom, otherState.calcDimsStruct.panX, otherState.calcDimsStruct.panY)
+                            updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, otherState.calcDimsStruct.imageTextureWidth, otherState.calcDimsStruct.imageTextureHeight)
                         end
                     end
                     
                     # Update state (slice number and display data)
-                    panelState.currentlyDispDat = singleSlDat
-                    panelState.currentDisplayedSlice = newSlice
-                    panelState.isSliceChanged = true
+                    otherState.currentlyDispDat = singleSlDat
+                    otherState.currentDisplayedSlice = newSlice
+                    otherState.isSliceChanged = true
                 end
             end
+        else
+            # Dragging: Do the pan!
+            lastX, lastY = panelState.lastPanDragCoords[1][1], panelState.lastPanDragCoords[1][2]
+            
+            dx = x - lastX
+            dy = y - lastY  
+            
+            # Convert screen delta to normalized data space and scale by zoom
+            panSpeedX = Float32(dx / actualW) / panelState.calcDimsStruct.zoom
+            panSpeedY = Float32(dy / actualH) / panelState.calcDimsStruct.zoom
+            
+            panelState.calcDimsStruct.panX += panSpeedX
+            panelState.calcDimsStruct.panY -= panSpeedY # y goes down on screen, up in texture
+            
+            panelState.lastPanDragCoords = [CartesianIndex(Int(round(x)), Int(round(y)))]
+            
+            @info "Pan: dx=$dx dy=$dy panX=$(panelState.calcDimsStruct.panX) panY=$(panelState.calcDimsStruct.panY)"
+            
+            # Re-render via reactToScroll which applies applyZoomPan in updateImagesDisplayed
+            oldSwitch = mainStates[1].switchIndex
+            mainStates[1].switchIndex = clickedPanel
+            reactToScroll(0, mainStates, false)
+            mainStates[1].switchIndex = oldSwitch
         end
-        
-
     end # end right-click handler
 
 

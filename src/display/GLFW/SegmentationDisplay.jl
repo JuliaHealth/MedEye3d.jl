@@ -18,6 +18,7 @@ using .MakieEventHandlers
 configuring consumer function on_next! function using multiple dispatch mechanism in order to connect input to proper functions
 """
 on_next!(stateObjects::Vector{StateDataFields}, data::Int64) = reactToScroll(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::ScrollZoomEvent) = ReactToScroll.reactToScrollZoom(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::forDisplayObjects) = setUpMainDisplay(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ForWordsDispStruct) = setUpWordsDisplay(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::CalcDimsStruct) = setUpCalcDimsStruct(data, stateObjects)
@@ -619,6 +620,18 @@ function coordinateDisplay(
                 try
                     on_next!(stateInstances, channelData)
                     
+                    if typeof(channelData) == ChangeTimePointEvent || typeof(channelData) == CompareTimePointsEvent
+                        idx = MakieEventHandlers.current_tp_index[]
+                        label = get(MakieEventHandlers.tp_labels, idx, "TP $idx")
+                        if MakieEventHandlers.compare_mode[]
+                            right_idx = MakieEventHandlers.compare_right_tp[]
+                            right_label = get(MakieEventHandlers.tp_labels, right_idx, "TP $right_idx")
+                            GLFW.SetWindowTitle(window, "MedEye3d - Left: $label | Right: $right_label")
+                        else
+                            GLFW.SetWindowTitle(window, "MedEye3d - Viewing: $label")
+                        end
+                    end
+                    
                     if !shouldStop[1]
                         glClear(GL_COLOR_BUFFER_BIT)
                         for state in stateInstances
@@ -643,8 +656,13 @@ function coordinateDisplay(
                     end
                 end
             catch e
-                @error "CONSUMER TASK CRASHED:" exception=(e, catch_backtrace())
-                shouldStop[1] = true
+                if e isa InterruptException || (e isa GLFW.GLFWError && e.code == GLFW.NOT_INITIALIZED)
+                    @error "CONSUMER TASK stopping due to fatal error:" exception=(e, catch_backtrace())
+                    shouldStop[1] = true
+                else
+                    @error "CONSUMER TASK event handler error (continuing):" exception=(e, catch_backtrace())
+                    # Don't stop — allow subsequent events to be processed
+                end
             end
         end
     end #end of consumer
@@ -672,6 +690,12 @@ function coordinateDisplay(
 
 
     registerInteractions(window, mainMedEye3dInstance, calcDimStructs)#passing needed subscriptions from GLFW
+    
+    # Set initial window title
+    idx = MakieEventHandlers.current_tp_index[]
+    label = get(MakieEventHandlers.tp_labels, idx, "TP $idx")
+    GLFW.SetWindowTitle(window, "MedEye3d - Viewing: $label")
+
     return mainMedEye3dInstance
 end #coordinateDisplay
 
