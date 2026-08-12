@@ -163,8 +163,11 @@ MedEye3d.DisplayDataManag.setDisplayedData(viewer, displayData)
 ### Mouse Interactions
 
 - **Left Click + Drag**: Annotate active mask
-- **Right Click + Drag**: Set crosshair reference point
+- **Right Click**: Set crosshair reference point (cross-plane jump)
+- **Right Click + Drag**: Pan the image (translate)
 - **Scroll Wheel**: Navigate through slices
+- **Shift + Scroll Wheel**: Zoom in/out
+- **Double Click (in Multi-panel Mode)**: Maximize/restore a panel
 
 ---
 
@@ -358,7 +361,10 @@ Interactions are summarized in this video: https://youtu.be/tv7-nGiik-w
 Next all Interactions are done either by mouse or by keyboard shortcuts:
 
 - **left click and drag** - will mark active texture (look below - set with alt ...) if it is set to be modifiable in the texture specifications, to the set value and size (by tab...)
-- **right click and drag** - sets remembered position - when we will change plane of crossection for example from tranverse to coonal this point will be also visible on new plane
+- **right click** - sets remembered position - when we change plane of cross-section (e.g., from transverse to coronal) this point will be also visible on the new plane. In multi-panel mode, it jumps all other panels to that anatomical point.
+- **right click and drag** - pans (translates) the image across the view.
+- **shift + scroll** - zooms the image in and out.
+- **double click** - in Quad or Multi-panel mode, maximizes the hovered panel to full screen, and restores it on a second double-click.
 
 All keyboard shortcuts will be activated on RELEASE of keys or by pressing enter while still pressing other; +,- and z keys acts also like enter
 

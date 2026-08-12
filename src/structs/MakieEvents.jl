@@ -1,5 +1,5 @@
 module MakieEvents
-export ChangePlaneEvent, CompareTimePointsEvent, ShowSingleLesionEvent
+export ChangePlaneEvent, CompareTimePointsEvent, ShowSingleLesionEvent, ScrollZoomEvent
 export WindowingEvent, PaintValEvent, SyncLesionEvent
 export ChangeTimePointEvent, ToggleLesionEvent, RefreshListEvent
 export AddAutoPetEvent, SyncMissingEvent, GenManualEvent
@@ -13,7 +13,11 @@ struct CompareTimePointsEvent
 end
 
 struct ShowSingleLesionEvent
-    lesion_id :: Int
+    lesion_id::Int
+end
+
+struct ScrollZoomEvent
+    zoom_delta::Float64
 end
 
 struct WindowingEvent

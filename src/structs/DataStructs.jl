@@ -139,6 +139,10 @@ usefull stats for proper text display
     #opengl corrections - used from top bottom left and right - remember that in open gl max height and width is 2!
     widthCorr::Float32 = 0.0
     heightCorr::Float32 = 0.0
+    # Zoom and Pan controls for the main quad texture mapping
+    zoom::Float32 = 1.0
+    panX::Float32 = 0.0
+    panY::Float32 = 0.0
     #and analogical in window coordinates
     windowWidthCorr::Int32 = Int32(round((widthCorr / 2) * windowWidth))
     windowHeightCorr::Int32 = Int32(round((heightCorr / 2) * windowHeight))

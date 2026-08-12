@@ -5,7 +5,7 @@ module TextureManag
 using Base: Float16
 using GLFW
 using ModernGL, Base.Threads, Logging, Setfield
-using ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..CustomFragShad, ..DataStructs, ..DisplayWords
+using ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..CustomFragShad, ..DataStructs, ..DisplayWords, ..StructsManag
 export activateTextures, addTextToTexture, initializeTextures, createTexture, getProperGL_TEXTURE, updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
 
 
@@ -213,7 +213,8 @@ function updateImagesDisplayed(
         texSpec = Nothing
         if !isempty(findList)
             texSpec = modulelistOfTextSpecs[findList[1]]
-            updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight)
+            transformedDat = applyZoomPan(updateDat.dat, calcDimStruct.zoom, calcDimStruct.panX, calcDimStruct.panY)
+            updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight)
         end
     end #for
     #render text associated with this slice

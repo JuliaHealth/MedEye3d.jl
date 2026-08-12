@@ -28,8 +28,8 @@ using Observables
 using JSON
 using HDF5
 using Dates
-using Dates
 using ..MakieEvents
+import ..SegmentationDisplay.MakieEventHandlers as _MEH
 
 abstract type DBMessage end
 struct SaveDBMessage <: DBMessage
@@ -406,6 +406,48 @@ function create_metadata_window(
     on(btn_ns.clicks) do _; put!(channel, Int64(1)) end
     on(btn_pt.clicks) do _; put!(channel, ChangeTimePointEvent(-1)) end
     on(btn_nt.clicks) do _; put!(channel, ChangeTimePointEvent(1)) end
+
+    # TP status indicator
+    tp_label_r = nr!()
+    tp_status = Observable{String}("Viewing: TP 0")
+    Label(g[tp_label_r, 1:4], tp_status, fontsize = 11, color = GRN, halign = :center)
+    
+    # Update TP label when TP buttons are clicked
+    function update_tp_label()
+        idx = _MEH.current_tp_index[]
+        label = get(_MEH.tp_labels, idx, "TP $idx")
+        
+        if cv_active[]
+            right_idx = _MEH.compare_right_tp[]
+            right_label = get(_MEH.tp_labels, right_idx, "TP $right_idx")
+            tp_status[] = "Left: $label | Right: $right_label"
+        else
+            tp_status[] = "Viewing: $label"
+        end
+    end
+
+    on(btn_pt.clicks) do _
+        # Small delay to let the channel event update state first
+        @async begin
+            sleep(0.1)
+            update_tp_label()
+        end
+    end
+    on(btn_nt.clicks) do _
+        @async begin
+            sleep(0.1)
+            update_tp_label()
+        end
+    end
+    on(btn_cv.clicks) do _
+        @async begin
+            sleep(0.1)
+            update_tp_label()
+        end
+    end
+    
+    # Initialize
+    update_tp_label()
 
     vc2_r = nr!()
     btn_tl = Button(g[vc2_r, 1:2], label = "Toggle Lesion Overlay", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)

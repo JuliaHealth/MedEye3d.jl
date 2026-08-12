@@ -124,11 +124,9 @@ when GLFW context is ready we need to use this  function in order to register GL
 """
 function subscribeGLFWtoActor(window::GLFW.Window, mainMedEye3dObject::MainMedEye3d, calcDim::CalcDimsStruct)
 
-
+    # registerMouseScrollFunctions sets the scroll callback WITH shift-zoom detection.
+    # Do NOT override it with a plain Int64-only callback afterward!
     ReactToScroll.registerMouseScrollFunctions(window, mainMedEye3dObject.channel)
-    GLFW.SetScrollCallback(window, (a, xoff, yoff) -> begin
-        put!(mainMedEye3dObject.channel, Int64(yoff))
-    end)
 
     ReactOnKeyboard.registerKeyboardFunctions(window, mainMedEye3dObject.channel)
     ReactOnMouseClickAndDrag.registerMouseClickFunctions(window, calcDim, mainMedEye3dObject.channel)

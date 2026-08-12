@@ -51,54 +51,72 @@ end
 
 function updateQuadVertices!(stateObject::StateDataFields, layout::Symbol)
     calcDimStruct = stateObject.calcDimsStruct
-    wc = calcDimStruct.widthCorr / 2.0f0
-    hc = calcDimStruct.heightCorr / 2.0f0
-    
     res = copy(calcDimStruct.mainImageQuadVert)
     
     if layout == :Hidden
-        res[1], res[9], res[17], res[25] = 0.0f0, 0.0f0, 0.0f0, 0.0f0
-        res[2], res[10], res[18], res[26] = 0.0f0, 0.0f0, 0.0f0, 0.0f0
+        res .= 0.0f0
     else
+        # Recalculate aspect ratio corrections based on the active layout
+        ratio_desired = calcDimStruct.heightToWithRatio * (calcDimStruct.imageTextureHeight / calcDimStruct.imageTextureWidth)
+        
+        av_width = Float64(calcDimStruct.windowWidth)
+        av_height = Float64(calcDimStruct.windowHeight)
+        
+        if layout == :LeftHalf || layout == :RightHalf
+            av_width /= 2.0
+        elseif layout == :TopLeft || layout == :TopRight || layout == :BottomLeft || layout == :BottomRight
+            av_width /= 2.0
+            av_height /= 2.0
+        end
+        
+        ratio_actual = av_height / av_width
+        
+        widthCorr = 0.0f0
+        heightCorr = 0.0f0
+        if ratio_actual > ratio_desired
+            heightCorr = 1.0f0 - Float32(ratio_desired / ratio_actual)
+        else
+            widthCorr = 1.0f0 - Float32(ratio_actual / ratio_desired)
+        end
+        
+        # OpenGL width is 1.0 for all these layouts
+        wc = widthCorr / 2.0f0
+        
+        # OpenGL height is 2.0 for LeftHalf/RightHalf, and 1.0 for quadrants
+        hc = (layout == :LeftHalf || layout == :RightHalf) ? heightCorr : heightCorr / 2.0f0
+        
+        scale = 0.90f0
+        yOffset = -0.10f0
+        
         # Y coordinates
         if layout == :TopLeft || layout == :TopRight
-            res[2] = (1.0f0 - hc)
-            res[10] = (0.0f0 + hc)
-            res[18] = (0.0f0 + hc)
-            res[26] = (1.0f0 - hc)
+            res[2] = (1.0f0 - hc) * scale + yOffset
+            res[10] = (0.0f0 + hc) * scale + yOffset
+            res[18] = (0.0f0 + hc) * scale + yOffset
+            res[26] = (1.0f0 - hc) * scale + yOffset
         elseif layout == :BottomLeft || layout == :BottomRight
-            res[2] = (0.0f0 - hc)
-            res[10] = (-1.0f0 + hc)
-            res[18] = (-1.0f0 + hc)
-            res[26] = (0.0f0 - hc)
+            res[2] = (0.0f0 - hc) * scale + yOffset
+            res[10] = (-1.0f0 + hc) * scale + yOffset
+            res[18] = (-1.0f0 + hc) * scale + yOffset
+            res[26] = (0.0f0 - hc) * scale + yOffset
         elseif layout == :LeftHalf || layout == :RightHalf
-            res[2] = (1.0f0 - hc)
-            res[10] = (-1.0f0 + hc)
-            res[18] = (-1.0f0 + hc)
-            res[26] = (1.0f0 - hc)
+            res[2] = (1.0f0 - hc) * scale + yOffset
+            res[10] = (-1.0f0 + hc) * scale + yOffset
+            res[18] = (-1.0f0 + hc) * scale + yOffset
+            res[26] = (1.0f0 - hc) * scale + yOffset
         end
         
         # X coordinates
-        if layout == :TopLeft || layout == :BottomLeft
-            res[1] = (0.0f0 - wc)
-            res[9] = (0.0f0 - wc)
-            res[17] = (-1.0f0 + wc)
-            res[25] = (-1.0f0 + wc)
-        elseif layout == :TopRight || layout == :BottomRight
-            res[1] = (1.0f0 - wc)
-            res[9] = (1.0f0 - wc)
-            res[17] = (0.0f0 + wc)
-            res[25] = (0.0f0 + wc)
-        elseif layout == :LeftHalf
-            res[1] = (0.0f0 - wc)
-            res[9] = (0.0f0 - wc)
-            res[17] = (-1.0f0 + wc)
-            res[25] = (-1.0f0 + wc)
-        elseif layout == :RightHalf
-            res[1] = (1.0f0 - wc)
-            res[9] = (1.0f0 - wc)
-            res[17] = (0.0f0 + wc)
-            res[25] = (0.0f0 + wc)
+        if layout == :TopLeft || layout == :BottomLeft || layout == :LeftHalf
+            res[1] = (0.0f0 - wc) * scale
+            res[9] = (0.0f0 - wc) * scale
+            res[17] = (-1.0f0 + wc) * scale
+            res[25] = (-1.0f0 + wc) * scale
+        elseif layout == :TopRight || layout == :BottomRight || layout == :RightHalf
+            res[1] = (1.0f0 - wc) * scale
+            res[9] = (1.0f0 - wc) * scale
+            res[17] = (0.0f0 + wc) * scale
+            res[25] = (0.0f0 + wc) * scale
         end
     end
     
@@ -108,22 +126,82 @@ function updateQuadVertices!(stateObject::StateDataFields, layout::Symbol)
     ModernGL.glBufferData(ModernGL.GL_ARRAY_BUFFER, sizeof(res), res, ModernGL.GL_STATIC_DRAW)
 end
 
+const compare_mode = Ref(false)
+const compare_right_tp = Ref(-1)  # TP index shown in right panel (panel 5)
+
 function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Vector{StateDataFields})
     if length(stateObjects) >= 5
+        compare_mode[] = data.compare
         if data.compare
-            # 2-pane view
+            # 2-pane view: panel 1 on left, panel 5 on right
             updateQuadVertices!(stateObjects[1], :LeftHalf)
             updateQuadVertices!(stateObjects[5], :RightHalf)
             updateQuadVertices!(stateObjects[2], :Hidden)
             updateQuadVertices!(stateObjects[3], :Hidden)
             updateQuadVertices!(stateObjects[4], :Hidden)
+            
+            # Load the NEXT TP into panel 5
+            if !isempty(tp_data_cache)
+                tp_indices = sort(collect(keys(tp_data_cache)))
+                cur_pos = findfirst(==(current_tp_index[]), tp_indices)
+                if cur_pos === nothing
+                    cur_pos = 1
+                end
+                # Right panel shows the next TP chronologically
+                next_pos = mod1(cur_pos + 1, length(tp_indices))
+                right_tp = tp_indices[next_pos]
+                compare_right_tp[] = right_tp
+                
+                # Load right TP data into panel 5
+                tp_voxels = tp_data_cache[right_tp]
+                
+                # Ensure manualModif is inserted at index 2 if it's missing (to match SegmentationDisplay.jl initialization)
+                if length(tp_voxels) >= 1 && tp_voxels[1][1] != "manualModif" && (length(tp_voxels) < 2 || tp_voxels[2][1] != "manualModif")
+                    insert!(tp_voxels, 2, ("manualModif", zeros(Float32, size(tp_voxels[1][2]))))
+                end
+
+                if length(tp_voxels) >= 5
+                    newDataToScroll = StructsManag.getThreeDims(tp_voxels[5])
+                    stateObjects[5].onScrollData.dataToScroll = newDataToScroll
+                    stateObjects[5].onScrollData.nameIndexes = DataStructs.getLocationDict(newDataToScroll)
+                    dimToScroll = stateObjects[5].onScrollData.dimensionToScroll
+                    if !isempty(newDataToScroll)
+                        stateObjects[5].onScrollData.slicesNumber = Int32(size(newDataToScroll[1].dat, dimToScroll))
+                    end
+                    stateObjects[5].currentDisplayedSlice = max(1, stateObjects[5].onScrollData.slicesNumber ÷ 2)
+                elseif length(tp_voxels) >= 1
+                    # Panel 5 uses same view as panel 1 (axial), so use index 1
+                    newDataToScroll = StructsManag.getThreeDims(tp_voxels[1])
+                    stateObjects[5].onScrollData.dataToScroll = newDataToScroll
+                    stateObjects[5].onScrollData.nameIndexes = DataStructs.getLocationDict(newDataToScroll)
+                    dimToScroll = stateObjects[5].onScrollData.dimensionToScroll
+                    if !isempty(newDataToScroll)
+                        stateObjects[5].onScrollData.slicesNumber = Int32(size(newDataToScroll[1].dat, dimToScroll))
+                    end
+                    stateObjects[5].currentDisplayedSlice = max(1, stateObjects[5].onScrollData.slicesNumber ÷ 2)
+                end
+                
+                # Re-render both panels
+                old_idx = stateObjects[1].switchIndex
+                stateObjects[1].switchIndex = 1
+                ReactToScroll.reactToScroll(0, stateObjects, false)
+                stateObjects[1].switchIndex = 5
+                ReactToScroll.reactToScroll(0, stateObjects, false)
+                stateObjects[1].switchIndex = old_idx
+                
+                left_label = get(tp_labels, current_tp_index[], "TP $(current_tp_index[])")
+                right_label = get(tp_labels, right_tp, "TP $right_tp")
+                @info "Compare mode ON: Left=$left_label, Right=$right_label"
+            end
         else
+            compare_right_tp[] = -1
             # 4-pane view
             updateQuadVertices!(stateObjects[1], :TopLeft)
             updateQuadVertices!(stateObjects[2], :TopRight)
             updateQuadVertices!(stateObjects[3], :BottomLeft)
             updateQuadVertices!(stateObjects[4], :BottomRight)
             updateQuadVertices!(stateObjects[5], :Hidden)
+            @info "Compare mode OFF: restored 4-pane view"
         end
     end
 end
@@ -265,8 +343,96 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     return changed
 end
 
+# TP navigation state: populated by the launch script
+# tp_data_cache[tp_index] = Vector{Vector{Any}} — per-panel voxel data tuples [(\"CT\", vol), (\"PET\", vol), (\"Mask\", vol)]
+const tp_data_cache = Dict{Int, Vector{Vector{Any}}}()
+const current_tp_index = Ref(0)
+const tp_labels = Dict{Int, String}()  # tp_index → display label (e.g. "PET TP0")
+export tp_data_cache, current_tp_index, tp_labels
+export compare_mode, compare_right_tp
+
+"""
+Helper: load TP data into a specific panel's onScrollData and re-render.
+`panel_idx` is the stateObjects index (1-5).
+`tp_voxel_idx` is the index into tp_voxels vector (usually same as panel_idx,
+but for panel 5 in compare mode we use index 1 since it's an axial view).
+"""
+function _load_tp_into_panel!(stateObjects, tp_voxels, panel_idx, tp_voxel_idx)
+    if tp_voxel_idx > length(tp_voxels) || panel_idx > length(stateObjects)
+        return
+    end
+    newDataToScroll = StructsManag.getThreeDims(tp_voxels[tp_voxel_idx])
+    stateObjects[panel_idx].onScrollData.dataToScroll = newDataToScroll
+    dimToScroll = stateObjects[panel_idx].onScrollData.dimensionToScroll
+    if !isempty(newDataToScroll)
+        stateObjects[panel_idx].onScrollData.slicesNumber = Int32(size(newDataToScroll[1].dat, dimToScroll))
+    end
+    stateObjects[panel_idx].currentDisplayedSlice = max(1, stateObjects[panel_idx].onScrollData.slicesNumber ÷ 2)
+end
+
 function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector{StateDataFields})
-    @info "TP Navigation: $(data.change). Emulated."
+    if isempty(tp_data_cache)
+        @info "No TP data loaded in tp_data_cache. TP navigation disabled."
+        return
+    end
+    
+    # Get sorted TP indices
+    tp_indices = sort(collect(keys(tp_data_cache)))
+    num_tps = length(tp_indices)
+    
+    # Find current position in the sorted list
+    cur_pos = findfirst(==(current_tp_index[]), tp_indices)
+    if cur_pos === nothing
+        cur_pos = 1  # fallback to first TP
+    end
+    
+    # Calculate new position with wrapping
+    new_pos = mod1(cur_pos + data.change, num_tps)
+    new_tp = tp_indices[new_pos]
+    current_tp_index[] = new_tp
+    
+    label = get(tp_labels, new_tp, "TP $new_tp")
+    @info "TP Navigation: switching to $label (index=$new_tp)"
+    
+    if compare_mode[]
+        # Compare mode: load current TP into left panel (1), next TP into right panel (5)
+        tp_voxels_left = tp_data_cache[new_tp]
+        _load_tp_into_panel!(stateObjects, tp_voxels_left, 1, 1)
+        
+        # Right panel: next TP chronologically
+        next_pos = mod1(new_pos + 1, num_tps)
+        right_tp = tp_indices[next_pos]
+        compare_right_tp[] = right_tp
+        tp_voxels_right = tp_data_cache[right_tp]
+        # Panel 5 is axial, so use voxel index 1 (the axial data)
+        _load_tp_into_panel!(stateObjects, tp_voxels_right, 5, 1)
+        
+        # Re-render both panels
+        old_idx = stateObjects[1].switchIndex
+        stateObjects[1].switchIndex = 1
+        ReactToScroll.reactToScroll(0, stateObjects, false)
+        stateObjects[1].switchIndex = 5
+        ReactToScroll.reactToScroll(0, stateObjects, false)
+        stateObjects[1].switchIndex = old_idx
+        
+        right_label = get(tp_labels, right_tp, "TP $right_tp")
+        @info "Compare: Left=$label, Right=$right_label"
+    else
+        # Normal mode: load current TP into all 4 panels
+        tp_voxels = tp_data_cache[new_tp]
+        num_panels = min(length(stateObjects), length(tp_voxels))
+        for i in 1:num_panels
+            _load_tp_into_panel!(stateObjects, tp_voxels, i, i)
+        end
+        
+        # Re-render all panels
+        old_idx = stateObjects[1].switchIndex
+        for idx in 1:num_panels
+            stateObjects[1].switchIndex = idx
+            ReactToScroll.reactToScroll(0, stateObjects, false)
+        end
+        stateObjects[1].switchIndex = old_idx
+    end
 end
 
 function reactToToggleLesion(data::ToggleLesionEvent, stateObjects::Vector{StateDataFields})

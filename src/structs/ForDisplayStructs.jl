@@ -304,6 +304,7 @@ Actor that is able to store a state to keep needed data for proper display
   calcDimsStruct::CalcDimsStruct = CalcDimsStruct()   #data for calculations of necessary constants needed to calculate window size , mouse position ...
   valueForMasToSet::valueForMasToSetStruct = valueForMasToSetStruct() # value that will be used to set  pixels where we would interact with mouse
   lastRecordedMousePosition::CartesianIndex{3} = CartesianIndex(1, 1, 1) # last position of the mouse  related to right click - usefull to know onto which slice to change when dimensions of scroll change
+  lastPanDragCoords::Vector{CartesianIndex{2}} = [] # last position of the mouse for right click drag panning
   forUndoVector::AbstractArray = [] # holds lambda functions that when invoked will  undo last operations
   maxLengthOfForUndoVector::Int64 = 15 # number controls how many step at maximum we can get back
   fieldKeyboardStruct::KeyboardStruct = KeyboardStruct()
