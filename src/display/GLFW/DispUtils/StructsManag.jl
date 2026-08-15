@@ -222,7 +222,7 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
   #1) we get actual available width by multiplying fraction of main image by total width
   #this gets halved , times 0.5 only in the case of multi image display
 
-  corrected_width = displayMode == SingleImage ? calcDimStruct.fractionOfMainIm * calcDimStruct.windowWidth : (calcDimStruct.fractionOfMainIm * calcDimStruct.windowWidth)
+  corrected_width = displayMode == QuadImage ? Float64(calcDimStruct.windowWidth) : (calcDimStruct.fractionOfMainIm * calcDimStruct.windowWidth)
   #2) we get the width of a texel by dividing the corrected width by the width of the size of associated array; simmilar with size
   texel_width = corrected_width / calcDimStruct.imageTextureWidth
   texel_height = calcDimStruct.windowHeight / calcDimStruct.imageTextureHeight

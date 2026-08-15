@@ -29,6 +29,7 @@ using JSON
 using HDF5
 using Dates
 using ..MakieEvents
+import ..SegmentationDisplay: synchronized_makie_renderloop
 import ..SegmentationDisplay.MakieEventHandlers as _MEH
 
 abstract type DBMessage end
@@ -43,7 +44,7 @@ struct LoadDBMessage <: DBMessage
     reply_channel::Channel{Dict}
 end
 
-export create_metadata_window, load_annotations, save_annotations
+export create_metadata_window, load_annotations, save_annotations, display_metadata_window
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 const _PKG_ROOT      = joinpath(@__DIR__, "..", "..", "extension", "data")
@@ -350,29 +351,57 @@ function create_metadata_window(
     btn_next = Button(g[nav_r, 4], label = "Next >>",
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
 
+    # Prominent active lesion status banner
+    nav_info_r = nr!()
+    active_lesion_display = Observable{String}("Active Lesion: (none)")
+    Label(g[nav_info_r, 1:4], active_lesion_display, fontsize = 12, color = ACCENT, halign = :center, tellwidth = false)
+
+    is_syncing_selection = Ref(false)
+
     on(les_menu.selection) do sel
+        is_syncing_selection[] && return
         sel === nothing && return
         s = string(sel)
-        s == active_lesion_id[] || (active_lesion_id[] = s)
+        if s != active_lesion_id[]
+            is_syncing_selection[] = true
+            try
+                active_lesion_id[] = s
+            finally
+                is_syncing_selection[] = false
+            end
+        end
     end
     on(active_lesion_id) do id
+        # Update status banner
+        active_lesion_display[] = "Active Lesion: [ $id ]"
+        # Sync Menu widget — set both i_selected and selection for visual update
         opts = lesion_ids[]
         isempty(opts) && return
         idx = findfirst(==(id), opts)
         idx === nothing && return
-        les_menu.i_selected[] = idx
+        is_syncing_selection[] = true
+        try
+            les_menu.i_selected[] = idx
+            les_menu.selection[] = id
+        finally
+            is_syncing_selection[] = false
+        end
     end
     on(btn_prev.clicks) do _
+        @info "BTN_PREV clicked"
         opts = lesion_ids[]; isempty(opts) && return
         idx = findfirst(==(active_lesion_id[]), opts)
-        idx === nothing && return
-        active_lesion_id[] = opts[idx == 1 ? length(opts) : idx-1]
+        new_idx = idx === nothing ? 1 : (idx == 1 ? length(opts) : idx - 1)
+        @info "BTN_PREV: setting active_lesion_id from $(active_lesion_id[]) to $(opts[new_idx])"
+        active_lesion_id[] = opts[new_idx]
     end
     on(btn_next.clicks) do _
+        @info "BTN_NEXT clicked"
         opts = lesion_ids[]; isempty(opts) && return
         idx = findfirst(==(active_lesion_id[]), opts)
-        idx === nothing && return
-        active_lesion_id[] = opts[idx == length(opts) ? 1 : idx+1]
+        new_idx = idx === nothing ? 1 : (idx == length(opts) ? 1 : idx + 1)
+        @info "BTN_NEXT: setting active_lesion_id from $(active_lesion_id[]) to $(opts[new_idx])"
+        active_lesion_id[] = opts[new_idx]
     end
 
     end_section!(sec_nav)
@@ -407,12 +436,12 @@ function create_metadata_window(
     on(btn_pt.clicks) do _; put!(channel, ChangeTimePointEvent(-1)) end
     on(btn_nt.clicks) do _; put!(channel, ChangeTimePointEvent(1)) end
 
-    # TP status indicator
+    # TP and Modality status indicator
     tp_label_r = nr!()
-    tp_status = Observable{String}("Viewing: TP 0")
-    Label(g[tp_label_r, 1:4], tp_status, fontsize = 11, color = GRN, halign = :center)
+    tp_status = Observable{String}("Modality & Timepoint: Initializing...")
+    Label(g[tp_label_r, 1:4], tp_status, fontsize = 12, color = GRN, halign = :center, tellwidth = false)
     
-    # Update TP label when TP buttons are clicked
+    # Update TP label when TP buttons or Compare view are toggled
     function update_tp_label()
         idx = _MEH.current_tp_index[]
         label = get(_MEH.tp_labels, idx, "TP $idx")
@@ -420,34 +449,37 @@ function create_metadata_window(
         if cv_active[]
             right_idx = _MEH.compare_right_tp[]
             right_label = get(_MEH.tp_labels, right_idx, "TP $right_idx")
-            tp_status[] = "Left: $label | Right: $right_label"
+            tp_status[] = "Active: Left [ $label ] | Right [ $right_label ]"
         else
-            tp_status[] = "Viewing: $label"
+            tp_status[] = "Visualized Modality & TP: [ $label ]"
         end
     end
 
     on(btn_pt.clicks) do _
-        # Small delay to let the channel event update state first
         @async begin
-            sleep(0.1)
+            sleep(0.08)
             update_tp_label()
         end
     end
     on(btn_nt.clicks) do _
         @async begin
-            sleep(0.1)
+            sleep(0.08)
             update_tp_label()
         end
     end
     on(btn_cv.clicks) do _
         @async begin
-            sleep(0.1)
+            sleep(0.08)
             update_tp_label()
         end
     end
     
-    # Initialize
+    # Initialize immediately and shortly after startup to capture populated labels
     update_tp_label()
+    @async begin
+        sleep(0.2)
+        update_tp_label()
+    end
 
     vc2_r = nr!()
     btn_tl = Button(g[vc2_r, 1:2], label = "Toggle Lesion Overlay", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
@@ -809,35 +841,63 @@ function create_metadata_window(
             w === nothing && continue
             val = get(data, q.short, nothing)
             if w isa Textbox
-                w.stored_string[] = val === nothing ? "" : val
+                target_str = val === nothing ? "" : val
+                if w.stored_string[] != target_str
+                    w.stored_string[] = target_str
+                end
             elseif w isa Menu
                 if val !== nothing
                     opts = w.options[]
                     idx = findfirst(==(val), opts)
-                    idx !== nothing && (w.i_selected[] = idx)
+                    target_idx = idx !== nothing ? idx : 1
+                    if w.i_selected[] != target_idx
+                        w.i_selected[] = target_idx
+                    end
                 else
-                    w.i_selected[] = 1   # reset to "- select -"
+                    if w.i_selected[] != 1
+                        w.i_selected[] = 1   # reset to "- select -"
+                    end
                 end
             end
         end
         rl_raw = get(data, "RadLex", "")
-        radlex_selected[] = isempty(rl_raw) ? String[] : String.(split(rl_raw, " | "))
+        target_radlex = isempty(rl_raw) ? String[] : String.(split(rl_raw, " | "))
+        if radlex_selected[] != target_radlex
+            radlex_selected[] = target_radlex
+        end
         cdb = Dict{String,String}()
         for (k, v) in data
             startswith(k, "Custom:") && (cdb[k[8:end]] = v)
         end
         custom_db[] = cdb
-        dict_tb.stored_string[] = get(data, "RadiologicalDictation", "")
-        rpt_tb.stored_string[] = get(data, "RadiologicalReportOutput", "")
+        
+        target_dict = get(data, "RadiologicalDictation", "")
+        if dict_tb.stored_string[] != target_dict
+            dict_tb.stored_string[] = target_dict
+        end
+        
+        target_rpt = get(data, "RadiologicalReportOutput", "")
+        if rpt_tb.stored_string[] != target_rpt
+            rpt_tb.stored_string[] = target_rpt
+        end
     end
 
     # ── Wire callbacks ────────────────────────────────────────────────────────
     on(active_lesion_id) do id
+        @info "WIRE_CALLBACK: active_lesion_id changed to: $id"
         db = lesion_db[]
         apply_state(get(db, id, Dict{String,String}()))
         m = match(r"\d+", id)
         if m !== nothing
-            put!(channel, SyncLesionEvent(parse(Int, m.match)))
+            lesion_num = parse(Int, m.match)
+            @info "WIRE_CALLBACK: dispatching SyncLesionEvent($lesion_num) to channel (isopen=$(isopen(channel)))"
+            @async begin
+                @info "WIRE_CALLBACK_ASYNC: about to put! SyncLesionEvent($lesion_num)"
+                put!(channel, SyncLesionEvent(lesion_num))
+                @info "WIRE_CALLBACK_ASYNC: put! completed for SyncLesionEvent($lesion_num)"
+            end
+        else
+            @warn "WIRE_CALLBACK: no lesion number found in id=$id"
         end
     end
 
@@ -922,8 +982,34 @@ function create_metadata_window(
         end
     end
 
-    display(fig)
     return (fig = fig, lesion_db = lesion_db)
+end
+
+"""
+Display the metadata Figure using the thread-safe synchronized GLMakie render loop.
+"""
+function display_metadata_window(fig::Figure)
+    screen = GLMakie.Screen(fig.scene; renderloop=synchronized_makie_renderloop)
+    
+    # Fix: Force hasfocus=true so GLMakie's MousePositionUpdater always tracks
+    # the mouse position. Without this, the Makie window ignores mouse movement
+    # when it doesn't have window focus (e.g., when the GLFW viewer window is
+    # focused), which prevents button click detection entirely.
+    #
+    # Root cause: GLMakie/src/events.jl MousePositionUpdater has:
+    #   !p.hasfocus[] && return
+    # This skips mouse tracking when the window isn't focused, so
+    # mouse_was_inside is never set to true, and button clicks are ignored.
+    events(fig.scene).hasfocus[] = true
+    on(events(fig.scene).hasfocus) do focused
+        # Override any GLFW focus-lost events — always keep tracking
+        if !focused
+            @async (events(fig.scene).hasfocus[] = true)
+        end
+    end
+    
+    display(screen, fig)
+    return screen
 end
 
 end # module LesionMetadataWindow

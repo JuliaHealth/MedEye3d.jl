@@ -22,10 +22,33 @@ return scrollback - that holds boolean subject (observable) to which we can reac
 """
 function registerMouseScrollFunctions(window::GLFW.Window, mainChannel::Base.Channel{Any})
     GLFW.SetScrollCallback(window, (a, xoff, yoff) -> begin
-        if GLFW.GetKey(window, GLFW.KEY_LEFT_SHIFT) == GLFW.PRESS || GLFW.GetKey(window, GLFW.KEY_RIGHT_SHIFT) == GLFW.PRESS
+        ctrl_down = GLFW.GetKey(window, GLFW.KEY_LEFT_CONTROL) == GLFW.PRESS || GLFW.GetKey(window, GLFW.KEY_RIGHT_CONTROL) == GLFW.PRESS
+        shift_down = GLFW.GetKey(window, GLFW.KEY_LEFT_SHIFT) == GLFW.PRESS || GLFW.GetKey(window, GLFW.KEY_RIGHT_SHIFT) == GLFW.PRESS
+        alt_down = GLFW.GetKey(window, GLFW.KEY_LEFT_ALT) == GLFW.PRESS || GLFW.GetKey(window, GLFW.KEY_RIGHT_ALT) == GLFW.PRESS
+        
+        # Ensure switchIndex is updated to the quadrant directly under the cursor
+        try
+            actualW, actualH = GLFW.GetWindowSize(window)
+            curX, curY = GLFW.GetCursorPos(window)
+            if curX >= 0 && curX <= actualW && curY >= 0 && curY <= actualH
+                put!(mainChannel, MouseStruct(
+                    isLeftButtonDown  = false,
+                    isRightButtonDown = false,
+                    lastCoordinates   = [CartesianIndex(Int(curX), Int(curY))],
+                    actualWindowWidth  = Int(actualW),
+                    actualWindowHeight = Int(actualH),
+                ))
+            end
+        catch
+        end
+        
+        if ctrl_down || shift_down || alt_down
             put!(mainChannel, ScrollZoomEvent(Float64(yoff)))
         else
-            put!(mainChannel, Int64(yoff))
+            scroll_delta = yoff > 0 ? 1 : (yoff < 0 ? -1 : 0)
+            if scroll_delta != 0
+                put!(mainChannel, Int64(scroll_delta))
+            end
         end
     end)
 end #registerMouseScrollFunctions
@@ -138,7 +161,7 @@ end
                 
                 # Use the current crosshair position (where the user last clicked or synced)
                 activePos = mainState.lastRecordedMousePosition
-                if clickedPanel == 1 || clickedPanel == 2 # Axial
+                if clickedPanel == 1 || clickedPanel == 2 || clickedPanel == 5 # Axial
                     origX, origY = activePos[1], activePos[2]
                     origZ = current
                 elseif clickedPanel == 3  # Sagittal (permuted 2,3,1)
@@ -183,14 +206,7 @@ end
                             panelState.currentDisplayedSlice = newSlice
                             panelState.isSliceChanged = true
                             
-                            for updateDat in singleSlDatSync.listOfDataAndImageNames
-                                findList = findall((texSpec) -> texSpec.name == updateDat.name, panelState.mainForDisplayObjects.listOfTextSpecifications)
-                                if !isempty(findList)
-                                    texSpec = panelState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
-                                    transformedDat = applyZoomPan(updateDat.dat, panelState.calcDimsStruct.zoom, panelState.calcDimsStruct.panX, panelState.calcDimsStruct.panY)
-                                    updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, panelState.calcDimsStruct.imageTextureWidth, panelState.calcDimsStruct.imageTextureHeight)
-                                end
-                            end
+                            updateImagesDisplayed(singleSlDatSync, panelState.mainForDisplayObjects, panelState.textDispObj, panelState.calcDimsStruct, panelState.valueForMasToSet, panelState.crosshairFields, panelState.mainRectFields, panelState.displayMode)
                         end
                         
                         # UPDATE lastRecordedMousePosition for the synced panels
@@ -227,14 +243,7 @@ end
                             panelState.isSliceChanged = true
                             
                             # upload textures to GPU without SwapBuffers
-                            for updateDat in singleSlDatSync.listOfDataAndImageNames
-                                findList = findall((texSpec) -> texSpec.name == updateDat.name, panelState.mainForDisplayObjects.listOfTextSpecifications)
-                                if !isempty(findList)
-                                    texSpec = panelState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
-                                    transformedDat = applyZoomPan(updateDat.dat, panelState.calcDimsStruct.zoom, panelState.calcDimsStruct.panX, panelState.calcDimsStruct.panY)
-                                    updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, panelState.calcDimsStruct.imageTextureWidth, panelState.calcDimsStruct.imageTextureHeight)
-                                end
-                            end
+                            updateImagesDisplayed(singleSlDatSync, panelState.mainForDisplayObjects, panelState.textDispObj, panelState.calcDimsStruct, panelState.valueForMasToSet, panelState.crosshairFields, panelState.mainRectFields, panelState.displayMode)
                             
                             # also update panelState.lastRecordedMousePosition to keep them in sync
                             panelState.lastRecordedMousePosition = CartesianIndex(locArr[1], locArr[2], locArr[3])

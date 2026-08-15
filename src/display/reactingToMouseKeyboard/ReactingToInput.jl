@@ -3,8 +3,7 @@ module ReactingToInput
 using GLFW, ModernGL, Setfield, DataTypesBasic, Base.Threads
 using ..ReactToScroll, ..ForDisplayStructs, ..ReactOnKeyboard
 using ..TextureManag, ..ReactOnMouseClickAndDrag, ..ReactOnKeyboard, ..DataStructs, ..StructsManag, ..DisplayWords
-# using ..MaskDiffrence
-using ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane
+using ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane, ..MakieEvents
 export subscribeGLFWtoActor, setUpForScrollData, setUpCalcDimsStruct, setUpWordsDisplay, setUpMainDisplay, setUpvalueForMasToSet, updateSingleImagesDisplayedSetUp
 
 
@@ -131,6 +130,9 @@ function subscribeGLFWtoActor(window::GLFW.Window, mainMedEye3dObject::MainMedEy
     ReactOnKeyboard.registerKeyboardFunctions(window, mainMedEye3dObject.channel)
     ReactOnMouseClickAndDrag.registerMouseClickFunctions(window, calcDim, mainMedEye3dObject.channel)
 
+    # Window management events routed directly through the channel
+    GLFW.SetWindowCloseCallback(window, (_) -> put!(mainMedEye3dObject.channel, CloseWindowEvent()))
+    GLFW.SetFramebufferSizeCallback(window, (_, w, h) -> put!(mainMedEye3dObject.channel, ResizeWindowEvent(Int(w), Int(h))))
 end
 
 

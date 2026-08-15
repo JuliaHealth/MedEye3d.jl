@@ -17,6 +17,7 @@ export OpenGLDisplayUtils
 # export  DisplayWords.textLinesFromStrings
 export StructsManag
 export ShadersAndVerticiesForSuperVoxels
+export LesionTracker
 # export  DisplayWords.textLinesFromStrings
 # export  StructsManag.getThreeDims
 
@@ -64,6 +65,7 @@ include(joinpath("display", "InferenceClient.jl"))
 using .InferenceClient
 include(joinpath("display", "LesionAssociation.jl"))
 using .LesionAssociation
+include("LesionTracker.jl")
 include(joinpath("higherAbstractions", "DisplayDataManag.jl"))
 include(joinpath("display", "GLFW", "SegmentationDisplay.jl"))
 #include(joinpath("higherAbstractions", "visualizationFromHdf5.jl"))

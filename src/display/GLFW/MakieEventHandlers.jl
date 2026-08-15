@@ -17,6 +17,22 @@ using ...InferenceClient
 using ...LesionAssociation
 using ModernGL
 using ..Uniforms
+
+function find_lesion_center(dat::AbstractArray{T, 3}, lesion_id::Float32) where T
+    sum_x = 0; sum_y = 0; sum_z = 0; count = 0
+    nx, ny, nz = size(dat)
+    @inbounds for k in 1:nz, j in 1:ny, i in 1:nx
+        if isapprox(dat[i, j, k], lesion_id, atol=0.1f0)
+            sum_x += i
+            sum_y += j
+            sum_z += k
+            count += 1
+        end
+    end
+    count == 0 && return nothing
+    return [round(Int, sum_x / count), round(Int, sum_y / count), round(Int, sum_z / count)]
+end
+
 function reactToChangePlane(data::ChangePlaneEvent, stateObjects::Vector{StateDataFields})
     dim = 3
     if data.plane == :Sagittal
@@ -43,6 +59,17 @@ function reactToChangePlane(data::ChangePlaneEvent, stateObjects::Vector{StateDa
         
         ChangePlane.processKeysInfo(Identity(new_scroll), stateObject, dummy_kb, false)
         
+        # If in compare mode, restore layout immediately
+        if compare_mode[]
+            if idx == 1
+                updateQuadVertices!(stateObject, :LeftHalf)
+            elseif idx == 5
+                updateQuadVertices!(stateObject, :RightHalf)
+            elseif idx in (2, 3, 4)
+                updateQuadVertices!(stateObject, :Hidden)
+            end
+        end
+        
         stateObjects[1].switchIndex = idx
         ReactToScroll.reactToScroll(0, stateObjects, false)
     end
@@ -51,79 +78,28 @@ end
 
 function updateQuadVertices!(stateObject::StateDataFields, layout::Symbol)
     calcDimStruct = stateObject.calcDimsStruct
-    res = copy(calcDimStruct.mainImageQuadVert)
     
     if layout == :Hidden
-        res .= 0.0f0
+        res = zeros(Float32, length(calcDimStruct.mainImageQuadVert))
+        stateObject.calcDimsStruct = Setfield.setproperties(calcDimStruct, (mainImageQuadVert = res,))
     else
-        # Recalculate aspect ratio corrections based on the active layout
-        ratio_desired = calcDimStruct.heightToWithRatio * (calcDimStruct.imageTextureHeight / calcDimStruct.imageTextureWidth)
-        
-        av_width = Float64(calcDimStruct.windowWidth)
-        av_height = Float64(calcDimStruct.windowHeight)
-        
-        if layout == :LeftHalf || layout == :RightHalf
-            av_width /= 2.0
-        elseif layout == :TopLeft || layout == :TopRight || layout == :BottomLeft || layout == :BottomRight
-            av_width /= 2.0
-            av_height /= 2.0
-        end
-        
-        ratio_actual = av_height / av_width
-        
-        widthCorr = 0.0f0
-        heightCorr = 0.0f0
-        if ratio_actual > ratio_desired
-            heightCorr = 1.0f0 - Float32(ratio_desired / ratio_actual)
+        pos = if layout == :TopLeft || layout == :LeftHalf
+            1
+        elseif layout == :TopRight || layout == :RightHalf
+            2
+        elseif layout == :BottomLeft
+            3
+        elseif layout == :BottomRight
+            4
         else
-            widthCorr = 1.0f0 - Float32(ratio_actual / ratio_desired)
+            1
         end
-        
-        # OpenGL width is 1.0 for all these layouts
-        wc = widthCorr / 2.0f0
-        
-        # OpenGL height is 2.0 for LeftHalf/RightHalf, and 1.0 for quadrants
-        hc = (layout == :LeftHalf || layout == :RightHalf) ? heightCorr : heightCorr / 2.0f0
-        
-        scale = 0.90f0
-        yOffset = -0.10f0
-        
-        # Y coordinates
-        if layout == :TopLeft || layout == :TopRight
-            res[2] = (1.0f0 - hc) * scale + yOffset
-            res[10] = (0.0f0 + hc) * scale + yOffset
-            res[18] = (0.0f0 + hc) * scale + yOffset
-            res[26] = (1.0f0 - hc) * scale + yOffset
-        elseif layout == :BottomLeft || layout == :BottomRight
-            res[2] = (0.0f0 - hc) * scale + yOffset
-            res[10] = (-1.0f0 + hc) * scale + yOffset
-            res[18] = (-1.0f0 + hc) * scale + yOffset
-            res[26] = (0.0f0 - hc) * scale + yOffset
-        elseif layout == :LeftHalf || layout == :RightHalf
-            res[2] = (1.0f0 - hc) * scale + yOffset
-            res[10] = (-1.0f0 + hc) * scale + yOffset
-            res[18] = (-1.0f0 + hc) * scale + yOffset
-            res[26] = (1.0f0 - hc) * scale + yOffset
-        end
-        
-        # X coordinates
-        if layout == :TopLeft || layout == :BottomLeft || layout == :LeftHalf
-            res[1] = (0.0f0 - wc) * scale
-            res[9] = (0.0f0 - wc) * scale
-            res[17] = (-1.0f0 + wc) * scale
-            res[25] = (-1.0f0 + wc) * scale
-        elseif layout == :TopRight || layout == :BottomRight || layout == :RightHalf
-            res[1] = (1.0f0 - wc) * scale
-            res[9] = (1.0f0 - wc) * scale
-            res[17] = (0.0f0 + wc) * scale
-            res[25] = (0.0f0 + wc) * scale
-        end
+        mode = (layout == :LeftHalf || layout == :RightHalf) ? MultiImage : QuadImage
+        stateObject.calcDimsStruct = StructsManag.getMainVerticies(calcDimStruct, mode, pos)
     end
     
-    stateObject.calcDimsStruct = Setfield.setproperties(calcDimStruct, (mainImageQuadVert = res,))
-    
     ModernGL.glBindBuffer(ModernGL.GL_ARRAY_BUFFER, stateObject.mainForDisplayObjects.vbo)
-    ModernGL.glBufferData(ModernGL.GL_ARRAY_BUFFER, sizeof(res), res, ModernGL.GL_STATIC_DRAW)
+    ModernGL.glBufferData(ModernGL.GL_ARRAY_BUFFER, sizeof(stateObject.calcDimsStruct.mainImageQuadVert), stateObject.calcDimsStruct.mainImageQuadVert, ModernGL.GL_STATIC_DRAW)
 end
 
 const compare_mode = Ref(false)
@@ -155,33 +131,16 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                 # Load right TP data into panel 5
                 tp_voxels = tp_data_cache[right_tp]
                 
-                # Ensure manualModif is inserted at index 2 if it's missing (to match SegmentationDisplay.jl initialization)
-                if length(tp_voxels) >= 1 && tp_voxels[1][1] != "manualModif" && (length(tp_voxels) < 2 || tp_voxels[2][1] != "manualModif")
-                    insert!(tp_voxels, 2, ("manualModif", zeros(Float32, size(tp_voxels[1][2]))))
-                end
-
                 if length(tp_voxels) >= 5
-                    newDataToScroll = StructsManag.getThreeDims(tp_voxels[5])
-                    stateObjects[5].onScrollData.dataToScroll = newDataToScroll
-                    stateObjects[5].onScrollData.nameIndexes = DataStructs.getLocationDict(newDataToScroll)
-                    dimToScroll = stateObjects[5].onScrollData.dimensionToScroll
-                    if !isempty(newDataToScroll)
-                        stateObjects[5].onScrollData.slicesNumber = Int32(size(newDataToScroll[1].dat, dimToScroll))
-                    end
-                    stateObjects[5].currentDisplayedSlice = max(1, stateObjects[5].onScrollData.slicesNumber ÷ 2)
+                    _load_tp_into_panel!(stateObjects, tp_voxels, 5, 5)
                 elseif length(tp_voxels) >= 1
                     # Panel 5 uses same view as panel 1 (axial), so use index 1
-                    newDataToScroll = StructsManag.getThreeDims(tp_voxels[1])
-                    stateObjects[5].onScrollData.dataToScroll = newDataToScroll
-                    stateObjects[5].onScrollData.nameIndexes = DataStructs.getLocationDict(newDataToScroll)
-                    dimToScroll = stateObjects[5].onScrollData.dimensionToScroll
-                    if !isempty(newDataToScroll)
-                        stateObjects[5].onScrollData.slicesNumber = Int32(size(newDataToScroll[1].dat, dimToScroll))
-                    end
-                    stateObjects[5].currentDisplayedSlice = max(1, stateObjects[5].onScrollData.slicesNumber ÷ 2)
+                    _load_tp_into_panel!(stateObjects, tp_voxels, 5, 1)
                 end
                 
-                # Re-render both panels
+                # Re-render both panels by clearing current display data to force texture update
+                stateObjects[1].currentlyDispDat = SingleSliceDat()
+                stateObjects[5].currentlyDispDat = SingleSliceDat()
                 old_idx = stateObjects[1].switchIndex
                 stateObjects[1].switchIndex = 1
                 ReactToScroll.reactToScroll(0, stateObjects, false)
@@ -201,6 +160,15 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
             updateQuadVertices!(stateObjects[3], :BottomLeft)
             updateQuadVertices!(stateObjects[4], :BottomRight)
             updateQuadVertices!(stateObjects[5], :Hidden)
+            
+            # Re-render all 4 panels to ensure textures and slices are displayed
+            old_idx = stateObjects[1].switchIndex
+            for i in 1:4
+                stateObjects[i].currentlyDispDat = SingleSliceDat()
+                stateObjects[1].switchIndex = i
+                ReactToScroll.reactToScroll(0, stateObjects, false)
+            end
+            stateObjects[1].switchIndex = old_idx
             @info "Compare mode OFF: restored 4-pane view"
         end
     end
@@ -231,7 +199,7 @@ end
 function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFields})
     for state in stateObjects
         for tex in state.mainForDisplayObjects.listOfTextSpecifications
-            if tex.isMainImage
+            if tex.name == "CT"
                 tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
                 
                 # Push uniform update for min/max
@@ -248,92 +216,151 @@ function reactToPaintVal(data::PaintValEvent, stateObjects::Vector{StateDataFiel
     end
 end
 
+const tp_node_names = Dict{Int, String}()
+
+function get_node_name_for_tp(tp_idx::Int)::String
+    if haskey(tp_node_names, tp_idx)
+        return tp_node_names[tp_idx]
+    end
+    lbl = get(tp_labels, tp_idx, "")
+    if occursin("PET", lbl) && occursin("TP", lbl)
+        m = match(r"TP\s*(\d+)", lbl)
+        if m !== nothing
+            return "PET_Lesions_$(m.captures[1])"
+        end
+    elseif occursin("SPECT", lbl) && occursin("TP", lbl)
+        m = match(r"TP\s*(\d+)", lbl)
+        if m !== nothing
+            return "SPECT_Lesions_$(m.captures[1])"
+        end
+    end
+    return "PET_Lesions_$tp_idx"
+end
+
 function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateDataFields})
+    @info "reactToSyncLesion called with lesion_id=$(data.lesion_id), nStates=$(length(stateObjects))"
     changed = false
     old_idx = stateObjects[1].switchIndex
     old_sync = stateObjects[1].mainForDisplayObjects.isSyncScrollOn
     for stateObject in stateObjects
         stateObject.mainForDisplayObjects.isSyncScrollOn = false
-        
-        # NEW: Toggle single lesion visibility mask
+    end
+
+    # Determine matched lesion ID for the compare right panel (panel 5) if in compare mode
+    panel5_lesion_id = data.lesion_id
+    if compare_mode[] && length(stateObjects) >= 5 && data.lesion_id > 0
+        try
+            left_node = get_node_name_for_tp(current_tp_index[])
+            right_node = get_node_name_for_tp(compare_right_tp[])
+            # Find cross-TP match from LesionAssociation module
+            match_mod = isdefined(Main, :MedEye3d) && isdefined(Main.MedEye3d, :LesionAssociation) ? 
+                        Main.MedEye3d.LesionAssociation : nothing
+            if match_mod !== nothing
+                matched_ids = match_mod.find_cross_tp_lesion(left_node, data.lesion_id, right_node)
+                if !isempty(matched_ids)
+                    panel5_lesion_id = matched_ids[1]
+                    @info "Cross-TP match: $(left_node) lesion $(data.lesion_id) -> $(right_node) lesion $(panel5_lesion_id)"
+                end
+            end
+        catch e
+            @warn "Error finding cross-TP lesion: $e"
+        end
+    end
+
+    # Set mask filter uniform for each panel
+    for (idx, stateObject) in enumerate(stateObjects)
+        target_id = (idx == 5 && compare_mode[]) ? panel5_lesion_id : data.lesion_id
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if textSpec.isMultiDiscreteMask || textSpec.name == "Mask"
-                if data.lesion_id > 0
-                    textSpec.minAndMaxValue = Float32.([data.lesion_id, data.lesion_id])
+                if target_id > 0
+                    textSpec.minAndMaxValue = Float32.([target_id, target_id])
                 else
                     textSpec.minAndMaxValue = Float32.([1.0, 1000.0])
                 end
                 ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
                 Uniforms.coontrolMinMaxUniformVals(textSpec)
+                @info "Set mask uniform for panel $idx: lesion=$target_id, texSpec.name=$(textSpec.name)"
             end
         end
     end
-    for (idx, stateObject) in enumerate(stateObjects)
-        if data.lesion_id > 0
-            found_center = nothing
+
+    active_panel_indices = if compare_mode[] && length(stateObjects) >= 5
+        [1, 5]
+    elseif length(stateObjects) >= 4
+        [1, 2, 3, 4]
+    else
+        collect(1:length(stateObjects))
+    end
+
+    canonical_center = nothing
+    if data.lesion_id > 0
+        # Find lesion center in axial panel 1 (or any panel with Mask)
+        for (si, stateObject) in enumerate(stateObjects)
             for (scrIdx, scrDat) in enumerate(stateObject.onScrollData.dataToScroll)
                 texSpec = stateObject.mainForDisplayObjects.listOfTextSpecifications[scrIdx]
-                if texSpec.name == "Mask" || texSpec.name == "manualModif"
-                    # Using isapprox for Float32 comparison since mask might be float
-                    indices = findall(x -> isapprox(x, Float32(data.lesion_id), atol=0.1f0), scrDat.dat)
-                    if !isempty(indices)
-                        # Extract the 3D mask matching the lesion
-                        mask = isapprox.(scrDat.dat, Float32(data.lesion_id), atol=0.1f0)
-                        
-                        # Sum over axes to find the slice with the maximum area
-                        best_x = argmax(sum(mask, dims=(2, 3)))[1]
-                        best_y = argmax(sum(mask, dims=(1, 3)))[2]
-                        best_z = argmax(sum(mask, dims=(1, 2)))[3]
-                        
-                        found_center = [best_x, best_y, best_z]
+                if (texSpec.name == "Mask" || texSpec.name == "manualModif") && stateObject.onScrollData.dimensionToScroll == 3
+                    canonical_center = find_lesion_center(scrDat.dat, Float32(data.lesion_id))
+                    if canonical_center !== nothing
                         break
                     end
                 end
             end
+            canonical_center !== nothing && break
+        end
+    end
+    @info "canonical_center=$canonical_center, active_panel_indices=$active_panel_indices"
+
+    if canonical_center !== nothing
+        for idx in active_panel_indices
+            stateObject = stateObjects[idx]
+            last_sl = max(1, stateObject.onScrollData.slicesNumber)
             
-            if found_center !== nothing
-                stateObject.lastRecordedMousePosition = CartesianIndex(found_center[1], found_center[2], found_center[3])
-                dim = stateObject.onScrollData.dimensionToScroll
-                stateObject.currentDisplayedSlice = found_center[dim]
-                
-                stateObjects[1].switchIndex = idx
-                ReactToScroll.reactToScroll(0, stateObjects, false)
-                changed = true
-                @info "Synced active lesion $(data.lesion_id) at center $found_center in window $idx"
-            else
-                if idx > 1 && length(stateObjects) > 0
-                    tp0_state = stateObjects[1]
-                    pos_tp0 = tp0_state.lastRecordedMousePosition
-                    spacing_tp0 = tp0_state.spacingsValue[1]
-                    origin_tp0 = tp0_state.originValue[1]
-                    phys_x = origin_tp0[1] + (pos_tp0[1] - 1) * spacing_tp0[1]
-                    phys_y = origin_tp0[2] + (pos_tp0[2] - 1) * spacing_tp0[2]
-                    phys_z = origin_tp0[3] + (pos_tp0[3] - 1) * spacing_tp0[3]
-                    
-                    spacing_tp1 = stateObject.spacingsValue[1]
-                    origin_tp1 = stateObject.originValue[1]
-                    vox_x = round(Int, (phys_x - origin_tp1[1]) / spacing_tp1[1]) + 1
-                    vox_y = round(Int, (phys_y - origin_tp1[2]) / spacing_tp1[2]) + 1
-                    vox_z = round(Int, (phys_z - origin_tp1[3]) / spacing_tp1[3]) + 1
-                    
-                    mapped_pos = CartesianIndex(vox_x, vox_y, vox_z)
-                    if idx == 1 || idx == 2
-                        stateObject.lastRecordedMousePosition = mapped_pos
-                    elseif idx == 3
-                        stateObject.lastRecordedMousePosition = CartesianIndex(vox_y, vox_z, vox_x)
-                    else
-                        stateObject.lastRecordedMousePosition = CartesianIndex(vox_x, vox_z, vox_y)
+            # Check if this panel has its own lesion center (especially in compare mode)
+            target_id = (idx == 5 && compare_mode[]) ? panel5_lesion_id : data.lesion_id
+            panel_center = nothing
+            if idx == 5 && compare_mode[] && target_id > 0
+                for (scrIdx, scrDat) in enumerate(stateObject.onScrollData.dataToScroll)
+                    texSpec = stateObject.mainForDisplayObjects.listOfTextSpecifications[scrIdx]
+                    if (texSpec.name == "Mask" || texSpec.name == "manualModif") && stateObject.onScrollData.dimensionToScroll == 3
+                        panel_center = find_lesion_center(scrDat.dat, Float32(target_id))
+                        panel_center !== nothing && break
                     end
-                    
-                    dim = stateObject.onScrollData.dimensionToScroll
-                    stateObject.currentDisplayedSlice = mapped_pos[dim]
-                    
-                    stateObjects[1].switchIndex = idx
-                    ReactToScroll.reactToScroll(0, stateObjects, false)
-                    changed = true
-                    @info "Mapped lesion $(data.lesion_id) via physical coordinates to window $idx: $mapped_pos"
                 end
             end
+            
+            effective_center = panel_center !== nothing ? panel_center : canonical_center
+            origX, origY, origZ = effective_center[1], effective_center[2], effective_center[3]
+            
+            if idx == 1 || idx == 2 || idx == 5
+                # Axial view (scrolls Z, shows X vs Y)
+                stateObject.lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
+                stateObject.currentDisplayedSlice = clamp(origZ, 1, last_sl)
+                texX, texY = origX, origY
+            elseif idx == 3
+                # Sagittal view (permuted 2,3,1: Y, Z, X; scrolls X, shows Y vs Z)
+                stateObject.lastRecordedMousePosition = CartesianIndex(origY, origZ, origX)
+                stateObject.currentDisplayedSlice = clamp(origX, 1, last_sl)
+                texX, texY = origY, origZ
+            else
+                # Coronal view (idx 4, permuted 1,3,2: X, Z, Y; scrolls Y, shows X vs Z)
+                stateObject.lastRecordedMousePosition = CartesianIndex(origX, origZ, origY)
+                stateObject.currentDisplayedSlice = clamp(origY, 1, last_sl)
+                texX, texY = origX, origZ
+            end
+            
+            # Center the view on the lesion if zoomed
+            if !isempty(stateObject.onScrollData.dataToScroll)
+                dat_shape = size(stateObject.onScrollData.dataToScroll[1].dat)
+                h_img = dat_shape[1]
+                w_img = dat_shape[2]
+                stateObject.calcDimsStruct.panX = Float32((texY - w_img / 2) / w_img)
+                stateObject.calcDimsStruct.panY = Float32((texX - h_img / 2) / h_img)
+            end
+            
+            stateObjects[1].switchIndex = idx
+            ReactToScroll.reactToScroll(0, stateObjects, false)
+            changed = true
+            @info "Synced active lesion $target_id at center $effective_center in panel $idx"
         end
     end
     for stateObject in stateObjects
@@ -361,13 +388,24 @@ function _load_tp_into_panel!(stateObjects, tp_voxels, panel_idx, tp_voxel_idx)
     if tp_voxel_idx > length(tp_voxels) || panel_idx > length(stateObjects)
         return
     end
-    newDataToScroll = StructsManag.getThreeDims(tp_voxels[tp_voxel_idx])
+    
+    panel_voxels = tp_voxels[tp_voxel_idx]
+    
+    # Ensure manualModif is inserted at index 2 if it's missing (to match SegmentationDisplay.jl initialization)
+    if length(panel_voxels) >= 1 && panel_voxels[1][1] != "manualModif" && (length(panel_voxels) < 2 || panel_voxels[2][1] != "manualModif")
+        insert!(panel_voxels, 2, ("manualModif", zeros(Float32, size(panel_voxels[1][2]))))
+    end
+    
+    newDataToScroll = StructsManag.getThreeDims(panel_voxels)
     stateObjects[panel_idx].onScrollData.dataToScroll = newDataToScroll
+    stateObjects[panel_idx].onScrollData.nameIndexes = DataStructs.getLocationDict(newDataToScroll)
+    
     dimToScroll = stateObjects[panel_idx].onScrollData.dimensionToScroll
     if !isempty(newDataToScroll)
         stateObjects[panel_idx].onScrollData.slicesNumber = Int32(size(newDataToScroll[1].dat, dimToScroll))
     end
     stateObjects[panel_idx].currentDisplayedSlice = max(1, stateObjects[panel_idx].onScrollData.slicesNumber ÷ 2)
+    stateObjects[panel_idx].currentlyDispDat = SingleSliceDat()
 end
 
 function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector{StateDataFields})
