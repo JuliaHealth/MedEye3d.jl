@@ -131,7 +131,7 @@ usefull stats for proper text display
     avWindHeightForMain::Int32 = windowHeight # how much of height is available for main image
     avMainImRatio::Float32 = Float32(windowHeight / avWindWidtForMain)# without any change it will give ratio between available height and width of place for main image - later we will compare it to actual required ratio of image
     #basic data for corrections required for display and calculating mouse positions
-    correCtedWindowQuadHeight::Int32 = avMainImRatio# corrected main quad height in window coordinate system
+    correCtedWindowQuadHeight::Int32 = avWindHeightForMain# corrected main quad height in window coordinate system
     correCtedWindowQuadWidth::Int32 = avWindWidtForMain# corrected main quad width in window coordinate system
     # now we still need ratio of the resulting quad window size after corrections relative to  total window size
     quadToTotalHeightRatio::Float32 = correCtedWindowQuadHeight / avWindHeightForMain

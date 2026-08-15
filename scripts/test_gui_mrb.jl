@@ -178,7 +178,7 @@ win = LesionMetadataWindow.create_metadata_window(active_lesion, lesion_ids, mai
 # Make TP2 invisible initially (Compare off)
 put!(mainMedEye3dInstance.channel, CompareTimePointsEvent(false))
 
-screen = display(win.fig)
+screen = LesionMetadataWindow.display_metadata_window(win.fig)
 
 # Keep script alive
 wait(screen)

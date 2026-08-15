@@ -365,9 +365,18 @@ function map_lesions_to_organs(lesion_mask::AbstractArray, ts_atlas::AbstractArr
         end
         
         # Compute centroid
-        cx = round(Int, mean(i[1] for i in indices))
-        cy = round(Int, mean(i[2] for i in indices))
-        cz = round(Int, mean(i[3] for i in indices))
+        cx_raw = mean(i[1] for i in indices)
+        cy_raw = mean(i[2] for i in indices)
+        cz_raw = mean(i[3] for i in indices)
+        
+        # Scale to atlas dimensions
+        scale_x = size(ts_atlas, 1) / size(lesion_mask, 1)
+        scale_y = size(ts_atlas, 2) / size(lesion_mask, 2)
+        scale_z = size(ts_atlas, 3) / size(lesion_mask, 3)
+        
+        cx = round(Int, cx_raw * scale_x)
+        cy = round(Int, cy_raw * scale_y)
+        cz = round(Int, cz_raw * scale_z)
         
         # Clamp to atlas bounds
         cx = clamp(cx, 1, size(ts_atlas, 1))

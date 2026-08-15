@@ -103,7 +103,10 @@ end#createShaderProgram
 
 
 """
-Polling task creation
+Polling task creation — monitors window close state only.
+GLFW.PollEvents() is NOT called here; it is called exclusively by the
+Makie renderloop's pollevents() to ensure proper event ordering for
+button click detection (mouseposition must fire before mousebutton).
 """
 function createPollingTask(window::GLFW.Window)
     stopChannel = Channel{Bool}(1)
@@ -122,12 +125,7 @@ function createPollingTask(window::GLFW.Window)
                     break
                 end
                 
-                sleep(0.001)
-                
-                # Final check before polling
-                if !isready(stopChannel) && !GLFW.WindowShouldClose(window)
-                    GLFW.PollEvents()
-                end
+                sleep(0.008)
             end
         catch e
             @warn "GLFW polling task error: $e" exception=(e, catch_backtrace())

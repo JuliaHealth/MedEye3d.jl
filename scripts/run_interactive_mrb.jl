@@ -88,34 +88,45 @@ idx = 0
 first_voxelDataTupleVector = nothing
 first_spacing = nothing
 first_mask = nothing
+tp_labels_map = Dict{Int, String}()
+tp_nodes_map = Dict{Int, String}()
 
-# Load PET
-for i in 0:3
-    ct_file = joinpath(data_dir_pat6, "Fixed_CT_Volume_$i.nii.gz")
-    pet_file = joinpath(data_dir_pat6, "SUV_PET_Image_$i.nii.gz")
-    mask_file = joinpath(data_dir_pat6, "PET_Lesions_$i.nii.gz")
+# Chronological study list ordered by acquisition date from metadata.json:
+# 1. 2022-03-10: PET TP 0
+# 2. 2022-05-19: SPECT TP 0
+# 3. 2022-07-14: SPECT TP 1
+# 4. 2022-08-25: PET TP 1
+# 5. 2022-09-08: SPECT TP 2
+# 6. 2022-12-08: PET TP 2
+# 7. 2023-01-23: SPECT TP 4
+# 8. 2023-06-15: PET TP 3
+studies = [
+    ("PET",   0, "2022-03-10", "Fixed_CT_Volume_0.nii.gz", "SUV_PET_Image_0.nii.gz",        "PET_Lesions_0.nii.gz",   "PET_Lesions_0"),
+    ("SPECT", 0, "2022-05-19", "SPECT_CT_Volume_0.nii.gz", "SPECT_NM_Vendor_Volume_0.nii.gz", "SPECT_Lesions_0.nii.gz", "SPECT_Lesions_0"),
+    ("SPECT", 1, "2022-07-14", "SPECT_CT_Volume_1.nii.gz", "SPECT_NM_Vendor_Volume_1.nii.gz", "SPECT_Lesions_1.nii.gz", "SPECT_Lesions_1"),
+    ("PET",   1, "2022-08-25", "Fixed_CT_Volume_1.nii.gz", "SUV_PET_Image_1.nii.gz",        "PET_Lesions_1.nii.gz",   "PET_Lesions_1"),
+    ("SPECT", 2, "2022-09-08", "SPECT_CT_Volume_2.nii.gz", "SPECT_NM_Vendor_Volume_2.nii.gz", "SPECT_Lesions_2.nii.gz", "SPECT_Lesions_2"),
+    ("PET",   2, "2022-12-08", "Fixed_CT_Volume_2.nii.gz", "SUV_PET_Image_2.nii.gz",        "PET_Lesions_2.nii.gz",   "PET_Lesions_2"),
+    ("SPECT", 4, "2023-01-23", "SPECT_CT_Volume_4.nii.gz", "SPECT_NM_Vendor_Volume_4.nii.gz", "SPECT_Lesions_4.nii.gz", "SPECT_Lesions_4"),
+    ("PET",   3, "2023-06-15", "Fixed_CT_Volume_3.nii.gz", "SUV_PET_Image_3.nii.gz",        "PET_Lesions_3.nii.gz",   "PET_Lesions_3"),
+]
+
+for (modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name) in studies
+    ct_file = joinpath(data_dir_pat6, ct_fname)
+    pet_file = joinpath(data_dir_pat6, pet_fname)
+    mask_file = joinpath(data_dir_pat6, mask_fname)
     if isfile(ct_file) && isfile(pet_file) && isfile(mask_file)
-        println("Loading PET TP $i...")
+        lbl = "$modality $date_str (TP $orig_tp)"
+        println("Loading $lbl (queue index $idx)...")
         vdt, spc, msk = load_tp(ct_file, pet_file, mask_file)
         all_tps_data[idx] = vdt
+        tp_labels_map[idx] = lbl
+        tp_nodes_map[idx] = node_name
         if idx == 0
             global first_voxelDataTupleVector = vdt
             global first_spacing = spc
             global first_mask = msk
         end
-        global idx += 1
-    end
-end
-
-# Load SPECT
-for i in [0, 1, 2, 4]
-    ct_file = joinpath(data_dir_pat6, "SPECT_CT_Volume_$i.nii.gz")
-    pet_file = joinpath(data_dir_pat6, "SPECT_NM_Vendor_Volume_$i.nii.gz")
-    mask_file = joinpath(data_dir_pat6, "SPECT_Lesions_$i.nii.gz")
-    if isfile(ct_file) && isfile(pet_file) && isfile(mask_file)
-        println("Loading SPECT TP $i...")
-        vdt, spc, msk = load_tp(ct_file, pet_file, mask_file)
-        all_tps_data[idx] = vdt
         global idx += 1
     end
 end
@@ -142,17 +153,11 @@ MEH = MedEye3d.SegmentationDisplay.MakieEventHandlers
 for (k, v) in all_tps_data
     MEH.tp_data_cache[k] = v
 end
-# Add labels: PET TPs 0-3, then SPECT TPs
-pet_count = count(i -> isfile(joinpath(data_dir_pat6, "SUV_PET_Image_$i.nii.gz")), 0:3)
-for i in 0:(pet_count-1)
-    MEH.tp_labels[i] = "PET TP$i"
+for (k, v) in tp_labels_map
+    MEH.tp_labels[k] = v
 end
-spect_indices = [0, 1, 2, 4]
-for (offset, si) in enumerate(spect_indices)
-    tp_idx = pet_count + offset - 1
-    if haskey(all_tps_data, tp_idx)
-        MEH.tp_labels[tp_idx] = "SPECT TP$si"
-    end
+for (k, v) in tp_nodes_map
+    MEH.tp_node_names[k] = v
 end
 MEH.current_tp_index[] = 0
 
@@ -182,16 +187,9 @@ if isfile(ts_nrrd_path)
     ts_names = LesionAssociation.parse_nrrd_segment_names(ts_nrrd_path)
     ts_atlas, ts_sizes = LesionAssociation.load_nrrd_labelmap(ts_nrrd_path)
     if ts_atlas !== nothing && !isempty(ts_names)
-        # The TS atlas is in the SAME voxel space as first_mask (both aligned to CT)
-        # However, the TS atlas may have different dimensions if the CT was resampled.
-        # If dimensions match, do direct lookup. Otherwise, scale coordinates.
-        if size(ts_atlas) == size(first_mask)
-            organ_mapping = LesionAssociation.map_lesions_to_organs(first_mask, ts_atlas, ts_names)
-        else
-            @warn "TS atlas size $(size(ts_atlas)) != mask size $(size(first_mask)) — attempting coordinate scaling"
-            # Scale coordinates from mask space to atlas space
-            organ_mapping = LesionAssociation.map_lesions_to_organs(first_mask, ts_atlas, ts_names)
-        end
+        # Apply Y-reversal on TS atlas to match the OpenGL display convention of first_mask
+        ts_atlas_aligned = reverse(ts_atlas, dims=2)
+        organ_mapping = LesionAssociation.map_lesions_to_organs(first_mask, ts_atlas_aligned, ts_names)
     end
 else
     @warn "TotalSegmentator atlas not found at $ts_nrrd_path — using NRRD names only"
@@ -255,7 +253,20 @@ lesion_ids = Observables.Observable(lesion_list)
 
 # Launch the Slicer Extension native port GUI
 win = LesionMetadataWindow.create_metadata_window(active_lesion, lesion_ids, mainMedEye3dInstance.channel)
-screen = display(win.fig)
+screen = LesionMetadataWindow.display_metadata_window(win.fig)
+
+# Dispatch initial lesion synchronization so the viewer centers on Lesion 1
+if !isempty(lesion_list) && lesion_list[1] != "(none)"
+    m = match(r"\d+", lesion_list[1])
+    if m !== nothing
+        initial_lesion_id = parse(Int, m.match)
+        @async begin
+            sleep(0.5)  # Allow GLFW consumer to initialize
+            put!(mainMedEye3dInstance.channel, MedEye3d.MakieEvents.SyncLesionEvent(initial_lesion_id))
+            println("Initial lesion sync dispatched: Lesion $initial_lesion_id")
+        end
+    end
+end
 
 # Run GLFW interaction loop manually
 println("Interactive session ready!")

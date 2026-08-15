@@ -4,6 +4,7 @@ export WindowingEvent, PaintValEvent, SyncLesionEvent
 export ChangeTimePointEvent, ToggleLesionEvent, RefreshListEvent
 export AddAutoPetEvent, SyncMissingEvent, GenManualEvent
 export MapLinkEvent, AutoRunPreprocessEvent, RunPreprocessEvent, ShowBoneMaskEvent, SaveMRBEvent
+export CloseWindowEvent, ResizeWindowEvent, SetWindowTitleEvent
 struct ChangePlaneEvent
     plane :: Symbol # :Axial, :Coronal, :Sagittal
 end
@@ -57,5 +58,14 @@ struct ShowBoneMaskEvent
     active :: Bool
 end
 struct SaveMRBEvent end
+
+struct CloseWindowEvent end
+struct ResizeWindowEvent
+    width :: Int
+    height :: Int
+end
+struct SetWindowTitleEvent
+    title :: String
+end
 
 end

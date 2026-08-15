@@ -73,8 +73,11 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
     @info "GLFW actual window size: $(actualW)x$(actualH) vs stored: $(calcD.windowWidth)x$(calcD.windowHeight)"
 
     GLFW.SetCursorPosCallback(window, (a, x, y) -> begin
-        # if (mouseStructInstance.isLeftButtonDown && x >= xmin && x <= xmax && y >= ymin && y <= ymax)
-        if (x >= xmin && x <= xmax && y >= ymin && y <= ymax)
+        actualW, actualH = GLFW.GetWindowSize(window)
+        mouseStructInstance.actualWindowWidth = Int(actualW)
+        mouseStructInstance.actualWindowHeight = Int(actualH)
+        
+        if (x >= 0 && x <= actualW && y >= 0 && y <= actualH)
             point = CartesianIndex(Int(x), Int(y))
             mouseStructInstance.lastCoordinates = [point]
             # Snapshot into a new struct so later callbacks cannot overwrite this message
@@ -85,7 +88,6 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
                 actualWindowWidth  = mouseStructInstance.actualWindowWidth,
                 actualWindowHeight = mouseStructInstance.actualWindowHeight,
             ))
-
         end
     end)# and  for example : cursor: 29.0, 469.0  types   Float64  Float64
     GLFW.SetMouseButtonCallback(window, (a, button, action, mods) -> begin
@@ -424,8 +426,21 @@ function reactToDoubleClick(event::DoubleClickEvent, mainStates::Vector{StateDat
     actualW = event.actualWindowWidth > 0 ? Float64(event.actualWindowWidth) : viewportW
     actualH = event.actualWindowHeight > 0 ? Float64(event.actualWindowHeight) : viewportH
 
+    # Detect compare mode: panels 3+4 are hidden (vertices zeroed out)
+    # In compare mode, left half = panel 1, right half = panel 5
+    is_compare = false
+    if length(mainStates) >= 5
+        botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
+        if !isempty(botVerts) && all(v -> v == 0.0f0, botVerts[1:2])
+            is_compare = true
+        end
+    end
+
     clickedPanel = if quadZoomState.isZoomed
         quadZoomState.zoomedPanel  # when zoomed, always target the zoomed panel
+    elseif is_compare
+        # In compare mode: left half = panel 1, right half = panel 5
+        event.x < actualW / 2.0 ? 1 : 5
     else
         glY = ((actualH - event.y) * 2.0 / viewportH) - 1.0
         topVerts = mainStates[1].calcDimsStruct.mainImageQuadVert
@@ -439,7 +454,7 @@ function reactToDoubleClick(event::DoubleClickEvent, mainStates::Vector{StateDat
     end
 
     if !quadZoomState.isZoomed
-        @info "DOUBLE-CLICK ZOOM IN: panel=$clickedPanel"
+        @info "DOUBLE-CLICK ZOOM IN: panel=$clickedPanel (is_compare=$is_compare)"
         quadZoomState.savedVerts = [copy(s.calcDimsStruct.mainImageQuadVert) for s in mainStates]
         quadZoomState.savedVertSizes = [s.calcDimsStruct.mainQuadVertSize for s in mainStates]
         quadZoomState.zoomedPanel = clickedPanel
@@ -451,7 +466,7 @@ function reactToDoubleClick(event::DoubleClickEvent, mainStates::Vector{StateDat
             (mainImageQuadVert = zoomedCalcDim.mainImageQuadVert,
              mainQuadVertSize  = zoomedCalcDim.mainQuadVertSize))
 
-        for i in 1:4
+        for i in 1:length(mainStates)
             if i != clickedPanel
                 mainStates[i].calcDimsStruct = setproperties(
                     mainStates[i].calcDimsStruct,
@@ -460,8 +475,8 @@ function reactToDoubleClick(event::DoubleClickEvent, mainStates::Vector{StateDat
             end
         end
     else
-        @info "DOUBLE-CLICK ZOOM OUT: restoring 4-pane"
-        for i in 1:4
+        @info "DOUBLE-CLICK ZOOM OUT: restoring layout"
+        for i in 1:min(length(mainStates), length(quadZoomState.savedVerts))
             mainStates[i].calcDimsStruct = setproperties(
                 mainStates[i].calcDimsStruct,
                 (mainImageQuadVert = quadZoomState.savedVerts[i],

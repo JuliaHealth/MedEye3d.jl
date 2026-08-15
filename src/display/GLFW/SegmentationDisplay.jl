@@ -3,7 +3,7 @@ Main module controlling displaying segmentations image and data
 
 """
 module SegmentationDisplay
-export loadRegisteredImages, displayImage, coordinateDisplay, passDataForScrolling
+export loadRegisteredImages, displayImage, coordinateDisplay, passDataForScrolling, close_window, set_window_title, resize_window, GLOBAL_OPENGL_LOCK, synchronized_makie_renderloop
 using Dates
 using ColorTypes, MedImages, ModernGL, GLFW, Dictionaries, Logging, Setfield, FreeTypeAbstraction, Statistics, Observables
 using ..PrepareWindow, ..PrepareWindowHelpers, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords, ..distinctColorsSaved
@@ -12,6 +12,115 @@ using ..ReactOnKeyboard, ..ReactOnMouseClickAndDrag, ..DisplayDataManag
 using ..MakieEvents
 include("MakieEventHandlers.jl")
 using .MakieEventHandlers
+
+const GLOBAL_OPENGL_LOCK = ReentrantLock()
+
+function synchronized_makie_renderloop(screen)
+    # Find GLMakie from loaded modules — it may not be in Main scope
+    # (e.g., when imported inside a submodule like LesionMetadataWindow)
+    local GLMakie_mod = nothing
+    if isdefined(Main, :GLMakie)
+        GLMakie_mod = Main.GLMakie
+    else
+        for (k, v) in Base.loaded_modules
+            if string(k.name) == "GLMakie"
+                GLMakie_mod = v
+                break
+            end
+        end
+    end
+    if GLMakie_mod === nothing
+        @warn "synchronized_makie_renderloop: GLMakie not found in loaded modules, renderloop disabled"
+        return
+    end
+    GLMakie = GLMakie_mod
+    Makie = isdefined(GLMakie, :Makie) ? GLMakie.Makie : nothing
+    if Makie === nothing
+        @warn "synchronized_makie_renderloop: Makie not found via GLMakie"
+        return
+    end
+    @info "synchronized_makie_renderloop: STARTED (GLMakie found via loaded_modules)"
+    tick_state = Ref(Makie.UnknownTickState)
+    loop_count = Ref(0)
+    while isopen(screen) && !screen.stop_renderloop[]
+        if isdefined(GLMakie, :GLAbstraction)
+            lock(GLOBAL_OPENGL_LOCK) do
+                GLMakie.GLAbstraction.with_context(screen.glscreen) do
+                    GLMakie.pollevents(screen, tick_state[])
+                    GLMakie.poll_updates(screen)
+                    if !screen.config.pause_renderloop && GLMakie.requires_update(screen)
+                        tick_state[] = Makie.RegularRenderTick
+                        GLMakie.render_frame(screen)
+                        GLFW.SwapBuffers(GLMakie.to_native(screen))
+                        glFlush()
+                    else
+                        tick_state[] = ifelse(screen.config.pause_renderloop, Makie.PausedRenderTick, Makie.SkippedRenderTick)
+                    end
+                end
+            end
+        end
+        loop_count[] += 1
+        if loop_count[] % 600 == 0
+            @info "RENDERLOOP alive: iteration $(loop_count[])"
+        end
+        GC.safepoint()
+        sleep(screen.timer)
+    end
+    @info "synchronized_makie_renderloop: STOPPED"
+end
+
+function switch_gl_context!(target_window)
+    # Find GLMakie from loaded modules (may not be in Main scope)
+    local glmakie = nothing
+    if isdefined(Main, :GLMakie)
+        glmakie = Main.GLMakie
+    else
+        for (k, v) in Base.loaded_modules
+            if string(k.name) == "GLMakie"
+                glmakie = v
+                break
+            end
+        end
+    end
+    if glmakie !== nothing && isdefined(glmakie, :GLAbstraction)
+        glmakie.GLAbstraction.gl_switch_context!(target_window)
+    else
+        if target_window === nothing
+            GLFW.MakeContextCurrent(GLFW.Window(C_NULL))
+        else
+            GLFW.MakeContextCurrent(target_window)
+        end
+    end
+end
+
+function reactToResizeWindow(data::ResizeWindowEvent, stateObjects::Vector{StateDataFields})
+    if data.width > 0 && data.height > 0
+        glViewport(0, 0, Int32(data.width), Int32(data.height))
+        for state in stateObjects
+            state.calcDimsStruct.windowWidth = Int64(data.width)
+            state.calcDimsStruct.windowHeight = Int64(data.height)
+            state.calcDimsStruct.avWindWidtForMain = Int32(round(data.width * state.calcDimsStruct.fractionOfMainIm))
+            state.calcDimsStruct.avWindHeightForMain = Int32(data.height)
+            state.calcDimsStruct.avMainImRatio = Float32(data.height / max(1, state.calcDimsStruct.avWindWidtForMain))
+            
+            try
+                state.calcDimsStruct = StructsManag.getMainVerticies(state.calcDimsStruct, state.displayMode, state.calcDimsStruct.imagePos)
+                if isdefined(state, :mainForDisplayObjects) && state.mainForDisplayObjects.vbo > 0
+                    glBindBuffer(GL_ARRAY_BUFFER, state.mainForDisplayObjects.vbo)
+                    glBufferData(GL_ARRAY_BUFFER, sizeof(state.calcDimsStruct.mainImageQuadVert), state.calcDimsStruct.mainImageQuadVert, GL_STATIC_DRAW)
+                end
+            catch e
+                @warn "Error updating quad vertices on window resize: $e"
+            end
+        end
+    end
+end
+
+function reactToSetWindowTitle(data::SetWindowTitleEvent, stateObjects::Vector{StateDataFields})
+    if !isempty(stateObjects) && stateObjects[1].mainForDisplayObjects.window.handle != C_NULL
+        GLFW.SetWindowTitle(stateObjects[1].mainForDisplayObjects.window, data.title)
+    end
+end
 
 #  do not copy it into the consumer function
 """
@@ -49,6 +158,9 @@ on_next!(stateObjects::Vector{StateDataFields}, data::AutoRunPreprocessEvent) = 
 on_next!(stateObjects::Vector{StateDataFields}, data::RunPreprocessEvent) = reactToRunPreprocess(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ShowBoneMaskEvent) = reactToShowBoneMask(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SaveMRBEvent) = reactToSaveMRB(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::CloseWindowEvent) = nothing
+on_next!(stateObjects::Vector{StateDataFields}, data::ResizeWindowEvent) = reactToResizeWindow(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::SetWindowTitleEvent) = reactToSetWindowTitle(data, stateObjects)
 on_error!(stateObjects::Vector{StateDataFields}, err) = error(err)
 on_complete!(stateObjects::Vector{StateDataFields}) = ""
 
@@ -528,52 +640,22 @@ function coordinateDisplay(
 
 
     function cleanUp()
-        
-        # Step 1: Stop the polling task FIRST
+        # Post CloseWindowEvent to serialize all OpenGL teardown and window destruction on the consumer task
         try
+            shouldStop[1] = true
             put!(stopChannel, true)
-            sleep(0.05)  # Give more time for task to stop
-        catch e
-            @warn "Error stopping polling task: $e"
+        catch
         end
-        
-        # Step 2: Clean up OpenGL resources
-        try
-            # Re-bind context to main thread for OpenGL cleanup
-            GLFW.MakeContextCurrent(window)
-            
-            objs = []
-            foreach(stateInstances) do stateInstance
-                push!(objs, stateInstance.mainForDisplayObjects)
-            end
-            foreach(objs) do obj
-                try
-                    glDeleteTextures(length(obj.listOfTextSpecifications), map(text -> text.ID, obj.listOfTextSpecifications))
-                catch e
-                    @warn "Error deleting textures: $e"
-                end
-            end
-            glFlush()
-
-        catch e
-            @warn "Error cleaning OpenGL resources: $e"
-        end
-        
-        # Step 3: Close the window
-        try
-            GLFW.SetWindowShouldClose(window, true)
-            sleep(0.02)
-            GLFW.DestroyWindow(window)
-        catch e
-            @warn "Error destroying window: $e"
-        end
-        
-        # Step 4: Mark as should stop
-        shouldStop[1] = true      
     end
 
-    # We do not call cleanUp here, because it would immediately close the window we just created!
-    GLFW.SetWindowCloseCallback(window, (_) -> cleanUp())
+    # Set callback to trigger channel shutdown
+    GLFW.SetWindowCloseCallback(window, (_) -> begin
+        try
+            put!(mainMedEye3dInstance.channel, CloseWindowEvent())
+        catch
+            cleanUp()
+        end
+    end)
 
     function consumer(mainChannel::Base.Channel{Any})
 
@@ -581,19 +663,52 @@ function coordinateDisplay(
             try
                 channelData = take!(mainChannel)
                 
+                if channelData isa CloseWindowEvent
+                    @info "CloseWindowEvent received: cleanly shutting down OpenGL and GLFW window"
+                    shouldStop[1] = true
+                    try
+                        lock(GLOBAL_OPENGL_LOCK) do
+                            switch_gl_context!(window)
+                            for state in stateInstances
+                                obj = state.mainForDisplayObjects
+                                try
+                                    glDeleteTextures(length(obj.listOfTextSpecifications), map(text -> text.ID, obj.listOfTextSpecifications))
+                                catch e
+                                    @warn "Error deleting textures: $e"
+                                end
+                            end
+                            glFlush()
+                            switch_gl_context!(nothing)
+                        end
+                    catch e
+                        @warn "Error cleaning OpenGL resources: $e"
+                    end
+                    
+                    try
+                        put!(stopChannel, true)
+                    catch
+                    end
+                    
+                    try
+                        if window.handle != C_NULL
+                            GLFW.SetWindowShouldClose(window, true)
+                            GLFW.DestroyWindow(window)
+                            window.handle = C_NULL
+                        end
+                    catch e
+                        @warn "Error destroying GLFW window: $e"
+                    end
+                    break
+                end
+
                 # get the aggregation here, only when the type is mouseStruct.
                 if typeof(channelData) == MouseStruct
                     # Coalesce rapid mouse movements: drain stale intermediate moves,
-                    # but never skip right-clicks (they must be processed).
-                    # DoubleClickEvent arrives as a distinct type, not via isDoubleClick flag.
+                    # but preserve button state transitions (press / release).
                     while !isempty(mainChannel) && typeof(fetch(mainChannel)) == MouseStruct
                         peeked = fetch(mainChannel)
-                        # Stop draining if the next item is an action event (not just a move)
-                        if peeked.isRightButtonDown
-                            break
-                        end
-                        # Also stop if the current item is an action event
-                        if channelData.isRightButtonDown
+                        if peeked.isRightButtonDown != channelData.isRightButtonDown ||
+                           peeked.isLeftButtonDown != channelData.isLeftButtonDown
                             break
                         end
                         channelData = take!(mainChannel)  # discard stale move, keep latest
@@ -612,47 +727,43 @@ function coordinateDisplay(
                     stateInstances[1].switchIndex = channelData.imagePos
                 end
 
-                old_ctx = GLFW.GetCurrentContext()
-                if old_ctx.handle != window.handle
-                    GLFW.MakeContextCurrent(window)
-                end
-                
-                try
-                    on_next!(stateInstances, channelData)
-                    
-                    if typeof(channelData) == ChangeTimePointEvent || typeof(channelData) == CompareTimePointsEvent
-                        idx = MakieEventHandlers.current_tp_index[]
-                        label = get(MakieEventHandlers.tp_labels, idx, "TP $idx")
-                        if MakieEventHandlers.compare_mode[]
-                            right_idx = MakieEventHandlers.compare_right_tp[]
-                            right_label = get(MakieEventHandlers.tp_labels, right_idx, "TP $right_idx")
-                            GLFW.SetWindowTitle(window, "MedEye3d - Left: $label | Right: $right_label")
-                        else
-                            GLFW.SetWindowTitle(window, "MedEye3d - Viewing: $label")
-                        end
-                    end
-                    
-                    if !shouldStop[1]
-                        glClear(GL_COLOR_BUFFER_BIT)
-                        for state in stateInstances
-                            # Rebind main VAO before each panel render - crosshair rendering
-                            # switches to a different VAO which corrupts subsequent panel draws
-                            glBindVertexArray(vao[])
-                            
-                            # draw text
-                            activateForTextDisp(state.textDispObj.shader_program_words, state.textDispObj.vbo_words, state.calcDimsStruct)
-                            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-                            
-                            # draw main
-                            reactivateMainObj(state.mainForDisplayObjects.shader_program, state.mainForDisplayObjects.vbo, state.calcDimsStruct)
-                            activateTextures(state.mainForDisplayObjects.listOfTextSpecifications)
-                            glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-                        end
-                        GLFW.SwapBuffers(window)
-                    end
-                finally
+                lock(GLOBAL_OPENGL_LOCK) do
+                    old_ctx = GLFW.GetCurrentContext()
                     if old_ctx.handle != window.handle
-                        GLFW.MakeContextCurrent(old_ctx)
+                        switch_gl_context!(window)
+                    end
+                    
+                    try
+                        @info "CONSUMER received event: $(typeof(channelData))" channelData
+                        on_next!(stateInstances, channelData)
+                        
+                        if !shouldStop[1]
+                            glClear(GL_COLOR_BUFFER_BIT)
+                            for state in stateInstances
+                                # Rebind main VAO before each panel render - crosshair rendering
+                                # switches to a different VAO which corrupts subsequent panel draws
+                                glBindVertexArray(vao[])
+                                
+                                # draw text
+                                activateForTextDisp(state.textDispObj.shader_program_words, state.textDispObj.vbo_words, state.calcDimsStruct)
+                                glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+                                
+                                # draw main
+                                reactivateMainObj(state.mainForDisplayObjects.shader_program, state.mainForDisplayObjects.vbo, state.calcDimsStruct)
+                                activateTextures(state.mainForDisplayObjects.listOfTextSpecifications)
+                                glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+                            end
+                            GLFW.SwapBuffers(window)
+                            glFlush()
+                        end
+                    finally
+                        if old_ctx.handle != window.handle
+                            if old_ctx.handle != C_NULL
+                                switch_gl_context!(old_ctx)
+                            else
+                                switch_gl_context!(nothing)
+                            end
+                        end
                     end
                 end
             catch e
@@ -667,11 +778,12 @@ function coordinateDisplay(
         end
     end #end of consumer
 
-    # Release context from the main thread so the background consumer task can claim it
+    # Release context from the main thread so the background consumer task can claim it (or just release it)
     GLFW.MakeContextCurrent(GLFW.Window(C_NULL))
     
-    mainMedEye3dInstance = MainMedEye3d(channel=Base.Channel{Any}(consumer, 1000; spawn=true, threadpool=:default), textDispObj=forTextDispStructs[1], displayMode=displayMode, states=stateInstances)
-    # mainMedEye3dInstance = MainMedEye3d(channel = Base.Channel{Any}(1000))
+    # Run consumer task on the main OpenGL thread (spawn=false) to prevent ThreadAssertionError
+    mainMedEye3dInstance = MainMedEye3d(channel=Base.Channel{Any}(consumer, 1000; spawn=false), textDispObj=forTextDispStructs[1], displayMode=displayMode, states=stateInstances)
+
 
 
     foreach(calcDimStructs) do currentCalcDim
@@ -698,6 +810,21 @@ function coordinateDisplay(
 
     return mainMedEye3dInstance
 end #coordinateDisplay
+
+"""
+Close the MedEye3d viewer window gracefully through the channel.
+"""
+close_window(main::MainMedEye3d) = put!(main.channel, CloseWindowEvent())
+
+"""
+Update the window title through the channel.
+"""
+set_window_title(main::MainMedEye3d, title::String) = put!(main.channel, SetWindowTitleEvent(title))
+
+"""
+Resize the window viewport and framebuffer dimensions through the channel.
+"""
+resize_window(main::MainMedEye3d, width::Int, height::Int) = put!(main.channel, ResizeWindowEvent(width, height))
 
 
 """
