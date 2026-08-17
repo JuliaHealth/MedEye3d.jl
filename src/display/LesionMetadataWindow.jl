@@ -996,6 +996,17 @@ function create_metadata_window(
         @info "WIRE_CALLBACK: active_lesion_id changed to: $id"
         db = lesion_db[]
         apply_state(get(db, id, Dict{String,String}()))
+        
+        # Synchronize lesion with viewer (filters mask and jumps to slice)
+        try
+            m = match(r"^(\d+)", id)
+            if m !== nothing
+                lid = parse(Int, m.match)
+                put!(channel, SyncLesionEvent(lid))
+            end
+        catch e
+            @warn "Failed to send SyncLesionEvent: $e"
+        end
     end
 
     on(btn_save.clicks) do _
