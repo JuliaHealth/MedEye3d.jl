@@ -65,9 +65,8 @@ function apply_transform_to_medimage(img::MedImage, T_RAS::Matrix{Float64})
     for i in 1:3
         M_old[i, 4] = old_orig[i]
     end
-    # ITK registration transforms are defined from Fixed (Baseline) -> Moving (SPECT).
-    # To place the moving image into the baseline coordinate system for resampling, we apply the inverse:
-    M_new = inv(T_LPS) * M_old
+    # Apply forward ITK LPS transformation matrix to place the moving image into baseline coordinate space
+    M_new = T_LPS * M_old
     
     new_orig = (M_new[1, 4], M_new[2, 4], M_new[3, 4])
     new_spacing = zeros(Float64, 3)

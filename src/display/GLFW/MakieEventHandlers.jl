@@ -371,19 +371,10 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                 texX, texY = origX, origZ
             end
             
-            # Center the view on the lesion if zoomed
-            if !isempty(stateObject.onScrollData.dataToScroll)
-                dat_shape = size(stateObject.onScrollData.dataToScroll[1].dat)
-                h_img = dat_shape[1]
-                w_img = dat_shape[2]
-                stateObject.calcDimsStruct.panX = Float32((texY - w_img / 2) / w_img)
-                stateObject.calcDimsStruct.panY = Float32((texX - h_img / 2) / h_img)
-            end
-            
             stateObjects[1].switchIndex = idx
             ReactToScroll.reactToScroll(0, stateObjects, false)
             changed = true
-            @info "Synced active lesion $target_id at center $effective_center in panel $idx"
+            @info "Synced active lesion $target_id at center $effective_center in panel $idx (slice $(stateObject.currentDisplayedSlice))"
         end
     end
     for stateObject in stateObjects
