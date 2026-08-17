@@ -53,6 +53,7 @@ function setUpForScrollData(onScrollData::FullScrollableDat, mainStates::Vector{
 
     onScrollData.slicesNumber = getSlicesNumber(onScrollData)
     mainState.onScrollData = onScrollData
+    mainState.currentDisplayedSlice = max(1, onScrollData.slicesNumber ÷ 2)
     #In order to refresh all in case we would change the texture dimensions ...
     ChangePlane.processKeysInfo(Option(onScrollData.dataToScrollDims), mainState, KeyboardStruct())
     #so  It will precalculate some data and later mouse modification will be swift

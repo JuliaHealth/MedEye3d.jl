@@ -109,13 +109,6 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
     if length(stateObjects) >= 5
         compare_mode[] = data.compare
         if data.compare
-            # 2-pane view: panel 1 on left, panel 5 on right
-            updateQuadVertices!(stateObjects[1], :LeftHalf)
-            updateQuadVertices!(stateObjects[5], :RightHalf)
-            updateQuadVertices!(stateObjects[2], :Hidden)
-            updateQuadVertices!(stateObjects[3], :Hidden)
-            updateQuadVertices!(stateObjects[4], :Hidden)
-            
             # Load the NEXT TP into panel 5
             if !isempty(tp_data_cache)
                 tp_indices = sort(collect(keys(tp_data_cache)))
@@ -137,23 +130,41 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                     # Panel 5 uses same view as panel 1 (axial), so use index 1
                     _load_tp_into_panel!(stateObjects, tp_voxels, 5, 1)
                 end
-                
-                # Re-render both panels by clearing current display data to force texture update
-                stateObjects[1].currentlyDispDat = SingleSliceDat()
-                stateObjects[5].currentlyDispDat = SingleSliceDat()
-                old_idx = stateObjects[1].switchIndex
-                stateObjects[1].switchIndex = 1
-                ReactToScroll.reactToScroll(0, stateObjects, false)
-                stateObjects[1].switchIndex = 5
-                ReactToScroll.reactToScroll(0, stateObjects, false)
-                stateObjects[1].switchIndex = old_idx
-                
+            end
+
+            # 2-pane view: panel 1 on left, panel 5 on right
+            updateQuadVertices!(stateObjects[1], :LeftHalf)
+            updateQuadVertices!(stateObjects[5], :RightHalf)
+            updateQuadVertices!(stateObjects[2], :Hidden)
+            updateQuadVertices!(stateObjects[3], :Hidden)
+            updateQuadVertices!(stateObjects[4], :Hidden)
+
+            # Re-render both panels by clearing current display data to force texture update
+            stateObjects[1].currentlyDispDat = SingleSliceDat()
+            stateObjects[5].currentlyDispDat = SingleSliceDat()
+            old_idx = stateObjects[1].switchIndex
+            stateObjects[1].switchIndex = 1
+            ReactToScroll.reactToScroll(0, stateObjects, false)
+            stateObjects[1].switchIndex = 5
+            ReactToScroll.reactToScroll(0, stateObjects, false)
+            stateObjects[1].switchIndex = old_idx
+            
+            if !isempty(tp_data_cache)
                 left_label = get(tp_labels, current_tp_index[], "TP $(current_tp_index[])")
                 right_label = get(tp_labels, right_tp, "TP $right_tp")
                 @info "Compare mode ON: Left=$left_label, Right=$right_label"
             end
         else
             compare_right_tp[] = -1
+            # Reload current active TP into all 4 panels so all views (Axial, PET, Sagittal, Coronal) match current_tp_index[]
+            if !isempty(tp_data_cache) && haskey(tp_data_cache, current_tp_index[])
+                tp_voxels = tp_data_cache[current_tp_index[]]
+                num_panels = min(4, length(stateObjects))
+                for i in 1:num_panels
+                    _load_tp_into_panel!(stateObjects, tp_voxels, i)
+                end
+            end
+
             # 4-pane view
             updateQuadVertices!(stateObjects[1], :TopLeft)
             updateQuadVertices!(stateObjects[2], :TopRight)
@@ -161,6 +172,17 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
             updateQuadVertices!(stateObjects[4], :BottomRight)
             updateQuadVertices!(stateObjects[5], :Hidden)
             
+            # Reset pan, zoom, displayMode, and center slice for all 4 panes
+            for i in 1:4
+                stateObjects[i].calcDimsStruct.zoom = 1.0f0
+                stateObjects[i].calcDimsStruct.panX = 0.0f0
+                stateObjects[i].calcDimsStruct.panY = 0.0f0
+                stateObjects[i].displayMode = QuadImage
+                if stateObjects[i].onScrollData.slicesNumber > 0
+                    stateObjects[i].currentDisplayedSlice = max(1, stateObjects[i].onScrollData.slicesNumber ÷ 2)
+                end
+            end
+
             # Re-render all 4 panels to ensure textures and slices are displayed
             old_idx = stateObjects[1].switchIndex
             for i in 1:4
@@ -169,7 +191,7 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                 ReactToScroll.reactToScroll(0, stateObjects, false)
             end
             stateObjects[1].switchIndex = old_idx
-            @info "Compare mode OFF: restored 4-pane view"
+            @info "Compare mode OFF: restored 4-pane view for TP $(current_tp_index[])"
         end
     end
 end
@@ -212,8 +234,9 @@ end
 
 function reactToPaintVal(data::PaintValEvent, stateObjects::Vector{StateDataFields})
     for state in stateObjects
-        state.valueForMasToSet.value = data.val
+        state.valueForMasToSet = valueForMasToSetStruct(value=data.val, is_painting_active=data.active)
     end
+    @info "Paint state updated: val=$(data.val), active=$(data.active)"
 end
 
 const tp_node_names = Dict{Int, String}()
@@ -375,7 +398,8 @@ end
 const tp_data_cache = Dict{Int, Vector{Vector{Any}}}()
 const current_tp_index = Ref(0)
 const tp_labels = Dict{Int, String}()  # tp_index → display label (e.g. "PET TP0")
-export tp_data_cache, current_tp_index, tp_labels
+const tp_descriptions = Dict{Int, String}() # tp_index → radiological description
+export tp_data_cache, current_tp_index, tp_labels, tp_descriptions
 export compare_mode, compare_right_tp
 
 """
@@ -384,8 +408,8 @@ Helper: load TP data into a specific panel's onScrollData and re-render.
 `tp_voxel_idx` is the index into tp_voxels vector (usually same as panel_idx,
 but for panel 5 in compare mode we use index 1 since it's an axial view).
 """
-function _load_tp_into_panel!(stateObjects, tp_voxels, panel_idx, tp_voxel_idx)
-    if tp_voxel_idx > length(tp_voxels) || panel_idx > length(stateObjects)
+function _load_tp_into_panel!(stateObjects, tp_voxels, panel_idx, tp_voxel_idx=panel_idx)
+    if panel_idx > length(stateObjects) || tp_voxel_idx > length(tp_voxels)
         return
     end
     
@@ -471,6 +495,14 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         end
         stateObjects[1].switchIndex = old_idx
     end
+    
+    # Requirement: Automatically return to Lesion 1 when changing time points
+    try
+        reactToSyncLesion(SyncLesionEvent(1), stateObjects)
+        @info "Auto-reset to Lesion 1 for $label"
+    catch e
+        @warn "Failed to auto-sync Lesion 1 on TP change: $e"
+    end
 end
 
 function reactToToggleLesion(data::ToggleLesionEvent, stateObjects::Vector{StateDataFields})
@@ -552,19 +584,24 @@ function reactToSyncMissing(data::SyncMissingEvent, stateObjects::Vector{StateDa
 end
 
 function reactToGenManual(data::GenManualEvent, stateObjects::Vector{StateDataFields})
-    @info "Gen Manual Lesions triggered."
+    @info "Bone subsegmentation triggered for lesion $(data.lesion_id)"
     tp1_state = stateObjects[1]
-    pos = tp1_state.lastRecordedMousePosition
+    
     seg_vol = tp1_state.mainForDisplayObjects.listOfTextSpecifications[3].imageTexture
+    ct_vol = tp1_state.mainForDisplayObjects.listOfTextSpecifications[2].imageTexture
     
-    cx, cy, cz = pos[1], pos[2], pos[3]
-    w, h, d = size(seg_vol)
-    x1, x2 = max(1, cx-2), min(w, cx+2)
-    y1, y2 = max(1, cy-2), min(h, cy+2)
-    z1, z2 = max(1, cz-2), min(d, cz+2)
+    bone_atlas = Float32.(ct_vol .> 150.0f0)
+    spacing = (1.5f0, 1.5f0, 2.0f0)
     
-    seg_vol[x1:x2, y1:y2, z1:z2] .= 1
-    @info "Manual lesion generated at $pos."
+    try
+        surf, marr = MedEye3d.BoneSubsegmentation.generate_bone_subsegments(seg_vol, bone_atlas, spacing, data.lesion_id)
+        seg_vol[surf] .= 2.0f0
+        seg_vol[marr] .= 3.0f0
+        @info "Bone subsegments generated successfully."
+        reactToScroll(0, stateObjects, false)
+    catch e
+        @error "Failed to generate bone subsegments: $e"
+    end
 end
 
 function reactToMapLink(data::MapLinkEvent, stateObjects::Vector{StateDataFields})
@@ -594,6 +631,62 @@ function reactToShowBoneMask(data::ShowBoneMaskEvent, stateObjects::Vector{State
             end
         end
     end
+end
+
+const MASK_BACKUP = Dict{UInt64, Array{Float32, 3}}()
+
+function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{StateDataFields})
+    @info "ShowMaskLayerEvent: layer $(data.layer) -> $(data.active)"
+    
+    for state in stateObjects
+        for (i, scrDat) in enumerate(state.onScrollData.dataToScroll)
+            texSpec = state.mainForDisplayObjects.listOfTextSpecifications[i]
+            if texSpec.name == "Mask" || texSpec.name == "manualModif"
+                dat_ptr = pointer(scrDat.dat)
+                dat_key = UInt64(UInt(dat_ptr))
+                
+                if !haskey(MASK_BACKUP, dat_key)
+                    MASK_BACKUP[dat_key] = copy(scrDat.dat)
+                end
+                
+                backup_vol = MASK_BACKUP[dat_key]
+                target_val = Float32(data.layer)
+                
+                if data.active
+                    idx = findall(backup_vol .== target_val)
+                    scrDat.dat[idx] .= target_val
+                else
+                    idx = findall(scrDat.dat .== target_val)
+                    scrDat.dat[idx] .= 0.0f0
+                end
+            end
+        end
+        
+        # Update single slice data for this pane from the modified volume
+        singleSlDat = state.onScrollData.dataToScroll |>
+            (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(state.currentDisplayedSlice), state.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
+            (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=state.currentDisplayedSlice, textToDisp=getTextForCurrentSlice(state.onScrollData, Int32(state.currentDisplayedSlice)))
+            
+        state.currentlyDispDat = singleSlDat
+        
+        # Upload new texture data to GPU
+        for updateDat in singleSlDat.listOfDataAndImageNames
+            findList = findall((texSpec) -> texSpec.name == updateDat.name, state.mainForDisplayObjects.listOfTextSpecifications)
+            if !isempty(findList)
+                texSpec = state.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
+                transformedDat = applyZoomPan(updateDat.dat, state.calcDimsStruct.zoom, state.calcDimsStruct.panX, state.calcDimsStruct.panY)
+                updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, state.calcDimsStruct.imageTextureWidth, state.calcDimsStruct.imageTextureHeight)
+            end
+        end
+    end
+    
+    # Re-render all panels
+    old_idx = stateObjects[1].switchIndex
+    for idx in 1:length(stateObjects)
+        stateObjects[1].switchIndex = idx
+        ReactToScroll.reactToScroll(0, stateObjects, false)
+    end
+    stateObjects[1].switchIndex = old_idx
 end
 
 function reactToSaveMRB(data::SaveMRBEvent, stateObjects::Vector{StateDataFields})

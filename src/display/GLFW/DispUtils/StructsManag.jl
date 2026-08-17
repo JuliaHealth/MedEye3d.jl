@@ -55,31 +55,25 @@ function applyZoomPan(slice::AbstractMatrix{T}, zoom::Float32, panX::Float32, pa
     end
     
     h, w = size(slice)
+    z = max(0.1f0, zoom)
     
-    # Size of the visible window in data coordinates
-    viewW = max(1, round(Int, w / zoom))
-    viewH = max(1, round(Int, h / zoom))
-    viewW = clamp(viewW, 1, w)
-    viewH = clamp(viewH, 1, h)
+    # Center in source coordinates: panning shifts the sample center
+    # panY shifts horizontal center (columns w), panX shifts vertical center (rows h)
+    cx = Float64(w) / 2.0 + (Float64(panY) * Float64(w))
+    cy = Float64(h) / 2.0 + (Float64(panX) * Float64(h))
     
-    # Center + pan offset (pan is in normalized coords, convert to pixels)
-    cx = w ÷ 2 + round(Int, panX * w)
-    cy = h ÷ 2 + round(Int, panY * h)
+    result = fill(zero(T), h, w)
     
-    # Compute crop region, clamped to array bounds
-    x1 = clamp(cx - viewW ÷ 2, 1, w - viewW + 1)
-    y1 = clamp(cy - viewH ÷ 2, 1, h - viewH + 1)
-    x2 = x1 + viewW - 1
-    y2 = y1 + viewH - 1
-    
-    cropped = slice[y1:y2, x1:x2]
-    
-    # Nearest-neighbor upscale to original dimensions
-    result = similar(slice)
     for j in 1:w, i in 1:h
-        si = clamp(round(Int, (i - 1) * viewH / h) + 1, 1, viewH)
-        sj = clamp(round(Int, (j - 1) * viewW / w) + 1, 1, viewW)
-        result[i, j] = cropped[si, sj]
+        vi = (Float64(i) - 0.5 - Float64(h) / 2.0) / Float64(z)
+        vj = (Float64(j) - 0.5 - Float64(w) / 2.0) / Float64(z)
+        
+        si = round(Int, cy + vi + 0.5)
+        sj = round(Int, cx + vj + 0.5)
+        
+        if si >= 1 && si <= h && sj >= 1 && sj <= w
+            result[i, j] = slice[si, sj]
+        end
     end
     
     return result
@@ -323,38 +317,46 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
       res[25] = normalCorrectedTextAccounting + widthCorr# top left
     end
   elseif displayMode == QuadImage
-    # For QuadImage, each panel takes exactly one quadrant.
+    if imagePos > 4
+      # Panel 5+ is hidden by default in QuadImage mode (only active as :RightHalf in compare mode)
+      res = zeros(Float32, length(res))
+      return setproperties(calcDimStruct, (
+        mainImageQuadVert=res,
+        mainQuadVertSize=sizeof(res),
+        widthCorr=Float32(widthCorr),
+        heightCorr=Float32(heightCorr),
+        imagePos=imagePos
+      ))
+    end
+    
+    # For QuadImage, each panel takes exactly one quadrant with aspect ratio padding
     wc = widthCorr / 2.0
     hc = heightCorr / 2.0
     
-    # Global scale and shift to avoid top app bar
-    scale = 0.90f0
-    yOffset = -0.10f0
-    
     # y coordinates (indices: 2=top right, 10=bottom right, 18=bottom left, 26=top left)
     if imagePos == 1 || imagePos == 2 # Top half (Y from 0.0 to 1.0)
-      res[2] = (1.0f0 - hc) * scale + yOffset
-      res[10] = (0.0f0 + hc) * scale + yOffset
-      res[18] = (0.0f0 + hc) * scale + yOffset
-      res[26] = (1.0f0 - hc) * scale + yOffset
+      res[2] = 1.0f0 - hc
+      res[10] = 0.0f0 + hc
+      res[18] = 0.0f0 + hc
+      res[26] = 1.0f0 - hc
     else # Bottom half (Y from -1.0 to 0.0)
-      res[2] = (0.0f0 - hc) * scale + yOffset
-      res[10] = (-1.0f0 + hc) * scale + yOffset
-      res[18] = (-1.0f0 + hc) * scale + yOffset
-      res[26] = (0.0f0 - hc) * scale + yOffset
+      res[2] = 0.0f0 - hc
+      res[10] = -1.0f0 + hc
+      res[18] = -1.0f0 + hc
+      res[26] = 0.0f0 - hc
     end
 
     # x coordinates (indices: 1=top right, 9=bottom right, 17=bottom left, 25=top left)
     if imagePos == 1 || imagePos == 3 # Left half (X from -1.0 to 0.0)
-      res[1] = (0.0f0 - wc) * scale
-      res[9] = (0.0f0 - wc) * scale
-      res[17] = (-1.0f0 + wc) * scale
-      res[25] = (-1.0f0 + wc) * scale
+      res[1] = 0.0f0 - wc
+      res[9] = 0.0f0 - wc
+      res[17] = -1.0f0 + wc
+      res[25] = -1.0f0 + wc
     else # Right half (X from 0.0 to 1.0)
-      res[1] = (1.0f0 - wc) * scale
-      res[9] = (1.0f0 - wc) * scale
-      res[17] = (0.0f0 + wc) * scale
-      res[25] = (0.0f0 + wc) * scale
+      res[1] = 1.0f0 - wc
+      res[9] = 1.0f0 - wc
+      res[17] = 0.0f0 + wc
+      res[25] = 0.0f0 + wc
     end
   end
 

@@ -23,6 +23,7 @@ DEVICE = None
 
 def init_models():
     global HELPNET_MODEL, NNUNET_MODEL, DEVICE
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     device_str = "cuda" if torch.cuda.is_available() else "cpu"
     DEVICE = torch.device(device_str)
     print(f"[Worker] Initializing models on {DEVICE}...")
@@ -78,10 +79,22 @@ def run_nninteractive(image_path, point_path, out_dir):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     
-    # Mock NNInteractive logic
-    print(f"[Worker] Running mock NNInteractive on {image_path}")
     img_nib = nib.load(image_path)
+    img_vol = img_nib.get_fdata().astype(np.float32)
+    point_nib = nib.load(point_path)
+    point_vol = point_nib.get_fdata().astype(np.float32)
+    
     pred = np.zeros(img_nib.shape, dtype=np.uint8)
+    
+    # Check for seed point coordinates
+    coords = np.where(point_vol > 0)
+    if len(coords[0]) > 0:
+        cz, cy, cx = int(coords[0][0]), int(coords[1][0]), int(coords[2][0])
+        z, y, x = np.ogrid[:img_vol.shape[0], :img_vol.shape[1], :img_vol.shape[2]]
+        dist = np.sqrt((z - cz)**2 + (y - cy)**2 + (x - cx)**2)
+        # Interactive sphere around seed point (radius 5 voxels)
+        pred[dist <= 5.0] = 1
+        print(f"[Worker] NNInteractive generated {np.sum(pred)} voxels around ({cz},{cy},{cx})")
     
     pred_path = out_dir / "nninteractive_prediction.nii.gz"
     nib.save(nib.Nifti1Image(pred, img_nib.affine), str(pred_path))

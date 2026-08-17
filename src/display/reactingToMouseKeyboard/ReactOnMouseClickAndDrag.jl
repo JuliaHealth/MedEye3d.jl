@@ -151,8 +151,9 @@ used when we want to save some manual modifications
 # function react_to_draw(textureList,actor,mouseCoords_channel)
 function react_to_draw(mouseStructArray::Vector{MouseStruct}, stateObjects::Vector{StateDataFields})
     stateObject = stateObjects[stateObjects[1].switchIndex]
-    # sleep(0.1);
-    # @info "react_to_draw after sleep" isready(mouseCoords_channel)
+    if !stateObject.valueForMasToSet.is_painting_active
+        return
+    end
     texture = stateObject.textureToModifyVec[1]
     calcDim = stateObject.calcDimsStruct
 
@@ -234,32 +235,17 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 
                 if is_compare
                     # Compare mode: left = panel 1, right = panel 5
-                    if x < actualW / 2.0
-                        mainState.switchIndex = 1
-                    else
-                        mainState.switchIndex = 5
-                    end
+                    mainState.switchIndex = x < actualW / 2.0 ? 1 : 5
                 else
                     # Quad view mode: standard 4-panel layout
-                    # Convert mouse to NDC accounting for viewport vs content area mismatch
-                    mouseGlX = (x * 2.0 / viewportW) - 1.0
-                    mouseGlY = ((actualH - y) * 2.0 / viewportH) - 1.0
-                    
-                    # Compute panel split dynamically from actual vertex positions
-                    topVerts = mainStates[1].calcDimsStruct.mainImageQuadVert
-                    botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
-                    topPanelBottom = Float64(min(topVerts[10], topVerts[18]))
-                    botPanelTop = Float64(max(botVerts[2], botVerts[26]))
-                    glMidY = (topPanelBottom + botPanelTop) / 2.0
-                    
-                    if x < actualW / 2.0 && mouseGlY > glMidY
-                        mainState.switchIndex = 1
-                    elseif x >= actualW / 2.0 && mouseGlY > glMidY
-                        mainState.switchIndex = 2
-                    elseif x < actualW / 2.0 && mouseGlY <= glMidY
-                        mainState.switchIndex = 3
+                    if x < actualW / 2.0 && y < actualH / 2.0
+                        mainStates[1].switchIndex = 1  # Top-Left (Axial CT/PET)
+                    elseif x >= actualW / 2.0 && y < actualH / 2.0
+                        mainStates[1].switchIndex = 2  # Top-Right (Pure PET Axial)
+                    elseif x < actualW / 2.0 && y >= actualH / 2.0
+                        mainStates[1].switchIndex = 3  # Bottom-Left (Sagittal)
                     else
-                        mainState.switchIndex = 4
+                        mainStates[1].switchIndex = 4  # Bottom-Right (Coronal)
                     end
                 end
             end
@@ -375,21 +361,24 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             dx = x - lastX
             dy = y - lastY  
             
-            # Convert screen delta to normalized data space and scale by zoom
-            panSpeedX = Float32(dx / actualW) / panelState.calcDimsStruct.zoom
-            panSpeedY = Float32(dy / actualH) / panelState.calcDimsStruct.zoom
+            # Screen dx is horizontal (maps to panX in data matrix), screen dy is vertical (maps to panY in data matrix)
+            # Both scaled by the current zoom level so panning speed matches cursor motion on screen
+            panSpeedX = Float32(dx / actualW) / max(0.1f0, panelState.calcDimsStruct.zoom)
+            panSpeedY = Float32(dy / actualH) / max(0.1f0, panelState.calcDimsStruct.zoom)
             
-            panelState.calcDimsStruct.panX += panSpeedX
-            panelState.calcDimsStruct.panY -= panSpeedY # y goes down on screen, up in texture
+            panelState.calcDimsStruct.panX = clamp(panelState.calcDimsStruct.panX - panSpeedX, -1.0f0, 1.0f0)
+            panelState.calcDimsStruct.panY = clamp(panelState.calcDimsStruct.panY + panSpeedY, -1.0f0, 1.0f0)
             
             panelState.lastPanDragCoords = [CartesianIndex(Int(round(x)), Int(round(y)))]
             
-            @info "Pan: dx=$dx dy=$dy panX=$(panelState.calcDimsStruct.panX) panY=$(panelState.calcDimsStruct.panY)"
-            
-            # Re-render via reactToScroll which applies applyZoomPan in updateImagesDisplayed
+            # Re-render via reactToScroll for all visible panels to prevent freezing
             oldSwitch = mainStates[1].switchIndex
-            mainStates[1].switchIndex = clickedPanel
-            reactToScroll(0, mainStates, false)
+            for i in 1:length(mainStates)
+                if sum(abs.(mainStates[i].calcDimsStruct.mainImageQuadVert)) > 0.01f0 # Not hidden
+                    mainStates[1].switchIndex = i
+                    reactToScroll(0, mainStates, false)
+                end
+            end
             mainStates[1].switchIndex = oldSwitch
         end
     end # end right-click handler
@@ -417,6 +406,12 @@ Dispatched via on_next!(states, data::DoubleClickEvent) — same pattern as all 
 """
 function reactToDoubleClick(event::DoubleClickEvent, mainStates::Vector{StateDataFields})
     if length(mainStates) < 4
+        return
+    end
+
+    # Guard: Disable double click zoom while painting or erasing is active
+    if !isempty(mainStates) && isdefined(mainStates[1], :valueForMasToSet) && mainStates[1].valueForMasToSet.is_painting_active
+        @info "Double-click zoom ignored: painting/erasing is currently active"
         return
     end
 

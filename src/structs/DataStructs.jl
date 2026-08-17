@@ -163,8 +163,9 @@ end#CalcDimsStruct
 simple struct that when passed is giving information about what should be current value we are setting to the mask
 """
 @with_kw struct valueForMasToSetStruct
-    value::Int64 = 1# value that will be used to set  pixels where we would interact with mouse
-    text::SimpleLineTextStruct = SimpleLineTextStruct(text="value of mask to set is  $(value)")
+    value::Int64 = 1 # value that will be used to set pixels where we would interact with mouse
+    is_painting_active::Bool = false # true only when painting in segmentation manager is activated
+    text::SimpleLineTextStruct = SimpleLineTextStruct(text="value of mask to set is $(value)")
 end#valueForMasToSetStruct
 
 

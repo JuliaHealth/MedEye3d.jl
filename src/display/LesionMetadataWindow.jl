@@ -29,7 +29,7 @@ using JSON
 using HDF5
 using Dates
 using ..MakieEvents
-import ..SegmentationDisplay: synchronized_makie_renderloop
+import ..SegmentationDisplay: synchronized_makie_renderloop, GLOBAL_OPENGL_LOCK
 import ..SegmentationDisplay.MakieEventHandlers as _MEH
 
 abstract type DBMessage end
@@ -48,8 +48,9 @@ export create_metadata_window, load_annotations, save_annotations, display_metad
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 const _PKG_ROOT      = joinpath(@__DIR__, "..", "..", "extension", "data")
-const DEF_JSON_PATH  = joinpath(_PKG_ROOT, "def.json")
-const RADLEX_CSV_PATH= joinpath(_PKG_ROOT, "RadLex.csv")
+const _SLICER_DATA   = "/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/data"
+const DEF_JSON_PATH  = isfile(joinpath(_SLICER_DATA, "def.json")) ? joinpath(_SLICER_DATA, "def.json") : (isfile(joinpath(_PKG_ROOT, "def.json")) ? joinpath(_PKG_ROOT, "def.json") : joinpath(@__DIR__, "..", "..", "data", "def.json"))
+const RADLEX_CSV_PATH= isfile(joinpath(_SLICER_DATA, "RadLex.csv")) ? joinpath(_SLICER_DATA, "RadLex.csv") : (isfile(joinpath(_PKG_ROOT, "RadLex.csv")) ? joinpath(_PKG_ROOT, "RadLex.csv") : joinpath(@__DIR__, "..", "..", "data", "RadLex.csv"))
 const DEFAULT_SAVE_PATH = joinpath(homedir(), "medeye3d_lesion_annotations.json")
 const DEFAULT_HDF5_PATH = joinpath(homedir(), "medeye3d_lesion_annotations.h5")
 
@@ -180,7 +181,7 @@ function save_annotations_hdf5(db::Dict, path::String=DEFAULT_HDF5_PATH)
                 end
             end
         end
-        @info "Annotations saved to HDF5 → $path"
+        @debug "Annotations saved to HDF5 → $path"
     catch e
         @error "Failed to save annotations to HDF5" exception=(e, catch_backtrace())
     end
@@ -192,7 +193,7 @@ function save_annotations(db::Dict,
         open(path, "w") do io
             JSON.print(io, db, 2)
         end
-        @info "Annotations saved → $(path)  ($(length(db)) lesions)"
+        @debug "Annotations saved → $(path)  ($(length(db)) lesions)"
     catch e
         @warn "Cannot save annotations: $(e)"
     end
@@ -285,8 +286,19 @@ function create_metadata_window(
     BLU_BTN = RGBf(0.20, 0.35, 0.60)
 
     # ── Figure ──────────────────────────────────────────────────────────────
-    fig = Figure(size = (920, 1600), backgroundcolor = BG)
-    g   = GridLayout(fig[1,1], tellheight = false, halign = :left, valign = :top)
+    fig = Figure(size = (920, 900), backgroundcolor = BG)
+    
+    main_layout = GridLayout(fig[1,1])
+    sl = Slider(main_layout[1, 2], range = 0:0.01:1, startvalue = 1, horizontal = false, tellheight = false)
+    
+    g = GridLayout(main_layout[1,1], tellheight = false, halign = :left, valign = sl.value)
+    
+    # Mouse scroll event to control slider
+    on(fig.scene.events.scroll) do scroll
+        sl.value[] = clamp(sl.value[] + scroll[2] * 0.05, 0.0, 1.0)
+        return Consume(true)
+    end
+    
     rowgap!(g, 3)
     colgap!(g, 4)
     colsize!(g, 1, Auto())
@@ -405,6 +417,38 @@ function create_metadata_window(
     end
 
     end_section!(sec_nav)
+
+    # ── Lesion Type & Anatomic Localization ───────────────────────────────────
+    sec_type = begin_section!("Lesion Type & Anatomic Localization")
+    
+    lt_r = nr!()
+    btn_type_prostate = Button(g[lt_r, 1], label = "Prostate",   buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_type_bone     = Button(g[lt_r, 2], label = "Bone Meta",  buttoncolor = ACCENT, labelcolor = TXT, fontsize = 10)
+    btn_type_organ    = Button(g[lt_r, 3], label = "Organ Meta", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_type_ln       = Button(g[lt_r, 4], label = "Lymph Node", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    
+    active_lesion_type = Observable("Bone Meta")
+    
+    function update_type_buttons(t)
+        active_lesion_type[] = t
+        btn_type_prostate.buttoncolor[] = (t == "Prostate") ? ACCENT : BG_PNL
+        btn_type_bone.buttoncolor[]     = (t == "Bone Meta") ? ACCENT : BG_PNL
+        btn_type_organ.buttoncolor[]    = (t == "Organ Meta") ? ACCENT : BG_PNL
+        btn_type_ln.buttoncolor[]       = (t == "Lymph Node" || t == "Lymph Node Meta") ? ACCENT : BG_PNL
+    end
+    
+    on(btn_type_prostate.clicks) do _; update_type_buttons("Prostate") end
+    on(btn_type_bone.clicks)     do _; update_type_buttons("Bone Meta") end
+    on(btn_type_organ.clicks)    do _; update_type_buttons("Organ Meta") end
+    on(btn_type_ln.clicks)       do _; update_type_buttons("Lymph Node Meta") end
+    
+    # Base Anatomy & Side
+    ba_r = nr!()
+    Label(g[ba_r, 1], "Base Anatomy:", fontsize = 11, font = :bold, color = SUBTXT, halign = :right)
+    tb_base_anat = Textbox(g[ba_r, 2:3], placeholder = "e.g. L3 Vertebra, Right Rib 4...", fontsize = 11)
+    menu_side = Menu(g[ba_r, 4], options = ["", "Right", "Left", "NA"], default = "", fontsize = 10)
+    
+    end_section!(sec_type)
 
     # ── Viewport Controls ────────────────────────────────────────────────────
     sec_view = begin_section!("Viewport & Windowing")
@@ -712,25 +756,69 @@ function create_metadata_window(
     # ── Segmentation Mini Manager ────────────────────────────────────────────
     sec_seg = begin_section!("Segmentation Mini Manager")
     pe_r = nr!()
-    btn_paint = Button(g[pe_r, 1], label = "Paint", buttoncolor = GRN,   labelcolor = TXT, fontsize = 11)
-    btn_erase = Button(g[pe_r, 2], label = "Erase", buttoncolor = RED_BTN, labelcolor = TXT, fontsize = 11)
-    on(btn_paint.clicks) do _; put!(channel, PaintValEvent(1)) end
-    on(btn_erase.clicks) do _; put!(channel, PaintValEvent(0)) end
+    btn_paint     = Button(g[pe_r, 1], label = "Paint", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    btn_erase     = Button(g[pe_r, 2], label = "Erase", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    btn_view_mode = Button(g[pe_r, 3:4], label = "View (No Paint)", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 11)
+    
+    current_paint_mode = Observable(:view)
+    
+    on(btn_paint.clicks) do _
+        current_paint_mode[] = :paint
+        btn_paint.buttoncolor[] = GRN
+        btn_erase.buttoncolor[] = BG_PNL
+        btn_view_mode.buttoncolor[] = BG_PNL
+        put!(channel, PaintValEvent(1, true))
+    end
+    on(btn_erase.clicks) do _
+        current_paint_mode[] = :erase
+        btn_paint.buttoncolor[] = BG_PNL
+        btn_erase.buttoncolor[] = RED_BTN
+        btn_view_mode.buttoncolor[] = BG_PNL
+        put!(channel, PaintValEvent(0, true))
+    end
+    on(btn_view_mode.clicks) do _
+        current_paint_mode[] = :view
+        btn_paint.buttoncolor[] = BG_PNL
+        btn_erase.buttoncolor[] = BG_PNL
+        btn_view_mode.buttoncolor[] = BLU_BTN
+        put!(channel, PaintValEvent(-1, false))
+    end
 
     algo_r = nr!()
     Label(g[algo_r, 1], "Algorithm:", halign=:left, fontsize=11, color=TXT)
     algo_combo = Menu(g[algo_r, 2:4], options = ["HELPNet (AI)", "NNInteractive", "Traditional (PETTumor)"], default = "HELPNet (AI)", fontsize = 10)
 
-    btn_add_ai = Button(g[nr!(), 1:4], label = "Add Lesion (Auto-PET)", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    btn_add_ai = Button(g[nr!(), 1:4], label = "Run Semiauto AI (HELPNet / nnInteractive)", buttoncolor = GRN, labelcolor = TXT, fontsize = 11)
     on(btn_add_ai.clicks) do _; put!(channel, AddAutoPetEvent(algo_combo.selection[])) end
 
     ai_r = nr!()
-    btn_sync_ai = Button(g[ai_r, 1:2], label = "Sync Missing (Auto-PET)", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
-    btn_map_link = Button(g[nr!(), 1:4], label = "Map Link", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
-    on(btn_map_link.clicks) do _; put!(channel, MapLinkEvent(active_lesion_id[])) end
-    btn_gen_man = Button(g[ai_r, 3:4], label = "Gen Manual", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
-    on(btn_sync_ai.clicks) do _; put!(channel, SyncMissingEvent()) end
-    on(btn_gen_man.clicks) do _; put!(channel, GenManualEvent()) end
+    btn_skelly = Button(g[ai_r, 1:4], label = "Run Skellytour", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    on(btn_skelly.clicks) do _
+        put!(channel, RunPreprocessEvent())
+    end
+
+    btn_bone_helpers = Button(g[nr!(), 1:4], label = "Extract Bone Surface & Marrow Subsegments", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    on(btn_bone_helpers.clicks) do _
+        lid = tryparse(Int, active_lesion[])
+        if lid !== nothing
+            put!(channel, GenManualEvent(lid))
+        end
+    end
+    
+    ai_r2 = nr!()
+    tog_lesion = Toggle(g[ai_r2, 1], active=true)
+    Label(g[ai_r2, 2], "Lesion", fontsize=11, color=TXT, halign=:left)
+    
+    tog_surface = Toggle(g[ai_r2, 3], active=true)
+    Label(g[ai_r2, 4], "Bone Surface", fontsize=11, color=TXT, halign=:left)
+    
+    ai_r3 = nr!()
+    tog_marrow = Toggle(g[ai_r3, 1], active=true)
+    Label(g[ai_r3, 2], "Bone Marrow", fontsize=11, color=TXT, halign=:left)
+    
+    on(tog_lesion.active) do val; put!(channel, ShowMaskLayerEvent(1, val)) end
+    on(tog_surface.active) do val; put!(channel, ShowMaskLayerEvent(2, val)) end
+    on(tog_marrow.active) do val; put!(channel, ShowMaskLayerEvent(3, val)) end
 
     end_section!(sec_seg)
 
@@ -809,6 +897,14 @@ function create_metadata_window(
     # ── Collect / apply UI state ──────────────────────────────────────────────
     function collect_state()::Dict{String,String}
         d = Dict{String,String}()
+        d["LesionType"] = active_lesion_type[]
+        v_base = _safe_strip(tb_base_anat.stored_string[])
+        isempty(v_base) || (d["BaseAnatomy"] = v_base)
+        side_sel = menu_side.selection[]
+        if side_sel !== nothing && !isempty(string(side_sel))
+            d["BaseAnatomySide"] = string(side_sel)
+        end
+        
         for q in schema
             w = get(field_widgets, q.short, nothing)
             w === nothing && continue
@@ -836,6 +932,19 @@ function create_metadata_window(
     end
 
     function apply_state(data::AbstractDict)
+        t_type = get(data, "LesionType", "Bone Meta")
+        update_type_buttons(t_type)
+        
+        t_base = get(data, "BaseAnatomy", "")
+        if tb_base_anat.stored_string[] != t_base
+            tb_base_anat.stored_string[] = t_base
+        end
+        
+        t_side = get(data, "BaseAnatomySide", "")
+        side_opts = menu_side.options[]
+        s_idx = findfirst(==(t_side), side_opts)
+        menu_side.i_selected[] = s_idx !== nothing ? s_idx : 1
+        
         for q in schema
             w = get(field_widgets, q.short, nothing)
             w === nothing && continue
@@ -871,7 +980,7 @@ function create_metadata_window(
         end
         custom_db[] = cdb
         
-        target_dict = get(data, "RadiologicalDictation", "")
+        target_dict = get(data, "RadiologicalDictation", get(_MEH.tp_descriptions, _MEH.current_tp_index[], ""))
         if dict_tb.stored_string[] != target_dict
             dict_tb.stored_string[] = target_dict
         end
@@ -887,18 +996,6 @@ function create_metadata_window(
         @info "WIRE_CALLBACK: active_lesion_id changed to: $id"
         db = lesion_db[]
         apply_state(get(db, id, Dict{String,String}()))
-        m = match(r"\d+", id)
-        if m !== nothing
-            lesion_num = parse(Int, m.match)
-            @info "WIRE_CALLBACK: dispatching SyncLesionEvent($lesion_num) to channel (isopen=$(isopen(channel)))"
-            @async begin
-                @info "WIRE_CALLBACK_ASYNC: about to put! SyncLesionEvent($lesion_num)"
-                put!(channel, SyncLesionEvent(lesion_num))
-                @info "WIRE_CALLBACK_ASYNC: put! completed for SyncLesionEvent($lesion_num)"
-            end
-        else
-            @warn "WIRE_CALLBACK: no lesion number found in id=$id"
-        end
     end
 
     on(btn_save.clicks) do _
@@ -989,7 +1086,9 @@ end
 Display the metadata Figure using the thread-safe synchronized GLMakie render loop.
 """
 function display_metadata_window(fig::Figure)
-    screen = GLMakie.Screen(fig.scene; renderloop=synchronized_makie_renderloop)
+    screen = lock(GLOBAL_OPENGL_LOCK) do
+        GLMakie.Screen(fig.scene; renderloop=synchronized_makie_renderloop)
+    end
     
     # Fix: Force hasfocus=true so GLMakie's MousePositionUpdater always tracks
     # the mouse position. Without this, the Makie window ignores mouse movement
@@ -1008,7 +1107,9 @@ function display_metadata_window(fig::Figure)
         end
     end
     
-    display(screen, fig)
+    lock(GLOBAL_OPENGL_LOCK) do
+        display(screen, fig)
+    end
     return screen
 end
 
