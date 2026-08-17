@@ -34,7 +34,7 @@ function registerMouseScrollFunctions(window::GLFW.Window, mainChannel::Base.Cha
                 put!(mainChannel, MouseStruct(
                     isLeftButtonDown  = false,
                     isRightButtonDown = false,
-                    lastCoordinates   = [CartesianIndex(Int(curX), Int(curY))],
+                    lastCoordinates   = [CartesianIndex(Int(round(curX)), Int(round(curY)))],
                     actualWindowWidth  = Int(actualW),
                     actualWindowHeight = Int(actualH),
                 ))
@@ -54,10 +54,14 @@ function registerMouseScrollFunctions(window::GLFW.Window, mainChannel::Base.Cha
 end #registerMouseScrollFunctions
 
 function reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFields})
-    mainState = mainStates[mainStates[1].switchIndex]
+    panelIdx = mainStates[1].switchIndex
+    if panelIdx < 1 || panelIdx > length(mainStates)
+        panelIdx = 1
+    end
+    mainState = mainStates[panelIdx]
     
-    # Zoom factor: 1.1 for each scroll tick
-    zoomFactor = data.zoom_delta > 0 ? 1.1f0 : (1.0f0 / 1.1f0)
+    # Zoom factor: 1.15 for each scroll tick
+    zoomFactor = data.zoom_delta > 0 ? 1.15f0 : (1.0f0 / 1.15f0)
     
     # Increase zoom, clamp between 1.0 (no zoom) and 20.0
     newZoom = clamp(mainState.calcDimsStruct.zoom * zoomFactor, 1.0f0, 20.0f0)
@@ -69,12 +73,13 @@ function reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFi
     end
     
     mainState.calcDimsStruct.zoom = newZoom
-    @info "Zoom: $(newZoom)x (panel=$(mainStates[1].switchIndex))"
+    @info "Shift-Scroll Zoom: $(round(newZoom, digits=2))x (panel=$panelIdx)"
     
-    # Re-render the current slice — reactToScroll with 0 scrollNumb will
-    # re-extract the same slice and call updateImagesDisplayed, which 
-    # applies applyZoomPan internally.
+    # Re-render target panel
+    old_switch = mainStates[1].switchIndex
+    mainStates[1].switchIndex = panelIdx
     reactToScroll(0, mainStates, false)
+    mainStates[1].switchIndex = old_switch
 end
 
 

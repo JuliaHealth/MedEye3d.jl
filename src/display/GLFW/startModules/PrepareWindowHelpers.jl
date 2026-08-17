@@ -171,6 +171,7 @@ function initializeWindow(windowWidth::Int, windowHeight::Int)
     GLFW.Init()
 
     # Create a windowed mode window and its OpenGL context
+    GLFW.WindowHint(GLFW.DECORATED, true)
     window = GLFW.CreateWindow(windowWidth, windowHeight, "Segmentation Visualization")
 
     # window = GLFW.Window(

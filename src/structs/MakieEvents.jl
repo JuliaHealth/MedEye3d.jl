@@ -3,7 +3,7 @@ export ChangePlaneEvent, CompareTimePointsEvent, ShowSingleLesionEvent, ScrollZo
 export WindowingEvent, PaintValEvent, SyncLesionEvent
 export ChangeTimePointEvent, ToggleLesionEvent, RefreshListEvent
 export AddAutoPetEvent, SyncMissingEvent, GenManualEvent
-export MapLinkEvent, AutoRunPreprocessEvent, RunPreprocessEvent, ShowBoneMaskEvent, SaveMRBEvent
+export MapLinkEvent, AutoRunPreprocessEvent, RunPreprocessEvent, ShowBoneMaskEvent, ShowMaskLayerEvent, SaveMRBEvent
 export CloseWindowEvent, ResizeWindowEvent, SetWindowTitleEvent
 struct ChangePlaneEvent
     plane :: Symbol # :Axial, :Coronal, :Sagittal
@@ -28,6 +28,8 @@ end
 
 struct PaintValEvent
     val :: Int
+    active :: Bool
+    PaintValEvent(val::Int, active::Bool=true) = new(val, active)
 end
 
 struct SyncLesionEvent
@@ -45,7 +47,9 @@ struct AddAutoPetEvent
     algorithm::String
 end
 struct SyncMissingEvent end
-struct GenManualEvent end
+struct GenManualEvent
+    lesion_id::Int
+end
 
 struct MapLinkEvent 
     lesion_id::String
@@ -55,6 +59,10 @@ struct AutoRunPreprocessEvent
 end
 struct RunPreprocessEvent end
 struct ShowBoneMaskEvent
+    active :: Bool
+end
+struct ShowMaskLayerEvent
+    layer :: Int
     active :: Bool
 end
 struct SaveMRBEvent end

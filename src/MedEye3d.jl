@@ -68,7 +68,14 @@ using .LesionAssociation
 include("LesionTracker.jl")
 include(joinpath("higherAbstractions", "DisplayDataManag.jl"))
 include(joinpath("display", "GLFW", "SegmentationDisplay.jl"))
-#include(joinpath("higherAbstractions", "visualizationFromHdf5.jl"))
+include(joinpath("ai", "AIInference.jl"))
+using .AIInference
+export AIInference
+
+include(joinpath("preprocessing", "BoneSubsegmentation.jl"))
+using .BoneSubsegmentation
+export BoneSubsegmentation
+
 include(joinpath("display", "LesionMetadataWindow.jl"))
 include(joinpath("display", "HeuristicsEngine.jl"))
 

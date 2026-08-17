@@ -12,7 +12,9 @@ function start_python_worker(worker_script_path::String)
     global PYTHON_PROC
     if PYTHON_PROC === nothing || process_exited(PYTHON_PROC)
         @info "Starting Python Worker for Inference..."
-        PYTHON_PROC = run(pipeline(`python3 $worker_script_path`, stdout=devnull, stderr=devnull), wait=false)
+        env = copy(ENV)
+        env["CUDA_VISIBLE_DEVICES"] = "1"
+        PYTHON_PROC = run(pipeline(setenv(`python3 $worker_script_path`, env), stdout=devnull, stderr=devnull), wait=false)
         sleep(3) # Give it time to load PyTorch and models
     else
         @info "Python Worker is already running."

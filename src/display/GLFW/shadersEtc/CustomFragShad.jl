@@ -154,32 +154,24 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
     for x in texturesNotCont
         if !x.isMainImage
             maskApplyCode *= """
-                if ($(x.name)isVisible == 1 && abs($(x.name)Res) > 0.00001) {
-                    float alpha = $(x.name)maskContribution * (abs($(x.name)Res) > 0.00001 ? 1.0 : 0.0);
-                    // Use a higher alpha if it's the active lesion mask
+                if ($(x.name)isVisible == 1 && $(x.name)Res > $(x.name)minValue) {
                     if ($(x.name)minValue == $(x.name)maxValue) {
                         if (abs($(x.name)Res - $(x.name)minValue) < 0.1) {
-                            alpha = 1.0;
-                        } else {
-                            alpha = 0.0;
+                            vec3 maskColor = vec3($(x.name)ColorMask.r, $(x.name)ColorMask.g, $(x.name)ColorMask.b);
+                            baseColor = mix(baseColor, maskColor, 0.85);
                         }
-                    } else if (alpha > 0.0) {
-                        alpha = clamp(alpha * 2.0, 0.5, 1.0); // Boost visibility
-                    }
-                    vec3 maskColor = vec3(0.0);
-                    if (alpha > 0.0) {
-                        if ($(x.name)minValue == $(x.name)maxValue) {
-                            maskColor = vec3($(x.name)ColorMask.r, $(x.name)ColorMask.g, $(x.name)ColorMask.b);
-                        } else {
-                            maskColor = vec3(
+                    } else {
+                        float normalizedVal = clamp(($(x.name)Res - $(x.name)minValue) / max($(x.name)ValueRange, 0.001), 0.0, 1.0);
+                        if (normalizedVal > 0.0) {
+                            float alpha = clamp(pow(normalizedVal, 0.4) * 0.95, 0.05, 0.85);
+                            vec3 maskColor = vec3(
                                 changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.r, $(x.name)ValueRange),
                                 changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.g, $(x.name)ValueRange),
                                 changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.b, $(x.name)ValueRange)
                             );
+                            baseColor = baseColor * (1.0 - alpha * 0.35) + maskColor * alpha * 1.5;
+                            baseColor = clamp(baseColor, 0.0, 1.0);
                         }
-                    }
-                    if (maskColor != vec3(0.0) && alpha > 0.0) {
-                        baseColor = mix(baseColor, maskColor, alpha);
                     }
                 }
             """

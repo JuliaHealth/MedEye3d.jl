@@ -157,6 +157,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::MapLinkEvent) = reactToMap
 on_next!(stateObjects::Vector{StateDataFields}, data::AutoRunPreprocessEvent) = reactToAutoRunPreprocess(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::RunPreprocessEvent) = reactToRunPreprocess(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ShowBoneMaskEvent) = reactToShowBoneMask(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::ShowMaskLayerEvent) = reactToShowMaskLayer(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SaveMRBEvent) = reactToSaveMRB(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::CloseWindowEvent) = nothing
 on_next!(stateObjects::Vector{StateDataFields}, data::ResizeWindowEvent) = reactToResizeWindow(data, stateObjects)
@@ -246,11 +247,11 @@ end#prepereForDispStruct
 """
 Returns the display mode of the visualizer
 """
-function getDisplayMode(listOfTextSpecs::Union{Vector{TextureSpec},Vector{Vector{TextureSpec}}})::DisplayMode
+function getDisplayMode(listOfTextSpecs::Union{Vector{TextureSpec},Vector{Vector{TextureSpec}}}, quadView::Bool=false)::DisplayMode
     if typeof(listOfTextSpecs) == Vector{TextureSpec}
         return SingleImage
     elseif typeof(listOfTextSpecs) == Vector{Vector{TextureSpec}}
-        if length(listOfTextSpecs) == 4
+        if length(listOfTextSpecs) >= 4 || quadView
             return QuadImage
         else
             return MultiImage
@@ -382,12 +383,12 @@ function coordinateDisplay(
     windowHeight::Int=Int(round(windowWidth * fractionOfMainIm)),
     textTexturewidthh::Int32=Int32(2000),
     textTextureheightt::Int32= fractionOfMainIm >= 1.0 ? Int32(1) : Int32(round((windowHeight / (windowWidth * (1 - fractionOfMainIm)))) * textTexturewidthh),
-    windowControlStruct::WindowControlStruct=WindowControlStruct(),
-
+    windowControlStruct::WindowControlStruct=WindowControlStruct();
+    quadView::Bool=false
 )
 
 
-    displayMode = getDisplayMode(listOfTextSpecsPrim)
+    displayMode = getDisplayMode(listOfTextSpecsPrim, quadView)
     #setting number to texture that will be needed in shader configuration
     #enumerate function returns index,value pair of each item in an array, here for the TextureSpecStruct, setting the whichCreated field to the current index
     listOfTextSpecs::Union{Vector{TextureSpec{Float32}},Vector{Vector{TextureSpec{Float32}}}} = begin
@@ -714,8 +715,8 @@ function coordinateDisplay(
                         channelData = take!(mainChannel)  # discard stale move, keep latest
                     end
 
-                    # Left-button drag aggregation for mask painting.
-                    if channelData.isLeftButtonDown
+                    # Left-button drag aggregation for mask painting ONLY when painting is active.
+                    if channelData.isLeftButtonDown && stateInstances[1].valueForMasToSet.is_painting_active
                         mouseStructAggregationArray::Vector{MouseStruct} = [channelData]
                         while !isempty(mainChannel) && typeof(fetch(mainChannel)) == MouseStruct
                             push!(mouseStructAggregationArray, take!(mainChannel))
@@ -1233,13 +1234,13 @@ function displayImage(
 
 
 
-    medEye3dChannelInstance = coordinateDisplay(textureSpecArray, fractionOfMainImage, datToScrollDimsB, spacings, origins, svVertAndInd, all_supervoxels, windowWidth)
+    medEye3dChannelInstance = coordinateDisplay(textureSpecArray, fractionOfMainImage, datToScrollDimsB, spacings, origins, svVertAndInd, all_supervoxels, windowWidth; quadView=quadView)
 
 
 
     # Populating the fields for mainMedEye3dInstance
     # try
-    displayMode = getDisplayMode(textureSpecArray)
+    displayMode = getDisplayMode(textureSpecArray, quadView)
 
     if displayMode == SingleImage
         medEye3dChannelInstance.voxelArrayShapes = map(x -> size(x[2]), voxelDataTupleVector)
