@@ -546,44 +546,288 @@ function create_metadata_window(
         put!(channel, ShowSingleLesionEvent(0))
     end
     
-    vc4_r = nr!()
-
-
-    ct_r = nr!()
-    Label(g[ct_r, 1], "CT Preset:", fontsize = 11, color = SUBTXT, halign = :right)
-    btn_soft = Button(g[ct_r, 2], label = "Soft Tissue", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_bone = Button(g[ct_r, 3], label = "Bone",        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_lung = Button(g[ct_r, 4], label = "Lung",        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    on(btn_soft.clicks) do _; put!(channel, WindowingEvent(-160.0f0,  240.0f0)) end
-    on(btn_bone.clicks) do _; put!(channel, WindowingEvent(-450.0f0, 1050.0f0)) end
-    on(btn_lung.clicks) do _; put!(channel, WindowingEvent(-1350.0f0, 150.0f0)) end
-
     end_section!(sec_view)
 
-    # ── Annotation Fields by Category ──────────────────────────────────────────
-    field_widgets = Dict{String, Any}()
+    # ── Dedicated Windowing & Image Offsets Subpanel ─────────────────────────
+    sec_win = begin_section!("Windowing & Image Offsets"; default_open=true)
 
-    # Group questions by their primary category
-    questions_by_cat = Dict{String, Vector{QuestionDef}}()
-    for q in schema
-        cat = isempty(q.categories) ? "Uncategorized" : q.categories[1]
-        if !haskey(questions_by_cat, cat)
-            questions_by_cat[cat] = QuestionDef[]
+        # CT Windowing
+    ct_lbl_r = nr!()
+    Label(g[ct_lbl_r, 1:4], "── CT Window & Offsets (HU) ──", fontsize = 11, font = :bold, color = ACCENT, halign = :center, tellwidth = false)
+    
+    ct_s_r = nr!()
+    islider_ct = IntervalSlider(g[ct_s_r, 1:4], range = -1500.0:10.0:3000.0, startvalues = (-150.0, 250.0))
+    
+    ct_p_r = nr!()
+    Label(g[ct_p_r, 1], "Presets:", fontsize = 10, color = SUBTXT, halign = :right)
+    btn_soft = Button(g[ct_p_r, 2], label = "Soft Tissue", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_bone = Button(g[ct_p_r, 3], label = "Bone",        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_lung = Button(g[ct_p_r, 4], label = "Lung",        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+
+    ct_c_r = nr!()
+    btn_ct_minus = Button(g[ct_c_r, 1], label = "- 50", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    tb_ct_min = Textbox(g[ct_c_r, 2], placeholder = "Min (-150)", stored_string = "-150.0", fontsize = 10)
+    tb_ct_max = Textbox(g[ct_c_r, 3], placeholder = "Max (250)",  stored_string = "250.0",  fontsize = 10)
+    btn_ct_plus  = Button(g[ct_c_r, 4], label = "+ 50", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    
+    ct_a_r = nr!()
+    btn_apply_ct = Button(g[ct_a_r, 2:3], label = "Apply CT", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+
+    is_syncing_ct = Ref(false)
+    function apply_ct_win(min_v::Real, max_v::Real)
+        is_syncing_ct[] && return
+        is_syncing_ct[] = true
+        try
+            tb_ct_min.stored_string[] = string(round(min_v, digits=1))
+            tb_ct_min.displayed_string[] = string(round(min_v, digits=1))
+            tb_ct_max.stored_string[] = string(round(max_v, digits=1))
+            tb_ct_max.displayed_string[] = string(round(max_v, digits=1))
+            set_close_to!(islider_ct, Float32(min_v), Float32(max_v))
+            put!(channel, WindowingEvent("CT", Float32(min_v), Float32(max_v)))
+        finally
+            is_syncing_ct[] = false
         end
-        push!(questions_by_cat[cat], q)
+    end
+
+    on(islider_ct.interval) do (min_v, max_v); apply_ct_win(min_v, max_v); end
+    on(btn_soft.clicks) do _; apply_ct_win(-160.0, 240.0) end
+    on(btn_bone.clicks) do _; apply_ct_win(-450.0, 1050.0) end
+    on(btn_lung.clicks) do _; apply_ct_win(-1350.0, 150.0) end
+    on(btn_ct_minus.clicks) do _
+        v_min = tryparse(Float32, _safe_strip(tb_ct_min.stored_string[])); v_min = v_min === nothing ? -150.0f0 : v_min - 50.0f0
+        v_max = tryparse(Float32, _safe_strip(tb_ct_max.stored_string[])); v_max = v_max === nothing ? 250.0f0 : v_max - 50.0f0
+        apply_ct_win(v_min, v_max)
+    end
+    on(btn_ct_plus.clicks) do _
+        v_min = tryparse(Float32, _safe_strip(tb_ct_min.stored_string[])); v_min = v_min === nothing ? -150.0f0 : v_min + 50.0f0
+        v_max = tryparse(Float32, _safe_strip(tb_ct_max.stored_string[])); v_max = v_max === nothing ? 250.0f0 : v_max + 50.0f0
+        apply_ct_win(v_min, v_max)
     end
     
-    # Render a section for each category in order
-    for cat in all_cats
-        haskey(questions_by_cat, cat) || continue
-        qs = questions_by_cat[cat]
-        
-        # We start sections collapsed to conserve space, unless specified otherwise
-        is_default_open = cat == "Final Assessment" || cat == "Identification"
-        sec_cat = begin_section!("Annotation: " * cat; default_open=is_default_open)
-        
-        for q in qs
+    function apply_ct_from_text()
+        s_min = !isempty(tb_ct_min.displayed_string[]) ? tb_ct_min.displayed_string[] : tb_ct_min.stored_string[]
+        s_max = !isempty(tb_ct_max.displayed_string[]) ? tb_ct_max.displayed_string[] : tb_ct_max.stored_string[]
+        v_min = tryparse(Float32, _safe_strip(s_min))
+        v_max = tryparse(Float32, _safe_strip(s_max))
+        if v_min !== nothing && v_max !== nothing
+            apply_ct_win(v_min, v_max)
+        end
+    end
+    on(tb_ct_min.stored_string) do _; apply_ct_from_text(); end
+    on(tb_ct_max.stored_string) do _; apply_ct_from_text(); end
+    on(btn_apply_ct.clicks) do _; apply_ct_from_text(); end
+
+    # PET Windowing
+    pet_lbl_r = nr!()
+    Label(g[pet_lbl_r, 1:4], "── PET Window & Offsets (SUV) ──", fontsize = 11, font = :bold, color = ACCENT, halign = :center, tellwidth = false)
+    
+    pet_s_r = nr!()
+    islider_pet = IntervalSlider(g[pet_s_r, 1:4], range = 0.0:0.1:50.0, startvalues = (0.0, 10.0))
+    
+    pet_p_r = nr!()
+    Label(g[pet_p_r, 1], "Presets:", fontsize = 10, color = SUBTXT, halign = :right)
+    btn_pet_5  = Button(g[pet_p_r, 2], label = "SUV 0-5",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_pet_10 = Button(g[pet_p_r, 3], label = "SUV 0-10", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_pet_15 = Button(g[pet_p_r, 4], label = "SUV 0-15", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+
+    pet_c_r = nr!()
+    btn_pet_minus = Button(g[pet_c_r, 1], label = "- 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    tb_pet_min = Textbox(g[pet_c_r, 2], placeholder = "Min (0.0)", stored_string = "0.0", fontsize = 10)
+    tb_pet_max = Textbox(g[pet_c_r, 3], placeholder = "Max (10.0)", stored_string = "10.0", fontsize = 10)
+    btn_pet_plus  = Button(g[pet_c_r, 4], label = "+ 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    
+    pet_a_r = nr!()
+    btn_apply_pet = Button(g[pet_a_r, 2:3], label = "Apply PET", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+
+    is_syncing_pet = Ref(false)
+    function apply_pet_win(min_v::Real, max_v::Real)
+        is_syncing_pet[] && return
+        is_syncing_pet[] = true
+        try
+            tb_pet_min.stored_string[] = string(round(min_v, digits=1))
+            tb_pet_min.displayed_string[] = string(round(min_v, digits=1))
+            tb_pet_max.stored_string[] = string(round(max_v, digits=1))
+            tb_pet_max.displayed_string[] = string(round(max_v, digits=1))
+            set_close_to!(islider_pet, Float32(min_v), Float32(max_v))
+            put!(channel, WindowingEvent("PET", Float32(min_v), Float32(max_v)))
+        finally
+            is_syncing_pet[] = false
+        end
+    end
+
+    on(islider_pet.interval) do (min_v, max_v); apply_pet_win(min_v, max_v); end
+    on(btn_pet_5.clicks)  do _; apply_pet_win(0.0, 5.0) end
+    on(btn_pet_10.clicks) do _; apply_pet_win(0.0, 10.0) end
+    on(btn_pet_15.clicks) do _; apply_pet_win(0.0, 15.0) end
+    on(btn_pet_minus.clicks) do _
+        v_min = tryparse(Float32, _safe_strip(tb_pet_min.stored_string[])); v_min = v_min === nothing ? 0.0f0 : v_min - 0.5f0
+        v_max = tryparse(Float32, _safe_strip(tb_pet_max.stored_string[])); v_max = v_max === nothing ? 10.0f0 : v_max - 0.5f0
+        apply_pet_win(v_min, v_max)
+    end
+    on(btn_pet_plus.clicks) do _
+        v_min = tryparse(Float32, _safe_strip(tb_pet_min.stored_string[])); v_min = v_min === nothing ? 0.0f0 : v_min + 0.5f0
+        v_max = tryparse(Float32, _safe_strip(tb_pet_max.stored_string[])); v_max = v_max === nothing ? 10.0f0 : v_max + 0.5f0
+        apply_pet_win(v_min, v_max)
+    end
+    
+    function apply_pet_from_text()
+        s_min = !isempty(tb_pet_min.displayed_string[]) ? tb_pet_min.displayed_string[] : tb_pet_min.stored_string[]
+        s_max = !isempty(tb_pet_max.displayed_string[]) ? tb_pet_max.displayed_string[] : tb_pet_max.stored_string[]
+        v_min = tryparse(Float32, _safe_strip(s_min))
+        v_max = tryparse(Float32, _safe_strip(s_max))
+        if v_min !== nothing && v_max !== nothing
+            apply_pet_win(v_min, v_max)
+        end
+    end
+    on(tb_pet_min.stored_string) do _; apply_pet_from_text(); end
+    on(tb_pet_max.stored_string) do _; apply_pet_from_text(); end
+    on(btn_apply_pet.clicks) do _; apply_pet_from_text(); end
+
+    # SPECT Windowing
+    spect_lbl_r = nr!()
+    Label(g[spect_lbl_r, 1:4], "── SPECT Window & Offsets (Counts) ──", fontsize = 11, font = :bold, color = ACCENT, halign = :center, tellwidth = false)
+    
+    spect_s_r = nr!()
+    islider_spect = IntervalSlider(g[spect_s_r, 1:4], range = 0.0:0.1:100.0, startvalues = (0.0, 10.0))
+    
+    spect_p_r = nr!()
+    Label(g[spect_p_r, 1], "Presets:", fontsize = 10, color = SUBTXT, halign = :right)
+    btn_spect_5  = Button(g[spect_p_r, 2], label = "SPECT 0-5",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_spect_10 = Button(g[spect_p_r, 3], label = "SPECT 0-10", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_spect_20 = Button(g[spect_p_r, 4], label = "SPECT 0-20", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+
+    spect_c_r = nr!()
+    btn_spect_minus = Button(g[spect_c_r, 1], label = "- 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    tb_spect_min = Textbox(g[spect_c_r, 2], placeholder = "Min (0.0)", stored_string = "0.0", fontsize = 10)
+    tb_spect_max = Textbox(g[spect_c_r, 3], placeholder = "Max (10.0)", stored_string = "10.0", fontsize = 10)
+    btn_spect_plus  = Button(g[spect_c_r, 4], label = "+ 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    
+    spect_a_r = nr!()
+    btn_apply_spect = Button(g[spect_a_r, 2:3], label = "Apply SPECT", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+
+    is_syncing_spect = Ref(false)
+    function apply_spect_win(min_v::Real, max_v::Real)
+        is_syncing_spect[] && return
+        is_syncing_spect[] = true
+        try
+            tb_spect_min.stored_string[] = string(round(min_v, digits=1))
+            tb_spect_min.displayed_string[] = string(round(min_v, digits=1))
+            tb_spect_max.stored_string[] = string(round(max_v, digits=1))
+            tb_spect_max.displayed_string[] = string(round(max_v, digits=1))
+            set_close_to!(islider_spect, Float32(min_v), Float32(max_v))
+            put!(channel, WindowingEvent("SPECT", Float32(min_v), Float32(max_v)))
+        finally
+            is_syncing_spect[] = false
+        end
+    end
+
+    on(islider_spect.interval) do (min_v, max_v); apply_spect_win(min_v, max_v); end
+    on(btn_spect_5.clicks)  do _; apply_spect_win(0.0, 5.0) end
+    on(btn_spect_10.clicks) do _; apply_spect_win(0.0, 10.0) end
+    on(btn_spect_20.clicks) do _; apply_spect_win(0.0, 20.0) end
+    on(btn_spect_minus.clicks) do _
+        v_min = tryparse(Float32, _safe_strip(tb_spect_min.stored_string[])); v_min = v_min === nothing ? 0.0f0 : v_min - 0.5f0
+        v_max = tryparse(Float32, _safe_strip(tb_spect_max.stored_string[])); v_max = v_max === nothing ? 10.0f0 : v_max - 0.5f0
+        apply_spect_win(v_min, v_max)
+    end
+    on(btn_spect_plus.clicks) do _
+        v_min = tryparse(Float32, _safe_strip(tb_spect_min.stored_string[])); v_min = v_min === nothing ? 0.0f0 : v_min + 0.5f0
+        v_max = tryparse(Float32, _safe_strip(tb_spect_max.stored_string[])); v_max = v_max === nothing ? 10.0f0 : v_max + 0.5f0
+        apply_spect_win(v_min, v_max)
+    end
+    
+    function apply_spect_from_text()
+        s_min = !isempty(tb_spect_min.displayed_string[]) ? tb_spect_min.displayed_string[] : tb_spect_min.stored_string[]
+        s_max = !isempty(tb_spect_max.displayed_string[]) ? tb_spect_max.displayed_string[] : tb_spect_max.stored_string[]
+        v_min = tryparse(Float32, _safe_strip(s_min))
+        v_max = tryparse(Float32, _safe_strip(s_max))
+        if v_min !== nothing && v_max !== nothing
+            apply_spect_win(v_min, v_max)
+        end
+    end
+    on(tb_spect_min.stored_string) do _; apply_spect_from_text(); end
+    on(tb_spect_max.stored_string) do _; apply_spect_from_text(); end
+    on(btn_apply_spect.clicks) do _; apply_spect_from_text(); end
+end_section!(sec_win)
+
+    # ── Canonical Slicer-Aligned Annotation Sections ──────────────────────────
+    field_widgets = Dict{String, Any}()
+    q_row_indices = Dict{String, Vector{Int}}()
+    all_metadata_rows = Int[]
+    
+    schema_dict = Dict(q.short => q for q in schema)
+    
+    canonical_sections = [
+        "1. Identification & Localization" => [
+            "Lesion tracking name?",
+            "Anatomic Location",
+            "Anatomical Sublocation",
+            "Anatomical Details"
+        ],
+        "2. Morphology" => [
+            "Inner Texture / Density / Attenuation",
+            "Border and Margin",
+            "Lesion Shape",
+            "Lesion Orientation",
+            "Macroscopic Pattern",
+            "Relation to Bone Marrow (Surrounding Changes Part A)",
+            "Periosteal Reaction (Surrounding Changes Part B)",
+            "Other Structural & Soft Tissue Changes (Surrounding Changes Part C)"
+        ],
+        "3. Quantitative & Clinical Context" => [
+            "SUV max",
+            "SUV Quantitative Metrics & References",
+            "Clinical Context & Staging Variables"
+        ],
+        "4. Prostate PRIMARY Score" => [
+            "PRIMARY score pattern?"
+        ],
+        "5. Final Assessment" => [
+            "PSMA-RADS 2.0",
+            "Alternative Hypothesis (False Positive)",
+            "Certainty"
+        ],
+        "6. Reporting" => [
+            "Comment"
+        ]
+    ]
+
+    function set_row_visible!(row_idx::Int, visible::Bool)
+        rowsize!(g, row_idx, visible ? Auto() : Fixed(0))
+        if row_idx < r[1]
+            rowgap!(g, row_idx, visible ? 3 : 0)
+        end
+        for c in g.content
+            if c.span.rows.start <= row_idx && c.span.rows.stop >= row_idx
+                if hasproperty(c.content, :blockscene)
+                    c.content.blockscene.visible[] = visible
+                elseif hasproperty(c.content, :visible)
+                    c.content.visible[] = visible
+                end
+            end
+        end
+    end
+
+    section_headers = Dict{String, Int}()
+
+    for (sec_title, q_list) in canonical_sections
+        is_default_open = (sec_title == "1. Identification & Localization" || sec_title == "5. Final Assessment")
+        sec_data = begin_section!(sec_title; default_open=is_default_open)
+        is_open, start_row, header_r, btn = sec_data
+        section_headers[sec_title] = header_r
+        push!(all_metadata_rows, header_r)
+
+        for sq in q_list
+            q = get(schema_dict, sq, nothing)
+            if q === nothing
+                # Create question definition if missing from schema cache
+                q = QuestionDef(sq, sq, String[], ["General"], "both", "")
+            end
+
             q_r = nr!()
+            push!(all_metadata_rows, q_r)
+            q_rows = Int[q_r]
+
             Label(g[q_r, 1], q.short * ":",
                 fontsize = 11, font = :bold, color = TXT,
                 halign = :right, tellwidth = false)
@@ -601,12 +845,13 @@ function create_metadata_window(
                 btn_add_opt = Button(g[q_r, 4], label = "+", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=11)
                 
                 tb_new_row = nr!()
+                push!(all_metadata_rows, tb_new_row)
+                push!(q_rows, tb_new_row)
+
                 tb_new = Textbox(g[tb_new_row, 2:3], placeholder="Type new & press Enter...", fontsize=11)
                 rowsize!(g, tb_new_row, Fixed(0))
-                tb_new.blockscene.visible[] = false  # hide at creation
-                if tb_new_row > 1
-                    rowgap!(g, tb_new_row - 1, 0)
-                end
+                tb_new.blockscene.visible[] = false
+                if tb_new_row < r[1]; rowgap!(g, tb_new_row, 0); end
                 
                 tb_new_visible = Observable(false)
                 
@@ -615,12 +860,12 @@ function create_metadata_window(
                     if tb_new_visible[]
                         rowsize!(g, tb_new_row, Auto())
                         tb_new.blockscene.visible[] = true
-                        if tb_new_row > 1; rowgap!(g, tb_new_row - 1, 3); end
+                        if tb_new_row < r[1]; rowgap!(g, tb_new_row, 3); end
                         tb_new.stored_string[] = ""
                     else
                         rowsize!(g, tb_new_row, Fixed(0))
                         tb_new.blockscene.visible[] = false
-                        if tb_new_row > 1; rowgap!(g, tb_new_row - 1, 0); end
+                        if tb_new_row < r[1]; rowgap!(g, tb_new_row, 0); end
                     end
                 end
                 
@@ -634,29 +879,32 @@ function create_metadata_window(
                     end
                     rowsize!(g, tb_new_row, Fixed(0))
                     tb_new.blockscene.visible[] = false
-                    if tb_new_row > 1; rowgap!(g, tb_new_row - 1, 0); end
+                    if tb_new_row < r[1]; rowgap!(g, tb_new_row, 0); end
                     tb_new_visible[] = false
                 end
             end
 
-            # Compact tooltip
+            # Tooltip row
             if !isempty(q.full) && length(q.full) > 8
-                tip = length(q.full) > 100 ? q.full[1:100] * "..." : q.full
-                Label(g[nr!(), 2:4], tip,
+                tip_r = nr!()
+                push!(all_metadata_rows, tip_r)
+                push!(q_rows, tip_r)
+                tip = length(q.full) > 90 ? q.full[1:90] * "..." : q.full
+                Label(g[tip_r, 2:4], tip,
                     fontsize = 9, color = SUBTXT, halign = :left,
                     tellwidth = false, word_wrap = true)
             end
+
+            q_row_indices[q.short] = q_rows
         end
-        
-        end_section!(sec_cat)
-        
-        # Apply the default_open collapse state immediately
+
+        end_section!(sec_data)
+
+        # Apply initial collapse if not default_open
         if !is_default_open
-            is_open, start_row, header_r, btn = sec_cat
             for i in start_row:r[1]
                 rowsize!(g, i, Fixed(0))
             end
-            # Zero row gaps for collapsed rows
             for i in (start_row > 1 ? start_row - 1 : start_row):min(r[1], r[1] - 1)
                 rowgap!(g, i, 0)
             end
@@ -667,6 +915,89 @@ function create_metadata_window(
                     end
                 end
             end
+        end
+    end
+
+    # ── Dynamic Visibility Engine ─────────────────────────────────────────────
+    function update_dynamic_visibility!(active_type::String)
+        is_p = (active_type == "Prostate")
+        is_bm = (active_type == "Bone Meta")
+        
+        # Hide Prostate Primary Score header if not prostate
+        if haskey(section_headers, "4. Prostate PRIMARY Score")
+            p_hdr = section_headers["4. Prostate PRIMARY Score"]
+            set_row_visible!(p_hdr, is_p)
+        end
+
+        for (sq, rows) in q_row_indices
+            visible = true
+            if sq == "PRIMARY score pattern?"
+                visible = is_p
+            elseif sq == "Relation to Bone Marrow (Surrounding Changes Part A)" || 
+                   sq == "Periosteal Reaction (Surrounding Changes Part B)"
+                visible = is_bm
+            elseif sq == "PSMA-RADS 2.0"
+                visible = !is_p
+            elseif sq == "Alternative Hypothesis (False Positive)"
+                # Retained across non-prostate and all metastatic/benign mimics
+                visible = !is_p
+            end
+
+            for row_idx in rows
+                set_row_visible!(row_idx, visible)
+            end
+        end
+    end
+
+    # Auto-defaults and presets on lesion type change
+    on(btn_type_prostate.clicks) do _
+        update_type_buttons("Prostate")
+        if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
+            field_widgets["Anatomic Location"].selection[] = "Prostate Gland"
+        end
+        if haskey(field_widgets, "Anatomical Sublocation") && field_widgets["Anatomical Sublocation"] isa Menu
+            field_widgets["Anatomical Sublocation"].selection[] = "Prostate Peripheral Zone (PZ)"
+        end
+        if haskey(field_widgets, "Macroscopic Pattern") && field_widgets["Macroscopic Pattern"] isa Menu
+            field_widgets["Macroscopic Pattern"].selection[] = "Solitary / Isolated Focus"
+        end
+    end
+    
+    on(btn_type_bone.clicks) do _
+        update_type_buttons("Bone Meta")
+        if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
+            field_widgets["Anatomic Location"].selection[] = "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)"
+        end
+        if haskey(field_widgets, "Inner Texture / Density / Attenuation") && field_widgets["Inner Texture / Density / Attenuation"] isa Menu
+            field_widgets["Inner Texture / Density / Attenuation"].selection[] = "Sclerotic / Blastic / Ivory (>1000 HU)"
+        end
+    end
+    
+    on(btn_type_organ.clicks) do _
+        update_type_buttons("Organ Meta")
+        if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
+            field_widgets["Anatomic Location"].selection[] = "Solid Organ / Viscera"
+        end
+    end
+    
+    on(btn_type_ln.clicks) do _
+        update_type_buttons("Lymph Node Meta")
+        if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
+            field_widgets["Anatomic Location"].selection[] = "Pelvic Lymph Node"
+        end
+    end
+
+    # Auto-hide metadata section in Compare Volumes mode
+    on(btn_cv.clicks) do _
+        for r_idx in all_metadata_rows
+            if cv_active[]
+                set_row_visible!(r_idx, false)
+            else
+                set_row_visible!(r_idx, true)
+            end
+        end
+        if !cv_active[]
+            update_dynamic_visibility!(active_lesion_type[])
         end
     end
 
@@ -799,9 +1130,9 @@ function create_metadata_window(
 
     btn_bone_helpers = Button(g[nr!(), 1:4], label = "Extract Bone Surface & Marrow Subsegments", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
     on(btn_bone_helpers.clicks) do _
-        lid = tryparse(Int, active_lesion[])
-        if lid !== nothing
-            put!(channel, GenManualEvent(lid))
+        m = match(r"\d+", active_lesion_id[])
+        if m !== nothing
+            put!(channel, GenManualEvent(parse(Int, m.match)))
         end
     end
     
@@ -905,6 +1236,14 @@ function create_metadata_window(
             d["BaseAnatomySide"] = string(side_sel)
         end
         
+        # Windowing values
+        d["_CT_Min"] = _safe_strip(tb_ct_min.stored_string[])
+        d["_CT_Max"] = _safe_strip(tb_ct_max.stored_string[])
+        d["_PET_Min"] = _safe_strip(tb_pet_min.stored_string[])
+        d["_PET_Max"] = _safe_strip(tb_pet_max.stored_string[])
+        d["_SPECT_Min"] = _safe_strip(tb_spect_min.stored_string[])
+        d["_SPECT_Max"] = _safe_strip(tb_spect_max.stored_string[])
+
         for q in schema
             w = get(field_widgets, q.short, nothing)
             w === nothing && continue
@@ -945,6 +1284,35 @@ function create_metadata_window(
         s_idx = findfirst(==(t_side), side_opts)
         menu_side.i_selected[] = s_idx !== nothing ? s_idx : 1
         
+        # Restore windowing if present
+        if haskey(data, "_CT_Min") && haskey(data, "_CT_Max")
+            tb_ct_min.stored_string[] = data["_CT_Min"]
+            tb_ct_max.stored_string[] = data["_CT_Max"]
+            v_min = tryparse(Float32, data["_CT_Min"])
+            v_max = tryparse(Float32, data["_CT_Max"])
+            if v_min !== nothing && v_max !== nothing
+                put!(channel, WindowingEvent("CT", v_min, v_max))
+            end
+        end
+        if haskey(data, "_PET_Min") && haskey(data, "_PET_Max")
+            tb_pet_min.stored_string[] = data["_PET_Min"]
+            tb_pet_max.stored_string[] = data["_PET_Max"]
+            v_min = tryparse(Float32, data["_PET_Min"])
+            v_max = tryparse(Float32, data["_PET_Max"])
+            if v_min !== nothing && v_max !== nothing
+                put!(channel, WindowingEvent("PET", v_min, v_max))
+            end
+        end
+        if haskey(data, "_SPECT_Min") && haskey(data, "_SPECT_Max")
+            tb_spect_min.stored_string[] = data["_SPECT_Min"]
+            tb_spect_max.stored_string[] = data["_SPECT_Max"]
+            v_min = tryparse(Float32, data["_SPECT_Min"])
+            v_max = tryparse(Float32, data["_SPECT_Max"])
+            if v_min !== nothing && v_max !== nothing
+                put!(channel, WindowingEvent("SPECT", v_min, v_max))
+            end
+        end
+
         for q in schema
             w = get(field_widgets, q.short, nothing)
             w === nothing && continue
@@ -1013,8 +1381,25 @@ function create_metadata_window(
         id = active_lesion_id[]
         db = copy(lesion_db[])
         db[id] = collect_state()
+        
+        # Persist global windowing
+        db["_GLOBAL_APP_STATE"] = Dict{String,String}(
+            "CT_Min" => _safe_strip(tb_ct_min.stored_string[]),
+            "CT_Max" => _safe_strip(tb_ct_max.stored_string[]),
+            "PET_Min" => _safe_strip(tb_pet_min.stored_string[]),
+            "PET_Max" => _safe_strip(tb_pet_max.stored_string[]),
+            "SPECT_Min" => _safe_strip(tb_spect_min.stored_string[]),
+            "SPECT_Max" => _safe_strip(tb_spect_max.stored_string[])
+        )
+        global_st = Dict{String, Any}(
+            "windowing" => Dict(
+                "CT" => [_safe_strip(tb_ct_min.stored_string[]), _safe_strip(tb_ct_max.stored_string[])],
+                "PET" => [_safe_strip(tb_pet_min.stored_string[]), _safe_strip(tb_pet_max.stored_string[])],
+                "SPECT" => [_safe_strip(tb_spect_min.stored_string[]), _safe_strip(tb_spect_max.stored_string[])]
+            )
+        )
         lesion_db[] = db
-        put!(db_channel, SaveDBMessage(db, Dict{String,Any}(), save_path, DEFAULT_HDF5_PATH))
+        put!(db_channel, SaveDBMessage(db, global_st, save_path, DEFAULT_HDF5_PATH))
         status_lbl.text[] = "Saved at $(Dates.format(Dates.now(), "HH:MM:SS"))"
     end
 
@@ -1024,6 +1409,13 @@ function create_metadata_window(
             put!(db_channel, LoadDBMessage(save_path, reply))
             db = take!(reply)
             lesion_db[] = db
+            
+            # Apply global state if found
+            if haskey(db, "_GLOBAL_APP_STATE")
+                gst = db["_GLOBAL_APP_STATE"]
+                apply_state(gst)
+            end
+            
             apply_state(get(db, active_lesion_id[], Dict{String,String}()))
             status_lbl.text[] = "Loaded $(length(db)) lesion(s)"
         end
