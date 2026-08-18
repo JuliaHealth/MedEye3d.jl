@@ -171,9 +171,10 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, stateObjects::Vect
     mappedCoords = Vector{CartesianIndex{2}}()
     for mouseStruct in mouseStructArray
         mouseCoords = mouseStruct.lastCoordinates
-        append!(mappedCoords, translateMouseToTexture(texture.strokeWidth, mouseCoords, stateObject.calcDimsStruct))
+        actualW = mouseStruct.actualWindowWidth
+        actualH = mouseStruct.actualWindowHeight
+        append!(mappedCoords, translateMouseToTexture(texture.strokeWidth, mouseCoords, stateObject.calcDimsStruct, actualW, actualH))
     end
-    # append!(mappedCoords, translateMouseToTexture(texture.strokeWidth, mouseCoords, stateObject.calcDimsStruct))
 
     # @info "react_to_draw after channel" mappedCoords
 
@@ -279,11 +280,64 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
         panelState = mainStates[clickedPanel]
         
         if isempty(panelState.lastPanDragCoords)
-            # Initial press: Do the jump!
-            panelState.lastPanDragCoords = [CartesianIndex(Int(round(x)), Int(round(y)))]
-            
             # Read actual rendered vertex positions from the panel's calcDimsStruct
             texX, texY = getTextureCoordinatesFromScreen(x, y, panelState.calcDimsStruct, actualW, actualH)
+            
+            if panelState.moveLesionMode
+                target_id = 0
+                for ts in panelState.mainForDisplayObjects.listOfTextSpecifications
+                    if (ts.isMultiDiscreteMask || ts.name == "Mask" || ts.name == "manualModif") && !isempty(ts.minAndMaxValue) && ts.minAndMaxValue[1] > 0
+                        target_id = Int(round(ts.minAndMaxValue[1]))
+                        break
+                    end
+                end
+                if target_id <= 0
+                    target_id = panelState.valueForMasToSet.value
+                end
+                if target_id <= 0
+                    for ts in mainStates[1].mainForDisplayObjects.listOfTextSpecifications
+                        if (ts.isMultiDiscreteMask || ts.name == "Mask" || ts.name == "manualModif") && !isempty(ts.minAndMaxValue) && ts.minAndMaxValue[1] > 0
+                            target_id = Int(round(ts.minAndMaxValue[1]))
+                            break
+                        end
+                    end
+                end
+                if target_id <= 0
+                    target_id = 1
+                end
+                
+                panelState.movingLesionID = target_id
+                panelState.movingLesionStartTex = (texX, texY)
+                panelState.movingLesionLastDelta = CartesianIndex(0,0,0)
+                seg_vol = nothing
+                for dat in mainStates[1].onScrollData.dataToScroll
+                    if dat.name == "Mask" || dat.name == "segmentation"
+                        if panelState.movingLesionID > 0 && any(dat.dat .== Float32(panelState.movingLesionID))
+                            seg_vol = dat.dat
+                            break
+                        elseif seg_vol === nothing
+                            seg_vol = dat.dat
+                        end
+                    elseif dat.name == "manualModif" && seg_vol === nothing
+                        seg_vol = dat.dat
+                    end
+                end
+                
+                if seg_vol !== nothing && panelState.movingLesionID > 0
+                    panelState.movingLesionOriginalCoords = findall(seg_vol .== Float32(panelState.movingLesionID))
+                    panelState.movingLesionOriginalBGs = zeros(Float32, length(panelState.movingLesionOriginalCoords))
+                    @info "Move Lesion START: lesion=$(panelState.movingLesionID) found $(length(panelState.movingLesionOriginalCoords)) voxels"
+                else
+                    panelState.movingLesionOriginalCoords = CartesianIndex{3}[]
+                    panelState.movingLesionOriginalBGs = Float32[]
+                    @warn "Move Lesion START: No voxels found for lesion $(panelState.movingLesionID)"
+                end
+                panelState.lastPanDragCoords = [CartesianIndex(Int(round(x)), Int(round(y)))]
+                return
+            end
+            
+            # Initial press: Do the jump!
+            panelState.lastPanDragCoords = [CartesianIndex(Int(round(x)), Int(round(y)))]
             
             @info "RIGHT-CLICK: panel=$clickedPanel windowXY=($x,$y) viewport=$(Int(viewportW))x$(Int(viewportH)) actual=$(Int(actualW))x$(Int(actualH))"
             @info "  texX=$texX texY=$texY"
@@ -325,9 +379,9 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 push!(targets, (5, origZ))
             end
             
-            for (panelIdx, targetSlice) in targets
-                if panelIdx != clickedPanel
-                    otherState = mainStates[panelIdx]
+            for (p_idx, targetSlice) in targets
+                if p_idx != clickedPanel && p_idx <= length(mainStates)
+                    otherState = mainStates[p_idx]
                     
                     # Read max slices for clamp
                     lastSlice = otherState.onScrollData.slicesNumber
@@ -355,6 +409,105 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 end
             end
         else
+            texX, texY = getTextureCoordinatesFromScreen(x, y, panelState.calcDimsStruct, actualW, actualH)
+            
+            if panelState.moveLesionMode
+                if !isempty(panelState.movingLesionOriginalCoords) && panelState.movingLesionID > 0
+                    startTexX, startTexY = panelState.movingLesionStartTex
+                    dx_tex = round(Int, texX - startTexX)
+                    dy_tex = round(Int, texY - startTexY)
+                    
+                    dx_vox, dy_vox, dz_vox = 0, 0, 0
+                    if clickedPanel == 1 || clickedPanel == 2
+                        dx_vox, dy_vox = dx_tex, dy_tex
+                    elseif clickedPanel == 3 # Sagittal (2,3,1) -> x is slice, y is texX, z is texY
+                        dy_vox, dz_vox = dx_tex, texY - startTexY # keeping logic aligned
+                        # Simplified delta mapping for sagittal
+                        dx_vox, dy_vox, dz_vox = 0, dx_tex, dy_tex
+                    else # Coronal (1,3,2) -> y is slice, x is texX, z is texY
+                        dx_vox, dy_vox, dz_vox = dx_tex, 0, dy_tex
+                    end
+                    
+                    new_delta = CartesianIndex(dx_vox, dy_vox, dz_vox)
+                    
+                    if new_delta != panelState.movingLesionLastDelta
+                        target_id = panelState.movingLesionID
+                        orig_coords = panelState.movingLesionOriginalCoords
+                        orig_bgs = panelState.movingLesionOriginalBGs
+                        old_d = panelState.movingLesionLastDelta
+                        
+                        dx, dy, dz = new_delta[1], new_delta[2], new_delta[3]
+                        old_dx, old_dy, old_dz = old_d[1], old_d[2], old_d[3]
+                        
+                        for (p_idx, st) in enumerate(mainStates)
+                            p_delta = (p_idx == 3) ? CartesianIndex(dy, dz, dx) : ((p_idx == 4) ? CartesianIndex(dx, dz, dy) : CartesianIndex(dx, dy, dz))
+                            p_old_d = (p_idx == 3) ? CartesianIndex(old_dy, old_dz, old_dx) : ((p_idx == 4) ? CartesianIndex(old_dx, old_dz, old_dy) : CartesianIndex(old_dx, old_dy, old_dz))
+                            
+                            p_orig_coords = map(orig_coords) do c
+                                (p_idx == 3) ? CartesianIndex(c[2], c[3], c[1]) : ((p_idx == 4) ? CartesianIndex(c[1], c[3], c[2]) : c)
+                            end
+                            
+                            for dat in st.onScrollData.dataToScroll
+                                if dat.name == "Mask" || dat.name == "segmentation" || dat.name == "manualModif"
+                                    seg_v = dat.dat
+                                    # 1. Restore old
+                                    last_coords = [c + p_old_d for c in p_orig_coords]
+                                    for (j, c) in enumerate(last_coords)
+                                        if checkbounds(Bool, seg_v, c) && j <= length(orig_bgs)
+                                            seg_v[c] = orig_bgs[j]
+                                        end
+                                    end
+                                    
+                                    # 2. Write new
+                                    new_coords = [c + p_delta for c in p_orig_coords]
+                                    for c in new_coords
+                                        if checkbounds(Bool, seg_v, c)
+                                            seg_v[c] = Float32(target_id)
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                        
+                        panelState.movingLesionLastDelta = new_delta
+                        
+                        # Synchronize tp_data_cache
+                        try
+                            MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
+                            tp_idx = MEH.current_tp_index[]
+                            if haskey(MEH.tp_data_cache, tp_idx)
+                                tp_voxels = MEH.tp_data_cache[tp_idx]
+                                for (p_idx, panel_data) in enumerate(tp_voxels)
+                                    for entry in panel_data
+                                        if entry[1] == "Mask" || entry[1] == "manualModif" || entry[1] == "segmentation"
+                                            for st_dat in mainStates[p_idx].onScrollData.dataToScroll
+                                                if st_dat.name == entry[1]
+                                                    entry[2] .= st_dat.dat
+                                                    break
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                        catch err
+                            @warn "Failed to sync tp_data_cache on move lesion: $err"
+                        end
+                        
+                        # Re-render all panels to show moved lesion immediately
+                        old_sw = mainStates[1].switchIndex
+                        for p in 1:length(mainStates)
+                            if sum(abs.(mainStates[p].calcDimsStruct.mainImageQuadVert)) > 0.01f0
+                                mainStates[1].switchIndex = p
+                                ReactToScroll.reactToScroll(0, mainStates, false)
+                            end
+                        end
+                        mainStates[1].switchIndex = old_sw
+                    end
+                end
+                return
+            end
+            
             # Dragging: Do the pan!
             lastX, lastY = panelState.lastPanDragCoords[1][1], panelState.lastPanDragCoords[1][2]
             
@@ -490,16 +643,21 @@ mouseCoords - list of coordinates of mouse positions while left button remains p
 calcDims - set of values usefull for calculating mouse position
 return vector of translated cartesian coordinates
 """
-function translateMouseToTexture(strokeWidth::Int32, mouseCoords::Vector{CartesianIndex{2}}, calcD::CalcDimsStruct)::Vector{CartesianIndex{2}}
+function translateMouseToTexture(strokeWidth::Int32, mouseCoords::Vector{CartesianIndex{2}}, calcD::CalcDimsStruct, actualW::Int, actualH::Int)::Vector{CartesianIndex{2}}
+    filteredList = Vector{CartesianIndex{2}}()
+    for c in mouseCoords
+        texX, texY = StructsManag.getTextureCoordinatesFromScreen(c[1], c[2], calcD, Float64(actualW), Float64(actualH))
+        ix, iy = Int(round(texX)), Int(round(texY))
+        if ix > 0 && iy > 0 && ix <= calcD.imageTextureWidth && iy <= calcD.imageTextureHeight
+            push!(filteredList, CartesianIndex(ix, iy))
+        end
+    end
 
-
-    filteredList = map(c -> CartesianIndex(getNewX(c[1], calcD), getNewY(c[2], calcD)), mouseCoords) |>
-                   (x) -> filter(it -> it[1] > 0 && it[2] > 0, x)       # we do not want to try access it in point 0 as julia is 1 indexed
     if (!isempty(filteredList))
         return map(point -> addStrokeWidth(point, Int64(strokeWidth)), filteredList) |>  # adding some points around the point of choice so will be better visible
                (matrix) -> reduce(vcat, matrix) |># when we added some oints around we got list of lists so now we need to flatten it out
                            unique |> # we want only unique elements
-                           uniq -> filter(it -> it[1] > 0 && it[1] < calcD.imageTextureWidth && it[2] > 0 && it[2] < calcD.imageTextureHeight, uniq)     # as we add new points they may end up getting outside the texture; we need to filter those out
+                           uniq -> filter(it -> it[1] > 0 && it[1] <= calcD.imageTextureWidth && it[2] > 0 && it[2] <= calcD.imageTextureHeight, uniq)     # as we add new points they may end up getting outside the texture; we need to filter those out
     end #if
     #if we are here we do not have anything meaningfull else to return
     return Vector{CartesianIndex{2}}()

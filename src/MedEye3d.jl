@@ -3,6 +3,15 @@ import Logging
 using Logging
 using Base.Threads
 
+# Configure logging to save to data/log.txt automatically
+function __init__()
+    log_dir = joinpath(@__DIR__, "..", "data")
+    if !isdir(log_dir)
+        mkdir(log_dir)
+    end
+    global_logger(SimpleLogger(open(joinpath(log_dir, "log.txt"), "a")))
+end
+
 export ForDisplayStructs
 # export  ForDisplayStructs.TextureSpec
 export SegmentationDisplay

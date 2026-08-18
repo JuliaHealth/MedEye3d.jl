@@ -15,6 +15,8 @@ using MedEye3d.LesionAssociation
 using Statistics
 using LinearAlgebra
 import GLFW
+import JSON
+import HDF5
 
 # Paths to data
 data_dir_pat6 = joinpath(@__DIR__, "..", "data", "pat_6_files")
@@ -36,24 +38,22 @@ function parse_tfm(tfm_path)
             fixed_params = parse.(Float64, split(replace(line, "FixedParameters:" => "")))
         end
     end
+    # ITK parameters are stored row-major in physical LPS space: p11, p12, p13, p21, ...
     A = transpose(reshape(params[1:9], 3, 3))
     t = params[10:12]
     c = fixed_params
     offset = t + c - A * c
-    T_RAS = Matrix{Float64}(I, 4, 4)
-    T_RAS[1:3, 1:3] = A
-    T_RAS[1:3, 4] = offset
-    return T_RAS
+    T_ITK = Matrix{Float64}(I, 4, 4)
+    T_ITK[1:3, 1:3] = A
+    T_ITK[1:3, 4] = offset
+    return T_ITK
 end
 
-# Helper to apply 4x4 RAS transform to MedImage spatial metadata
-function apply_transform_to_medimage(img::MedImage, T_RAS::Matrix{Float64})
-    if T_RAS == Matrix{Float64}(I, 4, 4)
+# Helper to apply ITK transform to MedImage spatial metadata for resampling
+function apply_transform_to_medimage(img::MedImage, T_ITK::Matrix{Float64})
+    if T_ITK == Matrix{Float64}(I, 4, 4)
         return img
     end
-    L = Diagonal([-1.0, -1.0, 1.0, 1.0])
-    T_LPS = L * T_RAS * L
-    
     old_spacing = img.spacing
     old_dir = transpose(reshape(collect(img.direction), 3, 3))
     old_orig = img.origin
@@ -65,8 +65,12 @@ function apply_transform_to_medimage(img::MedImage, T_RAS::Matrix{Float64})
     for i in 1:3
         M_old[i, 4] = old_orig[i]
     end
-    # Apply forward ITK LPS transformation matrix to place the moving image into baseline coordinate space
-    M_new = T_LPS * M_old
+    M_old[4, 4] = 1.0
+    
+    # In ITK, T maps Fixed -> Moving physical space.
+    # When resampling via MedImages.resample_to_image, mapping M_moving_mod^-1 * M_fixed = M_moving^-1 * T_ITK * M_fixed
+    # requires M_moving_mod = inv(T_ITK) * M_old.
+    M_new = inv(T_ITK) * M_old
     
     new_orig = (M_new[1, 4], M_new[2, 4], M_new[3, 4])
     new_spacing = zeros(Float64, 3)
@@ -101,13 +105,15 @@ textureSpec_mask = TextureSpec{Float32}(
     minAndMaxValue=Float32.([0, length(colors_mapped)])
 )
 textureSpec_pure_pet = TextureSpec{Float32}(name="PET", isMainImage=true, color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0, 10]))
+textureSpec_surface = TextureSpec{Float32}(name="Bone_Surface", isMainImage=false, color=RGB(0.0, 1.0, 1.0), minAndMaxValue=Float32.([0.5, 1.5]))
+textureSpec_marrow = TextureSpec{Float32}(name="Bone_Marrow", isMainImage=false, color=RGB(1.0, 1.0, 0.0), minAndMaxValue=Float32.([0.5, 1.5]))
 
 textureSpecArray = Vector{Vector{TextureSpec}}([
-    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask)],
+    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow)],
     TextureSpec[deepcopy(textureSpec_pure_pet)],
-    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask)],
-    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask)],
-    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask)]
+    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow)],
+    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow)],
+    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow)]
 ])
 
 # To hold all TP data
@@ -119,13 +125,13 @@ function load_tp(ct_path, pet_path, mask_path, tfm_path, modality)
     pet_raw = MedImages.load_image(pet_path, modality == "SPECT" ? "NM" : "PET")
     seg_raw = MedImages.load_image(mask_path, "CT")
     
-    T_RAS = (tfm_path != "" && isfile(tfm_path)) ? parse_tfm(tfm_path) : Matrix{Float64}(I, 4, 4)
+    T_ITK = (tfm_path != "" && isfile(tfm_path)) ? parse_tfm(tfm_path) : Matrix{Float64}(I, 4, 4)
     
-    ct_tfm = apply_transform_to_medimage(ct, T_RAS)
-    pet_tfm = apply_transform_to_medimage(pet_raw, T_RAS)
-    seg_tfm = apply_transform_to_medimage(seg_raw, T_RAS)
+    ct_tfm = apply_transform_to_medimage(ct, T_ITK)
+    pet_tfm = apply_transform_to_medimage(pet_raw, T_ITK)
+    seg_tfm = apply_transform_to_medimage(seg_raw, T_ITK)
     
-    ct_res = (T_RAS != Matrix{Float64}(I, 4, 4)) ? MedImages.resample_to_image(baseline_ct, ct_tfm, MedImages.Linear_en) : ct
+    ct_res = (T_ITK != Matrix{Float64}(I, 4, 4)) ? MedImages.resample_to_image(baseline_ct, ct_tfm, MedImages.Linear_en) : ct
     pet_res = MedImages.resample_to_image(baseline_ct, pet_tfm, MedImages.Linear_en)
     seg_res = MedImages.resample_to_image(baseline_ct, seg_tfm, MedImages.Nearest_neighbour_en)
     
@@ -157,12 +163,19 @@ function load_tp(ct_path, pet_path, mask_path, tfm_path, modality)
     vol_pet_sagittal = permutedims(pet_vol_base, (2, 3, 1))
     vol_mask_sagittal = permutedims(mask_vol_base, (2, 3, 1))
 
+    surf_axial = zeros(Float32, size(ct_vol_base))
+    marr_axial = zeros(Float32, size(ct_vol_base))
+    surf_sag = zeros(Float32, size(vol_img_sagittal))
+    marr_sag = zeros(Float32, size(vol_img_sagittal))
+    surf_cor = zeros(Float32, size(vol_img_coronal))
+    marr_cor = zeros(Float32, size(vol_img_coronal))
+
     return Vector{Vector{Any}}([
-        Any[("CT", vol_img_axial), ("PET", vol_pet_axial), ("Mask", vol_mask_axial)],         
+        Any[("CT", vol_img_axial), ("PET", vol_pet_axial), ("Mask", vol_mask_axial), ("Bone_Surface", surf_axial), ("Bone_Marrow", marr_axial)],         
         Any[("PET", vol_pet_axial)],                                                          
-        Any[("CT", vol_img_sagittal), ("PET", vol_pet_sagittal), ("Mask", vol_mask_sagittal)],
-        Any[("CT", vol_img_coronal), ("PET", vol_pet_coronal), ("Mask", vol_mask_coronal)],   
-        Any[("CT", vol_img_axial), ("PET", vol_pet_axial), ("Mask", vol_mask_axial)]    
+        Any[("CT", vol_img_sagittal), ("PET", vol_pet_sagittal), ("Mask", vol_mask_sagittal), ("Bone_Surface", surf_sag), ("Bone_Marrow", marr_sag)],
+        Any[("CT", vol_img_coronal), ("PET", vol_pet_coronal), ("Mask", vol_mask_coronal), ("Bone_Surface", surf_cor), ("Bone_Marrow", marr_cor)],   
+        Any[("CT", vol_img_axial), ("PET", vol_pet_axial), ("Mask", vol_mask_axial), ("Bone_Surface", surf_axial), ("Bone_Marrow", marr_axial)]    
     ]), Tuple(Float64.(baseline_ct.spacing)), mask_vol_base
 end
 
@@ -315,30 +328,44 @@ else
     @warn "TotalSegmentator atlas not found at $ts_nrrd_path — using NRRD names only"
 end
 
-# Embed precomputed KernelAbstractions Bone Subsegments into Mask volumes
+# Preload precomputed KernelAbstractions Bone Subsegments into MakieEventHandlers cache
 println("Loading precomputed KernelAbstractions Bone Subsegmentation for bone lesions...")
 output_h5 = joinpath(data_dir_pat6, "Bone_Subsegments_0.h5")
 if isfile(output_h5)
     import HDF5
-    HDF5.h5open(output_h5, "r") do file
-        for (k, vdt) in all_tps_data
-            for item in vdt
-                for (tname, tvol) in item
-                    if tname == "Mask"
-                        lids = filter(x -> x > 0, unique(tvol))
-                        for lid in lids
-                            lid_int = Int(lid)
-                            if haskey(file, "lesion_$(lid_int)_surf")
-                                surf = file["lesion_$(lid_int)_surf"][:]
-                                marr = file["lesion_$(lid_int)_marr"][:]
-                                tvol[surf .> 0] .= 2.0f0
-                                tvol[marr .> 0] .= 3.0f0
+    try
+        cis = CartesianIndices((512, 512, 326))
+        HDF5.h5open(output_h5, "r") do file
+            for obj in keys(file)
+                if endswith(obj, "_surf")
+                    lid_str = replace(replace(obj, "lesion_" => ""), "_surf" => "")
+                    try
+                        lid_int = parse(Int, lid_str)
+                        marr_key = "lesion_$(lid_int)_marr"
+                        if haskey(file, marr_key)
+                            surf_data = read(file[obj])
+                            marr_data = read(file[marr_key])
+                            surf_pts = if ndims(surf_data) == 1
+                                cis[surf_data]
+                            else
+                                findall(surf_data .> 0)
                             end
+                            marr_pts = if ndims(marr_data) == 1
+                                cis[marr_data]
+                            else
+                                findall(marr_data .> 0)
+                            end
+                            MEH.bone_subsegments_cache[lid_int] = (surf_pts, marr_pts)
                         end
+                    catch err
+                        @warn "Failed to parse lesion $obj: $err"
                     end
                 end
             end
         end
+        println("Loaded precomputed bone subsegments for $(length(MEH.bone_subsegments_cache)) lesions.")
+    catch e
+        @warn "Failed to read bone subsegments HDF5: $e"
     end
 else
     @warn "Precomputed bone subsegments not found. Run scripts/preprocessing/precompute_bone_subsegments.jl to generate them."
@@ -346,6 +373,16 @@ end
 
 unique_vals = sort(unique(first_mask))
 lesion_ids_ints = filter(x -> x > 0, unique_vals)
+
+# Precalculate lesion centroids for instant navigation (<1us)
+for lid in lesion_ids_ints
+    c = MEH.find_lesion_center(first_mask, Float32(lid))
+    if c !== nothing
+        MEH.lesion_centroids_cache[Int(lid)] = c
+    end
+end
+println("Cached centroids for $(length(MEH.lesion_centroids_cache)) lesions.")
+
 lesion_list = if isempty(lesion_ids_ints)
     ["(none)"]
 else

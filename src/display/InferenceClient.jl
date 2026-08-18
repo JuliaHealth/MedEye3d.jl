@@ -44,7 +44,7 @@ function extract_patch(vol::Array{Float32, 3}, cx::Int, cy::Int, cz::Int; pad_va
     return patch
 end
 
-function insert_patch!(vol::Array{Float32, 3}, patch::Array{UInt8, 3}, cx::Int, cy::Int, cz::Int)
+function insert_patch!(vol::Array{Float32, 3}, patch::Array{UInt8, 3}, cx::Int, cy::Int, cz::Int; label_val::Float32=1.0f0)
     w, h, d = size(vol)
     
     src_x1 = max(1, cx - 32)
@@ -67,21 +67,32 @@ function insert_patch!(vol::Array{Float32, 3}, patch::Array{UInt8, 3}, cx::Int, 
     target_slice = vol[src_x1:src_x2, src_y1:src_y2, src_z1:src_z2]
     for i in eachindex(mask_slice)
         if mask_slice[i] > 0
-            target_slice[i] = Float32(mask_slice[i])
+            target_slice[i] = label_val
         end
     end
     vol[src_x1:src_x2, src_y1:src_y2, src_z1:src_z2] .= target_slice
 end
 
-function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}, cx::Int, cy::Int, cz::Int; port=5005)
+function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}, points_vol::Union{Nothing, Array{Float32, 3}}, cx::Int, cy::Int, cz::Int; port=5005)
+    start_python_worker(joinpath(@__DIR__, "..", "..", "scripts", "python_worker.py"))
+
     out_dir = "/tmp/medeye3d_inference"
     mkpath(out_dir)
     
     ct_patch = extract_patch(ct_vol, cx, cy, cz, pad_val=-1000.0f0)
     pet_patch = extract_patch(pet_vol, cx, cy, cz, pad_val=0.0f0)
     
-    point_patch = fill(0.0f0, 64, 64, 64)
-    point_patch[33, 33, 33] = 1.0f0 # 1-indexed center
+    point_patch = if points_vol !== nothing && any(points_vol .> 0)
+        p_patch = extract_patch(points_vol, cx, cy, cz, pad_val=0.0f0)
+        if count(p_patch .> 0) == 0
+            p_patch[33, 33, 33] = 1.0f0
+        end
+        p_patch
+    else
+        p_patch = fill(0.0f0, 64, 64, 64)
+        p_patch[33, 33, 33] = 1.0f0
+        p_patch
+    end
     
     ct_path = joinpath(out_dir, "ct_in.nii.gz")
     pet_path = joinpath(out_dir, "pet_in.nii.gz")
@@ -128,31 +139,47 @@ function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32
     end
 end
 
-function run_nninteractive(image_vol::Array{Float32, 3}, cx::Int, cy::Int, cz::Int; port=5005)
+function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}, points_vol::Union{Nothing, Array{Float32, 3}}, cx::Int, cy::Int, cz::Int; port=5005)
+    start_python_worker(joinpath(@__DIR__, "..", "..", "scripts", "python_worker.py"))
+
     out_dir = "/tmp/medeye3d_inference"
     mkpath(out_dir)
     
-    img_patch = extract_patch(image_vol, cx, cy, cz, pad_val=0.0f0)
+    ct_patch = extract_patch(ct_vol, cx, cy, cz, pad_val=-1000.0f0)
+    pet_patch = extract_patch(pet_vol, cx, cy, cz, pad_val=0.0f0)
     
-    point_patch = fill(0.0f0, 64, 64, 64)
-    point_patch[33, 33, 33] = 1.0f0 # 1-indexed center
+    point_patch = if points_vol !== nothing && any(points_vol .> 0)
+        p_patch = extract_patch(points_vol, cx, cy, cz, pad_val=0.0f0)
+        if count(p_patch .> 0) == 0
+            p_patch[33, 33, 33] = 1.0f0
+        end
+        p_patch
+    else
+        p_patch = fill(0.0f0, 64, 64, 64)
+        p_patch[33, 33, 33] = 1.0f0
+        p_patch
+    end
     
-    img_path = joinpath(out_dir, "nn_img_in.nii.gz")
+    ct_path = joinpath(out_dir, "nn_ct_in.nii.gz")
+    pet_path = joinpath(out_dir, "nn_pet_in.nii.gz")
     point_path = joinpath(out_dir, "nn_point_in.nii.gz")
     
     dummy_sp = (1.0, 1.0, 1.0)
     dummy_or = (0.0, 0.0, 0.0)
     dummy_dir = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
     
-    im_img = MedImage(voxel_data=img_patch, spacing=dummy_sp, origin=dummy_or, direction=dummy_dir, image_type=MedImages.MedImage_data_struct.MRI_type, image_subtype=MedImages.MedImage_data_struct.CT_subtype, patient_id="dummy")
+    im_ct = MedImage(voxel_data=ct_patch, spacing=dummy_sp, origin=dummy_or, direction=dummy_dir, image_type=MedImages.MedImage_data_struct.MRI_type, image_subtype=MedImages.MedImage_data_struct.CT_subtype, patient_id="dummy")
+    im_pet = MedImage(voxel_data=pet_patch, spacing=dummy_sp, origin=dummy_or, direction=dummy_dir, image_type=MedImages.MedImage_data_struct.MRI_type, image_subtype=MedImages.MedImage_data_struct.CT_subtype, patient_id="dummy")
     im_pt = MedImage(voxel_data=point_patch, spacing=dummy_sp, origin=dummy_or, direction=dummy_dir, image_type=MedImages.MedImage_data_struct.MRI_type, image_subtype=MedImages.MedImage_data_struct.CT_subtype, patient_id="dummy")
     
-    MedImages.create_nii_from_medimage(im_img, img_path)
+    MedImages.create_nii_from_medimage(im_ct, ct_path)
+    MedImages.create_nii_from_medimage(im_pet, pet_path)
     MedImages.create_nii_from_medimage(im_pt, point_path)
     
     req = Dict(
         "command" => "nninteractive",
-        "image_path" => img_path,
+        "ct_path" => ct_path,
+        "pet_path" => pet_path,
         "point_path" => point_path,
         "out_dir" => out_dir
     )

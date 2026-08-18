@@ -318,6 +318,13 @@ Actor that is able to store a state to keep needed data for proper display
   originValue::Union{Vector{Tuple{Float64,Float64,Float64}},Tuple{Float64,Float64,Float64}} = [(1.0, 1.0, 1.0)]
   supervoxelFields::GlShaderAndBufferFields = GlShaderAndBufferFields()
   supervoxelVertAndInd::Dict{String,Vector} = Dict("supervoxel_vertices" => [], "supervoxel_indices" => [])
+  
+  moveLesionMode::Bool = false
+  movingLesionID::Int = 0
+  movingLesionOriginalCoords::Vector{CartesianIndex{3}} = CartesianIndex{3}[]
+  movingLesionStartTex::Tuple{Float64, Float64} = (0.0, 0.0)
+  movingLesionLastDelta::CartesianIndex{3} = CartesianIndex(0,0,0)
+  movingLesionOriginalBGs::Vector{UInt16} = UInt16[]
   allSupervoxels::Dict{Int, Dict{Int, Dict{String,Any}}} = Dict{Int, Dict{Int, Dict{String, Any}}}()
 end
 

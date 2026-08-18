@@ -200,183 +200,146 @@ end#getThreeDims
 
 
 
-```@doc
-calculates proper dimensions form main quad display on the basis of data stored in CalcDimsStruct
-some of the values calculated will be needed for futher derivations for example those that will  calculate mouse positions
-reurn CalcDimsStruct enriched by new data
-    ```
+"""
+Calculates OpenGL quad vertices (32 floats: 4 vertices * (X, Y, Z, R, G, B, U, V)) for a panel
+in `SingleImage`, `MultiImage` (Compare Mode), or `QuadImage` (4-view layout).
+
+Guarantees exact physical anatomical aspect ratio preservation:
+  ratio_desired = heightToWithRatio * (imageTextureHeight / imageTextureWidth) = (H_mm / W_mm)
+
+Within the panel's allocated NDC bounding box [x_min, x_max] x [y_min, y_max]:
+- If ratio_actual > ratio_desired (panel is taller than image):
+    scale_y = ratio_desired / ratio_actual, scale_x = 1.0 (fills width, centers vertically)
+- If ratio_actual <= ratio_desired (panel is wider than image):
+    scale_x = ratio_actual / ratio_desired, scale_y = 1.0 (fills height, centers horizontally, zero top gap)
+
+Returns enriched CalcDimsStruct.
+"""
 function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMode, imagePos::Int64)::CalcDimsStruct
-  #corrections that will be added on both sides (in case of height correction top and bottom in case of width correction left and right)
-  # to achieve required ratio
+  # 0. If QuadImage and imagePos > 4, panel is hidden (only active as :RightHalf in compare mode)
+  if displayMode == QuadImage && imagePos > 4
+    res = zeros(Float32, 32)
+    return setproperties(calcDimStruct, (
+      mainImageQuadVert = res,
+      mainQuadVertSize  = sizeof(res),
+      widthCorr         = 0.0f0,
+      heightCorr        = 0.0f0,
+      imagePos          = imagePos
+    ))
+  end
 
-  # @info calcDimStruct
-  widthCorr = 0.0
-  heightCorr = 0.0
+  total_w = Float64(calcDimStruct.windowWidth)
+  total_h = Float64(calcDimStruct.windowHeight)
+  frac = Float64(calcDimStruct.fractionOfMainIm)
 
-  #1) we get actual available width by multiplying fraction of main image by total width
-  #this gets halved , times 0.5 only in the case of multi image display
+  local panel_w::Float64
+  local panel_h::Float64
+  local x_min::Float64, x_max::Float64
+  local y_min::Float64, y_max::Float64
 
-  corrected_width = displayMode == QuadImage ? Float64(calcDimStruct.windowWidth) : (calcDimStruct.fractionOfMainIm * calcDimStruct.windowWidth)
-  #2) we get the width of a texel by dividing the corrected width by the width of the size of associated array; simmilar with size
-  texel_width = corrected_width / calcDimStruct.imageTextureWidth
-  texel_height = calcDimStruct.windowHeight / calcDimStruct.imageTextureHeight
-  #3) we get the ratio of the width to height of the texel
-  texel_ratio = texel_height / texel_width
+  ndc_right_edge = -1.0 + 2.0 * frac
 
+  if displayMode == SingleImage
+    panel_w = total_w * frac
+    panel_h = total_h
+    x_min = -1.0
+    x_max = ndc_right_edge
+    y_min = -1.0
+    y_max = 1.0
+  elseif displayMode == MultiImage
+    # 2 side-by-side panels
+    panel_w = (total_w * frac) / 2.0
+    panel_h = total_h
+    ndc_mid_x = -1.0 + frac
+    if imagePos == 1  # Left Panel
+      x_min = -1.0
+      x_max = ndc_mid_x
+    else              # Right Panel
+      x_min = ndc_mid_x
+      x_max = ndc_right_edge
+    end
+    y_min = -1.0
+    y_max = 1.0
+  else # QuadImage
+    # 4 quadrants: Top-Left (1), Top-Right (2), Bottom-Left (3), Bottom-Right (4)
+    panel_w = (total_w * frac) / 2.0
+    panel_h = total_h / 2.0
+    ndc_mid_x = -1.0 + frac
+    if imagePos == 1 || imagePos == 3  # Left column
+      x_min = -1.0
+      x_max = ndc_mid_x
+    else                              # Right column
+      x_min = ndc_mid_x
+      x_max = ndc_right_edge
+    end
+    if imagePos == 1 || imagePos == 2  # Top row
+      y_min = 0.0
+      y_max = 1.0
+    else                              # Bottom row
+      y_min = -1.0
+      y_max = 0.0
+    end
+  end
 
-  # @info "corrected_width" corrected_width
-  # @info "texel_ratio" texel_ratio
+  # 2. Desired anatomical physical aspect ratio (height_mm / width_mm)
+  tex_w = max(1.0, Float64(calcDimStruct.imageTextureWidth))
+  tex_h = max(1.0, Float64(calcDimStruct.imageTextureHeight))
+  ratio_desired = Float64(calcDimStruct.heightToWithRatio) * (tex_h / tex_w)
 
-  ratio_desired = calcDimStruct.heightToWithRatio * (calcDimStruct.imageTextureHeight / calcDimStruct.imageTextureWidth)
-  ratio_actual = calcDimStruct.windowHeight / corrected_width
+  # 3. Actual aspect ratio of the allocated panel (pixel height / pixel width)
+  ratio_actual = panel_h / max(1.0, panel_w)
+
+  # 4. Aspect-ratio preserving scale factors within the panel
+  local scale_x::Float64, scale_y::Float64
+  local widthCorr::Float64, heightCorr::Float64
 
   if ratio_actual > ratio_desired
-    # Window is too tall compared to the image. Shrink height.
-    heightCorr = 1.0 - (ratio_desired / ratio_actual)
+    scale_y = ratio_desired / ratio_actual
+    scale_x = 1.0
+    heightCorr = 1.0 - scale_y
     widthCorr = 0.0
   else
-    # Window is too wide compared to the image. Shrink width.
-    widthCorr = 1.0 - (ratio_actual / ratio_desired)
+    scale_x = ratio_actual / ratio_desired
+    scale_y = 1.0
+    widthCorr = 1.0 - scale_x
     heightCorr = 0.0
   end
 
-  # Calculate the new dimensions
-  new_height = calcDimStruct.windowHeight * (1.0 - heightCorr)
-  new_width = corrected_width * (1.0 - widthCorr)
-  recalc_texel_ratio = (new_height / calcDimStruct.imageTextureHeight) / (new_width / calcDimStruct.imageTextureWidth)
+  # 5. Compute NDC coordinates centered in panel [x_min, x_max] x [y_min, y_max]
+  x_center = (x_min + x_max) / 2.0
+  half_span_x = ((x_max - x_min) / 2.0) * scale_x
+  left_x  = Float32(x_center - half_span_x)
+  right_x = Float32(x_center + half_span_x)
 
+  y_center = (y_min + y_max) / 2.0
+  half_span_y = ((y_max - y_min) / 2.0) * scale_y
+  bottom_y = Float32(y_center - half_span_y)
+  top_y    = Float32(y_center + half_span_y)
 
+  # 6. Build 32-element OpenGL vertex array (4 vertices * 8 floats)
+  # Layout: X, Y, Z, R, G, B, U, V
+  res = Float32[
+    right_x, top_y,    0.0f0, 1.0f0, 0.0f0, 0.0f0, 1.0f0, 1.0f0,  # top right
+    right_x, bottom_y, 0.0f0, 0.0f0, 1.0f0, 0.0f0, 1.0f0, 0.0f0,  # bottom right
+    left_x,  bottom_y, 0.0f0, 0.0f0, 0.0f0, 1.0f0, 0.0f0, 0.0f0,  # bottom left
+    left_x,  top_y,    0.0f0, 1.0f0, 1.0f0, 0.0f0, 0.0f0, 1.0f0   # top left
+  ]
 
-  correCtedWindowQuadHeight = calcDimStruct.avWindHeightForMain
-  correCtedWindowQuadWidth = calcDimStruct.avWindWidtForMain
-  if (calcDimStruct.avMainImRatio > calcDimStruct.heightToWithRatio)
-    #if we have to big height to width ratio we need to reduce size of acual quad from top and bottom
-    # we know that we would not need to change width  hence we will use the width to calculate the quad height
-    correCtedWindowQuadHeight = calcDimStruct.heightToWithRatio * calcDimStruct.avWindWidtForMain
-  end# if to heigh
-  if (calcDimStruct.avMainImRatio < calcDimStruct.heightToWithRatio)
-    #if we have to low height to width ratio we need to reduce size of acual quad from left and right
-    # we know that we would not need to change height  hence we will use height to calculate the quad height
-    correCtedWindowQuadWidth = calcDimStruct.avWindHeightForMain / calcDimStruct.heightToWithRatio
-  end# if to wide
+  windowWidthCorr = Int32(round((widthCorr / 2.0) * panel_w))
+  windowHeightCorr = Int32(round((heightCorr / 2.0) * panel_h))
 
-
-
-  # # now we still need ratio of the resulting quad window size after corrections relative to  total window size
-  quadToTotalHeightRatio = correCtedWindowQuadHeight / calcDimStruct.windowHeight
-  quadToTotalWidthRatio = correCtedWindowQuadWidth / calcDimStruct.windowWidth
-
-
-  correctedWidthForTextAccounting = displayMode == SingleImage ? (-1 + calcDimStruct.fractionOfMainIm * 2) : (-1 + (corrected_width / calcDimStruct.windowWidth) * 2)
-  #as in OpenGl we start from -1 and end at 1 those ratios needs to be doubled in order to translate them in the OPEN Gl coordinate system yet we will achieve this doubling by just adding the corrections from both sides
-  #hence we do not need  to multiply by 2 becose we get from -1 to 1 so total is 2
-  # @info "texel_width $(texel_width) texel_height $(texel_height) texel_ratio  $(texel_ratio) calcDimStruct.heightToWithRatio $(calcDimStruct.heightToWithRatio)  isWidthToBeCorrected $(isWidthToBeCorrected) isHeightToBeCorrected $(isHeightToBeCorrected) calcDimStruct.imageTextureWidth $(calcDimStruct.imageTextureWidth) calcDimStruct.imageTextureHeight $(calcDimStruct.imageTextureHeight) "
-
-  # @info "correctedWidthForTextAccounting" correctedWidthForTextAccounting
-
-  res = Float32.([
-    # positions                  // colors           // texture coords
-    correctedWidthForTextAccounting - widthCorr, 1.0 - heightCorr, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0,   # top right
-    correctedWidthForTextAccounting - widthCorr, -1.0 + heightCorr, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0,   # bottom right
-    -1.0 + widthCorr, -1.0 + heightCorr, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,   # bottom left
-    -1.0 + widthCorr, 1.0 - heightCorr, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0    # top left
-  ])
-
-
-  normalCorrectedTextAccounting = (correctedWidthForTextAccounting + 1) / 2  #converion from opengl to normal
-  normalCorrectedTextAccounting /= 2 #havling the available width
-  normalCorrectedTextAccounting = (normalCorrectedTextAccounting * 2) - 1 #conversion from normal to opengl
-
-
-  textBeginning = (normalCorrectedTextAccounting + 1) / 2 #reverse direction from opengL to normal coordinate
-  textBeginning *= 2 #in normal coordinate
-  textBeginning = ((textBeginning) * 2) - 1 # conversion back to openGL coordinate system from normal coordinate system
-
-  # @info textBeginning
-  # @info "Original width corr" widthCorr
-
-  if displayMode == MultiImage
-    widthCorr /= 4
-    heightCorr /= 2
-
-    # @info widthCorr
-    if imagePos == 1    #LEFT IMAGE
-      res[1] = normalCorrectedTextAccounting - widthCorr # top right
-      res[9] = normalCorrectedTextAccounting - widthCorr# bottom right
-      res[17] = -1 + widthCorr# bottom left
-      res[25] = -1 + widthCorr#top left
-    end
-
-    if imagePos > 1 #Right Image since the index starts from 1, which is left image
-      # res[1] = abs(correctedWidthForTextAccounting * 3) # top right
-      # res[9] = abs(correctedWidthForTextAccounting * 3) # bottom right
-
-      res[1] = textBeginning - widthCorr # top right
-      res[9] = textBeginning - widthCorr# bottom right
-      res[17] = normalCorrectedTextAccounting + widthCorr# bottom left
-      res[25] = normalCorrectedTextAccounting + widthCorr# top left
-    end
-  elseif displayMode == QuadImage
-    if imagePos > 4
-      # Panel 5+ is hidden by default in QuadImage mode (only active as :RightHalf in compare mode)
-      res = zeros(Float32, length(res))
-      return setproperties(calcDimStruct, (
-        mainImageQuadVert=res,
-        mainQuadVertSize=sizeof(res),
-        widthCorr=Float32(widthCorr),
-        heightCorr=Float32(heightCorr),
-        imagePos=imagePos
-      ))
-    end
-    
-    # For QuadImage, each panel takes exactly one quadrant with aspect ratio padding
-    wc = widthCorr / 2.0
-    hc = heightCorr / 2.0
-    
-    # y coordinates (indices: 2=top right, 10=bottom right, 18=bottom left, 26=top left)
-    if imagePos == 1 || imagePos == 2 # Top half (Y from 0.0 to 1.0)
-      res[2] = 1.0f0 - hc
-      res[10] = 0.0f0 + hc
-      res[18] = 0.0f0 + hc
-      res[26] = 1.0f0 - hc
-    else # Bottom half (Y from -1.0 to 0.0)
-      res[2] = 0.0f0 - hc
-      res[10] = -1.0f0 + hc
-      res[18] = -1.0f0 + hc
-      res[26] = 0.0f0 - hc
-    end
-
-    # x coordinates (indices: 1=top right, 9=bottom right, 17=bottom left, 25=top left)
-    if imagePos == 1 || imagePos == 3 # Left half (X from -1.0 to 0.0)
-      res[1] = 0.0f0 - wc
-      res[9] = 0.0f0 - wc
-      res[17] = -1.0f0 + wc
-      res[25] = -1.0f0 + wc
-    else # Right half (X from 0.0 to 1.0)
-      res[1] = 1.0f0 - wc
-      res[9] = 1.0f0 - wc
-      res[17] = 0.0f0 + wc
-      res[25] = 0.0f0 + wc
-    end
-  end
-
-  # @info res[1], res[9], res[17], res[25]
-
-
-
-  # @info "texel_ratio" texel_ratio
-  # @info "recalc_texel_ratio" recalc_texel_ratio
-  # @info "height_to_withratio" calcDimStruct.heightToWithRatio
-
-  # @info "here width" corrected_width
-
-  windowWidthCorr = Int32(round((widthCorr / 2) * calcDimStruct.windowWidth))
-  windowHeightCorr = Int32(round((heightCorr / 2) * calcDimStruct.windowHeight))
-
-
-  return setproperties(calcDimStruct, (correCtedWindowQuadHeight=Int32(round(correCtedWindowQuadHeight)), correCtedWindowQuadWidth=Int32(round(correCtedWindowQuadWidth)), quadToTotalHeightRatio=quadToTotalHeightRatio, quadToTotalWidthRatio=quadToTotalWidthRatio, widthCorr=widthCorr, heightCorr=heightCorr, mainImageQuadVert=res, mainQuadVertSize=sizeof(res), windowWidthCorr=windowWidthCorr, windowHeightCorr=windowHeightCorr, corrected_width=corrected_width
+  return setproperties(calcDimStruct, (
+    widthCorr                 = Float32(widthCorr),
+    heightCorr                = Float32(heightCorr),
+    mainImageQuadVert         = res,
+    mainQuadVertSize          = sizeof(res),
+    windowWidthCorr           = windowWidthCorr,
+    windowHeightCorr          = windowHeightCorr,
+    corrected_width           = panel_w,
+    correCtedWindowQuadHeight = Int32(round(panel_h * scale_y)),
+    correCtedWindowQuadWidth  = Int32(round(panel_w * scale_x)),
+    imagePos                  = imagePos
   ))
-
 end #getMainVerticies
 
 

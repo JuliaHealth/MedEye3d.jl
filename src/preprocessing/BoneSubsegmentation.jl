@@ -24,10 +24,10 @@ Kernel to evaluate Euclidean distance from lesion surface and apply bone surface
     max_dist_mm::Float32
 )
     I = @index(Global, Cartesian)
-    iz, iy, ix = I[1], I[2], I[3]
+    ix, iy, iz = I[1], I[2], I[3]
     
-    # Only process cortical bone voxels that are NOT inside the lesion
-    if bone_cortical[iz, iy, ix] && !lesion_mask[iz, iy, ix]
+    # Only process cortical bone voxels that are strictly within bone and NOT inside the lesion
+    if bone_cortical[ix, iy, iz] && !lesion_mask[ix, iy, iz]
         min_d2 = Float32(1e9)
         max_d2 = max_dist_mm * max_dist_mm
         
@@ -47,12 +47,12 @@ Kernel to evaluate Euclidean distance from lesion surface and apply bone surface
         end
         
         if min_d2 <= max_d2
-            surface_out[iz, iy, ix] = true
+            surface_out[ix, iy, iz] = true
         else
-            surface_out[iz, iy, ix] = false
+            surface_out[ix, iy, iz] = false
         end
     else
-        surface_out[iz, iy, ix] = false
+        surface_out[ix, iy, iz] = false
     end
 end
 
@@ -72,20 +72,20 @@ Kernel to extract marrow voxels within spherical radius R_L around marrow centro
     radius_mm::Float32
 )
     I = @index(Global, Cartesian)
-    iz, iy, ix = I[1], I[2], I[3]
+    ix, iy, iz = I[1], I[2], I[3]
     
-    if bone_marrow[iz, iy, ix] && !lesion_mask[iz, iy, ix]
+    if bone_marrow[ix, iy, iz] && !lesion_mask[ix, iy, iz]
         dx = (Float32(ix) - cx) * sp_x
         dy = (Float32(iy) - cy) * sp_y
         dz = (Float32(iz) - cz) * sp_z
         d2 = dx*dx + dy*dy + dz*dz
         if d2 <= radius_mm * radius_mm
-            marrow_out[iz, iy, ix] = true
+            marrow_out[ix, iy, iz] = true
         else
-            marrow_out[iz, iy, ix] = false
+            marrow_out[ix, iy, iz] = false
         end
     else
-        marrow_out[iz, iy, ix] = false
+        marrow_out[ix, iy, iz] = false
     end
 end
 
@@ -104,11 +104,11 @@ function generate_bone_subsegments(
     bone_vol::AbstractArray{Float32, 3},
     spacing::Tuple{Float64, Float64, Float64},
     lesion_id::Int;
-    max_surface_dist_mm::Float64 = 30.0
+    max_surface_dist_mm::Float64 = 25.0
 )
-    dims = size(mask_vol)
-    surface_mask = zeros(Bool, dims)
-    marrow_mask = zeros(Bool, dims)
+    nx, ny, nz = size(mask_vol)
+    surface_mask = zeros(Bool, nx, ny, nz)
+    marrow_mask = zeros(Bool, nx, ny, nz)
     
     # 1. Find lesion coordinates
     lesion_indices = findall(mask_vol .== Float32(lesion_id))
@@ -122,36 +122,25 @@ function generate_bone_subsegments(
     margin_y = ceil(Int, 30.0 / sp_y)
     margin_z = ceil(Int, 30.0 / sp_z)
     
-    xs = [idx[3] for idx in lesion_indices]
+    xs = [idx[1] for idx in lesion_indices]
     ys = [idx[2] for idx in lesion_indices]
-    zs = [idx[1] for idx in lesion_indices]
+    zs = [idx[3] for idx in lesion_indices]
     
-    z_min = max(1, minimum(zs) - margin_z)
-    z_max = min(dims[1], maximum(zs) + margin_z)
-    y_min = max(1, minimum(ys) - margin_y)
-    y_max = min(dims[2], maximum(ys) + margin_y)
     x_min = max(1, minimum(xs) - margin_x)
-    x_max = min(dims[3], maximum(xs) + margin_x)
+    x_max = min(nx, maximum(xs) + margin_x)
+    y_min = max(1, minimum(ys) - margin_y)
+    y_max = min(ny, maximum(ys) + margin_y)
+    z_min = max(1, minimum(zs) - margin_z)
+    z_max = min(nz, maximum(zs) + margin_z)
     
-    crop_lesion = Array{Bool}(mask_vol[z_min:z_max, y_min:y_max, x_min:x_max] .== Float32(lesion_id))
-    crop_bone = bone_vol[z_min:z_max, y_min:y_max, x_min:x_max]
+    crop_lesion = Array{Bool}(mask_vol[x_min:x_max, y_min:y_max, z_min:z_max] .== Float32(lesion_id))
+    crop_bone = bone_vol[x_min:x_max, y_min:y_max, z_min:z_max]
     
     crop_dims = size(crop_lesion)
     
-    # Distinguish cortical vs marrow
-    # If bone_vol has multiple labels: 2=cortical, 1=marrow.
-    # Otherwise estimate cortical = boundary of bone, marrow = interior.
-    has_subseg_labels = any(crop_bone .== 2.0f0) && any(crop_bone .== 1.0f0)
-    if has_subseg_labels
-        crop_cortical = Array{Bool}(crop_bone .== 2.0f0)
-        crop_marrow = Array{Bool}(crop_bone .== 1.0f0)
-    else
-        # Approximate: bone is bone_vol > 0
-        crop_bone_bool = Array{Bool}(crop_bone .> 0.0f0)
-        # Inner marrow vs outer cortical
-        crop_cortical = copy(crop_bone_bool)
-        crop_marrow = copy(crop_bone_bool)
-    end
+    crop_bone_bool = Array{Bool}(crop_bone .> 0.0f0)
+    crop_cortical = copy(crop_bone_bool)
+    crop_marrow = copy(crop_bone_bool)
     
     # Extract sub-sampled lesion border coordinates for KernelAbstractions kernel
     crop_lesion_pts = findall(crop_lesion)
@@ -159,14 +148,14 @@ function generate_bone_subsegments(
         return surface_mask, marrow_mask
     end
     
-    # Subsample if too dense to keep kernel super fast (< 500 boundary points)
+    # Subsample if too dense to keep kernel fast (< 500 boundary points)
     step = max(1, length(crop_lesion_pts) ÷ 500)
     sampled_pts = crop_lesion_pts[1:step:end]
     num_pts = length(sampled_pts)
     
-    lx = Int32[p[3] for p in sampled_pts]
+    lx = Int32[p[1] for p in sampled_pts]
     ly = Int32[p[2] for p in sampled_pts]
-    lz = Int32[p[1] for p in sampled_pts]
+    lz = Int32[p[3] for p in sampled_pts]
 
     # Convert to GPU arrays if CUDA is available, on device 1
     has_cuda = false
@@ -178,7 +167,8 @@ function generate_bone_subsegments(
     if has_cuda
         try
             CUDA.device!(1)
-        catch
+        catch e
+            @warn "Failed to set CUDA device to 1: $e"
         end
         crop_surface = CUDA.zeros(Bool, crop_dims)
         crop_cortical_gpu = CUDA.CuArray(crop_cortical)
@@ -213,7 +203,7 @@ function generate_bone_subsegments(
     # 3. Calculate Marrow sphere radius R_L and centroid
     voxel_vol = sp_x * sp_y * sp_z
     lesion_vol_mm3 = length(lesion_indices) * voxel_vol
-    R_L = max(3.0f0, Float32((3.0 * lesion_vol_mm3 / (4.0 * pi))^(1.0 / 3.0)))
+    R_L = max(4.0f0, Float32((3.0 * lesion_vol_mm3 / (4.0 * pi))^(1.0 / 3.0)))
     
     # Find closest marrow point to lesion centroid
     lesion_cx = mean(xs) - x_min + 1
@@ -234,9 +224,9 @@ function generate_bone_subsegments(
         min_d = 1e9
         best_pt = marrow_pts[1]
         for p in marrow_pts
-            dx = (Float32(p[3]) - lesion_cx) * sp_x
+            dx = (Float32(p[1]) - lesion_cx) * sp_x
             dy = (Float32(p[2]) - lesion_cy) * sp_y
-            dz = (Float32(p[1]) - lesion_cz) * sp_z
+            dz = (Float32(p[3]) - lesion_cz) * sp_z
             d = dx*dx + dy*dy + dz*dz
             if d < min_d
                 min_d = d
@@ -244,9 +234,9 @@ function generate_bone_subsegments(
             end
         end
         
-        m_cz = Float32(best_pt[1])
+        m_cx = Float32(best_pt[1])
         m_cy = Float32(best_pt[2])
-        m_cx = Float32(best_pt[3])
+        m_cz = Float32(best_pt[3])
         
         kernel_marrow = kernel_bone_marrow!(backend)
         kernel_marrow(
@@ -265,14 +255,13 @@ function generate_bone_subsegments(
     crop_surface_cpu = has_cuda ? Array(crop_surface) : crop_surface
     crop_marrow_res_cpu = has_cuda ? Array(crop_marrow_res) : crop_marrow_res
     
-    # Discard if < 8 voxels
-    if count(crop_surface_cpu) >= 8
-        surface_mask[z_min:z_max, y_min:y_max, x_min:x_max] .= crop_surface_cpu
-    end
+    # STRICT BONE CONSTRAINT: Enforce bone boundary intersection so no voxels leak outside bone
+    surface_mask[x_min:x_max, y_min:y_max, z_min:z_max] .= crop_surface_cpu .& crop_bone_bool
+    marrow_mask[x_min:x_max, y_min:y_max, z_min:z_max] .= crop_marrow_res_cpu .& crop_bone_bool
     
-    if count(crop_marrow_res_cpu) >= 8
-        marrow_mask[z_min:z_max, y_min:y_max, x_min:x_max] .= crop_marrow_res_cpu
-    end
+    # Global safety check
+    surface_mask[bone_vol .<= 0] .= false
+    marrow_mask[bone_vol .<= 0] .= false
     
     return surface_mask, marrow_mask
 end
