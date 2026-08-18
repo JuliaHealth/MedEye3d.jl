@@ -26,7 +26,9 @@ import run_inference
 run_inference.run_inference('$(ct_patch_path)', '$(pet_patch_path)', '$(point_path)', '$(checkpoint)', '$(out_dir)')
 """
     
-    cmd = `$(pyenv) -c $(cmd_str)`
+    env = copy(ENV)
+    env["CUDA_VISIBLE_DEVICES"] = "1"
+    cmd = setenv(`$(pyenv) -c $(cmd_str)`, env)
     @info "Running HELPNet inference..." cmd
     run(cmd)
     
@@ -48,7 +50,9 @@ function run_skellytour_segmentation(ct_path::String, out_dir::String; pyenv=DEF
         skelly_bin = "skellytour"
     end
     
-    cmd = `$(skelly_bin) -i $(ct_path) -o $(out_dir) -m low --subseg --fast --overwrite`
+    env = copy(ENV)
+    env["CUDA_VISIBLE_DEVICES"] = "1"
+    cmd = setenv(`$(skelly_bin) -i $(ct_path) -o $(out_dir) -m low --subseg --fast --overwrite`, env)
     @info "Running Skellytour bone subsegmentation..." cmd
     run(cmd)
     return out_dir
@@ -61,7 +65,10 @@ Extracts cortical bone surface and bone marrow subsegment fragments around a bon
 """
 function run_bone_subsegmentation(lesion_path::String, bone_path::String, out_surface::String, out_marrow::String; pyenv=DEFAULT_PYENV)
     script_path = joinpath(@__DIR__, "..", "..", "scripts", "bone_subsegmentation.py")
-    cmd = `$(pyenv) $(script_path) --lesion $(lesion_path) --bone $(bone_path) --out-surface $(out_surface) --out-marrow $(out_marrow)`
+    
+    env = copy(ENV)
+    env["CUDA_VISIBLE_DEVICES"] = "1"
+    cmd = setenv(`$(pyenv) $(script_path) --lesion $(lesion_path) --bone $(bone_path) --out-surface $(out_surface) --out-marrow $(out_marrow)`, env)
     @info "Running bone subsegmentation extraction..." cmd
     run(cmd)
     return out_surface, out_marrow

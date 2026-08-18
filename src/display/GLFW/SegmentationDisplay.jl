@@ -145,6 +145,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::CompareTimePointsEvent) = 
 on_next!(stateObjects::Vector{StateDataFields}, data::ShowSingleLesionEvent) = reactToShowSingleLesion(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::WindowingEvent) = reactToWindowing(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::PaintValEvent) = reactToPaintVal(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::ChangeBrushSizeEvent) = reactToChangeBrushSize(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SyncLesionEvent) = reactToSyncLesion(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ChangeTimePointEvent) = reactToChangeTimePoint(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ToggleLesionEvent) = reactToToggleLesion(data, stateObjects)
@@ -162,6 +163,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::SaveMRBEvent) = reactToSav
 on_next!(stateObjects::Vector{StateDataFields}, data::CloseWindowEvent) = nothing
 on_next!(stateObjects::Vector{StateDataFields}, data::ResizeWindowEvent) = reactToResizeWindow(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SetWindowTitleEvent) = reactToSetWindowTitle(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::ToggleMoveLesionModeEvent) = reactToToggleMoveLesionMode(data, stateObjects)
 on_error!(stateObjects::Vector{StateDataFields}, err) = error(err)
 on_complete!(stateObjects::Vector{StateDataFields}) = ""
 

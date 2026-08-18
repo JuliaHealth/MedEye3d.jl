@@ -4,7 +4,7 @@ export WindowingEvent, PaintValEvent, SyncLesionEvent
 export ChangeTimePointEvent, ToggleLesionEvent, RefreshListEvent
 export AddAutoPetEvent, SyncMissingEvent, GenManualEvent
 export MapLinkEvent, AutoRunPreprocessEvent, RunPreprocessEvent, ShowBoneMaskEvent, ShowMaskLayerEvent, SaveMRBEvent
-export CloseWindowEvent, ResizeWindowEvent, SetWindowTitleEvent
+export CloseWindowEvent, ResizeWindowEvent, SetWindowTitleEvent, ChangeBrushSizeEvent, ToggleMoveLesionModeEvent
 struct ChangePlaneEvent
     plane :: Symbol # :Axial, :Coronal, :Sagittal
 end
@@ -22,8 +22,11 @@ struct ScrollZoomEvent
 end
 
 struct WindowingEvent
-    min_val :: Float32
-    max_val :: Float32
+    modality :: String
+    min_val  :: Float32
+    max_val  :: Float32
+    WindowingEvent(min_val::Real, max_val::Real) = new("CT", Float32(min_val), Float32(max_val))
+    WindowingEvent(modality::String, min_val::Real, max_val::Real) = new(modality, Float32(min_val), Float32(max_val))
 end
 
 struct PaintValEvent
@@ -74,6 +77,13 @@ struct ResizeWindowEvent
 end
 struct SetWindowTitleEvent
     title :: String
+end
+
+struct ChangeBrushSizeEvent
+    size :: Int
+end
+struct ToggleMoveLesionModeEvent
+    active :: Bool
 end
 
 end

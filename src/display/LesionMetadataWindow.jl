@@ -368,6 +368,40 @@ function create_metadata_window(
     active_lesion_display = Observable{String}("Active Lesion: (none)")
     Label(g[nav_info_r, 1:4], active_lesion_display, fontsize = 12, color = ACCENT, halign = :center, tellwidth = false)
 
+    # Prominent Lesion & Bone Subsegments Layer Visibility Controls
+    vis_row = nr!()
+    vis_lesion_active = Ref(true)
+    vis_surface_active = Ref(true)
+    vis_marrow_active = Ref(true)
+    
+    btn_vis_lesion  = Button(g[vis_row, 1:2], label = "Lesion: ON", buttoncolor = GRN, labelcolor = TXT, fontsize = 11)
+    btn_vis_surface = Button(g[vis_row, 3],   label = "Bone Surf: ON", buttoncolor = RGBf(0.0, 0.75, 0.75), labelcolor = TXT, fontsize = 10)
+    btn_vis_marrow  = Button(g[vis_row, 4],   label = "Marrow: ON", buttoncolor = RGBf(0.75, 0.75, 0.1), labelcolor = TXT, fontsize = 10)
+
+    on(btn_vis_lesion.clicks) do _
+        vis_lesion_active[] = !vis_lesion_active[]
+        btn_vis_lesion.label[] = vis_lesion_active[] ? "Lesion: ON" : "Lesion: OFF"
+        btn_vis_lesion.buttoncolor[] = vis_lesion_active[] ? GRN : BG_PNL
+        @info "BTN_VIS_LESION clicked: $(vis_lesion_active[])"
+        put!(channel, ShowMaskLayerEvent(1, vis_lesion_active[]))
+    end
+    
+    on(btn_vis_surface.clicks) do _
+        vis_surface_active[] = !vis_surface_active[]
+        btn_vis_surface.label[] = vis_surface_active[] ? "Bone Surf: ON" : "Bone Surf: OFF"
+        btn_vis_surface.buttoncolor[] = vis_surface_active[] ? RGBf(0.0, 0.75, 0.75) : BG_PNL
+        @info "BTN_VIS_SURFACE clicked: $(vis_surface_active[])"
+        put!(channel, ShowMaskLayerEvent(2, vis_surface_active[]))
+    end
+    
+    on(btn_vis_marrow.clicks) do _
+        vis_marrow_active[] = !vis_marrow_active[]
+        btn_vis_marrow.label[] = vis_marrow_active[] ? "Marrow: ON" : "Marrow: OFF"
+        btn_vis_marrow.buttoncolor[] = vis_marrow_active[] ? RGBf(0.75, 0.75, 0.1) : BG_PNL
+        @info "BTN_VIS_MARROW clicked: $(vis_marrow_active[])"
+        put!(channel, ShowMaskLayerEvent(3, vis_marrow_active[]))
+    end
+
     is_syncing_selection = Ref(false)
 
     on(les_menu.selection) do sel
@@ -435,6 +469,9 @@ function create_metadata_window(
         btn_type_bone.buttoncolor[]     = (t == "Bone Meta") ? ACCENT : BG_PNL
         btn_type_organ.buttoncolor[]    = (t == "Organ Meta") ? ACCENT : BG_PNL
         btn_type_ln.buttoncolor[]       = (t == "Lymph Node" || t == "Lymph Node Meta") ? ACCENT : BG_PNL
+        if t == "Bone Meta"
+            put!(channel, ShowBoneMaskEvent(true))
+        end
     end
     
     on(btn_type_prostate.clicks) do _; update_type_buttons("Prostate") end
@@ -448,8 +485,13 @@ function create_metadata_window(
     tb_base_anat = Textbox(g[ba_r, 2:3], placeholder = "e.g. L3 Vertebra, Right Rib 4...", fontsize = 11)
     menu_side = Menu(g[ba_r, 4], options = ["", "Right", "Left", "NA"], default = "", fontsize = 10)
     
+    # Anatomical Relations
+    rel_r = nr!()
+    Label(g[rel_r, 1], "Relation:", fontsize = 11, font = :bold, color = SUBTXT, halign = :right)
+    tb_rel_base = Textbox(g[rel_r, 2:3], placeholder = "e.g. Aorta", fontsize = 11)
+    menu_rel = Menu(g[rel_r, 4], options = ["", "Surrounded By", "Lateral To", "Medial To", "Anterior To", "Posterior To", "Superior To", "Inferior To", "Between", "Inside"], default = "", fontsize = 10)
+    
     end_section!(sec_type)
-
     # ── Viewport Controls ────────────────────────────────────────────────────
     sec_view = begin_section!("Viewport & Windowing")
     
@@ -576,6 +618,7 @@ function create_metadata_window(
     is_syncing_ct = Ref(false)
     function apply_ct_win(min_v::Real, max_v::Real)
         is_syncing_ct[] && return
+        is_syncing_selection[] && return
         is_syncing_ct[] = true
         try
             tb_ct_min.stored_string[] = string(round(min_v, digits=1))
@@ -605,6 +648,7 @@ function create_metadata_window(
     end
     
     function apply_ct_from_text()
+        is_syncing_selection[] && return
         s_min = !isempty(tb_ct_min.displayed_string[]) ? tb_ct_min.displayed_string[] : tb_ct_min.stored_string[]
         s_max = !isempty(tb_ct_max.displayed_string[]) ? tb_ct_max.displayed_string[] : tb_ct_max.stored_string[]
         v_min = tryparse(Float32, _safe_strip(s_min))
@@ -642,6 +686,7 @@ function create_metadata_window(
     is_syncing_pet = Ref(false)
     function apply_pet_win(min_v::Real, max_v::Real)
         is_syncing_pet[] && return
+        is_syncing_selection[] && return
         is_syncing_pet[] = true
         try
             tb_pet_min.stored_string[] = string(round(min_v, digits=1))
@@ -671,6 +716,7 @@ function create_metadata_window(
     end
     
     function apply_pet_from_text()
+        is_syncing_selection[] && return
         s_min = !isempty(tb_pet_min.displayed_string[]) ? tb_pet_min.displayed_string[] : tb_pet_min.stored_string[]
         s_max = !isempty(tb_pet_max.displayed_string[]) ? tb_pet_max.displayed_string[] : tb_pet_max.stored_string[]
         v_min = tryparse(Float32, _safe_strip(s_min))
@@ -708,6 +754,7 @@ function create_metadata_window(
     is_syncing_spect = Ref(false)
     function apply_spect_win(min_v::Real, max_v::Real)
         is_syncing_spect[] && return
+        is_syncing_selection[] && return
         is_syncing_spect[] = true
         try
             tb_spect_min.stored_string[] = string(round(min_v, digits=1))
@@ -989,7 +1036,7 @@ end_section!(sec_win)
 
     # Auto-hide metadata section in Compare Volumes mode
     on(btn_cv.clicks) do _
-        for r_idx in all_metadata_rows
+        for r_idx in vcat(all_metadata_rows, sec_type.rows)
             if cv_active[]
                 set_row_visible!(r_idx, false)
             else
@@ -1086,10 +1133,72 @@ end_section!(sec_win)
 
     # ── Segmentation Mini Manager ────────────────────────────────────────────
     sec_seg = begin_section!("Segmentation Mini Manager")
+    btn_new_lesion = Button(g[nr!(), 1:4], label = "Create New Empty Lesion", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 11)
+    on(btn_new_lesion.clicks) do _
+        max_id = 0
+        for opt in lesion_ids[]
+            m = match(r"^(\d+)", opt)
+            if m !== nothing
+                max_id = max(max_id, parse(Int, m.match))
+            end
+        end
+        for k in keys(lesion_db[])
+            m = match(r"^(\d+)", k)
+            if m !== nothing
+                max_id = max(max_id, parse(Int, m.match))
+            end
+        end
+        new_id = max_id + 1
+        new_name = "$(new_id) - New Lesion"
+        
+        db = copy(lesion_db[])
+        db[new_name] = Dict{String, Any}()
+        lesion_db[] = db
+        
+        opts = copy(lesion_ids[])
+        push!(opts, new_name)
+        
+        is_syncing_selection[] = true
+        try
+            lesion_ids[] = opts
+            les_menu.options[] = opts
+            les_menu.selection[] = new_name
+            les_menu.i_selected[] = length(opts)
+        finally
+            is_syncing_selection[] = false
+        end
+        active_lesion_id[] = new_name
+        
+        # Auto-switch to paint mode
+        current_paint_mode[] = :paint
+        btn_paint.buttoncolor[] = GRN
+        btn_erase.buttoncolor[] = BG_PNL
+        btn_view_mode.buttoncolor[] = BG_PNL
+        put!(channel, PaintValEvent(new_id, true))
+        put!(channel, SyncLesionEvent(new_id))
+    end
+
+    brush_r = nr!()
+    Label(g[brush_r, 1], "Brush Size:", halign=:left, fontsize=11, color=TXT)
+    slider_brush = Slider(g[brush_r, 2:4], range = 1:20, startvalue = 1)
+    on(slider_brush.value) do val
+        put!(channel, ChangeBrushSizeEvent(val))
+    end
+
     pe_r = nr!()
     btn_paint     = Button(g[pe_r, 1], label = "Paint", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
     btn_erase     = Button(g[pe_r, 2], label = "Erase", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
     btn_view_mode = Button(g[pe_r, 3:4], label = "View (No Paint)", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 11)
+    
+    move_r = nr!()
+    btn_move_lesion = Button(g[move_r, 1:4], label = "Move Lesion", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
+    
+    move_lesion_active = Ref(false)
+    on(btn_move_lesion.clicks) do _
+        move_lesion_active[] = !move_lesion_active[]
+        btn_move_lesion.buttoncolor[] = move_lesion_active[] ? GRN : BG_PNL
+        put!(channel, ToggleMoveLesionModeEvent(move_lesion_active[]))
+    end
     
     current_paint_mode = Observable(:view)
     
@@ -1098,7 +1207,9 @@ end_section!(sec_win)
         btn_paint.buttoncolor[] = GRN
         btn_erase.buttoncolor[] = BG_PNL
         btn_view_mode.buttoncolor[] = BG_PNL
-        put!(channel, PaintValEvent(1, true))
+        m = match(r"^(\d+)", active_lesion_id[])
+        val = m !== nothing ? parse(Int, m.match) : 1
+        put!(channel, PaintValEvent(val, true))
     end
     on(btn_erase.clicks) do _
         current_paint_mode[] = :erase
@@ -1375,6 +1486,9 @@ end_section!(sec_win)
         catch e
             @warn "Failed to send SyncLesionEvent: $e"
         end
+    end
+    if active_lesion_id[] != "" && active_lesion_id[] != "(none)"
+        notify(active_lesion_id)
     end
 
     on(btn_save.clicks) do _

@@ -9,7 +9,7 @@ using DataTypesBasic
 using Setfield
 
 export reactToChangePlane, reactToCompareTimePoints, reactToShowSingleLesion
-export reactToWindowing, reactToPaintVal, reactToSyncLesion
+export reactToWindowing, reactToPaintVal, reactToSyncLesion, reactToChangeBrushSize
 export reactToChangeTimePoint, reactToToggleLesion, reactToRefreshList
 export reactToAddAutoPet, reactToSyncMissing, reactToGenManual
 export reactToMapLink, reactToAutoRunPreprocess, reactToRunPreprocess, reactToShowBoneMask, reactToSaveMRB
@@ -218,10 +218,22 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
     return changed
 end
 
+const current_windowing = Dict{String, Vector{Float32}}(
+    "CT" => Float32[-150.0, 250.0],
+    "PET" => Float32[0.0, 10.0],
+    "SPECT" => Float32[0.0, 10.0]
+)
+export current_windowing
+
 function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFields})
+    target_mod = uppercase(data.modality)
+    current_windowing[target_mod] = Float32.([data.min_val, data.max_val])
+    
     for state in stateObjects
         for tex in state.mainForDisplayObjects.listOfTextSpecifications
-            if tex.name == "CT"
+            match = (target_mod == "CT" && tex.name == "CT") || 
+                    ((target_mod == "PET" || target_mod == "SPECT") && tex.name == "PET")
+            if match
                 tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
                 
                 # Push uniform update for min/max
@@ -230,6 +242,7 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
             end
         end
     end
+    @info "Updated windowing for $(data.modality): [$(data.min_val), $(data.max_val)]"
 end
 
 function reactToPaintVal(data::PaintValEvent, stateObjects::Vector{StateDataFields})
@@ -237,6 +250,15 @@ function reactToPaintVal(data::PaintValEvent, stateObjects::Vector{StateDataFiel
         state.valueForMasToSet = valueForMasToSetStruct(value=data.val, is_painting_active=data.active)
     end
     @info "Paint state updated: val=$(data.val), active=$(data.active)"
+end
+
+function reactToChangeBrushSize(data::ChangeBrushSizeEvent, stateObjects::Vector{StateDataFields})
+    for state in stateObjects
+        if !isempty(state.textureToModifyVec)
+            state.textureToModifyVec[1].strokeWidth = Int32(data.size)
+        end
+    end
+    @info "Brush size updated to $(data.size)"
 end
 
 const tp_node_names = Dict{Int, String}()
@@ -260,8 +282,11 @@ function get_node_name_for_tp(tp_idx::Int)::String
     return "PET_Lesions_$tp_idx"
 end
 
+const current_active_lesion_id = Ref(0)
+
 function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateDataFields})
     @info "reactToSyncLesion called with lesion_id=$(data.lesion_id), nStates=$(length(stateObjects))"
+    current_active_lesion_id[] = data.lesion_id
     changed = false
     old_idx = stateObjects[1].switchIndex
     old_sync = stateObjects[1].mainForDisplayObjects.isSyncScrollOn
@@ -307,6 +332,45 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         end
     end
 
+    # Sparse fast bone subsegments update (instantaneous, zero large array allocations)
+    for (panel_idx, stateObject) in enumerate(stateObjects)
+        surf_indices = CartesianIndex{3}[]
+        marr_indices = CartesianIndex{3}[]
+        
+        if data.lesion_id > 0 && haskey(bone_subsegments_cache, data.lesion_id)
+            raw_surf, raw_marr = bone_subsegments_cache[data.lesion_id]
+            
+            # Support both CartesianIndex[] sparse cache and raw 3D array cache
+            pts_surf = raw_surf isa AbstractArray{<:CartesianIndex} ? raw_surf : findall(raw_surf .> 0)
+            pts_marr = raw_marr isa AbstractArray{<:CartesianIndex} ? raw_marr : findall(raw_marr .> 0)
+            
+            if panel_idx == 3 # Sagittal (Y, Z, X)
+                surf_indices = [CartesianIndex(I[2], I[3], I[1]) for I in pts_surf]
+                marr_indices = [CartesianIndex(I[2], I[3], I[1]) for I in pts_marr]
+            elseif panel_idx == 4 # Coronal (X, Z, Y)
+                surf_indices = [CartesianIndex(I[1], I[3], I[2]) for I in pts_surf]
+                marr_indices = [CartesianIndex(I[1], I[3], I[2]) for I in pts_marr]
+            else # Axial (X, Y, Z)
+                surf_indices = pts_surf
+                marr_indices = pts_marr
+            end
+        end
+        
+        for scrDat in stateObject.onScrollData.dataToScroll
+            if scrDat.name == "Bone_Surface"
+                fill!(scrDat.dat, 0.0f0)
+                if !isempty(surf_indices)
+                    scrDat.dat[surf_indices] .= 1.0f0
+                end
+            elseif scrDat.name == "Bone_Marrow"
+                fill!(scrDat.dat, 0.0f0)
+                if !isempty(marr_indices)
+                    scrDat.dat[marr_indices] .= 1.0f0
+                end
+            end
+        end
+    end
+
     active_panel_indices = if compare_mode[] && length(stateObjects) >= 5
         [1, 5]
     elseif length(stateObjects) >= 4
@@ -315,21 +379,24 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         collect(1:length(stateObjects))
     end
 
-    canonical_center = nothing
-    if data.lesion_id > 0
-        # Find lesion center in axial panel 1 (or any panel with Mask)
+    canonical_center = if data.lesion_id > 0 && haskey(lesion_centroids_cache, data.lesion_id)
+        lesion_centroids_cache[data.lesion_id]
+    elseif data.lesion_id > 0
+        # fallback if not in cache
+        cc = nothing
         for (si, stateObject) in enumerate(stateObjects)
             for (scrIdx, scrDat) in enumerate(stateObject.onScrollData.dataToScroll)
                 texSpec = stateObject.mainForDisplayObjects.listOfTextSpecifications[scrIdx]
                 if (texSpec.name == "Mask" || texSpec.name == "manualModif") && stateObject.onScrollData.dimensionToScroll == 3
-                    canonical_center = find_lesion_center(scrDat.dat, Float32(data.lesion_id))
-                    if canonical_center !== nothing
-                        break
-                    end
+                    cc = find_lesion_center(scrDat.dat, Float32(data.lesion_id))
+                    cc !== nothing && break
                 end
             end
-            canonical_center !== nothing && break
+            cc !== nothing && break
         end
+        cc
+    else
+        nothing
     end
     @info "canonical_center=$canonical_center, active_panel_indices=$active_panel_indices"
 
@@ -340,15 +407,10 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             
             # Check if this panel has its own lesion center (especially in compare mode)
             target_id = (idx == 5 && compare_mode[]) ? panel5_lesion_id : data.lesion_id
-            panel_center = nothing
-            if idx == 5 && compare_mode[] && target_id > 0
-                for (scrIdx, scrDat) in enumerate(stateObject.onScrollData.dataToScroll)
-                    texSpec = stateObject.mainForDisplayObjects.listOfTextSpecifications[scrIdx]
-                    if (texSpec.name == "Mask" || texSpec.name == "manualModif") && stateObject.onScrollData.dimensionToScroll == 3
-                        panel_center = find_lesion_center(scrDat.dat, Float32(target_id))
-                        panel_center !== nothing && break
-                    end
-                end
+            panel_center = if idx == 5 && compare_mode[] && target_id > 0 && haskey(lesion_centroids_cache, target_id)
+                lesion_centroids_cache[target_id]
+            else
+                nothing
             end
             
             effective_center = panel_center !== nothing ? panel_center : canonical_center
@@ -387,10 +449,12 @@ end
 # TP navigation state: populated by the launch script
 # tp_data_cache[tp_index] = Vector{Vector{Any}} — per-panel voxel data tuples [(\"CT\", vol), (\"PET\", vol), (\"Mask\", vol)]
 const tp_data_cache = Dict{Int, Vector{Vector{Any}}}()
+const bone_subsegments_cache = Dict{Int, Any}()
+const lesion_centroids_cache = Dict{Int, Vector{Int}}()
 const current_tp_index = Ref(0)
 const tp_labels = Dict{Int, String}()  # tp_index → display label (e.g. "PET TP0")
 const tp_descriptions = Dict{Int, String}() # tp_index → radiological description
-export tp_data_cache, current_tp_index, tp_labels, tp_descriptions
+export tp_data_cache, bone_subsegments_cache, lesion_centroids_cache, current_tp_index, tp_labels, tp_descriptions
 export compare_mode, compare_right_tp
 
 """
@@ -518,33 +582,165 @@ function reactToRefreshList(data::RefreshListEvent, stateObjects::Vector{StateDa
 end
 
 function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateDataFields})
-    @info "Add New Lesion (Auto-PET) triggered."
+    @info "Add New Lesion (Auto-PET) triggered with algorithm: $(data.algorithm)"
     tp1_state = stateObjects[1]
     
-    # We need CT and PET volumes. 
-    # Let's assume textureSpec 1 is CT, 2 is PET, 3 is Seg. 
-    # Or just search by isMainImage for CT, and PET is usually the second.
+    ct_vol = tp1_state.onScrollData.dataToScroll[1].dat
+    pet_vol = length(tp1_state.onScrollData.dataToScroll) > 1 ? tp1_state.onScrollData.dataToScroll[2].dat : ct_vol
     
-    ct_vol = tp1_state.mainForDisplayObjects.listOfTextSpecifications[1].imageTexture
-    pet_vol = tp1_state.mainForDisplayObjects.listOfTextSpecifications[2].imageTexture
-    seg_vol = tp1_state.mainForDisplayObjects.listOfTextSpecifications[3].imageTexture
-    
-    pos = tp1_state.lastRecordedMousePosition
-    if data.algorithm == "NNInteractive"
-        @info "Running NNInteractive on seed $pos"
-        mask = InferenceClient.run_nninteractive(ct_vol, pos[1], pos[2], pos[3])
-    else
-        @info "Running HelpNet on seed $pos"
-        mask = InferenceClient.run_helpnet_inference(ct_vol, pet_vol, pos[1], pos[2], pos[3])
+    seg_vol = nothing
+    for dat in tp1_state.onScrollData.dataToScroll
+        if dat.name == "Mask" || dat.name == "segmentation"
+            seg_vol = dat.dat
+            break
+        end
+    end
+    if seg_vol === nothing
+        for dat in tp1_state.onScrollData.dataToScroll
+            if dat.name == "manualModif"
+                seg_vol = dat.dat
+                break
+            end
+        end
+    end
+    if seg_vol === nothing && length(tp1_state.onScrollData.dataToScroll) > 2
+        seg_vol = tp1_state.onScrollData.dataToScroll[3].dat
     end
     
-    if mask !== nothing
-        InferenceClient.insert_patch!(seg_vol, mask, pos[1], pos[2], pos[3])
-        @info "HelpNet segmented successfully."
-        # Update texture uniform version or trigger render update
-        # Just incrementing a dummy property to trigger render is usually how ReactToScroll works.
+    # Active lesion ID to assign to predicted voxels
+    active_id = tp1_state.valueForMasToSet.value
+    if active_id <= 0
+        for ts in tp1_state.mainForDisplayObjects.listOfTextSpecifications
+            if (ts.isMultiDiscreteMask || ts.name == "Mask" || ts.name == "manualModif") && ts.minAndMaxValue[1] > 0
+                active_id = Int(round(ts.minAndMaxValue[1]))
+                break
+            end
+        end
+    end
+    if active_id <= 0
+        active_id = 1
+    end
+    
+    # Find user-painted seed points for active lesion across all panels and buffers
+    painted_pts = CartesianIndex{3}[]
+    for (p_idx, st) in enumerate(stateObjects)
+        for dat in st.onScrollData.dataToScroll
+            if dat.name == "manualModif" || dat.name == "Mask" || dat.name == "segmentation"
+                p = findall(dat.dat .== Float32(active_id))
+                if isempty(p) && dat.name == "manualModif"
+                    p = findall(dat.dat .> 0.0f0)
+                end
+                if !isempty(p)
+                    if p_idx == 3 # Sagittal (Y, Z, X) -> Canonical (X, Y, Z)
+                        append!(painted_pts, [CartesianIndex(idx[3], idx[1], idx[2]) for idx in p])
+                    elseif p_idx == 4 # Coronal (X, Z, Y) -> Canonical (X, Y, Z)
+                        append!(painted_pts, [CartesianIndex(idx[1], idx[3], idx[2]) for idx in p])
+                    else # Axial (X, Y, Z)
+                        append!(painted_pts, p)
+                    end
+                end
+            end
+        end
+    end
+    unique!(painted_pts)
+
+    points_vol = zeros(Float32, size(ct_vol))
+    if !isempty(painted_pts)
+        for idx in painted_pts
+            if checkbounds(Bool, points_vol, idx)
+                points_vol[idx] = 1.0f0
+            end
+        end
+        cx = round(Int, mean([p[1] for p in painted_pts]))
+        cy = round(Int, mean([p[2] for p in painted_pts]))
+        cz = round(Int, mean([p[3] for p in painted_pts]))
     else
-        @warn "HelpNet inference failed or returned nothing."
+        pos = tp1_state.lastRecordedMousePosition
+        cx = (pos[1] > 0) ? pos[1] : 256
+        cy = (pos[2] > 0) ? pos[2] : 256
+        cz = (pos[3] > 0) ? pos[3] : Int(tp1_state.currentDisplayedSlice)
+    end
+    
+    if data.algorithm == "NNInteractive"
+        @info "Running NNInteractive on seed ($cx, $cy, $cz) for lesion $active_id with $(length(painted_pts)) painted points"
+        mask = InferenceClient.run_nninteractive(ct_vol, pet_vol, points_vol, cx, cy, cz)
+    else
+        @info "Running HelpNet on seed ($cx, $cy, $cz) for lesion $active_id with $(length(painted_pts)) painted points"
+        mask = InferenceClient.run_helpnet_inference(ct_vol, pet_vol, points_vol, cx, cy, cz)
+    end
+    
+    if mask !== nothing && seg_vol !== nothing
+        InferenceClient.insert_patch!(seg_vol, mask, cx, cy, cz, label_val=Float32(active_id))
+        @info "HelpNet/NNInteractive segmented $(count(mask .> 0)) patch voxels for lesion $active_id at ($cx, $cy, $cz)."
+        
+        # Propagate canonical mask volume to all panels
+        for (p_idx, st) in enumerate(stateObjects)
+            for scrDat in st.onScrollData.dataToScroll
+                if scrDat.name == "manualModif" || scrDat.name == "segmentation" || scrDat.name == "Mask"
+                    if p_idx == 3 # Sagittal (Y, Z, X)
+                        scrDat.dat .= permutedims(seg_vol, (2, 3, 1))
+                    elseif p_idx == 4 # Coronal (X, Z, Y)
+                        scrDat.dat .= permutedims(seg_vol, (1, 3, 2))
+                    else # Axial (1, 2, 5)
+                        scrDat.dat .= seg_vol
+                    end
+                end
+            end
+        end
+
+        # Synchronize tp_data_cache
+        tp_idx = current_tp_index[]
+        if haskey(tp_data_cache, tp_idx)
+            tp_voxels = tp_data_cache[tp_idx]
+            for (p_idx, panel_data) in enumerate(tp_voxels)
+                for entry in panel_data
+                    if entry[1] == "Mask" || entry[1] == "manualModif" || entry[1] == "segmentation"
+                        for st_dat in stateObjects[p_idx].onScrollData.dataToScroll
+                            if st_dat.name == entry[1]
+                                entry[2] .= st_dat.dat
+                                break
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        # Ensure mask uniform displays the active lesion
+        for stateObject in stateObjects
+            for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
+                if textSpec.isMultiDiscreteMask || textSpec.name == "Mask"
+                    textSpec.minAndMaxValue = Float32.([active_id, active_id])
+                    ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
+                    Uniforms.coontrolMinMaxUniformVals(textSpec)
+                end
+            end
+        end
+
+        # Jump panels to seed location
+        targets = [(1, cz), (2, cz), (3, cx), (4, cy)]
+        if length(stateObjects) >= 5
+            push!(targets, (5, cz))
+        end
+        for (p_idx, target_sl) in targets
+            if p_idx <= length(stateObjects)
+                st = stateObjects[p_idx]
+                max_sl = st.onScrollData.slicesNumber
+                st.currentDisplayedSlice = clamp(target_sl, 1, max_sl)
+            end
+        end
+
+        # Update all panel textures
+        old_sw = stateObjects[1].switchIndex
+        for p in 1:length(stateObjects)
+            if sum(abs.(stateObjects[p].calcDimsStruct.mainImageQuadVert)) > 0.01f0
+                stateObjects[1].switchIndex = p
+                ReactToScroll.reactToScroll(0, stateObjects, false)
+            end
+        end
+        stateObjects[1].switchIndex = old_sw
+    else
+        @warn "AI inference failed or returned nothing."
     end
 end
 
@@ -586,10 +782,60 @@ function reactToGenManual(data::GenManualEvent, stateObjects::Vector{StateDataFi
     
     try
         surf, marr = MedEye3d.BoneSubsegmentation.generate_bone_subsegments(seg_vol, bone_atlas, spacing, data.lesion_id)
-        seg_vol[surf] .= 2.0f0
-        seg_vol[marr] .= 3.0f0
-        @info "Bone subsegments generated successfully."
-        reactToScroll(0, stateObjects, false)
+        
+        tp_idx = current_tp_index[]
+        if haskey(tp_data_cache, tp_idx)
+            tp_voxels = tp_data_cache[tp_idx]
+            
+            # Since tp_voxels is a Vector{Vector{Any}} (one for each panel)
+            for (panel_idx, panel_data) in enumerate(tp_voxels)
+                # Create masks based on the panel's data dimension
+                # Panel 1 and 5 (axial), Panel 3 (sagittal), Panel 4 (coronal)
+                # For simplicity, we create the full 3D volumes in axial layout first
+                surf_vol = zeros(Float32, size(seg_vol))
+                marr_vol = zeros(Float32, size(seg_vol))
+                surf_vol[surf] .= 1.0f0
+                marr_vol[marr] .= 1.0f0
+                
+                # Transform to panel's orientation if needed
+                if panel_idx == 3 # Sagittal (Y, Z, X)
+                    surf_vol = permutedims(surf_vol, (2, 3, 1))
+                    marr_vol = permutedims(marr_vol, (2, 3, 1))
+                elseif panel_idx == 4 # Coronal (X, Z, Y)
+                    surf_vol = permutedims(surf_vol, (1, 3, 2))
+                    marr_vol = permutedims(marr_vol, (1, 3, 2))
+                end
+                
+                # Remove existing if any
+                filter!(v -> v[1] != "Bone_Surface" && v[1] != "Bone_Marrow", panel_data)
+                
+                # Append
+                push!(panel_data, ("Bone_Surface", surf_vol))
+                push!(panel_data, ("Bone_Marrow", marr_vol))
+            end
+            
+            @info "Bone subsegments generated and saved as separate label maps."
+            
+            # Re-initialize the panels to register the new textures
+            num_panels = min(4, length(stateObjects))
+            for i in 1:num_panels
+                _load_tp_into_panel!(stateObjects, tp_voxels, i)
+            end
+            
+            old_idx = stateObjects[1].switchIndex
+            for i in 1:num_panels
+                stateObjects[1].switchIndex = i
+                reactToScroll(0, stateObjects, false)
+            end
+            stateObjects[1].switchIndex = old_idx
+        else
+            # Fallback if no tp_data_cache (e.g. running outside of interactive MRB mode)
+            @warn "No TP data cache found! Cannot save separate label maps. Falling back to seg_vol."
+            seg_vol[surf] .= 2.0f0
+            seg_vol[marr] .= 3.0f0
+            reactToScroll(0, stateObjects, false)
+        end
+        
     catch e
         @error "Failed to generate bone subsegments: $e"
     end
@@ -616,12 +862,22 @@ end
 function reactToShowBoneMask(data::ShowBoneMaskEvent, stateObjects::Vector{StateDataFields})
     @info "Show Bone Mask toggled to $(data.active)"
     for stateObject in stateObjects
+        ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-            if textSpec.name == "Bone_Mask" || textSpec.name == "bone_mask" || textSpec.name == "bone" || textSpec.name == "Organ_Mask" || textSpec.name == "organ_mask"
+            if textSpec.name == "Bone_Mask" || textSpec.name == "bone_mask" || textSpec.name == "bone" || textSpec.name == "Organ_Mask" || textSpec.name == "organ_mask" || textSpec.name == "Bone_Surface" || textSpec.name == "Bone_Marrow"
                 textSpec.isVisible = data.active
+                Uniforms.setTextureVisibility(textSpec.isVisible, textSpec.uniforms)
             end
         end
     end
+    old_sw = stateObjects[1].switchIndex
+    for p in 1:length(stateObjects)
+        if sum(abs.(stateObjects[p].calcDimsStruct.mainImageQuadVert)) > 0.01f0
+            stateObjects[1].switchIndex = p
+            ReactToScroll.reactToScroll(0, stateObjects, false)
+        end
+    end
+    stateObjects[1].switchIndex = old_sw
 end
 
 const MASK_BACKUP = Dict{UInt64, Array{Float32, 3}}()
@@ -629,44 +885,53 @@ const MASK_BACKUP = Dict{UInt64, Array{Float32, 3}}()
 function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{StateDataFields})
     @info "ShowMaskLayerEvent: layer $(data.layer) -> $(data.active)"
     
+    tex_target = if data.layer == 1
+        "Mask"
+    elseif data.layer == 2
+        "Bone_Surface"
+    elseif data.layer == 3
+        "Bone_Marrow"
+    else
+        ""
+    end
+    
     for state in stateObjects
-        for (i, scrDat) in enumerate(state.onScrollData.dataToScroll)
-            texSpec = state.mainForDisplayObjects.listOfTextSpecifications[i]
-            if texSpec.name == "Mask" || texSpec.name == "manualModif"
-                dat_ptr = pointer(scrDat.dat)
-                dat_key = UInt64(UInt(dat_ptr))
-                
-                if !haskey(MASK_BACKUP, dat_key)
-                    MASK_BACKUP[dat_key] = copy(scrDat.dat)
-                end
-                
-                backup_vol = MASK_BACKUP[dat_key]
-                target_val = Float32(data.layer)
-                
-                if data.active
-                    idx = findall(backup_vol .== target_val)
-                    scrDat.dat[idx] .= target_val
-                else
-                    idx = findall(scrDat.dat .== target_val)
-                    scrDat.dat[idx] .= 0.0f0
-                end
+        ModernGL.glUseProgram(state.mainForDisplayObjects.shader_program)
+        for textSpec in state.mainForDisplayObjects.listOfTextSpecifications
+            if (tex_target == "Mask" && (textSpec.name == "Mask" || textSpec.name == "manualModif" || textSpec.name == "segmentation")) ||
+               (textSpec.name == tex_target)
+                textSpec.isVisible = data.active
+                Uniforms.setTextureVisibility(textSpec.isVisible, textSpec.uniforms)
             end
         end
-        
-        # Update single slice data for this pane from the modified volume
-        singleSlDat = state.onScrollData.dataToScroll |>
-            (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(state.currentDisplayedSlice), state.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
-            (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=state.currentDisplayedSlice, textToDisp=getTextForCurrentSlice(state.onScrollData, Int32(state.currentDisplayedSlice)))
-            
-        state.currentlyDispDat = singleSlDat
-        
-        # Upload new texture data to GPU
-        for updateDat in singleSlDat.listOfDataAndImageNames
-            findList = findall((texSpec) -> texSpec.name == updateDat.name, state.mainForDisplayObjects.listOfTextSpecifications)
-            if !isempty(findList)
-                texSpec = state.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
-                transformedDat = applyZoomPan(updateDat.dat, state.calcDimsStruct.zoom, state.calcDimsStruct.panX, state.calcDimsStruct.panY)
-                updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, state.calcDimsStruct.imageTextureWidth, state.calcDimsStruct.imageTextureHeight)
+        TextureManag.activateTextures(state.mainForDisplayObjects.listOfTextSpecifications)
+    end
+    
+    # If bone surface or marrow is toggled, also sync dataToScroll buffer directly
+    if data.layer == 2 || data.layer == 3
+        cur_lid = (current_active_lesion_id[] > 0) ? current_active_lesion_id[] : stateObjects[1].valueForMasToSet.value
+        for (panel_idx, stateObject) in enumerate(stateObjects)
+            for scrDat in stateObject.onScrollData.dataToScroll
+                if (data.layer == 2 && scrDat.name == "Bone_Surface") || (data.layer == 3 && scrDat.name == "Bone_Marrow")
+                    if !data.active
+                        fill!(scrDat.dat, 0.0f0)
+                    elseif cur_lid > 0 && haskey(bone_subsegments_cache, cur_lid)
+                        raw_surf, raw_marr = bone_subsegments_cache[cur_lid]
+                        pts = (data.layer == 2) ? (raw_surf isa AbstractArray{<:CartesianIndex} ? raw_surf : findall(raw_surf .> 0)) :
+                                                  (raw_marr isa AbstractArray{<:CartesianIndex} ? raw_marr : findall(raw_marr .> 0))
+                        indices = if panel_idx == 3
+                            [CartesianIndex(I[2], I[3], I[1]) for I in pts]
+                        elseif panel_idx == 4
+                            [CartesianIndex(I[1], I[3], I[2]) for I in pts]
+                        else
+                            pts
+                        end
+                        fill!(scrDat.dat, 0.0f0)
+                        if !isempty(indices)
+                            scrDat.dat[indices] .= 1.0f0
+                        end
+                    end
+                end
             end
         end
     end
@@ -674,14 +939,24 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
     # Re-render all panels
     old_idx = stateObjects[1].switchIndex
     for idx in 1:length(stateObjects)
-        stateObjects[1].switchIndex = idx
-        ReactToScroll.reactToScroll(0, stateObjects, false)
+        if sum(abs.(stateObjects[idx].calcDimsStruct.mainImageQuadVert)) > 0.01f0
+            stateObjects[1].switchIndex = idx
+            ReactToScroll.reactToScroll(0, stateObjects, false)
+        end
     end
     stateObjects[1].switchIndex = old_idx
 end
 
 function reactToSaveMRB(data::SaveMRBEvent, stateObjects::Vector{StateDataFields})
     @info "Save MRB triggered."
+end
+
+export reactToToggleMoveLesionMode
+function reactToToggleMoveLesionMode(data::ToggleMoveLesionModeEvent, stateObjects::Vector{StateDataFields})
+    @info "Move Lesion Mode toggled to $(data.active)"
+    for state in stateObjects
+        state.moveLesionMode = data.active
+    end
 end
 
 end
