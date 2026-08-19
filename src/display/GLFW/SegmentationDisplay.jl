@@ -152,6 +152,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::ToggleLesionEvent) = react
 
 on_next!(stateObjects::Vector{StateDataFields}, data::RefreshListEvent) = reactToRefreshList(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::AddAutoPetEvent) = reactToAddAutoPet(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::AIInferenceResultEvent) = reactToAIInferenceResult(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SyncMissingEvent) = reactToSyncMissing(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::GenManualEvent) = reactToGenManual(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MapLinkEvent) = reactToMapLink(data, stateObjects)
@@ -164,6 +165,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::CloseWindowEvent) = nothin
 on_next!(stateObjects::Vector{StateDataFields}, data::ResizeWindowEvent) = reactToResizeWindow(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SetWindowTitleEvent) = reactToSetWindowTitle(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ToggleMoveLesionModeEvent) = reactToToggleMoveLesionMode(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::AIStatusUpdateEvent) = (MakieEventHandlers.ai_status_text[] = data.text)
 on_error!(stateObjects::Vector{StateDataFields}, err) = error(err)
 on_complete!(stateObjects::Vector{StateDataFields}) = ""
 
@@ -637,6 +639,9 @@ function coordinateDisplay(
         stateInstance.textureToModifyVec = filter(it -> it.isEditable, initializedTextures[index])
     end
 
+    # Start the single persistent inference worker thread
+    MakieEventHandlers.start_inference_worker()
+
     shouldStop = [false]
     
     #    in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
@@ -667,7 +672,8 @@ function coordinateDisplay(
                 channelData = take!(mainChannel)
                 
                 if channelData isa CloseWindowEvent
-                    @info "CloseWindowEvent received: cleanly shutting down OpenGL and GLFW window"
+                    println("CloseWindowEvent received: shutting down OpenGL and GLFW window")
+                    flush(stdout)
                     shouldStop[1] = true
                     try
                         lock(GLOBAL_OPENGL_LOCK) do
@@ -737,7 +743,10 @@ function coordinateDisplay(
                     end
                     
                     try
-                        @info "CONSUMER received event: $(typeof(channelData))" channelData
+                        if !(channelData isa MouseStruct) && !(channelData isa Vector{MouseStruct})
+                            println("CONSUMER: processing $(typeof(channelData))")
+                            flush(stdout)
+                        end
                         on_next!(stateInstances, channelData)
                         
                         if !shouldStop[1]
@@ -771,11 +780,26 @@ function coordinateDisplay(
                 end
             catch e
                 if e isa InterruptException || (e isa GLFW.GLFWError && e.code == GLFW.NOT_INITIALIZED)
-                    @error "CONSUMER TASK stopping due to fatal error:" exception=(e, catch_backtrace())
+                    println("CONSUMER FATAL ERROR: $e")
+                    println(sprint(showerror, e, catch_backtrace()))
+                    flush(stdout)
                     shouldStop[1] = true
                 else
-                    @error "CONSUMER TASK event handler error (continuing):" exception=(e, catch_backtrace())
-                    # Don't stop — allow subsequent events to be processed
+                    println("CONSUMER ERROR (continuing): $e")
+                    println(sprint(showerror, e, catch_backtrace()))
+                    flush(stdout)
+                    # Update AI status label so user sees the error
+                    try
+                        MakieEventHandlers.ai_status_text[] = "[Error] $(sprint(showerror, e))"
+                    catch; end
+                    # Log to file for post-mortem analysis
+                    try
+                        open("/tmp/medeye3d_errors.log", "a") do f
+                            println(f, "$(Dates.now()) CONSUMER ERROR: $(sprint(showerror, e))")
+                            println(f, sprint(showerror, e, catch_backtrace()))
+                            println(f, "---")
+                        end
+                    catch; end
                 end
             end
         end

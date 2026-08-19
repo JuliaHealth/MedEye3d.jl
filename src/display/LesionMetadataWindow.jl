@@ -69,9 +69,7 @@ const _schema_cache = Ref{Vector{QuestionDef}}(QuestionDef[])
 function load_schema()::Vector{QuestionDef}
     isempty(_schema_cache[]) || return _schema_cache[]
     if !isfile(DEF_JSON_PATH)
-        @warn "def.json not found at $(DEF_JSON_PATH) — using built-in fallback schema"
-        _schema_cache[] = _builtin_schema()
-        return _schema_cache[]
+        error("Strict Configuration Enforcement: def.json schema file not found at $(DEF_JSON_PATH). Built-in fallback schema has been disabled.")
     end
     raw = JSON.parse(read(DEF_JSON_PATH, String))
     result = QuestionDef[]
@@ -91,36 +89,6 @@ function load_schema()::Vector{QuestionDef}
     end
     _schema_cache[] = result
     return result
-end
-
-function _builtin_schema()
-    [
-        QuestionDef("Radioligand Type","Radioligand used",
-            ["68Ga-PSMA-11","18F-PSMA-1007","18F-DCFPyL","Other"],
-            ["Technical Parameters"],"both","68Ga-PSMA-11"),
-        QuestionDef("Lesion tracking name?","Anatomical descriptor",
-            String[],["Identification"],"both",""),
-        QuestionDef("Anatomic Location","Primary anatomical site",
-            ["Prostate Gland","Axial Skeleton","Appendicular Skeleton",
-             "Pelvic Lymph Node","Distant Lymph Node","Solid Organ / Viscera",
-             "General Soft Tissue","Blood Vessel","Other"],
-            ["Location"],"both",""),
-        QuestionDef("Inner Texture / Density / Attenuation","Internal density",
-            ["Sclerotic / Blastic","Lytic / Lucent","Mixed Lytic & Sclerotic",
-             "Ground-Glass / Fibrous","Fluid-Filled / Cystic","Fat Density","Central Necrosis"],
-            ["Morphology"],"both",""),
-        QuestionDef("Border and Margin","Margin character",
-            ["Smooth / Well-Defined","Spiculated / Feathered","Moth-Eaten",
-             "Ill-Defined / Permeative","Reactive Sclerotic Rim"],
-            ["Morphology"],"both",""),
-        QuestionDef("Lesion Shape","3D morphology",
-            ["Oval / Bean-Shaped","Round","Teardrop","Lobulated","Irregular"],
-            ["Morphology"],"both",""),
-        QuestionDef("Certainty","Diagnostic certainty",
-            ["High (>90%)","Medium (50-90%)","Low (<50%)"],
-            ["Final Assessment"],"both",""),
-        QuestionDef("Comment","Free-text comment",String[],["Reporting"],"both",""),
-    ]
 end
 
 # ─── RadLex ──────────────────────────────────────────────────────────────────
@@ -469,9 +437,10 @@ function create_metadata_window(
         btn_type_bone.buttoncolor[]     = (t == "Bone Meta") ? ACCENT : BG_PNL
         btn_type_organ.buttoncolor[]    = (t == "Organ Meta") ? ACCENT : BG_PNL
         btn_type_ln.buttoncolor[]       = (t == "Lymph Node" || t == "Lymph Node Meta") ? ACCENT : BG_PNL
-        if t == "Bone Meta"
-            put!(channel, ShowBoneMaskEvent(true))
-        end
+        
+        is_bone = (t == "Bone Meta")
+        @info "Lesion type set to '$t' -> ShowBoneMaskEvent($is_bone)"
+        put!(channel, ShowBoneMaskEvent(is_bone))
     end
     
     on(btn_type_prostate.clicks) do _; update_type_buttons("Prostate") end
@@ -1231,22 +1200,13 @@ end_section!(sec_win)
     algo_combo = Menu(g[algo_r, 2:4], options = ["HELPNet (AI)", "NNInteractive", "Traditional (PETTumor)"], default = "HELPNet (AI)", fontsize = 10)
 
     btn_add_ai = Button(g[nr!(), 1:4], label = "Run Semiauto AI (HELPNet / nnInteractive)", buttoncolor = GRN, labelcolor = TXT, fontsize = 11)
-    on(btn_add_ai.clicks) do _; put!(channel, AddAutoPetEvent(algo_combo.selection[])) end
+    on(btn_add_ai.clicks) do _; put!(channel, AddAutoPetEvent(algo_combo.selection[], channel)) end
 
-    ai_r = nr!()
-    btn_skelly = Button(g[ai_r, 1:4], label = "Run Skellytour", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    on(btn_skelly.clicks) do _
-        put!(channel, RunPreprocessEvent())
-    end
+    # AI status label — shows real-time processing state to the user
+    Label(g[nr!(), 1:4], @lift(string($(_MEH.ai_status_text))),
+        fontsize=10, color=RGBAf(0.7, 0.9, 0.7, 1.0), halign=:center)
 
-    btn_bone_helpers = Button(g[nr!(), 1:4], label = "Extract Bone Surface & Marrow Subsegments", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
-    on(btn_bone_helpers.clicks) do _
-        m = match(r"\d+", active_lesion_id[])
-        if m !== nothing
-            put!(channel, GenManualEvent(parse(Int, m.match)))
-        end
-    end
-    
+
     ai_r2 = nr!()
     tog_lesion = Toggle(g[ai_r2, 1], active=true)
     Label(g[ai_r2, 2], "Lesion", fontsize=11, color=TXT, halign=:left)
@@ -1296,13 +1256,7 @@ end_section!(sec_win)
     Label(g[pre_r1, 2:4], "Auto-run preprocessing on scene load", fontsize = 11, color = TXT, halign = :left)
     on(tog_autorun.active) do val; put!(channel, AutoRunPreprocessEvent(val)) end
 
-    btn_run_full = Button(g[nr!(), 1:4], label = "Run Full Preprocessing (Skellytour + HelpNet Sync)", buttoncolor = GRN, labelcolor = TXT, fontsize = 11)
-    on(btn_run_full.clicks) do _; put!(channel, RunPreprocessEvent()) end
 
-    pre_r2 = nr!()
-    tog_skelly = Toggle(g[pre_r2, 1], active=false)
-    Label(g[pre_r2, 2:4], "Show Skellytour Bone Segmentation", fontsize = 11, color = TXT, halign = :left)
-    on(tog_skelly.active) do val; put!(channel, ShowBoneMaskEvent(val)) end
 
     btn_save_mrb = Button(g[nr!(), 1:4], label = "Save Scene as Preprocessed MRB...", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 11)
     on(btn_save_mrb.clicks) do _; put!(channel, SaveMRBEvent()) end
@@ -1382,8 +1336,34 @@ end_section!(sec_win)
     end
 
     function apply_state(data::AbstractDict)
-        t_type = get(data, "LesionType", "Bone Meta")
+        cur_id_str = active_lesion_id[]
+        m = match(r"^(\d+)", cur_id_str)
+        lid = m !== nothing ? parse(Int, m.match) : 1
+
+        t_type = if haskey(data, "LesionType")
+            data["LesionType"]
+        else
+            bone_kws = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula", "humerus", "scapula", "sternum", "skull", "palate", "bone", "spine", "ilium", "ischium"]
+            id_low = lowercase(cur_id_str)
+            if haskey(_MEH.bone_subsegments_cache, lid)
+                "Bone Meta"
+            elseif occursin("prostate", id_low)
+                "Prostate"
+            elseif any(kw -> occursin(kw, id_low), bone_kws)
+                "Bone Meta"
+            elseif occursin("lymph", id_low) || occursin("node", id_low)
+                "Lymph Node Meta"
+            else
+                "Organ Meta"
+            end
+        end
         update_type_buttons(t_type)
+        
+        if haskey(_MEH.bone_subsegments_cache, lid) || t_type == "Bone Meta"
+            tog_surface.active[] = true
+            tog_marrow.active[] = true
+        end
+
         
         t_base = get(data, "BaseAnatomy", "")
         if tb_base_anat.stored_string[] != t_base
@@ -1474,7 +1454,11 @@ end_section!(sec_win)
     on(active_lesion_id) do id
         @info "WIRE_CALLBACK: active_lesion_id changed to: $id"
         db = lesion_db[]
-        apply_state(get(db, id, Dict{String,String}()))
+        try
+            apply_state(get(db, id, Dict{String,String}()))
+        catch e
+            @warn "Failed to apply state for lesion $id: $e"
+        end
         
         # Synchronize lesion with viewer (filters mask and jumps to slice)
         try

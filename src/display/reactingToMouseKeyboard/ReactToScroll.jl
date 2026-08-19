@@ -149,7 +149,18 @@ end
         currentDim = Int64(mainState.onScrollData.dataToScrollDims.dimensionToScroll)
         lastMouse = mainState.lastRecordedMousePosition
         locArr = [lastMouse[1], lastMouse[2], lastMouse[3]]
-        locArr[currentDim] = current
+        
+        # FIX: The permutation for Sagittal is [Y, Z, X] and Coronal is [X, Z, Y]
+        if currentDim == 3
+            # Axial: [X, Y, Z], scrolls Z, so current replaces locArr[3]
+            locArr[3] = current
+        elseif currentDim == 1
+            # Sagittal: [Y, Z, X], scrolls X, so current replaces locArr[3]
+            locArr[3] = current
+        elseif currentDim == 2
+            # Coronal: [X, Z, Y], scrolls Y, so current replaces locArr[3]
+            locArr[3] = current
+        end
         mainState.lastRecordedMousePosition = CartesianIndex(locArr[1], locArr[2], locArr[3])
         #saving information about current slice for future reference
         mainState.currentDisplayedSlice = current

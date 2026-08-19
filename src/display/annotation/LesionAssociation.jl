@@ -183,35 +183,8 @@ function find_equivalent_lesion(logic::LesionAssociationLogic,
         isempty(hits) || return first(hits)
     end
 
-    # 2. Same time-point intra-node fallback: if both nodes are same TP, try same seg ID
-    src_tp = get_timepoint(logic, src_node)
-    dst_tp = get_timepoint(logic, dst_node)
-    if src_tp == dst_tp && (isempty(available_dst_segs) || src_seg_id in available_dst_segs)
-        return src_seg_id
-    end
-
-    # 3. Centroid distance fallback
-    src_c = get(logic._centroid_cache, (src_node, src_seg_id), nothing)
-    src_c === nothing && return nothing
-
-    best_id   = nothing
-    best_dist = Inf
-    for seg_id in available_dst_segs
-        dst_c = get(logic._centroid_cache, (dst_node, seg_id), nothing)
-        dst_c === nothing && continue
-        d = sqrt(sum((src_c[i] - dst_c[i])^2 for i in 1:3))
-        if d < best_dist
-            best_dist = d
-            best_id   = seg_id
-        end
-    end
-
-    if best_dist <= 50.0  # ~50 voxel threshold
-        @info "[LesionAssoc] Centroid fallback: $src_node/$src_seg_id → $dst_node/$best_id (dist=$(round(best_dist,digits=1)))"
-        return best_id
-    end
-
-    return nothing
+    # Strict Error Enforcement: No fallbacks allowed
+    error("Strict Matching Enforcement: Lesion association not found in IoU overlap mapping for $src_node / $src_seg_id to $dst_node. Centroid distance and ID fallbacks have been disabled.")
 end
 
 """
