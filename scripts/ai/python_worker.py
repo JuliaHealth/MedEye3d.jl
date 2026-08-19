@@ -1,0 +1,214 @@
+
+import traceback
+import sys
+import os
+import gc
+from pathlib import Path
+
+# Strict imports — no fallbacks. If nnInteractive is not installed, crash immediately.
+from nnInteractive.inference.inference_session import nnInteractiveInferenceSession
+from nnInteractive.model_management import ensure_model_available, get_default_model_id
+
+import json
+import numpy as np
+import nibabel as nib
+import torch
+import socket
+import threading
+
+
+# Setup bundle paths for models
+CURRENT_DIR = Path(__file__).resolve().parent
+BUNDLE_DIR = CURRENT_DIR / "helpnet_bundle"
+sys.path.insert(0, str(BUNDLE_DIR))
+
+from model import HELPNet_Lesion
+
+# Global Model states
+HELPNET_MODEL = None
+NN_INTERACTIVE_SESSION = None
+DEVICE = None
+INFERENCE_LOCK = threading.Lock()  # Serialize all inference calls (defense-in-depth)
+
+def init_models():
+    global HELPNET_MODEL, DEVICE, NN_INTERACTIVE_SESSION
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    
+    import torch
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print("[Worker] Initializing models on cuda...")
+    
+    # Load Helpnet — strict, no fallbacks
+    HELPNET_MODEL = HELPNet_Lesion()
+    ckpt = os.path.join(BUNDLE_DIR, "checkpoints", "helpnet_model_final.pt")
+    if not os.path.exists(ckpt):
+        raise FileNotFoundError(f"HELPNet checkpoint not found at {ckpt}. No fallbacks allowed.")
+    HELPNET_MODEL.load_state_dict(torch.load(ckpt, map_location=DEVICE))
+    HELPNET_MODEL.to(DEVICE)
+    HELPNET_MODEL.eval()
+    print("[Worker] HELPNet Checkpoint loaded.")
+    
+    # Load nnInteractive Session — strict, no fallbacks
+    print("[Worker] Initializing nnInteractive deep learning model...")
+    model_dir = ensure_model_available(get_default_model_id())
+    NN_INTERACTIVE_SESSION = nnInteractiveInferenceSession(device=DEVICE)
+    NN_INTERACTIVE_SESSION.initialize_from_trained_model_folder(str(model_dir))
+    print("[Worker] nnInteractive initialized.")
+        
+    print("[Worker] Models ready.")
+
+def resolve_path(p, out_dir="/tmp/medeye3d_inference"):
+    if not p:
+        return None
+    if os.path.exists(p):
+        return str(p)
+    if not p.endswith(".gz") and os.path.exists(p + ".gz"):
+        return str(p + ".gz")
+    
+    fname = os.path.basename(p)
+    fname_gz = fname if fname.endswith(".gz") else fname + ".gz"
+    
+    for cand_dir in [out_dir, "/tmp/medeye3d_inference"]:
+        if not cand_dir:
+            continue
+        c1 = Path(cand_dir) / fname
+        if c1.exists():
+            return str(c1)
+        c2 = Path(cand_dir) / fname_gz
+        if c2.exists():
+            return str(c2)
+        if fname.endswith(".gz"):
+            c3 = Path(cand_dir) / fname[:-3]
+            if c3.exists():
+                return str(c3)
+                
+    return str(Path(out_dir) / fname)
+
+def run_helpnet(ct_path, pet_path, point_path, out_dir):
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    
+    ct_path = resolve_path(ct_path, out_dir)
+    pet_path = resolve_path(pet_path, out_dir)
+    point_path = resolve_path(point_path, out_dir)
+    
+    ct_nib = nib.load(ct_path)
+    ct_vol = ct_nib.get_fdata().astype(np.float32)
+    pet_nib = nib.load(pet_path)
+    pet_vol = pet_nib.get_fdata().astype(np.float32)
+    point_nib = nib.load(point_path)
+    point_vol = point_nib.get_fdata().astype(np.float32)
+    
+    ct_mean = ct_vol.mean()
+    ct_std = ct_vol.std() + 1e-6
+    ct_norm = (ct_vol - ct_mean) / ct_std
+    
+    x = np.stack([ct_norm, pet_vol, point_vol], axis=0)
+    x_tensor = torch.from_numpy(x).unsqueeze(0).float()
+    
+    if HELPNET_MODEL is None:
+        raise RuntimeError("HELPNet model is not loaded. No fallbacks allowed.")
+    
+    with torch.no_grad():
+        logits = HELPNET_MODEL(x_tensor.to(DEVICE))
+        pred = torch.argmax(logits, dim=1).squeeze(0).cpu().numpy().astype(np.uint8)
+        print(f"[Worker] HELPNet deep learning model produced {np.sum(pred)} voxels.")
+            
+    pred_path = out_dir / "helpnet_prediction.nii.gz"
+    nib.save(nib.Nifti1Image(pred, ct_nib.affine), str(pred_path))
+    return str(pred_path)
+
+def run_nninteractive(ct_path, point_path, out_dir):
+    global NN_INTERACTIVE_SESSION
+    print("[Worker] Running NNInteractive (CT-only mode)...")
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pred_path = out_dir / "nninteractive_prediction.nii.gz"
+    
+    if NN_INTERACTIVE_SESSION is None:
+        raise RuntimeError("nnInteractive session is not initialized. No fallbacks allowed.")
+    
+    ct_path = resolve_path(ct_path, out_dir)
+    point_path = resolve_path(point_path, out_dir)
+    
+    ct_vol = nib.load(ct_path).get_fdata()
+    
+    # Determine scribbles
+    if point_path and os.path.exists(point_path):
+        point_vol = nib.load(point_path).get_fdata()
+    else:
+        raise FileNotFoundError(f"Point/scribble file not found at {point_path}. No fallbacks allowed.")
+        
+    print("[Worker] Using MIC-DKFZ nnInteractive Deep Learning Model")
+    
+    # nnUNet (and therefore nnInteractive) strictly expects orientation to be (Z, Y, X)
+    # Our Julia client provides NIfTI arrays in (X, Y, Z). Transpose them before feeding!
+    ct_vol_zyx = np.transpose(ct_vol, (2, 1, 0))
+    point_vol_zyx = np.transpose(point_vol, (2, 1, 0))
+    
+    image = ct_vol_zyx[np.newaxis, ...].astype(np.float32)
+    
+    NN_INTERACTIVE_SESSION.set_image(image)
+    NN_INTERACTIVE_SESSION._finish_preprocessing_and_initialize_interactions()
+    
+    target_zyx = np.zeros_like(ct_vol_zyx, dtype=np.uint8)
+    NN_INTERACTIVE_SESSION.set_target_buffer(target_zyx)
+    
+    scribble_mask_zyx = point_vol_zyx > 0
+    NN_INTERACTIVE_SESSION.add_scribble_interaction(scribble_mask_zyx, include_interaction=True, run_prediction=True)
+    
+    # Transpose back to (X, Y, Z) for Julia
+    result_mask = np.transpose(target_zyx, (2, 1, 0))
+        
+    # Save output
+    nib.save(nib.Nifti1Image(result_mask.astype(np.float32), np.eye(4)), pred_path)
+    print(f"[Worker] nninteractive saved to {pred_path}")
+    return str(pred_path)
+
+def handle_client(conn):
+    try:
+        data_b = conn.recv(8192)
+        if not data_b:
+            return
+            
+        data = json.loads(data_b.decode('utf-8'))
+        command = data.get("command", "")
+        
+        response = {}
+        if command == "ping":
+            response = {"status": "success", "message": "pong"}
+        else:
+            with INFERENCE_LOCK:
+                if command == "helpnet":
+                    pred_path = run_helpnet(data["ct_path"], data["pet_path"], data["point_path"], data["out_dir"])
+                    response = {"status": "success", "prediction_path": pred_path}
+                elif command == "nninteractive":
+                    ct_p = data.get("ct_path", data.get("image_path"))
+                    pred_path = run_nninteractive(ct_p, data["point_path"], data["out_dir"])
+                    response = {"status": "success", "prediction_path": pred_path}
+                else:
+                    response = {"status": "error", "message": "Unknown command"}
+            
+        conn.sendall(json.dumps(response).encode('utf-8'))
+    except Exception as e:
+        traceback.print_exc()
+        err = {"status": "error", "message": str(e)}
+        conn.sendall(json.dumps(err).encode('utf-8'))
+    finally:
+        conn.close()
+
+def run_server(port=5005):
+    init_models()
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind(('0.0.0.0', port))
+    server.listen(5)
+    print(f"[Worker] TCP JSON Server listening on port {port}...")
+    
+    while True:
+        conn, addr = server.accept()
+        t = threading.Thread(target=handle_client, args=(conn,))
+        t.start()
+
+if __name__ == "__main__":
+    run_server()

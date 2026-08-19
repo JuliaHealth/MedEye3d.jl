@@ -1,0 +1,210 @@
+using Pkg
+Pkg.activate(joinpath(@__DIR__, "..", ".."))
+Pkg.instantiate()
+
+using MedImages
+using JSON
+using HDF5
+using LinearAlgebra
+using NIfTI
+
+# Load MedEye3d logic needed for AI inference
+include(joinpath(@__DIR__, "..", "..", "src", "ai", "AIInference.jl"))
+using .AIInference
+
+# Load shared SceneHierarchy module
+include(joinpath(@__DIR__, "..", "lib", "SceneHierarchy.jl"))
+using .SceneHierarchy
+
+function main()
+    if isempty(ARGS)
+        error("Usage: julia scripts/preprocess_dataset.jl <data_dir>")
+    end
+    data_dir = ARGS[1]
+    
+    scene_json = joinpath(data_dir, "scene_hierarchy.json")
+    if !isfile(scene_json)
+        error("scene_hierarchy.json not found in $data_dir")
+    end
+    
+    hierarchy = JSON.parse(read(scene_json, String))
+    
+    baseline_ct_path = ""
+    baseline_ct = nothing
+    
+    # 1. Identify baseline CT
+    for node in hierarchy
+        if node["type"] == "vtkMRMLScalarVolumeNode" && occursin("CT", node["name"])
+            baseline_ct_path = joinpath(data_dir, node["name"] * ".nii.gz")
+            break
+        end
+    end
+    
+    if isempty(baseline_ct_path) || !isfile(baseline_ct_path)
+        error("Baseline CT not found!")
+    end
+    
+    println("Baseline CT: ", baseline_ct_path)
+    baseline_ct = MedImages.load_image(baseline_ct_path, "CT")
+    
+    # 2. Skellytour Execution
+    skelly_path = joinpath(data_dir, "Skellytour_0.nii.gz")
+    if !isfile(skelly_path)
+        println("Generating Skellytour bone mask...")
+        skelly_out_dir = joinpath(data_dir, "skelly_0")
+        mkpath(skelly_out_dir)
+        AIInference.run_skellytour_segmentation(baseline_ct_path, skelly_out_dir)
+        
+        # skellytour names the output something like *_postprocessed.nii.gz or temp.nii.gz
+        # Wait, since skellytour takes time, we should assume it's already run for pat_6,
+        # but for new patients it will run.
+        out_files = filter(x -> endswith(x, ".nii.gz"), readdir(skelly_out_dir))
+        if !isempty(out_files)
+            mv(joinpath(skelly_out_dir, out_files[1]), skelly_path, force=true)
+            println("Moved Skellytour output to $skelly_path")
+        end
+    end
+    
+    # 3. Process All Nodes
+    h5_path = joinpath(data_dir, "preprocessed_volumes.h5")
+    println("Resampling and saving to $h5_path")
+    h5_file = h5open(h5_path, "w")
+    
+    studies = parse_studies_from_hierarchy(data_dir)
+    
+    function process_file(name, tfm_path, group_name, is_mask=false)
+        if isempty(name)
+            return
+        end
+        nii_path = joinpath(data_dir, name)
+        if !isfile(nii_path)
+            println("  Warning: Could not find file for $name")
+            return
+        end
+        
+        println("  Processing $name...")
+        img_type = "CT" # default
+        if occursin("PET", name) || occursin("SPECT", name) || occursin("SUV", name) || occursin("NM", name)
+            img_type = occursin("SPECT", name) || occursin("NM", name) ? "NM" : "PET"
+        end
+        
+        img = MedImages.load_image(nii_path, img_type)
+        T_ITK = parse_tfm(tfm_path)
+        img_tfm = apply_transform_to_medimage(img, T_ITK)
+        
+        # Resample
+        interpolator = is_mask ? MedImages.Nearest_neighbour_en : MedImages.Linear_en
+        
+        if T_ITK != Matrix{Float64}(I, 4, 4) || img.spacing != baseline_ct.spacing || img.origin != baseline_ct.origin
+            img_res = MedImages.resample_to_image(baseline_ct, img_tfm, interpolator)
+        else
+            img_res = img
+        end
+        
+        MedImages.save_med_image(h5_file, group_name, name, img_res)
+    end
+    
+    for (modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname) in studies
+        tfm_path = tfm_fname != "" ? joinpath(data_dir, tfm_fname) : ""
+        group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
+        
+        process_file(ct_fname, tfm_path, group, false)
+        process_file(pet_fname, tfm_path, group, false)
+        process_file(mask_fname, tfm_path, group, true)
+    end
+    
+    close(h5_file)
+    println("Saved preprocessed volumes.")
+    
+    # 4. Bone Subsegmentation Precomputation
+    println("Starting Bone Subsegmentation Precomputation...")
+    bone_h5_path = joinpath(data_dir, "Bone_Subsegments_0.h5")
+    bone_h5 = h5open(bone_h5_path, "w")
+    
+    # Iterate over all masks saved in preprocessed_volumes.h5
+    h5_read = h5open(h5_path, "r")
+    skelly_nii = NIfTI.niread(skelly_path)
+    skelly_vox = Float32.(skelly_nii.raw)
+    skelly_aligned = reverse(skelly_vox, dims=2)
+    
+    cis = CartesianIndices(size(baseline_ct.voxel_data))
+    temp_lesion = joinpath(data_dir, "temp_lesion.nii.gz")
+    temp_surf = joinpath(data_dir, "temp_surf.nii.gz")
+    temp_marr = joinpath(data_dir, "temp_marr.nii.gz")
+    
+    processed_lesions = Set{Int}()
+    
+    for group in keys(h5_read)
+        for ds_name in keys(h5_read[group])
+            if occursin("Lesions", ds_name)
+                println("  Extracting lesions from $group/$ds_name...")
+                mask_vol = read(h5_read["$group/$ds_name"])
+                
+                # Find all unique lesion IDs
+                lesion_ids = unique(mask_vol)
+                filter!(x -> x > 0, lesion_ids)
+                
+                for lid_float in lesion_ids
+                    lid = Int(lid_float)
+                    if lid in processed_lesions
+                        continue
+                    end
+                    push!(processed_lesions, lid)
+                    
+                    println("    Processing Lesion ID: $lid")
+                    
+                    # Create binary mask for this lesion
+                    bin_mask = (mask_vol .== lid_float)
+                    
+                    # Check if it overlaps with bone (skellytour 1 or 2)
+                    # We can use the aligned skellytour (which matches baseline CT orientation)
+                    # Wait, our mask_vol is in ITK orientation (not reversed yet!).
+                    # So we should compare with skelly_vox!
+                    if !any(bin_mask .& (skelly_vox .> 0))
+                        println("      Skipping: Not a bone lesion.")
+                        continue
+                    end
+                    
+                    # Save temporary NIfTI
+                    img_to_save = MedImages.update_voxel_data(baseline_ct, Float32.(bin_mask))
+                    MedImages.create_nii_from_medimage(img_to_save, temp_lesion)
+                    
+                    try
+                        AIInference.run_bone_subsegmentation(temp_lesion, skelly_path, temp_surf, temp_marr)
+                        
+                        surf_nii = NIfTI.niread(temp_surf)
+                        marr_nii = NIfTI.niread(temp_marr)
+                        
+                        surf_aligned = reverse(Float32.(surf_nii.raw), dims=2)
+                        marr_aligned = reverse(Float32.(marr_nii.raw), dims=2)
+                        
+                        surf_pts = findall(surf_aligned .> 0)
+                        marr_pts = findall(marr_aligned .> 0)
+                        
+                        # Convert CartesianIndex to linear index
+                        lin_surf = map(idx -> LinearIndices(cis)[idx], surf_pts)
+                        lin_marr = map(idx -> LinearIndices(cis)[idx], marr_pts)
+                        
+                        bone_h5["lesion_$(lid)_surf"] = lin_surf
+                        bone_h5["lesion_$(lid)_marr"] = lin_marr
+                        
+                    catch e
+                        println("      Error processing lesion $lid: ", e)
+                    end
+                end
+            end
+        end
+    end
+    
+    close(h5_read)
+    close(bone_h5)
+    
+    # Clean up temp files
+    rm(temp_lesion, force=true)
+    rm(temp_surf, force=true)
+    rm(temp_marr, force=true)
+    
+    println("Pre-processing complete.")
+end
+
+main()

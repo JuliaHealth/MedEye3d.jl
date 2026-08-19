@@ -2,7 +2,7 @@ module MakieEvents
 export ChangePlaneEvent, CompareTimePointsEvent, ShowSingleLesionEvent, ScrollZoomEvent
 export WindowingEvent, PaintValEvent, SyncLesionEvent
 export ChangeTimePointEvent, ToggleLesionEvent, RefreshListEvent
-export AddAutoPetEvent, SyncMissingEvent, GenManualEvent
+export AddAutoPetEvent, AIInferenceResultEvent, AIStatusUpdateEvent, SyncMissingEvent, GenManualEvent
 export MapLinkEvent, AutoRunPreprocessEvent, RunPreprocessEvent, ShowBoneMaskEvent, ShowMaskLayerEvent, SaveMRBEvent
 export CloseWindowEvent, ResizeWindowEvent, SetWindowTitleEvent, ChangeBrushSizeEvent, ToggleMoveLesionModeEvent
 struct ChangePlaneEvent
@@ -48,6 +48,19 @@ struct RefreshListEvent end
 
 struct AddAutoPetEvent 
     algorithm::String
+    channel::Channel{Any}
+end
+struct AIInferenceResultEvent
+    algorithm::String
+    active_id::Int
+    cx::Int
+    cy::Int
+    cz::Int
+    mask::Union{Nothing, Array{<:Real, 3}}
+    seg_vol::Union{Nothing, Array{Float32, 3}}
+end
+struct AIStatusUpdateEvent
+    text::String
 end
 struct SyncMissingEvent end
 struct GenManualEvent

@@ -64,7 +64,7 @@ end
 Extracts cortical bone surface and bone marrow subsegment fragments around a bone metastasis.
 """
 function run_bone_subsegmentation(lesion_path::String, bone_path::String, out_surface::String, out_marrow::String; pyenv=DEFAULT_PYENV)
-    script_path = joinpath(@__DIR__, "..", "..", "scripts", "bone_subsegmentation.py")
+    script_path = joinpath(@__DIR__, "..", "..", "scripts", "ai", "bone_subsegmentation.py")
     
     env = copy(ENV)
     env["CUDA_VISIBLE_DEVICES"] = "1"
