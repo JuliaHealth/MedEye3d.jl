@@ -712,24 +712,28 @@ function coordinateDisplay(
 
                 # get the aggregation here, only when the type is mouseStruct.
                 if typeof(channelData) == MouseStruct
-                    # Coalesce rapid mouse movements: drain stale intermediate moves,
-                    # but preserve button state transitions (press / release).
-                    while !isempty(mainChannel) && typeof(fetch(mainChannel)) == MouseStruct
-                        peeked = fetch(mainChannel)
-                        if peeked.isRightButtonDown != channelData.isRightButtonDown ||
-                           peeked.isLeftButtonDown != channelData.isLeftButtonDown
-                            break
-                        end
-                        channelData = take!(mainChannel)  # discard stale move, keep latest
-                    end
-
                     # Left-button drag aggregation for mask painting ONLY when painting is active.
                     if channelData.isLeftButtonDown && stateInstances[1].valueForMasToSet.is_painting_active
                         mouseStructAggregationArray::Vector{MouseStruct} = [channelData]
                         while !isempty(mainChannel) && typeof(fetch(mainChannel)) == MouseStruct
+                            peeked = fetch(mainChannel)
+                            if !peeked.isLeftButtonDown
+                                break
+                            end
                             push!(mouseStructAggregationArray, take!(mainChannel))
                         end
                         channelData = mouseStructAggregationArray
+                    else
+                        # Coalesce rapid non-painting mouse movements: drain stale intermediate moves,
+                        # but preserve button state transitions (press / release).
+                        while !isempty(mainChannel) && typeof(fetch(mainChannel)) == MouseStruct
+                            peeked = fetch(mainChannel)
+                            if peeked.isRightButtonDown != channelData.isRightButtonDown ||
+                               peeked.isLeftButtonDown != channelData.isLeftButtonDown
+                                break
+                            end
+                            channelData = take!(mainChannel)  # discard stale move, keep latest
+                        end
                     end
 
                 elseif typeof(channelData) == CalcDimsStruct || typeof(channelData) == forDisplayObjects || typeof(channelData) == FullScrollableDat

@@ -57,6 +57,10 @@ include(joinpath("display", "GLFW", "startModules", "PrepareWindow.jl"))
 
 
 
+include(joinpath("postprocessing", "StrokeRasterization.jl"))
+using .StrokeRasterization
+export StrokeRasterization
+
 include(joinpath("display", "reactingToMouseKeyboard", "ReactToScroll.jl"))
 include(joinpath("display", "reactingToMouseKeyboard", "ReactOnMouseClickAndDrag.jl"))
 
@@ -84,6 +88,10 @@ export AIInference
 include(joinpath("preprocessing", "BoneSubsegmentation.jl"))
 using .BoneSubsegmentation
 export BoneSubsegmentation
+
+include(joinpath("postprocessing", "ConnectedComponents.jl"))
+using .ConnectedComponents
+export ConnectedComponents
 
 include(joinpath("display", "LesionMetadataWindow.jl"))
 include(joinpath("display", "HeuristicsEngine.jl"))
