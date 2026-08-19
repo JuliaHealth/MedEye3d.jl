@@ -160,7 +160,11 @@ function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32
             pred_file = basename(resp["prediction_path"])
             local_pred_path = joinpath(INFERENCE_DIR, pred_file)
             pred_im = MedImages.load_image(local_pred_path, "unknown")
-            return Array{UInt8}(pred_im.voxel_data)
+            raw_mask = Array{UInt8}(pred_im.voxel_data)
+            # Post-process: extract only largest connected component using GPU KernelAbstractions
+            clean_mask = MedEye3d.ConnectedComponents.extract_largest_connected_component(raw_mask)
+            println("[InferenceClient] HELPNet post-processing (LCC): $(count(raw_mask .> 0)) -> $(count(clean_mask .> 0)) voxels"); flush(stdout)
+            return clean_mask
         else
             println("[InferenceClient ERROR] Python Worker Error: $(resp["message"])"); flush(stdout)
             return nothing

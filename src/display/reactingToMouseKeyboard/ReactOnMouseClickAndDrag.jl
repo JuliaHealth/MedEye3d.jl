@@ -13,7 +13,7 @@ so we modify the data that is the basis of the mouse interaction mask  and we pa
 module ReactOnMouseClickAndDrag
 using Logging, Parameters, Setfield, GLFW, ModernGL, Dates, Parameters, Logging, Base.Threads
 using ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils
-using ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForLine, ..ReactToScroll, ..DisplayWords
+using ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForLine, ..ReactToScroll, ..DisplayWords, ..StrokeRasterization
 import Logging, Base.Threads
 export registerMouseClickFunctions
 export reactToMouseDrag
@@ -148,53 +148,55 @@ const quadZoomState = QuadZoomState(false, 0, Vector{Float32}[], Int64[])
 """
 used when we want to save some manual modifications
 """
-# function react_to_draw(textureList,actor,mouseCoords_channel)
 function react_to_draw(mouseStructArray::Vector{MouseStruct}, stateObjects::Vector{StateDataFields})
     stateObject = stateObjects[stateObjects[1].switchIndex]
-    if !stateObject.valueForMasToSet.is_painting_active
+    if !stateObject.valueForMasToSet.is_painting_active || isempty(stateObject.textureToModifyVec)
         return
     end
     texture = stateObject.textureToModifyVec[1]
     calcDim = stateObject.calcDimsStruct
 
-
-    # mouseCoords=take!(mouseCoords_channel).lastCoordinates
-    # mappedCoords=translateMouseToTexture(texture.strokeWidth, mouseCoords, actor.actor.calcDimsStruct)
-    # # two dimensional coordinates on plane of intrest (current slice)
-
-    """
-    get a list of MouseStruct from fetch and take!
-    map each MouseStruct using translateMouseToTexture
-    result will be mappedCoords, in react_to_draw
-    check whether the length of the mappedCoords is greater than 0
-    """
-    mappedCoords = Vector{CartesianIndex{2}}()
+    # Extract all sampled mouse coordinates in texture pixel space
+    sampledPoints = Tuple{Int,Int}[]
     for mouseStruct in mouseStructArray
         mouseCoords = mouseStruct.lastCoordinates
-        actualW = mouseStruct.actualWindowWidth
-        actualH = mouseStruct.actualWindowHeight
-        append!(mappedCoords, translateMouseToTexture(texture.strokeWidth, mouseCoords, stateObject.calcDimsStruct, actualW, actualH))
+        actualW = Float64(mouseStruct.actualWindowWidth)
+        actualH = Float64(mouseStruct.actualWindowHeight)
+        for c in mouseCoords
+            texX, texY = StructsManag.getTextureCoordinatesFromScreen(c[1], c[2], calcDim, actualW, actualH)
+            ix, iy = Int(round(texX)), Int(round(texY))
+            if ix >= 1 && ix <= calcDim.imageTextureWidth && iy >= 1 && iy <= calcDim.imageTextureHeight
+                push!(sampledPoints, (ix, iy))
+            end
+        end
     end
 
-    # @info "react_to_draw after channel" mappedCoords
+    if isempty(sampledPoints)
+        return
+    end
 
-    # is_sth_in=true
+    # Build polyline: connect from last point of previous frame if on the same slice
+    pointsToRasterize = Tuple{Int,Int}[]
+    if !stateObject.isSliceChanged && !isempty(stateObject.lastPaintCoords)
+        push!(pointsToRasterize, (stateObject.lastPaintCoords[1][1], stateObject.lastPaintCoords[1][2]))
+    end
+    append!(pointsToRasterize, sampledPoints)
+    stateObject.isSliceChanged = false
 
-    twoDimDat = stateObject.currentlyDispDat |> # accessing currently displayed data
-                (singSl) -> singSl.listOfDataAndImageNames[singSl.nameIndexes[texture.name]] #accessing the texture data we want to modify
+    # Store last point for next frame
+    stateObject.lastPaintCoords = [CartesianIndex(sampledPoints[end][1], sampledPoints[end][2])]
 
+    # Access current slice data
+    twoDimDat = stateObject.currentlyDispDat |>
+                (singSl) -> singSl.listOfDataAndImageNames[singSl.nameIndexes[texture.name]]
 
+    toSet = convert(twoDimDat.type, convert(parameter_type(texture), stateObject.valueForMasToSet.value))
+    strokeW = Int(texture.strokeWidth)
 
-    toSet = convert(parameter_type(texture), stateObject.valueForMasToSet.value)
-    sliceDat = modSlice!(twoDimDat, mappedCoords, convert(twoDimDat.type, toSet)) # modifying data associated with texture
+    # In-place continuous thick-line interpolation using KernelAbstractions
+    StrokeRasterization.rasterize_polyline!(twoDimDat.dat, pointsToRasterize, strokeW, toSet)
 
-
-    #  updateTexture(twoDimDat.type,sliceDat, texture,0,0,calcDim.imageTextureWidth,calcDim.imageTextureHeight  )
-
-    singleSliceDat = setproperties(stateObject.currentlyDispDat, (listOfDataAndImageNames = [sliceDat]))
-
-
-
+    singleSliceDat = setproperties(stateObject.currentlyDispDat, (listOfDataAndImageNames = [twoDimDat]))
     updateImagesDisplayed(singleSliceDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, stateObject.calcDimsStruct, stateObject.valueForMasToSet, stateObject.crosshairFields, stateObject.mainRectFields, stateObject.displayMode)
 end#react_to_draw
 
@@ -265,6 +267,13 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
     if !mousestr.isRightButtonDown
         for state in mainStates
             empty!(state.lastPanDragCoords)
+        end
+    end
+
+    # If the left mouse button is released, clear the paint stroke tail
+    if !mousestr.isLeftButtonDown
+        for state in mainStates
+            empty!(state.lastPaintCoords)
         end
     end
 
