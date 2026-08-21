@@ -203,14 +203,15 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
         MedImages.create_nii_from_medimage(im_ct, ct_path)
     end
     
-    # Always write points because they change every interaction
-    im_pt = MedImage(voxel_data=points_vol, spacing=dummy_sp, origin=dummy_or, direction=dummy_dir, image_type=MedImages.MedImage_data_struct.MRI_type, image_subtype=MedImages.MedImage_data_struct.CT_subtype, patient_id="dummy")
-    MedImages.create_nii_from_medimage(im_pt, point_path)
+    # Extract non-zero scribble coordinates directly (0-indexed for Python)
+    # This avoids expensive 3D NIfTI file generation for a few scribble points
+    scribble_indices = findall(points_vol .> 0)
+    scribble_coords = [[c[1]-1, c[2]-1, c[3]-1] for c in scribble_indices]
     
     req = Dict(
         "command" => "nninteractive",
         "ct_path" => ct_path,
-        "point_path" => point_path,
+        "scribble_coords" => scribble_coords,
         "out_dir" => "/tmp/medeye3d_inference"
     )
     

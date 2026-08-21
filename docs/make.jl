@@ -15,7 +15,12 @@ makedocs(;
     pages=[
         "Manual" => [
             "Get Started" => "manual/get_started.md",
-            "Code" => "manual/code_example.md"
+            "Code Examples" => "manual/code_example.md",
+            "AI Inference Pipeline" => "manual/ai_inference_pipeline.md",
+            "GPU Kernels & Post-Processing" => "manual/gpu_kernels_and_postprocessing.md",
+            "QuadView & 3D Navigation" => "manual/quad_view_and_navigation.md",
+            "Bone Subsegmentation & MRB" => "manual/bone_subsegmentation_and_mrb.md",
+            "GUI Controls & Windowing" => "manual/gui_controls_and_windowing.md"
         ],
         "Developers' documentation" => [
             "Visualization Playbook" => "devs/playbook.md"
