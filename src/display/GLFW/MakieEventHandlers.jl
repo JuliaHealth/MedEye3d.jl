@@ -700,6 +700,23 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
     catch e
         println("WARNING: Failed to auto-sync Lesion 1 on TP change: $e"); flush(stdout)
     end
+    
+    # Preload the new CT into Docker nnInteractive GPU memory (fire-and-forget)
+    try
+        tp_voxels_for_preload = tp_data_cache[new_tp]
+        if !isempty(tp_voxels_for_preload)
+            panel1_voxels = tp_voxels_for_preload[1]  # Axial panel data
+            for (name, vol) in panel1_voxels
+                if name == "CT"
+                    InferenceClient.preload_ct_for_nninteractive(Array{Float32,3}(vol))
+                    println("[TP Switch] CT preload initiated for $label"); flush(stdout)
+                    break
+                end
+            end
+        end
+    catch e
+        println("[TP Switch] CT preload skipped: $e"); flush(stdout)
+    end
 end
 
 function reactToToggleLesion(data::ToggleLesionEvent, stateObjects::Vector{StateDataFields})

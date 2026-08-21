@@ -642,6 +642,21 @@ function coordinateDisplay(
     # Start the single persistent inference worker thread
     MakieEventHandlers.start_inference_worker()
 
+    # Preload initial CT into Docker nnInteractive GPU (fire-and-forget)
+    try
+        if !isempty(stateInstances) && !isempty(stateInstances[1].onScrollData.dataToScroll)
+            for dat in stateInstances[1].onScrollData.dataToScroll
+                if dat.name == "CT"
+                    InferenceClient.preload_ct_for_nninteractive(Array{Float32,3}(dat.dat))
+                    println("[Display] Initial CT preload into nnInteractive GPU initiated"); flush(stdout)
+                    break
+                end
+            end
+        end
+    catch e
+        println("[Display] Initial CT preload skipped: $e"); flush(stdout)
+    end
+
     shouldStop = [false]
     
     #    in case we are recreating all we need to destroy old textures ... generally simplest is destroy window
