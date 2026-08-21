@@ -187,11 +187,9 @@ def run_nninteractive(ct_path, point_path, out_dir, scribble_coords=None):
     # Transpose back to (X, Y, Z) for Julia — must match CT's on-disk layout
     result_mask = np.transpose(target_zyx, (2, 1, 0))
         
-    # Save output with CT's affine — CRITICAL: MedImages/ITKIOWrapper will resample
-    # the prediction if the affine doesn't match the CT's affine, causing the mask
-    # to be loaded at the wrong resolution (e.g., 64³ instead of the original size)
-    ct_affine = CURRENT_LOADED_CT_AFFINE if CURRENT_LOADED_CT_AFFINE is not None else np.eye(4)
-    nib.save(nib.Nifti1Image(result_mask.astype(np.uint8), ct_affine), pred_path)
+    # Save output with identity affine — Julia loads via NIfTI.jl (raw voxels,
+    # no resampling), so the affine doesn't matter for the data transfer.
+    nib.save(nib.Nifti1Image(result_mask.astype(np.uint8), np.eye(4)), pred_path)
     print(f"[Worker] nninteractive produced {np.sum(result_mask)} voxels, saved to {pred_path}")
     return str(pred_path)
 
