@@ -777,7 +777,9 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
             for dat in st.onScrollData.dataToScroll
                 # Search for the newly painted scribbles in the texture they actually painted into
                 if dat.name == active_paint_tex || dat.name == "manualModif"
-                    p = findall(dat.dat .== Float32(active_id))
+                    p = findall((dat.dat .== Float32(active_id)) .| 
+                                (dat.dat .== Float32(st.valueForMasToSet.value)) .| 
+                                (dat.name == "manualModif" .& (dat.dat .> 0.0f0)))
                     if !isempty(p)
                         println("[reactToAddAutoPet] Found $(length(p)) painted voxels for lesion $active_id in panel $p_idx $(dat.name)"); flush(stdout)
                         if p_idx == 3 # Sagittal (Y, Z, X) -> Canonical (X, Y, Z)
@@ -836,14 +838,9 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
         channel = data.channel
         ct_vol_copy = copy(ct_vol)
         pet_vol_copy = copy(pet_vol)
-        bone_atlas = global_bone_atlas[]
 
-        # For HELPNet, use bone atlas as CT input if available
-        ct_input = if algo == "HELPNet (AI)" && bone_atlas !== nothing
-            copy(bone_atlas)
-        else
-            ct_vol_copy
-        end
+        # Always use the true CT volume for HELPNet and NNInteractive
+        ct_input = ct_vol_copy
 
         ai_status_text[] = "[Preparing] inference ($(algo))..."
         println("Queuing $(algo) inference job (seed=$cx,$cy,$cz, lesion=$active_id, $(length(painted_pts)) painted points)..."); flush(stdout)
@@ -1205,14 +1202,13 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
                         pts = (data.layer == 2) ? (raw_surf isa AbstractArray{<:CartesianIndex} ? raw_surf : findall(raw_surf .> 0)) :
                                                   (raw_marr isa AbstractArray{<:CartesianIndex} ? raw_marr : findall(raw_marr .> 0))
                         
-                        max_y = size(raw_surf isa AbstractArray{<:CartesianIndex} ? stateObjects[1].onScrollData.dataToScroll[1].dat : raw_surf, 2)
-                        # We must reverse the Y axis to match the reversed CT base volumes
-                        indices = if panel_idx == 3
-                            [CartesianIndex(max_y - I[2] + 1, I[3], I[1]) for I in pts]
-                        elseif panel_idx == 4
-                            [CartesianIndex(I[1], I[3], max_y - I[2] + 1) for I in pts]
-                        else
-                            [CartesianIndex(I[1], max_y - I[2] + 1, I[3]) for I in pts]
+                        # Use canonical indices matching reactToSyncLesion and reactToActiveLesionChanged
+                        indices = if panel_idx == 3 # Sagittal (Y, Z, X)
+                            [CartesianIndex(I[2], I[3], I[1]) for I in pts]
+                        elseif panel_idx == 4 # Coronal (X, Z, Y)
+                            [CartesianIndex(I[1], I[3], I[2]) for I in pts]
+                        else # Axial (X, Y, Z)
+                            pts
                         end
                         fill!(scrDat.dat, 0.0f0)
                         if !isempty(indices)

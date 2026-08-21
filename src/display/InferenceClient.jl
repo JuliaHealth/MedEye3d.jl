@@ -3,6 +3,7 @@ module InferenceClient
 using Sockets
 using JSON
 using MedImages
+using ..ConnectedComponents
 
 export start_python_worker, run_helpnet_inference, run_nninteractive, insert_patch!
 
@@ -162,7 +163,7 @@ function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32
             pred_im = MedImages.load_image(local_pred_path, "unknown")
             raw_mask = Array{UInt8}(pred_im.voxel_data)
             # Post-process: extract only largest connected component using GPU KernelAbstractions
-            clean_mask = MedEye3d.ConnectedComponents.extract_largest_connected_component(raw_mask)
+            clean_mask = ConnectedComponents.extract_largest_connected_component(raw_mask)
             println("[InferenceClient] HELPNet post-processing (LCC): $(count(raw_mask .> 0)) -> $(count(clean_mask .> 0)) voxels"); flush(stdout)
             return clean_mask
         else
