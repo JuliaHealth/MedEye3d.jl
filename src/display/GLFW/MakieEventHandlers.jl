@@ -1008,10 +1008,21 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
         end
     end
 
-    # Jump panels to seed location
-    targets = [(1, data.cz), (2, data.cz), (3, data.cx), (4, data.cy)]
+    # Compute center of the actual segmentation result (not the seed point)
+    seg_indices = findall(seg_vol .== Float32(data.active_id))
+    if !isempty(seg_indices)
+        center_x = round(Int, mean(i[1] for i in seg_indices))
+        center_y = round(Int, mean(i[2] for i in seg_indices))
+        center_z = round(Int, mean(i[3] for i in seg_indices))
+        println("[AI Result] Centering on segmentation centroid: ($center_x, $center_y, $center_z) from $(length(seg_indices)) voxels"); flush(stdout)
+    else
+        center_x, center_y, center_z = data.cx, data.cy, data.cz
+        println("[AI Result] No segmented voxels found, using seed: ($center_x, $center_y, $center_z)"); flush(stdout)
+    end
+    # Jump panels to segmentation center
+    targets = [(1, center_z), (2, center_z), (3, center_x), (4, center_y)]
     if length(stateObjects) >= 5
-        push!(targets, (5, data.cz))
+        push!(targets, (5, center_z))
     end
     for (p_idx, target_sl) in targets
         if p_idx <= length(stateObjects)
