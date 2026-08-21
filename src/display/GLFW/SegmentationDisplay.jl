@@ -794,7 +794,7 @@ function coordinateDisplay(
                     flush(stdout)
                     # Update AI status label so user sees the error
                     try
-                        MakieEventHandlers.ai_status_text[] = "[Error] $(sprint(showerror, e))"
+                        MakieEventHandlers.ai_status_text[] = MakieEventHandlers.safe_status_text("[Error] $(sprint(showerror, e))")
                     catch; end
                     # Log to file for post-mortem analysis
                     try
