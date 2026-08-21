@@ -3,7 +3,6 @@ module InferenceClient
 using Sockets
 using JSON
 using MedImages
-using NIfTI
 using ..ConnectedComponents
 
 export start_python_worker, run_helpnet_inference, run_nninteractive, insert_patch!
@@ -161,9 +160,8 @@ function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32
         if resp["status"] == "success"
             pred_file = basename(resp["prediction_path"])
             local_pred_path = joinpath(INFERENCE_DIR, pred_file)
-            # Use NIfTI.jl directly — MedImages/ITKIOWrapper resamples binary masks
-            pred_nii = NIfTI.niread(local_pred_path)
-            raw_mask = Array{UInt8}(pred_nii.raw)
+            pred_im = MedImages.load_image(local_pred_path, "unknown")
+            raw_mask = Array{UInt8}(pred_im.voxel_data)
             # Post-process: extract only largest connected component using GPU KernelAbstractions
             clean_mask = ConnectedComponents.extract_largest_connected_component(raw_mask)
             println("[InferenceClient] HELPNet post-processing (LCC): $(count(raw_mask .> 0)) -> $(count(clean_mask .> 0)) voxels"); flush(stdout)
@@ -228,11 +226,8 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
         if resp["status"] == "success"
             pred_file = basename(resp["prediction_path"])
             local_pred_path = joinpath(INFERENCE_DIR, pred_file)
-            # Use NIfTI.jl directly instead of MedImages — MedImages/ITKIOWrapper
-            # resamples data based on NIfTI affine, which destroys binary mask data
-            # (most voxels get interpolated to 0 during reorientation)
-            pred_nii = NIfTI.niread(local_pred_path)
-            return Array{UInt8}(pred_nii.raw)
+            pred_im = MedImages.load_image(local_pred_path, "unknown")
+            return Array{UInt8}(pred_im.voxel_data)
         else
             println("[InferenceClient ERROR] Python Worker Error: $(resp["message"])"); flush(stdout)
             return nothing
