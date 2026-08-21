@@ -25,6 +25,13 @@ using Observables
 # AI status Observable — LesionMetadataWindow reads this for the GUI label
 const ai_status_text = Observable{String}("Ready")
 
+# Sanitize AI status text for Makie Label rendering (ASCII-only, truncated)
+function safe_status_text(msg::String)
+    s = replace(msg, "\u2014" => "-", "\u2026" => "...")
+    s = String(filter(c -> isascii(c), collect(s)))
+    return length(s) > 80 ? s[1:80] * "..." : s
+end
+
 # Internal inference queue — serializes all Docker communication through a single worker thread
 struct InferenceJob
     algorithm::String
@@ -49,7 +56,7 @@ function start_inference_worker()
             try
                 job = take!(inference_queue)
                 
-                ai_status_text[] = "[Sending] to Docker ($(job.algorithm))..."
+                ai_status_text[] = safe_status_text("[Sending] to Docker ($(job.algorithm))...")
                 println("[AI Worker] Processing $(job.algorithm) at ($(job.cx),$(job.cy),$(job.cz)) for lesion $(job.active_id)..."); flush(stdout)
                 
                 mask = nothing
@@ -63,16 +70,16 @@ function start_inference_worker()
                         job.cx, job.cy, job.cz)
                 else
                     println("[AI Worker] WARNING: Unknown algorithm: $(job.algorithm)"); flush(stdout)
-                    ai_status_text[] = "[Warning] Unknown algorithm: $(job.algorithm)"
+                    ai_status_text[] = safe_status_text("[Warning] Unknown algorithm: $(job.algorithm)")
                     continue
                 end
                 
                 if mask !== nothing
                     voxel_count = count(mask .> 0)
-                    ai_status_text[] = "[Applying] result ($voxel_count voxels)..."
+                    ai_status_text[] = safe_status_text("[Applying] result ($voxel_count voxels)...")
                     println("[AI Worker] Docker returned mask with $voxel_count voxels. Posting to channel."); flush(stdout)
                 else
-                    ai_status_text[] = "[Warning] Docker returned no mask"
+                    ai_status_text[] = safe_status_text("[Warning] Docker returned no mask")
                     println("[AI Worker] Docker returned nothing (inference failed)."); flush(stdout)
                 end
                 
@@ -90,7 +97,7 @@ function start_inference_worker()
                 err_msg = sprint(showerror, e)
                 println("[AI Worker] ERROR: $err_msg"); flush(stdout)
                 println(sprint(showerror, e, catch_backtrace())); flush(stdout)
-                ai_status_text[] = "[Error] AI Worker Error: $err_msg"
+                ai_status_text[] = safe_status_text("[Error] AI Worker Error: $err_msg")
                 try
                     open("/tmp/medeye3d_errors.log", "a") do f
                         println(f, "$(Dates.now()) AI Worker ERROR: $err_msg")
@@ -717,7 +724,7 @@ function reactToRefreshList(data::RefreshListEvent, stateObjects::Vector{StateDa
 end
 
 function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateDataFields})
-    ai_status_text[] = "[Processing] AI request ($(data.algorithm))..."
+    ai_status_text[] = safe_status_text("[Processing] AI request ($(data.algorithm))...")
     try
         println("Add New Lesion (Auto-PET) triggered with algorithm: $(data.algorithm)"); flush(stdout)
         
@@ -777,9 +784,15 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
             for dat in st.onScrollData.dataToScroll
                 # Search for the newly painted scribbles in the texture they actually painted into
                 if dat.name == active_paint_tex || dat.name == "manualModif"
-                    p = findall((dat.dat .== Float32(active_id)) .| 
-                                (dat.dat .== Float32(st.valueForMasToSet.value)) .| 
-                                (dat.name == "manualModif" .& (dat.dat .> 0.0f0)))
+                    # For manualModif texture, accept ANY non-zero voxels as scribbles.
+                    # For other textures (Mask, segmentation), only match active_id or brush value.
+                    is_manual = dat.name == "manualModif"
+                    p = if is_manual
+                        findall(dat.dat .> 0.0f0)
+                    else
+                        findall((dat.dat .== Float32(active_id)) .| 
+                                (dat.dat .== Float32(st.valueForMasToSet.value)))
+                    end
                     if !isempty(p)
                         println("[reactToAddAutoPet] Found $(length(p)) painted voxels for lesion $active_id in panel $p_idx $(dat.name)"); flush(stdout)
                         if p_idx == 3 # Sagittal (Y, Z, X) -> Canonical (X, Y, Z)
@@ -808,7 +821,7 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
         else
             msg = "No painted scribbles found for AI inference. Paint scribbles on the lesion first."
             println("ERROR: $msg"); flush(stdout)
-            ai_status_text[] = "[Error] $msg"
+            ai_status_text[] = safe_status_text("[Error] $msg")
             try
                 open("/tmp/medeye3d_errors.log", "a") do f
                     println(f, "$(Dates.now()) [reactToAddAutoPet] ERROR: $msg")
@@ -842,7 +855,7 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
         # Always use the true CT volume for HELPNet and NNInteractive
         ct_input = ct_vol_copy
 
-        ai_status_text[] = "[Preparing] inference ($(algo))..."
+        ai_status_text[] = safe_status_text("[Preparing] inference ($(algo))...")
         println("Queuing $(algo) inference job (seed=$cx,$cy,$cz, lesion=$active_id, $(length(painted_pts)) painted points)..."); flush(stdout)
 
         # Put job on the inference queue — the single persistent worker thread
@@ -854,7 +867,7 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
         err_msg = sprint(showerror, e)
         println("ERROR in reactToAddAutoPet: $err_msg"); flush(stdout)
         println(sprint(showerror, e, catch_backtrace())); flush(stdout)
-        ai_status_text[] = "[Error] AI Error: $err_msg"
+        ai_status_text[] = safe_status_text("[Error] AI Error: $err_msg")
         try
             open("/tmp/medeye3d_errors.log", "a") do f
                 println(f, "$(Dates.now()) reactToAddAutoPet ERROR: $err_msg")
@@ -870,14 +883,14 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
 
     if data.mask === nothing
         println("WARNING: AI inference failed or returned nothing."); flush(stdout)
-        ai_status_text[] = "[Warning] Inference failed (no mask returned)"
+        ai_status_text[] = safe_status_text("[Warning] Inference failed (no mask returned)")
         return
     end
 
     seg_vol = data.seg_vol
     if seg_vol === nothing
         println("ERROR: No segmentation volume reference available. Cannot apply AI results. No fallbacks allowed."); flush(stdout)
-        ai_status_text[] = "[Error] No segmentation volume (Mask) found — cannot apply AI results"
+        ai_status_text[] = safe_status_text("[Error] No segmentation volume (Mask) found - cannot apply AI results")
         return
     end
 
@@ -1020,7 +1033,7 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
 
     # Update status label
     voxel_count = count(data.mask .> 0)
-    ai_status_text[] = "[Success] Done ($(voxel_count) voxels, lesion $(data.active_id))"
+    ai_status_text[] = safe_status_text("[Success] Done ($(voxel_count) voxels, lesion $(data.active_id))")
 end
 function reactToSyncMissing(data::SyncMissingEvent, stateObjects::Vector{StateDataFields})
     println("Sync Missing Lesions across TPs triggered."); flush(stdout)
