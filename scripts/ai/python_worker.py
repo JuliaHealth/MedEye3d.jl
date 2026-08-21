@@ -32,6 +32,7 @@ INFERENCE_LOCK = threading.Lock()  # Serialize all inference calls (defense-in-d
 
 CURRENT_LOADED_CT_PATH = None
 CURRENT_LOADED_CT_SHAPE = None
+CURRENT_LOADED_CT_AFFINE = None  # Store CT's NIfTI affine so predictions match
 
 def init_models():
     global HELPNET_MODEL, DEVICE, NN_INTERACTIVE_SESSION
@@ -128,7 +129,7 @@ def run_helpnet(ct_path, pet_path, point_path, out_dir):
     return str(pred_path)
 
 def run_nninteractive(ct_path, point_path, out_dir, scribble_coords=None):
-    global NN_INTERACTIVE_SESSION, CURRENT_LOADED_CT_PATH, CURRENT_LOADED_CT_SHAPE
+    global NN_INTERACTIVE_SESSION, CURRENT_LOADED_CT_PATH, CURRENT_LOADED_CT_SHAPE, CURRENT_LOADED_CT_AFFINE
     print("[Worker] Running NNInteractive (CT-only mode)...")
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -144,6 +145,7 @@ def run_nninteractive(ct_path, point_path, out_dir, scribble_coords=None):
         print(f"[Worker] Loading new CT scan into nnInteractive session: {ct_path}")
         ct_nib = nib.load(ct_path)
         ct_vol = ct_nib.get_fdata()
+        CURRENT_LOADED_CT_AFFINE = ct_nib.affine  # Store affine for prediction output
         ct_vol_zyx = np.transpose(ct_vol, (2, 1, 0))
         image = ct_vol_zyx[np.newaxis, ...].astype(np.float32)
         NN_INTERACTIVE_SESSION.set_image(image)
@@ -154,8 +156,9 @@ def run_nninteractive(ct_path, point_path, out_dir, scribble_coords=None):
         print(f"[Worker] Reusing cached CT scan in nnInteractive session: {ct_path}")
         NN_INTERACTIVE_SESSION.reset_interactions()
     
-    # Fast interactive focal lesion segmentation
-    NN_INTERACTIVE_SESSION.set_do_autozoom(False)
+    # Enable autozoom for better segmentation quality — the model iteratively
+    # zooms and refines its prediction for more accurate results
+    NN_INTERACTIVE_SESSION.set_do_autozoom(True)
     
     target_zyx = np.zeros(CURRENT_LOADED_CT_SHAPE, dtype=np.uint8)
     NN_INTERACTIVE_SESSION.set_target_buffer(target_zyx)
@@ -181,11 +184,14 @@ def run_nninteractive(ct_path, point_path, out_dir, scribble_coords=None):
     print(f"[Worker] Using MIC-DKFZ nnInteractive Model with {np.count_nonzero(scribble_mask_zyx)} scribble voxels")
     NN_INTERACTIVE_SESSION.add_scribble_interaction(scribble_mask_zyx, include_interaction=True, run_prediction=True)
     
-    # Transpose back to (X, Y, Z) for Julia
+    # Transpose back to (X, Y, Z) for Julia — must match CT's on-disk layout
     result_mask = np.transpose(target_zyx, (2, 1, 0))
         
-    # Save output
-    nib.save(nib.Nifti1Image(result_mask.astype(np.uint8), np.eye(4)), pred_path)
+    # Save output with CT's affine — CRITICAL: MedImages/ITKIOWrapper will resample
+    # the prediction if the affine doesn't match the CT's affine, causing the mask
+    # to be loaded at the wrong resolution (e.g., 64³ instead of the original size)
+    ct_affine = CURRENT_LOADED_CT_AFFINE if CURRENT_LOADED_CT_AFFINE is not None else np.eye(4)
+    nib.save(nib.Nifti1Image(result_mask.astype(np.uint8), ct_affine), pred_path)
     print(f"[Worker] nninteractive produced {np.sum(result_mask)} voxels, saved to {pred_path}")
     return str(pred_path)
 
