@@ -128,6 +128,36 @@ def run_helpnet(ct_path, pet_path, point_path, out_dir):
     nib.save(nib.Nifti1Image(pred, ct_nib.affine), str(pred_path))
     return str(pred_path)
 
+def preload_ct(ct_path, out_dir="/tmp/medeye3d_inference"):
+    """Preload CT into nnInteractive GPU memory for faster subsequent inference.
+    Starts background preprocessing via set_image() without blocking for completion.
+    """
+    global NN_INTERACTIVE_SESSION, CURRENT_LOADED_CT_PATH, CURRENT_LOADED_CT_SHAPE, CURRENT_LOADED_CT_AFFINE
+    
+    if NN_INTERACTIVE_SESSION is None:
+        raise RuntimeError("nnInteractive session is not initialized. No fallbacks allowed.")
+    
+    out_dir = Path(out_dir)
+    ct_path = resolve_path(ct_path, out_dir)
+    
+    if CURRENT_LOADED_CT_PATH == ct_path:
+        print(f"[Worker] CT already preloaded: {ct_path}")
+        return
+    
+    print(f"[Worker] Preloading CT into GPU: {ct_path}")
+    ct_nib = nib.load(ct_path)
+    ct_vol = ct_nib.get_fdata()
+    CURRENT_LOADED_CT_AFFINE = ct_nib.affine
+    ct_vol_zyx = np.transpose(ct_vol, (2, 1, 0))
+    image = ct_vol_zyx[np.newaxis, ...].astype(np.float32)
+    # set_image offloads preprocessing to a background thread
+    NN_INTERACTIVE_SESSION.set_image(image)
+    CURRENT_LOADED_CT_PATH = ct_path
+    CURRENT_LOADED_CT_SHAPE = ct_vol_zyx.shape
+    # Don't call _finish_preprocessing here — let it run in background.
+    # run_nninteractive will wait for it when needed.
+    print(f"[Worker] CT preload initiated (preprocessing runs in background)")
+
 def run_nninteractive(ct_path, point_path, out_dir, scribble_coords=None):
     global NN_INTERACTIVE_SESSION, CURRENT_LOADED_CT_PATH, CURRENT_LOADED_CT_SHAPE, CURRENT_LOADED_CT_AFFINE
     print("[Worker] Running NNInteractive (CT-only mode)...")
@@ -140,21 +170,23 @@ def run_nninteractive(ct_path, point_path, out_dir, scribble_coords=None):
     
     ct_path = resolve_path(ct_path, out_dir)
     
-    # Check if CT is already cached in session
+    # Check if CT is already cached (possibly by preload_ct)
     if CURRENT_LOADED_CT_PATH != ct_path:
         print(f"[Worker] Loading new CT scan into nnInteractive session: {ct_path}")
         ct_nib = nib.load(ct_path)
         ct_vol = ct_nib.get_fdata()
-        CURRENT_LOADED_CT_AFFINE = ct_nib.affine  # Store affine for prediction output
+        CURRENT_LOADED_CT_AFFINE = ct_nib.affine
         ct_vol_zyx = np.transpose(ct_vol, (2, 1, 0))
         image = ct_vol_zyx[np.newaxis, ...].astype(np.float32)
         NN_INTERACTIVE_SESSION.set_image(image)
-        NN_INTERACTIVE_SESSION._finish_preprocessing_and_initialize_interactions()
         CURRENT_LOADED_CT_PATH = ct_path
         CURRENT_LOADED_CT_SHAPE = ct_vol_zyx.shape
     else:
         print(f"[Worker] Reusing cached CT scan in nnInteractive session: {ct_path}")
         NN_INTERACTIVE_SESSION.reset_interactions()
+    
+    # Always wait for preprocessing to finish (handles both preload and inline cases)
+    NN_INTERACTIVE_SESSION._finish_preprocessing_and_initialize_interactions()
     
     # Enable autozoom for better segmentation quality — the model iteratively
     # zooms and refines its prediction for more accurate results
@@ -224,6 +256,10 @@ def handle_client(conn):
                     scribble_coords = data.get("scribble_coords")
                     pred_path = run_nninteractive(ct_p, data.get("point_path"), data["out_dir"], scribble_coords=scribble_coords)
                     response = {"status": "success", "prediction_path": pred_path}
+                elif command == "preload_ct":
+                    ct_p = data.get("ct_path")
+                    preload_ct(ct_p, data.get("out_dir", "/tmp/medeye3d_inference"))
+                    response = {"status": "success", "message": "CT preload initiated"}
                 else:
                     response = {"status": "error", "message": "Unknown command"}
             

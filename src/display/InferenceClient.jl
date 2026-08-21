@@ -5,7 +5,7 @@ using JSON
 using MedImages
 using ..ConnectedComponents
 
-export start_python_worker, run_helpnet_inference, run_nninteractive, insert_patch!
+export start_python_worker, run_helpnet_inference, run_nninteractive, insert_patch!, preload_ct_for_nninteractive
 
 global PYTHON_PROC = nothing
 
@@ -237,6 +237,60 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
         println(sprint(showerror, e, catch_backtrace())); flush(stdout)
         return nothing
     end
+end
+
+"""
+    preload_ct_for_nninteractive(ct_vol; port=5005)
+
+Preload CT into Docker nnInteractive GPU memory for faster subsequent inference.
+Fire-and-forget — runs in a background thread. Errors are logged but don't propagate.
+"""
+function preload_ct_for_nninteractive(ct_vol::Array{Float32, 3}; port=5005)
+    Threads.@spawn begin
+        try
+            out_dir = INFERENCE_DIR
+            mkpath(out_dir)
+            
+            ct_hash = hash(ct_vol)
+            ct_path = joinpath(out_dir, "nn_ct_$(ct_hash).nii.gz")
+            
+            # Save CT to NIfTI if not already on disk
+            if !isfile(ct_path)
+                dummy_sp = (1.0, 1.0, 1.0)
+                dummy_or = (0.0, 0.0, 0.0)
+                dummy_dir = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+                im_ct = MedImage(voxel_data=ct_vol, spacing=dummy_sp, origin=dummy_or,
+                    direction=dummy_dir,
+                    image_type=MedImages.MedImage_data_struct.MRI_type,
+                    image_subtype=MedImages.MedImage_data_struct.CT_subtype,
+                    patient_id="dummy")
+                MedImages.create_nii_from_medimage(im_ct, ct_path)
+                println("[InferenceClient] CT saved for preload: $ct_path"); flush(stdout)
+            end
+            
+            req = Dict(
+                "command" => "preload_ct",
+                "ct_path" => ct_path,
+                "out_dir" => "/tmp/medeye3d_inference"
+            )
+            
+            conn = connect("127.0.0.1", port)
+            write(conn, JSON.json(req))
+            resp_str = read(conn, String)
+            close(conn)
+            
+            resp = JSON.parse(resp_str)
+            if resp["status"] == "success"
+                println("[InferenceClient] CT preloaded into nnInteractive GPU ✓"); flush(stdout)
+            else
+                println("[InferenceClient] CT preload warning: $(resp["message"])"); flush(stdout)
+            end
+        catch e
+            # Non-fatal — preload is an optimization, not a requirement
+            println("[InferenceClient] CT preload failed (non-fatal): $e"); flush(stdout)
+        end
+    end
+    return nothing
 end
 
 end # module
