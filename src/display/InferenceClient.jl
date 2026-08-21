@@ -2,6 +2,7 @@ module InferenceClient
 
 using Sockets
 using JSON
+using Base64
 using MedImages
 using ..ConnectedComponents
 
@@ -177,43 +178,41 @@ function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32
     end
 end
 
-function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}, points_vol::Union{Nothing, Array{Float32, 3}}, cx::Int, cy::Int, cz::Int; port=5005)
-    # Docker container (medeye3d-ai) is started once at app startup — here we only communicate via TCP
-    # NOTE: pet_vol is accepted for API compatibility but NOT used — nnInteractive operates on CT only.
+"""
+    run_nninteractive(ct_vol, pet_vol, scribble_coords, cx, cy, cz; port=5005, autozoom=true)
 
+Run nnInteractive segmentation. `scribble_coords` is a `Vector{Vector{Int}}` of
+0-indexed [x,y,z] coordinates — avoids the expensive `findall` + full-volume allocation.
+Supports inline base64 mask transfer from Docker (skips NIfTI file I/O).
+"""
+function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3},
+                          scribble_coords::Vector{Vector{Int}},
+                          cx::Int, cy::Int, cz::Int;
+                          port=5005, autozoom=true)
     out_dir = INFERENCE_DIR
     mkpath(out_dir)
     
-    if points_vol === nothing || count(points_vol .> 0) == 0
-        error("No user-painted scribbles provided for NNInteractive. Paint a scribble before running AI. No fallbacks allowed.")
+    if isempty(scribble_coords)
+        error("No scribble coordinates provided for NNInteractive. No fallbacks allowed.")
     end
     
-    # Hash CT volume to avoid writing 300MB files to disk on every click
     ct_hash = hash(ct_vol)
-    
     ct_path = joinpath(out_dir, "nn_ct_$(ct_hash).nii.gz")
-    point_path = joinpath(out_dir, "nn_point_in.nii.gz")
     
-    dummy_sp = (1.0, 1.0, 1.0)
-    dummy_or = (0.0, 0.0, 0.0)
-    dummy_dir = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
-    
-    # Only write CT if it doesn't already exist for this patient
     if !isfile(ct_path)
+        dummy_sp = (1.0, 1.0, 1.0); dummy_or = (0.0, 0.0, 0.0)
+        dummy_dir = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
         im_ct = MedImage(voxel_data=ct_vol, spacing=dummy_sp, origin=dummy_or, direction=dummy_dir, image_type=MedImages.MedImage_data_struct.MRI_type, image_subtype=MedImages.MedImage_data_struct.CT_subtype, patient_id="dummy")
         MedImages.create_nii_from_medimage(im_ct, ct_path)
     end
-    
-    # Extract non-zero scribble coordinates directly (0-indexed for Python)
-    # This avoids expensive 3D NIfTI file generation for a few scribble points
-    scribble_indices = findall(points_vol .> 0)
-    scribble_coords = [[c[1]-1, c[2]-1, c[3]-1] for c in scribble_indices]
     
     req = Dict(
         "command" => "nninteractive",
         "ct_path" => ct_path,
         "scribble_coords" => scribble_coords,
-        "out_dir" => "/tmp/medeye3d_inference"
+        "out_dir" => "/tmp/medeye3d_inference",
+        "autozoom" => autozoom,
+        "inline_result" => true  # Request inline base64 mask transfer
     )
     
     try
@@ -224,10 +223,26 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
         
         resp = JSON.parse(resp_str)
         if resp["status"] == "success"
-            pred_file = basename(resp["prediction_path"])
-            local_pred_path = joinpath(INFERENCE_DIR, pred_file)
-            pred_im = MedImages.load_image(local_pred_path, "unknown")
-            return Array{UInt8}(pred_im.voxel_data)
+            # Prefer inline base64 transfer (no file I/O)
+            if haskey(resp, "mask_b64")
+                raw = base64decode(resp["mask_b64"])
+                shape = Tuple(resp["mask_shape"])
+                bbox = resp["bbox"]  # [[x1,x2], [y1,y2], [z1,z2]] in ZYX
+                sub_mask = reshape(reinterpret(UInt8, raw), Tuple(resp["sub_shape"]))
+                # Insert sub-mask into full-size output at bbox position
+                full_mask = zeros(UInt8, shape)
+                z1, z2 = bbox[1][1]+1, bbox[1][2]
+                y1, y2 = bbox[2][1]+1, bbox[2][2]
+                x1, x2 = bbox[3][1]+1, bbox[3][2]
+                full_mask[x1:x2, y1:y2, z1:z2] .= sub_mask
+                return full_mask
+            else
+                # Fallback: read from NIfTI file
+                pred_file = basename(resp["prediction_path"])
+                local_pred_path = joinpath(INFERENCE_DIR, pred_file)
+                pred_im = MedImages.load_image(local_pred_path, "unknown")
+                return Array{UInt8}(pred_im.voxel_data)
+            end
         else
             println("[InferenceClient ERROR] Python Worker Error: $(resp["message"])"); flush(stdout)
             return nothing
@@ -237,6 +252,16 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
         println(sprint(showerror, e, catch_backtrace())); flush(stdout)
         return nothing
     end
+end
+
+# Legacy API: accept points_vol (3D volume) and extract coords internally
+function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}, points_vol::Union{Nothing, Array{Float32, 3}}, cx::Int, cy::Int, cz::Int; port=5005, autozoom=true)
+    if points_vol === nothing || count(points_vol .> 0) == 0
+        error("No user-painted scribbles provided for NNInteractive. No fallbacks allowed.")
+    end
+    scribble_indices = findall(points_vol .> 0)
+    scribble_coords = [[c[1]-1, c[2]-1, c[3]-1] for c in scribble_indices]
+    return run_nninteractive(ct_vol, pet_vol, scribble_coords, cx, cy, cz; port=port, autozoom=autozoom)
 end
 
 """

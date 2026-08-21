@@ -44,6 +44,7 @@ struct InferenceJob
     active_id::Int
     seg_vol::Union{Nothing, Array{Float32, 3}}
     main_channel::Channel{Any}
+    scribble_coords::Vector{Vector{Int}}  # Pre-extracted 0-indexed [x,y,z] coords for nnInteractive fast path
 end
 
 const inference_queue = Channel{InferenceJob}(8)
@@ -61,9 +62,16 @@ function start_inference_worker()
                 
                 mask = nothing
                 if job.algorithm == "NNInteractive"
-                    mask = InferenceClient.run_nninteractive(
-                        job.ct_vol, job.pet_vol, job.points_vol,
-                        job.cx, job.cy, job.cz)
+                    # Fast path: use pre-extracted scribble coordinates (skip findall)
+                    if !isempty(job.scribble_coords)
+                        mask = InferenceClient.run_nninteractive(
+                            job.ct_vol, job.pet_vol, job.scribble_coords,
+                            job.cx, job.cy, job.cz)
+                    else
+                        mask = InferenceClient.run_nninteractive(
+                            job.ct_vol, job.pet_vol, job.points_vol,
+                            job.cx, job.cy, job.cz)
+                    end
                 elseif job.algorithm == "HELPNet (AI)"
                     mask = InferenceClient.run_helpnet_inference(
                         job.ct_vol, job.pet_vol, job.points_vol,
@@ -872,6 +880,10 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
         # Always use the true CT volume for HELPNet and NNInteractive
         ct_input = ct_vol_copy
 
+        # Pre-extract 0-indexed scribble coordinates for nnInteractive fast path
+        # (avoids expensive findall + full-volume allocation in InferenceClient)
+        scribble_coords_0idx = [[idx[1]-1, idx[2]-1, idx[3]-1] for idx in painted_pts if checkbounds(Bool, ct_vol, idx)]
+
         ai_status_text[] = safe_status_text("[Preparing] inference ($(algo))...")
         println("Queuing $(algo) inference job (seed=$cx,$cy,$cz, lesion=$active_id, $(length(painted_pts)) painted points)..."); flush(stdout)
 
@@ -879,7 +891,7 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
         # will pick it up and communicate with Docker. No race conditions.
         put!(inference_queue, InferenceJob(
             algo, ct_input, pet_vol_copy, points_vol,
-            cx, cy, cz, active_id, seg_vol, channel))
+            cx, cy, cz, active_id, seg_vol, channel, scribble_coords_0idx))
     catch e
         err_msg = sprint(showerror, e)
         println("ERROR in reactToAddAutoPet: $err_msg"); flush(stdout)

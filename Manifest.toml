@@ -2,7 +2,7 @@
 
 julia_version = "1.11.9"
 manifest_format = "2.0"
-project_hash = "e47bab21e68f136e00f8dbf9fcb86c7a83d23ce3"
+project_hash = "4b8e0faa77bef51868cddde4fcdfb9ba582695b5"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "5970c86505ae9c07bf5bc521ef2bbbb3849e8b7b"
@@ -2374,7 +2374,7 @@ uuid = "c8ffd9c3-330d-5841-b78e-0817d7145fa1"
 version = "2.28.6+0"
 
 [[deps.MedImages]]
-deps = ["Accessors", "Atomix", "BenchmarkTools", "CSV", "CUDA", "ChainRulesCore", "ColorTypes", "Combinatorics", "ComponentArrays", "CoordinateTransformations", "DICOM", "DataFrames", "Dates", "Dictionaries", "DifferentialEquations", "Documenter", "DocumenterVitepress", "Enzyme", "EzXML", "FiniteDifferences", "Flux", "ForwardDiff", "Functors", "HDF5", "ITKIOWrapper", "ImageTransformations", "Interpolations", "JLD", "JSON", "KernelAbstractions", "LinearAlgebra", "Lux", "LuxCUDA", "MPI", "NIfTI", "NNlib", "Optimisers", "Optimization", "OptimizationOptimJL", "OptimizationOptimisers", "OrdinaryDiffEq", "Parameters", "ProgressMeter", "Random", "Rotations", "SciMLSensitivity", "Setfield", "StaticArrays", "Statistics", "Tracker", "UUIDs", "ZipFile", "Zygote"]
+deps = ["Accessors", "Adapt", "Atomix", "BenchmarkTools", "CSV", "CUDA", "ChainRulesCore", "ColorTypes", "Combinatorics", "ComponentArrays", "CoordinateTransformations", "DICOM", "DataFrames", "Dates", "Dictionaries", "DifferentialEquations", "Documenter", "DocumenterVitepress", "Enzyme", "EzXML", "FiniteDifferences", "Flux", "ForwardDiff", "Functors", "HDF5", "ITKIOWrapper", "ImageMorphology", "ImageTransformations", "Images", "Interpolations", "JLD", "JSON", "KernelAbstractions", "LinearAlgebra", "Lux", "LuxCUDA", "MPI", "NIfTI", "NNlib", "NPZ", "Optimisers", "Optimization", "OptimizationOptimJL", "OptimizationOptimisers", "OrdinaryDiffEq", "Parameters", "ProgressMeter", "Random", "Rotations", "SciMLSensitivity", "Setfield", "StaticArrays", "Statistics", "Tracker", "UUIDs", "ZipFile", "Zygote"]
 path = "../MedImages.jl"
 uuid = "fbff095b-7891-4fc4-b5e5-3cd99b9dd225"
 version = "2.0.1"
@@ -2469,6 +2469,12 @@ version = "0.9.44"
     Mooncake = "da2b9cff-9c12-43a0-ae48-6db2b0edb7d6"
     SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
     cuDNN = "02a925ec-e4fe-4b08-9a7e-0d78e3d38ccd"
+
+[[deps.NPZ]]
+deps = ["FileIO", "ZipFile"]
+git-tree-sha1 = "60a8e272fe0c5079363b28b0953831e2dd7b7e6f"
+uuid = "15e1cf62-19b3-5cfa-8e77-841668bca605"
+version = "0.4.3"
 
 [[deps.NVML]]
 deps = ["CEnum", "CUDACore", "GPUToolbox", "Libdl"]

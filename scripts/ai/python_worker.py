@@ -158,7 +158,7 @@ def preload_ct(ct_path, out_dir="/tmp/medeye3d_inference"):
     # run_nninteractive will wait for it when needed.
     print(f"[Worker] CT preload initiated (preprocessing runs in background)")
 
-def run_nninteractive(ct_path, point_path, out_dir, scribble_coords=None):
+def run_nninteractive(ct_path, point_path, out_dir, scribble_coords=None, autozoom=True, inline_result=False):
     global NN_INTERACTIVE_SESSION, CURRENT_LOADED_CT_PATH, CURRENT_LOADED_CT_SHAPE, CURRENT_LOADED_CT_AFFINE
     print("[Worker] Running NNInteractive (CT-only mode)...")
     out_dir = Path(out_dir)
@@ -188,9 +188,8 @@ def run_nninteractive(ct_path, point_path, out_dir, scribble_coords=None):
     # Always wait for preprocessing to finish (handles both preload and inline cases)
     NN_INTERACTIVE_SESSION._finish_preprocessing_and_initialize_interactions()
     
-    # Enable autozoom for better segmentation quality — the model iteratively
-    # zooms and refines its prediction for more accurate results
-    NN_INTERACTIVE_SESSION.set_do_autozoom(True)
+    # Configurable autozoom — disable for faster interactive speed
+    NN_INTERACTIVE_SESSION.set_do_autozoom(autozoom)
     
     target_zyx = np.zeros(CURRENT_LOADED_CT_SHAPE, dtype=np.uint8)
     NN_INTERACTIVE_SESSION.set_target_buffer(target_zyx)
@@ -213,17 +212,36 @@ def run_nninteractive(ct_path, point_path, out_dir, scribble_coords=None):
     else:
         raise ValueError("Neither scribble_coords nor point_path provided for NNInteractive.")
         
-    print(f"[Worker] Using MIC-DKFZ nnInteractive Model with {np.count_nonzero(scribble_mask_zyx)} scribble voxels")
+    print(f"[Worker] Using MIC-DKFZ nnInteractive Model with {np.count_nonzero(scribble_mask_zyx)} scribble voxels (autozoom={autozoom})")
     NN_INTERACTIVE_SESSION.add_scribble_interaction(scribble_mask_zyx, include_interaction=True, run_prediction=True)
     
-    # Transpose back to (X, Y, Z) for Julia — must match CT's on-disk layout
+    total_voxels = int(np.sum(target_zyx > 0))
+    
+    if inline_result and total_voxels > 0:
+        # Inline transfer: find tight bounding box of nonzero voxels, base64-encode sub-mask
+        import base64
+        nz = np.nonzero(target_zyx)
+        if len(nz[0]) > 0:
+            z1, z2 = int(nz[0].min()), int(nz[0].max()) + 1
+            y1, y2 = int(nz[1].min()), int(nz[1].max()) + 1
+            x1, x2 = int(nz[2].min()), int(nz[2].max()) + 1
+            sub_mask_zyx = target_zyx[z1:z2, y1:y2, x1:x2]
+            # Transpose to Julia XYZ order
+            sub_mask_xyz = np.transpose(sub_mask_zyx, (2, 1, 0)).copy()
+            mask_b64 = base64.b64encode(sub_mask_xyz.astype(np.uint8).tobytes()).decode('ascii')
+            # Full shape in XYZ (Julia order)
+            full_shape_xyz = [CURRENT_LOADED_CT_SHAPE[2], CURRENT_LOADED_CT_SHAPE[1], CURRENT_LOADED_CT_SHAPE[0]]
+            sub_shape_xyz = list(sub_mask_xyz.shape)
+            # Clipped bbox in ZYX for Julia to place the sub-mask
+            clipped_bbox = [[z1, z2], [y1, y2], [x1, x2]]
+            print(f"[Worker] nninteractive produced {total_voxels} voxels, inline transfer ({len(mask_b64)} b64 bytes, sub_shape={sub_shape_xyz}, bbox_zyx={clipped_bbox})")
+            return {"inline": True, "mask_b64": mask_b64, "mask_shape": full_shape_xyz, "sub_shape": sub_shape_xyz, "bbox": clipped_bbox, "voxel_count": total_voxels}
+    
+    # Fallback: save as NIfTI file
     result_mask = np.transpose(target_zyx, (2, 1, 0))
-        
-    # Save output with identity affine — Julia loads via NIfTI.jl (raw voxels,
-    # no resampling), so the affine doesn't matter for the data transfer.
     nib.save(nib.Nifti1Image(result_mask.astype(np.uint8), np.eye(4)), pred_path)
-    print(f"[Worker] nninteractive produced {np.sum(result_mask)} voxels, saved to {pred_path}")
-    return str(pred_path)
+    print(f"[Worker] nninteractive produced {total_voxels} voxels, saved to {pred_path}")
+    return {"inline": False, "pred_path": str(pred_path), "voxel_count": total_voxels}
 
 def handle_client(conn):
     try:
@@ -254,8 +272,17 @@ def handle_client(conn):
                 elif command == "nninteractive":
                     ct_p = data.get("ct_path", data.get("image_path"))
                     scribble_coords = data.get("scribble_coords")
-                    pred_path = run_nninteractive(ct_p, data.get("point_path"), data["out_dir"], scribble_coords=scribble_coords)
-                    response = {"status": "success", "prediction_path": pred_path}
+                    autozoom = data.get("autozoom", True)
+                    inline_result = data.get("inline_result", False)
+                    result = run_nninteractive(ct_p, data.get("point_path"), data["out_dir"],
+                                              scribble_coords=scribble_coords, autozoom=autozoom,
+                                              inline_result=inline_result)
+                    if result.get("inline"):
+                        response = {"status": "success", "mask_b64": result["mask_b64"],
+                                    "mask_shape": result["mask_shape"], "sub_shape": result["sub_shape"],
+                                    "bbox": result["bbox"], "voxel_count": result["voxel_count"]}
+                    else:
+                        response = {"status": "success", "prediction_path": result["pred_path"]}
                 elif command == "preload_ct":
                     ct_p = data.get("ct_path")
                     preload_ct(ct_p, data.get("out_dir", "/tmp/medeye3d_inference"))
