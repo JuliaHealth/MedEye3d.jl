@@ -30,13 +30,22 @@ NN_INTERACTIVE_SESSION = None
 DEVICE = None
 INFERENCE_LOCK = threading.Lock()  # Serialize all inference calls (defense-in-depth)
 
+CURRENT_LOADED_CT_PATH = None
+CURRENT_LOADED_CT_SHAPE = None
+
 def init_models():
     global HELPNET_MODEL, DEVICE, NN_INTERACTIVE_SESSION
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
     
     import torch
-    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print("[Worker] Initializing models on cuda...")
+    if torch.cuda.is_available():
+        gpu_idx = int(os.environ.get("MEDEYE3D_GPU_INDEX", "0"))
+        if gpu_idx >= torch.cuda.device_count():
+            gpu_idx = 0
+        DEVICE = torch.device(f"cuda:{gpu_idx}")
+        print(f"[Worker] Initializing models on GPU: {torch.cuda.get_device_name(DEVICE)} (cuda:{gpu_idx})...")
+    else:
+        DEVICE = torch.device("cpu")
+        print("[Worker] WARNING: No CUDA GPU detected, falling back to CPU...")
     
     # Load Helpnet — strict, no fallbacks
     HELPNET_MODEL = HELPNet_Lesion()
@@ -118,8 +127,8 @@ def run_helpnet(ct_path, pet_path, point_path, out_dir):
     nib.save(nib.Nifti1Image(pred, ct_nib.affine), str(pred_path))
     return str(pred_path)
 
-def run_nninteractive(ct_path, point_path, out_dir):
-    global NN_INTERACTIVE_SESSION
+def run_nninteractive(ct_path, point_path, out_dir, scribble_coords=None):
+    global NN_INTERACTIVE_SESSION, CURRENT_LOADED_CT_PATH, CURRENT_LOADED_CT_SHAPE
     print("[Worker] Running NNInteractive (CT-only mode)...")
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -129,49 +138,73 @@ def run_nninteractive(ct_path, point_path, out_dir):
         raise RuntimeError("nnInteractive session is not initialized. No fallbacks allowed.")
     
     ct_path = resolve_path(ct_path, out_dir)
-    point_path = resolve_path(point_path, out_dir)
     
-    ct_vol = nib.load(ct_path).get_fdata()
-    
-    # Determine scribbles
-    if point_path and os.path.exists(point_path):
-        point_vol = nib.load(point_path).get_fdata()
+    # Check if CT is already cached in session
+    if CURRENT_LOADED_CT_PATH != ct_path:
+        print(f"[Worker] Loading new CT scan into nnInteractive session: {ct_path}")
+        ct_nib = nib.load(ct_path)
+        ct_vol = ct_nib.get_fdata()
+        ct_vol_zyx = np.transpose(ct_vol, (2, 1, 0))
+        image = ct_vol_zyx[np.newaxis, ...].astype(np.float32)
+        NN_INTERACTIVE_SESSION.set_image(image)
+        NN_INTERACTIVE_SESSION._finish_preprocessing_and_initialize_interactions()
+        CURRENT_LOADED_CT_PATH = ct_path
+        CURRENT_LOADED_CT_SHAPE = ct_vol_zyx.shape
     else:
-        raise FileNotFoundError(f"Point/scribble file not found at {point_path}. No fallbacks allowed.")
-        
-    print("[Worker] Using MIC-DKFZ nnInteractive Deep Learning Model")
+        print(f"[Worker] Reusing cached CT scan in nnInteractive session: {ct_path}")
+        NN_INTERACTIVE_SESSION.reset_interactions()
     
-    # nnUNet (and therefore nnInteractive) strictly expects orientation to be (Z, Y, X)
-    # Our Julia client provides NIfTI arrays in (X, Y, Z). Transpose them before feeding!
-    ct_vol_zyx = np.transpose(ct_vol, (2, 1, 0))
-    point_vol_zyx = np.transpose(point_vol, (2, 1, 0))
+    # Fast interactive focal lesion segmentation
+    NN_INTERACTIVE_SESSION.set_do_autozoom(False)
     
-    image = ct_vol_zyx[np.newaxis, ...].astype(np.float32)
-    
-    NN_INTERACTIVE_SESSION.set_image(image)
-    NN_INTERACTIVE_SESSION._finish_preprocessing_and_initialize_interactions()
-    
-    target_zyx = np.zeros_like(ct_vol_zyx, dtype=np.uint8)
+    target_zyx = np.zeros(CURRENT_LOADED_CT_SHAPE, dtype=np.uint8)
     NN_INTERACTIVE_SESSION.set_target_buffer(target_zyx)
     
-    scribble_mask_zyx = point_vol_zyx > 0
+    # Determine scribbles
+    if scribble_coords is not None and len(scribble_coords) > 0:
+        scribble_mask_zyx = np.zeros(CURRENT_LOADED_CT_SHAPE, dtype=bool)
+        for pt in scribble_coords:
+            x, y, z = pt[0], pt[1], pt[2]
+            if 0 <= z < CURRENT_LOADED_CT_SHAPE[0] and 0 <= y < CURRENT_LOADED_CT_SHAPE[1] and 0 <= x < CURRENT_LOADED_CT_SHAPE[2]:
+                scribble_mask_zyx[z, y, x] = True
+    elif point_path:
+        point_path = resolve_path(point_path, out_dir)
+        if os.path.exists(point_path):
+            point_vol = nib.load(point_path).get_fdata()
+            point_vol_zyx = np.transpose(point_vol, (2, 1, 0))
+            scribble_mask_zyx = point_vol_zyx > 0
+        else:
+            raise FileNotFoundError(f"Point/scribble file not found at {point_path}. No fallbacks allowed.")
+    else:
+        raise ValueError("Neither scribble_coords nor point_path provided for NNInteractive.")
+        
+    print(f"[Worker] Using MIC-DKFZ nnInteractive Model with {np.count_nonzero(scribble_mask_zyx)} scribble voxels")
     NN_INTERACTIVE_SESSION.add_scribble_interaction(scribble_mask_zyx, include_interaction=True, run_prediction=True)
     
     # Transpose back to (X, Y, Z) for Julia
     result_mask = np.transpose(target_zyx, (2, 1, 0))
         
     # Save output
-    nib.save(nib.Nifti1Image(result_mask.astype(np.float32), np.eye(4)), pred_path)
-    print(f"[Worker] nninteractive saved to {pred_path}")
+    nib.save(nib.Nifti1Image(result_mask.astype(np.uint8), np.eye(4)), pred_path)
+    print(f"[Worker] nninteractive produced {np.sum(result_mask)} voxels, saved to {pred_path}")
     return str(pred_path)
 
 def handle_client(conn):
     try:
-        data_b = conn.recv(8192)
-        if not data_b:
+        # Receive full message buffer
+        chunks = []
+        while True:
+            chunk = conn.recv(65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            if len(chunk) < 65536:
+                break
+        
+        if not chunks:
             return
             
-        data = json.loads(data_b.decode('utf-8'))
+        data = json.loads(b"".join(chunks).decode('utf-8'))
         command = data.get("command", "")
         
         response = {}
@@ -184,7 +217,8 @@ def handle_client(conn):
                     response = {"status": "success", "prediction_path": pred_path}
                 elif command == "nninteractive":
                     ct_p = data.get("ct_path", data.get("image_path"))
-                    pred_path = run_nninteractive(ct_p, data["point_path"], data["out_dir"])
+                    scribble_coords = data.get("scribble_coords")
+                    pred_path = run_nninteractive(ct_p, data.get("point_path"), data["out_dir"], scribble_coords=scribble_coords)
                     response = {"status": "success", "prediction_path": pred_path}
                 else:
                     response = {"status": "error", "message": "Unknown command"}

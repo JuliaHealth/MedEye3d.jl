@@ -418,3 +418,12 @@ docs/src/volume-0.nii.gz
 docs/src/ScalarVolume_0/
 .CondaPkg/
 medical_image_screenshot_000_001.png
+tmp_inference/
+docs/node_modules/
+docs/package-lock.json
+docs/build/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+scripts/ai/helpnet_bundle/checkpoints/
+*.pt
+*.pth

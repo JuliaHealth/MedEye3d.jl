@@ -4,64 +4,76 @@ layout: home
 
 hero:
   name: "MedEye3d.jl"
-  text: "Annotating and Visualizing segmentations in medical images"
-  tagline: Julia library for visualization and annotation medical images, specialized particularly for rapid development segmentation of 3 dimensional images like CT or PET/CT scans. Has full support of nuclear medicine Data.
+  text: "High-Performance 3D Medical Image Visualization, Annotation & AI Segmentation in Julia"
+  tagline: "Specialized for nuclear medicine, longitudinal therapies (PET/CT/SPECT), GPU-accelerated post-processing, and interactive deep learning segmentation."
   image:
     src: /logo.png
     alt: MedEye3d.jl Graphic
   actions:
     - theme: brand
-      text: View on JuliaHealth 
-      link: https://JuliaHealth.org
+      text: Get Started
+      link: /manual/get_started
     - theme: alt
-      text: View on Github
+      text: Code Examples
+      link: /manual/code_example
+    - theme: alt
+      text: View on GitHub
       link: https://github.com/JuliaHealth/MedEye3d.jl
 
 features:
-  - icon: 🔬
-    title: Image Registration and I/O
-    details: Image Registration and I/O wrappers via Insight Toolkit's ITK library backend for NIFTI and DICOM
-  - icon: ⚛️
-    title: Image Transformations 
-    details: Creating transformations (rotation, cropping, resampling and modification) over loaded image factories 
+  - icon: 🖥️
+    title: ModernGL QuadView Layout
+    details: Synchronized 4-panel viewport with cross-plane 3D slice jumping, double-click maximization, and data-level zoom/panning.
+  - icon: ☢️
+    title: Longitudinal Nuclear Medicine
+    details: Multi-cycle radionuclide therapy evaluation across PET/CT (TP0–TP3) and SPECT/CT (TP0–TP4) with quantitative SUV windowing.
+  - icon: ⚡
+    title: GPU KernelAbstractions
+    details: Portable CUDA & CPU kernels for 1.38ms 3D Connected Component Labeling and 12.5µs continuous swept-capsule stroke rasterization.
   - icon: 🤖
-    title: Automated Testing
-    details: Automated testing suite, available via  
-  - icon: 💻
-    title: Seamless Integration with other Julia Packages
-    details: Downstream integration with other medical-ecosystem pkgs
+    title: Real-Time AI Segmentation
+    details: Containerized deep learning worker running HELPNet 3D CNN and MIC-DKFZ NNInteractive with sub-0.3s GPU turnaround.
+  - icon: 🦴
+    title: Skeletal Subsegmentation
+    details: Automated separation of cortical bone surface vs trabecular bone marrow for targeted bone metastasis dosimetry.
+  - icon: 🎛️
+    title: GLMakie Clinical Dashboard
+    details: Dual-handle IntervalSliders, preset windowing, mask layer visibility toggles, and metadata reporting.
 ---
 ```
 
-````@raw html
-<div class="vp-doc" style="width:80%; margin:auto">
+`@raw html
+<div class="vp-doc" style="width:85%; margin:auto">
 
-<p style="margin-bottom:2cm"></p>
+<h2 style="text-align: center; margin-top: 2rem;">Why MedEye3d.jl?</h2>
 
-<h1> What is MedEye3d.jl? </h1>
+<p>
+Medical imaging reading and segmentation often require juggling bulky viewers, slow slice re-slicing, and disconnected Python AI models. 
+<strong>MedEye3d.jl</strong> unifies raw OpenGL rendering performance with Julia's scientific ecosystem and containerized deep learning workers into a cohesive, responsive clinical and research tool.
+</p>
 
-MedImages is a package for standardizing data handling of 3D and 4D medical images, with additional support for analysis and modification.
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin: 2rem 0;">
 
-It is meant to be used in conjunction with the `MedEye3d` visualization package, which further will be integrated within a pipeline `MedPipe3D`!
+<div style="border: 1px solid var(--vp-c-divider); border-radius: 8px; padding: 1.2rem; background: var(--vp-c-bg-soft);">
+<h3 style="margin-top: 0;">🚀 Sub-Millisecond GPU Post-Processing</h3>
+<p>Eliminate discrete brush gaps during manual painting with continuous swept-capsule rasterization (12.5 µs) and filter false positives with GPU multi-pass Connected Component Labeling (1.38 ms on RTX 3090).</p>
+</div>
 
-<h2> Basic usage </h2>
+<div style="border: 1px solid var(--vp-c-divider); border-radius: 8px; padding: 1.2rem; background: var(--vp-c-bg-soft);">
+<h3 style="margin-top: 0;">🎯 Real-Time Interactive AI</h3>
+<p>Incorporate foundation models into your annotation workflow. In-memory session caching and focal inference enable real-time 0.28s interactive scribble segmentation via MIC-DKFZ NNInteractive.</p>
+</div>
 
+<div style="border: 1px solid var(--vp-c-divider); border-radius: 8px; padding: 1.2rem; background: var(--vp-c-bg-soft);">
+<h3 style="margin-top: 0;">🔬 Longitudinal Therapy Comparison</h3>
+<p>Effortlessly track tumor response across time points (PET/CT and SPECT) with synchronized camera coordinates, side-by-side comparison overlays, and automated lesion group tracking.</p>
+</div>
 
-1. Import the package MedImages within a Julia REPL,
-2. Pass an `image file path` to `load_image` to get a MedImage object:
+</div>
 
-```julia
-using MedImages
-image_path = "/path/to/your/image"
-medimage_container = MedImages.load_image(image_path)
+<div style="text-align: center; margin-top: 3rem; padding: 1.5rem 0; border-top: 1px solid var(--vp-c-divider); color: var(--vp-c-text-2);">
+MedEye3d.jl is a proud member of the <a href="https://juliahealth.org" target="_blank">JuliaHealth</a> organization.
+</div>
 
-help(medimage_container)
+</div>
 ```
-and enjoy the fruits of your labour!
-
-<div style="text-align: center; margin-top: 4rem; padding: 2rem 0; border-top: 1px solid #eaecef; color: #4e6e8e;">
-© 2025 Divyansh Goyal | Last updated: May 21, 2025
-</div>
-
-</div>
-````

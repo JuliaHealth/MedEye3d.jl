@@ -1,136 +1,107 @@
-## Image Orientation Guidelines
+# Getting Started with MedEye3d.jl
 
-MedImages.jl is optimized for images in **LPS (Left-Posterior-Superior)** orientation for consistent processing and analysis. If your medical images are in a different orientation, we recommend converting them to LPS before using MedImages.jl.
+This guide walks you through setting up MedEye3d.jl, configuring your Julia multi-threading environment, starting the containerized AI worker, and loading your first medical image datasets.
 
-### Quick Orientation Converter
+---
 
-To help you convert your images to LPS orientation, we provide a convenient script that handles both NIfTI files and DICOM series.
+## 1. System Requirements & Prerequisites
 
-#### Setup Instructions
+- **Julia Version**: Julia **1.9 or later** is strictly required (due to the interactive threadpool).
+- **GPU & OpenGL**: OpenGL 3.3+ compatible GPU driver (`NVIDIA`, `AMD`, or `Intel`).
+- **NVIDIA CUDA (Optional, Recommended)**: For GPU-accelerated KernelAbstractions and deep learning inference.
+- **Docker**: For running the containerized AI inference server (`medeye3d-ai`).
 
-**Note:** Ensure you are not in a virtual environment and have Python 3 installed on your system.
+---
 
-##### For Windows and macOS
-```julia
-using Pkg
-Pkg.add("PyCall")
-Pkg.add("ArgParse")
+## 2. The Interactive Thread Requirement
 
-using Downloads
-Downloads.download("https://gist.githubusercontent.com/divital-coder/6d2dc6868ee5f8427cf719f54213227d/raw/a3b50aa734c662e0a4e57be6e29f69fc22921d03/reorient_to_lps.jl", "./reorient_to_lps.jl")
-python_path = Sys.which("python")
-if isnothing(python_path)
-  error("Python not found in PATH, please install python or add it to your PATH")
-else
-   ENV["PYTHON"] = python_path
-end   
-run(`pip install SimpleITK`)
-Pkg.build("PyCall")
-```
+OpenGL context creation and GLFW window loops must run on a dedicated thread to avoid context migration across OS threads. In Julia 1.9+, this is handled via the **interactive threadpool**.
 
-##### For Arch Linux
-```julia
-using Pkg
-Pkg.add("PyCall")
-Pkg.add("ArgParse")
+### Configuring the Interactive Thread
+Launch Julia with at least 1 interactive thread (the number after the comma):
 
-using Downloads
-Downloads.download("https://gist.githubusercontent.com/divital-coder/6d2dc6868ee5f8427cf719f54213227d/raw/a3b50aa734c662e0a4e57be6e29f69fc22921d03/reorient_to_lps.jl", "./reorient_to_lps.jl")
-python_path = Sys.which("python")
-if isnothing(python_path)
-  error("Python not found in PATH, please install python or add it to your PATH")
-else
-   ENV["PYTHON"] = python_path
-end   
-run(`yay -S python-simpleitk`)
-Pkg.build("PyCall")
-```
-
-#### Usage Examples
-
-##### Convert a NIfTI File
 ```bash
-julia reorient_to_lps.jl input_image.nii.gz output_lps.nii.gz
+# Terminal export (recommended)
+export JULIA_NUM_THREADS=3,1
+
+# Launching Julia directly
+julia --threads 3,1
 ```
 
-##### Convert a DICOM Series
-```bash
-julia reorient_to_lps.jl /path/to/dicom/folder/ output_lps.nii.gz
-```
+> **Note:** If MedEye3d is loaded in a Julia session without an interactive thread, it will throw an informative initialization error directing you to configure `JULIA_NUM_THREADS`.
 
-##### Additional Options
-```bash
-# Enable verbose output
-julia reorient_to_lps.jl brain.nii.gz brain_lps.nii.gz --verbose
+---
 
-# Force overwrite existing files
-julia reorient_to_lps.jl brain.nii.gz brain_lps.nii.gz --force
-```
+## 3. Installation
 
-### Converting Back to DICOM Format
-
-**Important:** The orientation converter outputs NIfTI files only. If you need your processed images back in DICOM format, you can use the [`ITKIOWrapper.jl`](https://github.com/JuliaHealth/ITKIOWrapper.jl) package for conversion.
-
-#### Installing ITKIOWrapper.jl
+Install MedEye3d.jl via the Julia package manager:
 
 ```julia
 using Pkg
-Pkg.add("ITKIOWrapper")
+Pkg.add(url="https://github.com/JuliaHealth/MedEye3d.jl.git")
 ```
 
-#### Converting NIfTI to DICOM Series
+---
 
-After processing your LPS-oriented NIfTI file with MedImages.jl, convert it back to DICOM:
+## 4. Starting the AI Inference Worker (Optional)
+
+If you plan to use AI semiauto segmentation (**HELPNet** or **NNInteractive**), start the persistent Docker inference container:
+
+```bash
+# From the repository root
+./scripts/ai/start_docker_worker.sh
+```
+
+The script builds (if not already cached) and launches the `medeye3d-ai` container in the background, mounting the shared `tmp_inference/` directory and exposing TCP port `5005`.
+
+---
+
+## 5. Loading Your First Medical Image
+
+### Single Modality CT Display
+To visualize a single 3D NIfTI or DICOM volume:
 
 ```julia
-using ITKIOWrapper
+using MedEye3d
 
-# Convert processed NIfTI back to DICOM series
-# This creates a directory with DICOM files
-dicom_nifti_conversion("processed_lps_image.nii.gz", "./output_dicom_series", true)
+# Tuple format: (filepath, label_name)
+ct_spec = ("path/to/ct_scan.nii.gz", "CT")
+
+# Launches the interactive GLFW OpenGL viewer
+viewer = MedEye3d.SegmentationDisplay.displayImage(ct_spec)
 ```
 
-#### Complete Workflow Example
-
-Here's a typical workflow for DICOM users:
+### Multi-Modal Fused PET/CT Display
+To visualize fused multi-modal volumes with alpha blending:
 
 ```julia
-using MedImages, ITKIOWrapper
+using MedEye3d
 
-# 1. Convert original DICOM to LPS-oriented NIfTI (using the orientation script)
-# julia reorient_to_lps.jl /path/to/original/dicom/ lps_oriented.nii.gz
+ct_spec  = ("path/to/ct_scan.nii.gz", "CT")
+pet_spec = ("path/to/suv_pet.nii.gz", "PET")
 
-# 2. Process with MedImages.jl
-medimage = MedImages.load_image("lps_oriented.nii.gz")
-# ... perform your analysis and modifications ...
-
-# 3. Save processed image (if modified)
-# save_image(modified_medimage, "processed_image.nii.gz")
-
-# 4. Convert back to DICOM series if needed
-dicom_nifti_conversion("processed_image.nii.gz", "./final_dicom_series", true)
+# Provide a tuple of image specifications
+viewer = MedEye3d.SegmentationDisplay.displayImage((ct_spec, pet_spec))
 ```
 
-#### Advanced DICOM Conversion Options
+---
 
-For more control over the DICOM output, you can also create images programmatically:
+## 6. Understanding Medical Coordinate Systems
 
-```julia
-using ITKIOWrapper
+Medical image volumes have physical voxel spacings $(\Delta_x, \Delta_y, \Delta_z)$ in millimeters (e.g. $0.976\,\text{mm} \times 0.976\,\text{mm} \times 3.0\,\text{mm}$).
 
-# Load your processed NIfTI image
-img = load_image("processed_lps_image.nii.gz")
-metadata = load_spatial_metadata(img)
-voxel_data = load_voxel_data(img, metadata)
+MedEye3d automatically computes the **true physical aspect ratio**:
+$$\text{Physical Ratio} = \frac{\Delta_{\text{vertical}}}{\Delta_{\text{horizontal}}} \times \frac{H_{\text{pixels}}}{W_{\text{pixels}}}$$
 
-# Save as DICOM series with full control
-save_image(voxel_data, metadata, "./custom_dicom_output", true)
-```
+This guarantees:
+- Slices extracted along any axis (Axial, Sagittal, Coronal) maintain undistorted physical proportions.
+- Circular lesions and anatomical structures remain spherical and true to physical reality.
+- Zero black padding wasted at the top and bottom of wide viewports.
 
-### Summary
+---
 
-1. **Input DICOM** → Convert to LPS NIfTI using the orientation script
-2. **Process** → Use MedImages.jl for analysis and modifications
-3. **Output DICOM** → Use ITKIOWrapper.jl to convert back to DICOM format
+## 7. Next Steps
 
-Once your images are in LPS orientation, you can use them seamlessly with MedImages.jl for optimal performance and compatibility, and easily convert between NIfTI and DICOM formats as needed for your workflow.
+- Explore [Code Examples & Tutorials](code_example.md) for programmatic scripting and advanced workflows.
+- Learn about the [QuadView 4-Panel Layout](quad_view_and_navigation.md).
+- Discover the [AI Inference Pipeline](ai_inference_pipeline.md) and [GPU Post-Processing](gpu_kernels_and_postprocessing.md).
