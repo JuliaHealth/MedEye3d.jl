@@ -117,6 +117,77 @@ function load_radlex()::Vector{String}
     return _radlex_cache[]
 end
 
+# ─── Anatomy Ontology (FoundationalAnatomy.csv) for Base Anatomy autocomplete ─
+const ANATOMY_CSV_PATH = isfile(joinpath(_SLICER_DATA, "FoundationalAnatomy.csv")) ? joinpath(_SLICER_DATA, "FoundationalAnatomy.csv") : joinpath(_PKG_ROOT, "FoundationalAnatomy.csv")
+const _anatomy_cache = Ref{Vector{String}}(String[])
+const ANATOMY_MAX_TERMS = 4000  # anatomy-specific, more focused than full RadLex
+
+"""Load FoundationalAnatomy.csv labels for Base Anatomy autocomplete."""
+function load_anatomy_ontology()::Vector{String}
+    isempty(_anatomy_cache[]) || return _anatomy_cache[]
+    terms = String[]
+    if isfile(ANATOMY_CSV_PATH)
+        for (i, line) in enumerate(eachline(ANATOMY_CSV_PATH))
+            i == 1 && continue   # header: Name,ID
+            parts = split(strip(line), ','; limit = 2)
+            length(parts) >= 1 || continue
+            label = strip(parts[1])
+            isempty(label) && continue
+            push!(terms, label)
+            length(terms) >= ANATOMY_MAX_TERMS && break
+        end
+        @info "Loaded $(length(terms)) FoundationalAnatomy terms for Base Anatomy autocomplete"
+    else
+        @warn "FoundationalAnatomy CSV not found at $(ANATOMY_CSV_PATH)"
+    end
+    _anatomy_cache[] = sort(terms)
+    return _anatomy_cache[]
+end
+
+"""
+    parse_and_map_to_ontology(raw_name, ontology_labels) → (mapped_name, side)
+
+Julia port of Slicer extension's `parseAndMapToOntology`.
+Takes a raw TotalSegmentator segment name (e.g. "femur_left", "vertebrae_T5")
+and maps it to an ontology label (e.g. "femur (UBERON)") + side ("Left"/"Right"/"").
+"""
+function parse_and_map_to_ontology(raw_name::String, ontology_labels::Vector{String})
+    isempty(raw_name) && return ("", "")
+    first_organ = lowercase(strip(split(raw_name, " ")[1]))
+    side = ""
+    
+    # Extract lateral side
+    if endswith(first_organ, "_right")
+        side = "Right"
+        first_organ = first_organ[1:end-6]
+    elseif endswith(first_organ, "_left")
+        side = "Left"
+        first_organ = first_organ[1:end-5]
+    end
+    
+    # Default fallback: title-case with underscores→spaces
+    best = titlecase(replace(first_organ, "_" => " "))
+    
+    # 1. Exact match with ontology tag (e.g. "femur (UBERON)")
+    exact_prefix = first_organ * " ("
+    for key in ontology_labels
+        if startswith(lowercase(key), exact_prefix)
+            return (key, side)
+        end
+    end
+    # 2. Exact match
+    for key in ontology_labels
+        lowercase(key) == first_organ && return (key, side)
+    end
+    # 3. Prefix match (e.g. "femur " matches "femur bone")
+    prefix = first_organ * " "
+    for key in ontology_labels
+        startswith(lowercase(key), prefix) && return (key, side)
+    end
+    
+    return (best, side)
+end
+
 # ─── Persistence ─────────────────────────────────────────────────────────────
 function load_annotations(path::String = DEFAULT_SAVE_PATH)::Dict{String,Dict{String,Any}}
     isfile(path) || return Dict{String,Dict{String,Any}}()
@@ -204,6 +275,7 @@ function create_metadata_window(
 
     schema   = load_schema()
     radlex   = load_radlex()
+    anatomy_ontology = load_anatomy_ontology()  # FoundationalAnatomy labels for Base Anatomy autocomplete
     all_cats = all_categories(schema)
 
     # In-memory DB
@@ -448,17 +520,67 @@ function create_metadata_window(
     on(btn_type_organ.clicks)    do _; update_type_buttons("Organ Meta") end
     on(btn_type_ln.clicks)       do _; update_type_buttons("Lymph Node Meta") end
     
-    # Base Anatomy & Side
+    # Base Anatomy & Side (with ontology autocomplete)
     ba_r = nr!()
     Label(g[ba_r, 1], "Base Anatomy:", fontsize = 11, font = :bold, color = SUBTXT, halign = :right)
-    tb_base_anat = Textbox(g[ba_r, 2:3], placeholder = "e.g. L3 Vertebra, Right Rib 4...", fontsize = 11)
+    tb_base_anat = Textbox(g[ba_r, 2:3], placeholder = "type to search anatomy...", fontsize = 11)
     menu_side = Menu(g[ba_r, 4], options = ["", "Right", "Left", "NA"], default = "", fontsize = 10)
     
-    # Anatomical Relations
+    # Ontology dropdown for Base Anatomy (filtered by search text)
+    ba_menu_r = nr!()
+    ba_filtered = Observable(anatomy_ontology[1:min(50, end)])
+    ba_menu = Menu(g[ba_menu_r, 1:4], options = ba_filtered, fontsize = 10)
+    
+    # Wire search → filter dropdown
+    on(tb_base_anat.stored_string) do txt
+        t = _safe_strip(txt)
+        if isempty(t)
+            ba_filtered[] = anatomy_ontology[1:min(50, end)]
+        else
+            tl = lowercase(t)
+            hits = filter(s -> occursin(tl, lowercase(s)), anatomy_ontology)
+            ba_filtered[] = hits[1:min(50, end)]
+        end
+    end
+    # Wire dropdown selection → fill textbox
+    on(ba_menu.selection) do sel
+        sel === nothing && return
+        s = string(sel)
+        if tb_base_anat.stored_string[] != s
+            tb_base_anat.stored_string[] = s
+        end
+    end
+    
+    # Anatomical Relations (with ontology autocomplete for the target organ)
     rel_r = nr!()
     Label(g[rel_r, 1], "Relation:", fontsize = 11, font = :bold, color = SUBTXT, halign = :right)
-    tb_rel_base = Textbox(g[rel_r, 2:3], placeholder = "e.g. Aorta", fontsize = 11)
-    menu_rel = Menu(g[rel_r, 4], options = ["", "Surrounded By", "Lateral To", "Medial To", "Anterior To", "Posterior To", "Superior To", "Inferior To", "Between", "Inside"], default = "", fontsize = 10)
+    menu_rel = Menu(g[rel_r, 2], options = ["", "Surrounded By", "Lateral To", "Medial To",
+        "Anterior To", "Posterior To", "Superior To", "Inferior To", "Between", "Inside"],
+        default = "", fontsize = 10)
+    tb_rel_base = Textbox(g[rel_r, 3:4], placeholder = "type organ name...", fontsize = 11)
+    
+    # Ontology dropdown for Relation target
+    rel_menu_r = nr!()
+    rel_filtered = Observable(anatomy_ontology[1:min(50, end)])
+    rel_menu = Menu(g[rel_menu_r, 1:4], options = rel_filtered, fontsize = 10)
+    
+    on(tb_rel_base.stored_string) do txt
+        t = _safe_strip(txt)
+        if isempty(t)
+            rel_filtered[] = anatomy_ontology[1:min(50, end)]
+        else
+            tl = lowercase(t)
+            hits = filter(s -> occursin(tl, lowercase(s)), anatomy_ontology)
+            rel_filtered[] = hits[1:min(50, end)]
+        end
+    end
+    on(rel_menu.selection) do sel
+        sel === nothing && return
+        s = string(sel)
+        if tb_rel_base.stored_string[] != s
+            tb_rel_base.stored_string[] = s
+        end
+    end
     
     end_section!(sec_type)
     # ── Viewport Controls ────────────────────────────────────────────────────
@@ -1349,8 +1471,10 @@ end_section!(sec_win)
             # Check BaseAnatomy text if available (from previous detection or TotalSegmentator)
             base_anat = lowercase(get(data, "BaseAnatomy", ""))
             id_low = lowercase(cur_id_str)
-            # Combine both sources for keyword matching
-            combined = base_anat * " " * id_low
+            # Also check global_organ_mapping for the raw TS organ name
+            raw_organ = lowercase(get(_MEH.global_organ_mapping[], lid, ""))
+            # Combine all sources for keyword matching
+            combined = base_anat * " " * id_low * " " * raw_organ
             
             # Bone keywords from TotalSegmentator segment names — must exclude
             # vascular structures that share similar names (e.g. "iliac_artery")
@@ -1395,11 +1519,25 @@ end_section!(sec_win)
 
         
         t_base = get(data, "BaseAnatomy", "")
+        t_side = get(data, "BaseAnatomySide", "")
+        
+        # Auto-detect BaseAnatomy from TotalSegmentator organ mapping if not saved
+        if isempty(t_base) && lid > 0
+            organ_map = _MEH.global_organ_mapping[]
+            raw_organ = get(organ_map, lid, "")
+            if !isempty(raw_organ)
+                t_base, auto_side = parse_and_map_to_ontology(raw_organ, anatomy_ontology)
+                if isempty(t_side) && !isempty(auto_side)
+                    t_side = auto_side
+                end
+                @info "Auto-detected BaseAnatomy for lesion $lid: '$t_base' (side='$t_side') from TS organ '$raw_organ'"
+            end
+        end
+        
         if tb_base_anat.stored_string[] != t_base
             tb_base_anat.stored_string[] = t_base
         end
         
-        t_side = get(data, "BaseAnatomySide", "")
         side_opts = menu_side.options[]
         s_idx = findfirst(==(t_side), side_opts)
         menu_side.i_selected[] = s_idx !== nothing ? s_idx : 1
