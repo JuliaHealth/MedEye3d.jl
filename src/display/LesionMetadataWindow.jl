@@ -425,11 +425,11 @@ function create_metadata_window(
     
     lt_r = nr!()
     btn_type_prostate = Button(g[lt_r, 1], label = "Prostate",   buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_type_bone     = Button(g[lt_r, 2], label = "Bone Meta",  buttoncolor = ACCENT, labelcolor = TXT, fontsize = 10)
-    btn_type_organ    = Button(g[lt_r, 3], label = "Organ Meta", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_type_bone     = Button(g[lt_r, 2], label = "Bone Meta",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_type_organ    = Button(g[lt_r, 3], label = "Organ Meta", buttoncolor = ACCENT, labelcolor = TXT, fontsize = 10)
     btn_type_ln       = Button(g[lt_r, 4], label = "Lymph Node", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     
-    active_lesion_type = Observable("Bone Meta")
+    active_lesion_type = Observable("Organ Meta")
     
     function update_type_buttons(t)
         active_lesion_type[] = t
@@ -1343,15 +1343,41 @@ end_section!(sec_win)
         t_type = if haskey(data, "LesionType")
             data["LesionType"]
         else
-            bone_kws = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula", "humerus", "scapula", "sternum", "skull", "palate", "bone", "spine", "ilium", "ischium"]
+            # Auto-detect lesion type from available info.
+            # Mirrors Slicer extension's categorization logic (LesionMetadata.py L4258-4266).
+            
+            # Check BaseAnatomy text if available (from previous detection or TotalSegmentator)
+            base_anat = lowercase(get(data, "BaseAnatomy", ""))
             id_low = lowercase(cur_id_str)
-            if haskey(_MEH.bone_subsegments_cache, lid)
-                "Bone Meta"
-            elseif occursin("prostate", id_low)
+            # Combine both sources for keyword matching
+            combined = base_anat * " " * id_low
+            
+            # Bone keywords from TotalSegmentator segment names — must exclude
+            # vascular structures that share similar names (e.g. "iliac_artery")
+            bone_kws = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula",
+                        "clavicle", "humerus", "scapula", "sternum", "skull",
+                        "palate", "bone", "spine", "ilium", "ischium", "pubis",
+                        "tibia", "radius", "carpal", "tarsal", "costal_cartilage"]
+            vascular_exclusions = ["vena", "artery", "vein", "vessel", "trunk"]
+            
+            is_bone_kw = any(kw -> occursin(kw, combined), bone_kws) &&
+                         !any(v -> occursin(v, combined), vascular_exclusions)
+            
+            # Only consider bone_subsegments_cache if it actually has non-empty data
+            # (empty entries are cached for non-bone lesions to avoid re-computation)
+            has_real_bone_subseg = if haskey(_MEH.bone_subsegments_cache, lid)
+                cached_data = _MEH.bone_subsegments_cache[lid]
+                cached_data isa Tuple && length(cached_data) >= 2 &&
+                    !isempty(cached_data[1]) || !isempty(cached_data[2])
+            else
+                false
+            end
+            
+            if occursin("prostate", combined)
                 "Prostate"
-            elseif any(kw -> occursin(kw, id_low), bone_kws)
+            elseif is_bone_kw || has_real_bone_subseg
                 "Bone Meta"
-            elseif occursin("lymph", id_low) || occursin("node", id_low)
+            elseif occursin("lymph", combined) || occursin("node", combined)
                 "Lymph Node Meta"
             else
                 "Organ Meta"
@@ -1359,9 +1385,12 @@ end_section!(sec_win)
         end
         update_type_buttons(t_type)
         
-        if haskey(_MEH.bone_subsegments_cache, lid) || t_type == "Bone Meta"
+        if t_type == "Bone Meta"
             tog_surface.active[] = true
             tog_marrow.active[] = true
+        else
+            tog_surface.active[] = false
+            tog_marrow.active[] = false
         end
 
         
