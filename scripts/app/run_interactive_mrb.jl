@@ -270,20 +270,54 @@ metadata_json_path = joinpath(data_dir_pat6, "metadata.json")
 if isfile(metadata_json_path)
     try
         meta_json = JSON.parsefile(metadata_json_path)
+        
+        # Collect all date→description entries
+        date_descriptions = Dict{String, String}()
         for item in meta_json
             for (k, v) in item
                 if v isa Dict && haskey(v, "Description")
-                    desc_text = v["Description"]
-                    for (s_idx, (m, otp, ds, _...)) in enumerate(studies)
-                        date_clean = replace(ds, "-" => "")
-                        if date_clean == k
-                            MEH.tp_descriptions[s_idx - 1] = desc_text
-                        end
-                    end
+                    date_descriptions[k] = v["Description"]
                 end
             end
         end
-        println("Loaded radiological descriptions for $(length(MEH.tp_descriptions)) time points.")
+        
+        # Sort dates chronologically → same order as studies (which are sorted by orig_tp)
+        sorted_dates = sort(collect(keys(date_descriptions)))
+        
+        # Map studies to descriptions by matching CT/PET filenames that contain dates
+        # or by chronological index if no date found in filenames
+        for (s_idx, study_tuple) in enumerate(studies)
+            tp_idx = s_idx - 1  # 0-indexed
+            
+            # Try to find date in the CT or PET filename
+            ct_fname = length(study_tuple) >= 4 ? study_tuple[4] : ""
+            pet_fname = length(study_tuple) >= 5 ? study_tuple[5] : ""
+            matched = false
+            
+            for date_key in sorted_dates
+                # Check if the CT/PET metadata entry's node name matches our study
+                if haskey(date_descriptions, date_key)
+                    # Direct date match in filename (e.g. "Fixed_CT_Volume_20220310")
+                    if occursin(date_key, ct_fname) || occursin(date_key, pet_fname)
+                        MEH.tp_descriptions[tp_idx] = date_descriptions[date_key]
+                        matched = true
+                        break
+                    end
+                end
+            end
+            
+            # Fallback: use chronological index if no date match found
+            if !matched && tp_idx < length(sorted_dates)
+                # Interleaved PET/SPECT studies may double up indices,
+                # so only match the first study per date
+                date_key = sorted_dates[tp_idx + 1]
+                if haskey(date_descriptions, date_key) && !haskey(MEH.tp_descriptions, tp_idx)
+                    MEH.tp_descriptions[tp_idx] = date_descriptions[date_key]
+                end
+            end
+        end
+        
+        println("Loaded radiological descriptions for $(length(MEH.tp_descriptions)) time points ($(length(date_descriptions)) dates in metadata.json)")
     catch e
         @warn "Failed to load metadata.json descriptions: $e"
     end
