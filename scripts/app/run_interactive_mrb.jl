@@ -334,6 +334,7 @@ if isfile(ts_nrrd_path)
         ct_aligned = reverse(ct_vox, dims=2)
         bone_atlas = Float32.(in.(ts_atlas_aligned, Ref(bone_labels)) .| (ct_aligned .>= 180.0f0))
         MEH.global_bone_atlas[] = bone_atlas
+        MEH.global_organ_mapping[] = organ_mapping
     end
 else
     @warn "TotalSegmentator atlas not found at $ts_nrrd_path — using NRRD names only"

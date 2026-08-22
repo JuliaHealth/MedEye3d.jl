@@ -601,10 +601,11 @@ const tp_data_cache = Dict{Int, Vector{Vector{Any}}}()
 const bone_subsegments_cache = Dict{Int, Any}()
 const lesion_centroids_cache = Dict{Int, Vector{Int}}()
 const global_bone_atlas = Ref{Any}(nothing)
+const global_organ_mapping = Ref{Dict{Int,String}}(Dict{Int,String}())  # lesion_id → TS organ name (from map_lesions_to_organs)
 const current_tp_index = Ref(0)
 const tp_labels = Dict{Int, String}()  # tp_index → display label (e.g. "PET TP0")
 const tp_descriptions = Dict{Int, String}() # tp_index → radiological description
-export tp_data_cache, bone_subsegments_cache, lesion_centroids_cache, global_bone_atlas, current_tp_index, tp_labels, tp_descriptions
+export tp_data_cache, bone_subsegments_cache, lesion_centroids_cache, global_bone_atlas, global_organ_mapping, current_tp_index, tp_labels, tp_descriptions
 export compare_mode, compare_right_tp
 
 """
