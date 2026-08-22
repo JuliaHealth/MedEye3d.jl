@@ -417,6 +417,41 @@ function map_lesions_to_organs(lesion_mask::AbstractArray, ts_atlas::AbstractArr
     return result
 end
 
-export load_nrrd_labelmap, map_lesions_to_organs
+"""
+    classify_organ_to_lesion_type(organ_name::String) → String
+
+Classify a TotalSegmentator organ name into a lesion type category.
+Returns one of: "Prostate", "Bone Meta", "Lymph Node Meta", "Organ Meta".
+
+Mirrors the Slicer extension's categorization logic (LesionMetadata.py L4258-4266):
+- Prostate → "Prostate"
+- Bone/vertebra/rib/femur/... (excluding vascular) → "Bone Meta"  
+- Lymph node → "Lymph Node Meta"
+- Everything else → "Organ Meta"
+"""
+function classify_organ_to_lesion_type(organ_name::String)::String
+    org = lowercase(organ_name)
+    
+    # Bone keywords — TotalSegmentator segment names that indicate skeletal structures
+    bone_kws = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula", "clavicle",
+                "humerus", "scapula", "sternum", "skull", "palate", "bone", "spine",
+                "ilium", "ischium", "pubis", "tibia", "radius", "carpal", "tarsal",
+                "costal_cartilage"]
+    
+    # Vascular exclusions — some TS names share bone keywords (e.g. "iliac_artery")
+    vascular_exclusions = ["vena", "artery", "vein", "vessel", "trunk"]
+    
+    if occursin("prostate", org)
+        return "Prostate"
+    elseif any(kw -> occursin(kw, org), bone_kws) && !any(v -> occursin(v, org), vascular_exclusions)
+        return "Bone Meta"
+    elseif occursin("lymph", org) || occursin("node", org)
+        return "Lymph Node Meta"
+    else
+        return "Organ Meta"
+    end
+end
+
+export load_nrrd_labelmap, map_lesions_to_organs, classify_organ_to_lesion_type
 
 end # module
