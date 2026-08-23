@@ -630,10 +630,12 @@ const patient_id = Ref{String}("")
 const tp_modalities = Dict{Int, String}()
 # Current PET/CT blend weight (0.0=CT only, 1.0=full PET overlay)
 const current_pet_blend = Ref(1.0f0)
+# Total axial slices for edge-slice artefact detection
+const volume_z_size = Ref(0)
 
 export tp_data_cache, bone_subsegments_cache, lesion_centroids_cache, global_bone_atlas, global_organ_mapping, current_tp_index, tp_labels, tp_descriptions
 export compare_mode, compare_right_tp
-export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, tp_modalities
+export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, tp_modalities, volume_z_size
 
 """
 Helper: load TP data into a specific panel's onScrollData and re-render.

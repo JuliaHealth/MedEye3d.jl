@@ -1698,6 +1698,39 @@ end_section!(sec_win)
             put!(channel, ShowMaskLayerEvent(3, false))
         end
 
+        # ── Edge-slice artefact detection ─────────────────────────────────
+        # Lesions on the first 2 or last 2 axial slices are classified as
+        # technical artifacts (partial volume / reconstruction edge effects)
+        if lid > 0 && haskey(_MEH.lesion_centroids_cache, lid) && _MEH.volume_z_size[] > 0
+            centroid = _MEH.lesion_centroids_cache[lid]
+            z_slice = centroid[3]
+            total_z = _MEH.volume_z_size[]
+            
+            if z_slice <= 2 || z_slice >= total_z - 1
+                # Set Alternative Hypothesis to "Technical Artifact"
+                if haskey(field_widgets, "Alternative Hypothesis (False Positive)") && field_widgets["Alternative Hypothesis (False Positive)"] isa Menu
+                    opts = field_widgets["Alternative Hypothesis (False Positive)"].options[]
+                    idx = findfirst(==("Technical Artifact"), opts)
+                    if idx !== nothing
+                        field_widgets["Alternative Hypothesis (False Positive)"].i_selected[] = idx
+                    end
+                end
+                # Set Certainty to 0
+                if haskey(field_widgets, "Certainty") && field_widgets["Certainty"] isa Menu
+                    opts = field_widgets["Certainty"].options[]
+                    idx = findfirst(==("0"), opts)
+                    if idx !== nothing
+                        field_widgets["Certainty"].i_selected[] = idx
+                    end
+                end
+                # Persist in db
+                db = copy(lesion_db[]); ld_edge = copy(get(db, active_lesion_id[], Dict{String,Any}()))
+                ld_edge["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
+                ld_edge["Certainty"] = "0"
+                db[active_lesion_id[]] = ld_edge; lesion_db[] = db
+                @info "Edge-slice artefact: lesion $lid z=$z_slice/$total_z → Technical Artifact, Certainty=0"
+            end
+        end
         
         t_base = get(data, "BaseAnatomy", "")
         t_side = get(data, "BaseAnatomySide", "")
