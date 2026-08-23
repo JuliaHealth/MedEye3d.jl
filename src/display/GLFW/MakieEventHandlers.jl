@@ -11,7 +11,7 @@ using Statistics: mean
 using Dates
 
 export reactToChangePlane, reactToCompareTimePoints, reactToShowSingleLesion
-export reactToWindowing, reactToPaintVal, reactToSyncLesion, reactToChangeBrushSize
+export reactToWindowing, reactToPaintVal, reactToSyncLesion, reactToChangeBrushSize, reactToPetBlend
 export reactToChangeTimePoint, reactToToggleLesion, reactToRefreshList
 export reactToAddAutoPet, reactToAIInferenceResult, reactToSyncMissing, reactToGenManual
 export reactToMapLink, reactToAutoRunPreprocess, reactToRunPreprocess, reactToShowBoneMask, reactToShowMaskLayer, reactToSaveMRB
@@ -344,6 +344,22 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
         end
     end
     println("Updated windowing for $(data.modality): [$(data.min_val), $(data.max_val)]"); flush(stdout)
+end
+
+function reactToPetBlend(data::PetBlendEvent, stateObjects::Vector{StateDataFields})
+    for state in stateObjects
+        ModernGL.glUseProgram(state.mainForDisplayObjects.shader_program)
+        for tex in state.mainForDisplayObjects.listOfTextSpecifications
+            # Update PET overlay contribution (not the pure PET main image panel)
+            if tex.name == "PET" && !tex.isMainImage
+                tex.maskContribution = data.weight
+                @uniforms! begin
+                    tex.uniforms.maskContribution := data.weight
+                end
+            end
+        end
+    end
+    println("PET/CT blend updated to $(data.weight)"); flush(stdout)
 end
 
 function reactToPaintVal(data::PaintValEvent, stateObjects::Vector{StateDataFields})

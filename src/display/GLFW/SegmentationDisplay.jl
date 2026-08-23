@@ -149,6 +149,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::ChangeBrushSizeEvent) = re
 on_next!(stateObjects::Vector{StateDataFields}, data::SyncLesionEvent) = reactToSyncLesion(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ChangeTimePointEvent) = reactToChangeTimePoint(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ToggleLesionEvent) = reactToToggleLesion(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::PetBlendEvent) = reactToPetBlend(data, stateObjects)
 
 on_next!(stateObjects::Vector{StateDataFields}, data::RefreshListEvent) = reactToRefreshList(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::AddAutoPetEvent) = reactToAddAutoPet(data, stateObjects)

@@ -5,6 +5,7 @@ export ChangeTimePointEvent, ToggleLesionEvent, RefreshListEvent
 export AddAutoPetEvent, AIInferenceResultEvent, AIStatusUpdateEvent, SyncMissingEvent, GenManualEvent
 export MapLinkEvent, AutoRunPreprocessEvent, RunPreprocessEvent, ShowBoneMaskEvent, ShowMaskLayerEvent, SaveMRBEvent
 export CloseWindowEvent, ResizeWindowEvent, SetWindowTitleEvent, ChangeBrushSizeEvent, ToggleMoveLesionModeEvent
+export PetBlendEvent
 struct ChangePlaneEvent
     plane :: Symbol # :Axial, :Coronal, :Sagittal
 end
@@ -97,6 +98,10 @@ struct ChangeBrushSizeEvent
 end
 struct ToggleMoveLesionModeEvent
     active :: Bool
+end
+
+struct PetBlendEvent
+    weight :: Float32  # 0.0 = CT only, 1.0 = full PET overlay
 end
 
 end

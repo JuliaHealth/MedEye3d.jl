@@ -58,6 +58,32 @@ textureSpecArray = Vector{Vector{TextureSpec}}([
     TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow)]
 ])
 
+# ── Hi-resolution display: resample to half in-plane spacing ─────────────
+# Doubles X,Y resolution while keeping Z unchanged (4x memory per volume)
+const HIRES_FACTOR = 2.0  # 2.0 = double resolution, 1.0 = native
+
+"""
+    hires_resample(vol::Array{Float32,3}, native_sp, half_sp, interp) -> Array{Float32,3}
+
+Resample a Float32 3D volume from `native_sp` to `half_sp` using MedImages.
+`interp` is MedImages.Linear_en for CT/PET or MedImages.Nearest_neighbour_en for masks.
+"""
+function hires_resample(vol::Array{Float32,3}, native_sp::Tuple{Float64,Float64,Float64},
+                        half_sp::Tuple{Float64,Float64,Float64}, interp)
+    if HIRES_FACTOR <= 1.0
+        return vol
+    end
+    dummy_origin = (0.0, 0.0, 0.0)
+    dummy_dir = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+    im = MedImage(voxel_data=vol, spacing=native_sp, origin=dummy_origin,
+                  direction=dummy_dir,
+                  image_type=MedImages.MedImage_data_struct.MRI_type,
+                  image_subtype=MedImages.MedImage_data_struct.CT_subtype,
+                  patient_id="hires")
+    resampled = MedImages.resample_to_spacing(im, half_sp, interp)
+    return Float32.(resampled.voxel_data)
+end
+
 # To hold all TP data
 all_tps_data = Dict{Int, Vector{Vector{Any}}}()
 
@@ -92,6 +118,13 @@ function load_tp(ct_path, pet_path, mask_path, tfm_path, modality)
     ct_vol_base = reverse(ct_vol, dims=2)
     pet_vol_base = reverse(pet_vol, dims=2)
     mask_vol_base = reverse(mask_vol, dims=2)
+
+    # Hi-res resample
+    native_sp = Tuple(Float64.(baseline_ct.spacing))
+    disp_sp = (native_sp[1] / HIRES_FACTOR, native_sp[2] / HIRES_FACTOR, native_sp[3])
+    ct_vol_base = hires_resample(ct_vol_base, native_sp, disp_sp, MedImages.Linear_en)
+    pet_vol_base = hires_resample(pet_vol_base, native_sp, disp_sp, MedImages.Linear_en)
+    mask_vol_base = hires_resample(mask_vol_base, native_sp, disp_sp, MedImages.Nearest_neighbour_en)
 
     vol_img_axial = ct_vol_base
     vol_pet_axial = pet_vol_base
@@ -145,7 +178,14 @@ if isfile(preprocessed_h5)
     base_ct_fname = studies[1][4]
     base_mask_fname = studies[1][6]
     global first_spacing = Tuple(Float64.(read(HDF5.attributes(h5_file["BASELINE/$base_ct_fname"])["spacing"])))
+    
+    # Compute display spacing (halved in-plane for hi-res)
+    display_spacing = (first_spacing[1] / HIRES_FACTOR, first_spacing[2] / HIRES_FACTOR, first_spacing[3])
+    println("Native spacing: $first_spacing → Display spacing: $display_spacing ($(HIRES_FACTOR)x)")
+    
     global first_mask = reverse(Float32.(read(h5_file["BASELINE/$base_mask_fname"])), dims=2)
+    # Resample first_mask to display resolution for centroid/organ mapping later
+    first_mask = hires_resample(first_mask, first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
     first_mask_base = first_mask
     
     for (modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname) in studies
@@ -168,6 +208,11 @@ if isfile(preprocessed_h5)
         ct_vol_base = reverse(ct_vol, dims=2)
         pet_vol_base = reverse(pet_vol, dims=2)
         mask_vol_base = reverse(mask_vol, dims=2)
+        
+        # Resample to display resolution (hi-res)
+        ct_vol_base = hires_resample(ct_vol_base, first_spacing, display_spacing, MedImages.Linear_en)
+        pet_vol_base = hires_resample(pet_vol_base, first_spacing, display_spacing, MedImages.Linear_en)
+        mask_vol_base = hires_resample(mask_vol_base, first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
         
         vol_img_sagittal = permutedims(ct_vol_base, (2, 3, 1))
         vol_pet_sagittal = permutedims(pet_vol_base, (2, 3, 1))
@@ -225,7 +270,14 @@ else
     end
 end
 
-spacings = [[first_spacing], [first_spacing], [(first_spacing[2], first_spacing[3], first_spacing[1])], [(first_spacing[1], first_spacing[3], first_spacing[2])], [first_spacing]]
+# Compute display_spacing for slow path if not already set
+if !@isdefined(display_spacing)
+    display_spacing = (first_spacing[1] / HIRES_FACTOR, first_spacing[2] / HIRES_FACTOR, first_spacing[3])
+    println("Native spacing: $first_spacing → Display spacing: $display_spacing ($(HIRES_FACTOR)x)")
+end
+
+ds = display_spacing
+spacings = [[ds], [ds], [(ds[2], ds[3], ds[1])], [(ds[1], ds[3], ds[2])], [ds]]
 origins = [[(0.0, 0.0, 0.0)] for _ in 1:5]
 
 dummyStudySrc = Vector{Vector{Tuple{String,String}}}()
