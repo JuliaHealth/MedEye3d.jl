@@ -175,8 +175,11 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
                                 petOnly_$(x.name) = clamp(maskColor_$(x.name) * intensity_$(x.name) * 1.8, 0.0, 1.0);
                             }
                         }
-                        // Always crossfade PET: blend=0→CT, blend=1→PET (black where no signal)
-                        baseColor = mix(baseColor, petOnly_$(x.name), $(x.name)maskContribution);
+                        // Piecewise blend: keep CT at 100% until blend=0.5, then crossfade to pure PET at 1.0
+                        float blend_$(x.name) = $(x.name)maskContribution;
+                        float ctW_$(x.name) = clamp(2.0 * (1.0 - blend_$(x.name)), 0.0, 1.0);
+                        float petW_$(x.name) = clamp(2.0 * blend_$(x.name), 0.0, 1.0);
+                        baseColor = clamp(baseColor * ctW_$(x.name) + petOnly_$(x.name) * petW_$(x.name), 0.0, 1.0);
                     }
                 """
             else
