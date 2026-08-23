@@ -356,13 +356,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             
             currentSlice = panelState.currentDisplayedSlice
             
-            # Map texture coordinates back to original volume coordinates
-            # Panel 1 & 2 (Axial): data = (origX, origY, origZ), texture shows (origX, origY)
-            # Panel 3 (Sagittal): data = permutedims(iso, (2,3,1)) = (origY, origZ, origX)
-            #   texture shows (origY, origZ), slice = origX
-            # Panel 4 (Coronal): data = permutedims(iso, (1,3,2)) = (origX, origZ, origY)
-            #   texture shows (origX, origZ), slice = origY
-            if clickedPanel == 1 || clickedPanel == 2
+            if clickedPanel == 1 || clickedPanel == 2 || clickedPanel == 5
                 origX, origY, origZ = texX, texY, currentSlice
             elseif clickedPanel == 3  # Sagittal
                 origY, origZ, origX = texX, texY, currentSlice
@@ -430,7 +424,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                     dy_tex = round(Int, texY - startTexY)
                     
                     dx_vox, dy_vox, dz_vox = 0, 0, 0
-                    if clickedPanel == 1 || clickedPanel == 2
+                    if clickedPanel == 1 || clickedPanel == 2 || clickedPanel == 5
                         dx_vox, dy_vox = dx_tex, dy_tex
                     elseif clickedPanel == 3 # Sagittal (2,3,1) -> x is slice, y is texX, z is texY
                         dy_vox, dz_vox = dx_tex, texY - startTexY # keeping logic aligned

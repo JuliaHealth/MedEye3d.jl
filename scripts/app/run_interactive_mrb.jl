@@ -60,7 +60,7 @@ textureSpecArray = Vector{Vector{TextureSpec}}([
 
 # ── Hi-resolution display: resample to half in-plane spacing ─────────────
 # Doubles X,Y resolution while keeping Z unchanged (4x memory per volume)
-const HIRES_FACTOR = 1.0  # 2.0 = double resolution, 1.0 = native
+const HIRES_FACTOR = 2.0  # 2.0 = double resolution, 1.0 = native
 
 """
     hires_resample(vol::Array{Float32,3}, native_sp, half_sp, interp) -> Array{Float32,3}

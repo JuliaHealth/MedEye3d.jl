@@ -233,7 +233,7 @@ end
                         end
                         
                         # UPDATE lastRecordedMousePosition for the synced panels
-                        if panelIdx == 1 || panelIdx == 2
+                        if panelIdx == 1 || panelIdx == 2 || panelIdx == 5
                             panelState.lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
                         elseif panelIdx == 3
                             panelState.lastRecordedMousePosition = CartesianIndex(origY, origZ, origX)
