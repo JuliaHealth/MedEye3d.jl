@@ -640,7 +640,7 @@ function create_metadata_window(
     ba_r = nr!()
     Label(g[ba_r, 1], "Base Anatomy:", fontsize = 10, color = LBL_FG, halign = :right)
     tb_base_anat = Textbox(g[ba_r, 2], placeholder = "type & Enter to search...", fontsize = 10)
-    btn_ba_search = Button(g[ba_r, 3], label = "🔍",
+    btn_ba_search = Button(g[ba_r, 3], label = "Find",
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     menu_side = Menu(g[ba_r, 4], options = ["", "Right", "Left", "NA"], default = "", fontsize = 10)
     
@@ -651,7 +651,7 @@ function create_metadata_window(
         "Anterior To", "Posterior To", "Superior To", "Inferior To", "Between", "Inside"],
         default = "", fontsize = 10)
     tb_rel_base = Textbox(g[rel_r, 3], placeholder = "type & Enter...", fontsize = 10)
-    btn_rel_search = Button(g[rel_r, 4], label = "🔍",
+    btn_rel_search = Button(g[rel_r, 4], label = "Find",
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     
     # Shared ontology dropdown (hidden by default, shown on search)
@@ -772,10 +772,10 @@ function create_metadata_window(
 
     # Merged overlay/single/all/refresh into one compact row
     vc2_r = nr!()
-    btn_tl = Button(g[vc2_r, 1], label = "Overlay ⊙", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_single = Button(g[vc2_r, 2], label = "Single ◉", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_all = Button(g[vc2_r, 3], label = "All ◎",    buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_rf = Button(g[vc2_r, 4], label = "↻ Refresh",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_tl = Button(g[vc2_r, 1], label = "Overlay", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_single = Button(g[vc2_r, 2], label = "Single", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_all = Button(g[vc2_r, 3], label = "All",    buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_rf = Button(g[vc2_r, 4], label = "Refresh",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     on(btn_tl.clicks) do _; put!(channel, ToggleLesionEvent()) end
     on(btn_rf.clicks) do _; put!(channel, RefreshListEvent()) end
     on(btn_single.clicks) do _
@@ -796,7 +796,7 @@ function create_metadata_window(
 
         # CT Windowing
     ct_lbl_r = nr!()
-    Label(g[ct_lbl_r, 1:4], "── CT Window & Offsets (HU) ──", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
+    Label(g[ct_lbl_r, 1:4], "-- CT Window & Offsets (HU) --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
     
     ct_s_r = nr!()
     islider_ct = IntervalSlider(g[ct_s_r, 1:4], range = -1500.0:10.0:3000.0, startvalues = (-150.0, 250.0))
@@ -862,7 +862,7 @@ function create_metadata_window(
 
     # PET Windowing
     pet_lbl_r = nr!()
-    Label(g[pet_lbl_r, 1:4], "── PET Window & Offsets (SUV) ──", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
+    Label(g[pet_lbl_r, 1:4], "-- PET Window & Offsets (SUV) --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
     
     pet_s_r = nr!()
     islider_pet = IntervalSlider(g[pet_s_r, 1:4], range = 0.0:0.1:50.0, startvalues = (0.0, 10.0))
@@ -928,7 +928,7 @@ function create_metadata_window(
 
     # SPECT Windowing
     spect_lbl_r = nr!()
-    Label(g[spect_lbl_r, 1:4], "── SPECT Window & Offsets (Counts) ──", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
+    Label(g[spect_lbl_r, 1:4], "-- SPECT Window & Offsets (Counts) --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
     
     spect_s_r = nr!()
     islider_spect = IntervalSlider(g[spect_s_r, 1:4], range = 0.0:0.1:100.0, startvalues = (0.0, 10.0))
@@ -1381,7 +1381,7 @@ end_section!(sec_win)
     Label(g[seg_r2, 1], "Brush:", halign=:right, fontsize=10, color=LBL_FG)
     slider_brush = Slider(g[seg_r2, 2:3], range = 1:20, startvalue = 1)
     on(slider_brush.value) do val; put!(channel, ChangeBrushSizeEvent(val)) end
-    btn_move_lesion = Button(g[seg_r2, 4], label = "Move ⇅", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_move_lesion = Button(g[seg_r2, 4], label = "Move", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     move_lesion_active = Ref(false)
     on(btn_move_lesion.clicks) do _
         move_lesion_active[] = !move_lesion_active[]
@@ -1392,7 +1392,7 @@ end_section!(sec_win)
     # Row 3: Algorithm + Run AI
     seg_r3 = nr!()
     algo_combo = Menu(g[seg_r3, 1:2], options = ["HELPNet (AI)", "NNInteractive", "Traditional (PETTumor)"], default = "HELPNet (AI)", fontsize = 10)
-    btn_add_ai = Button(g[seg_r3, 3:4], label = "Run AI ▶", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
+    btn_add_ai = Button(g[seg_r3, 3:4], label = "Run AI", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
     on(btn_add_ai.clicks) do _; put!(channel, AddAutoPetEvent(algo_combo.selection[], channel)) end
 
     # Row 4: AI status
@@ -1422,7 +1422,7 @@ end_section!(sec_win)
     rpt_r = nr!()
     Label(g[rpt_r, 1], "Report:", fontsize = 10, color = LBL_FG, halign = :right)
     rpt_tb = Textbox(g[rpt_r, 2:3], placeholder = "Generated summary...", fontsize = 10)
-    btn_gen = Button(g[rpt_r, 4], label = "Gen ▶",
+    btn_gen = Button(g[rpt_r, 4], label = "Gen",
         buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
     
     # Preprocessing
@@ -1447,9 +1447,9 @@ end_section!(sec_win)
     Menu(g[ads_r2, 4], options = ["None", "Bone_Mask", "Organ_Mask"], fontsize = 10)
 
     ads_r3 = nr!()
-    Label(g[ads_r3, 1], "Xform →:", fontsize = 10, color = LBL_FG, halign = :right)
+    Label(g[ads_r3, 1], "Xform Fwd:", fontsize = 10, color = LBL_FG, halign = :right)
     Menu(g[ads_r3, 2], options = ["None", "Elastic_Transform_0_to_1"], fontsize = 10)
-    Label(g[ads_r3, 3], "Xform ←:", fontsize = 10, color = LBL_FG, halign = :right)
+    Label(g[ads_r3, 3], "Xform Bwd:", fontsize = 10, color = LBL_FG, halign = :right)
     Menu(g[ads_r3, 4], options = ["None", "Elastic_Transform_1_to_0"], fontsize = 10)
 
     btn_map_link = Button(g[nr!(), 1:4], label = "Map Lesions (Link)", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
