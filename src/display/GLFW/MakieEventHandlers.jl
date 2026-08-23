@@ -352,10 +352,7 @@ function reactToPetBlend(data::PetBlendEvent, stateObjects::Vector{StateDataFiel
         for tex in state.mainForDisplayObjects.listOfTextSpecifications
             # Update PET overlay contribution (not the pure PET main image panel)
             if tex.name == "PET" && !tex.isMainImage
-                tex.maskContribution = data.weight
-                @uniforms! begin
-                    tex.uniforms.maskContribution := data.weight
-                end
+                Uniforms.setTextureContribution(tex, data.weight)
             end
         end
     end
@@ -631,6 +628,8 @@ const global_ts_names = Ref{Dict{Int,String}}(Dict{Int,String}())  # TS label ->
 const patient_id = Ref{String}("")
 # Study modalities per TP: tp_index -> "PET" or "SPECT"
 const tp_modalities = Dict{Int, String}()
+# Current PET/CT blend weight (0.0=CT only, 1.0=full PET overlay)
+const current_pet_blend = Ref(1.0f0)
 
 export tp_data_cache, bone_subsegments_cache, lesion_centroids_cache, global_bone_atlas, global_organ_mapping, current_tp_index, tp_labels, tp_descriptions
 export compare_mode, compare_right_tp

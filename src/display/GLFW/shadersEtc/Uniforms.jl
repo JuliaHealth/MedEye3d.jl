@@ -323,6 +323,17 @@ function changeTextureContribution(textur::TextureSpec, change::Float32)
 
 end#changeTextureContribution
 
+"""
+Set texture contribution to an absolute value (not relative delta).
+Used by external modules that cannot call @uniforms! macro directly.
+"""
+function setTextureContribution(textur::TextureSpec, value::Float32)
+    textur.maskContribution = clamp(value, 0.0f0, 1.0f0)
+    @uniforms! begin
+        textur.uniforms.maskContribution := textur.maskContribution
+    end
+end#setTextureContribution
+
 function changeMainTextureContribution(textur::TextureSpec, change::Float32, stateObject::StateDataFields)
     newValue = textur.maskContribution + change
     if (newValue >= 0 && newValue <= 1)
