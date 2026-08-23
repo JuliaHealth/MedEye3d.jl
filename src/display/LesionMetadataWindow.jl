@@ -920,6 +920,16 @@ function create_metadata_window(
     # ── Dedicated Windowing & Image Offsets Subpanel ─────────────────────────
     sec_win = begin_section!("Windowing & Image Offsets"; default_open=false)
 
+    # PET/CT Blend slider (0.0 = CT only, 1.0 = full PET overlay)
+    blend_r = nr!()
+    Label(g[blend_r, 1], "PET/CT:", fontsize = 10, color = LBL_FG, halign = :right)
+    slider_blend = Slider(g[blend_r, 2:3], range = 0.0f0:0.01f0:1.0f0, startvalue = 1.0f0)
+    lbl_blend_val = Label(g[blend_r, 4], @lift(string(round($(slider_blend.value), digits=2))),
+        fontsize = 10, color = TXT)
+    on(slider_blend.value) do val
+        put!(channel, PetBlendEvent(Float32(val)))
+    end
+
         # CT Windowing
     ct_lbl_r = nr!()
     Label(g[ct_lbl_r, 1:4], "-- CT Window & Offsets (HU) --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)

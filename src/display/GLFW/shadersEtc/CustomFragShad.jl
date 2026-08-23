@@ -164,6 +164,8 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
                         float normalizedVal = clamp(($(x.name)Res - $(x.name)minValue) / max($(x.name)ValueRange, 0.001), 0.0, 1.0);
                         if (normalizedVal > 0.0) {
                             float alpha = clamp(pow(normalizedVal, 0.4) * 0.95, 0.05, 0.85);
+                            // Scale alpha by maskContribution (0.0 = no overlay, 1.0 = full overlay)
+                            alpha = alpha * $(x.name)maskContribution;
                             vec3 maskColor = vec3(
                                 changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.r, $(x.name)ValueRange),
                                 changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.g, $(x.name)ValueRange),
