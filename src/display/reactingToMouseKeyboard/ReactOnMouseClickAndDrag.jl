@@ -319,7 +319,10 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 panelState.movingLesionStartTex = (texX, texY)
                 panelState.movingLesionLastDelta = CartesianIndex(0,0,0)
                 seg_vol = nothing
-                for dat in mainStates[1].onScrollData.dataToScroll
+                # In compare mode, search the right panel's data for the lesion
+                MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
+                search_panel = (MEH.compare_mode[] && clickedPanel == 5) ? mainStates[5] : mainStates[1]
+                for dat in search_panel.onScrollData.dataToScroll
                     if dat.name == "Mask" || dat.name == "segmentation"
                         if panelState.movingLesionID > 0 && any(dat.dat .== Float32(panelState.movingLesionID))
                             seg_vol = dat.dat
@@ -448,7 +451,11 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                         dx, dy, dz = new_delta[1], new_delta[2], new_delta[3]
                         old_dx, old_dy, old_dz = old_d[1], old_d[2], old_d[3]
                         
-                        for (p_idx, st) in enumerate(mainStates)
+                        MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
+                        panels_to_update = (MEH.compare_mode[] && clickedPanel == 5) ? [5] : collect(1:length(mainStates))
+                        
+                        for p_idx in panels_to_update
+                            st = mainStates[p_idx]
                             p_delta = (p_idx == 3) ? CartesianIndex(dy, dz, dx) : ((p_idx == 4) ? CartesianIndex(dx, dz, dy) : CartesianIndex(dx, dy, dz))
                             p_old_d = (p_idx == 3) ? CartesianIndex(old_dy, old_dz, old_dx) : ((p_idx == 4) ? CartesianIndex(old_dx, old_dz, old_dy) : CartesianIndex(old_dx, old_dy, old_dz))
                             
@@ -483,7 +490,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                         # Synchronize tp_data_cache
                         try
                             MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
-                            tp_idx = MEH.current_tp_index[]
+                            tp_idx = (MEH.compare_mode[] && clickedPanel == 5) ? MEH.compare_right_tp[] : MEH.current_tp_index[]
                             if haskey(MEH.tp_data_cache, tp_idx)
                                 tp_voxels = MEH.tp_data_cache[tp_idx]
                                 for (p_idx, panel_data) in enumerate(tp_voxels)

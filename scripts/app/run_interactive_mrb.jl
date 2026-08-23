@@ -526,6 +526,9 @@ for lid in lesion_ids_ints
 end
 println("Cached centroids for $(length(MEH.lesion_centroids_cache)) lesions.")
 
+# Store volume Z dimension for edge-slice artefact detection
+MEH.volume_z_size[] = size(first_mask, 3)
+
 lesion_list = if isempty(lesion_ids_ints)
     ["(none)"]
 else
