@@ -564,7 +564,7 @@ function create_metadata_window(
     # Check layout changes and pin to top if it shrinks
     on(g.layoutobservables.computedbbox) do bbox
         window_h = size(fig.scene)[2]
-        if bbox.widths[2] <= window_h
+        if bbox.widths[2] <= window_h && sl.value[] != 1.0
             sl.value[] = 1.0
         end
     end
