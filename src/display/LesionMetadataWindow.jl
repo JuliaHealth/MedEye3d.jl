@@ -540,7 +540,7 @@ function create_metadata_window(
     LBL_FG  = RGBf(0.90, 0.92, 0.95)  # high-contrast label text on dark bg
 
     # ── Figure ──────────────────────────────────────────────────────────────
-    fig = Figure(size = (920, 900), backgroundcolor = BG)
+    fig = Figure(size = (920, 900), backgroundcolor = BG, figure_padding = 0)
     
     main_layout = GridLayout(fig[1,1])
     sl = Slider(main_layout[1, 2], range = 0:0.01:1, startvalue = 1, horizontal = false, tellheight = false)
@@ -549,8 +549,24 @@ function create_metadata_window(
     
     # Mouse scroll event to control slider
     on(fig.scene.events.scroll) do scroll
-        sl.value[] = clamp(sl.value[] + scroll[2] * 0.05, 0.0, 1.0)
+        # Only allow scrolling if the content is taller than the window
+        # otherwise keep it pinned to the top (1.0)
+        content_h = g.layoutobservables.computedbbox[].widths[2]
+        window_h = size(fig.scene)[2]
+        if content_h > window_h
+            sl.value[] = clamp(sl.value[] + scroll[2] * 0.05, 0.0, 1.0)
+        else
+            sl.value[] = 1.0
+        end
         return Consume(true)
+    end
+    
+    # Check layout changes and pin to top if it shrinks
+    on(g.layoutobservables.computedbbox) do bbox
+        window_h = size(fig.scene)[2]
+        if bbox.widths[2] <= window_h
+            sl.value[] = 1.0
+        end
     end
     
     rowgap!(g, 0)   # ultra-compact: no gap between rows
