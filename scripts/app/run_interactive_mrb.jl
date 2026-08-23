@@ -323,6 +323,35 @@ if isfile(metadata_json_path)
     end
 end
 
+# Cache PET volumes per TP for SUV computation (axial orientation, Y-reversed)
+for (tp_idx, vdt) in all_tps_data
+    # vdt[1] is the axial panel: [("CT", ct_vol), ("PET", pet_vol), ("Mask", mask_vol), ...]
+    for (name, vol) in vdt[1]
+        if name == "PET"
+            MEH.pet_volumes_cache[tp_idx] = vol
+            break
+        end
+    end
+end
+println("Cached PET volumes for $(length(MEH.pet_volumes_cache)) time points.")
+
+# Cache modalities per TP
+for (modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname) in studies
+    tp_idx_found = -1
+    for (k, v) in tp_labels_map
+        if occursin(date_str, v)
+            tp_idx_found = k
+            break
+        end
+    end
+    if tp_idx_found >= 0
+        MEH.tp_modalities[tp_idx_found] = modality
+    end
+end
+
+# Extract patient ID from data directory name
+MEH.patient_id[] = basename(data_dir_pat6)
+
 MEH.current_tp_index[] = 0
 
 # Initialize Quad View and hide Pane 5
@@ -369,6 +398,9 @@ if isfile(ts_nrrd_path)
         bone_atlas = Float32.(in.(ts_atlas_aligned, Ref(bone_labels)) .| (ct_aligned .>= 180.0f0))
         MEH.global_bone_atlas[] = bone_atlas
         MEH.global_organ_mapping[] = organ_mapping
+        # Also cache TS atlas + names for SUV background organ computation
+        MEH.global_ts_atlas[] = ts_atlas_aligned
+        MEH.global_ts_names[] = ts_names
     end
 else
     @warn "TotalSegmentator atlas not found at $ts_nrrd_path — using NRRD names only"
