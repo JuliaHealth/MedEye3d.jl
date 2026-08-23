@@ -987,19 +987,49 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
     marr_pts_cached = haskey(bone_subsegments_cache, data.active_id) ? (bone_subsegments_cache[data.active_id][2] isa AbstractArray{<:CartesianIndex} ? bone_subsegments_cache[data.active_id][2] : findall(bone_subsegments_cache[data.active_id][2] .> 0)) : CartesianIndex{3}[]
     
     for (panel_idx, stateObject) in enumerate(stateObjects)
+        panel_surf_pts = surf_pts_cached
+        panel_marr_pts = marr_pts_cached
+        
+        # In Compare Mode, Panel 5 displays a different timepoint and may have a different lesion mask.
+        # Compute bone subsegments locally for Panel 5 so it perfectly wraps its own mask.
+        if compare_mode[] && panel_idx == 5 && global_bone_atlas[] !== nothing
+            try
+                panel_seg = nothing
+                for dat in stateObject.onScrollData.dataToScroll
+                    if dat.name == "Mask" || dat.name == "segmentation"
+                        panel_seg = dat.dat
+                    end
+                end
+                if panel_seg !== nothing
+                    panel_lesion_indices = findall(panel_seg .== Float32(data.active_id))
+                    has_bone = !isempty(panel_lesion_indices) && any(idx -> checkbounds(Bool, global_bone_atlas[], idx) && global_bone_atlas[][idx] > 0.0f0, panel_lesion_indices)
+                    if has_bone
+                        s_mask, m_mask = MedEye3d.BoneSubsegmentation.generate_bone_subsegments(panel_seg, global_bone_atlas[], (1.5f0, 1.5f0, 2.0f0), data.active_id)
+                        panel_surf_pts = findall(s_mask)
+                        panel_marr_pts = findall(m_mask)
+                    else
+                        panel_surf_pts = CartesianIndex{3}[]
+                        panel_marr_pts = CartesianIndex{3}[]
+                    end
+                end
+            catch e
+                println("Failed to recalc bone for panel 5: $e")
+            end
+        end
+
         surf_indices = if panel_idx == 3
-            [CartesianIndex(I[2], I[3], I[1]) for I in surf_pts_cached]
+            [CartesianIndex(I[2], I[3], I[1]) for I in panel_surf_pts]
         elseif panel_idx == 4
-            [CartesianIndex(I[1], I[3], I[2]) for I in surf_pts_cached]
+            [CartesianIndex(I[1], I[3], I[2]) for I in panel_surf_pts]
         else
-            surf_pts_cached
+            panel_surf_pts
         end
         marr_indices = if panel_idx == 3
-            [CartesianIndex(I[2], I[3], I[1]) for I in marr_pts_cached]
+            [CartesianIndex(I[2], I[3], I[1]) for I in panel_marr_pts]
         elseif panel_idx == 4
-            [CartesianIndex(I[1], I[3], I[2]) for I in marr_pts_cached]
+            [CartesianIndex(I[1], I[3], I[2]) for I in panel_marr_pts]
         else
-            marr_pts_cached
+            panel_marr_pts
         end
         
         for scrDat in stateObject.onScrollData.dataToScroll
@@ -1285,13 +1315,37 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
                         pts = (data.layer == 2) ? (raw_surf isa AbstractArray{<:CartesianIndex} ? raw_surf : findall(raw_surf .> 0)) :
                                                   (raw_marr isa AbstractArray{<:CartesianIndex} ? raw_marr : findall(raw_marr .> 0))
                         
+                        panel_pts = pts
+                        if compare_mode[] && panel_idx == 5 && global_bone_atlas[] !== nothing
+                            try
+                                panel_seg = nothing
+                                for scr in stateObject.onScrollData.dataToScroll
+                                    if scr.name == "Mask" || scr.name == "segmentation"
+                                        panel_seg = scr.dat
+                                    end
+                                end
+                                if panel_seg !== nothing
+                                    panel_lesion_indices = findall(panel_seg .== Float32(cur_lid))
+                                    has_bone = !isempty(panel_lesion_indices) && any(idx -> checkbounds(Bool, global_bone_atlas[], idx) && global_bone_atlas[][idx] > 0.0f0, panel_lesion_indices)
+                                    if has_bone
+                                        s_mask, m_mask = MedEye3d.BoneSubsegmentation.generate_bone_subsegments(panel_seg, global_bone_atlas[], (1.5f0, 1.5f0, 2.0f0), cur_lid)
+                                        panel_pts = (data.layer == 2) ? findall(s_mask) : findall(m_mask)
+                                    else
+                                        panel_pts = CartesianIndex{3}[]
+                                    end
+                                end
+                            catch e
+                                println("Failed to recalc bone for panel 5 (toggle): $e")
+                            end
+                        end
+
                         # Use canonical indices matching reactToSyncLesion and reactToActiveLesionChanged
                         indices = if panel_idx == 3 # Sagittal (Y, Z, X)
-                            [CartesianIndex(I[2], I[3], I[1]) for I in pts]
+                            [CartesianIndex(I[2], I[3], I[1]) for I in panel_pts]
                         elseif panel_idx == 4 # Coronal (X, Z, Y)
-                            [CartesianIndex(I[1], I[3], I[2]) for I in pts]
+                            [CartesianIndex(I[1], I[3], I[2]) for I in panel_pts]
                         else # Axial (X, Y, Z)
-                            pts
+                            panel_pts
                         end
                         fill!(scrDat.dat, 0.0f0)
                         if !isempty(indices)
