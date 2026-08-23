@@ -38,7 +38,7 @@ colors_mapped = map(c -> RGB(c[1]/255, c[2]/255, c[3]/255), MedEye3d.distinctCol
 
 # Setup MedEye3d Display Textures
 textureSpec_ct = TextureSpec{Float32}(name="CT", isMainImage=true, color=RGB(1.0, 1.0, 1.0), minAndMaxValue=Float32.([-150, 250]))
-textureSpec_pet = TextureSpec{Float32}(name="PET", isMainImage=false, color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0, 10]))
+textureSpec_pet = TextureSpec{Float32}(name="PET", isMainImage=false, isNuclearMask=true, color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0, 10]))
 textureSpec_mask = TextureSpec{Float32}(
     name="Mask", 
     isMainImage=false, 

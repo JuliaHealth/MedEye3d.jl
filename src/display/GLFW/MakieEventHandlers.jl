@@ -350,8 +350,8 @@ function reactToPetBlend(data::PetBlendEvent, stateObjects::Vector{StateDataFiel
     for state in stateObjects
         ModernGL.glUseProgram(state.mainForDisplayObjects.shader_program)
         for tex in state.mainForDisplayObjects.listOfTextSpecifications
-            # Update PET overlay contribution (not the pure PET main image panel)
-            if tex.name == "PET" && !tex.isMainImage
+            # Update nuclear overlay contribution (PET/SPECT, not the pure PET main image panel)
+            if tex.isNuclearMask && !tex.isMainImage
                 Uniforms.setTextureContribution(tex, data.weight)
             end
         end
