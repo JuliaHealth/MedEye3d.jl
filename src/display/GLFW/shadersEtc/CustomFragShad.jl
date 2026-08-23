@@ -163,16 +163,16 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
                     } else {
                         float normalizedVal = clamp(($(x.name)Res - $(x.name)minValue) / max($(x.name)ValueRange, 0.001), 0.0, 1.0);
                         if (normalizedVal > 0.0) {
-                            float alpha = clamp(pow(normalizedVal, 0.4) * 0.95, 0.05, 0.85);
-                            // Scale alpha by maskContribution (0.0 = no overlay, 1.0 = full overlay)
-                            alpha = alpha * $(x.name)maskContribution;
+                            float intensity = pow(normalizedVal, 0.4);
                             vec3 maskColor = vec3(
                                 changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.r, $(x.name)ValueRange),
                                 changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.g, $(x.name)ValueRange),
                                 changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.b, $(x.name)ValueRange)
                             );
-                            baseColor = baseColor * (1.0 - alpha * 0.35) + maskColor * alpha * 1.5;
-                            baseColor = clamp(baseColor, 0.0, 1.0);
+                            // PET-only color: windowed PET scaled to visible intensity
+                            vec3 petOnly = clamp(maskColor * intensity * 1.8, 0.0, 1.0);
+                            // Crossfade: blend=0 → pure CT, blend=1 → pure PET
+                            baseColor = mix(baseColor, petOnly, $(x.name)maskContribution);
                         }
                     }
                 }
