@@ -11,6 +11,9 @@ using ..DisplayWords, ..ForDisplayStructs, ..TextureManag, ..DataStructs, ..Stru
 export reactToScroll, reactToScrollZoom
 export registerMouseScrollFunctions
 
+# Module-local PET/CT blend tracking for Ctrl+scroll
+const _pet_blend_ref = Ref(1.0f0)
+
 
 
 
@@ -42,7 +45,11 @@ function registerMouseScrollFunctions(window::GLFW.Window, mainChannel::Base.Cha
         catch
         end
         
-        if ctrl_down || shift_down || alt_down
+        if ctrl_down && !shift_down && !alt_down
+            # Ctrl+scroll: adjust PET/CT blend (±0.05 per tick)
+            _pet_blend_ref[] = clamp(_pet_blend_ref[] + Float32(yoff > 0 ? 0.05 : -0.05), 0.0f0, 1.0f0)
+            put!(mainChannel, PetBlendEvent(_pet_blend_ref[]))
+        elseif shift_down || alt_down
             put!(mainChannel, ScrollZoomEvent(Float64(yoff)))
         else
             scroll_delta = yoff > 0 ? 1 : (yoff < 0 ? -1 : 0)
