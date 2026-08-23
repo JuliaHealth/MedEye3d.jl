@@ -324,6 +324,132 @@ function save_annotations(db::Dict,
     end
 end
 
+# ─── SUV Computation ─────────────────────────────────────────────────────────
+"""
+    compute_suv_max_at_centroid(pet_vol, centroid) -> Float32
+
+Compute SUVmax in a 3x3x3 voxel neighborhood around the lesion centroid.
+`centroid` is [x, y, z] in voxel coordinates (1-indexed).
+"""
+function compute_suv_max_at_centroid(pet_vol::AbstractArray{Float32, 3}, centroid::Vector{Int})::Float32
+    suv_max = 0.0f0
+    cx, cy, cz = centroid
+    for dz in -1:1, dy in -1:1, dx in -1:1
+        nx, ny, nz = cx + dx, cy + dy, cz + dz
+        if 1 <= nx <= size(pet_vol, 1) && 1 <= ny <= size(pet_vol, 2) && 1 <= nz <= size(pet_vol, 3)
+            val = pet_vol[nx, ny, nz]
+            if val > suv_max; suv_max = val; end
+        end
+    end
+    return suv_max
+end
+
+"""
+    compute_background_suvs(pet_vol, ts_atlas, ts_names) -> Dict{String, Float32}
+
+Compute mean SUV in reference organs (liver, parotid, blood pool) using
+TotalSegmentator atlas overlay on the PET volume.
+Returns Dict("liver" => mean, "parotid" => mean, "blood" => mean).
+"""
+function compute_background_suvs(pet_vol::AbstractArray{Float32, 3},
+                                  ts_atlas::AbstractArray,
+                                  ts_names::Dict{Int, String})::Dict{String, Float32}
+    result = Dict{String, Float32}("liver" => 0.0f0, "parotid" => 0.0f0, "blood" => 0.0f0)
+    target_keywords = Dict("liver" => ["liver"],
+                           "parotid" => ["parotid"],
+                           "blood" => ["vena_cava", "aorta", "blood"])
+    
+    # Find TS label IDs for reference organs
+    organ_labels = Dict{String, Vector{Int}}("liver" => Int[], "parotid" => Int[], "blood" => Int[])
+    for (label_id, name) in ts_names
+        name_low = lowercase(name)
+        for (organ_key, keywords) in target_keywords
+            if any(kw -> occursin(kw, name_low), keywords)
+                push!(organ_labels[organ_key], label_id)
+            end
+        end
+    end
+    
+    # Handle atlas size mismatch (resample via nearest neighbor)
+    needs_scale = size(ts_atlas) != size(pet_vol)
+    sx = needs_scale ? size(ts_atlas, 1) / size(pet_vol, 1) : 1.0
+    sy = needs_scale ? size(ts_atlas, 2) / size(pet_vol, 2) : 1.0
+    sz = needs_scale ? size(ts_atlas, 3) / size(pet_vol, 3) : 1.0
+    
+    for (organ_key, label_ids) in organ_labels
+        isempty(label_ids) && continue
+        label_set = Set(label_ids)
+        total_val = 0.0
+        count = 0
+        # Sample: iterate PET voxels, look up TS atlas label
+        for z in 1:size(pet_vol, 3), y in 1:size(pet_vol, 2), x in 1:size(pet_vol, 1)
+            ax = needs_scale ? clamp(round(Int, x * sx), 1, size(ts_atlas, 1)) : x
+            ay = needs_scale ? clamp(round(Int, y * sy), 1, size(ts_atlas, 2)) : y
+            az = needs_scale ? clamp(round(Int, z * sz), 1, size(ts_atlas, 3)) : z
+            ts_val = Int(ts_atlas[ax, ay, az])
+            if ts_val in label_set
+                total_val += pet_vol[x, y, z]
+                count += 1
+            end
+        end
+        if count > 0
+            result[organ_key] = Float32(total_val / count)
+        end
+    end
+    return result
+end
+
+# Background SUVs cache (computed once per TP, reused for all lesions)
+const _bg_suv_cache = Dict{Int, Dict{String, Float32}}()
+
+"""
+    get_background_suvs(tp_idx) -> Dict{String, Float32}
+
+Get cached or compute background SUVs for the given time point.
+"""
+function get_background_suvs(tp_idx::Int)::Dict{String, Float32}
+    haskey(_bg_suv_cache, tp_idx) && return _bg_suv_cache[tp_idx]
+    _MEH = MedEye3d.SegmentationDisplay.MakieEventHandlers
+    pet_vol = get(_MEH.pet_volumes_cache, tp_idx, nothing)
+    ts_atlas = _MEH.global_ts_atlas[]
+    ts_names = _MEH.global_ts_names[]
+    if pet_vol === nothing || ts_atlas === nothing || isempty(ts_names)
+        return Dict{String, Float32}("liver" => 0.0f0, "parotid" => 0.0f0, "blood" => 0.0f0)
+    end
+    bg = compute_background_suvs(pet_vol, ts_atlas, ts_names)
+    _bg_suv_cache[tp_idx] = bg
+    return bg
+end
+
+"""
+    compute_lesion_suv_string(lesion_id, tp_idx) -> String
+
+Auto-compute SUV max and background references, returning formatted string:
+"Max: X.X ; Parotid: X.X ; Liver: X.X ; Blood: X.X"
+"""
+function compute_lesion_suv_string(lesion_id::Int, tp_idx::Int)::String
+    _MEH = MedEye3d.SegmentationDisplay.MakieEventHandlers
+    pet_vol = get(_MEH.pet_volumes_cache, tp_idx, nothing)
+    centroid = get(_MEH.lesion_centroids_cache, lesion_id, nothing)
+    if pet_vol === nothing || centroid === nothing
+        return ""
+    end
+    suv_max = compute_suv_max_at_centroid(pet_vol, centroid)
+    bg = get_background_suvs(tp_idx)
+    return "Max: $(round(suv_max, digits=1)) ; Parotid: $(round(bg["parotid"], digits=1)) ; Liver: $(round(bg["liver"], digits=1)) ; Blood: $(round(bg["blood"], digits=1))"
+end
+
+"""
+    generate_tracking_name(lesion_id, organ_name, tp_idx, modality, patient_id) -> String
+
+Auto-generate a lesion tracking name like "Liver_L1_PET_TP0_PAT123"
+"""
+function generate_tracking_name(lesion_id::Int, organ_name::String, tp_idx::Int,
+                                 modality::String, patient_id_str::String)::String
+    organ_clean = isempty(organ_name) ? "Lesion" : replace(strip(organ_name), " " => "_")
+    return "$(organ_clean)_L$(lesion_id)_$(modality)_TP$(tp_idx)_$(patient_id_str)"
+end
+
 # ─── UI helpers ──────────────────────────────────────────────────────────────
 function all_categories(schema::Vector{QuestionDef})::Vector{String}
     # Fixed order to match the Slicer extension layout
@@ -427,8 +553,8 @@ function create_metadata_window(
         return Consume(true)
     end
     
-    rowgap!(g, 1)   # compact: was 3
-    colgap!(g, 3)   # compact: was 4
+    rowgap!(g, 0)   # ultra-compact: no gap between rows
+    colgap!(g, 2)   # compact columns
     colsize!(g, 1, Auto())
     r = [0]  # row counter as array for mutation in closures
     nr!() = (r[1] += 1; r[1])
@@ -1555,11 +1681,11 @@ end_section!(sec_win)
         update_type_buttons(t_type)
         
         if t_type == "Bone Meta"
-            tog_surface.active[] = true
-            tog_marrow.active[] = true
+            put!(channel, ShowMaskLayerEvent(2, true))   # bone surface
+            put!(channel, ShowMaskLayerEvent(3, true))   # bone marrow
         else
-            tog_surface.active[] = false
-            tog_marrow.active[] = false
+            put!(channel, ShowMaskLayerEvent(2, false))
+            put!(channel, ShowMaskLayerEvent(3, false))
         end
 
         
@@ -1586,6 +1712,46 @@ end_section!(sec_win)
         side_opts = menu_side.options[]
         s_idx = findfirst(==(t_side), side_opts)
         menu_side.i_selected[] = s_idx !== nothing ? s_idx : 1
+        
+        # ── Auto-fill Lesion tracking name ────────────────────────────────
+        tp_idx = _MEH.current_tp_index[]
+        modality = get(_MEH.tp_modalities, tp_idx, "PET")
+        pat_id = _MEH.patient_id[]
+        
+        if !haskey(data, "Lesion tracking name?") || isempty(get(data, "Lesion tracking name?", ""))
+            tracking_name = generate_tracking_name(lid, t_base, tp_idx, modality, pat_id)
+            if haskey(field_widgets, "Lesion tracking name?") && field_widgets["Lesion tracking name?"] isa Textbox
+                field_widgets["Lesion tracking name?"].stored_string[] = tracking_name
+            end
+            # Also store in db so it persists
+            db = copy(lesion_db[])
+            ld = get(db, active_lesion_id[], Dict{String,String}())
+            ld = copy(ld)
+            ld["Lesion tracking name?"] = tracking_name
+            db[active_lesion_id[]] = ld
+            lesion_db[] = db
+        end
+        
+        # ── Auto-fill SUV max ─────────────────────────────────────────────
+        if !haskey(data, "SUV max") || isempty(get(data, "SUV max", "")) || get(data, "SUV max", "") == "0.0"
+            try
+                suv_str = compute_lesion_suv_string(lid, tp_idx)
+                if !isempty(suv_str)
+                    if haskey(field_widgets, "SUV max") && field_widgets["SUV max"] isa Textbox
+                        field_widgets["SUV max"].stored_string[] = suv_str
+                    end
+                    # Persist
+                    db = copy(lesion_db[])
+                    ld = get(db, active_lesion_id[], Dict{String,String}())
+                    ld = copy(ld)
+                    ld["SUV max"] = suv_str
+                    db[active_lesion_id[]] = ld
+                    lesion_db[] = db
+                end
+            catch e
+                @warn "Auto-SUV computation failed for lesion $lid: $e"
+            end
+        end
         
         # Restore windowing if present
         if haskey(data, "_CT_Min") && haskey(data, "_CT_Max")

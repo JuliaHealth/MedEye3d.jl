@@ -601,12 +601,24 @@ const tp_data_cache = Dict{Int, Vector{Vector{Any}}}()
 const bone_subsegments_cache = Dict{Int, Any}()
 const lesion_centroids_cache = Dict{Int, Vector{Int}}()
 const global_bone_atlas = Ref{Any}(nothing)
-const global_organ_mapping = Ref{Dict{Int,String}}(Dict{Int,String}())  # lesion_id → TS organ name (from map_lesions_to_organs)
+const global_organ_mapping = Ref{Dict{Int,String}}(Dict{Int,String}())  # lesion_id -> TS organ name (from map_lesions_to_organs)
 const current_tp_index = Ref(0)
-const tp_labels = Dict{Int, String}()  # tp_index → display label (e.g. "PET TP0")
-const tp_descriptions = Dict{Int, String}() # tp_index → radiological description
+const tp_labels = Dict{Int, String}()  # tp_index -> display label (e.g. "PET TP0")
+const tp_descriptions = Dict{Int, String}() # tp_index -> radiological description
+
+# PET volume per TP for SUV computation: tp_index -> 3D Float32 array (axial orientation, Y-reversed)
+const pet_volumes_cache = Dict{Int, Array{Float32, 3}}()
+# TotalSegmentator atlas + names for background SUV reference organs
+const global_ts_atlas = Ref{Any}(nothing)          # 3D UInt8/Int array (axial, Y-reversed)
+const global_ts_names = Ref{Dict{Int,String}}(Dict{Int,String}())  # TS label -> organ name
+# Patient identification
+const patient_id = Ref{String}("")
+# Study modalities per TP: tp_index -> "PET" or "SPECT"
+const tp_modalities = Dict{Int, String}()
+
 export tp_data_cache, bone_subsegments_cache, lesion_centroids_cache, global_bone_atlas, global_organ_mapping, current_tp_index, tp_labels, tp_descriptions
 export compare_mode, compare_right_tp
+export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, tp_modalities
 
 """
 Helper: load TP data into a specific panel's onScrollData and re-render.
