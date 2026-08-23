@@ -54,6 +54,39 @@ const RADLEX_CSV_PATH= isfile(joinpath(_SLICER_DATA, "RadLex.csv")) ? joinpath(_
 const DEFAULT_SAVE_PATH = joinpath(homedir(), "medeye3d_lesion_annotations.json")
 const DEFAULT_HDF5_PATH = joinpath(homedir(), "medeye3d_lesion_annotations.h5")
 
+# Persistent custom dropdown options (same pattern as Slicer extension)
+const CUSTOM_OPTS_PATH = let
+    p1 = joinpath(_SLICER_DATA, "custom_options.json")
+    p2 = joinpath(_PKG_ROOT, "custom_options.json")
+    isfile(p1) ? p1 : p2  # prefer slicer data dir, fallback to extension/data/
+end
+
+const _custom_opts_cache = Ref{Dict{String,Any}}(Dict{String,Any}())
+
+function load_custom_options()::Dict{String,Any}
+    isempty(_custom_opts_cache[]) || return _custom_opts_cache[]
+    if isfile(CUSTOM_OPTS_PATH)
+        try
+            _custom_opts_cache[] = JSON.parse(read(CUSTOM_OPTS_PATH, String))
+        catch e
+            @warn "Failed to load custom_options.json: $e"
+            _custom_opts_cache[] = Dict{String,Any}()
+        end
+    end
+    return _custom_opts_cache[]
+end
+
+function save_custom_options!(db::Dict)
+    try
+        mkpath(dirname(CUSTOM_OPTS_PATH))
+        open(CUSTOM_OPTS_PATH, "w") do f
+            JSON.print(f, db, 4)
+        end
+    catch e
+        @warn "Failed to save custom_options.json: $e"
+    end
+end
+
 # ─── Schema ───────────────────────────────────────────────────────────────────
 struct QuestionDef
     short::String
@@ -400,12 +433,7 @@ function create_metadata_window(
     r = [0]  # row counter as array for mutation in closures
     nr!() = (r[1] += 1; r[1])
 
-    # ── Header ──────────────────────────────────────────────────────────────
-    Label(g[nr!(), 1:4], "Lesion Annotation Panel",
-        fontsize = 22, font = :bold, color = ACCENT, halign = :center, tellwidth = false)
-    Label(g[nr!(), 1:4],
-        "Julia port of Slicer Lesion Text Extension  |  $(length(schema)) annotation fields from def.json",
-        fontsize = 10, color = LBL_FG, halign = :center, tellwidth = false)
+    # Header removed for compactness — title was decorative only
 
     # ── Section helper ──────────────────────────────────────────────────────
     function begin_section!(title; default_open=true)
@@ -415,12 +443,31 @@ function create_metadata_window(
             buttoncolor = SEC_HDR, labelcolor = ACCENT, fontsize = 11, halign = :left)
         
         start_row = r[1] + 1
-        return (is_open, start_row, header_r, btn)
+        end_row_ref = Ref(start_row)  # updated by end_section!
+        return (is_open, start_row, header_r, btn, end_row_ref)
     end
     
     function end_section!(sec_data)
-        is_open, start_row, header_r, btn = sec_data
+        is_open, start_row, header_r, btn, end_row_ref = sec_data
         end_row = r[1]
+        end_row_ref[] = end_row
+        
+        # If default_open is false, collapse immediately
+        if !is_open[]
+            for i in start_row:end_row
+                rowsize!(g, i, Fixed(0))
+            end
+            for i in (start_row > 1 ? start_row - 1 : start_row):min(end_row, r[1] - 1)
+                rowgap!(g, i, 0)
+            end
+            for c in g.content
+                if c.span.rows.start >= start_row && c.span.rows.stop <= end_row
+                    if hasproperty(c.content, :blockscene)
+                        c.content.blockscene.visible[] = false
+                    end
+                end
+            end
+        end
         
         on(btn.clicks) do _
             is_open[] = !is_open[]
@@ -446,6 +493,23 @@ function create_metadata_window(
             end
         end
     end
+    
+    # Hide/show an entire section (header + content) for compare mode
+    function hide_section!(sec_data)
+        _, start_row, header_r, _, end_row_ref = sec_data
+        for i in header_r:end_row_ref[]
+            set_row_visible!(i, false)
+        end
+    end
+    function show_section!(sec_data)
+        is_open, start_row, header_r, _, end_row_ref = sec_data
+        set_row_visible!(header_r, true)
+        if is_open[]
+            for i in start_row:end_row_ref[]
+                set_row_visible!(i, true)
+            end
+        end
+    end
 
     # ── Lesion Navigation ────────────────────────────────────────────────────
     sec_nav = begin_section!("Lesion Navigation")
@@ -458,10 +522,8 @@ function create_metadata_window(
     btn_next = Button(g[nav_r, 4], label = "Next >>",
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
 
-    # Prominent active lesion status banner
-    nav_info_r = nr!()
-    active_lesion_display = Observable{String}("Active Lesion: (none)")
-    Label(g[nav_info_r, 1:4], active_lesion_display, fontsize = 11, color = ACCENT, halign = :center, tellwidth = false)
+    # Active lesion display kept for callbacks (no visible label — shown in dropdown)
+    active_lesion_display = Observable{String}("(none)")
 
     # Prominent Lesion & Bone Subsegments Layer Visibility Controls
     vis_row = nr!()
@@ -513,8 +575,7 @@ function create_metadata_window(
         end
     end
     on(active_lesion_id) do id
-        # Update status banner
-        active_lesion_display[] = "Active Lesion: [ $id ]"
+        active_lesion_display[] = id
         # Sync Menu widget — set both i_selected and selection for visual update
         opts = lesion_ids[]
         isempty(opts) && return
@@ -579,14 +640,27 @@ function create_metadata_window(
     ba_r = nr!()
     Label(g[ba_r, 1], "Base Anatomy:", fontsize = 10, color = LBL_FG, halign = :right)
     tb_base_anat = Textbox(g[ba_r, 2], placeholder = "type & Enter to search...", fontsize = 10)
-    btn_ba_search = Button(g[ba_r, 3], label = "🔍 Search",
+    btn_ba_search = Button(g[ba_r, 3], label = "🔍",
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     menu_side = Menu(g[ba_r, 4], options = ["", "Right", "Left", "NA"], default = "", fontsize = 10)
     
-    # Ontology dropdown for Base Anatomy (filtered by search text)
-    ba_menu_r = nr!()
-    ba_filtered = Observable(anatomy_ontology[1:min(50, end)])
-    ba_menu = Menu(g[ba_menu_r, 1:4], options = ba_filtered, fontsize = 10)
+    # Anatomical Relations (with ontology autocomplete for the target organ)
+    rel_r = nr!()
+    Label(g[rel_r, 1], "Relation:", fontsize = 10, color = LBL_FG, halign = :right)
+    menu_rel = Menu(g[rel_r, 2], options = ["", "Surrounded By", "Lateral To", "Medial To",
+        "Anterior To", "Posterior To", "Superior To", "Inferior To", "Between", "Inside"],
+        default = "", fontsize = 10)
+    tb_rel_base = Textbox(g[rel_r, 3], placeholder = "type & Enter...", fontsize = 10)
+    btn_rel_search = Button(g[rel_r, 4], label = "🔍",
+        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    
+    # Shared ontology dropdown (hidden by default, shown on search)
+    onto_row = nr!()
+    onto_filtered = Observable(anatomy_ontology[1:min(50, end)])
+    onto_menu = Menu(g[onto_row, 1:4], options = onto_filtered, fontsize = 10)
+    onto_target = Ref{Symbol}(:base)  # which field the ontology is serving
+    rowsize!(g, onto_row, Fixed(0))
+    onto_menu.blockscene.visible[] = false
     
     # Filter function for anatomy ontology
     function _filter_anatomy!(filtered_obs, txt, ontology)
@@ -600,51 +674,50 @@ function create_metadata_window(
         end
     end
     
-    # Wire search → filter dropdown (both Enter and button click)
+    function _show_onto!()
+        rowsize!(g, onto_row, Auto())
+        onto_menu.blockscene.visible[] = true
+    end
+    function _hide_onto!()
+        rowsize!(g, onto_row, Fixed(0))
+        onto_menu.blockscene.visible[] = false
+    end
+    
+    # Wire base anatomy search
     on(tb_base_anat.stored_string) do txt
-        _filter_anatomy!(ba_filtered, txt, anatomy_ontology)
+        onto_target[] = :base
+        _filter_anatomy!(onto_filtered, txt, anatomy_ontology)
+        _show_onto!()
     end
     on(btn_ba_search.clicks) do _
-        _filter_anatomy!(ba_filtered, tb_base_anat.stored_string[], anatomy_ontology)
-    end
-    # Wire dropdown selection → fill textbox
-    on(ba_menu.selection) do sel
-        sel === nothing && return
-        s = string(sel)
-        s == "(no matches)" && return
-        if tb_base_anat.stored_string[] != s
-            tb_base_anat.stored_string[] = s
-        end
+        onto_target[] = :base
+        _filter_anatomy!(onto_filtered, tb_base_anat.stored_string[], anatomy_ontology)
+        _show_onto!()
     end
     
-    # Anatomical Relations (with ontology autocomplete for the target organ)
-    rel_r = nr!()
-    Label(g[rel_r, 1], "Relation:", fontsize = 10, color = LBL_FG, halign = :right)
-    menu_rel = Menu(g[rel_r, 2], options = ["", "Surrounded By", "Lateral To", "Medial To",
-        "Anterior To", "Posterior To", "Superior To", "Inferior To", "Between", "Inside"],
-        default = "", fontsize = 10)
-    tb_rel_base = Textbox(g[rel_r, 3], placeholder = "type & Enter...", fontsize = 10)
-    btn_rel_search = Button(g[rel_r, 4], label = "🔍",
-        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    
-    # Ontology dropdown for Relation target
-    rel_menu_r = nr!()
-    rel_filtered = Observable(anatomy_ontology[1:min(50, end)])
-    rel_menu = Menu(g[rel_menu_r, 1:4], options = rel_filtered, fontsize = 10)
-    
+    # Wire relation search
     on(tb_rel_base.stored_string) do txt
-        _filter_anatomy!(rel_filtered, txt, anatomy_ontology)
+        onto_target[] = :relation
+        _filter_anatomy!(onto_filtered, txt, anatomy_ontology)
+        _show_onto!()
     end
     on(btn_rel_search.clicks) do _
-        _filter_anatomy!(rel_filtered, tb_rel_base.stored_string[], anatomy_ontology)
+        onto_target[] = :relation
+        _filter_anatomy!(onto_filtered, tb_rel_base.stored_string[], anatomy_ontology)
+        _show_onto!()
     end
-    on(rel_menu.selection) do sel
+    
+    # Wire dropdown selection → fill textbox and hide
+    on(onto_menu.selection) do sel
         sel === nothing && return
         s = string(sel)
         s == "(no matches)" && return
-        if tb_rel_base.stored_string[] != s
-            tb_rel_base.stored_string[] = s
+        if onto_target[] == :base
+            tb_base_anat.stored_string[] != s && (tb_base_anat.stored_string[] = s)
+        else
+            tb_rel_base.stored_string[] != s && (tb_rel_base.stored_string[] = s)
         end
+        _hide_onto!()
     end
     
     end_section!(sec_type)
@@ -678,62 +751,34 @@ function create_metadata_window(
     on(btn_pt.clicks) do _; put!(channel, ChangeTimePointEvent(-1)) end
     on(btn_nt.clicks) do _; put!(channel, ChangeTimePointEvent(1)) end
 
-    # TP and Modality status indicator
-    tp_label_r = nr!()
-    tp_status = Observable{String}("Modality & Timepoint: Initializing...")
-    Label(g[tp_label_r, 1:4], tp_status, fontsize = 10, color = GRN, halign = :center, tellwidth = false)
-    
-    # Update TP label when TP buttons or Compare view are toggled
+    # TP label removed — modality/timepoint info is in the viewer title bar
+    tp_status = Observable{String}("")  # kept for internal use
     function update_tp_label()
         idx = _MEH.current_tp_index[]
         label = get(_MEH.tp_labels, idx, "TP $idx")
-        
         if cv_active[]
             right_idx = _MEH.compare_right_tp[]
             right_label = get(_MEH.tp_labels, right_idx, "TP $right_idx")
-            tp_status[] = "Active: Left [ $label ] | Right [ $right_label ]"
+            tp_status[] = "L:$label | R:$right_label"
         else
-            tp_status[] = "Visualized Modality & TP: [ $label ]"
+            tp_status[] = label
         end
     end
-
-    on(btn_pt.clicks) do _
-        @async begin
-            sleep(0.08)
-            update_tp_label()
-        end
-    end
-    on(btn_nt.clicks) do _
-        @async begin
-            sleep(0.08)
-            update_tp_label()
-        end
-    end
-    on(btn_cv.clicks) do _
-        @async begin
-            sleep(0.08)
-            update_tp_label()
-        end
-    end
-    
-    # Initialize immediately and shortly after startup to capture populated labels
+    on(btn_pt.clicks) do _; @async (sleep(0.08); update_tp_label()) end
+    on(btn_nt.clicks) do _; @async (sleep(0.08); update_tp_label()) end
+    on(btn_cv.clicks) do _; @async (sleep(0.08); update_tp_label()) end
     update_tp_label()
-    @async begin
-        sleep(0.2)
-        update_tp_label()
-    end
+    @async (sleep(0.2); update_tp_label())
 
+    # Merged overlay/single/all/refresh into one compact row
     vc2_r = nr!()
-    btn_tl = Button(g[vc2_r, 1:2], label = "Toggle Lesion Overlay", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_rf = Button(g[vc2_r, 3:4], label = "Refresh List",          buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_tl = Button(g[vc2_r, 1], label = "Overlay ⊙", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_single = Button(g[vc2_r, 2], label = "Single ◉", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_all = Button(g[vc2_r, 3], label = "All ◎",    buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_rf = Button(g[vc2_r, 4], label = "↻ Refresh",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     on(btn_tl.clicks) do _; put!(channel, ToggleLesionEvent()) end
     on(btn_rf.clicks) do _; put!(channel, RefreshListEvent()) end
-
-    vc3_r = nr!()
-    btn_single = Button(g[vc3_r, 1:2], label = "Show Active Single", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_all = Button(g[vc3_r, 3:4], label = "Show All Lesions",      buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     on(btn_single.clicks) do _
-        # extract lesion id integer safely
         id_str = active_lesion_id[]
         m = match(r"\d+", id_str)
         if m !== nothing
@@ -747,7 +792,7 @@ function create_metadata_window(
     end_section!(sec_view)
 
     # ── Dedicated Windowing & Image Offsets Subpanel ─────────────────────────
-    sec_win = begin_section!("Windowing & Image Offsets"; default_open=true)
+    sec_win = begin_section!("Windowing & Image Offsets"; default_open=false)
 
         # CT Windowing
     ct_lbl_r = nr!()
@@ -768,8 +813,7 @@ function create_metadata_window(
     tb_ct_max = Textbox(g[ct_c_r, 3], placeholder = "Max (250)",  stored_string = "250.0",  fontsize = 10)
     btn_ct_plus  = Button(g[ct_c_r, 4], label = "+ 50", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     
-    ct_a_r = nr!()
-    btn_apply_ct = Button(g[ct_a_r, 2:3], label = "Apply CT", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    # Apply CT removed — slider drag and Enter-in-textbox already apply
 
     is_syncing_ct = Ref(false)
     function apply_ct_win(min_v::Real, max_v::Real)
@@ -815,7 +859,6 @@ function create_metadata_window(
     end
     on(tb_ct_min.stored_string) do _; apply_ct_from_text(); end
     on(tb_ct_max.stored_string) do _; apply_ct_from_text(); end
-    on(btn_apply_ct.clicks) do _; apply_ct_from_text(); end
 
     # PET Windowing
     pet_lbl_r = nr!()
@@ -836,8 +879,7 @@ function create_metadata_window(
     tb_pet_max = Textbox(g[pet_c_r, 3], placeholder = "Max (10.0)", stored_string = "10.0", fontsize = 10)
     btn_pet_plus  = Button(g[pet_c_r, 4], label = "+ 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     
-    pet_a_r = nr!()
-    btn_apply_pet = Button(g[pet_a_r, 2:3], label = "Apply PET", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    # Apply PET removed — slider drag and Enter-in-textbox already apply
 
     is_syncing_pet = Ref(false)
     function apply_pet_win(min_v::Real, max_v::Real)
@@ -883,7 +925,6 @@ function create_metadata_window(
     end
     on(tb_pet_min.stored_string) do _; apply_pet_from_text(); end
     on(tb_pet_max.stored_string) do _; apply_pet_from_text(); end
-    on(btn_apply_pet.clicks) do _; apply_pet_from_text(); end
 
     # SPECT Windowing
     spect_lbl_r = nr!()
@@ -904,8 +945,7 @@ function create_metadata_window(
     tb_spect_max = Textbox(g[spect_c_r, 3], placeholder = "Max (10.0)", stored_string = "10.0", fontsize = 10)
     btn_spect_plus  = Button(g[spect_c_r, 4], label = "+ 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     
-    spect_a_r = nr!()
-    btn_apply_spect = Button(g[spect_a_r, 2:3], label = "Apply SPECT", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    # Apply SPECT removed — slider drag and Enter-in-textbox already apply
 
     is_syncing_spect = Ref(false)
     function apply_spect_win(min_v::Real, max_v::Real)
@@ -950,7 +990,6 @@ function create_metadata_window(
     end
     on(tb_spect_min.stored_string) do _; apply_spect_from_text(); end
     on(tb_spect_max.stored_string) do _; apply_spect_from_text(); end
-    on(btn_apply_spect.clicks) do _; apply_spect_from_text(); end
 end_section!(sec_win)
 
     # ── All Annotation Fields (single section, like Slicer extension) ─────────
@@ -1014,18 +1053,16 @@ end_section!(sec_win)
 
     section_headers = Dict{String, Int}()
     
+    # Load persistent custom options
+    custom_opts_db = load_custom_options()
+    
     # Single collapsible section for all metadata
     sec_meta = begin_section!("Lesion Metadata"; default_open=true)
-    is_meta_open, meta_start_row, meta_header_r, meta_btn = sec_meta
+    is_meta_open, meta_start_row, meta_header_r, meta_btn, _ = sec_meta
     push!(all_metadata_rows, meta_header_r)
 
     for (group_title, q_list) in metadata_groups
-        # Visual sub-header (just a colored label, not collapsible)
-        sub_r = nr!()
-        push!(all_metadata_rows, sub_r)
-        Label(g[sub_r, 1:4], "── $group_title ──",
-            fontsize = 10, color = ACCENT, halign = :left, tellwidth = false)
-        section_headers[group_title] = sub_r
+        # Sub-headers removed for compactness — field names are descriptive enough
 
         for sq in q_list
             q = get(schema_dict, sq, nothing)
@@ -1047,7 +1084,10 @@ end_section!(sec_win)
                     fontsize = 10)
                 field_widgets[q.short] = tb
             else
-                opts_obs = Observable(String["- select -"; q.options])
+                # Inject saved custom options into dropdown
+                saved_opts = String[string(s) for s in get(custom_opts_db, q.short, Any[])]
+                all_opts = String["- select -"; q.options; saved_opts]
+                opts_obs = Observable(all_opts)
                 m = Menu(g[q_r, 2:3], options = opts_obs, fontsize = 10)
                 field_widgets[q.short] = m
                 
@@ -1078,18 +1118,29 @@ end_section!(sec_win)
                     end
                 end
                 
-                on(tb_new.stored_string) do val
-                    val = _safe_strip(val)
-                    if !isempty(val) && !(val in opts_obs[])
-                        new_opts = copy(opts_obs[])
-                        push!(new_opts, val)
-                        opts_obs[] = new_opts
-                        m.selection[] = val
+                # Capture q.short for the closure
+                let field_name = q.short
+                    on(tb_new.stored_string) do val
+                        val = _safe_strip(val)
+                        if !isempty(val) && !(val in opts_obs[])
+                            new_opts = copy(opts_obs[])
+                            push!(new_opts, val)
+                            opts_obs[] = new_opts
+                            m.selection[] = val
+                            # Persist custom option
+                            if !haskey(custom_opts_db, field_name)
+                                custom_opts_db[field_name] = String[]
+                            end
+                            if !(val in custom_opts_db[field_name])
+                                push!(custom_opts_db[field_name], val)
+                                save_custom_options!(custom_opts_db)
+                            end
+                        end
+                        rowsize!(g, tb_new_row, Fixed(0))
+                        tb_new.blockscene.visible[] = false
+                        if tb_new_row < r[1]; rowgap!(g, tb_new_row, 0); end
+                        tb_new_visible[] = false
                     end
-                    rowsize!(g, tb_new_row, Fixed(0))
-                    tb_new.blockscene.visible[] = false
-                    if tb_new_row < r[1]; rowgap!(g, tb_new_row, 0); end
-                    tb_new_visible[] = false
                 end
             end
 
@@ -1105,11 +1156,7 @@ end_section!(sec_win)
         is_p = (active_type == "Prostate")
         is_bm = (active_type == "Bone Meta")
         
-        # Hide Prostate Primary Score sub-header if not prostate
-        if haskey(section_headers, "PRIMARY Score")
-            p_hdr = section_headers["PRIMARY Score"]
-            set_row_visible!(p_hdr, is_p)
-        end
+        # PRIMARY Score sub-header removed — field visibility handled below
 
         for (sq, rows) in q_row_indices
             visible = true
@@ -1169,16 +1216,26 @@ end_section!(sec_win)
         end
     end
 
-    # Auto-hide metadata section in Compare Volumes mode
+    # Auto-hide metadata, segmentation, radlex, custom sections in Compare mode
     on(btn_cv.clicks) do _
-        for r_idx in all_metadata_rows
-            if cv_active[]
+        if cv_active[]
+            # Hide metadata rows
+            for r_idx in all_metadata_rows
                 set_row_visible!(r_idx, false)
-            else
+            end
+            # Hide entire sections
+            for sec in (sec_seg, sec_radlex, sec_custom)
+                hide_section!(sec)
+            end
+        else
+            # Show metadata rows
+            for r_idx in all_metadata_rows
                 set_row_visible!(r_idx, true)
             end
-        end
-        if !cv_active[]
+            # Show sections
+            for sec in (sec_seg, sec_radlex, sec_custom)
+                show_section!(sec)
+            end
             update_dynamic_visibility!(active_lesion_type[])
         end
     end
@@ -1266,68 +1323,65 @@ end_section!(sec_win)
 
     end_section!(sec_custom)
 
-    # ── Segmentation Mini Manager ────────────────────────────────────────────
-    sec_seg = begin_section!("Segmentation Mini Manager")
-    btn_new_lesion = Button(g[nr!(), 1:4], label = "Create New Empty Lesion", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    # ── Segmentation Mini Manager (compact) ────────────────────────────────
+    sec_seg = begin_section!("Segmentation & AI")
+    
+    # Row 1: New Lesion + Paint/Erase/View
+    seg_r1 = nr!()
+    btn_new_lesion = Button(g[seg_r1, 1], label = "New", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    btn_paint      = Button(g[seg_r1, 2], label = "Paint", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_erase      = Button(g[seg_r1, 3], label = "Erase", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_view_mode  = Button(g[seg_r1, 4], label = "View", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    
+    current_paint_mode = Observable(:view)
+    
     on(btn_new_lesion.clicks) do _
         max_id = 0
         for opt in lesion_ids[]
             m = match(r"^(\d+)", opt)
-            if m !== nothing
-                max_id = max(max_id, parse(Int, m.match))
-            end
+            m !== nothing && (max_id = max(max_id, parse(Int, m.match)))
         end
         for k in keys(lesion_db[])
             m = match(r"^(\d+)", k)
-            if m !== nothing
-                max_id = max(max_id, parse(Int, m.match))
-            end
+            m !== nothing && (max_id = max(max_id, parse(Int, m.match)))
         end
         new_id = max_id + 1
         new_name = "$(new_id) - New Lesion"
-        
-        db = copy(lesion_db[])
-        db[new_name] = Dict{String, Any}()
-        lesion_db[] = db
-        
-        opts = copy(lesion_ids[])
-        push!(opts, new_name)
-        
+        db = copy(lesion_db[]); db[new_name] = Dict{String, Any}(); lesion_db[] = db
+        opts = copy(lesion_ids[]); push!(opts, new_name)
         is_syncing_selection[] = true
         try
-            lesion_ids[] = opts
-            les_menu.options[] = opts
-            les_menu.selection[] = new_name
-            les_menu.i_selected[] = length(opts)
-        finally
-            is_syncing_selection[] = false
-        end
+            lesion_ids[] = opts; les_menu.options[] = opts
+            les_menu.selection[] = new_name; les_menu.i_selected[] = length(opts)
+        finally; is_syncing_selection[] = false; end
         active_lesion_id[] = new_name
-        
-        # Auto-switch to paint mode
         current_paint_mode[] = :paint
-        btn_paint.buttoncolor[] = GRN
-        btn_erase.buttoncolor[] = BG_PNL
-        btn_view_mode.buttoncolor[] = BG_PNL
-        put!(channel, PaintValEvent(new_id, true))
-        put!(channel, SyncLesionEvent(new_id))
+        btn_paint.buttoncolor[] = GRN; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BG_PNL
+        put!(channel, PaintValEvent(new_id, true)); put!(channel, SyncLesionEvent(new_id))
     end
-
-    brush_r = nr!()
-    Label(g[brush_r, 1], "Brush Size:", halign=:left, fontsize=11, color=TXT)
-    slider_brush = Slider(g[brush_r, 2:4], range = 1:20, startvalue = 1)
-    on(slider_brush.value) do val
-        put!(channel, ChangeBrushSizeEvent(val))
+    on(btn_paint.clicks) do _
+        current_paint_mode[] = :paint
+        btn_paint.buttoncolor[] = GRN; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BG_PNL
+        m = match(r"^(\d+)", active_lesion_id[]); val = m !== nothing ? parse(Int, m.match) : 1
+        put!(channel, PaintValEvent(val, true))
     end
-
-    pe_r = nr!()
-    btn_paint     = Button(g[pe_r, 1], label = "Paint", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_erase     = Button(g[pe_r, 2], label = "Erase", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_view_mode = Button(g[pe_r, 3:4], label = "View (No Paint)", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    on(btn_erase.clicks) do _
+        current_paint_mode[] = :erase
+        btn_paint.buttoncolor[] = BG_PNL; btn_erase.buttoncolor[] = RED_BTN; btn_view_mode.buttoncolor[] = BG_PNL
+        put!(channel, PaintValEvent(0, true))
+    end
+    on(btn_view_mode.clicks) do _
+        current_paint_mode[] = :view
+        btn_paint.buttoncolor[] = BG_PNL; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BLU_BTN
+        put!(channel, PaintValEvent(-1, false))
+    end
     
-    move_r = nr!()
-    btn_move_lesion = Button(g[move_r, 1:4], label = "Move Lesion", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    
+    # Row 2: Brush slider + Move button
+    seg_r2 = nr!()
+    Label(g[seg_r2, 1], "Brush:", halign=:right, fontsize=10, color=LBL_FG)
+    slider_brush = Slider(g[seg_r2, 2:3], range = 1:20, startvalue = 1)
+    on(slider_brush.value) do val; put!(channel, ChangeBrushSizeEvent(val)) end
+    btn_move_lesion = Button(g[seg_r2, 4], label = "Move ⇅", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     move_lesion_active = Ref(false)
     on(btn_move_lesion.clicks) do _
         move_lesion_active[] = !move_lesion_active[]
@@ -1335,126 +1389,73 @@ end_section!(sec_win)
         put!(channel, ToggleMoveLesionModeEvent(move_lesion_active[]))
     end
     
-    current_paint_mode = Observable(:view)
-    
-    on(btn_paint.clicks) do _
-        current_paint_mode[] = :paint
-        btn_paint.buttoncolor[] = GRN
-        btn_erase.buttoncolor[] = BG_PNL
-        btn_view_mode.buttoncolor[] = BG_PNL
-        m = match(r"^(\d+)", active_lesion_id[])
-        val = m !== nothing ? parse(Int, m.match) : 1
-        put!(channel, PaintValEvent(val, true))
-    end
-    on(btn_erase.clicks) do _
-        current_paint_mode[] = :erase
-        btn_paint.buttoncolor[] = BG_PNL
-        btn_erase.buttoncolor[] = RED_BTN
-        btn_view_mode.buttoncolor[] = BG_PNL
-        put!(channel, PaintValEvent(0, true))
-    end
-    on(btn_view_mode.clicks) do _
-        current_paint_mode[] = :view
-        btn_paint.buttoncolor[] = BG_PNL
-        btn_erase.buttoncolor[] = BG_PNL
-        btn_view_mode.buttoncolor[] = BLU_BTN
-        put!(channel, PaintValEvent(-1, false))
-    end
-
-    algo_r = nr!()
-    Label(g[algo_r, 1], "Algorithm:", halign=:left, fontsize=11, color=TXT)
-    algo_combo = Menu(g[algo_r, 2:4], options = ["HELPNet (AI)", "NNInteractive", "Traditional (PETTumor)"], default = "HELPNet (AI)", fontsize = 10)
-
-    btn_add_ai = Button(g[nr!(), 1:4], label = "Run Semiauto AI (HELPNet / nnInteractive)", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
+    # Row 3: Algorithm + Run AI
+    seg_r3 = nr!()
+    algo_combo = Menu(g[seg_r3, 1:2], options = ["HELPNet (AI)", "NNInteractive", "Traditional (PETTumor)"], default = "HELPNet (AI)", fontsize = 10)
+    btn_add_ai = Button(g[seg_r3, 3:4], label = "Run AI ▶", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
     on(btn_add_ai.clicks) do _; put!(channel, AddAutoPetEvent(algo_combo.selection[], channel)) end
 
-    # AI status label — shows real-time processing state to the user
+    # Row 4: AI status
     Label(g[nr!(), 1:4], @lift(string($(_MEH.ai_status_text))),
         fontsize=10, color=RGBAf(0.7, 0.9, 0.7, 1.0), halign=:center)
 
-
-    ai_r2 = nr!()
-    tog_lesion = Toggle(g[ai_r2, 1], active=true)
-    Label(g[ai_r2, 2], "Lesion", fontsize=11, color=TXT, halign=:left)
+    # Duplicate visibility toggles removed — already in Navigation section
     
-    tog_surface = Toggle(g[ai_r2, 3], active=true)
-    Label(g[ai_r2, 4], "Bone Surface", fontsize=11, color=TXT, halign=:left)
-    
-    ai_r3 = nr!()
-    tog_marrow = Toggle(g[ai_r3, 1], active=true)
-    Label(g[ai_r3, 2], "Bone Marrow", fontsize=11, color=TXT, halign=:left)
-    
-    on(tog_lesion.active) do val; put!(channel, ShowMaskLayerEvent(1, val)) end
-    on(tog_surface.active) do val; put!(channel, ShowMaskLayerEvent(2, val)) end
-    on(tog_marrow.active) do val; put!(channel, ShowMaskLayerEvent(3, val)) end
-
     end_section!(sec_seg)
 
-    # ── Active Data Settings ──────────────────────────────────────────────────
-    sec_ads = begin_section!("Active Data Settings")
-    ads_r1 = nr!()
-    Label(g[ads_r1, 1], "PET/SUV Node:", fontsize = 10, color = LBL_FG, halign = :right)
-    Menu(g[ads_r1, 2], options = ["Auto", "SUV_PET_Image_0", "SUV_PET_Image_1"], fontsize = 10)
-    Label(g[ads_r1, 3], "CT Node:", fontsize = 10, color = LBL_FG, halign = :right)
-    Menu(g[ads_r1, 4], options = ["Auto", "Fixed_CT_Volume_0", "Fixed_CT_Volume_1"], fontsize = 10)
-
-    ads_r2 = nr!()
-    Label(g[ads_r2, 1], "Lesion Mask:", fontsize = 10, color = LBL_FG, halign = :right)
-    Menu(g[ads_r2, 2], options = ["Auto", "Segmentation_0", "Segmentation_1"], fontsize = 10)
-    Label(g[ads_r2, 3], "Anatomy Atlas:", fontsize = 10, color = LBL_FG, halign = :right)
-    Menu(g[ads_r2, 4], options = ["None", "Bone_Mask", "Organ_Mask"], fontsize = 10)
-
-    ads_r3 = nr!()
-    Label(g[ads_r3, 1], "To Next TP Xform:", fontsize = 10, color = LBL_FG, halign = :right)
-    Menu(g[ads_r3, 2], options = ["None", "Elastic_Transform_0_to_1"], fontsize = 10)
-    Label(g[ads_r3, 3], "To Prev TP Xform:", fontsize = 10, color = LBL_FG, halign = :right)
-    Menu(g[ads_r3, 4], options = ["None", "Elastic_Transform_1_to_0"], fontsize = 10)
-
-    btn_map_link = Button(g[nr!(), 1:4], label = "Explicitly Map Selected Lesions (Link)", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
-    on(btn_map_link.clicks) do _; put!(channel, MapLinkEvent()) end
-
-    end_section!(sec_ads)
-
-    # ── Preprocessing & Automation ────────────────────────────────────────────
-    sec_pre = begin_section!("Preprocessing & Scene Management")
-    pre_r1 = nr!()
-    tog_autorun = Toggle(g[pre_r1, 1], active=false)
-    Label(g[pre_r1, 2:4], "Auto-run preprocessing on scene load", fontsize = 11, color = TXT, halign = :left)
-    on(tog_autorun.active) do val; put!(channel, AutoRunPreprocessEvent(val)) end
-
-
-
-    btn_save_mrb = Button(g[nr!(), 1:4], label = "Save Scene as Preprocessed MRB...", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    on(btn_save_mrb.clicks) do _; put!(channel, SaveMRBEvent()) end
-
-    end_section!(sec_pre)
-
-    # ── Persistence ──────────────────────────────────────────────────────────
-    sec_persist = begin_section!("Save & Load")
+    # ── Settings & Export (merged: Active Data + Preprocessing + Save + Report) ──
+    sec_settings = begin_section!("Settings & Export"; default_open=false)
+    
+    # Save / Load row
     sv_r = nr!()
     btn_save = Button(g[sv_r, 1:2], label = "Save Annotations",
         buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
     btn_load = Button(g[sv_r, 3:4], label = "Load Annotations",
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     status_lbl = Label(g[nr!(), 1:4], "",
-        fontsize = 11, color = RGBf(0.4, 0.9, 0.4), halign = :left, tellwidth = false)
-
-    end_section!(sec_persist)
-
-    # ── Report Panel ─────────────────────────────────────────────────────────
-    sec_report = begin_section!("Radiological Report Output")
-    Label(g[nr!(), 1:4], "Original Dictation:", fontsize = 10, color = LBL_FG, halign = :left)
-    dict_tb = Textbox(g[nr!(), 1:4], placeholder = "Enter radiological dictation here...", fontsize = 10)
+        fontsize = 10, color = RGBf(0.4, 0.9, 0.4), halign = :left, tellwidth = false)
     
-    Label(g[nr!(), 1:4], "Generated Description:", fontsize = 10, color = LBL_FG, halign = :left)
-    rpt_tb = Textbox(g[nr!(), 1:4],
-        placeholder = "Click 'Generate Report' to build structured summary...",
-        fontsize = 10)
-    gen_r = nr!()
-    btn_gen = Button(g[gen_r, 1:2], label = "Generate Report",
+    # Dictation & Report
+    dict_r = nr!()
+    Label(g[dict_r, 1], "Dictation:", fontsize = 10, color = LBL_FG, halign = :right)
+    dict_tb = Textbox(g[dict_r, 2:4], placeholder = "Radiological dictation...", fontsize = 10)
+    rpt_r = nr!()
+    Label(g[rpt_r, 1], "Report:", fontsize = 10, color = LBL_FG, halign = :right)
+    rpt_tb = Textbox(g[rpt_r, 2:3], placeholder = "Generated summary...", fontsize = 10)
+    btn_gen = Button(g[rpt_r, 4], label = "Gen ▶",
         buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    
+    # Preprocessing
+    pre_r1 = nr!()
+    tog_autorun = Toggle(g[pre_r1, 1], active=false)
+    Label(g[pre_r1, 2:3], "Auto-preprocess on load", fontsize = 10, color = LBL_FG, halign = :left)
+    btn_save_mrb = Button(g[pre_r1, 4], label = "Save MRB", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    on(tog_autorun.active) do val; put!(channel, AutoRunPreprocessEvent(val)) end
+    on(btn_save_mrb.clicks) do _; put!(channel, SaveMRBEvent()) end
+    
+    # Active Data Settings
+    ads_r1 = nr!()
+    Label(g[ads_r1, 1], "PET:", fontsize = 10, color = LBL_FG, halign = :right)
+    Menu(g[ads_r1, 2], options = ["Auto", "SUV_PET_Image_0", "SUV_PET_Image_1"], fontsize = 10)
+    Label(g[ads_r1, 3], "CT:", fontsize = 10, color = LBL_FG, halign = :right)
+    Menu(g[ads_r1, 4], options = ["Auto", "Fixed_CT_Volume_0", "Fixed_CT_Volume_1"], fontsize = 10)
 
-    end_section!(sec_report)
+    ads_r2 = nr!()
+    Label(g[ads_r2, 1], "Mask:", fontsize = 10, color = LBL_FG, halign = :right)
+    Menu(g[ads_r2, 2], options = ["Auto", "Segmentation_0", "Segmentation_1"], fontsize = 10)
+    Label(g[ads_r2, 3], "Atlas:", fontsize = 10, color = LBL_FG, halign = :right)
+    Menu(g[ads_r2, 4], options = ["None", "Bone_Mask", "Organ_Mask"], fontsize = 10)
+
+    ads_r3 = nr!()
+    Label(g[ads_r3, 1], "Xform →:", fontsize = 10, color = LBL_FG, halign = :right)
+    Menu(g[ads_r3, 2], options = ["None", "Elastic_Transform_0_to_1"], fontsize = 10)
+    Label(g[ads_r3, 3], "Xform ←:", fontsize = 10, color = LBL_FG, halign = :right)
+    Menu(g[ads_r3, 4], options = ["None", "Elastic_Transform_1_to_0"], fontsize = 10)
+
+    btn_map_link = Button(g[nr!(), 1:4], label = "Map Lesions (Link)", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    on(btn_map_link.clicks) do _; put!(channel, MapLinkEvent()) end
+
+    end_section!(sec_settings)
 
     # ── Collect / apply UI state ──────────────────────────────────────────────
     function collect_state()::Dict{String,String}
