@@ -60,7 +60,7 @@ textureSpecArray = Vector{Vector{TextureSpec}}([
 
 # ── Hi-resolution display: resample to half in-plane spacing ─────────────
 # Doubles X,Y resolution while keeping Z unchanged (4x memory per volume)
-const HIRES_FACTOR = 2.0  # 2.0 = double resolution, 1.0 = native
+const HIRES_FACTOR = 1.0  # 2.0 = double resolution, 1.0 = native
 
 """
     hires_resample(vol::Array{Float32,3}, native_sp, half_sp, interp) -> Array{Float32,3}
@@ -435,6 +435,9 @@ if isfile(ts_nrrd_path)
     if ts_atlas !== nothing && !isempty(ts_names)
         # Apply Y-reversal on TS atlas to match the OpenGL display convention of first_mask
         ts_atlas_aligned = reverse(ts_atlas, dims=2)
+        if HIRES_FACTOR > 1.0
+            ts_atlas_aligned = round.(typeof(ts_atlas_aligned[1]), hires_resample(Float32.(ts_atlas_aligned), first_spacing, display_spacing, MedImages.Nearest_neighbour_en))
+        end
         organ_mapping = LesionAssociation.map_lesions_to_organs(first_mask, ts_atlas_aligned, ts_names)
         
         bone_keywords = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula", "humerus", "scapula", "sternum", "skull", "palate", "bone", "spine"]
@@ -447,6 +450,9 @@ if isfile(ts_nrrd_path)
         end
         ct_vox = Float32.(baseline_ct.voxel_data)
         ct_aligned = reverse(ct_vox, dims=2)
+        if HIRES_FACTOR > 1.0
+            ct_aligned = hires_resample(ct_aligned, first_spacing, display_spacing, MedImages.Linear_en)
+        end
         bone_atlas = Float32.(in.(ts_atlas_aligned, Ref(bone_labels)) .| (ct_aligned .>= 180.0f0))
         MEH.global_bone_atlas[] = bone_atlas
         MEH.global_organ_mapping[] = organ_mapping
@@ -466,6 +472,9 @@ if isfile(skelly_path)
     skelly_nii = NIfTI.niread(skelly_path)
     skelly_vox = Float32.(skelly_nii.raw)
     skelly_aligned = reverse(skelly_vox, dims=2) # match OpenGL display convention
+    if HIRES_FACTOR > 1.0
+        skelly_aligned = hires_resample(skelly_aligned, first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
+    end
     MEH.global_bone_atlas[] = skelly_aligned
 else
     @warn "Skellytour bone segmentation not found at $skelly_path. AI Bone Subsegmentation will fail!"
@@ -478,6 +487,22 @@ if isfile(output_h5)
     import HDF5
     try
         cis = CartesianIndices((512, 512, 326))
+        
+        function scale_indices(pts, factor)
+            if factor <= 1.0; return pts; end
+            new_pts = CartesianIndex{3}[]
+            f = Int(round(factor))
+            for p in pts
+                x, y, z = p.I
+                for dx in 0:(f-1)
+                    for dy in 0:(f-1)
+                        push!(new_pts, CartesianIndex((x-1)*f + dx + 1, (y-1)*f + dy + 1, z))
+                    end
+                end
+            end
+            return new_pts
+        end
+
         HDF5.h5open(output_h5, "r") do file
             for obj in keys(file)
                 if endswith(obj, "_surf")
@@ -498,6 +523,8 @@ if isfile(output_h5)
                             else
                                 findall(marr_data .> 0)
                             end
+                            surf_pts = scale_indices(surf_pts, HIRES_FACTOR)
+                            marr_pts = scale_indices(marr_pts, HIRES_FACTOR)
                             MEH.bone_subsegments_cache[lid_int] = (surf_pts, marr_pts)
                         end
                     catch err

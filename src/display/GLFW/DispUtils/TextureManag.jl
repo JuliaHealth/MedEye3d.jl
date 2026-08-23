@@ -37,10 +37,14 @@ function updateTexture(::Type{Tt}, data::AbstractArray, textSpec::TextureSpec, x
     actual_width = size(data, 1)
     actual_height = size(data, 2)
     
+    # Avoid allocating and copying (collect) if data is already contiguous in memory
+    is_contig = stride(data, 1) == 1 && stride(data, 2) == size(data, 1)
+    pixels = is_contig ? data : collect(data)
+    
     if ((parameter_type(textSpec) == Float16) || (parameter_type(textSpec) == Float32))
-        glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, actual_width, actual_height, GL_RED, textSpec.OpGlType, collect(data))
+        glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, actual_width, actual_height, GL_RED, textSpec.OpGlType, pixels)
     else
-        glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, actual_width, actual_height, GL_RED_INTEGER, textSpec.OpGlType, collect(data))
+        glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, actual_width, actual_height, GL_RED_INTEGER, textSpec.OpGlType, pixels)
     end
     #  end
 
