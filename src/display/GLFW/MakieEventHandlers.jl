@@ -480,6 +480,8 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
 end
 
 function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateDataFields})
+    t_total = time_ns()
+    println("  [BENCH-SL] reactToSyncLesion($(data.lesion_id)) START"); flush(stdout)
     println("reactToSyncLesion called with lesion_id=$(data.lesion_id), nStates=$(length(stateObjects))"); flush(stdout)
     current_active_lesion_id[] = data.lesion_id
     changed = false
@@ -531,10 +533,13 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             end
         end
     end
+    t_uniforms_ms = (time_ns() - t_total) / 1e6
+    println("  [BENCH-SL] uniforms+cross-tp: $(round(t_uniforms_ms, digits=1))ms"); flush(stdout)
 
 
 
     # ── Pre-compute bone subseg ONCE per unique TP (deduplicated) ──
+    t_bone = time_ns()
     left_tp = current_tp_index[]
     left_axial_surf, left_axial_marr = try
         _get_or_compute_bone_subseg(stateObjects[1], data.lesion_id, left_tp)
@@ -553,8 +558,11 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     else
         (CartesianIndex{3}[], CartesianIndex{3}[])
     end
+    t_bone_ms = (time_ns() - t_bone) / 1e6
+    println("  [BENCH-SL] bone_subseg: $(round(t_bone_ms, digits=1))ms (left=$(length(left_axial_surf))+$(length(left_axial_marr)), right=$(length(right_axial_surf))+$(length(right_axial_marr)))"); flush(stdout)
 
     # ── Per-panel: just remap orientations from pre-computed axial data ──
+    t_panel = time_ns()
     for (panel_idx, stateObject) in enumerate(stateObjects)
         is_right = (panel_idx == 5 && compare_mode[])
         base_surf = is_right ? right_axial_surf : left_axial_surf
@@ -590,7 +598,10 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             end
         end
     end
+    t_panel_ms = (time_ns() - t_panel) / 1e6
+    println("  [BENCH-SL] panel_remap+write: $(round(t_panel_ms, digits=1))ms"); flush(stdout)
 
+    t_scroll = time_ns()
     active_panel_indices = if compare_mode[] && length(stateObjects) >= 5
         [1, 5]
     elseif length(stateObjects) >= 4
@@ -682,18 +693,32 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         stateObject.mainForDisplayObjects.isSyncScrollOn = old_sync
     end
     stateObjects[1].switchIndex = old_idx
+    t_scroll_ms = (time_ns() - t_scroll) / 1e6
+    println("  [BENCH-SL] centroid+scroll: $(round(t_scroll_ms, digits=1))ms"); flush(stdout)
+    t_total_ms = (time_ns() - t_total) / 1e6
+    println("  [BENCH-SL] SYNC LESION TOTAL: $(round(t_total_ms, digits=1))ms"); flush(stdout)
     return changed
 end
 
-# TP navigation state: populated by the launch script
-# tp_data_cache[tp_index] = Vector{Vector{Any}} — per-panel voxel data tuples [("CT", vol), ("PET", vol), ("Mask", vol)]
-const tp_data_cache = Dict{Int, Vector{Vector{Any}}}()
+# TP navigation state: compact cache holding only base axial volumes
+"""Compact cache entry storing only base (axial) volumes at minimal precision."""
+mutable struct TpCacheEntry
+    ct::Array{Float32,3}
+    pet::Array{Float32,3}
+    mask::Union{Array{Int8,3}, Array{Int16,3}}
+    bone_surf::BitArray{3}
+    bone_marr::BitArray{3}
+end
+
+const tp_data_cache = Dict{Int, TpCacheEntry}()
 const bone_subsegments_cache = Dict{Any, Any}()
 const lesion_centroids_cache = Dict{Any, Vector{Int}}()
 const last_bone_surf_indices = Dict{Int, Vector{CartesianIndex{3}}}()
 const last_bone_marr_indices = Dict{Int, Vector{CartesianIndex{3}}}()
 const tp_loader_ref = Ref{Any}(nothing)
+const _preload_task = Ref{Any}(nothing)
 export register_tp_loader!, get_or_load_tp_data, last_bone_surf_indices, last_bone_marr_indices
+export TpCacheEntry, invalidate_suv_for_lesion
 
 function register_tp_loader!(fn)
     tp_loader_ref[] = fn
@@ -703,13 +728,107 @@ function get_or_load_tp_data(idx::Int)
     if haskey(tp_data_cache, idx)
         return tp_data_cache[idx]
     elseif tp_loader_ref[] !== nothing
-        vdt = tp_loader_ref[](idx)
-        if vdt !== nothing
-            tp_data_cache[idx] = vdt
-            return vdt
+        entry = tp_loader_ref[](idx)
+        if entry !== nothing
+            tp_data_cache[idx] = entry
+            return entry
         end
     end
     return nothing
+end
+
+"""Load a TpCacheEntry into a specific panel, using PermutedDimsArray for sag/cor views."""
+function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
+    if panel_idx > length(stateObjects)
+        return
+    end
+    
+    # Convert compact types to Float32 for OpenGL textures
+    mask_f32 = Float32.(entry.mask)
+    bone_s_f32 = Float32.(entry.bone_surf)
+    bone_m_f32 = Float32.(entry.bone_marr)
+    
+    # Use PermutedDimsArray for zero-copy views
+    panel_voxels = if panel_idx == 3  # Sagittal (Y,Z,X)
+        Any[("CT", PermutedDimsArray(entry.ct, (2,3,1))),
+            ("PET", PermutedDimsArray(entry.pet, (2,3,1))),
+            ("Mask", PermutedDimsArray(mask_f32, (2,3,1))),
+            ("Bone_Surface", PermutedDimsArray(bone_s_f32, (2,3,1))),
+            ("Bone_Marrow", PermutedDimsArray(bone_m_f32, (2,3,1)))]
+    elseif panel_idx == 4  # Coronal (X,Z,Y)
+        Any[("CT", PermutedDimsArray(entry.ct, (1,3,2))),
+            ("PET", PermutedDimsArray(entry.pet, (1,3,2))),
+            ("Mask", PermutedDimsArray(mask_f32, (1,3,2))),
+            ("Bone_Surface", PermutedDimsArray(bone_s_f32, (1,3,2))),
+            ("Bone_Marrow", PermutedDimsArray(bone_m_f32, (1,3,2)))]
+    elseif panel_idx == 2  # PET-only
+        Any[("PET", entry.pet)]
+    else  # Axial (panels 1, 5)
+        Any[("CT", entry.ct), ("PET", entry.pet), ("Mask", mask_f32),
+            ("Bone_Surface", bone_s_f32), ("Bone_Marrow", bone_m_f32)]
+    end
+    
+    # Insert manualModif at index 2
+    if panel_idx != 2 && (length(panel_voxels) < 2 || panel_voxels[2][1] != "manualModif")
+        insert!(panel_voxels, 2, ("manualModif", zeros(Float32, size(panel_voxels[1][2]))))
+    elseif panel_idx == 2
+        insert!(panel_voxels, 1, ("manualModif", zeros(Float32, size(panel_voxels[1][2]))))
+    end
+    
+    newDataToScroll = StructsManag.getThreeDims(panel_voxels)
+    stateObjects[panel_idx].onScrollData.dataToScroll = newDataToScroll
+    stateObjects[panel_idx].onScrollData.nameIndexes = DataStructs.getLocationDict(newDataToScroll)
+    
+    # Track which TP this panel holds
+    stateObjects[panel_idx].onScrollData.currentTpIndex = current_tp_index[]
+    stateObjects[panel_idx].onScrollData.totalTpCount = length(tp_labels)
+    stateObjects[panel_idx].onScrollData.tpIndices = sort(collect(keys(tp_labels)))
+    
+    dimToScroll = stateObjects[panel_idx].onScrollData.dimensionToScroll
+    if !isempty(newDataToScroll)
+        stateObjects[panel_idx].onScrollData.slicesNumber = Int32(size(newDataToScroll[1].dat, dimToScroll))
+    end
+    stateObjects[panel_idx].currentDisplayedSlice = max(1, stateObjects[panel_idx].onScrollData.slicesNumber ÷ 2)
+    stateObjects[panel_idx].currentlyDispDat = SingleSliceDat()
+end
+
+"""Background-preload adjacent TPs so next/prev switch is instant."""
+function _preload_neighbors_async(tp_indices::Vector{Int}, cur_pos::Int)
+    num = length(tp_indices)
+    num <= 1 && return
+    next_tp = tp_indices[mod1(cur_pos + 1, num)]
+    prev_tp = tp_indices[mod1(cur_pos - 1, num)]
+    
+    _preload_task[] = @async begin
+        for tp in [next_tp, prev_tp]
+            if !haskey(tp_data_cache, tp) && tp_loader_ref[] !== nothing
+                try
+                    t = @elapsed begin
+                        entry = tp_loader_ref[](tp)
+                        if entry !== nothing
+                            tp_data_cache[tp] = entry
+                        end
+                    end
+                    println("  [PRELOAD] TP $tp loaded in $(round(t, digits=1))s"); flush(stdout)
+                catch e
+                    println("  [PRELOAD] TP $tp failed: $e"); flush(stdout)
+                end
+            end
+        end
+    end
+end
+
+"""Invalidate cached SUV and centroid data for a lesion after mask modification."""
+function invalidate_suv_for_lesion(lesion_id::Int, tp_idx::Int)
+    try
+        LMW = MedEye3d.LesionMetadataWindow
+        if isdefined(LMW, :_lesion_suv_cache)
+            delete!(LMW._lesion_suv_cache, (tp_idx, lesion_id))
+        end
+    catch; end
+    delete!(lesion_centroids_cache, (tp_idx, lesion_id))
+    delete!(lesion_centroids_cache, lesion_id)
+    println("  [SUV] Invalidated cache for lesion $lesion_id @ TP $tp_idx"); flush(stdout)
 end
 const global_bone_atlas = Ref{Any}(nothing)
 const global_organ_mapping = Ref{Dict{Int,String}}(Dict{Int,String}())  # lesion_id -> TS organ name (from map_lesions_to_organs)
@@ -735,37 +854,9 @@ export tp_data_cache, bone_subsegments_cache, lesion_centroids_cache, global_bon
 export compare_mode, compare_right_tp
 export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, tp_modalities, volume_z_size
 
-"""
-Helper: load TP data into a specific panel's onScrollData and re-render.
-`panel_idx` is the stateObjects index (1-5).
-`tp_voxel_idx` is the index into tp_voxels vector (usually same as panel_idx,
-but for panel 5 in compare mode we use index 1 since it's an axial view).
-"""
-function _load_tp_into_panel!(stateObjects, tp_voxels, panel_idx, tp_voxel_idx=panel_idx)
-    if panel_idx > length(stateObjects) || tp_voxel_idx > length(tp_voxels)
-        return
-    end
-    
-    panel_voxels = tp_voxels[tp_voxel_idx]
-    
-    # Ensure manualModif is inserted at index 2 if it's missing (to match SegmentationDisplay.jl initialization)
-    if length(panel_voxels) >= 1 && panel_voxels[1][1] != "manualModif" && (length(panel_voxels) < 2 || panel_voxels[2][1] != "manualModif")
-        insert!(panel_voxels, 2, ("manualModif", zeros(Float32, size(panel_voxels[1][2]))))
-    end
-    
-    newDataToScroll = StructsManag.getThreeDims(panel_voxels)
-    stateObjects[panel_idx].onScrollData.dataToScroll = newDataToScroll
-    stateObjects[panel_idx].onScrollData.nameIndexes = DataStructs.getLocationDict(newDataToScroll)
-    
-    dimToScroll = stateObjects[panel_idx].onScrollData.dimensionToScroll
-    if !isempty(newDataToScroll)
-        stateObjects[panel_idx].onScrollData.slicesNumber = Int32(size(newDataToScroll[1].dat, dimToScroll))
-    end
-    stateObjects[panel_idx].currentDisplayedSlice = max(1, stateObjects[panel_idx].onScrollData.slicesNumber ÷ 2)
-    stateObjects[panel_idx].currentlyDispDat = SingleSliceDat()
-end
 
 function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector{StateDataFields})
+    t_total = time_ns()
     if isempty(tp_labels)
         println("No TP labels loaded. TP navigation disabled."); flush(stdout)
         return
@@ -791,82 +882,153 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
     
     if compare_mode[]
         # Compare mode: load current TP into left panel (1), next TP into right panel (5)
-        tp_voxels_left = get_or_load_tp_data(new_tp)
-        if tp_voxels_left !== nothing
-            _load_tp_into_panel!(stateObjects, tp_voxels_left, 1, 1)
+        t_load = @elapsed begin
+            entry_left = get_or_load_tp_data(new_tp)
         end
+        println("  [BENCH] get_or_load_tp_data(left): $(round(t_load, digits=3))s"); flush(stdout)
+        
+        t_panel_left = @elapsed begin
+            if entry_left !== nothing
+                _load_tp_from_entry!(stateObjects, entry_left, 1)
+            end
+        end
+        println("  [BENCH] _load_tp_from_entry!(left): $(round(t_panel_left*1000, digits=1))ms"); flush(stdout)
         
         # Right panel: next TP chronologically
         next_pos = mod1(new_pos + 1, num_tps)
         right_tp = tp_indices[next_pos]
         compare_right_tp[] = right_tp
-        tp_voxels_right = get_or_load_tp_data(right_tp)
-        if tp_voxels_right !== nothing
-            _load_tp_into_panel!(stateObjects, tp_voxels_right, 5, 1)
+        
+        t_load_r = @elapsed begin
+            entry_right = get_or_load_tp_data(right_tp)
         end
+        println("  [BENCH] get_or_load_tp_data(right): $(round(t_load_r, digits=3))s"); flush(stdout)
+        
+        t_panel_right = @elapsed begin
+            if entry_right !== nothing
+                _load_tp_from_entry!(stateObjects, entry_right, 5)
+            end
+        end
+        println("  [BENCH] _load_tp_from_entry!(right): $(round(t_panel_right*1000, digits=1))ms"); flush(stdout)
         
         # Re-render both panels
-        old_idx = stateObjects[1].switchIndex
-        stateObjects[1].switchIndex = 1
-        ReactToScroll.reactToScroll(0, stateObjects, false)
-        stateObjects[1].switchIndex = 5
-        ReactToScroll.reactToScroll(0, stateObjects, false)
-        stateObjects[1].switchIndex = old_idx
+        t_render = @elapsed begin
+            old_idx = stateObjects[1].switchIndex
+            stateObjects[1].switchIndex = 1
+            ReactToScroll.reactToScroll(0, stateObjects, false)
+            stateObjects[1].switchIndex = 5
+            ReactToScroll.reactToScroll(0, stateObjects, false)
+            stateObjects[1].switchIndex = old_idx
+        end
+        println("  [BENCH] reactToScroll ×2: $(round(t_render*1000, digits=1))ms"); flush(stdout)
         
         right_label = get(tp_labels, right_tp, "TP $right_tp")
         println("Compare: Left=$label, Right=$right_label"); flush(stdout)
     else
-        # Normal mode: load current TP into all 4 panels
-        tp_voxels = get_or_load_tp_data(new_tp)
-        if tp_voxels !== nothing
-            num_panels = min(length(stateObjects), length(tp_voxels))
-            for i in 1:num_panels
-                _load_tp_into_panel!(stateObjects, tp_voxels, i, i)
+        # Normal mode: load current TP into all panels
+        t_load = @elapsed begin
+            entry = get_or_load_tp_data(new_tp)
+        end
+        println("  [BENCH] get_or_load_tp_data: $(round(t_load, digits=3))s"); flush(stdout)
+        
+        if entry !== nothing
+            num_panels = min(length(stateObjects), 5)
+            t_panels = @elapsed begin
+                for i in [1, 2, 3, 4]
+                    if i <= length(stateObjects)
+                        _load_tp_from_entry!(stateObjects, entry, i)
+                    end
+                end
+                # Panel 5 (compare right) also uses same entry in non-compare mode
+                if length(stateObjects) >= 5
+                    _load_tp_from_entry!(stateObjects, entry, 5)
+                end
             end
+            println("  [BENCH] _load_tp_from_entry! ×panels (PermutedDimsArray): $(round(t_panels*1000, digits=1))ms"); flush(stdout)
             
             # Re-render all panels
-            old_idx = stateObjects[1].switchIndex
-            for idx in 1:num_panels
-                stateObjects[1].switchIndex = idx
-                ReactToScroll.reactToScroll(0, stateObjects, false)
+            t_render = @elapsed begin
+                old_idx = stateObjects[1].switchIndex
+                for idx in 1:min(length(stateObjects), 5)
+                    stateObjects[1].switchIndex = idx
+                    ReactToScroll.reactToScroll(0, stateObjects, false)
+                end
+                stateObjects[1].switchIndex = old_idx
             end
-            stateObjects[1].switchIndex = old_idx
+            println("  [BENCH] reactToScroll ×panels: $(round(t_render*1000, digits=1))ms"); flush(stdout)
         end
     end
     
-    # Evict inactive time points from RAM to keep memory footprint minimal
-    needed_tps = compare_mode[] ? Set([current_tp_index[], compare_right_tp[]]) : Set([current_tp_index[]])
-    for k in collect(keys(tp_data_cache))
-        if !(k in needed_tps)
-            delete!(tp_data_cache, k)
+    # Sliding window eviction: keep prev + current + next (+ compare_right)
+    t_gc = @elapsed begin
+        needed_tps = Set([new_tp])
+        if num_tps > 1
+            prev_tp = tp_indices[mod1(new_pos - 1, num_tps)]
+            next_tp_idx = tp_indices[mod1(new_pos + 1, num_tps)]
+            push!(needed_tps, prev_tp, next_tp_idx)
         end
+        compare_mode[] && push!(needed_tps, compare_right_tp[])
+        for k in collect(keys(tp_data_cache))
+            k in needed_tps || delete!(tp_data_cache, k)
+        end
+        GC.gc(false)
     end
-    GC.gc(false)
+    println("  [BENCH] evict+GC: $(round(t_gc*1000, digits=1))ms"); flush(stdout)
+    
+    # Background-preload adjacent TPs for instant next/prev switching
+    _preload_neighbors_async(tp_indices, new_pos)
     
     # Requirement: Automatically return to Lesion 1 when changing time points
-    try
-        reactToSyncLesion(SyncLesionEvent(1), stateObjects)
-        println("Auto-reset to Lesion 1 for $label"); flush(stdout)
-    catch e
-        println("WARNING: Failed to auto-sync Lesion 1 on TP change: $e"); flush(stdout)
+    t_sync = @elapsed begin
+        try
+            reactToSyncLesion(SyncLesionEvent(1), stateObjects)
+            println("Auto-reset to Lesion 1 for $label"); flush(stdout)
+        catch e
+            println("WARNING: Failed to auto-sync Lesion 1 on TP change: $e"); flush(stdout)
+        end
     end
+    println("  [BENCH] reactToSyncLesion(1): $(round(t_sync, digits=3))s"); flush(stdout)
+    
+    # Pre-compute SUV for all lesions in the current TP
+    t_suv = @elapsed begin
+        try
+            LMW = MedEye3d.LesionMetadataWindow
+            if haskey(tp_data_cache, new_tp)
+                cached_entry = tp_data_cache[new_tp]
+                unique_ids = Set{Int}()
+                for v in cached_entry.mask
+                    iv = Int(v)
+                    iv > 0 && push!(unique_ids, iv)
+                end
+                for lid in unique_ids
+                    key = (new_tp, lid)
+                    if !haskey(LMW._lesion_suv_cache, key)
+                        try
+                            LMW._lesion_suv_cache[key] = LMW.compute_lesion_suv_string(lid, new_tp)
+                        catch; end
+                    end
+                end
+                println("  [BENCH] SUV precomputed for $(length(unique_ids)) lesions"); flush(stdout)
+            end
+        catch e
+            println("  [BENCH] SUV precompute skipped: $e"); flush(stdout)
+        end
+    end
+    println("  [BENCH] SUV precompute: $(round(t_suv, digits=3))s"); flush(stdout)
     
     # Preload the new CT into Docker nnInteractive GPU memory (fire-and-forget)
     try
-        tp_voxels_for_preload = tp_data_cache[new_tp]
-        if !isempty(tp_voxels_for_preload)
-            panel1_voxels = tp_voxels_for_preload[1]  # Axial panel data
-            for (name, vol) in panel1_voxels
-                if name == "CT"
-                    InferenceClient.preload_ct_for_nninteractive(Array{Float32,3}(vol))
-                    println("[TP Switch] CT preload initiated for $label"); flush(stdout)
-                    break
-                end
-            end
+        if haskey(tp_data_cache, new_tp)
+            cached_entry = tp_data_cache[new_tp]
+            InferenceClient.preload_ct_for_nninteractive(Array{Float32,3}(cached_entry.ct))
+            println("[TP Switch] CT preload initiated for $label"); flush(stdout)
         end
     catch e
         println("[TP Switch] CT preload skipped: $e"); flush(stdout)
     end
+    
+    t_total_ms = (time_ns() - t_total) / 1e6
+    println("  [BENCH] TP SWITCH TOTAL: $(round(t_total_ms, digits=1))ms"); flush(stdout)
 end
 
 function reactToToggleLesion(data::ToggleLesionEvent, stateObjects::Vector{StateDataFields})

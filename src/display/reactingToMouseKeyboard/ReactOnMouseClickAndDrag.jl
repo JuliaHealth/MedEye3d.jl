@@ -242,6 +242,17 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
 
     singleSliceDat = setproperties(stateObject.currentlyDispDat, (listOfDataAndImageNames = [twoDimDat]))
     updateImagesDisplayed(singleSliceDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, stateObject.calcDimsStruct, stateObject.valueForMasToSet, stateObject.crosshairFields, stateObject.mainRectFields, stateObject.displayMode)
+
+    # Invalidate SUV cache for the modified lesion
+    try
+        paint_id = round(Int, stateObject.valueForMasToSet.value)
+        if paint_id > 0
+            MEH = MedEye3d.SegmentationDisplay.MakieEventHandlers
+            MEH.invalidate_suv_for_lesion(paint_id, MEH.current_tp_index[])
+        end
+    catch e
+        # SUV invalidation is best-effort
+    end
 end#react_to_draw
 
 """
@@ -362,6 +373,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 panelState.movingLesionID = target_id
                 panelState.movingLesionStartTex = (texX, texY)
                 panelState.movingLesionLastDelta = CartesianIndex(0,0,0)
+                panelState.movingLesionSourceName = ""
                 seg_vol = nothing
                 # In compare mode, search the right panel's data for the lesion
                 MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
@@ -370,12 +382,15 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                     if dat.name == "Mask" || dat.name == "segmentation"
                         if panelState.movingLesionID > 0 && any(dat.dat .== Float32(panelState.movingLesionID))
                             seg_vol = dat.dat
+                            panelState.movingLesionSourceName = dat.name
                             break
                         elseif seg_vol === nothing
                             seg_vol = dat.dat
+                            panelState.movingLesionSourceName = dat.name
                         end
                     elseif dat.name == "manualModif" && seg_vol === nothing
                         seg_vol = dat.dat
+                        panelState.movingLesionSourceName = dat.name
                     end
                 end
                 
@@ -492,6 +507,9 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                         MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
                         panels_to_update = (MEH.compare_mode[] && clickedPanel == 5) ? [5] : collect(1:length(mainStates))
                         
+                        source_name = panelState.movingLesionSourceName
+                        processed_arrays = Set{UInt}()  # track objectid to skip duplicate array refs
+                        
                         for p_idx in panels_to_update
                             st = mainStates[p_idx]
                             p_delta = (p_idx == 3) ? CartesianIndex(dy, dz, dx) : ((p_idx == 4) ? CartesianIndex(dx, dz, dy) : CartesianIndex(dx, dy, dz))
@@ -502,8 +520,14 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                             end
                             
                             for dat in st.onScrollData.dataToScroll
-                                if dat.name == "Mask" || dat.name == "segmentation" || dat.name == "manualModif"
+                                if dat.name == source_name
                                     seg_v = dat.dat
+                                    arr_id = objectid(seg_v)
+                                    if arr_id in processed_arrays
+                                        continue  # skip duplicate array (panels 1+5 share same reference)
+                                    end
+                                    push!(processed_arrays, arr_id)
+                                    
                                     # 1. Restore old
                                     last_coords = [c + p_old_d for c in p_orig_coords]
                                     for (j, c) in enumerate(last_coords)
@@ -533,7 +557,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                                 tp_voxels = MEH.tp_data_cache[tp_idx]
                                 for (p_idx, panel_data) in enumerate(tp_voxels)
                                     for entry in panel_data
-                                        if entry[1] == "Mask" || entry[1] == "manualModif" || entry[1] == "segmentation"
+                                        if entry[1] == source_name
                                             for st_dat in mainStates[p_idx].onScrollData.dataToScroll
                                                 if st_dat.name == entry[1]
                                                     entry[2] .= st_dat.dat

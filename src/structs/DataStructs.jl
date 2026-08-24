@@ -95,6 +95,9 @@ struct is mutable becouse in case of the masks data can be changed multiple time
     nameIndexes::Dictionary{String,Int64} = getLocationDict(dataToScroll)  #gives a way of efficient querying by supplying dictionary where key is a name we are intrested in and a key is index where it is located in our array
     slicesNumber::Int32 = 1# number of available slices
     imagePos::Int64 = 1 # position of the image in the display
+    currentTpIndex::Int = 0          # which TP this panel is currently displaying
+    totalTpCount::Int = 0            # total number of available TPs
+    tpIndices::Vector{Int} = Int[]   # sorted list of all TP indices for navigation
 end #fullScrollableDat
 
 """

@@ -16,6 +16,8 @@ using .AIInference
 include(joinpath(@__DIR__, "..", "lib", "SceneHierarchy.jl"))
 using .SceneHierarchy
 
+const HIRES_FACTOR = 2.0
+
 function main()
     if isempty(ARGS)
         error("Usage: julia scripts/preprocess_dataset.jl <data_dir>")
@@ -107,6 +109,14 @@ function main()
         end
         
         MedImages.save_med_image(h5_file, group_name, name, img_res)
+
+        # Also save at display resolution (2× in-plane upsampling)
+        display_sp = (img_res.spacing[1] / HIRES_FACTOR, img_res.spacing[2] / HIRES_FACTOR, img_res.spacing[3])
+        interpolator_display = is_mask ? MedImages.Nearest_neighbour_en : MedImages.Linear_en
+        img_display = MedImages.resample_to_spacing(img_res, display_sp, interpolator_display)
+        display_group = group_name * "_DISPLAY"
+        MedImages.save_med_image(h5_file, display_group, name, img_display)
+        println("    Saved display-resolution ($(size(img_display.voxel_data))) to $display_group/$name")
     end
     
     for study in studies
