@@ -332,6 +332,7 @@ Actor that is able to store a state to keep needed data for proper display
   movingLesionStartTex::Tuple{Float64, Float64} = (0.0, 0.0)
   movingLesionLastDelta::CartesianIndex{3} = CartesianIndex(0,0,0)
   movingLesionOriginalBGs::Vector{UInt16} = UInt16[]
+  movingLesionSourceName::String = ""   # which array name ("Mask", "manualModif") the lesion was found in
   allSupervoxels::Dict{Int, Dict{Int, Dict{String,Any}}} = Dict{Int, Dict{Int, Dict{String, Any}}}()
 end
 

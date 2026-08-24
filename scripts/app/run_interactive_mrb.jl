@@ -192,6 +192,7 @@ if isfile(preprocessed_h5)
     close(h5_init)
     
     function load_single_tp_from_h5(tp_i::Int)
+        t_total = time_ns()
         if tp_i < 0 || tp_i >= length(studies)
             return nothing
         end
@@ -200,9 +201,20 @@ if isfile(preprocessed_h5)
         group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
         
         HDF5.h5open(preprocessed_h5, "r") do h5_file
-            ct_vol = Float32.(read(h5_file["$group/$ct_fname"]))
-            pet_vol = Float32.(read(h5_file["$group/$pet_fname"]))
-            mask_vol = Float32.(read(h5_file["$group/$mask_fname"]))
+            # Try pre-resampled display-resolution group first
+            display_group = group * "_DISPLAY"
+            use_display = haskey(h5_file, display_group) && 
+                          haskey(h5_file[display_group], ct_fname) &&
+                          haskey(h5_file[display_group], pet_fname) &&
+                          haskey(h5_file[display_group], mask_fname)
+            src_group = use_display ? display_group : group
+            
+            t_read = @elapsed begin
+                ct_vol = Float32.(read(h5_file["$src_group/$ct_fname"]))
+                pet_vol = Float32.(read(h5_file["$src_group/$pet_fname"]))
+                mask_vol = Float32.(read(h5_file["$src_group/$mask_fname"]))
+            end
+            println("    [BENCH-H5] read from $src_group: $(round(t_read, digits=3))s ($(size(ct_vol)))"); flush(stdout)
             
             if modality == "SPECT"
                 pos_dat = pet_vol[pet_vol .> 0]
@@ -211,41 +223,47 @@ if isfile(preprocessed_h5)
                 pet_vol = max.(0.0f0, pet_vol .* scale_factor)
             end
             
-            ct_vol_base = reverse(ct_vol, dims=2)
-            pet_vol_base = reverse(pet_vol, dims=2)
-            mask_vol_base = reverse(mask_vol, dims=2)
+            t_reverse = @elapsed begin
+                ct_vol_base = reverse(ct_vol, dims=2)
+                pet_vol_base = reverse(pet_vol, dims=2)
+                mask_vol_base = reverse(mask_vol, dims=2)
+            end
+            println("    [BENCH-H5] reverse: $(round(t_reverse*1000, digits=1))ms"); flush(stdout)
             
-            # Cache PET volume for SUV computation
+            # Cache PET volume for SUV computation (use native-res for accuracy)
             MEH.pet_volumes_cache[tp_i] = pet_vol_base
             
-            # Resample to display resolution (hi-res)
-            ct_vol_base = hires_resample(ct_vol_base, first_spacing, display_spacing, MedImages.Linear_en)
-            pet_vol_base = hires_resample(pet_vol_base, first_spacing, display_spacing, MedImages.Linear_en)
-            mask_vol_base = hires_resample(mask_vol_base, first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
+            # Only resample if reading from native-resolution fallback group
+            if !use_display
+                t_resample = @elapsed begin
+                    ct_vol_base = hires_resample(ct_vol_base, first_spacing, display_spacing, MedImages.Linear_en)
+                    pet_vol_base = hires_resample(pet_vol_base, first_spacing, display_spacing, MedImages.Linear_en)
+                    mask_vol_base = hires_resample(mask_vol_base, first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
+                end
+                println("    [BENCH-H5] hires_resample ×3: $(round(t_resample, digits=3))s (FALLBACK - native res)"); flush(stdout)
+            else
+                println("    [BENCH-H5] hires_resample: SKIPPED (pre-resampled)"); flush(stdout)
+            end
             
-            vol_img_sagittal = permutedims(ct_vol_base, (2, 3, 1))
-            vol_pet_sagittal = permutedims(pet_vol_base, (2, 3, 1))
-            vol_mask_sagittal = permutedims(mask_vol_base, (2, 3, 1))
+            # Convert mask to compact int type
+            t_mask = @elapsed begin
+                max_id = round(Int, maximum(mask_vol_base))
+                mask_compact = if max_id + 5 <= 127
+                    Int8.(round.(mask_vol_base))
+                else
+                    Int16.(round.(mask_vol_base))
+                end
+            end
+            println("    [BENCH-H5] mask compact: $(round(t_mask*1000, digits=1))ms ($(eltype(mask_compact)))"); flush(stdout)
             
-            vol_img_coronal = permutedims(ct_vol_base, (1, 3, 2))
-            vol_pet_coronal = permutedims(pet_vol_base, (1, 3, 2))
-            vol_mask_coronal = permutedims(mask_vol_base, (1, 3, 2))
+            # Bone arrays start as empty BitArrays
+            sz = size(ct_vol_base)
+            bone_surf = falses(sz...)
+            bone_marr = falses(sz...)
             
-            surf_axial = zeros(Float32, size(ct_vol_base))
-            marr_axial = zeros(Float32, size(ct_vol_base))
-            surf_sag = zeros(Float32, size(vol_img_sagittal))
-            marr_sag = zeros(Float32, size(vol_img_sagittal))
-            surf_cor = zeros(Float32, size(vol_img_coronal))
-            marr_cor = zeros(Float32, size(vol_img_coronal))
-            
-            vdt = Vector{Vector{Any}}([
-                Any[("CT", ct_vol_base), ("PET", pet_vol_base), ("Mask", mask_vol_base), ("Bone_Surface", surf_axial), ("Bone_Marrow", marr_axial)],         
-                Any[("PET", pet_vol_base)],                                                          
-                Any[("CT", vol_img_sagittal), ("PET", vol_pet_sagittal), ("Mask", vol_mask_sagittal), ("Bone_Surface", surf_sag), ("Bone_Marrow", marr_sag)],
-                Any[("CT", vol_img_coronal), ("PET", vol_pet_coronal), ("Mask", vol_mask_coronal), ("Bone_Surface", surf_cor), ("Bone_Marrow", marr_cor)],   
-                Any[("CT", ct_vol_base), ("PET", pet_vol_base), ("Mask", mask_vol_base), ("Bone_Surface", surf_axial), ("Bone_Marrow", marr_axial)]    
-            ])
-            return vdt
+            t_total_ms = (time_ns() - t_total) / 1e6
+            println("    [BENCH-H5] LOAD TP TOTAL: $(round(t_total_ms, digits=1))ms"); flush(stdout)
+            return MEH.TpCacheEntry(ct_vol_base, pet_vol_base, mask_compact, bone_surf, bone_marr)
         end
     end
     
@@ -266,9 +284,25 @@ if isfile(preprocessed_h5)
     end
     
     println("Loading initial Time Point 0 on-demand...")
-    first_vdt = load_single_tp_from_h5(0)
-    all_tps_data[0] = first_vdt
-    global first_voxelDataTupleVector = first_vdt
+    first_entry = load_single_tp_from_h5(0)
+    MEH.tp_data_cache[0] = first_entry
+    
+    # Convert TpCacheEntry to old vdt format for initial displayImage call
+    # (displayImage still expects Vector{Vector{Any}})
+    function entry_to_vdt(e::MEH.TpCacheEntry)
+        mask_f32 = Float32.(e.mask)
+        bone_s_f32 = Float32.(e.bone_surf)
+        bone_m_f32 = Float32.(e.bone_marr)
+        
+        Vector{Vector{Any}}([
+            Any[("CT", e.ct), ("PET", e.pet), ("Mask", mask_f32), ("Bone_Surface", bone_s_f32), ("Bone_Marrow", bone_m_f32)],
+            Any[("PET", e.pet)],
+            Any[("CT", collect(PermutedDimsArray(e.ct, (2,3,1)))), ("PET", collect(PermutedDimsArray(e.pet, (2,3,1)))), ("Mask", collect(PermutedDimsArray(mask_f32, (2,3,1)))), ("Bone_Surface", collect(PermutedDimsArray(bone_s_f32, (2,3,1)))), ("Bone_Marrow", collect(PermutedDimsArray(bone_m_f32, (2,3,1))))],
+            Any[("CT", collect(PermutedDimsArray(e.ct, (1,3,2)))), ("PET", collect(PermutedDimsArray(e.pet, (1,3,2)))), ("Mask", collect(PermutedDimsArray(mask_f32, (1,3,2)))), ("Bone_Surface", collect(PermutedDimsArray(bone_s_f32, (1,3,2)))), ("Bone_Marrow", collect(PermutedDimsArray(bone_m_f32, (1,3,2))))],
+            Any[("CT", e.ct), ("PET", e.pet), ("Mask", mask_f32), ("Bone_Surface", bone_s_f32), ("Bone_Marrow", bone_m_f32)]
+        ])
+    end
+    global first_voxelDataTupleVector = entry_to_vdt(first_entry)
 else
     # Legacy Slow Path
     for study in studies

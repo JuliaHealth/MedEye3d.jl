@@ -401,6 +401,7 @@ end
 
 # Background SUVs cache (computed once per TP, reused for all lesions)
 const _bg_suv_cache = Dict{Int, Dict{String, Float32}}()
+const _lesion_suv_cache = Dict{Tuple{Int,Int}, String}()  # (tp_idx, lesion_id) → SUV string
 
 """
     get_background_suvs(tp_idx) -> Dict{String, Float32}
@@ -1859,7 +1860,12 @@ end_section!(sec_win)
         # ── Auto-fill SUV max ─────────────────────────────────────────────
         if !haskey(data, "SUV max") || isempty(get(data, "SUV max", "")) || get(data, "SUV max", "") == "0.0"
             try
-                suv_str = compute_lesion_suv_string(lid, tp_idx)
+                cache_key = (tp_idx, lid)
+                suv_str = get(_lesion_suv_cache, cache_key, "")
+                if isempty(suv_str)
+                    suv_str = compute_lesion_suv_string(lid, tp_idx)
+                    _lesion_suv_cache[cache_key] = suv_str
+                end
                 if !isempty(suv_str)
                     if haskey(field_widgets, "SUV max") && field_widgets["SUV max"] isa Textbox
                         field_widgets["SUV max"].stored_string[] = suv_str
