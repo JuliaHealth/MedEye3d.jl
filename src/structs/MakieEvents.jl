@@ -69,7 +69,8 @@ struct GenManualEvent
 end
 
 struct MapLinkEvent 
-    lesion_id::String
+    src_ids::Vector{String}
+    dst_ids::Vector{String}
 end
 struct AutoRunPreprocessEvent
     active :: Bool
