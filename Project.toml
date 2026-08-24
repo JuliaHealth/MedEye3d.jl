@@ -41,7 +41,7 @@ Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 
 [compat]
 Base64 = "1.11.0"
-CUDA = "6.2.1"
+CUDA = ">=5.0"
 CodecZlib = "0.7.8"
 ColorTypes = ">=0.11.4"
 Colors = "0.13.1"

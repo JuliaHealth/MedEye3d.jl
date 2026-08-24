@@ -1,3 +1,6 @@
+using Pkg
+Pkg.precompile()
+using MedImages
+println("MedImages loaded successfully! Version: ", pkgversion(MedImages))
 using MedEye3d
-using .MedEye3d.InferenceClient
-println("InferenceClient signature: ", methods(InferenceClient.insert_patch!))
+println("MedEye3d loaded successfully! Version: ", pkgversion(MedEye3d))
