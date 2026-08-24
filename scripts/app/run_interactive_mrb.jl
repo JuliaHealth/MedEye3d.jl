@@ -188,7 +188,15 @@ if isfile(preprocessed_h5)
     first_mask = hires_resample(first_mask, first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
     first_mask_base = first_mask
     
-    for (modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname) in studies
+    for study in studies
+        modality = study[1]
+        orig_tp = study[2]
+        date_str = study[3]
+        ct_fname = study[4]
+        pet_fname = study[5]
+        mask_fname = study[6]
+        node_name = study[7]
+        tfm_fname = study[8]
         lbl = "$modality $date_str (TP $orig_tp)"
         println("Loading $lbl from HDF5 (queue index $idx)...")
         
@@ -248,7 +256,15 @@ if isfile(preprocessed_h5)
     close(h5_file)
 else
     # Legacy Slow Path
-    for (modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname) in studies
+    for study in studies
+        modality = study[1]
+        orig_tp = study[2]
+        date_str = study[3]
+        ct_fname = study[4]
+        pet_fname = study[5]
+        mask_fname = study[6]
+        node_name = study[7]
+        tfm_fname = study[8]
         ct_file = joinpath(data_dir_pat6, ct_fname)
         pet_file = joinpath(data_dir_pat6, pet_fname)
         mask_file = joinpath(data_dir_pat6, mask_fname)
@@ -387,8 +403,9 @@ for (tp_idx, vdt) in all_tps_data
 end
 println("Cached PET volumes for $(length(MEH.pet_volumes_cache)) time points.")
 
-# Cache modalities per TP
-for (modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname) in studies
+for study in studies
+    modality = study[1]
+    date_str = study[3]
     tp_idx_found = -1
     for (k, v) in tp_labels_map
         if occursin(date_str, v)
@@ -506,11 +523,9 @@ if isfile(output_h5)
         HDF5.h5open(output_h5, "r") do file
             for obj in keys(file)
                 if endswith(obj, "_surf")
-                    lid_str = replace(replace(obj, "lesion_" => ""), "_surf" => "")
-                    try
-                        lid_int = parse(Int, lid_str)
-                        marr_key = "lesion_$(lid_int)_marr"
-                        if haskey(file, marr_key)
+                    marr_key = replace(obj, "_surf" => "_marr")
+                    if haskey(file, marr_key)
+                        try
                             surf_data = read(file[obj])
                             marr_data = read(file[marr_key])
                             surf_pts = if ndims(surf_data) == 1
@@ -525,10 +540,27 @@ if isfile(output_h5)
                             end
                             surf_pts = scale_indices(surf_pts, HIRES_FACTOR)
                             marr_pts = scale_indices(marr_pts, HIRES_FACTOR)
-                            MEH.bone_subsegments_cache[lid_int] = (surf_pts, marr_pts)
+                            
+                            m_tp = match(r"^tp_(\d+)_lesion_(\d+)_surf$", obj)
+                            m_node = match(r"^(.+)_lesion_(\d+)_surf$", obj)
+                            m_simple = match(r"^lesion_(\d+)_surf$", obj)
+                            
+                            if m_tp !== nothing
+                                tp_idx = parse(Int, m_tp.captures[1])
+                                lid = parse(Int, m_tp.captures[2])
+                                MEH.bone_subsegments_cache[(tp_idx, lid)] = (surf_pts, marr_pts)
+                            elseif m_node !== nothing
+                                node_name = m_node.captures[1]
+                                lid = parse(Int, m_node.captures[2])
+                                MEH.bone_subsegments_cache[(node_name, lid)] = (surf_pts, marr_pts)
+                            elseif m_simple !== nothing
+                                lid = parse(Int, m_simple.captures[1])
+                                MEH.bone_subsegments_cache[lid] = (surf_pts, marr_pts)
+                                MEH.bone_subsegments_cache[(0, lid)] = (surf_pts, marr_pts)
+                            end
+                        catch err
+                            @warn "Failed to parse lesion $obj: $err"
                         end
-                    catch err
-                        @warn "Failed to parse lesion $obj: $err"
                     end
                 end
             end

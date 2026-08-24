@@ -549,24 +549,16 @@ function create_metadata_window(
     
     # Mouse scroll event to control slider
     on(fig.scene.events.scroll) do scroll
-        # Only allow scrolling if the content is taller than the window
-        # otherwise keep it pinned to the top (1.0)
+        # Allow scrolling more freely to avoid being locked out by layout computation glitches
         content_h = g.layoutobservables.computedbbox[].widths[2]
         window_h = size(fig.scene)[2]
-        if content_h > window_h
+        
+        if content_h > window_h * 0.5  # relaxed threshold
             sl.value[] = clamp(sl.value[] + scroll[2] * 0.05, 0.0, 1.0)
         else
             sl.value[] = 1.0
         end
         return Consume(true)
-    end
-    
-    # Check layout changes and pin to top if it shrinks
-    on(g.layoutobservables.computedbbox) do bbox
-        window_h = size(fig.scene)[2]
-        if bbox.widths[2] <= window_h && sl.value[] != 1.0
-            sl.value[] = 1.0
-        end
     end
     
     rowgap!(g, 0)   # ultra-compact: no gap between rows
@@ -1367,7 +1359,7 @@ end_section!(sec_win)
             field_widgets["Anatomic Location"].selection[] = "Pelvic Lymph Node"
         end
     end
-
+    local sec_map_lesions
     # Auto-hide metadata, segmentation, radlex, custom sections in Compare mode
     on(btn_cv.clicks) do _
         if cv_active[]
@@ -1376,9 +1368,10 @@ end_section!(sec_win)
                 set_row_visible!(r_idx, false)
             end
             # Hide entire sections
-            for sec in (sec_seg, sec_radlex, sec_custom)
+            for sec in (sec_radlex, sec_custom)
                 hide_section!(sec)
             end
+            show_section!(sec_map_lesions)
         else
             # Show metadata rows
             for r_idx in all_metadata_rows
@@ -1388,6 +1381,7 @@ end_section!(sec_win)
             for sec in (sec_seg, sec_radlex, sec_custom)
                 show_section!(sec)
             end
+            hide_section!(sec_map_lesions)
             update_dynamic_visibility!(active_lesion_type[])
         end
     end
@@ -1551,9 +1545,70 @@ end_section!(sec_win)
     Label(g[nr!(), 1:4], @lift(string($(_MEH.ai_status_text))),
         fontsize=10, color=RGBAf(0.7, 0.9, 0.7, 1.0), halign=:center)
 
-    # Duplicate visibility toggles removed — already in Navigation section
-    
     end_section!(sec_seg)
+
+    sec_map_lesions = begin_section!("Map Lesions (Compare Mode)"; default_open=true)
+    
+    btn_refresh_map = Button(g[nr!(), 1:4], label="Load TP Lesions", buttoncolor = BG_PNL, labelcolor = TXT, fontsize=10)
+    
+    map_r = nr!()
+    src_vbox = GridLayout(g[map_r, 1:2])
+    dst_vbox = GridLayout(g[map_r, 3:4])
+    
+    btn_do_map = Button(g[nr!(), 1:4], label="Link Selected Lesions", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize=10)
+    
+    src_toggles = Tuple{Int, Toggle}[]
+    dst_toggles = Tuple{Int, Toggle}[]
+    
+    function get_mask_ids(tp)
+        if !haskey(_MEH.tp_data_cache, tp) return Int[] end
+        panel_data = _MEH.tp_data_cache[tp][1]
+        for (name, arr) in panel_data
+            if name == "Mask" || name == "segmentation"
+                return Int.(filter(x -> x > 0, sort(unique(arr))))
+            end
+        end
+        return Int[]
+    end
+    
+    on(btn_refresh_map.clicks) do _
+        # Clear existing checkboxes
+        for elem in contents(src_vbox); delete!(elem); end
+        for elem in contents(dst_vbox); delete!(elem); end
+        empty!(src_toggles)
+        empty!(dst_toggles)
+        
+        tp_left = _MEH.current_tp_index[]
+        tp_right = _MEH.compare_right_tp[]
+        
+        l_ids = get_mask_ids(tp_left)
+        r_ids = get_mask_ids(tp_right)
+        
+        Label(src_vbox[1, 1:2], "Earlier (TP $tp_left)", fontsize=10, font=:bold, color=LBL_FG)
+        for (i, lid) in enumerate(l_ids)
+            t = Toggle(src_vbox[i+1, 1], active=false)
+            Label(src_vbox[i+1, 2], "ID $lid", fontsize=10, color=LBL_FG)
+            push!(src_toggles, (lid, t))
+        end
+        if isempty(l_ids) Label(src_vbox[2, 1:2], "None", fontsize=10, color=LBL_FG) end
+        
+        Label(dst_vbox[1, 1:2], "Next (TP $tp_right)", fontsize=10, font=:bold, color=LBL_FG)
+        for (i, lid) in enumerate(r_ids)
+            t = Toggle(dst_vbox[i+1, 1], active=false)
+            Label(dst_vbox[i+1, 2], "ID $lid", fontsize=10, color=LBL_FG)
+            push!(dst_toggles, (lid, t))
+        end
+        if isempty(r_ids) Label(dst_vbox[2, 1:2], "None", fontsize=10, color=LBL_FG) end
+    end
+    
+    on(btn_do_map.clicks) do _
+        src_sel = String[string(lid) for (lid, t) in src_toggles if t.active[]]
+        dst_sel = String[string(lid) for (lid, t) in dst_toggles if t.active[]]
+        put!(channel, MapLinkEvent(src_sel, dst_sel))
+    end
+    
+    end_section!(sec_map_lesions)
+    hide_section!(sec_map_lesions)
 
     # ── Settings & Export (merged: Active Data + Preprocessing + Save + Report) ──
     sec_settings = begin_section!("Settings & Export"; default_open=false)
@@ -1603,9 +1658,6 @@ end_section!(sec_win)
     Menu(g[ads_r3, 2], options = ["None", "Elastic_Transform_0_to_1"], fontsize = 10)
     Label(g[ads_r3, 3], "Xform Bwd:", fontsize = 10, color = LBL_FG, halign = :right)
     Menu(g[ads_r3, 4], options = ["None", "Elastic_Transform_1_to_0"], fontsize = 10)
-
-    btn_map_link = Button(g[nr!(), 1:4], label = "Map Lesions (Link)", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
-    on(btn_map_link.clicks) do _; put!(channel, MapLinkEvent()) end
 
     end_section!(sec_settings)
 

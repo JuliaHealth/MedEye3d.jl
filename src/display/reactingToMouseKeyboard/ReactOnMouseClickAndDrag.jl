@@ -148,8 +148,52 @@ const quadZoomState = QuadZoomState(false, 0, Vector{Float32}[], Int64[])
 """
 used when we want to save some manual modifications
 """
-function react_to_draw(mouseStructArray::Vector{MouseStruct}, stateObjects::Vector{StateDataFields})
-    stateObject = stateObjects[stateObjects[1].switchIndex]
+function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector{StateDataFields})
+    if isempty(mouseStructArray)
+        return
+    end
+
+    # First, detect the active panel from the first sampled point
+    first_mouse = mouseStructArray[1]
+    if !isempty(first_mouse.lastCoordinates)
+        x, y = first_mouse.lastCoordinates[1][1], first_mouse.lastCoordinates[1][2]
+        viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
+        viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
+        actualW = first_mouse.actualWindowWidth > 0 ? Float64(first_mouse.actualWindowWidth) : viewportW
+        actualH = first_mouse.actualWindowHeight > 0 ? Float64(first_mouse.actualWindowHeight) : viewportH
+        
+        is_compare = false
+        if length(mainStates) >= 5
+            botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
+            if !isempty(botVerts) && all(v -> v == 0.0f0, botVerts[1:2])
+                is_compare = true
+            end
+        end
+        
+        if is_compare
+            mainStates[1].switchIndex = x < actualW / 2.0 ? 1 : 5
+        elseif length(mainStates) >= 4
+            if x < actualW / 2.0 && y < actualH / 2.0
+                mainStates[1].switchIndex = 1
+            elseif x >= actualW / 2.0 && y < actualH / 2.0
+                mainStates[1].switchIndex = 2
+            elseif x < actualW / 2.0 && y >= actualH / 2.0
+                mainStates[1].switchIndex = 3
+            else
+                mainStates[1].switchIndex = 4
+            end
+        elseif length(mainStates) > 1
+            textBeginning, midPoint, imageRange = openGlSystemVals(mainStates[1].calcDimsStruct.fractionOfMainIm, mainStates[1].calcDimsStruct.windowWidth)
+            cursorXPosOpenGl = (x / mainStates[1].calcDimsStruct.windowWidth) * 2 - 1
+            if cursorXPosOpenGl > midPoint
+                mainStates[1].switchIndex = 2
+            else
+                mainStates[1].switchIndex = 1
+            end
+        end
+    end
+
+    stateObject = mainStates[mainStates[1].switchIndex]
     if !stateObject.valueForMasToSet.is_painting_active || isempty(stateObject.textureToModifyVec)
         return
     end

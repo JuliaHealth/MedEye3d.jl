@@ -47,7 +47,7 @@ of a MedImage. The voxel data is unchanged — this prepares the image for subse
 resampling via `MedImages.resample_to_image`.
 
 In ITK convention, T maps Fixed → Moving physical space. To resample the moving
-image onto the fixed grid, we need `M_moving_mod = inv(T_ITK) * M_old`.
+image onto the fixed grid, we map `M_new = inv(T_ITK) * M_old`.
 """
 function apply_transform_to_medimage(img::MedImage, T_ITK::Matrix{Float64})
     if T_ITK == Matrix{Float64}(I, 4, 4)
@@ -97,12 +97,41 @@ function parse_studies_from_hierarchy(data_dir)
     end
     hierarchy = JSON.parse(read(scene_json, String))
     
+    # Load metadata.json if available to extract actual acquisition dates
+    meta_dates = Dict{String, String}()
+    meta_json_path = joinpath(data_dir, "metadata.json")
+    if isfile(meta_json_path)
+        try
+            meta_json = JSON.parsefile(meta_json_path)
+            for item in meta_json
+                for (k, v) in item
+                    if v isa Dict && (haskey(v, "CT") || haskey(v, "PET") || haskey(v, "NM"))
+                        # Formatted date YYYY-MM-DD
+                        d_str = length(k) == 8 ? "$(k[1:4])-$(k[5:6])-$(k[7:8])" : k
+                        if haskey(v, "CT") && haskey(v["CT"], "name")
+                            meta_dates[v["CT"]["name"]] = d_str
+                        end
+                        if haskey(v, "PET") && haskey(v["PET"], "name")
+                            meta_dates[v["PET"]["name"]] = d_str
+                        end
+                        if haskey(v, "NM") && haskey(v["NM"], "name")
+                            meta_dates[v["NM"]["name"]] = d_str
+                        end
+                    end
+                end
+            end
+        catch e
+            @warn "Could not parse metadata.json dates: $e"
+        end
+    end
+
     parsed_studies = []
     
     function extract_study(children, tfm_name)
         ct_name = ""
         pet_name = ""
         mask_name = ""
+        ts_name = ""
         modality = "PET"
         for child in children
             if child["type"] == "vtkMRMLLinearTransformNode"
@@ -110,18 +139,26 @@ function parse_studies_from_hierarchy(data_dir)
             end
             name = child["name"]
             if child["type"] == "vtkMRMLScalarVolumeNode"
-                if occursin("CT", name)
-                    ct_name = name * ".nii.gz"
-                elseif occursin("PET", name) || occursin("SUV", name) || occursin("SPECT", name) || occursin("NM", name)
+                # Check for functional / NM / PET / SPECT first
+                if occursin("NM", name) || occursin("PET", name) || occursin("SUV", name)
                     pet_name = name * ".nii.gz"
-                    if occursin("SPECT", name) || occursin("NM", name)
+                    if occursin("NM", name) || occursin("SPECT", name)
                         modality = "SPECT"
                     end
+                elseif occursin("CT", name)
+                    ct_name = name * ".nii.gz"
                 end
-            elseif child["type"] == "vtkMRMLSegmentationNode" && occursin("Lesions", name)
-                mask_name = name * ".nii.gz"
-                if !isfile(joinpath(data_dir, mask_name))
-                    mask_name = name * ".seg.nrrd"
+            elseif child["type"] == "vtkMRMLSegmentationNode"
+                if occursin("Lesions", name)
+                    mask_name = name * ".nii.gz"
+                    if !isfile(joinpath(data_dir, mask_name))
+                        mask_name = name * ".seg.nrrd"
+                    end
+                elseif occursin("TS_all", name) || occursin("TotalSegmentator", name)
+                    ts_name = name * ".seg.nrrd"
+                    if !isfile(joinpath(data_dir, ts_name))
+                        ts_name = name * ".nii.gz"
+                    end
                 end
             end
         end
@@ -132,9 +169,13 @@ function parse_studies_from_hierarchy(data_dir)
         
         m = match(r"_(\d+)$", replace(ct_name, ".nii.gz" => ""))
         orig_tp = m !== nothing ? parse(Int, m.captures[1]) : 0
-        date_str = "$modality TP $orig_tp"
         
-        return (modality, orig_tp, date_str, ct_name, pet_name, mask_name, replace(mask_name, r"\..*" => ""), tfm_name)
+        # Look up exact date from metadata if possible
+        ct_base = replace(ct_name, ".nii.gz" => "")
+        pet_base = replace(pet_name, ".nii.gz" => "")
+        date_str = get(meta_dates, ct_base, get(meta_dates, pet_base, "$modality TP $orig_tp"))
+        
+        return (modality, orig_tp, date_str, ct_name, pet_name, mask_name, replace(mask_name, r"\..*" => ""), tfm_name, ts_name)
     end
     
     b = extract_study(hierarchy, "")
@@ -149,7 +190,8 @@ function parse_studies_from_hierarchy(data_dir)
         end
     end
     
-    sort!(parsed_studies, by = x -> (x[2], x[1]))
+    # Sort chronologically by date_str if it looks like a date (YYYY-MM-DD), otherwise by (orig_tp, modality)
+    sort!(parsed_studies, by = x -> occursin(r"^\d{4}-\d{2}-\d{2}", x[3]) ? x[3] : "$(x[2])_$(x[1])")
     return parsed_studies
 end
 
