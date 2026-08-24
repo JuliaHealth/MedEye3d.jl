@@ -651,6 +651,14 @@ function create_metadata_window(
         end
     end
 
+    # ── Cursor Info (always visible, not in a section) ───────────────────────
+    # Study name — compare mode shows both studies
+    Label(g[nr!(), 1:4], @lift(string($(_MEH.cursor_study_text))),
+        fontsize = 11, color = RGBAf(0.6, 0.8, 1.0, 1.0), halign = :left)
+    # HU / SUV / Lesion / View / Slice
+    Label(g[nr!(), 1:4], @lift(string($(_MEH.cursor_info_text))),
+        fontsize = 11, color = RGBAf(0.95, 0.85, 0.55, 1.0), halign = :left)
+
     # ── Lesion Navigation ────────────────────────────────────────────────────
     sec_nav = begin_section!("Lesion Navigation")
     nav_r = nr!()

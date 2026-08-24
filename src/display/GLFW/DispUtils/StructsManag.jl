@@ -305,16 +305,15 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
     heightCorr = 0.0
   end
 
-  # 5. Compute NDC coordinates centered in panel [x_min, x_max] x [y_min, y_max]
+  # 5. Compute NDC coordinates: X centered, Y top-gravity (flush to top of quadrant)
   x_center = (x_min + x_max) / 2.0
   half_span_x = ((x_max - x_min) / 2.0) * scale_x
   left_x  = Float32(x_center - half_span_x)
   right_x = Float32(x_center + half_span_x)
 
-  y_center = (y_min + y_max) / 2.0
-  half_span_y = ((y_max - y_min) / 2.0) * scale_y
-  bottom_y = Float32(y_center - half_span_y)
-  top_y    = Float32(y_center + half_span_y)
+  # Top-gravity: image is flush with top edge of quadrant, black bar at bottom
+  top_y    = Float32(y_max)
+  bottom_y = Float32(y_max - (y_max - y_min) * scale_y)
 
   # 6. Build 32-element OpenGL vertex array (4 vertices * 8 floats)
   # Layout: X, Y, Z, R, G, B, U, V

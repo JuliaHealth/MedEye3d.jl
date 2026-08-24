@@ -590,19 +590,84 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
         end
     end # end right-click handler
 
+    # ─── Cursor Info Readout (runs on OpenGL thread via on_next! dispatch) ───────
+    # Updates the cursor_info_text Observable and GLFW window title with:
+    # study name, HU, SUV, lesion name, view orientation, and slice number.
+    # Coordinate mapping is orientation-aware (axial/sagittal/coronal).
+    try
+        MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
+        clickedPanel = mainState.switchIndex
+        if clickedPanel >= 1 && clickedPanel <= length(mainStates) && !isempty(mouseCoords)
+            panelState = mainStates[clickedPanel]
+            viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
+            viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
+            actualW = mousestr.actualWindowWidth > 0 ? Float64(mousestr.actualWindowWidth) : viewportW
+            actualH = mousestr.actualWindowHeight > 0 ? Float64(mousestr.actualWindowHeight) : viewportH
+            x, y = mouseCoords[1][1], mouseCoords[1][2]
+            texX, texY = getTextureCoordinatesFromScreen(x, y, panelState.calcDimsStruct, actualW, actualH)
+            ix, iy = Int(round(texX)), Int(round(texY))
+            currentSlice = panelState.currentDisplayedSlice
 
+            # Build info parts
+            parts = String[]
 
-    #Dynamically moving crosshair on the screen based on mouse position, only if in multiImage mode, so simply shove it in above if block
-    # if (mousestr.isLeftButtonDown)
-    #     mappedCoords = translateMouseToTexture(Int32(1), mouseCoords, mainState.calcDimsStruct)
-    #     mappedCorrd = mappedCoords
-    #     if (!isempty(mappedCorrd))
-    #         cartMapped = cartTwoToThree(mainState.onScrollData.dataToScrollDims, mainState.currentDisplayedSlice, mappedCoords[1])
+            # Study label (compare mode aware)
+            tp_idx = MEH.current_tp_index[]
+            tp_label = get(MEH.tp_labels, tp_idx, "TP $tp_idx")
+            if MEH.compare_mode[]
+                r_idx = MEH.compare_right_tp[]
+                r_label = get(MEH.tp_labels, r_idx, "TP $r_idx")
+                study_str = "L: $tp_label | R: $r_label"
+            else
+                study_str = tp_label
+            end
 
-    #         mainState.lastRecordedMousePosition = cartMapped
-    #     end#if
-    # end
-    # @info "Mouse drag coordinates  : " mappedCoords
+            # Read values from 3D volumes using panel-local coordinates
+            # (panels 3,4 have reoriented data, so ix,iy,currentSlice are already correct)
+            for dat in panelState.onScrollData.dataToScroll
+                if dat.name == "CT" && checkbounds(Bool, dat.dat, ix, iy, currentSlice)
+                    hu = dat.dat[ix, iy, currentSlice]
+                    push!(parts, "HU: $(round(Int, hu))")
+                elseif dat.name == "PET" && checkbounds(Bool, dat.dat, ix, iy, currentSlice)
+                    suv = dat.dat[ix, iy, currentSlice]
+                    push!(parts, "SUV: $(round(suv, digits=2))")
+                elseif (dat.name == "Mask" || dat.name == "segmentation") && checkbounds(Bool, dat.dat, ix, iy, currentSlice)
+                    mask_val = dat.dat[ix, iy, currentSlice]
+                    if mask_val > 0
+                        lid = Int(round(mask_val))
+                        # Look up lesion name from organ mapping if available
+                        organ = try
+                            get(MEH.global_organ_mapping[], lid, "")
+                        catch
+                            ""
+                        end
+                        label = isempty(organ) ? "Lesion $lid" : "$organ (L$lid)"
+                        push!(parts, label)
+                    end
+                end
+            end
+
+            # Panel orientation indicator
+            view_name = if clickedPanel == 1 || clickedPanel == 2 || clickedPanel == 5
+                "Ax"
+            elseif clickedPanel == 3
+                "Sag"
+            else
+                "Cor"
+            end
+            push!(parts, "[$view_name] Sl:$currentSlice")
+
+            info_str = join(parts, " | ")
+            MEH.cursor_info_text[] = info_str
+            MEH.cursor_study_text[] = study_str
+
+            # Update GLFW window title (already on OpenGL thread inside on_next!, safe to call directly)
+            GLFW.SetWindowTitle(panelState.mainForDisplayObjects.window,
+                "MedEye3d - $study_str | $info_str")
+        end
+    catch
+        # Never let info readout crash the mouse handler
+    end
 
 end#..ReactToScroll
 
