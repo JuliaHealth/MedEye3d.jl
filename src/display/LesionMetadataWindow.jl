@@ -430,7 +430,13 @@ Auto-compute SUV max and background references, returning formatted string:
 function compute_lesion_suv_string(lesion_id::Int, tp_idx::Int)::String
     _MEH = MedEye3d.SegmentationDisplay.MakieEventHandlers
     pet_vol = get(_MEH.pet_volumes_cache, tp_idx, nothing)
-    centroid = get(_MEH.lesion_centroids_cache, lesion_id, nothing)
+    centroid = if haskey(_MEH.lesion_centroids_cache, (tp_idx, lesion_id))
+        _MEH.lesion_centroids_cache[(tp_idx, lesion_id)]
+    elseif haskey(_MEH.lesion_centroids_cache, lesion_id)
+        _MEH.lesion_centroids_cache[lesion_id]
+    else
+        nothing
+    end
     if pet_vol === nothing || centroid === nothing
         return ""
     end
@@ -1757,20 +1763,19 @@ end_section!(sec_win)
             end
         end
         update_type_buttons(t_type)
-        
-        if t_type == "Bone Meta"
-            put!(channel, ShowMaskLayerEvent(2, true))   # bone surface
-            put!(channel, ShowMaskLayerEvent(3, true))   # bone marrow
-        else
-            put!(channel, ShowMaskLayerEvent(2, false))
-            put!(channel, ShowMaskLayerEvent(3, false))
-        end
 
         # ── Edge-slice artefact detection ─────────────────────────────────
         # Lesions on the first 2 or last 2 axial slices are classified as
         # technical artifacts (partial volume / reconstruction edge effects)
-        if lid > 0 && haskey(_MEH.lesion_centroids_cache, lid) && _MEH.volume_z_size[] > 0
-            centroid = _MEH.lesion_centroids_cache[lid]
+        cur_tp = _MEH.current_tp_index[]
+        centroid = if haskey(_MEH.lesion_centroids_cache, (cur_tp, lid))
+            _MEH.lesion_centroids_cache[(cur_tp, lid)]
+        elseif haskey(_MEH.lesion_centroids_cache, lid)
+            _MEH.lesion_centroids_cache[lid]
+        else
+            nothing
+        end
+        if lid > 0 && centroid !== nothing && _MEH.volume_z_size[] > 0
             z_slice = centroid[3]
             total_z = _MEH.volume_z_size[]
             

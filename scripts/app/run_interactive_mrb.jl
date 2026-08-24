@@ -18,6 +18,8 @@ import GLFW
 import JSON
 import HDF5
 
+const MEH = MedEye3d.SegmentationDisplay.MakieEventHandlers
+
 # Paths to data
 data_dir_pat6 = length(ARGS) >= 1 ? ARGS[1] : joinpath(@__DIR__, "..", "..", "data", "pat_6_files")
 
@@ -170,90 +172,103 @@ studies = parse_studies_from_hierarchy(data_dir_pat6)
 
 preprocessed_h5 = joinpath(data_dir_pat6, "preprocessed_volumes.h5")
 if isfile(preprocessed_h5)
-    println("Found preprocessed_volumes.h5! Fast loading...")
+    println("Found preprocessed_volumes.h5! Initializing on-demand streaming...")
     import HDF5
-    h5_file = HDF5.h5open(preprocessed_h5, "r")
+    h5_init = HDF5.h5open(preprocessed_h5, "r")
     
     # Read Baseline spacing from the baseline CT
     base_ct_fname = studies[1][4]
     base_mask_fname = studies[1][6]
-    global first_spacing = Tuple(Float64.(read(HDF5.attributes(h5_file["BASELINE/$base_ct_fname"])["spacing"])))
+    global first_spacing = Tuple(Float64.(read(HDF5.attributes(h5_init["BASELINE/$base_ct_fname"])["spacing"])))
     
     # Compute display spacing (halved in-plane for hi-res)
     display_spacing = (first_spacing[1] / HIRES_FACTOR, first_spacing[2] / HIRES_FACTOR, first_spacing[3])
     println("Native spacing: $first_spacing → Display spacing: $display_spacing ($(HIRES_FACTOR)x)")
     
-    global first_mask = reverse(Float32.(read(h5_file["BASELINE/$base_mask_fname"])), dims=2)
+    global first_mask = reverse(Float32.(read(h5_init["BASELINE/$base_mask_fname"])), dims=2)
     # Resample first_mask to display resolution for centroid/organ mapping later
     first_mask = hires_resample(first_mask, first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
     first_mask_base = first_mask
+    close(h5_init)
     
-    for study in studies
+    function load_single_tp_from_h5(tp_i::Int)
+        if tp_i < 0 || tp_i >= length(studies)
+            return nothing
+        end
+        study = studies[tp_i + 1]
+        modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname = study[1:8]
+        group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
+        
+        HDF5.h5open(preprocessed_h5, "r") do h5_file
+            ct_vol = Float32.(read(h5_file["$group/$ct_fname"]))
+            pet_vol = Float32.(read(h5_file["$group/$pet_fname"]))
+            mask_vol = Float32.(read(h5_file["$group/$mask_fname"]))
+            
+            if modality == "SPECT"
+                pos_dat = pet_vol[pet_vol .> 0]
+                p99 = isempty(pos_dat) ? 1.0f0 : Float32(quantile(pos_dat, 0.99))
+                scale_factor = 8.0f0 / max(p99, 1.0f0)
+                pet_vol = max.(0.0f0, pet_vol .* scale_factor)
+            end
+            
+            ct_vol_base = reverse(ct_vol, dims=2)
+            pet_vol_base = reverse(pet_vol, dims=2)
+            mask_vol_base = reverse(mask_vol, dims=2)
+            
+            # Cache PET volume for SUV computation
+            MEH.pet_volumes_cache[tp_i] = pet_vol_base
+            
+            # Resample to display resolution (hi-res)
+            ct_vol_base = hires_resample(ct_vol_base, first_spacing, display_spacing, MedImages.Linear_en)
+            pet_vol_base = hires_resample(pet_vol_base, first_spacing, display_spacing, MedImages.Linear_en)
+            mask_vol_base = hires_resample(mask_vol_base, first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
+            
+            vol_img_sagittal = permutedims(ct_vol_base, (2, 3, 1))
+            vol_pet_sagittal = permutedims(pet_vol_base, (2, 3, 1))
+            vol_mask_sagittal = permutedims(mask_vol_base, (2, 3, 1))
+            
+            vol_img_coronal = permutedims(ct_vol_base, (1, 3, 2))
+            vol_pet_coronal = permutedims(pet_vol_base, (1, 3, 2))
+            vol_mask_coronal = permutedims(mask_vol_base, (1, 3, 2))
+            
+            surf_axial = zeros(Float32, size(ct_vol_base))
+            marr_axial = zeros(Float32, size(ct_vol_base))
+            surf_sag = zeros(Float32, size(vol_img_sagittal))
+            marr_sag = zeros(Float32, size(vol_img_sagittal))
+            surf_cor = zeros(Float32, size(vol_img_coronal))
+            marr_cor = zeros(Float32, size(vol_img_coronal))
+            
+            vdt = Vector{Vector{Any}}([
+                Any[("CT", ct_vol_base), ("PET", pet_vol_base), ("Mask", mask_vol_base), ("Bone_Surface", surf_axial), ("Bone_Marrow", marr_axial)],         
+                Any[("PET", pet_vol_base)],                                                          
+                Any[("CT", vol_img_sagittal), ("PET", vol_pet_sagittal), ("Mask", vol_mask_sagittal), ("Bone_Surface", surf_sag), ("Bone_Marrow", marr_sag)],
+                Any[("CT", vol_img_coronal), ("PET", vol_pet_coronal), ("Mask", vol_mask_coronal), ("Bone_Surface", surf_cor), ("Bone_Marrow", marr_cor)],   
+                Any[("CT", ct_vol_base), ("PET", pet_vol_base), ("Mask", mask_vol_base), ("Bone_Surface", surf_axial), ("Bone_Marrow", marr_axial)]    
+            ])
+            return vdt
+        end
+    end
+    
+    # Register fast on-demand loader with event handlers
+    MEH.register_tp_loader!(load_single_tp_from_h5)
+    
+    for (s_idx, study) in enumerate(studies)
+        tp_i = s_idx - 1
         modality = study[1]
         orig_tp = study[2]
         date_str = study[3]
-        ct_fname = study[4]
-        pet_fname = study[5]
-        mask_fname = study[6]
         node_name = study[7]
-        tfm_fname = study[8]
         lbl = "$modality $date_str (TP $orig_tp)"
-        println("Loading $lbl from HDF5 (queue index $idx)...")
-        
-        group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
-        
-        ct_vol = Float32.(read(h5_file["$group/$ct_fname"]))
-        pet_vol = Float32.(read(h5_file["$group/$pet_fname"]))
-        mask_vol = Float32.(read(h5_file["$group/$mask_fname"]))
-        
-        if modality == "SPECT"
-            pos_dat = pet_vol[pet_vol .> 0]
-            p99 = isempty(pos_dat) ? 1.0f0 : Float32(quantile(pos_dat, 0.99))
-            scale_factor = 8.0f0 / max(p99, 1.0f0)
-            pet_vol = max.(0.0f0, pet_vol .* scale_factor)
-        end
-        
-        ct_vol_base = reverse(ct_vol, dims=2)
-        pet_vol_base = reverse(pet_vol, dims=2)
-        mask_vol_base = reverse(mask_vol, dims=2)
-        
-        # Resample to display resolution (hi-res)
-        ct_vol_base = hires_resample(ct_vol_base, first_spacing, display_spacing, MedImages.Linear_en)
-        pet_vol_base = hires_resample(pet_vol_base, first_spacing, display_spacing, MedImages.Linear_en)
-        mask_vol_base = hires_resample(mask_vol_base, first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
-        
-        vol_img_sagittal = permutedims(ct_vol_base, (2, 3, 1))
-        vol_pet_sagittal = permutedims(pet_vol_base, (2, 3, 1))
-        vol_mask_sagittal = permutedims(mask_vol_base, (2, 3, 1))
-        
-        vol_img_coronal = permutedims(ct_vol_base, (1, 3, 2))
-        vol_pet_coronal = permutedims(pet_vol_base, (1, 3, 2))
-        vol_mask_coronal = permutedims(mask_vol_base, (1, 3, 2))
-        
-        surf_axial = zeros(Float32, size(ct_vol_base))
-        marr_axial = zeros(Float32, size(ct_vol_base))
-        surf_sag = zeros(Float32, size(vol_img_sagittal))
-        marr_sag = zeros(Float32, size(vol_img_sagittal))
-        surf_cor = zeros(Float32, size(vol_img_coronal))
-        marr_cor = zeros(Float32, size(vol_img_coronal))
-        
-        vdt = Vector{Vector{Any}}([
-            Any[("CT", ct_vol_base), ("PET", pet_vol_base), ("Mask", mask_vol_base), ("Bone_Surface", surf_axial), ("Bone_Marrow", marr_axial)],         
-            Any[("PET", pet_vol_base)],                                                          
-            Any[("CT", vol_img_sagittal), ("PET", vol_pet_sagittal), ("Mask", vol_mask_sagittal), ("Bone_Surface", surf_sag), ("Bone_Marrow", marr_sag)],
-            Any[("CT", vol_img_coronal), ("PET", vol_pet_coronal), ("Mask", vol_mask_coronal), ("Bone_Surface", surf_cor), ("Bone_Marrow", marr_cor)],   
-            Any[("CT", ct_vol_base), ("PET", pet_vol_base), ("Mask", mask_vol_base), ("Bone_Surface", surf_axial), ("Bone_Marrow", marr_axial)]    
-        ])
-        
-        all_tps_data[idx] = vdt
-        tp_labels_map[idx] = lbl
-        tp_nodes_map[idx] = node_name
-        if idx == 0
-            global first_voxelDataTupleVector = vdt
-        end
-        global idx += 1
+        tp_labels_map[tp_i] = lbl
+        tp_nodes_map[tp_i] = node_name
+        MEH.tp_labels[tp_i] = lbl
+        MEH.tp_modalities[tp_i] = modality
     end
-    close(h5_file)
+    
+    println("Loading initial Time Point 0 on-demand...")
+    first_vdt = load_single_tp_from_h5(0)
+    all_tps_data[0] = first_vdt
+    global first_voxelDataTupleVector = first_vdt
 else
     # Legacy Slow Path
     for study in studies
@@ -322,7 +337,6 @@ if isfile(worker_script)
 end
 
 # Populate TP data cache for navigation
-MEH = MedEye3d.SegmentationDisplay.MakieEventHandlers
 for (k, v) in all_tps_data
     MEH.tp_data_cache[k] = v
 end
@@ -576,14 +590,45 @@ end
 unique_vals = sort(unique(first_mask))
 lesion_ids_ints = filter(x -> x > 0, unique_vals)
 
-# Precalculate lesion centroids for instant navigation (<1us)
-for lid in lesion_ids_ints
-    c = MEH.find_lesion_center(first_mask, Float32(lid))
-    if c !== nothing
-        MEH.lesion_centroids_cache[Int(lid)] = c
+# Precalculate lesion centroids for ALL studies for instant navigation (<1us)
+if isfile(preprocessed_h5)
+    HDF5.h5open(preprocessed_h5, "r") do h5
+        for (s_idx, study) in enumerate(studies)
+            tp_idx = s_idx - 1
+            node_name = study[7]
+            mask_fname = study[6]
+            tfm_fname = study[8]
+            group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
+            
+            if haskey(h5, group) && haskey(h5[group], mask_fname)
+                mask_raw = reverse(Float32.(read(h5["$group/$mask_fname"])), dims=2)
+                u_lids = filter(x -> x > 0, unique(mask_raw))
+                for lid_f in u_lids
+                    lid = Int(lid_f)
+                    c_native = MEH.find_lesion_center(mask_raw, lid_f)
+                    if c_native !== nothing
+                        c_hires = [round(Int, c_native[1] * HIRES_FACTOR), round(Int, c_native[2] * HIRES_FACTOR), c_native[3]]
+                        MEH.lesion_centroids_cache[(tp_idx, lid)] = c_hires
+                        MEH.lesion_centroids_cache[(node_name, lid)] = c_hires
+                        if tp_idx == 0
+                            MEH.lesion_centroids_cache[lid] = c_hires
+                        end
+                    end
+                end
+            end
+        end
     end
+    println("Cached centroids for all 8 time points: $(length(MEH.lesion_centroids_cache)) entries.")
+else
+    for lid in lesion_ids_ints
+        c = MEH.find_lesion_center(first_mask, Float32(lid))
+        if c !== nothing
+            MEH.lesion_centroids_cache[Int(lid)] = c
+            MEH.lesion_centroids_cache[(0, Int(lid))] = c
+        end
+    end
+    println("Cached centroids for $(length(MEH.lesion_centroids_cache)) lesions.")
 end
-println("Cached centroids for $(length(MEH.lesion_centroids_cache)) lesions.")
 
 # Store volume Z dimension for edge-slice artefact detection
 MEH.volume_z_size[] = size(first_mask, 3)
