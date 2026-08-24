@@ -3,13 +3,17 @@ import Logging
 using Logging
 using Base.Threads
 
-# Configure logging to save to data/log.txt automatically
+# Configure logging to save to data/log.txt automatically (falling back to temporary/null logger if read-only)
 function __init__()
-    log_dir = joinpath(@__DIR__, "..", "data")
-    if !isdir(log_dir)
-        mkdir(log_dir)
+    try
+        log_dir = joinpath(@__DIR__, "..", "data")
+        if !isdir(log_dir)
+            mkdir(log_dir)
+        end
+        global_logger(SimpleLogger(open(joinpath(log_dir, "log.txt"), "a")))
+    catch
+        # Read-only or packaged installation fallback
     end
-    global_logger(SimpleLogger(open(joinpath(log_dir, "log.txt"), "a")))
 end
 
 export ForDisplayStructs
@@ -103,9 +107,9 @@ if (VERSION < v"1.8")
 end #if
 
 
-# using Pkg
-# ENV["MODERNGL_DEBUGGING"] = "true"
-# Pkg.build("ModernGL")
+include(joinpath("packaging", "AppMain.jl"))
+using .MedEye3dApp: julia_main
+export julia_main
 
 greet() = print("Hello from medEye")
 
