@@ -25,6 +25,11 @@ using Observables
 # AI status Observable — LesionMetadataWindow reads this for the GUI label
 const ai_status_text = Observable{String}("Ready")
 
+# Cursor info Observables — updated from on_next!(MouseStruct) via reactToMouseDrag
+const cursor_info_text = Observable{String}("")      # "HU: 45 | SUV: 3.2 | femur (L5) | [Ax] Sl:163"
+const cursor_study_text = Observable{String}("")     # "PET TP0" or "L: PET TP0 | R: PET TP3"
+export cursor_info_text, cursor_study_text
+
 # Sanitize AI status text for Makie Label rendering (ASCII-only, truncated)
 function safe_status_text(msg::String)
     s = replace(msg, "\u2014" => "-", "\u2026" => "...")
@@ -409,6 +414,71 @@ end
 
 const current_active_lesion_id = Ref(0)
 
+"""
+Compute or retrieve cached bone subsegments for a given stateObject + lesion + TP.
+Uses Bool thresholding instead of Float32 to save ~1GB allocation.
+Returns (surf_pts::Vector{CartesianIndex{3}}, marr_pts::Vector{CartesianIndex{3}})
+"""
+function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
+    if target_id <= 0
+        return (CartesianIndex{3}[], CartesianIndex{3}[])
+    end
+    
+    # Check cache
+    cached = if haskey(bone_subsegments_cache, (panel_tp, target_id))
+        bone_subsegments_cache[(panel_tp, target_id)]
+    elseif haskey(bone_subsegments_cache, (get_node_name_for_tp(panel_tp), target_id))
+        bone_subsegments_cache[(get_node_name_for_tp(panel_tp), target_id)]
+    elseif panel_tp == 0 && haskey(bone_subsegments_cache, target_id)
+        bone_subsegments_cache[target_id]
+    else
+        nothing
+    end
+    
+    if cached !== nothing
+        raw_surf, raw_marr = cached
+        return (raw_surf isa AbstractArray{<:CartesianIndex} ? raw_surf : findall(raw_surf .> 0),
+                raw_marr isa AbstractArray{<:CartesianIndex} ? raw_marr : findall(raw_marr .> 0))
+    end
+    
+    # Compute fresh
+    panel_seg = nothing
+    panel_ct = nothing
+    for dat in stateObject.onScrollData.dataToScroll
+        if dat.name == "Mask" || dat.name == "segmentation"
+            panel_seg = dat.dat
+        elseif dat.name == "CT"
+            panel_ct = dat.dat
+        end
+    end
+    
+    if panel_seg === nothing
+        return (CartesianIndex{3}[], CartesianIndex{3}[])
+    end
+    
+    # Bool threshold instead of Float32 (saves ~1GB allocation)
+    local_bone_atlas = panel_ct !== nothing ? (panel_ct .> 150.0f0) : global_bone_atlas[]
+    if local_bone_atlas === nothing
+        return (CartesianIndex{3}[], CartesianIndex{3}[])
+    end
+    
+    panel_lesion_indices = findall(panel_seg .== Float32(target_id))
+    has_bone = !isempty(panel_lesion_indices) && 
+        any(idx -> checkbounds(Bool, local_bone_atlas, idx) && local_bone_atlas[idx] > 0, panel_lesion_indices)
+    
+    if has_bone
+        s_mask, m_mask = MedEye3d.BoneSubsegmentation.generate_bone_subsegments(
+            panel_seg, Float32.(local_bone_atlas), (1.5f0, 1.5f0, 2.0f0), target_id)
+        pts_surf = findall(s_mask)
+        pts_marr = findall(m_mask)
+        bone_subsegments_cache[(panel_tp, target_id)] = (pts_surf, pts_marr)
+        return (pts_surf, pts_marr)
+    else
+        bone_subsegments_cache[(panel_tp, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
+        return (CartesianIndex{3}[], CartesianIndex{3}[])
+    end
+end
+
 function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateDataFields})
     println("reactToSyncLesion called with lesion_id=$(data.lesion_id), nStates=$(length(stateObjects))"); flush(stdout)
     current_active_lesion_id[] = data.lesion_id
@@ -464,74 +534,42 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
 
 
 
-    for (panel_idx, stateObject) in enumerate(stateObjects)
-        surf_indices = CartesianIndex{3}[]
-        marr_indices = CartesianIndex{3}[]
-        
-        target_id = (panel_idx == 5 && compare_mode[]) ? panel5_lesion_id : data.lesion_id
-        panel_tp = (panel_idx == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
-        
-        if target_id > 0
-            cached_entry = if haskey(bone_subsegments_cache, (panel_tp, target_id))
-                bone_subsegments_cache[(panel_tp, target_id)]
-            elseif haskey(bone_subsegments_cache, (get_node_name_for_tp(panel_tp), target_id))
-                bone_subsegments_cache[(get_node_name_for_tp(panel_tp), target_id)]
-            elseif panel_tp == 0 && haskey(bone_subsegments_cache, target_id)
-                bone_subsegments_cache[target_id]
-            else
-                nothing
-            end
-            
-            pts_surf = CartesianIndex{3}[]
-            pts_marr = CartesianIndex{3}[]
-            
-            if cached_entry !== nothing
-                raw_surf, raw_marr = cached_entry
-                pts_surf = raw_surf isa AbstractArray{<:CartesianIndex} ? raw_surf : findall(raw_surf .> 0)
-                pts_marr = raw_marr isa AbstractArray{<:CartesianIndex} ? raw_marr : findall(raw_marr .> 0)
-            else
-                try
-                    panel_seg = nothing
-                    panel_ct = nothing
-                    for dat in stateObject.onScrollData.dataToScroll
-                        if dat.name == "Mask" || dat.name == "segmentation"
-                            panel_seg = dat.dat
-                        elseif dat.name == "CT"
-                            panel_ct = dat.dat
-                        end
-                    end
-                    if panel_seg !== nothing
-                        local_bone_atlas = panel_ct !== nothing ? Float32.(panel_ct .> 150.0f0) : global_bone_atlas[]
-                        if local_bone_atlas !== nothing
-                            panel_lesion_indices = findall(panel_seg .== Float32(target_id))
-                            has_bone = !isempty(panel_lesion_indices) && any(idx -> checkbounds(Bool, local_bone_atlas, idx) && local_bone_atlas[idx] > 0.0f0, panel_lesion_indices)
-                            if has_bone
-                                s_mask, m_mask = MedEye3d.BoneSubsegmentation.generate_bone_subsegments(panel_seg, local_bone_atlas, (1.5f0, 1.5f0, 2.0f0), target_id)
-                                pts_surf = findall(s_mask)
-                                pts_marr = findall(m_mask)
-                                bone_subsegments_cache[(panel_tp, target_id)] = (pts_surf, pts_marr)
-                            else
-                                bone_subsegments_cache[(panel_tp, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
-                            end
-                        end
-                    end
-                catch e
-                    println("Failed to recalc bone for panel $panel_idx in reactToSyncLesion: $e")
-                end
-            end
+    # ── Pre-compute bone subseg ONCE per unique TP (deduplicated) ──
+    left_tp = current_tp_index[]
+    left_axial_surf, left_axial_marr = try
+        _get_or_compute_bone_subseg(stateObjects[1], data.lesion_id, left_tp)
+    catch e
+        println("Failed to compute bone subseg for left TP: $e")
+        (CartesianIndex{3}[], CartesianIndex{3}[])
+    end
 
-            if panel_idx == 3 # Sagittal (Y, Z, X)
-                surf_indices = [CartesianIndex(I[2], I[3], I[1]) for I in pts_surf]
-                marr_indices = [CartesianIndex(I[2], I[3], I[1]) for I in pts_marr]
-            elseif panel_idx == 4 # Coronal (X, Z, Y)
-                surf_indices = [CartesianIndex(I[1], I[3], I[2]) for I in pts_surf]
-                marr_indices = [CartesianIndex(I[1], I[3], I[2]) for I in pts_marr]
-            else # Axial (X, Y, Z)
-                surf_indices = pts_surf
-                marr_indices = pts_marr
-            end
+    right_axial_surf, right_axial_marr = if compare_mode[] && length(stateObjects) >= 5
+        try
+            _get_or_compute_bone_subseg(stateObjects[5], panel5_lesion_id, compare_right_tp[])
+        catch e
+            println("Failed to compute bone subseg for right TP: $e")
+            (CartesianIndex{3}[], CartesianIndex{3}[])
         end
-        
+    else
+        (CartesianIndex{3}[], CartesianIndex{3}[])
+    end
+
+    # ── Per-panel: just remap orientations from pre-computed axial data ──
+    for (panel_idx, stateObject) in enumerate(stateObjects)
+        is_right = (panel_idx == 5 && compare_mode[])
+        base_surf = is_right ? right_axial_surf : left_axial_surf
+        base_marr = is_right ? right_axial_marr : left_axial_marr
+
+        surf_indices, marr_indices = if panel_idx == 3  # Sagittal (Y, Z, X)
+            ([CartesianIndex(I[2], I[3], I[1]) for I in base_surf],
+             [CartesianIndex(I[2], I[3], I[1]) for I in base_marr])
+        elseif panel_idx == 4  # Coronal (X, Z, Y)
+            ([CartesianIndex(I[1], I[3], I[2]) for I in base_surf],
+             [CartesianIndex(I[1], I[3], I[2]) for I in base_marr])
+        else  # Axial (panels 1, 2, 5)
+            (base_surf, base_marr)
+        end
+
         for scrDat in stateObject.onScrollData.dataToScroll
             if scrDat.name == "Bone_Surface"
                 if haskey(last_bone_surf_indices, panel_idx) && !isempty(last_bone_surf_indices[panel_idx])
