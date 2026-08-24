@@ -12,8 +12,10 @@ hold raw Data that can be send to be displayed
 abstract type RawDataToDisp end
 
 """
-2 dimensional ata for displaying single slice
-struct is mutable becouse in case of the masks data can be changed multiple times and rapidly
+    TwoDimRawDat{T} <: RawDataToDisp
+
+A mutable struct holding 2-dimensional raw pixel data for displaying a single slice.
+Mutable to allow high-performance, rapid updates (e.g., during interactive mask painting).
 """
 @with_kw mutable struct TwoDimRawDat{T} <: RawDataToDisp
     type::Type{T} = UInt8# easy access to type
@@ -23,8 +25,10 @@ end#2DimRawDat
 
 
 """
-3 dimensional data for displaying single slice
-struct is mutable becouse in case of the masks data can be changed multiple times and rapidly
+    ThreeDimRawDat{T} <: RawDataToDisp
+
+A mutable struct holding 3-dimensional raw voxel data representing a full volume.
+Mutable to allow high-performance, rapid in-place memory updates (e.g., during AI inference or mask painting).
 """
 @with_kw mutable struct ThreeDimRawDat{T} <: RawDataToDisp
     type::Type{T} = UInt8# easy access to type

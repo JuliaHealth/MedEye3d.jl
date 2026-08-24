@@ -60,6 +60,12 @@ function registerMouseScrollFunctions(window::GLFW.Window, mainChannel::Base.Cha
     end)
 end #registerMouseScrollFunctions
 
+"""
+    reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFields})
+
+Handles continuous scaling logic when holding `Shift` + `Scroll`.
+The zooming dynamically recalculates `calcDimsStruct.zoom` and clips bounds (1.0x - 20.0x zoom). Automatically resets panning logic when fully zoomed out. Triggers a render pass immediately upon recalculation.
+"""
 function reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFields})
     panelIdx = mainStates[1].switchIndex
     if panelIdx < 1 || panelIdx > length(mainStates)
@@ -67,8 +73,8 @@ function reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFi
     end
     mainState = mainStates[panelIdx]
     
-    # Zoom factor: 1.15 for each scroll tick
-    zoomFactor = data.zoom_delta > 0 ? 1.15f0 : (1.0f0 / 1.15f0)
+    # Zoom factor: 1.1 for each scroll tick
+    zoomFactor = data.zoom_delta > 0 ? 1.1f0 : (1.0f0 / 1.1f0)
     
     # Increase zoom, clamp between 1.0 (no zoom) and 20.0
     newZoom = clamp(mainState.calcDimsStruct.zoom * zoomFactor, 1.0f0, 20.0f0)
@@ -92,10 +98,15 @@ end
 
 
 """
-in case of the scroll p true will be send in case of down - false
-in response to it it sets new screen int variable and changes displayed screen
-toBeSavedForBack - just marks weather we wat to save the info how to undo latest action
- - false if we invoke it from undoing
+    reactToScroll(scrollNumb::Int64, mainStates::Vector{StateDataFields}, toBeSavedForBack::Bool=true)
+
+Core scroll-navigation function executed sequentially by the `GL_Consumer` thread.
+
+# Logic Flow:
+1. Calculates target slice by applying `scrollNumb` (multiplied by 10 if fast-scroll `Shift` is active).
+2. Extracts the 2D cross-section data (`SingleSliceDat`) from the 3D raw voxel volume (`ThreeDimRawDat`) associated with the active panel.
+3. Automatically triggers 3D synchronizations (`reactToScroll` loops recursively) for QuadView configurations. Updates orthogonal coronal/sagittal panels immediately based on world-coordinate intersections with the axial view.
+4. Uploads data into GPU textures and calls `glClear`/`glDrawElements` via the consumer block.
 """
 function reactToScroll(scrollNumb::Int64, mainStates::Vector{StateDataFields}, toBeSavedForBack::Bool=true)
     mainState = mainStates[mainStates[1].switchIndex] #getting information from the first state

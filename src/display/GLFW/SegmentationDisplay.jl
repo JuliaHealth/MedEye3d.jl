@@ -1023,7 +1023,24 @@ end
 
 
 """
-High Level Initialisation function for the visualizer
+    displayImage(studySrc; kwargs...)
+
+High-Level entry point for the MedEye3d Visualizer.
+
+# Arguments
+- `studySrc`: Path(s) and metadata for the volume data (e.g. `Vector{Tuple{String,String}}` where tuples represent path and image type).
+
+# Keyword Arguments
+- `textureSpecArray`: Definitions of masks, colors, and visibility defaults.
+- `voxelDataTupleVector`: Explicitly passed dense voxel data (used by `run_interactive_mrb.jl`).
+- `spacings` & `origins`: Patient anatomical spatial scaling vectors.
+- `fractionOfMainImage`: Width ratio occupied by the OpenGL panel (0.0 - 1.0).
+- `windowWidth`: Starting horizontal resolution of the GLFW window.
+- `quadView`: Pass `true` to enable the 4-panel multi-planar layout.
+- `dimensionsToScroll`: The primary slicing dimension.
+
+# Returns
+`MainMedEye3d`: A handle representing the running viewer, containing the `channel` for posting GUI events.
 """
 function displayImage(
     studySrc::Union{Vector{Tuple{String,String}},Tuple{String,String},Vector{Vector{Tuple{String,String}}}}

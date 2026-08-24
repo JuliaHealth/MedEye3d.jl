@@ -11,7 +11,10 @@ export ToggleSyncScroll
 
 
 """
-Display mode of the visualizer : SingleImage or MultiImage
+Display mode of the MedEye3d visualizer layout.
+- `SingleImage`: A single full-screen 2D slicing plane.
+- `MultiImage`: Two side-by-side 2D slices for comparative viewing.
+- `QuadImage`: A four-panel layout (typically Axial, Coronal, Sagittal, and a 4th custom view like pure PET or a Compare mode timepoint).
 """
 @enum DisplayMode begin
   SingleImage
@@ -21,83 +24,86 @@ end
 
 
 """
-data needed for definition of mask  - data that will be displayed over main image
-this struct is parametarized by type of 3 dimensional array that will be used  to store data
+    Mask{arrayType}
+
+Data structure defining an overlay mask to be displayed on top of the main radiological image.
+
+# Fields
+- `path::String`: Path to the mask in the HDF5 backend (if applicable).
+- `maskId::Int64`: Unique identifier associated with this mask.
+- `maskName::String`: Name of the anatomical structure or annotation class (e.g., "Liver", "Lesion").
+- `maskArrayObs::Observable{Array{arrayType}}`: An active Observable wrapping the 3D voxel array holding the mask data, updating dynamically upon drawing/erasing.
+- `colorRGBA::RGBA`: The designated rendering color of the mask.
 """
 @with_kw struct Mask{arrayType}
-  path::String #path to this file in Hdf5
-  maskId::Int64 #unique associated with id taken from Hdf5 file system
-  maskName::String #unique for class not unique for instance for example it can be name of the organ that will be segmented - need to be unique in instance but across instances needs to be named the same
-  maskArrayObs::Observable{Array{arrayType}} # observable array used to store information that will be displayed over main image
-  colorRGBA::RGBA #associated RGBA  that will be displayed based on the values in maskArrayObs
+  path::String 
+  maskId::Int64 
+  maskName::String 
+  maskArrayObs::Observable{Array{arrayType}} 
+  colorRGBA::RGBA 
 end
+
 """
-hold reference numbers that will be used to access and modify given uniform value in a shader
+Abstract type holding references to OpenGL uniform variables used to control textures dynamically in shaders.
 """
 abstract type TextureUniforms end
 
 
 """
-hold reference numbers that will be used to access and modify given uniform value
-In order to have easy fast access to the values set the most recent values will also be stored inside
-In order to improve usability  we will also save with what data type this mask is associated
-for example Int, uint, float etc
+    MaskTextureUniforms <: TextureUniforms
+
+Holds reference pointers to OpenGL uniforms for a specific mask or layer.
+Stores references needed for rapid GL context updates (visibility, blending, clip ranges) during interactive rendering without costly CPU-GPU sync overhead.
 """
 @with_kw mutable struct MaskTextureUniforms <: TextureUniforms
-  samplerName::String = ""#name of the sampler - mainly for debugging purposes
-  samplerRef::Int32 = Int32(0) #reference to sampler of the texture
-  colorsMaskRef::Int32 = Int32(0) #reference to uniform holding color of this mask
-  isVisibleRef::Int32 = Int32(0)# reference to uniform that points weather we
-  maskMinValue::Float32 = Float32(0)# minimum value associated with possible value of mask
-  maskMAxValue::Float32 = Float32(0)# maximum value associated with possible value of mask
-  maskRangeValue::Float32 = Float32(0)# range of values associated with possible value of mask
-  maskContribution::Float32 = Float32(0)# controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%
+  samplerName::String = ""
+  samplerRef::Int32 = Int32(0)
+  colorsMaskRef::Int32 = Int32(0) 
+  isVisibleRef::Int32 = Int32(0)
+  maskMinValue::Float32 = Float32(0)
+  maskMAxValue::Float32 = Float32(0)
+  maskRangeValue::Float32 = Float32(0)
+  maskContribution::Float32 = Float32(0)
 end
 
 
 """
-Holding the data needed to create and  later reference the textures
+    TextureSpec{T}
 
-name::String=""               #human readable name by which we can reference texture
-numb::Int32 =-1               #needed to enable swithing between textures generally convinient when between 0-9; needed only if texture is to be modified by mouse input
-whichCreated::Int32 =-1       #marks which one this texture was when created - so first in list second ... - needed for convinient accessing ..Uniforms in shaders
-isMainImage ::Bool = false  #true if this texture represents main image
-isNuclearMask ::Bool = false # used for example in case of nuclear imagiing studies
-isContinuusMask ::Bool = false # in case of masks if mask is continuus color display we set multiple colors in a vector
-isMultiDiscreteMask ::Bool = false # in case of integer labels we map each integer to a distinct color from colorSet
-color::RGB = RGB(0.0,0.0,0.0) #needed in case for the masks in order to establish the range of colors we are intrested in in case of binary mask there is no point to supply more than one color (supply Vector with length = 1)
-colorSet::Vector{RGB}=[]    #set of colors that can be used for mask with continous values
-strokeWidth::Int32 =Int32(3)#marking how thick should be the line that is left after acting with the mouse ...
-isEditable::Bool =false     #if true we can modify given  texture using mouse interaction
-GL_Rtype::UInt32 =UInt32(0)           #GlRtype - for example GL_R8UI or GL_R16I
-OpGlType ::UInt32 =UInt32(0)          #open gl type - for example GL_UNSIGNED_BYTE or GL_SHORT
-actTextrureNumb ::UInt32 =UInt32(0)          #usefull to be able to activate the texture using GL_Activetexture - with proper open GL constant
-associatedActiveNumer ::Int64 =Int64(0)          #usefull to be able to activate the texture using GL_Activetexture - with proper open GL constant
-ID::Base.RefValue{UInt32} = Ref(UInt32(0))   #id of Texture
-isVisible::Bool= true       #if false it should be invisible
-uniforms::TextureUniforms=MaskTextureUniforms()# holds values needed to control ..Uniforms in a shader
-minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask, and second entry is maximum possible value for this mask
+Defines the specification and configuration parameters for an OpenGL texture layer (main volume or overlay mask).
 
+# Fields
+- `name::String`: Human-readable identifier.
+- `numb::Int32`: Optional numeric ID for keyboard shortcut toggling (0-9).
+- `isMainImage::Bool`: Flags if this layer is the base structural image (e.g., CT).
+- `isNuclearMask::Bool`: Flags if this is a functional imaging layer (e.g., PET) needing specialized crossfade blending.
+- `isContinuusMask::Bool`: Flags continuous color mapping over a value range.
+- `isMultiDiscreteMask::Bool`: Maps discrete integer labels to `colorSet` palettes.
+- `color::RGB`: The primary color mapping (for binary masks or single-hue overlays).
+- `strokeWidth::Int32`: Thickness of interactive paint/erase strokes on this mask.
+- `isEditable::Bool`: Enables live mouse annotation interactions.
+- `GL_Rtype::UInt32`: OpenGL texture format (e.g. `GL_R8UI`).
+- `OpGlType::UInt32`: OpenGL data type (e.g. `GL_UNSIGNED_BYTE`).
 """
 @with_kw mutable struct TextureSpec{T}
-  name::String = ""               #human readable name by which we can reference texture
-  numb::Int32 = -1               #needed to enable swithing between textures generally convinient when between 0-9; needed only if texture is to be modified by mouse input
-  whichCreated::Int32 = -1       #marks which one this texture was when created - so first in list second ... - needed for convinient accessing ..Uniforms in shaders
-  isMainImage::Bool = false  #true if this texture represents main image
-  isNuclearMask::Bool = false # used for example in case of nuclear imagiing studies
-  isContinuusMask::Bool = false # in case of masks if mask is continuus color display we set multiple colors in a vector
-  isMultiDiscreteMask::Bool = false # in case of integer labels we map each integer to a distinct color from colorSet
-  color::RGB = RGB(0.0, 0.0, 0.0) #needed in case for the masks in order to establish the range of colors we are intrested in in case of binary mask there is no point to supply more than one color (supply Vector with length = 1)
-  colorSet::Vector{RGB} = []    #set of colors that can be used for mask with continous values
-  strokeWidth::Int32 = Int32(3)#marking how thick should be the line that is left after acting with the mouse ...
-  isEditable::Bool = false     #if true we can modify given  texture using mouse interaction
-  GL_Rtype::UInt32 = UInt32(0)           #GlRtype - for example GL_R8UI or GL_R16I
-  OpGlType::UInt32 = UInt32(0)          #open gl type - for example GL_UNSIGNED_BYTE or GL_SHORT
-  actTextrureNumb::UInt32 = UInt32(0)          #usefull to be able to activate the texture using GL_Activetexture - with proper open GL constant
-  associatedActiveNumer::Int64 = Int64(0)          #usefull to be able to activate the texture using GL_Activetexture - with proper open GL constant
-  ID::Base.RefValue{UInt32} = Ref(UInt32(0))   #id of Texture
-  isVisible::Bool = true       #if false it should be invisible
-  uniforms::TextureUniforms = MaskTextureUniforms()# holds values needed to control ..Uniforms in a shader
+  name::String = ""
+  numb::Int32 = -1
+  whichCreated::Int32 = -1
+  isMainImage::Bool = false
+  isNuclearMask::Bool = false
+  isContinuusMask::Bool = false
+  isMultiDiscreteMask::Bool = false
+  color::RGB = RGB(0.0, 0.0, 0.0)
+  colorSet::Vector{RGB} = []
+  strokeWidth::Int32 = Int32(3)
+  isEditable::Bool = false
+  GL_Rtype::UInt32 = UInt32(0)
+  OpGlType::UInt32 = UInt32(0)
+  actTextrureNumb::UInt32 = UInt32(0)
+  associatedActiveNumer::Int64 = Int64(0)
+  ID::Base.RefValue{UInt32} = Ref(UInt32(0))
+  isVisible::Bool = true
+  uniforms::TextureUniforms = MaskTextureUniforms()
   minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask, and second entry is maximum possible value for this mask
   maskContribution::Float32 = 1.0 # controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%
   studyType::String = "" #type of the study - for example CT, MRI, PET, SPECT
