@@ -1216,10 +1216,14 @@ function displayImage(
     #Since there are repeating Tuples for Manual Modif, we need to ensure only a unique ones exist based on the first loaded image
 
     if typeof(voxelDataTupleVector) == Vector{Any}
-        insert!(voxelDataTupleVector, 2, ("manualModif", zeros(Float32, size(voxelDataForUniforms[1]))))
+        if !isempty(voxelDataTupleVector) && voxelDataTupleVector[1][1] != "manualModif" && (length(voxelDataTupleVector) < 2 || voxelDataTupleVector[2][1] != "manualModif")
+            insert!(voxelDataTupleVector, 2, ("manualModif", zeros(Float32, size(voxelDataForUniforms[1]))))
+        end
     elseif typeof(voxelDataTupleVector) == Vector{Vector{Any}}
         for (vectorIndex, innerVector) in enumerate(voxelDataTupleVector)
-            insert!(innerVector, 2, ("manualModif", zeros(Float32, size(voxelDataForUniforms[vectorIndex][1]))))
+            if !isempty(innerVector) && innerVector[1][1] != "manualModif" && (length(innerVector) < 2 || innerVector[2][1] != "manualModif")
+                insert!(innerVector, 2, ("manualModif", zeros(Float32, size(voxelDataForUniforms[vectorIndex][1]))))
+            end
         end
     end
 

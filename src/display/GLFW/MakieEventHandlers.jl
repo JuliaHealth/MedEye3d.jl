@@ -119,18 +119,18 @@ function start_inference_worker()
 end
 
 function find_lesion_center(dat::AbstractArray{T, 3}, lesion_id::Float32) where T
-    sum_x = 0; sum_y = 0; sum_z = 0; count = 0
-    nx, ny, nz = size(dat)
-    @inbounds for k in 1:nz, j in 1:ny, i in 1:nx
-        if isapprox(dat[i, j, k], lesion_id, atol=0.1f0)
-            sum_x += i
-            sum_y += j
-            sum_z += k
-            count += 1
-        end
+    pts = findall(dat .== lesion_id)
+    if isempty(pts)
+        pts = findall(abs.(dat .- lesion_id) .< 0.1f0)
     end
-    count == 0 && return nothing
-    return [round(Int, sum_x / count), round(Int, sum_y / count), round(Int, sum_z / count)]
+    if isempty(pts)
+        return nothing
+    end
+    sum_x = sum(p -> p[1], pts)
+    sum_y = sum(p -> p[2], pts)
+    sum_z = sum(p -> p[3], pts)
+    n = length(pts)
+    return [round(Int, sum_x / n), round(Int, sum_y / n), round(Int, sum_z / n)]
 end
 
 function reactToChangePlane(data::ChangePlaneEvent, stateObjects::Vector{StateDataFields})
@@ -210,25 +210,22 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
         compare_mode[] = data.compare
         if data.compare
             # Load the NEXT TP into panel 5
-            if !isempty(tp_data_cache)
-                tp_indices = sort(collect(keys(tp_data_cache)))
+            tp_indices = sort(collect(keys(tp_labels)))
+            if !isempty(tp_indices)
                 cur_pos = findfirst(==(current_tp_index[]), tp_indices)
-                if cur_pos === nothing
-                    cur_pos = 1
-                end
-                # Right panel shows the next TP chronologically
+                cur_pos = cur_pos === nothing ? 1 : cur_pos
                 next_pos = mod1(cur_pos + 1, length(tp_indices))
                 right_tp = tp_indices[next_pos]
                 compare_right_tp[] = right_tp
                 
-                # Load right TP data into panel 5
-                tp_voxels = tp_data_cache[right_tp]
-                
-                if length(tp_voxels) >= 5
-                    _load_tp_into_panel!(stateObjects, tp_voxels, 5, 5)
-                elseif length(tp_voxels) >= 1
-                    # Panel 5 uses same view as panel 1 (axial), so use index 1
-                    _load_tp_into_panel!(stateObjects, tp_voxels, 5, 1)
+                # Load right TP data into panel 5 on-demand
+                tp_voxels = get_or_load_tp_data(right_tp)
+                if tp_voxels !== nothing
+                    if length(tp_voxels) >= 5
+                        _load_tp_into_panel!(stateObjects, tp_voxels, 5, 5)
+                    elseif length(tp_voxels) >= 1
+                        _load_tp_into_panel!(stateObjects, tp_voxels, 5, 1)
+                    end
                 end
             end
 
@@ -249,21 +246,26 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
             ReactToScroll.reactToScroll(0, stateObjects, false)
             stateObjects[1].switchIndex = old_idx
             
-            if !isempty(tp_data_cache)
-                left_label = get(tp_labels, current_tp_index[], "TP $(current_tp_index[])")
-                right_label = get(tp_labels, right_tp, "TP $right_tp")
-                println("Compare mode ON: Left=$left_label, Right=$right_label"); flush(stdout)
-            end
+            left_label = get(tp_labels, current_tp_index[], "TP $(current_tp_index[])")
+            right_label = get(tp_labels, compare_right_tp[], "TP $(compare_right_tp[])")
+            println("Compare mode ON: Left=$left_label, Right=$right_label"); flush(stdout)
         else
             compare_right_tp[] = -1
-            # Reload current active TP into all 4 panels so all views (Axial, PET, Sagittal, Coronal) match current_tp_index[]
-            if !isempty(tp_data_cache) && haskey(tp_data_cache, current_tp_index[])
-                tp_voxels = tp_data_cache[current_tp_index[]]
+            # Reload current active TP into all 4 panels
+            tp_voxels = get_or_load_tp_data(current_tp_index[])
+            if tp_voxels !== nothing
                 num_panels = min(4, length(stateObjects))
                 for i in 1:num_panels
                     _load_tp_into_panel!(stateObjects, tp_voxels, i)
                 end
             end
+            # Evict inactive TPs from RAM
+            for k in collect(keys(tp_data_cache))
+                if k != current_tp_index[]
+                    delete!(tp_data_cache, k)
+                end
+            end
+            GC.gc(false)
 
             # 4-pane view
             updateQuadVertices!(stateObjects[1], :TopLeft)
@@ -532,15 +534,21 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         
         for scrDat in stateObject.onScrollData.dataToScroll
             if scrDat.name == "Bone_Surface"
-                fill!(scrDat.dat, 0.0f0)
+                if haskey(last_bone_surf_indices, panel_idx) && !isempty(last_bone_surf_indices[panel_idx])
+                    scrDat.dat[last_bone_surf_indices[panel_idx]] .= 0.0f0
+                end
                 if !isempty(surf_indices)
                     scrDat.dat[surf_indices] .= 1.0f0
                 end
+                last_bone_surf_indices[panel_idx] = surf_indices
             elseif scrDat.name == "Bone_Marrow"
-                fill!(scrDat.dat, 0.0f0)
+                if haskey(last_bone_marr_indices, panel_idx) && !isempty(last_bone_marr_indices[panel_idx])
+                    scrDat.dat[last_bone_marr_indices[panel_idx]] .= 0.0f0
+                end
                 if !isempty(marr_indices)
                     scrDat.dat[marr_indices] .= 1.0f0
                 end
+                last_bone_marr_indices[panel_idx] = marr_indices
             end
         end
     end
@@ -553,22 +561,32 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         collect(1:length(stateObjects))
     end
 
-    canonical_center = if data.lesion_id > 0 && haskey(lesion_centroids_cache, data.lesion_id)
-        lesion_centroids_cache[data.lesion_id]
-    elseif data.lesion_id > 0
-        # on-the-fly centroid computation when not pre-cached
-        cc = nothing
-        for (si, stateObject) in enumerate(stateObjects)
-            for (scrIdx, scrDat) in enumerate(stateObject.onScrollData.dataToScroll)
-                texSpec = stateObject.mainForDisplayObjects.listOfTextSpecifications[scrIdx]
-                if (texSpec.name == "Mask" || texSpec.name == "manualModif") && stateObject.onScrollData.dimensionToScroll == 3
-                    cc = find_lesion_center(scrDat.dat, Float32(data.lesion_id))
-                    cc !== nothing && break
+    panel_tp_cur = current_tp_index[]
+    canonical_center = if data.lesion_id > 0
+        if haskey(lesion_centroids_cache, (panel_tp_cur, data.lesion_id))
+            lesion_centroids_cache[(panel_tp_cur, data.lesion_id)]
+        elseif haskey(lesion_centroids_cache, (get_node_name_for_tp(panel_tp_cur), data.lesion_id))
+            lesion_centroids_cache[(get_node_name_for_tp(panel_tp_cur), data.lesion_id)]
+        elseif haskey(lesion_centroids_cache, data.lesion_id)
+            lesion_centroids_cache[data.lesion_id]
+        else
+            # on-the-fly centroid computation when not pre-cached
+            cc = nothing
+            for (si, stateObject) in enumerate(stateObjects)
+                for (scrIdx, scrDat) in enumerate(stateObject.onScrollData.dataToScroll)
+                    texSpec = stateObject.mainForDisplayObjects.listOfTextSpecifications[scrIdx]
+                    if (texSpec.name == "Mask" || texSpec.name == "manualModif") && stateObject.onScrollData.dimensionToScroll == 3
+                        cc = find_lesion_center(scrDat.dat, Float32(data.lesion_id))
+                        if cc !== nothing
+                            lesion_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
+                            break
+                        end
+                    end
                 end
+                cc !== nothing && break
             end
-            cc !== nothing && break
+            cc
         end
-        cc
     else
         nothing
     end
@@ -581,8 +599,17 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             
             # Check if this panel has its own lesion center (especially in compare mode)
             target_id = (idx == 5 && compare_mode[]) ? panel5_lesion_id : data.lesion_id
-            panel_center = if idx == 5 && compare_mode[] && target_id > 0 && haskey(lesion_centroids_cache, target_id)
-                lesion_centroids_cache[target_id]
+            panel_center = if idx == 5 && compare_mode[] && target_id > 0
+                r_tp = compare_right_tp[]
+                if haskey(lesion_centroids_cache, (r_tp, target_id))
+                    lesion_centroids_cache[(r_tp, target_id)]
+                elseif haskey(lesion_centroids_cache, (get_node_name_for_tp(r_tp), target_id))
+                    lesion_centroids_cache[(get_node_name_for_tp(r_tp), target_id)]
+                elseif haskey(lesion_centroids_cache, target_id)
+                    lesion_centroids_cache[target_id]
+                else
+                    nothing
+                end
             else
                 nothing
             end
@@ -623,8 +650,29 @@ end
 # TP navigation state: populated by the launch script
 # tp_data_cache[tp_index] = Vector{Vector{Any}} — per-panel voxel data tuples [("CT", vol), ("PET", vol), ("Mask", vol)]
 const tp_data_cache = Dict{Int, Vector{Vector{Any}}}()
-const bone_subsegments_cache = Dict{Int, Any}()
-const lesion_centroids_cache = Dict{Int, Vector{Int}}()
+const bone_subsegments_cache = Dict{Any, Any}()
+const lesion_centroids_cache = Dict{Any, Vector{Int}}()
+const last_bone_surf_indices = Dict{Int, Vector{CartesianIndex{3}}}()
+const last_bone_marr_indices = Dict{Int, Vector{CartesianIndex{3}}}()
+const tp_loader_ref = Ref{Any}(nothing)
+export register_tp_loader!, get_or_load_tp_data, last_bone_surf_indices, last_bone_marr_indices
+
+function register_tp_loader!(fn)
+    tp_loader_ref[] = fn
+end
+
+function get_or_load_tp_data(idx::Int)
+    if haskey(tp_data_cache, idx)
+        return tp_data_cache[idx]
+    elseif tp_loader_ref[] !== nothing
+        vdt = tp_loader_ref[](idx)
+        if vdt !== nothing
+            tp_data_cache[idx] = vdt
+            return vdt
+        end
+    end
+    return nothing
+end
 const global_bone_atlas = Ref{Any}(nothing)
 const global_organ_mapping = Ref{Dict{Int,String}}(Dict{Int,String}())  # lesion_id -> TS organ name (from map_lesions_to_organs)
 const current_tp_index = Ref(0)
@@ -680,13 +728,13 @@ function _load_tp_into_panel!(stateObjects, tp_voxels, panel_idx, tp_voxel_idx=p
 end
 
 function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector{StateDataFields})
-    if isempty(tp_data_cache)
-        println("No TP data loaded in tp_data_cache. TP navigation disabled."); flush(stdout)
+    if isempty(tp_labels)
+        println("No TP labels loaded. TP navigation disabled."); flush(stdout)
         return
     end
     
     # Get sorted TP indices
-    tp_indices = sort(collect(keys(tp_data_cache)))
+    tp_indices = sort(collect(keys(tp_labels)))
     num_tps = length(tp_indices)
     
     # Find current position in the sorted list
@@ -705,16 +753,19 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
     
     if compare_mode[]
         # Compare mode: load current TP into left panel (1), next TP into right panel (5)
-        tp_voxels_left = tp_data_cache[new_tp]
-        _load_tp_into_panel!(stateObjects, tp_voxels_left, 1, 1)
+        tp_voxels_left = get_or_load_tp_data(new_tp)
+        if tp_voxels_left !== nothing
+            _load_tp_into_panel!(stateObjects, tp_voxels_left, 1, 1)
+        end
         
         # Right panel: next TP chronologically
         next_pos = mod1(new_pos + 1, num_tps)
         right_tp = tp_indices[next_pos]
         compare_right_tp[] = right_tp
-        tp_voxels_right = tp_data_cache[right_tp]
-        # Panel 5 is axial, so use voxel index 1 (the axial data)
-        _load_tp_into_panel!(stateObjects, tp_voxels_right, 5, 1)
+        tp_voxels_right = get_or_load_tp_data(right_tp)
+        if tp_voxels_right !== nothing
+            _load_tp_into_panel!(stateObjects, tp_voxels_right, 5, 1)
+        end
         
         # Re-render both panels
         old_idx = stateObjects[1].switchIndex
@@ -728,20 +779,31 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         println("Compare: Left=$label, Right=$right_label"); flush(stdout)
     else
         # Normal mode: load current TP into all 4 panels
-        tp_voxels = tp_data_cache[new_tp]
-        num_panels = min(length(stateObjects), length(tp_voxels))
-        for i in 1:num_panels
-            _load_tp_into_panel!(stateObjects, tp_voxels, i, i)
+        tp_voxels = get_or_load_tp_data(new_tp)
+        if tp_voxels !== nothing
+            num_panels = min(length(stateObjects), length(tp_voxels))
+            for i in 1:num_panels
+                _load_tp_into_panel!(stateObjects, tp_voxels, i, i)
+            end
+            
+            # Re-render all panels
+            old_idx = stateObjects[1].switchIndex
+            for idx in 1:num_panels
+                stateObjects[1].switchIndex = idx
+                ReactToScroll.reactToScroll(0, stateObjects, false)
+            end
+            stateObjects[1].switchIndex = old_idx
         end
-        
-        # Re-render all panels
-        old_idx = stateObjects[1].switchIndex
-        for idx in 1:num_panels
-            stateObjects[1].switchIndex = idx
-            ReactToScroll.reactToScroll(0, stateObjects, false)
-        end
-        stateObjects[1].switchIndex = old_idx
     end
+    
+    # Evict inactive time points from RAM to keep memory footprint minimal
+    needed_tps = compare_mode[] ? Set([current_tp_index[], compare_right_tp[]]) : Set([current_tp_index[]])
+    for k in collect(keys(tp_data_cache))
+        if !(k in needed_tps)
+            delete!(tp_data_cache, k)
+        end
+    end
+    GC.gc(false)
     
     # Requirement: Automatically return to Lesion 1 when changing time points
     try
@@ -1063,15 +1125,21 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
         
         for scrDat in stateObject.onScrollData.dataToScroll
             if scrDat.name == "Bone_Surface"
-                fill!(scrDat.dat, 0.0f0)
+                if haskey(last_bone_surf_indices, panel_idx) && !isempty(last_bone_surf_indices[panel_idx])
+                    scrDat.dat[last_bone_surf_indices[panel_idx]] .= 0.0f0
+                end
                 if !isempty(surf_indices)
                     scrDat.dat[surf_indices] .= 1.0f0
                 end
+                last_bone_surf_indices[panel_idx] = surf_indices
             elseif scrDat.name == "Bone_Marrow"
-                fill!(scrDat.dat, 0.0f0)
+                if haskey(last_bone_marr_indices, panel_idx) && !isempty(last_bone_marr_indices[panel_idx])
+                    scrDat.dat[last_bone_marr_indices[panel_idx]] .= 0.0f0
+                end
                 if !isempty(marr_indices)
                     scrDat.dat[marr_indices] .= 1.0f0
                 end
+                last_bone_marr_indices[panel_idx] = marr_indices
             end
         end
     end
@@ -1336,7 +1404,15 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
             for scrDat in stateObject.onScrollData.dataToScroll
                 if (data.layer == 2 && scrDat.name == "Bone_Surface") || (data.layer == 3 && scrDat.name == "Bone_Marrow")
                     if !data.active
-                        fill!(scrDat.dat, 0.0f0)
+                        if data.layer == 2 && haskey(last_bone_surf_indices, panel_idx)
+                            scrDat.dat[last_bone_surf_indices[panel_idx]] .= 0.0f0
+                            delete!(last_bone_surf_indices, panel_idx)
+                        elseif data.layer == 3 && haskey(last_bone_marr_indices, panel_idx)
+                            scrDat.dat[last_bone_marr_indices[panel_idx]] .= 0.0f0
+                            delete!(last_bone_marr_indices, panel_idx)
+                        else
+                            fill!(scrDat.dat, 0.0f0)
+                        end
                     elseif cur_lid > 0
                         panel_tp = (panel_idx == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
                         cached_entry = if haskey(bone_subsegments_cache, (panel_tp, cur_lid))
@@ -1393,9 +1469,22 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
                         else # Axial (X, Y, Z)
                             panel_pts
                         end
-                        fill!(scrDat.dat, 0.0f0)
-                        if !isempty(indices)
-                            scrDat.dat[indices] .= 1.0f0
+                        if data.layer == 2
+                            if haskey(last_bone_surf_indices, panel_idx) && !isempty(last_bone_surf_indices[panel_idx])
+                                scrDat.dat[last_bone_surf_indices[panel_idx]] .= 0.0f0
+                            end
+                            if !isempty(indices)
+                                scrDat.dat[indices] .= 1.0f0
+                            end
+                            last_bone_surf_indices[panel_idx] = indices
+                        elseif data.layer == 3
+                            if haskey(last_bone_marr_indices, panel_idx) && !isempty(last_bone_marr_indices[panel_idx])
+                                scrDat.dat[last_bone_marr_indices[panel_idx]] .= 0.0f0
+                            end
+                            if !isempty(indices)
+                                scrDat.dat[indices] .= 1.0f0
+                            end
+                            last_bone_marr_indices[panel_idx] = indices
                         end
                     end
                 end
