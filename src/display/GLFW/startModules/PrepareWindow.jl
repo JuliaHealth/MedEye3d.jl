@@ -14,14 +14,11 @@ preparing all for displaying the images and responding to mouse and keyboard inp
 function displayAll(calcDimsStruct::CalcDimsStruct)
 
     if (nthreads(:interactive) == 0)
-        @error " MedEye3D above version 0.5.6 requires setting of the interactive Thread (feature available from Julia 1.9 ) one can set it in linux by enviromental variable export JULIA_NUM_THREADS=3,1 where 1 after the coma is the interactive thread and 3 is the number of the other threads available on your machine; or start julia like this julia --threads 3,1; you can also use the docker container prepared by the author from  https://github.com/jakubMitura14/MedPipe3DTutorial. . More about interactive THreads on https://docs.julialang.org/en/v1/manual/multi-threading/"
-        throw(error())
-
+        @warn "MedEye3D is running with standard threading (interactive thread pool not allocated). For optimal asynchronous responsiveness, consider starting with JULIA_NUM_THREADS=auto,1."
     end #if
 
-
     if (Threads.nthreads() == 1)
-        @warn "increase number of available threads look into https://docs.julialang.org/en/v1/manual/multi-threading/  or modify for example in vs code extension"
+        @info "Running on single Julia thread. Multithreading can be enabled via JULIA_NUM_THREADS."
     end
     # Create the window. This sets all the hints and makes the context current.
 

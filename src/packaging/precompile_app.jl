@@ -113,12 +113,14 @@ catch e
     println("MedImage tracing notice: ", e)
 end
 
-# 5. Trace AppMain entry dispatch
-println("[5/5] Tracing AppMain argument parser...")
+# 5. Trace AppMain entry dispatch & StudySelectorWindow
+println("[5/5] Tracing AppMain & StudySelectorWindow...")
+MedEye3d.StudySelectorWindow.scan_medical_files(@__DIR__)
+
 include(joinpath(@__DIR__, "AppMain.jl"))
 using .MedEye3dApp
 
-# Invoke help & version dispatch paths (no GUI window opened)
+# Invoke help & version dispatch paths
 MedEye3dApp.run_app(["--help"])
 MedEye3dApp.run_app(["--version"])
 
