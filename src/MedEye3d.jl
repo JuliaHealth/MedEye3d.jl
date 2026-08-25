@@ -99,13 +99,9 @@ export BoneSubsegmentation
 
 include(joinpath("display", "LesionMetadataWindow.jl"))
 include(joinpath("display", "HeuristicsEngine.jl"))
-
-#checking weather we have some interactive thread reserved
-if (VERSION < v"1.8")
-    @error "MedEye3D above version 0.5.6 requires at least Julia 1.9 and setting of the interactive Thread (feature available from Julia 1.9 ) one can set it in linux by enviromental variable export JULIA_NUM_THREADS=3,1 where 1 after the coma is the interactive thread and 3 is the number of the other threads available on your machine; or start julia like this julia --threads 3,1; you can also use the docker container prepared by the author from  https://github.com/jakubMitura14/MedPipe3DTutorial. More about interactive THreads on https://docs.julialang.org/en/v1/manual/multi-threading/"
-    throw(error())
-end #if
-
+include(joinpath("display", "StudySelectorWindow.jl"))
+using .StudySelectorWindow: open_study_selector, scan_medical_files
+export open_study_selector, scan_medical_files, StudySelectorWindow
 
 include(joinpath("packaging", "AppMain.jl"))
 using .MedEye3dApp: julia_main

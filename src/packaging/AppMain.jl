@@ -167,11 +167,11 @@ function launch_demo(; quad::Bool=true)
 end
 
 """
-    launch_from_file(file_path::String)
+    launch_from_file(file_path::String; quad::Bool=true)
 
 Loads and visualizes a medical image (NIfTI, DICOM, etc.) from `file_path`.
 """
-function launch_from_file(file_path::String)
+function launch_from_file(file_path::String; quad::Bool=true)
     println("Loading medical image: ", file_path)
     if !isfile(file_path)
         @error "Provided file path does not exist: $file_path"
@@ -206,31 +206,42 @@ function launch_from_file(file_path::String)
         isEditable=true
     )
 
-    # Setup multiplanar quad view
-    vol_img_coronal = permutedims(vol_img, (1, 3, 2))
-    vol_mask_coronal = permutedims(vol_mask, (1, 3, 2))
-    spacing_coronal = (spacing[1], spacing[3], spacing[2])
+    if quad
+        vol_img_coronal = permutedims(vol_img, (1, 3, 2))
+        vol_mask_coronal = permutedims(vol_mask, (1, 3, 2))
+        spacing_coronal = (spacing[1], spacing[3], spacing[2])
 
-    vol_img_sagittal = permutedims(vol_img, (2, 3, 1))
-    vol_mask_sagittal = permutedims(vol_mask, (2, 3, 1))
-    spacing_sagittal = (spacing[2], spacing[3], spacing[1])
+        vol_img_sagittal = permutedims(vol_img, (2, 3, 1))
+        vol_mask_sagittal = permutedims(vol_mask, (2, 3, 1))
+        spacing_sagittal = (spacing[2], spacing[3], spacing[1])
 
-    voxelDataTupleVector = Vector{Vector{Any}}([
-        Any[("MainImage", vol_img), ("Mask", vol_mask)],
-        Any[("Mask", vol_mask)],
-        Any[("MainImage", vol_img_coronal), ("Mask", vol_mask_coronal)],
-        Any[("MainImage", vol_img_sagittal), ("Mask", vol_mask_sagittal)]
-    ])
+        voxelDataTupleVector = Vector{Vector{Any}}([
+            Any[("MainImage", vol_img), ("Mask", vol_mask)],
+            Any[("Mask", vol_mask)],
+            Any[("MainImage", vol_img_coronal), ("Mask", vol_mask_coronal)],
+            Any[("MainImage", vol_img_sagittal), ("Mask", vol_mask_sagittal)]
+        ])
 
-    textureSpecArray = Vector{Vector{TextureSpec}}([
-        TextureSpec[deepcopy(textureSpec_img), deepcopy(textureSpec_mask)],
-        TextureSpec[deepcopy(textureSpec_mask)],
-        TextureSpec[deepcopy(textureSpec_img), deepcopy(textureSpec_mask)],
-        TextureSpec[deepcopy(textureSpec_img), deepcopy(textureSpec_mask)]
-    ])
+        textureSpecArray = Vector{Vector{TextureSpec}}([
+            TextureSpec[deepcopy(textureSpec_img), deepcopy(textureSpec_mask)],
+            TextureSpec[deepcopy(textureSpec_mask)],
+            TextureSpec[deepcopy(textureSpec_img), deepcopy(textureSpec_mask)],
+            TextureSpec[deepcopy(textureSpec_img), deepcopy(textureSpec_mask)]
+        ])
 
-    spacings = [[spacing], [spacing], [spacing_coronal], [spacing_sagittal]]
-    origins = [[origin], [origin], [origin], [origin]]
+        spacings = [[spacing], [spacing], [spacing_coronal], [spacing_sagittal]]
+        origins = [[origin], [origin], [origin], [origin]]
+    else
+        voxelDataTupleVector = Vector{Vector{Any}}([
+            Any[("MainImage", vol_img), ("Mask", vol_mask)]
+        ])
+        textureSpecArray = Vector{Vector{TextureSpec}}([
+            TextureSpec[deepcopy(textureSpec_img), deepcopy(textureSpec_mask)]
+        ])
+        spacings = [[spacing]]
+        origins = [[origin]]
+    end
+
     svVertAndInd = Dict{String, Vector}()
     dummyStudySrc = Vector{Vector{Tuple{String,String}}}()
 
@@ -244,7 +255,7 @@ function launch_from_file(file_path::String)
         fractionOfMainImage=Float32(1.0),
         windowWidth=1360,
         svVertAndInd=svVertAndInd,
-        quadView=true
+        quadView=quad
     )
 
     try
@@ -258,7 +269,7 @@ end
 """
     run_app(args::Vector{String})
 
-Main application dispatch logic.
+Dispatches CLI actions: help, version, image loading, or interactive study selector GUI.
 """
 function run_app(args::Vector{String})
     println("MedEye3D standalone runtime initializing...")
@@ -289,9 +300,40 @@ function run_app(args::Vector{String})
 
     file_args = filter(a -> !startswith(a, "-"), args)
     if !isempty(file_args) && isfile(file_args[1])
-        launch_from_file(file_args[1])
-    else
+        launch_from_file(file_args[1]; quad=true)
+    elseif "--demo" in args
         launch_demo(; quad=true)
+    else
+        println("Launching MedEye3D Study & Data Selector Panel...")
+        next_action = Ref{Union{Function,Nothing}}(nothing)
+        
+        fig, screen = MedEye3d.StudySelectorWindow.open_study_selector(
+            on_select = (selected_path, quad_view) -> begin
+                println("Selected study: $selected_path (quadView=$quad_view)")
+                next_action[] = () -> launch_from_file(selected_path; quad=quad_view)
+            end,
+            on_demo = (quad_view) -> begin
+                println("Selected 3D synthetic demo (quadView=$quad_view)")
+                next_action[] = () -> launch_demo(; quad=quad_view)
+            end
+        )
+
+        try
+            while GLMakie.isopen(screen) && next_action[] === nothing
+                sleep(0.05)
+            end
+        catch
+        end
+
+        # If an action was chosen, gracefully close the selector screen and launch the viewer
+        if next_action[] !== nothing
+            try
+                GLFW.SetWindowShouldClose(GLMakie.to_native(screen), true)
+                sleep(0.15)
+            catch
+            end
+            next_action[]()
+        end
     end
 end
 
@@ -307,12 +349,25 @@ function julia_main()::Cint
     out_log_path = joinpath(log_dir, "medeye3d_output.log")
     err_log_path = joinpath(log_dir, "medeye3d_error.log")
 
-    out_io = open(out_log_path, "a")
-    err_io = open(err_log_path, "a")
+    # Rotate previous logs
+    try
+        if isfile(out_log_path)
+            mv(out_log_path, joinpath(log_dir, "medeye3d_output_prev.log"), force=true)
+        end
+        if isfile(err_log_path)
+            mv(err_log_path, joinpath(log_dir, "medeye3d_error_prev.log"), force=true)
+        end
+    catch
+    end
 
-    println(out_io, "\n=======================================================")
+    out_io = open(out_log_path, "w")
+    err_io = open(err_log_path, "w")
+
+    println(out_io, "=======================================================")
     println(out_io, " MedEye3D Session Started: ", Dates.now())
     println(out_io, " Log Directory: ", log_dir)
+    println(out_io, " Julia Version: ", VERSION)
+    println(out_io, " Threads: ", Threads.nthreads())
     println(out_io, "=======================================================")
     flush(out_io)
 

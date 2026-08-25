@@ -56,10 +56,10 @@ PackageCompiler.create_app(
     build_output_dir;
     executables=["MedEye3D" => "julia_main"],
     precompile_execution_file=precompile_script,
-    include_transitive_dependencies=true,
-    include_lazy_artifacts=true,
+    include_transitive_dependencies=false,
+    include_lazy_artifacts=false,
     force=true,
-    incremental=false,
+    incremental=true,
     filter_stdlibs=false
 )
 

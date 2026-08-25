@@ -1,6 +1,4 @@
 using Pkg
-Pkg.precompile()
-using MedImages
-println("MedImages loaded successfully! Version: ", pkgversion(MedImages))
-using MedEye3d
-println("MedEye3d loaded successfully! Version: ", pkgversion(MedEye3d))
+Pkg.add("PackageCompiler")
+using PackageCompiler
+println("PackageCompiler is ready: ", pkgversion(PackageCompiler))

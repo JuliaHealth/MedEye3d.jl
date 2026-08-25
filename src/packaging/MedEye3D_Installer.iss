@@ -32,11 +32,10 @@ SetupIconFile=app_icon.ico
 UninstallDisplayIcon={app}\bin\{#MyAppExeName}
 
 ; Compression & Optimization
-Compression=lzma2/ultra64
+Compression=lzma2/max
 SolidCompression=yes
 LZMAUseSeparateProcess=yes
-LZMADictionarySize=1048576
-LZMANumBlockThreads=6
+LZMANumBlockThreads=4
 
 ; Modern UI Style & 64-bit Requirement
 WizardStyle=modern

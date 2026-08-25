@@ -76,7 +76,17 @@ $JuliaCmd = Get-Command julia -ErrorAction SilentlyContinue
 if (-not $JuliaCmd) {
     Write-Error "Julia is not found on PATH. Please install Julia 1.9+ and add it to PATH."
 }
+
+$JuliaChannelArgs = @()
 $JuliaVer = & julia --version
+if ($JuliaVer -match "1\.12") {
+    $has111 = (& juliaup status 2>$null | Select-String "1\.11")
+    if ($has111) {
+        $JuliaChannelArgs = @("+1.11")
+        $JuliaVer = & julia +1.11 --version
+        Write-Host "Using Julia 1.11 channel for CxxWrap/JLL binary compatibility." -ForegroundColor Yellow
+    }
+}
 Write-Host "Found: $JuliaVer" -ForegroundColor Green
 
 # -------------------------------------------------------------------------
@@ -84,9 +94,10 @@ Write-Host "Found: $JuliaVer" -ForegroundColor Green
 # -------------------------------------------------------------------------
 if (-not $SkipCompile) {
     Write-Host "`n[3/5] Compiling Standalone Application with PackageCompiler..." -ForegroundColor Cyan
-    Write-Host "Running: julia --project=`"$ProjectRoot`" `"$ScriptDir\build_app.jl`"" -ForegroundColor Gray
+    $fullArgs = $JuliaChannelArgs + @("--project=$ProjectRoot", "$ScriptDir\build_app.jl")
+    Write-Host "Running: julia $($fullArgs -join ' ')" -ForegroundColor Gray
     
-    $proc = Start-Process -FilePath "julia" -ArgumentList "--project=`"$ProjectRoot`"", "`"$ScriptDir\build_app.jl`"" -WorkingDirectory $ProjectRoot -NoNewWindow -PassThru -Wait
+    $proc = Start-Process -FilePath "julia" -ArgumentList $fullArgs -WorkingDirectory $ProjectRoot -NoNewWindow -PassThru -Wait
     if ($proc.ExitCode -ne 0) {
         Write-Error "PackageCompiler build failed with exit code $($proc.ExitCode)."
     }
