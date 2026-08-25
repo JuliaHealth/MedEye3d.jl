@@ -167,6 +167,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::ResizeWindowEvent) = react
 on_next!(stateObjects::Vector{StateDataFields}, data::SetWindowTitleEvent) = reactToSetWindowTitle(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ToggleMoveLesionModeEvent) = reactToToggleMoveLesionMode(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::AIStatusUpdateEvent) = (MakieEventHandlers.ai_status_text[] = data.text)
+on_next!(stateObjects::Vector{StateDataFields}, data::BoneSubsegResultEvent) = MakieEventHandlers.reactToBoneSubsegResult(data, stateObjects)
 on_error!(stateObjects::Vector{StateDataFields}, err) = error(err)
 on_complete!(stateObjects::Vector{StateDataFields}) = ""
 
@@ -830,8 +831,9 @@ function coordinateDisplay(
     
     # Run consumer task on the main OpenGL thread (spawn=false) to prevent ThreadAssertionError
     mainMedEye3dInstance = MainMedEye3d(channel=Base.Channel{Any}(consumer, 1000; spawn=false), textDispObj=forTextDispStructs[1], displayMode=displayMode, states=stateInstances)
-
-
+    
+    # Register main channel for background tasks to dispatch events back
+    MakieEventHandlers.register_main_channel!(mainMedEye3dInstance.channel)
 
     foreach(calcDimStructs) do currentCalcDim
         put!(mainMedEye3dInstance.channel, currentCalcDim)

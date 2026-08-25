@@ -243,22 +243,119 @@ def run_nninteractive(ct_path, point_path, out_dir, scribble_coords=None, autozo
     print(f"[Worker] nninteractive produced {total_voxels} voxels, saved to {pred_path}")
     return {"inline": False, "pred_path": str(pred_path), "voxel_count": total_voxels}
 
+def generate_bone_subsegments_pt(crop_lesion_np, crop_bone_np, spacing, max_surface_dist_mm=25.0):
+    import torch
+    import torch.nn.functional as F
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    
+    crop_lesion = torch.from_numpy(crop_lesion_np).bool().to(device)
+    crop_bone = torch.from_numpy(crop_bone_np > 0).bool().to(device)
+    
+    # 1. Morphological Closing (Dilation -> Erosion)
+    union = crop_lesion | crop_bone
+    
+    # 26-connected dilation (3x3x3 max pooling)
+    union_float = union.float().unsqueeze(0).unsqueeze(0)
+    dilated = F.max_pool3d(union_float, kernel_size=3, stride=1, padding=1)
+    dilated_bool = dilated.squeeze(0).squeeze(0) > 0
+    
+    # Erosion of dilated mask (min pooling of inverted mask)
+    dilated_inv = (~dilated_bool).float().unsqueeze(0).unsqueeze(0)
+    eroded_inv = F.max_pool3d(dilated_inv, kernel_size=3, stride=1, padding=1)
+    closed_bone = ~(eroded_inv.squeeze(0).squeeze(0) > 0)
+    
+    # 2. Extract true cortical surface using 6-connected neighbor check
+    padded = F.pad(closed_bone.float().unsqueeze(0).unsqueeze(0), (1,1,1,1,1,1), mode='constant', value=0.0)
+    
+    kernel = torch.zeros(1, 1, 3, 3, 3, device=device)
+    kernel[0, 0, 1, 1, 0] = 1
+    kernel[0, 0, 1, 1, 2] = 1
+    kernel[0, 0, 1, 0, 1] = 1
+    kernel[0, 0, 1, 2, 1] = 1
+    kernel[0, 0, 0, 1, 1] = 1
+    kernel[0, 0, 2, 1, 1] = 1
+    
+    neighbor_sum = F.conv3d(padded, kernel, stride=1, padding=0).squeeze(0).squeeze(0)
+    crop_cortical = closed_bone & (neighbor_sum < 6)
+    
+    # Bone marrow is interior
+    crop_marrow = closed_bone & ~crop_cortical
+    
+    # 3. Surface sphere check
+    lesion_idx = torch.nonzero(crop_lesion).float()
+    if len(lesion_idx) == 0:
+        return np.zeros_like(crop_lesion_np, dtype=bool), np.zeros_like(crop_lesion_np, dtype=bool)
+        
+    cortical_idx = torch.nonzero(crop_cortical).float()
+    sp = torch.tensor(spacing, device=device, dtype=torch.float32)
+    lesion_phys = lesion_idx * sp
+    cortical_phys = cortical_idx * sp
+    
+    step = max(1, len(lesion_phys) // 500)
+    lesion_sampled = lesion_phys[::step]
+    
+    crop_surface = torch.zeros_like(crop_cortical)
+    if len(cortical_phys) > 0 and len(lesion_sampled) > 0:
+        dists = torch.cdist(cortical_phys.unsqueeze(0), lesion_sampled.unsqueeze(0)).squeeze(0)
+        min_dists, _ = torch.min(dists, dim=1)
+        valid_cortical_mask = min_dists <= max_surface_dist_mm
+        valid_cortical_idx = cortical_idx[valid_cortical_mask].long()
+        if len(valid_cortical_idx) > 0:
+            crop_surface[valid_cortical_idx[:, 0], valid_cortical_idx[:, 1], valid_cortical_idx[:, 2]] = True
+        
+    # 4. Calculate Marrow sphere radius R_L and centroid
+    voxel_vol = spacing[0] * spacing[1] * spacing[2]
+    lesion_vol_mm3 = len(lesion_idx) * voxel_vol
+    R_L = max(4.0, float((3.0 * lesion_vol_mm3 / (4.0 * np.pi))**(1.0 / 3.0)))
+    
+    lesion_cx = torch.mean(lesion_idx[:, 0])
+    lesion_cy = torch.mean(lesion_idx[:, 1])
+    lesion_cz = torch.mean(lesion_idx[:, 2])
+    
+    marrow_only = crop_marrow & ~crop_lesion
+    marrow_idx = torch.nonzero(marrow_only).float()
+    crop_marrow_res = torch.zeros_like(crop_marrow)
+    
+    if len(marrow_idx) > 0:
+        marrow_phys = marrow_idx * sp
+        lesion_center_phys = torch.tensor([lesion_cx, lesion_cy, lesion_cz], device=device) * sp
+        dists_to_center = torch.norm(marrow_phys - lesion_center_phys, dim=1)
+        best_idx = torch.argmin(dists_to_center)
+        best_marrow_phys = marrow_phys[best_idx]
+        
+        dists_to_best = torch.norm(marrow_phys - best_marrow_phys, dim=1)
+        valid_marrow_mask = dists_to_best <= R_L
+        valid_marrow_idx = marrow_idx[valid_marrow_mask].long()
+        
+        if len(valid_marrow_idx) > 0:
+            crop_marrow_res[valid_marrow_idx[:, 0], valid_marrow_idx[:, 1], valid_marrow_idx[:, 2]] = True
+            
+    # STRICT BONE CONSTRAINT
+    crop_surface = crop_surface & crop_bone
+    crop_marrow_res = crop_marrow_res & crop_bone
+    
+    return crop_surface.cpu().numpy().astype(bool), crop_marrow_res.cpu().numpy().astype(bool)
+
 def handle_client(conn):
     try:
-        # Receive full message buffer
-        chunks = []
+        import json.decoder
+        data_bytes = b""
+        decoder = json.JSONDecoder()
+        data = None
         while True:
             chunk = conn.recv(65536)
             if not chunk:
                 break
-            chunks.append(chunk)
-            if len(chunk) < 65536:
+            data_bytes += chunk
+            try:
+                data_str = data_bytes.decode('utf-8')
+                data, idx = decoder.raw_decode(data_str)
                 break
+            except ValueError:
+                pass
         
-        if not chunks:
+        if data is None:
             return
-            
-        data = json.loads(b"".join(chunks).decode('utf-8'))
         command = data.get("command", "")
         
         response = {}
@@ -283,6 +380,31 @@ def handle_client(conn):
                                     "bbox": result["bbox"], "voxel_count": result["voxel_count"]}
                     else:
                         response = {"status": "success", "prediction_path": result["pred_path"]}
+                elif command == "bone_subsegmentation":
+                    import base64
+                    import numpy as np
+                    
+                    shape = tuple(data["shape"])
+                    spacing = tuple(data["spacing"])
+                    
+                    lesion_b64 = base64.b64decode(data["lesion_mask_b64"])
+                    bone_b64 = base64.b64decode(data["bone_mask_b64"])
+                    
+                    # They are sent as UInt8
+                    lesion_mask = np.frombuffer(lesion_b64, dtype=np.uint8).reshape(shape)
+                    bone_mask = np.frombuffer(bone_b64, dtype=np.uint8).reshape(shape)
+                    
+                    surf_mask, marr_mask = generate_bone_subsegments_pt(lesion_mask, bone_mask, spacing)
+                    
+                    surf_b64 = base64.b64encode(surf_mask.astype(np.uint8).tobytes()).decode('ascii')
+                    marr_b64 = base64.b64encode(marr_mask.astype(np.uint8).tobytes()).decode('ascii')
+                    
+                    response = {
+                        "status": "success",
+                        "surf_mask_b64": surf_b64,
+                        "marr_mask_b64": marr_b64,
+                        "shape": shape
+                    }
                 elif command == "preload_ct":
                     ct_p = data.get("ct_path")
                     preload_ct(ct_p, data.get("out_dir", "/tmp/medeye3d_inference"))

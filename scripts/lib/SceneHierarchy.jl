@@ -167,15 +167,18 @@ function parse_studies_from_hierarchy(data_dir)
             return nothing
         end
         
-        m = match(r"_(\d+)$", replace(ct_name, ".nii.gz" => ""))
-        orig_tp = m !== nothing ? parse(Int, m.captures[1]) : 0
+        ct_base = replace(ct_name, ".nii.gz" => "")
+        parts = split(ct_base, "_")
+        orig_tp = tryparse(Int, parts[end])
+        if orig_tp === nothing; orig_tp = 0; end
         
         # Look up exact date from metadata if possible
-        ct_base = replace(ct_name, ".nii.gz" => "")
         pet_base = replace(pet_name, ".nii.gz" => "")
         date_str = get(meta_dates, ct_base, get(meta_dates, pet_base, "$modality TP $orig_tp"))
         
-        return (modality, orig_tp, date_str, ct_name, pet_name, mask_name, replace(mask_name, r"\..*" => ""), tfm_name, ts_name)
+        # Strip extensions from mask name without regex
+        mask_base = replace(replace(mask_name, ".seg.nrrd" => ""), ".nii.gz" => "")
+        return (modality, orig_tp, date_str, ct_name, pet_name, mask_name, mask_base, tfm_name, ts_name)
     end
     
     b = extract_study(hierarchy, "")
@@ -191,7 +194,7 @@ function parse_studies_from_hierarchy(data_dir)
     end
     
     # Sort chronologically by date_str if it looks like a date (YYYY-MM-DD), otherwise by (orig_tp, modality)
-    sort!(parsed_studies, by = x -> occursin(r"^\d{4}-\d{2}-\d{2}", x[3]) ? x[3] : "$(x[2])_$(x[1])")
+    sort!(parsed_studies, by = x -> (length(x[3]) >= 10 && isdigit(x[3][1])) ? x[3] : "$(x[2])_$(x[1])")
     return parsed_studies
 end
 

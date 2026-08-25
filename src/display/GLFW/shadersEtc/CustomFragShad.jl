@@ -88,11 +88,12 @@ Adding string necessary for managing ..Uniforms of masks textures
 """
 function addMasksStrings(textur::TextureSpec{Float32}, lengthOfTextures)
     textName = textur.name
+    init_vis = textur.isVisible ? 1 : 0
     return """
 
     uniform $(addSamplerStr(textur,textName )); // mask image sampler
     $(addColorUniform(textur))
-    uniform int $(textName)isVisible= 0; // controlling visibility
+    uniform int $(textName)isVisible= $(init_vis); // controlling visibility
 
     uniform $(addTypeStr(textur))  $(textName)minValue= $(textur.minAndMaxValue[1]); // minimum possible value set in configuration
     uniform $(addTypeStr(textur))  $(textName)maxValue= $(textur.minAndMaxValue[2]); // maximum possible value set in configuration
@@ -115,7 +116,8 @@ function addColorUniform(textur::TextureSpec{Float32})
         # return "uniform vec4[$(colLen)] $(textur.name)ColorMask  = vec4[$(colLen)](vec4(0.0,0.0,0.0,1.0),$(colorStrings));// we add one so later function operating on this will make easier"
     end
     #in case mask uses only single color
-    return "uniform vec4 $(textur.name)ColorMask= vec4(0.0,0.0,0.0,0.0); //controlling colors"
+    col = textur.color
+    return "uniform vec4 $(textur.name)ColorMask= vec4($(col.r), $(col.g), $(col.b), 0.8); //controlling colors"
 
 
 end#addColorUniform
@@ -151,65 +153,40 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
     
     # Create the string for applying masks over the main color
     maskApplyCode = ""
+    
+    # 1. First layer: Nuclear / PET / SPECT overlay with blend slider crossfade
     for x in texturesNotCont
-        if !x.isMainImage
-            is_pet_overlay = x.isNuclearMask  # PET/SPECT nuclear overlays get crossfade, labels get overlay
-            if is_pet_overlay
-                # PET: full crossfade — black where no signal at blend=1.0
-                maskApplyCode *= """
-                    if ($(x.name)isVisible == 1) {
-                        vec3 petOnly_$(x.name) = vec3(0.0);
-                        if ($(x.name)minValue == $(x.name)maxValue) {
-                            if (abs($(x.name)Res - $(x.name)minValue) < 0.1) {
-                                petOnly_$(x.name) = vec3($(x.name)ColorMask.r, $(x.name)ColorMask.g, $(x.name)ColorMask.b);
-                            }
-                        } else if ($(x.name)Res > $(x.name)minValue) {
-                            float normalizedVal_$(x.name) = clamp(($(x.name)Res - $(x.name)minValue) / max($(x.name)ValueRange, 0.001), 0.0, 1.0);
-                            if (normalizedVal_$(x.name) > 0.0) {
-                                float intensity_$(x.name) = pow(normalizedVal_$(x.name), 0.4);
-                                vec3 maskColor_$(x.name) = vec3(
-                                    changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.r, $(x.name)ValueRange),
-                                    changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.g, $(x.name)ValueRange),
-                                    changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.b, $(x.name)ValueRange)
-                                );
-                                petOnly_$(x.name) = clamp(maskColor_$(x.name) * intensity_$(x.name) * 1.8, 0.0, 1.0);
-                            }
+        if !x.isMainImage && x.isNuclearMask
+            maskApplyCode *= """
+                if ($(x.name)isVisible == 1) {
+                    vec3 petOnly_$(x.name) = vec3(0.0);
+                    if ($(x.name)minValue == $(x.name)maxValue) {
+                        if (abs($(x.name)Res - $(x.name)minValue) < 0.1) {
+                            petOnly_$(x.name) = vec3($(x.name)ColorMask.r, $(x.name)ColorMask.g, $(x.name)ColorMask.b);
                         }
-                        // Piecewise blend: keep CT at 100% until blend=0.5, then crossfade to pure PET at 1.0
-                        float blend_$(x.name) = $(x.name)maskContribution;
-                        float ctW_$(x.name) = clamp(2.0 * (1.0 - blend_$(x.name)), 0.0, 1.0);
-                        float petW_$(x.name) = clamp(2.0 * blend_$(x.name), 0.0, 1.0);
-                        baseColor = clamp(baseColor * ctW_$(x.name) + petOnly_$(x.name) * petW_$(x.name), 0.0, 1.0);
-                    }
-                """
-            else
-                # Labels (Bone_Surface, Bone_Marrow, etc.): overlay on top, unaffected by blend
-                maskApplyCode *= """
-                    if ($(x.name)isVisible == 1 && $(x.name)Res > $(x.name)minValue) {
-                        if ($(x.name)minValue == $(x.name)maxValue) {
-                            if (abs($(x.name)Res - $(x.name)minValue) < 0.1) {
-                                vec3 labelColor_$(x.name) = vec3($(x.name)ColorMask.r, $(x.name)ColorMask.g, $(x.name)ColorMask.b);
-                                baseColor = mix(baseColor, labelColor_$(x.name), 0.85);
-                            }
-                        } else {
-                            float nv_$(x.name) = clamp(($(x.name)Res - $(x.name)minValue) / max($(x.name)ValueRange, 0.001), 0.0, 1.0);
-                            if (nv_$(x.name) > 0.0) {
-                                float a_$(x.name) = clamp(pow(nv_$(x.name), 0.4) * 0.95, 0.05, 0.85);
-                                vec3 lc_$(x.name) = vec3(
-                                    changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.r, $(x.name)ValueRange),
-                                    changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.g, $(x.name)ValueRange),
-                                    changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.b, $(x.name)ValueRange)
-                                );
-                                baseColor = baseColor * (1.0 - a_$(x.name) * 0.35) + lc_$(x.name) * a_$(x.name) * 1.5;
-                                baseColor = clamp(baseColor, 0.0, 1.0);
-                            }
+                    } else if ($(x.name)Res > $(x.name)minValue) {
+                        float normalizedVal_$(x.name) = clamp(($(x.name)Res - $(x.name)minValue) / max($(x.name)ValueRange, 0.001), 0.0, 1.0);
+                        if (normalizedVal_$(x.name) > 0.0) {
+                            float intensity_$(x.name) = pow(normalizedVal_$(x.name), 0.4);
+                            vec3 maskColor_$(x.name) = vec3(
+                                changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.r, $(x.name)ValueRange),
+                                changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.g, $(x.name)ValueRange),
+                                changeClip($(x.name)minValue, $(x.name)maxValue, $(x.name)Res, $(x.name)ColorMask.b, $(x.name)ValueRange)
+                            );
+                            petOnly_$(x.name) = clamp(maskColor_$(x.name) * intensity_$(x.name) * 1.8, 0.0, 1.0);
                         }
                     }
-                """
-            end
+                    // Piecewise blend: keep CT at 100% until blend=0.5, then crossfade to pure PET at 1.0
+                    float blend_$(x.name) = $(x.name)maskContribution;
+                    float ctW_$(x.name) = clamp(2.0 * (1.0 - blend_$(x.name)), 0.0, 1.0);
+                    float petW_$(x.name) = clamp(2.0 * blend_$(x.name), 0.0, 1.0);
+                    baseColor = clamp(baseColor * ctW_$(x.name) + petOnly_$(x.name) * petW_$(x.name), 0.0, 1.0);
+                }
+            """
         end
     end
     
+    # 2. Second layer: Continuous multi-color maps
     for x in texturesCont
         if !x.isMainImage
             maskApplyCode *= """
@@ -229,6 +206,7 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
         end
     end
 
+    # 3. Third layer: Multi-discrete segmentation masks (Mask, manualModif)
     for x in texturesDiscrete
         if !x.isMainImage
             maskApplyCode *= """
@@ -245,6 +223,18 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
                             baseColor = mix(baseColor, maskColor, alpha);
                         }
                     }
+                }
+            """
+        end
+    end
+
+    # 4. Top layer: High-contrast label overlays (Bone_Surface, Bone_Marrow) rendered ON TOP of lesion masks
+    for x in texturesNotCont
+        if !x.isMainImage && !x.isNuclearMask
+            maskApplyCode *= """
+                if ($(x.name)isVisible == 1 && $(x.name)Res > 0.1) {
+                    vec3 labelColor_$(x.name) = vec3($(x.name)ColorMask.r, $(x.name)ColorMask.g, $(x.name)ColorMask.b);
+                    baseColor = mix(baseColor, labelColor_$(x.name), 0.90);
                 }
             """
         end

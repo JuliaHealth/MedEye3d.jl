@@ -12,6 +12,62 @@ import nibabel as nib
 from scipy import ndimage
 from collections import Counter
 
+def generate_bone_subsegments_pt(crop_lesion_np, crop_bone_np, spacing, max_surface_dist_mm=25.0):
+    import torch
+    import torch.nn.functional as F
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    
+    crop_lesion = torch.from_numpy(crop_lesion_np).bool().to(device)
+    crop_bone = torch.from_numpy(crop_bone_np > 0).bool().to(device)
+    
+    union = crop_lesion | crop_bone
+    
+    union_float = union.float().unsqueeze(0).unsqueeze(0)
+    dilated = F.max_pool3d(union_float, kernel_size=3, stride=1, padding=1)
+    dilated_bool = dilated.squeeze(0).squeeze(0) > 0
+    
+    dilated_inv = (~dilated_bool).float().unsqueeze(0).unsqueeze(0)
+    eroded_inv = F.max_pool3d(dilated_inv, kernel_size=3, stride=1, padding=1)
+    closed_bone = ~(eroded_inv.squeeze(0).squeeze(0) > 0)
+    
+    padded = F.pad(closed_bone.float().unsqueeze(0).unsqueeze(0), (1,1,1,1,1,1), mode='constant', value=0.0)
+    
+    kernel = torch.zeros(1, 1, 3, 3, 3, device=device)
+    kernel[0, 0, 1, 1, 0] = 1
+    kernel[0, 0, 1, 1, 2] = 1
+    kernel[0, 0, 1, 0, 1] = 1
+    kernel[0, 0, 1, 2, 1] = 1
+    kernel[0, 0, 0, 1, 1] = 1
+    kernel[0, 0, 2, 1, 1] = 1
+    
+    neighbor_sum = F.conv3d(padded, kernel, stride=1, padding=0).squeeze(0).squeeze(0)
+    crop_cortical = closed_bone & (neighbor_sum < 6)
+    
+    lesion_idx = torch.nonzero(crop_lesion).float()
+    if len(lesion_idx) == 0:
+        return np.zeros_like(crop_lesion_np, dtype=bool)
+        
+    cortical_idx = torch.nonzero(crop_cortical).float()
+    sp = torch.tensor(spacing, device=device, dtype=torch.float32)
+    lesion_phys = lesion_idx * sp
+    cortical_phys = cortical_idx * sp
+    
+    step = max(1, len(lesion_phys) // 500)
+    lesion_sampled = lesion_phys[::step]
+    
+    crop_surface = torch.zeros_like(crop_cortical)
+    if len(cortical_phys) > 0 and len(lesion_sampled) > 0:
+        dists = torch.cdist(cortical_phys.unsqueeze(0), lesion_sampled.unsqueeze(0)).squeeze(0)
+        min_dists, _ = torch.min(dists, dim=1)
+        valid_cortical_mask = min_dists <= max_surface_dist_mm
+        valid_cortical_idx = cortical_idx[valid_cortical_mask].long()
+        if len(valid_cortical_idx) > 0:
+            crop_surface[valid_cortical_idx[:, 0], valid_cortical_idx[:, 1], valid_cortical_idx[:, 2]] = True
+            
+    crop_surface = crop_surface & crop_bone
+    
+    return crop_surface.cpu().numpy().astype(bool)
+
 def extract_bone_fragments(lesion_path, bone_path, out_surface_path, out_marrow_path):
     lesion_img = nib.load(lesion_path)
     np_lesion = lesion_img.get_fdata() > 0
@@ -74,22 +130,16 @@ def extract_bone_fragments(lesion_path, bone_path, out_surface_path, out_marrow_
         crop_skelly_mask = np.where(target_bone_mask, crop_skelly_mask, 0)
 
         # Check if skellytour cortical (2) and marrow (1) labels exist
-        if np.any(crop_skelly_mask == 2) or np.any(crop_skelly_mask == 1):
-            crop_cortical = (crop_skelly_mask == 2)
-            crop_marrow = (crop_skelly_mask == 1)
-        else:
-            raise ValueError(
-                f"Skellytour cortical (2) or marrow (1) labels NOT FOUND in bone mask for bone ID {target_bone_label}. "
-                "Ensure skellytour was executed correctly during preprocessing. Fallback to morphological erosion has been disabled."
-            )
+        crop_marrow = (crop_skelly_mask == 1)
 
-        crop_vicinity_dist = ndimage.distance_transform_edt(~crop_lesion_mask, sampling=spacing)
+        # Morphological Surface Extraction (1-voxel thick) based on the full skellytour bone mask
+        bone_surface_fragment[x_min:x_max, y_min:y_max, z_min:z_max] = generate_bone_subsegments_pt(
+            crop_lesion_mask, (crop_skelly_mask > 0).astype(np.uint8), spacing
+        ).astype(np.uint8)
 
-        if np.any(crop_cortical):
-            lesion_vicinity = (crop_vicinity_dist <= 30.0)
-            bone_surface_fragment[x_min:x_max, y_min:y_max, z_min:z_max] = ((crop_cortical & lesion_vicinity) & ~crop_lesion_mask).astype(np.uint8)
-
+        # Skellytour Marrow Extraction (based on label 1)
         if np.any(crop_marrow):
+            crop_vicinity_dist = ndimage.distance_transform_edt(~crop_lesion_mask, sampling=spacing)
             marrow_dist_from_lesion = np.where(crop_marrow, crop_vicinity_dist, np.inf)
             min_idx_marr = np.argmin(marrow_dist_from_lesion)
             if marrow_dist_from_lesion[np.unravel_index(min_idx_marr, marrow_dist_from_lesion.shape)] != np.inf:

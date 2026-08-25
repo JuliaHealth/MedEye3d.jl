@@ -261,12 +261,14 @@ function map_ts_to_anatomy(raw_ts_name::String)
     haskey(TS_TO_ANATOMY, name_low) && return (TS_TO_ANATOMY[name_low], side)
     
     # 2. Strip trailing number for numbered items: "rib_4" → base="rib", num="4"
-    m = match(r"^(.+?)_(\d+)$", name_low)
-    if m !== nothing
-        base = m.captures[1]
-        num = m.captures[2]
-        if haskey(TS_TO_ANATOMY, base)
-            return ("$(TS_TO_ANATOMY[base]) $num", side)
+    last_us = findlast('_', name_low)
+    if last_us !== nothing
+        base = name_low[1:last_us-1]
+        num = name_low[last_us+1:end]
+        if !isempty(num) && all(isdigit, num)
+            if haskey(TS_TO_ANATOMY, base)
+                return ("$(TS_TO_ANATOMY[base]) $num", side)
+            end
         end
     end
     
@@ -499,6 +501,7 @@ function create_metadata_window(
 
     # In-memory DB
     lesion_db = Observable{Dict}(Dict{String,Dict{String,Any}}())
+    _db_dirty = Ref(false)
 
     db_channel = Channel{Any}(32)
     @async begin
@@ -929,9 +932,11 @@ function create_metadata_window(
     on(btn_rf.clicks) do _; put!(channel, RefreshListEvent()) end
     on(btn_single.clicks) do _
         id_str = active_lesion_id[]
-        m = match(r"\d+", id_str)
-        if m !== nothing
-            put!(channel, ShowSingleLesionEvent(parse(Int, m.match)))
+        cp = findfirst(':', id_str)
+        num_str = cp !== nothing ? strip(id_str[1:cp-1]) : id_str
+        parsed = tryparse(Int, num_str)
+        if parsed !== nothing
+            put!(channel, ShowSingleLesionEvent(parsed))
         end
     end
     on(btn_all.clicks) do _
@@ -1359,6 +1364,16 @@ end_section!(sec_win)
         if haskey(field_widgets, "Inner Texture / Density / Attenuation") && field_widgets["Inner Texture / Density / Attenuation"] isa Menu
             field_widgets["Inner Texture / Density / Attenuation"].selection[] = "Sclerotic / Blastic / Ivory (>1000 HU)"
         end
+        
+        # Trigger GenManualEvent to ensure bone subsegmentation is calculated for manually painted lesions
+        active_str = active_lesion_id[]
+        if active_str != "" && active_str != "(none)"
+            parts = split(active_str, " - ")
+            lid = tryparse(Int, strip(parts[1]))
+            if lid !== nothing
+                put!(channel, GenManualEvent(lid))
+            end
+        end
     end
     
     on(btn_type_organ.clicks) do _
@@ -1499,12 +1514,16 @@ end_section!(sec_win)
     on(btn_new_lesion.clicks) do _
         max_id = 0
         for opt in lesion_ids[]
-            m = match(r"^(\d+)", opt)
-            m !== nothing && (max_id = max(max_id, parse(Int, m.match)))
+            cp = findfirst(':', opt)
+            ns = cp !== nothing ? strip(opt[1:cp-1]) : opt
+            p = tryparse(Int, ns)
+            p !== nothing && (max_id = max(max_id, p))
         end
         for k in keys(lesion_db[])
-            m = match(r"^(\d+)", k)
-            m !== nothing && (max_id = max(max_id, parse(Int, m.match)))
+            cp = findfirst(':', k)
+            ns = cp !== nothing ? strip(k[1:cp-1]) : k
+            p = tryparse(Int, ns)
+            p !== nothing && (max_id = max(max_id, p))
         end
         new_id = max_id + 1
         new_name = "$(new_id) - New Lesion"
@@ -1523,7 +1542,7 @@ end_section!(sec_win)
     on(btn_paint.clicks) do _
         current_paint_mode[] = :paint
         btn_paint.buttoncolor[] = GRN; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BG_PNL
-        m = match(r"^(\d+)", active_lesion_id[]); val = m !== nothing ? parse(Int, m.match) : 1
+        cp = findfirst(':', active_lesion_id[]); ns = cp !== nothing ? strip(active_lesion_id[][1:cp-1]) : active_lesion_id[]; val = (p = tryparse(Int, ns)) !== nothing ? p : 1
         put!(channel, PaintValEvent(val, true))
     end
     on(btn_erase.clicks) do _
@@ -1570,20 +1589,31 @@ end_section!(sec_win)
     src_vbox = GridLayout(g[map_r, 1:2])
     dst_vbox = GridLayout(g[map_r, 3:4])
     
-    btn_do_map = Button(g[nr!(), 1:4], label="Link Selected Lesions", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize=10)
+    map_btn_r = nr!()
+    btn_do_map = Button(g[map_btn_r, 1:2], label="Link Selected", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize=10)
+    btn_unlink = Button(g[map_btn_r, 3:4], label="Unlink Selected", buttoncolor = RGBf(0.6, 0.2, 0.2), labelcolor = TXT, fontsize=10)
     
     src_toggles = Tuple{Int, Toggle}[]
     dst_toggles = Tuple{Int, Toggle}[]
     
     function get_mask_ids(tp)
         if !haskey(_MEH.tp_data_cache, tp) return Int[] end
-        panel_data = _MEH.tp_data_cache[tp][1]
-        for (name, arr) in panel_data
-            if name == "Mask" || name == "segmentation"
-                return Int.(filter(x -> x > 0, sort(unique(arr))))
+        entry = _MEH.tp_data_cache[tp]
+        mask = entry.mask
+        return Int.(filter(x -> x > 0, sort(unique(mask))))
+    end
+    
+    function _get_display_label(node_name, seg_int)
+        # Look up group info from MATCH_GROUPS
+        match_groups = Main.MedEye3d.LesionAssociation.get_match_groups()
+        for (gid, members) in match_groups
+            for (node, s_int, name) in members
+                if node == node_name && s_int == seg_int
+                    return "ID $seg_int [Grp $gid]"
+                end
             end
         end
-        return Int[]
+        return "ID $seg_int"
     end
     
     on(btn_refresh_map.clicks) do _
@@ -1599,27 +1629,80 @@ end_section!(sec_win)
         l_ids = get_mask_ids(tp_left)
         r_ids = get_mask_ids(tp_right)
         
-        Label(src_vbox[1, 1:2], "Earlier (TP $tp_left)", fontsize=10, font=:bold, color=LBL_FG)
+        left_node = _MEH.get_node_name_for_tp(tp_left)
+        right_node = _MEH.get_node_name_for_tp(tp_right)
+        
+        Label(src_vbox[1, 1:2], "Left: $left_node", fontsize=10, font=:bold, color=LBL_FG)
         for (i, lid) in enumerate(l_ids)
             t = Toggle(src_vbox[i+1, 1], active=false)
-            Label(src_vbox[i+1, 2], "ID $lid", fontsize=10, color=LBL_FG)
+            lbl_text = _get_display_label(left_node, lid)
+            # Green for matched lesions, normal for unmatched
+            lbl_color = occursin("Grp", lbl_text) ? RGBf(0.4, 0.9, 0.4) : LBL_FG
+            Label(src_vbox[i+1, 2], lbl_text, fontsize=10, color=lbl_color)
             push!(src_toggles, (lid, t))
         end
         if isempty(l_ids) Label(src_vbox[2, 1:2], "None", fontsize=10, color=LBL_FG) end
         
-        Label(dst_vbox[1, 1:2], "Next (TP $tp_right)", fontsize=10, font=:bold, color=LBL_FG)
+        Label(dst_vbox[1, 1:2], "Right: $right_node", fontsize=10, font=:bold, color=LBL_FG)
         for (i, lid) in enumerate(r_ids)
             t = Toggle(dst_vbox[i+1, 1], active=false)
-            Label(dst_vbox[i+1, 2], "ID $lid", fontsize=10, color=LBL_FG)
+            lbl_text = _get_display_label(right_node, lid)
+            lbl_color = occursin("Grp", lbl_text) ? RGBf(0.4, 0.9, 0.4) : LBL_FG
+            Label(dst_vbox[i+1, 2], lbl_text, fontsize=10, color=lbl_color)
             push!(dst_toggles, (lid, t))
         end
         if isempty(r_ids) Label(dst_vbox[2, 1:2], "None", fontsize=10, color=LBL_FG) end
     end
     
     on(btn_do_map.clicks) do _
-        src_sel = String[string(lid) for (lid, t) in src_toggles if t.active[]]
-        dst_sel = String[string(lid) for (lid, t) in dst_toggles if t.active[]]
-        put!(channel, MapLinkEvent(src_sel, dst_sel))
+        LA = Main.MedEye3d.LesionAssociation
+        h5_path = _MEH.h5_path_ref[]
+        if isempty(h5_path)
+            println("WARNING: h5_path_ref not set, cannot save match"); flush(stdout)
+            return
+        end
+        
+        tp_left = _MEH.current_tp_index[]
+        tp_right = _MEH.compare_right_tp[]
+        left_node = _MEH.get_node_name_for_tp(tp_left)
+        right_node = _MEH.get_node_name_for_tp(tp_right)
+        
+        src_sel = Int[lid for (lid, t) in src_toggles if t.active[]]
+        dst_sel = Int[lid for (lid, t) in dst_toggles if t.active[]]
+        
+        for s_id in src_sel
+            for d_id in dst_sel
+                LA.update_match_group!(left_node, s_id, right_node, d_id, h5_path)
+                println("Linked $left_node:$s_id ↔ $right_node:$d_id in HDF5"); flush(stdout)
+            end
+        end
+    end
+    
+    on(btn_unlink.clicks) do _
+        LA = Main.MedEye3d.LesionAssociation
+        h5_path = _MEH.h5_path_ref[]
+        if isempty(h5_path)
+            println("WARNING: h5_path_ref not set, cannot unlink"); flush(stdout)
+            return
+        end
+        
+        tp_left = _MEH.current_tp_index[]
+        tp_right = _MEH.compare_right_tp[]
+        left_node = _MEH.get_node_name_for_tp(tp_left)
+        right_node = _MEH.get_node_name_for_tp(tp_right)
+        
+        for (lid, t) in src_toggles
+            if t.active[]
+                LA.remove_from_match_group!(left_node, lid, h5_path)
+                println("Unlinked $left_node:$lid from its match group"); flush(stdout)
+            end
+        end
+        for (lid, t) in dst_toggles
+            if t.active[]
+                LA.remove_from_match_group!(right_node, lid, h5_path)
+                println("Unlinked $right_node:$lid from its match group"); flush(stdout)
+            end
+        end
     end
     
     end_section!(sec_map_lesions)
@@ -1721,10 +1804,23 @@ end_section!(sec_win)
         return d
     end
 
+    _is_applying_state = Ref(false)
+    function trigger_autosave()
+        _is_applying_state[] && return
+        id = active_lesion_id[]
+        db = copy(lesion_db[])
+        db[id] = collect_state()
+        lesion_db[] = db
+        _db_dirty[] = true
+    end
+
     function apply_state(data::AbstractDict)
-        cur_id_str = active_lesion_id[]
-        m = match(r"^(\d+)", cur_id_str)
-        lid = m !== nothing ? parse(Int, m.match) : 1
+        _is_applying_state[] = true
+        try
+            cur_id_str = active_lesion_id[]
+        cp = findfirst(':', cur_id_str)
+        ns = cp !== nothing ? strip(cur_id_str[1:cp-1]) : cur_id_str
+        lid = (p = tryparse(Int, ns)) !== nothing ? p : 1
 
         t_type = if haskey(data, "LesionType")
             data["LesionType"]
@@ -1753,10 +1849,10 @@ end_section!(sec_win)
             
             # Only consider bone_subsegments_cache if it actually has non-empty data
             # (empty entries are cached for non-bone lesions to avoid re-computation)
-            has_real_bone_subseg = if haskey(_MEH.bone_subsegments_cache, lid)
-                cached_data = _MEH.bone_subsegments_cache[lid]
+            has_real_bone_subseg = if haskey(_MEH.bone_subsegments_cache, (_MEH.current_tp_index[], lid))
+                cached_data = _MEH.bone_subsegments_cache[(_MEH.current_tp_index[], lid)]
                 cached_data isa Tuple && length(cached_data) >= 2 &&
-                    !isempty(cached_data[1]) || !isempty(cached_data[2])
+                    (!isempty(cached_data[1]) || !isempty(cached_data[2]))
             else
                 false
             end
@@ -1956,6 +2052,9 @@ end_section!(sec_win)
         if rpt_tb.stored_string[] != target_rpt
             rpt_tb.stored_string[] = target_rpt
         end
+        finally
+            _is_applying_state[] = false
+        end
     end
 
     # ── Wire callbacks ────────────────────────────────────────────────────────
@@ -1970,9 +2069,10 @@ end_section!(sec_win)
         
         # Synchronize lesion with viewer (filters mask and jumps to slice)
         try
-            m = match(r"^(\d+)", id)
-            if m !== nothing
-                lid = parse(Int, m.match)
+            cp = findfirst(':', id)
+            ns = cp !== nothing ? strip(id[1:cp-1]) : id
+            lid = tryparse(Int, ns)
+            if lid !== nothing
                 put!(channel, SyncLesionEvent(lid))
             end
         catch e
@@ -2053,10 +2153,7 @@ end_section!(sec_win)
         rpt_tb.stored_string[] = generated_text
         
         # Trigger autosave update
-        id = active_lesion_id[]
-        db = copy(lesion_db[])
-        db[id] = collect_state()
-        lesion_db[] = db
+        trigger_autosave()
     end
 
     # Auto-save logic
@@ -2067,23 +2164,36 @@ end_section!(sec_win)
         end
     end
     
-    # Auto-update lesion_db on dictation and custom changes to ensure background task catches it
-    on(dict_tb.stored_string) do _
-        id = active_lesion_id[]
-        db = copy(lesion_db[])
-        db[id] = collect_state()
-        lesion_db[] = db
+    # ── Wire autosave triggers for all metadata UI elements ──────────
+    on(tb_base_anat.stored_string) do _; trigger_autosave(); end
+    on(tb_rel_base.stored_string) do _; trigger_autosave(); end
+    on(menu_side.selection) do _; trigger_autosave(); end
+    on(active_lesion_type) do _; trigger_autosave(); end
+    on(dict_tb.stored_string) do _; trigger_autosave(); end
+    on(rpt_tb.stored_string) do _; trigger_autosave(); end
+    on(radlex_selected) do _; trigger_autosave(); end
+    
+    for q in schema
+        w = get(field_widgets, q.short, nothing)
+        if w isa Textbox
+            on(w.stored_string) do _; trigger_autosave(); end
+        elseif w isa Menu
+            on(w.selection) do _; trigger_autosave(); end
+        end
     end
 
     @async begin
-        last_save_time = time()
         while true
             sleep(5.0)
-            try
-                db = lesion_db[]
-                put!(db_channel, SaveDBMessage(db, global_app_state, save_path, DEFAULT_HDF5_PATH))
-            catch e
-                @warn "Background autosave enqueue failed" e
+            if _db_dirty[]
+                _db_dirty[] = false
+                try
+                    db = lesion_db[]
+                    put!(db_channel, SaveDBMessage(db, global_app_state, save_path, DEFAULT_HDF5_PATH))
+                    println("  [AUTOSAVE] Saved (dirty flag was set)"); flush(stdout)
+                catch e
+                    @warn "Background autosave enqueue failed" e
+                end
             end
         end
     end

@@ -68,6 +68,19 @@ function main()
     println("Resampling and saving to $h5_path")
     h5_file = h5open(h5_path, "w")
     
+    # Embed JSON metadata as HDF5 datasets (HDF5 = single source of truth)
+    # Using datasets in _meta_ group instead of attributes due to 64KB attribute size limit
+    if !haskey(h5_file, "_meta_")
+        create_group(h5_file, "_meta_")
+    end
+    for json_name in ["scene_hierarchy.json", "metadata.json", "matches.json"]
+        json_path = joinpath(data_dir, json_name)
+        if isfile(json_path)
+            h5_file["_meta_/$json_name"] = read(json_path, String)
+            println("  Embedded $json_name as HDF5 dataset ($(filesize(json_path)) bytes)")
+        end
+    end
+    
     function process_file(name, tfm_path, group_name, is_mask=false)
         if isempty(name)
             return
@@ -108,14 +121,14 @@ function main()
             img_res = img
         end
         
-        MedImages.save_med_image(h5_file, group_name, name, img_res)
+        MedImages.save_med_image(h5_file, group_name, name, img_res; compress=3)
 
         # Also save at display resolution (2× in-plane upsampling)
         display_sp = (img_res.spacing[1] / HIRES_FACTOR, img_res.spacing[2] / HIRES_FACTOR, img_res.spacing[3])
         interpolator_display = is_mask ? MedImages.Nearest_neighbour_en : MedImages.Linear_en
         img_display = MedImages.resample_to_spacing(img_res, display_sp, interpolator_display)
         display_group = group_name * "_DISPLAY"
-        MedImages.save_med_image(h5_file, display_group, name, img_display)
+        MedImages.save_med_image(h5_file, display_group, name, img_display; compress=3)
         println("    Saved display-resolution ($(size(img_display.voxel_data))) to $display_group/$name")
     end
     
@@ -142,6 +155,7 @@ function main()
     end
     
     close(h5_file)
+    GC.gc()
     println("Saved preprocessed volumes.")
     
     # 4. Bone Subsegmentation Precomputation
