@@ -5,7 +5,7 @@ export ChangeTimePointEvent, ToggleLesionEvent, RefreshListEvent
 export AddAutoPetEvent, AIInferenceResultEvent, AIStatusUpdateEvent, SyncMissingEvent, GenManualEvent
 export MapLinkEvent, AutoRunPreprocessEvent, RunPreprocessEvent, ShowBoneMaskEvent, ShowMaskLayerEvent, SaveMRBEvent
 export CloseWindowEvent, ResizeWindowEvent, SetWindowTitleEvent, ChangeBrushSizeEvent, ToggleMoveLesionModeEvent
-export PetBlendEvent
+export PetBlendEvent, BoneSubsegResultEvent
 struct ChangePlaneEvent
     plane :: Symbol # :Axial, :Coronal, :Sagittal
 end
@@ -99,6 +99,13 @@ struct ChangeBrushSizeEvent
 end
 struct ToggleMoveLesionModeEvent
     active :: Bool
+end
+
+struct BoneSubsegResultEvent
+    panel_tp::Int
+    target_id::Int
+    pts_surf::Vector{CartesianIndex{3}}
+    pts_marr::Vector{CartesianIndex{3}}
 end
 
 struct PetBlendEvent

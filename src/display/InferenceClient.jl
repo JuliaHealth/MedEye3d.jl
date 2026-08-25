@@ -6,7 +6,7 @@ using Base64
 using MedImages
 using ..ConnectedComponents
 
-export start_python_worker, run_helpnet_inference, run_nninteractive, insert_patch!, preload_ct_for_nninteractive
+export start_python_worker, run_helpnet_inference, run_nninteractive, run_bone_subsegmentation_remote, insert_patch!, preload_ct_for_nninteractive
 
 global PYTHON_PROC = nothing
 
@@ -316,6 +316,55 @@ function preload_ct_for_nninteractive(ct_vol::Array{Float32, 3}; port=5005)
         end
     end
     return nothing
+end
+
+"""
+    run_bone_subsegmentation_remote(lesion_mask::Array{UInt8, 3}, bone_mask::Array{UInt8, 3}, spacing; port=5005)
+
+Run PyTorch-based bone subsegmentation remotely on the Docker container's GPU using Base64 inline transfer.
+Returns `(surface_mask, marrow_mask)` as `Array{Bool, 3}`.
+"""
+function run_bone_subsegmentation_remote(lesion_mask::AbstractArray{T, 3}, bone_mask::AbstractArray{U, 3}, spacing; port=5005) where {T, U}
+    shape = size(lesion_mask)
+    
+    # Pack as UInt8
+    lesion_uint8 = convert(Array{UInt8, 3}, lesion_mask .> 0)
+    bone_uint8 = convert(Array{UInt8, 3}, bone_mask .> 0)
+    
+    lesion_b64 = base64encode(lesion_uint8)
+    bone_b64 = base64encode(bone_uint8)
+    
+    req = Dict(
+        "command" => "bone_subsegmentation",
+        "shape" => collect(shape),
+        "spacing" => collect(spacing),
+        "lesion_mask_b64" => lesion_b64,
+        "bone_mask_b64" => bone_b64
+    )
+    
+    try
+        conn = connect("127.0.0.1", port)
+        write(conn, JSON.json(req))
+        resp_str = read(conn, String)
+        close(conn)
+        
+        resp = JSON.parse(resp_str)
+        if resp["status"] == "success"
+            surf_raw = base64decode(resp["surf_mask_b64"])
+            marr_raw = base64decode(resp["marr_mask_b64"])
+            
+            surf_arr = reshape(reinterpret(UInt8, surf_raw), shape) .> 0
+            marr_arr = reshape(reinterpret(UInt8, marr_raw), shape) .> 0
+            
+            return surf_arr, marr_arr
+        else
+            println("[InferenceClient ERROR] Bone Subsegmentation failed: $(resp["message"])"); flush(stdout)
+            return nothing, nothing
+        end
+    catch e
+        println("[InferenceClient ERROR] Failed to communicate with Python Worker: $e"); flush(stdout)
+        return nothing, nothing
+    end
 end
 
 end # module

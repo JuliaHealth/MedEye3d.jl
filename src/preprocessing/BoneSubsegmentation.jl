@@ -100,11 +100,11 @@ Returns:
 `(surface_mask::Array{Bool, 3}, marrow_mask::Array{Bool, 3})`
 """
 function generate_bone_subsegments(
-    mask_vol::AbstractArray{Float32, 3},
-    bone_vol::AbstractArray{Float32, 3},
-    spacing::Tuple{Float64, Float64, Float64},
+    mask_vol::AbstractArray{<:Real, 3},
+    bone_vol::AbstractArray{<:Real, 3},
+    spacing::Tuple{<:Real, <:Real, <:Real},
     lesion_id::Int;
-    max_surface_dist_mm::Float64 = 25.0
+    max_surface_dist_mm::Real = 25.0
 )
     nx, ny, nz = size(mask_vol)
     surface_mask = zeros(Bool, nx, ny, nz)
@@ -140,6 +140,23 @@ function generate_bone_subsegments(
     
     crop_bone_bool = Array{Bool}(crop_bone .> 0.0f0)
     
+    # Try calling the remote GPU Inference Worker via InferenceClient
+    # It will run the PyTorch based morphology kernels (milliseconds) instead of CPU loops
+    surf_res, marr_res = Main.MedEye3d.InferenceClient.run_bone_subsegmentation_remote(
+        convert(Array{UInt8, 3}, crop_lesion), 
+        convert(Array{UInt8, 3}, crop_bone_bool), 
+        spacing
+    )
+    if surf_res !== nothing && marr_res !== nothing
+        surface_mask[x_min:x_max, y_min:y_max, z_min:z_max] .= surf_res .& crop_bone_bool
+        marrow_mask[x_min:x_max, y_min:y_max, z_min:z_max] .= marr_res .& crop_bone_bool
+        surface_mask[bone_vol .<= 0] .= false
+        marrow_mask[bone_vol .<= 0] .= false
+        return surface_mask, marrow_mask
+    end
+    
+    # Fallback to local CPU/GPU KernelAbstractions logic if docker worker fails or is unavailable
+    @warn "Remote GPU bone subsegmentation failed. Falling back to local Julia morphological algorithms."
     cx_dim, cy_dim, cz_dim = crop_dims
     
     # Apply a fast 3D morphological closing (Dilation -> Erosion) to fill internal trabecular holes 

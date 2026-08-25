@@ -247,6 +247,8 @@ if isfile(preprocessed_h5)
             
             # Convert mask to compact int type
             t_mask = @elapsed begin
+                # Ensure no negative background values (like -1024 from CT resampling)
+                mask_vol_base = max.(0.0f0, mask_vol_base)
                 max_id = round(Int, maximum(mask_vol_base))
                 mask_compact = if max_id + 5 <= 127
                     Int8.(round.(mask_vol_base))
@@ -281,6 +283,7 @@ if isfile(preprocessed_h5)
         tp_nodes_map[tp_i] = node_name
         MEH.tp_labels[tp_i] = lbl
         MEH.tp_modalities[tp_i] = modality
+        MEH.tp_node_names[tp_i] = node_name  # Populate for cross-TP bone cache lookups
     end
     
     println("Loading initial Time Point 0 on-demand...")
@@ -288,12 +291,16 @@ if isfile(preprocessed_h5)
     MEH.tp_data_cache[0] = first_entry
     
     # Convert TpCacheEntry to old vdt format for initial displayImage call
-    # (displayImage still expects Vector{Vector{Any}})
+    # (displayImage still expects Vector{Vector{Any}} with concrete Array{Float32,3})
     function entry_to_vdt(e::MEH.TpCacheEntry)
         mask_f32 = Float32.(e.mask)
         bone_s_f32 = Float32.(e.bone_surf)
         bone_m_f32 = Float32.(e.bone_marr)
         
+        # collect() required here because displayImage (SegmentationDisplay.jl:1210)
+        # has strict type: Union{Vector{Array{Float32,3}}, Vector{Vector{Array{Float32,3}}}}
+        # PermutedDimsArray is AbstractArray, not Array. This is one-time startup cost.
+        # TP switching uses _load_tp_from_entry! which uses zero-copy PermutedDimsArray views.
         Vector{Vector{Any}}([
             Any[("CT", e.ct), ("PET", e.pet), ("Mask", mask_f32), ("Bone_Surface", bone_s_f32), ("Bone_Marrow", bone_m_f32)],
             Any[("PET", e.pet)],
@@ -358,6 +365,14 @@ mainMedEye3dInstance = SegmentationDisplay.displayImage(
     fractionOfMainImage=Float32(1.0),
     quadView=true
 )
+
+# Preload TP 1 in background so the first "Next TP" click is instant
+tp_indices_sorted = sort(collect(keys(tp_labels_map)))
+if length(tp_indices_sorted) > 1
+    next_tp = tp_indices_sorted[2]
+    println("Queuing background preload for TP $next_tp via IO channel...")
+    put!(MEH.io_channel[], MEH.PreloadTPMessage(next_tp))
+end
 
 # Start Background Inference Worker via Docker (HELPNet & nnInteractive)
 worker_script = joinpath(@__DIR__, "..", "ai", "python_worker.py")
@@ -468,6 +483,8 @@ end
 
 # Extract patient ID from data directory name
 MEH.patient_id[] = basename(data_dir_pat6)
+# Register HDF5 path (single source of truth for JSON metadata)
+MEH.h5_path_ref[] = preprocessed_h5
 
 MEH.current_tp_index[] = 0
 
@@ -568,6 +585,8 @@ if isfile(output_h5)
             return new_pts
         end
 
+        node_to_tp = Dict{String, Int}(study[7] => s_idx - 1 for (s_idx, study) in enumerate(studies))
+
         HDF5.h5open(output_h5, "r") do file
             for obj in keys(file)
                 if endswith(obj, "_surf")
@@ -589,21 +608,29 @@ if isfile(output_h5)
                             surf_pts = scale_indices(surf_pts, HIRES_FACTOR)
                             marr_pts = scale_indices(marr_pts, HIRES_FACTOR)
                             
-                            m_tp = match(r"^tp_(\d+)_lesion_(\d+)_surf$", obj)
-                            m_node = match(r"^(.+)_lesion_(\d+)_surf$", obj)
-                            m_simple = match(r"^lesion_(\d+)_surf$", obj)
-                            
-                            if m_tp !== nothing
-                                tp_idx = parse(Int, m_tp.captures[1])
-                                lid = parse(Int, m_tp.captures[2])
-                                MEH.bone_subsegments_cache[(tp_idx, lid)] = (surf_pts, marr_pts)
-                            elseif m_node !== nothing
-                                node_name = m_node.captures[1]
-                                lid = parse(Int, m_node.captures[2])
-                                MEH.bone_subsegments_cache[(node_name, lid)] = (surf_pts, marr_pts)
-                            elseif m_simple !== nothing
-                                lid = parse(Int, m_simple.captures[1])
-                                MEH.bone_subsegments_cache[lid] = (surf_pts, marr_pts)
+                            # Parse key format without regex
+                            # Formats: "PET_Lesions_0_lesion_24_surf", "tp_0_lesion_24_surf", "lesion_24_surf"
+                            obj_base = replace(obj, "_surf" => "")
+                            parts = split(obj_base, "_lesion_")
+                            if length(parts) == 2
+                                prefix = String(parts[1])
+                                lid = parse(Int, parts[2])
+                                
+                                if haskey(node_to_tp, prefix)
+                                    tp_i = node_to_tp[prefix]
+                                    MEH.bone_subsegments_cache[(tp_i, lid)] = (surf_pts, marr_pts)
+                                    MEH.bone_subsegments_cache[(prefix, lid)] = (surf_pts, marr_pts)
+                                elseif startswith(prefix, "tp_")
+                                    tp_num = tryparse(Int, replace(prefix, "tp_" => ""))
+                                    if tp_num !== nothing
+                                        MEH.bone_subsegments_cache[(tp_num, lid)] = (surf_pts, marr_pts)
+                                        MEH.bone_subsegments_cache[(prefix, lid)] = (surf_pts, marr_pts)
+                                    end
+                                else
+                                    MEH.bone_subsegments_cache[(prefix, lid)] = (surf_pts, marr_pts)
+                                end
+                            elseif startswith(obj_base, "lesion_")
+                                lid = parse(Int, replace(obj_base, "lesion_" => ""))
                                 MEH.bone_subsegments_cache[(0, lid)] = (surf_pts, marr_pts)
                             end
                         catch err
@@ -613,7 +640,9 @@ if isfile(output_h5)
                 end
             end
         end
-        println("Loaded precomputed bone subsegments for $(length(MEH.bone_subsegments_cache)) lesions.")
+        println("Loaded precomputed bone subsegments for $(length(MEH.bone_subsegments_cache)) keys.")
+        sample_keys = first(collect(keys(MEH.bone_subsegments_cache)), min(10, length(MEH.bone_subsegments_cache)))
+        println("  Sample bone keys: $sample_keys")
     catch e
         @warn "Failed to read bone subsegments HDF5: $e"
     end
@@ -667,6 +696,10 @@ end
 # Store volume Z dimension for edge-slice artefact detection
 MEH.volume_z_size[] = size(first_mask, 3)
 
+# Load cross-TP match groups from HDF5 attribute (single source of truth)
+LesionAssociation.load_matches_from_h5(preprocessed_h5)
+println("Loaded $(length(LesionAssociation.get_match_groups())) match groups from HDF5")
+
 lesion_list = if isempty(lesion_ids_ints)
     ["(none)"]
 else
@@ -688,12 +721,13 @@ else
             display_name = "Segment_$seg_int"
         end
         
-        # Look up match group from matches.json
+        # Look up match group from HDF5 matches attribute
         found_gid = nothing
         found_matches = 0
+        node_name_0 = get(tp_nodes_map, 0, "PET_Lesions_0")
         for (gid, members) in match_groups
             for (node, s_int, _) in members
-                if node == "PET_Lesions_0" && s_int == seg_int
+                if node == node_name_0 && s_int == seg_int
                     found_gid = gid
                     found_matches = length(members)
                     break

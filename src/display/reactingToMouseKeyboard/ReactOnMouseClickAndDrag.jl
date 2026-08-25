@@ -554,16 +554,28 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                             MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
                             tp_idx = (MEH.compare_mode[] && clickedPanel == 5) ? MEH.compare_right_tp[] : MEH.current_tp_index[]
                             if haskey(MEH.tp_data_cache, tp_idx)
-                                tp_voxels = MEH.tp_data_cache[tp_idx]
-                                for (p_idx, panel_data) in enumerate(tp_voxels)
-                                    for entry in panel_data
-                                        if entry[1] == source_name
-                                            for st_dat in mainStates[p_idx].onScrollData.dataToScroll
-                                                if st_dat.name == entry[1]
-                                                    entry[2] .= st_dat.dat
-                                                    break
-                                                end
+                                entry = MEH.tp_data_cache[tp_idx]
+                                # The source_name should be "Mask" or "manualModif"
+                                # We sync it from the canonical axial panel
+                                if source_name == "Mask" || source_name == "manualModif"
+                                    # Find the corresponding dataToScroll in the current panel
+                                    for st_dat in mainStates[clickedPanel].onScrollData.dataToScroll
+                                        if st_dat.name == source_name
+                                            # We need to reshape/permute back to axial based on clickedPanel
+                                            vol = if clickedPanel == 3 # Sagittal (Y, Z, X) -> back to (X, Y, Z)
+                                                permutedims(st_dat.dat, (3, 1, 2))
+                                            elseif clickedPanel == 4 # Coronal (X, Z, Y) -> back to (X, Y, Z)
+                                                permutedims(st_dat.dat, (1, 3, 2))
+                                            else # Axial (1, 2, 5)
+                                                st_dat.dat
                                             end
+                                            
+                                            if entry.mask isa Array{Int8, 3}
+                                                entry.mask .= round.(Int8, vol)
+                                            else
+                                                entry.mask .= round.(Int16, vol)
+                                            end
+                                            break
                                         end
                                     end
                                 end

@@ -223,14 +223,13 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                 right_tp = tp_indices[next_pos]
                 compare_right_tp[] = right_tp
                 
-                # Load right TP data into panel 5 on-demand
-                tp_voxels = get_or_load_tp_data(right_tp)
-                if tp_voxels !== nothing
-                    if length(tp_voxels) >= 5
-                        _load_tp_into_panel!(stateObjects, tp_voxels, 5, 5)
-                    elseif length(tp_voxels) >= 1
-                        _load_tp_into_panel!(stateObjects, tp_voxels, 5, 1)
-                    end
+                # Load right TP data into panel 5 using _load_tp_from_entry!
+                entry = get_or_load_tp_data(right_tp)
+                if entry !== nothing
+                    rm = Float32.(entry.mask)
+                    rs = Float32.(entry.bone_surf)
+                    rmr = Float32.(entry.bone_marr)
+                    _load_tp_from_entry!(stateObjects, entry, 5; mask_f32=rm, bone_s_f32=rs, bone_m_f32=rmr)
                 end
             end
 
@@ -254,14 +253,22 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
             left_label = get(tp_labels, current_tp_index[], "TP $(current_tp_index[])")
             right_label = get(tp_labels, compare_right_tp[], "TP $(compare_right_tp[])")
             println("Compare mode ON: Left=$left_label, Right=$right_label"); flush(stdout)
+            
+            # Re-apply bone overlay for active lesion
+            if current_active_lesion_id[] > 0
+                reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects)
+            end
         else
             compare_right_tp[] = -1
-            # Reload current active TP into all 4 panels
-            tp_voxels = get_or_load_tp_data(current_tp_index[])
-            if tp_voxels !== nothing
+            # Reload current active TP into all 4 panels using _load_tp_from_entry!
+            entry = get_or_load_tp_data(current_tp_index[])
+            if entry !== nothing
+                m = Float32.(entry.mask)
+                s = Float32.(entry.bone_surf)
+                mr = Float32.(entry.bone_marr)
                 num_panels = min(4, length(stateObjects))
                 for i in 1:num_panels
-                    _load_tp_into_panel!(stateObjects, tp_voxels, i)
+                    _load_tp_from_entry!(stateObjects, entry, i; mask_f32=m, bone_s_f32=s, bone_m_f32=mr)
                 end
             end
             # Evict inactive TPs from RAM
@@ -299,6 +306,11 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
             end
             stateObjects[1].switchIndex = old_idx
             println("Compare mode OFF: restored 4-pane view for TP $(current_tp_index[])"); flush(stdout)
+            
+            # Re-apply bone overlay for active lesion
+            if current_active_lesion_id[] > 0
+                reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects)
+            end
         end
     end
 end
@@ -397,19 +409,8 @@ function get_node_name_for_tp(tp_idx::Int)::String
     if haskey(tp_node_names, tp_idx)
         return tp_node_names[tp_idx]
     end
-    lbl = get(tp_labels, tp_idx, "")
-    if occursin("PET", lbl) && occursin("TP", lbl)
-        m = match(r"TP\s*(\d+)", lbl)
-        if m !== nothing
-            return "PET_Lesions_$(m.captures[1])"
-        end
-    elseif occursin("SPECT", lbl) && occursin("TP", lbl)
-        m = match(r"TP\s*(\d+)", lbl)
-        if m !== nothing
-            return "SPECT_Lesions_$(m.captures[1])"
-        end
-    end
-    return "PET_Lesions_$tp_idx"
+    @warn "No node name for TP $tp_idx — tp_node_names not populated from HDF5"
+    return "Unknown_TP_$tp_idx"
 end
 
 const current_active_lesion_id = Ref(0)
@@ -429,16 +430,20 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
         bone_subsegments_cache[(panel_tp, target_id)]
     elseif haskey(bone_subsegments_cache, (get_node_name_for_tp(panel_tp), target_id))
         bone_subsegments_cache[(get_node_name_for_tp(panel_tp), target_id)]
-    elseif panel_tp == 0 && haskey(bone_subsegments_cache, target_id)
-        bone_subsegments_cache[target_id]
     else
         nothing
     end
     
     if cached !== nothing
+        if cached === :computing
+            println("  [BONE-DEBUG] target_id=$target_id (tp=$panel_tp): still :computing"); flush(stdout)
+            return (CartesianIndex{3}[], CartesianIndex{3}[])
+        end
         raw_surf, raw_marr = cached
-        return (raw_surf isa AbstractArray{<:CartesianIndex} ? raw_surf : findall(raw_surf .> 0),
-                raw_marr isa AbstractArray{<:CartesianIndex} ? raw_marr : findall(raw_marr .> 0))
+        surf_res = raw_surf isa AbstractArray{<:CartesianIndex} ? raw_surf : findall(raw_surf .> 0)
+        marr_res = raw_marr isa AbstractArray{<:CartesianIndex} ? raw_marr : findall(raw_marr .> 0)
+        println("  [BONE-DEBUG] target_id=$target_id (tp=$panel_tp): CACHE HIT ($(length(surf_res)) surf, $(length(marr_res)) marr)"); flush(stdout)
+        return (surf_res, marr_res)
     end
     
     # Compute fresh
@@ -467,12 +472,44 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
         any(idx -> checkbounds(Bool, local_bone_atlas, idx) && local_bone_atlas[idx] > 0, panel_lesion_indices)
     
     if has_bone
-        s_mask, m_mask = MedEye3d.BoneSubsegmentation.generate_bone_subsegments(
-            panel_seg, Float32.(local_bone_atlas), (1.5f0, 1.5f0, 2.0f0), target_id)
-        pts_surf = findall(s_mask)
-        pts_marr = findall(m_mask)
-        bone_subsegments_cache[(panel_tp, target_id)] = (pts_surf, pts_marr)
-        return (pts_surf, pts_marr)
+        # Mark as computing to avoid redundant spawns
+        bone_subsegments_cache[(panel_tp, target_id)] = :computing
+        
+        # We must copy or reference the arrays safely for the background task
+        bg_panel_seg = copy(panel_seg)
+        bg_bone_atlas = copy(local_bone_atlas)
+        
+        Threads.@spawn begin
+            try
+                println("  [ASYNC-BONE] Starting background thread for lesion $target_id (tp=$panel_tp)")
+                t_bg = time_ns()
+                
+                s_mask, m_mask = Main.MedEye3d.BoneSubsegmentation.generate_bone_subsegments(
+                    bg_panel_seg, Float32.(bg_bone_atlas), (1.5f0, 1.5f0, 2.0f0), target_id)
+                    
+                pts_surf = findall(s_mask)
+                pts_marr = findall(m_mask)
+                
+                t_bg_ms = (time_ns() - t_bg) / 1e6
+                println("  [ASYNC-BONE] Finished in $(round(t_bg_ms, digits=1))ms. Triggering re-render.")
+                
+                # Send the result back to the main thread via the channel to safely update the Dict
+                if main_event_channel[] !== nothing
+                    put!(main_event_channel[], BoneSubsegResultEvent(panel_tp, target_id, pts_surf, pts_marr))
+                else
+                    # Fallback (unsafe)
+                    bone_subsegments_cache[(panel_tp, target_id)] = (pts_surf, pts_marr)
+                end
+            catch e
+                @warn "Background bone computation failed" e
+                if main_event_channel[] !== nothing
+                    put!(main_event_channel[], BoneSubsegResultEvent(panel_tp, target_id, CartesianIndex{3}[], CartesianIndex{3}[]))
+                else
+                    bone_subsegments_cache[(panel_tp, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
+                end
+            end
+        end
+        return (CartesianIndex{3}[], CartesianIndex{3}[])
     else
         bone_subsegments_cache[(panel_tp, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
         return (CartesianIndex{3}[], CartesianIndex{3}[])
@@ -530,6 +567,11 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                 textSpec.minAndMaxValue = Float32.([0.0, 1000.0])
                 ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
                 Uniforms.coontrolMinMaxUniformVals(textSpec)
+            elseif textSpec.name == "Bone_Surface" || textSpec.name == "Bone_Marrow"
+                textSpec.isVisible = true
+                ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
+                Uniforms.setTextureVisibility(true, textSpec.uniforms)
+                Uniforms.setMaskColor(textSpec.color, textSpec.uniforms)
             end
         end
     end
@@ -587,6 +629,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                     scrDat.dat[surf_indices] .= 1.0f0
                 end
                 last_bone_surf_indices[panel_idx] = surf_indices
+                println("  [BONE-DEBUG] Panel $panel_idx: Bone_Surface wrote $(length(surf_indices)) indices"); flush(stdout)
             elseif scrDat.name == "Bone_Marrow"
                 if haskey(last_bone_marr_indices, panel_idx) && !isempty(last_bone_marr_indices[panel_idx])
                     scrDat.dat[last_bone_marr_indices[panel_idx]] .= 0.0f0
@@ -595,6 +638,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                     scrDat.dat[marr_indices] .= 1.0f0
                 end
                 last_bone_marr_indices[panel_idx] = marr_indices
+                println("  [BONE-DEBUG] Panel $panel_idx: Bone_Marrow wrote $(length(marr_indices)) indices"); flush(stdout)
             end
         end
     end
@@ -715,13 +759,104 @@ const bone_subsegments_cache = Dict{Any, Any}()
 const lesion_centroids_cache = Dict{Any, Vector{Int}}()
 const last_bone_surf_indices = Dict{Int, Vector{CartesianIndex{3}}}()
 const last_bone_marr_indices = Dict{Int, Vector{CartesianIndex{3}}}()
+function reactToBoneSubsegResult(data::BoneSubsegResultEvent, stateObjects::Vector{StateDataFields})
+    println("reactToBoneSubsegResult: received result for lesion $(data.target_id) on tp $(data.panel_tp)"); flush(stdout)
+    bone_subsegments_cache[(data.panel_tp, data.target_id)] = (data.pts_surf, data.pts_marr)
+    
+    # Re-render if this lesion is still the active one
+    if current_active_lesion_id[] == data.target_id && data.target_id > 0
+        reactToSyncLesion(SyncLesionEvent(data.target_id), stateObjects)
+    end
+end
+
 const tp_loader_ref = Ref{Any}(nothing)
-const _preload_task = Ref{Any}(nothing)
-export register_tp_loader!, get_or_load_tp_data, last_bone_surf_indices, last_bone_marr_indices
+const io_channel = Ref{Any}(nothing)
+const main_event_channel = Ref{Any}(nothing)
+export register_tp_loader!, register_main_channel!, get_or_load_tp_data, last_bone_surf_indices, last_bone_marr_indices
 export TpCacheEntry, invalidate_suv_for_lesion
+
+function register_main_channel!(ch::Channel)
+    main_event_channel[] = ch
+end
+
+# IO channel message types for background TP loading/eviction
+struct PreloadTPMessage
+    tp_idx::Int
+end
+
+struct EvictAndPreloadMessage
+    evict_tps::Vector{Int}
+    preload_tps::Vector{Int}
+end
+
+const io_channel = Ref{Any}(nothing)
+const _io_task_started = Ref(false)
+export io_channel, PreloadTPMessage, EvictAndPreloadMessage
+
+"""Start the IO consumer task if not already running. Must be called at runtime, not precompile time."""
+function _ensure_io_task!()
+    _io_task_started[] && return
+    _io_task_started[] = true
+    io_channel[] = Channel{Any}(16)
+    Threads.@spawn begin
+        for msg in io_channel[]
+            try
+                if msg isa PreloadTPMessage
+                    tp = msg.tp_idx
+                    if !haskey(tp_data_cache, tp) && tp_loader_ref[] !== nothing
+                        t = @elapsed begin
+                            entry = tp_loader_ref[](tp)
+                            entry !== nothing && (tp_data_cache[tp] = entry)
+                        end
+                        println("  [IO] Preloaded TP $tp in $(round(t, digits=1))s"); flush(stdout)
+                    else
+                        println("  [IO] TP $tp already cached, skipping"); flush(stdout)
+                    end
+                elseif msg isa EvictAndPreloadMessage
+                    # Evict first to free memory before loading new data
+                    for tp in msg.evict_tps
+                        delete!(tp_data_cache, tp)
+                    end
+                    if !isempty(msg.evict_tps)
+                        GC.gc(false)
+                        println("  [IO] Evicted TPs $(msg.evict_tps)"); flush(stdout)
+                    end
+                    # Then preload neighbors
+                    for tp in msg.preload_tps
+                        if !haskey(tp_data_cache, tp) && tp_loader_ref[] !== nothing
+                            t = @elapsed begin
+                                entry = tp_loader_ref[](tp)
+                                entry !== nothing && (tp_data_cache[tp] = entry)
+                            end
+                            println("  [IO] Preloaded TP $tp in $(round(t, digits=1))s"); flush(stdout)
+                        end
+                    end
+                end
+            catch e
+                println("  [IO] Error processing message: $e"); flush(stdout)
+            end
+        end
+    end
+    println("  [IO] Background IO task started"); flush(stdout)
+end
 
 function register_tp_loader!(fn)
     tp_loader_ref[] = fn
+    _ensure_io_task!()  # Start IO consumer task on first registration
+    
+    # Eagerly preload neighbor TPs (TP 1, TP 2) so clicking TP>> is instant
+    Threads.@spawn begin
+        sleep(0.5)  # Allow initial display to finish first
+        tp_indices = sort(collect(keys(tp_labels)))
+        for tp_idx in tp_indices
+            if tp_idx != 0 && !haskey(tp_data_cache, tp_idx) && io_channel[] !== nothing
+                try
+                    put!(io_channel[], PreloadTPMessage(tp_idx))
+                    println("  [STARTUP] Dispatched background preload for TP $tp_idx"); flush(stdout)
+                catch; end
+            end
+        end
+    end
 end
 
 function get_or_load_tp_data(idx::Int)
@@ -737,16 +872,24 @@ function get_or_load_tp_data(idx::Int)
     return nothing
 end
 
-"""Load a TpCacheEntry into a specific panel, using PermutedDimsArray for sag/cor views."""
-function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
+"""Load a TpCacheEntry into a specific panel, using PermutedDimsArray for sag/cor views.
+Pre-converted Float32 arrays can be passed to avoid redundant conversions across panels."""
+function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx;
+                              mask_f32=nothing, bone_s_f32=nothing, bone_m_f32=nothing)
     if panel_idx > length(stateObjects)
         return
     end
     
-    # Convert compact types to Float32 for OpenGL textures
-    mask_f32 = Float32.(entry.mask)
-    bone_s_f32 = Float32.(entry.bone_surf)
-    bone_m_f32 = Float32.(entry.bone_marr)
+    # Convert compact types to Float32 only if not pre-supplied
+    if mask_f32 === nothing
+        mask_f32 = Float32.(entry.mask)
+    end
+    if bone_s_f32 === nothing
+        bone_s_f32 = Float32.(entry.bone_surf)
+    end
+    if bone_m_f32 === nothing
+        bone_m_f32 = Float32.(entry.bone_marr)
+    end
     
     # Use PermutedDimsArray for zero-copy views
     panel_voxels = if panel_idx == 3  # Sagittal (Y,Z,X)
@@ -768,11 +911,25 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
             ("Bone_Surface", bone_s_f32), ("Bone_Marrow", bone_m_f32)]
     end
     
-    # Insert manualModif at index 2
+    # Insert manualModif at index 2 — reuse existing buffer from stateObject when possible
+    existing_manual = nothing
+    if !isempty(stateObjects[panel_idx].onScrollData.dataToScroll)
+        for scrDat in stateObjects[panel_idx].onScrollData.dataToScroll
+            if scrDat.name == "manualModif"
+                if size(scrDat.dat) == size(panel_voxels[1][2])
+                    existing_manual = scrDat.dat
+                    fill!(existing_manual, 0.0f0)
+                end
+                break
+            end
+        end
+    end
+    manual_buf = existing_manual !== nothing ? existing_manual : zeros(Float32, size(panel_voxels[1][2]))
+    
     if panel_idx != 2 && (length(panel_voxels) < 2 || panel_voxels[2][1] != "manualModif")
-        insert!(panel_voxels, 2, ("manualModif", zeros(Float32, size(panel_voxels[1][2]))))
+        insert!(panel_voxels, 2, ("manualModif", manual_buf))
     elseif panel_idx == 2
-        insert!(panel_voxels, 1, ("manualModif", zeros(Float32, size(panel_voxels[1][2]))))
+        insert!(panel_voxels, 1, ("manualModif", manual_buf))
     end
     
     newDataToScroll = StructsManag.getThreeDims(panel_voxels)
@@ -792,38 +949,16 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
     stateObjects[panel_idx].currentlyDispDat = SingleSliceDat()
 end
 
-"""Background-preload adjacent TPs so next/prev switch is instant."""
-function _preload_neighbors_async(tp_indices::Vector{Int}, cur_pos::Int)
-    num = length(tp_indices)
-    num <= 1 && return
-    next_tp = tp_indices[mod1(cur_pos + 1, num)]
-    prev_tp = tp_indices[mod1(cur_pos - 1, num)]
-    
-    _preload_task[] = @async begin
-        for tp in [next_tp, prev_tp]
-            if !haskey(tp_data_cache, tp) && tp_loader_ref[] !== nothing
-                try
-                    t = @elapsed begin
-                        entry = tp_loader_ref[](tp)
-                        if entry !== nothing
-                            tp_data_cache[tp] = entry
-                        end
-                    end
-                    println("  [PRELOAD] TP $tp loaded in $(round(t, digits=1))s"); flush(stdout)
-                catch e
-                    println("  [PRELOAD] TP $tp failed: $e"); flush(stdout)
-                end
-            end
-        end
-    end
-end
 
 """Invalidate cached SUV and centroid data for a lesion after mask modification."""
 function invalidate_suv_for_lesion(lesion_id::Int, tp_idx::Int)
     try
-        LMW = MedEye3d.LesionMetadataWindow
+        LMW = Main.MedEye3d.LesionMetadataWindow
         if isdefined(LMW, :_lesion_suv_cache)
             delete!(LMW._lesion_suv_cache, (tp_idx, lesion_id))
+        end
+        if isdefined(LMW, :_db_dirty)
+            LMW._db_dirty[] = true
         end
     catch; end
     delete!(lesion_centroids_cache, (tp_idx, lesion_id))
@@ -843,6 +978,8 @@ const global_ts_atlas = Ref{Any}(nothing)          # 3D UInt8/Int array (axial, 
 const global_ts_names = Ref{Dict{Int,String}}(Dict{Int,String}())  # TS label -> organ name
 # Patient identification
 const patient_id = Ref{String}("")
+# Path to preprocessed HDF5 file (single source of truth for JSON metadata)
+const h5_path_ref = Ref{String}("")
 # Study modalities per TP: tp_index -> "PET" or "SPECT"
 const tp_modalities = Dict{Int, String}()
 # Current PET/CT blend weight (0.0=CT only, 1.0=full PET overlay)
@@ -852,7 +989,7 @@ const volume_z_size = Ref(0)
 
 export tp_data_cache, bone_subsegments_cache, lesion_centroids_cache, global_bone_atlas, global_organ_mapping, current_tp_index, tp_labels, tp_descriptions
 export compare_mode, compare_right_tp
-export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, tp_modalities, volume_z_size
+export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, h5_path_ref, tp_modalities, volume_z_size
 
 
 function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector{StateDataFields})
@@ -889,7 +1026,11 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         
         t_panel_left = @elapsed begin
             if entry_left !== nothing
-                _load_tp_from_entry!(stateObjects, entry_left, 1)
+                # Pre-convert once for left panel
+                lm = Float32.(entry_left.mask)
+                ls = Float32.(entry_left.bone_surf)
+                lmr = Float32.(entry_left.bone_marr)
+                _load_tp_from_entry!(stateObjects, entry_left, 1; mask_f32=lm, bone_s_f32=ls, bone_m_f32=lmr)
             end
         end
         println("  [BENCH] _load_tp_from_entry!(left): $(round(t_panel_left*1000, digits=1))ms"); flush(stdout)
@@ -906,7 +1047,11 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         
         t_panel_right = @elapsed begin
             if entry_right !== nothing
-                _load_tp_from_entry!(stateObjects, entry_right, 5)
+                # Pre-convert once for right panel
+                rm = Float32.(entry_right.mask)
+                rs = Float32.(entry_right.bone_surf)
+                rmr = Float32.(entry_right.bone_marr)
+                _load_tp_from_entry!(stateObjects, entry_right, 5; mask_f32=rm, bone_s_f32=rs, bone_m_f32=rmr)
             end
         end
         println("  [BENCH] _load_tp_from_entry!(right): $(round(t_panel_right*1000, digits=1))ms"); flush(stdout)
@@ -922,6 +1067,11 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         end
         println("  [BENCH] reactToScroll ×2: $(round(t_render*1000, digits=1))ms"); flush(stdout)
         
+        # Re-apply bone overlay for active lesion after TP data replacement
+        if current_active_lesion_id[] > 0
+            reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects)
+        end
+        
         right_label = get(tp_labels, right_tp, "TP $right_tp")
         println("Compare: Left=$label, Right=$right_label"); flush(stdout)
     else
@@ -934,14 +1084,20 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         if entry !== nothing
             num_panels = min(length(stateObjects), 5)
             t_panels = @elapsed begin
+                # Pre-convert arrays ONCE for all panels (saves ~20GB allocation)
+                mask_f32 = Float32.(entry.mask)
+                bone_s_f32 = Float32.(entry.bone_surf)
+                bone_m_f32 = Float32.(entry.bone_marr)
                 for i in [1, 2, 3, 4]
                     if i <= length(stateObjects)
-                        _load_tp_from_entry!(stateObjects, entry, i)
+                        _load_tp_from_entry!(stateObjects, entry, i;
+                            mask_f32=mask_f32, bone_s_f32=bone_s_f32, bone_m_f32=bone_m_f32)
                     end
                 end
                 # Panel 5 (compare right) also uses same entry in non-compare mode
                 if length(stateObjects) >= 5
-                    _load_tp_from_entry!(stateObjects, entry, 5)
+                    _load_tp_from_entry!(stateObjects, entry, 5;
+                        mask_f32=mask_f32, bone_s_f32=bone_s_f32, bone_m_f32=bone_m_f32)
                 end
             end
             println("  [BENCH] _load_tp_from_entry! ×panels (PermutedDimsArray): $(round(t_panels*1000, digits=1))ms"); flush(stdout)
@@ -956,27 +1112,30 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
                 stateObjects[1].switchIndex = old_idx
             end
             println("  [BENCH] reactToScroll ×panels: $(round(t_render*1000, digits=1))ms"); flush(stdout)
+            
+            # Re-apply bone overlay for active lesion after TP data replacement
+            if current_active_lesion_id[] > 0
+                reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects)
+            end
         end
     end
-    
-    # Sliding window eviction: keep prev + current + next (+ compare_right)
-    t_gc = @elapsed begin
-        needed_tps = Set([new_tp])
-        if num_tps > 1
-            prev_tp = tp_indices[mod1(new_pos - 1, num_tps)]
-            next_tp_idx = tp_indices[mod1(new_pos + 1, num_tps)]
-            push!(needed_tps, prev_tp, next_tp_idx)
-        end
-        compare_mode[] && push!(needed_tps, compare_right_tp[])
-        for k in collect(keys(tp_data_cache))
-            k in needed_tps || delete!(tp_data_cache, k)
-        end
-        GC.gc(false)
+    # Dispatch eviction + preload to IO channel (non-blocking)
+    needed_tps = Set([new_tp])
+    preload_tps = Int[]
+    if num_tps > 1
+        prev_tp = tp_indices[mod1(new_pos - 1, num_tps)]
+        next_tp_idx = tp_indices[mod1(new_pos + 1, num_tps)]
+        push!(needed_tps, prev_tp, next_tp_idx)
+        # Preload next first (most likely direction), then prev
+        !haskey(tp_data_cache, next_tp_idx) && push!(preload_tps, next_tp_idx)
+        !haskey(tp_data_cache, prev_tp) && push!(preload_tps, prev_tp)
     end
-    println("  [BENCH] evict+GC: $(round(t_gc*1000, digits=1))ms"); flush(stdout)
-    
-    # Background-preload adjacent TPs for instant next/prev switching
-    _preload_neighbors_async(tp_indices, new_pos)
+    compare_mode[] && push!(needed_tps, compare_right_tp[])
+    evict_tps = Int[k for k in keys(tp_data_cache) if !(k in needed_tps)]
+    if !isempty(evict_tps) || !isempty(preload_tps)
+        put!(io_channel[], EvictAndPreloadMessage(evict_tps, preload_tps))
+    end
+    println("  [BENCH] IO dispatched: evict=$(evict_tps), preload=$(preload_tps)"); flush(stdout)
     
     # Requirement: Automatically return to Lesion 1 when changing time points
     t_sync = @elapsed begin
@@ -992,7 +1151,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
     # Pre-compute SUV for all lesions in the current TP
     t_suv = @elapsed begin
         try
-            LMW = MedEye3d.LesionMetadataWindow
+            LMW = Main.MedEye3d.LesionMetadataWindow
             if haskey(tp_data_cache, new_tp)
                 cached_entry = tp_data_cache[new_tp]
                 unique_ids = Set{Int}()
@@ -1235,78 +1394,26 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
     println("$(data.algorithm) segmented $(count(data.mask .> 0)) patch voxels for lesion $(data.active_id) at ($(data.cx), $(data.cy), $(data.cz))."); flush(stdout)
     
     # Compute bone subsegments on the fly for this lesion (only if in bone)
-    if global_bone_atlas[] !== nothing
-        try
-            bone_atlas = global_bone_atlas[]
-            lesion_indices = findall(seg_vol .== Float32(data.active_id))
-            has_bone_overlap = !isempty(lesion_indices) && any(idx -> checkbounds(Bool, bone_atlas, idx) && bone_atlas[idx] > 0.0f0, lesion_indices)
-            if has_bone_overlap
-                spacing = (1.5f0, 1.5f0, 2.0f0)
-                surf_mask, marr_mask = MedEye3d.BoneSubsegmentation.generate_bone_subsegments(seg_vol, bone_atlas, spacing, data.active_id)
-                pts_surf = findall(surf_mask)
-                pts_marr = findall(marr_mask)
-                bone_subsegments_cache[data.active_id] = (pts_surf, pts_marr)
-                println("Generated on-the-fly bone subsegments for lesion $(data.active_id): $(length(pts_surf)) surface, $(length(pts_marr)) marrow"); flush(stdout)
-            else
-                bone_subsegments_cache[data.active_id] = (CartesianIndex{3}[], CartesianIndex{3}[])
-                println("Lesion $(data.active_id) does not overlap bone atlas — skipping bone subsegmentation"); flush(stdout)
-            end
-        catch e
-            println("WARNING: Failed to recalculate bone subsegments for lesion $(data.active_id): $e"); flush(stdout)
-        end
+    # (Removed synchronous computation - it is now delegated to the async _get_or_compute_bone_subseg below)
+
+    # Invalidate cache for the active lesion on all visible TPs so it recomputes after AI paints it
+    target_lid = data.active_id
+    delete!(bone_subsegments_cache, (current_tp_index[], target_lid))
+    delete!(bone_subsegments_cache, (get_node_name_for_tp(current_tp_index[]), target_lid))
+    if compare_mode[]
+        delete!(bone_subsegments_cache, (compare_right_tp[], target_lid))
+        delete!(bone_subsegments_cache, (get_node_name_for_tp(compare_right_tp[]), target_lid))
     end
 
     # Update bone surface & marrow textures in all panels
     for (panel_idx, stateObject) in enumerate(stateObjects)
         panel_tp = (panel_idx == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
-        target_lid = data.active_id
         
-        cached_entry = if haskey(bone_subsegments_cache, (panel_tp, target_lid))
-            bone_subsegments_cache[(panel_tp, target_lid)]
-        elseif haskey(bone_subsegments_cache, (get_node_name_for_tp(panel_tp), target_lid))
-            bone_subsegments_cache[(get_node_name_for_tp(panel_tp), target_lid)]
-        elseif panel_tp == 0 && haskey(bone_subsegments_cache, target_lid)
-            bone_subsegments_cache[target_lid]
-        else
-            nothing
-        end
-        
-        panel_surf_pts = CartesianIndex{3}[]
-        panel_marr_pts = CartesianIndex{3}[]
-        
-        if cached_entry !== nothing
-            raw_surf, raw_marr = cached_entry
-            panel_surf_pts = raw_surf isa AbstractArray{<:CartesianIndex} ? raw_surf : findall(raw_surf .> 0)
-            panel_marr_pts = raw_marr isa AbstractArray{<:CartesianIndex} ? raw_marr : findall(raw_marr .> 0)
-        else
-            try
-                panel_seg = nothing
-                panel_ct = nothing
-                for dat in stateObject.onScrollData.dataToScroll
-                    if dat.name == "Mask" || dat.name == "segmentation"
-                        panel_seg = dat.dat
-                    elseif dat.name == "CT"
-                        panel_ct = dat.dat
-                    end
-                end
-                if panel_seg !== nothing
-                    local_bone_atlas = panel_ct !== nothing ? Float32.(panel_ct .> 150.0f0) : global_bone_atlas[]
-                    if local_bone_atlas !== nothing
-                        panel_lesion_indices = findall(panel_seg .== Float32(target_lid))
-                        has_bone = !isempty(panel_lesion_indices) && any(idx -> checkbounds(Bool, local_bone_atlas, idx) && local_bone_atlas[idx] > 0.0f0, panel_lesion_indices)
-                        if has_bone
-                            s_mask, m_mask = MedEye3d.BoneSubsegmentation.generate_bone_subsegments(panel_seg, local_bone_atlas, (1.5f0, 1.5f0, 2.0f0), target_lid)
-                            panel_surf_pts = findall(s_mask)
-                            panel_marr_pts = findall(m_mask)
-                            bone_subsegments_cache[(panel_tp, target_lid)] = (panel_surf_pts, panel_marr_pts)
-                        else
-                            bone_subsegments_cache[(panel_tp, target_lid)] = (CartesianIndex{3}[], CartesianIndex{3}[])
-                        end
-                    end
-                end
-            catch e
-                println("Failed to recalc bone for panel $panel_idx in reactToActiveLesionChanged: $e")
-            end
+        panel_surf_pts, panel_marr_pts = try
+            _get_or_compute_bone_subseg(stateObject, target_lid, panel_tp)
+        catch e
+            println("Failed to recalc bone for panel $panel_idx in reactToActiveLesionChanged: $e")
+            (CartesianIndex{3}[], CartesianIndex{3}[])
         end
         surf_indices = if panel_idx == 3
             [CartesianIndex(I[2], I[3], I[1]) for I in panel_surf_pts]
@@ -1364,18 +1471,11 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
     # Synchronize tp_data_cache
     tp_idx = current_tp_index[]
     if haskey(tp_data_cache, tp_idx)
-        tp_voxels = tp_data_cache[tp_idx]
-        for (p_idx, panel_data) in enumerate(tp_voxels)
-            for entry in panel_data
-                if entry[1] == "Mask" || entry[1] == "manualModif" || entry[1] == "segmentation"
-                    for st_dat in stateObjects[p_idx].onScrollData.dataToScroll
-                        if st_dat.name == entry[1]
-                            entry[2] .= st_dat.dat
-                            break
-                        end
-                    end
-                end
-            end
+        entry = tp_data_cache[tp_idx]
+        if entry.mask isa Array{Int8, 3}
+            entry.mask .= round.(Int8, seg_vol)
+        else
+            entry.mask .= round.(Int16, seg_vol)
         end
     end
 
@@ -1459,70 +1559,25 @@ function reactToSyncMissing(data::SyncMissingEvent, stateObjects::Vector{StateDa
 end
 
 function reactToGenManual(data::GenManualEvent, stateObjects::Vector{StateDataFields})
-    println("Bone subsegmentation triggered for lesion $(data.lesion_id)"); flush(stdout)
-    tp1_state = stateObjects[1]
+    println("Bone subsegmentation (manual) triggered for lesion $(data.lesion_id)"); flush(stdout)
     
-    seg_vol = tp1_state.mainForDisplayObjects.listOfTextSpecifications[3].imageTexture
-    ct_vol = tp1_state.mainForDisplayObjects.listOfTextSpecifications[2].imageTexture
+    tp_idx = current_tp_index[]
     
-    bone_atlas = Float32.(ct_vol .> 150.0f0)
-    spacing = (1.5f0, 1.5f0, 2.0f0)
-    
-    try
-        surf, marr = MedEye3d.BoneSubsegmentation.generate_bone_subsegments(seg_vol, bone_atlas, spacing, data.lesion_id)
-        
-        tp_idx = current_tp_index[]
-        if haskey(tp_data_cache, tp_idx)
-            tp_voxels = tp_data_cache[tp_idx]
-            
-            # Since tp_voxels is a Vector{Vector{Any}} (one for each panel)
-            for (panel_idx, panel_data) in enumerate(tp_voxels)
-                # Create masks based on the panel's data dimension
-                # Panel 1 and 5 (axial), Panel 3 (sagittal), Panel 4 (coronal)
-                # For simplicity, we create the full 3D volumes in axial layout first
-                surf_vol = zeros(Float32, size(seg_vol))
-                marr_vol = zeros(Float32, size(seg_vol))
-                surf_vol[surf] .= 1.0f0
-                marr_vol[marr] .= 1.0f0
-                
-                # Transform to panel's orientation if needed
-                if panel_idx == 3 # Sagittal (Y, Z, X)
-                    surf_vol = permutedims(surf_vol, (2, 3, 1))
-                    marr_vol = permutedims(marr_vol, (2, 3, 1))
-                elseif panel_idx == 4 # Coronal (X, Z, Y)
-                    surf_vol = permutedims(surf_vol, (1, 3, 2))
-                    marr_vol = permutedims(marr_vol, (1, 3, 2))
-                end
-                
-                # Remove existing if any
-                filter!(v -> v[1] != "Bone_Surface" && v[1] != "Bone_Marrow", panel_data)
-                
-                # Append
-                push!(panel_data, ("Bone_Surface", surf_vol))
-                push!(panel_data, ("Bone_Marrow", marr_vol))
-            end
-            
-            println("Bone subsegments generated and saved as separate label maps."); flush(stdout)
-            
-            # Re-initialize the panels to register the new textures
-            num_panels = min(4, length(stateObjects))
-            for i in 1:num_panels
-                _load_tp_into_panel!(stateObjects, tp_voxels, i)
-            end
-            
-            old_idx = stateObjects[1].switchIndex
-            for i in 1:num_panels
-                stateObjects[1].switchIndex = i
-                reactToScroll(0, stateObjects, false)
-            end
-            stateObjects[1].switchIndex = old_idx
-        else
-            error("tp_data_cache not available. Cannot generate bone subsegments outside interactive mode. No fallbacks allowed.")
-        end
-        
-    catch e
-        println("ERROR: Failed to generate bone subsegments: $e"); flush(stdout)
+    # Invalidate bone subsegment cache for this lesion
+    delete!(bone_subsegments_cache, (tp_idx, data.lesion_id))
+    delete!(bone_subsegments_cache, (get_node_name_for_tp(tp_idx), data.lesion_id))
+    delete!(bone_subsegments_cache, data.lesion_id)
+    if compare_mode[]
+        delete!(bone_subsegments_cache, (compare_right_tp[], data.lesion_id))
+        delete!(bone_subsegments_cache, (get_node_name_for_tp(compare_right_tp[]), data.lesion_id))
     end
+    
+    # Invalidate centroid cache as well
+    delete!(lesion_centroids_cache, (tp_idx, data.lesion_id))
+    delete!(lesion_centroids_cache, data.lesion_id)
+    
+    # Trigger an async recomputation by forcing a sync lesion update
+    reactToSyncLesion(SyncLesionEvent(data.lesion_id), stateObjects)
 end
 
 function reactToMapLink(data::MapLinkEvent, stateObjects::Vector{StateDataFields})
@@ -1597,8 +1652,8 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
     
     # If bone surface or marrow is toggled, also sync dataToScroll buffer directly
     if data.layer == 2 || data.layer == 3
-        cur_lid = (current_active_lesion_id[] > 0) ? current_active_lesion_id[] : stateObjects[1].valueForMasToSet.value
-        println("  Bone data sync: cur_lid=$cur_lid, in_cache=$(haskey(bone_subsegments_cache, cur_lid))")
+        cur_lid = (current_active_lesion_id[] > 0) ? current_active_lesion_id[] : round(Int, stateObjects[1].valueForMasToSet.value)
+        println("  Bone data sync: cur_lid=$cur_lid, in_cache=$(haskey(bone_subsegments_cache, (current_tp_index[], cur_lid)))")
         flush(stdout)
         for (panel_idx, stateObject) in enumerate(stateObjects)
             for scrDat in stateObject.onScrollData.dataToScroll
@@ -1615,52 +1670,13 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
                         end
                     elseif cur_lid > 0
                         panel_tp = (panel_idx == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
-                        cached_entry = if haskey(bone_subsegments_cache, (panel_tp, cur_lid))
-                            bone_subsegments_cache[(panel_tp, cur_lid)]
-                        elseif haskey(bone_subsegments_cache, (get_node_name_for_tp(panel_tp), cur_lid))
-                            bone_subsegments_cache[(get_node_name_for_tp(panel_tp), cur_lid)]
-                        elseif panel_tp == 0 && haskey(bone_subsegments_cache, cur_lid)
-                            bone_subsegments_cache[cur_lid]
-                        else
-                            nothing
+                        panel_surf_pts, panel_marr_pts = try
+                            _get_or_compute_bone_subseg(stateObject, cur_lid, panel_tp)
+                        catch e
+                            println("Failed to recalc bone for panel $panel_idx (toggle): $e")
+                            (CartesianIndex{3}[], CartesianIndex{3}[])
                         end
-                        
-                        panel_pts = CartesianIndex{3}[]
-                        if cached_entry !== nothing
-                            raw_surf, raw_marr = cached_entry
-                            panel_pts = (data.layer == 2) ? (raw_surf isa AbstractArray{<:CartesianIndex} ? raw_surf : findall(raw_surf .> 0)) :
-                                                            (raw_marr isa AbstractArray{<:CartesianIndex} ? raw_marr : findall(raw_marr .> 0))
-                        else
-                            try
-                                panel_seg = nothing
-                                panel_ct = nothing
-                                for scr in stateObject.onScrollData.dataToScroll
-                                    if scr.name == "Mask" || scr.name == "segmentation"
-                                        panel_seg = scr.dat
-                                    elseif scr.name == "CT"
-                                        panel_ct = scr.dat
-                                    end
-                                end
-                                if panel_seg !== nothing
-                                    local_bone_atlas = panel_ct !== nothing ? Float32.(panel_ct .> 150.0f0) : global_bone_atlas[]
-                                    if local_bone_atlas !== nothing
-                                        panel_lesion_indices = findall(panel_seg .== Float32(cur_lid))
-                                        has_bone = !isempty(panel_lesion_indices) && any(idx -> checkbounds(Bool, local_bone_atlas, idx) && local_bone_atlas[idx] > 0.0f0, panel_lesion_indices)
-                                        if has_bone
-                                            s_mask, m_mask = MedEye3d.BoneSubsegmentation.generate_bone_subsegments(panel_seg, local_bone_atlas, (1.5f0, 1.5f0, 2.0f0), cur_lid)
-                                            pts_surf = findall(s_mask)
-                                            pts_marr = findall(m_mask)
-                                            bone_subsegments_cache[(panel_tp, cur_lid)] = (pts_surf, pts_marr)
-                                            panel_pts = (data.layer == 2) ? pts_surf : pts_marr
-                                        else
-                                            bone_subsegments_cache[(panel_tp, cur_lid)] = (CartesianIndex{3}[], CartesianIndex{3}[])
-                                        end
-                                    end
-                                end
-                            catch e
-                                println("Failed to recalc bone for panel $panel_idx (toggle): $e")
-                            end
-                        end
+                        panel_pts = (data.layer == 2) ? panel_surf_pts : panel_marr_pts
                         # Use canonical indices matching reactToSyncLesion and reactToActiveLesionChanged
                         indices = if panel_idx == 3 # Sagittal (Y, Z, X)
                             [CartesianIndex(I[2], I[3], I[1]) for I in panel_pts]

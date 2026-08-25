@@ -3,6 +3,7 @@ module LesionAssociation
 using JSON
 using Statistics
 using CodecZlib
+using HDF5
 
 const ASSOC_JSON_PATH = joinpath(homedir(), "medeye3d_lesion_associations.json")
 const OVERLAP_MAPPING = Dict{Tuple{String, String, String}, Vector{String}}()
@@ -12,8 +13,9 @@ const OVERLAP_MAPPING = Dict{Tuple{String, String, String}, Vector{String}}()
 const MATCH_GROUPS = Dict{Int, Vector{Tuple{String, Int, String}}}()
 
 export load_associations, save_associations, get_children, map_link
-export parse_nrrd_segment_names, load_matches_json, get_match_groups
+export parse_nrrd_segment_names, load_matches_json, load_matches_from_h5, save_matches_to_h5, get_match_groups
 export find_cross_tp_lesion, get_group_id_for_lesion
+export update_match_group!, remove_from_match_group!
 
 """
 Parse NRRD seg.nrrd header to extract LabelValue → Name mapping.
@@ -78,56 +80,200 @@ function load_matches_json(json_path::String)
     
     try
         data = JSON.parse(read(json_path, String))
-        
-        for root in data
-            # group_id might be at root or inside the first child
-            gid = get(root, "group_id", 0)
-            if gid == 0 && haskey(root, "children") && !isempty(root["children"])
-                gid = get(root["children"][1], "group_id", 0)
-            end
-            
-            if gid == 0
-                continue
-            end
-            
-            if !haskey(MATCH_GROUPS, gid)
-                MATCH_GROUPS[gid] = Tuple{String, Int, String}[]
-            end
-            
-            # Parse the root/parent entry
-            raw = get(root, "raw_lesion", "")
-            if !isempty(raw)
-                seg_int = parse(Int, replace(raw, "Segment_" => ""))
-                name = get(root, "lesion", raw)
-                node = get(root, "name", "")
-                entry = (node, seg_int, name)
-                if !(entry in MATCH_GROUPS[gid])
-                    push!(MATCH_GROUPS[gid], entry)
-                end
-            end
-            
-            # Parse children
-            for child in get(root, "children", [])
-                c_raw = get(child, "raw_lesion", "")
-                if isempty(c_raw)
-                    continue
-                end
-                c_int = parse(Int, replace(c_raw, "Segment_" => ""))
-                c_name = get(child, "lesion", c_raw)
-                c_node = get(child, "name", "")
-                c_entry = (c_node, c_int, c_name)
-                if !(c_entry in MATCH_GROUPS[gid])
-                    push!(MATCH_GROUPS[gid], c_entry)
-                end
-            end
-        end
-        
+        _parse_matches_data(data)
         @info "Loaded $(length(MATCH_GROUPS)) match groups from $(basename(json_path))"
     catch e
         @warn "Failed to load matches.json: $e"
     end
     
     return MATCH_GROUPS
+end
+
+"""
+Load match groups from the 'matches.json' HDF5 string attribute.
+HDF5 is the single source of truth after preprocessing.
+"""
+function load_matches_from_h5(h5_path::String)
+    empty!(MATCH_GROUPS)
+    if !isfile(h5_path)
+        @warn "HDF5 file not found: $h5_path"
+        return MATCH_GROUPS
+    end
+    try
+        HDF5.h5open(h5_path, "r") do f
+            if haskey(f, "_meta_") && haskey(f["_meta_"], "matches.json")
+                json_str = read(f["_meta_/matches.json"])
+                _parse_matches_data(JSON.parse(json_str))
+                @info "Loaded $(length(MATCH_GROUPS)) match groups from HDF5 _meta_ dataset"
+            else
+                @warn "No _meta_/matches.json dataset in $h5_path"
+            end
+        end
+    catch e
+        @warn "Failed to load matches from HDF5: $e"
+    end
+    return MATCH_GROUPS
+end
+
+"""
+Rebuild matches.json from MATCH_GROUPS and save as HDF5 dataset in _meta_ group.
+"""
+function save_matches_to_h5(h5_path::String)
+    if !isfile(h5_path)
+        @warn "HDF5 file not found for saving: $h5_path"
+        return
+    end
+    output = _match_groups_to_json()
+    json_str = JSON.json(output, 4)
+    try
+        HDF5.h5open(h5_path, "r+") do f
+            if !haskey(f, "_meta_")
+                create_group(f, "_meta_")
+            end
+            if haskey(f["_meta_"], "matches.json")
+                delete_object(f["_meta_"], "matches.json")
+            end
+            f["_meta_/matches.json"] = json_str
+        end
+        @info "Saved $(length(MATCH_GROUPS)) match groups to HDF5 _meta_ dataset"
+    catch e
+        @warn "Failed to save matches to HDF5: $e"
+    end
+end
+
+"""
+Link src and dst lesions in a match group and persist to HDF5.
+"""
+function update_match_group!(
+    src_node::String, src_seg_int::Int,
+    dst_node::String, dst_seg_int::Int,
+    h5_path::String
+)
+    existing_gid = nothing
+    for (gid, members) in MATCH_GROUPS
+        if any(m -> m[1] == src_node && m[2] == src_seg_int, members)
+            existing_gid = gid
+            break
+        end
+    end
+    
+    if existing_gid !== nothing
+        entry = (dst_node, dst_seg_int, "manual_$(dst_seg_int)_$(dst_node)")
+        if !(entry in MATCH_GROUPS[existing_gid])
+            push!(MATCH_GROUPS[existing_gid], entry)
+        end
+    else
+        new_gid = isempty(MATCH_GROUPS) ? 1 : maximum(keys(MATCH_GROUPS)) + 1
+        MATCH_GROUPS[new_gid] = [
+            (src_node, src_seg_int, "manual_$(src_seg_int)_$(src_node)"),
+            (dst_node, dst_seg_int, "manual_$(dst_seg_int)_$(dst_node)")
+        ]
+    end
+    
+    save_matches_to_h5(h5_path)
+end
+
+"""
+Remove a lesion from its match group and persist to HDF5.
+"""
+function remove_from_match_group!(node::String, seg_int::Int, h5_path::String)
+    for (gid, members) in MATCH_GROUPS
+        idx = findfirst(m -> m[1] == node && m[2] == seg_int, members)
+        if idx !== nothing
+            deleteat!(members, idx)
+            if length(members) <= 1
+                delete!(MATCH_GROUPS, gid)
+            end
+            break
+        end
+    end
+    save_matches_to_h5(h5_path)
+end
+
+"""
+Internal: Parse matches JSON data array into MATCH_GROUPS.
+"""
+function _parse_matches_data(data)
+    for root in data
+        gid = get(root, "group_id", 0)
+        if gid == 0 && haskey(root, "children") && !isempty(root["children"])
+            gid = get(root["children"][1], "group_id", 0)
+        end
+        
+        if gid == 0
+            continue
+        end
+        
+        if !haskey(MATCH_GROUPS, gid)
+            MATCH_GROUPS[gid] = Tuple{String, Int, String}[]
+        end
+        
+        # Parse the root/parent entry
+        raw = get(root, "raw_lesion", "")
+        if !isempty(raw)
+            seg_int = parse(Int, replace(raw, "Segment_" => ""))
+            name = get(root, "lesion", raw)
+            node = get(root, "name", "")
+            entry = (node, seg_int, name)
+            if !(entry in MATCH_GROUPS[gid])
+                push!(MATCH_GROUPS[gid], entry)
+            end
+        end
+        
+        # Parse children
+        for child in get(root, "children", [])
+            c_raw = get(child, "raw_lesion", "")
+            if isempty(c_raw)
+                continue
+            end
+            c_int = parse(Int, replace(c_raw, "Segment_" => ""))
+            c_name = get(child, "lesion", c_raw)
+            c_node = get(child, "name", "")
+            c_entry = (c_node, c_int, c_name)
+            if !(c_entry in MATCH_GROUPS[gid])
+                push!(MATCH_GROUPS[gid], c_entry)
+            end
+        end
+    end
+end
+
+"""
+Internal: Convert MATCH_GROUPS to JSON-serializable array.
+"""
+function _match_groups_to_json()
+    output = []
+    for (gid, members) in sort(collect(MATCH_GROUPS))
+        if isempty(members); continue; end
+        parent_idx = argmin([_tp_index_from_node(m[1]) for m in members])
+        parent = members[parent_idx]
+        children = [members[i] for i in 1:length(members) if i != parent_idx]
+        
+        root = Dict(
+            "name" => parent[1],
+            "raw_lesion" => "Segment_$(parent[2])",
+            "node" => "parent",
+            "lesion" => parent[3],
+            "volume_mm3" => 0.0,
+            "group_id" => gid,
+            "children" => [
+                Dict(
+                    "name" => c[1],
+                    "raw_lesion" => "Segment_$(c[2])",
+                    "lesion" => c[3],
+                    "volume_mm3" => 0.0,
+                    "group_id" => gid
+                ) for c in children
+            ]
+        )
+        push!(output, root)
+    end
+    return output
+end
+
+function _tp_index_from_node(node::String)::Int
+    parts = split(node, "_")
+    tp = tryparse(Int, parts[end])
+    return tp !== nothing ? tp : 999
 end
 
 """
