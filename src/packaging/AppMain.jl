@@ -304,35 +304,14 @@ function run_app(args::Vector{String})
     elseif "--demo" in args
         launch_demo(; quad=true)
     else
-        println("Launching MedEye3D Study & Data Selector Panel...")
-        next_action = Ref{Union{Function,Nothing}}(nothing)
-        
-        fig, screen = MedEye3d.StudySelectorWindow.open_study_selector(
-            on_select = (selected_path, quad_view) -> begin
-                println("Selected study: $selected_path (quadView=$quad_view)")
-                next_action[] = () -> launch_from_file(selected_path; quad=quad_view)
-            end,
-            on_demo = (quad_view) -> begin
-                println("Selected 3D synthetic demo (quadView=$quad_view)")
-                next_action[] = () -> launch_demo(; quad=quad_view)
-            end
-        )
-
-        try
-            while GLMakie.isopen(screen) && next_action[] === nothing
-                sleep(0.05)
-            end
-        catch
-        end
-
-        # If an action was chosen, gracefully close the selector screen and launch the viewer
-        if next_action[] !== nothing
-            try
-                GLFW.SetWindowShouldClose(GLMakie.to_native(screen), true)
-                sleep(0.15)
-            catch
-            end
-            next_action[]()
+        println("Opening MedEye3D File Selector / Demo Launcher...")
+        action, path = MedEye3d.StudySelectorWindow.prompt_open_or_demo()
+        if action == :file && isfile(path)
+            println("Selected file: ", path)
+            launch_from_file(path; quad=true)
+        else
+            println("No file selected. Launching interactive 3D demo phantom visualizer...")
+            launch_demo(; quad=true)
         end
     end
 end
@@ -341,15 +320,16 @@ end
     julia_main()::Cint
 
 Standard C-compatible entrypoint function required by PackageCompiler.jl.
-Captures stdio and stderr to prevent Windows GUI subsystem crashes (fd -2 error),
+Captures stdio and stderr into real-time flushed log files in `%APPDATA%\\MedEye3D\\logs`,
 initializes loggers, catches unhandled exceptions, and returns exit code 0.
 """
 function julia_main()::Cint
     log_dir = get_writable_log_dir()
     out_log_path = joinpath(log_dir, "medeye3d_output.log")
     err_log_path = joinpath(log_dir, "medeye3d_error.log")
+    session_log_path = joinpath(log_dir, "medeye3d_session.log")
 
-    # Rotate previous logs
+    # Rotate previous logs safely
     try
         if isfile(out_log_path)
             mv(out_log_path, joinpath(log_dir, "medeye3d_output_prev.log"), force=true)
@@ -360,39 +340,68 @@ function julia_main()::Cint
     catch
     end
 
-    out_io = open(out_log_path, "w")
-    err_io = open(err_log_path, "w")
+    out_file = open(out_log_path, "w")
+    err_file = open(err_log_path, "w")
 
-    println(out_io, "=======================================================")
-    println(out_io, " MedEye3D Session Started: ", Dates.now())
-    println(out_io, " Log Directory: ", log_dir)
-    println(out_io, " Julia Version: ", VERSION)
-    println(out_io, " Threads: ", Threads.nthreads())
-    println(out_io, "=======================================================")
-    flush(out_io)
+    init_msg = """
+    =======================================================
+     MedEye3D Session Started: $(Dates.now())
+     Log Directory: $log_dir
+     Output Log:    $out_log_path
+     Error Log:     $err_log_path
+     Julia Version: $VERSION
+     Threads:       $(Threads.nthreads())
+     Arguments:     $ARGS
+    =======================================================
+    """
+    println(out_file, init_msg)
+    flush(out_file)
 
-    redirect_stdio(stdout=out_io, stderr=err_io) do
-        logger = SimpleLogger(err_io, Logging.Info)
+    try
+        open(session_log_path, "a") do sess
+            println(sess, init_msg)
+            flush(sess)
+        end
+    catch
+    end
+
+    exit_code = Cint(0)
+    redirect_stdio(stdout=out_file, stderr=err_file) do
+        logger = SimpleLogger(err_file, Logging.Info)
         with_logger(logger) do
             try
                 run_app(ARGS)
             catch e
-                @error "Unhandled exception in MedEye3D main loop:" exception=(e, catch_backtrace())
-                println(stderr, "FATAL ERROR: ", e)
-                Base.show_backtrace(stderr, catch_backtrace())
+                exit_code = Cint(1)
+                err_msg = "FATAL UNHANDLED EXCEPTION: $(sprint(showerror, e))\n$(sprint(Base.show_backtrace, catch_backtrace()))"
+                println(stderr, err_msg)
                 flush(stderr)
-                return Cint(1)
+                try
+                    open(session_log_path, "a") do sess
+                        println(sess, "ERROR [$(Dates.now())]: $err_msg")
+                        flush(sess)
+                    end
+                catch
+                end
             finally
-                println(stdout, "MedEye3D Session Ended: ", Dates.now())
+                end_msg = "MedEye3D Session Ended: $(Dates.now()) (Exit code: $exit_code)\n"
+                println(stdout, end_msg)
                 flush(stdout)
                 flush(stderr)
-                close(out_io)
-                close(err_io)
+                try
+                    open(session_log_path, "a") do sess
+                        println(sess, end_msg)
+                        flush(sess)
+                    end
+                catch
+                end
+                try close(out_file) catch end
+                try close(err_file) catch end
             end
         end
     end
 
-    return Cint(0)
+    return exit_code
 end
 
 end # module MedEye3dApp
