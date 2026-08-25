@@ -1,11 +1,9 @@
 module StudySelectorWindow
 
-using GLMakie
-using Observables
 using Dates
 import GLFW
 
-export open_study_selector, scan_medical_files
+export open_study_selector, scan_medical_files, browse_file_dialog, browse_folder_dialog, prompt_open_or_demo
 
 """
     scan_medical_files(dir::String) -> Vector{String}
@@ -27,8 +25,8 @@ function scan_medical_files(dir::String)::Vector{String}
                     push!(found, rel)
                 end
             end
-            # Do not recurse too deep to prevent long pauses
-            if length(found) > 100
+            # Prevent scanning excessive files
+            if length(found) > 200
                 break
             end
         end
@@ -59,7 +57,7 @@ function browse_folder_dialog(initial_dir::String="")::String
             out = read(`powershell -NoProfile -Command $cmd`, String)
             selected = strip(out)
             if isdir(selected)
-                return selected
+                return String(selected)
             end
         catch e
             @warn "Failed to launch native folder dialog: $e"
@@ -79,8 +77,10 @@ function browse_file_dialog(initial_dir::String="")::String
         cmd = """
         Add-Type -AssemblyName System.Windows.Forms
         \$dialog = New-Object System.Windows.Forms.OpenFileDialog
-        \$dialog.Title = 'Select Medical Image File'
-        \$dialog.Filter = 'Medical Images (*.nii;*.nii.gz;*.mha;*.h5)|*.nii;*.nii.gz;*.mha;*.h5|All files (*.*)|*.*'
+        \$dialog.Title = 'MedEye3D - Select Medical Image to Visualize'
+        \$dialog.Filter = 'Medical Images (*.nii;*.nii.gz;*.mha;*.h5;*.dcm)|*.nii;*.nii.gz;*.mha;*.h5;*.dcm|NIfTI (*.nii;*.nii.gz)|*.nii;*.nii.gz|MetaImage (*.mha;*.mhd)|*.mha;*.mhd|HDF5 (*.h5;*.hdf5)|*.h5;*.hdf5|All files (*.*)|*.*'
+        \$dialog.FilterIndex = 1
+        \$dialog.RestoreDirectory = \$true
         $init_cmd
         if (\$dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
             Write-Output \$dialog.FileName
@@ -90,7 +90,7 @@ function browse_file_dialog(initial_dir::String="")::String
             out = read(`powershell -NoProfile -Command $cmd`, String)
             selected = strip(out)
             if isfile(selected)
-                return selected
+                return String(selected)
             end
         catch e
             @warn "Failed to launch native file dialog: $e"
@@ -100,165 +100,32 @@ function browse_file_dialog(initial_dir::String="")::String
 end
 
 """
-    open_study_selector(; on_select::Function=(path, quad)->nothing, on_demo::Function=(quad)->nothing)
+    prompt_open_or_demo(default_dir::String="") -> Tuple{Symbol, String}
 
-Opens an interactive GLMakie Study and Dataset Selection panel.
+Prompts the user via native Windows file dialog to choose a file or launch the demo phantom.
+Returns `(:file, path)` or `(:demo, "")`.
+"""
+function prompt_open_or_demo(default_dir::String="")::Tuple{Symbol, String}
+    selected_file = browse_file_dialog(default_dir)
+    if !isempty(selected_file) && isfile(selected_file)
+        return (:file, selected_file)
+    else
+        return (:demo, "")
+    end
+end
+
+"""
+    open_study_selector(; on_select::Union{Function,Nothing}=nothing, on_demo::Union{Function,Nothing}=nothing)
+
+Opens the native medical file selector or launches the 3D demo.
 """
 function open_study_selector(; on_select::Union{Function,Nothing}=nothing, on_demo::Union{Function,Nothing}=nothing)
-    default_dir = normpath(joinpath(@__DIR__, "..", ".."))
-    if !isdir(default_dir)
-        default_dir = homedir()
+    action, path = prompt_open_or_demo()
+    if action == :file && on_select !== nothing
+        on_select(path, true)
+    elseif on_demo !== nothing
+        on_demo(true)
     end
-
-    # Observables
-    current_dir = Observable(default_dir)
-    files_list = Observable(scan_medical_files(default_dir))
-    selected_file_index = Observable(1)
-    status_text = Observable("Ready. Select a folder or file to visualize.")
-    quad_view_obs = Observable(true)
-
-    # Initial options for Menu
-    menu_options = Observable(isempty(files_list[]) ? ["(No medical files found in current directory)"] : files_list[])
-
-    on(files_list) do fl
-        if isempty(fl)
-            menu_options[] = ["(No medical files found in current directory)"]
-            selected_file_index[] = 1
-        else
-            menu_options[] = fl
-            selected_file_index[] = 1
-        end
-    end
-
-    # GLMakie Figure
-    fig = Figure(size=(850, 520), backgroundcolor=RGBf(0.12, 0.13, 0.16))
-
-    # Header
-    Label(fig[1, 1:3], "MedEye3D - Study & Data Selector",
-        fontsize=22, font=:bold, color=RGBf(0.95, 0.95, 0.98), halign=:left)
-    Label(fig[2, 1:3], "Select a medical dataset folder, open an image file, or launch a synthetic 3D phantom.",
-        fontsize=13, color=RGBf(0.70, 0.73, 0.78), halign=:left)
-
-    # Folder Input Row
-    Label(fig[3, 1], "Folder Path:", fontsize=13, font=:bold, color=RGBf(0.85, 0.88, 0.92), halign=:left)
-    folder_tb = Textbox(fig[3, 2], placeholder="Enter or paste folder path...", stored_string=current_dir[],
-        fontsize=13, width=480, halign=:left)
-
-    btn_browse_folder = Button(fig[3, 3], label="Browse Folder...", fontsize=12,
-        buttoncolor=RGBf(0.22, 0.26, 0.32), labelcolor=RGBf(0.9, 0.9, 0.95))
-
-    # File / Quick actions Row
-    Label(fig[4, 1], "Detected Files:", fontsize=13, font=:bold, color=RGBf(0.85, 0.88, 0.92), halign=:left)
-    file_menu = Menu(fig[4, 2], options=menu_options, default=menu_options[][1], fontsize=13, width=480, halign=:left)
-
-    btn_browse_file = Button(fig[4, 3], label="Browse File...", fontsize=12,
-        buttoncolor=RGBf(0.22, 0.26, 0.32), labelcolor=RGBf(0.9, 0.9, 0.95))
-
-    # Options Row: QuadView Toggle
-    Label(fig[5, 1], "Display Mode:", fontsize=13, font=:bold, color=RGBf(0.85, 0.88, 0.92), halign=:left)
-    quad_toggle = Toggle(fig[5, 2], active=quad_view_obs[], halign=:left)
-    Label(fig[5, 2], "  Multi-Planar QuadView (Axial, Coronal, Sagittal, 3D)",
-        fontsize=12, color=RGBf(0.8, 0.82, 0.85), halign=:left, padding=(35, 0, 0, 0))
-
-    connect!(quad_view_obs, quad_toggle.active)
-
-    # Status Label
-    status_label = Label(fig[6, 1:3], status_text, fontsize=12, color=RGBf(0.6, 0.8, 1.0), halign=:left)
-
-    # Bottom Actions Grid
-    btn_grid = GridLayout(fig[7, 1:3])
-    
-    btn_demo = Button(btn_grid[1, 1], label="Launch 3D Demo", fontsize=13, font=:bold,
-        buttoncolor=RGBf(0.18, 0.42, 0.70), labelcolor=RGBf(1.0, 1.0, 1.0), height=42)
-
-    btn_open = Button(btn_grid[1, 2], label="Open Selected Study", fontsize=13, font=:bold,
-        buttoncolor=RGBf(0.16, 0.58, 0.36), labelcolor=RGBf(1.0, 1.0, 1.0), height=42)
-
-    btn_logs = Button(btn_grid[1, 3], label="View Logs", fontsize=12,
-        buttoncolor=RGBf(0.24, 0.28, 0.35), labelcolor=RGBf(0.88, 0.90, 0.95), height=42)
-
-    # Interactions
-    on(folder_tb.stored_string) do new_path
-        if isdir(new_path)
-            current_dir[] = normpath(new_path)
-            files_list[] = scan_medical_files(new_path)
-            status_text[] = "Found $(length(files_list[])) medical files in: $new_path"
-        else
-            status_text[] = "Specified path is not a valid directory: $new_path"
-        end
-    end
-
-    on(btn_browse_folder.clicks) do _
-        picked = browse_folder_dialog(current_dir[])
-        if !isempty(picked) && isdir(picked)
-            folder_tb.stored_string[] = picked
-            current_dir[] = picked
-            files_list[] = scan_medical_files(picked)
-            status_text[] = "Found $(length(files_list[])) medical files in: $picked"
-        end
-    end
-
-    on(btn_browse_file.clicks) do _
-        picked = browse_file_dialog(current_dir[])
-        if !isempty(picked) && isfile(picked)
-            parent_dir = dirname(picked)
-            folder_tb.stored_string[] = parent_dir
-            current_dir[] = parent_dir
-            files_list[] = scan_medical_files(parent_dir)
-            
-            # Auto-select picked file in menu
-            rel = relpath(picked, parent_dir)
-            idx = findfirst(==(rel), files_list[])
-            if idx !== nothing
-                file_menu.selection[] = rel
-            end
-            status_text[] = "Selected file: $picked"
-        end
-    end
-
-    on(btn_logs.clicks) do _
-        appdata = get(ENV, "APPDATA", "")
-        log_dir = !isempty(appdata) && isdir(joinpath(appdata, "MedEye3D", "logs")) ?
-            joinpath(appdata, "MedEye3D", "logs") : tempdir()
-        status_text[] = "Opening log folder: $log_dir"
-        if Sys.iswindows()
-            try
-                run(`explorer.exe $log_dir`, wait=false)
-            catch e
-                @warn "Could not open explorer: $e"
-            end
-        end
-    end
-
-    screen = display(fig)
-
-    # Open Selected Button handler
-    on(btn_open.clicks) do _
-        selected_rel = file_menu.selection[]
-        if selected_rel !== nothing && !startswith(selected_rel, "(")
-            full_path = joinpath(current_dir[], selected_rel)
-            if isfile(full_path)
-                status_text[] = "Opening study: $full_path..."
-                if on_select !== nothing
-                    on_select(full_path, quad_view_obs[])
-                end
-            else
-                status_text[] = "File does not exist: $full_path"
-            end
-        else
-            status_text[] = "Please select a valid medical file from the list or click 'Browse File...'."
-        end
-    end
-
-    # Launch Demo Button handler
-    on(btn_demo.clicks) do _
-        status_text[] = "Launching 3D synthetic phantom visualizer..."
-        if on_demo !== nothing
-            on_demo(quad_view_obs[])
-        end
-    end
-
-    return fig, screen
 end
 
 end # module StudySelectorWindow
