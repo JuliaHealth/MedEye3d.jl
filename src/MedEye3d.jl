@@ -93,9 +93,11 @@ include(joinpath("ai", "AIInference.jl"))
 using .AIInference
 export AIInference
 
-include(joinpath("preprocessing", "BoneSubsegmentation.jl"))
-using .BoneSubsegmentation
-export BoneSubsegmentation
+
+# BoneSubsegmentation removed — bone surface/marrow data is purely precomputed
+# in preprocessing (recompute_bones.jl) using max_anatomy + Skellytour.
+# Loaded from Bone_Subsegments_0.h5 at startup into bone_subsegments_cache.
+
 
 include(joinpath("display", "LesionMetadataWindow.jl"))
 include(joinpath("display", "HeuristicsEngine.jl"))

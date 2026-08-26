@@ -7,6 +7,7 @@ using JSON
 using HDF5
 using LinearAlgebra
 using NIfTI
+using CUDA
 
 # Load MedEye3d logic needed for AI inference
 include(joinpath(@__DIR__, "..", "..", "src", "ai", "AIInference.jl"))
@@ -19,6 +20,17 @@ using .SceneHierarchy
 using MedEye3d
 
 const HIRES_FACTOR = 2.0
+
+"""
+GPU-accelerated resample_to_image: moves voxel data to GPU, resamples, moves back to CPU.
+"""
+function gpu_resample_to_image(im_fixed::MedImages.MedImage, im_moving::MedImages.MedImage, interp::MedImages.Interpolator_enum)
+    gpu_fixed = MedImages.update_voxel_data(im_fixed, CuArray(Float32.(im_fixed.voxel_data)))
+    gpu_moving = MedImages.update_voxel_data(im_moving, CuArray(Float32.(im_moving.voxel_data)))
+    gpu_result = MedImages.resample_to_image(gpu_fixed, gpu_moving, interp)
+    cpu_result = MedImages.update_voxel_data(gpu_result, Array(gpu_result.voxel_data))
+    return cpu_result
+end
 
 function main()
     if isempty(ARGS)
@@ -118,7 +130,7 @@ function main()
         interpolator = is_mask ? MedImages.Nearest_neighbour_en : MedImages.Linear_en
         
         if T_ITK != Matrix{Float64}(I, 4, 4) || img.spacing != baseline_ct.spacing || img.origin != baseline_ct.origin
-            img_res = MedImages.resample_to_image(baseline_ct, img_tfm, interpolator)
+            img_res = gpu_resample_to_image(baseline_ct, img_tfm, interpolator)
         else
             img_res = img
         end
@@ -210,6 +222,8 @@ function main()
         node_name = study[7]
         tfm_fname = study[8]
         skellytour_source = study[12]  # per-timepoint Skellytour from hierarchy
+        max_anatomy_source = study[10]  # per-timepoint max_anatomy
+        max_anatomy_labels_source = study[11]  # per-timepoint max_anatomy labels
         
         # Load per-timepoint Skellytour (no sharing across time points!)
         if isempty(skellytour_source)
@@ -222,12 +236,43 @@ function main()
         println("  Loading Skellytour for $(ct_fname): $(basename(skellytour_source))")
         skelly_img = MedImages.load_image(local_skelly_path, "CT")
         # Resample Skellytour to baseline CT grid if dimensions differ
+        # IMPORTANT: save resampled version as temp file so Python gets the correct grid
+        skelly_path_for_python = local_skelly_path
         if size(skelly_img.voxel_data) != size(baseline_ct.voxel_data)
             println("    Resampling Skellytour $(size(skelly_img.voxel_data)) → $(size(baseline_ct.voxel_data))")
-            skelly_resampled = MedImages.resample_to_image(baseline_ct, skelly_img, MedImages.Nearest_neighbour_en)
+            skelly_resampled = gpu_resample_to_image(baseline_ct, skelly_img, MedImages.Nearest_neighbour_en)
             skelly_vox = Float32.(skelly_resampled.voxel_data)
+            skelly_path_for_python = joinpath(data_dir, "temp_skelly_resampled.nii.gz")
+            MedImages.create_nii_from_medimage(skelly_resampled, skelly_path_for_python)
         else
             skelly_vox = Float32.(skelly_img.voxel_data)
+        end
+        
+        # Load max_anatomy path and bone label IDs for surface computation
+        max_anat_path_for_python = ""
+        bone_labels_str = ""
+        if !isempty(max_anatomy_source) && !isempty(max_anatomy_labels_source)
+            max_anat_path = joinpath(data_dir, max_anatomy_source)
+            labels_path = joinpath(data_dir, max_anatomy_labels_source)
+            if isfile(max_anat_path) && isfile(labels_path)
+                max_labels = JSON.parsefile(labels_path)
+                bone_kws = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula", "humerus",
+                            "scapula_", "sternum", "skull", "palate", "bone", "spine", "mandible", "costal"]
+                bone_ids = [k for (k, v) in max_labels if any(kw -> occursin(kw, lowercase(v)), bone_kws)]
+                bone_labels_str = join(bone_ids, ",")
+                println("    max_anatomy bone labels: $(length(bone_ids)) IDs")
+                
+                # Check if max_anatomy needs resampling to baseline grid
+                max_anat_img = MedImages.load_image(max_anat_path, "CT")
+                if size(max_anat_img.voxel_data) != size(baseline_ct.voxel_data)
+                    println("    Resampling max_anatomy $(size(max_anat_img.voxel_data)) → $(size(baseline_ct.voxel_data))")
+                    max_anat_resampled = gpu_resample_to_image(baseline_ct, max_anat_img, MedImages.Nearest_neighbour_en)
+                    max_anat_path_for_python = joinpath(data_dir, "temp_max_anatomy_resampled.nii.gz")
+                    MedImages.create_nii_from_medimage(max_anat_resampled, max_anat_path_for_python)
+                else
+                    max_anat_path_for_python = max_anat_path
+                end
+            end
         end
         
         group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
@@ -247,9 +292,12 @@ function main()
             # Create binary mask for this lesion
             bin_mask = (mask_vol .== lid_float)
             
-            # Check if it overlaps with bone (skellytour > 0)
-            if !any(bin_mask .& (skelly_vox .> 0))
-                println("      Skipping: Not a bone lesion.")
+            # Require minimum overlap with Skellytour (at least 5% of lesion or 5 voxels)
+            skelly_overlap = count(bin_mask .& (skelly_vox .> 0))
+            lesion_voxels = count(bin_mask)
+            min_overlap = max(5, round(Int, 0.05 * lesion_voxels))
+            if skelly_overlap < min_overlap
+                println("      Skipping: insufficient bone overlap ($skelly_overlap < $min_overlap)")
                 continue
             end
             
@@ -258,7 +306,8 @@ function main()
             MedImages.create_nii_from_medimage(img_to_save, temp_lesion)
             
             try
-                AIInference.run_bone_subsegmentation(temp_lesion, skelly_path, temp_surf, temp_marr)
+                AIInference.run_bone_subsegmentation(temp_lesion, skelly_path_for_python, temp_surf, temp_marr;
+                    ct_path=joinpath(data_dir, "temp_ct.nii.gz"), max_anatomy_path=max_anat_path_for_python, bone_label_ids=bone_labels_str)
                 
                 surf_nii = NIfTI.niread(temp_surf)
                 marr_nii = NIfTI.niread(temp_marr)
