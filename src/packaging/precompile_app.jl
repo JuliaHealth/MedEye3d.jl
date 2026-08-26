@@ -14,7 +14,6 @@ using MedEye3d.MakieEvents
 using MedEye3d.StrokeRasterization
 using MedEye3d.ConnectedComponents
 using MedEye3d.AIInference
-using MedEye3d.BoneSubsegmentation
 using MedEye3d.LesionMetadataWindow
 using MedEye3d.LesionAssociation
 

@@ -660,6 +660,12 @@ if isfile(output_h5)
             end
         end
         println("Loaded precomputed bone subsegments for $(length(MEH.bone_subsegments_cache)) keys.")
+        # Per-TP summary to verify all time points loaded
+        for tp_i in 0:(length(studies)-1)
+            tp_entries = count(k -> k isa Tuple{Int, Int} && k[1] == tp_i, keys(MEH.bone_subsegments_cache))
+            node = get(tp_nodes_map, tp_i, "?")
+            println("  Bone cache: tp_$(tp_i) ($node) = $(tp_entries) lesion pairs")
+        end
         sample_keys = first(collect(keys(MEH.bone_subsegments_cache)), min(10, length(MEH.bone_subsegments_cache)))
         println("  Sample bone keys: $sample_keys")
     catch e

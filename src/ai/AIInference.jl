@@ -59,22 +59,33 @@ function run_skellytour_segmentation(ct_path::String, out_dir::String; pyenv=DEF
 end
 
 """
-    run_bone_subsegmentation(lesion_path::String, bone_path::String, out_surface::String, out_marrow::String; pyenv=DEFAULT_PYENV)
+    run_bone_subsegmentation(lesion_path, bone_path, out_surface, out_marrow; 
+                             ct_path="", max_anatomy_path="", bone_label_ids="", pyenv=DEFAULT_PYENV)
 
-Extracts cortical bone surface and bone marrow subsegment fragments around a bone metastasis.
+Extracts cortical bone surface (from max_anatomy solid bones) and bone marrow 
+(from Skellytour label 1 trabecula) subsegment fragments around a bone metastasis.
 """
-function run_bone_subsegmentation(lesion_path::String, bone_path::String, out_surface::String, out_marrow::String; ct_path::String="", pyenv=DEFAULT_PYENV)
+function run_bone_subsegmentation(lesion_path::String, bone_path::String, out_surface::String, out_marrow::String; 
+                                  ct_path::String="", max_anatomy_path::String="", bone_label_ids::String="", pyenv=DEFAULT_PYENV)
     script_path = joinpath(@__DIR__, "..", "..", "scripts", "ai", "bone_subsegmentation.py")
     
     env = copy(ENV)
     env["CUDA_VISIBLE_DEVICES"] = "1"
     
-    if ct_path == ""
-        cmd = setenv(`$(pyenv) $(script_path) --lesion $(lesion_path) --bone $(bone_path) --out-surface $(out_surface) --out-marrow $(out_marrow)`, env)
-    else
-        cmd = setenv(`$(pyenv) $(script_path) --lesion $(lesion_path) --bone $(bone_path) --ct $(ct_path) --out-surface $(out_surface) --out-marrow $(out_marrow)`, env)
+    args = [pyenv, script_path, "--lesion", lesion_path, "--bone", bone_path, 
+            "--out-surface", out_surface, "--out-marrow", out_marrow]
+    
+    if ct_path != ""
+        push!(args, "--ct", ct_path)
+    end
+    if max_anatomy_path != ""
+        push!(args, "--max-anatomy", max_anatomy_path)
+    end
+    if bone_label_ids != ""
+        push!(args, "--bone-labels", bone_label_ids)
     end
     
+    cmd = setenv(Cmd(args), env)
     @info "Running bone subsegmentation extraction..." cmd
     run(cmd)
     return out_surface, out_marrow
