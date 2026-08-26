@@ -409,6 +409,27 @@ def handle_client(conn):
                     ct_p = data.get("ct_path")
                     preload_ct(ct_p, data.get("out_dir", "/tmp/medeye3d_inference"))
                     response = {"status": "success", "message": "CT preload initiated"}
+                elif command == "run_anatomy":
+                    import subprocess
+                    import os
+                    ct_p = data.get("ct_path")
+                    out_d = data.get("out_dir")
+                    mode_flag = data.get("mode", "--fast")
+                    cmd_list = [
+                        "python3",
+                        "/mnt/big/project_ssd/project_ssd/lymph_node_rules/src/anatomy_segmentation/run_segmentation.py",
+                        ct_p, out_d, mode_flag
+                    ]
+                    # Also append task all if mode is fast, or whatever
+                    if "--task" not in data:
+                        cmd_list.extend(["--task", "all"])
+                        
+                    env = os.environ.copy()
+                    env["PYTHONPATH"] = "/mnt/big/project_ssd/project_ssd/lymph_node_rules"
+                    
+                    print(f"[Worker] Running anatomical segmentation: {' '.join(cmd_list)}")
+                    subprocess.run(cmd_list, check=True, env=env)
+                    response = {"status": "success", "message": "Anatomy segmentation finished"}
                 else:
                     response = {"status": "error", "message": "Unknown command"}
             

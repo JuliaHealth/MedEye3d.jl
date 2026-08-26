@@ -582,7 +582,17 @@ function classify_organ_to_lesion_type(organ_name::String)::String
     bone_kws = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula", "clavicle",
                 "humerus", "scapula", "sternum", "skull", "palate", "bone", "spine",
                 "ilium", "ischium", "pubis", "tibia", "radius", "carpal", "tarsal",
-                "costal_cartilage"]
+                "costal_cartilage", "mandible"]
+    
+    # Muscle keywords — max_anatomy has 90 muscles
+    muscle_kws = ["gluteus", "autochthon", "iliopsoas", "pectoralis", "subscapularis",
+                  "supraspinatus", "infraspinatus", "latissimus", "rectus_abdominis",
+                  "oblique", "erector", "trapezius", "deltoid", "sartorius", "quadriceps",
+                  "scalene", "platysma", "masseter", "temporalis", "pterygoid",
+                  "coracobrachial", "serratus", "teres_major", "triceps", "psoas",
+                  "quadratus", "sternocleidomastoid", "pharyngeal", "prevertebral",
+                  "tongue", "digastric", "thigh_medial", "thigh_posterior",
+                  "levator_scapulae", "sterno_thyroid", "thyrohyoid", "transversospinalis"]
     
     # Vascular exclusions — some TS names share bone keywords (e.g. "iliac_artery")
     vascular_exclusions = ["vena", "artery", "vein", "vessel", "trunk"]
@@ -591,6 +601,8 @@ function classify_organ_to_lesion_type(organ_name::String)::String
         return "Prostate"
     elseif any(kw -> occursin(kw, org), bone_kws) && !any(v -> occursin(v, org), vascular_exclusions)
         return "Bone Meta"
+    elseif any(kw -> occursin(kw, org), muscle_kws)
+        return "Muscle"
     elseif occursin("lymph", org) || occursin("node", org)
         return "Lymph Node Meta"
     else

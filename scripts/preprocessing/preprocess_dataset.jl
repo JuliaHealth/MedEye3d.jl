@@ -16,13 +16,15 @@ using .AIInference
 include(joinpath(@__DIR__, "..", "lib", "SceneHierarchy.jl"))
 using .SceneHierarchy
 
+using MedEye3d
+
 const HIRES_FACTOR = 2.0
 
 function main()
     if isempty(ARGS)
         error("Usage: julia scripts/preprocess_dataset.jl <data_dir>")
     end
-    data_dir = ARGS[1]
+    data_dir = abspath(ARGS[1])
     
     scene_json = joinpath(data_dir, "scene_hierarchy.json")
     if !isfile(scene_json)
@@ -143,6 +145,33 @@ function main()
         tfm_fname = study[8]
         ts_fname = length(study) >= 9 ? study[9] : ""
         
+        ct_fname_full = joinpath(data_dir, ct_fname)
+        ts_dir = joinpath(data_dir, "anatomy_out")
+        max_anatomy_file = joinpath(ts_dir, "max_anatomy.nii.gz")
+        
+        if !isfile(max_anatomy_file)
+            println("    max_anatomy.nii.gz missing. Triggering Comprehensive Anatomy Segmentation via AI TCP worker...")
+            try
+                dict_req = Dict(
+                    "command" => "run_anatomy",
+                    "ct_path" => ct_fname_full,
+                    "out_dir" => ts_dir,
+                    "mode" => "--fast"
+                )
+                worker_script = joinpath(dirname(@__DIR__), "ai", "python_worker.py")
+                MedEye3d.InferenceClient.start_python_worker(worker_script)
+                
+                resp = MedEye3d.InferenceClient.send_json_request(dict_req)
+                if get(resp, "status", "") != "success"
+                    println("    Warning: Anatomy segmentation reported error: ", get(resp, "message", "Unknown error"))
+                else
+                    println("    Anatomy segmentation finished successfully.")
+                end
+            catch e
+                println("    Warning: Anatomy segmentation failed: ", e)
+            end
+        end
+        
         tfm_path = tfm_fname != "" ? joinpath(data_dir, tfm_fname) : ""
         group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
         
@@ -158,16 +187,13 @@ function main()
     GC.gc()
     println("Saved preprocessed volumes.")
     
-    # 4. Bone Subsegmentation Precomputation
+    # 4. Bone Subsegmentation Precomputation (per-timepoint Skellytour)
     println("Starting Bone Subsegmentation Precomputation...")
     bone_h5_path = joinpath(data_dir, "Bone_Subsegments_0.h5")
     bone_h5 = h5open(bone_h5_path, "w")
     
     # Iterate over all masks saved in preprocessed_volumes.h5
     h5_read = h5open(h5_path, "r")
-    skelly_nii = NIfTI.niread(skelly_path)
-    skelly_vox = Float32.(skelly_nii.raw)
-    skelly_aligned = reverse(skelly_vox, dims=2)
     
     cis = CartesianIndices(size(baseline_ct.voxel_data))
     temp_lesion = joinpath(data_dir, "temp_lesion.nii.gz")
@@ -183,6 +209,26 @@ function main()
         mask_fname = study[6]
         node_name = study[7]
         tfm_fname = study[8]
+        skellytour_source = study[12]  # per-timepoint Skellytour from hierarchy
+        
+        # Load per-timepoint Skellytour (no sharing across time points!)
+        if isempty(skellytour_source)
+            error("No Skellytour path in scene_hierarchy.json for $(ct_fname). Run: julia scripts/preprocessing/update_scene_hierarchy.jl")
+        end
+        local_skelly_path = joinpath(data_dir, skellytour_source)
+        if !isfile(local_skelly_path)
+            error("Skellytour file not found: $local_skelly_path. Run anatomy segmentation for $(ct_fname) first.")
+        end
+        println("  Loading Skellytour for $(ct_fname): $(basename(skellytour_source))")
+        skelly_img = MedImages.load_image(local_skelly_path, "CT")
+        # Resample Skellytour to baseline CT grid if dimensions differ
+        if size(skelly_img.voxel_data) != size(baseline_ct.voxel_data)
+            println("    Resampling Skellytour $(size(skelly_img.voxel_data)) → $(size(baseline_ct.voxel_data))")
+            skelly_resampled = MedImages.resample_to_image(baseline_ct, skelly_img, MedImages.Nearest_neighbour_en)
+            skelly_vox = Float32.(skelly_resampled.voxel_data)
+        else
+            skelly_vox = Float32.(skelly_img.voxel_data)
+        end
         
         group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
         if !haskey(h5_read, group) || !haskey(h5_read[group], mask_fname)
@@ -201,7 +247,7 @@ function main()
             # Create binary mask for this lesion
             bin_mask = (mask_vol .== lid_float)
             
-            # Check if it overlaps with bone (skellytour 1 or 2)
+            # Check if it overlaps with bone (skellytour > 0)
             if !any(bin_mask .& (skelly_vox .> 0))
                 println("      Skipping: Not a bone lesion.")
                 continue

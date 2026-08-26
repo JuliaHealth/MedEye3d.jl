@@ -506,61 +506,80 @@ else
     Dict{Int, String}()
 end
 
-# Load TotalSegmentator atlas for anatomical organ name lookup
-ts_nrrd_path = joinpath(data_dir_pat6, "TS_all_Segmentation_0.seg.nrrd")
-organ_mapping = Dict{Int, String}()
-ts_atlas_aligned = nothing
-if isfile(ts_nrrd_path)
-    println("Loading TotalSegmentator atlas for organ names...")
-    ts_names = LesionAssociation.parse_nrrd_segment_names(ts_nrrd_path)
-    ts_atlas, ts_sizes = LesionAssociation.load_nrrd_labelmap(ts_nrrd_path)
-    if ts_atlas !== nothing && !isempty(ts_names)
-        # Apply Y-reversal on TS atlas to match the OpenGL display convention of first_mask
-        ts_atlas_aligned = reverse(ts_atlas, dims=2)
-        if HIRES_FACTOR > 1.0
-            ts_atlas_aligned = round.(typeof(ts_atlas_aligned[1]), hires_resample(Float32.(ts_atlas_aligned), first_spacing, display_spacing, MedImages.Nearest_neighbour_en))
-        end
-        organ_mapping = LesionAssociation.map_lesions_to_organs(first_mask, ts_atlas_aligned, ts_names)
-        
-        bone_keywords = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula", "humerus", "scapula", "sternum", "skull", "palate", "bone", "spine"]
-        bone_labels = Set{Int}()
-        for (k, v) in ts_names
-            v_low = lowercase(v)
-            if any(kw -> occursin(kw, v_low), bone_keywords)
-                push!(bone_labels, k)
-            end
-        end
-        ct_vox = Float32.(baseline_ct.voxel_data)
-        ct_aligned = reverse(ct_vox, dims=2)
-        if HIRES_FACTOR > 1.0
-            ct_aligned = hires_resample(ct_aligned, first_spacing, display_spacing, MedImages.Linear_en)
-        end
-        bone_atlas = Float32.(in.(ts_atlas_aligned, Ref(bone_labels)) .| (ct_aligned .>= 180.0f0))
-        MEH.global_bone_atlas[] = bone_atlas
-        MEH.global_organ_mapping[] = organ_mapping
-        # Also cache TS atlas + names for SUV background organ computation
-        MEH.global_ts_atlas[] = ts_atlas_aligned
-        MEH.global_ts_names[] = ts_names
-    end
-else
-    @warn "TotalSegmentator atlas not found at $ts_nrrd_path — using NRRD names only"
+# Load per-timepoint max_anatomy atlas (319 classes) for anatomical organ name lookup
+# No fallback to old TS seg.nrrd — max_anatomy is required
+baseline_study = studies[1]
+max_anatomy_source = baseline_study[10]
+max_anatomy_labels_file = baseline_study[11]
+skellytour_source = baseline_study[12]
+
+if isempty(max_anatomy_source) || isempty(max_anatomy_labels_file)
+    error("No max_anatomy in scene_hierarchy.json for baseline. Run:\n  julia scripts/preprocessing/update_scene_hierarchy.jl\n  bash scripts/ai/run_all_timepoints.sh")
 end
 
-skelly_path = joinpath(data_dir_pat6, "Skellytour_0.nii.gz")
-if isfile(skelly_path)
-    println("Loading Skellytour Bone Subsegmentation mask for AI inference...")
-    # Load Skellytour mask using the standard load_tp function or NIfTI directly
-    using NIfTI
-    skelly_nii = NIfTI.niread(skelly_path)
-    skelly_vox = Float32.(skelly_nii.raw)
-    skelly_aligned = reverse(skelly_vox, dims=2) # match OpenGL display convention
-    if HIRES_FACTOR > 1.0
-        skelly_aligned = hires_resample(skelly_aligned, first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
-    end
-    MEH.global_bone_atlas[] = skelly_aligned
-else
-    @warn "Skellytour bone segmentation not found at $skelly_path. AI Bone Subsegmentation will fail!"
+max_anat_path = joinpath(data_dir_pat6, max_anatomy_source)
+max_labels_path = joinpath(data_dir_pat6, max_anatomy_labels_file)
+
+if !isfile(max_anat_path)
+    error("max_anatomy.nii.gz not found: $max_anat_path\nRun: bash scripts/ai/run_all_timepoints.sh")
 end
+if !isfile(max_labels_path)
+    error("max_anatomy_labels.json not found: $max_labels_path\nRun: bash scripts/ai/run_all_timepoints.sh")
+end
+
+println("Loading max_anatomy atlas (319 classes) from $(basename(dirname(max_anatomy_source)))...")
+using NIfTI
+using JSON
+nii_anat = NIfTI.niread(max_anat_path)
+ts_atlas_raw = UInt16.(nii_anat.raw)
+ts_atlas_aligned = reverse(ts_atlas_raw, dims=2)
+if HIRES_FACTOR > 1.0
+    ts_atlas_aligned = round.(UInt16, hires_resample(Float32.(ts_atlas_aligned), first_spacing, display_spacing, MedImages.Nearest_neighbour_en))
+end
+raw_labels = JSON.parsefile(max_labels_path)
+ts_names = Dict{Int,String}(parse(Int, k) => v for (k, v) in raw_labels)
+println("  Loaded $(length(ts_names)) anatomical classes")
+
+organ_mapping = LesionAssociation.map_lesions_to_organs(first_mask, ts_atlas_aligned, ts_names)
+
+bone_keywords = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula", "humerus",
+                  "scapula", "sternum", "skull", "palate", "bone", "spine", "mandible",
+                  "costal"]
+bone_labels = Set{Int}()
+for (k, v) in ts_names
+    v_low = lowercase(v)
+    if any(kw -> occursin(kw, v_low), bone_keywords)
+        push!(bone_labels, k)
+    end
+end
+ct_vox = Float32.(baseline_ct.voxel_data)
+ct_aligned = reverse(ct_vox, dims=2)
+if HIRES_FACTOR > 1.0
+    ct_aligned = hires_resample(ct_aligned, first_spacing, display_spacing, MedImages.Linear_en)
+end
+bone_atlas = Float32.(in.(ts_atlas_aligned, Ref(bone_labels)) .| (ct_aligned .>= 180.0f0))
+MEH.global_bone_atlas[] = bone_atlas
+MEH.global_organ_mapping[] = organ_mapping
+# Cache atlas + names for SUV background organ computation
+MEH.global_ts_atlas[] = ts_atlas_aligned
+MEH.global_ts_names[] = ts_names
+
+# Load per-timepoint Skellytour from hierarchy (overrides bone atlas for AI bone subsegmentation)
+if isempty(skellytour_source)
+    error("No Skellytour in scene_hierarchy.json for baseline. Run:\n  julia scripts/preprocessing/update_scene_hierarchy.jl")
+end
+skelly_path = joinpath(data_dir_pat6, skellytour_source)
+if !isfile(skelly_path)
+    error("Skellytour file not found: $skelly_path\nRun anatomy segmentation for baseline first.")
+end
+println("Loading Skellytour from $(basename(dirname(skellytour_source)))...")
+skelly_nii = NIfTI.niread(skelly_path)
+skelly_vox = Float32.(skelly_nii.raw)
+skelly_aligned = reverse(skelly_vox, dims=2)
+if HIRES_FACTOR > 1.0
+    skelly_aligned = hires_resample(skelly_aligned, first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
+end
+MEH.global_bone_atlas[] = skelly_aligned
 
 # Preload precomputed KernelAbstractions Bone Subsegments into MakieEventHandlers cache
 println("Loading precomputed KernelAbstractions Bone Subsegmentation for bone lesions...")

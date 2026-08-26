@@ -68,7 +68,7 @@ def generate_bone_subsegments_pt(crop_lesion_np, crop_bone_np, spacing, max_surf
     
     return crop_surface.cpu().numpy().astype(bool)
 
-def extract_bone_fragments(lesion_path, bone_path, out_surface_path, out_marrow_path):
+def extract_bone_fragments(lesion_path, bone_path, out_surface_path, out_marrow_path, ct_path=None):
     lesion_img = nib.load(lesion_path)
     np_lesion = lesion_img.get_fdata() > 0
     affine = lesion_img.affine
@@ -127,11 +127,30 @@ def extract_bone_fragments(lesion_path, bone_path, out_surface_path, out_marrow_
 
     if target_bone_label > 0:
         target_bone_mask = (labeled_bones == target_bone_label)
-        crop_skelly_mask = np.where(target_bone_mask, crop_skelly_mask, 0)
+        
+        if ct_path is not None:
+            ct_img = nib.load(ct_path)
+            np_ct = ct_img.get_fdata()
+            crop_ct = np_ct[x_min:x_max, y_min:y_max, z_min:z_max]
+            
+            # Dilate the target bone mask by a few mm to account for rigid deformation mismatches
+            # spacing is typically [1.5, 1.5, 2.0]. 5mm is ~3 voxels
+            dilated_bone_mask = ndimage.binary_dilation(target_bone_mask, iterations=3)
+            
+            # Threshold CT to find the actual bone (HU > 150) inside the dilated region
+            refined_bone_mask = (crop_ct > 150) & dilated_bone_mask
+            
+            # Update target_bone_mask and crop_skelly_mask
+            target_bone_mask = refined_bone_mask
+            crop_skelly_mask = np.where(target_bone_mask, 1, 0)
+        else:
+            crop_skelly_mask = np.where(target_bone_mask, crop_skelly_mask, 0)
 
         # Check if skellytour cortical (2) and marrow (1) labels exist
-        crop_marrow = (crop_skelly_mask == 1)
-
+        # Instead of using Skellytour label 1, compute marrow using morphological erosion (Slicer fallback_to_ts behavior)
+        crop_marrow = ndimage.binary_erosion(target_bone_mask, iterations=2)
+        crop_marrow = crop_marrow & (crop_skelly_mask > 0) # ensure it is within the bone mask
+        
         # Morphological Surface Extraction (1-voxel thick) based on the full skellytour bone mask
         bone_surface_fragment[x_min:x_max, y_min:y_max, z_min:z_max] = generate_bone_subsegments_pt(
             crop_lesion_mask, (crop_skelly_mask > 0).astype(np.uint8), spacing
@@ -176,6 +195,7 @@ if __name__ == "__main__":
     parser.add_argument("--bone", required=True, help="Path to bone / skellytour NIfTI segmentation")
     parser.add_argument("--out-surface", required=True, help="Output path for bone surface mask")
     parser.add_argument("--out-marrow", required=True, help="Output path for bone marrow mask")
+    parser.add_argument("--ct", required=False, default=None, help="Optional path to the CT volume for refining the bone boundaries")
     args = parser.parse_args()
 
-    extract_bone_fragments(args.lesion, args.bone, args.out_surface, args.out_marrow)
+    extract_bone_fragments(args.lesion, args.bone, args.out_surface, args.out_marrow, args.ct)

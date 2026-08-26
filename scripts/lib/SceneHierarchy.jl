@@ -87,8 +87,9 @@ end
     parse_studies_from_hierarchy(data_dir::String) -> Vector{Tuple}
 
 Parse a `scene_hierarchy.json` file and return a chronologically sorted list of
-studies. Each study is a tuple:
-    (modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname)
+studies. Each study is a 12-element tuple:
+    (modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname, ts_name,
+     max_anatomy_source, max_anatomy_labels, skellytour_source)
 """
 function parse_studies_from_hierarchy(data_dir)
     scene_json = joinpath(data_dir, "scene_hierarchy.json")
@@ -132,6 +133,9 @@ function parse_studies_from_hierarchy(data_dir)
         pet_name = ""
         mask_name = ""
         ts_name = ""
+        max_anatomy_source = ""
+        max_anatomy_labels = ""
+        skellytour_source = ""
         modality = "PET"
         for child in children
             if child["type"] == "vtkMRMLLinearTransformNode"
@@ -154,6 +158,11 @@ function parse_studies_from_hierarchy(data_dir)
                     if !isfile(joinpath(data_dir, mask_name))
                         mask_name = name * ".seg.nrrd"
                     end
+                elseif startswith(name, "max_anatomy_")
+                    max_anatomy_source = get(child, "source", "")
+                    max_anatomy_labels = get(child, "labels", "")
+                elseif startswith(name, "skellytour_")
+                    skellytour_source = get(child, "source", "")
                 elseif occursin("TS_all", name) || occursin("TotalSegmentator", name)
                     ts_name = name * ".seg.nrrd"
                     if !isfile(joinpath(data_dir, ts_name))
@@ -178,7 +187,8 @@ function parse_studies_from_hierarchy(data_dir)
         
         # Strip extensions from mask name without regex
         mask_base = replace(replace(mask_name, ".seg.nrrd" => ""), ".nii.gz" => "")
-        return (modality, orig_tp, date_str, ct_name, pet_name, mask_name, mask_base, tfm_name, ts_name)
+        return (modality, orig_tp, date_str, ct_name, pet_name, mask_name, mask_base, tfm_name, ts_name,
+                max_anatomy_source, max_anatomy_labels, skellytour_source)
     end
     
     b = extract_study(hierarchy, "")

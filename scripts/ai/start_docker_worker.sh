@@ -27,13 +27,28 @@ if [ ! -d "$HOST_PROJECT_DIR" ]; then
     HOST_INFERENCE_DIR="$HOST_PROJECT_DIR/tmp_inference"
 fi
 
-mkdir -p "$HOST_INFERENCE_DIR"
+# Load environment variables if .env exists
+ENV_FILE="$HOST_PROJECT_DIR/.env"
+if [ -f "$ENV_FILE" ]; then
+    export $(grep -v '^#' "$ENV_FILE" | xargs)
+fi
 
 # Run container in background, expose 5005, and mount the inference temp dir
 echo "Starting MedEye3d AI Docker container..."
-docker run -d --rm --name medeye3d-ai --gpus all \
+docker run -d --rm --name medeye3d-ai --gpus '"device=1"' \
+    --shm-size=64g \
     -p 5005:5005 \
+    -e TOTALSEG_LICENSE_NUMBER="${TOTALSEG_LICENSE_NUMBER:-aca_XHEO7L1IH2U7G7}" \
     -v "$HOST_INFERENCE_DIR":/tmp/medeye3d_inference \
     -v "$HOST_APP_DIR":/app \
+    -v "/mnt/big/project_ssd/project_ssd:/mnt/big/project_ssd/project_ssd" \
+    -v "/home/jm:/home/jm" \
     medeye3d-ai:latest
+
+# Wait for container to be ready and set license
+sleep 2
+if [ -n "$TOTALSEG_LICENSE_NUMBER" ]; then
+    echo "Configuring TotalSegmentator license in Docker..."
+    docker exec medeye3d-ai totalseg_set_license -l "$TOTALSEG_LICENSE_NUMBER" -sv 2>/dev/null || true
+fi
 

@@ -1400,19 +1400,34 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
     target_lid = data.active_id
     delete!(bone_subsegments_cache, (current_tp_index[], target_lid))
     delete!(bone_subsegments_cache, (get_node_name_for_tp(current_tp_index[]), target_lid))
-    if compare_mode[]
-        delete!(bone_subsegments_cache, (compare_right_tp[], target_lid))
-        delete!(bone_subsegments_cache, (get_node_name_for_tp(compare_right_tp[]), target_lid))
+    
+    panel5_lesion_id = target_lid
+    if compare_mode[] && length(stateObjects) >= 5 && target_lid > 0
+        try
+            left_node = get_node_name_for_tp(current_tp_index[])
+            right_node = get_node_name_for_tp(compare_right_tp[])
+            match_mod = isdefined(Main, :MedEye3d) && isdefined(Main.MedEye3d, :LesionAssociation) ? Main.MedEye3d.LesionAssociation : nothing
+            if match_mod !== nothing
+                matched_ids = match_mod.find_cross_tp_lesion(left_node, target_lid, right_node)
+                if !isempty(matched_ids)
+                    panel5_lesion_id = matched_ids[1]
+                end
+            end
+        catch e
+        end
+        delete!(bone_subsegments_cache, (compare_right_tp[], panel5_lesion_id))
+        delete!(bone_subsegments_cache, (get_node_name_for_tp(compare_right_tp[]), panel5_lesion_id))
     end
 
     # Update bone surface & marrow textures in all panels
     for (panel_idx, stateObject) in enumerate(stateObjects)
         panel_tp = (panel_idx == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
+        panel_lid = (panel_idx == 5 && compare_mode[]) ? panel5_lesion_id : target_lid
         
         panel_surf_pts, panel_marr_pts = try
-            _get_or_compute_bone_subseg(stateObject, target_lid, panel_tp)
+            _get_or_compute_bone_subseg(stateObject, panel_lid, panel_tp)
         catch e
-            println("Failed to recalc bone for panel $panel_idx in reactToActiveLesionChanged: $e")
+            println("Failed to recalc bone for panel $panel_idx in reactToAIInferenceResult: $e")
             (CartesianIndex{3}[], CartesianIndex{3}[])
         end
         surf_indices = if panel_idx == 3
@@ -1568,8 +1583,23 @@ function reactToGenManual(data::GenManualEvent, stateObjects::Vector{StateDataFi
     delete!(bone_subsegments_cache, (get_node_name_for_tp(tp_idx), data.lesion_id))
     delete!(bone_subsegments_cache, data.lesion_id)
     if compare_mode[]
-        delete!(bone_subsegments_cache, (compare_right_tp[], data.lesion_id))
-        delete!(bone_subsegments_cache, (get_node_name_for_tp(compare_right_tp[]), data.lesion_id))
+        panel5_lesion_id = data.lesion_id
+        if length(stateObjects) >= 5 && data.lesion_id > 0
+            try
+                left_node = get_node_name_for_tp(tp_idx)
+                right_node = get_node_name_for_tp(compare_right_tp[])
+                match_mod = isdefined(Main, :MedEye3d) && isdefined(Main.MedEye3d, :LesionAssociation) ? Main.MedEye3d.LesionAssociation : nothing
+                if match_mod !== nothing
+                    matched_ids = match_mod.find_cross_tp_lesion(left_node, data.lesion_id, right_node)
+                    if !isempty(matched_ids)
+                        panel5_lesion_id = matched_ids[1]
+                    end
+                end
+            catch e
+            end
+        end
+        delete!(bone_subsegments_cache, (compare_right_tp[], panel5_lesion_id))
+        delete!(bone_subsegments_cache, (get_node_name_for_tp(compare_right_tp[]), panel5_lesion_id))
     end
     
     # Invalidate centroid cache as well
@@ -1670,8 +1700,23 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
                         end
                     elseif cur_lid > 0
                         panel_tp = (panel_idx == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
+                        panel_lid = cur_lid
+                        if panel_idx == 5 && compare_mode[] && length(stateObjects) >= 5 && cur_lid > 0
+                            try
+                                left_node = get_node_name_for_tp(current_tp_index[])
+                                right_node = get_node_name_for_tp(compare_right_tp[])
+                                match_mod = isdefined(Main, :MedEye3d) && isdefined(Main.MedEye3d, :LesionAssociation) ? Main.MedEye3d.LesionAssociation : nothing
+                                if match_mod !== nothing
+                                    matched_ids = match_mod.find_cross_tp_lesion(left_node, cur_lid, right_node)
+                                    if !isempty(matched_ids)
+                                        panel_lid = matched_ids[1]
+                                    end
+                                end
+                            catch e
+                            end
+                        end
                         panel_surf_pts, panel_marr_pts = try
-                            _get_or_compute_bone_subseg(stateObject, cur_lid, panel_tp)
+                            _get_or_compute_bone_subseg(stateObject, panel_lid, panel_tp)
                         catch e
                             println("Failed to recalc bone for panel $panel_idx (toggle): $e")
                             (CartesianIndex{3}[], CartesianIndex{3}[])
