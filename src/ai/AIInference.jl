@@ -63,12 +63,18 @@ end
 
 Extracts cortical bone surface and bone marrow subsegment fragments around a bone metastasis.
 """
-function run_bone_subsegmentation(lesion_path::String, bone_path::String, out_surface::String, out_marrow::String; pyenv=DEFAULT_PYENV)
+function run_bone_subsegmentation(lesion_path::String, bone_path::String, out_surface::String, out_marrow::String; ct_path::String="", pyenv=DEFAULT_PYENV)
     script_path = joinpath(@__DIR__, "..", "..", "scripts", "ai", "bone_subsegmentation.py")
     
     env = copy(ENV)
     env["CUDA_VISIBLE_DEVICES"] = "1"
-    cmd = setenv(`$(pyenv) $(script_path) --lesion $(lesion_path) --bone $(bone_path) --out-surface $(out_surface) --out-marrow $(out_marrow)`, env)
+    
+    if ct_path == ""
+        cmd = setenv(`$(pyenv) $(script_path) --lesion $(lesion_path) --bone $(bone_path) --out-surface $(out_surface) --out-marrow $(out_marrow)`, env)
+    else
+        cmd = setenv(`$(pyenv) $(script_path) --lesion $(lesion_path) --bone $(bone_path) --ct $(ct_path) --out-surface $(out_surface) --out-marrow $(out_marrow)`, env)
+    end
+    
     @info "Running bone subsegmentation extraction..." cmd
     run(cmd)
     return out_surface, out_marrow

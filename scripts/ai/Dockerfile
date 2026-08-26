@@ -6,7 +6,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 # Install required python packages
-RUN pip install numpy nibabel scipy
+RUN pip install numpy nibabel scipy SimpleITK TotalSegmentator nnunetv2
 
 # Clone and install nnInteractive
 RUN git clone https://github.com/MIC-DKFZ/nnInteractive.git /opt/nnInteractive && \

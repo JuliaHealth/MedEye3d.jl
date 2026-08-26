@@ -6,9 +6,21 @@ using Base64
 using MedImages
 using ..ConnectedComponents
 
-export start_python_worker, run_helpnet_inference, run_nninteractive, run_bone_subsegmentation_remote, insert_patch!, preload_ct_for_nninteractive
+export start_python_worker, run_helpnet_inference, run_nninteractive, run_bone_subsegmentation_remote, insert_patch!, preload_ct_for_nninteractive, send_json_request
 
 global PYTHON_PROC = nothing
+
+function send_json_request(req::Dict; port=5005)
+    try
+        conn = connect("127.0.0.1", port)
+        write(conn, JSON.json(req))
+        resp_str = read(conn, String)
+        close(conn)
+        return JSON.parse(resp_str)
+    catch e
+        return Dict("status" => "error", "message" => string(e))
+    end
+end
 
 function start_python_worker(worker_script_path::String)
     # Since we are using Docker, we just run the bash script to orchestrate it

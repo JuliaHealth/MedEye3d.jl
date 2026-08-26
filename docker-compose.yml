@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  medeye3d-gui:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+    container_name: medeye3d-gui
+    environment:
+      - DISPLAY=${DISPLAY}
+      - MESA_GL_VERSION_OVERRIDE=4.3
+      - MESA_GLSL_VERSION_OVERRIDE=430
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - /mnt/big/project_ssd/project_ssd:/mnt/big/project_ssd/project_ssd
+      - .:/workspace
+    network_mode: host
+    command: bash -c "julia --project=/workspace scripts/app/run_interactive_mrb.jl"
+
+  medeye3d-ai:
+    build:
+      context: scripts/ai
+      dockerfile: Dockerfile
+    container_name: medeye3d-ai
+    shm_size: '64gb'
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - /mnt/big/project_ssd/project_ssd:/mnt/big/project_ssd/project_ssd
+      - /home/jm:/home/jm
+    network_mode: host
