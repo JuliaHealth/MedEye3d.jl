@@ -53,6 +53,7 @@ const DEF_JSON_PATH  = isfile(joinpath(_SLICER_DATA, "def.json")) ? joinpath(_SL
 const RADLEX_CSV_PATH= isfile(joinpath(_SLICER_DATA, "RadLex.csv")) ? joinpath(_SLICER_DATA, "RadLex.csv") : (isfile(joinpath(_PKG_ROOT, "RadLex.csv")) ? joinpath(_PKG_ROOT, "RadLex.csv") : joinpath(@__DIR__, "..", "..", "data", "RadLex.csv"))
 const DEFAULT_SAVE_PATH = joinpath(homedir(), "medeye3d_lesion_annotations.json")
 const DEFAULT_HDF5_PATH = joinpath(homedir(), "medeye3d_lesion_annotations.h5")
+const ANATOMY_MAPPING_PATH = joinpath(@__DIR__, "..", "..", "data", "max_anatomy_to_ontology.json")
 
 # Persistent custom dropdown options (same pattern as Slicer extension)
 const CUSTOM_OPTS_PATH = let
@@ -178,6 +179,41 @@ function load_anatomy_ontology()::Vector{String}
     end
     _anatomy_cache[] = sort(terms)
     return _anatomy_cache[]
+end
+
+# ─── JSON Anatomy Mapping (max_anatomy → ontology) ──────────────────────────
+const _anatomy_mapping_cache = Ref{Dict{String,Any}}(Dict{String,Any}())
+
+"""Load the hand-crafted max_anatomy → UBERON ontology mapping from JSON."""
+function load_anatomy_mapping()::Dict{String,Any}
+    isempty(_anatomy_mapping_cache[]) || return _anatomy_mapping_cache[]
+    if isfile(ANATOMY_MAPPING_PATH)
+        try
+            _anatomy_mapping_cache[] = JSON.parsefile(ANATOMY_MAPPING_PATH)
+            @info "Loaded $(length(_anatomy_mapping_cache[])) max_anatomy→ontology mappings"
+        catch e
+            @warn "Failed to load anatomy mapping JSON: $e"
+        end
+    else
+        @warn "Anatomy mapping JSON not found at $(ANATOMY_MAPPING_PATH)"
+    end
+    return _anatomy_mapping_cache[]
+end
+
+"""
+    lookup_anatomy(raw_organ) → Dict or nothing
+
+Look up a raw max_anatomy organ name in the JSON mapping.
+Returns a Dict with keys: "detailed", "generalized", "side", "anatomic_location", "lesion_type".
+"""
+function lookup_anatomy(raw_organ::String)
+    isempty(raw_organ) && return nothing
+    mapping = load_anatomy_mapping()
+    key = lowercase(strip(raw_organ))
+    haskey(mapping, key) && return mapping[key]
+    # Try case-preserving exact match (max_anatomy uses mixed case for vertebrae)
+    haskey(mapping, strip(raw_organ)) && return mapping[strip(raw_organ)]
+    return nothing
 end
 
 # ─── Static TotalSegmentator → Anatomy Mapping ──────────────────────────────
@@ -458,6 +494,297 @@ function generate_tracking_name(lesion_id::Int, organ_name::String, tp_idx::Int,
     organ_clean = isempty(organ_name) ? "Lesion" : replace(strip(organ_name), " " => "_")
     return "$(organ_clean)_L$(lesion_id)_$(modality)_TP$(tp_idx)_$(patient_id_str)"
 end
+"""
+    parse_suv_fields(suv_str) -> Dict{String,Float32}
+
+Parse the formatted SUV string "Max: X.X ; Parotid: X.X ; Liver: X.X ; Blood: X.X"
+into a Dict with keys "max", "parotid", "liver", "blood".
+"""
+function parse_suv_fields(suv_str::String)::Dict{String, Float32}
+    result = Dict{String, Float32}()
+    for part in split(suv_str, ";")
+        sp = strip(part)
+        colon = findfirst(':', sp)
+        colon === nothing && continue
+        key = lowercase(strip(sp[1:colon-1]))
+        val = tryparse(Float32, strip(sp[colon+1:end]))
+        val !== nothing && (result[key] = val)
+    end
+    return result
+end
+
+"""
+    compute_promise_score(suv_max, bg_suvs) -> Int
+
+PROMISE scoring: 0=<blood, 1=blood≤x<liver, 2=liver≤x<parotid, 3=≥parotid.
+Returns -1 if references are missing/zero.
+"""
+function compute_promise_score(suv_max::Float32, bg::Dict{String, Float32})::Int
+    blood = get(bg, "blood", 0.0f0)
+    liver = get(bg, "liver", 0.0f0)
+    parotid = get(bg, "parotid", 0.0f0)
+    (blood <= 0 || liver <= 0 || parotid <= 0) && return -1
+    suv_max < blood  && return 0
+    suv_max < liver  && return 1
+    suv_max < parotid && return 2
+    return 3
+end
+
+"""
+    compute_suv_comparison_string(suv_max, bg_suvs) -> String
+
+Generate human-readable SUV comparison:
+"SUVmax X.X > Liver (Y.Y) — PROMISE 2" or "SUVmax X.X < Liver (Y.Y) — PROMISE 1"
+"""
+function compute_suv_comparison_string(suv_max::Float32, bg::Dict{String, Float32})::String
+    liver = get(bg, "liver", 0.0f0)
+    parotid = get(bg, "parotid", 0.0f0)
+    blood = get(bg, "blood", 0.0f0)
+    promise = compute_promise_score(suv_max, bg)
+    
+    parts = String[]
+    if liver > 0
+        cmp = suv_max >= liver ? "≥" : "<"
+        push!(parts, "Liver: $(cmp) ($(round(suv_max/liver, digits=2))×)")
+    end
+    if parotid > 0
+        cmp = suv_max >= parotid ? "≥" : "<"
+        push!(parts, "Parotid: $(cmp) ($(round(suv_max/parotid, digits=2))×)")
+    end
+    if blood > 0
+        cmp = suv_max >= blood ? "≥" : "<"
+        push!(parts, "Blood: $(cmp) ($(round(suv_max/blood, digits=2))×)")
+    end
+    promise_str = promise >= 0 ? " | PROMISE $promise" : ""
+    return join(parts, " ; ") * promise_str
+end
+
+# ─── Volume Computation ──────────────────────────────────────────────────────
+
+# Cache: (tp_idx, lid) → Dict("volume_mm3" => ..., "volume_cc" => ..., "voxel_count" => ...)
+const _volume_cache = Dict{Tuple{Int,Int}, Dict{String, Float64}}()
+
+"""
+    compute_lesion_volume(lid, tp_idx) -> Dict{String, Float64}
+
+Compute lesion volume from the cached mask at a specific time point.
+Uses display-space voxel spacing from Main.first_spacing.
+Returns Dict("volume_mm3", "volume_cc", "voxel_count", "diameter_mm").
+"""
+function compute_lesion_volume(lid::Int, tp_idx::Int)::Dict{String, Float64}
+    cache_key = (tp_idx, lid)
+    haskey(_volume_cache, cache_key) && return _volume_cache[cache_key]
+    
+    result = Dict{String, Float64}("volume_mm3" => 0.0, "volume_cc" => 0.0, 
+                                     "voxel_count" => 0.0, "diameter_mm" => 0.0)
+    try
+        entry = _MEH.get_or_load_tp_data(tp_idx)
+        entry === nothing && return result
+        mask = entry.mask
+        
+        # Count voxels with this label
+        voxel_count = count(x -> x == lid, mask)
+        voxel_count == 0 && return result
+        
+        # Get spacing: display space = native / HIRES_FACTOR for x,y
+        native_spacing = try
+            Main.first_spacing
+        catch
+            (1.0, 1.0, 1.0)
+        end
+        hires_factor = try
+            Main.HIRES_FACTOR
+        catch
+            2.0
+        end
+        
+        # Display spacing
+        sp_x = native_spacing[1] / hires_factor
+        sp_y = native_spacing[2] / hires_factor
+        sp_z = native_spacing[3]
+        
+        voxel_vol_mm3 = sp_x * sp_y * sp_z
+        volume_mm3 = voxel_count * voxel_vol_mm3
+        volume_cc = volume_mm3 / 1000.0
+        
+        # Equivalent sphere diameter
+        diameter_mm = 2.0 * (3.0 * volume_mm3 / (4.0 * π))^(1.0/3.0)
+        
+        result["volume_mm3"] = volume_mm3
+        result["volume_cc"] = volume_cc
+        result["voxel_count"] = Float64(voxel_count)
+        result["diameter_mm"] = diameter_mm
+    catch e
+        @warn "Volume computation failed for lesion $lid at TP $tp_idx: $e"
+    end
+    
+    _volume_cache[cache_key] = result
+    return result
+end
+
+# ─── Match Analysis ──────────────────────────────────────────────────────────
+
+"""
+    MatchAnalysisResult
+
+Contains volume/SUV comparison data for a lesion tracked across time points.
+"""
+struct MatchAnalysisResult
+    group_id::Int
+    current_volume_mm3::Float64
+    current_volume_cc::Float64
+    current_diameter_mm::Float64
+    current_suv_max::Float32
+    # Baseline comparison
+    baseline_volume_mm3::Float64
+    baseline_volume_cc::Float64
+    baseline_suv_max::Float32
+    baseline_node::String
+    baseline_lid::Int
+    # Delta values
+    volume_delta_pct::Float64    # (current - baseline) / baseline * 100
+    volume_delta_abs_cc::Float64  # current - baseline in cc
+    suv_delta_abs::Float32       # current - baseline SUVmax
+    suv_delta_pct::Float64       # (current - baseline) / baseline * 100
+    # RECIP classification
+    recip_category::String       # CR, PR, SD, PD, or N/A
+    n_timepoints::Int            # total TPs in this match group
+end
+
+"""
+    compute_match_analysis(lid, tp_idx) -> Union{MatchAnalysisResult, Nothing}
+
+Compute longitudinal match analysis for a lesion. Finds the earliest
+time point in the same match group (baseline), computes volume and SUV
+at both time points, and calculates deltas.
+"""
+function compute_match_analysis(lid::Int, tp_idx::Int)::Union{MatchAnalysisResult, Nothing}
+    LA = Main.MedEye3d.LesionAssociation
+    
+    # Find match group for this lesion
+    current_node = _MEH.get_node_name_for_tp(tp_idx)
+    match_groups = LA.get_match_groups()
+    
+    group_id = nothing
+    members = nothing
+    for (gid, mems) in match_groups
+        if any(m -> m[1] == current_node && m[2] == lid, mems)
+            group_id = gid
+            members = mems
+            break
+        end
+    end
+    
+    group_id === nothing && return nothing
+    length(members) < 2 && return nothing
+    
+    # Find baseline (earliest TP in group)
+    sorted_members = sort(members, by = m -> LA._tp_index_from_node(m[1]))
+    baseline_member = sorted_members[1]
+    baseline_node = baseline_member[1]
+    baseline_lid = baseline_member[2]
+    baseline_tp_idx = LA._tp_index_from_node(baseline_node)
+    
+    # Skip if current IS the baseline
+    if baseline_node == current_node && baseline_lid == lid
+        # Still report volume but no delta
+        cur_vol = compute_lesion_volume(lid, tp_idx)
+        cur_suv = _get_suv_max(lid, tp_idx)
+        return MatchAnalysisResult(
+            group_id,
+            cur_vol["volume_mm3"], cur_vol["volume_cc"], cur_vol["diameter_mm"], cur_suv,
+            0.0, 0.0, 0.0f0, "", 0,
+            0.0, 0.0, 0.0f0, 0.0,
+            "N/A (baseline)", length(members)
+        )
+    end
+    
+    # Compute volumes
+    cur_vol = compute_lesion_volume(lid, tp_idx)
+    base_vol = compute_lesion_volume(baseline_lid, baseline_tp_idx)
+    
+    # Compute SUVmax
+    cur_suv = _get_suv_max(lid, tp_idx)
+    base_suv = _get_suv_max(baseline_lid, baseline_tp_idx)
+    
+    # Volume delta
+    vol_delta_pct = base_vol["volume_cc"] > 0.001 ?
+        (cur_vol["volume_cc"] - base_vol["volume_cc"]) / base_vol["volume_cc"] * 100.0 : 0.0
+    vol_delta_abs = cur_vol["volume_cc"] - base_vol["volume_cc"]
+    
+    # SUV delta
+    suv_delta_abs = cur_suv - base_suv
+    suv_delta_pct = base_suv > 0.1f0 ?
+        Float64((cur_suv - base_suv) / base_suv * 100) : 0.0
+    
+    # RECIP classification based on volume change
+    recip = if cur_vol["volume_cc"] < 0.001 && base_vol["volume_cc"] > 0.001
+        "RECIP-CR"  # Complete Response (disappeared)
+    elseif vol_delta_pct < -30.0
+        "RECIP-PR"  # Partial Response (>30% decrease)
+    elseif vol_delta_pct > 20.0
+        "RECIP-PD"  # Progressive Disease (>20% increase)
+    else
+        "RECIP-SD"  # Stable Disease
+    end
+    
+    return MatchAnalysisResult(
+        group_id,
+        cur_vol["volume_mm3"], cur_vol["volume_cc"], cur_vol["diameter_mm"], cur_suv,
+        base_vol["volume_mm3"], base_vol["volume_cc"], base_suv, baseline_node, baseline_lid,
+        vol_delta_pct, vol_delta_abs, suv_delta_abs, suv_delta_pct,
+        recip, length(members)
+    )
+end
+
+"""
+    _get_suv_max(lid, tp_idx) -> Float32
+
+Get SUVmax for a lesion, using cache if available.
+"""
+function _get_suv_max(lid::Int, tp_idx::Int)::Float32
+    cache_key = (tp_idx, lid)
+    cached = get(_lesion_suv_cache, cache_key, "")
+    if !isempty(cached)
+        fields = parse_suv_fields(cached)
+        return get(fields, "max", 0.0f0)
+    end
+    # Compute fresh
+    pet_vol = get(_MEH.pet_volumes_cache, tp_idx, nothing)
+    centroid = if haskey(_MEH.lesion_centroids_cache, (tp_idx, lid))
+        _MEH.lesion_centroids_cache[(tp_idx, lid)]
+    elseif haskey(_MEH.lesion_centroids_cache, lid)
+        _MEH.lesion_centroids_cache[lid]
+    else
+        nothing
+    end
+    (pet_vol === nothing || centroid === nothing) && return 0.0f0
+    return compute_suv_max_at_centroid(pet_vol, centroid)
+end
+
+"""
+    format_match_analysis(result::MatchAnalysisResult) -> String
+
+Format match analysis result for display in the metadata panel.
+"""
+function format_match_analysis(r::MatchAnalysisResult)::String
+    parts = String[]
+    push!(parts, "Vol: $(round(r.current_volume_cc, digits=2))cc ($(round(r.current_diameter_mm, digits=1))mm⌀)")
+    
+    if r.baseline_volume_cc > 0.001
+        sign = r.volume_delta_pct >= 0 ? "+" : ""
+        push!(parts, "ΔVol: $(sign)$(round(r.volume_delta_pct, digits=1))% ($(sign)$(round(r.volume_delta_abs_cc, digits=2))cc)")
+    end
+    
+    if r.baseline_suv_max > 0.1f0
+        sign = r.suv_delta_abs >= 0 ? "+" : ""
+        push!(parts, "ΔSUV: $(sign)$(round(r.suv_delta_abs, digits=1)) ($(sign)$(round(r.suv_delta_pct, digits=1))%)")
+    end
+    
+    push!(parts, "Grp $(r.group_id) [$(r.n_timepoints) TPs] $(r.recip_category)")
+    
+    return join(parts, " | ")
+end
 
 # ─── UI helpers ──────────────────────────────────────────────────────────────
 function all_categories(schema::Vector{QuestionDef})::Vector{String}
@@ -484,6 +811,106 @@ function all_categories(schema::Vector{QuestionDef})::Vector{String}
         cat in result || push!(result, cat)
     end
     return result
+end
+
+# ─── SearchableMenu: Menu with type-to-filter ────────────────────────────────
+# A factory that wraps a standard Menu with per-instance keyboard handlers.
+# When the dropdown is open, typing filters options in real time.
+# Returns the Menu itself so `.i_selected[]` / `.selection[]` code is unchanged.
+
+"""
+    searchable_menu(g, row, cols; options, default=1, fontsize=10)
+
+Create a searchable dropdown.  Returns a standard **Menu** widget.
+
+When the dropdown is open, typing characters filters the visible options.
+Backspace removes a character from the filter. Escape resets the filter.
+The Menu prompt shows the current filter text ("Filter: query").
+Closing the dropdown restores all options.
+"""
+function searchable_menu(g, row, cols;
+        options,
+        default = 1,
+        fontsize = 10)
+
+    # Snapshot original full options
+    all_opts = Ref(options isa Observable ? copy(options[]) : collect(String, options))
+
+    # Standard Menu — no inner layouts, no Textbox, no alignment issues
+    menu = Menu(g[row, cols];
+        options  = copy(all_opts[]),
+        default  = default,
+        fontsize = fontsize)
+
+    filter_buf = Ref("")
+
+    # ── When menu opens → reset filter; when it closes → restore options ──
+    on(menu.is_open) do is_open
+        if is_open
+            filter_buf[] = ""
+        else
+            # Restore full options and reset prompt
+            menu.options[] = all_opts[]
+            menu.prompt[]  = "Select..."
+            filter_buf[]   = ""
+        end
+    end
+
+    # ── Keyboard: type to filter (scoped to this menu's blockscene) ──
+    bscene = menu.blockscene
+
+    on(bscene, events(bscene).unicode_input, priority = 100) do char
+        !menu.is_open[] && return Consume(false)
+        filter_buf[] *= string(char)
+        _apply_searchable_filter!(menu, filter_buf[], all_opts[])
+        return Consume(true)
+    end
+
+    on(bscene, events(bscene).keyboardbutton, priority = 100) do event
+        !menu.is_open[] && return Consume(false)
+        act = event.action
+        (act == Makie.Keyboard.press || act == Makie.Keyboard.repeat) || return Consume(false)
+
+        if event.key == Makie.Keyboard.backspace && !isempty(filter_buf[])
+            filter_buf[] = filter_buf[][1:prevind(filter_buf[], end)]
+            _apply_searchable_filter!(menu, filter_buf[], all_opts[])
+            return Consume(true)
+        elseif event.key == Makie.Keyboard.escape
+            filter_buf[] = ""
+            _apply_searchable_filter!(menu, "", all_opts[])
+            return Consume(true)
+        end
+        return Consume(false)
+    end
+
+    # ── Track Observable option changes ──
+    if options isa Observable
+        on(options) do new_opts
+            all_opts[] = collect(String, new_opts)
+            if !menu.is_open[]
+                menu.options[] = all_opts[]
+            end
+        end
+    end
+
+    return menu
+end
+
+"""Apply the current filter text to a searchable menu's options."""
+function _apply_searchable_filter!(menu, query::String, full_opts::Vector{String})
+    if isempty(query)
+        menu.options[] = full_opts
+        menu.prompt[]  = "Select..."
+    else
+        q = lowercase(query)
+        filtered = filter(s -> occursin(q, lowercase(s)), full_opts)
+        if isempty(filtered)
+            menu.options[] = ["(no match for '$query')"]
+        else
+            menu.options[] = filtered
+        end
+        menu.prompt[] = "Filter: $query"
+    end
 end
 
 # ─── Main window ─────────────────────────────────────────────────────────────
@@ -760,119 +1187,6 @@ function create_metadata_window(
 
     end_section!(sec_nav)
 
-    # ── Lesion Type & Anatomic Localization ───────────────────────────────────
-    sec_type = begin_section!("Lesion Type & Anatomic Localization")
-    
-    lt_r = nr!()
-    btn_type_prostate = Button(g[lt_r, 1], label = "Prostate",   buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_type_bone     = Button(g[lt_r, 2], label = "Bone Meta",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_type_organ    = Button(g[lt_r, 3], label = "Organ Meta", buttoncolor = ACCENT, labelcolor = TXT, fontsize = 10)
-    btn_type_ln       = Button(g[lt_r, 4], label = "Lymph Node", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    
-    active_lesion_type = Observable("Organ Meta")
-    
-    function update_type_buttons(t)
-        active_lesion_type[] = t
-        btn_type_prostate.buttoncolor[] = (t == "Prostate") ? ACCENT : BG_PNL
-        btn_type_bone.buttoncolor[]     = (t == "Bone Meta") ? ACCENT : BG_PNL
-        btn_type_organ.buttoncolor[]    = (t == "Organ Meta") ? ACCENT : BG_PNL
-        btn_type_ln.buttoncolor[]       = (t == "Lymph Node" || t == "Lymph Node Meta") ? ACCENT : BG_PNL
-        
-        is_bone = (t == "Bone Meta")
-        @info "Lesion type set to '$t' -> ShowBoneMaskEvent($is_bone)"
-        put!(channel, ShowBoneMaskEvent(is_bone))
-    end
-    
-    on(btn_type_prostate.clicks) do _; update_type_buttons("Prostate") end
-    on(btn_type_bone.clicks)     do _; update_type_buttons("Bone Meta") end
-    on(btn_type_organ.clicks)    do _; update_type_buttons("Organ Meta") end
-    on(btn_type_ln.clicks)       do _; update_type_buttons("Lymph Node Meta") end
-    
-    # Base Anatomy & Side (with ontology autocomplete)
-    ba_r = nr!()
-    Label(g[ba_r, 1], "Base Anatomy:", fontsize = 10, color = LBL_FG, halign = :right)
-    tb_base_anat = Textbox(g[ba_r, 2], placeholder = "type & Enter to search...", fontsize = 10)
-    btn_ba_search = Button(g[ba_r, 3], label = "Find",
-        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    menu_side = Menu(g[ba_r, 4], options = ["", "Right", "Left", "NA"], default = "", fontsize = 10)
-    
-    # Anatomical Relations (with ontology autocomplete for the target organ)
-    rel_r = nr!()
-    Label(g[rel_r, 1], "Relation:", fontsize = 10, color = LBL_FG, halign = :right)
-    menu_rel = Menu(g[rel_r, 2], options = ["", "Surrounded By", "Lateral To", "Medial To",
-        "Anterior To", "Posterior To", "Superior To", "Inferior To", "Between", "Inside"],
-        default = "", fontsize = 10)
-    tb_rel_base = Textbox(g[rel_r, 3], placeholder = "type & Enter...", fontsize = 10)
-    btn_rel_search = Button(g[rel_r, 4], label = "Find",
-        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    
-    # Shared ontology dropdown (hidden by default, shown on search)
-    onto_row = nr!()
-    onto_filtered = Observable(anatomy_ontology[1:min(50, end)])
-    onto_menu = Menu(g[onto_row, 1:4], options = onto_filtered, fontsize = 10)
-    onto_target = Ref{Symbol}(:base)  # which field the ontology is serving
-    rowsize!(g, onto_row, Fixed(0))
-    onto_menu.blockscene.visible[] = false
-    
-    # Filter function for anatomy ontology
-    function _filter_anatomy!(filtered_obs, txt, ontology)
-        t = _safe_strip(txt)
-        if isempty(t)
-            filtered_obs[] = ontology[1:min(50, end)]
-        else
-            tl = lowercase(t)
-            hits = filter(s -> occursin(tl, lowercase(s)), ontology)
-            filtered_obs[] = isempty(hits) ? ["(no matches)"] : hits[1:min(50, end)]
-        end
-    end
-    
-    function _show_onto!()
-        rowsize!(g, onto_row, Auto())
-        onto_menu.blockscene.visible[] = true
-    end
-    function _hide_onto!()
-        rowsize!(g, onto_row, Fixed(0))
-        onto_menu.blockscene.visible[] = false
-    end
-    
-    # Wire base anatomy search
-    on(tb_base_anat.stored_string) do txt
-        onto_target[] = :base
-        _filter_anatomy!(onto_filtered, txt, anatomy_ontology)
-        _show_onto!()
-    end
-    on(btn_ba_search.clicks) do _
-        onto_target[] = :base
-        _filter_anatomy!(onto_filtered, tb_base_anat.stored_string[], anatomy_ontology)
-        _show_onto!()
-    end
-    
-    # Wire relation search
-    on(tb_rel_base.stored_string) do txt
-        onto_target[] = :relation
-        _filter_anatomy!(onto_filtered, txt, anatomy_ontology)
-        _show_onto!()
-    end
-    on(btn_rel_search.clicks) do _
-        onto_target[] = :relation
-        _filter_anatomy!(onto_filtered, tb_rel_base.stored_string[], anatomy_ontology)
-        _show_onto!()
-    end
-    
-    # Wire dropdown selection → fill textbox and hide
-    on(onto_menu.selection) do sel
-        sel === nothing && return
-        s = string(sel)
-        s == "(no matches)" && return
-        if onto_target[] == :base
-            tb_base_anat.stored_string[] != s && (tb_base_anat.stored_string[] = s)
-        else
-            tb_rel_base.stored_string[] != s && (tb_rel_base.stored_string[] = s)
-        end
-        _hide_onto!()
-    end
-    
-    end_section!(sec_type)
     # ── Viewport Controls ────────────────────────────────────────────────────
     sec_view = begin_section!("Viewport & Windowing")
     
@@ -1166,10 +1480,10 @@ end_section!(sec_win)
     # All fields in order, grouped by visual sub-headers
     metadata_groups = [
         "Identification" => [
+            "Radioligand Type",
             "Lesion tracking name?",
             "Anatomic Location",
-            "Anatomical Sublocation",
-            "Anatomical Details"
+            "Anatomical Sublocation"
         ],
         "Morphology" => [
             "Inner Texture / Density / Attenuation",
@@ -1225,6 +1539,16 @@ end_section!(sec_win)
     is_meta_open, meta_start_row, meta_header_r, meta_btn, _ = sec_meta
     push!(all_metadata_rows, meta_header_r)
 
+    # Pre-declare variables that will be created inside the "Identification" group injection
+    # (Julia if-blocks create local scope, so we need outer-scope declarations)
+    local btn_type_prostate, btn_type_bone, btn_type_organ, btn_type_ln
+    local active_lesion_type, menu_base_anat, ba_all_opts, menu_side
+    local anat_detail_label_r, btn_add_anat_rel
+    local ANAT_RELATIONS, MAX_ANAT_ROWS
+    local anat_row_indices, anat_rel_menus, anat_struct_menus, anat_rm_btns, anat_active_count
+    local update_type_buttons
+    local no_ct_toggle, lbl_suv_comparison, lbl_match_analysis
+
     for (group_title, q_list) in metadata_groups
         # Sub-headers removed for compactness — field names are descriptive enough
 
@@ -1243,16 +1567,26 @@ end_section!(sec_win)
                 halign = :right, tellwidth = false)
 
             if isempty(q.options)
-                tb = Textbox(g[q_r, 2:4],
-                    placeholder = isempty(q.default_answer) ? "..." : q.default_answer,
-                    fontsize = 10)
+                if q.short == "Comment"
+                    # Comment field: bigger, white background, black text for readability
+                    tb = Textbox(g[q_r, 2:4],
+                        placeholder = "Free-text clinical notes...",
+                        fontsize = 10,
+                        textcolor = RGBf(0, 0, 0),
+                        boxcolor = RGBf(1, 1, 1))
+                    rowsize!(g, q_r, Fixed(80))
+                else
+                    tb = Textbox(g[q_r, 2:4],
+                        placeholder = isempty(q.default_answer) ? "..." : q.default_answer,
+                        fontsize = 10)
+                end
                 field_widgets[q.short] = tb
             else
                 # Inject saved custom options into dropdown
                 saved_opts = String[string(s) for s in get(custom_opts_db, q.short, Any[])]
                 all_opts = String["- select -"; q.options; saved_opts]
                 opts_obs = Observable(all_opts)
-                m = Menu(g[q_r, 2:3], options = opts_obs, fontsize = 10)
+                m = searchable_menu(g, q_r, 2:3, options = opts_obs, fontsize = 10)
                 field_widgets[q.short] = m
                 
                 btn_add_opt = Button(g[q_r, 4], label = "+", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=10)
@@ -1311,28 +1645,166 @@ end_section!(sec_win)
             # Compact: skip tooltip row (tooltips are too verbose for compact layout)
             q_row_indices[q.short] = q_rows
         end
+        
+        # ── After "Identification" group: inject Type Buttons + Anatomy ──────
+        if group_title == "Identification"
+            # Type buttons row
+            lt_r = nr!()
+            push!(all_metadata_rows, lt_r)
+            btn_type_prostate = Button(g[lt_r, 1], label = "Prostate",   buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+            btn_type_bone     = Button(g[lt_r, 2], label = "Bone Meta",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+            btn_type_organ    = Button(g[lt_r, 3], label = "Organ Meta", buttoncolor = ACCENT, labelcolor = TXT, fontsize = 10)
+            btn_type_ln       = Button(g[lt_r, 4], label = "Lymph Node", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+            
+            active_lesion_type = Observable("Organ Meta")
+            
+            function update_type_buttons(t)
+                active_lesion_type[] = t
+                btn_type_prostate.buttoncolor[] = (t == "Prostate") ? ACCENT : BG_PNL
+                btn_type_bone.buttoncolor[]     = (t == "Bone Meta") ? ACCENT : BG_PNL
+                btn_type_organ.buttoncolor[]    = (t == "Organ Meta") ? ACCENT : BG_PNL
+                btn_type_ln.buttoncolor[]       = (t == "Lymph Node" || t == "Lymph Node Meta") ? ACCENT : BG_PNL
+                
+                is_bone = (t == "Bone Meta")
+                @info "Lesion type set to '$t' -> ShowBoneMaskEvent($is_bone)"
+                put!(channel, ShowBoneMaskEvent(is_bone))
+            end
+            
+            on(btn_type_prostate.clicks) do _; update_type_buttons("Prostate") end
+            on(btn_type_bone.clicks)     do _; update_type_buttons("Bone Meta") end
+            on(btn_type_organ.clicks)    do _; update_type_buttons("Organ Meta") end
+            on(btn_type_ln.clicks)       do _; update_type_buttons("Lymph Node Meta") end
+            
+            # Base Anatomy (filterable Menu) + Side
+            ba_r = nr!()
+            push!(all_metadata_rows, ba_r)
+            Label(g[ba_r, 1], "Anatomy:", fontsize = 10, color = LBL_FG, halign = :right)
+            ba_all_opts = Observable(String[""; anatomy_ontology])
+            menu_base_anat = searchable_menu(g, ba_r, 2:3, options = ba_all_opts, fontsize = 10)
+            menu_side = Menu(g[ba_r, 4], options = ["", "Right", "Left", "NA"], default = "", fontsize = 10)
+            
+            # Anatomical Details (OntologyBuilder-style rows)
+            anat_detail_label_r = nr!()
+            push!(all_metadata_rows, anat_detail_label_r)
+            Label(g[anat_detail_label_r, 1:3], "Anatomical Details:", fontsize = 10, color = LBL_FG, halign = :left, tellwidth = false)
+            btn_add_anat_rel = Button(g[anat_detail_label_r, 4], label = "+ Row",
+                buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
+            
+            ANAT_RELATIONS = ["", "Inside / Contained In", "Surrounded By", "Adjacent To",
+                "Anterior To", "Posterior To", "Superior To", "Inferior To",
+                "Deep To", "Superficial To", "Lateral To", "Medial To",
+                "Proximal To", "Distal To", "Between"]
+            MAX_ANAT_ROWS = 6
+            
+            # Pre-allocate rows (all hidden by default)
+            anat_row_indices = Int[]
+            anat_rel_menus = Menu[]
+            anat_struct_menus = Menu[]
+            anat_rm_btns = Button[]
+            anat_active_count = Observable(0)
+            
+            for i in 1:MAX_ANAT_ROWS
+                ar = nr!()
+                push!(anat_row_indices, ar)
+                push!(all_metadata_rows, ar)
+                rel_m = searchable_menu(g, ar, 1:2, options = ANAT_RELATIONS, fontsize = 10)
+                struct_opts_i = Observable(String[""; anatomy_ontology])
+                struct_m = searchable_menu(g, ar, 3, options = struct_opts_i, fontsize = 10)
+                rm_btn = Button(g[ar, 4], label = "-", buttoncolor = RED_BTN, labelcolor = TXT, fontsize = 10, width = 30)
+                push!(anat_rel_menus, rel_m)
+                push!(anat_struct_menus, struct_m)
+                push!(anat_rm_btns, rm_btn)
+                # Hide by default
+                rowsize!(g, ar, Fixed(0))
+                rel_m.blockscene.visible[] = false
+                struct_m.blockscene.visible[] = false
+                rm_btn.blockscene.visible[] = false
+                
+                # Remove button
+                let idx = i
+                    on(rm_btn.clicks) do _
+                        n = anat_active_count[]
+                        n <= 0 && return
+                        for j in idx:(n-1)
+                            anat_rel_menus[j].i_selected[] = anat_rel_menus[j+1].i_selected[]
+                            anat_struct_menus[j].i_selected[] = anat_struct_menus[j+1].i_selected[]
+                        end
+                        anat_rel_menus[n].i_selected[] = 1
+                        anat_struct_menus[n].i_selected[] = 1
+                        anat_active_count[] = n - 1
+                    end
+                end
+            end
+            
+            # Show/hide rows based on active count
+            on(anat_active_count) do n
+                for i in 1:MAX_ANAT_ROWS
+                    visible = i <= n
+                    ar = anat_row_indices[i]
+                    rowsize!(g, ar, visible ? Auto() : Fixed(0))
+                    anat_rel_menus[i].blockscene.visible[] = visible
+                    anat_struct_menus[i].blockscene.visible[] = visible
+                    anat_rm_btns[i].blockscene.visible[] = visible
+                end
+            end
+            
+            # Add row button
+            on(btn_add_anat_rel.clicks) do _
+                n = anat_active_count[]
+                n < MAX_ANAT_ROWS && (anat_active_count[] = n + 1)
+            end
+        end  # end "Identification" injection
+
+        # Inject "No CT Correlate" toggle + SUV comparison after Identification
+        if group_title == "Identification"
+            ncc_r = nr!()
+            push!(all_metadata_rows, ncc_r)
+            no_ct_toggle = Toggle(g[ncc_r, 1], active = false, buttoncolor = ACCENT)
+            Label(g[ncc_r, 2], "No CT Correlate", fontsize = 10, color = LBL_FG, halign = :left)
+            
+            suv_comparison_r = nr!()
+            push!(all_metadata_rows, suv_comparison_r)
+            lbl_suv_comparison = Label(g[suv_comparison_r, 1:4], "", fontsize = 9, color = GRN, halign = :left, tellwidth = false)
+            
+            match_analysis_r = nr!()
+            push!(all_metadata_rows, match_analysis_r)
+            lbl_match_analysis = Label(g[match_analysis_r, 1:4], "", fontsize = 9, color = RGBf(0.6, 0.8, 1.0), halign = :left, tellwidth = false)
+        end
     end
     
     end_section!(sec_meta)
+
+    # CT-specific fields hidden when "No CT Correlate" is checked
+    CT_SPECIFIC_FIELDS = Set([
+        "Inner Texture / Density / Attenuation",
+        "Border and Margin",
+        "Lesion Shape",
+        "Lesion Orientation",
+        "Relation to Bone Marrow (Surrounding Changes Part A)",
+        "Periosteal Reaction (Surrounding Changes Part B)",
+        "Other Structural & Soft Tissue Changes (Surrounding Changes Part C)"
+    ])
 
     # ── Dynamic Visibility Engine ─────────────────────────────────────────────
     function update_dynamic_visibility!(active_type::String)
         is_p = (active_type == "Prostate")
         is_bm = (active_type == "Bone Meta")
+        no_ct = no_ct_toggle.active[]
         
-        # PRIMARY Score sub-header removed — field visibility handled below
-
         for (sq, rows) in q_row_indices
             visible = true
-            if sq == "PRIMARY score pattern?"
+            
+            # Hide CT-specific fields when No CT Correlate is checked
+            if no_ct && sq in CT_SPECIFIC_FIELDS
+                visible = false
+            elseif sq == "PRIMARY score pattern?"
                 visible = is_p
             elseif sq == "Relation to Bone Marrow (Surrounding Changes Part A)" || 
                    sq == "Periosteal Reaction (Surrounding Changes Part B)"
-                visible = is_bm
+                visible = is_bm && !no_ct
             elseif sq == "PSMA-RADS 2.0"
                 visible = !is_p
             elseif sq == "Alternative Hypothesis (False Positive)"
-                # Retained across non-prostate and all metastatic/benign mimics
                 visible = !is_p
             end
 
@@ -1340,6 +1812,12 @@ end_section!(sec_win)
                 set_row_visible!(row_idx, visible)
             end
         end
+    end
+
+    # Wire No CT Correlate toggle to refresh visibility
+    on(no_ct_toggle.active) do _
+        update_dynamic_visibility!(active_lesion_type[])
+        trigger_autosave()
     end
 
     # Auto-defaults and presets on lesion type change
@@ -1459,11 +1937,36 @@ end_section!(sec_win)
     rl_rm_btns = [Button(g[rl_slot_row_start + i - 1, 4], label = "x",
                     buttoncolor = RED_BTN, labelcolor = TXT, fontsize = 10, width = 30)
                   for i in 1:RL_SLOTS]
+    # Initialize all slots as hidden (zero height)
+    for i in 1:RL_SLOTS
+        rowsize!(g, rl_slot_row_start + i - 1, Fixed(0))
+        rl_rm_btns[i].blockscene.visible[] = false
+        rl_labels[i].blockscene.visible[] = false
+        if (rl_slot_row_start + i - 1) < r[1]
+            rowgap!(g, rl_slot_row_start + i - 1, 0)
+        end
+    end
     r[1] = rl_slot_row_start + RL_SLOTS - 1
 
     on(radlex_selected) do terms
         for i in 1:RL_SLOTS
-            rl_labels[i].text[] = i <= length(terms) ? terms[i] : ""
+            if i <= length(terms)
+                rl_labels[i].text[] = terms[i]
+                rowsize!(g, rl_slot_row_start + i - 1, Auto())
+                rl_rm_btns[i].blockscene.visible[] = true
+                rl_labels[i].blockscene.visible[] = true
+                if (rl_slot_row_start + i - 1) < r[1]
+                    rowgap!(g, rl_slot_row_start + i - 1, 1)
+                end
+            else
+                rl_labels[i].text[] = ""
+                rowsize!(g, rl_slot_row_start + i - 1, Fixed(0))
+                rl_rm_btns[i].blockscene.visible[] = false
+                rl_labels[i].blockscene.visible[] = false
+                if (rl_slot_row_start + i - 1) < r[1]
+                    rowgap!(g, rl_slot_row_start + i - 1, 0)
+                end
+            end
         end
     end
     for i in 1:RL_SLOTS
@@ -1763,11 +2266,33 @@ end_section!(sec_win)
     function collect_state()::Dict{String,String}
         d = Dict{String,String}()
         d["LesionType"] = active_lesion_type[]
-        v_base = _safe_strip(tb_base_anat.stored_string[])
-        isempty(v_base) || (d["BaseAnatomy"] = v_base)
+        ba_sel = menu_base_anat.selection[]
+        v_base = ba_sel === nothing ? "" : _safe_strip(string(ba_sel))
+        (isempty(v_base) || v_base == "") || (d["BaseAnatomy"] = v_base)
         side_sel = menu_side.selection[]
         if side_sel !== nothing && !isempty(string(side_sel))
             d["BaseAnatomySide"] = string(side_sel)
+        end
+        
+        # Serialize OntologyBuilder anatomical detail rows
+        n = anat_active_count[]
+        if n > 0
+            parts = String[]
+            for i in 1:n
+                rel_sel = anat_rel_menus[i].selection[]
+                rel_str = rel_sel === nothing ? "" : string(rel_sel)
+                struct_sel = anat_struct_menus[i].selection[]
+                struct_str = struct_sel === nothing ? "" : _safe_strip(string(struct_sel))
+                if !isempty(struct_str)
+                    push!(parts, isempty(rel_str) ? struct_str : "$(rel_str):$(struct_str)")
+                end
+            end
+            isempty(parts) || (d["Anatomical Details"] = join(parts, " | "))
+        end
+        
+        # No CT Correlate toggle
+        if no_ct_toggle.active[]
+            d["NoCTCorrelate"] = "true"
         end
         
         # Windowing values
@@ -1825,46 +2350,46 @@ end_section!(sec_win)
         t_type = if haskey(data, "LesionType")
             data["LesionType"]
         else
-            # Auto-detect lesion type from available info.
-            # Mirrors Slicer extension's categorization logic (LesionMetadata.py L4258-4266).
+            # Auto-detect lesion type: try JSON mapping first, then keyword fallback
+            raw_organ_for_type = get(_MEH.global_organ_mapping[], lid, "")
+            json_entry = lookup_anatomy(raw_organ_for_type)
             
-            # Check BaseAnatomy text if available (from previous detection or TotalSegmentator)
-            base_anat = lowercase(get(data, "BaseAnatomy", ""))
-            id_low = lowercase(cur_id_str)
-            # Also check global_organ_mapping for the raw TS organ name
-            raw_organ = lowercase(get(_MEH.global_organ_mapping[], lid, ""))
-            # Combine all sources for keyword matching
-            combined = base_anat * " " * id_low * " " * raw_organ
-            
-            # Bone keywords from TotalSegmentator segment names — must exclude
-            # vascular structures that share similar names (e.g. "iliac_artery")
-            bone_kws = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula",
-                        "clavicle", "humerus", "scapula", "sternum", "skull",
-                        "palate", "bone", "spine", "ilium", "ischium", "pubis",
-                        "tibia", "radius", "carpal", "tarsal", "costal_cartilage"]
-            vascular_exclusions = ["vena", "artery", "vein", "vessel", "trunk"]
-            
-            is_bone_kw = any(kw -> occursin(kw, combined), bone_kws) &&
-                         !any(v -> occursin(v, combined), vascular_exclusions)
-            
-            # Only consider bone_subsegments_cache if it actually has non-empty data
-            # (empty entries are cached for non-bone lesions to avoid re-computation)
-            has_real_bone_subseg = if haskey(_MEH.bone_subsegments_cache, (_MEH.current_tp_index[], lid))
-                cached_data = _MEH.bone_subsegments_cache[(_MEH.current_tp_index[], lid)]
-                cached_data isa Tuple && length(cached_data) >= 2 &&
-                    (!isempty(cached_data[1]) || !isempty(cached_data[2]))
+            if json_entry !== nothing
+                get(json_entry, "lesion_type", "Organ Meta")
             else
-                false
-            end
-            
-            if occursin("prostate", combined)
-                "Prostate"
-            elseif is_bone_kw || has_real_bone_subseg
-                "Bone Meta"
-            elseif occursin("lymph", combined) || occursin("node", combined)
-                "Lymph Node Meta"
-            else
-                "Organ Meta"
+                # Keyword fallback for organs not in JSON mapping
+                base_anat = lowercase(get(data, "BaseAnatomy", ""))
+                id_low = lowercase(cur_id_str)
+                raw_organ = lowercase(raw_organ_for_type)
+                combined = base_anat * " " * id_low * " " * raw_organ
+                
+                bone_kws = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula",
+                            "clavicle", "humerus", "scapula", "sternum", "skull",
+                            "palate", "bone", "spine", "ilium", "ischium", "pubis",
+                            "tibia", "radius", "carpal", "tarsal", "costal_cartilage"]
+                vascular_exclusions = ["vena", "artery", "vein", "vessel", "trunk"]
+                
+                is_bone_kw = any(kw -> occursin(kw, combined), bone_kws) &&
+                             !any(v -> occursin(v, combined), vascular_exclusions)
+                
+                # Only consider bone_subsegments_cache if it actually has non-empty data
+                has_real_bone_subseg = if haskey(_MEH.bone_subsegments_cache, (_MEH.current_tp_index[], lid))
+                    cached_data = _MEH.bone_subsegments_cache[(_MEH.current_tp_index[], lid)]
+                    cached_data isa Tuple && length(cached_data) >= 2 &&
+                        (!isempty(cached_data[1]) || !isempty(cached_data[2]))
+                else
+                    false
+                end
+                
+                if occursin("prostate", combined)
+                    "Prostate"
+                elseif is_bone_kw || has_real_bone_subseg
+                    "Bone Meta"
+                elseif occursin("lymph", combined) || occursin("node", combined)
+                    "Lymph Node Meta"
+                else
+                    "Organ Meta"
+                end
             end
         end
         update_type_buttons(t_type)
@@ -1913,26 +2438,113 @@ end_section!(sec_win)
         t_base = get(data, "BaseAnatomy", "")
         t_side = get(data, "BaseAnatomySide", "")
         
-        # Auto-detect BaseAnatomy from TotalSegmentator organ mapping if not saved
+        # Auto-detect BaseAnatomy from max_anatomy JSON mapping if not saved
         if isempty(t_base) && lid > 0
             organ_map = _MEH.global_organ_mapping[]
             raw_organ = get(organ_map, lid, "")
             if !isempty(raw_organ)
-                t_base, auto_side = map_ts_to_anatomy(raw_organ)
-                if isempty(t_side) && !isempty(auto_side)
-                    t_side = auto_side
+                entry = lookup_anatomy(raw_organ)
+                if entry !== nothing
+                    t_base = get(entry, "detailed", "")
+                    auto_side = get(entry, "side", "")
+                    if isempty(t_side) && !isempty(auto_side)
+                        t_side = auto_side
+                    end
+                    # Auto-fill Anatomic Location dropdown from JSON mapping
+                    anat_loc = get(entry, "anatomic_location", "")
+                    if !isempty(anat_loc) && (!haskey(data, "Anatomic Location") || isempty(get(data, "Anatomic Location", "")))
+                        if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
+                            opts = field_widgets["Anatomic Location"].options[]
+                            a_idx = findfirst(==(anat_loc), opts)
+                            if a_idx !== nothing
+                                field_widgets["Anatomic Location"].i_selected[] = a_idx
+                            end
+                        end
+                    end
+                    # Auto-fill Anatomical Sublocation from JSON mapping
+                    anat_subloc = get(entry, "anatomical_sublocation", "")
+                    if !isempty(anat_subloc) && (!haskey(data, "Anatomical Sublocation") || isempty(get(data, "Anatomical Sublocation", "")))
+                        if haskey(field_widgets, "Anatomical Sublocation") && field_widgets["Anatomical Sublocation"] isa Menu
+                            opts = field_widgets["Anatomical Sublocation"].options[]
+                            sl_idx = findfirst(==(anat_subloc), opts)
+                            if sl_idx !== nothing
+                                field_widgets["Anatomical Sublocation"].i_selected[] = sl_idx
+                            end
+                        end
+                    end
+                else
+                    # Fallback to old map_ts_to_anatomy for unknown organs
+                    t_base, auto_side = map_ts_to_anatomy(raw_organ)
+                    if isempty(t_side) && !isempty(auto_side)
+                        t_side = auto_side
+                    end
                 end
-                @info "Auto-detected BaseAnatomy for lesion $lid: '$t_base' (side='$t_side') from TS organ '$raw_organ'"
+                @info "Auto-detected BaseAnatomy for lesion $lid: '$t_base' (side='$t_side') from max_anatomy organ '$raw_organ'"
             end
         end
         
-        if tb_base_anat.stored_string[] != t_base
-            tb_base_anat.stored_string[] = t_base
+        # Set Base Anatomy menu selection
+        if !isempty(t_base)
+            ba_opts = menu_base_anat.options[]
+            ba_idx = findfirst(==(t_base), ba_opts)
+            if ba_idx !== nothing
+                menu_base_anat.i_selected[] = ba_idx
+            else
+                # Value not in options — add it dynamically
+                new_ba_opts = copy(ba_opts)
+                push!(new_ba_opts, t_base)
+                ba_all_opts[] = new_ba_opts
+                menu_base_anat.i_selected[] = length(new_ba_opts)
+            end
+        else
+            menu_base_anat.i_selected[] = 1  # reset to ""
         end
         
         side_opts = menu_side.options[]
         s_idx = findfirst(==(t_side), side_opts)
         menu_side.i_selected[] = s_idx !== nothing ? s_idx : 1
+        
+        # ── Restore OntologyBuilder anatomical detail rows ─────────────────
+        anat_details_raw = get(data, "Anatomical Details", "")
+        if !isempty(anat_details_raw)
+            parts = split(anat_details_raw, " | ")
+            count = min(length(parts), MAX_ANAT_ROWS)
+            for i in 1:count
+                p = strip(parts[i])
+                colon = findfirst(':', p)
+                if colon !== nothing
+                    rel_str = strip(p[1:colon-1])
+                    struct_str = strip(p[colon+1:end])
+                else
+                    rel_str = ""
+                    struct_str = p
+                end
+                # Set relation menu
+                rel_opts = anat_rel_menus[i].options[]
+                r_idx = findfirst(==(rel_str), rel_opts)
+                anat_rel_menus[i].i_selected[] = r_idx !== nothing ? r_idx : 1
+                # Set structure menu
+                struct_opts = anat_struct_menus[i].options[]
+                st_idx = findfirst(==(struct_str), struct_opts)
+                if st_idx !== nothing
+                    anat_struct_menus[i].i_selected[] = st_idx
+                else
+                    # Value not in options — add it
+                    new_sopts = copy(struct_opts)
+                    push!(new_sopts, struct_str)
+                    anat_struct_menus[i].options[] = new_sopts
+                    anat_struct_menus[i].i_selected[] = length(new_sopts)
+                end
+            end
+            anat_active_count[] = count
+        else
+            # Clear all rows
+            for i in 1:MAX_ANAT_ROWS
+                anat_rel_menus[i].i_selected[] = 1
+                anat_struct_menus[i].i_selected[] = 1
+            end
+            anat_active_count[] = 0
+        end
         
         # ── Auto-fill Lesion tracking name ────────────────────────────────
         tp_idx = _MEH.current_tp_index[]
@@ -1978,6 +2590,87 @@ end_section!(sec_win)
                 @warn "Auto-SUV computation failed for lesion $lid: $e"
             end
         end
+        
+        # ── Auto-compute PROMISE score and SUV comparison ────────────────
+        try
+            suv_str = get(data, "SUV max", "")
+            if isempty(suv_str) && haskey(field_widgets, "SUV max") && field_widgets["SUV max"] isa Textbox
+                suv_str = _safe_strip(field_widgets["SUV max"].stored_string[])
+            end
+            if !isempty(suv_str)
+                fields = parse_suv_fields(suv_str)
+                suv_max = get(fields, "max", 0.0f0)
+                if suv_max > 0
+                    bg = Dict{String,Float32}(
+                        "liver" => get(fields, "liver", 0.0f0),
+                        "parotid" => get(fields, "parotid", 0.0f0),
+                        "blood" => get(fields, "blood", 0.0f0)
+                    )
+                    cmp_str = compute_suv_comparison_string(suv_max, bg)
+                    lbl_suv_comparison.text[] = cmp_str
+                end
+            end
+        catch e
+            @warn "PROMISE auto-computation failed: $e"
+        end
+        
+        # ── Auto-compute Volume and Match Analysis ───────────────────────
+        try
+            vol = compute_lesion_volume(lid, tp_idx)
+            vol_cc = vol["volume_cc"]
+            vol_mm3 = vol["volume_mm3"]
+            diameter = vol["diameter_mm"]
+            
+            # Store volume in metadata
+            if vol_cc > 0
+                db = copy(lesion_db[])
+                ld = get(db, active_lesion_id[], Dict{String,String}())
+                ld = copy(ld)
+                ld["_Volume_mm3"] = string(round(vol_mm3, digits=1))
+                ld["_Volume_cc"] = string(round(vol_cc, digits=3))
+                ld["_Diameter_mm"] = string(round(diameter, digits=1))
+                db[active_lesion_id[]] = ld
+                lesion_db[] = db
+            end
+            
+            # Match analysis (cross-TP comparison)
+            analysis = compute_match_analysis(lid, tp_idx)
+            if analysis !== nothing
+                analysis_str = format_match_analysis(analysis)
+                lbl_match_analysis.text[] = analysis_str
+                
+                # Persist match analysis to metadata
+                db = copy(lesion_db[])
+                ld = get(db, active_lesion_id[], Dict{String,String}())
+                ld = copy(ld)
+                ld["_MatchGroup"] = string(analysis.group_id)
+                ld["_RECIP"] = analysis.recip_category
+                if analysis.baseline_volume_cc > 0.001
+                    ld["_VolDelta_pct"] = string(round(analysis.volume_delta_pct, digits=1))
+                    ld["_VolDelta_cc"] = string(round(analysis.volume_delta_abs_cc, digits=3))
+                end
+                if analysis.baseline_suv_max > 0.1f0
+                    ld["_SUVDelta"] = string(round(analysis.suv_delta_abs, digits=1))
+                    ld["_SUVDelta_pct"] = string(round(analysis.suv_delta_pct, digits=1))
+                end
+                db[active_lesion_id[]] = ld
+                lesion_db[] = db
+            else
+                # No match group — just show volume
+                if vol_cc > 0
+                    lbl_match_analysis.text[] = "Vol: $(round(vol_cc, digits=2))cc ($(round(diameter, digits=1))mm⌀)"
+                else
+                    lbl_match_analysis.text[] = ""
+                end
+            end
+        catch e
+            @warn "Volume/Match analysis failed for lesion $lid: $e"
+            lbl_match_analysis.text[] = ""
+        end
+        
+        # ── Restore No CT Correlate toggle ───────────────────────────────
+        no_ct_val = get(data, "NoCTCorrelate", "false") == "true"
+        no_ct_toggle.active[] = no_ct_val
         
         # Restore windowing if present
         if haskey(data, "_CT_Min") && haskey(data, "_CT_Max")
@@ -2165,8 +2858,13 @@ end_section!(sec_win)
     end
     
     # ── Wire autosave triggers for all metadata UI elements ──────────
-    on(tb_base_anat.stored_string) do _; trigger_autosave(); end
-    on(tb_rel_base.stored_string) do _; trigger_autosave(); end
+    on(menu_base_anat.selection) do _; trigger_autosave(); end
+    # OntologyBuilder anatomical detail rows
+    for i in 1:MAX_ANAT_ROWS
+        on(anat_struct_menus[i].selection) do _; trigger_autosave(); end
+        on(anat_rel_menus[i].selection) do _; trigger_autosave(); end
+    end
+    on(anat_active_count) do _; trigger_autosave(); end
     on(menu_side.selection) do _; trigger_autosave(); end
     on(active_lesion_type) do _; trigger_autosave(); end
     on(dict_tb.stored_string) do _; trigger_autosave(); end

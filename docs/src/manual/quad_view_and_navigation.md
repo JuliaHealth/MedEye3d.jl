@@ -45,3 +45,20 @@ Clicking the **Compare Volumes** button in the Makie GUI activates a 2-panel com
 - **Left Panel (Panel 1)**: Baseline / Reference time point.
 - **Right Panel (Panel 5)**: Follow-up / Response evaluation time point.
 - Slice scrolling is automatically synchronized across both volumes.
+
+### Synchronized Lesion Navigation
+
+When navigating to a lesion in Compare Mode:
+1. The left panel scrolls to the lesion's centroid at the current time point
+2. The right panel automatically finds the **matched lesion** in the comparison time point via `LesionAssociation.find_cross_tp_lesion()`
+3. Both panels isolate and highlight the corresponding lesions from the same **match group**
+
+### Quantitative Tracking
+
+The metadata panel automatically displays longitudinal changes when a matched lesion is selected:
+- **Volume delta**: Percentage and absolute change in lesion volume (cc)
+- **SUVmax delta**: Change in maximum SUV compared to baseline
+- **RECIP classification**: Complete Response (CR), Partial Response (PR), Stable Disease (SD), or Progressive Disease (PD)
+
+See [Lesion Metadata & Tracking](lesion_metadata_and_tracking.md) for full details on match analysis.
+
