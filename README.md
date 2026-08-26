@@ -23,6 +23,7 @@
 - **GPU-Accelerated Post-Processing**: Custom `KernelAbstractions.jl` kernels for sub-millisecond 3D Connected Component Labeling (CCL/LCC) and swept-capsule continuous thick-line stroke rasterization.
 - **Asynchronous Deep Learning Semiauto Segmentation**: Integrated containerized worker supporting **HELPNet** (3D lesion CNN) and **MIC-DKFZ NNInteractive** (prompt-based interactive foundation model) with sub-0.3s GPU turnaround.
 - **Anatomical Bone Compartmentalization**: Automated separation of cortical bone surface vs trabecular bone marrow for skeletal metastasis dosimetry.
+- **Clinical Annotation & PROMISE/RECIP Scoring**: Structured metadata panel with searchable dropdowns, automatic PROMISE score computation (SUV vs liver/parotid/blood pool), lesion volume tracking, cross-timepoint match analysis with RECIP 1.0 response classification (CR/PR/SD/PD), and "No CT Correlate" toggle.
 
 ---
 
@@ -112,6 +113,12 @@ julia --threads 3,1 scripts/app/run_interactive_mrb.jl data/pat_6_files
 │  - Global Lock (Thread-Safe) │  - Timepoint Navigation      │ - HELPNet 3D  │
 │  - QuadView & Compare Modes  │  - Bone & Organ Overlays     │ - nnInter-    │
 │  - Swept-Capsule Rasterizer  │  - Non-blocking Event Queue  │   active      │
+├──────────────────────────────┼──────────────────────────────┤               │
+│  Lesion Metadata & Tracking  │  Volume & Match Analysis     │               │
+│  - Searchable Dropdowns      │  - PROMISE Score (0-3)       │               │
+│  - Anatomy Auto-Fill (JSON)  │  - RECIP 1.0 Classification  │               │
+│  - No CT Correlate Toggle    │  - Cross-TP Volume Deltas    │               │
+│  - 20-Field Clinical Schema  │  - SUV Comparison vs Liver   │               │
 └──────────────────────────────┴──────────────────────────────┴───────────────┘
 ```
 
@@ -134,6 +141,7 @@ Full documentation, architecture manuals, and code examples are available in the
 - [QuadView 4-Panel Layout & 3D Navigation](docs/src/manual/quad_view_and_navigation.md)
 - [Bone Subsegmentation & MRB Integration](docs/src/manual/bone_subsegmentation_and_mrb.md)
 - [Makie GUI Controls & Windowing](docs/src/manual/gui_controls_and_windowing.md)
+- [Lesion Metadata, PROMISE & RECIP Tracking](docs/src/manual/lesion_metadata_and_tracking.md)
 - [Developer Playbook & Lock Architecture](docs/src/devs/playbook.md)
 - [Complete API Reference](docs/src/api.md)
 

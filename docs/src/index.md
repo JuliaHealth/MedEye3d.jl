@@ -39,6 +39,9 @@ features:
   - icon: 🎛️
     title: GLMakie Clinical Dashboard
     details: Dual-handle IntervalSliders, preset windowing, mask layer visibility toggles, and metadata reporting.
+  - icon: 📋
+    title: Clinical Annotation & PROMISE/RECIP
+    details: Structured metadata panel with searchable dropdowns, automatic PROMISE scoring, lesion volume tracking, cross-TP match analysis with RECIP 1.0 classification, and anatomy auto-fill.
 ---
 ```
 
