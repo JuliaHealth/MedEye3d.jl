@@ -8,7 +8,7 @@ module ReactToScroll
 using ModernGL, GLFW, Logging
 using ..DisplayWords, ..ForDisplayStructs, ..TextureManag, ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForSupervoxels, ..ShadersAndVerticiesForLine, ..MakieEvents
 
-export reactToScroll, reactToScrollZoom
+export reactToScroll, reactToScrollZoom, reactToScrollMultiPanel!
 export registerMouseScrollFunctions
 
 # Module-local PET/CT blend tracking for Ctrl+scroll
@@ -338,5 +338,77 @@ end
 
 #     end
 # end
+
+"""
+    reactToScrollMultiPanel!(panels, mainStates, sliceOverrides)
+
+Batch texture upload for multiple panels in ONE pass. Only uploads texture data
+(glTexSubImage2D) without text rendering or draw calls — consumer loop renders.
+
+This replaces N sequential `reactToScroll(0, ...)` calls with a single batch,
+avoiding per-panel overhead:
+  - No per-panel glUseProgram / glBufferData for text shader
+  - No per-panel FreeType CPU text rendering
+  - No per-panel glDrawElements
+  - No per-panel reactivateMainObj buffer upload
+
+`sliceOverrides` is a Dict{Int,Int} mapping panel_idx => slice_number.
+If a panel is not in sliceOverrides, its currentDisplayedSlice is used.
+"""
+function reactToScrollMultiPanel!(panels::Vector{Int}, mainStates::Vector{StateDataFields},
+                                  sliceOverrides::Dict{Int,Int}=Dict{Int,Int}())
+    t_start = time_ns()
+    n_uploads = 0
+    for panel_idx in panels
+        if panel_idx < 1 || panel_idx > length(mainStates)
+            continue
+        end
+        panelState = mainStates[panel_idx]
+        lastSlice = panelState.onScrollData.slicesNumber
+        if lastSlice < 1
+            continue
+        end
+        
+        current = get(sliceOverrides, panel_idx, panelState.currentDisplayedSlice)
+        current = clamp(current, 1, lastSlice)
+        panelState.currentDisplayedSlice = current
+        panelState.isSliceChanged = true
+        
+        # Slice 3D→2D for all textures in this panel
+        singleSlDat = panelState.onScrollData.dataToScroll |>
+            (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(current), panelState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
+            (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=current, textToDisp=getTextForCurrentSlice(panelState.onScrollData, Int32(current)))
+        
+        # Upload image textures only (no text, no draw calls)
+        modulelistOfTextSpecs = panelState.mainForDisplayObjects.listOfTextSpecifications
+        calcDimStruct = panelState.calcDimsStruct
+        for updateDat in singleSlDat.listOfDataAndImageNames
+            findList = findall((texSpec) -> texSpec.name == updateDat.name, modulelistOfTextSpecs)
+            if !isempty(findList)
+                texSpec = modulelistOfTextSpecs[findList[1]]
+                transformedDat = StructsManag.applyZoomPan(updateDat.dat, calcDimStruct.zoom, calcDimStruct.panX, calcDimStruct.panY)
+                TextureManag.updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight)
+                n_uploads += 1
+            end
+        end
+        
+        # Upload text texture directly (no shader switch needed — updateTexture only
+        # uses glActiveTexture/glBindTexture/glTexSubImage2D, not shader programs)
+        TextureManag.addTextToTexture(panelState.textDispObj, [singleSlDat.textToDisp..., panelState.valueForMasToSet.text], calcDimStruct)
+        
+        panelState.currentlyDispDat = singleSlDat
+        
+        # Update mouse position tracking
+        currentDim = Int64(panelState.onScrollData.dataToScrollDims.dimensionToScroll)
+        lastMouse = panelState.lastRecordedMousePosition
+        locArr = [lastMouse[1], lastMouse[2], lastMouse[3]]
+        locArr[3] = current
+        panelState.lastRecordedMousePosition = CartesianIndex(locArr[1], locArr[2], locArr[3])
+    end
+    t_ms = (time_ns() - t_start) / 1e6
+    if t_ms > 20.0
+        println("  [BENCH] reactToScrollMultiPanel!($(length(panels)) panels, $n_uploads tex): $(round(t_ms, digits=1))ms"); flush(stdout)
+    end
+end
 
 end #ReactToScroll

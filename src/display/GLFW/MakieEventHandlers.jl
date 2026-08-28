@@ -152,13 +152,11 @@ function reactToChangePlane(data::ChangePlaneEvent, stateObjects::Vector{StateDa
     end
     
     dummy_kb = KeyboardStruct()
-    old_idx = stateObjects[1].switchIndex
+    panel_indices = Int[]
     for (idx, stateObject) in enumerate(stateObjects)
         old_scroll = stateObject.onScrollData.dataToScrollDims
         new_scroll = DataToScrollDims(imageSize=old_scroll.imageSize, voxelSize=old_scroll.voxelSize, dimensionToScroll=dim)
         
-        # Override the lastRecordedMousePosition to be the middle of the volume
-        # so that ChangePlane.processKeysInfo will extract the middle slice instead of slice 1 (which is usually black air)
         stateObject.lastRecordedMousePosition = CartesianIndex(
             max(1, round(Int, old_scroll.imageSize[1] / 2)),
             max(1, round(Int, old_scroll.imageSize[2] / 2)),
@@ -167,7 +165,6 @@ function reactToChangePlane(data::ChangePlaneEvent, stateObjects::Vector{StateDa
         
         ChangePlane.processKeysInfo(Identity(new_scroll), stateObject, dummy_kb, false)
         
-        # If in compare mode, restore layout immediately
         if compare_mode[]
             if idx == 1
                 updateQuadVertices!(stateObject, :LeftHalf)
@@ -177,11 +174,10 @@ function reactToChangePlane(data::ChangePlaneEvent, stateObjects::Vector{StateDa
                 updateQuadVertices!(stateObject, :Hidden)
             end
         end
-        
-        stateObjects[1].switchIndex = idx
-        ReactToScroll.reactToScroll(0, stateObjects, false)
+        push!(panel_indices, idx)
     end
-    stateObjects[1].switchIndex = old_idx
+    # Batch texture upload for all panels at once
+    ReactToScroll.reactToScrollMultiPanel!(panel_indices, stateObjects)
 end
 
 function updateQuadVertices!(stateObject::StateDataFields, layout::Symbol)
@@ -229,7 +225,7 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                 # Load right TP data into panel 5 using _load_tp_from_entry!
                 entry = get_or_load_tp_data(right_tp)
                 if entry !== nothing
-                    rm = Float32.(entry.mask)
+                    rm = entry.mask_f32
                     rs = get_existing_bone_array(stateObjects[5], "Bone_Surface")
                     rmr = get_existing_bone_array(stateObjects[5], "Bone_Marrow")
                     _load_tp_from_entry!(stateObjects, entry, 5; mask_f32=rm, bone_s_f32=rs, bone_m_f32=rmr)
@@ -243,30 +239,25 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
             updateQuadVertices!(stateObjects[3], :Hidden)
             updateQuadVertices!(stateObjects[4], :Hidden)
 
-            # Re-render both panels by clearing current display data to force texture update
-            stateObjects[1].currentlyDispDat = SingleSliceDat()
-            stateObjects[5].currentlyDispDat = SingleSliceDat()
-            old_idx = stateObjects[1].switchIndex
-            stateObjects[1].switchIndex = 1
-            ReactToScroll.reactToScroll(0, stateObjects, false)
-            stateObjects[1].switchIndex = 5
-            ReactToScroll.reactToScroll(0, stateObjects, false)
-            stateObjects[1].switchIndex = old_idx
-            
             left_label = get(tp_labels, current_tp_index[], "TP $(current_tp_index[])")
             right_label = get(tp_labels, compare_right_tp[], "TP $(compare_right_tp[])")
             println("Compare mode ON: Left=$left_label, Right=$right_label"); flush(stdout)
             
-            # Re-apply bone overlay for active lesion
+            # Force texture update + bone overlay via reactToSyncLesion (covers [1,5])
+            stateObjects[1].currentlyDispDat = SingleSliceDat()
+            stateObjects[5].currentlyDispDat = SingleSliceDat()
             if current_active_lesion_id[] > 0
                 reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects)
+            else
+                # No active lesion — batch upload textures for both panels
+                ReactToScroll.reactToScrollMultiPanel!([1, 5], stateObjects)
             end
         else
             compare_right_tp[] = -1
             # Reload current active TP into all 4 panels using _load_tp_from_entry!
             entry = get_or_load_tp_data(current_tp_index[])
             if entry !== nothing
-                m = Float32.(entry.mask)
+                m = entry.mask_f32
                 s = get_existing_bone_array(stateObjects[1], "Bone_Surface")
                 mr = get_existing_bone_array(stateObjects[1], "Bone_Marrow")
                 num_panels = min(4, length(stateObjects))
@@ -274,13 +265,7 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                     _load_tp_from_entry!(stateObjects, entry, i; mask_f32=m, bone_s_f32=s, bone_m_f32=mr)
                 end
             end
-            # Evict inactive TPs from RAM
-            for k in collect(keys(tp_data_cache))
-                if k != current_tp_index[]
-                    delete!(tp_data_cache, k)
-                end
-            end
-            GC.gc(false)
+            # All TPs pre-loaded before GUI launch — no eviction needed
 
             # 4-pane view
             updateQuadVertices!(stateObjects[1], :TopLeft)
@@ -300,19 +285,18 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                 end
             end
 
-            # Re-render all 4 panels to ensure textures and slices are displayed
-            old_idx = stateObjects[1].switchIndex
+            # Clear display data to force full texture re-upload on next scroll
             for i in 1:4
                 stateObjects[i].currentlyDispDat = SingleSliceDat()
-                stateObjects[1].switchIndex = i
-                ReactToScroll.reactToScroll(0, stateObjects, false)
             end
-            stateObjects[1].switchIndex = old_idx
             println("Compare mode OFF: restored 4-pane view for TP $(current_tp_index[])"); flush(stdout)
             
-            # Re-apply bone overlay for active lesion
+            # Upload textures + bone overlay via reactToSyncLesion (covers [1,2,3,4])
             if current_active_lesion_id[] > 0
                 reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects)
+            else
+                # No active lesion — batch upload textures for all 4 panels
+                ReactToScroll.reactToScrollMultiPanel!([1, 2, 3, 4], stateObjects)
             end
         end
     end
@@ -473,19 +457,28 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         stateObject.mainForDisplayObjects.isSyncScrollOn = false
     end
 
-    # Clear stale bone overlay tracking and zero out bone texture arrays
-    # This prevents ghost overlays when switching between lesions
-    empty!(last_bone_surf_indices)
-    empty!(last_bone_marr_indices)
-    for stateObject in stateObjects
+    # Clear stale bone overlay using SPARSE index-based clearing (not full 3D fill!)
+    # Previously: fill!(arr, 0.0f0) on ALL bone 3D volumes (~4GB) = ~590ms
+    # Now: zero only the indices that were previously written (~5K-70K elements) = ~0.1ms
+    for (panel_idx, stateObject) in enumerate(stateObjects)
         for scrDat in stateObject.onScrollData.dataToScroll
-            if scrDat.name == "Bone_Surface" || scrDat.name == "Bone_Marrow"
-                arr = scrDat.dat isa PermutedDimsArray ? parent(scrDat.dat) : scrDat.dat
-                fill!(arr, 0.0f0)
+            if scrDat.name == "Bone_Surface" && haskey(last_bone_surf_indices, panel_idx)
+                old_indices = last_bone_surf_indices[panel_idx]
+                if !isempty(old_indices)
+                    scrDat.dat[old_indices] .= 0.0f0
+                end
+            elseif scrDat.name == "Bone_Marrow" && haskey(last_bone_marr_indices, panel_idx)
+                old_indices = last_bone_marr_indices[panel_idx]
+                if !isempty(old_indices)
+                    scrDat.dat[old_indices] .= 0.0f0
+                end
             end
         end
     end
-
+    empty!(last_bone_surf_indices)
+    empty!(last_bone_marr_indices)
+    t_sparse_ms = (time_ns() - t_total) / 1e6
+    
     # Determine matched lesion ID for the compare right panel (panel 5) if in compare mode
     panel5_lesion_id = data.lesion_id
     panel5_all_ids = Int[]
@@ -493,7 +486,6 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         try
             left_node = get_node_name_for_tp(current_tp_index[])
             right_node = get_node_name_for_tp(compare_right_tp[])
-            # Find cross-TP match from LesionAssociation module
             match_mod = isdefined(Main, :MedEye3d) && isdefined(Main.MedEye3d, :LesionAssociation) ? 
                         Main.MedEye3d.LesionAssociation : nothing
             if match_mod !== nothing
@@ -509,16 +501,16 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         end
     end
 
-    # Set mask filter uniform for each panel
+    t_uniform_start = time_ns()
+    # Set mask filter uniform for each panel (glUseProgram once per panel, not per textSpec)
     for (idx, stateObject) in enumerate(stateObjects)
         target_id = (idx == 5 && compare_mode[]) ? panel5_lesion_id : data.lesion_id
+        ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if textSpec.name == "Mask" || textSpec.name == "segmentation"
-                ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
                 if idx == 5 && compare_mode[] && !isempty(panel5_all_ids)
                     Uniforms.setAllowedIDs!(textSpec, panel5_all_ids)
                     Uniforms.coontrolMinMaxUniformVals(textSpec)
-                    if DEBUG_VERBOSE[]; println("Set mask multi-ID uniform for panel 5: lesions=$(panel5_all_ids)"); flush(stdout); end
                 else
                     Uniforms.setAllowedIDs!(textSpec, Int[])
                     if target_id > 0
@@ -527,24 +519,20 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                         textSpec.minAndMaxValue = Float32.([1.0, 1000.0])
                     end
                     Uniforms.coontrolMinMaxUniformVals(textSpec)
-                    if DEBUG_VERBOSE[]; println("Set mask uniform for panel $idx: lesion=$target_id, texSpec.name=$(textSpec.name)"); flush(stdout); end
                 end
             elseif textSpec.name == "manualModif"
-                # manualModif must always remain unclamped so all user strokes are visible
                 textSpec.minAndMaxValue = Float32.([0.0, 1000.0])
-                ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
                 Uniforms.setAllowedIDs!(textSpec, Int[])
                 Uniforms.coontrolMinMaxUniformVals(textSpec)
             elseif textSpec.name == "Bone_Surface" || textSpec.name == "Bone_Marrow"
                 textSpec.isVisible = true
-                ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
                 Uniforms.setTextureVisibility(true, textSpec.uniforms)
                 Uniforms.setMaskColor(textSpec.color, textSpec.uniforms)
             end
         end
     end
-    t_uniforms_ms = (time_ns() - t_total) / 1e6
-    if DEBUG_VERBOSE[]; println("  [BENCH-SL] uniforms+cross-tp: $(round(t_uniforms_ms, digits=1))ms"); flush(stdout); end
+    t_uniform_ms = (time_ns() - t_uniform_start) / 1e6
+    if DEBUG_VERBOSE[]; println("  [BENCH-SL] sparse_clear: $(round(t_sparse_ms, digits=1))ms, uniforms: $(round(t_uniform_ms, digits=1))ms"); flush(stdout); end
 
 
 
@@ -658,6 +646,8 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     if DEBUG_VERBOSE[]; println("canonical_center=$canonical_center, active_panel_indices=$active_panel_indices"); flush(stdout); end
 
     if canonical_center !== nothing
+        # Pre-compute slice positions for all panels FIRST, then batch-upload
+        slice_overrides = Dict{Int,Int}()
         for idx in active_panel_indices
             stateObject = stateObjects[idx]
             last_sl = max(1, stateObject.onScrollData.slicesNumber)
@@ -683,31 +673,24 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             origX, origY, origZ = effective_center[1], effective_center[2], effective_center[3]
             
             if idx == 1 || idx == 2 || idx == 5
-                # Axial view (scrolls Z, shows X vs Y)
                 stateObject.lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
-                stateObject.currentDisplayedSlice = clamp(origZ, 1, last_sl)
+                slice_overrides[idx] = clamp(origZ, 1, last_sl)
             elseif idx == 3
-                # Sagittal view (permuted 2,3,1: Y, Z, X; scrolls X, shows Y vs Z)
                 stateObject.lastRecordedMousePosition = CartesianIndex(origY, origZ, origX)
-                stateObject.currentDisplayedSlice = clamp(origX, 1, last_sl)
+                slice_overrides[idx] = clamp(origX, 1, last_sl)
             else
-                # Coronal view (idx 4, permuted 1,3,2: X, Z, Y; scrolls Y, shows X vs Z)
                 stateObject.lastRecordedMousePosition = CartesianIndex(origX, origZ, origY)
-                stateObject.currentDisplayedSlice = clamp(origY, 1, last_sl)
+                slice_overrides[idx] = clamp(origY, 1, last_sl)
             end
-            
-            stateObjects[1].switchIndex = idx
-            ReactToScroll.reactToScroll(0, stateObjects, false)
-            changed = true
-            if DEBUG_VERBOSE[]; println("Synced active lesion $target_id at center $effective_center in panel $idx (slice $(stateObject.currentDisplayedSlice))"); flush(stdout); end
+            if DEBUG_VERBOSE[]; println("Synced active lesion $target_id at center $effective_center in panel $idx (slice $(slice_overrides[idx]))"); flush(stdout); end
         end
+        # Single batch upload for ALL panels
+        ReactToScroll.reactToScrollMultiPanel!(active_panel_indices, stateObjects, slice_overrides)
+        changed = true
     else
-        # No centroid: still re-render all active panels to show bone overlay
-        for idx in active_panel_indices
-            stateObjects[1].switchIndex = idx
-            ReactToScroll.reactToScroll(0, stateObjects, false)
-            changed = true
-        end
+        # No centroid: batch re-render all active panels to show bone overlay
+        ReactToScroll.reactToScrollMultiPanel!(active_panel_indices, stateObjects)
+        changed = true
         if DEBUG_VERBOSE[]; println("Synced active lesion $(data.lesion_id) (no centroid found) - bone overlay uploaded"); flush(stdout); end
     end
     for stateObject in stateObjects
@@ -730,6 +713,8 @@ mutable struct TpCacheEntry
     bone_surf::BitArray{3}
     bone_marr::BitArray{3}
     anatomy::Union{Nothing, Array{UInt16,3}}  # max_anatomy atlas per-TP (UInt16, 163MB)
+    mask_f32::Array{Float32,3}                 # pre-converted Float32 mask (avoids 400ms per switch)
+    anat_f32::Array{Float32,3}                 # pre-converted Float32 anatomy (avoids 400ms per switch)
 end
 
 const tp_data_cache = Dict{Int, TpCacheEntry}()
@@ -822,16 +807,21 @@ function register_tp_loader!(fn)
     tp_loader_ref[] = fn
     _ensure_io_task!()  # Start IO consumer task on first registration
     
-    # Eagerly preload neighbor TPs (TP 1, TP 2) so clicking TP>> is instant
+    # Eagerly preload neighbor TPs — skip if already preloaded before GUI launch
     Threads.@spawn begin
         sleep(0.5)  # Allow initial display to finish first
         tp_indices = sort(collect(keys(tp_labels)))
-        for tp_idx in tp_indices
-            if tp_idx != 0 && !haskey(tp_data_cache, tp_idx) && io_channel[] !== nothing
-                try
-                    put!(io_channel[], PreloadTPMessage(tp_idx))
-                    println("  [STARTUP] Dispatched background preload for TP $tp_idx"); flush(stdout)
-                catch; end
+        all_cached = all(tp_idx -> haskey(tp_data_cache, tp_idx), tp_indices)
+        if all_cached
+            println("  [STARTUP] All TPs already in cache, skipping background preload"); flush(stdout)
+        else
+            for tp_idx in tp_indices
+                if tp_idx != 0 && !haskey(tp_data_cache, tp_idx) && io_channel[] !== nothing
+                    try
+                        put!(io_channel[], PreloadTPMessage(tp_idx))
+                        println("  [STARTUP] Dispatched background preload for TP $tp_idx"); flush(stdout)
+                    catch; end
+                end
             end
         end
     end
@@ -849,13 +839,11 @@ function get_or_load_tp_data(idx::Int)
     end
     return nothing
 end
-# Helper to extract existing array (to avoid 1.3 GB allocation on TP switch)
+# Helper to extract existing bone array reference (WITHOUT zeroing — caller decides)
 function get_existing_bone_array(stateObject, name)
     for scrDat in stateObject.onScrollData.dataToScroll
         if scrDat.name == name
-            # Return the base array (un-permute if necessary) and zero it out
             arr = scrDat.dat isa PermutedDimsArray ? parent(scrDat.dat) : scrDat.dat
-            fill!(arr, 0.0f0)
             return arr
         end
     end
@@ -875,9 +863,9 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx;
     delete!(last_bone_surf_indices, panel_idx)
     delete!(last_bone_marr_indices, panel_idx)
     
-    # Convert compact types to Float32 only if not pre-supplied
+    # Use pre-computed Float32 arrays from TpCacheEntry (avoids ~800ms per call)
     if mask_f32 === nothing
-        mask_f32 = Float32.(entry.mask)
+        mask_f32 = entry.mask_f32
     end
     if bone_s_f32 === nothing
         bone_s_f32 = Float32.(entry.bone_surf)
@@ -885,7 +873,7 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx;
     if bone_m_f32 === nothing
         bone_m_f32 = Float32.(entry.bone_marr)
     end
-    anat_f32 = entry.anatomy !== nothing ? Float32.(entry.anatomy) : zeros(Float32, size(entry.ct))
+    anat_f32 = entry.anat_f32
     
     # Use PermutedDimsArray for zero-copy views on CT/PET/Mask/Anatomy,
     # but bone arrays MUST be independent per-panel: reactToSyncLesion writes
@@ -1046,7 +1034,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         t_panel_left = @elapsed begin
             if entry_left !== nothing
                 # Extract existing display arrays to avoid 1.3 GB reallocation
-                lm = Float32.(entry_left.mask)
+                lm = entry_left.mask_f32
                 ls = get_existing_bone_array(stateObjects[1], "Bone_Surface")
                 lmr = get_existing_bone_array(stateObjects[1], "Bone_Marrow")
                 _load_tp_from_entry!(stateObjects, entry_left, 1; mask_f32=lm, bone_s_f32=ls, bone_m_f32=lmr)
@@ -1067,7 +1055,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         t_panel_right = @elapsed begin
             if entry_right !== nothing
                 # Extract existing display arrays to avoid 1.3 GB reallocation
-                rm = Float32.(entry_right.mask)
+                rm = entry_right.mask_f32
                 rs = get_existing_bone_array(stateObjects[5], "Bone_Surface")
                 rmr = get_existing_bone_array(stateObjects[5], "Bone_Marrow")
                 _load_tp_from_entry!(stateObjects, entry_right, 5; mask_f32=rm, bone_s_f32=rs, bone_m_f32=rmr)
@@ -1075,16 +1063,8 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         end
         if DEBUG_VERBOSE[]; println("  [BENCH] _load_tp_from_entry!(right): $(round(t_panel_right*1000, digits=1))ms"); flush(stdout); end
         
-        # Re-render both panels
-        t_render = @elapsed begin
-            old_idx = stateObjects[1].switchIndex
-            stateObjects[1].switchIndex = 1
-            ReactToScroll.reactToScroll(0, stateObjects, false)
-            stateObjects[1].switchIndex = 5
-            ReactToScroll.reactToScroll(0, stateObjects, false)
-            stateObjects[1].switchIndex = old_idx
-        end
-        if DEBUG_VERBOSE[]; println("  [BENCH] reactToScroll ×2: $(round(t_render*1000, digits=1))ms"); flush(stdout); end
+        # Skip initial per-panel reactToScroll — reactToSyncLesion below covers [1, 5]
+        if DEBUG_VERBOSE[]; println("  [BENCH] skipping redundant initial scroll in compare mode"); flush(stdout); end
         
         # Re-apply bone overlay for active lesion after TP data replacement
         if current_active_lesion_id[] > 0
@@ -1103,7 +1083,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         if entry !== nothing
             # Pre-convert arrays ONCE for all panels
             t_convert = @elapsed begin
-                mask_f32 = Float32.(entry.mask)
+                mask_f32 = entry.mask_f32
             end
             if DEBUG_VERBOSE[]; println("  [BENCH] Float32(mask): $(round(t_convert*1000, digits=1))ms ($(size(entry.mask)) $(eltype(entry.mask)))"); flush(stdout); end
             
@@ -1125,18 +1105,12 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
                         mask_f32=mask_f32, bone_s_f32=bone_s_f32, bone_m_f32=bone_m_f32)
                 end
             end
-            if DEBUG_VERBOSE[]; println("  [BENCH] _load_tp_from_entry! ×panels: $(round(t_panels*1000, digits=1))ms"); flush(stdout); end
-            
-            # Re-render all panels (uploads base images)
-            t_render = @elapsed begin
-                old_idx = stateObjects[1].switchIndex
-                for idx in 1:min(length(stateObjects), 5)
-                    stateObjects[1].switchIndex = idx
-                    ReactToScroll.reactToScroll(0, stateObjects, false)
-                end
-                stateObjects[1].switchIndex = old_idx
-            end
-            if DEBUG_VERBOSE[]; println("  [BENCH] reactToScroll ×panels: $(round(t_render*1000, digits=1))ms"); flush(stdout); end
+            # Skip initial per-panel reactToScroll here — reactToSyncLesion below
+            # will do its own reactToScroll for all active panels, which uploads textures.
+            # Only do a minimal scroll for panels NOT covered by reactToSyncLesion.
+            # reactToSyncLesion covers active_panel_indices = [1,2,3,4] in normal mode.
+            # Panel 5 is only used in compare mode (handled separately above).
+            if DEBUG_VERBOSE[]; println("  [BENCH] _load_tp_from_entry! completed, skipping redundant initial scroll"); flush(stdout); end
             
             # Re-apply bone overlay + navigate to active lesion (or lesion 1 if none)
             empty!(last_bone_surf_indices)
@@ -1153,25 +1127,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
             if DEBUG_VERBOSE[]; println("  [BENCH] bone overlay (reactToSyncLesion): $(round(t_bone_overlay*1000, digits=1))ms"); flush(stdout); end
         end
     end
-    # Dispatch eviction + preload to IO channel (non-blocking)
-    needed_tps = Set([new_tp])
-    preload_tps = Int[]
-    if num_tps > 1
-        prev_tp = tp_indices[mod1(new_pos - 1, num_tps)]
-        next_tp_idx = tp_indices[mod1(new_pos + 1, num_tps)]
-        push!(needed_tps, prev_tp, next_tp_idx)
-        if !compare_mode[]
-            # Preload next first (most likely direction), then prev
-            !haskey(tp_data_cache, next_tp_idx) && push!(preload_tps, next_tp_idx)
-            !haskey(tp_data_cache, prev_tp) && push!(preload_tps, prev_tp)
-        end
-    end
-    compare_mode[] && push!(needed_tps, compare_right_tp[])
-    evict_tps = Int[k for k in keys(tp_data_cache) if !(k in needed_tps)]
-    if !isempty(evict_tps) || !isempty(preload_tps)
-        put!(io_channel[], EvictAndPreloadMessage(evict_tps, preload_tps))
-    end
-    if DEBUG_VERBOSE[]; println("  [BENCH] IO dispatched: evict=$(evict_tps), preload=$(preload_tps)"); flush(stdout); end
+    # All TPs pre-loaded before GUI launch — no eviction or preload dispatch needed
     
     # SUV precompute + CT Docker preload: fire-and-forget in background (non-blocking)
     let tp_for_bg = new_tp, label_for_bg = label
@@ -1772,21 +1728,22 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
         end
     end
     
-    # Re-render all panels
-    old_idx = stateObjects[1].switchIndex
+    # Re-render all visible panels in one batch
+    visible_panels = Int[]
     for idx in 1:length(stateObjects)
         if sum(abs.(stateObjects[idx].calcDimsStruct.mainImageQuadVert)) > 0.01f0
-            stateObjects[1].switchIndex = idx
-            try
-                ReactToScroll.reactToScroll(0, stateObjects, false)
-            catch e
-                println("reactToScroll ERROR for panel $idx during visibility toggle: $e")
-                println(sprint(showerror, e, catch_backtrace()))
-                flush(stdout)
-            end
+            push!(visible_panels, idx)
         end
     end
-    stateObjects[1].switchIndex = old_idx
+    if !isempty(visible_panels)
+        try
+            ReactToScroll.reactToScrollMultiPanel!(visible_panels, stateObjects)
+        catch e
+            println("reactToScrollMultiPanel! ERROR during visibility toggle: $e")
+            println(sprint(showerror, e, catch_backtrace()))
+            flush(stdout)
+        end
+    end
 end
 
 function reactToSaveMRB(data::SaveMRBEvent, stateObjects::Vector{StateDataFields})
