@@ -51,13 +51,23 @@ textureSpec_mask = TextureSpec{Float32}(
 textureSpec_pure_pet = TextureSpec{Float32}(name="PET", isMainImage=true, color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0, 10]))
 textureSpec_surface = TextureSpec{Float32}(name="Bone_Surface", isMainImage=false, color=RGB(0.0, 1.0, 1.0), minAndMaxValue=Float32.([0.5, 1.5]), isVisible=true)
 textureSpec_marrow = TextureSpec{Float32}(name="Bone_Marrow", isMainImage=false, color=RGB(1.0, 1.0, 0.0), minAndMaxValue=Float32.([0.5, 1.5]), isVisible=true)
+# Anatomy overlay: multi-discrete mask with up to 400 classes, invisible by default (shown on click)
+anatomy_colors = [RGB(rand(), rand(), rand()) for _ in 1:400]
+textureSpec_anatomy = TextureSpec{Float32}(
+    name="Anatomy",
+    isMainImage=false,
+    isMultiDiscreteMask=true,
+    colorSet=anatomy_colors,
+    minAndMaxValue=Float32.([0, 400]),
+    isVisible=false
+)
 
 textureSpecArray = Vector{Vector{TextureSpec}}([
-    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow)],
+    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow), deepcopy(textureSpec_anatomy)],
     TextureSpec[deepcopy(textureSpec_pure_pet)],
-    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow)],
-    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow)],
-    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow)]
+    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow), deepcopy(textureSpec_anatomy)],
+    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow), deepcopy(textureSpec_anatomy)],
+    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow), deepcopy(textureSpec_anatomy)]
 ])
 
 # ── Hi-resolution display: resample to half in-plane spacing ─────────────
@@ -146,13 +156,19 @@ function load_tp(ct_path, pet_path, mask_path, tfm_path, modality)
     marr_sag = zeros(Float32, size(vol_img_sagittal))
     surf_cor = zeros(Float32, size(vol_img_coronal))
     marr_cor = zeros(Float32, size(vol_img_coronal))
+    # Panel 5 (compare right) needs its own independent bone arrays
+    surf_axial_p5 = zeros(Float32, size(ct_vol_base))
+    marr_axial_p5 = zeros(Float32, size(ct_vol_base))
+    anat_axial = zeros(Float32, size(ct_vol_base))
+    anat_sag = zeros(Float32, size(vol_img_sagittal))
+    anat_cor = zeros(Float32, size(vol_img_coronal))
 
     return Vector{Vector{Any}}([
-        Any[("CT", vol_img_axial), ("PET", vol_pet_axial), ("Mask", vol_mask_axial), ("Bone_Surface", surf_axial), ("Bone_Marrow", marr_axial)],         
+        Any[("CT", vol_img_axial), ("PET", vol_pet_axial), ("Mask", vol_mask_axial), ("Bone_Surface", surf_axial), ("Bone_Marrow", marr_axial), ("Anatomy", anat_axial)],         
         Any[("PET", vol_pet_axial)],                                                          
-        Any[("CT", vol_img_sagittal), ("PET", vol_pet_sagittal), ("Mask", vol_mask_sagittal), ("Bone_Surface", surf_sag), ("Bone_Marrow", marr_sag)],
-        Any[("CT", vol_img_coronal), ("PET", vol_pet_coronal), ("Mask", vol_mask_coronal), ("Bone_Surface", surf_cor), ("Bone_Marrow", marr_cor)],   
-        Any[("CT", vol_img_axial), ("PET", vol_pet_axial), ("Mask", vol_mask_axial), ("Bone_Surface", surf_axial), ("Bone_Marrow", marr_axial)]    
+        Any[("CT", vol_img_sagittal), ("PET", vol_pet_sagittal), ("Mask", vol_mask_sagittal), ("Bone_Surface", surf_sag), ("Bone_Marrow", marr_sag), ("Anatomy", anat_sag)],
+        Any[("CT", vol_img_coronal), ("PET", vol_pet_coronal), ("Mask", vol_mask_coronal), ("Bone_Surface", surf_cor), ("Bone_Marrow", marr_cor), ("Anatomy", anat_cor)],   
+        Any[("CT", vol_img_axial), ("PET", vol_pet_axial), ("Mask", vol_mask_axial), ("Bone_Surface", surf_axial_p5), ("Bone_Marrow", marr_axial_p5), ("Anatomy", anat_axial)]    
     ]), Tuple(Float64.(baseline_ct.spacing)), mask_vol_base
 end
 
@@ -201,6 +217,9 @@ if isfile(preprocessed_h5)
         group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
         
         HDF5.h5open(preprocessed_h5, "r") do h5_file
+            # Check if volumes were pre-flipped during preprocessing
+            is_preflipped = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
+            
             # Try pre-resampled display-resolution group first
             display_group = group * "_DISPLAY"
             use_display = haskey(h5_file, display_group) && 
@@ -223,12 +242,17 @@ if isfile(preprocessed_h5)
                 pet_vol = max.(0.0f0, pet_vol .* scale_factor)
             end
             
-            t_reverse = @elapsed begin
-                ct_vol_base = reverse(ct_vol, dims=2)
-                pet_vol_base = reverse(pet_vol, dims=2)
-                mask_vol_base = reverse(mask_vol, dims=2)
+            if !is_preflipped
+                t_reverse = @elapsed begin
+                    ct_vol_base = reverse(ct_vol, dims=2)
+                    pet_vol_base = reverse(pet_vol, dims=2)
+                    mask_vol_base = reverse(mask_vol, dims=2)
+                end
+                println("    [BENCH-H5] reverse: $(round(t_reverse*1000, digits=1))ms"); flush(stdout)
+            else
+                ct_vol_base = ct_vol; pet_vol_base = pet_vol; mask_vol_base = mask_vol
+                println("    [BENCH-H5] reverse: SKIPPED (pre-flipped)"); flush(stdout)
             end
-            println("    [BENCH-H5] reverse: $(round(t_reverse*1000, digits=1))ms"); flush(stdout)
             
             # Cache PET volume for SUV computation (use native-res for accuracy)
             MEH.pet_volumes_cache[tp_i] = pet_vol_base
@@ -245,15 +269,19 @@ if isfile(preprocessed_h5)
                 println("    [BENCH-H5] hires_resample: SKIPPED (pre-resampled)"); flush(stdout)
             end
             
-            # Convert mask to compact int type
+            # Convert mask to compact int type (skip if already compact from preprocessing)
             t_mask = @elapsed begin
-                # Ensure no negative background values (like -1024 from CT resampling)
-                mask_vol_base = max.(0.0f0, mask_vol_base)
-                max_id = round(Int, maximum(mask_vol_base))
-                mask_compact = if max_id + 5 <= 127
-                    Int8.(round.(mask_vol_base))
+                if eltype(mask_vol_base) <: Integer
+                    mask_compact = mask_vol_base  # already Int8/Int16 from preprocessing
                 else
-                    Int16.(round.(mask_vol_base))
+                    # Ensure no negative background values (like -1024 from CT resampling)
+                    mask_vol_base = max.(0.0f0, mask_vol_base)
+                    max_id = round(Int, maximum(mask_vol_base))
+                    mask_compact = if max_id + 5 <= 127
+                        Int8.(round.(mask_vol_base))
+                    else
+                        Int16.(round.(mask_vol_base))
+                    end
                 end
             end
             println("    [BENCH-H5] mask compact: $(round(t_mask*1000, digits=1))ms ($(eltype(mask_compact)))"); flush(stdout)
@@ -263,13 +291,84 @@ if isfile(preprocessed_h5)
             bone_surf = falses(sz...)
             bone_marr = falses(sz...)
             
+            # Load per-TP max_anatomy atlas (prefer pre-registered/resampled volume from HDF5)
+            anatomy_vol = nothing
+            try
+                max_anat_src = study[10]
+                max_anat_lbl = study[11]
+                
+                # Try finding pre-registered anatomy in HDF5 group first
+                anat_h5_key = ""
+                if haskey(h5_file, src_group)
+                    for k in keys(h5_file[src_group])
+                        if k == "max_anatomy.nii.gz" || endswith(k, ".seg.nrrd") || startswith(k, "TS_all") || startswith(k, "max_anatomy")
+                            anat_h5_key = "$src_group/$k"
+                            break
+                        end
+                    end
+                end
+                
+                if !isempty(anat_h5_key) && haskey(h5_file, anat_h5_key)
+                    raw_anat = read(h5_file[anat_h5_key])
+                    # Conditional reverse (skip if pre-flipped)
+                    if !is_preflipped
+                        raw_anat = reverse(Float32.(raw_anat), dims=2)
+                    end
+                    if !use_display && size(raw_anat) != size(ct_vol_base)
+                        raw_anat = hires_resample(Float32.(raw_anat), first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
+                    end
+                    # Auto-detect type: if already UInt16 from preprocessing, use directly
+                    anatomy_vol = eltype(raw_anat) <: Integer ? UInt16.(raw_anat) : UInt16.(round.(max.(0.0f0, Float32.(raw_anat))))
+                    println("    [BENCH-H5] Loaded max_anatomy from HDF5 ($anat_h5_key): $(size(anatomy_vol)) ($(eltype(raw_anat)))"); flush(stdout)
+                elseif !isempty(max_anat_src)
+                    # Fallback: load from NIfTI (for old HDF5 files without max_anatomy)
+                    anat_path = joinpath(data_dir_pat6, max_anat_src)
+                    if isfile(anat_path)
+                        anat_nii = NIfTI.niread(anat_path)
+                        anat_raw = Float32.(anat_nii.raw)
+                        anat_aligned = reverse(anat_raw, dims=2)
+                        if HIRES_FACTOR > 1.0
+                            anat_aligned = hires_resample(anat_aligned, first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
+                        end
+                        anatomy_vol = UInt16.(round.(max.(0.0f0, anat_aligned)))
+                        println("    [BENCH-H5] Loaded max_anatomy from NIfTI fallback: $(size(anatomy_vol))")
+                    end
+                end
+                
+                # Build merged label dictionary for cursor readout:
+                # Start with global names, then overlay per-TP real names (skip class_XX)
+                if !isempty(max_anat_lbl)
+                    tp_labels_path = joinpath(data_dir_pat6, max_anat_lbl)
+                    if isfile(tp_labels_path)
+                        tp_raw_labels = JSON.parsefile(tp_labels_path)
+                        merged = copy(MEH.global_ts_names[])  # start with all 201 global real names
+                        for (k_str, v) in tp_raw_labels
+                            k_int = parse(Int, k_str)
+                            if !occursin("class_", v)
+                                merged[k_int] = v  # use per-TP real name (overrides global)
+                            end
+                            # class_XX entries fall through to the global name for this integer
+                        end
+                        MEH.anatomy_labels_cache[tp_i] = merged
+                        println("    [BENCH-H5] Merged per-TP labels: $(length(merged)) entries ($(length(tp_raw_labels)) per-TP, $(length(MEH.global_ts_names[])) global)")
+                    else
+                        MEH.anatomy_labels_cache[tp_i] = MEH.global_ts_names[]
+                    end
+                else
+                    MEH.anatomy_labels_cache[tp_i] = MEH.global_ts_names[]
+                end
+            catch e
+                println("    [BENCH-H5] max_anatomy load failed for TP $tp_i: $e")
+            end
+            
             t_total_ms = (time_ns() - t_total) / 1e6
             println("    [BENCH-H5] LOAD TP TOTAL: $(round(t_total_ms, digits=1))ms"); flush(stdout)
-            return MEH.TpCacheEntry(ct_vol_base, pet_vol_base, mask_compact, bone_surf, bone_marr)
+            return MEH.TpCacheEntry(ct_vol_base, pet_vol_base, mask_compact, bone_surf, bone_marr, anatomy_vol)
         end
     end
     
     # Register fast on-demand loader with event handlers
+    MEH.DEBUG_VERBOSE[] = true  # Enable per-step [BENCH] logs for TP switch
     MEH.register_tp_loader!(load_single_tp_from_h5)
     
     for (s_idx, study) in enumerate(studies)
@@ -296,17 +395,26 @@ if isfile(preprocessed_h5)
         mask_f32 = Float32.(e.mask)
         bone_s_f32 = Float32.(e.bone_surf)
         bone_m_f32 = Float32.(e.bone_marr)
+        anat_f32 = if e.anatomy !== nothing
+            Float32.(e.anatomy)
+        elseif MEH.global_ts_atlas[] !== nothing
+            Float32.(MEH.global_ts_atlas[])
+        else
+            zeros(Float32, size(e.ct))
+        end
         
         # collect() required here because displayImage (SegmentationDisplay.jl:1210)
         # has strict type: Union{Vector{Array{Float32,3}}, Vector{Vector{Array{Float32,3}}}}
         # PermutedDimsArray is AbstractArray, not Array. This is one-time startup cost.
         # TP switching uses _load_tp_from_entry! which uses zero-copy PermutedDimsArray views.
+        # Each panel MUST have independent bone arrays — reactToSyncLesion writes
+        # per-panel bone subseg indices, so shared arrays cause doubling.
         Vector{Vector{Any}}([
-            Any[("CT", e.ct), ("PET", e.pet), ("Mask", mask_f32), ("Bone_Surface", bone_s_f32), ("Bone_Marrow", bone_m_f32)],
+            Any[("CT", e.ct), ("PET", e.pet), ("Mask", mask_f32), ("Bone_Surface", bone_s_f32), ("Bone_Marrow", bone_m_f32), ("Anatomy", anat_f32)],
             Any[("PET", e.pet)],
-            Any[("CT", collect(PermutedDimsArray(e.ct, (2,3,1)))), ("PET", collect(PermutedDimsArray(e.pet, (2,3,1)))), ("Mask", collect(PermutedDimsArray(mask_f32, (2,3,1)))), ("Bone_Surface", collect(PermutedDimsArray(bone_s_f32, (2,3,1)))), ("Bone_Marrow", collect(PermutedDimsArray(bone_m_f32, (2,3,1))))],
-            Any[("CT", collect(PermutedDimsArray(e.ct, (1,3,2)))), ("PET", collect(PermutedDimsArray(e.pet, (1,3,2)))), ("Mask", collect(PermutedDimsArray(mask_f32, (1,3,2)))), ("Bone_Surface", collect(PermutedDimsArray(bone_s_f32, (1,3,2)))), ("Bone_Marrow", collect(PermutedDimsArray(bone_m_f32, (1,3,2))))],
-            Any[("CT", e.ct), ("PET", e.pet), ("Mask", mask_f32), ("Bone_Surface", bone_s_f32), ("Bone_Marrow", bone_m_f32)]
+            Any[("CT", collect(PermutedDimsArray(e.ct, (2,3,1)))), ("PET", collect(PermutedDimsArray(e.pet, (2,3,1)))), ("Mask", collect(PermutedDimsArray(mask_f32, (2,3,1)))), ("Bone_Surface", zeros(Float32, size(e.ct, 2), size(e.ct, 3), size(e.ct, 1))), ("Bone_Marrow", zeros(Float32, size(e.ct, 2), size(e.ct, 3), size(e.ct, 1))), ("Anatomy", collect(PermutedDimsArray(anat_f32, (2,3,1))))],
+            Any[("CT", collect(PermutedDimsArray(e.ct, (1,3,2)))), ("PET", collect(PermutedDimsArray(e.pet, (1,3,2)))), ("Mask", collect(PermutedDimsArray(mask_f32, (1,3,2)))), ("Bone_Surface", zeros(Float32, size(e.ct, 1), size(e.ct, 3), size(e.ct, 2))), ("Bone_Marrow", zeros(Float32, size(e.ct, 1), size(e.ct, 3), size(e.ct, 2))), ("Anatomy", collect(PermutedDimsArray(anat_f32, (1,3,2))))],
+            Any[("CT", e.ct), ("PET", e.pet), ("Mask", mask_f32), ("Bone_Surface", zeros(Float32, size(bone_s_f32))), ("Bone_Marrow", zeros(Float32, size(bone_m_f32))), ("Anatomy", anat_f32)]
         ])
     end
     global first_voxelDataTupleVector = entry_to_vdt(first_entry)
@@ -402,12 +510,18 @@ if isfile(metadata_json_path)
     try
         meta_json = JSON.parsefile(metadata_json_path)
         
-        # Collect all date→description entries
+        # Collect all date→description entries (German and English)
         date_descriptions = Dict{String, String}()
+        date_english = Dict{String, String}()
         for item in meta_json
             for (k, v) in item
-                if v isa Dict && haskey(v, "Description")
-                    date_descriptions[k] = v["Description"]
+                if v isa Dict
+                    if haskey(v, "Description")
+                        date_descriptions[k] = v["Description"]
+                    end
+                    if haskey(v, "EnglishDescription")
+                        date_english[k] = v["EnglishDescription"]
+                    end
                 end
             end
         end
@@ -431,6 +545,9 @@ if isfile(metadata_json_path)
                     # Direct date match in filename (e.g. "Fixed_CT_Volume_20220310")
                     if occursin(date_key, ct_fname) || occursin(date_key, pet_fname)
                         MEH.tp_descriptions[tp_idx] = date_descriptions[date_key]
+                        if haskey(date_english, date_key)
+                            MEH.tp_english_descriptions[tp_idx] = date_english[date_key]
+                        end
                         matched = true
                         break
                     end
@@ -445,10 +562,13 @@ if isfile(metadata_json_path)
                 if haskey(date_descriptions, date_key) && !haskey(MEH.tp_descriptions, tp_idx)
                     MEH.tp_descriptions[tp_idx] = date_descriptions[date_key]
                 end
+                if haskey(date_english, date_key) && !haskey(MEH.tp_english_descriptions, tp_idx)
+                    MEH.tp_english_descriptions[tp_idx] = date_english[date_key]
+                end
             end
         end
         
-        println("Loaded radiological descriptions for $(length(MEH.tp_descriptions)) time points ($(length(date_descriptions)) dates in metadata.json)")
+        println("Loaded radiological descriptions for $(length(MEH.tp_descriptions)) time points ($(length(date_descriptions)) dates in metadata.json, $(length(MEH.tp_english_descriptions)) in English)")
     catch e
         @warn "Failed to load metadata.json descriptions: $e"
     end
@@ -520,6 +640,13 @@ end
 max_anat_path = joinpath(data_dir_pat6, max_anatomy_source)
 max_labels_path = joinpath(data_dir_pat6, max_anatomy_labels_file)
 
+# Always try to use the true anatomic names if they exist, rather than synthetic fallback names
+real_labels_path = joinpath(data_dir_pat6, "anatomy_out", "max_anatomy_labels.json")
+if isfile(real_labels_path)
+    max_labels_path = real_labels_path
+end
+
+
 if !isfile(max_anat_path)
     error("max_anatomy.nii.gz not found: $max_anat_path\nRun: bash scripts/ai/run_all_timepoints.sh")
 end
@@ -557,12 +684,13 @@ ct_aligned = reverse(ct_vox, dims=2)
 if HIRES_FACTOR > 1.0
     ct_aligned = hires_resample(ct_aligned, first_spacing, display_spacing, MedImages.Linear_en)
 end
-bone_atlas = Float32.(in.(ts_atlas_aligned, Ref(bone_labels)) .| (ct_aligned .>= 180.0f0))
+bone_atlas = Float32.(in.(ts_atlas_aligned, Ref(bone_labels)))
 MEH.global_bone_atlas[] = bone_atlas
 MEH.global_organ_mapping[] = organ_mapping
 # Cache atlas + names for SUV background organ computation
 MEH.global_ts_atlas[] = ts_atlas_aligned
 MEH.global_ts_names[] = ts_names
+MEH.anatomy_labels_cache[0] = ts_names  # TP 0 anatomy labels for cursor readout
 
 # Load per-timepoint Skellytour from hierarchy (overrides bone atlas for AI bone subsegmentation)
 if isempty(skellytour_source)

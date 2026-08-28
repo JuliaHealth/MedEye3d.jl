@@ -688,6 +688,28 @@ function coordinateDisplay(
             try
                 channelData = take!(mainChannel)
                 
+                # Coalesce SyncLesionEvent: skip intermediate events, keep only the latest
+                if channelData isa SyncLesionEvent
+                    while isready(mainChannel)
+                        peeked = fetch(mainChannel)
+                        if peeked isa SyncLesionEvent
+                            channelData = take!(mainChannel)  # skip intermediate, keep latest
+                        else
+                            break
+                        end
+                    end
+                end
+                # Coalesce scroll events: sum all pending scroll deltas into one
+                if channelData isa Int64
+                    while isready(mainChannel)
+                        peeked = fetch(mainChannel)
+                        if peeked isa Int64
+                            channelData += take!(mainChannel)
+                        else
+                            break
+                        end
+                    end
+                end
                 if channelData isa CloseWindowEvent
                     println("CloseWindowEvent received: shutting down OpenGL and GLFW window")
                     flush(stdout)
@@ -764,7 +786,7 @@ function coordinateDisplay(
                     end
                     
                     try
-                        if !(channelData isa MouseStruct) && !(channelData isa Vector{MouseStruct})
+                        if !(channelData isa MouseStruct) && !(channelData isa Vector{MouseStruct}) && !(channelData isa Int64)
                             println("CONSUMER: processing $(typeof(channelData))")
                             flush(stdout)
                         end

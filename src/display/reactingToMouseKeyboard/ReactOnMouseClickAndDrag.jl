@@ -680,6 +680,27 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                         label = isempty(organ) ? "Lesion $lid" : "$organ (L$lid)"
                         push!(parts, label)
                     end
+                elseif dat.name == "Anatomy" && checkbounds(Bool, dat.dat, ix, iy, currentSlice)
+                    anat_val = Int(round(dat.dat[ix, iy, currentSlice]))
+                    if anat_val > 0
+                        # Look up anatomy label from per-TP cached names or global
+                        anat_name = try
+                            tp = MEH.current_tp_index[]
+                            labels = get(MEH.anatomy_labels_cache, tp, Dict{Int,String}())
+                            lbl = get(labels, anat_val, "")
+                            if isempty(lbl) || occursin("class_", lbl)
+                                # Fallback to global ts_names (actual organ names)
+                                get(MEH.global_ts_names[], anat_val, "")
+                            else
+                                lbl
+                            end
+                        catch
+                            ""
+                        end
+                        if !isempty(anat_name)
+                            push!(parts, anat_name)
+                        end
+                    end
                 end
             end
 

@@ -14,65 +14,40 @@ import argparse
 import numpy as np
 import nibabel as nib
 from scipy import ndimage
+from scipy.spatial import cKDTree
 from collections import Counter
 
-def generate_bone_surface_shell(solid_bone_mask, lesion_mask, spacing, max_surface_dist_mm=25.0):
+def generate_bone_surface_shell(solid_bone_mask, lesion_mask, spacing, max_surface_dist_mm=12.0):
     """
     Compute bone surface as the outermost 1-voxel layer of a solid bone mask,
     restricted to within max_surface_dist_mm of the lesion.
     
-    solid_bone_mask: bool array — full solid bone extent (from max_anatomy / TS)
+    solid_bone_mask: bool array — full solid bone extent (from max_anatomy / TS / CT)
     lesion_mask: bool array — lesion binary mask
     spacing: tuple — voxel spacing in mm
     """
-    import torch
-    import torch.nn.functional as F
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    if not np.any(solid_bone_mask) or not np.any(lesion_mask):
+        return np.zeros_like(solid_bone_mask, dtype=bool)
     
-    solid = torch.from_numpy(solid_bone_mask).bool().to(device)
-    lesion = torch.from_numpy(lesion_mask).bool().to(device)
+    struct = ndimage.generate_binary_structure(3, 1)
+    eroded = ndimage.binary_erosion(solid_bone_mask, structure=struct)
+    surface = solid_bone_mask & (~eroded)
     
-    # Surface = bone voxels that have at least one non-bone neighbor (6-connected)
-    padded = F.pad(solid.float().unsqueeze(0).unsqueeze(0), (1,1,1,1,1,1), mode='constant', value=0.0)
-    
-    kernel = torch.zeros(1, 1, 3, 3, 3, device=device)
-    kernel[0, 0, 1, 1, 0] = 1
-    kernel[0, 0, 1, 1, 2] = 1
-    kernel[0, 0, 1, 0, 1] = 1
-    kernel[0, 0, 1, 2, 1] = 1
-    kernel[0, 0, 0, 1, 1] = 1
-    kernel[0, 0, 2, 1, 1] = 1
-    
-    neighbor_sum = F.conv3d(padded, kernel, stride=1, padding=0).squeeze(0).squeeze(0)
-    # Surface = bone voxels where at least one of 6 neighbors is NOT bone
-    surface = solid & (neighbor_sum < 6)
-    
-    # Restrict surface to within max_surface_dist_mm of the lesion
-    lesion_idx = torch.nonzero(lesion).float()
-    if len(lesion_idx) == 0:
+    surf_pts = np.argwhere(surface)
+    lesion_pts = np.argwhere(lesion_mask)
+    if len(surf_pts) == 0 or len(lesion_pts) == 0:
         return np.zeros_like(solid_bone_mask, dtype=bool)
         
-    surface_idx = torch.nonzero(surface).float()
-    if len(surface_idx) == 0:
-        return np.zeros_like(solid_bone_mask, dtype=bool)
+    sp = np.array(spacing, dtype=np.float32)
+    tree = cKDTree(lesion_pts * sp)
+    dists, _ = tree.query(surf_pts * sp)
     
-    sp = torch.tensor(spacing, device=device, dtype=torch.float32)
-    lesion_phys = lesion_idx * sp
-    surface_phys = surface_idx * sp
+    valid_surf = surf_pts[dists <= max_surface_dist_mm]
+    result = np.zeros_like(solid_bone_mask, dtype=bool)
+    if len(valid_surf) > 0:
+        result[valid_surf[:, 0], valid_surf[:, 1], valid_surf[:, 2]] = True
     
-    # Sample lesion points to keep distance computation manageable
-    step = max(1, len(lesion_phys) // 500)
-    lesion_sampled = lesion_phys[::step]
-    
-    result = torch.zeros_like(surface)
-    dists = torch.cdist(surface_phys.unsqueeze(0), lesion_sampled.unsqueeze(0)).squeeze(0)
-    min_dists, _ = torch.min(dists, dim=1)
-    valid_mask = min_dists <= max_surface_dist_mm
-    valid_idx = surface_idx[valid_mask].long()
-    if len(valid_idx) > 0:
-        result[valid_idx[:, 0], valid_idx[:, 1], valid_idx[:, 2]] = True
-    
-    return result.cpu().numpy().astype(bool)
+    return result
 
 
 def extract_bone_fragments(lesion_path, bone_path, out_surface_path, out_marrow_path, 
@@ -176,25 +151,18 @@ def extract_bone_fragments(lesion_path, bone_path, out_surface_path, out_marrow_
                     bone_for_surface = crop_solid_bone
                 
                 bone_surface_fragment[x_min:x_max, y_min:y_max, z_min:z_max] = generate_bone_surface_shell(
-                    bone_for_surface.astype(np.uint8), crop_lesion_mask.astype(np.uint8), spacing
+                    bone_for_surface.astype(np.uint8), crop_lesion_mask.astype(np.uint8), spacing, max_surface_dist_mm=12.0
                 ).astype(np.uint8)
             else:
                 print(f"  WARNING: max_anatomy shape {np_max_anat.shape} != lesion shape {np_lesion.shape}, falling back to Skellytour cortex")
                 bone_surface_fragment[x_min:x_max, y_min:y_max, z_min:z_max] = generate_bone_surface_shell(
-                    target_bone_mask_skelly.astype(np.uint8), crop_lesion_mask.astype(np.uint8), spacing
+                    target_bone_mask_skelly.astype(np.uint8), crop_lesion_mask.astype(np.uint8), spacing, max_surface_dist_mm=12.0
                 ).astype(np.uint8)
         else:
-            # Fallback: use Skellytour as the bone mask for surface
+            # Fallback: use Skellytour as the solid bone mask for surface
             crop_bone_for_surface = target_bone_mask_skelly
-            if ct_path is not None:
-                ct_img = nib.load(ct_path)
-                np_ct = ct_img.get_fdata()
-                crop_ct = np_ct[x_min:x_max, y_min:y_max, z_min:z_max]
-                dilated_bone = ndimage.binary_dilation(target_bone_mask_skelly, iterations=3)
-                crop_bone_for_surface = (crop_ct > 150) & dilated_bone
-            
             bone_surface_fragment[x_min:x_max, y_min:y_max, z_min:z_max] = generate_bone_surface_shell(
-                crop_bone_for_surface.astype(np.uint8), crop_lesion_mask.astype(np.uint8), spacing
+                crop_bone_for_surface.astype(np.uint8), crop_lesion_mask.astype(np.uint8), spacing, max_surface_dist_mm=12.0
             ).astype(np.uint8)
 
         # === BONE MARROW: from Skellytour label 1 (trabecula) ===

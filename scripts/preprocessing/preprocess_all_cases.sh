@@ -14,4 +14,10 @@ for pat_dir in "$MASTER_DIR"/*/; do
     echo "Preprocessing case: $pat_dir"
     echo "========================================"
     julia --project=. scripts/preprocessing/preprocess_dataset.jl "$pat_dir"
+
+    echo "--- Recomputing bone subsegments (erosion-based) ---"
+    julia --project=. scripts/preprocessing/recompute_bones.jl "$pat_dir"
+
+    echo "--- Pre-filling anatomy fields for existing lesions ---"
+    julia --project=. scripts/preprocessing/prefill_anatomy.jl "$pat_dir"
 done

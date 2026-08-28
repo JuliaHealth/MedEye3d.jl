@@ -7,6 +7,7 @@ using StaticArrays, ModernGL, Dictionaries, Parameters, ColorTypes
 using ..ForDisplayStructs
 
 export isMaskDiffViss, changeMainTextureContribution, changeTextureContribution, coontrolMinMaxUniformVals, createStructsDict, setCTWindow, setMaskColor, setTextureVisibility, setTypeOfMainSampler!
+export setAllowedIDs!
 export @uniforms
 export @uniforms!
 
@@ -345,16 +346,25 @@ function changeMainTextureContribution(textur::TextureSpec, change::Float32, sta
 
 end#changeTextureContribution
 
-
-
-
-
-
-
-
+"""
+Set specific allowed IDs for multi-ID filtering in compare mode.
+ids: Vector of lesion IDs to show (up to 16).
+Pass empty to revert to min/max mode.
+"""
+function setAllowedIDs!(textur::TextureSpec, ids::Vector{Int})
+    unifs = textur.uniforms
+    if !(unifs isa MaskTextureUniforms)
+        return
+    end
+    count = min(length(ids), 16)
+    if unifs.allowedIDCountRef >= 0
+        glUniform1i(unifs.allowedIDCountRef, Int32(count))
+    end
+    for i in 1:count
+        if i <= length(unifs.allowedIDsRef) && unifs.allowedIDsRef[i] >= 0
+            glUniform1f(unifs.allowedIDsRef[i], Float32(ids[i]))
+        end
+    end
+end
 
 end #module
-
-
-
-

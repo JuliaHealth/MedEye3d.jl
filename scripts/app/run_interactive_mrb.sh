@@ -26,5 +26,5 @@ echo ""
 echo "============================================"
 echo ""
 
-cd "$(dirname "$0")/.."
-JULIA_NUM_THREADS=3,1 julia --project=. scripts/run_interactive_mrb.jl
+cd "$(dirname "$0")/../.."
+JULIA_NUM_THREADS=3,1 julia --project=. scripts/run_interactive_mrb.jl 2>&1 | tee app_execution.log

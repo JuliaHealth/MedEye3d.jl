@@ -82,6 +82,15 @@ function main()
     println("Resampling and saving to $h5_path")
     h5_file = h5open(h5_path, "w")
     
+    # Translate German descriptions to English via DIZ LLM before embedding metadata
+    println("Translating radiological descriptions if needed...")
+    try
+        include(joinpath(@__DIR__, "translate_reports.jl"))
+        TranslateReports.translate_descriptions!(data_dir)
+    catch e
+        @warn "Translation step failed or skipped: $e"
+    end
+
     # Embed JSON metadata as HDF5 datasets (HDF5 = single source of truth)
     # Using datasets in _meta_ group instead of attributes due to 64KB attribute size limit
     if !haskey(h5_file, "_meta_")
@@ -135,12 +144,38 @@ function main()
             img_res = img
         end
         
+        # Pre-flip dim 2 so loading doesn't need reverse()
+        img_res = MedImages.update_voxel_data(img_res, reverse(img_res.voxel_data, dims=2))
+        
+        # Compact masks to Int8/Int16 (saves 75% storage + eliminates runtime conversion)
+        if is_mask
+            vox = Float32.(img_res.voxel_data)
+            vox = max.(0.0f0, vox)
+            max_id = round(Int, maximum(vox))
+            T = max_id + 5 <= 127 ? Int8 : Int16
+            img_res = MedImages.update_voxel_data(img_res, T.(round.(vox)))
+            println("    Compacted mask to $T (max_id=$max_id)")
+        end
+        
         MedImages.save_med_image(h5_file, group_name, name, img_res; compress=3)
 
         # Also save at display resolution (2× in-plane upsampling)
         display_sp = (img_res.spacing[1] / HIRES_FACTOR, img_res.spacing[2] / HIRES_FACTOR, img_res.spacing[3])
         interpolator_display = is_mask ? MedImages.Nearest_neighbour_en : MedImages.Linear_en
         img_display = MedImages.resample_to_spacing(img_res, display_sp, interpolator_display)
+        
+        # Pre-flip display resolution too
+        img_display = MedImages.update_voxel_data(img_display, reverse(img_display.voxel_data, dims=2))
+        
+        # Compact display mask
+        if is_mask
+            vox = Float32.(img_display.voxel_data)
+            vox = max.(0.0f0, vox)
+            max_id = round(Int, maximum(vox))
+            T = max_id + 5 <= 127 ? Int8 : Int16
+            img_display = MedImages.update_voxel_data(img_display, T.(round.(vox)))
+        end
+        
         display_group = group_name * "_DISPLAY"
         MedImages.save_med_image(h5_file, display_group, name, img_display; compress=3)
         println("    Saved display-resolution ($(size(img_display.voxel_data))) to $display_group/$name")
@@ -156,31 +191,36 @@ function main()
         node_name = study[7]
         tfm_fname = study[8]
         ts_fname = length(study) >= 9 ? study[9] : ""
+        max_anat_src = length(study) >= 10 ? study[10] : ""
         
         ct_fname_full = joinpath(data_dir, ct_fname)
-        ts_dir = joinpath(data_dir, "anatomy_out")
-        max_anatomy_file = joinpath(ts_dir, "max_anatomy.nii.gz")
         
-        if !isfile(max_anatomy_file)
-            println("    max_anatomy.nii.gz missing. Triggering Comprehensive Anatomy Segmentation via AI TCP worker...")
-            try
-                dict_req = Dict(
-                    "command" => "run_anatomy",
-                    "ct_path" => ct_fname_full,
-                    "out_dir" => ts_dir,
-                    "mode" => "--fast"
-                )
-                worker_script = joinpath(dirname(@__DIR__), "ai", "python_worker.py")
-                MedEye3d.InferenceClient.start_python_worker(worker_script)
-                
-                resp = MedEye3d.InferenceClient.send_json_request(dict_req)
-                if get(resp, "status", "") != "success"
-                    println("    Warning: Anatomy segmentation reported error: ", get(resp, "message", "Unknown error"))
-                else
-                    println("    Anatomy segmentation finished successfully.")
+        # Check per-TP max_anatomy — trigger inference if missing
+        if !isempty(max_anat_src)
+            max_anat_full = joinpath(data_dir, max_anat_src)
+            tp_anat_dir = dirname(max_anat_full)
+            if !isfile(max_anat_full)
+                println("    Per-TP max_anatomy missing: $max_anat_src")
+                println("    Triggering anatomy segmentation for $ct_fname...")
+                try
+                    dict_req = Dict(
+                        "command" => "run_anatomy",
+                        "ct_path" => ct_fname_full,
+                        "out_dir" => tp_anat_dir,
+                        "mode" => "--fast"
+                    )
+                    worker_script = joinpath(dirname(@__DIR__), "ai", "python_worker.py")
+                    MedEye3d.InferenceClient.start_python_worker(worker_script)
+                    resp = MedEye3d.InferenceClient.send_json_request(dict_req)
+                    if get(resp, "status", "") == "success"
+                        println("    ✅ Anatomy segmentation completed for $ct_fname")
+                    else
+                        println("    ⚠️  Anatomy segmentation error: ", get(resp, "message", "Unknown"))
+                    end
+                catch e
+                    println("    ⚠️  Anatomy inference failed: $e")
+                    println("    Run manually: bash scripts/ai/run_all_timepoints.sh")
                 end
-            catch e
-                println("    Warning: Anatomy segmentation failed: ", e)
             end
         end
         
@@ -193,7 +233,45 @@ function main()
         if !isempty(ts_fname)
             process_file(ts_fname, tfm_path, group, true)
         end
+        
+        # Process per-TP max_anatomy into HDF5 (resampled, pre-flipped, UInt16)
+        if !isempty(max_anat_src)
+            max_anat_path = joinpath(data_dir, max_anat_src)
+            if isfile(max_anat_path)
+                anat_name = "max_anatomy.nii.gz"
+                println("  Processing per-TP max_anatomy: $max_anat_src")
+                
+                img = MedImages.load_image(max_anat_path, "CT")
+                T_ITK = parse_tfm(tfm_path)
+                img_tfm = apply_transform_to_medimage(img, T_ITK)
+                
+                if T_ITK != Matrix{Float64}(I, 4, 4) || img.spacing != baseline_ct.spacing || img.origin != baseline_ct.origin
+                    img_res = gpu_resample_to_image(baseline_ct, img_tfm, MedImages.Nearest_neighbour_en)
+                else
+                    img_res = img_tfm
+                end
+                
+                # Pre-flip + save native res
+                img_res = MedImages.update_voxel_data(img_res, reverse(img_res.voxel_data, dims=2))
+                MedImages.save_med_image(h5_file, group, anat_name, img_res; compress=3)
+                
+                # Display resolution: pre-flip + UInt16 compact
+                display_sp = (img_res.spacing[1]/HIRES_FACTOR, img_res.spacing[2]/HIRES_FACTOR, img_res.spacing[3])
+                img_disp = MedImages.resample_to_spacing(img_res, display_sp, MedImages.Nearest_neighbour_en)
+                img_disp = MedImages.update_voxel_data(img_disp, reverse(img_disp.voxel_data, dims=2))
+                vox = UInt16.(round.(max.(0.0f0, Float32.(img_disp.voxel_data))))
+                img_disp = MedImages.update_voxel_data(img_disp, vox)
+                display_group = group * "_DISPLAY"
+                MedImages.save_med_image(h5_file, display_group, anat_name, img_disp; compress=3)
+                println("    Saved $(size(vox)) to $display_group/$anat_name (UInt16)")
+            else
+                println("  ⚠️  Per-TP max_anatomy not found: $max_anat_path")
+            end
+        end
     end
+    
+    # Mark HDF5 as pre-flipped so loading code skips reverse()
+    h5_file["_meta_/preflipped"] = 1
     
     close(h5_file)
     GC.gc()
