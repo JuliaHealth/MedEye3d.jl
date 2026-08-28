@@ -211,32 +211,34 @@ function updateImagesDisplayed(
 
     modulelistOfTextSpecs = forDisplayConstants.listOfTextSpecifications
 
+    t_tex = time_ns()
+    n_uploads = 0
+    n_collects = 0
     for updateDat in singleSliceDat.listOfDataAndImageNames
         findList = findall((texSpec) -> texSpec.name == updateDat.name, modulelistOfTextSpecs)
-        # texSpec = !isempty(findList) ? modulelistOfTextSpecs[findList[1]] : throw(DomainError(findList, "no such name specified in start configuration - $( updateDat[1])"))
         texSpec = Nothing
         if !isempty(findList)
             texSpec = modulelistOfTextSpecs[findList[1]]
             transformedDat = applyZoomPan(updateDat.dat, calcDimStruct.zoom, calcDimStruct.panX, calcDimStruct.panY)
+            # Check contiguity before upload
+            is_c = stride(transformedDat, 1) == 1 && stride(transformedDat, 2) == size(transformedDat, 1)
+            if !is_c; n_collects += 1; end
             updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight)
+            n_uploads += 1
         end
     end #for
-    #render text associated with this slice
+    t_tex_ms = (time_ns() - t_tex) / 1e6
 
-    activateForTextDisp(
-        wordsDispObj.shader_program_words, wordsDispObj.vbo_words, calcDimStruct)
-
+    # Upload text texture directly (no shader switch needed — consumer handles rendering)
+    t_text = time_ns()
     matr = addTextToTexture(wordsDispObj, [singleSliceDat.textToDisp..., valueForMaskToSett.text], calcDimStruct)
+    t_text_ms = (time_ns() - t_text) / 1e6
+    
+    if t_tex_ms + t_text_ms > 50.0
+        println("    [BENCH-GL] updateImages: texUpload=$(round(t_tex_ms, digits=1))ms ($n_uploads tex, $n_collects collected), text=$(round(t_text_ms, digits=1))ms"); flush(stdout)
+    end
 
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-
-    reactivateMainObj(forDisplayConstants.shader_program, forDisplayConstants.vbo, calcDimStruct)
-    #only display crosshair in multi-image display mode
-    # if displayMode == SingleImage
     OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
-    # elseif displayMode == MultiImage
-    # crosshairDisplay(crosshair, mainRect, forDisplayConstants) #[source of issue in multi image and images do no apeear]
-    # end
 
     # glFinish() removed — SwapBuffers in consumer loop provides synchronization
 end

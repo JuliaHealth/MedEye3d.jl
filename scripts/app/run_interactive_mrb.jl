@@ -231,9 +231,9 @@ if isfile(preprocessed_h5)
             t_read = @elapsed begin
                 ct_vol = Float32.(read(h5_file["$src_group/$ct_fname"]))
                 pet_vol = Float32.(read(h5_file["$src_group/$pet_fname"]))
-                mask_vol = Float32.(read(h5_file["$src_group/$mask_fname"]))
+                mask_vol = read(h5_file["$src_group/$mask_fname"])  # Keep native type (Int8/Int16)
             end
-            println("    [BENCH-H5] read from $src_group: $(round(t_read, digits=3))s ($(size(ct_vol)))"); flush(stdout)
+            println("    [BENCH-H5] read from $src_group: $(round(t_read, digits=3))s ($(size(ct_vol)), mask=$(eltype(mask_vol)))"); flush(stdout)
             
             if modality == "SPECT"
                 pos_dat = pet_vol[pet_vol .> 0]
@@ -242,7 +242,10 @@ if isfile(preprocessed_h5)
                 pet_vol = max.(0.0f0, pet_vol .* scale_factor)
             end
             
-            if !is_preflipped
+            # Reverse is needed unless reading from pre-flipped DISPLAY group
+            # (Native groups are NEVER pre-flipped, only DISPLAY groups are)
+            needs_reverse = !is_preflipped || !use_display
+            if needs_reverse
                 t_reverse = @elapsed begin
                     ct_vol_base = reverse(ct_vol, dims=2)
                     pet_vol_base = reverse(pet_vol, dims=2)
@@ -251,7 +254,7 @@ if isfile(preprocessed_h5)
                 println("    [BENCH-H5] reverse: $(round(t_reverse*1000, digits=1))ms"); flush(stdout)
             else
                 ct_vol_base = ct_vol; pet_vol_base = pet_vol; mask_vol_base = mask_vol
-                println("    [BENCH-H5] reverse: SKIPPED (pre-flipped)"); flush(stdout)
+                println("    [BENCH-H5] reverse: SKIPPED (pre-flipped DISPLAY)"); flush(stdout)
             end
             
             # Cache PET volume for SUV computation (use native-res for accuracy)
@@ -310,8 +313,8 @@ if isfile(preprocessed_h5)
                 
                 if !isempty(anat_h5_key) && haskey(h5_file, anat_h5_key)
                     raw_anat = read(h5_file[anat_h5_key])
-                    # Conditional reverse (skip if pre-flipped)
-                    if !is_preflipped
+                    # Reverse needed unless reading from pre-flipped DISPLAY group
+                    if needs_reverse
                         raw_anat = reverse(Float32.(raw_anat), dims=2)
                     end
                     if !use_display && size(raw_anat) != size(ct_vol_base)
@@ -361,9 +364,14 @@ if isfile(preprocessed_h5)
                 println("    [BENCH-H5] max_anatomy load failed for TP $tp_i: $e")
             end
             
+            # Pre-convert mask/anatomy to Float32 once (avoids ~800ms per TP switch)
+            sz = size(ct_vol_base)
+            mask_f32 = Float32.(mask_compact)
+            anat_f32 = anatomy_vol !== nothing ? Float32.(anatomy_vol) : zeros(Float32, sz)
+            
             t_total_ms = (time_ns() - t_total) / 1e6
             println("    [BENCH-H5] LOAD TP TOTAL: $(round(t_total_ms, digits=1))ms"); flush(stdout)
-            return MEH.TpCacheEntry(ct_vol_base, pet_vol_base, mask_compact, bone_surf, bone_marr, anatomy_vol)
+            return MEH.TpCacheEntry(ct_vol_base, pet_vol_base, mask_compact, bone_surf, bone_marr, anatomy_vol, mask_f32, anat_f32)
         end
     end
     
@@ -392,11 +400,11 @@ if isfile(preprocessed_h5)
     # Convert TpCacheEntry to old vdt format for initial displayImage call
     # (displayImage still expects Vector{Vector{Any}} with concrete Array{Float32,3})
     function entry_to_vdt(e::MEH.TpCacheEntry)
-        mask_f32 = Float32.(e.mask)
+        mask_f32 = e.mask_f32
         bone_s_f32 = Float32.(e.bone_surf)
         bone_m_f32 = Float32.(e.bone_marr)
         anat_f32 = if e.anatomy !== nothing
-            Float32.(e.anatomy)
+            e.anat_f32
         elseif MEH.global_ts_atlas[] !== nothing
             Float32.(MEH.global_ts_atlas[])
         else
@@ -462,6 +470,20 @@ origins = [[(0.0, 0.0, 0.0)] for _ in 1:5]
 
 dummyStudySrc = Vector{Vector{Tuple{String,String}}}()
 
+# Preload ALL remaining TPs before launching GUI (prevents premature clicking)
+println("Preloading all remaining TPs before GUI launch...")
+tp_indices_sorted = sort(collect(keys(tp_labels_map)))
+for tp_idx in tp_indices_sorted
+    if tp_idx != 0 && !haskey(MEH.tp_data_cache, tp_idx)
+        t_preload = @elapsed begin
+            entry = load_single_tp_from_h5(tp_idx)
+            MEH.tp_data_cache[tp_idx] = entry
+        end
+        println("  [PRELOAD] TP $tp_idx loaded in $(round(t_preload, digits=1))s"); flush(stdout)
+    end
+end
+println("All $(length(tp_indices_sorted)) TPs preloaded. Launching GUI..."); flush(stdout)
+
 println("Launching MedEye3d Viewer...")
 mainMedEye3dInstance = SegmentationDisplay.displayImage(
     dummyStudySrc;
@@ -474,13 +496,7 @@ mainMedEye3dInstance = SegmentationDisplay.displayImage(
     quadView=true
 )
 
-# Preload TP 1 in background so the first "Next TP" click is instant
-tp_indices_sorted = sort(collect(keys(tp_labels_map)))
-if length(tp_indices_sorted) > 1
-    next_tp = tp_indices_sorted[2]
-    println("Queuing background preload for TP $next_tp via IO channel...")
-    put!(MEH.io_channel[], MEH.PreloadTPMessage(next_tp))
-end
+# (All TPs already preloaded before GUI launch — no background preload needed)
 
 # Start Background Inference Worker via Docker (HELPNet & nnInteractive)
 worker_script = joinpath(@__DIR__, "..", "ai", "python_worker.py")

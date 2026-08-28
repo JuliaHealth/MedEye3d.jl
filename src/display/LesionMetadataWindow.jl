@@ -2871,7 +2871,7 @@ end_section!(sec_win)
         t_side = get(data, "BaseAnatomySide", "")
         
         # Auto-detect BaseAnatomy from max_anatomy JSON mapping if not saved
-        @info "[PREFILL] lid=$lid, t_base='$t_base', raw_organ='$(get(_MEH.global_organ_mapping[], lid, ""))'"
+        println("[PREFILL] lid=$lid, t_base='$t_base', raw_organ='$(get(_MEH.global_organ_mapping[], lid, ""))'"); flush(stdout)
         if isempty(t_base) && lid > 0
             organ_map = _MEH.global_organ_mapping[]
             raw_organ = get(organ_map, lid, "")
@@ -2912,36 +2912,44 @@ end_section!(sec_win)
                     # Auto-fill Anatomic Location dropdown from JSON mapping
                     anat_loc = get(entry, "anatomic_location", "")
                     anat_subloc = get(entry, "anatomical_sublocation", "")
-                    @info "[PREFILL] json_entry found for '$raw_organ': anat_loc='$anat_loc', subloc='$anat_subloc', data_has_AL=$(haskey(data, "Anatomic Location")), data_AL='$(get(data, "Anatomic Location", ""))'"
+                    println("[PREFILL] json_entry found for '$raw_organ': anat_loc='$anat_loc', subloc='$anat_subloc', data_has_AL=$(haskey(data, "Anatomic Location")), data_AL='$(get(data, "Anatomic Location", ""))'"); flush(stdout)
                     if !isempty(anat_loc)
-                        if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
-                            opts = field_widgets["Anatomic Location"].options[]
-                            a_idx = findfirst(==(anat_loc), opts)
-                            if a_idx === nothing
-                                # Value not in dropdown — add it dynamically
-                                new_opts = copy(opts)
-                                push!(new_opts, anat_loc)
-                                field_widgets["Anatomic Location"].options[] = new_opts
-                                a_idx = length(new_opts)
-                                @info "Dynamically added '$anat_loc' to Anatomic Location dropdown"
+                        if haskey(field_widgets, "Anatomic Location")
+                            w = field_widgets["Anatomic Location"]
+                            if w isa Menu
+                                opts = w.options[]
+                                a_idx = findfirst(==(anat_loc), opts)
+                                if a_idx === nothing
+                                    new_opts = copy(opts)
+                                    push!(new_opts, anat_loc)
+                                    w.options[] = new_opts
+                                    a_idx = length(new_opts)
+                                end
+                                w.i_selected[] = a_idx
+                            elseif w isa Textbox
+                                w.stored_string[] = anat_loc
                             end
-                            field_widgets["Anatomic Location"].i_selected[] = a_idx
+                            println("[PREFILL] Set Anatomic Location='$anat_loc' ($(typeof(w)))"); flush(stdout)
                         end
                     end
-                    # Auto-fill Anatomical Sublocation from JSON mapping (anat_subloc already set above)
+                    # Auto-fill Anatomical Sublocation from JSON mapping
                     if !isempty(anat_subloc)
-                        if haskey(field_widgets, "Anatomical Sublocation") && field_widgets["Anatomical Sublocation"] isa Menu
-                            opts = field_widgets["Anatomical Sublocation"].options[]
-                            sl_idx = findfirst(==(anat_subloc), opts)
-                            if sl_idx === nothing
-                                # Value not in dropdown — add it dynamically
-                                new_opts = copy(opts)
-                                push!(new_opts, anat_subloc)
-                                field_widgets["Anatomical Sublocation"].options[] = new_opts
-                                sl_idx = length(new_opts)
-                                @info "Dynamically added '$anat_subloc' to Anatomical Sublocation dropdown"
+                        if haskey(field_widgets, "Anatomical Sublocation")
+                            w = field_widgets["Anatomical Sublocation"]
+                            if w isa Menu
+                                opts = w.options[]
+                                sl_idx = findfirst(==(anat_subloc), opts)
+                                if sl_idx === nothing
+                                    new_opts = copy(opts)
+                                    push!(new_opts, anat_subloc)
+                                    w.options[] = new_opts
+                                    sl_idx = length(new_opts)
+                                end
+                                w.i_selected[] = sl_idx
+                            elseif w isa Textbox
+                                w.stored_string[] = anat_subloc
                             end
-                            field_widgets["Anatomical Sublocation"].i_selected[] = sl_idx
+                            println("[PREFILL] Set Anatomical Sublocation='$anat_subloc' ($(typeof(w)))"); flush(stdout)
                         end
                     end
                 else

@@ -144,9 +144,6 @@ function main()
             img_res = img
         end
         
-        # Pre-flip dim 2 so loading doesn't need reverse()
-        img_res = MedImages.update_voxel_data(img_res, reverse(img_res.voxel_data, dims=2))
-        
         # Compact masks to Int8/Int16 (saves 75% storage + eliminates runtime conversion)
         if is_mask
             vox = Float32.(img_res.voxel_data)
@@ -157,6 +154,7 @@ function main()
             println("    Compacted mask to $T (max_id=$max_id)")
         end
         
+        # Native resolution: saved WITHOUT flip (loading code applies reverse if needed)
         MedImages.save_med_image(h5_file, group_name, name, img_res; compress=3)
 
         # Also save at display resolution (2× in-plane upsampling)
@@ -164,7 +162,7 @@ function main()
         interpolator_display = is_mask ? MedImages.Nearest_neighbour_en : MedImages.Linear_en
         img_display = MedImages.resample_to_spacing(img_res, display_sp, interpolator_display)
         
-        # Pre-flip display resolution too
+        # Pre-flip DISPLAY resolution only (single flip — replaces runtime reverse())
         img_display = MedImages.update_voxel_data(img_display, reverse(img_display.voxel_data, dims=2))
         
         # Compact display mask
@@ -251,11 +249,10 @@ function main()
                     img_res = img_tfm
                 end
                 
-                # Pre-flip + save native res
-                img_res = MedImages.update_voxel_data(img_res, reverse(img_res.voxel_data, dims=2))
+                # Save native res WITHOUT flip
                 MedImages.save_med_image(h5_file, group, anat_name, img_res; compress=3)
                 
-                # Display resolution: pre-flip + UInt16 compact
+                # Display resolution: flip ONCE + UInt16 compact
                 display_sp = (img_res.spacing[1]/HIRES_FACTOR, img_res.spacing[2]/HIRES_FACTOR, img_res.spacing[3])
                 img_disp = MedImages.resample_to_spacing(img_res, display_sp, MedImages.Nearest_neighbour_en)
                 img_disp = MedImages.update_voxel_data(img_disp, reverse(img_disp.voxel_data, dims=2))
