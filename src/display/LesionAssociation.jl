@@ -144,30 +144,43 @@ end
 """
 Link src and dst lesions in a match group and persist to HDF5.
 """
-function update_match_group!(
-    src_node::String, src_seg_int::Int,
-    dst_node::String, dst_seg_int::Int,
-    h5_path::String
-)
-    existing_gid = nothing
+function update_match_group!(src_node::String, src_seg_int::Int, dst_node::String, dst_seg_int::Int, h5_path::String)
+    # Find all groups containing EITHER src OR dst
+    matching_gids = Int[]
     for (gid, members) in MATCH_GROUPS
-        if any(m -> m[1] == src_node && m[2] == src_seg_int, members)
-            existing_gid = gid
-            break
+        if any(m -> (m[1] == src_node && m[2] == src_seg_int) || (m[1] == dst_node && m[2] == dst_seg_int), members)
+            push!(matching_gids, gid)
         end
     end
     
-    if existing_gid !== nothing
-        entry = (dst_node, dst_seg_int, "manual_$(dst_seg_int)_$(dst_node)")
-        if !(entry in MATCH_GROUPS[existing_gid])
-            push!(MATCH_GROUPS[existing_gid], entry)
-        end
-    else
+    if isempty(matching_gids)
         new_gid = isempty(MATCH_GROUPS) ? 1 : maximum(keys(MATCH_GROUPS)) + 1
         MATCH_GROUPS[new_gid] = [
             (src_node, src_seg_int, "manual_$(src_seg_int)_$(src_node)"),
             (dst_node, dst_seg_int, "manual_$(dst_seg_int)_$(dst_node)")
         ]
+    else
+        # Merge all matching groups into the first one
+        primary_gid = matching_gids[1]
+        for i in 2:length(matching_gids)
+            gid = matching_gids[i]
+            for m in MATCH_GROUPS[gid]
+                if !(m in MATCH_GROUPS[primary_gid])
+                    push!(MATCH_GROUPS[primary_gid], m)
+                end
+            end
+            delete!(MATCH_GROUPS, gid)
+        end
+        
+        # Ensure src and dst are in the primary group
+        src_entry = (src_node, src_seg_int, "manual_$(src_seg_int)_$(src_node)")
+        dst_entry = (dst_node, dst_seg_int, "manual_$(dst_seg_int)_$(dst_node)")
+        if !(src_entry in MATCH_GROUPS[primary_gid])
+            push!(MATCH_GROUPS[primary_gid], src_entry)
+        end
+        if !(dst_entry in MATCH_GROUPS[primary_gid])
+            push!(MATCH_GROUPS[primary_gid], dst_entry)
+        end
     end
     
     save_matches_to_h5(h5_path)

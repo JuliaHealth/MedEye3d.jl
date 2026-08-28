@@ -42,9 +42,11 @@ end
 struct LoadDBMessage <: DBMessage
     path_json::String
     reply_channel::Channel{Dict}
+    path_hdf5::String
+    LoadDBMessage(path_json::String, reply_channel::Channel{Dict}, path_hdf5::String=DEFAULT_HDF5_PATH) = new(path_json, reply_channel, path_hdf5)
 end
 
-export create_metadata_window, load_annotations, save_annotations, display_metadata_window
+export create_metadata_window, load_annotations, save_annotations, load_annotations_hdf5, save_annotations_hdf5, get_lesion_state, display_metadata_window
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 const _PKG_ROOT      = joinpath(@__DIR__, "..", "..", "extension", "data")
@@ -55,36 +57,94 @@ const DEFAULT_SAVE_PATH = joinpath(homedir(), "medeye3d_lesion_annotations.json"
 const DEFAULT_HDF5_PATH = joinpath(homedir(), "medeye3d_lesion_annotations.h5")
 const ANATOMY_MAPPING_PATH = joinpath(@__DIR__, "..", "..", "data", "max_anatomy_to_ontology.json")
 
-# Persistent custom dropdown options (same pattern as Slicer extension)
+# Persistent custom dropdown options (cross-patient and cross-run)
+const GLOBAL_CUSTOM_OPTS_PATH = joinpath(homedir(), ".medeye3d_custom_options.json")
+const GLOBAL_CUSTOM_FIELDS_PATH = joinpath(homedir(), ".medeye3d_custom_fields.json")
 const CUSTOM_OPTS_PATH = let
     p1 = joinpath(_SLICER_DATA, "custom_options.json")
     p2 = joinpath(_PKG_ROOT, "custom_options.json")
-    isfile(p1) ? p1 : p2  # prefer slicer data dir, fallback to extension/data/
+    isfile(p1) ? p1 : p2
 end
 
 const _custom_opts_cache = Ref{Dict{String,Any}}(Dict{String,Any}())
+const _custom_fields_cache = Ref{Dict{String,String}}(Dict{String,String}())
 
 function load_custom_options()::Dict{String,Any}
     isempty(_custom_opts_cache[]) || return _custom_opts_cache[]
+    res = Dict{String,Any}()
+    # Merge package/slicer default custom options
     if isfile(CUSTOM_OPTS_PATH)
         try
-            _custom_opts_cache[] = JSON.parse(read(CUSTOM_OPTS_PATH, String))
+            merge!(res, JSON.parse(read(CUSTOM_OPTS_PATH, String)))
         catch e
             @warn "Failed to load custom_options.json: $e"
-            _custom_opts_cache[] = Dict{String,Any}()
         end
     end
+    # Merge user global custom options
+    if isfile(GLOBAL_CUSTOM_OPTS_PATH)
+        try
+            g_opts = JSON.parse(read(GLOBAL_CUSTOM_OPTS_PATH, String))
+            for (k, v) in g_opts
+                cur = get(res, k, Any[])
+                res[k] = unique(vcat(cur, v))
+            end
+        catch e
+            @warn "Failed to load global custom options: $e"
+        end
+    end
+    _custom_opts_cache[] = res
     return _custom_opts_cache[]
 end
 
 function save_custom_options!(db::Dict)
+    _custom_opts_cache[] = copy(db)
+    for p in [GLOBAL_CUSTOM_OPTS_PATH, CUSTOM_OPTS_PATH]
+        try
+            mkpath(dirname(p))
+            open(p, "w") do f
+                JSON.print(f, db, 4)
+            end
+        catch e
+            @warn "Failed to save custom options to $p: $e"
+        end
+    end
+end
+
+function add_global_custom_option(category::String, option::String)
+    isempty(category) || isempty(option) && return
+    opts = load_custom_options()
+    cur = get(opts, category, Any[])
+    if !(option in cur)
+        push!(cur, option)
+        opts[category] = cur
+        save_custom_options!(opts)
+        @info "Persisted global custom option: [$category] -> '$option'"
+    end
+end
+
+function load_global_custom_fields()::Dict{String,String}
+    isempty(_custom_fields_cache[]) || return _custom_fields_cache[]
+    if isfile(GLOBAL_CUSTOM_FIELDS_PATH)
+        try
+            raw = JSON.parse(read(GLOBAL_CUSTOM_FIELDS_PATH, String))
+            _custom_fields_cache[] = Dict{String,String}(string(k) => string(v) for (k, v) in raw)
+        catch e
+            @warn "Failed to load global custom fields: $e"
+            _custom_fields_cache[] = Dict{String,String}()
+        end
+    end
+    return _custom_fields_cache[]
+end
+
+function save_global_custom_fields(fields::Dict)
+    _custom_fields_cache[] = Dict{String,String}(string(k) => string(v) for (k, v) in fields)
     try
-        mkpath(dirname(CUSTOM_OPTS_PATH))
-        open(CUSTOM_OPTS_PATH, "w") do f
-            JSON.print(f, db, 4)
+        mkpath(dirname(GLOBAL_CUSTOM_FIELDS_PATH))
+        open(GLOBAL_CUSTOM_FIELDS_PATH, "w") do f
+            JSON.print(f, fields, 4)
         end
     catch e
-        @warn "Failed to save custom_options.json: $e"
+        @warn "Failed to save global custom fields: $e"
     end
 end
 
@@ -313,25 +373,115 @@ function map_ts_to_anatomy(raw_ts_name::String)
 end
 
 # ─── Persistence ─────────────────────────────────────────────────────────────
-function load_annotations(path::String = DEFAULT_SAVE_PATH)::Dict{String,Dict{String,Any}}
-    isfile(path) || return Dict{String,Dict{String,Any}}()
-    try
-        raw = JSON.parse(read(path, String))
-        out = Dict{String,Dict{String,Any}}()
-        for (k, v) in raw
-            if v isa AbstractDict
-                inner = Dict{String,Any}()
-                for (ik, iv) in v
-                    inner[string(ik)] = iv
-                end
-                out[string(k)] = inner
+"""
+    get_lesion_state(db::Dict, key::String) -> Dict{String,Any}
+
+Robust lookup of lesion metadata from database `db` by exact key match or numeric lesion ID.
+Handles keys like "1", "1: Femur", "1: Femur [Grp 1, 3 TPs]", etc.
+"""
+function get_lesion_state(db::Dict, key::String)::Dict{String,Any}
+    # 1. Exact match
+    if haskey(db, key)
+        v = db[key]
+        return v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : Dict{String,Any}()
+    end
+    
+    # 2. Extract numeric ID from key (e.g. "1: femur" -> 1)
+    cp = findfirst(':', key)
+    ns = cp !== nothing ? strip(key[1:cp-1]) : key
+    lid = tryparse(Int, ns)
+    
+    if lid !== nothing
+        # Check direct integer string key (e.g. "1")
+        lid_str = string(lid)
+        if haskey(db, lid_str)
+            v = db[lid_str]
+            return v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : Dict{String,Any}()
+        end
+        # Search all keys in db that start with "lid:" or "lid " or equal "lid"
+        for (k, v) in db
+            k_cp = findfirst(':', k)
+            k_ns = k_cp !== nothing ? strip(k[1:k_cp-1]) : k
+            k_lid = tryparse(Int, k_ns)
+            if k_lid == lid
+                return v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : Dict{String,Any}()
             end
         end
+    end
+    
+    return Dict{String,Any}()
+end
+
+"""
+    load_annotations_hdf5(path = DEFAULT_HDF5_PATH) -> Dict{String,Dict{String,Any}}
+
+Load all lesion metadata, button states, and global app states from HDF5 database.
+"""
+function load_annotations_hdf5(path::String = DEFAULT_HDF5_PATH)::Dict{String,Dict{String,Any}}
+    isfile(path) || return Dict{String,Dict{String,Any}}()
+    try
+        out = Dict{String,Dict{String,Any}}()
+        h5open(path, "r") do file
+            for id in keys(file)
+                obj = file[id]
+                if obj isa HDF5.Group
+                    inner = Dict{String,Any}()
+                    for k in keys(obj)
+                        try
+                            val = read(obj[k])
+                            # If value is a JSON string representing a dict/array, parse it
+                            if val isa AbstractString && (startswith(strip(val), "{") || startswith(strip(val), "["))
+                                try
+                                    parsed = JSON.parse(val)
+                                    inner[k] = parsed
+                                catch
+                                    inner[k] = val
+                                end
+                            else
+                                inner[k] = val
+                            end
+                        catch e
+                            @warn "Error reading HDF5 key $k in group $id: $e"
+                        end
+                    end
+                    out[id] = inner
+                end
+            end
+        end
+        @debug "Annotations loaded from HDF5 → $path ($(length(out)) entries)"
         return out
     catch e
-        @warn "Cannot load annotations from $(path): $(e)"
+        @warn "Cannot load annotations from HDF5 $(path): $(e)"
         return Dict{String,Dict{String,Any}}()
     end
+end
+
+function load_annotations(path::String = DEFAULT_SAVE_PATH)::Dict{String,Dict{String,Any}}
+    # Try loading from JSON
+    out = Dict{String,Dict{String,Any}}()
+    if isfile(path)
+        try
+            raw = JSON.parse(read(path, String))
+            for (k, v) in raw
+                if v isa AbstractDict
+                    inner = Dict{String,Any}()
+                    for (ik, iv) in v
+                        inner[string(ik)] = iv
+                    end
+                    out[string(k)] = inner
+                end
+            end
+        catch e
+            @warn "Cannot load annotations from JSON $(path): $(e)"
+        end
+    end
+    
+    # If JSON is empty or missing, try loading from default HDF5
+    if isempty(out) && isfile(DEFAULT_HDF5_PATH)
+        out = load_annotations_hdf5(DEFAULT_HDF5_PATH)
+    end
+    
+    return out
 end
 
 function save_annotations_hdf5(db::Dict, path::String=DEFAULT_HDF5_PATH)
@@ -339,12 +489,26 @@ function save_annotations_hdf5(db::Dict, path::String=DEFAULT_HDF5_PATH)
         h5open(path, "w") do file
             for (id, lesion_data) in db
                 g = create_group(file, string(id))
-                for (k, v) in lesion_data
-                    write(g, string(k), string(v))
+                if lesion_data isa AbstractDict
+                    for (k, v) in lesion_data
+                        if v isa AbstractArray
+                            try
+                                write(g, string(k), v)
+                            catch
+                                write(g, string(k), JSON.json(v))
+                            end
+                        elseif v isa AbstractDict
+                            write(g, string(k), JSON.json(v))
+                        else
+                            write(g, string(k), string(v))
+                        end
+                    end
+                else
+                    write(g, "value", string(lesion_data))
                 end
             end
         end
-        @debug "Annotations saved to HDF5 → $path"
+        @debug "Annotations saved to HDF5 → $path ($(length(db)) entries)"
     catch e
         @error "Failed to save annotations to HDF5" exception=(e, catch_backtrace())
     end
@@ -936,15 +1100,17 @@ function create_metadata_window(
             if msg isa SaveDBMessage
                 try
                     db_to_save = copy(msg.db)
-                    db_to_save["_GlobalAppState"] = msg.global_app_state
                     save_annotations(db_to_save, msg.path_json)
-                    save_annotations_hdf5(msg.db, msg.path_hdf5)
+                    save_annotations_hdf5(db_to_save, msg.path_hdf5)
                 catch e
                     @warn "Database save failed" e
                 end
             elseif msg isa LoadDBMessage
                 try
                     db = load_annotations(msg.path_json)
+                    if isempty(db) && isfile(msg.path_hdf5)
+                        db = load_annotations_hdf5(msg.path_hdf5)
+                    end
                     put!(msg.reply_channel, db)
                 catch e
                     @warn "Database load failed" e
@@ -957,12 +1123,19 @@ function create_metadata_window(
     # Load initial db asynchronously
     @async begin
         reply = Channel{Dict}(1)
-        put!(db_channel, LoadDBMessage(save_path, reply))
+        put!(db_channel, LoadDBMessage(save_path, reply, DEFAULT_HDF5_PATH))
         lesion_db[] = take!(reply)
     end
 
     # Helper for safely extracting and stripping text from Makie Textboxes
     _safe_strip(x) = x === nothing ? "" : String(strip(x))
+
+    # Helper for safely updating Textbox displayed and stored values simultaneously
+    function _set_tb_val!(tb::Textbox, val)
+        v = _safe_strip(val)
+        tb.displayed_string[] = v
+        tb.stored_string[] = v
+    end
 
     # ── Theme ──────────────────────────────────────────────────────────────
     BG      = RGBf(0.10, 0.12, 0.15)
@@ -1104,15 +1277,17 @@ function create_metadata_window(
     # Active lesion display kept for callbacks (no visible label — shown in dropdown)
     active_lesion_display = Observable{String}("(none)")
 
-    # Prominent Lesion & Bone Subsegments Layer Visibility Controls
+    # Prominent Lesion & Bone Subsegments & Anatomy Layer Visibility Controls
     vis_row = nr!()
     vis_lesion_active = Ref(true)
     vis_surface_active = Ref(true)
     vis_marrow_active = Ref(true)
+    vis_anatomy_active = Ref(false)
     
-    btn_vis_lesion  = Button(g[vis_row, 1:2], label = "Lesion: ON", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
-    btn_vis_surface = Button(g[vis_row, 3],   label = "Bone Surf: ON", buttoncolor = RGBf(0.0, 0.75, 0.75), labelcolor = TXT, fontsize = 10)
-    btn_vis_marrow  = Button(g[vis_row, 4],   label = "Marrow: ON", buttoncolor = RGBf(0.75, 0.75, 0.1), labelcolor = TXT, fontsize = 10)
+    btn_vis_lesion  = Button(g[vis_row, 1], label = "Lesion: ON",   buttoncolor = GRN, labelcolor = TXT, fontsize = 9)
+    btn_vis_surface = Button(g[vis_row, 2], label = "Surf: ON",     buttoncolor = RGBf(0.0, 0.75, 0.75), labelcolor = TXT, fontsize = 9)
+    btn_vis_marrow  = Button(g[vis_row, 3], label = "Marrow: ON",   buttoncolor = RGBf(0.75, 0.75, 0.1), labelcolor = TXT, fontsize = 9)
+    btn_vis_anatomy = Button(g[vis_row, 4], label = "Anatomy: OFF", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
 
     on(btn_vis_lesion.clicks) do _
         vis_lesion_active[] = !vis_lesion_active[]
@@ -1124,7 +1299,7 @@ function create_metadata_window(
     
     on(btn_vis_surface.clicks) do _
         vis_surface_active[] = !vis_surface_active[]
-        btn_vis_surface.label[] = vis_surface_active[] ? "Bone Surf: ON" : "Bone Surf: OFF"
+        btn_vis_surface.label[] = vis_surface_active[] ? "Surf: ON" : "Surf: OFF"
         btn_vis_surface.buttoncolor[] = vis_surface_active[] ? RGBf(0.0, 0.75, 0.75) : BG_PNL
         @info "BTN_VIS_SURFACE clicked: $(vis_surface_active[])"
         put!(channel, ShowMaskLayerEvent(2, vis_surface_active[]))
@@ -1136,6 +1311,14 @@ function create_metadata_window(
         btn_vis_marrow.buttoncolor[] = vis_marrow_active[] ? RGBf(0.75, 0.75, 0.1) : BG_PNL
         @info "BTN_VIS_MARROW clicked: $(vis_marrow_active[])"
         put!(channel, ShowMaskLayerEvent(3, vis_marrow_active[]))
+    end
+
+    on(btn_vis_anatomy.clicks) do _
+        vis_anatomy_active[] = !vis_anatomy_active[]
+        btn_vis_anatomy.label[] = vis_anatomy_active[] ? "Anatomy: ON" : "Anatomy: OFF"
+        btn_vis_anatomy.buttoncolor[] = vis_anatomy_active[] ? RGBf(0.5, 0.0, 0.8) : BG_PNL
+        @info "BTN_VIS_ANATOMY clicked: $(vis_anatomy_active[])"
+        put!(channel, ShowMaskLayerEvent(4, vis_anatomy_active[]))
     end
 
     is_syncing_selection = Ref(false)
@@ -1169,20 +1352,20 @@ function create_metadata_window(
         end
     end
     on(btn_prev.clicks) do _
-        @info "BTN_PREV clicked"
+        t = time_ns()
         opts = lesion_ids[]; isempty(opts) && return
         idx = findfirst(==(active_lesion_id[]), opts)
         new_idx = idx === nothing ? 1 : (idx == 1 ? length(opts) : idx - 1)
-        @info "BTN_PREV: setting active_lesion_id from $(active_lesion_id[]) to $(opts[new_idx])"
         active_lesion_id[] = opts[new_idx]
+        @info "[BENCH] Next/Prev Lesion (UI Update): $(round((time_ns()-t)/1e6, digits=1))ms"
     end
     on(btn_next.clicks) do _
-        @info "BTN_NEXT clicked"
+        t = time_ns()
         opts = lesion_ids[]; isempty(opts) && return
         idx = findfirst(==(active_lesion_id[]), opts)
         new_idx = idx === nothing ? 1 : (idx == length(opts) ? 1 : idx + 1)
-        @info "BTN_NEXT: setting active_lesion_id from $(active_lesion_id[]) to $(opts[new_idx])"
         active_lesion_id[] = opts[new_idx]
+        @info "[BENCH] Next/Prev Lesion (UI Update): $(round((time_ns()-t)/1e6, digits=1))ms"
     end
 
     end_section!(sec_nav)
@@ -1586,58 +1769,35 @@ end_section!(sec_win)
                 saved_opts = String[string(s) for s in get(custom_opts_db, q.short, Any[])]
                 all_opts = String["- select -"; q.options; saved_opts]
                 opts_obs = Observable(all_opts)
-                m = searchable_menu(g, q_r, 2:3, options = opts_obs, fontsize = 10)
+                def_idx = 1
+                if q.short == "Radioligand Type"
+                    ga_idx = findfirst(==("68Ga-PSMA-11"), all_opts)
+                    def_idx = ga_idx !== nothing ? ga_idx : 2
+                end
+                m = searchable_menu(g, q_r, 2:3, options = opts_obs, default = def_idx, fontsize = 10)
+                btn_add_opt = Button(g[q_r, 4], label = "+", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
                 field_widgets[q.short] = m
                 
-                btn_add_opt = Button(g[q_r, 4], label = "+", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=10)
-                
-                tb_new_row = nr!()
-                push!(all_metadata_rows, tb_new_row)
-                push!(q_rows, tb_new_row)
-
-                tb_new = Textbox(g[tb_new_row, 2:3], placeholder="Type new & press Enter...", fontsize=10)
-                rowsize!(g, tb_new_row, Fixed(0))
-                tb_new.blockscene.visible[] = false
-                if tb_new_row < r[1]; rowgap!(g, tb_new_row, 0); end
-                
-                tb_new_visible = Observable(false)
-                
-                on(btn_add_opt.clicks) do _
-                    tb_new_visible[] = !tb_new_visible[]
-                    if tb_new_visible[]
-                        rowsize!(g, tb_new_row, Auto())
-                        tb_new.blockscene.visible[] = true
-                        if tb_new_row < r[1]; rowgap!(g, tb_new_row, 1); end
-                        tb_new.stored_string[] = ""
-                    else
-                        rowsize!(g, tb_new_row, Fixed(0))
-                        tb_new.blockscene.visible[] = false
-                        if tb_new_row < r[1]; rowgap!(g, tb_new_row, 0); end
-                    end
-                end
-                
-                # Capture q.short for the closure
-                let field_name = q.short
-                    on(tb_new.stored_string) do val
-                        val = _safe_strip(val)
-                        if !isempty(val) && !(val in opts_obs[])
-                            new_opts = copy(opts_obs[])
-                            push!(new_opts, val)
-                            opts_obs[] = new_opts
-                            m.selection[] = val
-                            # Persist custom option
-                            if !haskey(custom_opts_db, field_name)
-                                custom_opts_db[field_name] = String[]
+                let q_name = q.short, menu_w = m, obs = opts_obs
+                    on(btn_add_opt.clicks) do _
+                        typed_prompt = menu_w.prompt[]
+                        val_to_add = startswith(typed_prompt, "Filter: ") ? strip(typed_prompt[9:end]) : ""
+                        if isempty(val_to_add) || val_to_add == "Select..."
+                            menu_w.is_open[] = true
+                        else
+                            val_str = String(val_to_add)
+                            add_global_custom_option(q_name, val_str)
+                            cur_opts = copy(obs[])
+                            if !(val_str in cur_opts)
+                                push!(cur_opts, val_str)
+                                obs[] = cur_opts
                             end
-                            if !(val in custom_opts_db[field_name])
-                                push!(custom_opts_db[field_name], val)
-                                save_custom_options!(custom_opts_db)
+                            idx = findfirst(==(val_str), menu_w.options[])
+                            if idx !== nothing
+                                menu_w.i_selected[] = idx
                             end
+                            trigger_autosave()
                         end
-                        rowsize!(g, tb_new_row, Fixed(0))
-                        tb_new.blockscene.visible[] = false
-                        if tb_new_row < r[1]; rowgap!(g, tb_new_row, 0); end
-                        tb_new_visible[] = false
                     end
                 end
             end
@@ -1739,7 +1899,7 @@ end_section!(sec_win)
             # Show/hide rows based on active count
             on(anat_active_count) do n
                 for i in 1:MAX_ANAT_ROWS
-                    visible = i <= n
+                    visible = (i <= n) && !cv_active[]
                     ar = anat_row_indices[i]
                     rowsize!(g, ar, visible ? Auto() : Fixed(0))
                     anat_rel_menus[i].blockscene.visible[] = visible
@@ -1772,130 +1932,8 @@ end_section!(sec_win)
         end
     end
     
-    end_section!(sec_meta)
-
-    # CT-specific fields hidden when "No CT Correlate" is checked
-    CT_SPECIFIC_FIELDS = Set([
-        "Inner Texture / Density / Attenuation",
-        "Border and Margin",
-        "Lesion Shape",
-        "Lesion Orientation",
-        "Relation to Bone Marrow (Surrounding Changes Part A)",
-        "Periosteal Reaction (Surrounding Changes Part B)",
-        "Other Structural & Soft Tissue Changes (Surrounding Changes Part C)"
-    ])
-
-    # ── Dynamic Visibility Engine ─────────────────────────────────────────────
-    function update_dynamic_visibility!(active_type::String)
-        is_p = (active_type == "Prostate")
-        is_bm = (active_type == "Bone Meta")
-        no_ct = no_ct_toggle.active[]
-        
-        for (sq, rows) in q_row_indices
-            visible = true
-            
-            # Hide CT-specific fields when No CT Correlate is checked
-            if no_ct && sq in CT_SPECIFIC_FIELDS
-                visible = false
-            elseif sq == "PRIMARY score pattern?"
-                visible = is_p
-            elseif sq == "Relation to Bone Marrow (Surrounding Changes Part A)" || 
-                   sq == "Periosteal Reaction (Surrounding Changes Part B)"
-                visible = is_bm && !no_ct
-            elseif sq == "PSMA-RADS 2.0"
-                visible = !is_p
-            elseif sq == "Alternative Hypothesis (False Positive)"
-                visible = !is_p
-            end
-
-            for row_idx in rows
-                set_row_visible!(row_idx, visible)
-            end
-        end
-    end
-
-    # Wire No CT Correlate toggle to refresh visibility
-    on(no_ct_toggle.active) do _
-        update_dynamic_visibility!(active_lesion_type[])
-        trigger_autosave()
-    end
-
-    # Auto-defaults and presets on lesion type change
-    on(btn_type_prostate.clicks) do _
-        update_type_buttons("Prostate")
-        if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
-            field_widgets["Anatomic Location"].selection[] = "Prostate Gland"
-        end
-        if haskey(field_widgets, "Anatomical Sublocation") && field_widgets["Anatomical Sublocation"] isa Menu
-            field_widgets["Anatomical Sublocation"].selection[] = "Prostate Peripheral Zone (PZ)"
-        end
-        if haskey(field_widgets, "Macroscopic Pattern") && field_widgets["Macroscopic Pattern"] isa Menu
-            field_widgets["Macroscopic Pattern"].selection[] = "Solitary / Isolated Focus"
-        end
-    end
-    
-    on(btn_type_bone.clicks) do _
-        update_type_buttons("Bone Meta")
-        if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
-            field_widgets["Anatomic Location"].selection[] = "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)"
-        end
-        if haskey(field_widgets, "Inner Texture / Density / Attenuation") && field_widgets["Inner Texture / Density / Attenuation"] isa Menu
-            field_widgets["Inner Texture / Density / Attenuation"].selection[] = "Sclerotic / Blastic / Ivory (>1000 HU)"
-        end
-        
-        # Trigger GenManualEvent to ensure bone subsegmentation is calculated for manually painted lesions
-        active_str = active_lesion_id[]
-        if active_str != "" && active_str != "(none)"
-            parts = split(active_str, " - ")
-            lid = tryparse(Int, strip(parts[1]))
-            if lid !== nothing
-                put!(channel, GenManualEvent(lid))
-            end
-        end
-    end
-    
-    on(btn_type_organ.clicks) do _
-        update_type_buttons("Organ Meta")
-        if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
-            field_widgets["Anatomic Location"].selection[] = "Solid Organ / Viscera"
-        end
-    end
-    
-    on(btn_type_ln.clicks) do _
-        update_type_buttons("Lymph Node Meta")
-        if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
-            field_widgets["Anatomic Location"].selection[] = "Pelvic Lymph Node"
-        end
-    end
-    local sec_map_lesions
-    # Auto-hide metadata, segmentation, radlex, custom sections in Compare mode
-    on(btn_cv.clicks) do _
-        if cv_active[]
-            # Hide metadata rows
-            for r_idx in all_metadata_rows
-                set_row_visible!(r_idx, false)
-            end
-            # Hide entire sections
-            for sec in (sec_radlex, sec_custom)
-                hide_section!(sec)
-            end
-            show_section!(sec_map_lesions)
-        else
-            # Show metadata rows
-            for r_idx in all_metadata_rows
-                set_row_visible!(r_idx, true)
-            end
-            # Show sections
-            for sec in (sec_seg, sec_radlex, sec_custom)
-                show_section!(sec)
-            end
-            hide_section!(sec_map_lesions)
-            update_dynamic_visibility!(active_lesion_type[])
-        end
-    end
-
     # ── RadLex Multi-Value Panel ──────────────────────────────────────────────
-    sec_radlex = begin_section!("RadLex Ontology Properties")
+    Label(g[nr!(), 1:4], "-- RadLex Ontology Properties --", fontsize = 11, color = ACCENT, halign = :center, tellwidth = false)
     radlex_selected = Observable(String[])
 
     rl_r = nr!()
@@ -1977,10 +2015,10 @@ end_section!(sec_win)
         end
     end
 
-    end_section!(sec_radlex)
+    
 
     # ── Custom Key-Value Fields ───────────────────────────────────────────────
-    sec_custom = begin_section!("Custom Key-Value Fields")
+    Label(g[nr!(), 1:4], "-- Custom Key-Value Fields --", fontsize = 11, color = ACCENT, halign = :center, tellwidth = false)
     custom_db = Observable(Dict{String,String}())
 
     ck_r = nr!()
@@ -2000,7 +2038,177 @@ end_section!(sec_win)
         custom_db[] = d
     end
 
-    end_section!(sec_custom)
+    
+
+    end_section!(sec_meta)
+
+    # ── Radiological Report ──────────────────────────────────────────────────
+    sec_report = begin_section!("Radiological Report"; default_open=true)
+
+    dict_hdr_r = nr!()
+    Label(g[dict_hdr_r, 1], "Dictation:", fontsize = 10, color = LBL_FG, halign = :right)
+    lang_btn_de = Button(g[dict_hdr_r, 2], label="DE", buttoncolor=GRN, labelcolor=TXT, fontsize=9)
+    lang_btn_en = Button(g[dict_hdr_r, 3], label="EN", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=9)
+    current_dict_lang = Observable("DE")
+
+    dict_r = nr!()
+    dict_text = Observable{String}("Radiological dictation...")
+    dict_lbl = Label(g[dict_r, 1:4], dict_text, word_wrap = true, tellwidth = false, fontsize = 9,
+        color = LBL_FG, halign = :left)
+
+    on(lang_btn_de.clicks) do _
+        current_dict_lang[] = "DE"
+        lang_btn_de.buttoncolor[] = GRN
+        lang_btn_en.buttoncolor[] = BG_PNL
+        tp = _MEH.current_tp_index[]
+        de_desc = get(_MEH.tp_descriptions, tp, "")
+        dict_text[] = isempty(de_desc) ? "(No dictation available)" : de_desc
+    end
+
+    on(lang_btn_en.clicks) do _
+        current_dict_lang[] = "EN"
+        lang_btn_en.buttoncolor[] = GRN
+        lang_btn_de.buttoncolor[] = BG_PNL
+        tp = _MEH.current_tp_index[]
+        en_desc = get(_MEH.tp_english_descriptions, tp, "")
+        dict_text[] = isempty(en_desc) ? "(No English translation available)" : en_desc
+    end
+
+    rpt_r = nr!()
+    Label(g[rpt_r, 1], "Report:", fontsize = 10, color = LBL_FG, halign = :right)
+    rpt_tb = Textbox(g[rpt_r, 2:3], placeholder = "Generated summary...", fontsize = 10)
+    btn_gen = Button(g[rpt_r, 4], label = "Gen",
+        buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+
+    end_section!(sec_report)
+
+    # CT-specific fields hidden when "No CT Correlate" is checked
+    CT_SPECIFIC_FIELDS = Set([
+        "Inner Texture / Density / Attenuation",
+        "Border and Margin",
+        "Lesion Shape",
+        "Lesion Orientation",
+        "Relation to Bone Marrow (Surrounding Changes Part A)",
+        "Periosteal Reaction (Surrounding Changes Part B)",
+        "Other Structural & Soft Tissue Changes (Surrounding Changes Part C)"
+    ])
+
+    # ── Dynamic Visibility Engine ─────────────────────────────────────────────
+    function update_dynamic_visibility!(active_type::String)
+        if cv_active[]
+            return # Let Compare Mode keep everything hidden
+        end
+        
+        is_p = (active_type == "Prostate")
+        is_bm = (active_type == "Bone Meta")
+        no_ct = no_ct_toggle.active[]
+        
+        for (sq, rows) in q_row_indices
+            visible = true
+            
+            # Hide CT-specific fields when No CT Correlate is checked
+            if no_ct && sq in CT_SPECIFIC_FIELDS
+                visible = false
+            elseif sq == "PRIMARY score pattern?"
+                visible = is_p
+            elseif sq == "Relation to Bone Marrow (Surrounding Changes Part A)" || 
+                   sq == "Periosteal Reaction (Surrounding Changes Part B)"
+                visible = is_bm && !no_ct
+            elseif sq == "PSMA-RADS 2.0"
+                visible = !is_p
+            elseif sq == "Alternative Hypothesis (False Positive)"
+                visible = !is_p
+            end
+
+            for row_idx in rows
+                set_row_visible!(row_idx, visible)
+            end
+        end
+    end
+
+    # Wire No CT Correlate toggle to refresh visibility
+    on(no_ct_toggle.active) do _
+        update_dynamic_visibility!(active_lesion_type[])
+        trigger_autosave()
+    end
+
+    # Auto-defaults and presets on lesion type change
+    on(btn_type_prostate.clicks) do _
+        update_type_buttons("Prostate")
+        if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
+            field_widgets["Anatomic Location"].selection[] = "Prostate Gland"
+        end
+        if haskey(field_widgets, "Anatomical Sublocation") && field_widgets["Anatomical Sublocation"] isa Menu
+            field_widgets["Anatomical Sublocation"].selection[] = "Prostate Peripheral Zone (PZ)"
+        end
+        if haskey(field_widgets, "Macroscopic Pattern") && field_widgets["Macroscopic Pattern"] isa Menu
+            field_widgets["Macroscopic Pattern"].selection[] = "Solitary / Isolated Focus"
+        end
+    end
+    
+    on(btn_type_bone.clicks) do _
+        update_type_buttons("Bone Meta")
+        if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
+            field_widgets["Anatomic Location"].selection[] = "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)"
+        end
+        if haskey(field_widgets, "Inner Texture / Density / Attenuation") && field_widgets["Inner Texture / Density / Attenuation"] isa Menu
+            field_widgets["Inner Texture / Density / Attenuation"].selection[] = "Sclerotic / Blastic / Ivory (>1000 HU)"
+        end
+        
+        # Trigger GenManualEvent to ensure bone subsegmentation is calculated for manually painted lesions
+        active_str = active_lesion_id[]
+        if active_str != "" && active_str != "(none)"
+            parts = split(active_str, " - ")
+            lid = tryparse(Int, strip(parts[1]))
+            if lid !== nothing
+                put!(channel, GenManualEvent(lid))
+            end
+        end
+    end
+    
+    on(btn_type_organ.clicks) do _
+        update_type_buttons("Organ Meta")
+        if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
+            field_widgets["Anatomic Location"].selection[] = "Solid Organ / Viscera"
+        end
+    end
+    
+    on(btn_type_ln.clicks) do _
+        update_type_buttons("Lymph Node Meta")
+        if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
+            field_widgets["Anatomic Location"].selection[] = "Pelvic Lymph Node"
+        end
+    end
+    local sec_map_lesions
+    local _build_match_display!
+    # Auto-hide metadata, segmentation, radlex, custom sections in Compare mode
+    on(btn_cv.clicks) do _
+        t_start = time_ns()
+        if cv_active[]
+            # Hide entire sections
+            for sec in (sec_meta, sec_seg, sec_report)
+                hide_section!(sec)
+            end
+            show_section!(sec_map_lesions)
+            notify(anat_active_count)
+            try
+                _build_match_display!()
+            catch e
+                @warn "Auto-building match display on compare mode toggle failed: $e"
+            end
+        else
+            # Show sections
+            for sec in (sec_meta, sec_seg, sec_report)
+                show_section!(sec)
+            end
+            hide_section!(sec_map_lesions)
+            update_dynamic_visibility!(active_lesion_type[])
+            notify(anat_active_count)
+        end
+        @info "[BENCH] Compare Volumes Toggle UI: $(round((time_ns()-t_start)/1e6, digits=1))ms"
+    end
+
+
 
     # ── Segmentation Mini Manager (compact) ────────────────────────────────
     sec_seg = begin_section!("Segmentation & AI")
@@ -2040,17 +2248,20 @@ end_section!(sec_win)
         active_lesion_id[] = new_name
         current_paint_mode[] = :paint
         btn_paint.buttoncolor[] = GRN; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BG_PNL
+        empty!(_MASK_IDS_CACHE)
         put!(channel, PaintValEvent(new_id, true)); put!(channel, SyncLesionEvent(new_id))
     end
     on(btn_paint.clicks) do _
         current_paint_mode[] = :paint
         btn_paint.buttoncolor[] = GRN; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BG_PNL
+        empty!(_MASK_IDS_CACHE)
         cp = findfirst(':', active_lesion_id[]); ns = cp !== nothing ? strip(active_lesion_id[][1:cp-1]) : active_lesion_id[]; val = (p = tryparse(Int, ns)) !== nothing ? p : 1
         put!(channel, PaintValEvent(val, true))
     end
     on(btn_erase.clicks) do _
         current_paint_mode[] = :erase
         btn_paint.buttoncolor[] = BG_PNL; btn_erase.buttoncolor[] = RED_BTN; btn_view_mode.buttoncolor[] = BG_PNL
+        empty!(_MASK_IDS_CACHE)
         put!(channel, PaintValEvent(0, true))
     end
     on(btn_view_mode.clicks) do _
@@ -2086,126 +2297,218 @@ end_section!(sec_win)
 
     sec_map_lesions = begin_section!("Map Lesions (Compare Mode)"; default_open=true)
     
-    btn_refresh_map = Button(g[nr!(), 1:4], label="Load TP Lesions", buttoncolor = BG_PNL, labelcolor = TXT, fontsize=10)
+    map_info_r = nr!()
+    lbl_map_left = Label(g[map_info_r, 1:2], "Current TP: ...", fontsize=10, font=:bold, color=LBL_FG, halign=:left)
+    lbl_map_right = Label(g[map_info_r, 3:4], "Compare TP: ...", fontsize=10, font=:bold, color=LBL_FG, halign=:left)
     
-    map_r = nr!()
-    src_vbox = GridLayout(g[map_r, 1:2])
-    dst_vbox = GridLayout(g[map_r, 3:4])
+    btn_refresh_map = Button(g[nr!(), 1:4], label="Refresh Associations", buttoncolor = BG_PNL, labelcolor = TXT, fontsize=10)
     
-    map_btn_r = nr!()
-    btn_do_map = Button(g[map_btn_r, 1:2], label="Link Selected", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize=10)
-    btn_unlink = Button(g[map_btn_r, 3:4], label="Unlink Selected", buttoncolor = RGBf(0.6, 0.2, 0.2), labelcolor = TXT, fontsize=10)
+    map_container_r = nr!()
+    map_grid = GridLayout(g[map_container_r, 1:4])
+    rowsize!(g, map_container_r, Auto())
     
-    src_toggles = Tuple{Int, Toggle}[]
-    dst_toggles = Tuple{Int, Toggle}[]
-    
+    map_selected_left = Observable{Vector{Int}}(Int[])
+    map_selected_right = Observable{Vector{Int}}(Int[])
+
+    _MASK_IDS_CACHE = Dict{Int, Vector{Int}}()
     function get_mask_ids(tp)
+        if haskey(_MASK_IDS_CACHE, tp) return _MASK_IDS_CACHE[tp] end
         if !haskey(_MEH.tp_data_cache, tp) return Int[] end
         entry = _MEH.tp_data_cache[tp]
         mask = entry.mask
-        return Int.(filter(x -> x > 0, sort(unique(mask))))
+        ids = Int.(filter(x -> x > 0, sort(unique(mask))))
+        _MASK_IDS_CACHE[tp] = ids
+        return ids
     end
-    
-    function _get_display_label(node_name, seg_int)
-        # Look up group info from MATCH_GROUPS
-        match_groups = Main.MedEye3d.LesionAssociation.get_match_groups()
-        for (gid, members) in match_groups
-            for (node, s_int, name) in members
-                if node == node_name && s_int == seg_int
-                    return "ID $seg_int [Grp $gid]"
-                end
-            end
-        end
-        return "ID $seg_int"
-    end
-    
-    on(btn_refresh_map.clicks) do _
-        # Clear existing checkboxes
-        for elem in contents(src_vbox); delete!(elem); end
-        for elem in contents(dst_vbox); delete!(elem); end
-        empty!(src_toggles)
-        empty!(dst_toggles)
+
+    function _build_match_display!()
+        for elem in contents(map_grid); delete!(elem); end
         
         tp_left = _MEH.current_tp_index[]
         tp_right = _MEH.compare_right_tp[]
+        if tp_right < 0
+            tp_indices = sort(collect(keys(_MEH.tp_labels)))
+            if !isempty(tp_indices)
+                cur_pos = findfirst(==(tp_left), tp_indices)
+                cur_pos = cur_pos === nothing ? 1 : cur_pos
+                next_pos = mod1(cur_pos + 1, length(tp_indices))
+                tp_right = tp_indices[next_pos]
+            else
+                tp_right = (tp_left + 1)
+            end
+        end
+        
+        left_node = _MEH.get_node_name_for_tp(tp_left)
+        right_node = _MEH.get_node_name_for_tp(tp_right)
+        
+        left_lbl = get(_MEH.tp_labels, tp_left, "TP $tp_left")
+        right_lbl = get(_MEH.tp_labels, tp_right, "TP $tp_right")
+        
+        lbl_map_left.text[] = "Current TP: $left_lbl ($left_node)"
+        lbl_map_right.text[] = "Compare TP: $right_lbl ($right_node)"
         
         l_ids = get_mask_ids(tp_left)
         r_ids = get_mask_ids(tp_right)
         
-        left_node = _MEH.get_node_name_for_tp(tp_left)
-        right_node = _MEH.get_node_name_for_tp(tp_right)
+        LA = Main.MedEye3d.LesionAssociation
         
-        Label(src_vbox[1, 1:2], "Left: $left_node", fontsize=10, font=:bold, color=LBL_FG)
-        for (i, lid) in enumerate(l_ids)
-            t = Toggle(src_vbox[i+1, 1], active=false)
-            lbl_text = _get_display_label(left_node, lid)
-            # Green for matched lesions, normal for unmatched
-            lbl_color = occursin("Grp", lbl_text) ? RGBf(0.4, 0.9, 0.4) : LBL_FG
-            Label(src_vbox[i+1, 2], lbl_text, fontsize=10, color=lbl_color)
-            push!(src_toggles, (lid, t))
-        end
-        if isempty(l_ids) Label(src_vbox[2, 1:2], "None", fontsize=10, color=LBL_FG) end
+        cur_act = active_lesion_id[]
+        cp = findfirst(':', cur_act)
+        ns = cp !== nothing ? strip(cur_act[1:cp-1]) : cur_act
+        active_lid = tryparse(Int, ns)
+        active_lid = active_lid !== nothing ? active_lid : (isempty(l_ids) ? 0 : l_ids[1])
         
-        Label(dst_vbox[1, 1:2], "Right: $right_node", fontsize=10, font=:bold, color=LBL_FG)
-        for (i, lid) in enumerate(r_ids)
-            t = Toggle(dst_vbox[i+1, 1], active=false)
-            lbl_text = _get_display_label(right_node, lid)
-            lbl_color = occursin("Grp", lbl_text) ? RGBf(0.4, 0.9, 0.4) : LBL_FG
-            Label(dst_vbox[i+1, 2], lbl_text, fontsize=10, color=lbl_color)
-            push!(dst_toggles, (lid, t))
+        cur_left_sel = copy(map_selected_left[])
+        if isempty(cur_left_sel) && active_lid > 0
+            cur_left_sel = Int[active_lid]
+            map_selected_left[] = cur_left_sel
         end
-        if isempty(r_ids) Label(dst_vbox[2, 1:2], "None", fontsize=10, color=LBL_FG) end
+        
+        cur_right_sel = copy(map_selected_right[])
+        if isempty(cur_right_sel) && !isempty(cur_left_sel)
+            matched_rights = Int[]
+            for lid in cur_left_sel
+                append!(matched_rights, LA.find_cross_tp_lesion(left_node, lid, right_node))
+            end
+            cur_right_sel = unique(matched_rights)
+            map_selected_right[] = cur_right_sel
+        end
+        
+        # Back-propagate to ensure all related left lesions are shown in the mapping
+        if !isempty(cur_right_sel)
+            matched_lefts = Int[]
+            for rid in cur_right_sel
+                append!(matched_lefts, LA.find_cross_tp_lesion(right_node, rid, left_node))
+            end
+            if !isempty(matched_lefts)
+                new_lefts = unique(vcat(cur_left_sel, matched_lefts))
+                if length(new_lefts) > length(cur_left_sel)
+                    cur_left_sel = new_lefts
+                    map_selected_left[] = cur_left_sel
+                end
+            end
+        end
+        
+        Label(map_grid[1, 1:2], "Add Left Lesion:", fontsize=9, color=LBL_FG, halign=:left)
+        Label(map_grid[1, 3:4], "Add Right Lesion:", fontsize=9, color=LBL_FG, halign=:left)
+        
+        l_opts = String["- select lesion -"]
+        for lid in l_ids
+            organ = get(_MEH.global_organ_mapping[], lid, "")
+            push!(l_opts, isempty(organ) ? "ID $lid" : "ID $lid: $organ")
+        end
+        r_opts = String["- select lesion -"]
+        for rid in r_ids
+            organ = get(_MEH.global_organ_mapping[], rid, "")
+            push!(r_opts, isempty(organ) ? "ID $rid" : "ID $rid: $organ")
+        end
+        
+        menu_l = searchable_menu(map_grid, 2, 1:2, options = Observable(l_opts), fontsize = 9)
+        menu_r = searchable_menu(map_grid, 2, 3:4, options = Observable(r_opts), fontsize = 9)
+        
+        function sync_mapping_and_display!()
+            h5_path = _MEH.h5_path_ref[]
+            if !isempty(h5_path) && !isempty(map_selected_left[]) && !isempty(map_selected_right[])
+                for l_id in map_selected_left[]
+                    for r_id in map_selected_right[]
+                        LA.update_match_group!(left_node, l_id, right_node, r_id, h5_path)
+                    end
+                end
+            end
+            if !isempty(map_selected_left[])
+                put!(channel, SyncLesionEvent(map_selected_left[][1]))
+            end
+            _build_match_display!()
+        end
+        
+        on(menu_l.selection) do sel
+            _is_applying_state[] && return
+            sel_str = string(sel)
+            (isempty(sel_str) || sel_str == "- select lesion -") && return
+            parts = split(sel_str, " ")
+            if length(parts) >= 2 && startswith(parts[1], "ID")
+                colon_p = findfirst(':', parts[2])
+                id_sub = colon_p !== nothing ? parts[2][1:colon_p-1] : parts[2]
+                lid = tryparse(Int, strip(id_sub))
+                if lid !== nothing && !(lid in map_selected_left[])
+                    push!(map_selected_left[], lid)
+                    notify(map_selected_left)
+                    sync_mapping_and_display!()
+                end
+            end
+        end
+        
+        on(menu_r.selection) do sel
+            _is_applying_state[] && return
+            sel_str = string(sel)
+            (isempty(sel_str) || sel_str == "- select lesion -") && return
+            parts = split(sel_str, " ")
+            if length(parts) >= 2 && startswith(parts[1], "ID")
+                colon_p = findfirst(':', parts[2])
+                id_sub = colon_p !== nothing ? parts[2][1:colon_p-1] : parts[2]
+                rid = tryparse(Int, strip(id_sub))
+                if rid !== nothing && !(rid in map_selected_right[])
+                    push!(map_selected_right[], rid)
+                    notify(map_selected_right)
+                    sync_mapping_and_display!()
+                end
+            end
+        end
+        
+        row_offset = 3
+        max_rows = max(length(map_selected_left[]), length(map_selected_right[]))
+        if max_rows == 0
+            Label(map_grid[row_offset, 1:4], "(No mapped lesions selected)", fontsize=9, color=SUBTXT, halign=:center)
+        else
+            for i in 1:length(map_selected_left[])
+                lid = map_selected_left[][i]
+                organ = get(_MEH.global_organ_mapping[], lid, "")
+                lbl_txt = isempty(organ) ? "ID $lid" : "ID $lid: $organ"
+                Label(map_grid[row_offset + i - 1, 1], lbl_txt, fontsize=9, color=TXT, halign=:left)
+                btn_rm_l = Button(map_grid[row_offset + i - 1, 2], label="✕", buttoncolor=RGBf(0.8, 0.2, 0.2), labelcolor=TXT, fontsize=9, width=25)
+                let rm_id = lid
+                    on(btn_rm_l.clicks) do _
+                        filter!(x -> x != rm_id, map_selected_left[])
+                        h5_path = _MEH.h5_path_ref[]
+                        !isempty(h5_path) && LA.remove_from_match_group!(left_node, rm_id, h5_path)
+                        notify(map_selected_left)
+                        _build_match_display!()
+                    end
+                end
+            end
+            
+            for j in 1:length(map_selected_right[])
+                rid = map_selected_right[][j]
+                organ = get(_MEH.global_organ_mapping[], rid, "")
+                lbl_txt = isempty(organ) ? "ID $rid" : "ID $rid: $organ"
+                Label(map_grid[row_offset + j - 1, 3], lbl_txt, fontsize=9, color=TXT, halign=:left)
+                btn_rm_r = Button(map_grid[row_offset + j - 1, 4], label="✕", buttoncolor=RGBf(0.8, 0.2, 0.2), labelcolor=TXT, fontsize=9, width=25)
+                let rm_id = rid
+                    on(btn_rm_r.clicks) do _
+                        filter!(x -> x != rm_id, map_selected_right[])
+                        h5_path = _MEH.h5_path_ref[]
+                        if !isempty(h5_path)
+                            for (gid, members) in LA.get_match_groups()
+                                idx_r = findfirst(m -> m[1] == right_node && m[2] == rm_id, members)
+                                if idx_r !== nothing
+                                    deleteat!(members, idx_r)
+                                    length(members) <= 1 && delete!(LA.get_match_groups(), gid)
+                                    LA.save_matches_to_h5(h5_path)
+                                    break
+                                end
+                            end
+                        end
+                        notify(map_selected_right)
+                        _build_match_display!()
+                    end
+                end
+            end
+        end
     end
     
-    on(btn_do_map.clicks) do _
-        LA = Main.MedEye3d.LesionAssociation
-        h5_path = _MEH.h5_path_ref[]
-        if isempty(h5_path)
-            println("WARNING: h5_path_ref not set, cannot save match"); flush(stdout)
-            return
-        end
-        
-        tp_left = _MEH.current_tp_index[]
-        tp_right = _MEH.compare_right_tp[]
-        left_node = _MEH.get_node_name_for_tp(tp_left)
-        right_node = _MEH.get_node_name_for_tp(tp_right)
-        
-        src_sel = Int[lid for (lid, t) in src_toggles if t.active[]]
-        dst_sel = Int[lid for (lid, t) in dst_toggles if t.active[]]
-        
-        for s_id in src_sel
-            for d_id in dst_sel
-                LA.update_match_group!(left_node, s_id, right_node, d_id, h5_path)
-                println("Linked $left_node:$s_id ↔ $right_node:$d_id in HDF5"); flush(stdout)
-            end
-        end
-    end
-    
-    on(btn_unlink.clicks) do _
-        LA = Main.MedEye3d.LesionAssociation
-        h5_path = _MEH.h5_path_ref[]
-        if isempty(h5_path)
-            println("WARNING: h5_path_ref not set, cannot unlink"); flush(stdout)
-            return
-        end
-        
-        tp_left = _MEH.current_tp_index[]
-        tp_right = _MEH.compare_right_tp[]
-        left_node = _MEH.get_node_name_for_tp(tp_left)
-        right_node = _MEH.get_node_name_for_tp(tp_right)
-        
-        for (lid, t) in src_toggles
-            if t.active[]
-                LA.remove_from_match_group!(left_node, lid, h5_path)
-                println("Unlinked $left_node:$lid from its match group"); flush(stdout)
-            end
-        end
-        for (lid, t) in dst_toggles
-            if t.active[]
-                LA.remove_from_match_group!(right_node, lid, h5_path)
-                println("Unlinked $right_node:$lid from its match group"); flush(stdout)
-            end
-        end
+    on(btn_refresh_map.clicks) do _
+        empty!(_MASK_IDS_CACHE)
+        _build_match_display!()
     end
     
     end_section!(sec_map_lesions)
@@ -2222,16 +2525,6 @@ end_section!(sec_win)
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     status_lbl = Label(g[nr!(), 1:4], "",
         fontsize = 10, color = RGBf(0.4, 0.9, 0.4), halign = :left, tellwidth = false)
-    
-    # Dictation & Report
-    dict_r = nr!()
-    Label(g[dict_r, 1], "Dictation:", fontsize = 10, color = LBL_FG, halign = :right)
-    dict_tb = Textbox(g[dict_r, 2:4], placeholder = "Radiological dictation...", fontsize = 10)
-    rpt_r = nr!()
-    Label(g[rpt_r, 1], "Report:", fontsize = 10, color = LBL_FG, halign = :right)
-    rpt_tb = Textbox(g[rpt_r, 2:3], placeholder = "Generated summary...", fontsize = 10)
-    btn_gen = Button(g[rpt_r, 4], label = "Gen",
-        buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
     
     # Preprocessing
     pre_r1 = nr!()
@@ -2322,8 +2615,13 @@ end_section!(sec_win)
         for (k, v) in custom_db[]
             d["Custom:$(k)"] = v
         end
-        v_dict = _safe_strip(dict_tb.stored_string[])
-        isempty(v_dict) || (d["RadiologicalDictation"] = v_dict)
+        if current_dict_lang[] == "EN"
+            v_dict = _safe_strip(dict_text[])
+            isempty(v_dict) || (d["RadiologicalDictationEN"] = v_dict)
+        else
+            v_dict = _safe_strip(dict_text[])
+            isempty(v_dict) || (d["RadiologicalDictation"] = v_dict)
+        end
         v_rpt = _safe_strip(rpt_tb.stored_string[])
         isempty(v_rpt) || (d["RadiologicalReportOutput"] = v_rpt)
         return d
@@ -2335,8 +2633,85 @@ end_section!(sec_win)
         id = active_lesion_id[]
         db = copy(lesion_db[])
         db[id] = collect_state()
+        
+        db["_GLOBAL_APP_STATE"] = Dict{String,String}(
+            "CT_Min" => _safe_strip(tb_ct_min.stored_string[]),
+            "CT_Max" => _safe_strip(tb_ct_max.stored_string[]),
+            "PET_Min" => _safe_strip(tb_pet_min.stored_string[]),
+            "PET_Max" => _safe_strip(tb_pet_max.stored_string[]),
+            "SPECT_Min" => _safe_strip(tb_spect_min.stored_string[]),
+            "SPECT_Max" => _safe_strip(tb_spect_max.stored_string[]),
+            "vis_lesion" => string(vis_lesion_active[]),
+            "vis_surface" => string(vis_surface_active[]),
+            "vis_marrow" => string(vis_marrow_active[]),
+            "vis_anatomy" => string(vis_anatomy_active[])
+        )
+        
         lesion_db[] = db
         _db_dirty[] = true
+    end
+    function apply_global_state(gst::AbstractDict)
+        _is_applying_state[] = true
+        try
+            # Apply Windowing
+            if haskey(gst, "CT_Min") && haskey(gst, "CT_Max")
+                _set_tb_val!(tb_ct_min, gst["CT_Min"])
+                _set_tb_val!(tb_ct_max, gst["CT_Max"])
+                v_min = tryparse(Float32, gst["CT_Min"])
+                v_max = tryparse(Float32, gst["CT_Max"])
+                if v_min !== nothing && v_max !== nothing
+                    put!(channel, WindowingEvent("CT", v_min, v_max))
+                end
+            end
+            if haskey(gst, "PET_Min") && haskey(gst, "PET_Max")
+                _set_tb_val!(tb_pet_min, gst["PET_Min"])
+                _set_tb_val!(tb_pet_max, gst["PET_Max"])
+                v_min = tryparse(Float32, gst["PET_Min"])
+                v_max = tryparse(Float32, gst["PET_Max"])
+                if v_min !== nothing && v_max !== nothing
+                    put!(channel, WindowingEvent("PET", v_min, v_max))
+                end
+            end
+            if haskey(gst, "SPECT_Min") && haskey(gst, "SPECT_Max")
+                _set_tb_val!(tb_spect_min, gst["SPECT_Min"])
+                _set_tb_val!(tb_spect_max, gst["SPECT_Max"])
+                v_min = tryparse(Float32, gst["SPECT_Min"])
+                v_max = tryparse(Float32, gst["SPECT_Max"])
+                if v_min !== nothing && v_max !== nothing
+                    put!(channel, WindowingEvent("SPECT", v_min, v_max))
+                end
+            end
+            
+            # Apply Toggles
+            if haskey(gst, "vis_lesion")
+                vis_lesion_active[] = (gst["vis_lesion"] == "true")
+                btn_vis_lesion.label[] = vis_lesion_active[] ? "Lesion: ON" : "Lesion: OFF"
+                btn_vis_lesion.buttoncolor[] = vis_lesion_active[] ? GRN : BG_PNL
+                put!(channel, ShowMaskLayerEvent(1, vis_lesion_active[]))
+            end
+            if haskey(gst, "vis_surface")
+                vis_surface_active[] = (gst["vis_surface"] == "true")
+                btn_vis_surface.label[] = vis_surface_active[] ? "Surf: ON" : "Surf: OFF"
+                btn_vis_surface.buttoncolor[] = vis_surface_active[] ? RGBf(0.0, 0.75, 0.75) : BG_PNL
+                put!(channel, ShowMaskLayerEvent(2, vis_surface_active[]))
+            end
+            if haskey(gst, "vis_marrow")
+                vis_marrow_active[] = (gst["vis_marrow"] == "true")
+                btn_vis_marrow.label[] = vis_marrow_active[] ? "Marrow: ON" : "Marrow: OFF"
+                btn_vis_marrow.buttoncolor[] = vis_marrow_active[] ? RGBf(0.75, 0.75, 0.1) : BG_PNL
+                put!(channel, ShowMaskLayerEvent(3, vis_marrow_active[]))
+            end
+            if haskey(gst, "vis_anatomy")
+                vis_anatomy_active[] = (gst["vis_anatomy"] == "true")
+                btn_vis_anatomy.label[] = vis_anatomy_active[] ? "Anatomy: ON" : "Anatomy: OFF"
+                btn_vis_anatomy.buttoncolor[] = vis_anatomy_active[] ? RGBf(0.5, 0.5, 0.8) : BG_PNL
+                put!(channel, ShowMaskLayerEvent(4, vis_anatomy_active[]))
+            end
+        catch e
+            @warn "Failed to apply global state: $e"
+        finally
+            _is_applying_state[] = false
+        end
     end
 
     function apply_state(data::AbstractDict)
@@ -2352,6 +2727,63 @@ end_section!(sec_win)
         else
             # Auto-detect lesion type: try JSON mapping first, then keyword fallback
             raw_organ_for_type = get(_MEH.global_organ_mapping[], lid, "")
+            if isempty(raw_organ_for_type)
+                # Try to compute it dynamically from the current mask!
+                tp = _MEH.current_tp_index[]
+                if haskey(_MEH.tp_data_cache, tp) && _MEH.global_ts_atlas[] !== nothing
+                    try
+                        mask = _MEH.tp_data_cache[tp].mask
+                        ts_atlas = _MEH.global_ts_atlas[]
+                        ts_names = _MEH.global_ts_names[]
+                        indices = findall(x -> x == lid, mask)
+                        if !isempty(indices)
+                            scale_x = size(ts_atlas, 1) / size(mask, 1)
+                            scale_y = size(ts_atlas, 2) / size(mask, 2)
+                            scale_z = size(ts_atlas, 3) / size(mask, 3)
+                            
+                            # Scan ALL lesion voxels against atlas for bone-priority mapping
+                            organ_counts = Dict{String,Int}()
+                            sample_step = max(1, length(indices) ÷ 500)  # subsample large lesions
+                            for (vi, idx) in enumerate(indices)
+                                vi % sample_step != 0 && continue
+                                sx = clamp(round(Int, idx[1] * scale_x), 1, size(ts_atlas, 1))
+                                sy = clamp(round(Int, idx[2] * scale_y), 1, size(ts_atlas, 2))
+                                sz = clamp(round(Int, idx[3] * scale_z), 1, size(ts_atlas, 3))
+                                ts_val = Int(ts_atlas[sx, sy, sz])
+                                if ts_val > 0 && haskey(ts_names, ts_val)
+                                    name = ts_names[ts_val]
+                                    organ_counts[name] = get(organ_counts, name, 0) + 1
+                                end
+                            end
+                            
+                            if !isempty(organ_counts)
+                                # Priority: bone > everything else
+                                bone_kws = ["femur","hip","vertebra","rib","sacrum","clavicula",
+                                            "humerus","scapula","sternum","skull","bone","spine",
+                                            "ilium","ischium","pubis","tibia","mandible","costal"]
+                                vascular_excl = ["vena","artery","vein","vessel","trunk"]
+                                bone_organs = filter(organ_counts) do (name, _)
+                                    nl = lowercase(name)
+                                    any(bk -> occursin(bk, nl), bone_kws) && !any(v -> occursin(v, nl), vascular_excl)
+                                end
+                                if !isempty(bone_organs)
+                                    organ_name = first(sort(collect(bone_organs), by=x->-x[2]))[1]
+                                else
+                                    organ_name = first(sort(collect(organ_counts), by=x->-x[2]))[1]
+                                end
+                            end
+                            
+                            if !isempty(organ_name)
+                                _MEH.global_organ_mapping[][lid] = organ_name
+                                raw_organ_for_type = organ_name
+                                @info "[DYNAMIC MAP] Mapped new lesion $lid to $organ_name (from $(length(organ_counts)) overlapping organs)"
+                            end
+                        end
+                    catch e
+                        @warn "Dynamic organ mapping failed for lesion $lid: $e"
+                    end
+                end
+            end
             json_entry = lookup_anatomy(raw_organ_for_type)
             
             if json_entry !== nothing
@@ -2439,9 +2871,36 @@ end_section!(sec_win)
         t_side = get(data, "BaseAnatomySide", "")
         
         # Auto-detect BaseAnatomy from max_anatomy JSON mapping if not saved
+        @info "[PREFILL] lid=$lid, t_base='$t_base', raw_organ='$(get(_MEH.global_organ_mapping[], lid, ""))'"
         if isempty(t_base) && lid > 0
             organ_map = _MEH.global_organ_mapping[]
             raw_organ = get(organ_map, lid, "")
+            # Fallback for new lesions: if organ mapping is empty, try looking up
+            # the anatomy atlas at the lesion's centroid position
+            if isempty(raw_organ) && _MEH.global_ts_atlas[] !== nothing
+                try
+                    centroid = get(_MEH.lesion_centroids_cache, (_MEH.current_tp_index[], lid), nothing)
+                    if centroid === nothing
+                        centroid = get(_MEH.lesion_centroids_cache, lid, nothing)
+                    end
+                    if centroid !== nothing
+                        atlas = _MEH.global_ts_atlas[]
+                        cx, cy, cz = clamp(centroid[1], 1, size(atlas,1)), clamp(centroid[2], 1, size(atlas,2)), clamp(centroid[3], 1, size(atlas,3))
+                        anat_val = Int(atlas[cx, cy, cz])
+                        if anat_val > 0
+                            raw_organ = get(_MEH.global_ts_names[], anat_val, "")
+                            if !isempty(raw_organ)
+                                # Cache it so subsequent lookups are fast
+                                organ_map[lid] = raw_organ
+                                _MEH.global_organ_mapping[] = organ_map
+                                @info "Auto-named new lesion $lid from anatomy atlas at [$cx,$cy,$cz]: '$raw_organ'"
+                            end
+                        end
+                    end
+                catch e
+                    @warn "Anatomy atlas lookup for new lesion $lid failed: $e"
+                end
+            end
             if !isempty(raw_organ)
                 entry = lookup_anatomy(raw_organ)
                 if entry !== nothing
@@ -2452,24 +2911,37 @@ end_section!(sec_win)
                     end
                     # Auto-fill Anatomic Location dropdown from JSON mapping
                     anat_loc = get(entry, "anatomic_location", "")
-                    if !isempty(anat_loc) && (!haskey(data, "Anatomic Location") || isempty(get(data, "Anatomic Location", "")))
+                    anat_subloc = get(entry, "anatomical_sublocation", "")
+                    @info "[PREFILL] json_entry found for '$raw_organ': anat_loc='$anat_loc', subloc='$anat_subloc', data_has_AL=$(haskey(data, "Anatomic Location")), data_AL='$(get(data, "Anatomic Location", ""))'"
+                    if !isempty(anat_loc)
                         if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
                             opts = field_widgets["Anatomic Location"].options[]
                             a_idx = findfirst(==(anat_loc), opts)
-                            if a_idx !== nothing
-                                field_widgets["Anatomic Location"].i_selected[] = a_idx
+                            if a_idx === nothing
+                                # Value not in dropdown — add it dynamically
+                                new_opts = copy(opts)
+                                push!(new_opts, anat_loc)
+                                field_widgets["Anatomic Location"].options[] = new_opts
+                                a_idx = length(new_opts)
+                                @info "Dynamically added '$anat_loc' to Anatomic Location dropdown"
                             end
+                            field_widgets["Anatomic Location"].i_selected[] = a_idx
                         end
                     end
-                    # Auto-fill Anatomical Sublocation from JSON mapping
-                    anat_subloc = get(entry, "anatomical_sublocation", "")
-                    if !isempty(anat_subloc) && (!haskey(data, "Anatomical Sublocation") || isempty(get(data, "Anatomical Sublocation", "")))
+                    # Auto-fill Anatomical Sublocation from JSON mapping (anat_subloc already set above)
+                    if !isempty(anat_subloc)
                         if haskey(field_widgets, "Anatomical Sublocation") && field_widgets["Anatomical Sublocation"] isa Menu
                             opts = field_widgets["Anatomical Sublocation"].options[]
                             sl_idx = findfirst(==(anat_subloc), opts)
-                            if sl_idx !== nothing
-                                field_widgets["Anatomical Sublocation"].i_selected[] = sl_idx
+                            if sl_idx === nothing
+                                # Value not in dropdown — add it dynamically
+                                new_opts = copy(opts)
+                                push!(new_opts, anat_subloc)
+                                field_widgets["Anatomical Sublocation"].options[] = new_opts
+                                sl_idx = length(new_opts)
+                                @info "Dynamically added '$anat_subloc' to Anatomical Sublocation dropdown"
                             end
+                            field_widgets["Anatomical Sublocation"].i_selected[] = sl_idx
                         end
                     end
                 else
@@ -2674,8 +3146,8 @@ end_section!(sec_win)
         
         # Restore windowing if present
         if haskey(data, "_CT_Min") && haskey(data, "_CT_Max")
-            tb_ct_min.stored_string[] = data["_CT_Min"]
-            tb_ct_max.stored_string[] = data["_CT_Max"]
+            _set_tb_val!(tb_ct_min, data["_CT_Min"])
+            _set_tb_val!(tb_ct_max, data["_CT_Max"])
             v_min = tryparse(Float32, data["_CT_Min"])
             v_max = tryparse(Float32, data["_CT_Max"])
             if v_min !== nothing && v_max !== nothing
@@ -2683,8 +3155,8 @@ end_section!(sec_win)
             end
         end
         if haskey(data, "_PET_Min") && haskey(data, "_PET_Max")
-            tb_pet_min.stored_string[] = data["_PET_Min"]
-            tb_pet_max.stored_string[] = data["_PET_Max"]
+            _set_tb_val!(tb_pet_min, data["_PET_Min"])
+            _set_tb_val!(tb_pet_max, data["_PET_Max"])
             v_min = tryparse(Float32, data["_PET_Min"])
             v_max = tryparse(Float32, data["_PET_Max"])
             if v_min !== nothing && v_max !== nothing
@@ -2692,8 +3164,8 @@ end_section!(sec_win)
             end
         end
         if haskey(data, "_SPECT_Min") && haskey(data, "_SPECT_Max")
-            tb_spect_min.stored_string[] = data["_SPECT_Min"]
-            tb_spect_max.stored_string[] = data["_SPECT_Max"]
+            _set_tb_val!(tb_spect_min, data["_SPECT_Min"])
+            _set_tb_val!(tb_spect_max, data["_SPECT_Max"])
             v_min = tryparse(Float32, data["_SPECT_Min"])
             v_max = tryparse(Float32, data["_SPECT_Max"])
             if v_min !== nothing && v_max !== nothing
@@ -2706,21 +3178,35 @@ end_section!(sec_win)
             w === nothing && continue
             val = get(data, q.short, nothing)
             if w isa Textbox
-                target_str = val === nothing ? "" : val
-                if w.stored_string[] != target_str
-                    w.stored_string[] = target_str
-                end
+                target_str = val === nothing ? "" : String(val)
+                _set_tb_val!(w, target_str)
             elseif w isa Menu
-                if val !== nothing
+                if val !== nothing && !isempty(String(val))
+                    val_str = String(val)
                     opts = w.options[]
-                    idx = findfirst(==(val), opts)
-                    target_idx = idx !== nothing ? idx : 1
-                    if w.i_selected[] != target_idx
-                        w.i_selected[] = target_idx
+                    idx = findfirst(==(val_str), opts)
+                    if idx === nothing
+                        new_opts = copy(opts)
+                        push!(new_opts, val_str)
+                        w.options[] = new_opts
+                        idx = length(new_opts)
+                    end
+                    if w.i_selected[] != idx
+                        w.i_selected[] = idx
                     end
                 else
-                    if w.i_selected[] != 1
-                        w.i_selected[] = 1   # reset to "- select -"
+                    if q.short == "Radioligand Type"
+                        opts = w.options[]
+                        ga_idx = findfirst(==("68Ga-PSMA-11"), opts)
+                        w.i_selected[] = ga_idx !== nothing ? ga_idx : 1
+                    elseif !isempty(q.default_answer)
+                        opts = w.options[]
+                        d_idx = findfirst(==(q.default_answer), opts)
+                        w.i_selected[] = d_idx !== nothing ? d_idx : 1
+                    else
+                        if w.i_selected[] != 1
+                            w.i_selected[] = 1   # reset to "- select -"
+                        end
                     end
                 end
             end
@@ -2736,15 +3222,16 @@ end_section!(sec_win)
         end
         custom_db[] = cdb
         
-        target_dict = get(data, "RadiologicalDictation", get(_MEH.tp_descriptions, _MEH.current_tp_index[], ""))
-        if dict_tb.stored_string[] != target_dict
-            dict_tb.stored_string[] = target_dict
+        target_dict = if current_dict_lang[] == "EN"
+            en_val = get(data, "RadiologicalDictationEN", get(_MEH.tp_english_descriptions, _MEH.current_tp_index[], ""))
+            isempty(en_val) ? get(data, "RadiologicalDictation", get(_MEH.tp_descriptions, _MEH.current_tp_index[], "")) : en_val
+        else
+            get(data, "RadiologicalDictation", get(_MEH.tp_descriptions, _MEH.current_tp_index[], ""))
         end
+        dict_text[] = target_dict
         
         target_rpt = get(data, "RadiologicalReportOutput", "")
-        if rpt_tb.stored_string[] != target_rpt
-            rpt_tb.stored_string[] = target_rpt
-        end
+        _set_tb_val!(rpt_tb, target_rpt)
         finally
             _is_applying_state[] = false
         end
@@ -2752,16 +3239,36 @@ end_section!(sec_win)
 
     # ── Wire callbacks ────────────────────────────────────────────────────────
     on(active_lesion_id) do id
+        t_cb = time_ns()
         @info "WIRE_CALLBACK: active_lesion_id changed to: $id"
         db = lesion_db[]
         try
-            apply_state(get(db, id, Dict{String,String}()))
+            apply_state(get_lesion_state(db, id))
         catch e
             @warn "Failed to apply state for lesion $id: $e"
         end
+        @info "[TIMING] apply_state: $(round((time_ns()-t_cb)/1e6, digits=1))ms for $id"
+        
+        # Refresh Map Lesions lists to track the newly selected lesion
+        if cv_active[]
+            try
+                cp_id = findfirst(':', id)
+                ns_id = cp_id !== nothing ? strip(id[1:cp_id-1]) : id
+                lid = tryparse(Int, ns_id)
+                if lid !== nothing
+                    map_selected_left[] = Int[lid]
+                    map_selected_right[] = Int[]  # will be auto-populated from cross-TP match
+                    _build_match_display!()
+                end
+            catch e
+                @warn "Failed to refresh Map Lesions: $e"
+            end
+        end
         
         # Synchronize lesion with viewer (filters mask and jumps to slice)
-        try
+        # Non-blocking: use @async so we don't freeze the Makie GUI thread if the
+        # consumer is busy processing a previous event
+        @async try
             cp = findfirst(':', id)
             ns = cp !== nothing ? strip(id[1:cp-1]) : id
             lid = tryparse(Int, ns)
@@ -2805,17 +3312,17 @@ end_section!(sec_win)
     on(btn_load.clicks) do _
         @async begin
             reply = Channel{Dict}(1)
-            put!(db_channel, LoadDBMessage(save_path, reply))
+            put!(db_channel, LoadDBMessage(save_path, reply, DEFAULT_HDF5_PATH))
             db = take!(reply)
             lesion_db[] = db
             
             # Apply global state if found
             if haskey(db, "_GLOBAL_APP_STATE")
                 gst = db["_GLOBAL_APP_STATE"]
-                apply_state(gst)
+                apply_global_state(gst)
             end
             
-            apply_state(get(db, active_lesion_id[], Dict{String,String}()))
+            apply_state(get_lesion_state(db, active_lesion_id[]))
             status_lbl.text[] = "Loaded $(length(db)) lesion(s)"
         end
     end
@@ -2866,8 +3373,11 @@ end_section!(sec_win)
     end
     on(anat_active_count) do _; trigger_autosave(); end
     on(menu_side.selection) do _; trigger_autosave(); end
-    on(active_lesion_type) do _; trigger_autosave(); end
-    on(dict_tb.stored_string) do _; trigger_autosave(); end
+    on(active_lesion_type) do t
+        update_dynamic_visibility!(t)
+        trigger_autosave()
+    end
+    on(dict_text) do _; trigger_autosave(); end
     on(rpt_tb.stored_string) do _; trigger_autosave(); end
     on(radlex_selected) do _; trigger_autosave(); end
     
@@ -2894,6 +3404,33 @@ end_section!(sec_win)
                 end
             end
         end
+    end
+
+    # Initial state application
+    initial_id = active_lesion_id[]
+    db = lesion_db[]
+    
+    # Apply global state (windowing, toggles) first
+    if haskey(db, "_GLOBAL_APP_STATE")
+        try
+            apply_global_state(db["_GLOBAL_APP_STATE"])
+        catch e
+            @warn "Failed initial apply_global_state: $e"
+        end
+    end
+    
+    if initial_id != "" && initial_id != "(none)"
+        try
+            apply_state(get_lesion_state(db, initial_id))
+        catch e
+            @warn "Failed initial apply_state: $e"
+        end
+    end
+    # Ensure dictation is populated if empty
+    tp_cur = _MEH.current_tp_index[]
+    de_desc = get(_MEH.tp_descriptions, tp_cur, "")
+    if !isempty(de_desc) && isempty(_safe_strip(dict_text[]))
+        dict_text[] = de_desc
     end
 
     return (fig = fig, lesion_db = lesion_db)

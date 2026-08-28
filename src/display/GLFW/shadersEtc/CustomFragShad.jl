@@ -99,6 +99,8 @@ function addMasksStrings(textur::TextureSpec{Float32}, lengthOfTextures)
     uniform $(addTypeStr(textur))  $(textName)maxValue= $(textur.minAndMaxValue[2]); // maximum possible value set in configuration
     uniform $(addTypeStr(textur))  $(textName)ValueRange= $(textur.minAndMaxValue[2] -textur.minAndMaxValue[1] ); // range of possible values calculated from above
     uniform float  $(textName)maskContribution=$(1/lengthOfTextures); //controls contribution of mask to output color
+    uniform float  $(textName)allowedIDs[16]; // list of allowed IDs for multi-ID filtering
+    uniform int    $(textName)allowedIDCount = 0; // 0 = use min/max, >0 = use list
 
     """
 end#addMasksStrings
@@ -211,7 +213,19 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
         if !x.isMainImage
             maskApplyCode *= """
                 if ($(x.name)isVisible == 1 && abs($(x.name)Res) > 0.00001) {
-                    if ($(x.name)minValue < $(x.name)maxValue || abs($(x.name)Res - $(x.name)minValue) < 0.1) {
+                    bool showThis_$(x.name) = false;
+                    if ($(x.name)allowedIDCount > 0) {
+                        for (int _aidx = 0; _aidx < 16; _aidx++) {
+                            if (_aidx >= $(x.name)allowedIDCount) { break; }
+                            if (abs($(x.name)Res - $(x.name)allowedIDs[_aidx]) < 0.1) {
+                                showThis_$(x.name) = true;
+                                break;
+                            }
+                        }
+                    } else {
+                        showThis_$(x.name) = ($(x.name)minValue < $(x.name)maxValue) || (abs($(x.name)Res - $(x.name)minValue) < 0.1);
+                    }
+                    if (showThis_$(x.name)) {
                         float alpha = $(x.name)maskContribution;
                         alpha = clamp(alpha * 2.0, 0.5, 1.0); // Boost visibility
                         vec3 maskColor = vec3(

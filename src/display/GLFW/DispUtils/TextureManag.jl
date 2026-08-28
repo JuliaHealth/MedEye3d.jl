@@ -238,7 +238,7 @@ function updateImagesDisplayed(
     # crosshairDisplay(crosshair, mainRect, forDisplayConstants) #[source of issue in multi image and images do no apeear]
     # end
 
-    glFinish()
+    # glFinish() removed — SwapBuffers in consumer loop provides synchronization
 end
 
 
@@ -267,7 +267,20 @@ On the basis of the name of the Texture it will assign the informs referencs to 
 function setuniforms(textSpec::TextureSpec, shader_program::UInt32)::TextureSpec
 
     n = textSpec.name
-    unifs = MaskTextureUniforms(samplerName=n, samplerRef=glGetUniformLocation(shader_program, n), colorsMaskRef=glGetUniformLocation(shader_program, "$(n)ColorMask"), maskMinValue=glGetUniformLocation(shader_program, "$(n)minValue"), maskMAxValue=glGetUniformLocation(shader_program, "$(n)maxValue"), maskRangeValue=glGetUniformLocation(shader_program, "$(n)ValueRange"), isVisibleRef=glGetUniformLocation(shader_program, "$(n)isVisible"), maskContribution=glGetUniformLocation(shader_program, "$(n)maskContribution"))
+    allowed_refs = Int32[glGetUniformLocation(shader_program, "$(n)allowedIDs[$i]") for i in 0:15]
+    allowed_count_ref = glGetUniformLocation(shader_program, "$(n)allowedIDCount")
+    unifs = MaskTextureUniforms(
+        samplerName=n, 
+        samplerRef=glGetUniformLocation(shader_program, n), 
+        colorsMaskRef=glGetUniformLocation(shader_program, "$(n)ColorMask"), 
+        maskMinValue=glGetUniformLocation(shader_program, "$(n)minValue"), 
+        maskMAxValue=glGetUniformLocation(shader_program, "$(n)maxValue"), 
+        maskRangeValue=glGetUniformLocation(shader_program, "$(n)ValueRange"), 
+        isVisibleRef=glGetUniformLocation(shader_program, "$(n)isVisible"), 
+        maskContribution=glGetUniformLocation(shader_program, "$(n)maskContribution"),
+        allowedIDsRef=allowed_refs,
+        allowedIDCountRef=allowed_count_ref
+    )
 
     return setproperties(textSpec, (uniforms = unifs))
 

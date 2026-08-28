@@ -1,3 +1,6 @@
+using Pkg
+Pkg.activate(joinpath(@__DIR__, "..", ".."))
+
 using MedImages
 using NIfTI
 using HDF5

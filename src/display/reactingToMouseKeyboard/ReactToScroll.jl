@@ -109,6 +109,7 @@ Core scroll-navigation function executed sequentially by the `GL_Consumer` threa
 4. Uploads data into GPU textures and calls `glClear`/`glDrawElements` via the consumer block.
 """
 function reactToScroll(scrollNumb::Int64, mainStates::Vector{StateDataFields}, toBeSavedForBack::Bool=true)
+    t_start = time_ns()
     mainState = mainStates[mainStates[1].switchIndex] #getting information from the first state
 
     current = mainState.currentDisplayedSlice
@@ -288,7 +289,10 @@ end
         end
 
     end#if
-
+    
+    t_end = time_ns()
+    action = scrollNumb != 0 ? "SCROLL" : "REDRAW"
+    @info "[BENCH] reactToScroll ($(action)): $(round((t_end-t_start)/1e6, digits=1))ms"
 end#reactToScroll
 function getSvCurrentSlice(all_supervoxels::Dict{Int, Dict{Int, Dict{String,Any}}}, slice_number, mainState=nothing)
     # Get the current axis

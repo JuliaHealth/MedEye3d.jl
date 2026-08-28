@@ -27,6 +27,12 @@ python3 scripts/ai/convert_mrb_to_nifti.py "$MRML_FILE" "$DIR"
 echo "Running preprocess_dataset.jl..."
 julia --project=. scripts/preprocessing/preprocess_dataset.jl "$DIR"
 
+echo "Running recompute_bones.jl..."
+julia --project=. scripts/preprocessing/recompute_bones.jl "$DIR"
+
+echo "Running prefill_anatomy.jl..."
+julia --project=. scripts/preprocessing/prefill_anatomy.jl "$DIR"
+
 echo "Cleaning up..."
 rm -rf "$TEMP_DIR"
 echo "Done!"

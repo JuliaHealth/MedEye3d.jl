@@ -64,6 +64,8 @@ Stores references needed for rapid GL context updates (visibility, blending, cli
   maskMAxValue::Float32 = Float32(0)
   maskRangeValue::Float32 = Float32(0)
   maskContribution::Float32 = Float32(0)
+  allowedIDsRef::Vector{Int32} = fill(Int32(-1), 16)
+  allowedIDCountRef::Int32 = Int32(-1)
 end
 
 

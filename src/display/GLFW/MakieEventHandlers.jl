@@ -22,6 +22,9 @@ using ModernGL
 using ..Uniforms
 using Observables
 
+# Debug flag: set to true to enable verbose bench/bone logging in hot paths
+const DEBUG_VERBOSE = Ref(false)
+
 # AI status Observable — LesionMetadataWindow reads this for the GUI label
 const ai_status_text = Observable{String}("Ready")
 
@@ -320,6 +323,8 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
     for stateObject in stateObjects
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if textSpec.isMultiDiscreteMask || textSpec.name == "Mask"
+                ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
+                Uniforms.setAllowedIDs!(textSpec, Int[])
                 if data.lesion_id == 0
                     textSpec.minAndMaxValue = Float32.([1.0, 1000.0])
                 else
@@ -327,7 +332,6 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
                 end
                 
                 # Push uniform update for min/max
-                ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
                 Uniforms.coontrolMinMaxUniformVals(textSpec)
                 changed = true
             end
@@ -400,7 +404,7 @@ function reactToChangeBrushSize(data::ChangeBrushSizeEvent, stateObjects::Vector
             state.textureToModifyVec[1].strokeWidth = Int32(data.size)
         end
     end
-    println("Brush size updated to $(data.size)"); flush(stdout)
+    if DEBUG_VERBOSE[]; println("Brush size updated to $(data.size)"); flush(stdout); end
 end
 
 const tp_node_names = Dict{Int, String}()
@@ -430,13 +434,13 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
     
     # Check precomputed cache (loaded from Bone_Subsegments_0.h5 at startup)
     cached = if haskey(bone_subsegments_cache, (panel_tp, target_id))
-        println("  [BONE] Cache HIT by (tp=$panel_tp, lid=$target_id)"); flush(stdout)
+        if DEBUG_VERBOSE[]; println("  [BONE] Cache HIT by (tp=$panel_tp, lid=$target_id)"); flush(stdout); end
         bone_subsegments_cache[(panel_tp, target_id)]
     elseif haskey(bone_subsegments_cache, (node_name, target_id))
-        println("  [BONE] Cache HIT by (node=$node_name, lid=$target_id)"); flush(stdout)
+        if DEBUG_VERBOSE[]; println("  [BONE] Cache HIT by (node=$node_name, lid=$target_id)"); flush(stdout); end
         bone_subsegments_cache[(node_name, target_id)]
     else
-        println("  [BONE] Cache MISS for lid=$target_id tp=$panel_tp node=$node_name"); flush(stdout)
+        if DEBUG_VERBOSE[]; println("  [BONE] Cache MISS for lid=$target_id tp=$panel_tp node=$node_name"); flush(stdout); end
         nothing
     end
     
@@ -447,7 +451,7 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
         raw_surf, raw_marr = cached
         surf_res = raw_surf isa AbstractArray{<:CartesianIndex} ? raw_surf : findall(raw_surf .> 0)
         marr_res = raw_marr isa AbstractArray{<:CartesianIndex} ? raw_marr : findall(raw_marr .> 0)
-        println("  [BONE] Result: $(length(surf_res)) surf, $(length(marr_res)) marr"); flush(stdout)
+        if DEBUG_VERBOSE[]; println("  [BONE] Result: $(length(surf_res)) surf, $(length(marr_res)) marr"); flush(stdout); end
         return (surf_res, marr_res)
     end
     
@@ -459,8 +463,8 @@ end
 
 function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateDataFields})
     t_total = time_ns()
-    println("  [BENCH-SL] reactToSyncLesion($(data.lesion_id)) START"); flush(stdout)
-    println("reactToSyncLesion called with lesion_id=$(data.lesion_id), nStates=$(length(stateObjects))"); flush(stdout)
+    if DEBUG_VERBOSE[]; println("  [BENCH-SL] reactToSyncLesion($(data.lesion_id)) START"); flush(stdout); end
+    if DEBUG_VERBOSE[]; println("reactToSyncLesion called with lesion_id=$(data.lesion_id), nStates=$(length(stateObjects))"); flush(stdout); end
     current_active_lesion_id[] = data.lesion_id
     changed = false
     old_idx = stateObjects[1].switchIndex
@@ -469,8 +473,22 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         stateObject.mainForDisplayObjects.isSyncScrollOn = false
     end
 
+    # Clear stale bone overlay tracking and zero out bone texture arrays
+    # This prevents ghost overlays when switching between lesions
+    empty!(last_bone_surf_indices)
+    empty!(last_bone_marr_indices)
+    for stateObject in stateObjects
+        for scrDat in stateObject.onScrollData.dataToScroll
+            if scrDat.name == "Bone_Surface" || scrDat.name == "Bone_Marrow"
+                arr = scrDat.dat isa PermutedDimsArray ? parent(scrDat.dat) : scrDat.dat
+                fill!(arr, 0.0f0)
+            end
+        end
+    end
+
     # Determine matched lesion ID for the compare right panel (panel 5) if in compare mode
     panel5_lesion_id = data.lesion_id
+    panel5_all_ids = Int[]
     if compare_mode[] && length(stateObjects) >= 5 && data.lesion_id > 0
         try
             left_node = get_node_name_for_tp(current_tp_index[])
@@ -481,8 +499,9 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             if match_mod !== nothing
                 matched_ids = match_mod.find_cross_tp_lesion(left_node, data.lesion_id, right_node)
                 if !isempty(matched_ids)
+                    panel5_all_ids = matched_ids
                     panel5_lesion_id = matched_ids[1]
-                    println("Cross-TP match: $(left_node) lesion $(data.lesion_id) -> $(right_node) lesion $(panel5_lesion_id)"); flush(stdout)
+                    if DEBUG_VERBOSE[]; println("Cross-TP match: $(left_node) lesion $(data.lesion_id) -> $(right_node) lesions $(matched_ids)"); flush(stdout); end
                 end
             end
         catch e
@@ -495,18 +514,26 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         target_id = (idx == 5 && compare_mode[]) ? panel5_lesion_id : data.lesion_id
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if textSpec.name == "Mask" || textSpec.name == "segmentation"
-                if target_id > 0
-                    textSpec.minAndMaxValue = Float32.([target_id, target_id])
-                else
-                    textSpec.minAndMaxValue = Float32.([1.0, 1000.0])
-                end
                 ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
-                Uniforms.coontrolMinMaxUniformVals(textSpec)
-                println("Set mask uniform for panel $idx: lesion=$target_id, texSpec.name=$(textSpec.name)"); flush(stdout)
+                if idx == 5 && compare_mode[] && !isempty(panel5_all_ids)
+                    Uniforms.setAllowedIDs!(textSpec, panel5_all_ids)
+                    Uniforms.coontrolMinMaxUniformVals(textSpec)
+                    if DEBUG_VERBOSE[]; println("Set mask multi-ID uniform for panel 5: lesions=$(panel5_all_ids)"); flush(stdout); end
+                else
+                    Uniforms.setAllowedIDs!(textSpec, Int[])
+                    if target_id > 0
+                        textSpec.minAndMaxValue = Float32.([target_id, target_id])
+                    else
+                        textSpec.minAndMaxValue = Float32.([1.0, 1000.0])
+                    end
+                    Uniforms.coontrolMinMaxUniformVals(textSpec)
+                    if DEBUG_VERBOSE[]; println("Set mask uniform for panel $idx: lesion=$target_id, texSpec.name=$(textSpec.name)"); flush(stdout); end
+                end
             elseif textSpec.name == "manualModif"
                 # manualModif must always remain unclamped so all user strokes are visible
                 textSpec.minAndMaxValue = Float32.([0.0, 1000.0])
                 ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
+                Uniforms.setAllowedIDs!(textSpec, Int[])
                 Uniforms.coontrolMinMaxUniformVals(textSpec)
             elseif textSpec.name == "Bone_Surface" || textSpec.name == "Bone_Marrow"
                 textSpec.isVisible = true
@@ -517,7 +544,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         end
     end
     t_uniforms_ms = (time_ns() - t_total) / 1e6
-    println("  [BENCH-SL] uniforms+cross-tp: $(round(t_uniforms_ms, digits=1))ms"); flush(stdout)
+    if DEBUG_VERBOSE[]; println("  [BENCH-SL] uniforms+cross-tp: $(round(t_uniforms_ms, digits=1))ms"); flush(stdout); end
 
 
 
@@ -542,7 +569,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         (CartesianIndex{3}[], CartesianIndex{3}[])
     end
     t_bone_ms = (time_ns() - t_bone) / 1e6
-    println("  [BENCH-SL] bone_subseg: $(round(t_bone_ms, digits=1))ms (left=$(length(left_axial_surf))+$(length(left_axial_marr)), right=$(length(right_axial_surf))+$(length(right_axial_marr)))"); flush(stdout)
+    if DEBUG_VERBOSE[]; println("  [BENCH-SL] bone_subseg: $(round(t_bone_ms, digits=1))ms (left=$(length(left_axial_surf))+$(length(left_axial_marr)), right=$(length(right_axial_surf))+$(length(right_axial_marr)))"); flush(stdout); end
 
     # ── Per-panel: just remap orientations from pre-computed axial data ──
     t_panel = time_ns()
@@ -570,7 +597,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                     scrDat.dat[surf_indices] .= 1.0f0
                 end
                 last_bone_surf_indices[panel_idx] = surf_indices
-                println("  [BONE-DEBUG] Panel $panel_idx: Bone_Surface wrote $(length(surf_indices)) indices"); flush(stdout)
+                if DEBUG_VERBOSE[]; println("  [BONE-DEBUG] Panel $panel_idx: Bone_Surface wrote $(length(surf_indices)) indices"); flush(stdout); end
             elseif scrDat.name == "Bone_Marrow"
                 if haskey(last_bone_marr_indices, panel_idx) && !isempty(last_bone_marr_indices[panel_idx])
                     scrDat.dat[last_bone_marr_indices[panel_idx]] .= 0.0f0
@@ -579,12 +606,12 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                     scrDat.dat[marr_indices] .= 1.0f0
                 end
                 last_bone_marr_indices[panel_idx] = marr_indices
-                println("  [BONE-DEBUG] Panel $panel_idx: Bone_Marrow wrote $(length(marr_indices)) indices"); flush(stdout)
+                if DEBUG_VERBOSE[]; println("  [BONE-DEBUG] Panel $panel_idx: Bone_Marrow wrote $(length(marr_indices)) indices"); flush(stdout); end
             end
         end
     end
     t_panel_ms = (time_ns() - t_panel) / 1e6
-    println("  [BENCH-SL] panel_remap+write: $(round(t_panel_ms, digits=1))ms"); flush(stdout)
+    if DEBUG_VERBOSE[]; println("  [BENCH-SL] panel_remap+write: $(round(t_panel_ms, digits=1))ms"); flush(stdout); end
 
     t_scroll = time_ns()
     active_panel_indices = if compare_mode[] && length(stateObjects) >= 5
@@ -598,12 +625,16 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     panel_tp_cur = current_tp_index[]
     canonical_center = if data.lesion_id > 0
         if haskey(lesion_centroids_cache, (panel_tp_cur, data.lesion_id))
+            if DEBUG_VERBOSE[]; println("  [BENCH-SL] centroid cache: HIT (tp,lid)"); flush(stdout); end
             lesion_centroids_cache[(panel_tp_cur, data.lesion_id)]
         elseif haskey(lesion_centroids_cache, (get_node_name_for_tp(panel_tp_cur), data.lesion_id))
+            if DEBUG_VERBOSE[]; println("  [BENCH-SL] centroid cache: HIT (node,lid)"); flush(stdout); end
             lesion_centroids_cache[(get_node_name_for_tp(panel_tp_cur), data.lesion_id)]
         elseif haskey(lesion_centroids_cache, data.lesion_id)
+            if DEBUG_VERBOSE[]; println("  [BENCH-SL] centroid cache: HIT (lid only)"); flush(stdout); end
             lesion_centroids_cache[data.lesion_id]
         else
+            if DEBUG_VERBOSE[]; println("  [BENCH-SL] centroid cache: MISS — computing on-the-fly"); flush(stdout); end
             # on-the-fly centroid computation when not pre-cached
             cc = nothing
             for (si, stateObject) in enumerate(stateObjects)
@@ -624,7 +655,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     else
         nothing
     end
-    println("canonical_center=$canonical_center, active_panel_indices=$active_panel_indices"); flush(stdout)
+    if DEBUG_VERBOSE[]; println("canonical_center=$canonical_center, active_panel_indices=$active_panel_indices"); flush(stdout); end
 
     if canonical_center !== nothing
         for idx in active_panel_indices
@@ -668,7 +699,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             stateObjects[1].switchIndex = idx
             ReactToScroll.reactToScroll(0, stateObjects, false)
             changed = true
-            println("Synced active lesion $target_id at center $effective_center in panel $idx (slice $(stateObject.currentDisplayedSlice))"); flush(stdout)
+            if DEBUG_VERBOSE[]; println("Synced active lesion $target_id at center $effective_center in panel $idx (slice $(stateObject.currentDisplayedSlice))"); flush(stdout); end
         end
     else
         # No centroid: still re-render all active panels to show bone overlay
@@ -677,16 +708,16 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             ReactToScroll.reactToScroll(0, stateObjects, false)
             changed = true
         end
-        println("Synced active lesion $(data.lesion_id) (no centroid found) - bone overlay uploaded"); flush(stdout)
+        if DEBUG_VERBOSE[]; println("Synced active lesion $(data.lesion_id) (no centroid found) - bone overlay uploaded"); flush(stdout); end
     end
     for stateObject in stateObjects
         stateObject.mainForDisplayObjects.isSyncScrollOn = old_sync
     end
     stateObjects[1].switchIndex = old_idx
     t_scroll_ms = (time_ns() - t_scroll) / 1e6
-    println("  [BENCH-SL] centroid+scroll: $(round(t_scroll_ms, digits=1))ms"); flush(stdout)
+    if DEBUG_VERBOSE[]; println("  [BENCH-SL] centroid+scroll: $(round(t_scroll_ms, digits=1))ms"); flush(stdout); end
     t_total_ms = (time_ns() - t_total) / 1e6
-    println("  [BENCH-SL] SYNC LESION TOTAL: $(round(t_total_ms, digits=1))ms"); flush(stdout)
+    @info "[BENCH] Next/Prev Lesion (OpenGL Sync) Total: $(round(t_total_ms, digits=1))ms"
     return changed
 end
 
@@ -698,6 +729,7 @@ mutable struct TpCacheEntry
     mask::Union{Array{Int8,3}, Array{Int16,3}}
     bone_surf::BitArray{3}
     bone_marr::BitArray{3}
+    anatomy::Union{Nothing, Array{UInt16,3}}  # max_anatomy atlas per-TP (UInt16, 163MB)
 end
 
 const tp_data_cache = Dict{Int, TpCacheEntry}()
@@ -821,8 +853,10 @@ end
 function get_existing_bone_array(stateObject, name)
     for scrDat in stateObject.onScrollData.dataToScroll
         if scrDat.name == name
-            # Return the base array (un-permute if necessary)
-            return scrDat.dat isa PermutedDimsArray ? parent(scrDat.dat) : scrDat.dat
+            # Return the base array (un-permute if necessary) and zero it out
+            arr = scrDat.dat isa PermutedDimsArray ? parent(scrDat.dat) : scrDat.dat
+            fill!(arr, 0.0f0)
+            return arr
         end
     end
     # Fallback (should never happen)
@@ -837,6 +871,10 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx;
         return
     end
     
+    # New data arrays → old bone overlay indices are stale
+    delete!(last_bone_surf_indices, panel_idx)
+    delete!(last_bone_marr_indices, panel_idx)
+    
     # Convert compact types to Float32 only if not pre-supplied
     if mask_f32 === nothing
         mask_f32 = Float32.(entry.mask)
@@ -847,25 +885,46 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx;
     if bone_m_f32 === nothing
         bone_m_f32 = Float32.(entry.bone_marr)
     end
+    anat_f32 = entry.anatomy !== nothing ? Float32.(entry.anatomy) : zeros(Float32, size(entry.ct))
     
-    # Use PermutedDimsArray for zero-copy views
+    # Use PermutedDimsArray for zero-copy views on CT/PET/Mask/Anatomy,
+    # but bone arrays MUST be independent per-panel: reactToSyncLesion writes
+    # bone subseg indices per-panel in panel-specific coordinate systems,
+    # so shared arrays get polluted by cross-panel writes (causing doubling).
+    
+    function get_or_create_bone(panel_idx, name, req_size)
+        arr = get_existing_bone_array(stateObjects[panel_idx], name)
+        if arr !== nothing && size(arr) == req_size
+            fill!(arr, 0.0f0)
+            return arr
+        end
+        return zeros(Float32, req_size)
+    end
+
     panel_voxels = if panel_idx == 3  # Sagittal (Y,Z,X)
+        sz = (size(entry.ct, 2), size(entry.ct, 3), size(entry.ct, 1))
         Any[("CT", PermutedDimsArray(entry.ct, (2,3,1))),
             ("PET", PermutedDimsArray(entry.pet, (2,3,1))),
             ("Mask", PermutedDimsArray(mask_f32, (2,3,1))),
-            ("Bone_Surface", PermutedDimsArray(bone_s_f32, (2,3,1))),
-            ("Bone_Marrow", PermutedDimsArray(bone_m_f32, (2,3,1)))]
+            ("Bone_Surface", get_or_create_bone(panel_idx, "Bone_Surface", sz)),
+            ("Bone_Marrow", get_or_create_bone(panel_idx, "Bone_Marrow", sz)),
+            ("Anatomy", PermutedDimsArray(anat_f32, (2,3,1)))]
     elseif panel_idx == 4  # Coronal (X,Z,Y)
+        sz = (size(entry.ct, 1), size(entry.ct, 3), size(entry.ct, 2))
         Any[("CT", PermutedDimsArray(entry.ct, (1,3,2))),
             ("PET", PermutedDimsArray(entry.pet, (1,3,2))),
             ("Mask", PermutedDimsArray(mask_f32, (1,3,2))),
-            ("Bone_Surface", PermutedDimsArray(bone_s_f32, (1,3,2))),
-            ("Bone_Marrow", PermutedDimsArray(bone_m_f32, (1,3,2)))]
+            ("Bone_Surface", get_or_create_bone(panel_idx, "Bone_Surface", sz)),
+            ("Bone_Marrow", get_or_create_bone(panel_idx, "Bone_Marrow", sz)),
+            ("Anatomy", PermutedDimsArray(anat_f32, (1,3,2)))]
     elseif panel_idx == 2  # PET-only
         Any[("PET", entry.pet)]
-    else  # Axial (panels 1, 5)
+    else  # Axial (panels 1, 5) — each gets its own copy
+        sz = size(entry.ct)
         Any[("CT", entry.ct), ("PET", entry.pet), ("Mask", mask_f32),
-            ("Bone_Surface", bone_s_f32), ("Bone_Marrow", bone_m_f32)]
+            ("Bone_Surface", get_or_create_bone(panel_idx, "Bone_Surface", sz)),
+            ("Bone_Marrow", get_or_create_bone(panel_idx, "Bone_Marrow", sz)),
+            ("Anatomy", anat_f32)]
     end
     
     # Insert manualModif at index 2 — reuse existing buffer from stateObject when possible
@@ -926,7 +985,8 @@ const global_bone_atlas = Ref{Any}(nothing)
 const global_organ_mapping = Ref{Dict{Int,String}}(Dict{Int,String}())  # lesion_id -> TS organ name (from map_lesions_to_organs)
 const current_tp_index = Ref(0)
 const tp_labels = Dict{Int, String}()  # tp_index -> display label (e.g. "PET TP0")
-const tp_descriptions = Dict{Int, String}() # tp_index -> radiological description
+const tp_descriptions = Dict{Int, String}() # tp_index -> radiological description (German)
+const tp_english_descriptions = Dict{Int, String}() # tp_index -> English radiological description
 
 # PET volume per TP for SUV computation: tp_index -> 3D Float32 array (axial orientation, Y-reversed)
 const pet_volumes_cache = Dict{Int, Array{Float32, 3}}()
@@ -943,10 +1003,12 @@ const tp_modalities = Dict{Int, String}()
 const current_pet_blend = Ref(1.0f0)
 # Total axial slices for edge-slice artefact detection
 const volume_z_size = Ref(0)
+# Per-TP anatomy labels: tp_index → Dict{Int,String} for cursor readout
+const anatomy_labels_cache = Dict{Int, Dict{Int,String}}()
 
-export tp_data_cache, bone_subsegments_cache, lesion_centroids_cache, global_bone_atlas, global_organ_mapping, current_tp_index, tp_labels, tp_descriptions
-export compare_mode, compare_right_tp
-export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, h5_path_ref, tp_modalities, volume_z_size
+export tp_data_cache, bone_subsegments_cache, lesion_centroids_cache, global_bone_atlas, global_organ_mapping, current_tp_index, tp_labels, tp_descriptions, tp_english_descriptions
+export compare_mode, compare_right_tp, get_node_name_for_tp, tp_node_names
+export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, h5_path_ref, tp_modalities, volume_z_size, anatomy_labels_cache
 
 
 function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector{StateDataFields})
@@ -979,7 +1041,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         t_load = @elapsed begin
             entry_left = get_or_load_tp_data(new_tp)
         end
-        println("  [BENCH] get_or_load_tp_data(left): $(round(t_load, digits=3))s"); flush(stdout)
+        if DEBUG_VERBOSE[]; println("  [BENCH] get_or_load_tp_data(left): $(round(t_load, digits=3))s"); flush(stdout); end
         
         t_panel_left = @elapsed begin
             if entry_left !== nothing
@@ -990,7 +1052,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
                 _load_tp_from_entry!(stateObjects, entry_left, 1; mask_f32=lm, bone_s_f32=ls, bone_m_f32=lmr)
             end
         end
-        println("  [BENCH] _load_tp_from_entry!(left): $(round(t_panel_left*1000, digits=1))ms"); flush(stdout)
+        if DEBUG_VERBOSE[]; println("  [BENCH] _load_tp_from_entry!(left): $(round(t_panel_left*1000, digits=1))ms"); flush(stdout); end
         
         # Right panel: next TP chronologically
         next_pos = mod1(new_pos + 1, num_tps)
@@ -1000,7 +1062,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         t_load_r = @elapsed begin
             entry_right = get_or_load_tp_data(right_tp)
         end
-        println("  [BENCH] get_or_load_tp_data(right): $(round(t_load_r, digits=3))s"); flush(stdout)
+        if DEBUG_VERBOSE[]; println("  [BENCH] get_or_load_tp_data(right): $(round(t_load_r, digits=3))s"); flush(stdout); end
         
         t_panel_right = @elapsed begin
             if entry_right !== nothing
@@ -1011,7 +1073,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
                 _load_tp_from_entry!(stateObjects, entry_right, 5; mask_f32=rm, bone_s_f32=rs, bone_m_f32=rmr)
             end
         end
-        println("  [BENCH] _load_tp_from_entry!(right): $(round(t_panel_right*1000, digits=1))ms"); flush(stdout)
+        if DEBUG_VERBOSE[]; println("  [BENCH] _load_tp_from_entry!(right): $(round(t_panel_right*1000, digits=1))ms"); flush(stdout); end
         
         # Re-render both panels
         t_render = @elapsed begin
@@ -1022,7 +1084,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
             ReactToScroll.reactToScroll(0, stateObjects, false)
             stateObjects[1].switchIndex = old_idx
         end
-        println("  [BENCH] reactToScroll ×2: $(round(t_render*1000, digits=1))ms"); flush(stdout)
+        if DEBUG_VERBOSE[]; println("  [BENCH] reactToScroll ×2: $(round(t_render*1000, digits=1))ms"); flush(stdout); end
         
         # Re-apply bone overlay for active lesion after TP data replacement
         if current_active_lesion_id[] > 0
@@ -1036,20 +1098,20 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         t_load = @elapsed begin
         entry = get_or_load_tp_data(new_tp)
         end
-        println("  [BENCH] get_or_load_tp_data: $(round(t_load*1000, digits=1))ms (cached=$(haskey(tp_data_cache, new_tp)))"); flush(stdout)
+        if DEBUG_VERBOSE[]; println("  [BENCH] get_or_load_tp_data: $(round(t_load*1000, digits=1))ms (cached=$(haskey(tp_data_cache, new_tp)))"); flush(stdout); end
         
         if entry !== nothing
             # Pre-convert arrays ONCE for all panels
             t_convert = @elapsed begin
                 mask_f32 = Float32.(entry.mask)
             end
-            println("  [BENCH] Float32(mask): $(round(t_convert*1000, digits=1))ms ($(size(entry.mask)) $(eltype(entry.mask)))"); flush(stdout)
+            if DEBUG_VERBOSE[]; println("  [BENCH] Float32(mask): $(round(t_convert*1000, digits=1))ms ($(size(entry.mask)) $(eltype(entry.mask)))"); flush(stdout); end
             
             t_bone_convert = @elapsed begin
                 bone_s_f32 = get_existing_bone_array(stateObjects[1], "Bone_Surface")
                 bone_m_f32 = get_existing_bone_array(stateObjects[1], "Bone_Marrow")
             end
-            println("  [BENCH] Extract existing bone_surf+marr arrays: $(round(t_bone_convert*1000, digits=1))ms"); flush(stdout)
+            if DEBUG_VERBOSE[]; println("  [BENCH] Extract existing bone_surf+marr arrays: $(round(t_bone_convert*1000, digits=1))ms"); flush(stdout); end
             
             t_panels = @elapsed begin
                 for i in [1, 2, 3, 4]
@@ -1063,7 +1125,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
                         mask_f32=mask_f32, bone_s_f32=bone_s_f32, bone_m_f32=bone_m_f32)
                 end
             end
-            println("  [BENCH] _load_tp_from_entry! ×panels: $(round(t_panels*1000, digits=1))ms"); flush(stdout)
+            if DEBUG_VERBOSE[]; println("  [BENCH] _load_tp_from_entry! ×panels: $(round(t_panels*1000, digits=1))ms"); flush(stdout); end
             
             # Re-render all panels (uploads base images)
             t_render = @elapsed begin
@@ -1074,9 +1136,11 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
                 end
                 stateObjects[1].switchIndex = old_idx
             end
-            println("  [BENCH] reactToScroll ×panels: $(round(t_render*1000, digits=1))ms"); flush(stdout)
+            if DEBUG_VERBOSE[]; println("  [BENCH] reactToScroll ×panels: $(round(t_render*1000, digits=1))ms"); flush(stdout); end
             
             # Re-apply bone overlay + navigate to active lesion (or lesion 1 if none)
+            empty!(last_bone_surf_indices)
+            empty!(last_bone_marr_indices)
             t_bone_overlay = @elapsed begin
                 lid = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
                 try
@@ -1086,7 +1150,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
                     println("WARNING: Failed to sync Lesion $lid on TP change: $e"); flush(stdout)
                 end
             end
-            println("  [BENCH] bone overlay (reactToSyncLesion): $(round(t_bone_overlay*1000, digits=1))ms"); flush(stdout)
+            if DEBUG_VERBOSE[]; println("  [BENCH] bone overlay (reactToSyncLesion): $(round(t_bone_overlay*1000, digits=1))ms"); flush(stdout); end
         end
     end
     # Dispatch eviction + preload to IO channel (non-blocking)
@@ -1107,7 +1171,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
     if !isempty(evict_tps) || !isempty(preload_tps)
         put!(io_channel[], EvictAndPreloadMessage(evict_tps, preload_tps))
     end
-    println("  [BENCH] IO dispatched: evict=$(evict_tps), preload=$(preload_tps)"); flush(stdout)
+    if DEBUG_VERBOSE[]; println("  [BENCH] IO dispatched: evict=$(evict_tps), preload=$(preload_tps)"); flush(stdout); end
     
     # SUV precompute + CT Docker preload: fire-and-forget in background (non-blocking)
     let tp_for_bg = new_tp, label_for_bg = label
@@ -1140,7 +1204,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
     end
     
     t_total_ms = (time_ns() - t_total) / 1e6
-    println("  [BENCH] TP SWITCH TOTAL: $(round(t_total_ms, digits=1))ms"); flush(stdout)
+    @info "[BENCH] Next/Prev TP Total: $(round(t_total_ms, digits=1))ms"
 end
 
 function reactToToggleLesion(data::ToggleLesionEvent, stateObjects::Vector{StateDataFields})
@@ -1612,6 +1676,8 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
         "Bone_Surface"
     elseif data.layer == 3
         "Bone_Marrow"
+    elseif data.layer == 4
+        "Anatomy"
     else
         ""
     end
