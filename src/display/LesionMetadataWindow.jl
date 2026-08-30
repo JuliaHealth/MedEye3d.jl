@@ -559,9 +559,8 @@ function compute_background_suvs(pet_vol::AbstractArray{Float32, 3},
     result = Dict{String, Float32}("liver" => 0.0f0, "parotid" => 0.0f0, "blood" => 0.0f0)
     target_keywords = Dict("liver" => ["liver"],
                            "parotid" => ["parotid"],
-                           "blood" => ["vena_cava", "aorta", "blood"])
+                           "blood" => ["vena_cava", "aorta", "blood", "heart"])
     
-    # Find TS label IDs for reference organs
     organ_labels = Dict{String, Vector{Int}}("liver" => Int[], "parotid" => Int[], "blood" => Int[])
     for (label_id, name) in ts_names
         name_low = lowercase(name)
@@ -572,30 +571,98 @@ function compute_background_suvs(pet_vol::AbstractArray{Float32, 3},
         end
     end
     
-    # Handle atlas size mismatch (resample via nearest neighbor)
-    needs_scale = size(ts_atlas) != size(pet_vol)
-    sx = needs_scale ? size(ts_atlas, 1) / size(pet_vol, 1) : 1.0
-    sy = needs_scale ? size(ts_atlas, 2) / size(pet_vol, 2) : 1.0
-    sz = needs_scale ? size(ts_atlas, 3) / size(pet_vol, 3) : 1.0
-    
+    label_to_organ = Dict{Int, String}()
     for (organ_key, label_ids) in organ_labels
-        isempty(label_ids) && continue
-        label_set = Set(label_ids)
-        total_val = 0.0
-        count = 0
-        # Sample: iterate PET voxels, look up TS atlas label
-        for z in 1:size(pet_vol, 3), y in 1:size(pet_vol, 2), x in 1:size(pet_vol, 1)
-            ax = needs_scale ? clamp(round(Int, x * sx), 1, size(ts_atlas, 1)) : x
-            ay = needs_scale ? clamp(round(Int, y * sy), 1, size(ts_atlas, 2)) : y
-            az = needs_scale ? clamp(round(Int, z * sz), 1, size(ts_atlas, 3)) : z
-            ts_val = Int(ts_atlas[ax, ay, az])
-            if ts_val in label_set
-                total_val += pet_vol[x, y, z]
-                count += 1
+        for lid in label_ids
+            label_to_organ[lid] = organ_key
+        end
+    end
+    
+    # 1. Collect coords in TS space in ONE fast pass
+    pts_dict = Dict{String, Vector{CartesianIndex{3}}}("liver" => [], "parotid" => [], "blood" => [])
+    for i in CartesianIndices(ts_atlas)
+        val = Int(ts_atlas[i])
+        if val > 0 && haskey(label_to_organ, val)
+            push!(pts_dict[label_to_organ[val]], i)
+        end
+    end
+    
+    needs_scale = size(ts_atlas) != size(pet_vol)
+    sx = needs_scale ? size(pet_vol, 1) / size(ts_atlas, 1) : 1.0
+    sy = needs_scale ? size(pet_vol, 2) / size(ts_atlas, 2) : 1.0
+    sz = needs_scale ? size(pet_vol, 3) / size(ts_atlas, 3) : 1.0
+    
+    for (organ_key, pts) in pts_dict
+        isempty(pts) && continue
+        kept_pts = CartesianIndex{3}[]
+        
+        if organ_key == "blood"
+            z_vals = [p[3] for p in pts]
+            z_min, z_max = minimum(z_vals), maximum(z_vals)
+            # Center 1/3 of the blood vessel (descending aorta) or heart
+            z_start = round(Int, z_min + (z_max - z_min)/3)
+            z_end = round(Int, z_max - (z_max - z_min)/3)
+            
+            z_groups = Dict{Int, Vector{CartesianIndex{3}}}()
+            for p in pts
+                if z_start <= p[3] <= z_end
+                    push!(get!(z_groups, p[3], CartesianIndex{3}[]), p)
+                end
+            end
+            
+            # For each slice, grab exactly the 1cm center (radius ~4-6mm)
+            for (z, z_pts) in z_groups
+                cx = sum(p[1] for p in z_pts) / length(z_pts)
+                cy = sum(p[2] for p in z_pts) / length(z_pts)
+                for p in z_pts
+                    if (p[1] - cx)^2 + (p[2] - cy)^2 <= 16
+                        push!(kept_pts, p)
+                    end
+                end
+            end
+            
+        elseif organ_key == "liver"
+            # Sphere radius 30mm directly in the centroid of the liver
+            cx = sum(p[1] for p in pts) / length(pts)
+            cy = sum(p[2] for p in pts) / length(pts)
+            cz = sum(p[3] for p in pts) / length(pts)
+            for p in pts
+                if (p[1] - cx)^2 + (p[2] - cy)^2 + (p[3] - cz)^2 <= 625
+                    push!(kept_pts, p)
+                end
+            end
+            
+        elseif organ_key == "parotid"
+            # Separate left and right, take center of each
+            cx_all = sum(p[1] for p in pts) / length(pts)
+            left_pts = [p for p in pts if p[1] < cx_all]
+            right_pts = [p for p in pts if p[1] >= cx_all]
+            
+            for sub_pts in (left_pts, right_pts)
+                if !isempty(sub_pts)
+                    cx = sum(p[1] for p in sub_pts) / length(sub_pts)
+                    cy = sum(p[2] for p in sub_pts) / length(sub_pts)
+                    cz = sum(p[3] for p in sub_pts) / length(sub_pts)
+                    for p in sub_pts
+                        if (p[1] - cx)^2 + (p[2] - cy)^2 + (p[3] - cz)^2 <= 9
+                            push!(kept_pts, p)
+                        end
+                    end
+                end
             end
         end
-        if count > 0
-            result[organ_key] = Float32(total_val / count)
+        
+        # 2. Average in PET space
+        total_val = 0.0
+        for p in kept_pts
+            px = needs_scale ? clamp(round(Int, p[1] * sx), 1, size(pet_vol, 1)) : p[1]
+            py = needs_scale ? clamp(round(Int, p[2] * sy), 1, size(pet_vol, 2)) : p[2]
+            pz = needs_scale ? clamp(round(Int, p[3] * sz), 1, size(pet_vol, 3)) : p[3]
+            total_val += pet_vol[px, py, pz]
+        end
+        
+        if !isempty(kept_pts)
+            result[organ_key] = Float32(total_val / length(kept_pts))
         end
     end
     return result
@@ -1084,7 +1151,7 @@ function create_metadata_window(
         channel::Base.Channel;
         save_path::String = DEFAULT_SAVE_PATH,
         ui_hooks::Dict{Symbol, Observable} = Dict{Symbol, Observable}())
-
+    local _build_match_display!
     schema   = load_schema()
     radlex   = load_radlex()
     anatomy_ontology = load_anatomy_ontology()  # FoundationalAnatomy labels for Base Anatomy autocomplete
@@ -1408,16 +1475,18 @@ function create_metadata_window(
         if cv_active[]
             right_idx = _MEH.compare_right_tp[]
             right_label = get(_MEH.tp_labels, right_idx, "TP $right_idx")
-            tp_status[] = "L:$label | R:$right_label"
+            put!(channel, SetWindowTitleEvent("MedEye3d - Compare: L [$label]  |  R [$right_label]"))
         else
-            tp_status[] = label
+            put!(channel, SetWindowTitleEvent("MedEye3d - Viewing: $label"))
         end
     end
-    on(btn_pt.clicks) do _; @async (sleep(0.08); update_tp_label()) end
-    on(btn_nt.clicks) do _; @async (sleep(0.08); update_tp_label()) end
-    on(btn_cv.clicks) do _; @async (sleep(0.08); update_tp_label()) end
+    on(_MEH.tp_switched) do _
+        update_tp_label()
+        if cv_active[]
+            _build_match_display!()
+        end
+    end
     update_tp_label()
-    @async (sleep(0.2); update_tp_label())
 
     # Merged overlay/single/all/refresh into one compact row
     vc2_r = nr!()
@@ -2180,7 +2249,6 @@ end_section!(sec_win)
         end
     end
     local sec_map_lesions
-    local _build_match_display!
     # Auto-hide metadata, segmentation, radlex, custom sections in Compare mode
     on(btn_cv.clicks) do _
         t_start = time_ns()
@@ -2652,6 +2720,7 @@ end_section!(sec_win)
     end
     function apply_global_state(gst::AbstractDict)
         _is_applying_state[] = true
+        is_syncing_selection[] = true
         try
             # Apply Windowing
             if haskey(gst, "CT_Min") && haskey(gst, "CT_Max")
@@ -2711,16 +2780,19 @@ end_section!(sec_win)
             @warn "Failed to apply global state: $e"
         finally
             _is_applying_state[] = false
+            is_syncing_selection[] = false
         end
     end
 
     function apply_state(data::AbstractDict)
         _is_applying_state[] = true
+        is_syncing_selection[] = true
         try
             cur_id_str = active_lesion_id[]
-        cp = findfirst(':', cur_id_str)
-        ns = cp !== nothing ? strip(cur_id_str[1:cp-1]) : cur_id_str
-        lid = (p = tryparse(Int, ns)) !== nothing ? p : 1
+            db_updates = Dict{String, Any}()
+            cp = findfirst(':', cur_id_str)
+            ns = cp !== nothing ? strip(cur_id_str[1:cp-1]) : cur_id_str
+            lid = (p = tryparse(Int, ns)) !== nothing ? p : 1
 
         t_type = if haskey(data, "LesionType")
             data["LesionType"]
@@ -2858,11 +2930,9 @@ end_section!(sec_win)
                         field_widgets["Certainty"].i_selected[] = idx
                     end
                 end
-                # Persist in db
-                db = copy(lesion_db[]); ld_edge = copy(get(db, active_lesion_id[], Dict{String,Any}()))
-                ld_edge["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
-                ld_edge["Certainty"] = "0"
-                db[active_lesion_id[]] = ld_edge; lesion_db[] = db
+                # Persist in db_updates
+                db_updates["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
+                db_updates["Certainty"] = "0"
                 @info "Edge-slice artefact: lesion $lid z=$z_slice/$total_z → Technical Artifact, Certainty=0"
             end
         end
@@ -3036,13 +3106,8 @@ end_section!(sec_win)
             if haskey(field_widgets, "Lesion tracking name?") && field_widgets["Lesion tracking name?"] isa Textbox
                 field_widgets["Lesion tracking name?"].stored_string[] = tracking_name
             end
-            # Also store in db so it persists
-            db = copy(lesion_db[])
-            ld = get(db, active_lesion_id[], Dict{String,String}())
-            ld = copy(ld)
-            ld["Lesion tracking name?"] = tracking_name
-            db[active_lesion_id[]] = ld
-            lesion_db[] = db
+            # Also store in db_updates so it persists
+            db_updates["Lesion tracking name?"] = tracking_name
         end
         
         # ── Auto-fill SUV max ─────────────────────────────────────────────
@@ -3059,12 +3124,7 @@ end_section!(sec_win)
                         field_widgets["SUV max"].stored_string[] = suv_str
                     end
                     # Persist
-                    db = copy(lesion_db[])
-                    ld = get(db, active_lesion_id[], Dict{String,String}())
-                    ld = copy(ld)
-                    ld["SUV max"] = suv_str
-                    db[active_lesion_id[]] = ld
-                    lesion_db[] = db
+                    db_updates["SUV max"] = suv_str
                 end
             catch e
                 @warn "Auto-SUV computation failed for lesion $lid: $e"
@@ -3103,14 +3163,9 @@ end_section!(sec_win)
             
             # Store volume in metadata
             if vol_cc > 0
-                db = copy(lesion_db[])
-                ld = get(db, active_lesion_id[], Dict{String,String}())
-                ld = copy(ld)
-                ld["_Volume_mm3"] = string(round(vol_mm3, digits=1))
-                ld["_Volume_cc"] = string(round(vol_cc, digits=3))
-                ld["_Diameter_mm"] = string(round(diameter, digits=1))
-                db[active_lesion_id[]] = ld
-                lesion_db[] = db
+                db_updates["_Volume_mm3"] = string(round(vol_mm3, digits=1))
+                db_updates["_Volume_cc"] = string(round(vol_cc, digits=3))
+                db_updates["_Diameter_mm"] = string(round(diameter, digits=1))
             end
             
             # Match analysis (cross-TP comparison)
@@ -3120,21 +3175,16 @@ end_section!(sec_win)
                 lbl_match_analysis.text[] = analysis_str
                 
                 # Persist match analysis to metadata
-                db = copy(lesion_db[])
-                ld = get(db, active_lesion_id[], Dict{String,String}())
-                ld = copy(ld)
-                ld["_MatchGroup"] = string(analysis.group_id)
-                ld["_RECIP"] = analysis.recip_category
+                db_updates["_MatchGroup"] = string(analysis.group_id)
+                db_updates["_RECIP"] = analysis.recip_category
                 if analysis.baseline_volume_cc > 0.001
-                    ld["_VolDelta_pct"] = string(round(analysis.volume_delta_pct, digits=1))
-                    ld["_VolDelta_cc"] = string(round(analysis.volume_delta_abs_cc, digits=3))
+                    db_updates["_VolDelta_pct"] = string(round(analysis.volume_delta_pct, digits=1))
+                    db_updates["_VolDelta_cc"] = string(round(analysis.volume_delta_abs_cc, digits=3))
                 end
                 if analysis.baseline_suv_max > 0.1f0
-                    ld["_SUVDelta"] = string(round(analysis.suv_delta_abs, digits=1))
-                    ld["_SUVDelta_pct"] = string(round(analysis.suv_delta_pct, digits=1))
+                    db_updates["_SUVDelta"] = string(round(analysis.suv_delta_abs, digits=1))
+                    db_updates["_SUVDelta_pct"] = string(round(analysis.suv_delta_pct, digits=1))
                 end
-                db[active_lesion_id[]] = ld
-                lesion_db[] = db
             else
                 # No match group — just show volume
                 if vol_cc > 0
@@ -3240,8 +3290,20 @@ end_section!(sec_win)
         
         target_rpt = get(data, "RadiologicalReportOutput", "")
         _set_tb_val!(rpt_tb, target_rpt)
+        
+        # ── Single batch commit for all metadata updates ──────────────────
+        if !isempty(db_updates)
+            db = copy(lesion_db[])
+            cur_ld = copy(get(db, active_lesion_id[], Dict{String,Any}()))
+            for (k, v) in db_updates
+                cur_ld[k] = v
+            end
+            db[active_lesion_id[]] = cur_ld
+            lesion_db[] = db
+        end
         finally
             _is_applying_state[] = false
+            is_syncing_selection[] = false
         end
     end
 
@@ -3258,7 +3320,7 @@ end_section!(sec_win)
         @info "[TIMING] apply_state: $(round((time_ns()-t_cb)/1e6, digits=1))ms for $id"
         
         # Refresh Map Lesions lists to track the newly selected lesion
-        if cv_active[]
+        if cv_active[] && sec_map_lesions[1][]
             try
                 cp_id = findfirst(':', id)
                 ns_id = cp_id !== nothing ? strip(id[1:cp_id-1]) : id

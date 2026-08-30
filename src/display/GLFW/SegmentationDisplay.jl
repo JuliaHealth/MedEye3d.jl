@@ -795,18 +795,45 @@ function coordinateDisplay(
                         if !shouldStop[1]
                             glClear(GL_COLOR_BUFFER_BIT)
                             for state in stateInstances
+                                # Skip hidden panels (panels with all-zero or empty quad vertices)
+                                if state.calcDimsStruct.mainQuadVertSize <= 0 || all(state.calcDimsStruct.mainImageQuadVert .== 0.0f0)
+                                    continue
+                                end
+                                # Safety: don't draw panels with uninitialized textures
+                                if state.currentlyDispDat.sliceNumber == 0
+                                    continue
+                                end
+
                                 # Rebind main VAO before each panel render - crosshair rendering
                                 # switches to a different VAO which corrupts subsequent panel draws
                                 glBindVertexArray(vao[])
                                 
-                                # draw text
-                                activateForTextDisp(state.textDispObj.shader_program_words, state.textDispObj.vbo_words, state.calcDimsStruct)
-                                glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+                                # Draw text ONLY on panel 1 if sidebar space is allocated (fractionOfMainIm < 1.0)
+                                if state.calcDimsStruct.fractionOfMainIm < 1.0f0 && state.imagePosition == 1 && state.textDispObj.textureSpec.ID[] != 0 && state.calcDimsStruct.wordsQuadVertSize > 0 && !all(state.calcDimsStruct.wordsImageQuadVert .== 0.0f0)
+                                    activateForTextDisp(state.textDispObj.shader_program_words, state.textDispObj.vbo_words, state.calcDimsStruct)
+                                    glActiveTexture(state.textDispObj.textureSpec.actTextrureNumb)
+                                    glBindTexture(GL_TEXTURE_2D, state.textDispObj.textureSpec.ID[])
+                                    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+                                end
                                 
-                                # draw main
-                                reactivateMainObj(state.mainForDisplayObjects.shader_program, state.mainForDisplayObjects.vbo, state.calcDimsStruct)
-                                activateTextures(state.mainForDisplayObjects.listOfTextSpecifications)
-                                glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+                                # Draw main panel
+                                if state.mainForDisplayObjects.shader_program != 0 && state.mainForDisplayObjects.vbo != 0 && state.calcDimsStruct.mainQuadVertSize > 0
+                                    # Safety: verify ALL texture IDs are valid before drawing
+                                    all_textures_valid = true
+                                    for texSpec in state.mainForDisplayObjects.listOfTextSpecifications
+                                        if texSpec.ID[] == 0
+                                            all_textures_valid = false
+                                            break
+                                        end
+                                    end
+                                    if all_textures_valid
+                                        reactivateMainObj(state.mainForDisplayObjects.shader_program, state.mainForDisplayObjects.vbo, state.calcDimsStruct)
+                                        # Re-bind EBO within VAO context to ensure indices are available
+                                        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo[])
+                                        activateTextures(state.mainForDisplayObjects.listOfTextSpecifications)
+                                        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
+                                    end
+                                end
                             end
                             GLFW.SwapBuffers(window)
                             glFlush()

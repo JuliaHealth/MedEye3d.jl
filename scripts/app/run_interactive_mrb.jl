@@ -70,31 +70,8 @@ textureSpecArray = Vector{Vector{TextureSpec}}([
     TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow), deepcopy(textureSpec_anatomy)]
 ])
 
-# ── Hi-resolution display: resample to half in-plane spacing ─────────────
-# Doubles X,Y resolution while keeping Z unchanged (4x memory per volume)
-const HIRES_FACTOR = 2.0  # 2.0 = double resolution, 1.0 = native
-
-"""
-    hires_resample(vol::Array{Float32,3}, native_sp, half_sp, interp) -> Array{Float32,3}
-
-Resample a Float32 3D volume from `native_sp` to `half_sp` using MedImages.
-`interp` is MedImages.Linear_en for CT/PET or MedImages.Nearest_neighbour_en for masks.
-"""
-function hires_resample(vol::Array{Float32,3}, native_sp::Tuple{Float64,Float64,Float64},
-                        half_sp::Tuple{Float64,Float64,Float64}, interp)
-    if HIRES_FACTOR <= 1.0
-        return vol
-    end
-    dummy_origin = (0.0, 0.0, 0.0)
-    dummy_dir = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
-    im = MedImage(voxel_data=vol, spacing=native_sp, origin=dummy_origin,
-                  direction=dummy_dir,
-                  image_type=MedImages.MedImage_data_struct.MRI_type,
-                  image_subtype=MedImages.MedImage_data_struct.CT_subtype,
-                  patient_id="hires")
-    resampled = MedImages.resample_to_spacing(im, half_sp, interp)
-    return Float32.(resampled.voxel_data)
-end
+# Native resolution rendering: OpenGL hardware filters textures smoothly on GPU (zero memory/CPU overhead)
+const HIRES_FACTOR = 1.0
 
 # To hold all TP data
 all_tps_data = Dict{Int, Vector{Vector{Any}}}()
@@ -130,13 +107,6 @@ function load_tp(ct_path, pet_path, mask_path, tfm_path, modality)
     ct_vol_base = reverse(ct_vol, dims=2)
     pet_vol_base = reverse(pet_vol, dims=2)
     mask_vol_base = reverse(mask_vol, dims=2)
-
-    # Hi-res resample
-    native_sp = Tuple(Float64.(baseline_ct.spacing))
-    disp_sp = (native_sp[1] / HIRES_FACTOR, native_sp[2] / HIRES_FACTOR, native_sp[3])
-    ct_vol_base = hires_resample(ct_vol_base, native_sp, disp_sp, MedImages.Linear_en)
-    pet_vol_base = hires_resample(pet_vol_base, native_sp, disp_sp, MedImages.Linear_en)
-    mask_vol_base = hires_resample(mask_vol_base, native_sp, disp_sp, MedImages.Nearest_neighbour_en)
 
     vol_img_axial = ct_vol_base
     vol_pet_axial = pet_vol_base
@@ -197,13 +167,13 @@ if isfile(preprocessed_h5)
     base_mask_fname = studies[1][6]
     global first_spacing = Tuple(Float64.(read(HDF5.attributes(h5_init["BASELINE/$base_ct_fname"])["spacing"])))
     
-    # Compute display spacing (halved in-plane for hi-res)
-    display_spacing = (first_spacing[1] / HIRES_FACTOR, first_spacing[2] / HIRES_FACTOR, first_spacing[3])
-    println("Native spacing: $first_spacing → Display spacing: $display_spacing ($(HIRES_FACTOR)x)")
+    # Native resolution display spacing (smooth interpolation is handled by GPU hardware in OpenGL)
+    display_spacing = first_spacing
+    println("Native spacing: $first_spacing")
     
-    global first_mask = reverse(Float32.(read(h5_init["BASELINE/$base_mask_fname"])), dims=2)
-    # Resample first_mask to display resolution for centroid/organ mapping later
-    first_mask = hires_resample(first_mask, first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
+    is_preflipped_init = haskey(h5_init, "_meta_/preflipped") && read(h5_init["_meta_/preflipped"]) == 1
+    raw_first_mask = read(h5_init["BASELINE/$base_mask_fname"])
+    global first_mask = is_preflipped_init ? Float32.(raw_first_mask) : reverse(Float32.(raw_first_mask), dims=2)
     first_mask_base = first_mask
     close(h5_init)
     
@@ -219,14 +189,7 @@ if isfile(preprocessed_h5)
         HDF5.h5open(preprocessed_h5, "r") do h5_file
             # Check if volumes were pre-flipped during preprocessing
             is_preflipped = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
-            
-            # Try pre-resampled display-resolution group first
-            display_group = group * "_DISPLAY"
-            use_display = haskey(h5_file, display_group) && 
-                          haskey(h5_file[display_group], ct_fname) &&
-                          haskey(h5_file[display_group], pet_fname) &&
-                          haskey(h5_file[display_group], mask_fname)
-            src_group = use_display ? display_group : group
+            src_group = group
             
             t_read = @elapsed begin
                 ct_vol = Float32.(read(h5_file["$src_group/$ct_fname"]))
@@ -242,9 +205,8 @@ if isfile(preprocessed_h5)
                 pet_vol = max.(0.0f0, pet_vol .* scale_factor)
             end
             
-            # Reverse is needed unless reading from pre-flipped DISPLAY group
-            # (Native groups are NEVER pre-flipped, only DISPLAY groups are)
-            needs_reverse = !is_preflipped || !use_display
+            # Reverse is needed unless reading from pre-flipped HDF5
+            needs_reverse = !is_preflipped
             if needs_reverse
                 t_reverse = @elapsed begin
                     ct_vol_base = reverse(ct_vol, dims=2)
@@ -254,23 +216,11 @@ if isfile(preprocessed_h5)
                 println("    [BENCH-H5] reverse: $(round(t_reverse*1000, digits=1))ms"); flush(stdout)
             else
                 ct_vol_base = ct_vol; pet_vol_base = pet_vol; mask_vol_base = mask_vol
-                println("    [BENCH-H5] reverse: SKIPPED (pre-flipped DISPLAY)"); flush(stdout)
+                println("    [BENCH-H5] reverse: SKIPPED (pre-flipped HDF5)"); flush(stdout)
             end
             
-            # Cache PET volume for SUV computation (use native-res for accuracy)
+            # Cache PET volume for SUV computation (native-res)
             MEH.pet_volumes_cache[tp_i] = pet_vol_base
-            
-            # Only resample if reading from native-resolution fallback group
-            if !use_display
-                t_resample = @elapsed begin
-                    ct_vol_base = hires_resample(ct_vol_base, first_spacing, display_spacing, MedImages.Linear_en)
-                    pet_vol_base = hires_resample(pet_vol_base, first_spacing, display_spacing, MedImages.Linear_en)
-                    mask_vol_base = hires_resample(mask_vol_base, first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
-                end
-                println("    [BENCH-H5] hires_resample ×3: $(round(t_resample, digits=3))s (FALLBACK - native res)"); flush(stdout)
-            else
-                println("    [BENCH-H5] hires_resample: SKIPPED (pre-resampled)"); flush(stdout)
-            end
             
             # Convert mask to compact int type (skip if already compact from preprocessing)
             t_mask = @elapsed begin
@@ -313,12 +263,8 @@ if isfile(preprocessed_h5)
                 
                 if !isempty(anat_h5_key) && haskey(h5_file, anat_h5_key)
                     raw_anat = read(h5_file[anat_h5_key])
-                    # Reverse needed unless reading from pre-flipped DISPLAY group
                     if needs_reverse
                         raw_anat = reverse(Float32.(raw_anat), dims=2)
-                    end
-                    if !use_display && size(raw_anat) != size(ct_vol_base)
-                        raw_anat = hires_resample(Float32.(raw_anat), first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
                     end
                     # Auto-detect type: if already UInt16 from preprocessing, use directly
                     anatomy_vol = eltype(raw_anat) <: Integer ? UInt16.(raw_anat) : UInt16.(round.(max.(0.0f0, Float32.(raw_anat))))
@@ -330,9 +276,6 @@ if isfile(preprocessed_h5)
                         anat_nii = NIfTI.niread(anat_path)
                         anat_raw = Float32.(anat_nii.raw)
                         anat_aligned = reverse(anat_raw, dims=2)
-                        if HIRES_FACTOR > 1.0
-                            anat_aligned = hires_resample(anat_aligned, first_spacing, display_spacing, MedImages.Nearest_neighbour_en)
-                        end
                         anatomy_vol = UInt16.(round.(max.(0.0f0, anat_aligned)))
                         println("    [BENCH-H5] Loaded max_anatomy from NIfTI fallback: $(size(anatomy_vol))")
                     end
@@ -368,6 +311,8 @@ if isfile(preprocessed_h5)
             sz = size(ct_vol_base)
             mask_f32 = Float32.(mask_compact)
             anat_f32 = anatomy_vol !== nothing ? Float32.(anatomy_vol) : zeros(Float32, sz)
+            # Pre-compute centroids for all lesions in this TP (fast zero-allocation pass)
+            MEH.precompute_mask_centroids!(mask_compact, tp_i, node_name)
             
             t_total_ms = (time_ns() - t_total) / 1e6
             println("    [BENCH-H5] LOAD TP TOTAL: $(round(t_total_ms, digits=1))ms"); flush(stdout)
@@ -624,8 +569,26 @@ MEH.h5_path_ref[] = preprocessed_h5
 
 MEH.current_tp_index[] = 0
 
-# Initialize Quad View and hide Pane 5
+# JIT warmup sequence: Compile critical paths before GUI appears
+println("Running JIT warmup (this may take a few seconds)...")
+
+# 1. Warm up base rendering and scrolling
 put!(mainMedEye3dInstance.channel, CompareTimePointsEvent(false))
+put!(mainMedEye3dInstance.channel, Int64(0))
+
+# 2. Warm up planar reformats (Coronal, Sagittal, back to Axial)
+put!(mainMedEye3dInstance.channel, ChangePlaneEvent(:Coronal)) # Coronal
+put!(mainMedEye3dInstance.channel, ChangePlaneEvent(:Sagittal)) # Sagittal
+put!(mainMedEye3dInstance.channel, ChangePlaneEvent(:Axial)) # Axial
+
+# 3. Warm up Compare Mode
+put!(mainMedEye3dInstance.channel, CompareTimePointsEvent(true))
+put!(mainMedEye3dInstance.channel, Int64(0))
+put!(mainMedEye3dInstance.channel, CompareTimePointsEvent(false))
+
+# 4. Warm up Time Point Switching (Next, then Prev)
+put!(mainMedEye3dInstance.channel, ChangeTimePointEvent(1))
+put!(mainMedEye3dInstance.channel, ChangeTimePointEvent(-1))
 
 # Start Makie Control Window
 println("Starting Makie Control Window...")
@@ -707,6 +670,15 @@ MEH.global_organ_mapping[] = organ_mapping
 MEH.global_ts_atlas[] = ts_atlas_aligned
 MEH.global_ts_names[] = ts_names
 MEH.anatomy_labels_cache[0] = ts_names  # TP 0 anatomy labels for cursor readout
+
+# Pre-cache background SUVs for all time points
+@async for tp_idx in keys(MEH.pet_volumes_cache)
+    try
+        LesionMetadataWindow.get_background_suvs(tp_idx)
+    catch e
+        @warn "Async background SUV cache failed for TP $tp_idx: $e"
+    end
+end
 
 # Load per-timepoint Skellytour from hierarchy (overrides bone atlas for AI bone subsegmentation)
 if isempty(skellytour_source)

@@ -110,186 +110,35 @@ Core scroll-navigation function executed sequentially by the `GL_Consumer` threa
 """
 function reactToScroll(scrollNumb::Int64, mainStates::Vector{StateDataFields}, toBeSavedForBack::Bool=true)
     t_start = time_ns()
-    mainState = mainStates[mainStates[1].switchIndex] #getting information from the first state
-
-    current = mainState.currentDisplayedSlice
-    old = current
-    #when shift is pressed scrolling is 10 times faster
-
-    if (!mainState.mainForDisplayObjects.isFastScroll)
-        current += scrollNumb
-    else
-        current += scrollNumb * 10
+    clickedPanel = mainStates[1].switchIndex
+    if clickedPanel < 1 || clickedPanel > length(mainStates)
+        clickedPanel = 1
     end
+    mainState = mainStates[clickedPanel]
 
+    delta = mainState.mainForDisplayObjects.isFastScroll ? scrollNumb * 10 : scrollNumb
 
-    #isScrollUp ? current+=1 : current-=1
-
-    # we do not want to move outside of possible range of slices
-    lastSlice = mainState.onScrollData.slicesNumber
-    if (lastSlice > 1)
-
-        mainState.isSliceChanged = true
-        if (current < 1)
-            current = 1
-        end
-        if (lastSlice < 1)
-            lastSlice = 1
-        end
-        if (current >= lastSlice)
-            current = lastSlice
-        end
-        #logic to change displayed screen
-        #we select slice that we are intrested in
-        singleSlDat = mainState.onScrollData.dataToScroll |>
-                      (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(current), mainState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
-                                  (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=current, textToDisp=getTextForCurrentSlice(mainState.onScrollData, Int32(current)))
-
-        updateImagesDisplayed(singleSlDat, mainState.mainForDisplayObjects, mainState.textDispObj, mainState.calcDimsStruct, mainState.valueForMasToSet, mainState.crosshairFields, mainState.mainRectFields, mainState.displayMode)
-
-        """
-        Added by me recently for testing
-        Add a check here to only invoke this in singelImage display mode
-        """
-        # Inside the reactToScroll function, find this section:
-if mainState.displayMode == SingleImage && !isempty(mainState.allSupervoxels)
-    # Change this line:
-    # current = mainState.lastRecordedMousePosition[toScrollDat.dimensionToScroll]
-    ShadersAndVerticiesForSupervoxels.renderSupervoxelLines(mainState.mainForDisplayObjects, mainState.supervoxelFields, mainState.mainRectFields,
-    mainState.allSupervoxels, mainState.onScrollData.dimensionToScroll, current)
-end
-        # if mainState.displayMode == SingleImage && !isempty(mainState.allSupervoxels)
-        #     current_slice_sv = getSvCurrentSlice(mainState.allSupervoxels, current)
-        #     ShadersAndVerticiesForSupervoxels.renderSupervoxelLines(mainState.mainForDisplayObjects, mainState.supervoxelFields, mainState.mainRectFields, current_slice_sv)
-        # end
-
-        mainState.currentlyDispDat = singleSlDat
-        # updating the last mouse position so when we will change plane it will better show actual position
-        currentDim = Int64(mainState.onScrollData.dataToScrollDims.dimensionToScroll)
-        lastMouse = mainState.lastRecordedMousePosition
-        locArr = [lastMouse[1], lastMouse[2], lastMouse[3]]
-        
-        # FIX: The permutation for Sagittal is [Y, Z, X] and Coronal is [X, Z, Y]
-        if currentDim == 3
-            # Axial: [X, Y, Z], scrolls Z, so current replaces locArr[3]
-            locArr[3] = current
-        elseif currentDim == 1
-            # Sagittal: [Y, Z, X], scrolls X, so current replaces locArr[3]
-            locArr[3] = current
-        elseif currentDim == 2
-            # Coronal: [X, Z, Y], scrolls Y, so current replaces locArr[3]
-            locArr[3] = current
-        end
-        mainState.lastRecordedMousePosition = CartesianIndex(locArr[1], locArr[2], locArr[3])
-        #saving information about current slice for future reference
-        mainState.currentDisplayedSlice = current
-        #enable undoing the action
-        # if (toBeSavedForBack)
-        #     func = () -> reactToScroll(old -= scrollNumb, mainState, false)
-        #     addToforUndoVector(mainState, func)
-        # end
-        
-        # Multiview synchronization
-        if length(mainStates) > 1 && mainState.mainForDisplayObjects.isSyncScrollOn
-            if length(mainStates) >= 4
-                clickedPanel = mainStates[1].switchIndex
-                
-                # Use the current crosshair position (where the user last clicked or synced)
-                activePos = mainState.lastRecordedMousePosition
-                if clickedPanel == 1 || clickedPanel == 2 || clickedPanel == 5 # Axial
-                    origX, origY = activePos[1], activePos[2]
-                    origZ = current
-                elseif clickedPanel == 3  # Sagittal (permuted 2,3,1)
-                    origY, origZ = activePos[1], activePos[2]
-                    origX = current
-                else # Bottom-Right (4) (Coronal) (permuted 1,3,2)
-                    origX, origZ = activePos[1], activePos[2]
-                    origY = current
-                end
-                
-                # Panel 1, 2, 5 scroll Z (origZ), Panel 3 scrolls origX, Panel 4 scrolls origY
-                targets = [(1, origZ), (2, origZ), (3, origX), (4, origY)]
-                if length(mainStates) >= 5
-                    push!(targets, (5, origZ))
-                end
-                
-                # Update lastRecordedMousePosition for all panels to ensure crosshairs synchronize!
-                for i in 1:length(mainStates)
-                    if i == 1 || i == 2 || i == 5
-                        mainStates[i].lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
-                    elseif i == 3
-                        mainStates[i].lastRecordedMousePosition = CartesianIndex(origY, origZ, origX)
-                    else
-                        mainStates[i].lastRecordedMousePosition = CartesianIndex(origX, origZ, origY)
-                    end
-                end
-                
-                for (panelIdx, targetSlice) in targets
-                    if panelIdx != clickedPanel
-                        panelState = mainStates[panelIdx]
-                        currSlice = panelState.currentDisplayedSlice
-                        
-                        if targetSlice != currSlice || panelState.currentlyDispDat === nothing
-                            lastSlice = panelState.onScrollData.slicesNumber
-                            newSlice = clamp(targetSlice, 1, lastSlice)
-                            
-                            singleSlDatSync = panelState.onScrollData.dataToScroll |>
-                                (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(newSlice), panelState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
-                                (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=newSlice, textToDisp=getTextForCurrentSlice(panelState.onScrollData, Int32(newSlice)))
-                            
-                            panelState.currentlyDispDat = singleSlDatSync
-                            panelState.currentDisplayedSlice = newSlice
-                            panelState.isSliceChanged = true
-                            
-                            updateImagesDisplayed(singleSlDatSync, panelState.mainForDisplayObjects, panelState.textDispObj, panelState.calcDimsStruct, panelState.valueForMasToSet, panelState.crosshairFields, panelState.mainRectFields, panelState.displayMode)
-                        end
-                        
-                        # UPDATE lastRecordedMousePosition for the synced panels
-                        if panelIdx == 1 || panelIdx == 2 || panelIdx == 5
-                            panelState.lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
-                        elseif panelIdx == 3
-                            panelState.lastRecordedMousePosition = CartesianIndex(origY, origZ, origX)
-                        else
-                            panelState.lastRecordedMousePosition = CartesianIndex(origX, origZ, origY)
-                        end
-                    end
-                end
-                
-
-            else
-                for panelIdx in 1:length(mainStates)
-                    if panelIdx != mainStates[1].switchIndex
-                        panelState = mainStates[panelIdx]
-                        targetDim = panelState.onScrollData.dataToScrollDims.dimensionToScroll
-                        targetSlice = locArr[targetDim]
-                        
-                        if targetSlice != panelState.currentDisplayedSlice || panelState.currentlyDispDat === nothing
-                            # clamp
-                            lastSlice = panelState.onScrollData.slicesNumber
-                            newSlice = clamp(targetSlice, 1, lastSlice)
-                            
-                            # update texture data (singleSlDat logic duplicated manually)
-                            singleSlDatSync = panelState.onScrollData.dataToScroll |>
-                                (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(newSlice), panelState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
-                                (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=newSlice, textToDisp=getTextForCurrentSlice(panelState.onScrollData, Int32(newSlice)))
-                            
-                            panelState.currentlyDispDat = singleSlDatSync
-                            panelState.currentDisplayedSlice = newSlice
-                            panelState.isSliceChanged = true
-                            
-                            # upload textures to GPU without SwapBuffers
-                            updateImagesDisplayed(singleSlDatSync, panelState.mainForDisplayObjects, panelState.textDispObj, panelState.calcDimsStruct, panelState.valueForMasToSet, panelState.crosshairFields, panelState.mainRectFields, panelState.displayMode)
-                            
-                            # also update panelState.lastRecordedMousePosition to keep them in sync
-                            panelState.lastRecordedMousePosition = CartesianIndex(locArr[1], locArr[2], locArr[3])
-                        end
-                    end
-                end
+    if length(mainStates) > 1 && mainState.mainForDisplayObjects.isSyncScrollOn
+        active_panels = Int[]
+        slice_overrides = Dict{Int,Int}()
+        for (i, pState) in enumerate(mainStates)
+            lastSlice = pState.onScrollData.slicesNumber
+            if lastSlice > 0
+                push!(active_panels, i)
+                newSlice = clamp(pState.currentDisplayedSlice + delta, 1, lastSlice)
+                slice_overrides[i] = newSlice
             end
         end
+        reactToScrollMultiPanel!(active_panels, mainStates, slice_overrides)
+    else
+        # Single panel scroll
+        lastSlice = mainState.onScrollData.slicesNumber
+        if lastSlice > 0
+            newSlice = clamp(mainState.currentDisplayedSlice + delta, 1, lastSlice)
+            reactToScrollMultiPanel!([clickedPanel], mainStates, Dict(clickedPanel => newSlice))
+        end
+    end
 
-    end#if
-    
     t_end = time_ns()
     action = scrollNumb != 0 ? "SCROLL" : "REDRAW"
     @info "[BENCH] reactToScroll ($(action)): $(round((t_end-t_start)/1e6, digits=1))ms"
@@ -369,10 +218,12 @@ function reactToScrollMultiPanel!(panels::Vector{Int}, mainStates::Vector{StateD
             continue
         end
         
-        current = get(sliceOverrides, panel_idx, panelState.currentDisplayedSlice)
+        prev_slice = panelState.currentDisplayedSlice
+        current = get(sliceOverrides, panel_idx, prev_slice)
         current = clamp(current, 1, lastSlice)
+        slice_changed = (current != prev_slice) || (panelState.currentlyDispDat.sliceNumber == 0)
         panelState.currentDisplayedSlice = current
-        panelState.isSliceChanged = true
+        panelState.isSliceChanged = slice_changed
         
         # Slice 3D→2D for all textures in this panel
         singleSlDat = panelState.onScrollData.dataToScroll |>
@@ -383,6 +234,10 @@ function reactToScrollMultiPanel!(panels::Vector{Int}, mainStates::Vector{StateD
         modulelistOfTextSpecs = panelState.mainForDisplayObjects.listOfTextSpecifications
         calcDimStruct = panelState.calcDimsStruct
         for updateDat in singleSlDat.listOfDataAndImageNames
+            # Optimization: if slice didn't change, only upload dynamic overlays (Bone, Mask)
+            if !slice_changed && updateDat.name != "Bone_Surface" && updateDat.name != "Bone_Marrow" && updateDat.name != "Mask" && updateDat.name != "manualModif"
+                continue
+            end
             findList = findall((texSpec) -> texSpec.name == updateDat.name, modulelistOfTextSpecs)
             if !isempty(findList)
                 texSpec = modulelistOfTextSpecs[findList[1]]
@@ -392,9 +247,12 @@ function reactToScrollMultiPanel!(panels::Vector{Int}, mainStates::Vector{StateD
             end
         end
         
-        # Upload text texture directly (no shader switch needed — updateTexture only
-        # uses glActiveTexture/glBindTexture/glTexSubImage2D, not shader programs)
-        TextureManag.addTextToTexture(panelState.textDispObj, [singleSlDat.textToDisp..., panelState.valueForMasToSet.text], calcDimStruct)
+        # Upload text texture ONLY for panels with active text display (typically panel 1)
+        if (panel_idx == 1 || panelState.textDispObj.textureSpec.ID[] != 0) && calcDimStruct.wordsQuadVertSize > 0 && !all(calcDimStruct.wordsImageQuadVert .== 0.0f0)
+            DisplayWords.activateForTextDisp(panelState.textDispObj.shader_program_words, panelState.textDispObj.vbo_words, calcDimStruct)
+            TextureManag.addTextToTexture(panelState.textDispObj, [singleSlDat.textToDisp..., panelState.valueForMasToSet.text], calcDimStruct)
+            DisplayWords.reactivateMainObj(panelState.mainForDisplayObjects.shader_program, panelState.mainForDisplayObjects.vbo, calcDimStruct)
+        end
         
         panelState.currentlyDispDat = singleSlDat
         

@@ -5,6 +5,7 @@ using ...ForDisplayStructs
 using ...DataStructs
 using ...ChangePlane
 using ...ReactToScroll
+using ...DisplayWords
 using DataTypesBasic
 using Setfield
 using Statistics: mean
@@ -127,18 +128,55 @@ function start_inference_worker()
 end
 
 function find_lesion_center(dat::AbstractArray{T, 3}, lesion_id::Float32) where T
-    pts = findall(dat .== lesion_id)
-    if isempty(pts)
-        pts = findall(abs.(dat .- lesion_id) .< 0.1f0)
+    target = round(T, lesion_id)
+    sx, sy, sz = size(dat)
+    sum_x = 0; sum_y = 0; sum_z = 0; n = 0
+    @inbounds for z in 1:sz, y in 1:sy, x in 1:sx
+        v = dat[x, y, z]
+        if v == target || abs(Float32(v) - lesion_id) < 0.1f0
+            sum_x += x
+            sum_y += y
+            sum_z += z
+            n += 1
+        end
     end
-    if isempty(pts)
+    if n == 0
         return nothing
     end
-    sum_x = sum(p -> p[1], pts)
-    sum_y = sum(p -> p[2], pts)
-    sum_z = sum(p -> p[3], pts)
-    n = length(pts)
     return [round(Int, sum_x / n), round(Int, sum_y / n), round(Int, sum_z / n)]
+end
+
+"""
+Fast single-pass accumulator to precompute centroids for ALL unique lesion IDs in a mask volume.
+Populates lesion_centroids_cache with (tp_idx, lid), (node_name, lid), and lid keys.
+"""
+function precompute_mask_centroids!(mask_vol::AbstractArray{T, 3}, tp_idx::Int, node_name::String="") where T
+    sx, sy, sz = size(mask_vol)
+    sums_x = Dict{Int, Int}()
+    sums_y = Dict{Int, Int}()
+    sums_z = Dict{Int, Int}()
+    counts = Dict{Int, Int}()
+    
+    @inbounds for z in 1:sz, y in 1:sy, x in 1:sx
+        v = Int(round(mask_vol[x, y, z]))
+        if v > 0
+            sums_x[v] = get(sums_x, v, 0) + x
+            sums_y[v] = get(sums_y, v, 0) + y
+            sums_z[v] = get(sums_z, v, 0) + z
+            counts[v] = get(counts, v, 0) + 1
+        end
+    end
+    
+    for (lid, n) in counts
+        c = [round(Int, sums_x[lid] / n), round(Int, sums_y[lid] / n), round(Int, sums_z[lid] / n)]
+        lesion_centroids_cache[(tp_idx, lid)] = c
+        if !isempty(node_name)
+            lesion_centroids_cache[(node_name, lid)] = c
+        end
+        if tp_idx == current_tp_index[]
+            lesion_centroids_cache[lid] = c
+        end
+    end
 end
 
 function reactToChangePlane(data::ChangePlaneEvent, stateObjects::Vector{StateDataFields})
@@ -184,8 +222,14 @@ function updateQuadVertices!(stateObject::StateDataFields, layout::Symbol)
     calcDimStruct = stateObject.calcDimsStruct
     
     if layout == :Hidden
-        res = zeros(Float32, length(calcDimStruct.mainImageQuadVert))
-        stateObject.calcDimsStruct = Setfield.setproperties(calcDimStruct, (mainImageQuadVert = res,))
+        res = zeros(Float32, 32)
+        w_res = zeros(Float32, 32)
+        stateObject.calcDimsStruct = Setfield.setproperties(calcDimStruct, (
+            mainImageQuadVert = res, 
+            mainQuadVertSize = sizeof(res),
+            wordsImageQuadVert = w_res,
+            wordsQuadVertSize = sizeof(w_res)
+        ))
     else
         pos = if layout == :TopLeft || layout == :LeftHalf
             1
@@ -201,13 +245,52 @@ function updateQuadVertices!(stateObject::StateDataFields, layout::Symbol)
         mode = (layout == :LeftHalf || layout == :RightHalf) ? MultiImage : QuadImage
         stateObject.calcDimsStruct = StructsManag.getMainVerticies(calcDimStruct, mode, pos)
     end
-    
-    ModernGL.glBindBuffer(ModernGL.GL_ARRAY_BUFFER, stateObject.mainForDisplayObjects.vbo)
-    ModernGL.glBufferData(ModernGL.GL_ARRAY_BUFFER, sizeof(stateObject.calcDimsStruct.mainImageQuadVert), stateObject.calcDimsStruct.mainImageQuadVert, ModernGL.GL_STATIC_DRAW)
 end
 
 const compare_mode = Ref(false)
 const compare_right_tp = Ref(-1)  # TP index shown in right panel (panel 5)
+const tp_switched = Observable{Int}(0)
+
+"""Force direct texture upload for a panel — bypasses scroll pipeline entirely."""
+function _force_texture_upload!(stateObjects::Vector{StateDataFields}, panel_idx::Int)
+    panelState = stateObjects[panel_idx]
+    dimToScroll = panelState.onScrollData.dimensionToScroll
+    lastSlice = panelState.onScrollData.slicesNumber
+    if lastSlice < 1
+        println("  [COMPARE-DBG] panel $panel_idx: slicesNumber=$lastSlice, SKIPPING upload"); flush(stdout)
+        return
+    end
+    current = clamp(panelState.currentDisplayedSlice, 1, lastSlice)
+    
+    singleSlDat = panelState.onScrollData.dataToScroll |>
+        (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(current), dimToScroll, threeDimDat), scrDat) |>
+        (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=current, textToDisp=getTextForCurrentSlice(panelState.onScrollData, Int32(current)))
+    
+    n_uploaded = 0
+    for updateDat in singleSlDat.listOfDataAndImageNames
+        findList = findall((texSpec) -> texSpec.name == updateDat.name, panelState.mainForDisplayObjects.listOfTextSpecifications)
+        if !isempty(findList)
+            texSpec = panelState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
+            transformedDat = applyZoomPan(updateDat.dat, panelState.calcDimsStruct.zoom, panelState.calcDimsStruct.panX, panelState.calcDimsStruct.panY)
+            # Safety: verify data dimensions fit within the allocated texture
+            actual_w = size(transformedDat, 1)
+            actual_h = size(transformedDat, 2)
+            tex_w = Int(panelState.calcDimsStruct.imageTextureWidth)
+            tex_h = Int(panelState.calcDimsStruct.imageTextureHeight)
+            if actual_w <= tex_w && actual_h <= tex_h
+                TextureManag.updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, panelState.calcDimsStruct.imageTextureWidth, panelState.calcDimsStruct.imageTextureHeight)
+                n_uploaded += 1
+            else
+                println("  [COMPARE-DBG] SKIPPING texture upload for '$(updateDat.name)' on panel $panel_idx: data=$(actual_w)x$(actual_h) > texture=$(tex_w)x$(tex_h)"); flush(stdout)
+            end
+        end
+    end
+    
+    panelState.currentlyDispDat = singleSlDat
+    panelState.currentDisplayedSlice = current
+    panelState.isSliceChanged = true
+    println("  [COMPARE-DBG] panel $panel_idx: uploaded $n_uploaded textures at slice $current (dimToScroll=$dimToScroll, slicesNumber=$lastSlice)"); flush(stdout)
+end
 
 function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Vector{StateDataFields})
     if length(stateObjects) >= 5
@@ -243,14 +326,17 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
             right_label = get(tp_labels, compare_right_tp[], "TP $(compare_right_tp[])")
             println("Compare mode ON: Left=$left_label, Right=$right_label"); flush(stdout)
             
-            # Force texture update + bone overlay via reactToSyncLesion (covers [1,5])
-            stateObjects[1].currentlyDispDat = SingleSliceDat()
-            stateObjects[5].currentlyDispDat = SingleSliceDat()
+            # Force direct texture upload for both visible panels
+            _force_texture_upload!(stateObjects, 1)
+            _force_texture_upload!(stateObjects, 5)
+            
+            # If there's an active lesion, set mask filter uniforms
             if current_active_lesion_id[] > 0
-                reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects)
-            else
-                # No active lesion — batch upload textures for both panels
-                ReactToScroll.reactToScrollMultiPanel!([1, 5], stateObjects)
+                try
+                    reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects)
+                catch e
+                    println("WARNING: reactToSyncLesion failed during compare-ON: $e"); flush(stdout)
+                end
             end
         else
             compare_right_tp[] = -1
@@ -285,20 +371,27 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                 end
             end
 
-            # Clear display data to force full texture re-upload on next scroll
+            # Clear display data to force full texture re-upload
             for i in 1:4
-                stateObjects[i].currentlyDispDat = SingleSliceDat()
+                stateObjects[i].currentlyDispDat = SingleSliceDat(sliceNumber=0)
             end
             println("Compare mode OFF: restored 4-pane view for TP $(current_tp_index[])"); flush(stdout)
             
-            # Upload textures + bone overlay via reactToSyncLesion (covers [1,2,3,4])
+            # Force direct texture upload for all 4 visible panels
+            for i in 1:4
+                _force_texture_upload!(stateObjects, i)
+            end
+            
+            # If there's an active lesion, set mask filter uniforms
             if current_active_lesion_id[] > 0
-                reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects)
-            else
-                # No active lesion — batch upload textures for all 4 panels
-                ReactToScroll.reactToScrollMultiPanel!([1, 2, 3, 4], stateObjects)
+                try
+                    reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects)
+                catch e
+                    println("WARNING: reactToSyncLesion failed during compare-OFF: $e"); flush(stdout)
+                end
             end
         end
+        tp_switched[] = tp_switched[] + 1
     end
 end
 
@@ -447,39 +540,9 @@ end
 
 function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateDataFields})
     t_total = time_ns()
-    if DEBUG_VERBOSE[]; println("  [BENCH-SL] reactToSyncLesion($(data.lesion_id)) START"); flush(stdout); end
-    if DEBUG_VERBOSE[]; println("reactToSyncLesion called with lesion_id=$(data.lesion_id), nStates=$(length(stateObjects))"); flush(stdout); end
-    current_active_lesion_id[] = data.lesion_id
     changed = false
-    old_idx = stateObjects[1].switchIndex
-    old_sync = stateObjects[1].mainForDisplayObjects.isSyncScrollOn
-    for stateObject in stateObjects
-        stateObject.mainForDisplayObjects.isSyncScrollOn = false
-    end
 
-    # Clear stale bone overlay using SPARSE index-based clearing (not full 3D fill!)
-    # Previously: fill!(arr, 0.0f0) on ALL bone 3D volumes (~4GB) = ~590ms
-    # Now: zero only the indices that were previously written (~5K-70K elements) = ~0.1ms
-    for (panel_idx, stateObject) in enumerate(stateObjects)
-        for scrDat in stateObject.onScrollData.dataToScroll
-            if scrDat.name == "Bone_Surface" && haskey(last_bone_surf_indices, panel_idx)
-                old_indices = last_bone_surf_indices[panel_idx]
-                if !isempty(old_indices)
-                    scrDat.dat[old_indices] .= 0.0f0
-                end
-            elseif scrDat.name == "Bone_Marrow" && haskey(last_bone_marr_indices, panel_idx)
-                old_indices = last_bone_marr_indices[panel_idx]
-                if !isempty(old_indices)
-                    scrDat.dat[old_indices] .= 0.0f0
-                end
-            end
-        end
-    end
-    empty!(last_bone_surf_indices)
-    empty!(last_bone_marr_indices)
-    t_sparse_ms = (time_ns() - t_total) / 1e6
-    
-    # Determine matched lesion ID for the compare right panel (panel 5) if in compare mode
+    # 1. Update OpenGL visibility constants for masks
     panel5_lesion_id = data.lesion_id
     panel5_all_ids = Int[]
     if compare_mode[] && length(stateObjects) >= 5 && data.lesion_id > 0
@@ -493,7 +556,6 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                 if !isempty(matched_ids)
                     panel5_all_ids = matched_ids
                     panel5_lesion_id = matched_ids[1]
-                    if DEBUG_VERBOSE[]; println("Cross-TP match: $(left_node) lesion $(data.lesion_id) -> $(right_node) lesions $(matched_ids)"); flush(stdout); end
                 end
             end
         catch e
@@ -501,8 +563,6 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         end
     end
 
-    t_uniform_start = time_ns()
-    # Set mask filter uniform for each panel (glUseProgram once per panel, not per textSpec)
     for (idx, stateObject) in enumerate(stateObjects)
         target_id = (idx == 5 && compare_mode[]) ? panel5_lesion_id : data.lesion_id
         ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
@@ -524,106 +584,87 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                 textSpec.minAndMaxValue = Float32.([0.0, 1000.0])
                 Uniforms.setAllowedIDs!(textSpec, Int[])
                 Uniforms.coontrolMinMaxUniformVals(textSpec)
-            elseif textSpec.name == "Bone_Surface" || textSpec.name == "Bone_Marrow"
-                textSpec.isVisible = true
-                Uniforms.setTextureVisibility(true, textSpec.uniforms)
-                Uniforms.setMaskColor(textSpec.color, textSpec.uniforms)
             end
         end
     end
-    t_uniform_ms = (time_ns() - t_uniform_start) / 1e6
-    if DEBUG_VERBOSE[]; println("  [BENCH-SL] sparse_clear: $(round(t_sparse_ms, digits=1))ms, uniforms: $(round(t_uniform_ms, digits=1))ms"); flush(stdout); end
 
+    # 1b. Update bone subseg 3D arrays for all panels
+    has_any_bone_data = false
+    if data.lesion_id > 0
+        for (panel_idx, stateObject) in enumerate(stateObjects)
+            panel_tp = (panel_idx == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
+            panel_lid = (panel_idx == 5 && compare_mode[]) ? panel5_lesion_id : data.lesion_id
 
+            panel_surf_pts, panel_marr_pts = try
+                _get_or_compute_bone_subseg(stateObject, panel_lid, panel_tp)
+            catch e
+                (CartesianIndex{3}[], CartesianIndex{3}[])
+            end
+            surf_indices = if panel_idx == 3  # Sagittal (Y, Z, X)
+                [CartesianIndex(I[2], I[3], I[1]) for I in panel_surf_pts]
+            elseif panel_idx == 4  # Coronal (X, Z, Y)
+                [CartesianIndex(I[1], I[3], I[2]) for I in panel_surf_pts]
+            else  # Axial (panels 1, 2, 5)
+                panel_surf_pts
+            end
+            marr_indices = if panel_idx == 3
+                [CartesianIndex(I[2], I[3], I[1]) for I in panel_marr_pts]
+            elseif panel_idx == 4
+                [CartesianIndex(I[1], I[3], I[2]) for I in panel_marr_pts]
+            else
+                panel_marr_pts
+            end
 
-    # ── Pre-compute bone subseg ONCE per unique TP (deduplicated) ──
-    t_bone = time_ns()
-    left_tp = current_tp_index[]
-    left_axial_surf, left_axial_marr = try
-        _get_or_compute_bone_subseg(stateObjects[1], data.lesion_id, left_tp)
-    catch e
-        println("Failed to compute bone subseg for left TP: $e")
-        (CartesianIndex{3}[], CartesianIndex{3}[])
-    end
+            if !isempty(surf_indices) || !isempty(marr_indices)
+                has_any_bone_data = true
+            end
 
-    right_axial_surf, right_axial_marr = if compare_mode[] && length(stateObjects) >= 5
-        try
-            _get_or_compute_bone_subseg(stateObjects[5], panel5_lesion_id, compare_right_tp[])
-        catch e
-            println("Failed to compute bone subseg for right TP: $e")
-            (CartesianIndex{3}[], CartesianIndex{3}[])
+            for scrDat in stateObject.onScrollData.dataToScroll
+                if scrDat.name == "Bone_Surface"
+                    if haskey(last_bone_surf_indices, panel_idx) && !isempty(last_bone_surf_indices[panel_idx])
+                        scrDat.dat[last_bone_surf_indices[panel_idx]] .= 0.0f0
+                    end
+                    if !isempty(surf_indices)
+                        scrDat.dat[surf_indices] .= 1.0f0
+                    end
+                    last_bone_surf_indices[panel_idx] = surf_indices
+                elseif scrDat.name == "Bone_Marrow"
+                    if haskey(last_bone_marr_indices, panel_idx) && !isempty(last_bone_marr_indices[panel_idx])
+                        scrDat.dat[last_bone_marr_indices[panel_idx]] .= 0.0f0
+                    end
+                    if !isempty(marr_indices)
+                        scrDat.dat[marr_indices] .= 1.0f0
+                    end
+                    last_bone_marr_indices[panel_idx] = marr_indices
+                end
+            end
         end
-    else
-        (CartesianIndex{3}[], CartesianIndex{3}[])
-    end
-    t_bone_ms = (time_ns() - t_bone) / 1e6
-    if DEBUG_VERBOSE[]; println("  [BENCH-SL] bone_subseg: $(round(t_bone_ms, digits=1))ms (left=$(length(left_axial_surf))+$(length(left_axial_marr)), right=$(length(right_axial_surf))+$(length(right_axial_marr)))"); flush(stdout); end
 
-    # ── Per-panel: just remap orientations from pre-computed axial data ──
-    t_panel = time_ns()
-    for (panel_idx, stateObject) in enumerate(stateObjects)
-        is_right = (panel_idx == 5 && compare_mode[])
-        base_surf = is_right ? right_axial_surf : left_axial_surf
-        base_marr = is_right ? right_axial_marr : left_axial_marr
-
-        surf_indices, marr_indices = if panel_idx == 3  # Sagittal (Y, Z, X)
-            ([CartesianIndex(I[2], I[3], I[1]) for I in base_surf],
-             [CartesianIndex(I[2], I[3], I[1]) for I in base_marr])
-        elseif panel_idx == 4  # Coronal (X, Z, Y)
-            ([CartesianIndex(I[1], I[3], I[2]) for I in base_surf],
-             [CartesianIndex(I[1], I[3], I[2]) for I in base_marr])
-        else  # Axial (panels 1, 2, 5)
-            (base_surf, base_marr)
-        end
-
-        for scrDat in stateObject.onScrollData.dataToScroll
-            if scrDat.name == "Bone_Surface"
-                if haskey(last_bone_surf_indices, panel_idx) && !isempty(last_bone_surf_indices[panel_idx])
-                    scrDat.dat[last_bone_surf_indices[panel_idx]] .= 0.0f0
+        # Ensure bone textures are visible in the shader when bone data exists
+        if has_any_bone_data
+            for stateObject in stateObjects
+                ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
+                for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
+                    if textSpec.name == "Bone_Surface" || textSpec.name == "Bone_Marrow"
+                        textSpec.isVisible = true
+                        Uniforms.setTextureVisibility(true, textSpec.uniforms)
+                    end
                 end
-                if !isempty(surf_indices)
-                    scrDat.dat[surf_indices] .= 1.0f0
-                end
-                last_bone_surf_indices[panel_idx] = surf_indices
-                if DEBUG_VERBOSE[]; println("  [BONE-DEBUG] Panel $panel_idx: Bone_Surface wrote $(length(surf_indices)) indices"); flush(stdout); end
-            elseif scrDat.name == "Bone_Marrow"
-                if haskey(last_bone_marr_indices, panel_idx) && !isempty(last_bone_marr_indices[panel_idx])
-                    scrDat.dat[last_bone_marr_indices[panel_idx]] .= 0.0f0
-                end
-                if !isempty(marr_indices)
-                    scrDat.dat[marr_indices] .= 1.0f0
-                end
-                last_bone_marr_indices[panel_idx] = marr_indices
-                if DEBUG_VERBOSE[]; println("  [BONE-DEBUG] Panel $panel_idx: Bone_Marrow wrote $(length(marr_indices)) indices"); flush(stdout); end
             end
         end
     end
-    t_panel_ms = (time_ns() - t_panel) / 1e6
-    if DEBUG_VERBOSE[]; println("  [BENCH-SL] panel_remap+write: $(round(t_panel_ms, digits=1))ms"); flush(stdout); end
 
-    t_scroll = time_ns()
-    active_panel_indices = if compare_mode[] && length(stateObjects) >= 5
-        [1, 5]
-    elseif length(stateObjects) >= 4
-        [1, 2, 3, 4]
-    else
-        collect(1:length(stateObjects))
-    end
-
+    # 2. Get canonical center
     panel_tp_cur = current_tp_index[]
     canonical_center = if data.lesion_id > 0
         if haskey(lesion_centroids_cache, (panel_tp_cur, data.lesion_id))
-            if DEBUG_VERBOSE[]; println("  [BENCH-SL] centroid cache: HIT (tp,lid)"); flush(stdout); end
             lesion_centroids_cache[(panel_tp_cur, data.lesion_id)]
         elseif haskey(lesion_centroids_cache, (get_node_name_for_tp(panel_tp_cur), data.lesion_id))
-            if DEBUG_VERBOSE[]; println("  [BENCH-SL] centroid cache: HIT (node,lid)"); flush(stdout); end
             lesion_centroids_cache[(get_node_name_for_tp(panel_tp_cur), data.lesion_id)]
         elseif haskey(lesion_centroids_cache, data.lesion_id)
-            if DEBUG_VERBOSE[]; println("  [BENCH-SL] centroid cache: HIT (lid only)"); flush(stdout); end
             lesion_centroids_cache[data.lesion_id]
         else
-            if DEBUG_VERBOSE[]; println("  [BENCH-SL] centroid cache: MISS — computing on-the-fly"); flush(stdout); end
-            # on-the-fly centroid computation when not pre-cached
+            # on-the-fly computation if cache miss
             cc = nothing
             for (si, stateObject) in enumerate(stateObjects)
                 for (scrIdx, scrDat) in enumerate(stateObject.onScrollData.dataToScroll)
@@ -643,64 +684,57 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     else
         nothing
     end
-    if DEBUG_VERBOSE[]; println("canonical_center=$canonical_center, active_panel_indices=$active_panel_indices"); flush(stdout); end
 
+    # 3. Emulate Right Click behavior to jump panels exactly as right click does
     if canonical_center !== nothing
-        # Pre-compute slice positions for all panels FIRST, then batch-upload
-        slice_overrides = Dict{Int,Int}()
-        for idx in active_panel_indices
-            stateObject = stateObjects[idx]
-            last_sl = max(1, stateObject.onScrollData.slicesNumber)
-            
-            # Check if this panel has its own lesion center (especially in compare mode)
-            target_id = (idx == 5 && compare_mode[]) ? panel5_lesion_id : data.lesion_id
-            panel_center = if idx == 5 && compare_mode[] && target_id > 0
-                r_tp = compare_right_tp[]
-                if haskey(lesion_centroids_cache, (r_tp, target_id))
-                    lesion_centroids_cache[(r_tp, target_id)]
-                elseif haskey(lesion_centroids_cache, (get_node_name_for_tp(r_tp), target_id))
-                    lesion_centroids_cache[(get_node_name_for_tp(r_tp), target_id)]
-                elseif haskey(lesion_centroids_cache, target_id)
-                    lesion_centroids_cache[target_id]
-                else
-                    nothing
-                end
+        origX, origY, origZ = canonical_center[1], canonical_center[2], canonical_center[3]
+
+        for i in 1:length(stateObjects)
+            if i == 1 || i == 2 || i == 5
+                stateObjects[i].lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
+            elseif i == 3
+                stateObjects[i].lastRecordedMousePosition = CartesianIndex(origY, origZ, origX)
             else
-                nothing
+                stateObjects[i].lastRecordedMousePosition = CartesianIndex(origX, origZ, origY)
             end
-            
-            effective_center = panel_center !== nothing ? panel_center : canonical_center
-            origX, origY, origZ = effective_center[1], effective_center[2], effective_center[3]
-            
-            if idx == 1 || idx == 2 || idx == 5
-                stateObject.lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
-                slice_overrides[idx] = clamp(origZ, 1, last_sl)
-            elseif idx == 3
-                stateObject.lastRecordedMousePosition = CartesianIndex(origY, origZ, origX)
-                slice_overrides[idx] = clamp(origX, 1, last_sl)
-            else
-                stateObject.lastRecordedMousePosition = CartesianIndex(origX, origZ, origY)
-                slice_overrides[idx] = clamp(origY, 1, last_sl)
-            end
-            if DEBUG_VERBOSE[]; println("Synced active lesion $target_id at center $effective_center in panel $idx (slice $(slice_overrides[idx]))"); flush(stdout); end
         end
-        # Single batch upload for ALL panels
-        ReactToScroll.reactToScrollMultiPanel!(active_panel_indices, stateObjects, slice_overrides)
+
+        targets = [(1, origZ), (2, origZ), (3, origX), (4, origY)]
+        if length(stateObjects) >= 5
+            push!(targets, (5, origZ))
+        end
+
+        for (p_idx, targetSlice) in targets
+            if p_idx <= length(stateObjects)
+                otherState = stateObjects[p_idx]
+                lastSlice = max(1, otherState.onScrollData.slicesNumber)
+                newSlice = clamp(targetSlice, 1, lastSlice)
+                
+                # Create slice dat (forces evaluation)
+                singleSlDat = otherState.onScrollData.dataToScroll |>
+                    (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(newSlice), otherState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
+                    (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=newSlice, textToDisp=getTextForCurrentSlice(otherState.onScrollData, Int32(newSlice)))
+                
+                # Fast upload directly to OpenGL (skipping CPU sync scroll logic)
+                for updateDat in singleSlDat.listOfDataAndImageNames
+                    findList = findall((texSpec) -> texSpec.name == updateDat.name, otherState.mainForDisplayObjects.listOfTextSpecifications)
+                    if !isempty(findList)
+                        texSpec = otherState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
+                        transformedDat = applyZoomPan(updateDat.dat, otherState.calcDimsStruct.zoom, otherState.calcDimsStruct.panX, otherState.calcDimsStruct.panY)
+                        TextureManag.updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, otherState.calcDimsStruct.imageTextureWidth, otherState.calcDimsStruct.imageTextureHeight)
+                    end
+                end
+                
+                otherState.currentlyDispDat = singleSlDat
+                otherState.currentDisplayedSlice = newSlice
+                otherState.isSliceChanged = true
+            end
+        end
         changed = true
-    else
-        # No centroid: batch re-render all active panels to show bone overlay
-        ReactToScroll.reactToScrollMultiPanel!(active_panel_indices, stateObjects)
-        changed = true
-        if DEBUG_VERBOSE[]; println("Synced active lesion $(data.lesion_id) (no centroid found) - bone overlay uploaded"); flush(stdout); end
     end
-    for stateObject in stateObjects
-        stateObject.mainForDisplayObjects.isSyncScrollOn = old_sync
-    end
-    stateObjects[1].switchIndex = old_idx
-    t_scroll_ms = (time_ns() - t_scroll) / 1e6
-    if DEBUG_VERBOSE[]; println("  [BENCH-SL] centroid+scroll: $(round(t_scroll_ms, digits=1))ms"); flush(stdout); end
+
     t_total_ms = (time_ns() - t_total) / 1e6
-    @info "[BENCH] Next/Prev Lesion (OpenGL Sync) Total: $(round(t_total_ms, digits=1))ms"
+    @info "[BENCH] Next Lesion (Fast Right-Click Emulation): $(round(t_total_ms, digits=1))ms"
     return changed
 end
 
@@ -847,8 +881,8 @@ function get_existing_bone_array(stateObject, name)
             return arr
         end
     end
-    # Fallback (should never happen)
-    return zeros(Float32, 1024, 1024, 326)
+    # Fallback — no bone array found in this panel's dataToScroll
+    return nothing
 end
 
 """Load a TpCacheEntry into a specific panel, using PermutedDimsArray for sag/cor views.
@@ -950,7 +984,7 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx;
         stateObjects[panel_idx].onScrollData.slicesNumber = Int32(size(newDataToScroll[1].dat, dimToScroll))
     end
     stateObjects[panel_idx].currentDisplayedSlice = max(1, stateObjects[panel_idx].onScrollData.slicesNumber ÷ 2)
-    stateObjects[panel_idx].currentlyDispDat = SingleSliceDat()
+    stateObjects[panel_idx].currentlyDispDat = SingleSliceDat(sliceNumber=0)
 end
 
 
@@ -995,7 +1029,7 @@ const volume_z_size = Ref(0)
 const anatomy_labels_cache = Dict{Int, Dict{Int,String}}()
 
 export tp_data_cache, bone_subsegments_cache, lesion_centroids_cache, global_bone_atlas, global_organ_mapping, current_tp_index, tp_labels, tp_descriptions, tp_english_descriptions
-export compare_mode, compare_right_tp, get_node_name_for_tp, tp_node_names
+export compare_mode, compare_right_tp, tp_switched, get_node_name_for_tp, tp_node_names
 export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, h5_path_ref, tp_modalities, volume_z_size, anatomy_labels_cache
 
 
@@ -1161,6 +1195,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
     
     t_total_ms = (time_ns() - t_total) / 1e6
     @info "[BENCH] Next/Prev TP Total: $(round(t_total_ms, digits=1))ms"
+    tp_switched[] = tp_switched[] + 1
 end
 
 function reactToToggleLesion(data::ToggleLesionEvent, stateObjects::Vector{StateDataFields})
