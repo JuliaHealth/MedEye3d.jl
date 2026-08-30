@@ -195,11 +195,7 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
                 if ($(x.name)isVisible == 1 && abs($(x.name)Res) > 0.00001) {
                     float alpha = $(x.name)maskContribution;
                     alpha = clamp(alpha * 2.0, 0.5, 1.0); // Boost visibility
-                    vec3 maskColor = vec3(
-                        r$(x.name)getColorForMultiColor($(x.name)Res),
-                        g$(x.name)getColorForMultiColor($(x.name)Res),
-                        b$(x.name)getColorForMultiColor($(x.name)Res)
-                    );
+                    vec3 maskColor = getMultiColor_$(x.name)($(x.name)Res);
                     if (maskColor != vec3(0.0)) {
                         baseColor = mix(baseColor, maskColor, alpha);
                     }
@@ -208,7 +204,7 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
         end
     end
 
-    # 3. Third layer: Multi-discrete segmentation masks (Mask, manualModif)
+    # 3. Third layer: Multi-discrete segmentation masks (Mask, manualModif, Anatomy)
     for x in texturesDiscrete
         if !x.isMainImage
             maskApplyCode *= """
@@ -228,11 +224,7 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
                     if (showThis_$(x.name)) {
                         float alpha = $(x.name)maskContribution;
                         alpha = clamp(alpha * 2.0, 0.5, 1.0); // Boost visibility
-                        vec3 maskColor = vec3(
-                            r$(x.name)getColorForDiscreteColor($(x.name)Res),
-                            g$(x.name)getColorForDiscreteColor($(x.name)Res),
-                            b$(x.name)getColorForDiscreteColor($(x.name)Res)
-                        );
+                        vec3 maskColor = getDiscreteColor_$(x.name)($(x.name)Res);
                         if (maskColor != vec3(0.0)) {
                             baseColor = mix(baseColor, maskColor, alpha);
                         }
@@ -254,6 +246,8 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
         end
     end
 
+    mainImage = filter(it -> it.isMainImage, textures)
+    mainImageName = isempty(mainImage) ? textures[1].name : mainImage[1].name
     
     return """
     float changeClip(float minVal, float maxVal, float value, float color, float range) {
@@ -268,10 +262,10 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
     $(getMultiColorMaskFunctions(texturesCont))
     $(getMultiDiscreteColorMaskFunctions(texturesDiscrete))
 
-    void main() {
+    vec3 getPixelColor(vec2 coord) {
         $(masksInfluences)
-
-        float todiv = max($(isVisibleList), 0.001); // Prevent division by zero
+        
+        float todiv = max($(isVisibleList), 1.0);
         
         // Base color from main image
         vec3 baseColor = vec3(
@@ -283,7 +277,29 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
         // Apply masks
         $(maskApplyCode)
 
-        FragColor = vec4(baseColor, 1.0);
+        return baseColor;
+    }
+    
+    void main() {
+        vec2 texSize = vec2(textureSize($(mainImageName), 0));
+        vec2 pixel = TexCoord0 * texSize - 0.5;
+        vec2 frac = fract(pixel);
+        ivec2 p0 = ivec2(floor(pixel));
+        
+        vec2 uv00 = (vec2(p0) + 0.5) / texSize;
+        vec2 uv10 = (vec2(p0 + ivec2(1, 0)) + 0.5) / texSize;
+        vec2 uv01 = (vec2(p0 + ivec2(0, 1)) + 0.5) / texSize;
+        vec2 uv11 = (vec2(p0 + ivec2(1, 1)) + 0.5) / texSize;
+        
+        vec3 c00 = getPixelColor(uv00);
+        vec3 c10 = getPixelColor(uv10);
+        vec3 c01 = getPixelColor(uv01);
+        vec3 c11 = getPixelColor(uv11);
+        
+        vec3 c0 = mix(c00, c10, frac.x);
+        vec3 c1 = mix(c01, c11, frac.x);
+        
+        FragColor = vec4(mix(c0, c1, frac.y), 1.0);
     }
     """
 end
@@ -428,7 +444,7 @@ function setMaskInfluence(textur::TextureSpec{Float32})
 
     return """
 
-    float $(textName)Res = texture($(textName), TexCoord0).r;
+    float $(textName)Res = texture($(textName), coord).r;
 
     """
 end#setMaskInfluence
@@ -501,57 +517,56 @@ end#chooseColorFonuction
 
 # """
 function getMultiColorMaskFunctions(continuusColorTextSpecs::Vector{TextureSpec{Float32}})::String
-    #Check in which range we are without if
-    #Important first color in color list needs to be doubled in order to make algorithm cleaner - so we will start from index 1 and always there would be some previous index
+    join(map(continuusColorTextSpecs) do spec
+        colors = spec.colorSet
+        N = length(colors)
+        if N == 0
+            return ""
+        end
+        table_entries = join(["vec3($(Float32(c.r)), $(Float32(c.g)), $(Float32(c.b)))" for c in colors], ",\n        ")
+        """
+        const vec3 $(spec.name)ContColorTable[$(N + 1)] = vec3[$(N + 1)](
+            vec3(0.0),
+            $table_entries
+        );
 
-    tuples = map(x -> [(x.name, [[a.r, a.g, a.b] for a in x.colorSet], "r", 1), (x.name, [[a.r, a.g, a.b] for a in x.colorSet], "g", 2), (x.name, [[a.r, a.g, a.b] for a in x.colorSet], "b", 3)], continuusColorTextSpecs)
-
-    if (!isempty(tuples))
-        tuples = reduce(vcat, tuples)
-    end
-
-
-    return join(map(x -> """
-
-   float $(x[3])$(x[1])getColorForMultiColor(float innertexelRes) {
-
-
-    float texelRes=  clamp(innertexelRes, $(x[1])minValue,$(x[1])maxValue );
-           float normalized = ((texelRes - $(x[1])minValue)/float($(x[1])ValueRange))*$(length(x[2])+1);
-           uint indexx = uint(floor(normalized)) ;// so we normalize floor  in order to get index of color from color list
-           float[$(length(x[2])+1)] colorFloats = float[$(length(x[2])+1)](0.0,$( map(it->it[x[4]],x[2])|> (fls)-> join(fls,",")    )   )  ;
-           float normalizedColorPercent= normalized-float(indexx) ;
-           //return  clamp( colorFloats[indexx-1]*(1- normalizedColorPercent),0.0,1.0 );//so we get color from current section and closer we are to the end of this section the bigger influence of this color, the closer we are to the begining the bigger the influence of previous section color
-           return  clamp(colorFloats[indexx]*normalizedColorPercent  +  colorFloats[ int(clamp(float(indexx-1),0.0,100.0))]*(1- normalizedColorPercent) ,0.0,1.0 );//so we get color from current section and closer we are to the end of this section the bigger influence of this color, the closer we are to the begining the bigger the influence of previous section color
-
-           }
-
-           """, tuples), " ")
-
-
-
-end#getNuclearMaskFunction
-
+        vec3 getMultiColor_$(spec.name)(float innertexelRes) {
+            float texelRes = clamp(innertexelRes, $(spec.name)minValue, $(spec.name)maxValue);
+            float normalized = ((texelRes - $(spec.name)minValue) / max(float($(spec.name)ValueRange), 0.001)) * float($(N + 1));
+            uint indexx = uint(floor(normalized));
+            float normalizedColorPercent = normalized - float(indexx);
+            uint prevIdx = uint(clamp(int(indexx) - 1, 0, $N));
+            uint curIdx = clamp(indexx, 0u, uint($N));
+            return clamp($(spec.name)ContColorTable[curIdx] * normalizedColorPercent + $(spec.name)ContColorTable[prevIdx] * (1.0 - normalizedColorPercent), 0.0, 1.0);
+        }
+        """
+    end, "\n")
+end
 
 function getMultiDiscreteColorMaskFunctions(discreteColorTextSpecs::Vector{TextureSpec{Float32}})::String
-    tuples = map(x -> [(x.name, [[a.r, a.g, a.b] for a in x.colorSet], "r", 1), (x.name, [[a.r, a.g, a.b] for a in x.colorSet], "g", 2), (x.name, [[a.r, a.g, a.b] for a in x.colorSet], "b", 3)], discreteColorTextSpecs)
+    join(map(discreteColorTextSpecs) do spec
+        colors = spec.colorSet
+        N = length(colors)
+        if N == 0
+            return ""
+        end
+        table_entries = join(["vec3($(Float32(c.r)), $(Float32(c.g)), $(Float32(c.b)))" for c in colors], ",\n        ")
+        """
+        const vec3 $(spec.name)DiscreteColorTable[$(N + 1)] = vec3[$(N + 1)](
+            vec3(0.0),
+            $table_entries
+        );
 
-    if (!isempty(tuples))
-        tuples = reduce(vcat, tuples)
-    end
-
-    return join(map(x -> """
-
-   float $(x[3])$(x[1])getColorForDiscreteColor(float innertexelRes) {
-       uint val = uint(round(innertexelRes));
-       if (val == 0u) {
-           return 0.0;
-       }
-       uint indexx = ((val - 1u) % uint($(length(x[2])))) + 1u;
-       float[$(length(x[2])+1)] colorFloats = float[$(length(x[2])+1)](0.0,$( map(it->it[x[4]],x[2])|> (fls)-> join(fls,",")    )   )  ;
-       return colorFloats[indexx];
-   }
-   """, tuples), " ")
+        vec3 getDiscreteColor_$(spec.name)(float innertexelRes) {
+            uint val = uint(round(innertexelRes));
+            if (val == 0u) {
+                return vec3(0.0);
+            }
+            uint indexx = ((val - 1u) % uint($N)) + 1u;
+            return $(spec.name)DiscreteColorTable[indexx];
+        }
+        """
+    end, "\n")
 end
 
 

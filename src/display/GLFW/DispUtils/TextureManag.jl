@@ -70,9 +70,12 @@ function createTexture(juliaDataType::Type{juliaDataTyp}, width::Int32, height::
     glGenTextures(1, texture)
     glBindTexture(GL_TEXTURE_2D, texture[])
 
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
+    # Linear filtering for continuous float textures (CT, PET) gives smooth hardware interpolation;
+    # Nearest neighbor filtering for integer masks ensures discrete label IDs are preserved.
+    is_float_texture = (GL_RType == GL_R32F || GL_RType == GL_R16F || GL_RType == GL_RGBA32F || GL_RType == GL_RGBA)
+    filter_mode = is_float_texture ? GL_LINEAR : GL_NEAREST
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter_mode)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter_mode)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0)
     #we just assign storage using glTexImage2D to ensure OpenGL 3.3 compatibility
@@ -136,7 +139,9 @@ function activateTextures(listOfTextSpecs::Vector{TextureSpec})::Vector{TextureS
         glActiveTexture(textSpec.actTextrureNumb)
         glBindTexture(GL_TEXTURE_2D, textSpec.ID[])
         
-        glUniform1i(textSpec.uniforms.samplerRef, textSpec.associatedActiveNumer)
+        if textSpec.uniforms.samplerRef >= 0
+            glUniform1i(textSpec.uniforms.samplerRef, textSpec.associatedActiveNumer)
+        end
         setMaskColor(textSpec.color, textSpec.uniforms)
         setTextureVisibility(textSpec.isVisible, textSpec.uniforms)
         changeTextureContribution(textSpec, textSpec.maskContribution)
@@ -229,9 +234,14 @@ function updateImagesDisplayed(
     end #for
     t_tex_ms = (time_ns() - t_tex) / 1e6
 
-    # Upload text texture directly (no shader switch needed — consumer handles rendering)
+    # Render text associated with this slice
     t_text = time_ns()
+    activateForTextDisp(
+        wordsDispObj.shader_program_words, wordsDispObj.vbo_words, calcDimStruct)
+
     matr = addTextToTexture(wordsDispObj, [singleSliceDat.textToDisp..., valueForMaskToSett.text], calcDimStruct)
+
+    reactivateMainObj(forDisplayConstants.shader_program, forDisplayConstants.vbo, calcDimStruct)
     t_text_ms = (time_ns() - t_text) / 1e6
     
     if t_tex_ms + t_text_ms > 50.0

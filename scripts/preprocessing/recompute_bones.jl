@@ -139,17 +139,19 @@ function main()
         ct_vol = read(h5_read["$group/$ct_fname"])
         
         temp_ct = joinpath(data_dir, "temp_ct.nii.gz")
-        ct_to_save = MedImages.update_voxel_data(baseline_ct, Float32.(ct_vol))
+        ct_unflipped = reverse(Float32.(ct_vol), dims=2)
+        ct_to_save = MedImages.update_voxel_data(baseline_ct, ct_unflipped)
         MedImages.create_nii_from_medimage(ct_to_save, temp_ct)
         
-        lesion_ids = unique(mask_vol)
+        mask_unflipped = reverse(Float32.(mask_vol), dims=2)
+        lesion_ids = unique(mask_unflipped)
         filter!(x -> x > 0, lesion_ids)
         
         for lid_float in lesion_ids
             lid = Int(lid_float)
             println("    Processing Study $s_idx Lesion ID: $lid")
             
-            bin_mask = (mask_vol .== lid_float)
+            bin_mask = (mask_unflipped .== lid_float)
             
             # Require minimum overlap with Skellytour (at least 5% of lesion or 5 voxels)
             skelly_overlap = count(bin_mask .& (skelly_vox .> 0))

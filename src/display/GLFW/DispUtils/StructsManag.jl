@@ -219,9 +219,12 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
   # 0. If QuadImage and imagePos > 4, panel is hidden (only active as :RightHalf in compare mode)
   if displayMode == QuadImage && imagePos > 4
     res = zeros(Float32, 32)
+    w_res = zeros(Float32, 32)
     return setproperties(calcDimStruct, (
       mainImageQuadVert = res,
       mainQuadVertSize  = sizeof(res),
+      wordsImageQuadVert = w_res,
+      wordsQuadVertSize = sizeof(w_res),
       widthCorr         = 0.0f0,
       heightCorr        = 0.0f0,
       imagePos          = imagePos

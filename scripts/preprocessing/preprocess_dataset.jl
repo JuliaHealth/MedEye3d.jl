@@ -17,9 +17,7 @@ using .AIInference
 include(joinpath(@__DIR__, "..", "lib", "SceneHierarchy.jl"))
 using .SceneHierarchy
 
-using MedEye3d
-
-const HIRES_FACTOR = 2.0
+const HIRES_FACTOR = 1.0
 
 """
 GPU-accelerated resample_to_image: moves voxel data to GPU, resamples, moves back to CPU.
@@ -154,29 +152,10 @@ function main()
             println("    Compacted mask to $T (max_id=$max_id)")
         end
         
-        # Native resolution: saved WITHOUT flip (loading code applies reverse if needed)
-        MedImages.save_med_image(h5_file, group_name, name, img_res; compress=3)
-
-        # Also save at display resolution (2× in-plane upsampling)
-        display_sp = (img_res.spacing[1] / HIRES_FACTOR, img_res.spacing[2] / HIRES_FACTOR, img_res.spacing[3])
-        interpolator_display = is_mask ? MedImages.Nearest_neighbour_en : MedImages.Linear_en
-        img_display = MedImages.resample_to_spacing(img_res, display_sp, interpolator_display)
-        
-        # Pre-flip DISPLAY resolution only (single flip — replaces runtime reverse())
-        img_display = MedImages.update_voxel_data(img_display, reverse(img_display.voxel_data, dims=2))
-        
-        # Compact display mask
-        if is_mask
-            vox = Float32.(img_display.voxel_data)
-            vox = max.(0.0f0, vox)
-            max_id = round(Int, maximum(vox))
-            T = max_id + 5 <= 127 ? Int8 : Int16
-            img_display = MedImages.update_voxel_data(img_display, T.(round.(vox)))
-        end
-        
-        display_group = group_name * "_DISPLAY"
-        MedImages.save_med_image(h5_file, display_group, name, img_display; compress=3)
-        println("    Saved display-resolution ($(size(img_display.voxel_data))) to $display_group/$name")
+        # Pre-flip native resolution (single flip during preprocessing eliminates runtime reverse)
+        img_flipped = MedImages.update_voxel_data(img_res, reverse(img_res.voxel_data, dims=2))
+        MedImages.save_med_image(h5_file, group_name, name, img_flipped; compress=3)
+        println("    Saved native pre-flipped ($(size(img_flipped.voxel_data))) to $group_name/$name")
     end
     
     for study in studies
@@ -249,18 +228,12 @@ function main()
                     img_res = img_tfm
                 end
                 
-                # Save native res WITHOUT flip
-                MedImages.save_med_image(h5_file, group, anat_name, img_res; compress=3)
-                
-                # Display resolution: flip ONCE + UInt16 compact
-                display_sp = (img_res.spacing[1]/HIRES_FACTOR, img_res.spacing[2]/HIRES_FACTOR, img_res.spacing[3])
-                img_disp = MedImages.resample_to_spacing(img_res, display_sp, MedImages.Nearest_neighbour_en)
-                img_disp = MedImages.update_voxel_data(img_disp, reverse(img_disp.voxel_data, dims=2))
+                # Native resolution: pre-flipped + UInt16 compact
+                img_disp = MedImages.update_voxel_data(img_res, reverse(img_res.voxel_data, dims=2))
                 vox = UInt16.(round.(max.(0.0f0, Float32.(img_disp.voxel_data))))
                 img_disp = MedImages.update_voxel_data(img_disp, vox)
-                display_group = group * "_DISPLAY"
-                MedImages.save_med_image(h5_file, display_group, anat_name, img_disp; compress=3)
-                println("    Saved $(size(vox)) to $display_group/$anat_name (UInt16)")
+                MedImages.save_med_image(h5_file, group, anat_name, img_disp; compress=3)
+                println("    Saved $(size(vox)) to $group/$anat_name (UInt16 pre-flipped)")
             else
                 println("  ⚠️  Per-TP max_anatomy not found: $max_anat_path")
             end
@@ -310,10 +283,18 @@ function main()
         end
         println("  Loading Skellytour for $(ct_fname): $(basename(skellytour_source))")
         skelly_img = MedImages.load_image(local_skelly_path, "CT")
+        # Apply transform if this is a non-baseline timepoint (e.g., SPECT)
+        tfm_path = joinpath(data_dir, tfm_fname)
+        if tfm_fname != "" && isfile(tfm_path)
+            T_ITK = parse_tfm(tfm_path)
+            skelly_img = apply_transform_to_medimage(skelly_img, T_ITK)
+            println("    Applied transform $(tfm_fname) to Skellytour")
+        end
+
         # Resample Skellytour to baseline CT grid if dimensions differ
         # IMPORTANT: save resampled version as temp file so Python gets the correct grid
         skelly_path_for_python = local_skelly_path
-        if size(skelly_img.voxel_data) != size(baseline_ct.voxel_data)
+        if size(skelly_img.voxel_data) != size(baseline_ct.voxel_data) || skelly_img.spacing != baseline_ct.spacing || skelly_img.origin != baseline_ct.origin
             println("    Resampling Skellytour $(size(skelly_img.voxel_data)) → $(size(baseline_ct.voxel_data))")
             skelly_resampled = gpu_resample_to_image(baseline_ct, skelly_img, MedImages.Nearest_neighbour_en)
             skelly_vox = Float32.(skelly_resampled.voxel_data)
@@ -339,7 +320,15 @@ function main()
                 
                 # Check if max_anatomy needs resampling to baseline grid
                 max_anat_img = MedImages.load_image(max_anat_path, "CT")
-                if size(max_anat_img.voxel_data) != size(baseline_ct.voxel_data)
+                
+                # Apply transform if this is a non-baseline timepoint
+                if tfm_fname != "" && isfile(tfm_path)
+                    T_ITK = parse_tfm(tfm_path)
+                    max_anat_img = apply_transform_to_medimage(max_anat_img, T_ITK)
+                    println("    Applied transform $(tfm_fname) to max_anatomy")
+                end
+                
+                if size(max_anat_img.voxel_data) != size(baseline_ct.voxel_data) || max_anat_img.spacing != baseline_ct.spacing || max_anat_img.origin != baseline_ct.origin
                     println("    Resampling max_anatomy $(size(max_anat_img.voxel_data)) → $(size(baseline_ct.voxel_data))")
                     max_anat_resampled = gpu_resample_to_image(baseline_ct, max_anat_img, MedImages.Nearest_neighbour_en)
                     max_anat_path_for_python = joinpath(data_dir, "temp_max_anatomy_resampled.nii.gz")
@@ -356,8 +345,15 @@ function main()
         end
         println("  Extracting bone subsegments for Study $s_idx ($node_name in $group/$mask_fname)...")
         mask_vol = read(h5_read["$group/$mask_fname"])
+        ct_vol = read(h5_read["$group/$ct_fname"])
         
-        lesion_ids = unique(mask_vol)
+        temp_ct = joinpath(data_dir, "temp_ct.nii.gz")
+        ct_unflipped = reverse(Float32.(ct_vol), dims=2)
+        ct_to_save = MedImages.update_voxel_data(baseline_ct, ct_unflipped)
+        MedImages.create_nii_from_medimage(ct_to_save, temp_ct)
+        
+        mask_unflipped = reverse(Float32.(mask_vol), dims=2)
+        lesion_ids = unique(mask_unflipped)
         filter!(x -> x > 0, lesion_ids)
         
         for lid_float in lesion_ids
@@ -365,7 +361,7 @@ function main()
             println("    Processing Study $s_idx Lesion ID: $lid")
             
             # Create binary mask for this lesion
-            bin_mask = (mask_vol .== lid_float)
+            bin_mask = (mask_unflipped .== lid_float)
             
             # Require minimum overlap with Skellytour (at least 5% of lesion or 5 voxels)
             skelly_overlap = count(bin_mask .& (skelly_vox .> 0))
@@ -421,6 +417,9 @@ function main()
     rm(temp_lesion, force=true)
     rm(temp_surf, force=true)
     rm(temp_marr, force=true)
+    rm(joinpath(data_dir, "temp_ct.nii.gz"), force=true)
+    rm(joinpath(data_dir, "temp_skelly_resampled.nii.gz"), force=true)
+    rm(joinpath(data_dir, "temp_max_anatomy_resampled.nii.gz"), force=true)
     
     println("Pre-processing complete.")
 end
