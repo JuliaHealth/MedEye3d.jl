@@ -836,7 +836,7 @@ function coordinateDisplay(
                                 end
                             end
                             GLFW.SwapBuffers(window)
-                            glFlush()
+                            # glFlush() removed — SwapBuffers implies an implicit flush
                         end
                     finally
                         if old_ctx.handle != window.handle

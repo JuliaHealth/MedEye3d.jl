@@ -187,8 +187,9 @@ function initializeWindow(windowWidth::Int, windowHeight::Int)
     GLFW.ShowWindow(window)
     GLFW.SetWindowSize(window, windowWidth, windowHeight) # Seems to be necessary to guarantee that window > 0
     glViewport(0, 0, windowWidth, windowHeight)
-    glDisable(GL_LIGHTING)
-    glEnable(GL_TEXTURE_2D)
+    # Deprecated fixed-function pipeline calls removed (OpenGL 3.3+ Core Profile)
+    # glDisable(GL_LIGHTING) — not needed with programmable shaders
+    # glEnable(GL_TEXTURE_2D) — texture units managed via sampler uniforms
     println(createcontextinfo())
     return window
 end #initializeWindow

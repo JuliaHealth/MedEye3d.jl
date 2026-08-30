@@ -590,6 +590,17 @@ put!(mainMedEye3dInstance.channel, CompareTimePointsEvent(false))
 put!(mainMedEye3dInstance.channel, ChangeTimePointEvent(1))
 put!(mainMedEye3dInstance.channel, ChangeTimePointEvent(-1))
 
+# 5. Warm up Lesion Navigation (SyncLesion compiles bone subseg + mask filter + scroll-to-center)
+put!(mainMedEye3dInstance.channel, SyncLesionEvent(1))
+
+# 6. Warm up Bone Visibility Toggle (compiles shader uniform path + re-scroll)
+put!(mainMedEye3dInstance.channel, ShowBoneMaskEvent(true))
+put!(mainMedEye3dInstance.channel, ShowBoneMaskEvent(false))
+
+# 7. Warm up Show Single Lesion (mask filter min/max + allowedIDs)
+put!(mainMedEye3dInstance.channel, ShowSingleLesionEvent(1))
+put!(mainMedEye3dInstance.channel, ShowSingleLesionEvent(0))
+
 # Start Makie Control Window
 println("Starting Makie Control Window...")
 import Observables
