@@ -62,7 +62,7 @@ juliaDataType- data type defined as a Julia datatype of data we are dealing with
 width,height - dimensions of the texture that we need
 GL_RType,OpGlType - Open Gl types needed to properly specify the  texture they need to be compatible with juliaDataType
 """
-function createTexture(juliaDataType::Type{juliaDataTyp}, width::Int32, height::Int32, GL_RType::UInt32=GL_R8UI, OpGlType=GL_UNSIGNED_BYTE) where {juliaDataTyp}
+function createTexture(juliaDataType::Type{juliaDataTyp}, width::Int32, height::Int32, GL_RType::UInt32=GL_R8UI, OpGlType=GL_UNSIGNED_BYTE; forceNearest::Bool=false) where {juliaDataTyp}
 
 
     #The texture we're going to render to
@@ -71,9 +71,10 @@ function createTexture(juliaDataType::Type{juliaDataTyp}, width::Int32, height::
     glBindTexture(GL_TEXTURE_2D, texture[])
 
     # Linear filtering for continuous float textures (CT, PET) gives smooth hardware interpolation;
-    # Nearest neighbor filtering for integer masks ensures discrete label IDs are preserved.
+    # Nearest neighbor filtering for integer masks and discrete segmentation masks ensures
+    # label IDs are preserved without interpolation at boundaries.
     is_float_texture = (GL_RType == GL_R32F || GL_RType == GL_R16F || GL_RType == GL_RGBA32F || GL_RType == GL_RGBA)
-    filter_mode = is_float_texture ? GL_LINEAR : GL_NEAREST
+    filter_mode = (is_float_texture && !forceNearest) ? GL_LINEAR : GL_NEAREST
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter_mode)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter_mode)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0)
@@ -101,7 +102,10 @@ function initializeTextures(listOfTextSpecs, calcDimStruct::CalcDimsStruct)::Vec
 
     for (ind, textSpec) in enumerate(listOfTextSpecs)
         index = ind - 1
-        textUreId = createTexture(parameter_type(textSpec), calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight, textSpec.GL_Rtype, textSpec.OpGlType)#binding texture and populating with data
+        # Discrete segmentation masks (Mask, Anatomy) and editable masks must use GL_NEAREST
+        # to prevent label ID interpolation at boundaries with hardware filtering
+        needsNearest = textSpec.isMultiDiscreteMask || textSpec.isEditable
+        textUreId = createTexture(parameter_type(textSpec), calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight, textSpec.GL_Rtype, textSpec.OpGlType; forceNearest=needsNearest)#binding texture and populating with data
 
         actTextrureNumb = getProperGL_TEXTURE(index)
         glActiveTexture(actTextrureNumb)
@@ -142,6 +146,8 @@ function activateTextures(listOfTextSpecs::Vector{TextureSpec})::Vector{TextureS
         if textSpec.uniforms.samplerRef >= 0
             glUniform1i(textSpec.uniforms.samplerRef, textSpec.associatedActiveNumer)
         end
+        # Uniforms are per-program state — must re-set after each glUseProgram switch
+        # since each panel has its own shader program
         setMaskColor(textSpec.color, textSpec.uniforms)
         setTextureVisibility(textSpec.isVisible, textSpec.uniforms)
         changeTextureContribution(textSpec, textSpec.maskContribution)
@@ -157,7 +163,7 @@ end#activateTextures
 associates GL_TEXTURE UInt32 to given index
 """
 function getProperGL_TEXTURE(index::Int)::UInt32
-    return eval(Meta.parse("GL_TEXTURE$(index)"))
+    return GL_TEXTURE0 + UInt32(index)
 end#getProperGL_TEXTURE
 
 """

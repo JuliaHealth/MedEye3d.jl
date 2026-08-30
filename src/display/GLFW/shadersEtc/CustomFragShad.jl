@@ -281,25 +281,10 @@ function mainFuncString(textures::Vector{TextureSpec{Float32}}, color)::String
     }
     
     void main() {
-        vec2 texSize = vec2(textureSize($(mainImageName), 0));
-        vec2 pixel = TexCoord0 * texSize - 0.5;
-        vec2 frac = fract(pixel);
-        ivec2 p0 = ivec2(floor(pixel));
-        
-        vec2 uv00 = (vec2(p0) + 0.5) / texSize;
-        vec2 uv10 = (vec2(p0 + ivec2(1, 0)) + 0.5) / texSize;
-        vec2 uv01 = (vec2(p0 + ivec2(0, 1)) + 0.5) / texSize;
-        vec2 uv11 = (vec2(p0 + ivec2(1, 1)) + 0.5) / texSize;
-        
-        vec3 c00 = getPixelColor(uv00);
-        vec3 c10 = getPixelColor(uv10);
-        vec3 c01 = getPixelColor(uv01);
-        vec3 c11 = getPixelColor(uv11);
-        
-        vec3 c0 = mix(c00, c10, frac.x);
-        vec3 c1 = mix(c01, c11, frac.x);
-        
-        FragColor = vec4(mix(c0, c1, frac.y), 1.0);
+        // Hardware GL_LINEAR filtering on continuous textures (CT, PET) provides
+        // free bilinear interpolation. GL_NEAREST on discrete masks (Mask, Anatomy)
+        // preserves label boundaries. No need for software 4-tap sampling.
+        FragColor = vec4(getPixelColor(TexCoord0), 1.0);
     }
     """
 end
