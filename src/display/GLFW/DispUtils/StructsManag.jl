@@ -30,16 +30,15 @@ function getTextureCoordinatesFromScreen(x::Real, y::Real, calcDimsStruct::CalcD
     texH = Float64(calcDimsStruct.imageTextureHeight)
     zoom = Float64(calcDimsStruct.zoom)
     
-    # Reverse the data-level zoom/pan transform to get original voxel coords
-    viewW = texW / zoom
-    viewH = texH / zoom
-    cx = texW / 2.0 + Float64(calcDimsStruct.panX) * texW
-    cy = texH / 2.0 + Float64(calcDimsStruct.panY) * texH
-    x1 = clamp(cx - viewW / 2.0, 1.0, texW - viewW + 1.0)
-    y1 = clamp(cy - viewH / 2.0, 1.0, texH - viewH + 1.0)
+    # Reverse the GPU UV transform to get original voxel coords
+    # GPU vertex shader: TexCoord = (aTexCoord - 0.5) * (1/zoom) + 0.5 + offset
+    # where offsetX = panY, offsetY = panX (matching applyZoomPan axis convention)
+    # Inverse: voxelCoord = ((screenNorm - 0.5) / zoom + 0.5 + panOffset) * texSize
+    uvX = (s - 0.5) / zoom + 0.5 + Float64(calcDimsStruct.panY)
+    uvY = (t - 0.5) / zoom + 0.5 + Float64(calcDimsStruct.panX)
     
-    texX = clamp(round(Int, x1 + s * viewW), 1, Int(texW))
-    texY = clamp(round(Int, y1 + t * viewH), 1, Int(texH))
+    texX = clamp(round(Int, uvX * texW), 1, Int(texW))
+    texY = clamp(round(Int, uvY * texH), 1, Int(texH))
     
     return texX, texY
 end

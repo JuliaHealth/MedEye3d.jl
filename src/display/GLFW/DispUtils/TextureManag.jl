@@ -6,7 +6,7 @@ using Base: Float16
 using GLFW
 using ModernGL, Base.Threads, Logging, Setfield
 using ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..CustomFragShad, ..DataStructs, ..DisplayWords, ..StructsManag
-export activateTextures, addTextToTexture, initializeTextures, createTexture, getProperGL_TEXTURE, updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks
+export activateTextures, addTextToTexture, initializeTextures, createTexture, getProperGL_TEXTURE, updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks, setZoomPanUniforms
 
 
 
@@ -77,6 +77,9 @@ function createTexture(juliaDataType::Type{juliaDataTyp}, width::Int32, height::
     filter_mode = (is_float_texture && !forceNearest) ? GL_LINEAR : GL_NEAREST
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter_mode)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter_mode)
+    # Clamp to edge prevents texture repetition when GPU zoom/pan moves UV outside [0,1]
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0)
     #we just assign storage using glTexImage2D to ensure OpenGL 3.3 compatibility
@@ -167,6 +170,32 @@ function getProperGL_TEXTURE(index::Int)::UInt32
 end#getProperGL_TEXTURE
 
 """
+    setZoomPanUniforms(forDispObj::forDisplayObjects, calcDims::CalcDimsStruct)
+
+Sets the GPU zoom/pan uniforms (uvScale, uvOffset) for the currently active shader program.
+Must be called after glUseProgram for each panel, since uniforms are per-program state.
+
+uvScale = vec2(1/zoom, 1/zoom) — shrinks UV range to zoom in
+uvOffset = vec2(panOffset) — shifts UV center for panning
+"""
+function setZoomPanUniforms(forDispObj::forDisplayObjects, calcDims::CalcDimsStruct)
+    zoom = max(0.1f0, calcDims.zoom)
+    scale = 1.0f0 / zoom
+    # Axis mapping matches old applyZoomPan() convention:
+    #   panY controls horizontal center (columns → UV X)
+    #   panX controls vertical center (rows → UV Y)
+    # No zoom division — the vertex shader's (aTexCoord - 0.5) * uvScale already handles zoom
+    offsetX = calcDims.panY    # panY → UV X (horizontal)
+    offsetY = calcDims.panX    # panX → UV Y (vertical)
+    if forDispObj.uvScaleRef >= 0
+        glUniform2f(forDispObj.uvScaleRef, scale, scale)
+    end
+    if forDispObj.uvOffsetRef >= 0
+        glUniform2f(forDispObj.uvOffsetRef, offsetX, offsetY)
+    end
+end
+
+"""
 Defines the switching of vao buffers for the rendering of
 dynamic crosshair
 """
@@ -230,11 +259,8 @@ function updateImagesDisplayed(
         texSpec = Nothing
         if !isempty(findList)
             texSpec = modulelistOfTextSpecs[findList[1]]
-            transformedDat = applyZoomPan(updateDat.dat, calcDimStruct.zoom, calcDimStruct.panX, calcDimStruct.panY)
-            # Check contiguity before upload
-            is_c = stride(transformedDat, 1) == 1 && stride(transformedDat, 2) == size(transformedDat, 1)
-            if !is_c; n_collects += 1; end
-            updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight)
+            # GPU zoom/pan: upload raw unzoomed data — zoom/pan applied by vertex shader uvScale/uvOffset
+            updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight)
             n_uploads += 1
         end
     end #for

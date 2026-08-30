@@ -20,13 +20,15 @@ function createVertexShader(gslString::String)
   layout (location = 2) in vec2 aTexCoord;
   out vec3 ourColor;
   smooth out vec2 TexCoord0;
+  // GPU-side zoom/pan: uvScale = vec2(1/zoom), uvOffset = pan displacement
+  uniform vec2 uvScale;
+  uniform vec2 uvOffset;
   void main()
   {
       gl_Position = vec4(aPos, 1.0);
       ourColor = aColor;
-   //  TexCoord0 = vec2(-aTexCoord.y, aTexCoord.x);
-     TexCoord0 = aTexCoord;
-
+      // Apply zoom/pan: center at 0.5, scale by 1/zoom, offset by pan
+      TexCoord0 = (aTexCoord - 0.5) * uvScale + 0.5 + uvOffset;
   }
   """
 
