@@ -160,6 +160,8 @@ windowControlStruct::WindowControlStruct=WindowControlStruct()# holding data use
   imagePos::Int64 = 1
   isSyncScrollOn::Bool = true # toggled by pressing c
   isCrosshairVisible::Bool = false # toggled by Makie GUI
+  uvScaleRef::Int32 = Int32(-1)   # uniform location for vec2 uvScale (GPU zoom)
+  uvOffsetRef::Int32 = Int32(-1)  # uniform location for vec2 uvOffset (GPU pan)
 end
 
 

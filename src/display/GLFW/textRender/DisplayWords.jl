@@ -19,6 +19,11 @@ function bindAndActivateForText(shader_program_words::UInt32, fragment_shader_wo
 
     glLinkProgram(shader_program_words)
     glUseProgram(shader_program_words)
+    # Text must not be affected by image zoom/pan — set identity UV transform
+    uvScaleRef = glGetUniformLocation(shader_program_words, "uvScale")
+    uvOffsetRef = glGetUniformLocation(shader_program_words, "uvOffset")
+    if uvScaleRef >= 0; glUniform2f(uvScaleRef, 1.0f0, 1.0f0); end
+    if uvOffsetRef >= 0; glUniform2f(uvOffsetRef, 0.0f0, 0.0f0); end
 
     glAttachShader(shader_program_words, fragment_shader_words)
     glAttachShader(shader_program_words, vertex_shader)
@@ -37,6 +42,11 @@ In order to be able to display texture with text we need to activate main shader
 """
 function activateForTextDisp(shader_program_words::UInt32, vbo_words::Base.RefValue{UInt32}, calcDim::CalcDimsStruct)
     glUseProgram(shader_program_words)
+    # Text must not be affected by image zoom/pan — set identity UV transform
+    uvScaleRef = glGetUniformLocation(shader_program_words, "uvScale")
+    uvOffsetRef = glGetUniformLocation(shader_program_words, "uvOffset")
+    if uvScaleRef >= 0; glUniform2f(uvScaleRef, 1.0f0, 1.0f0); end
+    if uvOffsetRef >= 0; glUniform2f(uvOffsetRef, 0.0f0, 0.0f0); end
     glBindBuffer(GL_ARRAY_BUFFER, vbo_words[])
     glBufferData(GL_ARRAY_BUFFER, calcDim.wordsQuadVertSize, calcDim.wordsImageQuadVert, GL_STATIC_DRAW)
 

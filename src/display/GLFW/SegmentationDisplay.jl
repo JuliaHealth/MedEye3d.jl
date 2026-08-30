@@ -5,7 +5,7 @@ Main module controlling displaying segmentations image and data
 module SegmentationDisplay
 export loadRegisteredImages, displayImage, coordinateDisplay, passDataForScrolling, close_window, set_window_title, resize_window, GLOBAL_OPENGL_LOCK, synchronized_makie_renderloop
 using Dates
-using ColorTypes, MedImages, ModernGL, GLFW, Dictionaries, Logging, Setfield, FreeTypeAbstraction, Statistics, Observables
+using ColorTypes, MedImages, ModernGL, GLFW, Dictionaries, Logging, Setfield, FreeTypeAbstraction, Statistics, Observables, FileIO
 using ..PrepareWindow, ..PrepareWindowHelpers, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords, ..distinctColorsSaved
 using ..ReactingToInput, ..ReactToScroll, ..ShadersAndVerticiesForText, ..ShadersAndVerticiesForLine, ..ShadersAndVerticiesForSupervoxels, ..DisplayWords, ..DataStructs, ..StructsManag
 using ..ReactOnKeyboard, ..ReactOnMouseClickAndDrag, ..DisplayDataManag
@@ -168,9 +168,54 @@ on_next!(stateObjects::Vector{StateDataFields}, data::SetWindowTitleEvent) = rea
 on_next!(stateObjects::Vector{StateDataFields}, data::ToggleMoveLesionModeEvent) = reactToToggleMoveLesionMode(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::AIStatusUpdateEvent) = (MakieEventHandlers.ai_status_text[] = data.text)
 on_next!(stateObjects::Vector{StateDataFields}, data::BoneSubsegResultEvent) = MakieEventHandlers.reactToBoneSubsegResult(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::ScreenshotEvent) = reactToScreenshot(data, stateObjects)
 on_error!(stateObjects::Vector{StateDataFields}, err) = error(err)
 on_complete!(stateObjects::Vector{StateDataFields}) = ""
 
+"""
+    reactToScreenshot(event::ScreenshotEvent, stateObjects)
+
+Captures the current OpenGL framebuffer and saves it as a PNG file.
+Must be called on the GL thread (via on_next! dispatch) after rendering.
+Signals event.done_channel when complete.
+"""
+function reactToScreenshot(event::ScreenshotEvent, stateObjects::Vector{StateDataFields})
+    try
+        window = stateObjects[1].mainForDisplayObjects.window
+        w, h = GLFW.GetFramebufferSize(window)
+        
+        if w <= 0 || h <= 0
+            @warn "Screenshot failed: invalid framebuffer size $(w)x$(h)"
+            put!(event.done_channel, false)
+            return
+        end
+        
+        # Read pixels from back buffer (current render target)
+        pixels = zeros(UInt8, 3 * w * h)
+        glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, pixels)
+        
+        # Convert to RGB image (flip Y — OpenGL origin is bottom-left)
+        img = Array{ColorTypes.RGB{ColorTypes.N0f8}}(undef, h, w)
+        for y in 1:h
+            for x in 1:w
+                idx = ((y - 1) * w + (x - 1)) * 3
+                r = reinterpret(ColorTypes.N0f8, pixels[idx + 1])
+                g = reinterpret(ColorTypes.N0f8, pixels[idx + 2])
+                b = reinterpret(ColorTypes.N0f8, pixels[idx + 3])
+                img[h - y + 1, x] = ColorTypes.RGB{ColorTypes.N0f8}(r, g, b)
+            end
+        end
+        
+        mkpath(dirname(event.path))
+        FileIO.save(event.path, img)
+        println("Screenshot saved: $(event.path) ($(w)x$(h))")
+        flush(stdout)
+        put!(event.done_channel, true)
+    catch e
+        @warn "Screenshot failed: $e"
+        put!(event.done_channel, false)
+    end
+end
 
 """
 is used to pass into the actor data that will be used for scrolling
@@ -560,6 +605,19 @@ function coordinateDisplay(
             imagePos=index
         ))
     end
+    # Query zoom/pan uniform locations for each panel's shader program
+    for forDispObj in forDispObjs
+        glUseProgram(forDispObj.shader_program)
+        forDispObj.uvScaleRef = glGetUniformLocation(forDispObj.shader_program, "uvScale")
+        forDispObj.uvOffsetRef = glGetUniformLocation(forDispObj.shader_program, "uvOffset")
+        # Initialize to identity transform (zoom=1, pan=0)
+        if forDispObj.uvScaleRef >= 0
+            glUniform2f(forDispObj.uvScaleRef, 1.0f0, 1.0f0)
+        end
+        if forDispObj.uvOffsetRef >= 0
+            glUniform2f(forDispObj.uvOffsetRef, 0.0f0, 0.0f0)
+        end
+    end
     #finding some texture that can be modifid and set as one active for modifications
     # put!(mainMedEye3dInstance.channel, forDispObj)
     #in order to clean up all resources while closing
@@ -828,6 +886,8 @@ function coordinateDisplay(
                                     end
                                     if all_textures_valid
                                         reactivateMainObj(state.mainForDisplayObjects.shader_program, state.mainForDisplayObjects.vbo, state.calcDimsStruct)
+                                        # Set per-panel GPU zoom/pan uniforms (must be after glUseProgram in reactivateMainObj)
+                                        TextureManag.setZoomPanUniforms(state.mainForDisplayObjects, state.calcDimsStruct)
                                         # Re-bind EBO within VAO context to ensure indices are available
                                         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo[])
                                         activateTextures(state.mainForDisplayObjects.listOfTextSpecifications)

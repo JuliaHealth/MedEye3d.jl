@@ -462,8 +462,8 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                         findList = findall((texSpec) -> texSpec.name == updateDat.name, otherState.mainForDisplayObjects.listOfTextSpecifications)
                         if !isempty(findList)
                             texSpec = otherState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
-                            transformedDat = applyZoomPan(updateDat.dat, otherState.calcDimsStruct.zoom, otherState.calcDimsStruct.panX, otherState.calcDimsStruct.panY)
-                            updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, otherState.calcDimsStruct.imageTextureWidth, otherState.calcDimsStruct.imageTextureHeight)
+                            # GPU zoom/pan: upload raw unzoomed data — zoom/pan applied by vertex shader
+                            updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, otherState.calcDimsStruct.imageTextureWidth, otherState.calcDimsStruct.imageTextureHeight)
                         end
                     end
                     
@@ -613,16 +613,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             panelState.calcDimsStruct.panY = clamp(panelState.calcDimsStruct.panY + panSpeedY, -1.0f0, 1.0f0)
             
             panelState.lastPanDragCoords = [CartesianIndex(Int(round(x)), Int(round(y)))]
-            
-            # Re-render via reactToScroll for all visible panels to prevent freezing
-            oldSwitch = mainStates[1].switchIndex
-            for i in 1:length(mainStates)
-                if sum(abs.(mainStates[i].calcDimsStruct.mainImageQuadVert)) > 0.01f0 # Not hidden
-                    mainStates[1].switchIndex = i
-                    reactToScroll(0, mainStates, false)
-                end
-            end
-            mainStates[1].switchIndex = oldSwitch
+            # GPU pan: no reactToScroll needed — render loop picks up new pan via setZoomPanUniforms
         end
     end # end right-click handler
 

@@ -5,7 +5,7 @@ export ChangeTimePointEvent, ToggleLesionEvent, RefreshListEvent
 export AddAutoPetEvent, AIInferenceResultEvent, AIStatusUpdateEvent, SyncMissingEvent, GenManualEvent
 export MapLinkEvent, AutoRunPreprocessEvent, RunPreprocessEvent, ShowBoneMaskEvent, ShowMaskLayerEvent, SaveMRBEvent
 export CloseWindowEvent, ResizeWindowEvent, SetWindowTitleEvent, ChangeBrushSizeEvent, ToggleMoveLesionModeEvent
-export PetBlendEvent, BoneSubsegResultEvent
+export PetBlendEvent, BoneSubsegResultEvent, ScreenshotEvent
 struct ChangePlaneEvent
     plane :: Symbol # :Axial, :Coronal, :Sagittal
 end
@@ -110,6 +110,11 @@ end
 
 struct PetBlendEvent
     weight :: Float32  # 0.0 = CT only, 1.0 = full PET overlay
+end
+
+struct ScreenshotEvent
+    path::String
+    done_channel::Channel{Bool}  # signaled when save completes
 end
 
 end

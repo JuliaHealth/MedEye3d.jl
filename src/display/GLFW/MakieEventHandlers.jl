@@ -271,14 +271,14 @@ function _force_texture_upload!(stateObjects::Vector{StateDataFields}, panel_idx
         findList = findall((texSpec) -> texSpec.name == updateDat.name, panelState.mainForDisplayObjects.listOfTextSpecifications)
         if !isempty(findList)
             texSpec = panelState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
-            transformedDat = applyZoomPan(updateDat.dat, panelState.calcDimsStruct.zoom, panelState.calcDimsStruct.panX, panelState.calcDimsStruct.panY)
+            # GPU zoom/pan: upload raw unzoomed data — zoom/pan applied by vertex shader
             # Safety: verify data dimensions fit within the allocated texture
-            actual_w = size(transformedDat, 1)
-            actual_h = size(transformedDat, 2)
+            actual_w = size(updateDat.dat, 1)
+            actual_h = size(updateDat.dat, 2)
             tex_w = Int(panelState.calcDimsStruct.imageTextureWidth)
             tex_h = Int(panelState.calcDimsStruct.imageTextureHeight)
             if actual_w <= tex_w && actual_h <= tex_h
-                TextureManag.updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, panelState.calcDimsStruct.imageTextureWidth, panelState.calcDimsStruct.imageTextureHeight)
+                TextureManag.updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, panelState.calcDimsStruct.imageTextureWidth, panelState.calcDimsStruct.imageTextureHeight)
                 n_uploaded += 1
             else
                 println("  [COMPARE-DBG] SKIPPING texture upload for '$(updateDat.name)' on panel $panel_idx: data=$(actual_w)x$(actual_h) > texture=$(tex_w)x$(tex_h)"); flush(stdout)
@@ -720,8 +720,8 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                     findList = findall((texSpec) -> texSpec.name == updateDat.name, otherState.mainForDisplayObjects.listOfTextSpecifications)
                     if !isempty(findList)
                         texSpec = otherState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
-                        transformedDat = applyZoomPan(updateDat.dat, otherState.calcDimsStruct.zoom, otherState.calcDimsStruct.panX, otherState.calcDimsStruct.panY)
-                        TextureManag.updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, otherState.calcDimsStruct.imageTextureWidth, otherState.calcDimsStruct.imageTextureHeight)
+                        # GPU zoom/pan: upload raw unzoomed data — zoom/pan applied by vertex shader
+                        TextureManag.updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, otherState.calcDimsStruct.imageTextureWidth, otherState.calcDimsStruct.imageTextureHeight)
                     end
                 end
                 

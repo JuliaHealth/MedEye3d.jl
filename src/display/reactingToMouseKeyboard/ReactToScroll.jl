@@ -87,12 +87,7 @@ function reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFi
     
     mainState.calcDimsStruct.zoom = newZoom
     @info "Shift-Scroll Zoom: $(round(newZoom, digits=2))x (panel=$panelIdx)"
-    
-    # Re-render target panel
-    old_switch = mainStates[1].switchIndex
-    mainStates[1].switchIndex = panelIdx
-    reactToScroll(0, mainStates, false)
-    mainStates[1].switchIndex = old_switch
+    # GPU zoom: no reactToScroll needed — render loop picks up new zoom via setZoomPanUniforms
 end
 
 
@@ -241,8 +236,8 @@ function reactToScrollMultiPanel!(panels::Vector{Int}, mainStates::Vector{StateD
             findList = findall((texSpec) -> texSpec.name == updateDat.name, modulelistOfTextSpecs)
             if !isempty(findList)
                 texSpec = modulelistOfTextSpecs[findList[1]]
-                transformedDat = StructsManag.applyZoomPan(updateDat.dat, calcDimStruct.zoom, calcDimStruct.panX, calcDimStruct.panY)
-                TextureManag.updateTexture(updateDat.type, transformedDat, texSpec, 0, 0, calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight)
+                # GPU zoom/pan: upload raw unzoomed data — zoom/pan applied by vertex shader uvScale/uvOffset uniforms
+                TextureManag.updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight)
                 n_uploads += 1
             end
         end
