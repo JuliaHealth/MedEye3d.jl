@@ -1,6 +1,6 @@
 module DisplayDataManag
 
-using ColorTypes, MedImages, ModernGL, GLFW, FreeTypeAbstraction, Base.Threads, Observables, Statistics
+using ColorTypes, MedImages, GLFW, FreeTypeAbstraction, Base.Threads, Observables, Statistics
 using ..ForDisplayStructs
 export retrieveVoxelArray, getDisplayedData, setDisplayedData, depositVoxelArray
 

@@ -1,205 +1,29 @@
 """
-It stores set of functions that need to be composed in order to prepare GLFW window and
-display verticies needed for texture  display
+PrepareWindowHelpers stub — OpenGL buffer creation removed, Vulkan backend handles buffers.
 """
 module PrepareWindowHelpers
+using GLFW, Logging
 
-using ..ModernGlUtil
-using GLFW, ModernGL
+export initializeWindow, createVertexBuffer, createDAtaBuffer, createDynamicDAtaBuffer
+export createElementBuffer, createDynamicElementBuffer, encodeDataFromDataBuffer, controllWindowInput
 
-
-export createDAtaBuffer, createCrosshairDAtaBuffer, createElementBuffer, createVertexBuffer, encodeDataFromDataBuffer, controllWindowInput, initializeWindow
-export createDynamicDataBuffer, createDynamicElementBuffer
-export createDynamicDAtaBuffer
-
-"""
-data is loaded into a buffer which passes it into thw GPU for futher processing
-    - here the data is just passing the positions of verticies
-    GL_STREAM_DRAW the data is set only once and used by the GPU at most a few times.
-    GL_STATIC_DRAW the data is set only once and used many times.
-    GL_DYNAMIC_DRAW the data is changed a lot and used many times.
-    """
-function createDAtaBuffer(positions)
-    vbo = Ref(GLuint(0))   # initial value is irrelevant, just allocate space
-    glGenBuffers(1, vbo)
-    glBindBuffer(GL_ARRAY_BUFFER, vbo[])
-    glBufferData(GL_ARRAY_BUFFER, sizeof(positions), positions, GL_STATIC_DRAW)
-    return vbo
-end #createDAtaBuffer
-
-
-"""
-Dynamic data buffer vbo for crosshair display
-    vbo is dynamic
-    for ebo its unnecessary to make it dynamic since the indices that make
-    up the crosshair remain constant.
-"""
-function createDynamicDAtaBuffer(positions)
-    vbo = Ref(GLuint(0))   # initial value is irrelevant, just allocate space
-    glGenBuffers(1, vbo)
-    glBindBuffer(GL_ARRAY_BUFFER, vbo[])
-    glBufferData(GL_ARRAY_BUFFER, sizeof(positions), positions, GL_DYNAMIC_DRAW)
-    return vbo
-end
-
-"""
-Dynamic data buffer vbo for crosshair display
-    vbo is dynamic
-    for ebo its unnecessary to make it dynamic since the indices that make
-    up the crosshair remain constant.
-"""
-function createDynamicDataBuffer(data::Vector{Float32})
-    vbo = Ref{UInt32}(0)
-    glGenBuffers(1, vbo)
-    glBindBuffer(GL_ARRAY_BUFFER, vbo[])
-    if !isempty(data)
-        glBufferData(GL_ARRAY_BUFFER, sizeof(data), data, GL_DYNAMIC_DRAW)
-    else
-        # Create empty buffer that can be resized later
-        glBufferData(GL_ARRAY_BUFFER, 0, C_NULL, GL_DYNAMIC_DRAW)
-    end
-    return vbo
-end
-
-function createDynamicElementBuffer(indices::Vector{UInt32})
-    ebo = Ref{UInt32}(0)
-    glGenBuffers(1, ebo)
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo[])
-    if !isempty(indices)
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_DYNAMIC_DRAW)
-    else
-        # Create empty buffer that can be resized later
-        glBufferData(GL_ELEMENT_ARRAY_BUFFER, 0, C_NULL, GL_DYNAMIC_DRAW)
-    end
-    return ebo
-end
-
-
-"""
-Similar to the VBO we bind the EBO and copy the indices into the buffer with glBufferData.
-    """
-function createElementBuffer(elements)
-    ebo = Ref(GLuint(0))
-    glGenBuffers(1, ebo)
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo[])
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(elements), elements, GL_STATIC_DRAW)
-    return ebo
-end #createElementBuffer
-
-"""
-vertex buffer keeping things simpler
-    """
-function createVertexBuffer()
-    vao = Ref(GLuint(0))
-    glGenVertexArrays(1, vao)
-    glBindVertexArray(vao[])
-    return vao
-end #createVertexBuffer
-
-
-glVertexAttribSettingStr = """
- showing how openGL should read data from buffer in GPU
- in case of code like below it would mean:
-
- first parameter specifies which vertex attribute we want to configure Remember that we specified the location of the position vertex attribute in the vertex shader
- next argument specifies the size of the vertex attribute. The vertex attribute is a vec2 so it is composed of 2 values.
- The third argument specifies the type of the data which is GL_FLOAT
- next argument specifies if we want the data to be normalized. If we’re inputting integer data types like int, byte and we’ve set this to GL_TRUE
-     The fifth argument is known as the stride and tells us the space between consecutive vertex attributes. Since the next set of position data is
-      located exactly 2 times the size of a float we could’ve also specified the stride as 0 to let OpenGL determine the stride
-     he last parameter is of type void* and thus requires that weird cast. This is the offset of where the position data begins in the buffer.
-
- glVertexAttribPointer positionAttribute, 2, GL_FLOAT, false, 0, C_NULL
-
-     The position data is stored as 32-bit  so 4 byte floating point values.
-     Each position is composed of 2 of those values.
-     """
-@doc glVertexAttribSettingStr
-function glVertexAttribSetting(positionAttribute)
-    glVertexAttribPointer(positionAttribute, 2, GL_FLOAT, false, 0, C_NULL)
-
-end #glVertexAttribSetting
-
-
-
-
-"""
-how data should be read from data buffer
-    """
-function encodeDataFromDataBuffer()
-    typee = Float32
-
-    # position attribute
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(typee), C_NULL)
-    glEnableVertexAttribArray(0)
-    # color attribute
-    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(typee), Ptr{Nothing}(3 * sizeof(typee)))
-    glEnableVertexAttribArray(1)
-    # texture coord attribute
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(typee), Ptr{Nothing}(6 * sizeof(typee)))
-    glEnableVertexAttribArray(2)
-
-end #encodeDataFromDataBuffer
-
-
-
-"""
-it will generally be invoked on GLFW.PollEvents()  in event loop and now depending on
-what will be pressed or clicked it will lead to diffrent actions
-"""
-function controllWindowInput(window)
-
-    # Input callbacks
-    GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
-        name = GLFW.GetKeyName(key, scancode)
-        if name === nothing
-            println("scancode $scancode  $(typeof(scancode))", action)
-            println("action $action $(typeof(action))")
-
-        else
-            println("key $name $(typeof(name))", action)
-            println("action $action $(typeof(action))")
-        end
-    end)
-end #controllWindowInputDoc
-
-"""
-modified from ModernGL.jl github page  and GLFW page
-stores primary
-    """
-function initializeWindow(windowWidth::Int, windowHeight::Int)
-    GLFW.Init()
-
-    # Create a windowed mode window and its OpenGL context
-    GLFW.WindowHint(GLFW.DECORATED, true)
-    window = GLFW.CreateWindow(windowWidth, windowHeight, "Segmentation Visualization")
-
-    # window = GLFW.Window(
-    # 	name = "Segmentation Visualization",
-    # 	resolution = (windowWidth, windowHeight),
-    # 	debugging = false,
-    # 	major = 3,
-    # 	minor = 3# this is what GLVisualize needs to offer all features
-    # )
-
-    # Make the window's context current
-    GLFW.MakeContextCurrent(window)
-    GLFW.ShowWindow(window)
-    GLFW.SetWindowSize(window, windowWidth, windowHeight) # Seems to be necessary to guarantee that window > 0
-    glViewport(0, 0, windowWidth, windowHeight)
-    # Deprecated fixed-function pipeline calls removed (OpenGL 3.3+ Core Profile)
-    # glDisable(GL_LIGHTING) — not needed with programmable shaders
-    # glEnable(GL_TEXTURE_2D) — texture units managed via sampler uniforms
-    println(createcontextinfo())
+function initializeWindow(width::Int, height::Int)
+    # Create GLFW window with NO_API for Vulkan
+    GLFW.WindowHint(GLFW.CLIENT_API, GLFW.NO_API)
+    GLFW.WindowHint(GLFW.RESIZABLE, true)
+    window = GLFW.CreateWindow(width, height, "MedEye3d")
+    # Reset CLIENT_API hint so GLMakie (Makie control window) can create OpenGL windows later
+    GLFW.WindowHint(GLFW.CLIENT_API, GLFW.OPENGL_API)
     return window
-end #initializeWindow
+end
 
+# Stubs for OpenGL buffer functions — not used by Vulkan backend
+function createVertexBuffer(); return Ref(UInt32(0)); end
+function createDAtaBuffer(vertices); return Ref(UInt32(0)); end
+function createDynamicDAtaBuffer(vertices); return Ref(UInt32(0)); end
+function createElementBuffer(indices); return Ref(UInt32(0)); end
+function createDynamicElementBuffer(indices); return Ref(UInt32(0)); end
+function encodeDataFromDataBuffer(); end
+function controllWindowInput(window); end
 
-
-
-end # PreperWindowHelpers
-
-
-
-
-
+end # module PrepareWindowHelpers

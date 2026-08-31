@@ -1,6 +1,6 @@
 
 module ReactingToInput
-using GLFW, ModernGL, Setfield, DataTypesBasic, Base.Threads
+using GLFW, Setfield, DataTypesBasic, Base.Threads
 using ..ReactToScroll, ..ForDisplayStructs, ..ReactOnKeyboard
 using ..TextureManag, ..ReactOnMouseClickAndDrag, ..ReactOnKeyboard, ..DataStructs, ..StructsManag, ..DisplayWords
 using ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane, ..MakieEvents
@@ -8,7 +8,7 @@ export subscribeGLFWtoActor, setUpForScrollData, setUpCalcDimsStruct, setUpWords
 
 
 """
-adding the data into about openGL and GLFW context to enable proper display of main image and masks
+adding the data into about display context to enable proper display of main image and masks
 """
 function setUpMainDisplay(mainForDisplayObjects::forDisplayObjects, mainStates::Vector{StateDataFields})
     mainState = mainStates[mainStates[1].switchIndex]
@@ -16,28 +16,10 @@ function setUpMainDisplay(mainForDisplayObjects::forDisplayObjects, mainStates::
 end#setUpMainDisplay
 
 """
-adding the data needed for text display; also activates appropriate quad for the display
-    it also configures texture that is build for text display
+adding the data needed for text display — no-op, text rendering removed for Vulkan backend.
 """
 function setUpWordsDisplay(textDispObject::ForWordsDispStruct, mainStates::Vector{StateDataFields})
-    mainState = mainStates[mainStates[1].switchIndex]
-
-    bindAndActivateForText(textDispObject.shader_program_words, textDispObject.fragment_shader_words, mainState.mainForDisplayObjects.vertex_shader, textDispObject.vbo_words, mainState.calcDimsStruct)
-
-    texId = createTexture(UInt8, mainState.calcDimsStruct.textTexturewidthh, mainState.calcDimsStruct.textTextureheightt, GL_R8UI, GL_UNSIGNED_BYTE)
-
-    textSpec = setproperties(textDispObject.textureSpec, (ID = texId))
-
-    samplerRef = glGetUniformLocation(textDispObject.shader_program_words, "TextTexture1")
-
-    glUniform1i(samplerRef, length(mainState.mainForDisplayObjects.listOfTextSpecifications) + 1)
-    textDispObjectiNITIALIZED = setproperties(textDispObject, (textureSpec = textSpec))
-
-    mainState.textDispObj = textDispObjectiNITIALIZED
-    # now reactivating the main vbo and shader program
-
-
-    reactivateMainObj(mainState.mainForDisplayObjects.shader_program, mainState.mainForDisplayObjects.vbo, mainState.calcDimsStruct)
+    # No-op: text rendering removed
 end#setUpWordsDisplay
 
 

@@ -3,7 +3,7 @@ using Base: Int32, isvisible
 export MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, StateDataFields, KeyboardStruct, KeyInputFields, TextureUniforms, MaskTextureUniforms, ForWordsDispStruct, MainMedEye3d
 export DisplayedVoxels, CustomDisplayedVoxels, DisplayMode, SingleImage, MultiImage, QuadImage, GlShaderAndBufferFields
 export DoubleClickEvent
-using ColorTypes, Parameters, Observables, ModernGL, GLFW, Dictionaries, FreeTypeAbstraction, Observables
+using ColorTypes, Parameters, Observables, GLFW, Dictionaries, FreeTypeAbstraction, Observables
 using ..DataStructs
 
 struct ToggleSyncScroll end
@@ -21,6 +21,19 @@ Display mode of the MedEye3d visualizer layout.
   MultiImage
   QuadImage
 end
+
+"""
+    RenderBackend
+
+Selects the low-level rendering API.
+- `VulkanBackend`: Vulkan 1.2+ via Vulkan.jl (default, hardware-accelerated, modern).
+- `OpenGLBackend`: Removed. Kept as enum value for compatibility only.
+"""
+@enum RenderBackend begin
+  OpenGLBackend  # Removed — kept for enum compatibility only
+  VulkanBackend
+end
+export RenderBackend, VulkanBackend
 
 
 """
@@ -72,7 +85,7 @@ end
 """
     TextureSpec{T}
 
-Defines the specification and configuration parameters for an OpenGL texture layer (main volume or overlay mask).
+Defines the specification and configuration parameters for a texture layer (main volume or overlay mask).
 
 # Fields
 - `name::String`: Human-readable identifier.
@@ -84,8 +97,8 @@ Defines the specification and configuration parameters for an OpenGL texture lay
 - `color::RGB`: The primary color mapping (for binary masks or single-hue overlays).
 - `strokeWidth::Int32`: Thickness of interactive paint/erase strokes on this mask.
 - `isEditable::Bool`: Enables live mouse annotation interactions.
-- `GL_Rtype::UInt32`: OpenGL texture format (e.g. `GL_R8UI`).
-- `OpGlType::UInt32`: OpenGL data type (e.g. `GL_UNSIGNED_BYTE`).
+- `GL_Rtype::UInt32`: [DEPRECATED] OpenGL texture format (e.g. `GL_R8UI`). Retained for legacy compatibility.
+- `OpGlType::UInt32`: [DEPRECATED] OpenGL data type (e.g. `GL_UNSIGNED_BYTE`). Retained for legacy compatibility.
 """
 @with_kw mutable struct TextureSpec{T}
   name::String = ""
@@ -109,6 +122,9 @@ Defines the specification and configuration parameters for an OpenGL texture lay
   minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask, and second entry is maximum possible value for this mask
   maskContribution::Float32 = 1.0 # controlls contribution  of given mask to the overall image - maximum value is 1 minimum 0 if we have 3 masks and all control contribution is set to 1 and all are visible their corresponding influence to pixel color is 33%
   studyType::String = "" #type of the study - for example CT, MRI, PET, SPECT
+  # Vulkan UBO fields (backend-neutral)
+  colorMask::RGBA = RGBA(0.0, 0.0, 0.0, 1.0) # per-texture color mask for Vulkan std140 UBO
+  allowedIDs::Vector{Float32} = Float32[]       # allowed lesion IDs for discrete mask filtering
 end
 
 #utility function to check type associated
@@ -162,6 +178,11 @@ windowControlStruct::WindowControlStruct=WindowControlStruct()# holding data use
   isCrosshairVisible::Bool = false # toggled by Makie GUI
   uvScaleRef::Int32 = Int32(-1)   # uniform location for vec2 uvScale (GPU zoom)
   uvOffsetRef::Int32 = Int32(-1)  # uniform location for vec2 uvOffset (GPU pan)
+  renderBackend::RenderBackend = VulkanBackend
+  vulkanCtx::Any = nothing
+  vulkanPipelineState::Any = nothing
+  vulkanQuadBuffers::Any = nothing
+  vulkanTextures::Vector{Any} = []
 end
 
 

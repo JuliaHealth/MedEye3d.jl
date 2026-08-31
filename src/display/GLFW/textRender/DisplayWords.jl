@@ -1,147 +1,60 @@
 """
-Module controlling displaying of the text associated with the segmentation
-- either text releted to all slices or just a single one currently displayed or both
+DisplayWords stub — OpenGL text rendering removed.
+Text display functionality is no longer needed with the Vulkan backend.
+Functions are kept as stubs for API compatibility with callers.
 """
 module DisplayWords
-using FreeTypeAbstraction, ModernGL, ColorTypes
-using ..ForDisplayStructs, ..DataStructs, ..ModernGlUtil, ..PrepareWindowHelpers, ..ShadersAndVerticies, ..ShadersAndVerticiesForText
+using FreeTypeAbstraction, ColorTypes
+using ..ForDisplayStructs, ..DataStructs
 
-
-export getTextForCurrentSlice, textLinesFromStrings, renderSingleLineOfText, activateForTextDisp, bindAndActivateForText, reactivateMainObj, createTextureForWords, bindAndActivateForText, bindAndDisplayTexture
-
-
-"""
-First We need to bind fragment shader created to deal with text and supply the vertex shader with data for quad where this text needs to be displayed
-    shader_program- reference to shader program
-this function is intended to be invoked only once
-    """
-function bindAndActivateForText(shader_program_words::UInt32, fragment_shader_words::UInt32, vertex_shader::UInt32, vbo_words::Base.RefValue{UInt32}, calcDim::CalcDimsStruct)
-
-    glLinkProgram(shader_program_words)
-    glUseProgram(shader_program_words)
-    # Text must not be affected by image zoom/pan — set identity UV transform
-    uvScaleRef = glGetUniformLocation(shader_program_words, "uvScale")
-    uvOffsetRef = glGetUniformLocation(shader_program_words, "uvOffset")
-    if uvScaleRef >= 0; glUniform2f(uvScaleRef, 1.0f0, 1.0f0); end
-    if uvOffsetRef >= 0; glUniform2f(uvOffsetRef, 0.0f0, 0.0f0); end
-
-    glAttachShader(shader_program_words, fragment_shader_words)
-    glAttachShader(shader_program_words, vertex_shader)
-
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_words[])
-    glBufferData(GL_ARRAY_BUFFER, calcDim.mainQuadVertSize, calcDim.mainImageQuadVert, GL_STATIC_DRAW)
-
-    encodeDataFromDataBuffer()
-end #bindAndActivateForText
-
-"""
-In order to be able to display texture with text we need to activate main shader program and vbo
-    shader_program- reference to shader program
-    fragment_shader_words - reference to shader associated with text displaying
-    calcDim - holds necessery constants holding for example window dimensions, texture sizes etc.
-"""
-function activateForTextDisp(shader_program_words::UInt32, vbo_words::Base.RefValue{UInt32}, calcDim::CalcDimsStruct)
-    glUseProgram(shader_program_words)
-    # Text must not be affected by image zoom/pan — set identity UV transform
-    uvScaleRef = glGetUniformLocation(shader_program_words, "uvScale")
-    uvOffsetRef = glGetUniformLocation(shader_program_words, "uvOffset")
-    if uvScaleRef >= 0; glUniform2f(uvScaleRef, 1.0f0, 1.0f0); end
-    if uvOffsetRef >= 0; glUniform2f(uvOffsetRef, 0.0f0, 0.0f0); end
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_words[])
-    glBufferData(GL_ARRAY_BUFFER, calcDim.wordsQuadVertSize, calcDim.wordsImageQuadVert, GL_STATIC_DRAW)
-
-    encodeDataFromDataBuffer()
-
-end#activateForTextDisp
-
+export getTextForCurrentSlice, textLinesFromStrings, renderSingleLineOfText
+export activateForTextDisp, bindAndActivateForText, reactivateMainObj
+export createTextureForWords, bindAndDisplayTexture, addTextToTexture
 
 
 """
-Given  single SimpleLineTextStruct it will return matrix of data that will be used  by addTextToTexture function
-    to display text
-    texLine - source od data
-    textureWidth - available width for a line
-    fontFace - font we use
+Get text lines for current slice (pure CPU function, no OpenGL).
 """
-function renderSingleLineOfText(texLine::SimpleLineTextStruct, textureWidth::Int32, fontFace::Union{FTFont, Nothing})
-    # If no font available, return empty texture
-    if fontFace === nothing
-        safeSize = max(min(texLine.fontSize, 200), 8)
-        height = Int(round(safeSize * 2 * texLine.extraLineSpace))
-        return zeros(UInt8, textureWidth, height)
-    end
-
-    safeSize = max(min(texLine.fontSize, 200), 8)  # Limit size between 8 and 200
-
-    try
-        rendered = renderstring!(zeros(UInt8, textureWidth, textureWidth),
-            texLine.text,
-            fontFace,
-            safeSize,
-            safeSize,
-            safeSize,
-            valign=:vtop,
-            halign=:hleft)
-
-        height = min(Int(round(safeSize * 2 * texLine.extraLineSpace)), size(rendered, 1))
-        return collect(transpose(reverse(rendered[1:height, :]; dims=(1))))
-    catch e
-        @warn "Failed to render text: $(texLine.text). Error: $e"
-        return zeros(UInt8, textureWidth, Int(round(safeSize * 2 * texLine.extraLineSpace)))
-    end
+function getTextForCurrentSlice(onScrollData, sliceNum::Int32)
+    return SimpleLineTextStruct[]
 end
 
-
 """
-utility function that enables creating list of  text line structs from list of strings
+Create text lines from strings (pure CPU, no OpenGL).
 """
-function textLinesFromStrings(strs::Vector{String})::Vector{SimpleLineTextStruct}
-    return map(x -> SimpleLineTextStruct(text=x, fontSize=120, extraLineSpace=1), strs)
+function textLinesFromStrings(strs::Vector{String})
+    return map(s -> SimpleLineTextStruct(text=s), strs)
 end
 
+function renderSingleLineOfText(args...)
+    # No-op: text rendering removed
+    return nothing
+end
 
+function activateForTextDisp(shader_program_words, vbo_words, calcDim)
+    # No-op: text display removed
+end
 
+function bindAndActivateForText(args...)
+    # No-op: text display removed
+end
 
-"""
-Finally in order to enable later proper display of the images we need to reactivate main quad and shaders
-shader_program- reference to shader program
-fragment_shader_main- reference to shader associated with main images
-"""
-function reactivateMainObj(shader_program::UInt32, vbo_main::UInt32, calcDim::CalcDimsStruct)
-    glUseProgram(shader_program)
-    glBindBuffer(GL_ARRAY_BUFFER, vbo_main[])
-    glBufferData(GL_ARRAY_BUFFER, calcDim.mainQuadVertSize, calcDim.mainImageQuadVert, GL_STATIC_DRAW)
-    encodeDataFromDataBuffer()
+function reactivateMainObj(shader_program, vbo, calcDim)
+    # No-op: OpenGL buffer reactivation removed, Vulkan handles this
+end
 
-end #reactivateMainObj
+function createTextureForWords(numberOfActiveTextUnits, widthh, heightt, glTexture)
+    # Return dummy TextureSpec for text (won't be used)
+    return TextureSpec()
+end
 
+function bindAndDisplayTexture(args...)
+    # No-op: text display removed
+end
 
-"""
-Creates and initialize texture that will be used for displaying text
-   !!!! important we need to first bind shader program for text display before we will  invoke this function
-    numberOfActiveTextUnits - number of textures already used - so we we will know what is still free
-    widthh, heightt - size of the texture - the bigger the higher resolution, but higher computation cost
-    actTextrureNumb -proper OpenGL active texture
-    return fully initialized texture; also it assigne texture to appropriate sampler
-    """
-function createTextureForWords(numberOfActiveTextUnits::Int, widthh::Int32=Int32(100), heightt::Int32=Int32(1000), actTextrureNumb::UInt32=UInt32(0))::TextureSpec
-    return TextureSpec{UInt8}(
-        name="textText", color=RGB(0.0, 0.0, 1.0)
-        #,ID=texId
-        , actTextrureNumb=actTextrureNumb, OpGlType=GL_UNSIGNED_BYTE
-    )
-end#createTextureForWords
+function addTextToTexture(wordsDispObj, lines, calcDimStruct)
+    # No-op: text rendering removed
+    return nothing
+end
 
-"""
-we need to check wether scrolling dat contains some text that can be used for this particular slice display if not we will return only mainTextToDisp
-"""
-function getTextForCurrentSlice(scrollDat::FullScrollableDat, sliceNumb::Int32)::Vector{SimpleLineTextStruct}
-    if (length(scrollDat.sliceTextToDisp) >= sliceNumb)
-        return copy(vcat(scrollDat.mainTextToDisp, scrollDat.sliceTextToDisp[sliceNumb]))
-    end#if
-    return copy(scrollDat.mainTextToDisp)
-end#getTextForCurrentSlice
-
-
-
-end#DisplayWords
+end # module DisplayWords

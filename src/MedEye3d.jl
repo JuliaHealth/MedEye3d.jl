@@ -26,7 +26,6 @@ export SegmentationDisplay
 # export  ForDisplayStructs.KeyboardStruct
 # export  ForDisplayStructs.MouseStruct
 # export  ForDisplayStructs.ActorWithOpenGlObjects
-export OpenGLDisplayUtils
 # export  DisplayWords.textLinesFromStrings
 export StructsManag
 export ShadersAndVerticiesForSuperVoxels
@@ -58,6 +57,11 @@ include(joinpath("display", "GLFW", "DispUtils", "TextureManag.jl"))
 include(joinpath("display", "GLFW", "shadersEtc", "ShadersAndVerticiesForLine.jl"))
 include(joinpath("display", "GLFW", "shadersEtc", "ShadersAndVerticiesForSupervoxels.jl"))
 include(joinpath("display", "GLFW", "startModules", "PrepareWindow.jl"))
+
+# Vulkan rendering backend (alternative to OpenGL)
+include(joinpath("display", "Vulkan", "VulkanBackend.jl"))
+using .VulkanBackend
+export VulkanBackend
 
 
 

@@ -1,84 +1,15 @@
-
-#Create and initialize shaders
+"""
+ShadersAndVerticies stub — OpenGL shaders removed, Vulkan backend uses VulkanShaders.
+"""
 module ShadersAndVerticies
-using ModernGL, GeometryTypes, GLFW
-using ..ForDisplayStructs, ..CustomFragShad, ..ModernGlUtil
 
 
-export createFragmentShader, positions, elements, getMainVerticies, createVertexShader
+export createVertexShader, createFragmentShader
 
+# Vertex data kept for CalcDimsStruct geometry calculations
+const elements = UInt32[0, 1, 2, 2, 3, 0]
 
-"""
-creating VertexShader  so controlling structures like verticies, quads
-gslString so version of GSLS we are using currently
-  """
-function createVertexShader(gslString::String)
-  # $(gslString)
-  vsh = """$(gslString)
-  layout (location = 0) in vec3 aPos;
-  layout (location = 1) in vec3 aColor;
-  layout (location = 2) in vec2 aTexCoord;
-  out vec3 ourColor;
-  smooth out vec2 TexCoord0;
-  // GPU-side zoom/pan: uvScale = vec2(1/zoom), uvOffset = pan displacement
-  uniform vec2 uvScale;
-  uniform vec2 uvOffset;
-  void main()
-  {
-      gl_Position = vec4(aPos, 1.0);
-      ourColor = aColor;
-      // Apply zoom/pan: center at 0.5, scale by 1/zoom, offset by pan
-      TexCoord0 = (aTexCoord - 0.5) * uvScale + 0.5 + uvOffset;
-  }
-  """
+function createVertexShader(gslsStr); return UInt32(0); end
+function createFragmentShader(gslsStr, textSpecs, color); return UInt32(0); end
 
-  return createShader(vsh, GL_VERTEX_SHADER)
-end
-
-"""
-loading the shader from file- so we have better experience writing shader in separate file (can be used if we do not use Custom frag shader)
-"""
-function getShaderFileText(path::String)
-  f = open(path)
-  return join(readlines(f), "\n")
-end #getShaderFileText
-
-
-"""
-creating fragment Shader  so controlling colors and textures
-gslString so version of GSLS we are using currently
-  """
-function createFragmentShader(gslString::String, listOfTexturesToCreate::Vector{TextureSpec{Float32}}, color)
-
-  # $(gslString)
-
-  fsh = """
-$(gslString)
-
-$( createCustomFramgentShader(listOfTexturesToCreate, color))
-"""
-
-# For debugging shaders
-  for (idx, line) in enumerate(eachline(IOBuffer(fsh)))
-     println(idx, ": ", line)
-  end
-  return createShader(fsh, GL_FRAGMENT_SHADER)
-end
-
-
-
-################### data to display verticies
-
-# Specify how vertices are arranged into faces
-# Face{N,T} type specifies a face with N vertices, with index type
-# T (you should choose UInt32), and index-offset O. If you're
-# specifying faces in terms of julia's 1-based indexing, you should set
-# O=0. (If you instead number the vertices starting with 0, set
-# O=-1.)
-elements = Face{3,UInt32}[(0, 1, 2),          # the first triangle
-  (2, 3, 0)]          # the second triangle
-
-
-
-
-end #..ShadersAndVerticies
+end # module ShadersAndVerticies
