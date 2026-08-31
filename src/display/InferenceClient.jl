@@ -23,25 +23,43 @@ function send_json_request(req::Dict; port=5005)
 end
 
 function start_python_worker(worker_script_path::String)
-    # Since we are using Docker, we just run the bash script to orchestrate it
     println("[InferenceClient] Ensuring MedEye3d AI Docker Worker is running..."); flush(stdout)
-    docker_script = joinpath(@__DIR__, "..", "..", "scripts", "ai", "start_docker_worker.sh")
     
-    # We use run(..., wait=true) because the bash script itself runs docker in the background (-d)
-    # or immediately exits if it's already running.
-    run(pipeline(`bash $docker_script`, stdout="/tmp/medeye3d_docker_worker.log", stderr="/tmp/medeye3d_docker_worker.log"), wait=true)
+    # Try to start Docker worker (may fail if docker-in-docker is not available)
+    docker_script = joinpath(@__DIR__, "..", "..", "scripts", "ai", "start_docker_worker.sh")
+    docker_available = try
+        run(pipeline(`bash $docker_script`, stdout="/tmp/medeye3d_docker_worker.log", stderr="/tmp/medeye3d_docker_worker.log"), wait=true)
+        true
+    catch e
+        println("[InferenceClient] Docker not available inside this container (normal for docker-in-docker)."); flush(stdout)
+        println("[InferenceClient] Start the AI worker from the HOST with:"); flush(stdout)
+        println("  bash scripts/ai/start_docker_worker.sh"); flush(stdout)
+        false
+    end
 
-    # Wait up to 15 seconds for the Python TCP server to initialize models and open port 5005 inside the container
+    # Wait up to 15 seconds for the Python TCP server to be reachable on port 5005
+    connected = false
     for i in 1:15
         try
             conn = connect("127.0.0.1", 5005)
             close(conn)
-            println("[InferenceClient] Docker Python Worker is ready."); flush(stdout)
-            verify_docker_code_sync()
+            println("[InferenceClient] AI Worker is ready on port 5005."); flush(stdout)
+            connected = true
+            try verify_docker_code_sync() catch end
             break
         catch
             sleep(1)
         end
+    end
+    if !connected
+        println("[InferenceClient] WARNING: AI Worker not reachable on port 5005 after 15s."); flush(stdout)
+        println("[InferenceClient] Start the AI container from the HOST:"); flush(stdout)
+        println("  docker rm -f medeye3d-ai 2>/dev/null"); flush(stdout)
+        println("  docker run -d --rm --name medeye3d-ai --gpus '\"device=1\"' \\"); flush(stdout)
+        println("    --shm-size=64g --network=container:sharp_ramanujan \\"); flush(stdout)
+        println("    -v /mnt/big/project_ssd/project_ssd/MedEye3d.jl/tmp_inference:/tmp/medeye3d_inference \\"); flush(stdout)
+        println("    -v /mnt/big/project_ssd/project_ssd/MedEye3d.jl/scripts/ai:/app \\"); flush(stdout)
+        println("    medeye3d-ai:latest"); flush(stdout)
     end
 end
 
@@ -88,7 +106,7 @@ function extract_patch(vol::Array{Float32, 3}, cx::Int, cy::Int, cz::Int; patch_
     return patch
 end
 
-function insert_patch!(vol::Array{Float32, 3}, patch::Array{<:Real, 3}, cx::Int, cy::Int, cz::Int; label_val::Float32=1.0f0)
+function insert_patch!(vol::AbstractArray{T, 3}, patch::AbstractArray{<:Real, 3}, cx::Int, cy::Int, cz::Int; label_val::T=T(1)) where T
     w, h, d = size(vol)
     pw, ph, pd = size(patch)
     

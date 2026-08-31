@@ -33,11 +33,22 @@ if [ -f "$ENV_FILE" ]; then
     export $(grep -v '^#' "$ENV_FILE" | xargs)
 fi
 
-# Run container in background, expose 5005, and mount the inference temp dir
+# Run container in background, sharing network with the GUI container if it exists
 echo "Starting MedEye3d AI Docker container..."
+
+# Detect GUI container for network sharing
+GUI_CONTAINER="${MEDEYE3D_GUI_CONTAINER:-sharp_ramanujan}"
+if docker ps -q -f name="$GUI_CONTAINER" > /dev/null 2>&1 && [ "$(docker ps -q -f name="$GUI_CONTAINER")" != "" ]; then
+    echo "  Sharing network with GUI container: $GUI_CONTAINER"
+    NETWORK_OPT="--network=container:$GUI_CONTAINER"
+else
+    echo "  No GUI container found; binding port 5005 to host"
+    NETWORK_OPT="-p 5005:5005"
+fi
+
 docker run -d --rm --name medeye3d-ai --gpus '"device=1"' \
     --shm-size=64g \
-    -p 5005:5005 \
+    $NETWORK_OPT \
     -e TOTALSEG_LICENSE_NUMBER="${TOTALSEG_LICENSE_NUMBER:-aca_XHEO7L1IH2U7G7}" \
     -v "$HOST_INFERENCE_DIR":/tmp/medeye3d_inference \
     -v "$HOST_APP_DIR":/app \

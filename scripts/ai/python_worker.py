@@ -225,13 +225,12 @@ def run_nninteractive(ct_path, point_path, out_dir, scribble_coords=None, autozo
             z1, z2 = int(nz[0].min()), int(nz[0].max()) + 1
             y1, y2 = int(nz[1].min()), int(nz[1].max()) + 1
             x1, x2 = int(nz[2].min()), int(nz[2].max()) + 1
-            sub_mask_zyx = target_zyx[z1:z2, y1:y2, x1:x2]
-            # Transpose to Julia XYZ order
-            sub_mask_xyz = np.transpose(sub_mask_zyx, (2, 1, 0)).copy()
-            mask_b64 = base64.b64encode(sub_mask_xyz.astype(np.uint8).tobytes()).decode('ascii')
+            sub_mask_zyx = np.ascontiguousarray(target_zyx[z1:z2, y1:y2, x1:x2])
+            # Direct C-contiguous ZYX byte export (bitwise matches Julia column-major XYZ reshape)
+            mask_b64 = base64.b64encode(sub_mask_zyx.astype(np.uint8).tobytes()).decode('ascii')
             # Full shape in XYZ (Julia order)
             full_shape_xyz = [CURRENT_LOADED_CT_SHAPE[2], CURRENT_LOADED_CT_SHAPE[1], CURRENT_LOADED_CT_SHAPE[0]]
-            sub_shape_xyz = list(sub_mask_xyz.shape)
+            sub_shape_xyz = [x2 - x1, y2 - y1, z2 - z1]
             # Clipped bbox in ZYX for Julia to place the sub-mask
             clipped_bbox = [[z1, z2], [y1, y2], [x1, x2]]
             print(f"[Worker] nninteractive produced {total_voxels} voxels, inline transfer ({len(mask_b64)} b64 bytes, sub_shape={sub_shape_xyz}, bbox_zyx={clipped_bbox})")
@@ -384,26 +383,31 @@ def handle_client(conn):
                     import base64
                     import numpy as np
                     
-                    shape = tuple(data["shape"])
-                    spacing = tuple(data["spacing"])
+                    shape_xyz = tuple(data["shape"])
+                    spacing_xyz = tuple(data["spacing"])
+                    
+                    # Julia sends [X, Y, Z] column-major, which in C-order memory is [Z, Y, X]
+                    shape_zyx = (shape_xyz[2], shape_xyz[1], shape_xyz[0])
+                    spacing_zyx = (spacing_xyz[2], spacing_xyz[1], spacing_xyz[0])
                     
                     lesion_b64 = base64.b64decode(data["lesion_mask_b64"])
                     bone_b64 = base64.b64decode(data["bone_mask_b64"])
                     
-                    # They are sent as UInt8
-                    lesion_mask = np.frombuffer(lesion_b64, dtype=np.uint8).reshape(shape)
-                    bone_mask = np.frombuffer(bone_b64, dtype=np.uint8).reshape(shape)
+                    # Reshape in C-order into (Z, Y, X)
+                    lesion_mask = np.frombuffer(lesion_b64, dtype=np.uint8).reshape(shape_zyx)
+                    bone_mask = np.frombuffer(bone_b64, dtype=np.uint8).reshape(shape_zyx)
                     
-                    surf_mask, marr_mask = generate_bone_subsegments_pt(lesion_mask, bone_mask, spacing)
+                    surf_mask, marr_mask = generate_bone_subsegments_pt(lesion_mask, bone_mask, spacing_zyx)
                     
-                    surf_b64 = base64.b64encode(surf_mask.astype(np.uint8).tobytes()).decode('ascii')
-                    marr_b64 = base64.b64encode(marr_mask.astype(np.uint8).tobytes()).decode('ascii')
+                    # C-order tobytes() directly matches Julia's (X, Y, Z) column-major reshape
+                    surf_b64 = base64.b64encode(np.ascontiguousarray(surf_mask).astype(np.uint8).tobytes()).decode('ascii')
+                    marr_b64 = base64.b64encode(np.ascontiguousarray(marr_mask).astype(np.uint8).tobytes()).decode('ascii')
                     
                     response = {
                         "status": "success",
                         "surf_mask_b64": surf_b64,
                         "marr_mask_b64": marr_b64,
-                        "shape": shape
+                        "shape": list(shape_xyz)
                     }
                 elif command == "preload_ct":
                     ct_p = data.get("ct_path")

@@ -34,11 +34,13 @@ const MEH = MedEye3d.SegmentationDisplay.MakieEventHandlers
     texX_mid, texY_mid = StructsManag.getTextureCoordinatesFromScreen(350, 225, calcDim, actualW, actualH)
     texX_bot, texY_bot = StructsManag.getTextureCoordinatesFromScreen(350, 440, calcDim, actualW, actualH)
     
-    # Y coordinates should increase from top to bottom (texY_top < texY_mid < texY_bot)
-    @test texY_top < texY_mid
-    @test texY_mid < texY_bot
-    @test texY_top >= 1
-    @test texY_bot <= 512
+    # With OpenGL-style UV mapping (V=0 at bottom, V=1 at top):
+    # Texture Y increases from BOTTOM to TOP of screen.
+    # texY_top (screen top) > texY_mid > texY_bot (screen bottom)
+    @test texY_top > texY_mid
+    @test texY_mid > texY_bot
+    @test texY_bot >= 1
+    @test texY_top <= 512
     println("Coordinate mapping Y progression: top=$texY_top, mid=$texY_mid, bot=$texY_bot")
     
     # X coordinates should increase from left to right
