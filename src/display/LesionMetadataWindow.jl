@@ -1351,11 +1351,19 @@ function create_metadata_window(
         return Consume(true)
     end
     
-    rowgap!(g, 0)   # ultra-compact: no gap between rows
+    rowgap!(g, 2)   # compact spacing: 2px gap between rows (prevents Menu/Slider overlap)
     colgap!(g, 2)   # compact columns
     colsize!(g, 1, Auto())
     r = [0]  # row counter as array for mutation in closures
     nr!() = (r[1] += 1; r[1])
+
+    # Registry of rows with explicit Fixed heights (Menu, Slider, Textbox rows).
+    # set_row_visible! uses this to restore the correct Fixed height instead of Auto()
+    # when re-showing a row after it was hidden (e.g., during compare mode toggle).
+    _row_fixed_heights = Dict{Int, Int}()  # row_index => pixel_height
+    function register_fixed_row!(row_idx::Int, height::Int)
+        _row_fixed_heights[row_idx] = height
+    end
 
     # Header removed for compactness — title was decorative only
 
@@ -1405,7 +1413,7 @@ function create_metadata_window(
             
             # Zero/restore row gaps to eliminate empty space between collapsed headers
             for i in (start_row > 1 ? start_row - 1 : start_row):min(end_row, r[1] - 1)
-                rowgap!(g, i, is_open[] ? 1 : 0)
+                rowgap!(g, i, is_open[] ? 2 : 0)
             end
             
             for c in g.content
@@ -1453,6 +1461,7 @@ function create_metadata_window(
         fontsize = 10)
     btn_next = Button(g[nav_r, 4], label = "Next >>",
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, nav_r, Fixed(28)); register_fixed_row!(nav_r, 28)
 
     # Active lesion display kept for callbacks (no visible label — shown in dropdown)
     active_lesion_display = Observable{String}("(none)")
@@ -1637,6 +1646,7 @@ function create_metadata_window(
     slider_blend = Slider(g[blend_r, 2:3], range = 0.0f0:0.01f0:1.0f0, startvalue = init_blend)
     lbl_blend_val = Label(g[blend_r, 4], @lift(string(round($(slider_blend.value), digits=2))),
         fontsize = 10, color = TXT)
+    rowsize!(g, blend_r, Fixed(28)); register_fixed_row!(blend_r, 28)
     on(slider_blend.value) do val
         v = Float32(val)
         display_cfg["pet_ct_blend"] = v
@@ -1650,6 +1660,7 @@ function create_metadata_window(
     slider_label_opacity = Slider(g[opac_r, 2:3], range = 0.0f0:0.01f0:1.0f0, startvalue = init_label_opacity)
     lbl_opac_val = Label(g[opac_r, 4], @lift(string(round($(slider_label_opacity.value), digits=2))),
         fontsize = 10, color = TXT)
+    rowsize!(g, opac_r, Fixed(28)); register_fixed_row!(opac_r, 28)
     on(slider_label_opacity.value) do val
         v = Float32(val)
         display_cfg["label_opacity"] = v
@@ -1663,6 +1674,7 @@ function create_metadata_window(
     
     ct_s_r = nr!()
     islider_ct = IntervalSlider(g[ct_s_r, 1:4], range = -1500.0:10.0:3000.0, startvalues = (-150.0, 250.0))
+    rowsize!(g, ct_s_r, Fixed(28)); register_fixed_row!(ct_s_r, 28)
     
     ct_p_r = nr!()
     Label(g[ct_p_r, 1], "Presets:", fontsize = 10, color = SUBTXT, halign = :right)
@@ -1675,6 +1687,7 @@ function create_metadata_window(
     tb_ct_min = Textbox(g[ct_c_r, 2], placeholder = "Min (-150)", stored_string = "-150.0", fontsize = 10)
     tb_ct_max = Textbox(g[ct_c_r, 3], placeholder = "Max (250)",  stored_string = "250.0",  fontsize = 10)
     btn_ct_plus  = Button(g[ct_c_r, 4], label = "+ 50", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, ct_c_r, Fixed(28)); register_fixed_row!(ct_c_r, 28)
     
     # Apply CT removed — slider drag and Enter-in-textbox already apply
 
@@ -1729,6 +1742,7 @@ function create_metadata_window(
     
     pet_s_r = nr!()
     islider_pet = IntervalSlider(g[pet_s_r, 1:4], range = 0.0:0.1:50.0, startvalues = (0.0, 10.0))
+    rowsize!(g, pet_s_r, Fixed(28)); register_fixed_row!(pet_s_r, 28)
     
     pet_p_r = nr!()
     Label(g[pet_p_r, 1], "Presets:", fontsize = 10, color = SUBTXT, halign = :right)
@@ -1741,6 +1755,7 @@ function create_metadata_window(
     tb_pet_min = Textbox(g[pet_c_r, 2], placeholder = "Min (0.0)", stored_string = "0.0", fontsize = 10)
     tb_pet_max = Textbox(g[pet_c_r, 3], placeholder = "Max (10.0)", stored_string = "10.0", fontsize = 10)
     btn_pet_plus  = Button(g[pet_c_r, 4], label = "+ 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, pet_c_r, Fixed(28)); register_fixed_row!(pet_c_r, 28)
     
     # Apply PET removed — slider drag and Enter-in-textbox already apply
 
@@ -1795,6 +1810,7 @@ function create_metadata_window(
     
     spect_s_r = nr!()
     islider_spect = IntervalSlider(g[spect_s_r, 1:4], range = 0.0:0.1:100.0, startvalues = (0.0, 10.0))
+    rowsize!(g, spect_s_r, Fixed(28)); register_fixed_row!(spect_s_r, 28)
     
     spect_p_r = nr!()
     Label(g[spect_p_r, 1], "Presets:", fontsize = 10, color = SUBTXT, halign = :right)
@@ -1807,6 +1823,7 @@ function create_metadata_window(
     tb_spect_min = Textbox(g[spect_c_r, 2], placeholder = "Min (0.0)", stored_string = "0.0", fontsize = 10)
     tb_spect_max = Textbox(g[spect_c_r, 3], placeholder = "Max (10.0)", stored_string = "10.0", fontsize = 10)
     btn_spect_plus  = Button(g[spect_c_r, 4], label = "+ 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, spect_c_r, Fixed(28)); register_fixed_row!(spect_c_r, 28)
     
     # Apply SPECT removed — slider drag and Enter-in-textbox already apply
 
@@ -1898,10 +1915,19 @@ end_section!(sec_win)
         ]
     ]
 
+    
     function set_row_visible!(row_idx::Int, visible::Bool)
-        rowsize!(g, row_idx, visible ? Auto() : Fixed(0))
+        if visible
+            if haskey(_row_fixed_heights, row_idx)
+                rowsize!(g, row_idx, Fixed(_row_fixed_heights[row_idx]))
+            else
+                rowsize!(g, row_idx, Auto())
+            end
+        else
+            rowsize!(g, row_idx, Fixed(0))
+        end
         if row_idx < r[1]
-            rowgap!(g, row_idx, visible ? 1 : 0)
+            rowgap!(g, row_idx, visible ? 2 : 0)
         end
         for c in g.content
             if c.span.rows.start <= row_idx && c.span.rows.stop >= row_idx
@@ -1959,11 +1985,12 @@ end_section!(sec_win)
                         fontsize = 10,
                         textcolor = RGBf(0, 0, 0),
                         boxcolor = RGBf(1, 1, 1))
-                    rowsize!(g, q_r, Fixed(80))
+                    rowsize!(g, q_r, Fixed(80)); register_fixed_row!(q_r, 80)
                 else
                     tb = Textbox(g[q_r, 2:4],
                         placeholder = isempty(q.default_answer) ? "..." : q.default_answer,
                         fontsize = 10)
+                    rowsize!(g, q_r, Fixed(28)); register_fixed_row!(q_r, 28)
                 end
                 field_widgets[q.short] = tb
             else
@@ -1978,6 +2005,7 @@ end_section!(sec_win)
                 end
                 m = searchable_menu(g, q_r, 2:3, options = opts_obs, default = def_idx, fontsize = 10)
                 btn_add_opt = Button(g[q_r, 4], label = "+", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+                rowsize!(g, q_r, Fixed(28)); register_fixed_row!(q_r, 28)
                 field_widgets[q.short] = m
                 
                 let q_name = q.short, menu_w = m, obs = opts_obs
@@ -2044,6 +2072,7 @@ end_section!(sec_win)
             ba_all_opts = Observable(String[""; anatomy_ontology])
             menu_base_anat = searchable_menu(g, ba_r, 2:3, options = ba_all_opts, fontsize = 10)
             menu_side = Menu(g[ba_r, 4], options = ["", "Right", "Left", "NA"], default = "", fontsize = 10)
+            rowsize!(g, ba_r, Fixed(28)); register_fixed_row!(ba_r, 28)
             
             # Anatomical Details (OntologyBuilder-style rows)
             anat_detail_label_r = nr!()
@@ -2145,7 +2174,9 @@ end_section!(sec_win)
         buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
 
     radlex_filtered = Observable(length(radlex) > 200 ? radlex[1:200] : radlex)
+    rl_menu_r = r[1] + 1  # peek at next row number before nr!()
     rl_menu = Menu(g[nr!(), 1:4], options = radlex_filtered, fontsize = 10)
+    rowsize!(g, rl_menu_r, Fixed(28)); register_fixed_row!(rl_menu_r, 28)
 
     on(rl_search.stored_string) do txt
         t = _safe_strip(txt)
@@ -2420,6 +2451,7 @@ end_section!(sec_win)
     btn_paint      = Button(g[seg_r1, 2], label = "Paint", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     btn_erase      = Button(g[seg_r1, 3], label = "Erase", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     btn_view_mode  = Button(g[seg_r1, 4], label = "View", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, seg_r1, Fixed(28)); register_fixed_row!(seg_r1, 28)
     
     current_paint_mode = Observable(:view)
     
@@ -2475,12 +2507,13 @@ end_section!(sec_win)
         put!(channel, PaintValEvent(-1, false))
     end
     
-    # Row 2: Brush slider + Move button
+    # Row 2: Brush slider + Move button (fixed height to prevent slider overlap)
     seg_r2 = nr!()
     Label(g[seg_r2, 1], "Brush:", halign=:right, fontsize=10, color=LBL_FG)
     slider_brush = Slider(g[seg_r2, 2:3], range = 1:20, startvalue = 1)
     on(slider_brush.value) do val; put!(channel, ChangeBrushSizeEvent(val)) end
     btn_move_lesion = Button(g[seg_r2, 4], label = "Move", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, seg_r2, Fixed(30)); register_fixed_row!(seg_r2, 30)
     move_lesion_active = Ref(false)
     on(btn_move_lesion.clicks) do _
         move_lesion_active[] = !move_lesion_active[]
@@ -2488,10 +2521,12 @@ end_section!(sec_win)
         put!(channel, ToggleMoveLesionModeEvent(move_lesion_active[]))
     end
     
-    # Row 3: Algorithm + Run AI
+    # Row 3: Algorithm dropdown (fixed height for Menu dropdown clearance)
     seg_r3 = nr!()
-    algo_combo = Menu(g[seg_r3, 1:2], options = ["HELPNet (AI)", "NNInteractive", "Traditional (PETTumor)"], default = "HELPNet (AI)", fontsize = 10)
-    btn_add_ai = Button(g[seg_r3, 3:4], label = "Run AI", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
+    Label(g[seg_r3, 1], "AI:", halign=:right, fontsize=10, color=LBL_FG)
+    algo_combo = Menu(g[seg_r3, 2:3], options = ["HELPNet (AI)", "NNInteractive", "Traditional (PETTumor)"], default = "HELPNet (AI)", fontsize = 10)
+    btn_add_ai = Button(g[seg_r3, 4], label = "Run AI", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, seg_r3, Fixed(30)); register_fixed_row!(seg_r3, 30)
     on(btn_add_ai.clicks) do _
         @async try
             put!(channel, AddAutoPetEvent(algo_combo.selection[], channel))
@@ -2500,9 +2535,11 @@ end_section!(sec_win)
         end
     end
 
-    # Row 4: AI status
-    Label(g[nr!(), 1:4], @lift(string($(_MEH.ai_status_text))),
+    # Row 4: AI status (fixed height)
+    seg_r4 = nr!()
+    Label(g[seg_r4, 1:4], @lift(string($(_MEH.ai_status_text))),
         fontsize=10, color=RGBAf(0.7, 0.9, 0.7, 1.0), halign=:center)
+    rowsize!(g, seg_r4, Fixed(20)); register_fixed_row!(seg_r4, 20)
 
     end_section!(sec_seg)
 
@@ -2524,6 +2561,14 @@ end_section!(sec_win)
     _MASK_IDS_CACHE = Dict{Int, Vector{Int}}()
     function get_mask_ids(tp)
         if haskey(_MASK_IDS_CACHE, tp) return _MASK_IDS_CACHE[tp] end
+        # Fast path: derive mask IDs from precomputed _volume_cache keys (O(1))
+        cached_ids = Int[lid for (tp_idx, lid) in keys(_volume_cache) if tp_idx == tp && lid > 0]
+        if !isempty(cached_ids)
+            ids = sort!(unique!(cached_ids))
+            _MASK_IDS_CACHE[tp] = ids
+            return ids
+        end
+        # Fallback: scan mask volume (O(N) — only if volume cache is empty)
         if !haskey(_MEH.tp_data_cache, tp) return Int[] end
         entry = _MEH.tp_data_cache[tp]
         mask = entry.mask
@@ -2751,18 +2796,21 @@ end_section!(sec_win)
     Menu(g[ads_r1, 2], options = ["Auto", "SUV_PET_Image_0", "SUV_PET_Image_1"], fontsize = 10)
     Label(g[ads_r1, 3], "CT:", fontsize = 10, color = LBL_FG, halign = :right)
     Menu(g[ads_r1, 4], options = ["Auto", "Fixed_CT_Volume_0", "Fixed_CT_Volume_1"], fontsize = 10)
+    rowsize!(g, ads_r1, Fixed(28)); register_fixed_row!(ads_r1, 28)
 
     ads_r2 = nr!()
     Label(g[ads_r2, 1], "Mask:", fontsize = 10, color = LBL_FG, halign = :right)
     Menu(g[ads_r2, 2], options = ["Auto", "Segmentation_0", "Segmentation_1"], fontsize = 10)
     Label(g[ads_r2, 3], "Atlas:", fontsize = 10, color = LBL_FG, halign = :right)
     Menu(g[ads_r2, 4], options = ["None", "Bone_Mask", "Organ_Mask"], fontsize = 10)
+    rowsize!(g, ads_r2, Fixed(28)); register_fixed_row!(ads_r2, 28)
 
     ads_r3 = nr!()
     Label(g[ads_r3, 1], "Xform Fwd:", fontsize = 10, color = LBL_FG, halign = :right)
     Menu(g[ads_r3, 2], options = ["None", "Elastic_Transform_0_to_1"], fontsize = 10)
     Label(g[ads_r3, 3], "Xform Bwd:", fontsize = 10, color = LBL_FG, halign = :right)
     Menu(g[ads_r3, 4], options = ["None", "Elastic_Transform_1_to_0"], fontsize = 10)
+    rowsize!(g, ads_r3, Fixed(28)); register_fixed_row!(ads_r3, 28)
 
     end_section!(sec_settings)
 

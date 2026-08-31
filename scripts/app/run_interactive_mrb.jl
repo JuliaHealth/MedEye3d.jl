@@ -519,8 +519,8 @@ put!(mainMedEye3dInstance.channel, ChangeTimePointEvent(-1))
 put!(mainMedEye3dInstance.channel, SyncLesionEvent(1))
 put!(mainMedEye3dInstance.channel, ShowBoneMaskEvent(true))
 put!(mainMedEye3dInstance.channel, ShowBoneMaskEvent(false))
-put!(mainMedEye3dInstance.channel, ShowSingleLesionEvent(1))
-put!(mainMedEye3dInstance.channel, ShowSingleLesionEvent(0))
+put!(mainMedEye3dInstance.channel, ShowSingleLesionEvent(0))  # warmup: show-all path
+put!(mainMedEye3dInstance.channel, ShowSingleLesionEvent(1))  # final state: single-lesion mode
 
 # Start Background Inference Worker
 worker_script = joinpath(@__DIR__, "..", "ai", "python_worker.py")
