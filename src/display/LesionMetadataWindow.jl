@@ -878,6 +878,55 @@ function compute_lesion_volume(lid::Int, tp_idx::Int)::Dict{String, Float64}
     return result
 end
 
+"""
+    precompute_all_volumes!(mask_vol, tp_idx)
+
+Single O(N) pass over the mask volume to accumulate voxel counts for ALL lesion IDs.
+Populates `_volume_cache` so that subsequent `compute_lesion_volume` calls are O(1) cache hits.
+Should be called once per TP at load time (alongside `precompute_mask_centroids!`).
+"""
+function precompute_all_volumes!(mask_vol::AbstractArray{T, 3}, tp_idx::Int) where T
+    # Single pass: count voxels per label
+    voxel_counts = Dict{Int, Int}()
+    @inbounds for v in mask_vol
+        iv = Int(round(v))
+        if iv > 0
+            voxel_counts[iv] = get(voxel_counts, iv, 0) + 1
+        end
+    end
+    
+    isempty(voxel_counts) && return
+    
+    # Get spacing
+    native_spacing = try
+        Main.first_spacing
+    catch
+        (1.0, 1.0, 1.0)
+    end
+    hires_factor = try
+        Main.HIRES_FACTOR
+    catch
+        2.0
+    end
+    sp_x = native_spacing[1] / hires_factor
+    sp_y = native_spacing[2] / hires_factor
+    sp_z = native_spacing[3]
+    voxel_vol_mm3 = sp_x * sp_y * sp_z
+    
+    for (lid, vc) in voxel_counts
+        volume_mm3 = vc * voxel_vol_mm3
+        volume_cc = volume_mm3 / 1000.0
+        diameter_mm = 2.0 * (3.0 * volume_mm3 / (4.0 * π))^(1.0/3.0)
+        _volume_cache[(tp_idx, lid)] = Dict{String, Float64}(
+            "volume_mm3" => volume_mm3,
+            "volume_cc" => volume_cc,
+            "voxel_count" => Float64(vc),
+            "diameter_mm" => diameter_mm
+        )
+    end
+    @info "[PERF] Precomputed volumes for $(length(voxel_counts)) lesions at TP $tp_idx"
+end
+
 # ─── Match Analysis ──────────────────────────────────────────────────────────
 
 """
@@ -2894,55 +2943,40 @@ end_section!(sec_win)
             # Auto-detect lesion type: try JSON mapping first, then keyword fallback
             raw_organ_for_type = get(_MEH.global_organ_mapping[], lid, "")
             if isempty(raw_organ_for_type)
-                # Try to compute it dynamically from the current mask!
+                # Fast centroid-based atlas lookup (O(1) instead of O(N) findall scan)
                 tp = _MEH.current_tp_index[]
-                if haskey(_MEH.tp_data_cache, tp) && _MEH.global_ts_atlas[] !== nothing
+                if _MEH.global_ts_atlas[] !== nothing
                     try
-                        mask = _MEH.tp_data_cache[tp].mask
                         ts_atlas = _MEH.global_ts_atlas[]
                         ts_names = _MEH.global_ts_names[]
-                        indices = findall(x -> x == lid, mask)
-                        if !isempty(indices)
-                            scale_x = size(ts_atlas, 1) / size(mask, 1)
-                            scale_y = size(ts_atlas, 2) / size(mask, 2)
-                            scale_z = size(ts_atlas, 3) / size(mask, 3)
-                            
-                            # Scan ALL lesion voxels against atlas for bone-priority mapping
-                            organ_counts = Dict{String,Int}()
-                            sample_step = max(1, length(indices) ÷ 500)  # subsample large lesions
-                            for (vi, idx) in enumerate(indices)
-                                vi % sample_step != 0 && continue
-                                sx = clamp(round(Int, idx[1] * scale_x), 1, size(ts_atlas, 1))
-                                sy = clamp(round(Int, idx[2] * scale_y), 1, size(ts_atlas, 2))
-                                sz = clamp(round(Int, idx[3] * scale_z), 1, size(ts_atlas, 3))
-                                ts_val = Int(ts_atlas[sx, sy, sz])
-                                if ts_val > 0 && haskey(ts_names, ts_val)
-                                    name = ts_names[ts_val]
-                                    organ_counts[name] = get(organ_counts, name, 0) + 1
-                                end
+                        centroid_for_map = if haskey(_MEH.lesion_centroids_cache, (tp, lid))
+                            _MEH.lesion_centroids_cache[(tp, lid)]
+                        elseif haskey(_MEH.lesion_centroids_cache, lid)
+                            _MEH.lesion_centroids_cache[lid]
+                        else
+                            nothing
+                        end
+                        if centroid_for_map !== nothing
+                            # Scale centroid from mask space to atlas space
+                            mask_sz = haskey(_MEH.tp_data_cache, tp) ? size(_MEH.tp_data_cache[tp].mask) : nothing
+                            if mask_sz !== nothing
+                                scale_x = size(ts_atlas, 1) / mask_sz[1]
+                                scale_y = size(ts_atlas, 2) / mask_sz[2]
+                                scale_z = size(ts_atlas, 3) / mask_sz[3]
+                                sx = clamp(round(Int, centroid_for_map[1] * scale_x), 1, size(ts_atlas, 1))
+                                sy = clamp(round(Int, centroid_for_map[2] * scale_y), 1, size(ts_atlas, 2))
+                                sz = clamp(round(Int, centroid_for_map[3] * scale_z), 1, size(ts_atlas, 3))
+                            else
+                                sx = clamp(centroid_for_map[1], 1, size(ts_atlas, 1))
+                                sy = clamp(centroid_for_map[2], 1, size(ts_atlas, 2))
+                                sz = clamp(centroid_for_map[3], 1, size(ts_atlas, 3))
                             end
-                            
-                            if !isempty(organ_counts)
-                                # Priority: bone > everything else
-                                bone_kws = ["femur","hip","vertebra","rib","sacrum","clavicula",
-                                            "humerus","scapula","sternum","skull","bone","spine",
-                                            "ilium","ischium","pubis","tibia","mandible","costal"]
-                                vascular_excl = ["vena","artery","vein","vessel","trunk"]
-                                bone_organs = filter(organ_counts) do (name, _)
-                                    nl = lowercase(name)
-                                    any(bk -> occursin(bk, nl), bone_kws) && !any(v -> occursin(v, nl), vascular_excl)
-                                end
-                                if !isempty(bone_organs)
-                                    organ_name = first(sort(collect(bone_organs), by=x->-x[2]))[1]
-                                else
-                                    organ_name = first(sort(collect(organ_counts), by=x->-x[2]))[1]
-                                end
-                            end
-                            
-                            if !isempty(organ_name)
+                            ts_val = Int(ts_atlas[sx, sy, sz])
+                            if ts_val > 0 && haskey(ts_names, ts_val)
+                                organ_name = ts_names[ts_val]
                                 _MEH.global_organ_mapping[][lid] = organ_name
                                 raw_organ_for_type = organ_name
-                                @info "[DYNAMIC MAP] Mapped new lesion $lid to $organ_name (from $(length(organ_counts)) overlapping organs)"
+                                @info "[DYNAMIC MAP] Fast centroid lookup: lesion $lid → '$organ_name' at [$sx,$sy,$sz]"
                             end
                         end
                     catch e
