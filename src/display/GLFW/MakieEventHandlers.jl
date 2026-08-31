@@ -415,8 +415,8 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
     end
 end
 
-# Flag controlling single vs all lesions display mode (default: false = display ALL lesions on start)
-const is_single_lesion_mode = Ref(false)
+# Flag controlling single vs all lesions display mode (default: true = display SINGLE lesion on start)
+const is_single_lesion_mode = Ref(true)
 export is_single_lesion_mode
 
 function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vector{StateDataFields})
