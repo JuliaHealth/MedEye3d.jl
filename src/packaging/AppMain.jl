@@ -12,7 +12,6 @@ using Statistics
 using LinearAlgebra
 using Dates
 import GLFW
-import ModernGL
 
 export julia_main
 

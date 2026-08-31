@@ -2,7 +2,7 @@
 controls mask visibility responds to keyboard input
 """
 module KeyboardVisibility
-using ModernGL, Setfield, GLFW, Dictionaries, Parameters, DataTypesBasic
+using Setfield, GLFW, Dictionaries, Parameters, DataTypesBasic
 using ..DisplayWords, ..StructsManag, ..PrepareWindow, ..DataStructs, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms
 export processKeysInfo, setVisAndRender
 

@@ -2,8 +2,8 @@
 controls changing plane for example from transverse to saggital ...
 """
 module ChangePlane
-using ModernGL, GLFW, Dictionaries, Parameters, DataTypesBasic, Setfield
-using ..DisplayWords, ..StructsManag, ..PrepareWindow, ..DataStructs, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms, ..ReactToScroll, ..ShadersAndVerticiesForSupervoxels
+using GLFW, Dictionaries, Parameters, DataTypesBasic, Setfield
+using ..StructsManag, ..DataStructs, ..ForDisplayStructs, ..ReactToScroll
 
 """
 In case we want to change the dimansion of scrolling so for example from transverse to coronal ...
@@ -13,7 +13,6 @@ In case we want to change the dimansion of scrolling so for example from transve
 
 function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true)
 
-
     toScrollDat = toScrollDatPrim.value
 
     old = stateObject.onScrollData.dimensionToScroll
@@ -22,84 +21,24 @@ function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObjec
     newCalcDim = getMainVerticies(ratioSetcalcDim, stateObject.displayMode, stateObject.imagePosition)
 
     stateObject.calcDimsStruct = newCalcDim
-    #In order to make the  background black  before we will render quad of possibly diffrent dimensions we will set all to invisible - and obtain black background
-    textSpecs = stateObject.mainForDisplayObjects.listOfTextSpecifications
 
-    for textSpec in textSpecs
-        setTextureVisibility(false, textSpec.uniforms)
-    end#for
-    basicRender(stateObject.mainForDisplayObjects.window)
-
-
-    #we need to change textures only if dimensions do not match
-    #  if(actor.actor.calcDimsStruct.imageTextureWidth!=newCalcDim.imageTextureWidth  || actor.actor.calcDimsStruct.imageTextureHeight!=newCalcDim.imageTextureHeight )
-    # first we need to update information about dimensions etc
-
-
-    #next we need to delete all textures and create new ones
-
-    arr = map(it -> it.ID[], textSpecs)
-    glFinish()# make open gl ready for work
-
-    glDeleteTextures(length(arr), arr)# deleting
-
-    #getting new
-    glUseProgram(stateObject.mainForDisplayObjects.shader_program)
-    stateObject.mainForDisplayObjects.listOfTextSpecifications = initializeTextures(textSpecs, newCalcDim)
-
-    # end#if
-
-
+    # Update scroll dimension and slice metadata
     stateObject.onScrollData.dimensionToScroll = toScrollDat.dimensionToScroll
     stateObject.onScrollData.dataToScrollDims = toScrollDat
     stateObject.onScrollData.slicesNumber = getSlicesNumber(stateObject.onScrollData)
-    if stateObject.displayMode == SingleImage && !isempty(stateObject.allSupervoxels)
-        current = stateObject.lastRecordedMousePosition[toScrollDat.dimensionToScroll]
-        # current_slice_sv = ReactToScroll.getSvCurrentSlice(stateObject.allSupervoxels, current, stateObject)
-        ShadersAndVerticiesForSupervoxels.renderSupervoxelLines(stateObject.mainForDisplayObjects, stateObject.supervoxelFields, stateObject.mainRectFields, stateObject.allSupervoxels, toScrollDat.dimensionToScroll, current)
-    end
 
-    #getting  the slice of intrest based on last recorded mouse position
-
+    # Get the slice of interest based on last recorded mouse position
     current = stateObject.lastRecordedMousePosition[toScrollDat.dimensionToScroll]
 
-    #displaying all
-
-
+    # Generate 2D slice data for display
     singleSlDat = stateObject.onScrollData.dataToScroll |>
                   (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(current), toScrollDat.dimensionToScroll, threeDimDat), scrDat) |>
-                              (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=current, textToDisp=getTextForCurrentSlice(stateObject.onScrollData, Int32(current)))
+                              (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=current)
 
-    # glFinish()
-    # glFlush()
-    # glClearColor(0.0, 0.0, 0.0 , 1.0)
-    # GLFW.SwapBuffers(actor.actor.mainForDisplayObjects.window)
+    stateObject.currentlyDispDat = singleSlDat
 
-    dispObj = stateObject.mainForDisplayObjects
-    #for displaying new quad - to accomodate new proportions
-
-    reactivateMainObj(dispObj.shader_program, dispObj.vbo, newCalcDim)
-
-
-
-    glClear(GL_COLOR_BUFFER_BIT)
-
-
-    stateObject.currentlyDispDat = singleSlDat = singleSlDat
-
-    updateImagesDisplayed(singleSlDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, newCalcDim, stateObject.valueForMasToSet, stateObject.crosshairFields, stateObject.mainRectFields, stateObject.displayMode)
-
-
-
-    #saving information about current slice for future reference
+    # Save information about current slice for future reference
     stateObject.currentDisplayedSlice = current
-    # to enbling getting back
-    # if(toBeSavedForBack)
-    #     addToforUndoVector(stateObject, ()-> processKeysInfo( Option(old),stateObject, keyInfo,false ))
-    # end
-
 
 end#processKeysInfo
 end#ChangePlane
-
-

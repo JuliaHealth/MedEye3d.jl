@@ -11,7 +11,7 @@ so we modify the data that is the basis of the mouse interaction mask  and we pa
 
 """
 module ReactOnMouseClickAndDrag
-using Logging, Parameters, Setfield, GLFW, ModernGL, Dates, Parameters, Logging, Base.Threads
+using Logging, Parameters, Setfield, GLFW, Dates, Parameters, Logging, Base.Threads
 using ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils
 using ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForLine, ..ReactToScroll, ..DisplayWords, ..StrokeRasterization
 import Logging, Base.Threads

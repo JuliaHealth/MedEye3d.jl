@@ -1,241 +1,88 @@
 """
-stores functions needed to create bind and update OpenGl textues
+TextureManag — Vulkan texture management.
+Replaces OpenGL texture operations with Vulkan equivalents via VulkanTextures module.
 """
 module TextureManag
 using Base: Float16
 using GLFW
-using ModernGL, Base.Threads, Logging, Setfield
+using Base.Threads, Logging, Setfield
 using ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..CustomFragShad, ..DataStructs, ..DisplayWords, ..StructsManag
 export activateTextures, addTextToTexture, initializeTextures, createTexture, getProperGL_TEXTURE, updateImagesDisplayed, updateTexture, assignUniformsAndTypesToMasks, setZoomPanUniforms
 
 
-
-
 """
-uploading data to given texture; of given types associated - specified in TextureSpec
-if we want to update only part of the texture we need to specify  offset and size of texture we use
-Just for reference openGL function definition
-    void glTextureSubImage2D(
-        GLuint texture,
-         GLint level,
-         GLint xoffset,
-         GLint yoffset,
-         GLsizei width,
-         GLsizei height,
-         GLenum format,
-         GLenum type,
-         const void *pixels);
+Upload data to a given texture via Vulkan staging buffer.
+Replaces OpenGL glTexSubImage2D.
 """
 function updateTexture(::Type{Tt}, data::AbstractArray, textSpec::TextureSpec, xoffset::Int, yoffset::Int, widthh::Int32, heightt::Int32) where {Tt}
-
-
-    #   @spawn :interactive begin
-    glActiveTexture(textSpec.actTextrureNumb) # active proper texture unit before binding
-    glBindTexture(GL_TEXTURE_2D, textSpec.ID[])
-    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0)
-
-    actual_width = size(data, 1)
-    actual_height = size(data, 2)
-    
-    # Avoid allocating and copying (collect) if data is already contiguous in memory
-    is_contig = stride(data, 1) == 1 && stride(data, 2) == size(data, 1)
-    pixels = is_contig ? data : collect(data)
-    
-    if ((parameter_type(textSpec) == Float16) || (parameter_type(textSpec) == Float32))
-        glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, actual_width, actual_height, GL_RED, textSpec.OpGlType, pixels)
-    else
-        glTexSubImage2D(GL_TEXTURE_2D, 0, xoffset, yoffset, actual_width, actual_height, GL_RED_INTEGER, textSpec.OpGlType, pixels)
-    end
-    #  end
-
-
-
+    # In Vulkan backend, this is handled by the consumer loop which calls
+    # VulkanTextures.update_vulkan_texture! after finding the matching VkTexture
+    # The texture spec just stores the data reference; actual upload happens in consumer
 end
 
 
-
-
 """
-creating texture that is storing values like integer, uint, float values that are representing
-main image or  mask data and which will be used by a shader to draw appropriate colors
-juliaDataType- data type defined as a Julia datatype of data we are dealing with
-width,height - dimensions of the texture that we need
-GL_RType,OpGlType - Open Gl types needed to properly specify the  texture they need to be compatible with juliaDataType
+Create a texture (stub — Vulkan textures are created during coordinateDisplay init).
 """
-function createTexture(juliaDataType::Type{juliaDataTyp}, width::Int32, height::Int32, GL_RType::UInt32=GL_R8UI, OpGlType=GL_UNSIGNED_BYTE; forceNearest::Bool=false) where {juliaDataTyp}
-
-
-    #The texture we're going to render to
-    texture = Ref(GLuint(0))
-    glGenTextures(1, texture)
-    glBindTexture(GL_TEXTURE_2D, texture[])
-
-    # Linear filtering for continuous float textures (CT, PET) gives smooth hardware interpolation;
-    # Nearest neighbor filtering for integer masks and discrete segmentation masks ensures
-    # label IDs are preserved without interpolation at boundaries.
-    is_float_texture = (GL_RType == GL_R32F || GL_RType == GL_R16F || GL_RType == GL_RGBA32F || GL_RType == GL_RGBA)
-    filter_mode = (is_float_texture && !forceNearest) ? GL_LINEAR : GL_NEAREST
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter_mode)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter_mode)
-    # Clamp to edge prevents texture repetition when GPU zoom/pan moves UV outside [0,1]
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0)
-    #we just assign storage using glTexImage2D to ensure OpenGL 3.3 compatibility
-    format = (GL_RType == GL_R8UI || GL_RType == GL_R16UI || GL_RType == GL_R32UI || GL_RType == GL_R8I || GL_RType == GL_R16I || GL_RType == GL_R32I) ? GL_RED_INTEGER : GL_RED
-    
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RType, width, height, 0, format, OpGlType, C_NULL)
-
-
-    return texture
+function createTexture(juliaDataType::Type{juliaDataTyp}, width::Int32, height::Int32, GL_RType::UInt32=UInt32(0), OpGlType=UInt32(0); forceNearest::Bool=false) where {juliaDataTyp}
+    return Ref(UInt32(0))
 end
 
 
-
 """
-initializing textures  - so we basically execute specification for configuration and bind all to OpenGL context
-listOfTextSpecs - list of TextureSpec structs that  holds data needed to
-calcDimStruct - struct holding necessery data about taxture dimensions, quad propertiess etc.
+Initialize textures — sets up TextureSpec metadata without OpenGL calls.
 """
 function initializeTextures(listOfTextSpecs, calcDimStruct::CalcDimsStruct)::Vector{TextureSpec}
-
     res = Vector{TextureSpec}()
-
-
     for (ind, textSpec) in enumerate(listOfTextSpecs)
         index = ind - 1
-        # Discrete segmentation masks (Mask, Anatomy) and editable masks must use GL_NEAREST
-        # to prevent label ID interpolation at boundaries with hardware filtering
-        needsNearest = textSpec.isMultiDiscreteMask || textSpec.isEditable
-        textUreId = createTexture(parameter_type(textSpec), calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight, textSpec.GL_Rtype, textSpec.OpGlType; forceNearest=needsNearest)#binding texture and populating with data
-
-        actTextrureNumb = getProperGL_TEXTURE(index)
-        glActiveTexture(actTextrureNumb)
-        glUniform1i(textSpec.uniforms.samplerRef, index)# we first look for uniform sampler in shader
-        # we set ..Uniforms of visibility and colors according to specified in configuration
-
-
-        setMaskColor(textSpec.color, textSpec.uniforms)
-
-
-        setTextureVisibility(textSpec.isVisible, textSpec.uniforms)
-        changeTextureContribution(textSpec, textSpec.maskContribution)
-        
-        if !isempty(textSpec.minAndMaxValue)
-            coontrolMinMaxUniformVals(textSpec)
-        end
-
-
-        push!(res, setproperties(textSpec, (ID=textUreId, actTextrureNumb=actTextrureNumb, associatedActiveNumer=index)))
-
-
-    end # for
-
+        actTextrureNumb = UInt32(index)  # Simple index, no GL_TEXTURE enum needed
+        push!(res, setproperties(textSpec, (
+            ID=Ref(UInt32(ind)),
+            actTextrureNumb=actTextrureNumb,
+            associatedActiveNumer=index,
+            colorMask=RGBA(textSpec.color.r, textSpec.color.g, textSpec.color.b, 1.0)
+        )))
+    end
     return res
-end #initializeAndDrawTextures
+end
+
 
 """
-activating textures that were already initialized in order to be able to use them with diffrent shader program
-shader_program- regference to OpenGL program so we will be able to activate  textures
-listOfTextSpecs - list of TextureSpec structs that  holds data needed to bind textures to shader program (Hovewer this new shader program have to keep the same ..Uniforms)
-return unmodified textures
+Activate textures — no-op in Vulkan (descriptor sets handle binding).
 """
 function activateTextures(listOfTextSpecs::Vector{TextureSpec})::Vector{TextureSpec}
-    for textSpec in listOfTextSpecs
-        glActiveTexture(textSpec.actTextrureNumb)
-        glBindTexture(GL_TEXTURE_2D, textSpec.ID[])
-        
-        if textSpec.uniforms.samplerRef >= 0
-            glUniform1i(textSpec.uniforms.samplerRef, textSpec.associatedActiveNumer)
-        end
-        # Uniforms are per-program state — must re-set after each glUseProgram switch
-        # since each panel has its own shader program
-        setMaskColor(textSpec.color, textSpec.uniforms)
-        setTextureVisibility(textSpec.isVisible, textSpec.uniforms)
-        changeTextureContribution(textSpec, textSpec.maskContribution)
-        if !isempty(textSpec.minAndMaxValue)
-            coontrolMinMaxUniformVals(textSpec)
-        end
-    end
     return listOfTextSpecs
-end#activateTextures
+end
 
 
 """
-associates GL_TEXTURE UInt32 to given index
+Get texture unit index (stub, not used by Vulkan).
 """
 function getProperGL_TEXTURE(index::Int)::UInt32
-    return GL_TEXTURE0 + UInt32(index)
-end#getProperGL_TEXTURE
+    return UInt32(index)
+end
+
 
 """
-    setZoomPanUniforms(forDispObj::forDisplayObjects, calcDims::CalcDimsStruct)
-
-Sets the GPU zoom/pan uniforms (uvScale, uvOffset) for the currently active shader program.
-Must be called after glUseProgram for each panel, since uniforms are per-program state.
-
-uvScale = vec2(1/zoom, 1/zoom) — shrinks UV range to zoom in
-uvOffset = vec2(panOffset) — shifts UV center for panning
+Set zoom/pan uniforms — no-op in Vulkan (uses push constants).
 """
-function setZoomPanUniforms(forDispObj::forDisplayObjects, calcDims::CalcDimsStruct)
-    zoom = max(0.1f0, calcDims.zoom)
-    scale = 1.0f0 / zoom
-    # Axis mapping matches old applyZoomPan() convention:
-    #   panY controls horizontal center (columns → UV X)
-    #   panX controls vertical center (rows → UV Y)
-    # No zoom division — the vertex shader's (aTexCoord - 0.5) * uvScale already handles zoom
-    offsetX = calcDims.panY    # panY → UV X (horizontal)
-    offsetY = calcDims.panX    # panX → UV Y (vertical)
-    if forDispObj.uvScaleRef >= 0
-        glUniform2f(forDispObj.uvScaleRef, scale, scale)
-    end
-    if forDispObj.uvOffsetRef >= 0
-        glUniform2f(forDispObj.uvOffsetRef, offsetX, offsetY)
-    end
+function setZoomPanUniforms(forDispObj, calcDims)
+    # No-op: Vulkan uses push constants for zoom/pan in VulkanRender.render_frame!
+end
+
+
+"""
+Crosshair display — no-op, crosshair rendering removed.
+"""
+function crosshairDisplay(crosshair, mainRect, forDisplayConstants)
+    # No-op: crosshair rendering not yet ported to Vulkan
 end
 
 """
-Defines the switching of vao buffers for the rendering of
-dynamic crosshair
-"""
-# function crosshairDisplay(crosshair::GlShaderAndBufferFields, mainRect::GlShaderAndBufferFields, forDisplayConstants::forDisplayObjects)
-#     #render onto the screen
-#     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL) #taken out from the basicRender
-#     ############################################
-#     # glBindVertexArray(0) #unbinding the vao for main rect
-#     # glUseProgram(crosshair.shaderProgram)
-#     glBindVertexArray(crosshair.vao[]) #binding the vao for crosshair
-#     glDrawElements(GL_LINES, 4, GL_UNSIGNED_INT, C_NULL)
+Update images displayed — Vulkan texture upload via forDisplayObjects.vulkanCtx.
 
-#     glBindVertexArray(0)
-#     # glUseProgram(mainRect.shaderProgram) #unbinding the vao for crosshair
-#     glBindVertexArray(mainRect.vao[])
-#     ############################################
-
-#     GLFW.SwapBuffers(forDisplayConstants.window) #from basic render function
-
-# end
-function crosshairDisplay(crosshair::GlShaderAndBufferFields, mainRect::GlShaderAndBufferFields, forDisplayConstants::forDisplayObjects)
-    # Render main image
-    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-
-    # Switch to crosshair shader and render crosshair
-    glUseProgram(crosshair.shaderProgram)
-    glBindVertexArray(crosshair.vao[])
-    glDrawElements(GL_LINES, 4, GL_UNSIGNED_INT, C_NULL)
-
-    # Switch back to main shader program
-    # using the shader program from the mainRect causes the image render to disappear, so better use the one from forDisplayConstants !!
-    glUseProgram(forDisplayConstants.shader_program)
-    glBindVertexArray(mainRect.vao[])
-
-    GLFW.SwapBuffers(forDisplayConstants.window)
-end
-"""
-coordinating updating all of the images, masks...
-singleSliceDat - holds data we want to use for update
-forDisplayObjects - stores all needed constants that holds reference to GLFW and OpenGL
+For Vulkan: finds matching VkTexture by name and calls update_vulkan_texture!
 """
 function updateImagesDisplayed(
     singleSliceDat::SingleSliceDat,
@@ -247,249 +94,58 @@ function updateImagesDisplayed(
     mainRect::GlShaderAndBufferFields,
     displayMode::DisplayMode)
 
-
-
     modulelistOfTextSpecs = forDisplayConstants.listOfTextSpecifications
+    ctx = forDisplayConstants.vulkanCtx
 
-    t_tex = time_ns()
-    n_uploads = 0
-    n_collects = 0
-    for updateDat in singleSliceDat.listOfDataAndImageNames
-        findList = findall((texSpec) -> texSpec.name == updateDat.name, modulelistOfTextSpecs)
-        texSpec = Nothing
-        if !isempty(findList)
-            texSpec = modulelistOfTextSpecs[findList[1]]
-            # GPU zoom/pan: upload raw unzoomed data — zoom/pan applied by vertex shader uvScale/uvOffset
-            updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight)
-            n_uploads += 1
-        end
-    end #for
-    t_tex_ms = (time_ns() - t_tex) / 1e6
-
-    # Render text associated with this slice
-    t_text = time_ns()
-    activateForTextDisp(
-        wordsDispObj.shader_program_words, wordsDispObj.vbo_words, calcDimStruct)
-
-    matr = addTextToTexture(wordsDispObj, [singleSliceDat.textToDisp..., valueForMaskToSett.text], calcDimStruct)
-
-    reactivateMainObj(forDisplayConstants.shader_program, forDisplayConstants.vbo, calcDimStruct)
-    t_text_ms = (time_ns() - t_text) / 1e6
-    
-    if t_tex_ms + t_text_ms > 50.0
-        println("    [BENCH-GL] updateImages: texUpload=$(round(t_tex_ms, digits=1))ms ($n_uploads tex, $n_collects collected), text=$(round(t_text_ms, digits=1))ms"); flush(stdout)
+    if ctx === nothing
+        return  # No Vulkan context, skip
     end
 
-    OpenGLDisplayUtils.basicRender(forDisplayConstants.window)
+    for updateDat in singleSliceDat.listOfDataAndImageNames
+        # Find matching VkTexture by name
+        for (i, vk_tex) in enumerate(forDisplayConstants.vulkanTextures)
+            if hasproperty(vk_tex, :name) && vk_tex.name == updateDat.name
+                try
+                    # Convert data to Float32 for Vulkan R32_SFLOAT format
+                    upload_data = Float32.(updateDat.dat)
+                    # Use VulkanTextures module from VulkanBackend
+                    # Access via the module hierarchy
+                    Base.invokelatest(
+                        getfield(parentmodule(parentmodule(@__MODULE__)), :VulkanBackend).VulkanTextures.update_vulkan_texture!,
+                        ctx, vk_tex, upload_data
+                    )
+                catch e
+                    @warn "Vulkan texture upload failed for $(updateDat.name): $e"
+                end
+                break
+            end
+        end
+    end
+end
 
-    # glFinish() removed — SwapBuffers in consumer loop provides synchronization
+"""
+Assign uniforms and types to masks — sets up TextureSpec metadata.
+In Vulkan, this just does the type mapping without OpenGL uniform queries.
+"""
+function assignUniformsAndTypesToMasks(textSpecs::Vector{TextureSpec{Float32}}, shader_program::UInt32)
+    return map(x -> setProperOpenGlTypes(x), textSpecs)
 end
 
 
 """
-on the basis of the type supplied in texture characteristic
-it supplies given set of ..Uniforms to it
-It would also assign proper openGl types to given julia data type, and pass data from texture specification to opengl context
-textSpecs - list of texture specificaton that we want to enrich by adding information about ..Uniforms
-return list of texture specifications enriched by information about ..Uniforms
-"""
-function assignUniformsAndTypesToMasks(textSpecs::Vector{TextureSpec{Float32}}, shader_program::UInt32)
-
-
-    mapped = map(x -> setuniforms(x, shader_program), textSpecs)
-    return map(x -> setProperOpenGlTypes(x), mapped)
-
-end#assign..UniformsToMasks
-
-
-"""
-helper for assign..UniformsToMasks
-On the basis of the name of the Texture it will assign the informs referencs to it
-- ..Uniforms for main image will be set separately
-
-"""
-function setuniforms(textSpec::TextureSpec, shader_program::UInt32)::TextureSpec
-
-    n = textSpec.name
-    allowed_refs = Int32[glGetUniformLocation(shader_program, "$(n)allowedIDs[$i]") for i in 0:15]
-    allowed_count_ref = glGetUniformLocation(shader_program, "$(n)allowedIDCount")
-    unifs = MaskTextureUniforms(
-        samplerName=n, 
-        samplerRef=glGetUniformLocation(shader_program, n), 
-        colorsMaskRef=glGetUniformLocation(shader_program, "$(n)ColorMask"), 
-        maskMinValue=glGetUniformLocation(shader_program, "$(n)minValue"), 
-        maskMAxValue=glGetUniformLocation(shader_program, "$(n)maxValue"), 
-        maskRangeValue=glGetUniformLocation(shader_program, "$(n)ValueRange"), 
-        isVisibleRef=glGetUniformLocation(shader_program, "$(n)isVisible"), 
-        maskContribution=glGetUniformLocation(shader_program, "$(n)maskContribution"),
-        allowedIDsRef=allowed_refs,
-        allowedIDCountRef=allowed_count_ref
-    )
-
-    return setproperties(textSpec, (uniforms = unifs))
-
-end#assign..UniformsToMasks
-
-
-
-"""
-On the basis of the type associated to texture we set proper open Gl types associated
-based on https://www.khronos.org/registry/OpenGL-Refpages/gl4/html/glTexImage2D.xhtml
-and https://www.khronos.org/opengl/wiki/OpenGL_Type
+Set Julia data type → OpenGL type mapping on TextureSpec.
+Kept for compatibility, though Vulkan uses FORMAT enums instead.
 """
 function setProperOpenGlTypes(textSpec::TextureSpec)::TextureSpec
-    if (parameter_type(textSpec) == Float16)
-        return setproperties(textSpec, (GL_Rtype=GL_R16F, OpGlType=GL_HALF_FLOAT))
-    end
-    if (parameter_type(textSpec) == Float32)
-        return setproperties(textSpec, (GL_Rtype=GL_R32F, OpGlType=GL_FLOAT))
-    end
-    if (parameter_type(textSpec) == Int8)
-        return setproperties(textSpec, (GL_Rtype=GL_R8I, OpGlType=GL_BYTE))
-    end
-    if (parameter_type(textSpec) == UInt8)
-        return setproperties(textSpec, (GL_Rtype=GL_R8UI, OpGlType=GL_UNSIGNED_BYTE))
-    end
-    if (parameter_type(textSpec) == Int16)
-        return setproperties(textSpec, (GL_Rtype=GL_R16I, OpGlType=GL_SHORT))
-    end
-    if (parameter_type(textSpec) == UInt16)
-        return setproperties(textSpec, (GL_Rtype=GL_R16UI, OpGlType=GL_UNSIGNED_SHORT))
-    end
-    if (parameter_type(textSpec) == Int32)
-        return setproperties(textSpec, (GL_Rtype=GL_R32I, OpGlType=GL_INT))
-    end
-    if (parameter_type(textSpec) == UInt32)
-        return setproperties(textSpec, (GL_Rtype=GL_R32UI, OpGlType=GL_UNSIGNED_INT))
-    end
-
-    throw(DomainError(textSpec, "type  of texture is not supported - supported types - Int8,16,32 UInt 8,16,32 float16,32"))
-end#
-
-
+    # Just return the spec as-is — Vulkan format mapping is handled elsewhere
+    return textSpec
+end
 
 """
-Given  vector of SimpleLineTextStructs it will return matrix of data that will be used
-to display text
-lines - data about text to be displayed
-calcDimStruct - struct holding important data about size of textures etc.
-wordsDispObj - object wit needed constants to display text
+Add text to texture — no-op, text rendering removed.
 """
 function addTextToTexture(wordsDispObj::ForWordsDispStruct, lines::Vector{SimpleLineTextStruct}, calcDimStruct::CalcDimsStruct)
-    textureWidth = calcDimStruct.textTexturewidthh
-    fontFace = wordsDispObj.fontFace
-
-    matrPrim = map(x -> renderSingleLineOfText(x, textureWidth, fontFace), reverse(lines)) |>
-               (xl) -> reduce(hcat, xl)
-
-    sz = size(matrPrim)
-    # below just to clear any data from texture uploaded before
-    matr = hcat(calcDimStruct.textTextureZeros[:, sz[2]:size(calcDimStruct.textTextureZeros)[2]-1], matrPrim)
-
-    updateTexture(UInt8, matr, wordsDispObj.textureSpec, 0, 0, calcDimStruct.textTexturewidthh, calcDimStruct.textTextureheightt) #  ,Int32(10000),Int32(1000)
-    return matr
-end #addTextToTexture
-
-
-
-
-########## puts bytes of image into PBO as fas as I get it  copy an image data to texture buffer
-
-
-# preparePixelBufferStr="""
-# width -width of the image in  number of pixels
-# height - height of the image in  number of pixels
-# pboNumber - just states which PBO it is
-# return reference to the pixel buffer object that we use to upload this texture and data size calculated for this texture
-# """
-# @doc preparePixelBufferStr
-# function preparePixelBuffer(juliaDataTyp::Type{juliaDataType},width,height,pboNumber)where{juliaDataType}
-#     DATA_SIZE = 8 * sizeof(juliaDataTyp) *width * height  # number of bytes our image will have so in 2D it will be width times height times number of bytes needed for used datatype we need to multiply by 8 becouse sizeof() return bytes instead of bits
-#     pbo = Ref(GLuint(pboNumber))
-#     glGenBuffers(1, pbo)
-#     return (pbo,DATA_SIZE)
-# end
-
-
-
-
-
-
-# usePixelBuferAndUploadDataStr = """
-# adapted from http://www.songho.ca/opengl/gl_pbo.html
-# creates single pixel buffer of given type
-# pboID - id of the pixel buffer object that was prepared for some particular texture
-# textureId - reference to id of a texture that we want to bind to this PBO
-# juliaDataType -julia type that is representing datatype in 2 dimensional array representing ima
-# width -width of the image in  number of pixels
-# height - height of the image in  number of pixels
-# subImageDataType - variable used in glTexSubImage2D to tell open Glo what type of data is in texture
-# data one dimensional array o julia type and width*height length
-# DATA_SIZE - size of texture in bytes
-# """
-# @doc usePixelBuferAndUploadDataStr
-# function usePixelBuferAndUploadData(
-#     juliaDataTyp::Type{juliaDataType}
-#                     ,pboID
-#                     ,width
-#                     ,height
-#                     ,data
-#                     ,textureId
-#                     ,DATA_SIZE
-#                     ,subImageDataType = GL_SHORT
-
-#                     )where{juliaDataType}
-
-#     glBindTexture(GL_TEXTURE_2D,textureId[]);
-#     # copy pixels from PBO to texture object
-#     # Use offset instead of pointer.
-#    # glTexSubImage2D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, GLsizei(width), GLsizei(height),  GL_RED_INTEGER, GL_SHORT, Ptr{juliaDataTyp}());
-
-#     glTexSubImage2D(GL_TEXTURE_2D,0,0,0, width, height, GL_RED_INTEGER, subImageDataType, Ptr{juliaDataType}());
-
-
-#     # bind the PBO
-#     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pboID[]);
-
-
-#     # Note that glMapBuffer() causes sync issue.
-#     # If GPU is working with this buffer, glMapBuffer() will wait(stall)
-#     # until GPU to finish its job. To avoid waiting (idle), you can call
-#     # first glBufferData() with NULL pointer before glMapBuffer().
-#     # If you do that, the previous data in PBO will be discarded and
-#     # glMapBuffer() returns a new allocated pointer immediately
-#     # even if GPU is still working with the previous data.
-#     glBufferData(GL_PIXEL_UNPACK_BUFFER, DATA_SIZE, Ptr{juliaDataType}(), GL_STREAM_DRAW);
-
-#     # map the buffer object into client's memory
-#     glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY)
-
-
-#     ptr = Ptr{juliaDataType}(glMapBuffer(GL_PIXEL_UNPACK_BUFFER, GL_WRITE_ONLY))
-#     # update data directly on the mapped buffer - this is internal function implemented below
-
-#     updatePixels(ptr,data,length(data));
-
-#     glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER); # release the mapped buffer
-
-#     # it is good idea to release PBOs with ID 0 after use.
-#     # Once bound with 0, all pixel operations are back to normal ways.
-#     glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-
-
-
-# end
-
-# updatePixelsStr = """
-# adapted from https://github.com/JuliaPlots/GLMakie.jl/blob/2717d812fdc66b283f63d5d97237e8d69e2c1f25/src/GLAbstraction/GLBuffer.jl from unsafe copy
-# """
-# @doc updatePixelsStr
-# function updatePixels(ptr, data,length)
-#     for i=1:length
-#         unsafe_store!(ptr,data[i], i)
-#     end
-# end
-
+    return nothing
+end
 
 end #..TextureManag
-

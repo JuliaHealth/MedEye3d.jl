@@ -23,7 +23,6 @@ using Statistics
 using LinearAlgebra
 using Dates
 import GLFW
-import ModernGL
 import HDF5
 import JSON
 

@@ -1,76 +1,17 @@
-
-#Create and initialize shaders
-module ShadersAndVerticiesForText
-using ModernGL, GeometryTypes, GLFW
-using ..ForDisplayStructs, ..CustomFragShad, ..ModernGlUtil
-
-export getWordsVerticies, createFragmentShader, elements
-
-
-
-
-
-
 """
-creating fragment Shader  so controlling colors and textures
-gslString so version of GSLS we are using currently
-  """
-function createFragmentShader(gslString::String)
-  fsh = """$(gslString)
-  #extension GL_EXT_gpu_shader4 : enable    //Include support for this extension, which defines usampler2D
+ShadersAndVerticiesForText stub — OpenGL text shaders removed, text rendering not needed for Vulkan backend.
+"""
+module ShadersAndVerticiesForText
 
-  out vec4 FragColor;
-  in vec3 ourColor;
-  smooth in vec2 TexCoord0;
 
-  uniform usampler2D TextTexture1;
-  void main() {
+export getWordsVerticies, createFragmentShader
 
-  uint text1Texel = texture(TextTexture1, TexCoord0).r ;
-
-   if(text1Texel > 0){
-    FragColor = vec4(0.0,0.0,0.0,1.0);  }
-     else {
-  FragColor = vec4(1.0,1.0,1.0,1.0);
-
-  }
-  }
-
-  """
-  return createShader(fsh, GL_FRAGMENT_SHADER)
+function getWordsVerticies(fractionOfMainIm)
+    return Float32[0,0,0,0,0,0,0,0]
 end
 
+function createFragmentShader(gslsStr)
+    return UInt32(0)
+end
 
-
-################### data to display verticies
-
-
-# Specify how vertices are arranged into faces
-# Face{N,T} type specifies a face with N vertices, with index type
-# T (you should choose UInt32), and index-offset O. If you're
-# specifying faces in terms of julia's 1-based indexing, you should set
-# O=0. (If you instead number the vertices starting with 0, set
-# O=-1.)
-elements = Face{3,UInt32}[(0, 1, 2),          # the first triangle
-  (2, 3, 0)]          # the second triangle
-
-
-"""
-generetes verticies for quad used for displaying text
-"""
-function getWordsVerticies(fractionOfMainIm::Float32)::Vector{Float32}
-  correctedWidthForTextAccounting = (-1 + fractionOfMainIm * 2)
-
-  return Float32.([
-    # positions                     // colors           // texture coords
-    1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0,   # top right
-    1.0, -1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0,   # bottom right
-    correctedWidthForTextAccounting, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,   # bottom left
-    correctedWidthForTextAccounting, 1.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0    # top left
-  ])
-end #getWordsVerticies
-
-
-
-
-end #..ShadersAndVerticies
+end # module ShadersAndVerticiesForText

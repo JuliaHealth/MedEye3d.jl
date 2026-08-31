@@ -5,10 +5,13 @@ Main module controlling displaying segmentations image and data
 module SegmentationDisplay
 export loadRegisteredImages, displayImage, coordinateDisplay, passDataForScrolling, close_window, set_window_title, resize_window, GLOBAL_OPENGL_LOCK, synchronized_makie_renderloop
 using Dates
-using ColorTypes, MedImages, ModernGL, GLFW, Dictionaries, Logging, Setfield, FreeTypeAbstraction, Statistics, Observables, FileIO
-using ..PrepareWindow, ..PrepareWindowHelpers, ..TextureManag, ..OpenGLDisplayUtils, ..ForDisplayStructs, ..Uniforms, ..DisplayWords, ..distinctColorsSaved
-using ..ReactingToInput, ..ReactToScroll, ..ShadersAndVerticiesForText, ..ShadersAndVerticiesForLine, ..ShadersAndVerticiesForSupervoxels, ..DisplayWords, ..DataStructs, ..StructsManag
+using ColorTypes, MedImages, GLFW, Dictionaries, Logging, Setfield, FreeTypeAbstraction, Statistics, Observables, FileIO
+using ..ForDisplayStructs, ..distinctColorsSaved
+using ..VulkanBackend: VulkanContext, VulkanPipeline, VulkanRender, VulkanTextures, VulkanScreenshot, VulkanShaders, VulkanBuffers, VulkanStaging
+using Vulkan
+using ..ReactingToInput, ..ReactToScroll, ..DataStructs, ..StructsManag
 using ..ReactOnKeyboard, ..ReactOnMouseClickAndDrag, ..DisplayDataManag
+using ..PrepareWindow, ..PrepareWindowHelpers, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms, ..DisplayWords
 using ..MakieEvents
 include("MakieEventHandlers.jl")
 using .MakieEventHandlers
@@ -52,7 +55,6 @@ function synchronized_makie_renderloop(screen)
                         tick_state[] = Makie.RegularRenderTick
                         GLMakie.render_frame(screen)
                         GLFW.SwapBuffers(GLMakie.to_native(screen))
-                        glFlush()
                     else
                         tick_state[] = ifelse(screen.config.pause_renderloop, Makie.PausedRenderTick, Makie.SkippedRenderTick)
                     end
@@ -69,33 +71,10 @@ function synchronized_makie_renderloop(screen)
     @info "synchronized_makie_renderloop: STOPPED"
 end
 
-function switch_gl_context!(target_window)
-    # Find GLMakie from loaded modules (may not be in Main scope)
-    local glmakie = nothing
-    if isdefined(Main, :GLMakie)
-        glmakie = Main.GLMakie
-    else
-        for (k, v) in Base.loaded_modules
-            if string(k.name) == "GLMakie"
-                glmakie = v
-                break
-            end
-        end
-    end
-    if glmakie !== nothing && isdefined(glmakie, :GLAbstraction)
-        glmakie.GLAbstraction.gl_switch_context!(target_window)
-    else
-        if target_window === nothing
-            GLFW.MakeContextCurrent(GLFW.Window(C_NULL))
-        else
-            GLFW.MakeContextCurrent(target_window)
-        end
-    end
-end
+# switch_gl_context! removed — Vulkan doesn't use GL context switching
 
 function reactToResizeWindow(data::ResizeWindowEvent, stateObjects::Vector{StateDataFields})
     if data.width > 0 && data.height > 0
-        glViewport(0, 0, Int32(data.width), Int32(data.height))
         for state in stateObjects
             state.calcDimsStruct.windowWidth = Int64(data.width)
             state.calcDimsStruct.windowHeight = Int64(data.height)
@@ -105,13 +84,18 @@ function reactToResizeWindow(data::ResizeWindowEvent, stateObjects::Vector{State
             
             try
                 state.calcDimsStruct = StructsManag.getMainVerticies(state.calcDimsStruct, state.displayMode, state.calcDimsStruct.imagePos)
-                if isdefined(state, :mainForDisplayObjects) && state.mainForDisplayObjects.vbo > 0
-                    glBindBuffer(GL_ARRAY_BUFFER, state.mainForDisplayObjects.vbo)
-                    glBufferData(GL_ARRAY_BUFFER, sizeof(state.calcDimsStruct.mainImageQuadVert), state.calcDimsStruct.mainImageQuadVert, GL_STATIC_DRAW)
-                end
             catch e
                 @warn "Error updating quad vertices on window resize: $e"
             end
+        end
+        # Recreate Vulkan swapchain for new size
+        try
+            obj = stateObjects[1].mainForDisplayObjects
+            if obj.vulkanCtx !== nothing
+                VulkanContext.recreate_swapchain!(obj.vulkanCtx, data.width, data.height)
+            end
+        catch e
+            @warn "Error recreating Vulkan swapchain: $e"
         end
     end
 end
@@ -181,36 +165,18 @@ Signals event.done_channel when complete.
 """
 function reactToScreenshot(event::ScreenshotEvent, stateObjects::Vector{StateDataFields})
     try
-        window = stateObjects[1].mainForDisplayObjects.window
-        w, h = GLFW.GetFramebufferSize(window)
-        
-        if w <= 0 || h <= 0
-            @warn "Screenshot failed: invalid framebuffer size $(w)x$(h)"
+        obj = stateObjects[1].mainForDisplayObjects
+        if obj.vulkanCtx !== nothing
+            img = VulkanScreenshot.capture_screenshot(obj.vulkanCtx)
+            mkpath(dirname(event.path))
+            FileIO.save(event.path, img)
+            println("Screenshot saved: $(event.path)")
+            flush(stdout)
+            put!(event.done_channel, true)
+        else
+            @warn "Screenshot failed: no Vulkan context"
             put!(event.done_channel, false)
-            return
         end
-        
-        # Read pixels from back buffer (current render target)
-        pixels = zeros(UInt8, 3 * w * h)
-        glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, pixels)
-        
-        # Convert to RGB image (flip Y — OpenGL origin is bottom-left)
-        img = Array{ColorTypes.RGB{ColorTypes.N0f8}}(undef, h, w)
-        for y in 1:h
-            for x in 1:w
-                idx = ((y - 1) * w + (x - 1)) * 3
-                r = reinterpret(ColorTypes.N0f8, pixels[idx + 1])
-                g = reinterpret(ColorTypes.N0f8, pixels[idx + 2])
-                b = reinterpret(ColorTypes.N0f8, pixels[idx + 3])
-                img[h - y + 1, x] = ColorTypes.RGB{ColorTypes.N0f8}(r, g, b)
-            end
-        end
-        
-        mkpath(dirname(event.path))
-        FileIO.save(event.path, img)
-        println("Screenshot saved: $(event.path) ($(w)x$(h))")
-        flush(stdout)
-        put!(event.done_channel, true)
     catch e
         @warn "Screenshot failed: $e"
         put!(event.done_channel, false)
@@ -302,7 +268,9 @@ function getDisplayMode(listOfTextSpecs::Union{Vector{TextureSpec},Vector{Vector
     if typeof(listOfTextSpecs) == Vector{TextureSpec}
         return SingleImage
     elseif typeof(listOfTextSpecs) == Vector{Vector{TextureSpec}}
-        if length(listOfTextSpecs) >= 4 || quadView
+        if length(listOfTextSpecs) == 1 && !quadView
+            return SingleImage
+        elseif length(listOfTextSpecs) >= 4 || quadView
             return QuadImage
         else
             return MultiImage
@@ -314,102 +282,25 @@ end
 
 """
 Carries out the initialization of shader and buffers for
-SuperVoxels
+SuperVoxels — stub, OpenGL rendering removed.
 """
 function initializeSupervoxels(vertex_shader, vao, ebo, vboVector, allSupervoxels)
-    vbo = vboVector[1] # Single image mode only rect vertex buffer
-    fragment_shader_supervoxel, shader_program_supervoxel = ShadersAndVerticiesForSupervoxels.createAndInitSupervoxelLineShaderProgram(vertex_shader)
-    vao_supervoxel = PrepareWindowHelpers.createVertexBuffer()
-
-    # Create initial empty buffers since we'll update them dynamically during scroll
-    # Get a sample supervoxel data to initialize buffers, or use empty arrays
-    initial_vertices = Float32[]
-    initial_indices = UInt32[]
-
-    # If we have supervoxel data, use the first slice as initial data
-    if !isempty(allSupervoxels)
-        first_slice_key = minimum(keys(allSupervoxels))
-        first_slice_data = allSupervoxels[first_slice_key]
-        if haskey(first_slice_data, "supervoxel_vertices") && haskey(first_slice_data, "supervoxel_indices")
-            initial_vertices = first_slice_data["supervoxel_vertices"]
-            initial_indices = first_slice_data["supervoxel_indices"]
-        end
-    end
-
-    # Create dynamic buffers
-    vbo_supervoxel = PrepareWindowHelpers.createDynamicDataBuffer(initial_vertices)
-    ebo_supervoxel = PrepareWindowHelpers.createDynamicElementBuffer(initial_indices)
-
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(Float32), Ptr{Nothing}(0))
-    glEnableVertexAttribArray(0)
-
-    glBindVertexArray(vao[])
-
-    superVoxels::GlShaderAndBufferFields = GlShaderAndBufferFields(
-        shaderProgram=shader_program_supervoxel,
-        fragmentShader=fragment_shader_supervoxel,
-        vao=vao_supervoxel,
-        vbo=vbo_supervoxel,
-        ebo=ebo_supervoxel
-    )
-
-    mainRect::GlShaderAndBufferFields = GlShaderAndBufferFields(
-        vao=vao,
-        vbo=vbo,
-        ebo=ebo
-    )
-
-    return (superVoxels, mainRect)
+    return (GlShaderAndBufferFields(), GlShaderAndBufferFields())
 end
 
 
 """
 Carries out the initialization of shader and buffers for
-crosshair
+crosshair — stub, OpenGL rendering removed.
 """
 function createCrosshairFields(vertex_shader)
-    fragment_shader_line, shader_program_line = ShadersAndVerticiesForLine.createAndInitLineShaderProgram(vertex_shader)
-    vao_line = PrepareWindowHelpers.createVertexBuffer()
-    vbo_line = PrepareWindowHelpers.createDynamicDAtaBuffer(ShadersAndVerticiesForLine.line_vertices)
-    ebo_line = PrepareWindowHelpers.createElementBuffer(ShadersAndVerticiesForLine.line_indices)
-
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(Float32), Ptr{Nothing}(0))
-    glEnableVertexAttribArray(0)
-
-    return GlShaderAndBufferFields(
-        shaderProgram=shader_program_line,
-        fragmentShader=fragment_shader_line,
-        vao=vao_line,
-        vbo=vbo_line,
-        ebo=ebo_line
-    )
+    return GlShaderAndBufferFields()
 end
 
 function initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader_words, vbo_words, shader_program_words)
-
-    # glBindVertexArray(0) #unbinding vao for the main rect
-    crosshairs = [createCrosshairFields(vertex_shader) for _ in 1:length(vboVector)]
-
-    # glBindVertexArray(0) #unbinding vao for the crosshair
-    glBindVertexArray(vao[]) #binding vao for the main rect
-
-    #we are not initializing shaderProgram in mainRects
-    mainRects::Vector{GlShaderAndBufferFields} = []
-    foreach(enumerate(vboVector)) do (index, vbo)
-        push!(mainRects, GlShaderAndBufferFields(
-            vao=vao,
-            vbo=vbo,
-            ebo=ebo
-        ))
-    end
-
-
-    textFields = GlShaderAndBufferFields(
-        shaderProgram=shader_program_words,
-        fragmentShader=fragment_shader_words,
-        vbo=vbo_words
-    )
-
+    crosshairs = [GlShaderAndBufferFields() for _ in 1:length(vboVector)]
+    mainRects = [GlShaderAndBufferFields() for _ in 1:length(vboVector)]
+    textFields = GlShaderAndBufferFields()
     return (crosshairs, mainRects, textFields)
 end
 
@@ -475,8 +366,8 @@ function coordinateDisplay(
             windowWidth=windowWidth,
             windowHeight=windowHeight,
             fractionOfMainIm=fractionOfMainIm,
-            wordsImageQuadVert=ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm),
-            wordsQuadVertSize=sizeof(ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm)),
+            wordsImageQuadVert=Float32[0,0,0,0,0,0,0,0],
+            wordsQuadVertSize=0,
             textTexturewidthh=textTexturewidthh,
             textTextureheightt=textTextureheightt) |>
                               (calcDim) -> getHeightToWidthRatio(calcDim, dataToScrollDims) |>
@@ -487,8 +378,8 @@ function coordinateDisplay(
                 windowWidth=windowWidth,
                 windowHeight=windowHeight,
                 fractionOfMainIm=fractionOfMainIm,
-                wordsImageQuadVert=ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm),
-                wordsQuadVertSize=sizeof(ShadersAndVerticiesForText.getWordsVerticies(fractionOfMainIm)),
+                wordsImageQuadVert=Float32[0,0,0,0,0,0,0,0],
+                wordsQuadVertSize=0,
                 textTexturewidthh=textTexturewidthh,
                 textTextureheightt=textTextureheightt,
                 imagePos=imageIndex) |>
@@ -505,73 +396,76 @@ function coordinateDisplay(
     #we can pass the first calcDimStruct here, since we need to get the window height and width which is same across all the calcDims
     window, vertex_shader, vao, ebo, fragment_shader_words, vbo_words, shader_program_words, gslsStr, stopChannel = PrepareWindow.displayAll(calcDimStructs[1])
 
+    # ═══ Vulkan Initialization ═══
+    # Initialize Vulkan context (instance, device, swapchain, render pass, etc.)
+    vk_ctx = VulkanContext.init_vulkan_context(window, calcDimStructs[1].windowWidth, calcDimStructs[1].windowHeight)
 
-
-    fragmentShaderVector = []
-    shaderProgramVector = []
-    vboVector = []
-
-
-    listOfTextSpecsMapped::Vector{Vector{TextureSpec}} = []
-
-    #here for fragShaderA we have fragmentShaderVector[1], shaderProgramVector[1], vboVector[1]
-    foreach(enumerate(calcDimStructs)) do (index, calcDimStruct)
-        fragShad, shadProg, vbo = PrepareWindow.createAndInitShaderProgram(vertex_shader, typeof(listOfTextSpecs) == Vector{TextureSpec{Float32}} ? listOfTextSpecs : listOfTextSpecs[index], gslsStr, calcDimStruct, index)
-        push!(fragmentShaderVector, fragShad)
-        push!(shaderProgramVector, shadProg)
-        push!(vboVector, vbo)
-        push!(listOfTextSpecsMapped, assignUniformsAndTypesToMasks(typeof(listOfTextSpecs) == Vector{TextureSpec{Float32}} ? listOfTextSpecs : listOfTextSpecs[index], shaderProgramVector[index]))
-        # @info "look here" index calcDimStruct.mainImageQuadVert
+    # Determine texture list per panel
+    listOfTextSpecsMapped::Vector{Vector{TextureSpec}} = if typeof(listOfTextSpecs) == Vector{TextureSpec{Float32}}
+        [listOfTextSpecs for _ in 1:length(calcDimStructs)]
+    else
+        listOfTextSpecs
     end
 
-
-
-    """
-    begin crosshair line rendering statements
-
-    Crosshair constraints :
-    1. Only in multi-image display mode
-    2. Share the same crosshair with both the states
-    3. Reveal slices in the same spatial area as the image from our mouse cursor.
-    4. Reduce the size of the crosshair
-    5. Make sure the correct vbo in multi-image are modified , initialize them properly in the relevanat states
-    """
-
-    #Crosshair display only in multi-image mode
-    crosshairs, mainRects, textFields = (Nothing, Nothing, Nothing)
-
-    supervoxel, mainRect = (Nothing, Nothing)
-    if displayMode == MultiImage || displayMode == QuadImage
-        crosshairs, mainRects, textFields = initializeCrosshair(vertex_shader, vao, ebo, vboVector, fragment_shader_words, vbo_words, shader_program_words)
-    elseif displayMode == SingleImage
-        supervoxel, mainRect = initializeSupervoxels(vertex_shader, vao, ebo, vboVector, allSupervoxels)
-    end
-
-    GLFW.MakeContextCurrent(window)
-    # than we set those ..Uniforms, open gl types and using data from arguments  to fill texture specifications
-    # listOfTextSpecsMapped::Vector{Vector{TextureSpec}} = []
-    # foreach(enumerate(listOfTextSpecs)) do (index, textSpecVector)
-    # push!(listOfTextSpecsMapped, assignUniformsAndTypesToMasks(textSpecVector, shaderProgramVector[index]))
-    # end
-
-    #@info "listOfTextSpecsMapped" listOfTextSpecsMapped
-    #initializing object that holds data reqired for interacting with opengl
+    # Build Vulkan pipeline and textures per panel
     initializedTextures::Vector{Vector{TextureSpec}} = []
-    foreach(enumerate(listOfTextSpecsMapped)) do (index, mappedTextSpecVector)
-        glUseProgram(shaderProgramVector[index])
-        push!(initializedTextures, initializeTextures(mappedTextSpecVector, calcDimStructs[index]))
-    end
+    forDispObjs::Vector{forDisplayObjects} = Vector{forDisplayObjects}()
 
+    foreach(enumerate(calcDimStructs)) do (index, calcDimStruct)
+        textSpecVec = listOfTextSpecsMapped[index]
+        w = calcDimStruct.imageTextureWidth
+        h = calcDimStruct.imageTextureHeight
 
-    numbDicts = []
-    foreach(initializedTextures) do initializedTexture
-        filteredTextures = filter(x -> x.numb >= 0, initializedTexture)
-        
-        # Check for duplicate numbers and fix them
+        # Create Vulkan textures for this panel
+        vk_textures = Any[]
+        panel_text_specs = TextureSpec[]
+
+        for (tex_idx, spec) in enumerate(textSpecVec)
+            T = parameter_type(spec)
+            initial_data = zeros(Float32, Int(w), Int(h))
+
+            filter_mode = (spec.isMultiDiscreteMask || spec.isEditable) ? :nearest : :linear
+
+            vk_tex = VulkanTextures.create_vulkan_texture(
+                vk_ctx, Int(w), Int(h),
+                Vulkan.FORMAT_R32_SFLOAT,
+                initial_data;
+                filter_mode=filter_mode,
+                name=spec.name
+            )
+            push!(vk_textures, vk_tex)
+
+            updated_spec = setproperties(spec, (
+                associatedActiveNumer = tex_idx - 1,
+                actTextrureNumb = UInt32(tex_idx - 1),
+                ID = Ref(UInt32(tex_idx)),
+                colorMask = RGBA(spec.color.r, spec.color.g, spec.color.b, 1.0)
+            ))
+            push!(panel_text_specs, updated_spec)
+        end
+        push!(initializedTextures, panel_text_specs)
+
+        # Generate Vulkan shaders
+        color = index == 1 ? "green" : "red"
+        frag_src = VulkanShaders.generate_vulkan_fragment_shader(textSpecVec, color)
+        vert_src = VulkanShaders.generate_vulkan_zerovbo_vertex_shader()
+
+        # Create pipeline state
+        vk_pipeline = VulkanPipeline.create_pipeline_state(
+            vk_ctx, vert_src, frag_src, length(textSpecVec)
+        )
+
+        # Bind textures to descriptor set
+        VulkanPipeline.update_descriptor_textures!(vk_ctx, vk_pipeline, VulkanTextures.VkTexture[vk_textures...])
+
+        # Initial UBO update
+        VulkanPipeline.update_ubo!(vk_ctx, vk_pipeline, panel_text_specs)
+
+        # Build numbDicts
+        filteredTextures = filter(x -> x.numb >= 0, panel_text_specs)
         usedNumbers = Set{Int32}()
         fixedTextures = map(tex -> begin
             if tex.numb in usedNumbers
-                # Find next available number
                 newNumb = tex.numb
                 while newNumb in usedNumbers
                     newNumb += 1
@@ -583,40 +477,20 @@ function coordinateDisplay(
                 tex
             end
         end, filteredTextures)
-        push!(numbDicts, Dictionary(map(it -> it.numb, fixedTextures), collect(eachindex(fixedTextures))))
-    end
-  
-    forDispObjs::Vector{forDisplayObjects} = Vector{forDisplayObjects}()
-    foreach(enumerate(initializedTextures)) do (index, initTextureVector)
+        numbDict = Dictionary(map(it -> it.numb, fixedTextures), collect(eachindex(fixedTextures)))
+
         push!(forDispObjs, forDisplayObjects(
-            listOfTextSpecifications=initTextureVector,
+            listOfTextSpecifications=panel_text_specs,
             window=window,
-            vertex_shader=vertex_shader,
-            fragment_shader=fragmentShaderVector[index],
-            shader_program=shaderProgramVector[index],
-            vbo=vboVector[index][],
-            ebo=ebo[],
-            imageUniforms=listOfTextSpecsMapped[index][1].uniforms,
-            TextureIndexes=Dictionary(map(it -> it.name, initTextureVector),
-                collect(eachindex(initTextureVector))),
-            numIndexes=numbDicts[index],
-            gslsStr=gslsStr,
+            TextureIndexes=Dictionary(map(it -> it.name, panel_text_specs), collect(eachindex(panel_text_specs))),
+            numIndexes=numbDict,
             windowControlStruct=windowControlStruct,
-            imagePos=index
+            imagePos=index,
+            renderBackend=VulkanBackend,
+            vulkanCtx=vk_ctx,
+            vulkanPipelineState=vk_pipeline,
+            vulkanTextures=vk_textures
         ))
-    end
-    # Query zoom/pan uniform locations for each panel's shader program
-    for forDispObj in forDispObjs
-        glUseProgram(forDispObj.shader_program)
-        forDispObj.uvScaleRef = glGetUniformLocation(forDispObj.shader_program, "uvScale")
-        forDispObj.uvOffsetRef = glGetUniformLocation(forDispObj.shader_program, "uvOffset")
-        # Initialize to identity transform (zoom=1, pan=0)
-        if forDispObj.uvScaleRef >= 0
-            glUniform2f(forDispObj.uvScaleRef, 1.0f0, 1.0f0)
-        end
-        if forDispObj.uvOffsetRef >= 0
-            glUniform2f(forDispObj.uvOffsetRef, 0.0f0, 0.0f0)
-        end
     end
     #finding some texture that can be modifid and set as one active for modifications
     # put!(mainMedEye3dInstance.channel, forDispObj)
@@ -624,40 +498,8 @@ function coordinateDisplay(
 
 
 
-    #passing for text display object
-    #hardcoding text for now for the left image display
-    # forTextDispStruct = prepareForDispStruct(length(initializedTextures[1]), fragment_shader_words, vbo_words, shader_program_words, window, textTexturewidthh, textTextureheightt, forDispObjs[1])
-    forTextDispStructs::Vector{ForWordsDispStruct} = Vector{ForWordsDispStruct}()
-    foreach(enumerate(initializedTextures)) do (index, initTextureVector)
-        push!(forTextDispStructs, prepareForDispStruct(
-            length(initTextureVector),
-            fragment_shader_words,
-            vbo_words,
-            shader_program_words,
-            window,
-            textTexturewidthh,
-            textTextureheightt,
-            forDispObjs[index]
-        ))
-    end
-
-    # wait we need to parse rect texture display obj !!!
-
-    rectTextDispObjs::Vector{ForWordsDispStruct} = Vector{ForWordsDispStruct}()
-    if displayMode == SingleImage
-        foreach(enumerate(initializedTextures)) do (index, initTextureVector)
-            push!(rectTextDispObjs, prepareForDispStruct(
-                length(initTextureVector),
-                fragment_shader_words,
-                vbo_words,
-                shader_program_words,
-                window,
-                textTexturewidthh,
-                textTextureheightt,
-                forDispObjs[index]
-            ))
-        end
-    end
+    # Create minimal text display structs (text rendering removed for Vulkan)
+    forTextDispStructs::Vector{ForWordsDispStruct} = [ForWordsDispStruct() for _ in 1:length(initializedTextures)]
 
     states = map(x -> StateDataFields(
             textDispObj=forTextDispStructs[x],
@@ -666,12 +508,12 @@ function coordinateDisplay(
             displayMode=displayMode,
             imagePosition=x,
             switchIndex=x,
-            mainRectFields=displayMode == SingleImage ? mainRect : mainRects[x],
-            crosshairFields=displayMode == SingleImage ? GlShaderAndBufferFields() : crosshairs[x],
-            textFields=displayMode == SingleImage ? GlShaderAndBufferFields() : textFields,
+            mainRectFields=GlShaderAndBufferFields(),
+            crosshairFields=GlShaderAndBufferFields(),
+            textFields=GlShaderAndBufferFields(),
             spacingsValue=spacing[x],
             originValue=origin[x],
-            supervoxelFields=displayMode == SingleImage ? supervoxel : GlShaderAndBufferFields(),
+            supervoxelFields=GlShaderAndBufferFields(),
             allSupervoxels=allSupervoxels
         ), 1:length(forDispObjs))
 
@@ -769,31 +611,24 @@ function coordinateDisplay(
                     end
                 end
                 if channelData isa CloseWindowEvent
-                    println("CloseWindowEvent received: shutting down OpenGL and GLFW window")
+                    println("CloseWindowEvent received: shutting down window")
                     flush(stdout)
                     shouldStop[1] = true
+                    
+                    # Destroy Vulkan resources
                     try
-                        lock(GLOBAL_OPENGL_LOCK) do
-                            switch_gl_context!(window)
-                            for state in stateInstances
-                                obj = state.mainForDisplayObjects
-                                try
-                                    glDeleteTextures(length(obj.listOfTextSpecifications), map(text -> text.ID, obj.listOfTextSpecifications))
-                                catch e
-                                    @warn "Error deleting textures: $e"
-                                end
+                        for state in stateInstances
+                            obj = state.mainForDisplayObjects
+                            if obj.vulkanCtx !== nothing
+                                VulkanPipeline.destroy_pipeline_state!(obj.vulkanCtx, obj.vulkanPipelineState)
+                                VulkanContext.destroy_vulkan_context!(obj.vulkanCtx)
                             end
-                            glFlush()
-                            switch_gl_context!(nothing)
                         end
                     catch e
-                        @warn "Error cleaning OpenGL resources: $e"
+                        @warn "Error cleaning Vulkan resources: $e"
                     end
                     
-                    try
-                        put!(stopChannel, true)
-                    catch
-                    end
+                    try put!(stopChannel, true) catch end
                     
                     try
                         if window.handle != C_NULL
@@ -837,75 +672,87 @@ function coordinateDisplay(
                     stateInstances[1].switchIndex = channelData.imagePos
                 end
 
-                lock(GLOBAL_OPENGL_LOCK) do
-                    old_ctx = GLFW.GetCurrentContext()
-                    if old_ctx.handle != window.handle
-                        switch_gl_context!(window)
+                if !(channelData isa MouseStruct) && !(channelData isa Vector{MouseStruct}) && !(channelData isa Int64)
+                    println("CONSUMER: processing $(typeof(channelData))")
+                    flush(stdout)
+                end
+                on_next!(stateInstances, channelData)
+                
+                if !shouldStop[1]
+                    # Build panel render data for Vulkan
+                    vk_panels = VulkanRender.PanelRenderData[]
+                    for state in stateInstances
+                        if state.calcDimsStruct.mainQuadVertSize <= 0 || all(state.calcDimsStruct.mainImageQuadVert .== 0.0f0)
+                            continue
+                        end
+                        if state.currentlyDispDat.sliceNumber == 0
+                            continue
+                        end
+                        
+                        obj = state.mainForDisplayObjects
+                        if obj.vulkanPipelineState === nothing
+                            continue
+                        end
+                        
+                        # Upload texture data from currentlyDispDat to Vulkan textures
+                        if state.currentlyDispDat !== nothing && !isempty(state.currentlyDispDat.listOfDataAndImageNames)
+                            for updateDat in state.currentlyDispDat.listOfDataAndImageNames
+                                for (i, vk_tex) in enumerate(obj.vulkanTextures)
+                                    if hasproperty(vk_tex, :name) && vk_tex.name == updateDat.name
+                                        try
+                                            upload_data = Float32.(updateDat.dat)
+                                            VulkanTextures.update_vulkan_texture!(obj.vulkanCtx, vk_tex, upload_data)
+                                        catch e
+                                            @warn "Vulkan texture upload failed for $(updateDat.name)" exception=e
+                                        end
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                        
+                        # Update UBO with current texture specs
+                        VulkanPipeline.update_ubo!(obj.vulkanCtx, obj.vulkanPipelineState, obj.listOfTextSpecifications)
+                        # Build push constants for zoom/pan + NDC quad bounds
+                        zoom = max(0.1f0, state.calcDimsStruct.zoom)
+                        scale = 1.0f0 / zoom
+                        offsetX = state.calcDimsStruct.panY
+                        offsetY = state.calcDimsStruct.panX
+                        
+                        # Extract NDC quad bounds from mainImageQuadVert
+                        # Each vertex has 8 floats: X, Y, Z, R, G, B, U, V
+                        verts = state.calcDimsStruct.mainImageQuadVert
+                        if length(verts) >= 32
+                            xs = Float32[verts[1], verts[9], verts[17], verts[25]]
+                            ys = Float32[verts[2], verts[10], verts[18], verts[26]]
+                            ndc_left   = minimum(xs)
+                            ndc_right  = maximum(xs)
+                            ndc_bottom = minimum(ys)
+                            ndc_top    = maximum(ys)
+                        else
+                            ndc_left   = -1.0f0
+                            ndc_bottom = -1.0f0
+                            ndc_right  =  1.0f0
+                            ndc_top    =  1.0f0
+                        end
+                        
+                        # Push constants: uvScale(2) + uvOffset(2) + ndcMin(2) + ndcMax(2) = 8 floats
+                        push_consts = Float32[scale, scale, offsetX, offsetY, 
+                                              ndc_left, ndc_bottom, ndc_right, ndc_top]
+                        
+                        w = Float32(obj.vulkanCtx.width)
+                        h = Float32(obj.vulkanCtx.height)
+                        
+                        panel = VulkanRender.PanelRenderData(
+                            obj.vulkanPipelineState,
+                            push_consts,
+                            Float32(0), Float32(0), w, h
+                        )
+                        push!(vk_panels, panel)
                     end
                     
-                    try
-                        if !(channelData isa MouseStruct) && !(channelData isa Vector{MouseStruct}) && !(channelData isa Int64)
-                            println("CONSUMER: processing $(typeof(channelData))")
-                            flush(stdout)
-                        end
-                        on_next!(stateInstances, channelData)
-                        
-                        if !shouldStop[1]
-                            glClear(GL_COLOR_BUFFER_BIT)
-                            for state in stateInstances
-                                # Skip hidden panels (panels with all-zero or empty quad vertices)
-                                if state.calcDimsStruct.mainQuadVertSize <= 0 || all(state.calcDimsStruct.mainImageQuadVert .== 0.0f0)
-                                    continue
-                                end
-                                # Safety: don't draw panels with uninitialized textures
-                                if state.currentlyDispDat.sliceNumber == 0
-                                    continue
-                                end
-
-                                # Rebind main VAO before each panel render - crosshair rendering
-                                # switches to a different VAO which corrupts subsequent panel draws
-                                glBindVertexArray(vao[])
-                                
-                                # Draw text ONLY on panel 1 if sidebar space is allocated (fractionOfMainIm < 1.0)
-                                if state.calcDimsStruct.fractionOfMainIm < 1.0f0 && state.imagePosition == 1 && state.textDispObj.textureSpec.ID[] != 0 && state.calcDimsStruct.wordsQuadVertSize > 0 && !all(state.calcDimsStruct.wordsImageQuadVert .== 0.0f0)
-                                    activateForTextDisp(state.textDispObj.shader_program_words, state.textDispObj.vbo_words, state.calcDimsStruct)
-                                    glActiveTexture(state.textDispObj.textureSpec.actTextrureNumb)
-                                    glBindTexture(GL_TEXTURE_2D, state.textDispObj.textureSpec.ID[])
-                                    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-                                end
-                                
-                                # Draw main panel
-                                if state.mainForDisplayObjects.shader_program != 0 && state.mainForDisplayObjects.vbo != 0 && state.calcDimsStruct.mainQuadVertSize > 0
-                                    # Safety: verify ALL texture IDs are valid before drawing
-                                    all_textures_valid = true
-                                    for texSpec in state.mainForDisplayObjects.listOfTextSpecifications
-                                        if texSpec.ID[] == 0
-                                            all_textures_valid = false
-                                            break
-                                        end
-                                    end
-                                    if all_textures_valid
-                                        reactivateMainObj(state.mainForDisplayObjects.shader_program, state.mainForDisplayObjects.vbo, state.calcDimsStruct)
-                                        # Set per-panel GPU zoom/pan uniforms (must be after glUseProgram in reactivateMainObj)
-                                        TextureManag.setZoomPanUniforms(state.mainForDisplayObjects, state.calcDimsStruct)
-                                        # Re-bind EBO within VAO context to ensure indices are available
-                                        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo[])
-                                        activateTextures(state.mainForDisplayObjects.listOfTextSpecifications)
-                                        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, C_NULL)
-                                    end
-                                end
-                            end
-                            GLFW.SwapBuffers(window)
-                            # glFlush() removed — SwapBuffers implies an implicit flush
-                        end
-                    finally
-                        if old_ctx.handle != window.handle
-                            if old_ctx.handle != C_NULL
-                                switch_gl_context!(old_ctx)
-                            else
-                                switch_gl_context!(nothing)
-                            end
-                        end
+                    if !isempty(vk_panels)
+                        VulkanRender.render_frame!(stateInstances[1].mainForDisplayObjects.vulkanCtx, vk_panels)
                     end
                 end
             catch e
@@ -936,9 +783,7 @@ function coordinateDisplay(
     end #end of consumer
 
     # Release context from the main thread so the background consumer task can claim it (or just release it)
-    GLFW.MakeContextCurrent(GLFW.Window(C_NULL))
-    
-    # Run consumer task on the main OpenGL thread (spawn=false) to prevent ThreadAssertionError
+    # Run consumer task (Vulkan context is thread-safe, no context switching needed)
     mainMedEye3dInstance = MainMedEye3d(channel=Base.Channel{Any}(consumer, 1000; spawn=false), textDispObj=forTextDispStructs[1], displayMode=displayMode, states=stateInstances)
     
     # Register main channel for background tasks to dispatch events back

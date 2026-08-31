@@ -2,7 +2,7 @@
 functions that controll window - so basically treshords for mask display
 """
 module WindowControll
-using ModernGL, Setfield, GLFW, Dictionaries, Parameters, DataTypesBasic
+using Setfield, GLFW, Dictionaries, Parameters, DataTypesBasic
 using ..DisplayWords, ..StructsManag, ..PrepareWindow, ..DataStructs, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms
 export setTextureWindow, getNewTresholdValue
 

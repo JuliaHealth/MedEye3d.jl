@@ -909,7 +909,9 @@ screen = LesionMetadataWindow.display_metadata_window(win.fig)
 
 # Run GLFW interaction loop manually
 println("Interactive session ready!")
-println("Press ENTER to close the viewer...")
-readline()
-println("Closing viewer...")
+if get(ENV, "MEDEYE3D_TEST_MODE", "false") != "true"
+    println("Press ENTER to close the viewer...")
+    readline()
+    println("Closing viewer...")
+end
 

@@ -5,7 +5,7 @@ Generally first we need to pass the GLFW callback to the Rocket obeservable
 code adapted from https://discourse.julialang.org/t/custom-subject-in-rocket-jl-for-mouse-events-from-glfw/65133/3
 """
 module ReactToScroll
-using ModernGL, GLFW, Logging
+using GLFW, Logging
 using ..DisplayWords, ..ForDisplayStructs, ..TextureManag, ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForSupervoxels, ..ShadersAndVerticiesForLine, ..MakieEvents
 
 export reactToScroll, reactToScrollZoom, reactToScrollMultiPanel!
@@ -223,7 +223,7 @@ function reactToScrollMultiPanel!(panels::Vector{Int}, mainStates::Vector{StateD
         # Slice 3D→2D for all textures in this panel
         singleSlDat = panelState.onScrollData.dataToScroll |>
             (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(current), panelState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
-            (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=current, textToDisp=getTextForCurrentSlice(panelState.onScrollData, Int32(current)))
+            (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=current)
         
         # Upload image textures only (no text, no draw calls)
         modulelistOfTextSpecs = panelState.mainForDisplayObjects.listOfTextSpecifications

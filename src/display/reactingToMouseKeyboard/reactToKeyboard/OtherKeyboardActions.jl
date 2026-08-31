@@ -2,7 +2,7 @@
 functions to controll stroke width , setting which texture is currently active and actions undoing
 """
 module OtherKeyboardActions
-using ModernGL, Setfield, GLFW, Dictionaries, Parameters, DataTypesBasic
+using Setfield, GLFW, Dictionaries, Parameters, DataTypesBasic
 using ..DisplayWords, ..StructsManag, ..PrepareWindow, ..DataStructs, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms
 
 """

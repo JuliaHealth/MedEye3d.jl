@@ -19,8 +19,8 @@ export reactToMapLink, reactToAutoRunPreprocess, reactToRunPreprocess, reactToSh
 using ...InferenceClient
 using ...LesionAssociation
 using ...TextureManag
-using ModernGL
-using ..Uniforms
+# ModernGL removed — Vulkan UBO updates happen in consumer loop via update_ubo!
+# Uniforms module no longer needed — TextureSpec fields are read directly by UBO packer
 using Observables
 
 # Debug flag: set to true to enable verbose bench/bone logging in hot paths
@@ -400,16 +400,13 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
     for stateObject in stateObjects
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if textSpec.isMultiDiscreteMask || textSpec.name == "Mask"
-                ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
-                Uniforms.setAllowedIDs!(textSpec, Int[])
+                # Clear allowed IDs filter
+                textSpec.allowedIDs = Float32[]
                 if data.lesion_id == 0
                     textSpec.minAndMaxValue = Float32.([1.0, 1000.0])
                 else
                     textSpec.minAndMaxValue = Float32.([data.lesion_id, data.lesion_id])
                 end
-                
-                # Push uniform update for min/max
-                Uniforms.coontrolMinMaxUniformVals(textSpec)
                 changed = true
             end
         end
@@ -436,10 +433,7 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
                     ((target_mod == "PET" || target_mod == "SPECT") && tex.name == "PET")
             if match
                 tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
-                
-                # Push uniform update for min/max
-                ModernGL.glUseProgram(state.mainForDisplayObjects.shader_program)
-                Uniforms.coontrolMinMaxUniformVals(tex)
+                # UBO update happens in consumer loop
             end
         end
     end
@@ -448,11 +442,10 @@ end
 
 function reactToPetBlend(data::PetBlendEvent, stateObjects::Vector{StateDataFields})
     for state in stateObjects
-        ModernGL.glUseProgram(state.mainForDisplayObjects.shader_program)
         for tex in state.mainForDisplayObjects.listOfTextSpecifications
             # Update nuclear overlay contribution (PET/SPECT, not the pure PET main image panel)
             if tex.isNuclearMask && !tex.isMainImage
-                Uniforms.setTextureContribution(tex, data.weight)
+                tex.maskContribution = clamp(data.weight, 0.0f0, 1.0f0)
             end
         end
     end
@@ -466,8 +459,7 @@ function reactToPaintVal(data::PaintValEvent, stateObjects::Vector{StateDataFiel
             for textSpec in state.mainForDisplayObjects.listOfTextSpecifications
                 if textSpec.name == "manualModif"
                     textSpec.isVisible = true
-                    ModernGL.glUseProgram(state.mainForDisplayObjects.shader_program)
-                    Uniforms.setTextureVisibility(textSpec.isVisible, textSpec.uniforms)
+                    # UBO update happens in consumer loop
                 end
             end
         end
@@ -565,25 +557,21 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
 
     for (idx, stateObject) in enumerate(stateObjects)
         target_id = (idx == 5 && compare_mode[]) ? panel5_lesion_id : data.lesion_id
-        ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if textSpec.name == "Mask" || textSpec.name == "segmentation"
                 if idx == 5 && compare_mode[] && !isempty(panel5_all_ids)
-                    Uniforms.setAllowedIDs!(textSpec, panel5_all_ids)
-                    Uniforms.coontrolMinMaxUniformVals(textSpec)
+                    textSpec.allowedIDs = Float32.(panel5_all_ids)
                 else
-                    Uniforms.setAllowedIDs!(textSpec, Int[])
+                    textSpec.allowedIDs = Float32[]
                     if target_id > 0
                         textSpec.minAndMaxValue = Float32.([target_id, target_id])
                     else
                         textSpec.minAndMaxValue = Float32.([1.0, 1000.0])
                     end
-                    Uniforms.coontrolMinMaxUniformVals(textSpec)
                 end
             elseif textSpec.name == "manualModif"
                 textSpec.minAndMaxValue = Float32.([0.0, 1000.0])
-                Uniforms.setAllowedIDs!(textSpec, Int[])
-                Uniforms.coontrolMinMaxUniformVals(textSpec)
+                textSpec.allowedIDs = Float32[]
             end
         end
     end
@@ -643,11 +631,9 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         # Ensure bone textures are visible in the shader when bone data exists
         if has_any_bone_data
             for stateObject in stateObjects
-                ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
                 for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
                     if textSpec.name == "Bone_Surface" || textSpec.name == "Bone_Marrow"
                         textSpec.isVisible = true
-                        Uniforms.setTextureVisibility(true, textSpec.uniforms)
                     end
                 end
             end
@@ -1204,10 +1190,7 @@ function reactToToggleLesion(data::ToggleLesionEvent, stateObjects::Vector{State
             if textSpec.isMultiDiscreteMask
                 textSpec.isVisible = !textSpec.isVisible
                 
-                # We must also push this uniform update to the GPU immediately!
-                ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
-                Uniforms.setTextureVisibility(textSpec.isVisible, textSpec.uniforms)
-                # DO NOT break, because there could be multiple windows needing update
+                # UBO update happens in consumer loop
             end
         end
     end
@@ -1507,12 +1490,8 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if textSpec.name == "Mask" || textSpec.name == "segmentation"
                 textSpec.minAndMaxValue = Float32.([data.active_id, data.active_id])
-                ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
-                Uniforms.coontrolMinMaxUniformVals(textSpec)
             elseif textSpec.name == "manualModif"
                 textSpec.minAndMaxValue = Float32.([0.0, 1000.0])
-                ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
-                Uniforms.coontrolMinMaxUniformVals(textSpec)
             end
         end
     end
@@ -1637,11 +1616,9 @@ end
 function reactToShowBoneMask(data::ShowBoneMaskEvent, stateObjects::Vector{StateDataFields})
     println("Show Bone Mask toggled to $(data.active)"); flush(stdout)
     for stateObject in stateObjects
-        ModernGL.glUseProgram(stateObject.mainForDisplayObjects.shader_program)
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if textSpec.name == "Bone_Mask" || textSpec.name == "bone_mask" || textSpec.name == "bone" || textSpec.name == "Organ_Mask" || textSpec.name == "organ_mask" || textSpec.name == "Bone_Surface" || textSpec.name == "Bone_Marrow"
                 textSpec.isVisible = data.active
-                Uniforms.setTextureVisibility(textSpec.isVisible, textSpec.uniforms)
             end
         end
     end
@@ -1675,17 +1652,14 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
     
     toggled_count = 0
     for (si, state) in enumerate(stateObjects)
-        ModernGL.glUseProgram(state.mainForDisplayObjects.shader_program)
         for textSpec in state.mainForDisplayObjects.listOfTextSpecifications
             if (tex_target == "Mask" && (textSpec.name == "Mask" || textSpec.name == "manualModif" || textSpec.name == "segmentation")) ||
                (textSpec.name == tex_target)
                 textSpec.isVisible = data.active
-                Uniforms.setTextureVisibility(textSpec.isVisible, textSpec.uniforms)
                 toggled_count += 1
                 println("  Panel $si: set isVisible=$(data.active) for texture '$(textSpec.name)'")
             end
         end
-        TextureManag.activateTextures(state.mainForDisplayObjects.listOfTextSpecifications)
     end
     println("  Toggled $toggled_count textures total for layer=$(data.layer)")
     flush(stdout)
