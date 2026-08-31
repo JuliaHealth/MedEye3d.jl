@@ -11,20 +11,32 @@ export getThreeDims, addToforUndoVector, cartTwoToThree, getHeightToWidthRatio, 
 Calculates texture coordinates from screen coordinates, accounting for viewport zoom/pan/padding.
 """
 function getTextureCoordinatesFromScreen(x::Real, y::Real, calcDimsStruct::CalcDimsStruct, actualW::Float64, actualH::Float64)
-    viewportW = Float64(calcDimsStruct.windowWidth)
-    viewportH = Float64(calcDimsStruct.windowHeight)
-    
-    glX = (x * 2.0 / viewportW) - 1.0
-    glY = ((actualH - y) * 2.0 / viewportH) - 1.0
+    # GLFW screen coordinates: (0,0) top-left, (actualW, actualH) bottom-right
+    # Vulkan NDC: x in [-1, 1] (left to right), y in [-1, 1] (top to bottom)
+    vkX = (Float64(x) * 2.0 / max(1.0, actualW)) - 1.0
+    vkY = (Float64(y) * 2.0 / max(1.0, actualH)) - 1.0
     
     verts = calcDimsStruct.mainImageQuadVert
-    glLeft   = Float64(min(verts[17], verts[25]))
-    glRight  = Float64(max(verts[1], verts[9]))
-    glBottom = Float64(min(verts[10], verts[18]))
-    glTop    = Float64(max(verts[2], verts[26]))
+    if length(verts) >= 32
+        ndcLeft   = Float64(min(verts[1], verts[9], verts[17], verts[25]))
+        ndcRight  = Float64(max(verts[1], verts[9], verts[17], verts[25]))
+        ndcBottom = Float64(min(verts[2], verts[10], verts[18], verts[26]))
+        ndcTop    = Float64(max(verts[2], verts[10], verts[18], verts[26]))
+    else
+        ndcLeft   = -1.0
+        ndcRight  =  1.0
+        ndcBottom = -1.0
+        ndcTop    =  1.0
+    end
     
-    s = clamp((glX - glLeft) / (glRight - glLeft), 0.0, 1.0)
-    t = clamp((glY - glBottom) / (glTop - glBottom), 0.0, 1.0)
+    # In Vulkan NDC: top = -ndcTop, bottom = -ndcBottom
+    vkLeft   = ndcLeft
+    vkRight  = ndcRight
+    vkTop    = -ndcTop
+    vkBottom = -ndcBottom
+    
+    s = clamp((vkX - vkLeft) / max(1e-5, vkRight - vkLeft), 0.0, 1.0)
+    t = clamp((vkY - vkTop) / max(1e-5, vkBottom - vkTop), 0.0, 1.0)
     
     texW = Float64(calcDimsStruct.imageTextureWidth)
     texH = Float64(calcDimsStruct.imageTextureHeight)

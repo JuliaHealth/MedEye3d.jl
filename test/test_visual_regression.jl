@@ -50,25 +50,28 @@ colors_mapped = map(c -> RGB(c[1]/255, c[2]/255, c[3]/255), MedEye3d.distinctCol
 # Texture specifications (identical to run_interactive_mrb.jl)
 textureSpec_ct = TextureSpec{Float32}(name="CT", isMainImage=true, color=RGB(1.0, 1.0, 1.0), minAndMaxValue=Float32.([-150, 250]))
 textureSpec_pet = TextureSpec{Float32}(name="PET", isMainImage=false, isNuclearMask=true, color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0, 10]))
-textureSpec_mask = TextureSpec{Float32}(
-    name="Mask", isMainImage=false, isMultiDiscreteMask=true,
-    colorSet=colors_mapped, minAndMaxValue=Float32.([0, length(colors_mapped)]), isEditable=true
+textureSpec_mask = TextureSpec{Int16}(
+    name="Mask", isMainImage=false, isMultiDiscreteMask=true, isIntegerTexture=true,
+    colorSet=colors_mapped, minAndMaxValue=Int16.([0, length(colors_mapped)]), isEditable=true
 )
 textureSpec_pure_pet = TextureSpec{Float32}(name="PET", isMainImage=true, color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0, 10]))
-textureSpec_surface = TextureSpec{Float32}(name="Bone_Surface", isMainImage=false, color=RGB(0.0, 1.0, 1.0), minAndMaxValue=Float32.([0.5, 1.5]), isVisible=true)
-textureSpec_marrow = TextureSpec{Float32}(name="Bone_Marrow", isMainImage=false, color=RGB(1.0, 1.0, 0.0), minAndMaxValue=Float32.([0.5, 1.5]), isVisible=true)
+textureSpec_bone = TextureSpec{Int8}(
+    name="Bone_Overlay", isMainImage=false, isIntegerTexture=true,
+    color=RGB(0.0, 1.0, 1.0), minAndMaxValue=Int8.([0, 3]),
+    isVisible=true
+)
 anatomy_colors = [RGB(rand(), rand(), rand()) for _ in 1:400]
-textureSpec_anatomy = TextureSpec{Float32}(
-    name="Anatomy", isMainImage=false, isMultiDiscreteMask=true,
-    colorSet=anatomy_colors, minAndMaxValue=Float32.([0, 400]), isVisible=false
+textureSpec_anatomy = TextureSpec{Int16}(
+    name="Anatomy", isMainImage=false, isMultiDiscreteMask=true, isIntegerTexture=true,
+    colorSet=anatomy_colors, minAndMaxValue=Int16.([0, 400]), isVisible=false
 )
 
 textureSpecArray = Vector{Vector{TextureSpec}}([
-    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow), deepcopy(textureSpec_anatomy)],
+    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
     TextureSpec[deepcopy(textureSpec_pure_pet)],
-    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow), deepcopy(textureSpec_anatomy)],
-    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow), deepcopy(textureSpec_anatomy)],
-    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_surface), deepcopy(textureSpec_marrow), deepcopy(textureSpec_anatomy)]
+    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
+    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
+    TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)]
 ])
 
 # Load and resample TP data
@@ -91,7 +94,7 @@ function load_tp(ct_path, pet_path, mask_path, tfm_path, modality)
     
     ct_vol = Float32.(ct_res.voxel_data)
     pet_vol = Float32.(pet_res.voxel_data)
-    mask_vol = Float32.(seg_res.voxel_data)
+    mask_vol = Int16.(round.(seg_res.voxel_data))
     
     if modality == "SPECT"
         pet_vol .= max.(pet_vol, 0.0f0)
@@ -99,11 +102,10 @@ function load_tp(ct_path, pet_path, mask_path, tfm_path, modality)
         if p99 > 0; pet_vol .= pet_vol .* (10.0f0 / p99); end
     end
     
-    surface_vol = zeros(Float32, size(ct_vol))
-    marrow_vol = zeros(Float32, size(ct_vol))
-    anatomy_vol = zeros(Float32, size(ct_vol))
+    bone_vol = zeros(Int8, size(ct_vol))
+    anatomy_vol = zeros(Int16, size(ct_vol))
     
-    return ct_vol, pet_vol, mask_vol, surface_vol, marrow_vol, anatomy_vol
+    return ct_vol, pet_vol, mask_vol, bone_vol, anatomy_vol
 end
 
 tp_labels_map = Dict{Int, String}()
@@ -118,13 +120,13 @@ for (i, study) in enumerate(studies)
     
     tp_labels_map[tp_idx] = date_str
     
-    ct_vol, pet_vol, mask_vol, surface_vol, marrow_vol, anatomy_vol = load_tp(ct_path, pet_path, mask_path, tfm_path, modality)
+    ct_vol, pet_vol, mask_vol, bone_vol, anatomy_vol = load_tp(ct_path, pet_path, mask_path, tfm_path, modality)
     
-    axial = Any[("CT", ct_vol), ("PET", pet_vol), ("Mask", mask_vol), ("Bone_Surface", surface_vol), ("Bone_Marrow", marrow_vol), ("Anatomy", anatomy_vol)]
+    axial = Any[("CT", ct_vol), ("PET", pet_vol), ("Mask", mask_vol), ("Bone_Overlay", bone_vol), ("Anatomy", anatomy_vol)]
     pure_pet = Any[("PET", pet_vol)]
-    sag = Any[("CT", ct_vol), ("PET", pet_vol), ("Mask", mask_vol), ("Bone_Surface", surface_vol), ("Bone_Marrow", marrow_vol), ("Anatomy", anatomy_vol)]
-    cor = Any[("CT", ct_vol), ("PET", pet_vol), ("Mask", mask_vol), ("Bone_Surface", surface_vol), ("Bone_Marrow", marrow_vol), ("Anatomy", anatomy_vol)]
-    cmp = Any[("CT", ct_vol), ("PET", pet_vol), ("Mask", mask_vol), ("Bone_Surface", surface_vol), ("Bone_Marrow", marrow_vol), ("Anatomy", anatomy_vol)]
+    sag = Any[("CT", ct_vol), ("PET", pet_vol), ("Mask", mask_vol), ("Bone_Overlay", bone_vol), ("Anatomy", anatomy_vol)]
+    cor = Any[("CT", ct_vol), ("PET", pet_vol), ("Mask", mask_vol), ("Bone_Overlay", bone_vol), ("Anatomy", anatomy_vol)]
+    cmp = Any[("CT", ct_vol), ("PET", pet_vol), ("Mask", mask_vol), ("Bone_Overlay", bone_vol), ("Anatomy", anatomy_vol)]
     
     all_tps_data[tp_idx] = [axial, pure_pet, sag, cor, cmp]
     println("  Loaded TP$tp_idx ($modality, $date_str)")
@@ -170,12 +172,12 @@ for (tp_idx, vdt) in all_tps_data
     ct_vol = vdt[1][1][2]   # axial panel CT
     pet_vol = vdt[1][2][2]  # axial panel PET
     mask_vol = vdt[1][3][2] # axial panel Mask
-    mask_i16 = round.(Int16, mask_vol)
-    mask_f32 = Float32.(mask_vol)
-    bone_surf = BitArray(zeros(Bool, size(ct_vol)))
-    bone_marr = BitArray(zeros(Bool, size(ct_vol)))
-    anat_f32 = zeros(Float32, size(ct_vol))
-    entry = MEH.TpCacheEntry(ct_vol, pet_vol, mask_i16, bone_surf, bone_marr, nothing, mask_f32, anat_f32)
+    mask_compact = eltype(mask_vol) == Int16 ? mask_vol : Int16.(round.(max.(0.0f0, Float32.(mask_vol))))
+    mask_i16 = mask_compact
+    bone_mask = zeros(Int8, size(ct_vol))
+    anatomy = nothing
+    anat_i16 = zeros(Int16, size(ct_vol))
+    entry = MEH.TpCacheEntry(ct_vol, pet_vol, mask_compact, bone_mask, anatomy, mask_i16, anat_i16)
     MEH.tp_data_cache[tp_idx] = entry
 end
 
@@ -186,9 +188,19 @@ put!(channel, Int64(0))
 put!(channel, ChangePlaneEvent(:Coronal))
 put!(channel, ChangePlaneEvent(:Sagittal))
 put!(channel, ChangePlaneEvent(:Axial))
+
+# Compare Volumes Warmup Cycle 1
 put!(channel, CompareTimePointsEvent(true))
 put!(channel, Int64(0))
 put!(channel, CompareTimePointsEvent(false))
+put!(channel, Int64(0))
+
+# Compare Volumes Warmup Cycle 2
+put!(channel, CompareTimePointsEvent(true))
+put!(channel, Int64(0))
+put!(channel, CompareTimePointsEvent(false))
+put!(channel, Int64(0))
+
 put!(channel, ChangeTimePointEvent(1))
 put!(channel, ChangeTimePointEvent(-1))
 sleep(3.0)  # Wait for warmup to complete
@@ -347,6 +359,43 @@ n_total += 1
 send_events(ChangeTimePointEvent(-1))
 n_pass += capture("23_prev_timepoint.png")
 
+# 24. Paint manual lesion (ID=2, bright overlay)
+n_total += 1
+send_events(
+    PaintValEvent(2, true),
+    MouseStruct(isLeftButtonDown=true, lastCoordinates=[CartesianIndex(300, 200), CartesianIndex(350, 250), CartesianIndex(400, 200)], actualWindowWidth=1400, actualWindowHeight=900)
+)
+n_pass += capture("24_painted_lesion.png")
+
+# 25. Move lesion
+n_total += 1
+send_events(
+    ToggleMoveLesionModeEvent(true),
+    MouseStruct(isLeftButtonDown=false, isRightButtonDown=true, lastCoordinates=[CartesianIndex(350, 225)], actualWindowWidth=1400, actualWindowHeight=900),
+    MouseStruct(isLeftButtonDown=false, isRightButtonDown=true, lastCoordinates=[CartesianIndex(450, 225)], actualWindowWidth=1400, actualWindowHeight=900),
+    ToggleMoveLesionModeEvent(false)
+)
+n_pass += capture("25_moved_lesion.png")
+
+# 26. Erase stroke
+n_total += 1
+send_events(
+    PaintValEvent(0, true),
+    MouseStruct(isLeftButtonDown=true, lastCoordinates=[CartesianIndex(300, 200), CartesianIndex(450, 250)], actualWindowWidth=1400, actualWindowHeight=900),
+    PaintValEvent(-1, false)
+)
+n_pass += capture("26_erased_lesion.png")
+
+# 27. Compare Mode ON -> OFF -> Plane Change (Verify Panel 2 pure PET and Panel 5 hidden)
+n_total += 1
+send_events(
+    CompareTimePointsEvent(true),
+    CompareTimePointsEvent(false),
+    ChangePlaneEvent(:Coronal),
+    ChangePlaneEvent(:Axial)
+)
+n_pass += capture("27_quad_view_after_compare.png")
+
 # ─── Summary ────────────────────────────────────────────────────────────
 println("\n" * "="^60)
 println("Visual Regression Test Results: $n_pass/$n_total passed")
@@ -360,6 +409,7 @@ println("="^60)
 
 # Clean shutdown
 println("Closing viewer...")
-put!(channel, ResizeWindowEvent(0, 0))
+put!(channel, CloseWindowEvent())
 sleep(0.5)
 println("Done.")
+exit(n_pass == n_total ? 0 : 1)

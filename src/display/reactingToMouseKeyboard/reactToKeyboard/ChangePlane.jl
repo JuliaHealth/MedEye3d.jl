@@ -27,8 +27,15 @@ function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObjec
     stateObject.onScrollData.dataToScrollDims = toScrollDat
     stateObject.onScrollData.slicesNumber = getSlicesNumber(stateObject.onScrollData)
 
-    # Get the slice of interest based on last recorded mouse position
-    current = stateObject.lastRecordedMousePosition[toScrollDat.dimensionToScroll]
+    # Get the slice of interest based on last recorded mouse position or middle slice
+    mousePos = stateObject.lastRecordedMousePosition
+    current = if mousePos == CartesianIndex(1, 1, 1) && stateObject.currentDisplayedSlice > 1
+        stateObject.currentDisplayedSlice
+    elseif mousePos == CartesianIndex(1, 1, 1)
+        max(1, stateObject.onScrollData.slicesNumber ÷ 2)
+    else
+        clamp(mousePos[toScrollDat.dimensionToScroll], 1, stateObject.onScrollData.slicesNumber)
+    end
 
     # Generate 2D slice data for display
     singleSlDat = stateObject.onScrollData.dataToScroll |>

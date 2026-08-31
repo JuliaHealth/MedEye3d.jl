@@ -11,8 +11,8 @@ using ..DisplayWords, ..ForDisplayStructs, ..TextureManag, ..DataStructs, ..Stru
 export reactToScroll, reactToScrollZoom, reactToScrollMultiPanel!
 export registerMouseScrollFunctions
 
-# Module-local PET/CT blend tracking for Ctrl+scroll
-const _pet_blend_ref = Ref(1.0f0)
+# Module-local PET/CT blend tracking for Ctrl+scroll (default 50% blend)
+const _pet_blend_ref = Ref(0.5f0)
 
 
 
@@ -29,21 +29,12 @@ function registerMouseScrollFunctions(window::GLFW.Window, mainChannel::Base.Cha
         shift_down = GLFW.GetKey(window, GLFW.KEY_LEFT_SHIFT) == GLFW.PRESS || GLFW.GetKey(window, GLFW.KEY_RIGHT_SHIFT) == GLFW.PRESS
         alt_down = GLFW.GetKey(window, GLFW.KEY_LEFT_ALT) == GLFW.PRESS || GLFW.GetKey(window, GLFW.KEY_RIGHT_ALT) == GLFW.PRESS
         
-        # Ensure switchIndex is updated to the quadrant directly under the cursor
-        try
-            actualW, actualH = GLFW.GetWindowSize(window)
-            curX, curY = GLFW.GetCursorPos(window)
-            if curX >= 0 && curX <= actualW && curY >= 0 && curY <= actualH
-                put!(mainChannel, MouseStruct(
-                    isLeftButtonDown  = false,
-                    isRightButtonDown = false,
-                    lastCoordinates   = [CartesianIndex(Int(round(curX)), Int(round(curY)))],
-                    actualWindowWidth  = Int(actualW),
-                    actualWindowHeight = Int(actualH),
-                ))
-            end
-        catch
-        end
+        # NOTE: switchIndex update removed from scroll callback.
+        # The cursor position callback (SetCursorPosCallback) already updates
+        # switchIndex on every mouse move. The synthetic MouseStruct injection
+        # was causing 2× events per scroll tick — the MouseStruct triggered a
+        # full reactToMouseDrag() dispatch (panel detection, pan drag cleanup,
+        # compare mode check) for zero useful work.
         
         if ctrl_down && !shift_down && !alt_down
             # Ctrl+scroll: adjust PET/CT blend (±0.05 per tick)
@@ -86,7 +77,7 @@ function reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFi
     end
     
     mainState.calcDimsStruct.zoom = newZoom
-    @info "Shift-Scroll Zoom: $(round(newZoom, digits=2))x (panel=$panelIdx)"
+    @debug "Shift-Scroll Zoom: $(round(newZoom, digits=2))x (panel=$panelIdx)"
     # GPU zoom: no reactToScroll needed — render loop picks up new zoom via setZoomPanUniforms
 end
 
@@ -136,7 +127,7 @@ function reactToScroll(scrollNumb::Int64, mainStates::Vector{StateDataFields}, t
 
     t_end = time_ns()
     action = scrollNumb != 0 ? "SCROLL" : "REDRAW"
-    @info "[BENCH] reactToScroll ($(action)): $(round((t_end-t_start)/1e6, digits=1))ms"
+    @debug "[BENCH] reactToScroll ($(action)): $(round((t_end-t_start)/1e6, digits=1))ms"
 end#reactToScroll
 function getSvCurrentSlice(all_supervoxels::Dict{Int, Dict{Int, Dict{String,Any}}}, slice_number, mainState=nothing)
     # Get the current axis
@@ -230,33 +221,27 @@ function reactToScrollMultiPanel!(panels::Vector{Int}, mainStates::Vector{StateD
         calcDimStruct = panelState.calcDimsStruct
         for updateDat in singleSlDat.listOfDataAndImageNames
             # Optimization: if slice didn't change, only upload dynamic overlays (Bone, Mask)
-            if !slice_changed && updateDat.name != "Bone_Surface" && updateDat.name != "Bone_Marrow" && updateDat.name != "Mask" && updateDat.name != "manualModif"
+            if !slice_changed && updateDat.name != "Bone_Overlay" && updateDat.name != "Mask" && updateDat.name != "manualModif"
                 continue
             end
-            findList = findall((texSpec) -> texSpec.name == updateDat.name, modulelistOfTextSpecs)
-            if !isempty(findList)
-                texSpec = modulelistOfTextSpecs[findList[1]]
+            idx = findfirst(ts -> ts.name == updateDat.name, modulelistOfTextSpecs)
+            if idx !== nothing
+                texSpec = modulelistOfTextSpecs[idx]
                 # GPU zoom/pan: upload raw unzoomed data — zoom/pan applied by vertex shader uvScale/uvOffset uniforms
                 TextureManag.updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, calcDimStruct.imageTextureWidth, calcDimStruct.imageTextureHeight)
                 n_uploads += 1
             end
         end
         
-        # Upload text texture ONLY for panels with active text display (typically panel 1)
-        if (panel_idx == 1 || panelState.textDispObj.textureSpec.ID[] != 0) && calcDimStruct.wordsQuadVertSize > 0 && !all(calcDimStruct.wordsImageQuadVert .== 0.0f0)
-            DisplayWords.activateForTextDisp(panelState.textDispObj.shader_program_words, panelState.textDispObj.vbo_words, calcDimStruct)
-            TextureManag.addTextToTexture(panelState.textDispObj, [singleSlDat.textToDisp..., panelState.valueForMasToSet.text], calcDimStruct)
-            DisplayWords.reactivateMainObj(panelState.mainForDisplayObjects.shader_program, panelState.mainForDisplayObjects.vbo, calcDimStruct)
-        end
+        # NOTE: Text rendering calls removed — activateForTextDisp, addTextToTexture,
+        # reactivateMainObj are all no-ops in the Vulkan backend. The condition
+        # check and function calls were pure waste per scroll per panel.
         
         panelState.currentlyDispDat = singleSlDat
         
-        # Update mouse position tracking
-        currentDim = Int64(panelState.onScrollData.dataToScrollDims.dimensionToScroll)
+        # Update mouse position tracking (direct construction, no temp array)
         lastMouse = panelState.lastRecordedMousePosition
-        locArr = [lastMouse[1], lastMouse[2], lastMouse[3]]
-        locArr[3] = current
-        panelState.lastRecordedMousePosition = CartesianIndex(locArr[1], locArr[2], locArr[3])
+        panelState.lastRecordedMousePosition = CartesianIndex(lastMouse[1], lastMouse[2], current)
     end
     t_ms = (time_ns() - t_start) / 1e6
     if t_ms > 20.0

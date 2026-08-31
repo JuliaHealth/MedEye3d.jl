@@ -8,14 +8,14 @@ services:
     container_name: medeye3d-gui
     environment:
       - DISPLAY=${DISPLAY}
-      - MESA_GL_VERSION_OVERRIDE=4.3
-      - MESA_GLSL_VERSION_OVERRIDE=430
+      - JULIA_NUM_THREADS=auto,1
+      - HDF5_USE_FILE_LOCKING=FALSE
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:ro
       - /mnt/big/project_ssd/project_ssd:/mnt/big/project_ssd/project_ssd
       - .:/workspace
     network_mode: host
-    command: bash -c "julia --project=/workspace scripts/app/run_interactive_mrb.jl"
+    command: bash -c "julia --threads=auto,1 --project=/workspace scripts/app/run_interactive_mrb.jl"
 
   medeye3d-ai:
     build:

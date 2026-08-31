@@ -5,7 +5,7 @@ export ChangeTimePointEvent, ToggleLesionEvent, RefreshListEvent
 export AddAutoPetEvent, AIInferenceResultEvent, AIStatusUpdateEvent, SyncMissingEvent, GenManualEvent
 export MapLinkEvent, AutoRunPreprocessEvent, RunPreprocessEvent, ShowBoneMaskEvent, ShowMaskLayerEvent, SaveMRBEvent
 export CloseWindowEvent, ResizeWindowEvent, SetWindowTitleEvent, ChangeBrushSizeEvent, ToggleMoveLesionModeEvent
-export PetBlendEvent, BoneSubsegResultEvent, ScreenshotEvent
+export PetBlendEvent, BoneSubsegResultEvent, ScreenshotEvent, LabelOpacityEvent
 struct ChangePlaneEvent
     plane :: Symbol # :Axial, :Coronal, :Sagittal
 end
@@ -49,7 +49,7 @@ struct RefreshListEvent end
 
 struct AddAutoPetEvent 
     algorithm::String
-    channel::Channel{Any}
+    channel::Any  # Channel{Any} or ChannelProxy (parallel startup)
 end
 struct AIInferenceResultEvent
     algorithm::String
@@ -115,6 +115,10 @@ end
 struct ScreenshotEvent
     path::String
     done_channel::Channel{Bool}  # signaled when save completes
+end
+
+struct LabelOpacityEvent
+    opacity :: Float32  # 0.0 = completely transparent, 1.0 = fully opaque
 end
 
 end

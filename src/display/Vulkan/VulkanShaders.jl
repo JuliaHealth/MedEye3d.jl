@@ -152,6 +152,11 @@ function generate_vulkan_zerovbo_vertex_shader()::String
             vec2(pc.ndcMin.x, pc.ndcMin.y), vec2(pc.ndcMax.x, pc.ndcMin.y), vec2(pc.ndcMin.x, pc.ndcMax.y),
             vec2(pc.ndcMin.x, pc.ndcMax.y), vec2(pc.ndcMax.x, pc.ndcMin.y), vec2(pc.ndcMax.x, pc.ndcMax.y)
         );
+        // OpenGL-compatible UV mapping for use with negative-height viewport.
+        // The negative viewport flips NDC Y (Y-up like OpenGL), but Vulkan's
+        // texture V=0 is at the TOP of the image (opposite to OpenGL's V=0 at bottom).
+        // To compensate, we map V=0 to the bottom vertex and V=1 to the top vertex,
+        // which inverts the texture vertically to match OpenGL's display convention.
         vec2 texCoords[6] = vec2[](
             vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(0.0, 1.0),
             vec2(0.0, 1.0), vec2(1.0, 0.0), vec2(1.0, 1.0)
@@ -216,10 +221,10 @@ via a UBO at `layout(set=1, binding=0)`.
 function generate_vulkan_fragment_shader(texture_specs, color)::String
     n_tex = length(texture_specs)
 
-    # Build sampler declarations
+    # Build sampler declarations (isampler2D for integer textures, sampler2D for float)
     sampler_decls = join(map(enumerate(texture_specs)) do (i, spec)
         binding = i - 1
-        sampler_type = "sampler2D"  # All textures are R32F in the Vulkan backend
+        sampler_type = spec.isIntegerTexture ? "isampler2D" : "sampler2D"
         "layout(set = 0, binding = $binding) uniform $sampler_type $(spec.name);"
     end, "\n    ")
 
@@ -238,9 +243,13 @@ function generate_vulkan_fragment_shader(texture_specs, color)::String
         """
     end, "\n        ")
 
-    # Build texture reads
+    # Build texture reads (integer textures read as int, then convert to float)
     tex_reads = join(map(texture_specs) do spec
-        "float $(spec.name)Res = texture($(spec.name), coord).r;"
+        if spec.isIntegerTexture
+            "int $(spec.name)Res_i = texture($(spec.name), coord).r;\n        float $(spec.name)Res = float($(spec.name)Res_i);"
+        else
+            "float $(spec.name)Res = texture($(spec.name), coord).r;"
+        end
     end, "\n        ")
 
     # Classify textures
@@ -396,7 +405,7 @@ function _generate_mask_overlay_code(notcont, cont, discrete)
                         showThis_$(n) = (params.$(n)minValue < params.$(n)maxValue) || (abs($(n)Res - params.$(n)minValue) < 0.1);
                     }
                     if (showThis_$(n)) {
-                        float alpha = clamp(params.$(n)maskContribution * 2.0, 0.3, 0.8);
+                        float alpha = clamp(params.$(n)maskContribution, 0.0, 1.0);
                         vec3 maskColor = getDiscreteColor_$(n)($(n)Res);
                         if (maskColor != vec3(0.0)) {
                             baseColor = mix(baseColor, maskColor, alpha);
@@ -407,17 +416,38 @@ function _generate_mask_overlay_code(notcont, cont, discrete)
         end
     end
 
-    # 4. Top layer: bone surface / label overlays (semi-transparent)
+    # 4. Top layer: bone overlay / label overlays
     for x in notcont
         if !x.isMainImage && !x.isNuclearMask
             n = x.name
-            code *= """
+            if occursin("Bone_Overlay", n)
+                # Combined bone mask: surface=1 (cyan), marrow=2 (yellow), both=3 (green)
+                code *= """
+                if (params.$(n)isVisible == 1 && abs($(n)Res) > 0.1) {
+                    float labelAlpha_$(n) = clamp(params.$(n)maskContribution, 0.0, 1.0);
+                    vec3 boneColor_$(n);
+                    int boneVal_$(n) = $(n)Res_i;
+                    if (boneVal_$(n) == 1) {
+                        boneColor_$(n) = vec3(0.0, 1.0, 1.0);  // Surface: cyan
+                    } else if (boneVal_$(n) == 2) {
+                        boneColor_$(n) = vec3(1.0, 1.0, 0.0);  // Marrow: yellow
+                    } else if (boneVal_$(n) == 3) {
+                        boneColor_$(n) = vec3(0.5, 1.0, 0.5);  // Both: green
+                    } else {
+                        boneColor_$(n) = vec3(params.$(n)ColorMask.r, params.$(n)ColorMask.g, params.$(n)ColorMask.b);
+                    }
+                    baseColor = mix(baseColor, boneColor_$(n), labelAlpha_$(n));
+                }
+            """
+            else
+                code *= """
                 if (params.$(n)isVisible == 1 && $(n)Res > 0.1) {
-                    float labelAlpha_$(n) = clamp(params.$(n)maskContribution * 2.0, 0.3, 0.8);
+                    float labelAlpha_$(n) = clamp(params.$(n)maskContribution, 0.0, 1.0);
                     vec3 labelColor_$(n) = vec3(params.$(n)ColorMask.r, params.$(n)ColorMask.g, params.$(n)ColorMask.b);
                     baseColor = mix(baseColor, labelColor_$(n), labelAlpha_$(n));
                 }
             """
+            end
         end
     end
 

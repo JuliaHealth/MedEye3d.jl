@@ -38,7 +38,7 @@ sets  visibility and render the result to the screen
 """
 function setVisAndRender(isVis::Bool, stateObject::StateDataFields, unifs::TextureUniforms)
     setTextureVisibility(isVis, unifs)
-    basicRender(stateObject.mainForDisplayObjects.window)
+    # NOTE: basicRender() removed — Vulkan rendering handled by consumer loop
 
 end#setVisAndRender
 

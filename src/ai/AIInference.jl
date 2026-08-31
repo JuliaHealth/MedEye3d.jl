@@ -5,9 +5,21 @@ using JSON
 
 export run_helpnet_inference, run_skellytour_segmentation, run_bone_subsegmentation, run_nninteractive_inference
 
-const DEFAULT_PYENV = "/mnt/big/project_ssd/project_ssd/MedEye3d.jl/pyenv/bin/python3"
-const HELPNET_BUNDLE_DIR = "/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/src/helpnet_inference_bundle"
-const HELPNET_CHECKPOINT = "/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/src/helpnet_inference_bundle/checkpoints/helpnet_model_final.pt"
+# Resolve pyenv relative to the project root (works inside Docker and on host)
+const _PROJECT_ROOT = abspath(joinpath(@__DIR__, "..", ".."))
+const DEFAULT_PYENV = let
+    pyenv_path = joinpath(_PROJECT_ROOT, "pyenv", "bin", "python3")
+    isfile(pyenv_path) ? pyenv_path : "python3"  # fallback to system python
+end
+const HELPNET_BUNDLE_DIR = let
+    # Try container path first, then host path
+    for p in ["/workspaces/MedEye3d.jl/helpnet_inference_bundle",
+              "/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/src/helpnet_inference_bundle"]
+        isdir(p) && return p
+    end
+    "/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/src/helpnet_inference_bundle"
+end
+const HELPNET_CHECKPOINT = joinpath(HELPNET_BUNDLE_DIR, "checkpoints", "helpnet_model_final.pt")
 
 """
     run_helpnet_inference(ct_patch_path::String, pet_patch_path::String, point_path::String, out_dir::String; pyenv=DEFAULT_PYENV)
@@ -68,26 +80,47 @@ Extracts cortical bone surface (from max_anatomy solid bones) and bone marrow
 function run_bone_subsegmentation(lesion_path::String, bone_path::String, out_surface::String, out_marrow::String; 
                                   ct_path::String="", max_anatomy_path::String="", bone_label_ids::String="", pyenv=DEFAULT_PYENV)
     script_path = joinpath(@__DIR__, "..", "..", "scripts", "ai", "bone_subsegmentation.py")
+    # Docker container path (if running inside sharp_ramanujan, script is at /workspaces/...)
+    docker_script = "/workspaces/MedEye3d.jl/scripts/ai/bone_subsegmentation.py"
     
     env = copy(ENV)
     env["CUDA_VISIBLE_DEVICES"] = "1"
     
-    args = [pyenv, script_path, "--lesion", lesion_path, "--bone", bone_path, 
-            "--out-surface", out_surface, "--out-marrow", out_marrow]
-    
+    extra_args = String[]
     if ct_path != ""
-        push!(args, "--ct", ct_path)
+        push!(extra_args, "--ct", ct_path)
     end
     if max_anatomy_path != ""
-        push!(args, "--max-anatomy", max_anatomy_path)
+        push!(extra_args, "--max-anatomy", max_anatomy_path)
     end
     if bone_label_ids != ""
-        push!(args, "--bone-labels", bone_label_ids)
+        push!(extra_args, "--bone-labels", bone_label_ids)
     end
     
-    cmd = setenv(Cmd(args), env)
-    @info "Running bone subsegmentation extraction..." cmd
-    run(cmd)
+    # Try medeye3d-ai Docker container first (has scipy/nibabel/numpy)
+    docker_available = try
+        success(`docker inspect medeye3d-ai`)
+    catch
+        false
+    end
+    
+    if docker_available
+        docker_args = ["docker", "exec", "medeye3d-ai", "python3", "-u", docker_script,
+                       "--lesion", lesion_path, "--bone", bone_path,
+                       "--out-surface", out_surface, "--out-marrow", out_marrow]
+        append!(docker_args, extra_args)
+        cmd = Cmd(docker_args)
+        @info "Running bone subsegmentation via Docker (medeye3d-ai)..." cmd
+        run(cmd)
+    else
+        # Fallback to local pyenv
+        args = [pyenv, script_path, "--lesion", lesion_path, "--bone", bone_path,
+                "--out-surface", out_surface, "--out-marrow", out_marrow]
+        append!(args, extra_args)
+        cmd = setenv(Cmd(args), env)
+        @info "Running bone subsegmentation locally..." cmd
+        run(cmd)
+    end
     return out_surface, out_marrow
 end
 
