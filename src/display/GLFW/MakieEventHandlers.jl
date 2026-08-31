@@ -32,13 +32,23 @@ const ai_status_text = Observable{String}("Ready")
 # Cursor info Observables — updated from on_next!(MouseStruct) via reactToMouseDrag
 const cursor_info_text = Observable{String}("")      # "HU: 45 | SUV: 3.2 | femur (L5) | [Ax] Sl:163"
 const cursor_study_text = Observable{String}("")     # "PET TP0" or "L: PET TP0 | R: PET TP3"
-export cursor_info_text, cursor_study_text
+export cursor_info_text, cursor_study_text, set_ai_status!
 
 # Sanitize AI status text for Makie Label rendering (ASCII-only, truncated)
 function safe_status_text(msg::String)
     s = replace(msg, "\u2014" => "-", "\u2026" => "...")
     s = String(filter(c -> isascii(c), collect(s)))
     return length(s) > 80 ? s[1:80] * "..." : s
+end
+
+# Thread-safe AI status updater (ensures Observable mutation doesn't race GLMakie renderloop)
+function set_ai_status!(msg::String)
+    s = safe_status_text(msg)
+    @async begin
+        try
+            ai_status_text[] = s
+        catch; end
+    end
 end
 
 # Internal inference queue — serializes all Docker communication through a single worker thread
@@ -51,7 +61,7 @@ struct InferenceJob
     cy::Int
     cz::Int
     active_id::Int
-    seg_vol::Union{Nothing, Array{Float32, 3}}
+    seg_vol::Any  # Reference to the live mask volume (Array{Int16,3})
     main_channel::Any  # Channel{Any} or ChannelProxy (parallel startup)
     scribble_coords::Vector{Vector{Int}}  # Pre-extracted 0-indexed [x,y,z] coords for nnInteractive fast path
 end
@@ -66,7 +76,7 @@ function start_inference_worker()
             try
                 job = take!(inference_queue)
                 
-                ai_status_text[] = safe_status_text("[Sending] to Docker ($(job.algorithm))...")
+                set_ai_status!("[Sending] to Docker ($(job.algorithm))...")
                 println("[AI Worker] Processing $(job.algorithm) at ($(job.cx),$(job.cy),$(job.cz)) for lesion $(job.active_id)..."); flush(stdout)
                 
                 mask = nothing
@@ -87,16 +97,16 @@ function start_inference_worker()
                         job.cx, job.cy, job.cz)
                 else
                     println("[AI Worker] WARNING: Unknown algorithm: $(job.algorithm)"); flush(stdout)
-                    ai_status_text[] = safe_status_text("[Warning] Unknown algorithm: $(job.algorithm)")
+                    set_ai_status!("[Warning] Unknown algorithm: $(job.algorithm)")
                     continue
                 end
                 
                 if mask !== nothing
                     voxel_count = count(mask .> 0)
-                    ai_status_text[] = safe_status_text("[Applying] result ($voxel_count voxels)...")
+                    set_ai_status!("[Applying] result ($voxel_count voxels)...")
                     println("[AI Worker] Docker returned mask with $voxel_count voxels. Posting to channel."); flush(stdout)
                 else
-                    ai_status_text[] = safe_status_text("[Warning] Docker returned no mask")
+                    set_ai_status!("[Warning] Docker returned no mask")
                     println("[AI Worker] Docker returned nothing (inference failed)."); flush(stdout)
                 end
                 
@@ -114,7 +124,7 @@ function start_inference_worker()
                 err_msg = sprint(showerror, e)
                 println("[AI Worker] ERROR: $err_msg"); flush(stdout)
                 println(sprint(showerror, e, catch_backtrace())); flush(stdout)
-                ai_status_text[] = safe_status_text("[Error] AI Worker Error: $err_msg")
+                set_ai_status!("[Error] AI Worker Error: $err_msg")
                 try
                     open("/tmp/medeye3d_errors.log", "a") do f
                         println(f, "$(Dates.now()) AI Worker ERROR: $err_msg")
@@ -405,6 +415,9 @@ end
 
 function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vector{StateDataFields})
     changed = false
+    if data.lesion_id > 0
+        current_active_lesion_id[] = data.lesion_id
+    end
     for stateObject in stateObjects
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if textSpec.isMultiDiscreteMask || textSpec.name == "Mask"
@@ -474,6 +487,9 @@ function reactToLabelOpacity(data::LabelOpacityEvent, stateObjects::Vector{State
 end
 
 function reactToPaintVal(data::PaintValEvent, stateObjects::Vector{StateDataFields})
+    if data.val > 0
+        current_active_lesion_id[] = data.val
+    end
     for state in stateObjects
         state.valueForMasToSet = valueForMasToSetStruct(value=data.val, is_painting_active=data.active)
         if data.active
@@ -561,6 +577,9 @@ end
 function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateDataFields})
     t_total = time_ns()
     changed = false
+    if data.lesion_id > 0
+        current_active_lesion_id[] = data.lesion_id
+    end
 
     # 1. Update OpenGL visibility constants for masks
     panel5_lesion_id = data.lesion_id
@@ -1214,40 +1233,30 @@ function reactToRefreshList(data::RefreshListEvent, stateObjects::Vector{StateDa
 end
 
 function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateDataFields})
-    ai_status_text[] = safe_status_text("[Processing] AI request ($(data.algorithm))...")
+    set_ai_status!("[Processing] AI request ($(data.algorithm))...")
     try
         println("Add New Lesion (Auto-PET) triggered with algorithm: $(data.algorithm)"); flush(stdout)
         
-        # Log all available volume names for debugging
         tp1_state = stateObjects[1]
-        println("[reactToAddAutoPet] Panel 1 volumes: $(join([d.name for d in tp1_state.onScrollData.dataToScroll], ", "))"); flush(stdout)
         
-        # Look up volumes by NAME, not index — manualModif auto-inserts at index 2
+        # Look up volumes by NAME, not index
         ct_vol = nothing
         pet_vol = nothing
+        seg_vol = nothing
         for dat in tp1_state.onScrollData.dataToScroll
             if dat.name == "CT" && ct_vol === nothing
                 ct_vol = dat.dat
             elseif dat.name == "PET" && pet_vol === nothing
                 pet_vol = dat.dat
+            elseif (dat.name == "Mask" || dat.name == "segmentation") && seg_vol === nothing
+                seg_vol = dat.dat
             end
         end
         if ct_vol === nothing
-            error("CT volume not found by name in panel 1. Available volumes: $(join([d.name for d in tp1_state.onScrollData.dataToScroll], ", ")). No fallbacks allowed.")
+            error("CT volume not found by name in panel 1. No fallbacks allowed.")
         end
         if pet_vol === nothing
-            error("PET volume not found by name in panel 1. Available volumes: $(join([d.name for d in tp1_state.onScrollData.dataToScroll], ", ")). No fallbacks allowed.")
-        end
-        
-        seg_vol = nothing
-        for dat in tp1_state.onScrollData.dataToScroll
-            if dat.name == "Mask" || dat.name == "segmentation"
-                seg_vol = dat.dat
-                break
-            end
-        end
-        if seg_vol === nothing
-            println("[reactToAddAutoPet] WARNING: No 'Mask'/'segmentation' volume found. AI results will not be applied to segmentation volume."); flush(stdout)
+            error("PET volume not found by name in panel 1. No fallbacks allowed.")
         end
         
         # Active lesion ID to assign to predicted voxels: prioritize current_active_lesion_id[]
@@ -1264,106 +1273,87 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
             active_id = 1
         end
         
-        # Find user-painted seed points across all panels (Axial, Pure PET, Sagittal, Coronal, Compare)
-        painted_pts = CartesianIndex{3}[]
+        # Snapshot panel scroll references for async scribble search
+        panel_snapshots = [
+            (p_idx,
+             !isempty(st.textureToModifyVec) ? st.textureToModifyVec[1].name : "NONE",
+             st.valueForMasToSet.value,
+             [(dat.name, dat.dat) for dat in st.onScrollData.dataToScroll])
+            for (p_idx, st) in enumerate(stateObjects)
+        ]
         
-        for (p_idx, st) in enumerate(stateObjects)
-            # Find what texture this panel is actually configured to paint into
-            active_paint_tex = !isempty(st.textureToModifyVec) ? st.textureToModifyVec[1].name : "NONE"
-            
-            for dat in st.onScrollData.dataToScroll
-                # Search for the newly painted scribbles in the texture they actually painted into
-                if dat.name == active_paint_tex || dat.name == "manualModif"
-                    # For manualModif texture, accept ANY non-zero voxels as scribbles.
-                    # For other textures (Mask, segmentation), only match active_id or brush value.
-                    is_manual = dat.name == "manualModif"
-                    T_elem = eltype(dat.dat)
-                    p = if is_manual
-                        findall(dat.dat .> 0)
-                    else
-                        v_act = round(T_elem, active_id)
-                        v_set = round(T_elem, st.valueForMasToSet.value)
-                        findall((dat.dat .== v_act) .| (dat.dat .== v_set))
-                    end
-                    if !isempty(p)
-                        println("[reactToAddAutoPet] Found $(length(p)) painted voxels for lesion $active_id in panel $p_idx $(dat.name)"); flush(stdout)
-                        if p_idx == 3 # Sagittal (Y, Z, X) -> Canonical (X, Y, Z)
-                            append!(painted_pts, [CartesianIndex(idx[3], idx[1], idx[2]) for idx in p])
-                        elseif p_idx == 4 # Coronal (X, Z, Y) -> Canonical (X, Y, Z)
-                            append!(painted_pts, [CartesianIndex(idx[1], idx[3], idx[2]) for idx in p])
-                        else # Axial (1, 2, 5) -> Canonical (X, Y, Z)
-                            append!(painted_pts, p)
-                        end
-                    end
-                end
-            end
-        end
-        unique!(painted_pts)
-
-        points_vol = zeros(Float32, size(ct_vol))
-        if !isempty(painted_pts)
-            for idx in painted_pts
-                if checkbounds(Bool, points_vol, idx)
-                    points_vol[idx] = 1.0f0
-                end
-            end
-            cx = round(Int, mean([p[1] for p in painted_pts]))
-            cy = round(Int, mean([p[2] for p in painted_pts]))
-            cz = round(Int, mean([p[3] for p in painted_pts]))
-        else
-            msg = "No painted scribbles found for AI inference. Paint scribbles on the lesion first."
-            println("ERROR: $msg"); flush(stdout)
-            ai_status_text[] = safe_status_text("[Error] $msg")
+        algo = data.algorithm
+        channel = data.channel
+        
+        # Execute heavy voxel scanning & job queuing asynchronously so consumer / GUI NEVER block
+        Threads.@spawn begin
             try
-                open("/tmp/medeye3d_errors.log", "a") do f
-                    println(f, "$(Dates.now()) [reactToAddAutoPet] ERROR: $msg")
-                    for (p_idx, st) in enumerate(stateObjects)
-                        active_paint_tex = !isempty(st.textureToModifyVec) ? st.textureToModifyVec[1].name : "NONE"
-                        println(f, "  Panel $p_idx active painting texture: $active_paint_tex")
-                        for dat in st.onScrollData.dataToScroll
-                            if dat.name == "manualModif" || dat.name == "Mask" || dat.name == "segmentation"
-                                nz_count = count(dat.dat .> 0.0f0)
-                                if nz_count > 0
-                                    nz_vals = unique(filter(x -> x > 0.0f0, dat.dat))
-                                    println(f, "    $(dat.name) contains $nz_count non-zero voxels. Unique values: $nz_vals")
-                                else
-                                    println(f, "    $(dat.name) is empty (0 non-zero voxels)")
+                painted_pts = CartesianIndex{3}[]
+                for (p_idx, active_paint_tex, brush_val, dat_list) in panel_snapshots
+                    for (d_name, d_dat) in dat_list
+                        if d_name == active_paint_tex || d_name == "manualModif"
+                            is_manual = d_name == "manualModif"
+                            T_elem = eltype(d_dat)
+                            p = if is_manual
+                                findall(d_dat .> 0)
+                            else
+                                v_act = round(T_elem, active_id)
+                                v_set = round(T_elem, brush_val)
+                                findall((d_dat .== v_act) .| (d_dat .== v_set))
+                            end
+                            if !isempty(p)
+                                println("[reactToAddAutoPet] Found $(length(p)) painted voxels for lesion $active_id in panel $p_idx $(d_name)"); flush(stdout)
+                                if p_idx == 3 # Sagittal (Y, Z, X) -> Canonical (X, Y, Z)
+                                    append!(painted_pts, [CartesianIndex(idx[3], idx[1], idx[2]) for idx in p])
+                                elseif p_idx == 4 # Coronal (X, Z, Y) -> Canonical (X, Y, Z)
+                                    append!(painted_pts, [CartesianIndex(idx[1], idx[3], idx[2]) for idx in p])
+                                else # Axial (1, 2, 5) -> Canonical (X, Y, Z)
+                                    append!(painted_pts, p)
                                 end
                             end
                         end
                     end
-                    println(f, "---")
                 end
-            catch; end
-            return
+                unique!(painted_pts)
+                
+                if isempty(painted_pts)
+                    msg = "No painted scribbles found for AI inference. Paint scribbles on the lesion first."
+                    println("ERROR: $msg"); flush(stdout)
+                    set_ai_status!("[Error] $msg")
+                    return
+                end
+                
+                points_vol = zeros(Float32, size(ct_vol))
+                for idx in painted_pts
+                    if checkbounds(Bool, points_vol, idx)
+                        points_vol[idx] = 1.0f0
+                    end
+                end
+                cx = round(Int, mean([p[1] for p in painted_pts]))
+                cy = round(Int, mean([p[2] for p in painted_pts]))
+                cz = round(Int, mean([p[3] for p in painted_pts]))
+                
+                scribble_coords_0idx = [[idx[1]-1, idx[2]-1, idx[3]-1] for idx in painted_pts if checkbounds(Bool, ct_vol, idx)]
+                
+                set_ai_status!("[Preparing] inference ($(algo))...")
+                println("Queuing $(algo) inference job (seed=$cx,$cy,$cz, lesion=$active_id, $(length(painted_pts)) painted points)..."); flush(stdout)
+                
+                # Use immutable views / direct references without 680MB deep copies
+                put!(inference_queue, InferenceJob(
+                    algo, ct_vol, pet_vol, points_vol,
+                    cx, cy, cz, active_id, seg_vol, channel, scribble_coords_0idx))
+            catch e
+                err_msg = sprint(showerror, e)
+                println("ERROR in async reactToAddAutoPet: $err_msg"); flush(stdout)
+                println(sprint(showerror, e, catch_backtrace())); flush(stdout)
+                set_ai_status!("[Error] AI Error: $err_msg")
+            end
         end
-
-        # Capture immutable copies of what the inference worker needs (thread safety)
-        algo = data.algorithm
-        channel = data.channel
-        ct_vol_copy = copy(ct_vol)
-        pet_vol_copy = copy(pet_vol)
-
-        # Always use the true CT volume for HELPNet and NNInteractive
-        ct_input = ct_vol_copy
-
-        # Pre-extract 0-indexed scribble coordinates for nnInteractive fast path
-        # (avoids expensive findall + full-volume allocation in InferenceClient)
-        scribble_coords_0idx = [[idx[1]-1, idx[2]-1, idx[3]-1] for idx in painted_pts if checkbounds(Bool, ct_vol, idx)]
-
-        ai_status_text[] = safe_status_text("[Preparing] inference ($(algo))...")
-        println("Queuing $(algo) inference job (seed=$cx,$cy,$cz, lesion=$active_id, $(length(painted_pts)) painted points)..."); flush(stdout)
-
-        # Put job on the inference queue — the single persistent worker thread
-        # will pick it up and communicate with Docker. No race conditions.
-        put!(inference_queue, InferenceJob(
-            algo, ct_input, pet_vol_copy, points_vol,
-            cx, cy, cz, active_id, seg_vol, channel, scribble_coords_0idx))
     catch e
         err_msg = sprint(showerror, e)
         println("ERROR in reactToAddAutoPet: $err_msg"); flush(stdout)
         println(sprint(showerror, e, catch_backtrace())); flush(stdout)
-        ai_status_text[] = safe_status_text("[Error] AI Error: $err_msg")
+        set_ai_status!("[Error] AI Error: $err_msg")
         try
             open("/tmp/medeye3d_errors.log", "a") do f
                 println(f, "$(Dates.now()) reactToAddAutoPet ERROR: $err_msg")
@@ -1379,14 +1369,14 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
 
     if data.mask === nothing
         println("WARNING: AI inference failed or returned nothing."); flush(stdout)
-        ai_status_text[] = safe_status_text("[Warning] Inference failed (no mask returned)")
+        set_ai_status!("[Warning] Inference failed (no mask returned)")
         return
     end
 
     seg_vol = data.seg_vol
     if seg_vol === nothing
         println("ERROR: No segmentation volume reference available. Cannot apply AI results. No fallbacks allowed."); flush(stdout)
-        ai_status_text[] = safe_status_text("[Error] No segmentation volume (Mask) found - cannot apply AI results")
+        set_ai_status!("[Error] No segmentation volume (Mask) found - cannot apply AI results")
         return
     end
 
@@ -1395,7 +1385,7 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
         seg_vol[data.mask .> 0] .= label_val
     else
         label_val = eltype(seg_vol)(data.active_id)
-        InferenceClient.insert_patch!(seg_vol, data.mask, data.cx, data.cy, data.cz, label_val=Float32(data.active_id))
+        InferenceClient.insert_patch!(seg_vol, data.mask, data.cx, data.cy, data.cz; label_val=label_val)
     end
     println("$(data.algorithm) segmented $(count(data.mask .> 0)) patch voxels for lesion $(data.active_id) at ($(data.cx), $(data.cy), $(data.cz))."); flush(stdout)
     
@@ -1477,19 +1467,13 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
         end
     end
     
-    # Propagate canonical mask volume to all panels
+    # Clear manualModif across all panels (scribbles consumed by AI)
+    # Note: seg_vol IS the canonical mask volume shared across all panels via PermutedDimsArray views.
+    # Modifying seg_vol directly propagates automatically to all panels without manual copying.
     for (p_idx, st) in enumerate(stateObjects)
         for scrDat in st.onScrollData.dataToScroll
             if scrDat.name == "manualModif"
-                fill!(scrDat.dat, 0.0f0)
-            elseif scrDat.name == "segmentation" || scrDat.name == "Mask"
-                if p_idx == 3 # Sagittal (Y, Z, X)
-                    scrDat.dat .= permutedims(seg_vol, (2, 3, 1))
-                elseif p_idx == 4 # Coronal (X, Z, Y)
-                    scrDat.dat .= permutedims(seg_vol, (1, 3, 2))
-                else # Axial (1, 2, 5)
-                    scrDat.dat .= seg_vol
-                end
+                fill!(scrDat.dat, zero(eltype(scrDat.dat)))
             end
         end
     end
@@ -1499,11 +1483,13 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
     if haskey(tp_data_cache, tp_idx)
         entry = tp_data_cache[tp_idx]
         if entry.mask isa Array{Int8, 3}
-            entry.mask .= round.(Int8, seg_vol)
-        else
-            entry.mask .= round.(Int16, seg_vol)
+            entry.mask .= clamp.(seg_vol, Int8(-128), Int8(127))
+        elseif entry.mask !== seg_vol
+            entry.mask .= seg_vol
         end
-        entry.mask_i16 .= round.(Int16, seg_vol)
+        if entry.mask_i16 !== seg_vol
+            entry.mask_i16 .= seg_vol
+        end
     end
 
     # Ensure mask uniform displays the active lesion
@@ -1519,7 +1505,7 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
     end
 
     # Compute center of the actual segmentation result (not the seed point)
-    seg_indices = findall(seg_vol .== Float32(data.active_id))
+    seg_indices = findall(seg_vol .== eltype(seg_vol)(data.active_id))
     if !isempty(seg_indices)
         center_x = round(Int, mean(i[1] for i in seg_indices))
         center_y = round(Int, mean(i[2] for i in seg_indices))
@@ -1542,19 +1528,15 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
         end
     end
 
-    # Update all panel textures via on_next! multiple dispatch (scroll with 0 = re-render current slice)
+    # Update all panel textures (scroll with 0 = re-render current slice)
     old_sw = stateObjects[1].switchIndex
-    for p in 1:length(stateObjects)
-        if sum(abs.(stateObjects[p].calcDimsStruct.mainImageQuadVert)) > 0.01f0
-            stateObjects[1].switchIndex = p
-            reactToScroll(0, stateObjects)
-        end
-    end
+    stateObjects[1].switchIndex = 1
+    reactToScroll(0, stateObjects)
     stateObjects[1].switchIndex = old_sw
 
     # Update status label
     voxel_count = count(data.mask .> 0)
-    ai_status_text[] = safe_status_text("[Success] Done ($(voxel_count) voxels, lesion $(data.active_id))")
+    set_ai_status!("[Success] Done ($(voxel_count) voxels, lesion $(data.active_id))")
 end
 function reactToSyncMissing(data::SyncMissingEvent, stateObjects::Vector{StateDataFields})
     println("Sync Missing Lesions across TPs triggered."); flush(stdout)

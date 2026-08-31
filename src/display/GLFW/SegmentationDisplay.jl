@@ -46,20 +46,24 @@ function synchronized_makie_renderloop(screen)
     tick_state = Ref(Makie.UnknownTickState)
     loop_count = Ref(0)
     while isopen(screen) && !screen.stop_renderloop[]
-        if isdefined(GLMakie, :GLAbstraction)
-            lock(GLOBAL_OPENGL_LOCK) do
-                GLMakie.GLAbstraction.with_context(screen.glscreen) do
-                    GLMakie.pollevents(screen, tick_state[])
-                    GLMakie.poll_updates(screen)
-                    if !screen.config.pause_renderloop && GLMakie.requires_update(screen)
-                        tick_state[] = Makie.RegularRenderTick
-                        GLMakie.render_frame(screen)
-                        GLFW.SwapBuffers(GLMakie.to_native(screen))
-                    else
-                        tick_state[] = ifelse(screen.config.pause_renderloop, Makie.PausedRenderTick, Makie.SkippedRenderTick)
+        try
+            if isdefined(GLMakie, :GLAbstraction)
+                lock(GLOBAL_OPENGL_LOCK) do
+                    GLMakie.GLAbstraction.with_context(screen.glscreen) do
+                        GLMakie.pollevents(screen, tick_state[])
+                        GLMakie.poll_updates(screen)
+                        if !screen.config.pause_renderloop && GLMakie.requires_update(screen)
+                            tick_state[] = Makie.RegularRenderTick
+                            GLMakie.render_frame(screen)
+                            GLFW.SwapBuffers(GLMakie.to_native(screen))
+                        else
+                            tick_state[] = ifelse(screen.config.pause_renderloop, Makie.PausedRenderTick, Makie.SkippedRenderTick)
+                        end
                     end
                 end
             end
+        catch e
+            @debug "Makie renderloop tick error: $e"
         end
         loop_count[] += 1
         if loop_count[] % 600 == 0
@@ -866,7 +870,7 @@ function coordinateDisplay(
                     flush(stdout)
                     # Update AI status label so user sees the error
                     try
-                        MakieEventHandlers.ai_status_text[] = MakieEventHandlers.safe_status_text("[Error] $(sprint(showerror, e))")
+                        MakieEventHandlers.set_ai_status!("[Error] $(sprint(showerror, e))")
                     catch; end
                     # Log to file for post-mortem analysis
                     try

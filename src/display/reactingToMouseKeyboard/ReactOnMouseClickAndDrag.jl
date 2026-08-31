@@ -239,6 +239,10 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     stateObject.lastPaintCoords = [CartesianIndex(sampledPoints[end][1], sampledPoints[end][2])]
 
     # Access current slice data
+    if !haskey(stateObject.currentlyDispDat.nameIndexes, texture.name)
+        println("[PAINT-DBG] ERROR: texture '$(texture.name)' not found in nameIndexes: $(collect(keys(stateObject.currentlyDispDat.nameIndexes)))"); flush(stdout)
+        return
+    end
     twoDimDat = stateObject.currentlyDispDat |>
                 (singSl) -> singSl.listOfDataAndImageNames[singSl.nameIndexes[texture.name]]
 
@@ -247,6 +251,8 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
 
     # In-place continuous thick-line interpolation using KernelAbstractions
     StrokeRasterization.rasterize_polyline!(twoDimDat.dat, pointsToRasterize, strokeW, toSet)
+
+    println("[PAINT-DBG] panel=$(mainStates[1].switchIndex) tex='$(texture.name)' val=$toSet pts=$(length(pointsToRasterize)) strokeW=$strokeW slice=$(stateObject.currentDisplayedSlice) datSize=$(size(twoDimDat.dat)) datType=$(twoDimDat.type)"); flush(stdout)
 
     # Mark slice changed so consumer loop uploads dirty texture to GPU
     stateObject.isSliceChanged = true

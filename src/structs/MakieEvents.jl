@@ -58,7 +58,7 @@ struct AIInferenceResultEvent
     cy::Int
     cz::Int
     mask::Union{Nothing, Array{<:Real, 3}}
-    seg_vol::Union{Nothing, Array{Float32, 3}}
+    seg_vol::Any
 end
 struct AIStatusUpdateEvent
     text::String

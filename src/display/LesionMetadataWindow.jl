@@ -2401,7 +2401,11 @@ end_section!(sec_win)
         current_paint_mode[] = :paint
         btn_paint.buttoncolor[] = GRN; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BG_PNL
         empty!(_MASK_IDS_CACHE)
-        put!(channel, PaintValEvent(new_id, true)); put!(channel, SyncLesionEvent(new_id))
+        # For a NEW lesion, do NOT send SyncLesionEvent — it has no voxels yet,
+        # so the centroid lookup defaults to the volume center (jumping to middle slice).
+        # Instead: activate painting and show ALL lesion IDs so newly painted voxels are visible.
+        put!(channel, PaintValEvent(new_id, true))
+        put!(channel, ShowSingleLesionEvent(0))  # show all lesions (0 = show all)
     end
     on(btn_paint.clicks) do _
         current_paint_mode[] = :paint
@@ -2439,7 +2443,13 @@ end_section!(sec_win)
     seg_r3 = nr!()
     algo_combo = Menu(g[seg_r3, 1:2], options = ["HELPNet (AI)", "NNInteractive", "Traditional (PETTumor)"], default = "HELPNet (AI)", fontsize = 10)
     btn_add_ai = Button(g[seg_r3, 3:4], label = "Run AI", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
-    on(btn_add_ai.clicks) do _; put!(channel, AddAutoPetEvent(algo_combo.selection[], channel)) end
+    on(btn_add_ai.clicks) do _
+        @async try
+            put!(channel, AddAutoPetEvent(algo_combo.selection[], channel))
+        catch e
+            @warn "Failed to dispatch AddAutoPetEvent: $e"
+        end
+    end
 
     # Row 4: AI status
     Label(g[nr!(), 1:4], @lift(string($(_MEH.ai_status_text))),

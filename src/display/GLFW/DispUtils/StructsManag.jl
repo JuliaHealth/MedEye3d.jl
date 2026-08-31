@@ -12,9 +12,12 @@ Calculates texture coordinates from screen coordinates, accounting for viewport 
 """
 function getTextureCoordinatesFromScreen(x::Real, y::Real, calcDimsStruct::CalcDimsStruct, actualW::Float64, actualH::Float64)
     # GLFW screen coordinates: (0,0) top-left, (actualW, actualH) bottom-right
-    # Vulkan NDC: x in [-1, 1] (left to right), y in [-1, 1] (top to bottom)
+    # With negative-height viewport, NDC Y is flipped to match OpenGL's Y-up:
+    #   NDC Y = +1 → top of screen, NDC Y = -1 → bottom of screen
+    # Screen X: left=0 → NDC X=-1, right=W → NDC X=+1 (same direction)
+    # Screen Y: top=0 → NDC Y=+1, bottom=H → NDC Y=-1 (OPPOSITE direction)
     vkX = (Float64(x) * 2.0 / max(1.0, actualW)) - 1.0
-    vkY = (Float64(y) * 2.0 / max(1.0, actualH)) - 1.0
+    vkY = 1.0 - (Float64(y) * 2.0 / max(1.0, actualH))
     
     verts = calcDimsStruct.mainImageQuadVert
     if length(verts) >= 32
@@ -29,14 +32,11 @@ function getTextureCoordinatesFromScreen(x::Real, y::Real, calcDimsStruct::CalcD
         ndcTop    =  1.0
     end
     
-    # In Vulkan NDC: top = -ndcTop, bottom = -ndcBottom
-    vkLeft   = ndcLeft
-    vkRight  = ndcRight
-    vkTop    = -ndcTop
-    vkBottom = -ndcBottom
-    
-    s = clamp((vkX - vkLeft) / max(1e-5, vkRight - vkLeft), 0.0, 1.0)
-    t = clamp((vkY - vkTop) / max(1e-5, vkBottom - vkTop), 0.0, 1.0)
+    # Now vkX and ndcLeft/ndcRight are in the same coordinate space,
+    # and vkY and ndcBottom/ndcTop are in the same coordinate space (Y-up).
+    # Normalize to [0,1] within the quad bounds:
+    s = clamp((vkX - ndcLeft) / max(1e-5, ndcRight - ndcLeft), 0.0, 1.0)
+    t = clamp((vkY - ndcBottom) / max(1e-5, ndcTop - ndcBottom), 0.0, 1.0)
     
     texW = Float64(calcDimsStruct.imageTextureWidth)
     texH = Float64(calcDimsStruct.imageTextureHeight)
