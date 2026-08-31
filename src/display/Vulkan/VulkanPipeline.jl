@@ -60,6 +60,10 @@ mutable struct VkPipelineState
     frag_module::ShaderModule
     n_textures::Int
     mapped_ubo_ptr::Ptr{UInt8}
+    # Dirty tracking: skip redundant UBO writes when nothing changed
+    ubo_dirty::Bool
+    # Pre-allocated scratch buffer for UBO packing (eliminates per-frame zeros() alloc)
+    _ubo_scratch::Vector{UInt8}
 end
 
 # ─── Descriptor set layout creation via raw VulkanCore ─────────────────
@@ -208,7 +212,9 @@ function create_pipeline_state(ctx::VkCtx, vert_glsl::String, frag_glsl::String,
         pool, desc_sets[1], desc_sets[2],
         ubo_buf, ubo_mem, ubo_size,
         vert_mod, frag_mod, n_textures,
-        mapped_ubo_ptr
+        mapped_ubo_ptr,
+        true,                      # ubo_dirty — always write on first frame
+        zeros(UInt8, ubo_size)     # _ubo_scratch — pre-allocated packing buffer
     )
 end
 
@@ -354,27 +360,34 @@ end
     update_ubo!(ctx, state, texture_specs)
 
 Writes per-texture parameters (visibility, min/max, color, etc.) into
-the UBO buffer. Called when uniforms change.
+the UBO buffer. Skips entirely when `state.ubo_dirty` is false.
+
+**Zero-allocation**: uses pre-allocated `state._ubo_scratch` buffer
+and `unsafe_store!` for field packing (no `reinterpret` vectors).
+
+Call `state.ubo_dirty = true` whenever texture specs change (ctrl+scroll,
+visibility toggle, maskContribution change, etc.).
 """
 function update_ubo!(ctx::VkCtx, state::VkPipelineState, texture_specs)
+    # Skip entirely if nothing has changed since last write
+    state.ubo_dirty || return
+    
     n = min(length(texture_specs), state.n_textures)
-    buf = zeros(UInt8, state.ubo_size)
+    buf = state._ubo_scratch  # Pre-allocated, no zeros() alloc
+    fill!(buf, 0x00)          # Clear in-place
 
     for i in 1:n
         spec = texture_specs[i]
         offset = (i - 1) * TEXTURE_PARAMS_SIZE
 
-        # Pack fields into std140 layout
+        # Pack fields into std140 layout (all via unsafe_store!, 0 allocs)
         _write_int32!(buf, offset + 0, spec.isVisible ? 1 : 0)
         _write_float32!(buf, offset + 4, isempty(spec.minAndMaxValue) ? 0.0f0 : Float32(spec.minAndMaxValue[1]))
         _write_float32!(buf, offset + 8, isempty(spec.minAndMaxValue) ? 1.0f0 : Float32(spec.minAndMaxValue[2]))
         range_val = isempty(spec.minAndMaxValue) ? 1.0f0 : Float32(spec.minAndMaxValue[2] - spec.minAndMaxValue[1])
         _write_float32!(buf, offset + 12, max(range_val, 1.0f0))
-        # maskContribution: if 0 (default), auto-calculate as 1/numTextures (OpenGL behaviour)
-        mc = Float32(spec.maskContribution)
-        if mc ≈ 0.0f0 && !spec.isMainImage
-            mc = Float32(1.0 / max(n, 1))
-        end
+        # maskContribution: direct value from 0.0 to 1.0
+        mc = clamp(Float32(spec.maskContribution), 0.0f0, 1.0f0)
         _write_float32!(buf, offset + 16, mc)
 
         # colorMask at offset 32 (16 bytes aligned)
@@ -385,26 +398,27 @@ function update_ubo!(ctx::VkCtx, state::VkPipelineState, texture_specs)
         _write_float32!(buf, offset + 44, Float32(color.alpha))
 
         # allowedIDs at offset 48 + 16 = 64
-        allowed = isempty(spec.allowedIDs) ? Float32[] : Float32.(spec.allowedIDs)
-        _write_int32!(buf, offset + 48, Int32(length(allowed)))
+        n_allowed = isempty(spec.allowedIDs) ? 0 : min(length(spec.allowedIDs), 16)
+        _write_int32!(buf, offset + 48, Int32(n_allowed))
 
-        for (j, val) in enumerate(allowed[1:min(length(allowed), 16)])
-            _write_float32!(buf, offset + 64 + (j - 1) * 16, val)
+        for j in 1:n_allowed
+            _write_float32!(buf, offset + 64 + (j - 1) * 16, Float32(spec.allowedIDs[j]))
         end
     end
 
-    # Copy to cached mapped UBO pointer
+    # Copy to cached mapped UBO pointer (HOST_COHERENT, no flush needed)
     unsafe_copyto!(state.mapped_ubo_ptr, pointer(buf), state.ubo_size)
+    state.ubo_dirty = false
 end
 
-function _write_int32!(buf, offset, val::Integer)
-    bytes = reinterpret(UInt8, [Int32(val)])
-    buf[offset+1 : offset+4] .= bytes
+@inline function _write_int32!(buf, offset, val::Integer)
+    # Direct unsafe_store! — zero allocations (no reinterpret/Vector overhead)
+    unsafe_store!(Ptr{Int32}(pointer(buf, offset + 1)), Int32(val))
 end
 
-function _write_float32!(buf, offset, val::Real)
-    bytes = reinterpret(UInt8, [Float32(val)])
-    buf[offset+1 : offset+4] .= bytes
+@inline function _write_float32!(buf, offset, val::Real)
+    # Direct unsafe_store! — zero allocations (no reinterpret/Vector overhead)
+    unsafe_store!(Ptr{Float32}(pointer(buf, offset + 1)), Float32(val))
 end
 
 # ─── Descriptor set texture update ──────────────────────────────────────

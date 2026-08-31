@@ -29,9 +29,8 @@ function processKeysInfo(wind::Identity{WindowControlStruct}, stateObject::State
 
     dispatchToFunctions(windowStruct, stateObject, keyInfo)
 
-    #to display change
-
-    basicRender(stateObject.mainForDisplayObjects.window)
+    # NOTE: basicRender() removed — it was an OpenGL SwapBuffers stub.
+    # Vulkan rendering is handled by the consumer loop's render_frame!.
 
     # for undoing action
     # if(toBeSavedForBack)

@@ -134,6 +134,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::SyncLesionEvent) = reactTo
 on_next!(stateObjects::Vector{StateDataFields}, data::ChangeTimePointEvent) = reactToChangeTimePoint(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ToggleLesionEvent) = reactToToggleLesion(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::PetBlendEvent) = reactToPetBlend(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::LabelOpacityEvent) = reactToLabelOpacity(data, stateObjects)
 
 on_next!(stateObjects::Vector{StateDataFields}, data::RefreshListEvent) = reactToRefreshList(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::AddAutoPetEvent) = reactToAddAutoPet(data, stateObjects)
@@ -333,7 +334,7 @@ function coordinateDisplay(
     displayMode = getDisplayMode(listOfTextSpecsPrim, quadView)
     #setting number to texture that will be needed in shader configuration
     #enumerate function returns index,value pair of each item in an array, here for the TextureSpecStruct, setting the whichCreated field to the current index
-    listOfTextSpecs::Union{Vector{TextureSpec{Float32}},Vector{Vector{TextureSpec{Float32}}}} = begin
+    listOfTextSpecs = begin
         if typeof(listOfTextSpecsPrim) == Vector{TextureSpec}
             # For single image mode with potential overlaid images
             counter = 1
@@ -399,9 +400,10 @@ function coordinateDisplay(
     # ═══ Vulkan Initialization ═══
     # Initialize Vulkan context (instance, device, swapchain, render pass, etc.)
     vk_ctx = VulkanContext.init_vulkan_context(window, calcDimStructs[1].windowWidth, calcDimStructs[1].windowHeight)
+    vk_ctx.staging_pool = VulkanStaging.create_staging_pool(vk_ctx, 64)
 
     # Determine texture list per panel
-    listOfTextSpecsMapped::Vector{Vector{TextureSpec}} = if typeof(listOfTextSpecs) == Vector{TextureSpec{Float32}}
+    listOfTextSpecsMapped::Vector{Vector{TextureSpec}} = if isa(listOfTextSpecs, Vector) && !isempty(listOfTextSpecs) && isa(listOfTextSpecs[1], TextureSpec)
         [listOfTextSpecs for _ in 1:length(calcDimStructs)]
     else
         listOfTextSpecs
@@ -422,13 +424,34 @@ function coordinateDisplay(
 
         for (tex_idx, spec) in enumerate(textSpecVec)
             T = parameter_type(spec)
-            initial_data = zeros(Float32, Int(w), Int(h))
-
-            filter_mode = (spec.isMultiDiscreteMask || spec.isEditable) ? :nearest : :linear
+            
+            filter_mode = (spec.isMultiDiscreteMask || spec.isEditable || spec.isIntegerTexture) ? :nearest : :linear
+            
+            # Determine Vulkan format from TextureSpec parameter type T
+            # This is fully configurable — any modality (CT, PET, SPECT, MRI, dosemaps)
+            # just needs the right T in TextureSpec{T} to get the optimal GPU format.
+            local vk_format, initial_data
+            if T == Int8
+                vk_format = Vulkan.FORMAT_R8_SINT
+                initial_data = zeros(Int8, Int(w), Int(h))
+            elseif T == Int16
+                vk_format = Vulkan.FORMAT_R16_SINT
+                initial_data = zeros(Int16, Int(w), Int(h))
+            elseif T == UInt8
+                vk_format = Vulkan.FORMAT_R8_UINT
+                initial_data = zeros(UInt8, Int(w), Int(h))
+            elseif T == UInt16
+                vk_format = Vulkan.FORMAT_R16_UINT
+                initial_data = zeros(UInt16, Int(w), Int(h))
+            else
+                # Default: Float32 for continuous data (CT, PET, SPECT, dosemaps, etc.)
+                vk_format = Vulkan.FORMAT_R32_SFLOAT
+                initial_data = zeros(Float32, Int(w), Int(h))
+            end
 
             vk_tex = VulkanTextures.create_vulkan_texture(
                 vk_ctx, Int(w), Int(h),
-                Vulkan.FORMAT_R32_SFLOAT,
+                vk_format,
                 initial_data;
                 filter_mode=filter_mode,
                 name=spec.name
@@ -583,7 +606,11 @@ function coordinateDisplay(
     end)
 
     function consumer(mainChannel::Base.Channel{Any})
-
+        first_frame = Ref(true)
+        # Pre-allocated per-frame scratch vectors (reused via empty!/resize!, never freed)
+        _upload_batch = VulkanStaging.TextureUploadBatchItem[]
+        _vk_panels = VulkanRender.PanelRenderData[]
+        _push_consts = Vector{Float32}(undef, 8)  # scale(2) + offset(2) + ndc(4)
         while !shouldStop[1]
             try
                 channelData = take!(mainChannel)
@@ -615,13 +642,24 @@ function coordinateDisplay(
                     flush(stdout)
                     shouldStop[1] = true
                     
-                    # Destroy Vulkan resources
+                    # Destroy Vulkan resources ONCE (shared context)
                     try
                         for state in stateInstances
                             obj = state.mainForDisplayObjects
-                            if obj.vulkanCtx !== nothing
+                            if obj.vulkanPipelineState !== nothing && obj.vulkanCtx !== nothing
                                 VulkanPipeline.destroy_pipeline_state!(obj.vulkanCtx, obj.vulkanPipelineState)
-                                VulkanContext.destroy_vulkan_context!(obj.vulkanCtx)
+                                obj.vulkanPipelineState = nothing
+                            end
+                        end
+                        vk_ctx = stateInstances[1].mainForDisplayObjects.vulkanCtx
+                        if vk_ctx !== nothing
+                            if vk_ctx.staging_pool !== nothing
+                                VulkanStaging.destroy_staging_pool!(vk_ctx, vk_ctx.staging_pool)
+                                vk_ctx.staging_pool = nothing
+                            end
+                            VulkanContext.destroy_vulkan_context!(vk_ctx)
+                            for state in stateInstances
+                                state.mainForDisplayObjects.vulkanCtx = nothing
                             end
                         end
                     catch e
@@ -673,16 +711,80 @@ function coordinateDisplay(
                 end
 
                 if !(channelData isa MouseStruct) && !(channelData isa Vector{MouseStruct}) && !(channelData isa Int64)
-                    println("CONSUMER: processing $(typeof(channelData))")
-                    flush(stdout)
+                    @debug "[CONSUMER] dispatch" event_type=string(typeof(channelData))
                 end
+                _t_dispatch = time_ns()
                 on_next!(stateInstances, channelData)
+                _t_after_dispatch = time_ns()
+                
+                # Mark UBO dirty for events that may change uniform parameters
+                # (visibility toggles, ctrl+scroll windowing, mask contribution, etc.)
+                # Skip for mouse-only and scroll-only events (they don't change UBO)
+                if !(channelData isa MouseStruct) && !(channelData isa Vector{MouseStruct}) && !(channelData isa Int64)
+                    for s in stateInstances
+                        obj = s.mainForDisplayObjects
+                        if obj.vulkanPipelineState !== nothing
+                            obj.vulkanPipelineState.ubo_dirty = true
+                        end
+                    end
+                end
                 
                 if !shouldStop[1]
-                    # Build panel render data for Vulkan
-                    vk_panels = VulkanRender.PanelRenderData[]
+                    vk_ctx = stateInstances[1].mainForDisplayObjects.vulkanCtx
+                    
+                    if first_frame[]
+                        for s in stateInstances
+                            s.isSliceChanged = true
+                        end
+                        first_frame[] = false
+                    end
+                    
+                    # 1. Collect all dirty textures across ALL panels into ONE batch
+                    empty!(_upload_batch)  # Reuse pre-allocated vector
                     for state in stateInstances
-                        if state.calcDimsStruct.mainQuadVertSize <= 0 || all(state.calcDimsStruct.mainImageQuadVert .== 0.0f0)
+                        if state.calcDimsStruct.mainQuadVertSize <= 0 || all(iszero, state.calcDimsStruct.mainImageQuadVert)
+                            continue
+                        end
+                        if state.currentlyDispDat.sliceNumber == 0
+                            continue
+                        end
+                        
+                        obj = state.mainForDisplayObjects
+                        if obj.vulkanPipelineState === nothing || obj.vulkanCtx === nothing
+                            continue
+                        end
+                        
+                        # Only upload if slice has changed or initial upload is needed
+                        if state.isSliceChanged && state.currentlyDispDat !== nothing && !isempty(state.currentlyDispDat.listOfDataAndImageNames)
+                            for updateDat in state.currentlyDispDat.listOfDataAndImageNames
+                                for vk_tex in obj.vulkanTextures
+                                    if hasproperty(vk_tex, :name) && vk_tex.name == updateDat.name
+                                        push!(_upload_batch, VulkanStaging.TextureUploadBatchItem(vk_tex, updateDat.dat))
+                                        break
+                                    end
+                                end
+                            end
+                            state.isSliceChanged = false
+                        end
+                    end
+                    
+                    # 2. Upload all dirty textures across all panels in ONE single GPU queue submission
+                    _t_before_upload = time_ns()
+                    _n_uploaded = length(_upload_batch)
+                    if !isempty(_upload_batch) && vk_ctx !== nothing && vk_ctx.staging_pool !== nothing
+                        try
+                            VulkanStaging.upload_textures_batched!(vk_ctx, vk_ctx.staging_pool, _upload_batch)
+                        catch e
+                            @warn "Batched Vulkan texture upload failed" exception=e
+                        end
+                    end
+                    _t_after_upload = time_ns()
+                    
+                    # 3. Build panel render data for Vulkan
+                    empty!(_vk_panels)  # Reuse pre-allocated vector
+                    _ubo_dirty_count = 0
+                    for state in stateInstances
+                        if state.calcDimsStruct.mainQuadVertSize <= 0 || all(iszero, state.calcDimsStruct.mainImageQuadVert)
                             continue
                         end
                         if state.currentlyDispDat.sliceNumber == 0
@@ -694,24 +796,10 @@ function coordinateDisplay(
                             continue
                         end
                         
-                        # Upload texture data from currentlyDispDat to Vulkan textures
-                        if state.currentlyDispDat !== nothing && !isempty(state.currentlyDispDat.listOfDataAndImageNames)
-                            for updateDat in state.currentlyDispDat.listOfDataAndImageNames
-                                for (i, vk_tex) in enumerate(obj.vulkanTextures)
-                                    if hasproperty(vk_tex, :name) && vk_tex.name == updateDat.name
-                                        try
-                                            upload_data = Float32.(updateDat.dat)
-                                            VulkanTextures.update_vulkan_texture!(obj.vulkanCtx, vk_tex, upload_data)
-                                        catch e
-                                            @warn "Vulkan texture upload failed for $(updateDat.name)" exception=e
-                                        end
-                                        break
-                                    end
-                                end
-                            end
+                        # Update UBO with current texture specs (skips if not dirty)
+                        if obj.vulkanPipelineState.ubo_dirty
+                            _ubo_dirty_count += 1
                         end
-                        
-                        # Update UBO with current texture specs
                         VulkanPipeline.update_ubo!(obj.vulkanCtx, obj.vulkanPipelineState, obj.listOfTextSpecifications)
                         # Build push constants for zoom/pan + NDC quad bounds
                         zoom = max(0.1f0, state.calcDimsStruct.zoom)
@@ -723,12 +811,11 @@ function coordinateDisplay(
                         # Each vertex has 8 floats: X, Y, Z, R, G, B, U, V
                         verts = state.calcDimsStruct.mainImageQuadVert
                         if length(verts) >= 32
-                            xs = Float32[verts[1], verts[9], verts[17], verts[25]]
-                            ys = Float32[verts[2], verts[10], verts[18], verts[26]]
-                            ndc_left   = minimum(xs)
-                            ndc_right  = maximum(xs)
-                            ndc_bottom = minimum(ys)
-                            ndc_top    = maximum(ys)
+                            # Direct min/max without allocating temporary Float32 arrays
+                            ndc_left   = min(verts[1], verts[9], verts[17], verts[25])
+                            ndc_right  = max(verts[1], verts[9], verts[17], verts[25])
+                            ndc_bottom = min(verts[2], verts[10], verts[18], verts[26])
+                            ndc_top    = max(verts[2], verts[10], verts[18], verts[26])
                         else
                             ndc_left   = -1.0f0
                             ndc_bottom = -1.0f0
@@ -737,8 +824,12 @@ function coordinateDisplay(
                         end
                         
                         # Push constants: uvScale(2) + uvOffset(2) + ndcMin(2) + ndcMax(2) = 8 floats
-                        push_consts = Float32[scale, scale, offsetX, offsetY, 
-                                              ndc_left, ndc_bottom, ndc_right, ndc_top]
+                        # Reuse pre-allocated vector (PanelRenderData stores the reference)
+                        push_consts = copy(_push_consts)  # Each panel needs its own copy
+                        push_consts[1] = scale; push_consts[2] = scale
+                        push_consts[3] = offsetX; push_consts[4] = offsetY
+                        push_consts[5] = ndc_left; push_consts[6] = ndc_bottom
+                        push_consts[7] = ndc_right; push_consts[8] = ndc_top
                         
                         w = Float32(obj.vulkanCtx.width)
                         h = Float32(obj.vulkanCtx.height)
@@ -748,11 +839,19 @@ function coordinateDisplay(
                             push_consts,
                             Float32(0), Float32(0), w, h
                         )
-                        push!(vk_panels, panel)
+                        push!(_vk_panels, panel)
                     end
                     
-                    if !isempty(vk_panels)
-                        VulkanRender.render_frame!(stateInstances[1].mainForDisplayObjects.vulkanCtx, vk_panels)
+                    _t_before_render = time_ns()
+                    if !isempty(_vk_panels) && vk_ctx !== nothing
+                        VulkanRender.render_frame!(vk_ctx, _vk_panels)
+                    end
+                    _t_after_render = time_ns()
+                    
+                    # Structured performance log (enable with JULIA_DEBUG=SegmentationDisplay)
+                    _t_total_ms = (_t_after_render - _t_dispatch) / 1e6
+                    if _t_total_ms > 30.0 || _n_uploaded > 0
+                        @debug "[PERF]" event=string(typeof(channelData)) dispatch_ms=round((_t_after_dispatch - _t_dispatch)/1e6, digits=1) upload_ms=round((_t_after_upload - _t_before_upload)/1e6, digits=1) render_ms=round((_t_after_render - _t_before_render)/1e6, digits=1) total_ms=round(_t_total_ms, digits=1) n_tex=_n_uploaded n_panels=length(_vk_panels) ubo_dirty=_ubo_dirty_count
                     end
                 end
             catch e
@@ -854,7 +953,7 @@ function getDefaultTexture(
             color=RGB(1.0, 1.0, 1.0),
             minAndMaxValue=Float32.([0, 100])
         )
-    elseif studyType == "ManualModif"
+    elseif studyType == "ManualModif" || studyType == "manualModif"
         colors_mapped = map(c -> RGB(c[1]/255, c[2]/255, c[3]/255), distinctColorsSaved.listOfColors)
         return TextureSpec{Float32}(
             name="manualModif",
@@ -1107,12 +1206,18 @@ function displayImage(
     end
 
 
-    #Texture specification for manual modification Mask
+    #Texture specification for manual modification Mask (only if not already provided)
     if typeof(textureSpecArray) == Vector{TextureSpec}
-        insert!(textureSpecArray, 2, getDefaultTexture("ManualModif", Int32(2)))
+        has_editable = any(t -> t.isEditable || t.name == "Mask" || t.name == "manualModif", textureSpecArray)
+        if !has_editable
+            insert!(textureSpecArray, 2, getDefaultTexture("manualModif", Int32(2)))
+        end
     elseif typeof(textureSpecArray) == Vector{Vector{TextureSpec}}
         for texturVector in textureSpecArray
-            insert!(texturVector, 2, getDefaultTexture("ManualModif", Int32(2)))
+            has_editable = any(t -> t.isEditable || t.name == "Mask" || t.name == "manualModif", texturVector)
+            if !has_editable
+                insert!(texturVector, 2, getDefaultTexture("manualModif", Int32(2)))
+            end
         end
     end
 
@@ -1160,8 +1265,8 @@ function displayImage(
     end
 
     # @info "look here" typeof(voxelDataTupleVector) typeof(voxelDataTupleVector[1]) voxelDataTupleVector[1]
-    # voxelDataForUniforms::Union{Vector{Array{Float32,3}},Vector{Vector{Array{Float32,3}}}} = map(x -> map(tup -> tup[2], x), voxelDataTupleVector)
-    voxelDataForUniforms::Union{Vector{Array{Float32,3}},Vector{Vector{Array{Float32,3}}}} = typeof(voxelDataTupleVector) == Vector{Any} ? map(tuple -> tuple[2], voxelDataTupleVector) : map(innerVector -> map(tuple -> tuple[2], innerVector), voxelDataTupleVector)
+    # Extract volume data from tuples — supports mixed types (Float32/Int16/Int8/UInt16)
+    voxelDataForUniforms = typeof(voxelDataTupleVector) == Vector{Any} ? map(tuple -> tuple[2], voxelDataTupleVector) : map(innerVector -> map(tuple -> tuple[2], innerVector), voxelDataTupleVector)
 
     if typeof(voxelDataTupleVector) == Vector{Any}
         voxelDataForUniforms = map(tuple -> tuple[2], voxelDataTupleVector)
@@ -1170,14 +1275,15 @@ function displayImage(
     end
 
     #Since there are repeating Tuples for Manual Modif, we need to ensure only a unique ones exist based on the first loaded image
-
     if typeof(voxelDataTupleVector) == Vector{Any}
-        if !isempty(voxelDataTupleVector) && voxelDataTupleVector[1][1] != "manualModif" && (length(voxelDataTupleVector) < 2 || voxelDataTupleVector[2][1] != "manualModif")
+        has_manual = any(t -> t[1] == "manualModif" || t[1] == "Mask", voxelDataTupleVector)
+        if !has_manual && !isempty(voxelDataTupleVector)
             insert!(voxelDataTupleVector, 2, ("manualModif", zeros(Float32, size(voxelDataForUniforms[1]))))
         end
     elseif typeof(voxelDataTupleVector) == Vector{Vector{Any}}
         for (vectorIndex, innerVector) in enumerate(voxelDataTupleVector)
-            if !isempty(innerVector) && innerVector[1][1] != "manualModif" && (length(innerVector) < 2 || innerVector[2][1] != "manualModif")
+            has_manual = any(t -> t[1] == "manualModif" || t[1] == "Mask", innerVector)
+            if !has_manual && !isempty(innerVector)
                 insert!(innerVector, 2, ("manualModif", zeros(Float32, size(voxelDataForUniforms[vectorIndex][1]))))
             end
         end
@@ -1189,13 +1295,13 @@ function displayImage(
     supplLines::Union{Vector{Vector{Vector{SimpleLineTextStruct}}},Vector{Vector{SimpleLineTextStruct}}} = Vector{Vector{SimpleLineTextStruct}}() #Subject to change
 
 
-    if typeof(voxelDataForUniforms) == Vector{Array{Float32,3}} #Our data is in Float32 format in 3 dimensions
+    if isa(voxelDataForUniforms, Vector) && !isempty(voxelDataForUniforms) && isa(voxelDataForUniforms[1], AbstractArray{<:Real, 3})
         dimToScroll = typeof(dimensionsToScroll) <: Vector ? dimensionsToScroll[1] : dimensionsToScroll
         datToScrollDimsB = DataToScrollDims(imageSize=size(voxelDataForUniforms[1]), voxelSize=spacings[1], dimensionToScroll=dimToScroll)
         mainLines = textLinesFromStrings(["main line 1", "main line 2"])
         supplLines = map(x -> textLinesFromStrings(["sub line 1 in $(x)", "sub line 2 in $(x)"]), 1:size(voxelDataForUniforms[1])[dimToScroll])
 
-    elseif typeof(voxelDataForUniforms) == Vector{Vector{Array{Float32,3}}}
+    elseif isa(voxelDataForUniforms, Vector) && !isempty(voxelDataForUniforms) && isa(voxelDataForUniforms[1], Vector)
         for (index, innerVector) in enumerate(voxelDataForUniforms)
             dimToScroll = typeof(dimensionsToScroll) <: Vector ? dimensionsToScroll[index] : dimensionsToScroll
             push!(datToScrollDimsB, DataToScrollDims(imageSize=size(innerVector[1]), voxelSize=spacings[index][1], dimensionToScroll=dimToScroll))
@@ -1208,7 +1314,7 @@ function displayImage(
 
 
 
-    sliceData::Union{Vector{ThreeDimRawDat{Float32}},Vector{Vector{ThreeDimRawDat{Float32}}}} = typeof(voxelDataTupleVector) == Vector{Vector{Any}} ? Vector{Vector{ThreeDimRawDat{Float32}}}() : Vector{ThreeDimRawDat{Float32}}()
+    sliceData = typeof(voxelDataTupleVector) == Vector{Vector{Any}} ? Vector{Any}() : Any[]
     mainScrollData::Union{FullScrollableDat,Vector{FullScrollableDat}} = typeof(voxelDataTupleVector) == Vector{Vector{Any}} ? Vector{FullScrollableDat}() : FullScrollableDat()
     if typeof(voxelDataTupleVector) == Vector{Any}
         sliceDatad = getThreeDims(voxelDataTupleVector)
@@ -1232,25 +1338,17 @@ function displayImage(
     end
 
 
-    # Few assertions to ensure correct types between the textureSpecification type and the voxel data type
-
+    # Type/name consistency checks (relaxed for mixed integer/float textures)
     if typeof(textureSpecArray) == Vector{TextureSpec}
-
         for (textureSpec, tupleVector) in zip(textureSpecArray, voxelDataTupleVector)
-            @assert typeof(textureSpec) == TextureSpec{Float32}
-            # @info typeof(voxelData)
-            @assert typeof(tupleVector[2]) == Array{Float32,3}
-
+            @assert isa(tupleVector[2], AbstractArray{<:Real, 3}) "Expected 3D array, got $(typeof(tupleVector[2]))"
             @assert textureSpec.name == tupleVector[1]
-            # @info typeof(voxelData)
         end
-
     elseif typeof(textureSpecArray) == Vector{Vector{TextureSpec}}
-        for (textureSpecVector, tupleVector) in zip(textureSpecArray, voxelDataTupleVector)
-            for (textureSpec, tuple) in zip(textureSpecVector, tupleVector)
-                @assert typeof(textureSpec) == TextureSpec{Float32}
-                @assert typeof(tuple[2]) == Array{Float32,3}
-                @assert textureSpec.name == tuple[1]
+        for (p_i, (textureSpecVector, tupleVector)) in enumerate(zip(textureSpecArray, voxelDataTupleVector))
+            for (t_i, (textureSpec, tuple)) in enumerate(zip(textureSpecVector, tupleVector))
+                @assert isa(tuple[2], AbstractArray{<:Real, 3}) "Expected 3D array, got $(typeof(tuple[2])) in panel $p_i tex $t_i"
+                @assert textureSpec.name == tuple[1] "Mismatch in panel $p_i tex $t_i: spec=$(textureSpec.name) vs tuple=$(tuple[1])"
             end
         end
     end

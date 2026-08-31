@@ -16,25 +16,28 @@ mask_path = "/root/data_decathlon/Task09_Spleen/labelsTr/spleen_10.nii.gz"
 nii_img = niread(image_path)
 nii_mask = niread(mask_path)
 vol_img = Float32.(nii_img.raw)
-vol_mask = Float32.(nii_mask.raw)
+vol_mask = Int16.(round.(nii_mask.raw))
 
 # Create multi-discrete mask with colors (like production)
 colors_mapped = [RGB(1.0, 0.0, 0.0), RGB(0.0, 1.0, 0.0), RGB(0.0, 0.0, 1.0)]
 
 ts_img = TextureSpec{Float32}(name="CT", isMainImage=true, color=RGB(1.,1.,1.), minAndMaxValue=Float32.([-150,250]))
-ts_mask = TextureSpec{Float32}(
+ts_mask = TextureSpec{Int16}(
     name="Mask", isMainImage=false,
-    isMultiDiscreteMask=true,
+    isMultiDiscreteMask=true, isIntegerTexture=true,
     colorSet=colors_mapped,
     maskContribution=Float32(0.5),
-    minAndMaxValue=Float32.([0, length(colors_mapped)])
+    minAndMaxValue=Int16.([0, length(colors_mapped)])
 )
-ts_surface = TextureSpec{Float32}(name="Bone_Surface", isMainImage=false, color=RGB(0.0,1.0,1.0), 
-    minAndMaxValue=Float32.([0.5,1.5]), maskContribution=Float32(0.5), isVisible=true)
-ts_marrow = TextureSpec{Float32}(name="Bone_Marrow", isMainImage=false, color=RGB(1.0,1.0,0.0), 
-    minAndMaxValue=Float32.([0.5,1.5]), maskContribution=Float32(0.5), isVisible=true)
+ts_bone = TextureSpec{Int8}(
+    name="Bone_Overlay", isMainImage=false, isIntegerTexture=true,
+    color=RGB(0.0, 1.0, 1.0), 
+    minAndMaxValue=Int8.([0, 3]),
+    maskContribution=Float32(0.5),
+    isVisible=true
+)
 
-tsa = Vector{Vector{TextureSpec}}([TextureSpec[deepcopy(ts_img), deepcopy(ts_mask), deepcopy(ts_surface), deepcopy(ts_marrow)]])
+tsa = Vector{Vector{TextureSpec}}([TextureSpec[deepcopy(ts_img), deepcopy(ts_mask), deepcopy(ts_bone)]])
 
 spacing = (1.,1.,1.); origin = (0.,0.,0.)
 dts = Vector{DataToScrollDims}()
@@ -46,9 +49,8 @@ inst = MedEye3d.SegmentationDisplay.coordinateDisplay(
     Dict{Int64,Dict{Int64,Dict{String,Any}}}()
 )
 
-# Create bone surface/marrow from CT thresholding
-bone_surf = zeros(Float32, size(vol_img))
-bone_marr = zeros(Float32, size(vol_img))
+# Create bone overlay (surface=1, marrow=2, both=3) from CT thresholding
+bone_overlay = zeros(Int8, size(vol_img))
 bone_region = vol_img .> 200
 for z in 2:size(vol_img,3)-1, y in 2:size(vol_img,2)-1, x in 2:size(vol_img,1)-1
     if bone_region[x,y,z]
@@ -56,20 +58,18 @@ for z in 2:size(vol_img,3)-1, y in 2:size(vol_img,2)-1, x in 2:size(vol_img,1)-1
                   !bone_region[x,y-1,z] || !bone_region[x,y+1,z] ||
                   !bone_region[x,y,z-1] || !bone_region[x,y,z+1]
         if is_edge
-            bone_surf[x,y,z] = 1.0f0
+            bone_overlay[x,y,z] = Int8(1)
         else
-            bone_marr[x,y,z] = 1.0f0
+            bone_overlay[x,y,z] = Int8(2)
         end
     end
 end
-println("Bone surface voxels: $(sum(bone_surf .> 0))")
-println("Bone marrow voxels: $(sum(bone_marr .> 0))")
+println("Bone overlay non-zero voxels: $(sum(bone_overlay .> 0))")
 
 SD = FullScrollableDat(dataToScroll=[
     ThreeDimRawDat{Float32}(type=Float32, name="CT", dat=vol_img),
-    ThreeDimRawDat{Float32}(type=Float32, name="Mask", dat=vol_mask),
-    ThreeDimRawDat{Float32}(type=Float32, name="Bone_Surface", dat=bone_surf),
-    ThreeDimRawDat{Float32}(type=Float32, name="Bone_Marrow", dat=bone_marr)
+    ThreeDimRawDat{Int16}(type=Int16, name="Mask", dat=vol_mask),
+    ThreeDimRawDat{Int8}(type=Int8, name="Bone_Overlay", dat=bone_overlay)
 ], dimensionToScroll=3)
 MedEye3d.SegmentationDisplay.passDataForScrolling(inst, SD)
 sleep(2)
@@ -117,8 +117,8 @@ state.calcDimsStruct.zoom = 1.0f0
 state.calcDimsStruct.panX = 0.0f0
 state.calcDimsStruct.panY = 0.0f0
 
-# ============== TEST 4: Bone surface + marrow overlay ===============
-println("\n--- TEST 4: Bone surface/marrow ---")
+# ============== TEST 4: Bone overlay ===============
+println("\n--- TEST 4: Bone overlay ---")
 # Move to a slice with bone (vertebral body)
 put!(ch, 0); sleep(1)
 capture_synced(ch, "/workspaces/MedEye3d.jl/feat_t4_bone.png")

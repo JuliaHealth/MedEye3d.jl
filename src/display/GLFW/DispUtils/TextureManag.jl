@@ -80,9 +80,16 @@ function crosshairDisplay(crosshair, mainRect, forDisplayConstants)
 end
 
 """
-Update images displayed — Vulkan texture upload via forDisplayObjects.vulkanCtx.
+Update images displayed — no-op in batched Vulkan backend.
 
-For Vulkan: finds matching VkTexture by name and calls update_vulkan_texture!
+Texture uploads are now handled exclusively by the consumer loop's
+`upload_textures_batched!` path in SegmentationDisplay.jl, which batches
+ALL dirty textures across ALL panels into a single GPU queue submission
+with fence-based async sync. This eliminates per-texture `queue_wait_idle`
+stalls that the old `update_vulkan_texture!` path caused.
+
+The consumer loop uses `state.isSliceChanged = true` to detect which
+panels need texture re-upload on the next frame.
 """
 function updateImagesDisplayed(
     singleSliceDat::SingleSliceDat,
@@ -93,34 +100,7 @@ function updateImagesDisplayed(
     crosshair::GlShaderAndBufferFields,
     mainRect::GlShaderAndBufferFields,
     displayMode::DisplayMode)
-
-    modulelistOfTextSpecs = forDisplayConstants.listOfTextSpecifications
-    ctx = forDisplayConstants.vulkanCtx
-
-    if ctx === nothing
-        return  # No Vulkan context, skip
-    end
-
-    for updateDat in singleSliceDat.listOfDataAndImageNames
-        # Find matching VkTexture by name
-        for (i, vk_tex) in enumerate(forDisplayConstants.vulkanTextures)
-            if hasproperty(vk_tex, :name) && vk_tex.name == updateDat.name
-                try
-                    # Convert data to Float32 for Vulkan R32_SFLOAT format
-                    upload_data = Float32.(updateDat.dat)
-                    # Use VulkanTextures module from VulkanBackend
-                    # Access via the module hierarchy
-                    Base.invokelatest(
-                        getfield(parentmodule(parentmodule(@__MODULE__)), :VulkanBackend).VulkanTextures.update_vulkan_texture!,
-                        ctx, vk_tex, upload_data
-                    )
-                catch e
-                    @warn "Vulkan texture upload failed for $(updateDat.name): $e"
-                end
-                break
-            end
-        end
-    end
+    # No-op: consumer loop handles batched texture uploads via isSliceChanged flag
 end
 
 """

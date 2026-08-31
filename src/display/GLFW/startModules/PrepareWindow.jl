@@ -25,6 +25,18 @@ function displayAll(calcDimsStruct::CalcDimsStruct)
                 if GLFW.WindowShouldClose(window)
                     break
                 end
+                # Process all pending GLFW events (mouse, keyboard, scroll, resize).
+                # Without this call, GLFW callbacks are never invoked and the window
+                # appears frozen. Previously this relied on the Makie renderloop, but
+                # that created a fragile dependency that broke when GLMakie failed.
+                try
+                    GLFW.PollEvents()
+                catch e
+                    # PollEvents can throw if window was destroyed concurrently
+                    if e isa GLFW.GLFWError && e.code == GLFW.NOT_INITIALIZED
+                        break
+                    end
+                end
                 sleep(0.008)
             end
         catch e

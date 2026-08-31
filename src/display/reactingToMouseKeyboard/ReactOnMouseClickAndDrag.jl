@@ -73,11 +73,12 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
     @info "GLFW actual window size: $(actualW)x$(actualH) vs stored: $(calcD.windowWidth)x$(calcD.windowHeight)"
 
     GLFW.SetCursorPosCallback(window, (a, x, y) -> begin
-        actualW, actualH = GLFW.GetWindowSize(window)
-        mouseStructInstance.actualWindowWidth = Int(actualW)
-        mouseStructInstance.actualWindowHeight = Int(actualH)
+        # Use cached window dimensions (updated by FramebufferSizeCallback / button callback)
+        # instead of querying GLFW.GetWindowSize on every pixel of mouse movement
+        aW = mouseStructInstance.actualWindowWidth
+        aH = mouseStructInstance.actualWindowHeight
         
-        if (x >= 0 && x <= actualW && y >= 0 && y <= actualH)
+        if (x >= 0 && x <= aW && y >= 0 && y <= aH)
             point = CartesianIndex(Int(x), Int(y))
             mouseStructInstance.lastCoordinates = [point]
             # Snapshot into a new struct so later callbacks cannot overwrite this message
@@ -85,12 +86,19 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
                 isLeftButtonDown  = mouseStructInstance.isLeftButtonDown,
                 isRightButtonDown = mouseStructInstance.isRightButtonDown,
                 lastCoordinates   = [point],
-                actualWindowWidth  = mouseStructInstance.actualWindowWidth,
-                actualWindowHeight = mouseStructInstance.actualWindowHeight,
+                actualWindowWidth  = aW,
+                actualWindowHeight = aH,
             ))
         end
     end)# and  for example : cursor: 29.0, 469.0  types   Float64  Float64
     GLFW.SetMouseButtonCallback(window, (a, button, action, mods) -> begin
+        # Refresh cached window dimensions (infrequent: only on button press/release)
+        try
+            bW, bH = GLFW.GetWindowSize(window)
+            mouseStructInstance.actualWindowWidth = Int(bW)
+            mouseStructInstance.actualWindowHeight = Int(bH)
+        catch end
+        
         # Only update the flag for the button that actually changed
         if button == GLFW.MOUSE_BUTTON_1
             mouseStructInstance.isLeftButtonDown = (action == GLFW.PRESS)
@@ -165,7 +173,7 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
         is_compare = false
         if length(mainStates) >= 5
             botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
-            if !isempty(botVerts) && all(v -> v == 0.0f0, botVerts[1:2])
+            if !isempty(botVerts) && botVerts[1] == 0.0f0 && botVerts[2] == 0.0f0
                 is_compare = true
             end
         end
@@ -240,15 +248,24 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     # In-place continuous thick-line interpolation using KernelAbstractions
     StrokeRasterization.rasterize_polyline!(twoDimDat.dat, pointsToRasterize, strokeW, toSet)
 
-    singleSliceDat = setproperties(stateObject.currentlyDispDat, (listOfDataAndImageNames = [twoDimDat]))
-    updateImagesDisplayed(singleSliceDat, stateObject.mainForDisplayObjects, stateObject.textDispObj, stateObject.calcDimsStruct, stateObject.valueForMasToSet, stateObject.crosshairFields, stateObject.mainRectFields, stateObject.displayMode)
+    # Mark slice changed so consumer loop uploads dirty texture to GPU
+    stateObject.isSliceChanged = true
 
-    # Invalidate SUV cache for the modified lesion
+    # Synchronize dirty flag on other visible panels
+    for s in mainStates
+        if s !== stateObject && sum(abs.(s.calcDimsStruct.mainImageQuadVert)) > 0.01f0
+            s.isSliceChanged = true
+        end
+    end
+
+    # Invalidate SUV cache and centroid cache for the modified lesion
     try
         paint_id = round(Int, stateObject.valueForMasToSet.value)
         if paint_id > 0
-            MEH = MedEye3d.SegmentationDisplay.MakieEventHandlers
+            MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
             MEH.invalidate_suv_for_lesion(paint_id, MEH.current_tp_index[])
+            delete!(MEH.lesion_centroids_cache, (MEH.current_tp_index[], paint_id))
+            delete!(MEH.lesion_centroids_cache, paint_id)
         end
     catch e
         # SUV invalidation is best-effort
@@ -267,7 +284,10 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
     mouseCoords = mousestr.lastCoordinates
     
     # 1. Update switchIndex based on mouse position — needs coords
-    if !isempty(mouseCoords)
+    activeDragPanel = findfirst(s -> !isempty(s.lastPanDragCoords), mainStates)
+    if activeDragPanel !== nothing && mousestr.isRightButtonDown
+        mainState.switchIndex = activeDragPanel
+    elseif !isempty(mouseCoords)
         if length(mainStates) >= 4 # QuadImage mode
             if quadZoomState.isZoomed
                 # When zoomed, always target the zoomed panel
@@ -286,7 +306,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 is_compare = false
                 if length(mainStates) >= 5
                     botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
-                    if !isempty(botVerts) && all(v -> v == 0.0f0, botVerts[1:2])  # first X,Y coords are 0 = hidden
+                    if !isempty(botVerts) && botVerts[1] == 0.0f0 && botVerts[2] == 0.0f0  # first X,Y coords are 0 = hidden
                         is_compare = true
                     end
                 end
@@ -333,7 +353,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
     end
 
     # 2. Right-click cross-plane jumping or panning
-    if !isempty(mouseCoords) && mousestr.isRightButtonDown && length(mainStates) >= 4 # QuadImage mode
+    if !isempty(mouseCoords) && mousestr.isRightButtonDown && !isempty(mainStates)
         viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
         viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
         actualW = mousestr.actualWindowWidth > 0 ? Float64(mousestr.actualWindowWidth) : viewportW
@@ -380,7 +400,8 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 search_panel = (MEH.compare_mode[] && clickedPanel == 5) ? mainStates[5] : mainStates[1]
                 for dat in search_panel.onScrollData.dataToScroll
                     if dat.name == "Mask" || dat.name == "segmentation"
-                        if panelState.movingLesionID > 0 && any(dat.dat .== Float32(panelState.movingLesionID))
+                        T_elem = eltype(dat.dat)
+                        if panelState.movingLesionID > 0 && any(dat.dat .== round(T_elem, panelState.movingLesionID))
                             seg_vol = dat.dat
                             panelState.movingLesionSourceName = dat.name
                             break
@@ -395,8 +416,9 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 end
                 
                 if seg_vol !== nothing && panelState.movingLesionID > 0
-                    panelState.movingLesionOriginalCoords = findall(seg_vol .== Float32(panelState.movingLesionID))
-                    panelState.movingLesionOriginalBGs = zeros(Float32, length(panelState.movingLesionOriginalCoords))
+                    T_elem = eltype(seg_vol)
+                    panelState.movingLesionOriginalCoords = findall(seg_vol .== round(T_elem, panelState.movingLesionID))
+                    panelState.movingLesionOriginalBGs = zeros(T_elem, length(panelState.movingLesionOriginalCoords))
                     @info "Move Lesion START: lesion=$(panelState.movingLesionID) found $(length(panelState.movingLesionOriginalCoords)) voxels"
                 else
                     panelState.movingLesionOriginalCoords = CartesianIndex{3}[]
@@ -459,9 +481,9 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                     
                     # Upload new texture data to GPU (without rendering/SwapBuffers)
                     for updateDat in singleSlDat.listOfDataAndImageNames
-                        findList = findall((texSpec) -> texSpec.name == updateDat.name, otherState.mainForDisplayObjects.listOfTextSpecifications)
-                        if !isempty(findList)
-                            texSpec = otherState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
+                        idx = findfirst(ts -> ts.name == updateDat.name, otherState.mainForDisplayObjects.listOfTextSpecifications)
+                        if idx !== nothing
+                            texSpec = otherState.mainForDisplayObjects.listOfTextSpecifications[idx]
                             # GPU zoom/pan: upload raw unzoomed data — zoom/pan applied by vertex shader
                             updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, otherState.calcDimsStruct.imageTextureWidth, otherState.calcDimsStruct.imageTextureHeight)
                         end
@@ -540,7 +562,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                                     new_coords = [c + p_delta for c in p_orig_coords]
                                     for c in new_coords
                                         if checkbounds(Bool, seg_v, c)
-                                            seg_v[c] = Float32(target_id)
+                                            seg_v[c] = round(eltype(seg_v), target_id)
                                         end
                                     end
                                 end
@@ -584,15 +606,12 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                             @warn "Failed to sync tp_data_cache on move lesion: $err"
                         end
                         
-                        # Re-render all panels to show moved lesion immediately
-                        old_sw = mainStates[1].switchIndex
+                        # Mark all visible panels dirty so consumer loop immediately uploads translated textures
                         for p in 1:length(mainStates)
                             if sum(abs.(mainStates[p].calcDimsStruct.mainImageQuadVert)) > 0.01f0
-                                mainStates[1].switchIndex = p
-                                ReactToScroll.reactToScroll(0, mainStates, false)
+                                mainStates[p].isSliceChanged = true
                             end
                         end
-                        mainStates[1].switchIndex = old_sw
                     end
                 end
                 return
@@ -604,13 +623,15 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             dx = x - lastX
             dy = y - lastY  
             
-            # Screen dx is horizontal (maps to panX in data matrix), screen dy is vertical (maps to panY in data matrix)
-            # Both scaled by the current zoom level so panning speed matches cursor motion on screen
-            panSpeedX = Float32(dx / actualW) / max(0.1f0, panelState.calcDimsStruct.zoom)
-            panSpeedY = Float32(dy / actualH) / max(0.1f0, panelState.calcDimsStruct.zoom)
+            # Horizontal motion dx maps to panY (horizontal offset in shader pc.uvOffset.x)
+            # Vertical motion dy maps to panX (vertical offset in shader pc.uvOffset.y)
+            panSpeedHoriz = Float32(dx / actualW) / max(0.1f0, panelState.calcDimsStruct.zoom)
+            panSpeedVert  = Float32(dy / actualH) / max(0.1f0, panelState.calcDimsStruct.zoom)
             
-            panelState.calcDimsStruct.panX = clamp(panelState.calcDimsStruct.panX - panSpeedX, -1.0f0, 1.0f0)
-            panelState.calcDimsStruct.panY = clamp(panelState.calcDimsStruct.panY + panSpeedY, -1.0f0, 1.0f0)
+            # Drag right (dx > 0) -> panY decreases -> image shifts right (follows cursor)
+            # Drag down  (dy > 0) -> panX increases -> image shifts down  (follows cursor)
+            panelState.calcDimsStruct.panY = clamp(panelState.calcDimsStruct.panY - panSpeedHoriz, -1.0f0, 1.0f0)
+            panelState.calcDimsStruct.panX = clamp(panelState.calcDimsStruct.panX + panSpeedVert, -1.0f0, 1.0f0)
             
             panelState.lastPanDragCoords = [CartesianIndex(Int(round(x)), Int(round(y)))]
             # GPU pan: no reactToScroll needed — render loop picks up new pan via setZoomPanUniforms
@@ -746,7 +767,7 @@ function reactToDoubleClick(event::DoubleClickEvent, mainStates::Vector{StateDat
     is_compare = false
     if length(mainStates) >= 5
         botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
-        if !isempty(botVerts) && all(v -> v == 0.0f0, botVerts[1:2])
+        if !isempty(botVerts) && botVerts[1] == 0.0f0 && botVerts[2] == 0.0f0
             is_compare = true
         end
     end

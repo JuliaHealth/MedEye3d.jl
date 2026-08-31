@@ -69,6 +69,31 @@ end
 const _custom_opts_cache = Ref{Dict{String,Any}}(Dict{String,Any}())
 const _custom_fields_cache = Ref{Dict{String,String}}(Dict{String,String}())
 
+# Persistent display preferences (PET/CT blend, Label Opacity)
+const GLOBAL_DISPLAY_CONFIG_PATH = joinpath(homedir(), ".medeye3d_display_config.json")
+
+function load_display_config()::Dict{String,Any}
+    if isfile(GLOBAL_DISPLAY_CONFIG_PATH)
+        try
+            return JSON.parse(read(GLOBAL_DISPLAY_CONFIG_PATH, String))
+        catch e
+            @warn "Failed to parse $GLOBAL_DISPLAY_CONFIG_PATH: $e"
+        end
+    end
+    return Dict{String,Any}(
+        "label_opacity" => 0.5,
+        "pet_ct_blend" => 0.5
+    )
+end
+
+function save_display_config(cfg::Dict{String,Any})
+    try
+        write(GLOBAL_DISPLAY_CONFIG_PATH, JSON.json(cfg, 4))
+    catch e
+        @warn "Failed to save $GLOBAL_DISPLAY_CONFIG_PATH: $e"
+    end
+end
+
 function load_custom_options()::Dict{String,Any}
     isempty(_custom_opts_cache[]) || return _custom_opts_cache[]
     res = Dict{String,Any}()
@@ -1144,13 +1169,52 @@ function _apply_searchable_filter!(menu, query::String, full_opts::Vector{String
     end
 end
 
+# ─── Channel Proxy for deferred connection (parallel startup) ────────────────
+
+"""
+    ChannelProxy
+
+Wraps a `Ref{Union{Channel, Nothing}}` so that `put!(proxy, event)` silently
+drops events when the channel is not yet connected (= `nothing`).
+This enables creating the Makie GUI before the Vulkan display channel exists.
+"""
+struct ChannelProxy
+    ref::Ref{Union{Base.Channel, Nothing}}
+end
+
+function Base.put!(proxy::ChannelProxy, event)
+    ch = proxy.ref[]
+    if ch !== nothing
+        put!(ch, event)
+    end
+    # Silently drop if channel not yet connected
+end
+
+"""Holds references returned by create_metadata_window for later channel connection."""
+mutable struct MetadataWindowResult
+    fig::Any
+    channel_ref::Ref{Union{Base.Channel, Nothing}}
+end
+
+"""Connect a live channel to a previously created metadata window (greyed-out → active)."""
+function connect_channel!(win::MetadataWindowResult, ch::Base.Channel)
+    win.channel_ref[] = ch
+    println("  [MAKIE] Channel connected — all controls now active"); flush(stdout)
+end
+
+export connect_channel!, MetadataWindowResult
+
 # ─── Main window ─────────────────────────────────────────────────────────────
 function create_metadata_window(
         active_lesion_id::Observable{String},
         lesion_ids::Observable{Vector{String}},
-        channel::Base.Channel;
+        channel_arg::Union{Base.Channel, Nothing};
         save_path::String = DEFAULT_SAVE_PATH,
         ui_hooks::Dict{Symbol, Observable} = Dict{Symbol, Observable}())
+    # Wrap channel in Ref for deferred connection (parallel startup)
+    channel_ref = Ref{Union{Base.Channel, Nothing}}(channel_arg)
+    # Proxy that silently drops events when channel is not yet connected
+    channel = ChannelProxy(channel_ref)
     local _build_match_display!
     schema   = load_schema()
     radlex   = load_radlex()
@@ -1514,14 +1578,34 @@ function create_metadata_window(
     # ── Dedicated Windowing & Image Offsets Subpanel ─────────────────────────
     sec_win = begin_section!("Windowing & Image Offsets"; default_open=false)
 
+    display_cfg = load_display_config()
+    init_blend = Float32(get(display_cfg, "pet_ct_blend", 0.5))
+    init_label_opacity = Float32(get(display_cfg, "label_opacity", 0.5))
+
     # PET/CT Blend slider (0.0 = CT only, 1.0 = full PET overlay)
     blend_r = nr!()
     Label(g[blend_r, 1], "PET/CT:", fontsize = 10, color = LBL_FG, halign = :right)
-    slider_blend = Slider(g[blend_r, 2:3], range = 0.0f0:0.01f0:1.0f0, startvalue = 1.0f0)
+    slider_blend = Slider(g[blend_r, 2:3], range = 0.0f0:0.01f0:1.0f0, startvalue = init_blend)
     lbl_blend_val = Label(g[blend_r, 4], @lift(string(round($(slider_blend.value), digits=2))),
         fontsize = 10, color = TXT)
     on(slider_blend.value) do val
-        put!(channel, PetBlendEvent(Float32(val)))
+        v = Float32(val)
+        display_cfg["pet_ct_blend"] = v
+        save_display_config(display_cfg)
+        put!(channel, PetBlendEvent(v))
+    end
+
+    # Label / Mask Opacity slider (0.0 = transparent, 1.0 = opaque)
+    opac_r = nr!()
+    Label(g[opac_r, 1], "Label Opacity:", fontsize = 10, color = LBL_FG, halign = :right)
+    slider_label_opacity = Slider(g[opac_r, 2:3], range = 0.0f0:0.01f0:1.0f0, startvalue = init_label_opacity)
+    lbl_opac_val = Label(g[opac_r, 4], @lift(string(round($(slider_label_opacity.value), digits=2))),
+        fontsize = 10, color = TXT)
+    on(slider_label_opacity.value) do val
+        v = Float32(val)
+        display_cfg["label_opacity"] = v
+        save_display_config(display_cfg)
+        put!(channel, LabelOpacityEvent(v))
     end
 
         # CT Windowing
@@ -3503,7 +3587,7 @@ end_section!(sec_win)
         dict_text[] = de_desc
     end
 
-    return (fig = fig, lesion_db = lesion_db)
+    return MetadataWindowResult(fig, channel_ref)
 end
 
 """

@@ -52,6 +52,10 @@ mutable struct VkCtx
     height::Int
     # Track last rendered swapchain image for screenshots
     last_rendered_image_idx::Int
+    # Persistent staging pool for zero-allocation batched texture uploads
+    staging_pool::Any
+    # Cached physical device memory properties (avoids repeated Vulkan queries)
+    cached_mem_props::Any
 end
 
 # ─── Helper: find a memory type with the required properties ────────────
@@ -66,6 +70,21 @@ function find_memory_type(pdev::PhysicalDevice, type_filter::Integer, properties
     mem_props = get_physical_device_memory_properties(pdev)
     for i in 0:(mem_props.memory_type_count - 1)
         mt = mem_props.memory_types[i + 1]  # Julia 1-indexed
+        if (type_filter & (1 << i)) != 0 && (mt.property_flags & properties) == properties
+            return UInt32(i)
+        end
+    end
+    error("VulkanContext: failed to find suitable memory type")
+end
+
+# Cached overload: uses ctx.cached_mem_props to avoid repeated Vulkan API calls
+function find_memory_type(ctx::VkCtx, type_filter::Integer, properties::MemoryPropertyFlag)::UInt32
+    mem_props = ctx.cached_mem_props
+    if mem_props === nothing
+        return find_memory_type(ctx.physical_device, type_filter, properties)
+    end
+    for i in 0:(mem_props.memory_type_count - 1)
+        mt = mem_props.memory_types[i + 1]
         if (type_filter & (1 << i)) != 0 && (mt.property_flags & properties) == properties
             return UInt32(i)
         end
@@ -140,7 +159,17 @@ function create_swapchain(ctx_or_device, pdev, surface, qfi, width, height;
         image_count = min(image_count, caps.max_image_count)
     end
 
-    present_mode = PRESENT_MODE_FIFO_KHR  # guaranteed available, vsync
+    # Prefer MAILBOX for lowest latency (triple-buffered, no tearing)
+    # For medical imaging, we want responsiveness over framerate pacing.
+    # Fall back to FIFO (vsync, guaranteed available) if MAILBOX unavailable.
+    available_modes = unwrap(get_physical_device_surface_present_modes_khr(pdev; surface=surface))
+    present_mode = PRESENT_MODE_FIFO_KHR  # fallback: guaranteed available
+    for m in available_modes
+        if m == PRESENT_MODE_MAILBOX_KHR
+            present_mode = PRESENT_MODE_MAILBOX_KHR
+            break
+        end
+    end
 
     device = ctx_or_device isa VkCtx ? ctx_or_device.device : ctx_or_device
 
@@ -320,13 +349,18 @@ function init_vulkan_context(window::GLFW.Window, width::Int, height::Int)::VkCt
     render_fin = unwrap(create_semaphore(device, SemaphoreCreateInfo()))
     fence      = unwrap(create_fence(device, FenceCreateInfo(flags=FENCE_CREATE_SIGNALED_BIT)))
 
+    # ── Cache physical device memory properties (avoid repeated queries) ──
+    cached_mem_props = get_physical_device_memory_properties(pdev)
+
     return VkCtx(
         instance, pdev, device, queue, qfi,
         surface, swapchain, sc_format, sc_extent, sc_images, sc_views,
         render_pass, framebuffers, cmd_pool, cmd_bufs,
         img_avail, render_fin, fence,
         window, width, height,
-        0  # last_rendered_image_idx
+        0,  # last_rendered_image_idx
+        nothing,  # staging_pool
+        cached_mem_props
     )
 end
 

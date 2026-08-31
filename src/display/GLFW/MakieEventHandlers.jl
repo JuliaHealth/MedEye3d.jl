@@ -12,7 +12,7 @@ using Statistics: mean
 using Dates
 
 export reactToChangePlane, reactToCompareTimePoints, reactToShowSingleLesion
-export reactToWindowing, reactToPaintVal, reactToSyncLesion, reactToChangeBrushSize, reactToPetBlend
+export reactToWindowing, reactToPaintVal, reactToSyncLesion, reactToChangeBrushSize, reactToPetBlend, reactToLabelOpacity
 export reactToChangeTimePoint, reactToToggleLesion, reactToRefreshList
 export reactToAddAutoPet, reactToAIInferenceResult, reactToSyncMissing, reactToGenManual
 export reactToMapLink, reactToAutoRunPreprocess, reactToRunPreprocess, reactToShowBoneMask, reactToShowMaskLayer, reactToSaveMRB
@@ -52,7 +52,7 @@ struct InferenceJob
     cz::Int
     active_id::Int
     seg_vol::Union{Nothing, Array{Float32, 3}}
-    main_channel::Channel{Any}
+    main_channel::Any  # Channel{Any} or ChannelProxy (parallel startup)
     scribble_coords::Vector{Vector{Int}}  # Pre-extracted 0-indexed [x,y,z] coords for nnInteractive fast path
 end
 
@@ -167,14 +167,17 @@ function precompute_mask_centroids!(mask_vol::AbstractArray{T, 3}, tp_idx::Int, 
         end
     end
     
-    for (lid, n) in counts
-        c = [round(Int, sums_x[lid] / n), round(Int, sums_y[lid] / n), round(Int, sums_z[lid] / n)]
-        lesion_centroids_cache[(tp_idx, lid)] = c
-        if !isempty(node_name)
-            lesion_centroids_cache[(node_name, lid)] = c
-        end
-        if tp_idx == current_tp_index[]
-            lesion_centroids_cache[lid] = c
+    # Thread-safe write to shared cache (parallel TP loading writes concurrently)
+    lock(_centroids_lock) do
+        for (lid, n) in counts
+            c = [round(Int, sums_x[lid] / n), round(Int, sums_y[lid] / n), round(Int, sums_z[lid] / n)]
+            lesion_centroids_cache[(tp_idx, lid)] = c
+            if !isempty(node_name)
+                lesion_centroids_cache[(node_name, lid)] = c
+            end
+            if tp_idx == current_tp_index[]
+                lesion_centroids_cache[lid] = c
+            end
         end
     end
 end
@@ -209,6 +212,10 @@ function reactToChangePlane(data::ChangePlaneEvent, stateObjects::Vector{StateDa
             elseif idx == 5
                 updateQuadVertices!(stateObject, :RightHalf)
             elseif idx in (2, 3, 4)
+                updateQuadVertices!(stateObject, :Hidden)
+            end
+        else
+            if idx == 5
                 updateQuadVertices!(stateObject, :Hidden)
             end
         end
@@ -268,9 +275,9 @@ function _force_texture_upload!(stateObjects::Vector{StateDataFields}, panel_idx
     
     n_uploaded = 0
     for updateDat in singleSlDat.listOfDataAndImageNames
-        findList = findall((texSpec) -> texSpec.name == updateDat.name, panelState.mainForDisplayObjects.listOfTextSpecifications)
-        if !isempty(findList)
-            texSpec = panelState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
+        idx = findfirst(ts -> ts.name == updateDat.name, panelState.mainForDisplayObjects.listOfTextSpecifications)
+        if idx !== nothing
+            texSpec = panelState.mainForDisplayObjects.listOfTextSpecifications[idx]
             # GPU zoom/pan: upload raw unzoomed data — zoom/pan applied by vertex shader
             # Safety: verify data dimensions fit within the allocated texture
             actual_w = size(updateDat.dat, 1)
@@ -308,12 +315,16 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                 # Load right TP data into panel 5 using _load_tp_from_entry!
                 entry = get_or_load_tp_data(right_tp)
                 if entry !== nothing
-                    rm = entry.mask_f32
-                    rs = get_existing_bone_array(stateObjects[5], "Bone_Surface")
-                    rmr = get_existing_bone_array(stateObjects[5], "Bone_Marrow")
-                    _load_tp_from_entry!(stateObjects, entry, 5; mask_f32=rm, bone_s_f32=rs, bone_m_f32=rmr)
+                    _load_tp_from_entry!(stateObjects, entry, 5)
                 end
             end
+
+            # Ensure panel 5 uses the exact same scroll dimension and slice as panel 1 for registered alignment
+            stateObjects[5].onScrollData.dimensionToScroll = stateObjects[1].onScrollData.dimensionToScroll
+            stateObjects[5].currentDisplayedSlice = stateObjects[1].currentDisplayedSlice
+            stateObjects[5].calcDimsStruct.zoom = stateObjects[1].calcDimsStruct.zoom
+            stateObjects[5].calcDimsStruct.panX = stateObjects[1].calcDimsStruct.panX
+            stateObjects[5].calcDimsStruct.panY = stateObjects[1].calcDimsStruct.panY
 
             # 2-pane view: panel 1 on left, panel 5 on right
             updateQuadVertices!(stateObjects[1], :LeftHalf)
@@ -343,12 +354,9 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
             # Reload current active TP into all 4 panels using _load_tp_from_entry!
             entry = get_or_load_tp_data(current_tp_index[])
             if entry !== nothing
-                m = entry.mask_f32
-                s = get_existing_bone_array(stateObjects[1], "Bone_Surface")
-                mr = get_existing_bone_array(stateObjects[1], "Bone_Marrow")
                 num_panels = min(4, length(stateObjects))
                 for i in 1:num_panels
-                    _load_tp_from_entry!(stateObjects, entry, i; mask_f32=m, bone_s_f32=s, bone_m_f32=mr)
+                    _load_tp_from_entry!(stateObjects, entry, i)
                 end
             end
             # All TPs pre-loaded before GUI launch — no eviction needed
@@ -360,8 +368,8 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
             updateQuadVertices!(stateObjects[4], :BottomRight)
             updateQuadVertices!(stateObjects[5], :Hidden)
             
-            # Reset pan, zoom, displayMode, and center slice for all 4 panes
-            for i in 1:4
+            # Reset pan, zoom, displayMode, and center slice for all panels
+            for i in 1:length(stateObjects)
                 stateObjects[i].calcDimsStruct.zoom = 1.0f0
                 stateObjects[i].calcDimsStruct.panX = 0.0f0
                 stateObjects[i].calcDimsStruct.panY = 0.0f0
@@ -402,10 +410,11 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
             if textSpec.isMultiDiscreteMask || textSpec.name == "Mask"
                 # Clear allowed IDs filter
                 textSpec.allowedIDs = Float32[]
+                T_mm = eltype(textSpec.minAndMaxValue)
                 if data.lesion_id == 0
-                    textSpec.minAndMaxValue = Float32.([1.0, 1000.0])
+                    textSpec.minAndMaxValue = T_mm.([1, 1000])
                 else
-                    textSpec.minAndMaxValue = Float32.([data.lesion_id, data.lesion_id])
+                    textSpec.minAndMaxValue = T_mm.([data.lesion_id, data.lesion_id])
                 end
                 changed = true
             end
@@ -449,18 +458,37 @@ function reactToPetBlend(data::PetBlendEvent, stateObjects::Vector{StateDataFiel
             end
         end
     end
-    println("PET/CT blend updated to $(data.weight)"); flush(stdout)
+    @debug "PET/CT blend updated" weight=data.weight
+end
+
+function reactToLabelOpacity(data::LabelOpacityEvent, stateObjects::Vector{StateDataFields})
+    for state in stateObjects
+        for tex in state.mainForDisplayObjects.listOfTextSpecifications
+            # Update opacity for discrete segmentation masks and label overlays
+            if tex.isMultiDiscreteMask || (!tex.isMainImage && !tex.isNuclearMask)
+                tex.maskContribution = clamp(data.opacity, 0.0f0, 1.0f0)
+            end
+        end
+    end
+    @debug "Label opacity updated" opacity=data.opacity
 end
 
 function reactToPaintVal(data::PaintValEvent, stateObjects::Vector{StateDataFields})
     for state in stateObjects
         state.valueForMasToSet = valueForMasToSetStruct(value=data.val, is_painting_active=data.active)
         if data.active
+            target_ts = nothing
             for textSpec in state.mainForDisplayObjects.listOfTextSpecifications
-                if textSpec.name == "manualModif"
-                    textSpec.isVisible = true
-                    # UBO update happens in consumer loop
+                if textSpec.name == "Mask" || textSpec.isMultiDiscreteMask
+                    target_ts = textSpec
+                    break
+                elseif textSpec.name == "manualModif" && target_ts === nothing
+                    target_ts = textSpec
                 end
+            end
+            if target_ts !== nothing
+                target_ts.isVisible = true
+                state.textureToModifyVec = [target_ts]
             end
         end
     end
@@ -559,14 +587,15 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         target_id = (idx == 5 && compare_mode[]) ? panel5_lesion_id : data.lesion_id
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if textSpec.name == "Mask" || textSpec.name == "segmentation"
+                T_mm = eltype(textSpec.minAndMaxValue)
                 if idx == 5 && compare_mode[] && !isempty(panel5_all_ids)
                     textSpec.allowedIDs = Float32.(panel5_all_ids)
                 else
                     textSpec.allowedIDs = Float32[]
                     if target_id > 0
-                        textSpec.minAndMaxValue = Float32.([target_id, target_id])
+                        textSpec.minAndMaxValue = T_mm.([target_id, target_id])
                     else
-                        textSpec.minAndMaxValue = Float32.([1.0, 1000.0])
+                        textSpec.minAndMaxValue = T_mm.([1, 1000])
                     end
                 end
             elseif textSpec.name == "manualModif"
@@ -608,31 +637,37 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             end
 
             for scrDat in stateObject.onScrollData.dataToScroll
-                if scrDat.name == "Bone_Surface"
-                    if haskey(last_bone_surf_indices, panel_idx) && !isempty(last_bone_surf_indices[panel_idx])
-                        scrDat.dat[last_bone_surf_indices[panel_idx]] .= 0.0f0
+                if scrDat.name == "Bone_Overlay"
+                    # Clear previous overlay
+                    if haskey(last_bone_overlay_indices, panel_idx) && !isempty(last_bone_overlay_indices[panel_idx])
+                        scrDat.dat[last_bone_overlay_indices[panel_idx]] .= Int8(0)
                     end
+                    # Write combined mask: surface=1, marrow=2, both=3
+                    all_indices = CartesianIndex{3}[]
                     if !isempty(surf_indices)
-                        scrDat.dat[surf_indices] .= 1.0f0
-                    end
-                    last_bone_surf_indices[panel_idx] = surf_indices
-                elseif scrDat.name == "Bone_Marrow"
-                    if haskey(last_bone_marr_indices, panel_idx) && !isempty(last_bone_marr_indices[panel_idx])
-                        scrDat.dat[last_bone_marr_indices[panel_idx]] .= 0.0f0
+                        scrDat.dat[surf_indices] .= Int8(1)
+                        append!(all_indices, surf_indices)
                     end
                     if !isempty(marr_indices)
-                        scrDat.dat[marr_indices] .= 1.0f0
+                        # For overlapping voxels, add (1+2=3), for marrow-only set to 2
+                        for idx in marr_indices
+                            if checkbounds(Bool, scrDat.dat, idx)
+                                old_val = scrDat.dat[idx]
+                                scrDat.dat[idx] = old_val == Int8(1) ? Int8(3) : Int8(2)
+                            end
+                        end
+                        append!(all_indices, marr_indices)
                     end
-                    last_bone_marr_indices[panel_idx] = marr_indices
+                    last_bone_overlay_indices[panel_idx] = unique(all_indices)
                 end
             end
         end
 
-        # Ensure bone textures are visible in the shader when bone data exists
+        # Ensure bone overlay texture is visible in the shader when bone data exists
         if has_any_bone_data
             for stateObject in stateObjects
                 for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-                    if textSpec.name == "Bone_Surface" || textSpec.name == "Bone_Marrow"
+                    if textSpec.name == "Bone_Overlay"
                         textSpec.isVisible = true
                     end
                 end
@@ -703,9 +738,9 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                 
                 # Fast upload directly to OpenGL (skipping CPU sync scroll logic)
                 for updateDat in singleSlDat.listOfDataAndImageNames
-                    findList = findall((texSpec) -> texSpec.name == updateDat.name, otherState.mainForDisplayObjects.listOfTextSpecifications)
-                    if !isempty(findList)
-                        texSpec = otherState.mainForDisplayObjects.listOfTextSpecifications[findList[1]]
+                    idx = findfirst(ts -> ts.name == updateDat.name, otherState.mainForDisplayObjects.listOfTextSpecifications)
+                    if idx !== nothing
+                        texSpec = otherState.mainForDisplayObjects.listOfTextSpecifications[idx]
                         # GPU zoom/pan: upload raw unzoomed data — zoom/pan applied by vertex shader
                         TextureManag.updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, otherState.calcDimsStruct.imageTextureWidth, otherState.calcDimsStruct.imageTextureHeight)
                     end
@@ -730,18 +765,17 @@ mutable struct TpCacheEntry
     ct::Array{Float32,3}
     pet::Array{Float32,3}
     mask::Union{Array{Int8,3}, Array{Int16,3}}
-    bone_surf::BitArray{3}
-    bone_marr::BitArray{3}
+    bone_mask::Array{Int8,3}      # Combined bone overlay: surface=1, marrow=2, both=3
     anatomy::Union{Nothing, Array{UInt16,3}}  # max_anatomy atlas per-TP (UInt16, 163MB)
-    mask_f32::Array{Float32,3}                 # pre-converted Float32 mask (avoids 400ms per switch)
-    anat_f32::Array{Float32,3}                 # pre-converted Float32 anatomy (avoids 400ms per switch)
+    mask_i16::Array{Int16,3}                  # pre-converted Int16 mask for R16_SINT texture
+    anat_i16::Union{Nothing, Array{Int16,3}}  # pre-converted Int16 anatomy for R16_SINT texture
 end
 
 const tp_data_cache = Dict{Int, TpCacheEntry}()
 const bone_subsegments_cache = Dict{Any, Any}()
 const lesion_centroids_cache = Dict{Any, Vector{Int}}()
-const last_bone_surf_indices = Dict{Int, Vector{CartesianIndex{3}}}()
-const last_bone_marr_indices = Dict{Int, Vector{CartesianIndex{3}}}()
+const _centroids_lock = ReentrantLock()
+const last_bone_overlay_indices = Dict{Int, Vector{CartesianIndex{3}}}()
 function reactToBoneSubsegResult(data::BoneSubsegResultEvent, stateObjects::Vector{StateDataFields})
     println("reactToBoneSubsegResult: received result for lesion $(data.target_id) on tp $(data.panel_tp)"); flush(stdout)
     bone_subsegments_cache[(data.panel_tp, data.target_id)] = (data.pts_surf, data.pts_marr)
@@ -755,7 +789,7 @@ end
 const tp_loader_ref = Ref{Any}(nothing)
 const io_channel = Ref{Any}(nothing)
 const main_event_channel = Ref{Any}(nothing)
-export register_tp_loader!, register_main_channel!, get_or_load_tp_data, last_bone_surf_indices, last_bone_marr_indices
+export register_tp_loader!, register_main_channel!, get_or_load_tp_data, last_bone_overlay_indices
 export TpCacheEntry, invalidate_suv_for_lesion
 
 function register_main_channel!(ch::Channel)
@@ -827,21 +861,18 @@ function register_tp_loader!(fn)
     tp_loader_ref[] = fn
     _ensure_io_task!()  # Start IO consumer task on first registration
     
-    # Eagerly preload neighbor TPs — skip if already preloaded before GUI launch
+    # Sliding window preload: only preload TP 1 (adjacent to startup TP 0)
+    # Further TPs are loaded lazily on demand via EvictAndPreloadMessage
     Threads.@spawn begin
         sleep(0.5)  # Allow initial display to finish first
         tp_indices = sort(collect(keys(tp_labels)))
-        all_cached = all(tp_idx -> haskey(tp_data_cache, tp_idx), tp_indices)
-        if all_cached
-            println("  [STARTUP] All TPs already in cache, skipping background preload"); flush(stdout)
-        else
-            for tp_idx in tp_indices
-                if tp_idx != 0 && !haskey(tp_data_cache, tp_idx) && io_channel[] !== nothing
-                    try
-                        put!(io_channel[], PreloadTPMessage(tp_idx))
-                        println("  [STARTUP] Dispatched background preload for TP $tp_idx"); flush(stdout)
-                    catch; end
-                end
+        # Only preload TP index 1 if not already cached
+        for tp_idx in tp_indices
+            if tp_idx == 1 && !haskey(tp_data_cache, tp_idx) && io_channel[] !== nothing
+                try
+                    put!(io_channel[], PreloadTPMessage(tp_idx))
+                    println("  [STARTUP] Dispatched background preload for TP $tp_idx"); flush(stdout)
+                catch; end
             end
         end
     end
@@ -871,68 +902,56 @@ function get_existing_bone_array(stateObject, name)
     return nothing
 end
 
-"""Load a TpCacheEntry into a specific panel, using PermutedDimsArray for sag/cor views.
-Pre-converted Float32 arrays can be passed to avoid redundant conversions across panels."""
-function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx;
-                              mask_f32=nothing, bone_s_f32=nothing, bone_m_f32=nothing)
+"""Load a TpCacheEntry into a specific panel.
+Integer textures (mask, anatomy, bone) use native Int16/Int8 types — no Float32 conversion.
+Bone_Surface + Bone_Marrow are merged into a single Bone_Overlay (surface=1, marrow=2, both=3)."""
+function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
     if panel_idx > length(stateObjects)
         return
     end
     
     # New data arrays → old bone overlay indices are stale
-    delete!(last_bone_surf_indices, panel_idx)
-    delete!(last_bone_marr_indices, panel_idx)
+    delete!(last_bone_overlay_indices, panel_idx)
     
-    # Use pre-computed Float32 arrays from TpCacheEntry (avoids ~800ms per call)
-    if mask_f32 === nothing
-        mask_f32 = entry.mask_f32
-    end
-    if bone_s_f32 === nothing
-        bone_s_f32 = Float32.(entry.bone_surf)
-    end
-    if bone_m_f32 === nothing
-        bone_m_f32 = Float32.(entry.bone_marr)
-    end
-    anat_f32 = entry.anat_f32
+    # Use pre-computed Int16 arrays from TpCacheEntry
+    mask_i16 = entry.mask_i16
+    anat_i16 = entry.anat_i16
+    bone_i8 = entry.bone_mask
     
-    # Use PermutedDimsArray for zero-copy views on CT/PET/Mask/Anatomy,
-    # but bone arrays MUST be independent per-panel: reactToSyncLesion writes
-    # bone subseg indices per-panel in panel-specific coordinate systems,
-    # so shared arrays get polluted by cross-panel writes (causing doubling).
-    
-    function get_or_create_bone(panel_idx, name, req_size)
-        arr = get_existing_bone_array(stateObjects[panel_idx], name)
-        if arr !== nothing && size(arr) == req_size
-            fill!(arr, 0.0f0)
-            return arr
+    # Bone overlay needs independent per-panel arrays because reactToSyncLesion writes
+    # bone subseg indices per-panel in panel-specific coordinate systems
+    function get_or_create_bone_i8(panel_idx, req_size)
+        # Try to reuse existing bone array from this panel
+        for dat in stateObjects[panel_idx].onScrollData.dataToScroll
+            if dat.name == "Bone_Overlay" && size(dat.dat) == req_size
+                fill!(dat.dat, Int8(0))
+                return dat.dat
+            end
         end
-        return zeros(Float32, req_size)
+        return zeros(Int8, req_size)
     end
 
     panel_voxels = if panel_idx == 3  # Sagittal (Y,Z,X)
         sz = (size(entry.ct, 2), size(entry.ct, 3), size(entry.ct, 1))
         Any[("CT", PermutedDimsArray(entry.ct, (2,3,1))),
             ("PET", PermutedDimsArray(entry.pet, (2,3,1))),
-            ("Mask", PermutedDimsArray(mask_f32, (2,3,1))),
-            ("Bone_Surface", get_or_create_bone(panel_idx, "Bone_Surface", sz)),
-            ("Bone_Marrow", get_or_create_bone(panel_idx, "Bone_Marrow", sz)),
-            ("Anatomy", PermutedDimsArray(anat_f32, (2,3,1)))]
+            ("Mask", PermutedDimsArray(mask_i16, (2,3,1))),
+            ("Bone_Overlay", get_or_create_bone_i8(panel_idx, sz)),
+            ("Anatomy", anat_i16 !== nothing ? PermutedDimsArray(anat_i16, (2,3,1)) : zeros(Int16, sz))]
     elseif panel_idx == 4  # Coronal (X,Z,Y)
         sz = (size(entry.ct, 1), size(entry.ct, 3), size(entry.ct, 2))
         Any[("CT", PermutedDimsArray(entry.ct, (1,3,2))),
             ("PET", PermutedDimsArray(entry.pet, (1,3,2))),
-            ("Mask", PermutedDimsArray(mask_f32, (1,3,2))),
-            ("Bone_Surface", get_or_create_bone(panel_idx, "Bone_Surface", sz)),
-            ("Bone_Marrow", get_or_create_bone(panel_idx, "Bone_Marrow", sz)),
-            ("Anatomy", PermutedDimsArray(anat_f32, (1,3,2)))]
+            ("Mask", PermutedDimsArray(mask_i16, (1,3,2))),
+            ("Bone_Overlay", get_or_create_bone_i8(panel_idx, sz)),
+            ("Anatomy", anat_i16 !== nothing ? PermutedDimsArray(anat_i16, (1,3,2)) : zeros(Int16, sz))]
     elseif panel_idx == 2  # PET-only
         Any[("PET", entry.pet)]
-    else  # Axial (panels 1, 5) — each gets its own copy
+    else  # Axial (panels 1, 5) — each gets its own bone copy
         sz = size(entry.ct)
-        Any[("CT", entry.ct), ("PET", entry.pet), ("Mask", mask_f32),
-            ("Bone_Surface", get_or_create_bone(panel_idx, "Bone_Surface", sz)),
-            ("Bone_Marrow", get_or_create_bone(panel_idx, "Bone_Marrow", sz)),
-            ("Anatomy", anat_f32)]
+        Any[("CT", entry.ct), ("PET", entry.pet), ("Mask", mask_i16),
+            ("Bone_Overlay", get_or_create_bone_i8(panel_idx, sz)),
+            ("Anatomy", anat_i16 !== nothing ? anat_i16 : zeros(Int16, sz))]
     end
     
     # Insert manualModif at index 2 — reuse existing buffer from stateObject when possible
@@ -948,12 +967,14 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx;
             end
         end
     end
-    manual_buf = existing_manual !== nothing ? existing_manual : zeros(Float32, size(panel_voxels[1][2]))
-    
-    if panel_idx != 2 && (length(panel_voxels) < 2 || panel_voxels[2][1] != "manualModif")
-        insert!(panel_voxels, 2, ("manualModif", manual_buf))
-    elseif panel_idx == 2
-        insert!(panel_voxels, 1, ("manualModif", manual_buf))
+    has_manual_spec = any(ts -> ts.name == "manualModif", stateObjects[panel_idx].mainForDisplayObjects.listOfTextSpecifications)
+    if has_manual_spec
+        manual_buf = existing_manual !== nothing ? existing_manual : zeros(Float32, size(panel_voxels[1][2]))
+        if panel_idx != 2 && (length(panel_voxels) < 2 || panel_voxels[2][1] != "manualModif")
+            insert!(panel_voxels, 2, ("manualModif", manual_buf))
+        elseif panel_idx == 2
+            insert!(panel_voxels, 1, ("manualModif", manual_buf))
+        end
     end
     
     newDataToScroll = StructsManag.getThreeDims(panel_voxels)
@@ -1053,11 +1074,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         
         t_panel_left = @elapsed begin
             if entry_left !== nothing
-                # Extract existing display arrays to avoid 1.3 GB reallocation
-                lm = entry_left.mask_f32
-                ls = get_existing_bone_array(stateObjects[1], "Bone_Surface")
-                lmr = get_existing_bone_array(stateObjects[1], "Bone_Marrow")
-                _load_tp_from_entry!(stateObjects, entry_left, 1; mask_f32=lm, bone_s_f32=ls, bone_m_f32=lmr)
+                _load_tp_from_entry!(stateObjects, entry_left, 1)
             end
         end
         if DEBUG_VERBOSE[]; println("  [BENCH] _load_tp_from_entry!(left): $(round(t_panel_left*1000, digits=1))ms"); flush(stdout); end
@@ -1074,11 +1091,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         
         t_panel_right = @elapsed begin
             if entry_right !== nothing
-                # Extract existing display arrays to avoid 1.3 GB reallocation
-                rm = entry_right.mask_f32
-                rs = get_existing_bone_array(stateObjects[5], "Bone_Surface")
-                rmr = get_existing_bone_array(stateObjects[5], "Bone_Marrow")
-                _load_tp_from_entry!(stateObjects, entry_right, 5; mask_f32=rm, bone_s_f32=rs, bone_m_f32=rmr)
+                _load_tp_from_entry!(stateObjects, entry_right, 5)
             end
         end
         if DEBUG_VERBOSE[]; println("  [BENCH] _load_tp_from_entry!(right): $(round(t_panel_right*1000, digits=1))ms"); flush(stdout); end
@@ -1101,40 +1114,20 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         if DEBUG_VERBOSE[]; println("  [BENCH] get_or_load_tp_data: $(round(t_load*1000, digits=1))ms (cached=$(haskey(tp_data_cache, new_tp)))"); flush(stdout); end
         
         if entry !== nothing
-            # Pre-convert arrays ONCE for all panels
-            t_convert = @elapsed begin
-                mask_f32 = entry.mask_f32
-            end
-            if DEBUG_VERBOSE[]; println("  [BENCH] Float32(mask): $(round(t_convert*1000, digits=1))ms ($(size(entry.mask)) $(eltype(entry.mask)))"); flush(stdout); end
-            
-            t_bone_convert = @elapsed begin
-                bone_s_f32 = get_existing_bone_array(stateObjects[1], "Bone_Surface")
-                bone_m_f32 = get_existing_bone_array(stateObjects[1], "Bone_Marrow")
-            end
-            if DEBUG_VERBOSE[]; println("  [BENCH] Extract existing bone_surf+marr arrays: $(round(t_bone_convert*1000, digits=1))ms"); flush(stdout); end
-            
             t_panels = @elapsed begin
                 for i in [1, 2, 3, 4]
                     if i <= length(stateObjects)
-                        _load_tp_from_entry!(stateObjects, entry, i;
-                            mask_f32=mask_f32, bone_s_f32=bone_s_f32, bone_m_f32=bone_m_f32)
+                        _load_tp_from_entry!(stateObjects, entry, i)
                     end
                 end
                 if length(stateObjects) >= 5
-                    _load_tp_from_entry!(stateObjects, entry, 5;
-                        mask_f32=mask_f32, bone_s_f32=bone_s_f32, bone_m_f32=bone_m_f32)
+                    _load_tp_from_entry!(stateObjects, entry, 5)
                 end
             end
-            # Skip initial per-panel reactToScroll here — reactToSyncLesion below
-            # will do its own reactToScroll for all active panels, which uploads textures.
-            # Only do a minimal scroll for panels NOT covered by reactToSyncLesion.
-            # reactToSyncLesion covers active_panel_indices = [1,2,3,4] in normal mode.
-            # Panel 5 is only used in compare mode (handled separately above).
             if DEBUG_VERBOSE[]; println("  [BENCH] _load_tp_from_entry! completed, skipping redundant initial scroll"); flush(stdout); end
             
             # Re-apply bone overlay + navigate to active lesion (or lesion 1 if none)
-            empty!(last_bone_surf_indices)
-            empty!(last_bone_marr_indices)
+            empty!(last_bone_overlay_indices)
             t_bone_overlay = @elapsed begin
                 lid = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
                 try
@@ -1147,7 +1140,25 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
             if DEBUG_VERBOSE[]; println("  [BENCH] bone overlay (reactToSyncLesion): $(round(t_bone_overlay*1000, digits=1))ms"); flush(stdout); end
         end
     end
-    # All TPs pre-loaded before GUI launch — no eviction or preload dispatch needed
+    # Sliding window: preload adjacent TPs (current ± 1), evict distant ones
+    if io_channel[] !== nothing
+        try
+            neighbors = Int[]
+            prev_pos = mod1(new_pos - 1, num_tps)
+            next_pos_n = mod1(new_pos + 1, num_tps)
+            push!(neighbors, tp_indices[prev_pos])
+            push!(neighbors, tp_indices[next_pos_n])
+            filter!(tp -> !haskey(tp_data_cache, tp), neighbors)
+            
+            # Evict TPs that are far from current (keep current ± 1 only)
+            keep_set = Set{Int}([new_tp, tp_indices[prev_pos], tp_indices[next_pos_n]])
+            evict_tps = filter(tp -> !in(tp, keep_set), collect(keys(tp_data_cache)))
+            
+            if !isempty(neighbors) || !isempty(evict_tps)
+                put!(io_channel[], EvictAndPreloadMessage(evict_tps, neighbors))
+            end
+        catch; end
+    end
     
     # SUV precompute + CT Docker preload: fire-and-forget in background (non-blocking)
     let tp_for_bg = new_tp, label_for_bg = label
@@ -1266,11 +1277,13 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
                     # For manualModif texture, accept ANY non-zero voxels as scribbles.
                     # For other textures (Mask, segmentation), only match active_id or brush value.
                     is_manual = dat.name == "manualModif"
+                    T_elem = eltype(dat.dat)
                     p = if is_manual
-                        findall(dat.dat .> 0.0f0)
+                        findall(dat.dat .> 0)
                     else
-                        findall((dat.dat .== Float32(active_id)) .| 
-                                (dat.dat .== Float32(st.valueForMasToSet.value)))
+                        v_act = round(T_elem, active_id)
+                        v_set = round(T_elem, st.valueForMasToSet.value)
+                        findall((dat.dat .== v_act) .| (dat.dat .== v_set))
                     end
                     if !isempty(p)
                         println("[reactToAddAutoPet] Found $(length(p)) painted voxels for lesion $active_id in panel $p_idx $(dat.name)"); flush(stdout)
@@ -1378,8 +1391,10 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
     end
 
     if size(data.mask) == size(seg_vol)
-        seg_vol[data.mask .> 0] .= Float32(data.active_id)
+        label_val = eltype(seg_vol)(data.active_id)
+        seg_vol[data.mask .> 0] .= label_val
     else
+        label_val = eltype(seg_vol)(data.active_id)
         InferenceClient.insert_patch!(seg_vol, data.mask, data.cx, data.cy, data.cz, label_val=Float32(data.active_id))
     end
     println("$(data.algorithm) segmented $(count(data.mask .> 0)) patch voxels for lesion $(data.active_id) at ($(data.cx), $(data.cy), $(data.cz))."); flush(stdout)
@@ -1437,22 +1452,27 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
         end
         
         for scrDat in stateObject.onScrollData.dataToScroll
-            if scrDat.name == "Bone_Surface"
-                if haskey(last_bone_surf_indices, panel_idx) && !isempty(last_bone_surf_indices[panel_idx])
-                    scrDat.dat[last_bone_surf_indices[panel_idx]] .= 0.0f0
+            if scrDat.name == "Bone_Overlay"
+                # Clear previous overlay
+                if haskey(last_bone_overlay_indices, panel_idx) && !isempty(last_bone_overlay_indices[panel_idx])
+                    scrDat.dat[last_bone_overlay_indices[panel_idx]] .= Int8(0)
                 end
+                # Write combined mask: surface=1, marrow=2, both=3
+                all_indices = CartesianIndex{3}[]
                 if !isempty(surf_indices)
-                    scrDat.dat[surf_indices] .= 1.0f0
-                end
-                last_bone_surf_indices[panel_idx] = surf_indices
-            elseif scrDat.name == "Bone_Marrow"
-                if haskey(last_bone_marr_indices, panel_idx) && !isempty(last_bone_marr_indices[panel_idx])
-                    scrDat.dat[last_bone_marr_indices[panel_idx]] .= 0.0f0
+                    scrDat.dat[surf_indices] .= Int8(1)
+                    append!(all_indices, surf_indices)
                 end
                 if !isempty(marr_indices)
-                    scrDat.dat[marr_indices] .= 1.0f0
+                    for idx in marr_indices
+                        if checkbounds(Bool, scrDat.dat, idx)
+                            old_val = scrDat.dat[idx]
+                            scrDat.dat[idx] = old_val == Int8(1) ? Int8(3) : Int8(2)
+                        end
+                    end
+                    append!(all_indices, marr_indices)
                 end
-                last_bone_marr_indices[panel_idx] = marr_indices
+                last_bone_overlay_indices[panel_idx] = unique(all_indices)
             end
         end
     end
@@ -1474,7 +1494,7 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
         end
     end
 
-    # Synchronize tp_data_cache
+    # Synchronize tp_data_cache (both compact mask and Int16 texture mask)
     tp_idx = current_tp_index[]
     if haskey(tp_data_cache, tp_idx)
         entry = tp_data_cache[tp_idx]
@@ -1483,13 +1503,15 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
         else
             entry.mask .= round.(Int16, seg_vol)
         end
+        entry.mask_i16 .= round.(Int16, seg_vol)
     end
 
     # Ensure mask uniform displays the active lesion
     for stateObject in stateObjects
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if textSpec.name == "Mask" || textSpec.name == "segmentation"
-                textSpec.minAndMaxValue = Float32.([data.active_id, data.active_id])
+                T = eltype(textSpec.minAndMaxValue)
+                textSpec.minAndMaxValue = T.([data.active_id, data.active_id])
             elseif textSpec.name == "manualModif"
                 textSpec.minAndMaxValue = Float32.([0.0, 1000.0])
             end
@@ -1617,7 +1639,7 @@ function reactToShowBoneMask(data::ShowBoneMaskEvent, stateObjects::Vector{State
     println("Show Bone Mask toggled to $(data.active)"); flush(stdout)
     for stateObject in stateObjects
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-            if textSpec.name == "Bone_Mask" || textSpec.name == "bone_mask" || textSpec.name == "bone" || textSpec.name == "Organ_Mask" || textSpec.name == "organ_mask" || textSpec.name == "Bone_Surface" || textSpec.name == "Bone_Marrow"
+            if textSpec.name == "Bone_Overlay" || textSpec.name == "Bone_Mask" || textSpec.name == "bone_mask" || textSpec.name == "bone" || textSpec.name == "Organ_Mask" || textSpec.name == "organ_mask"
                 textSpec.isVisible = data.active
             end
         end
@@ -1640,10 +1662,8 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
     
     tex_target = if data.layer == 1
         "Mask"
-    elseif data.layer == 2
-        "Bone_Surface"
-    elseif data.layer == 3
-        "Bone_Marrow"
+    elseif data.layer == 2 || data.layer == 3
+        "Bone_Overlay"
     elseif data.layer == 4
         "Anatomy"
     else
@@ -1671,16 +1691,13 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
         flush(stdout)
         for (panel_idx, stateObject) in enumerate(stateObjects)
             for scrDat in stateObject.onScrollData.dataToScroll
-                if (data.layer == 2 && scrDat.name == "Bone_Surface") || (data.layer == 3 && scrDat.name == "Bone_Marrow")
+                if scrDat.name == "Bone_Overlay"
                     if !data.active
-                        if data.layer == 2 && haskey(last_bone_surf_indices, panel_idx)
-                            scrDat.dat[last_bone_surf_indices[panel_idx]] .= 0.0f0
-                            delete!(last_bone_surf_indices, panel_idx)
-                        elseif data.layer == 3 && haskey(last_bone_marr_indices, panel_idx)
-                            scrDat.dat[last_bone_marr_indices[panel_idx]] .= 0.0f0
-                            delete!(last_bone_marr_indices, panel_idx)
+                        if haskey(last_bone_overlay_indices, panel_idx) && !isempty(last_bone_overlay_indices[panel_idx])
+                            scrDat.dat[last_bone_overlay_indices[panel_idx]] .= Int8(0)
+                            delete!(last_bone_overlay_indices, panel_idx)
                         else
-                            fill!(scrDat.dat, 0.0f0)
+                            fill!(scrDat.dat, Int8(0))
                         end
                     elseif cur_lid > 0
                         panel_tp = (panel_idx == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
@@ -1714,23 +1731,15 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
                         else # Axial (X, Y, Z)
                             panel_pts
                         end
-                        if data.layer == 2
-                            if haskey(last_bone_surf_indices, panel_idx) && !isempty(last_bone_surf_indices[panel_idx])
-                                scrDat.dat[last_bone_surf_indices[panel_idx]] .= 0.0f0
-                            end
-                            if !isempty(indices)
-                                scrDat.dat[indices] .= 1.0f0
-                            end
-                            last_bone_surf_indices[panel_idx] = indices
-                        elseif data.layer == 3
-                            if haskey(last_bone_marr_indices, panel_idx) && !isempty(last_bone_marr_indices[panel_idx])
-                                scrDat.dat[last_bone_marr_indices[panel_idx]] .= 0.0f0
-                            end
-                            if !isempty(indices)
-                                scrDat.dat[indices] .= 1.0f0
-                            end
-                            last_bone_marr_indices[panel_idx] = indices
+                        # Clear previous and set new for combined overlay
+                        if haskey(last_bone_overlay_indices, panel_idx) && !isempty(last_bone_overlay_indices[panel_idx])
+                            scrDat.dat[last_bone_overlay_indices[panel_idx]] .= Int8(0)
                         end
+                        if !isempty(indices)
+                            val = (data.layer == 2) ? Int8(1) : Int8(2)
+                            scrDat.dat[indices] .= val
+                        end
+                        last_bone_overlay_indices[panel_idx] = indices
                     end
                 end
             end

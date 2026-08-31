@@ -6,6 +6,7 @@ using MedImages
 using JSON
 using HDF5
 using LinearAlgebra
+using Statistics
 using NIfTI
 using CUDA
 
@@ -142,14 +143,14 @@ function main()
             img_res = img
         end
         
-        # Compact masks to Int8/Int16 (saves 75% storage + eliminates runtime conversion)
+        # Always use Int16 for label masks — matches TextureSpec{Int16} and R16_SINT format
+        # Int16 range [-32768, 32767] supports any segmentation label count
         if is_mask
             vox = Float32.(img_res.voxel_data)
             vox = max.(0.0f0, vox)
             max_id = round(Int, maximum(vox))
-            T = max_id + 5 <= 127 ? Int8 : Int16
-            img_res = MedImages.update_voxel_data(img_res, T.(round.(vox)))
-            println("    Compacted mask to $T (max_id=$max_id)")
+            img_res = MedImages.update_voxel_data(img_res, Int16.(round.(vox)))
+            println("    Compacted mask to Int16 (max_id=$max_id)")
         end
         
         # Pre-flip native resolution (single flip during preprocessing eliminates runtime reverse)
@@ -247,13 +248,205 @@ function main()
     GC.gc()
     println("Saved preprocessed volumes.")
     
-    # 4. Bone Subsegmentation Precomputation (per-timepoint Skellytour)
-    println("Starting Bone Subsegmentation Precomputation...")
-    bone_h5_path = joinpath(data_dir, "Bone_Subsegments_0.h5")
-    bone_h5 = h5open(bone_h5_path, "w")
+    # ═══════════════════════════════════════════════════════════════════════
+    # Phase 1.5: Store registration transforms (.tfm) into HDF5 _meta_
+    # ═══════════════════════════════════════════════════════════════════════
     
-    # Iterate over all masks saved in preprocessed_volumes.h5
-    h5_read = h5open(h5_path, "r")
+    println("\n=== Phase 1.5: Storing registration transforms ==")
+    h5_file = h5open(h5_path, "r+")
+    if !haskey(h5_file, "_meta_/transforms")
+        create_group(h5_file, "_meta_/transforms")
+    end
+    tfm_count = 0
+    for (s_idx, study) in enumerate(studies)
+        tfm_name = study[8]  # e.g. "Transform_FollowUp_to_Baseline_1.tfm"
+        if !isempty(tfm_name)
+            tfm_path = joinpath(data_dir, tfm_name)
+            if isfile(tfm_path)
+                tfm_content = read(tfm_path, String)
+                ds_name = "_meta_/transforms/$tfm_name"
+                if haskey(h5_file, ds_name)
+                    delete_object(h5_file, ds_name)
+                end
+                h5_file[ds_name] = tfm_content
+                tfm_count += 1
+                println("  Stored transform: $tfm_name ($(length(tfm_content)) bytes)")
+            else
+                println("  ⚠️  Transform file not found: $tfm_path")
+            end
+        end
+    end
+    println("  Stored $tfm_count transforms total")
+    close(h5_file)
+    
+    # ═══════════════════════════════════════════════════════════════════════
+    # Phase 2: Store atlas, skellytour, bone_atlas, labels, organ mapping,
+    #          centroids, and bone subsegments into the SAME HDF5.
+    #          This makes HDF5 the SINGLE source of truth for startup.
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    println("\n=== Phase 2: Embedding startup data into HDF5 ===")
+    h5_file = h5open(h5_path, "r+")  # Reopen for appending
+    
+    # --- 2a. Global max_anatomy atlas (baseline) ---
+    baseline_study = studies[1]
+    max_anatomy_source = length(baseline_study) >= 10 ? baseline_study[10] : ""
+    max_anatomy_labels_file = length(baseline_study) >= 11 ? baseline_study[11] : ""
+    skellytour_source = length(baseline_study) >= 12 ? baseline_study[12] : ""
+    
+    if !haskey(h5_file, "ATLAS")
+        create_group(h5_file, "ATLAS")
+    end
+    
+    # Store max_anatomy atlas (pre-flipped UInt16)
+    ts_atlas_aligned = nothing
+    ts_names = Dict{Int,String}()
+    if !isempty(max_anatomy_source)
+        max_anat_path = joinpath(data_dir, max_anatomy_source)
+        if isfile(max_anat_path)
+            println("  Storing global max_anatomy atlas...")
+            anat_img = MedImages.load_image(max_anat_path, "CT")
+            anat_raw = UInt16.(round.(max.(0.0f0, Float32.(anat_img.voxel_data))))
+            ts_atlas_aligned = reverse(anat_raw, dims=2)  # Pre-flip
+            h5_file["ATLAS/max_anatomy"] = ts_atlas_aligned
+            println("    Saved ATLAS/max_anatomy ($(size(ts_atlas_aligned)))")
+        end
+    end
+    
+    # Store max_anatomy labels JSON
+    if !isempty(max_anatomy_labels_file)
+        labels_path = joinpath(data_dir, max_anatomy_labels_file)
+        # Prefer real names if available
+        real_labels_path = joinpath(data_dir, "anatomy_out", "max_anatomy_labels.json")
+        if isfile(real_labels_path)
+            labels_path = real_labels_path
+        end
+        if isfile(labels_path)
+            println("  Storing max_anatomy labels...")
+            h5_file["_meta_/max_anatomy_labels.json"] = read(labels_path, String)
+            raw_labels = JSON.parsefile(labels_path)
+            ts_names = Dict{Int,String}(parse(Int, k) => v for (k, v) in raw_labels)
+            println("    Saved _meta_/max_anatomy_labels.json ($(length(ts_names)) classes)")
+        end
+    end
+    
+    # Store per-TP anatomy labels
+    for (s_idx, study) in enumerate(studies)
+        tp_i = s_idx - 1
+        tp_labels_file = length(study) >= 11 ? study[11] : ""
+        if !isempty(tp_labels_file)
+            tp_labels_path = joinpath(data_dir, tp_labels_file)
+            if isfile(tp_labels_path)
+                h5_file["_meta_/anatomy_labels_tp_$(tp_i).json"] = read(tp_labels_path, String)
+            end
+        end
+    end
+    
+    # Store Skellytour (pre-flipped Float32)
+    if !isempty(skellytour_source)
+        skelly_path = joinpath(data_dir, skellytour_source)
+        if isfile(skelly_path)
+            println("  Storing Skellytour bone atlas...")
+            skelly_img = MedImages.load_image(skelly_path, "CT")
+            skelly_aligned = reverse(Float32.(skelly_img.voxel_data), dims=2)
+            h5_file["ATLAS/skellytour"] = skelly_aligned
+            println("    Saved ATLAS/skellytour ($(size(skelly_aligned)))")
+        end
+    end
+    
+    # Compute and store bone_atlas (binary mask of bone-related label IDs)
+    if ts_atlas_aligned !== nothing && !isempty(ts_names)
+        println("  Computing bone_atlas binary mask...")
+        bone_keywords = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula", "humerus",
+                          "scapula", "sternum", "skull", "palate", "bone", "spine", "mandible",
+                          "costal"]
+        bone_label_ids = Set{Int}()
+        for (k, v) in ts_names
+            if any(kw -> occursin(kw, lowercase(v)), bone_keywords)
+                push!(bone_label_ids, k)
+            end
+        end
+        bone_atlas = Float32.(in.(ts_atlas_aligned, Ref(bone_label_ids)))
+        h5_file["ATLAS/bone_atlas"] = bone_atlas
+        h5_file["_meta_/bone_label_ids"] = collect(bone_label_ids)
+        println("    Saved ATLAS/bone_atlas ($(count(bone_atlas .> 0)) bone voxels, $(length(bone_label_ids)) label IDs)")
+    end
+    
+    # Compute and store organ_mapping for baseline mask
+    if ts_atlas_aligned !== nothing && !isempty(ts_names)
+        println("  Computing organ_mapping for baseline mask...")
+        # Read baseline mask from HDF5
+        base_mask_fname = studies[1][6]
+        base_group = studies[1][8] == "" ? "BASELINE" : "TFM_" * studies[1][8]
+        if haskey(h5_file, "$base_group/$base_mask_fname")
+            mask_raw = read(h5_file["$base_group/$base_mask_fname"])
+            mask_f32 = Float32.(mask_raw)
+            
+            # Map each lesion to the most common overlapping organ
+            organ_mapping = Dict{Int, String}()
+            unique_ids = filter(x -> x > 0, unique(mask_f32))
+            for lid_f in unique_ids
+                lid = Int(lid_f)
+                lesion_mask = mask_f32 .== lid_f
+                # Find most common atlas label overlapping this lesion
+                atlas_vals = ts_atlas_aligned[lesion_mask]
+                nonzero = filter(x -> x > 0, atlas_vals)
+                if !isempty(nonzero)
+                    # Count occurrences
+                    counts = Dict{UInt16, Int}()
+                    for v in nonzero
+                        counts[v] = get(counts, v, 0) + 1
+                    end
+                    best_label = first(sort(collect(counts), by=x->x[2], rev=true))[1]
+                    organ_mapping[lid] = get(ts_names, Int(best_label), "Unknown")
+                end
+            end
+            
+            # Store as JSON
+            organ_json = JSON.json(Dict(string(k) => v for (k, v) in organ_mapping))
+            h5_file["_meta_/organ_mapping"] = organ_json
+            println("    Saved _meta_/organ_mapping ($(length(organ_mapping)) lesions mapped)")
+        end
+    end
+    
+    # --- 2b. Compute and store centroids for ALL TPs ---
+    println("  Computing lesion centroids for all TPs...")
+    if !haskey(h5_file, "CENTROIDS")
+        create_group(h5_file, "CENTROIDS")
+    end
+    
+    centroid_count = 0
+    for (s_idx, study) in enumerate(studies)
+        tp_idx = s_idx - 1
+        node_name = study[7]
+        mask_fname = study[6]
+        tfm_fname = study[8]
+        group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
+        
+        if haskey(h5_file, group) && haskey(h5_file[group], mask_fname)
+            mask_vol = Float32.(read(h5_file["$group/$mask_fname"]))
+            u_lids = filter(x -> x > 0, unique(mask_vol))
+            for lid_f in u_lids
+                lid = Int(lid_f)
+                # Find centroid (mean of voxel coordinates)
+                indices = findall(mask_vol .== lid_f)
+                if !isempty(indices)
+                    cx = round(Int, mean(idx -> idx[1], indices))
+                    cy = round(Int, mean(idx -> idx[2], indices))
+                    cz = round(Int, mean(idx -> idx[3], indices))
+                    h5_file["CENTROIDS/tp$(tp_idx)_lid$(lid)"] = Int32[cx, cy, cz]
+                    centroid_count += 1
+                end
+            end
+        end
+    end
+    println("    Saved $centroid_count centroids across $(length(studies)) TPs")
+    
+    # --- 2c. Bone subsegmentation (moved into main HDF5) ---
+    println("\n=== Phase 3: Bone Subsegmentation ===")
+    if !haskey(h5_file, "BONE_SUBSEG")
+        create_group(h5_file, "BONE_SUBSEG")
+    end
     
     cis = CartesianIndices(size(baseline_ct.voxel_data))
     temp_lesion = joinpath(data_dir, "temp_lesion.nii.gz")
@@ -262,40 +455,34 @@ function main()
     
     for (s_idx, study) in enumerate(studies)
         modality = study[1]
-        orig_tp = study[2]
-        date_str = study[3]
         ct_fname = study[4]
-        pet_fname = study[5]
         mask_fname = study[6]
         node_name = study[7]
         tfm_fname = study[8]
-        skellytour_source = study[12]  # per-timepoint Skellytour from hierarchy
-        max_anatomy_source = study[10]  # per-timepoint max_anatomy
-        max_anatomy_labels_source = study[11]  # per-timepoint max_anatomy labels
+        skellytour_src = study[12]
+        max_anatomy_src = length(study) >= 10 ? study[10] : ""
+        max_anatomy_lbl = length(study) >= 11 ? study[11] : ""
         
-        # Load per-timepoint Skellytour (no sharing across time points!)
-        if isempty(skellytour_source)
-            error("No Skellytour path in scene_hierarchy.json for $(ct_fname). Run: julia scripts/preprocessing/update_scene_hierarchy.jl")
+        # Load per-timepoint Skellytour
+        if isempty(skellytour_src)
+            @warn "No Skellytour path for $(ct_fname), skipping bone subseg"
+            continue
         end
-        local_skelly_path = joinpath(data_dir, skellytour_source)
+        local_skelly_path = joinpath(data_dir, skellytour_src)
         if !isfile(local_skelly_path)
-            error("Skellytour file not found: $local_skelly_path. Run anatomy segmentation for $(ct_fname) first.")
+            @warn "Skellytour not found: $local_skelly_path, skipping"
+            continue
         end
-        println("  Loading Skellytour for $(ct_fname): $(basename(skellytour_source))")
+        println("  Loading Skellytour for $(ct_fname): $(basename(skellytour_src))")
         skelly_img = MedImages.load_image(local_skelly_path, "CT")
-        # Apply transform if this is a non-baseline timepoint (e.g., SPECT)
         tfm_path = joinpath(data_dir, tfm_fname)
         if tfm_fname != "" && isfile(tfm_path)
             T_ITK = parse_tfm(tfm_path)
             skelly_img = apply_transform_to_medimage(skelly_img, T_ITK)
-            println("    Applied transform $(tfm_fname) to Skellytour")
         end
-
-        # Resample Skellytour to baseline CT grid if dimensions differ
-        # IMPORTANT: save resampled version as temp file so Python gets the correct grid
+        
         skelly_path_for_python = local_skelly_path
         if size(skelly_img.voxel_data) != size(baseline_ct.voxel_data) || skelly_img.spacing != baseline_ct.spacing || skelly_img.origin != baseline_ct.origin
-            println("    Resampling Skellytour $(size(skelly_img.voxel_data)) → $(size(baseline_ct.voxel_data))")
             skelly_resampled = gpu_resample_to_image(baseline_ct, skelly_img, MedImages.Nearest_neighbour_en)
             skelly_vox = Float32.(skelly_resampled.voxel_data)
             skelly_path_for_python = joinpath(data_dir, "temp_skelly_resampled.nii.gz")
@@ -304,32 +491,25 @@ function main()
             skelly_vox = Float32.(skelly_img.voxel_data)
         end
         
-        # Load max_anatomy path and bone label IDs for surface computation
+        # Load max_anatomy for surface computation
         max_anat_path_for_python = ""
         bone_labels_str = ""
-        if !isempty(max_anatomy_source) && !isempty(max_anatomy_labels_source)
-            max_anat_path = joinpath(data_dir, max_anatomy_source)
-            labels_path = joinpath(data_dir, max_anatomy_labels_source)
+        if !isempty(max_anatomy_src) && !isempty(max_anatomy_lbl)
+            max_anat_path = joinpath(data_dir, max_anatomy_src)
+            labels_path = joinpath(data_dir, max_anatomy_lbl)
             if isfile(max_anat_path) && isfile(labels_path)
                 max_labels = JSON.parsefile(labels_path)
                 bone_kws = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula", "humerus",
                             "scapula_", "sternum", "skull", "palate", "bone", "spine", "mandible", "costal"]
                 bone_ids = [k for (k, v) in max_labels if any(kw -> occursin(kw, lowercase(v)), bone_kws)]
                 bone_labels_str = join(bone_ids, ",")
-                println("    max_anatomy bone labels: $(length(bone_ids)) IDs")
                 
-                # Check if max_anatomy needs resampling to baseline grid
                 max_anat_img = MedImages.load_image(max_anat_path, "CT")
-                
-                # Apply transform if this is a non-baseline timepoint
                 if tfm_fname != "" && isfile(tfm_path)
                     T_ITK = parse_tfm(tfm_path)
                     max_anat_img = apply_transform_to_medimage(max_anat_img, T_ITK)
-                    println("    Applied transform $(tfm_fname) to max_anatomy")
                 end
-                
                 if size(max_anat_img.voxel_data) != size(baseline_ct.voxel_data) || max_anat_img.spacing != baseline_ct.spacing || max_anat_img.origin != baseline_ct.origin
-                    println("    Resampling max_anatomy $(size(max_anat_img.voxel_data)) → $(size(baseline_ct.voxel_data))")
                     max_anat_resampled = gpu_resample_to_image(baseline_ct, max_anat_img, MedImages.Nearest_neighbour_en)
                     max_anat_path_for_python = joinpath(data_dir, "temp_max_anatomy_resampled.nii.gz")
                     MedImages.create_nii_from_medimage(max_anat_resampled, max_anat_path_for_python)
@@ -340,12 +520,12 @@ function main()
         end
         
         group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
-        if !haskey(h5_read, group) || !haskey(h5_read[group], mask_fname)
+        if !haskey(h5_file, group) || !haskey(h5_file[group], mask_fname)
             continue
         end
-        println("  Extracting bone subsegments for Study $s_idx ($node_name in $group/$mask_fname)...")
-        mask_vol = read(h5_read["$group/$mask_fname"])
-        ct_vol = read(h5_read["$group/$ct_fname"])
+        println("  Extracting bone subsegments for Study $s_idx ($node_name)...")
+        mask_vol = read(h5_file["$group/$mask_fname"])
+        ct_vol = read(h5_file["$group/$ct_fname"])
         
         temp_ct = joinpath(data_dir, "temp_ct.nii.gz")
         ct_unflipped = reverse(Float32.(ct_vol), dims=2)
@@ -360,10 +540,7 @@ function main()
             lid = Int(lid_float)
             println("    Processing Study $s_idx Lesion ID: $lid")
             
-            # Create binary mask for this lesion
             bin_mask = (mask_unflipped .== lid_float)
-            
-            # Require minimum overlap with Skellytour (at least 5% of lesion or 5 voxels)
             skelly_overlap = count(bin_mask .& (skelly_vox .> 0))
             lesion_voxels = count(bin_mask)
             min_overlap = max(5, round(Int, 0.05 * lesion_voxels))
@@ -372,13 +549,12 @@ function main()
                 continue
             end
             
-            # Save temporary NIfTI
             img_to_save = MedImages.update_voxel_data(baseline_ct, Float32.(bin_mask))
             MedImages.create_nii_from_medimage(img_to_save, temp_lesion)
             
             try
                 AIInference.run_bone_subsegmentation(temp_lesion, skelly_path_for_python, temp_surf, temp_marr;
-                    ct_path=joinpath(data_dir, "temp_ct.nii.gz"), max_anatomy_path=max_anat_path_for_python, bone_label_ids=bone_labels_str)
+                    ct_path=temp_ct, max_anatomy_path=max_anat_path_for_python, bone_label_ids=bone_labels_str)
                 
                 surf_nii = NIfTI.niread(temp_surf)
                 marr_nii = NIfTI.niread(temp_marr)
@@ -389,29 +565,26 @@ function main()
                 surf_pts = findall(surf_aligned .> 0)
                 marr_pts = findall(marr_aligned .> 0)
                 
-                # Convert CartesianIndex to linear index
                 lin_surf = map(idx -> LinearIndices(cis)[idx], surf_pts)
                 lin_marr = map(idx -> LinearIndices(cis)[idx], marr_pts)
                 
-                # Store by study node name and TP index
-                bone_h5["$(node_name)_lesion_$(lid)_surf"] = lin_surf
-                bone_h5["$(node_name)_lesion_$(lid)_marr"] = lin_marr
-                bone_h5["tp_$(s_idx-1)_lesion_$(lid)_surf"] = lin_surf
-                bone_h5["tp_$(s_idx-1)_lesion_$(lid)_marr"] = lin_marr
+                # Store in BONE_SUBSEG group of main HDF5
+                h5_file["BONE_SUBSEG/$(node_name)_lesion_$(lid)_surf"] = lin_surf
+                h5_file["BONE_SUBSEG/$(node_name)_lesion_$(lid)_marr"] = lin_marr
+                h5_file["BONE_SUBSEG/tp_$(s_idx-1)_lesion_$(lid)_surf"] = lin_surf
+                h5_file["BONE_SUBSEG/tp_$(s_idx-1)_lesion_$(lid)_marr"] = lin_marr
                 
                 if s_idx == 1
-                    bone_h5["lesion_$(lid)_surf"] = lin_surf
-                    bone_h5["lesion_$(lid)_marr"] = lin_marr
+                    h5_file["BONE_SUBSEG/lesion_$(lid)_surf"] = lin_surf
+                    h5_file["BONE_SUBSEG/lesion_$(lid)_marr"] = lin_marr
                 end
-                
             catch e
                 println("      Error processing lesion $lid: ", e)
             end
         end
     end
     
-    close(h5_read)
-    close(bone_h5)
+    close(h5_file)
     
     # Clean up temp files
     rm(temp_lesion, force=true)
@@ -421,7 +594,8 @@ function main()
     rm(joinpath(data_dir, "temp_skelly_resampled.nii.gz"), force=true)
     rm(joinpath(data_dir, "temp_max_anatomy_resampled.nii.gz"), force=true)
     
-    println("Pre-processing complete.")
+    println("\n✅ Pre-processing complete. HDF5 is now the single source of truth.")
+    println("   All atlas, centroids, organ mapping, and bone subsegments stored in: $h5_path")
 end
 
 main()

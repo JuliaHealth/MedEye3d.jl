@@ -42,6 +42,45 @@ end
 PanelRenderData(ps::VkPipelineState, push_constants::Vector{Float32}, vx, vy, vw, vh) =
     PanelRenderData(ps, nothing, push_constants, Float32(vx), Float32(vy), Float32(vw), Float32(vh))
 
+# ─── Pre-allocated scratch arrays to eliminate per-frame heap allocs ────
+# These module-level arrays are reused every frame instead of creating
+# new 1-element Vectors on each render_frame! call.
+
+const _fence_buf     = Fence[]          # sized to 1 at first use
+const _vp_buf        = Viewport[]       # sized to 1 at first use
+const _sc_buf        = Rect2D[]         # sized to 1 per Rect2D
+const _ds_buf        = DescriptorSet[]  # sized to 2 (samplers + ubo)
+const _EMPTY_UINT32  = UInt32[]         # immutable empty dynamic offsets
+const _vb_buf        = Buffer[]         # sized to 1 for vertex buffer bind
+const _vb_off_buf    = UInt64[0]        # vertex buffer offset (always 0)
+const _wait_sem_buf  = Semaphore[]      # sized to 1
+const _sig_sem_buf   = Semaphore[]      # sized to 1
+const _cmd_buf       = CommandBuffer[]  # sized to 1
+const _clear_buf     = ClearValue[]     # sized to 1
+const _submit_buf    = SubmitInfo[]     # sized to 1
+const _present_sem   = Semaphore[]      # sized to 1
+const _present_sc    = SwapchainKHR[]   # sized to 1
+const _present_idx   = UInt32[]         # sized to 1
+const _wait_stage_buf = UInt32[VulkanCore.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT]
+
+# Helper to ensure a 1-element buffer is correctly sized and filled
+@inline function _set1!(buf::Vector{T}, val::T) where T
+    if length(buf) != 1
+        resize!(buf, 1)
+    end
+    @inbounds buf[1] = val
+    return buf
+end
+
+@inline function _set2!(buf::Vector{T}, a::T, b::T) where T
+    if length(buf) != 2
+        resize!(buf, 2)
+    end
+    @inbounds buf[1] = a
+    @inbounds buf[2] = b
+    return buf
+end
+
 # ─── Frame rendering ───────────────────────────────────────────────────
 
 """
@@ -55,11 +94,14 @@ Renders one complete frame:
 5. Present to swapchain
 
 Returns `true` if rendering succeeded, `false` if swapchain is out of date.
+
+**Zero per-frame heap allocations**: all wrapper arrays are pre-allocated
+module-level buffers that are reused every frame.
 """
 function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData})::Bool
-    # Wait for previous frame
-    unwrap(wait_for_fences(ctx.device, [ctx.in_flight_fence], true, typemax(UInt64)))
-    unwrap(reset_fences(ctx.device, [ctx.in_flight_fence]))
+    # Wait for previous frame (reuse fence buffer)
+    unwrap(wait_for_fences(ctx.device, _set1!(_fence_buf, ctx.in_flight_fence), true, typemax(UInt64)))
+    unwrap(reset_fences(ctx.device, _set1!(_fence_buf, ctx.in_flight_fence)))
 
     # Acquire next image
     result = acquire_next_image_khr(ctx.device, ctx.swapchain, typemax(UInt64);
@@ -78,13 +120,13 @@ function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData})::Bool
     begin_info = CommandBufferBeginInfo(flags=COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
     unwrap(begin_command_buffer(cmd, begin_info))
 
-    # Begin render pass
-    clear_val = ClearValue(ClearColorValue((0.0f0, 0.0f0, 0.0f0, 1.0f0)))
+    # Begin render pass (reuse clear value buffer)
+    _set1!(_clear_buf, ClearValue(ClearColorValue((0.0f0, 0.0f0, 0.0f0, 1.0f0))))
     rpbi = RenderPassBeginInfo(
         ctx.render_pass,
         ctx.framebuffers[img_idx + 1],
         Rect2D(Offset2D(0, 0), ctx.swapchain_extent),
-        [clear_val]
+        _clear_buf
     )
     cmd_begin_render_pass(cmd, rpbi, SUBPASS_CONTENTS_INLINE)
 
@@ -100,16 +142,16 @@ function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData})::Bool
         # This ensures all existing mouse position calculations (getNewY,
         # getTextureCoordinatesFromScreen) which assume OpenGL coordinates
         # continue to work correctly. (VK_KHR_maintenance1 / Vulkan 1.1)
-        vp = Viewport(panel.viewport_x, panel.viewport_y + panel.viewport_h,
+        _set1!(_vp_buf, Viewport(panel.viewport_x, panel.viewport_y + panel.viewport_h,
                        panel.viewport_w, -panel.viewport_h,
-                       0.0f0, 1.0f0)
-        cmd_set_viewport(cmd, [vp])
+                       0.0f0, 1.0f0))
+        cmd_set_viewport(cmd, _vp_buf)
 
-        sc = Rect2D(
+        _set1!(_sc_buf, Rect2D(
             Offset2D(round(Int32, panel.viewport_x), round(Int32, panel.viewport_y)),
             Extent2D(round(UInt32, max(panel.viewport_w, 1.0f0)), round(UInt32, max(panel.viewport_h, 1.0f0)))
-        )
-        cmd_set_scissor(cmd, [sc])
+        ))
+        cmd_set_scissor(cmd, _sc_buf)
 
         # Push constants (zoom/pan)
         pc_data = panel.push_constants
@@ -120,17 +162,19 @@ function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData})::Bool
                                Ptr{Cvoid}(pointer(pc_data)))
         end
 
-        # Bind descriptor sets
+        # Bind descriptor sets (reuse pre-allocated buffers)
+        _set2!(_ds_buf, ps.descriptor_set_samplers, ps.descriptor_set_ubo)
         cmd_bind_descriptor_sets(cmd, PIPELINE_BIND_POINT_GRAPHICS,
                                   ps.pipeline_layout,
                                   0,  # first set
-                                  [ps.descriptor_set_samplers, ps.descriptor_set_ubo],
-                                  UInt32[])
+                                  _ds_buf,
+                                  _EMPTY_UINT32)
 
         # Bind vertex/index buffers or issue procedural Zero-VBO draw
         if panel.quad_buffers !== nothing
             qb = panel.quad_buffers
-            cmd_bind_vertex_buffers(cmd, [qb.vertex_buffer], UInt64[0])
+            _set1!(_vb_buf, qb.vertex_buffer)
+            cmd_bind_vertex_buffers(cmd, _vb_buf, _vb_off_buf)
             cmd_bind_index_buffer(cmd, qb.index_buffer, 0, INDEX_TYPE_UINT32)
             cmd_draw_indexed(cmd, UInt32(qb.index_count), 1, 0, 0, 0)
         else
@@ -142,21 +186,27 @@ function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData})::Bool
     cmd_end_render_pass(cmd)
     unwrap(end_command_buffer(cmd))
 
-    # Submit
-    wait_stages = UInt32[VulkanCore.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT]
+    # Submit (reuse pre-allocated wrapper arrays)
+    _set1!(_wait_sem_buf, ctx.image_available_semaphore)
+    _set1!(_cmd_buf, cmd)
+    _set1!(_sig_sem_buf, ctx.render_finished_semaphore)
     submit_info = SubmitInfo(
-        [ctx.image_available_semaphore],
-        wait_stages,
-        [cmd],
-        [ctx.render_finished_semaphore]
+        _wait_sem_buf,
+        _wait_stage_buf,
+        _cmd_buf,
+        _sig_sem_buf
     )
-    unwrap(queue_submit(ctx.graphics_queue, [submit_info]; fence=ctx.in_flight_fence))
+    _set1!(_submit_buf, submit_info)
+    unwrap(queue_submit(ctx.graphics_queue, _submit_buf; fence=ctx.in_flight_fence))
 
-    # Present
+    # Present (reuse pre-allocated wrapper arrays)
+    _set1!(_present_sem, ctx.render_finished_semaphore)
+    _set1!(_present_sc, ctx.swapchain)
+    _set1!(_present_idx, UInt32(img_idx))
     present_info = PresentInfoKHR(
-        [ctx.render_finished_semaphore],
-        [ctx.swapchain],
-        [img_idx]
+        _present_sem,
+        _present_sc,
+        _present_idx
     )
     present_result = queue_present_khr(ctx.graphics_queue, present_info)
     if isa(present_result, Vulkan.VulkanError)
