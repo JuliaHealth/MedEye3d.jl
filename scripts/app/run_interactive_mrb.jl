@@ -354,6 +354,7 @@ function load_single_tp_from_h5(tp_i::Int)
         mask_i16 = Int16.(mask_compact)
         anat_i16 = anatomy_vol !== nothing ? Int16.(anatomy_vol) : nothing
         MEH.precompute_mask_centroids!(mask_compact, tp_i, node_name)
+        try; MedEye3d.LesionMetadataWindow.precompute_all_volumes!(mask_compact, tp_i); catch e; @warn "Volume precompute skipped: $e"; end
         
         t_total_ms = (time_ns() - t_total) / 1e6
         println("    [BENCH-H5] LOAD TP $tp_i TOTAL: $(round(t_total_ms, digits=1))ms"); flush(stdout)

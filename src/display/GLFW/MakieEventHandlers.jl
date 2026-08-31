@@ -26,6 +26,10 @@ using Observables
 # Debug flag: set to true to enable verbose bench/bone logging in hot paths
 const DEBUG_VERBOSE = Ref(false)
 
+# Pre-allocated zero arrays for hidden panel quad vertices (Fix ❼: avoid allocations per toggle)
+const _HIDDEN_QUAD_VERTS = zeros(Float32, 32)
+const _HIDDEN_QUAD_VERTS_W = zeros(Float32, 32)
+
 # AI status Observable — LesionMetadataWindow reads this for the GUI label
 const ai_status_text = Observable{String}("Ready")
 
@@ -239,13 +243,11 @@ function updateQuadVertices!(stateObject::StateDataFields, layout::Symbol)
     calcDimStruct = stateObject.calcDimsStruct
     
     if layout == :Hidden
-        res = zeros(Float32, 32)
-        w_res = zeros(Float32, 32)
         stateObject.calcDimsStruct = Setfield.setproperties(calcDimStruct, (
-            mainImageQuadVert = res, 
-            mainQuadVertSize = sizeof(res),
-            wordsImageQuadVert = w_res,
-            wordsQuadVertSize = sizeof(w_res)
+            mainImageQuadVert = _HIDDEN_QUAD_VERTS, 
+            mainQuadVertSize = sizeof(_HIDDEN_QUAD_VERTS),
+            wordsImageQuadVert = _HIDDEN_QUAD_VERTS_W,
+            wordsQuadVertSize = sizeof(_HIDDEN_QUAD_VERTS_W)
         ))
     else
         pos = if layout == :TopLeft || layout == :LeftHalf
@@ -283,30 +285,24 @@ function _force_texture_upload!(stateObjects::Vector{StateDataFields}, panel_idx
         (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(current), dimToScroll, threeDimDat), scrDat) |>
         (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=current, textToDisp=getTextForCurrentSlice(panelState.onScrollData, Int32(current)))
     
-    n_uploaded = 0
+    # Fix ❹: Removed dead TextureManag.updateTexture calls (no-op in Vulkan backend).
+    # Actual GPU upload happens in consumer loop via isSliceChanged.
+    # Safety: verify data dimensions fit within allocated texture (log-only)
+    n_textures = length(singleSlDat.listOfDataAndImageNames)
     for updateDat in singleSlDat.listOfDataAndImageNames
-        idx = findfirst(ts -> ts.name == updateDat.name, panelState.mainForDisplayObjects.listOfTextSpecifications)
-        if idx !== nothing
-            texSpec = panelState.mainForDisplayObjects.listOfTextSpecifications[idx]
-            # GPU zoom/pan: upload raw unzoomed data — zoom/pan applied by vertex shader
-            # Safety: verify data dimensions fit within the allocated texture
-            actual_w = size(updateDat.dat, 1)
-            actual_h = size(updateDat.dat, 2)
-            tex_w = Int(panelState.calcDimsStruct.imageTextureWidth)
-            tex_h = Int(panelState.calcDimsStruct.imageTextureHeight)
-            if actual_w <= tex_w && actual_h <= tex_h
-                TextureManag.updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, panelState.calcDimsStruct.imageTextureWidth, panelState.calcDimsStruct.imageTextureHeight)
-                n_uploaded += 1
-            else
-                println("  [COMPARE-DBG] SKIPPING texture upload for '$(updateDat.name)' on panel $panel_idx: data=$(actual_w)x$(actual_h) > texture=$(tex_w)x$(tex_h)"); flush(stdout)
-            end
+        actual_w = size(updateDat.dat, 1)
+        actual_h = size(updateDat.dat, 2)
+        tex_w = Int(panelState.calcDimsStruct.imageTextureWidth)
+        tex_h = Int(panelState.calcDimsStruct.imageTextureHeight)
+        if actual_w > tex_w || actual_h > tex_h
+            println("  [COMPARE-DBG] SKIPPING texture '$(updateDat.name)' on panel $panel_idx: data=$(actual_w)x$(actual_h) > texture=$(tex_w)x$(tex_h)"); flush(stdout)
         end
     end
     
     panelState.currentlyDispDat = singleSlDat
     panelState.currentDisplayedSlice = current
     panelState.isSliceChanged = true
-    println("  [COMPARE-DBG] panel $panel_idx: uploaded $n_uploaded textures at slice $current (dimToScroll=$dimToScroll, slicesNumber=$lastSlice)"); flush(stdout)
+    println("  [COMPARE-DBG] panel $panel_idx: uploaded $n_textures textures at slice $current (dimToScroll=$dimToScroll, slicesNumber=$lastSlice)"); flush(stdout)
 end
 
 function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Vector{StateDataFields})
@@ -347,8 +343,10 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
             right_label = get(tp_labels, compare_right_tp[], "TP $(compare_right_tp[])")
             println("Compare mode ON: Left=$left_label, Right=$right_label"); flush(stdout)
             
-            # Force direct texture upload for both visible panels
-            _force_texture_upload!(stateObjects, 1)
+            # Fix ❺: Panel 1 data hasn't changed — only layout vertices moved.
+            # Just mark it dirty for the consumer to re-render; skip redundant slice extraction.
+            stateObjects[1].isSliceChanged = true
+            # Panel 5 is new — force full texture upload
             _force_texture_upload!(stateObjects, 5)
             
             # If there's an active lesion, set mask filter uniforms
@@ -361,15 +359,19 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
             end
         else
             compare_right_tp[] = -1
-            # Reload current active TP into all 4 panels using _load_tp_from_entry!
+            # Fix ❻: Only reload panels whose TP data has actually changed.
+            # Panels 1-4 already hold current_tp_index[] data unless TP was switched during compare.
             entry = get_or_load_tp_data(current_tp_index[])
             if entry !== nothing
+                cur_tp = current_tp_index[]
                 num_panels = min(4, length(stateObjects))
                 for i in 1:num_panels
-                    _load_tp_from_entry!(stateObjects, entry, i)
+                    panel_tp = try; stateObjects[i].onScrollData.currentTpIndex; catch; -1; end
+                    if panel_tp != cur_tp
+                        _load_tp_from_entry!(stateObjects, entry, i)
+                    end
                 end
             end
-            # All TPs pre-loaded before GUI launch — no eviction needed
 
             # 4-pane view
             updateQuadVertices!(stateObjects[1], :TopLeft)
@@ -413,18 +415,25 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
     end
 end
 
+# Flag controlling single vs all lesions display mode (default: false = display ALL lesions on start)
+const is_single_lesion_mode = Ref(false)
+export is_single_lesion_mode
+
 function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vector{StateDataFields})
     changed = false
     if data.lesion_id > 0
         current_active_lesion_id[] = data.lesion_id
+        is_single_lesion_mode[] = true
+    else
+        is_single_lesion_mode[] = false
     end
     for stateObject in stateObjects
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-            if textSpec.isMultiDiscreteMask || textSpec.name == "Mask"
+            if textSpec.isMultiDiscreteMask || textSpec.name == "Mask" || textSpec.name == "segmentation"
                 # Clear allowed IDs filter
                 textSpec.allowedIDs = Float32[]
                 T_mm = eltype(textSpec.minAndMaxValue)
-                if data.lesion_id == 0
+                if !is_single_lesion_mode[]
                     textSpec.minAndMaxValue = T_mm.([1, 1000])
                 else
                     textSpec.minAndMaxValue = T_mm.([data.lesion_id, data.lesion_id])
@@ -433,8 +442,8 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
             end
         end
     end
-    lbl = data.lesion_id == 0 ? "all" : string(data.lesion_id)
-    println("Show single lesion: $lbl"); flush(stdout)
+    lbl = is_single_lesion_mode[] ? string(data.lesion_id) : "all"
+    println("Show single lesion: $lbl (single_mode=$(is_single_lesion_mode[]))"); flush(stdout)
     return changed
 end
 
@@ -449,13 +458,29 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
     target_mod = uppercase(data.modality)
     current_windowing[target_mod] = Float32.([data.min_val, data.max_val])
     
-    for state in stateObjects
+    for (panel_idx, state) in enumerate(stateObjects)
+        panel_tp = if compare_mode[] && panel_idx == 5
+            compare_right_tp[]
+        else
+            state.onScrollData.currentTpIndex > 0 ? state.onScrollData.currentTpIndex : current_tp_index[]
+        end
+        panel_mod = uppercase(get(tp_modalities, panel_tp, "PET"))
+        
         for tex in state.mainForDisplayObjects.listOfTextSpecifications
-            match = (target_mod == "CT" && tex.name == "CT") || 
-                    ((target_mod == "PET" || target_mod == "SPECT") && tex.name == "PET")
-            if match
-                tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
-                # UBO update happens in consumer loop
+            if target_mod == "CT"
+                if tex.name == "CT"
+                    tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
+                end
+            elseif target_mod == "PET"
+                # Only update nuclear texture if this panel is displaying a PET timepoint
+                if (tex.name == "PET" && panel_mod == "PET")
+                    tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
+                end
+            elseif target_mod == "SPECT"
+                # Only update nuclear texture if this panel is displaying a SPECT timepoint
+                if tex.name == "SPECT" || (tex.name == "PET" && panel_mod == "SPECT")
+                    tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
+                end
             end
         end
     end
@@ -611,7 +636,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                     textSpec.allowedIDs = Float32.(panel5_all_ids)
                 else
                     textSpec.allowedIDs = Float32[]
-                    if target_id > 0
+                    if is_single_lesion_mode[] && target_id > 0
                         textSpec.minAndMaxValue = T_mm.([target_id, target_id])
                     else
                         textSpec.minAndMaxValue = T_mm.([1, 1000])
@@ -624,10 +649,14 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         end
     end
 
-    # 1b. Update bone subseg 3D arrays for all panels
+    # 1b. Update bone subseg 3D arrays for visible panels only
     has_any_bone_data = false
     if data.lesion_id > 0
         for (panel_idx, stateObject) in enumerate(stateObjects)
+            # Skip hidden panels (Fix ❸: avoid bone overlay work for invisible panels)
+            if stateObject.calcDimsStruct.mainQuadVertSize <= 0 || all(iszero, stateObject.calcDimsStruct.mainImageQuadVert)
+                continue
+            end
             panel_tp = (panel_idx == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
             panel_lid = (panel_idx == 5 && compare_mode[]) ? panel5_lesion_id : data.lesion_id
 
@@ -747,23 +776,20 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         for (p_idx, targetSlice) in targets
             if p_idx <= length(stateObjects)
                 otherState = stateObjects[p_idx]
+                # Skip hidden panels (Fix ❸: no work for invisible panels)
+                if otherState.calcDimsStruct.mainQuadVertSize <= 0 || all(iszero, otherState.calcDimsStruct.mainImageQuadVert)
+                    continue
+                end
                 lastSlice = max(1, otherState.onScrollData.slicesNumber)
                 newSlice = clamp(targetSlice, 1, lastSlice)
                 
-                # Create slice dat (forces evaluation)
+                # Create slice dat (forces evaluation — selectdim returns a view, zero-copy)
                 singleSlDat = otherState.onScrollData.dataToScroll |>
                     (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(newSlice), otherState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
                     (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=newSlice, textToDisp=getTextForCurrentSlice(otherState.onScrollData, Int32(newSlice)))
                 
-                # Fast upload directly to OpenGL (skipping CPU sync scroll logic)
-                for updateDat in singleSlDat.listOfDataAndImageNames
-                    idx = findfirst(ts -> ts.name == updateDat.name, otherState.mainForDisplayObjects.listOfTextSpecifications)
-                    if idx !== nothing
-                        texSpec = otherState.mainForDisplayObjects.listOfTextSpecifications[idx]
-                        # GPU zoom/pan: upload raw unzoomed data — zoom/pan applied by vertex shader
-                        TextureManag.updateTexture(updateDat.type, updateDat.dat, texSpec, 0, 0, otherState.calcDimsStruct.imageTextureWidth, otherState.calcDimsStruct.imageTextureHeight)
-                    end
-                end
+                # Fix ❹: Removed dead TextureManag.updateTexture calls (no-op in Vulkan backend).
+                # Actual GPU upload happens in consumer loop when isSliceChanged is set.
                 
                 otherState.currentlyDispDat = singleSlDat
                 otherState.currentDisplayedSlice = newSlice
@@ -1001,9 +1027,26 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
     stateObjects[panel_idx].onScrollData.nameIndexes = DataStructs.getLocationDict(newDataToScroll)
     
     # Track which TP this panel holds
-    stateObjects[panel_idx].onScrollData.currentTpIndex = current_tp_index[]
+    panel_tp = if compare_mode[] && panel_idx == 5
+        compare_right_tp[]
+    else
+        current_tp_index[]
+    end
+    stateObjects[panel_idx].onScrollData.currentTpIndex = panel_tp
     stateObjects[panel_idx].onScrollData.totalTpCount = length(tp_labels)
     stateObjects[panel_idx].onScrollData.tpIndices = sort(collect(keys(tp_labels)))
+
+    # Re-apply appropriate modality windowing for this panel
+    panel_mod = uppercase(get(tp_modalities, panel_tp, "PET"))
+    nuc_win = get(current_windowing, panel_mod, Float32[0.0, 10.0])
+    ct_win = get(current_windowing, "CT", Float32[-150.0, 250.0])
+    for tex in stateObjects[panel_idx].mainForDisplayObjects.listOfTextSpecifications
+        if tex.name == "CT"
+            tex.minAndMaxValue = Float32.([ct_win[1], ct_win[2]])
+        elseif tex.name == "PET" || tex.name == "SPECT"
+            tex.minAndMaxValue = Float32.([nuc_win[1], nuc_win[2]])
+        end
+    end
     
     dimToScroll = stateObjects[panel_idx].onScrollData.dimensionToScroll
     if !isempty(newDataToScroll)
