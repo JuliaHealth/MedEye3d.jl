@@ -2964,7 +2964,7 @@ end_section!(sec_win)
             if haskey(gst, "vis_anatomy")
                 vis_anatomy_active[] = (gst["vis_anatomy"] == "true")
                 btn_vis_anatomy.label[] = vis_anatomy_active[] ? "Anatomy: ON" : "Anatomy: OFF"
-                btn_vis_anatomy.buttoncolor[] = vis_anatomy_active[] ? RGBf(0.5, 0.5, 0.8) : BG_PNL
+                btn_vis_anatomy.buttoncolor[] = vis_anatomy_active[] ? RGBf(0.5, 0.0, 0.8) : BG_PNL
                 put!(channel, ShowMaskLayerEvent(4, vis_anatomy_active[]))
             end
         catch e
