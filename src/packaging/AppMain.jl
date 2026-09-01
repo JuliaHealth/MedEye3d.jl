@@ -12,6 +12,7 @@ using Statistics
 using LinearAlgebra
 using Dates
 import GLFW
+import HDF5
 
 export julia_main
 
@@ -220,7 +221,10 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         end
         close(h5)
     catch e
-        @error "Failed to read HDF5 dataset: $e"
+        err_msg = "Failed to read HDF5 dataset ($h5_path): $(sprint(showerror, e))\n$(sprint(Base.show_backtrace, catch_backtrace()))"
+        @error err_msg
+        println(stderr, err_msg)
+        flush(stderr)
         return
     end
 

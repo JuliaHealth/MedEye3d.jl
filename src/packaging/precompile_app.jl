@@ -122,4 +122,14 @@ using .MedEye3dApp
 MedEye3dApp.run_app(["--help"])
 MedEye3dApp.run_app(["--version"])
 
+# Trace HDF5 opening in MedEye3dApp
+try
+    h5_path = joinpath(@__DIR__, "..", "..", "data", "preprocessed_volumes.h5")
+    if isfile(h5_path)
+        h5 = MedEye3dApp.HDF5.h5open(h5_path, "r")
+        close(h5)
+    end
+catch e
+end
+
 println("=== MedEye3D Precompilation Traces Completed Successfully ===")
