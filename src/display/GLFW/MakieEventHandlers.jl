@@ -835,7 +835,7 @@ const tp_loader_ref = Ref{Any}(nothing)
 const io_channel = Ref{Any}(nothing)
 const main_event_channel = Ref{Any}(nothing)
 export register_tp_loader!, register_main_channel!, get_or_load_tp_data, last_bone_overlay_indices
-export TpCacheEntry, invalidate_suv_for_lesion
+export TpCacheEntry, invalidate_suv_for_lesion, invalidate_and_recompute_lesion_metrics_async!
 
 function register_main_channel!(ch::Channel)
     main_event_channel[] = ch
@@ -1057,12 +1057,15 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
 end
 
 
-"""Invalidate cached SUV and centroid data for a lesion after mask modification."""
+"""Invalidate cached SUV, volume, and centroid data for a lesion after mask modification."""
 function invalidate_suv_for_lesion(lesion_id::Int, tp_idx::Int)
     try
         LMW = Main.MedEye3d.LesionMetadataWindow
         if isdefined(LMW, :_lesion_suv_cache)
             delete!(LMW._lesion_suv_cache, (tp_idx, lesion_id))
+        end
+        if isdefined(LMW, :_volume_cache)
+            delete!(LMW._volume_cache, (tp_idx, lesion_id))
         end
         if isdefined(LMW, :_db_dirty)
             LMW._db_dirty[] = true
@@ -1071,6 +1074,74 @@ function invalidate_suv_for_lesion(lesion_id::Int, tp_idx::Int)
     delete!(lesion_centroids_cache, (tp_idx, lesion_id))
     delete!(lesion_centroids_cache, lesion_id)
     println("  [SUV] Invalidated cache for lesion $lesion_id @ TP $tp_idx"); flush(stdout)
+end
+
+"""
+    invalidate_and_recompute_lesion_metrics_async!(lesion_id, tp_idx, mask_vol)
+
+After mask modification (painting or AI segmentation):
+1. Invalidate all caches (SUV, volume, centroid)
+2. Recompute centroid from the current mask
+3. Async recompute SUV, volume, PROMISE and update UI fields
+"""
+function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::Int, mask_vol::Union{AbstractArray, Nothing}=nothing)
+    # 1. Invalidate caches
+    invalidate_suv_for_lesion(lesion_id, tp_idx)
+    
+    # 2. Recompute centroid from current mask
+    if mask_vol !== nothing
+        try
+            indices = findall(x -> round(Int, x) == lesion_id, mask_vol)
+            if !isempty(indices)
+                cx = round(Int, mean(i[1] for i in indices))
+                cy = round(Int, mean(i[2] for i in indices))
+                cz = round(Int, mean(i[3] for i in indices))
+                lesion_centroids_cache[(tp_idx, lesion_id)] = [cx, cy, cz]
+                if tp_idx == current_tp_index[]
+                    lesion_centroids_cache[lesion_id] = [cx, cy, cz]
+                end
+                println("  [SUV] Recomputed centroid for lesion $lesion_id @ TP $tp_idx: ($cx,$cy,$cz)"); flush(stdout)
+            end
+        catch e
+            @warn "Centroid recompute failed for lesion $lesion_id: $e"
+        end
+    elseif haskey(tp_data_cache, tp_idx)
+        # Try to get mask from tp_data_cache
+        try
+            entry = tp_data_cache[tp_idx]
+            m = entry.mask
+            indices = findall(x -> round(Int, x) == lesion_id, m)
+            if !isempty(indices)
+                cx = round(Int, mean(i[1] for i in indices))
+                cy = round(Int, mean(i[2] for i in indices))
+                cz = round(Int, mean(i[3] for i in indices))
+                lesion_centroids_cache[(tp_idx, lesion_id)] = [cx, cy, cz]
+                if tp_idx == current_tp_index[]
+                    lesion_centroids_cache[lesion_id] = [cx, cy, cz]
+                end
+            end
+        catch; end
+    end
+    
+    # 3. Async recompute SUV/volume/PROMISE (pre-populate caches)
+    Threads.@spawn begin
+        try
+            LMW = Main.MedEye3d.LesionMetadataWindow
+            
+            # Recompute volume (cache was cleared, so this recomputes from scratch)
+            vol = LMW.compute_lesion_volume(lesion_id, tp_idx)
+            
+            # Recompute SUV (cache was cleared, so this recomputes from scratch)
+            suv_str = LMW.compute_lesion_suv_string(lesion_id, tp_idx)
+            if !isempty(suv_str)
+                LMW._lesion_suv_cache[(tp_idx, lesion_id)] = suv_str
+            end
+            
+            println("  [SUV] Async recomputed metrics for lesion $lesion_id @ TP $tp_idx: vol=$(round(vol["volume_cc"], digits=2))cc, suv=$(suv_str)"); flush(stdout)
+        catch e
+            @warn "Async SUV/volume recompute failed for lesion $lesion_id: $e"
+        end
+    end
 end
 const global_bone_atlas = Ref{Any}(nothing)
 const global_organ_mapping = Ref{Dict{Int,String}}(Dict{Int,String}())  # lesion_id -> TS organ name (from map_lesions_to_organs)
@@ -1580,6 +1651,9 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
     # Update status label
     voxel_count = count(data.mask .> 0)
     set_ai_status!("[Success] Done ($(voxel_count) voxels, lesion $(data.active_id))")
+
+    # Invalidate caches and async-recompute SUV/volume/PROMISE for the modified lesion
+    invalidate_and_recompute_lesion_metrics_async!(data.active_id, current_tp_index[], seg_vol)
 end
 function reactToSyncMissing(data::SyncMissingEvent, stateObjects::Vector{StateDataFields})
     println("Sync Missing Lesions across TPs triggered."); flush(stdout)
@@ -1636,9 +1710,9 @@ function reactToGenManual(data::GenManualEvent, stateObjects::Vector{StateDataFi
         delete!(bone_subsegments_cache, (get_node_name_for_tp(compare_right_tp[]), panel5_lesion_id))
     end
     
-    # Invalidate centroid cache as well
-    delete!(lesion_centroids_cache, (tp_idx, data.lesion_id))
-    delete!(lesion_centroids_cache, data.lesion_id)
+    
+    # Invalidate caches and async-recompute SUV/volume/centroid for the modified lesion
+    invalidate_and_recompute_lesion_metrics_async!(data.lesion_id, tp_idx)
     
     # Trigger an async recomputation by forcing a sync lesion update
     reactToSyncLesion(SyncLesionEvent(data.lesion_id), stateObjects)

@@ -354,7 +354,36 @@ function main()
         end
     end
     
+    # IMPORTANT: The atlas volume uses per-TP label numbering (319-class TS), which has
+    # a DIFFERENT integer-to-name mapping than the baseline labels JSON (201-class TS).
+    # For organ mapping AND bone_atlas, we MUST use per-TP labels that match the atlas numbering.
+    # This override MUST happen BEFORE bone_atlas and organ_mapping computations.
+    if haskey(h5_file, "_meta_")
+        ts_names_tp = Dict{Int,String}()
+        for k in sort(collect(keys(h5_file["_meta_"])))
+            if startswith(k, "anatomy_labels_tp_")
+                try
+                    tp_raw = JSON.parse(read(h5_file["_meta_/$k"]))
+                    for (id_str, name) in tp_raw
+                        id = parse(Int, id_str)
+                        if !occursin("_class_", name) && !haskey(ts_names_tp, id)
+                            ts_names_tp[id] = name
+                        end
+                    end
+                    break  # Only need one TP (same numbering)
+                catch; end
+            end
+        end
+        if !isempty(ts_names_tp)
+            ts_names = ts_names_tp
+            println("  Using per-TP labels for atlas lookups: $(length(ts_names)) labels (matching atlas numbering)")
+        else
+            println("  No per-TP labels found, using baseline labels: $(length(ts_names)) labels")
+        end
+    end
+    
     # Compute and store bone_atlas (binary mask of bone-related label IDs)
+    # NOTE: Uses ts_names which has been overridden to per-TP labels above
     if ts_atlas_aligned !== nothing && !isempty(ts_names)
         println("  Computing bone_atlas binary mask...")
         bone_keywords = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula", "humerus",
@@ -372,9 +401,9 @@ function main()
         println("    Saved ATLAS/bone_atlas ($(count(bone_atlas .> 0)) bone voxels, $(length(bone_label_ids)) label IDs)")
     end
     
-    # Compute and store organ_mapping for baseline mask
+    # Compute and store organ_mapping for baseline mask using volume-based scan + bone priority
     if ts_atlas_aligned !== nothing && !isempty(ts_names)
-        println("  Computing organ_mapping for baseline mask...")
+        println("  Computing organ_mapping for baseline mask (volume-based, bone priority)...")
         # Read baseline mask from HDF5
         base_mask_fname = studies[1][6]
         base_group = studies[1][8] == "" ? "BASELINE" : "TFM_" * studies[1][8]
@@ -382,25 +411,9 @@ function main()
             mask_raw = read(h5_file["$base_group/$base_mask_fname"])
             mask_f32 = Float32.(mask_raw)
             
-            # Map each lesion to the most common overlapping organ
-            organ_mapping = Dict{Int, String}()
-            unique_ids = filter(x -> x > 0, unique(mask_f32))
-            for lid_f in unique_ids
-                lid = Int(lid_f)
-                lesion_mask = mask_f32 .== lid_f
-                # Find most common atlas label overlapping this lesion
-                atlas_vals = ts_atlas_aligned[lesion_mask]
-                nonzero = filter(x -> x > 0, atlas_vals)
-                if !isempty(nonzero)
-                    # Count occurrences
-                    counts = Dict{UInt16, Int}()
-                    for v in nonzero
-                        counts[v] = get(counts, v, 0) + 1
-                    end
-                    best_label = first(sort(collect(counts), by=x->x[2], rev=true))[1]
-                    organ_mapping[lid] = get(ts_names, Int(best_label), "Unknown")
-                end
-            end
+            # Use LesionAssociation volume-based mapping with bone priority
+            using MedEye3d.LesionAssociation
+            organ_mapping = LesionAssociation.map_lesions_to_organs(mask_f32, ts_atlas_aligned, ts_names)
             
             # Store as JSON
             organ_json = JSON.json(Dict(string(k) => v for (k, v) in organ_mapping))

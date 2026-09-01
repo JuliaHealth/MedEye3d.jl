@@ -398,6 +398,26 @@ function map_ts_to_anatomy(raw_ts_name::String)
 end
 
 # ─── Persistence ─────────────────────────────────────────────────────────────
+
+"""
+    parse_lesion_id(id_str::String) -> Union{Int, Nothing}
+
+Extract the numeric lesion ID from a display string.
+Handles formats: "1: Femur", "1 - New Lesion", "1: liver [Grp 1, 3 TPs]", "1", etc.
+"""
+function parse_lesion_id(id_str::String)::Union{Int, Nothing}
+    cp = findfirst(':', id_str)
+    dash = cp === nothing ? findfirst(" - ", id_str) : nothing
+    ns = if cp !== nothing
+        strip(id_str[1:cp-1])
+    elseif dash !== nothing
+        strip(id_str[1:first(dash)-1])
+    else
+        strip(id_str)
+    end
+    return tryparse(Int, ns)
+end
+
 """
     get_lesion_state(db::Dict, key::String) -> Dict{String,Any}
 
@@ -411,10 +431,8 @@ function get_lesion_state(db::Dict, key::String)::Dict{String,Any}
         return v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : Dict{String,Any}()
     end
     
-    # 2. Extract numeric ID from key (e.g. "1: femur" -> 1)
-    cp = findfirst(':', key)
-    ns = cp !== nothing ? strip(key[1:cp-1]) : key
-    lid = tryparse(Int, ns)
+    # 2. Extract numeric ID from key (e.g. "1: femur" -> 1, "1 - New" -> 1)
+    lid = parse_lesion_id(key)
     
     if lid !== nothing
         # Check direct integer string key (e.g. "1")
@@ -423,11 +441,9 @@ function get_lesion_state(db::Dict, key::String)::Dict{String,Any}
             v = db[lid_str]
             return v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : Dict{String,Any}()
         end
-        # Search all keys in db that start with "lid:" or "lid " or equal "lid"
+        # Search all keys in db that start with "lid:" or "lid - " or equal "lid"
         for (k, v) in db
-            k_cp = findfirst(':', k)
-            k_ns = k_cp !== nothing ? strip(k[1:k_cp-1]) : k
-            k_lid = tryparse(Int, k_ns)
+            k_lid = parse_lesion_id(k)
             if k_lid == lid
                 return v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : Dict{String,Any}()
             end
@@ -1620,9 +1636,7 @@ function create_metadata_window(
     on(btn_rf.clicks) do _; put!(channel, RefreshListEvent()) end
     on(btn_single.clicks) do _
         id_str = active_lesion_id[]
-        cp = findfirst(':', id_str)
-        num_str = cp !== nothing ? strip(id_str[1:cp-1]) : id_str
-        parsed = tryparse(Int, num_str)
+        parsed = parse_lesion_id(id_str)
         if parsed !== nothing
             put!(channel, ShowSingleLesionEvent(parsed))
         end
@@ -2421,6 +2435,8 @@ end_section!(sec_win)
             for sec in (sec_meta, sec_seg, sec_report)
                 hide_section!(sec)
             end
+            # Force map section open and visible
+            sec_map_lesions[1][] = true  # is_open = true
             show_section!(sec_map_lesions)
             notify(anat_active_count)
             try
@@ -2459,18 +2475,78 @@ end_section!(sec_win)
         max_id = 0
         for opt in lesion_ids[]
             cp = findfirst(':', opt)
-            ns = cp !== nothing ? strip(opt[1:cp-1]) : opt
+            dash = cp === nothing ? findfirst(" - ", opt) : nothing
+            ns = if cp !== nothing
+                strip(opt[1:cp-1])
+            elseif dash !== nothing
+                strip(opt[1:first(dash)-1])
+            else
+                opt
+            end
             p = tryparse(Int, ns)
             p !== nothing && (max_id = max(max_id, p))
         end
         for k in keys(lesion_db[])
             cp = findfirst(':', k)
-            ns = cp !== nothing ? strip(k[1:cp-1]) : k
+            dash = cp === nothing ? findfirst(" - ", k) : nothing
+            ns = if cp !== nothing
+                strip(k[1:cp-1])
+            elseif dash !== nothing
+                strip(k[1:first(dash)-1])
+            else
+                k
+            end
             p = tryparse(Int, ns)
             p !== nothing && (max_id = max(max_id, p))
         end
         new_id = max_id + 1
-        new_name = "$(new_id) - New Lesion"
+        
+        # Auto-name from anatomy atlas at approximate viewer position
+        display_name = "New Lesion"
+        try
+            atlas = _MEH.global_ts_atlas[]
+            ts_names = _MEH.global_ts_names[]
+            if atlas !== nothing && ts_names !== nothing
+                # Try to find the anatomy at the center of the atlas volume
+                # (the user is approximately at the current slice)
+                cx = div(size(atlas, 1), 2)
+                cy = div(size(atlas, 2), 2)
+                cz = div(size(atlas, 3), 2)
+                
+                # Better estimate: use the last known centroid position if available
+                last_lid = parse_lesion_id(active_lesion_id[])
+                tp = _MEH.current_tp_index[]
+                if last_lid !== nothing
+                    cc = get(_MEH.lesion_centroids_cache, (tp, last_lid), nothing)
+                    if cc === nothing
+                        cc = get(_MEH.lesion_centroids_cache, last_lid, nothing)
+                    end
+                    if cc !== nothing
+                        cx = clamp(cc[1], 1, size(atlas, 1))
+                        cy = clamp(cc[2], 1, size(atlas, 2))
+                        cz = clamp(cc[3], 1, size(atlas, 3))
+                    end
+                end
+                
+                anat_val = Int(atlas[cx, cy, cz])
+                if anat_val > 0
+                    organ_name = get(ts_names, anat_val, "")
+                    if !isempty(organ_name)
+                        entry = lookup_anatomy(organ_name)
+                        if entry !== nothing
+                            detailed = get(entry, "detailed", "")
+                            display_name = !isempty(detailed) ? detailed : organ_name
+                        else
+                            display_name = organ_name
+                        end
+                    end
+                end
+            end
+        catch e
+            @warn "Anatomy lookup for new lesion failed: $e"
+        end
+        
+        new_name = "$(new_id): $(display_name)"
         db = copy(lesion_db[]); db[new_name] = Dict{String, Any}(); lesion_db[] = db
         opts = copy(lesion_ids[]); push!(opts, new_name)
         is_syncing_selection[] = true
@@ -2492,7 +2568,7 @@ end_section!(sec_win)
         current_paint_mode[] = :paint
         btn_paint.buttoncolor[] = GRN; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BG_PNL
         empty!(_MASK_IDS_CACHE)
-        cp = findfirst(':', active_lesion_id[]); ns = cp !== nothing ? strip(active_lesion_id[][1:cp-1]) : active_lesion_id[]; val = (p = tryparse(Int, ns)) !== nothing ? p : 1
+        val = (p = parse_lesion_id(active_lesion_id[])) !== nothing ? p : 1
         put!(channel, PaintValEvent(val, true))
     end
     on(btn_erase.clicks) do _
@@ -2543,7 +2619,7 @@ end_section!(sec_win)
 
     end_section!(sec_seg)
 
-    sec_map_lesions = begin_section!("Map Lesions (Compare Mode)"; default_open=true)
+    sec_map_lesions = begin_section!("Map Lesions (Compare Mode)"; default_open=false)
     
     map_info_r = nr!()
     lbl_map_left = Label(g[map_info_r, 1:2], "Current TP: ...", fontsize=10, font=:bold, color=LBL_FG, halign=:left)
@@ -2578,6 +2654,11 @@ end_section!(sec_win)
     end
 
     function _build_match_display!()
+        # Skip building map display when not in compare mode (prevents layout overlap)
+        if !cv_active[]
+            for elem in contents(map_grid); delete!(elem); end
+            return
+        end
         for elem in contents(map_grid); delete!(elem); end
         
         tp_left = _MEH.current_tp_index[]
@@ -2609,9 +2690,7 @@ end_section!(sec_win)
         LA = Main.MedEye3d.LesionAssociation
         
         cur_act = active_lesion_id[]
-        cp = findfirst(':', cur_act)
-        ns = cp !== nothing ? strip(cur_act[1:cp-1]) : cur_act
-        active_lid = tryparse(Int, ns)
+        active_lid = parse_lesion_id(cur_act)
         active_lid = active_lid !== nothing ? active_lid : (isempty(l_ids) ? 0 : l_ids[1])
         
         cur_left_sel = copy(map_selected_left[])
@@ -2650,13 +2729,42 @@ end_section!(sec_win)
         
         l_opts = String["- select lesion -"]
         for lid in l_ids
-            organ = get(_MEH.global_organ_mapping[], lid, "")
-            push!(l_opts, isempty(organ) ? "ID $lid" : "ID $lid: $organ")
+            # Prefer full name from main dropdown, else anatomy-enriched name
+            display = ""
+            for opt in lesion_ids[]
+                p = parse_lesion_id(opt)
+                if p == lid; display = opt; break; end
+            end
+            if isempty(display)
+                organ = get(_MEH.global_organ_mapping[], lid, "")
+                if !isempty(organ) && organ != "Unknown"
+                    entry = lookup_anatomy(organ)
+                    detailed = entry !== nothing ? get(entry, "detailed", organ) : organ
+                    display = "ID $lid: $detailed"
+                else
+                    display = "ID $lid"
+                end
+            end
+            push!(l_opts, display)
         end
         r_opts = String["- select lesion -"]
         for rid in r_ids
-            organ = get(_MEH.global_organ_mapping[], rid, "")
-            push!(r_opts, isempty(organ) ? "ID $rid" : "ID $rid: $organ")
+            display = ""
+            for opt in lesion_ids[]
+                p = parse_lesion_id(opt)
+                if p == rid; display = opt; break; end
+            end
+            if isempty(display)
+                organ = get(_MEH.global_organ_mapping[], rid, "")
+                if !isempty(organ) && organ != "Unknown"
+                    entry = lookup_anatomy(organ)
+                    detailed = entry !== nothing ? get(entry, "detailed", organ) : organ
+                    display = "ID $rid: $detailed"
+                else
+                    display = "ID $rid"
+                end
+            end
+            push!(r_opts, display)
         end
         
         menu_l = searchable_menu(map_grid, 2, 1:2, options = Observable(l_opts), fontsize = 9)
@@ -2681,16 +2789,11 @@ end_section!(sec_win)
             _is_applying_state[] && return
             sel_str = string(sel)
             (isempty(sel_str) || sel_str == "- select lesion -") && return
-            parts = split(sel_str, " ")
-            if length(parts) >= 2 && startswith(parts[1], "ID")
-                colon_p = findfirst(':', parts[2])
-                id_sub = colon_p !== nothing ? parts[2][1:colon_p-1] : parts[2]
-                lid = tryparse(Int, strip(id_sub))
-                if lid !== nothing && !(lid in map_selected_left[])
-                    push!(map_selected_left[], lid)
-                    notify(map_selected_left)
-                    sync_mapping_and_display!()
-                end
+            lid = parse_lesion_id(sel_str)
+            if lid !== nothing && !(lid in map_selected_left[])
+                push!(map_selected_left[], lid)
+                notify(map_selected_left)
+                sync_mapping_and_display!()
             end
         end
         
@@ -2698,16 +2801,11 @@ end_section!(sec_win)
             _is_applying_state[] && return
             sel_str = string(sel)
             (isempty(sel_str) || sel_str == "- select lesion -") && return
-            parts = split(sel_str, " ")
-            if length(parts) >= 2 && startswith(parts[1], "ID")
-                colon_p = findfirst(':', parts[2])
-                id_sub = colon_p !== nothing ? parts[2][1:colon_p-1] : parts[2]
-                rid = tryparse(Int, strip(id_sub))
-                if rid !== nothing && !(rid in map_selected_right[])
-                    push!(map_selected_right[], rid)
-                    notify(map_selected_right)
-                    sync_mapping_and_display!()
-                end
+            rid = parse_lesion_id(sel_str)
+            if rid !== nothing && !(rid in map_selected_right[])
+                push!(map_selected_right[], rid)
+                notify(map_selected_right)
+                sync_mapping_and_display!()
             end
         end
         
@@ -2718,8 +2816,25 @@ end_section!(sec_win)
         else
             for i in 1:length(map_selected_left[])
                 lid = map_selected_left[][i]
-                organ = get(_MEH.global_organ_mapping[], lid, "")
-                lbl_txt = isempty(organ) ? "ID $lid" : "ID $lid: $organ"
+                # Build a rich display label: prefer full name from dropdown list, else organ mapping + anatomy
+                lbl_txt = ""
+                for opt in lesion_ids[]
+                    p = parse_lesion_id(opt)
+                    if p == lid
+                        lbl_txt = opt  # e.g. "3: Left Femur [Grp 1, 2 TPs]"
+                        break
+                    end
+                end
+                if isempty(lbl_txt)
+                    organ = get(_MEH.global_organ_mapping[], lid, "")
+                    if !isempty(organ) && organ != "Unknown"
+                        entry = lookup_anatomy(organ)
+                        detailed = entry !== nothing ? get(entry, "detailed", organ) : organ
+                        lbl_txt = "$lid: $detailed"
+                    else
+                        lbl_txt = "ID $lid"
+                    end
+                end
                 Label(map_grid[row_offset + i - 1, 1], lbl_txt, fontsize=9, color=TXT, halign=:left)
                 btn_rm_l = Button(map_grid[row_offset + i - 1, 2], label="✕", buttoncolor=RGBf(0.8, 0.2, 0.2), labelcolor=TXT, fontsize=9, width=25)
                 let rm_id = lid
@@ -2735,8 +2850,25 @@ end_section!(sec_win)
             
             for j in 1:length(map_selected_right[])
                 rid = map_selected_right[][j]
-                organ = get(_MEH.global_organ_mapping[], rid, "")
-                lbl_txt = isempty(organ) ? "ID $rid" : "ID $rid: $organ"
+                # Build a rich display label: prefer from dropdown list, else organ + anatomy
+                lbl_txt = ""
+                for opt in lesion_ids[]
+                    p = parse_lesion_id(opt)
+                    if p == rid
+                        lbl_txt = opt
+                        break
+                    end
+                end
+                if isempty(lbl_txt)
+                    organ = get(_MEH.global_organ_mapping[], rid, "")
+                    if !isempty(organ) && organ != "Unknown"
+                        entry = lookup_anatomy(organ)
+                        detailed = entry !== nothing ? get(entry, "detailed", organ) : organ
+                        lbl_txt = "$rid: $detailed"
+                    else
+                        lbl_txt = "ID $rid"
+                    end
+                end
                 Label(map_grid[row_offset + j - 1, 3], lbl_txt, fontsize=9, color=TXT, halign=:left)
                 btn_rm_r = Button(map_grid[row_offset + j - 1, 4], label="✕", buttoncolor=RGBf(0.8, 0.2, 0.2), labelcolor=TXT, fontsize=9, width=25)
                 let rm_id = rid
@@ -2981,16 +3113,14 @@ end_section!(sec_win)
         try
             cur_id_str = active_lesion_id[]
             db_updates = Dict{String, Any}()
-            cp = findfirst(':', cur_id_str)
-            ns = cp !== nothing ? strip(cur_id_str[1:cp-1]) : cur_id_str
-            lid = (p = tryparse(Int, ns)) !== nothing ? p : 1
+            lid = (p = parse_lesion_id(cur_id_str)) !== nothing ? p : 1
 
         t_type = if haskey(data, "LesionType")
             data["LesionType"]
         else
             # Auto-detect lesion type: try JSON mapping first, then keyword fallback
             raw_organ_for_type = get(_MEH.global_organ_mapping[], lid, "")
-            if isempty(raw_organ_for_type)
+            if isempty(raw_organ_for_type) || raw_organ_for_type == "Unknown"
                 # Fast centroid-based atlas lookup (O(1) instead of O(N) findall scan)
                 tp = _MEH.current_tp_index[]
                 if _MEH.global_ts_atlas[] !== nothing
@@ -3116,96 +3246,130 @@ end_section!(sec_win)
         t_base = get(data, "BaseAnatomy", "")
         t_side = get(data, "BaseAnatomySide", "")
         
-        # Auto-detect BaseAnatomy from max_anatomy JSON mapping if not saved
-        println("[PREFILL] lid=$lid, t_base='$t_base', raw_organ='$(get(_MEH.global_organ_mapping[], lid, ""))'"); flush(stdout)
-        if isempty(t_base) && lid > 0
+        # Resolve the raw organ name for this lesion (used for BaseAnatomy + Location auto-fill)
+        raw_organ = ""
+        if lid > 0
             organ_map = _MEH.global_organ_mapping[]
             raw_organ = get(organ_map, lid, "")
-            # Fallback for new lesions: if organ mapping is empty, try looking up
-            # the anatomy atlas at the lesion's centroid position
-            if isempty(raw_organ) && _MEH.global_ts_atlas[] !== nothing
+            # Fallback: if organ mapping is empty or "Unknown", try volume-based scan
+            if (isempty(raw_organ) || raw_organ == "Unknown") && _MEH.global_ts_atlas[] !== nothing
                 try
-                    centroid = get(_MEH.lesion_centroids_cache, (_MEH.current_tp_index[], lid), nothing)
-                    if centroid === nothing
-                        centroid = get(_MEH.lesion_centroids_cache, lid, nothing)
+                    atlas = _MEH.global_ts_atlas[]
+                    ts_nm = _MEH.global_ts_names[]
+                    tp_idx = _MEH.current_tp_index[]
+                    
+                    # Try volume-based scan from tp_data_cache mask
+                    if haskey(_MEH.tp_data_cache, tp_idx)
+                        mask_vol = _MEH.tp_data_cache[tp_idx].mask
+                        best = Main.MedEye3d.LesionAssociation.classify_and_pick_best_organ(mask_vol, atlas, ts_nm, lid)
+                        if !isempty(best)
+                            raw_organ = best
+                            organ_map[lid] = raw_organ
+                            _MEH.global_organ_mapping[] = organ_map
+                            @info "Auto-named lesion $lid via volume scan (bone priority): '$raw_organ'"
+                        end
                     end
-                    if centroid !== nothing
-                        atlas = _MEH.global_ts_atlas[]
-                        cx, cy, cz = clamp(centroid[1], 1, size(atlas,1)), clamp(centroid[2], 1, size(atlas,2)), clamp(centroid[3], 1, size(atlas,3))
-                        anat_val = Int(atlas[cx, cy, cz])
-                        if anat_val > 0
-                            raw_organ = get(_MEH.global_ts_names[], anat_val, "")
-                            if !isempty(raw_organ)
-                                # Cache it so subsequent lookups are fast
-                                organ_map[lid] = raw_organ
-                                _MEH.global_organ_mapping[] = organ_map
-                                @info "Auto-named new lesion $lid from anatomy atlas at [$cx,$cy,$cz]: '$raw_organ'"
+                    
+                    # If volume scan didn't find anything, try centroid fallback
+                    if isempty(raw_organ) || raw_organ == "Unknown"
+                        centroid = get(_MEH.lesion_centroids_cache, (tp_idx, lid), nothing)
+                        if centroid === nothing
+                            centroid = get(_MEH.lesion_centroids_cache, lid, nothing)
+                        end
+                        if centroid !== nothing
+                            cx, cy, cz = clamp(centroid[1], 1, size(atlas,1)), clamp(centroid[2], 1, size(atlas,2)), clamp(centroid[3], 1, size(atlas,3))
+                            anat_val = Int(atlas[cx, cy, cz])
+                            if anat_val > 0
+                                raw_organ = get(ts_nm, anat_val, "")
+                                if !isempty(raw_organ)
+                                    organ_map[lid] = raw_organ
+                                    _MEH.global_organ_mapping[] = organ_map
+                                    @info "Auto-named lesion $lid from centroid at [$cx,$cy,$cz]: '$raw_organ'"
+                                end
                             end
                         end
                     end
                 catch e
-                    @warn "Anatomy atlas lookup for new lesion $lid failed: $e"
+                    @warn "Anatomy atlas lookup for lesion $lid failed: $e"
                 end
             end
-            if !isempty(raw_organ)
-                entry = lookup_anatomy(raw_organ)
-                if entry !== nothing
-                    t_base = get(entry, "detailed", "")
-                    auto_side = get(entry, "side", "")
-                    if isempty(t_side) && !isempty(auto_side)
-                        t_side = auto_side
-                    end
-                    # Auto-fill Anatomic Location dropdown from JSON mapping
-                    anat_loc = get(entry, "anatomic_location", "")
-                    anat_subloc = get(entry, "anatomical_sublocation", "")
-                    println("[PREFILL] json_entry found for '$raw_organ': anat_loc='$anat_loc', subloc='$anat_subloc', data_has_AL=$(haskey(data, "Anatomic Location")), data_AL='$(get(data, "Anatomic Location", ""))'"); flush(stdout)
-                    if !isempty(anat_loc)
-                        if haskey(field_widgets, "Anatomic Location")
-                            w = field_widgets["Anatomic Location"]
-                            if w isa Menu
-                                opts = w.options[]
-                                a_idx = findfirst(==(anat_loc), opts)
-                                if a_idx === nothing
-                                    new_opts = copy(opts)
-                                    push!(new_opts, anat_loc)
-                                    w.options[] = new_opts
-                                    a_idx = length(new_opts)
-                                end
-                                w.i_selected[] = a_idx
-                            elseif w isa Textbox
-                                w.stored_string[] = anat_loc
-                            end
-                            println("[PREFILL] Set Anatomic Location='$anat_loc' ($(typeof(w)))"); flush(stdout)
-                        end
-                    end
-                    # Auto-fill Anatomical Sublocation from JSON mapping
-                    if !isempty(anat_subloc)
-                        if haskey(field_widgets, "Anatomical Sublocation")
-                            w = field_widgets["Anatomical Sublocation"]
-                            if w isa Menu
-                                opts = w.options[]
-                                sl_idx = findfirst(==(anat_subloc), opts)
-                                if sl_idx === nothing
-                                    new_opts = copy(opts)
-                                    push!(new_opts, anat_subloc)
-                                    w.options[] = new_opts
-                                    sl_idx = length(new_opts)
-                                end
-                                w.i_selected[] = sl_idx
-                            elseif w isa Textbox
-                                w.stored_string[] = anat_subloc
-                            end
-                            println("[PREFILL] Set Anatomical Sublocation='$anat_subloc' ($(typeof(w)))"); flush(stdout)
-                        end
-                    end
-                else
-                    # Fallback to old map_ts_to_anatomy for unknown organs
-                    t_base, auto_side = map_ts_to_anatomy(raw_organ)
-                    if isempty(t_side) && !isempty(auto_side)
-                        t_side = auto_side
+        end
+        
+        # Lookup the anatomy ontology entry (used for both BaseAnatomy and Location)
+        anat_entry = (!isempty(raw_organ) && raw_organ != "Unknown") ? lookup_anatomy(raw_organ) : nothing
+        println("[PREFILL] lid=$lid, raw_organ='$raw_organ', anat_entry=$(anat_entry !== nothing ? "found" : "null"), t_base='$t_base'"); flush(stdout)
+        
+        # Auto-detect BaseAnatomy from max_anatomy JSON mapping if not saved
+        if isempty(t_base) && anat_entry !== nothing
+            t_base = get(anat_entry, "detailed", "")
+            auto_side = get(anat_entry, "side", "")
+            if isempty(t_side) && !isempty(auto_side)
+                t_side = auto_side
+            end
+            @info "Auto-detected BaseAnatomy for lesion $lid: '$t_base' (side='$t_side') from organ '$raw_organ'"
+        elseif isempty(t_base) && !isempty(raw_organ) && raw_organ != "Unknown"
+            # Fallback to old map_ts_to_anatomy for unknown organs
+            t_base, auto_side = map_ts_to_anatomy(raw_organ)
+            if isempty(t_side) && !isempty(auto_side)
+                t_side = auto_side
+            end
+            @info "Auto-detected BaseAnatomy for lesion $lid: '$t_base' (side='$t_side') via keyword fallback from '$raw_organ'"
+        end
+        
+        # ── Auto-fill Anatomic Location & Sublocation (independent of BaseAnatomy) ──
+        # These run whenever the fields are empty, even if BaseAnatomy is already saved
+        existing_loc = get(data, "Anatomic Location", "")
+        existing_subloc = get(data, "Anatomical Sublocation", "")
+        
+        if anat_entry !== nothing
+            anat_loc = get(anat_entry, "anatomic_location", "")
+            anat_subloc = get(anat_entry, "anatomical_sublocation", "")
+            println("[PREFILL] anat_entry for '$raw_organ': loc='$anat_loc', subloc='$anat_subloc', existing_loc='$existing_loc', existing_subloc='$existing_subloc'"); flush(stdout)
+            
+            # Auto-fill Anatomic Location if empty
+            if isempty(existing_loc) && !isempty(anat_loc)
+                data["Anatomic Location"] = anat_loc
+                db_updates["Anatomic Location"] = anat_loc
+                println("[PREFILL] Auto-filled Anatomic Location='$anat_loc'"); flush(stdout)
+            end
+            
+            # Auto-fill Anatomical Sublocation if empty
+            if isempty(existing_subloc) && !isempty(anat_subloc)
+                data["Anatomical Sublocation"] = anat_subloc
+                db_updates["Anatomical Sublocation"] = anat_subloc
+                println("[PREFILL] Auto-filled Anatomical Sublocation='$anat_subloc'"); flush(stdout)
+            end
+        end
+        
+        # ── Auto-rename "New Lesion" entries when anatomy is determined ──
+        if lid > 0 && occursin("New Lesion", cur_id_str) && !isempty(t_base)
+            new_display_name = "$lid: $t_base"
+            if new_display_name != cur_id_str
+                # Rename in dropdown list
+                opts = copy(lesion_ids[])
+                idx = findfirst(==(cur_id_str), opts)
+                if idx !== nothing
+                    opts[idx] = new_display_name
+                    is_syncing_selection[] = true
+                    try
+                        lesion_ids[] = opts
+                        les_menu.options[] = opts
+                        les_menu.selection[] = new_display_name
+                        les_menu.i_selected[] = idx
+                    finally
+                        is_syncing_selection[] = false
                     end
                 end
-                @info "Auto-detected BaseAnatomy for lesion $lid: '$t_base' (side='$t_side') from max_anatomy organ '$raw_organ'"
+                # Rename in lesion_db: move data from old key to new key
+                db = copy(lesion_db[])
+                if haskey(db, cur_id_str)
+                    db[new_display_name] = pop!(db, cur_id_str)
+                end
+                lesion_db[] = db
+                # Update internal reference (but do NOT set active_lesion_id[] to avoid recursive callback)
+                active_lesion_display[] = new_display_name
+                cur_id_str = new_display_name
+                @info "Auto-renamed lesion to '$new_display_name'"
             end
         end
         
@@ -3286,25 +3450,25 @@ end_section!(sec_win)
             db_updates["Lesion tracking name?"] = tracking_name
         end
         
-        # ── Auto-fill SUV max ─────────────────────────────────────────────
-        if !haskey(data, "SUV max") || isempty(get(data, "SUV max", "")) || get(data, "SUV max", "") == "0.0"
-            try
-                cache_key = (tp_idx, lid)
-                suv_str = get(_lesion_suv_cache, cache_key, "")
-                if isempty(suv_str)
-                    suv_str = compute_lesion_suv_string(lid, tp_idx)
+        # ── Auto-fill SUV max (always recompute - cache handles freshness) ───
+        try
+            cache_key = (tp_idx, lid)
+            suv_str = get(_lesion_suv_cache, cache_key, "")
+            if isempty(suv_str)
+                suv_str = compute_lesion_suv_string(lid, tp_idx)
+                if !isempty(suv_str)
                     _lesion_suv_cache[cache_key] = suv_str
                 end
-                if !isempty(suv_str)
-                    if haskey(field_widgets, "SUV max") && field_widgets["SUV max"] isa Textbox
-                        field_widgets["SUV max"].stored_string[] = suv_str
-                    end
-                    # Persist
-                    db_updates["SUV max"] = suv_str
-                end
-            catch e
-                @warn "Auto-SUV computation failed for lesion $lid: $e"
             end
+            if !isempty(suv_str)
+                if haskey(field_widgets, "SUV max") && field_widgets["SUV max"] isa Textbox
+                    field_widgets["SUV max"].stored_string[] = suv_str
+                end
+                # Persist
+                db_updates["SUV max"] = suv_str
+            end
+        catch e
+            @warn "Auto-SUV computation failed for lesion $lid: $e"
         end
         
         # ── Auto-compute PROMISE score and SUV comparison ────────────────
@@ -3498,9 +3662,7 @@ end_section!(sec_win)
         # Refresh Map Lesions lists to track the newly selected lesion
         if cv_active[] && sec_map_lesions[1][]
             try
-                cp_id = findfirst(':', id)
-                ns_id = cp_id !== nothing ? strip(id[1:cp_id-1]) : id
-                lid = tryparse(Int, ns_id)
+                lid = parse_lesion_id(id)
                 if lid !== nothing
                     map_selected_left[] = Int[lid]
                     map_selected_right[] = Int[]  # will be auto-populated from cross-TP match
@@ -3515,9 +3677,7 @@ end_section!(sec_win)
         # Non-blocking: use @async so we don't freeze the Makie GUI thread if the
         # consumer is busy processing a previous event
         @async try
-            cp = findfirst(':', id)
-            ns = cp !== nothing ? strip(id[1:cp-1]) : id
-            lid = tryparse(Int, ns)
+            lid = parse_lesion_id(id)
             if lid !== nothing
                 put!(channel, SyncLesionEvent(lid))
             end

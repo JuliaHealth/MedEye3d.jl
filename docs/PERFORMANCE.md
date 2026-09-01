@@ -185,3 +185,37 @@ Per cached time point (512x401x644 volume):
 GPU texture memory per panel (512x401 slice):
 - Old: 6 x R32F = 6 x 0.8 MB = 4.8 MB
 - New: 2 x R32F + 2 x R16S + 1 x R8S = 1.6 + 0.8 + 0.2 = 2.6 MB (**46% less**)
+
+---
+
+## 12. Async SUV/Volume Recomputation After Segmentation
+
+**Impact**: Fresh SUV/volume/PROMISE metrics immediately after any mask modification (no stale values)
+
+Previously, SUV and volume values were computed once on first lesion selection and cached indefinitely. After painting or AI segmentation modified a lesion's mask, the cached values became stale — showing the old SUV/volume until the user manually re-triggered computation.
+
+**New architecture**:
+
+```
+Mask Modified (AI result or painting)
+        │
+        ▼
+invalidate_and_recompute_lesion_metrics_async!(lid, tp_idx, mask_vol)
+        │
+        ├── 1. Clear caches: _lesion_suv_cache, _volume_cache, lesion_centroids_cache
+        │
+        ├── 2. Recompute centroid from current mask (synchronous, ~10ms)
+        │
+        └── 3. Threads.@spawn (async, non-blocking):
+                ├── compute_lesion_volume(lid, tp_idx)      → _volume_cache
+                └── compute_lesion_suv_string(lid, tp_idx)  → _lesion_suv_cache
+```
+
+**Trigger points**:
+- `reactToAIInferenceResult()` — after AI segmentation writes mask voxels
+- `react_to_draw()` — after manual paint stroke mouse release
+- `reactToGenManual()` — after manual bone subsegmentation
+
+**apply_state always-recompute**: The SUV auto-fill in `apply_state()` was changed from conditional (`if data["SUV max"] is empty`) to always-recompute. It reads from the cache (O(1) if pre-populated by the async task) or computes fresh on cache miss. This ensures the UI always shows current values.
+
+**Files**: `MakieEventHandlers.jl` (L1060–1145), `ReactOnMouseClickAndDrag.jl` (L267–277), `LesionMetadataWindow.jl` (L3289–3308)

@@ -33,9 +33,15 @@ All event structs are defined in [`MakieEvents.jl`](../src/structs/MakieEvents.j
 | `RefreshListEvent()` | Reload lesion list | Refresh button |
 | `WindowingEvent(name, min, max)` | Change CT/PET/SPECT window | Windowing presets |
 | `ShowBoneMaskEvent(type, visible)` | Toggle bone surface/marrow | Bone visibility buttons |
+| `ShowMaskLayerEvent(layer, active)` | Toggle Anatomy/Segmentation visibility | Layer toggle buttons |
 | `CloseWindowEvent()` | Graceful shutdown | Window close callback |
 | `DoubleClickEvent(x, y, panel)` | Zoom into panel | Double-click on panel |
 | `ShowSingleLesionEvent(id)` | Highlight one lesion | Lesion list click |
+| `AddAutoPetEvent(algorithm, channel)` | Launch AI segmentation | AI inference buttons |
+| `AIInferenceResultEvent(mask, seg_vol, ...)` | Apply AI result to mask + async recompute SUV/volume | AI async callback |
+| `SyncLesionEvent(lesion_id)` | Sync display state for lesion | Lesion selection / navigation |
+| `GenManualEvent(lesion_id)` | Manual bone subsegmentation + async recompute metrics | Bone subseg button |
+| `PaintValEvent(val, is_paint)` | Set paint value (paint/erase mode) | Paint/Erase buttons |
 
 ---
 

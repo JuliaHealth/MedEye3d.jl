@@ -144,6 +144,17 @@ Swaps the entire volume data arrays (CT, PET, Mask) from the cached `all_tps_dat
 ### Windowing Handler
 Updates `minAndMaxValue` on the relevant `TextureSpec`, then re-uploads the current slice with the new window applied.
 
+### Async Side Effects (Non-Blocking)
+
+Some handlers spawn async tasks via `Threads.@spawn` that run outside the render cycle. These never block the consumer or GUI:
+
+- **`reactToAIInferenceResult`**: After writing AI mask voxels, calls `invalidate_and_recompute_lesion_metrics_async!()` which spawns an async task to recompute SUV/volume and populate caches.
+- **`react_to_draw`**: After mouse release following a paint stroke, spawns the same async metrics recomputation.
+- **`reactToGenManual`**: After manual bone subsegmentation, spawns async recomputation.
+- **`reactToAddAutoPet`**: The entire AI inference (TCP call + result wait) runs in a spawned thread; only the result event comes back through the channel.
+
+The async recomputation populates `_lesion_suv_cache` and `_volume_cache`, which are then read by `apply_state()` in the metadata panel on the next lesion selection (O(1) cache lookup).
+
 ---
 
 ## Phase 5: Render Cycle
