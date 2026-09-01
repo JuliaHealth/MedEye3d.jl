@@ -500,13 +500,128 @@ function load_nrrd_labelmap(nrrd_path::String)
 end
 
 """
-Map each lesion in `lesion_mask` to its nearest organ in the TS atlas.
-- `lesion_mask::Array{Float32,3}` - the lesion segmentation (from MedImages)
-- `ts_atlas::Array{UInt8,3}` - the TotalSegmentator labelmap (from load_nrrd_labelmap)
-- `ts_names::Dict{Int,String}` - label value → organ name (from parse_nrrd_segment_names)
+    classify_tissue_priority(organ_name::String) → Int
 
-Returns Dict{Int, String} mapping lesion segment int → organ name.
-Both arrays must be in the SAME coordinate space (same resampling grid).
+Classify a TotalSegmentator organ name into a tissue priority class.
+Lower number = higher priority for lesion naming.
+  1 = Bone, 2 = Solid Organ, 3 = Lymph, 4 = Vessel, 5 = Muscle/Soft Tissue
+"""
+function classify_tissue_priority(name::String)::Int
+    ln = lowercase(name)
+    
+    # Bone keywords — highest priority for lesion naming
+    bone_kw = ["vertebra", "rib_", "femur", "humerus", "scapula_", "hip_",
+               "sacrum", "skull", "sternum", "clavicle", "costal", "hyoid",
+               "mandible", "styloid", "zygomatic", "cricoid", "thyroid_cartilage",
+               "ilium", "ischium", "pubis", "tibia"]
+    # Vascular exclusions — some share bone keywords (e.g. "iliac_artery")
+    vessel_excl = ["artery", "vein", "vena", "vessel"]
+    # Muscle exclusions — muscles containing bone keywords (levator_scapulae, subscapularis)
+    muscle_excl = ["levator", "subscapularis", "infraspinatus", "supraspinatus",
+                   "teres", "coracobrachial"]
+    
+    if any(k -> occursin(k, ln), bone_kw) && !any(v -> occursin(v, ln), vessel_excl) && !any(m -> occursin(m, ln), muscle_excl)
+        return 1  # Bone
+    end
+    
+    organ_kw = ["liver", "kidney", "lung", "spleen", "pancreas", "heart",
+                "thyroid_gland", "adrenal", "stomach", "colon", "rectum",
+                "esophagus", "gallbladder", "bladder", "prostate", "bowel",
+                "duodenum", "trachea", "brain", "spinal_cord", "eye",
+                "parotid", "submandibular", "optic_nerve"]
+    any(k -> occursin(k, ln), organ_kw) && return 2  # Solid organ
+    
+    occursin("lymph", ln) && return 3  # Lymph node
+    
+    vessel_kw = ["aorta", "artery", "vein", "vena", "trunk", "carotid", "jugular"]
+    any(k -> occursin(k, ln), vessel_kw) && return 4  # Vessel
+    
+    return 5  # Muscle / soft tissue
+end
+
+"""
+    count_atlas_overlap(mask, atlas, lid, ts_names) → Dict{Int,Int}
+
+Count how many voxels of lesion `lid` in `mask` overlap each KNOWN atlas label.
+Uses broadcasting — works on both CPU Arrays and GPU CuArrays.
+Handles mismatched mask/atlas sizes via coordinate scaling.
+"""
+function count_atlas_overlap(mask::AbstractArray{<:Real,3}, atlas::AbstractArray{<:Real,3},
+                             lid::Integer, ts_names::Dict{Int,String})::Dict{Int,Int}
+    # Get lesion voxel indices (CPU-side, since we need coordinates)
+    indices = findall(x -> x == eltype(mask)(lid), mask)
+    isempty(indices) && return Dict{Int,Int}()
+    
+    # Scale factors from mask to atlas coordinates
+    sx = size(atlas, 1) / size(mask, 1)
+    sy = size(atlas, 2) / size(mask, 2)
+    sz = size(atlas, 3) / size(mask, 3)
+    
+    counts = Dict{Int,Int}()
+    for idx in indices
+        ax = clamp(round(Int, idx[1] * sx), 1, size(atlas, 1))
+        ay = clamp(round(Int, idx[2] * sy), 1, size(atlas, 2))
+        az = clamp(round(Int, idx[3] * sz), 1, size(atlas, 3))
+        v = Int(atlas[ax, ay, az])
+        # Only count KNOWN labels (present in ts_names)
+        if v > 0 && haskey(ts_names, v)
+            counts[v] = get(counts, v, 0) + 1
+        end
+    end
+    return counts
+end
+
+"""
+    pick_best_organ(counts, ts_names) → String
+
+Given atlas label counts, pick the best organ using tissue priority:
+bone > solid organ > lymph > vessel > muscle.
+Within the same priority class, picks the label with the most voxels.
+"""
+function pick_best_organ(counts::Dict{Int,Int}, ts_names::Dict{Int,String})::String
+    best_name = ""
+    best_priority = 6
+    best_count = 0
+    
+    for (label_id, cnt) in counts
+        name = get(ts_names, label_id, "")
+        isempty(name) && continue
+        
+        priority = classify_tissue_priority(name)
+        if priority < best_priority || (priority == best_priority && cnt > best_count)
+            best_name = name
+            best_priority = priority
+            best_count = cnt
+        end
+    end
+    return best_name
+end
+
+"""
+    classify_and_pick_best_organ(mask, atlas, ts_names, lid) → String
+
+Single-lesion volume-based organ lookup with bone priority.
+Scans ALL voxels of lesion `lid`, counts overlapping known atlas labels,
+and picks the best one using tissue priority (bone > organ > lymph > vessel > muscle).
+"""
+function classify_and_pick_best_organ(mask::AbstractArray{<:Real,3},
+                                      atlas::AbstractArray{<:Real,3},
+                                      ts_names::Dict{Int,String},
+                                      lid::Integer)::String
+    counts = count_atlas_overlap(mask, atlas, lid, ts_names)
+    return pick_best_organ(counts, ts_names)
+end
+
+"""
+Map each lesion in `lesion_mask` to its anatomical organ in the TS atlas.
+
+Uses volume-based scanning with tissue priority (bone > organ > lymph > vessel > muscle):
+1. Scans ALL voxels of each lesion for overlapping atlas labels
+2. Filters to known labels only (present in `ts_names`)  
+3. Picks the best label using tissue priority, breaking ties by voxel count
+4. Falls back to expanding-sphere centroid search for zero-overlap lesions
+
+Returns Dict{Int, String} mapping lesion ID → organ name.
 """
 function map_lesions_to_organs(lesion_mask::AbstractArray, ts_atlas::AbstractArray, ts_names::Dict{Int, String})
     result = Dict{Int, String}()
@@ -517,54 +632,48 @@ function map_lesions_to_organs(lesion_mask::AbstractArray, ts_atlas::AbstractArr
     for lesion_val in lesion_ints
         seg_int = Int(lesion_val)
         
-        # Find centroid of this lesion
-        indices = findall(x -> x == lesion_val, lesion_mask)
-        if isempty(indices)
-            continue
-        end
+        # Volume-based scan with bone priority
+        organ_name = classify_and_pick_best_organ(lesion_mask, ts_atlas, ts_names, seg_int)
         
-        # Compute centroid
-        cx_raw = mean(i[1] for i in indices)
-        cy_raw = mean(i[2] for i in indices)
-        cz_raw = mean(i[3] for i in indices)
-        
-        # Scale to atlas dimensions
-        scale_x = size(ts_atlas, 1) / size(lesion_mask, 1)
-        scale_y = size(ts_atlas, 2) / size(lesion_mask, 2)
-        scale_z = size(ts_atlas, 3) / size(lesion_mask, 3)
-        
-        cx = round(Int, cx_raw * scale_x)
-        cy = round(Int, cy_raw * scale_y)
-        cz = round(Int, cz_raw * scale_z)
-        
-        # Clamp to atlas bounds
-        cx = clamp(cx, 1, size(ts_atlas, 1))
-        cy = clamp(cy, 1, size(ts_atlas, 2))
-        cz = clamp(cz, 1, size(ts_atlas, 3))
-        
-        # Look up TS atlas at centroid (search expanding neighborhood)
-        organ_name = ""
-        for radius in [0, 1, 2, 4, 8]
-            for dx in -radius:radius
-                for dy in -radius:radius
-                    for dz in -radius:radius
-                        if dx*dx + dy*dy + dz*dz > radius*radius
-                            continue
+        if isempty(organ_name)
+            # Fallback: expanding sphere from centroid for zero-overlap lesions
+            indices = findall(x -> x == lesion_val, lesion_mask)
+            if !isempty(indices)
+                cx_raw = mean(i[1] for i in indices)
+                cy_raw = mean(i[2] for i in indices)
+                cz_raw = mean(i[3] for i in indices)
+                
+                scale_x = size(ts_atlas, 1) / size(lesion_mask, 1)
+                scale_y = size(ts_atlas, 2) / size(lesion_mask, 2)
+                scale_z = size(ts_atlas, 3) / size(lesion_mask, 3)
+                
+                cx = clamp(round(Int, cx_raw * scale_x), 1, size(ts_atlas, 1))
+                cy = clamp(round(Int, cy_raw * scale_y), 1, size(ts_atlas, 2))
+                cz = clamp(round(Int, cz_raw * scale_z), 1, size(ts_atlas, 3))
+                
+                for radius in [0, 1, 2, 4, 8, 16, 32]
+                    for dx in -radius:radius
+                        for dy in -radius:radius
+                            for dz in -radius:radius
+                                if dx*dx + dy*dy + dz*dz > radius*radius
+                                    continue
+                                end
+                                nx = clamp(cx + dx, 1, size(ts_atlas, 1))
+                                ny = clamp(cy + dy, 1, size(ts_atlas, 2))
+                                nz = clamp(cz + dz, 1, size(ts_atlas, 3))
+                                ts_val = Int(ts_atlas[nx, ny, nz])
+                                if ts_val > 0 && haskey(ts_names, ts_val)
+                                    organ_name = ts_names[ts_val]
+                                    break
+                                end
+                            end
+                            !isempty(organ_name) && break
                         end
-                        nx = clamp(cx + dx, 1, size(ts_atlas, 1))
-                        ny = clamp(cy + dy, 1, size(ts_atlas, 2))
-                        nz = clamp(cz + dz, 1, size(ts_atlas, 3))
-                        ts_val = Int(ts_atlas[nx, ny, nz])
-                        if ts_val > 0 && haskey(ts_names, ts_val)
-                            organ_name = ts_names[ts_val]
-                            break
-                        end
+                        !isempty(organ_name) && break
                     end
                     !isempty(organ_name) && break
                 end
-                !isempty(organ_name) && break
             end
-            !isempty(organ_name) && break
         end
         
         if !isempty(organ_name)
@@ -572,7 +681,7 @@ function map_lesions_to_organs(lesion_mask::AbstractArray, ts_atlas::AbstractArr
         end
     end
     
-    @info "Mapped $(length(result))/$(length(lesion_ints)) lesions to organs"
+    @info "Mapped $(length(result))/$(length(lesion_ints)) lesions to organs (volume-based with bone priority)"
     return result
 end
 
@@ -595,7 +704,8 @@ function classify_organ_to_lesion_type(organ_name::String)::String
     bone_kws = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula", "clavicle",
                 "humerus", "scapula", "sternum", "skull", "palate", "bone", "spine",
                 "ilium", "ischium", "pubis", "tibia", "radius", "carpal", "tarsal",
-                "costal_cartilage", "mandible"]
+                "costal_cartilage", "mandible", "hyoid", "styloid", "zygomatic",
+                "cricoid", "thyroid_cartilage"]
     
     # Muscle keywords — max_anatomy has 90 muscles
     muscle_kws = ["gluteus", "autochthon", "iliopsoas", "pectoralis", "subscapularis",
@@ -612,10 +722,10 @@ function classify_organ_to_lesion_type(organ_name::String)::String
     
     if occursin("prostate", org)
         return "Prostate"
-    elseif any(kw -> occursin(kw, org), bone_kws) && !any(v -> occursin(v, org), vascular_exclusions)
-        return "Bone Meta"
     elseif any(kw -> occursin(kw, org), muscle_kws)
         return "Muscle"
+    elseif any(kw -> occursin(kw, org), bone_kws) && !any(v -> occursin(v, org), vascular_exclusions)
+        return "Bone Meta"
     elseif occursin("lymph", org) || occursin("node", org)
         return "Lymph Node Meta"
     else
@@ -624,5 +734,6 @@ function classify_organ_to_lesion_type(organ_name::String)::String
 end
 
 export load_nrrd_labelmap, map_lesions_to_organs, classify_organ_to_lesion_type
+export classify_tissue_priority, classify_and_pick_best_organ, count_atlas_overlap, pick_best_organ
 
 end # module

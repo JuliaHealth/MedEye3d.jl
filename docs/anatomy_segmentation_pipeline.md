@@ -250,4 +250,3 @@ Delete the corresponding marker file:
 rm anatomy_out/.ts_task_<taskname>_*_completed
 ```
 Then re-run the pipeline — it will only re-do the missing task.
-""", "Description": "Comprehensive documentation for the anatomic segmentation pipeline", "Overwrite": true

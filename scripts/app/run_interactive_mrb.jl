@@ -76,11 +76,42 @@ if haskey(h5_init, "ATLAS/max_anatomy")
     println("  Loaded ATLAS/max_anatomy from HDF5 ($(size(ts_atlas_aligned)))")
 end
 
-if haskey(h5_init, "_meta_/max_anatomy_labels.json")
+# IMPORTANT: The ATLAS/max_anatomy volume uses per-TP label numbering (319-class TS),
+# which has a DIFFERENT integer-to-name mapping than the baseline labels JSON (201-class TS).
+# We MUST load per-TP labels first as the authoritative source, since they match the atlas.
+# Only fill remaining gaps from baseline labels for IDs not covered by the per-TP set.
+ts_names = Dict{Int,String}()
+
+# Step 1: Load per-TP labels first (these match the atlas numbering)
+for k in sort(collect(keys(h5_init["_meta_"])))
+    if startswith(k, "anatomy_labels_tp_")
+        try
+            tp_raw = JSON.parse(read(h5_init["_meta_/$k"]))
+            added = 0
+            for (id_str, name) in tp_raw
+                id = parse(Int, id_str)
+                # Skip junk intermediate class names from TS pipeline artifacts
+                if !occursin("_class_", name) && !haskey(ts_names, id)
+                    ts_names[id] = name
+                    added += 1
+                end
+            end
+            added > 0 && println("  Loaded $added labels from $k")
+            break  # Only need one TP's labels (they're all the same numbering)
+        catch e
+            @warn "Failed to load per-TP labels from $k: $e"
+        end
+    end
+end
+
+# Step 2: Fill any remaining gaps from baseline labels (only for IDs not in per-TP set)
+if haskey(h5_init, "_meta_/max_anatomy_labels.json") && isempty(ts_names)
+    # Fallback: if no per-TP labels exist, use baseline labels
     raw_labels = JSON.parse(read(h5_init["_meta_/max_anatomy_labels.json"]))
     ts_names = Dict{Int,String}(parse(Int, k) => v for (k, v) in raw_labels)
-    println("  Loaded $(length(ts_names)) anatomy labels from HDF5")
+    println("  Loaded $(length(ts_names)) anatomy labels from baseline (no per-TP labels found)")
 end
+println("  Total anatomy labels: $(length(ts_names))")
 
 if haskey(h5_init, "ATLAS/skellytour")
     skelly_atlas = read(h5_init["ATLAS/skellytour"])

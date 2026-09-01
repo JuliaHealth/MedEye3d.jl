@@ -264,17 +264,15 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
         end
     end
 
-    # Invalidate SUV cache and centroid cache for the modified lesion
+    # Invalidate SUV/volume/centroid caches and async-recompute metrics for the modified lesion
     try
         paint_id = round(Int, stateObject.valueForMasToSet.value)
         if paint_id > 0
             MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
-            MEH.invalidate_suv_for_lesion(paint_id, MEH.current_tp_index[])
-            delete!(MEH.lesion_centroids_cache, (MEH.current_tp_index[], paint_id))
-            delete!(MEH.lesion_centroids_cache, paint_id)
+            MEH.invalidate_and_recompute_lesion_metrics_async!(paint_id, MEH.current_tp_index[])
         end
     catch e
-        # SUV invalidation is best-effort
+        # SUV invalidation/recompute is best-effort
     end
 end#react_to_draw
 

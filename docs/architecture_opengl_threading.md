@@ -197,6 +197,21 @@ end
 |---|---|---|
 | GLFW Callbacks | Any (via GLFW event queue) | `put!()` events into channel |
 | Makie Button `on(clicks)` | Any (Makie event loop) | `put!()` events into channel |
-| Consumer task | Interactive thread | `take!()` events, call `on_next!()`, render OpenGL |
+| Consumer task | Interactive thread | `take!()` events, call `on_next!()`, render via Vulkan |
 | Makie renderloop | Spawned task | Renders GUI buttons under `GLOBAL_OPENGL_LOCK` |
 | Polling task | `@task` on interactive thread | Monitors window-close flag |
+| AI inference worker | `Threads.@spawn` (compute pool) | TCP call to Docker AI server, returns `AIInferenceResultEvent` |
+| SUV/Volume recompute | `Threads.@spawn` (compute pool) | Async metrics recomputation after mask changes |
+| I/O background task | `Threads.@spawn` (compute pool) | TP preloading/eviction via `io_channel` |
+
+### Async Compute Threads
+
+Some event handlers spawn short-lived worker threads via `Threads.@spawn` that run on Julia's compute threadpool (the `3` in `-t3,1`). These threads never touch the GPU or OpenGL/Vulkan context — they only read/write Julia arrays and caches.
+
+**`invalidate_and_recompute_lesion_metrics_async!`**: Spawned by `reactToAIInferenceResult`, `react_to_draw`, and `reactToGenManual` after mask modifications. The spawned thread:
+1. Scans the mask volume to count voxels (volume computation)
+2. Reads the PET volume at the lesion centroid (SUV computation)
+3. Populates `_volume_cache` and `_lesion_suv_cache`
+
+The caches are read by `apply_state()` in the metadata panel (runs on the Makie event loop thread). Because Julia `Dict` operations are atomic for single-key read/write, no explicit locking is needed for this pattern.
+

@@ -142,8 +142,11 @@ Full documentation, architecture manuals, and code examples are available in the
 - [Bone Subsegmentation & MRB Integration](docs/src/manual/bone_subsegmentation_and_mrb.md)
 - [Makie GUI Controls & Windowing](docs/src/manual/gui_controls_and_windowing.md)
 - [Lesion Metadata, PROMISE & RECIP Tracking](docs/src/manual/lesion_metadata_and_tracking.md)
+- [Lesion Metadata Auto-Fill, SUV Pipeline & Dropdown Schema](docs/lesion_metadata_autofill.md)
+- [Performance Optimizations](docs/PERFORMANCE.md)
 - [Developer Playbook & Lock Architecture](docs/src/devs/playbook.md)
 - [Complete API Reference](docs/src/api.md)
+- [Changelog](CHANGELOG.md)
 
 ---
 
