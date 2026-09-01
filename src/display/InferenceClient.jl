@@ -10,9 +10,29 @@ export start_python_worker, run_helpnet_inference, run_nninteractive, run_bone_s
 
 global PYTHON_PROC = nothing
 
-function send_json_request(req::Dict; port=5005)
+"""
+    get_ai_host()::String
+
+Returns the remote or local AI worker hostname / IP address configured via `MEDEYE3D_AI_HOST`
+(defaults to `"127.0.0.1"` for local execution or SSH port-forwarded tunnel).
+"""
+function get_ai_host()::String
+    return get(ENV, "MEDEYE3D_AI_HOST", "127.0.0.1")
+end
+
+"""
+    get_ai_port(default_port=5005)::Int
+
+Returns the AI worker TCP port configured via `MEDEYE3D_AI_PORT` (defaults to 5005).
+"""
+function get_ai_port(default_port=5005)::Int
+    return parse(Int, get(ENV, "MEDEYE3D_AI_PORT", string(default_port)))
+end
+
+function send_json_request(req::Dict; port=get_ai_port())
+    host = get_ai_host()
     try
-        conn = connect("127.0.0.1", port)
+        conn = connect(host, port)
         write(conn, JSON.json(req))
         resp_str = read(conn, String)
         close(conn)
@@ -23,27 +43,29 @@ function send_json_request(req::Dict; port=5005)
 end
 
 function start_python_worker(worker_script_path::String)
-    println("[InferenceClient] Ensuring MedEye3d AI Docker Worker is running..."); flush(stdout)
+    host = get_ai_host()
+    port = get_ai_port()
+    println("[InferenceClient] Ensuring MedEye3d AI Worker is reachable at $host:$port..."); flush(stdout)
     
-    # Try to start Docker worker (may fail if docker-in-docker is not available)
-    docker_script = joinpath(@__DIR__, "..", "..", "scripts", "ai", "start_docker_worker.sh")
-    docker_available = try
-        run(pipeline(`bash $docker_script`, stdout="/tmp/medeye3d_docker_worker.log", stderr="/tmp/medeye3d_docker_worker.log"), wait=true)
-        true
-    catch e
-        println("[InferenceClient] Docker not available inside this container (normal for docker-in-docker)."); flush(stdout)
-        println("[InferenceClient] Start the AI worker from the HOST with:"); flush(stdout)
-        println("  bash scripts/ai/start_docker_worker.sh"); flush(stdout)
-        false
+    # Try to start Docker worker if local
+    if host in ("127.0.0.1", "localhost")
+        docker_script = joinpath(@__DIR__, "..", "..", "scripts", "ai", "start_docker_worker.sh")
+        docker_available = try
+            run(pipeline(`bash $docker_script`, stdout="/tmp/medeye3d_docker_worker.log", stderr="/tmp/medeye3d_docker_worker.log"), wait=true)
+            true
+        catch e
+            println("[InferenceClient] Docker not available locally (normal for remote/SSH setups)."); flush(stdout)
+            false
+        end
     end
 
-    # Wait up to 15 seconds for the Python TCP server to be reachable on port 5005
+    # Wait up to 15 seconds for the Python TCP server to be reachable
     connected = false
     for i in 1:15
         try
-            conn = connect("127.0.0.1", 5005)
+            conn = connect(host, port)
             close(conn)
-            println("[InferenceClient] AI Worker is ready on port 5005."); flush(stdout)
+            println("[InferenceClient] AI Worker is ready at $host:$port."); flush(stdout)
             connected = true
             try verify_docker_code_sync() catch end
             break
@@ -52,14 +74,8 @@ function start_python_worker(worker_script_path::String)
         end
     end
     if !connected
-        println("[InferenceClient] WARNING: AI Worker not reachable on port 5005 after 15s."); flush(stdout)
-        println("[InferenceClient] Start the AI container from the HOST:"); flush(stdout)
-        println("  docker rm -f medeye3d-ai 2>/dev/null"); flush(stdout)
-        println("  docker run -d --rm --name medeye3d-ai --gpus '\"device=1\"' \\"); flush(stdout)
-        println("    --shm-size=64g --network=container:sharp_ramanujan \\"); flush(stdout)
-        println("    -v /mnt/big/project_ssd/project_ssd/MedEye3d.jl/tmp_inference:/tmp/medeye3d_inference \\"); flush(stdout)
-        println("    -v /mnt/big/project_ssd/project_ssd/MedEye3d.jl/scripts/ai:/app \\"); flush(stdout)
-        println("    medeye3d-ai:latest"); flush(stdout)
+        println("[InferenceClient] WARNING: AI Worker not reachable at $host:$port after 15s."); flush(stdout)
+        println("[InferenceClient] For remote GPU server over SSH, ensure tunnel is active: ssh -N -L $port:localhost:$port user@server"); flush(stdout)
     end
 end
 
@@ -142,7 +158,7 @@ end
 
 const INFERENCE_DIR = joinpath(dirname(dirname(@__DIR__)), "tmp_inference")
 
-function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}, points_vol::Union{Nothing, Array{Float32, 3}}, cx::Int, cy::Int, cz::Int; port=5005)
+function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}, points_vol::Union{Nothing, Array{Float32, 3}}, cx::Int, cy::Int, cz::Int; port=get_ai_port())
     # Docker container (medeye3d-ai) is started once at app startup — here we only communicate via TCP
 
     out_dir = INFERENCE_DIR
@@ -181,8 +197,9 @@ function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32
         "out_dir" => "/tmp/medeye3d_inference"
     )
     
+    host = get_ai_host()
     try
-        conn = connect("127.0.0.1", port)
+        conn = connect(host, port)
         write(conn, JSON.json(req))
         resp_str = read(conn, String)
         close(conn)
@@ -202,14 +219,14 @@ function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32
             return nothing
         end
     catch e
-        println("[InferenceClient ERROR] Failed to communicate with Python Worker: $e"); flush(stdout)
+        println("[InferenceClient ERROR] Failed to communicate with Python Worker at $host:$port: $e"); flush(stdout)
         println(sprint(showerror, e, catch_backtrace())); flush(stdout)
         return nothing
     end
 end
 
 """
-    run_nninteractive(ct_vol, pet_vol, scribble_coords, cx, cy, cz; port=5005, autozoom=true)
+    run_nninteractive(ct_vol, pet_vol, scribble_coords, cx, cy, cz; port=get_ai_port(), autozoom=true)
 
 Run nnInteractive segmentation. `scribble_coords` is a `Vector{Vector{Int}}` of
 0-indexed [x,y,z] coordinates — avoids the expensive `findall` + full-volume allocation.
@@ -218,7 +235,7 @@ Supports inline base64 mask transfer from Docker (skips NIfTI file I/O).
 function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3},
                           scribble_coords::Vector{Vector{Int}},
                           cx::Int, cy::Int, cz::Int;
-                          port=5005, autozoom=true)
+                          port=get_ai_port(), autozoom=true)
     out_dir = INFERENCE_DIR
     mkpath(out_dir)
     
@@ -245,8 +262,9 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
         "inline_result" => true  # Request inline base64 mask transfer
     )
     
+    host = get_ai_host()
     try
-        conn = connect("127.0.0.1", port)
+        conn = connect(host, port)
         write(conn, JSON.json(req))
         resp_str = read(conn, String)
         close(conn)
@@ -278,14 +296,14 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
             return nothing
         end
     catch e
-        println("[InferenceClient ERROR] Failed to communicate with Python Worker: $e"); flush(stdout)
+        println("[InferenceClient ERROR] Failed to communicate with Python Worker at $host:$port: $e"); flush(stdout)
         println(sprint(showerror, e, catch_backtrace())); flush(stdout)
         return nothing
     end
 end
 
 # Legacy API: accept points_vol (3D volume) and extract coords internally
-function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}, points_vol::Union{Nothing, Array{Float32, 3}}, cx::Int, cy::Int, cz::Int; port=5005, autozoom=true)
+function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}, points_vol::Union{Nothing, Array{Float32, 3}}, cx::Int, cy::Int, cz::Int; port=get_ai_port(), autozoom=true)
     if points_vol === nothing || count(points_vol .> 0) == 0
         error("No user-painted scribbles provided for NNInteractive. No fallbacks allowed.")
     end
@@ -295,12 +313,12 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
 end
 
 """
-    preload_ct_for_nninteractive(ct_vol; port=5005)
+    preload_ct_for_nninteractive(ct_vol; port=get_ai_port())
 
 Preload CT into Docker nnInteractive GPU memory for faster subsequent inference.
 Fire-and-forget — runs in a background thread. Errors are logged but don't propagate.
 """
-function preload_ct_for_nninteractive(ct_vol::Array{Float32, 3}; port=5005)
+function preload_ct_for_nninteractive(ct_vol::Array{Float32, 3}; port=get_ai_port())
     Threads.@spawn begin
         try
             out_dir = INFERENCE_DIR
@@ -329,7 +347,8 @@ function preload_ct_for_nninteractive(ct_vol::Array{Float32, 3}; port=5005)
                 "out_dir" => "/tmp/medeye3d_inference"
             )
             
-            conn = connect("127.0.0.1", port)
+            host = get_ai_host()
+            conn = connect(host, port)
             write(conn, JSON.json(req))
             resp_str = read(conn, String)
             close(conn)
@@ -349,12 +368,12 @@ function preload_ct_for_nninteractive(ct_vol::Array{Float32, 3}; port=5005)
 end
 
 """
-    run_bone_subsegmentation_remote(lesion_mask::Array{UInt8, 3}, bone_mask::Array{UInt8, 3}, spacing; port=5005)
+    run_bone_subsegmentation_remote(lesion_mask::Array{UInt8, 3}, bone_mask::Array{UInt8, 3}, spacing; port=get_ai_port())
 
 Run PyTorch-based bone subsegmentation remotely on the Docker container's GPU using Base64 inline transfer.
 Returns `(surface_mask, marrow_mask)` as `Array{Bool, 3}`.
 """
-function run_bone_subsegmentation_remote(lesion_mask::AbstractArray{T, 3}, bone_mask::AbstractArray{U, 3}, spacing; port=5005) where {T, U}
+function run_bone_subsegmentation_remote(lesion_mask::AbstractArray{T, 3}, bone_mask::AbstractArray{U, 3}, spacing; port=get_ai_port()) where {T, U}
     shape = size(lesion_mask)
     
     # Pack as UInt8
@@ -372,8 +391,9 @@ function run_bone_subsegmentation_remote(lesion_mask::AbstractArray{T, 3}, bone_
         "bone_mask_b64" => bone_b64
     )
     
+    host = get_ai_host()
     try
-        conn = connect("127.0.0.1", port)
+        conn = connect(host, port)
         write(conn, JSON.json(req))
         resp_str = read(conn, String)
         close(conn)
@@ -392,7 +412,7 @@ function run_bone_subsegmentation_remote(lesion_mask::AbstractArray{T, 3}, bone_
             return nothing, nothing
         end
     catch e
-        println("[InferenceClient ERROR] Failed to communicate with Python Worker: $e"); flush(stdout)
+        println("[InferenceClient ERROR] Failed to communicate with Python Worker at $host:$port: $e"); flush(stdout)
         return nothing, nothing
     end
 end
