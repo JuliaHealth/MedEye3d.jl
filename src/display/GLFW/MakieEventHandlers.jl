@@ -429,8 +429,8 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
     end
     for stateObject in stateObjects
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-            if textSpec.isMultiDiscreteMask || textSpec.name == "Mask" || textSpec.name == "segmentation"
-                # Clear allowed IDs filter
+            if (textSpec.name == "Mask" || textSpec.name == "segmentation") && textSpec.name != "Anatomy"
+                # Clear allowed IDs filter (only for lesion masks, not anatomical atlas)
                 textSpec.allowedIDs = Float32[]
                 T_mm = eltype(textSpec.minAndMaxValue)
                 if !is_single_lesion_mode[]
@@ -520,7 +520,7 @@ function reactToPaintVal(data::PaintValEvent, stateObjects::Vector{StateDataFiel
         if data.active
             target_ts = nothing
             for textSpec in state.mainForDisplayObjects.listOfTextSpecifications
-                if textSpec.name == "Mask" || textSpec.isMultiDiscreteMask
+                if textSpec.name == "Mask" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy")
                     target_ts = textSpec
                     break
                 elseif textSpec.name == "manualModif" && target_ts === nothing
@@ -1260,7 +1260,7 @@ end
 function reactToToggleLesion(data::ToggleLesionEvent, stateObjects::Vector{StateDataFields})
     for stateObject in stateObjects
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-            if textSpec.isMultiDiscreteMask
+            if (textSpec.isMultiDiscreteMask || textSpec.name == "Mask" || textSpec.name == "segmentation") && textSpec.name != "Anatomy"
                 textSpec.isVisible = !textSpec.isVisible
                 
                 # UBO update happens in consumer loop
@@ -1771,6 +1771,7 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
         end
     end
     
+    
     # Re-render all visible panels in one batch
     visible_panels = Int[]
     for idx in 1:length(stateObjects)
@@ -1785,6 +1786,25 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
             println("reactToScrollMultiPanel! ERROR during visibility toggle: $e")
             println(sprint(showerror, e, catch_backtrace()))
             flush(stdout)
+        end
+    end
+    
+    # Force re-upload of texture data after visibility toggle to ensure
+    # anatomy texture data reaches the GPU (may have been skipped on prior scroll)
+    if data.layer == 4 && data.active
+        for idx in visible_panels
+            stateObjects[idx].isSliceChanged = true
+            # Enforce full anatomy range — undo any prior single-lesion filter
+            for ts in stateObjects[idx].mainForDisplayObjects.listOfTextSpecifications
+                if ts.name == "Anatomy"
+                    ts.minAndMaxValue = Int16[0, 400]
+                    ts.allowedIDs = Float32[]
+                end
+            end
+            # Mark UBO dirty so shader reads updated minAndMaxValue
+            if stateObjects[idx].mainForDisplayObjects.vulkanPipelineState !== nothing
+                stateObjects[idx].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+            end
         end
     end
 end

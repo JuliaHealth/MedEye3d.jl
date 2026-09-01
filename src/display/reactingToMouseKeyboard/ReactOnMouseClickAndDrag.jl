@@ -376,7 +376,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             if panelState.moveLesionMode
                 target_id = 0
                 for ts in panelState.mainForDisplayObjects.listOfTextSpecifications
-                    if (ts.isMultiDiscreteMask || ts.name == "Mask" || ts.name == "manualModif") && !isempty(ts.minAndMaxValue) && ts.minAndMaxValue[1] > 0
+                    if (ts.isMultiDiscreteMask || ts.name == "Mask" || ts.name == "manualModif") && ts.name != "Anatomy" && !isempty(ts.minAndMaxValue) && ts.minAndMaxValue[1] > 0
                         target_id = Int(round(ts.minAndMaxValue[1]))
                         break
                     end
@@ -386,7 +386,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 end
                 if target_id <= 0
                     for ts in mainStates[1].mainForDisplayObjects.listOfTextSpecifications
-                        if (ts.isMultiDiscreteMask || ts.name == "Mask" || ts.name == "manualModif") && !isempty(ts.minAndMaxValue) && ts.minAndMaxValue[1] > 0
+                        if (ts.isMultiDiscreteMask || ts.name == "Mask" || ts.name == "manualModif") && ts.name != "Anatomy" && !isempty(ts.minAndMaxValue) && ts.minAndMaxValue[1] > 0
                             target_id = Int(round(ts.minAndMaxValue[1]))
                             break
                         end

@@ -77,6 +77,26 @@ textureSpecArray = Vector{Vector{TextureSpec}}([
 # Load and resample TP data
 all_tps_data = Dict{Int, Vector{Vector{Any}}}()
 
+# Load anatomy atlas from HDF5 (same as run_interactive_mrb.jl)
+import HDF5
+anatomy_atlas = try
+    preprocessed_h5 = joinpath(data_dir, "preprocessed_volumes.h5")
+    if isfile(preprocessed_h5)
+        h5 = HDF5.h5open(preprocessed_h5, "r")
+        anat = haskey(h5, "ATLAS/max_anatomy") ? Int16.(read(h5["ATLAS/max_anatomy"])) : nothing
+        close(h5)
+        if anat !== nothing
+            println("  Loaded anatomy atlas: $(size(anat)), non-zero=$(count(x -> x > 0, anat))")
+        end
+        anat
+    else
+        nothing
+    end
+catch e
+    @warn "Could not load anatomy atlas: $e"
+    nothing
+end
+
 function load_tp(ct_path, pet_path, mask_path, tfm_path, modality)
     ct = MedImages.load_image(ct_path, "CT")
     pet_raw = MedImages.load_image(pet_path, modality == "SPECT" ? "NM" : "PET")
@@ -103,7 +123,11 @@ function load_tp(ct_path, pet_path, mask_path, tfm_path, modality)
     end
     
     bone_vol = zeros(Int8, size(ct_vol))
-    anatomy_vol = zeros(Int16, size(ct_vol))
+    anatomy_vol = if anatomy_atlas !== nothing && size(anatomy_atlas) == size(ct_vol)
+        copy(anatomy_atlas)
+    else
+        zeros(Int16, size(ct_vol))
+    end
     
     return ct_vol, pet_vol, mask_vol, bone_vol, anatomy_vol
 end
@@ -172,12 +196,18 @@ for (tp_idx, vdt) in all_tps_data
     ct_vol = vdt[1][1][2]   # axial panel CT
     pet_vol = vdt[1][2][2]  # axial panel PET
     mask_vol = vdt[1][3][2] # axial panel Mask
+    anatomy_vol_for_cache = vdt[1][5][2]  # axial panel Anatomy
     mask_compact = eltype(mask_vol) == Int16 ? mask_vol : Int16.(round.(max.(0.0f0, Float32.(mask_vol))))
     mask_i16 = mask_compact
     bone_mask = zeros(Int8, size(ct_vol))
-    anatomy = nothing
-    anat_i16 = zeros(Int16, size(ct_vol))
-    entry = MEH.TpCacheEntry(ct_vol, pet_vol, mask_compact, bone_mask, anatomy, mask_i16, anat_i16)
+    # Use real anatomy data if available (non-zero), otherwise nothing
+    anatomy_u16 = if anatomy_vol_for_cache !== nothing && count(x -> x != 0, anatomy_vol_for_cache) > 0
+        UInt16.(max.(0, anatomy_vol_for_cache))
+    else
+        nothing
+    end
+    anat_i16 = anatomy_u16 !== nothing ? Int16.(anatomy_u16) : nothing
+    entry = MEH.TpCacheEntry(ct_vol, pet_vol, mask_compact, bone_mask, anatomy_u16, mask_i16, anat_i16)
     MEH.tp_data_cache[tp_idx] = entry
 end
 
@@ -348,6 +378,16 @@ n_pass += capture("20_bone_mask_on.png")
 n_total += 1
 send_events(ShowBoneMaskEvent(false))
 n_pass += capture("21_bone_mask_off.png")
+
+# 21b. Anatomy ON
+n_total += 1
+send_events(ShowMaskLayerEvent(4, true))
+n_pass += capture("21b_anatomy_on.png")
+
+# 21c. Anatomy OFF
+n_total += 1
+send_events(ShowMaskLayerEvent(4, false))
+n_pass += capture("21c_anatomy_off.png")
 
 # 22. Next time point
 n_total += 1
