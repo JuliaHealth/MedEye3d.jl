@@ -166,15 +166,175 @@ function launch_demo(; quad::Bool=true)
 end
 
 """
+    launch_from_h5(h5_path::String; quad::Bool=true)
+
+Loads and visualizes multi-modal medical datasets from a preprocessed HDF5 database (`preprocessed_volumes.h5`).
+Extracts baseline CT, SUV PET, and lesion masks with isotropic spacing and multi-planar QuadView.
+"""
+function launch_from_h5(h5_path::String; quad::Bool=true)
+    println("Opening HDF5 medical dataset: ", h5_path)
+    if !isfile(h5_path)
+        @error "Provided HDF5 file does not exist: $h5_path"
+        return
+    end
+
+    local vol_ct::Array{Float32, 3}
+    local vol_pet::Union{Nothing, Array{Float32, 3}} = nothing
+    local vol_mask::Union{Nothing, Array{Float32, 3}} = nothing
+    local spacing = (1.0, 1.0, 1.0)
+    local origin = (0.0, 0.0, 0.0)
+
+    try
+        h5 = HDF5.h5open(h5_path, "r")
+        if haskey(h5, "BASELINE")
+            base_grp = h5["BASELINE"]
+            # Find CT
+            ct_keys = filter(k -> occursin("CT", k) || occursin("ct", k), keys(base_grp))
+            ct_key = !isempty(ct_keys) ? ct_keys[1] : first(keys(base_grp))
+            ct_d = base_grp[ct_key]
+            vol_ct = Float32.(read(ct_d))
+            attrs = HDF5.attributes(ct_d)
+            if haskey(attrs, "spacing")
+                spacing = Tuple(Float64.(read(attrs["spacing"])))
+            end
+            if haskey(attrs, "origin")
+                origin = Tuple(Float64.(read(attrs["origin"])))
+            end
+
+            # Find PET
+            pet_keys = filter(k -> occursin("PET", k) || occursin("SUV", k) || occursin("pet", k), keys(base_grp))
+            if !isempty(pet_keys)
+                vol_pet = Float32.(read(base_grp[pet_keys[1]]))
+            end
+
+            # Find Lesion Mask
+            mask_keys = filter(k -> occursin("Lesion", k) || occursin("mask", k) || occursin("Mask", k), keys(base_grp))
+            if !isempty(mask_keys)
+                vol_mask = Float32.(read(base_grp[mask_keys[1]]))
+            end
+        else
+            # Fallback for generic HDF5 datasets
+            root_keys = keys(h5)
+            first_d = h5[first(root_keys)]
+            vol_ct = Float32.(read(first_d))
+        end
+        close(h5)
+    catch e
+        @error "Failed to read HDF5 dataset: $e"
+        return
+    end
+
+    if vol_mask === nothing
+        vol_mask = zeros(Float32, size(vol_ct)...)
+    end
+
+    min_ct, max_ct = Float32(minimum(vol_ct)), Float32(maximum(vol_ct))
+    if min_ct == max_ct
+        max_ct += 1.0f0
+    end
+
+    textureSpec_ct = TextureSpec{Float32}(
+        name="CT",
+        isMainImage=true,
+        color=RGB(1.0, 1.0, 1.0),
+        minAndMaxValue=Float32.([min_ct, min(max_ct, 1500.0f0)])
+    )
+
+    textureSpec_mask = TextureSpec{Float32}(
+        name="Mask",
+        isMainImage=false,
+        color=RGB(1.0, 0.0, 0.0),
+        minAndMaxValue=Float32.([0, 1]),
+        maskContribution=0.5f0,
+        isEditable=true
+    )
+
+    specs = TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_mask)]
+    tuples = Any[("CT", vol_ct), ("Mask", vol_mask)]
+
+    if vol_pet !== nothing
+        min_pet, max_pet = Float32(minimum(vol_pet)), Float32(maximum(vol_pet))
+        textureSpec_pet = TextureSpec{Float32}(
+            name="PET",
+            isMainImage=false,
+            color=RGB(1.0, 0.6, 0.0),
+            minAndMaxValue=Float32.([min_pet, max(max_pet, 10.0f0)]),
+            maskContribution=0.4f0
+        )
+        push!(specs, deepcopy(textureSpec_pet))
+        push!(tuples, ("PET", vol_pet))
+    end
+
+    if quad
+        vol_ct_coronal = permutedims(vol_ct, (1, 3, 2))
+        vol_mask_coronal = permutedims(vol_mask, (1, 3, 2))
+        spacing_coronal = (spacing[1], spacing[3], spacing[2])
+
+        vol_ct_sagittal = permutedims(vol_ct, (2, 3, 1))
+        vol_mask_sagittal = permutedims(vol_mask, (2, 3, 1))
+        spacing_sagittal = (spacing[2], spacing[3], spacing[1])
+
+        voxelDataTupleVector = Vector{Vector{Any}}([
+            tuples,
+            Any[("Mask", vol_mask)],
+            Any[("CT", vol_ct_coronal), ("Mask", vol_mask_coronal)],
+            Any[("CT", vol_ct_sagittal), ("Mask", vol_mask_sagittal)]
+        ])
+
+        textureSpecArray = Vector{Vector{TextureSpec}}([
+            specs,
+            TextureSpec[deepcopy(textureSpec_mask)],
+            TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_mask)],
+            TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_mask)]
+        ])
+
+        spacings = [[spacing], [spacing], [spacing_coronal], [spacing_sagittal]]
+        origins = [[origin], [origin], [origin], [origin]]
+    else
+        voxelDataTupleVector = Vector{Vector{Any}}([tuples])
+        textureSpecArray = Vector{Vector{TextureSpec}}([specs])
+        spacings = [[spacing]]
+        origins = [[origin]]
+    end
+
+    svVertAndInd = Dict{String, Vector}()
+    dummyStudySrc = Vector{Vector{Tuple{String,String}}}()
+
+    println("Opening MedEye3D window for: ", basename(h5_path))
+    mainViewer = SegmentationDisplay.displayImage(
+        dummyStudySrc;
+        textureSpecArray=textureSpecArray,
+        voxelDataTupleVector=voxelDataTupleVector,
+        spacings=spacings,
+        origins=origins,
+        fractionOfMainImage=Float32(1.0),
+        windowWidth=1360,
+        svVertAndInd=svVertAndInd,
+        quadView=quad
+    )
+
+    try
+        while isopen(mainViewer.channel)
+            sleep(0.1)
+        end
+    catch
+    end
+end
+
+"""
     launch_from_file(file_path::String; quad::Bool=true)
 
-Loads and visualizes a medical image (NIfTI, DICOM, etc.) from `file_path`.
+Loads and visualizes a medical image (NIfTI, DICOM, HDF5, etc.) from `file_path`.
 """
 function launch_from_file(file_path::String; quad::Bool=true)
     println("Loading medical image: ", file_path)
     if !isfile(file_path)
         @error "Provided file path does not exist: $file_path"
         return
+    end
+
+    if endswith(lowercase(file_path), ".h5") || endswith(lowercase(file_path), ".hdf5")
+        return launch_from_h5(file_path; quad=quad)
     end
 
     med_img = MedImages.load_image(file_path, "")
@@ -286,7 +446,7 @@ function run_app(args::Vector{String})
         Options:
           -h, --help        Show this help message
           -v, --version     Show version information
-          --demo            Launch synthetic 3D phantom viewer
+          --demo            Launch default test case or synthetic 3D phantom viewer
           [file_path]       Open medical image file (.nii, .nii.gz, .mha, .h5)
         """)
         return
@@ -297,17 +457,33 @@ function run_app(args::Vector{String})
         return
     end
 
+    default_h5_candidates = [
+        "D:\\MedEye3d.jl\\data\\preprocessed_volumes.h5",
+        joinpath(@__DIR__, "..", "..", "data", "preprocessed_volumes.h5"),
+        joinpath(get(ENV, "APPDATA", ""), "MedEye3D", "data", "preprocessed_volumes.h5")
+    ]
+    default_h5_idx = findfirst(isfile, default_h5_candidates)
+    default_h5 = default_h5_idx !== nothing ? default_h5_candidates[default_h5_idx] : nothing
+
     file_args = filter(a -> !startswith(a, "-"), args)
     if !isempty(file_args) && isfile(file_args[1])
         launch_from_file(file_args[1]; quad=true)
     elseif "--demo" in args
-        launch_demo(; quad=true)
+        if default_h5 !== nothing
+            println("Launching default test dataset: ", default_h5)
+            launch_from_h5(default_h5; quad=true)
+        else
+            launch_demo(; quad=true)
+        end
     else
         println("Opening MedEye3D File Selector / Demo Launcher...")
         action, path = MedEye3d.StudySelectorWindow.prompt_open_or_demo()
         if action == :file && isfile(path)
             println("Selected file: ", path)
             launch_from_file(path; quad=true)
+        elseif default_h5 !== nothing
+            println("No file selected. Launching default test dataset: ", default_h5)
+            launch_from_h5(default_h5; quad=true)
         else
             println("No file selected. Launching interactive 3D demo phantom visualizer...")
             launch_demo(; quad=true)

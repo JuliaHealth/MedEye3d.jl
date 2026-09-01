@@ -47,6 +47,8 @@ ChangesAssociations=yes
 ; Privileges required for Program Files and System Associations
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
+CloseApplications=yes
+CloseApplicationsFilter=*.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -92,3 +94,38 @@ Root: HKA; Subkey: "Software\Classes\MedEye3D.HDF5\shell\open\command"; ValueTyp
 
 [Run]
 Filename: "{app}\bin\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// Helper function to find previously installed version's uninstaller
+function GetUninstallString(): String;
+var
+  sUnInstPath: String;
+  sAppId: String;
+begin
+  sAppId := '{#MyAppAppId}';
+  sUnInstPath := '';
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + sAppId + '_is1', 'UninstallString', sUnInstPath) then
+  begin
+    RegQueryStringValue(HKEY_LOCAL_MACHINE, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + sAppId + '_is1', 'UninstallString', sUnInstPath);
+  end;
+  Result := sUnInstPath;
+end;
+
+// Automatically uninstall previous version before proceeding
+function InitializeSetup(): Boolean;
+var
+  sUnInstallString: String;
+  iResultCode: Integer;
+begin
+  Result := True;
+  sUnInstallString := GetUninstallString();
+  if sUnInstallString <> '' then
+  begin
+    sUnInstallString := RemoveQuotes(sUnInstallString);
+    if FileExists(sUnInstallString) then
+    begin
+      // Execute uninstaller silently and wait for it to finish
+      Exec(sUnInstallString, '/VERYSILENT /NORESTART /SUPPRESSMSGBOXES', '', SW_HIDE, ewWaitUntilTerminated, iResultCode);
+    end;
+  end;
+end;
