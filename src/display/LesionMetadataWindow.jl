@@ -185,10 +185,41 @@ end
 
 const _schema_cache = Ref{Vector{QuestionDef}}(QuestionDef[])
 
+function _builtin_schema()::Vector{QuestionDef}
+    [
+        QuestionDef("Radioligand Type","Radioligand used",
+            ["68Ga-PSMA-11","18F-PSMA-1007","18F-DCFPyL","Other"],
+            ["Technical Parameters"],"both","68Ga-PSMA-11"),
+        QuestionDef("Lesion tracking name?","Anatomical descriptor",
+            String[],["Identification"],"both",""),
+        QuestionDef("Anatomic Location","Primary anatomical site",
+            ["Prostate Gland","Axial Skeleton","Appendicular Skeleton",
+             "Pelvic Lymph Node","Distant Lymph Node","Solid Organ / Viscera",
+             "General Soft Tissue","Blood Vessel","Other"],
+            ["Location"],"both",""),
+        QuestionDef("Inner Texture / Density / Attenuation","Internal density",
+            ["Sclerotic / Blastic","Lytic / Lucent","Mixed Lytic & Sclerotic",
+             "Ground-Glass / Fibrous","Fluid-Filled / Cystic","Fat Density","Central Necrosis"],
+            ["Morphology"],"both",""),
+        QuestionDef("Border and Margin","Margin character",
+            ["Smooth / Well-Defined","Spiculated / Feathered","Moth-Eaten",
+             "Ill-Defined / Permeative","Reactive Sclerotic Rim"],
+            ["Morphology"],"both",""),
+        QuestionDef("Lesion Shape","3D morphology",
+            ["Oval / Bean-Shaped","Round","Teardrop","Lobulated","Irregular"],
+            ["Morphology"],"both",""),
+        QuestionDef("Certainty","Diagnostic certainty",
+            ["High (>90%)","Medium (50-90%)","Low (<50%)"],
+            ["Final Assessment"],"both",""),
+        QuestionDef("Comment","Free-text comment",String[],["Reporting"],"both",""),
+    ]
+end
+
 function load_schema()::Vector{QuestionDef}
     isempty(_schema_cache[]) || return _schema_cache[]
     if !isfile(DEF_JSON_PATH)
-        error("Strict Configuration Enforcement: def.json schema file not found at $(DEF_JSON_PATH). Built-in fallback schema has been disabled.")
+        _schema_cache[] = _builtin_schema()
+        return _schema_cache[]
     end
     raw = JSON.parse(read(DEF_JSON_PATH, String))
     result = QuestionDef[]
@@ -232,7 +263,7 @@ function load_radlex()::Vector{String}
     else
         @warn "RadLex CSV not found at $(RADLEX_CSV_PATH)"
     end
-    _radlex_cache[] = sort(terms)
+    _radlex_cache[] = isempty(terms) ? ["(none)"] : sort(terms)
     return _radlex_cache[]
 end
 
@@ -262,7 +293,7 @@ function load_anatomy_ontology()::Vector{String}
     else
         @warn "FoundationalAnatomy CSV not found at $(ANATOMY_CSV_PATH)"
     end
-    _anatomy_cache[] = sort(terms)
+    _anatomy_cache[] = isempty(terms) ? ["(none)"] : sort(terms)
     return _anatomy_cache[]
 end
 
@@ -1155,7 +1186,9 @@ function searchable_menu(g, row, cols;
         fontsize = 10)
 
     # Snapshot original full options
-    all_opts = Ref(options isa Observable ? copy(options[]) : collect(String, options))
+    opts_vec = options isa Observable ? copy(options[]) : collect(String, options)
+    isempty(opts_vec) && (opts_vec = ["(none)"])
+    all_opts = Ref(opts_vec)
 
     # Standard Menu — no inner layouts, no Textbox, no alignment issues
     menu = Menu(g[row, cols];
@@ -2187,7 +2220,8 @@ end_section!(sec_win)
     btn_rl_add = Button(g[rl_r, 4], label = "+ Add",
         buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
 
-    radlex_filtered = Observable(length(radlex) > 200 ? radlex[1:200] : radlex)
+    radlex_opts = isempty(radlex) ? ["(none)"] : (length(radlex) > 200 ? radlex[1:200] : radlex)
+    radlex_filtered = Observable(radlex_opts)
     rl_menu_r = r[1] + 1  # peek at next row number before nr!()
     rl_menu = Menu(g[nr!(), 1:4], options = radlex_filtered, fontsize = 10)
     rowsize!(g, rl_menu_r, Fixed(28)); register_fixed_row!(rl_menu_r, 28)
@@ -2195,11 +2229,11 @@ end_section!(sec_win)
     on(rl_search.stored_string) do txt
         t = _safe_strip(txt)
         if isempty(t)
-            radlex_filtered[] = length(radlex) > 200 ? radlex[1:200] : radlex
+            radlex_filtered[] = isempty(radlex) ? ["(none)"] : (length(radlex) > 200 ? radlex[1:200] : radlex)
         else
             tl = lowercase(t)
             hits = filter(s -> occursin(tl, lowercase(s)), radlex)
-            radlex_filtered[] = length(hits) > 200 ? hits[1:200] : hits
+            radlex_filtered[] = isempty(hits) ? ["(none)"] : (length(hits) > 200 ? hits[1:200] : hits)
         end
     end
     on(btn_rl_add.clicks) do _

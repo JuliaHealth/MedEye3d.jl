@@ -22,6 +22,8 @@ using ColorTypes
 using Statistics
 using LinearAlgebra
 using Dates
+using GLMakie
+import Observables
 import GLFW
 import HDF5
 import JSON
@@ -42,31 +44,44 @@ textureSpec_pet = TextureSpec{Float32}(
     isMainImage=false,
     isNuclearMask=true,
     color=RGB(1.0, 0.5, 0.0),
-    minAndMaxValue=Float32.([0, 10])
+    minAndMaxValue=Float32.([0, 10]),
+    maskContribution=0.5f0
 )
 
-textureSpec_mask = TextureSpec{Float32}(
+textureSpec_mask = TextureSpec{Int16}(
     name="Mask",
     isMainImage=false,
     isMultiDiscreteMask=true,
+    isIntegerTexture=true,
     colorSet=colors_mapped,
-    minAndMaxValue=Float32.([0, length(colors_mapped)]),
-    isEditable=true
+    minAndMaxValue=Int16.([0, length(colors_mapped)]),
+    isEditable=true,
+    maskContribution=0.5f0
+)
+
+textureSpec_bone = TextureSpec{Int8}(
+    name="Bone_Overlay",
+    isMainImage=false,
+    isIntegerTexture=true,
+    color=RGB(0.0, 1.0, 1.0),
+    minAndMaxValue=Int8.([0, 3]),
+    isVisible=true,
+    maskContribution=0.5f0
 )
 
 # 2. Trace 3D synthetic volume generation & memory representations
 println("[2/5] Tracing 3D volume manipulation & multi-planar permutations...")
 dim_x, dim_y, dim_z = 64, 64, 32
 vol_ct = rand(Float32, dim_x, dim_y, dim_z)
-vol_mask = zeros(Float32, dim_x, dim_y, dim_z)
-vol_mask[20:40, 20:40, 10:20] .= 1.0f0
+vol_mask = zeros(Int16, dim_x, dim_y, dim_z)
+vol_mask[20:40, 20:40, 10:20] .= Int16(1)
 
 # Axial, Coronal, Sagittal permutations
-vol_ct_coronal = permutedims(vol_ct, (1, 3, 2))
-vol_mask_coronal = permutedims(vol_mask, (1, 3, 2))
+vol_ct_coronal = PermutedDimsArray(vol_ct, (1, 3, 2))
+vol_mask_coronal = PermutedDimsArray(vol_mask, (1, 3, 2))
 
-vol_ct_sagittal = permutedims(vol_ct, (2, 3, 1))
-vol_mask_sagittal = permutedims(vol_mask, (2, 3, 1))
+vol_ct_sagittal = PermutedDimsArray(vol_ct, (2, 3, 1))
+vol_mask_sagittal = PermutedDimsArray(vol_mask, (2, 3, 1))
 
 spacing_axial = (1.0, 1.0, 2.0)
 spacing_coronal = (1.0, 2.0, 1.0)
@@ -114,6 +129,15 @@ end
 # 5. Trace AppMain entry dispatch & StudySelectorWindow
 println("[5/5] Tracing AppMain & StudySelectorWindow...")
 MedEye3d.StudySelectorWindow.scan_medical_files(@__DIR__)
+
+# Trace Makie metadata control panel window layout
+try
+    active_les = Observables.Observable("1: Lesion_1")
+    les_list = Observables.Observable(["1: Lesion_1", "2: Lesion_2"])
+    makie_win = LesionMetadataWindow.create_metadata_window(active_les, les_list, nothing)
+catch e
+    println("Makie layout tracing notice: ", e)
+end
 
 include(joinpath(@__DIR__, "AppMain.jl"))
 using .MedEye3dApp

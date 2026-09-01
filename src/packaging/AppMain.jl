@@ -5,14 +5,22 @@ using MedEye3d.ForDisplayStructs
 using MedEye3d.DataStructs
 using MedEye3d.StructsManag
 using MedEye3d.SegmentationDisplay
+using MedEye3d.MakieEvents
+using MedEye3d.LesionMetadataWindow
+using MedEye3d.LesionAssociation
 using MedImages
 using ColorTypes
 using Logging
 using Statistics
 using LinearAlgebra
 using Dates
+using GLMakie
+import Observables
 import GLFW
 import HDF5
+import JSON
+
+const MEH = MedEye3d.SegmentationDisplay.MakieEventHandlers
 
 export julia_main
 
@@ -43,124 +51,9 @@ function get_writable_log_dir()::String
 end
 
 """
-    launch_demo(; quad::Bool=true)
-
-Launches a standalone interactive 3D medical visualizer with synthetic CT and segmentation mask.
-Supports single panel or multi-planar 4-panel (Axial, Coronal, Sagittal) quad view.
-"""
-function launch_demo(; quad::Bool=true)
-    println("Initializing MedEye3D Demo Visualization...")
-
-    # Create synthetic CT volume (ellipsoid structure + simulated tissue)
-    dim_x, dim_y, dim_z = 128, 128, 64
-    vol_ct = zeros(Float32, dim_x, dim_y, dim_z)
-    vol_mask = zeros(Float32, dim_x, dim_y, dim_z)
-
-    cx, cy, cz = dim_x ÷ 2, dim_y ÷ 2, dim_z ÷ 2
-    for z in 1:dim_z, y in 1:dim_y, x in 1:dim_x
-        # Simulated tissue background
-        vol_ct[x, y, z] = -100.0f0 + 40.0f0 * sin(0.08f0 * x) * cos(0.08f0 * y)
-        
-        # Ellipsoidal organ / phantom
-        dx = (x - cx) / (dim_x * 0.35f0)
-        dy = (y - cy) / (dim_y * 0.35f0)
-        dz = (z - cz) / (dim_z * 0.35f0)
-        r2 = dx*dx + dy*dy + dz*dz
-        if r2 < 1.0f0
-            vol_ct[x, y, z] = 40.0f0 + 120.0f0 * (1.0f0 - Float32(sqrt(r2)))
-        end
-
-        # Synthetic focal lesion
-        lx = (x - (cx + 16)) / 10.0f0
-        ly = (y - (cy + 8)) / 10.0f0
-        lz = (z - (cz - 4)) / 8.0f0
-        if (lx*lx + ly*ly + lz*lz) < 1.0f0
-            vol_mask[x, y, z] = 1.0f0
-        end
-    end
-
-    spacing = (1.0, 1.0, 1.5)
-
-    textureSpec_ct = TextureSpec{Float32}(
-        name="CT",
-        isMainImage=true,
-        color=RGB(1.0, 1.0, 1.0),
-        minAndMaxValue=Float32.([-150, 250])
-    )
-
-    textureSpec_mask = TextureSpec{Float32}(
-        name="Mask",
-        isMainImage=false,
-        color=RGB(1.0, 0.2, 0.2),
-        minAndMaxValue=Float32.([0, 1]),
-        maskContribution=0.5f0,
-        isEditable=true
-    )
-
-    if quad
-        # Axial, Coronal, Sagittal
-        vol_ct_axial = vol_ct
-        vol_mask_axial = vol_mask
-        spacing_axial = spacing
-
-        vol_ct_coronal = permutedims(vol_ct, (1, 3, 2))
-        vol_mask_coronal = permutedims(vol_mask, (1, 3, 2))
-        spacing_coronal = (spacing[1], spacing[3], spacing[2])
-
-        vol_ct_sagittal = permutedims(vol_ct, (2, 3, 1))
-        vol_mask_sagittal = permutedims(vol_mask, (2, 3, 1))
-        spacing_sagittal = (spacing[2], spacing[3], spacing[1])
-
-        voxelDataTupleVector = Vector{Vector{Any}}([
-            Any[("CT", vol_ct_axial), ("Mask", vol_mask_axial)],
-            Any[("Mask", vol_mask_axial)],
-            Any[("CT", vol_ct_coronal), ("Mask", vol_mask_coronal)],
-            Any[("CT", vol_ct_sagittal), ("Mask", vol_mask_sagittal)]
-        ])
-
-        textureSpecArray = Vector{Vector{TextureSpec}}([
-            TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_mask)],
-            TextureSpec[deepcopy(textureSpec_mask)],
-            TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_mask)],
-            TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_mask)]
-        ])
-
-        spacings = [[spacing_axial], [spacing_axial], [spacing_coronal], [spacing_sagittal]]
-        origins = [[(0.0, 0.0, 0.0)], [(0.0, 0.0, 0.0)], [(0.0, 0.0, 0.0)], [(0.0, 0.0, 0.0)]]
-    else
-        voxelDataTupleVector = Vector{Vector{Any}}([
-            Any[("CT", vol_ct), ("Mask", vol_mask)]
-        ])
-        textureSpecArray = Vector{Vector{TextureSpec}}([
-            TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_mask)]
-        ])
-        spacings = [[spacing]]
-        origins = [[(0.0, 0.0, 0.0)]]
-    end
-
-    svVertAndInd = Dict{String, Vector}()
-    dummyStudySrc = Vector{Vector{Tuple{String,String}}}()
-
-    println("Opening MedEye3D window...")
-    mainViewer = SegmentationDisplay.displayImage(
-        dummyStudySrc;
-        textureSpecArray=textureSpecArray,
-        voxelDataTupleVector=voxelDataTupleVector,
-        spacings=spacings,
-        origins=origins,
-        fractionOfMainImage=Float32(1.0),
-        windowWidth=1280,
-        svVertAndInd=svVertAndInd,
-        quadView=quad
-    )
-
-    run_viewer_loop(mainViewer)
-end
-
-"""
     run_viewer_loop(mainViewer)
 
-Continuously pumps GLFW OS window events on the main thread and keeps the visualizer responsive until closed.
+Continuously pumps GLFW OS window events on the main thread and keeps the visualizer and Makie control panel responsive until closed.
 """
 function run_viewer_loop(mainViewer)
     window = if !isempty(mainViewer.states) && mainViewer.states[1].mainForDisplayObjects !== nothing
@@ -182,70 +75,13 @@ function run_viewer_loop(mainViewer)
 end
 
 """
-    launch_from_h5(h5_path::String; quad::Bool=true)
+    launch_simple_volume(vol_ct::Array{Float32, 3}, title::String; spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0), quad::Bool=true)
 
-Loads and visualizes multi-modal medical datasets from a preprocessed HDF5 database (`preprocessed_volumes.h5`).
-Extracts baseline CT, SUV PET, and lesion masks with isotropic spacing and multi-planar QuadView.
+Visualizes a single 3D scalar volume with optional multi-planar QuadView.
 """
-function launch_from_h5(h5_path::String; quad::Bool=true)
-    println("Opening HDF5 medical dataset: ", h5_path)
-    if !isfile(h5_path)
-        @error "Provided HDF5 file does not exist: $h5_path"
-        return
-    end
-
-    local vol_ct::Array{Float32, 3}
-    local vol_pet::Union{Nothing, Array{Float32, 3}} = nothing
-    local vol_mask::Union{Nothing, Array{Float32, 3}} = nothing
-    local spacing = (1.0, 1.0, 1.0)
-    local origin = (0.0, 0.0, 0.0)
-
-    try
-        h5 = HDF5.h5open(h5_path, "r")
-        if haskey(h5, "BASELINE")
-            base_grp = h5["BASELINE"]
-            # Find CT
-            ct_keys = filter(k -> occursin("CT", k) || occursin("ct", k), keys(base_grp))
-            ct_key = !isempty(ct_keys) ? ct_keys[1] : first(keys(base_grp))
-            ct_d = base_grp[ct_key]
-            vol_ct = Float32.(read(ct_d))
-            attrs = HDF5.attributes(ct_d)
-            if haskey(attrs, "spacing")
-                spacing = Tuple(Float64.(read(attrs["spacing"])))
-            end
-            if haskey(attrs, "origin")
-                origin = Tuple(Float64.(read(attrs["origin"])))
-            end
-
-            # Find PET
-            pet_keys = filter(k -> occursin("PET", k) || occursin("SUV", k) || occursin("pet", k), keys(base_grp))
-            if !isempty(pet_keys)
-                vol_pet = Float32.(read(base_grp[pet_keys[1]]))
-            end
-
-            # Find Lesion Mask
-            mask_keys = filter(k -> occursin("Lesion", k) || occursin("mask", k) || occursin("Mask", k), keys(base_grp))
-            if !isempty(mask_keys)
-                vol_mask = Float32.(read(base_grp[mask_keys[1]]))
-            end
-        else
-            # Fallback for generic HDF5 datasets
-            root_keys = keys(h5)
-            first_d = h5[first(root_keys)]
-            vol_ct = Float32.(read(first_d))
-        end
-        close(h5)
-    catch e
-        err_msg = "Failed to read HDF5 dataset ($h5_path): $(sprint(showerror, e))\n$(sprint(Base.show_backtrace, catch_backtrace()))"
-        @error err_msg
-        println(stderr, err_msg)
-        flush(stderr)
-        return
-    end
-
-    if vol_mask === nothing
-        vol_mask = zeros(Float32, size(vol_ct)...)
-    end
+function launch_simple_volume(vol_ct::Array{Float32, 3}, title::String; spacing=(1.0, 1.0, 1.0), origin=(0.0, 0.0, 0.0), quad::Bool=true)
+    dim_x, dim_y, dim_z = size(vol_ct)
+    vol_mask = zeros(Float32, dim_x, dim_y, dim_z)
 
     min_ct, max_ct = Float32(minimum(vol_ct)), Float32(maximum(vol_ct))
     if min_ct == max_ct
@@ -270,19 +106,6 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
 
     specs = TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_mask)]
     tuples = Any[("CT", vol_ct), ("Mask", vol_mask)]
-
-    if vol_pet !== nothing
-        min_pet, max_pet = Float32(minimum(vol_pet)), Float32(maximum(vol_pet))
-        textureSpec_pet = TextureSpec{Float32}(
-            name="PET",
-            isMainImage=false,
-            color=RGB(1.0, 0.6, 0.0),
-            minAndMaxValue=Float32.([min_pet, max(max_pet, 10.0f0)]),
-            maskContribution=0.4f0
-        )
-        push!(specs, deepcopy(textureSpec_pet))
-        push!(tuples, ("PET", vol_pet))
-    end
 
     if quad
         vol_ct_coronal = PermutedDimsArray(vol_ct, (1, 3, 2))
@@ -316,10 +139,8 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         origins = [[origin]]
     end
 
-    svVertAndInd = Dict{String, Vector}()
     dummyStudySrc = Vector{Vector{Tuple{String,String}}}()
-
-    println("Opening MedEye3D window for: ", basename(h5_path))
+    println("Opening MedEye3D window for: ", title)
     mainViewer = SegmentationDisplay.displayImage(
         dummyStudySrc;
         textureSpecArray=textureSpecArray,
@@ -327,11 +148,512 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         spacings=spacings,
         origins=origins,
         fractionOfMainImage=Float32(1.0),
-        windowWidth=1360,
-        svVertAndInd=svVertAndInd,
+        windowWidth=1280,
         quadView=quad
     )
 
+    run_viewer_loop(mainViewer)
+end
+
+"""
+    launch_demo(; quad::Bool=true)
+
+Launches a standalone interactive 3D medical visualizer with synthetic CT and segmentation mask.
+"""
+function launch_demo(; quad::Bool=true)
+    println("Initializing MedEye3D Demo Visualization...")
+
+    # Create synthetic CT volume
+    dim_x, dim_y, dim_z = 128, 128, 64
+    vol_ct = zeros(Float32, dim_x, dim_y, dim_z)
+    vol_mask = zeros(Float32, dim_x, dim_y, dim_z)
+
+    cx, cy, cz = dim_x ÷ 2, dim_y ÷ 2, dim_z ÷ 2
+    for z in 1:dim_z, y in 1:dim_y, x in 1:dim_x
+        vol_ct[x, y, z] = -100.0f0 + 40.0f0 * sin(0.08f0 * x) * cos(0.08f0 * y)
+        dx = (x - cx) / (dim_x * 0.35f0)
+        dy = (y - cy) / (dim_y * 0.35f0)
+        dz = (z - cz) / (dim_z * 0.35f0)
+        r2 = dx*dx + dy*dy + dz*dz
+        if r2 < 1.0f0
+            vol_ct[x, y, z] = 40.0f0 + 120.0f0 * (1.0f0 - Float32(sqrt(r2)))
+        end
+        lx = (x - (cx + 16)) / 10.0f0
+        ly = (y - (cy + 8)) / 10.0f0
+        lz = (z - (cz - 4)) / 8.0f0
+        if (lx*lx + ly*ly + lz*lz) < 1.0f0
+            vol_mask[x, y, z] = 1.0f0
+        end
+    end
+
+    spacing = (1.0, 1.0, 1.5)
+    origin = (0.0, 0.0, 0.0)
+
+    textureSpec_ct = TextureSpec{Float32}(name="CT", isMainImage=true, color=RGB(1.0, 1.0, 1.0), minAndMaxValue=Float32.([-150, 250]))
+    textureSpec_mask = TextureSpec{Float32}(name="Mask", isMainImage=false, color=RGB(1.0, 0.2, 0.2), minAndMaxValue=Float32.([0, 1]), maskContribution=0.5f0, isEditable=true)
+
+    if quad
+        vol_ct_coronal = PermutedDimsArray(vol_ct, (1, 3, 2))
+        vol_mask_coronal = PermutedDimsArray(vol_mask, (1, 3, 2))
+        spacing_coronal = (spacing[1], spacing[3], spacing[2])
+
+        vol_ct_sagittal = PermutedDimsArray(vol_ct, (2, 3, 1))
+        vol_mask_sagittal = PermutedDimsArray(vol_mask, (2, 3, 1))
+        spacing_sagittal = (spacing[2], spacing[3], spacing[1])
+
+        voxelDataTupleVector = Vector{Vector{Any}}([
+            Any[("CT", vol_ct), ("Mask", vol_mask)],
+            Any[("Mask", vol_mask)],
+            Any[("CT", vol_ct_coronal), ("Mask", vol_mask_coronal)],
+            Any[("CT", vol_ct_sagittal), ("Mask", vol_mask_sagittal)]
+        ])
+
+        textureSpecArray = Vector{Vector{TextureSpec}}([
+            TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_mask)],
+            TextureSpec[deepcopy(textureSpec_mask)],
+            TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_mask)],
+            TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_mask)]
+        ])
+
+        spacings = [[spacing], [spacing], [spacing_coronal], [spacing_sagittal]]
+        origins = [[origin], [origin], [origin], [origin]]
+    else
+        voxelDataTupleVector = Vector{Vector{Any}}([Any[("CT", vol_ct), ("Mask", vol_mask)]])
+        textureSpecArray = Vector{Vector{TextureSpec}}([TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_mask)]])
+        spacings = [[spacing]]
+        origins = [[origin]]
+    end
+
+    dummyStudySrc = Vector{Vector{Tuple{String,String}}}()
+    println("Opening MedEye3D Demo window...")
+    mainViewer = SegmentationDisplay.displayImage(
+        dummyStudySrc;
+        textureSpecArray=textureSpecArray,
+        voxelDataTupleVector=voxelDataTupleVector,
+        spacings=spacings,
+        origins=origins,
+        fractionOfMainImage=Float32(1.0),
+        windowWidth=1280,
+        quadView=quad
+    )
+
+    run_viewer_loop(mainViewer)
+end
+
+"""
+    launch_from_h5(h5_path::String; quad::Bool=true)
+
+Loads and visualizes multi-modal medical datasets from a preprocessed HDF5 database (`preprocessed_volumes.h5`).
+Initializes the complete clinical workflow:
+- 5-layer textures (CT, Nuclear PET overlay, discrete Mask, Bone Surface/Marrow overlay, Anatomy)
+- Panel 2 pure PET view and multi-planar QuadView (Axial, Coronal, Sagittal)
+- Makie metadata control panel window (sliders, lesion dropdown, AI segmentation triggers, report generation)
+- Real-time timepoint navigation (PET, SPECT, followups)
+"""
+function launch_from_h5(h5_path::String; quad::Bool=true)
+    println("Opening HDF5 medical dataset: ", h5_path)
+    if !isfile(h5_path)
+        @error "Provided HDF5 file does not exist: $h5_path"
+        return
+    end
+
+    ENV["HDF5_USE_FILE_LOCKING"] = "FALSE"
+    
+    h5_init = try
+        HDF5.h5open(h5_path, "r")
+    catch e
+        @error "Failed to open HDF5 file: $e"
+        return
+    end
+
+    # Check if this is a preprocessed multi-study dataset
+    is_multimodal = haskey(h5_init, "BASELINE")
+    
+    if !is_multimodal
+        root_keys = keys(h5_init)
+        vol_ct = Float32.(read(h5_init[first(root_keys)]))
+        close(h5_init)
+        return launch_simple_volume(vol_ct, basename(h5_path); quad=quad)
+    end
+
+    # 1. Parse studies and time points from scene_hierarchy / metadata
+    meta_dates = Dict{String, String}()
+    if haskey(h5_init, "_meta_/metadata.json")
+        try
+            meta_json = JSON.parse(read(h5_init["_meta_/metadata.json"]))
+            for item in meta_json
+                for (k, v) in item
+                    if v isa Dict && (haskey(v, "CT") || haskey(v, "PET") || haskey(v, "NM"))
+                        d_str = length(k) == 8 ? "$(k[1:4])-$(k[5:6])-$(k[7:8])" : k
+                        if haskey(v, "CT") && haskey(v["CT"], "name"); meta_dates[v["CT"]["name"]] = d_str; end
+                        if haskey(v, "PET") && haskey(v["PET"], "name"); meta_dates[v["PET"]["name"]] = d_str; end
+                        if haskey(v, "NM") && haskey(v["NM"], "name"); meta_dates[v["NM"]["name"]] = d_str; end
+                    end
+                end
+            end
+        catch e
+            @warn "Could not parse metadata.json dates: $e"
+        end
+    end
+
+    studies = []
+    if haskey(h5_init, "_meta_/scene_hierarchy.json")
+        try
+            hierarchy = JSON.parse(read(h5_init["_meta_/scene_hierarchy.json"]))
+            function extract_study(children, tfm_name)
+                ct_name = ""; pet_name = ""; mask_name = ""; ts_name = ""; max_anatomy_source = ""; max_anatomy_labels = ""; skellytour_source = ""; modality = "PET"
+                for child in children
+                    if child["type"] == "vtkMRMLLinearTransformNode"; continue; end
+                    name = child["name"]
+                    if child["type"] == "vtkMRMLScalarVolumeNode"
+                        if occursin("NM", name) || occursin("PET", name) || occursin("SUV", name)
+                            pet_name = name * ".nii.gz"
+                            if occursin("NM", name) || occursin("SPECT", name); modality = "SPECT"; end
+                        elseif occursin("CT", name)
+                            ct_name = name * ".nii.gz"
+                        end
+                    elseif child["type"] == "vtkMRMLSegmentationNode"
+                        if occursin("Lesions", name)
+                            mask_name = name * ".nii.gz"
+                        elseif startswith(name, "max_anatomy_")
+                            max_anatomy_source = get(child, "source", "")
+                            max_anatomy_labels = get(child, "labels", "")
+                        elseif startswith(name, "skellytour_")
+                            skellytour_source = get(child, "source", "")
+                        elseif occursin("TS_all", name) || occursin("TotalSegmentator", name)
+                            ts_name = name * ".nii.gz"
+                        end
+                    end
+                end
+                if isempty(ct_name) || isempty(pet_name); return nothing; end
+                ct_base = replace(ct_name, ".nii.gz" => "")
+                parts = split(ct_base, "_")
+                orig_tp = tryparse(Int, parts[end])
+                if orig_tp === nothing; orig_tp = 0; end
+                pet_base = replace(pet_name, ".nii.gz" => "")
+                date_str = get(meta_dates, ct_base, get(meta_dates, pet_base, "$modality TP $orig_tp"))
+                mask_base = replace(replace(mask_name, ".seg.nrrd" => ""), ".nii.gz" => "")
+                return (modality, orig_tp, date_str, ct_name, pet_name, mask_name, mask_base, tfm_name, ts_name, max_anatomy_source, max_anatomy_labels, skellytour_source)
+            end
+
+            b = extract_study(hierarchy, "")
+            if b !== nothing; push!(studies, b); end
+            for node in hierarchy
+                if node["type"] == "vtkMRMLLinearTransformNode"
+                    tfm_name = node["name"]
+                    tfm_file = tfm_name * ".tfm"
+                    s = extract_study(get(node, "children", []), tfm_file)
+                    if s !== nothing; push!(studies, s); end
+                end
+            end
+            sort!(studies, by = x -> (length(x[3]) >= 10 && isdigit(x[3][1])) ? x[3] : "$(x[2])_$(x[1])")
+        catch e
+            @warn "Failed to parse scene hierarchy: $e"
+        end
+    end
+
+    if isempty(studies)
+        base_ct = first(filter(k -> occursin("CT", k) || occursin("ct", k), keys(h5_init["BASELINE"])))
+        base_pet = first(filter(k -> occursin("PET", k) || occursin("SUV", k), keys(h5_init["BASELINE"])))
+        base_mask = first(filter(k -> occursin("Lesion", k) || occursin("mask", k), keys(h5_init["BASELINE"])))
+        push!(studies, ("PET", 0, "BASELINE", base_ct, base_pet, base_mask, "PET_Lesions_0", "", "", "", "", ""))
+    end
+
+    base_ct_fname = studies[1][4]
+    base_mask_fname = studies[1][6]
+    first_spacing = Tuple(Float64.(read(HDF5.attributes(h5_init["BASELINE/$base_ct_fname"])["spacing"])))
+    display_spacing = first_spacing
+
+    is_preflipped = haskey(h5_init, "_meta_/preflipped") && read(h5_init["_meta_/preflipped"]) == 1
+    raw_first_mask = read(h5_init["BASELINE/$base_mask_fname"])
+    first_mask = is_preflipped ? Float32.(raw_first_mask) : reverse(Float32.(raw_first_mask), dims=2)
+
+    ts_atlas_aligned = nothing
+    ts_names = Dict{Int,String}()
+    bone_atlas = nothing
+    skelly_atlas = nothing
+    organ_mapping = Dict{Int, String}()
+
+    if haskey(h5_init, "ATLAS/max_anatomy")
+        ts_atlas_aligned = read(h5_init["ATLAS/max_anatomy"])
+    end
+
+    if haskey(h5_init, "_meta_")
+        for k in sort(collect(keys(h5_init["_meta_"])))
+            if startswith(k, "anatomy_labels_tp_")
+                try
+                    tp_raw = JSON.parse(read(h5_init["_meta_/$k"]))
+                    for (id_str, name) in tp_raw
+                        id = parse(Int, id_str)
+                        if !occursin("_class_", name) && !haskey(ts_names, id)
+                            ts_names[id] = name
+                        end
+                    end
+                    break
+                catch; end
+            end
+        end
+        if haskey(h5_init, "_meta_/max_anatomy_labels.json") && isempty(ts_names)
+            try
+                raw_labels = JSON.parse(read(h5_init["_meta_/max_anatomy_labels.json"]))
+                ts_names = Dict{Int,String}(parse(Int, k) => v for (k, v) in raw_labels)
+            catch; end
+        end
+        if haskey(h5_init, "_meta_/organ_mapping")
+            try
+                raw_organ = JSON.parse(read(h5_init["_meta_/organ_mapping"]))
+                organ_mapping = Dict{Int,String}(parse(Int, k) => v for (k, v) in raw_organ)
+            catch; end
+        end
+    end
+
+    if haskey(h5_init, "ATLAS/skellytour")
+        skelly_atlas = read(h5_init["ATLAS/skellytour"])
+    end
+    if haskey(h5_init, "ATLAS/bone_atlas")
+        bone_atlas = read(h5_init["ATLAS/bone_atlas"])
+    end
+
+    # Centroids
+    if haskey(h5_init, "CENTROIDS")
+        for key in keys(h5_init["CENTROIDS"])
+            parts = split(key, "_lid")
+            if length(parts) == 2
+                tp_str = replace(parts[1], "tp" => "")
+                tp_idx = parse(Int, tp_str)
+                lid = parse(Int, parts[2])
+                coords = read(h5_init["CENTROIDS/$key"])
+                c = [Int(coords[1]), Int(coords[2]), Int(coords[3])]
+                MEH.lesion_centroids_cache[(tp_idx, lid)] = c
+                node_name = get(Dict(s_idx - 1 => study[7] for (s_idx, study) in enumerate(studies)), tp_idx, "")
+                if !isempty(node_name)
+                    MEH.lesion_centroids_cache[(node_name, lid)] = c
+                end
+                if tp_idx == 0
+                    MEH.lesion_centroids_cache[lid] = c
+                end
+            end
+        end
+    end
+
+    close(h5_init)
+
+    # 2. Textures configuration
+    colors_mapped = map(c -> RGB(c[1]/255, c[2]/255, c[3]/255), MedEye3d.distinctColorsSaved.listOfColors)
+    display_cfg = LesionMetadataWindow.load_display_config()
+    init_pet_blend = Float32(get(display_cfg, "pet_ct_blend", 0.5))
+    init_label_opacity = Float32(get(display_cfg, "label_opacity", 0.5))
+
+    textureSpec_ct = TextureSpec{Float32}(name="CT", isMainImage=true, color=RGB(1.0, 1.0, 1.0), minAndMaxValue=Float32.([-150, 250]))
+    textureSpec_pet = TextureSpec{Float32}(name="PET", isMainImage=false, isNuclearMask=true, color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0, 10]), maskContribution=init_pet_blend)
+    textureSpec_mask = TextureSpec{Int16}(
+        name="Mask", isMainImage=false, isMultiDiscreteMask=true, isIntegerTexture=true,
+        colorSet=colors_mapped, minAndMaxValue=Int16.([0, length(colors_mapped)]),
+        isEditable=true, maskContribution=init_label_opacity
+    )
+    textureSpec_pure_pet = TextureSpec{Float32}(name="PET", isMainImage=true, color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0, 10]))
+    textureSpec_bone = TextureSpec{Int8}(
+        name="Bone_Overlay", isMainImage=false, isIntegerTexture=true,
+        color=RGB(0.0, 1.0, 1.0), minAndMaxValue=Int8.([0, 3]),
+        isVisible=true, maskContribution=init_label_opacity
+    )
+    anatomy_colors = [RGB(rand(), rand(), rand()) for _ in 1:400]
+    textureSpec_anatomy = TextureSpec{Int16}(
+        name="Anatomy", isMainImage=false, isMultiDiscreteMask=true, isIntegerTexture=true,
+        colorSet=anatomy_colors, minAndMaxValue=Int16.([0, 400]),
+        isVisible=false, maskContribution=init_label_opacity
+    )
+
+    textureSpecArray = Vector{Vector{TextureSpec}}([
+        TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
+        TextureSpec[deepcopy(textureSpec_pure_pet)],
+        TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
+        TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
+        TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)]
+    ])
+
+    tp_labels_map = Dict{Int, String}()
+    tp_nodes_map = Dict{Int, String}()
+    for (s_idx, study) in enumerate(studies)
+        tp_i = s_idx - 1
+        modality = study[1]
+        orig_tp = study[2]
+        date_str = study[3]
+        node_name = study[7]
+        lbl = "$modality $date_str (TP $orig_tp)"
+        tp_labels_map[tp_i] = lbl
+        tp_nodes_map[tp_i] = node_name
+        MEH.tp_labels[tp_i] = lbl
+        MEH.tp_modalities[tp_i] = modality
+        MEH.tp_node_names[tp_i] = node_name
+    end
+
+    function load_single_tp_from_h5(tp_i::Int)
+        if tp_i < 0 || tp_i >= length(studies)
+            return nothing
+        end
+        study = studies[tp_i + 1]
+        modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname = study[1:8]
+        group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
+        
+        HDF5.h5open(h5_path, "r") do h5_file
+            is_pf = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
+            ct_vol = Float32.(read(h5_file["$group/$ct_fname"]))
+            pet_vol = Float32.(read(h5_file["$group/$pet_fname"]))
+            mask_vol = read(h5_file["$group/$mask_fname"])
+            
+            if modality == "SPECT"
+                pos_dat = pet_vol[pet_vol .> 0]
+                p99 = isempty(pos_dat) ? 1.0f0 : Float32(quantile(pos_dat, 0.99))
+                scale_factor = 8.0f0 / max(p99, 1.0f0)
+                pet_vol = max.(0.0f0, pet_vol .* scale_factor)
+            end
+            
+            needs_reverse = !is_pf
+            if needs_reverse
+                ct_vol_base = reverse(ct_vol, dims=2)
+                pet_vol_base = reverse(pet_vol, dims=2)
+                mask_vol_base = reverse(mask_vol, dims=2)
+            else
+                ct_vol_base = ct_vol; pet_vol_base = pet_vol; mask_vol_base = mask_vol
+            end
+            
+            lock(MEH._centroids_lock) do
+                MEH.pet_volumes_cache[tp_i] = pet_vol_base
+            end
+            
+            if eltype(mask_vol_base) == Int16
+                mask_compact = mask_vol_base
+            elseif eltype(mask_vol_base) <: Integer
+                mask_compact = Int16.(mask_vol_base)
+            else
+                mask_vol_base = max.(0.0f0, mask_vol_base)
+                mask_compact = Int16.(round.(mask_vol_base))
+            end
+            
+            sz = size(ct_vol_base)
+            bone_mask = zeros(Int8, sz)
+            
+            anatomy_vol = nothing
+            try
+                for k in keys(h5_file[group])
+                    if k == "max_anatomy.nii.gz" || startswith(k, "max_anatomy")
+                        raw_anat = read(h5_file["$group/$k"])
+                        if needs_reverse
+                            raw_anat = reverse(Float32.(raw_anat), dims=2)
+                        end
+                        anatomy_vol = eltype(raw_anat) <: Integer ? UInt16.(raw_anat) : UInt16.(round.(max.(0.0f0, Float32.(raw_anat))))
+                        break
+                    end
+                end
+            catch; end
+            
+            mask_i16 = Int16.(mask_compact)
+            anat_i16 = anatomy_vol !== nothing ? Int16.(anatomy_vol) : nothing
+            MEH.precompute_mask_centroids!(mask_compact, tp_i, node_name)
+            return MEH.TpCacheEntry(ct_vol_base, pet_vol_base, mask_compact, bone_mask, anatomy_vol, mask_i16, anat_i16)
+        end
+    end
+
+    MEH.register_tp_loader!(load_single_tp_from_h5)
+    first_entry = load_single_tp_from_h5(0)
+    MEH.tp_data_cache[0] = first_entry
+
+    function entry_to_vdt(e::MEH.TpCacheEntry)
+        mask_i16 = e.mask_i16
+        bone_i8 = e.bone_mask
+        anat_i16 = if e.anat_i16 !== nothing
+            e.anat_i16
+        elseif ts_atlas_aligned !== nothing
+            Int16.(ts_atlas_aligned)
+        else
+            zeros(Int16, size(e.ct))
+        end
+        
+        sz = size(e.ct)
+        Vector{Vector{Any}}([
+            Any[("CT", e.ct), ("PET", e.pet), ("Mask", mask_i16), ("Bone_Overlay", bone_i8), ("Anatomy", anat_i16)],
+            Any[("PET", e.pet)],
+            Any[("CT", PermutedDimsArray(e.ct, (2,3,1))), ("PET", PermutedDimsArray(e.pet, (2,3,1))), ("Mask", PermutedDimsArray(mask_i16, (2,3,1))), ("Bone_Overlay", zeros(Int8, sz[2], sz[3], sz[1])), ("Anatomy", PermutedDimsArray(anat_i16, (2,3,1)))],
+            Any[("CT", PermutedDimsArray(e.ct, (1,3,2))), ("PET", PermutedDimsArray(e.pet, (1,3,2))), ("Mask", PermutedDimsArray(mask_i16, (1,3,2))), ("Bone_Overlay", zeros(Int8, sz[1], sz[3], sz[2])), ("Anatomy", PermutedDimsArray(anat_i16, (1,3,2)))],
+            Any[("CT", e.ct), ("PET", e.pet), ("Mask", mask_i16), ("Bone_Overlay", zeros(Int8, sz)), ("Anatomy", anat_i16)]
+        ])
+    end
+    first_voxelDataTupleVector = entry_to_vdt(first_entry)
+
+    ds = display_spacing
+    spacings = [[ds], [ds], [(ds[2], ds[3], ds[1])], [(ds[1], ds[3], ds[2])], [ds]]
+    origins = [[(0.0, 0.0, 0.0)] for _ in 1:5]
+    dummyStudySrc = Vector{Vector{Tuple{String,String}}}()
+
+    # 3. Lesion List & Match Groups
+    try; LesionAssociation.load_matches_from_h5(h5_path); catch; end
+    match_groups = LesionAssociation.get_match_groups()
+
+    unique_vals = sort(unique(first_mask))
+    lesion_ids_ints = filter(x -> x > 0, unique_vals)
+    lesion_list = if isempty(lesion_ids_ints)
+        ["(none)"]
+    else
+        map(lesion_ids_ints) do i
+            seg_int = Int(i)
+            display_name = get(organ_mapping, seg_int, "Segment_$seg_int")
+            found_gid = nothing; found_matches = 0
+            node_name_0 = get(tp_nodes_map, 0, "PET_Lesions_0")
+            for (gid, members) in match_groups
+                for (node, s_int, _) in members
+                    if node == node_name_0 && s_int == seg_int
+                        found_gid = gid; found_matches = length(members); break
+                    end
+                end
+                found_gid !== nothing && break
+            end
+            found_gid !== nothing ? "$seg_int: $display_name [Grp $found_gid, $(found_matches) TPs]" : "$seg_int: $display_name"
+        end
+    end
+
+    active_lesion = Observables.Observable("(none)")
+    if !isempty(lesion_list) && lesion_list[1] != "(none)"
+        active_lesion[] = lesion_list[1]
+    end
+    lesion_ids = Observables.Observable(lesion_list)
+
+    # 4. Create Makie control window layout
+    println("Creating Makie control panel layout...")
+    makie_win = LesionMetadataWindow.create_metadata_window(active_lesion, lesion_ids, nothing)
+
+    # 5. Launch Vulkan display
+    println("Launching MedEye3D Vulkan display...")
+    mainViewer = SegmentationDisplay.displayImage(
+        dummyStudySrc;
+        textureSpecArray=textureSpecArray,
+        voxelDataTupleVector=first_voxelDataTupleVector,
+        spacings=spacings,
+        origins=origins,
+        windowWidth=1100,
+        fractionOfMainImage=Float32(1.0),
+        quadView=true
+    )
+
+    # 6. Connect Makie window to Vulkan channel & display
+    println("Connecting Makie window to Vulkan channel...")
+    LesionMetadataWindow.connect_channel!(makie_win, mainViewer.channel)
+    makie_screen = LesionMetadataWindow.display_metadata_window(makie_win.fig)
+
+    # 7. Warmup JIT & global references
+    put!(mainViewer.channel, CompareTimePointsEvent(false))
+    put!(mainViewer.channel, Int64(0))
+
+    MEH.global_bone_atlas[] = skelly_atlas !== nothing ? skelly_atlas : (bone_atlas !== nothing ? bone_atlas : zeros(Float32, 1, 1, 1))
+    MEH.global_organ_mapping[] = organ_mapping
+    MEH.global_ts_atlas[] = ts_atlas_aligned
+    MEH.global_ts_names[] = ts_names
+    MEH.patient_id[] = basename(h5_path)
+    MEH.h5_path_ref[] = h5_path
+    MEH.current_tp_index[] = 0
+    MEH.volume_z_size[] = size(first_mask, 3)
+
+    println("MedEye3D interactive clinical workflow initialized.")
     run_viewer_loop(mainViewer)
 end
 
@@ -356,82 +678,7 @@ function launch_from_file(file_path::String; quad::Bool=true)
     spacing = Tuple(Float64.(med_img.spacing))
     origin = Tuple(Float64.(med_img.origin))
 
-    vol_mask = zeros(Float32, size(vol_img)...)
-
-    min_val, max_val = Float32(minimum(vol_img)), Float32(maximum(vol_img))
-    if min_val == max_val
-        max_val += 1.0f0
-    end
-
-    textureSpec_img = TextureSpec{Float32}(
-        name="MainImage",
-        isMainImage=true,
-        color=RGB(1.0, 1.0, 1.0),
-        minAndMaxValue=Float32.([min_val, max_val])
-    )
-
-    textureSpec_mask = TextureSpec{Float32}(
-        name="Mask",
-        isMainImage=false,
-        color=RGB(1.0, 0.0, 0.0),
-        minAndMaxValue=Float32.([0, 1]),
-        maskContribution=0.5f0,
-        isEditable=true
-    )
-
-    if quad
-        vol_img_coronal = PermutedDimsArray(vol_img, (1, 3, 2))
-        vol_mask_coronal = PermutedDimsArray(vol_mask, (1, 3, 2))
-        spacing_coronal = (spacing[1], spacing[3], spacing[2])
-
-        vol_img_sagittal = PermutedDimsArray(vol_img, (2, 3, 1))
-        vol_mask_sagittal = PermutedDimsArray(vol_mask, (2, 3, 1))
-        spacing_sagittal = (spacing[2], spacing[3], spacing[1])
-
-        voxelDataTupleVector = Vector{Vector{Any}}([
-            Any[("MainImage", vol_img), ("Mask", vol_mask)],
-            Any[("Mask", vol_mask)],
-            Any[("MainImage", vol_img_coronal), ("Mask", vol_mask_coronal)],
-            Any[("MainImage", vol_img_sagittal), ("Mask", vol_mask_sagittal)]
-        ])
-
-        textureSpecArray = Vector{Vector{TextureSpec}}([
-            TextureSpec[deepcopy(textureSpec_img), deepcopy(textureSpec_mask)],
-            TextureSpec[deepcopy(textureSpec_mask)],
-            TextureSpec[deepcopy(textureSpec_img), deepcopy(textureSpec_mask)],
-            TextureSpec[deepcopy(textureSpec_img), deepcopy(textureSpec_mask)]
-        ])
-
-        spacings = [[spacing], [spacing], [spacing_coronal], [spacing_sagittal]]
-        origins = [[origin], [origin], [origin], [origin]]
-    else
-        voxelDataTupleVector = Vector{Vector{Any}}([
-            Any[("MainImage", vol_img), ("Mask", vol_mask)]
-        ])
-        textureSpecArray = Vector{Vector{TextureSpec}}([
-            TextureSpec[deepcopy(textureSpec_img), deepcopy(textureSpec_mask)]
-        ])
-        spacings = [[spacing]]
-        origins = [[origin]]
-    end
-
-    svVertAndInd = Dict{String, Vector}()
-    dummyStudySrc = Vector{Vector{Tuple{String,String}}}()
-
-    println("Opening MedEye3D window for: ", basename(file_path))
-    mainViewer = SegmentationDisplay.displayImage(
-        dummyStudySrc;
-        textureSpecArray=textureSpecArray,
-        voxelDataTupleVector=voxelDataTupleVector,
-        spacings=spacings,
-        origins=origins,
-        fractionOfMainImage=Float32(1.0),
-        windowWidth=1360,
-        svVertAndInd=svVertAndInd,
-        quadView=quad
-    )
-
-    run_viewer_loop(mainViewer)
+    launch_simple_volume(vol_img, basename(file_path); spacing=spacing, origin=origin, quad=quad)
 end
 
 """
