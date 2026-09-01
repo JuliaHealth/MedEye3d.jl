@@ -25,6 +25,10 @@ function displayAll(calcDimsStruct::CalcDimsStruct)
                 if GLFW.WindowShouldClose(window)
                     break
                 end
+                try
+                    GLFW.PollEvents()
+                catch
+                end
                 sleep(0.008)  # ~120 Hz yield rate, allows other Julia tasks to run
             end
         catch e

@@ -154,13 +154,28 @@ function launch_demo(; quad::Bool=true)
         quadView=quad
     )
 
-    println("MedEye3D window active. Entering event wait loop.")
-    # Keep application alive while viewer channel is active
+    run_viewer_loop(mainViewer)
+end
+
+"""
+    run_viewer_loop(mainViewer)
+
+Continuously pumps GLFW OS window events on the main thread and keeps the visualizer responsive until closed.
+"""
+function run_viewer_loop(mainViewer)
+    window = if !isempty(mainViewer.states) && mainViewer.states[1].mainForDisplayObjects !== nothing
+        mainViewer.states[1].mainForDisplayObjects.window
+    else
+        nothing
+    end
+
+    println("MedEye3D main event loop active. Window: ", window !== nothing ? "ready" : "none")
     try
-        while isopen(mainViewer.channel)
-            sleep(0.1)
+        while isopen(mainViewer.channel) && (window === nothing || !GLFW.WindowShouldClose(window))
+            GLFW.PollEvents()
+            sleep(0.005)
         end
-    catch
+    catch e
         # Channel closed or window terminated
     end
     println("MedEye3D session finished.")
@@ -270,12 +285,12 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     end
 
     if quad
-        vol_ct_coronal = permutedims(vol_ct, (1, 3, 2))
-        vol_mask_coronal = permutedims(vol_mask, (1, 3, 2))
+        vol_ct_coronal = PermutedDimsArray(vol_ct, (1, 3, 2))
+        vol_mask_coronal = PermutedDimsArray(vol_mask, (1, 3, 2))
         spacing_coronal = (spacing[1], spacing[3], spacing[2])
 
-        vol_ct_sagittal = permutedims(vol_ct, (2, 3, 1))
-        vol_mask_sagittal = permutedims(vol_mask, (2, 3, 1))
+        vol_ct_sagittal = PermutedDimsArray(vol_ct, (2, 3, 1))
+        vol_mask_sagittal = PermutedDimsArray(vol_mask, (2, 3, 1))
         spacing_sagittal = (spacing[2], spacing[3], spacing[1])
 
         voxelDataTupleVector = Vector{Vector{Any}}([
@@ -317,12 +332,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         quadView=quad
     )
 
-    try
-        while isopen(mainViewer.channel)
-            sleep(0.1)
-        end
-    catch
-    end
+    run_viewer_loop(mainViewer)
 end
 
 """
@@ -370,12 +380,12 @@ function launch_from_file(file_path::String; quad::Bool=true)
     )
 
     if quad
-        vol_img_coronal = permutedims(vol_img, (1, 3, 2))
-        vol_mask_coronal = permutedims(vol_mask, (1, 3, 2))
+        vol_img_coronal = PermutedDimsArray(vol_img, (1, 3, 2))
+        vol_mask_coronal = PermutedDimsArray(vol_mask, (1, 3, 2))
         spacing_coronal = (spacing[1], spacing[3], spacing[2])
 
-        vol_img_sagittal = permutedims(vol_img, (2, 3, 1))
-        vol_mask_sagittal = permutedims(vol_mask, (2, 3, 1))
+        vol_img_sagittal = PermutedDimsArray(vol_img, (2, 3, 1))
+        vol_mask_sagittal = PermutedDimsArray(vol_mask, (2, 3, 1))
         spacing_sagittal = (spacing[2], spacing[3], spacing[1])
 
         voxelDataTupleVector = Vector{Vector{Any}}([
@@ -421,12 +431,7 @@ function launch_from_file(file_path::String; quad::Bool=true)
         quadView=quad
     )
 
-    try
-        while isopen(mainViewer.channel)
-            sleep(0.1)
-        end
-    catch
-    end
+    run_viewer_loop(mainViewer)
 end
 
 """

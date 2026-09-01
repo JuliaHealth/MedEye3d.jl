@@ -321,6 +321,15 @@ Fire-and-forget — runs in a background thread. Errors are logged but don't pro
 function preload_ct_for_nninteractive(ct_vol::Array{Float32, 3}; port=get_ai_port())
     Threads.@spawn begin
         try
+            host = get_ai_host()
+            # Fast check if AI server is listening before doing any heavy I/O
+            test_conn = try
+                connect(host, port)
+            catch
+                return nothing
+            end
+            close(test_conn)
+
             out_dir = INFERENCE_DIR
             mkpath(out_dir)
             
@@ -347,7 +356,6 @@ function preload_ct_for_nninteractive(ct_vol::Array{Float32, 3}; port=get_ai_por
                 "out_dir" => "/tmp/medeye3d_inference"
             )
             
-            host = get_ai_host()
             conn = connect(host, port)
             write(conn, JSON.json(req))
             resp_str = read(conn, String)
