@@ -264,11 +264,12 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
         end
     end
 
-    # Invalidate SUV/volume/centroid caches and async-recompute metrics for the modified lesion
+    # Invalidate SUV/volume/centroid caches, async-recompute metrics, and mark mask dirty for auto-save
     try
+        MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
+        MEH.mark_tp_mask_dirty!(MEH.current_tp_index[])
         paint_id = round(Int, stateObject.valueForMasToSet.value)
         if paint_id > 0
-            MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
             MEH.invalidate_and_recompute_lesion_metrics_async!(paint_id, MEH.current_tp_index[])
         end
     catch e
@@ -601,6 +602,10 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                                             else
                                                 entry.mask .= round.(Int16, vol)
                                             end
+                                            if entry.mask_i16 !== nothing
+                                                entry.mask_i16 .= round.(Int16, vol)
+                                            end
+                                            MEH.mark_tp_mask_dirty!(tp_idx)
                                             break
                                         end
                                     end
@@ -733,6 +738,19 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             info_str = join(parts, " | ")
             MEH.cursor_info_text[] = info_str
             MEH.cursor_study_text[] = study_str
+
+            # Track 3D voxel position (axial orientation) for anatomy lookups
+            # Panels 1,2,5 are axial: (ix, iy, slice) maps to (x, y, z)
+            # Panel 3 is sagittal: data is PermutedDimsArray(vol, (3,2,1)), so (ix,iy,slice)→(slice,iy,ix)
+            # Panel 4 is coronal:  data is PermutedDimsArray(vol, (1,3,2)), so (ix,iy,slice)→(ix,slice,iy)
+            vox = if clickedPanel == 3
+                (currentSlice, iy, ix)
+            elseif clickedPanel == 4
+                (ix, currentSlice, iy)
+            else
+                (ix, iy, currentSlice)
+            end
+            MEH.current_viewer_position[] = vox
 
             # Update GLFW window title (already on OpenGL thread inside on_next!, safe to call directly)
             GLFW.SetWindowTitle(panelState.mainForDisplayObjects.window,
