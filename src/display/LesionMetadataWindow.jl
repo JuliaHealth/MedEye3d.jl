@@ -1642,6 +1642,7 @@ function create_metadata_window(
     end
 
     is_syncing_selection = Ref(false)
+    _skip_sync_on_lesion_change = Ref(false)  # set by btn_new_lesion to prevent SyncLesionEvent jump
 
     on(les_menu.selection) do sel
         is_syncing_selection[] && return
@@ -2534,8 +2535,7 @@ end_section!(sec_win)
         # Trigger GenManualEvent to ensure bone subsegmentation is calculated for manually painted lesions
         active_str = active_lesion_id[]
         if active_str != "" && active_str != "(none)"
-            parts = split(active_str, " - ")
-            lid = tryparse(Int, strip(parts[1]))
+            lid = parse_lesion_id(active_str)
             if lid !== nothing
                 put!(channel, GenManualEvent(lid))
             end
@@ -2684,6 +2684,7 @@ end_section!(sec_win)
             lesion_ids[] = opts; les_menu.options[] = opts
             les_menu.selection[] = new_name; les_menu.i_selected[] = length(opts)
         finally; is_syncing_selection[] = false; end
+        _skip_sync_on_lesion_change[] = true  # prevent SyncLesionEvent → no jump to center
         active_lesion_id[] = new_name
         current_paint_mode[] = :paint
         btn_paint.buttoncolor[] = GRN; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BG_PNL
@@ -3649,6 +3650,75 @@ end_section!(sec_win)
             @warn "PROMISE auto-computation failed: $e"
         end
         
+        # ── Auto-fill SUV Quantitative Metrics & References dropdown ─────
+        try
+            suv_str_for_quant = get(data, "SUV max", "")
+            if isempty(suv_str_for_quant) && haskey(field_widgets, "SUV max") && field_widgets["SUV max"] isa Textbox
+                suv_str_for_quant = _safe_strip(field_widgets["SUV max"].stored_string[])
+            end
+            if !isempty(suv_str_for_quant) && haskey(field_widgets, "SUV Quantitative Metrics & References")
+                qf = parse_suv_fields(suv_str_for_quant)
+                q_suv_max  = get(qf, "max", 0.0f0)
+                q_blood    = get(qf, "blood", 0.0f0)
+                q_liver    = get(qf, "liver", 0.0f0)
+                q_parotid  = get(qf, "parotid", 0.0f0)
+                
+                if q_suv_max > 0
+                    # Evaluate rules (highest clinical priority first)
+                    best_opt = nothing
+                    
+                    # Basic PROMISE-tier rules
+                    if q_suv_max >= q_parotid && q_parotid > 0
+                        best_opt = "SUVpeak > Parotid SUVmean (PROMISE = 3)"
+                    elseif q_suv_max >= q_liver && q_liver > 0
+                        best_opt = "SUVpeak > Liver SUVmean (PROMISE ≥ 2)"
+                    elseif q_suv_max >= q_blood && q_blood > 0
+                        best_opt = "SUVpeak > Blood Pool SUVmean (PSMA Avid)"
+                    elseif q_blood > 0 && q_suv_max < q_blood
+                        best_opt = "SUVpeak < Blood Pool SUVmean (PSMA Cold)"
+                    end
+                    
+                    # Specialized overrides
+                    if q_suv_max > 12.0
+                        best_opt = "SUVmax > 12 (Definite Primary)"
+                    end
+                    if q_liver > 0 && q_suv_max / q_liver > 2.5
+                        best_opt = something(best_opt, "Lesion-to-Background Ratio (LBR) > 2.5")
+                    end
+                    
+                    # Context-dependent rules
+                    lesion_type_str = try; active_lesion_type[]; catch; ""; end
+                    radioligand_str = try
+                        rw = field_widgets["Radioligand Type"]
+                        rw isa Menu ? rw.options[][rw.i_selected[]] : ""
+                    catch; ""; end
+                    
+                    if radioligand_str == "18F-PSMA-1007" && lesion_type_str == "Bone Meta" && q_suv_max < 10.0
+                        best_opt = "18F-PSMA-1007 Bone Lesion with SUV < 10 (FPR 51.4%)"
+                    end
+                    if lesion_type_str == "Bone Meta" && q_blood > 0 && q_suv_max < q_blood
+                        best_opt = "Unspecified Bone Uptake (UBU)"
+                    end
+                    
+                    # Only autofill if no user selection already saved in DB
+                    saved_quant = get(data, "SUV Quantitative Metrics & References", "")
+                    if (isempty(saved_quant) || saved_quant == "- select -") && best_opt !== nothing
+                        w_quant = field_widgets["SUV Quantitative Metrics & References"]
+                        if w_quant isa Menu
+                            q_opts = w_quant.options[]
+                            q_idx = findfirst(==(best_opt), q_opts)
+                            if q_idx !== nothing && w_quant.i_selected[] != q_idx
+                                w_quant.i_selected[] = q_idx
+                            end
+                            db_updates["SUV Quantitative Metrics & References"] = best_opt
+                        end
+                    end
+                end
+            end
+        catch e
+            @warn "SUV Quantitative autofill failed: $e"
+        end
+        
         # ── Auto-compute Volume and Match Analysis ───────────────────────
         try
             vol = compute_lesion_volume(lid, tp_idx)
@@ -3841,15 +3911,20 @@ end_section!(sec_win)
         end
         
         # Synchronize lesion with viewer (filters mask and jumps to slice)
-        # Non-blocking: use @async so we don't freeze the Makie GUI thread if the
-        # consumer is busy processing a previous event
-        @async try
-            lid = parse_lesion_id(id)
-            if lid !== nothing
-                put!(channel, SyncLesionEvent(lid))
+        # Skip for newly created lesions (no voxels → centroid defaults to center → unwanted jump)
+        if _skip_sync_on_lesion_change[]
+            _skip_sync_on_lesion_change[] = false
+        else
+            # Non-blocking: use @async so we don't freeze the Makie GUI thread if the
+            # consumer is busy processing a previous event
+            @async try
+                lid = parse_lesion_id(id)
+                if lid !== nothing
+                    put!(channel, SyncLesionEvent(lid))
+                end
+            catch e
+                @warn "Failed to send SyncLesionEvent: $e"
             end
-        catch e
-            @warn "Failed to send SyncLesionEvent: $e"
         end
     end
     if active_lesion_id[] != "" && active_lesion_id[] != "(none)"

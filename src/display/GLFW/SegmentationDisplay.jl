@@ -96,7 +96,7 @@ function reactToResizeWindow(data::ResizeWindowEvent, stateObjects::Vector{State
         try
             obj = stateObjects[1].mainForDisplayObjects
             if obj.vulkanCtx !== nothing
-                VulkanContext.recreate_swapchain!(obj.vulkanCtx, data.width, data.height)
+                VulkanContext.recreate_swapchain!(obj.vulkanCtx, data.fb_width, data.fb_height)
             end
         catch e
             @warn "Error recreating Vulkan swapchain: $e"
@@ -402,9 +402,29 @@ function coordinateDisplay(
     window, vertex_shader, vao, ebo, fragment_shader_words, vbo_words, shader_program_words, gslsStr, stopChannel = PrepareWindow.displayAll(calcDimStructs[1])
 
     # ═══ Vulkan Initialization ═══
-    # Initialize Vulkan context (instance, device, swapchain, render pass, etc.)
-    vk_ctx = VulkanContext.init_vulkan_context(window, calcDimStructs[1].windowWidth, calcDimStructs[1].windowHeight)
+    # Use FRAMEBUFFER size for Vulkan (actual GPU pixel dimensions).
+    # Use WINDOW size for CalcDimsStruct (GLFW cursor coords are in window space).
+    fb_w, fb_h = GLFW.GetFramebufferSize(window)
+    win_w, win_h = GLFW.GetWindowSize(window)
+    vk_ctx = VulkanContext.init_vulkan_context(window, Int(fb_w), Int(fb_h))
     vk_ctx.staging_pool = VulkanStaging.create_staging_pool(vk_ctx, 64)
+    
+    # Update CalcDimsStruct to use actual WINDOW size (may differ from requested due to WM/DPI)
+    if Int(win_w) != calcDimStructs[1].windowWidth || Int(win_h) != calcDimStructs[1].windowHeight
+        @info "Window size adjusted by WM/DPI: requested=$(calcDimStructs[1].windowWidth)x$(calcDimStructs[1].windowHeight) → window=$(win_w)x$(win_h), framebuffer=$(fb_w)x$(fb_h)"
+        for (idx, cd) in enumerate(calcDimStructs)
+            cd.windowWidth = Int64(win_w)
+            cd.windowHeight = Int64(win_h)
+            cd.avWindWidtForMain = Int32(round(Int(win_w) * cd.fractionOfMainIm))
+            cd.avWindHeightForMain = Int32(win_h)
+            cd.avMainImRatio = Float32(Int(win_h) / max(1, cd.avWindWidtForMain))
+            try
+                calcDimStructs[idx] = StructsManag.getMainVerticies(cd, displayMode, cd.imagePos)
+            catch e
+                @warn "Error updating quad vertices for panel $idx: $e"
+            end
+        end
+    end
 
     # Determine texture list per panel
     listOfTextSpecsMapped::Vector{Vector{TextureSpec}} = if isa(listOfTextSpecs, Vector) && !isempty(listOfTextSpecs) && isa(listOfTextSpecs[1], TextureSpec)
@@ -519,6 +539,7 @@ function coordinateDisplay(
             vulkanTextures=vk_textures
         ))
     end
+
     #finding some texture that can be modifid and set as one active for modifications
     # put!(mainMedEye3dInstance.channel, forDispObj)
     #in order to clean up all resources while closing
@@ -807,9 +828,28 @@ function coordinateDisplay(
                         VulkanPipeline.update_ubo!(obj.vulkanCtx, obj.vulkanPipelineState, obj.listOfTextSpecifications)
                         # Build push constants for zoom/pan + NDC quad bounds
                         zoom = max(0.1f0, state.calcDimsStruct.zoom)
-                        scale = 1.0f0 / zoom
                         offsetX = state.calcDimsStruct.panY
                         offsetY = state.calcDimsStruct.panX
+                        
+                        # Compute per-axis UV scale: combines zoom with data-to-texture ratio.
+                        # When the slice is smaller than the GPU texture (e.g., coronal 512×326
+                        # in a 512×512 texture after plane change), scale UV to only sample
+                        # the valid data region. For normal case (data matches texture), ratio=1.0.
+                        data_w = Float32(state.calcDimsStruct.imageTextureWidth)
+                        data_h = Float32(state.calcDimsStruct.imageTextureHeight)
+                        tex_w = data_w  # default: texture matches data
+                        tex_h = data_h
+                        if !isempty(obj.vulkanTextures)
+                            tex_w = Float32(obj.vulkanTextures[1].width)
+                            tex_h = Float32(obj.vulkanTextures[1].height)
+                        end
+                        ratio_x = data_w / max(1.0f0, tex_w)
+                        ratio_y = data_h / max(1.0f0, tex_h)
+                        scale_x = ratio_x / zoom
+                        scale_y = ratio_y / zoom
+                        # Shift UV origin so data maps from V=0 (top) not centered
+                        offset_corr_x = -(1.0f0 - ratio_x) / 2.0f0
+                        offset_corr_y = -(1.0f0 - ratio_y) / 2.0f0
                         
                         # Extract NDC quad bounds from mainImageQuadVert
                         # Each vertex has 8 floats: X, Y, Z, R, G, B, U, V
@@ -830,8 +870,8 @@ function coordinateDisplay(
                         # Push constants: uvScale(2) + uvOffset(2) + ndcMin(2) + ndcMax(2) = 8 floats
                         # Reuse pre-allocated vector (PanelRenderData stores the reference)
                         push_consts = copy(_push_consts)  # Each panel needs its own copy
-                        push_consts[1] = scale; push_consts[2] = scale
-                        push_consts[3] = offsetX; push_consts[4] = offsetY
+                        push_consts[1] = scale_x; push_consts[2] = scale_y
+                        push_consts[3] = offsetX + offset_corr_x; push_consts[4] = offsetY + offset_corr_y
                         push_consts[5] = ndc_left; push_consts[6] = ndc_bottom
                         push_consts[7] = ndc_right; push_consts[8] = ndc_top
                         
@@ -848,7 +888,18 @@ function coordinateDisplay(
                     
                     _t_before_render = time_ns()
                     if !isempty(_vk_panels) && vk_ctx !== nothing
-                        VulkanRender.render_frame!(vk_ctx, _vk_panels)
+                        if !VulkanRender.render_frame!(vk_ctx, _vk_panels)
+                            # Swapchain out of date — recreate from current framebuffer size
+                            try
+                                w_new, h_new = GLFW.GetFramebufferSize(window)
+                                if w_new > 0 && h_new > 0
+                                    VulkanContext.recreate_swapchain!(vk_ctx, Int(w_new), Int(h_new))
+                                    println("Swapchain recreated after error: $(w_new)x$(h_new)"); flush(stdout)
+                                end
+                            catch re
+                                @warn "Failed to recreate swapchain: $re"
+                            end
+                        end
                     end
                     _t_after_render = time_ns()
                     

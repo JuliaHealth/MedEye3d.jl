@@ -106,11 +106,14 @@ function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData})::Bool
     # Acquire next image
     result = acquire_next_image_khr(ctx.device, ctx.swapchain, typemax(UInt64);
                                      semaphore=ctx.image_available_semaphore)
-    if isa(result, Vulkan.VulkanError)
-        # Swapchain out of date → needs recreation
+    local img_idx::UInt32
+    try
+        img_idx, _ = unwrap(result)
+    catch e
+        # ERROR_OUT_OF_DATE_KHR or ERROR_SURFACE_LOST_KHR → swapchain needs recreation
+        println("Vulkan acquire error (swapchain out of date): $(e)"); flush(stdout)
         return false
     end
-    img_idx, _ = unwrap(result)
     ctx.last_rendered_image_idx = img_idx
 
     # Record command buffer
@@ -208,8 +211,10 @@ function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData})::Bool
         _present_sc,
         _present_idx
     )
-    present_result = queue_present_khr(ctx.graphics_queue, present_info)
-    if isa(present_result, Vulkan.VulkanError)
+    try
+        queue_present_khr(ctx.graphics_queue, present_info)
+    catch e
+        println("Vulkan present error (swapchain out of date): $(e)"); flush(stdout)
         return false  # swapchain needs recreation
     end
 

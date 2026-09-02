@@ -331,6 +331,9 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
 
   # 6. Build 32-element OpenGL vertex array (4 vertices * 8 floats)
   # Layout: X, Y, Z, R, G, B, U, V
+  # Note: UV values here are NOT used by the zero-VBO Vulkan vertex shader
+  # (which generates UV from gl_VertexIndex with push constants for zoom/pan).
+  # They are only used by getTextureCoordinatesFromScreen for mouse mapping.
   res = Float32[
     right_x, top_y,    0.0f0, 1.0f0, 0.0f0, 0.0f0, 1.0f0, 1.0f0,  # top right
     right_x, bottom_y, 0.0f0, 0.0f0, 1.0f0, 0.0f0, 1.0f0, 0.0f0,  # bottom right
