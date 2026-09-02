@@ -436,6 +436,54 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         end
     end
 
+    # Bone subsegments precomputed cache loading
+    if haskey(h5_init, "BONE_SUBSEG")
+        vol_size = ts_atlas_aligned !== nothing ? size(ts_atlas_aligned) : (512, 512, 326)
+        cis_b = CartesianIndices(vol_size)
+        node_to_tp = Dict{String, Int}(study[7] => s_idx - 1 for (s_idx, study) in enumerate(studies))
+        bone_grp = h5_init["BONE_SUBSEG"]
+        
+        for obj in keys(bone_grp)
+            if endswith(obj, "_surf")
+                marr_key = replace(obj, "_surf" => "_marr")
+                if haskey(bone_grp, marr_key)
+                    try
+                        surf_data = read(bone_grp[obj])
+                        marr_data = read(bone_grp[marr_key])
+                        surf_pts = ndims(surf_data) == 1 ? cis_b[surf_data] : findall(surf_data .> 0)
+                        marr_pts = ndims(marr_data) == 1 ? cis_b[marr_data] : findall(marr_data .> 0)
+                        
+                        obj_base = replace(obj, "_surf" => "")
+                        parts = split(obj_base, "_lesion_")
+                        if length(parts) == 2
+                            prefix = String(parts[1])
+                            lid = parse(Int, parts[2])
+                            
+                            if haskey(node_to_tp, prefix)
+                                tp_i = node_to_tp[prefix]
+                                MEH.bone_subsegments_cache[(tp_i, lid)] = (surf_pts, marr_pts)
+                                MEH.bone_subsegments_cache[(prefix, lid)] = (surf_pts, marr_pts)
+                            elseif startswith(prefix, "tp_")
+                                tp_num = tryparse(Int, replace(prefix, "tp_" => ""))
+                                if tp_num !== nothing
+                                    MEH.bone_subsegments_cache[(tp_num, lid)] = (surf_pts, marr_pts)
+                                    MEH.bone_subsegments_cache[(prefix, lid)] = (surf_pts, marr_pts)
+                                end
+                            else
+                                MEH.bone_subsegments_cache[(prefix, lid)] = (surf_pts, marr_pts)
+                            end
+                        elseif startswith(obj_base, "lesion_")
+                            lid = parse(Int, replace(obj_base, "lesion_" => ""))
+                            MEH.bone_subsegments_cache[(0, lid)] = (surf_pts, marr_pts)
+                        end
+                    catch err
+                        @warn "Failed to parse bone subseg $obj: $err"
+                    end
+                end
+            end
+        end
+    end
+
     close(h5_init)
 
     # Initialize MEH global state early so event handlers and UI widgets have full atlas data
