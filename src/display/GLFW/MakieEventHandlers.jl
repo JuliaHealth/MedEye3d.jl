@@ -213,6 +213,13 @@ function reactToChangePlane(data::ChangePlaneEvent, stateObjects::Vector{StateDa
     dummy_kb = KeyboardStruct()
     panel_indices = Int[]
     for (idx, stateObject) in enumerate(stateObjects)
+        # Panels 3 (Sagittal) and 4 (Coronal) have pre-permuted data that
+        # must always slice along dimension 3. Skip plane changes for them.
+        if idx in (3, 4)
+            push!(panel_indices, idx)
+            continue
+        end
+        
         old_scroll = stateObject.onScrollData.dataToScrollDims
         new_scroll = DataToScrollDims(imageSize=old_scroll.imageSize, voxelSize=old_scroll.voxelSize, dimensionToScroll=dim)
         
@@ -241,6 +248,13 @@ function reactToChangePlane(data::ChangePlaneEvent, stateObjects::Vector{StateDa
     end
     # Batch texture upload for all panels at once
     ReactToScroll.reactToScrollMultiPanel!(panel_indices, stateObjects)
+    
+    # Force slice re-upload: processKeysInfo already set currentDisplayedSlice,
+    # so reactToScrollMultiPanel may see slice_changed=false (same slice number,
+    # different plane). Force the consumer to upload the new plane's data.
+    for idx in panel_indices
+        stateObjects[idx].isSliceChanged = true
+    end
 end
 
 function updateQuadVertices!(stateObject::StateDataFields, layout::Symbol)
@@ -390,6 +404,17 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                 stateObjects[i].calcDimsStruct.panX = 0.0f0
                 stateObjects[i].calcDimsStruct.panY = 0.0f0
                 stateObjects[i].displayMode = QuadImage
+                # Restore correct dimensionToScroll for sagittal (3) and coronal (4)
+                # panels — their data is pre-permuted and must always slice along dim 3
+                if i in (3, 4)
+                    old_dts = stateObjects[i].onScrollData.dataToScrollDims
+                    stateObjects[i].onScrollData.dataToScrollDims = DataToScrollDims(
+                        imageSize = old_dts.imageSize,
+                        voxelSize = old_dts.voxelSize,
+                        dimensionToScroll = 3)
+                    stateObjects[i].onScrollData.dimensionToScroll = 3
+                    stateObjects[i].onScrollData.slicesNumber = Int32(old_dts.imageSize[3])
+                end
                 if stateObjects[i].onScrollData.slicesNumber > 0
                     stateObjects[i].currentDisplayedSlice = max(1, stateObjects[i].onScrollData.slicesNumber ÷ 2)
                 end
@@ -717,7 +742,29 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
     end
     
     if skelly_vol !== nothing && mask_vol !== nothing && count(skelly_vol .> 0) > 0
-        res = compute_bone_subsegments_fast(mask_vol, skelly_vol, target_id)
+        # Use proper morphological bone subsegmentation (erosion-based cortical shell + marrow)
+        res = try
+            BoneSub = Main.MedEye3d.BoneSubsegmentation
+            # Get spacing from stateObject or use default
+            sp = try
+                sv = stateObject.spacingsValue
+                isa(sv, Tuple) ? sv : sv[1]
+            catch
+                (1.0, 1.0, 2.0)
+            end
+            println("  [BONE-MORPH] Running morphological subseg for lid=$target_id tp=$panel_tp spacing=$sp"); flush(stdout)
+            surf_mask, marr_mask = BoneSub.generate_bone_subsegments(
+                Float32.(mask_vol), Float32.(skelly_vol), sp, target_id
+            )
+            s_pts = findall(surf_mask)
+            m_pts = findall(marr_mask)
+            println("  [BONE-MORPH] SUCCESS: $(length(s_pts)) surf, $(length(m_pts)) marrow voxels"); flush(stdout)
+            (s_pts, m_pts)
+        catch e
+            @warn "Morphological bone subseg failed, falling back to fast version" exception=(e, catch_backtrace())
+            println("  [BONE-FAST] Falling back to compute_bone_subsegments_fast for lid=$target_id tp=$panel_tp"); flush(stdout)
+            compute_bone_subsegments_fast(mask_vol, skelly_vol, target_id)
+        end
         bone_subsegments_cache[(panel_tp, target_id)] = res
         if !isempty(node_name)
             bone_subsegments_cache[(node_name, target_id)] = res

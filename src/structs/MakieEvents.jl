@@ -87,9 +87,13 @@ struct SaveMRBEvent end
 
 struct CloseWindowEvent end
 struct ResizeWindowEvent
-    width :: Int
+    width :: Int      # GLFW window size (for coordinate mapping — cursor coords are in this space)
     height :: Int
+    fb_width :: Int   # Framebuffer size (for Vulkan swapchain — actual pixel dimensions)
+    fb_height :: Int
 end
+# Backward-compatible constructor: when framebuffer size isn't known, assume same as window
+ResizeWindowEvent(w::Int, h::Int) = ResizeWindowEvent(w, h, w, h)
 struct SetWindowTitleEvent
     title :: String
 end

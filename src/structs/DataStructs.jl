@@ -164,6 +164,12 @@ usefull stats for proper text display
     corrected_width = 1.0 #Necessary for calculating proper mouse position
 
     imagePos::Int64 = 1 #Left or right image
+
+    # GPU Vulkan texture dimensions (allocated at max(imageSize) to handle all planes).
+    # imageTextureWidth/Height track the current plane's slice dimensions for aspect ratio,
+    # while gpuTextureWidth/Height store the actual GPU allocation size for UV scaling.
+    gpuTextureWidth::Int32 = imageTextureWidth
+    gpuTextureHeight::Int32 = imageTextureHeight
 end#CalcDimsStruct
 
 """

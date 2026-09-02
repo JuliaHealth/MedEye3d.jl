@@ -115,7 +115,13 @@ function subscribeGLFWtoActor(window::GLFW.Window, mainMedEye3dObject::MainMedEy
 
     # Window management events routed directly through the channel
     GLFW.SetWindowCloseCallback(window, (_) -> put!(mainMedEye3dObject.channel, CloseWindowEvent()))
-    GLFW.SetFramebufferSizeCallback(window, (_, w, h) -> put!(mainMedEye3dObject.channel, ResizeWindowEvent(Int(w), Int(h))))
+    GLFW.SetFramebufferSizeCallback(window, (win, fb_w, fb_h) -> begin
+        # GLFW cursor coords are in WINDOW space, not framebuffer space.
+        # Use window size for CalcDimsStruct (quad vertices / coordinate mapping),
+        # framebuffer size for Vulkan swapchain (actual GPU pixel dimensions).
+        win_w, win_h = GLFW.GetWindowSize(win)
+        put!(mainMedEye3dObject.channel, ResizeWindowEvent(Int(win_w), Int(win_h), Int(fb_w), Int(fb_h)))
+    end)
 end
 
 

@@ -280,7 +280,12 @@ function upload_textures_batched!(ctx::VkCtx, pool::VkStagingPool, batch::Vector
         aligned_offset = (curr_offset + 15) & ~UInt64(15)
         dest_ptr = Ptr{Nothing}(pool.mapped_ptr + aligned_offset)
         
-        # Format-dispatched copy directly to GPU staging memory (0 allocations)
+        # Zero the full texture area first, then copy actual data on top.
+        # When plane changes (e.g., axial→coronal), the slice may be smaller
+        # than the texture. Zeroing prevents stale garbage pixels from
+        # Vulkan reading past the valid data in the Extent3D copy region.
+        ccall(:memset, Ptr{Nothing}, (Ptr{Nothing}, Cint, Csize_t), dest_ptr, 0, data_bytes)
+        # Copy actual data (uses min(length(data), w*h) so safe for smaller slices)
         copy_data_to_staging!(dest_ptr, data, w, h, tex.format)
         
         push!(copy_specs, (tex, aligned_offset, w, h))
