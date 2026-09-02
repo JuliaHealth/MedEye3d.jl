@@ -395,6 +395,7 @@ end
 
 MEH.DEBUG_VERBOSE[] = true
 MEH.register_tp_loader!(load_single_tp_from_h5)
+MEH.register_h5_mask_saver!(preprocessed_h5, studies)
 
 # --- Load TP 0 and TP 1 in PARALLEL ---
 println("Loading Time Points 0 and 1 in parallel...")
@@ -650,4 +651,5 @@ if get(ENV, "MEDEYE3D_TEST_MODE", "false") != "true"
         end
     end
     println("Closing viewer...")
+    MEH.flush_all_dirty_masks!()
 end

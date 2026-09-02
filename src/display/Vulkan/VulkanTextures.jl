@@ -194,13 +194,19 @@ function update_vulkan_texture!(ctx::VkCtx, tex::VkTexture, data::AbstractArray)
     data_bytes = collect(reinterpret(UInt8, vec(data)))
     upload_size = length(data_bytes)
 
-    # Grow staging buffer if needed — old handle will be GC'd by Vulkan.jl finalizers
+    # Grow staging buffer if needed — explicitly release old handles for prompt GC
     if upload_size > tex.staging_size
         unwrap(device_wait_idle(ctx.device))
+        # Clear old references so GC can collect them before allocating new ones
+        old_buf = tex.staging_buffer
+        old_mem = tex.staging_memory
         tex.staging_buffer, tex.staging_memory = create_buffer(ctx, upload_size,
             BUFFER_USAGE_TRANSFER_SRC_BIT,
             MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT)
         tex.staging_size = upload_size
+        # Help GC collect old Vulkan handles promptly
+        old_buf = nothing; old_mem = nothing
+        GC.gc(false)
     end
 
     # Map and copy

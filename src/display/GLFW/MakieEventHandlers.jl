@@ -10,12 +10,14 @@ using DataTypesBasic
 using Setfield
 using Statistics: mean
 using Dates
+using HDF5
 
 export reactToChangePlane, reactToCompareTimePoints, reactToShowSingleLesion
 export reactToWindowing, reactToPaintVal, reactToSyncLesion, reactToChangeBrushSize, reactToPetBlend, reactToLabelOpacity
 export reactToChangeTimePoint, reactToToggleLesion, reactToRefreshList
 export reactToAddAutoPet, reactToAIInferenceResult, reactToSyncMissing, reactToGenManual
 export reactToMapLink, reactToAutoRunPreprocess, reactToRunPreprocess, reactToShowBoneMask, reactToShowMaskLayer, reactToSaveMRB
+export register_h5_mask_saver!, mark_tp_mask_dirty!, save_tp_mask_to_h5, flush_all_dirty_masks!, dirty_mask_tps
 using ...InferenceClient
 using ...LesionAssociation
 using ...TextureManag
@@ -36,7 +38,9 @@ const ai_status_text = Observable{String}("Ready")
 # Cursor info Observables — updated from on_next!(MouseStruct) via reactToMouseDrag
 const cursor_info_text = Observable{String}("")      # "HU: 45 | SUV: 3.2 | femur (L5) | [Ax] Sl:163"
 const cursor_study_text = Observable{String}("")     # "PET TP0" or "L: PET TP0 | R: PET TP3"
-export cursor_info_text, cursor_study_text, set_ai_status!
+# 3D voxel position under cursor (axial orientation: x, y, z=slice) — used for new lesion anatomy lookup
+const current_viewer_position = Ref((0, 0, 0))
+export cursor_info_text, cursor_study_text, set_ai_status!, current_viewer_position
 
 # Sanitize AI status text for Makie Label rendering (ASCII-only, truncated)
 function safe_status_text(msg::String)
@@ -943,6 +947,100 @@ const main_event_channel = Ref{Any}(nothing)
 export register_tp_loader!, register_main_channel!, get_or_load_tp_data, last_bone_overlay_indices
 export TpCacheEntry, invalidate_suv_for_lesion, invalidate_and_recompute_lesion_metrics_async!
 
+# ── HDF5 Mask Auto-Save & Persistence ─────────────────────────────────────────
+const dirty_mask_tps = Set{Int}()
+const _mask_save_lock = ReentrantLock()
+const h5_save_path_ref = Ref{String}("")
+const studies_ref = Ref{Vector}([])
+
+function register_h5_mask_saver!(h5_path::String, studies_list::Vector)
+    h5_save_path_ref[] = h5_path
+    studies_ref[] = studies_list
+    println("  [AUTOSAVE-MASK] Registered HDF5 mask persistence: $h5_path ($(length(studies_list)) studies)"); flush(stdout)
+    _ensure_mask_autosave_task!()
+end
+
+function mark_tp_mask_dirty!(tp_idx::Int)
+    lock(_mask_save_lock) do
+        push!(dirty_mask_tps, tp_idx)
+    end
+end
+
+function save_tp_mask_to_h5(tp_i::Int)::Bool
+    h5_path = h5_save_path_ref[]
+    studies_list = studies_ref[]
+    if isempty(h5_path) || !isfile(h5_path) || isempty(studies_list)
+        return false
+    end
+    if tp_i < 0 || tp_i >= length(studies_list)
+        return false
+    end
+    
+    if !haskey(tp_data_cache, tp_i)
+        return false
+    end
+    entry = tp_data_cache[tp_i]
+    mask_to_save = entry.mask_i16 !== nothing ? entry.mask_i16 : entry.mask
+    if mask_to_save === nothing
+        return false
+    end
+    if entry.mask !== nothing && entry.mask !== mask_to_save
+        try entry.mask .= mask_to_save catch; end
+    end
+    
+    study = studies_list[tp_i + 1]
+    modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname = study[1:8]
+    group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
+    
+    lock(_mask_save_lock) do
+        try
+            HDF5.h5open(h5_path, "r+") do h5_file
+                is_pf = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
+                needs_reverse = !is_pf
+                
+                raw_to_write = needs_reverse ? reverse(mask_to_save, dims=2) : mask_to_save
+                ds_path = "$group/$mask_fname"
+                if haskey(h5_file, ds_path)
+                    h5_file[ds_path][:, :, :] = Int16.(raw_to_write)
+                    println("  [AUTOSAVE-MASK] Saved mask for TP $tp_i to $ds_path ($(count(>(0), mask_to_save)) non-zero voxels)"); flush(stdout)
+                else
+                    @warn "Dataset $ds_path not found in HDF5"
+                end
+            end
+            delete!(dirty_mask_tps, tp_i)
+            # Precompute mask centroids for this TP
+            precompute_mask_centroids!(mask_to_save, tp_i, node_name)
+            return true
+        catch e
+            @error "Failed to save mask for TP $tp_i to $h5_path" exception=(e, catch_backtrace())
+            return false
+        end
+    end
+end
+
+function flush_all_dirty_masks!()
+    tps = lock(_mask_save_lock) do
+        collect(dirty_mask_tps)
+    end
+    for tp in tps
+        save_tp_mask_to_h5(tp)
+    end
+end
+
+const _mask_autosave_task_started = Ref(false)
+function _ensure_mask_autosave_task!()
+    _mask_autosave_task_started[] && return
+    _mask_autosave_task_started[] = true
+    @async begin
+        while true
+            sleep(2.0)
+            if !isempty(dirty_mask_tps) && !isempty(h5_save_path_ref[])
+                flush_all_dirty_masks!()
+            end
+        end
+    end
+end
+
 function register_main_channel!(ch::Channel)
     main_event_channel[] = ch
 end
@@ -1281,6 +1379,8 @@ export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, h5_path_
 
 function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector{StateDataFields})
     t_total = time_ns()
+    # Flush any modified masks before changing timepoint or evicting
+    flush_all_dirty_masks!()
     if isempty(tp_labels)
         println("No TP labels loaded. TP navigation disabled."); flush(stdout)
         return
@@ -1710,6 +1810,7 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
         if entry.mask_i16 !== seg_vol
             entry.mask_i16 .= seg_vol
         end
+        mark_tp_mask_dirty!(tp_idx)
     end
 
     # Ensure mask uniform displays the active lesion
@@ -1990,7 +2091,8 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
 end
 
 function reactToSaveMRB(data::SaveMRBEvent, stateObjects::Vector{StateDataFields})
-    println("Save MRB triggered."); flush(stdout)
+    println("Save MRB triggered: saving all dirty masks to HDF5..."); flush(stdout)
+    flush_all_dirty_masks!()
 end
 
 export reactToToggleMoveLesionMode
@@ -1999,6 +2101,10 @@ function reactToToggleMoveLesionMode(data::ToggleMoveLesionModeEvent, stateObjec
     for state in stateObjects
         state.moveLesionMode = data.active
     end
+end
+
+atexit() do
+    flush_all_dirty_masks!()
 end
 
 end

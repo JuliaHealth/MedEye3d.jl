@@ -466,22 +466,70 @@ function get_lesion_state(db::Dict, key::String)::Dict{String,Any}
     lid = parse_lesion_id(key)
     
     if lid !== nothing
-        # Check direct integer string key (e.g. "1")
+        # Check canonical integer string key (e.g. "1") — preferred since autosave now uses this
         lid_str = string(lid)
         if haskey(db, lid_str)
             v = db[lid_str]
             return v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : Dict{String,Any}()
         end
-        # Search all keys in db that start with "lid:" or "lid - " or equal "lid"
+        # Backward compat: search all display-name keys, prefer the one with most data
+        best_v = Dict{String,Any}()
+        best_count = 0
         for (k, v) in db
             k_lid = parse_lesion_id(k)
-            if k_lid == lid
-                return v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : Dict{String,Any}()
+            if k_lid == lid && v isa AbstractDict && length(v) > best_count
+                best_v = Dict{String,Any}(string(ik) => iv for (ik, iv) in v)
+                best_count = length(v)
             end
         end
+        return best_v
     end
     
     return Dict{String,Any}()
+end
+
+"""
+    _migrate_db(raw_db::Dict) -> Dict{String,Any}
+
+Migrate database keys to canonical numeric IDs (e.g. "1", "2").
+Merges duplicate/stale entries for the same lesion ID by retaining all fields,
+preferring newer/more populated entries when keys collide.
+"""
+function _migrate_db(raw_db::Dict)::Dict{String,Any}
+    migrated = Dict{String, Any}()
+    for (k, v) in raw_db
+        sk = string(k)
+        if startswith(sk, "_")
+            migrated[sk] = v
+            continue
+        end
+        lid = parse_lesion_id(sk)
+        canonical = lid !== nothing ? string(lid) : sk
+        
+        if haskey(migrated, canonical)
+            existing = migrated[canonical]
+            if v isa AbstractDict && existing isa AbstractDict
+                if length(v) > length(existing)
+                    merged = Dict{String,Any}(string(ik) => iv for (ik, iv) in v)
+                    for (ik, iv) in existing
+                        sik = string(ik)
+                        if !haskey(merged, sik); merged[sik] = iv; end
+                    end
+                    migrated[canonical] = merged
+                else
+                    merged = Dict{String,Any}(string(ik) => iv for (ik, iv) in existing)
+                    for (ik, iv) in v
+                        sik = string(ik)
+                        if !haskey(merged, sik); merged[sik] = iv; end
+                    end
+                    migrated[canonical] = merged
+                end
+            end
+        else
+            migrated[canonical] = v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : v
+        end
+    end
+    return migrated
 end
 
 """
@@ -521,6 +569,18 @@ function load_annotations_hdf5(path::String = DEFAULT_HDF5_PATH)::Dict{String,Di
             end
         end
         @debug "Annotations loaded from HDF5 → $path ($(length(out)) entries)"
+        if !isempty(out)
+            migrated = _migrate_db(out)
+            needs_rewrite = any(k -> begin
+                if startswith(string(k), "_"); return false; end
+                lid = parse_lesion_id(string(k))
+                return lid !== nothing && string(lid) != string(k)
+            end, keys(out))
+            if needs_rewrite
+                save_annotations_hdf5(migrated, path)
+            end
+            return migrated
+        end
         return out
     catch e
         @warn "Cannot load annotations from HDF5 $(path): $(e)"
@@ -553,6 +613,18 @@ function load_annotations(path::String = DEFAULT_SAVE_PATH)::Dict{String,Dict{St
         out = load_annotations_hdf5(DEFAULT_HDF5_PATH)
     end
     
+    if !isempty(out)
+        migrated = _migrate_db(out)
+        needs_rewrite = any(k -> begin
+            if startswith(string(k), "_"); return false; end
+            lid = parse_lesion_id(string(k))
+            return lid !== nothing && string(lid) != string(k)
+        end, keys(out))
+        if needs_rewrite
+            save_annotations(migrated, path)
+        end
+        return migrated
+    end
     return out
 end
 
@@ -1190,7 +1262,7 @@ function searchable_menu(g, row, cols;
     isempty(opts_vec) && (opts_vec = ["(none)"])
     all_opts = Ref(opts_vec)
 
-    # Standard Menu — no inner layouts, no Textbox, no alignment issues
+    # Standard Menu — button respects grid column width; use type-to-filter for long options
     menu = Menu(g[row, cols];
         options  = copy(all_opts[]),
         default  = default,
@@ -1292,6 +1364,8 @@ end
 mutable struct MetadataWindowResult
     fig::Any
     channel_ref::Ref{Union{Base.Channel, Nothing}}
+    lesion_db::Any
+    MetadataWindowResult(fig, ch_ref, ldb=nothing) = new(fig, ch_ref, ldb)
 end
 
 """Connect a live channel to a previously created metadata window (greyed-out → active)."""
@@ -1349,11 +1423,22 @@ function create_metadata_window(
         end
     end
     
-    # Load initial db asynchronously
+    # Load initial db asynchronously with migration to canonical numeric keys
     @async begin
         reply = Channel{Dict}(1)
         put!(db_channel, LoadDBMessage(save_path, reply, DEFAULT_HDF5_PATH))
-        lesion_db[] = take!(reply)
+        raw_db = take!(reply)
+        migrated = _migrate_db(raw_db)
+        n_before = length(raw_db)
+        n_after = length(migrated)
+        if n_before != n_after
+            println("  [DB] Migrated $n_before entries → $n_after canonical keys"); flush(stdout)
+            _db_dirty[] = true
+            try
+                put!(db_channel, SaveDBMessage(migrated, Dict{String, Any}(), save_path, DEFAULT_HDF5_PATH))
+            catch; end
+        end
+        lesion_db[] = migrated
     end
 
     # Helper for safely extracting and stripping text from Makie Textboxes
@@ -1566,6 +1651,8 @@ function create_metadata_window(
         sel === nothing && return
         s = string(sel)
         if s != active_lesion_id[]
+            # Save current lesion's state BEFORE switching (captures in-progress textbox edits)
+            try trigger_autosave() catch; end
             is_syncing_selection[] = true
             try
                 active_lesion_id[] = s
@@ -2026,17 +2113,28 @@ end_section!(sec_win)
 
             if isempty(q.options)
                 if q.short == "Comment"
-                    # Comment field: bigger, white background, black text for readability
+                    # Comment field: bigger, with visible text on dark-themed background
                     tb = Textbox(g[q_r, 2:4],
                         placeholder = "Free-text clinical notes...",
                         fontsize = 10,
-                        textcolor = RGBf(0, 0, 0),
-                        boxcolor = RGBf(1, 1, 1))
+                        textcolor = RGBf(0.95, 0.95, 0.95),
+                        textcolor_placeholder = RGBf(0.5, 0.5, 0.5),
+                        boxcolor = RGBf(0.15, 0.15, 0.18),
+                        boxcolor_focused = RGBf(0.2, 0.2, 0.25),
+                        boxcolor_hover = RGBf(0.18, 0.18, 0.22),
+                        bordercolor = RGBf(0.3, 0.3, 0.35),
+                        bordercolor_focused = RGBf(0.4, 0.5, 0.9),
+                        cursorcolor = RGBf(0.9, 0.9, 0.9))
                     rowsize!(g, q_r, Fixed(80)); register_fixed_row!(q_r, 80)
                 else
                     tb = Textbox(g[q_r, 2:4],
                         placeholder = isempty(q.default_answer) ? "..." : q.default_answer,
-                        fontsize = 10)
+                        fontsize = 10,
+                        textcolor = RGBf(0.9, 0.9, 0.9),
+                        boxcolor = RGBf(0.15, 0.15, 0.18),
+                        boxcolor_focused = RGBf(0.2, 0.2, 0.25),
+                        bordercolor = RGBf(0.3, 0.3, 0.35),
+                        bordercolor_focused = RGBf(0.4, 0.5, 0.9))
                     rowsize!(g, q_r, Fixed(28)); register_fixed_row!(q_r, 28)
                 end
                 field_widgets[q.short] = tb
@@ -2145,9 +2243,9 @@ end_section!(sec_win)
                 ar = nr!()
                 push!(anat_row_indices, ar)
                 push!(all_metadata_rows, ar)
-                rel_m = searchable_menu(g, ar, 1:2, options = ANAT_RELATIONS, fontsize = 10)
+                rel_m = searchable_menu(g, ar, 1, options = ANAT_RELATIONS, fontsize = 10)
                 struct_opts_i = Observable(String[""; anatomy_ontology])
-                struct_m = searchable_menu(g, ar, 3, options = struct_opts_i, fontsize = 10)
+                struct_m = searchable_menu(g, ar, 2:3, options = struct_opts_i, fontsize = 10)
                 rm_btn = Button(g[ar, 4], label = "-", buttoncolor = RED_BTN, labelcolor = TXT, fontsize = 10, width = 30)
                 push!(anat_rel_menus, rel_m)
                 push!(anat_struct_menus, struct_m)
@@ -2484,6 +2582,9 @@ end_section!(sec_win)
                 show_section!(sec)
             end
             hide_section!(sec_map_lesions)
+            # Explicitly clear dynamically-created elements in nested map_grid
+            # (hide_section! can't reach nested GridLayout children — they persist visually)
+            try for elem in contents(map_grid); delete!(elem); end catch; end
             update_dynamic_visibility!(active_lesion_type[])
             notify(anat_active_count)
         end
@@ -2521,48 +2622,46 @@ end_section!(sec_win)
             p !== nothing && (max_id = max(max_id, p))
         end
         for k in keys(lesion_db[])
-            cp = findfirst(':', k)
-            dash = cp === nothing ? findfirst(" - ", k) : nothing
-            ns = if cp !== nothing
-                strip(k[1:cp-1])
-            elseif dash !== nothing
-                strip(k[1:first(dash)-1])
-            else
-                k
-            end
-            p = tryparse(Int, ns)
+            p = parse_lesion_id(k)
             p !== nothing && (max_id = max(max_id, p))
         end
         new_id = max_id + 1
         
-        # Auto-name from anatomy atlas at approximate viewer position
+        # Auto-name from anatomy atlas at the CURRENT cursor position
         display_name = "New Lesion"
         try
             atlas = _MEH.global_ts_atlas[]
             ts_names = _MEH.global_ts_names[]
             if atlas !== nothing && ts_names !== nothing
-                # Try to find the anatomy at the center of the atlas volume
-                # (the user is approximately at the current slice)
-                cx = div(size(atlas, 1), 2)
-                cy = div(size(atlas, 2), 2)
-                cz = div(size(atlas, 3), 2)
+                # Use the actual viewer cursor position (tracked in ReactOnMouseClickAndDrag)
+                vpos = _MEH.current_viewer_position[]
+                cx = clamp(vpos[1], 1, size(atlas, 1))
+                cy = clamp(vpos[2], 1, size(atlas, 2))
+                cz = clamp(vpos[3], 1, size(atlas, 3))
                 
-                # Better estimate: use the last known centroid position if available
-                last_lid = parse_lesion_id(active_lesion_id[])
-                tp = _MEH.current_tp_index[]
-                if last_lid !== nothing
-                    cc = get(_MEH.lesion_centroids_cache, (tp, last_lid), nothing)
-                    if cc === nothing
-                        cc = get(_MEH.lesion_centroids_cache, last_lid, nothing)
-                    end
-                    if cc !== nothing
-                        cx = clamp(cc[1], 1, size(atlas, 1))
-                        cy = clamp(cc[2], 1, size(atlas, 2))
-                        cz = clamp(cc[3], 1, size(atlas, 3))
+                # Direct lookup at cursor position
+                anat_val = Int(atlas[cx, cy, cz])
+                
+                # If exact voxel is unlabeled, try expanding sphere search
+                if anat_val <= 0
+                    for radius in [1, 2, 4, 8, 16]
+                        found = false
+                        for dz in -radius:radius, dy in -radius:radius, dx in -radius:radius
+                            dx*dx + dy*dy + dz*dz > radius*radius && continue
+                            nx = clamp(cx + dx, 1, size(atlas, 1))
+                            ny = clamp(cy + dy, 1, size(atlas, 2))
+                            nz = clamp(cz + dz, 1, size(atlas, 3))
+                            v = Int(atlas[nx, ny, nz])
+                            if v > 0 && haskey(ts_names, v)
+                                anat_val = v
+                                found = true
+                                break
+                            end
+                        end
+                        found && break
                     end
                 end
                 
-                anat_val = Int(atlas[cx, cy, cz])
                 if anat_val > 0
                     organ_name = get(ts_names, anat_val, "")
                     if !isempty(organ_name)
@@ -2581,7 +2680,7 @@ end_section!(sec_win)
         end
         
         new_name = "$(new_id): $(display_name)"
-        db = copy(lesion_db[]); db[new_name] = Dict{String, Any}(); lesion_db[] = db
+        db = copy(lesion_db[]); db[string(new_id)] = Dict{String, Any}("_display_name" => new_name); lesion_db[] = db
         opts = copy(lesion_ids[]); push!(opts, new_name)
         is_syncing_selection[] = true
         try
@@ -3025,7 +3124,12 @@ end_section!(sec_win)
             w = get(field_widgets, q.short, nothing)
             w === nothing && continue
             if w isa Textbox
-                v = _safe_strip(w.stored_string[])
+                # Prefer displayed_string (live typing) over stored_string (Enter-confirmed)
+                # so in-progress edits are captured on autosave
+                v = _safe_strip(w.displayed_string[])
+                if isempty(v)
+                    v = _safe_strip(w.stored_string[])
+                end
                 isempty(v) || (d[q.short] = v)
             elseif w isa Menu
                 sel = w.selection[]
@@ -3055,9 +3159,16 @@ end_section!(sec_win)
     _is_applying_state = Ref(false)
     function trigger_autosave()
         _is_applying_state[] && return
-        id = active_lesion_id[]
+        display_id = active_lesion_id[]
+        lid = parse_lesion_id(display_id)
+        # Use canonical key: numeric ID string, or display name as fallback
+        canonical_key = lid !== nothing ? string(lid) : display_id
+        
         db = copy(lesion_db[])
-        db[id] = collect_state()
+        state = collect_state()
+        # Store the current display name for reference/debugging
+        state["_display_name"] = display_id
+        db[canonical_key] = state
         
         db["_GLOBAL_APP_STATE"] = Dict{String,String}(
             "CT_Min" => _safe_strip(tb_ct_min.stored_string[]),
@@ -3074,6 +3185,10 @@ end_section!(sec_win)
         
         lesion_db[] = db
         _db_dirty[] = true
+        # Immediate save (db_channel consumer deduplicates rapid changes)
+        try
+            put!(db_channel, SaveDBMessage(db, global_app_state, save_path, DEFAULT_HDF5_PATH))
+        catch; end
     end
     function apply_global_state(gst::AbstractDict)
         _is_applying_state[] = true
@@ -3394,10 +3509,21 @@ end_section!(sec_win)
                         is_syncing_selection[] = false
                     end
                 end
-                # Rename in lesion_db: move data from old key to new key
+                # Update in lesion_db: store under canonical key string(lid)
                 db = copy(lesion_db[])
-                if haskey(db, cur_id_str)
-                    db[new_display_name] = pop!(db, cur_id_str)
+                can_k = string(lid)
+                if haskey(db, can_k)
+                    if db[can_k] isa AbstractDict
+                        db[can_k]["_display_name"] = new_display_name
+                    end
+                elseif haskey(db, cur_id_str)
+                    d_old = pop!(db, cur_id_str)
+                    if d_old isa AbstractDict
+                        d_old["_display_name"] = new_display_name
+                    end
+                    db[can_k] = d_old
+                else
+                    db[can_k] = Dict{String, Any}("_display_name" => new_display_name)
                 end
                 lesion_db[] = db
                 # Update internal reference (but do NOT set active_lesion_id[] to avoid recursive callback)
@@ -3542,25 +3668,34 @@ end_section!(sec_win)
                 db_updates["_Diameter_mm"] = string(round(diameter, digits=1))
             end
             
-            # Match analysis (cross-TP comparison)
-            analysis = compute_match_analysis(lid, tp_idx)
-            if analysis !== nothing
-                analysis_str = format_match_analysis(analysis)
-                lbl_match_analysis.text[] = analysis_str
-                
-                # Persist match analysis to metadata
-                db_updates["_MatchGroup"] = string(analysis.group_id)
-                db_updates["_RECIP"] = analysis.recip_category
-                if analysis.baseline_volume_cc > 0.001
-                    db_updates["_VolDelta_pct"] = string(round(analysis.volume_delta_pct, digits=1))
-                    db_updates["_VolDelta_cc"] = string(round(analysis.volume_delta_abs_cc, digits=3))
-                end
-                if analysis.baseline_suv_max > 0.1f0
-                    db_updates["_SUVDelta"] = string(round(analysis.suv_delta_abs, digits=1))
-                    db_updates["_SUVDelta_pct"] = string(round(analysis.suv_delta_pct, digits=1))
+            # Match analysis (cross-TP comparison) — only show in Compare Volumes mode
+            if cv_active[]
+                analysis = compute_match_analysis(lid, tp_idx)
+                if analysis !== nothing
+                    analysis_str = format_match_analysis(analysis)
+                    lbl_match_analysis.text[] = analysis_str
+                    
+                    # Persist match analysis to metadata
+                    db_updates["_MatchGroup"] = string(analysis.group_id)
+                    db_updates["_RECIP"] = analysis.recip_category
+                    if analysis.baseline_volume_cc > 0.001
+                        db_updates["_VolDelta_pct"] = string(round(analysis.volume_delta_pct, digits=1))
+                        db_updates["_VolDelta_cc"] = string(round(analysis.volume_delta_abs_cc, digits=3))
+                    end
+                    if analysis.baseline_suv_max > 0.1f0
+                        db_updates["_SUVDelta"] = string(round(analysis.suv_delta_abs, digits=1))
+                        db_updates["_SUVDelta_pct"] = string(round(analysis.suv_delta_pct, digits=1))
+                    end
+                else
+                    # Compare mode but no match group — show volume
+                    if vol_cc > 0
+                        lbl_match_analysis.text[] = "Vol: $(round(vol_cc, digits=2))cc ($(round(diameter, digits=1))mm⌀)"
+                    else
+                        lbl_match_analysis.text[] = ""
+                    end
                 end
             else
-                # No match group — just show volume
+                # Single-TP mode — show volume only, no cross-TP comparison
                 if vol_cc > 0
                     lbl_match_analysis.text[] = "Vol: $(round(vol_cc, digits=2))cc ($(round(diameter, digits=1))mm⌀)"
                 else
@@ -3667,12 +3802,15 @@ end_section!(sec_win)
         
         # ── Single batch commit for all metadata updates ──────────────────
         if !isempty(db_updates)
+            display_id = active_lesion_id[]
+            lid = parse_lesion_id(display_id)
+            canonical_key = lid !== nothing ? string(lid) : display_id
             db = copy(lesion_db[])
-            cur_ld = copy(get(db, active_lesion_id[], Dict{String,Any}()))
+            cur_ld = copy(get(db, canonical_key, Dict{String,Any}()))
             for (k, v) in db_updates
                 cur_ld[k] = v
             end
-            db[active_lesion_id[]] = cur_ld
+            db[canonical_key] = cur_ld
             lesion_db[] = db
         end
         finally
@@ -3724,9 +3862,13 @@ end_section!(sec_win)
     end
 
     on(btn_save.clicks) do _
-        id = active_lesion_id[]
+        display_id = active_lesion_id[]
+        lid = parse_lesion_id(display_id)
+        canonical_key = lid !== nothing ? string(lid) : display_id
         db = copy(lesion_db[])
-        db[id] = collect_state()
+        state = collect_state()
+        state["_display_name"] = display_id
+        db[canonical_key] = state
         
         # Persist global windowing
         db["_GLOBAL_APP_STATE"] = Dict{String,String}(
@@ -3735,7 +3877,11 @@ end_section!(sec_win)
             "PET_Min" => _safe_strip(tb_pet_min.stored_string[]),
             "PET_Max" => _safe_strip(tb_pet_max.stored_string[]),
             "SPECT_Min" => _safe_strip(tb_spect_min.stored_string[]),
-            "SPECT_Max" => _safe_strip(tb_spect_max.stored_string[])
+            "SPECT_Max" => _safe_strip(tb_spect_max.stored_string[]),
+            "vis_lesion" => string(vis_lesion_active[]),
+            "vis_surface" => string(vis_surface_active[]),
+            "vis_marrow" => string(vis_marrow_active[]),
+            "vis_anatomy" => string(vis_anatomy_active[])
         )
         global_st = Dict{String, Any}(
             "windowing" => Dict(
@@ -3745,7 +3891,11 @@ end_section!(sec_win)
             )
         )
         lesion_db[] = db
+        _db_dirty[] = false
         put!(db_channel, SaveDBMessage(db, global_st, save_path, DEFAULT_HDF5_PATH))
+        try
+            _MEH.flush_all_dirty_masks!()
+        catch; end
         status_lbl.text[] = "Saved at $(Dates.format(Dates.now(), "HH:MM:SS"))"
     end
 
@@ -3753,7 +3903,8 @@ end_section!(sec_win)
         @async begin
             reply = Channel{Dict}(1)
             put!(db_channel, LoadDBMessage(save_path, reply, DEFAULT_HDF5_PATH))
-            db = take!(reply)
+            raw_db = take!(reply)
+            db = _migrate_db(raw_db)
             lesion_db[] = db
             
             # Apply global state if found
@@ -3819,12 +3970,30 @@ end_section!(sec_win)
     end
     on(dict_text) do _; trigger_autosave(); end
     on(rpt_tb.stored_string) do _; trigger_autosave(); end
+    on(rpt_tb.focused) do is_focused
+        if !is_focused
+            disp = _safe_strip(rpt_tb.displayed_string[])
+            if !isempty(disp) && disp != _safe_strip(rpt_tb.stored_string[])
+                rpt_tb.stored_string[] = disp
+            end
+        end
+    end
     on(radlex_selected) do _; trigger_autosave(); end
     
     for q in schema
         w = get(field_widgets, q.short, nothing)
         if w isa Textbox
             on(w.stored_string) do _; trigger_autosave(); end
+            # When textbox loses focus, commit displayed_string → stored_string
+            # so in-progress typing is saved without requiring Enter
+            on(w.focused) do is_focused
+                if !is_focused
+                    disp = _safe_strip(w.displayed_string[])
+                    if !isempty(disp) && disp != _safe_strip(w.stored_string[])
+                        w.stored_string[] = disp
+                    end
+                end
+            end
         elseif w isa Menu
             on(w.selection) do _; trigger_autosave(); end
         end
@@ -3842,6 +4011,21 @@ end_section!(sec_win)
                 catch e
                     @warn "Background autosave enqueue failed" e
                 end
+            end
+        end
+    end
+
+    # Flush-on-close: save any pending dirty state on graceful shutdown
+    atexit() do
+        if _db_dirty[]
+            _db_dirty[] = false
+            try
+                db = lesion_db[]
+                save_annotations(db, save_path)
+                save_annotations_hdf5(db, DEFAULT_HDF5_PATH)
+                println("  [AUTOSAVE] Final save on exit"); flush(stdout)
+            catch e
+                @warn "atexit save failed" e
             end
         end
     end
@@ -3873,7 +4057,7 @@ end_section!(sec_win)
         dict_text[] = de_desc
     end
 
-    return MetadataWindowResult(fig, channel_ref)
+    return MetadataWindowResult(fig, channel_ref, lesion_db)
 end
 
 """
