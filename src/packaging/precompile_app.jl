@@ -122,6 +122,13 @@ try
         image_subtype=MedImages.MedImage_data_struct.CT_subtype,
         patient_id="precompile_trace"
     )
+    # Trace bone subsegmentation computation
+    synth_mask = zeros(Int16, dim_x, dim_y, dim_z)
+    synth_mask[10:15, 10:15, 5:10] .= Int16(1)
+    synth_skelly = zeros(Float32, dim_x, dim_y, dim_z)
+    synth_skelly[8:18, 8:18, 4:12] .= Float32(2.0)
+    synth_skelly[11:14, 11:14, 6:9] .= Float32(1.0)
+    MedEye3d.SegmentationDisplay.MakieEventHandlers.compute_bone_subsegments_fast(synth_mask, synth_skelly, 1)
 catch e
     println("MedImage tracing notice: ", e)
 end

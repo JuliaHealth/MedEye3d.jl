@@ -438,6 +438,16 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
 
     close(h5_init)
 
+    # Initialize MEH global state early so event handlers and UI widgets have full atlas data
+    MEH.global_bone_atlas[] = skelly_atlas !== nothing ? skelly_atlas : (bone_atlas !== nothing ? bone_atlas : zeros(Float32, 1, 1, 1))
+    MEH.global_organ_mapping[] = organ_mapping
+    MEH.global_ts_atlas[] = ts_atlas_aligned
+    MEH.global_ts_names[] = ts_names
+    MEH.patient_id[] = basename(h5_path)
+    MEH.h5_path_ref[] = h5_path
+    MEH.current_tp_index[] = 0
+    MEH.volume_z_size[] = size(first_mask, 3)
+
     # 2. Textures configuration
     colors_mapped = map(c -> RGB(c[1]/255, c[2]/255, c[3]/255), MedEye3d.distinctColorsSaved.listOfColors)
     display_cfg = LesionMetadataWindow.load_display_config()
@@ -640,18 +650,9 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     LesionMetadataWindow.connect_channel!(makie_win, mainViewer.channel)
     makie_screen = LesionMetadataWindow.display_metadata_window(makie_win.fig)
 
-    # 7. Warmup JIT & global references
+    # 7. Warmup JIT & initial event synchronization
     put!(mainViewer.channel, CompareTimePointsEvent(false))
     put!(mainViewer.channel, Int64(0))
-
-    MEH.global_bone_atlas[] = skelly_atlas !== nothing ? skelly_atlas : (bone_atlas !== nothing ? bone_atlas : zeros(Float32, 1, 1, 1))
-    MEH.global_organ_mapping[] = organ_mapping
-    MEH.global_ts_atlas[] = ts_atlas_aligned
-    MEH.global_ts_names[] = ts_names
-    MEH.patient_id[] = basename(h5_path)
-    MEH.h5_path_ref[] = h5_path
-    MEH.current_tp_index[] = 0
-    MEH.volume_z_size[] = size(first_mask, 3)
 
     println("MedEye3D interactive clinical workflow initialized.")
     run_viewer_loop(mainViewer)
