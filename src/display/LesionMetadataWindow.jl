@@ -31,6 +31,7 @@ using Dates
 using ..MakieEvents
 import ..SegmentationDisplay: synchronized_makie_renderloop, GLOBAL_OPENGL_LOCK
 import ..SegmentationDisplay.MakieEventHandlers as _MEH
+import ..LesionAssociation as LA
 
 abstract type DBMessage end
 struct SaveDBMessage <: DBMessage
@@ -823,7 +824,6 @@ Get cached or compute background SUVs for the given time point.
 """
 function get_background_suvs(tp_idx::Int)::Dict{String, Float32}
     haskey(_bg_suv_cache, tp_idx) && return _bg_suv_cache[tp_idx]
-    _MEH = MedEye3d.SegmentationDisplay.MakieEventHandlers
     pet_vol = get(_MEH.pet_volumes_cache, tp_idx, nothing)
     ts_atlas = _MEH.global_ts_atlas[]
     ts_names = _MEH.global_ts_names[]
@@ -842,7 +842,6 @@ Auto-compute SUV max and background references, returning formatted string:
 "Max: X.X ; Parotid: X.X ; Liver: X.X ; Blood: X.X"
 """
 function compute_lesion_suv_string(lesion_id::Int, tp_idx::Int)::String
-    _MEH = MedEye3d.SegmentationDisplay.MakieEventHandlers
     pet_vol = get(_MEH.pet_volumes_cache, tp_idx, nothing)
     centroid = if haskey(_MEH.lesion_centroids_cache, (tp_idx, lesion_id))
         _MEH.lesion_centroids_cache[(tp_idx, lesion_id)]
@@ -1083,8 +1082,6 @@ time point in the same match group (baseline), computes volume and SUV
 at both time points, and calculates deltas.
 """
 function compute_match_analysis(lid::Int, tp_idx::Int)::Union{MatchAnalysisResult, Nothing}
-    LA = Main.MedEye3d.LesionAssociation
-    
     # Find match group for this lesion
     current_node = _MEH.get_node_name_for_tp(tp_idx)
     match_groups = LA.get_match_groups()
@@ -2820,8 +2817,6 @@ end_section!(sec_win)
         l_ids = get_mask_ids(tp_left)
         r_ids = get_mask_ids(tp_right)
         
-        LA = Main.MedEye3d.LesionAssociation
-        
         cur_act = active_lesion_id[]
         active_lid = parse_lesion_id(cur_act)
         active_lid = active_lid !== nothing ? active_lid : (isempty(l_ids) ? 0 : l_ids[1])
@@ -3410,7 +3405,7 @@ end_section!(sec_win)
                     # Try volume-based scan from tp_data_cache mask
                     if haskey(_MEH.tp_data_cache, tp_idx)
                         mask_vol = _MEH.tp_data_cache[tp_idx].mask
-                        best = Main.MedEye3d.LesionAssociation.classify_and_pick_best_organ(mask_vol, atlas, ts_nm, lid)
+                        best = LA.classify_and_pick_best_organ(mask_vol, atlas, ts_nm, lid)
                         if !isempty(best)
                             raw_organ = best
                             organ_map[lid] = raw_organ

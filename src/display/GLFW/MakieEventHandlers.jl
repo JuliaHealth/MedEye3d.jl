@@ -551,6 +551,26 @@ end
 
 const tp_node_names = Dict{Int, String}()
 
+function _get_lmw()
+    p = parentmodule(parentmodule(@__MODULE__))
+    if isdefined(p, :LesionMetadataWindow)
+        return getfield(p, :LesionMetadataWindow)
+    elseif isdefined(Main, :MedEye3d) && isdefined(Main.MedEye3d, :LesionMetadataWindow)
+        return Main.MedEye3d.LesionMetadataWindow
+    end
+    return nothing
+end
+
+function _get_la()
+    p = parentmodule(parentmodule(@__MODULE__))
+    if isdefined(p, :LesionAssociation)
+        return getfield(p, :LesionAssociation)
+    elseif isdefined(Main, :MedEye3d) && isdefined(Main.MedEye3d, :LesionAssociation)
+        return Main.MedEye3d.LesionAssociation
+    end
+    return nothing
+end
+
 function get_node_name_for_tp(tp_idx::Int)::String
     if haskey(tp_node_names, tp_idx)
         return tp_node_names[tp_idx]
@@ -723,8 +743,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         try
             left_node = get_node_name_for_tp(current_tp_index[])
             right_node = get_node_name_for_tp(compare_right_tp[])
-            match_mod = isdefined(Main, :MedEye3d) && isdefined(Main.MedEye3d, :LesionAssociation) ? 
-                        Main.MedEye3d.LesionAssociation : nothing
+            match_mod = _get_la()
             if match_mod !== nothing
                 matched_ids = match_mod.find_cross_tp_lesion(left_node, data.lesion_id, right_node)
                 if !isempty(matched_ids)
@@ -1264,15 +1283,17 @@ end
 """Invalidate cached SUV, volume, and centroid data for a lesion after mask modification."""
 function invalidate_suv_for_lesion(lesion_id::Int, tp_idx::Int)
     try
-        LMW = Main.MedEye3d.LesionMetadataWindow
-        if isdefined(LMW, :_lesion_suv_cache)
-            delete!(LMW._lesion_suv_cache, (tp_idx, lesion_id))
-        end
-        if isdefined(LMW, :_volume_cache)
-            delete!(LMW._volume_cache, (tp_idx, lesion_id))
-        end
-        if isdefined(LMW, :_db_dirty)
-            LMW._db_dirty[] = true
+        LMW = _get_lmw()
+        if LMW !== nothing
+            if isdefined(LMW, :_lesion_suv_cache)
+                delete!(LMW._lesion_suv_cache, (tp_idx, lesion_id))
+            end
+            if isdefined(LMW, :_volume_cache)
+                delete!(LMW._volume_cache, (tp_idx, lesion_id))
+            end
+            if isdefined(LMW, :_db_dirty)
+                LMW._db_dirty[] = true
+            end
         end
     catch; end
     delete!(lesion_centroids_cache, (tp_idx, lesion_id))
@@ -1330,18 +1351,19 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
     # 3. Async recompute SUV/volume/PROMISE (pre-populate caches)
     Threads.@spawn begin
         try
-            LMW = Main.MedEye3d.LesionMetadataWindow
-            
-            # Recompute volume (cache was cleared, so this recomputes from scratch)
-            vol = LMW.compute_lesion_volume(lesion_id, tp_idx)
-            
-            # Recompute SUV (cache was cleared, so this recomputes from scratch)
-            suv_str = LMW.compute_lesion_suv_string(lesion_id, tp_idx)
-            if !isempty(suv_str)
-                LMW._lesion_suv_cache[(tp_idx, lesion_id)] = suv_str
+            LMW = _get_lmw()
+            if LMW !== nothing
+                # Recompute volume (cache was cleared, so this recomputes from scratch)
+                vol = LMW.compute_lesion_volume(lesion_id, tp_idx)
+                
+                # Recompute SUV (cache was cleared, so this recomputes from scratch)
+                suv_str = LMW.compute_lesion_suv_string(lesion_id, tp_idx)
+                if !isempty(suv_str)
+                    LMW._lesion_suv_cache[(tp_idx, lesion_id)] = suv_str
+                end
+                
+                println("  [SUV] Async recomputed metrics for lesion $lesion_id @ TP $tp_idx: vol=$(round(vol["volume_cc"], digits=2))cc, suv=$(suv_str)"); flush(stdout)
             end
-            
-            println("  [SUV] Async recomputed metrics for lesion $lesion_id @ TP $tp_idx: vol=$(round(vol["volume_cc"], digits=2))cc, suv=$(suv_str)"); flush(stdout)
         catch e
             @warn "Async SUV/volume recompute failed for lesion $lesion_id: $e"
         end
@@ -1503,8 +1525,8 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
     let tp_for_bg = new_tp, label_for_bg = label
         Threads.@spawn begin
             try
-                LMW = Main.MedEye3d.LesionMetadataWindow
-                if haskey(tp_data_cache, tp_for_bg)
+                LMW = _get_lmw()
+                if LMW !== nothing && haskey(tp_data_cache, tp_for_bg)
                     cached_entry = tp_data_cache[tp_for_bg]
                     unique_ids = Set{Int}()
                     for v in cached_entry.mask
@@ -1722,7 +1744,7 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
         try
             left_node = get_node_name_for_tp(current_tp_index[])
             right_node = get_node_name_for_tp(compare_right_tp[])
-            match_mod = isdefined(Main, :MedEye3d) && isdefined(Main.MedEye3d, :LesionAssociation) ? Main.MedEye3d.LesionAssociation : nothing
+            match_mod = _get_la()
             if match_mod !== nothing
                 matched_ids = match_mod.find_cross_tp_lesion(left_node, target_lid, right_node)
                 if !isempty(matched_ids)
@@ -1903,7 +1925,7 @@ function reactToGenManual(data::GenManualEvent, stateObjects::Vector{StateDataFi
             try
                 left_node = get_node_name_for_tp(tp_idx)
                 right_node = get_node_name_for_tp(compare_right_tp[])
-                match_mod = isdefined(Main, :MedEye3d) && isdefined(Main.MedEye3d, :LesionAssociation) ? Main.MedEye3d.LesionAssociation : nothing
+                match_mod = _get_la()
                 if match_mod !== nothing
                     matched_ids = match_mod.find_cross_tp_lesion(left_node, data.lesion_id, right_node)
                     if !isempty(matched_ids)
@@ -2012,7 +2034,7 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
                             try
                                 left_node = get_node_name_for_tp(current_tp_index[])
                                 right_node = get_node_name_for_tp(compare_right_tp[])
-                                match_mod = isdefined(Main, :MedEye3d) && isdefined(Main.MedEye3d, :LesionAssociation) ? Main.MedEye3d.LesionAssociation : nothing
+                                match_mod = _get_la()
                                 if match_mod !== nothing
                                     matched_ids = match_mod.find_cross_tp_lesion(left_node, cur_lid, right_node)
                                     if !isempty(matched_ids)
