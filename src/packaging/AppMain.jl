@@ -614,6 +614,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     end
 
     MEH.register_tp_loader!(load_single_tp_from_h5)
+    MEH.register_h5_mask_saver!(h5_path, studies)
     first_entry = load_single_tp_from_h5(0)
     MEH.tp_data_cache[0] = first_entry
 
