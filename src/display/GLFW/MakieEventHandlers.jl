@@ -558,9 +558,91 @@ end
 const current_active_lesion_id = Ref(0)
 
 """
-Retrieve precomputed bone subsegments from cache (loaded from Bone_Subsegments_0.h5 at startup).
-NO on-the-fly computation — all bone data must be precomputed via preprocessing.
-If a lesion has no cache entry, it is not a bone lesion (filtered by 5% Skellytour overlap threshold).
+Fast on-the-fly computation of bone surface (cortex) and bone marrow (trabecula) subsegments around a bone lesion.
+"""
+function compute_bone_subsegments_fast(mask_vol::AbstractArray{<:Integer, 3}, skelly_vol::AbstractArray{<:Real, 3}, target_id::Int; spacing=(1.0, 1.0, 2.0))
+    lesion_vox = findall(mask_vol .== target_id)
+    if isempty(lesion_vox) || isempty(skelly_vol)
+        return (CartesianIndex{3}[], CartesianIndex{3}[])
+    end
+    
+    sz = size(mask_vol)
+    xs = [I[1] for I in lesion_vox]
+    ys = [I[2] for I in lesion_vox]
+    zs = [I[3] for I in lesion_vox]
+    
+    margin_x = ceil(Int, 20.0 / spacing[1])
+    margin_y = ceil(Int, 20.0 / spacing[2])
+    margin_z = ceil(Int, 20.0 / spacing[3])
+    
+    x_min = max(1, minimum(xs) - margin_x); x_max = min(sz[1], maximum(xs) + margin_x)
+    y_min = max(1, minimum(ys) - margin_y); y_max = min(sz[2], maximum(ys) + margin_y)
+    z_min = max(1, minimum(zs) - margin_z); z_max = min(sz[3], maximum(zs) + margin_z)
+    
+    crop_mask = view(mask_vol, x_min:x_max, y_min:y_max, z_min:z_max)
+    crop_skelly = view(skelly_vol, x_min:x_max, y_min:y_max, z_min:z_max)
+    
+    crop_lesion = findall(crop_mask .== target_id)
+    crop_bone_vox = findall(crop_skelly .> 0)
+    if isempty(crop_lesion) || isempty(crop_bone_vox)
+        return (CartesianIndex{3}[], CartesianIndex{3}[])
+    end
+    
+    lx = Float32[I[1] for I in crop_lesion]
+    ly = Float32[I[2] for I in crop_lesion]
+    lz = Float32[I[3] for I in crop_lesion]
+    
+    sp1 = Float32(spacing[1])
+    sp2 = Float32(spacing[2])
+    sp3 = Float32(spacing[3])
+    
+    n_vox = length(crop_lesion)
+    vox_vol = sp1 * sp2 * sp3
+    lesion_vol_mm3 = n_vox * vox_vol
+    R_L = max(4.0f0, Float32((3.0 * lesion_vol_mm3 / (4.0 * π))^(1/3)))
+    
+    max_surf_dist_mm2 = 14.0f0^2
+    max_marr_dist_mm2 = (R_L + 8.0f0)^2
+    
+    surf_pts = CartesianIndex{3}[]
+    marr_pts = CartesianIndex{3}[]
+    
+    for b_idx in crop_bone_vox
+        val = crop_skelly[b_idx]
+        bx = Float32(b_idx[1])
+        by = Float32(b_idx[2])
+        bz = Float32(b_idx[3])
+        
+        min_d2 = Inf32
+        @inbounds for i in 1:length(crop_lesion)
+            dx = (bx - lx[i]) * sp1
+            dy = (by - ly[i]) * sp2
+            dz = (bz - lz[i]) * sp3
+            d2 = dx*dx + dy*dy + dz*dz
+            if d2 < min_d2
+                min_d2 = d2
+                if min_d2 <= 4.0f0
+                    break
+                end
+            end
+        end
+        
+        global_idx = CartesianIndex(x_min + b_idx[1] - 1, y_min + b_idx[2] - 1, z_min + b_idx[3] - 1)
+        
+        if (val >= 1.5f0 || (val > 0 && min_d2 <= 36.0f0)) && min_d2 <= max_surf_dist_mm2
+            push!(surf_pts, global_idx)
+        end
+        
+        if val > 0 && val < 1.8f0 && min_d2 <= max_marr_dist_mm2 && crop_mask[b_idx] != target_id
+            push!(marr_pts, global_idx)
+        end
+    end
+    
+    return (surf_pts, marr_pts)
+end
+
+"""
+Retrieve bone subsegments from cache or compute on-the-fly using global bone atlas / Skellytour.
 Returns (surf_pts::Vector{CartesianIndex{3}}, marr_pts::Vector{CartesianIndex{3}})
 """
 function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
@@ -570,7 +652,7 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
     
     node_name = get_node_name_for_tp(panel_tp)
     
-    # Check precomputed cache (loaded from Bone_Subsegments_0.h5 at startup)
+    # Check precomputed cache
     cached = if haskey(bone_subsegments_cache, (panel_tp, target_id))
         if DEBUG_VERBOSE[]; println("  [BONE] Cache HIT by (tp=$panel_tp, lid=$target_id)"); flush(stdout); end
         bone_subsegments_cache[(panel_tp, target_id)]
@@ -593,8 +675,32 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
         return (surf_res, marr_res)
     end
     
-    # No precomputed data → not a bone lesion (filtered by 5% Skellytour overlap in preprocessing)
-    # Cache the empty result to avoid repeated lookups
+    # Fast on-the-fly extraction using global bone atlas / skellytour
+    skelly_vol = global_bone_atlas[]
+    mask_vol = if haskey(tp_data_cache, panel_tp)
+        tp_data_cache[panel_tp].mask_i16
+    else
+        m_dat = nothing
+        if stateObject !== nothing && isdefined(stateObject, :onScrollData)
+            for scr in stateObject.onScrollData.dataToScroll
+                if scr.name == "Mask"
+                    m_dat = scr.dat
+                    break
+                end
+            end
+        end
+        m_dat
+    end
+    
+    if skelly_vol !== nothing && mask_vol !== nothing && count(skelly_vol .> 0) > 0
+        res = compute_bone_subsegments_fast(mask_vol, skelly_vol, target_id)
+        bone_subsegments_cache[(panel_tp, target_id)] = res
+        if !isempty(node_name)
+            bone_subsegments_cache[(node_name, target_id)] = res
+        end
+        return res
+    end
+    
     bone_subsegments_cache[(panel_tp, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
     return (CartesianIndex{3}[], CartesianIndex{3}[])
 end
