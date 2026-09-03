@@ -136,6 +136,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::PaintValEvent) = reactToPa
 on_next!(stateObjects::Vector{StateDataFields}, data::ChangeBrushSizeEvent) = reactToChangeBrushSize(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SyncLesionEvent) = reactToSyncLesion(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ChangeTimePointEvent) = reactToChangeTimePoint(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::SetTimePointEvent) = reactToSetTimePoint(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ToggleLesionEvent) = reactToToggleLesion(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::PetBlendEvent) = reactToPetBlend(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::LabelOpacityEvent) = reactToLabelOpacity(data, stateObjects)

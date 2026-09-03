@@ -14,7 +14,7 @@ using HDF5
 
 export reactToChangePlane, reactToCompareTimePoints, reactToShowSingleLesion
 export reactToWindowing, reactToPaintVal, reactToSyncLesion, reactToChangeBrushSize, reactToPetBlend, reactToLabelOpacity
-export reactToChangeTimePoint, reactToToggleLesion, reactToRefreshList
+export reactToChangeTimePoint, reactToSetTimePoint, reactToToggleLesion, reactToRefreshList
 export reactToAddAutoPet, reactToAIInferenceResult, reactToSyncMissing, reactToGenManual
 export reactToMapLink, reactToAutoRunPreprocess, reactToRunPreprocess, reactToShowBoneMask, reactToShowMaskLayer, reactToSaveMRB
 export register_h5_mask_saver!, mark_tp_mask_dirty!, save_tp_mask_to_h5, flush_all_dirty_masks!, dirty_mask_tps
@@ -637,6 +637,27 @@ function compute_bone_subsegments_fast(mask_vol::AbstractArray{<:Integer, 3}, sk
         return (CartesianIndex{3}[], CartesianIndex{3}[])
     end
     
+    # === Erosion-based bone surface extraction ===
+    # Compute 6-connected erosion: a bone voxel is "interior" only if ALL 6 face-adjacent
+    # neighbors are also bone. Surface = bone & ~interior (1-voxel-thick shell).
+    cx, cy, cz = size(crop_skelly)
+    crop_bone_bool = Array{Bool}(undef, cx, cy, cz)
+    @inbounds for i in eachindex(crop_skelly)
+        crop_bone_bool[i] = crop_skelly[i] > 0
+    end
+    
+    is_interior = falses(cx, cy, cz)
+    @inbounds for k in 2:cz-1, j in 2:cy-1, i in 2:cx-1
+        if crop_bone_bool[i,j,k] &&
+           crop_bone_bool[i-1,j,k] && crop_bone_bool[i+1,j,k] &&
+           crop_bone_bool[i,j-1,k] && crop_bone_bool[i,j+1,k] &&
+           crop_bone_bool[i,j,k-1] && crop_bone_bool[i,j,k+1]
+            is_interior[i,j,k] = true
+        end
+    end
+    # Bone surface = bone voxels that have at least one non-bone neighbor
+    # (boundary voxels at crop edges are always surface by definition)
+    
     lx = Float32[I[1] for I in crop_lesion]
     ly = Float32[I[2] for I in crop_lesion]
     lz = Float32[I[3] for I in crop_lesion]
@@ -657,7 +678,6 @@ function compute_bone_subsegments_fast(mask_vol::AbstractArray{<:Integer, 3}, sk
     marr_pts = CartesianIndex{3}[]
     
     for b_idx in crop_bone_vox
-        val = crop_skelly[b_idx]
         bx = Float32(b_idx[1])
         by = Float32(b_idx[2])
         bz = Float32(b_idx[3])
@@ -678,11 +698,13 @@ function compute_bone_subsegments_fast(mask_vol::AbstractArray{<:Integer, 3}, sk
         
         global_idx = CartesianIndex(x_min + b_idx[1] - 1, y_min + b_idx[2] - 1, z_min + b_idx[3] - 1)
         
-        if (val >= 1.5f0 || (val > 0 && min_d2 <= 36.0f0)) && min_d2 <= max_surf_dist_mm2
+        # Surface: only bone voxels on the outer shell (NOT interior) within distance
+        if !is_interior[b_idx] && min_d2 <= max_surf_dist_mm2
             push!(surf_pts, global_idx)
         end
         
-        if val > 0 && val < 1.8f0 && min_d2 <= max_marr_dist_mm2 && crop_mask[b_idx] != target_id
+        # Marrow: interior bone voxels within distance, excluding the lesion itself
+        if is_interior[b_idx] && min_d2 <= max_marr_dist_mm2 && crop_mask[b_idx] != target_id
             push!(marr_pts, global_idx)
         end
     end
@@ -1600,6 +1622,150 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
     
     t_total_ms = (time_ns() - t_total) / 1e6
     @info "[BENCH] Next/Prev TP Total: $(round(t_total_ms, digits=1))ms"
+    tp_switched[] = tp_switched[] + 1
+end
+
+function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{StateDataFields})
+    t_total = time_ns()
+    flush_all_dirty_masks!()
+    if isempty(tp_labels)
+        println("No TP labels loaded. TP navigation disabled."); flush(stdout)
+        return
+    end
+
+    tp_indices = sort(collect(keys(tp_labels)))
+    num_tps = length(tp_indices)
+    target_tp = data.tp_index
+    if !haskey(tp_labels, target_tp)
+        println("Target TP $target_tp not found in loaded labels. Skipping."); flush(stdout)
+        return
+    end
+
+    target_pos = findfirst(==(target_tp), tp_indices)
+    target_pos = target_pos === nothing ? 1 : target_pos
+
+    if compare_mode[]
+        if data.panel == 5
+            # Set Right panel (panel 5)
+            right_tp = target_tp
+            compare_right_tp[] = right_tp
+            right_label = get(tp_labels, right_tp, "TP $right_tp")
+            println("Compare: setting Right to $right_label (index=$right_tp)"); flush(stdout)
+            
+            entry_right = get_or_load_tp_data(right_tp)
+            if entry_right !== nothing && length(stateObjects) >= 5
+                _load_tp_from_entry!(stateObjects, entry_right, 5)
+                # Keep panel 5 aligned with panel 1
+                stateObjects[5].onScrollData.dimensionToScroll = stateObjects[1].onScrollData.dimensionToScroll
+                stateObjects[5].currentDisplayedSlice = stateObjects[1].currentDisplayedSlice
+                stateObjects[5].calcDimsStruct.zoom = stateObjects[1].calcDimsStruct.zoom
+                stateObjects[5].calcDimsStruct.panX = stateObjects[1].calcDimsStruct.panX
+                stateObjects[5].calcDimsStruct.panY = stateObjects[1].calcDimsStruct.panY
+                stateObjects[5].isSliceChanged = true
+                _force_texture_upload!(stateObjects, 5)
+            end
+            
+            if current_active_lesion_id[] > 0
+                try reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects) catch; end
+            end
+        else
+            # Set Left panel (panel 1)
+            left_tp = target_tp
+            current_tp_index[] = left_tp
+            left_label = get(tp_labels, left_tp, "TP $left_tp")
+            println("Compare: setting Left to $left_label (index=$left_tp)"); flush(stdout)
+            
+            entry_left = get_or_load_tp_data(left_tp)
+            if entry_left !== nothing && length(stateObjects) >= 1
+                _load_tp_from_entry!(stateObjects, entry_left, 1)
+                stateObjects[1].isSliceChanged = true
+                _force_texture_upload!(stateObjects, 1)
+            end
+            
+            if current_active_lesion_id[] > 0
+                try reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects) catch; end
+            end
+        end
+    else
+        # Single mode: load target_tp into all panels
+        current_tp_index[] = target_tp
+        label = get(tp_labels, target_tp, "TP $target_tp")
+        println("TP Navigation: switching to $label (index=$target_tp)"); flush(stdout)
+        
+        entry = get_or_load_tp_data(target_tp)
+        if entry !== nothing
+            for i in 1:min(4, length(stateObjects))
+                _load_tp_from_entry!(stateObjects, entry, i)
+            end
+            if length(stateObjects) >= 5
+                _load_tp_from_entry!(stateObjects, entry, 5)
+            end
+            
+            empty!(last_bone_overlay_indices)
+            lid = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
+            try
+                reactToSyncLesion(SyncLesionEvent(lid), stateObjects)
+                println("Synced to Lesion $lid for $label"); flush(stdout)
+            catch e
+                println("WARNING: Failed to sync Lesion $lid on TP set: $e"); flush(stdout)
+            end
+        end
+    end
+
+    # Sliding window: preload adjacent TPs (current ± 1), evict distant ones
+    if io_channel[] !== nothing
+        try
+            neighbors = Int[]
+            prev_pos = mod1(target_pos - 1, num_tps)
+            next_pos_n = mod1(target_pos + 1, num_tps)
+            push!(neighbors, tp_indices[prev_pos])
+            push!(neighbors, tp_indices[next_pos_n])
+            filter!(tp -> !haskey(tp_data_cache, tp), neighbors)
+            
+            keep_set = Set{Int}([target_tp, tp_indices[prev_pos], tp_indices[next_pos_n]])
+            if compare_mode[] && compare_right_tp[] >= 0
+                push!(keep_set, compare_right_tp[])
+            end
+            evict_tps = filter(tp -> !in(tp, keep_set), collect(keys(tp_data_cache)))
+            
+            if !isempty(neighbors) || !isempty(evict_tps)
+                put!(io_channel[], EvictAndPreloadMessage(evict_tps, neighbors))
+            end
+        catch; end
+    end
+
+    # Background SUV precompute & CT Docker preload
+    let tp_for_bg = target_tp, label_for_bg = get(tp_labels, target_tp, "TP $target_tp")
+        Threads.@spawn begin
+            try
+                LMW = _get_lmw()
+                if LMW !== nothing && haskey(tp_data_cache, tp_for_bg)
+                    cached_entry = tp_data_cache[tp_for_bg]
+                    unique_ids = Set{Int}()
+                    for v in cached_entry.mask
+                        iv = Int(v)
+                        iv > 0 && push!(unique_ids, iv)
+                    end
+                    for lid in unique_ids
+                        key = (tp_for_bg, lid)
+                        !haskey(LMW._lesion_suv_cache, key) && 
+                            try LMW._lesion_suv_cache[key] = LMW.compute_lesion_suv_string(lid, tp_for_bg) catch; end
+                    end
+                    println("  [BG] SUV precomputed for $(length(unique_ids)) lesions"); flush(stdout)
+                end
+            catch; end
+            
+            try
+                if haskey(tp_data_cache, tp_for_bg)
+                    InferenceClient.preload_ct_for_nninteractive(Array{Float32,3}(tp_data_cache[tp_for_bg].ct))
+                    println("[BG] CT preload initiated for $label_for_bg"); flush(stdout)
+                end
+            catch; end
+        end
+    end
+
+    t_total_ms = (time_ns() - t_total) / 1e6
+    @info "[BENCH] Set TP Total: $(round(t_total_ms, digits=1))ms"
     tp_switched[] = tp_switched[] + 1
 end
 

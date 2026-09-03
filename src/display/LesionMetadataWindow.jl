@@ -1496,6 +1496,30 @@ function create_metadata_window(
         _row_fixed_heights[row_idx] = height
     end
 
+    function set_row_visible!(row_idx::Int, visible::Bool)
+        if visible
+            if haskey(_row_fixed_heights, row_idx)
+                rowsize!(g, row_idx, Fixed(_row_fixed_heights[row_idx]))
+            else
+                rowsize!(g, row_idx, Auto())
+            end
+        else
+            rowsize!(g, row_idx, Fixed(0))
+        end
+        if row_idx < r[1]
+            rowgap!(g, row_idx, visible ? 2 : 0)
+        end
+        for c in g.content
+            if c.span.rows.start <= row_idx && c.span.rows.stop >= row_idx
+                if hasproperty(c.content, :blockscene)
+                    c.content.blockscene.visible[] = visible
+                elseif hasproperty(c.content, :visible)
+                    c.content.visible[] = visible
+                end
+            end
+        end
+    end
+
     # Header removed for compactness — title was decorative only
 
     # ── Section helper ──────────────────────────────────────────────────────
@@ -1707,9 +1731,13 @@ function create_metadata_window(
     on(btn_sag.clicks) do _; put!(channel, ChangePlaneEvent(:Sagittal)) end
     
     cv_active = Ref(false)
+    local update_tp_dropdown_visibility!
+    local sync_tp_menus_to_current!
     on(btn_cv.clicks) do _
         cv_active[] = !cv_active[]
         btn_cv.buttoncolor[] = cv_active[] ? GRN : BLU_BTN
+        update_tp_dropdown_visibility!()
+        sync_tp_menus_to_current!()
         put!(channel, CompareTimePointsEvent(cv_active[]))
     end
 
@@ -1722,6 +1750,118 @@ function create_metadata_window(
     on(btn_ns.clicks) do _; put!(channel, Int64(1)) end
     on(btn_pt.clicks) do _; put!(channel, ChangeTimePointEvent(-1)) end
     on(btn_nt.clicks) do _; put!(channel, ChangeTimePointEvent(1)) end
+
+    # ── Time Point Dropdown(s) ────────────────────────────────────────────────
+    # Single TP view: 1 full-width dropdown (cols 1:4)
+    # Compare Volumes view: 2 side-by-side dropdowns (Left: cols 1:2, Right: cols 3:4)
+    tp_single_r = nr!()
+    menu_tp_single = Menu(g[tp_single_r, 1:4], options = ["(none)"], fontsize = 10)
+    rowsize!(g, tp_single_r, Fixed(28)); register_fixed_row!(tp_single_r, 28)
+
+    tp_comp_lbl_r = nr!()
+    lbl_tp_left  = Label(g[tp_comp_lbl_r, 1:2], "Left (Panel 1)", fontsize = 9, color = ACCENT, halign = :center)
+    lbl_tp_right = Label(g[tp_comp_lbl_r, 3:4], "Right (Panel 5)", fontsize = 9, color = ACCENT, halign = :center)
+    rowsize!(g, tp_comp_lbl_r, Fixed(16)); register_fixed_row!(tp_comp_lbl_r, 16)
+
+    tp_comp_r = nr!()
+    menu_tp_left  = Menu(g[tp_comp_r, 1:2], options = ["(none)"], fontsize = 10)
+    menu_tp_right = Menu(g[tp_comp_r, 3:4], options = ["(none)"], fontsize = 10)
+    rowsize!(g, tp_comp_r, Fixed(28)); register_fixed_row!(tp_comp_r, 28)
+
+    is_syncing_tp = Ref(false)
+
+    function update_tp_dropdown_visibility!()
+        is_comp = cv_active[]
+        set_row_visible!(tp_single_r, !is_comp)
+        set_row_visible!(tp_comp_lbl_r, is_comp)
+        set_row_visible!(tp_comp_r, is_comp)
+    end
+
+    function sync_tp_menus_to_current!()
+        is_syncing_tp[] = true
+        try
+            opts = menu_tp_single.options[]
+            isempty(opts) && return
+            
+            cur_idx = _MEH.current_tp_index[]
+            idx_cur = findfirst(opt -> startswith(opt, "$cur_idx:"), opts)
+            if idx_cur !== nothing
+                menu_tp_single.i_selected[] = idx_cur
+                menu_tp_single.selection[] = opts[idx_cur]
+                menu_tp_left.i_selected[] = idx_cur
+                menu_tp_left.selection[] = opts[idx_cur]
+            end
+            
+            r_idx = _MEH.compare_right_tp[]
+            if r_idx >= 0
+                idx_r = findfirst(opt -> startswith(opt, "$r_idx:"), opts)
+                if idx_r !== nothing
+                    menu_tp_right.i_selected[] = idx_r
+                    menu_tp_right.selection[] = opts[idx_r]
+                end
+            end
+        finally
+            is_syncing_tp[] = false
+        end
+    end
+
+    function refresh_tp_dropdown_options!()
+        tp_indices = sort(collect(keys(_MEH.tp_labels)))
+        opts = if isempty(tp_indices)
+            ["(none)"]
+        else
+            ["$idx: $(get(_MEH.tp_labels, idx, "TP $idx"))" for idx in tp_indices]
+        end
+        menu_tp_single.options[] = opts
+        menu_tp_left.options[] = opts
+        menu_tp_right.options[] = opts
+        sync_tp_menus_to_current!()
+    end
+
+    on(menu_tp_single.selection) do sel
+        is_syncing_tp[] && return
+        sel === nothing && return
+        s = string(sel)
+        s == "(none)" && return
+        try
+            tp_idx = parse(Int, split(s, ':')[1])
+            if tp_idx != _MEH.current_tp_index[]
+                put!(channel, SetTimePointEvent(tp_idx, 0))
+            end
+        catch e
+            @warn "Failed to parse TP index from '$s': $e"
+        end
+    end
+
+    on(menu_tp_left.selection) do sel
+        is_syncing_tp[] && return
+        sel === nothing && return
+        s = string(sel)
+        s == "(none)" && return
+        try
+            tp_idx = parse(Int, split(s, ':')[1])
+            if tp_idx != _MEH.current_tp_index[]
+                put!(channel, SetTimePointEvent(tp_idx, 1))
+            end
+        catch e
+            @warn "Failed to parse Left TP index from '$s': $e"
+        end
+    end
+
+    on(menu_tp_right.selection) do sel
+        is_syncing_tp[] && return
+        sel === nothing && return
+        s = string(sel)
+        s == "(none)" && return
+        try
+            tp_idx = parse(Int, split(s, ':')[1])
+            if tp_idx != _MEH.compare_right_tp[]
+                put!(channel, SetTimePointEvent(tp_idx, 5))
+            end
+        catch e
+            @warn "Failed to parse Right TP index from '$s': $e"
+        end
+    end
 
     # TP label removed — modality/timepoint info is in the viewer title bar
     tp_status = Observable{String}("")  # kept for internal use
@@ -1738,11 +1878,25 @@ function create_metadata_window(
     end
     on(_MEH.tp_switched) do _
         update_tp_label()
+        if cv_active[] != _MEH.compare_mode[]
+            cv_active[] = _MEH.compare_mode[]
+            btn_cv.buttoncolor[] = cv_active[] ? GRN : BLU_BTN
+            update_tp_dropdown_visibility!()
+        end
+        tp_indices = sort(collect(keys(_MEH.tp_labels)))
+        expected_count = max(1, length(tp_indices))
+        if length(menu_tp_single.options[]) != expected_count
+            refresh_tp_dropdown_options!()
+        else
+            sync_tp_menus_to_current!()
+        end
         if cv_active[]
             _build_match_display!()
         end
     end
     update_tp_label()
+    update_tp_dropdown_visibility!()
+    refresh_tp_dropdown_options!()
 
     # Merged overlay/single/all/refresh into one compact row
     vc2_r = nr!()
@@ -2047,30 +2201,7 @@ end_section!(sec_win)
         ]
     ]
 
-    
-    function set_row_visible!(row_idx::Int, visible::Bool)
-        if visible
-            if haskey(_row_fixed_heights, row_idx)
-                rowsize!(g, row_idx, Fixed(_row_fixed_heights[row_idx]))
-            else
-                rowsize!(g, row_idx, Auto())
-            end
-        else
-            rowsize!(g, row_idx, Fixed(0))
-        end
-        if row_idx < r[1]
-            rowgap!(g, row_idx, visible ? 2 : 0)
-        end
-        for c in g.content
-            if c.span.rows.start <= row_idx && c.span.rows.stop >= row_idx
-                if hasproperty(c.content, :blockscene)
-                    c.content.blockscene.visible[] = visible
-                elseif hasproperty(c.content, :visible)
-                    c.content.visible[] = visible
-                end
-            end
-        end
-    end
+    # (set_row_visible! defined above at L1500)
 
     section_headers = Dict{String, Int}()
     
