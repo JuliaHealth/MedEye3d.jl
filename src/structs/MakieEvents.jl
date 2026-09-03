@@ -1,7 +1,7 @@
 module MakieEvents
 export ChangePlaneEvent, CompareTimePointsEvent, ShowSingleLesionEvent, ScrollZoomEvent
 export WindowingEvent, PaintValEvent, SyncLesionEvent
-export ChangeTimePointEvent, ToggleLesionEvent, RefreshListEvent
+export ChangeTimePointEvent, SetTimePointEvent, ToggleLesionEvent, RefreshListEvent
 export AddAutoPetEvent, AIInferenceResultEvent, AIStatusUpdateEvent, SyncMissingEvent, GenManualEvent
 export MapLinkEvent, AutoRunPreprocessEvent, RunPreprocessEvent, ShowBoneMaskEvent, ShowMaskLayerEvent, SaveMRBEvent
 export CloseWindowEvent, ResizeWindowEvent, SetWindowTitleEvent, ChangeBrushSizeEvent, ToggleMoveLesionModeEvent
@@ -42,6 +42,12 @@ end
 
 struct ChangeTimePointEvent
     change :: Int
+end
+
+struct SetTimePointEvent
+    tp_index::Int
+    panel::Int  # 0 = single/all, 1 = left panel (compare), 5 = right panel (compare)
+    SetTimePointEvent(tp_index::Int, panel::Int=0) = new(tp_index, panel)
 end
 
 struct ToggleLesionEvent end

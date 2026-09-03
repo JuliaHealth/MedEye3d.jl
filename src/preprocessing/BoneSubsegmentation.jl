@@ -207,9 +207,9 @@ function generate_bone_subsegments(
 
     if has_cuda
         try
-            CUDA.device!(1)
+            CUDA.device!(0)
         catch e
-            @warn "Failed to set CUDA device to 1: $e"
+            @warn "Failed to set CUDA device to 0: $e"
         end
         crop_surface = CUDA.zeros(Bool, crop_dims)
         crop_cortical_gpu = CUDA.CuArray(crop_cortical)
