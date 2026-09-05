@@ -18,6 +18,9 @@ using .AIInference
 include(joinpath(@__DIR__, "..", "lib", "SceneHierarchy.jl"))
 using .SceneHierarchy
 
+using MedEye3d
+using MedEye3d.LesionAssociation
+
 const HIRES_FACTOR = 1.0
 
 """
@@ -101,6 +104,42 @@ function main()
             h5_file["_meta_/$json_name"] = read(json_path, String)
             println("  Embedded $json_name as HDF5 dataset ($(filesize(json_path)) bytes)")
         end
+    end
+    # Extract segment_names.json from scene_hierarchy.json if available
+    try
+        scene_path = joinpath(data_dir, "scene_hierarchy.json")
+        if isfile(scene_path)
+            h_tree = JSON.parse(read(scene_path, String))
+            extracted_sn = Dict{String, Dict{String, String}}()
+            function _walk_sn(nodes, cur_tp=0)
+                for nd in nodes
+                    tp = cur_tp
+                    nd_name = get(nd, "name", "")
+                    parts = split(replace(nd_name, ".nii.gz" => ""), "_")
+                    last_i = tryparse(Int, parts[end])
+                    if last_i !== nothing; tp = last_i; end
+                    if get(nd, "type", "") == "vtkMRMLSegmentationNode" && haskey(nd, "segments")
+                        segs = nd["segments"]
+                        if segs isa AbstractVector
+                            target = get!(extracted_sn, string(tp), Dict{String, String}())
+                            for (s_idx, s_item) in enumerate(segs)
+                                target[string(s_idx)] = (s_item isa AbstractDict) ? get(s_item, "name", "Segment $s_idx") : string(s_item)
+                            end
+                        end
+                    end
+                    if haskey(nd, "children")
+                        _walk_sn(nd["children"], tp)
+                    end
+                end
+            end
+            _walk_sn(h_tree, 0)
+            if !isempty(extracted_sn)
+                h5_file["_meta_/segment_names.json"] = JSON.json(extracted_sn)
+                println("  Embedded segment_names.json as HDF5 dataset ($(length(extracted_sn)) timepoints)")
+            end
+        end
+    catch e
+        @warn "Could not extract segment_names.json: $e"
     end
     
     function process_file(name, tfm_path, group_name, is_mask=false)
@@ -412,7 +451,6 @@ function main()
             mask_f32 = Float32.(mask_raw)
             
             # Use LesionAssociation volume-based mapping with bone priority
-            using MedEye3d.LesionAssociation
             organ_mapping = LesionAssociation.map_lesions_to_organs(mask_f32, ts_atlas_aligned, ts_names)
             
             # Store as JSON

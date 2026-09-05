@@ -41,6 +41,38 @@ using .SceneHierarchy
 studies = parse_studies_from_hierarchy(data_dir)
 println("Found $(length(studies)) timepoints in $(data_dir)")
 
+# ── Parse clinical segment names from scene_hierarchy.json if present ────────
+scene_json_path = joinpath(data_dir, "scene_hierarchy.json")
+scene_hierarchy_raw = isfile(scene_json_path) ? JSON.parsefile(scene_json_path) : []
+clinical_segment_map = Dict{Tuple{Int, Int}, String}()
+
+function extract_segments_from_hierarchy!(nodes, cur_tp)
+    for node in nodes
+        ntype = get(node, "type", "")
+        if ntype == "vtkMRMLSegmentationNode"
+            segs = get(node, "segments", [])
+            for (i, s) in enumerate(segs)
+                clinical_segment_map[(cur_tp, i)] = string(s)
+            end
+        elseif ntype == "vtkMRMLLinearTransformNode"
+            ch = get(node, "children", [])
+            ch_tp = cur_tp
+            for c in ch
+                c_name = get(c, "name", "")
+                parts = split(c_name, "_")
+                parsed_tp = tryparse(Int, parts[end])
+                if parsed_tp !== nothing
+                    ch_tp = parsed_tp
+                    break
+                end
+            end
+            extract_segments_from_hierarchy!(ch, ch_tp)
+        end
+    end
+end
+extract_segments_from_hierarchy!(scene_hierarchy_raw, 0)
+println("Loaded $(length(clinical_segment_map)) clinical segment names from scene_hierarchy.json")
+
 # ── Load existing database if available ─────────────────────────────────────
 using MedEye3d
 using MedEye3d.LesionMetadataWindow
@@ -204,48 +236,89 @@ for (s_idx, study) in enumerate(studies)
             end
         end
         
+        # Check if clinical segment name is available from scene_hierarchy.json
+        clinical_name = get(clinical_segment_map, (orig_tp, Int(lid)), "")
+        is_clinical = !isempty(clinical_name) && !startswith(clinical_name, "unknown_")
+
         # Ontology lookup
         entry = nothing
         if !isempty(organ_name)
             entry = get(ontology, lowercase(organ_name), get(ontology, organ_name, nothing))
         end
         
-        base_anatomy = entry !== nothing ? get(entry, "detailed", titlecase(replace(organ_name, "_" => " "))) : (isempty(organ_name) ? "Lesion" : titlecase(replace(organ_name, "_" => " ")))
+        base_anatomy = if is_clinical
+            clinical_name
+        else
+            entry !== nothing ? get(entry, "detailed", titlecase(replace(organ_name, "_" => " "))) : (isempty(organ_name) ? "Lesion" : titlecase(replace(organ_name, "_" => " ")))
+        end
         base_side = entry !== nothing ? get(entry, "side", "") : ""
         anatomic_loc = entry !== nothing ? get(entry, "anatomic_location", "Solid Organ / Viscera") : "Solid Organ / Viscera"
         anatomic_subloc = entry !== nothing ? get(entry, "anatomical_sublocation", "N/A (General Organ)") : "N/A (General Organ)"
         lesion_type = entry !== nothing ? get(entry, "lesion_type", "Organ Meta") : "Organ Meta"
         
-        # Check bone overlap with Skellytour
-        is_bone = false
-        if skelly_vox !== nothing
-            sk_overlap = count([skelly_vox[clamp(v[1],1,size(skelly_vox,1)), clamp(v[2],1,size(skelly_vox,2)), clamp(v[3],1,size(skelly_vox,3))] > 0 for v in voxels])
-            if sk_overlap >= min(5, round(Int, 0.05 * vol_voxels))
-                is_bone = true
-            end
-        end
-        bone_kws = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula", "humerus", "scapula", "sternum", "skull", "palate", "bone", "spine", "ilium", "ischium", "pubis"]
-        if any(kw -> occursin(kw, lowercase(organ_name)), bone_kws) || any(kw -> occursin(kw, lowercase(base_anatomy)), bone_kws)
-            is_bone = true
-        end
-        
-        if is_bone
-            lesion_type = "Bone Meta"
-            if !occursin("Skeleton", anatomic_loc)
-                anatomic_loc = (occursin("femur", lowercase(base_anatomy)) || occursin("humerus", lowercase(base_anatomy)) || occursin("tibia", lowercase(base_anatomy))) ? 
-                    "Appendicular Skeleton (Limbs, Scapulae, Hands, Feet)" : 
-                    "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)"
-            end
-            if isempty(anatomic_subloc) || anatomic_subloc == "N/A (General Organ)"
+        is_muscle = false
+        if is_clinical
+            if occursin("Knochen", clinical_name) || occursin("Bone", clinical_name) || occursin("Rippe", clinical_name)
+                lesion_type = "Bone Meta"
+                anatomic_loc = occursin("Rippe", clinical_name) ? "Axial Skeleton (Ribs, Sternum, Clavicles)" : "Axial Skeleton (Pelvis)"
                 anatomic_subloc = "Medullary Cavity (Intramedullary/Marrow)"
+            elseif occursin("Lymph", clinical_name) || occursin("LN", clinical_name)
+                lesion_type = "Lymph Node Meta"
+                anatomic_loc = occursin("obturator", lowercase(clinical_name)) ? "Pelvic Lymph Node" : (occursin("iliaca", lowercase(clinical_name)) ? "Pelvic Lymph Node" : "Distant Lymph Node")
+                anatomic_subloc = "Regional / Extrapelvic"
+            elseif occursin("Prostata", clinical_name) || occursin("Prostate", clinical_name) || occursin("VOI", clinical_name) || occursin("Gland", clinical_name)
+                lesion_type = "Prostate"
+                anatomic_loc = "Prostate Gland"
+                anatomic_subloc = "Prostate Peripheral Zone (PZ)"
             end
-        elseif occursin("lymph", lowercase(organ_name)) || occursin("node", lowercase(organ_name))
-            lesion_type = "Lymph Node Meta"
-            anatomic_loc = occursin("pelv", lowercase(organ_name)) ? "Pelvic Lymph Node" : "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)"
-        elseif occursin("prostate", lowercase(organ_name))
-            lesion_type = "Prostate"
-            anatomic_loc = "Prostate Gland"
-            anatomic_subloc = "Prostate Peripheral Zone (PZ)"
+        else
+            muscle_kws_prefill = ["gluteus", "autochthon", "iliopsoas", "pectoralis", "subscapularis",
+                                  "supraspinatus", "infraspinatus", "latissimus", "rectus_abdominis",
+                                  "oblique", "erector", "trapezius", "deltoid", "sartorius", "quadriceps",
+                                  "scalene", "platysma", "masseter", "temporalis", "pterygoid",
+                                  "coracobrachial", "serratus", "teres_major", "triceps", "psoas",
+                                  "quadratus", "sternocleidomastoid", "pharyngeal", "prevertebral",
+                                  "tongue", "digastric", "thigh_medial", "thigh_posterior",
+                                  "levator_scapulae", "sterno_thyroid", "thyrohyoid", "transversospinalis", "muscle"]
+            is_muscle = any(kw -> occursin(kw, lowercase(organ_name)), muscle_kws_prefill) || any(kw -> occursin(kw, lowercase(base_anatomy)), muscle_kws_prefill)
+
+            # Check bone overlap with Skellytour (muscles are strictly NOT bone)
+            is_bone = false
+            if !is_muscle
+                if skelly_vox !== nothing
+                    sk_overlap = count([skelly_vox[clamp(v[1],1,size(skelly_vox,1)), clamp(v[2],1,size(skelly_vox,2)), clamp(v[3],1,size(skelly_vox,3))] > 0 for v in voxels])
+                    if sk_overlap >= min(5, round(Int, 0.05 * vol_voxels))
+                        is_bone = true
+                    end
+                end
+                bone_kws = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula", "humerus", "scapula", "sternum", "skull", "palate", "bone", "spine", "ilium", "ischium", "pubis"]
+                if any(kw -> occursin(kw, lowercase(organ_name)), bone_kws) || any(kw -> occursin(kw, lowercase(base_anatomy)), bone_kws)
+                    is_bone = true
+                end
+            end
+            
+            if is_muscle
+                lesion_type = "Technical Artifact"
+                anatomic_loc = "General Soft Tissue (Muscles, Subcutaneous)"
+                anatomic_subloc = "Muscular / Fascial"
+            elseif is_bone
+                lesion_type = "Bone Meta"
+                if !occursin("Skeleton", anatomic_loc)
+                    anatomic_loc = (occursin("femur", lowercase(base_anatomy)) || occursin("humerus", lowercase(base_anatomy)) || occursin("tibia", lowercase(base_anatomy))) ? 
+                        "Appendicular Skeleton (Limbs, Scapulae, Hands, Feet)" : 
+                        "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)"
+                end
+                if isempty(anatomic_subloc) || anatomic_subloc == "N/A (General Organ)"
+                    anatomic_subloc = "Medullary Cavity (Intramedullary/Marrow)"
+                end
+            elseif occursin("lymph", lowercase(organ_name)) || occursin("node", lowercase(organ_name))
+                lesion_type = "Lymph Node Meta"
+                anatomic_loc = occursin("pelv", lowercase(organ_name)) ? "Pelvic Lymph Node" : "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)"
+            elseif occursin("prostate", lowercase(organ_name))
+                lesion_type = "Prostate"
+                anatomic_loc = "Prostate Gland"
+                anatomic_subloc = "Prostate Peripheral Zone (PZ)"
+            end
         end
         
         # ── Rules Engine ─────────────────────────────────────────────────────
@@ -253,8 +326,14 @@ for (s_idx, study) in enumerate(studies)
         certainty = "3"
         artifact_reason = ""
         
+        # Rule 0: Muscular uptake without bone substrate (presumed false positive / technical artifact)
+        if lesion_type == "Technical Artifact" || is_muscle
+            alt_hypothesis = "Technical Artifact"
+            certainty = "0"
+            artifact_reason = "Muscular uptake without CT substrate (presumed false positive / technical artifact)"
+            global total_artifacts_flagged += 1
         # Rule 1: Edge-slice reconstruction artifact (first 2 or last 2 axial slices)
-        if z_min <= 2 || z_max >= total_z - 1 || cz <= 2 || cz >= total_z - 1
+        elseif z_min <= 2 || z_max >= total_z - 1 || cz <= 2 || cz >= total_z - 1
             alt_hypothesis = "Technical Artifact"
             certainty = "0"
             artifact_reason = "Edge slice reconstruction / partial volume artifact (z=$cz/$total_z)"
@@ -297,8 +376,12 @@ for (s_idx, study) in enumerate(studies)
         suv_str = "Max: $(round(suv_max, digits=1)) ; Parotid: $(round(bg_suvs["parotid"], digits=1)) ; Liver: $(round(bg_suvs["liver"], digits=1)) ; Blood: $(round(bg_suvs["blood"], digits=1))"
         
         # Generate tracking name
-        pat_id = "pat6"
-        tracking_name = "$(replace(base_anatomy, " " => "_"))_L$(lid)_$(modality)_TP$(orig_tp)_$(pat_id)"
+        pat_id = "psma"
+        tracking_name = if is_clinical
+            "$(replace(clinical_name, " " => "_"))_TP$(orig_tp)"
+        else
+            "$(replace(base_anatomy, " " => "_"))_L$(lid)_$(modality)_TP$(orig_tp)_$(pat_id)"
+        end
         
         # Build lesion record
         lesion_record = Dict{String, Any}(
@@ -322,12 +405,20 @@ for (s_idx, study) in enumerate(studies)
             "_Modality" => modality,
             "_NodeName" => node_name
         )
+        if is_clinical
+            lesion_record["ClinicalLesionName"] = clinical_name
+            lesion_record["OriginalName"] = clinical_name
+        end
         if !isempty(artifact_reason)
             lesion_record["_ArtifactReason"] = artifact_reason
         end
         
         # Key naming: format as "$lid: $organ_name" and also ensure "$lid" is available
-        display_key = isempty(organ_name) ? "$lid: Lesion $lid" : "$lid: $organ_name"
+        display_key = if is_clinical
+            "$lid: $clinical_name"
+        else
+            isempty(organ_name) ? "$lid: Lesion $lid" : "$lid: $organ_name"
+        end
         
         # Merge with existing data if present (preserve user-edited clinical notes/custom fields)
         existing = get_lesion_state(existing_db, display_key)

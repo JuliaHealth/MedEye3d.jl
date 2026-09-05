@@ -16,6 +16,7 @@ RUN apt-get update && \
     libglib2.0-0 \
     xvfb \
     scrot \
+    xclip \
     x11-utils \
     xdotool \
     && rm -rf /var/lib/apt/lists/*

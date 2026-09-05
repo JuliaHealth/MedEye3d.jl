@@ -434,7 +434,8 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
             # If there's an active lesion, set mask filter uniforms
             if current_active_lesion_id[] > 0
                 try
-                    reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects)
+                    lid_off = _clamp_lid_for_tp(current_active_lesion_id[], current_tp_index[])
+                    reactToSyncLesion(SyncLesionEvent(lid_off), stateObjects)
                 catch e
                     println("WARNING: reactToSyncLesion failed during compare-OFF: $e"); flush(stdout)
                 end
@@ -477,15 +478,26 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
 end
 
 const current_windowing = Dict{String, Vector{Float32}}(
-    "CT" => Float32[-150.0, 250.0],
-    "PET" => Float32[0.0, 10.0],
-    "SPECT" => Float32[0.0, 10.0]
+    "CT"    => Float32[-160.0, 240.0],
+    "PET"   => Float32[0.0, 10.0],
+    "SPECT" => Float32[0.0, 10.0],
+    "T2"    => Float32[0.0, 1000.0],
+    "MRI"   => Float32[0.0, 1000.0],
+    "MR"    => Float32[0.0, 1000.0],
+    "T1"    => Float32[0.0, 600.0],
+    "ADC"   => Float32[0.0, 2200.0],
+    "DWI"   => Float32[0.0, 120.0]
 )
 export current_windowing
 
 function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFields})
     target_mod = uppercase(data.modality)
     current_windowing[target_mod] = Float32.([data.min_val, data.max_val])
+    if target_mod in ("T2", "MRI", "MR")
+        current_windowing["T2"] = Float32.([data.min_val, data.max_val])
+        current_windowing["MRI"] = Float32.([data.min_val, data.max_val])
+        current_windowing["MR"] = Float32.([data.min_val, data.max_val])
+    end
     
     for (panel_idx, state) in enumerate(stateObjects)
         panel_tp = if compare_mode[] && panel_idx == 5
@@ -495,21 +507,32 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
         end
         panel_mod = uppercase(get(tp_modalities, panel_tp, "PET"))
         
+        is_main_match = false
+        is_nuc_match = false
+        
+        if target_mod == "CT"
+            is_main_match = (panel_mod == "CT" || panel_mod == "PET" || panel_mod == "SPECT")
+        elseif target_mod in ("T2", "MRI", "MR")
+            is_main_match = (panel_mod in ("T2", "MRI", "MR"))
+        elseif target_mod == "T1"
+            is_main_match = (panel_mod == "T1")
+        elseif target_mod == "ADC"
+            is_main_match = (panel_mod == "ADC")
+            is_nuc_match = (panel_mod in ("T2", "MRI", "MR") || panel_mod == "ADC")
+        elseif target_mod == "DWI"
+            is_main_match = (panel_mod == "DWI")
+            is_nuc_match = (panel_mod == "DWI")
+        elseif target_mod == "PET"
+            is_nuc_match = (panel_mod == "PET" || panel_mod == "CT")
+        elseif target_mod == "SPECT"
+            is_nuc_match = (panel_mod == "SPECT")
+        end
+        
         for tex in state.mainForDisplayObjects.listOfTextSpecifications
-            if target_mod == "CT"
-                if tex.name == "CT"
-                    tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
-                end
-            elseif target_mod == "PET"
-                # Only update nuclear texture if this panel is displaying a PET timepoint
-                if (tex.name == "PET" && panel_mod == "PET")
-                    tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
-                end
-            elseif target_mod == "SPECT"
-                # Only update nuclear texture if this panel is displaying a SPECT timepoint
-                if tex.name == "SPECT" || (tex.name == "PET" && panel_mod == "SPECT")
-                    tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
-                end
+            if is_main_match && (tex.name == "CT" || tex.isMainImage)
+                tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
+            elseif is_nuc_match && (tex.name == "PET" || tex.name == "SPECT" || tex.isNuclearMask)
+                tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
             end
         end
     end
@@ -1053,6 +1076,49 @@ function reactToBoneSubsegResult(data::BoneSubsegResultEvent, stateObjects::Vect
     end
 end
 
+"""Clamp lesion_id to the range of segments available on the given TP.
+Falls back to 1 if the current ID doesn't exist on the target TP."""
+function _clamp_lid_for_tp(lid::Int, tp::Int)::Int
+    if lid <= 0; return 1; end
+    # Check tp_segment_names (populated from scene_hierarchy / segment_names.json)
+    if haskey(tp_segment_names, tp)
+        seg_ids = collect(keys(tp_segment_names[tp]))
+        if !isempty(seg_ids) && !(lid in seg_ids)
+            return minimum(seg_ids)
+        end
+    end
+    # Fallback: check mask data cache for max segment ID
+    if haskey(tp_data_cache, tp)
+        max_id = Int(maximum(tp_data_cache[tp].mask))
+        if max_id > 0 && lid > max_id
+            return 1
+        end
+    end
+    return lid
+end
+
+"""On MRI modalities, force the Mask texture to show ALL segments (prostate anatomy).
+Call this after reactToSyncLesion which may have re-applied single-lesion filtering."""
+function _force_mri_show_all!(tp::Int, stateObjects::Vector{StateDataFields})
+    panel_mod = uppercase(get(tp_modalities, tp, "PET"))
+    if !(panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI"))
+        return
+    end
+    for stateObject in stateObjects
+        for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
+            if textSpec.name == "Mask" || textSpec.name == "segmentation" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy" && textSpec.name != "Bone_Overlay")
+                T_mm = eltype(textSpec.minAndMaxValue)
+                textSpec.minAndMaxValue = T_mm.([1, 1000])
+                textSpec.isVisible = true
+                # Ensure mask is rendered with non-zero opacity
+                if textSpec.maskContribution <= 0.0f0
+                    textSpec.maskContribution = 0.5f0
+                end
+            end
+        end
+    end
+end
+
 const tp_loader_ref = Ref{Any}(nothing)
 const io_channel = Ref{Any}(nothing)
 const main_event_channel = Ref{Any}(nothing)
@@ -1354,13 +1420,46 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
 
     # Re-apply appropriate modality windowing for this panel
     panel_mod = uppercase(get(tp_modalities, panel_tp, "PET"))
-    nuc_win = get(current_windowing, panel_mod, Float32[0.0, 10.0])
-    ct_win = get(current_windowing, "CT", Float32[-150.0, 250.0])
+    
+    main_win = if panel_mod in ("T2", "MRI", "MR")
+        get(current_windowing, "T2", Float32[0.0, 1000.0])
+    elseif panel_mod == "T1"
+        get(current_windowing, "T1", Float32[0.0, 600.0])
+    elseif panel_mod == "ADC"
+        get(current_windowing, "ADC", Float32[0.0, 2200.0])
+    elseif panel_mod == "DWI"
+        get(current_windowing, "DWI", Float32[0.0, 120.0])
+    else
+        get(current_windowing, "CT", Float32[-160.0, 240.0])
+    end
+    
+    nuc_win = if panel_mod in ("T2", "MRI", "MR")
+        get(current_windowing, "ADC", Float32[0.0, 2200.0])
+    elseif panel_mod == "SPECT"
+        get(current_windowing, "SPECT", Float32[0.0, 10.0])
+    elseif panel_mod in ("ADC", "DWI", "T1")
+        main_win
+    else
+        get(current_windowing, "PET", Float32[0.0, 10.0])
+    end
+    
     for tex in stateObjects[panel_idx].mainForDisplayObjects.listOfTextSpecifications
-        if tex.name == "CT"
-            tex.minAndMaxValue = Float32.([ct_win[1], ct_win[2]])
-        elseif tex.name == "PET" || tex.name == "SPECT"
+        if tex.name == "CT" || tex.isMainImage
+            tex.minAndMaxValue = Float32.([main_win[1], main_win[2]])
+        elseif tex.name == "PET" || tex.name == "SPECT" || tex.isNuclearMask
             tex.minAndMaxValue = Float32.([nuc_win[1], nuc_win[2]])
+            # Default PET/nuclear overlay to 0% blend on MRI modalities
+            if panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI")
+                tex.maskContribution = 0.0f0
+            end
+        elseif panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI") && (tex.name == "Mask" || tex.name == "segmentation" || (tex.isMultiDiscreteMask && tex.name != "Anatomy" && tex.name != "Bone_Overlay"))
+            # Show ALL segments on MRI (prostate anatomy contours, not individual PET lesion IDs)
+            T_mm = eltype(tex.minAndMaxValue)
+            tex.minAndMaxValue = T_mm.([1, 1000])
+            tex.isVisible = true
+            if tex.maskContribution <= 0.0f0
+                tex.maskContribution = 0.5f0
+            end
         end
     end
     
@@ -1486,10 +1585,12 @@ const current_pet_blend = Ref(1.0f0)
 const volume_z_size = Ref(0)
 # Per-TP anatomy labels: tp_index → Dict{Int,String} for cursor readout
 const anatomy_labels_cache = Dict{Int, Dict{Int,String}}()
+# Per-TP segment / lesion names from HDF5 scene hierarchy: tp_index -> Dict{Int, String}(lesion_id -> original_name)
+const tp_segment_names = Dict{Int, Dict{Int, String}}()
 
 export tp_data_cache, bone_subsegments_cache, lesion_centroids_cache, global_bone_atlas, global_organ_mapping, current_tp_index, tp_labels, tp_descriptions, tp_english_descriptions
 export compare_mode, compare_right_tp, tp_switched, get_node_name_for_tp, tp_node_names
-export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, h5_path_ref, tp_modalities, volume_z_size, anatomy_labels_cache
+export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, h5_path_ref, tp_modalities, volume_z_size, anatomy_labels_cache, tp_segment_names
 
 
 function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector{StateDataFields})
@@ -1555,7 +1656,8 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         
         # Re-apply bone overlay for active lesion after TP data replacement
         if current_active_lesion_id[] > 0
-            reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects)
+            lid_cmp = _clamp_lid_for_tp(current_active_lesion_id[], new_tp)
+            reactToSyncLesion(SyncLesionEvent(lid_cmp), stateObjects)
         end
         
         right_label = get(tp_labels, right_tp, "TP $right_tp")
@@ -1584,6 +1686,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
             empty!(last_bone_overlay_indices)
             t_bone_overlay = @elapsed begin
                 lid = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
+                lid = _clamp_lid_for_tp(lid, new_tp)
                 try
                     reactToSyncLesion(SyncLesionEvent(lid), stateObjects)
                     println("Synced to Lesion $lid for $label"); flush(stdout)
@@ -1592,6 +1695,8 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
                 end
             end
             if DEBUG_VERBOSE[]; println("  [BENCH] bone overlay (reactToSyncLesion): $(round(t_bone_overlay*1000, digits=1))ms"); flush(stdout); end
+            # On MRI: force show-all segments (override single-lesion filter from reactToSyncLesion)
+            _force_mri_show_all!(new_tp, stateObjects)
         end
     end
     # Sliding window: preload adjacent TPs (current ± 1), evict distant ones
@@ -1690,7 +1795,8 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
             end
             
             if current_active_lesion_id[] > 0
-                try reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects) catch; end
+                lid_cmp = _clamp_lid_for_tp(current_active_lesion_id[], target_tp)
+                try reactToSyncLesion(SyncLesionEvent(lid_cmp), stateObjects) catch; end
             end
         else
             # Set Left panel (panel 1)
@@ -1707,7 +1813,8 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
             end
             
             if current_active_lesion_id[] > 0
-                try reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects) catch; end
+                lid_cmp = _clamp_lid_for_tp(current_active_lesion_id[], left_tp)
+                try reactToSyncLesion(SyncLesionEvent(lid_cmp), stateObjects) catch; end
             end
         end
     else
@@ -1727,12 +1834,15 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
             
             empty!(last_bone_overlay_indices)
             lid = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
+            lid = _clamp_lid_for_tp(lid, target_tp)
             try
                 reactToSyncLesion(SyncLesionEvent(lid), stateObjects)
                 println("Synced to Lesion $lid for $label"); flush(stdout)
             catch e
                 println("WARNING: Failed to sync Lesion $lid on TP set: $e"); flush(stdout)
             end
+            # On MRI: force show-all segments
+            _force_mri_show_all!(target_tp, stateObjects)
         end
     end
 

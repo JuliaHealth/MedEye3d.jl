@@ -98,25 +98,33 @@ function parse_studies_from_hierarchy(data_dir)
     end
     hierarchy = JSON.parse(read(scene_json, String))
     
-    # Load metadata.json if available to extract actual acquisition dates
+    # Load metadata.json if available to extract actual acquisition dates and modalities
     meta_dates = Dict{String, String}()
+    meta_modalities = Dict{String, String}()
     meta_json_path = joinpath(data_dir, "metadata.json")
     if isfile(meta_json_path)
         try
             meta_json = JSON.parsefile(meta_json_path)
             for item in meta_json
                 for (k, v) in item
-                    if v isa Dict && (haskey(v, "CT") || haskey(v, "PET") || haskey(v, "NM"))
+                    if v isa Dict
                         # Formatted date YYYY-MM-DD
-                        d_str = length(k) == 8 ? "$(k[1:4])-$(k[5:6])-$(k[7:8])" : k
-                        if haskey(v, "CT") && haskey(v["CT"], "name")
-                            meta_dates[v["CT"]["name"]] = d_str
+                        d_str = if length(k) >= 8 && all(isdigit, k[1:8])
+                            prefix = "$(k[1:4])-$(k[5:6])-$(k[7:8])"
+                            suffix = length(k) > 8 ? " (" * replace(strip(c -> c == '_', k[9:end]), "_" => " ") * ")" : ""
+                            prefix * suffix
+                        else
+                            k
                         end
-                        if haskey(v, "PET") && haskey(v["PET"], "name")
-                            meta_dates[v["PET"]["name"]] = d_str
-                        end
-                        if haskey(v, "NM") && haskey(v["NM"], "name")
-                            meta_dates[v["NM"]["name"]] = d_str
+                        for sub_k in keys(v)
+                            sub_dict = v[sub_k]
+                            if sub_dict isa Dict && haskey(sub_dict, "name")
+                                v_name = sub_dict["name"]
+                                meta_dates[v_name] = d_str
+                                if haskey(sub_dict, "Modality")
+                                    meta_modalities[v_name] = sub_dict["Modality"]
+                                end
+                            end
                         end
                     end
                 end
@@ -142,15 +150,30 @@ function parse_studies_from_hierarchy(data_dir)
                 continue
             end
             name = child["name"]
+            child_mod = get(child, "modality", get(child, "Modality", get(meta_modalities, name, "")))
+            if !isempty(child_mod)
+                modality = child_mod
+            end
             if child["type"] == "vtkMRMLScalarVolumeNode"
                 # Check for functional / NM / PET / SPECT first
                 if occursin("NM", name) || occursin("PET", name) || occursin("SUV", name)
                     pet_name = name * ".nii.gz"
-                    if occursin("NM", name) || occursin("SPECT", name)
+                    if isempty(child_mod) && (occursin("NM", name) || occursin("SPECT", name))
                         modality = "SPECT"
                     end
-                elseif occursin("CT", name)
+                elseif occursin("CT", name) || occursin("MR", name) || occursin("T2", name) || occursin("ADC", name) || occursin("DWI", name) || occursin("T1", name)
                     ct_name = name * ".nii.gz"
+                    if isempty(child_mod)
+                        if occursin("ADC", name)
+                            modality = "ADC"
+                        elseif occursin("DWI", name) || occursin("BVAL", name)
+                            modality = "DWI"
+                        elseif occursin("T1", name)
+                            modality = "T1"
+                        elseif occursin("MR", name) || occursin("T2", name)
+                            modality = "T2"
+                        end
+                    end
                 end
             elseif child["type"] == "vtkMRMLSegmentationNode"
                 if occursin("Lesions", name)
@@ -181,7 +204,10 @@ function parse_studies_from_hierarchy(data_dir)
         orig_tp = tryparse(Int, parts[end])
         if orig_tp === nothing; orig_tp = 0; end
         
-        # Look up exact date from metadata if possible
+        # Look up exact date and modality from metadata if possible
+        if haskey(meta_modalities, ct_base)
+            modality = meta_modalities[ct_base]
+        end
         pet_base = replace(pet_name, ".nii.gz" => "")
         date_str = get(meta_dates, ct_base, get(meta_dates, pet_base, "$modality TP $orig_tp"))
         
@@ -203,8 +229,8 @@ function parse_studies_from_hierarchy(data_dir)
         end
     end
     
-    # Sort chronologically by date_str if it looks like a date (YYYY-MM-DD), otherwise by (orig_tp, modality)
-    sort!(parsed_studies, by = x -> (length(x[3]) >= 10 && isdigit(x[3][1])) ? x[3] : "$(x[2])_$(x[1])")
+    # Sort chronologically by date prefix (YYYY-MM-DD), with orig_tp tie-breaker
+    sort!(parsed_studies, by = x -> ((length(x[3]) >= 10 && isdigit(x[3][1])) ? x[3][1:10] : "9999-99-99", x[2]))
     return parsed_studies
 end
 

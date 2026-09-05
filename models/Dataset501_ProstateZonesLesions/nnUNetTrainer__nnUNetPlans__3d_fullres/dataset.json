@@ -1,0 +1,22 @@
+{
+    "channel_names": {
+        "0": "T2W",
+        "1": "ADC",
+        "2": "HBV"
+    },
+    "labels": {
+        "background": 0,
+        "PZ": 1,
+        "TZ": 2,
+        "CZ": 3,
+        "AFS": 4,
+        "UR": 5,
+        "PG": 6,
+        "SV_L": 7,
+        "SV_R": 8,
+        "Lesion": 9
+    },
+    "numTraining": 670,
+    "file_ending": ".nii.gz",
+    "overwrite_image_reader_writer": "SimpleITKIO"
+}
