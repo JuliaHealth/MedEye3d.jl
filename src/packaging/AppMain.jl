@@ -763,22 +763,31 @@ function run_app(args::Vector{String})
         return
     end
 
+    MedEye3d.Telemetry.log_action("APP_START", Dict("args" => args))
+
     default_h5_candidates = [
         "D:\\MedEye3d.jl\\data\\preprocessed_volumes.h5",
         joinpath(@__DIR__, "..", "..", "data", "preprocessed_volumes.h5"),
-        joinpath(get(ENV, "APPDATA", ""), "MedEye3D", "data", "preprocessed_volumes.h5")
+        joinpath(get(ENV, "APPDATA", ""), "MedEye3D", "data", "preprocessed_volumes.h5"),
+        joinpath(homedir(), "Downloads", "preprocessed_volumes.h5"),
+        joinpath(homedir(), "Desktop", "preprocessed_volumes.h5"),
+        joinpath(homedir(), "Documents", "preprocessed_volumes.h5"),
+        joinpath(pwd(), "preprocessed_volumes.h5")
     ]
     default_h5_idx = findfirst(isfile, default_h5_candidates)
     default_h5 = default_h5_idx !== nothing ? default_h5_candidates[default_h5_idx] : nothing
 
     file_args = filter(a -> !startswith(a, "-"), args)
     if !isempty(file_args) && isfile(file_args[1])
+        MedEye3d.Telemetry.log_action("CLI_LOAD_FILE", Dict("path" => basename(file_args[1])))
         launch_from_file(file_args[1]; quad=true)
     elseif "--demo" in args
         if default_h5 !== nothing
             println("Launching default test dataset: ", default_h5)
+            MedEye3d.Telemetry.log_action("CLI_LOAD_DEMO_DATASET")
             launch_from_h5(default_h5; quad=true)
         else
+            MedEye3d.Telemetry.log_action("CLI_LOAD_SYNTHETIC_PHANTOM")
             launch_demo(; quad=true)
         end
     else
@@ -786,12 +795,15 @@ function run_app(args::Vector{String})
         action, path = MedEye3d.StudySelectorWindow.prompt_open_or_demo()
         if action == :file && isfile(path)
             println("Selected file: ", path)
+            MedEye3d.Telemetry.log_action("GUI_LOAD_FILE", Dict("path" => basename(path)))
             launch_from_file(path; quad=true)
         elseif default_h5 !== nothing
             println("No file selected. Launching default test dataset: ", default_h5)
+            MedEye3d.Telemetry.log_action("GUI_LOAD_DEFAULT_DATASET")
             launch_from_h5(default_h5; quad=true)
         else
             println("No file selected. Launching interactive 3D demo phantom visualizer...")
+            MedEye3d.Telemetry.log_action("GUI_LOAD_SYNTHETIC_PHANTOM")
             launch_demo(; quad=true)
         end
     end

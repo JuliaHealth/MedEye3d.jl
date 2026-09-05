@@ -86,6 +86,9 @@ include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","ChangeP
 include(joinpath( "display","reactingToMouseKeyboard","reactToKeyboard","ReactToKeyboard.jl") )
 
 include(joinpath("display", "reactingToMouseKeyboard", "ReactingToInput.jl"))
+include(joinpath("utils", "Telemetry.jl"))
+using .Telemetry
+export Telemetry
 include(joinpath("display", "InferenceClient.jl"))
 using .InferenceClient
 include(joinpath("display", "LesionAssociation.jl"))
