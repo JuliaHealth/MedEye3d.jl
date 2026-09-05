@@ -692,9 +692,15 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                     mask_val = dat.dat[ix, iy, currentSlice]
                     if mask_val > 0
                         lid = Int(round(mask_val))
-                        # Look up lesion name from organ mapping if available
+                        # Look up lesion name: prioritize RTOG / clinical name from HDF5
                         organ = try
-                            get(MEH.global_organ_mapping[], lid, "")
+                            tp = MEH.current_tp_index[]
+                            seg_names = get(MEH.tp_segment_names, tp, Dict{Int, String}())
+                            s_name = get(seg_names, lid, "")
+                            if isempty(s_name) && tp != 0
+                                s_name = get(get(MEH.tp_segment_names, 0, Dict{Int, String}()), lid, "")
+                            end
+                            !isempty(s_name) ? s_name : get(MEH.global_organ_mapping[], lid, "")
                         catch
                             ""
                         end

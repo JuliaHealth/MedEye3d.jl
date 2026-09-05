@@ -32,6 +32,11 @@ using ..MakieEvents
 import ..SegmentationDisplay: synchronized_makie_renderloop, GLOBAL_OPENGL_LOCK
 import ..SegmentationDisplay.MakieEventHandlers as _MEH
 import ..LesionAssociation as LA
+import ..LLMDictation
+import ..EPSMAStructuredReport as ESR
+import ..EPSMAReportWindow as ERW
+
+export create_metadata_window, display_metadata_window, get_active_lesion_db, get_mask_ids, lookup_anatomy
 
 abstract type DBMessage end
 struct SaveDBMessage <: DBMessage
@@ -938,6 +943,61 @@ end
 # Cache: (tp_idx, lid) → Dict("volume_mm3" => ..., "volume_cc" => ..., "voxel_count" => ...)
 const _volume_cache = Dict{Tuple{Int,Int}, Dict{String, Float64}}()
 
+# Active lesion DB reference for cross-module queries (EPSMA, LLM Dictation)
+const _active_lesion_db = Ref{Any}(nothing)
+
+function get_active_lesion_db()::Dict{String, Any}
+    if _active_lesion_db[] !== nothing
+        val = _active_lesion_db[][]
+        if val isa Dict
+            return Dict{String, Any}(string(k) => v for (k, v) in val)
+        end
+    end
+    return Dict{String, Any}()
+end
+
+const _MASK_IDS_CACHE = Dict{Int, Vector{Int}}()
+
+"""
+    get_mask_ids(tp::Int) -> Vector{Int}
+
+Returns all positive lesion mask IDs present at time point `tp`.
+Uses cached `_volume_cache` keys when available, falling back to scanning mask volume.
+"""
+function get_mask_ids(tp::Int)::Vector{Int}
+    if haskey(_MASK_IDS_CACHE, tp)
+        return _MASK_IDS_CACHE[tp]
+    end
+    # 1. Fast path: check _volume_cache keys
+    cached_ids = Int[lid for (tp_idx, lid) in keys(_volume_cache) if tp_idx == tp && lid > 0]
+    if !isempty(cached_ids)
+        ids = sort!(unique!(cached_ids))
+        _MASK_IDS_CACHE[tp] = ids
+        return ids
+    end
+    # 2. Check MEH tp_data_cache
+    if haskey(_MEH.tp_data_cache, tp)
+        entry = _MEH.tp_data_cache[tp]
+        if entry !== nothing && isdefined(entry, :mask) && entry.mask !== nothing
+            m = entry.mask
+            pos = filter(x -> x > 0, unique(m))
+            if !isempty(pos)
+                ids = sort!(Int.(pos))
+                _MASK_IDS_CACHE[tp] = ids
+                return ids
+            end
+        end
+    end
+    # 3. Check MEH pet_volumes_cache or centroids
+    c_ids = Int[lid for ((tp_i, lid), _) in _MEH.lesion_centroids_cache if tp_i == tp && lid > 0]
+    if !isempty(c_ids)
+        ids = sort!(unique!(c_ids))
+        _MASK_IDS_CACHE[tp] = ids
+        return ids
+    end
+    return Int[]
+end
+
 """
     compute_lesion_volume(lid, tp_idx) -> Dict{String, Float64}
 
@@ -1392,6 +1452,7 @@ function create_metadata_window(
 
     # In-memory DB
     lesion_db = Observable{Dict}(Dict{String,Dict{String,Any}}())
+    _active_lesion_db[] = lesion_db
     _db_dirty = Ref(false)
 
     db_channel = Channel{Any}(32)
@@ -1487,6 +1548,25 @@ function create_metadata_window(
     colsize!(g, 1, Auto())
     r = [0]  # row counter as array for mutation in closures
     nr!() = (r[1] += 1; r[1])
+
+    # High-contrast textbox helper for dark theme
+    function styled_textbox(grid_pos; placeholder="", stored_string="", fontsize=10, width=Auto(), tellwidth=false, kwargs...)
+        return Textbox(grid_pos;
+            placeholder = placeholder,
+            stored_string = stored_string,
+            fontsize = fontsize,
+            textcolor = RGBf(0.95, 0.95, 0.95),
+            textcolor_placeholder = RGBf(0.55, 0.58, 0.65),
+            boxcolor = RGBf(0.14, 0.16, 0.20),
+            boxcolor_focused = RGBf(0.20, 0.24, 0.32),
+            boxcolor_hover = RGBf(0.17, 0.20, 0.27),
+            bordercolor = RGBf(0.30, 0.35, 0.45),
+            bordercolor_focused = ACCENT,
+            cursorcolor = RGBf(0.95, 0.95, 0.95),
+            width = width,
+            tellwidth = tellwidth,
+            kwargs...)
+    end
 
     # Registry of rows with explicit Fixed heights (Menu, Slider, Textbox rows).
     # set_row_visible! uses this to restore the correct Fixed height instead of Auto()
@@ -1733,6 +1813,7 @@ function create_metadata_window(
     cv_active = Ref(false)
     local update_tp_dropdown_visibility!
     local sync_tp_menus_to_current!
+    local load_clinical_info_for_tp! = nothing
     on(btn_cv.clicks) do _
         cv_active[] = !cv_active[]
         btn_cv.buttoncolor[] = cv_active[] ? GRN : BLU_BTN
@@ -1893,6 +1974,58 @@ function create_metadata_window(
         if cv_active[]
             _build_match_display!()
         end
+        refresh_lesion_dropdown_for_tp!(_MEH.current_tp_index[])
+        if load_clinical_info_for_tp! !== nothing
+            load_clinical_info_for_tp!(_MEH.current_tp_index[])
+        end
+    end
+
+    function refresh_lesion_dropdown_for_tp!(tp::Int)
+        seg_names = get(_MEH.tp_segment_names, tp, Dict{Int, String}())
+        
+        # 1. Determine lesion integer IDs present at this time point
+        l_ints = Int[]
+        if haskey(_MEH.tp_data_cache, tp)
+            m = _MEH.tp_data_cache[tp].mask
+            l_ints = filter(x -> x > 0, sort(unique(m)))
+        elseif haskey(_MEH.lesion_centroids_cache, tp)
+            l_ints = sort([k[2] for k in keys(_MEH.lesion_centroids_cache) if k isa Tuple && k[1] == tp])
+        end
+        if isempty(l_ints) && !isempty(seg_names)
+            l_ints = sort(collect(keys(seg_names)))
+        end
+        
+        new_list = if isempty(l_ints)
+            ["(none)"]
+        else
+            map(l_ints) do sid
+                d_name = if haskey(seg_names, sid) && !isempty(seg_names[sid])
+                    seg_names[sid]
+                elseif haskey(_MEH.global_organ_mapping[], sid)
+                    _MEH.global_organ_mapping[][sid]
+                else
+                    "Segment_$sid"
+                end
+                "$sid: $d_name"
+            end
+        end
+        
+        is_syncing_selection[] = true
+        try
+            lesion_ids[] = new_list
+            les_menu.options[] = new_list
+            if !isempty(new_list) && new_list[1] != "(none)"
+                active_lesion_id[] = new_list[1]
+                les_menu.selection[] = new_list[1]
+                les_menu.i_selected[] = 1
+            else
+                active_lesion_id[] = "(none)"
+                les_menu.selection[] = "(none)"
+                les_menu.i_selected[] = 1
+            end
+        finally
+            is_syncing_selection[] = false
+        end
     end
     update_tp_label()
     update_tp_dropdown_visibility!()
@@ -1970,8 +2103,8 @@ function create_metadata_window(
 
     ct_c_r = nr!()
     btn_ct_minus = Button(g[ct_c_r, 1], label = "- 50", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    tb_ct_min = Textbox(g[ct_c_r, 2], placeholder = "Min (-150)", stored_string = "-150.0", fontsize = 10)
-    tb_ct_max = Textbox(g[ct_c_r, 3], placeholder = "Max (250)",  stored_string = "250.0",  fontsize = 10)
+    tb_ct_min = styled_textbox(g[ct_c_r, 2]; placeholder = "Min (-150)", stored_string = "-150.0", fontsize = 10)
+    tb_ct_max = styled_textbox(g[ct_c_r, 3]; placeholder = "Max (250)",  stored_string = "250.0",  fontsize = 10)
     btn_ct_plus  = Button(g[ct_c_r, 4], label = "+ 50", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     rowsize!(g, ct_c_r, Fixed(28)); register_fixed_row!(ct_c_r, 28)
     
@@ -2038,8 +2171,8 @@ function create_metadata_window(
 
     pet_c_r = nr!()
     btn_pet_minus = Button(g[pet_c_r, 1], label = "- 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    tb_pet_min = Textbox(g[pet_c_r, 2], placeholder = "Min (0.0)", stored_string = "0.0", fontsize = 10)
-    tb_pet_max = Textbox(g[pet_c_r, 3], placeholder = "Max (10.0)", stored_string = "10.0", fontsize = 10)
+    tb_pet_min = styled_textbox(g[pet_c_r, 2]; placeholder = "Min (0.0)", stored_string = "0.0", fontsize = 10)
+    tb_pet_max = styled_textbox(g[pet_c_r, 3]; placeholder = "Max (10.0)", stored_string = "10.0", fontsize = 10)
     btn_pet_plus  = Button(g[pet_c_r, 4], label = "+ 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     rowsize!(g, pet_c_r, Fixed(28)); register_fixed_row!(pet_c_r, 28)
     
@@ -2106,8 +2239,8 @@ function create_metadata_window(
 
     spect_c_r = nr!()
     btn_spect_minus = Button(g[spect_c_r, 1], label = "- 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    tb_spect_min = Textbox(g[spect_c_r, 2], placeholder = "Min (0.0)", stored_string = "0.0", fontsize = 10)
-    tb_spect_max = Textbox(g[spect_c_r, 3], placeholder = "Max (10.0)", stored_string = "10.0", fontsize = 10)
+    tb_spect_min = styled_textbox(g[spect_c_r, 2]; placeholder = "Min (0.0)", stored_string = "0.0", fontsize = 10)
+    tb_spect_max = styled_textbox(g[spect_c_r, 3]; placeholder = "Max (10.0)", stored_string = "10.0", fontsize = 10)
     btn_spect_plus  = Button(g[spect_c_r, 4], label = "+ 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     rowsize!(g, spect_c_r, Fixed(28)); register_fixed_row!(spect_c_r, 28)
     
@@ -2154,9 +2287,267 @@ function create_metadata_window(
             apply_spect_win(v_min, v_max)
         end
     end
-    on(tb_spect_min.stored_string) do _; apply_spect_from_text(); end
-    on(tb_spect_max.stored_string) do _; apply_spect_from_text(); end
-end_section!(sec_win)
+    # MRI Windowing (T2, T1, ADC, DWI)
+    mri_lbl_r = nr!()
+    Label(g[mri_lbl_r, 1:4], "-- MRI Window & Offsets (T2 / ADC / DWI / T1) --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
+    
+    mri_s_r = nr!()
+    islider_mri = IntervalSlider(g[mri_s_r, 1:4], range = 0.0:10.0:3000.0, startvalues = (0.0, 1000.0))
+    rowsize!(g, mri_s_r, Fixed(28)); register_fixed_row!(mri_s_r, 28)
+    
+    mri_p_r = nr!()
+    btn_mri_t2  = Button(g[mri_p_r, 1], label = "T2 [0-1000]",   buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+    btn_mri_adc = Button(g[mri_p_r, 2], label = "ADC [0-2200]",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+    btn_mri_dwi = Button(g[mri_p_r, 3], label = "DWI [0-120]",   buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+    btn_mri_t1  = Button(g[mri_p_r, 4], label = "T1 [0-600]",    buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+
+    mri_c_r = nr!()
+    btn_mri_minus = Button(g[mri_c_r, 1], label = "- 50", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    tb_mri_min = styled_textbox(g[mri_c_r, 2]; placeholder = "Min (0)", stored_string = "0.0", fontsize = 10)
+    tb_mri_max = styled_textbox(g[mri_c_r, 3]; placeholder = "Max (1000)", stored_string = "1000.0", fontsize = 10)
+    btn_mri_plus  = Button(g[mri_c_r, 4], label = "+ 50", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, mri_c_r, Fixed(28)); register_fixed_row!(mri_c_r, 28)
+
+    is_syncing_mri = Ref(false)
+    active_mri_submod = Ref("T2")
+
+    function apply_mri_win(mod::String, min_v::Real, max_v::Real)
+        is_syncing_mri[] && return
+        is_syncing_selection[] && return
+        is_syncing_mri[] = true
+        try
+            active_mri_submod[] = mod
+            tb_mri_min.stored_string[] = string(round(min_v, digits=1))
+            tb_mri_min.displayed_string[] = string(round(min_v, digits=1))
+            tb_mri_max.stored_string[] = string(round(max_v, digits=1))
+            tb_mri_max.displayed_string[] = string(round(max_v, digits=1))
+            set_close_to!(islider_mri, Float32(min_v), Float32(max_v))
+            put!(channel, WindowingEvent(mod, Float32(min_v), Float32(max_v)))
+        finally
+            is_syncing_mri[] = false
+        end
+    end
+
+    on(islider_mri.interval) do (min_v, max_v); apply_mri_win(active_mri_submod[], min_v, max_v); end
+    on(btn_mri_t2.clicks)  do _; apply_mri_win("T2", 0.0, 1000.0) end
+    on(btn_mri_adc.clicks) do _; apply_mri_win("ADC", 0.0, 2200.0) end
+    on(btn_mri_dwi.clicks) do _; apply_mri_win("DWI", 0.0, 120.0) end
+    on(btn_mri_t1.clicks)  do _; apply_mri_win("T1", 0.0, 600.0) end
+    on(btn_mri_minus.clicks) do _
+        v_min = tryparse(Float32, _safe_strip(tb_mri_min.stored_string[])); v_min = v_min === nothing ? 0.0f0 : v_min - 50.0f0
+        v_max = tryparse(Float32, _safe_strip(tb_mri_max.stored_string[])); v_max = v_max === nothing ? 1000.0f0 : v_max - 50.0f0
+        apply_mri_win(active_mri_submod[], v_min, v_max)
+    end
+    on(btn_mri_plus.clicks) do _
+        v_min = tryparse(Float32, _safe_strip(tb_mri_min.stored_string[])); v_min = v_min === nothing ? 0.0f0 : v_min + 50.0f0
+        v_max = tryparse(Float32, _safe_strip(tb_mri_max.stored_string[])); v_max = v_max === nothing ? 1000.0f0 : v_max + 50.0f0
+        apply_mri_win(active_mri_submod[], v_min, v_max)
+    end
+    
+    function apply_mri_from_text()
+        s_min = !isempty(tb_mri_min.displayed_string[]) ? tb_mri_min.displayed_string[] : tb_mri_min.stored_string[]
+        s_max = !isempty(tb_mri_max.displayed_string[]) ? tb_mri_max.displayed_string[] : tb_mri_max.stored_string[]
+        v_min = tryparse(Float32, _safe_strip(s_min))
+        v_max = tryparse(Float32, _safe_strip(s_max))
+        if v_min !== nothing && v_max !== nothing
+            apply_mri_win(active_mri_submod[], v_min, v_max)
+        end
+    end
+    on(tb_mri_min.stored_string) do _; apply_mri_from_text(); end
+    on(tb_mri_max.stored_string) do _; apply_mri_from_text(); end
+
+    end_section!(sec_win)
+
+    # ── Clinical Information & Patient History ───────────────────────────────
+    sec_clinical = begin_section!("Clinical Information & Indication"; default_open=true)
+    
+    # 1. Indication
+    clin_ind_r = nr!()
+    Label(g[clin_ind_r, 1], "Indication:", fontsize = 10, color = LBL_FG, halign = :right)
+    clin_ind_opts = Observable(["- select -",
+        "Biochemical Recurrence (BCR)",
+        "Primary Staging (High-Risk PCa)",
+        "177Lu-PSMA RLT Workup",
+        "Therapy Response Assessment",
+        "Active Surveillance / Restaging",
+        "Other / Suspected Metastasis"])
+    menu_indication = searchable_menu(g, clin_ind_r, 2:4, options = clin_ind_opts, default = 1, fontsize = 10)
+    rowsize!(g, clin_ind_r, Fixed(28)); register_fixed_row!(clin_ind_r, 28)
+    
+    # 2. PSA & Kinetics
+    clin_psa_r = nr!()
+    Label(g[clin_psa_r, 1], "PSA (ng/mL):", fontsize = 10, color = LBL_FG, halign = :right)
+    tb_psa = styled_textbox(g[clin_psa_r, 2]; placeholder = "e.g. 14.8", width = Auto())
+    Label(g[clin_psa_r, 3], "PSA Kinetics:", fontsize = 10, color = LBL_FG, halign = :right)
+    tb_psa_dt = styled_textbox(g[clin_psa_r, 4]; placeholder = "e.g. PSAdt 4.5 mo", width = Auto())
+    rowsize!(g, clin_psa_r, Fixed(28)); register_fixed_row!(clin_psa_r, 28)
+    
+    # 3. Histology (Gleason/ISUP) & Initial TNM
+    clin_hist_r = nr!()
+    Label(g[clin_hist_r, 1], "Gleason / ISUP:", fontsize = 10, color = LBL_FG, halign = :right)
+    clin_gl_opts = Observable(["- select -",
+        "Gleason 3+4=7a (ISUP 2)",
+        "Gleason 4+3=7b (ISUP 3)",
+        "Gleason 4+4=8 (ISUP 4)",
+        "Gleason 4+5=9 (ISUP 5)",
+        "Gleason 5+4=9 (ISUP 5)",
+        "Gleason 5+5=10 (ISUP 5)",
+        "Gleason 3+3=6 (ISUP 1)",
+        "Unknown / Not Performed"])
+    menu_gleason = searchable_menu(g, clin_hist_r, 2, options = clin_gl_opts, default = 1, fontsize = 10)
+    Label(g[clin_hist_r, 3], "Initial TNM:", fontsize = 10, color = LBL_FG, halign = :right)
+    tb_tnm = styled_textbox(g[clin_hist_r, 4]; placeholder = "e.g. pT3a pN1 cM0", width = Auto())
+    rowsize!(g, clin_hist_r, Fixed(28)); register_fixed_row!(clin_hist_r, 28)
+    
+    # 4. Prior Therapies (Quick-Toggle Buttons)
+    clin_tx_lbl_r = nr!()
+    Label(g[clin_tx_lbl_r, 1:4], "Prior Therapies (click to toggle):", fontsize = 9, color = ACCENT, halign = :left, padding = (8, 0, 2, 2))
+    rowsize!(g, clin_tx_lbl_r, Fixed(18)); register_fixed_row!(clin_tx_lbl_r, 18)
+    
+    clin_tx1_r = nr!()
+    btn_tx_rpe   = Button(g[clin_tx1_r, 1], label = "RPE (Surg)", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+    btn_tx_rt    = Button(g[clin_tx1_r, 2], label = "Radiation",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+    btn_tx_adt   = Button(g[clin_tx1_r, 3], label = "ADT",        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+    btn_tx_arsi  = Button(g[clin_tx1_r, 4], label = "AR-Inhib",   buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+    rowsize!(g, clin_tx1_r, Fixed(26)); register_fixed_row!(clin_tx1_r, 26)
+    
+    clin_tx2_r = nr!()
+    btn_tx_chemo = Button(g[clin_tx2_r, 1], label = "Chemotherapy", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+    btn_tx_lu    = Button(g[clin_tx2_r, 2], label = "177Lu-PSMA",   buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+    btn_tx_bone  = Button(g[clin_tx2_r, 3], label = "Bone Protect", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+    btn_tx_none  = Button(g[clin_tx2_r, 4], label = "None / Naive",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+    rowsize!(g, clin_tx2_r, Fixed(26)); register_fixed_row!(clin_tx2_r, 26)
+    
+    active_prior_therapies = Set{String}()
+    function toggle_prior_tx!(name::String, btn::Button)
+        if name == "None / Naive"
+            empty!(active_prior_therapies)
+            push!(active_prior_therapies, name)
+        else
+            delete!(active_prior_therapies, "None / Naive")
+            if name in active_prior_therapies
+                delete!(active_prior_therapies, name)
+            else
+                push!(active_prior_therapies, name)
+            end
+        end
+        btn_tx_rpe.buttoncolor[]   = ("RPE (Surg)" in active_prior_therapies) ? ACCENT : BG_PNL
+        btn_tx_rt.buttoncolor[]    = ("Radiation" in active_prior_therapies) ? ACCENT : BG_PNL
+        btn_tx_adt.buttoncolor[]   = ("ADT" in active_prior_therapies) ? ACCENT : BG_PNL
+        btn_tx_arsi.buttoncolor[]  = ("AR-Inhib" in active_prior_therapies) ? ACCENT : BG_PNL
+        btn_tx_chemo.buttoncolor[] = ("Chemotherapy" in active_prior_therapies) ? ACCENT : BG_PNL
+        btn_tx_lu.buttoncolor[]    = ("177Lu-PSMA" in active_prior_therapies) ? ACCENT : BG_PNL
+        btn_tx_bone.buttoncolor[]  = ("Bone Protect" in active_prior_therapies) ? ACCENT : BG_PNL
+        btn_tx_none.buttoncolor[]  = ("None / Naive" in active_prior_therapies) ? ACCENT : BG_PNL
+        sync_clinical_info_to_db!()
+    end
+    
+    on(btn_tx_rpe.clicks)   do _; toggle_prior_tx!("RPE (Surg)", btn_tx_rpe); end
+    on(btn_tx_rt.clicks)    do _; toggle_prior_tx!("Radiation", btn_tx_rt); end
+    on(btn_tx_adt.clicks)   do _; toggle_prior_tx!("ADT", btn_tx_adt); end
+    on(btn_tx_arsi.clicks)  do _; toggle_prior_tx!("AR-Inhib", btn_tx_arsi); end
+    on(btn_tx_chemo.clicks) do _; toggle_prior_tx!("Chemotherapy", btn_tx_chemo); end
+    on(btn_tx_lu.clicks)    do _; toggle_prior_tx!("177Lu-PSMA", btn_tx_lu); end
+    on(btn_tx_bone.clicks)  do _; toggle_prior_tx!("Bone Protect", btn_tx_bone); end
+    on(btn_tx_none.clicks)  do _; toggle_prior_tx!("None / Naive", btn_tx_none); end
+    
+    # 5. Clinical History / Anamnese Notes (Multi-line)
+    clin_notes_r = nr!()
+    Label(g[clin_notes_r, 1], "Anamnese Notes:", fontsize = 10, color = LBL_FG, halign = :right)
+    tb_clinical_notes = styled_textbox(g[clin_notes_r, 2:4];
+        placeholder = "Clinical history, symptoms, previous imaging...",
+        width = Auto())
+    rowsize!(g, clin_notes_r, Fixed(64)); register_fixed_row!(clin_notes_r, 64)
+    
+    # Synchronization & Persistence for Clinical Info
+    is_syncing_clinical = Ref(false)
+    function sync_clinical_info_to_db!()
+        is_syncing_clinical[] && return
+        tp = _MEH.current_tp_index[]
+        ind_val = (menu_indication.i_selected[] > 1 && menu_indication.i_selected[] <= length(menu_indication.options[])) ?
+            menu_indication.options[][menu_indication.i_selected[]] : ""
+        gl_val = (menu_gleason.i_selected[] > 1 && menu_gleason.i_selected[] <= length(menu_gleason.options[])) ?
+            menu_gleason.options[][menu_gleason.i_selected[]] : ""
+        p_str = join(sort(collect(active_prior_therapies)), ", ")
+        
+        info = Dict{String, Any}(
+            "Indication" => ind_val,
+            "PSA" => tb_psa.stored_string[],
+            "PSADoublingTime" => tb_psa_dt.stored_string[],
+            "Gleason" => gl_val,
+            "TNMStage" => tb_tnm.stored_string[],
+            "PriorTherapies" => p_str,
+            "ClinicalNotes" => tb_clinical_notes.stored_string[]
+        )
+        _db = copy(lesion_db[])
+        _db["Clinical_Info_TP$(tp)"] = info
+        _db["Patient_Clinical_Info"] = info
+        lesion_db[] = _db
+        try trigger_autosave() catch; end
+    end
+    
+    on(menu_indication.i_selected) do _; sync_clinical_info_to_db!(); end
+    on(tb_psa.stored_string)       do _; sync_clinical_info_to_db!(); end
+    on(tb_psa_dt.stored_string)    do _; sync_clinical_info_to_db!(); end
+    on(menu_gleason.i_selected)    do _; sync_clinical_info_to_db!(); end
+    on(tb_tnm.stored_string)       do _; sync_clinical_info_to_db!(); end
+    on(tb_clinical_notes.stored_string) do _; sync_clinical_info_to_db!(); end
+    
+    load_clinical_info_for_tp! = function (tp::Int)
+        is_syncing_clinical[] = true
+        try
+            _db = lesion_db[]
+            info = if haskey(_db, "Clinical_Info_TP$(tp)")
+                _db["Clinical_Info_TP$(tp)"]
+            elseif haskey(_db, "Patient_Clinical_Info")
+                _db["Patient_Clinical_Info"]
+            else
+                Dict{String, Any}()
+            end
+            
+            ind = get(info, "Indication", "")
+            idx = findfirst(==(ind), menu_indication.options[])
+            menu_indication.i_selected[] = idx !== nothing ? idx : 1
+            
+            tb_psa.stored_string[] = get(info, "PSA", "")
+            tb_psa_dt.stored_string[] = get(info, "PSADoublingTime", "")
+            
+            gl = get(info, "Gleason", "")
+            g_idx = findfirst(==(gl), menu_gleason.options[])
+            menu_gleason.i_selected[] = g_idx !== nothing ? g_idx : 1
+            
+            tb_tnm.stored_string[] = get(info, "TNMStage", "")
+            
+            p_str = get(info, "PriorTherapies", "")
+            empty!(active_prior_therapies)
+            for item in split(p_str, ",")
+                s = strip(item)
+                !isempty(s) && push!(active_prior_therapies, s)
+            end
+            btn_tx_rpe.buttoncolor[]   = ("RPE (Surg)" in active_prior_therapies) ? ACCENT : BG_PNL
+            btn_tx_rt.buttoncolor[]    = ("Radiation" in active_prior_therapies) ? ACCENT : BG_PNL
+            btn_tx_adt.buttoncolor[]   = ("ADT" in active_prior_therapies) ? ACCENT : BG_PNL
+            btn_tx_arsi.buttoncolor[]  = ("AR-Inhib" in active_prior_therapies) ? ACCENT : BG_PNL
+            btn_tx_chemo.buttoncolor[] = ("Chemotherapy" in active_prior_therapies) ? ACCENT : BG_PNL
+            btn_tx_lu.buttoncolor[]    = ("177Lu-PSMA" in active_prior_therapies) ? ACCENT : BG_PNL
+            btn_tx_bone.buttoncolor[]  = ("Bone Protect" in active_prior_therapies) ? ACCENT : BG_PNL
+            btn_tx_none.buttoncolor[]  = ("None / Naive" in active_prior_therapies) ? ACCENT : BG_PNL
+            
+            tb_clinical_notes.stored_string[] = get(info, "ClinicalNotes", "")
+        finally
+            is_syncing_clinical[] = false
+        end
+    end
+    
+    # Load clinical info for initial time point
+    load_clinical_info_for_tp!(_MEH.current_tp_index[])
+    
+    # Reload clinical info when the async DB loader populates lesion_db
+    on(lesion_db) do _
+        try load_clinical_info_for_tp!(_MEH.current_tp_index[]) catch; end
+    end
+    
+    end_section!(sec_clinical)
 
     # ── All Annotation Fields (single section, like Slicer extension) ─────────
     field_widgets = Dict{String, Any}()
@@ -2443,7 +2834,7 @@ end_section!(sec_win)
 
     rl_r = nr!()
     Label(g[rl_r, 1], "Search:", fontsize = 10, color = LBL_FG, halign = :right)
-    rl_search = Textbox(g[rl_r, 2:3], placeholder = "type to filter RadLex terms...", fontsize = 10)
+    rl_search = styled_textbox(g[rl_r, 2:3]; placeholder = "type to filter RadLex terms...", fontsize = 10)
     btn_rl_add = Button(g[rl_r, 4], label = "+ Add",
         buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
 
@@ -2531,9 +2922,9 @@ end_section!(sec_win)
 
     ck_r = nr!()
     Label(g[ck_r, 1], "Key:", fontsize = 10, color = LBL_FG, halign = :right)
-    ck_tb = Textbox(g[ck_r, 2], placeholder = "field name", fontsize = 10)
+    ck_tb = styled_textbox(g[ck_r, 2]; placeholder = "field name", fontsize = 10)
     Label(g[ck_r, 3], "Value:", fontsize = 10, color = LBL_FG, halign = :right)
-    cv_tb = Textbox(g[ck_r, 4], placeholder = "value", fontsize = 10)
+    cv_tb = styled_textbox(g[ck_r, 4]; placeholder = "value", fontsize = 10)
 
     btn_add_c = Button(g[nr!(), 4], label = "+ Add Custom Field",
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
@@ -2582,11 +2973,87 @@ end_section!(sec_win)
         dict_text[] = isempty(en_desc) ? "(No English translation available)" : en_desc
     end
 
+    # ── AI Radiological Dictation (Qwen 3.5 397B on AcademicCloud) ────────────
+    ai_lang_r = nr!()
+    Label(g[ai_lang_r, 1], "Report Language:", fontsize = 9, color = ACCENT, halign = :right)
+    btn_ai_de = Button(g[ai_lang_r, 2], label = "[DE] Deutsch", buttoncolor = (current_dict_lang[] == "DE" ? ACCENT : BG_PNL), labelcolor = TXT, fontsize = 9)
+    btn_ai_en = Button(g[ai_lang_r, 3], label = "[EN] English", buttoncolor = (current_dict_lang[] == "EN" ? ACCENT : BG_PNL), labelcolor = TXT, fontsize = 9)
+    rowsize!(g, ai_lang_r, Fixed(24)); register_fixed_row!(ai_lang_r, 24)
+
+    on(btn_ai_de.clicks) do _
+        current_dict_lang[] = "DE"
+        btn_ai_de.buttoncolor[] = ACCENT
+        btn_ai_en.buttoncolor[] = BG_PNL
+        lang_btn_de.buttoncolor[] = GRN
+        lang_btn_en.buttoncolor[] = BG_PNL
+        tp = _MEH.current_tp_index[]
+        de_desc = get(_MEH.tp_descriptions, tp, "")
+        dict_text[] = isempty(de_desc) ? "(No dictation available)" : de_desc
+    end
+
+    on(btn_ai_en.clicks) do _
+        current_dict_lang[] = "EN"
+        btn_ai_en.buttoncolor[] = ACCENT
+        btn_ai_de.buttoncolor[] = BG_PNL
+        lang_btn_en.buttoncolor[] = GRN
+        lang_btn_de.buttoncolor[] = BG_PNL
+        tp = _MEH.current_tp_index[]
+        en_desc = get(_MEH.tp_english_descriptions, tp, "")
+        dict_text[] = isempty(en_desc) ? "(No English translation available)" : en_desc
+    end
+
+    ai_hdr_r = nr!()
+    Label(g[ai_hdr_r, 1], "AI Dictation:", fontsize = 10, color = ACCENT, halign = :right)
+    btn_gen = Button(g[ai_hdr_r, 2], label = "Generate", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    btn_open_report = Button(g[ai_hdr_r, 3], label = "[R] E-PSMA Report", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
+    btn_copy_rpt = Button(g[ai_hdr_r, 4], label = "Copy", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, ai_hdr_r, Fixed(28)); register_fixed_row!(ai_hdr_r, 28)
+
+    ai_status_r = nr!()
+    lbl_dict_status = Label(g[ai_status_r, 1:4], "Status: Ready (Model: Qwen 3.5 397B)", fontsize = 9, color = SUBTXT, halign = :left)
+    rowsize!(g, ai_status_r, Fixed(18)); register_fixed_row!(ai_status_r, 18)
+
     rpt_r = nr!()
-    Label(g[rpt_r, 1], "Report:", fontsize = 10, color = LBL_FG, halign = :right)
-    rpt_tb = Textbox(g[rpt_r, 2:3], placeholder = "Generated summary...", fontsize = 10)
-    btn_gen = Button(g[rpt_r, 4], label = "Gen",
-        buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    report_text = Observable{String}("(Click 'Generate' or '[R] E-PSMA Report' to create and view the structured E-PSMA radiological report...)")
+    report_lbl = Label(g[rpt_r, 1:4], report_text, word_wrap = true, tellwidth = false, fontsize = 9,
+        color = TXT, halign = :left)
+    rpt_tb = Textbox(g[nr!(), 1:4], height = 0)
+
+    on(btn_open_report.clicks) do _
+        try
+            tp = _MEH.current_tp_index[]
+            lang = current_dict_lang[]
+            lbl_dict_status.text[] = "Opening E-PSMA Report Window ($lang)..."
+            lbl_dict_status.color[] = ACCENT
+            @info "[E-PSMA] Getting report data for TP $tp ($lang)..."
+            ESR.invalidate_report!(tp)  # Force rebuild with current data
+            rep = ESR.get_or_build_report(tp; lang=lang)
+            @info "[E-PSMA] Report ready: $(length(rep.synoptic_rows)) lesion rows, opening window..."
+            ERW.open_epsma_report_window(rep)
+            lbl_dict_status.text[] = "Status: E-PSMA Report Window open ($lang)"
+            lbl_dict_status.color[] = GRN
+            @info "[E-PSMA] Report window opened successfully"
+        catch e
+            msg = sprint(showerror, e, catch_backtrace())
+            @error "[E-PSMA] Failed to open report window" exception=(e, catch_backtrace())
+            lbl_dict_status.text[] = "[ERR] E-PSMA Report: $(sprint(showerror, e))"
+            lbl_dict_status.color[] = RGBf(0.9, 0.2, 0.2)
+        end
+    end
+
+    on(btn_copy_rpt.clicks) do _
+        txt = report_text[]
+        if !isempty(txt) && !startswith(txt, "(")
+            ok = LLMDictation.copy_to_clipboard(txt)
+            if ok
+                lbl_dict_status.text[] = "[OK] Copied report to clipboard"
+                lbl_dict_status.color[] = GRN
+            else
+                lbl_dict_status.text[] = "Copied to clipboard (or check stdout)"
+                lbl_dict_status.color[] = SUBTXT
+            end
+        end
+    end
 
     end_section!(sec_report)
 
@@ -2896,24 +3363,7 @@ end_section!(sec_win)
     map_selected_left = Observable{Vector{Int}}(Int[])
     map_selected_right = Observable{Vector{Int}}(Int[])
 
-    _MASK_IDS_CACHE = Dict{Int, Vector{Int}}()
-    function get_mask_ids(tp)
-        if haskey(_MASK_IDS_CACHE, tp) return _MASK_IDS_CACHE[tp] end
-        # Fast path: derive mask IDs from precomputed _volume_cache keys (O(1))
-        cached_ids = Int[lid for (tp_idx, lid) in keys(_volume_cache) if tp_idx == tp && lid > 0]
-        if !isempty(cached_ids)
-            ids = sort!(unique!(cached_ids))
-            _MASK_IDS_CACHE[tp] = ids
-            return ids
-        end
-        # Fallback: scan mask volume (O(N) — only if volume cache is empty)
-        if !haskey(_MEH.tp_data_cache, tp) return Int[] end
-        entry = _MEH.tp_data_cache[tp]
-        mask = entry.mask
-        ids = Int.(filter(x -> x > 0, sort(unique(mask))))
-        _MASK_IDS_CACHE[tp] = ids
-        return ids
-    end
+    # Uses module-level get_mask_ids(tp)
 
     function _build_match_display!()
         # Skip building map display when not in compare mode (prevents layout overlap)
@@ -3278,8 +3728,10 @@ end_section!(sec_win)
             v_dict = _safe_strip(dict_text[])
             isempty(v_dict) || (d["RadiologicalDictation"] = v_dict)
         end
-        v_rpt = _safe_strip(rpt_tb.stored_string[])
-        isempty(v_rpt) || (d["RadiologicalReportOutput"] = v_rpt)
+        v_rpt = _safe_strip(report_text[])
+        if !isempty(v_rpt) && !startswith(v_rpt, "(")
+            d["RadiologicalReportOutput"] = v_rpt
+        end
         return d
     end
 
@@ -3392,6 +3844,8 @@ end_section!(sec_win)
             lid = (p = parse_lesion_id(cur_id_str)) !== nothing ? p : 1
 
         t_type = if haskey(data, "LesionType")
+            # Still compute json_entry for muscle detection below
+            raw_organ_for_type = get(_MEH.global_organ_mapping[], lid, "")
             data["LesionType"]
         else
             # Auto-detect lesion type: try JSON mapping first, then keyword fallback
@@ -3447,15 +3901,34 @@ end_section!(sec_win)
                 base_anat = lowercase(get(data, "BaseAnatomy", ""))
                 id_low = lowercase(cur_id_str)
                 raw_organ = lowercase(raw_organ_for_type)
-                combined = base_anat * " " * id_low * " " * raw_organ
+                # Include original RTOG/clinical segment name for classification hints
+                # (e.g., "Knochen Beckengürtel" → bone, "Lymphknoten Obturator" → lymph node)
+                seg_name_for_type = ""
+                if isdefined(_MEH, :tp_segment_names)
+                    tp_segs = get(_MEH.tp_segment_names, _MEH.current_tp_index[], Dict{Int,String}())
+                    seg_name_for_type = lowercase(get(tp_segs, lid, ""))
+                end
+                combined = base_anat * " " * id_low * " " * raw_organ * " " * seg_name_for_type
                 
+                muscle_kws = ["gluteus", "autochthon", "iliopsoas", "pectoralis", "subscapularis",
+                              "supraspinatus", "infraspinatus", "latissimus", "rectus_abdominis",
+                              "oblique", "erector", "trapezius", "deltoid", "sartorius", "quadriceps",
+                              "scalene", "platysma", "masseter", "temporalis", "pterygoid",
+                              "coracobrachial", "serratus", "teres_major", "triceps", "psoas",
+                              "quadratus", "sternocleidomastoid", "pharyngeal", "prevertebral",
+                              "tongue", "digastric", "thigh_medial", "thigh_posterior",
+                              "levator_scapulae", "sterno_thyroid", "thyrohyoid", "transversospinalis", "muscle"]
+                is_muscle_kw = any(kw -> occursin(kw, combined), muscle_kws)
+
                 bone_kws = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula",
                             "clavicle", "humerus", "scapula", "sternum", "skull",
                             "palate", "bone", "spine", "ilium", "ischium", "pubis",
-                            "tibia", "radius", "carpal", "tarsal", "costal_cartilage"]
+                            "tibia", "radius", "carpal", "tarsal", "costal_cartilage",
+                            # German bone keywords from RTOG naming
+                            "knochen", "skelett", "wirbel", "rippe", "becken", "kamm"]
                 vascular_exclusions = ["vena", "artery", "vein", "vessel", "trunk"]
                 
-                is_bone_kw = any(kw -> occursin(kw, combined), bone_kws) &&
+                is_bone_kw = !is_muscle_kw && any(kw -> occursin(kw, combined), bone_kws) &&
                              !any(v -> occursin(v, combined), vascular_exclusions)
                 
                 # Only consider bone_subsegments_cache if it actually has non-empty data
@@ -3467,12 +3940,14 @@ end_section!(sec_win)
                     false
                 end
                 
-                if occursin("prostate", combined)
+                if occursin("prostate", combined) || occursin("prostat", combined)
                     "Prostate"
-                elseif is_bone_kw || has_real_bone_subseg
+                elseif is_muscle_kw
+                    "Technical Artifact"
+                elseif is_bone_kw || (has_real_bone_subseg && !is_muscle_kw)
                     "Bone Meta"
-                elseif occursin("lymph", combined) || occursin("node", combined)
-                    "Lymph Node Meta"
+                elseif occursin("lymph", combined) || occursin("node", combined) || occursin("knoten", combined)
+                    "Lymph Node"
                 else
                     "Organ Meta"
                 end
@@ -3480,9 +3955,34 @@ end_section!(sec_win)
         end
         update_type_buttons(t_type)
 
-        # ── Edge-slice artefact detection ─────────────────────────────────
-        # Lesions on the first 2 or last 2 axial slices are classified as
-        # technical artifacts (partial volume / reconstruction edge effects)
+        # ── Muscular false positive & edge-slice artefact detection ───────
+        # Ensure json_entry is always defined (it may only be set inside the else branch of t_type)
+        if !@isdefined(json_entry)
+            json_entry = lookup_anatomy(raw_organ_for_type)
+        end
+        is_muscle_lesion = (json_entry !== nothing && (get(json_entry, "is_muscle", false) || get(json_entry, "lesion_type", "") == "Technical Artifact")) ||
+                           t_type == "Technical Artifact"
+        if is_muscle_lesion
+            if haskey(field_widgets, "Alternative Hypothesis (False Positive)") && field_widgets["Alternative Hypothesis (False Positive)"] isa Menu
+                opts = field_widgets["Alternative Hypothesis (False Positive)"].options[]
+                idx = findfirst(==("Technical Artifact"), opts)
+                if idx !== nothing
+                    field_widgets["Alternative Hypothesis (False Positive)"].i_selected[] = idx
+                end
+            end
+            if haskey(field_widgets, "Certainty") && field_widgets["Certainty"] isa Menu
+                opts = field_widgets["Certainty"].options[]
+                idx = findfirst(==("0"), opts)
+                if idx !== nothing
+                    field_widgets["Certainty"].i_selected[] = idx
+                end
+            end
+            db_updates["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
+            db_updates["Certainty"] = "0"
+            db_updates["LesionType"] = "Technical Artifact"
+            @info "Muscular artefact: lesion $lid → Technical Artifact, Certainty=0"
+        end
+
         cur_tp = _MEH.current_tp_index[]
         centroid = if haskey(_MEH.lesion_centroids_cache, (cur_tp, lid))
             _MEH.lesion_centroids_cache[(cur_tp, lid)]
@@ -3521,6 +4021,16 @@ end_section!(sec_win)
         
         t_base = get(data, "BaseAnatomy", "")
         t_side = get(data, "BaseAnatomySide", "")
+        
+        # Check if an original RTOG / clinical name is available from HDF5 or annotations
+        orig_rtog_name = get(data, "ClinicalLesionName", get(data, "OriginalName", ""))
+        if isempty(orig_rtog_name) && lid > 0
+            tp_idx_cur = _MEH.current_tp_index[]
+            orig_rtog_name = get(get(_MEH.tp_segment_names, tp_idx_cur, Dict{Int, String}()), lid, "")
+        end
+        if isempty(t_base) && !isempty(orig_rtog_name)
+            t_base = orig_rtog_name
+        end
         
         # Resolve the raw organ name for this lesion (used for BaseAnatomy + Location auto-fill)
         raw_organ = ""
@@ -3994,7 +4504,17 @@ end_section!(sec_win)
         dict_text[] = target_dict
         
         target_rpt = get(data, "RadiologicalReportOutput", "")
-        _set_tb_val!(rpt_tb, target_rpt)
+        if !isempty(target_rpt)
+            report_text[] = target_rpt
+            _set_tb_val!(rpt_tb, target_rpt)
+            lbl_dict_status.text[] = "Status: Loaded saved report"
+            lbl_dict_status.color[] = SUBTXT
+        else
+            report_text[] = "(Click 'Generate' to create longitudinal radiological dictation for this time point via Qwen 3.5 397B...)"
+            _set_tb_val!(rpt_tb, "")
+            lbl_dict_status.text[] = "Status: Ready (Model: Qwen 3.5 397B)"
+            lbl_dict_status.color[] = SUBTXT
+        end
         
         # ── Single batch commit for all metadata updates ──────────────────
         if !isempty(db_updates)
@@ -4008,6 +4528,8 @@ end_section!(sec_win)
             end
             db[canonical_key] = cur_ld
             lesion_db[] = db
+            # Invalidate cached E-PSMA report so next access rebuilds with new metadata
+            try ESR.invalidate_report!(_MEH.current_tp_index[]) catch; end
         end
         finally
             _is_applying_state[] = false
@@ -4120,32 +4642,58 @@ end_section!(sec_win)
     end
 
     on(btn_gen.clicks) do _
-        id   = active_lesion_id[]
-        data = collect_state()
-        lines = ["=== Structured Radiological Report ===",
-                 "Lesion ID: $(id)", ""]
-        dictation = get(data, "RadiologicalDictation", "")
-        if !isempty(dictation)
-            push!(lines, "Dictation: $(dictation)", "")
-        end
-        for q in schema
-            v = get(data, q.short, ""); isempty(v) && continue
-            push!(lines, "* $(q.short): $(v)")
-        end
-        rl = get(data, "RadLex", "")
-        isempty(rl) || push!(lines, "* RadLex Properties: $(rl)")
-        for (k, v) in data
-            startswith(k, "Custom:") && push!(lines, "* $(k[8:end]): $(v)")
-        end
-        push!(lines, "", "Generated: $(Dates.format(Dates.now(), "yyyy-mm-dd HH:MM:SS"))")
+        tp = _MEH.current_tp_index[]
+        tp_name = get(_MEH.tp_labels, tp, "TP $tp")
+        lang = current_dict_lang[]
+        lbl_dict_status.text[] = "[...] Aggregating TP $tp data & querying Qwen 3.5 397B ($lang)..."
+        lbl_dict_status.color[] = ACCENT
+        btn_gen.buttoncolor[] = BG_PNL
         
-        # In a real environment we would send 'lines' to DIZ LLM API here
-        # For now, we simulate the DIZ API generated text
-        generated_text = join(lines, "\n") * "\n[DIZ LLM Translated Output]"
-        rpt_tb.stored_string[] = generated_text
+        ESR.invalidate_report!(tp)  # Force rebuild with current data
+        rep = ESR.get_or_build_report(tp; lang = lang)
         
-        # Trigger autosave update
-        trigger_autosave()
+        LLMDictation.generate_report_async(
+            tp;
+            lang = lang,
+            model = LLMDictation.DEFAULT_MODEL,
+            on_complete = (report_str, elapsed) -> begin
+                @async begin
+                    report_text[] = report_str
+                    _set_tb_val!(rpt_tb, report_str)
+                    lbl_dict_status.text[] = "[OK] Generated in $(elapsed)s via Qwen 3.5 397B ($lang)"
+                    lbl_dict_status.color[] = GRN
+                    btn_gen.buttoncolor[] = BLU_BTN
+                    
+                    # Update E-PSMA structured report with LLM generated narrative
+                    if lang == "DE"
+                        rep.conclusion_de = report_str
+                    else
+                        rep.conclusion_en = report_str
+                    end
+                    
+                    # Open or refresh the E-PSMA report window
+                    try
+                        ERW.open_epsma_report_window(rep)
+                    catch e
+                        @warn "Failed to open E-PSMA window on generation: $e"
+                    end
+                    
+                    trigger_autosave()
+                end
+            end,
+            on_error = (err) -> begin
+                @async begin
+                    lbl_dict_status.text[] = "[ERR] Generation failed: $err"
+                    lbl_dict_status.color[] = RGBf(0.9, 0.2, 0.2)
+                    btn_gen.buttoncolor[] = BLU_BTN
+                    
+                    # Still open report window with auto-extracted metrics
+                    try
+                        ERW.open_epsma_report_window(rep)
+                    catch; end
+                end
+            end
+        )
     end
 
     # Auto-save logic
@@ -4170,6 +4718,7 @@ end_section!(sec_win)
         trigger_autosave()
     end
     on(dict_text) do _; trigger_autosave(); end
+    on(report_text) do _; trigger_autosave(); end
     on(rpt_tb.stored_string) do _; trigger_autosave(); end
     on(rpt_tb.focused) do is_focused
         if !is_focused

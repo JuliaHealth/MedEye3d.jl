@@ -62,9 +62,17 @@ function main()
         max_anatomy_source = study[10]  # per-timepoint max_anatomy
         max_anatomy_labels_source = study[11]  # per-timepoint max_anatomy labels
         
-        # Load per-timepoint Skellytour (no sharing across time points!)
+        # Load per-timepoint Skellytour (with baseline fallback)
         if isempty(skellytour_source)
-            error("No Skellytour path in scene_hierarchy.json for $(ct_fname). Run: julia scripts/preprocessing/update_scene_hierarchy.jl")
+            if isfile(joinpath(data_dir, "Skellytour_0.nii.gz"))
+                skellytour_source = "Skellytour_0.nii.gz"
+            else
+                error("No Skellytour path in scene_hierarchy.json for $(ct_fname).")
+            end
+        end
+        if isempty(max_anatomy_source) && isfile(joinpath(data_dir, "anatomy_out_fixed_ct_0", "max_anatomy.nii.gz"))
+            max_anatomy_source = "anatomy_out_fixed_ct_0/max_anatomy.nii.gz"
+            max_anatomy_labels_source = "anatomy_out_fixed_ct_0/max_anatomy_labels.json"
         end
         skelly_path = joinpath(data_dir, skellytour_source)
         if !isfile(skelly_path)

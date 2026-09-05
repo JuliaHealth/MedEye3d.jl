@@ -100,6 +100,18 @@ include(joinpath("ai", "AIInference.jl"))
 using .AIInference
 export AIInference
 
+include(joinpath("ai", "LLMDictation.jl"))
+using .LLMDictation
+export LLMDictation
+
+include(joinpath("ai", "EPSMAStructuredReport.jl"))
+using .EPSMAStructuredReport
+export EPSMAStructuredReport
+
+include(joinpath("display", "EPSMAReportWindow.jl"))
+using .EPSMAReportWindow
+export EPSMAReportWindow, open_epsma_report_window, close_epsma_report_window
+
 
 # BoneSubsegmentation removed — bone surface/marrow data is purely precomputed
 # in preprocessing (recompute_bones.jl) using max_anatomy + Skellytour.
@@ -114,7 +126,8 @@ export open_study_selector, scan_medical_files, StudySelectorWindow
 
 include(joinpath("packaging", "AppMain.jl"))
 using .MedEye3dApp: julia_main
-export julia_main
+const AppMain = MedEye3dApp
+export julia_main, MedEye3dApp, AppMain
 
 greet() = print("Hello from medEye")
 

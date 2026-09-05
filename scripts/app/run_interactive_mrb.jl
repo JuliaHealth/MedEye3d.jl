@@ -30,7 +30,7 @@ import HDF5
 const MEH = MedEye3d.SegmentationDisplay.MakieEventHandlers
 
 # Paths to data
-data_dir_pat6 = length(ARGS) >= 1 ? ARGS[1] : joinpath(@__DIR__, "..", "..", "data", "pat_6_files")
+data_dir_pat6 = length(ARGS) >= 1 ? ARGS[1] : joinpath(@__DIR__, "..", "..", "data", "cases", "psma_patient_all_tp")
 
 t_startup = time_ns()
 println("Starting MedEye3d (HDF5-only mode)...")

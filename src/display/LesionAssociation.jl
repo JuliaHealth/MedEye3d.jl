@@ -720,11 +720,14 @@ function classify_organ_to_lesion_type(organ_name::String)::String
     # Vascular exclusions — some TS names share bone keywords (e.g. "iliac_artery")
     vascular_exclusions = ["vena", "artery", "vein", "vessel", "trunk"]
     
+    is_muscle = any(kw -> occursin(kw, org), muscle_kws)
+    is_bone = !is_muscle && any(kw -> occursin(kw, org), bone_kws) && !any(v -> occursin(v, org), vascular_exclusions)
+
     if occursin("prostate", org)
         return "Prostate"
-    elseif any(kw -> occursin(kw, org), muscle_kws)
-        return "Muscle"
-    elseif any(kw -> occursin(kw, org), bone_kws) && !any(v -> occursin(v, org), vascular_exclusions)
+    elseif is_muscle
+        return "Technical Artifact"
+    elseif is_bone
         return "Bone Meta"
     elseif occursin("lymph", org) || occursin("node", org)
         return "Lymph Node Meta"

@@ -12,12 +12,15 @@ const DEFAULT_PYENV = let
     isfile(pyenv_path) ? pyenv_path : "python3"  # fallback to system python
 end
 const HELPNET_BUNDLE_DIR = let
-    # Try container path first, then host path
+    found = "/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/src/helpnet_inference_bundle"
     for p in ["/workspaces/MedEye3d.jl/helpnet_inference_bundle",
               "/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/src/helpnet_inference_bundle"]
-        isdir(p) && return p
+        if isdir(p)
+            found = p
+            break
+        end
     end
-    "/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/src/helpnet_inference_bundle"
+    found
 end
 const HELPNET_CHECKPOINT = joinpath(HELPNET_BUNDLE_DIR, "checkpoints", "helpnet_model_final.pt")
 

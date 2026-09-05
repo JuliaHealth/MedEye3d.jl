@@ -22,6 +22,37 @@ import JSON
 
 const MEH = MedEye3d.SegmentationDisplay.MakieEventHandlers
 
+# ── Clipboard safety patch ────────────────────────────────────────────────────
+# Makie's editabletext calls InteractiveUtils.clipboard() directly on Ctrl+C/V.
+# In Docker / headless environments without xclip/xsel this throws a hard error.
+# Monkey-patch to silently degrade instead of crashing the app.
+try
+    import InteractiveUtils
+    if Sys.islinux()
+        try
+            InteractiveUtils.clipboard("__clipboard_test__")
+        catch
+            @eval InteractiveUtils function clipboard(x::AbstractString)
+                try
+                    open(`xclip -selection clipboard`, "w") do io
+                        print(io, x)
+                    end
+                catch
+                    @warn "Clipboard not available (no xclip/xsel). Text not copied." maxlog=1
+                end
+            end
+            @eval InteractiveUtils function clipboard()
+                try
+                    return read(`xclip -selection clipboard -o`, String)
+                catch
+                    return ""
+                end
+            end
+            @info "[STARTUP] Patched InteractiveUtils.clipboard for headless/Docker environment"
+        end
+    end
+catch; end
+
 export julia_main
 
 """
@@ -278,16 +309,30 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
 
     # 1. Parse studies and time points from scene_hierarchy / metadata
     meta_dates = Dict{String, String}()
+    meta_modalities = Dict{String, String}()
     if haskey(h5_init, "_meta_/metadata.json")
         try
             meta_json = JSON.parse(read(h5_init["_meta_/metadata.json"]))
             for item in meta_json
                 for (k, v) in item
-                    if v isa Dict && (haskey(v, "CT") || haskey(v, "PET") || haskey(v, "NM"))
-                        d_str = length(k) == 8 ? "$(k[1:4])-$(k[5:6])-$(k[7:8])" : k
-                        if haskey(v, "CT") && haskey(v["CT"], "name"); meta_dates[v["CT"]["name"]] = d_str; end
-                        if haskey(v, "PET") && haskey(v["PET"], "name"); meta_dates[v["PET"]["name"]] = d_str; end
-                        if haskey(v, "NM") && haskey(v["NM"], "name"); meta_dates[v["NM"]["name"]] = d_str; end
+                    if v isa Dict
+                        d_str = if length(k) >= 8 && all(isdigit, k[1:8])
+                            prefix = "$(k[1:4])-$(k[5:6])-$(k[7:8])"
+                            suffix = length(k) > 8 ? " (" * replace(strip(c -> c == '_', k[9:end]), "_" => " ") * ")" : ""
+                            prefix * suffix
+                        else
+                            k
+                        end
+                        for sub_k in keys(v)
+                            sub_dict = v[sub_k]
+                            if sub_dict isa Dict && haskey(sub_dict, "name")
+                                v_name = sub_dict["name"]
+                                meta_dates[v_name] = d_str
+                                if haskey(sub_dict, "Modality")
+                                    meta_modalities[v_name] = sub_dict["Modality"]
+                                end
+                            end
+                        end
                     end
                 end
             end
@@ -305,12 +350,27 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 for child in children
                     if child["type"] == "vtkMRMLLinearTransformNode"; continue; end
                     name = child["name"]
+                    child_mod = get(child, "modality", get(child, "Modality", get(meta_modalities, name, "")))
+                    if !isempty(child_mod)
+                        modality = child_mod
+                    end
                     if child["type"] == "vtkMRMLScalarVolumeNode"
                         if occursin("NM", name) || occursin("PET", name) || occursin("SUV", name)
                             pet_name = name * ".nii.gz"
-                            if occursin("NM", name) || occursin("SPECT", name); modality = "SPECT"; end
-                        elseif occursin("CT", name)
+                            if isempty(child_mod) && (occursin("NM", name) || occursin("SPECT", name)); modality = "SPECT"; end
+                        elseif occursin("CT", name) || occursin("MR", name) || occursin("T2", name) || occursin("ADC", name) || occursin("DWI", name) || occursin("T1", name)
                             ct_name = name * ".nii.gz"
+                            if isempty(child_mod)
+                                if occursin("ADC", name)
+                                    modality = "ADC"
+                                elseif occursin("DWI", name) || occursin("BVAL", name)
+                                    modality = "DWI"
+                                elseif occursin("T1", name)
+                                    modality = "T1"
+                                elseif occursin("MR", name) || occursin("T2", name)
+                                    modality = "T2"
+                                end
+                            end
                         end
                     elseif child["type"] == "vtkMRMLSegmentationNode"
                         if occursin("Lesions", name)
@@ -330,6 +390,9 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 parts = split(ct_base, "_")
                 orig_tp = tryparse(Int, parts[end])
                 if orig_tp === nothing; orig_tp = 0; end
+                if haskey(meta_modalities, ct_base)
+                    modality = meta_modalities[ct_base]
+                end
                 pet_base = replace(pet_name, ".nii.gz" => "")
                 date_str = get(meta_dates, ct_base, get(meta_dates, pet_base, "$modality TP $orig_tp"))
                 mask_base = replace(replace(mask_name, ".seg.nrrd" => ""), ".nii.gz" => "")
@@ -346,7 +409,37 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                     if s !== nothing; push!(studies, s); end
                 end
             end
-            sort!(studies, by = x -> (length(x[3]) >= 10 && isdigit(x[3][1])) ? x[3] : "$(x[2])_$(x[1])")
+            sort!(studies, by = x -> ((length(x[3]) >= 10 && isdigit(x[3][1])) ? x[3][1:10] : "9999-99-99", x[2]))
+
+            # Harvest original RTOG / clinical segment names per timepoint
+            function harvest_segments!(nodes, cur_tp=0)
+                for node in nodes
+                    tp = cur_tp
+                    name = get(node, "name", "")
+                    parts = split(replace(name, ".nii.gz" => ""), "_")
+                    last_int = tryparse(Int, parts[end])
+                    if last_int !== nothing
+                        tp = last_int
+                    end
+                    if get(node, "type", "") == "vtkMRMLSegmentationNode" && haskey(node, "segments")
+                        segs = node["segments"]
+                        if segs isa AbstractVector
+                            dict = get!(MEH.tp_segment_names, tp, Dict{Int, String}())
+                            for (idx, item) in enumerate(segs)
+                                if item isa AbstractDict
+                                    dict[idx] = get(item, "name", "Segment $idx")
+                                else
+                                    dict[idx] = string(item)
+                                end
+                            end
+                        end
+                    end
+                    if haskey(node, "children")
+                        harvest_segments!(node["children"], tp)
+                    end
+                end
+            end
+            harvest_segments!(hierarchy, 0)
         catch e
             @warn "Failed to parse scene hierarchy: $e"
         end
@@ -403,6 +496,18 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             try
                 raw_organ = JSON.parse(read(h5_init["_meta_/organ_mapping"]))
                 organ_mapping = Dict{Int,String}(parse(Int, k) => v for (k, v) in raw_organ)
+            catch; end
+        end
+        if haskey(h5_init, "_meta_/segment_names.json")
+            try
+                raw_sn = JSON.parse(read(h5_init["_meta_/segment_names.json"]))
+                for (tp_str, sdict) in raw_sn
+                    tp_i = parse(Int, tp_str)
+                    target = get!(MEH.tp_segment_names, tp_i, Dict{Int, String}())
+                    for (sid_str, sname) in sdict
+                        target[parse(Int, sid_str)] = string(sname)
+                    end
+                end
             catch; end
         end
     end
@@ -546,6 +651,22 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         MEH.tp_node_names[tp_i] = node_name
     end
 
+    # Load prostate-specific anatomy labels for MRI timepoints (must run after tp_modalities is populated)
+    HDF5.h5open(h5_path, "r") do h5_r
+        if haskey(h5_r, "_meta_/prostate_anatomy_labels.json")
+            try
+                raw_prostate = JSON.parse(read(h5_r["_meta_/prostate_anatomy_labels.json"]))
+                prostate_labels = Dict{Int,String}(parse(Int, k) => v for (k, v) in raw_prostate)
+                for (tp_i, mod) in MEH.tp_modalities
+                    if uppercase(mod) in ("T2", "MRI", "MR", "T1", "ADC", "DWI")
+                        MEH.anatomy_labels_cache[tp_i] = prostate_labels
+                    end
+                end
+                @info "Loaded prostate anatomy labels for MRI TPs: $(collect(values(prostate_labels)))"
+            catch; end
+        end
+    end
+
     function load_single_tp_from_h5(tp_i::Int)
         if tp_i < 0 || tp_i >= length(studies)
             return nothing
@@ -605,6 +726,23 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                     end
                 end
             catch; end
+            # Fallback: if no per-TP anatomy, reuse ATLAS or BASELINE anatomy
+            # (MRI TPs are registered to baseline space, so the atlas is valid)
+            if anatomy_vol === nothing
+                for fallback_path in ["ATLAS/max_anatomy", "BASELINE/max_anatomy.nii.gz"]
+                    if haskey(h5_file, fallback_path)
+                        try
+                            raw_anat = read(h5_file[fallback_path])
+                            if needs_reverse
+                                raw_anat = reverse(Float32.(raw_anat), dims=2)
+                            end
+                            anatomy_vol = eltype(raw_anat) <: Integer ? UInt16.(raw_anat) : UInt16.(round.(max.(0.0f0, Float32.(raw_anat))))
+                            println("  [TP $tp_i] Using fallback anatomy from $fallback_path"); flush(stdout)
+                            break
+                        catch; end
+                    end
+                end
+            end
             
             mask_i16 = Int16.(mask_compact)
             anat_i16 = anatomy_vol !== nothing ? Int16.(anatomy_vol) : nothing
@@ -651,12 +789,26 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
 
     unique_vals = sort(unique(first_mask))
     lesion_ids_ints = filter(x -> x > 0, unique_vals)
+    tp0_sn = get(MEH.tp_segment_names, 0, Dict{Int, String}())
+    for sid in keys(tp0_sn)
+        if !(sid in lesion_ids_ints)
+            push!(lesion_ids_ints, sid)
+        end
+    end
+    sort!(lesion_ids_ints)
+
     lesion_list = if isempty(lesion_ids_ints)
         ["(none)"]
     else
         map(lesion_ids_ints) do i
             seg_int = Int(i)
-            display_name = get(organ_mapping, seg_int, "Segment_$seg_int")
+            display_name = if haskey(tp0_sn, seg_int) && !isempty(tp0_sn[seg_int])
+                tp0_sn[seg_int]
+            elseif haskey(organ_mapping, seg_int)
+                organ_mapping[seg_int]
+            else
+                "Segment_$seg_int"
+            end
             found_gid = nothing; found_matches = 0
             node_name_0 = get(tp_nodes_map, 0, "PET_Lesions_0")
             for (gid, members) in match_groups
@@ -704,6 +856,14 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     put!(mainViewer.channel, Int64(0))
 
     println("MedEye3D interactive clinical workflow initialized.")
+    
+    # 8. Pre-build E-PSMA structured reports (async, non-blocking)
+    @async try
+        MedEye3d.EPSMAStructuredReport.prebuild_reports!()
+    catch e
+        @warn "[STARTUP] E-PSMA report pre-build failed" exception=(e, catch_backtrace())
+    end
+    
     run_viewer_loop(mainViewer)
 end
 

@@ -4,6 +4,12 @@
 set -e
 export DEBIAN_FRONTEND=noninteractive
 
+# Ensure clipboard support for Makie textboxes (Ctrl+C/V)
+if ! command -v xclip &>/dev/null && ! command -v xsel &>/dev/null; then
+    echo "Installing xclip for clipboard support..."
+    sudo apt-get update -qq && sudo apt-get install -y -qq xclip 2>/dev/null || true
+fi
+
 # Use Mesa software renderer if no GPU driver available
 export MESA_GL_VERSION_OVERRIDE=4.3
 export MESA_GLSL_VERSION_OVERRIDE=430
@@ -27,4 +33,7 @@ echo "============================================"
 echo ""
 
 cd "$(dirname "$0")/../.."
-JULIA_NUM_THREADS=3,1 julia --project=. scripts/run_interactive_mrb.jl 2>&1 | tee app_execution.log
+LOG_FILE="data/app_interactive.log"
+echo "  Logging to: $(pwd)/$LOG_FILE"
+echo ""
+JULIA_NUM_THREADS=3,1 julia --project=. scripts/app/run_interactive_mrb.jl "$@" 2>&1 | tee "$LOG_FILE"
