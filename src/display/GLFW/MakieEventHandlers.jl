@@ -766,7 +766,6 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
     if skelly_vol !== nothing && mask_vol !== nothing && count(skelly_vol .> 0) > 0
         # Use proper morphological bone subsegmentation (erosion-based cortical shell + marrow)
         res = try
-            BoneSub = Main.MedEye3d.BoneSubsegmentation
             # Get spacing from stateObject or use default
             sp = try
                 sv = stateObject.spacingsValue
@@ -774,16 +773,41 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
             catch
                 (1.0, 1.0, 2.0)
             end
-            println("  [BONE-MORPH] Running morphological subseg for lid=$target_id tp=$panel_tp spacing=$sp"); flush(stdout)
-            surf_mask, marr_mask = BoneSub.generate_bone_subsegments(
-                Float32.(mask_vol), Float32.(skelly_vol), sp, target_id
-            )
-            s_pts = findall(surf_mask)
-            m_pts = findall(marr_mask)
-            println("  [BONE-MORPH] SUCCESS: $(length(s_pts)) surf, $(length(m_pts)) marrow voxels"); flush(stdout)
+            println("  [BONE-REMOTE] Running remote bone subseg for lid=$target_id tp=$panel_tp spacing=$sp"); flush(stdout)
+            
+            # Crop to bounding box for transfer efficiency
+            sz = size(mask_vol)
+            lesion_vox = findall(mask_vol .== target_id)
+            if isempty(lesion_vox) || isempty(skelly_vol)
+                return (CartesianIndex{3}[], CartesianIndex{3}[])
+            end
+            xs = [I[1] for I in lesion_vox]; ys = [I[2] for I in lesion_vox]; zs = [I[3] for I in lesion_vox]
+            margin = 30
+            x_min = max(1, minimum(xs) - margin); x_max = min(sz[1], maximum(xs) + margin)
+            y_min = max(1, minimum(ys) - margin); y_max = min(sz[2], maximum(ys) + margin)
+            z_min = max(1, minimum(zs) - margin); z_max = min(sz[3], maximum(zs) + margin)
+            
+            crop_mask = view(mask_vol, x_min:x_max, y_min:y_max, z_min:z_max)
+            crop_skelly = view(skelly_vol, x_min:x_max, y_min:y_max, z_min:z_max)
+            
+            les_arr = convert(Array{UInt8,3}, crop_mask .== target_id)
+            bone_arr = convert(Array{UInt8,3}, crop_skelly .> 0)
+            
+            surf_crop, marr_crop = Main.MedEye3d.InferenceClient.run_bone_subsegmentation_remote(les_arr, bone_arr, sp)
+            
+            s_pts = CartesianIndex{3}[]
+            m_pts = CartesianIndex{3}[]
+            for I in findall(surf_crop)
+                push!(s_pts, CartesianIndex(I[1] + x_min - 1, I[2] + y_min - 1, I[3] + z_min - 1))
+            end
+            for I in findall(marr_crop)
+                push!(m_pts, CartesianIndex(I[1] + x_min - 1, I[2] + y_min - 1, I[3] + z_min - 1))
+            end
+            
+            println("  [BONE-REMOTE] SUCCESS: $(length(s_pts)) surf, $(length(m_pts)) marrow voxels"); flush(stdout)
             (s_pts, m_pts)
         catch e
-            @warn "Morphological bone subseg failed, falling back to fast version" exception=(e, catch_backtrace())
+            @warn "Remote bone subseg failed, falling back to fast version" exception=(e, catch_backtrace())
             println("  [BONE-FAST] Falling back to compute_bone_subsegments_fast for lid=$target_id tp=$panel_tp"); flush(stdout)
             compute_bone_subsegments_fast(mask_vol, skelly_vol, target_id)
         end
