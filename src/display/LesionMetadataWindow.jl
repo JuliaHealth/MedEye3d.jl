@@ -55,21 +55,44 @@ end
 export create_metadata_window, load_annotations, save_annotations, load_annotations_hdf5, save_annotations_hdf5, get_lesion_state, display_metadata_window
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
-const _PKG_ROOT      = joinpath(@__DIR__, "..", "..", "extension", "data")
-const _SLICER_DATA   = "/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/data"
-const DEF_JSON_PATH  = isfile(joinpath(_SLICER_DATA, "def.json")) ? joinpath(_SLICER_DATA, "def.json") : (isfile(joinpath(_PKG_ROOT, "def.json")) ? joinpath(_PKG_ROOT, "def.json") : joinpath(@__DIR__, "..", "..", "data", "def.json"))
-const RADLEX_CSV_PATH= isfile(joinpath(_SLICER_DATA, "RadLex.csv")) ? joinpath(_SLICER_DATA, "RadLex.csv") : (isfile(joinpath(_PKG_ROOT, "RadLex.csv")) ? joinpath(_PKG_ROOT, "RadLex.csv") : joinpath(@__DIR__, "..", "..", "data", "RadLex.csv"))
+const _ASSETS_DIR    = normpath(joinpath(@__DIR__, "..", "..", "assets"))
+const _PKG_ROOT      = normpath(joinpath(@__DIR__, "..", "..", "extension", "data"))
+const _REPO_DATA     = normpath(joinpath(@__DIR__, "..", "..", "data"))
+const _SLICER_DATA   = isdir("/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/data") ?
+    "/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/data" : ""
+
+const DEF_JSON_PATH  = isfile(joinpath(_ASSETS_DIR, "def.json")) ? joinpath(_ASSETS_DIR, "def.json") :
+                       (isfile(joinpath(_PKG_ROOT, "def.json")) ? joinpath(_PKG_ROOT, "def.json") :
+                       (isfile(joinpath(_REPO_DATA, "def.json")) ? joinpath(_REPO_DATA, "def.json") :
+                       (isfile(joinpath(_SLICER_DATA, "def.json")) ? joinpath(_SLICER_DATA, "def.json") : "")))
+
+const RADLEX_CSV_PATH= isfile(joinpath(_ASSETS_DIR, "RadLex.csv")) ? joinpath(_ASSETS_DIR, "RadLex.csv") :
+                       (isfile(joinpath(_PKG_ROOT, "RadLex.csv")) ? joinpath(_PKG_ROOT, "RadLex.csv") :
+                       (isfile(joinpath(_REPO_DATA, "RadLex.csv")) ? joinpath(_REPO_DATA, "RadLex.csv") :
+                       (isfile(joinpath(_SLICER_DATA, "RadLex.csv")) ? joinpath(_SLICER_DATA, "RadLex.csv") : "")))
+
+const ANATOMY_CSV_PATH = isfile(joinpath(_ASSETS_DIR, "FoundationalAnatomy.csv")) ? joinpath(_ASSETS_DIR, "FoundationalAnatomy.csv") :
+                         (isfile(joinpath(_PKG_ROOT, "FoundationalAnatomy.csv")) ? joinpath(_PKG_ROOT, "FoundationalAnatomy.csv") :
+                         (isfile(joinpath(_REPO_DATA, "FoundationalAnatomy.csv")) ? joinpath(_REPO_DATA, "FoundationalAnatomy.csv") :
+                         (isfile(joinpath(_SLICER_DATA, "FoundationalAnatomy.csv")) ? joinpath(_SLICER_DATA, "FoundationalAnatomy.csv") : "")))
+
 const DEFAULT_SAVE_PATH = joinpath(homedir(), "medeye3d_lesion_annotations.json")
 const DEFAULT_HDF5_PATH = joinpath(homedir(), "medeye3d_lesion_annotations.h5")
-const ANATOMY_MAPPING_PATH = joinpath(@__DIR__, "..", "..", "data", "max_anatomy_to_ontology.json")
+const ANATOMY_MAPPING_PATH = isfile(joinpath(_ASSETS_DIR, "max_anatomy_to_ontology.json")) ?
+                             joinpath(_ASSETS_DIR, "max_anatomy_to_ontology.json") :
+                             (isfile(joinpath(_REPO_DATA, "max_anatomy_to_ontology.json")) ?
+                             joinpath(_REPO_DATA, "max_anatomy_to_ontology.json") :
+                             joinpath(_PKG_ROOT, "max_anatomy_to_ontology.json"))
 
 # Persistent custom dropdown options (cross-patient and cross-run)
 const GLOBAL_CUSTOM_OPTS_PATH = joinpath(homedir(), ".medeye3d_custom_options.json")
 const GLOBAL_CUSTOM_FIELDS_PATH = joinpath(homedir(), ".medeye3d_custom_fields.json")
 const CUSTOM_OPTS_PATH = let
-    p1 = joinpath(_SLICER_DATA, "custom_options.json")
-    p2 = joinpath(_PKG_ROOT, "custom_options.json")
-    isfile(p1) ? p1 : p2
+    p0 = joinpath(_ASSETS_DIR, "custom_options.json")
+    p1 = joinpath(_PKG_ROOT, "custom_options.json")
+    p2 = joinpath(_REPO_DATA, "custom_options.json")
+    p3 = joinpath(_SLICER_DATA, "custom_options.json")
+    isfile(p0) ? p0 : (isfile(p1) ? p1 : (isfile(p2) ? p2 : (isfile(p3) ? p3 : p0)))
 end
 
 const _custom_opts_cache = Ref{Dict{String,Any}}(Dict{String,Any}())
@@ -193,37 +216,73 @@ const _schema_cache = Ref{Vector{QuestionDef}}(QuestionDef[])
 
 function _builtin_schema()::Vector{QuestionDef}
     [
-        QuestionDef("Radioligand Type","Radioligand used",
-            ["68Ga-PSMA-11","18F-PSMA-1007","18F-DCFPyL","Other"],
-            ["Technical Parameters"],"both","68Ga-PSMA-11"),
-        QuestionDef("Lesion tracking name?","Anatomical descriptor",
-            String[],["Identification"],"both",""),
-        QuestionDef("Anatomic Location","Primary anatomical site",
-            ["Prostate Gland","Axial Skeleton","Appendicular Skeleton",
-             "Pelvic Lymph Node","Distant Lymph Node","Solid Organ / Viscera",
-             "General Soft Tissue","Blood Vessel","Other"],
-            ["Location"],"both",""),
-        QuestionDef("Inner Texture / Density / Attenuation","Internal density",
-            ["Sclerotic / Blastic","Lytic / Lucent","Mixed Lytic & Sclerotic",
-             "Ground-Glass / Fibrous","Fluid-Filled / Cystic","Fat Density","Central Necrosis"],
-            ["Morphology"],"both",""),
-        QuestionDef("Border and Margin","Margin character",
-            ["Smooth / Well-Defined","Spiculated / Feathered","Moth-Eaten",
-             "Ill-Defined / Permeative","Reactive Sclerotic Rim"],
-            ["Morphology"],"both",""),
-        QuestionDef("Lesion Shape","3D morphology",
-            ["Oval / Bean-Shaped","Round","Teardrop","Lobulated","Irregular"],
-            ["Morphology"],"both",""),
-        QuestionDef("Certainty","Diagnostic certainty",
-            ["High (>90%)","Medium (50-90%)","Low (<50%)"],
-            ["Final Assessment"],"both",""),
-        QuestionDef("Comment","Free-text comment",String[],["Reporting"],"both",""),
+        QuestionDef("Radioligand Type", "The specific radioligand used for this PSMA-PET scan, influencing pharmacokinetic thresholds.",
+            String["68Ga-PSMA-11", "18F-PSMA-1007", "18F-DCFPyL", "Other"],
+            String["Technical Parameters"], "both", "68Ga-PSMA-11"),
+        QuestionDef("Lesion tracking name?", "What is the specific anatomical descriptor or tracking name for this lesion?",
+            String[],
+            String["Identification", "Longitudinal Tracking"], "both", ""),
+        QuestionDef("Anatomic Location", "Primary anatomical site of the lesion in the body, which dictates spread pathway probability and pre-test likelihood.",
+            String["Prostate Gland", "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)", "Appendicular Skeleton (Limbs, Scapulae, Hands, Feet)", "Pelvic Lymph Node", "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)", "Solid Organ / Viscera", "Neural Ganglion / Sympathetic Chain", "General Soft Tissue (Muscles, Subcutaneous)", "Direct Rectal Infiltration", "Direct Bladder Infiltration", "Lacrimal Gland", "Salivary Gland", "Urinary Bladder", "Blood Vessel", "Head / Skull Base / Intracranial", "Neck / Thyroid Region", "Chest / Mediastinum / Thorax", "Seminal Vesicles", "Adrenal Gland", "Breast / Chest Wall"],
+            String["Location"], "both", ""),
+        QuestionDef("Anatomical Sublocation", "Fine-grained compartment within the anatomic location, aiding in distinguishing neoplastic infiltration from physiological uptake or benign mimics.",
+            String["Medullary Cavity (Intramedullary/Marrow)", "Cortical Bone (Intracortical)", "Juxtacortical / Surface", "Subchondral (Extends to Articular Surface)", "Metadiaphysis / Metaphysis / Diaphysis", "Epiphysis", "Vertebral Endplate", "Prostate Peripheral Zone (PZ)", "Prostate Transition/Central Zone (TZ/CZ)", "Prostate Capsule / Apex", "Intranodal Cortex (Asymmetric Gradient)", "Lymph Node Hilum", "Liver Lobe", "Pancreatic Tail / Left Upper Quadrant (LUQ)", "Brain Extra-Axial / Dural-Based", "Adrenal Cortex", "Anal Canal (Below Levator Ani)", "Rectal Ampulla (Above Levator Ani)", "Thyroid Upper Two-Thirds", "Unilateral Left Lobe", "Unilateral Right Lobe", "Ipsilateral Regional Drainage", "Contralateral Regional Drainage", "Bladder Wall / Detrusor Muscle", "Rectal Wall / Muscularis Layer", "Trigeminal Ganglion (Meckel's Cave)", "Stellate Ganglion (Cervicothoracic / Thyroid Level)", "Coeliac Ganglion (Para-aortic / Kidney Level)", "Hypogastric Ganglion (Para-vertebral / Iliac Level)", "Sacral Ganglion (Pre-sacral Area)", "Anterior Cortex of Tibia", "Internal Auditory Canal", "Anterior Fibromuscular Stroma (Prostate)", "Testicular Lymph Node Route (Para-aortic / Renal Hilum)", "N/A (General Organ)", "Vascular (Arterial/Venous)", "Muscular / Fascial", "Intertrochanteric Region (Femur)", "Seminal Vesicle Lumen", "Neural Foramen / Nerve Root", "Splenic Hilum", "Subscapular / Infrascapular", "Subareolar / Breast Fat Pad", "Anterior Mediastinum", "Gallbladder Fossa"],
+            String["Location"], "both", ""),
+        QuestionDef("Inner Texture / Density / Attenuation", "Internal density and matrix structure evaluated on CT (Hounsfield Units) or contrast dynamics, revealing cellular composition.",
+            String["Sclerotic / Blastic / Ivory (>1000 HU)", "Lytic / Lucent (Bone Destruction)", "Mixed Lytic & Sclerotic", "Ground-Glass / Fibrous (70-130 HU)", "Fluid-Filled / Cystic (Water Density)", "Fat Density / Trapped Fat", "Coarse Trabeculation", "Corduroy / Polka-Dot Trabeculation", "Honeycomb / Swiss Cheese Trabeculation", "Chondroid Ring-and-Arc Calcification", "Microcalcifications (Psammomatous)", "Coarse Central Calcification", "Central Necrosis (Low Density)", "Gas-Generating / Emphysematous", "Uniformly Homogeneous", "Reticular / Septal Thickening", "Traction Bronchiectasis", "Honeycombing"],
+            String["Morphology"], "both", ""),
+        QuestionDef("Border and Margin", "Outer transition zone and margins of the lesion, reflecting local growth rate and aggressiveness.",
+            String["Reactive Sclerotic Rim (Sharp Outer, Fuzzy Inner)", "Serpiginous (Snake-like) Margin", "Ill-Defined / Permeative / Moth-Eaten Margins", "Sharp / Well-Defined (Non-Sclerotic)", "Spiculated / Feathered / Thorny (Blending)", "Smooth / Well-Defined Margins", "Incomplete or Absent Halo", "Complete Halo / Fibrous Capsule", "Rind Sign (Thick Sclerotic Reactive Rim)", "Overhanging Edges (Apple Core)", "Irregular Extramural Fat Stranding"],
+            String["Morphology"], "both", ""),
+        QuestionDef("Lesion Shape", "Morphological shape in three dimensions (3D planes), crucial for distinguishing standard lymph node layouts, ganglia, and bone remodeling.",
+            String["Spherical", "Oval / Bean-Shaped", "Round", "Teardrop / Comma-Shaped", "Elongated (Spanning >3 Vertebrae / Parallel to Bone)", "Wedge-Shaped", "Annular / Constricting ('Apple Core')", "Dumbbell Shaped", "Broad-Based / Dural-Based", "Tuberous / Lobulated", "Expansile / Ballooning / Blowout"],
+            String["Morphology"], "both", ""),
+        QuestionDef("Lesion Orientation", "The spatial alignment of the lesion relative to anatomical landmarks (such as the long axis of bone, joints, or vessels).",
+            String["Parallel to the Long Axis of Bone", "Horizontal", "Vertical", "Radial / Sunburst", "Centripetal Enhancement", "Perilymphatic Distribution", "Symmetric / Bilateral"],
+            String["Morphology"], "both", ""),
+        QuestionDef("Macroscopic Pattern", "Multi-lesion spatial distributions or alignment patterns across the scan volume, highly indicative of etiology.",
+            String["Linear Alignment Across Ribs ('Pearls on a string')", "Bilateral and Symmetric Distribution", "Asymmetric / Unilateral Focus", "Solitary / Isolated Focus", "Multifocal / Polyostotic (>5 foci)", "Monostotic (Single Bone)", "Scattered / Spotted Sclerosis"],
+            String["Morphology"], "both", ""),
+        QuestionDef("Relation to Bone Marrow (Surrounding Changes Part A)", "The impact of the lesion on the adjacent spongy marrow cavity and fat signals.",
+            String["Infiltrative (Replaces Marrow Fat)", "Non-Infiltrative (Spares Marrow Fat)"],
+            String["Morphology"], "bone_meta", ""),
+        QuestionDef("Periosteal Reaction (Surrounding Changes Part B)", "Outer cortical bone reactions, indicative of slow remodeling vs aggressive breakthrough.",
+            String["None", "Diffuse Cortical Expansion (Pagetoid)", "Thick / Solid Reaction (Callus)", "Aggressive / Sunburst / Spiculated", "Codman Triangle", "Local Cortical Hypertrophy / Pressure Erosion", "Focal/Localized Periosteal Reaction", "Multilamellated / Onion-Skin"],
+            String["Morphology"], "bone_meta", ""),
+        QuestionDef("Other Structural & Soft Tissue Changes (Surrounding Changes Part C)", "Pathognomonic radiological signs in adjacent soft tissues or bone cortex.",
+            String["multiselect", "Cortical Thinning / Endosteal Scalloping", "Cortical Breakthrough / Destruction", "Soft-Tissue Edema / Swelling", "Associated Soft-Tissue Mass", "Hematoma-like morphology (Mimic)", "Fascicular Sign (Schwannoma MR signature)", "Beveled Edge Sign / Sequestrum (Calvarium LCH)", "Dripping Candle Wax (Melorheostosis)", "Dense Linear Striations (Osteopathia Striata)", "Lipohaemarthrosis (Fat-Fluid Level)", "Vacuum Cleft Sign (Gas in vertebral body)", "Puzzle Sign (Cortical fragment alignment)", "Fallen Fragment Sign", "Dural Tail Sign (Tapering enhancement)", "Local Tissue Infiltration (Trachea/Esophagus/Carotid)", "Perivesical Fat Stranding / Haziness", "Soap-Bubble Appearance (Pseudotrabeculation)", "Blowout Appearance (Highly Expansile)", "Nodular Septal Enhancement (Malignant septa)", "Vascularized Nidus with CT/MRI Groove", "Blade of Grass / Flame-Shaped Margin (Osteolytic Paget)", "Yarmulke Sign (Skull Paget)", "Abe Lincoln / Black Beard Sign (Mandible Paget)", "Split-Fat Sign", "Fluid-Fluid Level", "Adrenal Washout", "Seminal Vesicle Invasion (SVI)", "Direct Bladder Detrusor Infiltration", "Direct Rectal Muscularis Infiltration", "Vacuum Cleft Sign", "Puzzle Sign", "Dural Tail Sign", "Architectural Distortion", "Shepherd's Crook Deformity (Proximal Femur FD)", "Picture Frame Vertebra (Paget's)", "Eggshell Calcification (Hilar Nodes)", "Bamboo Spine (Ankylosing Spondylitis)", "Popcorn Calcification (Chondroid)"],
+            String["Morphology"], "both", ""),
+        QuestionDef("SUV Quantitative Metrics & References", "Standardized Uptake Value (SUV) metrics and comparisons to reference organs, acting as quantitative gates in the decision tree.",
+            String["multiselect", "SUVpeak > Blood Pool SUVmean (PSMA Avid)", "SUVpeak > Spleen SUVmean", "SUVmax > 12 (Definite Primary)", "TZ Uptake > 2x Background Transition Zone", "18F-PSMA-1007 Bone Lesion with SUV < 10 (FPR 51.4%)", "Unspecified Bone Uptake (UBU)", "SUVpeak > Liver SUVmean (PROMISE ≥ 2)", "SUVpeak > Parotid SUVmean (PROMISE = 3)", "SUVpeak < Blood Pool SUVmean (PSMA Cold)", "Lesion-to-Background Ratio (LBR) > 2.5"],
+            String["Quantitative"], "both", ""),
+        QuestionDef("Clinical Context & Staging Variables", "Patient demographic data, treatment status, and tumor biology history which adjust diagnostic probability.",
+            String["multiselect", "Patient Age < 40 Years Old (Out of Scope)", "Patient Age >= 40 Years Old", "Gleason Score > 6", "Serum PSA > 20 ng/mL", "Recent Treatment (<2mo post-radiation/surgery, or 2-4wk post-ADT)", "Heavily Pre-treated (Advanced ADT / Chemo)", "Original Primary Tumor was PSMA-Cold (~10%)", "Previously Treated Lesion (Irradiated / ADT)", "Widespread Disease (>5 malignant findings)", "Post-Splenectomy Status", "Recent COVID-19 / Viral Pneumonia (Lung uptake trap)", "Short PSA Doubling Time (PSADT < 6 months)", "History of Hyperparathyroidism (Brown Tumor risk)", "NEPC Phenotype (AR-negative / FDG-active / AR0Glyc1)", "High Genomic Risk (Decipher/Oncotype/Prolaris)", "Has >5 Other PSMA-Avid Metastases", "High Tumor Burden (>=5 Metastases)", "Low Tumor Burden (<5 Metastases)", "PSA Persistence (>0.1 ng/mL at 6wk post-RP)", "Post-BCG Treatment History", "Prior Pelvic Radiation Therapy", "History of Bisphosphonate Use", "History of Corticosteroid Use", "Sickle Cell Disease"],
+            String["Clinical Context"], "both", ""),
+        QuestionDef("SUV max", "Maximum SUV value in this lesion",
+            String[],
+            String["Quantitative"], "both", "0.0"),
+        QuestionDef("PRIMARY score pattern?", "Automatically calculated PRIMARY score (v1.0) based on zonal location and SUVmax.",
+            String[],
+            String["Prostate Analysis", "PROMISE V2"], "prostate", "Pending..."),
+        QuestionDef("PSMA-RADS 2.0", "Automatically calculated PSMA-RADS v2.0 score based on location, SUV, and morphology.",
+            String[],
+            String["Final Assessment"], "both", "Pending..."),
+        QuestionDef("Alternative Hypothesis (False Positive)", "Inferred alternative diagnosis or benign mimic based on morphological and clinical criteria.",
+            String["None / Malignant Suspected", "Technical Artifact", "Physiological uptake", "Small blood vessel / tubular structure", "Bone Scar / Hardware Graft", "Bone Island / Enostosis", "Osteopoikilosis / Dysplasia", "Bone Infarction / Osteonecrosis", "Trauma / Stress Fracture", "Benign Osteoporotic Collapse", "Fibrous Dysplasia", "Liposclerosing Myxofibrous Tumor (LSMFT)", "Degenerative Osteoarthritis", "Enchondroma", "Paget's Disease", "Osseous Hemangioma", "Osteoma", "Severe Osteoporosis (RID39300)", "Multiple Myeloma", "Chronic Osteomyelitis", "Brodie Abscess", "Giant Cell Tumor (GCT)", "Telangiectatic Osteosarcoma", "Osteosarcoma", "Desmoplastic Fibroma", "Blowout Metastasis (RCC / Thyroid)", "Low-Grade Central Osteosarcoma", "Trigeminal Ganglion", "Stellate Ganglion", "Coeliac Ganglion", "Hypogastric Ganglion", "Sacral Ganglion", "Sympathetic Ganglion", "Testicular Distant Nodal Route", "Sarcoidosis", "Lung Fibrosis", "Reactive Lymph Node", "Suspicious Lymph Node", "Benign Adrenal Adenoma", "Adrenal Metastasis / Malignancy", "Pancreatic Neuroendocrine Tumor (PanNET)", "Pancreatic Ductal Adenocarcinoma (PDAC)", "Accessory Spleen / Splenosis", "Schwannoma / Nerve Sheath Tumor", "Vestibular Schwannoma", "Glomus Tumor (Paraganglioma)", "Meningioma", "Liver Hemangioma", "Liver Hematoma", "CZ Mickey Mouse Base", "Symmetric BPH", "Prostatitis", "Extraprostatic extension (T3b/T4)", "PZ Prostate Cancer", "TZ Prostate Cancer", "PSMA-Cold Malignancy Suspected", "Aneurysmal Bone Cyst (ABC)", "Simple Bone Cyst (SBC)", "Radiation-Induced Sarcoma", "Brown Tumor (Hyperparathyroidism)", "Modic Type 1 Endplate Changes", "Diffuse Bone Marrow Activation (Anemia)", "Inflammatory Spondylitis (AS)", "Osteoid Osteoma", "Desmoid Tumor (Aggressive Fibromatosis)", "Nodular Fasciitis", "Lipoma / Angiolipoma / Hibernoma", "Intramuscular Myxoma", "Gynecomastia / PASH", "Elastofibroma Dorsi", "Thyroid / Parathyroid Adenoma", "Thymoma / Thymic Hyperplasia", "Cerebral Infarction (Stroke)", "Synchronous Colorectal Cancer", "Primary Lung Cancer", "Malignant Melanoma Metastasis", "Lymphoma (DLBCL / FL)", "Tuberculosis (TB)", "Diverticulitis", "Cholelithiasis (Gallbladder Stones)", "Dermatofibroma / Acrochordon", "Active Vascular Calcification", "Esophagitis / Swallowed Saliva", "Bronchogenic Cyst", "Pheochromocytoma"],
+            String["Final Assessment"], "both", "None / Malignant Suspected"),
+        QuestionDef("Certainty", "Degree of diagnostic certainty (1 = very low, 10 = very high)",
+            String["slider", "0", "10"],
+            String["Final Assessment"], "both", "10"),
+        QuestionDef("Comment", "Additional clinical comments or observations.",
+            String[],
+            String["Reporting"], "both", ""),
     ]
 end
 
 function load_schema()::Vector{QuestionDef}
     isempty(_schema_cache[]) || return _schema_cache[]
     if !isfile(DEF_JSON_PATH)
+        @warn "def.json not found at $(DEF_JSON_PATH), falling back to builtin 20-question schema"
         _schema_cache[] = _builtin_schema()
         return _schema_cache[]
     end
@@ -274,7 +333,7 @@ function load_radlex()::Vector{String}
 end
 
 # ─── Anatomy Ontology (FoundationalAnatomy.csv) for Base Anatomy autocomplete ─
-const ANATOMY_CSV_PATH = isfile(joinpath(_SLICER_DATA, "FoundationalAnatomy.csv")) ? joinpath(_SLICER_DATA, "FoundationalAnatomy.csv") : joinpath(_PKG_ROOT, "FoundationalAnatomy.csv")
+# (ANATOMY_CSV_PATH defined above in Paths section)
 const _anatomy_cache = Ref{Vector{String}}(String[])
 
 """Load ALL FoundationalAnatomy.csv labels for Base Anatomy search/autocomplete."""

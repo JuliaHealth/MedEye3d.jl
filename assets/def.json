@@ -1,0 +1,726 @@
+[
+  {
+    "full": "The specific radioligand used for this PSMA-PET scan, influencing pharmacokinetic thresholds.",
+    "allowed_answer": [
+      "68Ga-PSMA-11",
+      "18F-PSMA-1007",
+      "18F-DCFPyL",
+      "Other"
+    ],
+    "short q": "Radioligand Type",
+    "category": [
+      "Technical Parameters"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "68Ga-PSMA-11",
+    "comments": {
+      "68Ga-PSMA-11": "Standard gallium-68 based tracer, renally excreted, low bone false positive rate.",
+      "18F-PSMA-1007": "Fluorine-18 based tracer, hepatobiliary excretion. Higher rate of unspecific bone uptake (UBU) (~36%) mimicking metastases.",
+      "18F-DCFPyL": "Fluorine-18 based tracer, renally excreted, standard clinical alternative."
+    }
+  },
+  {
+    "full": "What is the specific anatomical descriptor or tracking name for this lesion?",
+    "allowed_answer": [],
+    "short q": "Lesion tracking name?",
+    "category": [
+      "Identification",
+      "Longitudinal Tracking"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "",
+    "comments": {
+      "input_guidance": "Provide a consistent label (e.g., 'Right Iliac Node 1', 'L4 Vertebra') to track this specific lesion across multiple scans."
+    }
+  },
+  {
+    "full": "Primary anatomical site of the lesion in the body, which dictates spread pathway probability and pre-test likelihood.",
+    "allowed_answer": [
+      "Prostate Gland",
+      "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+      "Appendicular Skeleton (Limbs, Scapulae, Hands, Feet)",
+      "Pelvic Lymph Node",
+      "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+      "Solid Organ / Viscera",
+      "Neural Ganglion / Sympathetic Chain",
+      "General Soft Tissue (Muscles, Subcutaneous)",
+      "Direct Rectal Infiltration",
+      "Direct Bladder Infiltration",
+      "Lacrimal Gland",
+      "Salivary Gland",
+      "Urinary Bladder",
+      "Blood Vessel",
+      "Head / Skull Base / Intracranial",
+      "Neck / Thyroid Region",
+      "Chest / Mediastinum / Thorax",
+      "Seminal Vesicles",
+      "Adrenal Gland",
+      "Breast / Chest Wall"
+    ],
+    "short q": "Anatomic Location",
+    "category": [
+      "Location"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "",
+    "comments": {
+      "Prostate Gland": "Primary tumor site. Subject to PRIMARY score criteria (zonal location and SUVmax).",
+      "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)": "Highly preferred bone metastatic site due to drainage via Batson's valveless venous plexus.",
+      "Appendicular Skeleton (Limbs, Scapulae, Hands, Feet)": "Lower probability site for isolated metastasis; typical of widespread disease or benign cartillage/bone mimics (e.g. enchondromas in hands/feet).",
+      "Pelvic Lymph Node": "Regional N1 nodes located strictly below the common iliac artery bifurcation (e.g., obturator, internal/external iliac, presacral). Pathological size limits: obturator >8 mm, internal iliac >7 mm. Micrometastases can occur in normal-sized nodes.",
+      "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)": "Distant M1a nodes located at or above the common iliac bifurcation (common iliac, para-aortic, retroperitoneal, mediastinal, or supraclavicular).",
+      "Solid Organ / Viscera": "Hematogenous distant metastasis (M1c disease), e.g., liver, lungs, brain, adrenals.",
+      "Neural Ganglion / Sympathetic Chain": "Common site of false-positive sympathetic/sensory ganglion tracer uptake (e.g. C7, kidney para-aortic).",
+      "General Soft Tissue (Muscles, Subcutaneous)": "Can harbor schwannomas, hemangiomas, or metastases.",
+      "Direct Rectal Infiltration": "Primary prostate tumor invading the rectal wall through Denonvilliers' fascia (T4 disease).",
+      "Direct Bladder Infiltration": "Primary prostate tumor invading the bladder neck/detrusor muscle (T4 disease).",
+      "Lacrimal Gland": "Secretory gland with physiological high tracer accumulation (PSMA-RADS 1).",
+      "Salivary Gland": "Secretory salivary glands (parotid, submandibular) with intense physiological tracer accumulation (PSMA-RADS 1).",
+      "Urinary Bladder": "Physiological urinary excretion reservoir. Accumulates high concentration of excreted tracer (PSMA-RADS 1).",
+      "Blood Vessel": "Vascular structures showing blood pool tracer retention or clearance, mimicking lymphadenopathy (PSMA-RADS 1)."
+    }
+  },
+  {
+    "full": "Fine-grained compartment within the anatomic location, aiding in distinguishing neoplastic infiltration from physiological uptake or benign mimics.",
+    "allowed_answer": [
+      "Medullary Cavity (Intramedullary/Marrow)",
+      "Cortical Bone (Intracortical)",
+      "Juxtacortical / Surface",
+      "Subchondral (Extends to Articular Surface)",
+      "Metadiaphysis / Metaphysis / Diaphysis",
+      "Epiphysis",
+      "Vertebral Endplate",
+      "Prostate Peripheral Zone (PZ)",
+      "Prostate Transition/Central Zone (TZ/CZ)",
+      "Prostate Capsule / Apex",
+      "Intranodal Cortex (Asymmetric Gradient)",
+      "Lymph Node Hilum",
+      "Liver Lobe",
+      "Pancreatic Tail / Left Upper Quadrant (LUQ)",
+      "Brain Extra-Axial / Dural-Based",
+      "Adrenal Cortex",
+      "Anal Canal (Below Levator Ani)",
+      "Rectal Ampulla (Above Levator Ani)",
+      "Thyroid Upper Two-Thirds",
+      "Unilateral Left Lobe",
+      "Unilateral Right Lobe",
+      "Ipsilateral Regional Drainage",
+      "Contralateral Regional Drainage",
+      "Bladder Wall / Detrusor Muscle",
+      "Rectal Wall / Muscularis Layer",
+      "Trigeminal Ganglion (Meckel's Cave)",
+      "Stellate Ganglion (Cervicothoracic / Thyroid Level)",
+      "Coeliac Ganglion (Para-aortic / Kidney Level)",
+      "Hypogastric Ganglion (Para-vertebral / Iliac Level)",
+      "Sacral Ganglion (Pre-sacral Area)",
+      "Anterior Cortex of Tibia",
+      "Internal Auditory Canal",
+      "Anterior Fibromuscular Stroma (Prostate)",
+      "Testicular Lymph Node Route (Para-aortic / Renal Hilum)",
+      "N/A (General Organ)",
+      "Vascular (Arterial/Venous)",
+      "Muscular / Fascial",
+      "Intertrochanteric Region (Femur)",
+      "Seminal Vesicle Lumen",
+      "Neural Foramen / Nerve Root",
+      "Splenic Hilum",
+      "Subscapular / Infrascapular",
+      "Subareolar / Breast Fat Pad",
+      "Anterior Mediastinum",
+      "Gallbladder Fossa"
+    ],
+    "short q": "Anatomical Sublocation",
+    "category": [
+      "Location"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "",
+    "comments": {
+      "Medullary Cavity (Intramedullary/Marrow)": "Prostate bone metastases typically initiate here, replacing red marrow.",
+      "Cortical Bone (Intracortical)": "Benign lesions are often intracortical, unlike metastases which start in marrow.",
+      "Juxtacortical / Surface": "Surface-based bone formation, typical of benign exostoses or parosteal sarcoma.",
+      "Subchondral (Extends to Articular Surface)": "Sclerosis strictly subchondral points to joint degeneration.",
+      "Metadiaphysis / Metaphysis / Diaphysis": "Longitudinal position in long bones. Fibrous dysplasia, enchondromas, and bone cysts prefer metadiaphysis.",
+      "Epiphysis": "Benign spotted bone disease prefers epiphysis and metaphysis.",
+      "Vertebral Endplate": "Herniations occur in the center of the endplate.",
+      "Prostate Peripheral Zone (PZ)": "Most common zone for prostate cancer. Focal uptake here is highly suspicious.",
+      "Prostate Transition/Central Zone (TZ/CZ)": "Subject to BPH mimics. Symmetric CZ is physiological; focal TZ >2x background is suspicious.",
+      "Prostate Capsule / Apex": "Uptake touching capsule/apex increases likelihood of extraprostatic extension.",
+      "Intranodal Cortex (Asymmetric Gradient)": "Classic spatial signature of early micrometastasis seeding via afferent lymphatics.",
+      "Lymph Node Hilum": "Uptake centered at a preserved fatty hilum favors benign reactive processes.",
+      "Liver Lobe": "Focal hypoattenuating lesions indicate visceral metastasis.",
+      "Pancreatic Tail / Left Upper Quadrant (LUQ)": "Location of splenules which mimic pancreatic NETs or metastases.",
+      "Brain Extra-Axial / Dural-Based": "Dural-based extra-axial masses with high PSMA represent a common second primary trap.",
+      "Adrenal Cortex": "Source of benign adenomas (lipid-rich) vs adrenal metastases.",
+      "Anal Canal (Below Levator Ani)": "Epicenter below levator ani indicates anal cancer, draining to inguinal nodes.",
+      "Rectal Ampulla (Above Levator Ani)": "Epicenter above levator ani indicates rectal cancer, draining to mesorectal/hypogastric nodes.",
+      "Thyroid Upper Two-Thirds": "Parafollicular C-cell origin site for medullary thyroid cancer.",
+      "Unilateral Left Lobe": "Primary tumor confined strictly to the left lobe of the prostate (does not cross the midline).",
+      "Unilateral Right Lobe": "Primary tumor confined strictly to the right lobe of the prostate (does not cross the midline).",
+      "Ipsilateral Regional Drainage": "Pelvic lymph node located on the same side as the unilateral primary tumor; highly suspicious.",
+      "Contralateral Regional Drainage": "Pelvic lymph node located on the opposite side of the unilateral primary tumor.",
+      "Bladder Wall / Detrusor Muscle": "Target of direct anterior infiltration from the prostate base.",
+      "Rectal Wall / Muscularis Layer": "Target of direct posterior infiltration through the rectoprostatic fat plane.",
+      "Anterior Cortex of Tibia": "Highly specific cortical sublocation for benign osteofibrous dysplasia or aggressive adamantinoma.",
+      "Internal Auditory Canal": "Origin site for vestibular schwannoma (eighth cranial nerve), helping differentiate CP angle meningiomas.",
+      "Anterior Fibromuscular Stroma (Prostate)": "Anterior prostate stroma, avascular, focal contour bulge or early enhancement points to cancer.",
+      "Testicular Lymph Node Route (Para-aortic / Renal Hilum)": "Direct lymphatic route from the testes, bypassing pelvic chains directly to the renal hilum.",
+      "N/A (General Organ)": "Applicable for general organs or clearance sites that do not have sublocation divisions."
+    }
+  },
+  {
+    "full": "Internal density and matrix structure evaluated on CT (Hounsfield Units) or contrast dynamics, revealing cellular composition.",
+    "allowed_answer": [
+      "Sclerotic / Blastic / Ivory (>1000 HU)",
+      "Lytic / Lucent (Bone Destruction)",
+      "Mixed Lytic & Sclerotic",
+      "Ground-Glass / Fibrous (70-130 HU)",
+      "Fluid-Filled / Cystic (Water Density)",
+      "Fat Density / Trapped Fat",
+      "Coarse Trabeculation",
+      "Corduroy / Polka-Dot Trabeculation",
+      "Honeycomb / Swiss Cheese Trabeculation",
+      "Chondroid Ring-and-Arc Calcification",
+      "Microcalcifications (Psammomatous)",
+      "Coarse Central Calcification",
+      "Central Necrosis (Low Density)",
+      "Gas-Generating / Emphysematous",
+      "Uniformly Homogeneous",
+      "Reticular / Septal Thickening",
+      "Traction Bronchiectasis",
+      "Honeycombing"
+    ],
+    "short q": "Inner Texture / Density / Attenuation",
+    "category": [
+      "Morphology"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "",
+    "comments": {
+      "Sclerotic / Blastic / Ivory (>1000 HU)": "Classic prostate cancer osteoblastic metastasis matrix, or benign enostosis. Active metastases present as amorphous, fluffy, cloud-like medullary densities that are T1-hypointense, T2/STIR-hyperintense with post-contrast enhancement and restricted diffusion (dark ADC), often showing a surrounding marrow edema 'halo sign' (unlike enostosis/Paget's which spare marrow). Enostosis has uniform CT density >1000 HU and is T1/T2 hypointense.",
+      "Lytic / Lucent (Bone Destruction)": "Bone-destroying pattern. Metastatic osteolytic clones present with an aggressive permeative or moth-eaten pattern containing numerous <1 mm lucencies, ill-defined margins, and wide zones of transition. Punched-out without rim suggests myeloma.",
+      "Mixed Lytic & Sclerotic": "Combined bone destruction and formation, typical of mixed metastasis or aggressive tumors.",
+      "Central radiolucent nidus (Osteoid Osteoma mimic)": "Small central radiolucent nidus surrounded by dense reactive osteosclerosis. Benign osteoid osteoma signature, typical if age < 40.",
+      "Arciform Arterial Enhancement (Accessory Spleen)": "Focal arc-like or centripetal contrast enhancement in arterial phase, pathognomonic for accessory spleen/splenosis.",
+      "Adrenal Washout (Absolute >60% / Relative >40% / <10 HU)": "Precise CT contrast washout kinetics indicating benign lipid-rich or lipid-poor adrenal adenoma.",
+      "Ground-Glass / Fibrous (70-130 HU)": "Fibro-osseous ground-glass mineralization with diagnostic CT attenuation strictly 70 to 130 HU. Expansile intramedullary lesion, endosteal scalloping with budding appearance on MRI, and coxa vara shepherd's crook bowing deformity (Fibrous Dysplasia).",
+      "Fluid-Filled / Cystic (Water Density)": "True fluid attenuation. Differentiates simple cysts or chronic liquefied hepatic hematomas (0-20 HU) from solid/fibrous ground-glass masses.",
+      "Fat Density / Trapped Fat": "Preserved fat density. Trapped fat suggests benign hemangioma, Paget's, or lipid-rich adrenal adenoma.",
+      "Coarse Trabeculation": "Disorganized, thickened trabecular remodeling typical of Paget's.",
+      "Corduroy / Polka-Dot Trabeculation": "Thickened vertical trabeculae in vertebrae, pathognomonic for spinal hemangioma.",
+      "Honeycomb / Swiss Cheese Trabeculation": "Multiple rings and arcs of bone mixed with coarse trabeculae in flat or tubular bones.",
+      "Chondroid Ring-and-Arc Calcification": "Stippled, punctate, flocculent, or classic ring-and-arc matrix calcifications, pathognomonic for enchondroma.",
+      "Microcalcifications (Psammomatous)": "Amorphous granular psammoma bodies, characteristic of papillary thyroid cancer.",
+      "Coarse Central Calcification": "Coarse stromal calcifications, seen in medullary thyroid cancer, neuroendocrine tumors, or hemangiomas.",
+      "Central Necrosis (Low Density)": "Pathognomonic central hypo-attenuating necrotic core (100% PPV for lymph node metastases; T2 hyperintense, unenhancing center with peripheral ring enhancement).",
+      "Gas-Generating / Emphysematous": "Gas pockets in tissues or bladder wall, pathognomonic for emphysematous infections.",
+      "Uniformly Homogeneous": "Solid uniform density without internal variance, characteristic of benign enostosis.",
+      "Reticular / Septal Thickening": "Linear or network-like interstitial thickening on lung CT, characteristic of pulmonary fibrosis.",
+      "Traction Bronchiectasis": "Irregular dilatation of bronchi within areas of pulmonary fibrosis due to mechanical traction by surrounding fibrous tissue.",
+      "Honeycombing": "Clustered cystic air spaces in the lung periphery, diagnostic of advanced pulmonary fibrosis."
+    }
+  },
+  {
+    "full": "Outer transition zone and margins of the lesion, reflecting local growth rate and aggressiveness.",
+    "allowed_answer": [
+      "Reactive Sclerotic Rim (Sharp Outer, Fuzzy Inner)",
+      "Serpiginous (Snake-like) Margin",
+      "Ill-Defined / Permeative / Moth-Eaten Margins",
+      "Sharp / Well-Defined (Non-Sclerotic)",
+      "Spiculated / Feathered / Thorny (Blending)",
+      "Smooth / Well-Defined Margins",
+      "Incomplete or Absent Halo",
+      "Complete Halo / Fibrous Capsule",
+      "Rind Sign (Thick Sclerotic Reactive Rim)",
+      "Overhanging Edges (Apple Core)",
+      "Irregular Extramural Fat Stranding"
+    ],
+    "short q": "Border and Margin",
+    "category": [
+      "Morphology"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "",
+    "comments": {
+      "Reactive Sclerotic Rim (Sharp Outer, Fuzzy Inner)": "Narrow zone of transition with peripheral sclerosis. Seen in slowly growing or treated bone metastases, osteoid osteomas, or cysts. Therapy-induced sclerotic responses (ADT, chemotherapy, radiation, or bisphosphonates) develop a reactive sclerotic rim progressing centripetally, leading to dense eburnation.",
+      "Serpiginous (Snake-like) Margin": "Wavy, calcified boundary wrapping around fat, pathognomonic for bone infarction.",
+      "Ill-Defined / Permeative / Moth-Eaten Margins": "Rapidly growing bone-destroying processes, highly aggressive.",
+      "Sharp / Well-Defined (Non-Sclerotic)": "Punched-out margin without reactive sclerosis, characteristic of myeloma.",
+      "Spiculated / Feathered / Thorny (Blending)": "Radiating thorny spicules blending into adjacent trabeculae, pathognomonic for bone islands (enostoses). Represents outer margin integrating with host bone without destruction.",
+      "Smooth / Well-Defined Margins": "Slowly growing benign nodules, normal anatomical variants, or encapsulated tumors.",
+      "Incomplete or Absent Halo": "Thyroid nodule with incomplete halo indicates infiltration, raising malignancy suspicion.",
+      "Complete Halo / Fibrous Capsule": "Well-defined fibrous capsule around a thyroid nodule, favoring benignity.",
+      "Rind Sign (Thick Sclerotic Reactive Rim)": "Very thick, smooth sclerotic border in intertrochanteric femur, classic for fibrous dysplasia.",
+      "Overhanging Edges (Apple Core)": "Abrupt shelf-like luminal narrowing edges, classic for colonic adenocarcinoma.",
+      "Irregular Extramural Fat Stranding": "Stranding in perivesical or pericolic fat indicates stage T3b/T4 local spread (or post-biopsy edema)."
+    }
+  },
+  {
+    "full": "Morphological shape in three dimensions (3D planes), crucial for distinguishing standard lymph node layouts, ganglia, and bone remodeling.",
+    "allowed_answer": [
+      "Spherical",
+      "Oval / Bean-Shaped",
+      "Round",
+      "Teardrop / Comma-Shaped",
+      "Elongated (Spanning >3 Vertebrae / Parallel to Bone)",
+      "Wedge-Shaped",
+      "Annular / Constricting ('Apple Core')",
+      "Dumbbell Shaped",
+      "Broad-Based / Dural-Based",
+      "Tuberous / Lobulated",
+      "Expansile / Ballooning / Blowout"
+    ],
+    "short q": "Lesion Shape",
+    "category": [
+      "Morphology"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "",
+    "comments": {
+      "Spherical": "Uniform dimensions in all planes. Can represent primary tumor or focal bone metastasis.",
+      "Oval / Bean-Shaped": "Normal lymph node shape with a longitudinal-to-short axis ratio (L/T) >= 2. Differentiates normal nodes from spherical metastatic infiltration.",
+      "Round": "Metastatic lymph nodes lose their elongated shape and round out due to radial tumor growth (L/T ratio < 2), a highly suspicious geometric sign of nodal malignancy.",
+      "Teardrop / Comma-Shaped": "Maintained in 3D, molds to bone/fascia. Pathognomonic for sympathetic ganglia (resolves oblique slice illusion).",
+      "Elongated (Spanning >3 Vertebrae / Parallel to Bone)": "Elongated along the long axis of bone (bone island) or spanning vertically in spinal muscle (ganglion).",
+      "Wedge-Shaped": "Linear, wedge-shaped, or diffuse pattern in prostate (prostatitis) or lung (lobar infection).",
+      "Annular / Constricting ('Apple Core')": "Constricting collar around lumen with overhanging margins, classic for colon cancer.",
+      "Dumbbell Shaped": "Mass splayed through neural foramina causing smooth pressure erosion, typical of schwannoma.",
+      "Broad-Based / Dural-Based": "Dural-based extra-axial mass, classic meningioma location (second primary trap).",
+      "Tuberous / Lobulated": "Bulky tuberous contours, typical of primary thyroid lymphoma.",
+      "Expansile / Ballooning / Blowout": "Causes cortical expansion and thinning. ABC has ballooning blowout; FD has smooth expansion."
+    }
+  },
+  {
+    "full": "The spatial alignment of the lesion relative to anatomical landmarks (such as the long axis of bone, joints, or vessels).",
+    "allowed_answer": [
+      "Parallel to the Long Axis of Bone",
+      "Horizontal",
+      "Vertical",
+      "Radial / Sunburst",
+      "Centripetal Enhancement",
+      "Perilymphatic Distribution",
+      "Symmetric / Bilateral"
+    ],
+    "short q": "Lesion Orientation",
+    "category": [
+      "Morphology"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "",
+    "comments": {
+      "Parallel to the Long Axis of Bone": "Classic alignment for benign enostosis; metastases are typically spherical and do not align.",
+      "Horizontal": "Oriented transversely across bone cortex, typical of traumatic or stress fractures (e.g. atypical femoral fracture).",
+      "Vertical": "Vertical trabecular reinforcement, typical of corduroy/polka-dot hemangiomas.",
+      "Radial / Sunburst": "Spicules radiating outwards, typical of Kaposiform infiltrations or osteosarcoma.",
+      "Centripetal Enhancement": "Contrast enhancement filling from periphery inwards over time, pathognomonic for hemangiomas.",
+      "Perilymphatic Distribution": "Nodules aligned along bronchovascular bundles and pleural surfaces, classic for sarcoidosis."
+    }
+  },
+  {
+    "full": "Multi-lesion spatial distributions or alignment patterns across the scan volume, highly indicative of etiology.",
+    "allowed_answer": [
+      "Linear Alignment Across Ribs ('Pearls on a string')",
+      "Bilateral and Symmetric Distribution",
+      "Asymmetric / Unilateral Focus",
+      "Solitary / Isolated Focus",
+      "Multifocal / Polyostotic (>5 foci)",
+      "Monostotic (Single Bone)",
+      "Scattered / Spotted Sclerosis"
+    ],
+    "short q": "Macroscopic Pattern",
+    "category": [
+      "Morphology"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "",
+    "comments": {
+      "Linear Alignment Across Ribs ('Pearls on a string')": "Uptake points aligned in a row along adjacent ribs, pathognomonic for trauma/fractures.",
+      "Bilateral and Symmetric Distribution": "Physiologic ganglia, symmetric BPH lobes, symmetric joint arthritis, or bilateral hilar nodes.",
+      "Asymmetric / Unilateral Focus": "Unilateral or random distribution, highly favors metastatic seeding.",
+      "Solitary / Isolated Focus": "Single lesion. Clinically evaluated against specific morphological and quantitative criteria.",
+      "Multifocal / Polyostotic (>5 foci)": "Multiple bones/nodes involved, heavily diagnostic of advanced metastatic disease vs spotted bone dysplasia.",
+      "Monostotic (Single Bone)": "Involvement of only one bone. Common in early Paget's (25% of cases) or monostotic fibrous dysplasia.",
+      "Scattered / Spotted Sclerosis": "Dozens of small, symmetric, uniform bone islands clustered in epiphyses, pathognomonic for osteopoikilosis."
+    }
+  },
+  {
+    "full": "The impact of the lesion on the adjacent spongy marrow cavity and fat signals.",
+    "allowed_answer": [
+      "Infiltrative (Replaces Marrow Fat)",
+      "Non-Infiltrative (Spares Marrow Fat)"
+    ],
+    "short q": "Relation to Bone Marrow (Surrounding Changes Part A)",
+    "category": [
+      "Morphology"
+    ],
+    "meta_or_prostate": "bone_meta",
+    "default_answer": "",
+    "comments": {
+      "Infiltrative (Replaces Marrow Fat)": "Obliterates trabeculae and replaces lipid-rich fatty marrow (CT density >40 HU, versus osteoporosis <20 HU). MRI shows T1 hypointensity, STIR hyperintensity, restricted diffusion (dark ADC), and post-contrast enhancement. Highly specific for metastasis/myeloma.",
+      "Non-Infiltrative (Spares Marrow Fat)": "Intact marrow fat. Differentiates benign mimics (like enostosis or severe osteoporosis where fat density is preserved <20 HU) from infiltrative malignant processes."
+    }
+  },
+  {
+    "full": "Outer cortical bone reactions, indicative of slow remodeling vs aggressive breakthrough.",
+    "allowed_answer": [
+      "None",
+      "Diffuse Cortical Expansion (Pagetoid)",
+      "Thick / Solid Reaction (Callus)",
+      "Aggressive / Sunburst / Spiculated",
+      "Codman Triangle",
+      "Local Cortical Hypertrophy / Pressure Erosion",
+      "Focal/Localized Periosteal Reaction",
+      "Multilamellated / Onion-Skin"
+    ],
+    "short q": "Periosteal Reaction (Surrounding Changes Part B)",
+    "category": [
+      "Morphology"
+    ],
+    "meta_or_prostate": "bone_meta",
+    "default_answer": "",
+    "comments": {
+      "None": "No periosteal reaction. Characteristic of stable benign entities, simple bone cysts, enchondromas, or early intracancellous metastases.",
+      "Diffuse Cortical Expansion (Pagetoid)": "Widening of the overall bone caliber with cortical splitting/thickening (Paget's). Bowing, insufficiency fractures (Looser zones), preserved T1 fatty marrow signal on MRI (rules out metastasis), and skull mouse-face / calvarium Yarmulke scintigraphy signs.",
+      "Thick / Solid Reaction (Callus)": "Broad, smooth cortical new bone formation, typical of healing fractures, chronic stress reaction, or chronic infections.",
+      "Aggressive / Sunburst / Spiculated": "Fast-growing spicules of bone forming perpendicular to the cortex, typical of primary osteosarcoma or acute aggressive periostitis.",
+      "Codman Triangle": "Triangular elevation of periosteum away from cortex, indicating aggressive elevation (sarcoma or acute osteomyelitis).",
+      "Local Cortical Hypertrophy / Pressure Erosion": "Localized cortical reactive thickening adjacent to a soft-tissue mass, typical of benign vascular or neurogenic lesions.",
+      "Focal/Localized Periosteal Reaction": "Focal periosteal reaction adjacent to a bone lesion, indicative of metastatic osseous breakthrough.",
+      "Multilamellated / Onion-Skin": "Multilamellated concentric layers of new bone, indicating intermediate aggressiveness (Ewing sarcoma, LCH, or acute osteomyelitis)."
+    }
+  },
+  {
+    "full": "Pathognomonic radiological signs in adjacent soft tissues or bone cortex.",
+    "allowed_answer": [
+      "multiselect",
+      "Cortical Thinning / Endosteal Scalloping",
+      "Cortical Breakthrough / Destruction",
+      "Soft-Tissue Edema / Swelling",
+      "Associated Soft-Tissue Mass",
+      "Hematoma-like morphology (Mimic)",
+      "Fascicular Sign (Schwannoma MR signature)",
+      "Beveled Edge Sign / Sequestrum (Calvarium LCH)",
+      "Dripping Candle Wax (Melorheostosis)",
+      "Dense Linear Striations (Osteopathia Striata)",
+      "Lipohaemarthrosis (Fat-Fluid Level)",
+      "Vacuum Cleft Sign (Gas in vertebral body)",
+      "Puzzle Sign (Cortical fragment alignment)",
+      "Fallen Fragment Sign",
+      "Dural Tail Sign (Tapering enhancement)",
+      "Local Tissue Infiltration (Trachea/Esophagus/Carotid)",
+      "Perivesical Fat Stranding / Haziness",
+      "Soap-Bubble Appearance (Pseudotrabeculation)",
+      "Blowout Appearance (Highly Expansile)",
+      "Nodular Septal Enhancement (Malignant septa)",
+      "Vascularized Nidus with CT/MRI Groove",
+      "Blade of Grass / Flame-Shaped Margin (Osteolytic Paget)",
+      "Yarmulke Sign (Skull Paget)",
+      "Abe Lincoln / Black Beard Sign (Mandible Paget)",
+      "Split-Fat Sign",
+      "Fluid-Fluid Level",
+      "Adrenal Washout",
+      "Seminal Vesicle Invasion (SVI)",
+      "Direct Bladder Detrusor Infiltration",
+      "Direct Rectal Muscularis Infiltration",
+      "Vacuum Cleft Sign",
+      "Puzzle Sign",
+      "Dural Tail Sign",
+      "Architectural Distortion",
+      "Shepherd's Crook Deformity (Proximal Femur FD)",
+      "Picture Frame Vertebra (Paget's)",
+      "Eggshell Calcification (Hilar Nodes)",
+      "Bamboo Spine (Ankylosing Spondylitis)",
+      "Popcorn Calcification (Chondroid)"
+    ],
+    "short q": "Other Structural & Soft Tissue Changes (Surrounding Changes Part C)",
+    "category": [
+      "Morphology"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "",
+    "comments": {
+      "Cortical Thinning / Endosteal Scalloping": "Gradual erosion of inner cortex by intramedullary pressure, typical of expansile benign cysts, fibrous dysplasia, or enchondromas.",
+      "Cortical Breakthrough / Destruction": "Erosion through outer cortex, highly suggestive of aggressive malignant infiltration, osteosarcoma, or active osteomyelitis.",
+      "Soft-Tissue Edema / Swelling": "Localized fluid reaction. For skeletal metastases, this represents the pathognomonic MRI 'halo sign' of hyperintense bone marrow edema or a fluid-filled gap (due to trabecular destruction) surrounding the lesion. Absent in enostosis/Paget's.",
+      "Associated Soft-Tissue Mass": "Extension of bone tumor into a surrounding soft-tissue component, classic for aggressive metastases or primary sarcomas.",
+      "Hematoma-like morphology (Mimic)": "Mass mimicking a hematoma on CT. If SUVpeak exceeds the Parotid gland, it is highly suspicious for a hemorrhagic or necrotic neoplasm.",
+      "Fascicular Sign (Schwannoma MR signature)": "On MRI, multiple small, round, intermediate-signal structures within a mass, providing a pathognomonic Schwannoma signature.",
+      "Beveled Edge Sign / Sequestrum (Calvarium LCH)": "Pathognomonic CT/skull X-ray signs indicating Eosinophilic Granuloma / Langerhans Cell Histiocytosis.",
+      "Dripping Candle Wax (Melorheostosis)": "Flowing cortical hyperostosis along the cortex resembling melting wax, pathognomonic for Melorheostosis.",
+      "Dense Linear Striations (Osteopathia Striata)": "Dense linear striations parallel to the long axis of the bone, pathognomonic for Osteopathia Striata.",
+      "Lipohaemarthrosis (Fat-Fluid Level)": "Marrow fat and blood pooling in joint space (pathognomonic for intra-articular fracture) or gravity-dependent fluid-fluid level (hematocrit effect) due to clotted blood settling in liquefying hepatic hematomas.",
+      "Vacuum Cleft Sign (Gas in vertebral body)": "Linear gas collection within a collapsed vertebra, virtually excludes metastatic disease (pathognomonic for benign osteoporotic fracture).",
+      "Puzzle Sign (Cortical fragment alignment)": "Fracture fragments fit together perfectly like puzzle pieces, indicating no bone resorption or tumor mass.",
+      "Fallen Fragment Sign": "Cortical fragment settles to the bottom of a fluid-filled cavity, pathognomonic for simple bone cyst.",
+      "Dural Tail Sign (Tapering enhancement)": "Tapering, enhancing dural tail adjacent to a broad dural mass, highly specific for meningioma.",
+      "Local Tissue Infiltration (Trachea/Esophagus/Carotid)": "Infiltration of anterior neck structures, typical of aggressive thyroid cancers.",
+      "Perivesical Fat Stranding / Haziness": "Fat stranding adjacent to bladder wall. Indicates T3b extravesical spread or post-biopsy edema.",
+      "Soap-Bubble Appearance (Pseudotrabeculation)": "Concentric internal bony ridges in thinned/expanded cortex, typical of GCT, ABC, NOF, desmoplastic fibroma, or plasmacytoma.",
+      "Blowout Appearance (Highly Expansile)": "Explosive osteolytic expansion, highly suggestive of hypervascular metastasis (renal or thyroid) or Brown tumor of hyperparathyroidism.",
+      "Nodular Septal Enhancement (Malignant septa)": "Solid nodular enhancement along internal septa, differentiating telangiectatic osteosarcoma from simple/aneurysmal bone cysts.",
+      "Vascularized Nidus with CT/MRI Groove": "Central highly vascularized nidus with a feeding vessel groove on CT, pathognomonic for osteoid osteoma.",
+      "Blade of Grass / Flame-Shaped Margin (Osteolytic Paget)": "A sharply demarcated wedge-shaped resorption zone, pathognomonic for the early active osteolytic phase of Paget's disease.",
+      "Yarmulke Sign (Skull Paget)": "Diffuse skull vault expansion with calvarial thickening, mimicking a skullcap, classic for Paget's disease.",
+      "Abe Lincoln / Black Beard Sign (Mandible Paget)": "Intense symmetric uptake throughout the mandible, pathognomonic for mandibular Paget's disease.",
+      "Architectural Distortion": "Disruption of the normal alignment or spacing of lung parenchyma or surrounding structures, seen in chronic pulmonary processes or severe fibrosis."
+    }
+  },
+  {
+    "full": "Standardized Uptake Value (SUV) metrics and comparisons to reference organs, acting as quantitative gates in the decision tree.",
+    "allowed_answer": [
+      "multiselect",
+      "SUVpeak > Blood Pool SUVmean (PSMA Avid)",
+      "SUVpeak > Spleen SUVmean",
+      "SUVmax > 12 (Definite Primary)",
+      "TZ Uptake > 2x Background Transition Zone",
+      "18F-PSMA-1007 Bone Lesion with SUV < 10 (FPR 51.4%)",
+      "Unspecified Bone Uptake (UBU)",
+      "SUVpeak > Liver SUVmean (PROMISE ≥ 2)",
+      "SUVpeak > Parotid SUVmean (PROMISE = 3)",
+      "SUVpeak < Blood Pool SUVmean (PSMA Cold)",
+      "Lesion-to-Background Ratio (LBR) > 2.5"
+    ],
+    "short q": "SUV Quantitative Metrics & References",
+    "category": [
+      "Quantitative"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "",
+    "comments": {
+      "SUVpeak > Blood Pool SUVmean (PSMA Avid)": "Basic gate for PSMA avidity. If true, lesion is considered PSMA-avid. If false, lesion is PSMA-cold.",
+      "SUVpeak > Spleen SUVmean": "Used to confirm bone metastasis in cases of equivocal CT morphology or multifocal lesions without CT correlates.",
+      "SUVmax > 12 (Definite Primary)": "Primary prostate peripheral zone focal uptake gate. If true, indicates definite clinically significant cancer (PRIMARY 5).",
+      "TZ Uptake > 2x Background Transition Zone": "Primary prostate transition zone focal uptake gate. Differentiates malignant TZ tumors (PRIMARY 3) from BPH nodules (PRIMARY 2).",
+      "18F-PSMA-1007 Bone Lesion with SUV < 10 (FPR 51.4%)": "Specific check for 18F-PSMA-1007 tracer. Isolated bone lesions with SUV < 10 have an intrinsic 51.4% false positive rate; requires conservative scoring.",
+      "Unspecified Bone Uptake (UBU)": "Low-grade bone uptake without clear CT correlate or clinical context correlation. Biopsy should be avoided unless other metastatic indicators are present."
+    }
+  },
+  {
+    "full": "Patient demographic data, treatment status, and tumor biology history which adjust diagnostic probability.",
+    "allowed_answer": [
+      "multiselect",
+      "Patient Age < 40 Years Old (Out of Scope)",
+      "Patient Age >= 40 Years Old",
+      "Gleason Score > 6",
+      "Serum PSA > 20 ng/mL",
+      "Recent Treatment (<2mo post-radiation/surgery, or 2-4wk post-ADT)",
+      "Heavily Pre-treated (Advanced ADT / Chemo)",
+      "Original Primary Tumor was PSMA-Cold (~10%)",
+      "Previously Treated Lesion (Irradiated / ADT)",
+      "Widespread Disease (>5 malignant findings)",
+      "Post-Splenectomy Status",
+      "Recent COVID-19 / Viral Pneumonia (Lung uptake trap)",
+      "Short PSA Doubling Time (PSADT < 6 months)",
+      "History of Hyperparathyroidism (Brown Tumor risk)",
+      "NEPC Phenotype (AR-negative / FDG-active / AR0Glyc1)",
+      "High Genomic Risk (Decipher/Oncotype/Prolaris)",
+      "Has >5 Other PSMA-Avid Metastases",
+      "High Tumor Burden (>=5 Metastases)",
+      "Low Tumor Burden (<5 Metastases)",
+      "PSA Persistence (>0.1 ng/mL at 6wk post-RP)",
+      "Post-BCG Treatment History",
+      "Prior Pelvic Radiation Therapy",
+      "History of Bisphosphonate Use",
+      "History of Corticosteroid Use",
+      "Sickle Cell Disease"
+    ],
+    "short q": "Clinical Context & Staging Variables",
+    "category": [
+      "Clinical Context"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "",
+    "comments": {
+      "Patient Age < 40 Years Old (Out of Scope)": "Prostate cancer is extremely rare. Sclerotic bone lesions in young patients are typically other primaries or congenital conditions.",
+      "Patient Age >= 40 Years Old": "Standard target demographic. Bone lesions are suspicious for metastasis, myeloma, or Paget's.",
+      "Gleason Score 6 (ISUP 1)": "Grade Group 1: Clinically insignificant or low-grade prostate cancer.",
+      "Gleason Score 7 (ISUP 2/3)": "Grade Group 2 or 3: Intermediate-grade prostate cancer.",
+      "Gleason Score 8 (ISUP 4)": "Grade Group 4: High-grade prostate cancer with significant metastatic risk.",
+      "Gleason Score 9-10 (ISUP 5)": "Grade Group 5: Very high-grade prostate cancer with extremely high risk of aggressive metastasis.",
+      "Serum PSA > 20 ng/mL": "Elevated PSA, strongly correlated with active lymphatic and skeletal metastasis.",
+      "Recent Treatment (<2mo post-radiation/surgery, or 2-4wk post-ADT)": "Causes inflammatory flare, which can mimic active progression. Requires clinical correlation.",
+      "Heavily Pre-treated (Advanced ADT / Chemo)": "Suspect neuroendocrine prostate cancer (NEPC) conversion in cold lesions (receptors mutated/lost; FDG-PET recommended).",
+      "Original Primary Tumor was PSMA-Cold (~10%)": "If true, cold lesions are highly concordant for true prostate cancer metastases despite lack of avidity.",
+      "Previously Treated Lesion (Irradiated / ADT)": "Lesion was previously a definitive metastasis but has been treated. Maintains a PSMA-RADS 5T score regardless of current uptake.",
+      "Widespread Disease (>5 malignant findings)": "Patient has numerous distinct malignant findings, significantly increasing the pre-test probability that any equivocal lesion is malignant.",
+      "Post-Splenectomy Status": "Patient had spleen removed. Routes quantitative spleen reference checks to alternative organs to prevent referencing errors.",
+      "Recent COVID-19 / Viral Pneumonia (Lung uptake trap)": "Causes transient, non-specific ground-glass lung uptake on PSMA-PET mimicking pulmonary spread.",
+      "Short PSA Doubling Time (PSADT < 6 months)": "Aggressive PSA doubling kinetics, strongly increasing the likelihood of true active metastatic disease.",
+      "History of Hyperparathyroidism (Brown Tumor risk)": "Elevates risk of hypervascular lytic en-osteolytic lesions matching Brown Tumors.",
+      "NEPC Phenotype (AR-negative / FDG-active / AR0Glyc1)": "Loss of Androgen Receptor and high glycolytic activity in mCRPC setting. Explains cold PSMA-RADS 3D lesions.",
+      "High Genomic Risk (Decipher/Oncotype/Prolaris)": "High genetic risk of cell-cycle progression or adverse pathology, increasing suspicion for primary or metastatic PCa.",
+      "Has >5 Other PSMA-Avid Metastases": "Indicates tumor heterogeneity. An isolated cold lesion is likely a metastasis clone that lost PSMA expression.",
+      "High Tumor Burden (>=5 Metastases)": "Presence of 5 or more metastases across the scan, representing high general risk and systemic progression.",
+      "Low Tumor Burden (<5 Metastases)": "Less than 5 metastases, indicating oligometastatic or early disease where false-positive rules in atypical sites apply."
+    }
+  },
+  {
+    "full": "Maximum SUV value in this lesion",
+    "allowed_answer": [],
+    "short q": "SUV max",
+    "category": [
+      "Quantitative"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "0.0"
+  },
+  {
+    "full": "Automatically calculated PRIMARY score (v1.0) based on zonal location and SUVmax.",
+    "allowed_answer": [],
+    "short q": "PRIMARY score pattern?",
+    "category": [
+      "Prostate Analysis",
+      "PROMISE V2"
+    ],
+    "meta_or_prostate": "prostate",
+    "default_answer": "Pending...",
+    "comments": {
+      "PRIMARY 1 (No Pattern)": "Very Low Risk. No dominant pattern, or overridden by physiological/edge artifacts.",
+      "PRIMARY 2 (Diffuse TZ / Symmetric CZ)": "Low Risk. Diffuse Transitional Zone or Symmetric Central Zone uptake.",
+      "PRIMARY 3 (Focal TZ)": "Intermediate Risk. Focal Transition Zone uptake > 2x Background TZ.",
+      "PRIMARY 4 (Focal PZ)": "High Risk. Focal Peripheral Zone uptake.",
+      "PRIMARY 5 (SUVmax >= 12)": "Very High Risk. Intense focal uptake with SUVmax > 12."
+    }
+  },
+  {
+    "full": "Automatically calculated PSMA-RADS v2.0 score based on location, SUV, and morphology.",
+    "allowed_answer": [],
+    "short q": "PSMA-RADS 2.0",
+    "category": [
+      "Final Assessment"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "Pending...",
+    "comments": {
+      "PSMA-RADS 1": "Definitively Benign. Pathognomonic mimics (e.g., Ganglion, Hemangioma, Bone Island, Osteoarthritis) or physiological clearance.",
+      "PSMA-RADS 2": "Likely Benign. Equivocal/Low uptake in an Atypical anatomical site, or sympathetic ganglion.",
+      "PSMA-RADS 3A": "Indeterminate soft tissue/node. Equivocal/Low uptake in a typical soft tissue or nodal location.",
+      "PSMA-RADS 3B": "Indeterminate bone. Equivocal/Low uptake in a typical bone location.",
+      "PSMA-RADS 3C": "Intense atypical. Intense uptake in an Atypical site; requires clinical workup to rule out a 2nd malignancy.",
+      "PSMA-RADS 3D": "Suspicious unavid lesion. No significant uptake but structural mass or cortical gap is highly suspicious.",
+      "PSMA-RADS 4": "Highly Likely PCa. Intense uptake in a Typical site but lacking definitive CT structural correlates.",
+      "PSMA-RADS 5": "Almost Certainly PCa. Intense uptake in a Typical site with definitive CT correlates (enlarged node, sclerotic bone).",
+      "PSMA-RADS 5T": "Treated Metastasis. Prior therapy (ADT, chemo, radiation, or bisphosphonates) produces a centripetal sclerotic response. Successfully healed/inactive lesions present as cold PSMA bone scars mimicking enostoses, whereas active/recurrent lesions exhibit high uptake."
+    }
+  },
+  {
+    "full": "Inferred alternative diagnosis or benign mimic based on morphological and clinical criteria.",
+    "allowed_answer": [
+      "None / Malignant Suspected",
+      "Technical Artifact",
+      "Physiological uptake",
+      "Small blood vessel / tubular structure",
+      "Bone Scar / Hardware Graft",
+      "Bone Island / Enostosis",
+      "Osteopoikilosis / Dysplasia",
+      "Bone Infarction / Osteonecrosis",
+      "Trauma / Stress Fracture",
+      "Benign Osteoporotic Collapse",
+      "Fibrous Dysplasia",
+      "Liposclerosing Myxofibrous Tumor (LSMFT)",
+      "Degenerative Osteoarthritis",
+      "Enchondroma",
+      "Paget's Disease",
+      "Osseous Hemangioma",
+      "Osteoma",
+      "Severe Osteoporosis (RID39300)",
+      "Multiple Myeloma",
+      "Chronic Osteomyelitis",
+      "Brodie Abscess",
+      "Giant Cell Tumor (GCT)",
+      "Telangiectatic Osteosarcoma",
+      "Osteosarcoma",
+      "Desmoplastic Fibroma",
+      "Blowout Metastasis (RCC / Thyroid)",
+      "Low-Grade Central Osteosarcoma",
+      "Trigeminal Ganglion",
+      "Stellate Ganglion",
+      "Coeliac Ganglion",
+      "Hypogastric Ganglion",
+      "Sacral Ganglion",
+      "Sympathetic Ganglion",
+      "Testicular Distant Nodal Route",
+      "Sarcoidosis",
+      "Lung Fibrosis",
+      "Reactive Lymph Node",
+      "Suspicious Lymph Node",
+      "Benign Adrenal Adenoma",
+      "Adrenal Metastasis / Malignancy",
+      "Pancreatic Neuroendocrine Tumor (PanNET)",
+      "Pancreatic Ductal Adenocarcinoma (PDAC)",
+      "Accessory Spleen / Splenosis",
+      "Schwannoma / Nerve Sheath Tumor",
+      "Vestibular Schwannoma",
+      "Glomus Tumor (Paraganglioma)",
+      "Meningioma",
+      "Liver Hemangioma",
+      "Liver Hematoma",
+      "CZ Mickey Mouse Base",
+      "Symmetric BPH",
+      "Prostatitis",
+      "Extraprostatic extension (T3b/T4)",
+      "PZ Prostate Cancer",
+      "TZ Prostate Cancer",
+      "PSMA-Cold Malignancy Suspected",
+      "Aneurysmal Bone Cyst (ABC)",
+      "Simple Bone Cyst (SBC)",
+      "Radiation-Induced Sarcoma",
+      "Brown Tumor (Hyperparathyroidism)",
+      "Modic Type 1 Endplate Changes",
+      "Diffuse Bone Marrow Activation (Anemia)",
+      "Inflammatory Spondylitis (AS)",
+      "Osteoid Osteoma",
+      "Desmoid Tumor (Aggressive Fibromatosis)",
+      "Nodular Fasciitis",
+      "Lipoma / Angiolipoma / Hibernoma",
+      "Intramuscular Myxoma",
+      "Gynecomastia / PASH",
+      "Elastofibroma Dorsi",
+      "Thyroid / Parathyroid Adenoma",
+      "Thymoma / Thymic Hyperplasia",
+      "Cerebral Infarction (Stroke)",
+      "Synchronous Colorectal Cancer",
+      "Primary Lung Cancer",
+      "Malignant Melanoma Metastasis",
+      "Lymphoma (DLBCL / FL)",
+      "Tuberculosis (TB)",
+      "Diverticulitis",
+      "Cholelithiasis (Gallbladder Stones)",
+      "Dermatofibroma / Acrochordon",
+      "Active Vascular Calcification",
+      "Esophagitis / Swallowed Saliva",
+      "Bronchogenic Cyst",
+      "Pheochromocytoma"
+    ],
+    "short q": "Alternative Hypothesis (False Positive)",
+    "category": [
+      "Final Assessment"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "None / Malignant Suspected"
+  },
+  {
+    "full": "Degree of diagnostic certainty (1 = very low, 10 = very high)",
+    "allowed_answer": [
+      "slider",
+      0,
+      10
+    ],
+    "short q": "Certainty",
+    "category": [
+      "Final Assessment"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "10"
+  },
+  {
+    "full": "Additional clinical comments or observations.",
+    "allowed_answer": [],
+    "short q": "Comment",
+    "category": [
+      "Reporting"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": ""
+  }
+]

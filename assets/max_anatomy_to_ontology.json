@@ -1,0 +1,2359 @@
+{
+  "heart": {
+    "detailed": "heart (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "colon": {
+    "detailed": "colon (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "liver": {
+    "detailed": "liver (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Liver Lobe"
+  },
+  "kidney_left": {
+    "detailed": "kidney (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "kidney_right": {
+    "detailed": "kidney (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "adrenal_gland_left": {
+    "detailed": "adrenal gland (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Adrenal Cortex"
+  },
+  "adrenal_gland_right": {
+    "detailed": "adrenal gland (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Adrenal Cortex"
+  },
+  "aorta": {
+    "detailed": "aorta (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "brachiocephalic_trunk": {
+    "detailed": "brachiocephalic trunk (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "brachiocephalic_vein_left": {
+    "detailed": "brachiocephalic vein (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "brachiocephalic_vein_right": {
+    "detailed": "brachiocephalic vein (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "brain": {
+    "detailed": "brain (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Brain Extra-Axial / Dural-Based"
+  },
+  "common_carotid_artery_left": {
+    "detailed": "common carotid artery plus branches (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "common_carotid_artery_right": {
+    "detailed": "common carotid artery plus branches (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "duodenum": {
+    "detailed": "duodenum (UBERON)",
+    "generalized": "small intestine (UBERON)",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "esophagus": {
+    "detailed": "esophagus (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "gallbladder": {
+    "detailed": "gallbladder (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "iliac_artery_left": {
+    "detailed": "iliac artery (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "iliac_artery_right": {
+    "detailed": "iliac artery (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "iliac_vena_left": {
+    "detailed": "iliac vein (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "iliac_vena_right": {
+    "detailed": "iliac vein (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "inferior_vena_cava": {
+    "detailed": "inferior vena cava (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "pancreas": {
+    "detailed": "pancreas (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Pancreatic Tail / Left Upper Quadrant (LUQ)"
+  },
+  "prostate": {
+    "detailed": "prostate gland (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Prostate Peripheral Zone (PZ)"
+  },
+  "small_bowel": {
+    "detailed": "small intestine (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "spinal_cord": {
+    "detailed": "spinal cord (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "spleen": {
+    "detailed": "spleen (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "stomach": {
+    "detailed": "stomach (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "subclavian_artery_left": {
+    "detailed": "subclavian artery (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "subclavian_artery_right": {
+    "detailed": "subclavian artery (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "superior_vena_cava": {
+    "detailed": "superior vena cava (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "thyroid_gland": {
+    "detailed": "thyroid gland (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Thyroid Upper Two-Thirds"
+  },
+  "trachea": {
+    "detailed": "trachea (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "urinary_bladder": {
+    "detailed": "urinary bladder (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Urinary Bladder",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Bladder Wall / Detrusor Muscle"
+  },
+  "atrial_appendage_left": {
+    "detailed": "heart (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "rectum": {
+    "detailed": "rectum (UBERON)",
+    "generalized": "colon (UBERON)",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Rectal Ampulla (Above Levator Ani)"
+  },
+  "kidney_cyst_left": {
+    "detailed": "kidney (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "kidney_cyst_right": {
+    "detailed": "kidney (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "lung_upper_lobe_left": {
+    "detailed": "upper lobe of left lung (UBERON)",
+    "generalized": "lung (UBERON)",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Unilateral Left Lobe"
+  },
+  "lung_lower_lobe_left": {
+    "detailed": "lower lobe of left lung (UBERON)",
+    "generalized": "lung (UBERON)",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Unilateral Left Lobe"
+  },
+  "lung_upper_lobe_right": {
+    "detailed": "upper lobe of right lung (UBERON)",
+    "generalized": "lung (UBERON)",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Unilateral Right Lobe"
+  },
+  "lung_middle_lobe_right": {
+    "detailed": "middle lobe of right lung (UBERON)",
+    "generalized": "lung (UBERON)",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Unilateral Right Lobe"
+  },
+  "lung_lower_lobe_right": {
+    "detailed": "lower lobe of right lung (UBERON)",
+    "generalized": "lung (UBERON)",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Unilateral Right Lobe"
+  },
+  "pulmonary_artery": {
+    "detailed": "pulmonary artery (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "pulmonary_vein": {
+    "detailed": "pulmonary vein (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "celiac_trunk": {
+    "detailed": "celiac trunk (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "portal_vein_and_splenic_vein": {
+    "detailed": "portal vein (UBERON)",
+    "generalized": "splenic vein (UBERON)",
+    "side": "",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "clavicula_left": {
+    "detailed": "clavicle bone (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "clavicula_right": {
+    "detailed": "clavicle bone (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "costal_cartilages": {
+    "detailed": "costal cartilage (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "femur_left": {
+    "detailed": "femur (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Appendicular Skeleton (Limbs, Scapulae, Hands, Feet)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "femur_right": {
+    "detailed": "femur (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Appendicular Skeleton (Limbs, Scapulae, Hands, Feet)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "hip_left": {
+    "detailed": "innominate bone (UBERON)",
+    "generalized": "pelvic girdle bone/zone (UBERON)",
+    "side": "Left",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "hip_right": {
+    "detailed": "innominate bone (UBERON)",
+    "generalized": "pelvic girdle bone/zone (UBERON)",
+    "side": "Right",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "humerus_left": {
+    "detailed": "humerus (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Appendicular Skeleton (Limbs, Scapulae, Hands, Feet)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "humerus_right": {
+    "detailed": "humerus (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Appendicular Skeleton (Limbs, Scapulae, Hands, Feet)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_left_1": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_left_2": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_left_3": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_left_4": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_left_5": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_left_6": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_left_7": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_left_8": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_left_9": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_left_10": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_left_11": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_left_12": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_right_1": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_right_2": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_right_3": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_right_4": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_right_5": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_right_6": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_right_7": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_right_8": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_right_9": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_right_10": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_right_11": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "rib_right_12": {
+    "detailed": "rib (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "sacrum": {
+    "detailed": "sacral vertebra (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "scapula_left": {
+    "detailed": "scapula (UBERON)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Appendicular Skeleton (Limbs, Scapulae, Hands, Feet)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "scapula_right": {
+    "detailed": "scapula (UBERON)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Appendicular Skeleton (Limbs, Scapulae, Hands, Feet)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "skull": {
+    "detailed": "skull (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "sternum": {
+    "detailed": "sternum (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_C1": {
+    "detailed": "cervical vertebra 1 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_C2": {
+    "detailed": "cervical vertebra 2 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_C3": {
+    "detailed": "cervical vertebra 3 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_C4": {
+    "detailed": "cervical vertebra 4 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_C5": {
+    "detailed": "cervical vertebra 5 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_C6": {
+    "detailed": "cervical vertebra 6 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_C7": {
+    "detailed": "cervical vertebra 7 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_L1": {
+    "detailed": "lumbar vertebra 1 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_L2": {
+    "detailed": "lumbar vertebra 2 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_L3": {
+    "detailed": "lumbar vertebra 3 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_L4": {
+    "detailed": "lumbar vertebra 4 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_L5": {
+    "detailed": "lumbar vertebra 5 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_S1": {
+    "detailed": "sacral vertebra 1 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_T1": {
+    "detailed": "thoracic vertebra 1 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_T2": {
+    "detailed": "thoracic vertebra 2 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_T3": {
+    "detailed": "thoracic vertebra 3 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_T4": {
+    "detailed": "thoracic vertebra 4 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_T5": {
+    "detailed": "thoracic vertebra 5 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_T6": {
+    "detailed": "thoracic vertebra 6 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_T7": {
+    "detailed": "thoracic vertebra 7 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_T8": {
+    "detailed": "thoracic vertebra 8 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_T9": {
+    "detailed": "thoracic vertebra 9 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_T10": {
+    "detailed": "thoracic vertebra 10 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_T11": {
+    "detailed": "thoracic vertebra 11 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "vertebrae_T12": {
+    "detailed": "thoracic vertebra 12 (UBERON)",
+    "generalized": "vertebral column (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "mandible": {
+    "detailed": "mandible (UBERON)",
+    "generalized": "skull (UBERON)",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "anterior_scalene_left": {
+    "detailed": "scalene muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "anterior_scalene_right": {
+    "detailed": "scalene muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "autochthon_left": {
+    "detailed": "back muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "autochthon_right": {
+    "detailed": "back muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "coracobrachial_left": {
+    "detailed": "coracobrachialis muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "coracobrachial_right": {
+    "detailed": "coracobrachialis muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "deltoid_left": {
+    "detailed": "deltoid (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "deltoid_right": {
+    "detailed": "deltoid (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "digastric_left": {
+    "detailed": "digastric muscle group (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "digastric_right": {
+    "detailed": "digastric muscle group (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "erector_spinae_left": {
+    "detailed": "erector spinae muscle group (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "erector_spinae_right": {
+    "detailed": "erector spinae muscle group (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "external_oblique_left": {
+    "detailed": "external oblique (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "external_oblique_right": {
+    "detailed": "external oblique (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "gluteus_maximus_left": {
+    "detailed": "gluteus maximus (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "gluteus_maximus_right": {
+    "detailed": "gluteus maximus (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "gluteus_medius_left": {
+    "detailed": "gluteus medius (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "gluteus_medius_right": {
+    "detailed": "gluteus medius (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "gluteus_minimus_left": {
+    "detailed": "gluteus minimus (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "gluteus_minimus_right": {
+    "detailed": "gluteus minimus (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "iliopsoas_left": {
+    "detailed": "iliopsoas (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "iliopsoas_right": {
+    "detailed": "iliopsoas (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "inferior_pharyngeal_constrictor": {
+    "detailed": "inferior pharyngeal constrictor (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "infraspinatus_left": {
+    "detailed": "infraspinatus muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "infraspinatus_right": {
+    "detailed": "infraspinatus muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "internal_oblique_left": {
+    "detailed": "internal oblique (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "internal_oblique_right": {
+    "detailed": "internal oblique (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "lateral_pterygoid_left": {
+    "detailed": "lateral pterygoid muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "lateral_pterygoid_right": {
+    "detailed": "lateral pterygoid muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "latissimus_dorsi_left": {
+    "detailed": "latissimus dorsi muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "latissimus_dorsi_right": {
+    "detailed": "latissimus dorsi muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "levator_scapulae_left": {
+    "detailed": "levator scapulae muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "levator_scapulae_right": {
+    "detailed": "levator scapulae muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "masseter_left": {
+    "detailed": "masseter muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "masseter_right": {
+    "detailed": "masseter muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "medial_pterygoid_left": {
+    "detailed": "medial pterygoid muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "medial_pterygoid_right": {
+    "detailed": "medial pterygoid muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "middle_pharyngeal_constrictor": {
+    "detailed": "middle pharyngeal constrictor (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "middle_scalene_left": {
+    "detailed": "scalene muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "middle_scalene_right": {
+    "detailed": "scalene muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "pectoralis_major_left": {
+    "detailed": "pectoralis major (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "pectoralis_major_right": {
+    "detailed": "pectoralis major (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "pectoralis_minor_left": {
+    "detailed": "pectoralis minor (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "pectoralis_minor_right": {
+    "detailed": "pectoralis minor (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "platysma_left": {
+    "detailed": "platysma (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "platysma_right": {
+    "detailed": "platysma (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "posterior_scalene_left": {
+    "detailed": "scalene muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "posterior_scalene_right": {
+    "detailed": "scalene muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "prevertebral_left": {
+    "detailed": "prevertebral muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "prevertebral_right": {
+    "detailed": "prevertebral muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "psoas_major_left": {
+    "detailed": "psoas major muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "psoas_major_right": {
+    "detailed": "psoas major muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "quadratus_lumborum_left": {
+    "detailed": "quadratus lumborum (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "quadratus_lumborum_right": {
+    "detailed": "quadratus lumborum (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "quadriceps_femoris_left": {
+    "detailed": "quadriceps femoris (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "quadriceps_femoris_right": {
+    "detailed": "quadriceps femoris (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "rectus_abdominis_left": {
+    "detailed": "rectus abdominis muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "rectus_abdominis_right": {
+    "detailed": "rectus abdominis muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "sartorius_left": {
+    "detailed": "sartorius muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "sartorius_right": {
+    "detailed": "sartorius muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "serratus_anterior": {
+    "detailed": "serratus ventralis (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "serratus_anterior_left": {
+    "detailed": "serratus ventralis (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "serratus_anterior_right": {
+    "detailed": "serratus ventralis (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "sterno_thyroid_left": {
+    "detailed": "sternothyroid muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "sterno_thyroid_right": {
+    "detailed": "sternothyroid muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "sternocleidomastoid_left": {
+    "detailed": "sternocleidomastoid (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "sternocleidomastoid_right": {
+    "detailed": "sternocleidomastoid (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "subscapularis_left": {
+    "detailed": "subscapularis muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "subscapularis_right": {
+    "detailed": "subscapularis muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "superior_pharyngeal_constrictor": {
+    "detailed": "superior pharyngeal constrictor (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "supraspinatus_left": {
+    "detailed": "supraspinatus muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "supraspinatus_right": {
+    "detailed": "supraspinatus muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "temporalis_left": {
+    "detailed": "temporalis muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "temporalis_right": {
+    "detailed": "temporalis muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "teres_major_left": {
+    "detailed": "teres major muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "teres_major_right": {
+    "detailed": "teres major muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "thigh_medial_compartment_left": {
+    "detailed": "thigh adductor compartment (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "thigh_medial_compartment_right": {
+    "detailed": "thigh adductor compartment (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "thigh_posterior_compartment_left": {
+    "detailed": "thigh posterior compartment (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "thigh_posterior_compartment_right": {
+    "detailed": "thigh posterior compartment (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "thyrohyoid_left": {
+    "detailed": "thyrohyoid muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "thyrohyoid_right": {
+    "detailed": "thyrohyoid muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "tongue": {
+    "detailed": "tongue (UBERON)",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "transversospinalis_left": {
+    "detailed": "transversospinalis muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "transversospinalis_right": {
+    "detailed": "transversospinalis muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "trapezius": {
+    "detailed": "trapezius muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "trapezius_left": {
+    "detailed": "trapezius muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "trapezius_right": {
+    "detailed": "trapezius muscle (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "triceps_brachii_left": {
+    "detailed": "triceps brachii (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Left",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "triceps_brachii_right": {
+    "detailed": "triceps brachii (UBERON)",
+    "generalized": "muscle organ (UBERON)",
+    "side": "Right",
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial",
+    "alternative_hypothesis": "Technical Artifact",
+    "certainty": "0",
+    "is_muscle": true,
+    "is_artifact": true,
+    "clinical_significance": "Benign / Technical Artifact (Muscular uptake without CT substrate)"
+  },
+  "hyoid": {
+    "detailed": "hyoid bone (UBERON)",
+    "generalized": "hyoid",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "styloid_process_left": {
+    "detailed": "styloid process (UBERON)",
+    "generalized": "styloid process",
+    "side": "Left",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "styloid_process_right": {
+    "detailed": "styloid process (UBERON)",
+    "generalized": "styloid process",
+    "side": "Right",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "zygomatic_arch_left": {
+    "detailed": "zygomatic arch (UBERON)",
+    "generalized": "zygomatic arch",
+    "side": "Left",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "zygomatic_arch_right": {
+    "detailed": "zygomatic arch (UBERON)",
+    "generalized": "zygomatic arch",
+    "side": "Right",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "cricoid_cartilage": {
+    "detailed": "cricoid cartilage (UBERON)",
+    "generalized": "cricoid cartilage",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "thyroid_cartilage": {
+    "detailed": "thyroid cartilage (UBERON)",
+    "generalized": "thyroid cartilage",
+    "side": "",
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
+  },
+  "eye_left": {
+    "detailed": "eye (UBERON)",
+    "generalized": "eye",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "eye_right": {
+    "detailed": "eye (UBERON)",
+    "generalized": "eye",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "eye_lens_left": {
+    "detailed": "lens of eye (UBERON)",
+    "generalized": "lens",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "eye_lens_right": {
+    "detailed": "lens of eye (UBERON)",
+    "generalized": "lens",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "heart_atrium_left": {
+    "detailed": "heart (UBERON)",
+    "generalized": "heart",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "heart_atrium_right": {
+    "detailed": "heart (UBERON)",
+    "generalized": "heart",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "heart_myocardium": {
+    "detailed": "heart (UBERON)",
+    "generalized": "heart",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "heart_ventricle_left": {
+    "detailed": "heart (UBERON)",
+    "generalized": "heart",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "heart_ventricle_right": {
+    "detailed": "heart (UBERON)",
+    "generalized": "heart",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "parotid_gland_left": {
+    "detailed": "parotid gland (UBERON)",
+    "generalized": "parotid gland",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "parotid_gland_right": {
+    "detailed": "parotid gland (UBERON)",
+    "generalized": "parotid gland",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "submandibular_gland_left": {
+    "detailed": "submandibular gland (UBERON)",
+    "generalized": "submandibular gland",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "submandibular_gland_right": {
+    "detailed": "submandibular gland (UBERON)",
+    "generalized": "submandibular gland",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "optic_nerve_left": {
+    "detailed": "optic nerve (UBERON)",
+    "generalized": "optic nerve",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "optic_nerve_right": {
+    "detailed": "optic nerve (UBERON)",
+    "generalized": "optic nerve",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "lung_left": {
+    "detailed": "left lung (UBERON)",
+    "generalized": "lung",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Unilateral Left Lobe"
+  },
+  "lung_right": {
+    "detailed": "right lung (UBERON)",
+    "generalized": "lung",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Unilateral Right Lobe"
+  },
+  "hard_palate": {
+    "detailed": "hard palate (UBERON)",
+    "generalized": "hard palate",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "soft_palate": {
+    "detailed": "soft palate (UBERON)",
+    "generalized": "soft palate",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "hypopharynx": {
+    "detailed": "hypopharynx (UBERON)",
+    "generalized": "hypopharynx",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "nasopharynx": {
+    "detailed": "nasopharynx (UBERON)",
+    "generalized": "nasopharynx",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "oropharynx": {
+    "detailed": "oropharynx (UBERON)",
+    "generalized": "oropharynx",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "larynx_air": {
+    "detailed": "larynx (UBERON)",
+    "generalized": "larynx",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "nasal_cavity_left": {
+    "detailed": "nasal cavity (UBERON)",
+    "generalized": "nasal cavity",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "nasal_cavity_right": {
+    "detailed": "nasal cavity (UBERON)",
+    "generalized": "nasal cavity",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "auditory_canal_left": {
+    "detailed": "auditory canal (UBERON)",
+    "generalized": "auditory canal",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "auditory_canal_right": {
+    "detailed": "auditory canal (UBERON)",
+    "generalized": "auditory canal",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "internal_carotid_artery_left": {
+    "detailed": "internal carotid artery (UBERON)",
+    "generalized": "internal carotid artery",
+    "side": "Left",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "internal_carotid_artery_right": {
+    "detailed": "internal carotid artery (UBERON)",
+    "generalized": "internal carotid artery",
+    "side": "Right",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "internal_jugular_vein_left": {
+    "detailed": "internal jugular vein (UBERON)",
+    "generalized": "internal jugular vein",
+    "side": "Left",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "internal_jugular_vein_right": {
+    "detailed": "internal jugular vein (UBERON)",
+    "generalized": "internal jugular vein",
+    "side": "Right",
+    "anatomic_location": "Blood Vessel",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  }
+}

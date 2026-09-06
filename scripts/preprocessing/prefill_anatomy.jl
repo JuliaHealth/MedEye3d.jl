@@ -21,7 +21,11 @@ using JSON, NIfTI, HDF5, Statistics, LinearAlgebra, MedImages
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 data_dir = length(ARGS) >= 1 ? ARGS[1] : joinpath(@__DIR__, "..", "..", "data", "pat_6_files")
-ontology_path = joinpath(@__DIR__, "..", "..", "data", "max_anatomy_to_ontology.json")
+ontology_path = let
+    p_assets = normpath(joinpath(@__DIR__, "..", "..", "assets", "max_anatomy_to_ontology.json"))
+    p_data = normpath(joinpath(@__DIR__, "..", "..", "data", "max_anatomy_to_ontology.json"))
+    isfile(p_assets) ? p_assets : p_data
+end
 h5_annot_path = joinpath(homedir(), "medeye3d_lesion_annotations.h5")
 json_annot_path = joinpath(homedir(), "medeye3d_lesion_annotations.json")
 case_h5_path = joinpath(data_dir, "medeye3d_lesion_annotations.h5")

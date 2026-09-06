@@ -275,7 +275,9 @@ function _lookup_ontology(raw_name::String)::Union{Nothing, Dict{String, Any}}
         catch; end
     end
     if _ontology_cache[] === nothing
-        json_path = joinpath(@__DIR__, "..", "..", "data", "max_anatomy_to_ontology.json")
+        assets_path = normpath(joinpath(@__DIR__, "..", "..", "assets", "max_anatomy_to_ontology.json"))
+        data_path = normpath(joinpath(@__DIR__, "..", "..", "data", "max_anatomy_to_ontology.json"))
+        json_path = isfile(assets_path) ? assets_path : data_path
         if isfile(json_path)
             try
                 _ontology_cache[] = JSON.parsefile(json_path)

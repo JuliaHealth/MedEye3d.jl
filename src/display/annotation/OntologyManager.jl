@@ -27,7 +27,11 @@ format_term(t::OntologyTerm) = "$(t.id) \u2014 $(t.label)"   # em-dash OK in Jul
 parse_term_id(s::String) = split(s, " \u2014 "; limit=2)[1]  # extract ID from formatted string
 
 # ─── Caches ──────────────────────────────────────────────────────────────────
-const _PKG_DATA   = joinpath(@__DIR__, "..", "..", "..", "extension", "data")
+const _PKG_DATA = let
+    p_assets = normpath(joinpath(@__DIR__, "..", "..", "..", "assets"))
+    p_ext = normpath(joinpath(@__DIR__, "..", "..", "..", "extension", "data"))
+    isdir(p_assets) && isfile(joinpath(p_assets, "RadLex.csv")) ? p_assets : p_ext
+end
 const _radlex_cache = Ref{Vector{OntologyTerm}}(OntologyTerm[])
 const _anatomy_cache = Ref{Vector{OntologyTerm}}(OntologyTerm[])
 const _all_cache    = Ref{Vector{OntologyTerm}}(OntologyTerm[])

@@ -109,7 +109,7 @@ When a lesion is loaded, its segmentation mask overlap with the TotalSegmentator
 - **Side** (Left / Right / NA)
 - **Lesion Type** (Prostate / Bone Meta / Organ Meta / Lymph Node)
 
-This mapping is defined in `data/max_anatomy_to_ontology.json` (201 entries), which maps each TotalSegmentator organ name to structured annotation fields.
+This mapping is defined in `assets/max_anatomy_to_ontology.json` (239 entries), which maps each TotalSegmentator organ name to structured annotation fields.
 
 ---
 
@@ -289,7 +289,7 @@ User-entered fields are stored with their schema-defined names (e.g., `"Anatomic
 
 ## 10. Schema Definition
 
-The metadata annotation schema is defined in `extension/data/def.json` with 20 structured questions:
+The metadata annotation schema is defined in `assets/def.json` with 20 structured questions:
 
 | Field | Type | Options |
 | :--- | :--- | :--- |

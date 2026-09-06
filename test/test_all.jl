@@ -36,10 +36,42 @@ using JSON
     end
     
     @testset "LesionMetadataWindow Schema and Serialization" begin
-        # Test schema loading
+        # Test schema loading from assets/def.json
         schema = LesionMetadataWindow.load_schema()
-        @test length(schema) > 0
+        @test length(schema) == 20
         @test schema[1].short == "Radioligand Type"
+        
+        # Test that dropdown options are richly populated (not empty or stub)
+        schema_dict = Dict(q.short => q for q in schema)
+        @test haskey(schema_dict, "Anatomic Location")
+        @test length(schema_dict["Anatomic Location"].options) == 20
+        
+        @test haskey(schema_dict, "Anatomical Sublocation")
+        @test length(schema_dict["Anatomical Sublocation"].options) == 45
+        
+        @test haskey(schema_dict, "Alternative Hypothesis (False Positive)")
+        @test length(schema_dict["Alternative Hypothesis (False Positive)"].options) == 85
+        
+        @test haskey(schema_dict, "Inner Texture / Density / Attenuation")
+        @test length(schema_dict["Inner Texture / Density / Attenuation"].options) == 18
+
+        # Test anatomy mapping (assets/max_anatomy_to_ontology.json)
+        anatomy_mapping = LesionMetadataWindow.load_anatomy_mapping()
+        @test length(anatomy_mapping) >= 200
+        @test haskey(anatomy_mapping, "femur_left") || haskey(anatomy_mapping, "liver")
+
+        # Test RadLex and Foundational Anatomy ontologies
+        radlex_terms = LesionMetadataWindow.load_radlex()
+        @test length(radlex_terms) > 100
+        @test radlex_terms != ["(none)"]
+
+        foundational_terms = LesionMetadataWindow.load_anatomy_ontology()
+        @test length(foundational_terms) > 100
+        @test foundational_terms != ["(none)"]
+
+        # Test custom options baseline
+        custom_opts = LesionMetadataWindow.load_custom_options()
+        @test isa(custom_opts, Dict)
         
         # Test saving and loading annotations
         temp_path = tempname() * ".json"
