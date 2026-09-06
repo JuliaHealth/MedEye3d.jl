@@ -3275,15 +3275,18 @@ function create_metadata_window(
         try
             atlas = _MEH.global_ts_atlas[]
             ts_names = _MEH.global_ts_names[]
+            println("[NEW LESION] atlas=$(atlas !== nothing ? "$(size(atlas))" : "null"), ts_names=$(ts_names !== nothing ? "$(length(ts_names)) entries" : "null")")
             if atlas !== nothing && ts_names !== nothing
                 # Use the actual viewer cursor position (tracked in ReactOnMouseClickAndDrag)
                 vpos = _MEH.current_viewer_position[]
+                println("[NEW LESION] cursor_pos=$vpos → atlas_size=$(size(atlas))")
                 cx = clamp(vpos[1], 1, size(atlas, 1))
                 cy = clamp(vpos[2], 1, size(atlas, 2))
                 cz = clamp(vpos[3], 1, size(atlas, 3))
                 
                 # Direct lookup at cursor position
                 anat_val = Int(atlas[cx, cy, cz])
+                println("[NEW LESION] atlas[$cx,$cy,$cz]=$anat_val")
                 
                 # If exact voxel is unlabeled, try expanding sphere search
                 if anat_val <= 0
@@ -3308,6 +3311,9 @@ function create_metadata_window(
                 if anat_val > 0
                     organ_name = get(ts_names, anat_val, "")
                     if !isempty(organ_name)
+                        # Store in global_organ_mapping so metadata autofill works
+                        _MEH.global_organ_mapping[][new_id] = organ_name
+                        @info "[NEW LESION] Mapped lesion $new_id → '$organ_name' from atlas"
                         entry = lookup_anatomy(organ_name)
                         if entry !== nothing
                             detailed = get(entry, "detailed", "")
