@@ -38,7 +38,7 @@ The script will:
 2. Locate or install Inno Setup 6.
 3. Generate the final single-file setup wizard at:
    ```
-   D:\MedEye3d.jl\dist\MedEye3D_v0.5.8_Setup.exe
+   D:\MedEye3d.jl\dist\MedEye3D_v0.5.9_Setup.exe
    ```
 
 ---

@@ -153,6 +153,11 @@ using .MedEye3dApp
 MedEye3dApp.run_app(["--help"])
 MedEye3dApp.run_app(["--version"])
 
+# Trace telemetry logging
+MedEye3d.Telemetry.log_action("PRECOMPILE_START", Dict("args" => ["--demo"]))
+MedEye3d.Telemetry.log_action("PRECOMPILE_LOAD", Dict("path" => "dummy.h5"))
+MedEye3d.Telemetry.log_action("PRECOMPILE_EMPTY")
+
 # Trace HDF5 opening in MedEye3dApp
 try
     h5_path = joinpath(@__DIR__, "..", "..", "data", "preprocessed_volumes.h5")
