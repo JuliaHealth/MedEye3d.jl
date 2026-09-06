@@ -3,7 +3,7 @@ Main module controlling displaying segmentations image and data
 
 """
 module SegmentationDisplay
-export loadRegisteredImages, displayImage, coordinateDisplay, passDataForScrolling, close_window, set_window_title, resize_window, GLOBAL_OPENGL_LOCK, synchronized_makie_renderloop
+export loadRegisteredImages, displayImage, coordinateDisplay, passDataForScrolling, close_window, set_window_title, resize_window, GLOBAL_OPENGL_LOCK, synchronized_makie_renderloop, _report_hide_flag, _report_screen_ref, _first_screen_ref
 using Dates
 using ColorTypes, MedImages, GLFW, Dictionaries, Logging, Setfield, FreeTypeAbstraction, Statistics, Observables, FileIO
 using ..ForDisplayStructs, ..distinctColorsSaved
@@ -17,6 +17,10 @@ include("MakieEventHandlers.jl")
 using .MakieEventHandlers
 
 const GLOBAL_OPENGL_LOCK = ReentrantLock()
+# Flag for safe cross-task report window hiding (set by EPSMAReportWindow, checked by renderloop)
+const _report_hide_flag = Ref{Bool}(false)
+const _report_screen_ref = Ref{Any}(nothing)
+const _first_screen_ref = Ref{Any}(nothing)  # First renderloop = main window (self-registered)
 
 function synchronized_makie_renderloop(screen)
     # Find GLMakie from loaded modules — it may not be in Main scope
@@ -45,7 +49,39 @@ function synchronized_makie_renderloop(screen)
     @info "synchronized_makie_renderloop: STARTED (GLMakie found via loaded_modules)"
     tick_state = Ref(Makie.UnknownTickState)
     loop_count = Ref(0)
+    # Self-register: first renderloop to start = main window
+    if _first_screen_ref[] === nothing
+        _first_screen_ref[] = screen
+        println("[RENDERLOOP] Main screen self-registered: $(objectid(screen))")
+    end
     while isopen(screen) && !screen.stop_renderloop[]
+        # Check if report window should be hidden (flag set by EPSMAReportWindow)
+        if _report_hide_flag[] && screen !== _first_screen_ref[]
+            _report_hide_flag[] = false
+            try
+                lock(GLOBAL_OPENGL_LOCK) do
+                    GLMakie.GLAbstraction.with_context(screen.glscreen) do
+                        GLFW.IconifyWindow(GLMakie.to_native(screen))  # Minimize (universally supported)
+                    end
+                end
+                screen.config.pause_renderloop = true
+                # Focus main Makie window so user can interact immediately
+                main_scr = _first_screen_ref[]
+                if main_scr !== nothing
+                    try
+                        lock(GLOBAL_OPENGL_LOCK) do
+                            GLFW.RestoreWindow(GLMakie.to_native(main_scr))
+                            GLFW.FocusWindow(GLMakie.to_native(main_scr))
+                        end
+                    catch; end
+                end
+                println("[E-PSMA] Report window minimized, main window focused")
+            catch e
+                println("[E-PSMA] Minimize failed in renderloop: $e")
+            end
+            sleep(0.1)
+            continue
+        end
         try
             if isdefined(GLMakie, :GLAbstraction)
                 lock(GLOBAL_OPENGL_LOCK) do

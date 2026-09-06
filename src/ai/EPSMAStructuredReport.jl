@@ -15,6 +15,7 @@ export EPSMALesionRow,
        prebuild_reports!,
        get_or_build_report,
        invalidate_report!,
+       request_report_refresh!,
        enrich_with_llm!,
        export_to_docx,
        to_dict
@@ -434,6 +435,12 @@ function resolve_anatomical_location(lid::Integer, state::Union{AbstractDict, No
             clean_loc = !isempty(clean_side) ? "$clean_side Gluteal Muscle" : "Gluteal Muscle"
         elseif occursin("aorta", lowercase(raw_organ))
             clean_loc = "Aorta (Blood Pool / Vascular)"
+        elseif is_muscle || is_artifact
+            # For artifacts/muscles, use raw organ name (human-readable), not UBERON label
+            clean_loc = titlecase(replace(raw_organ, "_" => " "))
+            if !isempty(clean_side) && !occursin(lowercase(clean_side), lowercase(clean_loc))
+                clean_loc = "$clean_side $clean_loc"
+            end
         else
             clean_loc = detailed
             if !isempty(clean_side) && !occursin(lowercase(clean_side), lowercase(clean_loc))
@@ -585,30 +592,58 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
             seg_name = get(tp_segs, lid, "")
         end
         
-        # 1c. Auto-infer LesionType from segment name if current type is generic
-        if ltype in ("Lesion", "Organ Meta", "") && !isempty(seg_name)
-            seg_lo = lowercase(seg_name)
-            if occursin("knochen", seg_lo) || occursin("bone", seg_lo)
+        # 1c. Auto-infer LesionType — ATLAS is PRIMARY (TotalSegmentator ground truth)
+        # TS provides definitive segmentation for bones, prostate, and visceral organs.
+        # Lymph nodes are the ONLY exception (TS has no LN segmentation) → inferred from segment names.
+        organ_lo = lowercase(raw_organ_name)
+        if ltype in ("Lesion", "Organ Meta", "")
+            # 1c-i: Bone (atlas has definitive bone segmentation)
+            bone_atlas_kw = ["hip_", "femur_", "rib_", "vertebra", "sacrum", "skull",
+                             "humerus_", "scapula_", "clavicle_", "sternum", "clavicula",
+                             "costal", "ilium", "ischium", "pubis", "patella"]
+            if any(k -> occursin(k, organ_lo), bone_atlas_kw)
                 ltype = "Bone Meta"
-            elseif occursin("lymph", seg_lo) || occursin("knoten", seg_lo) || occursin("node", seg_lo)
-                ltype = "Lymph Node"
-            elseif occursin("prostat", seg_lo)
+                @info "[E-PSMA] Atlas→Bone Meta for lesion $lid (atlas: '$raw_organ_name')"
+            end
+            # 1c-ii: Prostate (atlas has prostate segmentation)
+            if occursin("prostat", organ_lo)
                 ltype = "Prostate"
+                @info "[E-PSMA] Atlas→Prostate for lesion $lid (atlas: '$raw_organ_name')"
+            end
+            # 1c-iii: Visceral organs (atlas has organ segmentation)
+            visc_atlas_kw = ["liver", "lung_", "brain", "spleen", "kidney_",
+                             "adrenal_", "pancreas", "thyroid", "gallbladder"]
+            if any(k -> occursin(k, organ_lo), visc_atlas_kw)
+                ltype = "Organ Meta"
+                @info "[E-PSMA] Atlas→Organ Meta for lesion $lid (atlas: '$raw_organ_name')"
             end
         end
         
-        # 1d. Auto-infer LesionType from atlas organ name for known LN stations
-        # TotalSegmentator has no lymph node labels, but lesions near iliac vessels
-        # or the aorta are almost certainly lymph node metastases (users don't annotate
-        # normal blood pool as lesions).
+        # 1c-iv: Lymph nodes — SPECIAL CASE (TS has NO LN segmentation)
+        # Inferred from segment names ("Lymphknoten", "lymph node") or vascular atlas names
+        if ltype in ("Lesion", "Organ Meta", "")
+            # From segment names (clinical annotations)
+            if !isempty(seg_name)
+                seg_lo = lowercase(seg_name)
+                if occursin("lymph", seg_lo) || occursin("knoten", seg_lo) || occursin("node", seg_lo)
+                    ltype = "Lymph Node"
+                    @info "[E-PSMA] SegName→Lymph Node for lesion $lid (seg: '$seg_name')"
+                elseif occursin("knochen", seg_lo) || occursin("bone", seg_lo)
+                    ltype = "Bone Meta"  # Segment name fallback for bone
+                elseif occursin("prostat", seg_lo)
+                    ltype = "Prostate"   # Segment name fallback for prostate
+                end
+            end
+        end
+        
+        # 1d. Auto-infer LN from atlas vascular names (iliac vessels, aorta = LN stations)
         if ltype in ("Lesion", "Organ Meta", "") && !is_artifact
-            organ_lo = lowercase(raw_organ_name)
             if occursin("iliac", organ_lo) && !occursin("crest", organ_lo)
                 ltype = "Lymph Node"  # Pelvic LN station (near iliac vessels)
-                @info "[E-PSMA] Auto-inferred Lymph Node for lesion $lid (atlas: '$raw_organ_name')"
+                @info "[E-PSMA] Atlas vascular→Lymph Node for lesion $lid (atlas: '$raw_organ_name')"
             elseif occursin("aorta", organ_lo) || occursin("vena_cava", organ_lo) || occursin("caval", organ_lo)
                 ltype = "Lymph Node"  # Para-aortic / retroperitoneal LN
-                @info "[E-PSMA] Auto-inferred Lymph Node for lesion $lid (atlas: '$raw_organ_name')"
+                @info "[E-PSMA] Atlas vascular→Lymph Node for lesion $lid (atlas: '$raw_organ_name')"
             end
         end
         
@@ -1089,6 +1124,15 @@ function prebuild_reports!()
         @warn "[E-PSMA] Cannot pre-build reports: MakieEventHandlers not available"
         return
     end
+    # Wait for organ_mapping to be populated from HDF5 (async loading)
+    for attempt in 1:15
+        !isempty(_MEH.global_organ_mapping[]) && break
+        @info "[E-PSMA] Waiting for organ_mapping (attempt $attempt/15)..."
+        sleep(1.0)
+    end
+    if isempty(_MEH.global_organ_mapping[])
+        @warn "[E-PSMA] organ_mapping still empty after 15s, building with available data"
+    end
     for tp in sort(collect(keys(_MEH.tp_labels)))
         try
             _report_cache[tp] = build_epsma_data(tp)
@@ -1125,6 +1169,37 @@ function invalidate_report!(tp_idx::Int)
     end
 end
 
+# ── Debounced auto-refresh ───────────────────────────────────────────────────
+const _refresh_pending = Ref{Bool}(false)
+const _refresh_lock = ReentrantLock()
+
+"""
+    request_report_refresh!(tp_idx::Int)
+
+Request a debounced report refresh. Multiple calls within 2s are coalesced
+into a single rebuild after the last change settles.
+"""
+function request_report_refresh!(tp_idx::Int)
+    lock(_refresh_lock) do
+        if _refresh_pending[]
+            return  # Already pending — will pick up latest data
+        end
+        _refresh_pending[] = true
+    end
+    @async begin
+        sleep(2.0)  # Debounce: coalesce rapid changes
+        lock(_refresh_lock) do
+            _refresh_pending[] = false
+        end
+        try
+            invalidate_report!(tp_idx)
+            _report_cache[tp_idx] = build_epsma_data(tp_idx)
+            @info "[E-PSMA] Auto-refreshed TP $tp_idx: $(length(_report_cache[tp_idx].synoptic_rows)) rows"
+        catch e
+            @warn "[E-PSMA] Auto-refresh failed for TP $tp_idx" exception=e
+        end
+    end
+end
 # ── Serialization to Dict ────────────────────────────────────────────────────
 function to_dict(rep::EPSMAReport)::Dict{String, Any}
     return Dict{String, Any}(

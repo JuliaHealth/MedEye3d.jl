@@ -3768,6 +3768,8 @@ function create_metadata_window(
         try
             put!(db_channel, SaveDBMessage(db, global_app_state, save_path, DEFAULT_HDF5_PATH))
         catch; end
+        # Trigger debounced E-PSMA report refresh (coalesces rapid changes)
+        try ESR.request_report_refresh!(_MEH.current_tp_index[]) catch; end
     end
     function apply_global_state(gst::AbstractDict)
         _is_applying_state[] = true

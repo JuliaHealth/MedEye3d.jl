@@ -286,8 +286,8 @@ using MedEye3d.EPSMAReportWindow
             screen = open_epsma_report_window(rep)
             @test active_report_screen[] !== nothing
             close_epsma_report_window()
-            # After close, screen ref is nulled (SetWindowShouldClose triggers cleanup)
-            @test active_report_screen[] === nothing
+            # After close, screen is hidden (not destroyed) for fast reopen
+            @test active_report_screen[] !== nothing
         catch e
             # If headless display is unavailable, verify fallback
             @info "Headless screen test result: $e"
