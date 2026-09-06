@@ -6,7 +6,7 @@ This document describes the automatic metadata population system for lesion anno
 
 ## Dropdown Schema (`def.json`)
 
-All metadata dropdowns are defined in [`extension/data/def.json`](../extension/data/def.json). Each entry has:
+All metadata dropdowns are defined in [`assets/def.json`](../assets/def.json). Each entry has:
 
 ```json
 {
@@ -47,14 +47,14 @@ All metadata dropdowns are defined in [`extension/data/def.json`](../extension/d
 
 ### Adding Custom Options
 
-Users can add custom options at runtime via the "Add option..." textbox. Custom options are persisted in `extension/data/custom_options.json` via `load_custom_options()` / `save_custom_options()`.
+Users can add custom options at runtime via the "Add option..." textbox. Custom options are persisted in `assets/custom_options.json` via `load_custom_options()` / `save_custom_options()`.
 
 ### Extending Dropdowns
 
-To add new options permanently, edit `def.json` and append entries to the `"allowed_answer"` array. The JSON must remain valid — validate with:
+To add new options permanently, edit `assets/def.json` and append entries to the `"allowed_answer"` array. The JSON must remain valid — validate with:
 
 ```bash
-python3 -c "import json; json.load(open('extension/data/def.json')); print('OK')"
+python3 -c "import json; json.load(open('assets/def.json')); print('OK')"
 ```
 
 ### Source Reference
@@ -137,7 +137,7 @@ The `map_lesions_to_organs()` function uses a **volume-based scan** instead of s
 
 | File | Purpose |
 |---|---|
-| `data/max_anatomy_to_ontology.json` | 239 entries mapping TotalSegmentator organ names to ontology fields (anatomic_location, sublocation, side, detailed name, lesion_type) |
+| `assets/max_anatomy_to_ontology.json` | 239 entries mapping TotalSegmentator organ names to ontology fields (anatomic_location, sublocation, side, detailed name, lesion_type) |
 | `LesionAssociation.jl:L502–740` | `classify_tissue_priority()`, `count_atlas_overlap()`, `pick_best_organ()`, `classify_and_pick_best_organ()`, `map_lesions_to_organs()` — volume-based organ mapping with bone priority |
 | `LesionMetadataWindow.jl:L258–302` | `load_anatomy_mapping()`, `lookup_anatomy()` — JSON-based lookup with lowercase-first then exact-case matching |
 | `LesionMetadataWindow.jl:L304–351` | `TS_TO_ANATOMY` const dict — static fallback mapping for when JSON lookup fails |

@@ -31,7 +31,10 @@ ts_atlas = read(h5["ATLAS/max_anatomy"])
 mask_raw = read(h5["BASELINE/PET_Lesions_0.nii.gz"])
 mask_f32 = Float32.(mask_raw)
 
-onto = JSON.parsefile("/workspaces/MedEye3d.jl/data/max_anatomy_to_ontology.json")
+onto_path = isfile("/workspaces/MedEye3d.jl/assets/max_anatomy_to_ontology.json") ?
+    "/workspaces/MedEye3d.jl/assets/max_anatomy_to_ontology.json" :
+    "/workspaces/MedEye3d.jl/data/max_anatomy_to_ontology.json"
+onto = JSON.parsefile(onto_path)
 println("Ontology: $(length(onto)) entries")
 
 close(h5)
