@@ -3,7 +3,7 @@ module EPSMAReportWindow
 using GLMakie
 using Observables
 using Dates
-import ..SegmentationDisplay: synchronized_makie_renderloop, GLOBAL_OPENGL_LOCK
+import ..SegmentationDisplay: synchronized_makie_renderloop, GLOBAL_OPENGL_LOCK, _report_hide_flag, _report_screen_ref
 import ..SegmentationDisplay.MakieEventHandlers as _MEH
 import ..EPSMAStructuredReport as ESR
 import ..LLMDictation
@@ -664,18 +664,40 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
     # ── Button Handlers ──────────────────────────────────────────────────────
     on(btn_export.clicks) do _
         lang = current_lang[]
-        reports_dir = joinpath(@__DIR__, "..", "..", "data", "reports")
-        isdir(reports_dir) || mkpath(reports_dir)
-        filename = "E_PSMA_Report_$(report.patient_id)_TP$(report.tp_index)_$(lang).docx"
-        out_path = joinpath(reports_dir, filename)
+        default_dir = joinpath(@__DIR__, "..", "..", "data", "reports")
+        isdir(default_dir) || mkpath(default_dir)
+        default_name = "E_PSMA_Report_$(report.patient_id)_TP$(report.tp_index)_$(lang).docx"
+        default_path = joinpath(default_dir, default_name)
         
-        status_text[] = "[...] Generating official Word report ($lang)..."
+        status_text[] = "[...] Choosing save location..."
+        
+        # Show native file dialog (zenity on Linux)
+        out_path = try
+            cmd = Cmd(["zenity", "--file-selection", "--save", "--confirm-overwrite",
+                       "--title=Save E-PSMA Report", "--filename=$default_path"])
+            chomp(read(cmd, String))
+        catch
+            # Fallback to default path if dialog cancelled or zenity unavailable
+            nothing
+        end
+        
+        if out_path === nothing || isempty(out_path)
+            status_text[] = "[CANCELLED] Export cancelled by user"
+            return
+        end
+        
+        # Ensure .docx extension
+        if !endswith(lowercase(out_path), ".docx")
+            out_path *= ".docx"
+        end
+        
+        status_text[] = "[...] Generating Word report ($lang)..."
         try
             # Sync user edits from GUI textboxes → report object before export
             _sync_edits_to_report!(report, lang, sec1_text, sec3_text, sec4_prostate, sec4_lymph, sec4_bone, sec4_visceral, sec6_text)
             ESR.export_to_docx(report, out_path; lang = lang)
-            status_text[] = "[OK] Word report successfully exported: $out_path"
-            @info "Exported E-PSMA Word report to $out_path"
+            status_text[] = "[OK] Exported: $(basename(out_path))"
+            println("[E-PSMA] Exported Word report to $out_path")
         catch e
             status_text[] = "[ERR] Export failed: $e"
             @error "Failed to export Word document" exception=e
@@ -745,14 +767,19 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
     end
 
     on(btn_close.clicks) do _
-        close_epsma_report_window()
+        _report_hide_flag[] = true
+        println("[E-PSMA] Close requested (flag set)")
     end
 
     if reuse_screen
+        _report_hide_flag[] = false  # Clear any pending hide
         lock(GLOBAL_OPENGL_LOCK) do
             empty!(screen)
             display(screen, fig)
+            screen.config.pause_renderloop = false  # Unpause after minimize
+            GLMakie.GLFW.RestoreWindow(screen.glscreen)  # Un-minimize
             GLMakie.GLFW.ShowWindow(screen.glscreen)
+            GLMakie.GLFW.FocusWindow(screen.glscreen)    # Bring to front
         end
     else
         screen = lock(GLOBAL_OPENGL_LOCK) do
@@ -764,6 +791,7 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
     
     active_report_screen[] = screen
     active_report_fig[] = fig
+    _report_screen_ref[] = screen  # Register with renderloop for safe hiding
     return screen
 end
 
@@ -773,23 +801,7 @@ end
 Closes the E-PSMA report window if open.
 """
 function close_epsma_report_window()
-    if active_report_screen[] !== nothing
-        try
-            screen = active_report_screen[]
-            if isopen(screen)
-                # Don't use GLOBAL_OPENGL_LOCK here — this callback fires
-                # from inside the render loop which already holds the lock.
-                GLMakie.GLFW.SetWindowShouldClose(screen.glscreen, true)
-                active_report_screen[] = nothing
-                @info "[E-PSMA] Report window closed (← Return to Main Panel)"
-            end
-        catch e
-            @warn "[E-PSMA] Close failed" exception=e
-            try
-                active_report_screen[] = nothing
-            catch; end
-        end
-    end
+    _report_hide_flag[] = true
 end
 
 end # module EPSMAReportWindow

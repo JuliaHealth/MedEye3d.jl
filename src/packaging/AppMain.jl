@@ -859,6 +859,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     
     # 8. Pre-build E-PSMA structured reports (async, non-blocking)
     @async try
+        sleep(3.0)  # Wait for HDF5 loading and background preloads to finish
         MedEye3d.EPSMAStructuredReport.prebuild_reports!()
     catch e
         @warn "[STARTUP] E-PSMA report pre-build failed" exception=(e, catch_backtrace())
