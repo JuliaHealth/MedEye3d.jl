@@ -55,45 +55,35 @@ end
 export create_metadata_window, load_annotations, save_annotations, load_annotations_hdf5, save_annotations_hdf5, get_lesion_state, display_metadata_window
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
-const _ASSETS_DIR    = normpath(joinpath(@__DIR__, "..", "..", "assets"))
-const _PKG_ROOT      = normpath(joinpath(@__DIR__, "..", "..", "extension", "data"))
-const _REPO_DATA     = normpath(joinpath(@__DIR__, "..", "..", "data"))
-const _SLICER_DATA   = isdir("/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/data") ?
-    "/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/data" : ""
-
-const DEF_JSON_PATH  = isfile(joinpath(_ASSETS_DIR, "def.json")) ? joinpath(_ASSETS_DIR, "def.json") :
-                       (isfile(joinpath(_PKG_ROOT, "def.json")) ? joinpath(_PKG_ROOT, "def.json") :
-                       (isfile(joinpath(_REPO_DATA, "def.json")) ? joinpath(_REPO_DATA, "def.json") :
-                       (isfile(joinpath(_SLICER_DATA, "def.json")) ? joinpath(_SLICER_DATA, "def.json") : "")))
-
-const RADLEX_CSV_PATH= isfile(joinpath(_ASSETS_DIR, "RadLex.csv")) ? joinpath(_ASSETS_DIR, "RadLex.csv") :
-                       (isfile(joinpath(_PKG_ROOT, "RadLex.csv")) ? joinpath(_PKG_ROOT, "RadLex.csv") :
-                       (isfile(joinpath(_REPO_DATA, "RadLex.csv")) ? joinpath(_REPO_DATA, "RadLex.csv") :
-                       (isfile(joinpath(_SLICER_DATA, "RadLex.csv")) ? joinpath(_SLICER_DATA, "RadLex.csv") : "")))
-
-const ANATOMY_CSV_PATH = isfile(joinpath(_ASSETS_DIR, "FoundationalAnatomy.csv")) ? joinpath(_ASSETS_DIR, "FoundationalAnatomy.csv") :
-                         (isfile(joinpath(_PKG_ROOT, "FoundationalAnatomy.csv")) ? joinpath(_PKG_ROOT, "FoundationalAnatomy.csv") :
-                         (isfile(joinpath(_REPO_DATA, "FoundationalAnatomy.csv")) ? joinpath(_REPO_DATA, "FoundationalAnatomy.csv") :
-                         (isfile(joinpath(_SLICER_DATA, "FoundationalAnatomy.csv")) ? joinpath(_SLICER_DATA, "FoundationalAnatomy.csv") : "")))
-
-const DEFAULT_SAVE_PATH = joinpath(homedir(), "medeye3d_lesion_annotations.json")
-const DEFAULT_HDF5_PATH = joinpath(homedir(), "medeye3d_lesion_annotations.h5")
-const ANATOMY_MAPPING_PATH = isfile(joinpath(_ASSETS_DIR, "max_anatomy_to_ontology.json")) ?
-                             joinpath(_ASSETS_DIR, "max_anatomy_to_ontology.json") :
-                             (isfile(joinpath(_REPO_DATA, "max_anatomy_to_ontology.json")) ?
-                             joinpath(_REPO_DATA, "max_anatomy_to_ontology.json") :
-                             joinpath(_PKG_ROOT, "max_anatomy_to_ontology.json"))
-
-# Persistent custom dropdown options (cross-patient and cross-run)
-const GLOBAL_CUSTOM_OPTS_PATH = joinpath(homedir(), ".medeye3d_custom_options.json")
-const GLOBAL_CUSTOM_FIELDS_PATH = joinpath(homedir(), ".medeye3d_custom_fields.json")
-const CUSTOM_OPTS_PATH = let
-    p0 = joinpath(_ASSETS_DIR, "custom_options.json")
-    p1 = joinpath(_PKG_ROOT, "custom_options.json")
-    p2 = joinpath(_REPO_DATA, "custom_options.json")
-    p3 = joinpath(_SLICER_DATA, "custom_options.json")
-    isfile(p0) ? p0 : (isfile(p1) ? p1 : (isfile(p2) ? p2 : (isfile(p3) ? p3 : p0)))
+function _find_metadata_data_file(filename::String)::String
+    candidates = [
+        normpath(joinpath(@__DIR__, "..", "..", "assets", filename)),
+        normpath(joinpath(@__DIR__, "..", "..", "data", filename)),
+        joinpath(dirname(Sys.BINDIR), "assets", filename),
+        joinpath(dirname(Sys.BINDIR), "data", filename),
+        joinpath(Sys.BINDIR, "assets", filename),
+        joinpath(Sys.BINDIR, "data", filename),
+        joinpath(get(ENV, "APPDATA", ""), "MedEye3D", "assets", filename),
+        joinpath(get(ENV, "APPDATA", ""), "MedEye3D", "data", filename),
+        joinpath(homedir(), "AppData", "Local", "Programs", "MedEye3D", "assets", filename),
+        joinpath(homedir(), "AppData", "Local", "Programs", "MedEye3D", "data", filename),
+        joinpath("D:\\slicer_lesion_text_extension", "data", filename),
+        "/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/data/$filename",
+        normpath(joinpath(@__DIR__, "..", "..", "extension", "data", filename))
+    ]
+    for c in candidates
+        isfile(c) && return c
+    end
+    return normpath(joinpath(@__DIR__, "..", "..", "assets", filename))
 end
+
+const DEF_JSON_PATH       = _find_metadata_data_file("def.json")
+const RADLEX_CSV_PATH     = _find_metadata_data_file("RadLex.csv")
+const ANATOMY_CSV_PATH    = _find_metadata_data_file("FoundationalAnatomy.csv")
+const CUSTOM_OPTS_PATH    = _find_metadata_data_file("custom_options.json")
+const DEFAULT_SAVE_PATH   = joinpath(homedir(), "medeye3d_lesion_annotations.json")
+const DEFAULT_HDF5_PATH   = joinpath(homedir(), "medeye3d_lesion_annotations.h5")
+const ANATOMY_MAPPING_PATH= _find_metadata_data_file("max_anatomy_to_ontology.json")
 
 const _custom_opts_cache = Ref{Dict{String,Any}}(Dict{String,Any}())
 const _custom_fields_cache = Ref{Dict{String,String}}(Dict{String,String}())
@@ -215,7 +205,7 @@ end
 const _schema_cache = Ref{Vector{QuestionDef}}(QuestionDef[])
 
 function _builtin_schema()::Vector{QuestionDef}
-    [
+    QuestionDef[
         QuestionDef("Radioligand Type", "The specific radioligand used for this PSMA-PET scan, influencing pharmacokinetic thresholds.",
             String["68Ga-PSMA-11", "18F-PSMA-1007", "18F-DCFPyL", "Other"],
             String["Technical Parameters"], "both", "68Ga-PSMA-11"),
@@ -271,7 +261,7 @@ function _builtin_schema()::Vector{QuestionDef}
             String["None / Malignant Suspected", "Technical Artifact", "Physiological uptake", "Small blood vessel / tubular structure", "Bone Scar / Hardware Graft", "Bone Island / Enostosis", "Osteopoikilosis / Dysplasia", "Bone Infarction / Osteonecrosis", "Trauma / Stress Fracture", "Benign Osteoporotic Collapse", "Fibrous Dysplasia", "Liposclerosing Myxofibrous Tumor (LSMFT)", "Degenerative Osteoarthritis", "Enchondroma", "Paget's Disease", "Osseous Hemangioma", "Osteoma", "Severe Osteoporosis (RID39300)", "Multiple Myeloma", "Chronic Osteomyelitis", "Brodie Abscess", "Giant Cell Tumor (GCT)", "Telangiectatic Osteosarcoma", "Osteosarcoma", "Desmoplastic Fibroma", "Blowout Metastasis (RCC / Thyroid)", "Low-Grade Central Osteosarcoma", "Trigeminal Ganglion", "Stellate Ganglion", "Coeliac Ganglion", "Hypogastric Ganglion", "Sacral Ganglion", "Sympathetic Ganglion", "Testicular Distant Nodal Route", "Sarcoidosis", "Lung Fibrosis", "Reactive Lymph Node", "Suspicious Lymph Node", "Benign Adrenal Adenoma", "Adrenal Metastasis / Malignancy", "Pancreatic Neuroendocrine Tumor (PanNET)", "Pancreatic Ductal Adenocarcinoma (PDAC)", "Accessory Spleen / Splenosis", "Schwannoma / Nerve Sheath Tumor", "Vestibular Schwannoma", "Glomus Tumor (Paraganglioma)", "Meningioma", "Liver Hemangioma", "Liver Hematoma", "CZ Mickey Mouse Base", "Symmetric BPH", "Prostatitis", "Extraprostatic extension (T3b/T4)", "PZ Prostate Cancer", "TZ Prostate Cancer", "PSMA-Cold Malignancy Suspected", "Aneurysmal Bone Cyst (ABC)", "Simple Bone Cyst (SBC)", "Radiation-Induced Sarcoma", "Brown Tumor (Hyperparathyroidism)", "Modic Type 1 Endplate Changes", "Diffuse Bone Marrow Activation (Anemia)", "Inflammatory Spondylitis (AS)", "Osteoid Osteoma", "Desmoid Tumor (Aggressive Fibromatosis)", "Nodular Fasciitis", "Lipoma / Angiolipoma / Hibernoma", "Intramuscular Myxoma", "Gynecomastia / PASH", "Elastofibroma Dorsi", "Thyroid / Parathyroid Adenoma", "Thymoma / Thymic Hyperplasia", "Cerebral Infarction (Stroke)", "Synchronous Colorectal Cancer", "Primary Lung Cancer", "Malignant Melanoma Metastasis", "Lymphoma (DLBCL / FL)", "Tuberculosis (TB)", "Diverticulitis", "Cholelithiasis (Gallbladder Stones)", "Dermatofibroma / Acrochordon", "Active Vascular Calcification", "Esophagitis / Swallowed Saliva", "Bronchogenic Cyst", "Pheochromocytoma"],
             String["Final Assessment"], "both", "None / Malignant Suspected"),
         QuestionDef("Certainty", "Degree of diagnostic certainty (1 = very low, 10 = very high)",
-            String["slider", "0", "10"],
+            String["slider", "1", "10"],
             String["Final Assessment"], "both", "10"),
         QuestionDef("Comment", "Additional clinical comments or observations.",
             String[],
@@ -333,7 +323,6 @@ function load_radlex()::Vector{String}
 end
 
 # ─── Anatomy Ontology (FoundationalAnatomy.csv) for Base Anatomy autocomplete ─
-# (ANATOMY_CSV_PATH defined above in Paths section)
 const _anatomy_cache = Ref{Vector{String}}(String[])
 
 """Load ALL FoundationalAnatomy.csv labels for Base Anatomy search/autocomplete."""

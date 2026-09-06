@@ -81,12 +81,31 @@ if isfile(license_path)
     println("✓ Copied LICENSE.")
 end
 
+# Copy metadata schema, ontologies, and custom options into distribution bundle
+dist_data_dir = joinpath(build_output_dir, "data")
+dist_assets_dir = joinpath(build_output_dir, "assets")
+mkpath(dist_data_dir)
+mkpath(dist_assets_dir)
+for dir_name in ["data", "assets"]
+    src_dir = joinpath(project_root, dir_name)
+    if isdir(src_dir)
+        for fname in ["def.json", "RadLex.csv", "FoundationalAnatomy.csv", "custom_options.json", "max_anatomy_to_ontology.json"]
+            src_f = joinpath(src_dir, fname)
+            if isfile(src_f)
+                cp(src_f, joinpath(dist_data_dir, fname); force=true)
+                cp(src_f, joinpath(dist_assets_dir, fname); force=true)
+                println("✓ Copied $dir_name/$fname to distribution bundle.")
+            end
+        end
+    end
+end
+
 # Create a default configuration / info file
 info_file = joinpath(build_output_dir, "app_info.json")
 write(info_file, """
 {
     "name": "MedEye3D",
-    "version": "0.5.8",
+    "version": "0.5.9",
     "arch": "x86_64",
     "entrypoint": "bin/MedEye3D.exe",
     "description": "High-Performance 3D Medical Image Annotation & Visualization Software"

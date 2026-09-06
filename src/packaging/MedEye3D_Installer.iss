@@ -3,7 +3,7 @@
 ; =====================================================================
 
 #define MyAppName "MedEye3D"
-#define MyAppVersion "0.5.8"
+#define MyAppVersion "0.5.9"
 #define MyAppPublisher "JuliaHealth / Dr. Jakub Mitura"
 #define MyAppURL "https://github.com/JuliaHealth/MedEye3d.jl"
 #define MyAppExeName "MedEye3D.exe"

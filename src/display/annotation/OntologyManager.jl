@@ -26,11 +26,22 @@ end
 format_term(t::OntologyTerm) = "$(t.id) \u2014 $(t.label)"   # em-dash OK in Julia strings
 parse_term_id(s::String) = split(s, " \u2014 "; limit=2)[1]  # extract ID from formatted string
 
-# ─── Caches ──────────────────────────────────────────────────────────────────
-const _PKG_DATA = let
-    p_assets = normpath(joinpath(@__DIR__, "..", "..", "..", "assets"))
-    p_ext = normpath(joinpath(@__DIR__, "..", "..", "..", "extension", "data"))
-    isdir(p_assets) && isfile(joinpath(p_assets, "RadLex.csv")) ? p_assets : p_ext
+function _find_ontology_file(filename::String)::String
+    candidates = [
+        joinpath(@__DIR__, "..", "..", "..", "assets", filename),
+        joinpath(@__DIR__, "..", "..", "..", "data", filename),
+        joinpath(dirname(Sys.BINDIR), "assets", filename),
+        joinpath(dirname(Sys.BINDIR), "data", filename),
+        joinpath(Sys.BINDIR, "assets", filename),
+        joinpath(Sys.BINDIR, "data", filename),
+        joinpath("D:\\slicer_lesion_text_extension", "data", filename),
+        "/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/data/$filename",
+        joinpath(@__DIR__, "..", "..", "..", "extension", "data", filename)
+    ]
+    for c in candidates
+        isfile(c) && return c
+    end
+    return joinpath(@__DIR__, "..", "..", "..", "assets", filename)
 end
 const _radlex_cache = Ref{Vector{OntologyTerm}}(OntologyTerm[])
 const _anatomy_cache = Ref{Vector{OntologyTerm}}(OntologyTerm[])
@@ -41,7 +52,7 @@ const MAX_TERMS = 2000  # keep UI responsive
 # ─── Loaders ─────────────────────────────────────────────────────────────────
 function load_radlex(;max_terms::Int = MAX_TERMS)::Vector{OntologyTerm}
     isempty(_radlex_cache[]) || return _radlex_cache[]
-    path = joinpath(_PKG_DATA, "RadLex.csv")
+    path = _find_ontology_file("RadLex.csv")
     terms = _load_csv(path, :RadLex, max_terms)
     _radlex_cache[] = sort(terms; by = t -> t.label)
     @info "OntologyManager: loaded $(length(_radlex_cache[])) RadLex terms"
@@ -50,7 +61,7 @@ end
 
 function load_foundational_anatomy(;max_terms::Int = MAX_TERMS)::Vector{OntologyTerm}
     isempty(_anatomy_cache[]) || return _anatomy_cache[]
-    path = joinpath(_PKG_DATA, "FoundationalAnatomy.csv")
+    path = _find_ontology_file("FoundationalAnatomy.csv")
     # FoundationalAnatomy.csv format: Name,ID
     terms = OntologyTerm[]
     isfile(path) || (@warn "FoundationalAnatomy.csv not found at $path"; return terms)
