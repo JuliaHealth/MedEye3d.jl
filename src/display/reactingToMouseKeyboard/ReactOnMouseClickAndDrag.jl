@@ -270,6 +270,20 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
         MEH.mark_tp_mask_dirty!(MEH.current_tp_index[])
         paint_id = round(Int, stateObject.valueForMasToSet.value)
         if paint_id > 0
+            # Sync painted slice to tp_data_cache so organ mapping can find new voxels
+            tp_idx = MEH.current_tp_index[]
+            cur_slice = stateObject.currentDisplayedSlice
+            if haskey(MEH.tp_data_cache, tp_idx)
+                entry = MEH.tp_data_cache[tp_idx]
+                try
+                    entry.mask_i16[:, :, cur_slice] .= Int16.(twoDimDat.dat)
+                    if entry.mask isa Array{Int8, 3}
+                        entry.mask[:, :, cur_slice] .= clamp.(twoDimDat.dat, Int8(-128), Int8(127))
+                    else
+                        entry.mask[:, :, cur_slice] .= twoDimDat.dat
+                    end
+                catch; end
+            end
             MEH.invalidate_and_recompute_lesion_metrics_async!(paint_id, MEH.current_tp_index[])
         end
     catch e

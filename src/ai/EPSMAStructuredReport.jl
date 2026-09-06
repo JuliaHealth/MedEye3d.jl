@@ -16,6 +16,7 @@ export EPSMALesionRow,
        get_or_build_report,
        invalidate_report!,
        request_report_refresh!,
+       register_refresh_callback!,
        enrich_with_llm!,
        export_to_docx,
        to_dict
@@ -1174,6 +1175,17 @@ end
 # ── Debounced auto-refresh ───────────────────────────────────────────────────
 const _refresh_pending = Ref{Bool}(false)
 const _refresh_lock = ReentrantLock()
+const _on_refresh_callback = Ref{Any}(nothing)
+
+"""
+    register_refresh_callback!(cb)
+
+Register a callback `cb(tp_idx::Int)` that fires after each auto-refresh rebuild.
+Used by the report window to update its visible GUI text.
+"""
+function register_refresh_callback!(cb)
+    _on_refresh_callback[] = cb
+end
 
 """
     request_report_refresh!(tp_idx::Int)
@@ -1197,6 +1209,12 @@ function request_report_refresh!(tp_idx::Int)
             invalidate_report!(tp_idx)
             _report_cache[tp_idx] = build_epsma_data(tp_idx)
             @info "[E-PSMA] Auto-refreshed TP $tp_idx: $(length(_report_cache[tp_idx].synoptic_rows)) rows"
+            # Notify the report window (if open) to update its GUI
+            if _on_refresh_callback[] !== nothing
+                try _on_refresh_callback[](tp_idx) catch e
+                    @warn "[E-PSMA] Refresh callback failed: $e"
+                end
+            end
         catch e
             @warn "[E-PSMA] Auto-refresh failed for TP $tp_idx" exception=e
         end

@@ -53,35 +53,10 @@ function synchronized_makie_renderloop(screen)
     if _first_screen_ref[] === nothing
         _first_screen_ref[] = screen
         println("[RENDERLOOP] Main screen self-registered: $(objectid(screen))")
+    else
+        println("[RENDERLOOP] Secondary screen started: $(objectid(screen)), main=$(objectid(_first_screen_ref[]))")
     end
     while isopen(screen) && !screen.stop_renderloop[]
-        # Check if report window should be hidden (flag set by EPSMAReportWindow)
-        if _report_hide_flag[] && screen !== _first_screen_ref[]
-            _report_hide_flag[] = false
-            try
-                lock(GLOBAL_OPENGL_LOCK) do
-                    GLMakie.GLAbstraction.with_context(screen.glscreen) do
-                        GLFW.IconifyWindow(GLMakie.to_native(screen))  # Minimize (universally supported)
-                    end
-                end
-                screen.config.pause_renderloop = true
-                # Focus main Makie window so user can interact immediately
-                main_scr = _first_screen_ref[]
-                if main_scr !== nothing
-                    try
-                        lock(GLOBAL_OPENGL_LOCK) do
-                            GLFW.RestoreWindow(GLMakie.to_native(main_scr))
-                            GLFW.FocusWindow(GLMakie.to_native(main_scr))
-                        end
-                    catch; end
-                end
-                println("[E-PSMA] Report window minimized, main window focused")
-            catch e
-                println("[E-PSMA] Minimize failed in renderloop: $e")
-            end
-            sleep(0.1)
-            continue
-        end
         try
             if isdefined(GLMakie, :GLAbstraction)
                 lock(GLOBAL_OPENGL_LOCK) do
@@ -628,6 +603,11 @@ function coordinateDisplay(
 
     # Start the single persistent inference worker thread
     MakieEventHandlers.start_inference_worker()
+
+    # Hide Panel 2 (PET-only) for MRI modalities at startup
+    if length(stateInstances) >= 2
+        MakieEventHandlers._update_quad_layout_for_modality!(stateInstances, 0)
+    end
 
     # Preload initial CT into Docker nnInteractive GPU (fire-and-forget)
     try

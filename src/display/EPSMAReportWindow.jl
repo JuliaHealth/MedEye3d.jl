@@ -14,6 +14,7 @@ export open_epsma_report_window, close_epsma_report_window, active_report_screen
 const active_report_screen = Ref{Any}(nothing)
 const active_report_fig = Ref{Any}(nothing)
 const active_report_data = Ref{Any}(nothing)
+const _report_glfw_window = Ref{Any}(nothing)  # GLFW native window handle for report
 
 """
     _sync_edits_to_report!(report, lang, sec1, sec3, sec4p, sec4l, sec4b, sec4v, sec6)
@@ -663,44 +664,46 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
 
     # ── Button Handlers ──────────────────────────────────────────────────────
     on(btn_export.clicks) do _
-        lang = current_lang[]
-        default_dir = joinpath(@__DIR__, "..", "..", "data", "reports")
-        isdir(default_dir) || mkpath(default_dir)
-        default_name = "E_PSMA_Report_$(report.patient_id)_TP$(report.tp_index)_$(lang).docx"
-        default_path = joinpath(default_dir, default_name)
-        
-        status_text[] = "[...] Choosing save location..."
-        
-        # Show native file dialog (zenity on Linux)
-        out_path = try
-            cmd = Cmd(["zenity", "--file-selection", "--save", "--confirm-overwrite",
-                       "--title=Save E-PSMA Report", "--filename=$default_path"])
-            chomp(read(cmd, String))
-        catch
-            # Fallback to default path if dialog cancelled or zenity unavailable
-            nothing
-        end
-        
-        if out_path === nothing || isempty(out_path)
-            status_text[] = "[CANCELLED] Export cancelled by user"
-            return
-        end
-        
-        # Ensure .docx extension
-        if !endswith(lowercase(out_path), ".docx")
-            out_path *= ".docx"
-        end
-        
-        status_text[] = "[...] Generating Word report ($lang)..."
-        try
-            # Sync user edits from GUI textboxes → report object before export
-            _sync_edits_to_report!(report, lang, sec1_text, sec3_text, sec4_prostate, sec4_lymph, sec4_bone, sec4_visceral, sec6_text)
-            ESR.export_to_docx(report, out_path; lang = lang)
-            status_text[] = "[OK] Exported: $(basename(out_path))"
-            println("[E-PSMA] Exported Word report to $out_path")
-        catch e
-            status_text[] = "[ERR] Export failed: $e"
-            @error "Failed to export Word document" exception=e
+        @async begin
+            lang = current_lang[]
+            default_dir = joinpath(@__DIR__, "..", "..", "data", "reports")
+            isdir(default_dir) || mkpath(default_dir)
+            default_name = "E_PSMA_Report_$(report.patient_id)_TP$(report.tp_index)_$(lang).docx"
+            default_path = joinpath(default_dir, default_name)
+            
+            status_text[] = "[...] Choosing save location..."
+            
+            # Show native file dialog (zenity on Linux) — runs async to not block renderloop
+            out_path = try
+                cmd = Cmd(["zenity", "--file-selection", "--save", "--confirm-overwrite",
+                           "--title=Save E-PSMA Report", "--filename=$default_path"])
+                chomp(read(cmd, String))
+            catch
+                # Fallback to default path if dialog cancelled or zenity unavailable
+                nothing
+            end
+            
+            if out_path === nothing || isempty(out_path)
+                status_text[] = "[CANCELLED] Export cancelled by user"
+                return
+            end
+            
+            # Ensure .docx extension
+            if !endswith(lowercase(out_path), ".docx")
+                out_path *= ".docx"
+            end
+            
+            status_text[] = "[...] Generating Word report ($lang)..."
+            try
+                # Sync user edits from GUI textboxes → report object before export
+                _sync_edits_to_report!(report, lang, sec1_text, sec3_text, sec4_prostate, sec4_lymph, sec4_bone, sec4_visceral, sec6_text)
+                ESR.export_to_docx(report, out_path; lang = lang)
+                status_text[] = "[OK] Exported: $(basename(out_path))"
+                println("[E-PSMA] Exported Word report to $out_path")
+            catch e
+                status_text[] = "[ERR] Export failed: $e"
+                @error "Failed to export Word document" exception=e
+            end
         end
     end
 
@@ -755,7 +758,13 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
         try
             ESR.invalidate_report!(report.tp_index)
             new_report = ESR.get_or_build_report(report.tp_index)
+            # Copy fields into captured `report` so set_language! sees updated data
+            for fname in fieldnames(ESR.EPSMAReport)
+                try setfield!(report, fname, getfield(new_report, fname)) catch; end
+            end
             active_report_data[] = new_report
+            hdr_patient_lbl[] = "Patient: $(report.patient_id)  |  $(report.tp_label)  |  $(report.modality)"
+            hdr_mitnm_lbl[] = "miTNM: $(report.final_mitnm)  |  TMTV: $(round(report.tmtv_cc, digits=2)) cc"
             set_language!(current_lang[])
             status_text[] = "[OK] Report refreshed with latest metadata!"
             if on_refresh !== nothing
@@ -767,23 +776,64 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
     end
 
     on(btn_close.clicks) do _
-        _report_hide_flag[] = true
-        println("[E-PSMA] Close requested (flag set)")
+        scr = active_report_screen[]
+        if scr === nothing
+            println("[E-PSMA] No report screen to minimize")
+            return
+        end
+        println("[E-PSMA] Close requested — scheduling async minimize")
+        # @async because this callback fires inside pollevents() which holds GLOBAL_OPENGL_LOCK
+        @async begin
+            try
+                lock(GLOBAL_OPENGL_LOCK) do
+                    GLMakie.GLFW.IconifyWindow(scr.glscreen)
+                end
+                println("[E-PSMA] Report window minimized successfully")
+            catch e
+                println("[E-PSMA] Minimize failed: $e")
+            end
+        end
+    end
+
+    # Register callback so auto-refresh updates the visible report window
+    ESR.register_refresh_callback!() do tp_idx
+        rd = active_report_data[]
+        if rd !== nothing && rd.tp_index == tp_idx
+            new_report = ESR.get_or_build_report(tp_idx)
+            # Copy all fields from new_report into the captured `report` object
+            # (set_language! reads from `report`, not from `active_report_data[]`)
+            for fname in fieldnames(ESR.EPSMAReport)
+                try setfield!(report, fname, getfield(new_report, fname)) catch; end
+            end
+            active_report_data[] = new_report
+            # Update header banner
+            hdr_patient_lbl[] = "Patient: $(report.patient_id)  |  $(report.tp_label)  |  $(report.modality)"
+            hdr_mitnm_lbl[] = "miTNM: $(report.final_mitnm)  |  TMTV: $(round(report.tmtv_cc, digits=2)) cc"
+            # Update text sections (synoptic table rows are static layout — use Refresh button to rebuild)
+            set_language!(current_lang[])
+            status_text[] = "[OK] Auto-refreshed — text updated (click Refresh to rebuild synoptic table)"
+            println("[E-PSMA] Report window auto-refreshed for TP $tp_idx ($(length(report.synoptic_rows)) rows)"); flush(stdout)
+        end
     end
 
     if reuse_screen
-        _report_hide_flag[] = false  # Clear any pending hide
         lock(GLOBAL_OPENGL_LOCK) do
             empty!(screen)
             display(screen, fig)
-            screen.config.pause_renderloop = false  # Unpause after minimize
-            GLMakie.GLFW.RestoreWindow(screen.glscreen)  # Un-minimize
+            screen.config.pause_renderloop = false
+            GLMakie.GLFW.RestoreWindow(screen.glscreen)
             GLMakie.GLFW.ShowWindow(screen.glscreen)
-            GLMakie.GLFW.FocusWindow(screen.glscreen)    # Bring to front
+            GLMakie.GLFW.FocusWindow(screen.glscreen)
         end
     else
+        # Use Screen() without scene arg → screen_from_pool() → independent GLFW window
+        # (Screen(fig.scene) uses singleton_screen() which shares the main window!)
         screen = lock(GLOBAL_OPENGL_LOCK) do
-            s = GLMakie.Screen(fig.scene; renderloop = synchronized_makie_renderloop)
+            s = GLMakie.Screen(;
+                renderloop = synchronized_makie_renderloop,
+                title = "E-PSMA Report — $(report.patient_id)",
+                focus_on_show = true
+            )
             display(s, fig)
             s
         end
@@ -791,7 +841,8 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
     
     active_report_screen[] = screen
     active_report_fig[] = fig
-    _report_screen_ref[] = screen  # Register with renderloop for safe hiding
+    _report_screen_ref[] = screen
+    println("[E-PSMA] Report window opened (independent screen: $(objectid(screen)), glscreen: $(screen.glscreen))")
     return screen
 end
 
@@ -801,7 +852,16 @@ end
 Closes the E-PSMA report window if open.
 """
 function close_epsma_report_window()
-    _report_hide_flag[] = true
+    scr = active_report_screen[]
+    if scr !== nothing
+        @async begin
+            try
+                lock(GLOBAL_OPENGL_LOCK) do
+                    GLMakie.GLFW.IconifyWindow(scr.glscreen)
+                end
+            catch; end
+        end
+    end
 end
 
 end # module EPSMAReportWindow

@@ -391,9 +391,9 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                 end
             end
 
-            # 4-pane view
+            # 4-pane view (hide Panel 2 for MRI modalities without PET/SPECT)
             updateQuadVertices!(stateObjects[1], :TopLeft)
-            updateQuadVertices!(stateObjects[2], :TopRight)
+            _update_quad_layout_for_modality!(stateObjects, current_tp_index[])
             updateQuadVertices!(stateObjects[3], :BottomLeft)
             updateQuadVertices!(stateObjects[4], :BottomRight)
             updateQuadVertices!(stateObjects[5], :Hidden)
@@ -1119,6 +1119,22 @@ function _force_mri_show_all!(tp::Int, stateObjects::Vector{StateDataFields})
     end
 end
 
+"""Check if timepoint modality has PET/SPECT data (not MRI-only)."""
+function _has_nuclear_modality(tp::Int)::Bool
+    panel_mod = uppercase(get(tp_modalities, tp, "PET"))
+    return !(panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI"))
+end
+
+"""Update quad layout: hide Panel 2 (PET-only) when modality is MRI."""
+function _update_quad_layout_for_modality!(stateObjects::Vector{StateDataFields}, tp::Int)
+    if _has_nuclear_modality(tp)
+        updateQuadVertices!(stateObjects[2], :TopRight)
+    else
+        updateQuadVertices!(stateObjects[2], :Hidden)
+        println("[LAYOUT] Panel 2 (PET-only) hidden — MRI modality for TP $tp"); flush(stdout)
+    end
+end
+
 const tp_loader_ref = Ref{Any}(nothing)
 const io_channel = Ref{Any}(nothing)
 const main_event_channel = Ref{Any}(nothing)
@@ -1506,6 +1522,7 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
     invalidate_suv_for_lesion(lesion_id, tp_idx)
     
     # 2. Recompute centroid from current mask
+    centroid_found = false
     if mask_vol !== nothing
         try
             indices = findall(x -> round(Int, x) == lesion_id, mask_vol)
@@ -1517,16 +1534,18 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
                 if tp_idx == current_tp_index[]
                     lesion_centroids_cache[lesion_id] = [cx, cy, cz]
                 end
+                centroid_found = true
                 println("  [SUV] Recomputed centroid for lesion $lesion_id @ TP $tp_idx: ($cx,$cy,$cz)"); flush(stdout)
             end
         catch e
             @warn "Centroid recompute failed for lesion $lesion_id: $e"
         end
-    elseif haskey(tp_data_cache, tp_idx)
-        # Try to get mask from tp_data_cache
+    end
+    # Try mask_i16 from tp_data_cache (this is the Int16 version, handles IDs > 127)
+    if !centroid_found && haskey(tp_data_cache, tp_idx)
         try
             entry = tp_data_cache[tp_idx]
-            m = entry.mask
+            m = entry.mask_i16  # Use Int16 version for IDs > 127
             indices = findall(x -> round(Int, x) == lesion_id, m)
             if !isempty(indices)
                 cx = round(Int, mean(i[1] for i in indices))
@@ -1536,11 +1555,59 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
                 if tp_idx == current_tp_index[]
                     lesion_centroids_cache[lesion_id] = [cx, cy, cz]
                 end
+                centroid_found = true
             end
         catch; end
     end
     
-    # 3. Async recompute SUV/volume/PROMISE (pre-populate caches)
+    # 3. Update organ mapping from atlas (if not already set)
+    if !haskey(global_organ_mapping[], lesion_id) || get(global_organ_mapping[], lesion_id, "") in ("", "Unknown")
+        try
+            atlas = global_ts_atlas[]
+            ts_nm = global_ts_names[]
+            if atlas !== nothing && ts_nm !== nothing
+                organ_name = ""
+                # Try volume-based scan first (most accurate — uses bone priority)
+                if mask_vol !== nothing
+                    LA = _get_la()
+                    if LA !== nothing
+                        organ_name = LA.classify_and_pick_best_organ(mask_vol, atlas, ts_nm, lesion_id)
+                    end
+                elseif haskey(tp_data_cache, tp_idx)
+                    LA = _get_la()
+                    if LA !== nothing
+                        organ_name = LA.classify_and_pick_best_organ(tp_data_cache[tp_idx].mask_i16, atlas, ts_nm, lesion_id)
+                    end
+                end
+                # Fallback: centroid-based atlas lookup
+                if isempty(organ_name) && centroid_found
+                    centroid = lesion_centroids_cache[(tp_idx, lesion_id)]
+                    mask_sz = haskey(tp_data_cache, tp_idx) ? size(tp_data_cache[tp_idx].mask) : nothing
+                    if mask_sz !== nothing
+                        sx = clamp(round(Int, centroid[1] * size(atlas,1) / mask_sz[1]), 1, size(atlas,1))
+                        sy = clamp(round(Int, centroid[2] * size(atlas,2) / mask_sz[2]), 1, size(atlas,2))
+                        sz = clamp(round(Int, centroid[3] * size(atlas,3) / mask_sz[3]), 1, size(atlas,3))
+                    else
+                        sx = clamp(centroid[1], 1, size(atlas,1))
+                        sy = clamp(centroid[2], 1, size(atlas,2))
+                        sz = clamp(centroid[3], 1, size(atlas,3))
+                    end
+                    anat_val = Int(atlas[sx, sy, sz])
+                    if anat_val > 0 && haskey(ts_nm, anat_val)
+                        organ_name = ts_nm[anat_val]
+                    end
+                end
+                if !isempty(organ_name)
+                    global_organ_mapping[][lesion_id] = organ_name
+                    println("  [SUV] Auto-mapped lesion $lesion_id → '$organ_name' from paint voxels"); flush(stdout)
+                end
+            end
+        catch e
+            @warn "Organ mapping update failed for lesion $lesion_id: $e"
+        end
+    end
+    
+    # 4. Async recompute SUV/volume/PROMISE (pre-populate caches)
     Threads.@spawn begin
         try
             LMW = _get_lmw()
@@ -1697,6 +1764,10 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
             if DEBUG_VERBOSE[]; println("  [BENCH] bone overlay (reactToSyncLesion): $(round(t_bone_overlay*1000, digits=1))ms"); flush(stdout); end
             # On MRI: force show-all segments (override single-lesion filter from reactToSyncLesion)
             _force_mri_show_all!(new_tp, stateObjects)
+            # Hide/show Panel 2 (PET-only) based on modality
+            if !compare_mode[]
+                _update_quad_layout_for_modality!(stateObjects, new_tp)
+            end
         end
     end
     # Sliding window: preload adjacent TPs (current ± 1), evict distant ones
@@ -1843,6 +1914,10 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
             end
             # On MRI: force show-all segments
             _force_mri_show_all!(target_tp, stateObjects)
+            # Hide/show Panel 2 (PET-only) based on modality
+            if !compare_mode[]
+                _update_quad_layout_for_modality!(stateObjects, target_tp)
+            end
         end
     end
 
