@@ -2,7 +2,7 @@
 
 julia_version = "1.11.3"
 manifest_format = "2.0"
-project_hash = "8105886295b41abef8316f5b944504a2ba8a2ee3"
+project_hash = "d3146e5bf1a7d4439a30566aef27e20360a0b71c"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "0a81a018463de6c3f4f2c9360121c562e5add9e4"
@@ -602,6 +602,11 @@ deps = ["Libdl", "MacroTools", "libcxxwrap_julia_jll"]
 git-tree-sha1 = "3d05a37a8d40524752524da392ec0c2fbee32543"
 uuid = "1f15a43c-97ca-5a2a-ae31-89f07a497df4"
 version = "0.16.2"
+
+[[deps.DBInterface]]
+git-tree-sha1 = "a444404b3f94deaa43ca2a58e18153a82695282b"
+uuid = "a10d1c49-ce27-4219-8d33-6db1a4562965"
+version = "2.6.1"
 
 [[deps.DICOM]]
 git-tree-sha1 = "8857acfd0f2ae6f2d27a187fb7cdcd990e0866da"
@@ -3347,6 +3352,18 @@ git-tree-sha1 = "72312aa278823c0e99ce31186e22d917d2d11f99"
 uuid = "476501e8-09a2-5ece-8869-fb82de89a1fa"
 version = "0.6.46"
 
+[[deps.SQLite]]
+deps = ["DBInterface", "Random", "SQLite_jll", "Serialization", "Tables", "WeakRefStrings"]
+git-tree-sha1 = "e06c74d1b23a4180c3f79a718235c8a15c165849"
+uuid = "0aa819cd-b072-5ff4-a722-6bc24af294d9"
+version = "1.8.1"
+
+[[deps.SQLite_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl", "Zlib_jll", "dlfcn_win32_jll"]
+git-tree-sha1 = "324744e40b84e6dc2cfaa4122ce969a083c40a6f"
+uuid = "76ed43ae-9a5d-5a62-8c75-30186b810ce8"
+version = "3.53.2+0"
+
 [[deps.SciMLBase]]
 deps = ["ADTypes", "Accessors", "Adapt", "ArrayInterface", "CommonSolve", "ConstructionBase", "Distributed", "DocStringExtensions", "EnumX", "FindFirstFunctions", "FunctionWrappersWrappers", "IteratorInterfaceExtensions", "LinearAlgebra", "Logging", "LoggingExtras", "Markdown", "PreallocationTools", "PrecompileTools", "Preferences", "Printf", "Random", "RecipesBase", "RecursiveArrayTools", "RuntimeGeneratedFunctions", "SciMLLogging", "SciMLOperators", "SciMLPublic", "SciMLStructures", "StaticArraysCore", "Statistics", "SymbolicIndexingInterface"]
 git-tree-sha1 = "3da7c8123557f718eb91d51fb71a10e0239bcf6f"
@@ -4188,6 +4205,12 @@ deps = ["Artifacts", "JLLWrappers", "Libdl"]
 git-tree-sha1 = "6498e3581023f8e530f34760d18f75a69e3a4ea8"
 uuid = "1e29f10c-031c-5a83-9565-69cddfc27673"
 version = "1.3.0+0"
+
+[[deps.dlfcn_win32_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "e141d67ffe550eadfb5af1bdbdaf138031e4805f"
+uuid = "c4b69c83-5512-53e3-94e6-de98773c479f"
+version = "1.4.2+0"
 
 [[deps.glslang_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]

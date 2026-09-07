@@ -377,6 +377,38 @@ function resolve_anatomical_location(lid::Integer, state::Union{AbstractDict, No
     is_artifact = alt_hyp == "Technical Artifact" || certainty == "0" || ltype == "Technical Artifact" || is_muscle ||
                   occursin("artifact", combined_check) || occursin("artefakt", combined_check) || occursin("bladder", combined_check)
 
+    # 4b. Override muscle/artifact when atlas says bone (user primary rule:
+    #     "if lesion is in bone based on max anatomy, it is recognized as such")
+    if (is_muscle || is_artifact) && _MEH !== nothing
+        atlas_organ = get(_MEH.global_organ_mapping[], lid, "")
+        if !isempty(atlas_organ) && atlas_organ != "Unknown"
+            # Inline bone detection (same keywords as LesionAssociation.classify_tissue_priority)
+            alo = lowercase(atlas_organ)
+            bone_kw = ["vertebra", "rib_", "femur", "humerus", "scapula_", "hip_",
+                        "sacrum", "skull", "sternum", "clavicle", "costal", "hyoid",
+                        "ilium", "ischium", "pubis", "tibia", "mandible"]
+            vessel_excl = ["artery", "vein", "vena", "vessel"]
+            muscle_excl = ["levator", "subscapularis", "infraspinatus", "supraspinatus",
+                           "teres", "coracobrachial"]
+            is_atlas_bone = any(k -> occursin(k, alo), bone_kw) &&
+                           !any(v -> occursin(v, alo), vessel_excl) &&
+                           !any(m -> occursin(m, alo), muscle_excl)
+            if is_atlas_bone
+                @info "[E-PSMA] Overriding muscle/artifact for lesion $lid: atlas='$atlas_organ' is BONE, BaseAnatomy='$base_anat' triggered muscle flag"
+                is_muscle = false
+                is_artifact = alt_hyp == "Technical Artifact" || certainty == "0" || ltype == "Technical Artifact"
+                raw_organ = atlas_organ  # Use atlas bone name instead of muscle BaseAnatomy
+                ont_entry = _lookup_ontology(raw_organ)  # Re-lookup ontology for bone
+            end
+        end
+    end
+    # 4c. Override artifact when LesionType is "Bone Meta"
+    if ltype == "Bone Meta" && (is_artifact || is_muscle)
+        @info "[E-PSMA] Overriding artifact for lesion $lid: LesionType='Bone Meta'"
+        is_artifact = false
+        is_muscle = false
+    end
+
     # 5. Format human-readable clinical location
     clean_loc = ""
     clean_side = !isempty(side) ? side : (ont_entry !== nothing ? get(ont_entry, "side", "") : "")
@@ -1338,7 +1370,7 @@ end
 
 Exports the E-PSMA report to a formatted Microsoft Word document (.docx).
 """
-function export_to_docx(report::EPSMAReport, out_path::String; lang::String="EN")::String
+function export_to_docx(report::EPSMAReport, out_path::AbstractString; lang::AbstractString="EN")::String
     json_data = to_dict(report)
     _sanitize_json!(json_data)
     json_str = JSON.json(json_data)

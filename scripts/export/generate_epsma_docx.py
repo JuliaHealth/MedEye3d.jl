@@ -79,50 +79,13 @@ def build_epsma_docx(data, output_path, lang="EN"):
     run_title.font.bold = True
     run_title.font.color.rgb = PRIMARY
 
-    sub_p = doc.add_paragraph()
-    sub_p.paragraph_format.space_after = Pt(12)
-    run_sub = sub_p.add_run(
-        "Gemäß EANM Standardized Reporting Guidelines v1.0 für PSMA-PET/CT (Eur J Nucl Med Mol Imaging 2021 48:1626–1638)"
-        if is_de else
-        "In accordance with EANM Standardized Reporting Guidelines v1.0 for PSMA PET/CT (Eur J Nucl Med Mol Imaging 2021 48:1626–1638)"
-    )
-    run_sub.font.size = Pt(9.5)
-    run_sub.font.italic = True
-    run_sub.font.color.rgb = MUTED
 
-    # Header Meta Box Table
+
+    # Patient data (used in staging box later)
     patient_id = data.get("patient_id", "Unknown")
     exam_date = data.get("study_date", data.get("tp_label", "Current"))
     modality = data.get("modality", "PET/CT")
     mitnm = data.get("final_mitnm", "miT0 miN0 miM0")
-
-    meta_tbl = doc.add_table(rows=2, cols=4)
-    meta_tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
-    set_table_borders(meta_tbl, color="B0C4DE", sz="6")
-
-    meta_headers = ["Patient ID", "Untersuchungsdatum" if is_de else "Exam Date", "Modalität" if is_de else "Modality", "Gesamt miTNM" if is_de else "Overall miTNM"]
-    meta_vals = [patient_id, exam_date, modality, mitnm]
-
-    for col_idx, (hdr, val) in enumerate(zip(meta_headers, meta_vals)):
-        c0 = meta_tbl.cell(0, col_idx)
-        set_cell_background(c0, "E9ECEF")
-        set_cell_margins(c0, top=80, bottom=80, left=120, right=120)
-        p0 = c0.paragraphs[0]
-        p0.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r0 = p0.add_run(hdr)
-        r0.font.size = Pt(8.5)
-        r0.font.bold = True
-        r0.font.color.rgb = PRIMARY
-
-        c1 = meta_tbl.cell(1, col_idx)
-        set_cell_margins(c1, top=80, bottom=80, left=120, right=120)
-        p1 = c1.paragraphs[0]
-        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r1 = p1.add_run(val)
-        r1.font.size = Pt(9.5)
-        r1.font.bold = (col_idx == 3)
-        if col_idx == 3:
-            r1.font.color.rgb = RGBColor(180, 40, 40)
 
     # 1. Patient History & Indication
     h1 = doc.add_paragraph()
@@ -174,10 +137,7 @@ def build_epsma_docx(data, output_path, lang="EN"):
     r_h4.font.bold = True
     r_h4.font.color.rgb = PRIMARY
 
-    preamble_txt = "Dieser Bericht wurde in Übereinstimmung mit den standardisierten Befundungsrichtlinien v1.0 der EANM für PSMA-PET/CT erstellt." if is_de else "This report has been produced in accordance with the European Association of Nuclear Medicine (EANM) standardized reporting guidelines v1.0 for PSMA PET/CT."
-    p_pre = doc.add_paragraph(preamble_txt)
-    p_pre.paragraph_format.space_after = Pt(10)
-    p_pre.style.font.size = Pt(10)
+
 
     bio_txt = data.get("biodistribution_text_de" if is_de else "biodistribution_text_en",
                        "Die physiologische Biodistribution des Tracers war regulär." if is_de else
@@ -248,201 +208,7 @@ def build_epsma_docx(data, output_path, lang="EN"):
     r_b3.font.bold = True
     r_b3.font.size = Pt(9.5)
 
-    # Appendix 
-    h_app = doc.add_paragraph()
-    h_app.paragraph_format.space_before = Pt(24)
-    h_app.paragraph_format.space_after = Pt(10)
-    r_app = h_app.add_run("Anhang — Synoptische Tabellen" if is_de else "Appendix — Synoptic Tables")
-    r_app.font.size = Pt(14)
-    r_app.font.bold = True
-    r_app.font.color.rgb = PRIMARY
 
-    # Appendix Table 1
-    h2_app = doc.add_paragraph()
-    h2_app.paragraph_format.space_before = Pt(10)
-    h2_app.paragraph_format.space_after = Pt(4)
-    r_h2_app = h2_app.add_run("[Synoptische Tabelle 1 — Untersuchungstechnik]" if is_de else "[Synoptic Table 1 — Technical Parameters]")
-    r_h2_app.font.size = Pt(10)
-    r_h2_app.font.bold = True
-    r_h2_app.font.color.rgb = PRIMARY
-
-    tech = data.get("tech_params", {})
-    t1_headers = [
-        "Radiopharmakon" if is_de else "Radiotracer",
-        "Aktivität" if is_de else "Activity Injected",
-        "Uptake-Zeit" if is_de else "Uptake Time",
-        "Akquisitionsbereich" if is_de else "Type of Acquisition",
-        "CT-Protokoll" if is_de else "CT Protocol",
-        "Kontrastmittel" if is_de else "Contrast Oral/IV",
-        "Diuretikum" if is_de else "Diuretic"
-    ]
-    t1_vals = [
-        tech.get("radiotracer", "[68Ga]Ga-PSMA-11"),
-        tech.get("injected_activity", "155 MBq (2.1 MBq/kg)"),
-        tech.get("uptake_time", "60 – 90 min"),
-        tech.get("acquisition_type", "Standard (Vertex to mid-thigh)"),
-        tech.get("ct_protocol", "Low-Dose / Diagnostic"),
-        tech.get("contrast", "No / Nein"),
-        tech.get("diuretic", "No / Nein")
-    ]
-
-    tbl1 = doc.add_table(rows=2, cols=7)
-    tbl1.alignment = WD_TABLE_ALIGNMENT.CENTER
-    set_table_borders(tbl1, color="CCCCCC", sz="4")
-
-    for c_idx, (hdr, val) in enumerate(zip(t1_headers, t1_vals)):
-        c0 = tbl1.cell(0, c_idx)
-        set_cell_background(c0, HEADER_BG)
-        set_cell_margins(c0, top=100, bottom=100, left=100, right=100)
-        p0 = c0.paragraphs[0]
-        p0.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r0 = p0.add_run(hdr)
-        r0.font.size = Pt(8.5)
-        r0.font.bold = True
-        r0.font.color.rgb = RGBColor(255, 255, 255)
-
-        c1 = tbl1.cell(1, c_idx)
-        set_cell_background(c1, "FFFFFF")
-        set_cell_margins(c1, top=80, bottom=80, left=100, right=100)
-        p1 = c1.paragraphs[0]
-        p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        r1 = p1.add_run(val)
-        r1.font.size = Pt(8.5)
-        r1.font.color.rgb = DARK_TEXT
-
-    # Appendix Table 2
-    h5 = doc.add_paragraph()
-    h5.paragraph_format.space_before = Pt(14)
-    h5.paragraph_format.space_after = Pt(4)
-    r_h5 = h5.add_run(
-        "[Synoptische Tabelle 2 — Befunde]" if is_de else
-        "[Synoptic Table 2 — Findings]"
-    )
-    r_h5.font.size = Pt(10)
-    r_h5.font.bold = True
-    r_h5.font.color.rgb = PRIMARY
-
-    t2_headers = [
-        "Anatomische Lokalisation" if is_de else "Anatomical Location",
-        "miTNM",
-        "Größe / Vol." if is_de else "Size / Vol.",
-        "Anzahl" if is_de else "Number",
-        "PSMA Expr. Q (SUVmax)",
-        "PSMA Expr. V",
-        "Konfidenz (1-5)" if is_de else "Reader Conf. (1-5)"
-    ]
-
-    rows_data = data.get("synoptic_rows", [])
-    num_rows = max(len(rows_data), 1) + 1
-    tbl2 = doc.add_table(rows=num_rows, cols=7)
-    tbl2.alignment = WD_TABLE_ALIGNMENT.CENTER
-    set_table_borders(tbl2, color="CCCCCC", sz="4")
-
-    # Header Row
-    for c_idx, hdr in enumerate(t2_headers):
-        cell = tbl2.cell(0, c_idx)
-        set_cell_background(cell, HEADER_BG)
-        set_cell_margins(cell, top=100, bottom=100, left=100, right=100)
-        p = cell.paragraphs[0]
-        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        run = p.add_run(hdr)
-        run.font.size = Pt(8.5)
-        run.font.bold = True
-        run.font.color.rgb = RGBColor(255, 255, 255)
-
-    if not rows_data:
-        empty_vals = ["(Keine suspekten Läsionen)" if is_de else "(No suspected lesions identified)", "-", "-", "-", "-", "-", "-"]
-        for c_idx, v in enumerate(empty_vals):
-            cell = tbl2.cell(1, c_idx)
-            set_cell_margins(cell, top=80, bottom=80, left=100, right=100)
-            p = cell.paragraphs[0]
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            run = p.add_run(v)
-            run.font.size = Pt(8.5)
-    else:
-        for r_idx, row in enumerate(rows_data):
-            row_num = r_idx + 1
-            bg_color = ALT_ROW_BG if (r_idx % 2 == 1) else "FFFFFF"
-            r_vals = [
-                row.get("location", ""),
-                row.get("mitnm", ""),
-                row.get("size_str", ""),
-                str(row.get("num_lesions", 1)),
-                row.get("psma_q", ""),
-                row.get("psma_v", ""),
-                str(row.get("reader_confidence", 5))
-            ]
-            for c_idx, val in enumerate(r_vals):
-                cell = tbl2.cell(row_num, c_idx)
-                set_cell_background(cell, bg_color)
-                set_cell_margins(cell, top=80, bottom=80, left=100, right=100)
-                p = cell.paragraphs[0]
-                p.alignment = WD_ALIGN_PARAGRAPH.LEFT if c_idx == 0 else WD_ALIGN_PARAGRAPH.CENTER
-                run = p.add_run(val)
-                run.font.size = Pt(8.5)
-                run.font.color.rgb = DARK_TEXT
-                if c_idx == 1:
-                    run.font.bold = True
-
-    # Appendix Table 6
-    art_rows = data.get("artifact_rows", [])
-    if art_rows:
-        h_art = doc.add_paragraph()
-        h_art.paragraph_format.space_before = Pt(14)
-        h_art.paragraph_format.space_after = Pt(4)
-        r_hart = h_art.add_run(
-            "[Tabelle 6 — Nebenbefunde]" if is_de else
-            "[Table 6 — Incidental Findings]"
-        )
-        r_hart.font.size = Pt(10)
-        r_hart.font.bold = True
-        r_hart.font.color.rgb = PRIMARY
-
-        t6_headers = [
-            "Anatomische Lokalisation" if is_de else "Anatomical Location",
-            "Vermutete Ätiologie" if is_de else "Suspected Aetiology",
-            "Größe / Vol." if is_de else "Size / Vol.",
-            "PSMA Expr. Q (SUVmax)",
-            "PSMA Expr. V",
-            "Staging-Auswirkung" if is_de else "Staging Impact"
-        ]
-        tbl6 = doc.add_table(rows=len(art_rows) + 1, cols=6)
-        tbl6.alignment = WD_TABLE_ALIGNMENT.CENTER
-        set_table_borders(tbl6, color="CCCCCC", sz="4")
-
-        for c_idx, hdr in enumerate(t6_headers):
-            cell = tbl6.cell(0, c_idx)
-            set_cell_background(cell, "5C6F84")
-            set_cell_margins(cell, top=80, bottom=80, left=80, right=80)
-            p = cell.paragraphs[0]
-            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            run = p.add_run(hdr)
-            run.font.size = Pt(8.0)
-            run.font.bold = True
-            run.font.color.rgb = RGBColor(255, 255, 255)
-
-        for r_idx, row in enumerate(art_rows):
-            row_num = r_idx + 1
-            bg_color = ALT_ROW_BG if (r_idx % 2 == 1) else "FFFFFF"
-            r_vals = [
-                row.get("location", ""),
-                row.get("comment", "Technical Artifact"),
-                row.get("size_str", ""),
-                row.get("psma_q", ""),
-                row.get("psma_v", ""),
-                "Exkludiert (miM0)" if is_de else "Excluded (miM0)"
-            ]
-            for c_idx, val in enumerate(r_vals):
-                cell = tbl6.cell(row_num, c_idx)
-                set_cell_background(cell, bg_color)
-                set_cell_margins(cell, top=60, bottom=60, left=80, right=80)
-                p = cell.paragraphs[0]
-                p.alignment = WD_ALIGN_PARAGRAPH.LEFT if c_idx == 0 else WD_ALIGN_PARAGRAPH.CENTER
-                run = p.add_run(val)
-                run.font.size = Pt(8.0)
-                run.font.color.rgb = DARK_TEXT
-                if c_idx == 5:
-                    run.font.bold = True
 
     # Footnote with reference guidelines
     p_foot = doc.add_paragraph()

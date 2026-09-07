@@ -1560,9 +1560,8 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
         catch; end
     end
     
-    # 3. Update organ mapping from atlas (if not already set)
-    if !haskey(global_organ_mapping[], lesion_id) || get(global_organ_mapping[], lesion_id, "") in ("", "Unknown")
-        try
+    # 3. Update organ mapping from atlas (always re-run — volume scan may upgrade muscle→bone)
+    try
             atlas = global_ts_atlas[]
             ts_nm = global_ts_names[]
             if atlas !== nothing && ts_nm !== nothing
@@ -1598,14 +1597,26 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
                     end
                 end
                 if !isempty(organ_name)
-                    global_organ_mapping[][lesion_id] = organ_name
-                    println("  [SUV] Auto-mapped lesion $lesion_id → '$organ_name' from paint voxels"); flush(stdout)
+                    existing = get(global_organ_mapping[], lesion_id, "")
+                    should_update = isempty(existing) || existing in ("Unknown",)
+                    if !should_update
+                        # Only update if new organ has higher tissue priority (lower number = higher)
+                        LA = _get_la()
+                        if LA !== nothing
+                            new_pri = LA.classify_tissue_priority(organ_name)
+                            old_pri = LA.classify_tissue_priority(existing)
+                            should_update = new_pri <= old_pri  # bone(1) beats muscle(5)
+                        end
+                    end
+                    if should_update
+                        global_organ_mapping[][lesion_id] = organ_name
+                        println("  [SUV] Auto-mapped lesion $lesion_id → '$organ_name' from paint voxels"); flush(stdout)
+                    end
                 end
             end
         catch e
             @warn "Organ mapping update failed for lesion $lesion_id: $e"
         end
-    end
     
     # 4. Async recompute SUV/volume/PROMISE (pre-populate caches)
     Threads.@spawn begin
