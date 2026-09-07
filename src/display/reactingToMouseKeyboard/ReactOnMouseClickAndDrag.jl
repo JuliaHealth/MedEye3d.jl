@@ -720,6 +720,28 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                             ""
                         end
                         label = isempty(organ) ? "Lesion $lid" : "$organ (L$lid)"
+                        
+                        # On MRI: also show the anatomy zone from max_anatomy under this voxel
+                        try
+                            tp = MEH.current_tp_index[]
+                            panel_mod = uppercase(get(MEH.tp_modalities, tp, "PET"))
+                            if panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI")
+                                for adat in panelState.onScrollData.dataToScroll
+                                    if adat.name == "Anatomy" && checkbounds(Bool, adat.dat, ix, iy, currentSlice)
+                                        anat_val = Int(round(adat.dat[ix, iy, currentSlice]))
+                                        if anat_val > 0
+                                            labels = get(MEH.anatomy_labels_cache, tp, Dict{Int,String}())
+                                            anat_lbl = get(labels, anat_val, get(MEH.global_ts_names[], anat_val, ""))
+                                            if !isempty(anat_lbl)
+                                                label = "$label in $anat_lbl"
+                                            end
+                                        end
+                                        break
+                                    end
+                                end
+                            end
+                        catch; end
+                        
                         push!(parts, label)
                     end
                 elseif dat.name == "Anatomy" && checkbounds(Bool, dat.dat, ix, iy, currentSlice)

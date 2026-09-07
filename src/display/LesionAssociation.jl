@@ -587,6 +587,11 @@ function pick_best_organ(counts::Dict{Int,Int}, ts_names::Dict{Int,String})::Str
         name = get(ts_names, label_id, "")
         isempty(name) && continue
         
+        # Prostate-wins rule: ANY overlap with prostate → classify as prostate
+        if occursin("prostate", lowercase(name)) && cnt > 0
+            return name
+        end
+        
         priority = classify_tissue_priority(name)
         if priority < best_priority || (priority == best_priority && cnt > best_count)
             best_name = name

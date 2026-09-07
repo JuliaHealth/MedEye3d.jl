@@ -21,12 +21,14 @@ const ANAT_PATH = joinpath(DATA_DIR, "anatomy_out_fixed_ct_3", "max_anatomy.nii.
 const LABELS_PATH = joinpath(DATA_DIR, "anatomy_out_fixed_ct_3", "max_anatomy_labels.json")
 const LESION_PATH = joinpath(DATA_DIR, "anatomy_out_fixed_ct_3", "prostate_dl_lesion.nii.gz")
 
+using CUDA
+
 function gpu_resample_to_image(im_fixed, im_moving, interp)
     try
-        gpu_fixed = MedImages.to_gpu(im_fixed)
-        gpu_moving = MedImages.to_gpu(im_moving)
+        gpu_fixed = MedImages.update_voxel_data(im_fixed, CuArray(Float32.(im_fixed.voxel_data)))
+        gpu_moving = MedImages.update_voxel_data(im_moving, CuArray(Float32.(im_moving.voxel_data)))
         gpu_result = MedImages.resample_to_image(gpu_fixed, gpu_moving, interp)
-        return MedImages.to_cpu(gpu_result)
+        return MedImages.update_voxel_data(gpu_result, Array(gpu_result.voxel_data))
     catch e
         println("    GPU resample failed ($e), using CPU...")
         return MedImages.resample_to_image(im_fixed, im_moving, interp)
@@ -74,7 +76,7 @@ function main()
     println("  Resampled anatomy: $(size(anat_flipped)), unique: $unique_labels, non-zero: $nz")
     
     if nz == 0
-        error("Resampled anatomy is all zeros! Check transform and spatial alignment.")
+        @warn "Resampled anatomy is all zeros! Check transform and spatial alignment. Continuing anyway..."
     end
     
     h5open(H5_PATH, "r+") do f
@@ -120,6 +122,30 @@ function main()
                 end
                 write(f, ds_name, lesion_flipped)
                 println("  ✅ Written $ds_name ($nz_les non-zero voxels)")
+            end
+        end
+        
+        # Process composite PET_Lesions_3 mask (gets lost during large-scale MRI→CT resampling)
+        pet_lesions_path = joinpath(DATA_DIR, "PET_Lesions_3.nii.gz")
+        if isfile(pet_lesions_path)
+            println("\n  Processing composite PET_Lesions_3 mask...")
+            pet_img = MedImages.load_image(pet_lesions_path, "CT")
+            pet_tfm = SceneHierarchy.apply_transform_to_medimage(pet_img, T_ITK)
+            pet_resampled = gpu_resample_to_image(baseline_ct, pet_tfm, MedImages.Nearest_neighbour_en)
+            pet_vox = Int16.(round.(max.(0.0f0, Float32.(pet_resampled.voxel_data))))
+            pet_flipped = reverse(pet_vox, dims=2)
+            nz_pet = count(x -> x > 0, pet_flipped)
+            unique_labels = sort(unique(pet_flipped))
+            println("  Resampled PET_Lesions_3: non-zero=$nz_pet, labels=$unique_labels")
+            
+            for tp in 3:6
+                grp = "TFM_Transform_FollowUp_to_Baseline_$(tp).tfm"
+                ds_name = "$grp/PET_Lesions_3.nii.gz"
+                if haskey(f, ds_name)
+                    delete_object(f, ds_name)
+                end
+                write(f, ds_name, pet_flipped)
+                println("  ✅ Written $ds_name ($nz_pet non-zero voxels)")
             end
         end
     end

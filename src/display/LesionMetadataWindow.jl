@@ -83,6 +83,11 @@ const DEF_JSON_PATH       = _find_metadata_data_file("def.json")
 const RADLEX_CSV_PATH     = _find_metadata_data_file("RadLex.csv")
 const ANATOMY_CSV_PATH    = _find_metadata_data_file("FoundationalAnatomy.csv")
 const CUSTOM_OPTS_PATH    = _find_metadata_data_file("custom_options.json")
+
+# Module-level anatomy visibility state (mirrored from the local vis_anatomy_active Ref)
+# Allows MakieEventHandlers to query anatomy toggle state without direct access
+const _anatomy_visible_global = Ref(false)
+is_anatomy_visible() = _anatomy_visible_global[]
 const DEFAULT_SAVE_PATH   = joinpath(homedir(), "medeye3d_lesion_annotations.json")
 const DEFAULT_HDF5_PATH   = joinpath(homedir(), "medeye3d_lesion_annotations.h5")
 const ANATOMY_MAPPING_PATH= _find_metadata_data_file("max_anatomy_to_ontology.json")
@@ -1957,6 +1962,7 @@ function create_metadata_window(
 
     on(btn_vis_anatomy.clicks) do _
         vis_anatomy_active[] = !vis_anatomy_active[]
+        _anatomy_visible_global[] = vis_anatomy_active[]
         btn_vis_anatomy.label[] = vis_anatomy_active[] ? "Anatomy: ON" : "Anatomy: OFF"
         btn_vis_anatomy.buttoncolor[] = vis_anatomy_active[] ? RGBf(0.5, 0.0, 0.8) : BG_PNL
         @info "BTN_VIS_ANATOMY clicked: $(vis_anatomy_active[])"
@@ -4062,6 +4068,7 @@ function create_metadata_window(
             end
             if haskey(gst, "vis_anatomy")
                 vis_anatomy_active[] = (gst["vis_anatomy"] == "true")
+                _anatomy_visible_global[] = vis_anatomy_active[]
                 btn_vis_anatomy.label[] = vis_anatomy_active[] ? "Anatomy: ON" : "Anatomy: OFF"
                 btn_vis_anatomy.buttoncolor[] = vis_anatomy_active[] ? RGBf(0.5, 0.0, 0.8) : BG_PNL
                 put!(channel, ShowMaskLayerEvent(4, vis_anatomy_active[]))
