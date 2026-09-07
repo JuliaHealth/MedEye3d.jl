@@ -105,7 +105,7 @@ info_file = joinpath(build_output_dir, "app_info.json")
 write(info_file, """
 {
     "name": "MedEye3D",
-    "version": "0.5.9",
+    "version": "0.5.10",
     "arch": "x86_64",
     "entrypoint": "bin/MedEye3D.exe",
     "description": "High-Performance 3D Medical Image Annotation & Visualization Software"

@@ -35,7 +35,7 @@ function log_action(action::AbstractString, details=Dict{String, Any}())
             "action" => string(action),
             "details" => JSON.json(details),
             "os" => string(Sys.MACHINE),
-            "version" => "0.5.9"
+            "version" => "0.5.10"
         )
 
         body_str = JSON.json(payload)

@@ -168,4 +168,14 @@ try
 catch e
 end
 
+# Trace SQLite FTS5 anatomy indexing and queries
+try
+    terms = LesionMetadataWindow.load_anatomy_ontology()
+    res = LesionMetadataWindow.fts_anatomy_search("femur"; limit=10)
+    mapping = LesionMetadataWindow.load_anatomy_mapping()
+    println("Precompiled SQLite FTS5 search (results: $(length(res))) and ontology mapping (entries: $(length(mapping)))")
+catch e
+    println("SQLite FTS5 tracing notice: ", e)
+end
+
 println("=== MedEye3D Precompilation Traces Completed Successfully ===")

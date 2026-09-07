@@ -1,7 +1,7 @@
 name = "MedEye3d"
 uuid = "48a1af7b-3279-4eeb-8f2b-7ca229bb51b1"
 authors = ["M.D Jakub Mitura <53857487+jakubMitura14@users.noreply.github.com>"]
-version = "0.5.9"
+version = "0.5.10"
 
 [deps]
 Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
