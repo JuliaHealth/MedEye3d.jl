@@ -474,6 +474,7 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
     end
     lbl = is_single_lesion_mode[] ? string(data.lesion_id) : "all"
     println("Show single lesion: $lbl (single_mode=$(is_single_lesion_mode[]))"); flush(stdout)
+    _mri_clamp_mask_range!(stateObjects)
     return changed
 end
 
@@ -893,6 +894,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             end
         end
     end
+    _mri_clamp_mask_range!(stateObjects)
 
     # 1b. Update bone subseg 3D arrays for visible panels only
     has_any_bone_data = false
@@ -1097,18 +1099,26 @@ function _clamp_lid_for_tp(lid::Int, tp::Int)::Int
     return lid
 end
 
-"""On MRI modalities, force the Mask texture to show ALL segments (prostate anatomy).
+"""On MRI modalities, show lesion segments in Mask texture.
+If anatomy toggle is ON, also show prostate gland (label 4+).
 Call this after reactToSyncLesion which may have re-applied single-lesion filtering."""
 function _force_mri_show_all!(tp::Int, stateObjects::Vector{StateDataFields})
     panel_mod = uppercase(get(tp_modalities, tp, "PET"))
     if !(panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI"))
         return
     end
+    # Check anatomy toggle state from LesionMetadataWindow
+    anatomy_on = try
+        LMW = _get_lmw()
+        LMW !== nothing ? LMW.is_anatomy_visible() : false
+    catch; false; end
+    max_label = anatomy_on ? 1000 : 3  # 1-3 = lesions, 4+ = gland/anatomy
+
     for stateObject in stateObjects
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if textSpec.name == "Mask" || textSpec.name == "segmentation" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy" && textSpec.name != "Bone_Overlay")
                 T_mm = eltype(textSpec.minAndMaxValue)
-                textSpec.minAndMaxValue = T_mm.([1, 1000])
+                textSpec.minAndMaxValue = T_mm.([1, max_label])
                 textSpec.isVisible = true
                 # Ensure mask is rendered with non-zero opacity
                 if textSpec.maskContribution <= 0.0f0
@@ -1123,6 +1133,35 @@ end
 function _has_nuclear_modality(tp::Int)::Bool
     panel_mod = uppercase(get(tp_modalities, tp, "PET"))
     return !(panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI"))
+end
+
+"""Clamp mask minAndMaxValue on MRI TPs to hide gland (label 4+) when anatomy toggle is OFF.
+Safe to call on any modality — no-ops on non-MRI TPs.
+Call at the END of any function that sets mask minAndMaxValue to prevent gland leak."""
+function _mri_clamp_mask_range!(stateObjects::Vector{StateDataFields})
+    tp = current_tp_index[]
+    panel_mod = uppercase(get(tp_modalities, tp, "PET"))
+    if !(panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI"))
+        return  # Not MRI, no clamping needed
+    end
+    anatomy_on = try
+        LMW = _get_lmw()
+        LMW !== nothing ? LMW.is_anatomy_visible() : false
+    catch; false; end
+    anatomy_on && return  # Anatomy ON → allow all labels
+
+    # Clamp max label to 3 (hide gland = label 4+)
+    for stateObject in stateObjects
+        for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
+            if textSpec.name == "Mask" || textSpec.name == "segmentation" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy" && textSpec.name != "Bone_Overlay")
+                T_mm = eltype(textSpec.minAndMaxValue)
+                cur_max = textSpec.minAndMaxValue[2]
+                if cur_max > T_mm(3)
+                    textSpec.minAndMaxValue = T_mm.([textSpec.minAndMaxValue[1], 3])
+                end
+            end
+        end
+    end
 end
 
 """Update quad layout: hide Panel 2 (PET-only) when modality is MRI."""
@@ -1469,9 +1508,14 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
                 tex.maskContribution = 0.0f0
             end
         elseif panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI") && (tex.name == "Mask" || tex.name == "segmentation" || (tex.isMultiDiscreteMask && tex.name != "Anatomy" && tex.name != "Bone_Overlay"))
-            # Show ALL segments on MRI (prostate anatomy contours, not individual PET lesion IDs)
+            # Show lesion segments on MRI; show gland (label 4+) only if anatomy toggle is ON
+            anatomy_on = try
+                LMW = _get_lmw()
+                LMW !== nothing ? LMW.is_anatomy_visible() : false
+            catch; false; end
+            max_label = anatomy_on ? 1000 : 3
             T_mm = eltype(tex.minAndMaxValue)
-            tex.minAndMaxValue = T_mm.([1, 1000])
+            tex.minAndMaxValue = T_mm.([1, max_label])
             tex.isVisible = true
             if tex.maskContribution <= 0.0f0
                 tex.maskContribution = 0.5f0
@@ -2550,6 +2594,22 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
             # Mark UBO dirty so shader reads updated minAndMaxValue
             if stateObjects[idx].mainForDisplayObjects.vulkanPipelineState !== nothing
                 stateObjects[idx].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+            end
+        end
+    end
+    
+    # On MRI modalities: update Mask label range to show/hide prostate gland (label 4+)
+    if data.layer == 4
+        tp = current_tp_index[]
+        panel_mod = uppercase(get(tp_modalities, tp, "PET"))
+        if panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI")
+            _force_mri_show_all!(tp, stateObjects)
+            # Force re-render to reflect the updated mask range
+            for idx in visible_panels
+                stateObjects[idx].isSliceChanged = true
+                if stateObjects[idx].mainForDisplayObjects.vulkanPipelineState !== nothing
+                    stateObjects[idx].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                end
             end
         end
     end
