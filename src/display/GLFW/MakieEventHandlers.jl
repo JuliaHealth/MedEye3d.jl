@@ -1611,6 +1611,13 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
                     if should_update
                         global_organ_mapping[][lesion_id] = organ_name
                         println("  [SUV] Auto-mapped lesion $lesion_id → '$organ_name' from paint voxels"); flush(stdout)
+                        # Notify LesionMetadataWindow to auto-fill BaseAnatomy + LesionType
+                        try
+                            organ_mapping_updated[] = (lesion_id, organ_name)
+                            println("  [SUV] Fired organ_mapping_updated for lesion $lesion_id → '$organ_name'"); flush(stdout)
+                        catch e
+                            @warn "organ_mapping_updated notification failed: $e"
+                        end
                     end
                 end
             end
@@ -1641,6 +1648,7 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
 end
 const global_bone_atlas = Ref{Any}(nothing)
 const global_organ_mapping = Ref{Dict{Int,String}}(Dict{Int,String}())  # lesion_id -> TS organ name (from map_lesions_to_organs)
+const organ_mapping_updated = Observable(Tuple{Int,String}((0, "")))  # fires (lesion_id, organ_name) after paint-based mapping
 const current_tp_index = Ref(0)
 const tp_labels = Dict{Int, String}()  # tp_index -> display label (e.g. "PET TP0")
 const tp_descriptions = Dict{Int, String}() # tp_index -> radiological description (German)
@@ -1669,6 +1677,7 @@ const tp_segment_names = Dict{Int, Dict{Int, String}}()
 export tp_data_cache, bone_subsegments_cache, lesion_centroids_cache, global_bone_atlas, global_organ_mapping, current_tp_index, tp_labels, tp_descriptions, tp_english_descriptions
 export compare_mode, compare_right_tp, tp_switched, get_node_name_for_tp, tp_node_names
 export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, h5_path_ref, tp_modalities, volume_z_size, anatomy_labels_cache, tp_segment_names
+export organ_mapping_updated
 
 
 function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector{StateDataFields})
