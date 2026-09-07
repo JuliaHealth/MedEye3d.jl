@@ -411,7 +411,12 @@ function resolve_anatomical_location(lid::Integer, state::Union{AbstractDict, No
 
     # 5. Format human-readable clinical location
     clean_loc = ""
-    clean_side = !isempty(side) ? side : (ont_entry !== nothing ? get(ont_entry, "side", "") : "")
+    # Treat "NA"/"N/A" as empty — unpaired organs (liver, spleen, sacrum) have no side
+    _side = uppercase(side) in ("NA", "N/A") ? "" : side
+    clean_side = !isempty(_side) ? _side : (ont_entry !== nothing ? get(ont_entry, "side", "") : "")
+    if uppercase(clean_side) in ("NA", "N/A")
+        clean_side = ""
+    end
 
     if ont_entry !== nothing
         detailed = get(ont_entry, "detailed", "")

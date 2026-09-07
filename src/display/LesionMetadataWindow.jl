@@ -1500,8 +1500,18 @@ function searchable_menu(g, row, cols;
         if is_open
             filter_buf[] = ""
         else
-            # Restore limited options on close (avoids rebuilding 26K menu items)
+            # Preserve current selection before restoring options
+            sel = menu.selection[]
             _apply_searchable_filter!(menu, "", all_opts[])
+            # Ensure the selected value remains visible in the restored options
+            if sel !== nothing && !isempty(string(sel))
+                sel_str = string(sel)
+                current_opts = menu.options[]
+                if sel_str ∉ current_opts
+                    menu.options[] = vcat([sel_str], current_opts)
+                    menu.i_selected[] = 1
+                end
+            end
             filter_buf[]   = ""
         end
     end
@@ -4960,6 +4970,72 @@ function create_metadata_window(
         elseif w isa Menu
             on(w.selection) do _; trigger_autosave(); end
         end
+    end
+
+    # ── Auto-fill BaseAnatomy, Side, and LesionType when organ mapping updates after painting ──
+    try
+        on(_MEH.organ_mapping_updated) do (lid, organ_name)
+            println("[PAINT→FILL] Received organ_mapping_updated: lid=$lid, organ='$organ_name'"); flush(stdout)
+            lid == 0 && return  # skip initial value
+            # Only auto-fill if this is the currently displayed lesion
+            cur_lesion_str = active_lesion_display[]
+            cur_lid = tryparse(Int, replace(cur_lesion_str, r"[^\d]" => ""))
+            println("[PAINT→FILL] cur_lesion_str='$cur_lesion_str', cur_lid=$cur_lid, lid=$lid"); flush(stdout)
+            (cur_lid === nothing || cur_lid != lid) && return
+            
+            # Look up the ontology entry for this organ
+            anat_entry = lookup_anatomy(organ_name)
+            anat_entry === nothing && return
+            
+            t_base = get(anat_entry, "detailed", "")
+            auto_side = get(anat_entry, "side", "")
+            lesion_type = get(anat_entry, "lesion_type", "")
+            
+            # Auto-fill BaseAnatomy if currently empty
+            ba_sel = menu_base_anat.selection[]
+            ba_str = ba_sel === nothing ? "" : _safe_strip(string(ba_sel))
+            if isempty(ba_str) && !isempty(t_base)
+                ba_opts = menu_base_anat.options[]
+                ba_idx = findfirst(==(t_base), ba_opts)
+                if ba_idx !== nothing
+                    menu_base_anat.i_selected[] = ba_idx
+                else
+                    new_ba_opts = copy(ba_opts)
+                    push!(new_ba_opts, t_base)
+                    ba_all_opts[] = new_ba_opts
+                    menu_base_anat.i_selected[] = length(new_ba_opts)
+                end
+                @info "[PAINT→ANAT] Auto-filled BaseAnatomy for lesion $lid: '$t_base' from '$organ_name'"
+            end
+            
+            # Auto-fill Side if currently empty (skip NA/N/A)
+            if !isempty(auto_side) && uppercase(auto_side) ∉ ("NA", "N/A")
+                side_sel = menu_side.selection[]
+                side_str = side_sel === nothing ? "" : string(side_sel)
+                if isempty(side_str)
+                    side_opts = menu_side.options[]
+                    s_idx = findfirst(==(auto_side), side_opts)
+                    if s_idx !== nothing
+                        menu_side.i_selected[] = s_idx
+                    end
+                end
+            end
+            
+            # Auto-set LesionType from ontology (Bone Meta, Organ Meta, etc.)
+            if !isempty(lesion_type)
+                cur_type = active_lesion_type[]
+                # Only auto-set if type is currently default/empty or Organ Meta
+                # (don't override user's manual selection to e.g. Prostate)
+                if isempty(cur_type) || cur_type == "Organ Meta"
+                    update_type_buttons(lesion_type)
+                    @info "[PAINT→TYPE] Auto-set LesionType for lesion $lid: '$lesion_type' from '$organ_name'"
+                end
+            end
+            
+            trigger_autosave()
+        end
+    catch e
+        @warn "Failed to register organ_mapping_updated listener: $e"
     end
 
     @async begin
