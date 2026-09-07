@@ -475,12 +475,22 @@ function load_anatomy_mapping()::Dict{String,Any}
     isempty(_anatomy_mapping_cache[]) || return _anatomy_mapping_cache[]
     if isfile(ANATOMY_MAPPING_PATH)
         try
-            _anatomy_mapping_cache[] = JSON.parsefile(ANATOMY_MAPPING_PATH)
-            @info "Loaded $(length(_anatomy_mapping_cache[])) max_anatomy→ontology mappings"
+            raw = JSON.parsefile(ANATOMY_MAPPING_PATH)
+            # Normalize all keys to lowercase for reliable lookup
+            normalized = Dict{String,Any}()
+            for (k, v) in raw
+                normalized[lowercase(k)] = v
+                # Also keep original case key for backward compatibility
+                normalized[k] = v
+            end
+            _anatomy_mapping_cache[] = normalized
+            println("[ANATOMY] Loaded $(length(raw)) max_anatomy→ontology mappings ($(length(normalized)) with normalized keys)"); flush(stdout)
         catch e
+            println("[ANATOMY] Failed to load anatomy mapping JSON: $e"); flush(stdout)
             @warn "Failed to load anatomy mapping JSON: $e"
         end
     else
+        println("[ANATOMY] Anatomy mapping JSON not found at $(ANATOMY_MAPPING_PATH)"); flush(stdout)
         @warn "Anatomy mapping JSON not found at $(ANATOMY_MAPPING_PATH)"
     end
     return _anatomy_mapping_cache[]
@@ -496,9 +506,15 @@ function lookup_anatomy(raw_organ::String)
     isempty(raw_organ) && return nothing
     mapping = load_anatomy_mapping()
     key = lowercase(strip(raw_organ))
-    haskey(mapping, key) && return mapping[key]
-    # Try case-preserving exact match (max_anatomy uses mixed case for vertebrae)
-    haskey(mapping, strip(raw_organ)) && return mapping[strip(raw_organ)]
+    if haskey(mapping, key)
+        return mapping[key]
+    end
+    # Try case-preserving exact match as fallback
+    stripped = strip(raw_organ)
+    if haskey(mapping, stripped)
+        return mapping[stripped]
+    end
+    println("[LOOKUP] lookup_anatomy('$raw_organ') → NOT FOUND (key='$key', mapping_size=$(length(mapping)))"); flush(stdout)
     return nothing
 end
 
@@ -4400,11 +4416,13 @@ function create_metadata_window(
             if ba_idx !== nothing
                 menu_base_anat.i_selected[] = ba_idx
             else
-                # Value not in options — add it dynamically
-                new_ba_opts = copy(ba_opts)
-                push!(new_ba_opts, t_base)
-                ba_all_opts[] = new_ba_opts
-                menu_base_anat.i_selected[] = length(new_ba_opts)
+                # Value not in options — prepend it (menu limits display to ~25 items)
+                new_ba_opts = vcat([t_base], ba_opts)
+                menu_base_anat.options[] = new_ba_opts
+                menu_base_anat.i_selected[] = 1
+                if !(t_base in ba_all_opts[])
+                    ba_all_opts[] = vcat(ba_all_opts[], [t_base])
+                end
             end
         else
             menu_base_anat.i_selected[] = 1  # reset to ""
@@ -4439,11 +4457,10 @@ function create_metadata_window(
                 if st_idx !== nothing
                     anat_struct_menus[i].i_selected[] = st_idx
                 else
-                    # Value not in options — add it
-                    new_sopts = copy(struct_opts)
-                    push!(new_sopts, struct_str)
+                    # Value not in options — prepend it (searchable_menu limits to ~25 items)
+                    new_sopts = vcat([struct_str], struct_opts)
                     anat_struct_menus[i].options[] = new_sopts
-                    anat_struct_menus[i].i_selected[] = length(new_sopts)
+                    anat_struct_menus[i].i_selected[] = 1
                 end
             end
             anat_active_count[] = count
@@ -4975,66 +4992,88 @@ function create_metadata_window(
     # ── Auto-fill BaseAnatomy, Side, and LesionType when organ mapping updates after painting ──
     try
         on(_MEH.organ_mapping_updated) do (lid, organ_name)
-            println("[PAINT→FILL] Received organ_mapping_updated: lid=$lid, organ='$organ_name'"); flush(stdout)
-            lid == 0 && return  # skip initial value
-            # Only auto-fill if this is the currently displayed lesion
-            cur_lesion_str = active_lesion_display[]
-            cur_lid = tryparse(Int, replace(cur_lesion_str, r"[^\d]" => ""))
-            println("[PAINT→FILL] cur_lesion_str='$cur_lesion_str', cur_lid=$cur_lid, lid=$lid"); flush(stdout)
-            (cur_lid === nothing || cur_lid != lid) && return
-            
-            # Look up the ontology entry for this organ
-            anat_entry = lookup_anatomy(organ_name)
-            anat_entry === nothing && return
-            
-            t_base = get(anat_entry, "detailed", "")
-            auto_side = get(anat_entry, "side", "")
-            lesion_type = get(anat_entry, "lesion_type", "")
-            
-            # Auto-fill BaseAnatomy if currently empty
-            ba_sel = menu_base_anat.selection[]
-            ba_str = ba_sel === nothing ? "" : _safe_strip(string(ba_sel))
-            if isempty(ba_str) && !isempty(t_base)
-                ba_opts = menu_base_anat.options[]
-                ba_idx = findfirst(==(t_base), ba_opts)
-                if ba_idx !== nothing
-                    menu_base_anat.i_selected[] = ba_idx
-                else
-                    new_ba_opts = copy(ba_opts)
-                    push!(new_ba_opts, t_base)
-                    ba_all_opts[] = new_ba_opts
-                    menu_base_anat.i_selected[] = length(new_ba_opts)
+            try
+                println("[PAINT→FILL] Received organ_mapping_updated: lid=$lid, organ='$organ_name'"); flush(stdout)
+                lid == 0 && return  # skip initial value
+                # Only auto-fill if this is the currently displayed lesion
+                cur_lesion_str = active_lesion_display[]
+                # Parse lesion ID from display string: "ID: description" or "New Lesion ID"
+                cur_lesion_s = string(cur_lesion_str)
+                m = match(r"^(\d+)", cur_lesion_s)
+                if m === nothing
+                    # Fallback: try "New Lesion <ID>" format
+                    m = match(r"(\d+)\s*$", cur_lesion_s)
                 end
-                @info "[PAINT→ANAT] Auto-filled BaseAnatomy for lesion $lid: '$t_base' from '$organ_name'"
-            end
-            
-            # Auto-fill Side if currently empty (skip NA/N/A)
-            if !isempty(auto_side) && uppercase(auto_side) ∉ ("NA", "N/A")
-                side_sel = menu_side.selection[]
-                side_str = side_sel === nothing ? "" : string(side_sel)
-                if isempty(side_str)
+                cur_lid = m !== nothing ? tryparse(Int, m.captures[1]) : nothing
+                println("[PAINT→FILL] cur_lesion_str='$cur_lesion_s', cur_lid=$cur_lid, lid=$lid"); flush(stdout)
+                (cur_lid === nothing || cur_lid != lid) && return
+                
+                # Look up the ontology entry for this organ
+                println("[PAINT→FILL] Calling lookup_anatomy('$organ_name')..."); flush(stdout)
+                anat_entry = lookup_anatomy(organ_name)
+                println("[PAINT→FILL] lookup_anatomy result: $(anat_entry !== nothing ? "found" : "nothing")"); flush(stdout)
+                anat_entry === nothing && return
+                
+                t_base = get(anat_entry, "detailed", "")
+                auto_side = get(anat_entry, "side", "")
+                lesion_type = get(anat_entry, "lesion_type", "")
+                println("[PAINT→FILL] t_base='$t_base', side='$auto_side', type='$lesion_type'"); flush(stdout)
+                
+                # Always update BaseAnatomy from organ mapping (reflects current paint state)
+                if !isempty(t_base)
+                    ba_opts = menu_base_anat.options[]
+                    ba_idx = findfirst(==(t_base), ba_opts)
+                    if ba_idx !== nothing
+                        menu_base_anat.i_selected[] = ba_idx
+                    else
+                        # Prepend term to menu options (menu limits display to ~25 items,
+                        # so appending at index 27+ causes BoundsError)
+                        new_opts = vcat([t_base], ba_opts)
+                        menu_base_anat.options[] = new_opts
+                        menu_base_anat.i_selected[] = 1
+                        # Also add to backing store for future filter operations
+                        if !(t_base in ba_all_opts[])
+                            ba_all_opts[] = vcat(ba_all_opts[], [t_base])
+                        end
+                    end
+                    println("[PAINT→ANAT] Set BaseAnatomy for lesion $lid: '$t_base' from '$organ_name'"); flush(stdout)
+                end
+                
+                # Always update Side from organ mapping (skip NA/N/A for unpaired organs)
+                if !isempty(auto_side) && uppercase(auto_side) ∉ ("NA", "N/A")
                     side_opts = menu_side.options[]
                     s_idx = findfirst(==(auto_side), side_opts)
                     if s_idx !== nothing
                         menu_side.i_selected[] = s_idx
                     end
+                    println("[PAINT→SIDE] Set Side for lesion $lid: '$auto_side' from '$organ_name'"); flush(stdout)
+                elseif isempty(auto_side) || uppercase(auto_side) in ("NA", "N/A")
+                    # Unpaired organ — clear side to empty
+                    s_idx = findfirst(==(""), menu_side.options[])
+                    if s_idx !== nothing
+                        menu_side.i_selected[] = s_idx
+                    end
                 end
-            end
-            
-            # Auto-set LesionType from ontology (Bone Meta, Organ Meta, etc.)
-            if !isempty(lesion_type)
-                cur_type = active_lesion_type[]
-                # Only auto-set if type is currently default/empty or Organ Meta
-                # (don't override user's manual selection to e.g. Prostate)
-                if isempty(cur_type) || cur_type == "Organ Meta"
+                
+                # Always update LesionType from ontology (Bone Meta, Organ Meta, etc.)
+                if !isempty(lesion_type)
                     update_type_buttons(lesion_type)
-                    @info "[PAINT→TYPE] Auto-set LesionType for lesion $lid: '$lesion_type' from '$organ_name'"
+                    println("[PAINT→TYPE] Set LesionType for lesion $lid: '$lesion_type' from '$organ_name'"); flush(stdout)
                 end
+                
+                trigger_autosave()
+            catch e
+                println("[PAINT→FILL] ERROR in callback: $e"); flush(stdout)
+                for (exc, bt) in current_exceptions()
+                    showerror(stdout, exc, bt)
+                    println()
+                end
+                flush(stdout)
             end
-            
-            trigger_autosave()
         end
+        println("[PAINT→FILL] Successfully registered organ_mapping_updated listener"); flush(stdout)
     catch e
+        println("[PAINT→FILL] FAILED to register organ_mapping_updated listener: $e"); flush(stdout)
         @warn "Failed to register organ_mapping_updated listener: $e"
     end
 

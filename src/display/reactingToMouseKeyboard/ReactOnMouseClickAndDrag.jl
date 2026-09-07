@@ -287,7 +287,8 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
             MEH.invalidate_and_recompute_lesion_metrics_async!(paint_id, MEH.current_tp_index[])
         end
     catch e
-        # SUV invalidation/recompute is best-effort
+        # Log errors instead of silently swallowing
+        println("[PAINT-ERR] SUV/organ mapping failed: $e"); flush(stdout)
     end
 end#react_to_draw
 

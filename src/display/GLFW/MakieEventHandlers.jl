@@ -1616,7 +1616,8 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
                             organ_mapping_updated[] = (lesion_id, organ_name)
                             println("  [SUV] Fired organ_mapping_updated for lesion $lesion_id → '$organ_name'"); flush(stdout)
                         catch e
-                            @warn "organ_mapping_updated notification failed: $e"
+                            println("  [SUV] organ_mapping_updated FAILED: $e"); flush(stdout)
+                            showerror(stdout, e, catch_backtrace()); println(); flush(stdout)
                         end
                     end
                 end
