@@ -920,7 +920,7 @@ function run_app(args::Vector{String})
     end
 
     if "--version" in args || "-v" in args
-        println("MedEye3D Version 0.5.9 (x86_64-w64-mingw32)")
+        println("MedEye3D Version 0.5.10 (x86_64-w64-mingw32)")
         return
     end
 
