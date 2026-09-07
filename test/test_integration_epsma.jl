@@ -85,7 +85,7 @@ for path in ['$en_path', '$de_path']:
         assert 'word/document.xml' in z.namelist()
         xml_data = z.read('word/document.xml').decode('utf-8')
         assert 'E-PSMA' in xml_data
-        assert 'Synoptic Table' in xml_data or 'Synoptische Tabelle' in xml_data
+        assert 'Findings' in xml_data or 'Befundung' in xml_data
         assert 'miTNM' in xml_data
         print(f'Verified valid XML structure for {path}')
 "`

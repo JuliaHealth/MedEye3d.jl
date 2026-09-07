@@ -28,6 +28,8 @@ using Observables
 using JSON
 using HDF5
 using Dates
+using SQLite
+using DBInterface
 using ..MakieEvents
 import ..SegmentationDisplay: synchronized_makie_renderloop, GLOBAL_OPENGL_LOCK
 import ..SegmentationDisplay.MakieEventHandlers as _MEH
@@ -84,6 +86,7 @@ const CUSTOM_OPTS_PATH    = _find_metadata_data_file("custom_options.json")
 const DEFAULT_SAVE_PATH   = joinpath(homedir(), "medeye3d_lesion_annotations.json")
 const DEFAULT_HDF5_PATH   = joinpath(homedir(), "medeye3d_lesion_annotations.h5")
 const ANATOMY_MAPPING_PATH= _find_metadata_data_file("max_anatomy_to_ontology.json")
+const GLOBAL_CUSTOM_OPTS_PATH = joinpath(homedir(), ".medeye3d_custom_options.json")
 
 const _custom_opts_cache = Ref{Dict{String,Any}}(Dict{String,Any}())
 const _custom_fields_cache = Ref{Dict{String,String}}(Dict{String,String}())
@@ -324,8 +327,26 @@ end
 
 # ─── Anatomy Ontology (FoundationalAnatomy.csv) for Base Anatomy autocomplete ─
 const _anatomy_cache = Ref{Vector{String}}(String[])
+const _searchable_lc_cache = Ref{Vector{String}}(String[])  # Pre-computed lowercase for fast filtering
 
-"""Load ALL FoundationalAnatomy.csv labels for Base Anatomy search/autocomplete."""
+# Common clinical anatomy terms that clinicians actually search for
+const CLINICAL_ANATOMY_ALIASES = [
+    "Iliac Bone", "Pelvic Bone", "Hip Bone", "Innominate Bone",
+    "Thoracic Vertebra", "Lumbar Vertebra", "Cervical Vertebra", "Sacral Vertebra",
+    "Sacrum", "Coccyx", "Rib", "Costal Bone",
+    "Femur", "Humerus", "Tibia", "Fibula", "Radius", "Ulna",
+    "Scapula", "Clavicle", "Sternum", "Mandible", "Skull", "Calvarium",
+    "Prostate Gland", "Seminal Vesicle", "Urinary Bladder",
+    "Kidney", "Liver", "Lung", "Spleen", "Adrenal Gland", "Pancreas",
+    "Lymph Node", "Inguinal Lymph Node", "Iliac Lymph Node", "Para-aortic Lymph Node",
+    "Obturator Lymph Node", "External Iliac Lymph Node", "Internal Iliac Lymph Node",
+    "Aorta", "Iliac Artery", "Iliac Vein",
+    "Gluteal Muscle", "Psoas Muscle", "Sartorius Muscle", "Quadriceps Muscle"
+]
+
+"""Load UBERON anatomy terms from FoundationalAnatomy.csv for Base Anatomy search/autocomplete.
+Only loads actual anatomy terms (UBERON: IDs), skipping GO, CHEBI, CL, NCBITaxon etc.
+Prepends common clinical aliases for quick access."""
 function load_anatomy_ontology()::Vector{String}
     isempty(_anatomy_cache[]) || return _anatomy_cache[]
     terms = String[]
@@ -334,21 +355,116 @@ function load_anatomy_ontology()::Vector{String}
         for (i, line) in enumerate(eachline(ANATOMY_CSV_PATH))
             i == 1 && continue   # header: Name,ID
             parts = split(strip(line), ','; limit = 2)
-            length(parts) >= 1 || continue
+            length(parts) >= 2 || continue
             label = strip(parts[1])
+            id_str = strip(parts[2])
             isempty(label) && continue
+            # Only keep UBERON terms (actual anatomy structures)
+            startswith(id_str, "UBERON:") || continue
             lbl_low = lowercase(label)
             if !(lbl_low in seen)
                 push!(seen, lbl_low)
                 push!(terms, label)
             end
         end
-        @info "Loaded $(length(terms)) unique FoundationalAnatomy terms for Base Anatomy autocomplete"
+        @info "Loaded $(length(terms)) UBERON anatomy terms for Base Anatomy autocomplete (filtered from CSV)"
     else
         @warn "FoundationalAnatomy CSV not found at $(ANATOMY_CSV_PATH)"
     end
-    _anatomy_cache[] = isempty(terms) ? ["(none)"] : sort(terms)
+    # Prepend clinical aliases (deduped against UBERON terms)
+    alias_terms = String[]
+    for a in CLINICAL_ANATOMY_ALIASES
+        if !(lowercase(a) in Set(lowercase(t) for t in terms))
+            push!(alias_terms, a)
+        end
+    end
+    combined = vcat(sort(alias_terms), sort(terms))
+    _anatomy_cache[] = isempty(combined) ? ["(none)"] : combined
+    # Pre-compute lowercase for fast searchable_menu filtering
+    _searchable_lc_cache[] = [lowercase(t) for t in _anatomy_cache[]]
+    # Build FTS5 index for high-performance ranked search
+    _build_anatomy_fts!(_anatomy_cache[])
     return _anatomy_cache[]
+end
+
+# ─── In-Memory SQLite FTS5 Anatomy Search Engine ─────────────────────────────
+const _anatomy_fts_db = Ref{Union{Nothing, SQLite.DB}}(nothing)
+
+# Clinical synonym expansion for search queries
+const CLINICAL_SYNONYMS = Dict{String, String}(
+    "cortical bone" => "compact bone",
+    "spongy bone" => "trabecular bone",
+    "cancellous bone" => "trabecular bone",
+    "spinal canal" => "vertebral foramen",
+    "backbone" => "vertebral column",
+    "kneecap" => "patella",
+    "shoulder blade" => "scapula",
+    "collar bone" => "clavicle",
+    "shin bone" => "tibia",
+    "thigh bone" => "femur",
+    "hip bone" => "innominate bone",
+    "breast bone" => "sternum",
+    "voice box" => "larynx",
+    "windpipe" => "trachea",
+)
+
+"""Build in-memory SQLite FTS5 index from anatomy terms for high-performance search.
+Uses BM25 ranking, prefix indexing (1-3 chars), and unicode61 tokenizer."""
+function _build_anatomy_fts!(terms::Vector{String})
+    try
+        db = SQLite.DB()  # in-memory database
+        DBInterface.execute(db, """CREATE VIRTUAL TABLE anatomy_fts USING fts5(
+            term, tokenize="unicode61", prefix="1,2,3"
+        );""")
+        for t in terms
+            DBInterface.execute(db, "INSERT INTO anatomy_fts (term) VALUES (?);", [t])
+        end
+        _anatomy_fts_db[] = db
+        @info "[ANAT] Built FTS5 index with $(length(terms)) anatomy terms"
+    catch e
+        @warn "[ANAT] Failed to build FTS5 index, falling back to linear search: $e"
+        _anatomy_fts_db[] = nothing
+    end
+end
+
+"""Search anatomy terms using FTS5 with BM25 ranking and prefix matching.
+Returns ranked results (most relevant first). Falls back to empty if FTS5 unavailable."""
+function fts_anatomy_search(query::String; limit::Int=25)::Vector{String}
+    db = _anatomy_fts_db[]
+    db === nothing && return String[]
+    q = lowercase(strip(query))
+    isempty(q) && return String[]
+    
+    # Expand clinical synonyms
+    for (syn, canonical) in CLINICAL_SYNONYMS
+        if occursin(syn, q)
+            q = replace(q, syn => canonical)
+        end
+    end
+    
+    # Normalize plurals: vertebrae→vertebra, bones→bone
+    q = replace(q, r"(ae|es|s)$" => "")
+    
+    # Build FTS5 query: last token gets * for prefix/autocomplete matching
+    tokens = split(q)
+    isempty(tokens) && return String[]
+    fts_query = if length(tokens) == 1
+        tokens[1] * "*"
+    else
+        join(tokens[1:end-1], " ") * " " * tokens[end] * "*"
+    end
+    
+    results = String[]
+    try
+        for row in DBInterface.execute(db,
+            "SELECT term FROM anatomy_fts WHERE anatomy_fts MATCH ? ORDER BY rank LIMIT ?;",
+            [fts_query, limit])
+            push!(results, row.term)
+        end
+    catch e
+        @debug "[ANAT] FTS5 query failed for '$fts_query': $e"
+    end
+    return results
 end
 
 # ─── JSON Anatomy Mapping (max_anatomy → ontology) ──────────────────────────
@@ -1367,22 +1483,25 @@ function searchable_menu(g, row, cols;
     isempty(opts_vec) && (opts_vec = ["(none)"])
     all_opts = Ref(opts_vec)
 
-    # Standard Menu — button respects grid column width; use type-to-filter for long options
+    # Standard Menu — limit initial options to avoid 26K-item layout at construction
+    MAX_INIT = 25
+    init_opts = length(all_opts[]) > MAX_INIT ?
+        vcat(all_opts[][1:MAX_INIT], ["(type to filter $(length(all_opts[])) items...)"]) :
+        copy(all_opts[])
     menu = Menu(g[row, cols];
-        options  = copy(all_opts[]),
+        options  = init_opts,
         default  = default,
         fontsize = fontsize)
 
     filter_buf = Ref("")
 
-    # ── When menu opens → reset filter; when it closes → restore options ──
+    # ── When menu opens → reset filter; when it closes → restore limited options ──
     on(menu.is_open) do is_open
         if is_open
             filter_buf[] = ""
         else
-            # Restore full options and reset prompt
-            menu.options[] = all_opts[]
-            menu.prompt[]  = "Select..."
+            # Restore limited options on close (avoids rebuilding 26K menu items)
+            _apply_searchable_filter!(menu, "", all_opts[])
             filter_buf[]   = ""
         end
     end
@@ -1419,7 +1538,7 @@ function searchable_menu(g, row, cols;
         on(options) do new_opts
             all_opts[] = collect(String, new_opts)
             if !menu.is_open[]
-                menu.options[] = all_opts[]
+                _apply_searchable_filter!(menu, "", all_opts[])
             end
         end
     end
@@ -1427,14 +1546,39 @@ function searchable_menu(g, row, cols;
     return menu
 end
 
-"""Apply the current filter text to a searchable menu's options."""
+"""Apply the current filter text to a searchable menu's options.
+Uses SQLite FTS5 for ranked search with BM25 relevance scoring.
+Falls back to linear substring scan if FTS5 unavailable."""
 function _apply_searchable_filter!(menu, query::String, full_opts::Vector{String})
+    MAX_DISPLAY = 25  # Limit displayed matches to prevent Makie layout rebuild bottleneck
     if isempty(query)
-        menu.options[] = full_opts
+        # Show only first MAX_DISPLAY items when no filter (avoids 16K item rebuild)
+        if length(full_opts) > MAX_DISPLAY
+            menu.options[] = vcat(full_opts[1:MAX_DISPLAY], ["(type to filter $(length(full_opts)) items...)"])
+        else
+            menu.options[] = full_opts
+        end
         menu.prompt[]  = "Select..."
     else
-        q = lowercase(query)
-        filtered = filter(s -> occursin(q, lowercase(s)), full_opts)
+        # Primary: FTS5 ranked search (0.1-0.2ms, BM25 relevance)
+        filtered = fts_anatomy_search(query; limit = MAX_DISPLAY)
+        
+        # Fallback: linear substring scan if FTS5 returns empty
+        if isempty(filtered)
+            q = lowercase(query)
+            q_norm = replace(q, r"(ae|es|s)$" => "")
+            use_norm = q_norm != q
+            lc_cache = _searchable_lc_cache[]
+            use_cache = length(lc_cache) == length(full_opts)
+            for i in eachindex(full_opts)
+                t = use_cache ? lc_cache[i] : lowercase(full_opts[i])
+                if occursin(q, t) || (use_norm && occursin(q_norm, t))
+                    push!(filtered, full_opts[i])
+                    length(filtered) >= MAX_DISPLAY && break
+                end
+            end
+        end
+        
         if isempty(filtered)
             menu.options[] = ["(no match for '$query')"]
         else
@@ -3288,10 +3432,11 @@ function create_metadata_window(
                 anat_val = Int(atlas[cx, cy, cz])
                 println("[NEW LESION] atlas[$cx,$cy,$cz]=$anat_val")
                 
-                # If exact voxel is unlabeled, try expanding sphere search
+                # If exact voxel is unlabeled, try expanding sphere search with tissue priority
                 if anat_val <= 0
+                    # Collect all candidate labels within radius and pick best by tissue priority
+                    candidates = Dict{Int,Int}()
                     for radius in [1, 2, 4, 8, 16]
-                        found = false
                         for dz in -radius:radius, dy in -radius:radius, dx in -radius:radius
                             dx*dx + dy*dy + dz*dz > radius*radius && continue
                             nx = clamp(cx + dx, 1, size(atlas, 1))
@@ -3299,12 +3444,24 @@ function create_metadata_window(
                             nz = clamp(cz + dz, 1, size(atlas, 3))
                             v = Int(atlas[nx, ny, nz])
                             if v > 0 && haskey(ts_names, v)
-                                anat_val = v
-                                found = true
-                                break
+                                candidates[v] = get(candidates, v, 0) + 1
                             end
                         end
-                        found && break
+                        if !isempty(candidates)
+                            # Pick best using tissue priority (bone > organ > lymph > vessel > muscle)
+                            LA = parentmodule(@__MODULE__).LesionAssociation
+                            best_organ = LA.pick_best_organ(candidates, ts_names)
+                            if !isempty(best_organ)
+                                # Find the label ID for the best organ
+                                for (k, v) in ts_names
+                                    if v == best_organ && haskey(candidates, k)
+                                        anat_val = k
+                                        break
+                                    end
+                                end
+                            end
+                            break
+                        end
                     end
                 end
                 

@@ -697,12 +697,18 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
             try
                 # Sync user edits from GUI textboxes → report object before export
                 _sync_edits_to_report!(report, lang, sec1_text, sec3_text, sec4_prostate, sec4_lymph, sec4_bone, sec4_visceral, sec6_text)
-                ESR.export_to_docx(report, out_path; lang = lang)
+                ESR.export_to_docx(report, String(out_path); lang = lang)
                 status_text[] = "[OK] Exported: $(basename(out_path))"
                 println("[E-PSMA] Exported Word report to $out_path")
             catch e
-                status_text[] = "[ERR] Export failed: $e"
-                @error "Failed to export Word document" exception=e
+                emsg = sprint(showerror, e)
+                status_text[] = "[ERR] Export failed: $emsg"
+                println("[E-PSMA] EXPORT ERROR: $emsg"); flush(stdout)
+                try
+                    for (exc, bt) in current_exceptions()
+                        println("[E-PSMA] ", sprint(showerror, exc, bt)); flush(stdout)
+                    end
+                catch; end
             end
         end
     end
