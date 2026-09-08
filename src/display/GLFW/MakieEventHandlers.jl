@@ -1562,59 +1562,78 @@ end
 
 After mask modification (painting or AI segmentation):
 1. Invalidate all caches (SUV, volume, centroid)
-2. Recompute centroid from the current mask
-3. Async recompute SUV, volume, PROMISE and update UI fields
+const _async_suv_debounce = Dict{Tuple{Int, Int}, Float64}()
+
+"""
+Called when a lesion is painted or modified.
+1. Synchronously invalidates caches.
+2. Schedules a debounced background task to recompute metrics.
 """
 function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::Int, mask_vol::Union{AbstractArray, Nothing}=nothing)
-    # 1. Invalidate caches
+    # 1. Invalidate caches (synchronous)
     invalidate_suv_for_lesion(lesion_id, tp_idx)
     
-    # 2. Recompute centroid from current mask
-    centroid_found = false
-    if mask_vol !== nothing
-        try
-            indices = findall(x -> round(Int, x) == lesion_id, mask_vol)
-            if !isempty(indices)
-                cx = round(Int, mean(i[1] for i in indices))
-                cy = round(Int, mean(i[2] for i in indices))
-                cz = round(Int, mean(i[3] for i in indices))
-                lesion_centroids_cache[(tp_idx, lesion_id)] = [cx, cy, cz]
-                if tp_idx == current_tp_index[]
-                    lesion_centroids_cache[lesion_id] = [cx, cy, cz]
-                end
-                centroid_found = true
-                println("  [SUV] Recomputed centroid for lesion $lesion_id @ TP $tp_idx: ($cx,$cy,$cz)"); flush(stdout)
-            end
-        catch e
-            @warn "Centroid recompute failed for lesion $lesion_id: $e"
-        end
-    end
-    # Try mask_i16 from tp_data_cache (this is the Int16 version, handles IDs > 127)
-    if !centroid_found && haskey(tp_data_cache, tp_idx)
-        try
-            entry = tp_data_cache[tp_idx]
-            m = entry.mask_i16  # Use Int16 version for IDs > 127
-            indices = findall(x -> round(Int, x) == lesion_id, m)
-            if !isempty(indices)
-                cx = round(Int, mean(i[1] for i in indices))
-                cy = round(Int, mean(i[2] for i in indices))
-                cz = round(Int, mean(i[3] for i in indices))
-                lesion_centroids_cache[(tp_idx, lesion_id)] = [cx, cy, cz]
-                if tp_idx == current_tp_index[]
-                    lesion_centroids_cache[lesion_id] = [cx, cy, cz]
-                end
-                centroid_found = true
-            end
-        catch; end
-    end
+    # Debounce the heavy background task
+    now_t = time()
+    _async_suv_debounce[(tp_idx, lesion_id)] = now_t
     
-    # 3. Update organ mapping from atlas (always re-run — volume scan may upgrade muscle→bone)
-    try
+    Threads.@spawn begin
+        # Wait a short period to batch updates
+        sleep(0.5)
+        
+        # Abort if a newer event arrived
+        if get(_async_suv_debounce, (tp_idx, lesion_id), 0.0) > now_t
+            return
+        end
+        
+        # 2. Recompute centroid from current mask
+        centroid_found = false
+        if mask_vol !== nothing
+            try
+                indices = findall(==(lesion_id), mask_vol)
+                if !isempty(indices)
+                    cx = round(Int, mean(i[1] for i in indices))
+                    cy = round(Int, mean(i[2] for i in indices))
+                    cz = round(Int, mean(i[3] for i in indices))
+                    lesion_centroids_cache[(tp_idx, lesion_id)] = [cx, cy, cz]
+                    if tp_idx == current_tp_index[]
+                        lesion_centroids_cache[lesion_id] = [cx, cy, cz]
+                    end
+                    centroid_found = true
+                    # println("  [SUV] Recomputed centroid for lesion $lesion_id @ TP $tp_idx: ($cx,$cy,$cz)"); flush(stdout)
+                end
+            catch e
+                @warn "Centroid recompute failed for lesion $lesion_id: $e"
+            end
+        end
+        
+        # Try mask_i16 from tp_data_cache
+        if !centroid_found && haskey(tp_data_cache, tp_idx)
+            try
+                entry = tp_data_cache[tp_idx]
+                m = entry.mask_i16
+                # Optimize: avoid anonymous function overhead for Int16 arrays
+                indices = findall(==(Int16(lesion_id)), m)
+                if !isempty(indices)
+                    cx = round(Int, mean(i[1] for i in indices))
+                    cy = round(Int, mean(i[2] for i in indices))
+                    cz = round(Int, mean(i[3] for i in indices))
+                    lesion_centroids_cache[(tp_idx, lesion_id)] = [cx, cy, cz]
+                    if tp_idx == current_tp_index[]
+                        lesion_centroids_cache[lesion_id] = [cx, cy, cz]
+                    end
+                    centroid_found = true
+                end
+            catch; end
+        end
+        
+        # 3. Update organ mapping from atlas
+        try
             atlas = global_ts_atlas[]
             ts_nm = global_ts_names[]
             if atlas !== nothing && ts_nm !== nothing
                 organ_name = ""
-                # Try volume-based scan first (most accurate — uses bone priority)
+                # Try volume-based scan first
                 if mask_vol !== nothing
                     LA = _get_la()
                     if LA !== nothing
@@ -1626,6 +1645,7 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
                         organ_name = LA.classify_and_pick_best_organ(tp_data_cache[tp_idx].mask_i16, atlas, ts_nm, lesion_id)
                     end
                 end
+                
                 # Fallback: centroid-based atlas lookup
                 if isempty(organ_name) && centroid_found
                     centroid = lesion_centroids_cache[(tp_idx, lesion_id)]
@@ -1644,25 +1664,24 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
                         organ_name = ts_nm[anat_val]
                     end
                 end
+                
                 if !isempty(organ_name)
                     existing = get(global_organ_mapping[], lesion_id, "")
                     should_update = isempty(existing) || existing in ("Unknown",)
                     if !should_update
-                        # Only update if new organ has higher tissue priority (lower number = higher)
                         LA = _get_la()
                         if LA !== nothing
                             new_pri = LA.classify_tissue_priority(organ_name)
                             old_pri = LA.classify_tissue_priority(existing)
-                            should_update = new_pri <= old_pri  # bone(1) beats muscle(5)
+                            should_update = new_pri <= old_pri
                         end
                     end
                     if should_update
                         global_organ_mapping[][lesion_id] = organ_name
-                        println("  [SUV] Auto-mapped lesion $lesion_id → '$organ_name' from paint voxels"); flush(stdout)
-                        # Notify LesionMetadataWindow to auto-fill BaseAnatomy + LesionType
+                        # println("  [SUV] Auto-mapped lesion $lesion_id → '$organ_name' from paint voxels"); flush(stdout)
                         try
                             organ_mapping_updated[] = (lesion_id, organ_name)
-                            println("  [SUV] Fired organ_mapping_updated for lesion $lesion_id → '$organ_name'"); flush(stdout)
+                            # println("  [SUV] Fired organ_mapping_updated for lesion $lesion_id → '$organ_name'"); flush(stdout)
                         catch e
                             println("  [SUV] organ_mapping_updated FAILED: $e"); flush(stdout)
                             showerror(stdout, e, catch_backtrace()); println(); flush(stdout)
@@ -1673,22 +1692,17 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
         catch e
             @warn "Organ mapping update failed for lesion $lesion_id: $e"
         end
-    
-    # 4. Async recompute SUV/volume/PROMISE (pre-populate caches)
-    Threads.@spawn begin
+        
+        # 4. Recompute SUV/volume
         try
             LMW = _get_lmw()
             if LMW !== nothing
-                # Recompute volume (cache was cleared, so this recomputes from scratch)
                 vol = LMW.compute_lesion_volume(lesion_id, tp_idx)
-                
-                # Recompute SUV (cache was cleared, so this recomputes from scratch)
                 suv_str = LMW.compute_lesion_suv_string(lesion_id, tp_idx)
                 if !isempty(suv_str)
                     LMW._lesion_suv_cache[(tp_idx, lesion_id)] = suv_str
                 end
-                
-                println("  [SUV] Async recomputed metrics for lesion $lesion_id @ TP $tp_idx: vol=$(round(vol["volume_cc"], digits=2))cc, suv=$(suv_str)"); flush(stdout)
+                # println("  [SUV] Async recomputed metrics for lesion $lesion_id @ TP $tp_idx: vol=$(round(vol["volume_cc"], digits=2))cc, suv=$(suv_str)"); flush(stdout)
             end
         catch e
             @warn "Async SUV/volume recompute failed for lesion $lesion_id: $e"
