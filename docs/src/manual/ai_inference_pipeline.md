@@ -44,7 +44,7 @@ sequenceDiagram
   2. Raw PET SUV patch ($64 \times 64 \times 64$).
   3. Single-point prompt channel (point centered at $[33, 33, 33]$).
 - **Inference Mode**: 3D sliding-window focal patch inference.
-- **Post-Processing**: Filtered through `MedEye3d.ConnectedComponents.extract_largest_connected_component` to remove false-positive background noise islands.
+- **Post-Processing**: Filtered through `MedEye3d.ConnectedComponents.extract_largest_connected_component` to remove false-positive background noise islands. Features automatic fallback to multithreaded CPU KernelAbstractions if the host Windows GPU driver does not support JIT kernel compilation.
 
 ### NNInteractive (MIC-DKFZ Foundation Model)
 - **Modality Input**: Full-volume CT only (PET is not used).
@@ -104,3 +104,35 @@ pred_mask = run_helpnet_inference(ct_vol, pet_vol, click_x, click_y, click_z)
 # Run NNInteractive
 pred_mask = run_nninteractive(ct_vol, pet_vol, scribble_mask, click_x, click_y, click_z)
 ```
+
+---
+
+## 5. Locating Logs & Debugging Inference
+
+When verifying or debugging AI inference runs:
+
+### Application Runtime Logs (Windows Standalone)
+- **Directory**: `%APPDATA%\MedEye3D\logs\`
+- **Files**:
+  - `medeye3d_output.log`: Standard output logging inference requests, timing, and voxel counts.
+  - `medeye3d_error.log`: Standard error and warning traces.
+  - `medeye3d_session.log`: Session history and parameters.
+
+### Docker Container Logs
+```powershell
+docker logs medeye3d-ai --tail 100
+```
+
+### Temporary File Inspection
+- **Exchange Directory**: `tmp_inference/`
+  - `ct_in.nii.gz` / `pet_in.nii.gz`: Inputs sent to container.
+  - `helpnet_prediction.nii.gz`: Output returned from HELPNet.
+
+---
+
+## 6. Detailed Setup & Windows Docker Guide
+
+For complete instructions on running Docker on Windows (WSL 2 backend, GPU passthrough, and PowerShell automation), see:
+- [`docs/ai_docker_setup.md`](file:///D:/MedEye3d.jl/docs/ai_docker_setup.md)
+- Packaging & Installer Guide: [`src/packaging/README.md`](file:///D:/MedEye3d.jl/src/packaging/README.md)
+
