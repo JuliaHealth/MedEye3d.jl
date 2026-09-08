@@ -77,6 +77,25 @@ using JSON
         @test InferenceClient.run_nninteractive(dummy_vol, dummy_vol, [[0, 0, 0]], 5, 5, 5) === nothing
         @test InferenceClient.run_bone_subsegmentation_remote(dummy_vol, dummy_vol, (1.0, 1.0, 1.0)) == (nothing, nothing)
         @test InferenceClient.preload_ct_for_nninteractive(dummy_vol) === nothing
+
+        # Test error tracking and diagnostic messages
+        InferenceClient.set_last_ai_error!("Test error message")
+        @test InferenceClient.get_last_ai_error() == "Test error message"
+        InferenceClient.set_last_ai_error!("")
+        @test InferenceClient.get_last_ai_error() == ""
+
+        # Test script location discovery
+        script_path = InferenceClient.find_ai_script("python_worker.py")
+        @test isfile(script_path)
+        @test endswith(script_path, "python_worker.py")
+
+        # Test writable inference dir resolution
+        inf_dir = InferenceClient.get_inference_dir()
+        @test isdir(inf_dir)
+        test_write = joinpath(inf_dir, ".test_write")
+        write(test_write, "test")
+        @test isfile(test_write)
+        rm(test_write; force=true)
     end
     
     @testset "LesionMetadataWindow Schema and Serialization" begin

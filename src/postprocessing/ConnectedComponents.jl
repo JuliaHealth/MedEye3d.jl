@@ -104,12 +104,26 @@ Extract voxels with matching target_label into a binary mask.
 end
 
 """
-    label_connected_components(mask::AbstractArray{<:Real, 3}; connectivity::Int=26, use_gpu::Bool=CUDA.functional()) -> Array{Int32, 3}
+    label_connected_components(mask::AbstractArray{<:Real, 3}; connectivity::Int=26, use_gpu::Bool=(try CUDA.functional() catch; false end)) -> Array{Int32, 3}
 
 Labels connected components in a 3D binary/integer mask using KernelAbstractions.
 Returns a 3D Int32 array with distinct component IDs.
+Automatically falls back to CPU if GPU kernel launch or compilation fails.
 """
-function label_connected_components(mask::AbstractArray{<:Real, 3}; connectivity::Int=26, use_gpu::Bool=CUDA.functional())
+function label_connected_components(mask::AbstractArray{<:Real, 3}; connectivity::Int=26, use_gpu::Bool=(try CUDA.functional() catch; false end))
+    if use_gpu
+        try
+            return _label_connected_components_impl(mask, true; connectivity=connectivity)
+        catch e
+            @warn "[ConnectedComponents] GPU label propagation failed ($e), falling back to CPU."
+            return _label_connected_components_impl(mask, false; connectivity=connectivity)
+        end
+    else
+        return _label_connected_components_impl(mask, false; connectivity=connectivity)
+    end
+end
+
+function _label_connected_components_impl(mask::AbstractArray{<:Real, 3}, use_gpu::Bool; connectivity::Int=26)
     if count(mask .> 0) == 0
         return zeros(Int32, size(mask))
     end
@@ -162,12 +176,25 @@ function label_connected_components(mask::AbstractArray{<:Real, 3}; connectivity
 end
 
 """
-    extract_largest_connected_component(mask::AbstractArray{<:Real, 3}; connectivity::Int=26, output_val::UInt8=UInt8(1), use_gpu::Bool=CUDA.functional()) -> Array{UInt8, 3}
+    extract_largest_connected_component(mask::AbstractArray{<:Real, 3}; connectivity::Int=26, output_val::UInt8=UInt8(1), use_gpu::Bool=(try CUDA.functional() catch; false end)) -> Array{UInt8, 3}
 
 Extracts ONLY the largest connected component from a 3D binary/integer mask.
-Uses GPU KernelAbstractions for parallel multi-pass label propagation.
+Uses GPU KernelAbstractions for parallel multi-pass label propagation with automatic CPU fallback.
 """
-function extract_largest_connected_component(mask::AbstractArray{<:Real, 3}; connectivity::Int=26, output_val::UInt8=UInt8(1), use_gpu::Bool=CUDA.functional())
+function extract_largest_connected_component(mask::AbstractArray{<:Real, 3}; connectivity::Int=26, output_val::UInt8=UInt8(1), use_gpu::Bool=(try CUDA.functional() catch; false end))
+    if use_gpu
+        try
+            return _extract_largest_connected_component_impl(mask, true; connectivity=connectivity, output_val=output_val)
+        catch e
+            @warn "[ConnectedComponents] GPU extraction failed ($e), falling back to CPU."
+            return _extract_largest_connected_component_impl(mask, false; connectivity=connectivity, output_val=output_val)
+        end
+    else
+        return _extract_largest_connected_component_impl(mask, false; connectivity=connectivity, output_val=output_val)
+    end
+end
+
+function _extract_largest_connected_component_impl(mask::AbstractArray{<:Real, 3}, use_gpu::Bool; connectivity::Int=26, output_val::UInt8=UInt8(1))
     if count(mask .> 0) == 0
         return zeros(UInt8, size(mask))
     end

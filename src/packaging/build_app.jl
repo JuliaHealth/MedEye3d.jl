@@ -112,6 +112,11 @@ if isdir(src_scripts_ai)
             println("✓ Copied scripts/ai/$fname to distribution bundle.")
         end
     end
+    src_bundle = joinpath(src_scripts_ai, "helpnet_bundle")
+    if isdir(src_bundle)
+        cp(src_bundle, joinpath(dist_scripts_ai, "helpnet_bundle"); force=true)
+        println("✓ Copied scripts/ai/helpnet_bundle to distribution bundle.")
+    end
 end
 
 # Create a default configuration / info file

@@ -8,10 +8,83 @@ using ..ConnectedComponents
 
 export start_python_worker, run_helpnet_inference, run_nninteractive, run_bone_subsegmentation_remote,
        insert_patch!, preload_ct_for_nninteractive, send_json_request,
-       prompt_start_ai_models, is_worker_reachable, is_ai_enabled, set_ai_enabled!
+       prompt_start_ai_models, is_worker_reachable, is_ai_enabled, set_ai_enabled!,
+       get_last_ai_error, set_last_ai_error!, find_ai_script, get_inference_dir
 
 global PYTHON_PROC = nothing
 const AI_ENABLED = Ref{Bool}(true)
+const LAST_AI_ERROR = Ref{String}("")
+
+"""
+    get_last_ai_error() -> String
+
+Returns the most recent descriptive error encountered when starting or communicating with the AI worker.
+"""
+function get_last_ai_error()::String
+    return LAST_AI_ERROR[]
+end
+
+"""
+    set_last_ai_error!(err::String)
+
+Sets the most recent descriptive error message for AI worker diagnostics.
+"""
+function set_last_ai_error!(err::String)
+    LAST_AI_ERROR[] = err
+    return err
+end
+
+"""
+    find_ai_script(script_name::String) -> String
+
+Finds the absolute path to an AI helper script across development, bundled, installed, and user directories.
+"""
+function find_ai_script(script_name::String)::String
+    candidates = [
+        joinpath(dirname(Sys.BINDIR), "scripts", "ai", script_name),
+        joinpath(Sys.BINDIR, "scripts", "ai", script_name),
+        normpath(joinpath(@__DIR__, "..", "..", "scripts", "ai", script_name)),
+        joinpath(pwd(), "scripts", "ai", script_name),
+        joinpath(homedir(), ".medeye3d", "scripts", "ai", script_name)
+    ]
+    for c in candidates
+        if isfile(c)
+            return normpath(c)
+        end
+    end
+    return ""
+end
+
+"""
+    get_inference_dir() -> String
+
+Returns a verified writable directory for temporary inference volume data exchange with the AI container.
+"""
+function get_inference_dir()::String
+    # 1. Dev directory if exists and writable
+    dev_dir = normpath(joinpath(@__DIR__, "..", "..", "tmp_inference"))
+    if isdir(dirname(dev_dir))
+        try
+            mkpath(dev_dir)
+            test_file = joinpath(dev_dir, ".perm_test")
+            write(test_file, "test")
+            rm(test_file; force=true)
+            return dev_dir
+        catch
+        end
+    end
+    # 2. User profile directory
+    user_dir = joinpath(homedir(), ".medeye3d", "tmp_inference")
+    try
+        mkpath(user_dir)
+        return user_dir
+    catch
+    end
+    # 3. System temp directory
+    tmp_dir = joinpath(tempdir(), "medeye3d_inference")
+    mkpath(tmp_dir)
+    return tmp_dir
+end
 
 """
     is_ai_enabled() -> Bool
@@ -59,13 +132,16 @@ end
 """
     is_worker_reachable(; host=get_ai_host(), port=get_ai_port())::Bool
 
-Quickly tests if the AI worker TCP server is reachable.
+Quickly tests if the AI worker TCP server is reachable and responding to commands.
 """
 function is_worker_reachable(; host=get_ai_host(), port=get_ai_port())::Bool
     try
         conn = connect(host, port)
+        write(conn, JSON.json(Dict("command" => "ping")))
+        resp_str = read(conn, String)
         close(conn)
-        return true
+        resp = JSON.parse(resp_str)
+        return get(resp, "status", "") == "success"
     catch
         return false
     end
@@ -210,31 +286,73 @@ function start_python_worker(worker_script_path::String = "")::Bool
     if is_worker_reachable(; host=host, port=port)
         println("[InferenceClient] AI Worker is ready and connected at $host:$port."); flush(stdout)
         set_ai_enabled!(true)
+        set_last_ai_error!("")
         try verify_docker_code_sync() catch end
         return true
     end
+
+    fatal_launcher_error = false
 
     # 2. Try to start local worker if host is local
     if host in ("127.0.0.1", "localhost")
         if Sys.iswindows()
             # Try start_docker_worker.ps1
-            ps_script = normpath(joinpath(@__DIR__, "..", "..", "scripts", "ai", "start_docker_worker.ps1"))
-            if isfile(ps_script)
+            ps_script = find_ai_script("start_docker_worker.ps1")
+            inf_dir = get_inference_dir()
+            if !isempty(ps_script)
                 println("[InferenceClient] Launching Windows Docker AI worker ($ps_script)..."); flush(stdout)
                 try
-                    run(`powershell -NoProfile -ExecutionPolicy Bypass -File $ps_script -Port $port`, wait=true)
+                    out_buf = IOBuffer()
+                    err_buf = IOBuffer()
+                    cmd = `powershell -NoProfile -ExecutionPolicy Bypass -File $ps_script -Port $port -InferenceDir $inf_dir`
+                    proc = run(pipeline(ignorestatus(cmd), stdout=out_buf, stderr=err_buf), wait=true)
+                    out_str = String(take!(out_buf))
+                    err_str = String(take!(err_buf))
+                    exit_code = proc.exitcode
+
+                    if !isempty(out_str)
+                        print("[InferenceClient] Docker launcher: $out_str"); flush(stdout)
+                    end
+                    if !isempty(err_str)
+                        print("[InferenceClient] Docker launcher stderr: $err_str"); flush(stdout)
+                    end
+
+                    if exit_code != 0
+                        err_reason = if exit_code == 1
+                            "Docker CLI not found in PATH. Please install Docker Desktop (https://www.docker.com) and ensure 'docker' is in your system PATH."
+                        elseif exit_code == 2
+                            "Docker Desktop daemon is not running. Please start Docker Desktop and ensure the Docker engine is running."
+                        elseif exit_code == 3
+                            "Failed to build Docker image 'medeye3d-ai:latest'. Check Docker Desktop logs and disk space."
+                        elseif exit_code == 4
+                            "Docker image 'medeye3d-ai:latest' not found."
+                        elseif exit_code == 5
+                            "Failed to start Docker container 'medeye3d-ai'. Check Docker Desktop logs."
+                        else
+                            "Docker launch script exited with code $exit_code: $(strip(err_str))"
+                        end
+                        set_last_ai_error!(err_reason)
+                        println("[InferenceClient ERROR] $err_reason"); flush(stdout)
+                        fatal_launcher_error = true
+                    end
                 catch e
-                    println("[InferenceClient] Docker worker launch notice: $e"); flush(stdout)
+                    err_msg = "Failed to run Docker launcher script: $e"
+                    set_last_ai_error!(err_msg)
+                    println("[InferenceClient ERROR] $err_msg"); flush(stdout)
+                    fatal_launcher_error = true
                 end
+            else
+                err_msg = "Could not find 'start_docker_worker.ps1' in application bundle or repository."
+                set_last_ai_error!(err_msg)
+                println("[InferenceClient WARNING] $err_msg"); flush(stdout)
             end
 
-            # If still not reachable, try local Python worker
+            # If Docker launch had fatal error and port is not open, check local Python worker fallback
             if !is_worker_reachable(; host=host, port=port)
                 py_script = !isempty(worker_script_path) && isfile(worker_script_path) ?
                     worker_script_path :
-                    normpath(joinpath(@__DIR__, "..", "..", "scripts", "ai", "python_worker.py"))
-                if isfile(py_script)
-                    # Check if python has torch
+                    find_ai_script("python_worker.py")
+                if !isempty(py_script) && isfile(py_script)
                     has_py = try
                         run(pipeline(`python -c "import torch"`, stdout=devnull, stderr=devnull), wait=true)
                         true
@@ -242,9 +360,10 @@ function start_python_worker(worker_script_path::String = "")::Bool
                         false
                     end
                     if has_py
-                        println("[InferenceClient] Launching local python_worker.py in background..."); flush(stdout)
+                        println("[InferenceClient] Attempting local python_worker.py fallback..."); flush(stdout)
                         try
                             run(`python $py_script`, wait=false)
+                            fatal_launcher_error = false
                         catch e
                             println("[InferenceClient] Local python worker launch notice: $e"); flush(stdout)
                         end
@@ -252,35 +371,56 @@ function start_python_worker(worker_script_path::String = "")::Bool
                 end
             end
         else
-            docker_script = normpath(joinpath(@__DIR__, "..", "..", "scripts", "ai", "start_docker_worker.sh"))
-            if isfile(docker_script)
-                try
-                    log_file = tempname() * ".log"
-                    run(pipeline(`bash $docker_script`, stdout=log_file, stderr=log_file), wait=true)
-                catch e
-                    println("[InferenceClient] Docker not available locally (normal for remote/SSH setups)."); flush(stdout)
+            docker_script = find_ai_script("start_docker_worker.sh")
+            if !isempty(docker_script)
+                out_buf = IOBuffer()
+                err_buf = IOBuffer()
+                cmd = `bash $docker_script`
+                proc = run(pipeline(ignorestatus(cmd), stdout=out_buf, stderr=err_buf), wait=true)
+                out_str = String(take!(out_buf))
+                err_str = String(take!(err_buf))
+                if proc.exitcode != 0
+                    err_reason = "Docker script 'start_docker_worker.sh' failed with exit code $(proc.exitcode): $(strip(err_str))"
+                    set_last_ai_error!(err_reason)
+                    println("[InferenceClient ERROR] $err_reason"); flush(stdout)
+                    fatal_launcher_error = true
                 end
+            else
+                err_msg = "Could not find 'start_docker_worker.sh'"
+                set_last_ai_error!(err_msg)
+                println("[InferenceClient WARNING] $err_msg"); flush(stdout)
             end
         end
     end
 
-    # 3. Wait up to 15 seconds for the Python TCP server to be reachable
+    # If launcher failed fatally and port is definitely not reachable, return immediately without 45s sleep loop
+    if fatal_launcher_error && !is_worker_reachable(; host=host, port=port)
+        println("[InferenceClient] Aborting AI connection: Docker launcher encountered fatal error and AI port $port is offline."); flush(stdout)
+        return false
+    end
+
+    # 3. Wait up to 45 seconds for the Python TCP server to be reachable & responsive
     connected = false
-    for i in 1:15
+    for i in 1:45
         if is_worker_reachable(; host=host, port=port)
             println("[InferenceClient] AI Worker is ready at $host:$port."); flush(stdout)
             connected = true
             set_ai_enabled!(true)
+            set_last_ai_error!("")
             try verify_docker_code_sync() catch end
             break
+        end
+        if i % 10 == 0
+            println("[InferenceClient] Waiting for AI Worker to initialize ($i/45s)..."); flush(stdout)
         end
         sleep(1)
     end
 
     if !connected
-        println("[InferenceClient] WARNING: AI Worker not reachable at $host:$port after 15s."); flush(stdout)
+        timeout_msg = "AI Worker not responsive at $host:$port after 45s (GPU model loading timeout or container exited)."
+        set_last_ai_error!(timeout_msg)
+        println("[InferenceClient] Notice: $timeout_msg"); flush(stdout)
         println("[InferenceClient] For remote GPU server over SSH, ensure tunnel is active: ssh -N -L $port:localhost:$port user@server"); flush(stdout)
-        set_ai_enabled!(false)
         return false
     end
     return true
@@ -363,8 +503,6 @@ function insert_patch!(vol::AbstractArray{T, 3}, patch::AbstractArray{<:Real, 3}
     vol[src_x1:src_x2, src_y1:src_y2, src_z1:src_z2] .= target_slice
 end
 
-const INFERENCE_DIR = joinpath(dirname(dirname(@__DIR__)), "tmp_inference")
-
 function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}, points_vol::Union{Nothing, Array{Float32, 3}}, cx::Int, cy::Int, cz::Int; port=get_ai_port())
     if !is_ai_enabled()
         println("[InferenceClient] HELPNet inference skipped: AI models are disabled."); flush(stdout)
@@ -373,7 +511,7 @@ function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32
 
     # Docker container (medeye3d-ai) is started once at app startup — here we only communicate via TCP
 
-    out_dir = INFERENCE_DIR
+    out_dir = get_inference_dir()
     mkpath(out_dir)
     
     ct_patch = extract_patch(ct_vol, cx, cy, cz, pad_val=-1000.0f0)
@@ -403,15 +541,33 @@ function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32
     
     req = Dict(
         "command" => "helpnet",
-        "ct_path" => ct_path,
-        "pet_path" => pet_path,
-        "point_path" => point_path,
+        "ct_path" => "/tmp/medeye3d_inference/$(basename(ct_path))",
+        "pet_path" => "/tmp/medeye3d_inference/$(basename(pet_path))",
+        "point_path" => "/tmp/medeye3d_inference/$(basename(point_path))",
         "out_dir" => "/tmp/medeye3d_inference"
     )
     
     host = get_ai_host()
+    conn = nothing
+    for attempt in 1:3
+        try
+            conn = connect(host, port)
+            break
+        catch e
+            if attempt < 3
+                sleep(1.0)
+            end
+        end
+    end
+    if conn === nothing
+        last_err = get_last_ai_error()
+        detail = isempty(last_err) ? "Is Docker container 'medeye3d-ai' running? Check Docker Desktop or run start_docker_worker.ps1." : last_err
+        set_last_ai_error!("Connection refused at $host:$port ($detail)")
+        println("[InferenceClient ERROR] Failed to connect to Python Worker at $host:$port: connection refused. $detail"); flush(stdout)
+        return nothing
+    end
+
     try
-        conn = connect(host, port)
         write(conn, JSON.json(req))
         resp_str = read(conn, String)
         close(conn)
@@ -419,22 +575,34 @@ function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32
         resp = JSON.parse(resp_str)
         if resp["status"] == "success"
             pred_file = basename(resp["prediction_path"])
-            local_pred_path = joinpath(INFERENCE_DIR, pred_file)
+            local_pred_path = joinpath(out_dir, pred_file)
             pred_im = MedImages.load_image(local_pred_path, "unknown")
             raw_mask = Array{UInt8}(pred_im.voxel_data)
-            # Post-process: extract only largest connected component using GPU KernelAbstractions
-            clean_mask = ConnectedComponents.extract_largest_connected_component(raw_mask)
+            # Post-process: extract only largest connected component using GPU/CPU KernelAbstractions
+            clean_mask = try
+                ConnectedComponents.extract_largest_connected_component(raw_mask)
+            catch lcc_err
+                println("[InferenceClient] HELPNet post-processing (LCC) fallback to raw mask: $lcc_err"); flush(stdout)
+                raw_mask
+            end
             println("[InferenceClient] HELPNet post-processing (LCC): $(count(raw_mask .> 0)) -> $(count(clean_mask .> 0)) voxels"); flush(stdout)
+            set_last_ai_error!("")
             return clean_mask
         else
-            println("[InferenceClient ERROR] Python Worker Error: $(resp["message"])"); flush(stdout)
+            err_msg = string(get(resp, "message", "Unknown error from HELPNet worker"))
+            set_last_ai_error!("HELPNet error: $err_msg")
+            println("[InferenceClient ERROR] Python Worker Error: $err_msg"); flush(stdout)
             return nothing
         end
     catch e
+        set_last_ai_error!("Failed to communicate with Python Worker at $host:$port: $e")
         println("[InferenceClient ERROR] Failed to communicate with Python Worker at $host:$port: $e"); flush(stdout)
-        println(sprint(showerror, e, catch_backtrace())); flush(stdout)
         return nothing
     end
+end
+
+function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}, cx::Int, cy::Int, cz::Int; port=get_ai_port())
+    return run_helpnet_inference(ct_vol, pet_vol, nothing, cx, cy, cz; port=port)
 end
 
 """
@@ -453,7 +621,7 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
         return nothing
     end
 
-    out_dir = INFERENCE_DIR
+    out_dir = get_inference_dir()
     mkpath(out_dir)
     
     if isempty(scribble_coords)
@@ -472,7 +640,7 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
     
     req = Dict(
         "command" => "nninteractive",
-        "ct_path" => ct_path,
+        "ct_path" => "/tmp/medeye3d_inference/$(basename(ct_path))",
         "scribble_coords" => scribble_coords,
         "out_dir" => "/tmp/medeye3d_inference",
         "autozoom" => autozoom,
@@ -480,14 +648,33 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
     )
     
     host = get_ai_host()
+    conn = nothing
+    for attempt in 1:3
+        try
+            conn = connect(host, port)
+            break
+        catch e
+            if attempt < 3
+                sleep(1.0)
+            end
+        end
+    end
+    if conn === nothing
+        last_err = get_last_ai_error()
+        detail = isempty(last_err) ? "Is Docker container 'medeye3d-ai' running? Check Docker Desktop or run start_docker_worker.ps1." : last_err
+        set_last_ai_error!("Connection refused at $host:$port ($detail)")
+        println("[InferenceClient ERROR] Failed to connect to Python Worker at $host:$port: connection refused. $detail"); flush(stdout)
+        return nothing
+    end
+
     try
-        conn = connect(host, port)
         write(conn, JSON.json(req))
         resp_str = read(conn, String)
         close(conn)
         
         resp = JSON.parse(resp_str)
         if resp["status"] == "success"
+            set_last_ai_error!("")
             # Prefer inline base64 transfer (no file I/O)
             if haskey(resp, "mask_b64")
                 raw = base64decode(resp["mask_b64"])
@@ -504,17 +691,19 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
             else
                 # Fallback: read from NIfTI file
                 pred_file = basename(resp["prediction_path"])
-                local_pred_path = joinpath(INFERENCE_DIR, pred_file)
+                local_pred_path = joinpath(out_dir, pred_file)
                 pred_im = MedImages.load_image(local_pred_path, "unknown")
                 return Array{UInt8}(pred_im.voxel_data)
             end
         else
-            println("[InferenceClient ERROR] Python Worker Error: $(resp["message"])"); flush(stdout)
+            err_msg = string(get(resp, "message", "Unknown error from nnInteractive worker"))
+            set_last_ai_error!("nnInteractive error: $err_msg")
+            println("[InferenceClient ERROR] Python Worker Error: $err_msg"); flush(stdout)
             return nothing
         end
     catch e
+        set_last_ai_error!("Failed to communicate with Python Worker at $host:$port: $e")
         println("[InferenceClient ERROR] Failed to communicate with Python Worker at $host:$port: $e"); flush(stdout)
-        println(sprint(showerror, e, catch_backtrace())); flush(stdout)
         return nothing
     end
 end
@@ -550,7 +739,7 @@ function preload_ct_for_nninteractive(ct_vol::Array{Float32, 3}; port=get_ai_por
             end
             close(test_conn)
 
-            out_dir = INFERENCE_DIR
+            out_dir = get_inference_dir()
             mkpath(out_dir)
             
             ct_hash = hash(ct_vol)
@@ -572,7 +761,7 @@ function preload_ct_for_nninteractive(ct_vol::Array{Float32, 3}; port=get_ai_por
             
             req = Dict(
                 "command" => "preload_ct",
-                "ct_path" => ct_path,
+                "ct_path" => "/tmp/medeye3d_inference/$(basename(ct_path))",
                 "out_dir" => "/tmp/medeye3d_inference"
             )
             

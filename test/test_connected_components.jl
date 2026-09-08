@@ -13,14 +13,27 @@ end
 
 @testset "ConnectedComponents (KernelAbstractions & SimpleITK Baseline)" begin
 
+    HAS_SITK = try
+        success(`python3 -c "import SimpleITK"`)
+    catch
+        false
+    end
+    if !HAS_SITK
+        println("[Notice] SimpleITK not installed in Python environment, skipping SimpleITK cross-validation.")
+    end
+
     # Helper function to call SimpleITK baseline in Python
     function sitk_largest_connected_component(mask::Array{UInt8, 3}; connectivity::Int=26)
+        HAS_SITK || return nothing
         # Write array to temp binary / NIfTI or evaluate via python script
         tmp_in = tempname() * "_in.raw"
         tmp_out = tempname() * "_out.raw"
         
         # Save raw binary bytes with Fortran (Julia) order
         write(tmp_in, mask)
+        
+        tmp_in_esc = replace(tmp_in, "\\" => "/")
+        tmp_out_esc = replace(tmp_out, "\\" => "/")
         
         dims_str = "$(size(mask, 1)),$(size(mask, 2)),$(size(mask, 3))"
         fully_conn = connectivity == 26 ? "True" : "False"
@@ -30,7 +43,7 @@ import numpy as np
 import SimpleITK as sitk
 
 dims = tuple(map(int, '$dims_str'.split(',')))
-raw = np.fromfile('$tmp_in', dtype=np.uint8)
+raw = np.fromfile('$tmp_in_esc', dtype=np.uint8)
 data_xyz = raw.reshape(dims, order='F')
 
 if np.count_nonzero(data_xyz) == 0:
@@ -44,7 +57,7 @@ else:
     out_xyz = np.transpose(out_zyx, (2, 1, 0))
 
 flat_out = out_xyz.flatten(order='F')
-flat_out.tofile('$tmp_out')
+flat_out.tofile('$tmp_out_esc')
 """
         run(`python3 -c $py_cmd`)
         
@@ -79,7 +92,9 @@ flat_out.tofile('$tmp_out')
         end
         
         res_sitk = sitk_largest_connected_component(empty_vol)
-        @test count(res_sitk .> 0) == 0
+        if res_sitk !== nothing
+            @test count(res_sitk .> 0) == 0
+        end
         println("✓ Empty mask test passed")
     end
 
@@ -98,8 +113,10 @@ flat_out.tofile('$tmp_out')
         end
         
         res_sitk = sitk_largest_connected_component(single_vol)
-        @test res_sitk == single_vol
-        @test dice_score(res_cpu, res_sitk) == 1.0
+        if res_sitk !== nothing
+            @test res_sitk == single_vol
+            @test dice_score(res_cpu, res_sitk) == 1.0
+        end
         println("✓ Single component test passed (Dice = 1.0)")
     end
 
@@ -120,6 +137,14 @@ flat_out.tofile('$tmp_out')
             end
         end
         
+        # Analytical ground truth: largest sphere
+        largest_sphere = zeros(UInt8, 64, 64, 64)
+        for z in 1:64, y in 1:64, x in 1:64
+            if (x-45)^2 + (y-45)^2 + (z-45)^2 <= 64
+                largest_sphere[x, y, z] = 1
+            end
+        end
+        
         total_initial = count(multi_vol .> 0)
         println("Initial multi-component voxels: ", total_initial)
         
@@ -127,17 +152,22 @@ flat_out.tofile('$tmp_out')
         res_sitk = sitk_largest_connected_component(multi_vol)
         
         @test count(res_cpu .> 0) < total_initial
-        @test count(res_cpu .> 0) == count(res_sitk .> 0)
-        @test dice_score(res_cpu, res_sitk) == 1.0
-        @test res_cpu == res_sitk
+        @test res_cpu == largest_sphere
+        if res_sitk !== nothing
+            @test count(res_cpu .> 0) == count(res_sitk .> 0)
+            @test dice_score(res_cpu, res_sitk) == 1.0
+            @test res_cpu == res_sitk
+        end
         
         if CUDA.functional()
             res_gpu = extract_largest_connected_component(multi_vol, use_gpu=true)
-            @test res_gpu == res_sitk
-            @test dice_score(res_gpu, res_sitk) == 1.0
+            @test res_gpu == largest_sphere
+            if res_sitk !== nothing
+                @test dice_score(res_gpu, res_sitk) == 1.0
+            end
         end
         
-        println("✓ Multi-component spheres test passed! (KA GPU/CPU vs SimpleITK: Dice = 1.000, $(count(res_cpu .> 0)) voxels)")
+        println("✓ Multi-component spheres test passed! (KA GPU/CPU matches analytical largest sphere: $(count(res_cpu .> 0)) voxels)")
     end
 
     @testset "Complex Topologies & Noise Specks" begin
@@ -148,6 +178,8 @@ flat_out.tofile('$tmp_out')
                 complex_vol[x, y, z] = 1
             end
         end
+        
+        clean_expected = copy(complex_vol)
         
         # Add 50 isolated random 1-voxel and 2-voxel noise specks
         import Random
@@ -162,16 +194,21 @@ flat_out.tofile('$tmp_out')
         res_cpu = extract_largest_connected_component(complex_vol, use_gpu=false)
         res_sitk = sitk_largest_connected_component(complex_vol)
         
-        @test res_cpu == res_sitk
-        @test dice_score(res_cpu, res_sitk) == 1.0
+        @test res_cpu == clean_expected
+        if res_sitk !== nothing
+            @test res_cpu == res_sitk
+            @test dice_score(res_cpu, res_sitk) == 1.0
+        end
         
         if CUDA.functional()
             res_gpu = extract_largest_connected_component(complex_vol, use_gpu=true)
-            @test res_gpu == res_sitk
-            @test dice_score(res_gpu, res_sitk) == 1.0
+            @test res_gpu == clean_expected
+            if res_sitk !== nothing
+                @test dice_score(res_gpu, res_sitk) == 1.0
+            end
         end
         
-        println("✓ Complex lesion with random noise specks passed! (KA vs SimpleITK: Dice = 1.000)")
+        println("✓ Complex lesion with random noise specks passed! (KA cleanly isolates main lesion)")
     end
 
     @testset "Performance Benchmark: KA GPU vs KA CPU vs SimpleITK" begin
@@ -205,8 +242,10 @@ flat_out.tofile('$tmp_out')
             println("  KernelAbstractions GPU:   ", round(t_gpu * 1000, digits=2), " ms")
         end
         
-        t_sitk = benchmark_fn(() -> sitk_largest_connected_component(bench_vol), 5)
-        println("  SimpleITK Baseline (C++): ", round(t_sitk * 1000, digits=2), " ms")
+        if HAS_SITK
+            t_sitk = benchmark_fn(() -> sitk_largest_connected_component(bench_vol), 5)
+            println("  SimpleITK Baseline (C++): ", round(t_sitk * 1000, digits=2), " ms")
+        end
         
         @test true
     end
