@@ -80,7 +80,7 @@ const inference_queue = Channel{InferenceJob}(8)
 # Persistent worker thread — started once, processes jobs sequentially (no race conditions)
 function start_inference_worker()
     Threads.@spawn begin
-        println("[AI Worker] Inference worker thread started."); flush(stdout)
+        @debug "[AI Worker] Inference worker thread started."
         while true
             try
                 job = take!(inference_queue)
@@ -90,7 +90,7 @@ function start_inference_worker()
                 end
                 
                 set_ai_status!("[Sending] to Docker ($(job.algorithm))...")
-                println("[AI Worker] Processing $(job.algorithm) at ($(job.cx),$(job.cy),$(job.cz)) for lesion $(job.active_id)..."); flush(stdout)
+                @debug "[AI Worker] Processing $(job.algorithm) at ($(job.cx),$(job.cy),$(job.cz)) for lesion $(job.active_id)..."
                 
                 mask = nothing
                 if job.algorithm == "NNInteractive"
@@ -109,7 +109,7 @@ function start_inference_worker()
                         job.ct_vol, job.pet_vol, job.points_vol,
                         job.cx, job.cy, job.cz)
                 else
-                    println("[AI Worker] WARNING: Unknown algorithm: $(job.algorithm)"); flush(stdout)
+                    @debug "[AI Worker] WARNING: Unknown algorithm: $(job.algorithm)"
                     set_ai_status!("[Warning] Unknown algorithm: $(job.algorithm)")
                     continue
                 end
@@ -117,10 +117,10 @@ function start_inference_worker()
                 if mask !== nothing
                     voxel_count = count(mask .> 0)
                     set_ai_status!("[Applying] result ($voxel_count voxels)...")
-                    println("[AI Worker] Docker returned mask with $voxel_count voxels. Posting to channel."); flush(stdout)
+                    @debug "[AI Worker] Docker returned mask with $voxel_count voxels. Posting to channel."
                 else
                     set_ai_status!("[Warning] Docker returned no mask")
-                    println("[AI Worker] Docker returned nothing (inference failed)."); flush(stdout)
+                    @debug "[AI Worker] Docker returned nothing (inference failed)."
                 end
                 
                 # Post result back to main event channel via on_next! multiple dispatch
@@ -131,12 +131,12 @@ function start_inference_worker()
                     
             catch e
                 if e isa InvalidStateException  # channel closed
-                    println("[AI Worker] Queue closed, shutting down."); flush(stdout)
+                    @debug "[AI Worker] Queue closed, shutting down."
                     break
                 end
                 err_msg = sprint(showerror, e)
-                println("[AI Worker] ERROR: $err_msg"); flush(stdout)
-                println(sprint(showerror, e, catch_backtrace())); flush(stdout)
+                @debug "[AI Worker] ERROR: $err_msg"
+                @debug "Error trace" exception=(e, catch_backtrace())
                 set_ai_status!("[Error] AI Worker Error: $err_msg")
                 try
                     open("/tmp/medeye3d_errors.log", "a") do f
@@ -299,7 +299,7 @@ function _force_texture_upload!(stateObjects::Vector{StateDataFields}, panel_idx
     dimToScroll = panelState.onScrollData.dimensionToScroll
     lastSlice = panelState.onScrollData.slicesNumber
     if lastSlice < 1
-        println("  [COMPARE-DBG] panel $panel_idx: slicesNumber=$lastSlice, SKIPPING upload"); flush(stdout)
+        @debug "  [COMPARE-DBG] panel $panel_idx: slicesNumber=$lastSlice, SKIPPING upload"
         return
     end
     current = clamp(panelState.currentDisplayedSlice, 1, lastSlice)
@@ -318,14 +318,14 @@ function _force_texture_upload!(stateObjects::Vector{StateDataFields}, panel_idx
         tex_w = Int(panelState.calcDimsStruct.imageTextureWidth)
         tex_h = Int(panelState.calcDimsStruct.imageTextureHeight)
         if actual_w > tex_w || actual_h > tex_h
-            println("  [COMPARE-DBG] SKIPPING texture '$(updateDat.name)' on panel $panel_idx: data=$(actual_w)x$(actual_h) > texture=$(tex_w)x$(tex_h)"); flush(stdout)
+            @debug "  [COMPARE-DBG] SKIPPING texture '$(updateDat.name)' on panel $panel_idx: data=$(actual_w)x$(actual_h) > texture=$(tex_w)x$(tex_h)"
         end
     end
     
     panelState.currentlyDispDat = singleSlDat
     panelState.currentDisplayedSlice = current
     panelState.isSliceChanged = true
-    println("  [COMPARE-DBG] panel $panel_idx: uploaded $n_textures textures at slice $current (dimToScroll=$dimToScroll, slicesNumber=$lastSlice)"); flush(stdout)
+    @debug "  [COMPARE-DBG] panel $panel_idx: uploaded $n_textures textures at slice $current (dimToScroll=$dimToScroll, slicesNumber=$lastSlice)"
 end
 
 function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Vector{StateDataFields})
@@ -364,7 +364,7 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
 
             left_label = get(tp_labels, current_tp_index[], "TP $(current_tp_index[])")
             right_label = get(tp_labels, compare_right_tp[], "TP $(compare_right_tp[])")
-            println("Compare mode ON: Left=$left_label, Right=$right_label"); flush(stdout)
+            @debug "Compare mode ON: Left=$left_label, Right=$right_label"
             
             # Fix ❺: Panel 1 data hasn't changed — only layout vertices moved.
             # Just mark it dirty for the consumer to re-render; skip redundant slice extraction.
@@ -377,7 +377,7 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                 try
                     reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects)
                 catch e
-                    println("WARNING: reactToSyncLesion failed during compare-ON: $e"); flush(stdout)
+                    @debug "WARNING: reactToSyncLesion failed during compare-ON: $e"
                 end
             end
         else
@@ -429,7 +429,7 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
             for i in 1:4
                 stateObjects[i].currentlyDispDat = SingleSliceDat(sliceNumber=0)
             end
-            println("Compare mode OFF: restored 4-pane view for TP $(current_tp_index[])"); flush(stdout)
+            @debug "Compare mode OFF: restored 4-pane view for TP $(current_tp_index[])"
             
             # Force direct texture upload for all 4 visible panels
             for i in 1:4
@@ -442,7 +442,7 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                     lid_off = _clamp_lid_for_tp(current_active_lesion_id[], current_tp_index[])
                     reactToSyncLesion(SyncLesionEvent(lid_off), stateObjects)
                 catch e
-                    println("WARNING: reactToSyncLesion failed during compare-OFF: $e"); flush(stdout)
+                    @debug "WARNING: reactToSyncLesion failed during compare-OFF: $e"
                 end
             end
         end
@@ -478,7 +478,7 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
         end
     end
     lbl = is_single_lesion_mode[] ? string(data.lesion_id) : "all"
-    println("Show single lesion: $lbl (single_mode=$(is_single_lesion_mode[]))"); flush(stdout)
+    @debug "Show single lesion: $lbl (single_mode=$(is_single_lesion_mode[]))"
     _mri_clamp_mask_range!(stateObjects)
     return changed
 end
@@ -542,7 +542,7 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
             end
         end
     end
-    println("Updated windowing for $(data.modality): [$(data.min_val), $(data.max_val)]"); flush(stdout)
+    @debug "Updated windowing for $(data.modality): [$(data.min_val), $(data.max_val)]"
 end
 
 function reactToPetBlend(data::PetBlendEvent, stateObjects::Vector{StateDataFields})
@@ -591,7 +591,7 @@ function reactToPaintVal(data::PaintValEvent, stateObjects::Vector{StateDataFiel
             end
         end
     end
-    println("Paint state updated: val=$(data.val), active=$(data.active)"); flush(stdout)
+    @debug "Paint state updated: val=$(data.val), active=$(data.active)"
 end
 
 function reactToChangeBrushSize(data::ChangeBrushSizeEvent, stateObjects::Vector{StateDataFields})
@@ -802,7 +802,7 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
             catch
                 (1.0, 1.0, 2.0)
             end
-            println("  [BONE-REMOTE] Running remote bone subseg for lid=$target_id tp=$panel_tp spacing=$sp"); flush(stdout)
+            @debug "  [BONE-REMOTE] Running remote bone subseg for lid=$target_id tp=$panel_tp spacing=$sp"
             
             # Crop to bounding box for transfer efficiency
             sz = size(mask_vol)
@@ -833,11 +833,11 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
                 push!(m_pts, CartesianIndex(I[1] + x_min - 1, I[2] + y_min - 1, I[3] + z_min - 1))
             end
             
-            println("  [BONE-REMOTE] SUCCESS: $(length(s_pts)) surf, $(length(m_pts)) marrow voxels"); flush(stdout)
+            @debug "  [BONE-REMOTE] SUCCESS: $(length(s_pts)) surf, $(length(m_pts)) marrow voxels"
             (s_pts, m_pts)
         catch e
             @warn "Remote bone subseg failed, falling back to fast version" exception=(e, catch_backtrace())
-            println("  [BONE-FAST] Falling back to compute_bone_subsegments_fast for lid=$target_id tp=$panel_tp"); flush(stdout)
+            @debug "  [BONE-FAST] Falling back to compute_bone_subsegments_fast for lid=$target_id tp=$panel_tp"
             compute_bone_subsegments_fast(mask_vol, skelly_vol, target_id)
         end
         bone_subsegments_cache[(panel_tp, target_id)] = res
@@ -874,7 +874,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                 end
             end
         catch e
-            println("WARNING: Error finding cross-TP lesion: $e"); flush(stdout)
+            @debug "WARNING: Error finding cross-TP lesion: $e"
         end
     end
 
@@ -1074,7 +1074,7 @@ const lesion_centroids_cache = Dict{Any, Vector{Int}}()
 const _centroids_lock = ReentrantLock()
 const last_bone_overlay_indices = Dict{Int, Vector{CartesianIndex{3}}}()
 function reactToBoneSubsegResult(data::BoneSubsegResultEvent, stateObjects::Vector{StateDataFields})
-    println("reactToBoneSubsegResult: received result for lesion $(data.target_id) on tp $(data.panel_tp)"); flush(stdout)
+    @debug "reactToBoneSubsegResult: received result for lesion $(data.target_id) on tp $(data.panel_tp)"
     bone_subsegments_cache[(data.panel_tp, data.target_id)] = (data.pts_surf, data.pts_marr)
     
     # Re-render if this lesion is still the active one
@@ -1175,7 +1175,7 @@ function _update_quad_layout_for_modality!(stateObjects::Vector{StateDataFields}
         updateQuadVertices!(stateObjects[2], :TopRight)
     else
         updateQuadVertices!(stateObjects[2], :Hidden)
-        println("[LAYOUT] Panel 2 (PET-only) hidden — MRI modality for TP $tp"); flush(stdout)
+        @debug "[LAYOUT] Panel 2 (PET-only) hidden — MRI modality for TP $tp"
     end
 end
 
@@ -1555,7 +1555,7 @@ function invalidate_suv_for_lesion(lesion_id::Int, tp_idx::Int)
     catch; end
     delete!(lesion_centroids_cache, (tp_idx, lesion_id))
     delete!(lesion_centroids_cache, lesion_id)
-    println("  [SUV] Invalidated cache for lesion $lesion_id @ TP $tp_idx"); flush(stdout)
+    @debug "  [SUV] Invalidated cache for lesion $lesion_id @ TP $tp_idx"
 end
 
 const _async_suv_debounce = Dict{Tuple{Int, Int}, Float64}()
@@ -1598,7 +1598,7 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
                         lesion_centroids_cache[lesion_id] = [cx, cy, cz]
                     end
                     centroid_found = true
-                    # println("  [SUV] Recomputed centroid for lesion $lesion_id @ TP $tp_idx: ($cx,$cy,$cz)"); flush(stdout)
+                    @debug "  [SUV] Recomputed centroid for lesion $lesion_id @ TP $tp_idx: ($cx,$cy,$cz)"
                 end
             catch e
                 @warn "Centroid recompute failed for lesion $lesion_id: $e"
@@ -1676,13 +1676,12 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
                     end
                     if should_update
                         global_organ_mapping[][lesion_id] = organ_name
-                        # println("  [SUV] Auto-mapped lesion $lesion_id → '$organ_name' from paint voxels"); flush(stdout)
+                        @debug "  [SUV] Auto-mapped lesion $lesion_id → '$organ_name' from paint voxels"
                         try
                             organ_mapping_updated[] = (lesion_id, organ_name)
-                            # println("  [SUV] Fired organ_mapping_updated for lesion $lesion_id → '$organ_name'"); flush(stdout)
+                            @debug "  [SUV] Fired organ_mapping_updated for lesion $lesion_id → '$organ_name'"
                         catch e
-                            println("  [SUV] organ_mapping_updated FAILED: $e"); flush(stdout)
-                            showerror(stdout, e, catch_backtrace()); println(); flush(stdout)
+                            @debug "  [SUV] organ_mapping_updated FAILED: $e"
                         end
                     end
                 end
@@ -1700,7 +1699,7 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
                 if !isempty(suv_str)
                     LMW._lesion_suv_cache[(tp_idx, lesion_id)] = suv_str
                 end
-                # println("  [SUV] Async recomputed metrics for lesion $lesion_id @ TP $tp_idx: vol=$(round(vol["volume_cc"], digits=2))cc, suv=$(suv_str)"); flush(stdout)
+                @debug "  [SUV] Async recomputed metrics for lesion $lesion_id @ TP $tp_idx: vol=$(round(vol["volume_cc"], digits=2))cc, suv=$(suv_str)"
             end
         catch e
             @warn "Async SUV/volume recompute failed for lesion $lesion_id: $e"
@@ -1746,7 +1745,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
     # Flush any modified masks before changing timepoint or evicting
     flush_all_dirty_masks!()
     if isempty(tp_labels)
-        println("No TP labels loaded. TP navigation disabled."); flush(stdout)
+        @debug "No TP labels loaded. TP navigation disabled."
         return
     end
     
@@ -1766,7 +1765,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
     current_tp_index[] = new_tp
     
     label = get(tp_labels, new_tp, "TP $new_tp")
-    println("TP Navigation: switching to $label (index=$new_tp)"); flush(stdout)
+    @debug "TP Navigation: switching to $label (index=$new_tp)"
     
     if compare_mode[]
         # Compare mode: load current TP into left panel (1), next TP into right panel (5)
@@ -1809,7 +1808,7 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         end
         
         right_label = get(tp_labels, right_tp, "TP $right_tp")
-        println("Compare: Left=$label, Right=$right_label"); flush(stdout)
+        @debug "Compare: Left=$label, Right=$right_label"
     else
         # Normal mode: load current TP into all panels
         t_load = @elapsed begin
@@ -1837,14 +1836,14 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
                 lid = _clamp_lid_for_tp(lid, new_tp)
                 try
                     reactToSyncLesion(SyncLesionEvent(lid), stateObjects)
-                    println("Synced to Lesion $lid for $label"); flush(stdout)
+                    @debug "Synced to Lesion $lid for $label"
                 catch e
-                    println("WARNING: Failed to sync Lesion $lid on TP change: $e"); flush(stdout)
+                    @debug "WARNING: Failed to sync Lesion $lid on TP change: $e"
                 end
             end
             if DEBUG_VERBOSE[]; println("  [BENCH] bone overlay (reactToSyncLesion): $(round(t_bone_overlay*1000, digits=1))ms"); flush(stdout); end
             # On MRI: force show-all segments (override single-lesion filter from reactToSyncLesion)
-            _force_mri_show_all!(new_tp, stateObjects)
+            _force_mri_show_all!(stateObjects)
             # Hide/show Panel 2 (PET-only) based on modality
             if !compare_mode[]
                 _update_quad_layout_for_modality!(stateObjects, new_tp)
@@ -1888,14 +1887,14 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
                         !haskey(LMW._lesion_suv_cache, key) && 
                             try LMW._lesion_suv_cache[key] = LMW.compute_lesion_suv_string(lid, tp_for_bg) catch; end
                     end
-                    println("  [BG] SUV precomputed for $(length(unique_ids)) lesions"); flush(stdout)
+                    @debug "  [BG] SUV precomputed for $(length(unique_ids)) lesions"
                 end
             catch; end
             
             try
                 if haskey(tp_data_cache, tp_for_bg)
                     InferenceClient.preload_ct_for_nninteractive(Array{Float32,3}(tp_data_cache[tp_for_bg].ct))
-                    println("[BG] CT preload initiated for $label_for_bg"); flush(stdout)
+                    @debug "[BG] CT preload initiated for $label_for_bg"
                 end
             catch; end
         end
@@ -1910,7 +1909,7 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
     t_total = time_ns()
     flush_all_dirty_masks!()
     if isempty(tp_labels)
-        println("No TP labels loaded. TP navigation disabled."); flush(stdout)
+        @debug "No TP labels loaded. TP navigation disabled."
         return
     end
 
@@ -1918,7 +1917,7 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
     num_tps = length(tp_indices)
     target_tp = data.tp_index
     if !haskey(tp_labels, target_tp)
-        println("Target TP $target_tp not found in loaded labels. Skipping."); flush(stdout)
+        @debug "Target TP $target_tp not found in loaded labels. Skipping."
         return
     end
 
@@ -1931,7 +1930,7 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
             right_tp = target_tp
             compare_right_tp[] = right_tp
             right_label = get(tp_labels, right_tp, "TP $right_tp")
-            println("Compare: setting Right to $right_label (index=$right_tp)"); flush(stdout)
+            @debug "Compare: setting Right to $right_label (index=$right_tp)"
             
             entry_right = get_or_load_tp_data(right_tp)
             if entry_right !== nothing && length(stateObjects) >= 5
@@ -1955,7 +1954,7 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
             left_tp = target_tp
             current_tp_index[] = left_tp
             left_label = get(tp_labels, left_tp, "TP $left_tp")
-            println("Compare: setting Left to $left_label (index=$left_tp)"); flush(stdout)
+            @debug "Compare: setting Left to $left_label (index=$left_tp)"
             
             entry_left = get_or_load_tp_data(left_tp)
             if entry_left !== nothing && length(stateObjects) >= 1
@@ -1973,7 +1972,7 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
         # Single mode: load target_tp into all panels
         current_tp_index[] = target_tp
         label = get(tp_labels, target_tp, "TP $target_tp")
-        println("TP Navigation: switching to $label (index=$target_tp)"); flush(stdout)
+        @debug "TP Navigation: switching to $label (index=$target_tp)"
         
         entry = get_or_load_tp_data(target_tp)
         if entry !== nothing
@@ -1989,12 +1988,12 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
             lid = _clamp_lid_for_tp(lid, target_tp)
             try
                 reactToSyncLesion(SyncLesionEvent(lid), stateObjects)
-                println("Synced to Lesion $lid for $label"); flush(stdout)
+                @debug "Synced to Lesion $lid for $label"
             catch e
-                println("WARNING: Failed to sync Lesion $lid on TP set: $e"); flush(stdout)
+                @debug "WARNING: Failed to sync Lesion $lid on TP set: $e"
             end
             # On MRI: force show-all segments
-            _force_mri_show_all!(target_tp, stateObjects)
+            _force_mri_show_all!(stateObjects)
             # Hide/show Panel 2 (PET-only) based on modality
             if !compare_mode[]
                 _update_quad_layout_for_modality!(stateObjects, target_tp)
@@ -2041,14 +2040,14 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
                         !haskey(LMW._lesion_suv_cache, key) && 
                             try LMW._lesion_suv_cache[key] = LMW.compute_lesion_suv_string(lid, tp_for_bg) catch; end
                     end
-                    println("  [BG] SUV precomputed for $(length(unique_ids)) lesions"); flush(stdout)
+                    @debug "  [BG] SUV precomputed for $(length(unique_ids)) lesions"
                 end
             catch; end
             
             try
                 if haskey(tp_data_cache, tp_for_bg)
                     InferenceClient.preload_ct_for_nninteractive(Array{Float32,3}(tp_data_cache[tp_for_bg].ct))
-                    println("[BG] CT preload initiated for $label_for_bg"); flush(stdout)
+                    @debug "[BG] CT preload initiated for $label_for_bg"
                 end
             catch; end
         end
@@ -2074,18 +2073,18 @@ end
 
 
 function reactToRefreshList(data::RefreshListEvent, stateObjects::Vector{StateDataFields})
-    println("Refreshing lesion list..."); flush(stdout)
+    @debug "Refreshing lesion list..."
 end
 
 function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateDataFields})
     if !InferenceClient.is_ai_enabled()
         set_ai_status!("[AI Disabled] Restart app with AI enabled or run worker on port 5005")
-        println("[AI] Automatic segmentation requested but AI models are disabled."); flush(stdout)
+        @debug "[AI] Automatic segmentation requested but AI models are disabled."
         return
     end
     set_ai_status!("[Processing] AI request ($(data.algorithm))...")
     try
-        println("Add New Lesion (Auto-PET) triggered with algorithm: $(data.algorithm)"); flush(stdout)
+        @debug "Add New Lesion (Auto-PET) triggered with algorithm: $(data.algorithm)"
         
         tp1_state = stateObjects[1]
         
@@ -2152,7 +2151,7 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
                                 findall((d_dat .== v_act) .| (d_dat .== v_set))
                             end
                             if !isempty(p)
-                                println("[reactToAddAutoPet] Found $(length(p)) painted voxels for lesion $active_id in panel $p_idx $(d_name)"); flush(stdout)
+                                @debug "[reactToAddAutoPet] Found $(length(p)) painted voxels for lesion $active_id in panel $p_idx $(d_name)"
                                 if p_idx == 3 # Sagittal (Y, Z, X) -> Canonical (X, Y, Z)
                                     append!(painted_pts, [CartesianIndex(idx[3], idx[1], idx[2]) for idx in p])
                                 elseif p_idx == 4 # Coronal (X, Z, Y) -> Canonical (X, Y, Z)
@@ -2168,7 +2167,7 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
                 
                 if isempty(painted_pts)
                     msg = "No painted scribbles found for AI inference. Paint scribbles on the lesion first."
-                    println("ERROR: $msg"); flush(stdout)
+                    @debug "ERROR: $msg"
                     set_ai_status!("[Error] $msg")
                     return
                 end
@@ -2186,7 +2185,7 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
                 scribble_coords_0idx = [[idx[1]-1, idx[2]-1, idx[3]-1] for idx in painted_pts if checkbounds(Bool, ct_vol, idx)]
                 
                 set_ai_status!("[Preparing] inference ($(algo))...")
-                println("Queuing $(algo) inference job (seed=$cx,$cy,$cz, lesion=$active_id, $(length(painted_pts)) painted points)..."); flush(stdout)
+                @debug "Queuing $(algo) inference job (seed=$cx,$cy,$cz, lesion=$active_id, $(length(painted_pts)) painted points)..."
                 
                 # Use immutable views / direct references without 680MB deep copies
                 put!(inference_queue, InferenceJob(
@@ -2194,15 +2193,15 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
                     cx, cy, cz, active_id, seg_vol, channel, scribble_coords_0idx))
             catch e
                 err_msg = sprint(showerror, e)
-                println("ERROR in async reactToAddAutoPet: $err_msg"); flush(stdout)
-                println(sprint(showerror, e, catch_backtrace())); flush(stdout)
+                @debug "ERROR in async reactToAddAutoPet: $err_msg"
+                @debug "Error trace" exception=(e, catch_backtrace())
                 set_ai_status!("[Error] AI Error: $err_msg")
             end
         end
     catch e
         err_msg = sprint(showerror, e)
-        println("ERROR in reactToAddAutoPet: $err_msg"); flush(stdout)
-        println(sprint(showerror, e, catch_backtrace())); flush(stdout)
+        @debug "ERROR in reactToAddAutoPet: $err_msg"
+        @debug "Error trace" exception=(e, catch_backtrace())
         set_ai_status!("[Error] AI Error: $err_msg")
         try
             open("/tmp/medeye3d_errors.log", "a") do f
@@ -2215,17 +2214,17 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
 end
 
 function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Vector{StateDataFields})
-    println("AIInferenceResultEvent received: algorithm=$(data.algorithm), active_id=$(data.active_id), seed=($(data.cx),$(data.cy),$(data.cz))"); flush(stdout)
+    @debug "AIInferenceResultEvent received: algorithm=$(data.algorithm), active_id=$(data.active_id), seed=($(data.cx),$(data.cy),$(data.cz))"
 
     if data.mask === nothing
-        println("WARNING: AI inference failed or returned nothing."); flush(stdout)
+        @debug "WARNING: AI inference failed or returned nothing."
         set_ai_status!("[Warning] Inference failed (no mask returned)")
         return
     end
 
     seg_vol = data.seg_vol
     if seg_vol === nothing
-        println("ERROR: No segmentation volume reference available. Cannot apply AI results. No fallbacks allowed."); flush(stdout)
+        @debug "ERROR: No segmentation volume reference available. Cannot apply AI results. No fallbacks allowed."
         set_ai_status!("[Error] No segmentation volume (Mask) found - cannot apply AI results")
         return
     end
@@ -2237,7 +2236,7 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
         label_val = eltype(seg_vol)(data.active_id)
         InferenceClient.insert_patch!(seg_vol, data.mask, data.cx, data.cy, data.cz; label_val=label_val)
     end
-    println("$(data.algorithm) segmented $(count(data.mask .> 0)) patch voxels for lesion $(data.active_id) at ($(data.cx), $(data.cy), $(data.cz))."); flush(stdout)
+    @debug "$(data.algorithm) segmented $(count(data.mask .> 0)) patch voxels for lesion $(data.active_id) at ($(data.cx), $(data.cy), $(data.cz))."
     
     # Compute bone subsegments on the fly for this lesion (only if in bone)
     # (Removed synchronous computation - it is now delegated to the async _get_or_compute_bone_subseg below)
@@ -2361,10 +2360,10 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
         center_x = round(Int, mean(i[1] for i in seg_indices))
         center_y = round(Int, mean(i[2] for i in seg_indices))
         center_z = round(Int, mean(i[3] for i in seg_indices))
-        println("[AI Result] Centering on segmentation centroid: ($center_x, $center_y, $center_z) from $(length(seg_indices)) voxels"); flush(stdout)
+        @debug "[AI Result] Centering on segmentation centroid: ($center_x, $center_y, $center_z) from $(length(seg_indices)) voxels"
     else
         center_x, center_y, center_z = data.cx, data.cy, data.cz
-        println("[AI Result] No segmented voxels found, using seed: ($center_x, $center_y, $center_z)"); flush(stdout)
+        @debug "[AI Result] No segmented voxels found, using seed: ($center_x, $center_y, $center_z)"
     end
     # Jump panels to segmentation center
     targets = [(1, center_z), (2, center_z), (3, center_x), (4, center_y)]
@@ -2393,9 +2392,9 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
     invalidate_and_recompute_lesion_metrics_async!(data.active_id, current_tp_index[], seg_vol)
 end
 function reactToSyncMissing(data::SyncMissingEvent, stateObjects::Vector{StateDataFields})
-    println("Sync Missing Lesions across TPs triggered."); flush(stdout)
+    @debug "Sync Missing Lesions across TPs triggered."
     if length(stateObjects) < 2
-        println("WARNING: Need at least 2 time points to sync missing lesions."); flush(stdout)
+        @debug "WARNING: Need at least 2 time points to sync missing lesions."
         return
     end
     
@@ -2409,17 +2408,17 @@ function reactToSyncMissing(data::SyncMissingEvent, stateObjects::Vector{StateDa
     tp2_pet = tp2_state.mainForDisplayObjects.listOfTextSpecifications[2].imageTexture
     tp2_seg = tp2_state.mainForDisplayObjects.listOfTextSpecifications[3].imageTexture
     
-    println("Running HelpNet on TP2 for missing lesion at $pos..."); flush(stdout)
+    @debug "Running HelpNet on TP2 for missing lesion at $pos..."
     mask = InferenceClient.run_helpnet_inference(tp2_ct, tp2_pet, pos[1], pos[2], pos[3])
     if mask !== nothing
         InferenceClient.insert_patch!(tp2_seg, mask, pos[1], pos[2], pos[3])
         LesionAssociation.map_link("TP1", "TP2", "SyncedLesion")
-        println("Successfully synced and mapped lesion to TP2."); flush(stdout)
+        @debug "Successfully synced and mapped lesion to TP2."
     end
 end
 
 function reactToGenManual(data::GenManualEvent, stateObjects::Vector{StateDataFields})
-    println("Bone subsegmentation (manual) triggered for lesion $(data.lesion_id)"); flush(stdout)
+    @debug "Bone subsegmentation (manual) triggered for lesion $(data.lesion_id)"
     
     tp_idx = current_tp_index[]
     
@@ -2456,23 +2455,23 @@ function reactToGenManual(data::GenManualEvent, stateObjects::Vector{StateDataFi
 end
 
 function reactToMapLink(data::MapLinkEvent, stateObjects::Vector{StateDataFields})
-    println("Map Link triggered. Linking lesions: src=$(data.src_ids) to dst=$(data.dst_ids)"); flush(stdout)
+    @debug "Map Link triggered. Linking lesions: src=$(data.src_ids) to dst=$(data.dst_ids)"
     if length(stateObjects) > 1
         # LesionAssociation.map_link("TP1", "TP2", data.src_ids, data.dst_ids)
-        println("Successfully mapped between TP1 and TP2"); flush(stdout)
+        @debug "Successfully mapped between TP1 and TP2"
     end
 end
 
 function reactToAutoRunPreprocess(data::AutoRunPreprocessEvent, stateObjects::Vector{StateDataFields})
-    println("Auto-run preprocessing toggled to $(data.active)"); flush(stdout)
+    @debug "Auto-run preprocessing toggled to $(data.active)"
 end
 
 function reactToRunPreprocess(data::RunPreprocessEvent, stateObjects::Vector{StateDataFields})
-    println("Full Preprocessing triggered."); flush(stdout)
+    @debug "Full Preprocessing triggered."
 end
 
 function reactToShowBoneMask(data::ShowBoneMaskEvent, stateObjects::Vector{StateDataFields})
-    println("Show Bone Mask toggled to $(data.active)"); flush(stdout)
+    @debug "Show Bone Mask toggled to $(data.active)"
     for stateObject in stateObjects
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if textSpec.name == "Bone_Overlay" || textSpec.name == "Bone_Mask" || textSpec.name == "bone_mask" || textSpec.name == "bone" || textSpec.name == "Organ_Mask" || textSpec.name == "organ_mask"
@@ -2637,13 +2636,13 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
 end
 
 function reactToSaveMRB(data::SaveMRBEvent, stateObjects::Vector{StateDataFields})
-    println("Save MRB triggered: saving all dirty masks to HDF5..."); flush(stdout)
+    @debug "Save MRB triggered: saving all dirty masks to HDF5..."
     flush_all_dirty_masks!()
 end
 
 export reactToToggleMoveLesionMode
 function reactToToggleMoveLesionMode(data::ToggleMoveLesionModeEvent, stateObjects::Vector{StateDataFields})
-    println("Move Lesion Mode toggled to $(data.active)"); flush(stdout)
+    @debug "Move Lesion Mode toggled to $(data.active)"
     for state in stateObjects
         state.moveLesionMode = data.active
     end

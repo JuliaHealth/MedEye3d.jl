@@ -432,7 +432,7 @@ function _generate_mask_overlay_code(notcont, cont, discrete)
                             }
                         }
                     } else {
-                        showThis_$(n) = (params.$(n)minValue < params.$(n)maxValue) || (abs($(n)Res - params.$(n)minValue) < 0.1);
+                        showThis_$(n) = ($(n)Res >= params.$(n)minValue - 0.1) && ($(n)Res <= params.$(n)maxValue + 0.1);
                     }
                     if (showThis_$(n)) {
                         float alpha = clamp(params.$(n)maskContribution, 0.0, 1.0);
