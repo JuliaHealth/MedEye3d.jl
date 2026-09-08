@@ -1557,14 +1557,11 @@ function invalidate_suv_for_lesion(lesion_id::Int, tp_idx::Int)
     println("  [SUV] Invalidated cache for lesion $lesion_id @ TP $tp_idx"); flush(stdout)
 end
 
-"""
-    invalidate_and_recompute_lesion_metrics_async!(lesion_id, tp_idx, mask_vol)
-
-After mask modification (painting or AI segmentation):
-1. Invalidate all caches (SUV, volume, centroid)
 const _async_suv_debounce = Dict{Tuple{Int, Int}, Float64}()
 
 """
+    invalidate_and_recompute_lesion_metrics_async!(lesion_id, tp_idx, mask_vol)
+
 Called when a lesion is painted or modified.
 1. Synchronously invalidates caches.
 2. Schedules a debounced background task to recompute metrics.
