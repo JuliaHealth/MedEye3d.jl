@@ -20,6 +20,7 @@ if [ -f "/etc/vulkan/icd.d/nvidia_icd.json" ]; then
     export VK_DRIVER_FILES="/etc/vulkan/icd.d/nvidia_icd.json"
 fi
 
+
 # Performance & multi-threading
 export JULIA_NUM_THREADS=4,1
 export HDF5_USE_FILE_LOCKING=FALSE
