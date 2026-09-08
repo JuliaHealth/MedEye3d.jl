@@ -83,6 +83,10 @@ function start_inference_worker()
         while true
             try
                 job = take!(inference_queue)
+                if !InferenceClient.is_ai_enabled()
+                    set_ai_status!("[AI Disabled] Restart app with AI enabled or run worker on port 5005")
+                    continue
+                end
                 
                 set_ai_status!("[Sending] to Docker ($(job.algorithm))...")
                 println("[AI Worker] Processing $(job.algorithm) at ($(job.cx),$(job.cy),$(job.cz)) for lesion $(job.active_id)..."); flush(stdout)
@@ -2062,6 +2066,11 @@ function reactToRefreshList(data::RefreshListEvent, stateObjects::Vector{StateDa
 end
 
 function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateDataFields})
+    if !InferenceClient.is_ai_enabled()
+        set_ai_status!("[AI Disabled] Restart app with AI enabled or run worker on port 5005")
+        println("[AI] Automatic segmentation requested but AI models are disabled."); flush(stdout)
+        return
+    end
     set_ai_status!("[Processing] AI request ($(data.algorithm))...")
     try
         println("Add New Lesion (Auto-PET) triggered with algorithm: $(data.algorithm)"); flush(stdout)

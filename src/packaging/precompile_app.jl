@@ -153,6 +153,18 @@ using .MedEye3dApp
 MedEye3dApp.run_app(["--help"])
 MedEye3dApp.run_app(["--version"])
 
+# Trace InferenceClient AI lifecycle & model prompt
+try
+    MedEye3d.InferenceClient.set_ai_enabled!(false)
+    MedEye3d.InferenceClient.is_ai_enabled()
+    MedEye3d.InferenceClient.prompt_start_ai_models(["--no-ai"])
+    MedEye3d.InferenceClient.prompt_start_ai_models(["--ai"])
+    MedEye3d.InferenceClient.set_ai_enabled!(false)
+    MedEye3d.InferenceClient.is_worker_reachable(port=59999)
+catch e
+    println("InferenceClient tracing notice: ", e)
+end
+
 # Trace telemetry logging
 MedEye3d.Telemetry.log_action("PRECOMPILE_START", Dict("args" => ["--demo"]))
 MedEye3d.Telemetry.log_action("PRECOMPILE_LOAD", Dict("path" => "dummy.h5"))

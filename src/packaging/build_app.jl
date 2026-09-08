@@ -100,12 +100,26 @@ for dir_name in ["data", "assets"]
     end
 end
 
+# Copy AI scripts into distribution bundle so local AI worker can be started from installed app
+dist_scripts_ai = joinpath(build_output_dir, "scripts", "ai")
+mkpath(dist_scripts_ai)
+src_scripts_ai = joinpath(project_root, "scripts", "ai")
+if isdir(src_scripts_ai)
+    for fname in ["start_docker_worker.ps1", "start_docker_worker.sh", "Dockerfile", "python_worker.py"]
+        fpath = joinpath(src_scripts_ai, fname)
+        if isfile(fpath)
+            cp(fpath, joinpath(dist_scripts_ai, fname); force=true)
+            println("✓ Copied scripts/ai/$fname to distribution bundle.")
+        end
+    end
+end
+
 # Create a default configuration / info file
 info_file = joinpath(build_output_dir, "app_info.json")
 write(info_file, """
 {
     "name": "MedEye3D",
-    "version": "0.5.10",
+    "version": "0.5.11",
     "arch": "x86_64",
     "entrypoint": "bin/MedEye3D.exe",
     "description": "High-Performance 3D Medical Image Annotation & Visualization Software"
