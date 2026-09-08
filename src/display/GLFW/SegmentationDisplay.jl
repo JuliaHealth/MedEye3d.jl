@@ -652,7 +652,7 @@ function coordinateDisplay(
         # Pre-allocated per-frame scratch vectors (reused via empty!/resize!, never freed)
         _upload_batch = VulkanStaging.TextureUploadBatchItem[]
         _vk_panels = VulkanRender.PanelRenderData[]
-        _push_consts = Vector{Float32}(undef, 8)  # scale(2) + offset(2) + ndc(4)
+        _push_consts = Vector{Float32}(undef, 12)  # scale(2) + offset(2) + ndc(4) + crosshairUV(2) + showCrosshair+pad(2)
         while !shouldStop[1]
             try
                 channelData = take!(mainChannel)
@@ -783,7 +783,7 @@ function coordinateDisplay(
                     
                     # 1. Collect all dirty textures across ALL panels into ONE batch
                     empty!(_upload_batch)  # Reuse pre-allocated vector
-                    for state in stateInstances
+                    for (panel_idx, state) in enumerate(stateInstances)
                         if state.calcDimsStruct.mainQuadVertSize <= 0 || all(iszero, state.calcDimsStruct.mainImageQuadVert)
                             continue
                         end
@@ -825,7 +825,7 @@ function coordinateDisplay(
                     # 3. Build panel render data for Vulkan
                     empty!(_vk_panels)  # Reuse pre-allocated vector
                     _ubo_dirty_count = 0
-                    for state in stateInstances
+                    for (panel_idx, state) in enumerate(stateInstances)
                         if state.calcDimsStruct.mainQuadVertSize <= 0 || all(iszero, state.calcDimsStruct.mainImageQuadVert)
                             continue
                         end
@@ -891,6 +891,36 @@ function coordinateDisplay(
                         push_consts[3] = offsetX + offset_corr_x; push_consts[4] = offsetY + offset_corr_y
                         push_consts[5] = ndc_left; push_consts[6] = ndc_bottom
                         push_consts[7] = ndc_right; push_consts[8] = ndc_top
+
+                        ix, iy, iz = MakieEventHandlers.current_viewer_position[]
+                        hovered_idx = stateInstances[1].switchIndex
+                        show_crosshair = 0.0f0
+                        cx, cy = 0.0f0, 0.0f0
+
+                        # Determine if crosshair toggle is active from LesionMetadataWindow
+                        LMW = MakieEventHandlers._get_lmw()
+                        is_crosshair_on = (LMW !== nothing) ? LMW.is_crosshair_visible() : false
+
+                        if is_crosshair_on && ix > 0 && iy > 0 && iz > 0 && hovered_idx > 0 && panel_idx != hovered_idx
+                            show_crosshair = reinterpret(Float32, Int32(1))
+                            # Map world (origX, origY, origZ) to panel's 2D texture UV
+                            # Must match the right-click jump logic in ReactOnMouseClickAndDrag.jl:460-466
+                            w = Float32(state.calcDimsStruct.imageTextureWidth)
+                            h = Float32(state.calcDimsStruct.imageTextureHeight)
+                            if panel_idx == 3  # Sagittal: texX=origY, texY=origZ
+                                cx = Float32(iy) / w
+                                cy = Float32(iz) / h
+                            elseif panel_idx == 4  # Coronal: texX=origX, texY=origZ
+                                cx = Float32(ix) / w
+                                cy = Float32(iz) / h
+                            else  # Axial (panels 1,2,5): texX=origX, texY=origY
+                                cx = Float32(ix) / w
+                                cy = Float32(iy) / h
+                            end
+                        end
+                        push_consts[9] = cx; push_consts[10] = cy
+                        push_consts[11] = show_crosshair; push_consts[12] = 0.0f0
+
                         
                         w = Float32(obj.vulkanCtx.width)
                         h = Float32(obj.vulkanCtx.height)

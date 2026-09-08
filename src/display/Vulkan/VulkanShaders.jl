@@ -112,8 +112,11 @@ function generate_vulkan_vertex_shader()::String
     layout(push_constant) uniform PushConstants {
         vec2 uvScale;
         vec2 uvOffset;
-        vec2 ndcMin;   // unused by VBO shader, but must match layout
+        vec2 ndcMin;
         vec2 ndcMax;
+        vec2 crosshairUV;
+        int showCrosshair;
+        int padding;
     } pc;
 
     void main() {
@@ -141,8 +144,11 @@ function generate_vulkan_zerovbo_vertex_shader()::String
     layout(push_constant) uniform PushConstants {
         vec2 uvScale;
         vec2 uvOffset;
-        vec2 ndcMin;   // (left, bottom) in NDC
-        vec2 ndcMax;   // (right, top) in NDC
+        vec2 ndcMin;
+        vec2 ndcMax;
+        vec2 crosshairUV;
+        int showCrosshair;
+        int padding;
     } pc;
 
     void main() {
@@ -287,6 +293,16 @@ function generate_vulkan_fragment_shader(texture_specs, color)::String
         $ubo_members
     } params;
 
+    layout(push_constant) uniform PushConstants {
+        vec2 uvScale;
+        vec2 uvOffset;
+        vec2 ndcMin;
+        vec2 ndcMax;
+        vec2 crosshairUV;
+        int showCrosshair;
+        int padding;
+    } pc;
+
     float changeClip(float minVal, float maxVal, float value, float color, float range) {
         if (value < minVal) {
             return 0.0;
@@ -317,7 +333,21 @@ function generate_vulkan_fragment_shader(texture_specs, color)::String
     }
 
     void main() {
-        FragColor = vec4(getPixelColor(TexCoord0), 1.0);
+        vec3 finalColor = getPixelColor(TexCoord0);
+        if (pc.showCrosshair == 1) {
+            float dx = abs(TexCoord0.x - pc.crosshairUV.x);
+            float dy = abs(TexCoord0.y - pc.crosshairUV.y);
+            // Targeting reticle: thin lines, short arms, empty center
+            float lineW = 0.001;   // line thickness in UV
+            float armLen = 0.04;   // arm length in UV
+            float gap = 0.006;     // empty center radius in UV
+            bool onH = (dy < lineW) && (dx > gap) && (dx < gap + armLen);
+            bool onV = (dx < lineW) && (dy > gap) && (dy < gap + armLen);
+            if (onH || onV) {
+                finalColor = vec3(0.0, 1.0, 0.0);
+            }
+        }
+        FragColor = vec4(finalColor, 1.0);
     }
     """
 end

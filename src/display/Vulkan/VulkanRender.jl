@@ -160,7 +160,7 @@ function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData})::Bool
         pc_data = panel.push_constants
         GC.@preserve pc_data begin
             cmd_push_constants(cmd, ps.pipeline_layout,
-                               SHADER_STAGE_VERTEX_BIT,
+                               SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT,
                                0, sizeof(pc_data),
                                Ptr{Cvoid}(pointer(pc_data)))
         end
