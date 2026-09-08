@@ -87,6 +87,8 @@ const CUSTOM_OPTS_PATH    = _find_metadata_data_file("custom_options.json")
 # Module-level anatomy visibility state (mirrored from the local vis_anatomy_active Ref)
 # Allows MakieEventHandlers to query anatomy toggle state without direct access
 const _anatomy_visible_global = Ref(false)
+const _crosshair_visible_global = Ref(false)
+is_crosshair_visible() = _crosshair_visible_global[]
 is_anatomy_visible() = _anatomy_visible_global[]
 const DEFAULT_SAVE_PATH   = joinpath(homedir(), "medeye3d_lesion_annotations.json")
 const DEFAULT_HDF5_PATH   = joinpath(homedir(), "medeye3d_lesion_annotations.h5")
@@ -1936,6 +1938,10 @@ function create_metadata_window(
     btn_vis_marrow  = Button(g[vis_row, 3], label = "Marrow: ON",   buttoncolor = RGBf(0.75, 0.75, 0.1), labelcolor = TXT, fontsize = 9)
     btn_vis_anatomy = Button(g[vis_row, 4], label = "Anatomy: OFF", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
 
+    vis_crosshair_active = Ref(false)
+    crosshair_row = nr!()
+    btn_vis_crosshair = Button(g[crosshair_row, 1:2], label = "Crosshair: OFF", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+
     on(btn_vis_lesion.clicks) do _
         vis_lesion_active[] = !vis_lesion_active[]
         btn_vis_lesion.label[] = vis_lesion_active[] ? "Lesion: ON" : "Lesion: OFF"
@@ -1958,6 +1964,14 @@ function create_metadata_window(
         btn_vis_marrow.buttoncolor[] = vis_marrow_active[] ? RGBf(0.75, 0.75, 0.1) : BG_PNL
         @info "BTN_VIS_MARROW clicked: $(vis_marrow_active[])"
         put!(channel, ShowMaskLayerEvent(3, vis_marrow_active[]))
+    end
+
+    on(btn_vis_crosshair.clicks) do _
+        vis_crosshair_active[] = !vis_crosshair_active[]
+        _crosshair_visible_global[] = vis_crosshair_active[]
+        btn_vis_crosshair.label[] = vis_crosshair_active[] ? "Crosshair: ON" : "Crosshair: OFF"
+        btn_vis_crosshair.buttoncolor[] = vis_crosshair_active[] ? RGBf(0.0, 0.8, 0.0) : BG_PNL
+        put!(channel, ShowMaskLayerEvent(5, vis_crosshair_active[])) # Send a dummy layer to trigger re-render
     end
 
     on(btn_vis_anatomy.clicks) do _

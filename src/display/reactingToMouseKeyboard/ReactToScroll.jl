@@ -200,7 +200,7 @@ function reactToScrollMultiPanel!(panels::Vector{Int}, mainStates::Vector{StateD
         end
         panelState = mainStates[panel_idx]
         lastSlice = panelState.onScrollData.slicesNumber
-        if lastSlice < 1
+        if lastSlice < 1 || panelState.calcDimsStruct.mainQuadVertSize <= 0 || all(iszero, panelState.calcDimsStruct.mainImageQuadVert)
             continue
         end
         

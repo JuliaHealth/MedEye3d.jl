@@ -143,9 +143,9 @@ function create_pipeline_state(ctx::VkCtx, vert_glsl::String, frag_glsl::String,
 
     # Push constant range (zoom/pan + NDC bounds: 4x vec2 = 32 bytes)
     push_range = VulkanCore.VkPushConstantRange(
-        VulkanCore.VK_SHADER_STAGE_VERTEX_BIT,
+        VulkanCore.VK_SHADER_STAGE_VERTEX_BIT | VulkanCore.VK_SHADER_STAGE_FRAGMENT_BIT,
         UInt32(0),   # offset
-        UInt32(32)   # size: uvScale(8) + uvOffset(8) + ndcMin(8) + ndcMax(8)
+        UInt32(48)   # size: uvScale(8) + uvOffset(8) + ndcMin(8) + ndcMax(8) + crosshairUV(8) + showCrosshair(4) + padding(4)
     )
     push_ranges = [push_range]
 

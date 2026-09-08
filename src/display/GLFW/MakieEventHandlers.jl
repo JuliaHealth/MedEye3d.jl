@@ -40,7 +40,8 @@ const cursor_info_text = Observable{String}("")      # "HU: 45 | SUV: 3.2 | femu
 const cursor_study_text = Observable{String}("")     # "PET TP0" or "L: PET TP0 | R: PET TP3"
 # 3D voxel position under cursor (axial orientation: x, y, z=slice) — used for new lesion anatomy lookup
 const current_viewer_position = Ref((0, 0, 0))
-export cursor_info_text, cursor_study_text, set_ai_status!, current_viewer_position
+const current_hovered_panel = Ref{Int}(0)
+export cursor_info_text, cursor_study_text, set_ai_status!, current_viewer_position, current_hovered_panel
 
 # Sanitize AI status text for Makie Label rendering (ASCII-only, truncated)
 function safe_status_text(msg::String)
@@ -1106,19 +1107,19 @@ end
 """On MRI modalities, show lesion segments in Mask texture.
 If anatomy toggle is ON, also show prostate gland (label 4+).
 Call this after reactToSyncLesion which may have re-applied single-lesion filtering."""
-function _force_mri_show_all!(tp::Int, stateObjects::Vector{StateDataFields})
-    panel_mod = uppercase(get(tp_modalities, tp, "PET"))
-    if !(panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI"))
-        return
-    end
-    # Check anatomy toggle state from LesionMetadataWindow
+function _force_mri_show_all!(stateObjects::Vector{StateDataFields})
     anatomy_on = try
         LMW = _get_lmw()
         LMW !== nothing ? LMW.is_anatomy_visible() : false
     catch; false; end
     max_label = anatomy_on ? 1000 : 3  # 1-3 = lesions, 4+ = gland/anatomy
 
-    for stateObject in stateObjects
+    for (i, stateObject) in enumerate(stateObjects)
+        tp = (i == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
+        panel_mod = uppercase(get(tp_modalities, tp, "PET"))
+        if !(panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI"))
+            continue
+        end
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if textSpec.name == "Mask" || textSpec.name == "segmentation" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy" && textSpec.name != "Bone_Overlay")
                 T_mm = eltype(textSpec.minAndMaxValue)
@@ -1143,19 +1144,19 @@ end
 Safe to call on any modality — no-ops on non-MRI TPs.
 Call at the END of any function that sets mask minAndMaxValue to prevent gland leak."""
 function _mri_clamp_mask_range!(stateObjects::Vector{StateDataFields})
-    tp = current_tp_index[]
-    panel_mod = uppercase(get(tp_modalities, tp, "PET"))
-    if !(panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI"))
-        return  # Not MRI, no clamping needed
-    end
     anatomy_on = try
         LMW = _get_lmw()
         LMW !== nothing ? LMW.is_anatomy_visible() : false
     catch; false; end
     anatomy_on && return  # Anatomy ON → allow all labels
 
-    # Clamp max label to 3 (hide gland = label 4+)
-    for stateObject in stateObjects
+    # Check each panel individually based on its actual TP
+    for (i, stateObject) in enumerate(stateObjects)
+        tp = (i == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
+        panel_mod = uppercase(get(tp_modalities, tp, "PET"))
+        if !(panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI"))
+            continue
+        end
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if textSpec.name == "Mask" || textSpec.name == "segmentation" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy" && textSpec.name != "Bone_Overlay")
                 T_mm = eltype(textSpec.minAndMaxValue)
@@ -2623,7 +2624,7 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
         tp = current_tp_index[]
         panel_mod = uppercase(get(tp_modalities, tp, "PET"))
         if panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI")
-            _force_mri_show_all!(tp, stateObjects)
+            _force_mri_show_all!(stateObjects)
             # Force re-render to reflect the updated mask range
             for idx in visible_panels
                 stateObjects[idx].isSliceChanged = true
