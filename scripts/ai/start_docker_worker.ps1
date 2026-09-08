@@ -1,20 +1,21 @@
-﻿# start_docker_worker.ps1 - Launch MedEye3D AI Docker container on Windows
+# start_docker_worker.ps1 - Launch MedEye3D AI Docker container on Windows
 [CmdletBinding()]
 param(
     [string]$Port = "5005",
-    [switch]$BuildIfMissing = $true
+    [switch]$BuildIfMissing = $true,
+    [string]$InferenceDir = ""
 )
 
 $ErrorActionPreference = "Continue"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..\..")
+$ProjectRoot = Resolve-Path (Join-Path $ScriptDir "..\..") -ErrorAction SilentlyContinue
 
 Write-Host "[MedEye3D AI] Checking Docker environment on Windows..." -ForegroundColor Cyan
 
 # 1. Verify Docker CLI is accessible
 if (-not (Get-Command "docker" -ErrorAction SilentlyContinue)) {
-    Write-Warning "[MedEye3D AI] Docker CLI not found in PATH."
+    Write-Warning "[MedEye3D AI] Docker CLI not found in PATH. Please install Docker Desktop (https://www.docker.com) and add 'docker' to your PATH."
     exit 1
 }
 
@@ -30,13 +31,25 @@ try {
 }
 
 if (-not $daemonRunning) {
-    $dockerDesktopExe = "C:\Program Files\Docker\Docker\Docker Desktop.exe"
-    if (Test-Path $dockerDesktopExe) {
-        Write-Host "[MedEye3D AI] Docker daemon not running. Launching Docker Desktop..." -ForegroundColor Yellow
-        Start-Process $dockerDesktopExe
-        # Wait up to 30 seconds for Docker daemon to become responsive
-        for ($i = 0; $i -lt 15; $i++) {
-            Start-Sleep -Seconds 2
+    $desktopCandidates = @(
+        "C:\Program Files\Docker\Docker\Docker Desktop.exe",
+        (Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Docker\Docker\Docker Desktop.exe"),
+        (Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker Desktop.exe")
+    )
+    $foundDesktop = $null
+    foreach ($cand in $desktopCandidates) {
+        if ($cand -and (Test-Path $cand)) {
+            $foundDesktop = $cand
+            break
+        }
+    }
+    if ($foundDesktop) {
+        Write-Host "[MedEye3D AI] Docker daemon not running. Launching Docker Desktop ($foundDesktop)..." -ForegroundColor Yellow
+        Start-Process $foundDesktop
+        # Wait up to 45 seconds for Docker daemon to become responsive
+        for ($i = 1; $i -le 15; $i++) {
+            Start-Sleep -Seconds 3
             try {
                 $null = docker info 2>&1
                 if ($LASTEXITCODE -eq 0) {
@@ -45,6 +58,7 @@ if (-not $daemonRunning) {
                     break
                 }
             } catch {}
+            Write-Host "[MedEye3D AI] Waiting for Docker Desktop to initialize ($($i*3)/45s)..." -ForegroundColor Gray
         }
     }
 }
@@ -81,9 +95,34 @@ if (-not $image) {
 }
 
 # 6. Prepare volume directories
-$InferenceDir = Join-Path $ProjectRoot "tmp_inference"
-if (-not (Test-Path $InferenceDir)) {
-    New-Item -ItemType Directory -Path $InferenceDir -Force | Out-Null
+if (-not $InferenceDir) {
+    if ($ProjectRoot -and (Test-Path $ProjectRoot)) {
+        $candidate = Join-Path $ProjectRoot "tmp_inference"
+        try {
+            if (-not (Test-Path $candidate)) { New-Item -ItemType Directory -Path $candidate -Force | Out-Null }
+            $testFile = Join-Path $candidate ".perm_test"
+            [IO.File]::WriteAllText($testFile, "test")
+            Remove-Item $testFile -Force
+            $InferenceDir = $candidate
+        } catch {
+            $InferenceDir = $null
+        }
+    }
+    if (-not $InferenceDir) {
+        $userDir = Join-Path $env:USERPROFILE ".medeye3d\tmp_inference"
+        try {
+            if (-not (Test-Path $userDir)) { New-Item -ItemType Directory -Path $userDir -Force | Out-Null }
+            $InferenceDir = $userDir
+        } catch {
+            $tempDir = Join-Path $env:TEMP "medeye3d_inference"
+            if (-not (Test-Path $tempDir)) { New-Item -ItemType Directory -Path $tempDir -Force | Out-Null }
+            $InferenceDir = $tempDir
+        }
+    }
+} else {
+    if (-not (Test-Path $InferenceDir)) {
+        New-Item -ItemType Directory -Path $InferenceDir -Force | Out-Null
+    }
 }
 
 # Convert Windows paths to POSIX slashes for Docker volume mounts
@@ -93,7 +132,7 @@ $HostApp = ($ScriptDir -replace '\\', '/')
 # Check GPU support
 $gpuArgs = @()
 try {
-    $null = docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu22.04 nvidia-smi 2>&1
+    $null = docker run --rm --gpus all medeye3d-ai:latest nvidia-smi 2>&1
     if ($LASTEXITCODE -eq 0) {
         $gpuArgs = @("--gpus", "all")
         Write-Host "[MedEye3D AI] NVIDIA GPU acceleration detected and enabled." -ForegroundColor Green

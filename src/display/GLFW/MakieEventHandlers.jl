@@ -119,8 +119,17 @@ function start_inference_worker()
                     set_ai_status!("[Applying] result ($voxel_count voxels)...")
                     @debug "[AI Worker] Docker returned mask with $voxel_count voxels. Posting to channel."
                 else
-                    set_ai_status!("[Warning] Docker returned no mask")
-                    @debug "[AI Worker] Docker returned nothing (inference failed)."
+                    if !InferenceClient.is_worker_reachable()
+                        err = InferenceClient.get_last_ai_error()
+                        msg = isempty(err) ? "[Error] AI worker unreachable on port $(InferenceClient.get_ai_port()). Is Docker running?" : "[Error] AI offline: $err"
+                        set_ai_status!(msg)
+                        println("[AI Worker] $msg"); flush(stdout)
+                    else
+                        err = InferenceClient.get_last_ai_error()
+                        msg = isempty(err) ? "[Warning] AI model returned no mask (inference returned empty)." : "[Warning] $err"
+                        set_ai_status!(msg)
+                        println("[AI Worker] $msg"); flush(stdout)
+                    end
                 end
                 
                 # Post result back to main event channel via on_next! multiple dispatch
@@ -1293,7 +1302,6 @@ struct EvictAndPreloadMessage
     preload_tps::Vector{Int}
 end
 
-const io_channel = Ref{Any}(nothing)
 const _io_task_started = Ref(false)
 export io_channel, PreloadTPMessage, EvictAndPreloadMessage
 
@@ -2217,8 +2225,16 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
     @debug "AIInferenceResultEvent received: algorithm=$(data.algorithm), active_id=$(data.active_id), seed=($(data.cx),$(data.cy),$(data.cz))"
 
     if data.mask === nothing
-        @debug "WARNING: AI inference failed or returned nothing."
-        set_ai_status!("[Warning] Inference failed (no mask returned)")
+        println("WARNING: AI inference failed or returned nothing."); flush(stdout)
+        if !InferenceClient.is_worker_reachable()
+            err = InferenceClient.get_last_ai_error()
+            msg = isempty(err) ? "[Error] AI worker unreachable on port $(InferenceClient.get_ai_port()). Is Docker running?" : "[Error] AI offline: $err"
+            set_ai_status!(msg)
+        else
+            err = InferenceClient.get_last_ai_error()
+            msg = isempty(err) ? "[Warning] Inference failed (no mask returned)" : "[Warning] $err"
+            set_ai_status!(msg)
+        end
         return
     end
 

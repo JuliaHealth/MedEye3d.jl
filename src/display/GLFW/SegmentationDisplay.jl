@@ -13,6 +13,7 @@ using ..ReactingToInput, ..ReactToScroll, ..DataStructs, ..StructsManag
 using ..ReactOnKeyboard, ..ReactOnMouseClickAndDrag, ..DisplayDataManag
 using ..PrepareWindow, ..PrepareWindowHelpers, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms, ..DisplayWords
 using ..MakieEvents
+using ..InferenceClient
 include("MakieEventHandlers.jl")
 using .MakieEventHandlers
 

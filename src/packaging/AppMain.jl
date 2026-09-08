@@ -944,7 +944,9 @@ function run_app(args::Vector{String})
                 if worker_ok
                     println("[STARTUP] AI inference models ready and connected.")
                 else
-                    println("[STARTUP] Local AI inference models could not be reached. Operating in viewer-only mode.")
+                    err_msg = MedEye3d.InferenceClient.get_last_ai_error()
+                    detail = isempty(err_msg) ? "Port $(MedEye3d.InferenceClient.get_ai_port()) unreachable" : err_msg
+                    println("[STARTUP] Notice: Local AI inference models could not be started: $detail. Operating in viewer-only mode.")
                 end
             catch e
                 @warn "[STARTUP] Failed to initialize AI inference worker: $e"

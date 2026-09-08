@@ -3,7 +3,7 @@ import traceback
 import sys
 import os
 import gc
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 # Strict imports — no fallbacks. If nnInteractive is not installed, crash immediately.
 from nnInteractive.inference.inference_session import nnInteractiveInferenceSession
@@ -48,15 +48,21 @@ def init_models():
         DEVICE = torch.device("cpu")
         print("[Worker] WARNING: No CUDA GPU detected, falling back to CPU...")
     
-    # Load Helpnet — strict, no fallbacks
-    HELPNET_MODEL = HELPNet_Lesion()
+    # Load Helpnet
     ckpt = os.path.join(BUNDLE_DIR, "checkpoints", "helpnet_model_final.pt")
-    if not os.path.exists(ckpt):
-        raise FileNotFoundError(f"HELPNet checkpoint not found at {ckpt}. No fallbacks allowed.")
-    HELPNET_MODEL.load_state_dict(torch.load(ckpt, map_location=DEVICE))
-    HELPNET_MODEL.to(DEVICE)
-    HELPNET_MODEL.eval()
-    print("[Worker] HELPNet Checkpoint loaded.")
+    if os.path.exists(ckpt):
+        try:
+            HELPNET_MODEL = HELPNet_Lesion()
+            HELPNET_MODEL.load_state_dict(torch.load(ckpt, map_location=DEVICE))
+            HELPNET_MODEL.to(DEVICE)
+            HELPNET_MODEL.eval()
+            print("[Worker] HELPNet Checkpoint loaded.")
+        except Exception as e:
+            print(f"[Worker] WARNING: Failed to load HELPNet checkpoint: {e}")
+            HELPNET_MODEL = None
+    else:
+        print(f"[Worker] WARNING: HELPNet checkpoint not found at {ckpt}. HELPNet inference will be disabled.")
+        HELPNET_MODEL = None
     
     # Load nnInteractive Session — strict, no fallbacks
     print("[Worker] Initializing nnInteractive deep learning model...")
@@ -70,25 +76,28 @@ def init_models():
 def resolve_path(p, out_dir="/tmp/medeye3d_inference"):
     if not p:
         return None
-    if os.path.exists(p):
-        return str(p)
-    if not p.endswith(".gz") and os.path.exists(p + ".gz"):
-        return str(p + ".gz")
     
-    fname = os.path.basename(p)
+    path_obj = Path(p)
+    if path_obj.exists():
+        return str(path_obj)
+    
+    gz_cand = Path(str(p) + ".gz")
+    if not str(p).endswith(".gz") and gz_cand.exists():
+        return str(gz_cand)
+    
+    # Use pathlib.PureWindowsPath to robustly extract file name regardless of host OS path format
+    fname = PureWindowsPath(p).name
     fname_gz = fname if fname.endswith(".gz") else fname + ".gz"
     
-    for cand_dir in [out_dir, "/tmp/medeye3d_inference"]:
-        if not cand_dir:
-            continue
-        c1 = Path(cand_dir) / fname
+    for cand_dir in [Path(out_dir), Path("/tmp/medeye3d_inference")]:
+        c1 = cand_dir / fname
         if c1.exists():
             return str(c1)
-        c2 = Path(cand_dir) / fname_gz
+        c2 = cand_dir / fname_gz
         if c2.exists():
             return str(c2)
         if fname.endswith(".gz"):
-            c3 = Path(cand_dir) / fname[:-3]
+            c3 = cand_dir / fname[:-3]
             if c3.exists():
                 return str(c3)
                 
@@ -117,7 +126,7 @@ def run_helpnet(ct_path, pet_path, point_path, out_dir):
     x_tensor = torch.from_numpy(x).unsqueeze(0).float()
     
     if HELPNET_MODEL is None:
-        raise RuntimeError("HELPNet model is not loaded. No fallbacks allowed.")
+        raise RuntimeError("HELPNet model is not loaded. Please ensure scripts/ai/helpnet_bundle/checkpoints/helpnet_model_final.pt is present.")
     
     with torch.no_grad():
         logits = HELPNET_MODEL(x_tensor.to(DEVICE))
