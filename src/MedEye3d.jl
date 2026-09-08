@@ -91,6 +91,7 @@ using .Telemetry
 export Telemetry
 include(joinpath("display", "InferenceClient.jl"))
 using .InferenceClient
+export InferenceClient
 include(joinpath("display", "LesionAssociation.jl"))
 using .LesionAssociation
 include("LesionTracker.jl")

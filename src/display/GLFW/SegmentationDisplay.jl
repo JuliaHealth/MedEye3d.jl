@@ -611,7 +611,7 @@ function coordinateDisplay(
 
     # Preload initial CT into Docker nnInteractive GPU (fire-and-forget)
     try
-        if !isempty(stateInstances) && !isempty(stateInstances[1].onScrollData.dataToScroll)
+        if InferenceClient.is_ai_enabled() && !isempty(stateInstances) && !isempty(stateInstances[1].onScrollData.dataToScroll)
             for dat in stateInstances[1].onScrollData.dataToScroll
                 if dat.name == "CT"
                     InferenceClient.preload_ct_for_nninteractive(Array{Float32,3}(dat.dat))

@@ -28,11 +28,55 @@ using JSON
         @test "1" in children
     end
     
-    @testset "InferenceClient JSON Serialization" begin
-        # We can't guarantee a Python backend in the automated test, 
-        # so we will just test that the functions are accessible.
+    @testset "InferenceClient Lifecycle & Model Prompt" begin
+        # Test function definitions
         @test isdefined(InferenceClient, :run_helpnet_inference)
         @test isdefined(InferenceClient, :run_nninteractive)
+        @test isdefined(InferenceClient, :prompt_start_ai_models)
+        @test isdefined(InferenceClient, :is_worker_reachable)
+        @test isdefined(InferenceClient, :is_ai_enabled)
+        @test isdefined(InferenceClient, :set_ai_enabled!)
+
+        # Test enable/disable toggle
+        InferenceClient.set_ai_enabled!(false)
+        @test InferenceClient.is_ai_enabled() == false
+        @test ENV["MEDEYE3D_START_AI"] == "0"
+        
+        InferenceClient.set_ai_enabled!(true)
+        @test InferenceClient.is_ai_enabled() == true
+        @test ENV["MEDEYE3D_START_AI"] == "1"
+
+        # Test CLI flags override
+        @test InferenceClient.prompt_start_ai_models(["--no-ai"]) == false
+        @test InferenceClient.is_ai_enabled() == false
+
+        @test InferenceClient.prompt_start_ai_models(["--ai"]) == true
+        @test InferenceClient.is_ai_enabled() == true
+
+        @test InferenceClient.prompt_start_ai_models(["--disable-ai"]) == false
+        @test InferenceClient.prompt_start_ai_models(["--enable-ai"]) == true
+
+        # Test environment variable override
+        ENV["MEDEYE3D_START_AI"] = "0"
+        @test InferenceClient.prompt_start_ai_models(String[]) == false
+        @test InferenceClient.is_ai_enabled() == false
+
+        ENV["MEDEYE3D_START_AI"] = "1"
+        @test InferenceClient.prompt_start_ai_models(String[]) == true
+        @test InferenceClient.is_ai_enabled() == true
+
+        delete!(ENV, "MEDEYE3D_START_AI")
+
+        # Test reachability check on non-existent port returns false without throwing
+        @test InferenceClient.is_worker_reachable(port=59999) == false
+
+        # Test graceful handling of disabled AI in inference calls
+        InferenceClient.set_ai_enabled!(false)
+        dummy_vol = zeros(Float32, 10, 10, 10)
+        @test InferenceClient.run_helpnet_inference(dummy_vol, dummy_vol, nothing, 5, 5, 5) === nothing
+        @test InferenceClient.run_nninteractive(dummy_vol, dummy_vol, [[0, 0, 0]], 5, 5, 5) === nothing
+        @test InferenceClient.run_bone_subsegmentation_remote(dummy_vol, dummy_vol, (1.0, 1.0, 1.0)) == (nothing, nothing)
+        @test InferenceClient.preload_ct_for_nninteractive(dummy_vol) === nothing
     end
     
     @testset "LesionMetadataWindow Schema and Serialization" begin

@@ -6,9 +6,36 @@ using Base64
 using MedImages
 using ..ConnectedComponents
 
-export start_python_worker, run_helpnet_inference, run_nninteractive, run_bone_subsegmentation_remote, insert_patch!, preload_ct_for_nninteractive, send_json_request
+export start_python_worker, run_helpnet_inference, run_nninteractive, run_bone_subsegmentation_remote,
+       insert_patch!, preload_ct_for_nninteractive, send_json_request,
+       prompt_start_ai_models, is_worker_reachable, is_ai_enabled, set_ai_enabled!
 
 global PYTHON_PROC = nothing
+const AI_ENABLED = Ref{Bool}(true)
+
+"""
+    is_ai_enabled() -> Bool
+
+Returns whether AI inference models are currently enabled for this session.
+"""
+function is_ai_enabled()::Bool
+    return AI_ENABLED[]
+end
+
+"""
+    set_ai_enabled!(val::Bool)
+
+Enables or disables AI inference models for this session.
+"""
+function set_ai_enabled!(val::Bool)
+    AI_ENABLED[] = val
+    if !val
+        ENV["MEDEYE3D_START_AI"] = "0"
+    else
+        ENV["MEDEYE3D_START_AI"] = "1"
+    end
+    return val
+end
 
 """
     get_ai_host()::String
@@ -29,6 +56,131 @@ function get_ai_port(default_port=5005)::Int
     return parse(Int, get(ENV, "MEDEYE3D_AI_PORT", string(default_port)))
 end
 
+"""
+    is_worker_reachable(; host=get_ai_host(), port=get_ai_port())::Bool
+
+Quickly tests if the AI worker TCP server is reachable.
+"""
+function is_worker_reachable(; host=get_ai_host(), port=get_ai_port())::Bool
+    try
+        conn = connect(host, port)
+        close(conn)
+        return true
+    catch
+        return false
+    end
+end
+
+"""
+    prompt_start_ai_models(args::Vector{String}=ARGS) -> Bool
+
+Prompts the user on startup whether to run the local AI inference models (nnInteractive & HELPNet).
+Checks CLI flags (`--ai` / `--no-ai`), environment variables (`MEDEYE3D_START_AI`),
+persistent configuration, and native OS dialogs.
+"""
+function prompt_start_ai_models(args::Vector{String}=ARGS)::Bool
+    # 1. CLI flags have highest priority
+    if any(a -> a in ("--no-ai", "--disable-ai", "--without-ai"), args)
+        println("[InferenceClient] AI inference models disabled via CLI flag.")
+        set_ai_enabled!(false)
+        return false
+    end
+    if any(a -> a in ("--ai", "--enable-ai", "--with-ai"), args)
+        println("[InferenceClient] AI inference models enabled via CLI flag.")
+        set_ai_enabled!(true)
+        return true
+    end
+
+    # 2. Environment variable
+    env_ai = lowercase(strip(get(ENV, "MEDEYE3D_START_AI", "")))
+    if env_ai in ("0", "false", "no", "disable", "disabled")
+        println("[InferenceClient] AI inference models disabled via MEDEYE3D_START_AI.")
+        set_ai_enabled!(false)
+        return false
+    elseif env_ai in ("1", "true", "yes", "enable", "enabled")
+        println("[InferenceClient] AI inference models enabled via MEDEYE3D_START_AI.")
+        set_ai_enabled!(true)
+        return true
+    end
+
+    # 3. Headless / automated / CI environment
+    if haskey(ENV, "CI") || get(ENV, "MEDEYE3D_NONINTERACTIVE", "") in ("1", "true")
+        println("[InferenceClient] Headless / CI environment detected. Defaulting to viewer mode.")
+        set_ai_enabled!(false)
+        return false
+    end
+
+    # 4. Persistent configuration
+    cfg_path = joinpath(homedir(), ".medeye3d_display_config.json")
+    if isfile(cfg_path)
+        try
+            cfg = JSON.parse(read(cfg_path, String))
+            pref = lowercase(strip(get(cfg, "start_ai_models", "ask")))
+            if pref in ("always", "true", "yes", "enable")
+                println("[InferenceClient] AI inference models enabled via saved preference.")
+                set_ai_enabled!(true)
+                return true
+            elseif pref in ("never", "false", "no", "disable")
+                println("[InferenceClient] AI inference models disabled via saved preference.")
+                set_ai_enabled!(false)
+                return false
+            end
+        catch e
+            @debug "Failed to read display config: $e"
+        end
+    end
+
+    # 5. If already reachable, inform user and use it
+    if is_worker_reachable()
+        println("[InferenceClient] AI Worker is already active at $(get_ai_host()):$(get_ai_port()).")
+        set_ai_enabled!(true)
+        return true
+    end
+
+    # 6. Native dialog prompt on Windows
+    if Sys.iswindows()
+        prompt_text = "Would you like to run the AI inference models (nnInteractive & HELPNet) locally?\\n\\nIn case of capable hardware (GPU / Docker / Python), running the models locally enables interactive AI segmentation tools automatically.\\n\\n• Click 'Yes' to run/connect local AI models\\n• Click 'No' for viewer-only mode"
+        prompt_title = "MedEye3D - AI Inference Models"
+        ps_cmd = """
+        Add-Type -AssemblyName System.Windows.Forms
+        \$res = [System.Windows.Forms.MessageBox]::Show(
+            "$prompt_text",
+            "$prompt_title",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Question
+        )
+        Write-Output \$res
+        """
+        try
+            out = read(`powershell -NoProfile -Command $ps_cmd`, String)
+            result = strip(out)
+            if result == "Yes"
+                println("[InferenceClient] User selected YES to run AI inference models.")
+                set_ai_enabled!(true)
+                return true
+            else
+                println("[InferenceClient] User selected NO to AI inference models.")
+                set_ai_enabled!(false)
+                return false
+            end
+        catch e
+            @warn "[InferenceClient] Failed to display native dialog: $e"
+            set_ai_enabled!(false)
+            return false
+        end
+    elseif isinteractive()
+        print("Would you like to run the AI inference models (nnInteractive & HELPNet)? [y/N]: ")
+        flush(stdout)
+        ans = readline()
+        selected = lowercase(strip(ans)) in ("y", "yes")
+        set_ai_enabled!(selected)
+        return selected
+    end
+
+    set_ai_enabled!(false)
+    return false
+end
+
 function send_json_request(req::Dict; port=get_ai_port())
     host = get_ai_host()
     try
@@ -42,41 +194,96 @@ function send_json_request(req::Dict; port=get_ai_port())
     end
 end
 
-function start_python_worker(worker_script_path::String)
+"""
+    start_python_worker(worker_script_path::String = "") -> Bool
+
+Ensures the MedEye3d AI inference worker is reachable at host:port.
+If not running locally, attempts to start it via Docker (or local Python).
+Returns `true` if connected successfully, or `false` otherwise.
+"""
+function start_python_worker(worker_script_path::String = "")::Bool
     host = get_ai_host()
     port = get_ai_port()
     println("[InferenceClient] Ensuring MedEye3d AI Worker is reachable at $host:$port..."); flush(stdout)
-    
-    # Try to start Docker worker if local
+
+    # 1. If already connected, return immediately
+    if is_worker_reachable(; host=host, port=port)
+        println("[InferenceClient] AI Worker is ready and connected at $host:$port."); flush(stdout)
+        set_ai_enabled!(true)
+        try verify_docker_code_sync() catch end
+        return true
+    end
+
+    # 2. Try to start local worker if host is local
     if host in ("127.0.0.1", "localhost")
-        docker_script = joinpath(@__DIR__, "..", "..", "scripts", "ai", "start_docker_worker.sh")
-        docker_available = try
-            run(pipeline(`bash $docker_script`, stdout="/tmp/medeye3d_docker_worker.log", stderr="/tmp/medeye3d_docker_worker.log"), wait=true)
-            true
-        catch e
-            println("[InferenceClient] Docker not available locally (normal for remote/SSH setups)."); flush(stdout)
-            false
+        if Sys.iswindows()
+            # Try start_docker_worker.ps1
+            ps_script = normpath(joinpath(@__DIR__, "..", "..", "scripts", "ai", "start_docker_worker.ps1"))
+            if isfile(ps_script)
+                println("[InferenceClient] Launching Windows Docker AI worker ($ps_script)..."); flush(stdout)
+                try
+                    run(`powershell -NoProfile -ExecutionPolicy Bypass -File $ps_script -Port $port`, wait=true)
+                catch e
+                    println("[InferenceClient] Docker worker launch notice: $e"); flush(stdout)
+                end
+            end
+
+            # If still not reachable, try local Python worker
+            if !is_worker_reachable(; host=host, port=port)
+                py_script = !isempty(worker_script_path) && isfile(worker_script_path) ?
+                    worker_script_path :
+                    normpath(joinpath(@__DIR__, "..", "..", "scripts", "ai", "python_worker.py"))
+                if isfile(py_script)
+                    # Check if python has torch
+                    has_py = try
+                        run(pipeline(`python -c "import torch"`, stdout=devnull, stderr=devnull), wait=true)
+                        true
+                    catch
+                        false
+                    end
+                    if has_py
+                        println("[InferenceClient] Launching local python_worker.py in background..."); flush(stdout)
+                        try
+                            run(`python $py_script`, wait=false)
+                        catch e
+                            println("[InferenceClient] Local python worker launch notice: $e"); flush(stdout)
+                        end
+                    end
+                end
+            end
+        else
+            docker_script = normpath(joinpath(@__DIR__, "..", "..", "scripts", "ai", "start_docker_worker.sh"))
+            if isfile(docker_script)
+                try
+                    log_file = tempname() * ".log"
+                    run(pipeline(`bash $docker_script`, stdout=log_file, stderr=log_file), wait=true)
+                catch e
+                    println("[InferenceClient] Docker not available locally (normal for remote/SSH setups)."); flush(stdout)
+                end
+            end
         end
     end
 
-    # Wait up to 15 seconds for the Python TCP server to be reachable
+    # 3. Wait up to 15 seconds for the Python TCP server to be reachable
     connected = false
     for i in 1:15
-        try
-            conn = connect(host, port)
-            close(conn)
+        if is_worker_reachable(; host=host, port=port)
             println("[InferenceClient] AI Worker is ready at $host:$port."); flush(stdout)
             connected = true
+            set_ai_enabled!(true)
             try verify_docker_code_sync() catch end
             break
-        catch
-            sleep(1)
         end
+        sleep(1)
     end
+
     if !connected
         println("[InferenceClient] WARNING: AI Worker not reachable at $host:$port after 15s."); flush(stdout)
         println("[InferenceClient] For remote GPU server over SSH, ensure tunnel is active: ssh -N -L $port:localhost:$port user@server"); flush(stdout)
+        set_ai_enabled!(false)
+        return false
     end
+    return true
 end
 
 """
@@ -159,6 +366,11 @@ end
 const INFERENCE_DIR = joinpath(dirname(dirname(@__DIR__)), "tmp_inference")
 
 function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}, points_vol::Union{Nothing, Array{Float32, 3}}, cx::Int, cy::Int, cz::Int; port=get_ai_port())
+    if !is_ai_enabled()
+        println("[InferenceClient] HELPNet inference skipped: AI models are disabled."); flush(stdout)
+        return nothing
+    end
+
     # Docker container (medeye3d-ai) is started once at app startup — here we only communicate via TCP
 
     out_dir = INFERENCE_DIR
@@ -236,6 +448,11 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
                           scribble_coords::Vector{Vector{Int}},
                           cx::Int, cy::Int, cz::Int;
                           port=get_ai_port(), autozoom=true)
+    if !is_ai_enabled()
+        println("[InferenceClient] nnInteractive inference skipped: AI models are disabled."); flush(stdout)
+        return nothing
+    end
+
     out_dir = INFERENCE_DIR
     mkpath(out_dir)
     
@@ -319,6 +536,9 @@ Preload CT into Docker nnInteractive GPU memory for faster subsequent inference.
 Fire-and-forget — runs in a background thread. Errors are logged but don't propagate.
 """
 function preload_ct_for_nninteractive(ct_vol::Array{Float32, 3}; port=get_ai_port())
+    if !is_ai_enabled()
+        return nothing
+    end
     Threads.@spawn begin
         try
             host = get_ai_host()
@@ -382,6 +602,9 @@ Run PyTorch-based bone subsegmentation remotely on the Docker container's GPU us
 Returns `(surface_mask, marrow_mask)` as `Array{Bool, 3}`.
 """
 function run_bone_subsegmentation_remote(lesion_mask::AbstractArray{T, 3}, bone_mask::AbstractArray{U, 3}, spacing; port=get_ai_port()) where {T, U}
+    if !is_ai_enabled()
+        return nothing, nothing
+    end
     shape = size(lesion_mask)
     
     # Pack as UInt8

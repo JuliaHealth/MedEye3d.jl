@@ -7,7 +7,8 @@ Write-Host "===============================================================" -Fo
 
 # 1. Verify Deliverables
 Write-Host "`n[Step 1/4] Checking Compiled Deliverables..." -ForegroundColor Yellow
-$setupPath = "dist\MedEye3D_v0.5.10_Setup.exe"
+$setupFile = Get-ChildItem "dist\MedEye3D_v*_Setup.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$setupPath = if ($setupFile) { $setupFile.FullName } else { "dist\MedEye3D_v0.5.11_Setup.exe" }
 $exePath   = "build\MedEye3D_dist\bin\MedEye3D.exe"
 $dllPath   = "build\MedEye3D_dist\lib\julia\sys.dll"
 

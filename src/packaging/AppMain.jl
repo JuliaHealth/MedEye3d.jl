@@ -855,6 +855,10 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     put!(mainViewer.channel, CompareTimePointsEvent(false))
     put!(mainViewer.channel, Int64(0))
 
+    if !MedEye3d.InferenceClient.is_ai_enabled()
+        MEH.set_ai_status!("[AI Disabled] (Viewer Mode)")
+    end
+
     println("MedEye3D interactive clinical workflow initialized.")
     
     # 8. Pre-build E-PSMA structured reports (async, non-blocking)
@@ -913,6 +917,8 @@ function run_app(args::Vector{String})
         Options:
           -h, --help        Show this help message
           -v, --version     Show version information
+          --ai, --enable-ai Enable and run local AI inference models (nnInteractive & HELPNet)
+          --no-ai           Disable AI inference models (run in viewer-only mode)
           --demo            Launch default test case or synthetic 3D phantom viewer
           [file_path]       Open medical image file (.nii, .nii.gz, .mha, .h5)
         """)
@@ -920,11 +926,34 @@ function run_app(args::Vector{String})
     end
 
     if "--version" in args || "-v" in args
-        println("MedEye3D Version 0.5.10 (x86_64-w64-mingw32)")
+        println("MedEye3D Version 0.5.11 (x86_64-w64-mingw32)")
         return
     end
 
     MedEye3d.Telemetry.log_action("APP_START", Dict("args" => args))
+
+    # Query / configure whether to run AI inference models (nnInteractive & HELPNet) locally
+    run_ai = MedEye3d.InferenceClient.prompt_start_ai_models(args)
+    if run_ai
+        println("[STARTUP] Local AI inference models (nnInteractive & HELPNet) requested.")
+        MedEye3d.InferenceClient.set_ai_enabled!(true)
+        # Launch worker in background so file selection and viewer startup are immediate
+        @async begin
+            try
+                worker_ok = MedEye3d.InferenceClient.start_python_worker()
+                if worker_ok
+                    println("[STARTUP] AI inference models ready and connected.")
+                else
+                    println("[STARTUP] Local AI inference models could not be reached. Operating in viewer-only mode.")
+                end
+            catch e
+                @warn "[STARTUP] Failed to initialize AI inference worker: $e"
+            end
+        end
+    else
+        println("[STARTUP] AI inference models disabled by user choice or configuration.")
+        MedEye3d.InferenceClient.set_ai_enabled!(false)
+    end
 
     default_h5_candidates = [
         "D:\\MedEye3d.jl\\data\\preprocessed_volumes.h5",
