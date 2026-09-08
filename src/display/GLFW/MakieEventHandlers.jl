@@ -500,8 +500,8 @@ const current_windowing = Dict{String, Vector{Float32}}(
     "MRI"   => Float32[0.0, 1000.0],
     "MR"    => Float32[0.0, 1000.0],
     "T1"    => Float32[0.0, 600.0],
-    "ADC"   => Float32[0.0, 2200.0],
-    "DWI"   => Float32[0.0, 120.0]
+    "ADC"   => Float32[0.0, 1500.0],
+    "DWI"   => Float32[0.0, 500.0]
 )
 export current_windowing
 
@@ -1117,11 +1117,7 @@ end
 If anatomy toggle is ON, also show prostate gland (label 4+).
 Call this after reactToSyncLesion which may have re-applied single-lesion filtering."""
 function _force_mri_show_all!(stateObjects::Vector{StateDataFields})
-    anatomy_on = try
-        LMW = _get_lmw()
-        LMW !== nothing ? LMW.is_anatomy_visible() : false
-    catch; false; end
-    max_label = anatomy_on ? 1000 : 3  # 1-3 = lesions, 4+ = gland/anatomy
+    max_label = 3  # MRI: always clamp mask to lesion labels 1-3 (never show gland label 4)
 
     for (i, stateObject) in enumerate(stateObjects)
         tp = (i == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
@@ -1149,15 +1145,10 @@ function _has_nuclear_modality(tp::Int)::Bool
     return !(panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI"))
 end
 
-"""Clamp mask minAndMaxValue on MRI TPs to hide gland (label 4+) when anatomy toggle is OFF.
-Safe to call on any modality — no-ops on non-MRI TPs.
-Call at the END of any function that sets mask minAndMaxValue to prevent gland leak."""
+"""Clamp mask minAndMaxValue on MRI TPs to hide gland (label 4+).
+On MRI, mask is always clamped to [1,3] — anatomy toggle controls the separate Anatomy texture.
+Safe to call on any modality — no-ops on non-MRI TPs."""
 function _mri_clamp_mask_range!(stateObjects::Vector{StateDataFields})
-    anatomy_on = try
-        LMW = _get_lmw()
-        LMW !== nothing ? LMW.is_anatomy_visible() : false
-    catch; false; end
-    anatomy_on && return  # Anatomy ON → allow all labels
 
     # Check each panel individually based on its actual TP
     for (i, stateObject) in enumerate(stateObjects)
@@ -1522,11 +1513,7 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
             end
         elseif panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI") && (tex.name == "Mask" || tex.name == "segmentation" || (tex.isMultiDiscreteMask && tex.name != "Anatomy" && tex.name != "Bone_Overlay"))
             # Show lesion segments on MRI; show gland (label 4+) only if anatomy toggle is ON
-            anatomy_on = try
-                LMW = _get_lmw()
-                LMW !== nothing ? LMW.is_anatomy_visible() : false
-            catch; false; end
-            max_label = anatomy_on ? 1000 : 3
+            max_label = 3  # MRI: always clamp to lesion labels 1-3
             T_mm = eltype(tex.minAndMaxValue)
             tex.minAndMaxValue = T_mm.([1, max_label])
             tex.isVisible = true
