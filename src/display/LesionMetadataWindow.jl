@@ -519,7 +519,7 @@ function lookup_anatomy(raw_organ::String)
     if haskey(mapping, stripped)
         return mapping[stripped]
     end
-    println("[LOOKUP] lookup_anatomy('$raw_organ') → NOT FOUND (key='$key', mapping_size=$(length(mapping)))"); flush(stdout)
+    # NOT FOUND is normal for clinical lesion names — no log needed
     return nothing
 end
 
