@@ -73,6 +73,13 @@ Base.@kwdef mutable struct EPSMAReport
     history_text_de::String = ""
     
     # Regional Findings (Narrative)
+    findings_head_neck_en::String = "No suspicious PSMA uptake in the head and neck region."
+
+    findings_head_neck_de::String = "Kein Hinweis auf eine suspekte PSMA-Mehranreicherung im Kopf-/Halsbereich."
+
+    findings_thorax_en::String = "No suspicious PSMA uptake in the thorax."
+
+    findings_thorax_de::String = "Kein Hinweis auf eine suspekte PSMA-Mehranreicherung thorakal."
     findings_prostate_en::String = "No abnormal PSMA uptake detected in prostate / prostate bed."
     findings_prostate_de::String = "Keine pathologische PSMA-Mehranreicherung in der Prostata bzw. im Prostatabett nachweisbar."
     findings_lymph_en::String = "No suspicious PSMA-avid pelvic or extra-pelvic lymph nodes identified."
@@ -1045,18 +1052,42 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
     visc_txt_de = join(visc_parts_de, "\n\n")
 
     # Default Conclusions
+        # Generate dynamic conclusion
+    concl_de_parts = String[]
+    if t_part == "miT0"
+        push!(concl_de_parts, "Kein Anhalt für einen PSMA-positiven Primärtumor bzw. ein lokales Rezidiv/Residuum im Bereich von Prostata oder Prostatabett (miT0).")
+    else
+        push!(concl_de_parts, "Nachweis einer PSMA-positiven Läsion im Bereich der Prostata/Prostatabett ($t_part).")
+    end
+    
+    if n_part == "miN0"
+        push!(concl_de_parts, "Kein Anhalt für suspekte regionäre pelvine Lymphknotenmetastasen (miN0).")
+    else
+        push!(concl_de_parts, "Nachweis PSMA-positiver regionärer pelviner Lymphknotenmetastasen ($n_part).")
+    end
+    
+    if has_m1a
+        push!(concl_de_parts, "PSMA-positive extrapelfine Lymphknotenmetastasen (miM1a).")
+    end
+    if has_m1b
+        push!(concl_de_parts, "PSMA-positive Knochenmetastasen (miM1b).")
+    end
+    if has_m1c
+        push!(concl_de_parts, "PSMA-positive viszerale Organmetastasen (miM1c).")
+    end
+    
+    if !has_m1a && !has_m1b && !has_m1c
+        push!(concl_de_parts, "Kein Anhalt für PSMA-positive Fernmetastasen (miM0).")
+    end
+    
+    concl_de = join(["$i. $part" for (i, part) in enumerate(concl_de_parts)], "
+")
+
     concl_en = if isempty(synoptic_rows)
         "No definitive evidence of PSMA-avid local recurrence or metastatic prostate cancer (final miTNM: miT0 miN0 miM0)."
     else
-        "1. Evidence of PSMA-avid prostate cancer lesions as detailed above. Final molecular imaging staging: $final_mitnm.\n2. Total Metabolic Tumor Volume (TMTV): $(total_tmtv_cc) cc. Overall Response Status: $overall_recip.\n3. Recommend multidisciplinary tumor board review."
+        "Evidence of PSMA-avid prostate cancer lesions. Final molecular imaging staging: $final_mitnm."
     end
-    
-    concl_de = if isempty(synoptic_rows)
-        "Kein Anhalt für ein PSMA-positives Lokalrezidiv oder metastasiertes Prostatakarzinom (finales miTNM: miT0 miN0 miM0)."
-    else
-        "1. Nachweis PSMA-positiver Prostatakarzinom-Läsionen wie oben detailliert beschrieben. Finales molekulares Tumorstadium: $final_mitnm.\n2. Gesamt-Tumorvolumen (TMTV): $(total_tmtv_cc) ml. Verlauf/Therapieansprechen: $overall_recip.\n3. Interdisziplinäre Tumorkonferenz empfohlen."
-    end
-    
     # Query clinical information entered in main panel
     clin_info = Dict{String, Any}()
     if haskey(db, "Clinical_Info_TP$(tp_idx)")
@@ -1126,6 +1157,10 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
         tech_narrative_de = "",
         history_text_en = full_history_en,
         history_text_de = full_history_de,
+        findings_head_neck_en = "No suspicious PSMA uptake in the head and neck region.",
+        findings_head_neck_de = "Kein Hinweis auf eine suspekte PSMA-Mehranreicherung im Kopf-/Halsbereich.",
+        findings_thorax_en = "No suspicious PSMA uptake in the thorax.",
+        findings_thorax_de = "Kein Hinweis auf eine suspekte PSMA-Mehranreicherung thorakal.",
         findings_prostate_en = prostate_txt_en,
         findings_prostate_de = prostate_txt_de,
         findings_lymph_en = lymph_txt_en,
@@ -1285,6 +1320,13 @@ function to_dict(rep::EPSMAReport)::Dict{String, Any}
         "tech_narrative_de" => rep.tech_narrative_de,
         "history_text_en" => rep.history_text_en,
         "history_text_de" => rep.history_text_de,
+        "findings_head_neck_en" => rep.findings_head_neck_en,
+
+        "findings_head_neck_de" => rep.findings_head_neck_de,
+
+        "findings_thorax_en" => rep.findings_thorax_en,
+
+        "findings_thorax_de" => rep.findings_thorax_de,
         "findings_prostate_en" => rep.findings_prostate_en,
         "findings_prostate_de" => rep.findings_prostate_de,
         "findings_lymph_en" => rep.findings_lymph_en,

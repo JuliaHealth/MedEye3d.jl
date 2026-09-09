@@ -4343,7 +4343,7 @@ function create_metadata_window(
         
         # Lookup the anatomy ontology entry (used for both BaseAnatomy and Location)
         anat_entry = (!isempty(raw_organ) && raw_organ != "Unknown") ? lookup_anatomy(raw_organ) : nothing
-        println("[PREFILL] lid=$lid, raw_organ='$raw_organ', anat_entry=$(anat_entry !== nothing ? "found" : "null"), t_base='$t_base'"); flush(stdout)
+        @debug "[PREFILL] lid=$lid, raw_organ=$raw_organ, t_base=$t_base"
         
         # Auto-detect BaseAnatomy from max_anatomy JSON mapping if not saved
         if isempty(t_base) && anat_entry !== nothing
@@ -4370,20 +4370,20 @@ function create_metadata_window(
         if anat_entry !== nothing
             anat_loc = get(anat_entry, "anatomic_location", "")
             anat_subloc = get(anat_entry, "anatomical_sublocation", "")
-            println("[PREFILL] anat_entry for '$raw_organ': loc='$anat_loc', subloc='$anat_subloc', existing_loc='$existing_loc', existing_subloc='$existing_subloc'"); flush(stdout)
+            @debug "[PREFILL] anat_entry for raw_organ: loc, subloc"
             
             # Auto-fill Anatomic Location if empty
             if isempty(existing_loc) && !isempty(anat_loc)
                 data["Anatomic Location"] = anat_loc
                 db_updates["Anatomic Location"] = anat_loc
-                println("[PREFILL] Auto-filled Anatomic Location='$anat_loc'"); flush(stdout)
+                @debug "[PREFILL] Auto-filled Anatomic Location='$anat_loc'"
             end
             
             # Auto-fill Anatomical Sublocation if empty
             if isempty(existing_subloc) && !isempty(anat_subloc)
                 data["Anatomical Sublocation"] = anat_subloc
                 db_updates["Anatomical Sublocation"] = anat_subloc
-                println("[PREFILL] Auto-filled Anatomical Sublocation='$anat_subloc'"); flush(stdout)
+                @debug "[PREFILL] Auto-filled Anatomical Sublocation='$anat_subloc'"
             end
         end
         
@@ -5014,7 +5014,7 @@ function create_metadata_window(
     try
         on(_MEH.organ_mapping_updated) do (lid, organ_name)
             try
-                println("[PAINT→FILL] Received organ_mapping_updated: lid=$lid, organ='$organ_name'"); flush(stdout)
+                @debug "[PAINT→FILL] Received organ_mapping_updated: lid=$lid, organ='$organ_name'"
                 lid == 0 && return  # skip initial value
                 # Only auto-fill if this is the currently displayed lesion
                 cur_lesion_str = active_lesion_display[]
@@ -5026,19 +5026,19 @@ function create_metadata_window(
                     m = match(r"(\d+)\s*$", cur_lesion_s)
                 end
                 cur_lid = m !== nothing ? tryparse(Int, m.captures[1]) : nothing
-                println("[PAINT→FILL] cur_lesion_str='$cur_lesion_s', cur_lid=$cur_lid, lid=$lid"); flush(stdout)
+                @debug "[PAINT→FILL] cur_lesion_str='$cur_lesion_s', cur_lid=$cur_lid, lid=$lid"
                 (cur_lid === nothing || cur_lid != lid) && return
                 
                 # Look up the ontology entry for this organ
-                println("[PAINT→FILL] Calling lookup_anatomy('$organ_name')..."); flush(stdout)
+                @debug "[PAINT→FILL] Calling lookup_anatomy('$organ_name')..."
                 anat_entry = lookup_anatomy(organ_name)
-                println("[PAINT→FILL] lookup_anatomy result: $(anat_entry !== nothing ? "found" : "nothing")"); flush(stdout)
+                @debug "[PAINT-FILL] lookup_anatomy result available"
                 anat_entry === nothing && return
                 
                 t_base = get(anat_entry, "detailed", "")
                 auto_side = get(anat_entry, "side", "")
                 lesion_type = get(anat_entry, "lesion_type", "")
-                println("[PAINT→FILL] t_base='$t_base', side='$auto_side', type='$lesion_type'"); flush(stdout)
+                @debug "[PAINT→FILL] t_base='$t_base', side='$auto_side', type='$lesion_type'"
                 
                 # Always update BaseAnatomy from organ mapping (reflects current paint state)
                 if !isempty(t_base)
@@ -5057,7 +5057,7 @@ function create_metadata_window(
                             ba_all_opts[] = vcat(ba_all_opts[], [t_base])
                         end
                     end
-                    println("[PAINT→ANAT] Set BaseAnatomy for lesion $lid: '$t_base' from '$organ_name'"); flush(stdout)
+                    @debug "[PAINT-ANAT] Set BaseAnatomy for lesion $lid"
                 end
                 
                 # Always update Side from organ mapping (skip NA/N/A for unpaired organs)
@@ -5067,7 +5067,7 @@ function create_metadata_window(
                     if s_idx !== nothing
                         menu_side.i_selected[] = s_idx
                     end
-                    println("[PAINT→SIDE] Set Side for lesion $lid: '$auto_side' from '$organ_name'"); flush(stdout)
+                    @debug "[PAINT-SIDE] Set Side for lesion $lid"
                 elseif isempty(auto_side) || uppercase(auto_side) in ("NA", "N/A")
                     # Unpaired organ — clear side to empty
                     s_idx = findfirst(==(""), menu_side.options[])
@@ -5079,12 +5079,12 @@ function create_metadata_window(
                 # Always update LesionType from ontology (Bone Meta, Organ Meta, etc.)
                 if !isempty(lesion_type)
                     update_type_buttons(lesion_type)
-                    println("[PAINT→TYPE] Set LesionType for lesion $lid: '$lesion_type' from '$organ_name'"); flush(stdout)
+                    @debug "[PAINT-TYPE] Set LesionType for lesion $lid"
                 end
                 
                 trigger_autosave()
             catch e
-                println("[PAINT→FILL] ERROR in callback: $e"); flush(stdout)
+                @debug "[PAINT→FILL] ERROR in callback: $e"
                 for (exc, bt) in current_exceptions()
                     showerror(stdout, exc, bt)
                     println()
@@ -5092,9 +5092,9 @@ function create_metadata_window(
                 flush(stdout)
             end
         end
-        println("[PAINT→FILL] Successfully registered organ_mapping_updated listener"); flush(stdout)
+        @debug "[PAINT→FILL] Successfully registered organ_mapping_updated listener"
     catch e
-        println("[PAINT→FILL] FAILED to register organ_mapping_updated listener: $e"); flush(stdout)
+        @debug "[PAINT→FILL] FAILED to register organ_mapping_updated listener: $e"
         @warn "Failed to register organ_mapping_updated listener: $e"
     end
 
@@ -5106,7 +5106,7 @@ function create_metadata_window(
                 try
                     db = lesion_db[]
                     put!(db_channel, SaveDBMessage(db, global_app_state, save_path, DEFAULT_HDF5_PATH))
-                    println("  [AUTOSAVE] Saved (dirty flag was set)"); flush(stdout)
+                    @debug "  [AUTOSAVE] Saved (dirty flag was set)"
                 catch e
                     @warn "Background autosave enqueue failed" e
                 end

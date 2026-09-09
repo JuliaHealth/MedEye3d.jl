@@ -252,7 +252,7 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     # In-place continuous thick-line interpolation using KernelAbstractions
     StrokeRasterization.rasterize_polyline!(twoDimDat.dat, pointsToRasterize, strokeW, toSet)
 
-    println("[PAINT-DBG] panel=$(mainStates[1].switchIndex) tex='$(texture.name)' val=$toSet pts=$(length(pointsToRasterize)) strokeW=$strokeW slice=$(stateObject.currentDisplayedSlice) datSize=$(size(twoDimDat.dat)) datType=$(twoDimDat.type)"); flush(stdout)
+    @debug "[PAINT-DBG] panel=$(mainStates[1].switchIndex) tex='$(texture.name)' val=$toSet pts=$(length(pointsToRasterize))"
 
     # Mark slice changed so consumer loop uploads dirty texture to GPU
     stateObject.isSliceChanged = true
