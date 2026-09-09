@@ -496,9 +496,36 @@ function call_academiccloud_chat(
         write(tmp_io, body_json)
         close(tmp_io)
 
-        cmd = `curl -s -X POST $url -H "Authorization: Bearer $key" -H "Content-Type: application/json" -d @$tmp_path`
-        output = read(cmd, String)
+        cmd = `curl -s --retry 3 --retry-delay 2 --max-time 120 -X POST $url -H "Authorization: Bearer $key" -H "Content-Type: application/json" -d @$tmp_path`
         
+        try
+            open("/workspaces/MedEye3d.jl/data/curl_debug.log", "a") do f
+                println(f, "--- NEW CURL CALL ---")
+                println(f, "URL: ", url)
+                println(f, "Payload length: ", length(body_json))
+            end
+        catch; end
+
+        output = ""
+        try
+            output = read(cmd, String)
+            open("/workspaces/MedEye3d.jl/data/curl_debug.log", "a") do f
+                println(f, "Output length: ", length(output))
+                println(f, "Output prefix: ", output[1:min(200, length(output))])
+            end
+        catch ce
+            open("/workspaces/MedEye3d.jl/data/curl_debug.log", "a") do f
+                println(f, "CURL CRASHED: ", ce)
+            end
+            throw(ce)
+        end
+        
+        # Check for HTML Gateway
+
+        if startswith(lstrip(output), "<") || occursin("502 Bad Gateway", output) || occursin("504 Gateway Time-out", output) || occursin("401 Unauthorized", output)
+            return "API Error: AcademicCloud is currently overloaded or unavailable. Raw response: $(output[1:min(150, length(output))])"
+        end
+
         resp = JSON.parse(output)
         if haskey(resp, "error")
             err_msg = get(resp["error"], "message", "Unknown API error")
@@ -524,7 +551,8 @@ function call_academiccloud_chat(
 
         return strip(string(content))
     catch e
-        return "Connection Error: $e"
+        @error "LLM API Call Failed" exception=(e, catch_backtrace())
+        return "Connection Error: $e. (Please check data/curl_debug.log)"
     finally
         rm(tmp_path, force=true)
     end

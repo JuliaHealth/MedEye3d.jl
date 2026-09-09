@@ -3242,8 +3242,7 @@ function create_metadata_window(
 
     ai_hdr_r = nr!()
     Label(g[ai_hdr_r, 1], "AI Dictation:", fontsize = 10, color = ACCENT, halign = :right)
-    btn_gen = Button(g[ai_hdr_r, 2], label = "Generate", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
-    btn_open_report = Button(g[ai_hdr_r, 3], label = "[R] E-PSMA Report", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
+    btn_open_report = Button(g[ai_hdr_r, 2:3], label = "[R] E-PSMA Report", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
     btn_copy_rpt = Button(g[ai_hdr_r, 4], label = "Copy", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     rowsize!(g, ai_hdr_r, Fixed(28)); register_fixed_row!(ai_hdr_r, 28)
 
@@ -3252,7 +3251,7 @@ function create_metadata_window(
     rowsize!(g, ai_status_r, Fixed(18)); register_fixed_row!(ai_status_r, 18)
 
     rpt_r = nr!()
-    report_text = Observable{String}("(Click 'Generate' or '[R] E-PSMA Report' to create and view the structured E-PSMA radiological report...)")
+    report_text = Observable{String}("(Auto-generating background radiological dictation for this time point...)")
     report_lbl = Label(g[rpt_r, 1:4], report_text, word_wrap = true, tellwidth = false, fontsize = 9,
         color = TXT, halign = :left)
     rpt_tb = Textbox(g[nr!(), 1:4], height = 0)
@@ -4027,6 +4026,8 @@ function create_metadata_window(
         catch; end
         # Trigger debounced E-PSMA report refresh (coalesces rapid changes)
         try ESR.request_report_refresh!(_MEH.current_tp_index[]) catch; end
+        # Trigger debounced LLM auto dictation
+        try request_auto_dictation!(_MEH.current_tp_index[]) catch; end
     end
     function apply_global_state(gst::AbstractDict)
         _is_applying_state[] = true
@@ -4765,6 +4766,9 @@ function create_metadata_window(
         dict_text[] = target_dict
         
         target_rpt = get(data, "RadiologicalReportOutput", "")
+        if occursin("Connection Error", target_rpt)
+            target_rpt = ""
+        end
         if !isempty(target_rpt)
             report_text[] = target_rpt
             _set_tb_val!(rpt_tb, target_rpt)
@@ -4840,6 +4844,8 @@ function create_metadata_window(
                 @warn "Failed to send SyncLesionEvent: $e"
             end
         end
+        # Trigger auto dictation generation on lesion switch (which includes app startup)
+        try request_auto_dictation!(_MEH.current_tp_index[]) catch; end
     end
     if active_lesion_id[] != "" && active_lesion_id[] != "(none)"
         notify(active_lesion_id)
@@ -4902,59 +4908,78 @@ function create_metadata_window(
         end
     end
 
-    on(btn_gen.clicks) do _
-        tp = _MEH.current_tp_index[]
-        tp_name = get(_MEH.tp_labels, tp, "TP $tp")
-        lang = current_dict_lang[]
-        lbl_dict_status.text[] = "[...] Aggregating TP $tp data & querying Qwen 3.5 397B ($lang)..."
-        lbl_dict_status.color[] = ACCENT
-        btn_gen.buttoncolor[] = BG_PNL
+    _auto_dict_lock = ReentrantLock()
+    _auto_dict_counter = Ref{Int}(0)
+    _auto_dict_pending_tp = Ref{Int}(-1)
+    _dictation_running = Ref{Bool}(false)
+
+    function request_auto_dictation!(tp_idx::Int)
+        c = 0
+        lock(_auto_dict_lock) do
+            _auto_dict_pending_tp[] = tp_idx
+            _auto_dict_counter[] += 1
+            c = _auto_dict_counter[]
+        end
         
-        ESR.invalidate_report!(tp)  # Force rebuild with current data
-        rep = ESR.get_or_build_report(tp; lang = lang)
-        
-        LLMDictation.generate_report_async(
-            tp;
-            lang = lang,
-            model = LLMDictation.DEFAULT_MODEL,
-            on_complete = (report_str, elapsed) -> begin
-                @async begin
-                    report_text[] = report_str
-                    _set_tb_val!(rpt_tb, report_str)
-                    lbl_dict_status.text[] = "[OK] Generated in $(elapsed)s via Qwen 3.5 397B ($lang)"
-                    lbl_dict_status.color[] = GRN
-                    btn_gen.buttoncolor[] = BLU_BTN
-                    
-                    # Update E-PSMA structured report with LLM generated narrative
-                    if lang == "DE"
-                        rep.conclusion_de = report_str
-                    else
-                        rep.conclusion_en = report_str
-                    end
-                    
-                    # Open or refresh the E-PSMA report window
-                    try
-                        ERW.open_epsma_report_window(rep)
-                    catch e
-                        @warn "Failed to open E-PSMA window on generation: $e"
-                    end
-                    
-                    trigger_autosave()
-                end
-            end,
-            on_error = (err) -> begin
-                @async begin
-                    lbl_dict_status.text[] = "[ERR] Generation failed: $err"
-                    lbl_dict_status.color[] = RGBf(0.9, 0.2, 0.2)
-                    btn_gen.buttoncolor[] = BLU_BTN
-                    
-                    # Still open report window with auto-extracted metrics
-                    try
-                        ERW.open_epsma_report_window(rep)
-                    catch; end
+        @async begin
+            sleep(5.0) # Wait 5 seconds to debounce
+            
+            do_gen = false
+            lock(_auto_dict_lock) do
+                # If counter matches and nothing is running right now, start it!
+                if _auto_dict_counter[] == c && _auto_dict_pending_tp[] == tp_idx && !_dictation_running[]
+                    do_gen = true
+                    _dictation_running[] = true
+                    _auto_dict_pending_tp[] = -1
                 end
             end
-        )
+            
+            if do_gen
+                lang = current_dict_lang[]
+                lbl_dict_status.text[] = "[...] Background generating dictation via Qwen 3.5 397B ($lang)..."
+                lbl_dict_status.color[] = ACCENT
+                
+                ESR.invalidate_report!(tp_idx)
+                rep = ESR.get_or_build_report(tp_idx; lang = lang)
+                
+                LLMDictation.generate_report_async(
+                    tp_idx;
+                    lang = lang,
+                    model = LLMDictation.DEFAULT_MODEL,
+                    on_complete = (report_str, elapsed) -> begin
+                        @async begin
+                            report_text[] = report_str
+                            _set_tb_val!(rpt_tb, report_str)
+                            lbl_dict_status.text[] = "[OK] Generated in $(elapsed)s via Qwen 3.5 397B ($lang)"
+                            lbl_dict_status.color[] = GRN
+                            
+                            if lang == "DE"
+                                rep.conclusion_de = report_str
+                            else
+                                rep.conclusion_en = report_str
+                            end
+                            
+                            try ERW.open_epsma_report_window(rep) catch; end
+                            
+                            lock(_auto_dict_lock) do
+                                _dictation_running[] = false
+                            end
+                            trigger_autosave()
+                        end
+                    end,
+                    on_error = (err) -> begin
+                        @async begin
+                            lbl_dict_status.text[] = "[ERR] Generation failed: $err"
+                            lbl_dict_status.color[] = RGBf(0.9, 0.2, 0.2)
+                            try ERW.open_epsma_report_window(rep) catch; end
+                            lock(_auto_dict_lock) do
+                                _dictation_running[] = false
+                            end
+                        end
+                    end
+                )
+            end
+        end
     end
 
     # Auto-save logic

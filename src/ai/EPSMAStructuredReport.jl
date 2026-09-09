@@ -621,27 +621,71 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
     
     for lid in l_ids
         state = if LMW !== nothing && !isempty(db)
-            try LMW.get_lesion_state(db, string(lid)) catch; Dict{String, String}() end
+            try LMW.get_lesion_state(db, string(lid)) catch; Dict{String, Any}() end
         else
-            Dict{String, String}()
+            Dict{String, Any}()
+        end
+        # Ensure state is mutable and handles string keys
+        if !(state isa Dict{String, Any})
+            state = Dict{String, Any}(k => v for (k,v) in state)
         end
         
-        # 1. Resolve clean anatomical location & artifact status (NO generic "Lesion $lid"!)
-        (loc_full, is_artifact, is_muscle, raw_organ_name) = resolve_anatomical_location(lid, state, tp_idx, _MEH, LMW)
-        sublocation = get(state, "Anatomical Details", "")
-        ltype = get(state, "LesionType", "Lesion")
-        comment = get(state, "Comment", "")
-        
-        # 1b. Fetch original RTOG/clinical segment name for classification hints
+        # 1a. Fetch original RTOG/clinical segment name for classification hints
         seg_name = ""
         if _MEH !== nothing && isdefined(_MEH, :tp_segment_names)
             tp_segs = get(_MEH.tp_segment_names, tp_idx, Dict{Int,String}())
             seg_name = get(tp_segs, lid, "")
         end
         
-        # 1c. Auto-infer LesionType — ATLAS is PRIMARY (TotalSegmentator ground truth)
-        # TS provides definitive segmentation for bones, prostate, and visceral organs.
-        # Lymph nodes are the ONLY exception (TS has no LN segmentation) → inferred from segment names.
+        # 1b. Fetch raw organ name from atlas to do absolute sanity checks
+        atlas_organ = ""
+        if _MEH !== nothing
+            atlas_organ = get(_MEH.global_organ_mapping[], lid, "")
+            if atlas_organ == "Unknown"
+                atlas_organ = ""
+            end
+        end
+        
+        # 1c. Sanity check: If user/UI saved "Prostate" but it's clearly an Iliac vessel, WIPE the Prostate classification
+        seg_lo = lowercase(seg_name)
+        org_lo = lowercase(atlas_organ)
+        ltype_tmp = get(state, "LesionType", "Lesion")
+        
+        # Check for pelvic vessels / lymph stations
+        if occursin("iliac", seg_lo) || occursin("iliac", org_lo) || occursin("obturat", seg_lo) || occursin("obturat", org_lo) || occursin("inguin", seg_lo) || occursin("inguin", org_lo)
+            if ltype_tmp == "Prostate"
+                @info "[E-PSMA] OVERRIDE: Lesion $lid is anatomically pelvic vascular/node but LesionType was Prostate. Fixing to Lymph Node."
+                state["LesionType"] = "Lymph Node"
+                
+                # Also wipe out Prostate-specific sub-zones
+                details = get(state, "Anatomical Details", "")
+                if occursin("Prostate", details) || occursin("PZ", details) || occursin("TZ", details) || occursin("CG", details) || occursin("Seminal", details)
+                    state["Anatomical Details"] = ""
+                end
+            end
+        end
+
+        # 1. Resolve clean anatomical location & artifact status (NO generic "Lesion $lid"!)
+        (loc_full, is_artifact, is_muscle, raw_organ_name) = resolve_anatomical_location(lid, state, tp_idx, _MEH, LMW)
+        sublocation = get(state, "Anatomical Details", "")
+        ltype = get(state, "LesionType", "Lesion")
+        comment = get(state, "Comment", "")
+        
+        # 1c. Auto-infer LesionType 
+        # PRIMARY: Clinical annotations (seg_name) take absolute precedence
+        if ltype in ("Lesion", "Organ Meta", "") && !isempty(seg_name)
+            seg_lo = lowercase(seg_name)
+            if occursin("lymph", seg_lo) || occursin("knoten", seg_lo) || occursin("node", seg_lo) || occursin("iliac", seg_lo) || occursin("obturat", seg_lo) || occursin("inguin", seg_lo)
+                ltype = "Lymph Node"
+                @info "[E-PSMA] SegName→Lymph Node for lesion $lid (seg: '$seg_name')"
+            elseif occursin("knochen", seg_lo) || occursin("bone", seg_lo)
+                ltype = "Bone Meta"
+            elseif occursin("prostat", seg_lo)
+                ltype = "Prostate"
+            end
+        end
+
+        # SECONDARY: Atlas (TotalSegmentator) fallback
         organ_lo = lowercase(raw_organ_name)
         if ltype in ("Lesion", "Organ Meta", "")
             # 1c-i: Bone (atlas has definitive bone segmentation)
@@ -663,23 +707,6 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
             if any(k -> occursin(k, organ_lo), visc_atlas_kw)
                 ltype = "Organ Meta"
                 @info "[E-PSMA] Atlas→Organ Meta for lesion $lid (atlas: '$raw_organ_name')"
-            end
-        end
-        
-        # 1c-iv: Lymph nodes — SPECIAL CASE (TS has NO LN segmentation)
-        # Inferred from segment names ("Lymphknoten", "lymph node") or vascular atlas names
-        if ltype in ("Lesion", "Organ Meta", "")
-            # From segment names (clinical annotations)
-            if !isempty(seg_name)
-                seg_lo = lowercase(seg_name)
-                if occursin("lymph", seg_lo) || occursin("knoten", seg_lo) || occursin("node", seg_lo)
-                    ltype = "Lymph Node"
-                    @info "[E-PSMA] SegName→Lymph Node for lesion $lid (seg: '$seg_name')"
-                elseif occursin("knochen", seg_lo) || occursin("bone", seg_lo)
-                    ltype = "Bone Meta"  # Segment name fallback for bone
-                elseif occursin("prostat", seg_lo)
-                    ltype = "Prostate"   # Segment name fallback for prostate
-                end
             end
         end
         
