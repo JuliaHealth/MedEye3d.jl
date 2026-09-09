@@ -498,8 +498,9 @@ function call_academiccloud_chat(
 
         cmd = `curl -s --retry 3 --retry-delay 2 --max-time 120 -X POST $url -H "Authorization: Bearer $key" -H "Content-Type: application/json" -d @$tmp_path`
         
+        debug_log = abspath(joinpath(@__DIR__, "..", "..", "data", "curl_debug.log"))
         try
-            open("/workspaces/MedEye3d.jl/data/curl_debug.log", "a") do f
+            open(debug_log, "a") do f
                 println(f, "--- NEW CURL CALL ---")
                 println(f, "URL: ", url)
                 println(f, "Payload length: ", length(body_json))
@@ -509,14 +510,16 @@ function call_academiccloud_chat(
         output = ""
         try
             output = read(cmd, String)
-            open("/workspaces/MedEye3d.jl/data/curl_debug.log", "a") do f
+            open(debug_log, "a") do f
                 println(f, "Output length: ", length(output))
                 println(f, "Output prefix: ", output[1:min(200, length(output))])
             end
         catch ce
-            open("/workspaces/MedEye3d.jl/data/curl_debug.log", "a") do f
-                println(f, "CURL CRASHED: ", ce)
-            end
+            try
+                open(debug_log, "a") do f
+                    println(f, "CURL CRASHED: ", ce)
+                end
+            catch; end
             throw(ce)
         end
         
