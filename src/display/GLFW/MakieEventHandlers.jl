@@ -1738,7 +1738,7 @@ export organ_mapping_updated
 function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector{StateDataFields})
     t_total = time_ns()
     # Flush any modified masks before changing timepoint or evicting
-    flush_all_dirty_masks!()
+    if !isempty(dirty_mask_tps); Threads.@spawn flush_all_dirty_masks!(); end
     if isempty(tp_labels)
         @debug "No TP labels loaded. TP navigation disabled."
         return
@@ -1902,7 +1902,7 @@ end
 
 function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{StateDataFields})
     t_total = time_ns()
-    flush_all_dirty_masks!()
+    if !isempty(dirty_mask_tps); Threads.@spawn flush_all_dirty_masks!(); end
     if isempty(tp_labels)
         @debug "No TP labels loaded. TP navigation disabled."
         return
@@ -2495,8 +2495,7 @@ end
 const MASK_BACKUP = Dict{UInt64, Array{Float32, 3}}()
 
 function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{StateDataFields})
-    println("reactToShowMaskLayer: layer=$(data.layer) active=$(data.active) num_panels=$(length(stateObjects))")
-    flush(stdout)
+    @debug "reactToShowMaskLayer: layer=$(data.layer) active=$(data.active)"
     
     tex_target = if data.layer == 1
         "Mask"
@@ -2515,18 +2514,16 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
                (textSpec.name == tex_target)
                 textSpec.isVisible = data.active
                 toggled_count += 1
-                println("  Panel $si: set isVisible=$(data.active) for texture '$(textSpec.name)'")
+                @debug "  Panel $si: set isVisible=$(data.active) for texture $(textSpec.name)"
             end
         end
     end
-    println("  Toggled $toggled_count textures total for layer=$(data.layer)")
-    flush(stdout)
+    @debug "  Toggled $toggled_count textures for layer=$(data.layer)"
     
     # If bone surface or marrow is toggled, also sync dataToScroll buffer directly
     if data.layer == 2 || data.layer == 3
         cur_lid = (current_active_lesion_id[] > 0) ? current_active_lesion_id[] : round(Int, stateObjects[1].valueForMasToSet.value)
-        println("  Bone data sync: cur_lid=$cur_lid, in_cache=$(haskey(bone_subsegments_cache, (current_tp_index[], cur_lid)))")
-        flush(stdout)
+        @debug "  Bone data sync: cur_lid=$cur_lid"
         for (panel_idx, stateObject) in enumerate(stateObjects)
             for scrDat in stateObject.onScrollData.dataToScroll
                 if scrDat.name == "Bone_Overlay"
