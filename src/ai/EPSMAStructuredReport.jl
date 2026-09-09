@@ -1080,8 +1080,8 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
         push!(concl_de_parts, "Kein Anhalt für PSMA-positive Fernmetastasen (miM0).")
     end
     
-    concl_de = join(["$i. $part" for (i, part) in enumerate(concl_de_parts)], "
-")
+    concl_de = join(["$i. $part" for (i, part) in enumerate(concl_de_parts)], "\n")
+
 
     concl_en = if isempty(synoptic_rows)
         "No definitive evidence of PSMA-avid local recurrence or metastatic prostate cancer (final miTNM: miT0 miN0 miM0)."
@@ -1423,12 +1423,21 @@ function export_to_docx(report::EPSMAReport, out_path::AbstractString; lang::Abs
     json_str = JSON.json(json_data)
     
     # Robust path resolution (before try so it's in scope for catch)
-    script_path = abspath(joinpath(@__DIR__, "..", "..", "scripts", "export", "generate_epsma_docx.py"))
-    if !isfile(script_path)
-        script_path = "/workspaces/MedEye3d.jl/scripts/export/generate_epsma_docx.py"
+    candidate_paths = [
+        abspath(joinpath(@__DIR__, "..", "..", "scripts", "export", "generate_epsma_docx.py")),
+        normpath(joinpath(Sys.BINDIR, "..", "scripts", "export", "generate_epsma_docx.py")),
+        normpath(joinpath(Sys.BINDIR, "scripts", "export", "generate_epsma_docx.py")),
+        "/workspaces/MedEye3d.jl/scripts/export/generate_epsma_docx.py"
+    ]
+    script_path = ""
+    for p in candidate_paths
+        if isfile(p)
+            script_path = p
+            break
+        end
     end
-    if !isfile(script_path)
-        error("Python export script not found. Searched: $(abspath(joinpath(@__DIR__, "..", "..", "scripts", "export", "generate_epsma_docx.py")))")
+    if isempty(script_path)
+        error("Python export script not found. Searched: $(join(candidate_paths, ", "))")
     end
     
     # Use project data dir for temp file (system /tmp may have user quota limits)
@@ -1443,7 +1452,8 @@ function export_to_docx(report::EPSMAReport, out_path::AbstractString; lang::Abs
         out_dir = dirname(out_path)
         isdir(out_dir) || mkpath(out_dir)
         
-        cmd = `python3 $script_path $tmp_json $out_path $lang`
+        py_bin = Sys.iswindows() ? "python" : "python3"
+        cmd = `$py_bin $script_path $tmp_json $out_path $lang`
         result = read(cmd, String)
         
         if !isfile(out_path)

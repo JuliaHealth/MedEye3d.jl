@@ -119,6 +119,20 @@ if isdir(src_scripts_ai)
     end
 end
 
+# Copy export scripts into distribution bundle (e.g., E-PSMA docx generator)
+dist_scripts_export = joinpath(build_output_dir, "scripts", "export")
+mkpath(dist_scripts_export)
+src_scripts_export = joinpath(project_root, "scripts", "export")
+if isdir(src_scripts_export)
+    for fname in ["generate_epsma_docx.py"]
+        fpath = joinpath(src_scripts_export, fname)
+        if isfile(fpath)
+            cp(fpath, joinpath(dist_scripts_export, fname); force=true)
+            println("✓ Copied scripts/export/$fname to distribution bundle.")
+        end
+    end
+end
+
 # Create a default configuration / info file
 info_file = joinpath(build_output_dir, "app_info.json")
 write(info_file, """
