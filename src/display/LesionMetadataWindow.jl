@@ -3992,7 +3992,8 @@ function create_metadata_window(
     end
 
     _is_applying_state = Ref(false)
-    function trigger_autosave()
+    _is_dictating_update = Ref(false)
+    function trigger_autosave(; skip_dictation=false)
         _is_applying_state[] && return
         display_id = active_lesion_id[]
         lid = parse_lesion_id(display_id)
@@ -4026,8 +4027,11 @@ function create_metadata_window(
         catch; end
         # Trigger debounced E-PSMA report refresh (coalesces rapid changes)
         try ESR.request_report_refresh!(_MEH.current_tp_index[]) catch; end
+        
         # Trigger debounced LLM auto dictation
-        try request_auto_dictation!(_MEH.current_tp_index[]) catch; end
+        if !skip_dictation && !_is_dictating_update[]
+            try request_auto_dictation!(_MEH.current_tp_index[]) catch; end
+        end
     end
     function apply_global_state(gst::AbstractDict)
         _is_applying_state[] = true
@@ -4948,23 +4952,28 @@ function create_metadata_window(
                     model = LLMDictation.DEFAULT_MODEL,
                     on_complete = (report_str, elapsed) -> begin
                         @async begin
-                            report_text[] = report_str
-                            _set_tb_val!(rpt_tb, report_str)
-                            lbl_dict_status.text[] = "[OK] Generated in $(elapsed)s via Qwen 3.5 397B ($lang)"
-                            lbl_dict_status.color[] = GRN
-                            
-                            if lang == "DE"
-                                rep.conclusion_de = report_str
-                            else
-                                rep.conclusion_en = report_str
+                            _is_dictating_update[] = true
+                            try
+                                report_text[] = report_str
+                                _set_tb_val!(rpt_tb, report_str)
+                                lbl_dict_status.text[] = "[OK] Generated in $(elapsed)s via Qwen 3.5 397B ($lang)"
+                                lbl_dict_status.color[] = GRN
+                                
+                                if lang == "DE"
+                                    rep.conclusion_de = report_str
+                                else
+                                    rep.conclusion_en = report_str
+                                end
+                                
+                                try ERW.open_epsma_report_window(rep) catch; end
+                                
+                                trigger_autosave(; skip_dictation=true)
+                            finally
+                                _is_dictating_update[] = false
+                                lock(_auto_dict_lock) do
+                                    _dictation_running[] = false
+                                end
                             end
-                            
-                            try ERW.open_epsma_report_window(rep) catch; end
-                            
-                            lock(_auto_dict_lock) do
-                                _dictation_running[] = false
-                            end
-                            trigger_autosave()
                         end
                     end,
                     on_error = (err) -> begin
