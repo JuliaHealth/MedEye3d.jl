@@ -98,14 +98,17 @@ Returns `true` if rendering succeeded, `false` if swapchain is out of date.
 **Zero per-frame heap allocations**: all wrapper arrays are pre-allocated
 module-level buffers that are reused every frame.
 """
-function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData})::Bool
+function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData}, target_window=nothing)::Bool
+    
+    tgt = target_window === nothing ? ctx : target_window
+
     # Wait for previous frame (reuse fence buffer)
-    unwrap(wait_for_fences(ctx.device, _set1!(_fence_buf, ctx.in_flight_fence), true, typemax(UInt64)))
-    unwrap(reset_fences(ctx.device, _set1!(_fence_buf, ctx.in_flight_fence)))
+    unwrap(wait_for_fences(ctx.device, _set1!(_fence_buf, tgt.in_flight_fence), true, typemax(UInt64)))
+    unwrap(reset_fences(ctx.device, _set1!(_fence_buf, tgt.in_flight_fence)))
 
     # Acquire next image
-    result = acquire_next_image_khr(ctx.device, ctx.swapchain, typemax(UInt64);
-                                     semaphore=ctx.image_available_semaphore)
+    result = acquire_next_image_khr(ctx.device, tgt.swapchain, typemax(UInt64);
+                                     semaphore=tgt.image_available_semaphore)
     local img_idx::UInt32
     try
         img_idx, _ = unwrap(result)
@@ -114,10 +117,11 @@ function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData})::Bool
         println("Vulkan acquire error (swapchain out of date): $(e)"); flush(stdout)
         return false
     end
-    ctx.last_rendered_image_idx = img_idx
+    # ctx.last_rendered_image_idx (omitted for secondary)
+    if target_window === nothing; ctx.last_rendered_image_idx = img_idx; end = img_idx
 
     # Record command buffer
-    cmd = ctx.command_buffers[img_idx + 1]  # 0-indexed image, 1-indexed Julia
+    cmd = tgt.command_buffers[img_idx + 1]  # 0-indexed image, 1-indexed Julia
     unwrap(reset_command_buffer(cmd))
 
     begin_info = CommandBufferBeginInfo(flags=COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
@@ -126,9 +130,9 @@ function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData})::Bool
     # Begin render pass (reuse clear value buffer)
     _set1!(_clear_buf, ClearValue(ClearColorValue((0.0f0, 0.0f0, 0.0f0, 1.0f0))))
     rpbi = RenderPassBeginInfo(
-        ctx.render_pass,
-        ctx.framebuffers[img_idx + 1],
-        Rect2D(Offset2D(0, 0), ctx.swapchain_extent),
+        tgt.render_pass,
+        tgt.framebuffers[img_idx + 1],
+        Rect2D(Offset2D(0, 0), tgt.swapchain_extent),
         _clear_buf
     )
     cmd_begin_render_pass(cmd, rpbi, SUBPASS_CONTENTS_INLINE)
@@ -190,9 +194,9 @@ function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData})::Bool
     unwrap(end_command_buffer(cmd))
 
     # Submit (reuse pre-allocated wrapper arrays)
-    _set1!(_wait_sem_buf, ctx.image_available_semaphore)
+    _set1!(_wait_sem_buf, tgt.image_available_semaphore)
     _set1!(_cmd_buf, cmd)
-    _set1!(_sig_sem_buf, ctx.render_finished_semaphore)
+    _set1!(_sig_sem_buf, tgt.render_finished_semaphore)
     submit_info = SubmitInfo(
         _wait_sem_buf,
         _wait_stage_buf,
@@ -200,11 +204,11 @@ function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData})::Bool
         _sig_sem_buf
     )
     _set1!(_submit_buf, submit_info)
-    unwrap(queue_submit(ctx.graphics_queue, _submit_buf; fence=ctx.in_flight_fence))
+    unwrap(queue_submit(ctx.graphics_queue, _submit_buf; fence=tgt.in_flight_fence))
 
     # Present (reuse pre-allocated wrapper arrays)
-    _set1!(_present_sem, ctx.render_finished_semaphore)
-    _set1!(_present_sc, ctx.swapchain)
+    _set1!(_present_sem, tgt.render_finished_semaphore)
+    _set1!(_present_sc, tgt.swapchain)
     _set1!(_present_idx, UInt32(img_idx))
     present_info = PresentInfoKHR(
         _present_sem,

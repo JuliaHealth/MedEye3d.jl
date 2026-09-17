@@ -130,7 +130,8 @@ Compiles shaders, creates descriptor set layouts, pipeline layout,
 graphics pipeline, descriptor pool, descriptor sets, and UBO buffer.
 """
 function create_pipeline_state(ctx::VkCtx, vert_glsl::String, frag_glsl::String,
-                                n_textures::Int)::VkPipelineState
+                                n_textures::Int; render_pass::Union{RenderPass, Nothing}=nothing)::VkPipelineState
+    actual_render_pass = render_pass === nothing ? ctx.render_pass : render_pass
     # Compile shaders
     vert_spv = compile_glsl_to_spirv(:vert, vert_glsl)
     frag_spv = compile_glsl_to_spirv(:frag, frag_glsl)
@@ -169,7 +170,7 @@ function create_pipeline_state(ctx::VkCtx, vert_glsl::String, frag_glsl::String,
     pipeline_layout = PipelineLayout(pl_ref[], ctx.device, Threads.Atomic{UInt64}(1))
 
     # Graphics pipeline
-    pipeline = _create_graphics_pipeline_raw(ctx, vert_mod, frag_mod, pipeline_layout, zero_vbo=true)
+    pipeline = _create_graphics_pipeline_raw(ctx, vert_mod, frag_mod, pipeline_layout, zero_vbo=true, render_pass=actual_render_pass)
 
     # Descriptor pool
     pool_sizes = [
@@ -223,7 +224,8 @@ end
 function _create_graphics_pipeline_raw(ctx::VkCtx, vert_mod::ShaderModule,
                                         frag_mod::ShaderModule,
                                         pipeline_layout::PipelineLayout;
-                                        zero_vbo::Bool=false)::Pipeline
+                                        zero_vbo::Bool=false,
+                                        render_pass::RenderPass=ctx.render_pass)::Pipeline
     entry = b"main\0"
 
     # Vertex input: position(3) + color(3) + texcoord(2) = stride 32 (or empty for Zero-VBO)
@@ -338,7 +340,7 @@ function _create_graphics_pipeline_raw(ctx::VkCtx, vert_mod::ShaderModule,
             pointer(cb_arr),
             pointer(dyn_arr),
             pipeline_layout.vks,
-            ctx.render_pass.vks,
+            render_pass.vks,
             UInt32(0),
             C_NULL,
             Int32(-1)
