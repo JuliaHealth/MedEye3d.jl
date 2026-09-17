@@ -118,7 +118,7 @@ function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData}, target_windo
         return false
     end
     # ctx.last_rendered_image_idx (omitted for secondary)
-    if target_window === nothing; ctx.last_rendered_image_idx = img_idx; end = img_idx
+    if target_window === nothing; ctx.last_rendered_image_idx = img_idx; end
 
     # Record command buffer
     cmd = tgt.command_buffers[img_idx + 1]  # 0-indexed image, 1-indexed Julia
