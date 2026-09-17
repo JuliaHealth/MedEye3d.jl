@@ -749,6 +749,9 @@ function coordinateDisplay(
                         end
                     end
 
+                elseif channelData isa SyncViewsEvent
+                    # Handle syncing state (stub for now)
+                    @info "SyncViewsEvent: $(channelData.is_synced)"
                 elseif typeof(channelData) == CalcDimsStruct || typeof(channelData) == forDisplayObjects || typeof(channelData) == FullScrollableDat
                     stateInstances[1].switchIndex = channelData.imagePos
                 end

@@ -5,7 +5,7 @@ export ChangeTimePointEvent, SetTimePointEvent, ToggleLesionEvent, RefreshListEv
 export AddAutoPetEvent, AIInferenceResultEvent, AIStatusUpdateEvent, SyncMissingEvent, GenManualEvent
 export MapLinkEvent, AutoRunPreprocessEvent, RunPreprocessEvent, ShowBoneMaskEvent, ShowMaskLayerEvent, SaveMRBEvent
 export CloseWindowEvent, ResizeWindowEvent, SetWindowTitleEvent, ChangeBrushSizeEvent, ToggleMoveLesionModeEvent
-export PetBlendEvent, BoneSubsegResultEvent, ScreenshotEvent, LabelOpacityEvent
+export PetBlendEvent, BoneSubsegResultEvent, ScreenshotEvent, LabelOpacityEvent, SyncViewsEvent, LaunchM2Event
 struct ChangePlaneEvent
     plane :: Symbol # :Axial, :Coronal, :Sagittal
 end
@@ -131,4 +131,14 @@ struct LabelOpacityEvent
     opacity :: Float32  # 0.0 = completely transparent, 1.0 = fully opaque
 end
 
+end
+
+
+struct SyncViewsEvent
+    is_synced::Bool
+end
+
+
+struct LaunchM2Event
+    tp_index::Int
 end

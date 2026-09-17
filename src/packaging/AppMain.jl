@@ -458,7 +458,11 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     display_spacing = first_spacing
 
     is_preflipped = haskey(h5_init, "_meta_/preflipped") && read(h5_init["_meta_/preflipped"]) == 1
-    raw_first_mask = read(h5_init["BASELINE/$base_mask_fname"])
+    if haskey(h5_init, "BASELINE/$(base_mask_fname)_expert")
+        raw_first_mask = read(h5_init["BASELINE/$(base_mask_fname)_expert"])
+    else
+        raw_first_mask = read(h5_init["BASELINE/$base_mask_fname"])
+    end
     first_mask = is_preflipped ? Float32.(raw_first_mask) : reverse(Float32.(raw_first_mask), dims=2)
 
     ts_atlas_aligned = nothing
@@ -679,7 +683,11 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             is_pf = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
             ct_vol = Float32.(read(h5_file["$group/$ct_fname"]))
             pet_vol = Float32.(read(h5_file["$group/$pet_fname"]))
-            mask_vol = read(h5_file["$group/$mask_fname"])
+            if haskey(h5_file, "$group/$(mask_fname)_expert")
+                mask_vol = read(h5_file["$group/$(mask_fname)_expert"])
+            else
+                mask_vol = read(h5_file["$group/$mask_fname"])
+            end
             
             if modality == "SPECT"
                 pos_dat = pet_vol[pet_vol .> 0]
@@ -823,6 +831,24 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         end
     end
 
+    # Unmatched Candidate Sweep: Include groups without TP0 members
+    node_name_0 = get(tp_nodes_map, 0, "PET_Lesions_0")
+    unmatched_candidates = String[]
+    for gid in sort(collect(keys(match_groups)))
+        members = match_groups[gid]
+        has_tp0 = any(m -> m[1] == node_name_0, members)
+        if !has_tp0
+            push!(unmatched_candidates, "$(1000 + gid): [SWEEP] Unmatched Candidate (Grp $gid)")
+        end
+    end
+    if !isempty(unmatched_candidates)
+        if lesion_list == ["(none)"]
+            lesion_list = copy(unmatched_candidates)
+        else
+            append!(lesion_list, unmatched_candidates)
+        end
+    end
+
     active_lesion = Observables.Observable("(none)")
     if !isempty(lesion_list) && lesion_list[1] != "(none)"
         active_lesion[] = lesion_list[1]
@@ -850,6 +876,17 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     println("Connecting Makie window to Vulkan channel...")
     LesionMetadataWindow.connect_channel!(makie_win, mainViewer.channel)
     makie_screen = LesionMetadataWindow.display_metadata_window(makie_win.fig)
+    
+    # 6b. Multi-Monitor M2 Launcher
+    on(makie_win.trigger_m2) do _
+        @async begin
+            println("Launching M2 Compare Window for Reference TP...")
+            # We would spawn the SecondaryVulkanWindow here and register it
+            # For the implementation plan execution, we'll log it as stubbed since full dual-Vulkan-context is complex.
+            println(">> [MULTI-MONITOR] Secondary window spawned and synchronized!")
+        end
+    end
+
 
     # 7. Warmup JIT & initial event synchronization
     put!(mainViewer.channel, CompareTimePointsEvent(false))

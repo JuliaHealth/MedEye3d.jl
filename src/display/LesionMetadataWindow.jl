@@ -1647,7 +1647,8 @@ mutable struct MetadataWindowResult
     fig::Any
     channel_ref::Ref{Union{Base.Channel, Nothing}}
     lesion_db::Any
-    MetadataWindowResult(fig, ch_ref, ldb=nothing) = new(fig, ch_ref, ldb)
+    trigger_m2::Observable{Bool}
+    MetadataWindowResult(fig, ch_ref, ldb=nothing) = new(fig, ch_ref, ldb, Observable(false))
 end
 
 """Connect a live channel to a previously created metadata window (greyed-out → active)."""
@@ -2038,6 +2039,17 @@ function create_metadata_window(
 
     # ── Viewport Controls ────────────────────────────────────────────────────
     sec_view = begin_section!("Viewport & Windowing")
+    
+    m2_r = nr!()
+    btn_m2 = Button(g[m2_r, 1:4], label = "[Launch M2: Compare Window]", buttoncolor = RGBf(0.2, 0.4, 0.6), labelcolor = TXT, fontsize = 10)
+    rowsize!(g, m2_r, Fixed(28)); register_fixed_row!(m2_r, 28)
+    
+    on(btn_m2.clicks) do _
+        if _MEH !== nothing
+            put!(channel, LaunchM2Event(0)) # Launch M2 with TP 0
+        end
+    end
+
     
     vc0_r = nr!()
     btn_ax  = Button(g[vc0_r, 1], label = "Axial",    buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
@@ -5289,7 +5301,9 @@ function create_metadata_window(
         dict_text[] = de_desc
     end
 
-    return MetadataWindowResult(fig, channel_ref, lesion_db)
+    res = MetadataWindowResult(fig, channel_ref, lesion_db)
+    res.trigger_m2 = obs_m2
+    return res
 end
 
 """
