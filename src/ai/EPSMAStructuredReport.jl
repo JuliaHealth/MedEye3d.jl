@@ -38,6 +38,7 @@ Base.@kwdef struct EPSMALesionRow
     recip_status::String = "BASELINE"
     delta_str::String = ""
     is_new::Bool = false
+    is_key_image::Bool = false
     comment::String = ""
 end
 
@@ -53,6 +54,7 @@ end
 
 Base.@kwdef mutable struct EPSMAReport
     patient_id::String = "PAT_001"
+    clinical_profile::String = "INITIAL_STAGING"
     tp_index::Int = 0
     tp_label::String = "PET TP 0"
     modality::String = "PET/CT"
@@ -619,6 +621,20 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
     all_prior_tp_indices = _MEH !== nothing ? filter(t -> t < tp_idx, collect(keys(_MEH.tp_labels))) : Int[]
     has_prior_studies = !isempty(all_prior_tp_indices)
     
+    clinical_profile = "INITIAL_STAGING"
+    if LMW !== nothing && !isempty(db)
+        if haskey(db, "Patient_Clinical_Info")
+            clinical_profile = get(db["Patient_Clinical_Info"], "Profile", "INITIAL_STAGING")
+        else
+            for (k, v) in db
+                if v isa Dict && haskey(v, "ClinicalProfile")
+                    clinical_profile = v["ClinicalProfile"]
+                    break
+                end
+            end
+        end
+    end
+
     for lid in l_ids
         state = if LMW !== nothing && !isempty(db)
             try LMW.get_lesion_state(db, string(lid)) catch; Dict{String, Any}() end
@@ -631,6 +647,7 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
         end
         
         # 1a. Fetch original RTOG/clinical segment name for classification hints
+        is_key_image = get(state, "KeyImage", "false") == "true"
         seg_name = ""
         if _MEH !== nothing && isdefined(_MEH, :tp_segment_names)
             tp_segs = get(_MEH.tp_segment_names, tp_idx, Dict{Int,String}())
@@ -850,6 +867,7 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
                 recip_status = "ARTIFACT",
                 delta_str = "Technical Artifact / False Positive",
                 is_new = false,
+                is_key_image = is_key_image,
                 comment = !isempty(comment) ? comment : (is_muscle ? "Muscular uptake without CT substrate (false positive)" : "Artifact")
             )
             push!(artifact_rows, row)
@@ -1171,12 +1189,15 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
 
     return EPSMAReport(
         patient_id = patient_id,
+        clinical_profile = clinical_profile,
         default_lang = lang,
         tp_index = tp_idx,
         tp_label = tp_label,
         modality = modality,
         study_date = Dates.format(Dates.today(), "yyyy-mm-dd"),
-        tech_params = EPSMATechnicalParams(),
+        tech_params = EPSMATechnicalParams(
+            radiotracer = (LMW !== nothing && haskey(db, "Patient_Clinical_Info")) ? get(db["Patient_Clinical_Info"], "Radioligand", "(not specified)") : "(not specified)"
+        ),
         background_suv = bg,
         biodistribution_text_en = "(Please enter biodistribution statement.)",
         biodistribution_text_de = "(Bitte Biodistributionsbeschreibung eingeben.)",
@@ -1323,6 +1344,7 @@ end
 function to_dict(rep::EPSMAReport)::Dict{String, Any}
     return Dict{String, Any}(
         "patient_id" => rep.patient_id,
+        "clinical_profile" => rep.clinical_profile,
         "tp_index" => rep.tp_index,
         "tp_label" => rep.tp_label,
         "modality" => rep.modality,
@@ -1383,6 +1405,7 @@ function to_dict(rep::EPSMAReport)::Dict{String, Any}
                 "recip_status" => r.recip_status,
                 "delta_str" => r.delta_str,
                 "is_new" => r.is_new,
+                "is_key_image" => r.is_key_image,
                 "comment" => r.comment
             ) for r in rep.synoptic_rows
         ],
@@ -1403,6 +1426,7 @@ function to_dict(rep::EPSMAReport)::Dict{String, Any}
                 "recip_status" => r.recip_status,
                 "delta_str" => r.delta_str,
                 "is_new" => r.is_new,
+                "is_key_image" => r.is_key_image,
                 "comment" => r.comment
             ) for r in rep.artifact_rows
         ],
