@@ -216,7 +216,7 @@ const _schema_cache = Ref{Vector{QuestionDef}}(QuestionDef[])
 
 function _builtin_schema()::Vector{QuestionDef}
     QuestionDef[
-        QuestionDef("Radioligand Type", "The specific radioligand used for this PSMA-PET scan, influencing pharmacokinetic thresholds.",
+        QuestionDef("The specific radioligand used for this PSMA-PET scan, influencing pharmacokinetic thresholds.",
             String["68Ga-PSMA-11", "18F-PSMA-1007", "18F-DCFPyL", "Other"],
             String["Technical Parameters"], "both", "68Ga-PSMA-11"),
         QuestionDef("Lesion tracking name?", "What is the specific anatomical descriptor or tracking name for this lesion?",
@@ -1677,6 +1677,7 @@ function create_metadata_window(
 
     # In-memory DB
     lesion_db = Observable{Dict}(Dict{String,Dict{String,Any}}())
+    is_starred = Observable(false)
     _active_lesion_db[] = lesion_db
     _db_dirty = Ref(false)
 
@@ -2599,6 +2600,15 @@ function create_metadata_window(
     # ── Clinical Information & Patient History ───────────────────────────────
     sec_clinical = begin_section!("Clinical Information & Indication"; default_open=true)
     
+    # 0. Profile & Radioligand
+    clin_prof_r = nr!()
+    Label(g[clin_prof_r, 1], "Profile:", fontsize = 10, color = LBL_FG, halign = :right)
+    menu_profile = Menu(g[clin_prof_r, 2], options = ["INITIAL_STAGING", "BCR", "POST_RLT"], fontsize = 10)
+    Label(g[clin_prof_r, 3], "Radioligand:", fontsize = 10, color = LBL_FG, halign = :right)
+    menu_radioligand = Menu(g[clin_prof_r, 4], options = ["68Ga-PSMA-11", "18F-PSMA-1007", "18F-DCFPyL", "Other"], fontsize = 10)
+    rowsize!(g, clin_prof_r, Fixed(28)); register_fixed_row!(clin_prof_r, 28)
+
+    
     # 1. Indication
     clin_ind_r = nr!()
     Label(g[clin_ind_r, 1], "Indication:", fontsize = 10, color = LBL_FG, halign = :right)
@@ -2709,6 +2719,8 @@ function create_metadata_window(
         p_str = join(sort(collect(active_prior_therapies)), ", ")
         
         info = Dict{String, Any}(
+            "Profile" => menu_profile.selection[] !== nothing ? String(menu_profile.selection[]) : "INITIAL_STAGING",
+            "Radioligand" => menu_radioligand.selection[] !== nothing ? String(menu_radioligand.selection[]) : "68Ga-PSMA-11",
             "Indication" => ind_val,
             "PSA" => tb_psa.stored_string[],
             "PSADoublingTime" => tb_psa_dt.stored_string[],
@@ -2724,6 +2736,8 @@ function create_metadata_window(
         try trigger_autosave() catch; end
     end
     
+    on(menu_profile.selection) do _; sync_clinical_info_to_db!(); end
+    on(menu_radioligand.selection) do _; sync_clinical_info_to_db!(); end
     on(menu_indication.i_selected) do _; sync_clinical_info_to_db!(); end
     on(tb_psa.stored_string)       do _; sync_clinical_info_to_db!(); end
     on(tb_psa_dt.stored_string)    do _; sync_clinical_info_to_db!(); end
@@ -2742,6 +2756,14 @@ function create_metadata_window(
             else
                 Dict{String, Any}()
             end
+            
+            prof = get(info, "Profile", "")
+            p_idx = findfirst(==(prof), menu_profile.options[])
+            if p_idx !== nothing; menu_profile.i_selected[] = p_idx; menu_profile.selection[] = prof; end
+            
+            rad = get(info, "Radioligand", "")
+            r_idx = findfirst(==(rad), menu_radioligand.options[])
+            if r_idx !== nothing; menu_radioligand.i_selected[] = r_idx; menu_radioligand.selection[] = rad; end
             
             ind = get(info, "Indication", "")
             idx = findfirst(==(ind), menu_indication.options[])
@@ -2797,7 +2819,6 @@ function create_metadata_window(
     # All fields in order, grouped by visual sub-headers
     metadata_groups = [
         "Identification" => [
-            "Radioligand Type",
             "Lesion tracking name?",
             "Anatomic Location",
             "Anatomical Sublocation"
@@ -2841,6 +2862,24 @@ function create_metadata_window(
     sec_meta = begin_section!("Lesion Metadata"; default_open=true)
     is_meta_open, meta_start_row, meta_header_r, meta_btn, _ = sec_meta
     push!(all_metadata_rows, meta_header_r)
+    
+    # --- Scientific Workflow & Key Image ---
+    wf_r = nr!()
+    btn_accept = Button(g[wf_r, 1], label = "Accept", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
+    btn_reject = Button(g[wf_r, 2], label = "Reject", buttoncolor = RGBf(0.8, 0.2, 0.2), labelcolor = TXT, fontsize = 10)
+    btn_correct = Button(g[wf_r, 3], label = "Correct", buttoncolor = RGBf(0.8, 0.8, 0.2), labelcolor = TXT, fontsize = 10)
+    btn_export = Button(g[wf_r, 4], label = "Export", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, wf_r, Fixed(28)); register_fixed_row!(wf_r, 28)
+    push!(all_metadata_rows, wf_r)
+
+    state_r = nr!()
+    Label(g[state_r, 1], "State:", fontsize = 10, color = LBL_FG, halign = :right)
+    menu_obs_state = Menu(g[state_r, 2], options = ["UNREVIEWED", "ACCEPTED", "REJECTED", "CORRECTED", "UNCERTAIN", "NEW", "RESOLVED"], fontsize = 10)
+    btn_star = Button(g[state_r, 3:4], label = "☆ Key Image", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, state_r, Fixed(28)); register_fixed_row!(state_r, 28)
+    push!(all_metadata_rows, state_r)
+    # ----------------------------------------
+
 
     # Pre-declare variables that will be created inside the "Identification" group injection
     # (Julia if-blocks create local scope, so we need outer-scope declarations)
@@ -3916,6 +3955,8 @@ function create_metadata_window(
     function collect_state()::Dict{String,String}
         d = Dict{String,String}()
         d["LesionType"] = active_lesion_type[]
+        d["ObservationState"] = menu_obs_state.selection[] !== nothing ? String(menu_obs_state.selection[]) : "UNREVIEWED"
+        d["KeyImage"] = is_starred[] ? "true" : "false"
         ba_sel = menu_base_anat.selection[]
         v_base = ba_sel === nothing ? "" : _safe_strip(string(ba_sel))
         (isempty(v_base) || v_base == "") || (d["BaseAnatomy"] = v_base)
@@ -4107,6 +4148,11 @@ function create_metadata_window(
             cur_id_str = active_lesion_id[]
             db_updates = Dict{String, Any}()
             lid = (p = parse_lesion_id(cur_id_str)) !== nothing ? p : 1
+
+            menu_obs_state.selection[] = get(data, "ObservationState", "UNREVIEWED")
+            is_starred[] = get(data, "KeyImage", "false") == "true"
+            btn_star.label[] = is_starred[] ? "★ Key Image" : "☆ Key Image"
+            btn_star.buttoncolor[] = is_starred[] ? RGBf(0.9, 0.8, 0.2) : BG_PNL
 
         t_type = if haskey(data, "LesionType")
             # Still compute json_entry for muscle detection below
@@ -4595,10 +4641,7 @@ function create_metadata_window(
                     
                     # Context-dependent rules
                     lesion_type_str = try; active_lesion_type[]; catch; ""; end
-                    radioligand_str = try
-                        rw = field_widgets["Radioligand Type"]
-                        rw isa Menu ? rw.options[][rw.i_selected[]] : ""
-                    catch; ""; end
+                    radioligand_str = menu_radioligand.selection[] !== nothing ? String(menu_radioligand.selection[]) : ""
                     
                     if radioligand_str == "18F-PSMA-1007" && lesion_type_str == "Bone Meta" && q_suv_max < 10.0
                         best_opt = "18F-PSMA-1007 Bone Lesion with SUV < 10 (FPR 51.4%)"
@@ -4855,6 +4898,61 @@ function create_metadata_window(
         notify(active_lesion_id)
     end
 
+    # ── Scientific Workflow Actions ────────────────────────────────────────────
+    on(btn_accept.clicks) do _
+        @info "Action: Accept"
+        menu_obs_state.selection[] = "ACCEPTED"
+        trigger_autosave()
+        put!(channel, ChangeTimePointEvent(1))
+    end
+
+    on(btn_reject.clicks) do _
+        @info "Action: Reject"
+        menu_obs_state.selection[] = "REJECTED"
+        trigger_autosave()
+        put!(channel, ChangeTimePointEvent(1))
+    end
+
+    on(btn_correct.clicks) do _
+        @info "Action: Correct"
+        menu_obs_state.selection[] = "CORRECTED"
+        trigger_autosave()
+        put!(channel, ChangeTimePointEvent(1))
+    end
+
+    on(btn_export.clicks) do _
+        path = joinpath(homedir(), "research_export.csv")
+        open(path, "w") do io
+            println(io, "LesionID,Display,State,Anatomy,SUVmax,SUVmean,Volume_ml")
+            for (lid, data) in lesion_db[]
+                if lid == "_GLOBAL_APP_STATE" || startswith(lid, "_")
+                    continue
+                end
+                disp = get(data, "_display_name", "")
+                st = get(data, "ObservationState", "UNREVIEWED")
+                anat = get(data, "Anatomic Location", "")
+                suvmax = get(data, "SUV max", "")
+                suvmean = get(data, "SUV mean", "")
+                vol = get(data, "Volume (mL)", "")
+                println(io, "\"$(lid)\",\"$(disp)\",\"$(st)\",\"$(anat)\",\"$(suvmax)\",\"$(suvmean)\",\"$(vol)\"")
+            end
+        end
+        @info "Exported research data to $path"
+        status_lbl.text[] = "Exported to research_export.csv"
+    end
+
+    on(btn_star.clicks) do _
+        is_starred[] = !is_starred[]
+        btn_star.label[] = is_starred[] ? "★ Key Image" : "☆ Key Image"
+        btn_star.buttoncolor[] = is_starred[] ? RGBf(0.9, 0.8, 0.2) : BG_PNL
+        trigger_autosave()
+        if is_starred[] && _MEH !== nothing
+            sc_path = joinpath(homedir(), "screenshot_keyimage_$(active_lesion_id[]).png")
+            put!(channel, ScreenshotEvent(sc_path))
+            @info "Triggered printscreen on Key Image: $sc_path"
+        end
+    end
+
     on(btn_save.clicks) do _
         display_id = active_lesion_id[]
         lid = parse_lesion_id(display_id)
@@ -5000,6 +5098,7 @@ function create_metadata_window(
     end
     
     # ── Wire autosave triggers for all metadata UI elements ──────────
+    on(menu_obs_state.selection) do _; trigger_autosave(); end
     on(menu_base_anat.selection) do _; trigger_autosave(); end
     # OntologyBuilder anatomical detail rows
     for i in 1:MAX_ANAT_ROWS
