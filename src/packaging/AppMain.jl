@@ -879,12 +879,8 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     
     # 6b. Multi-Monitor M2 Launcher
     on(makie_win.trigger_m2) do _
-        @async begin
-            println("Launching M2 Compare Window for Reference TP...")
-            # We would spawn the SecondaryVulkanWindow here and register it
-            # For the implementation plan execution, we'll log it as stubbed since full dual-Vulkan-context is complex.
-            println(">> [MULTI-MONITOR] Secondary window spawned and synchronized!")
-        end
+        println(">> [MULTI-MONITOR] Requesting Secondary Window spawn...")
+        put!(mainViewer.channel, LaunchM2Event(1))
     end
 
 

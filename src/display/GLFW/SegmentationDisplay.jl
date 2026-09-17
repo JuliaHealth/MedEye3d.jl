@@ -654,6 +654,8 @@ function coordinateDisplay(
         _upload_batch = VulkanStaging.TextureUploadBatchItem[]
         _vk_panels = VulkanRender.PanelRenderData[]
         _push_consts = Vector{Float32}(undef, 12)  # scale(2) + offset(2) + ndc(4) + crosshairUV(2) + showCrosshair+pad(2)
+        m2_glfw = Ref{Any}(nothing)
+        m2_vk = Ref{Any}(nothing)
         while !shouldStop[1]
             try
                 channelData = take!(mainChannel)
@@ -752,6 +754,22 @@ function coordinateDisplay(
                 elseif channelData isa SyncViewsEvent
                     # Handle syncing state (stub for now)
                     @info "SyncViewsEvent: $(channelData.is_synced)"
+                elseif channelData isa LaunchM2Event
+                    if m2_glfw[] === nothing
+                        @info "Spawning M2 Compare Window..."
+                        try
+                            GLFW.WindowHint(GLFW.CLIENT_API, GLFW.NO_API)
+                            m2_glfw[] = GLFW.CreateWindow(1200, 800, "MedEye3D - Compare (M2)", nothing, nothing)
+                            if m2_glfw[] !== nothing
+                                m2_vk[] = VulkanContext.create_secondary_window(vk_ctx, m2_glfw[], 1200, 800)
+                                @info "M2 Window spawned successfully!"
+                            end
+                        catch e
+                            @error "Failed to spawn M2 window" exception=e
+                        end
+                    else
+                        @info "M2 Window is already open."
+                    end
                 elseif typeof(channelData) == CalcDimsStruct || typeof(channelData) == forDisplayObjects || typeof(channelData) == FullScrollableDat
                     stateInstances[1].switchIndex = channelData.imagePos
                 end
@@ -949,6 +967,19 @@ function coordinateDisplay(
                                 end
                             catch re
                                 @warn "Failed to recreate swapchain: $re"
+                            end
+                        end
+                    end
+                    
+                    if m2_vk[] !== nothing && m2_glfw[] !== nothing
+                        if GLFW.WindowShouldClose(m2_glfw[])
+                            GLFW.DestroyWindow(m2_glfw[])
+                            m2_glfw[] = nothing
+                            m2_vk[] = nothing
+                        else
+                            try
+                                VulkanRender.render_frame!(vk_ctx, VulkanRender.PanelRenderData[], m2_vk[])
+                            catch e
                             end
                         end
                     end
