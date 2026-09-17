@@ -131,14 +131,13 @@ struct LabelOpacityEvent
     opacity :: Float32  # 0.0 = completely transparent, 1.0 = fully opaque
 end
 
-end
-
 
 struct SyncViewsEvent
     is_synced::Bool
 end
 
-
 struct LaunchM2Event
     tp_index::Int
 end
+
+end # module MakieEvents
