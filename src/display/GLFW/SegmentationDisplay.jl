@@ -171,6 +171,9 @@ on_next!(stateObjects::Vector{StateDataFields}, data::ToggleMoveLesionModeEvent)
 on_next!(stateObjects::Vector{StateDataFields}, data::AIStatusUpdateEvent) = (MakieEventHandlers.ai_status_text[] = data.text)
 on_next!(stateObjects::Vector{StateDataFields}, data::BoneSubsegResultEvent) = MakieEventHandlers.reactToBoneSubsegResult(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ScreenshotEvent) = reactToScreenshot(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::LaunchM2Event) = nothing
+
+on_next!(stateObjects::Vector{StateDataFields}, data::SyncViewsEvent) = nothing
 on_error!(stateObjects::Vector{StateDataFields}, err) = error(err)
 on_complete!(stateObjects::Vector{StateDataFields}) = ""
 
