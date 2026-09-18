@@ -762,7 +762,7 @@ function coordinateDisplay(
                         @info "Spawning M2 Compare Window..."
                         try
                             GLFW.WindowHint(GLFW.CLIENT_API, GLFW.NO_API)
-                            m2_glfw[] = GLFW.CreateWindow(1200, 800, "MedEye3D - Compare (M2)", nothing, nothing)
+                            m2_glfw[] = GLFW.CreateWindow(1200, 800, "MedEye3D - Compare (M2)")
                             if m2_glfw[] !== nothing
                                 m2_vk[] = VulkanContext.create_secondary_window(vk_ctx, m2_glfw[], 1200, 800)
                                 @info "M2 Window spawned successfully!"
