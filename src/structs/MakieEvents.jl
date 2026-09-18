@@ -148,6 +148,8 @@ end
 
 struct LaunchM2Event
     tp_index::Int
+    window::Any
+    LaunchM2Event(tp_index::Int, window::Any=nothing) = new(tp_index, window)
 end
 
 end # module MakieEvents

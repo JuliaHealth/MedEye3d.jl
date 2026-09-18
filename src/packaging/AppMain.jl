@@ -890,7 +890,10 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     # 6b. Multi-Monitor M2 Launcher
     on(makie_win.trigger_m2) do _
         println(">> [MULTI-MONITOR] Requesting Secondary Window spawn...")
-        put!(mainViewer.channel, LaunchM2Event(1))
+        # Create the window on the main thread (thread 1) to avoid X11/Wayland deadlocks
+        GLFW.WindowHint(GLFW.CLIENT_API, GLFW.NO_API)
+        new_window = GLFW.CreateWindow(1200, 800, "MedEye3D - Compare (M2)")
+        put!(mainViewer.channel, LaunchM2Event(1, new_window))
     end
 
 

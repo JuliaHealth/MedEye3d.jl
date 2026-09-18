@@ -1417,21 +1417,23 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
         return zeros(Int8, req_size)
     end
 
-    panel_voxels = if panel_idx == 3  # Sagittal (Y,Z,X)
+    panel_idx_mapped = panel_idx > 5 ? panel_idx - 5 : panel_idx
+    
+    panel_voxels = if panel_idx_mapped == 3  # Sagittal (Y,Z,X)
         sz = (size(entry.ct, 2), size(entry.ct, 3), size(entry.ct, 1))
         Any[("CT", PermutedDimsArray(entry.ct, (2,3,1))),
             ("PET", PermutedDimsArray(entry.pet, (2,3,1))),
             ("Mask", PermutedDimsArray(mask_i16, (2,3,1))),
             ("Bone_Overlay", get_or_create_bone_i8(panel_idx, sz)),
             ("Anatomy", anat_i16 !== nothing ? PermutedDimsArray(anat_i16, (2,3,1)) : zeros(Int16, sz))]
-    elseif panel_idx == 4  # Coronal (X,Z,Y)
+    elseif panel_idx_mapped == 4  # Coronal (X,Z,Y)
         sz = (size(entry.ct, 1), size(entry.ct, 3), size(entry.ct, 2))
         Any[("CT", PermutedDimsArray(entry.ct, (1,3,2))),
             ("PET", PermutedDimsArray(entry.pet, (1,3,2))),
             ("Mask", PermutedDimsArray(mask_i16, (1,3,2))),
             ("Bone_Overlay", get_or_create_bone_i8(panel_idx, sz)),
             ("Anatomy", anat_i16 !== nothing ? PermutedDimsArray(anat_i16, (1,3,2)) : zeros(Int16, sz))]
-    elseif panel_idx == 2  # PET-only
+    elseif panel_idx_mapped == 2  # PET-only
         Any[("PET", entry.pet)]
     else  # Axial (panels 1, 5) — each gets its own bone copy
         sz = size(entry.ct)
