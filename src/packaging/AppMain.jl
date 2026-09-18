@@ -893,6 +893,27 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         # Create the window on the main thread (thread 1) to avoid X11/Wayland deadlocks
         GLFW.WindowHint(GLFW.CLIENT_API, GLFW.NO_API)
         new_window = GLFW.CreateWindow(1200, 800, "MedEye3D - Compare (M2)")
+        
+        if new_window !== nothing
+            GLFW.ShowWindow(new_window)
+            
+            # Register callbacks on the main thread!
+            if length(mainViewer.states) >= 10
+                MedEye3d.ReactOnMouseClickAndDrag.registerMouseClickFunctions(new_window, mainViewer.states[6].calcDimsStruct, mainViewer.channel, 2)
+                MedEye3d.ReactToScroll.registerMouseScrollFunctions(new_window, mainViewer.channel, 2)
+                
+                GLFW.SetFramebufferSizeCallback(new_window, (win, fb_w, fb_h) -> begin
+                    win_w, win_h = GLFW.GetWindowSize(win)
+                    put!(mainViewer.channel, MedEye3d.MakieEvents.ResizeWindowEvent(Int(win_w), Int(win_h), Int(fb_w), Int(fb_h), 2))
+                end)
+                
+                # Fire an initial resize event to ensure layout calculates correctly
+                win_w, win_h = GLFW.GetWindowSize(new_window)
+                fb_w, fb_h = GLFW.GetFramebufferSize(new_window)
+                put!(mainViewer.channel, MedEye3d.MakieEvents.ResizeWindowEvent(Int(win_w), Int(win_h), Int(fb_w), Int(fb_h), 2))
+            end
+        end
+        
         put!(mainViewer.channel, LaunchM2Event(1, new_window))
     end
 

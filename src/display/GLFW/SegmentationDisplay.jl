@@ -778,23 +778,8 @@ function coordinateDisplay(
                         try
                             m2_glfw[] = channelData.window
                             if m2_glfw[] !== nothing
-                                GLFW.ShowWindow(m2_glfw[])
                                 m2_vk[] = VulkanContext.create_secondary_window(vk_ctx, m2_glfw[], 1200, 800)
                                 @info "M2 Window spawned successfully!"
-                                
-                                # Register callbacks using window_id = 2
-                                ReactOnMouseClickAndDrag.registerMouseClickFunctions(m2_glfw[], stateInstances[6].calcDimsStruct, mainChannel, 2)
-                                ReactToScroll.registerMouseScrollFunctions(m2_glfw[], mainChannel, 2)
-                                
-                                GLFW.SetFramebufferSizeCallback(m2_glfw[], (win, fb_w, fb_h) -> begin
-                                    win_w, win_h = GLFW.GetWindowSize(win)
-                                    put!(mainChannel, ResizeWindowEvent(Int(win_w), Int(win_h), Int(fb_w), Int(fb_h), 2))
-                                end)
-                                
-                                # Fire an initial resize event to ensure layout calculates correctly
-                                win_w, win_h = GLFW.GetWindowSize(m2_glfw[])
-                                fb_w, fb_h = GLFW.GetFramebufferSize(m2_glfw[])
-                                put!(mainChannel, ResizeWindowEvent(Int(win_w), Int(win_h), Int(fb_w), Int(fb_h), 2))
                             end
                         catch e
                             @error "Failed to spawn M2 window" exception=e
