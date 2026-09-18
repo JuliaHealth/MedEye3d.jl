@@ -33,6 +33,12 @@ export LesionTracker
 # export  DisplayWords.textLinesFromStrings
 # export  StructsManag.getThreeDims
 
+include(joinpath("workflow", "ScientificWorkflow.jl"))
+using .ScientificWorkflow
+export ScientificWorkflow
+export LesionObservationState, UNREVIEWED, ACCEPTED, REJECTED, CORRECTED, UNCERTAIN, NEW, RESOLVED
+export RegistrationQC, SegmentationVersion, LesionObservation, LesionTrack, AnnotationWorkflowController
+
 include(joinpath("display", "GLFW", "startModules", "ModernGlUtil.jl"))
 
 include(joinpath("structs", "BasicStructs.jl"))

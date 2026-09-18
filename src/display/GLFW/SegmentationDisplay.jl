@@ -91,7 +91,9 @@ end
 
 function reactToResizeWindow(data::ResizeWindowEvent, stateObjects::Vector{StateDataFields})
     if data.width > 0 && data.height > 0
-        for state in stateObjects
+        range_to_update = data.window_id == 2 ? (6:length(stateObjects)) : (1:min(5, length(stateObjects)))
+        for idx in range_to_update
+            state = stateObjects[idx]
             state.calcDimsStruct.windowWidth = Int64(data.width)
             state.calcDimsStruct.windowHeight = Int64(data.height)
             state.calcDimsStruct.avWindWidtForMain = Int32(round(data.width * state.calcDimsStruct.fractionOfMainIm))
@@ -104,14 +106,17 @@ function reactToResizeWindow(data::ResizeWindowEvent, stateObjects::Vector{State
                 @warn "Error updating quad vertices on window resize: $e"
             end
         end
-        # Recreate Vulkan swapchain for new size
-        try
-            obj = stateObjects[1].mainForDisplayObjects
-            if obj.vulkanCtx !== nothing
-                VulkanContext.recreate_swapchain!(obj.vulkanCtx, data.fb_width, data.fb_height)
+        # Recreate Vulkan swapchain for Main Window ONLY
+        # (M2 Window swapchain is recreated dynamically in the render loop if out of date)
+        if data.window_id == 1
+            try
+                obj = stateObjects[1].mainForDisplayObjects
+                if obj.vulkanCtx !== nothing
+                    VulkanContext.recreate_swapchain!(obj.vulkanCtx, data.fb_width, data.fb_height)
+                end
+            catch e
+                @warn "Error recreating Vulkan swapchain: $e"
             end
-        catch e
-            @warn "Error recreating Vulkan swapchain: $e"
         end
     end
 end
@@ -126,7 +131,10 @@ end
 """
 configuring consumer function on_next! function using multiple dispatch mechanism in order to connect input to proper functions
 """
-on_next!(stateObjects::Vector{StateDataFields}, data::Int64) = reactToScroll(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::ScrollEvent) = begin
+    println(">> [DEBUG] on_next! received ScrollEvent: delta=", data.scroll_delta, " win=", data.window_id); flush(stdout)
+    ReactToScroll.reactToScroll(data, stateObjects)
+end
 on_next!(stateObjects::Vector{StateDataFields}, data::ScrollZoomEvent) = ReactToScroll.reactToScrollZoom(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::forDisplayObjects) = setUpMainDisplay(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ForWordsDispStruct) = setUpWordsDisplay(data, stateObjects)
@@ -134,8 +142,14 @@ on_next!(stateObjects::Vector{StateDataFields}, data::CalcDimsStruct) = setUpCal
 on_next!(stateObjects::Vector{StateDataFields}, data::valueForMasToSetStruct) = setUpvalueForMasToSet(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::FullScrollableDat) = setUpForScrollData(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SingleSliceDat) = updateSingleImagesDisplayedSetUp(data, stateObjects)
-on_next!(stateObjects::Vector{StateDataFields}, data::Vector{MouseStruct}) = react_to_draw(data, stateObjects)
-on_next!(stateObjects::Vector{StateDataFields}, data::MouseStruct) = reactToMouseDrag(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::Vector{MouseStruct}) = begin
+    # println(">> [DEBUG] on_next! received Vector{MouseStruct}"); flush(stdout)
+    react_to_draw(data, stateObjects)
+end
+on_next!(stateObjects::Vector{StateDataFields}, data::MouseStruct) = begin
+    # println(">> [DEBUG] on_next! received MouseStruct"); flush(stdout)
+    reactToMouseDrag(data, stateObjects)
+end
 on_next!(stateObjects::Vector{StateDataFields}, data::DoubleClickEvent) = reactToDoubleClick(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::KeyInputFields) = reactToKeyInput(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::DisplayedVoxels) = retrieveVoxelArray(data, stateObjects)
@@ -655,7 +669,8 @@ function coordinateDisplay(
         first_frame = Ref(true)
         # Pre-allocated per-frame scratch vectors (reused via empty!/resize!, never freed)
         _upload_batch = VulkanStaging.TextureUploadBatchItem[]
-        _vk_panels = VulkanRender.PanelRenderData[]
+        _vk_main_panels = VulkanRender.PanelRenderData[]
+        _vk_m2_panels = VulkanRender.PanelRenderData[]
         _push_consts = Vector{Float32}(undef, 12)  # scale(2) + offset(2) + ndc(4) + crosshairUV(2) + showCrosshair+pad(2)
         m2_glfw = Ref{Any}(nothing)
         m2_vk = Ref{Any}(nothing)
@@ -767,12 +782,46 @@ function coordinateDisplay(
                                 GLFW.ShowWindow(m2_glfw[])
                                 m2_vk[] = VulkanContext.create_secondary_window(vk_ctx, m2_glfw[], 1200, 800)
                                 @info "M2 Window spawned successfully!"
+                                
+                                # Register callbacks using window_id = 2
+                                ReactOnMouseClickAndDrag.registerMouseClickFunctions(m2_glfw[], stateInstances[6].calcDimsStruct, mainChannel, 2)
+                                ReactToScroll.registerMouseScrollFunctions(m2_glfw[], mainChannel, 2)
+                                
+                                GLFW.SetFramebufferSizeCallback(m2_glfw[], (win, fb_w, fb_h) -> begin
+                                    win_w, win_h = GLFW.GetWindowSize(win)
+                                    put!(mainChannel, ResizeWindowEvent(Int(win_w), Int(win_h), Int(fb_w), Int(fb_h), 2))
+                                end)
+                                
+                                # Fire an initial resize event to ensure layout calculates correctly
+                                win_w, win_h = GLFW.GetWindowSize(m2_glfw[])
+                                fb_w, fb_h = GLFW.GetFramebufferSize(m2_glfw[])
+                                put!(mainChannel, ResizeWindowEvent(Int(win_w), Int(win_h), Int(fb_w), Int(fb_h), 2))
                             end
                         catch e
                             @error "Failed to spawn M2 window" exception=e
                         end
-                    else
-                        @info "M2 Window is already open."
+                    end
+                    
+                    if m2_glfw[] !== nothing && length(stateInstances) >= 10
+                        # Load the requested TP into M2's quad panels
+                        @info "Loading TP $(channelData.tp_index) into M2 window..."
+                        entry = MakieEventHandlers.get_or_load_tp_data(channelData.tp_index)
+                        if entry !== nothing
+                            MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 6)
+                            MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 7)
+                            MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 8)
+                            MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 9)
+                            
+                            # Sync base coordinates with main window
+                            for i in 6:9
+                                stateInstances[i].onScrollData.dimensionToScroll = stateInstances[i-5].onScrollData.dimensionToScroll
+                                stateInstances[i].currentDisplayedSlice = stateInstances[i-5].currentDisplayedSlice
+                                stateInstances[i].calcDimsStruct.zoom = stateInstances[i-5].calcDimsStruct.zoom
+                                stateInstances[i].calcDimsStruct.panX = stateInstances[i-5].calcDimsStruct.panX
+                                stateInstances[i].calcDimsStruct.panY = stateInstances[i-5].calcDimsStruct.panY
+                                MakieEventHandlers._force_texture_upload!(stateInstances, i)
+                            end
+                        end
                     end
                 elseif typeof(channelData) == CalcDimsStruct || typeof(channelData) == forDisplayObjects || typeof(channelData) == FullScrollableDat
                     stateInstances[1].switchIndex = channelData.imagePos
@@ -849,7 +898,8 @@ function coordinateDisplay(
                     _t_after_upload = time_ns()
                     
                     # 3. Build panel render data for Vulkan
-                    empty!(_vk_panels)  # Reuse pre-allocated vector
+                    empty!(_vk_main_panels)
+                    empty!(_vk_m2_panels)
                     _ubo_dirty_count = 0
                     for (panel_idx, state) in enumerate(stateInstances)
                         if state.calcDimsStruct.mainQuadVertSize <= 0 || all(iszero, state.calcDimsStruct.mainImageQuadVert)
@@ -910,14 +960,12 @@ function coordinateDisplay(
                             ndc_top    =  1.0f0
                         end
                         
-                        # Push constants: uvScale(2) + uvOffset(2) + ndcMin(2) + ndcMax(2) = 8 floats
-                        # Reuse pre-allocated vector (PanelRenderData stores the reference)
-                        push_consts = copy(_push_consts)  # Each panel needs its own copy
+                        push_consts = Vector{Float32}(undef, 12)
                         push_consts[1] = scale_x; push_consts[2] = scale_y
                         push_consts[3] = offsetX + offset_corr_x; push_consts[4] = offsetY + offset_corr_y
                         push_consts[5] = ndc_left; push_consts[6] = ndc_bottom
                         push_consts[7] = ndc_right; push_consts[8] = ndc_top
-
+                        
                         ix, iy, iz = MakieEventHandlers.current_viewer_position[]
                         hovered_idx = stateInstances[1].switchIndex
                         show_crosshair = 0.0f0
@@ -933,10 +981,12 @@ function coordinateDisplay(
                             # Must match the right-click jump logic in ReactOnMouseClickAndDrag.jl:460-466
                             w = Float32(state.calcDimsStruct.imageTextureWidth)
                             h = Float32(state.calcDimsStruct.imageTextureHeight)
-                            if panel_idx == 3  # Sagittal: texX=origY, texY=origZ
+                            
+                            panel_idx_mapped = panel_idx > 5 ? panel_idx - 5 : panel_idx
+                            if panel_idx_mapped == 3  # Sagittal: texX=origY, texY=origZ
                                 cx = Float32(iy) / w
                                 cy = Float32(iz) / h
-                            elseif panel_idx == 4  # Coronal: texX=origX, texY=origZ
+                            elseif panel_idx_mapped == 4  # Coronal: texX=origX, texY=origZ
                                 cx = Float32(ix) / w
                                 cy = Float32(iz) / h
                             else  # Axial (panels 1,2,5): texX=origX, texY=origY
@@ -956,12 +1006,16 @@ function coordinateDisplay(
                             push_consts,
                             Float32(0), Float32(0), w, h
                         )
-                        push!(_vk_panels, panel)
+                        if panel_idx > 5
+                            push!(_vk_m2_panels, panel)
+                        else
+                            push!(_vk_main_panels, panel)
+                        end
                     end
                     
                     _t_before_render = time_ns()
-                    if !isempty(_vk_panels) && vk_ctx !== nothing
-                        if !VulkanRender.render_frame!(vk_ctx, _vk_panels)
+                    if !isempty(_vk_main_panels) && vk_ctx !== nothing
+                        if !VulkanRender.render_frame!(vk_ctx, _vk_main_panels)
                             # Swapchain out of date — recreate from current framebuffer size
                             try
                                 w_new, h_new = GLFW.GetFramebufferSize(window)
@@ -982,7 +1036,13 @@ function coordinateDisplay(
                             m2_vk[] = nothing
                         else
                             try
-                                VulkanRender.render_frame!(vk_ctx, VulkanRender.PanelRenderData[], m2_vk[])
+                                if !isempty(_vk_m2_panels) && !VulkanRender.render_frame!(vk_ctx, _vk_m2_panels, m2_vk[])
+                                    w_new, h_new = GLFW.GetFramebufferSize(m2_glfw[])
+                                    if w_new > 0 && h_new > 0
+                                        VulkanContext.recreate_secondary_swapchain!(vk_ctx, m2_vk[], Int(w_new), Int(h_new))
+                                        println("M2 Swapchain recreated after error: $(w_new)x$(h_new)"); flush(stdout)
+                                    end
+                                end
                             catch e
                                 println(">> [DEBUG] M2 Render Error: ", e)
                                 flush(stdout)

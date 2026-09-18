@@ -1237,13 +1237,13 @@ function save_tp_mask_to_h5(tp_i::Int)::Bool
                 needs_reverse = !is_pf
                 
                 raw_to_write = needs_reverse ? reverse(mask_to_save, dims=2) : mask_to_save
-                ds_path = "$group/$mask_fname"
-                if haskey(h5_file, ds_path)
-                    h5_file[ds_path][:, :, :] = Int16.(raw_to_write)
-                    println("  [AUTOSAVE-MASK] Saved mask for TP $tp_i to $ds_path ($(count(>(0), mask_to_save)) non-zero voxels)"); flush(stdout)
+                ds_path_expert = "$group/$(mask_fname)_expert"
+                if haskey(h5_file, ds_path_expert)
+                    h5_file[ds_path_expert][:, :, :] = Int16.(raw_to_write)
                 else
-                    @warn "Dataset $ds_path not found in HDF5"
+                    h5_file[ds_path_expert, chunk=(32,32,32), compress=3] = Int16.(raw_to_write)
                 end
+                println("  [AUTOSAVE-MASK] Saved mask for TP $tp_i to $ds_path_expert ($(count(>(0), mask_to_save)) non-zero voxels)"); flush(stdout)
             end
             delete!(dirty_mask_tps, tp_i)
             # Precompute mask centroids for this TP
@@ -2384,7 +2384,7 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
     # Update all panel textures (scroll with 0 = re-render current slice)
     old_sw = stateObjects[1].switchIndex
     stateObjects[1].switchIndex = 1
-    reactToScroll(0, stateObjects)
+    ReactToScroll.reactToScroll(ScrollEvent(0, 1), stateObjects)
     stateObjects[1].switchIndex = old_sw
 
     # Update status label
@@ -2486,7 +2486,7 @@ function reactToShowBoneMask(data::ShowBoneMaskEvent, stateObjects::Vector{State
     for p in 1:length(stateObjects)
         if sum(abs.(stateObjects[p].calcDimsStruct.mainImageQuadVert)) > 0.01f0
             stateObjects[1].switchIndex = p
-            ReactToScroll.reactToScroll(0, stateObjects, false)
+            ReactToScroll.reactToScroll(ScrollEvent(0, p > 5 ? 2 : 1), stateObjects, false)
         end
     end
     stateObjects[1].switchIndex = old_sw

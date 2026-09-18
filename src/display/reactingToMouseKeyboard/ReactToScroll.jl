@@ -23,10 +23,12 @@ returns subscription in order to enable unsubscribing in the end
 window - GLFW window
 return scrollback - that holds boolean subject (observable) to which we can react by subscribing appropriate actor
 """
-function registerMouseScrollFunctions(window::GLFW.Window, mainChannel::Base.Channel{Any})
+function registerMouseScrollFunctions(window::GLFW.Window, mainChannel::Base.Channel{Any}, window_id::Int=1)
     GLFW.SetScrollCallback(window, (a, xoff, yoff) -> begin
-        ctrl_down = GLFW.GetKey(window, GLFW.KEY_LEFT_CONTROL) == GLFW.PRESS || GLFW.GetKey(window, GLFW.KEY_RIGHT_CONTROL) == GLFW.PRESS
+        
+        # Check modifier keys using GLFW directly
         shift_down = GLFW.GetKey(window, GLFW.KEY_LEFT_SHIFT) == GLFW.PRESS || GLFW.GetKey(window, GLFW.KEY_RIGHT_SHIFT) == GLFW.PRESS
+        ctrl_down = GLFW.GetKey(window, GLFW.KEY_LEFT_CONTROL) == GLFW.PRESS || GLFW.GetKey(window, GLFW.KEY_RIGHT_CONTROL) == GLFW.PRESS
         alt_down = GLFW.GetKey(window, GLFW.KEY_LEFT_ALT) == GLFW.PRESS || GLFW.GetKey(window, GLFW.KEY_RIGHT_ALT) == GLFW.PRESS
         
         # NOTE: switchIndex update removed from scroll callback.
@@ -41,11 +43,12 @@ function registerMouseScrollFunctions(window::GLFW.Window, mainChannel::Base.Cha
             _pet_blend_ref[] = clamp(_pet_blend_ref[] + Float32(yoff > 0 ? 0.05 : -0.05), 0.0f0, 1.0f0)
             put!(mainChannel, PetBlendEvent(_pet_blend_ref[]))
         elseif shift_down || alt_down
-            put!(mainChannel, ScrollZoomEvent(Float64(yoff)))
+            put!(mainChannel, ScrollZoomEvent(Float64(yoff), window_id))
         else
             scroll_delta = yoff > 0 ? 1 : (yoff < 0 ? -1 : 0)
             if scroll_delta != 0
-                put!(mainChannel, Int64(scroll_delta))
+                println(">> [DEBUG] Pushing ScrollEvent: ", scroll_delta, " for window ", window_id); flush(stdout)
+                put!(mainChannel, ScrollEvent(scroll_delta, window_id))
             end
         end
     end)
@@ -59,19 +62,28 @@ The zooming dynamically recalculates `calcDimsStruct.zoom` and clips bounds (1.0
 """
 function reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFields})
     panelIdx = mainStates[1].switchIndex
+    
+    # Enforce window bounds based on the window the event came from
+    if data.window_id == 2 && panelIdx <= 5 && length(mainStates) >= 10
+        panelIdx += 5
+    elseif data.window_id == 1 && panelIdx > 5
+        panelIdx -= 5
+    end
+    
     if panelIdx < 1 || panelIdx > length(mainStates)
-        panelIdx = 1
+        panelIdx = data.window_id == 2 ? 6 : 1
     end
     mainState = mainStates[panelIdx]
+
+    # Dynamically scale zooming speed (zoom faster when far out, slower when close up)
+    zoomSpeed = 0.05 * max(1.0, mainState.calcDimsStruct.zoom / 2.0)
+    delta = Float32(data.zoom_delta * zoomSpeed)
     
-    # Zoom factor: 1.1 for each scroll tick
-    zoomFactor = data.zoom_delta > 0 ? 1.1f0 : (1.0f0 / 1.1f0)
+    newZoom = clamp(mainState.calcDimsStruct.zoom + delta, 0.5f0, 40.0f0)
     
-    # Increase zoom, clamp between 1.0 (no zoom) and 20.0
-    newZoom = clamp(mainState.calcDimsStruct.zoom * zoomFactor, 1.0f0, 20.0f0)
-    
-    # If zoom hits 1.0, reset panning as well to keep it clean
-    if newZoom == 1.0f0
+    # If returned to base zoom (or zoomed out), center the pan
+    if newZoom <= 1.05f0
+        newZoom = 1.0f0
         mainState.calcDimsStruct.panX = 0.0f0
         mainState.calcDimsStruct.panY = 0.0f0
     end
@@ -84,21 +96,31 @@ end
 
 
 """
-    reactToScroll(scrollNumb::Int64, mainStates::Vector{StateDataFields}, toBeSavedForBack::Bool=true)
+    reactToScroll(data::ScrollEvent, mainStates::Vector{StateDataFields}, toBeSavedForBack::Bool=true)
 
 Core scroll-navigation function executed sequentially by the `GL_Consumer` thread.
 
 # Logic Flow:
-1. Calculates target slice by applying `scrollNumb` (multiplied by 10 if fast-scroll `Shift` is active).
+1. Calculates target slice by applying `scroll_delta` (multiplied by 10 if fast-scroll `Shift` is active).
 2. Extracts the 2D cross-section data (`SingleSliceDat`) from the 3D raw voxel volume (`ThreeDimRawDat`) associated with the active panel.
 3. Automatically triggers 3D synchronizations (`reactToScroll` loops recursively) for QuadView configurations. Updates orthogonal coronal/sagittal panels immediately based on world-coordinate intersections with the axial view.
 4. Uploads data into GPU textures and calls `glClear`/`glDrawElements` via the consumer block.
 """
-function reactToScroll(scrollNumb::Int64, mainStates::Vector{StateDataFields}, toBeSavedForBack::Bool=true)
+function reactToScroll(data::ScrollEvent, mainStates::Vector{StateDataFields}, toBeSavedForBack::Bool=true)
+    scrollNumb = data.scroll_delta
+    
     t_start = time_ns()
     clickedPanel = mainStates[1].switchIndex
+    
+    # Enforce window bounds
+    if data.window_id == 2 && clickedPanel <= 5 && length(mainStates) >= 10
+        clickedPanel += 5
+    elseif data.window_id == 1 && clickedPanel > 5
+        clickedPanel -= 5
+    end
+    
     if clickedPanel < 1 || clickedPanel > length(mainStates)
-        clickedPanel = 1
+        clickedPanel = data.window_id == 2 ? 6 : 1
     end
     mainState = mainStates[clickedPanel]
 

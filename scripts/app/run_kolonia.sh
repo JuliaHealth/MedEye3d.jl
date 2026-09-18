@@ -9,7 +9,7 @@ export DEBIAN_FRONTEND=noninteractive
 # Ensure clipboard support for Makie textboxes (Ctrl+C/V)
 if ! command -v xclip &>/dev/null && ! command -v xsel &>/dev/null; then
     echo "Installing xclip for clipboard support..."
-    sudo apt-get update -qq && sudo apt-get install -y -qq xclip 2>/dev/null || true
+    
 fi
 
 # Graphics & rendering settings

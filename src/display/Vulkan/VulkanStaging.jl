@@ -67,7 +67,7 @@ function create_staging_pool(ctx::VkCtx, capacity_mb::Int=64)::VkStagingPool
     mapped_ptr = Ptr{UInt8}(ptr)
     
     cbai = CommandBufferAllocateInfo(ctx.command_pool, COMMAND_BUFFER_LEVEL_PRIMARY, 1)
-    cmd = unwrap(allocate_command_buffers(ctx.device, cbai))[1]
+    cmd = unwrap(Vulkan.allocate_command_buffers(ctx.device, cbai))[1]
     
     # Create a signaled fence so first wait_for_fences succeeds immediately
     transfer_fence = unwrap(create_fence(ctx.device, FenceCreateInfo(flags=FENCE_CREATE_SIGNALED_BIT)))

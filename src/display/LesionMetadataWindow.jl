@@ -1666,6 +1666,7 @@ function create_metadata_window(
         channel_arg::Union{Base.Channel, Nothing};
         save_path::String = DEFAULT_SAVE_PATH,
         ui_hooks::Dict{Symbol, Observable} = Dict{Symbol, Observable}())
+    obs_m2 = Observable(false)
     # Wrap channel in Ref for deferred connection (parallel startup)
     channel_ref = Ref{Union{Base.Channel, Nothing}}(channel_arg)
     # Proxy that silently drops events when channel is not yet connected
@@ -2045,9 +2046,7 @@ function create_metadata_window(
     rowsize!(g, m2_r, Fixed(28)); register_fixed_row!(m2_r, 28)
     
     on(btn_m2.clicks) do _
-        if _MEH !== nothing
-            put!(channel, LaunchM2Event(0)) # Launch M2 with TP 0
-        end
+        obs_m2[] = !obs_m2[]
     end
 
     
@@ -2078,8 +2077,8 @@ function create_metadata_window(
     btn_ns = Button(g[vc_r, 2], label = "Slice >>",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     btn_pt = Button(g[vc_r, 3], label = "<< TP",     buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     btn_nt = Button(g[vc_r, 4], label = "TP >>",     buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    on(btn_ps.clicks) do _; put!(channel, Int64(-1)) end
-    on(btn_ns.clicks) do _; put!(channel, Int64(1)) end
+    on(btn_ps.clicks) do _; put!(channel, MakieEvents.ScrollEvent(-1, 1)) end
+    on(btn_ns.clicks) do _; put!(channel, MakieEvents.ScrollEvent(1, 1)) end
     on(btn_pt.clicks) do _; put!(channel, ChangeTimePointEvent(-1)) end
     on(btn_nt.clicks) do _; put!(channel, ChangeTimePointEvent(1)) end
 
