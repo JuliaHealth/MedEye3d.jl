@@ -270,6 +270,7 @@ Holding necessery data to controll mouse interaction
   lastCoordinates::Vector{CartesianIndex{2}} = [] # list of accumulated mouse coordinates
   actualWindowWidth::Int = 0  # actual GLFW window content area width
   actualWindowHeight::Int = 0  # actual GLFW window content area height
+  window_id::Int = 1          # 1 = main, 2 = secondary
 end#MouseStruct
 
 """
@@ -281,6 +282,7 @@ Dispatched as a dedicated type via on_next! — same pattern as KeyInputFields, 
   y::Int = 0                    # cursor y at time of click
   actualWindowWidth::Int = 0
   actualWindowHeight::Int = 0
+  window_id::Int = 1
 end#DoubleClickEvent
 
 

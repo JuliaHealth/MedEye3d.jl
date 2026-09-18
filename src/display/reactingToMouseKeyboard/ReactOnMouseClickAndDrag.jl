@@ -57,7 +57,7 @@ imageWidth adn imageHeight are the dimensions of textures that we use to display
 # Module-level timestamp for double-click detection (avoids GLFW.GetTime which doesn't exist in Julia GLFW.jl)
 const lastLeftClickTimestamp = Ref{Float64}(0.0)
 
-function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct, mainChannel::Base.Channel{Any})
+function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct, mainChannel::Base.Channel{Any}, window_id::Int=1)
     xmin = Int32(calcD.windowWidthCorr)
     xmax = Int32(calcD.avWindWidtForMain - calcD.windowWidthCorr)
 
@@ -65,6 +65,7 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
     ymax = Int32(calcD.avWindHeightForMain - calcD.windowHeightCorr)
     # calculating dimensions of quad becouse it do not occupy whole window, and we want to react only to those mouse positions that are on main image quad
     mouseStructInstance = MouseStruct()
+    mouseStructInstance.window_id = window_id
     
     # Query actual GLFW window size (may differ from requested size due to WM resize)
     actualW, actualH = GLFW.GetWindowSize(window)
@@ -88,6 +89,7 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
                 lastCoordinates   = [point],
                 actualWindowWidth  = aW,
                 actualWindowHeight = aH,
+                window_id = window_id
             ))
         end
     end)# and  for example : cursor: 29.0, 469.0  types   Float64  Float64
@@ -120,6 +122,7 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
                     y = isempty(coords) ? 0 : coords[1][2],
                     actualWindowWidth  = mouseStructInstance.actualWindowWidth,
                     actualWindowHeight = mouseStructInstance.actualWindowHeight,
+                    window_id = window_id
                 ))
             end
             lastLeftClickTimestamp[] = now
@@ -132,6 +135,7 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
             lastCoordinates   = mouseStructInstance.lastCoordinates,
             actualWindowWidth  = mouseStructInstance.actualWindowWidth,
             actualWindowHeight = mouseStructInstance.actualWindowHeight,
+            window_id = window_id
         ))
     end) # for example types MOUSE_BUTTON_1 PRESS   GLFW.MouseButton  GLFW.Action
 
@@ -333,17 +337,19 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 
                 if is_compare
                     # Compare mode: left = panel 1, right = panel 5
+                    # M2 window does not use compare mode internally for now
                     mainState.switchIndex = x < actualW / 2.0 ? 1 : 5
                 else
+                    offset = (mousestr.window_id == 2 && length(mainStates) >= 10) ? 5 : 0
                     # Quad view mode: standard 4-panel layout
                     if x < actualW / 2.0 && y < actualH / 2.0
-                        mainStates[1].switchIndex = 1  # Top-Left (Axial CT/PET)
-                    elseif x >= actualW / 2.0 && y < actualH / 2.0
-                        mainStates[1].switchIndex = 2  # Top-Right (Pure PET Axial)
-                    elseif x < actualW / 2.0 && y >= actualH / 2.0
-                        mainStates[1].switchIndex = 3  # Bottom-Left (Sagittal)
+                        mainStates[1].switchIndex = 1 + offset # Top-Left (Axial CT/PET)
+                    elseif x > actualW / 2.0 && y < actualH / 2.0
+                        mainStates[1].switchIndex = 2 + offset # Top-Right (Coronal CT/PET)
+                    elseif x < actualW / 2.0 && y > actualH / 2.0
+                        mainStates[1].switchIndex = 3 + offset # Bottom-Left (Sagittal CT/PET)
                     else
-                        mainStates[1].switchIndex = 4  # Bottom-Right (Coronal)
+                        mainStates[1].switchIndex = 4 + offset # Bottom-Right (3D/MIP/Empty)
                     end
                 end
             end
@@ -457,9 +463,10 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             
             currentSlice = panelState.currentDisplayedSlice
             
-            if clickedPanel == 1 || clickedPanel == 2 || clickedPanel == 5
+            clickedPanel_mapped = clickedPanel > 5 ? clickedPanel - 5 : clickedPanel
+            if clickedPanel_mapped == 1 || clickedPanel_mapped == 2 || clickedPanel_mapped == 5
                 origX, origY, origZ = texX, texY, currentSlice
-            elseif clickedPanel == 3  # Sagittal
+            elseif clickedPanel_mapped == 3  # Sagittal
                 origY, origZ, origX = texX, texY, currentSlice
             else # Bottom-Right (4) (Coronal)
                 origX, origZ, origY = texX, texY, currentSlice
@@ -467,9 +474,10 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             
             # Ensure lastRecordedMousePosition is updated for ALL panels so scroll sync knows the intersection!
             for i in 1:length(mainStates)
-                if i == 1 || i == 2 || i == 5
+                i_mapped = i > 5 ? i - 5 : i
+                if i_mapped == 1 || i_mapped == 2 || i_mapped == 5
                     mainStates[i].lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
-                elseif i == 3
+                elseif i_mapped == 3
                     mainStates[i].lastRecordedMousePosition = CartesianIndex(origY, origZ, origX)
                 else
                     mainStates[i].lastRecordedMousePosition = CartesianIndex(origX, origZ, origY)
@@ -484,6 +492,9 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             targets = [(1, origZ), (2, origZ), (3, origX), (4, origY)]
             if length(mainStates) >= 5
                 push!(targets, (5, origZ))
+            end
+            if length(mainStates) >= 10
+                push!(targets, (6, origZ), (7, origZ), (8, origX), (9, origY), (10, origZ))
             end
             
             for (p_idx, targetSlice) in targets
@@ -843,14 +854,15 @@ function reactToDoubleClick(event::DoubleClickEvent, mainStates::Vector{StateDat
         # In compare mode: left half = panel 1, right half = panel 5
         event.x < actualW / 2.0 ? 1 : 5
     else
+        offset = (event.window_id == 2 && length(mainStates) >= 10) ? 5 : 0
         glY = ((actualH - event.y) * 2.0 / viewportH) - 1.0
-        topVerts = mainStates[1].calcDimsStruct.mainImageQuadVert
-        botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
+        topVerts = mainStates[1 + offset].calcDimsStruct.mainImageQuadVert
+        botVerts = mainStates[3 + offset].calcDimsStruct.mainImageQuadVert
         glMidY = (Float64(min(topVerts[10], topVerts[18])) + Float64(max(botVerts[2], botVerts[26]))) / 2.0
-        if event.x < actualW / 2.0 && glY > glMidY; 1
-        elseif event.x >= actualW / 2.0 && glY > glMidY; 2
-        elseif event.x < actualW / 2.0 && glY <= glMidY; 3
-        else; 4
+        if event.x < actualW / 2.0 && glY > glMidY; 1 + offset
+        elseif event.x >= actualW / 2.0 && glY > glMidY; 2 + offset
+        elseif event.x < actualW / 2.0 && glY <= glMidY; 3 + offset
+        else; 4 + offset
         end
     end
 
@@ -867,7 +879,9 @@ function reactToDoubleClick(event::DoubleClickEvent, mainStates::Vector{StateDat
             (mainImageQuadVert = zoomedCalcDim.mainImageQuadVert,
              mainQuadVertSize  = zoomedCalcDim.mainQuadVertSize))
 
-        for i in 1:length(mainStates)
+        is_m2 = clickedPanel > 5
+        range_to_zoom = is_m2 ? (6:min(10, length(mainStates))) : (1:5)
+        for i in range_to_zoom
             if i != clickedPanel
                 mainStates[i].calcDimsStruct = setproperties(
                     mainStates[i].calcDimsStruct,

@@ -17,6 +17,7 @@ using Logging
 
 export VkCtx, init_vulkan_context, destroy_vulkan_context!, recreate_swapchain!
 export find_memory_type, one_time_submit!
+export SecondaryVulkanWindow, create_secondary_window, recreate_secondary_swapchain!
 
 # ─── VkCtx: aggregate of all core Vulkan state ─────────────────────────
 
@@ -56,6 +57,24 @@ mutable struct VkCtx
     staging_pool::Any
     # Cached physical device memory properties (avoids repeated Vulkan queries)
     cached_mem_props::Any
+end
+
+mutable struct SecondaryVulkanWindow
+    surface::SurfaceKHR
+    swapchain::SwapchainKHR
+    swapchain_format::Format
+    swapchain_extent::Extent2D
+    swapchain_images::Vector{Image}
+    swapchain_image_views::Vector{ImageView}
+    render_pass::RenderPass
+    framebuffers::Vector{Framebuffer}
+    command_buffers::Vector{CommandBuffer}
+    image_available_semaphore::Semaphore
+    render_finished_semaphore::Semaphore
+    in_flight_fence::Fence
+    window::GLFW.Window
+    width::Int
+    height::Int
 end
 
 # ─── Helper: find a memory type with the required properties ────────────
@@ -102,7 +121,7 @@ submits to the graphics queue, and waits for completion.
 """
 function one_time_submit!(f::Function, ctx::VkCtx)
     alloc_info = CommandBufferAllocateInfo(ctx.command_pool, COMMAND_BUFFER_LEVEL_PRIMARY, 1)
-    cmds = unwrap(allocate_command_buffers(ctx.device, alloc_info))
+    cmds = unwrap(Vulkan.allocate_command_buffers(ctx.device, alloc_info))
     cmd = cmds[1]
     begin_info = CommandBufferBeginInfo(flags = COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
     unwrap(begin_command_buffer(cmd, begin_info))
@@ -278,6 +297,12 @@ function create_framebuffers(device::Device, render_pass::RenderPass,
     end
 end
 
+create_framebuffers(device::Device, render_pass::RenderPass, extent::Extent2D, image_views::Vector{ImageView}) =
+    create_framebuffers(device, render_pass, image_views, extent)
+
+allocate_command_buffers(device::Device, pool::CommandPool, count::Integer) =
+    unwrap(Vulkan.allocate_command_buffers(device, CommandBufferAllocateInfo(pool, COMMAND_BUFFER_LEVEL_PRIMARY, UInt32(count))))
+
 # ─── init_vulkan_context ────────────────────────────────────────────────
 
 """
@@ -341,8 +366,7 @@ function init_vulkan_context(window::GLFW.Window, width::Int, height::Int)::VkCt
     # ── Command pool & buffers ──
     cpci = CommandPoolCreateInfo(qfi; flags=COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT)
     cmd_pool = unwrap(create_command_pool(device, cpci))
-    cbai = CommandBufferAllocateInfo(cmd_pool, COMMAND_BUFFER_LEVEL_PRIMARY, UInt32(length(sc_images)))
-    cmd_bufs = unwrap(allocate_command_buffers(device, cbai))
+    cmd_bufs = allocate_command_buffers(device, cmd_pool, length(sc_images))
 
     # ── Synchronisation ──
     img_avail  = unwrap(create_semaphore(device, SemaphoreCreateInfo()))
@@ -392,7 +416,7 @@ function recreate_swapchain!(ctx::VkCtx, new_width::Int, new_height::Int)
 
     # Re-allocate command buffers
     cbai = CommandBufferAllocateInfo(ctx.command_pool, COMMAND_BUFFER_LEVEL_PRIMARY, UInt32(length(sc_images)))
-    ctx.command_buffers = unwrap(allocate_command_buffers(ctx.device, cbai))
+    ctx.command_buffers = unwrap(Vulkan.allocate_command_buffers(ctx.device, cbai))
 end
 
 # ─── Cleanup ────────────────────────────────────────────────────────────
@@ -414,6 +438,82 @@ function destroy_vulkan_context!(ctx::VkCtx)
 
     # All Vulkan handles (device, instance, semaphores, fences, etc.)
     # will be cleaned up by Vulkan.jl's GC finalizers in proper dependency order.
+end
+
+# ─── Secondary Vulkan Window ──────────────────────────────────────────
+
+"""
+    create_secondary_window(ctx::VkCtx, window::GLFW.Window, width::Int, height::Int)::SecondaryVulkanWindow
+
+Creates a secondary Vulkan window and presentation swapchain sharing the existing device, queue, and command pool from `ctx`.
+"""
+function create_secondary_window(ctx::VkCtx, window::GLFW.Window, width::Int, height::Int)::SecondaryVulkanWindow
+    # ── Surface via GLFW ──
+    surface_ref = Ref{VulkanCore.VkSurfaceKHR}(VulkanCore.VkSurfaceKHR(0))
+    err = ccall((:glfwCreateWindowSurface, GLFW.libglfw),
+                Cint,
+                (Ptr{Cvoid}, Ptr{Cvoid}, Ptr{Cvoid}, Ptr{VulkanCore.VkSurfaceKHR}),
+                ctx.instance.vks, window.handle, C_NULL, surface_ref)
+    err != 0 && error("glfwCreateWindowSurface failed: $err")
+    surface = SurfaceKHR(Ptr{Cvoid}(surface_ref[]), ctx.instance, Threads.Atomic{UInt64}(1))
+
+    # ── Swapchain ──
+    swapchain, sc_format, sc_extent, sc_images, sc_views =
+        create_swapchain(ctx, ctx.physical_device, surface, ctx.queue_family_index, width, height)
+
+    # ── Render pass ──
+    render_pass = create_render_pass(ctx.device, sc_format)
+
+    # ── Framebuffers ──
+    framebuffers = create_framebuffers(ctx.device, render_pass, sc_extent, sc_views)
+
+    # ── Command buffers ──
+    command_buffers = allocate_command_buffers(ctx.device, ctx.command_pool, length(framebuffers))
+
+    # ── Synchronisation ──
+    image_available_semaphore = unwrap(create_semaphore(ctx.device, SemaphoreCreateInfo()))
+    render_finished_semaphore = unwrap(create_semaphore(ctx.device, SemaphoreCreateInfo()))
+    in_flight_fence           = unwrap(create_fence(ctx.device, FenceCreateInfo(flags=FENCE_CREATE_SIGNALED_BIT)))
+
+    return SecondaryVulkanWindow(
+        surface,
+        swapchain,
+        sc_format,
+        sc_extent,
+        sc_images,
+        sc_views,
+        render_pass,
+        framebuffers,
+        command_buffers,
+        image_available_semaphore,
+        render_finished_semaphore,
+        in_flight_fence,
+        window,
+        width,
+        height
+    )
+end
+
+function recreate_secondary_swapchain!(ctx::VkCtx, sec::SecondaryVulkanWindow, new_width::Int, new_height::Int)
+    unwrap(device_wait_idle(ctx.device))
+    
+    old_swapchain = sec.swapchain
+    swapchain, sc_format, sc_extent, sc_images, sc_views =
+        create_swapchain(ctx, ctx.physical_device, sec.surface, ctx.queue_family_index,
+                         new_width, new_height; old_swapchain=old_swapchain)
+
+    sec.swapchain = swapchain
+    sec.swapchain_format = sc_format
+    sec.swapchain_extent = sc_extent
+    sec.swapchain_images = sc_images
+    sec.swapchain_image_views = sc_views
+    sec.framebuffers = create_framebuffers(ctx.device, sec.render_pass, sc_views, sc_extent)
+    sec.width = new_width
+    sec.height = new_height
+
+    # Re-allocate command buffers
+    cbai = CommandBufferAllocateInfo(ctx.command_pool, COMMAND_BUFFER_LEVEL_PRIMARY, UInt32(length(sc_images)))
+    sec.command_buffers = unwrap(Vulkan.allocate_command_buffers(ctx.device, cbai))
 end
 
 end # module VulkanContext

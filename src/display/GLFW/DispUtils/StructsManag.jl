@@ -227,8 +227,10 @@ Within the panel's allocated NDC bounding box [x_min, x_max] x [y_min, y_max]:
 Returns enriched CalcDimsStruct.
 """
 function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMode, imagePos::Int64)::CalcDimsStruct
-  # 0. If QuadImage and imagePos > 4, panel is hidden (only active as :RightHalf in compare mode)
-  if displayMode == QuadImage && imagePos > 4
+  imagePos_mapped = imagePos > 5 ? imagePos - 5 : imagePos
+
+  # 0. If QuadImage and imagePos_mapped > 4, panel is hidden (only active as :RightHalf in compare mode)
+  if displayMode == QuadImage && imagePos_mapped > 4
     res = zeros(Float32, 32)
     w_res = zeros(Float32, 32)
     return setproperties(calcDimStruct, (
@@ -279,14 +281,14 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
     panel_w = (total_w * frac) / 2.0
     panel_h = total_h / 2.0
     ndc_mid_x = -1.0 + frac
-    if imagePos == 1 || imagePos == 3  # Left column
+    if imagePos_mapped == 1 || imagePos_mapped == 3  # Left column
       x_min = -1.0
       x_max = ndc_mid_x
     else                              # Right column
       x_min = ndc_mid_x
       x_max = ndc_right_edge
     end
-    if imagePos == 1 || imagePos == 2  # Top row
+    if imagePos_mapped == 1 || imagePos_mapped == 2  # Top row
       y_min = 0.0
       y_max = 1.0
     else                              # Bottom row

@@ -632,6 +632,14 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     )
 
     textureSpecArray = Vector{Vector{TextureSpec}}([
+        # Main Window (TP 0) Quad View
+        TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
+        TextureSpec[deepcopy(textureSpec_pure_pet)],
+        TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
+        TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
+        TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
+        
+        # M2 Window (TP 1) Quad View
         TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
         TextureSpec[deepcopy(textureSpec_pure_pet)],
         TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
@@ -785,10 +793,12 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         ])
     end
     first_voxelDataTupleVector = entry_to_vdt(first_entry)
+    append!(first_voxelDataTupleVector, entry_to_vdt(first_entry)) # Append 5 more panels for M2 (starts as a copy of TP0)
 
     ds = display_spacing
     spacings = [[ds], [ds], [(ds[2], ds[3], ds[1])], [(ds[1], ds[3], ds[2])], [ds]]
-    origins = [[(0.0, 0.0, 0.0)] for _ in 1:5]
+    append!(spacings, deepcopy(spacings))
+    origins = [[(0.0, 0.0, 0.0)] for _ in 1:10]
     dummyStudySrc = Vector{Vector{Tuple{String,String}}}()
 
     # 3. Lesion List & Match Groups
@@ -886,7 +896,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
 
     # 7. Warmup JIT & initial event synchronization
     put!(mainViewer.channel, CompareTimePointsEvent(false))
-    put!(mainViewer.channel, Int64(0))
+    put!(mainViewer.channel, MakieEvents.ScrollEvent(0, 1))
 
     if !MedEye3d.InferenceClient.is_ai_enabled()
         MEH.set_ai_status!("[AI Disabled] (Viewer Mode)")

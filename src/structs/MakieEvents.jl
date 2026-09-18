@@ -1,5 +1,5 @@
 module MakieEvents
-export ChangePlaneEvent, CompareTimePointsEvent, ShowSingleLesionEvent, ScrollZoomEvent
+export ChangePlaneEvent, CompareTimePointsEvent, ShowSingleLesionEvent, ScrollZoomEvent, ScrollEvent
 export WindowingEvent, PaintValEvent, SyncLesionEvent
 export ChangeTimePointEvent, SetTimePointEvent, ToggleLesionEvent, RefreshListEvent
 export AddAutoPetEvent, AIInferenceResultEvent, AIStatusUpdateEvent, SyncMissingEvent, GenManualEvent
@@ -20,6 +20,14 @@ end
 
 struct ScrollZoomEvent
     zoom_delta::Float64
+    window_id::Int
+    ScrollZoomEvent(z::Float64, w::Int=1) = new(z, w)
+end
+
+struct ScrollEvent
+    scroll_delta::Int
+    window_id::Int
+    ScrollEvent(d::Int, w::Int=1) = new(d, w)
 end
 
 struct WindowingEvent
@@ -97,9 +105,11 @@ struct ResizeWindowEvent
     height :: Int
     fb_width :: Int   # Framebuffer size (for Vulkan swapchain — actual pixel dimensions)
     fb_height :: Int
+    window_id :: Int  # 1 for Main Window, 2 for M2 Window
 end
-# Backward-compatible constructor: when framebuffer size isn't known, assume same as window
-ResizeWindowEvent(w::Int, h::Int) = ResizeWindowEvent(w, h, w, h)
+# Backward-compatible constructors
+ResizeWindowEvent(w::Int, h::Int) = ResizeWindowEvent(w, h, w, h, 1)
+ResizeWindowEvent(w::Int, h::Int, fb_w::Int, fb_h::Int) = ResizeWindowEvent(w, h, fb_w, fb_h, 1)
 struct SetWindowTitleEvent
     title :: String
 end

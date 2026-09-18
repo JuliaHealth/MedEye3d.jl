@@ -164,7 +164,7 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
     end
 
     # Observables for Dynamic Bilingual Translation
-    hdr_patient_lbl = Observable("Patient ID: $(report.patient_id) | Exam Date: $(report.study_date) | Modality: $(report.modality)")
+    hdr_patient_lbl = Observable("Patient ID: $(report.patient_id) | Profile: $(report.clinical_profile) | Exam Date: $(report.study_date) | Modality: $(report.modality)")
     hdr_mitnm_lbl   = Observable("Overall miTNM: $(report.final_mitnm)")
     
     sec1_title      = Observable("1. Patient History & Clinical Indication")
@@ -484,8 +484,10 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
             Box(t2_grid[r_row, 1:num_cols], color = row_bg, cornerradius = 2)
             
             # Col 1: Location + New Lesion badge
-            loc_disp = row.is_new ? "* $(row.location) [NEW]" : row.location
-            Label(t2_grid[r_row, 1], loc_disp, fontsize = 10, color = (row.is_new ? GOLD : TXT), halign = :left, padding = (10, 6, 6, 6))
+            loc_disp = row.location
+            if row.is_key_image; loc_disp = "★ " * loc_disp; end
+            if row.is_new; loc_disp = loc_disp * " [NEW]"; end
+            Label(t2_grid[r_row, 1], loc_disp, fontsize = 10, color = ((row.is_new || row.is_key_image) ? GOLD : TXT), halign = :left, padding = (10, 6, 6, 6))
             
             # Col 2: miTNM
             Label(t2_grid[r_row, 2], row.mitnm, fontsize = 10, font = :bold, color = GOLD, halign = :center)
