@@ -759,11 +759,12 @@ function coordinateDisplay(
                     @info "SyncViewsEvent: $(channelData.is_synced)"
                 elseif channelData isa LaunchM2Event
                     if m2_glfw[] === nothing
-                        @info "Spawning M2 Compare Window..."
+                        @info "Spawning M2 Compare Window on thread $(Threads.threadid())!"
                         try
                             GLFW.WindowHint(GLFW.CLIENT_API, GLFW.NO_API)
                             m2_glfw[] = GLFW.CreateWindow(1200, 800, "MedEye3D - Compare (M2)")
                             if m2_glfw[] !== nothing
+                                GLFW.ShowWindow(m2_glfw[])
                                 m2_vk[] = VulkanContext.create_secondary_window(vk_ctx, m2_glfw[], 1200, 800)
                                 @info "M2 Window spawned successfully!"
                             end
@@ -983,6 +984,8 @@ function coordinateDisplay(
                             try
                                 VulkanRender.render_frame!(vk_ctx, VulkanRender.PanelRenderData[], m2_vk[])
                             catch e
+                                println(">> [DEBUG] M2 Render Error: ", e)
+                                flush(stdout)
                             end
                         end
                     end
