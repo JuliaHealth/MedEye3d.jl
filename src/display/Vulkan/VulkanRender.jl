@@ -104,7 +104,6 @@ function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData}, target_windo
 
     # Wait for previous frame (reuse fence buffer)
     unwrap(wait_for_fences(ctx.device, _set1!(_fence_buf, tgt.in_flight_fence), true, typemax(UInt64)))
-    unwrap(reset_fences(ctx.device, _set1!(_fence_buf, tgt.in_flight_fence)))
 
     # Acquire next image
     result = acquire_next_image_khr(ctx.device, tgt.swapchain, typemax(UInt64);
@@ -117,6 +116,9 @@ function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData}, target_windo
         println("Vulkan acquire error (swapchain out of date): $(e)"); flush(stdout)
         return false
     end
+    
+    # Reset fence ONLY if acquire succeeded, otherwise we deadlock on the next frame
+    unwrap(reset_fences(ctx.device, _set1!(_fence_buf, tgt.in_flight_fence)))
     # ctx.last_rendered_image_idx (omitted for secondary)
     if target_window === nothing; ctx.last_rendered_image_idx = img_idx; end
 
