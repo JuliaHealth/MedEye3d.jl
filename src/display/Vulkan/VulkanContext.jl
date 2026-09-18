@@ -415,6 +415,9 @@ function recreate_swapchain!(ctx::VkCtx, new_width::Int, new_height::Int)
     ctx.height = new_height
 
     # Re-allocate command buffers
+    if !isempty(ctx.command_buffers)
+        Vulkan.free_command_buffers(ctx.device, ctx.command_pool, ctx.command_buffers)
+    end
     cbai = CommandBufferAllocateInfo(ctx.command_pool, COMMAND_BUFFER_LEVEL_PRIMARY, UInt32(length(sc_images)))
     ctx.command_buffers = unwrap(Vulkan.allocate_command_buffers(ctx.device, cbai))
 end
@@ -512,6 +515,9 @@ function recreate_secondary_swapchain!(ctx::VkCtx, sec::SecondaryVulkanWindow, n
     sec.height = new_height
 
     # Re-allocate command buffers
+    if !isempty(sec.command_buffers)
+        Vulkan.free_command_buffers(ctx.device, ctx.command_pool, sec.command_buffers)
+    end
     cbai = CommandBufferAllocateInfo(ctx.command_pool, COMMAND_BUFFER_LEVEL_PRIMARY, UInt32(length(sc_images)))
     sec.command_buffers = unwrap(Vulkan.allocate_command_buffers(ctx.device, cbai))
 end
