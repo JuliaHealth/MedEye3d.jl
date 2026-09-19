@@ -1129,7 +1129,10 @@ function coordinateDisplay(
                     end
                 end
             catch e
-                if e isa InterruptException || (e isa GLFW.GLFWError && e.code == GLFW.NOT_INITIALIZED)
+                if (e isa InvalidStateException && e.state === :closed) || !isopen(mainChannel)
+                    shouldStop[1] = true
+                    break
+                elseif e isa InterruptException || (e isa GLFW.GLFWError && e.code == GLFW.NOT_INITIALIZED)
                     println("CONSUMER FATAL ERROR: $e")
                     println(sprint(showerror, e, catch_backtrace()))
                     flush(stdout)

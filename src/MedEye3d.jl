@@ -17,6 +17,7 @@ function __init__()
 end
 
 export ForDisplayStructs
+export DoubleClickEvent
 # export  ForDisplayStructs.TextureSpec
 export SegmentationDisplay
 
