@@ -1648,7 +1648,8 @@ mutable struct MetadataWindowResult
     channel_ref::Ref{Union{Base.Channel, Nothing}}
     lesion_db::Any
     trigger_m2::Observable{Bool}
-    MetadataWindowResult(fig, ch_ref, ldb=nothing) = new(fig, ch_ref, ldb, Observable(false))
+    m2_mode::Observable{String}
+    MetadataWindowResult(fig, ch_ref, ldb=nothing) = new(fig, ch_ref, ldb, Observable(false), Observable("Quad View"))
 end
 
 """Connect a live channel to a previously created metadata window (greyed-out → active)."""
@@ -2042,7 +2043,8 @@ function create_metadata_window(
     sec_view = begin_section!("Viewport & Windowing")
     
     m2_r = nr!()
-    btn_m2 = Button(g[m2_r, 1:4], label = "[Launch M2: Compare Window]", buttoncolor = RGBf(0.2, 0.4, 0.6), labelcolor = TXT, fontsize = 10)
+    btn_m2 = Button(g[m2_r, 1:2], label = "[Launch M2]", buttoncolor = RGBf(0.2, 0.4, 0.6), labelcolor = TXT, fontsize = 10)
+    menu_m2_mode = Menu(g[m2_r, 3:4], options = ["Quad View", "Left CT, Right PET", "Compare Prev/Curr TP"], default = "Quad View", fontsize = 10)
     rowsize!(g, m2_r, Fixed(28)); register_fixed_row!(m2_r, 28)
     
     on(btn_m2.clicks) do _
@@ -5302,6 +5304,11 @@ function create_metadata_window(
 
     res = MetadataWindowResult(fig, channel_ref, lesion_db)
     res.trigger_m2 = obs_m2
+    on(menu_m2_mode.selection) do val
+        if val !== nothing
+            res.m2_mode[] = val
+        end
+    end
     return res
 end
 

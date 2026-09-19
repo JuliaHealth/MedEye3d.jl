@@ -787,25 +787,61 @@ function coordinateDisplay(
                     end
                     
                     if m2_glfw[] !== nothing && length(stateInstances) >= 10
-                        # Load the requested TP into M2's quad panels
-                        @info "Loading TP $(channelData.tp_index) into M2 window..."
-                        entry = MakieEventHandlers.get_or_load_tp_data(channelData.tp_index)
-                        if entry !== nothing
-                            MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 6)
-                            MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 7)
-                            MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 8)
-                            MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 9)
+                        @info "Configuring M2 window for mode: $(channelData.mode)..."
+                        
+                        if channelData.mode == "Quad View"
+                            for i in 6:10
+                                stateInstances[i].displayMode = QuadImage
+                            end
+                            entry = MakieEventHandlers.get_or_load_tp_data(channelData.tp_index)
+                            if entry !== nothing
+                                for i in 6:9
+                                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, i)
+                                end
+                            end
+                        elseif channelData.mode == "Left CT, Right PET"
+                            for i in 6:10
+                                stateInstances[i].displayMode = MultiImage
+                            end
+                            entry = MakieEventHandlers.get_or_load_tp_data(channelData.tp_index)
+                            if entry !== nothing
+                                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 6) # CT/PET (Panel 1)
+                                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 7) # PET only (Panel 2)
+                                # Force Panel 6 to CT only (opacity 0) if it's currently CT+PET
+                                # Actually, user can toggle it manually, or we can leave it as whatever Panel 1 is.
+                            end
+                        elseif channelData.mode == "Compare Prev/Curr TP"
+                            for i in 6:10
+                                stateInstances[i].displayMode = MultiImage
+                            end
+                            prev_tp = max(0, channelData.tp_index - 1)
+                            curr_tp = channelData.tp_index
                             
-                            # Sync base coordinates with main window
-                            for i in 6:9
-                                stateInstances[i].onScrollData.dimensionToScroll = stateInstances[i-5].onScrollData.dimensionToScroll
-                                stateInstances[i].currentDisplayedSlice = stateInstances[i-5].currentDisplayedSlice
-                                stateInstances[i].calcDimsStruct.zoom = stateInstances[i-5].calcDimsStruct.zoom
-                                stateInstances[i].calcDimsStruct.panX = stateInstances[i-5].calcDimsStruct.panX
-                                stateInstances[i].calcDimsStruct.panY = stateInstances[i-5].calcDimsStruct.panY
-                                MakieEventHandlers._force_texture_upload!(stateInstances, i)
+                            entry_prev = MakieEventHandlers.get_or_load_tp_data(prev_tp)
+                            entry_curr = MakieEventHandlers.get_or_load_tp_data(curr_tp)
+                            
+                            if entry_prev !== nothing
+                                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_prev, 6) # Left
+                            end
+                            if entry_curr !== nothing
+                                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_curr, 7) # Right
                             end
                         end
+                        
+                        # Sync base coordinates with main window
+                        for i in 6:10
+                            stateInstances[i].onScrollData.dimensionToScroll = stateInstances[i-5].onScrollData.dimensionToScroll
+                            stateInstances[i].currentDisplayedSlice = stateInstances[i-5].currentDisplayedSlice
+                            stateInstances[i].calcDimsStruct.zoom = stateInstances[i-5].calcDimsStruct.zoom
+                            stateInstances[i].calcDimsStruct.panX = stateInstances[i-5].calcDimsStruct.panX
+                            stateInstances[i].calcDimsStruct.panY = stateInstances[i-5].calcDimsStruct.panY
+                            MakieEventHandlers._force_texture_upload!(stateInstances, i)
+                        end
+                        
+                        # Trigger an immediate layout refresh
+                        win_w, win_h = GLFW.GetWindowSize(m2_glfw[])
+                        fb_w, fb_h = GLFW.GetFramebufferSize(m2_glfw[])
+                        put!(mainChannel, ResizeWindowEvent(Int(win_w), Int(win_h), Int(fb_w), Int(fb_h), 2))
                     end
                 elseif typeof(channelData) == CalcDimsStruct || typeof(channelData) == forDisplayObjects || typeof(channelData) == FullScrollableDat
                     stateInstances[1].switchIndex = channelData.imagePos
