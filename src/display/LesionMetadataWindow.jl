@@ -1649,7 +1649,10 @@ mutable struct MetadataWindowResult
     lesion_db::Any
     trigger_m2::Observable{Bool}
     m2_mode::Observable{String}
-    MetadataWindowResult(fig, ch_ref, ldb=nothing) = new(fig, ch_ref, ldb, Observable(false), Observable("Quad View"))
+    set_compare_mode::Observable{Bool}
+    ui_queue::Vector{Function}
+    ui_lock::ReentrantLock
+    MetadataWindowResult(fig, ch_ref, ldb=nothing) = new(fig, ch_ref, ldb, Observable(false), Observable("Quad View"), Observable(false), Function[], ReentrantLock())
 end
 
 """Connect a live channel to a previously created metadata window (greyed-out → active)."""
@@ -1668,6 +1671,9 @@ function create_metadata_window(
         save_path::String = DEFAULT_SAVE_PATH,
         ui_hooks::Dict{Symbol, Observable} = Dict{Symbol, Observable}())
     obs_m2 = Observable(false)
+    obs_set_compare_mode = Observable(false)
+    ui_queue = Function[]
+    ui_lock = ReentrantLock()
     # Wrap channel in Ref for deferred connection (parallel startup)
     channel_ref = Ref{Union{Base.Channel, Nothing}}(channel_arg)
     # Proxy that silently drops events when channel is not yet connected
@@ -2066,12 +2072,17 @@ function create_metadata_window(
     local update_tp_dropdown_visibility!
     local sync_tp_menus_to_current!
     local load_clinical_info_for_tp! = nothing
+    local apply_compare_mode_ui! = nothing
     on(btn_cv.clicks) do _
-        cv_active[] = !cv_active[]
-        btn_cv.buttoncolor[] = cv_active[] ? GRN : BLU_BTN
-        update_tp_dropdown_visibility!()
-        sync_tp_menus_to_current!()
-        put!(channel, CompareTimePointsEvent(cv_active[]))
+        if apply_compare_mode_ui! !== nothing
+            apply_compare_mode_ui!(!cv_active[])
+        end
+    end
+    
+    on(obs_set_compare_mode) do val
+        if apply_compare_mode_ui! !== nothing && cv_active[] != val
+            apply_compare_mode_ui!(val)
+        end
     end
 
     vc_r = nr!()
@@ -2211,24 +2222,24 @@ function create_metadata_window(
     end
     on(_MEH.tp_switched) do _
         update_tp_label()
-        if cv_active[] != _MEH.compare_mode[]
-            cv_active[] = _MEH.compare_mode[]
-            btn_cv.buttoncolor[] = cv_active[] ? GRN : BLU_BTN
-            update_tp_dropdown_visibility!()
-        end
-        tp_indices = sort(collect(keys(_MEH.tp_labels)))
-        expected_count = max(1, length(tp_indices))
-        if length(menu_tp_single.options[]) != expected_count
-            refresh_tp_dropdown_options!()
-        else
-            sync_tp_menus_to_current!()
-        end
-        if cv_active[]
-            _build_match_display!()
-        end
-        refresh_lesion_dropdown_for_tp!(_MEH.current_tp_index[])
-        if load_clinical_info_for_tp! !== nothing
-            load_clinical_info_for_tp!(_MEH.current_tp_index[])
+        
+        lock(ui_lock) do
+            push!(ui_queue, () -> begin
+                tp_indices = sort(collect(keys(_MEH.tp_labels)))
+                expected_count = max(1, length(tp_indices))
+                if length(menu_tp_single.options[]) != expected_count
+                    refresh_tp_dropdown_options!()
+                else
+                    sync_tp_menus_to_current!()
+                end
+                if cv_active[]
+                    _build_match_display!()
+                end
+                refresh_lesion_dropdown_for_tp!(_MEH.current_tp_index[])
+                if load_clinical_info_for_tp! !== nothing
+                    load_clinical_info_for_tp!(_MEH.current_tp_index[])
+                end
+            end)
         end
     end
 
@@ -3442,38 +3453,7 @@ function create_metadata_window(
             field_widgets["Anatomic Location"].selection[] = "Pelvic Lymph Node"
         end
     end
-    local sec_map_lesions
-    # Auto-hide metadata, segmentation, radlex, custom sections in Compare mode
-    on(btn_cv.clicks) do _
-        t_start = time_ns()
-        if cv_active[]
-            # Hide entire sections
-            for sec in (sec_meta, sec_seg, sec_report)
-                hide_section!(sec)
-            end
-            # Force map section open and visible
-            sec_map_lesions[1][] = true  # is_open = true
-            show_section!(sec_map_lesions)
-            notify(anat_active_count)
-            try
-                _build_match_display!()
-            catch e
-                @warn "Auto-building match display on compare mode toggle failed: $e"
-            end
-        else
-            # Show sections
-            for sec in (sec_meta, sec_seg, sec_report)
-                show_section!(sec)
-            end
-            hide_section!(sec_map_lesions)
-            # Explicitly clear dynamically-created elements in nested map_grid
-            # (hide_section! can't reach nested GridLayout children — they persist visually)
-            try for elem in contents(map_grid); delete!(elem); end catch; end
-            update_dynamic_visibility!(active_lesion_type[])
-            notify(anat_active_count)
-        end
-        @info "[BENCH] Compare Volumes Toggle UI: $(round((time_ns()-t_start)/1e6, digits=1))ms"
-    end
+
 
 
 
@@ -3919,6 +3899,36 @@ function create_metadata_window(
     
     end_section!(sec_map_lesions)
     hide_section!(sec_map_lesions)
+
+    function apply_compare_mode_ui_impl!(active::Bool)
+        cv_active[] = active
+        btn_cv.buttoncolor[] = cv_active[] ? GRN : BLU_BTN
+        update_tp_dropdown_visibility!()
+        sync_tp_menus_to_current!()
+        if cv_active[]
+            for sec in (sec_meta, sec_seg, sec_report)
+                hide_section!(sec)
+            end
+            sec_map_lesions[1][] = true
+            show_section!(sec_map_lesions)
+            notify(anat_active_count)
+            try
+                _build_match_display!()
+            catch e
+                @warn "Auto-building match display on compare mode toggle failed: $e"
+            end
+        else
+            for sec in (sec_meta, sec_seg, sec_report)
+                show_section!(sec)
+            end
+            hide_section!(sec_map_lesions)
+            try for elem in contents(map_grid); delete!(elem); end catch; end
+            update_dynamic_visibility!(active_lesion_type[])
+            notify(anat_active_count)
+        end
+        put!(channel, CompareTimePointsEvent(cv_active[]))
+    end
+    apply_compare_mode_ui! = apply_compare_mode_ui_impl!
 
     # ── Settings & Export (merged: Active Data + Preprocessing + Save + Report) ──
     sec_settings = begin_section!("Settings & Export"; default_open=false)
@@ -5159,83 +5169,66 @@ function create_metadata_window(
     # ── Auto-fill BaseAnatomy, Side, and LesionType when organ mapping updates after painting ──
     try
         on(_MEH.organ_mapping_updated) do (lid, organ_name)
-            try
-                @debug "[PAINT→FILL] Received organ_mapping_updated: lid=$lid, organ='$organ_name'"
-                lid == 0 && return  # skip initial value
-                # Only auto-fill if this is the currently displayed lesion
-                cur_lesion_str = active_lesion_display[]
-                # Parse lesion ID from display string: "ID: description" or "New Lesion ID"
-                cur_lesion_s = string(cur_lesion_str)
-                m = match(r"^(\d+)", cur_lesion_s)
-                if m === nothing
-                    # Fallback: try "New Lesion <ID>" format
-                    m = match(r"(\d+)\s*$", cur_lesion_s)
-                end
-                cur_lid = m !== nothing ? tryparse(Int, m.captures[1]) : nothing
-                @debug "[PAINT→FILL] cur_lesion_str='$cur_lesion_s', cur_lid=$cur_lid, lid=$lid"
-                (cur_lid === nothing || cur_lid != lid) && return
-                
-                # Look up the ontology entry for this organ
-                @debug "[PAINT→FILL] Calling lookup_anatomy('$organ_name')..."
-                anat_entry = lookup_anatomy(organ_name)
-                @debug "[PAINT-FILL] lookup_anatomy result available"
-                anat_entry === nothing && return
-                
-                t_base = get(anat_entry, "detailed", "")
-                auto_side = get(anat_entry, "side", "")
-                lesion_type = get(anat_entry, "lesion_type", "")
-                @debug "[PAINT→FILL] t_base='$t_base', side='$auto_side', type='$lesion_type'"
-                
-                # Always update BaseAnatomy from organ mapping (reflects current paint state)
-                if !isempty(t_base)
-                    ba_opts = menu_base_anat.options[]
-                    ba_idx = findfirst(==(t_base), ba_opts)
-                    if ba_idx !== nothing
-                        menu_base_anat.i_selected[] = ba_idx
-                    else
-                        # Prepend term to menu options (menu limits display to ~25 items,
-                        # so appending at index 27+ causes BoundsError)
-                        new_opts = vcat([t_base], ba_opts)
-                        menu_base_anat.options[] = new_opts
-                        menu_base_anat.i_selected[] = 1
-                        # Also add to backing store for future filter operations
-                        if !(t_base in ba_all_opts[])
-                            ba_all_opts[] = vcat(ba_all_opts[], [t_base])
+            lock(ui_lock) do
+                push!(ui_queue, () -> begin
+                    try
+                        @debug "[PAINT→FILL] Received organ_mapping_updated: lid=$lid, organ='$organ_name'"
+                        lid == 0 && return  # skip initial value
+                        cur_lesion_str = active_lesion_display[]
+                        cur_lesion_s = string(cur_lesion_str)
+                        m = match(r"^(\d+)", cur_lesion_s)
+                        if m === nothing
+                            m2 = match(r"New Lesion\s+(\d+)", cur_lesion_s)
+                            if m2 !== nothing
+                                m = m2
+                            end
                         end
+                        m === nothing && return
+                        parsed_lid = tryparse(Int, m.match)
+                        if parsed_lid === lid
+                            @debug "[PAINT→FILL] Updating UI for current lesion $lid"
+                            
+                            if haskey(field_widgets, "BaseAnatomy")
+                                tb_anatomic = field_widgets["BaseAnatomy"]
+                                tb_anatomic.stored_string[] = organ_name
+                                notify(tb_anatomic.stored_string)
+                                val = parse_lesion_id(active_lesion_id[])
+                                if val !== nothing && val > 0
+                                    save_state_to_db(val)
+                                end
+                            end
+                            
+                            entry = lookup_anatomy(organ_name)
+                            if entry !== nothing
+                                if haskey(entry, "side") && haskey(field_widgets, "Side")
+                                    side = entry["side"]
+                                    if side in ["Left", "Right", "Bilateral", "Central"]
+                                        field_widgets["Side"].selection[] = side
+                                    end
+                                end
+                                
+                                if haskey(entry, "lesion_class")
+                                    lc = entry["lesion_class"]
+                                    if lc == "Lymph Node Meta"
+                                        update_type_buttons("Lymph Node Meta")
+                                    elseif lc == "Bone Meta"
+                                        update_type_buttons("Bone Meta")
+                                    elseif lc == "Solid Organ / Viscera"
+                                        update_type_buttons("Local Tumor / Recurrence")
+                                    end
+                                    if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
+                                        if lc in field_widgets["Anatomic Location"].options[]
+                                            field_widgets["Anatomic Location"].selection[] = lc
+                                        end
+                                    end
+                                end
+                            end
+                            notify(active_lesion_id)
+                        end
+                    catch e
+                        @warn "Failed inside organ_mapping_updated UI queue: $e"
                     end
-                    @debug "[PAINT-ANAT] Set BaseAnatomy for lesion $lid"
-                end
-                
-                # Always update Side from organ mapping (skip NA/N/A for unpaired organs)
-                if !isempty(auto_side) && uppercase(auto_side) ∉ ("NA", "N/A")
-                    side_opts = menu_side.options[]
-                    s_idx = findfirst(==(auto_side), side_opts)
-                    if s_idx !== nothing
-                        menu_side.i_selected[] = s_idx
-                    end
-                    @debug "[PAINT-SIDE] Set Side for lesion $lid"
-                elseif isempty(auto_side) || uppercase(auto_side) in ("NA", "N/A")
-                    # Unpaired organ — clear side to empty
-                    s_idx = findfirst(==(""), menu_side.options[])
-                    if s_idx !== nothing
-                        menu_side.i_selected[] = s_idx
-                    end
-                end
-                
-                # Always update LesionType from ontology (Bone Meta, Organ Meta, etc.)
-                if !isempty(lesion_type)
-                    update_type_buttons(lesion_type)
-                    @debug "[PAINT-TYPE] Set LesionType for lesion $lid"
-                end
-                
-                trigger_autosave()
-            catch e
-                @debug "[PAINT→FILL] ERROR in callback: $e"
-                for (exc, bt) in current_exceptions()
-                    showerror(stdout, exc, bt)
-                    println()
-                end
-                flush(stdout)
+                end)
             end
         end
         @debug "[PAINT→FILL] Successfully registered organ_mapping_updated listener"
@@ -5304,6 +5297,7 @@ function create_metadata_window(
 
     res = MetadataWindowResult(fig, channel_ref, lesion_db)
     res.trigger_m2 = obs_m2
+    res.set_compare_mode = obs_set_compare_mode
     on(menu_m2_mode.selection) do val
         if val !== nothing
             res.m2_mode[] = val

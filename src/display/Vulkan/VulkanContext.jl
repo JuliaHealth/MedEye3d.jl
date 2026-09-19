@@ -431,11 +431,22 @@ Tears down all Vulkan resources and closes the GLFW window.
 Vulkan.jl GC finalizers handle most resource destruction.
 """
 function destroy_vulkan_context!(ctx::VkCtx)
-    unwrap(device_wait_idle(ctx.device))
+    try
+        unwrap(device_wait_idle(ctx.device))
+    catch; end
+
+    if hasproperty(ctx.swapchain, :destructor) && ctx.swapchain.destructor !== nothing
+        try ctx.swapchain.destructor() catch; end
+    end
+    if hasproperty(ctx.surface, :destructor) && ctx.surface.destructor !== nothing
+        try ctx.surface.destructor() catch; end
+    end
 
     # Close the GLFW window (not a Vulkan handle, needs explicit cleanup)
-    if ctx.window.handle != C_NULL
-        GLFW.DestroyWindow(ctx.window)
+    if ctx.window !== nothing && ctx.window.handle != C_NULL
+        try
+            GLFW.DestroyWindow(ctx.window)
+        catch; end
         ctx.window.handle = C_NULL
     end
 
@@ -520,6 +531,35 @@ function recreate_secondary_swapchain!(ctx::VkCtx, sec::SecondaryVulkanWindow, n
     end
     cbai = CommandBufferAllocateInfo(ctx.command_pool, COMMAND_BUFFER_LEVEL_PRIMARY, UInt32(length(sc_images)))
     sec.command_buffers = unwrap(Vulkan.allocate_command_buffers(ctx.device, cbai))
+end
+
+"""
+    destroy_secondary_window!(ctx::VkCtx, sec::SecondaryVulkanWindow)
+
+Cleanly destroys secondary swapchain, surface, and window.
+"""
+function destroy_secondary_window!(ctx::VkCtx, sec::SecondaryVulkanWindow)
+    try
+        unwrap(device_wait_idle(ctx.device))
+    catch; end
+    if !isempty(sec.command_buffers)
+        try
+            Vulkan.free_command_buffers(ctx.device, ctx.command_pool, sec.command_buffers)
+            empty!(sec.command_buffers)
+        catch; end
+    end
+    if hasproperty(sec.swapchain, :destructor) && sec.swapchain.destructor !== nothing
+        try sec.swapchain.destructor() catch; end
+    end
+    if hasproperty(sec.surface, :destructor) && sec.surface.destructor !== nothing
+        try sec.surface.destructor() catch; end
+    end
+    if sec.window !== nothing && sec.window.handle != C_NULL
+        try
+            GLFW.DestroyWindow(sec.window)
+        catch; end
+        sec.window.handle = C_NULL
+    end
 end
 
 end # module VulkanContext
