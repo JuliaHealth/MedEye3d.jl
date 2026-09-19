@@ -888,33 +888,40 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     makie_screen = LesionMetadataWindow.display_metadata_window(makie_win.fig)
     
     # 6b. Multi-Monitor M2 Launcher
+    m2_window_cache = Ref{Any}(nothing)
     on(makie_win.trigger_m2) do _
-        println(">> [MULTI-MONITOR] Requesting Secondary Window spawn...")
-        # Create the window on the main thread (thread 1) to avoid X11/Wayland deadlocks
-        GLFW.WindowHint(GLFW.CLIENT_API, GLFW.NO_API)
-        new_window = GLFW.CreateWindow(1200, 800, "MedEye3D - Compare (M2)")
+        println(">> [MULTI-MONITOR] Requesting Secondary Window spawn (mode: $(makie_win.m2_mode[]))...")
         
-        if new_window !== nothing
-            GLFW.ShowWindow(new_window)
+        if m2_window_cache[] === nothing
+            # Create the window on the main thread (thread 1) to avoid X11/Wayland deadlocks
+            GLFW.WindowHint(GLFW.CLIENT_API, GLFW.NO_API)
+            new_window = GLFW.CreateWindow(1200, 800, "MedEye3D - Compare (M2)")
             
-            # Register callbacks on the main thread!
-            if length(mainViewer.states) >= 10
-                MedEye3d.ReactOnMouseClickAndDrag.registerMouseClickFunctions(new_window, mainViewer.states[6].calcDimsStruct, mainViewer.channel, 2)
-                MedEye3d.ReactToScroll.registerMouseScrollFunctions(new_window, mainViewer.channel, 2)
+            if new_window !== nothing
+                GLFW.ShowWindow(new_window)
+                m2_window_cache[] = new_window
                 
-                GLFW.SetFramebufferSizeCallback(new_window, (win, fb_w, fb_h) -> begin
-                    win_w, win_h = GLFW.GetWindowSize(win)
+                # Register callbacks on the main thread!
+                if length(mainViewer.states) >= 10
+                    MedEye3d.ReactOnMouseClickAndDrag.registerMouseClickFunctions(new_window, mainViewer.states[6].calcDimsStruct, mainViewer.channel, 2)
+                    MedEye3d.ReactToScroll.registerMouseScrollFunctions(new_window, mainViewer.channel, 2)
+                    
+                    GLFW.SetFramebufferSizeCallback(new_window, (win, fb_w, fb_h) -> begin
+                        win_w, win_h = GLFW.GetWindowSize(win)
+                        put!(mainViewer.channel, MedEye3d.MakieEvents.ResizeWindowEvent(Int(win_w), Int(win_h), Int(fb_w), Int(fb_h), 2))
+                    end)
+                    
+                    # Fire an initial resize event to ensure layout calculates correctly
+                    win_w, win_h = GLFW.GetWindowSize(new_window)
+                    fb_w, fb_h = GLFW.GetFramebufferSize(new_window)
                     put!(mainViewer.channel, MedEye3d.MakieEvents.ResizeWindowEvent(Int(win_w), Int(win_h), Int(fb_w), Int(fb_h), 2))
-                end)
-                
-                # Fire an initial resize event to ensure layout calculates correctly
-                win_w, win_h = GLFW.GetWindowSize(new_window)
-                fb_w, fb_h = GLFW.GetFramebufferSize(new_window)
-                put!(mainViewer.channel, MedEye3d.MakieEvents.ResizeWindowEvent(Int(win_w), Int(win_h), Int(fb_w), Int(fb_h), 2))
+                end
             end
         end
         
-        put!(mainViewer.channel, LaunchM2Event(1, new_window))
+        mode_val = makie_win.m2_mode[]
+        tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
+        put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], mode_val))
     end
 
 

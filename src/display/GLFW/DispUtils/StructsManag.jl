@@ -229,8 +229,8 @@ Returns enriched CalcDimsStruct.
 function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMode, imagePos::Int64)::CalcDimsStruct
   imagePos_mapped = imagePos > 5 ? imagePos - 5 : imagePos
 
-  # 0. If QuadImage and imagePos_mapped > 4, panel is hidden (only active as :RightHalf in compare mode)
-  if displayMode == QuadImage && imagePos_mapped > 4
+  # 0. Hide unused panels based on mode
+  if (displayMode == QuadImage && imagePos_mapped > 4) || (displayMode == MultiImage && imagePos_mapped > 2)
     res = zeros(Float32, 32)
     w_res = zeros(Float32, 32)
     return setproperties(calcDimStruct, (
@@ -267,7 +267,7 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
     panel_w = (total_w * frac) / 2.0
     panel_h = total_h
     ndc_mid_x = -1.0 + frac
-    if imagePos == 1  # Left Panel
+    if imagePos_mapped == 1  # Left Panel
       x_min = -1.0
       x_max = ndc_mid_x
     else              # Right Panel

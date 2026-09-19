@@ -149,7 +149,8 @@ end
 struct LaunchM2Event
     tp_index::Int
     window::Any
-    LaunchM2Event(tp_index::Int, window::Any=nothing) = new(tp_index, window)
+    mode::String
+    LaunchM2Event(tp_index::Int, window::Any=nothing, mode::String="Quad View") = new(tp_index, window, mode)
 end
 
 end # module MakieEvents
