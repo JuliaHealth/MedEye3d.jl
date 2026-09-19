@@ -923,6 +923,13 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
         put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], mode_val))
     end
+    
+    on(makie_win.m2_mode) do val
+        if m2_window_cache[] !== nothing
+            tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
+            put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], val))
+        end
+    end
 
 
     # 7. Warmup JIT & initial event synchronization
