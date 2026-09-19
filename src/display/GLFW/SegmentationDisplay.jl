@@ -814,17 +814,17 @@ function coordinateDisplay(
                             for i in 6:10
                                 stateInstances[i].displayMode = MultiImage
                             end
-                            prev_tp = max(0, channelData.tp_index - 1)
-                            curr_tp = channelData.tp_index
+                            left_tp = channelData.tp_index
+                            right_tp = MakieEventHandlers.compare_right_tp[]
                             
-                            entry_prev = MakieEventHandlers.get_or_load_tp_data(prev_tp)
-                            entry_curr = MakieEventHandlers.get_or_load_tp_data(curr_tp)
+                            entry_left = MakieEventHandlers.get_or_load_tp_data(left_tp)
+                            entry_right = MakieEventHandlers.get_or_load_tp_data(right_tp)
                             
-                            if entry_prev !== nothing
-                                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_prev, 6) # Left
+                            if entry_left !== nothing
+                                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_left, 6) # Left
                             end
-                            if entry_curr !== nothing
-                                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_curr, 7) # Right
+                            if entry_right !== nothing
+                                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_right, 7) # Right
                             end
                         end
                         
