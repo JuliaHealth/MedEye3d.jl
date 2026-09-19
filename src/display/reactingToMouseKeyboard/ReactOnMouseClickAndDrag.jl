@@ -147,14 +147,18 @@ mouseCoords_channel = Base.Channel{MouseStruct}(100)
 # we can fetch! on the channel, what is the next thing line, if the mouseStruct, check previous one by fetch. If it mouseStruct, aggregate those 2 and fetch the next one
 #fetch in while loop, until no more mouseStructs, then we have the last one, and we can react to it
 
-# Double-click zoom state for QuadImage mode
+# Double-click zoom state for QuadImage mode (independent per window: 1=Main, 2=M2)
 mutable struct QuadZoomState
     isZoomed::Bool
     zoomedPanel::Int
     savedVerts::Vector{Vector{Float32}}
     savedVertSizes::Vector{Int64}
 end
-const quadZoomState = QuadZoomState(false, 0, Vector{Float32}[], Int64[])
+const quadZoomStates = [
+    QuadZoomState(false, 0, Vector{Float32}[], Int64[]),
+    QuadZoomState(false, 0, Vector{Float32}[], Int64[])
+]
+const quadZoomState = quadZoomStates[1]
 
 
 """
@@ -216,12 +220,18 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     first_mouse = mouseStructArray[1]
     if !isempty(first_mouse.lastCoordinates)
         x, y = first_mouse.lastCoordinates[1][1], first_mouse.lastCoordinates[1][2]
-        viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
-        viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
-        actualW = first_mouse.actualWindowWidth > 0 ? Float64(first_mouse.actualWindowWidth) : viewportW
-        actualH = first_mouse.actualWindowHeight > 0 ? Float64(first_mouse.actualWindowHeight) : viewportH
-        
-        mainStates[1].switchIndex = _detect_clicked_panel(x, y, actualW, actualH, first_mouse.window_id, mainStates)
+        win_idx = clamp(first_mouse.window_id, 1, 2)
+        zoomState = quadZoomStates[win_idx]
+        if zoomState.isZoomed
+            mainStates[1].switchIndex = zoomState.zoomedPanel
+        else
+            viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
+            viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
+            actualW = first_mouse.actualWindowWidth > 0 ? Float64(first_mouse.actualWindowWidth) : viewportW
+            actualH = first_mouse.actualWindowHeight > 0 ? Float64(first_mouse.actualWindowHeight) : viewportH
+            
+            mainStates[1].switchIndex = _detect_clicked_panel(x, y, actualW, actualH, first_mouse.window_id, mainStates)
+        end
     end
 
     stateObject = mainStates[mainStates[1].switchIndex]
@@ -331,9 +341,11 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
     if activeDragPanel !== nothing && mousestr.isRightButtonDown
         mainState.switchIndex = activeDragPanel
     elseif !isempty(mouseCoords)
-        if quadZoomState.isZoomed
+        win_idx = clamp(mousestr.window_id, 1, 2)
+        zoomState = quadZoomStates[win_idx]
+        if zoomState.isZoomed
             # When zoomed, always target the zoomed panel
-            mainState.switchIndex = quadZoomState.zoomedPanel
+            mainState.switchIndex = zoomState.zoomedPanel
         else
             viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
             viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
@@ -813,24 +825,29 @@ function reactToDoubleClick(event::DoubleClickEvent, mainStates::Vector{StateDat
         return
     end
 
+    win_idx = clamp(event.window_id, 1, 2)
+    zoomState = quadZoomStates[win_idx]
+    is_m2 = (event.window_id == 2)
+    panel_range = (is_m2 && length(mainStates) >= 10) ? (6:10) : (1:min(5, length(mainStates)))
+
     # Determine which panel was clicked from cursor position
-    viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
-    viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
+    viewportW = Float64(mainStates[panel_range.start].calcDimsStruct.windowWidth)
+    viewportH = Float64(mainStates[panel_range.start].calcDimsStruct.windowHeight)
     actualW = event.actualWindowWidth > 0 ? Float64(event.actualWindowWidth) : viewportW
     actualH = event.actualWindowHeight > 0 ? Float64(event.actualWindowHeight) : viewportH
 
-    clickedPanel = if quadZoomState.isZoomed
-        quadZoomState.zoomedPanel  # when zoomed, always target the zoomed panel
+    clickedPanel = if zoomState.isZoomed
+        zoomState.zoomedPanel  # when zoomed, always target the zoomed panel
     else
         _detect_clicked_panel(event.x, event.y, actualW, actualH, event.window_id, mainStates)
     end
 
-    if !quadZoomState.isZoomed
-        @info "DOUBLE-CLICK ZOOM IN: panel=$clickedPanel (is_compare=$is_compare)"
-        quadZoomState.savedVerts = [copy(s.calcDimsStruct.mainImageQuadVert) for s in mainStates]
-        quadZoomState.savedVertSizes = [s.calcDimsStruct.mainQuadVertSize for s in mainStates]
-        quadZoomState.zoomedPanel = clickedPanel
-        quadZoomState.isZoomed = true
+    if !zoomState.isZoomed
+        @info "DOUBLE-CLICK ZOOM IN: panel=$clickedPanel (win=$(event.window_id))"
+        zoomState.savedVerts = [copy(mainStates[i].calcDimsStruct.mainImageQuadVert) for i in panel_range]
+        zoomState.savedVertSizes = [mainStates[i].calcDimsStruct.mainQuadVertSize for i in panel_range]
+        zoomState.zoomedPanel = clickedPanel
+        zoomState.isZoomed = true
 
         zoomedCalcDim = getMainVerticies(mainStates[clickedPanel].calcDimsStruct, SingleImage, 1)
         mainStates[clickedPanel].calcDimsStruct = setproperties(
@@ -838,9 +855,7 @@ function reactToDoubleClick(event::DoubleClickEvent, mainStates::Vector{StateDat
             (mainImageQuadVert = zoomedCalcDim.mainImageQuadVert,
              mainQuadVertSize  = zoomedCalcDim.mainQuadVertSize))
 
-        is_m2 = clickedPanel > 5
-        range_to_zoom = is_m2 ? (6:min(10, length(mainStates))) : (1:5)
-        for i in range_to_zoom
+        for i in panel_range
             if i != clickedPanel
                 mainStates[i].calcDimsStruct = setproperties(
                     mainStates[i].calcDimsStruct,
@@ -849,14 +864,16 @@ function reactToDoubleClick(event::DoubleClickEvent, mainStates::Vector{StateDat
             end
         end
     else
-        @info "DOUBLE-CLICK ZOOM OUT: restoring layout"
-        for i in 1:min(length(mainStates), length(quadZoomState.savedVerts))
-            mainStates[i].calcDimsStruct = setproperties(
-                mainStates[i].calcDimsStruct,
-                (mainImageQuadVert = quadZoomState.savedVerts[i],
-                 mainQuadVertSize  = quadZoomState.savedVertSizes[i]))
+        @info "DOUBLE-CLICK ZOOM OUT: restoring layout (win=$(event.window_id))"
+        for (offset, i) in enumerate(panel_range)
+            if offset <= length(zoomState.savedVerts)
+                mainStates[i].calcDimsStruct = setproperties(
+                    mainStates[i].calcDimsStruct,
+                    (mainImageQuadVert = zoomState.savedVerts[offset],
+                     mainQuadVertSize  = zoomState.savedVertSizes[offset]))
+            end
         end
-        quadZoomState.isZoomed = false
+        zoomState.isZoomed = false
     end
 end#reactToDoubleClick
 

@@ -101,6 +101,13 @@ function run_viewer_loop(mainViewer, makie_win=nothing)
                 GLFW.PollEvents()
                 sleep(0.01)
             end
+
+            println(">> [TEST_MODE] Testing double-click zoom & restore on Main Window...")
+            put!(mainViewer.channel, MedEye3d.ForDisplayStructs.DoubleClickEvent(x=100, y=100, actualWindowWidth=1100, actualWindowHeight=1100, window_id=1))
+            for _ in 1:10; GLFW.PollEvents(); sleep(0.01); end
+            put!(mainViewer.channel, MedEye3d.ForDisplayStructs.DoubleClickEvent(x=100, y=100, actualWindowWidth=1100, actualWindowHeight=1100, window_id=1))
+            for _ in 1:10; GLFW.PollEvents(); sleep(0.01); end
+
             if makie_win !== nothing
                 println(">> [TEST_MODE] Triggering M2 window launch in mode 'Compare Prev/Curr TP'...")
                 makie_win.m2_mode[] = "Compare Prev/Curr TP"
@@ -115,6 +122,12 @@ function run_viewer_loop(mainViewer, makie_win=nothing)
                     end
                     sleep(0.01)
                 end
+
+                println(">> [TEST_MODE] Testing double-click zoom & restore on M2 Window...")
+                put!(mainViewer.channel, MedEye3d.ForDisplayStructs.DoubleClickEvent(x=100, y=100, actualWindowWidth=1200, actualWindowHeight=800, window_id=2))
+                for _ in 1:10; GLFW.PollEvents(); sleep(0.01); end
+                put!(mainViewer.channel, MedEye3d.ForDisplayStructs.DoubleClickEvent(x=100, y=100, actualWindowWidth=1200, actualWindowHeight=800, window_id=2))
+                for _ in 1:10; GLFW.PollEvents(); sleep(0.01); end
             end
             println(">> [TEST_MODE] Test completed successfully without deadlocks or crashes!")
             try
@@ -145,7 +158,7 @@ function run_viewer_loop(mainViewer, makie_win=nothing)
             sleep(0.005)
         end
     catch e
-        # Channel closed or window terminated
+        @error "Exception in viewer loop: $e" exception=(e, catch_backtrace())
     finally
         try
             if isopen(mainViewer.channel)
