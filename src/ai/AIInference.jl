@@ -9,7 +9,7 @@ export run_helpnet_inference, run_skellytour_segmentation, run_bone_subsegmentat
 const _PROJECT_ROOT = abspath(joinpath(@__DIR__, "..", ".."))
 const DEFAULT_PYENV = let
     pyenv_path = joinpath(_PROJECT_ROOT, "pyenv", "bin", "python3")
-    isfile(pyenv_path) ? pyenv_path : "python3"  # fallback to system python
+    (isfile("/.dockerenv") || !isfile(pyenv_path)) ? "python3" : pyenv_path
 end
 const HELPNET_BUNDLE_DIR = let
     found = "/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/src/helpnet_inference_bundle"
