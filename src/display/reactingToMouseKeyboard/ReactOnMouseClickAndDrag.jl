@@ -158,6 +158,53 @@ const quadZoomState = QuadZoomState(false, 0, Vector{Float32}[], Int64[])
 
 
 """
+Determine which panel was clicked/hovered based on mouse cursor position and window layout.
+"""
+function _detect_clicked_panel(x::Real, y::Real, actualW::Real, actualH::Real, window_id::Int, mainStates::Vector{StateDataFields})::Int
+    if window_id == 2 && length(mainStates) >= 10
+        is_m2_two_panel = (length(mainStates) >= 8 &&
+            (!isempty(mainStates[8].calcDimsStruct.mainImageQuadVert) &&
+             mainStates[8].calcDimsStruct.mainImageQuadVert[1] == 0.0f0 &&
+             mainStates[8].calcDimsStruct.mainImageQuadVert[2] == 0.0f0))
+        if is_m2_two_panel
+            return x < actualW / 2.0 ? 6 : 7
+        else
+            if x < actualW / 2.0 && y < actualH / 2.0
+                return 6
+            elseif x >= actualW / 2.0 && y < actualH / 2.0
+                return 7
+            elseif x < actualW / 2.0 && y >= actualH / 2.0
+                return 8
+            else
+                return 9
+            end
+        end
+    else
+        is_compare = (length(mainStates) >= 5 &&
+            (!isempty(mainStates[3].calcDimsStruct.mainImageQuadVert) &&
+             mainStates[3].calcDimsStruct.mainImageQuadVert[1] == 0.0f0 &&
+             mainStates[3].calcDimsStruct.mainImageQuadVert[2] == 0.0f0))
+        if is_compare
+            return x < actualW / 2.0 ? 1 : 5
+        elseif length(mainStates) >= 4
+            if x < actualW / 2.0 && y < actualH / 2.0
+                return 1
+            elseif x >= actualW / 2.0 && y < actualH / 2.0
+                return 2
+            elseif x < actualW / 2.0 && y >= actualH / 2.0
+                return 3
+            else
+                return 4
+            end
+        elseif length(mainStates) > 1
+            return x < actualW / 2.0 ? 1 : 2
+        else
+            return 1
+        end
+    end
+end
+
+"""
 used when we want to save some manual modifications
 """
 function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector{StateDataFields})
@@ -174,35 +221,7 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
         actualW = first_mouse.actualWindowWidth > 0 ? Float64(first_mouse.actualWindowWidth) : viewportW
         actualH = first_mouse.actualWindowHeight > 0 ? Float64(first_mouse.actualWindowHeight) : viewportH
         
-        is_compare = false
-        if length(mainStates) >= 5
-            botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
-            if !isempty(botVerts) && botVerts[1] == 0.0f0 && botVerts[2] == 0.0f0
-                is_compare = true
-            end
-        end
-        
-        if is_compare
-            mainStates[1].switchIndex = x < actualW / 2.0 ? 1 : 5
-        elseif length(mainStates) >= 4
-            if x < actualW / 2.0 && y < actualH / 2.0
-                mainStates[1].switchIndex = 1
-            elseif x >= actualW / 2.0 && y < actualH / 2.0
-                mainStates[1].switchIndex = 2
-            elseif x < actualW / 2.0 && y >= actualH / 2.0
-                mainStates[1].switchIndex = 3
-            else
-                mainStates[1].switchIndex = 4
-            end
-        elseif length(mainStates) > 1
-            textBeginning, midPoint, imageRange = openGlSystemVals(mainStates[1].calcDimsStruct.fractionOfMainIm, mainStates[1].calcDimsStruct.windowWidth)
-            cursorXPosOpenGl = (x / mainStates[1].calcDimsStruct.windowWidth) * 2 - 1
-            if cursorXPosOpenGl > midPoint
-                mainStates[1].switchIndex = 2
-            else
-                mainStates[1].switchIndex = 1
-            end
-        end
+        mainStates[1].switchIndex = _detect_clicked_panel(x, y, actualW, actualH, first_mouse.window_id, mainStates)
     end
 
     stateObject = mainStates[mainStates[1].switchIndex]
@@ -312,55 +331,17 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
     if activeDragPanel !== nothing && mousestr.isRightButtonDown
         mainState.switchIndex = activeDragPanel
     elseif !isempty(mouseCoords)
-        if length(mainStates) >= 4 # QuadImage mode
-            if quadZoomState.isZoomed
-                # When zoomed, always target the zoomed panel
-                mainState.switchIndex = quadZoomState.zoomedPanel
-            else
-                # viewportW/H = requested window size used in glViewport (defines NDC→pixel mapping)
-                viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
-                viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
-                # actualW/H = GLFW content area (may be smaller if WM resized window to fit screen)
-                actualW = mousestr.actualWindowWidth > 0 ? Float64(mousestr.actualWindowWidth) : viewportW
-                actualH = mousestr.actualWindowHeight > 0 ? Float64(mousestr.actualWindowHeight) : viewportH
-                x, y = (mouseCoords[1][1], mouseCoords[1][2])
-                
-                # Detect compare mode: panels 3+4 are hidden (vertices zeroed out)
-                # In compare mode, left half = panel 1, right half = panel 5
-                is_compare = false
-                if length(mainStates) >= 5
-                    botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
-                    if !isempty(botVerts) && botVerts[1] == 0.0f0 && botVerts[2] == 0.0f0  # first X,Y coords are 0 = hidden
-                        is_compare = true
-                    end
-                end
-                
-                if is_compare
-                    # Compare mode: left = panel 1, right = panel 5
-                    # M2 window does not use compare mode internally for now
-                    mainState.switchIndex = x < actualW / 2.0 ? 1 : 5
-                else
-                    offset = (mousestr.window_id == 2 && length(mainStates) >= 10) ? 5 : 0
-                    # Quad view mode: standard 4-panel layout
-                    if x < actualW / 2.0 && y < actualH / 2.0
-                        mainStates[1].switchIndex = 1 + offset # Top-Left (Axial CT/PET)
-                    elseif x > actualW / 2.0 && y < actualH / 2.0
-                        mainStates[1].switchIndex = 2 + offset # Top-Right (Coronal CT/PET)
-                    elseif x < actualW / 2.0 && y > actualH / 2.0
-                        mainStates[1].switchIndex = 3 + offset # Bottom-Left (Sagittal CT/PET)
-                    else
-                        mainStates[1].switchIndex = 4 + offset # Bottom-Right (3D/MIP/Empty)
-                    end
-                end
-            end
-        elseif length(mainStates) > 1
-            textBeginning, midPoint, imageRange = openGlSystemVals(mainState.calcDimsStruct.fractionOfMainIm, mainState.calcDimsStruct.windowWidth)
-            cursorXPosOpenGl = (mouseCoords[1][1] / mainState.calcDimsStruct.windowWidth) * 2 - 1
-            if cursorXPosOpenGl > midPoint
-                mainState.switchIndex = 2
-            elseif cursorXPosOpenGl < midPoint
-                mainState.switchIndex = 1
-            end
+        if quadZoomState.isZoomed
+            # When zoomed, always target the zoomed panel
+            mainState.switchIndex = quadZoomState.zoomedPanel
+        else
+            viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)
+            viewportH = Float64(mainStates[1].calcDimsStruct.windowHeight)
+            actualW = mousestr.actualWindowWidth > 0 ? Float64(mousestr.actualWindowWidth) : viewportW
+            actualH = mousestr.actualWindowHeight > 0 ? Float64(mousestr.actualWindowHeight) : viewportH
+            x, y = (mouseCoords[1][1], mouseCoords[1][2])
+            
+            mainState.switchIndex = _detect_clicked_panel(x, y, actualW, actualH, mousestr.window_id, mainStates)
         end
     end # end !isempty(mouseCoords) for panel detection
     
@@ -838,32 +819,10 @@ function reactToDoubleClick(event::DoubleClickEvent, mainStates::Vector{StateDat
     actualW = event.actualWindowWidth > 0 ? Float64(event.actualWindowWidth) : viewportW
     actualH = event.actualWindowHeight > 0 ? Float64(event.actualWindowHeight) : viewportH
 
-    # Detect compare mode: panels 3+4 are hidden (vertices zeroed out)
-    # In compare mode, left half = panel 1, right half = panel 5
-    is_compare = false
-    if length(mainStates) >= 5
-        botVerts = mainStates[3].calcDimsStruct.mainImageQuadVert
-        if !isempty(botVerts) && botVerts[1] == 0.0f0 && botVerts[2] == 0.0f0
-            is_compare = true
-        end
-    end
-
     clickedPanel = if quadZoomState.isZoomed
         quadZoomState.zoomedPanel  # when zoomed, always target the zoomed panel
-    elseif is_compare
-        # In compare mode: left half = panel 1, right half = panel 5
-        event.x < actualW / 2.0 ? 1 : 5
     else
-        offset = (event.window_id == 2 && length(mainStates) >= 10) ? 5 : 0
-        glY = ((actualH - event.y) * 2.0 / viewportH) - 1.0
-        topVerts = mainStates[1 + offset].calcDimsStruct.mainImageQuadVert
-        botVerts = mainStates[3 + offset].calcDimsStruct.mainImageQuadVert
-        glMidY = (Float64(min(topVerts[10], topVerts[18])) + Float64(max(botVerts[2], botVerts[26]))) / 2.0
-        if event.x < actualW / 2.0 && glY > glMidY; 1 + offset
-        elseif event.x >= actualW / 2.0 && glY > glMidY; 2 + offset
-        elseif event.x < actualW / 2.0 && glY <= glMidY; 3 + offset
-        else; 4 + offset
-        end
+        _detect_clicked_panel(event.x, event.y, actualW, actualH, event.window_id, mainStates)
     end
 
     if !quadZoomState.isZoomed

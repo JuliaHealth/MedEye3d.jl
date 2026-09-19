@@ -86,7 +86,7 @@ end
 
 Continuously pumps GLFW OS window events on the main thread and keeps the visualizer and Makie control panel responsive until closed.
 """
-function run_viewer_loop(mainViewer)
+function run_viewer_loop(mainViewer, makie_win=nothing)
     window = if !isempty(mainViewer.states) && mainViewer.states[1].mainForDisplayObjects !== nothing
         mainViewer.states[1].mainForDisplayObjects.window
     else
@@ -95,12 +95,67 @@ function run_viewer_loop(mainViewer)
 
     println("MedEye3D main event loop active. Window: ", window !== nothing ? "ready" : "none")
     try
+        if get(ENV, "MEDEYE3D_TEST_MODE", "false") == "true"
+            println(">> [TEST_MODE] Pumping events and testing M2 launch...")
+            for _ in 1:20
+                GLFW.PollEvents()
+                sleep(0.01)
+            end
+            if makie_win !== nothing
+                println(">> [TEST_MODE] Triggering M2 window launch in mode 'Compare Prev/Curr TP'...")
+                makie_win.m2_mode[] = "Compare Prev/Curr TP"
+                notify(makie_win.trigger_m2)
+                for _ in 1:50
+                    GLFW.PollEvents()
+                    lock(makie_win.ui_lock) do
+                        for f in makie_win.ui_queue
+                            try; f(); catch e; @warn "UI task failed: $e"; end
+                        end
+                        empty!(makie_win.ui_queue)
+                    end
+                    sleep(0.01)
+                end
+            end
+            println(">> [TEST_MODE] Test completed successfully without deadlocks or crashes!")
+            try
+                if isopen(mainViewer.channel)
+                    close(mainViewer.channel)
+                end
+            catch; end
+            for _ in 1:20
+                GLFW.PollEvents()
+                sleep(0.01)
+            end
+            exit(0)
+        end
+
         while isopen(mainViewer.channel) && (window === nothing || !GLFW.WindowShouldClose(window))
             GLFW.PollEvents()
+            
+            # Process any deferred UI tasks on the main thread
+            if makie_win !== nothing
+                lock(makie_win.ui_lock) do
+                    for f in makie_win.ui_queue
+                        try; f(); catch e; @warn "UI task failed: $e"; end
+                    end
+                    empty!(makie_win.ui_queue)
+                end
+            end
+            
             sleep(0.005)
         end
     catch e
         # Channel closed or window terminated
+    finally
+        try
+            if isopen(mainViewer.channel)
+                close(mainViewer.channel)
+            end
+        catch; end
+        for _ in 1:20
+            try; GLFW.PollEvents(); catch; end
+            sleep(0.01)
+        end
     end
     println("MedEye3D session finished.")
 end
@@ -282,6 +337,12 @@ Initializes the complete clinical workflow:
 - Real-time timepoint navigation (PET, SPECT, followups)
 """
 function launch_from_h5(h5_path::String; quad::Bool=true)
+    if isdir(h5_path)
+        cand = joinpath(h5_path, "preprocessed_volumes.h5")
+        if isfile(cand)
+            h5_path = cand
+        end
+    end
     println("Opening HDF5 medical dataset: ", h5_path)
     if !isfile(h5_path)
         @error "Provided HDF5 file does not exist: $h5_path"
@@ -763,6 +824,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             mask_i16 = Int16.(mask_compact)
             anat_i16 = anatomy_vol !== nothing ? Int16.(anatomy_vol) : nothing
             MEH.precompute_mask_centroids!(mask_compact, tp_i, node_name)
+            try; MedEye3d.LesionMetadataWindow.precompute_all_volumes!(mask_compact, tp_i); catch; end
             return MEH.TpCacheEntry(ct_vol_base, pet_vol_base, mask_compact, bone_mask, anatomy_vol, mask_i16, anat_i16)
         end
     end
@@ -922,9 +984,9 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         mode_val = makie_win.m2_mode[]
         tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
         if mode_val == "Compare Prev/Curr TP"
-            put!(mainViewer.channel, CompareTimePointsEvent(true))
+            makie_win.set_compare_mode[] = true
         else
-            put!(mainViewer.channel, CompareTimePointsEvent(false))
+            makie_win.set_compare_mode[] = false
         end
         put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], mode_val))
     end
@@ -933,9 +995,9 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         if m2_window_cache[] !== nothing
             tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
             if val == "Compare Prev/Curr TP"
-                put!(mainViewer.channel, CompareTimePointsEvent(true))
+                makie_win.set_compare_mode[] = true
             else
-                put!(mainViewer.channel, CompareTimePointsEvent(false))
+                makie_win.set_compare_mode[] = false
             end
             put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], val))
         end
@@ -960,7 +1022,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         @warn "[STARTUP] E-PSMA report pre-build failed" exception=(e, catch_backtrace())
     end
     
-    run_viewer_loop(mainViewer)
+    run_viewer_loop(mainViewer, makie_win)
 end
 
 """

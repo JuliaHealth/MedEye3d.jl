@@ -22,6 +22,8 @@ const GLOBAL_OPENGL_LOCK = ReentrantLock()
 const _report_hide_flag = Ref{Bool}(false)
 const _report_screen_ref = Ref{Any}(nothing)
 const _first_screen_ref = Ref{Any}(nothing)  # First renderloop = main window (self-registered)
+const _m2_glfw_ref = Ref{Any}(nothing)
+const _m2_vk_ref = Ref{Any}(nothing)
 
 function synchronized_makie_renderloop(screen)
     # Find GLMakie from loaded modules — it may not be in Main scope
@@ -116,6 +118,20 @@ function reactToResizeWindow(data::ResizeWindowEvent, stateObjects::Vector{State
                 end
             catch e
                 @warn "Error recreating Vulkan swapchain: $e"
+            end
+        elseif data.window_id == 2
+            try
+                if _m2_vk_ref[] !== nothing && data.fb_width > 0 && data.fb_height > 0
+                    sec = _m2_vk_ref[]
+                    if sec.swapchain_extent.width != UInt32(data.fb_width) || sec.swapchain_extent.height != UInt32(data.fb_height)
+                        vk_ctx = stateObjects[1].mainForDisplayObjects.vulkanCtx
+                        if vk_ctx !== nothing
+                            VulkanContext.recreate_secondary_swapchain!(vk_ctx, sec, Int(data.fb_width), Int(data.fb_height))
+                        end
+                    end
+                end
+            catch e
+                @warn "Error recreating secondary Vulkan swapchain: $e"
             end
         end
     end
@@ -672,8 +688,8 @@ function coordinateDisplay(
         _vk_main_panels = VulkanRender.PanelRenderData[]
         _vk_m2_panels = VulkanRender.PanelRenderData[]
         _push_consts = Vector{Float32}(undef, 12)  # scale(2) + offset(2) + ndc(4) + crosshairUV(2) + showCrosshair+pad(2)
-        m2_glfw = Ref{Any}(nothing)
-        m2_vk = Ref{Any}(nothing)
+        m2_glfw = _m2_glfw_ref
+        m2_vk = _m2_vk_ref
         while !shouldStop[1]
             try
                 channelData = take!(mainChannel)
@@ -789,6 +805,17 @@ function coordinateDisplay(
                     if m2_glfw[] !== nothing && length(stateInstances) >= 10
                         @info "Configuring M2 window for mode: $(channelData.mode)..."
                         
+                        m2_ext = m2_vk[] !== nothing ? m2_vk[].swapchain_extent : nothing
+                        cur_w = m2_ext !== nothing ? Int(m2_ext.width) : 1200
+                        cur_h = m2_ext !== nothing ? Int(m2_ext.height) : 800
+                        
+                        for i in 6:10
+                            stateInstances[i].calcDimsStruct.windowWidth = Int64(cur_w)
+                            stateInstances[i].calcDimsStruct.windowHeight = Int64(cur_h)
+                            stateInstances[i].calcDimsStruct.avWindWidtForMain = Int32(cur_w)
+                            stateInstances[i].calcDimsStruct.avWindHeightForMain = Int32(cur_h)
+                        end
+                        
                         if channelData.mode == "Quad View"
                             for i in 6:10
                                 stateInstances[i].displayMode = QuadImage
@@ -799,6 +826,11 @@ function coordinateDisplay(
                                     MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, i)
                                 end
                             end
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[6], :TopLeft)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[7], :TopRight)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
                         elseif channelData.mode == "Left CT, Right PET"
                             for i in 6:10
                                 stateInstances[i].displayMode = MultiImage
@@ -807,15 +839,28 @@ function coordinateDisplay(
                             if entry !== nothing
                                 MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 6) # CT/PET (Panel 1)
                                 MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 7) # PET only (Panel 2)
-                                # Force Panel 6 to CT only (opacity 0) if it's currently CT+PET
-                                # Actually, user can toggle it manually, or we can leave it as whatever Panel 1 is.
                             end
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[6], :LeftHalf)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[7], :RightHalf)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[8], :Hidden)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[9], :Hidden)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
                         elseif channelData.mode == "Compare Prev/Curr TP"
                             for i in 6:10
                                 stateInstances[i].displayMode = MultiImage
                             end
                             left_tp = channelData.tp_index
                             right_tp = MakieEventHandlers.compare_right_tp[]
+                            if right_tp < 0
+                                tp_indices = sort(collect(keys(MakieEventHandlers.tp_labels)))
+                                if !isempty(tp_indices)
+                                    cur_pos = findfirst(==(left_tp), tp_indices)
+                                    cur_pos = cur_pos === nothing ? 1 : cur_pos
+                                    next_pos = mod1(cur_pos + 1, length(tp_indices))
+                                    right_tp = tp_indices[next_pos]
+                                    MakieEventHandlers.compare_right_tp[] = right_tp
+                                end
+                            end
                             
                             entry_left = MakieEventHandlers.get_or_load_tp_data(left_tp)
                             entry_right = MakieEventHandlers.get_or_load_tp_data(right_tp)
@@ -826,22 +871,24 @@ function coordinateDisplay(
                             if entry_right !== nothing
                                 MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_right, 7) # Right
                             end
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[6], :LeftHalf)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[7], :RightHalf)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[8], :Hidden)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[9], :Hidden)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
                         end
                         
-                        # Sync base coordinates with main window
+                        # Sync base coordinates with main window and upload textures
                         for i in 6:10
                             stateInstances[i].onScrollData.dimensionToScroll = stateInstances[i-5].onScrollData.dimensionToScroll
                             stateInstances[i].currentDisplayedSlice = stateInstances[i-5].currentDisplayedSlice
                             stateInstances[i].calcDimsStruct.zoom = stateInstances[i-5].calcDimsStruct.zoom
                             stateInstances[i].calcDimsStruct.panX = stateInstances[i-5].calcDimsStruct.panX
                             stateInstances[i].calcDimsStruct.panY = stateInstances[i-5].calcDimsStruct.panY
-                            MakieEventHandlers._force_texture_upload!(stateInstances, i)
+                            if stateInstances[i].calcDimsStruct.mainQuadVertSize > 0 && !all(iszero, stateInstances[i].calcDimsStruct.mainImageQuadVert)
+                                MakieEventHandlers._force_texture_upload!(stateInstances, i)
+                            end
                         end
-                        
-                        # Trigger an immediate layout refresh
-                        win_w, win_h = GLFW.GetWindowSize(m2_glfw[])
-                        fb_w, fb_h = GLFW.GetFramebufferSize(m2_glfw[])
-                        put!(mainChannel, ResizeWindowEvent(Int(win_w), Int(win_h), Int(fb_w), Int(fb_h), 2))
                     end
                 elseif typeof(channelData) == CalcDimsStruct || typeof(channelData) == forDisplayObjects || typeof(channelData) == FullScrollableDat
                     stateInstances[1].switchIndex = channelData.imagePos
@@ -1018,8 +1065,8 @@ function coordinateDisplay(
                         push_consts[11] = show_crosshair; push_consts[12] = 0.0f0
 
                         
-                        w = Float32(obj.vulkanCtx.width)
-                        h = Float32(obj.vulkanCtx.height)
+                        w = (panel_idx > 5 && m2_vk[] !== nothing) ? Float32(m2_vk[].swapchain_extent.width) : Float32(obj.vulkanCtx.width)
+                        h = (panel_idx > 5 && m2_vk[] !== nothing) ? Float32(m2_vk[].swapchain_extent.height) : Float32(obj.vulkanCtx.height)
                         
                         panel = VulkanRender.PanelRenderData(
                             obj.vulkanPipelineState,
@@ -1051,7 +1098,11 @@ function coordinateDisplay(
                     
                     if m2_vk[] !== nothing && m2_glfw[] !== nothing
                         if GLFW.WindowShouldClose(m2_glfw[])
-                            GLFW.DestroyWindow(m2_glfw[])
+                            try
+                                VulkanContext.destroy_secondary_window!(vk_ctx, m2_vk[])
+                            catch e
+                                @warn "Failed to destroy secondary window cleanly: $e"
+                            end
                             m2_glfw[] = nothing
                             m2_vk[] = nothing
                         else
@@ -1102,6 +1153,17 @@ function coordinateDisplay(
                 end
             end
         end
+        # Clean shutdown of secondary window and Vulkan device
+        if m2_vk[] !== nothing
+            try
+                VulkanContext.destroy_secondary_window!(vk_ctx, m2_vk[])
+            catch; end
+            m2_glfw[] = nothing
+            m2_vk[] = nothing
+        end
+        try
+            VulkanContext.destroy_vulkan_context!(vk_ctx)
+        catch; end
     end #end of consumer
 
     # Release context from the main thread so the background consumer task can claim it (or just release it)
