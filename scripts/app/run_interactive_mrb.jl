@@ -236,10 +236,14 @@ if bone_subseg_count == 0
     legacy_bone_h5 = joinpath(data_dir_pat6, "Bone_Subsegments_0.h5")
     if isfile(legacy_bone_h5)
         println("  Falling back to legacy Bone_Subsegments_0.h5...")
-        HDF5.h5open(legacy_bone_h5, "r") do h5
-            global bone_subseg_count = _load_bone_subseg_from_group!(h5)
+        try
+            HDF5.h5open(legacy_bone_h5, "r") do h5
+                global bone_subseg_count = _load_bone_subseg_from_group!(h5)
+            end
+            println("  Loaded $bone_subseg_count bone subsegment pairs from legacy file")
+        catch e
+            @warn "Failed to load legacy Bone_Subsegments_0.h5 (may be corrupted): $e"
         end
-        println("  Loaded $bone_subseg_count bone subsegment pairs from legacy file")
     end
 end
 
