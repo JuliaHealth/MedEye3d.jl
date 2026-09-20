@@ -24,7 +24,7 @@ const _report_screen_ref = Ref{Any}(nothing)
 const _first_screen_ref = Ref{Any}(nothing)  # First renderloop = main window (self-registered)
 const _m2_glfw_ref = Ref{Any}(nothing)
 const _m2_vk_ref = Ref{Any}(nothing)
-
+const _current_m2_mode = Ref("Pure PET (Current TP)")
 function synchronized_makie_renderloop(screen)
     # Find GLMakie from loaded modules — it may not be in Main scope
     # (e.g., when imported inside a submodule like LesionMetadataWindow)
@@ -90,6 +90,151 @@ function synchronized_makie_renderloop(screen)
 end
 
 # switch_gl_context! removed — Vulkan doesn't use GL context switching
+function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String, tp_index::Int; load_data::Bool = true)
+    _current_m2_mode[] = mode
+    if mode == "Pure PET (Current TP)"
+        for i in 6:10
+            stateInstances[i].displayMode = QuadImage
+        end
+        if load_data
+            entry = MakieEventHandlers.get_or_load_tp_data(tp_index)
+            if entry !== nothing
+                for i in 6:9
+                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, i)
+                end
+            end
+        end
+        MakieEventHandlers.updateQuadVertices!(stateInstances[6], :TopLeft)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[7], :TopRight)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
+        
+        # Force PET blend to 100% for these panels
+        for i in 6:9
+            for tex in stateInstances[i].mainForDisplayObjects.listOfTextSpecifications
+                if tex.isNuclearMask && !tex.isMainImage
+                    tex.maskContribution = 1.0f0
+                end
+            end
+        end
+        ReactToScroll._pet_blend_ref_w2[] = 1.0f0
+    elseif mode == "Next TP (Quad View)"
+        for i in 6:10
+            stateInstances[i].displayMode = QuadImage
+        end
+        if load_data
+            tp_indices = sort(collect(keys(MakieEventHandlers.tp_labels)))
+            next_tp = tp_index
+            if !isempty(tp_indices)
+                cur_pos = findfirst(==(tp_index), tp_indices)
+                cur_pos = cur_pos === nothing ? 1 : cur_pos
+                next_pos = mod1(cur_pos + 1, length(tp_indices))
+                next_tp = tp_indices[next_pos]
+            end
+            entry_next = MakieEventHandlers.get_or_load_tp_data(next_tp)
+            if entry_next !== nothing
+                for i in 6:9
+                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_next, i)
+                end
+            end
+        end
+        MakieEventHandlers.updateQuadVertices!(stateInstances[6], :TopLeft)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[7], :TopRight)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
+    elseif mode == "Left CT, Right PET" || mode == "Left CT, Right PET (Current TP)"
+        for i in 6:10
+            stateInstances[i].displayMode = MultiImage
+        end
+        if load_data
+            entry = MakieEventHandlers.get_or_load_tp_data(tp_index)
+            if entry !== nothing
+                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 6) # CT/PET (Panel 1)
+                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 7) # PET only (Panel 2)
+            end
+        end
+        MakieEventHandlers.updateQuadVertices!(stateInstances[6], :LeftHalf)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[7], :RightHalf)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[8], :Hidden)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[9], :Hidden)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
+    elseif mode == "Compare Curr/Next TP"
+        for i in 6:10
+            stateInstances[i].displayMode = MultiImage
+        end
+        if load_data
+            left_tp = tp_index
+            right_tp = MakieEventHandlers.compare_right_tp[]
+            if right_tp < 0
+                tp_indices = sort(collect(keys(MakieEventHandlers.tp_labels)))
+                if !isempty(tp_indices)
+                    cur_pos = findfirst(==(left_tp), tp_indices)
+                    cur_pos = cur_pos === nothing ? 1 : cur_pos
+                    next_pos = mod1(cur_pos + 1, length(tp_indices))
+                    right_tp = tp_indices[next_pos]
+                    MakieEventHandlers.compare_right_tp[] = right_tp
+                end
+            end
+            
+            entry_left = MakieEventHandlers.get_or_load_tp_data(left_tp)
+            entry_right = MakieEventHandlers.get_or_load_tp_data(right_tp)
+            
+            if entry_left !== nothing
+                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_left, 6) # Left
+            end
+            if entry_right !== nothing
+                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_right, 10) # Right
+            end
+        end
+        MakieEventHandlers.updateQuadVertices!(stateInstances[6], :LeftHalf)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[7], :Hidden)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[8], :Hidden)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[9], :Hidden)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[10], :RightHalf)
+    else # "Quad View" or "Current TP (Quad View)"
+        for i in 6:10
+            stateInstances[i].displayMode = QuadImage
+        end
+        if load_data
+            entry = MakieEventHandlers.get_or_load_tp_data(tp_index)
+            if entry !== nothing
+                for i in 6:9
+                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, i)
+                end
+            end
+        end
+        MakieEventHandlers.updateQuadVertices!(stateInstances[6], :TopLeft)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[7], :TopRight)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
+    end
+    
+    # Sync base coordinates with main window and upload textures
+    if load_data
+        for i in 6:10
+            target_ref = i - 5
+            if target_ref > 1 && stateInstances[target_ref].currentDisplayedSlice <= 0
+                target_ref = 1
+            end
+            stateInstances[i].onScrollData.dimensionToScroll = stateInstances[target_ref].onScrollData.dimensionToScroll
+            stateInstances[i].currentDisplayedSlice = stateInstances[target_ref].currentDisplayedSlice
+            stateInstances[i].onScrollData.slicesNumber = stateInstances[target_ref].onScrollData.slicesNumber
+            stateInstances[i].calcDimsStruct.zoom = stateInstances[target_ref].calcDimsStruct.zoom
+            stateInstances[i].calcDimsStruct.panX = stateInstances[target_ref].calcDimsStruct.panX
+            stateInstances[i].calcDimsStruct.panY = stateInstances[target_ref].calcDimsStruct.panY
+            stateInstances[i].calcDimsStruct.imageTextureWidth = stateInstances[target_ref].calcDimsStruct.imageTextureWidth
+            stateInstances[i].calcDimsStruct.imageTextureHeight = stateInstances[target_ref].calcDimsStruct.imageTextureHeight
+            stateInstances[i].calcDimsStruct.heightToWithRatio = stateInstances[target_ref].calcDimsStruct.heightToWithRatio
+
+            if stateInstances[i].calcDimsStruct.mainQuadVertSize > 0 && !all(iszero, stateInstances[i].calcDimsStruct.mainImageQuadVert)
+                MakieEventHandlers._force_texture_upload!(stateInstances, i)
+            end
+        end
+    end
+end
 
 function reactToResizeWindow(data::ResizeWindowEvent, stateObjects::Vector{StateDataFields})
     if data.width > 0 && data.height > 0
@@ -102,10 +247,20 @@ function reactToResizeWindow(data::ResizeWindowEvent, stateObjects::Vector{State
             state.calcDimsStruct.avWindHeightForMain = Int32(data.height)
             state.calcDimsStruct.avMainImRatio = Float32(data.height / max(1, state.calcDimsStruct.avWindWidtForMain))
             
+            if data.window_id == 1
+                try
+                    state.calcDimsStruct = StructsManag.getMainVerticies(state.calcDimsStruct, state.displayMode, state.calcDimsStruct.imagePos)
+                catch e
+                    @warn "Error updating quad vertices on window resize: $e"
+                end
+            end
+        end
+        if data.window_id == 2
             try
-                state.calcDimsStruct = StructsManag.getMainVerticies(state.calcDimsStruct, state.displayMode, state.calcDimsStruct.imagePos)
+                cur_tp = MakieEventHandlers.current_tp_index[]
+                apply_m2_layout!(stateObjects, _current_m2_mode[], cur_tp; load_data=false)
             catch e
-                @warn "Error updating quad vertices on window resize: $e"
+                @warn "Error applying M2 layout on resize: $e"
             end
         end
         # Recreate Vulkan swapchain for Main Window ONLY
@@ -816,116 +971,7 @@ function coordinateDisplay(
                             stateInstances[i].calcDimsStruct.avWindHeightForMain = Int32(cur_h)
                         end
                         
-                        if channelData.mode == "Pure PET (Current TP)"
-                            for i in 6:10
-                                stateInstances[i].displayMode = SingleImage
-                            end
-                            entry = MakieEventHandlers.get_or_load_tp_data(channelData.tp_index)
-                            if entry !== nothing
-                                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 7)
-                            end
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[6], :Hidden)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[7], :SingleImage)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[8], :Hidden)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[9], :Hidden)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
-                        elseif channelData.mode == "Next TP (Quad View)"
-                            for i in 6:10
-                                stateInstances[i].displayMode = QuadImage
-                            end
-                            tp_indices = sort(collect(keys(MakieEventHandlers.tp_labels)))
-                            next_tp = channelData.tp_index
-                            if !isempty(tp_indices)
-                                cur_pos = findfirst(==(channelData.tp_index), tp_indices)
-                                cur_pos = cur_pos === nothing ? 1 : cur_pos
-                                next_pos = mod1(cur_pos + 1, length(tp_indices))
-                                next_tp = tp_indices[next_pos]
-                            end
-                            entry_next = MakieEventHandlers.get_or_load_tp_data(next_tp)
-                            if entry_next !== nothing
-                                for i in 6:9
-                                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_next, i)
-                                end
-                            end
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[6], :TopLeft)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[7], :TopRight)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
-                        elseif channelData.mode == "Left CT, Right PET" || channelData.mode == "Left CT, Right PET (Current TP)"
-                            for i in 6:10
-                                stateInstances[i].displayMode = MultiImage
-                            end
-                            entry = MakieEventHandlers.get_or_load_tp_data(channelData.tp_index)
-                            if entry !== nothing
-                                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 6) # CT/PET (Panel 1)
-                                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 7) # PET only (Panel 2)
-                            end
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[6], :LeftHalf)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[7], :RightHalf)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[8], :Hidden)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[9], :Hidden)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
-                        elseif channelData.mode == "Compare Prev/Curr TP"
-                            for i in 6:10
-                                stateInstances[i].displayMode = MultiImage
-                            end
-                            left_tp = channelData.tp_index
-                            right_tp = MakieEventHandlers.compare_right_tp[]
-                            if right_tp < 0
-                                tp_indices = sort(collect(keys(MakieEventHandlers.tp_labels)))
-                                if !isempty(tp_indices)
-                                    cur_pos = findfirst(==(left_tp), tp_indices)
-                                    cur_pos = cur_pos === nothing ? 1 : cur_pos
-                                    next_pos = mod1(cur_pos + 1, length(tp_indices))
-                                    right_tp = tp_indices[next_pos]
-                                    MakieEventHandlers.compare_right_tp[] = right_tp
-                                end
-                            end
-                            
-                            entry_left = MakieEventHandlers.get_or_load_tp_data(left_tp)
-                            entry_right = MakieEventHandlers.get_or_load_tp_data(right_tp)
-                            
-                            if entry_left !== nothing
-                                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_left, 6) # Left
-                            end
-                            if entry_right !== nothing
-                                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_right, 7) # Right
-                            end
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[6], :LeftHalf)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[7], :RightHalf)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[8], :Hidden)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[9], :Hidden)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
-                        else # "Quad View" or "Current TP (Quad View)"
-                            for i in 6:10
-                                stateInstances[i].displayMode = QuadImage
-                            end
-                            entry = MakieEventHandlers.get_or_load_tp_data(channelData.tp_index)
-                            if entry !== nothing
-                                for i in 6:9
-                                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, i)
-                                end
-                            end
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[6], :TopLeft)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[7], :TopRight)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
-                            MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
-                        end
-                        
-                        # Sync base coordinates with main window and upload textures
-                        for i in 6:10
-                            target_ref = (channelData.mode == "Pure PET (Current TP)" && i == 7) ? 1 : (i - 5)
-                            stateInstances[i].onScrollData.dimensionToScroll = stateInstances[target_ref].onScrollData.dimensionToScroll
-                            stateInstances[i].currentDisplayedSlice = stateInstances[target_ref].currentDisplayedSlice
-                            stateInstances[i].calcDimsStruct.zoom = stateInstances[target_ref].calcDimsStruct.zoom
-                            stateInstances[i].calcDimsStruct.panX = stateInstances[target_ref].calcDimsStruct.panX
-                            stateInstances[i].calcDimsStruct.panY = stateInstances[target_ref].calcDimsStruct.panY
-                            if stateInstances[i].calcDimsStruct.mainQuadVertSize > 0 && !all(iszero, stateInstances[i].calcDimsStruct.mainImageQuadVert)
-                                MakieEventHandlers._force_texture_upload!(stateInstances, i)
-                            end
-                        end
+                        apply_m2_layout!(stateInstances, channelData.mode, channelData.tp_index)
                     end
                 elseif typeof(channelData) == CalcDimsStruct || typeof(channelData) == forDisplayObjects || typeof(channelData) == FullScrollableDat
                     stateInstances[1].switchIndex = channelData.imagePos
@@ -934,9 +980,20 @@ function coordinateDisplay(
                 if !(channelData isa MouseStruct) && !(channelData isa Vector{MouseStruct}) && !(channelData isa Int64)
                     @debug "[CONSUMER] dispatch" event_type=string(typeof(channelData))
                 end
+                # Breadcrumb: log dangerous events (CompareTimePoints, SetTimePoint) before dispatch
+                if channelData isa CompareTimePointsEvent
+                    println("[CONSUMER] >>> CompareTimePointsEvent(compare=$(channelData.compare)) — DISPATCHING"); flush(stdout)
+                elseif channelData isa SetTimePointEvent
+                    println("[CONSUMER] >>> SetTimePointEvent — DISPATCHING"); flush(stdout)
+                end
                 _t_dispatch = time_ns()
                 on_next!(stateInstances, channelData)
                 _t_after_dispatch = time_ns()
+                if channelData isa CompareTimePointsEvent
+                    println("[CONSUMER] <<< CompareTimePointsEvent DONE in $(round((_t_after_dispatch - _t_dispatch)/1e6, digits=1))ms"); flush(stdout)
+                elseif channelData isa SetTimePointEvent
+                    println("[CONSUMER] <<< SetTimePointEvent DONE in $(round((_t_after_dispatch - _t_dispatch)/1e6, digits=1))ms"); flush(stdout)
+                end
                 
                 # Mark UBO dirty for events that may change uniform parameters
                 # (visibility toggles, ctrl+scroll windowing, mask contribution, etc.)
@@ -993,10 +1050,20 @@ function coordinateDisplay(
                     _t_before_upload = time_ns()
                     _n_uploaded = length(_upload_batch)
                     if !isempty(_upload_batch) && vk_ctx !== nothing && vk_ctx.staging_pool !== nothing
+                        # Breadcrumb log: survives SIGSEGV since flushed before unsafe ops
+                        if MakieEventHandlers.DEBUG_VERBOSE[]
+                            for (bi, bitem) in enumerate(_upload_batch)
+                                println("  [VK-UPLOAD] item $bi: name=$(bitem.texture.name) data=$(size(bitem.data)) tex=$(bitem.texture.width)x$(bitem.texture.height) fmt=$(bitem.texture.format) eltype=$(eltype(bitem.data))"); flush(stdout)
+                            end
+                        end
                         try
                             VulkanStaging.upload_textures_batched!(vk_ctx, vk_ctx.staging_pool, _upload_batch)
                         catch e
-                            @warn "Batched Vulkan texture upload failed" exception=e
+                            println("[CRASH-GUARD] Vulkan upload FAILED: $e"); flush(stdout)
+                            for (st_i, st_line) in enumerate(stacktrace(catch_backtrace()))
+                                st_i > 15 && break
+                                println("  [$st_i] $st_line"); flush(stdout)
+                            end
                         end
                     end
                     _t_after_upload = time_ns()

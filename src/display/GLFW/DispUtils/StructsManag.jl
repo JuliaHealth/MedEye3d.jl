@@ -230,7 +230,7 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
   imagePos_mapped = imagePos > 5 ? imagePos - 5 : imagePos
 
   # 0. Hide unused panels based on mode
-  if (displayMode == QuadImage && imagePos_mapped > 4) || (displayMode == MultiImage && imagePos_mapped > 2)
+  if imagePos_mapped < 1 || (displayMode == QuadImage && imagePos_mapped > 4) || (displayMode == MultiImage && imagePos_mapped > 2 && imagePos_mapped != 5)
     res = zeros(Float32, 32)
     w_res = zeros(Float32, 32)
     return setproperties(calcDimStruct, (

@@ -130,6 +130,8 @@ end
 
 struct PetBlendEvent
     weight :: Float32  # 0.0 = CT only, 1.0 = full PET overlay
+    window_id :: Int
+    PetBlendEvent(w::Float32, win::Int=0) = new(w, win)
 end
 
 struct ScreenshotEvent
@@ -150,7 +152,7 @@ struct LaunchM2Event
     tp_index::Int
     window::Any
     mode::String
-    LaunchM2Event(tp_index::Int, window::Any=nothing, mode::String="Quad View") = new(tp_index, window, mode)
+    LaunchM2Event(tp_index::Int, window::Any=nothing, mode::String="Pure PET (Current TP)") = new(tp_index, window, mode)
 end
 
 end # module MakieEvents

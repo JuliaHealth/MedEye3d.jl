@@ -279,7 +279,8 @@ function updateQuadVertices!(stateObject::StateDataFields, layout::Symbol)
             mainImageQuadVert = _HIDDEN_QUAD_VERTS, 
             mainQuadVertSize = sizeof(_HIDDEN_QUAD_VERTS),
             wordsImageQuadVert = _HIDDEN_QUAD_VERTS_W,
-            wordsQuadVertSize = sizeof(_HIDDEN_QUAD_VERTS_W)
+            wordsQuadVertSize = sizeof(_HIDDEN_QUAD_VERTS_W),
+            imagePos = -1
         ))
     else
         pos = if layout == :TopLeft || layout == :LeftHalf || layout == :SingleImage || layout == :WholeWindow
@@ -294,6 +295,7 @@ function updateQuadVertices!(stateObject::StateDataFields, layout::Symbol)
             1
         end
         mode = (layout == :SingleImage || layout == :WholeWindow) ? SingleImage : ((layout == :LeftHalf || layout == :RightHalf) ? MultiImage : QuadImage)
+        stateObject.displayMode = mode
         stateObject.calcDimsStruct = StructsManag.getMainVerticies(calcDimStruct, mode, pos)
     end
 end
@@ -308,18 +310,23 @@ function _force_texture_upload!(stateObjects::Vector{StateDataFields}, panel_idx
     dimToScroll = panelState.onScrollData.dimensionToScroll
     lastSlice = panelState.onScrollData.slicesNumber
     if lastSlice < 1
-        @debug "  [COMPARE-DBG] panel $panel_idx: slicesNumber=$lastSlice, SKIPPING upload"
+        println("  [FORCE-TEX] panel $panel_idx: slicesNumber=$lastSlice, SKIPPING upload"); flush(stdout)
         return
     end
     current = clamp(panelState.currentDisplayedSlice, 1, lastSlice)
     
     singleSlDat = panelState.onScrollData.dataToScroll |>
-        (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(current), dimToScroll, threeDimDat), scrDat) |>
+        (scrDat) -> map(threeDimDat -> begin
+            td = threeToTwoDimm(threeDimDat.type, Int64(current), dimToScroll, threeDimDat)
+            # Materialize SubArray/PermutedDimsArray views to contiguous arrays.
+            # unsafe_copyto! in VulkanStaging requires contiguous memory;
+            # selectdim() on PermutedDimsArray creates views with complex strides.
+            materialized = td.dat isa Array ? td.dat : collect(td.dat)
+            TwoDimRawDat{threeDimDat.type}(td.type, td.name, materialized)
+        end, scrDat) |>
         (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=current, textToDisp=getTextForCurrentSlice(panelState.onScrollData, Int32(current)))
     
-    # Fix ❹: Removed dead TextureManag.updateTexture calls (no-op in Vulkan backend).
-    # Actual GPU upload happens in consumer loop via isSliceChanged.
-    # Safety: verify data dimensions fit within allocated texture (log-only)
+    # Safety: verify data dimensions fit within allocated texture
     n_textures = length(singleSlDat.listOfDataAndImageNames)
     for updateDat in singleSlDat.listOfDataAndImageNames
         actual_w = size(updateDat.dat, 1)
@@ -327,20 +334,21 @@ function _force_texture_upload!(stateObjects::Vector{StateDataFields}, panel_idx
         tex_w = Int(panelState.calcDimsStruct.imageTextureWidth)
         tex_h = Int(panelState.calcDimsStruct.imageTextureHeight)
         if actual_w > tex_w || actual_h > tex_h
-            @debug "  [COMPARE-DBG] SKIPPING texture '$(updateDat.name)' on panel $panel_idx: data=$(actual_w)x$(actual_h) > texture=$(tex_w)x$(tex_h)"
+            println("  [FORCE-TEX] WARN: '$(updateDat.name)' on panel $panel_idx: data=$(actual_w)x$(actual_h) > texture=$(tex_w)x$(tex_h)"); flush(stdout)
         end
     end
     
     panelState.currentlyDispDat = singleSlDat
     panelState.currentDisplayedSlice = current
     panelState.isSliceChanged = true
-    @debug "  [COMPARE-DBG] panel $panel_idx: uploaded $n_textures textures at slice $current (dimToScroll=$dimToScroll, slicesNumber=$lastSlice)"
+    println("  [FORCE-TEX] panel $panel_idx: prepared $n_textures textures at slice $current (dimToScroll=$dimToScroll, slicesNumber=$lastSlice)"); flush(stdout)
 end
 
 function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Vector{StateDataFields})
     if length(stateObjects) >= 5
         compare_mode[] = data.compare
         if data.compare
+            println("[COMPARE] ON: starting compare mode setup..."); flush(stdout)
             # Load the NEXT TP into panel 5
             tp_indices = sort(collect(keys(tp_labels)))
             if !isempty(tp_indices)
@@ -349,20 +357,30 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                 next_pos = mod1(cur_pos + 1, length(tp_indices))
                 right_tp = tp_indices[next_pos]
                 compare_right_tp[] = right_tp
+                println("[COMPARE] Loading right TP=$right_tp (current=$(current_tp_index[]))"); flush(stdout)
                 
                 # Load right TP data into panel 5 using _load_tp_from_entry!
                 entry = get_or_load_tp_data(right_tp)
                 if entry !== nothing
+                    println("[COMPARE] Got entry for TP=$right_tp, loading into panel 5..."); flush(stdout)
                     _load_tp_from_entry!(stateObjects, entry, 5)
+                    println("[COMPARE] Panel 5 data loaded"); flush(stdout)
+                else
+                    println("[COMPARE] WARNING: get_or_load_tp_data returned nothing for TP=$right_tp"); flush(stdout)
                 end
             end
 
             # Ensure panel 5 uses the exact same scroll dimension and slice as panel 1 for registered alignment
             stateObjects[5].onScrollData.dimensionToScroll = stateObjects[1].onScrollData.dimensionToScroll
             stateObjects[5].currentDisplayedSlice = stateObjects[1].currentDisplayedSlice
+            stateObjects[5].onScrollData.slicesNumber = stateObjects[1].onScrollData.slicesNumber
             stateObjects[5].calcDimsStruct.zoom = stateObjects[1].calcDimsStruct.zoom
             stateObjects[5].calcDimsStruct.panX = stateObjects[1].calcDimsStruct.panX
             stateObjects[5].calcDimsStruct.panY = stateObjects[1].calcDimsStruct.panY
+            stateObjects[5].calcDimsStruct.imageTextureWidth = stateObjects[1].calcDimsStruct.imageTextureWidth
+            stateObjects[5].calcDimsStruct.imageTextureHeight = stateObjects[1].calcDimsStruct.imageTextureHeight
+            stateObjects[5].calcDimsStruct.heightToWithRatio = stateObjects[1].calcDimsStruct.heightToWithRatio
+            println("[COMPARE] Panel 5 scroll/zoom synced with panel 1"); flush(stdout)
 
             # 2-pane view: panel 1 on left, panel 5 on right
             updateQuadVertices!(stateObjects[1], :LeftHalf)
@@ -370,25 +388,31 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
             updateQuadVertices!(stateObjects[2], :Hidden)
             updateQuadVertices!(stateObjects[3], :Hidden)
             updateQuadVertices!(stateObjects[4], :Hidden)
+            println("[COMPARE] Quad vertices updated (2-pane layout)"); flush(stdout)
 
             left_label = get(tp_labels, current_tp_index[], "TP $(current_tp_index[])")
             right_label = get(tp_labels, compare_right_tp[], "TP $(compare_right_tp[])")
-            @debug "Compare mode ON: Left=$left_label, Right=$right_label"
+            println("[COMPARE] Left=$left_label, Right=$right_label"); flush(stdout)
             
             # Fix ❺: Panel 1 data hasn't changed — only layout vertices moved.
             # Just mark it dirty for the consumer to re-render; skip redundant slice extraction.
             stateObjects[1].isSliceChanged = true
             # Panel 5 is new — force full texture upload
+            println("[COMPARE] Forcing texture upload for panel 5..."); flush(stdout)
             _force_texture_upload!(stateObjects, 5)
+            println("[COMPARE] Panel 5 texture upload done"); flush(stdout)
             
             # If there's an active lesion, set mask filter uniforms
             if current_active_lesion_id[] > 0
                 try
+                    println("[COMPARE] Syncing active lesion $(current_active_lesion_id[])..."); flush(stdout)
                     reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects)
+                    println("[COMPARE] Lesion sync done"); flush(stdout)
                 catch e
-                    @debug "WARNING: reactToSyncLesion failed during compare-ON: $e"
+                    println("[COMPARE] WARNING: reactToSyncLesion failed during compare-ON: $e"); flush(stdout)
                 end
             end
+            println("[COMPARE] ON: setup complete"); flush(stdout)
         else
             compare_right_tp[] = -1
             # Fix ❻: Only reload panels whose TP data has actually changed.
@@ -555,15 +579,22 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
 end
 
 function reactToPetBlend(data::PetBlendEvent, stateObjects::Vector{StateDataFields})
-    for state in stateObjects
+    range_to_update = data.window_id == 0 ? (1:length(stateObjects)) : (data.window_id == 2 ? (6:10) : (1:5))
+    for idx in range_to_update
+        if idx > length(stateObjects)
+            continue
+        end
+        state = stateObjects[idx]
         for tex in state.mainForDisplayObjects.listOfTextSpecifications
-            # Update nuclear overlay contribution (PET/SPECT, not the pure PET main image panel)
             if tex.isNuclearMask && !tex.isMainImage
                 tex.maskContribution = clamp(data.weight, 0.0f0, 1.0f0)
             end
         end
+        if state.mainForDisplayObjects.vulkanPipelineState !== nothing
+            state.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+        end
     end
-    @debug "PET/CT blend updated" weight=data.weight
+    @debug "PET/CT blend updated" weight=data.weight window_id=data.window_id
 end
 
 function reactToLabelOpacity(data::LabelOpacityEvent, stateObjects::Vector{StateDataFields})
@@ -786,74 +817,114 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
     
     # Fast on-the-fly extraction using global bone atlas / skellytour
     skelly_vol = global_bone_atlas[]
-    mask_vol = if haskey(tp_data_cache, panel_tp)
-        tp_data_cache[panel_tp].mask_i16
-    else
-        m_dat = nothing
+    mask_vol = lock(_tp_cache_lock) do
+        haskey(tp_data_cache, panel_tp) ? tp_data_cache[panel_tp].mask_i16 : nothing
+    end
+    if mask_vol === nothing
         if stateObject !== nothing && isdefined(stateObject, :onScrollData)
             for scr in stateObject.onScrollData.dataToScroll
                 if scr.name == "Mask"
-                    m_dat = scr.dat
+                    mask_vol = scr.dat
                     break
                 end
             end
         end
-        m_dat
     end
     
-    if skelly_vol !== nothing && mask_vol !== nothing && count(skelly_vol .> 0) > 0
-        # Use proper morphological bone subsegmentation (erosion-based cortical shell + marrow)
-        res = try
-            # Get spacing from stateObject or use default
-            sp = try
-                sv = stateObject.spacingsValue
-                isa(sv, Tuple) ? sv : sv[1]
-            catch
-                (1.0, 1.0, 2.0)
-            end
-            @debug "  [BONE-REMOTE] Running remote bone subseg for lid=$target_id tp=$panel_tp spacing=$sp"
-            
-            # Crop to bounding box for transfer efficiency
-            sz = size(mask_vol)
-            lesion_vox = findall(mask_vol .== target_id)
-            if isempty(lesion_vox) || isempty(skelly_vol)
-                return (CartesianIndex{3}[], CartesianIndex{3}[])
-            end
-            xs = [I[1] for I in lesion_vox]; ys = [I[2] for I in lesion_vox]; zs = [I[3] for I in lesion_vox]
-            margin = 30
-            x_min = max(1, minimum(xs) - margin); x_max = min(sz[1], maximum(xs) + margin)
-            y_min = max(1, minimum(ys) - margin); y_max = min(sz[2], maximum(ys) + margin)
-            z_min = max(1, minimum(zs) - margin); z_max = min(sz[3], maximum(zs) + margin)
-            
-            crop_mask = view(mask_vol, x_min:x_max, y_min:y_max, z_min:z_max)
-            crop_skelly = view(skelly_vol, x_min:x_max, y_min:y_max, z_min:z_max)
-            
-            les_arr = convert(Array{UInt8,3}, crop_mask .== target_id)
-            bone_arr = convert(Array{UInt8,3}, crop_skelly .> 0)
-            
-            surf_crop, marr_crop = Main.MedEye3d.InferenceClient.run_bone_subsegmentation_remote(les_arr, bone_arr, sp)
-            
-            s_pts = CartesianIndex{3}[]
-            m_pts = CartesianIndex{3}[]
-            for I in findall(surf_crop)
-                push!(s_pts, CartesianIndex(I[1] + x_min - 1, I[2] + y_min - 1, I[3] + z_min - 1))
-            end
-            for I in findall(marr_crop)
-                push!(m_pts, CartesianIndex(I[1] + x_min - 1, I[2] + y_min - 1, I[3] + z_min - 1))
-            end
-            
-            @debug "  [BONE-REMOTE] SUCCESS: $(length(s_pts)) surf, $(length(m_pts)) marrow voxels"
-            (s_pts, m_pts)
-        catch e
-            @warn "Remote bone subseg failed, falling back to fast version" exception=(e, catch_backtrace())
-            @debug "  [BONE-FAST] Falling back to compute_bone_subsegments_fast for lid=$target_id tp=$panel_tp"
-            compute_bone_subsegments_fast(mask_vol, skelly_vol, target_id)
+    # Cache bone atlas presence check (avoid scanning entire volume every time)
+    has_bone = if _bone_atlas_has_data[] !== nothing
+        _bone_atlas_has_data[]
+    elseif skelly_vol !== nothing
+        v = count(skelly_vol .> 0) > 0
+        _bone_atlas_has_data[] = v
+        v
+    else
+        false
+    end
+    
+    if skelly_vol !== nothing && mask_vol !== nothing && has_bone
+        # Get spacing from stateObject or use default
+        sp = try
+            sv = stateObject.spacingsValue
+            isa(sv, Tuple) ? sv : sv[1]
+        catch
+            (1.0, 1.0, 2.0)
         end
-        bone_subsegments_cache[(panel_tp, target_id)] = res
+        
+        # Crop to bounding box for transfer efficiency
+        sz = size(mask_vol)
+        lesion_vox = findall(mask_vol .== target_id)
+        if isempty(lesion_vox)
+            bone_subsegments_cache[(panel_tp, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
+            return (CartesianIndex{3}[], CartesianIndex{3}[])
+        end
+        xs = [I[1] for I in lesion_vox]; ys = [I[2] for I in lesion_vox]; zs = [I[3] for I in lesion_vox]
+        margin = 30
+        x_min = max(1, minimum(xs) - margin); x_max = min(sz[1], maximum(xs) + margin)
+        y_min = max(1, minimum(ys) - margin); y_max = min(sz[2], maximum(ys) + margin)
+        z_min = max(1, minimum(zs) - margin); z_max = min(sz[3], maximum(zs) + margin)
+        
+        crop_mask = view(mask_vol, x_min:x_max, y_min:y_max, z_min:z_max)
+        crop_skelly = view(skelly_vol, x_min:x_max, y_min:y_max, z_min:z_max)
+        
+        les_arr = convert(Array{UInt8,3}, crop_mask .== target_id)
+        bone_arr = convert(Array{UInt8,3}, crop_skelly .> 0)
+        
+        # Mark as computing (sentinel prevents re-dispatch — see line 808)
+        bone_subsegments_cache[(panel_tp, target_id)] = :computing
         if !isempty(node_name)
-            bone_subsegments_cache[(node_name, target_id)] = res
+            bone_subsegments_cache[(node_name, target_id)] = :computing
         end
-        return res
+        
+        # Async: spawn background task for the remote call so consumer is NOT blocked
+        let les_arr=les_arr, bone_arr=bone_arr, sp=sp,
+            x_min=x_min, y_min=y_min, z_min=z_min,
+            panel_tp=panel_tp, target_id=target_id, node_name=node_name,
+            mask_vol=mask_vol, skelly_vol=skelly_vol
+            Threads.@spawn begin
+                try
+                    println("  [BONE-ASYNC] Starting remote bone subseg for lid=$target_id tp=$panel_tp"); flush(stdout)
+                    surf_crop, marr_crop = Main.MedEye3d.InferenceClient.run_bone_subsegmentation_remote(les_arr, bone_arr, sp)
+                    
+                    s_pts = CartesianIndex{3}[]
+                    m_pts = CartesianIndex{3}[]
+                    if surf_crop !== nothing && marr_crop !== nothing
+                        for I in findall(surf_crop)
+                            push!(s_pts, CartesianIndex(I[1] + x_min - 1, I[2] + y_min - 1, I[3] + z_min - 1))
+                        end
+                        for I in findall(marr_crop)
+                            push!(m_pts, CartesianIndex(I[1] + x_min - 1, I[2] + y_min - 1, I[3] + z_min - 1))
+                        end
+                    end
+                    
+                    println("  [BONE-ASYNC] Remote done: $(length(s_pts)) surf, $(length(m_pts)) marrow"); flush(stdout)
+                    
+                    # Feed result back to consumer via existing BoneSubsegResultEvent
+                    ch = main_event_channel[]
+                    if ch !== nothing
+                        put!(ch, BoneSubsegResultEvent(panel_tp, target_id, s_pts, m_pts))
+                    end
+                catch e
+                    println("  [BONE-ASYNC] Remote failed: $e — trying fast fallback"); flush(stdout)
+                    try
+                        res = compute_bone_subsegments_fast(mask_vol, skelly_vol, target_id)
+                        ch = main_event_channel[]
+                        if ch !== nothing
+                            put!(ch, BoneSubsegResultEvent(panel_tp, target_id, res[1], res[2]))
+                        end
+                    catch e2
+                        println("  [BONE-ASYNC] Fast fallback also failed: $e2"); flush(stdout)
+                        bone_subsegments_cache[(panel_tp, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
+                        if !isempty(node_name)
+                            bone_subsegments_cache[(node_name, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
+                        end
+                    end
+                end
+            end
+        end
+        
+        # Return empty immediately — overlay will be populated when BoneSubsegResultEvent arrives
+        return (CartesianIndex{3}[], CartesianIndex{3}[])
     end
     
     bone_subsegments_cache[(panel_tp, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
@@ -861,6 +932,7 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
 end
 
 function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateDataFields})
+    println("[SYNC-LESION] START lid=$(data.lesion_id)"); flush(stdout)
     t_total = time_ns()
     changed = false
     if data.lesion_id > 0
@@ -910,6 +982,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     end
     _mri_clamp_mask_range!(stateObjects)
 
+    println("[SYNC-LESION] Visibility updated, bone subseg..."); flush(stdout)
     # 1b. Update bone subseg 3D arrays for visible panels only
     has_any_bone_data = false
     if data.lesion_id > 0
@@ -984,6 +1057,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         end
     end
 
+    println("[SYNC-LESION] Bone subseg dispatched, centroid..."); flush(stdout)
     # 2. Get canonical center
     panel_tp_cur = current_tp_index[]
     canonical_center = if data.lesion_id > 0
@@ -1061,11 +1135,12 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     end
 
     t_total_ms = (time_ns() - t_total) / 1e6
-    @info "[BENCH] Next Lesion (Fast Right-Click Emulation): $(round(t_total_ms, digits=1))ms"
+    println("[SYNC-LESION] DONE $(round(t_total_ms, digits=1))ms"); flush(stdout)
     return changed
 end
 
 # TP navigation state: compact cache holding only base axial volumes
+const _bone_atlas_has_data = Ref{Union{Nothing, Bool}}(nothing)
 """Compact cache entry storing only base (axial) volumes at minimal precision."""
 mutable struct TpCacheEntry
     ct::Array{Float32,3}
@@ -1078,12 +1153,14 @@ mutable struct TpCacheEntry
 end
 
 const tp_data_cache = Dict{Int, TpCacheEntry}()
+const _tp_cache_lock = ReentrantLock()   # Protects tp_data_cache Dict operations (short-lived)
+const _hdf5_io_lock = ReentrantLock()    # Serializes ALL HDF5 file access (libhdf5 is NOT thread-safe)
 const bone_subsegments_cache = Dict{Any, Any}()
 const lesion_centroids_cache = Dict{Any, Vector{Int}}()
 const _centroids_lock = ReentrantLock()
 const last_bone_overlay_indices = Dict{Int, Vector{CartesianIndex{3}}}()
 function reactToBoneSubsegResult(data::BoneSubsegResultEvent, stateObjects::Vector{StateDataFields})
-    @debug "reactToBoneSubsegResult: received result for lesion $(data.target_id) on tp $(data.panel_tp)"
+    println("[BONE-RESULT] Received: lid=$(data.target_id) tp=$(data.panel_tp) surf=$(length(data.pts_surf)) marr=$(length(data.pts_marr))"); flush(stdout)
     bone_subsegments_cache[(data.panel_tp, data.target_id)] = (data.pts_surf, data.pts_marr)
     
     # Re-render if this lesion is still the active one
@@ -1104,11 +1181,11 @@ function _clamp_lid_for_tp(lid::Int, tp::Int)::Int
         end
     end
     # Fallback: check mask data cache for max segment ID
-    if haskey(tp_data_cache, tp)
-        max_id = Int(maximum(tp_data_cache[tp].mask))
-        if max_id > 0 && lid > max_id
-            return 1
-        end
+    max_id = lock(_tp_cache_lock) do
+        haskey(tp_data_cache, tp) ? Int(maximum(tp_data_cache[tp].mask)) : 0
+    end
+    if max_id > 0 && lid > max_id
+        return 1
     end
     return lid
 end
@@ -1214,10 +1291,12 @@ function save_tp_mask_to_h5(tp_i::Int)::Bool
         return false
     end
     
-    if !haskey(tp_data_cache, tp_i)
+    entry = lock(_tp_cache_lock) do
+        haskey(tp_data_cache, tp_i) ? tp_data_cache[tp_i] : nothing
+    end
+    if entry === nothing
         return false
     end
-    entry = tp_data_cache[tp_i]
     mask_to_save = entry.mask_i16 !== nothing ? entry.mask_i16 : entry.mask
     if mask_to_save === nothing
         return false
@@ -1232,18 +1311,20 @@ function save_tp_mask_to_h5(tp_i::Int)::Bool
     
     lock(_mask_save_lock) do
         try
-            HDF5.h5open(h5_path, "r+") do h5_file
-                is_pf = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
-                needs_reverse = !is_pf
-                
-                raw_to_write = needs_reverse ? reverse(mask_to_save, dims=2) : mask_to_save
-                ds_path_expert = "$group/$(mask_fname)_expert"
-                if haskey(h5_file, ds_path_expert)
-                    h5_file[ds_path_expert][:, :, :] = Int16.(raw_to_write)
-                else
-                    h5_file[ds_path_expert, chunk=(32,32,32), compress=3] = Int16.(raw_to_write)
+            lock(_hdf5_io_lock) do
+                HDF5.h5open(h5_path, "r+") do h5_file
+                    is_pf = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
+                    needs_reverse = !is_pf
+                    
+                    raw_to_write = needs_reverse ? reverse(mask_to_save, dims=2) : mask_to_save
+                    ds_path_expert = "$group/$(mask_fname)_expert"
+                    if haskey(h5_file, ds_path_expert)
+                        h5_file[ds_path_expert][:, :, :] = Int16.(raw_to_write)
+                    else
+                        h5_file[ds_path_expert, chunk=(32,32,32), compress=3] = Int16.(raw_to_write)
+                    end
+                    println("  [AUTOSAVE-MASK] Saved mask for TP $tp_i to $ds_path_expert ($(count(>(0), mask_to_save)) non-zero voxels)"); flush(stdout)
                 end
-                println("  [AUTOSAVE-MASK] Saved mask for TP $tp_i to $ds_path_expert ($(count(>(0), mask_to_save)) non-zero voxels)"); flush(stdout)
             end
             delete!(dirty_mask_tps, tp_i)
             # Precompute mask centroids for this TP
@@ -1306,10 +1387,24 @@ function _ensure_io_task!()
             try
                 if msg isa PreloadTPMessage
                     tp = msg.tp_idx
-                    if !haskey(tp_data_cache, tp) && tp_loader_ref[] !== nothing
+                    already_cached = lock(_tp_cache_lock) do
+                        haskey(tp_data_cache, tp)
+                    end
+                    if !already_cached && tp_loader_ref[] !== nothing
                         t = @elapsed begin
-                            entry = tp_loader_ref[](tp)
-                            entry !== nothing && (tp_data_cache[tp] = entry)
+                            entry = lock(_hdf5_io_lock) do
+                                # Re-check under IO lock (another load may have raced)
+                                cached2 = lock(_tp_cache_lock) do
+                                    haskey(tp_data_cache, tp) ? tp_data_cache[tp] : nothing
+                                end
+                                cached2 !== nothing && return cached2
+                                tp_loader_ref[](tp)
+                            end
+                            if entry !== nothing
+                                lock(_tp_cache_lock) do
+                                    tp_data_cache[tp] = entry
+                                end
+                            end
                         end
                         println("  [IO] Preloaded TP $tp in $(round(t, digits=1))s"); flush(stdout)
                     else
@@ -1317,8 +1412,10 @@ function _ensure_io_task!()
                     end
                 elseif msg isa EvictAndPreloadMessage
                     # Evict first to free memory before loading new data
-                    for tp in msg.evict_tps
-                        delete!(tp_data_cache, tp)
+                    lock(_tp_cache_lock) do
+                        for tp in msg.evict_tps
+                            delete!(tp_data_cache, tp)
+                        end
                     end
                     if !isempty(msg.evict_tps)
                         GC.gc(false)
@@ -1326,10 +1423,23 @@ function _ensure_io_task!()
                     end
                     # Then preload neighbors
                     for tp in msg.preload_tps
-                        if !haskey(tp_data_cache, tp) && tp_loader_ref[] !== nothing
+                        already_cached = lock(_tp_cache_lock) do
+                            haskey(tp_data_cache, tp)
+                        end
+                        if !already_cached && tp_loader_ref[] !== nothing
                             t = @elapsed begin
-                                entry = tp_loader_ref[](tp)
-                                entry !== nothing && (tp_data_cache[tp] = entry)
+                                entry = lock(_hdf5_io_lock) do
+                                    cached2 = lock(_tp_cache_lock) do
+                                        haskey(tp_data_cache, tp) ? tp_data_cache[tp] : nothing
+                                    end
+                                    cached2 !== nothing && return cached2
+                                    tp_loader_ref[](tp)
+                                end
+                                if entry !== nothing
+                                    lock(_tp_cache_lock) do
+                                        tp_data_cache[tp] = entry
+                                    end
+                                end
                             end
                             println("  [IO] Preloaded TP $tp in $(round(t, digits=1))s"); flush(stdout)
                         end
@@ -1354,7 +1464,7 @@ function register_tp_loader!(fn)
         tp_indices = sort(collect(keys(tp_labels)))
         # Only preload TP index 1 if not already cached
         for tp_idx in tp_indices
-            if tp_idx == 1 && !haskey(tp_data_cache, tp_idx) && io_channel[] !== nothing
+            if tp_idx == 1 && !lock(_tp_cache_lock) do; haskey(tp_data_cache, tp_idx); end && io_channel[] !== nothing
                 try
                     put!(io_channel[], PreloadTPMessage(tp_idx))
                     println("  [STARTUP] Dispatched background preload for TP $tp_idx"); flush(stdout)
@@ -1365,12 +1475,26 @@ function register_tp_loader!(fn)
 end
 
 function get_or_load_tp_data(idx::Int)
-    if haskey(tp_data_cache, idx)
-        return tp_data_cache[idx]
-    elseif tp_loader_ref[] !== nothing
-        entry = tp_loader_ref[](idx)
+    # Fast path: check cache under short lock
+    cached = lock(_tp_cache_lock) do
+        haskey(tp_data_cache, idx) ? tp_data_cache[idx] : nothing
+    end
+    cached !== nothing && return cached
+
+    # Slow path: load from HDF5 under IO lock (serializes with save and preload)
+    if tp_loader_ref[] !== nothing
+        entry = lock(_hdf5_io_lock) do
+            # Re-check cache — another thread may have loaded while we waited for the IO lock
+            cached2 = lock(_tp_cache_lock) do
+                haskey(tp_data_cache, idx) ? tp_data_cache[idx] : nothing
+            end
+            cached2 !== nothing && return cached2
+            tp_loader_ref[](idx)
+        end
         if entry !== nothing
-            tp_data_cache[idx] = entry
+            lock(_tp_cache_lock) do
+                tp_data_cache[idx] = entry
+            end
             return entry
         end
     end
@@ -1505,7 +1629,7 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
     end
     
     for tex in stateObjects[panel_idx].mainForDisplayObjects.listOfTextSpecifications
-        if tex.name == "CT" || tex.isMainImage
+        if tex.name == "CT" || (tex.isMainImage && tex.name != "PET" && tex.name != "SPECT")
             tex.minAndMaxValue = Float32.([main_win[1], main_win[2]])
         elseif tex.name == "PET" || tex.name == "SPECT" || tex.isNuclearMask
             tex.minAndMaxValue = Float32.([nuc_win[1], nuc_win[2]])
@@ -1603,23 +1727,27 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
         end
         
         # Try mask_i16 from tp_data_cache
-        if !centroid_found && haskey(tp_data_cache, tp_idx)
-            try
-                entry = tp_data_cache[tp_idx]
-                m = entry.mask_i16
-                # Optimize: avoid anonymous function overhead for Int16 arrays
-                indices = findall(==(Int16(lesion_id)), m)
-                if !isempty(indices)
-                    cx = round(Int, mean(i[1] for i in indices))
-                    cy = round(Int, mean(i[2] for i in indices))
-                    cz = round(Int, mean(i[3] for i in indices))
-                    lesion_centroids_cache[(tp_idx, lesion_id)] = [cx, cy, cz]
-                    if tp_idx == current_tp_index[]
-                        lesion_centroids_cache[lesion_id] = [cx, cy, cz]
+        if !centroid_found
+            entry = lock(_tp_cache_lock) do
+                haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
+            end
+            if entry !== nothing
+                try
+                    m = entry.mask_i16
+                    # Optimize: avoid anonymous function overhead for Int16 arrays
+                    indices = findall(==(Int16(lesion_id)), m)
+                    if !isempty(indices)
+                        cx = round(Int, mean(i[1] for i in indices))
+                        cy = round(Int, mean(i[2] for i in indices))
+                        cz = round(Int, mean(i[3] for i in indices))
+                        lesion_centroids_cache[(tp_idx, lesion_id)] = [cx, cy, cz]
+                        if tp_idx == current_tp_index[]
+                            lesion_centroids_cache[lesion_id] = [cx, cy, cz]
+                        end
+                        centroid_found = true
                     end
-                    centroid_found = true
-                end
-            catch; end
+                catch; end
+            end
         end
         
         # 3. Update organ mapping from atlas
@@ -1634,17 +1762,24 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
                     if LA !== nothing
                         organ_name = LA.classify_and_pick_best_organ(mask_vol, atlas, ts_nm, lesion_id)
                     end
-                elseif haskey(tp_data_cache, tp_idx)
-                    LA = _get_la()
-                    if LA !== nothing
-                        organ_name = LA.classify_and_pick_best_organ(tp_data_cache[tp_idx].mask_i16, atlas, ts_nm, lesion_id)
+                else
+                    cached_mask = lock(_tp_cache_lock) do
+                        haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx].mask_i16 : nothing
+                    end
+                    if cached_mask !== nothing
+                        LA = _get_la()
+                        if LA !== nothing
+                            organ_name = LA.classify_and_pick_best_organ(cached_mask, atlas, ts_nm, lesion_id)
+                        end
                     end
                 end
                 
                 # Fallback: centroid-based atlas lookup
                 if isempty(organ_name) && centroid_found
                     centroid = lesion_centroids_cache[(tp_idx, lesion_id)]
-                    mask_sz = haskey(tp_data_cache, tp_idx) ? size(tp_data_cache[tp_idx].mask) : nothing
+                    mask_sz = lock(_tp_cache_lock) do
+                        haskey(tp_data_cache, tp_idx) ? size(tp_data_cache[tp_idx].mask) : nothing
+                    end
                     if mask_sz !== nothing
                         sx = clamp(round(Int, centroid[1] * size(atlas,1) / mask_sz[1]), 1, size(atlas,1))
                         sy = clamp(round(Int, centroid[2] * size(atlas,2) / mask_sz[2]), 1, size(atlas,2))
@@ -1731,7 +1866,7 @@ const anatomy_labels_cache = Dict{Int, Dict{Int,String}}()
 # Per-TP segment / lesion names from HDF5 scene hierarchy: tp_index -> Dict{Int, String}(lesion_id -> original_name)
 const tp_segment_names = Dict{Int, Dict{Int, String}}()
 
-export tp_data_cache, bone_subsegments_cache, lesion_centroids_cache, global_bone_atlas, global_organ_mapping, current_tp_index, tp_labels, tp_descriptions, tp_english_descriptions
+export tp_data_cache, _tp_cache_lock, _hdf5_io_lock, bone_subsegments_cache, lesion_centroids_cache, global_bone_atlas, global_organ_mapping, current_tp_index, tp_labels, tp_descriptions, tp_english_descriptions
 export compare_mode, compare_right_tp, tp_switched, get_node_name_for_tp, tp_node_names
 export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, h5_path_ref, tp_modalities, volume_z_size, anatomy_labels_cache, tp_segment_names
 export organ_mapping_updated
@@ -1855,11 +1990,11 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
             next_pos_n = mod1(new_pos + 1, num_tps)
             push!(neighbors, tp_indices[prev_pos])
             push!(neighbors, tp_indices[next_pos_n])
-            filter!(tp -> !haskey(tp_data_cache, tp), neighbors)
+            filter!(tp -> !lock(_tp_cache_lock) do; haskey(tp_data_cache, tp); end, neighbors)
             
             # Evict TPs that are far from current (keep current ± 1 only)
             keep_set = Set{Int}([new_tp, tp_indices[prev_pos], tp_indices[next_pos_n]])
-            evict_tps = filter(tp -> !in(tp, keep_set), collect(keys(tp_data_cache)))
+            evict_tps = filter(tp -> !in(tp, keep_set), lock(_tp_cache_lock) do; collect(keys(tp_data_cache)); end)
             
             if !isempty(neighbors) || !isempty(evict_tps)
                 put!(io_channel[], EvictAndPreloadMessage(evict_tps, neighbors))
@@ -1872,8 +2007,10 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         Threads.@spawn begin
             try
                 LMW = _get_lmw()
-                if LMW !== nothing && haskey(tp_data_cache, tp_for_bg)
-                    cached_entry = tp_data_cache[tp_for_bg]
+                cached_entry = lock(_tp_cache_lock) do
+                    haskey(tp_data_cache, tp_for_bg) ? tp_data_cache[tp_for_bg] : nothing
+                end
+                if LMW !== nothing && cached_entry !== nothing
                     unique_ids = Set{Int}()
                     for v in cached_entry.mask
                         iv = Int(v)
@@ -1889,8 +2026,11 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
             catch; end
             
             try
-                if haskey(tp_data_cache, tp_for_bg)
-                    InferenceClient.preload_ct_for_nninteractive(Array{Float32,3}(tp_data_cache[tp_for_bg].ct))
+                ct_vol = lock(_tp_cache_lock) do
+                    haskey(tp_data_cache, tp_for_bg) ? tp_data_cache[tp_for_bg].ct : nothing
+                end
+                if ct_vol !== nothing
+                    InferenceClient.preload_ct_for_nninteractive(Array{Float32,3}(ct_vol))
                     @debug "[BG] CT preload initiated for $label_for_bg"
                 end
             catch; end
@@ -2006,13 +2146,13 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
             next_pos_n = mod1(target_pos + 1, num_tps)
             push!(neighbors, tp_indices[prev_pos])
             push!(neighbors, tp_indices[next_pos_n])
-            filter!(tp -> !haskey(tp_data_cache, tp), neighbors)
+            filter!(tp -> !lock(_tp_cache_lock) do; haskey(tp_data_cache, tp); end, neighbors)
             
             keep_set = Set{Int}([target_tp, tp_indices[prev_pos], tp_indices[next_pos_n]])
             if compare_mode[] && compare_right_tp[] >= 0
                 push!(keep_set, compare_right_tp[])
             end
-            evict_tps = filter(tp -> !in(tp, keep_set), collect(keys(tp_data_cache)))
+            evict_tps = filter(tp -> !in(tp, keep_set), lock(_tp_cache_lock) do; collect(keys(tp_data_cache)); end)
             
             if !isempty(neighbors) || !isempty(evict_tps)
                 put!(io_channel[], EvictAndPreloadMessage(evict_tps, neighbors))
@@ -2025,8 +2165,10 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
         Threads.@spawn begin
             try
                 LMW = _get_lmw()
-                if LMW !== nothing && haskey(tp_data_cache, tp_for_bg)
-                    cached_entry = tp_data_cache[tp_for_bg]
+                cached_entry = lock(_tp_cache_lock) do
+                    haskey(tp_data_cache, tp_for_bg) ? tp_data_cache[tp_for_bg] : nothing
+                end
+                if LMW !== nothing && cached_entry !== nothing
                     unique_ids = Set{Int}()
                     for v in cached_entry.mask
                         iv = Int(v)
@@ -2042,8 +2184,11 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
             catch; end
             
             try
-                if haskey(tp_data_cache, tp_for_bg)
-                    InferenceClient.preload_ct_for_nninteractive(Array{Float32,3}(tp_data_cache[tp_for_bg].ct))
+                ct_vol = lock(_tp_cache_lock) do
+                    haskey(tp_data_cache, tp_for_bg) ? tp_data_cache[tp_for_bg].ct : nothing
+                end
+                if ct_vol !== nothing
+                    InferenceClient.preload_ct_for_nninteractive(Array{Float32,3}(ct_vol))
                     @debug "[BG] CT preload initiated for $label_for_bg"
                 end
             catch; end
@@ -2334,8 +2479,10 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
 
     # Synchronize tp_data_cache (both compact mask and Int16 texture mask)
     tp_idx = current_tp_index[]
-    if haskey(tp_data_cache, tp_idx)
-        entry = tp_data_cache[tp_idx]
+    entry = lock(_tp_cache_lock) do
+        haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
+    end
+    if entry !== nothing
         if entry.mask isa Array{Int8, 3}
             entry.mask .= clamp.(seg_vol, Int8(-128), Int8(127))
         elseif entry.mask !== seg_vol

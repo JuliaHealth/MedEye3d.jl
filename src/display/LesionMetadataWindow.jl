@@ -1163,16 +1163,15 @@ function get_mask_ids(tp::Int)::Vector{Int}
         return ids
     end
     # 2. Check MEH tp_data_cache
-    if haskey(_MEH.tp_data_cache, tp)
-        entry = _MEH.tp_data_cache[tp]
-        if entry !== nothing && isdefined(entry, :mask) && entry.mask !== nothing
-            m = entry.mask
-            pos = filter(x -> x > 0, unique(m))
-            if !isempty(pos)
-                ids = sort!(Int.(pos))
-                _MASK_IDS_CACHE[tp] = ids
-                return ids
-            end
+    mask_ref = lock(_MEH._tp_cache_lock) do
+        haskey(_MEH.tp_data_cache, tp) ? _MEH.tp_data_cache[tp].mask : nothing
+    end
+    if mask_ref !== nothing
+        pos = filter(x -> x > 0, unique(mask_ref))
+        if !isempty(pos)
+            ids = sort!(Int.(pos))
+            _MASK_IDS_CACHE[tp] = ids
+            return ids
         end
     end
     # 3. Check MEH pet_volumes_cache or centroids
@@ -1652,7 +1651,7 @@ mutable struct MetadataWindowResult
     set_compare_mode::Observable{Bool}
     ui_queue::Vector{Function}
     ui_lock::ReentrantLock
-    MetadataWindowResult(fig, ch_ref, ldb=nothing) = new(fig, ch_ref, ldb, Observable(false), Observable("Quad View"), Observable(false), Function[], ReentrantLock())
+    MetadataWindowResult(fig, ch_ref, ldb=nothing) = new(fig, ch_ref, ldb, Observable(false), Observable("Pure PET (Current TP)"), Observable(false), Function[], ReentrantLock())
 end
 
 """Connect a live channel to a previously created metadata window (greyed-out → active)."""
@@ -2050,7 +2049,7 @@ function create_metadata_window(
     
     m2_r = nr!()
     btn_m2 = Button(g[m2_r, 1:2], label = "[Launch M2]", buttoncolor = RGBf(0.2, 0.4, 0.6), labelcolor = TXT, fontsize = 10)
-    menu_m2_mode = Menu(g[m2_r, 3:4], options = ["Pure PET (Current TP)", "Next TP (Quad View)", "Left CT, Right PET", "Compare Prev/Curr TP", "Current TP (Quad View)"], default = "Pure PET (Current TP)", fontsize = 10)
+    menu_m2_mode = Menu(g[m2_r, 3:4], options = ["Pure PET (Current TP)", "Compare Curr/Next TP"], default = "Pure PET (Current TP)", fontsize = 10)
     rowsize!(g, m2_r, Fixed(28)); register_fixed_row!(m2_r, 28)
     
     on(btn_m2.clicks) do _
@@ -2074,9 +2073,7 @@ function create_metadata_window(
     local load_clinical_info_for_tp! = nothing
     local apply_compare_mode_ui! = nothing
     on(btn_cv.clicks) do _
-        if apply_compare_mode_ui! !== nothing
-            apply_compare_mode_ui!(!cv_active[])
-        end
+        obs_set_compare_mode[] = !cv_active[]
     end
     
     on(obs_set_compare_mode) do val
@@ -2248,9 +2245,11 @@ function create_metadata_window(
         
         # 1. Determine lesion integer IDs present at this time point
         l_ints = Int[]
-        if haskey(_MEH.tp_data_cache, tp)
-            m = _MEH.tp_data_cache[tp].mask
-            l_ints = filter(x -> x > 0, sort(unique(m)))
+        mask_ref = lock(_MEH._tp_cache_lock) do
+            haskey(_MEH.tp_data_cache, tp) ? _MEH.tp_data_cache[tp].mask : nothing
+        end
+        if mask_ref !== nothing
+            l_ints = filter(x -> x > 0, sort(unique(mask_ref)))
         elseif haskey(_MEH.lesion_centroids_cache, tp)
             l_ints = sort([k[2] for k in keys(_MEH.lesion_centroids_cache) if k isa Tuple && k[1] == tp])
         end
@@ -2333,7 +2332,7 @@ function create_metadata_window(
         v = Float32(val)
         display_cfg["pet_ct_blend"] = v
         save_display_config(display_cfg)
-        put!(channel, PetBlendEvent(v))
+        put!(channel, PetBlendEvent(v, 1))
     end
 
     # Label / Mask Opacity slider (0.0 = transparent, 1.0 = opaque)
@@ -3901,6 +3900,7 @@ function create_metadata_window(
     hide_section!(sec_map_lesions)
 
     function apply_compare_mode_ui_impl!(active::Bool)
+        println("[COMPARE-UI] apply_compare_mode_ui_impl!(active=$active) — START"); flush(stdout)
         cv_active[] = active
         btn_cv.buttoncolor[] = cv_active[] ? GRN : BLU_BTN
         update_tp_dropdown_visibility!()
@@ -3913,9 +3913,11 @@ function create_metadata_window(
             show_section!(sec_map_lesions)
             notify(anat_active_count)
             try
+                println("[COMPARE-UI] Building match display..."); flush(stdout)
                 _build_match_display!()
+                println("[COMPARE-UI] Match display built"); flush(stdout)
             catch e
-                @warn "Auto-building match display on compare mode toggle failed: $e"
+                println("[COMPARE-UI] WARNING: _build_match_display! failed: $e"); flush(stdout)
             end
         else
             for sec in (sec_meta, sec_seg, sec_report)
@@ -3926,7 +3928,9 @@ function create_metadata_window(
             update_dynamic_visibility!(active_lesion_type[])
             notify(anat_active_count)
         end
+        println("[COMPARE-UI] Sending CompareTimePointsEvent($(cv_active[])) to channel..."); flush(stdout)
         put!(channel, CompareTimePointsEvent(cv_active[]))
+        println("[COMPARE-UI] Event sent, apply_compare_mode_ui_impl! DONE"); flush(stdout)
     end
     apply_compare_mode_ui! = apply_compare_mode_ui_impl!
 
@@ -4200,7 +4204,9 @@ function create_metadata_window(
                         end
                         if centroid_for_map !== nothing
                             # Scale centroid from mask space to atlas space
-                            mask_sz = haskey(_MEH.tp_data_cache, tp) ? size(_MEH.tp_data_cache[tp].mask) : nothing
+                            mask_sz = lock(_MEH._tp_cache_lock) do
+                                haskey(_MEH.tp_data_cache, tp) ? size(_MEH.tp_data_cache[tp].mask) : nothing
+                            end
                             if mask_sz !== nothing
                                 scale_x = size(ts_atlas, 1) / mask_sz[1]
                                 scale_y = size(ts_atlas, 2) / mask_sz[2]
@@ -4379,8 +4385,10 @@ function create_metadata_window(
                     tp_idx = _MEH.current_tp_index[]
                     
                     # Try volume-based scan from tp_data_cache mask
-                    if haskey(_MEH.tp_data_cache, tp_idx)
-                        mask_vol = _MEH.tp_data_cache[tp_idx].mask
+                    mask_vol = lock(_MEH._tp_cache_lock) do
+                        haskey(_MEH.tp_data_cache, tp_idx) ? _MEH.tp_data_cache[tp_idx].mask : nothing
+                    end
+                    if mask_vol !== nothing
                         best = LA.classify_and_pick_best_organ(mask_vol, atlas, ts_nm, lid)
                         if !isempty(best)
                             raw_organ = best
@@ -5298,9 +5306,15 @@ function create_metadata_window(
     res = MetadataWindowResult(fig, channel_ref, lesion_db)
     res.trigger_m2 = obs_m2
     res.set_compare_mode = obs_set_compare_mode
+    res.m2_mode[] = menu_m2_mode.selection[]
     on(menu_m2_mode.selection) do val
-        if val !== nothing
+        if val !== nothing && res.m2_mode[] != val
             res.m2_mode[] = val
+        end
+    end
+    on(res.m2_mode) do val
+        if menu_m2_mode.selection[] != val
+            menu_m2_mode.selection[] = val
         end
     end
     return res

@@ -1,0 +1,371 @@
+GNU gdb (Ubuntu 12.1-0ubuntu1~22.04.2) 12.1
+Copyright (C) 2022 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+Type "show copying" and "show warranty" for details.
+This GDB was configured as "x86_64-linux-gnu".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<https://www.gnu.org/software/gdb/bugs/>.
+Find the GDB manual and other documentation resources online at:
+    <http://www.gnu.org/software/gdb/documentation/>.
+
+For help, type "help".
+Type "apropos word" to search for commands related to "word".
+Attaching to process 73460
+[New LWP 73469]
+[New LWP 73470]
+[New LWP 73495]
+[New LWP 73496]
+[New LWP 73497]
+[New LWP 73498]
+[New LWP 73499]
+[New LWP 73500]
+[New LWP 73501]
+[New LWP 73502]
+[New LWP 73503]
+[New LWP 73504]
+[New LWP 73505]
+[New LWP 74794]
+[New LWP 83039]
+[New LWP 83040]
+[New LWP 83041]
+[New LWP 83042]
+[New LWP 83043]
+[New LWP 83044]
+[New LWP 83045]
+[New LWP 83046]
+[New LWP 83047]
+[New LWP 83048]
+[New LWP 83049]
+[New LWP 90009]
+[New LWP 90010]
+[New LWP 90011]
+[New LWP 90012]
+To enable execution of this file add
+	add-auto-load-safe-path /usr/lib/x86_64-linux-gnu/libthread_db.so.1
+line to your configuration file "/root/.config/gdb/gdbinit".
+To completely disable this security protection add
+	set auto-load safe-path /
+line to your configuration file "/root/.config/gdb/gdbinit".
+For more information about this security protection see the
+"Auto-loading safe path" section in the GDB manual.  E.g., run from the shell:
+	info "(gdb)Auto-loading safe path"
+0x00007fde26639ba8 in __GI_epoll_pwait (epfd=5, events=0x7ffd53effd30, maxevents=1024, timeout=-1, set=0x0) at ../sysdeps/unix/sysv/linux/epoll_pwait.c:42
+
+Thread 30 (LWP 90012 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fde25e50848 <cond+40>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fde25e50848 <cond+40>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fde25e50848 <cond+40>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fde25e50860 <mutex>, cond=0x7fde25e50820 <cond>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fde25e50820 <cond>, mutex=0x7fde25e50860 <mutex>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fde2598a121 in uv_cond_wait (cond=0x7fde25e50820 <cond>, mutex=0x7fde25e50860 <mutex>) at src/unix/thread.c:822
+#6  0x00007fde2596f615 in worker (arg=0x0) at src/threadpool.c:76
+#7  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007fde2663a890 in __closefrom_fallback (from=1408249024, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#9  0x0000000000000000 in ?? ()
+
+Thread 29 (LWP 90011 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fde25e50848 <cond+40>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fde25e50848 <cond+40>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fde25e50848 <cond+40>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fde25e50860 <mutex>, cond=0x7fde25e50820 <cond>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fde25e50820 <cond>, mutex=0x7fde25e50860 <mutex>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fde2598a121 in uv_cond_wait (cond=0x7fde25e50820 <cond>, mutex=0x7fde25e50860 <mutex>) at src/unix/thread.c:822
+#6  0x00007fde2596f615 in worker (arg=0x0) at src/threadpool.c:76
+#7  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007fde2663a890 in __closefrom_fallback (from=1408249024, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#9  0x0000000000000000 in ?? ()
+
+Thread 28 (LWP 90010 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fde25e50848 <cond+40>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fde25e50848 <cond+40>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fde25e50848 <cond+40>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fde25e50860 <mutex>, cond=0x7fde25e50820 <cond>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fde25e50820 <cond>, mutex=0x7fde25e50860 <mutex>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fde2598a121 in uv_cond_wait (cond=0x7fde25e50820 <cond>, mutex=0x7fde25e50860 <mutex>) at src/unix/thread.c:822
+#6  0x00007fde2596f615 in worker (arg=0x0) at src/threadpool.c:76
+#7  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007fde2663a890 in __closefrom_fallback (from=1408249024, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#9  0x0000000000000000 in ?? ()
+
+Thread 27 (LWP 90009 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fde25e5084c <cond+44>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fde25e5084c <cond+44>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fde25e5084c <cond+44>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fde25e50860 <mutex>, cond=0x7fde25e50820 <cond>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fde25e50820 <cond>, mutex=0x7fde25e50860 <mutex>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fde2598a121 in uv_cond_wait (cond=0x7fde25e50820 <cond>, mutex=0x7fde25e50860 <mutex>) at src/unix/thread.c:822
+#6  0x00007fde2596f615 in worker (arg=0x0) at src/threadpool.c:76
+#7  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#8  0x00007fde2663a890 in __closefrom_fallback (from=1408249024, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#9  0x0000000000000000 in ?? ()
+
+Thread 26 (LWP 83049 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fdcbbefabe0 <thread_status+1376>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fdcbbefabe0 <thread_status+1376>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fdcbbefabe0 <thread_status+1376>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fdcbbefab90 <thread_status+1296>, cond=0x7fdcbbefabb8 <thread_status+1336>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fdcbbefabb8 <thread_status+1336>, mutex=0x7fdcbbefab90 <thread_status+1296>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fdcba48e97b in blas_thread_server () from /data/artifacts/497c61a1c5c3d838edfd8d4b4cf847a31dabf1d0/lib/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408241664, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 25 (LWP 83048 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fdcbbefab60 <thread_status+1248>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fdcbbefab60 <thread_status+1248>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fdcbbefab60 <thread_status+1248>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fdcbbefab10 <thread_status+1168>, cond=0x7fdcbbefab38 <thread_status+1208>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fdcbbefab38 <thread_status+1208>, mutex=0x7fdcbbefab10 <thread_status+1168>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fdcba48e97b in blas_thread_server () from /data/artifacts/497c61a1c5c3d838edfd8d4b4cf847a31dabf1d0/lib/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408241664, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 24 (LWP 83047 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fdcbbefaae0 <thread_status+1120>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fdcbbefaae0 <thread_status+1120>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fdcbbefaae0 <thread_status+1120>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fdcbbefaa90 <thread_status+1040>, cond=0x7fdcbbefaab8 <thread_status+1080>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fdcbbefaab8 <thread_status+1080>, mutex=0x7fdcbbefaa90 <thread_status+1040>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fdcba48e97b in blas_thread_server () from /data/artifacts/497c61a1c5c3d838edfd8d4b4cf847a31dabf1d0/lib/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408241664, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 23 (LWP 83046 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fdcbbefaa60 <thread_status+992>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fdcbbefaa60 <thread_status+992>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fdcbbefaa60 <thread_status+992>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fdcbbefaa10 <thread_status+912>, cond=0x7fdcbbefaa38 <thread_status+952>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fdcbbefaa38 <thread_status+952>, mutex=0x7fdcbbefaa10 <thread_status+912>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fdcba48e97b in blas_thread_server () from /data/artifacts/497c61a1c5c3d838edfd8d4b4cf847a31dabf1d0/lib/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408241664, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 22 (LWP 83045 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fdcbbefa9e0 <thread_status+864>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fdcbbefa9e0 <thread_status+864>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fdcbbefa9e0 <thread_status+864>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fdcbbefa990 <thread_status+784>, cond=0x7fdcbbefa9b8 <thread_status+824>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fdcbbefa9b8 <thread_status+824>, mutex=0x7fdcbbefa990 <thread_status+784>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fdcba48e97b in blas_thread_server () from /data/artifacts/497c61a1c5c3d838edfd8d4b4cf847a31dabf1d0/lib/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408241664, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 21 (LWP 83044 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fdcbbefa960 <thread_status+736>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fdcbbefa960 <thread_status+736>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fdcbbefa960 <thread_status+736>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fdcbbefa910 <thread_status+656>, cond=0x7fdcbbefa938 <thread_status+696>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fdcbbefa938 <thread_status+696>, mutex=0x7fdcbbefa910 <thread_status+656>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fdcba48e97b in blas_thread_server () from /data/artifacts/497c61a1c5c3d838edfd8d4b4cf847a31dabf1d0/lib/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408241664, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 20 (LWP 83043 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fdcbbefa8e0 <thread_status+608>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fdcbbefa8e0 <thread_status+608>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fdcbbefa8e0 <thread_status+608>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fdcbbefa890 <thread_status+528>, cond=0x7fdcbbefa8b8 <thread_status+568>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fdcbbefa8b8 <thread_status+568>, mutex=0x7fdcbbefa890 <thread_status+528>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fdcba48e97b in blas_thread_server () from /data/artifacts/497c61a1c5c3d838edfd8d4b4cf847a31dabf1d0/lib/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408241664, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 19 (LWP 83042 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fdcbbefa860 <thread_status+480>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fdcbbefa860 <thread_status+480>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fdcbbefa860 <thread_status+480>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fdcbbefa810 <thread_status+400>, cond=0x7fdcbbefa838 <thread_status+440>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fdcbbefa838 <thread_status+440>, mutex=0x7fdcbbefa810 <thread_status+400>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fdcba48e97b in blas_thread_server () from /data/artifacts/497c61a1c5c3d838edfd8d4b4cf847a31dabf1d0/lib/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408241664, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 18 (LWP 83041 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fdcbbefa7e0 <thread_status+352>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fdcbbefa7e0 <thread_status+352>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fdcbbefa7e0 <thread_status+352>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fdcbbefa790 <thread_status+272>, cond=0x7fdcbbefa7b8 <thread_status+312>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fdcbbefa7b8 <thread_status+312>, mutex=0x7fdcbbefa790 <thread_status+272>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fdcba48e97b in blas_thread_server () from /data/artifacts/497c61a1c5c3d838edfd8d4b4cf847a31dabf1d0/lib/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408241664, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 17 (LWP 83040 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fdcbbefa760 <thread_status+224>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fdcbbefa760 <thread_status+224>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fdcbbefa760 <thread_status+224>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fdcbbefa710 <thread_status+144>, cond=0x7fdcbbefa738 <thread_status+184>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fdcbbefa738 <thread_status+184>, mutex=0x7fdcbbefa710 <thread_status+144>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fdcba48e97b in blas_thread_server () from /data/artifacts/497c61a1c5c3d838edfd8d4b4cf847a31dabf1d0/lib/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408241664, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 16 (LWP 83039 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fdcbbefa6e0 <thread_status+96>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fdcbbefa6e0 <thread_status+96>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fdcbbefa6e0 <thread_status+96>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fdcbbefa690 <thread_status+16>, cond=0x7fdcbbefa6b8 <thread_status+56>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fdcbbefa6b8 <thread_status+56>, mutex=0x7fdcbbefa690 <thread_status+16>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fdcba48e97b in blas_thread_server () from /data/artifacts/497c61a1c5c3d838edfd8d4b4cf847a31dabf1d0/lib/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408241664, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 15 (LWP 74794 "cuda0000640001a"):
+#0  0x00007fde2662cc0f in fts_children (sp=0x7fdcf429cda0, instr=0) at ../sysdeps/wordsize-64/../../io/fts.c:558
+#1  0x00007fdd6877bfc7 in ?? () from /usr/local/share/julia/artifacts/2c8e4324b86fc70a7c041ce8dc72b5f9b41a7a98/lib/libcuda.so
+Backtrace stopped: previous frame inner to this frame (corrupt stack?)
+
+Thread 14 (LWP 73505 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fde0eab0de0 <thread_status+1376>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fde0eab0de0 <thread_status+1376>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fde0eab0de0 <thread_status+1376>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fde0eab0d90 <thread_status+1296>, cond=0x7fde0eab0db8 <thread_status+1336>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fde0eab0db8 <thread_status+1336>, mutex=0x7fde0eab0d90 <thread_status+1296>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fde0cd9f32b in blas_thread_server () from /usr/local/bin/../lib/julia/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408260032, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 13 (LWP 73504 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fde0eab0d60 <thread_status+1248>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fde0eab0d60 <thread_status+1248>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fde0eab0d60 <thread_status+1248>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fde0eab0d10 <thread_status+1168>, cond=0x7fde0eab0d38 <thread_status+1208>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fde0eab0d38 <thread_status+1208>, mutex=0x7fde0eab0d10 <thread_status+1168>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fde0cd9f32b in blas_thread_server () from /usr/local/bin/../lib/julia/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408260032, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 12 (LWP 73503 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fde0eab0ce0 <thread_status+1120>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fde0eab0ce0 <thread_status+1120>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fde0eab0ce0 <thread_status+1120>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fde0eab0c90 <thread_status+1040>, cond=0x7fde0eab0cb8 <thread_status+1080>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fde0eab0cb8 <thread_status+1080>, mutex=0x7fde0eab0c90 <thread_status+1040>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fde0cd9f32b in blas_thread_server () from /usr/local/bin/../lib/julia/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408260032, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 11 (LWP 73502 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fde0eab0c60 <thread_status+992>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fde0eab0c60 <thread_status+992>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fde0eab0c60 <thread_status+992>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fde0eab0c10 <thread_status+912>, cond=0x7fde0eab0c38 <thread_status+952>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fde0eab0c38 <thread_status+952>, mutex=0x7fde0eab0c10 <thread_status+912>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fde0cd9f32b in blas_thread_server () from /usr/local/bin/../lib/julia/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408260032, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 10 (LWP 73501 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fde0eab0be0 <thread_status+864>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fde0eab0be0 <thread_status+864>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fde0eab0be0 <thread_status+864>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fde0eab0b90 <thread_status+784>, cond=0x7fde0eab0bb8 <thread_status+824>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fde0eab0bb8 <thread_status+824>, mutex=0x7fde0eab0b90 <thread_status+784>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fde0cd9f32b in blas_thread_server () from /usr/local/bin/../lib/julia/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408260032, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 9 (LWP 73500 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fde0eab0b60 <thread_status+736>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fde0eab0b60 <thread_status+736>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fde0eab0b60 <thread_status+736>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fde0eab0b10 <thread_status+656>, cond=0x7fde0eab0b38 <thread_status+696>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fde0eab0b38 <thread_status+696>, mutex=0x7fde0eab0b10 <thread_status+656>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fde0cd9f32b in blas_thread_server () from /usr/local/bin/../lib/julia/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408260032, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 8 (LWP 73499 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fde0eab0ae0 <thread_status+608>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fde0eab0ae0 <thread_status+608>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fde0eab0ae0 <thread_status+608>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fde0eab0a90 <thread_status+528>, cond=0x7fde0eab0ab8 <thread_status+568>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fde0eab0ab8 <thread_status+568>, mutex=0x7fde0eab0a90 <thread_status+528>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fde0cd9f32b in blas_thread_server () from /usr/local/bin/../lib/julia/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408260032, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 7 (LWP 73498 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fde0eab0a60 <thread_status+480>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fde0eab0a60 <thread_status+480>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fde0eab0a60 <thread_status+480>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fde0eab0a10 <thread_status+400>, cond=0x7fde0eab0a38 <thread_status+440>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fde0eab0a38 <thread_status+440>, mutex=0x7fde0eab0a10 <thread_status+400>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fde0cd9f32b in blas_thread_server () from /usr/local/bin/../lib/julia/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408260032, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 6 (LWP 73497 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fde0eab09e0 <thread_status+352>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fde0eab09e0 <thread_status+352>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fde0eab09e0 <thread_status+352>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fde0eab0990 <thread_status+272>, cond=0x7fde0eab09b8 <thread_status+312>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fde0eab09b8 <thread_status+312>, mutex=0x7fde0eab0990 <thread_status+272>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fde0cd9f32b in blas_thread_server () from /usr/local/bin/../lib/julia/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408260032, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 5 (LWP 73496 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fde0eab0960 <thread_status+224>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fde0eab0960 <thread_status+224>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fde0eab0960 <thread_status+224>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fde0eab0910 <thread_status+144>, cond=0x7fde0eab0938 <thread_status+184>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fde0eab0938 <thread_status+184>, mutex=0x7fde0eab0910 <thread_status+144>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fde0cd9f32b in blas_thread_server () from /usr/local/bin/../lib/julia/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408260032, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 4 (LWP 73495 "julia"):
+#0  __futex_abstimed_wait_common64 (private=0, cancel=true, abstime=0x0, op=393, expected=0, futex_word=0x7fde0eab08e0 <thread_status+96>) at ./nptl/futex-internal.c:57
+#1  __futex_abstimed_wait_common (cancel=true, private=0, abstime=0x0, clockid=0, expected=0, futex_word=0x7fde0eab08e0 <thread_status+96>) at ./nptl/futex-internal.c:87
+#2  __GI___futex_abstimed_wait_cancelable64 (futex_word=futex_word@entry=0x7fde0eab08e0 <thread_status+96>, expected=expected@entry=0, clockid=clockid@entry=0, abstime=abstime@entry=0x0, private=private@entry=0) at ./nptl/futex-internal.c:139
+#3  0x00007fde265a7a01 in __pthread_cond_wait_common (abstime=0x0, clockid=0, mutex=0x7fde0eab0890 <thread_status+16>, cond=0x7fde0eab08b8 <thread_status+56>) at ./nptl/pthread_cond_wait.c:503
+#4  ___pthread_cond_wait (cond=0x7fde0eab08b8 <thread_status+56>, mutex=0x7fde0eab0890 <thread_status+16>) at ./nptl/pthread_cond_wait.c:627
+#5  0x00007fde0cd9f32b in blas_thread_server () from /usr/local/bin/../lib/julia/libopenblas64_.so
+#6  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#7  0x00007fde2663a890 in __closefrom_fallback (from=1408260032, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#8  0x0000000000000000 in ?? ()
+
+Thread 3 (LWP 73470 "julia"):
+#0  0x00007fde2655721a in __GI___sigtimedwait (set=set@entry=0x7fde1f81a470, info=info@entry=0x7fde1f81a4f0, timeout=timeout@entry=0x0) at ../sysdeps/unix/sysv/linux/sigtimedwait.c:61
+#1  0x00007fde2655729b in __GI___sigwaitinfo (set=set@entry=0x7fde1f81a470, info=info@entry=0x7fde1f81a4f0) at ../sysdeps/unix/sysv/linux/sigwaitinfo.c:25
+#2  0x00007fde259085bc in signal_listener (arg=<optimized out>) at /cache/build/builder-demeter6-3/julialang/julia-release-1-dot-11/src/signals-unix.c:820
+#3  0x00007fde265a8a83 in start_thread (arg=<optimized out>) at ./nptl/pthread_create.c:442
+#4  0x00007fde2663a890 in __closefrom_fallback (from=1408260976, dirfd_fallback=<optimized out>) at ../sysdeps/unix/sysv/linux/closefrom_fallback.c:50
+#5  0x0000000000000000 in ?? ()
+
+Thread 2 (LWP 73469 "iou-sqp-284659"):
+#0  0x0000000000000000 in ?? ()
+Backtrace stopped: Cannot access memory at address 0x0
+
+Thread 1 (LWP 73460 "julia"):
+#0  0x00007fde26639ba8 in __GI_epoll_pwait (epfd=5, events=0x7ffd53effd30, maxevents=1024, timeout=-1, set=0x0) at ../sysdeps/unix/sysv/linux/epoll_pwait.c:42
+#1  0x0000000500000000 in ?? ()
+#2  0x00007ffd53effd30 in ?? ()
+#3  0xffffffff00000400 in ?? ()
+#4  0x0000000000000000 in ?? ()
+Detaching from program: /usr/local/bin/julia, process 73460
+[Inferior 1 (process 73460) detached]

@@ -83,6 +83,14 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
             point = CartesianIndex(Int(x), Int(y))
             mouseStructInstance.lastCoordinates = [point]
             # Snapshot into a new struct so later callbacks cannot overwrite this message
+            
+            # Anti-deadlock: drop rapid mouse movements if consumer channel is getting full.
+            # If we block here, we deadlock the Makie renderloop (which holds GLOBAL_OPENGL_LOCK)
+            # against the consumer thread which might be loading a large HDF5 file.
+            if isready(mainChannel) && length(mainChannel.data) >= 950
+                return # drop mouse move event
+            end
+            
             put!(mainChannel, MouseStruct(
                 isLeftButtonDown  = mouseStructInstance.isLeftButtonDown,
                 isRightButtonDown = mouseStructInstance.isRightButtonDown,
@@ -294,8 +302,10 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
             # Sync painted slice to tp_data_cache so organ mapping can find new voxels
             tp_idx = MEH.current_tp_index[]
             cur_slice = stateObject.currentDisplayedSlice
-            if haskey(MEH.tp_data_cache, tp_idx)
-                entry = MEH.tp_data_cache[tp_idx]
+            entry = lock(MEH._tp_cache_lock) do
+                haskey(MEH.tp_data_cache, tp_idx) ? MEH.tp_data_cache[tp_idx] : nothing
+            end
+            if entry !== nothing
                 try
                     entry.mask_i16[:, :, cur_slice] .= Int16.(twoDimDat.dat)
                     if entry.mask isa Array{Int8, 3}
@@ -587,8 +597,10 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                         try
                             MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
                             tp_idx = (MEH.compare_mode[] && clickedPanel == 5) ? MEH.compare_right_tp[] : MEH.current_tp_index[]
-                            if haskey(MEH.tp_data_cache, tp_idx)
-                                entry = MEH.tp_data_cache[tp_idx]
+                            entry = lock(MEH._tp_cache_lock) do
+                                haskey(MEH.tp_data_cache, tp_idx) ? MEH.tp_data_cache[tp_idx] : nothing
+                            end
+                            if entry !== nothing
                                 # The source_name should be "Mask" or "manualModif"
                                 # We sync it from the canonical axial panel
                                 if source_name == "Mask" || source_name == "manualModif"
