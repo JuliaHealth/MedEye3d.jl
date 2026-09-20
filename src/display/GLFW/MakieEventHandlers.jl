@@ -348,8 +348,8 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
     if length(stateObjects) >= 5
         compare_mode[] = data.compare
         if data.compare
-            println("[COMPARE] ON: starting compare mode setup..."); flush(stdout)
-            # Load the NEXT TP into panel 5
+            println("[COMPARE] ON: preloading next TP data..."); flush(stdout)
+            # Load the NEXT TP into panel 5 (hidden — for M2 window use)
             tp_indices = sort(collect(keys(tp_labels)))
             if !isempty(tp_indices)
                 cur_pos = findfirst(==(current_tp_index[]), tp_indices)
@@ -359,7 +359,7 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                 compare_right_tp[] = right_tp
                 println("[COMPARE] Loading right TP=$right_tp (current=$(current_tp_index[]))"); flush(stdout)
                 
-                # Load right TP data into panel 5 using _load_tp_from_entry!
+                # Load right TP data into panel 5
                 entry = get_or_load_tp_data(right_tp)
                 if entry !== nothing
                     println("[COMPARE] Got entry for TP=$right_tp, loading into panel 5..."); flush(stdout)
@@ -370,7 +370,7 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                 end
             end
 
-            # Ensure panel 5 uses the exact same scroll dimension and slice as panel 1 for registered alignment
+            # Sync panel 5 scroll/zoom with panel 1 (for M2 use)
             stateObjects[5].onScrollData.dimensionToScroll = stateObjects[1].onScrollData.dimensionToScroll
             stateObjects[5].currentDisplayedSlice = stateObjects[1].currentDisplayedSlice
             stateObjects[5].onScrollData.slicesNumber = stateObjects[1].onScrollData.slicesNumber
@@ -380,96 +380,35 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
             stateObjects[5].calcDimsStruct.imageTextureWidth = stateObjects[1].calcDimsStruct.imageTextureWidth
             stateObjects[5].calcDimsStruct.imageTextureHeight = stateObjects[1].calcDimsStruct.imageTextureHeight
             stateObjects[5].calcDimsStruct.heightToWithRatio = stateObjects[1].calcDimsStruct.heightToWithRatio
-            println("[COMPARE] Panel 5 scroll/zoom synced with panel 1"); flush(stdout)
 
-            # 2-pane view: panel 1 on left, panel 5 on right
-            updateQuadVertices!(stateObjects[1], :LeftHalf)
-            updateQuadVertices!(stateObjects[5], :RightHalf)
-            updateQuadVertices!(stateObjects[2], :Hidden)
-            updateQuadVertices!(stateObjects[3], :Hidden)
-            updateQuadVertices!(stateObjects[4], :Hidden)
-            println("[COMPARE] Quad vertices updated (2-pane layout)"); flush(stdout)
+            # Keep quad layout — NO vertex changes. Panel 5 stays hidden.
+            # The actual side-by-side comparison happens in the M2 window.
+            updateQuadVertices!(stateObjects[5], :Hidden)
 
             left_label = get(tp_labels, current_tp_index[], "TP $(current_tp_index[])")
             right_label = get(tp_labels, compare_right_tp[], "TP $(compare_right_tp[])")
-            println("[COMPARE] Left=$left_label, Right=$right_label"); flush(stdout)
+            println("[COMPARE] Current=$left_label, Compare=$right_label (data preloaded in panel 5)"); flush(stdout)
             
-            # Fix ❺: Panel 1 data hasn't changed — only layout vertices moved.
-            # Just mark it dirty for the consumer to re-render; skip redundant slice extraction.
-            stateObjects[1].isSliceChanged = true
-            # Panel 5 is new — force full texture upload
-            println("[COMPARE] Forcing texture upload for panel 5..."); flush(stdout)
+            # Preload panel 5 texture data (ready for M2)
             _force_texture_upload!(stateObjects, 5)
-            println("[COMPARE] Panel 5 texture upload done"); flush(stdout)
             
-            # If there's an active lesion, set mask filter uniforms
+            # Sync active lesion visibility
             if current_active_lesion_id[] > 0
                 try
-                    println("[COMPARE] Syncing active lesion $(current_active_lesion_id[])..."); flush(stdout)
                     reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[]), stateObjects)
-                    println("[COMPARE] Lesion sync done"); flush(stdout)
                 catch e
-                    println("[COMPARE] WARNING: reactToSyncLesion failed during compare-ON: $e"); flush(stdout)
+                    println("[COMPARE] WARNING: reactToSyncLesion failed: $e"); flush(stdout)
                 end
             end
-            println("[COMPARE] ON: setup complete"); flush(stdout)
+            println("[COMPARE] ON: setup complete (quad view unchanged, data preloaded for M2)"); flush(stdout)
         else
+            println("[COMPARE] OFF: clearing compare state"); flush(stdout)
             compare_right_tp[] = -1
-            # Fix ❻: Only reload panels whose TP data has actually changed.
-            # Panels 1-4 already hold current_tp_index[] data unless TP was switched during compare.
-            entry = get_or_load_tp_data(current_tp_index[])
-            if entry !== nothing
-                cur_tp = current_tp_index[]
-                num_panels = min(4, length(stateObjects))
-                for i in 1:num_panels
-                    panel_tp = try; stateObjects[i].onScrollData.currentTpIndex; catch; -1; end
-                    if panel_tp != cur_tp
-                        _load_tp_from_entry!(stateObjects, entry, i)
-                    end
-                end
-            end
-
-            # 4-pane view (hide Panel 2 for MRI modalities without PET/SPECT)
-            updateQuadVertices!(stateObjects[1], :TopLeft)
-            _update_quad_layout_for_modality!(stateObjects, current_tp_index[])
-            updateQuadVertices!(stateObjects[3], :BottomLeft)
-            updateQuadVertices!(stateObjects[4], :BottomRight)
+            # Hide panel 5 (compare data no longer needed)
             updateQuadVertices!(stateObjects[5], :Hidden)
             
-            # Reset pan, zoom, displayMode, and center slice for all panels
-            for i in 1:length(stateObjects)
-                stateObjects[i].calcDimsStruct.zoom = 1.0f0
-                stateObjects[i].calcDimsStruct.panX = 0.0f0
-                stateObjects[i].calcDimsStruct.panY = 0.0f0
-                stateObjects[i].displayMode = QuadImage
-                # Restore correct dimensionToScroll for sagittal (3) and coronal (4)
-                # panels — their data is pre-permuted and must always slice along dim 3
-                if i in (3, 4)
-                    old_dts = stateObjects[i].onScrollData.dataToScrollDims
-                    stateObjects[i].onScrollData.dataToScrollDims = DataToScrollDims(
-                        imageSize = old_dts.imageSize,
-                        voxelSize = old_dts.voxelSize,
-                        dimensionToScroll = 3)
-                    stateObjects[i].onScrollData.dimensionToScroll = 3
-                    stateObjects[i].onScrollData.slicesNumber = Int32(old_dts.imageSize[3])
-                end
-                if stateObjects[i].onScrollData.slicesNumber > 0
-                    stateObjects[i].currentDisplayedSlice = max(1, stateObjects[i].onScrollData.slicesNumber ÷ 2)
-                end
-            end
-
-            # Clear display data to force full texture re-upload
-            for i in 1:4
-                stateObjects[i].currentlyDispDat = SingleSliceDat(sliceNumber=0)
-            end
-            @debug "Compare mode OFF: restored 4-pane view for TP $(current_tp_index[])"
-            
-            # Force direct texture upload for all 4 visible panels
-            for i in 1:4
-                _force_texture_upload!(stateObjects, i)
-            end
-            
-            # If there's an active lesion, set mask filter uniforms
+            # Quad layout was never changed, so no vertex restoration needed.
+            # Just sync lesion visibility back to single-TP mode.
             if current_active_lesion_id[] > 0
                 try
                     lid_off = _clamp_lid_for_tp(current_active_lesion_id[], current_tp_index[])
@@ -478,6 +417,7 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                     @debug "WARNING: reactToSyncLesion failed during compare-OFF: $e"
                 end
             end
+            println("[COMPARE] OFF: done"); flush(stdout)
         end
         tp_switched[] = tp_switched[] + 1
     end
