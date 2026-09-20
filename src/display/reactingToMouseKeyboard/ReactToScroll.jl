@@ -26,8 +26,10 @@ return scrollback - that holds boolean subject (observable) to which we can reac
 function registerMouseScrollFunctions(window::GLFW.Window, mainChannel::Base.Channel{Any}, window_id::Int=1)
     GLFW.SetScrollCallback(window, (a, xoff, yoff) -> begin
         
-        # Check modifier keys using GLFW directly
-        shift_down = GLFW.GetKey(window, GLFW.KEY_LEFT_SHIFT) == GLFW.PRESS || GLFW.GetKey(window, GLFW.KEY_RIGHT_SHIFT) == GLFW.PRESS
+        # Check modifier keys using GLFW directly with key-callback fallback
+        shift_down = (GLFW.GetKey(window, GLFW.KEY_LEFT_SHIFT) == GLFW.PRESS ||
+                      GLFW.GetKey(window, GLFW.KEY_RIGHT_SHIFT) == GLFW.PRESS ||
+                      is_shift_down_ref[])
         ctrl_down = GLFW.GetKey(window, GLFW.KEY_LEFT_CONTROL) == GLFW.PRESS || GLFW.GetKey(window, GLFW.KEY_RIGHT_CONTROL) == GLFW.PRESS
         alt_down = GLFW.GetKey(window, GLFW.KEY_LEFT_ALT) == GLFW.PRESS || GLFW.GetKey(window, GLFW.KEY_RIGHT_ALT) == GLFW.PRESS
         
@@ -58,16 +60,24 @@ end #registerMouseScrollFunctions
     reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFields})
 
 Handles continuous scaling logic when holding `Shift` + `Scroll`.
-The zooming dynamically recalculates `calcDimsStruct.zoom` and clips bounds (1.0x - 20.0x zoom). Automatically resets panning logic when fully zoomed out. Triggers a render pass immediately upon recalculation.
+The zooming dynamically recalculates `calcDimsStruct.zoom` and clips bounds (1.0x - 40.0x zoom). Automatically resets panning logic when fully zoomed out. Triggers a render pass immediately upon recalculation.
 """
 function reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFields})
-    panelIdx = mainStates[1].switchIndex
+    win_idx = clamp(data.window_id, 1, 2)
+    zoomState = quadZoomStates[win_idx]
     
-    # Enforce window bounds based on the window the event came from
-    if data.window_id == 2 && panelIdx <= 5 && length(mainStates) >= 10
-        panelIdx += 5
-    elseif data.window_id == 1 && panelIdx > 5
-        panelIdx -= 5
+    panelIdx = if zoomState.isZoomed
+        zoomState.zoomedPanel
+    else
+        p = mainStates[1].switchIndex
+        # Enforce window bounds based on the window the event came from
+        if data.window_id == 2 && p <= 5 && length(mainStates) >= 10
+            p + 5
+        elseif data.window_id == 1 && p > 5
+            p - 5
+        else
+            p
+        end
     end
     
     if panelIdx < 1 || panelIdx > length(mainStates)
@@ -75,14 +85,14 @@ function reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFi
     end
     mainState = mainStates[panelIdx]
 
-    # Dynamically scale zooming speed (zoom faster when far out, slower when close up)
-    zoomSpeed = 0.05 * max(1.0, mainState.calcDimsStruct.zoom / 2.0)
+    # Dynamically scale zooming speed (15% per tick with scaling for higher zoom)
+    zoomSpeed = 0.15f0 * max(1.0f0, mainState.calcDimsStruct.zoom / 2.0f0)
     delta = Float32(data.zoom_delta * zoomSpeed)
     
-    newZoom = clamp(mainState.calcDimsStruct.zoom + delta, 0.5f0, 40.0f0)
+    newZoom = clamp(mainState.calcDimsStruct.zoom + delta, 1.0f0, 40.0f0)
     
-    # If returned to base zoom (or zoomed out), center the pan
-    if newZoom <= 1.05f0
+    # Only reset to base zoom and center pan when zooming OUT and reaching base scale
+    if delta < 0 && newZoom <= 1.02f0
         newZoom = 1.0f0
         mainState.calcDimsStruct.panX = 0.0f0
         mainState.calcDimsStruct.panY = 0.0f0
@@ -90,7 +100,7 @@ function reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFi
     
     mainState.calcDimsStruct.zoom = newZoom
     @debug "Shift-Scroll Zoom: $(round(newZoom, digits=2))x (panel=$panelIdx)"
-    # GPU zoom: no reactToScroll needed — render loop picks up new zoom via setZoomPanUniforms
+    # GPU zoom: no reactToScroll needed — render loop picks up new zoom via push constants
 end
 
 
@@ -110,13 +120,21 @@ function reactToScroll(data::ScrollEvent, mainStates::Vector{StateDataFields}, t
     scrollNumb = data.scroll_delta
     
     t_start = time_ns()
-    clickedPanel = mainStates[1].switchIndex
+    win_idx = clamp(data.window_id, 1, 2)
+    zoomState = quadZoomStates[win_idx]
     
-    # Enforce window bounds
-    if data.window_id == 2 && clickedPanel <= 5 && length(mainStates) >= 10
-        clickedPanel += 5
-    elseif data.window_id == 1 && clickedPanel > 5
-        clickedPanel -= 5
+    clickedPanel = if zoomState.isZoomed
+        zoomState.zoomedPanel
+    else
+        p = mainStates[1].switchIndex
+        # Enforce window bounds
+        if data.window_id == 2 && p <= 5 && length(mainStates) >= 10
+            p + 5
+        elseif data.window_id == 1 && p > 5
+            p - 5
+        else
+            p
+        end
     end
     
     if clickedPanel < 1 || clickedPanel > length(mainStates)

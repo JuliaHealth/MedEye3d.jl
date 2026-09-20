@@ -2050,7 +2050,7 @@ function create_metadata_window(
     
     m2_r = nr!()
     btn_m2 = Button(g[m2_r, 1:2], label = "[Launch M2]", buttoncolor = RGBf(0.2, 0.4, 0.6), labelcolor = TXT, fontsize = 10)
-    menu_m2_mode = Menu(g[m2_r, 3:4], options = ["Quad View", "Left CT, Right PET", "Compare Prev/Curr TP"], default = "Quad View", fontsize = 10)
+    menu_m2_mode = Menu(g[m2_r, 3:4], options = ["Pure PET (Current TP)", "Next TP (Quad View)", "Left CT, Right PET", "Compare Prev/Curr TP", "Current TP (Quad View)"], default = "Pure PET (Current TP)", fontsize = 10)
     rowsize!(g, m2_r, Fixed(28)); register_fixed_row!(m2_r, 28)
     
     on(btn_m2.clicks) do _

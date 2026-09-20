@@ -2,7 +2,7 @@ module ForDisplayStructs
 using Base: Int32, isvisible
 export MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, StateDataFields, KeyboardStruct, KeyInputFields, TextureUniforms, MaskTextureUniforms, ForWordsDispStruct, MainMedEye3d
 export DisplayedVoxels, CustomDisplayedVoxels, DisplayMode, SingleImage, MultiImage, QuadImage, GlShaderAndBufferFields
-export DoubleClickEvent
+export DoubleClickEvent, QuadZoomState, quadZoomStates, quadZoomState, is_shift_down_ref
 using ColorTypes, Parameters, Observables, GLFW, Dictionaries, FreeTypeAbstraction, Observables
 using ..DataStructs
 
@@ -284,6 +284,25 @@ Dispatched as a dedicated type via on_next! — same pattern as KeyInputFields, 
   actualWindowHeight::Int = 0
   window_id::Int = 1
 end#DoubleClickEvent
+ 
+"""
+Double-click zoom state for QuadImage mode (independent per window: 1=Main, 2=M2)
+"""
+mutable struct QuadZoomState
+    isZoomed::Bool
+    zoomedPanel::Int
+    savedVerts::Vector{Vector{Float32}}
+    savedVertSizes::Vector{Int64}
+end
+
+const quadZoomStates = [
+    QuadZoomState(false, 0, Vector{Float32}[], Int64[]),
+    QuadZoomState(false, 0, Vector{Float32}[], Int64[])
+]
+const quadZoomState = quadZoomStates[1]
+
+# Shared modifier key reference for shift-scroll
+const is_shift_down_ref = Ref(false)
 
 
 """

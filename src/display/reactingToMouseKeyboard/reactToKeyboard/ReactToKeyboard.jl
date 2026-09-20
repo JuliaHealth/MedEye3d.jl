@@ -21,9 +21,10 @@ window - GLFW window with Visualization
 """
 function registerKeyboardFunctions(window::GLFW.Window, mainChannel::Base.Channel{Any})
     GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
-        # @info "information from the registerKeyboardFunction : scancode : $key, action : $action"
+        if key == GLFW.KEY_LEFT_SHIFT || key == GLFW.KEY_RIGHT_SHIFT
+            is_shift_down_ref[] = (action != GLFW.RELEASE)
+        end
         keyInputInstance = KeyInputFields(scancode=Int32(key), action=action)
-        # println(keyInputInstance)
         put!(mainChannel, keyInputInstance)
     end)
 end #registerKeyboardFunctions

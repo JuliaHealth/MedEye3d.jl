@@ -147,18 +147,6 @@ mouseCoords_channel = Base.Channel{MouseStruct}(100)
 # we can fetch! on the channel, what is the next thing line, if the mouseStruct, check previous one by fetch. If it mouseStruct, aggregate those 2 and fetch the next one
 #fetch in while loop, until no more mouseStructs, then we have the last one, and we can react to it
 
-# Double-click zoom state for QuadImage mode (independent per window: 1=Main, 2=M2)
-mutable struct QuadZoomState
-    isZoomed::Bool
-    zoomedPanel::Int
-    savedVerts::Vector{Vector{Float32}}
-    savedVertSizes::Vector{Int64}
-end
-const quadZoomStates = [
-    QuadZoomState(false, 0, Vector{Float32}[], Int64[]),
-    QuadZoomState(false, 0, Vector{Float32}[], Int64[])
-]
-const quadZoomState = quadZoomStates[1]
 
 
 """
@@ -848,6 +836,7 @@ function reactToDoubleClick(event::DoubleClickEvent, mainStates::Vector{StateDat
         zoomState.savedVertSizes = [mainStates[i].calcDimsStruct.mainQuadVertSize for i in panel_range]
         zoomState.zoomedPanel = clickedPanel
         zoomState.isZoomed = true
+        mainStates[1].switchIndex = clickedPanel
 
         zoomedCalcDim = getMainVerticies(mainStates[clickedPanel].calcDimsStruct, SingleImage, 1)
         mainStates[clickedPanel].calcDimsStruct = setproperties(

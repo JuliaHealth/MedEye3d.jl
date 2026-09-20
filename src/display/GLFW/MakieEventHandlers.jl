@@ -282,7 +282,7 @@ function updateQuadVertices!(stateObject::StateDataFields, layout::Symbol)
             wordsQuadVertSize = sizeof(_HIDDEN_QUAD_VERTS_W)
         ))
     else
-        pos = if layout == :TopLeft || layout == :LeftHalf
+        pos = if layout == :TopLeft || layout == :LeftHalf || layout == :SingleImage || layout == :WholeWindow
             1
         elseif layout == :TopRight || layout == :RightHalf
             2
@@ -293,7 +293,7 @@ function updateQuadVertices!(stateObject::StateDataFields, layout::Symbol)
         else
             1
         end
-        mode = (layout == :LeftHalf || layout == :RightHalf) ? MultiImage : QuadImage
+        mode = (layout == :SingleImage || layout == :WholeWindow) ? SingleImage : ((layout == :LeftHalf || layout == :RightHalf) ? MultiImage : QuadImage)
         stateObject.calcDimsStruct = StructsManag.getMainVerticies(calcDimStruct, mode, pos)
     end
 end
