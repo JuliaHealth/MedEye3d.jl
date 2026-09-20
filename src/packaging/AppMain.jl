@@ -1021,34 +1021,26 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         
         mode_val = makie_win.m2_mode[]
         tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
-        if mode_val == "Compare Curr/Next TP"
-            makie_win.set_compare_mode[] = true
-        else
-            makie_win.set_compare_mode[] = false
-        end
         put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], mode_val))
     end
     
     on(makie_win.m2_mode) do val
         tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
-        if val == "Compare Curr/Next TP"
-            makie_win.set_compare_mode[] = true
-        else
-            makie_win.set_compare_mode[] = false
-        end
         if m2_window_cache[] !== nothing
             put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], val))
         end
     end
     
+    # Compare mode is decoupled from M2 window creation.
+    # Compare button only preloads next-TP data. If M2 is already open, auto-update it.
     on(makie_win.set_compare_mode) do val
-        if val
+        if val && m2_window_cache[] !== nothing
+            # M2 is already open — switch it to show the compare TP's quad view
+            tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
             if makie_win.m2_mode[] != "Compare Curr/Next TP"
                 makie_win.m2_mode[] = "Compare Curr/Next TP"
-            end
-        else
-            if makie_win.m2_mode[] == "Compare Curr/Next TP"
-                makie_win.m2_mode[] = "Pure PET (Current TP)"
+            else
+                put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], "Compare Curr/Next TP"))
             end
         end
     end

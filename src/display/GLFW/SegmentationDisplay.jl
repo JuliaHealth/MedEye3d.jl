@@ -161,16 +161,16 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
         MakieEventHandlers.updateQuadVertices!(stateInstances[9], :Hidden)
         MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
     elseif mode == "Compare Curr/Next TP"
+        # M2 window shows a QUAD VIEW of the next (compare) TP
         for i in 6:10
-            stateInstances[i].displayMode = MultiImage
+            stateInstances[i].displayMode = QuadImage
         end
         if load_data
-            left_tp = tp_index
             right_tp = MakieEventHandlers.compare_right_tp[]
             if right_tp < 0
                 tp_indices = sort(collect(keys(MakieEventHandlers.tp_labels)))
                 if !isempty(tp_indices)
-                    cur_pos = findfirst(==(left_tp), tp_indices)
+                    cur_pos = findfirst(==(tp_index), tp_indices)
                     cur_pos = cur_pos === nothing ? 1 : cur_pos
                     next_pos = mod1(cur_pos + 1, length(tp_indices))
                     right_tp = tp_indices[next_pos]
@@ -178,21 +178,19 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
                 end
             end
             
-            entry_left = MakieEventHandlers.get_or_load_tp_data(left_tp)
             entry_right = MakieEventHandlers.get_or_load_tp_data(right_tp)
-            
-            if entry_left !== nothing
-                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_left, 6) # Left
-            end
             if entry_right !== nothing
-                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_right, 10) # Right
+                for i in 6:9
+                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_right, i)
+                end
             end
         end
-        MakieEventHandlers.updateQuadVertices!(stateInstances[6], :LeftHalf)
-        MakieEventHandlers.updateQuadVertices!(stateInstances[7], :Hidden)
-        MakieEventHandlers.updateQuadVertices!(stateInstances[8], :Hidden)
-        MakieEventHandlers.updateQuadVertices!(stateInstances[9], :Hidden)
-        MakieEventHandlers.updateQuadVertices!(stateInstances[10], :RightHalf)
+        # Quad layout: 4 panels for compare TP
+        MakieEventHandlers.updateQuadVertices!(stateInstances[6], :TopLeft)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[7], :TopRight)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
     else # "Quad View" or "Current TP (Quad View)"
         for i in 6:10
             stateInstances[i].displayMode = QuadImage
