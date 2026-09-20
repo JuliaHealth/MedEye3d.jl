@@ -102,6 +102,12 @@ function run_viewer_loop(mainViewer, makie_win=nothing)
                 sleep(0.01)
             end
 
+            println(">> [TEST_MODE] Testing Shift-Scroll Zoom in & out on Main Window...")
+            put!(mainViewer.channel, MedEye3d.MakieEvents.ScrollZoomEvent(1.0, 1))
+            for _ in 1:10; GLFW.PollEvents(); sleep(0.01); end
+            put!(mainViewer.channel, MedEye3d.MakieEvents.ScrollZoomEvent(-1.0, 1))
+            for _ in 1:10; GLFW.PollEvents(); sleep(0.01); end
+
             println(">> [TEST_MODE] Testing double-click zoom & restore on Main Window...")
             put!(mainViewer.channel, MedEye3d.ForDisplayStructs.DoubleClickEvent(x=100, y=100, actualWindowWidth=1100, actualWindowHeight=1100, window_id=1))
             for _ in 1:10; GLFW.PollEvents(); sleep(0.01); end
@@ -109,8 +115,7 @@ function run_viewer_loop(mainViewer, makie_win=nothing)
             for _ in 1:10; GLFW.PollEvents(); sleep(0.01); end
 
             if makie_win !== nothing
-                println(">> [TEST_MODE] Triggering M2 window launch in mode 'Compare Prev/Curr TP'...")
-                makie_win.m2_mode[] = "Compare Prev/Curr TP"
+                println(">> [TEST_MODE] Triggering M2 window launch in default mode '$(makie_win.m2_mode[])'...")
                 notify(makie_win.trigger_m2)
                 for _ in 1:50
                     GLFW.PollEvents()
@@ -123,11 +128,29 @@ function run_viewer_loop(mainViewer, makie_win=nothing)
                     sleep(0.01)
                 end
 
+                println(">> [TEST_MODE] Testing Shift-Scroll Zoom on M2 Window...")
+                put!(mainViewer.channel, MedEye3d.MakieEvents.ScrollZoomEvent(1.0, 2))
+                for _ in 1:10; GLFW.PollEvents(); sleep(0.01); end
+                put!(mainViewer.channel, MedEye3d.MakieEvents.ScrollZoomEvent(-1.0, 2))
+                for _ in 1:10; GLFW.PollEvents(); sleep(0.01); end
+
                 println(">> [TEST_MODE] Testing double-click zoom & restore on M2 Window...")
                 put!(mainViewer.channel, MedEye3d.ForDisplayStructs.DoubleClickEvent(x=100, y=100, actualWindowWidth=1200, actualWindowHeight=800, window_id=2))
                 for _ in 1:10; GLFW.PollEvents(); sleep(0.01); end
                 put!(mainViewer.channel, MedEye3d.ForDisplayStructs.DoubleClickEvent(x=100, y=100, actualWindowWidth=1200, actualWindowHeight=800, window_id=2))
                 for _ in 1:10; GLFW.PollEvents(); sleep(0.01); end
+
+                println(">> [TEST_MODE] Switching M2 to 'Next TP (Quad View)'...")
+                makie_win.m2_mode[] = "Next TP (Quad View)"
+                for _ in 1:30; GLFW.PollEvents(); sleep(0.01); end
+
+                println(">> [TEST_MODE] Switching M2 to 'Compare Prev/Curr TP' (triggers Compare Mode)...")
+                makie_win.m2_mode[] = "Compare Prev/Curr TP"
+                for _ in 1:30; GLFW.PollEvents(); sleep(0.01); end
+
+                println(">> [TEST_MODE] Switching M2 back to 'Pure PET (Current TP)' (triggers Main View)...")
+                makie_win.m2_mode[] = "Pure PET (Current TP)"
+                for _ in 1:30; GLFW.PollEvents(); sleep(0.01); end
             end
             println(">> [TEST_MODE] Test completed successfully without deadlocks or crashes!")
             try
@@ -1012,7 +1035,12 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             else
                 makie_win.set_compare_mode[] = false
             end
-            put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], val))
+        end
+    end
+
+    on(MedEye3d.SegmentationDisplay.MakieEventHandlers.tp_switched) do tp_idx
+        if m2_window_cache[] !== nothing
+            put!(mainViewer.channel, LaunchM2Event(tp_idx, m2_window_cache[], makie_win.m2_mode[]))
         end
     end
 

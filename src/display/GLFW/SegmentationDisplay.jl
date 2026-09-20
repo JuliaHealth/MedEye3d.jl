@@ -816,14 +816,35 @@ function coordinateDisplay(
                             stateInstances[i].calcDimsStruct.avWindHeightForMain = Int32(cur_h)
                         end
                         
-                        if channelData.mode == "Quad View"
+                        if channelData.mode == "Pure PET (Current TP)"
                             for i in 6:10
-                                stateInstances[i].displayMode = QuadImage
+                                stateInstances[i].displayMode = SingleImage
                             end
                             entry = MakieEventHandlers.get_or_load_tp_data(channelData.tp_index)
                             if entry !== nothing
+                                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 7)
+                            end
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[6], :Hidden)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[7], :SingleImage)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[8], :Hidden)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[9], :Hidden)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
+                        elseif channelData.mode == "Next TP (Quad View)"
+                            for i in 6:10
+                                stateInstances[i].displayMode = QuadImage
+                            end
+                            tp_indices = sort(collect(keys(MakieEventHandlers.tp_labels)))
+                            next_tp = channelData.tp_index
+                            if !isempty(tp_indices)
+                                cur_pos = findfirst(==(channelData.tp_index), tp_indices)
+                                cur_pos = cur_pos === nothing ? 1 : cur_pos
+                                next_pos = mod1(cur_pos + 1, length(tp_indices))
+                                next_tp = tp_indices[next_pos]
+                            end
+                            entry_next = MakieEventHandlers.get_or_load_tp_data(next_tp)
+                            if entry_next !== nothing
                                 for i in 6:9
-                                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, i)
+                                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_next, i)
                                 end
                             end
                             MakieEventHandlers.updateQuadVertices!(stateInstances[6], :TopLeft)
@@ -831,7 +852,7 @@ function coordinateDisplay(
                             MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
                             MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
                             MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
-                        elseif channelData.mode == "Left CT, Right PET"
+                        elseif channelData.mode == "Left CT, Right PET" || channelData.mode == "Left CT, Right PET (Current TP)"
                             for i in 6:10
                                 stateInstances[i].displayMode = MultiImage
                             end
@@ -876,15 +897,31 @@ function coordinateDisplay(
                             MakieEventHandlers.updateQuadVertices!(stateInstances[8], :Hidden)
                             MakieEventHandlers.updateQuadVertices!(stateInstances[9], :Hidden)
                             MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
+                        else # "Quad View" or "Current TP (Quad View)"
+                            for i in 6:10
+                                stateInstances[i].displayMode = QuadImage
+                            end
+                            entry = MakieEventHandlers.get_or_load_tp_data(channelData.tp_index)
+                            if entry !== nothing
+                                for i in 6:9
+                                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, i)
+                                end
+                            end
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[6], :TopLeft)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[7], :TopRight)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
+                            MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
                         end
                         
                         # Sync base coordinates with main window and upload textures
                         for i in 6:10
-                            stateInstances[i].onScrollData.dimensionToScroll = stateInstances[i-5].onScrollData.dimensionToScroll
-                            stateInstances[i].currentDisplayedSlice = stateInstances[i-5].currentDisplayedSlice
-                            stateInstances[i].calcDimsStruct.zoom = stateInstances[i-5].calcDimsStruct.zoom
-                            stateInstances[i].calcDimsStruct.panX = stateInstances[i-5].calcDimsStruct.panX
-                            stateInstances[i].calcDimsStruct.panY = stateInstances[i-5].calcDimsStruct.panY
+                            target_ref = (channelData.mode == "Pure PET (Current TP)" && i == 7) ? 1 : (i - 5)
+                            stateInstances[i].onScrollData.dimensionToScroll = stateInstances[target_ref].onScrollData.dimensionToScroll
+                            stateInstances[i].currentDisplayedSlice = stateInstances[target_ref].currentDisplayedSlice
+                            stateInstances[i].calcDimsStruct.zoom = stateInstances[target_ref].calcDimsStruct.zoom
+                            stateInstances[i].calcDimsStruct.panX = stateInstances[target_ref].calcDimsStruct.panX
+                            stateInstances[i].calcDimsStruct.panY = stateInstances[target_ref].calcDimsStruct.panY
                             if stateInstances[i].calcDimsStruct.mainQuadVertSize > 0 && !all(iszero, stateInstances[i].calcDimsStruct.mainImageQuadVert)
                                 MakieEventHandlers._force_texture_upload!(stateInstances, i)
                             end
