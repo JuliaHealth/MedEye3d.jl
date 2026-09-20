@@ -191,6 +191,22 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
         MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
         MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
         MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
+        
+        # Set default CT+PET blend for panels 6,8,9 and pure PET for panel 7 (TopRight)
+        default_blend = 0.5f0
+        for i in [6, 8, 9]
+            for tex in stateInstances[i].mainForDisplayObjects.listOfTextSpecifications
+                if tex.isNuclearMask && !tex.isMainImage
+                    tex.maskContribution = default_blend
+                end
+            end
+        end
+        for tex in stateInstances[7].mainForDisplayObjects.listOfTextSpecifications
+            if tex.isNuclearMask && !tex.isMainImage
+                tex.maskContribution = 1.0f0
+            end
+        end
+        ReactToScroll._pet_blend_ref_w2[] = default_blend
     else # "Quad View" or "Current TP (Quad View)"
         for i in 6:10
             stateInstances[i].displayMode = QuadImage
