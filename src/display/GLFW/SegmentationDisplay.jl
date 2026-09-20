@@ -92,6 +92,19 @@ end
 # switch_gl_context! removed — Vulkan doesn't use GL context switching
 function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String, tp_index::Int; load_data::Bool = true)
     _current_m2_mode[] = mode
+    
+    # Always sync aspect ratio data from main window panels BEFORE vertex calculation.
+    # This ensures correct proportions on window resize/maximize (load_data=false).
+    for i in 6:min(10, length(stateInstances))
+        target_ref = i - 5
+        if target_ref > 1 && stateInstances[target_ref].currentDisplayedSlice <= 0
+            target_ref = 1
+        end
+        stateInstances[i].calcDimsStruct.imageTextureWidth = stateInstances[target_ref].calcDimsStruct.imageTextureWidth
+        stateInstances[i].calcDimsStruct.imageTextureHeight = stateInstances[target_ref].calcDimsStruct.imageTextureHeight
+        stateInstances[i].calcDimsStruct.heightToWithRatio = stateInstances[target_ref].calcDimsStruct.heightToWithRatio
+    end
+    
     if mode == "Pure PET (Current TP)"
         for i in 6:10
             stateInstances[i].displayMode = QuadImage
@@ -239,9 +252,6 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
             stateInstances[i].calcDimsStruct.zoom = stateInstances[target_ref].calcDimsStruct.zoom
             stateInstances[i].calcDimsStruct.panX = stateInstances[target_ref].calcDimsStruct.panX
             stateInstances[i].calcDimsStruct.panY = stateInstances[target_ref].calcDimsStruct.panY
-            stateInstances[i].calcDimsStruct.imageTextureWidth = stateInstances[target_ref].calcDimsStruct.imageTextureWidth
-            stateInstances[i].calcDimsStruct.imageTextureHeight = stateInstances[target_ref].calcDimsStruct.imageTextureHeight
-            stateInstances[i].calcDimsStruct.heightToWithRatio = stateInstances[target_ref].calcDimsStruct.heightToWithRatio
 
             if stateInstances[i].calcDimsStruct.mainQuadVertSize > 0 && !all(iszero, stateInstances[i].calcDimsStruct.mainImageQuadVert)
                 MakieEventHandlers._force_texture_upload!(stateInstances, i)
