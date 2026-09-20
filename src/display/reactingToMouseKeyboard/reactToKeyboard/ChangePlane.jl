@@ -18,7 +18,7 @@ function processKeysInfo(toScrollDatPrim::Identity{DataToScrollDims}, stateObjec
     old = stateObject.onScrollData.dimensionToScroll
 
     ratioSetcalcDim = getHeightToWidthRatio(stateObject.calcDimsStruct, toScrollDat)
-    newCalcDim = getMainVerticies(ratioSetcalcDim, stateObject.displayMode, stateObject.imagePosition)
+    newCalcDim = getMainVerticies(ratioSetcalcDim, stateObject.displayMode, stateObject.calcDimsStruct.imagePos)
 
     stateObject.calcDimsStruct = newCalcDim
 

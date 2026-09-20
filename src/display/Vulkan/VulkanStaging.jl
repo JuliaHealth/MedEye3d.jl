@@ -258,6 +258,12 @@ function upload_textures_batched!(ctx::VkCtx, pool::VkStagingPool, batch::Vector
         total_bytes_needed += (tex_bytes + 15) & ~UInt64(15)
     end
     
+    # SAFETY: reject batch if it exceeds pool capacity (would write past mapped memory)
+    if total_bytes_needed > pool.capacity
+        println("[VK-STAGING-ERR] Batch ($(total_bytes_needed) bytes) exceeds pool capacity ($(pool.capacity) bytes)! SKIPPING"); flush(stdout)
+        return
+    end
+    
     # Reset staging ring buffer offset if wrap-around is needed
     if pool.offset + total_bytes_needed > pool.capacity
         pool.offset = 0
@@ -276,17 +282,30 @@ function upload_textures_batched!(ctx::VkCtx, pool::VkStagingPool, batch::Vector
         bpp = bytes_per_pixel(tex.format)
         data_bytes = UInt64(w * h * bpp)
         
+        # SAFETY: skip texture if data is too small (prevents out-of-bounds read)
+        expected_pixels = w * h
+        actual_pixels = length(data)
+        if actual_pixels < 1
+            println("[VK-STAGING-WARN] empty data for '$(tex.name)' ($(w)x$(h)), SKIPPING"); flush(stdout)
+            continue
+        end
+        
         # Ensure 16-byte alignment for Vulkan buffer offsets
         aligned_offset = (curr_offset + 15) & ~UInt64(15)
         dest_ptr = Ptr{Nothing}(pool.mapped_ptr + aligned_offset)
         
-        # Zero the full texture area first, then copy actual data on top.
-        # When plane changes (e.g., axial→coronal), the slice may be smaller
-        # than the texture. Zeroing prevents stale garbage pixels from
-        # Vulkan reading past the valid data in the Extent3D copy region.
-        ccall(:memset, Ptr{Nothing}, (Ptr{Nothing}, Cint, Csize_t), dest_ptr, 0, data_bytes)
-        # Copy actual data (uses min(length(data), w*h) so safe for smaller slices)
-        copy_data_to_staging!(dest_ptr, data, w, h, tex.format)
+        # GC.@preserve: prevent GC from collecting the parent array of SubArray views
+        # during unsafe_copyto!. Without this, a concurrent GC could free the parent
+        # array while we're reading from it via pointer(), causing a segfault.
+        GC.@preserve data begin
+            # Zero the full texture area first, then copy actual data on top.
+            # When plane changes (e.g., axial→coronal), the slice may be smaller
+            # than the texture. Zeroing prevents stale garbage pixels from
+            # Vulkan reading past the valid data in the Extent3D copy region.
+            ccall(:memset, Ptr{Nothing}, (Ptr{Nothing}, Cint, Csize_t), dest_ptr, 0, data_bytes)
+            # Copy actual data (uses min(length(data), w*h) so safe for smaller slices)
+            copy_data_to_staging!(dest_ptr, data, w, h, tex.format)
+        end
         
         push!(copy_specs, (tex, aligned_offset, w, h))
         curr_offset = aligned_offset + data_bytes

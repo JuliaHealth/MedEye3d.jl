@@ -144,8 +144,8 @@ function run_viewer_loop(mainViewer, makie_win=nothing)
                 makie_win.m2_mode[] = "Next TP (Quad View)"
                 for _ in 1:30; GLFW.PollEvents(); sleep(0.01); end
 
-                println(">> [TEST_MODE] Switching M2 to 'Compare Prev/Curr TP' (triggers Compare Mode)...")
-                makie_win.m2_mode[] = "Compare Prev/Curr TP"
+                println(">> [TEST_MODE] Switching M2 to 'Compare Curr/Next TP' (triggers Compare Mode)...")
+                makie_win.m2_mode[] = "Compare Curr/Next TP"
                 for _ in 1:30; GLFW.PollEvents(); sleep(0.01); end
 
                 println(">> [TEST_MODE] Switching M2 back to 'Pure PET (Current TP)' (triggers Main View)...")
@@ -868,7 +868,9 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     MEH.register_tp_loader!(load_single_tp_from_h5)
     MEH.register_h5_mask_saver!(h5_path, studies)
     first_entry = load_single_tp_from_h5(0)
-    MEH.tp_data_cache[0] = first_entry
+    lock(MEH._tp_cache_lock) do
+        MEH.tp_data_cache[0] = first_entry
+    end
 
     function entry_to_vdt(e::MEH.TpCacheEntry)
         mask_i16 = e.mask_i16
@@ -1019,7 +1021,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         
         mode_val = makie_win.m2_mode[]
         tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
-        if mode_val == "Compare Prev/Curr TP"
+        if mode_val == "Compare Curr/Next TP"
             makie_win.set_compare_mode[] = true
         else
             makie_win.set_compare_mode[] = false
@@ -1028,12 +1030,25 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     end
     
     on(makie_win.m2_mode) do val
+        tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
+        if val == "Compare Curr/Next TP"
+            makie_win.set_compare_mode[] = true
+        else
+            makie_win.set_compare_mode[] = false
+        end
         if m2_window_cache[] !== nothing
-            tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
-            if val == "Compare Prev/Curr TP"
-                makie_win.set_compare_mode[] = true
-            else
-                makie_win.set_compare_mode[] = false
+            put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], val))
+        end
+    end
+    
+    on(makie_win.set_compare_mode) do val
+        if val
+            if makie_win.m2_mode[] != "Compare Curr/Next TP"
+                makie_win.m2_mode[] = "Compare Curr/Next TP"
+            end
+        else
+            if makie_win.m2_mode[] == "Compare Curr/Next TP"
+                makie_win.m2_mode[] = "Pure PET (Current TP)"
             end
         end
     end

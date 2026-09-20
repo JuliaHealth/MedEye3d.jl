@@ -11,9 +11,9 @@ using ..DisplayWords, ..ForDisplayStructs, ..TextureManag, ..DataStructs, ..Stru
 export reactToScroll, reactToScrollZoom, reactToScrollMultiPanel!
 export registerMouseScrollFunctions
 
-# Module-local PET/CT blend tracking for Ctrl+scroll (default 50% blend)
-const _pet_blend_ref = Ref(0.5f0)
-
+# Module-local PET/CT blend tracking for Ctrl+scroll
+const _pet_blend_ref_w1 = Ref(0.5f0)
+const _pet_blend_ref_w2 = Ref(0.5f0)
 
 
 
@@ -42,11 +42,28 @@ function registerMouseScrollFunctions(window::GLFW.Window, mainChannel::Base.Cha
         
         if ctrl_down && !shift_down && !alt_down
             # Ctrl+scroll: adjust PET/CT blend (±0.05 per tick)
-            _pet_blend_ref[] = clamp(_pet_blend_ref[] + Float32(yoff > 0 ? 0.05 : -0.05), 0.0f0, 1.0f0)
-            put!(mainChannel, PetBlendEvent(_pet_blend_ref[]))
+            delta_blend = Float32(yoff > 0 ? 0.05 : -0.05)
+            
+            if isready(mainChannel) && length(mainChannel.data) >= 950
+                return # Anti-deadlock drop
+            end
+            
+            if window_id == 2
+                _pet_blend_ref_w2[] = clamp(_pet_blend_ref_w2[] + delta_blend, 0.0f0, 1.0f0)
+                put!(mainChannel, PetBlendEvent(_pet_blend_ref_w2[], 2))
+            else
+                _pet_blend_ref_w1[] = clamp(_pet_blend_ref_w1[] + delta_blend, 0.0f0, 1.0f0)
+                put!(mainChannel, PetBlendEvent(_pet_blend_ref_w1[], 1))
+            end
         elseif shift_down || alt_down
+            if isready(mainChannel) && length(mainChannel.data) >= 950
+                return # Anti-deadlock drop
+            end
             put!(mainChannel, ScrollZoomEvent(Float64(yoff), window_id))
         else
+            if isready(mainChannel) && length(mainChannel.data) >= 950
+                return # Anti-deadlock drop
+            end
             scroll_delta = yoff > 0 ? 1 : (yoff < 0 ? -1 : 0)
             if scroll_delta != 0
                 println(">> [DEBUG] Pushing ScrollEvent: ", scroll_delta, " for window ", window_id); flush(stdout)
