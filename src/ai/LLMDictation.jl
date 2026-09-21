@@ -9,6 +9,8 @@ export compile_timepoint_clinical_data,
        call_academiccloud_chat,
        generate_radiological_dictation,
        generate_report_async,
+       extract_clinical_fields,
+       extract_clinical_fields_async,
        copy_to_clipboard,
        TimePointClinicalData,
        LesionFinding,
@@ -635,6 +637,137 @@ function copy_to_clipboard(text::String)::Bool
 
     println("[Clipboard Output]:\n$text")
     return false
+end
+
+# ── Clinical Field Extraction from Free-Text History ─────────────────────────
+
+const CLINICAL_EXTRACTION_PROMPT_TEMPLATE = """
+You are a clinical NLP system for prostate cancer PSMA PET/CT imaging.
+Extract the following structured clinical fields from the patient history text below.
+Return ONLY a valid JSON object with exactly these keys.
+Use an empty string "" if a field cannot be determined from the text.
+For "prior_therapies" use a JSON array of strings (empty array [] if none found).
+
+Required JSON keys:
+{
+    "psa_value": "numeric PSA value in ng/mL (number only, e.g. 14.8)",
+    "psa_kinetics": "PSA doubling time or kinetics description (e.g. PSAdt 4.5 mo, rising, stable, declining)",
+    "gleason_score": "Gleason score (e.g. 3+4=7, 4+5=9)",
+    "isup_grade": "ISUP grade group 1-5 (number only)",
+    "initial_tnm": "TNM staging (e.g. pT3a pN1 cM0)",
+    "indication": "clinical indication (staging/BCR/RLT/response/restaging)",
+    "prior_therapies": ["list of prior treatments, e.g. RPE, Radiation, ADT, AR-Inhibitor, Chemotherapy, 177Lu-PSMA, Bone Protective"],
+    "relevant_comorbidities": "relevant conditions affecting interpretation",
+    "prior_imaging_date": "date of last relevant imaging",
+    "prior_imaging_findings": "key findings from prior imaging"
+}
+
+Patient history text:
+"""
+
+"""
+    _parse_extraction_json(raw::String) -> Dict{String, Any}
+
+Parse the LLM response to extract the JSON object, handling markdown code fences
+and extraneous text around the JSON block.
+"""
+function _parse_extraction_json(raw::String)::Dict{String, Any}
+    s = strip(raw)
+
+    # Strip markdown code fences if present
+    m = match(r"```(?:json)?\s*\n?(.*?)\n?\s*```"s, s)
+    if m !== nothing
+        s = strip(m.captures[1])
+    end
+
+    # Try to find a JSON object in the text
+    brace_start = findfirst('{', s)
+    brace_end = findlast('}', s)
+    if brace_start !== nothing && brace_end !== nothing && brace_end > brace_start
+        s = s[brace_start:brace_end]
+    end
+
+    try
+        parsed = JSON.parse(s)
+        if parsed isa Dict
+            return parsed
+        end
+    catch e
+        @warn "Failed to parse clinical extraction JSON" exception=e raw_prefix=s[1:min(200, length(s))]
+    end
+
+    return Dict{String, Any}()
+end
+
+"""
+    extract_clinical_fields(history_text::String; model=DEFAULT_MODEL) -> Dict{String, Any}
+
+Takes free-text patient clinical history / anamnese and uses the LLM to extract
+structured clinical fields (PSA, Gleason, TNM, prior therapies, etc.).
+
+Returns a Dict with string keys matching the JSON schema above.
+On failure or empty input, returns an empty Dict.
+"""
+function extract_clinical_fields(
+    history_text::String;
+    model::String = DEFAULT_MODEL
+)::Dict{String, Any}
+    text = strip(history_text)
+    isempty(text) && return Dict{String, Any}()
+
+    prompt = CLINICAL_EXTRACTION_PROMPT_TEMPLATE * text
+
+    messages = [
+        Dict("role" => "system", "content" => "You are a clinical NLP extraction system. Output ONLY valid JSON, no explanations."),
+        Dict("role" => "user", "content" => prompt)
+    ]
+
+    raw = call_academiccloud_chat(messages; model=model, max_tokens=1500, temperature=0.0)
+
+    # Check for API errors
+    if startswith(raw, "API Error:") || startswith(raw, "Connection Error:")
+        @warn "Clinical extraction API call failed" response_prefix=raw[1:min(100, length(raw))]
+        return Dict{String, Any}("_error" => raw)
+    end
+
+    result = _parse_extraction_json(raw)
+    if isempty(result)
+        return Dict{String, Any}("_error" => "Failed to parse LLM response as JSON")
+    end
+
+    return result
+end
+
+"""
+    extract_clinical_fields_async(history_text::String; model=DEFAULT_MODEL, on_complete=nothing, on_error=nothing)
+
+Asynchronously extracts structured clinical fields from free-text history on a
+background thread so the Makie GLFW rendering loop is never blocked.
+
+- `on_complete(fields::Dict{String, Any}, elapsed::Float64)` — called on success
+- `on_error(err)` — called on exception
+"""
+function extract_clinical_fields_async(
+    history_text::String;
+    model::String = DEFAULT_MODEL,
+    on_complete::Union{Function, Nothing} = nothing,
+    on_error::Union{Function, Nothing} = nothing
+)
+    Threads.@spawn begin
+        t_start = time()
+        try
+            fields = extract_clinical_fields(history_text; model=model)
+            elapsed = round(time() - t_start, digits=1)
+            if on_complete !== nothing
+                on_complete(fields, elapsed)
+            end
+        catch e
+            @error "Failed to extract clinical fields" exception=(e, catch_backtrace())
+            if on_error !== nothing
+                on_error(e)
+            end
+        end
+    end
 end
 
 end # module LLMDictation

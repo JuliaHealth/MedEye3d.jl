@@ -524,6 +524,9 @@ function _generate_discrete_color_funcs(discrete_specs)
         );
 
         vec3 getDiscreteColor_$(n)(float innertexelRes) {
+            if (innertexelRes < -0.1) {
+                return vec3(1.0, 0.0, 0.0); // Red for negative prompts
+            }
             uint val = uint(round(innertexelRes));
             if (val == 0u) {
                 return vec3(0.0);

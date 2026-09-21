@@ -58,7 +58,9 @@ function processKeysInfo(annot::Identity{AnnotationStruct}, stateObject::StateDa
     if (!isempty(textureList))
         texture = textureList[1]
         oldsWidth = texture.strokeWidth
-        texture.strokeWidth = oldsWidth += annot.value.strokeWidthChange
+        newWidth = oldsWidth + annot.value.strokeWidthChange
+        newWidth = clamp(newWidth, 1, 20)
+        texture.strokeWidth = newWidth
         # for undoing action
         # if (toBeSavedForBack)
         #     addToforUndoVector(stateObject, () -> processKeysInfo(Option(AnnotationStruct(oldsWidth)), stateObject, keyInfo, false))

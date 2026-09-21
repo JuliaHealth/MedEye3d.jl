@@ -614,6 +614,7 @@ Supports inline base64 mask transfer from Docker (skips NIfTI file I/O).
 """
 function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3},
                           scribble_coords::Vector{Vector{Int}},
+                          negative_coords::Vector{Vector{Int}},
                           cx::Int, cy::Int, cz::Int;
                           port=get_ai_port(), autozoom=true)
     if !is_ai_enabled()
@@ -642,6 +643,7 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
         "command" => "nninteractive",
         "ct_path" => "/tmp/medeye3d_inference/$(basename(ct_path))",
         "scribble_coords" => scribble_coords,
+        "negative_coords" => negative_coords,
         "out_dir" => "/tmp/medeye3d_inference",
         "autozoom" => autozoom,
         "inline_result" => true  # Request inline base64 mask transfer
@@ -715,7 +717,11 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
     end
     scribble_indices = findall(points_vol .> 0)
     scribble_coords = [[c[1]-1, c[2]-1, c[3]-1] for c in scribble_indices]
-    return run_nninteractive(ct_vol, pet_vol, scribble_coords, cx, cy, cz; port=port, autozoom=autozoom)
+    
+    negative_indices = findall(points_vol .< 0)
+    negative_coords = [[c[1]-1, c[2]-1, c[3]-1] for c in negative_indices]
+    
+    return run_nninteractive(ct_vol, pet_vol, scribble_coords, negative_coords, cx, cy, cz; port=port, autozoom=autozoom)
 end
 
 """
