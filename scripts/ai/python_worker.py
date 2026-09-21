@@ -454,7 +454,9 @@ def handle_client(conn):
     finally:
         conn.close()
 
-def run_server(port=5005):
+def run_server(port=None):
+    if port is None:
+        port = int(os.environ.get('MEDEYE3D_AI_PORT', '5006'))
     init_models()
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

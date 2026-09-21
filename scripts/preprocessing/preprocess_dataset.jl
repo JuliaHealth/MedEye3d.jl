@@ -111,28 +111,36 @@ function main()
         if isfile(scene_path)
             h_tree = JSON.parse(read(scene_path, String))
             extracted_sn = Dict{String, Dict{String, String}}()
-            function _walk_sn(nodes, cur_tp=0)
+            function _walk_sn(nodes, studies_list)
                 for nd in nodes
-                    tp = cur_tp
                     nd_name = get(nd, "name", "")
-                    parts = split(replace(nd_name, ".nii.gz" => ""), "_")
-                    last_i = tryparse(Int, parts[end])
-                    if last_i !== nothing; tp = last_i; end
                     if get(nd, "type", "") == "vtkMRMLSegmentationNode" && haskey(nd, "segments")
-                        segs = nd["segments"]
-                        if segs isa AbstractVector
-                            target = get!(extracted_sn, string(tp), Dict{String, String}())
-                            for (s_idx, s_item) in enumerate(segs)
-                                target[string(s_idx)] = (s_item isa AbstractDict) ? get(s_item, "name", "Segment $s_idx") : string(s_item)
+                        # Match this segmentation node to the correct study by mask filename
+                        seg_base = replace(nd_name, ".nii.gz" => "")
+                        matched_idx = -1
+                        for (si, study) in enumerate(studies_list)
+                            mask_base = replace(study[6], ".nii.gz" => "")
+                            if seg_base == mask_base
+                                matched_idx = si - 1  # 0-indexed study index
+                                break
+                            end
+                        end
+                        if matched_idx >= 0
+                            segs = nd["segments"]
+                            if segs isa AbstractVector
+                                target = get!(extracted_sn, string(matched_idx), Dict{String, String}())
+                                for (s_idx, s_item) in enumerate(segs)
+                                    target[string(s_idx)] = (s_item isa AbstractDict) ? get(s_item, "name", "Segment $s_idx") : string(s_item)
+                                end
                             end
                         end
                     end
                     if haskey(nd, "children")
-                        _walk_sn(nd["children"], tp)
+                        _walk_sn(nd["children"], studies_list)
                     end
                 end
             end
-            _walk_sn(h_tree, 0)
+            _walk_sn(h_tree, studies)
             if !isempty(extracted_sn)
                 h5_file["_meta_/segment_names.json"] = JSON.json(extracted_sn)
                 println("  Embedded segment_names.json as HDF5 dataset ($(length(extracted_sn)) timepoints)")
@@ -344,8 +352,9 @@ function main()
         max_anat_path = joinpath(data_dir, max_anatomy_source)
         if isfile(max_anat_path)
             println("  Storing global max_anatomy atlas...")
-            anat_img = MedImages.load_image(max_anat_path, "CT")
-            anat_raw = UInt16.(round.(max.(0.0f0, Float32.(anat_img.voxel_data))))
+            # Use NIfTI.niread to get raw integer labels without rescale slope/intercept
+            nii_atlas = NIfTI.niread(max_anat_path)
+            anat_raw = UInt16.(max.(0, Int.(nii_atlas.raw)))
             ts_atlas_aligned = reverse(anat_raw, dims=2)  # Pre-flip
             h5_file["ATLAS/max_anatomy"] = ts_atlas_aligned
             println("    Saved ATLAS/max_anatomy ($(size(ts_atlas_aligned)))")
@@ -440,24 +449,40 @@ function main()
         println("    Saved ATLAS/bone_atlas ($(count(bone_atlas .> 0)) bone voxels, $(length(bone_label_ids)) label IDs)")
     end
     
-    # Compute and store organ_mapping for baseline mask using volume-based scan + bone priority
+    # Compute and store organ_mapping for ALL timepoints using volume-based scan + bone priority
     if ts_atlas_aligned !== nothing && !isempty(ts_names)
-        println("  Computing organ_mapping for baseline mask (volume-based, bone priority)...")
-        # Read baseline mask from HDF5
-        base_mask_fname = studies[1][6]
-        base_group = studies[1][8] == "" ? "BASELINE" : "TFM_" * studies[1][8]
-        if haskey(h5_file, "$base_group/$base_mask_fname")
-            mask_raw = read(h5_file["$base_group/$base_mask_fname"])
-            mask_f32 = Float32.(mask_raw)
+        println("  Computing organ_mapping for ALL timepoints (volume-based, bone priority)...")
+        all_organ_mappings = Dict{String, Dict{String, String}}()
+        
+        for (si, study) in enumerate(studies)
+            tp_idx = si - 1  # 0-indexed study index
+            mask_fname = study[6]
+            group = study[8] == "" ? "BASELINE" : "TFM_" * study[8]
+            h5_key = "$group/$mask_fname"
             
-            # Use LesionAssociation volume-based mapping with bone priority
-            organ_mapping = LesionAssociation.map_lesions_to_organs(mask_f32, ts_atlas_aligned, ts_names)
-            
-            # Store as JSON
-            organ_json = JSON.json(Dict(string(k) => v for (k, v) in organ_mapping))
-            h5_file["_meta_/organ_mapping"] = organ_json
-            println("    Saved _meta_/organ_mapping ($(length(organ_mapping)) lesions mapped)")
+            if haskey(h5_file, h5_key)
+                mask_raw = read(h5_file[h5_key])
+                mask_f32 = Float32.(mask_raw)
+                
+                organ_mapping = LesionAssociation.map_lesions_to_organs(mask_f32, ts_atlas_aligned, ts_names)
+                
+                tp_map = Dict{String, String}()
+                for (k, v) in organ_mapping
+                    tp_map[string(k)] = v
+                end
+                all_organ_mappings[string(tp_idx)] = tp_map
+                println("    TP $tp_idx ($mask_fname): $(length(organ_mapping)) lesions mapped")
+            else
+                println("    TP $tp_idx ($mask_fname): mask not found in HDF5, skipping")
+            end
         end
+        
+        # Store as JSON — now per-TP nested format
+        if haskey(h5_file, "_meta_/organ_mapping")
+            delete_object(h5_file, "_meta_/organ_mapping")
+        end
+        h5_file["_meta_/organ_mapping"] = JSON.json(all_organ_mappings)
+        println("    Saved _meta_/organ_mapping ($(length(all_organ_mappings)) TPs)")
     end
     
     # --- 2b. Compute and store centroids for ALL TPs ---

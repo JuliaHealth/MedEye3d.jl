@@ -531,34 +531,40 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             sort!(studies, by = x -> ((length(x[3]) >= 10 && isdigit(x[3][1])) ? x[3][1:10] : "9999-99-99", x[2]))
 
             # Harvest original RTOG / clinical segment names per timepoint
-            function harvest_segments!(nodes, cur_tp=0)
+            function harvest_segments!(nodes, studies_list)
                 for node in nodes
-                    tp = cur_tp
                     name = get(node, "name", "")
-                    parts = split(replace(name, ".nii.gz" => ""), "_")
-                    last_int = tryparse(Int, parts[end])
-                    if last_int !== nothing
-                        tp = last_int
-                    end
                     if get(node, "type", "") == "vtkMRMLSegmentationNode" && haskey(node, "segments")
-                        segs = node["segments"]
-                        if segs isa AbstractVector
-                            dict = get!(MEH.tp_segment_names, tp, Dict{Int, String}())
-                            for (idx, item) in enumerate(segs)
-                                if item isa AbstractDict
-                                    dict[idx] = get(item, "name", "Segment $idx")
-                                else
-                                    dict[idx] = string(item)
+                        # Match this segmentation node to the correct study by mask filename
+                        seg_base = replace(name, ".nii.gz" => "")
+                        matched_idx = -1
+                        for (si, study) in enumerate(studies_list)
+                            mask_base = replace(study[6], ".nii.gz" => "")
+                            if seg_base == mask_base
+                                matched_idx = si - 1  # 0-indexed study index
+                                break
+                            end
+                        end
+                        if matched_idx >= 0
+                            segs = node["segments"]
+                            if segs isa AbstractVector
+                                dict = get!(MEH.tp_segment_names, matched_idx, Dict{Int, String}())
+                                for (idx, item) in enumerate(segs)
+                                    if item isa AbstractDict
+                                        dict[idx] = get(item, "name", "Segment $idx")
+                                    else
+                                        dict[idx] = string(item)
+                                    end
                                 end
                             end
                         end
                     end
                     if haskey(node, "children")
-                        harvest_segments!(node["children"], tp)
+                        harvest_segments!(node["children"], studies_list)
                     end
                 end
             end
-            harvest_segments!(hierarchy, 0)
+            harvest_segments!(hierarchy, studies)
         catch e
             @warn "Failed to parse scene hierarchy: $e"
         end
@@ -617,9 +623,34 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         end
         if haskey(h5_init, "_meta_/organ_mapping")
             try
-                raw_organ = JSON.parse(read(h5_init["_meta_/organ_mapping"]))
-                organ_mapping = Dict{Int,String}(parse(Int, k) => v for (k, v) in raw_organ)
-            catch; end
+                raw = JSON.parse(read(h5_init["_meta_/organ_mapping"]))
+                if !isempty(raw)
+                    first_val = first(values(raw))
+                    if first_val isa Dict
+                        # New per-TP format
+                        for (tp_str, tp_map) in raw
+                            tp_idx = parse(Int, tp_str)
+                            MEH.tp_organ_mapping[tp_idx] = Dict{Int, String}()
+                            for (lid_str, organ) in tp_map
+                                lid = parse(Int, lid_str)
+                                MEH.tp_organ_mapping[tp_idx][lid] = organ
+                                # Also populate global for backward compat
+                                MEH.global_organ_mapping[][lid] = organ
+                                organ_mapping[lid] = organ
+                            end
+                        end
+                    else
+                        # Legacy flat format
+                        for (lid_str, organ) in raw
+                            lid = parse(Int, lid_str)
+                            MEH.global_organ_mapping[][lid] = organ
+                            organ_mapping[lid] = organ
+                        end
+                    end
+                end
+            catch e
+                @warn "Failed to parse organ_mapping: $e"
+            end
         end
         if haskey(h5_init, "_meta_/segment_names.json")
             try
@@ -942,12 +973,30 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     else
         map(lesion_ids_ints) do i
             seg_int = Int(i)
-            display_name = if haskey(tp0_sn, seg_int) && !isempty(tp0_sn[seg_int])
-                tp0_sn[seg_int]
-            elseif haskey(organ_mapping, seg_int)
-                organ_mapping[seg_int]
-            else
-                "Segment_$seg_int"
+            display_name = ""
+            # 1. Try seg_names, skip generic placeholders
+            if haskey(tp0_sn, seg_int) && !isempty(tp0_sn[seg_int])
+                sn = tp0_sn[seg_int]
+                if !startswith(sn, "unknown_") && !startswith(sn, "Segment") && !startswith(sn, "artificial_")
+                    display_name = sn
+                end
+            end
+            # 2. Try per-TP organ mapping (from preprocessing)
+            if isempty(display_name) && haskey(MEH.tp_organ_mapping, 0)
+                tp0_organs = MEH.tp_organ_mapping[0]
+                if haskey(tp0_organs, seg_int)
+                    raw = tp0_organs[seg_int]
+                    display_name = titlecase(replace(raw, "_" => " "))
+                end
+            end
+            # 3. Try legacy organ_mapping
+            if isempty(display_name) && haskey(organ_mapping, seg_int)
+                raw = organ_mapping[seg_int]
+                display_name = titlecase(replace(raw, "_" => " "))
+            end
+            # 4. Fallback
+            if isempty(display_name)
+                display_name = "Lesion $seg_int"
             end
             found_gid = nothing; found_matches = 0
             node_name_0 = get(tp_nodes_map, 0, "PET_Lesions_0")

@@ -42,14 +42,15 @@ if docker ps -q -f name="$GUI_CONTAINER" > /dev/null 2>&1 && [ "$(docker ps -q -
     echo "  Sharing network with GUI container: $GUI_CONTAINER"
     NETWORK_OPT="--network=container:$GUI_CONTAINER"
 else
-    echo "  No GUI container found; binding port 5005 to host"
-    NETWORK_OPT="-p 5005:5005"
+    echo "  No GUI container found; binding port 5006 to host"
+    NETWORK_OPT="-p 5006:5006"
 fi
 
 docker run -d --rm --name medeye3d-ai --gpus '"device=1"' \
     --shm-size=64g \
     $NETWORK_OPT \
     -e TOTALSEG_LICENSE_NUMBER="${TOTALSEG_LICENSE_NUMBER:-aca_XHEO7L1IH2U7G7}" \
+    -e MEDEYE3D_AI_PORT="${MEDEYE3D_AI_PORT:-5006}" \
     -v "$HOST_INFERENCE_DIR":/tmp/medeye3d_inference \
     -v "$HOST_APP_DIR":/app \
     -v "/mnt/big/project_ssd/project_ssd:/mnt/big/project_ssd/project_ssd" \

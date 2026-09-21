@@ -11,6 +11,38 @@ export start_python_worker, run_helpnet_inference, run_nninteractive, run_bone_s
        prompt_start_ai_models, is_worker_reachable, is_ai_enabled, set_ai_enabled!,
        get_last_ai_error, set_last_ai_error!, find_ai_script, get_inference_dir
 
+"""
+    read_with_timeout(conn::TCPSocket, timeout_s::Real=30.0) -> String
+
+Read from a TCP socket with a timeout. Closes the socket and throws if the read
+doesn't complete within `timeout_s` seconds. Prevents hanging on ghost listeners.
+"""
+function read_with_timeout(conn::Sockets.TCPSocket, timeout_s::Real=30.0)::String
+    result_ch = Channel{Any}(1)
+    reader = @async begin
+        try
+            data = read(conn, String)
+            put!(result_ch, data)
+        catch e
+            put!(result_ch, e)
+        end
+    end
+    # Wait for result or timeout
+    deadline = time() + timeout_s
+    while !isready(result_ch)
+        if time() > deadline
+            try; close(conn); catch; end
+            throw(ErrorException("TCP read timed out after $(timeout_s)s — AI worker not responding"))
+        end
+        sleep(0.05)
+    end
+    result = take!(result_ch)
+    if result isa Exception
+        throw(result)
+    end
+    return result::String
+end
+
 global PYTHON_PROC = nothing
 const AI_ENABLED = Ref{Bool}(true)
 const LAST_AI_ERROR = Ref{String}("")
@@ -121,11 +153,11 @@ function get_ai_host()::String
 end
 
 """
-    get_ai_port(default_port=5005)::Int
+    get_ai_port(default_port=5006)::Int
 
-Returns the AI worker TCP port configured via `MEDEYE3D_AI_PORT` (defaults to 5005).
+Returns the AI worker TCP port configured via `MEDEYE3D_AI_PORT` (defaults to 5006).
 """
-function get_ai_port(default_port=5005)::Int
+function get_ai_port(default_port=5006)::Int
     return parse(Int, get(ENV, "MEDEYE3D_AI_PORT", string(default_port)))
 end
 
@@ -138,7 +170,7 @@ function is_worker_reachable(; host=get_ai_host(), port=get_ai_port())::Bool
     try
         conn = connect(host, port)
         write(conn, JSON.json(Dict("command" => "ping")))
-        resp_str = read(conn, String)
+        resp_str = read_with_timeout(conn, 5.0)
         close(conn)
         resp = JSON.parse(resp_str)
         return get(resp, "status", "") == "success"
@@ -262,7 +294,7 @@ function send_json_request(req::Dict; port=get_ai_port())
     try
         conn = connect(host, port)
         write(conn, JSON.json(req))
-        resp_str = read(conn, String)
+        resp_str = read_with_timeout(conn, 30.0)
         close(conn)
         return JSON.parse(resp_str)
     catch e
@@ -569,7 +601,7 @@ function run_helpnet_inference(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32
 
     try
         write(conn, JSON.json(req))
-        resp_str = read(conn, String)
+        resp_str = read_with_timeout(conn, 60.0)
         close(conn)
         
         resp = JSON.parse(resp_str)
@@ -616,7 +648,7 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
                           scribble_coords::Vector{Vector{Int}},
                           negative_coords::Vector{Vector{Int}},
                           cx::Int, cy::Int, cz::Int;
-                          port=get_ai_port(), autozoom=true)
+                          port=get_ai_port(), autozoom=true, spacing::Tuple=(1.0, 1.0, 1.0))
     if !is_ai_enabled()
         println("[InferenceClient] nnInteractive inference skipped: AI models are disabled."); flush(stdout)
         return nothing
@@ -629,14 +661,16 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
         error("No scribble coordinates provided for NNInteractive. No fallbacks allowed.")
     end
     
-    ct_hash = hash(ct_vol)
+    # Include spacing in hash so cached files with wrong spacing are invalidated
+    ct_hash = hash((ct_vol, spacing))
     ct_path = joinpath(out_dir, "nn_ct_$(ct_hash).nii.gz")
     
     if !isfile(ct_path)
-        dummy_sp = (1.0, 1.0, 1.0); dummy_or = (0.0, 0.0, 0.0)
+        sp = spacing; dummy_or = (0.0, 0.0, 0.0)
         dummy_dir = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
-        im_ct = MedImage(voxel_data=ct_vol, spacing=dummy_sp, origin=dummy_or, direction=dummy_dir, image_type=MedImages.MedImage_data_struct.MRI_type, image_subtype=MedImages.MedImage_data_struct.CT_subtype, patient_id="dummy")
+        im_ct = MedImage(voxel_data=ct_vol, spacing=sp, origin=dummy_or, direction=dummy_dir, image_type=MedImages.MedImage_data_struct.MRI_type, image_subtype=MedImages.MedImage_data_struct.CT_subtype, patient_id="dummy")
         MedImages.create_nii_from_medimage(im_ct, ct_path)
+        println("[InferenceClient] CT saved with spacing=$sp: $ct_path"); flush(stdout)
     end
     
     req = Dict(
@@ -671,7 +705,7 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
 
     try
         write(conn, JSON.json(req))
-        resp_str = read(conn, String)
+        resp_str = read_with_timeout(conn, 60.0)
         close(conn)
         
         resp = JSON.parse(resp_str)
@@ -711,7 +745,7 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
 end
 
 # Legacy API: accept points_vol (3D volume) and extract coords internally
-function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}, points_vol::Union{Nothing, Array{Float32, 3}}, cx::Int, cy::Int, cz::Int; port=get_ai_port(), autozoom=true)
+function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}, points_vol::Union{Nothing, Array{Float32, 3}}, cx::Int, cy::Int, cz::Int; port=get_ai_port(), autozoom=true, spacing::Tuple=(1.0, 1.0, 1.0))
     if points_vol === nothing || count(points_vol .> 0) == 0
         error("No user-painted scribbles provided for NNInteractive. No fallbacks allowed.")
     end
@@ -721,7 +755,7 @@ function run_nninteractive(ct_vol::Array{Float32, 3}, pet_vol::Array{Float32, 3}
     negative_indices = findall(points_vol .< 0)
     negative_coords = [[c[1]-1, c[2]-1, c[3]-1] for c in negative_indices]
     
-    return run_nninteractive(ct_vol, pet_vol, scribble_coords, negative_coords, cx, cy, cz; port=port, autozoom=autozoom)
+    return run_nninteractive(ct_vol, pet_vol, scribble_coords, negative_coords, cx, cy, cz; port=port, autozoom=autozoom, spacing=spacing)
 end
 
 """
@@ -730,7 +764,7 @@ end
 Preload CT into Docker nnInteractive GPU memory for faster subsequent inference.
 Fire-and-forget — runs in a background thread. Errors are logged but don't propagate.
 """
-function preload_ct_for_nninteractive(ct_vol::Array{Float32, 3}; port=get_ai_port())
+function preload_ct_for_nninteractive(ct_vol::Array{Float32, 3}; port=get_ai_port(), spacing::Tuple=(1.0, 1.0, 1.0))
     if !is_ai_enabled()
         return nothing
     end
@@ -748,21 +782,21 @@ function preload_ct_for_nninteractive(ct_vol::Array{Float32, 3}; port=get_ai_por
             out_dir = get_inference_dir()
             mkpath(out_dir)
             
-            ct_hash = hash(ct_vol)
+            ct_hash = hash((ct_vol, spacing))
             ct_path = joinpath(out_dir, "nn_ct_$(ct_hash).nii.gz")
             
             # Save CT to NIfTI if not already on disk
             if !isfile(ct_path)
-                dummy_sp = (1.0, 1.0, 1.0)
+                sp = spacing
                 dummy_or = (0.0, 0.0, 0.0)
                 dummy_dir = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
-                im_ct = MedImage(voxel_data=ct_vol, spacing=dummy_sp, origin=dummy_or,
+                im_ct = MedImage(voxel_data=ct_vol, spacing=sp, origin=dummy_or,
                     direction=dummy_dir,
                     image_type=MedImages.MedImage_data_struct.MRI_type,
                     image_subtype=MedImages.MedImage_data_struct.CT_subtype,
                     patient_id="dummy")
                 MedImages.create_nii_from_medimage(im_ct, ct_path)
-                println("[InferenceClient] CT saved for preload: $ct_path"); flush(stdout)
+                println("[InferenceClient] CT saved for preload with spacing=$sp: $ct_path"); flush(stdout)
             end
             
             req = Dict(
@@ -773,7 +807,7 @@ function preload_ct_for_nninteractive(ct_vol::Array{Float32, 3}; port=get_ai_por
             
             conn = connect(host, port)
             write(conn, JSON.json(req))
-            resp_str = read(conn, String)
+            resp_str = read_with_timeout(conn, 30.0)
             close(conn)
             
             resp = JSON.parse(resp_str)
@@ -821,7 +855,7 @@ function run_bone_subsegmentation_remote(lesion_mask::AbstractArray{T, 3}, bone_
     try
         conn = connect(host, port)
         write(conn, JSON.json(req))
-        resp_str = read(conn, String)
+        resp_str = read_with_timeout(conn, 30.0)
         close(conn)
         
         resp = JSON.parse(resp_str)

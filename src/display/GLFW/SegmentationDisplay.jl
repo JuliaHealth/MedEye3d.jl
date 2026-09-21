@@ -466,6 +466,20 @@ on_next!(stateObjects::Vector{StateDataFields}, data::ScreenshotEvent) = reactTo
 on_next!(stateObjects::Vector{StateDataFields}, data::LaunchM2Event) = nothing
 
 on_next!(stateObjects::Vector{StateDataFields}, data::SyncViewsEvent) = nothing
+# --- No-op handlers for UI-only events handled in LesionMetadataWindow ---
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.SetRegistrationQCEvent) = nothing
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.FlagRegistrationEvent) = nothing
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ValidateReportEvent) = nothing
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.CaseQCEvent) = nothing
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.AcceptLesionEvent) = nothing
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.RejectLesionEvent) = nothing
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.MarkUncertainEvent) = nothing
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.MarkResolvedEvent) = nothing
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.CenterLesionEvent) = nothing
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.NextLesionEvent) = nothing
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.PrevLesionEvent) = nothing
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleMaskVisibilityEvent) = nothing
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.RevertToAIEvent) = nothing
 on_error!(stateObjects::Vector{StateDataFields}, err) = error(err)
 on_complete!(stateObjects::Vector{StateDataFields}) = ""
 

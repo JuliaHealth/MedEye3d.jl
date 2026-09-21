@@ -741,7 +741,17 @@ function classify_organ_to_lesion_type(organ_name::String)::String
     end
 end
 
+"""
+    lookup_anatomy(raw_organ::String) -> String
+
+Format a raw organ name into a human-readable anatomy string.
+"""
+function lookup_anatomy(raw_organ::String)
+    isempty(raw_organ) && return ""
+    return titlecase(replace(strip(raw_organ), "_" => " "))
+end
+
 export load_nrrd_labelmap, map_lesions_to_organs, classify_organ_to_lesion_type
-export classify_tissue_priority, classify_and_pick_best_organ, count_atlas_overlap, pick_best_organ
+export classify_tissue_priority, classify_and_pick_best_organ, count_atlas_overlap, pick_best_organ, lookup_anatomy
 
 end # module
