@@ -4549,7 +4549,9 @@ function create_metadata_window(
         cur_left_sel = copy(map_selected_left[])
         cur_right_sel = copy(map_selected_right[])
 
-        Threads.@spawn begin
+        # Run synchronously — UI widget creation (Label, Button) needs the GL thread.
+        # Threads.@spawn causes segfault in glGenBuffers.
+        begin
             try
                 l_ids = get_mask_ids(tp_left)
                 r_ids = get_mask_ids(tp_right)
@@ -4670,7 +4672,8 @@ function create_metadata_window(
                     push!(right_labels, lbl_txt)
                 end
                 
-                @async begin
+                # UI creation — runs synchronously on the GL-safe calling thread
+                begin
                     try
                         cv_active[] || return
                         try; empty!(map_grid); catch e; @warn "map_grid cleanup: $e"; end
