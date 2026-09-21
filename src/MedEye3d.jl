@@ -37,8 +37,16 @@ export LesionTracker
 include(joinpath("workflow", "ScientificWorkflow.jl"))
 using .ScientificWorkflow
 export ScientificWorkflow
+
+include(joinpath("workflow", "ResearchExport.jl"))
+using .ResearchExport
+export ResearchExport
+
+include(joinpath("workflow", "ConflictChecker.jl"))
+using .ConflictChecker
+export ValidationIssue, ConflictSeverity, BLOCKING, WARNING, INFORMATIONAL, run_conflict_checks
 export LesionObservationState, UNREVIEWED, ACCEPTED, REJECTED, CORRECTED, UNCERTAIN, NEW, RESOLVED
-export RegistrationQC, SegmentationVersion, LesionObservation, LesionTrack, AnnotationWorkflowController
+export RegistrationQC, SegmentationVersion, LesionObservation, LesionTrack, AnnotationWorkflowController, AuditEvent
 
 include(joinpath("display", "GLFW", "startModules", "ModernGlUtil.jl"))
 

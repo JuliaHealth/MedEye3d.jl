@@ -1,11 +1,24 @@
 module MakieEvents
 export ChangePlaneEvent, CompareTimePointsEvent, ShowSingleLesionEvent, ScrollZoomEvent, ScrollEvent
 export WindowingEvent, PaintValEvent, SyncLesionEvent
-export ChangeTimePointEvent, SetTimePointEvent, ToggleLesionEvent, RefreshListEvent
+export ChangeTimePointEvent, SetTimePointEvent, ToggleLesionEvent, RefreshListEvent, SetM2ReferenceEvent
 export AddAutoPetEvent, AIInferenceResultEvent, AIStatusUpdateEvent, SyncMissingEvent, GenManualEvent
 export MapLinkEvent, AutoRunPreprocessEvent, RunPreprocessEvent, ShowBoneMaskEvent, ShowMaskLayerEvent, SaveMRBEvent
 export CloseWindowEvent, ResizeWindowEvent, SetWindowTitleEvent, ChangeBrushSizeEvent, ToggleMoveLesionModeEvent
 export PetBlendEvent, BoneSubsegResultEvent, ScreenshotEvent, LabelOpacityEvent, SyncViewsEvent, LaunchM2Event
+export AcceptLesionEvent, RejectLesionEvent, MarkUncertainEvent, MarkResolvedEvent
+export CenterLesionEvent, NextLesionEvent, PrevLesionEvent, ToggleMaskVisibilityEvent, RevertToAIEvent
+export FlagRegistrationEvent, SetRegistrationQCEvent, ValidateReportEvent, CaseQCEvent
+export NextPhaseEvent, PrevPhaseEvent, SetPhaseEvent
+
+struct NextPhaseEvent end
+struct PrevPhaseEvent end
+struct SetPhaseEvent
+    phase::String
+end
+
+struct CaseQCEvent end
+struct ValidateReportEvent end
 struct ChangePlaneEvent
     plane :: Symbol # :Axial, :Coronal, :Sagittal
 end
@@ -56,6 +69,10 @@ struct SetTimePointEvent
     tp_index::Int
     panel::Int  # 0 = single/all, 1 = left panel (compare), 5 = right panel (compare)
     SetTimePointEvent(tp_index::Int, panel::Int=0) = new(tp_index, panel)
+end
+
+struct SetM2ReferenceEvent
+    tp_index::Int # -1 = auto/previous, 0 = baseline
 end
 
 struct ToggleLesionEvent end
@@ -155,4 +172,30 @@ struct LaunchM2Event
     LaunchM2Event(tp_index::Int, window::Any=nothing, mode::String="Pure PET (Current TP)") = new(tp_index, window, mode)
 end
 
+# Scientific annotation keyboard shortcuts
+struct AcceptLesionEvent end
+struct RejectLesionEvent end
+struct MarkUncertainEvent end
+struct MarkResolvedEvent end  
+struct CenterLesionEvent end
+struct NextLesionEvent end
+struct PrevLesionEvent end
+struct ToggleMaskVisibilityEvent
+    visible::Bool
+end
+
+struct RevertToAIEvent
+    lesion_id::Int
+    tp_index::Int
+    RevertToAIEvent(lid::Int, tp::Int=0) = new(lid, tp)
+end
+
+struct FlagRegistrationEvent end
+
+struct SetRegistrationQCEvent
+    status::String  # "GOOD", "QUESTIONABLE", "LOCAL_ADJUSTED", "POOR_MANUAL_MATCH", "FAILED_NOT_EVALUABLE"
+end
+
+struct ToggleFlickerEvent end
+struct ToggleOverlayEvent end
 end # module MakieEvents

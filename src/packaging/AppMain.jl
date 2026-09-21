@@ -86,6 +86,27 @@ end
 
 Continuously pumps GLFW OS window events on the main thread and keeps the visualizer and Makie control panel responsive until closed.
 """
+function auto_place_windows!(m1_win, m2_win, m3_win)
+    monitors = GLFW.GetMonitors()
+    n = length(monitors)
+    if n >= 2
+        if m1_win !== nothing
+            pos_x, pos_y = GLFW.GetMonitorPos(monitors[1])
+            GLFW.SetWindowPos(m1_win, pos_x + 50, pos_y + 50)
+        end
+        if m2_win !== nothing
+            pos_x, pos_y = GLFW.GetMonitorPos(monitors[2])
+            GLFW.SetWindowPos(m2_win, pos_x + 50, pos_y + 50)
+        end
+    end
+    if n >= 3
+        if m3_win !== nothing
+            pos_x, pos_y = GLFW.GetMonitorPos(monitors[3])
+            GLFW.SetWindowPos(m3_win, pos_x + 50, pos_y + 50)
+        end
+    end
+end
+
 function run_viewer_loop(mainViewer, makie_win=nothing)
     window = if !isempty(mainViewer.states) && mainViewer.states[1].mainForDisplayObjects !== nothing
         mainViewer.states[1].mainForDisplayObjects.window
@@ -410,6 +431,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     if haskey(h5_init, "_meta_/metadata.json")
         try
             meta_json = JSON.parse(read(h5_init["_meta_/metadata.json"]))
+            MEH.global_dicom_metadata[] = meta_json isa Dict ? meta_json : Dict("items" => meta_json)
             for item in meta_json
                 for (k, v) in item
                     if v isa Dict
@@ -989,6 +1011,14 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     
     # 6b. Multi-Monitor M2 Launcher
     m2_window_cache = Ref{Any}(nothing)
+    
+    # Auto-place initial windows
+    if !isempty(mainViewer.states) && mainViewer.states[1].mainForDisplayObjects !== nothing
+        m1_win = mainViewer.states[1].mainForDisplayObjects.window
+        m3_win = hasproperty(makie_screen, :glscreen) ? makie_screen.glscreen : nothing
+        auto_place_windows!(m1_win, m2_window_cache[], m3_win)
+    end
+
     on(makie_win.trigger_m2) do _
         println(">> [MULTI-MONITOR] Requesting Secondary Window spawn (mode: $(makie_win.m2_mode[]))...")
         
@@ -1000,6 +1030,12 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             if new_window !== nothing
                 GLFW.ShowWindow(new_window)
                 m2_window_cache[] = new_window
+                
+                if !isempty(mainViewer.states) && mainViewer.states[1].mainForDisplayObjects !== nothing
+                    m1_win = mainViewer.states[1].mainForDisplayObjects.window
+                    m3_win = hasproperty(makie_screen, :glscreen) ? makie_screen.glscreen : nothing
+                    auto_place_windows!(m1_win, new_window, m3_win)
+                end
                 
                 # Register callbacks on the main thread!
                 if length(mainViewer.states) >= 10

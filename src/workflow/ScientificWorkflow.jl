@@ -6,6 +6,43 @@ export SegmentationVersion
 export LesionObservation
 export LesionTrack
 export AnnotationWorkflowController
+export AuditEvent
+
+export AnnotationWorkflowState, WF_CASE_LOADING, WF_LESION_REVIEW, WF_EDIT_MASK, WF_PROMPT_SEGMENT, WF_REGISTRATION_REVIEW, WF_CASE_QC, WF_CASE_COMPLETE
+
+export ClinicalPhase, PHASE_CASE_SETUP, PHASE_READ, PHASE_ASSESS, PHASE_REPORT_DRAFT, PHASE_VALIDATION, PHASE_SIGNED
+
+export CaseProfile, PROFILE_INITIAL_STAGING, PROFILE_BCR, PROFILE_PRE_RLT, PROFILE_POST_RLT, PROFILE_RESPONSE, PROFILE_GENERAL
+
+@enum CaseProfile begin
+    PROFILE_INITIAL_STAGING
+    PROFILE_BCR
+    PROFILE_PRE_RLT
+    PROFILE_POST_RLT
+    PROFILE_RESPONSE
+    PROFILE_GENERAL
+end
+@enum ClinicalPhase begin
+    PHASE_CASE_SETUP     # Loading, selecting workflow profile
+    PHASE_READ           # Image review, segmentation correction, findings
+    PHASE_ASSESS         # Staging, response classification
+    PHASE_REPORT_DRAFT   # Report generation, editing
+    PHASE_VALIDATION     # Conflict checking, QA
+    PHASE_SIGNED         # Locked, signed off
+end
+
+"""
+    AnnotationWorkflowState
+"""
+@enum AnnotationWorkflowState begin
+    WF_CASE_LOADING
+    WF_LESION_REVIEW     # Normal viewing/review mode - A/R/U/X shortcuts active
+    WF_EDIT_MASK         # Paint/erase mode active - mouse drag = paint/erase
+    WF_PROMPT_SEGMENT    # Prompt segmentation active - clicks = prompts
+    WF_REGISTRATION_REVIEW  # Registration QC mode
+    WF_CASE_QC           # Completion QC
+    WF_CASE_COMPLETE     # Case locked
+end
 
 """
     LesionObservationState
@@ -196,6 +233,79 @@ function AnnotationWorkflowController(;
     current_tp_idx = 0
 )
     AnnotationWorkflowController(case_id, tracks, current_track_id, current_tp_idx)
+end
+
+"""
+    AuditEvent
+
+Immutable record of an annotation action for audit trail.
+"""
+struct AuditEvent
+    event_id::String
+    timestamp::String  # ISO 8601
+    case_id::String
+    lesion_track_id::Int
+    timepoint_index::Int
+    event_type::String  # "ACCEPT", "REJECT", "CORRECT", "UNCERTAIN", "RESOLVED", "NEW_LESION", "EDIT_START", "EDIT_APPLY", "REVERT_TO_AI", "PROMPT_SEGMENT", "NAVIGATE"
+    previous_state::String
+    new_state::String
+    segmentation_version::String
+    tool_used::String
+    comment::String
+
+    AuditEvent(
+        event_id,
+        timestamp,
+        case_id,
+        lesion_track_id,
+        timepoint_index,
+        event_type,
+        previous_state,
+        new_state,
+        segmentation_version,
+        tool_used,
+        comment
+    ) = new(
+        String(event_id),
+        String(timestamp),
+        String(case_id),
+        Int(lesion_track_id),
+        Int(timepoint_index),
+        String(event_type),
+        String(previous_state),
+        String(new_state),
+        String(segmentation_version),
+        String(tool_used),
+        String(comment)
+    )
+end
+
+function AuditEvent(;
+    event_id = "",
+    timestamp = "",
+    case_id = "",
+    lesion_track_id = 0,
+    timepoint_index = 0,
+    event_type = "",
+    previous_state = "",
+    new_state = "",
+    segmentation_version = "",
+    tool_used = "",
+    comment = ""
+)
+    AuditEvent(
+        event_id,
+        timestamp,
+        case_id,
+        lesion_track_id,
+        timepoint_index,
+        event_type,
+        previous_state,
+        new_state,
+        segmentation_version,
+        tool_used,
+        comment
+    )
 end
 
 end # module ScientificWorkflow

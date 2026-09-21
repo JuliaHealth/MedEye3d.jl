@@ -8,18 +8,46 @@ module ReactOnKeyboard
 using Setfield, GLFW, Dictionaries, Parameters, DataTypesBasic
 using ..DisplayWords, ..StructsManag, ..PrepareWindow, ..DataStructs, ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms
 using ..KeyboardMouseHelper, ..KeyboardVisibility, ..OtherKeyboardActions, ..WindowControll, ..ChangePlane
+using ..MakieEvents
 # using ..MaskDiffrence
-export reactToKeyInput, reactToKeyboard, registerKeyboardFunctions, processKeysInfo
+export reactToKeyInput, reactToKeyboard, registerKeyboardFunctions, processKeysInfo, register_keyboard_channel!
 
+const keyboard_channel_ref = Ref{Union{Nothing, Base.Channel{Any}}}(nothing)
 
+function register_keyboard_channel!(ch::Base.Channel{Any})
+    keyboard_channel_ref[] = ch
+end
 
+function _get_event_channel()
+    if keyboard_channel_ref[] !== nothing
+        return keyboard_channel_ref[]
+    end
+    try
+        p = parentmodule(parentmodule(@__MODULE__))
+        if isdefined(p, :SegmentationDisplay) && isdefined(p.SegmentationDisplay, :MakieEventHandlers)
+            return p.SegmentationDisplay.MakieEventHandlers.main_event_channel[]
+        end
+    catch; end
+    return nothing
+end
 
+function _is_lesion_review()
+    try
+        p = parentmodule(parentmodule(@__MODULE__))
+        if isdefined(p, :SegmentationDisplay) && isdefined(p.SegmentationDisplay, :MakieEventHandlers)
+            st = p.SegmentationDisplay.MakieEventHandlers.get_workflow_state()
+            return string(st) == "WF_LESION_REVIEW"
+        end
+    catch; end
+    return true
+end
 
 """
 registering functions to the GLFW
 window - GLFW window with Visualization
 """
 function registerKeyboardFunctions(window::GLFW.Window, mainChannel::Base.Channel{Any})
+    keyboard_channel_ref[] = mainChannel
     GLFW.SetKeyCallback(window, (_, key, scancode, action, mods) -> begin
         if key == GLFW.KEY_LEFT_SHIFT || key == GLFW.KEY_RIGHT_SHIFT
             is_shift_down_ref[] = (action != GLFW.RELEASE)
@@ -138,7 +166,18 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             scCode = "z"
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.ToggleFlickerEvent())
+            end
             scCode = "f"
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_O)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.ToggleOverlayEvent())
+            end
+            scCode = "o"
 
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_S)
@@ -146,6 +185,87 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_C)
             scCode = "c"
+
+        # Scientific annotation keyboard shortcuts
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_A)
+            if keyInputInfo.action == GLFW.PRESS && _is_lesion_review()
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.AcceptLesionEvent())
+            end
+            return
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_R)
+            if keyInputInfo.action == GLFW.PRESS && _is_lesion_review()
+                ch = _get_event_channel()
+                if ch !== nothing
+                    if is_shift_down_ref[]
+                        put!(ch, MakieEvents.FlagRegistrationEvent())
+                    else
+                        put!(ch, MakieEvents.RejectLesionEvent())
+                    end
+                end
+            end
+            return
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_U)
+            if keyInputInfo.action == GLFW.PRESS && _is_lesion_review()
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.MarkUncertainEvent())
+            end
+            return
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_B)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.SetM2ReferenceEvent(0))
+            end
+            return
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_V)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.SetM2ReferenceEvent(-1))
+            end
+            return
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_X)
+            if keyInputInfo.action == GLFW.PRESS && _is_lesion_review()
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.MarkResolvedEvent())
+            end
+            return
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_N)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.NextLesionEvent())
+            end
+            return
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_P)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.PrevLesionEvent())
+            end
+            return
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_D)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.CenterLesionEvent())
+            end
+            return
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_Q)
+            ch = _get_event_channel()
+            if ch !== nothing
+                if keyInputInfo.action == GLFW.PRESS
+                    put!(ch, MakieEvents.ToggleMaskVisibilityEvent(false))
+                elseif keyInputInfo.action == GLFW.RELEASE
+                    put!(ch, MakieEvents.ToggleMaskVisibilityEvent(true))
+                end
+            end
+            return
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_KP_ADD) || keyInputInfo.scancode == Int32(GLFW.KEY_EQUAL)
             scCode = "+"
@@ -161,6 +281,10 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_3)
             scCode = "3"
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_LEFT_BRACKET)
+            scCode = "["
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_RIGHT_BRACKET)
+            scCode = "]"
         else
             scCode = "notImp"
         end
@@ -185,7 +309,12 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
         mainState.fieldKeyboardStruct.isCPressed = (act == 1) && scCode == "c"
         mainState.fieldKeyboardStruct.isPlusPressed = scCode == (act == 1) && scCode == "+"
         mainState.fieldKeyboardStruct.isMinusPressed = (act == 1) && scCode == "-"
+        mainState.fieldKeyboardStruct.isLeftBracketPressed = (act == 1) && scCode == "["
+        mainState.fieldKeyboardStruct.isRightBracketPressed = (act == 1) && scCode == "]"
 
+        # add specific flags for brackets but wait! 
+        # I cannot just add fieldKeyboardStruct.isLeftBracketPressed unless it is declared. 
+        # So I will just check scCode inside ReactToKeyboard instead of adding to KeyboardStruct! Wait, ReactToKeyboard processes KeyboardStruct. 
         push!(mainState.fieldKeyboardStruct.lastKeysPressed, scCode)
     end
     reactToKeyboard(mainState.fieldKeyboardStruct, mainState)
@@ -282,6 +411,10 @@ function parseString(str::Vector{String}, stateObject::StateDataFields, keyInfo:
         return Option(AnnotationStruct(1))
     elseif (keyInfo.isTAbPressed && keyInfo.isMinusPressed)
         return Option(AnnotationStruct(-1))
+    elseif (keyInfo.isLeftBracketPressed)
+        return Option(AnnotationStruct(-1))
+    elseif (keyInfo.isRightBracketPressed)
+        return Option(AnnotationStruct(1))
     elseif (isempty(filtered))#nothing to be done
         return Option()
         # when we want to set new value for manual mask change

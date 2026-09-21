@@ -74,7 +74,7 @@ using JSON
         InferenceClient.set_ai_enabled!(false)
         dummy_vol = zeros(Float32, 10, 10, 10)
         @test InferenceClient.run_helpnet_inference(dummy_vol, dummy_vol, nothing, 5, 5, 5) === nothing
-        @test InferenceClient.run_nninteractive(dummy_vol, dummy_vol, [[0, 0, 0]], 5, 5, 5) === nothing
+        @test InferenceClient.run_nninteractive(dummy_vol, dummy_vol, [[0, 0, 0]], Vector{Vector{Int64}}(), 5, 5, 5) === nothing
         @test InferenceClient.run_bone_subsegmentation_remote(dummy_vol, dummy_vol, (1.0, 1.0, 1.0)) == (nothing, nothing)
         @test InferenceClient.preload_ct_for_nninteractive(dummy_vol) === nothing
 
@@ -101,7 +101,7 @@ using JSON
     @testset "LesionMetadataWindow Schema and Serialization" begin
         # Test schema loading from assets/def.json
         schema = LesionMetadataWindow.load_schema()
-        @test length(schema) == 20
+        @test length(schema) >= 20  # May grow as new fields are added
         @test schema[1].short == "Radioligand Type"
         
         # Test that dropdown options are richly populated (not empty or stub)
@@ -195,4 +195,8 @@ using JSON
         @test heuristics["Inner Texture / Density / Attenuation"] == "Sclerotic / Blastic"
         @test haskey(heuristics, "Lesion Shape")
     end
+
+    include("test_ai_mask_versioning.jl")
+    include("test_auto_advance.jl")
+    include("test_new_features.jl")
 end

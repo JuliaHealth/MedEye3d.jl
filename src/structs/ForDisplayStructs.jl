@@ -253,6 +253,8 @@ mostRecentAction ::GLFW.Action= GLFW.RELEASE
   isFPressed::Bool = false
   isSPressed::Bool = false
   isCPressed::Bool = false
+  isLeftBracketPressed::Bool = false
+  isRightBracketPressed::Bool = false
   lastKeysPressed::Vector{String} = [] # last pressed keys - it listenes to keys only if ctrl/shift or alt is pressed- it clears when we release those case or when we press enter
   #informations about what triggered sending this particular struct to the  actor
   mostRecentScanCode::Int32 = Int32(GLFW.KEY_KP_4)

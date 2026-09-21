@@ -275,11 +275,41 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     twoDimDat = stateObject.currentlyDispDat |>
                 (singSl) -> singSl.listOfDataAndImageNames[singSl.nameIndexes[texture.name]]
 
-    toSet = convert(twoDimDat.type, convert(parameter_type(texture), stateObject.valueForMasToSet.value))
+    is_ctrl = mainStates[1].fieldKeyboardStruct.isCtrlPressed
+    val = stateObject.valueForMasToSet.value
+    if is_ctrl && val > 0
+        val = -val
+    end
+    toSet = convert(twoDimDat.type, convert(parameter_type(texture), val))
     strokeW = Int(texture.strokeWidth)
+
+    # ── AI Mask Immutability: Backup original AI mask before first expert edit ──
+    MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
+    tp_idx = MEH.current_tp_index[]
+    raw_val = round(Int, stateObject.valueForMasToSet.value)
+    lesion_id = raw_val > 0 ? raw_val : MEH.current_active_lesion_id[]
+    if lesion_id <= 0
+        lesion_id = MEH.current_active_lesion_id[]
+    end
+    if lesion_id > 0
+        try
+            MEH.ensure_ai_mask_backup!(lesion_id, tp_idx, stateObject)
+        catch e
+            @warn "Failed to ensure AI mask backup: $e"
+        end
+    end
 
     # In-place continuous thick-line interpolation using KernelAbstractions
     StrokeRasterization.rasterize_polyline!(twoDimDat.dat, pointsToRasterize, strokeW, toSet)
+
+    # ── Mark expert edit & set origin to EXPERT_CORRECTION ──
+    if lesion_id > 0
+        try
+            MEH.mark_expert_edit!(lesion_id)
+        catch e
+            @warn "Failed to mark expert edit: $e"
+        end
+    end
 
     @debug "[PAINT-DBG] panel=$(mainStates[1].switchIndex) tex='$(texture.name)' val=$toSet pts=$(length(pointsToRasterize))"
 
@@ -295,10 +325,10 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
 
     # Invalidate SUV/volume/centroid caches, async-recompute metrics, and mark mask dirty for auto-save
     try
-        MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
         MEH.mark_tp_mask_dirty!(MEH.current_tp_index[])
         paint_id = round(Int, stateObject.valueForMasToSet.value)
-        if paint_id > 0
+        edit_id = paint_id > 0 ? paint_id : MEH.current_active_lesion_id[]
+        if edit_id > 0 || paint_id == 0
             # Sync painted slice to tp_data_cache so organ mapping can find new voxels
             tp_idx = MEH.current_tp_index[]
             cur_slice = stateObject.currentDisplayedSlice
@@ -315,7 +345,9 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
                     end
                 catch; end
             end
-            MEH.invalidate_and_recompute_lesion_metrics_async!(paint_id, MEH.current_tp_index[])
+            if edit_id > 0
+                MEH.invalidate_and_recompute_lesion_metrics_async!(edit_id, MEH.current_tp_index[])
+            end
         end
     catch e
         # Log errors instead of silently swallowing
@@ -433,6 +465,11 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 end
                 
                 if seg_vol !== nothing && panelState.movingLesionID > 0
+                    try
+                        MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
+                        tp_idx = (MEH.compare_mode[] && clickedPanel == 5) ? MEH.compare_right_tp[] : MEH.current_tp_index[]
+                        MEH.ensure_ai_mask_backup!(panelState.movingLesionID, tp_idx, panelState)
+                    catch; end
                     T_elem = eltype(seg_vol)
                     panelState.movingLesionOriginalCoords = findall(seg_vol .== round(T_elem, panelState.movingLesionID))
                     panelState.movingLesionOriginalBGs = zeros(T_elem, length(panelState.movingLesionOriginalCoords))
@@ -478,13 +515,15 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             @info "  origX=$origX origY=$origY origZ=$origZ currentSlice=$currentSlice"
             @info "  Axial scrolls Z(1-$(mainStates[1].onScrollData.slicesNumber)) Sag scrolls origX(1-$(mainStates[3].onScrollData.slicesNumber)) Cor scrolls origY(1-$(mainStates[4].onScrollData.slicesNumber))"
             
+            MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
+            
             # Jump other panels to the corresponding slices
             # Panel 1, 2 & 5 scroll through Z (origZ), Panel 3 scrolls through origX, Panel 4 scrolls through origY
             targets = [(1, origZ), (2, origZ), (3, origX), (4, origY)]
             if length(mainStates) >= 5
                 push!(targets, (5, origZ))
             end
-            if length(mainStates) >= 10
+            if length(mainStates) >= 10 && MEH._m2_crosshair_sync[]
                 push!(targets, (6, origZ), (7, origZ), (8, origX), (9, origY), (10, origZ))
             end
             
@@ -625,6 +664,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                                                 entry.mask_i16 .= round.(Int16, vol)
                                             end
                                             MEH.mark_tp_mask_dirty!(tp_idx)
+                                            MEH.mark_expert_edit!(panelState.movingLesionID)
                                             break
                                         end
                                     end

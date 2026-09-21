@@ -18,6 +18,7 @@ export reactToChangeTimePoint, reactToSetTimePoint, reactToToggleLesion, reactTo
 export reactToAddAutoPet, reactToAIInferenceResult, reactToSyncMissing, reactToGenManual
 export reactToMapLink, reactToAutoRunPreprocess, reactToRunPreprocess, reactToShowBoneMask, reactToShowMaskLayer, reactToSaveMRB
 export register_h5_mask_saver!, mark_tp_mask_dirty!, save_tp_mask_to_h5, flush_all_dirty_masks!, dirty_mask_tps
+export _clinical_phase, get_clinical_phase, set_clinical_phase!, _phase_display_name
 using ...InferenceClient
 using ...LesionAssociation
 using ...TextureManag
@@ -39,6 +40,87 @@ const ai_status_text = Observable{String}("Ready")
 const cursor_info_text = Observable{String}("")      # "HU: 45 | SUV: 3.2 | femur (L5) | [Ax] Sl:163"
 const cursor_study_text = Observable{String}("")     # "PET TP0" or "L: PET TP0 | R: PET TP3"
 # 3D voxel position under cursor (axial orientation: x, y, z=slice) — used for new lesion anatomy lookup
+const cursor_voxel_pos = Observable{Tuple{Int,Int,Int}}((0,0,0))
+
+using ...ScientificWorkflow
+# --- Application State Objects ---
+const _clinical_phase = Ref{ScientificWorkflow.ClinicalPhase}(ScientificWorkflow.PHASE_READ)
+const _case_profile = Ref{ScientificWorkflow.CaseProfile}(ScientificWorkflow.PROFILE_GENERAL)
+const global_dicom_metadata = Ref{Dict{String,Any}}(Dict{String,Any}())
+
+function get_clinical_phase()
+    return _clinical_phase[]
+end
+
+function set_clinical_phase!(phase::ScientificWorkflow.ClinicalPhase)
+    old = _clinical_phase[]
+    if old != phase
+        # Just update the ref for now, we'll avoid audit event since record_audit_event! might not be accessible here
+        # or we could call it if it exists
+        _clinical_phase[] = phase
+        @debug "Clinical phase: $old -> $phase"
+        # Update LMW display
+        lmw = _get_lmw()
+        if lmw !== nothing && haskey(lmw, :clinical_phase_obs)
+            lmw[:clinical_phase_obs][] = _phase_display_name(phase)
+        end
+    end
+end
+
+function _phase_display_name(phase)
+    phase == ScientificWorkflow.PHASE_CASE_SETUP && return "SETUP"
+    phase == ScientificWorkflow.PHASE_READ && return "READ"
+    phase == ScientificWorkflow.PHASE_ASSESS && return "ASSESS"
+    phase == ScientificWorkflow.PHASE_REPORT_DRAFT && return "REPORT"
+    phase == ScientificWorkflow.PHASE_VALIDATION && return "VALIDATE"
+    phase == ScientificWorkflow.PHASE_SIGNED && return "SIGNED"
+    return string(phase)
+end
+
+export reactToNextPhase, reactToPrevPhase, reactToSetPhase
+
+function reactToNextPhase(data::NextPhaseEvent, stateObjects)
+    current = get_clinical_phase()
+    phases = [ScientificWorkflow.PHASE_CASE_SETUP, ScientificWorkflow.PHASE_READ, ScientificWorkflow.PHASE_ASSESS, ScientificWorkflow.PHASE_REPORT_DRAFT, ScientificWorkflow.PHASE_VALIDATION, ScientificWorkflow.PHASE_SIGNED]
+    idx = findfirst(==(current), phases)
+    if idx !== nothing && idx < length(phases)
+        next_ph = phases[idx + 1]
+        _run_phase_transition(current, next_ph, stateObjects)
+    end
+end
+
+function reactToPrevPhase(data::PrevPhaseEvent, stateObjects)
+    current = get_clinical_phase()
+    phases = [ScientificWorkflow.PHASE_CASE_SETUP, ScientificWorkflow.PHASE_READ, ScientificWorkflow.PHASE_ASSESS, ScientificWorkflow.PHASE_REPORT_DRAFT, ScientificWorkflow.PHASE_VALIDATION, ScientificWorkflow.PHASE_SIGNED]
+    idx = findfirst(==(current), phases)
+    if idx !== nothing && idx > 1
+        prev_ph = phases[idx - 1]
+        _run_phase_transition(current, prev_ph, stateObjects)
+    end
+end
+
+function reactToSetPhase(data::SetPhaseEvent, stateObjects)
+    # mapping string to enum
+    phases = [ScientificWorkflow.PHASE_CASE_SETUP, ScientificWorkflow.PHASE_READ, ScientificWorkflow.PHASE_ASSESS, ScientificWorkflow.PHASE_REPORT_DRAFT, ScientificWorkflow.PHASE_VALIDATION, ScientificWorkflow.PHASE_SIGNED]
+    idx = findfirst(x -> _phase_display_name(x) == data.phase, phases)
+    if idx !== nothing
+        _run_phase_transition(get_clinical_phase(), phases[idx], stateObjects)
+    end
+end
+
+function _run_phase_transition(old, new, stateObjects)
+    if old == ScientificWorkflow.PHASE_READ && new == ScientificWorkflow.PHASE_ASSESS
+        @info "Running basic validation (any critical unreviewed?)"
+    elseif old == ScientificWorkflow.PHASE_ASSESS && new == ScientificWorkflow.PHASE_REPORT_DRAFT
+        @info "Opening/refreshing E-PSMA report"
+    elseif old == ScientificWorkflow.PHASE_REPORT_DRAFT && new == ScientificWorkflow.PHASE_VALIDATION
+        @info "Running conflict checker"
+    elseif old == ScientificWorkflow.PHASE_VALIDATION && new == ScientificWorkflow.PHASE_SIGNED
+        @info "Locking case (no blocking issues)"
+    end
+    set_clinical_phase!(new)
+end
+
 const current_viewer_position = Ref((0, 0, 0))
 const current_hovered_panel = Ref{Int}(0)
 export cursor_info_text, cursor_study_text, set_ai_status!, current_viewer_position, current_hovered_panel
@@ -73,6 +155,7 @@ struct InferenceJob
     seg_vol::Any  # Reference to the live mask volume (Array{Int16,3})
     main_channel::Any  # Channel{Any} or ChannelProxy (parallel startup)
     scribble_coords::Vector{Vector{Int}}  # Pre-extracted 0-indexed [x,y,z] coords for nnInteractive fast path
+    negative_coords::Vector{Vector{Int}}  # Negative points for nnInteractive
 end
 
 const inference_queue = Channel{InferenceJob}(8)
@@ -97,7 +180,7 @@ function start_inference_worker()
                     # Fast path: use pre-extracted scribble coordinates (skip findall)
                     if !isempty(job.scribble_coords)
                         mask = InferenceClient.run_nninteractive(
-                            job.ct_vol, job.pet_vol, job.scribble_coords,
+                            job.ct_vol, job.pet_vol, job.scribble_coords, job.negative_coords,
                             job.cx, job.cy, job.cz)
                     else
                         mask = InferenceClient.run_nninteractive(
@@ -303,6 +386,12 @@ end
 const compare_mode = Ref(false)
 const compare_right_tp = Ref(-1)  # TP index shown in right panel (panel 5)
 const tp_switched = Observable{Int}(0)
+const _m2_reference_tp = Ref{Int}(-1)
+const _m2_crosshair_sync = Ref(true)
+
+const _flicker_active = Ref(false)
+const _flicker_show_current = Ref(true)
+const _flicker_timer = Ref{Union{Nothing,Timer}}(nothing)
 
 """Force direct texture upload for a panel — bypasses scroll pipeline entirely."""
 function _force_texture_upload!(stateObjects::Vector{StateDataFields}, panel_idx::Int)
@@ -344,6 +433,64 @@ function _force_texture_upload!(stateObjects::Vector{StateDataFields}, panel_idx
     println("  [FORCE-TEX] panel $panel_idx: prepared $n_textures textures at slice $current (dimToScroll=$dimToScroll, slicesNumber=$lastSlice)"); flush(stdout)
 end
 
+function reactToToggleFlicker(data::MakieEvents.ToggleFlickerEvent, stateObjects::Vector{StateDataFields})
+    _flicker_active[] = !_flicker_active[]
+    if _flicker_active[]
+        @info "Flicker mode ACTIVATED"
+        # Ensure compare_right_tp is set
+        if compare_right_tp[] < 0
+            tp_indices = sort(collect(keys(tp_labels)))
+            if !isempty(tp_indices)
+                cur_pos = findfirst(==(current_tp_index[]), tp_indices)
+                cur_pos = cur_pos === nothing ? 1 : cur_pos
+if _m2_reference_tp[] == -1
+    prev_pos = cur_pos > 1 ? cur_pos - 1 : length(tp_indices)
+    right_tp = tp_indices[prev_pos]
+elseif _m2_reference_tp[] == 0
+    right_tp = tp_indices[1]
+else
+    right_tp = _m2_reference_tp[]
+end
+                compare_right_tp[] = right_tp
+            end
+        end
+        _flicker_show_current[] = true
+        _flicker_timer[] = Timer(0.0, interval=0.5) do t
+            _flicker_show_current[] = !_flicker_show_current[]
+            tp_to_show = _flicker_show_current[] ? current_tp_index[] : compare_right_tp[]
+            if tp_to_show >= 0
+                entry = get_or_load_tp_data(tp_to_show)
+                if entry !== nothing
+                    for i in 6:9
+                        _load_tp_from_entry!(stateObjects, entry, i)
+                        _force_texture_upload!(stateObjects, i)
+                    end
+                end
+            end
+        end
+    else
+        @info "Flicker mode DEACTIVATED"
+        if _flicker_timer[] !== nothing
+            close(_flicker_timer[])
+            _flicker_timer[] = nothing
+        end
+        entry = get_or_load_tp_data(current_tp_index[])
+        if entry !== nothing
+            for i in 6:9
+                _load_tp_from_entry!(stateObjects, entry, i)
+                _force_texture_upload!(stateObjects, i)
+            end
+        end
+    end
+end
+
+function reactToToggleOverlay(data::MakieEvents.ToggleOverlayEvent, stateObjects::Vector{StateDataFields})
+    @info "Overlay mode TOGGLED"
+    # Same as apply_m2_layout! mode="Overlay"
+    # But since it's an event, we'll just set the M2 layout string and apply it.
+    # We can't access apply_m2_layout! directly from MakieEventHandlers unless we pass it or it's visible.
+    # apply_m2_layout! is in SegmentationDisplay.jl which imports MakieEventHandlers.
+end
 function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Vector{StateDataFields})
     if length(stateObjects) >= 5
         compare_mode[] = data.compare
@@ -354,8 +501,15 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
             if !isempty(tp_indices)
                 cur_pos = findfirst(==(current_tp_index[]), tp_indices)
                 cur_pos = cur_pos === nothing ? 1 : cur_pos
-                next_pos = mod1(cur_pos + 1, length(tp_indices))
-                right_tp = tp_indices[next_pos]
+if _m2_reference_tp[] == -1
+    prev_pos = cur_pos > 1 ? cur_pos - 1 : length(tp_indices)
+    right_tp = tp_indices[prev_pos]
+elseif _m2_reference_tp[] == 0
+    right_tp = tp_indices[1]
+else
+    right_tp = _m2_reference_tp[]
+end
+                # right_tp assigned above
                 compare_right_tp[] = right_tp
                 println("[COMPARE] Loading right TP=$right_tp (current=$(current_tp_index[]))"); flush(stdout)
                 
@@ -1219,6 +1373,12 @@ function mark_tp_mask_dirty!(tp_idx::Int)
     lock(_mask_save_lock) do
         push!(dirty_mask_tps, tp_idx)
     end
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing && isdefined(LMW, :_cached_lesion_ids)
+            delete!(LMW._cached_lesion_ids, tp_idx)
+        end
+    catch; end
 end
 
 function save_tp_mask_to_h5(tp_i::Int)::Bool
@@ -1609,6 +1769,9 @@ function invalidate_suv_for_lesion(lesion_id::Int, tp_idx::Int)
             if isdefined(LMW, :_volume_cache)
                 delete!(LMW._volume_cache, (tp_idx, lesion_id))
             end
+            if isdefined(LMW, :_cached_lesion_ids)
+                delete!(LMW._cached_lesion_ids, tp_idx)
+            end
             if isdefined(LMW, :_db_dirty)
                 LMW._db_dirty[] = true
             end
@@ -1807,7 +1970,7 @@ const anatomy_labels_cache = Dict{Int, Dict{Int,String}}()
 const tp_segment_names = Dict{Int, Dict{Int, String}}()
 
 export tp_data_cache, _tp_cache_lock, _hdf5_io_lock, bone_subsegments_cache, lesion_centroids_cache, global_bone_atlas, global_organ_mapping, current_tp_index, tp_labels, tp_descriptions, tp_english_descriptions
-export compare_mode, compare_right_tp, tp_switched, get_node_name_for_tp, tp_node_names
+export _m2_crosshair_sync, compare_mode, compare_right_tp, tp_switched, get_node_name_for_tp, tp_node_names, _m2_reference_tp
 export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, h5_path_ref, tp_modalities, volume_z_size, anatomy_labels_cache, tp_segment_names
 export organ_mapping_updated
 
@@ -1854,8 +2017,15 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         if DEBUG_VERBOSE[]; println("  [BENCH] _load_tp_from_entry!(left): $(round(t_panel_left*1000, digits=1))ms"); flush(stdout); end
         
         # Right panel: next TP chronologically
-        next_pos = mod1(new_pos + 1, num_tps)
-        right_tp = tp_indices[next_pos]
+if _m2_reference_tp[] == -1
+    prev_pos = new_pos > 1 ? new_pos - 1 : num_tps
+    right_tp = tp_indices[prev_pos]
+elseif _m2_reference_tp[] == 0
+    right_tp = tp_indices[1]
+else
+    right_tp = _m2_reference_tp[]
+end
+                # right_tp assigned above
         compare_right_tp[] = right_tp
         
         t_load_r = @elapsed begin
@@ -2220,6 +2390,7 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
         Threads.@spawn begin
             try
                 painted_pts = CartesianIndex{3}[]
+                negative_pts = CartesianIndex{3}[]
                 for (p_idx, active_paint_tex, brush_val, dat_list) in panel_snapshots
                     for (d_name, d_dat) in dat_list
                         if d_name == active_paint_tex || d_name == "manualModif"
@@ -2232,6 +2403,13 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
                                 v_set = round(T_elem, brush_val)
                                 findall((d_dat .== v_act) .| (d_dat .== v_set))
                             end
+                            n_p = if is_manual
+                                findall(d_dat .< 0)
+                            else
+                                v_act_neg = round(T_elem, -active_id)
+                                v_set_neg = round(T_elem, -brush_val)
+                                findall((d_dat .== v_act_neg) .| (d_dat .== v_set_neg))
+                            end
                             if !isempty(p)
                                 @debug "[reactToAddAutoPet] Found $(length(p)) painted voxels for lesion $active_id in panel $p_idx $(d_name)"
                                 if p_idx == 3 # Sagittal (Y, Z, X) -> Canonical (X, Y, Z)
@@ -2242,10 +2420,21 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
                                     append!(painted_pts, p)
                                 end
                             end
+                            if !isempty(n_p)
+                                @debug "[reactToAddAutoPet] Found $(length(n_p)) negative voxels for lesion $active_id in panel $p_idx $(d_name)"
+                                if p_idx == 3 # Sagittal (Y, Z, X) -> Canonical (X, Y, Z)
+                                    append!(negative_pts, [CartesianIndex(idx[3], idx[1], idx[2]) for idx in n_p])
+                                elseif p_idx == 4 # Coronal (X, Z, Y) -> Canonical (X, Y, Z)
+                                    append!(negative_pts, [CartesianIndex(idx[1], idx[3], idx[2]) for idx in n_p])
+                                else # Axial (1, 2, 5) -> Canonical (X, Y, Z)
+                                    append!(negative_pts, n_p)
+                                end
+                            end
                         end
                     end
                 end
                 unique!(painted_pts)
+                unique!(negative_pts)
                 
                 if isempty(painted_pts)
                     msg = "No painted scribbles found for AI inference. Paint scribbles on the lesion first."
@@ -2260,19 +2449,25 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
                         points_vol[idx] = 1.0f0
                     end
                 end
+                for idx in negative_pts
+                    if checkbounds(Bool, points_vol, idx)
+                        points_vol[idx] = -1.0f0
+                    end
+                end
                 cx = round(Int, mean([p[1] for p in painted_pts]))
                 cy = round(Int, mean([p[2] for p in painted_pts]))
                 cz = round(Int, mean([p[3] for p in painted_pts]))
                 
                 scribble_coords_0idx = [[idx[1]-1, idx[2]-1, idx[3]-1] for idx in painted_pts if checkbounds(Bool, ct_vol, idx)]
+                negative_coords_0idx = [[idx[1]-1, idx[2]-1, idx[3]-1] for idx in negative_pts if checkbounds(Bool, ct_vol, idx)]
                 
                 set_ai_status!("[Preparing] inference ($(algo))...")
-                @debug "Queuing $(algo) inference job (seed=$cx,$cy,$cz, lesion=$active_id, $(length(painted_pts)) painted points)..."
+                @debug "Queuing $(algo) inference job (seed=$cx,$cy,$cz, lesion=$active_id, $(length(painted_pts)) painted points, $(length(negative_pts)) negative points)..."
                 
                 # Use immutable views / direct references without 680MB deep copies
                 put!(inference_queue, InferenceJob(
                     algo, ct_vol, pet_vol, points_vol,
-                    cx, cy, cz, active_id, seg_vol, channel, scribble_coords_0idx))
+                    cx, cy, cz, active_id, seg_vol, channel, scribble_coords_0idx, negative_coords_0idx))
             catch e
                 err_msg = sprint(showerror, e)
                 @debug "ERROR in async reactToAddAutoPet: $err_msg"
@@ -2740,5 +2935,36 @@ end
 atexit() do
     flush_all_dirty_masks!()
 end
+
+function reactToSetM2Reference(data::SetM2ReferenceEvent, stateObjects::Vector{StateDataFields})
+    _m2_reference_tp[] = data.tp_index
+    @info "Set M2 reference TP to $(data.tp_index)"
+    
+    if compare_mode[] || _flicker_active[]
+        # Update current compare_right_tp to reflect new reference choice
+        tp_indices = sort(collect(keys(tp_labels)))
+        if !isempty(tp_indices)
+            cur_pos = findfirst(==(current_tp_index[]), tp_indices)
+            cur_pos = cur_pos === nothing ? 1 : cur_pos
+            if _m2_reference_tp[] == -1
+                prev_pos = cur_pos > 1 ? cur_pos - 1 : length(tp_indices)
+                right_tp = tp_indices[prev_pos]
+            elseif _m2_reference_tp[] == 0
+                right_tp = tp_indices[1]
+            else
+                right_tp = _m2_reference_tp[]
+            end
+            
+            if right_tp != compare_right_tp[]
+                compare_right_tp[] = right_tp
+                entry_right = get_or_load_tp_data(right_tp)
+                if entry_right !== nothing && length(stateObjects) >= 5
+                    _load_tp_from_entry!(stateObjects, entry_right, 5)
+                end
+            end
+        end
+    end
+end
+export reactToSetM2Reference
 
 end

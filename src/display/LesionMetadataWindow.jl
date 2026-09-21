@@ -55,6 +55,7 @@ struct LoadDBMessage <: DBMessage
 end
 
 export create_metadata_window, load_annotations, save_annotations, load_annotations_hdf5, save_annotations_hdf5, get_lesion_state, display_metadata_window
+export current_has_expert_edits, current_seg_origin, mark_expert_correction!, mark_prompt_segmentation!, mark_reverted_to_ai!, request_autosave, get_lesion_has_expert_edits, get_lesion_segmentation_origin
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 function _find_metadata_data_file(filename::String)::String
@@ -90,6 +91,125 @@ const _anatomy_visible_global = Ref(false)
 const _crosshair_visible_global = Ref(false)
 is_crosshair_visible() = _crosshair_visible_global[]
 is_anatomy_visible() = _anatomy_visible_global[]
+
+# Global observable registry accessible by MakieEventHandlers
+const _lmw_observables = Dict{Symbol, Any}()
+Base.haskey(m::Module, s::Symbol) = (m == LesionMetadataWindow && haskey(_lmw_observables, s))
+Base.getindex(m::Module, s::Symbol) = (m == LesionMetadataWindow ? _lmw_observables[s] : throw(KeyError(s)))
+
+const current_has_expert_edits = Observable(false)
+const current_seg_origin = Observable("AI_PRESEGMENTATION")
+const _global_trigger_autosave = Ref{Any}(nothing)
+
+_lmw_observables[:has_expert_edits] = current_has_expert_edits
+_lmw_observables[:seg_origin] = current_seg_origin
+
+"""
+    mark_expert_correction!(lid=nothing)
+
+Updates the active lesion's tracking to EXPERT_CORRECTION and sets has_expert_edits = true.
+"""
+function mark_expert_correction!(lid=nothing)
+    current_has_expert_edits[] = true
+    current_seg_origin[] = "EXPERT_CORRECTION"
+    if lid !== nothing && _active_lesion_db[] !== nothing
+        lid_str = string(lid isa String ? (parse_lesion_id(lid) !== nothing ? parse_lesion_id(lid) : lid) : lid)
+        db = copy(_active_lesion_db[][])
+        if haskey(db, lid_str) && db[lid_str] isa AbstractDict
+            db[lid_str]["has_expert_edits"] = true
+            db[lid_str]["SegmentationOrigin"] = "EXPERT_CORRECTION"
+            _active_lesion_db[][] = db
+        end
+    end
+    request_autosave(skip_dictation=true)
+end
+
+"""
+    mark_prompt_segmentation!(lid=nothing)
+
+Updates the active lesion's tracking to PROMPT_SEGMENTATION.
+"""
+function mark_prompt_segmentation!(lid=nothing)
+    current_seg_origin[] = "PROMPT_SEGMENTATION"
+    if lid !== nothing && _active_lesion_db[] !== nothing
+        lid_str = string(lid isa String ? (parse_lesion_id(lid) !== nothing ? parse_lesion_id(lid) : lid) : lid)
+        db = copy(_active_lesion_db[][])
+        if haskey(db, lid_str) && db[lid_str] isa AbstractDict
+            db[lid_str]["SegmentationOrigin"] = "PROMPT_SEGMENTATION"
+            _active_lesion_db[][] = db
+        end
+    end
+    request_autosave(skip_dictation=true)
+end
+
+"""
+    mark_reverted_to_ai!(lid=nothing)
+
+Resets the active lesion's tracking to AI_PRESEGMENTATION and has_expert_edits = false.
+"""
+function mark_reverted_to_ai!(lid=nothing)
+    current_has_expert_edits[] = false
+    current_seg_origin[] = "AI_PRESEGMENTATION"
+    if lid !== nothing && _active_lesion_db[] !== nothing
+        lid_str = string(lid isa String ? (parse_lesion_id(lid) !== nothing ? parse_lesion_id(lid) : lid) : lid)
+        db = copy(_active_lesion_db[][])
+        if haskey(db, lid_str) && db[lid_str] isa AbstractDict
+            db[lid_str]["has_expert_edits"] = false
+            db[lid_str]["SegmentationOrigin"] = "AI_PRESEGMENTATION"
+            _active_lesion_db[][] = db
+        end
+    end
+    request_autosave(skip_dictation=true)
+end
+
+"""
+    request_autosave(; skip_dictation=false)
+
+Triggers autosave on the active metadata window if available.
+"""
+function request_autosave(; skip_dictation=false)
+    if _global_trigger_autosave[] !== nothing
+        try
+            _global_trigger_autosave[](skip_dictation=skip_dictation)
+        catch e
+            @debug "Error executing request_autosave: $e"
+        end
+    end
+end
+
+"""
+    get_lesion_has_expert_edits(lid)::Bool
+
+Returns whether the specified lesion has expert edits.
+"""
+function get_lesion_has_expert_edits(lid)::Bool
+    if _active_lesion_db[] !== nothing
+        db = _active_lesion_db[][]
+        st = get_lesion_state(db, string(lid))
+        if haskey(st, "has_expert_edits")
+            v = st["has_expert_edits"]
+            return (v === true || v == "true" || v == 1 || v == "1")
+        elseif get(st, "SegmentationOrigin", "") == "EXPERT_CORRECTION"
+            return true
+        end
+    end
+    return false
+end
+
+"""
+    get_lesion_segmentation_origin(lid)::String
+
+Returns the SegmentationOrigin for the specified lesion ("AI_PRESEGMENTATION", "EXPERT_CORRECTION", "PROMPT_SEGMENTATION").
+"""
+function get_lesion_segmentation_origin(lid)::String
+    if _active_lesion_db[] !== nothing
+        db = _active_lesion_db[][]
+        st = get_lesion_state(db, string(lid))
+        return String(get(st, "SegmentationOrigin", "AI_PRESEGMENTATION"))
+    end
+    return "AI_PRESEGMENTATION"
+end
+
 const DEFAULT_SAVE_PATH   = joinpath(homedir(), "medeye3d_lesion_annotations.json")
 const DEFAULT_HDF5_PATH   = joinpath(homedir(), "medeye3d_lesion_annotations.h5")
 const ANATOMY_MAPPING_PATH= _find_metadata_data_file("max_anatomy_to_ontology.json")
@@ -258,7 +378,7 @@ function _builtin_schema()::Vector{QuestionDef}
         QuestionDef("Clinical Context & Staging Variables", "Patient demographic data, treatment status, and tumor biology history which adjust diagnostic probability.",
             String["multiselect", "Patient Age < 40 Years Old (Out of Scope)", "Patient Age >= 40 Years Old", "Gleason Score > 6", "Serum PSA > 20 ng/mL", "Recent Treatment (<2mo post-radiation/surgery, or 2-4wk post-ADT)", "Heavily Pre-treated (Advanced ADT / Chemo)", "Original Primary Tumor was PSMA-Cold (~10%)", "Previously Treated Lesion (Irradiated / ADT)", "Widespread Disease (>5 malignant findings)", "Post-Splenectomy Status", "Recent COVID-19 / Viral Pneumonia (Lung uptake trap)", "Short PSA Doubling Time (PSADT < 6 months)", "History of Hyperparathyroidism (Brown Tumor risk)", "NEPC Phenotype (AR-negative / FDG-active / AR0Glyc1)", "High Genomic Risk (Decipher/Oncotype/Prolaris)", "Has >5 Other PSMA-Avid Metastases", "High Tumor Burden (>=5 Metastases)", "Low Tumor Burden (<5 Metastases)", "PSA Persistence (>0.1 ng/mL at 6wk post-RP)", "Post-BCG Treatment History", "Prior Pelvic Radiation Therapy", "History of Bisphosphonate Use", "History of Corticosteroid Use", "Sickle Cell Disease"],
             String["Clinical Context"], "both", ""),
-        QuestionDef("SUV max", "Maximum SUV value in this lesion",
+        QuestionDef("SUV max", "Maximum & Peak SUV values in this lesion",
             String[],
             String["Quantitative"], "both", "0.0"),
         QuestionDef("PRIMARY score pattern?", "Automatically calculated PRIMARY score (v1.0) based on zonal location and SUVmax.",
@@ -274,6 +394,9 @@ function _builtin_schema()::Vector{QuestionDef}
             String["slider", "1", "10"],
             String["Final Assessment"], "both", "10"),
         QuestionDef("Comment", "Additional clinical comments or observations.",
+            String[],
+            String["Reporting"], "both", ""),
+        QuestionDef("Caption", "Auto-generated caption for key images.",
             String[],
             String["Reporting"], "both", ""),
     ]
@@ -301,6 +424,9 @@ function load_schema()::Vector{QuestionDef}
             string(get(q, "meta_or_prostate", "both")),
             string(get(q, "default_answer", ""))
         ))
+    end
+    if !any(q -> q.short == "Caption", result)
+        push!(result, QuestionDef("Caption", "Auto-generated caption for key images.", String[], String["Reporting"], "both", ""))
     end
     _schema_cache[] = result
     return result
@@ -884,6 +1010,70 @@ function compute_suv_max_at_centroid(pet_vol::AbstractArray{Float32, 3}, centroi
 end
 
 """
+    compute_suv_peak(pet_vol, mask_vol, target_id, sp_x, sp_y, sp_z) -> Float32
+
+Compute SUVpeak as the mean SUV in a 1cm³ spherical ROI centered at the voxel
+with the highest SUV within the lesion mask.
+"""
+function compute_suv_peak(pet_vol::AbstractArray{Float32, 3}, mask_vol::AbstractArray{<:Integer, 3}, target_id::Int, sp_x::Float64, sp_y::Float64, sp_z::Float64)::Float32
+    lesion_vox = findall(mask_vol .== target_id)
+    if isempty(lesion_vox)
+        return 0.0f0
+    end
+    
+    # 1. Find max SUV voxel in the lesion mask
+    max_suv = -1.0f0
+    max_idx = lesion_vox[1]
+    for idx in lesion_vox
+        val = pet_vol[idx]
+        if val > max_suv
+            max_suv = val
+            max_idx = idx
+        end
+    end
+    
+    # 2. 1cm³ sphere = 1000mm³ -> radius ≈ 6.2035mm
+    radius_mm = 6.2035
+    radius_mm_sq = radius_mm^2
+    
+    # Bounding box in voxels for the sphere
+    rad_x = ceil(Int, radius_mm / sp_x)
+    rad_y = ceil(Int, radius_mm / sp_y)
+    rad_z = ceil(Int, radius_mm / sp_z)
+    
+    cx, cy, cz = max_idx[1], max_idx[2], max_idx[3]
+    sx, sy, sz = size(pet_vol)
+    
+    xmin, xmax = max(1, cx - rad_x), min(sx, cx + rad_x)
+    ymin, ymax = max(1, cy - rad_y), min(sy, cy + rad_y)
+    zmin, zmax = max(1, cz - rad_z), min(sz, cz + rad_z)
+    
+    sum_suv = 0.0f0
+    count = 0
+    for z in zmin:zmax
+        dz_mm = (z - cz) * sp_z
+        dz_mm_sq = dz_mm^2
+        for y in ymin:ymax
+            dy_mm = (y - cy) * sp_y
+            dy_mm_sq = dy_mm^2
+            for x in xmin:xmax
+                dx_mm = (x - cx) * sp_x
+                dx_mm_sq = dx_mm^2
+                if dx_mm_sq + dy_mm_sq + dz_mm_sq <= radius_mm_sq
+                    # Intersect with lesion mask
+                    if mask_vol[x, y, z] == target_id
+                        sum_suv += pet_vol[x, y, z]
+                        count += 1
+                    end
+                end
+            end
+        end
+    end
+    
+    return count > 0 ? (sum_suv / count) : 0.0f0
+end
+
+"""
     compute_background_suvs(pet_vol, ts_atlas, ts_names) -> Dict{String, Float32}
 
 Compute mean SUV in reference organs (liver, parotid, blood pool) using
@@ -1046,8 +1236,9 @@ function compute_lesion_suv_string(lesion_id::Int, tp_idx::Int)::String
         return ""
     end
     suv_max = compute_suv_max_at_centroid(pet_vol, centroid)
+    suv_peak = _get_suv_peak(lesion_id, tp_idx)
     bg = get_background_suvs(tp_idx)
-    return "Max: $(round(suv_max, digits=1)) ; Parotid: $(round(bg["parotid"], digits=1)) ; Liver: $(round(bg["liver"], digits=1)) ; Blood: $(round(bg["blood"], digits=1))"
+    return "Max: $(round(suv_max, digits=1)) ; Peak: $(round(suv_peak, digits=1)) ; Parotid: $(round(bg["parotid"], digits=1)) ; Liver: $(round(bg["liver"], digits=1)) ; Blood: $(round(bg["blood"], digits=1))"
 end
 
 """
@@ -1304,18 +1495,21 @@ struct MatchAnalysisResult
     current_volume_cc::Float64
     current_diameter_mm::Float64
     current_suv_max::Float32
+    current_suv_peak::Float32
     # Baseline comparison
     baseline_volume_mm3::Float64
     baseline_volume_cc::Float64
     baseline_suv_max::Float32
+    baseline_suv_peak::Float32
     baseline_node::String
     baseline_lid::Int
-    # Delta values
-    volume_delta_pct::Float64    # (current - baseline) / baseline * 100
-    volume_delta_abs_cc::Float64  # current - baseline in cc
-    suv_delta_abs::Float32       # current - baseline SUVmax
-    suv_delta_pct::Float64       # (current - baseline) / baseline * 100
-    # RECIP classification
+    # Deltas
+    volume_delta_pct::Float64
+    volume_delta_abs_cc::Float64
+    suv_max_delta_abs::Float32
+    suv_max_delta_pct::Float64
+    suv_peak_delta_abs::Float32
+    suv_peak_delta_pct::Float64
     recip_category::String       # CR, PR, SD, PD, or N/A
     n_timepoints::Int            # total TPs in this match group
 end
@@ -1357,11 +1551,12 @@ function compute_match_analysis(lid::Int, tp_idx::Int)::Union{MatchAnalysisResul
         # Still report volume but no delta
         cur_vol = compute_lesion_volume(lid, tp_idx)
         cur_suv = _get_suv_max(lid, tp_idx)
+        cur_suv_peak = _get_suv_peak(lid, tp_idx)
         return MatchAnalysisResult(
             group_id,
-            cur_vol["volume_mm3"], cur_vol["volume_cc"], cur_vol["diameter_mm"], cur_suv,
-            0.0, 0.0, 0.0f0, "", 0,
-            0.0, 0.0, 0.0f0, 0.0,
+            cur_vol["volume_mm3"], cur_vol["volume_cc"], cur_vol["diameter_mm"], cur_suv, cur_suv_peak,
+            0.0, 0.0, 0.0f0, 0.0f0, "", 0,
+            0.0, 0.0, 0.0f0, 0.0, 0.0f0, 0.0,
             "N/A (baseline)", length(members)
         )
     end
@@ -1370,19 +1565,21 @@ function compute_match_analysis(lid::Int, tp_idx::Int)::Union{MatchAnalysisResul
     cur_vol = compute_lesion_volume(lid, tp_idx)
     base_vol = compute_lesion_volume(baseline_lid, baseline_tp_idx)
     
-    # Compute SUVmax
+    # Compute SUV
     cur_suv = _get_suv_max(lid, tp_idx)
     base_suv = _get_suv_max(baseline_lid, baseline_tp_idx)
+    cur_suv_peak = _get_suv_peak(lid, tp_idx)
+    base_suv_peak = _get_suv_peak(baseline_lid, baseline_tp_idx)
     
-    # Volume delta
-    vol_delta_pct = base_vol["volume_cc"] > 0.001 ?
-        (cur_vol["volume_cc"] - base_vol["volume_cc"]) / base_vol["volume_cc"] * 100.0 : 0.0
+    # Compute deltas
     vol_delta_abs = cur_vol["volume_cc"] - base_vol["volume_cc"]
+    vol_delta_pct = base_vol["volume_cc"] > 0.001 ? (vol_delta_abs / base_vol["volume_cc"]) * 100.0 : 0.0
     
-    # SUV delta
-    suv_delta_abs = cur_suv - base_suv
-    suv_delta_pct = base_suv > 0.1f0 ?
-        Float64((cur_suv - base_suv) / base_suv * 100) : 0.0
+    suv_max_delta_abs = cur_suv - base_suv
+    suv_max_delta_pct = base_suv > 0.1f0 ? Float64(suv_max_delta_abs / base_suv) * 100.0 : 0.0
+    
+    suv_peak_delta_abs = cur_suv_peak - base_suv_peak
+    suv_peak_delta_pct = base_suv_peak > 0.1f0 ? Float64(suv_peak_delta_abs / base_suv_peak) * 100.0 : 0.0
     
     # RECIP classification based on volume change
     recip = if cur_vol["volume_cc"] < 0.001 && base_vol["volume_cc"] > 0.001
@@ -1397,9 +1594,9 @@ function compute_match_analysis(lid::Int, tp_idx::Int)::Union{MatchAnalysisResul
     
     return MatchAnalysisResult(
         group_id,
-        cur_vol["volume_mm3"], cur_vol["volume_cc"], cur_vol["diameter_mm"], cur_suv,
-        base_vol["volume_mm3"], base_vol["volume_cc"], base_suv, baseline_node, baseline_lid,
-        vol_delta_pct, vol_delta_abs, suv_delta_abs, suv_delta_pct,
+        cur_vol["volume_mm3"], cur_vol["volume_cc"], cur_vol["diameter_mm"], cur_suv, cur_suv_peak,
+        base_vol["volume_mm3"], base_vol["volume_cc"], base_suv, base_suv_peak, baseline_node, baseline_lid,
+        vol_delta_pct, vol_delta_abs, suv_max_delta_abs, suv_max_delta_pct, suv_peak_delta_abs, suv_peak_delta_pct,
         recip, length(members)
     )
 end
@@ -1430,6 +1627,81 @@ function _get_suv_max(lid::Int, tp_idx::Int)::Float32
 end
 
 """
+    _get_suv_peak(lid, tp_idx) -> Float32
+
+Get SUVpeak for a lesion, using cache if available.
+"""
+function _get_suv_peak(lid::Int, tp_idx::Int)::Float32
+    cache_key = (tp_idx, lid)
+    cached = get(_lesion_suv_cache, cache_key, "")
+    if !isempty(cached)
+        fields = parse_suv_fields(cached)
+        return get(fields, "peak", 0.0f0)
+    end
+    # Compute fresh
+    pet_vol = get(_MEH.pet_volumes_cache, tp_idx, nothing)
+    mask_vol = lock(_MEH._tp_cache_lock) do
+        haskey(_MEH.tp_data_cache, tp_idx) ? _MEH.tp_data_cache[tp_idx].mask_i16 : nothing
+    end
+    if pet_vol === nothing || mask_vol === nothing
+        return 0.0f0
+    end
+    
+    native_spacing = try
+        Main.first_spacing
+    catch
+        (1.0, 1.0, 2.0)
+    end
+    hires_factor = try
+        Main.HIRES_FACTOR
+    catch
+        2.0
+    end
+    sp_x = native_spacing[1] / hires_factor
+    sp_y = native_spacing[2] / hires_factor
+    sp_z = native_spacing[3]
+    
+    return compute_suv_peak(pet_vol, mask_vol, lid, Float64(sp_x), Float64(sp_y), Float64(sp_z))
+end
+
+"""
+    precompute_metrics_for_tp!(tp_idx::Int)
+
+Pre-computes metrics (background SUVs, volume, SUV max, SUV peak) for all lesions on a TP in the background.
+"""
+function precompute_metrics_for_tp!(tp_idx::Int)
+    Threads.@spawn begin
+        try
+            haskey(_MEH.tp_data_cache, tp_idx) || return
+            
+            # Pre-compute background SUVs (slowest first-call)
+            try get_background_suvs(tp_idx) catch; end
+            
+            # Get lesion IDs
+            mask = lock(_MEH._tp_cache_lock) do
+                if haskey(_MEH.tp_data_cache, tp_idx)
+                    entry = _MEH.tp_data_cache[tp_idx]
+                    isdefined(entry, :mask_i16) ? entry.mask_i16 : entry.mask
+                else
+                    nothing
+                end
+            end
+            mask === nothing && return
+            lesion_ids = filter(x -> x > 0, unique(mask))
+            
+            for lid in lesion_ids
+                try compute_lesion_volume(Int(lid), tp_idx) catch; end
+                try _get_suv_max(Int(lid), tp_idx) catch; end  
+                try _get_suv_peak(Int(lid), tp_idx) catch; end
+            end
+            @debug "[PRECOMPUTE] TP $tp_idx: $(length(lesion_ids)) lesions done"
+        catch e
+            @warn "[PRECOMPUTE] Failed for TP $tp_idx" e
+        end
+    end
+end
+
+"""
     format_match_analysis(result::MatchAnalysisResult) -> String
 
 Format match analysis result for display in the metadata panel.
@@ -1444,8 +1716,12 @@ function format_match_analysis(r::MatchAnalysisResult)::String
     end
     
     if r.baseline_suv_max > 0.1f0
-        sign = r.suv_delta_abs >= 0 ? "+" : ""
-        push!(parts, "ΔSUV: $(sign)$(round(r.suv_delta_abs, digits=1)) ($(sign)$(round(r.suv_delta_pct, digits=1))%)")
+        sign_m = r.suv_max_delta_abs >= 0 ? "+" : ""
+        push!(parts, "ΔSUVmax: $(sign_m)$(round(r.suv_max_delta_abs, digits=1)) ($(sign_m)$(round(r.suv_max_delta_pct, digits=1))%)")
+    end
+    if r.baseline_suv_peak > 0.1f0
+        sign_p = r.suv_peak_delta_abs >= 0 ? "+" : ""
+        push!(parts, "ΔSUVpeak: $(sign_p)$(round(r.suv_peak_delta_abs, digits=1)) ($(sign_p)$(round(r.suv_peak_delta_pct, digits=1))%)")
     end
     
     push!(parts, "Grp $(r.group_id) [$(r.n_timepoints) TPs] $(r.recip_category)")
@@ -1662,6 +1938,10 @@ end
 
 export connect_channel!, MetadataWindowResult
 
+const _is_autosaving = Ref(false)
+const _autosave_pending = Ref(false)
+const _cached_lesion_ids = Dict{Int, Vector{Int}}()
+
 # ─── Main window ─────────────────────────────────────────────────────────────
 function create_metadata_window(
         active_lesion_id::Observable{String},
@@ -1688,28 +1968,47 @@ function create_metadata_window(
     is_starred = Observable(false)
     _active_lesion_db[] = lesion_db
     _db_dirty = Ref(false)
+    
+    save_status_text = Observable("Ready")
+    save_status_color = Observable(RGBf(0.4, 0.9, 0.4))
 
     db_channel = Channel{Any}(32)
-    @async begin
+    Threads.@spawn begin
         for msg in db_channel
-            if msg isa SaveDBMessage
-                try
-                    db_to_save = copy(msg.db)
-                    save_annotations(db_to_save, msg.path_json)
-                    save_annotations_hdf5(db_to_save, msg.path_hdf5)
-                catch e
-                    @warn "Database save failed" e
-                end
-            elseif msg isa LoadDBMessage
-                try
-                    db = load_annotations(msg.path_json)
-                    if isempty(db) && isfile(msg.path_hdf5)
-                        db = load_annotations_hdf5(msg.path_hdf5)
+            try
+                if msg isa SaveDBMessage
+                    try
+                        db_to_save = copy(msg.db)
+                        save_annotations(db_to_save, msg.path_json)
+                        save_annotations_hdf5(db_to_save, msg.path_hdf5)
+                        @async begin
+                            save_status_text[] = "Saved OK $(Dates.format(Dates.now(), "HH:MM:SS"))"
+                            save_status_color[] = RGBf(0.4, 0.9, 0.4)
+                        end
+                    catch e
+                        @warn "Database save failed" e
+                        @async begin
+                            save_status_text[] = "Save failed!"
+                            save_status_color[] = RGBf(0.9, 0.2, 0.2)
+                        end
                     end
-                    put!(msg.reply_channel, db)
-                catch e
-                    @warn "Database load failed" e
-                    put!(msg.reply_channel, Dict{String,Dict{String,Any}}())
+                elseif msg isa LoadDBMessage
+                    try
+                        db = load_annotations(msg.path_json)
+                        if isempty(db) && isfile(msg.path_hdf5)
+                            db = load_annotations_hdf5(msg.path_hdf5)
+                        end
+                        put!(msg.reply_channel, db)
+                    catch e
+                        @warn "Database load failed" e
+                        put!(msg.reply_channel, Dict{String,Dict{String,Any}}())
+                    end
+                end
+            catch e
+                @warn "DB channel consumer error" e
+                @async begin
+                    save_status_text[] = "Save failed!"
+                    save_status_color[] = RGBf(0.9, 0.2, 0.2)
                 end
             end
         end
@@ -1759,9 +2058,27 @@ function create_metadata_window(
     fig = Figure(size = (920, 900), backgroundcolor = BG, figure_padding = 0)
     
     main_layout = GridLayout(fig[1,1])
-    sl = Slider(main_layout[1, 2], range = 0:0.01:1, startvalue = 1, horizontal = false, tellheight = false)
+
+    # ── Phase Indicator Bar ──────────────────────────────────────────────────
+    phase_layout = GridLayout(main_layout[1, 1:2], tellheight = true)
+    btn_prev_phase = Button(phase_layout[1, 1], label = "◀ Prev", buttoncolor = BLU_BTN, labelcolor = LBL_FG)
+    phase_lbl = Label(phase_layout[1, 2], "READ", color = ACCENT, font = :bold, fontsize = 18)
+    btn_next_phase = Button(phase_layout[1, 3], label = "Next ▶", buttoncolor = BLU_BTN, labelcolor = LBL_FG)
+    colsize!(phase_layout, 1, Auto())
+    colsize!(phase_layout, 2, Auto())
+    colsize!(phase_layout, 3, Auto())
     
-    g = GridLayout(main_layout[1,1], tellheight = false, halign = :left, valign = sl.value)
+    on(btn_prev_phase.clicks) do _
+        put!(channel, PrevPhaseEvent())
+    end
+    on(btn_next_phase.clicks) do _
+        put!(channel, NextPhaseEvent())
+    end
+    _lmw_observables[:clinical_phase_obs] = phase_lbl.text
+
+    sl = Slider(main_layout[2, 2], range = 0:0.01:1, startvalue = 1, horizontal = false, tellheight = false)
+    
+    g = GridLayout(main_layout[2,1], tellheight = false, halign = :left, valign = sl.value)
     
     # Mouse scroll event to control slider
     on(fig.scene.events.scroll) do scroll
@@ -1919,9 +2236,24 @@ function create_metadata_window(
     # HU / SUV / Lesion / View / Slice
     Label(g[nr!(), 1:4], @lift(string($(_MEH.cursor_info_text))),
         fontsize = 11, color = RGBAf(0.95, 0.85, 0.55, 1.0), halign = :left)
+    # Save Status
+    Label(g[nr!(), 1:4], save_status_text,
+        fontsize = 10, color = save_status_color, halign = :left)
 
     # ── Lesion Navigation ────────────────────────────────────────────────────
     sec_nav = begin_section!("Lesion Navigation")
+    
+    queue_r = nr!()
+    filter_opts = ["All", "Unreviewed", "Accepted", "Corrected", "Rejected", "Uncertain", "New", "Resolved", "Key Images"]
+    sort_opts = ["By Index", "By SUVmax", "By Volume", "By State"]
+    menu_filter = Menu(g[queue_r, 1:2], options = filter_opts, default = "All", fontsize = 10)
+    menu_sort = Menu(g[queue_r, 3:4], options = sort_opts, default = "By Index", fontsize = 10)
+    rowsize!(g, queue_r, Fixed(28)); register_fixed_row!(queue_r, 28)
+    
+    unrev_r = nr!()
+    btn_next_unreviewed = Button(g[unrev_r, 1:4], label = "Next Unreviewed (Space)", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, unrev_r, Fixed(28)); register_fixed_row!(unrev_r, 28)
+    
     nav_r = nr!()
     btn_prev = Button(g[nav_r, 1], label = "<< Prev",
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
@@ -2049,9 +2381,30 @@ function create_metadata_window(
     
     m2_r = nr!()
     btn_m2 = Button(g[m2_r, 1:2], label = "[Launch M2]", buttoncolor = RGBf(0.2, 0.4, 0.6), labelcolor = TXT, fontsize = 10)
-    menu_m2_mode = Menu(g[m2_r, 3:4], options = ["Pure PET (Current TP)", "Compare Curr/Next TP"], default = "Pure PET (Current TP)", fontsize = 10)
+    menu_m2_mode = Menu(g[m2_r, 3:4], options = ["Pure PET (Current TP)", "Compare Curr/Next TP", "Flicker", "Overlay"], default = "Pure PET (Current TP)", fontsize = 10)
     rowsize!(g, m2_r, Fixed(28)); register_fixed_row!(m2_r, 28)
+    m2_ref_r = nr!()
+    Label(g[m2_ref_r, 1:2], "Reference TP:", fontsize = 10, color = LBL_FG, halign = :left)
+    menu_m2_ref = Menu(g[m2_ref_r, 3:4], options = ["Previous TP", "Baseline (TP0)"], default = "Previous TP", fontsize = 10)
+    rowsize!(g, m2_ref_r, Fixed(28)); register_fixed_row!(m2_ref_r, 28)
+
     
+    on(menu_m2_ref.selection) do sel
+        if sel !== nothing
+            sel_str = string(sel)
+            if sel_str == "Previous TP"
+                put!(channel, SetM2ReferenceEvent(-1))
+            elseif sel_str == "Baseline (TP0)"
+                put!(channel, SetM2ReferenceEvent(0))
+            else
+                # It's "1: <label>"
+                m = match(r"^(\d+):", sel_str)
+                if m !== nothing
+                    put!(channel, SetM2ReferenceEvent(parse(Int, m.captures[1])))
+                end
+            end
+        end
+    end
     on(btn_m2.clicks) do _
         obs_m2[] = !obs_m2[]
     end
@@ -2154,6 +2507,7 @@ function create_metadata_window(
             ["$idx: $(get(_MEH.tp_labels, idx, "TP $idx"))" for idx in tp_indices]
         end
         menu_tp_single.options[] = opts
+        menu_m2_ref.options[] = vcat(["Previous TP", "Baseline (TP0)"], opts)
         menu_tp_left.options[] = opts
         menu_tp_right.options[] = opts
         sync_tp_menus_to_current!()
@@ -2249,7 +2603,9 @@ function create_metadata_window(
             haskey(_MEH.tp_data_cache, tp) ? _MEH.tp_data_cache[tp].mask : nothing
         end
         if mask_ref !== nothing
-            l_ints = filter(x -> x > 0, sort(unique(mask_ref)))
+            l_ints = get!(_cached_lesion_ids, tp) do
+                filter(x -> x > 0, sort(unique(mask_ref)))
+            end
         elseif haskey(_MEH.lesion_centroids_cache, tp)
             l_ints = sort([k[2] for k in keys(_MEH.lesion_centroids_cache) if k isa Tuple && k[1] == tp])
         end
@@ -2257,10 +2613,56 @@ function create_metadata_window(
             l_ints = sort(collect(keys(seg_names)))
         end
         
-        new_list = if isempty(l_ints)
+        # --- Apply filter & sort ---
+        filter_val = menu_filter.selection[] === nothing ? "All" : String(menu_filter.selection[])
+        sort_val = menu_sort.selection[] === nothing ? "By Index" : String(menu_sort.selection[])
+        
+        filtered_l_ints = Int[]
+        db = lesion_db[]
+        for sid in l_ints
+            s_id_str = string(sid)
+            data = get(db, s_id_str, Dict{String, Any}())
+            obs = get(data, "ObservationState", "UNREVIEWED")
+            is_ki = get(data, "KeyImage", "false") == "true"
+            
+            keep = true
+            if filter_val == "Key Images"
+                keep = is_ki
+            elseif filter_val == "Unreviewed"
+                keep = obs == "UNREVIEWED"
+            elseif filter_val == "Accepted"
+                keep = obs == "ACCEPTED"
+            elseif filter_val == "Corrected"
+                keep = obs == "CORRECTED"
+            elseif filter_val == "Rejected"
+                keep = obs == "REJECTED"
+            elseif filter_val == "Uncertain"
+                keep = obs == "UNCERTAIN"
+            elseif filter_val == "New"
+                keep = obs == "NEW"
+            elseif filter_val == "Resolved"
+                keep = obs == "RESOLVED"
+            end
+            if keep
+                push!(filtered_l_ints, sid)
+            end
+        end
+        
+        if sort_val == "By SUVmax"
+            sort!(filtered_l_ints, by = sid -> tryparse(Float64, get(get(db, string(sid), Dict()), "SUV max", "0.0")) === nothing ? 0.0 : tryparse(Float64, get(get(db, string(sid), Dict()), "SUV max", "0.0")), rev=true)
+        elseif sort_val == "By Volume"
+            sort!(filtered_l_ints, by = sid -> tryparse(Float64, get(get(db, string(sid), Dict()), "Volume (mL)", "0.0")) === nothing ? 0.0 : tryparse(Float64, get(get(db, string(sid), Dict()), "Volume (mL)", "0.0")), rev=true)
+        elseif sort_val == "By State"
+            state_order = Dict("UNREVIEWED" => 1, "UNCERTAIN" => 2, "NEW" => 3, "CORRECTED" => 4, "ACCEPTED" => 5, "REJECTED" => 6, "RESOLVED" => 7)
+            sort!(filtered_l_ints, by = sid -> get(state_order, get(get(db, string(sid), Dict()), "ObservationState", "UNREVIEWED"), 99))
+        else
+            sort!(filtered_l_ints)
+        end
+        
+        new_list = if isempty(filtered_l_ints)
             ["(none)"]
         else
-            map(l_ints) do sid
+            map(filtered_l_ints) do sid
                 d_name = if haskey(seg_names, sid) && !isempty(seg_names[sid])
                     seg_names[sid]
                 elseif haskey(_MEH.global_organ_mapping[], sid)
@@ -2276,7 +2678,12 @@ function create_metadata_window(
         try
             lesion_ids[] = new_list
             les_menu.options[] = new_list
-            if !isempty(new_list) && new_list[1] != "(none)"
+            
+            cur_active = active_lesion_id[]
+            if cur_active in new_list
+                les_menu.selection[] = cur_active
+                les_menu.i_selected[] = findfirst(==(cur_active), new_list)
+            elseif !isempty(new_list) && new_list[1] != "(none)"
                 active_lesion_id[] = new_list[1]
                 les_menu.selection[] = new_list[1]
                 les_menu.i_selected[] = 1
@@ -2288,10 +2695,77 @@ function create_metadata_window(
         finally
             is_syncing_selection[] = false
         end
+        precompute_metrics_for_tp!(tp)
     end
     update_tp_label()
     update_tp_dropdown_visibility!()
     refresh_tp_dropdown_options!()
+
+    on(menu_filter.selection) do _
+        if _MEH !== nothing
+            refresh_lesion_dropdown_for_tp!(_MEH.current_tp_index[])
+        end
+    end
+    
+    on(menu_sort.selection) do _
+        if _MEH !== nothing
+            refresh_lesion_dropdown_for_tp!(_MEH.current_tp_index[])
+        end
+    end
+    
+    on(btn_next_unreviewed.clicks) do _
+        if _MEH !== nothing
+            opts = les_menu.options[]
+            db = lesion_db[]
+            found = false
+            cur_sel = les_menu.selection[]
+            start_idx = 1
+            if cur_sel !== nothing
+                idx = findfirst(==(cur_sel), opts)
+                if idx !== nothing
+                    start_idx = idx + 1
+                end
+            end
+            for i in start_idx:length(opts)
+                opt = opts[i]
+                opt == "(none)" && continue
+                sid = parse_lesion_id(opt)
+                if sid !== nothing
+                    obs = get(get(db, string(sid), Dict()), "ObservationState", "UNREVIEWED")
+                    if obs == "UNREVIEWED"
+                        active_lesion_id[] = opt
+                        les_menu.selection[] = opt
+                        found = true
+                        break
+                    end
+                end
+            end
+            if !found
+                # Wrap around
+                for i in 1:min(start_idx-1, length(opts))
+                    opt = opts[i]
+                    opt == "(none)" && continue
+                    sid = parse_lesion_id(opt)
+                    if sid !== nothing
+                        obs = get(get(db, string(sid), Dict()), "ObservationState", "UNREVIEWED")
+                        if obs == "UNREVIEWED"
+                            active_lesion_id[] = opt
+                            les_menu.selection[] = opt
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    on(events(fig).keyboardbutton) do event
+        if event.action == Makie.Keyboard.release && event.key == Makie.Keyboard.space
+            btn_next_unreviewed.clicks[] = btn_next_unreviewed.clicks[] + 1
+            return Consume(true)
+        end
+        return Consume(false)
+    end
 
     # Merged overlay/single/all/refresh into one compact row
     vc2_r = nr!()
@@ -2626,7 +3100,7 @@ function create_metadata_window(
     # 0. Profile & Radioligand
     clin_prof_r = nr!()
     Label(g[clin_prof_r, 1], "Profile:", fontsize = 10, color = LBL_FG, halign = :right)
-    menu_profile = Menu(g[clin_prof_r, 2], options = ["INITIAL_STAGING", "BCR", "POST_RLT"], fontsize = 10)
+    menu_profile = Menu(g[clin_prof_r, 2], options = ["INITIAL_STAGING", "BCR", "PRE_RLT", "POST_RLT", "RESPONSE", "GENERAL"], fontsize = 10)
     Label(g[clin_prof_r, 3], "Radioligand:", fontsize = 10, color = LBL_FG, halign = :right)
     menu_radioligand = Menu(g[clin_prof_r, 4], options = ["68Ga-PSMA-11", "18F-PSMA-1007", "18F-DCFPyL", "Other"], fontsize = 10)
     rowsize!(g, clin_prof_r, Fixed(28)); register_fixed_row!(clin_prof_r, 28)
@@ -2730,6 +3204,206 @@ function create_metadata_window(
         width = Auto())
     rowsize!(g, clin_notes_r, Fixed(64)); register_fixed_row!(clin_notes_r, 64)
     
+    # 6. LLM-Based Field Extraction from Anamnese Notes
+    clin_extract_r = nr!()
+    extract_status_text = Observable{String}("")
+    btn_extract_fields = Button(g[clin_extract_r, 1:2], label = "[>] Extract Fields",
+        buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 9)
+    lbl_extract_status = Label(g[clin_extract_r, 3:4], extract_status_text,
+        fontsize = 9, color = SUBTXT, halign = :left)
+    rowsize!(g, clin_extract_r, Fixed(26)); register_fixed_row!(clin_extract_r, 26)
+
+    # Provenance tracking: which fields were auto-filled by LLM vs manually entered
+    field_provenance = Dict{String, String}()  # field_name => "LLM_EXTRACTED" | "MANUAL"
+    is_applying_extraction = Ref(false)
+
+    # Map LLM extraction keys to the therapy button labels used in the UI
+    _THERAPY_LABEL_MAP = Dict{String, String}(
+        "rpe"            => "RPE (Surg)",
+        "rp"             => "RPE (Surg)",
+        "prostatectomy"  => "RPE (Surg)",
+        "surgery"        => "RPE (Surg)",
+        "radiation"      => "Radiation",
+        "radiotherapy"   => "Radiation",
+        "ebrt"           => "Radiation",
+        "adt"            => "ADT",
+        "androgen"       => "ADT",
+        "lhrh"           => "ADT",
+        "ar-inhibitor"   => "AR-Inhib",
+        "arsi"           => "AR-Inhib",
+        "enzalutamide"   => "AR-Inhib",
+        "abiraterone"    => "AR-Inhib",
+        "apalutamide"    => "AR-Inhib",
+        "darolutamide"   => "AR-Inhib",
+        "chemotherapy"   => "Chemotherapy",
+        "chemo"          => "Chemotherapy",
+        "docetaxel"      => "Chemotherapy",
+        "cabazitaxel"    => "Chemotherapy",
+        "177lu-psma"     => "177Lu-PSMA",
+        "lu-psma"        => "177Lu-PSMA",
+        "radioligand"    => "177Lu-PSMA",
+        "rlt"            => "177Lu-PSMA",
+        "bone protective" => "Bone Protect",
+        "bisphosphonate" => "Bone Protect",
+        "denosumab"      => "Bone Protect",
+        "zoledronic"     => "Bone Protect",
+    )
+
+    function _apply_extracted_fields!(fields::Dict{String, Any})
+        is_applying_extraction[] = true
+        is_syncing_clinical[] = true
+        try
+            # PSA value
+            psa_val = get(fields, "psa_value", "")
+            if psa_val isa String && !isempty(strip(psa_val))
+                tb_psa.stored_string[] = strip(psa_val)
+                field_provenance["PSA"] = "LLM_EXTRACTED"
+            end
+
+            # PSA kinetics / doubling time
+            psa_kin = get(fields, "psa_kinetics", "")
+            if psa_kin isa String && !isempty(strip(psa_kin))
+                tb_psa_dt.stored_string[] = strip(psa_kin)
+                field_provenance["PSADoublingTime"] = "LLM_EXTRACTED"
+            end
+
+            # Gleason / ISUP — match against the dropdown options
+            gleason_raw = get(fields, "gleason_score", "")
+            isup_raw = get(fields, "isup_grade", "")
+            if (gleason_raw isa String && !isempty(strip(gleason_raw))) ||
+               (isup_raw isa String && !isempty(strip(isup_raw)))
+                gl_str = lowercase(string(gleason_raw))
+                isup_str = strip(string(isup_raw))
+                opts = menu_gleason.options[]
+                best_idx = 1  # "- select -"
+                for (i, opt) in enumerate(opts)
+                    opt_lc = lowercase(opt)
+                    # Try to match by Gleason pattern
+                    if !isempty(gl_str) && occursin(gl_str, opt_lc)
+                        best_idx = i; break
+                    end
+                    # Try to match by ISUP grade
+                    if !isempty(isup_str) && occursin("isup $(isup_str)", opt_lc)
+                        best_idx = i; break
+                    end
+                end
+                if best_idx > 1
+                    menu_gleason.i_selected[] = best_idx
+                    field_provenance["Gleason"] = "LLM_EXTRACTED"
+                end
+            end
+
+            # TNM staging
+            tnm_val = get(fields, "initial_tnm", "")
+            if tnm_val isa String && !isempty(strip(tnm_val))
+                tb_tnm.stored_string[] = strip(tnm_val)
+                field_provenance["TNMStage"] = "LLM_EXTRACTED"
+            end
+
+            # Indication — match against dropdown options
+            ind_val = get(fields, "indication", "")
+            if ind_val isa String && !isempty(strip(ind_val))
+                ind_lc = lowercase(strip(ind_val))
+                ind_opts = menu_indication.options[]
+                for (i, opt) in enumerate(ind_opts)
+                    if occursin(ind_lc, lowercase(opt)) || occursin(lowercase(opt), ind_lc)
+                        menu_indication.i_selected[] = i
+                        field_provenance["Indication"] = "LLM_EXTRACTED"
+                        break
+                    end
+                end
+            end
+
+            # Prior therapies — match against therapy buttons
+            prior_raw = get(fields, "prior_therapies", [])
+            if prior_raw isa AbstractVector && !isempty(prior_raw)
+                for therapy in prior_raw
+                    t_lc = lowercase(strip(string(therapy)))
+                    # Try direct match against label map
+                    matched_label = get(_THERAPY_LABEL_MAP, t_lc, "")
+                    if isempty(matched_label)
+                        # Fuzzy: check if any key is a substring
+                        for (k, v) in _THERAPY_LABEL_MAP
+                            if occursin(k, t_lc) || occursin(t_lc, k)
+                                matched_label = v; break
+                            end
+                        end
+                    end
+                    if !isempty(matched_label) && !(matched_label in active_prior_therapies)
+                        delete!(active_prior_therapies, "None / Naive")
+                        push!(active_prior_therapies, matched_label)
+                    end
+                end
+                # Update button colors
+                btn_tx_rpe.buttoncolor[]   = ("RPE (Surg)" in active_prior_therapies) ? ACCENT : BG_PNL
+                btn_tx_rt.buttoncolor[]    = ("Radiation" in active_prior_therapies) ? ACCENT : BG_PNL
+                btn_tx_adt.buttoncolor[]   = ("ADT" in active_prior_therapies) ? ACCENT : BG_PNL
+                btn_tx_arsi.buttoncolor[]  = ("AR-Inhib" in active_prior_therapies) ? ACCENT : BG_PNL
+                btn_tx_chemo.buttoncolor[] = ("Chemotherapy" in active_prior_therapies) ? ACCENT : BG_PNL
+                btn_tx_lu.buttoncolor[]    = ("177Lu-PSMA" in active_prior_therapies) ? ACCENT : BG_PNL
+                btn_tx_bone.buttoncolor[]  = ("Bone Protect" in active_prior_therapies) ? ACCENT : BG_PNL
+                btn_tx_none.buttoncolor[]  = ("None / Naive" in active_prior_therapies) ? ACCENT : BG_PNL
+                field_provenance["PriorTherapies"] = "LLM_EXTRACTED"
+            end
+        finally
+            is_syncing_clinical[] = false
+            is_applying_extraction[] = false
+        end
+        # Trigger a single sync after all fields are populated
+        sync_clinical_info_to_db!()
+    end
+
+    on(btn_extract_fields.clicks) do _
+        notes_text = tb_clinical_notes.stored_string[]
+        if isempty(strip(notes_text))
+            extract_status_text[] = "[!] No anamnese text to extract from"
+            return
+        end
+        extract_status_text[] = "Extracting fields via LLM..."
+        btn_extract_fields.buttoncolor[] = BG_PNL  # dim while running
+        LLMDictation.extract_clinical_fields_async(
+            notes_text;
+            on_complete = (fields, elapsed) -> begin
+                if haskey(fields, "_error")
+                    extract_status_text[] = "[FAIL] $(fields["_error"])"
+                    btn_extract_fields.buttoncolor[] = BLU_BTN
+                    return
+                end
+                n_fields = count(v -> v isa String ? !isempty(strip(v)) : (v isa AbstractVector && !isempty(v)), values(fields))
+                _apply_extracted_fields!(fields)
+                extract_status_text[] = "[OK] Extracted $(n_fields) fields ($(elapsed)s) — review & modify"
+                btn_extract_fields.buttoncolor[] = BLU_BTN
+            end,
+            on_error = (err) -> begin
+                extract_status_text[] = "[FAIL] Error: $(sprint(showerror, err))"
+                btn_extract_fields.buttoncolor[] = BLU_BTN
+            end
+        )
+    end
+
+    # Track manual edits: when user changes a field after extraction, mark as MANUAL
+    for (obs, key) in [
+        (tb_psa.stored_string, "PSA"),
+        (tb_psa_dt.stored_string, "PSADoublingTime"),
+        (tb_tnm.stored_string, "TNMStage"),
+    ]
+        on(obs) do _
+            if !is_applying_extraction[] && !is_syncing_clinical[]
+                field_provenance[key] = "MANUAL"
+            end
+        end
+    end
+    on(menu_gleason.i_selected) do _
+        if !is_applying_extraction[] && !is_syncing_clinical[]
+            field_provenance["Gleason"] = "MANUAL"
+        end
+    end
+    on(menu_indication.i_selected) do _
+        if !is_applying_extraction[] && !is_syncing_clinical[]
+            field_provenance["Indication"] = "MANUAL"
+        end
+    end
+    
     # Synchronization & Persistence for Clinical Info
     is_syncing_clinical = Ref(false)
     function sync_clinical_info_to_db!()
@@ -2750,7 +3424,8 @@ function create_metadata_window(
             "Gleason" => gl_val,
             "TNMStage" => tb_tnm.stored_string[],
             "PriorTherapies" => p_str,
-            "ClinicalNotes" => tb_clinical_notes.stored_string[]
+            "ClinicalNotes" => tb_clinical_notes.stored_string[],
+            "FieldProvenance" => copy(field_provenance)
         )
         _db = copy(lesion_db[])
         _db["Clinical_Info_TP$(tp)"] = info
@@ -2759,7 +3434,32 @@ function create_metadata_window(
         try trigger_autosave() catch; end
     end
     
-    on(menu_profile.selection) do _; sync_clinical_info_to_db!(); end
+    function apply_profile_ui(prof_str)
+        prof_enum = if prof_str == "INITIAL_STAGING"
+            _MEH.ScientificWorkflow.PROFILE_INITIAL_STAGING
+        elseif prof_str == "BCR"
+            _MEH.ScientificWorkflow.PROFILE_BCR
+        elseif prof_str == "PRE_RLT"
+            _MEH.ScientificWorkflow.PROFILE_PRE_RLT
+        elseif prof_str == "POST_RLT"
+            _MEH.ScientificWorkflow.PROFILE_POST_RLT
+        elseif prof_str == "RESPONSE"
+            _MEH.ScientificWorkflow.PROFILE_RESPONSE
+        else
+            _MEH.ScientificWorkflow.PROFILE_GENERAL
+        end
+        _MEH._case_profile[] = prof_enum
+
+        if prof_str == "POST_RLT" && !is_syncing_clinical[]
+            m2_idx = findfirst(==("Compare Curr/Next TP"), menu_m2_mode.options[])
+            if m2_idx !== nothing; menu_m2_mode.i_selected[] = m2_idx; end
+        end
+    end
+
+    on(menu_profile.selection) do p
+        p !== nothing && apply_profile_ui(String(p))
+        sync_clinical_info_to_db!()
+    end
     on(menu_radioligand.selection) do _; sync_clinical_info_to_db!(); end
     on(menu_indication.i_selected) do _; sync_clinical_info_to_db!(); end
     on(tb_psa.stored_string)       do _; sync_clinical_info_to_db!(); end
@@ -2817,6 +3517,16 @@ function create_metadata_window(
             btn_tx_none.buttoncolor[]  = ("None / Naive" in active_prior_therapies) ? ACCENT : BG_PNL
             
             tb_clinical_notes.stored_string[] = get(info, "ClinicalNotes", "")
+
+            # Restore provenance tracking
+            empty!(field_provenance)
+            saved_prov = get(info, "FieldProvenance", nothing)
+            if saved_prov isa Dict
+                for (k, v) in saved_prov
+                    field_provenance[string(k)] = string(v)
+                end
+            end
+            extract_status_text[] = ""
         finally
             is_syncing_clinical[] = false
         end
@@ -2827,6 +3537,7 @@ function create_metadata_window(
     
     # Reload clinical info when the async DB loader populates lesion_db
     on(lesion_db) do _
+        _is_autosaving[] && return
         try load_clinical_info_for_tp!(_MEH.current_tp_index[]) catch; end
     end
     
@@ -2881,6 +3592,41 @@ function create_metadata_window(
     # Load persistent custom options
     custom_opts_db = load_custom_options()
     
+    # Registration QC section
+    sec_reg_qc = begin_section!("Registration QC"; default_open=true)
+    reg_r1 = nr!()
+    Label(g[reg_r1, 1], "Reg QC:", fontsize = 10, color = LBL_FG, halign = :left)
+    menu_reg_qc = Menu(g[reg_r1, 2:3],
+        options = ["UNREVIEWED", "GOOD", "QUESTIONABLE", "LOCAL_ADJUSTED", "POOR_MANUAL_MATCH", "FAILED_NOT_EVALUABLE"],
+        default = "UNREVIEWED", fontsize = 10)
+    btn_flag_reg = Button(g[reg_r1, 4], label = "Flag", buttoncolor = RGBf(0.8, 0.4, 0.2), labelcolor = TXT, fontsize = 10)
+    rowsize!(g, reg_r1, Fixed(28)); register_fixed_row!(reg_r1, 28)
+    
+    reg_r2 = nr!()
+    tb_reg_comment = styled_textbox(g[reg_r2, 1:4], placeholder="Registration notes...", fontsize=10)
+    rowsize!(g, reg_r2, Fixed(28)); register_fixed_row!(reg_r2, 28)
+    
+    _lmw_observables[:reg_qc_status] = menu_reg_qc.selection
+    
+    on(menu_reg_qc.selection) do val
+        if val !== nothing
+            put!(channel, SetRegistrationQCEvent(String(val)))
+            try trigger_autosave() catch; end
+        end
+    end
+    
+    on(btn_flag_reg.clicks) do _
+        put!(channel, FlagRegistrationEvent())
+        menu_reg_qc.selection[] = "QUESTIONABLE"
+        try trigger_autosave() catch; end
+    end
+    
+    on(tb_reg_comment.stored_string) do _
+        try trigger_autosave() catch; end
+    end
+    
+    end_section!(sec_reg_qc)
+
     # Single collapsible section for all metadata
     sec_meta = begin_section!("Lesion Metadata"; default_open=true)
     is_meta_open, meta_start_row, meta_header_r, meta_btn, _ = sec_meta
@@ -2892,8 +3638,15 @@ function create_metadata_window(
     btn_reject = Button(g[wf_r, 2], label = "Reject", buttoncolor = RGBf(0.8, 0.2, 0.2), labelcolor = TXT, fontsize = 10)
     btn_correct = Button(g[wf_r, 3], label = "Correct", buttoncolor = RGBf(0.8, 0.8, 0.2), labelcolor = TXT, fontsize = 10)
     btn_export = Button(g[wf_r, 4], label = "Export", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_validate = Button(g[wf_r, 5], label = "Validate", buttoncolor = RGBf(0.2, 0.4, 0.8), labelcolor = TXT, fontsize = 10)
+    btn_qc = Button(g[wf_r, 6], label = "Case QC", buttoncolor = RGBf(0.6, 0.2, 0.8), labelcolor = TXT, fontsize = 10)
     rowsize!(g, wf_r, Fixed(28)); register_fixed_row!(wf_r, 28)
     push!(all_metadata_rows, wf_r)
+
+    val_r = nr!()
+    lbl_val_status = Label(g[val_r, 1:6], "", fontsize = 10, color = RGBf(0.8, 0.8, 0.2), halign = :left, justification = :left, word_wrap=true)
+    rowsize!(g, val_r, Fixed(60)); register_fixed_row!(val_r, 60)
+    push!(all_metadata_rows, val_r)
 
     state_r = nr!()
     Label(g[state_r, 1], "State:", fontsize = 10, color = LBL_FG, halign = :right)
@@ -2912,7 +3665,7 @@ function create_metadata_window(
     local ANAT_RELATIONS, MAX_ANAT_ROWS
     local anat_row_indices, anat_rel_menus, anat_struct_menus, anat_rm_btns, anat_active_count
     local update_type_buttons
-    local no_ct_toggle, lbl_suv_comparison, lbl_match_analysis
+    local no_ct_toggle, lbl_suv_comparison, lbl_suv, lbl_match_analysis
 
     for (group_title, q_list) in metadata_groups
         # Sub-headers removed for compactness — field names are descriptive enough
@@ -3121,6 +3874,7 @@ function create_metadata_window(
             suv_comparison_r = nr!()
             push!(all_metadata_rows, suv_comparison_r)
             lbl_suv_comparison = Label(g[suv_comparison_r, 1:4], "", fontsize = 9, color = GRN, halign = :left, tellwidth = false)
+            lbl_suv = lbl_suv_comparison
             
             match_analysis_r = nr!()
             push!(all_metadata_rows, match_analysis_r)
@@ -3459,6 +4213,13 @@ function create_metadata_window(
     # ── Segmentation Mini Manager (compact) ────────────────────────────────
     sec_seg = begin_section!("Segmentation & AI")
     
+    # Mode indicator
+    mode_r = nr!()
+    workflow_mode_obs = Observable("VIEW MODE")
+    _lmw_observables[:workflow_mode] = workflow_mode_obs
+    Label(g[mode_r, 1:4], workflow_mode_obs, halign=:center, fontsize=12, color=ACCENT, font=:bold)
+    rowsize!(g, mode_r, Fixed(20)); register_fixed_row!(mode_r, 20)
+    
     # Row 1: New Lesion + Paint/Erase/View
     seg_r1 = nr!()
     btn_new_lesion = Button(g[seg_r1, 1], label = "New", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
@@ -3574,6 +4335,7 @@ function create_metadata_window(
         current_paint_mode[] = :paint
         btn_paint.buttoncolor[] = GRN; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BG_PNL
         empty!(_MASK_IDS_CACHE)
+        empty!(_cached_lesion_ids)
         # For a NEW lesion, do NOT send SyncLesionEvent — it has no voxels yet,
         # so the centroid lookup defaults to the volume center (jumping to middle slice).
         # Instead: activate painting and show ALL lesion IDs so newly painted voxels are visible.
@@ -3584,19 +4346,24 @@ function create_metadata_window(
         current_paint_mode[] = :paint
         btn_paint.buttoncolor[] = GRN; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BG_PNL
         empty!(_MASK_IDS_CACHE)
+        empty!(_cached_lesion_ids)
         val = (p = parse_lesion_id(active_lesion_id[])) !== nothing ? p : 1
         put!(channel, PaintValEvent(val, true))
+        _MEH.set_workflow_state!(_MEH.ScientificWorkflow.WF_EDIT_MASK)
     end
     on(btn_erase.clicks) do _
         current_paint_mode[] = :erase
         btn_paint.buttoncolor[] = BG_PNL; btn_erase.buttoncolor[] = RED_BTN; btn_view_mode.buttoncolor[] = BG_PNL
         empty!(_MASK_IDS_CACHE)
+        empty!(_cached_lesion_ids)
         put!(channel, PaintValEvent(0, true))
+        _MEH.set_workflow_state!(_MEH.ScientificWorkflow.WF_EDIT_MASK)
     end
     on(btn_view_mode.clicks) do _
         current_paint_mode[] = :view
         btn_paint.buttoncolor[] = BG_PNL; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BLU_BTN
         put!(channel, PaintValEvent(-1, false))
+        _MEH.set_workflow_state!(_MEH.ScientificWorkflow.WF_LESION_REVIEW)
     end
     
     # Row 2: Brush slider + Move button (fixed height to prevent slider overlap)
@@ -3627,7 +4394,21 @@ function create_metadata_window(
         end
     end
 
-    # Row 4: AI status (fixed height)
+    # Row 4: Segmentation origin & Revert to AI button
+    seg_r_rev = nr!()
+    Label(g[seg_r_rev, 1:2], @lift("Origin: $(string($current_seg_origin))"), fontsize = 10, color = SUBTXT, halign = :left)
+    btn_revert_ai = Button(g[seg_r_rev, 3:4], label = "Revert to AI", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, seg_r_rev, Fixed(28)); register_fixed_row!(seg_r_rev, 28)
+    
+    on(btn_revert_ai.clicks) do _
+        active_str = active_lesion_id[]
+        lid = parse_lesion_id(active_str)
+        if lid !== nothing
+            put!(channel, RevertToAIEvent(lid, _MEH.current_tp_index[]))
+        end
+    end
+
+    # Row 5: AI status (fixed height)
     seg_r4 = nr!()
     Label(g[seg_r4, 1:4], @lift(string($(_MEH.ai_status_text))),
         fontsize=10, color=RGBAf(0.7, 0.9, 0.7, 1.0), halign=:center)
@@ -3659,6 +4440,7 @@ function create_metadata_window(
             return
         end
         for elem in contents(map_grid); delete!(elem); end
+        Label(map_grid[1, 1:4], "Loading matches...", fontsize=9, color=SUBTXT, halign=:center)
         
         tp_left = _MEH.current_tp_index[]
         tp_right = _MEH.compare_right_tp[]
@@ -3680,219 +4462,248 @@ function create_metadata_window(
         left_lbl = get(_MEH.tp_labels, tp_left, "TP $tp_left")
         right_lbl = get(_MEH.tp_labels, tp_right, "TP $tp_right")
         
-        lbl_map_left.text[] = "Current TP: $left_lbl ($left_node)"
-        lbl_map_right.text[] = "Compare TP: $right_lbl ($right_node)"
-        
-        l_ids = get_mask_ids(tp_left)
-        r_ids = get_mask_ids(tp_right)
-        
         cur_act = active_lesion_id[]
-        active_lid = parse_lesion_id(cur_act)
-        active_lid = active_lid !== nothing ? active_lid : (isempty(l_ids) ? 0 : l_ids[1])
-        
+        cur_lesion_ids = copy(lesion_ids[])
         cur_left_sel = copy(map_selected_left[])
-        if isempty(cur_left_sel) && active_lid > 0
-            cur_left_sel = Int[active_lid]
-            map_selected_left[] = cur_left_sel
-        end
-        
         cur_right_sel = copy(map_selected_right[])
-        if isempty(cur_right_sel) && !isempty(cur_left_sel)
-            matched_rights = Int[]
-            for lid in cur_left_sel
-                append!(matched_rights, LA.find_cross_tp_lesion(left_node, lid, right_node))
-            end
-            cur_right_sel = unique(matched_rights)
-            map_selected_right[] = cur_right_sel
-        end
-        
-        # Back-propagate to ensure all related left lesions are shown in the mapping
-        if !isempty(cur_right_sel)
-            matched_lefts = Int[]
-            for rid in cur_right_sel
-                append!(matched_lefts, LA.find_cross_tp_lesion(right_node, rid, left_node))
-            end
-            if !isempty(matched_lefts)
-                new_lefts = unique(vcat(cur_left_sel, matched_lefts))
-                if length(new_lefts) > length(cur_left_sel)
-                    cur_left_sel = new_lefts
-                    map_selected_left[] = cur_left_sel
+
+        Threads.@spawn begin
+            try
+                l_ids = get_mask_ids(tp_left)
+                r_ids = get_mask_ids(tp_right)
+                
+                active_lid = parse_lesion_id(cur_act)
+                active_lid = active_lid !== nothing ? active_lid : (isempty(l_ids) ? 0 : l_ids[1])
+                
+                if isempty(cur_left_sel) && active_lid > 0
+                    cur_left_sel = Int[active_lid]
                 end
-            end
-        end
-        
-        Label(map_grid[1, 1:2], "Add Left Lesion:", fontsize=9, color=LBL_FG, halign=:left)
-        Label(map_grid[1, 3:4], "Add Right Lesion:", fontsize=9, color=LBL_FG, halign=:left)
-        
-        l_opts = String["- select lesion -"]
-        for lid in l_ids
-            # Prefer full name from main dropdown, else anatomy-enriched name
-            display = ""
-            for opt in lesion_ids[]
-                p = parse_lesion_id(opt)
-                if p == lid; display = opt; break; end
-            end
-            if isempty(display)
-                organ = get(_MEH.global_organ_mapping[], lid, "")
-                if !isempty(organ) && organ != "Unknown"
-                    entry = lookup_anatomy(organ)
-                    detailed = entry !== nothing ? get(entry, "detailed", organ) : organ
-                    display = "ID $lid: $detailed"
-                else
-                    display = "ID $lid"
+                
+                if isempty(cur_right_sel) && !isempty(cur_left_sel)
+                    matched_rights = Int[]
+                    for lid in cur_left_sel
+                        append!(matched_rights, LA.find_cross_tp_lesion(left_node, lid, right_node))
+                    end
+                    cur_right_sel = unique(matched_rights)
                 end
-            end
-            push!(l_opts, display)
-        end
-        r_opts = String["- select lesion -"]
-        for rid in r_ids
-            display = ""
-            for opt in lesion_ids[]
-                p = parse_lesion_id(opt)
-                if p == rid; display = opt; break; end
-            end
-            if isempty(display)
-                organ = get(_MEH.global_organ_mapping[], rid, "")
-                if !isempty(organ) && organ != "Unknown"
-                    entry = lookup_anatomy(organ)
-                    detailed = entry !== nothing ? get(entry, "detailed", organ) : organ
-                    display = "ID $rid: $detailed"
-                else
-                    display = "ID $rid"
-                end
-            end
-            push!(r_opts, display)
-        end
-        
-        menu_l = searchable_menu(map_grid, 2, 1:2, options = Observable(l_opts), fontsize = 9)
-        menu_r = searchable_menu(map_grid, 2, 3:4, options = Observable(r_opts), fontsize = 9)
-        
-        function sync_mapping_and_display!()
-            h5_path = _MEH.h5_path_ref[]
-            if !isempty(h5_path) && !isempty(map_selected_left[]) && !isempty(map_selected_right[])
-                for l_id in map_selected_left[]
-                    for r_id in map_selected_right[]
-                        LA.update_match_group!(left_node, l_id, right_node, r_id, h5_path)
+                
+                # Back-propagate to ensure all related left lesions are shown in the mapping
+                if !isempty(cur_right_sel)
+                    matched_lefts = Int[]
+                    for rid in cur_right_sel
+                        append!(matched_lefts, LA.find_cross_tp_lesion(right_node, rid, left_node))
+                    end
+                    if !isempty(matched_lefts)
+                        new_lefts = unique(vcat(cur_left_sel, matched_lefts))
+                        if length(new_lefts) > length(cur_left_sel)
+                            cur_left_sel = new_lefts
+                        end
                     end
                 end
-            end
-            if !isempty(map_selected_left[])
-                put!(channel, SyncLesionEvent(map_selected_left[][1]))
-            end
-            _build_match_display!()
-        end
-        
-        on(menu_l.selection) do sel
-            _is_applying_state[] && return
-            sel_str = string(sel)
-            (isempty(sel_str) || sel_str == "- select lesion -") && return
-            lid = parse_lesion_id(sel_str)
-            if lid !== nothing && !(lid in map_selected_left[])
-                push!(map_selected_left[], lid)
-                notify(map_selected_left)
-                sync_mapping_and_display!()
-            end
-        end
-        
-        on(menu_r.selection) do sel
-            _is_applying_state[] && return
-            sel_str = string(sel)
-            (isempty(sel_str) || sel_str == "- select lesion -") && return
-            rid = parse_lesion_id(sel_str)
-            if rid !== nothing && !(rid in map_selected_right[])
-                push!(map_selected_right[], rid)
-                notify(map_selected_right)
-                sync_mapping_and_display!()
-            end
-        end
-        
-        row_offset = 3
-        max_rows = max(length(map_selected_left[]), length(map_selected_right[]))
-        if max_rows == 0
-            Label(map_grid[row_offset, 1:4], "(No mapped lesions selected)", fontsize=9, color=SUBTXT, halign=:center)
-        else
-            for i in 1:length(map_selected_left[])
-                lid = map_selected_left[][i]
-                # Build a rich display label: prefer full name from dropdown list, else organ mapping + anatomy
-                lbl_txt = ""
-                for opt in lesion_ids[]
-                    p = parse_lesion_id(opt)
-                    if p == lid
-                        lbl_txt = opt  # e.g. "3: Left Femur [Grp 1, 2 TPs]"
-                        break
+                
+                l_opts = String["- select lesion -"]
+                for lid in l_ids
+                    # Prefer full name from main dropdown, else anatomy-enriched name
+                    display = ""
+                    for opt in cur_lesion_ids
+                        p = parse_lesion_id(opt)
+                        if p == lid; display = opt; break; end
                     end
-                end
-                if isempty(lbl_txt)
-                    organ = get(_MEH.global_organ_mapping[], lid, "")
-                    if !isempty(organ) && organ != "Unknown"
-                        entry = lookup_anatomy(organ)
-                        detailed = entry !== nothing ? get(entry, "detailed", organ) : organ
-                        lbl_txt = "$lid: $detailed"
-                    else
-                        lbl_txt = "ID $lid"
+                    if isempty(display)
+                        organ = get(_MEH.global_organ_mapping[], lid, "")
+                        if !isempty(organ) && organ != "Unknown"
+                            entry = lookup_anatomy(organ)
+                            detailed = entry !== nothing ? get(entry, "detailed", organ) : organ
+                            display = "ID $lid: $detailed"
+                        else
+                            display = "ID $lid"
+                        end
                     end
+                    push!(l_opts, display)
                 end
-                Label(map_grid[row_offset + i - 1, 1], lbl_txt, fontsize=9, color=TXT, halign=:left)
-                btn_rm_l = Button(map_grid[row_offset + i - 1, 2], label="✕", buttoncolor=RGBf(0.8, 0.2, 0.2), labelcolor=TXT, fontsize=9, width=25)
-                let rm_id = lid
-                    on(btn_rm_l.clicks) do _
-                        filter!(x -> x != rm_id, map_selected_left[])
-                        h5_path = _MEH.h5_path_ref[]
-                        !isempty(h5_path) && LA.remove_from_match_group!(left_node, rm_id, h5_path)
-                        notify(map_selected_left)
-                        _build_match_display!()
+                r_opts = String["- select lesion -"]
+                for rid in r_ids
+                    display = ""
+                    for opt in cur_lesion_ids
+                        p = parse_lesion_id(opt)
+                        if p == rid; display = opt; break; end
                     end
-                end
-            end
-            
-            for j in 1:length(map_selected_right[])
-                rid = map_selected_right[][j]
-                # Build a rich display label: prefer from dropdown list, else organ + anatomy
-                lbl_txt = ""
-                for opt in lesion_ids[]
-                    p = parse_lesion_id(opt)
-                    if p == rid
-                        lbl_txt = opt
-                        break
+                    if isempty(display)
+                        organ = get(_MEH.global_organ_mapping[], rid, "")
+                        if !isempty(organ) && organ != "Unknown"
+                            entry = lookup_anatomy(organ)
+                            detailed = entry !== nothing ? get(entry, "detailed", organ) : organ
+                            display = "ID $rid: $detailed"
+                        else
+                            display = "ID $rid"
+                        end
                     end
+                    push!(r_opts, display)
                 end
-                if isempty(lbl_txt)
-                    organ = get(_MEH.global_organ_mapping[], rid, "")
-                    if !isempty(organ) && organ != "Unknown"
-                        entry = lookup_anatomy(organ)
-                        detailed = entry !== nothing ? get(entry, "detailed", organ) : organ
-                        lbl_txt = "$rid: $detailed"
-                    else
-                        lbl_txt = "ID $rid"
+                
+                # Precompute label text for selected items
+                left_labels = String[]
+                for lid in cur_left_sel
+                    lbl_txt = ""
+                    for opt in cur_lesion_ids
+                        p = parse_lesion_id(opt)
+                        if p == lid
+                            lbl_txt = opt
+                            break
+                        end
                     end
+                    if isempty(lbl_txt)
+                        organ = get(_MEH.global_organ_mapping[], lid, "")
+                        if !isempty(organ) && organ != "Unknown"
+                            entry = lookup_anatomy(organ)
+                            detailed = entry !== nothing ? get(entry, "detailed", organ) : organ
+                            lbl_txt = "$lid: $detailed"
+                        else
+                            lbl_txt = "ID $lid"
+                        end
+                    end
+                    push!(left_labels, lbl_txt)
                 end
-                Label(map_grid[row_offset + j - 1, 3], lbl_txt, fontsize=9, color=TXT, halign=:left)
-                btn_rm_r = Button(map_grid[row_offset + j - 1, 4], label="✕", buttoncolor=RGBf(0.8, 0.2, 0.2), labelcolor=TXT, fontsize=9, width=25)
-                let rm_id = rid
-                    on(btn_rm_r.clicks) do _
-                        filter!(x -> x != rm_id, map_selected_right[])
-                        h5_path = _MEH.h5_path_ref[]
-                        if !isempty(h5_path)
-                            for (gid, members) in LA.get_match_groups()
-                                idx_r = findfirst(m -> m[1] == right_node && m[2] == rm_id, members)
-                                if idx_r !== nothing
-                                    deleteat!(members, idx_r)
-                                    length(members) <= 1 && delete!(LA.get_match_groups(), gid)
-                                    LA.save_matches_to_h5(h5_path)
-                                    break
+                
+                right_labels = String[]
+                for rid in cur_right_sel
+                    lbl_txt = ""
+                    for opt in cur_lesion_ids
+                        p = parse_lesion_id(opt)
+                        if p == rid
+                            lbl_txt = opt
+                            break
+                        end
+                    end
+                    if isempty(lbl_txt)
+                        organ = get(_MEH.global_organ_mapping[], rid, "")
+                        if !isempty(organ) && organ != "Unknown"
+                            entry = lookup_anatomy(organ)
+                            detailed = entry !== nothing ? get(entry, "detailed", organ) : organ
+                            lbl_txt = "$rid: $detailed"
+                        else
+                            lbl_txt = "ID $rid"
+                        end
+                    end
+                    push!(right_labels, lbl_txt)
+                end
+                
+                @async begin
+                    try
+                        cv_active[] || return
+                        for elem in contents(map_grid); delete!(elem); end
+                        
+                        lbl_map_left.text[] = "Current TP: $left_lbl ($left_node)"
+                        lbl_map_right.text[] = "Compare TP: $right_lbl ($right_node)"
+                        
+                        map_selected_left[] = cur_left_sel
+                        map_selected_right[] = cur_right_sel
+                        
+                        Label(map_grid[1, 1:2], "Add Left Lesion:", fontsize=9, color=LBL_FG, halign=:left)
+                        Label(map_grid[1, 3:4], "Add Right Lesion:", fontsize=9, color=LBL_FG, halign=:left)
+                        
+                        menu_l = searchable_menu(map_grid, 2, 1:2, options = Observable(l_opts), fontsize = 9)
+                        menu_r = searchable_menu(map_grid, 2, 3:4, options = Observable(r_opts), fontsize = 9)
+                        
+                        function sync_mapping_and_display!()
+                            h5_path = _MEH.h5_path_ref[]
+                            if !isempty(h5_path) && !isempty(map_selected_left[]) && !isempty(map_selected_right[])
+                                for l_id in map_selected_left[]
+                                    for r_id in map_selected_right[]
+                                        LA.update_match_group!(left_node, l_id, right_node, r_id, h5_path)
+                                    end
+                                end
+                            end
+                            if !isempty(map_selected_left[])
+                                put!(channel, SyncLesionEvent(map_selected_left[][1]))
+                            end
+                            _build_match_display!()
+                        end
+                        
+                        on(menu_l.selection) do sel
+                            _is_applying_state[] && return
+                            sel_str = string(sel)
+                            (isempty(sel_str) || sel_str == "- select lesion -") && return
+                            lid = parse_lesion_id(sel_str)
+                            if lid !== nothing && !(lid in map_selected_left[])
+                                push!(map_selected_left[], lid)
+                                notify(map_selected_left)
+                                sync_mapping_and_display!()
+                            end
+                        end
+                        
+                        on(menu_r.selection) do sel
+                            _is_applying_state[] && return
+                            sel_str = string(sel)
+                            (isempty(sel_str) || sel_str == "- select lesion -") && return
+                            rid = parse_lesion_id(sel_str)
+                            if rid !== nothing && !(rid in map_selected_right[])
+                                push!(map_selected_right[], rid)
+                                notify(map_selected_right)
+                                sync_mapping_and_display!()
+                            end
+                        end
+                        
+                        row_offset = 3
+                        max_rows = max(length(cur_left_sel), length(cur_right_sel))
+                        if max_rows == 0
+                            Label(map_grid[row_offset, 1:4], "(No mapped lesions selected)", fontsize=9, color=SUBTXT, halign=:center)
+                        else
+                            for i in 1:length(cur_left_sel)
+                                lid = cur_left_sel[i]
+                                lbl_txt = left_labels[i]
+                                Label(map_grid[row_offset + i - 1, 1], lbl_txt, fontsize=9, color=TXT, halign=:left)
+                                btn_rm_l = Button(map_grid[row_offset + i - 1, 2], label="✕", buttoncolor=RGBf(0.8, 0.2, 0.2), labelcolor=TXT, fontsize=9, width=25)
+                                let rm_id = lid
+                                    on(btn_rm_l.clicks) do _
+                                        filter!(x -> x != rm_id, map_selected_left[])
+                                        h5_path = _MEH.h5_path_ref[]
+                                        !isempty(h5_path) && LA.remove_from_match_group!(left_node, rm_id, h5_path)
+                                        notify(map_selected_left)
+                                        _build_match_display!()
+                                    end
+                                end
+                            end
+                            
+                            for j in 1:length(cur_right_sel)
+                                rid = cur_right_sel[j]
+                                lbl_txt = right_labels[j]
+                                Label(map_grid[row_offset + j - 1, 3], lbl_txt, fontsize=9, color=TXT, halign=:left)
+                                btn_rm_r = Button(map_grid[row_offset + j - 1, 4], label="✕", buttoncolor=RGBf(0.8, 0.2, 0.2), labelcolor=TXT, fontsize=9, width=25)
+                                let rm_id = rid
+                                    on(btn_rm_r.clicks) do _
+                                        filter!(x -> x != rm_id, map_selected_right[])
+                                        h5_path = _MEH.h5_path_ref[]
+                                        if !isempty(h5_path)
+                                            for (gid, members) in LA.get_match_groups()
+                                                idx_r = findfirst(m -> m[1] == right_node && m[2] == rm_id, members)
+                                                if idx_r !== nothing
+                                                    deleteat!(members, idx_r)
+                                                    length(members) <= 1 && delete!(LA.get_match_groups(), gid)
+                                                    LA.save_matches_to_h5(h5_path)
+                                                    break
+                                                end
+                                            end
+                                        end
+                                        notify(map_selected_right)
+                                        _build_match_display!()
+                                    end
                                 end
                             end
                         end
-                        notify(map_selected_right)
-                        _build_match_display!()
+                    catch e
+                        @warn "Match display UI building failed" e
                     end
                 end
+            catch e
+                @warn "Match display computation failed" e
             end
         end
     end
     
     on(btn_refresh_map.clicks) do _
         empty!(_MASK_IDS_CACHE)
+        empty!(_cached_lesion_ids)
         _build_match_display!()
     end
     
@@ -3979,11 +4790,22 @@ function create_metadata_window(
     end_section!(sec_settings)
 
     # ── Collect / apply UI state ──────────────────────────────────────────────
-    function collect_state()::Dict{String,String}
-        d = Dict{String,String}()
+    function collect_state()::Dict{String,Any}
+        d = Dict{String,Any}()
         d["LesionType"] = active_lesion_type[]
         d["ObservationState"] = menu_obs_state.selection[] !== nothing ? String(menu_obs_state.selection[]) : "UNREVIEWED"
         d["KeyImage"] = is_starred[] ? "true" : "false"
+        d["has_expert_edits"] = current_has_expert_edits[]
+        d["SegmentationOrigin"] = current_seg_origin[]
+        
+        reg_status = menu_reg_qc.selection[]
+        if reg_status !== nothing && String(reg_status) != "UNREVIEWED"
+            d["RegistrationQC"] = String(reg_status)
+        end
+        if !isempty(tb_reg_comment.stored_string[])
+            d["RegistrationComment"] = tb_reg_comment.stored_string[]
+        end
+        
         ba_sel = menu_base_anat.selection[]
         v_base = ba_sel === nothing ? "" : _safe_strip(string(ba_sel))
         (isempty(v_base) || v_base == "") || (d["BaseAnatomy"] = v_base)
@@ -4063,44 +4885,64 @@ function create_metadata_window(
     _is_dictating_update = Ref(false)
     function trigger_autosave(; skip_dictation=false)
         _is_applying_state[] && return
-        display_id = active_lesion_id[]
-        lid = parse_lesion_id(display_id)
-        # Use canonical key: numeric ID string, or display name as fallback
-        canonical_key = lid !== nothing ? string(lid) : display_id
         
-        db = copy(lesion_db[])
-        state = collect_state()
-        # Store the current display name for reference/debugging
-        state["_display_name"] = display_id
-        db[canonical_key] = state
+        # Debounce: if already pending, skip (will be included in next save)
+        _autosave_pending[] && return
+        _autosave_pending[] = true
         
-        db["_GLOBAL_APP_STATE"] = Dict{String,String}(
-            "CT_Min" => _safe_strip(tb_ct_min.stored_string[]),
-            "CT_Max" => _safe_strip(tb_ct_max.stored_string[]),
-            "PET_Min" => _safe_strip(tb_pet_min.stored_string[]),
-            "PET_Max" => _safe_strip(tb_pet_max.stored_string[]),
-            "SPECT_Min" => _safe_strip(tb_spect_min.stored_string[]),
-            "SPECT_Max" => _safe_strip(tb_spect_max.stored_string[]),
-            "vis_lesion" => string(vis_lesion_active[]),
-            "vis_surface" => string(vis_surface_active[]),
-            "vis_marrow" => string(vis_marrow_active[]),
-            "vis_anatomy" => string(vis_anatomy_active[])
-        )
-        
-        lesion_db[] = db
-        _db_dirty[] = true
-        # Immediate save (db_channel consumer deduplicates rapid changes)
-        try
-            put!(db_channel, SaveDBMessage(db, global_app_state, save_path, DEFAULT_HDF5_PATH))
-        catch; end
-        # Trigger debounced E-PSMA report refresh (coalesces rapid changes)
-        try ESR.request_report_refresh!(_MEH.current_tp_index[]) catch; end
-        
-        # Trigger debounced LLM auto dictation
-        if !skip_dictation && !_is_dictating_update[]
-            try request_auto_dictation!(_MEH.current_tp_index[]) catch; end
+        @async begin
+            try
+                sleep(0.3)  # 300ms debounce window
+                _autosave_pending[] = false
+                
+                _is_autosaving[] = true
+                try
+                    save_status_text[] = "Saving..."
+                    save_status_color[] = RGBf(0.9, 0.9, 0.2)
+                    
+                    display_id = active_lesion_id[]
+                    lid = parse_lesion_id(display_id)
+                    canonical_key = lid !== nothing ? string(lid) : display_id
+                    
+                    db = copy(lesion_db[])
+                    state = collect_state()
+                    state["_display_name"] = display_id
+                    db[canonical_key] = state
+                    
+                    db["_GLOBAL_APP_STATE"] = Dict{String,String}(
+                        "CT_Min" => _safe_strip(tb_ct_min.stored_string[]),
+                        "CT_Max" => _safe_strip(tb_ct_max.stored_string[]),
+                        "PET_Min" => _safe_strip(tb_pet_min.stored_string[]),
+                        "PET_Max" => _safe_strip(tb_pet_max.stored_string[]),
+                        "SPECT_Min" => _safe_strip(tb_spect_min.stored_string[]),
+                        "SPECT_Max" => _safe_strip(tb_spect_max.stored_string[]),
+                        "vis_lesion" => string(vis_lesion_active[]),
+                        "vis_surface" => string(vis_surface_active[]),
+                        "vis_marrow" => string(vis_marrow_active[]),
+                        "vis_anatomy" => string(vis_anatomy_active[])
+                    )
+                    
+                    lesion_db[] = db
+                    _db_dirty[] = true
+                    try
+                        put!(db_channel, SaveDBMessage(db, global_app_state, save_path, DEFAULT_HDF5_PATH))
+                    catch; end
+                finally
+                    _is_autosaving[] = false
+                end
+                
+                try ESR.request_report_refresh!(_MEH.current_tp_index[]) catch; end
+                if !skip_dictation && !_is_dictating_update[]
+                    try request_auto_dictation!(_MEH.current_tp_index[]) catch; end
+                end
+            catch e
+                _autosave_pending[] = false
+                _is_autosaving[] = false
+                @warn "Autosave error" e
+            end
         end
     end
+    _global_trigger_autosave[] = trigger_autosave
     function apply_global_state(gst::AbstractDict)
         _is_applying_state[] = true
         is_syncing_selection[] = true
@@ -4180,6 +5022,22 @@ function create_metadata_window(
             is_starred[] = get(data, "KeyImage", "false") == "true"
             btn_star.label[] = is_starred[] ? "★ Key Image" : "☆ Key Image"
             btn_star.buttoncolor[] = is_starred[] ? RGBf(0.9, 0.8, 0.2) : BG_PNL
+            
+            menu_reg_qc.selection[] = get(data, "RegistrationQC", "UNREVIEWED")
+            tb_reg_comment.stored_string[] = get(data, "RegistrationComment", "")
+            tb_reg_comment.displayed_string[] = tb_reg_comment.stored_string[]
+
+            # Segmentation Origin & Expert Edits tracking
+            seg_orig = get(data, "SegmentationOrigin", "AI_PRESEGMENTATION")
+            current_seg_origin[] = String(seg_orig)
+            has_edits = false
+            if haskey(data, "has_expert_edits")
+                v_edits = data["has_expert_edits"]
+                has_edits = (v_edits === true || v_edits == "true" || v_edits == 1 || v_edits == "1")
+            elseif seg_orig == "EXPERT_CORRECTION"
+                has_edits = true
+            end
+            current_has_expert_edits[] = has_edits
 
         t_type = if haskey(data, "LesionType")
             # Still compute json_entry for muscle detection below
@@ -4590,167 +5448,201 @@ function create_metadata_window(
             db_updates["Lesion tracking name?"] = tracking_name
         end
         
-        # ── Auto-fill SUV max (always recompute - cache handles freshness) ───
-        try
-            cache_key = (tp_idx, lid)
-            suv_str = get(_lesion_suv_cache, cache_key, "")
-            if isempty(suv_str)
-                suv_str = compute_lesion_suv_string(lid, tp_idx)
-                if !isempty(suv_str)
-                    _lesion_suv_cache[cache_key] = suv_str
-                end
-            end
-            if !isempty(suv_str)
-                if haskey(field_widgets, "SUV max") && field_widgets["SUV max"] isa Textbox
-                    field_widgets["SUV max"].stored_string[] = suv_str
-                end
-                # Persist
-                db_updates["SUV max"] = suv_str
-            end
-        catch e
-            @warn "Auto-SUV computation failed for lesion $lid: $e"
-        end
-        
-        # ── Auto-compute PROMISE score and SUV comparison ────────────────
-        try
-            suv_str = get(data, "SUV max", "")
-            if isempty(suv_str) && haskey(field_widgets, "SUV max") && field_widgets["SUV max"] isa Textbox
-                suv_str = _safe_strip(field_widgets["SUV max"].stored_string[])
-            end
-            if !isempty(suv_str)
-                fields = parse_suv_fields(suv_str)
-                suv_max = get(fields, "max", 0.0f0)
-                if suv_max > 0
-                    bg = Dict{String,Float32}(
-                        "liver" => get(fields, "liver", 0.0f0),
-                        "parotid" => get(fields, "parotid", 0.0f0),
-                        "blood" => get(fields, "blood", 0.0f0)
-                    )
-                    cmp_str = compute_suv_comparison_string(suv_max, bg)
-                    lbl_suv_comparison.text[] = cmp_str
-                end
-            end
-        catch e
-            @warn "PROMISE auto-computation failed: $e"
-        end
-        
-        # ── Auto-fill SUV Quantitative Metrics & References dropdown ─────
-        try
-            suv_str_for_quant = get(data, "SUV max", "")
-            if isempty(suv_str_for_quant) && haskey(field_widgets, "SUV max") && field_widgets["SUV max"] isa Textbox
-                suv_str_for_quant = _safe_strip(field_widgets["SUV max"].stored_string[])
-            end
-            if !isempty(suv_str_for_quant) && haskey(field_widgets, "SUV Quantitative Metrics & References")
-                qf = parse_suv_fields(suv_str_for_quant)
-                q_suv_max  = get(qf, "max", 0.0f0)
-                q_blood    = get(qf, "blood", 0.0f0)
-                q_liver    = get(qf, "liver", 0.0f0)
-                q_parotid  = get(qf, "parotid", 0.0f0)
-                
-                if q_suv_max > 0
-                    # Evaluate rules (highest clinical priority first)
-                    best_opt = nothing
-                    
-                    # Basic PROMISE-tier rules
-                    if q_suv_max >= q_parotid && q_parotid > 0
-                        best_opt = "SUVpeak > Parotid SUVmean (PROMISE = 3)"
-                    elseif q_suv_max >= q_liver && q_liver > 0
-                        best_opt = "SUVpeak > Liver SUVmean (PROMISE ≥ 2)"
-                    elseif q_suv_max >= q_blood && q_blood > 0
-                        best_opt = "SUVpeak > Blood Pool SUVmean (PSMA Avid)"
-                    elseif q_blood > 0 && q_suv_max < q_blood
-                        best_opt = "SUVpeak < Blood Pool SUVmean (PSMA Cold)"
-                    end
-                    
-                    # Specialized overrides
-                    if q_suv_max > 12.0
-                        best_opt = "SUVmax > 12 (Definite Primary)"
-                    end
-                    if q_liver > 0 && q_suv_max / q_liver > 2.5
-                        best_opt = something(best_opt, "Lesion-to-Background Ratio (LBR) > 2.5")
-                    end
-                    
-                    # Context-dependent rules
-                    lesion_type_str = try; active_lesion_type[]; catch; ""; end
-                    radioligand_str = menu_radioligand.selection[] !== nothing ? String(menu_radioligand.selection[]) : ""
-                    
-                    if radioligand_str == "18F-PSMA-1007" && lesion_type_str == "Bone Meta" && q_suv_max < 10.0
-                        best_opt = "18F-PSMA-1007 Bone Lesion with SUV < 10 (FPR 51.4%)"
-                    end
-                    if lesion_type_str == "Bone Meta" && q_blood > 0 && q_suv_max < q_blood
-                        best_opt = "Unspecified Bone Uptake (UBU)"
-                    end
-                    
-                    # Only autofill if no user selection already saved in DB
-                    saved_quant = get(data, "SUV Quantitative Metrics & References", "")
-                    if (isempty(saved_quant) || saved_quant == "- select -") && best_opt !== nothing
-                        w_quant = field_widgets["SUV Quantitative Metrics & References"]
-                        if w_quant isa Menu
-                            q_opts = w_quant.options[]
-                            q_idx = findfirst(==(best_opt), q_opts)
-                            if q_idx !== nothing && w_quant.i_selected[] != q_idx
-                                w_quant.i_selected[] = q_idx
-                            end
-                            db_updates["SUV Quantitative Metrics & References"] = best_opt
+        # ── Async SUV, Volume and Match Analysis ─────────────────────────
+        lbl_suv_comparison.text[] = "..."
+        lbl_match_analysis.text[] = "..."
+
+        cur_id_str = active_lesion_id[]
+        cur_lid = lid
+        cur_tp = tp_idx
+        cur_cv = cv_active[]
+        cur_data = copy(data)
+        cur_lesion_type = try; active_lesion_type[]; catch; ""; end
+        cur_radioligand = menu_radioligand.selection[] !== nothing ? String(menu_radioligand.selection[]) : ""
+
+        Threads.@spawn begin
+            try
+                # 1. Auto-fill SUV max
+                suv_str = ""
+                try
+                    cache_key = (cur_tp, cur_lid)
+                    suv_str = get(_lesion_suv_cache, cache_key, "")
+                    if isempty(suv_str)
+                        suv_str = compute_lesion_suv_string(cur_lid, cur_tp)
+                        if !isempty(suv_str)
+                            _lesion_suv_cache[cache_key] = suv_str
                         end
                     end
+                catch e
+                    @warn "Auto-SUV computation failed for lesion $cur_lid: $e"
                 end
-            end
-        catch e
-            @warn "SUV Quantitative autofill failed: $e"
-        end
-        
-        # ── Auto-compute Volume and Match Analysis ───────────────────────
-        try
-            vol = compute_lesion_volume(lid, tp_idx)
-            vol_cc = vol["volume_cc"]
-            vol_mm3 = vol["volume_mm3"]
-            diameter = vol["diameter_mm"]
-            
-            # Store volume in metadata
-            if vol_cc > 0
-                db_updates["_Volume_mm3"] = string(round(vol_mm3, digits=1))
-                db_updates["_Volume_cc"] = string(round(vol_cc, digits=3))
-                db_updates["_Diameter_mm"] = string(round(diameter, digits=1))
-            end
-            
-            # Match analysis (cross-TP comparison) — only show in Compare Volumes mode
-            if cv_active[]
-                analysis = compute_match_analysis(lid, tp_idx)
-                if analysis !== nothing
-                    analysis_str = format_match_analysis(analysis)
-                    lbl_match_analysis.text[] = analysis_str
-                    
-                    # Persist match analysis to metadata
-                    db_updates["_MatchGroup"] = string(analysis.group_id)
-                    db_updates["_RECIP"] = analysis.recip_category
-                    if analysis.baseline_volume_cc > 0.001
-                        db_updates["_VolDelta_pct"] = string(round(analysis.volume_delta_pct, digits=1))
-                        db_updates["_VolDelta_cc"] = string(round(analysis.volume_delta_abs_cc, digits=3))
+
+                # 2. Auto-compute PROMISE score and SUV comparison
+                cmp_str = ""
+                try
+                    s_for_cmp = !isempty(suv_str) ? suv_str : get(cur_data, "SUV max", "")
+                    if !isempty(s_for_cmp)
+                        fields = parse_suv_fields(s_for_cmp)
+                        suv_max = get(fields, "max", 0.0f0)
+                        if suv_max > 0
+                            bg = Dict{String,Float32}(
+                                "liver" => get(fields, "liver", 0.0f0),
+                                "parotid" => get(fields, "parotid", 0.0f0),
+                                "blood" => get(fields, "blood", 0.0f0)
+                            )
+                            cmp_str = compute_suv_comparison_string(suv_max, bg)
+                        end
                     end
-                    if analysis.baseline_suv_max > 0.1f0
-                        db_updates["_SUVDelta"] = string(round(analysis.suv_delta_abs, digits=1))
-                        db_updates["_SUVDelta_pct"] = string(round(analysis.suv_delta_pct, digits=1))
+                catch e
+                    @warn "PROMISE auto-computation failed: $e"
+                end
+
+                # 3. Auto-fill SUV Quantitative Metrics & References
+                best_opt = nothing
+                try
+                    s_for_quant = !isempty(suv_str) ? suv_str : get(cur_data, "SUV max", "")
+                    if !isempty(s_for_quant)
+                        qf = parse_suv_fields(s_for_quant)
+                        q_suv_max  = get(qf, "max", 0.0f0)
+                        q_blood    = get(qf, "blood", 0.0f0)
+                        q_liver    = get(qf, "liver", 0.0f0)
+                        q_parotid  = get(qf, "parotid", 0.0f0)
+                        
+                        if q_suv_max > 0
+                            if q_suv_max >= q_parotid && q_parotid > 0
+                                best_opt = "SUVpeak > Parotid SUVmean (PROMISE = 3)"
+                            elseif q_suv_max >= q_liver && q_liver > 0
+                                best_opt = "SUVpeak > Liver SUVmean (PROMISE ≥ 2)"
+                            elseif q_suv_max >= q_blood && q_blood > 0
+                                best_opt = "SUVpeak > Blood Pool SUVmean (PSMA Avid)"
+                            elseif q_blood > 0 && q_suv_max < q_blood
+                                best_opt = "SUVpeak < Blood Pool SUVmean (PSMA Cold)"
+                            end
+                            if q_suv_max > 12.0
+                                best_opt = "SUVmax > 12 (Definite Primary)"
+                            end
+                            if q_liver > 0 && q_suv_max / q_liver > 2.5
+                                best_opt = something(best_opt, "Lesion-to-Background Ratio (LBR) > 2.5")
+                            end
+                            if cur_radioligand == "18F-PSMA-1007" && cur_lesion_type == "Bone Meta" && q_suv_max < 10.0
+                                best_opt = "18F-PSMA-1007 Bone Lesion with SUV < 10 (FPR 51.4%)"
+                            end
+                            if cur_lesion_type == "Bone Meta" && q_blood > 0 && q_suv_max < q_blood
+                                best_opt = "Unspecified Bone Uptake (UBU)"
+                            end
+                        end
+                    end
+                catch e
+                    @warn "SUV Quantitative autofill failed: $e"
+                end
+
+                # 4. Auto-compute Volume
+                vol_dict = Dict{String, Float64}()
+                try
+                    vol_dict = compute_lesion_volume(cur_lid, cur_tp)
+                catch e
+                    @warn "Volume computation failed for lesion $cur_lid: $e"
+                end
+                vol_cc = get(vol_dict, "volume_cc", 0.0)
+                vol_mm3 = get(vol_dict, "volume_mm3", 0.0)
+                diameter = get(vol_dict, "diameter_mm", 0.0)
+
+                # 5. Match analysis
+                analysis = nothing
+                analysis_str = ""
+                if cur_cv
+                    try
+                        analysis = compute_match_analysis(cur_lid, cur_tp)
+                        if analysis !== nothing
+                            analysis_str = format_match_analysis(analysis)
+                        elseif vol_cc > 0
+                            analysis_str = "Vol: $(round(vol_cc, digits=2))cc ($(round(diameter, digits=1))mm⌀)"
+                        end
+                    catch e
+                        @warn "Volume/Match analysis failed for lesion $cur_lid: $e"
                     end
                 else
-                    # Compare mode but no match group — show volume
                     if vol_cc > 0
-                        lbl_match_analysis.text[] = "Vol: $(round(vol_cc, digits=2))cc ($(round(diameter, digits=1))mm⌀)"
-                    else
-                        lbl_match_analysis.text[] = ""
+                        analysis_str = "Vol: $(round(vol_cc, digits=2))cc ($(round(diameter, digits=1))mm⌀)"
                     end
                 end
-            else
-                # Single-TP mode — show volume only, no cross-TP comparison
-                if vol_cc > 0
-                    lbl_match_analysis.text[] = "Vol: $(round(vol_cc, digits=2))cc ($(round(diameter, digits=1))mm⌀)"
-                else
-                    lbl_match_analysis.text[] = ""
+
+                @async begin
+                    try
+                        # Update UI only if the lesion is still active
+                        if active_lesion_id[] == cur_id_str
+                            lbl_suv_comparison.text[] = !isempty(cmp_str) ? cmp_str : ""
+                            lbl_match_analysis.text[] = analysis_str
+
+                            if !isempty(suv_str) && haskey(field_widgets, "SUV max") && field_widgets["SUV max"] isa Textbox
+                                _set_tb_val!(field_widgets["SUV max"], suv_str)
+                            end
+
+                            saved_quant = get(cur_data, "SUV Quantitative Metrics & References", "")
+                            if (isempty(saved_quant) || saved_quant == "- select -") && best_opt !== nothing
+                                if haskey(field_widgets, "SUV Quantitative Metrics & References")
+                                    w_quant = field_widgets["SUV Quantitative Metrics & References"]
+                                    if w_quant isa Menu
+                                        q_opts = w_quant.options[]
+                                        q_idx = findfirst(==(best_opt), q_opts)
+                                        if q_idx !== nothing && w_quant.i_selected[] != q_idx
+                                            w_quant.i_selected[] = q_idx
+                                        end
+                                    end
+                                end
+                            end
+                        end
+
+                        # Persist computed metrics into DB
+                        async_db_updates = Dict{String, Any}()
+                        if !isempty(suv_str)
+                            async_db_updates["SUV max"] = suv_str
+                        end
+                        saved_quant = get(cur_data, "SUV Quantitative Metrics & References", "")
+                        if (isempty(saved_quant) || saved_quant == "- select -") && best_opt !== nothing
+                            async_db_updates["SUV Quantitative Metrics & References"] = best_opt
+                        end
+                        if vol_cc > 0
+                            async_db_updates["_Volume_mm3"] = string(round(vol_mm3, digits=1))
+                            async_db_updates["_Volume_cc"] = string(round(vol_cc, digits=3))
+                            async_db_updates["_Diameter_mm"] = string(round(diameter, digits=1))
+                        end
+                        if analysis !== nothing
+                            async_db_updates["_MatchGroup"] = string(analysis.group_id)
+                            async_db_updates["_RECIP"] = analysis.recip_category
+                            if analysis.baseline_volume_cc > 0.001
+                                async_db_updates["_VolDelta_pct"] = string(round(analysis.volume_delta_pct, digits=1))
+                                async_db_updates["_VolDelta_cc"] = string(round(analysis.volume_delta_abs_cc, digits=3))
+                            end
+                            if analysis.baseline_suv_max > 0.1f0
+                                async_db_updates["_SUVDelta"] = string(round(analysis.suv_delta_abs, digits=1))
+                                async_db_updates["_SUVDelta_pct"] = string(round(analysis.suv_delta_pct, digits=1))
+                            end
+                        end
+
+                        if !isempty(async_db_updates)
+                            canonical_key = string(cur_lid)
+                            db = copy(lesion_db[])
+                            cur_ld = copy(get(db, canonical_key, Dict{String,Any}()))
+                            for (k, v) in async_db_updates
+                                cur_ld[k] = v
+                            end
+                            db[canonical_key] = cur_ld
+                            _is_autosaving[] = true
+                            try
+                                lesion_db[] = db
+                            finally
+                                _is_autosaving[] = false
+                            end
+                            try ESR.invalidate_report!(cur_tp) catch; end
+                        end
+                    catch e
+                        @warn "Async UI metrics update failed for lesion $cur_lid" e
+                    end
                 end
+            catch e
+                @warn "Async metrics background thread error for lesion $cur_lid" e
             end
-        catch e
-            @warn "Volume/Match analysis failed for lesion $lid: $e"
-            lbl_match_analysis.text[] = ""
         end
         
         # ── Restore No CT Correlate toggle ───────────────────────────────
@@ -4934,54 +5826,244 @@ function create_metadata_window(
         @info "Action: Accept"
         menu_obs_state.selection[] = "ACCEPTED"
         trigger_autosave()
-        put!(channel, ChangeTimePointEvent(1))
+        _MEH.auto_advance_after_decision!()
     end
 
     on(btn_reject.clicks) do _
         @info "Action: Reject"
         menu_obs_state.selection[] = "REJECTED"
         trigger_autosave()
-        put!(channel, ChangeTimePointEvent(1))
+        _MEH.auto_advance_after_decision!()
     end
 
     on(btn_correct.clicks) do _
         @info "Action: Correct"
         menu_obs_state.selection[] = "CORRECTED"
         trigger_autosave()
-        put!(channel, ChangeTimePointEvent(1))
+        _MEH.auto_advance_after_decision!()
+    end
+
+    on(btn_validate.clicks) do _
+        if main_event_channel[] !== nothing
+            put!(main_event_channel[], ValidateReportEvent())
+        end
+        
+        lbl_val_status.text[] = "Validating..."
+        lbl_val_status.color[] = SUBTXT
+        
+        entries = Dict{String,Any}[]
+        active_id_str = active_lesion_id[] !== nothing ? string(active_lesion_id[]) : ""
+        
+        db = copy(lesion_db[])
+        active_state = collect_state()
+        for (lid, data) in db
+            if lid == "_GLOBAL_APP_STATE" || startswith(lid, "_")
+                continue
+            end
+            if lid == active_id_str
+                merged = copy(data)
+                for (k, v) in active_state
+                    merged[k] = v
+                end
+                push!(entries, merged)
+            else
+                push!(entries, data)
+            end
+        end
+        
+        tp_idx = _MEH.current_tp_index[]
+        
+        Threads.@spawn begin
+            try
+                report = ESR.get_or_build_report(tp_idx; lang="EN")
+                report_data = ESR.to_dict(report)
+                issues = run_conflict_checks(report_data, entries)
+                
+                @async begin
+                    try
+                        if isempty(issues)
+                            lbl_val_status.text[] = "[OK] No issues found"
+                            lbl_val_status.color[] = GRN
+                        else
+                            blocking = count(i -> i.severity == ConflictChecker.BLOCKING, issues)
+                            warns = count(i -> i.severity == ConflictChecker.WARNING, issues)
+                            
+                            summary = "[!!] $blocking blocking issues, [!] $warns warnings\n"
+                            for i in issues
+                                prefix = i.severity == ConflictChecker.BLOCKING ? "[BLOCK]" : (i.severity == ConflictChecker.WARNING ? "[WARN]" : "[INFO]")
+                                summary *= "$prefix $(i.message)\n"
+                            end
+                            
+                            lbl_val_status.text[] = summary
+                            lbl_val_status.color[] = blocking > 0 ? RGBf(0.8, 0.2, 0.2) : RGBf(0.8, 0.8, 0.2)
+                        end
+                    catch e
+                        @warn "Validation UI update failed" e
+                    end
+                end
+            catch e
+                @warn "Validation failed" e
+                @async begin
+                    lbl_val_status.text[] = "Validation error"
+                    lbl_val_status.color[] = RGBf(0.8, 0.2, 0.2)
+                end
+            end
+        end
+    end
+    
+    on(btn_qc.clicks) do _
+        if main_event_channel[] !== nothing
+            put!(main_event_channel[], CaseQCEvent())
+        end
+        
+        lbl_val_status.text[] = "Running QC checks..."
+        lbl_val_status.color[] = SUBTXT
+        
+        active_id_str = active_lesion_id[] !== nothing ? string(active_lesion_id[]) : ""
+        db = copy(lesion_db[])
+        active_state = collect_state()
+        
+        Threads.@spawn begin
+            try
+                issues = String[]
+                for (lid, data) in db
+                    if lid == "_GLOBAL_APP_STATE" || startswith(lid, "_")
+                        continue
+                    end
+                    
+                    # Merge with UI state if it's the active lesion
+                    d = data
+                    if lid == active_id_str
+                        d = copy(data)
+                        for (k, v) in active_state
+                            d[k] = v
+                        end
+                    end
+                    
+                    obs = get(d, "ObservationState", "UNREVIEWED")
+                    reg_qc = get(d, "RegistrationQC", "UNREVIEWED")
+                    track_name = get(d, "Lesion tracking name?", "")
+                    
+                    if obs == "UNREVIEWED"
+                        push!(issues, "[$lid] UNREVIEWED lesion.")
+                    end
+                    
+                    if obs == "UNCERTAIN" && get(d, "uncertainty_ack", false) != true && isempty(get(d, "Comment", ""))
+                        push!(issues, "[$lid] UNCERTAIN without explicit acknowledgement (or Comment).")
+                    end
+                    
+                    if reg_qc == "QUESTIONABLE"
+                        push!(issues, "[$lid] Registration flagged as QUESTIONABLE but lacks final QC outcome.")
+                    end
+                    
+                    if obs == "NEW" && isempty(track_name)
+                        push!(issues, "[$lid] NEW lesion is not linked into a track.")
+                    end
+                end
+                
+                @async begin
+                    try
+                        if isempty(issues)
+                            lbl_val_status.text[] = "[OK] Case QC Passed: Ready to Mark Complete"
+                            lbl_val_status.color[] = GRN
+                            _MEH.set_workflow_state!(_MEH.ScientificWorkflow.WF_CASE_COMPLETE)
+                        else
+                            lbl_val_status.text[] = "[X] " * join(issues, "\n[X] ")
+                            lbl_val_status.color[] = RGBf(0.9, 0.2, 0.2)
+                        end
+                    catch e
+                        @warn "QC UI update failed" e
+                    end
+                end
+            catch e
+                @warn "QC failed" e
+                @async begin
+                    lbl_val_status.text[] = "QC check error"
+                    lbl_val_status.color[] = RGBf(0.9, 0.2, 0.2)
+                end
+            end
+        end
     end
 
     on(btn_export.clicks) do _
+        status_lbl.text[] = "Exporting..."
+        
+        entries = Dict{String,Any}[]
+        for (lid, data) in lesion_db[]
+            if lid == "_GLOBAL_APP_STATE" || startswith(lid, "_")
+                continue
+            end
+            
+            entry = Dict{String,Any}()
+            entry["case_id"] = get(data, "case_id", "")
+            entry["timepoint_index"] = get(data, "timepoint_index", "")
+            entry["lesion_id"] = lid
+            entry["lesion_name"] = get(data, "_display_name", "")
+            entry["lesion_type"] = get(data, "LesionType", "")
+            entry["base_anatomy"] = get(data, "BaseAnatomy", get(data, "Anatomic Location", ""))
+            entry["side"] = get(data, "BaseAnatomySide", "")
+            entry["observation_state"] = get(data, "ObservationState", "UNREVIEWED")
+            entry["segmentation_origin"] = get(data, "SegmentationOrigin", "")
+            entry["has_expert_edits"] = get(data, "has_expert_edits", false)
+            entry["suv_max"] = get(data, "SUV max", "")
+            entry["suv_mean"] = get(data, "SUV mean", "")
+            entry["volume_cc"] = get(data, "Volume (mL)", "")
+            entry["diameter_mm"] = get(data, "Diameter (mm)", "")
+            entry["registration_qc"] = get(data, "RegistrationQC", "")
+            entry["registration_comment"] = get(data, "RegistrationComment", "")
+            entry["reviewer_timestamp"] = get(data, "Timestamp", "")
+            entry["comment"] = get(data, "Comments", "")
+            
+            push!(entries, entry)
+        end
+        
         path = joinpath(homedir(), "research_export.csv")
-        open(path, "w") do io
-            println(io, "LesionID,Display,State,Anatomy,SUVmax,SUVmean,Volume_ml")
-            for (lid, data) in lesion_db[]
-                if lid == "_GLOBAL_APP_STATE" || startswith(lid, "_")
-                    continue
+        
+        Threads.@spawn begin
+            try
+                ResearchExport.export_lesion_data_csv(entries, path)
+                @info "Exported research data to $path"
+                @async begin
+                    status_lbl.text[] = "Exported to research_export.csv"
                 end
-                disp = get(data, "_display_name", "")
-                st = get(data, "ObservationState", "UNREVIEWED")
-                anat = get(data, "Anatomic Location", "")
-                suvmax = get(data, "SUV max", "")
-                suvmean = get(data, "SUV mean", "")
-                vol = get(data, "Volume (mL)", "")
-                println(io, "\"$(lid)\",\"$(disp)\",\"$(st)\",\"$(anat)\",\"$(suvmax)\",\"$(suvmean)\",\"$(vol)\"")
+            catch e
+                @warn "Research export failed" e
+                @async begin
+                    status_lbl.text[] = "Export failed"
+                end
             end
         end
-        @info "Exported research data to $path"
-        status_lbl.text[] = "Exported to research_export.csv"
     end
 
     on(btn_star.clicks) do _
         is_starred[] = !is_starred[]
         btn_star.label[] = is_starred[] ? "★ Key Image" : "☆ Key Image"
         btn_star.buttoncolor[] = is_starred[] ? RGBf(0.9, 0.8, 0.2) : BG_PNL
-        trigger_autosave()
+        
         if is_starred[] && _MEH !== nothing
-            sc_path = joinpath(homedir(), "screenshot_keyimage_$(active_lesion_id[]).png")
+            data = collect_state()
+            anatomy = get(data, "BaseAnatomy", get(data, "Anatomic Location", "lesion"))
+            if isempty(anatomy) anatomy = "lesion" end
+            suv = get(data, "SUV max", "N/A")
+            vol = get(data, "Volume (mL)", "N/A")
+            
+            fig_n = length([k for (k,v) in lesion_db[] if get(v, "KeyImage", "false") == "true"]) + 1
+            caption = "Fig $fig_n. PSMA-positive $anatomy, SUVmax $suv, $vol cc"
+            
+            if haskey(field_widgets, "Caption") && field_widgets["Caption"] isa Textbox
+                field_widgets["Caption"].stored_string[] = caption
+                field_widgets["Caption"].displayed_string[] = caption
+            end
+            
+            tp = _MEH.current_tp_index[]
+            sc_dir = joinpath(dirname(save_path), "key_images")
+            lid = parse_lesion_id(active_lesion_id[])
+            lid_str = lid !== nothing ? string(lid) : active_lesion_id[]
+            sc_path = joinpath(sc_dir, "L$(lid_str)_TP$(tp)_axial.png")
             put!(channel, ScreenshotEvent(sc_path))
             @info "Triggered printscreen on Key Image: $sc_path"
         end
+        trigger_autosave()
     end
 
     on(btn_save.clicks) do _
@@ -5317,6 +6399,39 @@ function create_metadata_window(
             menu_m2_mode.selection[] = val
         end
     end
+
+    # Register observables for MakieEventHandlers / keyboard shortcuts
+    _lmw_observables[:active_lesion_id] = active_lesion_id
+    _lmw_observables[:lesion_ids] = lesion_ids
+    _lmw_observables[:obs_state] = menu_obs_state.selection
+    _lmw_observables[:menu_obs_state] = menu_obs_state
+    _lmw_observables[:btn_prev] = btn_prev
+    _lmw_observables[:btn_next] = btn_next
+    _lmw_observables[:menu_tp_single] = menu_tp_single
+    _lmw_observables[:obs_tp] = menu_tp_single.selection
+    _lmw_observables[:current_tp] = menu_tp_single.selection
+    _lmw_observables[:menu_tp_left] = menu_tp_left
+    _lmw_observables[:menu_tp_right] = menu_tp_right
+    _lmw_observables[:btn_prev_tp] = btn_pt
+    _lmw_observables[:btn_next_tp] = btn_nt
+
+    obs_next_lesion = Observable(0)
+    obs_prev_lesion = Observable(0)
+    on(obs_next_lesion) do _
+        opts = lesion_ids[]; isempty(opts) && return
+        idx = findfirst(==(active_lesion_id[]), opts)
+        new_idx = idx === nothing ? 1 : (idx == length(opts) ? 1 : idx + 1)
+        active_lesion_id[] = opts[new_idx]
+    end
+    on(obs_prev_lesion) do _
+        opts = lesion_ids[]; isempty(opts) && return
+        idx = findfirst(==(active_lesion_id[]), opts)
+        new_idx = idx === nothing ? 1 : (idx == 1 ? length(opts) : idx - 1)
+        active_lesion_id[] = opts[new_idx]
+    end
+    _lmw_observables[:obs_next_lesion] = obs_next_lesion
+    _lmw_observables[:obs_prev_lesion] = obs_prev_lesion
+
     return res
 end
 

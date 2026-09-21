@@ -220,6 +220,83 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
             end
         end
         ReactToScroll._pet_blend_ref_w2[] = default_blend
+    elseif mode == "Flicker"
+        for i in 6:10
+            stateInstances[i].displayMode = QuadImage
+        end
+        if load_data
+            MakieEventHandlers.reactToToggleFlicker(MakieEvents.ToggleFlickerEvent(), stateInstances)
+        end
+        MakieEventHandlers.updateQuadVertices!(stateInstances[6], :TopLeft)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[7], :TopRight)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
+        
+    elseif mode == "Overlay"
+        for i in 6:10
+            stateInstances[i].displayMode = QuadImage
+        end
+        if load_data
+            right_tp = MakieEventHandlers.compare_right_tp[]
+            if right_tp < 0
+                tp_indices = sort(collect(keys(MakieEventHandlers.tp_labels)))
+                if !isempty(tp_indices)
+                    cur_pos = findfirst(==(tp_index), tp_indices)
+                    cur_pos = cur_pos === nothing ? 1 : cur_pos
+                    next_pos = mod1(cur_pos + 1, length(tp_indices))
+                    right_tp = tp_indices[next_pos]
+                    MakieEventHandlers.compare_right_tp[] = right_tp
+                end
+            end
+            
+            entry_curr = MakieEventHandlers.get_or_load_tp_data(tp_index)
+            if entry_curr !== nothing
+                for i in 6:9
+                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_curr, i)
+                end
+            end
+            
+            entry_right = MakieEventHandlers.get_or_load_tp_data(right_tp)
+            if entry_right !== nothing
+                for i in 6:9
+                    for dat in stateInstances[i].onScrollData.dataToScroll
+                        if dat.name == "PET"
+                            panel_idx_mapped = i > 5 ? i - 5 : i
+                            if panel_idx_mapped == 3
+                                dat.dat = PermutedDimsArray(entry_right.pet, (2,3,1))
+                            elseif panel_idx_mapped == 4
+                                dat.dat = PermutedDimsArray(entry_right.pet, (1,3,2))
+                            elseif panel_idx_mapped == 2
+                                dat.dat = PermutedDimsArray(entry_right.pet, (2,1,3))
+                            else 
+                                dat.dat = entry_right.pet
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        MakieEventHandlers.updateQuadVertices!(stateInstances[6], :TopLeft)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[7], :TopRight)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
+        
+        default_blend = 0.5f0
+        for i in [6, 8, 9]
+            for tex in stateInstances[i].mainForDisplayObjects.listOfTextSpecifications
+                if tex.isNuclearMask && !tex.isMainImage
+                    tex.maskContribution = default_blend
+                end
+            end
+        end
+        for tex in stateInstances[7].mainForDisplayObjects.listOfTextSpecifications
+            if tex.isNuclearMask && !tex.isMainImage
+                tex.maskContribution = 1.0f0
+            end
+        end
+        ReactToScroll._pet_blend_ref_w2[] = default_blend
     else # "Quad View" or "Current TP (Quad View)"
         for i in 6:10
             stateInstances[i].displayMode = QuadImage
@@ -350,12 +427,17 @@ on_next!(stateObjects::Vector{StateDataFields}, data::KeyInputFields) = reactToK
 on_next!(stateObjects::Vector{StateDataFields}, data::DisplayedVoxels) = retrieveVoxelArray(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::CustomDisplayedVoxels) = depositVoxelArray(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ChangePlaneEvent) = reactToChangePlane(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::NextPhaseEvent) = reactToNextPhase(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::PrevPhaseEvent) = reactToPrevPhase(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::SetPhaseEvent) = reactToSetPhase(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::CompareTimePointsEvent) = reactToCompareTimePoints(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ShowSingleLesionEvent) = reactToShowSingleLesion(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::WindowingEvent) = reactToWindowing(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::PaintValEvent) = reactToPaintVal(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ChangeBrushSizeEvent) = reactToChangeBrushSize(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SyncLesionEvent) = reactToSyncLesion(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleFlickerEvent) = apply_m2_layout!(stateObjects, "Flicker", -1; load_data=true)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleOverlayEvent) = apply_m2_layout!(stateObjects, "Overlay", -1; load_data=true)
 on_next!(stateObjects::Vector{StateDataFields}, data::ChangeTimePointEvent) = reactToChangeTimePoint(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SetTimePointEvent) = reactToSetTimePoint(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ToggleLesionEvent) = reactToToggleLesion(data, stateObjects)
@@ -372,6 +454,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::AutoRunPreprocessEvent) = 
 on_next!(stateObjects::Vector{StateDataFields}, data::RunPreprocessEvent) = reactToRunPreprocess(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ShowBoneMaskEvent) = reactToShowBoneMask(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ShowMaskLayerEvent) = reactToShowMaskLayer(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::SetM2ReferenceEvent) = reactToSetM2Reference(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SaveMRBEvent) = reactToSaveMRB(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::CloseWindowEvent) = nothing
 on_next!(stateObjects::Vector{StateDataFields}, data::ResizeWindowEvent) = reactToResizeWindow(data, stateObjects)

@@ -103,8 +103,9 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
     
     btn_export = Button(tb_layout[1, 5], label = "Export Word (.docx)", buttoncolor = GRN, labelcolor = TXT, fontsize = 11)
     btn_copy   = Button(tb_layout[1, 6], label = "Copy Text", buttoncolor = BG_CARD, labelcolor = TXT, fontsize = 11)
-    btn_refresh= Button(tb_layout[1, 7], label = "Refresh", buttoncolor = BG_CARD, labelcolor = TXT, fontsize = 11)
-    btn_close  = Button(tb_layout[1, 8], label = "← Return to Main Panel", buttoncolor = RGBf(0.4, 0.15, 0.15), labelcolor = TXT, fontsize = 11)
+    btn_prior  = Button(tb_layout[1, 7], label = "[+] Load Prior Report", buttoncolor = BG_CARD, labelcolor = TXT, fontsize = 11)
+    btn_refresh= Button(tb_layout[1, 8], label = "Refresh", buttoncolor = BG_CARD, labelcolor = TXT, fontsize = 11)
+    btn_close  = Button(tb_layout[1, 9], label = "← Return to Main Panel", buttoncolor = RGBf(0.4, 0.15, 0.15), labelcolor = TXT, fontsize = 11)
 
     # Status Bar
     status_text = Observable("Status: Ready (E-PSMA v1.0 Standardized Structured Report)")
@@ -206,7 +207,22 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
         "• Treatment Response Evaluation (PERCIST / RECIP): $(report.overall_recip)"
     ))
 
-    sec7_title      = Observable("7. ✏️ Technical Parameters (User Input)")
+    sec7_title      = Observable("7. Technical Parameters (User Input)")
+
+    # ── Section Provenance Tracking ──────────────────────────────────────────
+    # Tracks whether each editable section was auto-generated or manually edited
+    YELLOW_EDIT = RGBf(0.85, 0.75, 0.20)  # Visual indicator for manual edits
+    section_keys = ["sec1", "sec3", "sec4_prostate", "sec4_lymph", "sec4_bone", "sec4_visceral", "sec6"]
+    # Initialize provenance from report state (default to AUTO)
+    section_prov_obs = Dict{String, Observable{String}}()
+    for sk in section_keys
+        initial = get(report.section_provenance, sk, "AUTO")
+        section_prov_obs[sk] = Observable(initial)
+    end
+
+    # Prior report panel state
+    prior_report_obs = Observable(report.prior_report_text)
+    prior_panel_visible = Observable(!isempty(report.prior_report_text))
 
     # Function to apply language switch
     function set_language!(lang::String)
@@ -224,13 +240,13 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
         
         # Section 1 — mark as needing input if empty or placeholder
         history_placeholder = isempty(report.history_text_en) || occursin("Please enter", report.history_text_en)
-        s1_suffix = history_placeholder ? "  ⚠️" : ""
+        s1_suffix = history_placeholder ? " (!)" : ""
         sec1_title[] = is_de ? "1. Klinische Angaben und Anamnese$s1_suffix" : "1. Patient History & Clinical Indication$s1_suffix"
         sec1_text[]  = wrap_text(is_de ? report.history_text_de : report.history_text_en)
         
         # Section 2 — mark as needing input if technical params are placeholder
         tech_placeholder = report.tech_params.radiotracer == "(not specified)"
-        s2_suffix = tech_placeholder ? "  ⚠️" : ""
+        s2_suffix = tech_placeholder ? " (!)" : ""
         sec2_title[] = is_de ? "2. Untersuchungstechnik (Synoptische Tabelle 1)$s2_suffix" : "2. Technical Information & Methodology (Synoptic Table 1)$s2_suffix"
         # Update Table 1 values from (possibly updated) tech_params
         if @isdefined(t1_obs)
@@ -290,7 +306,7 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
              "• Treatment Response Evaluation (PERCIST / RECIP): $(report.overall_recip)"))
         
         # Section 7 title
-        sec7_title[] = is_de ? "7. ✏️ Technische Parameter (Benutzereingabe)" : "7. ✏️ Technical Parameters (User Input)"
+        sec7_title[] = is_de ? "7. Technische Parameter (Benutzereingabe)" : "7. Technical Parameters (User Input)"
             
         status_text[] = is_de ? "Status: Sprache auf Deutsch gesetzt" : "Status: Language switched to English"
     end
@@ -309,10 +325,37 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
         rowsize!(g, r_idx, Fixed(38))
     end
 
-    function add_card_text!(text_obs::Observable{String})
+    function add_card_text!(text_obs::Observable{String}; section_key::Union{String,Nothing}=nothing)
         r_idx = nr!()
-        Box(g[r_idx, 1], color = BG_CARD, cornerradius = 4, strokecolor = BORDER, strokewidth = 1)
-        tb = Textbox(g[r_idx, 1],
+        card_gl = GridLayout(g[r_idx, 1])
+        
+        # Provenance badge + Regenerate button (only when section_key is provided)
+        if section_key !== nothing && haskey(section_prov_obs, section_key)
+            prov_obs = section_prov_obs[section_key]
+            prov_label = @lift($prov_obs == "MANUAL" ? "[M] MANUAL" : "[A] AUTO")
+            prov_color = @lift($prov_obs == "MANUAL" ? YELLOW_EDIT : SUBTXT)
+            Label(card_gl[1, 1], prov_label, fontsize = 9, font = :bold, color = prov_color, halign = :left, padding = (8, 0, 2, 0))
+            btn_regen = Button(card_gl[1, 2], label = "Regenerate", buttoncolor = BG_INSET, labelcolor = SUBTXT, fontsize = 9, width = 110, tellwidth = false)
+            colsize!(card_gl, 1, Relative(0.88))
+            colsize!(card_gl, 2, Fixed(120))
+            rowsize!(card_gl, 1, Fixed(22))
+            
+            on(btn_regen.clicks) do _
+                # Reset this section to AUTO by re-applying language (pulls from report data)
+                prov_obs[] = "AUTO"
+                report.section_provenance[section_key] = "AUTO"
+                delete!(report.section_overrides, section_key)
+                set_language!(current_lang[])
+                status_text[] = "Section regenerated from structured data ($(section_key))"
+            end
+            
+            tb_row = 2
+        else
+            tb_row = 1
+        end
+        
+        Box(card_gl[tb_row, 1:2], color = BG_CARD, cornerradius = 4, strokecolor = BORDER, strokewidth = 1)
+        tb = Textbox(card_gl[tb_row, 1:2],
             stored_string = text_obs[],
             placeholder = "(click to edit)",
             fontsize = 11,
@@ -329,6 +372,14 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
         # Sync textbox → observable when user edits
         on(tb.stored_string) do val
             text_obs[] = val
+            # Mark section as MANUAL when user types
+            if section_key !== nothing && haskey(section_prov_obs, section_key)
+                if section_prov_obs[section_key][] != "MANUAL"
+                    section_prov_obs[section_key][] = "MANUAL"
+                end
+                report.section_provenance[section_key] = "MANUAL"
+                report.section_overrides[section_key] = val
+            end
         end
         # Sync observable → textbox when changed externally (e.g. language switch)
         on(text_obs) do val
@@ -350,9 +401,78 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
     colsize!(hdr_box, 2, Relative(0.30))
     rowsize!(g, r_hdr, Fixed(46))
 
+    # ── Prior Report Panel (collapsible, shown when a prior report is loaded) ──
+    r_prior = nr!()
+    prior_gl = GridLayout(g[r_prior, 1])
+    
+    # Header row with title + Use as Template button
+    prior_header_text = @lift($prior_panel_visible ? "[P] Prior Report (Vorbefund) — click 'Use as Template' to prefill sections" : "[P] Prior Report (Vorbefund) — hidden")
+    Box(prior_gl[1, 1:2], color = RGBf(0.14, 0.16, 0.22), cornerradius = 4, strokecolor = ACCENT, strokewidth = 1)
+    Label(prior_gl[1, 1], prior_header_text, fontsize = 11, font = :bold, color = ACCENT, halign = :left, padding = (12, 0, 6, 6))
+    btn_use_template = Button(prior_gl[1, 2], label = "[T] Use as Template", buttoncolor = GOLD, labelcolor = RGBf(0.1, 0.1, 0.1), fontsize = 10, width = 160, tellwidth = false)
+    colsize!(prior_gl, 1, Relative(0.85))
+    colsize!(prior_gl, 2, Fixed(170))
+    rowsize!(prior_gl, 1, Fixed(32))
+    
+    # Prior report text display (read-only textbox)
+    prior_display_text = @lift(isempty($prior_report_obs) ? "(No prior report loaded)" : $prior_report_obs)
+    Box(prior_gl[2, 1:2], color = BG_INSET, cornerradius = 4, strokecolor = BORDER, strokewidth = 1)
+    tb_prior = Textbox(prior_gl[2, 1:2],
+        stored_string = prior_display_text[],
+        placeholder = "(No prior report loaded — click 'Load Prior Report' in toolbar)",
+        fontsize = 10,
+        textcolor = SUBTXT,
+        textcolor_placeholder = SUBTXT,
+        boxcolor = BG_INSET,
+        boxcolor_focused = BG_INSET,
+        boxcolor_hover = BG_INSET,
+        bordercolor = BORDER,
+        bordercolor_focused = BORDER,
+        cursorcolor = SUBTXT,
+        width = 1680,
+        tellwidth = false)
+    on(prior_display_text) do val
+        if tb_prior.stored_string[] != val
+            tb_prior.stored_string[] = val
+            tb_prior.displayed_string[] = val
+        end
+    end
+    
+    # "Use as Template" handler — copies prior text into current report sections
+    on(btn_use_template.clicks) do _
+        txt = prior_report_obs[]
+        if isempty(txt)
+            status_text[] = "[!] No prior report loaded — use 'Load Prior Report' button first"
+            return
+        end
+        
+        # Populate all narrative sections with the prior report text as a starting template
+        lang = current_lang[]
+        is_de = lang == "DE"
+        
+        template_header = is_de ? "[VORLAGE AUS VORBEFUND — bitte anpassen]\n\n" : "[TEMPLATE FROM PRIOR REPORT — please adjust]\n\n"
+        
+        # Set each editable section with the full prior text (user refines per-section)
+        sec1_text[] = template_header * txt
+        sec6_text[] = template_header * txt
+        
+        # Mark all sections as MANUAL since they now contain template-derived content
+        for sk in section_keys
+            if haskey(section_prov_obs, sk)
+                section_prov_obs[sk][] = "MANUAL"
+                report.section_provenance[sk] = "MANUAL"
+            end
+        end
+        
+        # Sync back to report
+        _sync_edits_to_report!(report, lang, sec1_text, sec3_text, sec4_prostate, sec4_lymph, sec4_bone, sec4_visceral, sec6_text)
+        
+        status_text[] = is_de ? "Vorbefund als Vorlage uebernommen — bitte Abschnitte anpassen" : "Prior report applied as template — please adjust sections"
+    end
+
     # ── 1. Patient History ───────────────────────────────────────────────────
     add_section_header!(sec1_title)
-    add_card_text!(sec1_text)
+    add_card_text!(sec1_text; section_key = "sec1")
 
     # ── 2. Technical Parameters (Synoptic Table 1) ───────────────────────────
     add_section_header!(sec2_title)
@@ -382,7 +502,7 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
 
     # ── 3. Physiological Background ──────────────────────────────────────────
     add_section_header!(sec3_title)
-    add_card_text!(sec3_text)
+    add_card_text!(sec3_text; section_key = "sec3")
 
     # ── 4. Detailed Findings by Region ───────────────────────────────────────
     add_section_header!(sec4_title)
@@ -391,51 +511,59 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
     rowgap!(findings_grid, 8)
     colsize!(findings_grid, 1, Relative(1.0))
 
-    Box(findings_grid[1, 1], color = BG_CARD, cornerradius = 4, strokecolor = BORDER, strokewidth = 1)
-    tb_prostate = Textbox(findings_grid[1, 1],
-        stored_string = sec4_prostate[], placeholder = "(click to edit prostate findings)",
-        fontsize = 11,
-        textcolor = TXT, textcolor_placeholder = SUBTXT,
-        boxcolor = BG_INSET, boxcolor_focused = RGBf(0.20, 0.24, 0.32), boxcolor_hover = RGBf(0.17, 0.20, 0.27),
-        bordercolor = BORDER, bordercolor_focused = ACCENT, cursorcolor = TXT,
-        width = 1680, tellwidth = false)
-    on(tb_prostate.stored_string) do val; sec4_prostate[] = val; end
+    # Helper to create a findings textbox row with provenance badge + Regenerate button
+    function _make_findings_row!(grid, row_idx, text_obs, placeholder_str, sec_key)
+        sub_gl = GridLayout(grid[row_idx, 1])
+        
+        # Provenance badge row
+        prov_obs = section_prov_obs[sec_key]
+        prov_label = @lift($prov_obs == "MANUAL" ? "[M] MANUAL" : "[A] AUTO")
+        prov_color = @lift($prov_obs == "MANUAL" ? YELLOW_EDIT : SUBTXT)
+        Label(sub_gl[1, 1], prov_label, fontsize = 9, font = :bold, color = prov_color, halign = :left, padding = (8, 0, 2, 0))
+        btn_regen = Button(sub_gl[1, 2], label = "Regenerate", buttoncolor = BG_INSET, labelcolor = SUBTXT, fontsize = 9, width = 110, tellwidth = false)
+        colsize!(sub_gl, 1, Relative(0.88))
+        colsize!(sub_gl, 2, Fixed(120))
+        rowsize!(sub_gl, 1, Fixed(22))
+        
+        on(btn_regen.clicks) do _
+            prov_obs[] = "AUTO"
+            report.section_provenance[sec_key] = "AUTO"
+            delete!(report.section_overrides, sec_key)
+            set_language!(current_lang[])
+            status_text[] = "Section regenerated from structured data ($(sec_key))"
+        end
+        
+        # Textbox row
+        Box(sub_gl[2, 1:2], color = BG_CARD, cornerradius = 4, strokecolor = BORDER, strokewidth = 1)
+        tb = Textbox(sub_gl[2, 1:2],
+            stored_string = text_obs[], placeholder = placeholder_str,
+            fontsize = 11,
+            textcolor = TXT, textcolor_placeholder = SUBTXT,
+            boxcolor = BG_INSET, boxcolor_focused = RGBf(0.20, 0.24, 0.32), boxcolor_hover = RGBf(0.17, 0.20, 0.27),
+            bordercolor = BORDER, bordercolor_focused = ACCENT, cursorcolor = TXT,
+            width = 1680, tellwidth = false)
+        on(tb.stored_string) do val
+            text_obs[] = val
+            if prov_obs[] != "MANUAL"
+                prov_obs[] = "MANUAL"
+            end
+            report.section_provenance[sec_key] = "MANUAL"
+            report.section_overrides[sec_key] = val
+        end
+        # Sync observable → textbox when changed externally (e.g. language switch)
+        on(text_obs) do v
+            if tb.stored_string[] != v
+                tb.stored_string[] = v
+                tb.displayed_string[] = v
+            end
+        end
+        return tb
+    end
 
-    Box(findings_grid[2, 1], color = BG_CARD, cornerradius = 4, strokecolor = BORDER, strokewidth = 1)
-    tb_lymph = Textbox(findings_grid[2, 1],
-        stored_string = sec4_lymph[], placeholder = "(click to edit lymph node findings)",
-        fontsize = 11,
-        textcolor = TXT, textcolor_placeholder = SUBTXT,
-        boxcolor = BG_INSET, boxcolor_focused = RGBf(0.20, 0.24, 0.32), boxcolor_hover = RGBf(0.17, 0.20, 0.27),
-        bordercolor = BORDER, bordercolor_focused = ACCENT, cursorcolor = TXT,
-        width = 1680, tellwidth = false)
-    on(tb_lymph.stored_string) do val; sec4_lymph[] = val; end
-
-    Box(findings_grid[3, 1], color = BG_CARD, cornerradius = 4, strokecolor = BORDER, strokewidth = 1)
-    tb_bone = Textbox(findings_grid[3, 1],
-        stored_string = sec4_bone[], placeholder = "(click to edit bone findings)",
-        fontsize = 11,
-        textcolor = TXT, textcolor_placeholder = SUBTXT,
-        boxcolor = BG_INSET, boxcolor_focused = RGBf(0.20, 0.24, 0.32), boxcolor_hover = RGBf(0.17, 0.20, 0.27),
-        bordercolor = BORDER, bordercolor_focused = ACCENT, cursorcolor = TXT,
-        width = 1680, tellwidth = false)
-    on(tb_bone.stored_string) do val; sec4_bone[] = val; end
-
-    Box(findings_grid[4, 1], color = BG_CARD, cornerradius = 4, strokecolor = BORDER, strokewidth = 1)
-    tb_visceral = Textbox(findings_grid[4, 1],
-        stored_string = sec4_visceral[], placeholder = "(click to edit visceral findings)",
-        fontsize = 11,
-        textcolor = TXT, textcolor_placeholder = SUBTXT,
-        boxcolor = BG_INSET, boxcolor_focused = RGBf(0.20, 0.24, 0.32), boxcolor_hover = RGBf(0.17, 0.20, 0.27),
-        bordercolor = BORDER, bordercolor_focused = ACCENT, cursorcolor = TXT,
-        width = 1680, tellwidth = false)
-    on(tb_visceral.stored_string) do val; sec4_visceral[] = val; end
-
-    # Sync observables -> textboxes when language changes
-    on(sec4_prostate) do v; if tb_prostate.stored_string[] != v; tb_prostate.stored_string[] = v; tb_prostate.displayed_string[] = v; end; end
-    on(sec4_lymph)    do v; if tb_lymph.stored_string[] != v; tb_lymph.stored_string[] = v; tb_lymph.displayed_string[] = v; end; end
-    on(sec4_bone)     do v; if tb_bone.stored_string[] != v; tb_bone.stored_string[] = v; tb_bone.displayed_string[] = v; end; end
-    on(sec4_visceral) do v; if tb_visceral.stored_string[] != v; tb_visceral.stored_string[] = v; tb_visceral.displayed_string[] = v; end; end
+    tb_prostate = _make_findings_row!(findings_grid, 1, sec4_prostate, "(click to edit prostate findings)", "sec4_prostate")
+    tb_lymph    = _make_findings_row!(findings_grid, 2, sec4_lymph,    "(click to edit lymph node findings)", "sec4_lymph")
+    tb_bone     = _make_findings_row!(findings_grid, 3, sec4_bone,     "(click to edit bone findings)", "sec4_bone")
+    tb_visceral = _make_findings_row!(findings_grid, 4, sec4_visceral, "(click to edit visceral findings)", "sec4_visceral")
 
     # ── 5. Synoptic Table 2 (Findings Overview) ──────────────────────────────
     add_section_header!(sec5_title)
@@ -548,7 +676,7 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
 
     # ── 6. Conclusion & Recommendation ───────────────────────────────────────
     add_section_header!(sec6_title)
-    add_card_text!(sec6_text)
+    add_card_text!(sec6_text; section_key = "sec6")
 
     # Staging Callout Box (Direct placement without nested subgrid)
     r_callout = nr!()
@@ -618,7 +746,7 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
 
     # Apply button
     s7_row[] += 1
-    btn_apply_s7 = Button(s7_grid[s7_row[], 2], label = "✏️ Apply & Update Report ↻", fontsize = 11, width = 280, tellwidth = false)
+    btn_apply_s7 = Button(s7_grid[s7_row[], 2], label = "Apply & Update Report", fontsize = 11, width = 280, tellwidth = false)
 
     colsize!(s7_grid, 1, Fixed(200))
     colsize!(s7_grid, 2, Relative(0.35))
@@ -661,10 +789,55 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
 
         # Re-render sections with updated data
         set_language!(lang)
-        status_text[] = is_de ? "Status: Technische Parameter übernommen ✓" : "Status: Technical parameters applied ✓"
+        status_text[] = is_de ? "Status: Technische Parameter uebernommen" : "Status: Technical parameters applied"
     end
 
     # ── Button Handlers ──────────────────────────────────────────────────────
+    
+    # Load Prior Report handler
+    on(btn_prior.clicks) do _
+        @async begin
+            status_text[] = "[...] Choosing prior report file..."
+            
+            # Show native file dialog (zenity on Linux)
+            file_path = try
+                cmd = Cmd(["zenity", "--file-selection",
+                           "--title=Load Prior Report (Vorbefund)",
+                           "--file-filter=Report files (txt, docx)|*.txt *.docx *.text *.md",
+                           "--file-filter=All files|*"])
+                chomp(read(cmd, String))
+            catch
+                nothing
+            end
+            
+            if file_path === nothing || isempty(file_path)
+                status_text[] = "[CANCELLED] Prior report loading cancelled"
+                return
+            end
+            
+            status_text[] = "[...] Reading prior report: $(basename(file_path))..."
+            txt = ESR.read_prior_report(file_path)
+            
+            if isempty(txt)
+                status_text[] = "[ERR] Could not read prior report or file is empty: $(basename(file_path))"
+                return
+            end
+            
+            # Store in report and update UI
+            report.prior_report_text = txt
+            report.prior_report_path = file_path
+            prior_report_obs[] = txt
+            prior_panel_visible[] = true
+            
+            lang = current_lang[]
+            is_de = lang == "DE"
+            status_text[] = is_de ? 
+                "Vorbefund geladen: $(basename(file_path)) ($(length(txt)) Zeichen)" :
+                "Prior report loaded: $(basename(file_path)) ($(length(txt)) chars)"
+            println("[E-PSMA] Prior report loaded from $file_path ($(length(txt)) chars)")
+        end
+    end
+
     on(btn_export.clicks) do _
         @async begin
             lang = current_lang[]

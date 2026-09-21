@@ -19,7 +19,8 @@ export EPSMALesionRow,
        register_refresh_callback!,
        enrich_with_llm!,
        export_to_docx,
-       to_dict
+       to_dict,
+       read_prior_report
 
 # ── Data Structures ──────────────────────────────────────────────────────────
 Base.@kwdef struct EPSMALesionRow
@@ -105,9 +106,27 @@ Base.@kwdef mutable struct EPSMAReport
     tmtv_cc::Float64 = 0.0
     tmtv_delta_pct::Float64 = 0.0
     overall_recip::String = "BASELINE (Initial Staging)"
+    
+    # Longitudinal Comparison Section (only populated when >1 TP available)
+    comparison_section_en::String = ""
+    comparison_section_de::String = ""
+    
+    # Negative Statements Summary (consolidated list of uninvolved body regions)
+    negative_statements_en::String = ""
+    negative_statements_de::String = ""
+    
     conclusion_en::String = ""
     conclusion_de::String = ""
     default_lang::String = "EN"
+    
+    # Prior report reference (loaded from file for comparison / templating)
+    prior_report_text::String = ""
+    prior_report_path::String = ""
+    
+    # Section-level edit tracking: maps section key → overridden text
+    section_overrides::Dict{String, String} = Dict{String, String}()
+    # Section-level provenance: maps section key → "AUTO" or "MANUAL"
+    section_provenance::Dict{String, String} = Dict{String, String}()
 end
 
 # ── Utility Helpers ──────────────────────────────────────────────────────────
@@ -541,12 +560,293 @@ resolve_anatomical_location(lid::Integer, state::Any, tp_idx::Integer=0, _MEH=no
     resolve_anatomical_location(Int(lid), state isa AbstractDict ? state : nothing, Int(tp_idx), _MEH, LMW)
 
 
+# ── Longitudinal Comparison Section ──────────────────────────────────────────
+"""
+    generate_comparison_section(current_report, prior_report, prior_tp_label) -> (en, de)
+
+Generate a narrative comparison paragraph between the current TP report and the
+most recent prior TP report. Returns (english_text, german_text).
+Only called when >1 TP is available. Lists:
+  - TMTV change
+  - New lesions
+  - Resolved lesions (present in prior but absent in current)
+  - Lesions with significant change (>20% SUVmax or >20% volume)
+"""
+function generate_comparison_section(current::EPSMAReport, prior::EPSMAReport, prior_label::String)::Tuple{String, String}
+    parts_en = String[]
+    parts_de = String[]
+
+    # Header
+    push!(parts_en, "=== Comparison with Prior Study ($prior_label, $(prior.study_date)) ===")
+    push!(parts_de, "=== Vergleich mit Voruntersuchung ($prior_label, $(prior.study_date)) ===")
+
+    # TMTV comparison
+    tmtv_curr = current.tmtv_cc
+    tmtv_prior = prior.tmtv_cc
+    if tmtv_prior > 0.001
+        tmtv_delta_pct = round((tmtv_curr - tmtv_prior) / tmtv_prior * 100.0, digits=1)
+        sgn = tmtv_delta_pct >= 0 ? "+" : ""
+        push!(parts_en, "• Total Molecular Tumor Volume (TMTV): $(round(tmtv_curr, digits=2)) cc (prior: $(round(tmtv_prior, digits=2)) cc, change: $(sgn)$(tmtv_delta_pct)%).")
+        push!(parts_de, "• Gesamtes molekulares Tumorvolumen (TMTV): $(round(tmtv_curr, digits=2)) cc (Voruntersuchung: $(round(tmtv_prior, digits=2)) cc, Veränderung: $(sgn)$(tmtv_delta_pct)%).")
+    else
+        push!(parts_en, "• Total Molecular Tumor Volume (TMTV): $(round(tmtv_curr, digits=2)) cc (prior: no measurable tumor volume).")
+        push!(parts_de, "• Gesamtes molekulares Tumorvolumen (TMTV): $(round(tmtv_curr, digits=2)) cc (Voruntersuchung: kein messbares Tumorvolumen).")
+    end
+
+    # Build ID→row maps
+    curr_by_id = Dict{Int, EPSMALesionRow}(r.id => r for r in current.synoptic_rows)
+    prior_by_id = Dict{Int, EPSMALesionRow}(r.id => r for r in prior.synoptic_rows)
+    curr_ids = Set(keys(curr_by_id))
+    prior_ids = Set(keys(prior_by_id))
+
+    # New lesions (in current but not in prior)
+    new_ids = sort(collect(setdiff(curr_ids, prior_ids)))
+    if !isempty(new_ids)
+        push!(parts_en, "\n• New Lesions ($(length(new_ids))):")
+        push!(parts_de, "\n• Neue Läsionen ($(length(new_ids))):")
+        for nid in new_ids
+            r = curr_by_id[nid]
+            push!(parts_en, "  - $(r.location): $(r.psma_q), $(r.size_str)")
+            push!(parts_de, "  - $(r.location): $(r.psma_q), $(r.size_str)")
+        end
+    else
+        push!(parts_en, "\n• No new lesions identified.")
+        push!(parts_de, "\n• Keine neuen Läsionen nachweisbar.")
+    end
+
+    # Resolved lesions (in prior but not in current)
+    resolved_ids = sort(collect(setdiff(prior_ids, curr_ids)))
+    if !isempty(resolved_ids)
+        push!(parts_en, "\n• Resolved Lesions ($(length(resolved_ids))):")
+        push!(parts_de, "\n• Nicht mehr nachweisbare Läsionen ($(length(resolved_ids))):")
+        for rid in resolved_ids
+            r = prior_by_id[rid]
+            push!(parts_en, "  - $(r.location) (prior: $(r.psma_q), $(r.size_str)) — no longer detectable.")
+            push!(parts_de, "  - $(r.location) (Voruntersuchung: $(r.psma_q), $(r.size_str)) — nicht mehr nachweisbar.")
+        end
+    else
+        push!(parts_en, "\n• No previously detected lesions have resolved.")
+        push!(parts_de, "\n• Keine zuvor nachgewiesenen Läsionen rückläufig.")
+    end
+
+    # Lesions with significant change (>20% SUVmax or >20% volume)
+    persisting_ids = sort(collect(intersect(curr_ids, prior_ids)))
+    sig_changed_en = String[]
+    sig_changed_de = String[]
+    for pid in persisting_ids
+        rc = curr_by_id[pid]
+        rp = prior_by_id[pid]
+        suv_delta_pct = rp.suv_max > 0.01f0 ? (Float64(rc.suv_max) - Float64(rp.suv_max)) / Float64(rp.suv_max) * 100.0 : 0.0
+        vol_delta_pct = rp.volume_cc > 0.001 ? (rc.volume_cc - rp.volume_cc) / rp.volume_cc * 100.0 : 0.0
+        if abs(suv_delta_pct) > 20.0 || abs(vol_delta_pct) > 20.0
+            sgn_s = suv_delta_pct >= 0 ? "+" : ""
+            sgn_v = vol_delta_pct >= 0 ? "+" : ""
+            push!(sig_changed_en, "  - $(rc.location): SUVmax $(round(rp.suv_max, digits=1)) → $(round(rc.suv_max, digits=1)) ($(sgn_s)$(round(suv_delta_pct, digits=1))%), Vol $(round(rp.volume_cc, digits=2)) → $(round(rc.volume_cc, digits=2)) cc ($(sgn_v)$(round(vol_delta_pct, digits=1))%)")
+            push!(sig_changed_de, "  - $(rc.location): SUVmax $(round(rp.suv_max, digits=1)) → $(round(rc.suv_max, digits=1)) ($(sgn_s)$(round(suv_delta_pct, digits=1))%), Vol $(round(rp.volume_cc, digits=2)) → $(round(rc.volume_cc, digits=2)) cc ($(sgn_v)$(round(vol_delta_pct, digits=1))%)")
+        end
+    end
+    if !isempty(sig_changed_en)
+        push!(parts_en, "\n• Lesions with Significant Change (>20% SUVmax or Volume, $(length(sig_changed_en))):")
+        push!(parts_de, "\n• Läsionen mit signifikanter Veränderung (>20% SUVmax oder Volumen, $(length(sig_changed_de))):")
+        append!(parts_en, sig_changed_en)
+        append!(parts_de, sig_changed_de)
+    else
+        if !isempty(persisting_ids)
+            push!(parts_en, "\n• All persisting lesions show stable disease (<20% change in SUVmax and volume).")
+            push!(parts_de, "\n• Alle persistierenden Läsionen zeigen stabile Erkrankung (<20% Veränderung von SUVmax und Volumen).")
+        end
+    end
+
+    # Overall RECIP assessment
+    push!(parts_en, "\n• Overall Response Assessment (RECIP): $(current.overall_recip)")
+    push!(parts_de, "\n• Gesamtbeurteilung des Therapieansprechens (RECIP): $(current.overall_recip)")
+
+    return (join(parts_en, "\n"), join(parts_de, "\n"))
+end
+
+# ── Negative Statements from Structured Data ─────────────────────────────────
+"""
+    generate_negative_statements(synoptic_rows, has_t, has_n, has_m1a, has_m1b, has_m1c) -> (en, de)
+
+Generate consolidated negative statements for body regions without findings.
+Checks which miTNM categories have NO accepted lesions and produces structured
+negative assertions in both English and German for clinical reporting.
+"""
+function generate_negative_statements(synoptic_rows::Vector{EPSMALesionRow},
+                                      has_t::Bool, has_n::Bool,
+                                      has_m1a::Bool, has_m1b::Bool, has_m1c::Bool)::Tuple{String, String}
+    neg_en = String[]
+    neg_de = String[]
+
+    # 1. Primary / Local recurrence
+    if !has_t
+        push!(neg_en, "• No evidence of PSMA-avid local tumor / recurrence in the prostate or prostate bed.")
+        push!(neg_de, "• Kein Hinweis auf ein PSMA-positives lokales Rezidiv oder Primärtumor in der Prostata bzw. im Prostatabett.")
+    end
+
+    # 2. Regional lymph nodes
+    if !has_n
+        push!(neg_en, "• No pathological pelvic lymph node involvement detected.")
+        push!(neg_de, "• Kein pathologischer pelviner Lymphknotenbefall nachweisbar.")
+    end
+
+    # 3. Extra-pelvic lymph nodes
+    if !has_m1a
+        push!(neg_en, "• No PSMA-avid extra-pelvic or retroperitoneal lymph node metastases.")
+        push!(neg_de, "• Keine PSMA-positiven extra-pelvinen oder retroperitonealen Lymphknotenmetastasen nachweisbar.")
+    end
+
+    # 4. Osseous metastases
+    if !has_m1b
+        push!(neg_en, "• No PSMA-avid osseous metastases detected in axial or appendicular skeleton.")
+        push!(neg_de, "• Kein Nachweis PSMA-positiver ossärer Filiae im Achsen- oder Extremitätenskelett.")
+    end
+
+    # 5. Visceral metastases
+    if !has_m1c
+        push!(neg_en, "• No PSMA-avid visceral organ metastases (liver, lungs, brain, adrenals unremarkable).")
+        push!(neg_de, "• Kein Nachweis PSMA-positiver viszeraler Metastasen (Leber, Lunge, ZNS, Nebennieren unauffällig).")
+    end
+
+    # If everything is negative (no lesions at all)
+    if isempty(synoptic_rows)
+        pushfirst!(neg_en, "[No PSMA-avid prostate cancer lesions identified in this examination.]")
+        pushfirst!(neg_de, "[In dieser Untersuchung wurden keine PSMA-positiven Prostatakarzinom-Läsionen nachgewiesen.]")
+    end
+
+    return (join(neg_en, "\n"), join(neg_de, "\n"))
+end
+
 # ── Automatic Report Aggregation ─────────────────────────────────────────────
 """
     build_epsma_data(tp_idx::Int; lang="EN") -> EPSMAReport
 
 Aggregates all metadata, background references, quantitative metrics, and longitudinal trajectories
 into a structured E-PSMA report object conforming to the EANM v1.0 consensus.
+function _extract_dicom_tech_params(_MEH, LMW, db)
+
+    base = EPSMATechnicalParams()
+
+    if _MEH !== nothing
+
+        meta = _MEH.global_dicom_metadata[]
+
+        m_str = string(meta)
+
+        
+
+        # Very rough fallback parsing if full schema not known
+
+        tracer = "(not specified)"
+
+        if occursin("18F", m_str) || occursin("DCFPyL", m_str) || occursin("PSMA-1007", m_str)
+
+            tracer = occursin("DCFPyL", m_str) ? "[18F]DCFPyL" : "[18F]PSMA-1007"
+
+        elseif occursin("68Ga", m_str) || occursin("Ga-68", m_str) || occursin("Ga-PSMA", m_str)
+
+            tracer = "[68Ga]Ga-PSMA-11"
+
+        end
+
+        
+
+        act = "(not specified)"
+
+        m_act = match(r"RadionuclideTotalDose.*?([0-9]+[.]?[0-9]*e?[+-]?[0-9]*)", m_str)
+
+        if m_act !== nothing
+
+            val = parse(Float64, m_act.captures[1])
+
+            act = string(round(Int, val / 1000000)) * " MBq"
+
+        end
+
+        
+
+        acq = "(not specified)"
+
+        if occursin("ManufacturerModelName", m_str)
+
+            m_model = match(r"ManufacturerModelName.*?:.*?"([^"]+)"", m_str)
+
+            if m_model !== nothing
+
+                acq = m_model.captures[1] * " PET/CT"
+
+            end
+
+        end
+
+        
+
+        recon = "(not specified)"
+
+        if occursin("ReconstructionMethod", m_str)
+
+            m_recon = match(r"ReconstructionMethod.*?:.*?"([^"]+)"", m_str)
+
+            if m_recon !== nothing
+
+                recon = m_recon.captures[1]
+
+            end
+
+        end
+
+        
+
+        base = EPSMATechnicalParams(
+
+            radiotracer = tracer,
+
+            injected_activity = act,
+
+            uptake_time = "(not specified)",
+
+            acquisition_type = acq != "(not specified)" ? acq : recon,
+
+            ct_protocol = "(not specified)",
+
+            contrast = "(not specified)",
+
+            diuretic = "(not specified)"
+
+        )
+
+    end
+
+    
+
+    db_tracer = (LMW !== nothing && haskey(db, "Patient_Clinical_Info")) ? get(db["Patient_Clinical_Info"], "Radioligand", "(not specified)") : "(not specified)"
+
+    if db_tracer != "(not specified)" && db_tracer != ""
+
+        base = EPSMATechnicalParams(
+
+            radiotracer = db_tracer,
+
+            injected_activity = base.injected_activity,
+
+            uptake_time = base.uptake_time,
+
+            acquisition_type = base.acquisition_type,
+
+            ct_protocol = base.ct_protocol,
+
+            contrast = base.contrast,
+
+            diuretic = base.diuretic
+
+        )
+
+    end
+
+    return base
+
+end
+
 """
 function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
     _MEH = _get_meh()
@@ -1187,6 +1487,44 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
         !isempty(desc_de) ? desc_de : ""
     end
 
+    # ── Generate Negative Statements (consolidated uninvolved regions) ──
+    (neg_stmts_en, neg_stmts_de) = generate_negative_statements(synoptic_rows, has_t, has_n, has_m1a, has_m1b, has_m1c)
+
+    # ── Generate Longitudinal Comparison Section (only when prior TP available) ──
+    comp_en = ""
+    comp_de = ""
+    tmtv_delta = 0.0
+    if has_prior_studies
+        prior_tp = maximum(all_prior_tp_indices)
+        prior_label = _MEH !== nothing ? get(_MEH.tp_labels, prior_tp, "PET TP $prior_tp") : "PET TP $prior_tp"
+        # Check if the prior TP report is already cached; if not, build it
+        if haskey(_report_cache, prior_tp)
+            prior_report = _report_cache[prior_tp]
+        else
+            try
+                prior_report = build_epsma_data(prior_tp; lang=lang)
+            catch e
+                @warn "[E-PSMA] Failed to build prior TP $prior_tp report for comparison" exception=e
+                prior_report = nothing
+            end
+        end
+        if prior_report !== nothing
+            # Build a temporary current report object to pass to comparison
+            temp_current = EPSMAReport(
+                synoptic_rows = synoptic_rows,
+                tmtv_cc = total_tmtv_cc,
+                overall_recip = overall_recip,
+                study_date = Dates.format(Dates.today(), "yyyy-mm-dd")
+            )
+            (comp_en, comp_de) = generate_comparison_section(temp_current, prior_report, prior_label)
+            # Compute TMTV delta percentage for the report struct
+            if prior_report.tmtv_cc > 0.001
+                tmtv_delta = round((total_tmtv_cc - prior_report.tmtv_cc) / prior_report.tmtv_cc * 100.0, digits=1)
+            end
+            @info "[E-PSMA] Generated comparison section vs prior TP $prior_tp"
+        end
+    end
+
     return EPSMAReport(
         patient_id = patient_id,
         clinical_profile = clinical_profile,
@@ -1195,9 +1533,7 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
         tp_label = tp_label,
         modality = modality,
         study_date = Dates.format(Dates.today(), "yyyy-mm-dd"),
-        tech_params = EPSMATechnicalParams(
-            radiotracer = (LMW !== nothing && haskey(db, "Patient_Clinical_Info")) ? get(db["Patient_Clinical_Info"], "Radioligand", "(not specified)") : "(not specified)"
-        ),
+        tech_params = _extract_dicom_tech_params(_MEH, LMW, db),
         background_suv = bg,
         biodistribution_text_en = "(Please enter biodistribution statement.)",
         biodistribution_text_de = "(Bitte Biodistributionsbeschreibung eingeben.)",
@@ -1225,8 +1561,12 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
         skeletal_burden_de = burden_de,
         final_mitnm = final_mitnm,
         tmtv_cc = total_tmtv_cc,
-        tmtv_delta_pct = 0.0,
+        tmtv_delta_pct = tmtv_delta,
         overall_recip = overall_recip,
+        comparison_section_en = comp_en,
+        comparison_section_de = comp_de,
+        negative_statements_en = neg_stmts_en,
+        negative_statements_de = neg_stmts_de,
         conclusion_en = concl_en,
         conclusion_de = concl_de
     )
@@ -1434,9 +1774,68 @@ function to_dict(rep::EPSMAReport)::Dict{String, Any}
         "tmtv_cc" => rep.tmtv_cc,
         "tmtv_delta_pct" => rep.tmtv_delta_pct,
         "overall_recip" => rep.overall_recip,
+        "comparison_section_en" => rep.comparison_section_en,
+        "comparison_section_de" => rep.comparison_section_de,
+        "negative_statements_en" => rep.negative_statements_en,
+        "negative_statements_de" => rep.negative_statements_de,
         "conclusion_en" => rep.conclusion_en,
-        "conclusion_de" => rep.conclusion_de
+        "conclusion_de" => rep.conclusion_de,
+        "prior_report_text" => rep.prior_report_text,
+        "prior_report_path" => rep.prior_report_path,
+        "section_overrides" => rep.section_overrides,
+        "section_provenance" => rep.section_provenance
     )
+end
+
+# ── Prior Report Loading ─────────────────────────────────────────────────────
+
+"""
+    _read_docx_text(path::AbstractString) -> String
+
+Extracts plain text from a .docx file using python3 + python-docx.
+Falls back to empty string on error.
+"""
+function _read_docx_text(path::AbstractString)::String
+    py_script = """
+import sys, docx
+doc = docx.Document(sys.argv[1])
+for p in doc.paragraphs:
+    print(p.text)
+"""
+    try
+        py_bin = Sys.iswindows() ? "python" : "python3"
+        return chomp(read(`$py_bin -c $py_script $path`, String))
+    catch e
+        @warn "[E-PSMA] Failed to read DOCX file" path=path exception=e
+        return ""
+    end
+end
+
+"""
+    read_prior_report(path::AbstractString) -> String
+
+Reads a prior report from a .txt or .docx file and returns its text content.
+Supported formats: .txt, .docx
+"""
+function read_prior_report(path::AbstractString)::String
+    if !isfile(path)
+        @warn "[E-PSMA] Prior report file not found" path=path
+        return ""
+    end
+    ext = lowercase(splitext(path)[2])
+    if ext == ".docx"
+        return _read_docx_text(path)
+    elseif ext in (".txt", ".text", ".md")
+        try
+            return read(path, String)
+        catch e
+            @warn "[E-PSMA] Failed to read text file" path=path exception=e
+            return ""
+        end
+    else
+        @warn "[E-PSMA] Unsupported prior report format (use .txt or .docx)" path=path ext=ext
+        return ""
+    end
 end
 
 # ── Export to Word (.docx) ───────────────────────────────────────────────────
