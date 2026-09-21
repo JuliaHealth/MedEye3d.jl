@@ -1701,6 +1701,27 @@ function precompute_metrics_for_tp!(tp_idx::Int)
     end
 end
 
+function get_cached_organ_name(sid::Int, tp::Int)
+    get!(_organ_classification_cache, (sid, tp)) do
+        entry = lock(_MEH._tp_cache_lock) do
+            get(_MEH.tp_data_cache, tp, nothing)
+        end
+        entry === nothing && return ""
+        entry.anatomy === nothing && return ""
+        try
+            organ = LA.classify_and_pick_best_organ(entry.mask_i16, entry.anatomy, _MEH.global_ts_names[], sid)
+            organ === nothing && return ""
+            formatted = try LA.lookup_anatomy(organ) catch; "" end
+            if isempty(formatted) || formatted == organ
+                return replace(organ, "_" => " ")
+            end
+            return formatted
+        catch
+            return ""
+        end
+    end
+end
+
 """
     format_match_analysis(result::MatchAnalysisResult) -> String
 
@@ -1941,6 +1962,7 @@ export connect_channel!, MetadataWindowResult
 const _is_autosaving = Ref(false)
 const _autosave_pending = Ref(false)
 const _cached_lesion_ids = Dict{Int, Vector{Int}}()
+const _organ_classification_cache = Dict{Tuple{Int,Int}, String}()
 
 # ─── Main window ─────────────────────────────────────────────────────────────
 function create_metadata_window(
@@ -2663,13 +2685,53 @@ function create_metadata_window(
             ["(none)"]
         else
             map(filtered_l_ints) do sid
-                d_name = if haskey(seg_names, sid) && !isempty(seg_names[sid])
-                    seg_names[sid]
-                elseif haskey(_MEH.global_organ_mapping[], sid)
-                    _MEH.global_organ_mapping[][sid]
-                else
-                    "Segment_$sid"
+                d_name = ""
+                
+                # 1. Try seg_names, but skip generic placeholders
+                if haskey(seg_names, sid) && !isempty(seg_names[sid])
+                    sn = seg_names[sid]
+                    if !startswith(sn, "unknown_") && !startswith(sn, "Segment") && !startswith(sn, "artificial_")
+                        d_name = sn
+                    end
                 end
+                
+                # 2. Try per-TP organ mapping (from preprocessing)
+                if isempty(d_name)
+                    tp_organs = get(_MEH.tp_organ_mapping, tp, Dict{Int,String}())
+                    if haskey(tp_organs, sid)
+                        raw = tp_organs[sid]
+                        d_name = try LA.lookup_anatomy(raw) catch; "" end
+                        if isempty(d_name) || d_name == raw
+                            d_name = replace(raw, "_" => " ")
+                        end
+                    end
+                end
+                
+                # 3. Try global_organ_mapping (legacy baseline fallback)
+                if isempty(d_name) && haskey(_MEH.global_organ_mapping[], sid)
+                    raw = _MEH.global_organ_mapping[][sid]
+                    d_name = try LA.lookup_anatomy(raw) catch; replace(raw, "_" => " ") end
+                end
+                
+                # 4. Try user-saved BaseAnatomy from lesion_db
+                if isempty(d_name)
+                    lid_data = get(db, string(sid), Dict{String,Any}())
+                    saved_anat = get(lid_data, "BaseAnatomy", "")
+                    if !isempty(saved_anat) && saved_anat != "Unknown" && saved_anat != "(select)"
+                        d_name = saved_anat
+                    end
+                end
+                
+                # 5. For NEW manual lesions: classify on-the-fly using atlas  
+                if isempty(d_name)
+                    d_name = try get_cached_organ_name(sid, tp) catch; "" end
+                end
+                
+                # 6. Ultimate fallback
+                if isempty(d_name)
+                    d_name = "Lesion $sid"
+                end
+                
                 "$sid: $d_name"
             end
         end
@@ -4243,12 +4305,25 @@ function create_metadata_window(
                 opt
             end
             p = tryparse(Int, ns)
-            p !== nothing && (max_id = max(max_id, p))
+            # Skip sweep IDs (≥ 1000) — those are synthetic match group entries
+            p !== nothing && p < 1000 && (max_id = max(max_id, p))
         end
         for k in keys(lesion_db[])
             p = parse_lesion_id(k)
-            p !== nothing && (max_id = max(max_id, p))
+            p !== nothing && p < 1000 && (max_id = max(max_id, p))
         end
+        # Also check actual mask for highest real segment ID
+        try
+            entry = lock(_MEH._tp_cache_lock) do
+                get(_MEH.tp_data_cache, _MEH.current_tp[], nothing)
+            end
+            if entry !== nothing && entry.mask_i16 !== nothing
+                mask_max = Int(maximum(entry.mask_i16))
+                if mask_max > 0 && mask_max < 1000
+                    max_id = max(max_id, mask_max)
+                end
+            end
+        catch; end
         new_id = max_id + 1
         
         # Auto-name from anatomy atlas at the CURRENT cursor position
@@ -4336,17 +4411,23 @@ function create_metadata_window(
         btn_paint.buttoncolor[] = GRN; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BG_PNL
         empty!(_MASK_IDS_CACHE)
         empty!(_cached_lesion_ids)
+        empty!(_organ_classification_cache)
         # For a NEW lesion, do NOT send SyncLesionEvent — it has no voxels yet,
         # so the centroid lookup defaults to the volume center (jumping to middle slice).
         # Instead: activate painting and show ALL lesion IDs so newly painted voxels are visible.
         put!(channel, PaintValEvent(new_id, true))
         put!(channel, ShowSingleLesionEvent(0))  # show all lesions (0 = show all)
+        # Force texture re-upload via zero-scroll to ensure painted voxels are visible
+        put!(channel, MakieEvents.ScrollEvent(0, 1))
+        println("[NEW LESION] Created lesion $new_id, paint mode active, val=$new_id")
+        flush(stdout)
     end
     on(btn_paint.clicks) do _
         current_paint_mode[] = :paint
         btn_paint.buttoncolor[] = GRN; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BG_PNL
         empty!(_MASK_IDS_CACHE)
         empty!(_cached_lesion_ids)
+        empty!(_organ_classification_cache)
         val = (p = parse_lesion_id(active_lesion_id[])) !== nothing ? p : 1
         put!(channel, PaintValEvent(val, true))
         _MEH.set_workflow_state!(_MEH.ScientificWorkflow.WF_EDIT_MASK)
@@ -4356,6 +4437,7 @@ function create_metadata_window(
         btn_paint.buttoncolor[] = BG_PNL; btn_erase.buttoncolor[] = RED_BTN; btn_view_mode.buttoncolor[] = BG_PNL
         empty!(_MASK_IDS_CACHE)
         empty!(_cached_lesion_ids)
+        empty!(_organ_classification_cache)
         put!(channel, PaintValEvent(0, true))
         _MEH.set_workflow_state!(_MEH.ScientificWorkflow.WF_EDIT_MASK)
     end
@@ -4591,7 +4673,7 @@ function create_metadata_window(
                 @async begin
                     try
                         cv_active[] || return
-                        for elem in contents(map_grid); delete!(elem); end
+                        try; empty!(map_grid); catch e; @warn "map_grid cleanup: $e"; end
                         
                         lbl_map_left.text[] = "Current TP: $left_lbl ($left_node)"
                         lbl_map_right.text[] = "Compare TP: $right_lbl ($right_node)"
@@ -4704,6 +4786,7 @@ function create_metadata_window(
     on(btn_refresh_map.clicks) do _
         empty!(_MASK_IDS_CACHE)
         empty!(_cached_lesion_ids)
+        empty!(_organ_classification_cache)
         _build_match_display!()
     end
     

@@ -46,7 +46,20 @@ using ...ScientificWorkflow
 # --- Application State Objects ---
 const _clinical_phase = Ref{ScientificWorkflow.ClinicalPhase}(ScientificWorkflow.PHASE_READ)
 const _case_profile = Ref{ScientificWorkflow.CaseProfile}(ScientificWorkflow.PROFILE_GENERAL)
+const _workflow_state = Ref{ScientificWorkflow.AnnotationWorkflowState}(ScientificWorkflow.WF_LESION_REVIEW)
 const global_dicom_metadata = Ref{Dict{String,Any}}(Dict{String,Any}())
+
+function get_workflow_state()
+    return _workflow_state[]
+end
+
+function set_workflow_state!(state::ScientificWorkflow.AnnotationWorkflowState)
+    old = _workflow_state[]
+    if old != state
+        _workflow_state[] = state
+        @debug "[WORKFLOW] State changed: $old → $state"
+    end
+end
 
 function get_clinical_phase()
     return _clinical_phase[]
@@ -156,6 +169,7 @@ struct InferenceJob
     main_channel::Any  # Channel{Any} or ChannelProxy (parallel startup)
     scribble_coords::Vector{Vector{Int}}  # Pre-extracted 0-indexed [x,y,z] coords for nnInteractive fast path
     negative_coords::Vector{Vector{Int}}  # Negative points for nnInteractive
+    spacing::Tuple{Float64,Float64,Float64}  # Real CT voxel spacing for correct AI model behavior
 end
 
 const inference_queue = Channel{InferenceJob}(8)
@@ -181,11 +195,11 @@ function start_inference_worker()
                     if !isempty(job.scribble_coords)
                         mask = InferenceClient.run_nninteractive(
                             job.ct_vol, job.pet_vol, job.scribble_coords, job.negative_coords,
-                            job.cx, job.cy, job.cz)
+                            job.cx, job.cy, job.cz; spacing=job.spacing)
                     else
                         mask = InferenceClient.run_nninteractive(
                             job.ct_vol, job.pet_vol, job.points_vol,
-                            job.cx, job.cy, job.cz)
+                            job.cx, job.cy, job.cz; spacing=job.spacing)
                     end
                 elseif job.algorithm == "HELPNet (AI)"
                     mask = InferenceClient.run_helpnet_inference(
@@ -596,7 +610,7 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
                 textSpec.allowedIDs = Float32[]
                 T_mm = eltype(textSpec.minAndMaxValue)
                 if !is_single_lesion_mode[]
-                    textSpec.minAndMaxValue = T_mm.([1, 1000])
+                    textSpec.minAndMaxValue = T_mm.([1, 10000])
                 else
                     textSpec.minAndMaxValue = T_mm.([data.lesion_id, data.lesion_id])
                 end
@@ -1065,11 +1079,11 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                     if is_single_lesion_mode[] && target_id > 0
                         textSpec.minAndMaxValue = T_mm.([target_id, target_id])
                     else
-                        textSpec.minAndMaxValue = T_mm.([1, 1000])
+                        textSpec.minAndMaxValue = T_mm.([1, 10000])
                     end
                 end
             elseif textSpec.name == "manualModif"
-                textSpec.minAndMaxValue = Float32.([0.0, 1000.0])
+                textSpec.minAndMaxValue = Float32.([0.0, 10000.0])
                 textSpec.allowedIDs = Float32[]
             end
         end
@@ -1968,10 +1982,12 @@ const volume_z_size = Ref(0)
 const anatomy_labels_cache = Dict{Int, Dict{Int,String}}()
 # Per-TP segment / lesion names from HDF5 scene hierarchy: tp_index -> Dict{Int, String}(lesion_id -> original_name)
 const tp_segment_names = Dict{Int, Dict{Int, String}}()
+# Per-TP organ mapping: tp_index -> Dict{Int, String}(lesion_id -> organ_name)
+const tp_organ_mapping = Dict{Int, Dict{Int, String}}()
 
 export tp_data_cache, _tp_cache_lock, _hdf5_io_lock, bone_subsegments_cache, lesion_centroids_cache, global_bone_atlas, global_organ_mapping, current_tp_index, tp_labels, tp_descriptions, tp_english_descriptions
 export _m2_crosshair_sync, compare_mode, compare_right_tp, tp_switched, get_node_name_for_tp, tp_node_names, _m2_reference_tp
-export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, h5_path_ref, tp_modalities, volume_z_size, anatomy_labels_cache, tp_segment_names
+export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, h5_path_ref, tp_modalities, volume_z_size, anatomy_labels_cache, tp_segment_names, tp_organ_mapping
 export organ_mapping_updated
 
 
@@ -2374,67 +2390,28 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
             active_id = 1
         end
         
-        # Snapshot panel scroll references for async scribble search
-        panel_snapshots = [
-            (p_idx,
-             !isempty(st.textureToModifyVec) ? st.textureToModifyVec[1].name : "NONE",
-             st.valueForMasToSet.value,
-             [(dat.name, dat.dat) for dat in st.onScrollData.dataToScroll])
-            for (p_idx, st) in enumerate(stateObjects)
-        ]
-        
         algo = data.algorithm
         channel = data.channel
         
         # Execute heavy voxel scanning & job queuing asynchronously so consumer / GUI NEVER block
         Threads.@spawn begin
             try
-                painted_pts = CartesianIndex{3}[]
-                negative_pts = CartesianIndex{3}[]
-                for (p_idx, active_paint_tex, brush_val, dat_list) in panel_snapshots
-                    for (d_name, d_dat) in dat_list
-                        if d_name == active_paint_tex || d_name == "manualModif"
-                            is_manual = d_name == "manualModif"
-                            T_elem = eltype(d_dat)
-                            p = if is_manual
-                                findall(d_dat .> 0)
-                            else
-                                v_act = round(T_elem, active_id)
-                                v_set = round(T_elem, brush_val)
-                                findall((d_dat .== v_act) .| (d_dat .== v_set))
-                            end
-                            n_p = if is_manual
-                                findall(d_dat .< 0)
-                            else
-                                v_act_neg = round(T_elem, -active_id)
-                                v_set_neg = round(T_elem, -brush_val)
-                                findall((d_dat .== v_act_neg) .| (d_dat .== v_set_neg))
-                            end
-                            if !isempty(p)
-                                @debug "[reactToAddAutoPet] Found $(length(p)) painted voxels for lesion $active_id in panel $p_idx $(d_name)"
-                                if p_idx == 3 # Sagittal (Y, Z, X) -> Canonical (X, Y, Z)
-                                    append!(painted_pts, [CartesianIndex(idx[3], idx[1], idx[2]) for idx in p])
-                                elseif p_idx == 4 # Coronal (X, Z, Y) -> Canonical (X, Y, Z)
-                                    append!(painted_pts, [CartesianIndex(idx[1], idx[3], idx[2]) for idx in p])
-                                else # Axial (1, 2, 5) -> Canonical (X, Y, Z)
-                                    append!(painted_pts, p)
-                                end
-                            end
-                            if !isempty(n_p)
-                                @debug "[reactToAddAutoPet] Found $(length(n_p)) negative voxels for lesion $active_id in panel $p_idx $(d_name)"
-                                if p_idx == 3 # Sagittal (Y, Z, X) -> Canonical (X, Y, Z)
-                                    append!(negative_pts, [CartesianIndex(idx[3], idx[1], idx[2]) for idx in n_p])
-                                elseif p_idx == 4 # Coronal (X, Z, Y) -> Canonical (X, Y, Z)
-                                    append!(negative_pts, [CartesianIndex(idx[1], idx[3], idx[2]) for idx in n_p])
-                                else # Axial (1, 2, 5) -> Canonical (X, Y, Z)
-                                    append!(negative_pts, n_p)
-                                end
-                            end
-                        end
-                    end
+                # Extract scribbles directly from panel 1's mask (seg_vol) —
+                # the one 3D array with integer lesion IDs.
+                # Only voxels matching active_id are user-painted scribbles.
+                if seg_vol === nothing
+                    set_ai_status!("[Error] No segmentation mask found for scribble extraction.")
+                    return
                 end
-                unique!(painted_pts)
-                unique!(negative_pts)
+                
+                T_elem = eltype(seg_vol)
+                v_act = round(T_elem, active_id)
+                v_neg = round(T_elem, -active_id)
+                
+                painted_pts = findall(seg_vol .== v_act)
+                negative_pts = findall(seg_vol .== v_neg)
+                
+                println("[AI-SCRIBBLE] seg_vol active_id=$active_id: $(length(painted_pts)) pos, $(length(negative_pts)) neg voxels"); flush(stdout)
                 
                 if isempty(painted_pts)
                     msg = "No painted scribbles found for AI inference. Paint scribbles on the lesion first."
@@ -2464,10 +2441,18 @@ function reactToAddAutoPet(data::AddAutoPetEvent, stateObjects::Vector{StateData
                 set_ai_status!("[Preparing] inference ($(algo))...")
                 @debug "Queuing $(algo) inference job (seed=$cx,$cy,$cz, lesion=$active_id, $(length(painted_pts)) painted points, $(length(negative_pts)) negative points)..."
                 
+                # Extract real voxel spacing from scroll dims (critical for nnInteractive autozoom)
+                ct_spacing = try
+                    tp1_state.onScrollData.dataToScrollDims.voxelSize
+                catch
+                    (1.0, 1.0, 1.0)
+                end
+                @debug "[reactToAddAutoPet] Using CT spacing: $ct_spacing"
+                
                 # Use immutable views / direct references without 680MB deep copies
                 put!(inference_queue, InferenceJob(
                     algo, ct_vol, pet_vol, points_vol,
-                    cx, cy, cz, active_id, seg_vol, channel, scribble_coords_0idx, negative_coords_0idx))
+                    cx, cy, cz, active_id, seg_vol, channel, scribble_coords_0idx, negative_coords_0idx, ct_spacing))
             catch e
                 err_msg = sprint(showerror, e)
                 @debug "ERROR in async reactToAddAutoPet: $err_msg"
@@ -2636,7 +2621,7 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
                 T = eltype(textSpec.minAndMaxValue)
                 textSpec.minAndMaxValue = T.([data.active_id, data.active_id])
             elseif textSpec.name == "manualModif"
-                textSpec.minAndMaxValue = Float32.([0.0, 1000.0])
+                textSpec.minAndMaxValue = Float32.([0.0, 10000.0])
             end
         end
     end
