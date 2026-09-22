@@ -10,6 +10,8 @@ export AcceptLesionEvent, RejectLesionEvent, MarkUncertainEvent, MarkResolvedEve
 export CenterLesionEvent, NextLesionEvent, PrevLesionEvent, ToggleMaskVisibilityEvent, RevertToAIEvent
 export FlagRegistrationEvent, SetRegistrationQCEvent, ValidateReportEvent, CaseQCEvent
 export NextPhaseEvent, PrevPhaseEvent, SetPhaseEvent
+export EditModeEvent, ViewModeEvent, SetTPFirstEvent, SetTPLastEvent
+export NewLesionEvent, EraseModeEvent, ShowOnlyPETEvent, ShowOnlyCTEvent, ToggleAnatomyEvent, ToggleSyncScrollEvent
 
 struct NextPhaseEvent end
 struct PrevPhaseEvent end
@@ -198,4 +200,22 @@ end
 
 struct ToggleFlickerEvent end
 struct ToggleOverlayEvent end
+
+# Keyboard shortcut events for edit mode and TP navigation
+struct EditModeEvent end     # E key - toggle to edit/paint mode
+struct ViewModeEvent end     # Esc key - cancel edit, return to view mode
+struct SetTPFirstEvent end   # Home key - jump to first TP (baseline)
+struct SetTPLastEvent end    # End key - jump to last TP
+
+struct NewLesionEvent end
+struct EraseModeEvent end
+struct ShowOnlyPETEvent
+    active::Bool  # true=press, false=release
+end
+struct ShowOnlyCTEvent
+    active::Bool
+end
+struct ToggleAnatomyEvent end
+struct ToggleSyncScrollEvent end
+
 end # module MakieEvents

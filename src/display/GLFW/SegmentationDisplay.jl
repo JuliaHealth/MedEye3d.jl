@@ -93,6 +93,22 @@ end
 function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String, tp_index::Int; load_data::Bool = true)
     _current_m2_mode[] = mode
     
+    # Sync GUI M2 mode dropdown
+    try
+        LMW = MakieEventHandlers._get_lmw()
+        if LMW !== nothing
+            obs_dict = getfield(LMW, :_lmw_observables)
+            if haskey(obs_dict, :menu_m2_mode)
+                menu = obs_dict[:menu_m2_mode]
+                idx = findfirst(==(mode), menu.options[])
+                if idx !== nothing && menu.i_selected[] != idx
+                    menu.i_selected[] = idx
+                end
+            end
+            _notify_makie_scene(obs_dict)
+        end
+    catch; end
+    
     # Always sync aspect ratio data from main window panels BEFORE vertex calculation.
     # This ensures correct proportions on window resize/maximize (load_data=false).
     for i in 6:min(10, length(stateInstances))
@@ -466,20 +482,77 @@ on_next!(stateObjects::Vector{StateDataFields}, data::ScreenshotEvent) = reactTo
 on_next!(stateObjects::Vector{StateDataFields}, data::LaunchM2Event) = nothing
 
 on_next!(stateObjects::Vector{StateDataFields}, data::SyncViewsEvent) = nothing
-# --- No-op handlers for UI-only events handled in LesionMetadataWindow ---
+# --- Handlers for keyboard shortcut events that bridge to LesionMetadataWindow ---
+# These trigger the same Observables that the GUI buttons use, ensuring full sync.
+
+function _trigger_lmw_observable(key::Symbol, val=nothing)
+    try
+        LMW = MakieEventHandlers._get_lmw()
+        LMW === nothing && return
+        obs_dict = getfield(LMW, :_lmw_observables)
+        if haskey(obs_dict, key)
+            obs = obs_dict[key]
+            if val !== nothing
+                obs[] = val
+            elseif obs isa Observables.Observable{Int}
+                obs[] = obs[] + 1  # trigger by incrementing
+            end
+        end
+        # Force Makie GUI redraw
+        _notify_makie_scene(obs_dict)
+    catch e
+        @debug "Failed to trigger LMW observable $key: $e"
+    end
+end
+
+"""Notify the Makie scene so GLMakie.requires_update() returns true on the next render tick."""
+function _notify_makie_scene(obs_dict::Dict{Symbol,Any})
+    if haskey(obs_dict, :fig)
+        try notify(obs_dict[:fig].scene.visible) catch; end
+    end
+end
+
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.SetRegistrationQCEvent) = nothing
-on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.FlagRegistrationEvent) = nothing
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.FlagRegistrationEvent) = _trigger_lmw_observable(:obs_flag_reg)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ValidateReportEvent) = nothing
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.CaseQCEvent) = nothing
-on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.AcceptLesionEvent) = nothing
-on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.RejectLesionEvent) = nothing
-on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.MarkUncertainEvent) = nothing
-on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.MarkResolvedEvent) = nothing
-on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.CenterLesionEvent) = nothing
-on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.NextLesionEvent) = nothing
-on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.PrevLesionEvent) = nothing
-on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleMaskVisibilityEvent) = nothing
+
+# Accept/Reject/Uncertain/Resolved: trigger LMW button observables for GUI state update
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.AcceptLesionEvent) = _trigger_lmw_observable(:obs_accept)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.RejectLesionEvent) = _trigger_lmw_observable(:obs_reject)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.MarkUncertainEvent) = _trigger_lmw_observable(:obs_uncertain)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.MarkResolvedEvent) = _trigger_lmw_observable(:obs_resolved)
+
+# Center lesion: trigger center observable
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.CenterLesionEvent) = _trigger_lmw_observable(:obs_center)
+
+# Next/Prev lesion navigation: trigger LMW observables that update dropdown + sync lesion
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.NextLesionEvent) = _trigger_lmw_observable(:obs_next_lesion)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.PrevLesionEvent) = _trigger_lmw_observable(:obs_prev_lesion)
+
+# Mask visibility toggle (Q hold/release)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleMaskVisibilityEvent) = MakieEventHandlers.reactToToggleMaskVisibility(data, stateObjects)
+
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.RevertToAIEvent) = nothing
+
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ShowOnlyPETEvent) = MakieEventHandlers.reactToShowOnlyPET(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ShowOnlyCTEvent) = MakieEventHandlers.reactToShowOnlyCT(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleSyncScrollEvent) = MakieEventHandlers.reactToToggleSyncScroll(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleAnatomyEvent) = _trigger_lmw_observable(:obs_toggle_anatomy)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.NewLesionEvent) = _trigger_lmw_observable(:obs_new_lesion)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.EraseModeEvent) = _trigger_lmw_observable(:obs_erase_mode)
+
+# EditMode (E key): activate paint mode — same as Paint button click
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.EditModeEvent) = MakieEventHandlers.reactToEditMode(data, stateObjects)
+
+# ViewMode (Esc key): deactivate paint, return to view — same as View button click
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ViewModeEvent) = MakieEventHandlers.reactToViewMode(data, stateObjects)
+
+# SetTPFirst (Home key): jump to first TP
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.SetTPFirstEvent) = MakieEventHandlers.reactToSetTPFirst(data, stateObjects)
+
+# SetTPLast (End key): jump to last TP
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.SetTPLastEvent) = MakieEventHandlers.reactToSetTPLast(data, stateObjects)
 on_error!(stateObjects::Vector{StateDataFields}, err) = error(err)
 on_complete!(stateObjects::Vector{StateDataFields}) = ""
 

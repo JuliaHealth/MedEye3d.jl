@@ -97,6 +97,9 @@ const _lmw_observables = Dict{Symbol, Any}()
 Base.haskey(m::Module, s::Symbol) = (m == LesionMetadataWindow && haskey(_lmw_observables, s))
 Base.getindex(m::Module, s::Symbol) = (m == LesionMetadataWindow ? _lmw_observables[s] : throw(KeyError(s)))
 
+# Registry of all Textbox widgets — used by focus guard to suppress shortcuts when typing
+const _all_textboxes = Any[]
+
 const current_has_expert_edits = Observable(false)
 const current_seg_origin = Observable("AI_PRESEGMENTATION")
 const _global_trigger_autosave = Ref{Any}(nothing)
@@ -1971,6 +1974,7 @@ function create_metadata_window(
         channel_arg::Union{Base.Channel, Nothing};
         save_path::String = DEFAULT_SAVE_PATH,
         ui_hooks::Dict{Symbol, Observable} = Dict{Symbol, Observable}())
+    empty!(_all_textboxes)  # clear textbox registry on (re-)creation
     obs_m2 = Observable(false)
     obs_set_compare_mode = Observable(false)
     ui_queue = Function[]
@@ -2124,7 +2128,7 @@ function create_metadata_window(
 
     # High-contrast textbox helper for dark theme
     function styled_textbox(grid_pos; placeholder="", stored_string="", fontsize=10, width=Auto(), tellwidth=false, kwargs...)
-        return Textbox(grid_pos;
+        tb = Textbox(grid_pos;
             placeholder = placeholder,
             stored_string = stored_string,
             fontsize = fontsize,
@@ -2139,6 +2143,8 @@ function create_metadata_window(
             width = width,
             tellwidth = tellwidth,
             kwargs...)
+        push!(_all_textboxes, tb)  # register for focus guard
+        return tb
     end
 
     # Registry of rows with explicit Fixed heights (Menu, Slider, Textbox rows).
@@ -2305,6 +2311,13 @@ function create_metadata_window(
     crosshair_row = nr!()
     btn_vis_crosshair = Button(g[crosshair_row, 1:2], label = "Crosshair: OFF", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
 
+    btn_sync_scroll = Button(g[crosshair_row, 3:4], label = "Sync: ON", buttoncolor = RGBf(0.2, 0.6, 0.3), labelcolor = TXT, fontsize = 9)
+    on(btn_sync_scroll.clicks) do _
+        try
+            put!(channel, MakieEvents.ToggleSyncScrollEvent())
+        catch; end
+    end
+
     on(btn_vis_lesion.clicks) do _
         vis_lesion_active[] = !vis_lesion_active[]
         btn_vis_lesion.label[] = vis_lesion_active[] ? "Lesion: ON" : "Lesion: OFF"
@@ -2407,14 +2420,14 @@ function create_metadata_window(
     rowsize!(g, m2_r, Fixed(28)); register_fixed_row!(m2_r, 28)
     m2_ref_r = nr!()
     Label(g[m2_ref_r, 1:2], "Reference TP:", fontsize = 10, color = LBL_FG, halign = :left)
-    menu_m2_ref = Menu(g[m2_ref_r, 3:4], options = ["Previous TP", "Baseline (TP0)"], default = "Previous TP", fontsize = 10)
+    menu_m2_ref = Menu(g[m2_ref_r, 3:4], options = ["Next TP", "Baseline (TP0)"], default = "Next TP", fontsize = 10)
     rowsize!(g, m2_ref_r, Fixed(28)); register_fixed_row!(m2_ref_r, 28)
 
     
     on(menu_m2_ref.selection) do sel
         if sel !== nothing
             sel_str = string(sel)
-            if sel_str == "Previous TP"
+            if sel_str == "Next TP"
                 put!(channel, SetM2ReferenceEvent(-1))
             elseif sel_str == "Baseline (TP0)"
                 put!(channel, SetM2ReferenceEvent(0))
@@ -2529,7 +2542,7 @@ function create_metadata_window(
             ["$idx: $(get(_MEH.tp_labels, idx, "TP $idx"))" for idx in tp_indices]
         end
         menu_tp_single.options[] = opts
-        menu_m2_ref.options[] = vcat(["Previous TP", "Baseline (TP0)"], opts)
+        menu_m2_ref.options[] = vcat(["Next TP", "Baseline (TP0)"], opts)
         menu_tp_left.options[] = opts
         menu_tp_right.options[] = opts
         sync_tp_menus_to_current!()
@@ -2596,24 +2609,27 @@ function create_metadata_window(
     on(_MEH.tp_switched) do _
         update_tp_label()
         
-        lock(ui_lock) do
-            push!(ui_queue, () -> begin
-                tp_indices = sort(collect(keys(_MEH.tp_labels)))
-                expected_count = max(1, length(tp_indices))
-                if length(menu_tp_single.options[]) != expected_count
-                    refresh_tp_dropdown_options!()
-                else
-                    sync_tp_menus_to_current!()
-                end
-                if cv_active[]
-                    _build_match_display!()
-                end
-                refresh_lesion_dropdown_for_tp!(_MEH.current_tp_index[])
-                if load_clinical_info_for_tp! !== nothing
-                    load_clinical_info_for_tp!(_MEH.current_tp_index[])
-                end
-            end)
+        # Sync TP dropdown menus directly (ui_queue was never drained)
+        try
+            tp_indices = sort(collect(keys(_MEH.tp_labels)))
+            expected_count = max(1, length(tp_indices))
+            if length(menu_tp_single.options[]) != expected_count
+                refresh_tp_dropdown_options!()
+            else
+                sync_tp_menus_to_current!()
+            end
+            if cv_active[]
+                _build_match_display!()
+            end
+            refresh_lesion_dropdown_for_tp!(_MEH.current_tp_index[])
+            if load_clinical_info_for_tp! !== nothing
+                load_clinical_info_for_tp!(_MEH.current_tp_index[])
+            end
+        catch e
+            @warn "[tp_switched] Error syncing UI: $e"
         end
+        # Force Makie redraw (tp_switched fires from consumer thread)
+        try notify(fig.scene.visible) catch; end
     end
 
     function refresh_lesion_dropdown_for_tp!(tp::Int)
@@ -2823,7 +2839,20 @@ function create_metadata_window(
     
     on(events(fig).keyboardbutton) do event
         if event.action == Makie.Keyboard.release && event.key == Makie.Keyboard.space
-            btn_next_unreviewed.clicks[] = btn_next_unreviewed.clicks[] + 1
+            # Focus guard: don't trigger Next Unreviewed if any Textbox has focus
+            # (prevents Space key leak when typing in windowing/notes/comments fields)
+            any_focused = false
+            for tb in _all_textboxes
+                try
+                    if tb.focused[]
+                        any_focused = true
+                        break
+                    end
+                catch; end
+            end
+            if !any_focused
+                btn_next_unreviewed.clicks[] = btn_next_unreviewed.clicks[] + 1
+            end
             return Consume(true)
         end
         return Consume(false)
@@ -6345,8 +6374,6 @@ function create_metadata_window(
     # ── Auto-fill BaseAnatomy, Side, and LesionType when organ mapping updates after painting ──
     try
         on(_MEH.organ_mapping_updated) do (lid, organ_name)
-            lock(ui_lock) do
-                push!(ui_queue, () -> begin
                     try
                         @debug "[PAINT→FILL] Received organ_mapping_updated: lid=$lid, organ='$organ_name'"
                         lid == 0 && return  # skip initial value
@@ -6402,10 +6429,8 @@ function create_metadata_window(
                             notify(active_lesion_id)
                         end
                     catch e
-                        @warn "Failed inside organ_mapping_updated UI queue: $e"
+                        @warn "Failed inside organ_mapping_updated callback: $e"
                     end
-                end)
-            end
         end
         @debug "[PAINT→FILL] Successfully registered organ_mapping_updated listener"
     catch e
@@ -6472,6 +6497,7 @@ function create_metadata_window(
     end
 
     res = MetadataWindowResult(fig, channel_ref, lesion_db)
+    _lmw_observables[:fig] = fig
     res.trigger_m2 = obs_m2
     res.set_compare_mode = obs_set_compare_mode
     res.m2_mode[] = menu_m2_mode.selection[]
@@ -6501,6 +6527,36 @@ function create_metadata_window(
     _lmw_observables[:btn_prev_tp] = btn_pt
     _lmw_observables[:btn_next_tp] = btn_nt
 
+    # CT/PET GUI-only sync functions (update slider/textbox without re-sending event)
+    function _sync_ct_gui(min_v, max_v)
+        is_syncing_ct[] && return; is_syncing_ct[] = true
+        try
+            tb_ct_min.stored_string[] = string(round(min_v, digits=1))
+            tb_ct_min.displayed_string[] = string(round(min_v, digits=1))
+            tb_ct_max.stored_string[] = string(round(max_v, digits=1))
+            tb_ct_max.displayed_string[] = string(round(max_v, digits=1))
+            set_close_to!(islider_ct, Float32(min_v), Float32(max_v))
+        finally; is_syncing_ct[] = false; end
+    end
+    _lmw_observables[:sync_ct_gui] = _sync_ct_gui
+
+    function _sync_pet_gui(min_v, max_v)
+        is_syncing_pet[] && return; is_syncing_pet[] = true
+        try
+            tb_pet_min.stored_string[] = string(round(min_v, digits=1))
+            tb_pet_min.displayed_string[] = string(round(min_v, digits=1))
+            tb_pet_max.stored_string[] = string(round(max_v, digits=1))
+            tb_pet_max.displayed_string[] = string(round(max_v, digits=1))
+            set_close_to!(islider_pet, Float32(min_v), Float32(max_v))
+        finally; is_syncing_pet[] = false; end
+    end
+    _lmw_observables[:sync_pet_gui] = _sync_pet_gui
+
+    _lmw_observables[:slider_brush] = slider_brush
+    _lmw_observables[:slider_blend] = slider_blend
+    _lmw_observables[:menu_m2_mode] = menu_m2_mode
+
+
     obs_next_lesion = Observable(0)
     obs_prev_lesion = Observable(0)
     on(obs_next_lesion) do _
@@ -6517,6 +6573,135 @@ function create_metadata_window(
     end
     _lmw_observables[:obs_next_lesion] = obs_next_lesion
     _lmw_observables[:obs_prev_lesion] = obs_prev_lesion
+
+    # ── Keyboard-triggered action observables ──────────────────────────────
+    # These are triggered from MakieEventHandlers when keyboard shortcuts fire,
+    # executing the same logic as the GUI buttons.
+
+    obs_accept = Observable(0)
+    on(obs_accept) do _
+        menu_obs_state.selection[] = "ACCEPTED"
+        idx = findfirst(==("ACCEPTED"), menu_obs_state.options[])
+        idx !== nothing && (menu_obs_state.i_selected[] = idx)
+        trigger_autosave()
+        try _MEH.auto_advance_after_decision!() catch; end
+    end
+    _lmw_observables[:obs_accept] = obs_accept
+
+    obs_reject = Observable(0)
+    on(obs_reject) do _
+        menu_obs_state.selection[] = "REJECTED"
+        idx = findfirst(==("REJECTED"), menu_obs_state.options[])
+        idx !== nothing && (menu_obs_state.i_selected[] = idx)
+        trigger_autosave()
+        try _MEH.auto_advance_after_decision!() catch; end
+    end
+    _lmw_observables[:obs_reject] = obs_reject
+
+    obs_uncertain = Observable(0)
+    on(obs_uncertain) do _
+        menu_obs_state.selection[] = "UNCERTAIN"
+        idx = findfirst(==("UNCERTAIN"), menu_obs_state.options[])
+        idx !== nothing && (menu_obs_state.i_selected[] = idx)
+        trigger_autosave()
+    end
+    _lmw_observables[:obs_uncertain] = obs_uncertain
+
+    obs_resolved = Observable(0)
+    on(obs_resolved) do _
+        menu_obs_state.selection[] = "RESOLVED"
+        idx = findfirst(==("RESOLVED"), menu_obs_state.options[])
+        idx !== nothing && (menu_obs_state.i_selected[] = idx)
+        trigger_autosave()
+    end
+    _lmw_observables[:obs_resolved] = obs_resolved
+
+    obs_center = Observable(0)
+    on(obs_center) do _
+        # Center lesion: trigger SyncLesionEvent for current active lesion
+        lid = parse_lesion_id(active_lesion_id[])
+        if lid !== nothing && lid > 0
+            put!(channel, MakieEvents.SyncLesionEvent(lid))
+            @info "[KEYBOARD] D/Center → SyncLesion $lid"
+        end
+    end
+    _lmw_observables[:obs_center] = obs_center
+
+    # New Lesion observable (keyboard N)
+    obs_new_lesion = Observable(0)
+    on(obs_new_lesion) do _
+        # Simulate btn_new_lesion click
+        btn_new_lesion.clicks[] = btn_new_lesion.clicks[] + 1
+    end
+    _lmw_observables[:obs_new_lesion] = obs_new_lesion
+
+    # Erase mode observable (keyboard Del)
+    obs_erase_mode = Observable(0)
+    on(obs_erase_mode) do _
+        if current_paint_mode[] != :erase
+            # Switch to erase mode (same as btn_erase click)
+            btn_erase.clicks[] = btn_erase.clicks[] + 1
+        end
+    end
+    _lmw_observables[:obs_erase_mode] = obs_erase_mode
+
+    # Toggle anatomy observable (keyboard B)
+    obs_toggle_anatomy = Observable(0)
+    on(obs_toggle_anatomy) do _
+        btn_vis_anatomy.clicks[] = btn_vis_anatomy.clicks[] + 1
+    end
+    _lmw_observables[:obs_toggle_anatomy] = obs_toggle_anatomy
+
+    # Sync scroll state change — updates the GUI button
+    obs_sync_scroll_changed = Observable(0)
+    on(obs_sync_scroll_changed) do _
+        try
+            # Read current state from the first stateObject — we check via the event handler result
+            # For now just toggle the button label
+            current_label = btn_sync_scroll.label[]
+            if current_label == "Sync: ON"
+                btn_sync_scroll.label[] = "Sync: OFF"
+                btn_sync_scroll.buttoncolor[] = BG_PNL
+            else
+                btn_sync_scroll.label[] = "Sync: ON"
+                btn_sync_scroll.buttoncolor[] = RGBf(0.2, 0.6, 0.3)
+            end
+        catch; end
+    end
+    _lmw_observables[:obs_sync_scroll_changed] = obs_sync_scroll_changed
+
+    obs_edit_mode = Observable(0)
+    on(obs_edit_mode) do _
+        # Same as btn_paint click — update GUI button colors + paint mode
+        current_paint_mode[] = :paint
+        btn_paint.buttoncolor[] = GRN
+        btn_erase.buttoncolor[] = BG_PNL
+        btn_view_mode.buttoncolor[] = BG_PNL
+        empty!(_MASK_IDS_CACHE)
+        empty!(_cached_lesion_ids)
+        empty!(_organ_classification_cache)
+        @info "[KEYBOARD] E → Paint mode GUI updated"
+    end
+    _lmw_observables[:obs_edit_mode] = obs_edit_mode
+
+    obs_view_mode = Observable(0)
+    on(obs_view_mode) do _
+        # Same as btn_view_mode click — update GUI button colors + view mode
+        current_paint_mode[] = :view
+        btn_paint.buttoncolor[] = BG_PNL
+        btn_erase.buttoncolor[] = BG_PNL
+        btn_view_mode.buttoncolor[] = BLU_BTN
+        @info "[KEYBOARD] Esc → View mode GUI updated"
+    end
+    _lmw_observables[:obs_view_mode] = obs_view_mode
+
+    obs_flag_reg = Observable(0)
+    on(obs_flag_reg) do _
+        @info "[KEYBOARD] Shift+R → Flag registration"
+        menu_reg_qc.selection[] = "QUESTIONABLE"
+        try trigger_autosave() catch; end
+    end
+    _lmw_observables[:obs_flag_reg] = obs_flag_reg
 
     return res
 end
