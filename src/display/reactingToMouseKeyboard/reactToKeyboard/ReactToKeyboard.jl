@@ -13,6 +13,8 @@ using ..MakieEvents
 export reactToKeyInput, reactToKeyboard, registerKeyboardFunctions, processKeysInfo, register_keyboard_channel!
 
 const keyboard_channel_ref = Ref{Union{Nothing, Base.Channel{Any}}}(nothing)
+const is_ctrl_down_ref = Ref(false)
+const is_alt_down_ref = Ref(false)
 
 function register_keyboard_channel!(ch::Base.Channel{Any})
     keyboard_channel_ref[] = ch
@@ -40,6 +42,23 @@ function _is_lesion_review()
         end
     catch; end
     return true
+end
+
+function _sync_windowing_gui(modality::String, min_v::Float32, max_v::Float32)
+    try
+        top = parentmodule(parentmodule(parentmodule(@__MODULE__)))
+        if isdefined(top, :LesionMetadataWindow)
+            obs_dict = getfield(top.LesionMetadataWindow, :_lmw_observables)
+            key = modality == "CT" ? :sync_ct_gui : :sync_pet_gui
+            if haskey(obs_dict, key)
+                obs_dict[key](min_v, max_v)
+            end
+            # Force Makie redraw
+            if haskey(obs_dict, :fig)
+                try notify(obs_dict[:fig].scene.visible) catch; end
+            end
+        end
+    catch; end
 end
 
 """
@@ -71,6 +90,7 @@ processKeysInfo(numbb::Identity{Int64}, stateObject::StateDataFields, keyInfo::K
 processKeysInfo(numbb::Identity{Bool}, stateObject::StateDataFields, keyInfo::KeyboardStruct) = OtherKeyboardActions.processKeysInfoUndo(numbb, stateObject, keyInfo)
 processKeysInfo(annot::Identity{AnnotationStruct}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) = OtherKeyboardActions.processKeysInfo(annot, stateObject, keyInfo, toBeSavedForBack)
 processKeysInfo(isTobeFast::Identity{Tuple{Bool,Bool}}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) = KeyboardMouseHelper.processKeysInfo(isTobeFast, stateObject, keyInfo, toBeSavedForBack)
+processKeysInfo(annot::Identity{ToggleSyncScroll}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) = OtherKeyboardActions.processKeysInfo(annot, stateObject, keyInfo, toBeSavedForBack)
 
 processKeysInfo(wind::Identity{WindowControlStruct}, stateObject::StateDataFields, keyInfo::KeyboardStruct, toBeSavedForBack::Bool=true) = WindowControll.processKeysInfo(wind, stateObject, keyInfo, toBeSavedForBack)
 
@@ -120,12 +140,14 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
     if (act > 0)# so we have press or relese
         scCode = ""
         if keyInputInfo.scancode == Int32(GLFW.KEY_RIGHT_CONTROL) || keyInputInfo.scancode == Int32(GLFW.KEY_LEFT_CONTROL)
+            is_ctrl_down_ref[] = (keyInputInfo.action != GLFW.RELEASE)
             scCode = "ctrl"
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_LEFT_SHIFT) || keyInputInfo.scancode == Int32(GLFW.KEY_RIGHT_SHIFT)
             scCode = "shift"
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_RIGHT_ALT) || keyInputInfo.scancode == Int32(GLFW.KEY_LEFT_ALT)
+            is_alt_down_ref[] = (keyInputInfo.action != GLFW.RELEASE)
             scCode = "alt"
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_SPACE)
@@ -138,29 +160,68 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             scCode = "enter"
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F1)
-            scCode = "f1"
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.WindowingEvent("CT", -160.0f0, 240.0f0))
+                _sync_windowing_gui("CT", -160.0f0, 240.0f0)
+            end
+            return
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F2)
-            scCode = "f2"
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.WindowingEvent("CT", -450.0f0, 1050.0f0))
+                _sync_windowing_gui("CT", -450.0f0, 1050.0f0)
+            end
+            return
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F3)
-            scCode = "f3"
-
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.WindowingEvent("CT", -1350.0f0, 150.0f0))
+                _sync_windowing_gui("CT", -1350.0f0, 150.0f0)
+            end
+            return
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F4)
-            scCode = "f4"
-
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.WindowingEvent("CT", -40.0f0, 120.0f0))
+                _sync_windowing_gui("CT", -40.0f0, 120.0f0)
+            end
+            return
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F5)
-            scCode = "f5"
-
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.WindowingEvent("CT", -30.0f0, 200.0f0))
+                _sync_windowing_gui("CT", -30.0f0, 200.0f0)
+            end
+            return
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F6)
-            scCode = "f6"
-
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.WindowingEvent("CT", -125.0f0, 225.0f0))
+                _sync_windowing_gui("CT", -125.0f0, 225.0f0)
+            end
+            return
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F7)
-            scCode = "f7"
-
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.WindowingEvent("PET", 0.0f0, 5.0f0))
+                _sync_windowing_gui("PET", 0.0f0, 5.0f0)
+            end
+            return
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F8)
-            scCode = "f8"
-
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.WindowingEvent("PET", 0.0f0, 10.0f0))
+                _sync_windowing_gui("PET", 0.0f0, 10.0f0)
+            end
+            return
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F9)
-            scCode = "f9"
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.WindowingEvent("PET", 0.0f0, 15.0f0))
+                _sync_windowing_gui("PET", 0.0f0, 15.0f0)
+            end
+            return
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_Z)
             scCode = "z"
@@ -181,10 +242,19 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
 
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_S)
-            scCode = "s"
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.ToggleSyncScrollEvent())
+            end
+            return
 
+        # C - Toggle synchronized scrolling (same as S)
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_C)
-            scCode = "c"
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.ToggleSyncScrollEvent())
+            end
+            return
 
         # Scientific annotation keyboard shortcuts
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_A)
@@ -214,10 +284,11 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             end
             return
 
+        # B - Toggle max anatomy overlay
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_B)
             if keyInputInfo.action == GLFW.PRESS
                 ch = _get_event_channel()
-                ch !== nothing && put!(ch, MakieEvents.SetM2ReferenceEvent(0))
+                ch !== nothing && put!(ch, MakieEvents.ToggleAnatomyEvent())
             end
             return
 
@@ -235,17 +306,23 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             end
             return
 
+        # N - New Lesion (same as "New" button in GUI)
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_N)
             if keyInputInfo.action == GLFW.PRESS
                 ch = _get_event_channel()
-                ch !== nothing && put!(ch, MakieEvents.NextLesionEvent())
+                ch !== nothing && put!(ch, MakieEvents.NewLesionEvent())
             end
             return
 
+        # P hold - Show only PET/SPECT (hide all other textures)
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_P)
-            if keyInputInfo.action == GLFW.PRESS
-                ch = _get_event_channel()
-                ch !== nothing && put!(ch, MakieEvents.PrevLesionEvent())
+            ch = _get_event_channel()
+            if ch !== nothing
+                if keyInputInfo.action == GLFW.PRESS
+                    put!(ch, MakieEvents.ShowOnlyPETEvent(true))
+                elseif keyInputInfo.action == GLFW.RELEASE
+                    put!(ch, MakieEvents.ShowOnlyPETEvent(false))
+                end
             end
             return
 
@@ -267,6 +344,26 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             end
             return
 
+        # T hold - Show only CT (hide all other textures)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_T)
+            ch = _get_event_channel()
+            if ch !== nothing
+                if keyInputInfo.action == GLFW.PRESS
+                    put!(ch, MakieEvents.ShowOnlyCTEvent(true))
+                elseif keyInputInfo.action == GLFW.RELEASE
+                    put!(ch, MakieEvents.ShowOnlyCTEvent(false))
+                end
+            end
+            return
+
+        # Del - Toggle erase mode (in paint mode)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_DELETE)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.EraseModeEvent())
+            end
+            return
+
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_KP_ADD) || keyInputInfo.scancode == Int32(GLFW.KEY_EQUAL)
             scCode = "+"
 
@@ -285,6 +382,71 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             scCode = "["
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_RIGHT_BRACKET)
             scCode = "]"
+
+        # E - toggle edit/paint mode (same action as Paint button in GUI)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_E)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.EditModeEvent())
+            end
+            return
+
+        # Esc - cancel edit mode, return to view (same as View button in GUI)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_ESCAPE)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.ViewModeEvent())
+            end
+            return
+
+        # Up arrow - previous lesion (Ctrl+Up = previous unreviewed)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_UP)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.PrevLesionEvent())
+            end
+            return
+
+        # Down arrow - next lesion (Ctrl+Down = next unreviewed)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_DOWN)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.NextLesionEvent())
+            end
+            return
+
+        # Alt+Left - previous timepoint (same as << TP button)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_LEFT)
+            if keyInputInfo.action == GLFW.PRESS && is_alt_down_ref[]
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.ChangeTimePointEvent(-1))
+            end
+            return
+
+        # Alt+Right - next timepoint (same as TP >> button)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_RIGHT)
+            if keyInputInfo.action == GLFW.PRESS && is_alt_down_ref[]
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.ChangeTimePointEvent(1))
+            end
+            return
+
+        # Home - first TP (baseline)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_HOME)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.SetTPFirstEvent())
+            end
+            return
+
+        # End - last TP
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_END)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.SetTPLastEvent())
+            end
+            return
+
         else
             scCode = "notImp"
         end

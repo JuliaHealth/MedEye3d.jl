@@ -19,6 +19,7 @@ export reactToAddAutoPet, reactToAIInferenceResult, reactToSyncMissing, reactToG
 export reactToMapLink, reactToAutoRunPreprocess, reactToRunPreprocess, reactToShowBoneMask, reactToShowMaskLayer, reactToSaveMRB
 export register_h5_mask_saver!, mark_tp_mask_dirty!, save_tp_mask_to_h5, flush_all_dirty_masks!, dirty_mask_tps
 export _clinical_phase, get_clinical_phase, set_clinical_phase!, _phase_display_name
+export reactToEditMode, reactToViewMode, reactToSetTPFirst, reactToSetTPLast, reactToToggleMaskVisibility, reactToShowOnlyPET, reactToShowOnlyCT, reactToToggleSyncScroll
 using ...InferenceClient
 using ...LesionAssociation
 using ...TextureManag
@@ -458,8 +459,8 @@ function reactToToggleFlicker(data::MakieEvents.ToggleFlickerEvent, stateObjects
                 cur_pos = findfirst(==(current_tp_index[]), tp_indices)
                 cur_pos = cur_pos === nothing ? 1 : cur_pos
 if _m2_reference_tp[] == -1
-    prev_pos = cur_pos > 1 ? cur_pos - 1 : length(tp_indices)
-    right_tp = tp_indices[prev_pos]
+    next_pos = cur_pos < length(tp_indices) ? cur_pos + 1 : 1
+    right_tp = tp_indices[next_pos]
 elseif _m2_reference_tp[] == 0
     right_tp = tp_indices[1]
 else
@@ -516,8 +517,8 @@ function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Ve
                 cur_pos = findfirst(==(current_tp_index[]), tp_indices)
                 cur_pos = cur_pos === nothing ? 1 : cur_pos
 if _m2_reference_tp[] == -1
-    prev_pos = cur_pos > 1 ? cur_pos - 1 : length(tp_indices)
-    right_tp = tp_indices[prev_pos]
+    next_pos = cur_pos < length(tp_indices) ? cur_pos + 1 : 1
+    right_tp = tp_indices[next_pos]
 elseif _m2_reference_tp[] == 0
     right_tp = tp_indices[1]
 else
@@ -703,6 +704,20 @@ function reactToPetBlend(data::PetBlendEvent, stateObjects::Vector{StateDataFiel
         end
     end
     @debug "PET/CT blend updated" weight=data.weight window_id=data.window_id
+    # Sync GUI blend slider
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing
+            obs_dict = getfield(LMW, :_lmw_observables)
+            if haskey(obs_dict, :slider_blend)
+                obs_dict[:slider_blend].value[] = data.weight
+            end
+            # Force Makie redraw (cross-thread Observable change)
+            if haskey(obs_dict, :fig)
+                try notify(obs_dict[:fig].scene.visible) catch; end
+            end
+        end
+    catch; end
 end
 
 function reactToLabelOpacity(data::LabelOpacityEvent, stateObjects::Vector{StateDataFields})
@@ -752,6 +767,148 @@ function reactToChangeBrushSize(data::ChangeBrushSizeEvent, stateObjects::Vector
 end
 
 const tp_node_names = Dict{Int, String}()
+
+# ── EditModeEvent (E key) ──────────────────────────────────────────────────
+# Same as clicking the "Paint" button in the Makie metadata window.
+# Activates paint mode with the current lesion ID, updates GUI button colors.
+function reactToEditMode(data::MakieEvents.EditModeEvent, stateObjects::Vector{StateDataFields})
+    lid = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
+    # Activate painting in render state (same as PaintValEvent)
+    reactToPaintVal(PaintValEvent(lid, true), stateObjects)
+    # Update GUI: paint button highlighted, workflow state
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing
+            obs_dict = getfield(LMW, :_lmw_observables)
+            if haskey(obs_dict, :obs_edit_mode)
+                obs_dict[:obs_edit_mode][] = obs_dict[:obs_edit_mode][] + 1
+            end
+        end
+    catch; end
+    set_workflow_state!(ScientificWorkflow.WF_EDIT_MASK)
+    @info "[KEYBOARD] E → Edit/Paint mode activated (lesion $lid)"
+end
+
+# ── ViewModeEvent (Esc key) ────────────────────────────────────────────────
+# Same as clicking the "View" button in the Makie metadata window.
+# Deactivates paint, returns to view mode, updates GUI button colors.
+function reactToViewMode(data::MakieEvents.ViewModeEvent, stateObjects::Vector{StateDataFields})
+    # Deactivate painting in render state (same as PaintValEvent(-1, false))
+    reactToPaintVal(PaintValEvent(-1, false), stateObjects)
+    # Update GUI: view button highlighted, workflow state
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing
+            obs_dict = getfield(LMW, :_lmw_observables)
+            if haskey(obs_dict, :obs_view_mode)
+                obs_dict[:obs_view_mode][] = obs_dict[:obs_view_mode][] + 1
+            end
+        end
+    catch; end
+    set_workflow_state!(ScientificWorkflow.WF_LESION_REVIEW)
+    @info "[KEYBOARD] Esc → View mode activated"
+end
+
+# ── SetTPFirstEvent (Home key) ─────────────────────────────────────────────
+# Jump to first TP (baseline). Same as selecting first option in TP dropdown.
+function reactToSetTPFirst(data::MakieEvents.SetTPFirstEvent, stateObjects::Vector{StateDataFields})
+    if isempty(tp_labels)
+        @debug "No TP labels loaded. Home key ignored."
+        return
+    end
+    tp_indices = sort(collect(keys(tp_labels)))
+    first_tp = tp_indices[1]
+    if current_tp_index[] != first_tp
+        reactToSetTimePoint(SetTimePointEvent(first_tp), stateObjects)
+        @info "[KEYBOARD] Home → Jump to first TP (index=$first_tp)"
+    end
+end
+
+# ── SetTPLastEvent (End key) ───────────────────────────────────────────────
+# Jump to last TP. Same as selecting last option in TP dropdown.
+function reactToSetTPLast(data::MakieEvents.SetTPLastEvent, stateObjects::Vector{StateDataFields})
+    if isempty(tp_labels)
+        @debug "No TP labels loaded. End key ignored."
+        return
+    end
+    tp_indices = sort(collect(keys(tp_labels)))
+    last_tp = tp_indices[end]
+    if current_tp_index[] != last_tp
+        reactToSetTimePoint(SetTimePointEvent(last_tp), stateObjects)
+        @info "[KEYBOARD] End → Jump to last TP (index=$last_tp)"
+    end
+end
+
+# ── ToggleMaskVisibilityEvent (Q hold/release) ────────────────────────────
+# Q press: hide all masks. Q release: show all masks.
+function reactToToggleMaskVisibility(data::MakieEvents.ToggleMaskVisibilityEvent, stateObjects::Vector{StateDataFields})
+    show = data.visible  # true = show (release), false = hide (press)
+    for state in stateObjects
+        for textSpec in state.mainForDisplayObjects.listOfTextSpecifications
+            if textSpec.name == "Mask" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy")
+                textSpec.isVisible = show
+            end
+        end
+        state.isSliceChanged = true
+    end
+    @debug "[KEYBOARD] Q → Mask visibility: $(show ? "shown" : "hidden")"
+end
+
+# ── ShowOnlyPETEvent (P hold) ──────────────────────────────────────────────
+# P hold: show only PET/SPECT textures
+function reactToShowOnlyPET(data::MakieEvents.ShowOnlyPETEvent, stateObjects::Vector{StateDataFields})
+    for state in stateObjects
+        for textSpec in state.mainForDisplayObjects.listOfTextSpecifications
+            if data.active  # press: hide everything except PET/SPECT
+                if textSpec.name == "PET" || textSpec.name == "SPECT" || textSpec.isNuclearMask
+                    textSpec.isVisible = true
+                else
+                    textSpec.isVisible = false
+                end
+            else  # release: restore all
+                textSpec.isVisible = true
+            end
+        end
+        state.isSliceChanged = true
+    end
+end
+
+# ── ShowOnlyCTEvent (T hold) ───────────────────────────────────────────────
+# T hold: show only CT textures  
+function reactToShowOnlyCT(data::MakieEvents.ShowOnlyCTEvent, stateObjects::Vector{StateDataFields})
+    for state in stateObjects
+        for textSpec in state.mainForDisplayObjects.listOfTextSpecifications
+            if data.active  # press: hide everything except CT
+                if textSpec.name == "CT" || textSpec.isMainImage
+                    textSpec.isVisible = true
+                else
+                    textSpec.isVisible = false
+                end
+            else  # release: restore all
+                textSpec.isVisible = true
+            end
+        end
+        state.isSliceChanged = true
+    end
+end
+
+# ── ToggleSyncScrollEvent (S key) ──────────────────────────────────────────
+# S key: toggle synchronized scrolling across panels + sync GUI button
+function reactToToggleSyncScroll(data::MakieEvents.ToggleSyncScrollEvent, stateObjects::Vector{StateDataFields})
+    for state in stateObjects
+        state.mainForDisplayObjects.isSyncScrollOn = !state.mainForDisplayObjects.isSyncScrollOn
+    end
+    # Sync GUI button
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing
+            obs_dict = getfield(LMW, :_lmw_observables)
+            if haskey(obs_dict, :obs_sync_scroll_changed)
+                obs_dict[:obs_sync_scroll_changed][] = obs_dict[:obs_sync_scroll_changed][] + 1
+            end
+        end
+    catch; end
+end
 
 function _get_lmw()
     p = parentmodule(parentmodule(@__MODULE__))
@@ -1099,8 +1256,9 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             if stateObject.calcDimsStruct.mainQuadVertSize <= 0 || all(iszero, stateObject.calcDimsStruct.mainImageQuadVert)
                 continue
             end
-            panel_tp = (panel_idx == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
-            panel_lid = (panel_idx == 5 && compare_mode[]) ? panel5_lesion_id : data.lesion_id
+            is_right_tp = compare_mode[] && panel_idx in (5, 6, 7, 8, 9)
+            panel_tp = is_right_tp ? compare_right_tp[] : current_tp_index[]
+            panel_lid = is_right_tp ? panel5_lesion_id : data.lesion_id
 
             panel_surf_pts, panel_marr_pts = try
                 _get_or_compute_bone_subseg(stateObject, panel_lid, panel_tp)
@@ -1202,11 +1360,11 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         origX, origY, origZ = canonical_center[1], canonical_center[2], canonical_center[3]
 
         for i in 1:length(stateObjects)
-            if i == 1 || i == 2 || i == 5
+            if i in (1, 2, 5, 6, 7)  # Axial panels (main + M2)
                 stateObjects[i].lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
-            elseif i == 3
+            elseif i in (3, 8)  # Sagittal panels (main + M2)
                 stateObjects[i].lastRecordedMousePosition = CartesianIndex(origY, origZ, origX)
-            else
+            elseif i in (4, 9)  # Coronal panels (main + M2)
                 stateObjects[i].lastRecordedMousePosition = CartesianIndex(origX, origZ, origY)
             end
         end
@@ -1214,6 +1372,13 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         targets = [(1, origZ), (2, origZ), (3, origX), (4, origY)]
         if length(stateObjects) >= 5
             push!(targets, (5, origZ))
+        end
+        # M2 Quad View panels mirror main window layout
+        if length(stateObjects) >= 9
+            push!(targets, (6, origZ))  # M2 Axial (like panel 1)
+            push!(targets, (7, origZ))  # M2 PET (like panel 2)
+            push!(targets, (8, origX))  # M2 Sagittal (like panel 3)
+            push!(targets, (9, origY))  # M2 Coronal (like panel 4)
         end
 
         for (p_idx, targetSlice) in targets
@@ -2034,8 +2199,8 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         
         # Right panel: next TP chronologically
 if _m2_reference_tp[] == -1
-    prev_pos = new_pos > 1 ? new_pos - 1 : num_tps
-    right_tp = tp_indices[prev_pos]
+    next_pos = new_pos < num_tps ? new_pos + 1 : 1
+    right_tp = tp_indices[next_pos]
 elseif _m2_reference_tp[] == 0
     right_tp = tp_indices[1]
 else
@@ -2947,6 +3112,26 @@ function reactToSetM2Reference(data::SetM2ReferenceEvent, stateObjects::Vector{S
                     _load_tp_from_entry!(stateObjects, entry_right, 5)
                 end
             end
+            # Sync GUI right TP dropdown
+            try
+                LMW = _get_lmw()
+                if LMW !== nothing
+                    obs_dict = getfield(LMW, :_lmw_observables)
+                    if haskey(obs_dict, :menu_tp_right)
+                        menu = obs_dict[:menu_tp_right]
+                        tp_label = get(tp_labels, right_tp, "TP $(right_tp)")
+                        idx = findfirst(==(tp_label), menu.options[])
+                        if idx !== nothing
+                            menu.i_selected[] = idx
+                            menu.selection[] = menu.options[][idx]
+                        end
+                    end
+                    # Force Makie redraw (cross-thread Observable change)
+                    if haskey(obs_dict, :fig)
+                        try notify(obs_dict[:fig].scene.visible) catch; end
+                    end
+                end
+            catch; end
         end
     end
 end
