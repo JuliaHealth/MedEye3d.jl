@@ -234,6 +234,7 @@ function launch_simple_volume(vol_ct::Array{Float32, 3}, title::String; spacing=
     textureSpec_ct = TextureSpec{Float32}(
         name="CT",
         isMainImage=true,
+        studyType="CT",
         color=RGB(1.0, 1.0, 1.0),
         minAndMaxValue=Float32.([min_ct, min(max_ct, 1500.0f0)])
     )
@@ -332,7 +333,7 @@ function launch_demo(; quad::Bool=true)
     spacing = (1.0, 1.0, 1.5)
     origin = (0.0, 0.0, 0.0)
 
-    textureSpec_ct = TextureSpec{Float32}(name="CT", isMainImage=true, color=RGB(1.0, 1.0, 1.0), minAndMaxValue=Float32.([-150, 250]))
+    textureSpec_ct = TextureSpec{Float32}(name="CT", isMainImage=true, studyType="CT", color=RGB(1.0, 1.0, 1.0), minAndMaxValue=Float32.([-150, 250]))
     textureSpec_mask = TextureSpec{Float32}(name="Mask", isMainImage=false, color=RGB(1.0, 0.2, 0.2), minAndMaxValue=Float32.([0, 1]), maskContribution=0.5f0, isEditable=true)
 
     if quad
@@ -761,14 +762,14 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     init_pet_blend = Float32(get(display_cfg, "pet_ct_blend", 0.5))
     init_label_opacity = Float32(get(display_cfg, "label_opacity", 0.5))
 
-    textureSpec_ct = TextureSpec{Float32}(name="CT", isMainImage=true, color=RGB(1.0, 1.0, 1.0), minAndMaxValue=Float32.([-150, 250]))
-    textureSpec_pet = TextureSpec{Float32}(name="PET", isMainImage=false, isNuclearMask=true, color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0, 10]), maskContribution=init_pet_blend)
+    textureSpec_ct = TextureSpec{Float32}(name="CT", isMainImage=true, studyType="CT", color=RGB(1.0, 1.0, 1.0), minAndMaxValue=Float32.([-150, 250]))
+    textureSpec_pet = TextureSpec{Float32}(name="PET", isMainImage=false, isNuclearMask=true, studyType="PET", color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0, 10]), maskContribution=init_pet_blend)
     textureSpec_mask = TextureSpec{Int16}(
         name="Mask", isMainImage=false, isMultiDiscreteMask=true, isIntegerTexture=true,
         colorSet=colors_mapped, minAndMaxValue=Int16.([0, length(colors_mapped)]),
         isEditable=true, maskContribution=init_label_opacity
     )
-    textureSpec_pure_pet = TextureSpec{Float32}(name="PET", isMainImage=true, color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0, 10]))
+    textureSpec_pure_pet = TextureSpec{Float32}(name="PET", isMainImage=true, studyType="PET", color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0, 10]))
     textureSpec_bone = TextureSpec{Int8}(
         name="Bone_Overlay", isMainImage=false, isIntegerTexture=true,
         color=RGB(0.0, 1.0, 1.0), minAndMaxValue=Int8.([0, 3]),

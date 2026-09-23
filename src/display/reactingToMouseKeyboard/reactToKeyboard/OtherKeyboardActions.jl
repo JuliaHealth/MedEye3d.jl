@@ -69,9 +69,9 @@ function processKeysInfo(annot::Identity{AnnotationStruct}, stateObject::StateDa
                 if haskey(obs_dict, :slider_brush)
                     obs_dict[:slider_brush].value[] = newWidth
                 end
-                # Force Makie redraw (cross-thread Observable change)
-                if haskey(obs_dict, :fig)
-                    try notify(obs_dict[:fig].scene.visible) catch; end
+                # Force Makie redraw (safe)
+                if haskey(obs_dict, :redraw_trigger)
+                    obs_dict[:redraw_trigger][] = obs_dict[:redraw_trigger][] + 1
                 end
             end
         catch; end

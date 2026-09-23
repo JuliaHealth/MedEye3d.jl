@@ -53,9 +53,9 @@ function _sync_windowing_gui(modality::String, min_v::Float32, max_v::Float32)
             if haskey(obs_dict, key)
                 obs_dict[key](min_v, max_v)
             end
-            # Force Makie redraw
-            if haskey(obs_dict, :fig)
-                try notify(obs_dict[:fig].scene.visible) catch; end
+            # Force Makie redraw (safe)
+            if haskey(obs_dict, :redraw_trigger)
+                obs_dict[:redraw_trigger][] = obs_dict[:redraw_trigger][] + 1
             end
         end
     catch; end
