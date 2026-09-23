@@ -507,8 +507,10 @@ end
 
 """Notify the Makie scene so GLMakie.requires_update() returns true on the next render tick."""
 function _notify_makie_scene(obs_dict::Dict{Symbol,Any})
-    if haskey(obs_dict, :fig)
-        try notify(obs_dict[:fig].scene.visible) catch; end
+    if haskey(obs_dict, :redraw_trigger)
+        obs_dict[:redraw_trigger][] = obs_dict[:redraw_trigger][] + 1
+    elseif haskey(obs_dict, :fig)
+        try notify(obs_dict[:fig].scene.px_area) catch; end
     end
 end
 
@@ -1436,14 +1438,25 @@ function coordinateDisplay(
                     flush(stdout)
                     shouldStop[1] = true
                 else
-                    println("CONSUMER ERROR (continuing): $e")
-                    println(sprint(showerror, e, catch_backtrace()))
+                    # Truncate error output to prevent terminal flood (BoundsError can include huge arrays)
+                    err_msg = try sprint(showerror, e; context=:limit=>true) catch; string(typeof(e)) end
+                    if length(err_msg) > 500
+                        err_msg = err_msg[1:500] * "... [truncated]"
+                    end
+                    println("CONSUMER ERROR (continuing): ", err_msg)
+                    bt = try sprint(showerror, e, catch_backtrace(); context=:limit=>true) catch; "" end
+                    if length(bt) > 2000
+                        bt = bt[1:2000] * "... [truncated]"
+                    end
+                    println(bt)
                     flush(stdout)
                     # Update AI status label so user sees the error
                     try
-                        MakieEventHandlers.set_ai_status!("[Error] $(sprint(showerror, e))")
+                        ai_msg = try sprint(showerror, e; context=:limit=>true) catch; string(typeof(e)) end
+                        if length(ai_msg) > 200; ai_msg = ai_msg[1:200] * "..."; end
+                        MakieEventHandlers.set_ai_status!("[Error] $ai_msg")
                     catch; end
-                    # Log to file for post-mortem analysis
+                    # Log to file for post-mortem analysis (full output OK in file)
                     try
                         open("/tmp/medeye3d_errors.log", "a") do f
                             println(f, "$(Dates.now()) CONSUMER ERROR: $(sprint(showerror, e))")

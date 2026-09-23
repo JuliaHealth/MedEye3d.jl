@@ -2628,8 +2628,10 @@ function create_metadata_window(
         catch e
             @warn "[tp_switched] Error syncing UI: $e"
         end
-        # Force Makie redraw (tp_switched fires from consumer thread)
-        try notify(fig.scene.visible) catch; end
+        # Force Makie redraw (safe — tp_switched fires from consumer thread)
+        if haskey(_lmw_observables, :redraw_trigger)
+            _lmw_observables[:redraw_trigger][] = _lmw_observables[:redraw_trigger][] + 1
+        end
     end
 
     function refresh_lesion_dropdown_for_tp!(tp::Int)
@@ -2893,7 +2895,9 @@ function create_metadata_window(
     lbl_blend_val = Label(g[blend_r, 4], @lift(string(round($(slider_blend.value), digits=2))),
         fontsize = 10, color = TXT)
     rowsize!(g, blend_r, Fixed(28)); register_fixed_row!(blend_r, 28)
+    is_syncing_blend = Ref(false)
     on(slider_blend.value) do val
+        is_syncing_blend[] && return
         v = Float32(val)
         display_cfg["pet_ct_blend"] = v
         save_display_config(display_cfg)
@@ -6554,7 +6558,14 @@ function create_metadata_window(
 
     _lmw_observables[:slider_brush] = slider_brush
     _lmw_observables[:slider_blend] = slider_blend
+    _lmw_observables[:is_syncing_blend] = is_syncing_blend
     _lmw_observables[:menu_m2_mode] = menu_m2_mode
+
+    # Safe redraw trigger — incrementing this marks the Makie scene dirty
+    # without toggling visibility (unlike notify(fig.scene.visible))
+    _redraw_trigger = Observable(0)
+    on(_redraw_trigger) do _; end  # no-op listener to keep Observable alive
+    _lmw_observables[:redraw_trigger] = _redraw_trigger
 
 
     obs_next_lesion = Observable(0)

@@ -50,9 +50,9 @@
 
 | Shortcut | Action | GUI Sync |
 |----------|--------|----------|
-| **Q (hold)** | Temporarily hide all mask overlays | ✅ Masks toggle on/off |
-| **P (hold)** | Show only PET/SPECT (hide CT and masks) | ✅ All textures toggle |
-| **T (hold)** | Show only CT (hide PET and masks) | ✅ All textures toggle |
+| **Q (hold)** | Temporarily hide all mask overlays | ✅ Preserves prior manual mask state |
+| **P (hold)** | Hide masks (keeps CT and PET/SPECT visible) | ✅ Preserves prior manual mask state |
+| **T (hold)** | Show only CT (hides everything else) | ✅ Preserves prior manual mask state |
 | **B** | Toggle max anatomy overlay | ✅ Anatomy button toggles |
 | **S** or **C** | Toggle synchronized scrolling | ✅ Sync button updates |
 

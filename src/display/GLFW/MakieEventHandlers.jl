@@ -43,6 +43,17 @@ const cursor_study_text = Observable{String}("")     # "PET TP0" or "L: PET TP0 
 # 3D voxel position under cursor (axial orientation: x, y, z=slice) — used for new lesion anatomy lookup
 const cursor_voxel_pos = Observable{Tuple{Int,Int,Int}}((0,0,0))
 
+"""Safe Makie redraw trigger — uses a dedicated no-op Observable instead of
+notify(fig.scene.visible) which can cause blinking by toggling scene visibility."""
+function _safe_redraw(obs_dict::Dict{Symbol,Any})
+    if haskey(obs_dict, :redraw_trigger)
+        obs_dict[:redraw_trigger][] = obs_dict[:redraw_trigger][] + 1
+    elseif haskey(obs_dict, :fig)
+        # Fallback: notify px_area (always-present, no side effects)
+        try notify(obs_dict[:fig].scene.px_area) catch; end
+    end
+end
+
 using ...ScientificWorkflow
 # --- Application State Objects ---
 const _clinical_phase = Ref{ScientificWorkflow.ClinicalPhase}(ScientificWorkflow.PHASE_READ)
@@ -677,9 +688,13 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
         end
         
         for tex in state.mainForDisplayObjects.listOfTextSpecifications
-            if is_main_match && (tex.name == "CT" || tex.isMainImage)
+            # Match CT textures: studyType=="CT", or fallback to isMainImage when studyType is unset
+            # (but exclude PET/SPECT textures that have isMainImage=true on pure-PET panels)
+            is_ct_tex = tex.studyType == "CT" || (isempty(tex.studyType) && tex.isMainImage && !tex.isNuclearMask && !(uppercase(tex.name) in ("PET", "SPECT")))
+            is_nuc_tex = tex.studyType == "PET" || tex.studyType == "SPECT" || tex.isNuclearMask
+            if is_main_match && is_ct_tex
                 tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
-            elseif is_nuc_match && (tex.name == "PET" || tex.name == "SPECT" || tex.isNuclearMask)
+            elseif is_nuc_match && is_nuc_tex
                 tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
             end
         end
@@ -704,18 +719,24 @@ function reactToPetBlend(data::PetBlendEvent, stateObjects::Vector{StateDataFiel
         end
     end
     @debug "PET/CT blend updated" weight=data.weight window_id=data.window_id
-    # Sync GUI blend slider
+    # Sync GUI blend slider (with guard to prevent circular event loop)
     try
         LMW = _get_lmw()
         if LMW !== nothing
             obs_dict = getfield(LMW, :_lmw_observables)
             if haskey(obs_dict, :slider_blend)
-                obs_dict[:slider_blend].value[] = data.weight
+                if haskey(obs_dict, :is_syncing_blend)
+                    obs_dict[:is_syncing_blend][] = true
+                end
+                try
+                    obs_dict[:slider_blend].value[] = data.weight
+                finally
+                    if haskey(obs_dict, :is_syncing_blend)
+                        obs_dict[:is_syncing_blend][] = false
+                    end
+                end
             end
-            # Force Makie redraw (cross-thread Observable change)
-            if haskey(obs_dict, :fig)
-                try notify(obs_dict[:fig].scene.visible) catch; end
-            end
+            _safe_redraw(obs_dict)
         end
     catch; end
 end
@@ -839,37 +860,62 @@ function reactToSetTPLast(data::MakieEvents.SetTPLastEvent, stateObjects::Vector
     end
 end
 
+const _shortcut_visibility_cache = Dict{UInt64, Bool}()
+
 # ── ToggleMaskVisibilityEvent (Q hold/release) ────────────────────────────
-# Q press: hide all masks. Q release: show all masks.
+# Q press: hide all masks. Q release: restore masks.
 function reactToToggleMaskVisibility(data::MakieEvents.ToggleMaskVisibilityEvent, stateObjects::Vector{StateDataFields})
-    show = data.visible  # true = show (release), false = hide (press)
+    is_press = !data.visible  # true = show (release), false = hide (press)
     for state in stateObjects
         for textSpec in state.mainForDisplayObjects.listOfTextSpecifications
-            if textSpec.name == "Mask" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy")
-                textSpec.isVisible = show
+            if is_press
+                if !haskey(_shortcut_visibility_cache, objectid(textSpec))
+                    _shortcut_visibility_cache[objectid(textSpec)] = textSpec.isVisible
+                end
+                if textSpec.name == "Mask" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy")
+                    textSpec.isVisible = false
+                end
+            else
+                if haskey(_shortcut_visibility_cache, objectid(textSpec))
+                    textSpec.isVisible = _shortcut_visibility_cache[objectid(textSpec)]
+                end
             end
         end
         state.isSliceChanged = true
     end
-    @debug "[KEYBOARD] Q → Mask visibility: $(show ? "shown" : "hidden")"
+    if !is_press
+        empty!(_shortcut_visibility_cache)
+    end
+    @debug "[KEYBOARD] Q → Mask visibility: $(data.visible ? "restored" : "hidden")"
 end
 
 # ── ShowOnlyPETEvent (P hold) ──────────────────────────────────────────────
-# P hold: show only PET/SPECT textures
+# P hold: show only main images and PET/SPECT, hide all masks/overlays
 function reactToShowOnlyPET(data::MakieEvents.ShowOnlyPETEvent, stateObjects::Vector{StateDataFields})
     for state in stateObjects
         for textSpec in state.mainForDisplayObjects.listOfTextSpecifications
-            if data.active  # press: hide everything except PET/SPECT
-                if textSpec.name == "PET" || textSpec.name == "SPECT" || textSpec.isNuclearMask
+            if data.active  # press: hide all masks except PET/SPECT
+                if !haskey(_shortcut_visibility_cache, objectid(textSpec))
+                    _shortcut_visibility_cache[objectid(textSpec)] = textSpec.isVisible
+                end
+                is_ct_tex = textSpec.studyType == "CT" || (isempty(textSpec.studyType) && textSpec.isMainImage && !textSpec.isNuclearMask && !(uppercase(textSpec.name) in ("PET", "SPECT")))
+                is_pet_spect = textSpec.studyType == "PET" || textSpec.studyType == "SPECT" || textSpec.isNuclearMask
+                
+                if is_ct_tex || is_pet_spect || textSpec.isMainImage
                     textSpec.isVisible = true
                 else
                     textSpec.isVisible = false
                 end
             else  # release: restore all
-                textSpec.isVisible = true
+                if haskey(_shortcut_visibility_cache, objectid(textSpec))
+                    textSpec.isVisible = _shortcut_visibility_cache[objectid(textSpec)]
+                end
             end
         end
         state.isSliceChanged = true
+    end
+    if !data.active
+        empty!(_shortcut_visibility_cache)
     end
 end
 
@@ -879,16 +925,26 @@ function reactToShowOnlyCT(data::MakieEvents.ShowOnlyCTEvent, stateObjects::Vect
     for state in stateObjects
         for textSpec in state.mainForDisplayObjects.listOfTextSpecifications
             if data.active  # press: hide everything except CT
-                if textSpec.name == "CT" || textSpec.isMainImage
+                if !haskey(_shortcut_visibility_cache, objectid(textSpec))
+                    _shortcut_visibility_cache[objectid(textSpec)] = textSpec.isVisible
+                end
+                is_ct_tex = textSpec.studyType == "CT" || (isempty(textSpec.studyType) && textSpec.isMainImage && !textSpec.isNuclearMask && !(uppercase(textSpec.name) in ("PET", "SPECT")))
+                
+                if is_ct_tex
                     textSpec.isVisible = true
                 else
                     textSpec.isVisible = false
                 end
             else  # release: restore all
-                textSpec.isVisible = true
+                if haskey(_shortcut_visibility_cache, objectid(textSpec))
+                    textSpec.isVisible = _shortcut_visibility_cache[objectid(textSpec)]
+                end
             end
         end
         state.isSliceChanged = true
+    end
+    if !data.active
+        empty!(_shortcut_visibility_cache)
     end
 end
 
@@ -1286,15 +1342,21 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
 
             for scrDat in stateObject.onScrollData.dataToScroll
                 if scrDat.name == "Bone_Overlay"
-                    # Clear previous overlay
+                    # Clear previous overlay (with bounds filtering)
                     if haskey(last_bone_overlay_indices, panel_idx) && !isempty(last_bone_overlay_indices[panel_idx])
-                        scrDat.dat[last_bone_overlay_indices[panel_idx]] .= Int8(0)
+                        valid_old = filter(idx -> checkbounds(Bool, scrDat.dat, idx), last_bone_overlay_indices[panel_idx])
+                        if !isempty(valid_old)
+                            scrDat.dat[valid_old] .= Int8(0)
+                        end
                     end
                     # Write combined mask: surface=1, marrow=2, both=3
                     all_indices = CartesianIndex{3}[]
                     if !isempty(surf_indices)
-                        scrDat.dat[surf_indices] .= Int8(1)
-                        append!(all_indices, surf_indices)
+                        valid_surf = filter(idx -> checkbounds(Bool, scrDat.dat, idx), surf_indices)
+                        if !isempty(valid_surf)
+                            scrDat.dat[valid_surf] .= Int8(1)
+                        end
+                        append!(all_indices, valid_surf)
                     end
                     if !isempty(marr_indices)
                         # For overlapping voxels, add (1+2=3), for marrow-only set to 2
@@ -1304,7 +1366,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                                 scrDat.dat[idx] = old_val == Int8(1) ? Int8(3) : Int8(2)
                             end
                         end
-                        append!(all_indices, marr_indices)
+                        append!(all_indices, filter(idx -> checkbounds(Bool, scrDat.dat, idx), marr_indices))
                     end
                     last_bone_overlay_indices[panel_idx] = unique(all_indices)
                 end
@@ -3126,10 +3188,8 @@ function reactToSetM2Reference(data::SetM2ReferenceEvent, stateObjects::Vector{S
                             menu.selection[] = menu.options[][idx]
                         end
                     end
-                    # Force Makie redraw (cross-thread Observable change)
-                    if haskey(obs_dict, :fig)
-                        try notify(obs_dict[:fig].scene.visible) catch; end
-                    end
+                    # Force Makie redraw (safe — no visibility toggling)
+                    _safe_redraw(obs_dict)
                 end
             catch; end
         end
