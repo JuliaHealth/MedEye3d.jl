@@ -6,14 +6,14 @@ export MEASUREMENT_COLORS, get_measurement_color
 
 # ─── Color Palette ────────────────────────────────────────────────────────────
 const MEASUREMENT_COLORS = [
-    (1.0f0, 0.3f0, 0.3f0, 0.8f0),  # 1 Red
-    (0.3f0, 0.85f0, 0.3f0, 0.8f0), # 2 Green
-    (0.4f0, 0.55f0, 1.0f0, 0.8f0), # 3 Blue
-    (1.0f0, 0.85f0, 0.0f0, 0.8f0), # 4 Yellow
-    (1.0f0, 0.5f0, 0.0f0, 0.8f0),  # 5 Orange
-    (0.85f0, 0.3f0, 0.85f0, 0.8f0),# 6 Purple
-    (0.0f0, 0.85f0, 0.85f0, 0.8f0),# 7 Cyan
-    (1.0f0, 0.6f0, 0.7f0, 0.8f0),  # 8 Pink
+    (1.0f0, 0.3f0, 0.3f0, 0.4f0),  # 1 Red
+    (0.3f0, 0.85f0, 0.3f0, 0.4f0), # 2 Green
+    (0.4f0, 0.55f0, 1.0f0, 0.4f0), # 3 Blue
+    (1.0f0, 0.85f0, 0.0f0, 0.4f0), # 4 Yellow
+    (1.0f0, 0.5f0, 0.0f0, 0.4f0),  # 5 Orange
+    (0.85f0, 0.3f0, 0.85f0, 0.4f0),# 6 Purple
+    (0.0f0, 0.85f0, 0.85f0, 0.4f0),# 7 Cyan
+    (1.0f0, 0.6f0, 0.7f0, 0.4f0),  # 8 Pink
 ]
 
 function get_measurement_color(idx::Int)
@@ -118,7 +118,7 @@ function deserialize_measurements(s::String)::Tuple{Vector{SphereMeasurement}, V
 end
 
 # ─── Helper: thick line as 2-triangle quad ────────────────────────────────────
-function _push_thick_line!(vertices::Vector{Float32}, u1, v1, u2, v2, color, w, h, thickness::Float32=0.005f0)
+function _push_thick_line!(vertices::Vector{Float32}, u1, v1, u2, v2, color, w, h, thickness::Float32=0.0025f0)
     dx = u2 - u1
     dy = v2 - v1
     len = sqrt(dx^2 + dy^2)
@@ -144,7 +144,7 @@ function _push_thick_line!(vertices::Vector{Float32}, u1, v1, u2, v2, color, w, 
 end
 
 # ─── Helper: small crosshair at a point ───────────────────────────────────────
-function _push_crosshair!(vertices::Vector{Float32}, u, v, color, w, h, size::Float32=0.015f0, thickness::Float32=0.003f0)
+function _push_crosshair!(vertices::Vector{Float32}, u, v, color, w, h, size::Float32=0.015f0, thickness::Float32=0.0015f0)
     _push_thick_line!(vertices, u - size, v, u + size, v, color, w, h, thickness)
     _push_thick_line!(vertices, u, v - size * (w > 0 ? (w/h) : 1.0f0), u, v + size * (w > 0 ? (w/h) : 1.0f0), color, w, h, thickness)
 end
@@ -152,8 +152,8 @@ end
 # ─── Helper: small endpoint handle (small filled square) ─────────────────────
 function _push_endpoint_handle!(vertices::Vector{Float32}, u, v, color, w, h, size::Float32=0.008f0)
     # Draw a small + symbol at the endpoint to indicate it's interactive
-    _push_thick_line!(vertices, u - size, v, u + size, v, color, w, h, 0.004f0)
-    _push_thick_line!(vertices, u, v - size * (w > 0 ? (w/h) : 1.0f0), u, v + size * (w > 0 ? (w/h) : 1.0f0), color, w, h, 0.004f0)
+    _push_thick_line!(vertices, u - size, v, u + size, v, color, w, h, 0.002f0)
+    _push_thick_line!(vertices, u, v - size * (w > 0 ? (w/h) : 1.0f0), u, v + size * (w > 0 ? (w/h) : 1.0f0), color, w, h, 0.002f0)
 end
 
 # ─── Helper: get effective per-axis radii ─────────────────────────────────────
@@ -212,7 +212,7 @@ function compute_measurement_vertices(measurements::Vector{SphereMeasurement}, s
             color = get_measurement_color(m.color_idx)
             # Make active measurements slightly brighter / more opaque
             if m.is_active
-                color[4] = 1.0f0
+                color[4] = 0.7f0
             end
             
             # Ellipse intersection: parametric approach
@@ -270,7 +270,7 @@ function compute_measurement_vertices(measurements::Vector{SphereMeasurement}, s
                 u2 = (px_vox_2 - 0.5f0) / w
                 v2 = (py_vox_2 - 0.5f0) / h
                 
-                _push_thick_line!(vertices, u1, v1, u2, v2, color, w, h, 0.002f0)
+                _push_thick_line!(vertices, u1, v1, u2, v2, color, w, h, 0.001f0)
             end
         end
     end
@@ -336,7 +336,7 @@ function compute_line_vertices(line_measurements::Vector{LineMeasurement}, state
         if visible
             color = get_measurement_color(lm.color_idx)
             if lm.is_active
-                color[4] = 1.0f0
+                color[4] = 0.7f0
             end
             
             u1, v1 = _project_point_to_uv(sx, sy, sz, panel_id, w, h)
@@ -347,7 +347,7 @@ function compute_line_vertices(line_measurements::Vector{LineMeasurement}, state
                 _push_crosshair!(vertices, u1, v1, color, w, h)
             else
                 # Normal line
-                _push_thick_line!(vertices, u1, v1, u2, v2, color, w, h, 0.004f0)
+                _push_thick_line!(vertices, u1, v1, u2, v2, color, w, h, 0.002f0)
                 
                 # Draw endpoint handles (small crosses at each end)
                 _push_endpoint_handle!(vertices, u1, v1, color, w, h)
