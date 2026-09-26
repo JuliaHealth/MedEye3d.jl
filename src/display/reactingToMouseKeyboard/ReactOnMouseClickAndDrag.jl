@@ -657,7 +657,6 @@ function _handle_sphere_measurement(mousestr, mainStates, obj, center_idx, MEH, 
             end
             _compute_sphere_suv!(m, mainStates)
             _update_cursor_info_sphere!(m, MEH)
-            _trigger_meas_obs(MEH, :obs_update_measurements, obj)
             
         elseif active_idx === nothing
             # Check if clicking near an existing sphere's edge (edit mode)
@@ -713,7 +712,6 @@ function _handle_sphere_measurement(mousestr, mainStates, obj, center_idx, MEH, 
             m.radius_mm = radius_mm
             _compute_sphere_suv!(m, mainStates)
             _update_cursor_info_sphere!(m, MEH)
-            _trigger_meas_obs(MEH, :obs_update_measurements, obj)
         end
     else
         # Mouse released: finalize
@@ -770,7 +768,6 @@ function _handle_line_measurement(mousestr, mainStates, obj, point3d, MEH, MeasM
             _compute_length!(lm)
             _compute_line_suv!(lm, mainStates)
             _update_cursor_info_line!(lm, MEH)
-            _trigger_meas_obs(MEH, :obs_update_measurements, obj)
             
         elseif active_idx === nothing
             # Check if clicking near an existing line's endpoint (edit mode)
@@ -823,7 +820,6 @@ function _handle_line_measurement(mousestr, mainStates, obj, point3d, MEH, MeasM
             _compute_length!(lm)
             _compute_line_suv!(lm, mainStates)
             _update_cursor_info_line!(lm, MEH)
-            _trigger_meas_obs(MEH, :obs_update_measurements, obj)
         end
     else
         # Mouse released: finalize
