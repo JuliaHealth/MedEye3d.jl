@@ -12,11 +12,11 @@ module VulkanRender
 using Vulkan
 using VulkanCore
 using ..VulkanContext: VkCtx
-using ..VulkanPipeline: VkPipelineState
-using ..VulkanBuffers: VkQuadBuffers
+using ..VulkanPipeline: VkPipelineState, VkVectorPipelineState
+using ..VulkanBuffers: VkQuadBuffers, create_buffer
 using ..VulkanTextures: VkTexture
 
-export render_frame!, PanelRenderData
+export render_frame!, PanelRenderData, ensure_vector_vbo!, destroy_vector_vbo!
 
 # ─── Per-panel render data ──────────────────────────────────────────────
 
@@ -28,6 +28,7 @@ a frame.
 """
 struct PanelRenderData
     pipeline_state::VkPipelineState
+    vector_pipeline_state::Union{VkVectorPipelineState, Nothing}
     quad_buffers::Union{VkQuadBuffers, Nothing}
     # Push constant data: uvScale (vec2) + uvOffset (vec2) = 16 bytes
     push_constants::Vector{Float32}  # [scale_x, scale_y, offset_x, offset_y]
@@ -36,11 +37,18 @@ struct PanelRenderData
     viewport_y::Float32
     viewport_w::Float32
     viewport_h::Float32
+    # Vector primitives to draw (vec2 pos + vec4 color = 6 floats per vertex)
+    vector_vertices::Vector{Float32}
+    # Pre-allocated vector VBO: Tuple{Buffer, DeviceMemory, Int} or nothing
+    vector_vbo::Any
 end
 
 # Default constructor for Zero-VBO panel
+PanelRenderData(ps::VkPipelineState, vps::Union{VkVectorPipelineState, Nothing}, push_constants::Vector{Float32}, vx, vy, vw, vh, vector_vertices::Vector{Float32}=Float32[], vector_vbo=nothing) =
+    PanelRenderData(ps, vps, nothing, push_constants, Float32(vx), Float32(vy), Float32(vw), Float32(vh), vector_vertices, vector_vbo)
+    
 PanelRenderData(ps::VkPipelineState, push_constants::Vector{Float32}, vx, vy, vw, vh) =
-    PanelRenderData(ps, nothing, push_constants, Float32(vx), Float32(vy), Float32(vw), Float32(vh))
+    PanelRenderData(ps, nothing, nothing, push_constants, Float32(vx), Float32(vy), Float32(vw), Float32(vh), Float32[], nothing)
 
 # ─── Pre-allocated scratch arrays to eliminate per-frame heap allocs ────
 # These module-level arrays are reused every frame instead of creating
@@ -190,6 +198,41 @@ function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData}, target_windo
             # Zero-VBO: 6 procedural vertices (2 triangles) generated via gl_VertexIndex
             cmd_draw(cmd, 6, 1, 0, 0)
         end
+        
+        # --- VECTOR PIPELINE OVERLAY ---
+        if !isempty(panel.vector_vertices) && panel.vector_pipeline_state !== nothing && panel.vector_vbo !== nothing
+            vps = panel.vector_pipeline_state
+            
+            # Map buffer and copy data
+            
+            
+            data_size = sizeof(Float32) * length(panel.vector_vertices)
+            vb, mem, _cap = panel.vector_vbo
+            
+            ptr = unwrap(Vulkan.map_memory(ctx.device, mem, 0, data_size))
+            unsafe_copyto!(Ptr{Float32}(ptr), pointer(panel.vector_vertices), length(panel.vector_vertices))
+            Vulkan.unmap_memory(ctx.device, mem)
+            
+            # Bind vector pipeline
+            cmd_bind_pipeline(cmd, PIPELINE_BIND_POINT_GRAPHICS, vps.pipeline)
+            
+            # Re-push constants for the vector pipeline layout (separate VkPipelineLayout handle)
+            GC.@preserve pc_data begin
+                cmd_push_constants(cmd, vps.pipeline_layout,
+                                   SHADER_STAGE_VERTEX_BIT | SHADER_STAGE_FRAGMENT_BIT,
+                                   0, sizeof(pc_data),
+                                   Ptr{Cvoid}(pointer(pc_data)))
+            end
+            
+            # Bind scratch vertex buffer
+            _set1!(_vb_buf, vb)
+            cmd_bind_vertex_buffers(cmd, _vb_buf, _vb_off_buf)
+            
+            # Draw
+            n_vertices = length(panel.vector_vertices) ÷ 6
+            cmd_draw(cmd, UInt32(n_vertices), 1, 0, 0)
+        end
+
     end
 
     cmd_end_render_pass(cmd)
@@ -225,6 +268,45 @@ function render_frame!(ctx::VkCtx, panels::Vector{PanelRenderData}, target_windo
     end
 
     return true
+end
+
+# ─── Vector VBO lifecycle ───────────────────────────────────────────────
+
+"""
+    ensure_vector_vbo!(ctx, current, required_size) → Tuple{Buffer, DeviceMemory, Int}
+
+Returns a host-visible vertex buffer large enough for `required_size` bytes.
+Re-uses `current` if large enough; otherwise destroys it and allocates a new one
+with 2× headroom to reduce re-allocations.
+"""
+function ensure_vector_vbo!(ctx::VkCtx, current::Any, required_size::Integer)
+    if current !== nothing
+        buf, mem, cap = current
+        if cap >= required_size
+            return current
+        end
+        # Old buffer too small — destroy it
+        Vulkan.destroy_buffer(ctx.device, buf)
+        Vulkan.free_memory(ctx.device, mem)
+    end
+    alloc_size = max(required_size, 4096) * 2
+    buf, mem = create_buffer(ctx, alloc_size,
+        BUFFER_USAGE_VERTEX_BUFFER_BIT,
+        MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT)
+    return (buf, mem, alloc_size)
+end
+
+"""
+    destroy_vector_vbo!(ctx, vbo_tuple)
+
+Destroys the vector VBO buffer and frees its device memory.
+"""
+function destroy_vector_vbo!(ctx::VkCtx, vbo_tuple)
+    if vbo_tuple !== nothing
+        buf, mem, _ = vbo_tuple
+        Vulkan.destroy_buffer(ctx.device, buf)
+        Vulkan.free_memory(ctx.device, mem)
+    end
 end
 
 end # module VulkanRender

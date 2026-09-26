@@ -4,7 +4,7 @@ export MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, StateD
 export DisplayedVoxels, CustomDisplayedVoxels, DisplayMode, SingleImage, MultiImage, QuadImage, GlShaderAndBufferFields
 export DoubleClickEvent, QuadZoomState, quadZoomStates, quadZoomState, is_shift_down_ref
 using ColorTypes, Parameters, Observables, GLFW, Dictionaries, FreeTypeAbstraction, Observables
-using ..DataStructs
+using ..DataStructs, ..Measurements
 
 struct ToggleSyncScroll end
 export ToggleSyncScroll
@@ -182,8 +182,12 @@ windowControlStruct::WindowControlStruct=WindowControlStruct()# holding data use
   renderBackend::RenderBackend = VulkanBackend
   vulkanCtx::Any = nothing
   vulkanPipelineState::Any = nothing
+  vulkanVectorPipelineState::Any = nothing
   vulkanQuadBuffers::Any = nothing
   vulkanTextures::Vector{Any} = []
+  vulkanVectorVBO::Any = nothing  # Tuple{Buffer, DeviceMemory, Int} or nothing
+  measurements::Vector{Measurements.SphereMeasurement} = Measurements.SphereMeasurement[]
+  line_measurements::Vector{Measurements.LineMeasurement} = Measurements.LineMeasurement[]
 end
 
 

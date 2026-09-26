@@ -9,7 +9,7 @@ using ColorTypes, MedImages, GLFW, Dictionaries, Logging, Setfield, FreeTypeAbst
 using ..ForDisplayStructs, ..distinctColorsSaved
 using ..VulkanBackend: VulkanContext, VulkanPipeline, VulkanRender, VulkanTextures, VulkanScreenshot, VulkanShaders, VulkanBuffers, VulkanStaging
 using Vulkan
-using ..ReactingToInput, ..ReactToScroll, ..DataStructs, ..StructsManag
+using ..ReactingToInput, ..ReactToScroll, ..DataStructs, ..StructsManag, ..Measurements
 using ..ReactOnKeyboard, ..ReactOnMouseClickAndDrag, ..DisplayDataManag
 using ..PrepareWindow, ..PrepareWindowHelpers, ..TextureManag, ..OpenGLDisplayUtils, ..Uniforms, ..DisplayWords
 using ..MakieEvents
@@ -555,6 +555,16 @@ on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.SetTPFirstEven
 
 # SetTPLast (End key): jump to last TP
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.SetTPLastEvent) = MakieEventHandlers.reactToSetTPLast(data, stateObjects)
+
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.JumpToMeasurementEvent) = MakieEventHandlers.reactToJumpToMeasurement(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.JumpToLineMeasurementEvent) = MakieEventHandlers.reactToJumpToLineMeasurement(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.DeleteMeasurementEvent) = MakieEventHandlers.reactToDeleteMeasurement(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.DeleteLineMeasurementEvent) = MakieEventHandlers.reactToDeleteLineMeasurement(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleMeasurementModeEvent) = MakieEventHandlers.reactToToggleMeasurementMode(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.CycleMeasurementSubModeEvent) = MakieEventHandlers.reactToCycleMeasurementSubMode(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.EditMeasurementEvent) = MakieEventHandlers.reactToEditMeasurement(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.EditLineMeasurementEvent) = MakieEventHandlers.reactToEditLineMeasurement(data, stateObjects)
+
 on_error!(stateObjects::Vector{StateDataFields}, err) = error(err)
 on_complete!(stateObjects::Vector{StateDataFields}) = ""
 
@@ -895,12 +905,25 @@ function coordinateDisplay(
         vert_src = VulkanShaders.generate_vulkan_zerovbo_vertex_shader()
 
         # Create pipeline state
-        vk_pipeline = VulkanPipeline.create_pipeline_state(
+                vk_pipeline = VulkanPipeline.create_pipeline_state(
+
             vk_ctx, vert_src, frag_src, length(textSpecVec)
         )
 
         # Bind textures to descriptor set
         VulkanPipeline.update_descriptor_textures!(vk_ctx, vk_pipeline, VulkanTextures.VkTexture[vk_textures...])
+
+        # Vector Pipeline
+        vector_vert_src = VulkanShaders.generate_vulkan_vector_vertex_shader()
+        vector_frag_src = VulkanShaders.generate_vulkan_vector_fragment_shader()
+        vector_vert_spv = VulkanShaders.compile_glsl_to_spirv(:vert, vector_vert_src)
+        vector_frag_spv = VulkanShaders.compile_glsl_to_spirv(:frag, vector_frag_src)
+        vector_vert_mod = VulkanShaders.create_shader_module(vk_ctx.device, vector_vert_spv)
+        vector_frag_mod = VulkanShaders.create_shader_module(vk_ctx.device, vector_frag_spv)
+        vk_vector_pipeline = VulkanPipeline.create_vector_pipeline_state(vk_ctx, length(textSpecVec), vector_vert_mod, vector_frag_mod)
+        # Pre-allocate vector VBO (64KB initial — grows as needed in render loop)
+        vk_vector_vbo = VulkanRender.ensure_vector_vbo!(vk_ctx, nothing, 65536)
+
 
         # Initial UBO update
         VulkanPipeline.update_ubo!(vk_ctx, vk_pipeline, panel_text_specs)
@@ -933,7 +956,9 @@ function coordinateDisplay(
             renderBackend=VulkanBackend,
             vulkanCtx=vk_ctx,
             vulkanPipelineState=vk_pipeline,
-            vulkanTextures=vk_textures
+            vulkanVectorPipelineState=vk_vector_pipeline,
+            vulkanTextures=vk_textures,
+            vulkanVectorVBO=vk_vector_vbo
         ))
     end
 
@@ -1045,6 +1070,17 @@ function coordinateDisplay(
             try
                 channelData = take!(mainChannel)
                 
+                # Register panel 1's display objects for measurement autosave (once)
+                if MakieEventHandlers._main_obj_ref[] === nothing && !isempty(stateInstances)
+                    MakieEventHandlers._main_obj_ref[] = stateInstances[1].mainForDisplayObjects
+                    println("  [MEAS-INIT] Registered _main_obj_ref, h5_path='$(MakieEventHandlers.h5_save_path_ref[])', tp=$(MakieEventHandlers.current_tp_index[])"); flush(stdout)
+                    # Load saved measurements from HDF5
+                    try
+                        MakieEventHandlers.load_measurements_from_h5!(MakieEventHandlers.current_tp_index[], stateInstances[1].mainForDisplayObjects)
+                    catch e
+                        println("  [MEAS-INIT] Load failed: $e"); flush(stdout)
+                    end
+                end                
                 # Coalesce SyncLesionEvent: skip intermediate events, keep only the latest
                 if channelData isa SyncLesionEvent
                     while isready(mainChannel)
@@ -1112,8 +1148,8 @@ function coordinateDisplay(
 
                 # get the aggregation here, only when the type is mouseStruct.
                 if typeof(channelData) == MouseStruct
-                    # Left-button drag aggregation for mask painting ONLY when painting is active.
-                    if channelData.isLeftButtonDown && stateInstances[1].valueForMasToSet.is_painting_active
+                    # Left-button drag aggregation for mask painting OR measurements when active.
+                    if channelData.isLeftButtonDown && (stateInstances[1].valueForMasToSet.is_painting_active || MakieEventHandlers.measurements_mode[])
                         mouseStructAggregationArray::Vector{MouseStruct} = [channelData]
                         while !isempty(mainChannel) && typeof(fetch(mainChannel)) == MouseStruct
                             peeked = fetch(mainChannel)
@@ -1362,16 +1398,55 @@ function coordinateDisplay(
                             end
                         end
                         push_consts[9] = cx; push_consts[10] = cy
-                        push_consts[11] = show_crosshair; push_consts[12] = 0.0f0
+                        push_consts[11] = show_crosshair; push_consts[12] = MakieEventHandlers.app_is_loading[] ? 0.3f0 : 1.0f0
 
                         
                         w = (panel_idx > 5 && m2_vk[] !== nothing) ? Float32(m2_vk[].swapchain_extent.width) : Float32(obj.vulkanCtx.width)
                         h = (panel_idx > 5 && m2_vk[] !== nothing) ? Float32(m2_vk[].swapchain_extent.height) : Float32(obj.vulkanCtx.height)
                         
+                        # Use panel 1's measurements for cross-view visibility
+                        # (measurements are stored on the clicked panel's obj, which may differ)
+                        _meas_obj = stateInstances[1].mainForDisplayObjects
+                        _all_spheres = _meas_obj.measurements
+                        _all_lines = _meas_obj.line_measurements
+                        # Also gather measurements from the current panel's obj (in case they differ)
+                        if obj !== _meas_obj
+                            if !isempty(obj.measurements)
+                                _all_spheres = vcat(_all_spheres, obj.measurements)
+                            end
+                            if !isempty(obj.line_measurements)
+                                _all_lines = vcat(_all_lines, obj.line_measurements)
+                            end
+                        end
+                        
+                        vector_vertices = Float32[]
+                        if !isempty(_all_spheres)
+                            vector_vertices = Measurements.compute_measurement_vertices(_all_spheres, stateInstances, panel_idx)
+                        end
+                        if !isempty(_all_lines)
+                            line_verts = Measurements.compute_line_vertices(_all_lines, stateInstances, panel_idx)
+                            if isempty(vector_vertices)
+                                vector_vertices = line_verts
+                            elseif !isempty(line_verts)
+                                append!(vector_vertices, line_verts)
+                            end
+                        end
+                        
+                        # Ensure VBO is large enough for this frame's vector data
+                        vbo_for_panel = obj.vulkanVectorVBO
+                        data_size = sizeof(Float32) * length(vector_vertices)
+                        if data_size > 0 && obj.vulkanCtx !== nothing
+                            vbo_for_panel = VulkanRender.ensure_vector_vbo!(obj.vulkanCtx, vbo_for_panel, data_size)
+                            obj.vulkanVectorVBO = vbo_for_panel
+                        end
+                        
                         panel = VulkanRender.PanelRenderData(
                             obj.vulkanPipelineState,
+                            obj.vulkanVectorPipelineState,
                             push_consts,
-                            Float32(0), Float32(0), w, h
+                            Float32(0), Float32(0), w, h,
+                            vector_vertices,
+                            vbo_for_panel
                         )
                         if panel_idx > 5
                             push!(_vk_m2_panels, panel)

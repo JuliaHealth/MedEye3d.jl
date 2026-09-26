@@ -50,9 +50,11 @@ export RegistrationQC, SegmentationVersion, LesionObservation, LesionTrack, Anno
 
 include(joinpath("display", "GLFW", "startModules", "ModernGlUtil.jl"))
 
+include(joinpath("structs", "Measurements.jl"))
 include(joinpath("structs", "BasicStructs.jl"))
 include(joinpath("structs", "DataStructs.jl"))
 include(joinpath("structs", "ForDisplayStructs.jl"))
+
 include(joinpath("structs", "MakieEvents.jl"))
 using .MakieEvents
 export MakieEvents

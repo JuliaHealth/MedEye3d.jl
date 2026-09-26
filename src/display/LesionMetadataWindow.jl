@@ -600,7 +600,8 @@ function fts_anatomy_search(query::String; limit::Int=25)::Vector{String}
     catch e
         @debug "[ANAT] FTS5 query failed for '$fts_query': $e"
     end
-    return results
+    return res
+ults
 end
 
 # ─── JSON Anatomy Mapping (max_anatomy → ontology) ──────────────────────────
@@ -991,6 +992,100 @@ function save_annotations(db::Dict,
         @warn "Cannot save annotations: $(e)"
     end
 end
+
+# ─── Measurement Persistence ─────────────────────────────────────────────────
+
+const DEFAULT_MEASUREMENTS_PATH = joinpath(homedir(), "medeye3d_measurements.json")
+
+"""
+    save_measurements(spheres::Vector, lines::Vector, path::String)
+
+Save both sphere and line measurements as JSON array.
+"""
+function save_measurements(spheres::Vector, lines::Vector, path::String=DEFAULT_MEASUREMENTS_PATH)
+    try
+        data = Any[]
+        for m in spheres
+            push!(data, Dict{String,Any}(
+                "type" => "sphere",
+                "id" => m.id,
+                "center_idx" => [m.center_idx[1], m.center_idx[2], m.center_idx[3]],
+                "radius_mm" => m.radius_mm,
+                "suv_mean" => m.suv_mean,
+                "suv_max" => m.suv_max,
+                "is_active" => false
+            ))
+        end
+        for lm in lines
+            push!(data, Dict{String,Any}(
+                "type" => "line",
+                "id" => lm.id,
+                "start_idx" => [lm.start_idx[1], lm.start_idx[2], lm.start_idx[3]],
+                "end_idx" => [lm.end_idx[1], lm.end_idx[2], lm.end_idx[3]],
+                "length_mm" => lm.length_mm,
+                "is_active" => false
+            ))
+        end
+        open(path, "w") do io
+            JSON.print(io, data, 2)
+        end
+        @debug "Measurements saved → $(path) ($(length(spheres)) spheres, $(length(lines)) lines)"
+    catch e
+        @warn "Cannot save measurements: $(e)"
+    end
+end
+
+# Backward compat: save only spheres
+function save_measurements(measurements::Vector, path::String=DEFAULT_MEASUREMENTS_PATH)
+    save_measurements(measurements, Any[], path)
+end
+
+"""
+    load_measurements(path::String) -> (Vector{SphereMeasurement}, Vector{LineMeasurement})
+
+Load measurements from JSON file. Returns tuple of (spheres, lines).
+"""
+function load_measurements(path::String=DEFAULT_MEASUREMENTS_PATH)
+    Meas = parentmodule(@__MODULE__).Measurements
+    spheres = Meas.SphereMeasurement[]
+    lines = Meas.LineMeasurement[]
+    if !isfile(path)
+        return (spheres, lines)
+    end
+    try
+        data = JSON.parsefile(path)
+        for entry in data
+            entry_type = get(entry, "type", "sphere")
+            if entry_type == "sphere"
+                center = entry["center_idx"]
+                push!(spheres, Meas.SphereMeasurement(
+                    id = get(entry, "id", length(spheres) + 1),
+                    center_idx = (Float32(center[1]), Float32(center[2]), Float32(center[3])),
+                    radius_mm = Float32(get(entry, "radius_mm", 10.0)),
+                    suv_mean = Float32(get(entry, "suv_mean", 0.0)),
+                    suv_max = Float32(get(entry, "suv_max", 0.0)),
+                    is_active = false
+                ))
+            elseif entry_type == "line"
+                s = entry["start_idx"]
+                e = entry["end_idx"]
+                push!(lines, Meas.LineMeasurement(
+                    id = get(entry, "id", length(lines) + 1),
+                    start_idx = (Float32(s[1]), Float32(s[2]), Float32(s[3])),
+                    end_idx = (Float32(e[1]), Float32(e[2]), Float32(e[3])),
+                    length_mm = Float32(get(entry, "length_mm", 0.0)),
+                    is_active = false
+                ))
+            end
+        end
+        @debug "Loaded $(length(spheres)) spheres + $(length(lines)) lines from $path"
+    catch e
+        @warn "Cannot load measurements: $(e)"
+    end
+    return (spheres, lines)
+end
+
+export save_measurements, load_measurements
 
 # ─── SUV Computation ─────────────────────────────────────────────────────────
 """
@@ -2007,6 +2102,22 @@ function create_metadata_window(
                         db_to_save = copy(msg.db)
                         save_annotations(db_to_save, msg.path_json)
                         save_annotations_hdf5(db_to_save, msg.path_hdf5)
+                        # Also save measurements alongside annotations
+                        try
+                            _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+                            main_channel_ref = _MEH.main_event_channel
+                            # Get measurements from the state objects (via the forDisplayObjects)
+                            # We save to a companion file next to the annotations
+                            meas_path = replace(msg.path_json, ".json" => "_measurements.json")
+                            if @isdefined(_viewer_state_ref) && _viewer_state_ref[] !== nothing
+                                obj = _viewer_state_ref[].mainForDisplayObjects
+                                saved_spheres = filter(m -> !m.is_active, obj.measurements)
+                                saved_lines = filter(m -> !m.is_active, obj.line_measurements)
+                                if !isempty(saved_spheres) || !isempty(saved_lines)
+                                    save_measurements(saved_spheres, saved_lines, meas_path)
+                                end
+                            end
+                        catch; end
                         @async begin
                             save_status_text[] = "Saved OK $(Dates.format(Dates.now(), "HH:MM:SS"))"
                             save_status_color[] = RGBf(0.4, 0.9, 0.4)
@@ -2264,6 +2375,9 @@ function create_metadata_window(
     # HU / SUV / Lesion / View / Slice
     Label(g[nr!(), 1:4], @lift(string($(_MEH.cursor_info_text))),
         fontsize = 11, color = RGBAf(0.95, 0.85, 0.55, 1.0), halign = :left)
+    # Live measurement info (sphere SUV / line distance)
+    Label(g[nr!(), 1:4], @lift(string($(_MEH.measurement_info_text))),
+        fontsize = 11, color = RGBAf(0.55, 1.0, 0.55, 1.0), halign = :left)
     # Save Status
     Label(g[nr!(), 1:4], save_status_text,
         fontsize = 10, color = save_status_color, halign = :left)
@@ -4531,6 +4645,241 @@ function create_metadata_window(
 
     end_section!(sec_seg)
 
+    # ── Measurements Section ─────────────────────────────────────────────────
+    sec_meas = begin_section!("Measurements"; default_open=true)
+
+    # Mode toggle button
+    meas_mode_obs = Observable(false)
+    meas_btn_r = nr!()
+    btn_meas_toggle = Button(g[meas_btn_r, 1:4], label = @lift($meas_mode_obs ? "Measuring ON (Shift+M)" : "Start Measuring (Shift+M)"),
+        buttoncolor = @lift($meas_mode_obs ? RGBf(0.15, 0.55, 0.15) : BG_PNL),
+        labelcolor = TXT, fontsize = 10)
+    rowsize!(g, meas_btn_r, Fixed(24)); register_fixed_row!(meas_btn_r, 24)
+
+    on(btn_meas_toggle.clicks) do _
+        meas_mode_obs[] = !meas_mode_obs[]
+        _MEH.measurements_mode[] = meas_mode_obs[]
+    end
+    # Sync from keyboard toggle
+    _lmw_observables[:obs_measurement_mode_changed] = Observable(0)
+    on(_lmw_observables[:obs_measurement_mode_changed]) do _
+        new_mode = _MEH.measurements_mode[]
+        new_sub = _MEH.measurement_sub_mode[]
+        if meas_mode_obs[] != new_mode
+            meas_mode_obs[] = new_mode
+        end
+        if meas_submode_obs[] != new_sub
+            meas_submode_obs[] = new_sub
+        end
+    end
+
+    # Sub-mode toggle: Sphere vs Line
+    meas_submode_obs = Observable(:sphere)
+    meas_submode_r = nr!()
+    btn_sphere_mode = Button(g[meas_submode_r, 1:2], label = @lift($meas_submode_obs == :sphere ? "[*] Sphere (SUV)" : "[ ] Sphere (SUV)"),
+        buttoncolor = @lift($meas_submode_obs == :sphere ? RGBf(0.2, 0.2, 0.6) : BG_PNL),
+        labelcolor = TXT, fontsize = 9)
+    btn_line_mode = Button(g[meas_submode_r, 3:4], label = @lift($meas_submode_obs == :line ? "[*] Line (cm)" : "[ ] Line (cm)"),
+        buttoncolor = @lift($meas_submode_obs == :line ? RGBf(0.2, 0.2, 0.6) : BG_PNL),
+        labelcolor = TXT, fontsize = 9)
+    rowsize!(g, meas_submode_r, Fixed(22)); register_fixed_row!(meas_submode_r, 22)
+
+    on(btn_sphere_mode.clicks) do _
+        if meas_submode_obs[] != :sphere
+            meas_submode_obs[] = :sphere
+        end
+        _MEH.measurement_sub_mode[] = :sphere
+        if !meas_mode_obs[]
+            meas_mode_obs[] = true
+            _MEH.measurements_mode[] = true
+        end
+    end
+    on(btn_line_mode.clicks) do _
+        if meas_submode_obs[] != :line
+            meas_submode_obs[] = :line
+        end
+        _MEH.measurement_sub_mode[] = :line
+        if !meas_mode_obs[]
+            meas_mode_obs[] = true
+            _MEH.measurements_mode[] = true
+        end
+    end
+    # Sync from keyboard Shift+L
+    on(_MEH.measurement_sub_mode) do v
+        if meas_submode_obs[] != v
+            meas_submode_obs[] = v
+        end
+    end
+
+    # Radius slider (only relevant for sphere mode)
+    meas_radius_r = nr!()
+    Label(g[meas_radius_r, 1], "Radius (mm):", fontsize=9, color=LBL_FG, halign=:left)
+    sl_radius = Slider(g[meas_radius_r, 2:3], range=1.0f0:1.0f0:100.0f0, startvalue=10.0f0)
+    lbl_radius_val = Label(g[meas_radius_r, 4], @lift(string(round(Int, $(sl_radius.value)), " mm")),
+        fontsize=9, color=TXT, halign=:center)
+    rowsize!(g, meas_radius_r, Fixed(22)); register_fixed_row!(meas_radius_r, 22)
+
+    on(sl_radius.value) do v
+        fv = Float32(v)
+        if _MEH.active_measurement_radius_mm[] != fv
+            _MEH.active_measurement_radius_mm[] = fv
+        end
+    end
+    # Sync from scroll resize
+    on(_MEH.active_measurement_radius_mm) do v
+        if sl_radius.value[] != v
+            sl_radius.value[] = v
+        end
+    end
+
+    # Show/Hide all measurements toggle + Clear All
+    meas_vis_r = nr!()
+    meas_visible_obs = Observable(true)
+    btn_vis_toggle = Button(g[meas_vis_r, 1:2], label = @lift($meas_visible_obs ? "[V] Visible" : "[H] Hidden"),
+        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+    btn_clear_all = Button(g[meas_vis_r, 3:4], label = "[X] Clear All",
+        buttoncolor = BG_PNL, labelcolor = RGBf(0.9, 0.3, 0.3), fontsize = 9)
+    rowsize!(g, meas_vis_r, Fixed(22)); register_fixed_row!(meas_vis_r, 22)
+
+    on(btn_vis_toggle.clicks) do _
+        meas_visible_obs[] = !meas_visible_obs[]
+    end
+    on(btn_clear_all.clicks) do _
+        try
+            put!(channel, MakieEvents.DeleteMeasurementEvent(-1))
+            put!(channel, MakieEvents.DeleteLineMeasurementEvent(-1))
+        catch; end
+    end
+
+    # Measurements list (dynamic GridLayout)
+    meas_list_r = nr!()
+    meas_list_grid = GridLayout(g[meas_list_r, 1:4])
+    rowsize!(g, meas_list_r, Auto())
+
+    # Observable to trigger list refresh — receives the mainForDisplayObjects
+    _lmw_observables[:obs_refresh_measurements] = Observable{Any}(nothing)
+
+    function _rebuild_measurement_list!(grid, obj)
+        # Clear existing content
+        for elem in contents(grid)
+            try delete!(elem) catch; end
+        end
+        
+        if obj === nothing
+            return
+        end
+        
+        if !haskey(_lmw_observables, :obs_update_measurements)
+            _lmw_observables[:obs_update_measurements] = Observable(0)
+        end
+        obs_upd = _lmw_observables[:obs_update_measurements]
+
+        saved_spheres = filter(m -> m.id > 0, obj.measurements)
+        saved_lines = filter(m -> m.id > 0, obj.line_measurements)
+        
+        if isempty(saved_spheres) && isempty(saved_lines)
+            Label(grid[1, 1:4], "No measurements yet. Enable mode, then click.",
+                fontsize=9, color=RGBf(0.5, 0.5, 0.5), halign=:center)
+            return
+        end
+        
+        row_i = 0
+        Meas = parentmodule(@__MODULE__).Measurements
+        
+        # Sphere measurements — each with its own color
+        for (i, m) in enumerate(saved_spheres)
+            row_i += 1
+            
+            local m_ref = m
+            mc = Meas.MEASUREMENT_COLORS[((m_ref.color_idx - 1) % length(Meas.MEASUREMENT_COLORS)) + 1]
+            row_color = RGBf(mc[1], mc[2], mc[3])
+            
+            lbl1 = lift(obs_upd) do _
+                "⬤ S$(m_ref.id) R:$(round(m_ref.radius_mm, digits=1))"
+            end
+            lbl2 = lift(obs_upd) do _
+                "Mean:$(round(m_ref.suv_mean, digits=1)) Max:$(round(m_ref.suv_max, digits=1))"
+            end
+            
+            Label(grid[row_i, 1], lbl1,
+                fontsize=9, color=row_color, halign=:left)
+            Label(grid[row_i, 2], lbl2,
+                fontsize=9, color=TXT, halign=:left)
+            
+            btn_eye = Button(grid[row_i, 3], label="[>]", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=9)
+            btn_edit = Button(grid[row_i, 4], label="[✎]", buttoncolor=BG_PNL, labelcolor=RGBf(0.4, 0.8, 1.0), fontsize=9)
+            btn_del = Button(grid[row_i, 5], label="[x]", buttoncolor=BG_PNL, labelcolor=RGBf(0.9, 0.3, 0.3), fontsize=9)
+            
+            local mid = m.id
+            on(btn_eye.clicks) do _
+                try
+                    put!(channel, MakieEvents.JumpToMeasurementEvent(mid))
+                catch; end
+            end
+            on(btn_edit.clicks) do _
+                try
+                    put!(channel, MakieEvents.EditMeasurementEvent(mid))
+                catch; end
+            end
+            on(btn_del.clicks) do _
+                try
+                    put!(channel, MakieEvents.DeleteMeasurementEvent(mid))
+                catch; end
+            end
+        end
+        
+        # Line measurements — each with its own color
+        for (i, lm) in enumerate(saved_lines)
+            row_i += 1
+            
+            local lm_ref = lm
+            mc = Meas.MEASUREMENT_COLORS[((lm_ref.color_idx - 1) % length(Meas.MEASUREMENT_COLORS)) + 1]
+            row_color = RGBf(mc[1], mc[2], mc[3])
+            
+            lbl1 = lift(obs_upd) do _
+                len_str = lm_ref.length_mm >= 10.0f0 ? "$(round(lm_ref.length_mm / 10.0f0, digits=2))cm" : "$(round(lm_ref.length_mm, digits=1))mm"
+                "━ L$(lm_ref.id) $(len_str)"
+            end
+            lbl2 = lift(obs_upd) do _
+                "Mean:$(round(lm_ref.suv_mean, digits=1)) Max:$(round(lm_ref.suv_max, digits=1))"
+            end
+            
+            Label(grid[row_i, 1], lbl1,
+                fontsize=9, color=row_color, halign=:left)
+            Label(grid[row_i, 2], lbl2,
+                fontsize=9, color=TXT, halign=:left)
+            
+            btn_eye_l = Button(grid[row_i, 3], label="[>]", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=9)
+            btn_edit_l = Button(grid[row_i, 4], label="[✎]", buttoncolor=BG_PNL, labelcolor=RGBf(0.4, 0.8, 1.0), fontsize=9)
+            btn_del_l = Button(grid[row_i, 5], label="[x]", buttoncolor=BG_PNL, labelcolor=RGBf(0.9, 0.3, 0.3), fontsize=9)
+            
+            local lid = lm.id
+            on(btn_eye_l.clicks) do _
+                try
+                    put!(channel, MakieEvents.JumpToLineMeasurementEvent(lid))
+                catch; end
+            end
+            on(btn_edit_l.clicks) do _
+                try
+                    put!(channel, MakieEvents.EditLineMeasurementEvent(lid))
+                catch; end
+            end
+            on(btn_del_l.clicks) do _
+                try
+                    put!(channel, MakieEvents.DeleteLineMeasurementEvent(lid))
+                catch; end
+            end
+        end
+    end
+
+    on(_lmw_observables[:obs_refresh_measurements]) do obj
+        if obj !== nothing
+            _rebuild_measurement_list!(meas_list_grid, obj)
+        end
+    end
+
+    end_section!(sec_meas)
+
     sec_map_lesions = begin_section!("Map Lesions (Compare Mode)"; default_open=false)
     
     map_info_r = nr!()
@@ -4771,7 +5120,7 @@ function create_metadata_window(
                                 lid = cur_left_sel[i]
                                 lbl_txt = left_labels[i]
                                 Label(map_grid[row_offset + i - 1, 1], lbl_txt, fontsize=9, color=TXT, halign=:left)
-                                btn_rm_l = Button(map_grid[row_offset + i - 1, 2], label="✕", buttoncolor=RGBf(0.8, 0.2, 0.2), labelcolor=TXT, fontsize=9, width=25)
+                                btn_rm_l = Button(map_grid[row_offset + i - 1, 2], label="[x]", buttoncolor=RGBf(0.8, 0.2, 0.2), labelcolor=TXT, fontsize=9, width=25)
                                 let rm_id = lid
                                     on(btn_rm_l.clicks) do _
                                         filter!(x -> x != rm_id, map_selected_left[])
@@ -4787,7 +5136,7 @@ function create_metadata_window(
                                 rid = cur_right_sel[j]
                                 lbl_txt = right_labels[j]
                                 Label(map_grid[row_offset + j - 1, 3], lbl_txt, fontsize=9, color=TXT, halign=:left)
-                                btn_rm_r = Button(map_grid[row_offset + j - 1, 4], label="✕", buttoncolor=RGBf(0.8, 0.2, 0.2), labelcolor=TXT, fontsize=9, width=25)
+                                btn_rm_r = Button(map_grid[row_offset + j - 1, 4], label="[x]", buttoncolor=RGBf(0.8, 0.2, 0.2), labelcolor=TXT, fontsize=9, width=25)
                                 let rm_id = rid
                                     on(btn_rm_r.clicks) do _
                                         filter!(x -> x != rm_id, map_selected_right[])
@@ -6715,6 +7064,7 @@ function create_metadata_window(
     _lmw_observables[:obs_flag_reg] = obs_flag_reg
 
     return res
+
 end
 
 """
@@ -6745,6 +7095,14 @@ function display_metadata_window(fig::Figure)
     lock(GLOBAL_OPENGL_LOCK) do
         display(screen, fig)
     end
+    # Loading Overlay for Makie
+    overlay_grid = GridLayout(fig.layout[1:end, 1:end], tellwidth=false, tellheight=false, )
+    loading_bg = Box(overlay_grid[1, 1], color=(:black, 0.85), strokewidth=0)
+    loading_txt = Label(overlay_grid[1, 1], "LOADING APPLICATION...\nPlease wait while engines initialize.", color=:white, fontsize=30, font=:bold, halign=:center, valign=:center)
+    
+    _lmw_observables[:loading_overlay_bg] = loading_bg
+    _lmw_observables[:loading_overlay_txt] = loading_txt
+
     return screen
 end
 

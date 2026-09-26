@@ -1146,6 +1146,28 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         MEH.set_ai_status!("[AI Disabled] (Viewer Mode)")
     end
 
+    put!(mainViewer.channel, MedEye3d.MakieEvents.SetWindowTitleEvent("MedEye3d - LOADING APPLICATION... PLEASE WAIT"))
+
+    @async begin
+        sleep(6.0) # Wait for JIT warmup and bone subsegments
+        try
+            put!(mainViewer.channel, MedEye3d.MakieEvents.SetWindowTitleEvent("MedEye3d - Ready"))
+            if makie_win !== nothing
+                obs = MedEye3d.LesionMetadataWindow._lmw_observables
+                if haskey(obs, :loading_overlay_bg)
+                    obs[:loading_overlay_bg].visible = false
+                    obs[:loading_overlay_txt].visible = false
+                end
+            end
+            
+            MEH.app_is_loading[] = false
+            put!(mainViewer.channel, MedEye3d.MakieEvents.RenderRequestEvent())
+        catch e
+
+            @warn "Failed to hide loading screen: $e"
+        end
+    end
+
     println("MedEye3D interactive clinical workflow initialized.")
     
     # 8. Pre-build E-PSMA structured reports (async, non-blocking)

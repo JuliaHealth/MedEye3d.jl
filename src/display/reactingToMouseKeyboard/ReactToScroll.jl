@@ -80,7 +80,29 @@ Handles continuous scaling logic when holding `Shift` + `Scroll`.
 The zooming dynamically recalculates `calcDimsStruct.zoom` and clips bounds (1.0x - 40.0x zoom). Automatically resets panning logic when fully zoomed out. Triggers a render pass immediately upon recalculation.
 """
 function reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFields})
+    MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+    if MEH.measurements_mode[]
+        # Resize measurement sphere!
+        delta = data.scroll_delta > 0 ? 1.0f0 : -1.0f0
+        if is_shift_down_ref[]
+            delta *= 5.0f0 # Faster resize
+        end
+        old_val = MEH.active_measurement_radius_mm[]
+        new_val = clamp(old_val + delta, 1.0f0, 100.0f0)
+        MEH.active_measurement_radius_mm[] = new_val
+        
+        # Also update the active measurement if any
+        Measurements = parentmodule(@__MODULE__).Measurements
+        obj = mainStates[1].mainForDisplayObjects
+        active_idx = findfirst(m -> m.is_active, obj.measurements)
+        if active_idx !== nothing
+            obj.measurements[active_idx].radius_mm = new_val
+        end
+        return
+    end
+
     win_idx = clamp(data.window_id, 1, 2)
+
     zoomState = quadZoomStates[win_idx]
     
     panelIdx = if zoomState.isZoomed

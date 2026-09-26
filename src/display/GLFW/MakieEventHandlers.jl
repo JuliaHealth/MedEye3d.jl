@@ -42,6 +42,8 @@ const cursor_info_text = Observable{String}("")      # "HU: 45 | SUV: 3.2 | femu
 const cursor_study_text = Observable{String}("")     # "PET TP0" or "L: PET TP0 | R: PET TP3"
 # 3D voxel position under cursor (axial orientation: x, y, z=slice) — used for new lesion anatomy lookup
 const cursor_voxel_pos = Observable{Tuple{Int,Int,Int}}((0,0,0))
+# Measurement info — dedicated Observable for live measurement values during drag
+const measurement_info_text = Observable{String}("")  # "⬤ Sphere: SUVmean=0.42 SUVmax=1.23 R=10.0mm"
 
 """Safe Makie redraw trigger — uses a dedicated no-op Observable instead of
 notify(fig.scene.visible) which can cause blinking by toggling scene visibility."""
@@ -147,8 +149,9 @@ function _run_phase_transition(old, new, stateObjects)
 end
 
 const current_viewer_position = Ref((0, 0, 0))
+const app_is_loading = Ref(true)
 const current_hovered_panel = Ref{Int}(0)
-export cursor_info_text, cursor_study_text, set_ai_status!, current_viewer_position, current_hovered_panel
+export cursor_info_text, cursor_study_text, set_ai_status!, current_viewer_position, current_hovered_panel, measurement_info_text
 
 # Sanitize AI status text for Makie Label rendering (ASCII-only, truncated)
 function safe_status_text(msg::String)
@@ -418,6 +421,12 @@ const _m2_crosshair_sync = Ref(true)
 const _flicker_active = Ref(false)
 const _flicker_show_current = Ref(true)
 const _flicker_timer = Ref{Union{Nothing,Timer}}(nothing)
+
+# Measurement mode state
+const measurements_mode = Observable{Bool}(false)
+const active_measurement_radius_mm = Observable{Float32}(10.0f0)
+const measurement_sub_mode = Observable{Symbol}(:sphere)  # :sphere or :line
+export measurements_mode, active_measurement_radius_mm, measurement_sub_mode
 
 """Force direct texture upload for a panel — bypasses scroll pipeline entirely."""
 function _force_texture_upload!(stateObjects::Vector{StateDataFields}, panel_idx::Int)
@@ -1608,6 +1617,27 @@ function register_h5_mask_saver!(h5_path::String, studies_list::Vector)
     studies_ref[] = studies_list
     println("  [AUTOSAVE-MASK] Registered HDF5 mask persistence: $h5_path ($(length(studies_list)) studies)"); flush(stdout)
     _ensure_mask_autosave_task!()
+    # Load measurements now that HDF5 path is available
+    try
+        if _main_obj_ref[] !== nothing
+            println("  [MEAS-INIT] Deferred load: tp=$(current_tp_index[]), h5=$h5_path"); flush(stdout)
+            load_measurements_from_h5!(current_tp_index[], _main_obj_ref[])
+        else
+            # _main_obj_ref not yet set — schedule a deferred load
+            @async begin
+                for _wait_i in 1:50  # Wait up to 5 seconds
+                    sleep(0.1)
+                    if _main_obj_ref[] !== nothing
+                        println("  [MEAS-INIT] Deferred load (async, after $(_wait_i*100)ms): tp=$(current_tp_index[])"); flush(stdout)
+                        load_measurements_from_h5!(current_tp_index[], _main_obj_ref[])
+                        break
+                    end
+                end
+            end
+        end
+    catch e
+        println("  [MEAS-INIT] Deferred load error: $e"); flush(stdout)
+    end
 end
 
 function mark_tp_mask_dirty!(tp_idx::Int)
@@ -1688,6 +1718,8 @@ function flush_all_dirty_masks!()
 end
 
 const _mask_autosave_task_started = Ref(false)
+const _measurement_dirty = Ref(false)
+
 function _ensure_mask_autosave_task!()
     _mask_autosave_task_started[] && return
     _mask_autosave_task_started[] = true
@@ -1697,9 +1729,148 @@ function _ensure_mask_autosave_task!()
             if !isempty(dirty_mask_tps) && !isempty(h5_save_path_ref[])
                 flush_all_dirty_masks!()
             end
+            # Also autosave measurements if dirty
+            if _measurement_dirty[] && !isempty(h5_save_path_ref[])
+                try
+                    save_measurements_to_h5()
+                    _measurement_dirty[] = false
+                catch e
+                    @warn "Measurement autosave failed" exception=e
+                end
+            end
         end
     end
 end
+
+export mark_measurements_dirty!, save_measurements_to_h5, load_measurements_from_h5!
+
+"""Mark measurements as needing autosave. Called after any measurement change."""
+function mark_measurements_dirty!()
+    _measurement_dirty[] = true
+end
+
+"""Save current measurements to HDF5 as a string attribute on the time point group."""
+function save_measurements_to_h5()
+    h5_path = h5_save_path_ref[]
+    studies_list = studies_ref[]
+    if isempty(h5_path) || !isfile(h5_path) || isempty(studies_list)
+        println("  [AUTOSAVE-MEAS] Skip: h5_path='$(h5_path)' isfile=$(isfile(h5_path)) nstudies=$(length(studies_list))"); flush(stdout)
+        return
+    end
+    tp_i = current_tp_index[]
+    if tp_i < 0 || tp_i >= length(studies_list)
+        println("  [AUTOSAVE-MEAS] Skip: tp_i=$tp_i out of range (nstudies=$(length(studies_list)))"); flush(stdout)
+        return
+    end
+    
+    # Get measurements from the display objects (stored on panel 1)
+    Meas = parentmodule(parentmodule(@__MODULE__)).Measurements
+    obj = nothing
+    try
+        obj = _get_main_display_objects()
+    catch; end
+    if obj === nothing
+        println("  [AUTOSAVE-MEAS] Skip: _main_obj_ref is nothing"); flush(stdout)
+        return
+    end
+    
+    serialized = Meas.serialize_measurements(obj.measurements, obj.line_measurements)
+    
+    study = studies_list[tp_i + 1]
+    modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname = study[1:8]
+    group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
+    
+    lock(_hdf5_io_lock) do
+        HDF5.h5open(h5_path, "r+") do h5_file
+            if haskey(h5_file, group)
+                g = h5_file[group]
+                # Write as an attribute on the group
+                attr_name = "measurements"
+                if haskey(HDF5.attributes(g), attr_name)
+                    HDF5.delete_attribute(g, attr_name)
+                end
+                HDF5.attributes(g)[attr_name] = serialized
+                n_spheres = count(m -> !m.is_active, obj.measurements)
+                n_lines = count(m -> !m.is_active, obj.line_measurements)
+                println("  [AUTOSAVE-MEAS] Saved $(n_spheres) spheres + $(n_lines) lines to $group"); flush(stdout)
+            end
+        end
+    end
+end
+
+"""Load measurements from HDF5 for the given time point and populate the display objects."""
+function load_measurements_from_h5!(tp_i::Int, obj)
+    h5_path = h5_save_path_ref[]
+    studies_list = studies_ref[]
+    if isempty(h5_path) || !isfile(h5_path) || isempty(studies_list)
+        return
+    end
+    if tp_i < 0 || tp_i >= length(studies_list)
+        return
+    end
+    
+    Meas = parentmodule(parentmodule(@__MODULE__)).Measurements
+    study = studies_list[tp_i + 1]
+    modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname = study[1:8]
+    group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
+    
+    serialized = ""
+    try
+        lock(_hdf5_io_lock) do
+            HDF5.h5open(h5_path, "r") do h5_file
+                if haskey(h5_file, group)
+                    g = h5_file[group]
+                    if haskey(HDF5.attributes(g), "measurements")
+                        serialized = read(HDF5.attributes(g)["measurements"])
+                    end
+                end
+            end
+        end
+    catch e
+        @warn "Failed to load measurements from HDF5" exception=e
+    end
+    
+    if !isempty(serialized)
+        spheres, lines = Meas.deserialize_measurements(serialized)
+        empty!(obj.measurements)
+        append!(obj.measurements, spheres)
+        empty!(obj.line_measurements)
+        append!(obj.line_measurements, lines)
+        println("  [AUTOSAVE-MEAS] Loaded $(length(spheres)) spheres + $(length(lines)) lines from $group"); flush(stdout)
+        # Trigger GUI refresh so measurement rows appear
+        try
+            LMW = _get_lmw()
+            if LMW !== nothing
+                obs = getfield(LMW, :_lmw_observables)
+                if haskey(obs, :obs_refresh_measurements)
+                    obs[:obs_refresh_measurements][] = obj
+                end
+            end
+        catch; end
+        # Also schedule a delayed refresh in case the GUI wasn't ready
+        @async begin
+            sleep(2.0)
+            try
+                LMW2 = _get_lmw()
+                if LMW2 !== nothing
+                    obs2 = getfield(LMW2, :_lmw_observables)
+                    if haskey(obs2, :obs_refresh_measurements)
+                        obs2[:obs_refresh_measurements][] = obj
+                    end
+                end
+            catch; end
+        end
+    end
+end
+
+"""Get the panel 1 mainForDisplayObjects. Returns nothing if not available."""
+function _get_main_display_objects()
+    ch = main_event_channel[]
+    # We can't get state objects from here directly — store a ref
+    _main_obj_ref[]
+end
+const _main_obj_ref = Ref{Any}(nothing)
+export _main_obj_ref
 
 function register_main_channel!(ch::Channel)
     main_event_channel[] = ch
@@ -2231,6 +2402,14 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
     tp_indices = sort(collect(keys(tp_labels)))
     num_tps = length(tp_indices)
     
+    # Save current TP measurements before switching
+    try
+        if _measurement_dirty[] && _main_obj_ref[] !== nothing
+            save_measurements_to_h5()
+            _measurement_dirty[] = false
+        end
+    catch; end
+    
     # Find current position in the sorted list
     cur_pos = findfirst(==(current_tp_index[]), tp_indices)
     if cur_pos === nothing
@@ -2241,6 +2420,13 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
     new_pos = mod1(cur_pos + data.change, num_tps)
     new_tp = tp_indices[new_pos]
     current_tp_index[] = new_tp
+    
+    # Load measurements for the new time point
+    try
+        if _main_obj_ref[] !== nothing
+            load_measurements_from_h5!(new_tp, _main_obj_ref[])
+        end
+    catch; end
     
     label = get(tp_labels, new_tp, "TP $new_tp")
     @debug "TP Navigation: switching to $label (index=$new_tp)"
@@ -2398,6 +2584,13 @@ end
 function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{StateDataFields})
     t_total = time_ns()
     if !isempty(dirty_mask_tps); Threads.@spawn flush_all_dirty_masks!(); end
+    # Save measurements before TP switch
+    try
+        if _measurement_dirty[] && _main_obj_ref[] !== nothing
+            save_measurements_to_h5()
+            _measurement_dirty[] = false
+        end
+    catch; end
     if isempty(tp_labels)
         @debug "No TP labels loaded. TP navigation disabled."
         return
@@ -2461,6 +2654,12 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
     else
         # Single mode: load target_tp into all panels
         current_tp_index[] = target_tp
+        # Load measurements for the new time point
+        try
+            if _main_obj_ref[] !== nothing
+                load_measurements_from_h5!(target_tp, _main_obj_ref[])
+            end
+        catch; end
         label = get(tp_labels, target_tp, "TP $target_tp")
         @debug "TP Navigation: switching to $label (index=$target_tp)"
         
@@ -3146,6 +3345,11 @@ end
 
 atexit() do
     flush_all_dirty_masks!()
+    try
+        if _measurement_dirty[] && _main_obj_ref[] !== nothing
+            save_measurements_to_h5()
+        end
+    catch; end
 end
 
 function reactToSetM2Reference(data::SetM2ReferenceEvent, stateObjects::Vector{StateDataFields})
@@ -3196,5 +3400,255 @@ function reactToSetM2Reference(data::SetM2ReferenceEvent, stateObjects::Vector{S
     end
 end
 export reactToSetM2Reference
+
+# ─── Measurement Mode Handlers ──────────────────────────────────────────
+
+export reactToToggleMeasurementMode, reactToJumpToMeasurement, reactToDeleteMeasurement
+
+function reactToToggleMeasurementMode(data::MakieEvents.ToggleMeasurementModeEvent, stateObjects::Vector{StateDataFields})
+    measurements_mode[] = !measurements_mode[]
+    if !measurements_mode[]
+        editing_measurement_id[] = 0
+        editing_measurement_type[] = :none
+    end
+    @info "Measurement mode: $(measurements_mode[] ? "ON" : "OFF")"
+    
+    # Notify LMW GUI if available
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing
+            obs_dict = getfield(LMW, :_lmw_observables)
+            if haskey(obs_dict, :obs_measurement_mode_changed)
+                obs_dict[:obs_measurement_mode_changed][] = obs_dict[:obs_measurement_mode_changed][] + 1
+            end
+        end
+    catch; end
+end
+
+function reactToJumpToMeasurement(data::MakieEvents.JumpToMeasurementEvent, stateObjects::Vector{StateDataFields})
+    if isempty(stateObjects) || length(stateObjects) < 4
+        return
+    end
+    
+    Meas = parentmodule(parentmodule(@__MODULE__)).Measurements
+    obj = stateObjects[1].mainForDisplayObjects
+    
+    idx = findfirst(m -> m.id == data.id, obj.measurements)
+    if idx !== nothing
+        m = obj.measurements[idx]
+        cx, cy, cz = round(Int, m.center_idx[1]), round(Int, m.center_idx[2]), round(Int, m.center_idx[3])
+    else
+        idx_line = findfirst(m -> m.id == data.id, obj.line_measurements)
+        if idx_line !== nothing
+            m = obj.line_measurements[idx_line]
+            cx, cy, cz = round(Int, (m.start_idx[1] + m.end_idx[1])/2), round(Int, (m.start_idx[2] + m.end_idx[2])/2), round(Int, (m.start_idx[3] + m.end_idx[3])/2)
+        else
+            @warn "Measurement #$(data.id) not found"
+            return
+        end
+    end
+    
+    @info "Jumping to measurement #$(data.id) at voxel ($cx, $cy, $cz)"
+    
+    # Jump all panels to the measurement center
+    # Panel 1/2/5: Axial, scroll Z
+    # Panel 3: Sagittal, scroll X
+    # Panel 4: Coronal, scroll Y
+    targets = Dict{Int,Int}(1 => cz, 2 => cz, 3 => cx, 4 => cy)
+    if length(stateObjects) >= 5
+        targets[5] = cz
+    end
+    
+    ReactToScroll = parentmodule(parentmodule(@__MODULE__)).ReactToScroll
+    ReactToScroll.reactToScrollMultiPanel!(collect(keys(targets)), stateObjects, targets)
+    current_viewer_position[] = (cx, cy, cz)
+
+end
+
+function reactToDeleteMeasurement(data::MakieEvents.DeleteMeasurementEvent, stateObjects::Vector{StateDataFields})
+    if isempty(stateObjects)
+        return
+    end
+    
+    obj = stateObjects[1].mainForDisplayObjects
+    if data.id == -1
+        # Clear all measurements
+        for so in stateObjects
+            empty!(so.mainForDisplayObjects.measurements)
+        end
+        @info "Cleared all measurements"
+    else
+        idx = findfirst(m -> m.id == data.id, obj.measurements)
+        if idx !== nothing
+            deleteat!(obj.measurements, idx)
+            @info "Deleted measurement #$(data.id)"
+        end
+    end
+    if data.id == -1 || editing_measurement_id[] == data.id
+        editing_measurement_id[] = 0
+        editing_measurement_type[] = :none
+    end
+    mark_measurements_dirty!()
+    
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing
+            obs = getfield(LMW, :_lmw_observables)
+            if haskey(obs, :obs_refresh_measurements)
+                obs[:obs_refresh_measurements][] = obj
+            end
+        end
+    catch; end
+end
+
+# ─── Line Measurement Handlers ──────────────────────────────────────────
+
+export reactToCycleMeasurementSubMode, reactToDeleteLineMeasurement, reactToJumpToLineMeasurement
+
+function reactToCycleMeasurementSubMode(data::MakieEvents.CycleMeasurementSubModeEvent, stateObjects::Vector{StateDataFields})
+    measurement_sub_mode[] = measurement_sub_mode[] == :sphere ? :line : :sphere
+    @info "Measurement sub-mode: $(measurement_sub_mode[])"
+    
+    # Notify GUI
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing
+            obs_dict = getfield(LMW, :_lmw_observables)
+            if haskey(obs_dict, :obs_measurement_mode_changed)
+                obs_dict[:obs_measurement_mode_changed][] = obs_dict[:obs_measurement_mode_changed][] + 1
+            end
+        end
+    catch; end
+end
+
+function reactToDeleteLineMeasurement(data::MakieEvents.DeleteLineMeasurementEvent, stateObjects::Vector{StateDataFields})
+    if isempty(stateObjects)
+        return
+    end
+    obj = stateObjects[1].mainForDisplayObjects
+    if data.id == -1
+        for so in stateObjects
+            empty!(so.mainForDisplayObjects.line_measurements)
+        end
+        @info "Cleared all line measurements"
+    else
+        idx = findfirst(m -> m.id == data.id, obj.line_measurements)
+        if idx !== nothing
+            deleteat!(obj.line_measurements, idx)
+            @info "Deleted line measurement #$(data.id)"
+        end
+    end
+    if data.id == -1 || editing_measurement_id[] == data.id
+        editing_measurement_id[] = 0
+        editing_measurement_type[] = :none
+    end
+    mark_measurements_dirty!()
+    
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing
+            obs = getfield(LMW, :_lmw_observables)
+            if haskey(obs, :obs_refresh_measurements)
+                obs[:obs_refresh_measurements][] = obj
+            end
+        end
+    catch; end
+end
+
+function reactToJumpToLineMeasurement(data::MakieEvents.JumpToLineMeasurementEvent, stateObjects::Vector{StateDataFields})
+    if isempty(stateObjects) || length(stateObjects) < 4
+        return
+    end
+    
+    obj = stateObjects[1].mainForDisplayObjects
+    idx = findfirst(m -> m.id == data.id, obj.line_measurements)
+    if idx === nothing
+        @warn "Line measurement #$(data.id) not found"
+        return
+    end
+    
+    lm = obj.line_measurements[idx]
+    # Jump to midpoint of the line
+    mx = round(Int, (lm.start_idx[1] + lm.end_idx[1]) / 2)
+    my = round(Int, (lm.start_idx[2] + lm.end_idx[2]) / 2)
+    mz = round(Int, (lm.start_idx[3] + lm.end_idx[3]) / 2)
+    
+    @info "Jumping to line measurement #$(data.id) midpoint ($mx, $my, $mz)"
+    
+    targets = Dict{Int,Int}(1 => mz, 2 => mz, 3 => mx, 4 => my)
+    if length(stateObjects) >= 5
+        targets[5] = mz
+    end
+    
+    ReactToScroll = parentmodule(parentmodule(@__MODULE__)).ReactToScroll
+    ReactToScroll.reactToScrollMultiPanel!(collect(keys(targets)), stateObjects, targets)
+    current_viewer_position[] = (mx, my, mz)
+
+end
+
+# ─── Edit Measurement Handlers ──────────────────────────────────────────────
+# Observable to track which measurement is in "edit" mode (ready for edge/endpoint drag)
+const editing_measurement_id = Observable{Int}(0)   # 0 = none
+const editing_measurement_type = Observable{Symbol}(:none)  # :sphere or :line
+export editing_measurement_id, editing_measurement_type
+export reactToEditMeasurement, reactToEditLineMeasurement
+
+function reactToEditMeasurement(data::MakieEvents.EditMeasurementEvent, stateObjects::Vector{StateDataFields})
+    if isempty(stateObjects); return; end
+    obj = stateObjects[1].mainForDisplayObjects
+    idx = findfirst(m -> m.id == data.id, obj.measurements)
+    if idx === nothing; return; end
+    
+    m = obj.measurements[idx]
+    # Enable measurement mode + sphere sub-mode
+    measurements_mode[] = true
+    measurement_sub_mode[] = :sphere
+    # Initialize per-axis radii from base radius
+    if m.radius_x_mm <= 0; m.radius_x_mm = m.radius_mm; end
+    if m.radius_y_mm <= 0; m.radius_y_mm = m.radius_mm; end
+    if m.radius_z_mm <= 0; m.radius_z_mm = m.radius_mm; end
+    # Mark as editing — next click near edge will start drag
+    editing_measurement_id[] = data.id
+    editing_measurement_type[] = :sphere
+    println("  [MEAS-EDIT] Sphere #$(data.id) ready for editing"); flush(stdout)
+    
+    # Jump to the sphere center
+    cx, cy, cz = round(Int, m.center_idx[1]), round(Int, m.center_idx[2]), round(Int, m.center_idx[3])
+    targets = Dict{Int,Int}()
+    for i in 1:min(2, length(stateObjects)); targets[i] = cz; end
+    if length(stateObjects) >= 3; targets[3] = cx; end
+    if length(stateObjects) >= 4; targets[4] = cy; end
+    if length(stateObjects) >= 5; targets[5] = cz; end
+    ReactToScroll = parentmodule(parentmodule(@__MODULE__)).ReactToScroll
+    ReactToScroll.reactToScrollMultiPanel!(collect(keys(targets)), stateObjects, targets)
+end
+
+function reactToEditLineMeasurement(data::MakieEvents.EditLineMeasurementEvent, stateObjects::Vector{StateDataFields})
+    if isempty(stateObjects); return; end
+    obj = stateObjects[1].mainForDisplayObjects
+    idx = findfirst(m -> m.id == data.id, obj.line_measurements)
+    if idx === nothing; return; end
+    
+    lm = obj.line_measurements[idx]
+    # Enable measurement mode + line sub-mode
+    measurements_mode[] = true
+    measurement_sub_mode[] = :line
+    # Mark as editing
+    editing_measurement_id[] = data.id
+    editing_measurement_type[] = :line
+    println("  [MEAS-EDIT] Line #$(data.id) ready for editing"); flush(stdout)
+    
+    # Jump to the line midpoint
+    mx = round(Int, (lm.start_idx[1] + lm.end_idx[1]) / 2)
+    my = round(Int, (lm.start_idx[2] + lm.end_idx[2]) / 2)
+    mz = round(Int, (lm.start_idx[3] + lm.end_idx[3]) / 2)
+    targets = Dict{Int,Int}()
+    for i in 1:min(2, length(stateObjects)); targets[i] = mz; end
+    if length(stateObjects) >= 3; targets[3] = mx; end
+    if length(stateObjects) >= 4; targets[4] = my; end
+    if length(stateObjects) >= 5; targets[5] = mz; end
+    ReactToScroll = parentmodule(parentmodule(@__MODULE__)).ReactToScroll
+    ReactToScroll.reactToScrollMultiPanel!(collect(keys(targets)), stateObjects, targets)
+end
 
 end
