@@ -16,7 +16,7 @@ using ..VulkanBuffers: create_buffer, VkQuadBuffers
 using ..VulkanShaders: compile_glsl_to_spirv, create_shader_module
 using ..VulkanTextures: VkTexture
 
-export VkPipelineState, create_pipeline_state, destroy_pipeline_state!
+export VkPipelineState, VkVectorPipelineState, VkVectorPipelineState, create_pipeline_state, destroy_pipeline_state!
 export update_ubo!, update_descriptor_textures!
 
 # ─── Constants for std140 UBO layout ───────────────────────────────────
@@ -45,6 +45,12 @@ Holds all the Vulkan pipeline resources for a rendering pipeline:
 - Descriptor pool and allocated descriptor sets
 - UBO buffer and memory for uniform parameter updates
 """
+
+mutable struct VkVectorPipelineState
+    pipeline::Pipeline
+    pipeline_layout::PipelineLayout
+end
+
 mutable struct VkPipelineState
     pipeline::Pipeline
     pipeline_layout::PipelineLayout
@@ -460,4 +466,148 @@ function destroy_pipeline_state!(ctx::VkCtx, state::VkPipelineState)
     unwrap(device_wait_idle(ctx.device))
 end
 
+export create_vector_pipeline_state
+
+function create_vector_pipeline_state(ctx::VkCtx, n_textures::Int, vert_mod::ShaderModule, frag_mod::ShaderModule)::VkVectorPipelineState
+    pc_ranges = [
+        VulkanCore.VkPushConstantRange(
+            VulkanCore.VK_SHADER_STAGE_VERTEX_BIT | VulkanCore.VK_SHADER_STAGE_FRAGMENT_BIT,
+            UInt32(0), UInt32(48)
+        )
+    ]
+
+    pl_ref = Ref{VulkanCore.VkPipelineLayout}(C_NULL)
+    plci = Ref(VulkanCore.VkPipelineLayoutCreateInfo(
+        VulkanCore.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+        C_NULL, UInt32(0),
+        UInt32(0), C_NULL,
+        UInt32(length(pc_ranges)), pointer(pc_ranges)
+    ))
+
+    fptr = VulkanCore.vkGetInstanceProcAddr(ctx.device.physical_device.instance.vks, "vkCreatePipelineLayout")
+    if fptr == C_NULL
+        fptr = VulkanCore.vkGetDeviceProcAddr(ctx.device.vks, "vkCreatePipelineLayout")
+    end
+    result = ccall(fptr, VulkanCore.VkResult,
+        (VulkanCore.VkDevice, Ptr{VulkanCore.VkPipelineLayoutCreateInfo}, Ptr{Cvoid}, Ptr{VulkanCore.VkPipelineLayout}),
+        ctx.device.vks, plci, C_NULL, pl_ref)
+    result != VulkanCore.VK_SUCCESS && error("vkCreatePipelineLayout for vector failed: $result")
+    
+    pipeline_layout = PipelineLayout(pl_ref[], ctx.device, Threads.Atomic{UInt64}(1))
+
+    bindings = [
+        VulkanCore.VkVertexInputBindingDescription(UInt32(0), UInt32(24), VulkanCore.VK_VERTEX_INPUT_RATE_VERTEX)
+    ]
+    attrs = [
+        VulkanCore.VkVertexInputAttributeDescription(UInt32(0), UInt32(0), VulkanCore.VK_FORMAT_R32G32_SFLOAT, UInt32(0)),
+        VulkanCore.VkVertexInputAttributeDescription(UInt32(1), UInt32(0), VulkanCore.VK_FORMAT_R32G32B32A32_SFLOAT, UInt32(8))
+    ]
+
+    entry = b"main\0"
+    stages = [
+        VulkanCore.VkPipelineShaderStageCreateInfo(
+            VulkanCore.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            C_NULL, UInt32(0),
+            VulkanCore.VK_SHADER_STAGE_VERTEX_BIT,
+            vert_mod.vks, pointer(entry), C_NULL
+        ),
+        VulkanCore.VkPipelineShaderStageCreateInfo(
+            VulkanCore.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            C_NULL, UInt32(0),
+            VulkanCore.VK_SHADER_STAGE_FRAGMENT_BIT,
+            frag_mod.vks, pointer(entry), C_NULL
+        )
+    ]
+
+    vi = [VulkanCore.VkPipelineVertexInputStateCreateInfo(
+        VulkanCore.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+        C_NULL, UInt32(0),
+        UInt32(1), pointer(bindings),
+        UInt32(2), pointer(attrs)
+    )]
+
+    ia = [VulkanCore.VkPipelineInputAssemblyStateCreateInfo(
+        VulkanCore.VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+        C_NULL, UInt32(0),
+        VulkanCore.VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, UInt32(0)
+    )]
+
+    dyn_states = [VulkanCore.VK_DYNAMIC_STATE_VIEWPORT, VulkanCore.VK_DYNAMIC_STATE_SCISSOR]
+    dyn = [VulkanCore.VkPipelineDynamicStateCreateInfo(
+        VulkanCore.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+        C_NULL, UInt32(0),
+        UInt32(length(dyn_states)), pointer(dyn_states)
+    )]
+    
+    vp = [VulkanCore.VkPipelineViewportStateCreateInfo(
+        VulkanCore.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        C_NULL, UInt32(0), UInt32(1), C_NULL, UInt32(1), C_NULL
+    )]
+
+    raster = [VulkanCore.VkPipelineRasterizationStateCreateInfo(
+        VulkanCore.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+        C_NULL, UInt32(0),
+        UInt32(0), UInt32(0),
+        VulkanCore.VK_POLYGON_MODE_FILL,
+        UInt32(0),
+        VulkanCore.VK_FRONT_FACE_COUNTER_CLOCKWISE,
+        UInt32(0), 1.0f0, 0.0f0, 0.0f0, 1.0f0
+    )]
+
+    ms = [VulkanCore.VkPipelineMultisampleStateCreateInfo(
+        VulkanCore.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+        C_NULL, UInt32(0), VulkanCore.VK_SAMPLE_COUNT_1_BIT, UInt32(0),
+        1.0f0, C_NULL, UInt32(0), UInt32(0)
+    )]
+
+    cba = [VulkanCore.VkPipelineColorBlendAttachmentState(
+        UInt32(1), # blendEnable (TRUE)
+        VulkanCore.VK_BLEND_FACTOR_SRC_ALPHA,
+        VulkanCore.VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+        VulkanCore.VK_BLEND_OP_ADD,
+        VulkanCore.VK_BLEND_FACTOR_ONE,
+        VulkanCore.VK_BLEND_FACTOR_ZERO,
+        VulkanCore.VK_BLEND_OP_ADD,
+        VulkanCore.VK_COLOR_COMPONENT_R_BIT | VulkanCore.VK_COLOR_COMPONENT_G_BIT |
+        VulkanCore.VK_COLOR_COMPONENT_B_BIT | VulkanCore.VK_COLOR_COMPONENT_A_BIT
+    )]
+
+    cb = [VulkanCore.VkPipelineColorBlendStateCreateInfo(
+        VulkanCore.VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+        C_NULL, UInt32(0), UInt32(0), VulkanCore.VK_LOGIC_OP_CLEAR,
+        UInt32(1), pointer(cba), (0.0f0, 0.0f0, 0.0f0, 0.0f0)
+    )]
+
+    pci = [VulkanCore.VkGraphicsPipelineCreateInfo(
+        VulkanCore.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+        C_NULL, UInt32(0), UInt32(2), pointer(stages),
+        pointer(vi), pointer(ia), C_NULL,
+        pointer(vp), pointer(raster), pointer(ms),
+        C_NULL, pointer(cb), pointer(dyn),
+        pipeline_layout.vks, ctx.render_pass.vks, UInt32(0), C_NULL, -1
+    )]
+
+    pipeline_ref = Ref{VulkanCore.VkPipeline}(C_NULL)
+    fcreate = VulkanCore.vkGetInstanceProcAddr(ctx.device.physical_device.instance.vks, "vkCreateGraphicsPipelines")
+    if fcreate == C_NULL
+        fcreate = VulkanCore.vkGetDeviceProcAddr(ctx.device.vks, "vkCreateGraphicsPipelines")
+    end
+    
+    # Must preserve ALL arrays that have their pointers passed into structs above
+    GC.@preserve bindings attrs entry stages vi ia dyn_states dyn vp raster ms cba cb pci begin
+        res = ccall(fcreate, VulkanCore.VkResult,
+            (VulkanCore.VkDevice, VulkanCore.VkPipelineCache, UInt32, Ptr{VulkanCore.VkGraphicsPipelineCreateInfo}, Ptr{Cvoid}, Ptr{VulkanCore.VkPipeline}),
+            ctx.device.vks, C_NULL, UInt32(1), pointer(pci), C_NULL, pipeline_ref)
+        res != VulkanCore.VK_SUCCESS && error("vkCreateGraphicsPipelines for vector failed: $res")
+    end
+
+    pipeline = Pipeline(pipeline_ref[], ctx.device, Threads.Atomic{UInt64}(1))
+
+    return VkVectorPipelineState(pipeline, pipeline_layout)
+end
+
 end # module VulkanPipeline
+
+
+
+

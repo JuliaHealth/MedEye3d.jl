@@ -108,6 +108,39 @@ Synchronized scrolling is **ON by default**. When enabled, scrolling on any pane
 
 ---
 
+## Measurements
+
+### Mode Control
+
+| Shortcut | Action | Notes |
+|----------|--------|-------|
+| **Shift + M** | Toggle measurement mode ON/OFF | Enter/exit measurement mode |
+| **Shift + L** | Cycle sub-mode: Sphere ↔ Line | Switches between SUV sphere and line distance tools |
+
+### SUV Spheres (Sphere sub-mode)
+
+| Shortcut | Action | Notes |
+|----------|--------|-------|
+| **Shift + Scroll** | Resize measurement sphere radius | 5mm steps when shift held |
+| **Left Click** (in sphere mode) | Place sphere measurement | Computes SUV mean/max in the sphere |
+| **Hover** over saved sphere | Shows SUV mean/max in cursor info bar | Works in any mode |
+
+### Line Distances (Line sub-mode)
+
+| Shortcut | Action | Notes |
+|----------|--------|-------|
+| **Left Click** (first, in line mode) | Set start point of line | Green rubberband follows cursor |
+| **Left Click** (second, in line mode) | Set end point and save | Computes distance in mm using voxel spacing |
+
+> **GUI**: The "Measurements" panel in the sidebar has:
+> - Toggle button (Shift+M) for measurement mode
+> - Sub-mode buttons: Sphere (SUV) / Line (cm)
+> - Radius slider (sphere mode only)
+> - Show/Hide + Clear All buttons
+> - Combined measurement list with [>] (jump to) and [x] (delete) per entry
+
+---
+
 ## Legacy / Not Working
 
 > These shortcuts exist in the codebase but are non-functional or have been superseded.

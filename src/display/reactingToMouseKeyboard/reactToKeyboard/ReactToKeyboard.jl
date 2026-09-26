@@ -25,7 +25,7 @@ function _get_event_channel()
         return keyboard_channel_ref[]
     end
     try
-        p = parentmodule(parentmodule(@__MODULE__))
+        p = parentmodule(@__MODULE__)
         if isdefined(p, :SegmentationDisplay) && isdefined(p.SegmentationDisplay, :MakieEventHandlers)
             return p.SegmentationDisplay.MakieEventHandlers.main_event_channel[]
         end
@@ -35,7 +35,7 @@ end
 
 function _is_lesion_review()
     try
-        p = parentmodule(parentmodule(@__MODULE__))
+        p = parentmodule(@__MODULE__)
         if isdefined(p, :SegmentationDisplay) && isdefined(p.SegmentationDisplay, :MakieEventHandlers)
             st = p.SegmentationDisplay.MakieEventHandlers.get_workflow_state()
             return string(st) == "WF_LESION_REVIEW"
@@ -46,7 +46,7 @@ end
 
 function _sync_windowing_gui(modality::String, min_v::Float32, max_v::Float32)
     try
-        top = parentmodule(parentmodule(parentmodule(@__MODULE__)))
+        top = parentmodule(@__MODULE__)
         if isdefined(top, :LesionMetadataWindow)
             obs_dict = getfield(top.LesionMetadataWindow, :_lmw_observables)
             key = modality == "CT" ? :sync_ct_gui : :sync_pet_gui
@@ -353,6 +353,22 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
                 elseif keyInputInfo.action == GLFW.RELEASE
                     put!(ch, MakieEvents.ShowOnlyCTEvent(false))
                 end
+            end
+            return
+
+        # M - Toggle measurement mode (Shift+M)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_M)
+            if keyInputInfo.action == GLFW.PRESS && is_shift_down_ref[]
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.ToggleMeasurementModeEvent())
+            end
+            return
+
+        # L - Cycle measurement sub-mode: Sphere ↔ Line (Shift+L)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_L)
+            if keyInputInfo.action == GLFW.PRESS && is_shift_down_ref[]
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.CycleMeasurementSubModeEvent())
             end
             return
 

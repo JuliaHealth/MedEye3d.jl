@@ -231,6 +231,54 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     end
 
     stateObject = mainStates[mainStates[1].switchIndex]
+    
+    # --- MEASUREMENT INTERCEPT (DRAG) ---
+    MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+    sub_mode = MEH.measurement_sub_mode[]
+    meas_on = MEH.measurements_mode[]
+    if meas_on && (sub_mode == :sphere || sub_mode == :line)
+        MeasMod = parentmodule(@__MODULE__).Measurements
+        calcDim = stateObject.calcDimsStruct
+        first_mouse = mouseStructArray[end]
+        if isempty(first_mouse.lastCoordinates); return; end
+        actualW = first_mouse.actualWindowWidth > 0 ? Float64(first_mouse.actualWindowWidth) : Float64(calcDim.windowWidth)
+        actualH = first_mouse.actualWindowHeight > 0 ? Float64(first_mouse.actualWindowHeight) : Float64(calcDim.windowHeight)
+        
+        c = first_mouse.lastCoordinates[1]
+        texX, texY = StructsManag.getTextureCoordinatesFromScreen(c[1], c[2], calcDim, actualW, actualH)
+        
+        ix, iy = round(Int, texX), round(Int, texY)
+        clickedPanel = mainStates[1].switchIndex
+        slice = stateObject.currentDisplayedSlice
+        
+        cp_mapped = clickedPanel > 5 ? clickedPanel - 5 : clickedPanel
+        if cp_mapped == 3 # Sagittal
+            origX, origY, origZ = slice, ix, iy
+        elseif cp_mapped == 4 # Coronal
+            origX, origY, origZ = ix, slice, iy
+        else # Axial (1,2,5)
+            origX, origY, origZ = ix, iy, slice
+        end
+        
+        # Clean up active ghost measurements from other panels
+        for i in 1:length(mainStates)
+            if i != clickedPanel
+                filter!(m -> !m.is_active, mainStates[i].mainForDisplayObjects.measurements)
+                filter!(m -> !m.is_active, mainStates[i].mainForDisplayObjects.line_measurements)
+            end
+        end
+        
+        # Always store measurements on panel 1's display object for cross-view visibility
+        meas_obj = mainStates[1].mainForDisplayObjects
+        if sub_mode == :sphere
+            _handle_sphere_measurement(first_mouse, mainStates, meas_obj, (Float32(origX), Float32(origY), Float32(origZ)), MEH, MeasMod)
+        elseif sub_mode == :line
+            _handle_line_measurement(first_mouse, mainStates, meas_obj, (Float32(origX), Float32(origY), Float32(origZ)), MEH, MeasMod)
+        end
+        return # Do not paint
+    end
+    # --- END MEASUREMENT INTERCEPT ---
+
     if !stateObject.valueForMasToSet.is_painting_active || isempty(stateObject.textureToModifyVec)
         return
     end
@@ -284,7 +332,7 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     strokeW = Int(texture.strokeWidth)
 
     # ── AI Mask Immutability: Backup original AI mask before first expert edit ──
-    MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
+    MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
     tp_idx = MEH.current_tp_index[]
     raw_val = round(Int, stateObject.valueForMasToSet.value)
     lesion_id = raw_val > 0 ? raw_val : MEH.current_active_lesion_id[]
@@ -355,6 +403,456 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     end
 end#react_to_draw
 
+# ── Measurement Helper Functions ──────────────────────────────────────────────
+
+function _compute_sphere_suv!(m, mainStates)
+    axialState = mainStates[1]
+    pet_dat = nothing
+    for dat in axialState.onScrollData.dataToScroll
+        if dat.name == "PET"
+            pet_dat = dat.dat
+            break
+        end
+    end
+    if pet_dat !== nothing
+        cx_v, cy_v, cz_v = m.center_idx
+        R = m.radius_mm
+        sp = axialState.spacingsValue[1]
+        sx, sy, sz = Float32(sp[1]), Float32(sp[2]), Float32(sp[3])
+        if sz == 0.0f0; sz = 1.0f0; end
+        rx = ceil(Int, R / sx)
+        ry = ceil(Int, R / sy)
+        rz = ceil(Int, R / sz)
+        cxi, cyi, czi = round(Int, cx_v), round(Int, cy_v), round(Int, cz_v)
+
+        sum_suv = 0.0f0
+        max_suv = 0.0f0
+        count = 0
+
+        R2 = R^2
+        for z in max(1, czi-rz):min(size(pet_dat, 3), czi+rz)
+            dz = (z - czi) * sz
+            dz2 = dz^2
+            for y in max(1, cyi-ry):min(size(pet_dat, 2), cyi+ry)
+                dy = (y - cyi) * sy
+                dy2 = dy^2
+                for x in max(1, cxi-rx):min(size(pet_dat, 1), cxi+rx)
+                    dx = (x - cxi) * sx
+                    dx2 = dx^2
+                    if dx2 + dy2 + dz2 <= R2
+                        val = pet_dat[x, y, z]
+                        sum_suv += val
+                        max_suv = max(max_suv, val)
+                        count += 1
+                    end
+                end
+            end
+        end
+        if count > 0
+            m.suv_mean = sum_suv / count
+            m.suv_max = max_suv
+        else
+            m.suv_mean = 0.0f0
+            m.suv_max = 0.0f0
+        end
+    end
+end
+
+function _compute_line_suv!(m, mainStates)
+    axialState = mainStates[1]
+    pet_dat = nothing
+    for dat in axialState.onScrollData.dataToScroll
+        if dat.name == "PET"
+            pet_dat = dat.dat
+            break
+        end
+    end
+    if pet_dat !== nothing
+        sp = axialState.spacingsValue[1]
+        sx, sy, sz = Float32(sp[1]), Float32(sp[2]), Float32(sp[3])
+
+        dx_mm = (m.end_idx[1] - m.start_idx[1]) * sx
+        dy_mm = (m.end_idx[2] - m.start_idx[2]) * sy
+        dz_mm = (m.end_idx[3] - m.start_idx[3]) * sz
+        len = sqrt(dx_mm^2 + dy_mm^2 + dz_mm^2)
+
+        if len == 0
+            cx, cy, cz = round(Int, m.start_idx[1]), round(Int, m.start_idx[2]), round(Int, m.start_idx[3])
+            if checkbounds(Bool, pet_dat, cx, cy, cz)
+                val = pet_dat[cx, cy, cz]
+                m.suv_mean = val
+                m.suv_max = val
+            end
+            return
+        end
+
+        steps = max(2, ceil(Int, len / min(sx, sy, sz) * 2))
+        sum_suv = 0.0f0
+        max_suv = 0.0f0
+        count = 0
+
+        for i in 0:steps
+            t = i / steps
+            cx = round(Int, m.start_idx[1] + t * (m.end_idx[1] - m.start_idx[1]))
+            cy = round(Int, m.start_idx[2] + t * (m.end_idx[2] - m.start_idx[2]))
+            cz = round(Int, m.start_idx[3] + t * (m.end_idx[3] - m.start_idx[3]))
+            if checkbounds(Bool, pet_dat, cx, cy, cz)
+                val = pet_dat[cx, cy, cz]
+                sum_suv += val
+                max_suv = max(max_suv, val)
+                count += 1
+            end
+        end
+        if count > 0
+            m.suv_mean = sum_suv / count
+            m.suv_max = max_suv
+        else
+            m.suv_mean = 0.0f0
+            m.suv_max = 0.0f0
+        end
+    end
+end
+
+# ─── trigger_obs helper ──────────────────────────────────────────────────────
+# For :obs_refresh_measurements — pass the display-object so the GUI can rebuild.
+# For :obs_update_measurements — increment (existing integer Observable).
+function _trigger_meas_obs(MEH, name::Symbol, obj_for_refresh)
+    try
+        LMW = MEH._get_lmw()
+        if LMW !== nothing
+            obs = getfield(LMW, :_lmw_observables)
+            if haskey(obs, name)
+                if name == :obs_refresh_measurements
+                    obs[name][] = obj_for_refresh  # set to display-obj (triggers rebuild)
+                    # Mark measurements dirty for HDF5 autosave
+                    try MEH.mark_measurements_dirty!() catch; end
+                else
+                    obs[name][] += 1  # integer increment
+                    # Also mark dirty on update (drag edits)
+                    try MEH.mark_measurements_dirty!() catch; end
+                end
+            end
+        end
+    catch; end
+end
+
+# ─── Live info on top panel ──────────────────────────────────────────────────
+function _update_cursor_info_sphere!(m, MEH)
+    try
+        info = "⬤ Sphere: SUV Mean=$(round(m.suv_mean, digits=2)) Max=$(round(m.suv_max, digits=2)) R=$(round(m.radius_mm, digits=1))mm"
+        MEH.measurement_info_text[] = info
+    catch; end
+end
+
+function _update_cursor_info_line!(lm, MEH)
+    try
+        len_cm = lm.length_mm / 10.0f0
+        if lm.length_mm >= 10.0f0
+            info = "━ Line: $(round(len_cm, digits=2))cm ($(round(lm.length_mm, digits=1))mm) | SUV Mean=$(round(lm.suv_mean, digits=2)) Max=$(round(lm.suv_max, digits=2))"
+        else
+            info = "━ Line: $(round(lm.length_mm, digits=1))mm | SUV Mean=$(round(lm.suv_mean, digits=2)) Max=$(round(lm.suv_max, digits=2))"
+        end
+        MEH.measurement_info_text[] = info
+    catch; end
+end
+
+# ─── Hit-testing helpers ─────────────────────────────────────────────────────
+function _find_nearby_sphere_edge(obj, point3d, mainStates, panel_id)
+    # Check if the click is near the edge of an existing sphere
+    hit_tolerance_mm = 5.0f0  # tolerance in mm
+    axialState = mainStates[1]
+    sp = axialState.spacingsValue[1]
+    sx, sy, sz = Float32(sp[1]), Float32(sp[2]), Float32(sp[3])
+    
+    MEH_edit = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+    edit_id = MEH_edit.editing_measurement_id[]
+    
+    for (idx, m) in enumerate(obj.measurements)
+        if m.is_active || m.id < 1; continue; end
+        cx, cy, cz = m.center_idx
+        px, py, pz = point3d
+        
+        # Distance from click to sphere center in mm
+        dx_mm = (px - cx) * sx
+        dy_mm = (py - cy) * sy
+        dz_mm = (pz - cz) * sz
+        dist_mm = sqrt(dx_mm^2 + dy_mm^2 + dz_mm^2)
+        
+        # Check if click is near the edge of the sphere
+        R = m.radius_mm
+        # When this is the "editing" measurement, be more generous — any click within 2x radius
+        tolerance = (edit_id == m.id) ? R * 1.5f0 : hit_tolerance_mm
+        min_dist = (edit_id == m.id) ? 0.0f0 : R * 0.3f0
+        
+        if abs(dist_mm - R) < tolerance && dist_mm > min_dist
+            # Determine which axis the user is closest to
+            abs_dx = abs(dx_mm)
+            abs_dy = abs(dy_mm)
+            abs_dz = abs(dz_mm)
+            
+            panel_mapped = panel_id > 5 ? panel_id - 5 : panel_id
+            if panel_mapped == 1 || panel_mapped == 2 || panel_mapped == 5
+                axis = abs_dx > abs_dy ? :x : :y
+            elseif panel_mapped == 3
+                axis = abs_dz > abs_dy ? :z : :y
+            else
+                axis = abs_dx > abs_dz ? :x : :z
+            end
+            return (idx, axis)
+        end
+    end
+    return nothing
+end
+
+function _find_nearby_line_endpoint(obj, point3d, mainStates)
+    hit_tolerance_vox = 8.0f0  # voxel distance tolerance
+    px, py, pz = point3d
+    
+    MEH_edit = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+    edit_id = MEH_edit.editing_measurement_id[]
+    
+    for (idx, lm) in enumerate(obj.line_measurements)
+        if lm.is_active || lm.id < 1; continue; end
+        # Check start point
+        ds = sqrt((px - lm.start_idx[1])^2 + (py - lm.start_idx[2])^2 + (pz - lm.start_idx[3])^2)
+        de = sqrt((px - lm.end_idx[1])^2 + (py - lm.end_idx[2])^2 + (pz - lm.end_idx[3])^2)
+        
+        # More generous tolerance when this is the editing measurement
+        tol = (edit_id == lm.id) ? hit_tolerance_vox * 3.0f0 : hit_tolerance_vox
+        
+        if ds <= tol && ds <= de
+            return (idx, :start)
+        elseif de <= tol
+            return (idx, :end)
+        end
+    end
+    return nothing
+end
+
+# ─── Main Sphere Handler ─────────────────────────────────────────────────────
+function _handle_sphere_measurement(mousestr, mainStates, obj, center_idx, MEH, MeasMod)
+    radius_mm = MEH.active_measurement_radius_mm[]
+    active_idx = findfirst(m -> m.is_active && m.id > 0, obj.measurements)  # Exclude ghost (id=-1)
+    # Also check if we're editing an edge
+    editing_idx = findfirst(m -> m.editing_axis != :none && m.id > 0, obj.measurements)
+
+    if mousestr.isLeftButtonDown
+        if editing_idx !== nothing
+            # Edge-editing mode: adjust radius on the editing axis
+            m = obj.measurements[editing_idx]
+            cx, cy, cz = m.center_idx
+            px, py, pz = center_idx
+            sp = mainStates[1].spacingsValue[1]
+            sx, sy, sz = Float32(sp[1]), Float32(sp[2]), Float32(sp[3])
+            
+            if m.editing_axis == :x
+                new_r = abs(px - cx) * sx
+                m.radius_x_mm = max(2.0f0, new_r)
+            elseif m.editing_axis == :y
+                new_r = abs(py - cy) * sy
+                m.radius_y_mm = max(2.0f0, new_r)
+            elseif m.editing_axis == :z
+                new_r = abs(pz - cz) * sz
+                m.radius_z_mm = max(2.0f0, new_r)
+            end
+            _compute_sphere_suv!(m, mainStates)
+            _update_cursor_info_sphere!(m, MEH)
+            _trigger_meas_obs(MEH, :obs_update_measurements, obj)
+            
+        elseif active_idx === nothing
+            # Check if clicking near an existing sphere's edge (edit mode)
+            hit = _find_nearby_sphere_edge(obj, center_idx, mainStates, mainStates[1].switchIndex)
+            if hit !== nothing
+                sidx, axis = hit
+                m = obj.measurements[sidx]
+                m.editing_axis = axis
+                # Initialize per-axis radii from base radius if not set
+                if m.radius_x_mm <= 0; m.radius_x_mm = m.radius_mm; end
+                if m.radius_y_mm <= 0; m.radius_y_mm = m.radius_mm; end
+                if m.radius_z_mm <= 0; m.radius_z_mm = m.radius_mm; end
+                _update_cursor_info_sphere!(m, MEH)
+            else
+                # Check if we clicked far away while in edit mode
+                if MEH.editing_measurement_id[] > 0
+                    MEH.editing_measurement_id[] = 0
+                    MEH.editing_measurement_type[] = :none
+                    return
+                end
+                # First click: convert ghost (id=-1) to real, or create new
+                ghost_idx = findfirst(m -> m.id == -1, obj.measurements)
+                new_meas_idx = 0
+                if ghost_idx !== nothing
+                    # Convert ghost to real measurement
+                    m = obj.measurements[ghost_idx]
+                    m.id = length(filter(mm -> mm.id > 0, obj.measurements)) + 1
+                    m.center_idx = center_idx
+                    m.radius_mm = radius_mm
+                    m.is_active = true
+                    new_meas_idx = ghost_idx
+                else
+                    next_color = (length(obj.measurements) + length(obj.line_measurements)) % 8 + 1
+                    push!(obj.measurements, MeasMod.SphereMeasurement(
+                        id = length(obj.measurements) + 1,
+                        center_idx = center_idx,
+                        radius_mm = radius_mm,
+                        suv_mean = 0.0f0,
+                        suv_max = 0.0f0,
+                        is_active = true,
+                        color_idx = next_color
+                    ))
+                    new_meas_idx = length(obj.measurements)
+                end
+                _compute_sphere_suv!(obj.measurements[new_meas_idx], mainStates)
+                _update_cursor_info_sphere!(obj.measurements[new_meas_idx], MEH)
+                _trigger_meas_obs(MEH, :obs_refresh_measurements, obj)
+            end
+        else
+            # Dragging: update position and compute SUV live
+            m = obj.measurements[active_idx]
+            m.center_idx = center_idx
+            m.radius_mm = radius_mm
+            _compute_sphere_suv!(m, mainStates)
+            _update_cursor_info_sphere!(m, MEH)
+            _trigger_meas_obs(MEH, :obs_update_measurements, obj)
+        end
+    else
+        # Mouse released: finalize
+        if editing_idx !== nothing
+            m = obj.measurements[editing_idx]
+            m.editing_axis = :none
+            _compute_sphere_suv!(m, mainStates)
+            MEH.editing_measurement_id[] = m.id
+            MEH.editing_measurement_type[] = :sphere
+            _trigger_meas_obs(MEH, :obs_update_measurements, obj)
+            _trigger_meas_obs(MEH, :obs_refresh_measurements, obj)
+        elseif active_idx !== nothing
+            m = obj.measurements[active_idx]
+            m.center_idx = center_idx
+            m.radius_mm = radius_mm
+            m.is_active = false
+            _compute_sphere_suv!(m, mainStates)
+            # After creation, mark for editing so next click edits this sphere
+            MEH.editing_measurement_id[] = m.id
+            MEH.editing_measurement_type[] = :sphere
+            # Initialize per-axis radii
+            if m.radius_x_mm <= 0; m.radius_x_mm = m.radius_mm; end
+            if m.radius_y_mm <= 0; m.radius_y_mm = m.radius_mm; end
+            if m.radius_z_mm <= 0; m.radius_z_mm = m.radius_mm; end
+            _trigger_meas_obs(MEH, :obs_update_measurements, obj)
+            _trigger_meas_obs(MEH, :obs_refresh_measurements, obj)
+        end
+    end
+end
+
+# ─── Main Line Handler ───────────────────────────────────────────────────────
+function _handle_line_measurement(mousestr, mainStates, obj, point3d, MEH, MeasMod)
+    active_idx = findfirst(m -> m.is_active && m.id > 0, obj.line_measurements)  # Exclude ghost
+    editing_idx = findfirst(m -> m.editing_endpoint != :none && m.id > 0, obj.line_measurements)
+
+    function _compute_length!(lm)
+        sp = mainStates[1].spacingsValue[1]
+        sx, sy, sz = Float32(sp[1]), Float32(sp[2]), Float32(sp[3])
+        dx_mm = (lm.end_idx[1] - lm.start_idx[1]) * sx
+        dy_mm = (lm.end_idx[2] - lm.start_idx[2]) * sy
+        dz_mm = (lm.end_idx[3] - lm.start_idx[3]) * sz
+        lm.length_mm = sqrt(dx_mm^2 + dy_mm^2 + dz_mm^2)
+    end
+
+    if mousestr.isLeftButtonDown
+        if editing_idx !== nothing
+            # Endpoint-editing mode
+            lm = obj.line_measurements[editing_idx]
+            if lm.editing_endpoint == :start
+                lm.start_idx = point3d
+            else
+                lm.end_idx = point3d
+            end
+            _compute_length!(lm)
+            _compute_line_suv!(lm, mainStates)
+            _update_cursor_info_line!(lm, MEH)
+            _trigger_meas_obs(MEH, :obs_update_measurements, obj)
+            
+        elseif active_idx === nothing
+            # Check if clicking near an existing line's endpoint (edit mode)
+            hit = _find_nearby_line_endpoint(obj, point3d, mainStates)
+            if hit !== nothing
+                lidx, endpoint = hit
+                lm = obj.line_measurements[lidx]
+                lm.editing_endpoint = endpoint
+                _update_cursor_info_line!(lm, MEH)
+            else
+                # Check if we clicked far away while in edit mode
+                if MEH.editing_measurement_id[] > 0
+                    MEH.editing_measurement_id[] = 0
+                    MEH.editing_measurement_type[] = :none
+                    return
+                end
+                # Start new line: convert ghost (id=-1) to real, or create new
+                ghost_idx = findfirst(m -> m.id == -1, obj.line_measurements)
+                new_line_idx = 0
+                if ghost_idx !== nothing
+                    # Convert ghost to real
+                    lm = obj.line_measurements[ghost_idx]
+                    lm.id = length(filter(mm -> mm.id > 0, obj.line_measurements)) + 1
+                    lm.start_idx = point3d
+                    lm.end_idx = point3d
+                    lm.is_active = true
+                    new_line_idx = ghost_idx
+                else
+                    next_color = (length(obj.measurements) + length(obj.line_measurements)) % 8 + 1
+                    push!(obj.line_measurements, MeasMod.LineMeasurement(
+                        id = length(obj.line_measurements) + 1,
+                        start_idx = point3d,
+                        end_idx = point3d,
+                        length_mm = 0.0f0,
+                        suv_mean = 0.0f0,
+                        suv_max = 0.0f0,
+                        is_active = true,
+                        color_idx = next_color
+                    ))
+                    new_line_idx = length(obj.line_measurements)
+                end
+                _compute_line_suv!(obj.line_measurements[new_line_idx], mainStates)
+                _update_cursor_info_line!(obj.line_measurements[new_line_idx], MEH)
+                _trigger_meas_obs(MEH, :obs_refresh_measurements, obj)
+            end
+        else
+            # Dragging: update endpoint
+            lm = obj.line_measurements[active_idx]
+            lm.end_idx = point3d
+            _compute_length!(lm)
+            _compute_line_suv!(lm, mainStates)
+            _update_cursor_info_line!(lm, MEH)
+            _trigger_meas_obs(MEH, :obs_update_measurements, obj)
+        end
+    else
+        # Mouse released: finalize
+        if editing_idx !== nothing
+            lm = obj.line_measurements[editing_idx]
+            lm.editing_endpoint = :none
+            _compute_length!(lm)
+            _compute_line_suv!(lm, mainStates)
+            MEH.editing_measurement_id[] = lm.id
+            MEH.editing_measurement_type[] = :line
+            _trigger_meas_obs(MEH, :obs_update_measurements, obj)
+            _trigger_meas_obs(MEH, :obs_refresh_measurements, obj)
+        elseif active_idx !== nothing
+            lm = obj.line_measurements[active_idx]
+            lm.end_idx = point3d
+            lm.is_active = false
+            _compute_length!(lm)
+            _compute_line_suv!(lm, mainStates)
+            # After creation, mark for editing so next click edits this line
+            MEH.editing_measurement_id[] = lm.id
+            MEH.editing_measurement_type[] = :line
+            _trigger_meas_obs(MEH, :obs_update_measurements, obj)
+            _trigger_meas_obs(MEH, :obs_refresh_measurements, obj)
+        end
+    end
+end
+
+# ── End Measurement Helper Functions ──────────────────────────────────────────
+
 """
 we use mouse coordinate to modify the texture that is currently active for modifications
     - we take information about texture currently active for modifications from variables stored in actor
@@ -394,11 +892,91 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
         end
     end
 
+    # --- MEASUREMENT INTERCEPT (LEFT BUTTON DOWN - FALLBACK) ---
+    # This handles the case where mouse events come as single MouseStruct 
+    # (e.g., when is_painting_active is false and aggregation didn't trigger)
+    if mousestr.isLeftButtonDown && !isempty(mouseCoords)
+        MEH_fb = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+        if MEH_fb.measurements_mode[]
+            sub_mode_fb = MEH_fb.measurement_sub_mode[]
+            if sub_mode_fb == :sphere || sub_mode_fb == :line
+                clickedPanel_fb = mainState.switchIndex
+                if clickedPanel_fb >= 1 && clickedPanel_fb <= length(mainStates)
+                    stObj = mainStates[clickedPanel_fb]
+                    MeasMod_fb = parentmodule(@__MODULE__).Measurements
+                    calcDim_fb = stObj.calcDimsStruct
+                    actualW_fb = mousestr.actualWindowWidth > 0 ? Float64(mousestr.actualWindowWidth) : Float64(calcDim_fb.windowWidth)
+                    actualH_fb = mousestr.actualWindowHeight > 0 ? Float64(mousestr.actualWindowHeight) : Float64(calcDim_fb.windowHeight)
+                    
+                    c_fb = mouseCoords[1]
+                    texX_fb, texY_fb = StructsManag.getTextureCoordinatesFromScreen(c_fb[1], c_fb[2], calcDim_fb, actualW_fb, actualH_fb)
+                    ix_fb, iy_fb = round(Int, texX_fb), round(Int, texY_fb)
+                    slice_fb = stObj.currentDisplayedSlice
+                    
+                    cp_mapped_fb = clickedPanel_fb > 5 ? clickedPanel_fb - 5 : clickedPanel_fb
+                    if cp_mapped_fb == 3
+                        origX_fb, origY_fb, origZ_fb = slice_fb, ix_fb, iy_fb
+                    elseif cp_mapped_fb == 4
+                        origX_fb, origY_fb, origZ_fb = ix_fb, slice_fb, iy_fb
+                    else
+                        origX_fb, origY_fb, origZ_fb = ix_fb, iy_fb, slice_fb
+                    end
+                    
+                    meas_obj_fb = mainStates[1].mainForDisplayObjects
+                    if sub_mode_fb == :sphere
+                        _handle_sphere_measurement(mousestr, mainStates, meas_obj_fb, (Float32(origX_fb), Float32(origY_fb), Float32(origZ_fb)), MEH_fb, MeasMod_fb)
+                    elseif sub_mode_fb == :line
+                        _handle_line_measurement(mousestr, mainStates, meas_obj_fb, (Float32(origX_fb), Float32(origY_fb), Float32(origZ_fb)), MEH_fb, MeasMod_fb)
+                    end
+                end
+            end
+        end
+    end
+    # --- END MEASUREMENT INTERCEPT (LEFT BUTTON DOWN) ---
+
     # If the left mouse button is released, clear the paint stroke tail
     if !mousestr.isLeftButtonDown
         for state in mainStates
             empty!(state.lastPaintCoords)
         end
+        
+        # --- MEASUREMENT INTERCEPT (RELEASE) ---
+        MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+        sub_mode = MEH.measurement_sub_mode[]
+        if MEH.measurements_mode[] && (sub_mode == :sphere || sub_mode == :line)
+            clickedPanel = mainState.switchIndex
+            if clickedPanel >= 1 && clickedPanel <= length(mainStates)
+                stateObject = mainStates[clickedPanel]
+                MeasMod = parentmodule(@__MODULE__).Measurements
+                calcDim = stateObject.calcDimsStruct
+                actualW = mousestr.actualWindowWidth > 0 ? Float64(mousestr.actualWindowWidth) : Float64(calcDim.windowWidth)
+                actualH = mousestr.actualWindowHeight > 0 ? Float64(mousestr.actualWindowHeight) : Float64(calcDim.windowHeight)
+                
+                if !isempty(mouseCoords)
+                    c = mouseCoords[1]
+                    texX, texY = StructsManag.getTextureCoordinatesFromScreen(c[1], c[2], calcDim, actualW, actualH)
+                    ix, iy = round(Int, texX), round(Int, texY)
+                    slice = stateObject.currentDisplayedSlice
+                    
+                    cp_mapped = clickedPanel > 5 ? clickedPanel - 5 : clickedPanel
+                    if cp_mapped == 3 # Sagittal
+                        origX, origY, origZ = slice, ix, iy
+                    elseif cp_mapped == 4 # Coronal
+                        origX, origY, origZ = ix, slice, iy
+                    else # Axial
+                        origX, origY, origZ = ix, iy, slice
+                    end
+                    
+                    meas_obj_rel = mainStates[1].mainForDisplayObjects
+                    if sub_mode == :sphere
+                        _handle_sphere_measurement(mousestr, mainStates, meas_obj_rel, (Float32(origX), Float32(origY), Float32(origZ)), MEH, MeasMod)
+                    elseif sub_mode == :line
+                        _handle_line_measurement(mousestr, mainStates, meas_obj_rel, (Float32(origX), Float32(origY), Float32(origZ)), MEH, MeasMod)
+                    end
+                end
+            end
+        end
+        # --- END MEASUREMENT INTERCEPT ---
     end
 
     # 2. Right-click cross-plane jumping or panning
@@ -445,7 +1023,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 panelState.movingLesionSourceName = ""
                 seg_vol = nothing
                 # In compare mode, search the right panel's data for the lesion
-                MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
+                MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
                 search_panel = (MEH.compare_mode[] && clickedPanel == 5) ? mainStates[5] : mainStates[1]
                 for dat in search_panel.onScrollData.dataToScroll
                     if dat.name == "Mask" || dat.name == "segmentation"
@@ -466,7 +1044,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 
                 if seg_vol !== nothing && panelState.movingLesionID > 0
                     try
-                        MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
+                        MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
                         tp_idx = (MEH.compare_mode[] && clickedPanel == 5) ? MEH.compare_right_tp[] : MEH.current_tp_index[]
                         MEH.ensure_ai_mask_backup!(panelState.movingLesionID, tp_idx, panelState)
                     catch; end
@@ -515,7 +1093,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             @info "  origX=$origX origY=$origY origZ=$origZ currentSlice=$currentSlice"
             @info "  Axial scrolls Z(1-$(mainStates[1].onScrollData.slicesNumber)) Sag scrolls origX(1-$(mainStates[3].onScrollData.slicesNumber)) Cor scrolls origY(1-$(mainStates[4].onScrollData.slicesNumber))"
             
-            MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
+            MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
             
             # Jump other panels to the corresponding slices
             # Panel 1, 2 & 5 scroll through Z (origZ), Panel 3 scrolls through origX, Panel 4 scrolls through origY
@@ -587,7 +1165,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                         dx, dy, dz = new_delta[1], new_delta[2], new_delta[3]
                         old_dx, old_dy, old_dz = old_d[1], old_d[2], old_d[3]
                         
-                        MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
+                        MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
                         panels_to_update = (MEH.compare_mode[] && clickedPanel == 5) ? [5] : collect(1:length(mainStates))
                         
                         source_name = panelState.movingLesionSourceName
@@ -634,7 +1212,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                         
                         # Synchronize tp_data_cache
                         try
-                            MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
+                            MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
                             tp_idx = (MEH.compare_mode[] && clickedPanel == 5) ? MEH.compare_right_tp[] : MEH.current_tp_index[]
                             entry = lock(MEH._tp_cache_lock) do
                                 haskey(MEH.tp_data_cache, tp_idx) ? MEH.tp_data_cache[tp_idx] : nothing
@@ -706,12 +1284,141 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
         end
     end # end right-click handler
 
+    # ─── GHOST Measurement Preview (on EVERY mouse move) ────────────────────────
+    # When measurement mode is active, show a preview sphere/line at the cursor
+    # position BEFORE the user clicks. This gives live feedback as they move.
+    try
+        MEH_ghost = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+        if MEH_ghost.measurements_mode[] && !isempty(mouseCoords) && !mousestr.isLeftButtonDown
+            sub_mode_g = MEH_ghost.measurement_sub_mode[]
+            clickedPanel_g = mainState.switchIndex
+            edit_id_g = MEH_ghost.editing_measurement_id[]
+            
+            # If we're in edit mode (just placed a measurement), show its info and suppress ghost
+            if edit_id_g > 0 && clickedPanel_g >= 1 && clickedPanel_g <= length(mainStates)
+                meas_obj_edit = mainStates[1].mainForDisplayObjects
+                # Remove any existing ghosts
+                if any(m -> m.id == -1, meas_obj_edit.measurements)
+                    filter!(m -> m.id != -1, meas_obj_edit.measurements)
+                end
+                if any(m -> m.id == -1, meas_obj_edit.line_measurements)
+                    filter!(m -> m.id != -1, meas_obj_edit.line_measurements)
+                end
+                # Show info for the measurement being edited
+                if sub_mode_g == :sphere
+                    eidx = findfirst(m -> m.id == edit_id_g, meas_obj_edit.measurements)
+                    if eidx !== nothing
+                        _update_cursor_info_sphere!(meas_obj_edit.measurements[eidx], MEH_ghost)
+                    end
+                elseif sub_mode_g == :line
+                    eidx = findfirst(m -> m.id == edit_id_g, meas_obj_edit.line_measurements)
+                    if eidx !== nothing
+                        _update_cursor_info_line!(meas_obj_edit.line_measurements[eidx], MEH_ghost)
+                    end
+                end
+            elseif clickedPanel_g >= 1 && clickedPanel_g <= length(mainStates) && (sub_mode_g == :sphere || sub_mode_g == :line)
+                MeasMod_g = parentmodule(@__MODULE__).Measurements
+                stObj_g = mainStates[clickedPanel_g]
+                calcDim_g = stObj_g.calcDimsStruct
+                actualW_g = mousestr.actualWindowWidth > 0 ? Float64(mousestr.actualWindowWidth) : Float64(calcDim_g.windowWidth)
+                actualH_g = mousestr.actualWindowHeight > 0 ? Float64(mousestr.actualWindowHeight) : Float64(calcDim_g.windowHeight)
+                
+                c_g = mouseCoords[1]
+                texX_g, texY_g = StructsManag.getTextureCoordinatesFromScreen(c_g[1], c_g[2], calcDim_g, actualW_g, actualH_g)
+                ix_g, iy_g = round(Int, texX_g), round(Int, texY_g)
+                slice_g = stObj_g.currentDisplayedSlice
+                
+                cp_mapped_g = clickedPanel_g > 5 ? clickedPanel_g - 5 : clickedPanel_g
+                if cp_mapped_g == 3
+                    origX_g, origY_g, origZ_g = slice_g, ix_g, iy_g
+                elseif cp_mapped_g == 4
+                    origX_g, origY_g, origZ_g = ix_g, slice_g, iy_g
+                else
+                    origX_g, origY_g, origZ_g = ix_g, iy_g, slice_g
+                end
+                
+                meas_obj_g = mainStates[1].mainForDisplayObjects
+                point3d_g = (Float32(origX_g), Float32(origY_g), Float32(origZ_g))
+                
+                if sub_mode_g == :sphere
+                    # Clean up any line ghosts when in sphere mode
+                    if any(m -> m.id == -1, meas_obj_g.line_measurements)
+                        filter!(m -> m.id != -1, meas_obj_g.line_measurements)
+                    end
+                    # Update or create ghost sphere
+                    ghost_idx = findfirst(m -> m.id == -1, meas_obj_g.measurements)
+                    if ghost_idx === nothing
+                        # Create ghost sphere (id=-1 marks it as ghost)
+                        radius_g = MEH_ghost.active_measurement_radius_mm[]
+                        push!(meas_obj_g.measurements, MeasMod_g.SphereMeasurement(
+                            id = -1,
+                            center_idx = point3d_g,
+                            radius_mm = radius_g,
+                            suv_mean = 0.0f0,
+                            suv_max = 0.0f0,
+                            is_active = true,
+                            color_idx = (length(meas_obj_g.measurements) + length(meas_obj_g.line_measurements)) % 8 + 1
+                        ))
+                        ghost_idx = length(meas_obj_g.measurements)
+                    end
+                    ghost = meas_obj_g.measurements[ghost_idx]
+                    ghost.center_idx = point3d_g
+                    ghost.radius_mm = MEH_ghost.active_measurement_radius_mm[]
+                    ghost.is_active = true
+                    _compute_sphere_suv!(ghost, mainStates)
+                    _update_cursor_info_sphere!(ghost, MEH_ghost)
+                    
+                elseif sub_mode_g == :line
+                    # Clean up any sphere ghosts when in line mode
+                    if any(m -> m.id == -1, meas_obj_g.measurements)
+                        filter!(m -> m.id != -1, meas_obj_g.measurements)
+                    end
+                    # Update or create ghost line
+                    ghost_idx = findfirst(m -> m.id == -1, meas_obj_g.line_measurements)
+                    if ghost_idx === nothing
+                        push!(meas_obj_g.line_measurements, MeasMod_g.LineMeasurement(
+                            id = -1,
+                            start_idx = point3d_g,
+                            end_idx = point3d_g,
+                            length_mm = 0.0f0,
+                            suv_mean = 0.0f0,
+                            suv_max = 0.0f0,
+                            is_active = true,
+                            color_idx = (length(meas_obj_g.measurements) + length(meas_obj_g.line_measurements)) % 8 + 1
+                        ))
+                        ghost_idx = length(meas_obj_g.line_measurements)
+                    end
+                    ghost_line = meas_obj_g.line_measurements[ghost_idx]
+                    ghost_line.start_idx = point3d_g
+                    ghost_line.end_idx = point3d_g
+                    ghost_line.is_active = true
+                    _compute_line_suv!(ghost_line, mainStates)
+                    # Show position info for ghost line
+                    MEH_ghost.measurement_info_text[] = "━ Line: move cursor, click to set start point"
+                end
+            end
+        end
+        # Clear ghost when measurement mode is off
+        if !isempty(mainStates) && !MEH_ghost.measurements_mode[]
+            meas_obj_clr = mainStates[1].mainForDisplayObjects
+            if !isempty(meas_obj_clr.measurements) && any(m -> m.id == -1, meas_obj_clr.measurements)
+                filter!(m -> m.id != -1, meas_obj_clr.measurements)
+            end
+            if !isempty(meas_obj_clr.line_measurements) && any(m -> m.id == -1, meas_obj_clr.line_measurements)
+                filter!(m -> m.id != -1, meas_obj_clr.line_measurements)
+            end
+            if !isempty(MEH_ghost.measurement_info_text[])
+                MEH_ghost.measurement_info_text[] = ""
+            end
+        end
+    catch; end
+
     # ─── Cursor Info Readout (runs on OpenGL thread via on_next! dispatch) ───────
     # Updates the cursor_info_text Observable and GLFW window title with:
     # study name, HU, SUV, lesion name, view orientation, and slice number.
     # Coordinate mapping is orientation-aware (axial/sagittal/coronal).
     try
-        MEH = parentmodule(parentmodule(@__MODULE__)).SegmentationDisplay.MakieEventHandlers
+        MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
         clickedPanel = mainState.switchIndex
         if clickedPanel >= 1 && clickedPanel <= length(mainStates) && !isempty(mouseCoords)
             panelState = mainStates[clickedPanel]
@@ -840,8 +1547,9 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             MEH.current_viewer_position[] = vox
 
             # Update GLFW window title (already on OpenGL thread inside on_next!, safe to call directly)
-            GLFW.SetWindowTitle(panelState.mainForDisplayObjects.window,
-                "MedEye3d - $study_str | $info_str")
+            meas_info = MEH.measurement_info_text[]
+            title = isempty(meas_info) ? "MedEye3d - $study_str | $info_str" : "MedEye3d - $study_str | $info_str | $meas_info"
+            GLFW.SetWindowTitle(panelState.mainForDisplayObjects.window, title)
         end
     catch
         # Never let info readout crash the mouse handler

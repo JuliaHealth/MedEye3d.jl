@@ -63,7 +63,7 @@ function processKeysInfo(annot::Identity{AnnotationStruct}, stateObject::StateDa
         texture.strokeWidth = newWidth
         # Sync GUI brush slider
         try
-            top = parentmodule(parentmodule(parentmodule(@__MODULE__)))
+            top = parentmodule(@__MODULE__)
             if isdefined(top, :LesionMetadataWindow)
                 obs_dict = getfield(top.LesionMetadataWindow, :_lmw_observables)
                 if haskey(obs_dict, :slider_brush)

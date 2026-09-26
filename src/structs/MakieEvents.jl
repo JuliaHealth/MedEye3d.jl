@@ -218,4 +218,26 @@ end
 struct ToggleAnatomyEvent end
 struct ToggleSyncScrollEvent end
 
+# Measurement mode events
+struct ToggleMeasurementModeEvent end
+struct DeleteMeasurementEvent
+    id::Int
+end
+struct JumpToMeasurementEvent
+    id::Int
+end
+struct CycleMeasurementSubModeEvent end
+struct DeleteLineMeasurementEvent
+    id::Int  # -1 = delete all
+end
+struct JumpToLineMeasurementEvent
+    id::Int
+end
+struct EditMeasurementEvent
+    id::Int
+end
+struct EditLineMeasurementEvent
+    id::Int
+end
+
 end # module MakieEvents

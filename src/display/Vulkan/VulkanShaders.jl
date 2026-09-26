@@ -18,7 +18,7 @@ using Logging
 export compile_glsl_to_spirv, create_shader_module
 export generate_vulkan_vertex_shader, generate_vulkan_zerovbo_vertex_shader
 export generate_vulkan_fragment_shader
-export generate_vulkan_text_fragment_shader
+export generate_vulkan_text_fragment_shader, generate_vulkan_vector_vertex_shader, generate_vulkan_vector_fragment_shader
 
 # ─── GLSL → SPIR-V compilation ─────────────────────────────────────────
 
@@ -116,7 +116,7 @@ function generate_vulkan_vertex_shader()::String
         vec2 ndcMax;
         vec2 crosshairUV;
         int showCrosshair;
-        int padding;
+        float loadingFade;
     } pc;
 
     void main() {
@@ -148,7 +148,7 @@ function generate_vulkan_zerovbo_vertex_shader()::String
         vec2 ndcMax;
         vec2 crosshairUV;
         int showCrosshair;
-        int padding;
+        float loadingFade;
     } pc;
 
     void main() {
@@ -300,7 +300,7 @@ function generate_vulkan_fragment_shader(texture_specs, color)::String
         vec2 ndcMax;
         vec2 crosshairUV;
         int showCrosshair;
-        int padding;
+        float loadingFade;
     } pc;
 
     float changeClip(float minVal, float maxVal, float value, float color, float range) {
@@ -347,7 +347,7 @@ function generate_vulkan_fragment_shader(texture_specs, color)::String
                 finalColor = vec3(0.0, 1.0, 0.0);
             }
         }
-        FragColor = vec4(finalColor, 1.0);
+        FragColor = vec4(finalColor * pc.loadingFade, 1.0);
     }
     """
 end
@@ -538,4 +538,50 @@ function _generate_discrete_color_funcs(discrete_specs)
     end, "\n")
 end
 
+
+function generate_vulkan_vector_vertex_shader()::String
+    return """
+    #version 450
+
+    layout(location = 0) in vec2 aImageUV;
+    layout(location = 1) in vec4 aColor;
+
+    layout(location = 0) out vec4 vColor;
+
+    layout(push_constant) uniform PushConstants {
+        vec2 uvScale;
+        vec2 uvOffset;
+        vec2 ndcMin;
+        vec2 ndcMax;
+        vec2 crosshairUV;
+        int showCrosshair;
+        float loadingFade;
+    } pc;
+
+    void main() {
+        vColor = aColor;
+        vec2 U = (aImageUV - 0.5 - pc.uvOffset) / pc.uvScale + 0.5;
+        vec2 ndc;
+        ndc.x = mix(pc.ndcMin.x, pc.ndcMax.x, U.x);
+        ndc.y = mix(pc.ndcMin.y, pc.ndcMax.y, U.y);
+        gl_Position = vec4(ndc, 0.5, 1.0);
+    }
+    """
+end
+
+function generate_vulkan_vector_fragment_shader()::String
+    return """
+    #version 450
+
+    layout(location = 0) in vec4 vColor;
+    layout(location = 0) out vec4 FragColor;
+
+    void main() {
+        FragColor = vColor;
+    }
+    """
+end
+
+
 end # module VulkanShaders
+
