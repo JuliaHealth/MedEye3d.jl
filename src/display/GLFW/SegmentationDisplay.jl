@@ -419,10 +419,7 @@ end
 """
 configuring consumer function on_next! function using multiple dispatch mechanism in order to connect input to proper functions
 """
-on_next!(stateObjects::Vector{StateDataFields}, data::ScrollEvent) = begin
-    println(">> [DEBUG] on_next! received ScrollEvent: delta=", data.scroll_delta, " win=", data.window_id); flush(stdout)
-    ReactToScroll.reactToScroll(data, stateObjects)
-end
+on_next!(stateObjects::Vector{StateDataFields}, data::ScrollEvent) = ReactToScroll.reactToScroll(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ScrollZoomEvent) = ReactToScroll.reactToScrollZoom(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::forDisplayObjects) = setUpMainDisplay(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ForWordsDispStruct) = setUpWordsDisplay(data, stateObjects)
@@ -1148,6 +1145,14 @@ function coordinateDisplay(
 
                 # get the aggregation here, only when the type is mouseStruct.
                 if typeof(channelData) == MouseStruct
+                    # Fix 2D: Close any open Makie dropdowns when the 3D viewer receives a click
+                    if channelData.isLeftButtonDown
+                        try
+                            for m in LesionMetadataWindow._ALL_MENUS
+                                m.is_open[] && (m.is_open[] = false)
+                            end
+                        catch; end
+                    end
                     # Left-button drag aggregation for mask painting OR measurements when active.
                     if channelData.isLeftButtonDown && (stateInstances[1].valueForMasToSet.is_painting_active || MakieEventHandlers.measurements_mode[])
                         mouseStructAggregationArray::Vector{MouseStruct} = [channelData]
@@ -1213,21 +1218,25 @@ function coordinateDisplay(
                     @debug "[CONSUMER] dispatch" event_type=string(typeof(channelData))
                 end
                 # Breadcrumb: log dangerous events (CompareTimePoints, SetTimePoint) before dispatch
-                if channelData isa CompareTimePointsEvent
-                    println("[CONSUMER] >>> CompareTimePointsEvent(compare=$(channelData.compare)) — DISPATCHING"); flush(stdout)
-                elseif channelData isa SetTimePointEvent
-                    println("[CONSUMER] >>> SetTimePointEvent — DISPATCHING"); flush(stdout)
+                if MakieEventHandlers.PERF_LOG[]
+                    if channelData isa CompareTimePointsEvent
+                        println("[CONSUMER] >>> CompareTimePointsEvent(compare=$(channelData.compare)) — DISPATCHING"); flush(stdout)
+                    elseif channelData isa SetTimePointEvent
+                        println("[CONSUMER] >>> SetTimePointEvent — DISPATCHING"); flush(stdout)
+                    end
                 end
                 _t_dispatch = time_ns()
                 on_next!(stateInstances, channelData)
                 _t_after_dispatch = time_ns()
-                _dispatch_ms = (_t_after_dispatch - _t_dispatch) / 1e6
                 # Universal interaction timing: log any event taking >5ms (skip raw mouse moves to avoid spam)
-                if _dispatch_ms > 5.0 && !(channelData isa MouseStruct)
-                    _evt_name = string(typeof(channelData))
-                    _dot = findlast('.', _evt_name)
-                    if _dot !== nothing; _evt_name = _evt_name[_dot+1:end]; end
-                    println("[PERF] $(_evt_name): $(round(_dispatch_ms, digits=1))ms"); flush(stdout)
+                if MakieEventHandlers.PERF_LOG[]
+                    _dispatch_ms = (_t_after_dispatch - _t_dispatch) / 1e6
+                    if _dispatch_ms > 5.0 && !(channelData isa MouseStruct)
+                        _evt_name = string(typeof(channelData))
+                        _dot = findlast('.', _evt_name)
+                        if _dot !== nothing; _evt_name = _evt_name[_dot+1:end]; end
+                        println("[PERF] $(_evt_name): $(round(_dispatch_ms, digits=1))ms"); flush(stdout)
+                    end
                 end
                 
                 # Mark UBO dirty for events that may change uniform parameters
@@ -1501,12 +1510,14 @@ function coordinateDisplay(
                     _t_after_render = time_ns()
                     
                     # Structured performance log — always print slow frames (>30ms)
-                    _t_total_ms = (_t_after_render - _t_dispatch) / 1e6
-                    if _t_total_ms > 30.0
-                        _evt_name2 = string(typeof(channelData))
-                        _dot2 = findlast('.', _evt_name2)
-                        if _dot2 !== nothing; _evt_name2 = _evt_name2[_dot2+1:end]; end
-                        println("[PERF-FRAME] $(_evt_name2): total=$(round(_t_total_ms, digits=1))ms dispatch=$(round((_t_after_dispatch - _t_dispatch)/1e6, digits=1))ms upload=$(round((_t_after_upload - _t_before_upload)/1e6, digits=1))ms render=$(round((_t_after_render - _t_before_render)/1e6, digits=1))ms tex=$(_n_uploaded) panels=$(length(_vk_main_panels)) ubo=$(_ubo_dirty_count)"); flush(stdout)
+                    if MakieEventHandlers.PERF_LOG[]
+                        _t_total_ms = (_t_after_render - _t_dispatch) / 1e6
+                        if _t_total_ms > 30.0
+                            _evt_name2 = string(typeof(channelData))
+                            _dot2 = findlast('.', _evt_name2)
+                            if _dot2 !== nothing; _evt_name2 = _evt_name2[_dot2+1:end]; end
+                            println("[PERF-FRAME] $(_evt_name2): total=$(round(_t_total_ms, digits=1))ms dispatch=$(round((_t_after_dispatch - _t_dispatch)/1e6, digits=1))ms upload=$(round((_t_after_upload - _t_before_upload)/1e6, digits=1))ms render=$(round((_t_after_render - _t_before_render)/1e6, digits=1))ms tex=$(_n_uploaded) panels=$(length(_vk_main_panels)) ubo=$(_ubo_dirty_count)"); flush(stdout)
+                        end
                     end
                 end
             catch e
