@@ -29,6 +29,8 @@ using Observables
 
 # Debug flag: set to true to enable verbose bench/bone logging in hot paths
 const DEBUG_VERBOSE = Ref(false)
+# Performance logging flag: set MEDEYE_PERF_LOG=1 env var to enable [PERF] println output
+const PERF_LOG = Ref(get(ENV, "MEDEYE_PERF_LOG", "0") == "1")
 
 # Pre-allocated zero arrays for hidden panel quad vertices (Fix ❼: avoid allocations per toggle)
 const _HIDDEN_QUAD_VERTS = zeros(Float32, 32)
@@ -816,7 +818,7 @@ function reactToEditMode(data::MakieEvents.EditModeEvent, stateObjects::Vector{S
         end
     catch; end
     set_workflow_state!(ScientificWorkflow.WF_EDIT_MASK)
-    @info "[KEYBOARD] E → Edit/Paint mode activated (lesion $lid)"
+    if PERF_LOG[]; println("[KEYBOARD] E → Edit/Paint mode activated (lesion $lid)"); flush(stdout); end
 end
 
 # ── ViewModeEvent (Esc key) ────────────────────────────────────────────────
@@ -836,7 +838,7 @@ function reactToViewMode(data::MakieEvents.ViewModeEvent, stateObjects::Vector{S
         end
     catch; end
     set_workflow_state!(ScientificWorkflow.WF_LESION_REVIEW)
-    @info "[KEYBOARD] Esc → View mode activated"
+    if PERF_LOG[]; println("[KEYBOARD] Esc → View mode activated"); flush(stdout); end
 end
 
 # ── SetTPFirstEvent (Home key) ─────────────────────────────────────────────
@@ -1213,7 +1215,7 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
             mask_vol=mask_vol, skelly_vol=skelly_vol
             Threads.@spawn begin
                 try
-                    println("  [BONE-ASYNC] Starting remote bone subseg for lid=$target_id tp=$panel_tp"); flush(stdout)
+                    if PERF_LOG[]; println("  [BONE-ASYNC] Starting remote bone subseg for lid=$target_id tp=$panel_tp"); flush(stdout); end
                     surf_crop, marr_crop = Main.MedEye3d.InferenceClient.run_bone_subsegmentation_remote(les_arr, bone_arr, sp)
                     
                     s_pts = CartesianIndex{3}[]
@@ -1227,7 +1229,7 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
                         end
                     end
                     
-                    println("  [BONE-ASYNC] Remote done: $(length(s_pts)) surf, $(length(m_pts)) marrow"); flush(stdout)
+                    if PERF_LOG[]; println("  [BONE-ASYNC] Remote done: $(length(s_pts)) surf, $(length(m_pts)) marrow"); flush(stdout); end
                     
                     # Feed result back to consumer via existing BoneSubsegResultEvent
                     ch = main_event_channel[]
@@ -1235,7 +1237,7 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
                         put!(ch, BoneSubsegResultEvent(panel_tp, target_id, s_pts, m_pts))
                     end
                 catch e
-                    println("  [BONE-ASYNC] Remote failed: $e — trying fast fallback"); flush(stdout)
+                    if PERF_LOG[]; println("  [BONE-ASYNC] Remote failed: $e — trying fast fallback"); flush(stdout); end
                     try
                         res = compute_bone_subsegments_fast(mask_vol, skelly_vol, target_id)
                         ch = main_event_channel[]
@@ -1243,7 +1245,7 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
                             put!(ch, BoneSubsegResultEvent(panel_tp, target_id, res[1], res[2]))
                         end
                     catch e2
-                        println("  [BONE-ASYNC] Fast fallback also failed: $e2"); flush(stdout)
+                        if PERF_LOG[]; println("  [BONE-ASYNC] Fast fallback also failed: $e2"); flush(stdout); end
                         bone_subsegments_cache[(panel_tp, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
                         if !isempty(node_name)
                             bone_subsegments_cache[(node_name, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
@@ -1262,7 +1264,7 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
 end
 
 function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateDataFields})
-    println("[SYNC-LESION] START lid=$(data.lesion_id)"); flush(stdout)
+    if PERF_LOG[]; println("[SYNC-LESION] START lid=$(data.lesion_id)"); flush(stdout); end
     t_total = time_ns()
     changed = false
     if data.lesion_id > 0
@@ -1312,7 +1314,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     end
     _mri_clamp_mask_range!(stateObjects)
 
-    println("[SYNC-LESION] Visibility updated, bone subseg..."); flush(stdout)
+    if PERF_LOG[]; println("[SYNC-LESION] Visibility updated, bone subseg..."); flush(stdout); end
     # 1b. Update bone subseg 3D arrays for visible panels only
     has_any_bone_data = false
     if data.lesion_id > 0
@@ -1394,7 +1396,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         end
     end
 
-    println("[SYNC-LESION] Bone subseg dispatched, centroid..."); flush(stdout)
+    if PERF_LOG[]; println("[SYNC-LESION] Bone subseg dispatched, centroid..."); flush(stdout); end
     # 2. Get canonical center
     panel_tp_cur = current_tp_index[]
     canonical_center = if data.lesion_id > 0
@@ -1479,7 +1481,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     end
 
     t_total_ms = (time_ns() - t_total) / 1e6
-    println("[SYNC-LESION] DONE $(round(t_total_ms, digits=1))ms"); flush(stdout)
+    if PERF_LOG[]; println("[SYNC-LESION] DONE $(round(t_total_ms, digits=1))ms"); flush(stdout); end
     return changed
 end
 

@@ -277,7 +277,7 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
             _handle_line_measurement(first_mouse, mainStates, meas_obj, (Float32(origX), Float32(origY), Float32(origZ)), MEH, MeasMod)
         end
         _meas_ms = (time_ns() - _t_meas) / 1e6
-        if _meas_ms > 3.0
+        if MEH.PERF_LOG[] && _meas_ms > 3.0
             println("[PERF] Measurement($(sub_mode)): $(round(_meas_ms, digits=1))ms"); flush(stdout)
         end
         return # Do not paint
@@ -408,7 +408,7 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
         println("[PAINT-ERR] SUV/organ mapping failed: $e"); flush(stdout)
     end
     _paint_ms = (time_ns() - _t_paint) / 1e6
-    if _paint_ms > 5.0
+    if MEH.PERF_LOG[] && _paint_ms > 5.0
         println("[PERF] Paint: $(round(_paint_ms, digits=1))ms ($(length(mouseStructArray)) samples)"); flush(stdout)
     end
 end#react_to_draw

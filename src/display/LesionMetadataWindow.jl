@@ -40,6 +40,9 @@ import ..EPSMAReportWindow as ERW
 
 export create_metadata_window, display_metadata_window, get_active_lesion_db, get_mask_ids, lookup_anatomy
 
+# Registry of all Menu widgets for global click-outside-to-close dismiss
+const _ALL_MENUS = Makie.Menu[]
+
 abstract type DBMessage end
 struct SaveDBMessage <: DBMessage
     db::Dict
@@ -600,8 +603,7 @@ function fts_anatomy_search(query::String; limit::Int=25)::Vector{String}
     catch e
         @debug "[ANAT] FTS5 query failed for '$fts_query': $e"
     end
-    return res
-ults
+    return results
 end
 
 # ─── JSON Anatomy Mapping (max_anatomy → ontology) ──────────────────────────
@@ -1577,7 +1579,7 @@ function precompute_all_volumes!(mask_vol::AbstractArray{T, 3}, tp_idx::Int) whe
             "diameter_mm" => diameter_mm
         )
     end
-    @info "[PERF] Precomputed volumes for $(length(voxel_counts)) lesions at TP $tp_idx"
+    if _MEH.PERF_LOG[]; println("[PERF] Precomputed volumes for $(length(voxel_counts)) lesions at TP $tp_idx"); flush(stdout); end
 end
 
 # ─── Match Analysis ──────────────────────────────────────────────────────────
@@ -1954,7 +1956,7 @@ function searchable_menu(g, row, cols;
             return Consume(true)
         elseif event.key == Makie.Keyboard.escape
             filter_buf[] = ""
-            _apply_searchable_filter!(menu, "", all_opts[])
+            menu.is_open[] = false   # Close the dropdown (on(is_open) resets filter)
             return Consume(true)
         end
         return Consume(false)
@@ -1970,7 +1972,14 @@ function searchable_menu(g, row, cols;
         end
     end
 
+    push!(_ALL_MENUS, menu)
     return menu
+end
+
+"""Register a plain Menu widget in the global dismiss registry."""
+function _register_menu!(m::Makie.Menu)
+    push!(_ALL_MENUS, m)
+    return m
 end
 
 """Apply the current filter text to a searchable menu's options.
@@ -2217,16 +2226,36 @@ function create_metadata_window(
     
     g = GridLayout(main_layout[2,1], tellheight = false, halign = :left, valign = sl.value)
     
-    # Mouse scroll event to control slider
+    # ── Debounced scroll to avoid layout thrashing ──────────────────────────
+    # Problem: each sl.value[] update triggers a full GridLayout re-solve (80+ rows).
+    # Fix: cache content height, accumulate scroll delta, update at most every 30ms.
+    _cached_content_h = Ref(3000.0)  # initial estimate, updated by layout observer
+    _scroll_acc = Ref(0.0)
+    _scroll_pending = Ref(false)
+
+    # Update cached height when layout actually changes (section toggle, new widgets)
+    on(g.layoutobservables.computedbbox) do bbox
+        _cached_content_h[] = bbox.widths[2]
+    end
+
     on(fig.scene.events.scroll) do scroll
-        # Allow scrolling more freely to avoid being locked out by layout computation glitches
-        content_h = g.layoutobservables.computedbbox[].widths[2]
         window_h = size(fig.scene)[2]
+        if _cached_content_h[] > window_h * 0.5
+            _scroll_acc[] += scroll[2] * 0.03
+        end
         
-        if content_h > window_h * 0.5  # relaxed threshold
-            sl.value[] = clamp(sl.value[] + scroll[2] * 0.05, 0.0, 1.0)
-        else
-            sl.value[] = 1.0
+        if !_scroll_pending[]
+            _scroll_pending[] = true
+            @async begin
+                sleep(0.03)  # 30ms debounce — coalesces rapid scroll ticks
+                acc = _scroll_acc[]
+                _scroll_acc[] = 0.0
+                _scroll_pending[] = false
+                new_val = clamp(sl.value[] + acc, 0.0, 1.0)
+                if abs(new_val - sl.value[]) > 0.001  # skip if no meaningful change
+                    sl.value[] = new_val
+                end
+            end
         end
         return Consume(true)
     end
@@ -2389,8 +2418,8 @@ function create_metadata_window(
     queue_r = nr!()
     filter_opts = ["All", "Unreviewed", "Accepted", "Corrected", "Rejected", "Uncertain", "New", "Resolved", "Key Images"]
     sort_opts = ["By Index", "By SUVmax", "By Volume", "By State"]
-    menu_filter = Menu(g[queue_r, 1:2], options = filter_opts, default = "All", fontsize = 10)
-    menu_sort = Menu(g[queue_r, 3:4], options = sort_opts, default = "By Index", fontsize = 10)
+    menu_filter = Menu(g[queue_r, 1:2], options = filter_opts, default = "All", fontsize = 10); _register_menu!(menu_filter)
+    menu_sort = Menu(g[queue_r, 3:4], options = sort_opts, default = "By Index", fontsize = 10); _register_menu!(menu_sort)
     rowsize!(g, queue_r, Fixed(28)); register_fixed_row!(queue_r, 28)
     
     unrev_r = nr!()
@@ -2402,7 +2431,7 @@ function create_metadata_window(
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     les_menu = Menu(g[nav_r, 2:3],
         options = @lift(isempty($lesion_ids) ? ["(none)"] : $lesion_ids),
-        fontsize = 10)
+        fontsize = 10); _register_menu!(les_menu)
     btn_next = Button(g[nav_r, 4], label = "Next >>",
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     rowsize!(g, nav_r, Fixed(28)); register_fixed_row!(nav_r, 28)
@@ -2437,7 +2466,7 @@ function create_metadata_window(
         vis_lesion_active[] = !vis_lesion_active[]
         btn_vis_lesion.label[] = vis_lesion_active[] ? "Lesion: ON" : "Lesion: OFF"
         btn_vis_lesion.buttoncolor[] = vis_lesion_active[] ? GRN : BG_PNL
-        @info "BTN_VIS_LESION clicked: $(vis_lesion_active[])"
+        if _MEH.PERF_LOG[]; println("BTN_VIS_LESION clicked: $(vis_lesion_active[])"); flush(stdout); end
         put!(channel, ShowMaskLayerEvent(1, vis_lesion_active[]))
     end
     
@@ -2445,7 +2474,7 @@ function create_metadata_window(
         vis_surface_active[] = !vis_surface_active[]
         btn_vis_surface.label[] = vis_surface_active[] ? "Surf: ON" : "Surf: OFF"
         btn_vis_surface.buttoncolor[] = vis_surface_active[] ? RGBf(0.0, 0.75, 0.75) : BG_PNL
-        @info "BTN_VIS_SURFACE clicked: $(vis_surface_active[])"
+        if _MEH.PERF_LOG[]; println("BTN_VIS_SURFACE clicked: $(vis_surface_active[])"); flush(stdout); end
         put!(channel, ShowMaskLayerEvent(2, vis_surface_active[]))
     end
     
@@ -2453,7 +2482,7 @@ function create_metadata_window(
         vis_marrow_active[] = !vis_marrow_active[]
         btn_vis_marrow.label[] = vis_marrow_active[] ? "Marrow: ON" : "Marrow: OFF"
         btn_vis_marrow.buttoncolor[] = vis_marrow_active[] ? RGBf(0.75, 0.75, 0.1) : BG_PNL
-        @info "BTN_VIS_MARROW clicked: $(vis_marrow_active[])"
+        if _MEH.PERF_LOG[]; println("BTN_VIS_MARROW clicked: $(vis_marrow_active[])"); flush(stdout); end
         put!(channel, ShowMaskLayerEvent(3, vis_marrow_active[]))
     end
 
@@ -2470,7 +2499,7 @@ function create_metadata_window(
         _anatomy_visible_global[] = vis_anatomy_active[]
         btn_vis_anatomy.label[] = vis_anatomy_active[] ? "Anatomy: ON" : "Anatomy: OFF"
         btn_vis_anatomy.buttoncolor[] = vis_anatomy_active[] ? RGBf(0.5, 0.0, 0.8) : BG_PNL
-        @info "BTN_VIS_ANATOMY clicked: $(vis_anatomy_active[])"
+        if _MEH.PERF_LOG[]; println("BTN_VIS_ANATOMY clicked: $(vis_anatomy_active[])"); flush(stdout); end
         put!(channel, ShowMaskLayerEvent(4, vis_anatomy_active[]))
     end
 
@@ -2513,7 +2542,7 @@ function create_metadata_window(
         idx = findfirst(==(active_lesion_id[]), opts)
         new_idx = idx === nothing ? 1 : (idx == 1 ? length(opts) : idx - 1)
         active_lesion_id[] = opts[new_idx]
-        @info "[BENCH] Next/Prev Lesion (UI Update): $(round((time_ns()-t)/1e6, digits=1))ms"
+        if _MEH.PERF_LOG[]; println("[BENCH] Next/Prev Lesion (UI Update): $(round((time_ns()-t)/1e6, digits=1))ms"); flush(stdout); end
     end
     on(btn_next.clicks) do _
         t = time_ns()
@@ -2521,7 +2550,7 @@ function create_metadata_window(
         idx = findfirst(==(active_lesion_id[]), opts)
         new_idx = idx === nothing ? 1 : (idx == length(opts) ? 1 : idx + 1)
         active_lesion_id[] = opts[new_idx]
-        @info "[BENCH] Next/Prev Lesion (UI Update): $(round((time_ns()-t)/1e6, digits=1))ms"
+        if _MEH.PERF_LOG[]; println("[BENCH] Next/Prev Lesion (UI Update): $(round((time_ns()-t)/1e6, digits=1))ms"); flush(stdout); end
     end
 
     end_section!(sec_nav)
@@ -2531,11 +2560,11 @@ function create_metadata_window(
     
     m2_r = nr!()
     btn_m2 = Button(g[m2_r, 1:2], label = "[Launch M2]", buttoncolor = RGBf(0.2, 0.4, 0.6), labelcolor = TXT, fontsize = 10)
-    menu_m2_mode = Menu(g[m2_r, 3:4], options = ["Pure PET (Current TP)", "Compare Curr/Next TP", "Flicker", "Overlay"], default = "Pure PET (Current TP)", fontsize = 10)
+    menu_m2_mode = Menu(g[m2_r, 3:4], options = ["Pure PET (Current TP)", "Compare Curr/Next TP", "Flicker", "Overlay"], default = "Pure PET (Current TP)", fontsize = 10); _register_menu!(menu_m2_mode)
     rowsize!(g, m2_r, Fixed(28)); register_fixed_row!(m2_r, 28)
     m2_ref_r = nr!()
     Label(g[m2_ref_r, 1:2], "Reference TP:", fontsize = 10, color = LBL_FG, halign = :left)
-    menu_m2_ref = Menu(g[m2_ref_r, 3:4], options = ["Next TP", "Baseline (TP0)"], default = "Next TP", fontsize = 10)
+    menu_m2_ref = Menu(g[m2_ref_r, 3:4], options = ["Next TP", "Baseline (TP0)"], default = "Next TP", fontsize = 10); _register_menu!(menu_m2_ref)
     rowsize!(g, m2_ref_r, Fixed(28)); register_fixed_row!(m2_ref_r, 28)
 
     
@@ -2599,7 +2628,7 @@ function create_metadata_window(
     # Single TP view: 1 full-width dropdown (cols 1:4)
     # Compare Volumes view: 2 side-by-side dropdowns (Left: cols 1:2, Right: cols 3:4)
     tp_single_r = nr!()
-    menu_tp_single = Menu(g[tp_single_r, 1:4], options = ["(none)"], fontsize = 10)
+    menu_tp_single = Menu(g[tp_single_r, 1:4], options = ["(none)"], fontsize = 10); _register_menu!(menu_tp_single)
     rowsize!(g, tp_single_r, Fixed(28)); register_fixed_row!(tp_single_r, 28)
 
     tp_comp_lbl_r = nr!()
@@ -2608,8 +2637,8 @@ function create_metadata_window(
     rowsize!(g, tp_comp_lbl_r, Fixed(16)); register_fixed_row!(tp_comp_lbl_r, 16)
 
     tp_comp_r = nr!()
-    menu_tp_left  = Menu(g[tp_comp_r, 1:2], options = ["(none)"], fontsize = 10)
-    menu_tp_right = Menu(g[tp_comp_r, 3:4], options = ["(none)"], fontsize = 10)
+    menu_tp_left  = Menu(g[tp_comp_r, 1:2], options = ["(none)"], fontsize = 10); _register_menu!(menu_tp_left)
+    menu_tp_right = Menu(g[tp_comp_r, 3:4], options = ["(none)"], fontsize = 10); _register_menu!(menu_tp_right)
     rowsize!(g, tp_comp_r, Fixed(28)); register_fixed_row!(tp_comp_r, 28)
 
     is_syncing_tp = Ref(false)
@@ -3310,9 +3339,9 @@ function create_metadata_window(
     # 0. Profile & Radioligand
     clin_prof_r = nr!()
     Label(g[clin_prof_r, 1], "Profile:", fontsize = 10, color = LBL_FG, halign = :right)
-    menu_profile = Menu(g[clin_prof_r, 2], options = ["INITIAL_STAGING", "BCR", "PRE_RLT", "POST_RLT", "RESPONSE", "GENERAL"], fontsize = 10)
+    menu_profile = Menu(g[clin_prof_r, 2], options = ["INITIAL_STAGING", "BCR", "PRE_RLT", "POST_RLT", "RESPONSE", "GENERAL"], fontsize = 10); _register_menu!(menu_profile)
     Label(g[clin_prof_r, 3], "Radioligand:", fontsize = 10, color = LBL_FG, halign = :right)
-    menu_radioligand = Menu(g[clin_prof_r, 4], options = ["68Ga-PSMA-11", "18F-PSMA-1007", "18F-DCFPyL", "Other"], fontsize = 10)
+    menu_radioligand = Menu(g[clin_prof_r, 4], options = ["68Ga-PSMA-11", "18F-PSMA-1007", "18F-DCFPyL", "Other"], fontsize = 10); _register_menu!(menu_radioligand)
     rowsize!(g, clin_prof_r, Fixed(28)); register_fixed_row!(clin_prof_r, 28)
 
     
@@ -3808,7 +3837,7 @@ function create_metadata_window(
     Label(g[reg_r1, 1], "Reg QC:", fontsize = 10, color = LBL_FG, halign = :left)
     menu_reg_qc = Menu(g[reg_r1, 2:3],
         options = ["UNREVIEWED", "GOOD", "QUESTIONABLE", "LOCAL_ADJUSTED", "POOR_MANUAL_MATCH", "FAILED_NOT_EVALUABLE"],
-        default = "UNREVIEWED", fontsize = 10)
+        default = "UNREVIEWED", fontsize = 10); _register_menu!(menu_reg_qc)
     btn_flag_reg = Button(g[reg_r1, 4], label = "Flag", buttoncolor = RGBf(0.8, 0.4, 0.2), labelcolor = TXT, fontsize = 10)
     rowsize!(g, reg_r1, Fixed(28)); register_fixed_row!(reg_r1, 28)
     
@@ -3860,7 +3889,7 @@ function create_metadata_window(
 
     state_r = nr!()
     Label(g[state_r, 1], "State:", fontsize = 10, color = LBL_FG, halign = :right)
-    menu_obs_state = Menu(g[state_r, 2], options = ["UNREVIEWED", "ACCEPTED", "REJECTED", "CORRECTED", "UNCERTAIN", "NEW", "RESOLVED"], fontsize = 10)
+    menu_obs_state = Menu(g[state_r, 2], options = ["UNREVIEWED", "ACCEPTED", "REJECTED", "CORRECTED", "UNCERTAIN", "NEW", "RESOLVED"], fontsize = 10); _register_menu!(menu_obs_state)
     btn_star = Button(g[state_r, 3:4], label = "☆ Key Image", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     rowsize!(g, state_r, Fixed(28)); register_fixed_row!(state_r, 28)
     push!(all_metadata_rows, state_r)
@@ -3999,7 +4028,7 @@ function create_metadata_window(
             Label(g[ba_r, 1], "Anatomy:", fontsize = 10, color = LBL_FG, halign = :right)
             ba_all_opts = Observable(String[""; anatomy_ontology])
             menu_base_anat = searchable_menu(g, ba_r, 2:3, options = ba_all_opts, fontsize = 10)
-            menu_side = Menu(g[ba_r, 4], options = ["", "Right", "Left", "NA"], default = "", fontsize = 10)
+            menu_side = Menu(g[ba_r, 4], options = ["", "Right", "Left", "NA"], default = "", fontsize = 10); _register_menu!(menu_side)
             rowsize!(g, ba_r, Fixed(28)); register_fixed_row!(ba_r, 28)
             
             # Anatomical Details (OntologyBuilder-style rows)
@@ -4105,7 +4134,7 @@ function create_metadata_window(
     radlex_opts = isempty(radlex) ? ["(none)"] : (length(radlex) > 200 ? radlex[1:200] : radlex)
     radlex_filtered = Observable(radlex_opts)
     rl_menu_r = r[1] + 1  # peek at next row number before nr!()
-    rl_menu = Menu(g[nr!(), 1:4], options = radlex_filtered, fontsize = 10)
+    rl_menu = Menu(g[nr!(), 1:4], options = radlex_filtered, fontsize = 10); _register_menu!(rl_menu)
     rowsize!(g, rl_menu_r, Fixed(28)); register_fixed_row!(rl_menu_r, 28)
 
     on(rl_search.stored_string) do txt
@@ -4613,7 +4642,7 @@ function create_metadata_window(
     # Row 3: Algorithm dropdown (fixed height for Menu dropdown clearance)
     seg_r3 = nr!()
     Label(g[seg_r3, 1], "AI:", halign=:right, fontsize=10, color=LBL_FG)
-    algo_combo = Menu(g[seg_r3, 2:3], options = ["HELPNet (AI)", "NNInteractive", "Traditional (PETTumor)"], default = "HELPNet (AI)", fontsize = 10)
+    algo_combo = Menu(g[seg_r3, 2:3], options = ["HELPNet (AI)", "NNInteractive", "Traditional (PETTumor)"], default = "HELPNet (AI)", fontsize = 10); _register_menu!(algo_combo)
     btn_add_ai = Button(g[seg_r3, 4], label = "Run AI", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
     rowsize!(g, seg_r3, Fixed(30)); register_fixed_row!(seg_r3, 30)
     on(btn_add_ai.clicks) do _
@@ -4838,7 +4867,7 @@ function create_metadata_window(
                 p.visible[] = false
             end
             _ms = (time_ns() - _t_rebuild) / 1e6
-            if _ms > 2.0; println("[PERF] _rebuild_measurement_list!(empty): $(round(_ms, digits=1))ms"); flush(stdout); end
+            if _MEH.PERF_LOG[] && _ms > 2.0; println("[PERF] _rebuild_measurement_list!(empty): $(round(_ms, digits=1))ms"); flush(stdout); end
             return
         else
             _empty_meas_lbl.visible[] = false
@@ -4882,7 +4911,7 @@ function create_metadata_window(
             pool_idx += 1
         end
         _ms = (time_ns() - _t_rebuild) / 1e6
-        if _ms > 2.0; println("[PERF] _rebuild_measurement_list!($(total_meas) items): $(round(_ms, digits=1))ms"); flush(stdout); end
+        if _MEH.PERF_LOG[] && _ms > 2.0; println("[PERF] _rebuild_measurement_list!($(total_meas) items): $(round(_ms, digits=1))ms"); flush(stdout); end
     end
 
     on(_lmw_observables[:obs_refresh_measurements]) do obj
@@ -5563,7 +5592,7 @@ function create_metadata_window(
                                 organ_name = ts_names[ts_val]
                                 _MEH.global_organ_mapping[][lid] = organ_name
                                 raw_organ_for_type = organ_name
-                                @info "[DYNAMIC MAP] Fast centroid lookup: lesion $lid → '$organ_name' at [$sx,$sy,$sz]"
+                                if _MEH.PERF_LOG[]; println("[DYNAMIC MAP] Fast centroid lookup: lesion $lid → '$organ_name' at [$sx,$sy,$sz]"); flush(stdout); end
                             end
                         end
                     catch e
@@ -5659,7 +5688,7 @@ function create_metadata_window(
             db_updates["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
             db_updates["Certainty"] = "0"
             db_updates["LesionType"] = "Technical Artifact"
-            @info "Muscular artefact: lesion $lid → Technical Artifact, Certainty=0"
+            if _MEH.PERF_LOG[]; println("Muscular artefact: lesion $lid → Technical Artifact, Certainty=0"); flush(stdout); end
         end
 
         cur_tp = _MEH.current_tp_index[]
@@ -5694,7 +5723,7 @@ function create_metadata_window(
                 # Persist in db_updates
                 db_updates["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
                 db_updates["Certainty"] = "0"
-                @info "Edge-slice artefact: lesion $lid z=$z_slice/$total_z → Technical Artifact, Certainty=0"
+                if _MEH.PERF_LOG[]; println("Edge-slice artefact: lesion $lid z=$z_slice/$total_z → Technical Artifact, Certainty=0"); flush(stdout); end
             end
         end
         
@@ -5702,13 +5731,12 @@ function create_metadata_window(
         t_side = get(data, "BaseAnatomySide", "")
         
         # Check if an original RTOG / clinical name is available from HDF5 or annotations
+        # NOTE: orig_rtog_name is NOT used for BaseAnatomy prefill — atlas-based anatomy takes priority.
+        # It's still needed for seg_name_for_type classification below.
         orig_rtog_name = get(data, "ClinicalLesionName", get(data, "OriginalName", ""))
         if isempty(orig_rtog_name) && lid > 0
             tp_idx_cur = _MEH.current_tp_index[]
             orig_rtog_name = get(get(_MEH.tp_segment_names, tp_idx_cur, Dict{Int, String}()), lid, "")
-        end
-        if isempty(t_base) && !isempty(orig_rtog_name)
-            t_base = orig_rtog_name
         end
         
         # Resolve the raw organ name for this lesion (used for BaseAnatomy + Location auto-fill)
@@ -5733,7 +5761,7 @@ function create_metadata_window(
                             raw_organ = best
                             organ_map[lid] = raw_organ
                             _MEH.global_organ_mapping[] = organ_map
-                            @info "Auto-named lesion $lid via volume scan (bone priority): '$raw_organ'"
+                            if _MEH.PERF_LOG[]; println("Auto-named lesion $lid via volume scan (bone priority): '$raw_organ'"); flush(stdout); end
                         end
                     end
                     
@@ -5751,7 +5779,7 @@ function create_metadata_window(
                                 if !isempty(raw_organ)
                                     organ_map[lid] = raw_organ
                                     _MEH.global_organ_mapping[] = organ_map
-                                    @info "Auto-named lesion $lid from centroid at [$cx,$cy,$cz]: '$raw_organ'"
+                                    if _MEH.PERF_LOG[]; println("Auto-named lesion $lid from centroid at [$cx,$cy,$cz]: '$raw_organ'"); flush(stdout); end
                                 end
                             end
                         end
@@ -5773,14 +5801,14 @@ function create_metadata_window(
             if isempty(t_side) && !isempty(auto_side)
                 t_side = auto_side
             end
-            @info "Auto-detected BaseAnatomy for lesion $lid: '$t_base' (side='$t_side') from organ '$raw_organ'"
+            if _MEH.PERF_LOG[]; println("Auto-detected BaseAnatomy for lesion $lid: '$t_base' (side='$t_side') from organ '$raw_organ'"); flush(stdout); end
         elseif isempty(t_base) && !isempty(raw_organ) && raw_organ != "Unknown"
             # Fallback to old map_ts_to_anatomy for unknown organs
             t_base, auto_side = map_ts_to_anatomy(raw_organ)
             if isempty(t_side) && !isempty(auto_side)
                 t_side = auto_side
             end
-            @info "Auto-detected BaseAnatomy for lesion $lid: '$t_base' (side='$t_side') via keyword fallback from '$raw_organ'"
+            if _MEH.PERF_LOG[]; println("Auto-detected BaseAnatomy for lesion $lid: '$t_base' (side='$t_side') via keyword fallback from '$raw_organ'"); flush(stdout); end
         end
         
         # ── Auto-fill Anatomic Location & Sublocation (independent of BaseAnatomy) ──
@@ -5847,7 +5875,7 @@ function create_metadata_window(
                 # Update internal reference (but do NOT set active_lesion_id[] to avoid recursive callback)
                 active_lesion_display[] = new_display_name
                 cur_id_str = new_display_name
-                @info "Auto-renamed lesion to '$new_display_name'"
+                if _MEH.PERF_LOG[]; println("Auto-renamed lesion to '$new_display_name'"); flush(stdout); end
             end
         end
         
@@ -6263,7 +6291,7 @@ function create_metadata_window(
             @warn "Failed to apply state for lesion $id: $e"
         end
         _apply_ms = round((time_ns()-t_cb)/1e6, digits=1)
-        if _apply_ms > 5.0
+        if _MEH.PERF_LOG[] && _apply_ms > 5.0
             println("[PERF] LesionNav($id): $(round(_apply_ms, digits=1))ms"); flush(stdout)
         end
         
@@ -6997,7 +7025,7 @@ function create_metadata_window(
         lid = parse_lesion_id(active_lesion_id[])
         if lid !== nothing && lid > 0
             put!(channel, MakieEvents.SyncLesionEvent(lid))
-            @info "[KEYBOARD] D/Center → SyncLesion $lid"
+            if _MEH.PERF_LOG[]; println("[KEYBOARD] D/Center → SyncLesion $lid"); flush(stdout); end
         end
     end
     _lmw_observables[:obs_center] = obs_center
@@ -7103,12 +7131,29 @@ function display_metadata_window(fig::Figure)
     on(events(fig.scene).hasfocus) do focused
         # Override any GLFW focus-lost events — always keep tracking
         if !focused
+            # Fix 2C: Close any open dropdowns when switching to the 3D viewer window
+            for m in _ALL_MENUS
+                try; m.is_open[] && (m.is_open[] = false); catch; end
+            end
             @async (events(fig.scene).hasfocus[] = true)
         end
     end
     
     lock(GLOBAL_OPENGL_LOCK) do
         display(screen, fig)
+    end
+
+    # Fix 2B: Global click-outside-to-close for all dropdown menus
+    # Priority 200 fires BEFORE any widget handler (Makie Menu=64, buttons~30).
+    # Closes all open menus, then returns Consume(false) so the actual target
+    # widget still processes the click normally.
+    on(events(fig.scene).mousebutton, priority = 200) do event
+        if event.action == Mouse.press && event.button == Mouse.left
+            for m in _ALL_MENUS
+                try; m.is_open[] && (m.is_open[] = false); catch; end
+            end
+        end
+        return Consume(false)
     end
     # Loading Overlay for Makie
     overlay_grid = GridLayout(fig.layout[1:end, 1:end], tellwidth=false, tellheight=false, )
