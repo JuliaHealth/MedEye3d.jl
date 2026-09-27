@@ -654,9 +654,19 @@ function main()
                     h5_file["BONE_SUBSEG/lesion_$(lid)_surf"] = lin_surf
                     h5_file["BONE_SUBSEG/lesion_$(lid)_marr"] = lin_marr
                 end
+                
+                surf_nii = nothing
+                marr_nii = nothing
+                surf_aligned = nothing
+                marr_aligned = nothing
+                surf_pts = nothing
+                marr_pts = nothing
+                img_to_save = nothing
+                bin_mask = nothing
             catch e
                 println("      Error processing lesion $lid: ", e)
             end
+            GC.gc(true)
         end
     end
     
