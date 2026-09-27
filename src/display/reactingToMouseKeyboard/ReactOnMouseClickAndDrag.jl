@@ -270,10 +270,15 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
         
         # Always store measurements on panel 1's display object for cross-view visibility
         meas_obj = mainStates[1].mainForDisplayObjects
+        _t_meas = time_ns()
         if sub_mode == :sphere
             _handle_sphere_measurement(first_mouse, mainStates, meas_obj, (Float32(origX), Float32(origY), Float32(origZ)), MEH, MeasMod)
         elseif sub_mode == :line
             _handle_line_measurement(first_mouse, mainStates, meas_obj, (Float32(origX), Float32(origY), Float32(origZ)), MEH, MeasMod)
+        end
+        _meas_ms = (time_ns() - _t_meas) / 1e6
+        if _meas_ms > 3.0
+            println("[PERF] Measurement($(sub_mode)): $(round(_meas_ms, digits=1))ms"); flush(stdout)
         end
         return # Do not paint
     end
@@ -282,6 +287,7 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     if !stateObject.valueForMasToSet.is_painting_active || isempty(stateObject.textureToModifyVec)
         return
     end
+    _t_paint = time_ns()
     texture = stateObject.textureToModifyVec[1]
     calcDim = stateObject.calcDimsStruct
 
@@ -400,6 +406,10 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     catch e
         # Log errors instead of silently swallowing
         println("[PAINT-ERR] SUV/organ mapping failed: $e"); flush(stdout)
+    end
+    _paint_ms = (time_ns() - _t_paint) / 1e6
+    if _paint_ms > 5.0
+        println("[PERF] Paint: $(round(_paint_ms, digits=1))ms ($(length(mouseStructArray)) samples)"); flush(stdout)
     end
 end#react_to_draw
 

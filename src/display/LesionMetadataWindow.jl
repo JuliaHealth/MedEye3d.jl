@@ -2238,7 +2238,7 @@ function create_metadata_window(
     nr!() = (r[1] += 1; r[1])
 
     # High-contrast textbox helper for dark theme
-    function styled_textbox(grid_pos; placeholder="", stored_string="", fontsize=10, width=Auto(), tellwidth=false, kwargs...)
+    function styled_textbox(grid_pos; placeholder="", stored_string="", fontsize=10, width=Auto(), tellwidth=false, tellheight=false, kwargs...)
         tb = Textbox(grid_pos;
             placeholder = placeholder,
             stored_string = stored_string,
@@ -2253,6 +2253,7 @@ function create_metadata_window(
             cursorcolor = RGBf(0.95, 0.95, 0.95),
             width = width,
             tellwidth = tellwidth,
+            tellheight = tellheight,
             kwargs...)
         push!(_all_textboxes, tb)  # register for focus guard
         return tb
@@ -2371,16 +2372,16 @@ function create_metadata_window(
     # ── Cursor Info (always visible, not in a section) ───────────────────────
     # Study name — compare mode shows both studies
     Label(g[nr!(), 1:4], @lift(string($(_MEH.cursor_study_text))),
-        fontsize = 11, color = RGBAf(0.6, 0.8, 1.0, 1.0), halign = :left)
+        fontsize = 11, color = RGBAf(0.6, 0.8, 1.0, 1.0), halign = :left, tellwidth=false, tellheight=false)
     # HU / SUV / Lesion / View / Slice
     Label(g[nr!(), 1:4], @lift(string($(_MEH.cursor_info_text))),
-        fontsize = 11, color = RGBAf(0.95, 0.85, 0.55, 1.0), halign = :left)
+        fontsize = 11, color = RGBAf(0.95, 0.85, 0.55, 1.0), halign = :left, tellwidth=false, tellheight=false)
     # Live measurement info (sphere SUV / line distance)
     Label(g[nr!(), 1:4], @lift(string($(_MEH.measurement_info_text))),
-        fontsize = 11, color = RGBAf(0.55, 1.0, 0.55, 1.0), halign = :left)
+        fontsize = 11, color = RGBAf(0.55, 1.0, 0.55, 1.0), halign = :left, tellwidth=false, tellheight=false)
     # Save Status
     Label(g[nr!(), 1:4], save_status_text,
-        fontsize = 10, color = save_status_color, halign = :left)
+        fontsize = 10, color = save_status_color, halign = :left, tellwidth=false, tellheight=false)
 
     # ── Lesion Navigation ────────────────────────────────────────────────────
     sec_nav = begin_section!("Lesion Navigation")
@@ -4753,123 +4754,135 @@ function create_metadata_window(
 
     # Measurements list (dynamic GridLayout)
     meas_list_r = nr!()
-    meas_list_grid = GridLayout(g[meas_list_r, 1:4])
+    meas_list_grid = GridLayout(g[meas_list_r, 1:4], tellwidth=false)
     rowsize!(g, meas_list_r, Auto())
 
     # Observable to trigger list refresh — receives the mainForDisplayObjects
     _lmw_observables[:obs_refresh_measurements] = Observable{Any}(nothing)
 
-    function _rebuild_measurement_list!(grid, obj)
-        # Clear existing content
-        for elem in contents(grid)
-            try delete!(elem) catch; end
+    # ── WIDGET POOLING FOR MEASUREMENTS ──
+    # To prevent massive Makie layout lag and shader compilation stuttering,
+    # we pre-allocate a pool of 20 measurement rows and just toggle their visibility and text.
+    MAX_POOLED_MEAS = 20
+    
+    _meas_pool = []
+    for i in 1:MAX_POOLED_MEAS
+        vis = Observable(false)
+        l1_txt = Observable("")
+        l1_col = Observable{Any}(RGBf(1,1,1))
+        l2_txt = Observable("")
+        tid = Observable(0)
+        is_l = Observable(false)
+        
+        lbl1 = Label(meas_list_grid[i, 1], l1_txt, fontsize=9, color=l1_col, halign=:left, visible=vis, tellwidth=false, tellheight=false)
+        lbl2 = Label(meas_list_grid[i, 2], l2_txt, fontsize=9, color=TXT, halign=:left, visible=vis, tellwidth=false, tellheight=false)
+        
+        # Button does NOT support `visible` kwarg — toggle via blockscene.visible instead
+        btn_eye = Button(meas_list_grid[i, 3], label="[>]", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=9, tellwidth=false, tellheight=false)
+        btn_edit = Button(meas_list_grid[i, 4], label="[✎]", buttoncolor=BG_PNL, labelcolor=RGBf(0.4, 0.8, 1.0), fontsize=9, tellwidth=false, tellheight=false)
+        btn_del = Button(meas_list_grid[i, 5], label="[x]", buttoncolor=BG_PNL, labelcolor=RGBf(0.9, 0.3, 0.3), fontsize=9, tellwidth=false, tellheight=false)
+        
+        # Set initial visibility to hidden
+        btn_eye.blockscene.visible[] = false
+        btn_edit.blockscene.visible[] = false
+        btn_del.blockscene.visible[] = false
+        
+        # Sync button visibility with the vis Observable
+        on(vis) do v
+            btn_eye.blockscene.visible[] = v
+            btn_edit.blockscene.visible[] = v
+            btn_del.blockscene.visible[] = v
         end
         
+        on(btn_eye.clicks) do _
+            id = tid[]
+            if id > 0
+                evt = is_l[] ? MakieEvents.JumpToLineMeasurementEvent(id) : MakieEvents.JumpToMeasurementEvent(id)
+                try put!(channel, evt) catch; end
+            end
+        end
+        on(btn_edit.clicks) do _
+            id = tid[]
+            if id > 0
+                evt = is_l[] ? MakieEvents.EditLineMeasurementEvent(id) : MakieEvents.EditMeasurementEvent(id)
+                try put!(channel, evt) catch; end
+            end
+        end
+        on(btn_del.clicks) do _
+            id = tid[]
+            if id > 0
+                evt = is_l[] ? MakieEvents.DeleteLineMeasurementEvent(id) : MakieEvents.DeleteMeasurementEvent(id)
+                try put!(channel, evt) catch; end
+            end
+        end
+        
+        push!(_meas_pool, (; visible=vis, l1_txt=l1_txt, l1_col=l1_col, l2_txt=l2_txt, tid=tid, is_l=is_l))
+    end
+    
+    _empty_meas_lbl = Label(meas_list_grid[1, 1:4], "No measurements yet. Enable mode, then click.",
+        fontsize=9, color=RGBf(0.5, 0.5, 0.5), halign=:center, visible=false)
+
+    function _rebuild_measurement_list!(grid, obj)
+        _t_rebuild = time_ns()
         if obj === nothing
             return
         end
         
-        if !haskey(_lmw_observables, :obs_update_measurements)
-            _lmw_observables[:obs_update_measurements] = Observable(0)
-        end
-        obs_upd = _lmw_observables[:obs_update_measurements]
-
         saved_spheres = filter(m -> m.id > 0, obj.measurements)
         saved_lines = filter(m -> m.id > 0, obj.line_measurements)
+        total_meas = length(saved_spheres) + length(saved_lines)
         
-        if isempty(saved_spheres) && isempty(saved_lines)
-            Label(grid[1, 1:4], "No measurements yet. Enable mode, then click.",
-                fontsize=9, color=RGBf(0.5, 0.5, 0.5), halign=:center)
+        if total_meas == 0
+            _empty_meas_lbl.visible[] = true
+            for p in _meas_pool
+                p.visible[] = false
+            end
+            _ms = (time_ns() - _t_rebuild) / 1e6
+            if _ms > 2.0; println("[PERF] _rebuild_measurement_list!(empty): $(round(_ms, digits=1))ms"); flush(stdout); end
             return
+        else
+            _empty_meas_lbl.visible[] = false
         end
         
-        row_i = 0
         Meas = parentmodule(@__MODULE__).Measurements
+        pool_idx = 1
         
-        # Sphere measurements — each with its own color
-        for (i, m) in enumerate(saved_spheres)
-            row_i += 1
-            
-            local m_ref = m
-            mc = Meas.MEASUREMENT_COLORS[((m_ref.color_idx - 1) % length(Meas.MEASUREMENT_COLORS)) + 1]
-            row_color = RGBf(mc[1], mc[2], mc[3])
-            
-            lbl1 = lift(obs_upd) do _
-                "⬤ S$(m_ref.id) R:$(round(m_ref.radius_mm, digits=1))"
-            end
-            lbl2 = lift(obs_upd) do _
-                "Mean:$(round(m_ref.suv_mean, digits=1)) Max:$(round(m_ref.suv_max, digits=1))"
-            end
-            
-            Label(grid[row_i, 1], lbl1,
-                fontsize=9, color=row_color, halign=:left)
-            Label(grid[row_i, 2], lbl2,
-                fontsize=9, color=TXT, halign=:left)
-            
-            btn_eye = Button(grid[row_i, 3], label="[>]", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=9)
-            btn_edit = Button(grid[row_i, 4], label="[✎]", buttoncolor=BG_PNL, labelcolor=RGBf(0.4, 0.8, 1.0), fontsize=9)
-            btn_del = Button(grid[row_i, 5], label="[x]", buttoncolor=BG_PNL, labelcolor=RGBf(0.9, 0.3, 0.3), fontsize=9)
-            
-            local mid = m.id
-            on(btn_eye.clicks) do _
-                try
-                    put!(channel, MakieEvents.JumpToMeasurementEvent(mid))
-                catch; end
-            end
-            on(btn_edit.clicks) do _
-                try
-                    put!(channel, MakieEvents.EditMeasurementEvent(mid))
-                catch; end
-            end
-            on(btn_del.clicks) do _
-                try
-                    put!(channel, MakieEvents.DeleteMeasurementEvent(mid))
-                catch; end
-            end
+        # Spheres
+        for m in saved_spheres
+            if pool_idx > MAX_POOLED_MEAS; break; end
+            p = _meas_pool[pool_idx]
+            mc = Meas.MEASUREMENT_COLORS[((m.color_idx - 1) % length(Meas.MEASUREMENT_COLORS)) + 1]
+            p.l1_col[] = RGBf(mc[1], mc[2], mc[3])
+            p.l1_txt[] = "⬤ S$(m.id) R:$(round(m.radius_mm, digits=1))"
+            p.l2_txt[] = "Mean:$(round(m.suv_mean, digits=1)) Max:$(round(m.suv_max, digits=1))"
+            p.tid[] = m.id
+            p.is_l[] = false
+            p.visible[] = true
+            pool_idx += 1
         end
         
-        # Line measurements — each with its own color
-        for (i, lm) in enumerate(saved_lines)
-            row_i += 1
-            
-            local lm_ref = lm
-            mc = Meas.MEASUREMENT_COLORS[((lm_ref.color_idx - 1) % length(Meas.MEASUREMENT_COLORS)) + 1]
-            row_color = RGBf(mc[1], mc[2], mc[3])
-            
-            lbl1 = lift(obs_upd) do _
-                len_str = lm_ref.length_mm >= 10.0f0 ? "$(round(lm_ref.length_mm / 10.0f0, digits=2))cm" : "$(round(lm_ref.length_mm, digits=1))mm"
-                "━ L$(lm_ref.id) $(len_str)"
-            end
-            lbl2 = lift(obs_upd) do _
-                "Mean:$(round(lm_ref.suv_mean, digits=1)) Max:$(round(lm_ref.suv_max, digits=1))"
-            end
-            
-            Label(grid[row_i, 1], lbl1,
-                fontsize=9, color=row_color, halign=:left)
-            Label(grid[row_i, 2], lbl2,
-                fontsize=9, color=TXT, halign=:left)
-            
-            btn_eye_l = Button(grid[row_i, 3], label="[>]", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=9)
-            btn_edit_l = Button(grid[row_i, 4], label="[✎]", buttoncolor=BG_PNL, labelcolor=RGBf(0.4, 0.8, 1.0), fontsize=9)
-            btn_del_l = Button(grid[row_i, 5], label="[x]", buttoncolor=BG_PNL, labelcolor=RGBf(0.9, 0.3, 0.3), fontsize=9)
-            
-            local lid = lm.id
-            on(btn_eye_l.clicks) do _
-                try
-                    put!(channel, MakieEvents.JumpToLineMeasurementEvent(lid))
-                catch; end
-            end
-            on(btn_edit_l.clicks) do _
-                try
-                    put!(channel, MakieEvents.EditLineMeasurementEvent(lid))
-                catch; end
-            end
-            on(btn_del_l.clicks) do _
-                try
-                    put!(channel, MakieEvents.DeleteLineMeasurementEvent(lid))
-                catch; end
-            end
+        # Lines
+        for lm in saved_lines
+            if pool_idx > MAX_POOLED_MEAS; break; end
+            p = _meas_pool[pool_idx]
+            mc = Meas.MEASUREMENT_COLORS[((lm.color_idx - 1) % length(Meas.MEASUREMENT_COLORS)) + 1]
+            p.l1_col[] = RGBf(mc[1], mc[2], mc[3])
+            len_str = lm.length_mm >= 10.0f0 ? "$(round(lm.length_mm / 10.0f0, digits=2))cm" : "$(round(lm.length_mm, digits=1))mm"
+            p.l1_txt[] = "━ L$(lm.id) $(len_str)"
+            p.l2_txt[] = "Mean:$(round(lm.suv_mean, digits=1)) Max:$(round(lm.suv_max, digits=1))"
+            p.tid[] = lm.id
+            p.is_l[] = true
+            p.visible[] = true
+            pool_idx += 1
         end
+        
+        # Hide the rest
+        while pool_idx <= MAX_POOLED_MEAS
+            _meas_pool[pool_idx].visible[] = false
+            pool_idx += 1
+        end
+        _ms = (time_ns() - _t_rebuild) / 1e6
+        if _ms > 2.0; println("[PERF] _rebuild_measurement_list!($(total_meas) items): $(round(_ms, digits=1))ms"); flush(stdout); end
     end
 
     on(_lmw_observables[:obs_refresh_measurements]) do obj
@@ -6243,14 +6256,16 @@ function create_metadata_window(
     # ── Wire callbacks ────────────────────────────────────────────────────────
     on(active_lesion_id) do id
         t_cb = time_ns()
-        @info "WIRE_CALLBACK: active_lesion_id changed to: $id"
         db = lesion_db[]
         try
             apply_state(get_lesion_state(db, id))
         catch e
             @warn "Failed to apply state for lesion $id: $e"
         end
-        @info "[TIMING] apply_state: $(round((time_ns()-t_cb)/1e6, digits=1))ms for $id"
+        _apply_ms = round((time_ns()-t_cb)/1e6, digits=1)
+        if _apply_ms > 5.0
+            println("[PERF] LesionNav($id): $(round(_apply_ms, digits=1))ms"); flush(stdout)
+        end
         
         # Refresh Map Lesions lists to track the newly selected lesion
         if cv_active[] && sec_map_lesions[1][]

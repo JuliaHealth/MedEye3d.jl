@@ -1221,10 +1221,13 @@ function coordinateDisplay(
                 _t_dispatch = time_ns()
                 on_next!(stateInstances, channelData)
                 _t_after_dispatch = time_ns()
-                if channelData isa CompareTimePointsEvent
-                    println("[CONSUMER] <<< CompareTimePointsEvent DONE in $(round((_t_after_dispatch - _t_dispatch)/1e6, digits=1))ms"); flush(stdout)
-                elseif channelData isa SetTimePointEvent
-                    println("[CONSUMER] <<< SetTimePointEvent DONE in $(round((_t_after_dispatch - _t_dispatch)/1e6, digits=1))ms"); flush(stdout)
+                _dispatch_ms = (_t_after_dispatch - _t_dispatch) / 1e6
+                # Universal interaction timing: log any event taking >5ms (skip raw mouse moves to avoid spam)
+                if _dispatch_ms > 5.0 && !(channelData isa MouseStruct)
+                    _evt_name = string(typeof(channelData))
+                    _dot = findlast('.', _evt_name)
+                    if _dot !== nothing; _evt_name = _evt_name[_dot+1:end]; end
+                    println("[PERF] $(_evt_name): $(round(_dispatch_ms, digits=1))ms"); flush(stdout)
                 end
                 
                 # Mark UBO dirty for events that may change uniform parameters
@@ -1497,10 +1500,13 @@ function coordinateDisplay(
                     end
                     _t_after_render = time_ns()
                     
-                    # Structured performance log (enable with JULIA_DEBUG=SegmentationDisplay)
+                    # Structured performance log — always print slow frames (>30ms)
                     _t_total_ms = (_t_after_render - _t_dispatch) / 1e6
-                    if _t_total_ms > 30.0 || _n_uploaded > 0
-                        @debug "[PERF]" event=string(typeof(channelData)) dispatch_ms=round((_t_after_dispatch - _t_dispatch)/1e6, digits=1) upload_ms=round((_t_after_upload - _t_before_upload)/1e6, digits=1) render_ms=round((_t_after_render - _t_before_render)/1e6, digits=1) total_ms=round(_t_total_ms, digits=1) n_tex=_n_uploaded n_panels=length(_vk_panels) ubo_dirty=_ubo_dirty_count
+                    if _t_total_ms > 30.0
+                        _evt_name2 = string(typeof(channelData))
+                        _dot2 = findlast('.', _evt_name2)
+                        if _dot2 !== nothing; _evt_name2 = _evt_name2[_dot2+1:end]; end
+                        println("[PERF-FRAME] $(_evt_name2): total=$(round(_t_total_ms, digits=1))ms dispatch=$(round((_t_after_dispatch - _t_dispatch)/1e6, digits=1))ms upload=$(round((_t_after_upload - _t_before_upload)/1e6, digits=1))ms render=$(round((_t_after_render - _t_before_render)/1e6, digits=1))ms tex=$(_n_uploaded) panels=$(length(_vk_main_panels)) ubo=$(_ubo_dirty_count)"); flush(stdout)
                     end
                 end
             catch e
