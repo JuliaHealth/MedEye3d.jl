@@ -2511,6 +2511,7 @@ function create_metadata_window(
     tab2_end = Ref(0)
     tab3_end = Ref(0)
     tab4_end = Ref(0)
+    _all_sections = []  # collects section tuples for tab switching re-collapse
     nr!() = (r[1] += 1; r[1])
 
     # High-contrast textbox helper for dark theme
@@ -2625,6 +2626,7 @@ function create_metadata_window(
         is_open, start_row, header_r, btn, end_row_ref = sec_data
         end_row = r[1]
         end_row_ref[] = end_row
+        push!(_all_sections, sec_data)  # register for tab switching
         
         # If default_open is false, collapse immediately (DURING CONSTRUCTION — use raw scans, not cache)
         if !is_open[]
@@ -5741,9 +5743,8 @@ function create_metadata_window(
         btn_tab_anat.buttoncolor[] = tab_idx == 3 ? ACCENT : BLU_BTN
         btn_tab_tools.buttoncolor[] = tab_idx == 4 ? ACCENT : BLU_BTN
         
-        # We need to hide all rows NOT in the active tab
-        start_row = 1
-        end_row = 1
+        # Determine active row range
+        start_row = 1; end_row = 1
         if tab_idx == 1
             start_row = 1; end_row = tab1_end[]
         elseif tab_idx == 2
@@ -5754,25 +5755,23 @@ function create_metadata_window(
             start_row = tab3_end[] + 1; end_row = tab4_end[]
         end
         
+        # Show/hide rows using set_row_visible! (handles widget blockscene visibility)
         for i in 1:r[1]
-            # For rows OUTSIDE the active tab, we hide them
-            if i < start_row || i > end_row
-                rowsize!(g, i, Fixed(0))
-                if i < r[1]
-                    rowgap!(g, i, 0)
-                end
-            else
-                # Restore size
-                if haskey(_row_fixed_heights, i)
-                    rowsize!(g, i, Fixed(_row_fixed_heights[i]))
-                else
-                    rowsize!(g, i, Auto())
-                end
-                if i < r[1]
-                    rowgap!(g, i, 2)
+            set_row_visible!(i, i >= start_row && i <= end_row)
+        end
+        
+        # Re-collapse any sections that are in the closed state within the active range
+        for sec in _all_sections
+            is_open_obs, sec_start, _, _, sec_end_ref = sec
+            if !is_open_obs[]
+                for i in sec_start:sec_end_ref[]
+                    if i >= start_row && i <= end_row
+                        set_row_visible!(i, false)
+                    end
                 end
             end
         end
+        
         # Reset scroll
         sl.value[] = 1.0
         _scroll_acc[] = 0.0

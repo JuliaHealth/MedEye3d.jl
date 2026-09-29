@@ -153,7 +153,7 @@ run_skellytour('$CT_FILE', '$OUT_DIR')
     # === Step 5: Post-process + Build Max Anatomy ===
     echo "  [5/5] Post-processing + building max_anatomy..."
     docker exec "$CONTAINER" python3 "$POSTPROCESS_SCRIPT" "$OUT_DIR" 2>&1 | tee -a "$LOG_FILE"
-    docker exec "$CONTAINER" python3 "$BUILD_SCRIPT" "$OUT_DIR" "$MAX_ANAT" 2>&1 | tee -a "$LOG_FILE"
+    # docker exec "$CONTAINER" python3 "$BUILD_SCRIPT" "$OUT_DIR" "$MAX_ANAT" 2>&1 | tee -a "$LOG_FILE"
     
     # Verify
     if [ -f "$MAX_ANAT" ]; then
