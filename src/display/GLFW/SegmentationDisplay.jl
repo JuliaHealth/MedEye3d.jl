@@ -538,6 +538,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ShowOnlyPETEve
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ShowOnlyCTEvent) = MakieEventHandlers.reactToShowOnlyCT(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleSyncScrollEvent) = MakieEventHandlers.reactToToggleSyncScroll(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleAnatomyEvent) = _trigger_lmw_observable(:obs_toggle_anatomy)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleCrosshairEvent) = _trigger_lmw_observable(:obs_toggle_crosshair)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.NewLesionEvent) = _trigger_lmw_observable(:obs_new_lesion)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.EraseModeEvent) = _trigger_lmw_observable(:obs_erase_mode)
 

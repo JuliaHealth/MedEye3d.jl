@@ -331,28 +331,60 @@ function init_vulkan_context(window::GLFW.Window, width::Int, height::Int)::VkCt
     err != 0 && error("glfwCreateWindowSurface failed: $err")
     surface = SurfaceKHR(Ptr{Cvoid}(surface_ref[]), instance, Threads.Atomic{UInt64}(1))
 
-    # ── Physical device — prefer discrete GPU ──
+    # ── Physical device — prefer discrete GPU that can present to this surface ──
     pdevs = unwrap(enumerate_physical_devices(instance))
     isempty(pdevs) && error("No Vulkan physical devices found")
-    pdev = pdevs[1]
-    for pd in pdevs
+    
+    # Score each device: discrete GPU with present support is best
+    function _gpu_score(pd)
         props = get_physical_device_properties(pd)
-        if props.device_type == PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+        is_discrete = props.device_type == PHYSICAL_DEVICE_TYPE_DISCRETE_GPU
+        # Check if any queue family supports both graphics + present
+        can_present = false
+        qfps = get_physical_device_queue_family_properties(pd)
+        for (j, qfp) in enumerate(qfps)
+            has_gfx = (qfp.queue_flags & QUEUE_GRAPHICS_BIT) == QUEUE_GRAPHICS_BIT
+            if has_gfx
+                try
+                    pres = unwrap(get_physical_device_surface_support_khr(pd, UInt32(j - 1), surface))
+                    pres && (can_present = true; break)
+                catch; end
+            end
+        end
+        return (is_discrete ? 2 : 0) + (can_present ? 1 : 0)
+    end
+    
+    sorted_pdevs = sort(collect(pdevs); by = pd -> -_gpu_score(pd))
+    
+    # Try each device in priority order (discrete+present first, then others)
+    local pdev, qfi, device, queue
+    device_created = false
+    last_err = nothing
+    for pd in sorted_pdevs
+        props = get_physical_device_properties(pd)
+        try
+            qfi_candidate = find_graphics_queue_family(pd, surface)
+            queue_ci = DeviceQueueCreateInfo(qfi_candidate, [1.0f0])
+            dev_ci = DeviceCreateInfo([queue_ci], [], ["VK_KHR_swapchain"])
+            dev_candidate = unwrap(create_device(pd, dev_ci))
+            
+            # Success
             pdev = pd
+            qfi = qfi_candidate
+            device = dev_candidate
+            queue = get_device_queue(device, qfi, 0)
+            device_created = true
+            @info "Vulkan GPU: $(props.device_name) (type=$(props.device_type))"
             break
+        catch ex
+            last_err = ex
+            @warn "Vulkan device creation failed on $(props.device_name), trying next..." exception=ex
         end
     end
-    @info "Vulkan GPU: $(get_physical_device_properties(pdev).device_name)"
-
-    # ── Queue family ──
-    qfi = find_graphics_queue_family(pdev, surface)
-
-    # ── Logical device ──
-    queue_ci = DeviceQueueCreateInfo(qfi, [1.0f0])
-    dev_ci = DeviceCreateInfo([queue_ci], [], ["VK_KHR_swapchain"])
-    device = unwrap(create_device(pdev, dev_ci))
-    queue = get_device_queue(device, qfi, 0)
-
+    
+    if !device_created
+        error("All Vulkan devices failed. Last error: $last_err")
+    end
     # ── Swapchain ──
     swapchain, sc_format, sc_extent, sc_images, sc_views =
         create_swapchain(device, pdev, surface, qfi, width, height)

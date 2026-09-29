@@ -54,6 +54,7 @@
 | **P (hold)** | Hide masks (keeps CT and PET/SPECT visible) | ✅ Preserves prior manual mask state |
 | **T (hold)** | Show only CT (hides everything else) | ✅ Preserves prior manual mask state |
 | **B** | Toggle max anatomy overlay | ✅ Anatomy button toggles |
+| **H** | Toggle crosshair overlay | ✅ Crosshair button toggles |
 | **S** or **C** | Toggle synchronized scrolling | ✅ Sync button updates |
 
 ## CT Windowing Presets

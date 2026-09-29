@@ -874,7 +874,7 @@ end
 const _shortcut_visibility_cache = Dict{UInt64, Bool}()
 
 # ── ToggleMaskVisibilityEvent (Q hold/release) ────────────────────────────
-# Q press: hide all masks. Q release: restore masks.
+# Q press: hide all masks, bone overlays, and anatomy. Q release: restore.
 function reactToToggleMaskVisibility(data::MakieEvents.ToggleMaskVisibilityEvent, stateObjects::Vector{StateDataFields})
     is_press = !data.visible  # true = show (release), false = hide (press)
     for state in stateObjects
@@ -883,7 +883,12 @@ function reactToToggleMaskVisibility(data::MakieEvents.ToggleMaskVisibilityEvent
                 if !haskey(_shortcut_visibility_cache, objectid(textSpec))
                     _shortcut_visibility_cache[objectid(textSpec)] = textSpec.isVisible
                 end
-                if textSpec.name == "Mask" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy")
+                # Hide: lesion mask, bone overlay, organ mask, anatomy, any multi-discrete mask
+                if textSpec.name == "Mask" || textSpec.name == "Bone_Overlay" || textSpec.name == "Bone_Mask" ||
+                   textSpec.name == "bone_mask" || textSpec.name == "bone" ||
+                   textSpec.name == "Organ_Mask" || textSpec.name == "organ_mask" ||
+                   textSpec.name == "Anatomy" ||
+                   (textSpec.isMultiDiscreteMask && textSpec.name != "CT" && !textSpec.isMainImage && !textSpec.isNuclearMask)
                     textSpec.isVisible = false
                 end
             else
@@ -1313,6 +1318,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         end
     end
     _mri_clamp_mask_range!(stateObjects)
+    _t_vis = round((time_ns()-t_total)/1e6, digits=1)
 
     if PERF_LOG[]; println("[SYNC-LESION] Visibility updated, bone subseg..."); flush(stdout); end
     # 1b. Update bone subseg 3D arrays for visible panels only
@@ -1397,6 +1403,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     end
 
     if PERF_LOG[]; println("[SYNC-LESION] Bone subseg dispatched, centroid..."); flush(stdout); end
+    _t_bone = round((time_ns()-t_total)/1e6, digits=1)
     # 2. Get canonical center
     panel_tp_cur = current_tp_index[]
     canonical_center = if data.lesion_id > 0
@@ -1481,7 +1488,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     end
 
     t_total_ms = (time_ns() - t_total) / 1e6
-    if PERF_LOG[]; println("[SYNC-LESION] DONE $(round(t_total_ms, digits=1))ms"); flush(stdout); end
+    println("[SYNC-LESION] lid=$(data.lesion_id) vis=$(_t_vis)ms bone=$(_t_bone)ms TOTAL=$(round(t_total_ms, digits=1))ms"); flush(stdout)
     return changed
 end
 

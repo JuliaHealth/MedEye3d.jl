@@ -292,6 +292,14 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             end
             return
 
+        # H - Toggle crosshair overlay
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_H)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.ToggleCrosshairEvent())
+            end
+            return
+
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_V)
             if keyInputInfo.action == GLFW.PRESS
                 ch = _get_event_channel()
