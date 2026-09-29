@@ -2432,8 +2432,17 @@ function create_metadata_window(
     
     main_layout = GridLayout(fig[1,1])
 
-    # ── Phase Indicator Bar ──────────────────────────────────────────────────
-    phase_layout = GridLayout(main_layout[1, 1:2], tellheight = true)
+
+    # ── Tabs Bar ─────────────────────────────────────────────────────────────
+    tab_layout = GridLayout(main_layout[1, 1:2], tellheight = true)
+    btn_tab_nav = Button(tab_layout[1, 1], label = "1. Nav & View", buttoncolor = BLU_BTN, labelcolor = LBL_FG)
+    btn_tab_clin = Button(tab_layout[1, 2], label = "2. Clinical & Annot", buttoncolor = BLU_BTN, labelcolor = LBL_FG)
+    btn_tab_anat = Button(tab_layout[1, 3], label = "3. Anatomy & Seg", buttoncolor = BLU_BTN, labelcolor = LBL_FG)
+    btn_tab_tools = Button(tab_layout[1, 4], label = "4. Export & Tools", buttoncolor = BLU_BTN, labelcolor = LBL_FG)
+    
+    # Push phase indicator down to row 2
+    phase_layout = GridLayout(main_layout[2, 1:2], tellheight = true)
+
     btn_prev_phase = Button(phase_layout[1, 1], label = "◀ Prev", buttoncolor = BLU_BTN, labelcolor = LBL_FG)
     phase_lbl = Label(phase_layout[1, 2], "READ", color = ACCENT, font = :bold, fontsize = 18)
     btn_next_phase = Button(phase_layout[1, 3], label = "Next ▶", buttoncolor = BLU_BTN, labelcolor = LBL_FG)
@@ -2449,9 +2458,9 @@ function create_metadata_window(
     end
     _lmw_observables[:clinical_phase_obs] = phase_lbl.text
 
-    sl = Slider(main_layout[2, 2], range = 0:0.01:1, startvalue = 1, horizontal = false, tellheight = false)
+    sl = Slider(main_layout[3, 2], range = 0:0.01:1, startvalue = 1, horizontal = false, tellheight = false)
     
-    g = GridLayout(main_layout[2,1], tellheight = false, halign = :left, valign = sl.value)
+    g = GridLayout(main_layout[3,1], tellheight = false, halign = :left, valign = sl.value)
     
     # ── Debounced scroll with startup guard ──────────────────────────────
     # Problem: each sl.value[] update triggers a full GridLayout re-solve (80+ rows).
@@ -2498,6 +2507,10 @@ function create_metadata_window(
     colgap!(g, 2)   # compact columns
     colsize!(g, 1, Auto())
     r = [0]  # row counter as array for mutation in closures
+    tab1_end = Ref(0)
+    tab2_end = Ref(0)
+    tab3_end = Ref(0)
+    tab4_end = Ref(0)
     nr!() = (r[1] += 1; r[1])
 
     # High-contrast textbox helper for dark theme
@@ -3596,6 +3609,7 @@ function create_metadata_window(
 
     end_section!(sec_win)
 
+    tab1_end[] = r[1]
     # ── Clinical Information & Patient History ───────────────────────────────
     sec_clinical = begin_section!("Clinical Information & Indication"; default_open=true)
     
@@ -4719,6 +4733,7 @@ function create_metadata_window(
         "Other Structural & Soft Tissue Changes (Surrounding Changes Part C)"
     ])
 
+    tab2_end[] = r[1]
     # ── Dynamic Visibility Engine ─────────────────────────────────────────────
     function update_dynamic_visibility!(active_type::String)
         if cv_active[]
@@ -5626,6 +5641,7 @@ function create_metadata_window(
     end
     apply_compare_mode_ui! = apply_compare_mode_ui_impl!
 
+    tab3_end[] = r[1]
     # ── Settings & Export (merged: Active Data + Preprocessing + Save + Report) ──
     sec_settings = begin_section!("Settings & Export"; default_open=false)
     
@@ -5710,6 +5726,66 @@ function create_metadata_window(
     rowsize!(g, ads_r3, Fixed(28)); register_fixed_row!(ads_r3, 28)
 
     end_section!(sec_settings)
+
+
+    tab4_end[] = r[1]
+    
+    # Tab Switching Logic
+    active_tab = Observable(1)
+    
+    function switch_tab!(tab_idx)
+        active_tab[] = tab_idx
+        # Update button colors
+        btn_tab_nav.buttoncolor[] = tab_idx == 1 ? ACCENT : BLU_BTN
+        btn_tab_clin.buttoncolor[] = tab_idx == 2 ? ACCENT : BLU_BTN
+        btn_tab_anat.buttoncolor[] = tab_idx == 3 ? ACCENT : BLU_BTN
+        btn_tab_tools.buttoncolor[] = tab_idx == 4 ? ACCENT : BLU_BTN
+        
+        # We need to hide all rows NOT in the active tab
+        start_row = 1
+        end_row = 1
+        if tab_idx == 1
+            start_row = 1; end_row = tab1_end[]
+        elseif tab_idx == 2
+            start_row = tab1_end[] + 1; end_row = tab2_end[]
+        elseif tab_idx == 3
+            start_row = tab2_end[] + 1; end_row = tab3_end[]
+        elseif tab_idx == 4
+            start_row = tab3_end[] + 1; end_row = tab4_end[]
+        end
+        
+        for i in 1:r[1]
+            # For rows OUTSIDE the active tab, we hide them
+            if i < start_row || i > end_row
+                rowsize!(g, i, Fixed(0))
+                if i < r[1]
+                    rowgap!(g, i, 0)
+                end
+            else
+                # Restore size
+                if haskey(_row_fixed_heights, i)
+                    rowsize!(g, i, Fixed(_row_fixed_heights[i]))
+                else
+                    rowsize!(g, i, Auto())
+                end
+                if i < r[1]
+                    rowgap!(g, i, 2)
+                end
+            end
+        end
+        # Reset scroll
+        sl.value[] = 1.0
+        _scroll_acc[] = 0.0
+    end
+    
+    on(btn_tab_nav.clicks) do _; switch_tab!(1); end
+    on(btn_tab_clin.clicks) do _; switch_tab!(2); end
+    on(btn_tab_anat.clicks) do _; switch_tab!(3); end
+    on(btn_tab_tools.clicks) do _; switch_tab!(4); end
+    
+    # Initialize to tab 1
+    switch_tab!(1)
+
 
     # ── Collect / apply UI state ──────────────────────────────────────────────
     function collect_state()::Dict{String,Any}
@@ -7773,7 +7849,7 @@ function display_metadata_window(fig::Figure)
     end
     
     # ── Loading Overlay for Makie ──────────────────────────────────────────────
-    overlay_grid = GridLayout(fig.layout[1:end, 1:end], tellwidth=false, tellheight=false, )
+    overlay_grid = GridLayout(fig.layout[:, :], tellwidth=false, tellheight=false, )
     loading_bg = Box(overlay_grid[1, 1], color=(:black, 0.85), strokewidth=0)
     loading_txt = Label(overlay_grid[1, 1], "LOADING APPLICATION...\nPlease wait while engines initialize.", color=:white, fontsize=30, font=:bold, halign=:center, valign=:center)
     
@@ -7796,11 +7872,11 @@ function display_metadata_window(fig::Figure)
         end
     end
 
-    login_grid = GridLayout(fig.layout[1:end, 1:end], tellwidth=false, tellheight=false)
+    login_grid = GridLayout(fig.layout[:, :], tellwidth=false, tellheight=false)
     login_bg = Box(login_grid[1, 1], color=(:black, 0.92), strokewidth=0, visible=_login_visible)
     
     login_inner = GridLayout(login_grid[1, 1], tellwidth=false, tellheight=false)
-    login_inner_bg = Button(login_inner[1:end, 1:end], label="", buttoncolor=:transparent, buttoncolor_active=:transparent, buttoncolor_hover=:transparent, strokewidth=0, width=nothing, height=nothing)
+    login_inner_bg = Button(login_inner[:, :], label="", buttoncolor=:transparent, buttoncolor_active=:transparent, buttoncolor_hover=:transparent, strokewidth=0, width=nothing, height=nothing)
     on(_login_visible) do vis; login_inner_bg.blockscene.visible[] = vis; end
     
     lbl_title = Label(login_inner[1, 1:2], "MedEye3d Login", color=:white, fontsize=24, font=:bold, halign=:center, visible=_login_visible)
