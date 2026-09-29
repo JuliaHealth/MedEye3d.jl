@@ -58,7 +58,31 @@ struct LoadDBMessage <: DBMessage
 end
 
 export create_metadata_window, load_annotations, save_annotations, load_annotations_hdf5, save_annotations_hdf5, get_lesion_state, display_metadata_window
-export current_has_expert_edits, current_seg_origin, mark_expert_correction!, mark_prompt_segmentation!, mark_reverted_to_ai!, request_autosave, get_lesion_has_expert_edits, get_lesion_segmentation_origin
+
+# ── Skip no-op Observable updates (each avoided update saves ~1-5ms) ─────────
+"""
+    _set!(obs, val) — Set Observable only if value changed. Avoids Makie reactive cascade.
+"""
+@inline function _set!(obs::Observable, val)
+    obs[] == val && return false
+    obs[] = val
+    return true
+end
+"""
+    _set_menu!(menu, selection_val) — Set Menu selection only if changed.
+"""
+@inline function _set_menu!(menu, val)
+    menu.selection[] == val && return
+    menu.selection[] = val
+end
+"""
+    _set_menu_idx!(menu, idx) — Set Menu i_selected only if changed.
+"""
+@inline function _set_menu_idx!(menu, idx::Integer)
+    menu.i_selected[] == idx && return
+    menu.i_selected[] = idx
+end
+export current_has_expert_edits, current_seg_origin, mark_expert_correction!, mark_prompt_segmentation!, mark_reverted_to_ai!, request_autosave, get_lesion_has_expert_edits, get_lesion_segmentation_origin, _current_user
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 function _find_metadata_data_file(filename::String)::String
@@ -106,6 +130,10 @@ const _all_textboxes = Any[]
 const current_has_expert_edits = Observable(false)
 const current_seg_origin = Observable("AI_PRESEGMENTATION")
 const _global_trigger_autosave = Ref{Any}(nothing)
+const _current_user = Ref{String}("")
+const _login_authenticated = Ref{Bool}(false)
+const _login_success_time = Ref{Float64}(0.0)
+const _LOGIN_PASSWORD = "lu"
 
 _lmw_observables[:has_expert_edits] = current_has_expert_edits
 _lmw_observables[:seg_origin] = current_seg_origin
@@ -124,6 +152,15 @@ function mark_expert_correction!(lid=nothing)
         if haskey(db, lid_str) && db[lid_str] isa AbstractDict
             db[lid_str]["has_expert_edits"] = true
             db[lid_str]["SegmentationOrigin"] = "EXPERT_CORRECTION"
+            # Audit: record last segmentation edit
+            if !isempty(_current_user[])
+                db[lid_str]["_last_seg_edit_by"] = _current_user[]
+            end
+            db[lid_str]["_last_seg_edit_at"] = Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
+            # Full edit history: append segmentation edit event
+            try
+                _append_seg_edit_to_history!(db[lid_str], _current_user[], "paint_brush")
+            catch; end
             _active_lesion_db[][] = db
         end
     end
@@ -653,6 +690,30 @@ function lookup_anatomy(raw_organ::String)
     if haskey(mapping, stripped)
         return mapping[stripped]
     end
+    # Try stripping _left/_right suffix
+    for suffix in ["_left", "_right"]
+        if endswith(key, suffix)
+            base = key[1:end-length(suffix)]
+            if haskey(mapping, base)
+                return mapping[base]
+            end
+        end
+    end
+    # Try substring match: find the JSON key that contains the query or vice versa
+    # e.g., "adductor" matches "thigh_medial_compartment" → no, but "adductor_left" matches "adductor_left"
+    # This handles cases where the raw_organ is a shortened/alias name
+    best_match = nothing
+    best_len = 0
+    for (mk, mv) in mapping
+        # Check if the raw_organ key contains a JSON key or vice versa
+        if occursin(key, mk) || occursin(mk, key)
+            if length(mk) > best_len  # prefer longer (more specific) matches
+                best_match = mv
+                best_len = length(mk)
+            end
+        end
+    end
+    best_match !== nothing && return best_match
     # NOT FOUND is normal for clinical lesion names — no log needed
     return nothing
 end
@@ -811,6 +872,107 @@ function get_lesion_state(db::Dict, key::String)::Dict{String,Any}
     end
     
     return Dict{String,Any}()
+end
+
+# ─── Edit History Tracking ────────────────────────────────────────────────────
+# Tracks all metadata modifications per lesion (excluding imaging tensor data).
+
+"""Fields excluded from edit history diff tracking (internal/computed/windowing/meta-meta)."""
+const _EDIT_HISTORY_EXCLUDED_FIELDS = Set{String}([
+    "_last_modified_by", "_last_modified_at",
+    "_CT_Min", "_CT_Max", "_PET_Min", "_PET_Max", "_SPECT_Min", "_SPECT_Max",
+    "_display_name", "_Centroid", "_Diameter_mm", "_Volume_cc", "_Volume_mm3",
+    "_Slice_Z", "_TimePoint", "_Modality", "_NodeName",
+    "_last_seg_edit_by", "_last_seg_edit_at",
+    "_edit_history",
+])
+
+"""Maximum number of edit history entries per lesion (safety cap)."""
+const _MAX_EDIT_HISTORY = 500
+
+"""
+    _compute_metadata_diff(old, new) -> Vector{Dict{String,String}}
+
+Computes field-level differences between old and new lesion states,
+excluding internal/computed/windowing fields and imaging tensor data.
+"""
+function _compute_metadata_diff(old::AbstractDict, new::AbstractDict)
+    changes = Dict{String,String}[]
+    all_keys = union(keys(old), keys(new))
+    for k in all_keys
+        k in _EDIT_HISTORY_EXCLUDED_FIELDS && continue
+        startswith(k, "_") && continue  # skip all internal fields
+        old_v = string(get(old, k, ""))
+        new_v = string(get(new, k, ""))
+        if old_v != new_v
+            push!(changes, Dict{String,String}("field" => k, "old" => old_v, "new" => new_v))
+        end
+    end
+    return changes
+end
+
+"""
+    _append_edit_history!(new_state, old_state)
+
+Compares new_state against old_state, and if there are meaningful metadata changes,
+appends an edit record to new_state["_edit_history"].
+Carries over existing history from old_state. Caps at _MAX_EDIT_HISTORY entries.
+"""
+function _append_edit_history!(new_state::Dict, old_state::AbstractDict)
+    existing = get(old_state, "_edit_history", Any[])
+    if existing isa AbstractString
+        try existing = JSON.parse(existing) catch; existing = Any[] end
+    end
+    if !(existing isa AbstractArray)
+        existing = Any[]
+    end
+    existing = collect(Any, existing)
+    
+    changes = _compute_metadata_diff(old_state, new_state)
+    
+    if !isempty(changes)
+        entry = Dict{String,Any}(
+            "user"      => _current_user[],
+            "timestamp" => Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS"),
+            "action"    => "metadata_edit",
+            "changes"   => changes
+        )
+        push!(existing, entry)
+        if length(existing) > _MAX_EDIT_HISTORY
+            existing = existing[end-_MAX_EDIT_HISTORY+1:end]
+        end
+    end
+    
+    new_state["_edit_history"] = existing
+end
+
+"""
+    _append_seg_edit_to_history!(lesion_data, user, tool)
+
+Appends a segmentation edit event to the lesion's _edit_history.
+"""
+function _append_seg_edit_to_history!(lesion_data::AbstractDict, user::String, tool::String="paint_brush")
+    existing = get(lesion_data, "_edit_history", Any[])
+    if existing isa AbstractString
+        try existing = JSON.parse(existing) catch; existing = Any[] end
+    end
+    if !(existing isa AbstractArray)
+        existing = Any[]
+    end
+    existing = collect(Any, existing)
+    
+    entry = Dict{String,Any}(
+        "user"      => user,
+        "timestamp" => Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS"),
+        "action"    => "segmentation_edit",
+        "changes"   => [Dict{String,String}("field" => "SegmentationMask", "old" => "", "new" => "EXPERT_CORRECTION")],
+        "tool"      => tool
+    )
+    push!(existing, entry)
+    if length(existing) > _MAX_EDIT_HISTORY
+        existing = existing[end-_MAX_EDIT_HISTORY+1:end]
+    end
+    lesion_data["_edit_history"] = existing
 end
 
 """
@@ -1919,29 +2081,66 @@ function searchable_menu(g, row, cols;
         if is_open
             filter_buf[] = ""
         else
-            # Preserve current selection before restoring options
             sel = menu.selection[]
-            _apply_searchable_filter!(menu, "", all_opts[])
-            # Ensure the selected value remains visible in the restored options
-            if sel !== nothing && !isempty(string(sel))
-                sel_str = string(sel)
-                current_opts = menu.options[]
-                if sel_str ∉ current_opts
-                    menu.options[] = vcat([sel_str], current_opts)
+            
+            # If the user typed something but just clicked away without selecting, auto-commit their typed text
+            if !isempty(filter_buf[]) && (sel === nothing || isempty(string(sel)))
+                typed_str = filter_buf[]
+                current_opts = all_opts[]
+                if !(typed_str in current_opts)
+                    # Custom text: prepend to options so it's a valid selection
+                    menu.options[] = vcat([typed_str], current_opts)
+                    sel = typed_str
                     menu.i_selected[] = 1
+                else
+                    # Exists in options: select it
+                    menu.options[] = current_opts
+                    idx = findfirst(==(typed_str), current_opts)
+                    sel = typed_str
+                    menu.i_selected[] = idx !== nothing ? idx : 1
                 end
+                filter_buf[] = ""
+            else
+                # Standard restore logic if they didn't type anything new (or if they actually clicked an item)
+                if !isempty(filter_buf[])
+                    _apply_searchable_filter!(menu, "", all_opts[])
+                end
+                if sel !== nothing && !isempty(string(sel))
+                    sel_str = string(sel)
+                    current_opts = menu.options[]
+                    
+                    idx = findfirst(==(sel_str), current_opts)
+                    if idx !== nothing
+                        menu.i_selected[] = idx
+                    else
+                        menu.options[] = vcat([sel_str], current_opts)
+                        menu.i_selected[] = 1
+                    end
+                end
+                filter_buf[] = ""
             end
-            filter_buf[]   = ""
         end
     end
 
     # ── Keyboard: type to filter (scoped to this menu's blockscene) ──
     bscene = menu.blockscene
+    _filter_pending = Ref(false)
+    
+    function _debounced_filter!()
+        _filter_pending[] && return
+        _filter_pending[] = true
+        @async begin
+            sleep(0.08)  # 80ms debounce for rapid typing
+            _filter_pending[] = false
+            _apply_searchable_filter!(menu, filter_buf[], all_opts[])
+        end
+    end
 
     on(bscene, events(bscene).unicode_input, priority = 100) do char
         !menu.is_open[] && return Consume(false)
         filter_buf[] *= string(char)
-        _apply_searchable_filter!(menu, filter_buf[], all_opts[])
+        menu.prompt[] = "Filter: $(filter_buf[])"  # instant visual feedback
+        _debounced_filter!()
         return Consume(true)
     end
 
@@ -1952,7 +2151,21 @@ function searchable_menu(g, row, cols;
 
         if event.key == Makie.Keyboard.backspace && !isempty(filter_buf[])
             filter_buf[] = filter_buf[][1:prevind(filter_buf[], end)]
-            _apply_searchable_filter!(menu, filter_buf[], all_opts[])
+            menu.prompt[] = isempty(filter_buf[]) ? "Select..." : "Filter: $(filter_buf[])"
+            _debounced_filter!()
+            return Consume(true)
+        elseif event.key == Makie.Keyboard.enter
+            # User hits enter to select the best match
+            opts = menu.options[]
+            if !isempty(opts)
+                # Filter down might have put the best match at index 1
+                menu.i_selected[] = 1
+                # (Makie automatically updates selection when i_selected is updated,
+                #  but if it was already 1, we might need to manually trigger autosave or let it be.)
+                # Force selection to be explicit:
+                # Actually, if we close the menu, the is_open logic will preserve it!
+            end
+            menu.is_open[] = false
             return Consume(true)
         elseif event.key == Makie.Keyboard.escape
             filter_buf[] = ""
@@ -1983,31 +2196,37 @@ function _register_menu!(m::Makie.Menu)
 end
 
 """Apply the current filter text to a searchable menu's options.
-Uses SQLite FTS5 for ranked search with BM25 relevance scoring.
-Falls back to linear substring scan if FTS5 unavailable."""
+Uses SQLite FTS5 for ranked search with BM25 relevance scoring on large option sets (anatomy).
+Falls back to linear substring scan for small sets or when FTS5 returns empty."""
 function _apply_searchable_filter!(menu, query::String, full_opts::Vector{String})
     MAX_DISPLAY = 25  # Limit displayed matches to prevent Makie layout rebuild bottleneck
     if isempty(query)
         # Show only first MAX_DISPLAY items when no filter (avoids 16K item rebuild)
         if length(full_opts) > MAX_DISPLAY
-            menu.options[] = vcat(full_opts[1:MAX_DISPLAY], ["(type to filter $(length(full_opts)) items...)"])
+            new_opts = vcat(full_opts[1:MAX_DISPLAY], ["(type to filter $(length(full_opts)) items...)"])
         else
-            menu.options[] = full_opts
+            new_opts = full_opts
         end
-        menu.prompt[]  = "Select..."
+        # Skip no-op: avoid Makie layout rebuild if options haven't changed
+        if menu.options[] != new_opts
+            menu.options[] = new_opts
+        end
+        if menu.prompt[] != "Select..."
+            menu.prompt[]  = "Select..."
+        end
     else
-        # Primary: FTS5 ranked search (0.1-0.2ms, BM25 relevance)
-        filtered = fts_anatomy_search(query; limit = MAX_DISPLAY)
+        # For large option sets (anatomy, 16K+ items), use FTS5 ranked search
+        # For small sets (<100 items), skip FTS5 overhead and use linear scan directly
+        use_fts = length(full_opts) >= 100
+        filtered = use_fts ? fts_anatomy_search(query; limit = MAX_DISPLAY) : String[]
         
-        # Fallback: linear substring scan if FTS5 returns empty
+        # Linear substring scan (primary for small sets, fallback for large)
         if isempty(filtered)
             q = lowercase(query)
             q_norm = replace(q, r"(ae|es|s)$" => "")
             use_norm = q_norm != q
-            lc_cache = _searchable_lc_cache[]
-            use_cache = length(lc_cache) == length(full_opts)
             for i in eachindex(full_opts)
-                t = use_cache ? lc_cache[i] : lowercase(full_opts[i])
+                t = lowercase(full_opts[i])
                 if occursin(q, t) || (use_norm && occursin(q_norm, t))
                     push!(filtered, full_opts[i])
                     length(filtered) >= MAX_DISPLAY && break
@@ -2015,12 +2234,19 @@ function _apply_searchable_filter!(menu, query::String, full_opts::Vector{String
             end
         end
         
-        if isempty(filtered)
-            menu.options[] = ["(no match for '$query')"]
+        new_opts = if isempty(filtered)
+            ["(no match for '$query')"]
         else
-            menu.options[] = filtered
+            filtered
         end
-        menu.prompt[] = "Filter: $query"
+        # Skip no-op: avoid Makie layout rebuild if options haven't changed
+        if menu.options[] != new_opts
+            menu.options[] = new_opts
+        end
+        new_prompt = "Filter: $query"
+        if menu.prompt[] != new_prompt
+            menu.prompt[] = new_prompt
+        end
     end
 end
 
@@ -2184,6 +2410,7 @@ function create_metadata_window(
     # Helper for safely updating Textbox displayed and stored values simultaneously
     function _set_tb_val!(tb::Textbox, val)
         v = _safe_strip(val)
+        tb.stored_string[] == v && return  # skip if unchanged
         tb.displayed_string[] = v
         tb.stored_string[] = v
     end
@@ -2226,19 +2453,26 @@ function create_metadata_window(
     
     g = GridLayout(main_layout[2,1], tellheight = false, halign = :left, valign = sl.value)
     
-    # ── Debounced scroll to avoid layout thrashing ──────────────────────────
+    # ── Debounced scroll with startup guard ──────────────────────────────
     # Problem: each sl.value[] update triggers a full GridLayout re-solve (80+ rows).
-    # Fix: cache content height, accumulate scroll delta, update at most every 30ms.
-    _cached_content_h = Ref(3000.0)  # initial estimate, updated by layout observer
+    # Fix: heavy debounce (200ms, ~5 Hz) + startup guard (5s) to prevent freeze.
+    _cached_content_h = Ref(3000.0)
     _scroll_acc = Ref(0.0)
     _scroll_pending = Ref(false)
+    _scroll_ready = Ref(false)  # Disabled during startup layout build
 
-    # Update cached height when layout actually changes (section toggle, new widgets)
+    # Enable scroll after layout settles (5 seconds)
+    @async begin; sleep(5.0); _scroll_ready[] = true; end
+
+    # Update cached height when layout actually changes
     on(g.layoutobservables.computedbbox) do bbox
         _cached_content_h[] = bbox.widths[2]
     end
 
     on(fig.scene.events.scroll) do scroll
+        if !_scroll_ready[]
+            return Consume(true)  # Swallow scroll during startup
+        end
         window_h = size(fig.scene)[2]
         if _cached_content_h[] > window_h * 0.5
             _scroll_acc[] += scroll[2] * 0.03
@@ -2247,14 +2481,14 @@ function create_metadata_window(
         if !_scroll_pending[]
             _scroll_pending[] = true
             @async begin
-                sleep(0.03)  # 30ms debounce — coalesces rapid scroll ticks
+                sleep(0.20)  # 200ms debounce — max 5 layout re-solves/sec
                 acc = _scroll_acc[]
                 _scroll_acc[] = 0.0
-                _scroll_pending[] = false
                 new_val = clamp(sl.value[] + acc, 0.0, 1.0)
-                if abs(new_val - sl.value[]) > 0.001  # skip if no meaningful change
+                if abs(new_val - sl.value[]) > 0.001
                     sl.value[] = new_val
                 end
+                _scroll_pending[] = false  # Reset AFTER layout update completes
             end
         end
         return Consume(true)
@@ -2296,7 +2530,31 @@ function create_metadata_window(
         _row_fixed_heights[row_idx] = height
     end
 
+    # Row→widget index: maps row_idx → Vector of (blockscene_or_visible_obs) for O(1) lookup
+    _row_widget_cache = Dict{Int, Vector{Any}}()
+    _row_visibility_state = Dict{Int, Bool}()  # tracks current visibility to skip no-ops
+    
+    function _ensure_row_cache_built!()
+        isempty(_row_widget_cache) || return
+        for c in g.content
+            for row_idx in c.span.rows.start:c.span.rows.stop
+                widgets = get!(() -> Any[], _row_widget_cache, row_idx)
+                push!(widgets, c.content)
+            end
+        end
+    end
+    
+    function _invalidate_row_cache!()
+        empty!(_row_widget_cache)
+    end
+
     function set_row_visible!(row_idx::Int, visible::Bool)
+        # Skip if this row is already in the desired state
+        if haskey(_row_visibility_state, row_idx) && _row_visibility_state[row_idx] == visible
+            return
+        end
+        _row_visibility_state[row_idx] = visible
+        
         if visible
             if haskey(_row_fixed_heights, row_idx)
                 rowsize!(g, row_idx, Fixed(_row_fixed_heights[row_idx]))
@@ -2309,13 +2567,14 @@ function create_metadata_window(
         if row_idx < r[1]
             rowgap!(g, row_idx, visible ? 2 : 0)
         end
-        for c in g.content
-            if c.span.rows.start <= row_idx && c.span.rows.stop >= row_idx
-                if hasproperty(c.content, :blockscene)
-                    c.content.blockscene.visible[] = visible
-                elseif hasproperty(c.content, :visible)
-                    c.content.visible[] = visible
-                end
+        # Use cached row→widget mapping instead of scanning all grid content
+        _ensure_row_cache_built!()
+        widgets = get(_row_widget_cache, row_idx, Any[])
+        for w in widgets
+            if hasproperty(w, :blockscene)
+                w.blockscene.visible[] = visible
+            elseif hasproperty(w, :visible)
+                w.visible[] = visible
             end
         end
     end
@@ -2341,43 +2600,21 @@ function create_metadata_window(
         
         # If default_open is false, collapse immediately
         if !is_open[]
+            g.block_updates = true
             for i in start_row:end_row
-                rowsize!(g, i, Fixed(0))
+                set_row_visible!(i, false)
             end
-            for i in (start_row > 1 ? start_row - 1 : start_row):min(end_row, r[1] - 1)
-                rowgap!(g, i, 0)
-            end
-            for c in g.content
-                if c.span.rows.start >= start_row && c.span.rows.stop <= end_row
-                    if hasproperty(c.content, :blockscene)
-                        c.content.blockscene.visible[] = false
-                    end
-                end
-            end
+            g.block_updates = false
         end
         
         on(btn.clicks) do _
             is_open[] = !is_open[]
+            g.block_updates = true
             for i in start_row:end_row
-                if is_open[]
-                    rowsize!(g, i, Auto())
-                else
-                    rowsize!(g, i, Fixed(0))
-                end
+                set_row_visible!(i, is_open[])
             end
-            
-            # Zero/restore row gaps to eliminate empty space between collapsed headers
-            for i in (start_row > 1 ? start_row - 1 : start_row):min(end_row, r[1] - 1)
-                rowgap!(g, i, is_open[] ? 2 : 0)
-            end
-            
-            for c in g.content
-                if c.span.rows.start >= start_row && c.span.rows.stop <= end_row
-                    if hasproperty(c.content, :blockscene)
-                        c.content.blockscene.visible[] = is_open[]
-                    end
-                end
-            end
+            g.block_updates = false
+            Makie.GridLayoutBase.update!(g)
         end
     end
     
@@ -3435,6 +3672,71 @@ function create_metadata_window(
     on(btn_tx_bone.clicks)  do _; toggle_prior_tx!("Bone Protect", btn_tx_bone); end
     on(btn_tx_none.clicks)  do _; toggle_prior_tx!("None / Naive", btn_tx_none); end
     
+    # 4b. Clinical Context & Staging Variables (moved from per-lesion to patient-level)
+    clin_ctx_lbl_r = nr!()
+    Label(g[clin_ctx_lbl_r, 1:4], "Clinical Context & Staging (click to toggle):", fontsize = 9, color = ACCENT, halign = :left, padding = (8, 0, 2, 2))
+    rowsize!(g, clin_ctx_lbl_r, Fixed(18)); register_fixed_row!(clin_ctx_lbl_r, 18)
+    
+    # Define all clinical context items with short labels for buttons
+    _CC_ITEMS = [
+        # Row 1: Age / PSA / Gleason
+        ("Age<40", "Patient Age < 40 Years Old (Out of Scope)"),
+        ("Age≥40", "Patient Age >= 40 Years Old"),
+        ("Gleason>6", "Gleason Score > 6"),
+        ("PSA>20", "Serum PSA > 20 ng/mL"),
+        # Row 2: Treatment status
+        ("Recent Tx", "Recent Treatment (<2mo post-radiation/surgery, or 2-4wk post-ADT)"),
+        ("Heavy PreTx", "Heavily Pre-treated (Advanced ADT / Chemo)"),
+        ("PSMA-Cold 1°", "Original Primary Tumor was PSMA-Cold (~10%)"),
+        ("Prev Treated", "Previously Treated Lesion (Irradiated / ADT)"),
+        # Row 3: Disease extent
+        ("Widespread", "Widespread Disease (>5 malignant findings)"),
+        ("High Burden", "High Tumor Burden (>=5 Metastases)"),
+        ("Low Burden", "Low Tumor Burden (<5 Metastases)"),
+        (">5 PSMA+", "Has >5 Other PSMA-Avid Metastases"),
+        # Row 4: Biology / risk
+        ("Short PSAdt", "Short PSA Doubling Time (PSADT < 6 months)"),
+        ("PSA Persist", "PSA Persistence (>0.1 ng/mL at 6wk post-RP)"),
+        ("NEPC", "NEPC Phenotype (AR-negative / FDG-active / AR0Glyc1)"),
+        ("High Genomic", "High Genomic Risk (Decipher/Oncotype/Prolaris)"),
+        # Row 5: History / traps
+        ("Post-Splen", "Post-Splenectomy Status"),
+        ("COVID Trap", "Recent COVID-19 / Viral Pneumonia (Lung uptake trap)"),
+        ("Hyperparathyr", "History of Hyperparathyroidism (Brown Tumor risk)"),
+        ("Post-BCG", "Post-BCG Treatment History"),
+        # Row 6: Other history
+        ("Pelvic RT", "Prior Pelvic Radiation Therapy"),
+        ("Bisphosph", "History of Bisphosphonate Use"),
+        ("Steroids", "History of Corticosteroid Use"),
+        ("Sickle Cell", "Sickle Cell Disease"),
+    ]
+    
+    active_clinical_context = Set{String}()
+    cc_buttons = Dict{String, Button}()
+    
+    for row_start in 1:4:length(_CC_ITEMS)
+        cc_r = nr!()
+        row_end = min(row_start + 3, length(_CC_ITEMS))
+        for (col_offset, idx) in enumerate(row_start:row_end)
+            short_lbl, _ = _CC_ITEMS[idx]
+            btn = Button(g[cc_r, col_offset], label = short_lbl, buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 8)
+            cc_buttons[short_lbl] = btn
+            let full_name = _CC_ITEMS[idx][2], short = short_lbl
+                on(btn.clicks) do _
+                    if full_name in active_clinical_context
+                        delete!(active_clinical_context, full_name)
+                        cc_buttons[short].buttoncolor[] = BG_PNL
+                    else
+                        push!(active_clinical_context, full_name)
+                        cc_buttons[short].buttoncolor[] = ACCENT
+                    end
+                    sync_clinical_info_to_db!()
+                end
+            end
+        end
+        rowsize!(g, cc_r, Fixed(24)); register_fixed_row!(cc_r, 24)
+    end
+    
     # 5. Clinical History / Anamnese Notes (Multi-line)
     clin_notes_r = nr!()
     Label(g[clin_notes_r, 1], "Anamnese Notes:", fontsize = 10, color = LBL_FG, halign = :right)
@@ -3663,6 +3965,7 @@ function create_metadata_window(
             "Gleason" => gl_val,
             "TNMStage" => tb_tnm.stored_string[],
             "PriorTherapies" => p_str,
+            "ClinicalContext" => join(sort(collect(active_clinical_context)), " | "),
             "ClinicalNotes" => tb_clinical_notes.stored_string[],
             "FieldProvenance" => copy(field_provenance)
         )
@@ -3755,6 +4058,19 @@ function create_metadata_window(
             btn_tx_bone.buttoncolor[]  = ("Bone Protect" in active_prior_therapies) ? ACCENT : BG_PNL
             btn_tx_none.buttoncolor[]  = ("None / Naive" in active_prior_therapies) ? ACCENT : BG_PNL
             
+            # Restore Clinical Context toggles
+            cc_str = get(info, "ClinicalContext", "")
+            empty!(active_clinical_context)
+            for item in split(cc_str, " | ")
+                s = strip(item)
+                !isempty(s) && push!(active_clinical_context, s)
+            end
+            for (short_lbl, full_name) in _CC_ITEMS
+                if haskey(cc_buttons, short_lbl)
+                    cc_buttons[short_lbl].buttoncolor[] = (full_name in active_clinical_context) ? ACCENT : BG_PNL
+                end
+            end
+            
             tb_clinical_notes.stored_string[] = get(info, "ClinicalNotes", "")
 
             # Restore provenance tracking
@@ -3776,7 +4092,7 @@ function create_metadata_window(
     
     # Reload clinical info when the async DB loader populates lesion_db
     on(lesion_db) do _
-        _is_autosaving[] && return
+        (_is_autosaving[] || _is_applying_state[]) && return
         try load_clinical_info_for_tp!(_MEH.current_tp_index[]) catch; end
     end
     
@@ -3808,8 +4124,7 @@ function create_metadata_window(
         ],
         "Clinical Context" => [
             "SUV max",
-            "SUV Quantitative Metrics & References",
-            "Clinical Context & Staging Variables"
+            "SUV Quantitative Metrics & References"
         ],
         "PRIMARY Score" => [
             "PRIMARY score pattern?"
@@ -3950,6 +4265,17 @@ function create_metadata_window(
                     rowsize!(g, q_r, Fixed(28)); register_fixed_row!(q_r, 28)
                 end
                 field_widgets[q.short] = tb
+            elseif length(q.options) >= 1 && q.options[1] == "slider"
+                # Slider widget (e.g., Certainty: 0-10)
+                range_min = length(q.options) >= 2 ? parse(Int, q.options[2]) : 0
+                range_max = length(q.options) >= 3 ? parse(Int, q.options[3]) : 10
+                def_val = isempty(q.default_answer) ? range_max : parse(Int, q.default_answer)
+                cert_sl = Slider(g[q_r, 2:3], range = range_min:range_max, startvalue = def_val,
+                    color_active = ACCENT, color_inactive = RGBf(0.3, 0.3, 0.35))
+                lbl_val = Label(g[q_r, 4], @lift(string($(cert_sl.value))),
+                    fontsize = 12, color = TXT, halign = :center)
+                rowsize!(g, q_r, Fixed(28)); register_fixed_row!(q_r, 28)
+                field_widgets[q.short] = cert_sl
             else
                 # Inject saved custom options into dropdown
                 saved_opts = String[string(s) for s in get(custom_opts_db, q.short, Any[])]
@@ -4004,8 +4330,11 @@ function create_metadata_window(
             btn_type_ln       = Button(g[lt_r, 4], label = "Lymph Node", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
             
             active_lesion_type = Observable("Organ Meta")
+            _last_bone_state = Ref(false)
             
             function update_type_buttons(t)
+                # Skip if type unchanged (saves 4 button color updates + bone event)
+                active_lesion_type[] == t && return
                 active_lesion_type[] = t
                 btn_type_prostate.buttoncolor[] = (t == "Prostate") ? ACCENT : BG_PNL
                 btn_type_bone.buttoncolor[]     = (t == "Bone Meta") ? ACCENT : BG_PNL
@@ -4013,8 +4342,12 @@ function create_metadata_window(
                 btn_type_ln.buttoncolor[]       = (t == "Lymph Node" || t == "Lymph Node Meta") ? ACCENT : BG_PNL
                 
                 is_bone = (t == "Bone Meta")
-                @info "Lesion type set to '$t' -> ShowBoneMaskEvent($is_bone)"
-                put!(channel, ShowBoneMaskEvent(is_bone))
+                # Only send bone mask event if visibility actually changes (avoids ~580ms re-render)
+                if is_bone != _last_bone_state[]
+                    _last_bone_state[] = is_bone
+                    if _MEH.PERF_LOG[]; println("Lesion type '$t' -> ShowBoneMaskEvent($is_bone)"); flush(stdout); end
+                    put!(channel, ShowBoneMaskEvent(is_bone))
+                end
             end
             
             on(btn_type_prostate.clicks) do _; update_type_buttons("Prostate") end
@@ -4040,7 +4373,7 @@ function create_metadata_window(
             
             ANAT_RELATIONS = ["", "Inside / Contained In", "Surrounded By", "Adjacent To",
                 "Anterior To", "Posterior To", "Superior To", "Inferior To",
-                "Deep To", "Superficial To", "Lateral To", "Medial To",
+                "Deep To", "Superficial To", "Lateral To", "Medial To", "Left To", "Right To",
                 "Proximal To", "Distal To", "Between"]
             MAX_ANAT_ROWS = 6
             
@@ -4370,6 +4703,7 @@ function create_metadata_window(
         is_bm = (active_type == "Bone Meta")
         no_ct = no_ct_toggle.active[]
         
+        g.block_updates = true
         for (sq, rows) in q_row_indices
             visible = true
             
@@ -4391,6 +4725,8 @@ function create_metadata_window(
                 set_row_visible!(row_idx, visible)
             end
         end
+        g.block_updates = false
+        Makie.GridLayoutBase.update!(g)
     end
 
     # Wire No CT Correlate toggle to refresh visibility
@@ -5226,28 +5562,34 @@ function create_metadata_window(
         btn_cv.buttoncolor[] = cv_active[] ? GRN : BLU_BTN
         update_tp_dropdown_visibility!()
         sync_tp_menus_to_current!()
-        if cv_active[]
-            for sec in (sec_meta, sec_seg, sec_report)
-                hide_section!(sec)
+        g.block_updates = true
+        try
+            if cv_active[]
+                for sec in (sec_meta, sec_seg, sec_report)
+                    hide_section!(sec)
+                end
+                sec_map_lesions[1][] = true
+                show_section!(sec_map_lesions)
+                notify(anat_active_count)
+                try
+                    println("[COMPARE-UI] Building match display..."); flush(stdout)
+                    _build_match_display!()
+                    println("[COMPARE-UI] Match display built"); flush(stdout)
+                catch e
+                    println("[COMPARE-UI] WARNING: _build_match_display! failed: $e"); flush(stdout)
+                end
+            else
+                for sec in (sec_meta, sec_seg, sec_report)
+                    show_section!(sec)
+                end
+                hide_section!(sec_map_lesions)
+                try for elem in contents(map_grid); delete!(elem); end catch; end
+                update_dynamic_visibility!(active_lesion_type[])
+                notify(anat_active_count)
             end
-            sec_map_lesions[1][] = true
-            show_section!(sec_map_lesions)
-            notify(anat_active_count)
-            try
-                println("[COMPARE-UI] Building match display..."); flush(stdout)
-                _build_match_display!()
-                println("[COMPARE-UI] Match display built"); flush(stdout)
-            catch e
-                println("[COMPARE-UI] WARNING: _build_match_display! failed: $e"); flush(stdout)
-            end
-        else
-            for sec in (sec_meta, sec_seg, sec_report)
-                show_section!(sec)
-            end
-            hide_section!(sec_map_lesions)
-            try for elem in contents(map_grid); delete!(elem); end catch; end
-            update_dynamic_visibility!(active_lesion_type[])
-            notify(anat_active_count)
+        finally
+            g.block_updates = false
+            try Makie.GridLayoutBase.update!(g) catch; end
         end
         println("[COMPARE-UI] Sending CompareTimePointsEvent($(cv_active[])) to channel..."); flush(stdout)
         put!(channel, CompareTimePointsEvent(cv_active[]))
@@ -5266,6 +5608,47 @@ function create_metadata_window(
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     status_lbl = Label(g[nr!(), 1:4], "",
         fontsize = 10, color = RGBf(0.4, 0.9, 0.4), halign = :left, tellwidth = false)
+        
+    btn_history = Button(g[nr!(), 1:4], label = "View Edit History (Active Lesion)", 
+        buttoncolor = RGBf(0.3, 0.4, 0.6), labelcolor = :white, fontsize = 10)
+        
+    on(btn_history.clicks) do _
+        lid = active_lesion_id[]
+        db = lesion_db[]
+        p_lid = parse_lesion_id(lid)
+        canonical_key = p_lid !== nothing ? string(p_lid) : string(lid)
+        
+        history_text = "No edit history for Lesion $lid"
+        if haskey(db, canonical_key) && haskey(db[canonical_key], "_edit_history")
+            history = db[canonical_key]["_edit_history"]
+            if !isempty(history)
+                io = IOBuffer()
+                println(io, "Edit History for Lesion $lid:\n")
+                for entry in history
+                    ts = get(entry, "timestamp", "?")
+                    usr = get(entry, "user", "(unknown)")
+                    usr = isempty(usr) ? "(unknown)" : usr
+                    println(io, "[$ts] by $usr:")
+                    changes = get(entry, "changes", [])
+                    for c in changes
+                        k = get(c, "field", "?")
+                        old_v = get(c, "old", "")
+                        new_v = get(c, "new", "")
+                        if isempty(old_v); old_v = "(empty)"; end
+                        if isempty(new_v); new_v = "(empty)"; end
+                        println(io, "  • $k: $old_v -> $new_v")
+                    end
+                    println(io, "")
+                end
+                history_text = String(take!(io))
+            end
+        end
+        
+        # Display in a new standalone Makie window
+        f_hist = Figure(size=(600, 400))
+        Label(f_hist[1, 1], history_text, justification=:left, halign=:left, valign=:top)
+        display(GLMakie.Screen(), f_hist)
+    end
     
     # Preprocessing
     pre_r1 = nr!()
@@ -5278,23 +5661,23 @@ function create_metadata_window(
     # Active Data Settings
     ads_r1 = nr!()
     Label(g[ads_r1, 1], "PET:", fontsize = 10, color = LBL_FG, halign = :right)
-    Menu(g[ads_r1, 2], options = ["Auto", "SUV_PET_Image_0", "SUV_PET_Image_1"], fontsize = 10)
+    _register_menu!(Menu(g[ads_r1, 2], options = ["Auto", "SUV_PET_Image_0", "SUV_PET_Image_1"], fontsize = 10))
     Label(g[ads_r1, 3], "CT:", fontsize = 10, color = LBL_FG, halign = :right)
-    Menu(g[ads_r1, 4], options = ["Auto", "Fixed_CT_Volume_0", "Fixed_CT_Volume_1"], fontsize = 10)
+    _register_menu!(Menu(g[ads_r1, 4], options = ["Auto", "Fixed_CT_Volume_0", "Fixed_CT_Volume_1"], fontsize = 10))
     rowsize!(g, ads_r1, Fixed(28)); register_fixed_row!(ads_r1, 28)
 
     ads_r2 = nr!()
     Label(g[ads_r2, 1], "Mask:", fontsize = 10, color = LBL_FG, halign = :right)
-    Menu(g[ads_r2, 2], options = ["Auto", "Segmentation_0", "Segmentation_1"], fontsize = 10)
+    _register_menu!(Menu(g[ads_r2, 2], options = ["Auto", "Segmentation_0", "Segmentation_1"], fontsize = 10))
     Label(g[ads_r2, 3], "Atlas:", fontsize = 10, color = LBL_FG, halign = :right)
-    Menu(g[ads_r2, 4], options = ["None", "Bone_Mask", "Organ_Mask"], fontsize = 10)
+    _register_menu!(Menu(g[ads_r2, 4], options = ["None", "Bone_Mask", "Organ_Mask"], fontsize = 10))
     rowsize!(g, ads_r2, Fixed(28)); register_fixed_row!(ads_r2, 28)
 
     ads_r3 = nr!()
     Label(g[ads_r3, 1], "Xform Fwd:", fontsize = 10, color = LBL_FG, halign = :right)
-    Menu(g[ads_r3, 2], options = ["None", "Elastic_Transform_0_to_1"], fontsize = 10)
+    _register_menu!(Menu(g[ads_r3, 2], options = ["None", "Elastic_Transform_0_to_1"], fontsize = 10))
     Label(g[ads_r3, 3], "Xform Bwd:", fontsize = 10, color = LBL_FG, halign = :right)
-    Menu(g[ads_r3, 4], options = ["None", "Elastic_Transform_1_to_0"], fontsize = 10)
+    _register_menu!(Menu(g[ads_r3, 4], options = ["None", "Elastic_Transform_1_to_0"], fontsize = 10))
     rowsize!(g, ads_r3, Fixed(28)); register_fixed_row!(ads_r3, 28)
 
     end_section!(sec_settings)
@@ -5307,6 +5690,11 @@ function create_metadata_window(
         d["KeyImage"] = is_starred[] ? "true" : "false"
         d["has_expert_edits"] = current_has_expert_edits[]
         d["SegmentationOrigin"] = current_seg_origin[]
+        # Audit trail: who and when
+        if !isempty(_current_user[])
+            d["_last_modified_by"] = _current_user[]
+        end
+        d["_last_modified_at"] = Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
         
         reg_status = menu_reg_qc.selection[]
         if reg_status !== nothing && String(reg_status) != "UNREVIEWED"
@@ -5333,11 +5721,14 @@ function create_metadata_window(
                 rel_str = rel_sel === nothing ? "" : string(rel_sel)
                 struct_sel = anat_struct_menus[i].selection[]
                 struct_str = struct_sel === nothing ? "" : _safe_strip(string(struct_sel))
-                if !isempty(struct_str)
-                    push!(parts, isempty(rel_str) ? struct_str : "$(rel_str):$(struct_str)")
+                if !isempty(struct_str) || !isempty(rel_str)
+                    push!(parts, isempty(rel_str) ? struct_str : (isempty(struct_str) ? rel_str : "$(rel_str):$(struct_str)"))
                 end
             end
-            isempty(parts) || (d["Anatomical Details"] = join(parts, " | "))
+            if !isempty(parts)
+                d["Anatomical Details"] = join(parts, " | ")
+                println("SAVING ANATOMICAL DETAILS: ", d["Anatomical Details"])
+            end
         end
         
         # No CT Correlate toggle
@@ -5370,6 +5761,8 @@ function create_metadata_window(
                 s = string(sel)
                 (isempty(s) || s == "- select -") && continue
                 d[q.short] = s
+            elseif w isa Slider
+                d[q.short] = string(w.value[])
             end
         end
         rl = radlex_selected[]
@@ -5393,57 +5786,72 @@ function create_metadata_window(
 
     _is_applying_state = Ref(false)
     _is_dictating_update = Ref(false)
+    _last_snapshot = Ref{Any}(nothing)  # holds (id, state, global_state, tp_idx, skip_dict)
     function trigger_autosave(; skip_dictation=false)
         _is_applying_state[] && return
         
-        # Debounce: if already pending, skip (will be included in next save)
+        # Debounce: if already pending, skip to prevent queuing
         _autosave_pending[] && return
         _autosave_pending[] = true
         
+        # Phase 2: debounced save
         @async begin
             try
                 sleep(0.3)  # 300ms debounce window
                 _autosave_pending[] = false
                 
+                # Capture state NOW after debounce (reads Makie Observables, safe in Julia)
+                snap_id = active_lesion_id[]
+                snap_state = collect_state()
+                snap_state["_display_name"] = snap_id
+                snap_global = Dict{String,String}(
+                    "CT_Min"  => _safe_strip(tb_ct_min.stored_string[]),
+                    "CT_Max"  => _safe_strip(tb_ct_max.stored_string[]),
+                    "PET_Min" => _safe_strip(tb_pet_min.stored_string[]),
+                    "PET_Max" => _safe_strip(tb_pet_max.stored_string[]),
+                    "SPECT_Min" => _safe_strip(tb_spect_min.stored_string[]),
+                    "SPECT_Max" => _safe_strip(tb_spect_max.stored_string[]),
+                    "vis_lesion"  => string(vis_lesion_active[]),
+                    "vis_surface" => string(vis_surface_active[]),
+                    "vis_marrow"  => string(vis_marrow_active[]),
+                    "vis_anatomy" => string(vis_anatomy_active[]),
+                    "_current_user" => _current_user[],
+                    "_last_save_at" => Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
+                )
+                snap_tp = try _MEH.current_tp_index[] catch; 0 end
+                snap_skip_dict = skip_dictation
+                
+                lid = parse_lesion_id(snap_id)
+                canonical_key = lid !== nothing ? string(lid) : snap_id
+                
                 _is_autosaving[] = true
                 try
-                    save_status_text[] = "Saving..."
-                    save_status_color[] = RGBf(0.9, 0.9, 0.2)
-                    
-                    display_id = active_lesion_id[]
-                    lid = parse_lesion_id(display_id)
-                    canonical_key = lid !== nothing ? string(lid) : display_id
-                    
                     db = copy(lesion_db[])
-                    state = collect_state()
-                    state["_display_name"] = display_id
-                    db[canonical_key] = state
-                    
-                    db["_GLOBAL_APP_STATE"] = Dict{String,String}(
-                        "CT_Min" => _safe_strip(tb_ct_min.stored_string[]),
-                        "CT_Max" => _safe_strip(tb_ct_max.stored_string[]),
-                        "PET_Min" => _safe_strip(tb_pet_min.stored_string[]),
-                        "PET_Max" => _safe_strip(tb_pet_max.stored_string[]),
-                        "SPECT_Min" => _safe_strip(tb_spect_min.stored_string[]),
-                        "SPECT_Max" => _safe_strip(tb_spect_max.stored_string[]),
-                        "vis_lesion" => string(vis_lesion_active[]),
-                        "vis_surface" => string(vis_surface_active[]),
-                        "vis_marrow" => string(vis_marrow_active[]),
-                        "vis_anatomy" => string(vis_anatomy_active[])
-                    )
-                    
-                    lesion_db[] = db
+                    # ── Edit History: compute diff and append before replacing ──
+                    old_state = get(db, canonical_key, Dict{String,Any}())
+                    if old_state isa AbstractDict && !isempty(old_state)
+                        try
+                            _append_edit_history!(snap_state, old_state)
+                        catch e
+                            @warn "Edit history diff failed" e
+                        end
+                    end
+                    db[canonical_key] = snap_state
+                    db["_GLOBAL_APP_STATE"] = snap_global
+                    lesion_db[] = db  # Observable — must stay on main thread
                     _db_dirty[] = true
                     try
+                        # File I/O happens on background thread via db_channel consumer (Threads.@spawn at line 2170)
                         put!(db_channel, SaveDBMessage(db, global_app_state, save_path, DEFAULT_HDF5_PATH))
                     catch; end
                 finally
                     _is_autosaving[] = false
                 end
                 
-                try ESR.request_report_refresh!(_MEH.current_tp_index[]) catch; end
-                if !skip_dictation && !_is_dictating_update[]
-                    try request_auto_dictation!(_MEH.current_tp_index[]) catch; end
+                # Report refresh + dictation (stay on main thread — they touch Makie Observables internally)
+                try ESR.request_report_refresh!(snap_tp) catch; end
+                if !snap_skip_dict && !_is_dictating_update[]
+                    try request_auto_dictation!(snap_tp) catch; end
                 end
             catch e
                 _autosave_pending[] = false
@@ -5521,25 +5929,37 @@ function create_metadata_window(
     end
 
     function apply_state(data::AbstractDict)
+        _t_apply_start = time_ns()
         _is_applying_state[] = true
         is_syncing_selection[] = true
+        g.block_updates = true
         try
             cur_id_str = active_lesion_id[]
             db_updates = Dict{String, Any}()
             lid = (p = parse_lesion_id(cur_id_str)) !== nothing ? p : 1
 
-            menu_obs_state.selection[] = get(data, "ObservationState", "UNREVIEWED")
-            is_starred[] = get(data, "KeyImage", "false") == "true"
-            btn_star.label[] = is_starred[] ? "★ Key Image" : "☆ Key Image"
-            btn_star.buttoncolor[] = is_starred[] ? RGBf(0.9, 0.8, 0.2) : BG_PNL
+            # Restore ObservationState — must use i_selected[] for Makie to update the visual
+            obs_val = get(data, "ObservationState", "UNREVIEWED")
+            obs_opts = menu_obs_state.options[]
+            obs_idx = findfirst(==(obs_val), obs_opts)
+            _set_menu_idx!(menu_obs_state, obs_idx !== nothing ? obs_idx : 1)
+            star_val = get(data, "KeyImage", "false") == "true"
+            _set!(is_starred, star_val)
+            _set!(btn_star.label, star_val ? "★ Key Image" : "☆ Key Image")
+            _set!(btn_star.buttoncolor, star_val ? RGBf(0.9, 0.8, 0.2) : BG_PNL)
             
-            menu_reg_qc.selection[] = get(data, "RegistrationQC", "UNREVIEWED")
-            tb_reg_comment.stored_string[] = get(data, "RegistrationComment", "")
-            tb_reg_comment.displayed_string[] = tb_reg_comment.stored_string[]
+            # Restore RegistrationQC — must use i_selected[] for Makie to update the visual
+            reg_val = get(data, "RegistrationQC", "UNREVIEWED")
+            reg_opts = menu_reg_qc.options[]
+            reg_idx = findfirst(==(reg_val), reg_opts)
+            _set_menu_idx!(menu_reg_qc, reg_idx !== nothing ? reg_idx : 1)
+            reg_comment = get(data, "RegistrationComment", "")
+            _set!(tb_reg_comment.stored_string, reg_comment)
+            _set!(tb_reg_comment.displayed_string, reg_comment)
 
             # Segmentation Origin & Expert Edits tracking
             seg_orig = get(data, "SegmentationOrigin", "AI_PRESEGMENTATION")
-            current_seg_origin[] = String(seg_orig)
+            _set!(current_seg_origin, String(seg_orig))
             has_edits = false
             if haskey(data, "has_expert_edits")
                 v_edits = data["has_expert_edits"]
@@ -5547,15 +5967,24 @@ function create_metadata_window(
             elseif seg_orig == "EXPERT_CORRECTION"
                 has_edits = true
             end
-            current_has_expert_edits[] = has_edits
+            _set!(current_has_expert_edits, has_edits)
 
         t_type = if haskey(data, "LesionType")
-            # Still compute json_entry for muscle detection below
-            raw_organ_for_type = get(_MEH.global_organ_mapping[], lid, "")
-            data["LesionType"]
+            # Saved type exists — override if anatomy mapping disagrees
+            _tp_o = get(_MEH.tp_organ_mapping, _MEH.current_tp_index[], Dict{Int,String}())
+            raw_organ_for_type = get(_tp_o, lid, get(_MEH.global_organ_mapping[], lid, ""))
+            json_entry_for_type = lookup_anatomy(raw_organ_for_type)
+            saved_type = data["LesionType"]
+            if json_entry_for_type !== nothing
+                mapped_type = get(json_entry_for_type, "lesion_type", "")
+                (!isempty(mapped_type) && mapped_type != saved_type) ? mapped_type : saved_type
+            else
+                saved_type
+            end
         else
             # Auto-detect lesion type: try JSON mapping first, then keyword fallback
-            raw_organ_for_type = get(_MEH.global_organ_mapping[], lid, "")
+            _tp_o2 = get(_MEH.tp_organ_mapping, _MEH.current_tp_index[], Dict{Int,String}())
+            raw_organ_for_type = get(_tp_o2, lid, get(_MEH.global_organ_mapping[], lid, ""))
             if isempty(raw_organ_for_type) || raw_organ_for_type == "Unknown"
                 # Fast centroid-based atlas lookup (O(1) instead of O(N) findall scan)
                 tp = _MEH.current_tp_index[]
@@ -5662,6 +6091,7 @@ function create_metadata_window(
             end
         end
         update_type_buttons(t_type)
+        _t_type = round((time_ns()-_t_apply_start)/1e6, digits=1)
 
         # ── Muscular false positive & edge-slice artefact detection ───────
         # Ensure json_entry is always defined (it may only be set inside the else branch of t_type)
@@ -5670,19 +6100,22 @@ function create_metadata_window(
         end
         is_muscle_lesion = (json_entry !== nothing && (get(json_entry, "is_muscle", false) || get(json_entry, "lesion_type", "") == "Technical Artifact")) ||
                            t_type == "Technical Artifact"
-        if is_muscle_lesion
+        if is_muscle_lesion && !haskey(data, "Certainty")
             if haskey(field_widgets, "Alternative Hypothesis (False Positive)") && field_widgets["Alternative Hypothesis (False Positive)"] isa Menu
                 opts = field_widgets["Alternative Hypothesis (False Positive)"].options[]
                 idx = findfirst(==("Technical Artifact"), opts)
                 if idx !== nothing
-                    field_widgets["Alternative Hypothesis (False Positive)"].i_selected[] = idx
+                    _set_menu_idx!(field_widgets["Alternative Hypothesis (False Positive)"], idx)
                 end
             end
-            if haskey(field_widgets, "Certainty") && field_widgets["Certainty"] isa Menu
-                opts = field_widgets["Certainty"].options[]
-                idx = findfirst(==("0"), opts)
-                if idx !== nothing
-                    field_widgets["Certainty"].i_selected[] = idx
+            if haskey(field_widgets, "Certainty")
+                cert_w = field_widgets["Certainty"]
+                if cert_w isa Slider
+                    cert_w.selected_index[] = 1  # index 1 = value 0 in range 0:10
+                elseif cert_w isa Menu
+                    opts = cert_w.options[]
+                    idx = findfirst(==("0"), opts)
+                    if idx !== nothing; _set_menu_idx!(cert_w, idx); end
                 end
             end
             db_updates["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
@@ -5703,21 +6136,24 @@ function create_metadata_window(
             z_slice = centroid[3]
             total_z = _MEH.volume_z_size[]
             
-            if z_slice <= 2 || z_slice >= total_z - 1
+            if (z_slice <= 2 || z_slice >= total_z - 1) && !haskey(data, "Certainty")
                 # Set Alternative Hypothesis to "Technical Artifact"
                 if haskey(field_widgets, "Alternative Hypothesis (False Positive)") && field_widgets["Alternative Hypothesis (False Positive)"] isa Menu
                     opts = field_widgets["Alternative Hypothesis (False Positive)"].options[]
                     idx = findfirst(==("Technical Artifact"), opts)
                     if idx !== nothing
-                        field_widgets["Alternative Hypothesis (False Positive)"].i_selected[] = idx
+                        _set_menu_idx!(field_widgets["Alternative Hypothesis (False Positive)"], idx)
                     end
                 end
                 # Set Certainty to 0
-                if haskey(field_widgets, "Certainty") && field_widgets["Certainty"] isa Menu
-                    opts = field_widgets["Certainty"].options[]
-                    idx = findfirst(==("0"), opts)
-                    if idx !== nothing
-                        field_widgets["Certainty"].i_selected[] = idx
+                if haskey(field_widgets, "Certainty")
+                    cert_w = field_widgets["Certainty"]
+                    if cert_w isa Slider
+                        cert_w.selected_index[] = 1  # index 1 = value 0 in range 0:10
+                    elseif cert_w isa Menu
+                        opts = cert_w.options[]
+                        idx = findfirst(==("0"), opts)
+                        if idx !== nothing; _set_menu_idx!(cert_w, idx); end
                     end
                 end
                 # Persist in db_updates
@@ -5742,8 +6178,14 @@ function create_metadata_window(
         # Resolve the raw organ name for this lesion (used for BaseAnatomy + Location auto-fill)
         raw_organ = ""
         if lid > 0
-            organ_map = _MEH.global_organ_mapping[]
-            raw_organ = get(organ_map, lid, "")
+            # Check per-TP organ mapping first (avoids last-writer-wins from global flat map)
+            tp_organs = get(_MEH.tp_organ_mapping, _MEH.current_tp_index[], Dict{Int,String}())
+            raw_organ = get(tp_organs, lid, "")
+            # Fallback to global flat mapping
+            if isempty(raw_organ)
+                organ_map = _MEH.global_organ_mapping[]
+                raw_organ = get(organ_map, lid, "")
+            end
             # Fallback: if organ mapping is empty or "Unknown", try volume-based scan
             if (isempty(raw_organ) || raw_organ == "Unknown") && _MEH.global_ts_atlas[] !== nothing
                 try
@@ -5790,6 +6232,15 @@ function create_metadata_window(
             end
         end
         
+        # Fallback: if atlas scan didn't find raw_organ, try the HDF5 segment name
+        # (e.g., "quadriceps_femoris_left" from tp_segment_names / scene_hierarchy)
+        if (isempty(raw_organ) || raw_organ == "Unknown") && !isempty(orig_rtog_name)
+            lc = lowercase(orig_rtog_name)
+            if !startswith(lc, "segment") && !startswith(lc, "unknown") && !startswith(lc, "artificial_") && !startswith(lc, "lesion") && !occursin("postprocessed", lc)
+                raw_organ = orig_rtog_name
+            end
+        end
+        
         # Lookup the anatomy ontology entry (used for both BaseAnatomy and Location)
         anat_entry = (!isempty(raw_organ) && raw_organ != "Unknown") ? lookup_anatomy(raw_organ) : nothing
         @debug "[PREFILL] lid=$lid, raw_organ=$raw_organ, t_base=$t_base"
@@ -5821,11 +6272,38 @@ function create_metadata_window(
             anat_subloc = get(anat_entry, "anatomical_sublocation", "")
             @debug "[PREFILL] anat_entry for raw_organ: loc, subloc"
             
-            # Auto-fill Anatomic Location if empty
-            if isempty(existing_loc) && !isempty(anat_loc)
-                data["Anatomic Location"] = anat_loc
-                db_updates["Anatomic Location"] = anat_loc
-                @debug "[PREFILL] Auto-filled Anatomic Location='$anat_loc'"
+            # Cross-check: if t_type contradicts anat_loc from JSON (e.g., type=Bone Meta but loc=Muscle),
+            # override with the correct location for the detected type
+            is_muscle_loc = occursin("Soft Tissue", anat_loc) || occursin("Muscle", anat_loc)
+            if is_muscle_loc && t_type == "Bone Meta"
+                # Bone lesion wrongly mapped to muscle — determine correct skeleton location from BaseAnatomy
+                base_lc = lowercase(t_base)
+                if any(kw -> occursin(kw, base_lc), ["femur", "humerus", "tibia", "scapula", "radius", "carpal", "tarsal"])
+                    anat_loc = "Appendicular Skeleton (Limbs, Scapulae, Hands, Feet)"
+                else
+                    anat_loc = "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)"
+                end
+                anat_subloc = "Medullary Cavity (Intramedullary/Marrow)"
+            elseif is_muscle_loc && t_type == "Organ Meta"
+                anat_loc = "Solid Organ / Viscera"
+                anat_subloc = ""
+            elseif is_muscle_loc && (t_type == "Lymph Node" || t_type == "Lymph Node Meta")
+                anat_loc = "Pelvic Lymph Node"
+                anat_subloc = ""
+            end
+            
+            # Auto-fill Anatomic Location if empty OR if currently wrong (muscle for bone/organ)
+            target_loc = anat_loc
+            if isempty(existing_loc) && !isempty(target_loc)
+                data["Anatomic Location"] = target_loc
+                db_updates["Anatomic Location"] = target_loc
+                @debug "[PREFILL] Auto-filled Anatomic Location='$target_loc'"
+            elseif !isempty(existing_loc) && (occursin("Soft Tissue", existing_loc) || occursin("Muscle", existing_loc)) && 
+                   t_type in ["Bone Meta", "Organ Meta", "Lymph Node", "Lymph Node Meta", "Prostate"] && !isempty(target_loc)
+                # Override existing wrong muscle/soft-tissue location for non-muscle types
+                data["Anatomic Location"] = target_loc
+                db_updates["Anatomic Location"] = target_loc
+                @debug "[PREFILL] Overriding wrong Anatomic Location from '$existing_loc' to '$target_loc' (type=$t_type)"
             end
             
             # Auto-fill Anatomical Sublocation if empty
@@ -5833,6 +6311,57 @@ function create_metadata_window(
                 data["Anatomical Sublocation"] = anat_subloc
                 db_updates["Anatomical Sublocation"] = anat_subloc
                 @debug "[PREFILL] Auto-filled Anatomical Sublocation='$anat_subloc'"
+            elseif !isempty(existing_subloc) && (occursin("Muscular", existing_subloc) || occursin("Fascial", existing_subloc)) &&
+                   t_type in ["Bone Meta", "Organ Meta", "Lymph Node", "Lymph Node Meta", "Prostate"] && !isempty(anat_subloc)
+                data["Anatomical Sublocation"] = anat_subloc
+                db_updates["Anatomical Sublocation"] = anat_subloc
+                @debug "[PREFILL] Overriding wrong Anatomical Sublocation to '$anat_subloc' (type=$t_type)"
+            end
+        else
+            # No JSON entry found — use t_type + keywords to determine location/sublocation
+            fallback_loc = ""
+            fallback_subloc = ""
+            raw_lc = lowercase(raw_organ)
+            base_lc = lowercase(t_base)
+            combined_lc = raw_lc * " " * base_lc
+            
+            if t_type == "Bone Meta"
+                if any(kw -> occursin(kw, combined_lc), ["femur", "humerus", "tibia", "scapula", "radius", "carpal", "tarsal"])
+                    fallback_loc = "Appendicular Skeleton (Limbs, Scapulae, Hands, Feet)"
+                else
+                    fallback_loc = "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)"
+                end
+                fallback_subloc = "Medullary Cavity (Intramedullary/Marrow)"
+            elseif t_type == "Technical Artifact"
+                fallback_loc = "General Soft Tissue (Muscles, Subcutaneous)"
+                fallback_subloc = "Muscular / Fascial"
+            elseif t_type == "Organ Meta"
+                # Try to determine specific organ location
+                if any(kw -> occursin(kw, combined_lc), ["liver", "spleen", "pancreas", "kidney", "adrenal", "gallbladder"])
+                    fallback_loc = "Solid Organ / Viscera"
+                elseif any(kw -> occursin(kw, combined_lc), ["lung", "trachea", "bronch"])
+                    fallback_loc = "Solid Organ / Viscera"
+                elseif any(kw -> occursin(kw, combined_lc), ["bladder"])
+                    fallback_loc = "Urinary Bladder"
+                else
+                    fallback_loc = "Solid Organ / Viscera"
+                end
+            elseif t_type == "Lymph Node" || t_type == "Lymph Node Meta"
+                fallback_loc = "Pelvic Lymph Node"
+            elseif t_type == "Prostate"
+                fallback_loc = "Prostate Gland"
+                fallback_subloc = "Prostate Peripheral Zone (PZ)"
+            end
+            
+            if isempty(existing_loc) && !isempty(fallback_loc)
+                data["Anatomic Location"] = fallback_loc
+                db_updates["Anatomic Location"] = fallback_loc
+                @debug "[PREFILL] Keyword-fallback Anatomic Location='$fallback_loc' (type=$t_type, raw=$raw_organ)"
+            end
+            if isempty(existing_subloc) && !isempty(fallback_subloc)
+                data["Anatomical Sublocation"] = fallback_subloc
+                db_updates["Anatomical Sublocation"] = fallback_subloc
+                @debug "[PREFILL] Keyword-fallback Anatomical Sublocation='$fallback_subloc'"
             end
         end
         
@@ -5884,23 +6413,23 @@ function create_metadata_window(
             ba_opts = menu_base_anat.options[]
             ba_idx = findfirst(==(t_base), ba_opts)
             if ba_idx !== nothing
-                menu_base_anat.i_selected[] = ba_idx
+                _set_menu_idx!(menu_base_anat, ba_idx)
             else
                 # Value not in options — prepend it (menu limits display to ~25 items)
                 new_ba_opts = vcat([t_base], ba_opts)
                 menu_base_anat.options[] = new_ba_opts
-                menu_base_anat.i_selected[] = 1
+                _set_menu_idx!(menu_base_anat, 1)
                 if !(t_base in ba_all_opts[])
                     ba_all_opts[] = vcat(ba_all_opts[], [t_base])
                 end
             end
         else
-            menu_base_anat.i_selected[] = 1  # reset to ""
+            _set_menu_idx!(menu_base_anat, 1)  # reset to ""
         end
         
         side_opts = menu_side.options[]
         s_idx = findfirst(==(t_side), side_opts)
-        menu_side.i_selected[] = s_idx !== nothing ? s_idx : 1
+        _set_menu_idx!(menu_side, s_idx !== nothing ? s_idx : 1)
         
         # ── Restore OntologyBuilder anatomical detail rows ─────────────────
         anat_details_raw = get(data, "Anatomical Details", "")
@@ -5920,27 +6449,27 @@ function create_metadata_window(
                 # Set relation menu
                 rel_opts = anat_rel_menus[i].options[]
                 r_idx = findfirst(==(rel_str), rel_opts)
-                anat_rel_menus[i].i_selected[] = r_idx !== nothing ? r_idx : 1
+                _set_menu_idx!(anat_rel_menus[i], r_idx !== nothing ? r_idx : 1)
                 # Set structure menu
                 struct_opts = anat_struct_menus[i].options[]
                 st_idx = findfirst(==(struct_str), struct_opts)
                 if st_idx !== nothing
-                    anat_struct_menus[i].i_selected[] = st_idx
+                    _set_menu_idx!(anat_struct_menus[i], st_idx)
                 else
                     # Value not in options — prepend it (searchable_menu limits to ~25 items)
                     new_sopts = vcat([struct_str], struct_opts)
                     anat_struct_menus[i].options[] = new_sopts
-                    anat_struct_menus[i].i_selected[] = 1
+                    _set_menu_idx!(anat_struct_menus[i], 1)
                 end
             end
             anat_active_count[] = count
         else
             # Clear all rows
             for i in 1:MAX_ANAT_ROWS
-                anat_rel_menus[i].i_selected[] = 1
-                anat_struct_menus[i].i_selected[] = 1
+                _set_menu_idx!(anat_rel_menus[i], 1)
+                _set_menu_idx!(anat_struct_menus[i], 1)
             end
-            anat_active_count[] = 0
+            _set!(anat_active_count, 0)
         end
         
         # ── Auto-fill Lesion tracking name ────────────────────────────────
@@ -5958,8 +6487,9 @@ function create_metadata_window(
         end
         
         # ── Async SUV, Volume and Match Analysis ─────────────────────────
-        lbl_suv_comparison.text[] = "..."
-        lbl_match_analysis.text[] = "..."
+        _t_anatomy = round((time_ns()-_t_apply_start)/1e6, digits=1)
+        _set!(lbl_suv_comparison.text, "...")
+        _set!(lbl_match_analysis.text, "...")
 
         cur_id_str = active_lesion_id[]
         cur_lid = lid
@@ -6153,10 +6683,11 @@ function create_metadata_window(
                 @warn "Async metrics background thread error for lesion $cur_lid" e
             end
         end
+        _t_suv = round((time_ns()-_t_apply_start)/1e6, digits=1)
         
         # ── Restore No CT Correlate toggle ───────────────────────────────
         no_ct_val = get(data, "NoCTCorrelate", "false") == "true"
-        no_ct_toggle.active[] = no_ct_val
+        _set!(no_ct_toggle.active, no_ct_val)
         
         # Restore windowing if present
         if haskey(data, "_CT_Min") && haskey(data, "_CT_Max")
@@ -6212,15 +6743,32 @@ function create_metadata_window(
                     if q.short == "Radioligand Type"
                         opts = w.options[]
                         ga_idx = findfirst(==("68Ga-PSMA-11"), opts)
-                        w.i_selected[] = ga_idx !== nothing ? ga_idx : 1
+                        _set_menu_idx!(w, ga_idx !== nothing ? ga_idx : 1)
                     elseif !isempty(q.default_answer)
                         opts = w.options[]
                         d_idx = findfirst(==(q.default_answer), opts)
-                        w.i_selected[] = d_idx !== nothing ? d_idx : 1
+                        _set_menu_idx!(w, d_idx !== nothing ? d_idx : 1)
                     else
-                        if w.i_selected[] != 1
-                            w.i_selected[] = 1   # reset to "- select -"
+                        _set_menu_idx!(w, 1)
+                    end
+                end
+            elseif w isa Slider
+                if val !== nothing
+                    parsed = tryparse(Int, String(val))
+                    if parsed !== nothing
+                        r = w.range[]
+                        clamped = clamp(parsed, first(r), last(r))
+                        new_idx = clamped - first(r) + 1
+                        if w.selected_index[] != new_idx
+                            w.selected_index[] = new_idx
                         end
+                    end
+                else
+                    # Default: use the default_answer from QuestionDef
+                    def = isempty(q.default_answer) ? last(w.range[]) : parse(Int, q.default_answer)
+                    new_idx = def - first(w.range[]) + 1
+                    if w.selected_index[] != new_idx
+                        w.selected_index[] = new_idx
                     end
                 end
             end
@@ -6242,25 +6790,26 @@ function create_metadata_window(
         else
             get(data, "RadiologicalDictation", get(_MEH.tp_descriptions, _MEH.current_tp_index[], ""))
         end
-        dict_text[] = target_dict
+        _set!(dict_text, target_dict)
         
         target_rpt = get(data, "RadiologicalReportOutput", "")
         if occursin("Connection Error", target_rpt)
             target_rpt = ""
         end
         if !isempty(target_rpt)
-            report_text[] = target_rpt
+            _set!(report_text, target_rpt)
             _set_tb_val!(rpt_tb, target_rpt)
-            lbl_dict_status.text[] = "Status: Loaded saved report"
-            lbl_dict_status.color[] = SUBTXT
+            _set!(lbl_dict_status.text, "Status: Loaded saved report")
+            _set!(lbl_dict_status.color, SUBTXT)
         else
-            report_text[] = "(Click 'Generate' to create longitudinal radiological dictation for this time point via Qwen 3.5 397B...)"
+            _set!(report_text, "(Click 'Generate' to create longitudinal radiological dictation for this time point via Qwen 3.5 397B...)")
             _set_tb_val!(rpt_tb, "")
-            lbl_dict_status.text[] = "Status: Ready (Model: Qwen 3.5 397B)"
-            lbl_dict_status.color[] = SUBTXT
+            _set!(lbl_dict_status.text, "Status: Ready (Model: Qwen 3.5 397B)")
+            _set!(lbl_dict_status.color, SUBTXT)
         end
         
         # ── Single batch commit for all metadata updates ──────────────────
+        _t_fields = round((time_ns()-_t_apply_start)/1e6, digits=1)
         if !isempty(db_updates)
             display_id = active_lesion_id[]
             lid = parse_lesion_id(display_id)
@@ -6275,7 +6824,11 @@ function create_metadata_window(
             # Invalidate cached E-PSMA report so next access rebuilds with new metadata
             try ESR.invalidate_report!(_MEH.current_tp_index[]) catch; end
         end
+        _t_total = round((time_ns()-_t_apply_start)/1e6, digits=1)
+        println("[APPLY] type=$(_t_type)ms anat=$(_t_anatomy)ms suv=$(_t_suv)ms fields=$(_t_fields)ms TOTAL=$(_t_total)ms"); flush(stdout)
         finally
+            g.block_updates = false
+            try Makie.GridLayoutBase.update!(g) catch; end
             _is_applying_state[] = false
             is_syncing_selection[] = false
         end
@@ -6291,31 +6844,28 @@ function create_metadata_window(
             @warn "Failed to apply state for lesion $id: $e"
         end
         _apply_ms = round((time_ns()-t_cb)/1e6, digits=1)
-        if _MEH.PERF_LOG[] && _apply_ms > 5.0
-            println("[PERF] LesionNav($id): $(round(_apply_ms, digits=1))ms"); flush(stdout)
-        end
         
+        t_sync = time_ns()
         # Refresh Map Lesions lists to track the newly selected lesion
         if cv_active[] && sec_map_lesions[1][]
             try
                 lid = parse_lesion_id(id)
                 if lid !== nothing
                     map_selected_left[] = Int[lid]
-                    map_selected_right[] = Int[]  # will be auto-populated from cross-TP match
+                    map_selected_right[] = Int[]
                     _build_match_display!()
                 end
             catch e
                 @warn "Failed to refresh Map Lesions: $e"
             end
         end
+        _map_ms = round((time_ns()-t_sync)/1e6, digits=1)
         
         # Synchronize lesion with viewer (filters mask and jumps to slice)
-        # Skip for newly created lesions (no voxels → centroid defaults to center → unwanted jump)
+        t_event = time_ns()
         if _skip_sync_on_lesion_change[]
             _skip_sync_on_lesion_change[] = false
         else
-            # Non-blocking: use @async so we don't freeze the Makie GUI thread if the
-            # consumer is busy processing a previous event
             @async try
                 lid = parse_lesion_id(id)
                 if lid !== nothing
@@ -6325,8 +6875,15 @@ function create_metadata_window(
                 @warn "Failed to send SyncLesionEvent: $e"
             end
         end
-        # Trigger auto dictation generation on lesion switch (which includes app startup)
+        _event_ms = round((time_ns()-t_event)/1e6, digits=1)
+        
+        # Trigger auto dictation generation on lesion switch
+        t_dict = time_ns()
         try request_auto_dictation!(_MEH.current_tp_index[]) catch; end
+        _dict_ms = round((time_ns()-t_dict)/1e6, digits=1)
+        
+        _total_ms = round((time_ns()-t_cb)/1e6, digits=1)
+        println("[LESION-NAV] $id: apply=$(_apply_ms)ms map=$(_map_ms)ms sync=$(_event_ms)ms dict=$(_dict_ms)ms TOTAL=$(_total_ms)ms"); flush(stdout)
     end
     if active_lesion_id[] != "" && active_lesion_id[] != "(none)"
         notify(active_lesion_id)
@@ -6584,6 +7141,11 @@ function create_metadata_window(
         db = copy(lesion_db[])
         state = collect_state()
         state["_display_name"] = display_id
+        # ── Edit History: compute diff before replacing ──
+        old_state = get(db, canonical_key, Dict{String,Any}())
+        if old_state isa AbstractDict && !isempty(old_state)
+            try _append_edit_history!(state, old_state) catch; end
+        end
         db[canonical_key] = state
         
         # Persist global windowing
@@ -6732,6 +7294,7 @@ function create_metadata_window(
     on(anat_active_count) do _; trigger_autosave(); end
     on(menu_side.selection) do _; trigger_autosave(); end
     on(active_lesion_type) do t
+        _is_applying_state[] && return  # skip during apply_state (it handles visibility itself)
         update_dynamic_visibility!(t)
         trigger_autosave()
     end
@@ -6764,6 +7327,8 @@ function create_metadata_window(
             end
         elseif w isa Menu
             on(w.selection) do _; trigger_autosave(); end
+        elseif w isa Slider
+            on(w.value) do _; trigger_autosave(); end
         end
     end
 
@@ -6806,18 +7371,47 @@ function create_metadata_window(
                                     end
                                 end
                                 
-                                if haskey(entry, "lesion_class")
-                                    lc = entry["lesion_class"]
-                                    if lc == "Lymph Node Meta"
+                                if haskey(entry, "lesion_type")
+                                    lt = entry["lesion_type"]
+                                    if lt == "Lymph Node Meta"
                                         update_type_buttons("Lymph Node Meta")
-                                    elseif lc == "Bone Meta"
+                                    elseif lt == "Bone Meta"
                                         update_type_buttons("Bone Meta")
-                                    elseif lc == "Solid Organ / Viscera"
-                                        update_type_buttons("Local Tumor / Recurrence")
+                                    elseif lt == "Organ Meta"
+                                        update_type_buttons("Organ Meta")
+                                    elseif lt == "Prostate"
+                                        update_type_buttons("Prostate")
                                     end
+                                end
+                                if haskey(entry, "anatomic_location")
+                                    loc = entry["anatomic_location"]
+                                    subloc = get(entry, "anatomical_sublocation", "")
+                                    
+                                    # Cross-check: if type contradicts location (e.g., Bone type but Muscle location)
+                                    cur_type = active_lesion_type[]
+                                    is_muscle_loc = occursin("Soft Tissue", loc) || occursin("Muscle", loc)
+                                    if is_muscle_loc && cur_type == "Bone Meta"
+                                        org_lc = lowercase(organ_name)
+                                        if any(kw -> occursin(kw, org_lc), ["femur", "humerus", "tibia", "scapula", "radius", "carpal", "tarsal"])
+                                            loc = "Appendicular Skeleton (Limbs, Scapulae, Hands, Feet)"
+                                        else
+                                            loc = "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)"
+                                        end
+                                        subloc = "Medullary Cavity (Intramedullary/Marrow)"
+                                    elseif is_muscle_loc && cur_type == "Organ Meta"
+                                        loc = "Solid Organ / Viscera"
+                                    elseif is_muscle_loc && (cur_type == "Lymph Node" || cur_type == "Lymph Node Meta")
+                                        loc = "Pelvic Lymph Node"
+                                    end
+                                    
                                     if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
-                                        if lc in field_widgets["Anatomic Location"].options[]
-                                            field_widgets["Anatomic Location"].selection[] = lc
+                                        if loc in field_widgets["Anatomic Location"].options[]
+                                            field_widgets["Anatomic Location"].selection[] = loc
+                                        end
+                                    end
+                                    if !isempty(subloc) && haskey(field_widgets, "Anatomical Sublocation") && field_widgets["Anatomical Sublocation"] isa Menu
+                                        if subloc in field_widgets["Anatomical Sublocation"].options[]
+                                            field_widgets["Anatomical Sublocation"].selection[] = subloc
                                         end
                                     end
                                 end
@@ -7055,6 +7649,13 @@ function create_metadata_window(
     end
     _lmw_observables[:obs_toggle_anatomy] = obs_toggle_anatomy
 
+    # Toggle crosshair observable (keyboard H)
+    obs_toggle_crosshair = Observable(0)
+    on(obs_toggle_crosshair) do _
+        btn_vis_crosshair.clicks[] = btn_vis_crosshair.clicks[] + 1
+    end
+    _lmw_observables[:obs_toggle_crosshair] = obs_toggle_crosshair
+
     # Sync scroll state change — updates the GUI button
     obs_sync_scroll_changed = Observable(0)
     on(obs_sync_scroll_changed) do _
@@ -7139,29 +7740,155 @@ function display_metadata_window(fig::Figure)
         end
     end
     
-    lock(GLOBAL_OPENGL_LOCK) do
-        display(screen, fig)
-    end
-
-    # Fix 2B: Global click-outside-to-close for all dropdown menus
-    # Priority 200 fires BEFORE any widget handler (Makie Menu=64, buttons~30).
-    # Closes all open menus, then returns Consume(false) so the actual target
-    # widget still processes the click normally.
-    on(events(fig.scene).mousebutton, priority = 200) do event
-        if event.action == Mouse.press && event.button == Mouse.left
-            for m in _ALL_MENUS
-                try; m.is_open[] && (m.is_open[] = false); catch; end
-            end
-        end
-        return Consume(false)
-    end
-    # Loading Overlay for Makie
+    # ── Loading Overlay for Makie ──────────────────────────────────────────────
     overlay_grid = GridLayout(fig.layout[1:end, 1:end], tellwidth=false, tellheight=false, )
     loading_bg = Box(overlay_grid[1, 1], color=(:black, 0.85), strokewidth=0)
     loading_txt = Label(overlay_grid[1, 1], "LOADING APPLICATION...\nPlease wait while engines initialize.", color=:white, fontsize=30, font=:bold, halign=:center, valign=:center)
     
     _lmw_observables[:loading_overlay_bg] = loading_bg
     _lmw_observables[:loading_overlay_txt] = loading_txt
+
+    # ── Login Overlay ─────────────────────────────────────────────────────────
+    _login_visible = Observable(false)
+    _lmw_observables[:login_visible] = _login_visible
+    
+    # Hide all dropdowns while login is active so they cannot steal clicks (since they were added first)
+    on(_login_visible) do vis
+        for m in _ALL_MENUS
+            try
+                if hasproperty(m, :blockscene)
+                    m.blockscene.visible[] = !vis
+                end
+            catch
+            end
+        end
+    end
+
+    login_grid = GridLayout(fig.layout[1:end, 1:end], tellwidth=false, tellheight=false)
+    login_bg = Box(login_grid[1, 1], color=(:black, 0.92), strokewidth=0, visible=_login_visible)
+    
+    login_inner = GridLayout(login_grid[1, 1], tellwidth=false, tellheight=false)
+    login_inner_bg = Button(login_inner[1:end, 1:end], label="", buttoncolor=:transparent, buttoncolor_active=:transparent, buttoncolor_hover=:transparent, strokewidth=0, width=nothing, height=nothing)
+    on(_login_visible) do vis; login_inner_bg.blockscene.visible[] = vis; end
+    
+    lbl_title = Label(login_inner[1, 1:2], "MedEye3d Login", color=:white, fontsize=24, font=:bold, halign=:center, visible=_login_visible)
+    lbl_user = Label(login_inner[2, 1], "Username:", color=:white, fontsize=14, halign=:right, visible=_login_visible)
+    login_tb_user = Textbox(login_inner[2, 2], placeholder="Enter username", fontsize=14, width=200,
+        textcolor=RGBf(0.95, 0.95, 0.95), textcolor_placeholder=RGBf(0.55, 0.58, 0.65), 
+        boxcolor=RGBf(0.14, 0.16, 0.20), boxcolor_focused=RGBf(0.20, 0.24, 0.32), boxcolor_hover=RGBf(0.17, 0.20, 0.27),
+        bordercolor=RGBf(0.30, 0.35, 0.45), cursorcolor=RGBf(0.95, 0.95, 0.95))
+    on(_login_visible) do vis; login_tb_user.blockscene.visible[] = vis; end
+    
+    lbl_pass = Label(login_inner[3, 1], "Password:", color=:white, fontsize=14, halign=:right, visible=_login_visible)
+    login_tb_pass = Textbox(login_inner[3, 2], placeholder="Enter password", fontsize=14, width=200,
+        textcolor=RGBf(0.95, 0.95, 0.95), textcolor_placeholder=RGBf(0.55, 0.58, 0.65), 
+        boxcolor=RGBf(0.14, 0.16, 0.20), boxcolor_focused=RGBf(0.20, 0.24, 0.32), boxcolor_hover=RGBf(0.17, 0.20, 0.27),
+        bordercolor=RGBf(0.30, 0.35, 0.45), cursorcolor=RGBf(0.95, 0.95, 0.95))
+    on(_login_visible) do vis; login_tb_pass.blockscene.visible[] = vis; end
+    
+    login_btn = Button(login_inner[4, 1:2], label="Login", buttoncolor=RGBf(0.2, 0.6, 0.3), labelcolor=:white, fontsize=16)
+    on(_login_visible) do vis; login_btn.blockscene.visible[] = vis; end
+    
+    login_msg = Label(login_inner[5, 1:2], "", color=RGBf(1.0, 0.3, 0.3), fontsize=12, halign=:center, visible=_login_visible)
+    
+    rowsize!(login_inner, 1, Fixed(40))
+    rowsize!(login_inner, 2, Fixed(35))
+    rowsize!(login_inner, 3, Fixed(35))
+    rowsize!(login_inner, 4, Fixed(40))
+    rowsize!(login_inner, 5, Fixed(25))
+    colsize!(login_inner, 1, Fixed(100))
+    colsize!(login_inner, 2, Fixed(210))
+    
+    push!(_all_textboxes, login_tb_user)
+    push!(_all_textboxes, login_tb_pass)
+    
+    function _do_login()
+        user = strip(login_tb_user.displayed_string[])
+        pass = strip(login_tb_pass.displayed_string[])
+        
+        if isempty(user)
+            login_msg.text[] = "Please enter a username"
+            return
+        end
+        if pass != _LOGIN_PASSWORD
+            login_msg.text[] = "Incorrect password"
+            return
+        end
+        _current_user[] = user
+        _login_authenticated[] = true
+        _login_success_time[] = time()
+        # Hide login overlay
+        _login_visible[] = false
+        login_msg.text[] = ""
+        println("[LOGIN] User '$(user)' authenticated at $(Dates.format(Dates.now(), "HH:MM:SS"))"); flush(stdout)
+    end
+    
+    on(login_btn.clicks) do _
+        _do_login()
+    end
+    # Also allow Enter in either field to login
+    on(login_tb_pass.stored_string) do _
+        _do_login()
+    end
+    on(login_tb_user.stored_string) do _
+        _do_login()
+    end
+    
+    _lmw_observables[:login_bg] = login_bg
+    _lmw_observables[:login_user] = login_tb_user
+
+    # ── Intercept Clicks to Prevent Click-Through ─────────────────────────────
+    on(events(fig.scene).mousebutton, priority=100) do event
+        if !_login_authenticated[]
+            if event.action == Mouse.press
+                pos = events(fig.scene).mouseposition[]
+                bbox = login_inner.layoutobservables.computedbbox[]
+                
+                # Explicitly hit-test the Login Button to bypass the Menu ghost (priority 64)
+                btn_bbox = login_btn.layoutobservables.computedbbox[]
+                if pos[1] >= btn_bbox.origin[1] && pos[1] <= btn_bbox.origin[1] + btn_bbox.widths[1] &&
+                   pos[2] >= btn_bbox.origin[2] && pos[2] <= btn_bbox.origin[2] + btn_bbox.widths[2]
+                    
+                    # Also trigger the visual click on the button manually
+                    login_btn.buttoncolor = RGBf(0.1, 0.4, 0.2)
+                    _do_login()
+                    return Consume(true)
+                end
+                
+                # Check if mouse is inside the login modal area
+                if pos[1] >= bbox.origin[1] && pos[1] <= bbox.origin[1] + bbox.widths[1] &&
+                   pos[2] >= bbox.origin[2] && pos[2] <= bbox.origin[2] + bbox.widths[2]
+                    return Consume(false) # Inside login panel: allow Textboxes to process (priority 70)
+                else
+                    return Consume(true) # Outside: block it so underlying Dropdowns don't trigger!
+                end
+            elseif event.action == Mouse.release
+                login_btn.buttoncolor = RGBf(0.2, 0.6, 0.3) # Reset button color
+            end
+        elseif time() - _login_success_time[] < 1.0
+            # Block all clicks for 1 second after login to prevent queued double-clicks from hitting dropdowns
+            return Consume(true)
+        end
+        return Consume(false)
+    end
+
+    # ── Starve the Ghost (Priority 65 Interceptor) ────────────────────────────
+    # Makie's Textbox processes clicks at priority 70 and returns Consume(false).
+    # Makie's Menu listens at priority 64 and consumes clicks, stealing them.
+    # By intercepting at priority 65, we allow Textboxes to work, but we 
+    # completely block the event from reaching the Menus and other underlying elements.
+    on(events(fig.scene).mousebutton, priority=65) do event
+        if !_login_authenticated[]
+            # If we get here, Textboxes (70) have already processed the event.
+            # We unconditionally consume it to protect the login panel from priority 64/60 elements.
+            return Consume(true)
+        end
+        return Consume(false)
+    end
+
+    lock(GLOBAL_OPENGL_LOCK) do
+        display(screen, fig)
+    end
 
     return screen
 end

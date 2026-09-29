@@ -12,6 +12,7 @@ export FlagRegistrationEvent, SetRegistrationQCEvent, ValidateReportEvent, CaseQ
 export NextPhaseEvent, PrevPhaseEvent, SetPhaseEvent
 export EditModeEvent, ViewModeEvent, SetTPFirstEvent, SetTPLastEvent
 export NewLesionEvent, EraseModeEvent, ShowOnlyPETEvent, ShowOnlyCTEvent, ToggleAnatomyEvent, ToggleSyncScrollEvent
+export ToggleCrosshairEvent
 
 struct NextPhaseEvent end
 struct PrevPhaseEvent end
@@ -217,6 +218,7 @@ struct ShowOnlyCTEvent
 end
 struct ToggleAnatomyEvent end
 struct ToggleSyncScrollEvent end
+struct ToggleCrosshairEvent end    # H key - toggle crosshair overlay
 
 # Measurement mode events
 struct ToggleMeasurementModeEvent end

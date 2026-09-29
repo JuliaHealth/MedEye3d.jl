@@ -66,7 +66,6 @@ function registerMouseScrollFunctions(window::GLFW.Window, mainChannel::Base.Cha
             end
             scroll_delta = yoff > 0 ? 1 : (yoff < 0 ? -1 : 0)
             if scroll_delta != 0
-                println(">> [DEBUG] Pushing ScrollEvent: ", scroll_delta, " for window ", window_id); flush(stdout)
                 put!(mainChannel, ScrollEvent(scroll_delta, window_id))
             end
         end

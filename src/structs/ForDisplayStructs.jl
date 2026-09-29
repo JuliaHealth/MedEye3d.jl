@@ -120,7 +120,7 @@ Defines the specification and configuration parameters for a texture layer (main
   isVisible::Bool = true
   uniforms::TextureUniforms = MaskTextureUniforms()
   minAndMaxValue::Vector{T} = []#entry one is minimum possible value for this mask, and second entry is maximum possible value for this mask
-  maskContribution::Float32 = 0.5f0 # controls contribution / opacity of given mask (default 0.5 = 50% opacity/blend)
+  maskContribution::Float32 = 0.35f0 # controls contribution / opacity of given mask (default 35% — semi-transparent so underlying structures visible)
   studyType::String = "" #type of the study - for example CT, MRI, PET, SPECT
   # Vulkan UBO fields (backend-neutral)
   colorMask::RGBA = RGBA(0.0, 0.0, 0.0, 1.0) # per-texture color mask for Vulkan std140 UBO

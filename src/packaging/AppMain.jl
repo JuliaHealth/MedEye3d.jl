@@ -1149,7 +1149,19 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     put!(mainViewer.channel, MedEye3d.MakieEvents.SetWindowTitleEvent("MedEye3d - LOADING APPLICATION... PLEASE WAIT"))
 
     @async begin
-        sleep(6.0) # Wait for JIT warmup and bone subsegments
+        # Wait for HDF5 loading and basic JIT warmup
+        sleep(3.0) 
+        
+        # Pre-build E-PSMA structured reports (this does heavy blocking work on main thread)
+        try
+            MedEye3d.EPSMAStructuredReport.prebuild_reports!()
+        catch e
+            @warn "[STARTUP] E-PSMA report pre-build failed" exception=(e, catch_backtrace())
+        end
+        
+        # Ensure all initial rendering/shaders have settled
+        sleep(1.0)
+        
         try
             put!(mainViewer.channel, MedEye3d.MakieEvents.SetWindowTitleEvent("MedEye3d - Ready"))
             if makie_win !== nothing
@@ -1157,26 +1169,20 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 if haskey(obs, :loading_overlay_bg)
                     obs[:loading_overlay_bg].visible = false
                     obs[:loading_overlay_txt].visible = false
+                    if haskey(obs, :login_visible)
+                        obs[:login_visible][] = true
+                    end
                 end
             end
             
             MEH.app_is_loading[] = false
             put!(mainViewer.channel, MedEye3d.MakieEvents.RenderRequestEvent())
         catch e
-
             @warn "Failed to hide loading screen: $e"
         end
     end
 
     println("MedEye3D interactive clinical workflow initialized.")
-    
-    # 8. Pre-build E-PSMA structured reports (async, non-blocking)
-    @async try
-        sleep(3.0)  # Wait for HDF5 loading and background preloads to finish
-        MedEye3d.EPSMAStructuredReport.prebuild_reports!()
-    catch e
-        @warn "[STARTUP] E-PSMA report pre-build failed" exception=(e, catch_backtrace())
-    end
     
     run_viewer_loop(mainViewer, makie_win)
 end

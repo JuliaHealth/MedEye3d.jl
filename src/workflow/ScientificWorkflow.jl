@@ -243,6 +243,7 @@ Immutable record of an annotation action for audit trail.
 struct AuditEvent
     event_id::String
     timestamp::String  # ISO 8601
+    user::String       # Username of the person who performed this action
     case_id::String
     lesion_track_id::Int
     timepoint_index::Int
@@ -256,6 +257,7 @@ struct AuditEvent
     AuditEvent(
         event_id,
         timestamp,
+        user,
         case_id,
         lesion_track_id,
         timepoint_index,
@@ -268,6 +270,7 @@ struct AuditEvent
     ) = new(
         String(event_id),
         String(timestamp),
+        String(user),
         String(case_id),
         Int(lesion_track_id),
         Int(timepoint_index),
@@ -283,6 +286,7 @@ end
 function AuditEvent(;
     event_id = "",
     timestamp = "",
+    user = "",
     case_id = "",
     lesion_track_id = 0,
     timepoint_index = 0,
@@ -296,6 +300,7 @@ function AuditEvent(;
     AuditEvent(
         event_id,
         timestamp,
+        user,
         case_id,
         lesion_track_id,
         timepoint_index,
