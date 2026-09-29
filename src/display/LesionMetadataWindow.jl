@@ -2475,12 +2475,23 @@ function create_metadata_window(
     _bbox_cache_ready = Ref(false)
     Rect2f_scroll = Makie.GeometryBasics.HyperRectangle{2, Float32}
     
+    _max_scroll_px = Ref(0.0f0)  # pre-computed max scrollable range
+    
     function _cache_widget_bboxes!()
         empty!(_bbox_cache)
         for (i, c) in enumerate(g.content)
             w = c.content
             bb = w.layoutobservables.computedbbox[]
             _bbox_cache[i] = Rect2f_scroll(Float32[bb.origin[1], bb.origin[2]], Float32[bb.widths[1], bb.widths[2]])
+        end
+        # Pre-compute scrollable range
+        if !isempty(_bbox_cache)
+            min_y = minimum(bb.origin[2] for bb in values(_bbox_cache))
+            max_y = maximum(bb.origin[2] + bb.widths[2] for bb in values(_bbox_cache))
+            window_h = Float32(size(fig.scene)[2])
+            _max_scroll_px[] = max(0.0f0, (max_y - min_y) - window_h + 100.0f0)
+        else
+            _max_scroll_px[] = 0.0f0
         end
         _bbox_cache_ready[] = true
     end
@@ -2499,37 +2510,25 @@ function create_metadata_window(
     
     # Rocket Subject for scroll — debounce at 50ms (20 Hz, now feasible)
     _scroll_subject = Subject(Float64)
-    _scroll_debounced = _scroll_subject |> debounce_time(50)
+    _scroll_debounced = _scroll_subject |> debounce_time(16)  # ~60fps, feasible at 3.7ms/scroll
     subscribe!(_scroll_debounced, lambda(
         on_next = (delta) -> begin
             !_bbox_cache_ready[] && return
-            window_h = Float32(size(fig.scene)[2])
-            # Compute scrollable range from cached content extent
-            if !isempty(_bbox_cache)
-                min_y = minimum(bb.origin[2] for bb in values(_bbox_cache))
-                max_y = maximum(bb.origin[2] + bb.widths[2] for bb in values(_bbox_cache))
-                total_h = max_y - min_y
-                max_scroll = max(0.0f0, total_h - window_h + 100.0f0)
-            else
-                max_scroll = 0.0f0
-            end
-            
-            # Apply offset: positive = scroll down (content shifts up)
-            new_offset = clamp(_scroll_offset_px[] + Float32(delta * max_scroll), 0.0f0, max_scroll)
+            # Use pre-computed max_scroll from cache (avoids min/max scan on every scroll)
+            new_offset = clamp(_scroll_offset_px[] + Float32(delta * _max_scroll_px[]), 0.0f0, _max_scroll_px[])
             _apply_scroll!(new_offset)
         end
     ))
     
     on(fig.scene.events.scroll) do scroll
-        if !_scroll_ready[]
+        if !_scroll_ready[] || !_bbox_cache_ready[]
             return Consume(true)
         end
-        window_h = size(fig.scene)[2]
-        if _cached_content_h[] > window_h * 0.5
-            _scroll_acc[] += scroll[2] * 0.03
+        # Push each scroll delta directly — debounce_time(16) handles coalescing
+        delta = scroll[2] * 0.03
+        if abs(delta) > 0.0001
+            next!(_scroll_subject, delta)
         end
-        next!(_scroll_subject, _scroll_acc[])
-        _scroll_acc[] = 0.0
         return Consume(true)
     end
     
@@ -2706,12 +2705,28 @@ function create_metadata_window(
         end
     end
 
-    # ── Cursor Info (always visible, not in a section) ───────────────────────
+    # ── Cursor Info (throttled to reduce Makie text re-layout overhead) ──────
+    # cursor_info_text updates on every mouse move (~100+ Hz). Throttle to 10Hz
+    # to avoid saturating the Makie rendering thread with text layout updates.
+    _throttled_cursor_info = Observable("")
+    _throttled_cursor_study = Observable("")
+    _cursor_throttle_subject = Subject(String)
+    _cursor_throttle_debounced = _cursor_throttle_subject |> debounce_time(100)  # 10Hz
+    subscribe!(_cursor_throttle_debounced, lambda(
+        on_next = (val) -> begin
+            _throttled_cursor_info[] = string(_MEH.cursor_info_text[])
+            _throttled_cursor_study[] = string(_MEH.cursor_study_text[])
+        end
+    ))
+    on(_MEH.cursor_info_text) do _
+        next!(_cursor_throttle_subject, "")
+    end
+    
     # Study name — compare mode shows both studies
-    Label(g[nr!(), 1:4], @lift(string($(_MEH.cursor_study_text))),
+    Label(g[nr!(), 1:4], _throttled_cursor_study,
         fontsize = 11, color = RGBAf(0.6, 0.8, 1.0, 1.0), halign = :left, tellwidth=false, tellheight=false)
     # HU / SUV / Lesion / View / Slice
-    Label(g[nr!(), 1:4], @lift(string($(_MEH.cursor_info_text))),
+    Label(g[nr!(), 1:4], _throttled_cursor_info,
         fontsize = 11, color = RGBAf(0.95, 0.85, 0.55, 1.0), halign = :left, tellwidth=false, tellheight=false)
     # Live measurement info (sphere SUV / line distance)
     Label(g[nr!(), 1:4], @lift(string($(_MEH.measurement_info_text))),
@@ -5801,7 +5816,7 @@ function create_metadata_window(
             end
             if !isempty(parts)
                 d["Anatomical Details"] = join(parts, " | ")
-                println("SAVING ANATOMICAL DETAILS: ", d["Anatomical Details"])
+                # (removed: synchronous I/O in autosave hot path)
             end
         end
         
