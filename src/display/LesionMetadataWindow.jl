@@ -2632,14 +2632,14 @@ function create_metadata_window(
         
         on(btn.clicks) do _
             is_open[] = !is_open[]
-            g.block_updates = true
+            # g.block_updates = true
             try
                 for i in start_row:end_row
                     set_row_visible!(i, is_open[])
                 end
             finally
-                g.block_updates = false
-                try Makie.GridLayoutBase.update!(g) catch; end
+                # g.block_updates = false
+                # try Makie.GridLayoutBase.update!(g) catch; end
             end
         end
     end
@@ -4729,7 +4729,7 @@ function create_metadata_window(
         is_bm = (active_type == "Bone Meta")
         no_ct = no_ct_toggle.active[]
         
-        g.block_updates = true
+        # g.block_updates = true
         try
             for (sq, rows) in q_row_indices
                 visible = true
@@ -4753,8 +4753,8 @@ function create_metadata_window(
                 end
             end
         finally
-            g.block_updates = false
-            try Makie.GridLayoutBase.update!(g) catch; end
+            # g.block_updates = false
+            # try Makie.GridLayoutBase.update!(g) catch; end
         end
     end
 
@@ -5591,7 +5591,7 @@ function create_metadata_window(
         btn_cv.buttoncolor[] = cv_active[] ? GRN : BLU_BTN
         update_tp_dropdown_visibility!()
         sync_tp_menus_to_current!()
-        g.block_updates = true
+        # g.block_updates = true
         try
             if cv_active[]
                 for sec in (sec_meta, sec_seg, sec_report)
@@ -5617,8 +5617,8 @@ function create_metadata_window(
                 notify(anat_active_count)
             end
         finally
-            g.block_updates = false
-            try Makie.GridLayoutBase.update!(g) catch; end
+            # g.block_updates = false
+            # try Makie.GridLayoutBase.update!(g) catch; end
         end
         println("[COMPARE-UI] Sending CompareTimePointsEvent($(cv_active[])) to channel..."); flush(stdout)
         put!(channel, CompareTimePointsEvent(cv_active[]))
@@ -5961,7 +5961,7 @@ function create_metadata_window(
         _t_apply_start = time_ns()
         _is_applying_state[] = true
         is_syncing_selection[] = true
-        g.block_updates = true
+        # g.block_updates = true
         try
             cur_id_str = active_lesion_id[]
             db_updates = Dict{String, Any}()
@@ -6856,8 +6856,8 @@ function create_metadata_window(
         _t_total = round((time_ns()-_t_apply_start)/1e6, digits=1)
         println("[APPLY] type=$(_t_type)ms anat=$(_t_anatomy)ms suv=$(_t_suv)ms fields=$(_t_fields)ms TOTAL=$(_t_total)ms"); flush(stdout)
         finally
-            g.block_updates = false
-            try Makie.GridLayoutBase.update!(g) catch; end
+            # g.block_updates = false
+            # try Makie.GridLayoutBase.update!(g) catch; end
             _is_applying_state[] = false
             is_syncing_selection[] = false
         end
