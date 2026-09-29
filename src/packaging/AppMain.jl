@@ -1198,7 +1198,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         end
     end
 
-    println("MedEye3D interactive clinical workflow initialized.")
+    println("MedEye3D interactive clinical workflow initialized."); flush(stdout)
     
     run_viewer_loop(mainViewer, makie_win)
 end
