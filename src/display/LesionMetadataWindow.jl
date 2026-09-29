@@ -2533,8 +2533,10 @@ function create_metadata_window(
     # Row→widget index: maps row_idx → Vector of (blockscene_or_visible_obs) for O(1) lookup
     _row_widget_cache = Dict{Int, Vector{Any}}()
     _row_visibility_state = Dict{Int, Bool}()  # tracks current visibility to skip no-ops
+    _row_cache_ready = Ref(false)  # Set to true AFTER construction is complete
     
     function _ensure_row_cache_built!()
+        _row_cache_ready[] || return  # Don't cache during construction
         isempty(_row_widget_cache) || return
         for c in g.content
             for row_idx in c.span.rows.start:c.span.rows.stop
@@ -2567,14 +2569,27 @@ function create_metadata_window(
         if row_idx < r[1]
             rowgap!(g, row_idx, visible ? 2 : 0)
         end
-        # Use cached row→widget mapping instead of scanning all grid content
+        # Use cached row→widget mapping if ready, otherwise fall back to scanning g.content
         _ensure_row_cache_built!()
-        widgets = get(_row_widget_cache, row_idx, Any[])
-        for w in widgets
-            if hasproperty(w, :blockscene)
-                w.blockscene.visible[] = visible
-            elseif hasproperty(w, :visible)
-                w.visible[] = visible
+        if !isempty(_row_widget_cache)
+            widgets = get(_row_widget_cache, row_idx, Any[])
+            for w in widgets
+                if hasproperty(w, :blockscene)
+                    w.blockscene.visible[] = visible
+                elseif hasproperty(w, :visible)
+                    w.visible[] = visible
+                end
+            end
+        else
+            # Fallback: scan g.content directly (during construction or before cache is ready)
+            for c in g.content
+                if c.span.rows.start <= row_idx && c.span.rows.stop >= row_idx
+                    if hasproperty(c.content, :blockscene)
+                        c.content.blockscene.visible[] = visible
+                    elseif hasproperty(c.content, :visible)
+                        c.content.visible[] = visible
+                    end
+                end
             end
         end
     end
@@ -2598,23 +2613,34 @@ function create_metadata_window(
         end_row = r[1]
         end_row_ref[] = end_row
         
-        # If default_open is false, collapse immediately
+        # If default_open is false, collapse immediately (DURING CONSTRUCTION — use raw scans, not cache)
         if !is_open[]
-            g.block_updates = true
             for i in start_row:end_row
-                set_row_visible!(i, false)
+                rowsize!(g, i, Fixed(0))
             end
-            g.block_updates = false
+            for i in (start_row > 1 ? start_row - 1 : start_row):min(end_row, r[1] - 1)
+                rowgap!(g, i, 0)
+            end
+            for c in g.content
+                if c.span.rows.start >= start_row && c.span.rows.stop <= end_row
+                    if hasproperty(c.content, :blockscene)
+                        c.content.blockscene.visible[] = false
+                    end
+                end
+            end
         end
         
         on(btn.clicks) do _
             is_open[] = !is_open[]
             g.block_updates = true
-            for i in start_row:end_row
-                set_row_visible!(i, is_open[])
+            try
+                for i in start_row:end_row
+                    set_row_visible!(i, is_open[])
+                end
+            finally
+                g.block_updates = false
+                try Makie.GridLayoutBase.update!(g) catch; end
             end
-            g.block_updates = false
-            Makie.GridLayoutBase.update!(g)
         end
     end
     
@@ -4704,29 +4730,32 @@ function create_metadata_window(
         no_ct = no_ct_toggle.active[]
         
         g.block_updates = true
-        for (sq, rows) in q_row_indices
-            visible = true
-            
-            # Hide CT-specific fields when No CT Correlate is checked
-            if no_ct && sq in CT_SPECIFIC_FIELDS
-                visible = false
-            elseif sq == "PRIMARY score pattern?"
-                visible = is_p
-            elseif sq == "Relation to Bone Marrow (Surrounding Changes Part A)" || 
-                   sq == "Periosteal Reaction (Surrounding Changes Part B)"
-                visible = is_bm && !no_ct
-            elseif sq == "PSMA-RADS 2.0"
-                visible = !is_p
-            elseif sq == "Alternative Hypothesis (False Positive)"
-                visible = !is_p
-            end
+        try
+            for (sq, rows) in q_row_indices
+                visible = true
+                
+                # Hide CT-specific fields when No CT Correlate is checked
+                if no_ct && sq in CT_SPECIFIC_FIELDS
+                    visible = false
+                elseif sq == "PRIMARY score pattern?"
+                    visible = is_p
+                elseif sq == "Relation to Bone Marrow (Surrounding Changes Part A)" || 
+                       sq == "Periosteal Reaction (Surrounding Changes Part B)"
+                    visible = is_bm && !no_ct
+                elseif sq == "PSMA-RADS 2.0"
+                    visible = !is_p
+                elseif sq == "Alternative Hypothesis (False Positive)"
+                    visible = !is_p
+                end
 
-            for row_idx in rows
-                set_row_visible!(row_idx, visible)
+                for row_idx in rows
+                    set_row_visible!(row_idx, visible)
+                end
             end
+        finally
+            g.block_updates = false
+            try Makie.GridLayoutBase.update!(g) catch; end
         end
-        g.block_updates = false
-        Makie.GridLayoutBase.update!(g)
     end
 
     # Wire No CT Correlate toggle to refresh visibility
@@ -7707,6 +7736,9 @@ function create_metadata_window(
     end
     _lmw_observables[:obs_flag_reg] = obs_flag_reg
 
+    # Enable row widget cache NOW that all sections are built
+    _row_cache_ready[] = true
+    
     return res
 
 end
