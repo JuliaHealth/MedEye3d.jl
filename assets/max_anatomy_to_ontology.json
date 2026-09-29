@@ -2355,5 +2355,837 @@
     "anatomic_location": "Blood Vessel",
     "lesion_type": "Organ Meta",
     "anatomical_sublocation": "Vascular (Arterial/Venous)"
+  },
+  "Abdominal_Station_1_Right_Paracardial": {
+    "detailed": "Abdominal_Station_1_Right_Paracardial",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "lev_vert": {
+    "detailed": "lev_vert",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "N/A"
+  },
+  "Abdominal_Station_16a1_Aortic_Hiatus": {
+    "detailed": "Abdominal_Station_16a1_Aortic_Hiatus",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Celiac_Helper_Aorta_Expanded": {
+    "detailed": "Abdominal_Celiac_Helper_Aorta_Expanded",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Station_Inferior_Pancreatic": {
+    "detailed": "Abdominal_Station_Inferior_Pancreatic",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Neck_Level_IV_Lower_Jugular_Left": {
+    "detailed": "Neck_Level_IV_Lower_Jugular_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Neck"
+  },
+  "Neck_Retropharyngeal": {
+    "detailed": "Neck_Retropharyngeal",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Neck"
+  },
+  "Deep_Inguinal_Left": {
+    "detailed": "Deep_Inguinal_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Deep_Inguinal_Right": {
+    "detailed": "Deep_Inguinal_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Inguinal_Ligament": {
+    "detailed": "Inguinal_Ligament",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_External_Iliac_Right": {
+    "detailed": "Abdominal_External_Iliac_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Axillary_Level_I_Right": {
+    "detailed": "Axillary_Level_I_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Neck_Level_Va_Upper_Posterior_Triangle": {
+    "detailed": "Neck_Level_Va_Upper_Posterior_Triangle",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Neck"
+  },
+  "Thoracic_Station_5_Subaortic": {
+    "detailed": "Thoracic_Station_5_Subaortic",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Abdominal_Station_10_Splenic_Hilum": {
+    "detailed": "Abdominal_Station_10_Splenic_Hilum",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Station_16a2_Upper_Middle_Paraaortic": {
+    "detailed": "Abdominal_Station_16a2_Upper_Middle_Paraaortic",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Station_13_Posterior_Pancreaticoduodenal": {
+    "detailed": "Abdominal_Station_13_Posterior_Pancreaticoduodenal",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Neck_Level_VI_Anterior_Cervical": {
+    "detailed": "Neck_Level_VI_Anterior_Cervical",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Neck"
+  },
+  "Thoracic_Station_6_Paraaortic": {
+    "detailed": "Thoracic_Station_6_Paraaortic",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "fused_spine": {
+    "detailed": "fused_spine",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "N/A"
+  },
+  "ribs_combined": {
+    "detailed": "ribs_combined",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "N/A"
+  },
+  "spinal_cord_dilated_1cm": {
+    "detailed": "spinal_cord_dilated_1cm",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "N/A"
+  },
+  "thorax_wall": {
+    "detailed": "thorax_wall",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "N/A"
+  },
+  "deep_fascial_floor_left": {
+    "detailed": "deep_fascial_floor_left",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "N/A"
+  },
+  "deep_fascial_floor_right": {
+    "detailed": "deep_fascial_floor_right",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "N/A"
+  },
+  "Abdominal_Station_3_Lesser_Curvature": {
+    "detailed": "Abdominal_Station_3_Lesser_Curvature",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Axillary_Rotter_Right": {
+    "detailed": "Axillary_Rotter_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Thoracic_Station_2_UpperParatracheal_Left": {
+    "detailed": "Thoracic_Station_2_UpperParatracheal_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Thoracic_Mammary": {
+    "detailed": "Thoracic_Mammary",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Abdominal_Renal_Hilar_Right": {
+    "detailed": "Abdominal_Renal_Hilar_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Station_2_Left_Paracardial": {
+    "detailed": "Abdominal_Station_2_Left_Paracardial",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Station_11_Splenic_Artery": {
+    "detailed": "Abdominal_Station_11_Splenic_Artery",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Thoracic_Trachea_2cm_Exclusion_Helper": {
+    "detailed": "Thoracic_Trachea_2cm_Exclusion_Helper",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Superficial_Inguinal_Left": {
+    "detailed": "Superficial_Inguinal_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Superficial_Inguinal_Right": {
+    "detailed": "Superficial_Inguinal_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Thoracic_Station_Prepericardial_Right": {
+    "detailed": "Thoracic_Station_Prepericardial_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Abdominal_Obturator_Left": {
+    "detailed": "Abdominal_Obturator_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_External_Iliac_Left": {
+    "detailed": "Abdominal_External_Iliac_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "aortic_arch_exported": {
+    "detailed": "aortic_arch_exported",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "N/A"
+  },
+  "Abdominal_Celiac_Helper_Aorta_Slab": {
+    "detailed": "Abdominal_Celiac_Helper_Aorta_Slab",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Presacral": {
+    "detailed": "Abdominal_Presacral",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Axillary_Rotter_Left": {
+    "detailed": "Axillary_Rotter_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Abdominal_Station_7_Left_Gastric": {
+    "detailed": "Abdominal_Station_7_Left_Gastric",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Neck_Level_IIa_Upper_Jugular": {
+    "detailed": "Neck_Level_IIa_Upper_Jugular",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Neck"
+  },
+  "Abdominal_Pararectal": {
+    "detailed": "Abdominal_Pararectal",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Neck_Parotid": {
+    "detailed": "Neck_Parotid",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Neck"
+  },
+  "Helper_ChestWall_Bridge": {
+    "detailed": "Helper_ChestWall_Bridge",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "N/A"
+  },
+  "Abdominal_Obturator_Base_Right": {
+    "detailed": "Abdominal_Obturator_Base_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Neck_Level_III_Middle_Jugular": {
+    "detailed": "Neck_Level_III_Middle_Jugular",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Neck"
+  },
+  "Thoracic_Station_Hilar_Interlobar_Right": {
+    "detailed": "Thoracic_Station_Hilar_Interlobar_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Abdominal_Obturator_Right": {
+    "detailed": "Abdominal_Obturator_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Thoracic_Sternum_Exclusion_Zone": {
+    "detailed": "Thoracic_Sternum_Exclusion_Zone",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "tissue_fat": {
+    "detailed": "tissue_fat",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "N/A"
+  },
+  "Abdominal_Inferior_Pancreas": {
+    "detailed": "Abdominal_Inferior_Pancreas",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "portal_vein": {
+    "detailed": "portal_vein",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "N/A"
+  },
+  "Abdominal_Common_Iliac_Left": {
+    "detailed": "Abdominal_Common_Iliac_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Mesenteric_Interenteric": {
+    "detailed": "Abdominal_Mesenteric_Interenteric",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Mesenteric_Helper_Base": {
+    "detailed": "Abdominal_Mesenteric_Helper_Base",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Thoracic_Station_3A_Prevascular_Left": {
+    "detailed": "Thoracic_Station_3A_Prevascular_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Abdominal_Mesenteric_Helper_Dilated": {
+    "detailed": "Abdominal_Mesenteric_Helper_Dilated",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Thoracic_Prepericardial": {
+    "detailed": "Thoracic_Prepericardial",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Abdominal_Station_9_Celiac": {
+    "detailed": "Abdominal_Station_9_Celiac",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Station_16b1_Lower_Middle_Paraaortic": {
+    "detailed": "Abdominal_Station_16b1_Lower_Middle_Paraaortic",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Station_8_Common_Hepatic": {
+    "detailed": "Abdominal_Station_8_Common_Hepatic",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Common_Iliac_Right": {
+    "detailed": "Abdominal_Common_Iliac_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Renal_Hilar_Left": {
+    "detailed": "Abdominal_Renal_Hilar_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Thoracic_Supraclavicular_Left": {
+    "detailed": "Thoracic_Supraclavicular_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Thoracic_Supraclavicular_Right": {
+    "detailed": "Thoracic_Supraclavicular_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Abdominal_Station_1_2_Paracardial": {
+    "detailed": "Abdominal_Station_1_2_Paracardial",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Neck_Level_Xb_Occipital": {
+    "detailed": "Neck_Level_Xb_Occipital",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Neck"
+  },
+  "Neck_Level_IV_Lower_Jugular_Right": {
+    "detailed": "Neck_Level_IV_Lower_Jugular_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Neck"
+  },
+  "Abdominal_Obturator_Base_Left": {
+    "detailed": "Abdominal_Obturator_Base_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Helper_Axillary_Bounds_Right": {
+    "detailed": "Helper_Axillary_Bounds_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Axillary_Level_III_Right": {
+    "detailed": "Axillary_Level_III_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Axillary_Level_II_Right": {
+    "detailed": "Axillary_Level_II_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Abdominal_Internal_Iliac_Left": {
+    "detailed": "Abdominal_Internal_Iliac_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Station_5_Suprapyloric": {
+    "detailed": "Abdominal_Station_5_Suprapyloric",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Station_6_Infrapyloric": {
+    "detailed": "Abdominal_Station_6_Infrapyloric",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Station_16b2_Caudal_Paraaortic": {
+    "detailed": "Abdominal_Station_16b2_Caudal_Paraaortic",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Superior_Mesenteric_Artery": {
+    "detailed": "Abdominal_Superior_Mesenteric_Artery",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Thoracic_Station_Hilar_Interlobar_Left": {
+    "detailed": "Thoracic_Station_Hilar_Interlobar_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Axillary_Level_III_Left": {
+    "detailed": "Axillary_Level_III_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Thoracic_Station_8_Paraoesophageal": {
+    "detailed": "Thoracic_Station_8_Paraoesophageal",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Abdominal_Internal_Iliac_Right": {
+    "detailed": "Abdominal_Internal_Iliac_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Abdominal_Celiac_Helper_Pancreas": {
+    "detailed": "Abdominal_Celiac_Helper_Pancreas",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Thoracic_Station_7_Subcarinial": {
+    "detailed": "Thoracic_Station_7_Subcarinial",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Thoracic_Station_3A_Prevascular_Right": {
+    "detailed": "Thoracic_Station_3A_Prevascular_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Axillary_Level_I_Left": {
+    "detailed": "Axillary_Level_I_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Abdominal_Station_4_Greater_Curvature": {
+    "detailed": "Abdominal_Station_4_Greater_Curvature",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Helper_Axillary_Bounds_Left": {
+    "detailed": "Helper_Axillary_Bounds_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Neck_Level_Ia_Submental": {
+    "detailed": "Neck_Level_Ia_Submental",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Neck"
+  },
+  "Thoracic_Sternum_Bridge": {
+    "detailed": "Thoracic_Sternum_Bridge",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Neck_Level_IIb_Upper_Jugular": {
+    "detailed": "Neck_Level_IIb_Upper_Jugular",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Neck"
+  },
+  "Abdominal_Station_17_Anterior_Pancreaticoduodenal": {
+    "detailed": "Abdominal_Station_17_Anterior_Pancreaticoduodenal",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "splenic_vein": {
+    "detailed": "splenic_vein",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "N/A"
+  },
+  "Thoracic_Station_4_LowerParatracheal_Right": {
+    "detailed": "Thoracic_Station_4_LowerParatracheal_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Thoracic_Station_6_Helper_Base": {
+    "detailed": "Thoracic_Station_6_Helper_Base",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Thoracic_Station_4_LowerParatracheal_Left": {
+    "detailed": "Thoracic_Station_4_LowerParatracheal_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Axillary_Level_II_Left": {
+    "detailed": "Axillary_Level_II_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Thoracic_Station_2_UpperParatracheal_Right": {
+    "detailed": "Thoracic_Station_2_UpperParatracheal_Right",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Thoracic_Station_Prepericardial_Left": {
+    "detailed": "Thoracic_Station_Prepericardial_Left",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Abdominal_Station_14_SMA": {
+    "detailed": "Abdominal_Station_14_SMA",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Abdominal"
+  },
+  "Thoracic_Station_3P_Retrotracheal": {
+    "detailed": "Thoracic_Station_3P_Retrotracheal",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Thoracic"
+  },
+  "Neck_Level_Ib_Submandibular": {
+    "detailed": "Neck_Level_Ib_Submandibular",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Lymph Node",
+    "lesion_type": "Lymph Node",
+    "anatomical_sublocation": "Neck"
   }
 }
