@@ -1062,8 +1062,8 @@ function coordinateDisplay(
         _vk_main_panels = VulkanRender.PanelRenderData[]
         _vk_m2_panels = VulkanRender.PanelRenderData[]
         _push_consts = Vector{Float32}(undef, 12)  # scale(2) + offset(2) + ndc(4) + crosshairUV(2) + showCrosshair+pad(2)
-        m2_glfw = _m2_glfw_ref
-        m2_vk = _m2_vk_ref
+        m2_glfw = SegmentationDisplay._m2_glfw_ref
+        m2_vk = SegmentationDisplay._m2_vk_ref
         while !shouldStop[1]
             try
                 channelData = take!(mainChannel)

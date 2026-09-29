@@ -186,7 +186,7 @@ function run_viewer_loop(mainViewer, makie_win=nothing)
             exit(0)
         end
 
-        while isopen(mainViewer.channel) && (window === nothing || !GLFW.WindowShouldClose(window))
+        println("Channel open? ", isopen(mainViewer.channel), " window should close? ", window !== nothing ? GLFW.WindowShouldClose(window) : "none"); while isopen(mainViewer.channel) && (window === nothing || !GLFW.WindowShouldClose(window))
             GLFW.PollEvents()
             
             # Process any deferred UI tasks on the main thread
