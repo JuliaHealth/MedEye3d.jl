@@ -48,7 +48,7 @@ try
                     return ""
                 end
             end
-            @info "[STARTUP] Patched InteractiveUtils.clipboard for headless/Docker environment"
+            println("[STARTUP] Patched InteractiveUtils.clipboard for headless/Docker environment"); flush(stdout)
         end
     end
 catch; end
@@ -1149,23 +1149,37 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     put!(mainViewer.channel, MedEye3d.MakieEvents.SetWindowTitleEvent("MedEye3d - LOADING APPLICATION... PLEASE WAIT"))
 
     @async begin
-        # Wait for HDF5 loading and basic JIT warmup
-        sleep(3.0) 
+        t_startup = time_ns()
         
-        # Pre-build E-PSMA structured reports (this does heavy blocking work on main thread)
+        # Phase 1: Pre-build E-PSMA structured reports (heavy work)
         try
             MedEye3d.EPSMAStructuredReport.prebuild_reports!()
+            println("[STARTUP] E-PSMA reports pre-built"); flush(stdout)
         catch e
             @warn "[STARTUP] E-PSMA report pre-build failed" exception=(e, catch_backtrace())
         end
         
-        # Ensure all initial rendering/shaders have settled
-        sleep(1.0)
+        # Phase 2: Wait for GUI preload (bbox cache, scroll, etc.) to complete
+        # Instead of a fixed sleep, we poll the coordinated readiness signal.
+        obs = makie_win !== nothing ? MedEye3d.LesionMetadataWindow._lmw_observables : Dict()
+        gui_ready = false
+        for _i in 1:100  # Wait up to 10 seconds (100 × 100ms)
+            if haskey(obs, :gui_preload_done) && obs[:gui_preload_done][]
+                gui_ready = true
+                break
+            end
+            sleep(0.1)
+        end
+        if !gui_ready
+            @warn "[STARTUP] GUI preload did not complete within 10s, proceeding anyway"
+        end
+        
+        # Phase 3: Small settle time for rendering/shaders
+        sleep(0.3)
         
         try
             put!(mainViewer.channel, MedEye3d.MakieEvents.SetWindowTitleEvent("MedEye3d - Ready"))
             if makie_win !== nothing
-                obs = MedEye3d.LesionMetadataWindow._lmw_observables
                 if haskey(obs, :loading_overlay_bg)
                     obs[:loading_overlay_bg].visible = false
                     obs[:loading_overlay_txt].visible = false
@@ -1177,6 +1191,8 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             
             MEH.app_is_loading[] = false
             put!(mainViewer.channel, MedEye3d.MakieEvents.RenderRequestEvent())
+            t_ms = (time_ns() - t_startup) / 1e6
+            println("[STARTUP] App ready in $(round(t_ms, digits=0))ms (gui_ready=$gui_ready)"); flush(stdout)
         catch e
             @warn "Failed to hide loading screen: $e"
         end

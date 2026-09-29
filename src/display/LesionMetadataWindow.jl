@@ -2459,10 +2459,7 @@ function create_metadata_window(
     # Fix: heavy debounce (200ms, ~5 Hz) + startup guard (5s) to prevent freeze.
     _cached_content_h = Ref(3000.0)
     _scroll_acc = Ref(0.0)
-    _scroll_ready = Ref(false)  # Disabled during startup layout build
-
-    # Enable scroll after layout settles (5 seconds)
-    @async begin; sleep(5.0); _scroll_ready[] = true; end
+    _scroll_ready = Ref(false)  # Enabled by coordinated startup (see bottom of function)
 
     # Update cached height when layout actually changes
     on(g.layoutobservables.computedbbox) do bbox
@@ -7794,15 +7791,31 @@ function create_metadata_window(
     # Enable row widget cache NOW that all sections are built
     _row_cache_ready[] = true
     
-    # ── Fast scroll: cache widget bboxes and block layout solver ──────────
-    # After the layout solver has computed all positions during construction,
-    # cache them for the direct-offset scroll approach (~54x faster).
-    # g.block_updates = true prevents the solver from overwriting our offsets.
+    # ── Coordinated startup preload ──────────────────────────────────────
+    # Single async task that coordinates ALL preloading in the right order.
+    # The loading overlay in AppMain waits for _gui_preload_done before hiding.
+    _gui_preload_done = Ref(false)
+    _lmw_observables[:gui_preload_done] = _gui_preload_done
+    
     @async begin
-        sleep(2.0)  # let layout fully settle before caching
+        t_preload = time_ns()
+        
+        # Phase 1: Let layout solver finish computing all widget positions (1s settle time)
+        sleep(1.0)
+        
+        # Phase 2: Build bbox cache for fast scroll
         _cache_widget_bboxes!()
         g.block_updates = true
-        @info "[SCROLL] BBox cache built: $(length(_bbox_cache)) widgets, block_updates=true"
+        println("[PRELOAD] BBox cache built: $(length(_bbox_cache)) widgets"); flush(stdout)
+        
+        # Phase 3: Enable scroll
+        _scroll_ready[] = true
+        println("[PRELOAD] Scroll enabled"); flush(stdout)
+        
+        # Phase 4: Signal readiness
+        _gui_preload_done[] = true
+        t_ms = (time_ns() - t_preload) / 1e6
+        println("[PRELOAD] GUI preload complete in $(round(t_ms, digits=0))ms"); flush(stdout)
     end
     
     return res
