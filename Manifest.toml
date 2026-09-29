@@ -2,7 +2,7 @@
 
 julia_version = "1.11.3"
 manifest_format = "2.0"
-project_hash = "d3146e5bf1a7d4439a30566aef27e20360a0b71c"
+project_hash = "cfdfb846cf69915c44ed69f83731b0bda5485534"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "0a81a018463de6c3f4f2c9360121c562e5add9e4"
@@ -3288,6 +3288,16 @@ git-tree-sha1 = "6d40b2fe70437b01397d2a4d5b020008da4e7019"
 uuid = "f50d1b31-88e8-58de-be2c-1cc44531875f"
 version = "0.5.2+0"
 
+[[deps.Rocket]]
+deps = ["DataStructures", "Sockets", "Unrolled"]
+git-tree-sha1 = "12c8d9bb85176acf23057b679a894ea59eb922c8"
+uuid = "df971d30-c9d6-4b37-b8ff-e965b2cb3a40"
+version = "1.9.0"
+weakdeps = ["Observables"]
+
+    [deps.Rocket.extensions]
+    RocketObservablesExt = "Observables"
+
 [[deps.Roots]]
 deps = ["Accessors", "CommonSolve", "Printf"]
 git-tree-sha1 = "7fb25a964849d90a0446366cdefca822e0e84900"
@@ -3906,6 +3916,12 @@ version = "1.28.0"
     Latexify = "23fbe1c1-3f47-55db-b15f-69d7ec21a316"
     NaNMath = "77ba4419-2d1f-58cd-9bb1-8ffee604a2e3"
     Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+
+[[deps.Unrolled]]
+deps = ["MacroTools"]
+git-tree-sha1 = "6cc9d682755680e0f0be87c56392b7651efc2c7b"
+uuid = "9602ed7d-8fef-5bc8-8597-8f21381861e8"
+version = "0.1.5"
 
 [[deps.UnsafeAtomics]]
 git-tree-sha1 = "0f30765c32d66d58e41f4cb5624d4fc8a82ec13b"

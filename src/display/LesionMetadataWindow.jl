@@ -25,6 +25,7 @@ module LesionMetadataWindow
 
 using GLMakie
 using Observables
+using Rocket
 using JSON
 using HDF5
 using Dates
@@ -2458,7 +2459,6 @@ function create_metadata_window(
     # Fix: heavy debounce (200ms, ~5 Hz) + startup guard (5s) to prevent freeze.
     _cached_content_h = Ref(3000.0)
     _scroll_acc = Ref(0.0)
-    _scroll_pending = Ref(false)
     _scroll_ready = Ref(false)  # Disabled during startup layout build
 
     # Enable scroll after layout settles (5 seconds)
@@ -2469,6 +2469,21 @@ function create_metadata_window(
         _cached_content_h[] = bbox.widths[2]
     end
 
+    # ── Rocket.jl scroll debounce ──────────────────────────────────────────
+    # Use a Rocket Subject + debounce_time instead of manual sleep/pending flags.
+    # The Subject receives scroll delta accumulations; debounce_time(200) ensures
+    # at most 5 layout re-solves per second (one every 200ms of scroll silence).
+    _scroll_subject = Subject(Float64)
+    _scroll_debounced = _scroll_subject |> debounce_time(200)
+    subscribe!(_scroll_debounced, lambda(
+        on_next = (acc_val) -> begin
+            new_val = clamp(sl.value[] + acc_val, 0.0, 1.0)
+            if abs(new_val - sl.value[]) > 0.001
+                sl.value[] = new_val
+            end
+        end
+    ))
+    
     on(fig.scene.events.scroll) do scroll
         if !_scroll_ready[]
             return Consume(true)  # Swallow scroll during startup
@@ -2477,20 +2492,9 @@ function create_metadata_window(
         if _cached_content_h[] > window_h * 0.5
             _scroll_acc[] += scroll[2] * 0.03
         end
-        
-        if !_scroll_pending[]
-            _scroll_pending[] = true
-            @async begin
-                sleep(0.20)  # 200ms debounce — max 5 layout re-solves/sec
-                acc = _scroll_acc[]
-                _scroll_acc[] = 0.0
-                new_val = clamp(sl.value[] + acc, 0.0, 1.0)
-                if abs(new_val - sl.value[]) > 0.001
-                    sl.value[] = new_val
-                end
-                _scroll_pending[] = false  # Reset AFTER layout update completes
-            end
-        end
+        # Push accumulated scroll into Rocket Subject — debounce_time handles the rest
+        next!(_scroll_subject, _scroll_acc[])
+        _scroll_acc[] = 0.0
         return Consume(true)
     end
     
@@ -5816,18 +5820,25 @@ function create_metadata_window(
     _is_applying_state = Ref(false)
     _is_dictating_update = Ref(false)
     _last_snapshot = Ref{Any}(nothing)  # holds (id, state, global_state, tp_idx, skip_dict)
+    # ── Rocket.jl autosave debounce ──────────────────────────────────────────
+    # Use a Rocket Subject + debounce_time(300) instead of manual sleep/pending.
+    _autosave_subject = Subject(Tuple{Bool})
+    _autosave_debounced = _autosave_subject |> debounce_time(300)
+    
     function trigger_autosave(; skip_dictation=false)
         _is_applying_state[] && return
         
-        # Debounce: if already pending, skip to prevent queuing
-        _autosave_pending[] && return
-        _autosave_pending[] = true
-        
-        # Phase 2: debounced save
-        @async begin
+        # Push into Rocket Subject — debounce_time handles coalescing
+        next!(_autosave_subject, (skip_dictation,))
+        return
+    end
+    
+    # The debounced handler runs the actual save logic
+    subscribe!(_autosave_debounced, lambda(
+        on_next = (args) -> @async begin
+            skip_dictation_val = args[1]
+            _autosave_pending[] = true
             try
-                sleep(0.3)  # 300ms debounce window
-                _autosave_pending[] = false
                 
                 # Capture state NOW after debounce (reads Makie Observables, safe in Julia)
                 snap_id = active_lesion_id[]
@@ -5848,7 +5859,7 @@ function create_metadata_window(
                     "_last_save_at" => Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
                 )
                 snap_tp = try _MEH.current_tp_index[] catch; 0 end
-                snap_skip_dict = skip_dictation
+                snap_skip_dict = skip_dictation_val
                 
                 lid = parse_lesion_id(snap_id)
                 canonical_key = lid !== nothing ? string(lid) : snap_id
@@ -5888,7 +5899,7 @@ function create_metadata_window(
                 @warn "Autosave error" e
             end
         end
-    end
+    ))
     _global_trigger_autosave[] = trigger_autosave
     function apply_global_state(gst::AbstractDict)
         _is_applying_state[] = true
