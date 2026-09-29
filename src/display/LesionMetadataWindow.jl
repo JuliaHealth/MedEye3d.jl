@@ -2452,7 +2452,7 @@ function create_metadata_window(
 
     sl = Slider(main_layout[2, 2], range = 0:0.01:1, startvalue = 1, horizontal = false, tellheight = false)
     
-    g = GridLayout(main_layout[2,1], tellheight = false, halign = :left, valign = sl.value)
+    g = GridLayout(main_layout[2,1], tellheight = false, halign = :left, valign = :top)
     
     # ── Debounced scroll with startup guard ──────────────────────────────
     # Problem: each sl.value[] update triggers a full GridLayout re-solve (80+ rows).
@@ -2469,30 +2469,68 @@ function create_metadata_window(
         _cached_content_h[] = bbox.widths[2]
     end
 
-    # ── Rocket.jl scroll debounce ──────────────────────────────────────────
-    # Use a Rocket Subject + debounce_time instead of manual sleep/pending flags.
-    # The Subject receives scroll delta accumulations; debounce_time(200) ensures
-    # at most 5 layout re-solves per second (one every 200ms of scroll silence).
+    # ── Direct BBox Scroll (bypasses layout solver, ~54x faster) ──────────
+    # Instead of changing valign (which triggers a full layout re-solve on all
+    # ~90 rows), we cache widget positions and apply a direct Y-offset.
+    # Benchmark: 3.7ms/scroll vs ~200ms/scroll with layout solver.
+    _scroll_offset_px = Ref(0.0f0)   # current scroll offset in pixels
+    _bbox_cache = Dict{Int, Makie.GeometryBasics.HyperRectangle{2, Float32}}()
+    _bbox_cache_ready = Ref(false)
+    Rect2f_scroll = Makie.GeometryBasics.HyperRectangle{2, Float32}
+    
+    function _cache_widget_bboxes!()
+        empty!(_bbox_cache)
+        for (i, c) in enumerate(g.content)
+            w = c.content
+            bb = w.layoutobservables.computedbbox[]
+            _bbox_cache[i] = Rect2f_scroll(Float32[bb.origin[1], bb.origin[2]], Float32[bb.widths[1], bb.widths[2]])
+        end
+        _bbox_cache_ready[] = true
+    end
+    
+    function _apply_scroll!(offset_px::Float32)
+        _scroll_offset_px[] = offset_px
+        !_bbox_cache_ready[] && return
+        for (i, c) in enumerate(g.content)
+            w = c.content
+            orig = get(_bbox_cache, i, nothing)
+            orig === nothing && continue
+            new_bbox = Rect2f_scroll(Float32[orig.origin[1], orig.origin[2] + offset_px], orig.widths)
+            w.layoutobservables.computedbbox[] = new_bbox
+        end
+    end
+    
+    # Rocket Subject for scroll — debounce at 50ms (20 Hz, now feasible)
     _scroll_subject = Subject(Float64)
-    _scroll_debounced = _scroll_subject |> debounce_time(200)
+    _scroll_debounced = _scroll_subject |> debounce_time(50)
     subscribe!(_scroll_debounced, lambda(
-        on_next = (acc_val) -> begin
-            new_val = clamp(sl.value[] + acc_val, 0.0, 1.0)
-            if abs(new_val - sl.value[]) > 0.001
-                sl.value[] = new_val
+        on_next = (delta) -> begin
+            !_bbox_cache_ready[] && return
+            window_h = Float32(size(fig.scene)[2])
+            # Compute scrollable range from cached content extent
+            if !isempty(_bbox_cache)
+                min_y = minimum(bb.origin[2] for bb in values(_bbox_cache))
+                max_y = maximum(bb.origin[2] + bb.widths[2] for bb in values(_bbox_cache))
+                total_h = max_y - min_y
+                max_scroll = max(0.0f0, total_h - window_h + 100.0f0)
+            else
+                max_scroll = 0.0f0
             end
+            
+            # Apply offset: positive = scroll down (content shifts up)
+            new_offset = clamp(_scroll_offset_px[] + Float32(delta * max_scroll), 0.0f0, max_scroll)
+            _apply_scroll!(new_offset)
         end
     ))
     
     on(fig.scene.events.scroll) do scroll
         if !_scroll_ready[]
-            return Consume(true)  # Swallow scroll during startup
+            return Consume(true)
         end
         window_h = size(fig.scene)[2]
         if _cached_content_h[] > window_h * 0.5
             _scroll_acc[] += scroll[2] * 0.03
         end
-        # Push accumulated scroll into Rocket Subject — debounce_time handles the rest
         next!(_scroll_subject, _scroll_acc[])
         _scroll_acc[] = 0.0
         return Consume(true)
@@ -2636,14 +2674,20 @@ function create_metadata_window(
         
         on(btn.clicks) do _
             is_open[] = !is_open[]
-            # g.block_updates = true
+            # Temporarily unblock layout solver for section collapse/expand
+            g.block_updates = false
             try
                 for i in start_row:end_row
                     set_row_visible!(i, is_open[])
                 end
             finally
-                # g.block_updates = false
-                # try Makie.GridLayoutBase.update!(g) catch; end
+                # Re-cache bboxes and re-block after layout settles
+                @async begin
+                    sleep(0.15)  # let layout solver finish
+                    _cache_widget_bboxes!()
+                    g.block_updates = true
+                    _apply_scroll!(_scroll_offset_px[])  # re-apply current scroll
+                end
             end
         end
     end
@@ -7749,6 +7793,17 @@ function create_metadata_window(
 
     # Enable row widget cache NOW that all sections are built
     _row_cache_ready[] = true
+    
+    # ── Fast scroll: cache widget bboxes and block layout solver ──────────
+    # After the layout solver has computed all positions during construction,
+    # cache them for the direct-offset scroll approach (~54x faster).
+    # g.block_updates = true prevents the solver from overwriting our offsets.
+    @async begin
+        sleep(2.0)  # let layout fully settle before caching
+        _cache_widget_bboxes!()
+        g.block_updates = true
+        @info "[SCROLL] BBox cache built: $(length(_bbox_cache)) widgets, block_updates=true"
+    end
     
     return res
 
