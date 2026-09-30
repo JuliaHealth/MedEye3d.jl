@@ -3433,10 +3433,12 @@ function create_metadata_window(
         is_syncing_selection[] && return
         is_syncing_ct[] = true
         try
-            tb_ct_min.stored_string[] = string(round(min_v, digits=1))
-            tb_ct_min.displayed_string[] = string(round(min_v, digits=1))
-            tb_ct_max.stored_string[] = string(round(max_v, digits=1))
-            tb_ct_max.displayed_string[] = string(round(max_v, digits=1))
+            s_min = string(round(min_v, digits=1))
+            s_max = string(round(max_v, digits=1))
+            _set!(tb_ct_min.stored_string, s_min)
+            _set!(tb_ct_min.displayed_string, s_min)
+            _set!(tb_ct_max.stored_string, s_max)
+            _set!(tb_ct_max.displayed_string, s_max)
             set_close_to!(islider_ct, Float32(min_v), Float32(max_v))
             next!(_windowing_subject, ("CT", Float32(min_v), Float32(max_v)))
         finally
@@ -3501,10 +3503,12 @@ function create_metadata_window(
         is_syncing_selection[] && return
         is_syncing_pet[] = true
         try
-            tb_pet_min.stored_string[] = string(round(min_v, digits=1))
-            tb_pet_min.displayed_string[] = string(round(min_v, digits=1))
-            tb_pet_max.stored_string[] = string(round(max_v, digits=1))
-            tb_pet_max.displayed_string[] = string(round(max_v, digits=1))
+            s_min = string(round(min_v, digits=1))
+            s_max = string(round(max_v, digits=1))
+            _set!(tb_pet_min.stored_string, s_min)
+            _set!(tb_pet_min.displayed_string, s_min)
+            _set!(tb_pet_max.stored_string, s_max)
+            _set!(tb_pet_max.displayed_string, s_max)
             set_close_to!(islider_pet, Float32(min_v), Float32(max_v))
             next!(_windowing_subject, ("PET", Float32(min_v), Float32(max_v)))
         finally
@@ -3569,10 +3573,12 @@ function create_metadata_window(
         is_syncing_selection[] && return
         is_syncing_spect[] = true
         try
-            tb_spect_min.stored_string[] = string(round(min_v, digits=1))
-            tb_spect_min.displayed_string[] = string(round(min_v, digits=1))
-            tb_spect_max.stored_string[] = string(round(max_v, digits=1))
-            tb_spect_max.displayed_string[] = string(round(max_v, digits=1))
+            s_min = string(round(min_v, digits=1))
+            s_max = string(round(max_v, digits=1))
+            _set!(tb_spect_min.stored_string, s_min)
+            _set!(tb_spect_min.displayed_string, s_min)
+            _set!(tb_spect_max.stored_string, s_max)
+            _set!(tb_spect_max.displayed_string, s_max)
             set_close_to!(islider_spect, Float32(min_v), Float32(max_v))
             next!(_windowing_subject, ("SPECT", Float32(min_v), Float32(max_v)))
         finally
@@ -3634,10 +3640,12 @@ function create_metadata_window(
         is_syncing_mri[] = true
         try
             active_mri_submod[] = mod
-            tb_mri_min.stored_string[] = string(round(min_v, digits=1))
-            tb_mri_min.displayed_string[] = string(round(min_v, digits=1))
-            tb_mri_max.stored_string[] = string(round(max_v, digits=1))
-            tb_mri_max.displayed_string[] = string(round(max_v, digits=1))
+            s_min = string(round(min_v, digits=1))
+            s_max = string(round(max_v, digits=1))
+            _set!(tb_mri_min.stored_string, s_min)
+            _set!(tb_mri_min.displayed_string, s_min)
+            _set!(tb_mri_max.stored_string, s_max)
+            _set!(tb_mri_max.displayed_string, s_max)
             set_close_to!(islider_mri, Float32(min_v), Float32(max_v))
             next!(_windowing_subject, (mod, Float32(min_v), Float32(max_v)))
         finally
@@ -6801,7 +6809,8 @@ function create_metadata_window(
         _t_suv = round((time_ns()-_t_apply_start)/1e6, digits=1)
         
         # ── Restore No CT Correlate toggle ───────────────────────────────
-        no_ct_val = get(data, "NoCTCorrelate", "false") == "true"
+        _nct = get(data, "NoCTCorrelate", false)
+        no_ct_val = _nct === true || _nct == "true" || _nct == "1" || _nct == 1
         _set!(no_ct_toggle.active, no_ct_val)
         
         # Restore windowing if present
