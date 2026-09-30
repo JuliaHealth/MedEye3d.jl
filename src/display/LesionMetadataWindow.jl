@@ -2525,7 +2525,7 @@ function create_metadata_window(
             return Consume(true)
         end
         # Push each scroll delta directly — debounce_time(16) handles coalescing
-        delta = scroll[2] * 0.03
+        delta = -scroll[2] * 0.03
         if abs(delta) > 0.0001
             next!(_scroll_subject, delta)
         end
