@@ -1,0 +1,68 @@
+{
+    "helper_Thoracic_Station_3A_Prevascular_Base": {
+        "is_helper": true,
+        "category": "Helper",
+        "rule": "VolumetricBoundary2D",
+        "keep_all_components": true,
+        "boundaries": {
+            "anterior": "sternum",
+            "lateral": [
+                "lung_left",
+                "lung_right",
+                "thorax_wall"
+            ],
+            "posterior": [
+                "heart",
+                "aorta_ascending",
+                "superior_vena_cava",
+                "common_carotid_artery_left",
+                "common_carotid_artery_right",
+                "brachiocephalic_vein_left",
+                "brachiocephalic_vein_right"
+            ]
+        },
+        "constraints": [
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": [
+                    "common_carotid_artery_left",
+                    "common_carotid_artery_right",
+                    "superior_vena_cava",
+                    "aorta_ascending",
+                    "heart",
+                    "brachiocephalic_vein_left",
+                    "brachiocephalic_vein_right"
+                ],
+                "boundary_part": "center",
+                "slice_wise": true,
+                "parallel_to": "sternum",
+                "comment": "Bounded posteriorly by anterior edge of major vessels/heart, parallel to sternum"
+            }
+        ],
+        "exclude": [
+            "sternum",
+            "manubrium",
+            "clavicle_left",
+            "clavicle_right",
+            "heart",
+            "trachea",
+            "lung_left",
+            "lung_right",
+            "thorax_wall",
+            "superior_vena_cava",
+            "aorta_ascending",
+            "aorta_ascending",
+            "aortic_arch_computed",
+            "common_carotid_artery_left",
+            "common_carotid_artery_right",
+            "brachiocephalic_vein_left",
+            "brachiocephalic_vein_right",
+            "thorax_wall",
+            "helper_subcutaneous_anterior_chest",
+            "helper_sternum_costal_cartilages_bridge"
+        ],
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "posterior_offset_mm": 100.0
+    }
+}

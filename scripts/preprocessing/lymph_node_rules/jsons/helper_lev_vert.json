@@ -1,0 +1,17 @@
+{
+    "lev_vert": {
+        "rule": "VolumetricBoundary2D",
+        "is_bilateral": false,
+        "boundaries": {
+            "structures": [
+                "levator_scapulae",
+                "fused_spine"
+            ]
+        },
+        "ancillary_landmarks": [
+            "levator_scapulae",
+            "fused_spine"
+        ],
+        "is_helper": true
+    }
+}

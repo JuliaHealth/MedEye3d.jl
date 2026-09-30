@@ -1,0 +1,23 @@
+{
+    "helper_subcutaneous_anterior_chest": {
+        "rule": "VolumetricBoundary2D",
+        "is_bilateral": false,
+        "boundaries": {
+            "anterior": [
+                "body"
+            ],
+            "posterior": [
+                "thorax_wall"
+            ]
+        },
+        "ignore_fat": true,
+        "ignore_global_exclusion": true,
+        "keep_all_components": true,
+        "comments": "Helper for anterior subcutaneous tissue, bounded by body surface and thorax_wall.",
+        "ancillary_landmarks": [
+            "body",
+            "thorax_wall"
+        ],
+        "is_helper": true
+    }
+}

@@ -1,0 +1,38 @@
+{
+    "helper_hilar_exclusions_base": {
+        "rule": "Combine",
+        "method": "union",
+        "components": [
+            "heart",
+            "aorta",
+            "pulmonary_artery",
+            "pulmonary_vein",
+            "trachea",
+            "esophagus",
+            "brachiocephalic_vein_left",
+            "brachiocephalic_vein_right",
+            "inferior_vena_cava",
+            "superior_vena_cava",
+            "atrial_appendage_left",
+            "heart_ventricle_left"
+        ],
+        "is_helper": true,
+        "category": "new_helpers"
+    },
+    "helper_hilar_exclusions_safe": {
+        "rule": "Combine",
+        "method": "union",
+        "components": [
+            "helper_hilar_exclusions_base"
+        ],
+        "exclude": [
+            "helper_hilar_lateral_both"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_hilar_exclusions_base",
+            "helper_hilar_lateral_both"
+        ]
+    }
+}

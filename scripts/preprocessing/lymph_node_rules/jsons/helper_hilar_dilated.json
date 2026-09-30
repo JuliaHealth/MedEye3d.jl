@@ -1,0 +1,12 @@
+{
+    "helper_hilar_dilated": {
+        "rule": "DilatedMask",
+        "input_landmarks": [
+            "Thoracic_Station_Hilar_Interlobar"
+        ],
+        "dilation_mm": 15.0,
+        "slice_wise": false,
+        "comments": "Hilar lymph node areas dilated by 1.5 cm",
+        "is_helper": true
+    }
+}

@@ -1,0 +1,8 @@
+{
+    "tissue_fat": {
+        "rule": "Base",
+        "overlap_precedence": [
+            "visceral_fat"
+        ]
+    }
+}

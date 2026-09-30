@@ -1,0 +1,27 @@
+{
+    "lev_vert": {
+        "rule": "VolumetricBoundary2D",
+        "is_bilateral": true,
+        "boundaries": {
+            "structures": [
+                "levator_scapulae",
+                "fused_spine"
+            ]
+        },
+        "roi": {
+            "landmark": [
+                "levator_scapulae",
+                "fused_spine"
+            ],
+            "padding_mm": [
+                10,
+                10,
+                10
+            ]
+        },
+        "keep_all_components": true,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "comments": "Convex hull of levator scapulae and vertebral column. Used for exclusion from neck nodes."
+    }
+}

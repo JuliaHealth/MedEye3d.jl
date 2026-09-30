@@ -1,0 +1,8 @@
+{
+    "helper_subcarinial_pulmonary_artery_hull": {
+        "rule": "ConvexHull2D",
+        "targets": ["helper_Thoracic_Station_7_Subcarinial_base_a", "pulmonary_artery"],
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

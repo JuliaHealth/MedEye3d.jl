@@ -1,0 +1,11 @@
+{
+    "helper_pyloric_derived": {
+        "rule": "PyloricSplitHelper",
+        "custom_rule": "PyloricSplitHelper",
+        "input": "stomach",
+        "depends_on": ["stomach"],
+        "is_helper": true,
+        "category": "abdominal_organs",
+        "comments": "Pyloric area: rightward connected component of stomach where it splits into 2 CCs. With erosion fallback."
+    }
+}

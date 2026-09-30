@@ -1,0 +1,19 @@
+{
+    "splenic_vein": {
+        "rule": "BitwiseAnd",
+        "mask_name": "portal_vein_and_splenic_vein",
+        "is_bilateral": false,
+        "constraints": [
+            {
+                "constraint_type": "LeftOf",
+                "landmark": "aorta",
+                "boundary_part": "center",
+                "slice_wise": true
+            }
+        ],
+        "exclude": [],
+        "is_helper": false,
+        "category": "Vessel",
+        "comments": "Splenic vein: left side of aorta (toward spleen)"
+    }
+}

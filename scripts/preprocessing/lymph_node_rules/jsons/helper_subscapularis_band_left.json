@@ -1,0 +1,8 @@
+{
+    "helper_subscapularis_band_left": {
+        "rule": "SubscapularisBand",
+        "side": "Left",
+        "shift_mm": 60.0,
+        "is_helper": true
+    }
+}

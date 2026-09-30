@@ -1,0 +1,172 @@
+{
+    "Neck_Level_VI_Central_Compartment": {
+        "rule": "DilatedMask",
+        "is_bilateral": false,
+        "input_landmarks": [
+            "trachea"
+        ],
+        "dilation_mm": 20.0,
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "hyoid",
+                "boundary_part": "min",
+                "comment": "Superior Z-axis limit: lowest voxel of hyoid"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "sternum",
+                "boundary_part": "max",
+                "comment": "Inferior Z-axis limit: highest voxel of sternum/manubrium"
+            },
+            {
+                "constraint_type": "RightOf",
+                "landmark": "common_carotid_artery_left",
+                "side": "left",
+                "boundary_part": "medial",
+                "slice_wise": true,
+                "comment": "Lateral limit: Right of Left Carotid medial border"
+            },
+            {
+                "constraint_type": "LeftOf",
+                "landmark": "common_carotid_artery_right",
+                "side": "right",
+                "boundary_part": "medial",
+                "slice_wise": true,
+                "comment": "Lateral limit: Left of Right Carotid medial border"
+            },
+            {
+                "constraint_type": "RightOf",
+                "landmark": "sternocleidomastoid_left",
+                "side": "left",
+                "boundary_part": "medial",
+                "slice_wise": true,
+                "comment": "Lateral limit: Right of Left SCM medial border"
+            },
+            {
+                "constraint_type": "LeftOf",
+                "landmark": "sternocleidomastoid_right",
+                "side": "right",
+                "boundary_part": "medial",
+                "slice_wise": true,
+                "comment": "Lateral limit: Left of Right SCM medial border"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "trachea",
+                "boundary_part": "min",
+                "slice_wise": true,
+                "comment": "Posterior limit: always anterior to most anterior voxel of trachea (Strap Muscle Heuristic)"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "thyroid_gland",
+                "boundary_part": "min",
+                "slice_wise": true,
+                "comment": "Posterior limit: always anterior to thyroid gland"
+            }
+        ],
+        "exclude": [
+            "thyroid_gland",
+            "trachea",
+            "sternocleidomastoid",
+            "platysma",
+            "common_carotid_artery",
+            "internal_jugular_vein",
+            "fused_spine",
+            "esophagus"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 5
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "thyroid_gland",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "trachea",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "sternocleidomastoid",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "platysma",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "internal_jugular_vein",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "common_carotid_artery",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "esophagus",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "thyroid_gland",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "trachea",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "sternum",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "fused_spine",
+                "direction": "anterior"
+            }
+        ],
+        "keep_all_components": true,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "comments": "Neck Level VI Central Compartment: Bounded by hyoid, manubrium, SCMs, carotids, and anteriorly projected from trachea.",
+        "ancillary_landmarks": [
+            "common_carotid_artery",
+            "esophagus",
+            "fused_spine",
+            "hyoid",
+            "platysma",
+            "sternocleidomastoid",
+            "sternum",
+            "manubrium",
+            "thyroid_gland",
+            "trachea",
+            "internal_jugular_vein",
+            "body_trunc"
+        ],
+        "roi": {
+            "landmark": "trachea",
+            "padding_mm": [
+                50,
+                50,
+                50
+            ]
+        }
+    }
+}

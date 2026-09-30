@@ -1,0 +1,25 @@
+{
+    "Inguinal_Ligament": {
+        "rule": "GeometricPrimitive",
+        "primitive": "Cylinder",
+        "is_bilateral": true,
+        "p1": {
+            "name": "Medial Anterior Hip",
+            "method": "extreme_point",
+            "landmark": "hip",
+            "split": "medial",
+            "direction": "anterior"
+        },
+        "p2": {
+            "name": "Lateral Anterior Hip",
+            "method": "extreme_point",
+            "landmark": "hip",
+            "split": "lateral",
+            "direction": "anterior"
+        },
+        "radius_mm": 20.0,
+        "comments": "Inguinal Ligament proxy. Connects anterior-most lateral hip (ASIS) to anterior-most medial hip (Pubic Tubercle). 2cm radius as requested.",
+        "ignore_global_exclusion": true,
+        "ignore_fat": true
+    }
+}

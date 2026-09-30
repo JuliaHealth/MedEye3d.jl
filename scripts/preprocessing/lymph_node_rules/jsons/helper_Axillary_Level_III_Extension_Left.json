@@ -1,0 +1,10 @@
+{
+    "helper_Axillary_Level_III_Extension_Left": {
+        "rule": "ConvexHullBridge",
+        "is_helper": true,
+        "bridge_landmarks": [
+            "helper_ax_iii_base_left",
+            "clavicula_left"
+        ]
+    }
+}

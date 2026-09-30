@@ -1,0 +1,19 @@
+{
+    "portal_vein": {
+        "rule": "BitwiseAnd",
+        "mask_name": "portal_vein_and_splenic_vein",
+        "is_bilateral": false,
+        "constraints": [
+            {
+                "constraint_type": "RightOf",
+                "landmark": "aorta",
+                "boundary_part": "center",
+                "slice_wise": true
+            }
+        ],
+        "exclude": [],
+        "is_helper": false,
+        "category": "Vessel",
+        "comments": "Portal vein: right side of aorta (toward liver)"
+    }
+}

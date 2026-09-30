@@ -1,0 +1,9 @@
+{
+    "helper_rtog_I_hull_right": {
+        "rule": "ConvexHullBridge",
+        "landmark_1": "scapula_right",
+        "landmark_2": "subscapularis",
+        "side": "right",
+        "is_helper": true
+    }
+}

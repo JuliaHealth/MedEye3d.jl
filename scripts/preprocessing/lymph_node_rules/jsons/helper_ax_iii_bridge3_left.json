@@ -1,0 +1,8 @@
+{
+    "helper_ax_iii_bridge3_left": {
+        "rule": "ConvexHullBridge",
+        "landmark_1": "clavicula_left",
+        "landmark_2": "pectoralis_minor",
+        "is_helper": true
+    }
+}

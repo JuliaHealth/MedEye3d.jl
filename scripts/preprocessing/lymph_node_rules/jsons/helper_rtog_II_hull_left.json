@@ -1,0 +1,9 @@
+{
+    "helper_rtog_II_hull_left": {
+        "rule": "ConvexHullBridge",
+        "landmark_1": "pectoralis_minor",
+        "landmark_2": "helper_ribs_sternum",
+        "side": "left",
+        "is_helper": true
+    }
+}

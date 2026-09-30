@@ -1,0 +1,90 @@
+{
+    "Thoracic_Mammary": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "chest_wall",
+        "margins_mm": {
+            "anterior": 30,
+            "posterior": 0,
+            "left": 100,
+            "right": 100
+        },
+        "constraints": [
+            {
+                "constraint_type": "AnteriorTo",
+                "landmarks": [
+                    "sternum"
+                ],
+                "boundary_part": "max",
+                "slice_wise": true,
+                "comments": "Must be anterior to posterior edge (max Y) of sternum on each slice"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmarks": [
+                    "lungs"
+                ],
+                "boundary_part": "min",
+                "slice_wise": true,
+                "comments": "Must be anterior to anterior edge (min Y) of lungs on each slice"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmarks": [
+                    "heart"
+                ],
+                "boundary_part": "min",
+                "slice_wise": true,
+                "comments": "Must be anterior to anterior edge (min Y) of heart on each slice"
+            }
+        ],
+        "z_plane_restriction": {
+            "superior": "sternum",
+            "superior_part": "max",
+            "superior_offset_mm": 0,
+            "inferior": "sternum",
+            "inferior_part": "min"
+        },
+        "comments": "Internal Mammary. Strictly subcutaneous (anterior to chest wall). Excludes heart, vessels, lungs, and gives precedence to Prepericardial.",
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "after": [
+            "Thoracic_Prepericardial",
+            "Thoracic_Station_3A_Prevascular",
+            "Thoracic_Station_6_Paraaortic",
+            "Thoracic_Station_3P_Retrotracheal"
+        ],
+        "exclude": [
+            "costal_cartilages",
+            "pectoralis_minor",
+            "thoracic_cavity",
+            "aorta",
+            "Thoracic_Station_6_Paraaortic",
+            "Thoracic_Station_3A_Prevascular",
+            "superior_vena_cava",
+            "pulmonary_artery",
+            "Axillary_Level_III",
+            "esophagus",
+            "Axillary_Rotter",
+            "Axillary_Level_I",
+            "heart",
+            "lung_vessels",
+            "Thoracic_Prepericardial",
+            "pectoralis_major",
+            "inferior_vena_cava",
+            "skeletal_muscle",
+            "pulmonary_vein",
+            "Axillary_Level_II",
+            "trachea",
+            "chest_wall",
+            "lungs"
+        ],
+        "overlap_precedence": [],
+        "keep_all_components": false,
+        "ancillary_landmarks": [
+            "chest_wall"
+        ],
+        "depends_on": [
+            "chest_wall"
+        ]
+    }
+}

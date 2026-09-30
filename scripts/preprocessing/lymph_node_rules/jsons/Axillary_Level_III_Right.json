@@ -1,0 +1,48 @@
+{
+    "Axillary_Level_III_Right": {
+        "rule": "ConvexHull2D",
+        "slice_wise": true,
+        "targets": [
+            "Axillary_Level_III_Right_Base",
+            "helper_ap_right"
+        ],
+        "components": [
+            "Axillary_Level_III_Right_Base",
+            "helper_ap_right"
+        ],
+        "side": "right",
+        "level": "iii",
+        "color": [
+            100,
+            100,
+            255
+        ],
+        "group": "Thoracic",
+        "category": "Lymph_Node",
+        "constraints": [
+            {
+                "constraint_type": "LateralTo",
+                "landmark": "sternum",
+                "slice_wise": true,
+                "comment": "Medial constraint: lateral to the most lateral voxel of the sternum per slice"
+            }
+        ],
+        "exclude": [
+            "clavicula_left",
+            "clavicula_right",
+            "clavicula",
+            "pectoralis_major_right",
+            "pectoralis_minor_right",
+            "ribs_combined"
+        ],
+        "dependencies": [
+            "Axillary_Level_III_Right_Base",
+            "helper_ap_right"
+        ],
+        "overlap_precedence": [
+            "Axillary_Rotter_Right",
+            "Axillary_Rotter"
+        ],
+        "post_overlap_lcc": true
+    }
+}

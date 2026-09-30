@@ -1,0 +1,161 @@
+{
+    "Thoracic_Station_5_Subaortic_Base": {
+        "rule": "AnisotropicMargin",
+        "is_bilateral": false,
+        "base_landmark": "aorta",
+        "margins_mm": {
+            "left": 40,
+            "right": 0,
+            "anterior": 15,
+            "posterior": 15,
+            "superior": 0,
+            "inferior": 0
+        },
+        "z_plane_restriction": {
+            "superior": "aortic_arch_bottom",
+            "superior_part": "min",
+            "superior_offset_mm": 0.0,
+            "inferior": "trachea",
+            "inferior_part": "min",
+            "inferior_offset_mm": 0.0
+        },
+        "side": "left",
+        "constraints": [
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "aorta_ascending",
+                "boundary_part": "min",
+                "comment": "Posterior to Ascending Aorta (Anterolateral part of Arch Ring)"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "aorta_descending",
+                "boundary_part": "max",
+                "comment": "Anterior to Descending Aorta (Medial part of Arch Ring)"
+            },
+            {
+                "constraint_type": "LineLimitBetweenLandmarks",
+                "landmark_1": "aorta_ascending",
+                "landmark_2": "aorta_descending",
+                "label_value": 2,
+                "comment": "Left of Midline Plane (Anterolateral)."
+            },
+            {
+                "constraint_type": "MedialTo",
+                "landmark": "lung_upper_lobe_left",
+                "boundary_part": "center"
+            },
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "aorta",
+                "slice_wise": true,
+                "boundary_part": "min",
+                "comment": "Never extend anterior to the anterior wall of the Aorta."
+            }
+        ],
+        "exclude": [
+            "aorta",
+            "fused_spine",
+            "lung",
+            "lung_upper_lobe_left",
+            "lung_lower_lobe_left",
+            "lung_upper_lobe_right",
+            "lung_middle_lobe_right",
+            "lung_lower_lobe_right",
+            "pulmonary_artery",
+            {
+                "landmark": "trachea",
+                "margin_mm": 10
+            },
+            "helper_aorta_medial_line",
+            "helper_sternum_costal_cartilages_bridge"
+        ],
+        "comments": "Station 5. AP Window. Left of Midline, Medial to Lung, Between Asc/Desc Aorta. Excludes 1cm around Trachea. Explicitly excludes all lung lobes and spine.",
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "keep_all_components": false,
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "aorta_ascending",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "aorta_descending",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "aortic_arch_computed",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "pulmonary_artery",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "lung_left",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "trachea",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "esophagus",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "pulmonary_artery",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "aorta_descending",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "trachea",
+                "direction": "lateral"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Z_inf",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "aortic_arch_computed_min_Z",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "left_pulmonary_artery_max_Z",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "aorta_ascending",
+                "direction": "posterior"
+            },
+            {
+                "type": "VolumeMin",
+                "value": 1000
+            }
+        ],
+        "is_helper": true,
+        "group": "Thoracic",
+        "overlap_precedence": [
+            "Thoracic_Station_6_Paraaortic",
+            "Thoracic_Station_Prepericardial_Left",
+            "Thoracic_Station_Prepericardial_Right"
+        ]
+    }
+}

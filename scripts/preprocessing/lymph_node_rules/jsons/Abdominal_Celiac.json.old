@@ -1,0 +1,21 @@
+{
+    "Abdominal_Celiac": {
+        "rule": "DilatedMask",
+        "is_bilateral": false,
+        "input_landmarks": [
+            "celiac_trunk"
+        ],
+        "dilation_mm": 20.0,
+        "comments": "2 cm around celiac trunk.",
+        "exclude": [
+            "celiac_trunk",
+            "pancreas",
+            "stomach",
+            "liver",
+            "aorta"
+        ],
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "keep_all_components": false
+    }
+}

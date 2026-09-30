@@ -1,0 +1,67 @@
+{
+    "Thoracic_Station_2_UpperParatracheal_Right": {
+        "rule": "GeometricConstraint",
+        "side": "right",
+        "color": [
+            150,
+            200,
+            150
+        ],
+        "group": "Thoracic",
+        "category": "Lymph_Node",
+        "dependencies": [
+            "helper_Thoracic_Station_2_UpperParatracheal_Base",
+            "trachea"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "RightOf",
+                "landmark": "trachea",
+                "boundary_part": "max",
+                "slice_wise": true
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "vertebrae",
+                "boundary_part": "min",
+                "slice_wise": true,
+                "comment": "Anterior to the most anterior voxel of vertebral column on a per slice basis"
+            }
+        ],
+        "base_landmark": "helper_Thoracic_Station_2_UpperParatracheal_Base",
+        "exclude": [
+            "lung_left",
+            "lung_right",
+            "heart",
+            "aorta",
+            "aorta_ascending",
+            "aorta_descending",
+            "aortic_arch_computed",
+            "pulmonary_artery",
+            "superior_vena_cava",
+            "inferior_vena_cava",
+            "brachiocephalic_vein_left",
+            "brachiocephalic_vein_right",
+            "esophagus",
+            "sternum",
+            "helper_sternum_costal_cartilages_bridge",
+            "trachea",
+            "helper_costal_sternum_hull",
+            "fused_spine",
+            "clavicula",
+            "clavicula_left",
+            "clavicula_right",
+            "lung_trachea_bronchia"
+        ],
+        "overlap_precedence": [
+            "Thoracic_Station_3A_Prevascular_Left",
+            "Thoracic_Station_3A_Prevascular_Right",
+            "Thoracic_Station_5_Subaortic",
+            "Thoracic_Station_5_Subaortic_Left",
+            "Abdominal_Station_16a1_Aortic_Hiatus",
+            "Abdominal_Station_16a2_Upper_Middle_Paraaortic"
+        ],
+        "keep_all_components": false,
+        "post_overlap_lcc": true
+    }
+}

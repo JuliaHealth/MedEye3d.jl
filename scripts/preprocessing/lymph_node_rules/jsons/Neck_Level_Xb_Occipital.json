@@ -1,0 +1,89 @@
+{
+    "Neck_Level_Xb_Occipital": {
+        "rule": "AnisotropicMargin",
+        "is_bilateral": true,
+        "input": "sternocleidomastoid",
+        "margins_mm": {
+            "superior": 40.0,
+            "posterior": 30.0
+        },
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "sternocleidomastoid",
+                "boundary_part": "max",
+                "comment": "Inferior limit: Near SCM apex"
+            },
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "sternocleidomastoid",
+                "boundary_part": "max",
+                "slice_wise": true,
+                "comment": "Anterior limit: Posterior to SCM"
+            }
+        ],
+        "exclude": [
+            "skull",
+            "skull",
+            "skull_filled",
+            "sternocleidomastoid",
+            "parotid_gland",
+            "tissue_muscle",
+            "fused_spine",
+            "brain",
+            "lev_vert"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 5
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "skull",
+                "expected": 0
+            },
+            {
+                "type": "TargetVolumeMin",
+                "target": "mandible",
+                "value": 100,
+                "message": "ERROR: Mandible missing (upper neck missing), rejecting Occipital."
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "tissue_muscle",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "parotid_gland",
+                "expected": 0
+            }
+        ],
+        "keep_all_components": true,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "comments": "Neck Level Xb (Occipital): Expanded superiorly/posteriorly from SCM apex, excluded from deep muscles and skull.",
+        "ancillary_landmarks": [
+            "fused_spine",
+            "parotid_gland",
+            "skull",
+            "skull",
+            "skull_filled",
+            "sternocleidomastoid",
+            "tissue_muscle",
+            "lev_vert"
+        ],
+        "roi": {
+            "landmark": "sternocleidomastoid",
+            "padding_mm": [
+                50,
+                50,
+                50
+            ]
+        },
+        "depends_on": [
+            "lev_vert"
+        ]
+    }
+}

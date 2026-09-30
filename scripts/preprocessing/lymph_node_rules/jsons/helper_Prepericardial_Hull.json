@@ -1,0 +1,17 @@
+{
+    "helper_Prepericardial_Hull": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "lung_left",
+            "lung_right",
+            "sternum"
+        ],
+        "dependencies": [
+            "lung_left",
+            "lung_right",
+            "sternum"
+        ],
+        "is_bilateral": false,
+        "is_helper": true
+    }
+}

@@ -1,0 +1,109 @@
+{
+    "Abdominal_Internal_Iliac_Right": {
+        "rule": "InternalIliacCustom",
+        "side": "Right",
+        "primitive": "Cylinder",
+        "p1": "internal_iliac_p1",
+        "p2": "internal_iliac_p2",
+        "radius_mm": 7.0,
+        "length_mm": 94.5,
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "helper_acetabulum_right",
+                "boundary_part": "min",
+                "comment": "Inferior bound: bottom of acetabulum"
+            }
+        ],
+        "exclude": [
+            "pelvis",
+            "sacrum",
+            "piriformis",
+            "obturator_internus",
+            "urinary_bladder",
+            "rectum",
+            "prostate",
+            "uterus",
+            "Abdominal_External_Iliac",
+            "iliopsoas",
+            "helper_pelvis_gluteal",
+            "iliac_artery_right",
+            "iliac_artery_external_right",
+            "iliac_vena_right",
+            "iliac_vena_external_right"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 5
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "urinary_bladder",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "rectum",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "prostate",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "uterus",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "sacrum",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "pelvis",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "sacrum",
+                "direction": "anterior"
+            }
+        ],
+        "keep_all_components": true,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "comments": "Abdominal Internal Iliac Right: Implemented geometrically with dynamic midline split.",
+        "ancillary_landmarks": [
+            "iliac_artery_external",
+            "obturator_internus",
+            "pelvis",
+            "piriformis",
+            "prostate",
+            "rectum",
+            "sacrum",
+            "urinary_bladder",
+            "uterus",
+            "iliopsoas",
+            "helper_pelvis_gluteal"
+        ],
+        "depends_on": [
+            "helper_pelvis_gluteal",
+            "Abdominal_External_Iliac_Right",
+            "helper_acetabulum_right"
+        ],
+        "overlap_precedence": [
+            "Abdominal_External_Iliac_Right",
+            "Abdominal_Obturator_Left",
+            "Abdominal_Obturator_Right",
+            "Abdominal_Obturator"
+        ],
+        "z_plane_restriction": {
+            "superior": "Abdominal_External_Iliac_Right",
+            "superior_part": "absolute_max"
+        }
+    }
+}

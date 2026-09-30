@@ -1,0 +1,10 @@
+{
+    "helper_neck_vi_exclusion_hull": {
+        "rule": "ConvexHullBridge",
+        "is_helper": true,
+        "bridge_landmarks": [
+            "helper_neck_vi_union",
+            "helper_neck_vi_union"
+        ]
+    }
+}

@@ -1,0 +1,183 @@
+{
+    "Abdominal_Presacral": {
+        "rule": "Mask",
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "autochthon_left",
+                "boundary_part": "absolute_min",
+                "comment": "Inferior limit: absolute lowest voxel of autochthon_left"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "vertebrae_S1",
+                "boundary_part": "max",
+                "comment": "Superior limit: sacral promontory"
+            },
+            {
+                "constraint_type": "RightOf",
+                "landmarks": [
+                    "iliac_artery_common_left",
+                    "iliac_vena_common_left",
+                    "iliac_artery_external_left",
+                    "iliac_vena_external_left",
+                    "iliac_artery_internal_left",
+                    "iliac_vena_internal_left"
+                ],
+                "slice_wise": true,
+                "boundary_part": "min"
+            },
+            {
+                "constraint_type": "LeftOf",
+                "landmarks": [
+                    "iliac_artery_common_right",
+                    "iliac_vena_common_right",
+                    "iliac_artery_external_right",
+                    "iliac_vena_external_right",
+                    "iliac_artery_internal_right",
+                    "iliac_vena_internal_right"
+                ],
+                "slice_wise": true,
+                "boundary_part": "max"
+            }
+        ],
+        "exclude": [
+            "helper_sacrum_fused",
+            "vertebrae_L5",
+            {
+                "landmark": "rectum",
+                "margin_mm": 3.0
+            },
+            "urinary_bladder",
+            "prostate",
+            "iliac_artery_internal_left",
+            "iliac_artery_internal_right",
+            "iliac_vena_internal_left",
+            "iliac_vena_internal_right",
+            "iliac_artery_common_left",
+            "iliac_artery_common_right",
+            "iliac_vena_common_left",
+            "iliac_vena_common_right",
+            "iliac_artery_external_left",
+            "iliac_artery_external_right",
+            "iliac_vena_external_left",
+            "iliac_vena_external_right",
+            "piriformis_left",
+            "piriformis_right",
+            "obturator_internus_left",
+            "obturator_internus_right",
+            "iliopsoas",
+            "helper_pelvis_gluteal",
+            "Abdominal_Common_Iliac_Left",
+            "Abdominal_Common_Iliac_Right",
+            "Abdominal_External_Iliac_Left",
+            "Abdominal_External_Iliac_Right",
+            "Abdominal_Internal_Iliac_Left",
+            "Abdominal_Internal_Iliac_Right",
+            "helper_Abdominal_Presacral_MovedLine",
+            "stomach",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "liver",
+            "spleen",
+            "pancreas",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 5
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "rectum",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "helper_sacrum_fused",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "vertebrae_L5",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": [
+                    "urinary_bladder",
+                    "prostate"
+                ],
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "helper_sacrum_fused",
+                "direction": "anterior"
+            }
+        ],
+        "keep_all_components": true,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "comments": "Abdominal Presacral: 10mm anterior strip tracking the sacral concavity, bounded laterally by common and external iliacs, ending inferiorly at the bottom of the autochthonous muscle.",
+        "ancillary_landmarks": [
+            "helper_sacrum_fused",
+            "rectum",
+            "vertebrae_L5",
+            "urinary_bladder",
+            "prostate",
+            "piriformis_left",
+            "piriformis_right",
+            "obturator_internus_left",
+            "obturator_internus_right",
+            "iliac_artery_internal_left",
+            "iliac_artery_internal_right",
+            "iliac_vena_internal_left",
+            "iliac_vena_internal_right",
+            "iliac_artery_common_left",
+            "iliac_artery_common_right",
+            "iliac_vena_common_left",
+            "iliac_vena_common_right",
+            "iliac_artery_external_left",
+            "iliac_artery_external_right",
+            "iliac_vena_external_left",
+            "iliac_vena_external_right",
+            "autochthon_left",
+            "autochthon_right",
+            "iliopsoas",
+            "helper_pelvis_gluteal",
+            "Abdominal_Common_Iliac_Left",
+            "Abdominal_Common_Iliac_Right",
+            "Abdominal_External_Iliac_Left",
+            "Abdominal_External_Iliac_Right",
+            "Abdominal_Internal_Iliac_Left",
+            "Abdominal_Internal_Iliac_Right",
+            "helper_Abdominal_Presacral_MovedLine"
+        ],
+        "roi": {
+            "landmark": "vertebrae_S1",
+            "padding_mm": [
+                30,
+                30,
+                20
+            ]
+        },
+        "depends_on": [
+            "helper_pelvis_gluteal",
+            "helper_Abdominal_Presacral_Base",
+            "Abdominal_Common_Iliac_Left",
+            "Abdominal_Common_Iliac_Right",
+            "Abdominal_External_Iliac_Left",
+            "Abdominal_External_Iliac_Right",
+            "Abdominal_Internal_Iliac_Left",
+            "Abdominal_Internal_Iliac_Right",
+            "helper_Abdominal_Presacral_MovedLine"
+        ],
+        "base_landmark": "helper_Abdominal_Presacral_Base",
+        "overlap_precedence": []
+    }
+}

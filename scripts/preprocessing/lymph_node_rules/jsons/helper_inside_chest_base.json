@@ -1,0 +1,15 @@
+{
+    "helper_inside_chest_base": {
+        "rule": "Union",
+        "inputs": [
+            "lung",
+            "lung_left",
+            "lung_right",
+            "ribs_combined",
+            "fused_spine",
+            "vertebral_column_fused",
+            "sternum"
+        ],
+        "is_helper": true
+    }
+}

@@ -1,0 +1,8 @@
+{
+    "helper_subaortic_prevascular_bridge": {
+        "rule": "ConvexHullBridge",
+        "landmark_1": "Thoracic_Station_5_Subaortic_Base",
+        "landmark_2": "Thoracic_Station_3A_Prevascular_Left",
+        "is_helper": true
+    }
+}

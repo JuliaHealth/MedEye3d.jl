@@ -1,0 +1,25 @@
+{
+    "Abdominal_Station_7_Left_Gastric": {
+        "rule": "DilatedMask",
+        "input_landmarks": [
+            "celiac_trunk"
+        ],
+        "dilation_mm": 20.0,
+        "is_bilateral": false,
+        "exclude": [
+            "stomach",
+            "pancreas",
+            "liver",
+            "aorta",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "spleen",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right"
+        ],
+        "comments": "Approximation of Left Gastric (Station 7). Expanded towards stomach.",
+        "depends_on": []
+    }
+}

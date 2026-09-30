@@ -1,0 +1,39 @@
+{
+    "helper_lesser_gastric_curvature": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "stomach",
+            "liver"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "z_plane_restriction": {
+            "superior": "stomach",
+            "superior_part": "max",
+            "inferior": "stomach",
+            "inferior_part": "min"
+        },
+        "exclude": [
+            "stomach",
+            "esophagus",
+            "liver",
+            "heart",
+            "aorta",
+            "inferior_vena_cava",
+            "pancreas",
+            "spleen",
+            "fused_spine",
+            "lung",
+            "lung_left",
+            "lung_right",
+            "diaphragm_proxy",
+            "helper_cardia",
+            "Abdominal_Station_1_Right_Paracardial",
+            "Abdominal_Station_2_Left_Paracardial"
+        ],
+        "dependencies": [
+            "stomach",
+            "liver"
+        ]
+    }
+}

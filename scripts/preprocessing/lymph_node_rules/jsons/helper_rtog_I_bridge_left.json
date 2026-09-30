@@ -1,0 +1,10 @@
+{
+    "helper_rtog_I_bridge_left": {
+        "rule": "ConvexHullBridge",
+        "landmark_1": "humerus_left",
+        "landmark_2": "subscapularis_left",
+        "side": "left",
+        "is_bilateral": false,
+        "is_helper": true
+    }
+}

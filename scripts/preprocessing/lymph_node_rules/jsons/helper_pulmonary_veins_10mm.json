@@ -1,0 +1,8 @@
+{
+    "helper_pulmonary_veins_10mm": {
+        "rule": "DilatedMask",
+        "input": "pulmonary_vein",
+        "dilation_mm": 10.0,
+        "comments": "Dilated pulmonary veins by 1cm for Hilar Interlobar"
+    }
+}

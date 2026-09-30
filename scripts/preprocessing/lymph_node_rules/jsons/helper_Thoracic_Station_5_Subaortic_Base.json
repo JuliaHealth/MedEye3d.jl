@@ -1,0 +1,26 @@
+{
+    "helper_Thoracic_Station_5_Subaortic_Base": {
+        "rule": "ConvexHullBridging",
+        "is_bilateral": false,
+        "side": "Left",
+        "input": "body_trunc",
+        "bridge_landmarks": [
+            "aorta_ascending",
+            "aorta_descending"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "aortic_arch_computed",
+                "boundary_part": "min"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "pulmonary_artery",
+                "boundary_part": "max"
+            }
+        ],
+        "comments": "Base area for Thoracic Station 5 (AP window) before lateral extension to the left lung.",
+        "is_helper": true
+    }
+}

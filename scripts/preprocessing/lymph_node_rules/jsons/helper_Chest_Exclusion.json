@@ -1,0 +1,13 @@
+{
+    "helper_Chest_Exclusion": {
+        "rule": "GeometricConstraint",
+        "input": "body",
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "sternum",
+                "boundary_part": "max"
+            }
+        ]
+    }
+}

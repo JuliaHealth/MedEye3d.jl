@@ -1,0 +1,14 @@
+{
+    "helper_Common_Hepatic_Artery_Proxy": {
+        "rule": "GeometricPrimitive",
+        "primitive_type": "cylinder",
+        "p1": "celiac_trunk",
+        "p2": {
+            "landmark": "portal_vein_and_splenic_vein",
+            "direction": "right"
+        },
+        "radius_mm": 8.0,
+        "is_helper": true,
+        "comments": "Proxy for Common Hepatic Artery (Station 8)"
+    }
+}

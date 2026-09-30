@@ -1,0 +1,28 @@
+{
+    "Axillary_Level_II_Left": {
+        "rule": "Mask",
+        "side": "left",
+        "level": "ii",
+        "color": [
+            100,
+            255,
+            100
+        ],
+        "group": "Thoracic",
+        "category": "Lymph_Node",
+        "exclude": [
+            "lung",
+            "clavicula",
+            "scapula",
+            "humerus",
+            "pectoralis_major",
+            "latissimus_dorsi",
+            "serratus_anterior",
+            "subclavian_artery",
+            "subscapularis",
+            "deltoid"
+        ],
+        "keep_all_components": true,
+        "mask_name": "helper_rtog_II_z_left"
+    }
+}

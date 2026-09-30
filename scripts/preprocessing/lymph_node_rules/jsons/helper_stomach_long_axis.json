@@ -1,0 +1,22 @@
+{
+    "helper_stomach_right_of_axis": {
+        "rule": "StomachLongAxisHelper",
+        "custom_rule": "StomachLongAxisHelper",
+        "input": "stomach",
+        "side": "right",
+        "depends_on": ["stomach"],
+        "is_helper": true,
+        "category": "new_helpers",
+        "comments": "Right half-plane of stomach per-slice PCA long axis (medial/lesser curvature side)"
+    },
+    "helper_stomach_left_of_axis": {
+        "rule": "StomachLongAxisHelper",
+        "custom_rule": "StomachLongAxisHelper",
+        "input": "stomach",
+        "side": "left",
+        "depends_on": ["stomach"],
+        "is_helper": true,
+        "category": "new_helpers",
+        "comments": "Left half-plane of stomach per-slice PCA long axis (lateral/greater curvature side)"
+    }
+}

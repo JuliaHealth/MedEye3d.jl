@@ -1,0 +1,12 @@
+{
+    "helper_bronchi_all": {
+        "rule": "GeometricConstraint",
+        "base_landmark": "lung_trachea_bronchia",
+        "constraints": [],
+        "exclude": [
+            "trachea"
+        ],
+        "is_helper": true,
+        "keep_all_components": true
+    }
+}

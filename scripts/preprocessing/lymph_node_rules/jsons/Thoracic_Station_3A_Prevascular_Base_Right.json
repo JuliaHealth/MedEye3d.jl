@@ -1,0 +1,19 @@
+{
+    "Thoracic_Station_3A_Prevascular_Base_Right": {
+        "is_helper": true,
+        "category": "Helper",
+        "rule": "Mask",
+        "input": "helper_Thoracic_Station_3A_Prevascular_Base",
+        "side": "Right",
+        "constraints": [
+            {
+                "constraint_type": "SideLimit",
+                "landmark": "trachea",
+                "boundary_part": "center",
+                "slice_wise": true,
+                "comment": "Separation of left and right using middle of trachea"
+            }
+        ],
+        "keep_all_components": true
+    }
+}

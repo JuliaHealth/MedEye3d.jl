@@ -1,0 +1,19 @@
+{
+    "helper_thoracic_cage_hull": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "lung",
+            "lung_left",
+            "lung_right",
+            "ribs_combined",
+            "sternum",
+            "clavicula_left",
+            "clavicula_right",
+            "clavicula_cleaned",
+            "costal_cartilages"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "comments": "2D Convex Hull of thoracic cage: lungs, ribs, sternum, clavicles, and costal cartilages."
+    }
+}

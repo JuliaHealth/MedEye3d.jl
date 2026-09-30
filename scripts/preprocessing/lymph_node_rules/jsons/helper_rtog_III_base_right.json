@@ -1,0 +1,10 @@
+{
+    "helper_rtog_III_base_right": {
+        "rule": "Union",
+        "inputs": [
+            "helper_rtog_III_hull_clavicula_right",
+            "helper_rtog_III_hull_rib1_right"
+        ],
+        "is_helper": true
+    }
+}

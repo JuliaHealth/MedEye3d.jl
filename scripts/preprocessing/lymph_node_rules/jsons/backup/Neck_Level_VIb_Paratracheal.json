@@ -1,0 +1,93 @@
+{
+    "Neck_Level_VIb_Paratracheal": {
+        "rule": "DilatedMask",
+        "is_bilateral": true,
+        "input_landmarks": ["trachea"],
+        "dilation_mm": 15.0,
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "cricoid_cartilage",
+                "boundary_part": "min",
+                "comment": "Superior limit: below cricoid ring"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "manubrium",
+                "boundary_part": "max",
+                "comment": "Inferior limit: above suprasternal notch (manubrium)"
+            },
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "trachea",
+                "boundary_part": "min",
+                "slice_wise": true,
+                "comment": "Anterior limit: posterior to anterior surface of trachea"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": ["vertebrae_C5", "vertebrae_C6", "vertebrae_C7", "vertebrae_T1"],
+                "boundary_part": "max",
+                "slice_wise": true,
+                "comment": "Posterior limit: anterior to most anterior voxel of cervical spine on given slice"
+            },
+            {
+                "constraint_type": "MedialTo",
+                "landmark": "common_carotid_artery",
+                "boundary_part": "medial",
+                "slice_wise": true,
+                "comment": "Lateral limit: medial to common carotid arteries"
+            }
+        ],
+        "exclude": [
+            "trachea",
+            "esophagus",
+            "thyroid_gland",
+            "common_carotid_artery_left",
+            "common_carotid_artery_right",
+            "sternocleidomastoid_left",
+            "sternocleidomastoid_right",
+            "sternum",
+            "vertebrae_C5",
+            "vertebrae_C6",
+            "vertebrae_C7",
+            "vertebrae_T1"
+        ],
+        "assertions": [
+            { "type": "VolumeMin", "value": 5 },
+            { "type": "VolumeIntersection", "target": "trachea", "expected": 0 },
+            { "type": "VolumeIntersection", "target": "esophagus", "expected": 0 },
+            { "type": "VolumeIntersection", "target": "thyroid_gland", "expected": 0 },
+            { "type": "VolumeIntersection", "target": ["common_carotid_artery_left", "common_carotid_artery_right"], "expected": 0 },
+            { "type": "VolumeIntersection", "target": ["sternocleidomastoid_left", "sternocleidomastoid_right"], "expected": 0 },
+            { "type": "RelativePosition", "target": "cricoid_cartilage", "direction": "inferior" },
+            { "type": "RelativePosition", "target": "manubrium", "direction": "superior" },
+            { "type": "RelativePosition", "target": "common_carotid_artery", "direction": "medial" }
+        ],
+        "keep_all_components": false,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "roi": {
+            "landmark": "trachea",
+            "padding_mm": [50, 50, 50]
+        },
+        "ancillary_landmarks": [
+            "cricoid_cartilage",
+            "manubrium",
+            "trachea",
+            "esophagus",
+            "thyroid_gland",
+            "common_carotid_artery",
+            "common_carotid_artery_left",
+            "common_carotid_artery_right",
+            "sternocleidomastoid_left",
+            "sternocleidomastoid_right",
+            "sternum",
+            "vertebrae_C5",
+            "vertebrae_C6",
+            "vertebrae_C7",
+            "vertebrae_T1"
+        ],
+        "comments": "Neck Level VIb (Paratracheal): Dilation from trachea with strict boundaries for cricoid, manubrium, spine, and carotids."
+    }
+}

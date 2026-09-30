@@ -1,0 +1,15 @@
+{
+    "helper_sacrum_fused": {
+        "rule": "Union",
+        "components": [
+            "sacrum",
+            "fused_spine",
+            "vertebrae_S1"
+        ],
+        "is_helper": true,
+        "keep_all_components": true,
+        "ignore_global_exclusion": true,
+        "category": "new_helpers",
+        "comments": "Helper to create a union of sacrum + fused_spine + S1 for presacral anterior contour extraction."
+    }
+}

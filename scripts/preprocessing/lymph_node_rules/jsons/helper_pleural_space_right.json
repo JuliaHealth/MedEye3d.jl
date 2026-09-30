@@ -1,0 +1,10 @@
+{
+    "helper_pleural_space_right": {
+        "rule": "PleuralSpaceCustom",
+        "lung_landmark": "lung_right",
+        "side": "right",
+        "distance_lateral_mm": 35.0,
+        "distance_medial_mm": 10.0,
+        "is_helper": true
+    }
+}

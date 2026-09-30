@@ -1,0 +1,19 @@
+{
+    "helper_Paraaortic_Aorta": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "aorta",
+        "margins_mm": {
+            "anterior": 10.0,
+            "posterior": 10.0,
+            "left": 15.0,
+            "right": 10.0
+        },
+        "exclude": [
+            "iliopsoas"
+        ],
+        "ancillary_landmarks": [
+            "iliopsoas"
+        ],
+        "is_helper": true
+    }
+}

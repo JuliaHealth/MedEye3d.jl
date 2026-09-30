@@ -1,0 +1,23 @@
+{
+    "helper_pyloric_area": {
+        "rule": "ConvexHull",
+        "targets": ["stomach", "duodenum"],
+        "mode": "2D",
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "duodenum",
+                "boundary_part": "min"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "stomach",
+                "boundary_part": "center",
+                "comment": "Below mid-stomach to focus on the pyloric area"
+            }
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "comments": "Pyloric area: junction between stomach and duodenum. Visible in new_helpers segmentation node."
+    }
+}

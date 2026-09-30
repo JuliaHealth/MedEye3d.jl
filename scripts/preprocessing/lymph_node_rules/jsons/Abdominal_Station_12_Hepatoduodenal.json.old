@@ -1,0 +1,37 @@
+{
+    "Abdominal_Station_12_Hepatoduodenal": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "portal_vein_and_splenic_vein",
+        "margins_mm": {
+            "anterior": 15,
+            "superior": 15,
+            "posterior": 15,
+            "left": 15,
+            "right": 15,
+            "inferior": 15
+        },
+        "is_bilateral": false,
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmarks": [
+                    "pancreas"
+                ]
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmarks": [
+                    "liver"
+                ]
+            }
+        ],
+        "exclude": [
+            "portal_vein_and_splenic_vein",
+            "liver",
+            "pancreas",
+            "duodenum",
+            "stomach"
+        ],
+        "comments": "Hepatoduodenal ligament nodes (Station 12) between liver and pancreas."
+    }
+}

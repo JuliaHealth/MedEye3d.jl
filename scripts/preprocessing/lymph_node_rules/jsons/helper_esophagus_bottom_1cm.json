@@ -1,0 +1,23 @@
+{
+    "helper_esophagus_bottom_1cm": {
+        "rule": "Mask",
+        "input": "esophagus",
+        "is_helper": true,
+        "category": "new_helpers",
+        "z_plane_restriction": {
+            "superior": "esophagus",
+            "superior_part": "min",
+            "superior_offset_mm": 10.0
+        }
+    },
+    "helper_paracardial_dilated": {
+        "rule": "DilatedMask",
+        "base_landmark": "helper_esophagus_bottom_1cm",
+        "dilation_mm": 10.0,
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_esophagus_bottom_1cm"
+        ]
+    }
+}

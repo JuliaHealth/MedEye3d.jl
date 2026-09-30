@@ -1,0 +1,10 @@
+{
+    "helper_chest_cavity": {
+        "rule": "ConvexHullBridge",
+        "landmark_1": "Thoracic_Chest_Wall",
+        "landmark_2": "Thoracic_Chest_Wall",
+        "is_helper": true,
+        "group": "Thoracic",
+        "category": "Helper"
+    }
+}

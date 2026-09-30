@@ -1,0 +1,134 @@
+{
+    "fused_spine": {
+        "rule": "GenericMorphologyDAG",
+        "inputs": [
+            "vertebrae_C1", "vertebrae_C2", "vertebrae_C3", "vertebrae_C4", "vertebrae_C5", "vertebrae_C6", "vertebrae_C7",
+            "vertebrae_T1", "vertebrae_T2", "vertebrae_T3", "vertebrae_T4", "vertebrae_T5", "vertebrae_T6",
+            "vertebrae_T7", "vertebrae_T8", "vertebrae_T9", "vertebrae_T10", "vertebrae_T11", "vertebrae_T12",
+            "vertebrae_L1", "vertebrae_L2", "vertebrae_L3", "vertebrae_L4", "vertebrae_L5",
+            "vertebrae_S1", "sacrum"
+        ],
+        "operations": [
+            {
+                "opcode": 3,
+                "in_ch": -1
+            },
+            {
+                "opcode": 12,
+                "radius": 1
+            },
+            {
+                "opcode": 13,
+                "radius": 1
+            },
+            {
+                "opcode": 14
+            }
+        ]
+    },
+    "ribs_combined": {
+        "rule": "GenericMorphologyDAG",
+        "inputs": [
+            "rib_left_1", "rib_right_1",
+            "rib_left_2", "rib_right_2",
+            "rib_left_3", "rib_right_3",
+            "rib_left_4", "rib_right_4",
+            "rib_left_5", "rib_right_5",
+            "rib_left_6", "rib_right_6",
+            "rib_left_7", "rib_right_7",
+            "rib_left_8", "rib_right_8",
+            "rib_left_9", "rib_right_9",
+            "rib_left_10", "rib_right_10",
+            "rib_left_11", "rib_right_11",
+            "rib_left_12", "rib_right_12"
+        ],
+        "operations": [
+            {
+                "opcode": 3,
+                "in_ch": -1
+            }
+        ]
+    },
+    "spinal_cord_dilated_1cm": {
+        "rule": "GenericMorphologyDAG",
+        "inputs": ["spinal_cord"],
+        "operations": [
+            {
+                "opcode": 12,
+                "radius": 10
+            }
+        ]
+    },
+    "thorax_wall": {
+        "rule": "GenericMorphologyDAG",
+        "inputs": ["thorax_wall_raw"],
+        "operations": [
+            {
+                "opcode": 12,
+                "radius": 40
+            },
+            {
+                "opcode": 13,
+                "radius": 40
+            }
+        ]
+    },
+    "deep_fascial_floor_left": {
+        "rule": "GenericMorphologyDAG",
+        "inputs": ["anterior_scalene_left", "prevertebral_left", "erector_spinae_left"],
+        "operations": [
+            { "opcode": 3, "in_ch": -1 },
+            { "opcode": 12, "radius": 2 }
+        ]
+    },
+    "deep_fascial_floor_right": {
+        "rule": "GenericMorphologyDAG",
+        "inputs": ["anterior_scalene_right", "prevertebral_right", "erector_spinae_right"],
+        "operations": [
+            { "opcode": 3, "in_ch": -1 },
+            { "opcode": 12, "radius": 2 }
+        ]
+    },
+    "helper_pelvis_gluteal": {
+        "rule": "GenericMorphologyDAG",
+        "inputs": [
+            "iliopsoas_left", "iliopsoas_right", "iliopsoas",
+            "gluteus_maximus_left", "gluteus_maximus_right",
+            "gluteus_medius_left", "gluteus_medius_right",
+            "gluteus_minimus_left", "gluteus_minimus_right",
+            "piriformis_left", "piriformis_right",
+            "obturator_internus_left", "obturator_internus_right"
+        ],
+        "operations": [
+            { "opcode": 3, "in_ch": -1 }
+        ]
+    },
+    "helper_sacrum_fused": {
+        "rule": "GenericMorphologyDAG",
+        "inputs": ["sacrum", "vertebrae_S1"],
+        "operations": [
+            { "opcode": 3, "in_ch": -1 }
+        ]
+    },
+    "helper_hip_iliopsoas": {
+        "rule": "GenericMorphologyDAG",
+        "inputs": ["iliopsoas_left", "iliopsoas_right", "iliopsoas", "hip_left", "hip_right"],
+        "operations": [
+            { "opcode": 3, "in_ch": -1 }
+        ]
+    },
+    "helper_rectum_dilated_2cm": {
+        "rule": "GenericMorphologyDAG",
+        "inputs": ["rectum"],
+        "operations": [
+            { "opcode": 12, "radius": 20 }
+        ]
+    },
+    "helper_sternocleidomastoid_fused": {
+        "rule": "GenericMorphologyDAG",
+        "inputs": ["sternocleidomastoid_left", "sternocleidomastoid_right"],
+        "operations": [
+            { "opcode": 3, "in_ch": -1 }
+        ]
+    }
+}

@@ -1,0 +1,122 @@
+{
+    "helper_Paraaortic_Aorta_16a1": {
+        "rule": "DilatedMask",
+        "base_landmark": "aorta",
+        "dilation_mm": 10.0,
+        "is_helper": true,
+        "category": "new_helpers",
+        "per_slice_lcc": true,
+        "comments": "Standard 10mm around aorta for 16a1 zone"
+    },
+    "helper_Paraaortic_IVC_16a1": {
+        "rule": "DilatedMask",
+        "base_landmark": "inferior_vena_cava",
+        "dilation_mm": 10.0,
+        "is_helper": true,
+        "category": "new_helpers",
+        "per_slice_lcc": true,
+        "comments": "Standard 10mm around IVC for 16a1 zone"
+    },
+    "helper_Paraaortic_Esophagus_16a1": {
+        "rule": "DilatedMask",
+        "base_landmark": "esophagus",
+        "dilation_mm": 10.0,
+        "is_helper": true,
+        "category": "new_helpers",
+        "per_slice_lcc": true,
+        "comments": "10mm around esophagus to bridge toward paraoesophageal"
+    },
+    "helper_Abdominal_Station_16a1_Aortic_Hiatus_base": {
+        "rule": "BitwiseOr",
+        "targets": [
+            "helper_Paraaortic_Aorta_16a1",
+            "helper_Paraaortic_IVC_16a1",
+            "helper_Paraaortic_Esophagus_16a1"
+        ],
+        "is_bilateral": false,
+        "z_plane_restriction": {
+            "superior": [
+                {
+                    "landmark": "helper_diaphragm_1cm_aorta",
+                    "part": "center"
+                },
+                {
+                    "landmark": "heart",
+                    "part": "min"
+                }
+            ],
+            "inferior": "superior_mesenteric_artery",
+            "inferior_part": "max",
+            "superior_selection_mode": "first"
+        },
+        "exclude": [
+            "esophagus",
+            "stomach",
+            "liver",
+            "spleen",
+            "pancreas",
+            "aorta",
+            "inferior_vena_cava",
+            "fused_spine",
+            "spinal_cord",
+            "lung_left",
+            "lung_right",
+            "heart",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "kidney_left",
+            "kidney_right",
+            "diaphragm_proxy"
+        ],
+        "depends_on": [
+            "helper_diaphragm_1cm_aorta"
+        ],
+        "comments": "Station 16a1: 10mm around aorta+IVC+esophagus at hiatus level. Esophagus dilation bridges the gap to paraoesophageal.",
+        "is_helper": true,
+        "category": "new_helpers"
+    },
+    "Abdominal_Station_16a1_Aortic_Hiatus": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_Abdominal_Station_16a1_Aortic_Hiatus_base"
+        ],
+        "is_bilateral": false,
+        "exclude": [
+            "liver",
+            "inferior_vena_cava",
+            "fused_spine",
+            "lung_right",
+            "psoas_major_left",
+            "small_bowel",
+            "spinal_cord",
+            "psoas_major_right",
+            "spleen",
+            "kidney_right",
+            "diaphragm_proxy",
+            "heart",
+            "stomach",
+            "kidney_left",
+            "pancreas",
+            "gallbladder",
+            "esophagus",
+            "colon",
+            "aorta",
+            "lung_left",
+            "duodenum"
+        ],
+        "overlap_precedence": [],
+        "per_slice_lcc": true,
+        "keep_all_components": false,
+        "depends_on": [
+            "helper_Abdominal_Station_16a1_Aortic_Hiatus_base"
+        ],
+        "group": "Abdominal",
+        "category": "Lymph_Node",
+        "color": [
+            200,
+            200,
+            200
+        ]
+    }
+}

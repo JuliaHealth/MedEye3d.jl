@@ -1,0 +1,71 @@
+{
+    "Neck_Level_VI_Anterior_Cervical": {
+        "rule": "Combine",
+        "method": "union",
+        "components": [
+            "helper_neck_VI_anterior",
+            "helper_neck_VI_deep_left",
+            "helper_neck_VI_deep_right"
+        ],
+        "exclude": [
+            "thyroid_cartilage",
+            "cricoid_cartilage",
+            "trachea",
+            "thyroid_gland",
+            "esophagus",
+            "sternocleidomastoid_left",
+            "sternocleidomastoid_right",
+            "common_carotid_artery_left",
+            "common_carotid_artery_right",
+            "internal_jugular_vein_left",
+            "internal_jugular_vein_right",
+            "lung_left",
+            "lung_right",
+            "lung",
+            "anterior_scalene",
+            "middle_scalene",
+            "posterior_scalene",
+            "spinal_cord",
+            "fused_spine",
+            "vertebrae",
+            "hyoid",
+            "submandibular_gland_left",
+            "submandibular_gland_right",
+            "parotid_gland_left",
+            "parotid_gland_right",
+            "helper_Chest_Exclusion",
+            "helper_thoracic_cage_hull",
+            "pectoralis_major",
+            "pectoralis_minor",
+            "platysma",
+            "strap_muscles"
+        ],
+        "per_slice_lcc": false,
+        "is_bilateral": false,
+        "group": "Neck",
+        "category": "Lymph_Node",
+        "color": [
+            150,
+            200,
+            100
+        ],
+        "overlap_precedence": [
+            "Neck_Level_Ia_Submental",
+            "Neck_Level_Ib_Submandibular_Left",
+            "Neck_Level_Ib_Submandibular_Right",
+            "Neck_Level_IIa_Upper_Jugular_Left",
+            "Neck_Level_IIa_Upper_Jugular_Right",
+            "Neck_Level_IIb_Upper_Jugular_Left",
+            "Neck_Level_IIb_Upper_Jugular_Right",
+            "Neck_Level_III_Middle_Jugular_Left",
+            "Neck_Level_III_Middle_Jugular_Right",
+            "Neck_Level_IV_Lower_Jugular_Left",
+            "Neck_Level_IV_Lower_Jugular_Right"
+        ],
+        "depends_on": [
+            "helper_neck_VI_anterior",
+            "helper_neck_VI_deep_left",
+            "helper_neck_VI_deep_right"
+        ]
+    }
+}

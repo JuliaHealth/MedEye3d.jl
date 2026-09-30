@@ -1,0 +1,290 @@
+{
+    "helper_neck_VI_base": {
+        "rule": "AnisotropicMargin",
+        "is_bilateral": false,
+        "input": "body",
+        "is_helper": true,
+        "category": "new_helpers",
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "hyoid",
+                "boundary_part": "min",
+                "comment": "Top: bottom of hyoid"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "sternum",
+                "boundary_part": "max",
+                "comment": "Bottom: top of sternum"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "hyoid",
+                "boundary_part": "min",
+                "slice_wise": true,
+                "only_where_present": true,
+                "comment": "Posterior constraint: stay anterior to hyoid"
+            },
+            {
+                "constraint_type": "RightOf",
+                "landmark": "sternocleidomastoid_left",
+                "boundary_part": "max",
+                "offset_mm": -10.0
+            },
+            {
+                "constraint_type": "LeftOf",
+                "landmark": "sternocleidomastoid_right",
+                "boundary_part": "min",
+                "offset_mm": -10.0
+            }
+        ],
+        "exclude": [
+            "trachea",
+            "esophagus",
+            "thyroid_gland",
+            "cricoid_cartilage",
+            "sternocleidomastoid",
+            "anterior_scalene",
+            "middle_scalene",
+            "spinal_cord",
+            "fused_spine",
+            "prevertebral",
+            "common_carotid_artery_left",
+            "common_carotid_artery_right",
+            "internal_jugular_vein_left",
+            "internal_jugular_vein_right",
+            "thyroid_cartilage",
+            "hyoid"
+        ],
+        "ignore_global_exclusion": true,
+        "overlap_precedence": [
+            "Axillary_Level_I",
+            "Axillary_Level_II",
+            "Axillary_Level_III",
+            "Axillary_Rotter"
+        ]
+    },
+    "helper_neck_VI_hull_with_levels": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_neck_VI_base",
+            "Neck_Level_IIa_Upper_Jugular",
+            "Neck_Level_IIb_Upper_Jugular",
+            "Neck_Level_III_Middle_Jugular"
+        ],
+        "is_bilateral": false,
+        "is_helper": true,
+        "category": "new_helpers",
+        "dependencies": [
+            "helper_neck_VI_base",
+            "Neck_Level_IIa_Upper_Jugular",
+            "Neck_Level_IIb_Upper_Jugular",
+            "Neck_Level_III_Middle_Jugular"
+        ]
+    },
+    "helper_neck_VI_cartilage_exclusion": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "thyroid_cartilage",
+            "cricoid_cartilage"
+        ],
+        "is_bilateral": false,
+        "is_helper": true,
+        "category": "new_helpers",
+        "dependencies": [
+            "thyroid_cartilage",
+            "cricoid_cartilage"
+        ]
+    },
+    "helper_neck_VI_thyroid_bridge": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "thyroid_gland",
+            "thyroid_cartilage"
+        ],
+        "is_bilateral": false,
+        "is_helper": true,
+        "category": "new_helpers",
+        "dependencies": [
+            "thyroid_gland",
+            "thyroid_cartilage"
+        ]
+    },
+    "helper_neck_VI_trachea_bridge": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_neck_VI_base",
+            "trachea"
+        ],
+        "is_bilateral": false,
+        "is_helper": true,
+        "category": "new_helpers",
+        "z_plane_restriction": {
+            "superior": "thyroid_cartilage",
+            "superior_part": "min",
+            "inferior": "sternum",
+            "inferior_part": "max"
+        },
+        "dependencies": [
+            "helper_neck_VI_base",
+            "trachea"
+        ]
+    },
+    "helper_neck_VI_trachea_thyroid_hull": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "trachea",
+            "thyroid_gland"
+        ],
+        "is_bilateral": false,
+        "is_helper": true,
+        "category": "new_helpers",
+        "dependencies": [
+            "trachea",
+            "thyroid_gland"
+        ],
+        "comments": "ConvexHull between trachea and thyroid gland for Neck VI extension"
+    },
+    "helper_neck_VI_thyroid_cricoid_union": {
+        "rule": "BitwiseOr",
+        "targets": [
+            "thyroid_gland",
+            "cricoid_cartilage"
+        ],
+        "is_bilateral": false,
+        "is_helper": true,
+        "category": "new_helpers",
+        "comments": "Union of thyroid and cricoid for anterior extension base"
+    },
+    "helper_neck_VI_anterior_4cm": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "helper_neck_VI_thyroid_cricoid_union",
+        "margins_mm": {
+            "anterior": 40,
+            "posterior": 0,
+            "left": 0,
+            "right": 0,
+            "superior": 0,
+            "inferior": 0
+        },
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_neck_VI_thyroid_cricoid_union"
+        ],
+        "comments": "4cm anterior extension from thyroid/cricoid most anterior voxels"
+    },
+    "Neck_Level_VI_Anterior_Cervical": {
+        "rule": "BitwiseOr",
+        "targets": [
+            "helper_neck_VI_hull_with_levels",
+            "helper_neck_VI_thyroid_bridge",
+            "helper_neck_VI_trachea_bridge",
+            "helper_neck_VI_trachea_thyroid_hull",
+            "helper_neck_VI_anterior_4cm"
+        ],
+        "is_bilateral": false,
+        "constraints": [
+            {
+                "constraint_type": "RightOf",
+                "landmark": "sternocleidomastoid_left",
+                "boundary_part": "max",
+                "offset_mm": -20.0,
+                "comment": "Lateral extend 2cm beyond SCM left"
+            },
+            {
+                "constraint_type": "LeftOf",
+                "landmark": "sternocleidomastoid_right",
+                "boundary_part": "min",
+                "offset_mm": -20.0,
+                "comment": "Lateral extend 2cm beyond SCM right"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "trachea",
+                "boundary_part": "max",
+                "slice_wise": true,
+                "comment": "Posterior constraint: stay anterior to posterior edge of trachea"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "sternum",
+                "boundary_part": "max",
+                "comment": "Inferior limit: strictly above top of sternum"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "hyoid",
+                "boundary_part": "min",
+                "comment": "Superior limit: strictly below bottom of hyoid"
+            }
+        ],
+        "exclude": [
+            "helper_neck_VI_cartilage_exclusion",
+            "Neck_Level_IIa_Upper_Jugular",
+            "Neck_Level_IIb_Upper_Jugular",
+            "Neck_Level_III_Middle_Jugular",
+            "Neck_Level_IV_Lower_Jugular",
+            "thyroid_cartilage",
+            "cricoid_cartilage",
+            "thyroid_gland",
+            "trachea",
+            "esophagus",
+            "sternocleidomastoid",
+            "anterior_scalene",
+            "middle_scalene",
+            "posterior_scalene",
+            "spinal_cord",
+            "fused_spine",
+            "prevertebral",
+            "common_carotid_artery_left",
+            "common_carotid_artery_right",
+            "internal_jugular_vein_left",
+            "internal_jugular_vein_right",
+            "hyoid",
+            "submandibular_gland_left",
+            "submandibular_gland_right",
+            "parotid_gland_left",
+            "parotid_gland_right",
+            "lung",
+            "lung_left",
+            "lung_right",
+            "helper_Chest_Exclusion",
+            "helper_thoracic_cage_hull",
+            "pectoralis_major",
+            "pectoralis_minor"
+        ],
+        "ignore_global_exclusion": true,
+        "keep_all_components": false,
+        "post_overlap_lcc": true,
+        "group": "Neck",
+        "category": "Lymph_Node",
+        "color": [
+            150,
+            200,
+            100
+        ],
+        "overlap_precedence": [
+            "Neck_Level_Ia_Submental",
+            "Neck_Level_Ib_Submandibular",
+            "Neck_Level_IIa_Upper_Jugular",
+            "Neck_Level_IIb_Upper_Jugular",
+            "Neck_Level_III_Middle_Jugular",
+            "Neck_Level_IV_Lower_Jugular"
+        ],
+        "depends_on": [
+            "helper_neck_VI_hull_with_levels",
+            "helper_neck_VI_thyroid_bridge",
+            "helper_neck_VI_trachea_bridge",
+            "helper_neck_VI_cartilage_exclusion",
+            "helper_thoracic_cage_hull",
+            "helper_neck_VI_trachea_thyroid_hull",
+            "helper_neck_VI_anterior_4cm"
+        ],
+        "ancillary_landmarks": [
+            "sternum",
+            "hyoid"
+        ]
+    }
+}

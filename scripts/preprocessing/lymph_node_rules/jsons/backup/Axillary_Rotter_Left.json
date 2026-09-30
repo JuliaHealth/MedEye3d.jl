@@ -1,0 +1,26 @@
+{
+    "Axillary_Rotter_Left": {
+        "rule": "Mask",
+        "side": "left",
+        "level": "rotter",
+        "color": [
+            255,
+            255,
+            100
+        ],
+        "group": "Thoracic",
+        "category": "Lymph_Node",
+        "exclude": [
+            "lung",
+            "clavicula",
+            "scapula",
+            "humerus",
+            "pectoralis_major",
+            "latissimus_dorsi",
+            "serratus_anterior",
+            "subclavian_artery"
+        ],
+        "keep_all_components": true,
+        "mask_name": "helper_rotter_pm_ext_left"
+    }
+}

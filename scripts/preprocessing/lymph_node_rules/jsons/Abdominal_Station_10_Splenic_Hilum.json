@@ -1,0 +1,81 @@
+{
+    "helper_splenic_hilum_base": {
+        "rule": "ConvexHull",
+        "targets": [
+            "spleen",
+            "helper_splenic_pd"
+        ],
+        "mode": "2D",
+        "exclude": [
+            "spleen",
+            "stomach",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "liver",
+            "pancreas",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "comments": "Base splenic hilum: 2D Convex Hull of spleen and pd point."
+    },
+    "helper_splenic_hilum_extension": {
+        "rule": "ConvexHull",
+        "targets": [
+            "helper_splenic_hilum_base",
+            "splenic_vein"
+        ],
+        "mode": "2D",
+        "exclude": [
+            "spleen",
+            "stomach",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "liver",
+            "pancreas",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_splenic_hilum_base",
+            "splenic_vein"
+        ],
+        "comments": "Extension: 2D convex hull between base hilum and splenic vein for wider coverage"
+    },
+    "Abdominal_Station_10_Splenic_Hilum": {
+        "rule": "BitwiseOr",
+        "targets": [
+            "helper_splenic_hilum_base",
+            "helper_splenic_hilum_extension"
+        ],
+        "exclude": [
+            "spleen",
+            "stomach",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "liver",
+            "pancreas",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right"
+        ],
+        "depends_on": [
+            "helper_splenic_hilum_base",
+            "helper_splenic_hilum_extension"
+        ],
+        "overlap_precedence": [
+            "Abdominal_Station_4_Greater_Curvature"
+        ],
+        "category": "Lymph_Node",
+        "group": "Abdominal",
+        "comments": "Combined splenic hilum: base + extension toward splenic artery."
+    }
+}

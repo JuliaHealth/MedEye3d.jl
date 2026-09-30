@@ -1,0 +1,29 @@
+{
+    "helper_gap_liver_lung_right": {
+        "rule": "VolumetricBoundary2D",
+        "boundaries": {
+            "liver": "liver",
+            "lung": "lung_right"
+        },
+        "is_bilateral": false,
+        "keep_all_components": true,
+        "z_plane_restriction": {
+            "superior": "liver",
+            "superior_part": "max"
+        },
+        "constraints": [
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "heart",
+                "boundary_part": "mid",
+                "slice_wise": true
+            }
+        ],
+        "ancillary_landmarks": [
+            "liver",
+            "lung_right",
+            "heart"
+        ],
+        "is_helper": true
+    }
+}

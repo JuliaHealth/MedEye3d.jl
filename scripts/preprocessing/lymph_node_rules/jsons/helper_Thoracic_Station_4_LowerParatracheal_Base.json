@@ -1,0 +1,64 @@
+{
+    "helper_Thoracic_Station_4_LowerParatracheal_Base": {
+        "rule": "GeometricConstraint",
+        "is_helper": true,
+        "dependencies": [
+            "helper_paratracheal_lungs_hull_anterior",
+            "helper_prevascular_unified",
+            "aorta",
+            "carina_computed",
+            "Thoracic_Station_1_LowCervical"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "helper_prevascular_unified",
+                "boundary_part": "min",
+                "slice_wise": true,
+                "allow_missing": true
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "aorta",
+                "boundary_part": "max"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "carina_computed",
+                "boundary_part": "min"
+            },
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "Thoracic_Station_1_LowCervical",
+                "boundary_part": "min",
+                "slice_wise": true,
+                "allow_missing": true
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "vertebrae",
+                "boundary_part": "min",
+                "slice_wise": true,
+                "comment": "Anterior to the most anterior voxel of vertebral column on a per slice basis"
+            }
+        ],
+        "base_landmark": "helper_paratracheal_lungs_hull_anterior",
+        "exclude": [
+            "heart",
+            "aorta",
+            "aorta_ascending",
+            "aorta_descending",
+            "aortic_arch_computed",
+            "pulmonary_artery",
+            "superior_vena_cava",
+            "inferior_vena_cava",
+            "brachiocephalic_vein_left",
+            "brachiocephalic_vein_right",
+            "esophagus",
+            "sternum",
+            "helper_sternum_costal_cartilages_bridge",
+            "trachea",
+            "lung_trachea_bronchia"
+        ]
+    }
+}

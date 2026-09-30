@@ -1,0 +1,12 @@
+{
+    "helper_Abdominal_Presacral_MovedLine": {
+        "rule": "PresacralAnteriorCustom",
+        "landmark": "helper_sacrum_fused",
+        "distance_mm": 10.0,
+        "is_bilateral": false,
+        "output_type": "moved_line",
+        "depends_on": [
+            "helper_sacrum_fused"
+        ]
+    }
+}

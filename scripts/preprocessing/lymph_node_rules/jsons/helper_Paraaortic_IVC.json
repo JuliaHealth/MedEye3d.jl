@@ -1,0 +1,13 @@
+{
+    "helper_Paraaortic_IVC": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "inferior_vena_cava",
+        "margins_mm": {
+            "anterior": 8.0,
+            "posterior": 6.0,
+            "left": 8.0,
+            "right": 6.0
+        },
+        "is_helper": true
+    }
+}

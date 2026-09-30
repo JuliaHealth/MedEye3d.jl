@@ -1,0 +1,126 @@
+{
+    "Abdominal_Obturator": {
+        "rule": "BitwiseOr",
+        "is_bilateral": true,
+        "target_landmarks": [
+            "Abdominal_Obturator_Base"
+        ],
+        "depends_on": [
+            "Abdominal_Obturator_Base",
+            "helper_obturator_medial_boundary",
+            "helper_hip_iliopsoas"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "hip",
+                "boundary_part": "min",
+                "comment": "Inferior bound: bottom of hip bones"
+            },
+            {
+                "constraint_type": "LateralTo",
+                "landmark": "helper_obturator_medial_boundary",
+                "boundary_part": "lateral",
+                "comment": "Medial bound: lateral border of bladder/prostate/rectum"
+            },
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "iliac_vena_external",
+                "boundary_part": "center",
+                "comment": "Anterior bound: external iliac vein (center to allow seamless connection)"
+            }
+        ],
+        "exclude": [
+            "hip",
+            "sacrum",
+            "obturator_internus",
+            "urinary_bladder",
+            "rectum",
+            "prostate",
+            "uterus",
+            "vagina",
+            "seminal_vesicle",
+            "iliac_vena_external",
+            "iliac_artery_external",
+            "iliac_vena_internal",
+            "iliac_artery_internal",
+            "iliac_vena_common",
+            "iliac_artery_common",
+            "Abdominal_Presacral",
+            "iliopsoas",
+            "helper_rectum_dilated_2cm",
+            "helper_obturator_medial_boundary",
+            "helper_hip_iliopsoas",
+            "stomach",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "liver",
+            "spleen",
+            "pancreas",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 5
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "urinary_bladder",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "hip",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "iliac_vena_external",
+                "direction": "posterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "urinary_bladder",
+                "direction": "lateral"
+            }
+        ],
+        "roi": {
+            "landmark": "hip",
+            "padding_mm": [
+                100,
+                100,
+                100
+            ]
+        },
+        "ancillary_landmarks": [
+            "iliac_artery_external",
+            "iliac_artery_internal",
+            "iliac_artery_common",
+            "iliac_vena_external",
+            "iliac_vena_internal",
+            "iliac_vena_common",
+            "obturator_internus",
+            "hip",
+            "prostate",
+            "pubic_symphysis_top",
+            "rectum",
+            "sacrum",
+            "urinary_bladder",
+            "vagina",
+            "uterus",
+            "seminal_vesicle",
+            "Abdominal_Presacral",
+            "iliopsoas",
+            "helper_rectum_dilated_2cm",
+            "helper_obturator_medial_boundary"
+        ],
+        "z_plane_restriction": {
+            "superior": "obturator_internus",
+            "superior_part": "max"
+        }
+    }
+}

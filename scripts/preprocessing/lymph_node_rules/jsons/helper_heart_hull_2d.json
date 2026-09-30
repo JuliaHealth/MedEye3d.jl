@@ -1,0 +1,23 @@
+{
+    "helper_heart_hull_2d": {
+        "rule": "ConvexHull",
+        "slice_wise": true,
+        "is_bilateral": false,
+        "targets": [
+            "heart"
+        ],
+        "is_helper": true,
+        "category": "new_helpers"
+    },
+    "helper_heart_hull_2d_dilated": {
+        "rule": "Morphology",
+        "operation": "dilate",
+        "radius_mm": 10.0,
+        "landmark": "helper_heart_hull_2d",
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_heart_hull_2d"
+        ]
+    }
+}

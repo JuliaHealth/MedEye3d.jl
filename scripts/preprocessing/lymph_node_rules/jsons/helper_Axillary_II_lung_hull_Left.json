@@ -1,0 +1,15 @@
+{
+    "helper_Axillary_II_lung_hull_Left": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "Axillary_Level_II_Left",
+            "lung_left"
+        ],
+        "is_bilateral": false,
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "Axillary_Level_II_Left"
+        ]
+    }
+}

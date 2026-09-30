@@ -1,0 +1,22 @@
+{
+    "helper_Stomach_Lesser_Curvature": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "stomach",
+        "margins_mm": {
+            "anterior": 0.0,
+            "posterior": 0.0,
+            "left": 0.0,
+            "right": 0.0
+        },
+        "constraints": [
+            {
+                "constraint_type": "RightOf",
+                "landmark": "stomach",
+                "boundary_part": "center",
+                "comment": "Lesser curvature is on the medial (right) side of the stomach"
+            }
+        ],
+        "is_helper": true,
+        "comments": "Proxy for Lesser Curvature (Stations 3, 5)"
+    }
+}

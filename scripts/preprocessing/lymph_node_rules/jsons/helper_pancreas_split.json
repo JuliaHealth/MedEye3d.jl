@@ -1,0 +1,22 @@
+{
+    "helper_pancreas_head": {
+        "rule": "PancreasSplitHelper",
+        "custom_rule": "PancreasSplitHelper",
+        "input": "pancreas",
+        "side": "head",
+        "depends_on": ["pancreas", "duodenum"],
+        "is_helper": true,
+        "category": "new_helpers",
+        "comments": "Pancreas head: right part (toward duodenum). Split at first slice with 2 CCs."
+    },
+    "helper_pancreas_tail": {
+        "rule": "PancreasSplitHelper",
+        "custom_rule": "PancreasSplitHelper",
+        "input": "pancreas",
+        "side": "tail",
+        "depends_on": ["pancreas", "duodenum"],
+        "is_helper": true,
+        "category": "new_helpers",
+        "comments": "Pancreas tail: left part (toward spleen). Split at first slice with 2 CCs."
+    }
+}

@@ -1,0 +1,50 @@
+{
+    "helper_Axillary_Level_III_base_Left": {
+        "rule": "Union",
+        "components": [
+            "helper_ax_iii_base_left",
+            "helper_Axillary_Level_III_Extension_Left"
+        ],
+        "side": "left",
+        "is_helper": true
+    },
+    "helper_Axillary_Level_III_clavicle_bridge_Left": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_Axillary_Level_III_base_Left",
+            "clavicula_left"
+        ],
+        "side": "left",
+        "is_helper": true,
+        "dependencies": [
+            "helper_Axillary_Level_III_base_Left",
+            "clavicula_left"
+        ]
+    },
+    "Axillary_Level_III_Left_Base": {
+        "rule": "BitwiseOr",
+        "targets": [
+            "helper_Axillary_Level_III_base_Left",
+            "helper_Axillary_Level_III_clavicle_bridge_Left"
+        ],
+        "side": "left",
+        "is_helper": true,
+        "constraints": [
+            {
+                "constraint_type": "LateralTo",
+                "landmark": "sternum",
+                "slice_wise": true,
+                "comment": "Medial constraint: lateral to the most lateral voxel of the sternum per slice"
+            }
+        ],
+        "exclude": [
+            "clavicula_left",
+            "clavicula_right",
+            "clavicula"
+        ],
+        "dependencies": [
+            "helper_Axillary_Level_III_base_Left",
+            "helper_Axillary_Level_III_clavicle_bridge_Left"
+        ]
+    }
+}

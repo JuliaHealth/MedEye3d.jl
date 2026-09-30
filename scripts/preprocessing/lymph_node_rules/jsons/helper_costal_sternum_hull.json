@@ -1,0 +1,15 @@
+{
+    "helper_costal_sternum_hull": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "costal_cartilages",
+            "sternum"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "dependencies": [
+            "costal_cartilages",
+            "sternum"
+        ]
+    }
+}

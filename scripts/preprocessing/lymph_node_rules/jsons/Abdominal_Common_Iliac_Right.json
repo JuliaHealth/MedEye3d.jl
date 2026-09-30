@@ -1,0 +1,74 @@
+{
+    "helper_common_iliac_artery_dilated_Right": {
+        "rule": "Morphology",
+        "operation": "dilate",
+        "radius_mm": 7.0,
+        "landmark": "iliac_artery_common_right",
+        "is_helper": true,
+        "category": "new_helpers"
+    },
+    "helper_common_iliac_vein_dilated_Right": {
+        "rule": "Morphology",
+        "operation": "dilate",
+        "radius_mm": 7.0,
+        "landmark": "iliac_vena_common_right",
+        "is_helper": true,
+        "category": "new_helpers"
+    },
+    "Abdominal_Common_Iliac_Right": {
+        "rule": "Combine",
+        "method": "union",
+        "components": [
+            "helper_common_iliac_artery_dilated_Right",
+            "helper_common_iliac_vein_dilated_Right"
+        ],
+        "exclude": [
+            "iliac_artery_right",
+            "iliac_vena_right",
+            "aorta",
+            "psoas_major_right",
+            "vertebrae_L4",
+            "vertebrae_L5",
+            "sacrum",
+            "small_bowel",
+            "sigmoid",
+            "iliopsoas",
+            "helper_pelvis_gluteal",
+            "stomach",
+            "duodenum",
+            "colon",
+            "liver",
+            "spleen",
+            "pancreas",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right",
+            "rectum",
+            "urinary_bladder",
+            "prostate",
+            "uterus",
+            "hip_left",
+            "hip_right",
+            "femur_left",
+            "femur_right",
+            "gluteus_maximus_left",
+            "gluteus_maximus_right",
+            "gluteus_medius_left",
+            "gluteus_medius_right",
+            "gluteus_minimus_left",
+            "gluteus_minimus_right",
+            "obturator_internus",
+            "piriformis",
+            "inferior_vena_cava"
+        ],
+        "depends_on": [
+            "helper_common_iliac_artery_dilated_Right",
+            "helper_common_iliac_vein_dilated_Right",
+            "helper_pelvis_gluteal"
+        ],
+        "per_slice_lcc": true,
+        "is_bilateral": false,
+        "side": "Right",
+        "keep_all_components": false
+    }
+}

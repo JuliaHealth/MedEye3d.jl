@@ -1,0 +1,11 @@
+{
+    "helper_stomach_right_third": {
+        "rule": "SplitMask",
+        "input": "stomach",
+        "axis": "x",
+        "split_method": "ratio_0.33",
+        "keep": "min",
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

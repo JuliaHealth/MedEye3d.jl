@@ -1,0 +1,16 @@
+{
+    "helper_femur_pelvis": {
+        "rule": "VolumetricBoundary2D",
+        "is_bilateral": true,
+        "growth_mode": "sideways",
+        "boundaries": {
+            "lateral": "femur",
+            "medial": "hip"
+        },
+        "ancillary_landmarks": [
+            "femur",
+            "hip"
+        ],
+        "is_helper": true
+    }
+}

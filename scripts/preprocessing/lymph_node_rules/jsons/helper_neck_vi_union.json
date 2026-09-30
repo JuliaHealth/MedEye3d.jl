@@ -1,0 +1,12 @@
+{
+    "helper_neck_vi_union": {
+        "rule": "Union",
+        "components": [
+            "hyoid",
+            "thyroid_gland",
+            "thyroid_cartilage",
+            "cricoid_cartilage"
+        ],
+        "is_helper": true
+    }
+}

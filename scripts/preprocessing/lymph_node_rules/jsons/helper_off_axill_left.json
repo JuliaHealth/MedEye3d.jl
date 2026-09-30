@@ -1,0 +1,9 @@
+{
+    "helper_off_axill_left": {
+        "rule": "ConvexHullBridge",
+        "landmark_1": "humerus_left",
+        "landmark_2": "subscapularis",
+        "side": "left",
+        "is_helper": true
+    }
+}

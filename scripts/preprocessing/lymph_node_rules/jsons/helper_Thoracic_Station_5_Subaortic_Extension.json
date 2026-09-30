@@ -1,0 +1,53 @@
+{
+    "helper_Thoracic_Station_5_Subaortic_Extension": {
+        "rule": "ConvexHullBridging",
+        "is_bilateral": false,
+        "side": "Left",
+        "input": "body_trunc",
+        "bridge_landmarks": [
+            "helper_Thoracic_Station_5_Subaortic_Base",
+            "lung_left"
+        ],
+        "exclude": [
+            "lung_left",
+            "aorta_ascending",
+            "aorta_descending",
+            "aortic_arch_computed",
+            "pulmonary_artery",
+            "trachea",
+            "esophagus",
+            "helper_subcutaneous_anterior_chest",
+            "thorax_wall",
+            "helper_pleural_space_left",
+            "helper_pleural_space_right"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "aortic_arch_computed",
+                "boundary_part": "min"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "pulmonary_artery",
+                "boundary_part": "max"
+            }
+        ],
+        "ancillary_landmarks": [
+            "helper_Thoracic_Station_5_Subaortic_Base",
+            "lung_left",
+            "aorta_ascending",
+            "aorta_descending",
+            "aortic_arch_computed",
+            "pulmonary_artery",
+            "trachea",
+            "esophagus",
+            "helper_subcutaneous_anterior_chest",
+            "thorax_wall",
+            "body_trunc",
+            "helper_pleural_space_left",
+            "helper_pleural_space_right"
+        ],
+        "is_helper": true
+    }
+}

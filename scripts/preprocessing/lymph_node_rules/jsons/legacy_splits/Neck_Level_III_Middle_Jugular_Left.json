@@ -1,0 +1,53 @@
+{
+    "Neck_Level_III_Middle_Jugular_left": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "common_carotid_artery_left",
+        "margins_mm": {
+            "lateral": 12.0,
+            "medial": 4.0,
+            "anterior": 10.0,
+            "posterior": 8.0,
+            "superior": 0.0,
+            "inferior": 0.0
+        },
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "hyoid",
+                "boundary_part": "max",
+                "comment": "Superior limit: hyoid"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "cricoid_cartilage",
+                "boundary_part": "min",
+                "offset_mm": -5.0,
+                "comment": "Inferior limit: cricoid cartilage bottom"
+            }
+        ],
+        "exclude": [
+            "sternocleidomastoid_left",
+            "thyroid_gland",
+            "common_carotid_artery_left",
+            "internal_jugular_vein_left",
+            "internal_carotid_artery_left",
+            "trachea",
+            "pharynx",
+            "fused_spine"
+        ],
+        "ancillary_landmarks": [
+            "common_carotid_artery_left",
+            "internal_jugular_vein_left",
+            "internal_carotid_artery_left",
+            "sternocleidomastoid_left",
+            "thyroid_gland",
+            "hyoid",
+            "cricoid_cartilage",
+            "trachea",
+            "pharynx",
+            "fused_spine"
+        ],
+        "ignore_fat": true,
+        "ignore_global_exclusion": true
+    }
+}

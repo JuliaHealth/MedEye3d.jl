@@ -1,0 +1,21 @@
+{
+    "Abdominal_Mesenteric_Helper_Dilated": {
+        "rule": "Morphology",
+        "operation": "dilate",
+        "landmark": "Abdominal_Mesenteric_Helper_Base",
+        "radius_mm": 20.0,
+        "ignore_global_exclusion": true,
+        "exclude": [
+            "stomach",
+            "duodenum",
+            "liver",
+            "spleen",
+            "pancreas",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right"
+        ],
+        "ignore_fat": true,
+        "keep_all_components": false
+    }
+}

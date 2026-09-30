@@ -1,0 +1,44 @@
+{
+    "Abdominal_Station_1_Right_Paracardial": {
+        "rule": "Mask",
+        "is_bilateral": false,
+        "constraints": [
+            {
+                "constraint_type": "RightOf",
+                "landmark": "helper_esophagus_bottom_1cm",
+                "boundary_part": "center",
+                "slice_wise": true
+            }
+        ],
+        "exclude": [
+            "stomach",
+            "liver",
+            "spleen",
+            "pancreas",
+            "aorta",
+            "inferior_vena_cava",
+            "heart",
+            "lung_left",
+            "lung_right",
+            "diaphragm_proxy",
+            "esophagus",
+            "gallbladder"
+        ],
+        "depends_on": [
+            "helper_paracardial_dilated"
+        ],
+        "ignore_global_exclusion": true,
+        "category": "Lymph_Node",
+        "group": "Abdominal",
+        "color": [
+            255,
+            200,
+            100
+        ],
+        "comments": "Right paracardial: right half of 2cm cardia dilation, excluding organs.",
+        "overlap_precedence": [
+            "Thoracic_Station_7_Subcarinial"
+        ],
+        "input": "helper_paracardial_dilated"
+    }
+}

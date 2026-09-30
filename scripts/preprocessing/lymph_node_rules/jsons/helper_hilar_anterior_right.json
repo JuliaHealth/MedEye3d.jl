@@ -1,0 +1,14 @@
+{
+    "helper_hilar_anterior_right": {
+        "rule": "HilarAnteriorHelper",
+        "hilar_landmark": "Thoracic_Station_Hilar_Interlobar",
+        "offset_mm": 50.0,
+        "is_bilateral": false,
+        "depends_on": [
+            "Thoracic_Station_Hilar_Interlobar"
+        ],
+        "ancillary_landmarks": [
+            "Thoracic_Station_Hilar_Interlobar"
+        ]
+    }
+}

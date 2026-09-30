@@ -518,7 +518,72 @@ const CLINICAL_ANATOMY_ALIASES = [
     "Lymph Node", "Inguinal Lymph Node", "Iliac Lymph Node", "Para-aortic Lymph Node",
     "Obturator Lymph Node", "External Iliac Lymph Node", "Internal Iliac Lymph Node",
     "Aorta", "Iliac Artery", "Iliac Vein",
-    "Gluteal Muscle", "Psoas Muscle", "Sartorius Muscle", "Quadriceps Muscle"
+    "Gluteal Muscle", "Psoas Muscle", "Sartorius Muscle", "Quadriceps Muscle",
+    # ── Clinical lymph node station names (for Anatomical Details searchable menus) ──
+    # Pelvic / Abdominal non-station
+    "Obturator Lymph Node (Left)", "Obturator Lymph Node (Right)",
+    "Internal Iliac Lymph Node (Left)", "Internal Iliac Lymph Node (Right)",
+    "External Iliac Lymph Node (Left)", "External Iliac Lymph Node (Right)",
+    "Common Iliac Lymph Node (Left)", "Common Iliac Lymph Node (Right)",
+    "Presacral Lymph Node", "Pararectal Lymph Node",
+    "Mesenteric Interenteric Lymph Node",
+    "Renal Hilar Lymph Node (Left)", "Renal Hilar Lymph Node (Right)",
+    "Para-Aortic Lymph Node",
+    # JGCA gastric stations
+    "Station 10 Splenic Hilum Lymph Node",
+    "Station 11 Splenic Artery Lymph Node",
+    "Station 13 Posterior Pancreaticoduodenal Lymph Node",
+    "Station 14 Superior Mesenteric Artery (SMA) Lymph Node",
+    "Station 16a1 Aortic Hiatus Lymph Node",
+    "Station 16a2 Upper Middle Paraaortic Lymph Node",
+    "Station 16b1 Lower Middle Paraaortic Lymph Node",
+    "Station 16b2 Caudal Paraaortic Lymph Node",
+    "Station 17 Anterior Pancreaticoduodenal Lymph Node",
+    "Station 1/2 Paracardial Lymph Node",
+    "Station 1 Right Paracardial Lymph Node",
+    "Station 2 Left Paracardial Lymph Node",
+    "Station 3 Lesser Curvature Lymph Node",
+    "Station 4 Greater Curvature Lymph Node",
+    "Station 5/6 Pyloric Lymph Node",
+    "Station 5 Suprapyloric Lymph Node",
+    "Station 6 Infrapyloric Lymph Node",
+    "Station 7 Left Gastric Lymph Node",
+    "Station 8 Common Hepatic Lymph Node",
+    "Station 9 Celiac Lymph Node",
+    "Inferior Pancreatic Lymph Node",
+    # Inguinal
+    "Deep Inguinal Lymph Node (Left)", "Deep Inguinal Lymph Node (Right)",
+    "Superficial Inguinal Lymph Node (Left)", "Superficial Inguinal Lymph Node (Right)",
+    # Axillary
+    "Axillary Level I Lymph Node (Left)", "Axillary Level I Lymph Node (Right)",
+    "Axillary Level II Lymph Node (Left)", "Axillary Level II Lymph Node (Right)",
+    "Axillary Level III Lymph Node (Left)", "Axillary Level III Lymph Node (Right)",
+    "Rotter Interpectoral Lymph Node (Left)", "Rotter Interpectoral Lymph Node (Right)",
+    # Thoracic / Mediastinal (IASLC)
+    "Internal Mammary Lymph Node (Left)", "Internal Mammary Lymph Node (Right)",
+    "Station 2L Upper Paratracheal Lymph Node", "Station 2R Upper Paratracheal Lymph Node",
+    "Station 3A Prevascular Lymph Node (Left)", "Station 3A Prevascular Lymph Node (Right)",
+    "Station 3P Retrotracheal Lymph Node (Left)", "Station 3P Retrotracheal Lymph Node (Right)",
+    "Station 4L Lower Paratracheal Lymph Node", "Station 4R Lower Paratracheal Lymph Node",
+    "Station 5 Subaortic (AP Window) Lymph Node",
+    "Station 6 Paraaortic (Ascending Aorta) Lymph Node",
+    "Station 7 Subcarinal Lymph Node",
+    "Station 8 Paraesophageal Lymph Node (Left)", "Station 8 Paraesophageal Lymph Node (Right)",
+    "Station 10/11 Hilar / Interlobar Lymph Node (Left)", "Station 10/11 Hilar / Interlobar Lymph Node (Right)",
+    "Prepericardial Lymph Node (Left)", "Prepericardial Lymph Node (Right)",
+    "Supraclavicular Lymph Node (Left)", "Supraclavicular Lymph Node (Right)",
+    # Neck levels
+    "Neck Level Ia Submental Lymph Node",
+    "Neck Level Ib Submandibular Lymph Node (Left)", "Neck Level Ib Submandibular Lymph Node (Right)",
+    "Neck Level IIa Upper Jugular Lymph Node (Left)", "Neck Level IIa Upper Jugular Lymph Node (Right)",
+    "Neck Level IIb Upper Jugular Lymph Node (Left)", "Neck Level IIb Upper Jugular Lymph Node (Right)",
+    "Neck Level III Middle Jugular Lymph Node (Left)", "Neck Level III Middle Jugular Lymph Node (Right)",
+    "Neck Level IV Lower Jugular Lymph Node (Left)", "Neck Level IV Lower Jugular Lymph Node (Right)",
+    "Neck Level Va Upper Posterior Triangle Lymph Node (Left)", "Neck Level Va Upper Posterior Triangle Lymph Node (Right)",
+    "Neck Level VI Anterior Cervical Lymph Node",
+    "Neck Level Xb Occipital Lymph Node (Left)", "Neck Level Xb Occipital Lymph Node (Right)",
+    "Parotid Lymph Node (Left)", "Parotid Lymph Node (Right)",
+    "Retropharyngeal Lymph Node"
 ]
 
 """Load UBERON anatomy terms from FoundationalAnatomy.csv for Base Anatomy search/autocomplete.
@@ -6200,14 +6265,16 @@ function create_metadata_window(
                     false
                 end
                 
+                LA = _MEH._get_la()
+                is_ln_struct = LA !== nothing && LA.is_lymph_node_structure(raw_organ_for_type)
                 if occursin("prostate", combined) || occursin("prostat", combined)
                     "Prostate"
+                elseif is_ln_struct || occursin("lymph", combined) || occursin("node", combined) || occursin("knoten", combined)
+                    "Lymph Node Meta"
                 elseif is_muscle_kw
                     "Technical Artifact"
                 elseif is_bone_kw || (has_real_bone_subseg && !is_muscle_kw)
                     "Bone Meta"
-                elseif occursin("lymph", combined) || occursin("node", combined) || occursin("knoten", combined)
-                    "Lymph Node"
                 else
                     "Organ Meta"
                 end
@@ -6221,8 +6288,11 @@ function create_metadata_window(
         if !@isdefined(json_entry)
             json_entry = lookup_anatomy(raw_organ_for_type)
         end
-        is_muscle_lesion = (json_entry !== nothing && (get(json_entry, "is_muscle", false) || get(json_entry, "lesion_type", "") == "Technical Artifact")) ||
-                           t_type == "Technical Artifact"
+        LA_mod = _MEH._get_la()
+        is_ln = (LA_mod !== nothing && LA_mod.is_lymph_node_structure(raw_organ_for_type)) ||
+                (t_type in ("Lymph Node", "Lymph Node Meta"))
+        is_muscle_lesion = !is_ln && ((json_entry !== nothing && (get(json_entry, "is_muscle", false) || get(json_entry, "lesion_type", "") == "Technical Artifact")) ||
+                           t_type == "Technical Artifact")
         if is_muscle_lesion && !haskey(data, "Certainty")
             if haskey(field_widgets, "Alternative Hypothesis (False Positive)") && field_widgets["Alternative Hypothesis (False Positive)"] isa Menu
                 opts = field_widgets["Alternative Hypothesis (False Positive)"].options[]
@@ -6385,6 +6455,15 @@ function create_metadata_window(
             if _MEH.PERF_LOG[]; println("Auto-detected BaseAnatomy for lesion $lid: '$t_base' (side='$t_side') via keyword fallback from '$raw_organ'"); flush(stdout); end
         end
         
+        # ── Override BaseAnatomy with formatted clinical station name for LN ──
+        LA_ba = _MEH._get_la()
+        if LA_ba !== nothing && !isempty(raw_organ) && LA_ba.is_lymph_node_structure(raw_organ)
+            formatted_ba = LA_ba.format_clinical_station_name(raw_organ)
+            if !isempty(formatted_ba)
+                t_base = formatted_ba
+            end
+        end
+        
         # ── Auto-fill Anatomic Location & Sublocation (independent of BaseAnatomy) ──
         # These run whenever the fields are empty, even if BaseAnatomy is already saved
         existing_loc = get(data, "Anatomic Location", "")
@@ -6470,7 +6549,12 @@ function create_metadata_window(
                     fallback_loc = "Solid Organ / Viscera"
                 end
             elseif t_type == "Lymph Node" || t_type == "Lymph Node Meta"
-                fallback_loc = "Pelvic Lymph Node"
+                LA_mod2 = _MEH._get_la()
+                if LA_mod2 !== nothing
+                    fallback_loc, fallback_subloc = LA_mod2.classify_lymph_node_location(raw_organ)
+                else
+                    fallback_loc = "Pelvic Lymph Node"
+                end
             elseif t_type == "Prostate"
                 fallback_loc = "Prostate Gland"
                 fallback_subloc = "Prostate Peripheral Zone (PZ)"
@@ -6587,12 +6671,74 @@ function create_metadata_window(
             end
             anat_active_count[] = count
         else
-            # Clear all rows
-            for i in 1:MAX_ANAT_ROWS
-                _set_menu_idx!(anat_rel_menus[i], 1)
-                _set_menu_idx!(anat_struct_menus[i], 1)
+            # ── Auto-generate Anatomical Details for lymph node lesions ──────
+            auto_details = ""
+            LA_ad = _MEH._get_la()
+            if LA_ad !== nothing && !isempty(raw_organ) && LA_ad.is_lymph_node_structure(raw_organ)
+                # Try volume-based multi-row generation from atlas overlap
+                if _MEH.global_ts_atlas[] !== nothing
+                    try
+                        atlas_ad = _MEH.global_ts_atlas[]
+                        ts_nm_ad = _MEH.global_ts_names[]
+                        mask_vol_ad = lock(_MEH._tp_cache_lock) do
+                            haskey(_MEH.tp_data_cache, _MEH.current_tp_index[]) ? _MEH.tp_data_cache[_MEH.current_tp_index[]].mask : nothing
+                        end
+                        if mask_vol_ad !== nothing && lid > 0
+                            counts_ad = LA_ad.count_atlas_overlap(mask_vol_ad, atlas_ad, lid, ts_nm_ad)
+                            auto_details = LA_ad.generate_detailed_anatomy_rows(counts_ad, ts_nm_ad; max_rows=4)
+                        end
+                    catch e
+                        @debug "[ANAT_DETAILS] Atlas overlap failed: $e"
+                    end
+                end
+                # Fallback: single row from raw_organ name
+                if isempty(auto_details)
+                    formatted = LA_ad.format_clinical_station_name(raw_organ)
+                    if !isempty(formatted)
+                        auto_details = "Inside / Contained In:$formatted"
+                    end
+                end
             end
-            _set!(anat_active_count, 0)
+
+            if !isempty(auto_details)
+                # Parse and set the auto-generated details
+                data["Anatomical Details"] = auto_details
+                db_updates["Anatomical Details"] = auto_details
+                auto_parts = split(auto_details, " | ")
+                auto_count = min(length(auto_parts), MAX_ANAT_ROWS)
+                for i in 1:auto_count
+                    p = strip(auto_parts[i])
+                    colon = findfirst(':', p)
+                    if colon !== nothing
+                        rel_str = strip(p[1:colon-1])
+                        struct_str = strip(p[colon+1:end])
+                    else
+                        rel_str = ""
+                        struct_str = p
+                    end
+                    rel_opts = anat_rel_menus[i].options[]
+                    r_idx = findfirst(==(rel_str), rel_opts)
+                    _set_menu_idx!(anat_rel_menus[i], r_idx !== nothing ? r_idx : 1)
+                    struct_opts = anat_struct_menus[i].options[]
+                    st_idx = findfirst(==(struct_str), struct_opts)
+                    if st_idx !== nothing
+                        _set_menu_idx!(anat_struct_menus[i], st_idx)
+                    else
+                        new_sopts = vcat([struct_str], struct_opts)
+                        anat_struct_menus[i].options[] = new_sopts
+                        _set_menu_idx!(anat_struct_menus[i], 1)
+                    end
+                end
+                anat_active_count[] = auto_count
+                @debug "[ANAT_DETAILS] Auto-generated $(auto_count) rows for lymph node lesion $lid"
+            else
+                # Clear all rows
+                for i in 1:MAX_ANAT_ROWS
+                    _set_menu_idx!(anat_rel_menus[i], 1)
+                    _set_menu_idx!(anat_struct_menus[i], 1)
+                end
+                _set!(anat_active_count, 0)
+            end
         end
         
         # ── Auto-fill Lesion tracking name ────────────────────────────────
@@ -7487,6 +7633,20 @@ function create_metadata_window(
                             end
                             
                             entry = lookup_anatomy(organ_name)
+                            if entry === nothing
+                                LA_paint = _MEH._get_la()
+                                if LA_paint !== nothing && LA_paint.is_lymph_node_structure(organ_name)
+                                    loc_p, subloc_p = LA_paint.classify_lymph_node_location(organ_name)
+                                    side_p = endswith(lowercase(organ_name), "_left") ? "Left" :
+                                             endswith(lowercase(organ_name), "_right") ? "Right" : ""
+                                    entry = Dict(
+                                        "lesion_type" => "Lymph Node Meta",
+                                        "anatomic_location" => loc_p,
+                                        "anatomical_sublocation" => subloc_p,
+                                        "side" => side_p
+                                    )
+                                end
+                            end
                             if entry !== nothing
                                 if haskey(entry, "side") && haskey(field_widgets, "Side")
                                     side = entry["side"]
@@ -7538,6 +7698,61 @@ function create_metadata_window(
                                             field_widgets["Anatomical Sublocation"].selection[] = subloc
                                         end
                                     end
+                                end
+                            end
+                            # ── Auto-fill Anatomical Details for LN after painting ──
+                            LA_paint2 = _MEH._get_la()
+                            if LA_paint2 !== nothing && LA_paint2.is_lymph_node_structure(organ_name)
+                                paint_details = ""
+                                if _MEH.global_ts_atlas[] !== nothing
+                                    try
+                                        atlas_p = _MEH.global_ts_atlas[]
+                                        ts_nm_p = _MEH.global_ts_names[]
+                                        mask_vol_p = lock(_MEH._tp_cache_lock) do
+                                            haskey(_MEH.tp_data_cache, _MEH.current_tp_index[]) ? _MEH.tp_data_cache[_MEH.current_tp_index[]].mask : nothing
+                                        end
+                                        if mask_vol_p !== nothing && lid > 0
+                                            counts_p = LA_paint2.count_atlas_overlap(mask_vol_p, atlas_p, lid, ts_nm_p)
+                                            paint_details = LA_paint2.generate_detailed_anatomy_rows(counts_p, ts_nm_p; max_rows=4)
+                                        end
+                                    catch e
+                                        @debug "[PAINT→ANAT_DETAILS] Atlas overlap failed: $e"
+                                    end
+                                end
+                                if isempty(paint_details)
+                                    formatted_p = LA_paint2.format_clinical_station_name(organ_name)
+                                    if !isempty(formatted_p)
+                                        paint_details = "Inside / Contained In:$formatted_p"
+                                    end
+                                end
+                                if !isempty(paint_details)
+                                    pd_parts = split(paint_details, " | ")
+                                    pd_count = min(length(pd_parts), MAX_ANAT_ROWS)
+                                    for i in 1:pd_count
+                                        p = strip(pd_parts[i])
+                                        colon = findfirst(':', p)
+                                        if colon !== nothing
+                                            rel_str = strip(p[1:colon-1])
+                                            struct_str = strip(p[colon+1:end])
+                                        else
+                                            rel_str = ""
+                                            struct_str = p
+                                        end
+                                        rel_opts = anat_rel_menus[i].options[]
+                                        r_idx = findfirst(==(rel_str), rel_opts)
+                                        _set_menu_idx!(anat_rel_menus[i], r_idx !== nothing ? r_idx : 1)
+                                        struct_opts = anat_struct_menus[i].options[]
+                                        st_idx = findfirst(==(struct_str), struct_opts)
+                                        if st_idx !== nothing
+                                            _set_menu_idx!(anat_struct_menus[i], st_idx)
+                                        else
+                                            new_sopts = vcat([struct_str], struct_opts)
+                                            anat_struct_menus[i].options[] = new_sopts
+                                            _set_menu_idx!(anat_struct_menus[i], 1)
+                                        end
+                                    end
+                                    anat_active_count[] = pd_count
+                                    @debug "[PAINT→ANAT_DETAILS] Auto-generated $(pd_count) rows for LN lesion $lid"
                                 end
                             end
                             notify(active_lesion_id)

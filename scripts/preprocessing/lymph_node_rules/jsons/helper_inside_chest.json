@@ -1,0 +1,8 @@
+{
+    "helper_inside_chest": {
+        "rule": "ConvexHullBridge",
+        "landmark_1": "helper_inside_chest_base",
+        "landmark_2": "helper_inside_chest_base",
+        "is_helper": true
+    }
+}

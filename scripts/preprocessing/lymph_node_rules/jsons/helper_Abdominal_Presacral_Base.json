@@ -1,0 +1,13 @@
+{
+    "helper_Abdominal_Presacral_Base": {
+        "rule": "PresacralAnteriorCustom",
+        "landmark": "helper_sacrum_fused",
+        "distance_mm": 10.0,
+        "is_bilateral": false,
+        "output_type": "zone",
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_sacrum_fused"
+        ]
+    }
+}

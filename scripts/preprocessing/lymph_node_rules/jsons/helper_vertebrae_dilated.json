@@ -1,0 +1,10 @@
+{
+    "helper_vertebrae_dilated": {
+        "rule": "Morphology",
+        "operation": "dilate",
+        "radius_mm": 10.0,
+        "landmark": "vertebrae",
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

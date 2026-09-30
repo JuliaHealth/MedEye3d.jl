@@ -1,0 +1,15 @@
+{
+    "helper_gap_bronchus_lung_right": {
+        "rule": "VolumetricBoundary2D",
+        "boundaries": {
+            "bronchi": "bronchi_main_right",
+            "lung": "lung_right"
+        },
+        "is_bilateral": false,
+        "keep_all_components": true,
+        "ancillary_landmarks": [
+            "bronchi_main_right",
+            "lung_right"
+        ]
+    }
+}

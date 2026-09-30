@@ -1,0 +1,20 @@
+{
+    "Thoracic_Station_6_Helper_Base": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "aortic_arch",
+        "margins_mm": {
+            "anterior": 10.0,
+            "posterior": 5.0,
+            "left": 15.0,
+            "right": 0.0,
+            "superior": 10.0,
+            "inferior": 10.0
+        },
+        "ignore_global_exclusion": true,
+        "exclude": [
+            "trachea"
+        ],
+        "ignore_fat": true,
+        "keep_all_components": false
+    }
+}

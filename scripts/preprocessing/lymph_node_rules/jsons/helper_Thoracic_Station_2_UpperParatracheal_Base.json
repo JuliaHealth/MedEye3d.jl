@@ -1,0 +1,94 @@
+{
+    "helper_paratracheal_step1_lungs_hull": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "lung_upper_lobe_left",
+            "lung_upper_lobe_right"
+        ],
+        "dependencies": [
+            "lung_upper_lobe_left",
+            "lung_upper_lobe_right"
+        ],
+        "is_helper": true
+    },
+    "helper_paratracheal_step2_sternum_hull": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_paratracheal_step1_lungs_hull",
+            "sternum"
+        ],
+        "dependencies": [
+            "helper_paratracheal_step1_lungs_hull",
+            "sternum"
+        ],
+        "is_helper": true
+    },
+    "helper_paratracheal_step3_clavicle_hull": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_paratracheal_step2_sternum_hull",
+            "clavicula_left",
+            "clavicula_right"
+        ],
+        "dependencies": [
+            "helper_paratracheal_step2_sternum_hull",
+            "clavicula_left",
+            "clavicula_right"
+        ],
+        "is_helper": true
+    },
+    "helper_Thoracic_Station_2_UpperParatracheal_Base": {
+        "rule": "GeometricConstraint",
+        "is_helper": true,
+        "dependencies": [
+            "helper_paratracheal_step3_clavicle_hull",
+            "helper_prevascular_unified",
+            "rib_1",
+            "aorta"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "helper_prevascular_unified",
+                "boundary_part": "min",
+                "slice_wise": true,
+                "allow_missing": true
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "rib_1",
+                "boundary_part": "center"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "aorta",
+                "boundary_part": "max"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "vertebrae",
+                "boundary_part": "min",
+                "slice_wise": true,
+                "comment": "Anterior to the most anterior voxel of vertebral column on a per slice basis"
+            }
+        ],
+        "base_landmark": "helper_paratracheal_step3_clavicle_hull",
+        "exclude": [
+            "heart",
+            "aorta",
+            "aorta_ascending",
+            "aorta_descending",
+            "aortic_arch_computed",
+            "pulmonary_artery",
+            "superior_vena_cava",
+            "inferior_vena_cava",
+            "brachiocephalic_vein_left",
+            "brachiocephalic_vein_right",
+            "esophagus",
+            "sternum",
+            "helper_sternum_costal_cartilages_bridge",
+            "trachea",
+            "lung_trachea_bronchia"
+        ]
+    }
+}

@@ -1,0 +1,21 @@
+{
+    "Abdominal_Station_17_Anterior_Pancreaticoduodenal": {
+        "rule": "BitwiseAnd",
+        "mask_name": "helper_pancreaticoduodenal_base",
+        "constraints": [
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "pancreas",
+                "boundary_part": "center",
+                "slice_wise": true
+            }
+        ],
+        "exclude": [],
+        "depends_on": ["helper_pancreaticoduodenal_base"],
+        "overlap_precedence": ["Abdominal_Station_9_Celiac", "Abdominal_Station_14_SMA"],
+        "category": "Lymph_Node",
+        "group": "Abdominal",
+        "color": [120, 160, 200],
+        "comments": "Station 17: Anterior half of pancreaticoduodenal base"
+    }
+}

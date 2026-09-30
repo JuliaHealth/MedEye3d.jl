@@ -1,0 +1,321 @@
+{
+    "helper_subcarinial_a": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "lung_left",
+            "lung_right"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "constraints": [
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "spinal_cord",
+                "boundary_part": "max"
+            }
+        ]
+    },
+    "helper_subcarinial_b": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "bronchi_main_left",
+            "bronchi_main_right"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "bronchi_main_left",
+            "bronchi_main_right"
+        ]
+    },
+    "helper_subcarinial_c": {
+        "rule": "Combine",
+        "method": "union",
+        "components": [
+            "vertebrae"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "vertebrae",
+                "boundary_part": "min"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "spinal_cord",
+                "boundary_part": "center"
+            }
+        ],
+        "exclude": [
+            "lung_upper_lobe_left",
+            "lung_lower_lobe_left",
+            "lung_upper_lobe_right",
+            "lung_middle_lobe_right",
+            "lung_lower_lobe_right"
+        ],
+        "keep_all_components": false,
+        "z_plane_restriction": {
+            "superior": "carina",
+            "superior_part": "center",
+            "inferior": "lung_trachea_bronchia",
+            "inferior_part": "min",
+            "inferior_selection_mode": "min_physical"
+        },
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "vertebrae",
+            "spinal_cord"
+        ]
+    },
+    "helper_subcarinial_d_extruded": {
+        "rule": "AnteriorGrowthMask",
+        "input": "helper_subcarinial_b",
+        "distance_mm": 40.0,
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_subcarinial_b"
+        ]
+    },
+    "helper_subcarinial_d": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_subcarinial_d_extruded"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_subcarinial_d_extruded"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "heart",
+                "boundary_part": "min"
+            }
+        ]
+    },
+    "Thoracic_Station_7_Subcarinial": {
+        "rule": "Combine",
+        "method": "union",
+        "components": [
+            "helper_subcarinial_a_clean",
+            "helper_subcarinial_a_lcc",
+            "helper_subcarinial_a_lcc_b_hull",
+            "helper_subcarinial_b",
+            "helper_subcarinial_a_b_hull",
+            "helper_subcarinial_c",
+            "helper_subcarinial_d",
+            "helper_subcarinial_c_d_hull",
+            "helper_subcarinial_c_bridge"
+        ],
+        "is_bilateral": false,
+        "exclude": [
+            "heart",
+            "spine",
+            "vertebrae",
+            "spinal_cord",
+            "atrial_appendage_left",
+            "lung_upper_lobe_left",
+            "lung_lower_lobe_left",
+            "lung_upper_lobe_right",
+            "lung_middle_lobe_right",
+            "lung_lower_lobe_right",
+            "aorta"
+        ],
+        "overlap_precedence": [
+            "Thoracic_Station_8_Paraoesophageal",
+            "Thoracic_Station_3P_Retrotracheal",
+            "Thoracic_Station_Prepericardial"
+        ],
+        "z_plane_restriction": {
+            "superior": "carina",
+            "superior_part": "center",
+            "inferior": "lung_trachea_bronchia",
+            "inferior_part": "min",
+            "inferior_selection_mode": "min_physical"
+        },
+        "per_slice_lcc": true,
+        "keep_all_components": false,
+        "depends_on": [
+            "helper_subcarinial_a_clean",
+            "helper_subcarinial_a_lcc",
+            "helper_subcarinial_a_lcc_b_hull",
+            "helper_subcarinial_b",
+            "helper_subcarinial_a_b_hull",
+            "helper_subcarinial_c",
+            "helper_subcarinial_c_d_hull",
+            "helper_subcarinial_d",
+            "helper_hll",
+            "helper_hrr",
+            "helper_subcarinial_c_bridge",
+            "bronchi_main_left",
+            "bronchi_main_right"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "heart",
+                "boundary_part": "center"
+            },
+            {
+                "constraint_type": "LeftOf",
+                "landmark": "bronchi_main_right",
+                "boundary_part": "center"
+            },
+            {
+                "constraint_type": "RightOf",
+                "landmark": "bronchi_main_left",
+                "boundary_part": "center"
+            }
+        ]
+    },
+    "helper_subcarinial_a_lcc": {
+        "rule": "Combine",
+        "method": "union",
+        "components": [
+            "helper_subcarinial_a"
+        ],
+        "exclude": [
+            "lung_left",
+            "lung_right"
+        ],
+        "keep_all_components": false,
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_subcarinial_a"
+        ]
+    },
+    "helper_subcarinial_c_d_hull": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_subcarinial_c",
+            "helper_subcarinial_d_extruded"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_subcarinial_c",
+            "helper_subcarinial_d_extruded"
+        ]
+    },
+    "helper_hll_hull": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_subcarinial_d_extruded",
+            "lung_left"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_subcarinial_d_extruded"
+        ]
+    },
+    "helper_hrr_hull": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_subcarinial_d_extruded",
+            "lung_right"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_subcarinial_d_extruded"
+        ]
+    },
+    "helper_hll": {
+        "rule": "Combine",
+        "method": "union",
+        "components": [
+            "helper_hll_hull"
+        ],
+        "exclude": [
+            "lung_left",
+            "lung_right",
+            "helper_subcarinial_d_extruded"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_hll_hull",
+            "helper_subcarinial_d_extruded"
+        ]
+    },
+    "helper_hrr": {
+        "rule": "Combine",
+        "method": "union",
+        "components": [
+            "helper_hrr_hull"
+        ],
+        "exclude": [
+            "lung_left",
+            "lung_right",
+            "helper_subcarinial_d_extruded"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_hrr_hull",
+            "helper_subcarinial_d_extruded"
+        ]
+    },
+    "helper_subcarinial_a_clean": {
+        "rule": "Combine",
+        "method": "union",
+        "components": [
+            "helper_subcarinial_a"
+        ],
+        "exclude": [
+            "vertebrae",
+            "spinal_cord",
+            "lung_left",
+            "lung_right"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_subcarinial_a"
+        ]
+    },
+    "helper_subcarinial_a_b_hull": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_subcarinial_a_clean",
+            "helper_subcarinial_b"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_subcarinial_a_clean",
+            "helper_subcarinial_b"
+        ]
+    },
+    "helper_subcarinial_a_lcc_b_hull": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_subcarinial_a_lcc",
+            "helper_subcarinial_b"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_subcarinial_a_lcc",
+            "helper_subcarinial_b"
+        ]
+    },
+    "helper_subcarinial_c_bridge": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_subcarinial_c",
+            "helper_subcarinial_b"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_subcarinial_c",
+            "helper_subcarinial_b"
+        ]
+    }
+}

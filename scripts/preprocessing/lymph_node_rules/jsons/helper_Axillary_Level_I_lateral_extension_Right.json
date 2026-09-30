@@ -1,0 +1,20 @@
+{
+    "helper_Axillary_Level_I_lateral_extension_Right": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "helper_Axillary_Level_I_base_Right",
+        "side": "right",
+        "is_helper": true,
+        "keep_all_components": true,
+        "margins_mm": {
+            "lateral": 50.0,
+            "medial": 0.0,
+            "anterior": 0.0,
+            "posterior": 0.0,
+            "superior": 0.0,
+            "inferior": 0.0
+        },
+        "dependencies": [
+            "helper_Axillary_Level_I_base_Right"
+        ]
+    }
+}

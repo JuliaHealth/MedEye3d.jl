@@ -1,0 +1,10 @@
+{
+    "helper_rectum_dilated": {
+        "rule": "Morphology",
+        "operation": "dilate",
+        "radius_mm": 20.0,
+        "landmark": "rectum",
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

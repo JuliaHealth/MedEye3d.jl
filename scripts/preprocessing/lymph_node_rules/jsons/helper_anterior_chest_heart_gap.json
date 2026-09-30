@@ -1,0 +1,12 @@
+{
+    "helper_anterior_chest_heart_gap": {
+        "rule": "AnteriorGrowthMask",
+        "input_mask": "heart",
+        "growth_mm": 50.0,
+        "is_bilateral": false,
+        "keep_all_components": true,
+        "ancillary_landmarks": [
+            "heart"
+        ]
+    }
+}

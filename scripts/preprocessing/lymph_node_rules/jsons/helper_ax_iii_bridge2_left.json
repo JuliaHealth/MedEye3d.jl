@@ -1,0 +1,8 @@
+{
+    "helper_ax_iii_bridge2_left": {
+        "rule": "ConvexHullBridge",
+        "landmark_1": "rib_left_1",
+        "landmark_2": "clavicula_left",
+        "is_helper": true
+    }
+}

@@ -1,0 +1,43 @@
+{
+    "Thoracic_Station_6_Paraaortic": {
+        "rule": "ConvexHull2D",
+        "category": "Lymph_Node",
+        "targets": [
+            "lung_left",
+            "aortic_arch_computed"
+        ],
+        "is_bilateral": false,
+        "overlap_precedence": [
+            "Thoracic_Station_Prepericardial_Left",
+            "Thoracic_Station_Prepericardial_Right",
+            "Thoracic_Station_2_UpperParatracheal_Left",
+            "Thoracic_Station_2_UpperParatracheal_Right",
+            "Thoracic_Station_2_UpperParatracheal",
+            "Thoracic_Station_4_LowerParatracheal_Left",
+            "Thoracic_Station_4_LowerParatracheal_Right",
+            "Thoracic_Station_4_LowerParatracheal"
+        ],
+        "exclude": [
+            "aorta",
+            "aortic_arch_computed",
+            "lung_left",
+            "pulmonary_artery",
+            "sternum",
+            "trachea",
+            "superior_vena_cava",
+            "helper_pleural_space_left",
+            "helper_pleural_space_right"
+        ],
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "dependencies": [
+            "lung_left",
+            "aortic_arch_computed"
+        ],
+        "z_plane_restriction": {
+            "superior": "aortic_arch_exported",
+            "inferior": "aortic_arch_exported"
+        },
+        "per_slice_lcc": true
+    }
+}

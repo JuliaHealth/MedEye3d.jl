@@ -1,0 +1,106 @@
+{
+    "helper_Deep_Inguinal": {
+        "rule": "AnisotropicMargin",
+        "is_bilateral": true,
+        "base_landmark": "iliac_vena",
+        "margins_mm": {
+            "lateral": 0.0,
+            "medial": 20.0,
+            "anterior": 15.0,
+            "posterior": 0.0,
+            "superior": 20.0,
+            "inferior": 20.0
+        },
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "femur",
+                "boundary_part": "max",
+                "comment": "Superior/Cranial Boundary: Top of the femur"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "femur",
+                "boundary_part": "max",
+                "offset_mm": -50.0,
+                "comment": "Inferior/Caudal Boundary: 50 mm below the top of the femur"
+            }
+        ],
+        "exclude": [
+            "pelvic_bones",
+            "sacrum",
+            "hip",
+            "femur",
+            "iliac_vena",
+            "iliac_artery",
+            "tissue_muscle"
+        ],
+        "ignore_fat": true
+    },
+    "helper_Superficial_Inguinal": {
+        "rule": "AnisotropicMargin",
+        "is_bilateral": true,
+        "base_landmark": "iliac_vena",
+        "margins_mm": {
+            "lateral": 25.0,
+            "medial": 15.0,
+            "anterior": 30.0,
+            "posterior": 0.0,
+            "superior": 20.0,
+            "inferior": 80.0
+        },
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "femur",
+                "boundary_part": "max",
+                "comment": "Superior/Cranial Boundary: Top of the femur"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "hip",
+                "boundary_part": "min",
+                "comment": "Inferior/Caudal Boundary: Lowest point of the hip bone"
+            }
+        ],
+        "exclude": [
+            "helper_Deep_Inguinal",
+            "pelvic_bones",
+            "sacrum",
+            "hip",
+            "femur",
+            "iliac_vena",
+            "iliac_artery",
+            "tissue_muscle"
+        ],
+        "ignore_fat": false
+    },
+    "Abdominal_Inguinal": {
+        "rule": "BitwiseOr",
+        "is_bilateral": true,
+        "targets": [
+            "helper_Deep_Inguinal",
+            "helper_Superficial_Inguinal"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "Inguinal_Ligament",
+                "boundary_part": "max",
+                "offset_mm": 5.0,
+                "comment": "Prevent superior/posterior spill into the pelvis"
+            }
+        ],
+        "overlap_precedence": [
+            "Abdominal_Mesenteric_Interenteric"
+        ],
+        "comments": "Final Inguinal: Union of Deep and Superficial Inguinal compartments exactly following adaptations.md.",
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "keep_all_components": true,
+        "exclude": [
+            "femur",
+            "pelvis"
+        ]
+    }
+}

@@ -1,0 +1,10 @@
+{
+    "helper_paraaortic_iliac_bridge_coronal": {
+        "rule": "ConvexHullBridge",
+        "plane": "coronal",
+        "bridge_landmarks": ["helper_16b2_bottom_part", "helper_common_iliac_top_part"],
+        "depends_on": ["helper_16b2_bottom_part", "helper_common_iliac_top_part"],
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

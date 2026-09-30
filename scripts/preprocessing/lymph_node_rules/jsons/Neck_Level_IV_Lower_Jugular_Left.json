@@ -1,0 +1,75 @@
+{
+    "Neck_Level_IV_Lower_Jugular_Left": {
+        "rule": "BitwiseOr",
+        "targets": [
+            "helper_Neck_Level_IV_hull_Left"
+        ],
+        "side": "left",
+        "z_plane_restriction": {
+            "superior": "cricoid_cartilage",
+            "superior_part": "min",
+            "inferior": "sternum",
+            "inferior_part": "max",
+            "comment": "Superior: cricoid bottom. Inferior: sternum top."
+        },
+        "constraints": [
+            {
+                "constraint_type": "LeftOf",
+                "landmark": "trachea",
+                "boundary_part": "center",
+                "slice_wise": true,
+                "comment": "Medial division based on middle of trachea"
+            }
+        ],
+        "exclude": [
+            "internal_carotid_artery",
+            "middle_scalene",
+            "posterior_scalene",
+            "levator_scapulae",
+            "trapezius",
+            "platysma",
+            "digastric",
+            "thyroid_gland",
+            "submandibular_gland",
+            "parotid_gland",
+            "trachea",
+            "esophagus",
+            "pharynx",
+            "larynx",
+            "fused_spine",
+            "spinal_cord",
+            "clavicula",
+            "scapula",
+            "lung",
+            "lung_left",
+            "lung_right",
+            "prevertebral",
+            "subclavian_artery",
+            "thyroid_cartilage",
+            "cricoid_cartilage",
+            "internal_jugular_vein",
+            "common_carotid_artery",
+            "sternocleidomastoid",
+            "anterior_scalene"
+        ],
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "keep_all_components": false,
+        "group": "Neck",
+        "category": "Lymph_Node",
+        "color": [
+            200,
+            150,
+            100
+        ],
+        "dependencies": [
+            "helper_Neck_Level_IV_hull_Left",
+            "trachea"
+        ],
+        "ancillary_landmarks": [
+            "trachea",
+            "cricoid_cartilage",
+            "sternum"
+        ]
+    }
+}

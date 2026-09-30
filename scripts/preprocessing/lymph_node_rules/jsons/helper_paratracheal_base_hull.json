@@ -1,0 +1,10 @@
+{
+    "helper_paratracheal_base_hull": {
+        "rule": "ConvexHullBridge",
+        "is_helper": true,
+        "bridge_landmarks": [
+            "lung_left",
+            "lung_right"
+        ]
+    }
+}

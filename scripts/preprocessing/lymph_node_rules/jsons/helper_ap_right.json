@@ -1,0 +1,18 @@
+{
+    "helper_ap_right": {
+        "rule": "Combine",
+        "inputs": ["pectoralis_major_right"],
+        "side": "right",
+        "is_helper": true,
+        "constraints": [
+            {
+                "constraint_type": "MedialTo",
+                "landmark": "pectoralis_minor_right",
+                "boundary_part": "medial",
+                "slice_wise": true,
+                "comment": "Part of pectoralis major MEDIAL to the medial edge of pectoralis minor"
+            }
+        ],
+        "dependencies": ["pectoralis_major_right", "pectoralis_minor_right"]
+    }
+}

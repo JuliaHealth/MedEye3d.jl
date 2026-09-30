@@ -602,25 +602,27 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     end
 
     if haskey(h5_init, "_meta_")
-        for k in sort(collect(keys(h5_init["_meta_"])))
-            if startswith(k, "anatomy_labels_tp_")
-                try
-                    tp_raw = JSON.parse(read(h5_init["_meta_/$k"]))
-                    for (id_str, name) in tp_raw
-                        id = parse(Int, id_str)
-                        if !occursin("_class_", name) && !haskey(ts_names, id)
-                            ts_names[id] = name
-                        end
-                    end
-                    break
-                catch; end
-            end
-        end
-        if haskey(h5_init, "_meta_/max_anatomy_labels.json") && isempty(ts_names)
+        if haskey(h5_init, "_meta_/max_anatomy_labels.json")
             try
                 raw_labels = JSON.parse(read(h5_init["_meta_/max_anatomy_labels.json"]))
                 ts_names = Dict{Int,String}(parse(Int, k) => v for (k, v) in raw_labels)
             catch; end
+        end
+        if isempty(ts_names)
+            for k in sort(collect(keys(h5_init["_meta_"])))
+                if startswith(k, "anatomy_labels_tp_")
+                    try
+                        tp_raw = JSON.parse(read(h5_init["_meta_/$k"]))
+                        for (id_str, name) in tp_raw
+                            id = parse(Int, id_str)
+                            if !occursin("_class_", name) && !haskey(ts_names, id)
+                                ts_names[id] = name
+                            end
+                        end
+                        break
+                    catch; end
+                end
+            end
         end
         if haskey(h5_init, "_meta_/organ_mapping")
             try

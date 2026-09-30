@@ -1,0 +1,23 @@
+{
+    "Abdominal_Obturator_Base_Right": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": [
+            "hip",
+            "obturator_internus"
+        ],
+        "margins_mm": {
+            "medial": 18.0
+        },
+        "is_bilateral": false,
+        "depends_on": [
+            "hip",
+            "obturator_internus"
+        ],
+        "ancillary_landmarks": [
+            "hip",
+            "obturator_internus"
+        ],
+        "comments": "Creates a base structure by expanding the medial border of the hip/obturator internus by 18mm medially. The final obturator mask will be intersected with this to limit its medial extent.",
+        "side": "right"
+    }
+}

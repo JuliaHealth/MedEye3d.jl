@@ -1,0 +1,74 @@
+{
+    "helper_pyloric_base": {
+        "rule": "DilatedMask",
+        "base_landmark": "helper_pyloric_bridge",
+        "keep_all_components": false,
+        "exclude": [
+            "stomach",
+            "duodenum",
+            "pancreas",
+            "liver",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right",
+            "aorta",
+            "inferior_vena_cava"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_pyloric_bridge"
+        ],
+        "comments": "Pyloric base: 5mm sup/inf/left + 25mm right around pyloric area. Single LCC.",
+        "margin_mm": 10.0,
+        "post_overlap_lcc": true
+    },
+    "Abdominal_Station_5_Suprapyloric": {
+        "rule": "BitwiseAnd",
+        "mask_name": "helper_pyloric_base",
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "helper_pyloric_derived",
+                "boundary_part": "center"
+            }
+        ],
+        "exclude": [],
+        "depends_on": [
+            "helper_pyloric_base",
+            "helper_pyloric_derived"
+        ],
+        "category": "Lymph_Node",
+        "group": "Abdominal",
+        "color": [
+            220,
+            180,
+            100
+        ],
+        "comments": "Station 5 Suprapyloric: upper half of pyloric base"
+    },
+    "Abdominal_Station_6_Infrapyloric": {
+        "rule": "BitwiseAnd",
+        "mask_name": "helper_pyloric_base",
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "helper_pyloric_derived",
+                "boundary_part": "center"
+            }
+        ],
+        "exclude": [],
+        "depends_on": [
+            "helper_pyloric_base",
+            "helper_pyloric_derived"
+        ],
+        "category": "Lymph_Node",
+        "group": "Abdominal",
+        "color": [
+            180,
+            220,
+            100
+        ],
+        "comments": "Station 6 Infrapyloric: lower half of pyloric base"
+    }
+}

@@ -1,0 +1,9 @@
+{
+    "helper_b_axilla_left": {
+        "rule": "ConvexHullBridge",
+        "landmark_1": "pectoralis_major_left",
+        "landmark_2": "subscapularis",
+        "side": "left",
+        "is_helper": true
+    }
+}

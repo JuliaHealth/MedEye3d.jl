@@ -1,0 +1,75 @@
+{
+    "helper_Abdominal_Paraaortic_Base": {
+        "rule": "BitwiseOr",
+        "targets": [
+            "helper_Paraaortic_Aorta",
+            "helper_Paraaortic_IVC"
+        ],
+        "is_bilateral": false,
+        "keep_all_components": true,
+        "ignore_global_exclusion": true,
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "vertebrae_T11",
+                "boundary_part": "max",
+                "comment": "Superior limit: Top of T11 to ensure full coverage of Aortic Hiatus (Station 16a1)"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "aorta",
+                "boundary_part": "min",
+                "comment": "Inferior limit: Aortic bifurcation",
+                "offset_mm": -5.0
+            },
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "aorta",
+                "boundary_part": "min",
+                "slice_wise": true,
+                "comment": "Anterior limit: most anterior voxel of aorta segmentation"
+            }
+        ],
+        "exclude": [
+            "fused_spine",
+            "psoas_major_left",
+            "psoas_major_right",
+            "kidney_left",
+            "kidney_right",
+            "pancreas",
+            "duodenum",
+            "small_bowel",
+            "stomach",
+            "colon",
+            "helper_RPC_exclude"
+        ],
+        "comments": "PIVOTAL defined Paraaortic with asymmetric vessel expansions and specific RPC exclusion.",
+        "ancillary_landmarks": [
+            "aorta",
+            "inferior_vena_cava",
+            "fused_spine",
+            "psoas_major_left",
+            "psoas_major_right",
+            "kidney_left",
+            "kidney_right",
+            "pancreas",
+            "duodenum",
+            "small_bowel",
+            "stomach",
+            "colon",
+            "vertebrae_L2",
+            "vertebrae_T12",
+            "vertebrae_L1",
+            "vertebrae_T11"
+        ],
+        "roi": {
+            "landmark": "aorta",
+            "padding_mm": [
+                50,
+                50,
+                50
+            ]
+        },
+        "is_helper": true
+    }
+}

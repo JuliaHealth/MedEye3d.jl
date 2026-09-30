@@ -1,0 +1,65 @@
+{
+    "Neck_Parotid": {
+        "rule": "DilatedMask",
+        "is_bilateral": true,
+        "input_landmarks": [
+            "parotid_gland"
+        ],
+        "dilation_mm": 3.0,
+        "constraints": [],
+        "exclude": [
+            "mandible",
+            "skull",
+            "sternocleidomastoid",
+            "internal_jugular_vein",
+            "pharynx",
+            "lev_vert"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 5
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "mandible",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "skull",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "sternocleidomastoid",
+                "expected": 0
+            }
+        ],
+        "keep_all_components": true,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "comments": "Neck Level VIII (Parotid): 5mm margin around gland, excluding gland tissue and surrounding muscles/bones.",
+        "ancillary_landmarks": [
+            "parotid_gland",
+            "mandible",
+            "skull",
+            "sternocleidomastoid",
+            "masseter",
+            "pharynx",
+            "internal_jugular_vein",
+            "lev_vert"
+        ],
+        "roi": {
+            "landmark": "parotid_gland",
+            "padding_mm": [
+                50,
+                50,
+                50
+            ]
+        },
+        "depends_on": [
+            "lev_vert"
+        ]
+    }
+}

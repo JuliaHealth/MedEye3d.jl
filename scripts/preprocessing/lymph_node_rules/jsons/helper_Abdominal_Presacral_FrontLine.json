@@ -1,0 +1,12 @@
+{
+    "helper_Abdominal_Presacral_FrontLine": {
+        "rule": "PresacralAnteriorCustom",
+        "landmark": "helper_sacrum_fused",
+        "distance_mm": 10.0,
+        "is_bilateral": false,
+        "output_type": "front_line",
+        "depends_on": [
+            "helper_sacrum_fused"
+        ]
+    }
+}

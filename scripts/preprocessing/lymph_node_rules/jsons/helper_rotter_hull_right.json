@@ -1,0 +1,9 @@
+{
+    "helper_rotter_hull_right": {
+        "rule": "ConvexHullBridge",
+        "landmark_1": "helper_pectoralis_minor_right",
+        "landmark_2": "helper_rotter_pm_ext_right",
+        "side": "right",
+        "is_helper": true
+    }
+}

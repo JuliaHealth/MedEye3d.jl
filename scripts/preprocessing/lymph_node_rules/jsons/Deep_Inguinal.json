@@ -1,0 +1,99 @@
+{
+    "helper_Deep_Inguinal_base": {
+        "rule": "AnisotropicMargin",
+        "is_bilateral": true,
+        "base_landmark": "iliac_vena",
+        "roi": {
+            "landmark": "iliac_vena",
+            "padding_mm": [
+                30,
+                30,
+                80
+            ]
+        },
+        "margins_mm": {
+            "lateral": 0,
+            "medial": 20,
+            "anterior": 15,
+            "posterior": 0,
+            "superior": 20,
+            "inferior": 20
+        },
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "femur",
+                "offset_mm": -50,
+                "boundary_part": "max",
+                "comment": "Saphenofemoral junction proxy"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "femur",
+                "boundary_part": "max",
+                "comment": "Acetabulum roof proxy"
+            }
+        ],
+        "exclude": [
+            "pelvis",
+            "hip",
+            "femur",
+            "iliac_vena",
+            "iliac_artery",
+            "tissue_muscle",
+            "urinary_bladder",
+            "skeletal_muscle",
+            "abdominal_cavity"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 5
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "iliac_vena",
+                "expected": 0
+            }
+        ],
+        "ignore_fat": true,
+        "ancillary_landmarks": [
+            "femur",
+            "hip",
+            "iliac_vena",
+            "iliac_artery",
+            "tissue_muscle",
+            "urinary_bladder",
+            "pelvis"
+        ],
+        "comments": "Deep ILNs are medial to the femoral vein, anterior to pectineus.",
+        "is_helper": true,
+        "category": "new_helpers"
+    },
+    "Deep_Inguinal_Left": {
+        "rule": "InguinalAnteriorProxy",
+        "input": "helper_Deep_Inguinal_base_Left",
+        "side": "left",
+        "is_bilateral": false,
+        "depends_on": [
+            "helper_Deep_Inguinal_base",
+            "hip"
+        ],
+        "post_overlap_lcc": true,
+        "category": "Lymph_Node",
+        "group": "Abdominal"
+    },
+    "Deep_Inguinal_Right": {
+        "rule": "InguinalAnteriorProxy",
+        "input": "helper_Deep_Inguinal_base_Right",
+        "side": "right",
+        "is_bilateral": false,
+        "depends_on": [
+            "helper_Deep_Inguinal_base",
+            "hip"
+        ],
+        "post_overlap_lcc": true,
+        "category": "Lymph_Node",
+        "group": "Abdominal"
+    }
+}

@@ -1,0 +1,8 @@
+{
+    "helper_subcarinial_heart_hull": {
+        "rule": "ConvexHull2D",
+        "targets": ["helper_Thoracic_Station_7_Subcarinial_base_a", "heart"],
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

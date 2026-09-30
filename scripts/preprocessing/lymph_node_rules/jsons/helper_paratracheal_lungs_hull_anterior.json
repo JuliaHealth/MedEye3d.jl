@@ -1,0 +1,15 @@
+{
+    "helper_paratracheal_lungs_hull_anterior": {
+        "rule": "GeometricConstraint",
+        "constraints": [
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "trachea",
+                "boundary_part": "max",
+                "slice_wise": true
+            }
+        ],
+        "is_helper": true,
+        "base_landmark": "helper_paratracheal_base_hull"
+    }
+}

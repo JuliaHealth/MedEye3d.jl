@@ -1,0 +1,21 @@
+{
+    "Thoracic_Station_1_LowCervical": {
+        "rule": "Station1LowCervical",
+        "keep_all_components": true,
+        "is_bilateral": true,
+        "input": "body",
+        "dependencies": {
+            "cricoid": "cricoid_cartilage",
+            "trachea": "trachea",
+            "manubrium": "manubrium",
+            "clavicle": "clavicula",
+            "esophagus": "esophagus",
+            "thyroid": "thyroid_gland",
+            "lung_l": "lung_left",
+            "lung_r": "lung_right",
+            "scm": "helper_scm_hull",
+            "scalene": "helper_scalene_hull"
+        },
+        "comments": "Station 1 Low Cervical nodes generated via custom kernel and automatically split."
+    }
+}

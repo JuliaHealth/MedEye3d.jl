@@ -1,0 +1,111 @@
+{
+    "Abdominal_Pararectal": {
+        "rule": "DilatedMask",
+        "input_landmarks": [
+            "rectum"
+        ],
+        "dilation_mm": 15.0,
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "hip",
+                "boundary_part": "max",
+                "comment": "Upper constraint to be top of hip bones"
+            }
+        ],
+        "exclude": [
+            {
+                "landmark": "urinary_bladder",
+                "margin_mm": 2.0
+            },
+            {
+                "landmark": "prostate",
+                "margin_mm": 2.0
+            },
+            {
+                "landmark": "uterus",
+                "margin_mm": 2.0
+            },
+            {
+                "landmark": "sacrum",
+                "margin_mm": 2.0
+            },
+            {
+                "landmark": "pelvis",
+                "margin_mm": 2.0
+            },
+            {
+                "landmark": "iliac_artery",
+                "margin_mm": 2.0
+            },
+            {
+                "landmark": "iliac_vena",
+                "margin_mm": 2.0
+            },
+            "iliopsoas",
+            "helper_pelvis_gluteal",
+            "stomach",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "liver",
+            "spleen",
+            "pancreas",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right",
+            "aorta",
+            "inferior_vena_cava",
+            "fused_spine",
+            "spinal_cord"
+        ],
+        "keep_all_components": false,
+        "is_bilateral": false,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "sacrum",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": [
+                    "prostate",
+                    "uterus"
+                ],
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 5
+            }
+        ],
+        "comments": "Abdominal Pararectal (Perimesorectal): 15mm expansion around the rectum, fat-restricted, urogenital and pelvic-wall exclusions.",
+        "ancillary_landmarks": [
+            "iliac_artery",
+            "iliac_vena",
+            "pelvis",
+            "prostate",
+            "rectum",
+            "sacrum",
+            "urinary_bladder",
+            "uterus",
+            "iliopsoas",
+            "helper_pelvis_gluteal"
+        ],
+        "roi": {
+            "landmark": "rectum",
+            "padding_mm": [
+                100,
+                100,
+                100
+            ]
+        },
+        "overlap_precedence": [
+            "Abdominal_Presacral",
+            "Abdominal_Mesenteric_Interenteric"
+        ]
+    }
+}

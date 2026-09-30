@@ -1,0 +1,57 @@
+{
+    "Axillary_Rotter_Left": {
+        "rule": "AxillaryRTOG",
+        "side": "left",
+        "level": "rotter",
+        "color": [
+            255,
+            255,
+            100
+        ],
+        "group": "Thoracic",
+        "category": "Lymph_Node",
+        "exclude": [
+            "lung",
+            "clavicula",
+            "scapula",
+            "humerus",
+            "pectoralis_major",
+            "latissimus_dorsi",
+            "serratus_anterior",
+            "subclavian_artery",
+            "subscapularis",
+            "deltoid",
+            "pectoralis_minor",
+            "teres_major",
+            "intercostal_muscles",
+            "triceps_brachii",
+            "biceps_brachii",
+            "coracobrachialis",
+            "infraspinatus",
+            "supraspinatus",
+            "humerus_left",
+            "humerus_right",
+            "clavicula_left",
+            "clavicula_right",
+            "scapula_left",
+            "scapula_right",
+            "deltoid_left",
+            "deltoid_right",
+            "subscapularis_left",
+            "subscapularis_right",
+            "teres_minor"
+        ],
+        "keep_all_components": true,
+        "is_dominant": true,
+        "overlap_precedence": [],
+        "dependencies": {
+            "helper_chestwall_bridge": "helper_chestwall_bridge",
+            "pectoralis_major_left": "pectoralis_major_left",
+            "pectoralis_major_right": "pectoralis_major_right",
+            "subscapularis_left": "subscapularis_left",
+            "subscapularis_right": "subscapularis_right",
+            "subclavian_artery_left": "subclavian_artery_left",
+            "subclavian_artery_right": "subclavian_artery_right"
+        }
+    }
+}

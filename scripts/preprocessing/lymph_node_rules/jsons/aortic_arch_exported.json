@@ -1,0 +1,10 @@
+{
+    "aortic_arch_exported": {
+        "rule": "Copy",
+        "input": "aortic_arch_computed",
+        "category": "new_helpers",
+        "dependencies": [
+            "aortic_arch_computed"
+        ]
+    }
+}

@@ -2357,835 +2357,1467 @@
     "anatomical_sublocation": "Vascular (Arterial/Venous)"
   },
   "Abdominal_Station_1_Right_Paracardial": {
-    "detailed": "Abdominal_Station_1_Right_Paracardial",
+    "detailed": "Station 1 Right Paracardial Lymph Node",
     "generalized": "",
-    "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "lev_vert": {
-    "detailed": "lev_vert",
+    "detailed": "Vertebral Column",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "N/A"
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
   },
   "Abdominal_Station_16a1_Aortic_Hiatus": {
-    "detailed": "Abdominal_Station_16a1_Aortic_Hiatus",
+    "detailed": "Station 16a1 Aortic Hiatus Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Retroperitoneal / Para-Aortic"
   },
   "Abdominal_Celiac_Helper_Aorta_Expanded": {
     "detailed": "Abdominal_Celiac_Helper_Aorta_Expanded",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Abdominal_Station_Inferior_Pancreatic": {
-    "detailed": "Abdominal_Station_Inferior_Pancreatic",
+    "detailed": "Inferior Pancreatic Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Neck_Level_IV_Lower_Jugular_Left": {
-    "detailed": "Neck_Level_IV_Lower_Jugular_Left",
+    "detailed": "Neck Level IV Lower Jugular Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Neck"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
   },
   "Neck_Retropharyngeal": {
-    "detailed": "Neck_Retropharyngeal",
+    "detailed": "Retropharyngeal Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Neck"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
   },
   "Deep_Inguinal_Left": {
-    "detailed": "Deep_Inguinal_Left",
+    "detailed": "Deep Inguinal Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Inguinal"
   },
   "Deep_Inguinal_Right": {
-    "detailed": "Deep_Inguinal_Right",
+    "detailed": "Deep Inguinal Lymph Node (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Inguinal"
   },
   "Inguinal_Ligament": {
-    "detailed": "Inguinal_Ligament",
+    "detailed": "Inguinal Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Inguinal"
   },
   "Abdominal_External_Iliac_Right": {
-    "detailed": "Abdominal_External_Iliac_Right",
+    "detailed": "External Iliac Lymph Node (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Pelvic Lymph Node",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "External Iliac"
   },
   "Axillary_Level_I_Right": {
-    "detailed": "Axillary_Level_I_Right",
+    "detailed": "Axillary Level I Lymph Node (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Axillary"
   },
   "Neck_Level_Va_Upper_Posterior_Triangle": {
-    "detailed": "Neck_Level_Va_Upper_Posterior_Triangle",
+    "detailed": "Neck Level Va Upper Posterior Triangle Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Neck"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
   },
   "Thoracic_Station_5_Subaortic": {
-    "detailed": "Thoracic_Station_5_Subaortic",
+    "detailed": "Station 5 Subaortic (AP Window) Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Abdominal_Station_10_Splenic_Hilum": {
-    "detailed": "Abdominal_Station_10_Splenic_Hilum",
+    "detailed": "Station 10 Splenic Hilum Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Abdominal_Station_16a2_Upper_Middle_Paraaortic": {
-    "detailed": "Abdominal_Station_16a2_Upper_Middle_Paraaortic",
+    "detailed": "Station 16a2 Upper Middle Paraaortic Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Retroperitoneal / Para-Aortic"
   },
   "Abdominal_Station_13_Posterior_Pancreaticoduodenal": {
-    "detailed": "Abdominal_Station_13_Posterior_Pancreaticoduodenal",
+    "detailed": "Station 13 Posterior Pancreaticoduodenal Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Neck_Level_VI_Anterior_Cervical": {
-    "detailed": "Neck_Level_VI_Anterior_Cervical",
+    "detailed": "Neck Level VI Anterior Cervical Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Neck"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
   },
   "Thoracic_Station_6_Paraaortic": {
-    "detailed": "Thoracic_Station_6_Paraaortic",
+    "detailed": "Station 6 Paraaortic (Ascending Aorta) Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "fused_spine": {
-    "detailed": "fused_spine",
+    "detailed": "Fused Spine",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "N/A"
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
   },
   "ribs_combined": {
-    "detailed": "ribs_combined",
+    "detailed": "Ribs",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "N/A"
+    "anatomic_location": "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Medullary Cavity (Intramedullary/Marrow)"
   },
   "spinal_cord_dilated_1cm": {
-    "detailed": "spinal_cord_dilated_1cm",
+    "detailed": "Spinal Cord",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "N/A"
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": ""
   },
   "thorax_wall": {
-    "detailed": "thorax_wall",
+    "detailed": "Thorax Wall",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "N/A"
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial"
   },
   "deep_fascial_floor_left": {
-    "detailed": "deep_fascial_floor_left",
-    "generalized": "",
-    "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "N/A"
-  },
-  "deep_fascial_floor_right": {
-    "detailed": "deep_fascial_floor_right",
-    "generalized": "",
-    "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "N/A"
-  },
-  "Abdominal_Station_3_Lesser_Curvature": {
-    "detailed": "Abdominal_Station_3_Lesser_Curvature",
-    "generalized": "",
-    "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
-  },
-  "Axillary_Rotter_Right": {
-    "detailed": "Axillary_Rotter_Right",
-    "generalized": "",
-    "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
-  },
-  "Thoracic_Station_2_UpperParatracheal_Left": {
-    "detailed": "Thoracic_Station_2_UpperParatracheal_Left",
+    "detailed": "Deep Fascial Floor (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial"
   },
-  "Thoracic_Mammary": {
-    "detailed": "Thoracic_Mammary",
-    "generalized": "",
-    "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
-  },
-  "Abdominal_Renal_Hilar_Right": {
-    "detailed": "Abdominal_Renal_Hilar_Right",
+  "deep_fascial_floor_right": {
+    "detailed": "Deep Fascial Floor (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial"
+  },
+  "Abdominal_Station_3_Lesser_Curvature": {
+    "detailed": "Station 3 Lesser Curvature Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
+  },
+  "Axillary_Rotter_Right": {
+    "detailed": "Rotter Interpectoral Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Axillary"
+  },
+  "Thoracic_Station_2_UpperParatracheal_Left": {
+    "detailed": "Station 2L Upper Paratracheal Lymph Node",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "Thoracic_Mammary": {
+    "detailed": "Internal Mammary Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "Abdominal_Renal_Hilar_Right": {
+    "detailed": "Renal Hilar Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Abdominal_Station_2_Left_Paracardial": {
-    "detailed": "Abdominal_Station_2_Left_Paracardial",
+    "detailed": "Station 2 Left Paracardial Lymph Node",
     "generalized": "",
-    "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Abdominal_Station_11_Splenic_Artery": {
-    "detailed": "Abdominal_Station_11_Splenic_Artery",
+    "detailed": "Station 11 Splenic Artery Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Thoracic_Trachea_2cm_Exclusion_Helper": {
     "detailed": "Thoracic_Trachea_2cm_Exclusion_Helper",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Superficial_Inguinal_Left": {
-    "detailed": "Superficial_Inguinal_Left",
+    "detailed": "Superficial Inguinal Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Inguinal"
   },
   "Superficial_Inguinal_Right": {
-    "detailed": "Superficial_Inguinal_Right",
+    "detailed": "Superficial Inguinal Lymph Node (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Inguinal"
   },
   "Thoracic_Station_Prepericardial_Right": {
-    "detailed": "Thoracic_Station_Prepericardial_Right",
+    "detailed": "Prepericardial Lymph Node (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Abdominal_Obturator_Left": {
-    "detailed": "Abdominal_Obturator_Left",
+    "detailed": "Obturator Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Pelvic Lymph Node",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Obturator"
   },
   "Abdominal_External_Iliac_Left": {
-    "detailed": "Abdominal_External_Iliac_Left",
+    "detailed": "External Iliac Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Pelvic Lymph Node",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "External Iliac"
   },
   "aortic_arch_exported": {
-    "detailed": "aortic_arch_exported",
+    "detailed": "Aortic Arch",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "N/A"
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": ""
   },
   "Abdominal_Celiac_Helper_Aorta_Slab": {
     "detailed": "Abdominal_Celiac_Helper_Aorta_Slab",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Abdominal_Presacral": {
-    "detailed": "Abdominal_Presacral",
+    "detailed": "Presacral Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Pelvic Lymph Node",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Presacral"
   },
   "Axillary_Rotter_Left": {
-    "detailed": "Axillary_Rotter_Left",
+    "detailed": "Rotter Interpectoral Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Axillary"
   },
   "Abdominal_Station_7_Left_Gastric": {
-    "detailed": "Abdominal_Station_7_Left_Gastric",
+    "detailed": "Station 7 Left Gastric Lymph Node",
     "generalized": "",
-    "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Neck_Level_IIa_Upper_Jugular": {
-    "detailed": "Neck_Level_IIa_Upper_Jugular",
+    "detailed": "Neck Level IIa Upper Jugular Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Neck"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
   },
   "Abdominal_Pararectal": {
-    "detailed": "Abdominal_Pararectal",
+    "detailed": "Pararectal Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Pelvic Lymph Node",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Perirectal"
   },
   "Neck_Parotid": {
-    "detailed": "Neck_Parotid",
+    "detailed": "Parotid Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Neck"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
   },
   "Helper_ChestWall_Bridge": {
-    "detailed": "Helper_ChestWall_Bridge",
+    "detailed": "Chest Wall Bridge (Helper)",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "N/A"
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial"
   },
   "Abdominal_Obturator_Base_Right": {
-    "detailed": "Abdominal_Obturator_Base_Right",
+    "detailed": "Obturator Lymph Node (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Pelvic Lymph Node",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Obturator"
   },
   "Neck_Level_III_Middle_Jugular": {
-    "detailed": "Neck_Level_III_Middle_Jugular",
+    "detailed": "Neck Level III Middle Jugular Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Neck"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
   },
   "Thoracic_Station_Hilar_Interlobar_Right": {
-    "detailed": "Thoracic_Station_Hilar_Interlobar_Right",
+    "detailed": "Station 10/11 Hilar / Interlobar Lymph Node (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Abdominal_Obturator_Right": {
-    "detailed": "Abdominal_Obturator_Right",
+    "detailed": "Obturator Lymph Node (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Pelvic Lymph Node",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Obturator"
   },
   "Thoracic_Sternum_Exclusion_Zone": {
     "detailed": "Thoracic_Sternum_Exclusion_Zone",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "tissue_fat": {
-    "detailed": "tissue_fat",
+    "detailed": "Fat Tissue",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "N/A"
+    "anatomic_location": "General Soft Tissue (Muscles, Subcutaneous)",
+    "lesion_type": "Technical Artifact",
+    "anatomical_sublocation": "Muscular / Fascial"
   },
   "Abdominal_Inferior_Pancreas": {
-    "detailed": "Abdominal_Inferior_Pancreas",
+    "detailed": "Inferior Pancreatic Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "portal_vein": {
-    "detailed": "portal_vein",
+    "detailed": "Portal Vein",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "N/A"
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": ""
   },
   "Abdominal_Common_Iliac_Left": {
-    "detailed": "Abdominal_Common_Iliac_Left",
+    "detailed": "Common Iliac Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Common Iliac"
   },
   "Abdominal_Mesenteric_Interenteric": {
-    "detailed": "Abdominal_Mesenteric_Interenteric",
+    "detailed": "Mesenteric Interenteric Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Abdominal_Mesenteric_Helper_Base": {
-    "detailed": "Abdominal_Mesenteric_Helper_Base",
+    "detailed": "Mesenteric Interenteric Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Thoracic_Station_3A_Prevascular_Left": {
-    "detailed": "Thoracic_Station_3A_Prevascular_Left",
+    "detailed": "Station 3A Prevascular Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Abdominal_Mesenteric_Helper_Dilated": {
-    "detailed": "Abdominal_Mesenteric_Helper_Dilated",
+    "detailed": "Mesenteric Interenteric Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Thoracic_Prepericardial": {
-    "detailed": "Thoracic_Prepericardial",
+    "detailed": "Prepericardial Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Abdominal_Station_9_Celiac": {
-    "detailed": "Abdominal_Station_9_Celiac",
+    "detailed": "Station 9 Celiac Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Abdominal_Station_16b1_Lower_Middle_Paraaortic": {
-    "detailed": "Abdominal_Station_16b1_Lower_Middle_Paraaortic",
+    "detailed": "Station 16b1 Lower Middle Paraaortic Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Retroperitoneal / Para-Aortic"
   },
   "Abdominal_Station_8_Common_Hepatic": {
-    "detailed": "Abdominal_Station_8_Common_Hepatic",
+    "detailed": "Station 8 Common Hepatic Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Abdominal_Common_Iliac_Right": {
-    "detailed": "Abdominal_Common_Iliac_Right",
+    "detailed": "Common Iliac Lymph Node (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Common Iliac"
   },
   "Abdominal_Renal_Hilar_Left": {
-    "detailed": "Abdominal_Renal_Hilar_Left",
+    "detailed": "Renal Hilar Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Thoracic_Supraclavicular_Left": {
-    "detailed": "Thoracic_Supraclavicular_Left",
+    "detailed": "Supraclavicular Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Supraclavicular"
   },
   "Thoracic_Supraclavicular_Right": {
-    "detailed": "Thoracic_Supraclavicular_Right",
+    "detailed": "Supraclavicular Lymph Node (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Supraclavicular"
   },
   "Abdominal_Station_1_2_Paracardial": {
-    "detailed": "Abdominal_Station_1_2_Paracardial",
+    "detailed": "Station 1/2 Paracardial Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Neck_Level_Xb_Occipital": {
-    "detailed": "Neck_Level_Xb_Occipital",
+    "detailed": "Neck Level Xb Occipital Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Neck"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
   },
   "Neck_Level_IV_Lower_Jugular_Right": {
-    "detailed": "Neck_Level_IV_Lower_Jugular_Right",
+    "detailed": "Neck Level IV Lower Jugular Lymph Node (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Neck"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
   },
   "Abdominal_Obturator_Base_Left": {
-    "detailed": "Abdominal_Obturator_Base_Left",
+    "detailed": "Obturator Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Pelvic Lymph Node",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Obturator"
   },
   "Helper_Axillary_Bounds_Right": {
-    "detailed": "Helper_Axillary_Bounds_Right",
+    "detailed": "Axillary Lymph Node (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Axillary"
   },
   "Axillary_Level_III_Right": {
-    "detailed": "Axillary_Level_III_Right",
+    "detailed": "Axillary Level III Lymph Node (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Axillary"
   },
   "Axillary_Level_II_Right": {
-    "detailed": "Axillary_Level_II_Right",
+    "detailed": "Axillary Level II Lymph Node (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Axillary"
   },
   "Abdominal_Internal_Iliac_Left": {
-    "detailed": "Abdominal_Internal_Iliac_Left",
+    "detailed": "Internal Iliac Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Pelvic Lymph Node",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Internal Iliac"
   },
   "Abdominal_Station_5_Suprapyloric": {
-    "detailed": "Abdominal_Station_5_Suprapyloric",
+    "detailed": "Station 5 Suprapyloric Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Abdominal_Station_6_Infrapyloric": {
-    "detailed": "Abdominal_Station_6_Infrapyloric",
+    "detailed": "Station 6 Infrapyloric Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Abdominal_Station_16b2_Caudal_Paraaortic": {
-    "detailed": "Abdominal_Station_16b2_Caudal_Paraaortic",
+    "detailed": "Station 16b2 Caudal Paraaortic Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Retroperitoneal / Para-Aortic"
   },
   "Abdominal_Superior_Mesenteric_Artery": {
-    "detailed": "Abdominal_Superior_Mesenteric_Artery",
+    "detailed": "Mesenteric Interenteric Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Thoracic_Station_Hilar_Interlobar_Left": {
-    "detailed": "Thoracic_Station_Hilar_Interlobar_Left",
+    "detailed": "Station 10/11 Hilar / Interlobar Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Axillary_Level_III_Left": {
-    "detailed": "Axillary_Level_III_Left",
+    "detailed": "Axillary Level III Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Axillary"
   },
   "Thoracic_Station_8_Paraoesophageal": {
-    "detailed": "Thoracic_Station_8_Paraoesophageal",
+    "detailed": "Station 8 Paraesophageal Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Abdominal_Internal_Iliac_Right": {
-    "detailed": "Abdominal_Internal_Iliac_Right",
+    "detailed": "Internal Iliac Lymph Node (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Pelvic Lymph Node",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Internal Iliac"
   },
   "Abdominal_Celiac_Helper_Pancreas": {
     "detailed": "Abdominal_Celiac_Helper_Pancreas",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Thoracic_Station_7_Subcarinial": {
-    "detailed": "Thoracic_Station_7_Subcarinial",
+    "detailed": "Station 7 Subcarinal Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Thoracic_Station_3A_Prevascular_Right": {
-    "detailed": "Thoracic_Station_3A_Prevascular_Right",
+    "detailed": "Station 3A Prevascular Lymph Node (Right)",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Axillary_Level_I_Left": {
-    "detailed": "Axillary_Level_I_Left",
+    "detailed": "Axillary Level I Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Axillary"
   },
   "Abdominal_Station_4_Greater_Curvature": {
-    "detailed": "Abdominal_Station_4_Greater_Curvature",
+    "detailed": "Station 4 Greater Curvature Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Helper_Axillary_Bounds_Left": {
-    "detailed": "Helper_Axillary_Bounds_Left",
+    "detailed": "Axillary Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Axillary"
   },
   "Neck_Level_Ia_Submental": {
-    "detailed": "Neck_Level_Ia_Submental",
+    "detailed": "Neck Level Ia Submental Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Neck"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
   },
   "Thoracic_Sternum_Bridge": {
     "detailed": "Thoracic_Sternum_Bridge",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Neck_Level_IIb_Upper_Jugular": {
-    "detailed": "Neck_Level_IIb_Upper_Jugular",
+    "detailed": "Neck Level IIb Upper Jugular Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Neck"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
   },
   "Abdominal_Station_17_Anterior_Pancreaticoduodenal": {
-    "detailed": "Abdominal_Station_17_Anterior_Pancreaticoduodenal",
+    "detailed": "Station 17 Anterior Pancreaticoduodenal Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "splenic_vein": {
-    "detailed": "splenic_vein",
+    "detailed": "Splenic Vein",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "N/A"
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": ""
   },
   "Thoracic_Station_4_LowerParatracheal_Right": {
-    "detailed": "Thoracic_Station_4_LowerParatracheal_Right",
+    "detailed": "Station 4R Lower Paratracheal Lymph Node",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Thoracic_Station_6_Helper_Base": {
     "detailed": "Thoracic_Station_6_Helper_Base",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Thoracic_Station_4_LowerParatracheal_Left": {
-    "detailed": "Thoracic_Station_4_LowerParatracheal_Left",
+    "detailed": "Station 4L Lower Paratracheal Lymph Node",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Axillary_Level_II_Left": {
-    "detailed": "Axillary_Level_II_Left",
+    "detailed": "Axillary Level II Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Axillary"
   },
   "Thoracic_Station_2_UpperParatracheal_Right": {
-    "detailed": "Thoracic_Station_2_UpperParatracheal_Right",
+    "detailed": "Station 2R Upper Paratracheal Lymph Node",
     "generalized": "",
     "side": "Right",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Thoracic_Station_Prepericardial_Left": {
-    "detailed": "Thoracic_Station_Prepericardial_Left",
+    "detailed": "Prepericardial Lymph Node (Left)",
     "generalized": "",
     "side": "Left",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Abdominal_Station_14_SMA": {
-    "detailed": "Abdominal_Station_14_SMA",
+    "detailed": "Station 14 Superior Mesenteric Artery (SMA) Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Abdominal"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
   },
   "Thoracic_Station_3P_Retrotracheal": {
-    "detailed": "Thoracic_Station_3P_Retrotracheal",
+    "detailed": "Station 3P Retrotracheal Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Thoracic"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   },
   "Neck_Level_Ib_Submandibular": {
-    "detailed": "Neck_Level_Ib_Submandibular",
+    "detailed": "Neck Level Ib Submandibular Lymph Node",
     "generalized": "",
     "side": "",
-    "anatomic_location": "Lymph Node",
-    "lesion_type": "Lymph Node",
-    "anatomical_sublocation": "Neck"
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "abdominal_mesenteric_interenteric": {
+    "detailed": "Mesenteric Interenteric Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
+  },
+  "abdominal_obturator_left": {
+    "detailed": "Obturator Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Pelvic Lymph Node",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Obturator"
+  },
+  "abdominal_obturator_right": {
+    "detailed": "Obturator Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Pelvic Lymph Node",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Obturator"
+  },
+  "abdominal_pararectal": {
+    "detailed": "Pararectal Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Pelvic Lymph Node",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Perirectal"
+  },
+  "abdominal_presacral": {
+    "detailed": "Presacral Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Pelvic Lymph Node",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Presacral"
+  },
+  "abdominal_renal_hilar_left": {
+    "detailed": "Renal Hilar Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "abdominal_renal_hilar_right": {
+    "detailed": "Renal Hilar Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "abdominal_station_10_splenic_hilum": {
+    "detailed": "Station 10 Splenic Hilum Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
+  },
+  "abdominal_station_11_splenic_artery": {
+    "detailed": "Station 11 Splenic Artery Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
+  },
+  "abdominal_station_13_posterior_pancreaticoduodenal": {
+    "detailed": "Station 13 Posterior Pancreaticoduodenal Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
+  },
+  "abdominal_station_16a1_aortic_hiatus": {
+    "detailed": "Station 16a1 Aortic Hiatus Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Retroperitoneal / Para-Aortic"
+  },
+  "abdominal_station_17_anterior_pancreaticoduodenal": {
+    "detailed": "Station 17 Anterior Pancreaticoduodenal Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
+  },
+  "abdominal_station_1_right_paracardial": {
+    "detailed": "Station 1 Right Paracardial Lymph Node",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
+  },
+  "abdominal_station_2_left_paracardial": {
+    "detailed": "Station 2 Left Paracardial Lymph Node",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
+  },
+  "abdominal_station_3_lesser_curvature": {
+    "detailed": "Station 3 Lesser Curvature Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
+  },
+  "abdominal_station_4_greater_curvature": {
+    "detailed": "Station 4 Greater Curvature Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
+  },
+  "abdominal_station_5_suprapyloric": {
+    "detailed": "Station 5 Suprapyloric Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
+  },
+  "abdominal_station_6_infrapyloric": {
+    "detailed": "Station 6 Infrapyloric Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
+  },
+  "abdominal_station_7_left_gastric": {
+    "detailed": "Station 7 Left Gastric Lymph Node",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
+  },
+  "abdominal_station_8_common_hepatic": {
+    "detailed": "Station 8 Common Hepatic Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
+  },
+  "abdominal_station_9_celiac": {
+    "detailed": "Station 9 Celiac Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
+  },
+  "abdominal_station_inferior_pancreatic": {
+    "detailed": "Inferior Pancreatic Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Abdominal / Mesenteric"
+  },
+  "axillary_level_iii_left": {
+    "detailed": "Axillary Level III Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Axillary"
+  },
+  "axillary_level_iii_right": {
+    "detailed": "Axillary Level III Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Axillary"
+  },
+  "axillary_level_i_left": {
+    "detailed": "Axillary Level I Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Axillary"
+  },
+  "axillary_level_i_right": {
+    "detailed": "Axillary Level I Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Axillary"
+  },
+  "axillary_rotter_left": {
+    "detailed": "Rotter Interpectoral Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Axillary"
+  },
+  "axillary_rotter_right": {
+    "detailed": "Rotter Interpectoral Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Axillary"
+  },
+  "deep_inguinal_left": {
+    "detailed": "Deep Inguinal Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Inguinal"
+  },
+  "deep_inguinal_right": {
+    "detailed": "Deep Inguinal Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Inguinal"
+  },
+  "Neck_Level_III_Middle_Jugular_left": {
+    "detailed": "Neck Level III Middle Jugular Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_level_iii_middle_jugular_left": {
+    "detailed": "Neck Level III Middle Jugular Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "Neck_Level_III_Middle_Jugular_right": {
+    "detailed": "Neck Level III Middle Jugular Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_level_iii_middle_jugular_right": {
+    "detailed": "Neck Level III Middle Jugular Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "Neck_Level_IIa_Upper_Jugular_Left": {
+    "detailed": "Neck Level IIa Upper Jugular Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_level_iia_upper_jugular_left": {
+    "detailed": "Neck Level IIa Upper Jugular Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "Neck_Level_IIa_Upper_Jugular_Right": {
+    "detailed": "Neck Level IIa Upper Jugular Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_level_iia_upper_jugular_right": {
+    "detailed": "Neck Level IIa Upper Jugular Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "Neck_Level_IIb_Upper_Jugular_Left": {
+    "detailed": "Neck Level IIb Upper Jugular Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_level_iib_upper_jugular_left": {
+    "detailed": "Neck Level IIb Upper Jugular Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "Neck_Level_IIb_Upper_Jugular_Right": {
+    "detailed": "Neck Level IIb Upper Jugular Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_level_iib_upper_jugular_right": {
+    "detailed": "Neck Level IIb Upper Jugular Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_level_iv_lower_jugular_left": {
+    "detailed": "Neck Level IV Lower Jugular Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_level_iv_lower_jugular_right": {
+    "detailed": "Neck Level IV Lower Jugular Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_level_ia_submental": {
+    "detailed": "Neck Level Ia Submental Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "Neck_Level_Ib_Submandibular_Left": {
+    "detailed": "Neck Level Ib Submandibular Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_level_ib_submandibular_left": {
+    "detailed": "Neck Level Ib Submandibular Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "Neck_Level_Ib_Submandibular_Right": {
+    "detailed": "Neck Level Ib Submandibular Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_level_ib_submandibular_right": {
+    "detailed": "Neck Level Ib Submandibular Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_level_vi_anterior_cervical": {
+    "detailed": "Neck Level VI Anterior Cervical Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "Neck_Level_Va_Upper_Posterior_Triangle_Left": {
+    "detailed": "Neck Level Va Upper Posterior Triangle Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_level_va_upper_posterior_triangle_left": {
+    "detailed": "Neck Level Va Upper Posterior Triangle Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "Neck_Level_Va_Upper_Posterior_Triangle_Right": {
+    "detailed": "Neck Level Va Upper Posterior Triangle Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_level_va_upper_posterior_triangle_right": {
+    "detailed": "Neck Level Va Upper Posterior Triangle Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "Neck_Level_Xb_Occipital_Left": {
+    "detailed": "Neck Level Xb Occipital Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_level_xb_occipital_left": {
+    "detailed": "Neck Level Xb Occipital Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "Neck_Level_Xb_Occipital_Right": {
+    "detailed": "Neck Level Xb Occipital Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_level_xb_occipital_right": {
+    "detailed": "Neck Level Xb Occipital Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "Neck_Parotid_Left": {
+    "detailed": "Parotid Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_parotid_left": {
+    "detailed": "Parotid Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "Neck_Parotid_Right": {
+    "detailed": "Parotid Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_parotid_right": {
+    "detailed": "Parotid Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "neck_retropharyngeal": {
+    "detailed": "Retropharyngeal Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Cervical / Neck"
+  },
+  "superficial_inguinal_left": {
+    "detailed": "Superficial Inguinal Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Inguinal"
+  },
+  "superficial_inguinal_right": {
+    "detailed": "Superficial Inguinal Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Inguinal"
+  },
+  "thoracic_station_2_upperparatracheal_left": {
+    "detailed": "Station 2L Upper Paratracheal Lymph Node",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "thoracic_station_2_upperparatracheal_right": {
+    "detailed": "Station 2R Upper Paratracheal Lymph Node",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "thoracic_station_3a_prevascular_left": {
+    "detailed": "Station 3A Prevascular Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "thoracic_station_3a_prevascular_right": {
+    "detailed": "Station 3A Prevascular Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "Thoracic_Station_5_Subaortic_Left": {
+    "detailed": "Station 5 Subaortic (AP Window) Lymph Node",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "thoracic_station_5_subaortic_left": {
+    "detailed": "Station 5 Subaortic (AP Window) Lymph Node",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "thoracic_station_6_paraaortic": {
+    "detailed": "Station 6 Paraaortic (Ascending Aorta) Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "thoracic_station_7_subcarinial": {
+    "detailed": "Station 7 Subcarinal Lymph Node",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "Thoracic_Station_8_Paraoesophageal_Left": {
+    "detailed": "Station 8 Paraesophageal Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "thoracic_station_8_paraoesophageal_left": {
+    "detailed": "Station 8 Paraesophageal Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "Thoracic_Station_8_Paraoesophageal_Right": {
+    "detailed": "Station 8 Paraesophageal Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "thoracic_station_8_paraoesophageal_right": {
+    "detailed": "Station 8 Paraesophageal Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "thoracic_station_prepericardial_left": {
+    "detailed": "Prepericardial Lymph Node (Left)",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "thoracic_station_prepericardial_right": {
+    "detailed": "Prepericardial Lymph Node (Right)",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
   }
 }

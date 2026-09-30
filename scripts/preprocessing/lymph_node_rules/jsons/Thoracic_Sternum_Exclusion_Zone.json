@@ -1,0 +1,19 @@
+{
+    "Thoracic_Sternum_Exclusion_Zone": {
+        "is_bilateral": false,
+        "rule": "AnisotropicMargin",
+        "base_landmark": "sternum",
+        "margins_mm": {
+            "lateral": -1,
+            "anterior": 5,
+            "posterior": 5
+        },
+        "comments": "Excludes the sternum bone bone (-1mm safety margin to ensure wall contact).",
+        "ignore_global_exclusion": true,
+        "exclude": [
+            "trachea"
+        ],
+        "ignore_fat": true,
+        "keep_all_components": false
+    }
+}

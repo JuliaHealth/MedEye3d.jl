@@ -1,0 +1,16 @@
+{
+    "helper_stomach_dilated": {
+        "rule": "DilatedMask",
+        "base_landmark": "stomach",
+        "dilation_mm": 10.0,
+        "is_helper": true
+    },
+    "Abdominal_Gastric": {
+        "rule": "BitwiseOr",
+        "targets": ["helper_stomach_dilated"],
+        "is_bilateral": false,
+        "exclude": ["stomach", "liver", "pancreas", "spleen", "colon", "small_bowel", "heart", "lung_left", "lung_right"],
+        "comments": "Gastric nodes: 1cm margin around stomach covering pyloric region, greater and smaller curvature. Implemented via 10mm dilation of stomach, excluding the stomach itself and surrounding organs.",
+        "depends_on": ["helper_stomach_dilated"]
+    }
+}

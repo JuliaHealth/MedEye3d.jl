@@ -1,0 +1,55 @@
+{
+    "helper_Paraaortic_Aorta": {
+        "rule": "DilatedMask",
+        "base_landmark": "aorta",
+        "dilation_mm": 10.0
+    },
+    "helper_Paraaortic_IVC": {
+        "rule": "DilatedMask",
+        "base_landmark": "inferior_vena_cava",
+        "dilation_mm": 10.0
+    },
+    "helper_Abdominal_Paraaortic": {
+        "rule": "BitwiseOr",
+        "targets": [
+            "helper_Paraaortic_Aorta",
+            "helper_Paraaortic_IVC"
+        ],
+        "is_bilateral": false,
+        "keep_all_components": true,
+        "ignore_global_exclusion": true,
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "vertebrae_T12",
+                "boundary_part": "max",
+                "comment": "Superior limit: Diaphragmatic aortic hiatus (around T12)"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "aorta",
+                "boundary_part": "min",
+                "comment": "Inferior limit: Aortic bifurcation",
+                "offset_mm": -5.0
+            }
+        ],
+        "exclude": [
+            "fused_spine", "spinal_cord",
+            "psoas_major_left", "psoas_major_right",
+            "autochthon_left", "autochthon_right",
+            "quadratus_lumborum_left", "quadratus_lumborum_right",
+            "iliopsoas",
+            "stomach", "duodenum", "small_bowel", "colon",
+            "liver", "spleen", "pancreas", "gallbladder",
+            "kidney_left", "kidney_right"
+        ],
+        "overlap_precedence": [
+            "Abdominal_Station_7_Left_Gastric",
+            "Abdominal_Station_8_Common_Hepatic",
+            "Abdominal_Station_9_Celiac",
+            "Abdominal_Station_11_Splenic_Artery",
+            "Abdominal_Station_14_SMA"
+        ],
+        "comments": "Simplified paraaortic: 1cm around aorta OR IVC, excluding organs and muscles."
+    }
+}

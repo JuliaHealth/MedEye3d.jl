@@ -1,0 +1,9 @@
+{
+    "helper_rotter_pmaj_shield_left": {
+        "rule": "AnteriorExtrusion",
+        "input": "pectoralis_major_left",
+        "distance_mm": 40.0,
+        "side": "left",
+        "is_helper": true
+    }
+}

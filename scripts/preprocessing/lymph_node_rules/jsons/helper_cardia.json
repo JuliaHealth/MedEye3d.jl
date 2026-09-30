@@ -1,0 +1,63 @@
+{
+    "helper_cardia_esophageal_part": {
+        "rule": "DilatedMask",
+        "base_landmark": "esophagus",
+        "dilation_mm": 2.0,
+        "is_helper": true,
+        "category": "new_helpers",
+        "z_plane_restriction": {
+            "superior": "esophagus",
+            "superior_part": "min",
+            "superior_offset_mm": 10.0,
+            "inferior": "esophagus",
+            "inferior_part": "min"
+        },
+        "comments": "Last 1cm of esophagus (bottom 10mm)"
+    },
+    "helper_cardia_gastric_part": {
+        "rule": "DilatedMask",
+        "base_landmark": "stomach",
+        "dilation_mm": 2.0,
+        "is_helper": true,
+        "category": "new_helpers",
+        "z_plane_restriction": {
+            "superior": "esophagus",
+            "superior_part": "min",
+            "superior_offset_mm": 10.0,
+            "inferior": "esophagus",
+            "inferior_part": "min",
+            "inferior_offset_mm": -10.0
+        },
+        "comments": "1cm of stomach adjacent to esophagus bottom"
+    },
+    "helper_cardia": {
+        "rule": "BitwiseOr",
+        "targets": ["helper_cardia_esophageal_part", "helper_cardia_gastric_part"],
+        "is_helper": true,
+        "category": "new_helpers"
+    },
+    "helper_paracardial_2cm": {
+        "rule": "DilatedMask",
+        "base_landmark": "helper_cardia",
+        "dilation_mm": 20.0,
+        "is_helper": true,
+        "category": "new_helpers",
+        "comments": "2cm isotropic dilation around cardia for paracardial node definition"
+    },
+    "helper_stomach_cardia": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "helper_cardia_esophageal_part",
+        "margins_mm": {"all": 10},
+        "exclude": [
+            "esophagus", "stomach", "liver", "aorta", "inferior_vena_cava",
+            "spleen", "pancreas", "lung_left", "lung_right", "heart",
+            "fused_spine", "spinal_cord", "diaphragm_proxy",
+            "duodenum", "small_bowel", "colon", "gallbladder",
+            "kidney_left", "kidney_right"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": ["helper_cardia_esophageal_part"],
+        "comments": "Stomach cardia: 10mm anisotropic margin around last 1cm of esophagus, excluding organs"
+    }
+}

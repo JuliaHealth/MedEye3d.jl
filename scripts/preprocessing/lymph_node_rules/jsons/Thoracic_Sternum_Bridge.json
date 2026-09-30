@@ -1,0 +1,39 @@
+{
+    "Thoracic_Sternum_Bridge": {
+        "is_bilateral": false,
+        "rule": "LateralBridge",
+        "base_landmark": "sternum",
+        "targets": [
+            "costal_cartilages",
+            "rib_left_1",
+            "rib_right_1",
+            "rib_left_2",
+            "rib_right_2",
+            "rib_left_3",
+            "rib_right_3",
+            "rib_left_4",
+            "rib_right_4",
+            "rib_left_5",
+            "rib_right_5",
+            "rib_left_6",
+            "rib_right_6",
+            "rib_left_7",
+            "rib_right_7",
+            "rib_left_8",
+            "rib_right_8",
+            "rib_left_9",
+            "rib_right_9",
+            "rib_left_10",
+            "rib_right_10"
+        ],
+        "max_mm": 100,
+        "comments": "Grows the sternum laterally (scanline fill) until it meets the ribs or cartilages on each slice.",
+        "ignore_global_exclusion": true,
+        "exclude": [
+            "trachea"
+        ],
+        "ignore_fat": true,
+        "overlap_precedence": [],
+        "keep_all_components": false
+    }
+}

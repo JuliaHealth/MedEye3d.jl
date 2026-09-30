@@ -1,0 +1,37 @@
+{
+    "Axillary_Level_I_Left": {
+        "rule": "BitwiseOr",
+        "targets": [
+            "helper_Axillary_Level_I_base_Left",
+            "helper_Axillary_Level_I_lateral_extension_Left"
+        ],
+        "exclude": [
+            "helper_Axillary_Level_I_teres_subscap_scapula_bridge_Left",
+            "pectoralis_major_left",
+            "pectoralis_minor_left",
+            "ribs_combined",
+            "helper_Axillary_II_lung_hull_Left"
+        ],
+        "side": "left",
+        "level": "i",
+        "color": [
+            255,
+            100,
+            100
+        ],
+        "group": "Thoracic",
+        "category": "Lymph_Node",
+        "dependencies": [
+            "helper_Axillary_Level_I_base_Left",
+            "helper_Axillary_Level_I_teres_subscap_scapula_bridge_Left",
+            "helper_Axillary_Level_I_lateral_extension_Left",
+            "helper_Axillary_II_lung_hull_Left"
+        ],
+        "overlap_precedence": [
+            "Axillary_Rotter_Left",
+            "Axillary_Rotter"
+        ],
+        "keep_all_components": false,
+        "post_overlap_lcc": true
+    }
+}

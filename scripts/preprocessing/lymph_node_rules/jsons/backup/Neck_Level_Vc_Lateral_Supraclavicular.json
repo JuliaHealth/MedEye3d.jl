@@ -1,0 +1,62 @@
+{
+    "Neck_Level_Vc_Lateral_Supraclavicular": {
+        "rule": "DilatedMask",
+        "is_bilateral": true,
+        "input_landmarks": ["clavicula"],
+        "dilation_mm": 30.0,
+        "roi": {
+            "landmark": "clavicula",
+            "padding_mm": [50, 50, 50]
+        },
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "clavicula",
+                "boundary_part": "max",
+                "offset_mm": 20.0,
+                "comment": "Superior limit: 20mm above clavicle max"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "clavicula",
+                "boundary_part": "max",
+                "comment": "Inferior limit: Clavicle top"
+            },
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "sternocleidomastoid",
+                "boundary_part": "max",
+                "slice_wise": true,
+                "comment": "Anterior limit: Posterior to SCM"
+            }
+        ],
+        "exclude": [
+            "lung",
+            "subclavian_artery",
+            "subclavian_vein",
+            "clavicula",
+            "sternocleidomastoid",
+            "anterior_scalene"
+        ],
+        "assertions": [
+            { "type": "VolumeMin", "value": 5 },
+            { "type": "VolumeIntersection", "target": "lung", "expected": 0 },
+            { "type": "VolumeIntersection", "target": "subclavian_artery", "expected": 0 },
+            { "type": "VolumeIntersection", "target": "subclavian_vein", "expected": 0 },
+            { "type": "VolumeIntersection", "target": "clavicula", "expected": 0 }
+        ],
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "keep_all_components": false,
+        "comments": "Neck Level Vc (Lateral Supraclavicular): 30mm expansion above clavicle. Excludes lung, vessels, SCM, scalene.",
+        "ancillary_landmarks": [
+            "lung",
+            "subclavian_artery",
+            "subclavian_vein",
+            "clavicula",
+            "sternocleidomastoid",
+            "anterior_scalene",
+            "internal_jugular_vein"
+        ]
+    }
+}

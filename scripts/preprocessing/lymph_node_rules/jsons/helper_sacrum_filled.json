@@ -1,0 +1,23 @@
+{
+    "helper_sacrum_filled": {
+        "rule": "VolumetricBoundary2D",
+        "boundaries": {
+            "structures": [
+                "sacrum"
+            ]
+        },
+        "roi": {
+            "landmark": "sacrum",
+            "padding_mm": [
+                10,
+                10,
+                10
+            ]
+        },
+        "keep_all_components": true,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "comments": "Helper to create a solid convex hull of the sacrum per-slice, filling in any holes or deep concavities.",
+        "is_helper": true
+    }
+}

@@ -1,0 +1,10 @@
+{
+    "helper_prepericardial_mammary_bridge_right": {
+        "rule": "ConvexHullBridge",
+        "landmark_1": "Thoracic_Station_Prepericardial_Base_Right",
+        "landmark_2": "Thoracic_Mammary",
+        "is_helper": true,
+        "ignore_global_exclusion": true,
+        "side": "right"
+    }
+}

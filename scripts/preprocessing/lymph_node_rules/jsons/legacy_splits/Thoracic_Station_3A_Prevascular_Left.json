@@ -1,0 +1,82 @@
+{
+    "Thoracic_Station_3A_Prevascular_Left": {
+        "rule": "Combine",
+        "method": "union",
+        "side": "Left",
+        "overlap_precedence": [
+            "Thoracic_Station_5_Subaortic"
+        ],
+        "components": [
+            "Thoracic_Station_3A_Prevascular_Base_Left",
+            "helper_Thoracic_Station_3A_Prevascular_bridge_Left"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "sternum",
+                "boundary_part": "max",
+                "comment": "Superior limit is the top of the sternum"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "carina_computed",
+                "comment": "Inferior limit is the carina"
+            },
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "sternum",
+                "boundary_part": "anterior",
+                "slice_wise": true,
+                "comment": "Anterior constraint: posterior to the anterior edge of the sternum"
+            },
+            {
+                "constraint_type": "SideLimit",
+                "landmark": "sternum",
+                "boundary_part": "center",
+                "slice_wise": true,
+                "comment": "Separation of left and right using middle of sternum"
+            }
+        ],
+        "exclude": [
+            "sternum",
+            "manubrium",
+            "clavicle_left",
+            "clavicle_right",
+            "heart",
+            "trachea",
+            "lung_left",
+            "lung_right",
+            "superior_vena_cava",
+            "aorta",
+            "aorta_ascending",
+            "aortic_arch_computed",
+            "common_carotid_artery_left",
+            "common_carotid_artery_right",
+            "brachiocephalic_vein_left",
+            "brachiocephalic_vein_right",
+            "thorax_wall",
+            "helper_subcutaneous_anterior_chest"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 5
+            }
+        ],
+        "depends_on": [
+            "Thoracic_Station_3A_Prevascular_Base_Left",
+            "helper_Thoracic_Station_3A_Prevascular_bridge_Left"
+        ],
+        "ancillary_landmarks": [
+            "Thoracic_Station_3A_Prevascular_Base_Left",
+            "helper_Thoracic_Station_3A_Prevascular_bridge_Left",
+            "sternum",
+            "carina_computed",
+            "helper_subcutaneous_anterior_chest"
+        ],
+        "keep_all_components": false,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "comments": "Station 3A (Prevascular Left): Combine of Base + VB2D bridge to sternum."
+    }
+}
