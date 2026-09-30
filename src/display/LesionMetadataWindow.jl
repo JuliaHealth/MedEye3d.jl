@@ -2267,9 +2267,10 @@ end
 function Base.put!(proxy::ChannelProxy, event)
     ch = proxy.ref[]
     if ch !== nothing
-        put!(ch, event)
+        @async try
+            put!(ch, event)
+        catch; end
     end
-    # Silently drop if channel not yet connected
 end
 
 """Holds references returned by create_metadata_window for later channel connection."""
@@ -3363,11 +3364,18 @@ function create_metadata_window(
         fontsize = 10, color = TXT)
     rowsize!(g, blend_r, Fixed(28)); register_fixed_row!(blend_r, 28)
     is_syncing_blend = Ref(false)
+    # Debounced save for display config (avoids disk I/O on every slider drag step)
+    _display_cfg_save_subject = Subject(Bool)
+    _display_cfg_save_debounced = _display_cfg_save_subject |> debounce_time(500)
+    subscribe!(_display_cfg_save_debounced, lambda(
+        on_next = (_) -> save_display_config(display_cfg)
+    ))
+
     on(slider_blend.value) do val
         is_syncing_blend[] && return
         v = Float32(val)
         display_cfg["pet_ct_blend"] = v
-        save_display_config(display_cfg)
+        next!(_display_cfg_save_subject, true)  # debounced save (500ms)
         put!(channel, PetBlendEvent(v, 1))
     end
 
@@ -3381,7 +3389,7 @@ function create_metadata_window(
     on(slider_label_opacity.value) do val
         v = Float32(val)
         display_cfg["label_opacity"] = v
-        save_display_config(display_cfg)
+        next!(_display_cfg_save_subject, true)  # debounced save (500ms)
         put!(channel, LabelOpacityEvent(v))
     end
 
@@ -3409,6 +3417,17 @@ function create_metadata_window(
     # Apply CT removed — slider drag and Enter-in-textbox already apply
 
     is_syncing_ct = Ref(false)
+    # ── Rocket debounce for windowing events ──────────────────────────────
+    # Slider drag fires per-pixel. Debounce at 50ms to limit Vulkan re-renders to 20Hz.
+    _windowing_subject = Subject(Tuple{String, Float32, Float32})
+    _windowing_debounced = _windowing_subject |> debounce_time(50)
+    subscribe!(_windowing_debounced, lambda(
+        on_next = (args) -> begin
+            mod, min_v, max_v = args
+            put!(channel, WindowingEvent(mod, min_v, max_v))
+        end
+    ))
+
     function apply_ct_win(min_v::Real, max_v::Real)
         is_syncing_ct[] && return
         is_syncing_selection[] && return
@@ -3419,7 +3438,7 @@ function create_metadata_window(
             tb_ct_max.stored_string[] = string(round(max_v, digits=1))
             tb_ct_max.displayed_string[] = string(round(max_v, digits=1))
             set_close_to!(islider_ct, Float32(min_v), Float32(max_v))
-            put!(channel, WindowingEvent("CT", Float32(min_v), Float32(max_v)))
+            next!(_windowing_subject, ("CT", Float32(min_v), Float32(max_v)))
         finally
             is_syncing_ct[] = false
         end
@@ -3487,7 +3506,7 @@ function create_metadata_window(
             tb_pet_max.stored_string[] = string(round(max_v, digits=1))
             tb_pet_max.displayed_string[] = string(round(max_v, digits=1))
             set_close_to!(islider_pet, Float32(min_v), Float32(max_v))
-            put!(channel, WindowingEvent("PET", Float32(min_v), Float32(max_v)))
+            next!(_windowing_subject, ("PET", Float32(min_v), Float32(max_v)))
         finally
             is_syncing_pet[] = false
         end
@@ -3555,7 +3574,7 @@ function create_metadata_window(
             tb_spect_max.stored_string[] = string(round(max_v, digits=1))
             tb_spect_max.displayed_string[] = string(round(max_v, digits=1))
             set_close_to!(islider_spect, Float32(min_v), Float32(max_v))
-            put!(channel, WindowingEvent("SPECT", Float32(min_v), Float32(max_v)))
+            next!(_windowing_subject, ("SPECT", Float32(min_v), Float32(max_v)))
         finally
             is_syncing_spect[] = false
         end
@@ -3620,7 +3639,7 @@ function create_metadata_window(
             tb_mri_max.stored_string[] = string(round(max_v, digits=1))
             tb_mri_max.displayed_string[] = string(round(max_v, digits=1))
             set_close_to!(islider_mri, Float32(min_v), Float32(max_v))
-            put!(channel, WindowingEvent(mod, Float32(min_v), Float32(max_v)))
+            next!(_windowing_subject, (mod, Float32(min_v), Float32(max_v)))
         finally
             is_syncing_mri[] = false
         end
