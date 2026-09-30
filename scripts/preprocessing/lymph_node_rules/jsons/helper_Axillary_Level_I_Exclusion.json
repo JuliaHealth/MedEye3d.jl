@@ -1,0 +1,41 @@
+{
+    "helper_Axillary_Level_I_teres_subscap_scapula_bridge_Left": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "teres_major_left",
+            "subscapularis_left",
+            "scapula_left"
+        ],
+        "side": "left",
+        "is_helper": true,
+        "dependencies": [
+            "teres_major_left",
+            "subscapularis_left",
+            "scapula_left"
+        ]
+    },
+    "helper_Axillary_Level_I_teres_subscap_scapula_bridge_Right": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "teres_major_right",
+            "subscapularis_right",
+            "scapula_right"
+        ],
+        "side": "right",
+        "is_helper": true,
+        "dependencies": [
+            "teres_major_right",
+            "subscapularis_right",
+            "scapula_right"
+        ]
+    },
+    "helper_Axillary_Level_I_teres_subscap_scapula_bridge": {
+        "rule": "BitwiseOr",
+        "targets": [
+            "helper_Axillary_Level_I_teres_subscap_scapula_bridge_Left",
+            "helper_Axillary_Level_I_teres_subscap_scapula_bridge_Right"
+        ],
+        "is_bilateral": true,
+        "is_helper": true
+    }
+}

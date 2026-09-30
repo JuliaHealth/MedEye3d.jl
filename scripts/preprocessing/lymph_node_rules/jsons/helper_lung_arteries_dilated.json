@@ -1,0 +1,10 @@
+{
+    "helper_lung_arteries_dilated": {
+        "rule": "Morphology",
+        "operation": "dilate",
+        "radius_mm": 10.0,
+        "landmark": "lung_arteries",
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

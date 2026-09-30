@@ -1,0 +1,10 @@
+{
+    "helper_neck_VI_body_eroded": {
+        "rule": "Morphology",
+        "operation": "erode",
+        "radius_mm": 2.0,
+        "landmark": "body_trunc",
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

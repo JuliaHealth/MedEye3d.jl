@@ -1,0 +1,14 @@
+{
+    "helper_neck_VI_visceral_block": {
+        "rule": "Combine",
+        "method": "union",
+        "components": [
+            "trachea",
+            "thyroid_gland",
+            "thyroid_cartilage",
+            "cricoid_cartilage"
+        ],
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

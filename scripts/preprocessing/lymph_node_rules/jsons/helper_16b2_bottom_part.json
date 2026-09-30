@@ -1,0 +1,17 @@
+{
+    "helper_16b2_bottom_part": {
+        "rule": "BitwiseOr",
+        "inputs": ["helper_16b2_base"],
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "helper_16b2_base",
+                "boundary_part": "min",
+                "offset_mm": 5.0
+            }
+        ],
+        "depends_on": ["helper_16b2_base"],
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

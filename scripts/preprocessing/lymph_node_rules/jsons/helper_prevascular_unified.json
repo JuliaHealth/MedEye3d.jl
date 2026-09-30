@@ -1,0 +1,11 @@
+{
+    "helper_prevascular_unified": {
+        "rule": "Union",
+        "components": [
+            "Thoracic_Station_3A_Prevascular_Base_Left",
+            "Thoracic_Station_3A_Prevascular_Base_Right",
+            "helper_clavicle_bridge"
+        ],
+        "is_helper": true
+    }
+}

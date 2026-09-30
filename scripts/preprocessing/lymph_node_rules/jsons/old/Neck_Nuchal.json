@@ -1,0 +1,61 @@
+{
+    "Neck_Nuchal": {
+        "rule": "AnisotropicMargin",
+        "is_bilateral": false,
+        "input": "fused_spine",
+        "margins_mm": {
+            "posterior": 50,
+            "lateral": 70,
+            "anterior": 0,
+            "superior": 0,
+            "inferior": 0
+        },
+        "constraints": [
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "fused_spine",
+                "boundary_part": "max",
+                "slice_wise": true,
+                "comment": "Must stay posterior to the vertebral bodies."
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "skull_real",
+                "boundary_part": "min",
+                "comment": "Superior limit: Skull base"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "hyoid",
+                "boundary_part": "min",
+                "comment": "Inferior limit: Hyoid bottom"
+            }
+        ],
+        "exclude": [
+            "fused_spine",
+            "skull_real"
+        ],
+        "assertions": [
+            { "type": "VolumeMin", "value": 5 },
+            { "type": "VolumeIntersection", "target": "fused_spine", "expected": 0 },
+            { "type": "VolumeIntersection", "target": "skull_real", "expected": 0 }
+        ],
+        "comments": "Nuchal Nodes: Posterior to Spine, from Skull Base to Hyoid.",
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "keep_all_components": true,
+        "ancillary_landmarks": [
+            "fused_spine",
+            "skull_real",
+            "hyoid"
+        ],
+        "roi": {
+            "landmark": "fused_spine",
+            "padding_mm": [
+                50,
+                50,
+                50
+            ]
+        }
+    }
+}

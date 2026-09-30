@@ -1,0 +1,775 @@
+module GpuLandmarks
+using KernelAbstractions
+using LinearAlgebra
+using Statistics
+using Adapt
+using CUDA
+import ..Landmarks
+
+@kernel function compute_centroid_kernel!(mask, stats, ox::Float32, oy::Float32, oz::Float32, sx::Float32, sy::Float32, sz::Float32, d00::Float32, d11::Float32, d22::Float32, dx::Int32, dy::Int32, dz::Int32)
+    i, j, k = @index(Global, NTuple)
+    if i <= dx && j <= dy && k <= dz
+        if mask[i, j, k] > UInt8(0)
+            px = ox + Float32(i - 1) * sx * d00
+            py = oy + Float32(j - 1) * sy * d11
+            pz = oz + Float32(k - 1) * sz * d22
+            KernelAbstractions.@atomic stats[1] += Float64(px)
+            KernelAbstractions.@atomic stats[2] += Float64(py)
+            KernelAbstractions.@atomic stats[3] += Float64(pz)
+            KernelAbstractions.@atomic stats[4] += 1.0
+        end
+    end
+end
+
+@kernel function compute_covariance_kernel!(mask, stats, cx::Float32, cy::Float32, cz::Float32, ox::Float32, oy::Float32, oz::Float32, sx::Float32, sy::Float32, sz::Float32, d00::Float32, d11::Float32, d22::Float32, dx::Int32, dy::Int32, dz::Int32)
+    i, j, k = @index(Global, NTuple)
+    if i <= dx && j <= dy && k <= dz
+        if mask[i, j, k] > UInt8(0)
+            px = ox + Float32(i - 1) * sx * d00 - cx
+            py = oy + Float32(j - 1) * sy * d11 - cy
+            pz = oz + Float32(k - 1) * sz * d22 - cz
+            KernelAbstractions.@atomic stats[1] += Float64(px * px)
+            KernelAbstractions.@atomic stats[2] += Float64(px * py)
+            KernelAbstractions.@atomic stats[3] += Float64(px * pz)
+            KernelAbstractions.@atomic stats[4] += Float64(py * py)
+            KernelAbstractions.@atomic stats[5] += Float64(py * pz)
+            KernelAbstractions.@atomic stats[6] += Float64(pz * pz)
+            
+        end
+    end
+end
+
+
+using CUDA
+using KernelAbstractions
+using KernelAbstractions
+using LinearAlgebra
+using Statistics
+
+export precalculate_all_gpu_landmarks!,
+       gpu_compute_mask_bounds,
+       gpu_compute_mask_centroid,
+       gpu_get_extreme_point
+
+"""
+    gpu_compute_mask_bounds(arr) -> (min_x, max_x, min_y, max_y, min_z, max_z)
+Finds the 1-based 3D bounding box of non-zero voxels directly on GPU/CPU array.
+"""
+@kernel function compute_plane_histogram_kernel!(mask, hist, nx::Float32, ny::Float32, nz::Float32, cx::Float32, cy::Float32, cz::Float32, ox::Float32, oy::Float32, oz::Float32, sx::Float32, sy::Float32, sz::Float32, d00::Float32, d11::Float32, d22::Float32, dx::Int32, dy::Int32, dz::Int32)
+    i, j, k = @index(Global, NTuple)
+    if i <= dx && j <= dy && k <= dz
+        if mask[i, j, k] > UInt8(0)
+            px = ox + Float32(i - 1) * sx * d00
+            py = oy + Float32(j - 1) * sy * d11
+            pz = oz + Float32(k - 1) * sz * d22
+            dist = nx * (px - cx) + ny * (py - cy) + nz * (pz - cz)
+            bin = Int32(round(dist)) + 100
+            if bin >= 1 && bin <= 201
+                KernelAbstractions.@atomic hist[bin] += Int32(1)
+            end
+        end
+    end
+end
+
+@kernel function find_anterior_midline_mandible_kernel!(y_min_col, @Const(mandible), i_min::Int32, i_max::Int32, j_min::Int32, j_max::Int32, k_min::Int32, k_max::Int32)
+    col_idx, slice_idx = @index(Global, NTuple)
+    i = i_min + Int32(col_idx - 1)
+    k = k_min + Int32(slice_idx - 1)
+    if i <= i_max && k <= k_max
+        for j in j_min:j_max
+            if mandible[i, j, k] > UInt8(0)
+                y_min_col[col_idx, slice_idx] = j
+                break
+            end
+        end
+    end
+end
+
+function gpu_compute_mask_bounds(arr::AbstractArray{T, 3}) where T
+    if !any(arr .> 0)
+        return (0, 0, 0, 0, 0, 0)
+    end
+    
+    # 2D/1D reductions
+    z_proj = Array(dropdims(any(arr .> 0, dims=(1, 2)), dims=(1, 2)))
+    z_min = findfirst(z_proj)
+    z_max = findlast(z_proj)
+    
+    y_proj = Array(dropdims(any(arr .> 0, dims=(1, 3)), dims=(1, 3)))
+    y_min = findfirst(y_proj)
+    y_max = findlast(y_proj)
+    
+    x_proj = Array(dropdims(any(arr .> 0, dims=(2, 3)), dims=(2, 3)))
+    x_min = findfirst(x_proj)
+    x_max = findlast(x_proj)
+    
+    return (Int(x_min === nothing ? 0 : x_min),
+            Int(x_max === nothing ? 0 : x_max),
+            Int(y_min === nothing ? 0 : y_min),
+            Int(y_max === nothing ? 0 : y_max),
+            Int(z_min === nothing ? 0 : z_min),
+            Int(z_max === nothing ? 0 : z_max))
+end
+
+"""
+    gpu_get_extreme_point(arr, spacing, origin, direction, dir_name)
+Returns 3D physical coordinate [x, y, z] of the extreme point in specified direction.
+"""
+function gpu_get_extreme_point(arr::AbstractArray{T, 3}, spacing::NTuple{3, Float64}, origin::NTuple{3, Float64}, direction::Tuple, dir_name::String) where T
+    bounds = gpu_compute_mask_bounds(arr)
+    if bounds[1] == 0
+        return nothing
+    end
+    
+    dir_00 = direction[1]; dir_11 = direction[5]; dir_22 = direction[9]
+    d_upper = uppercase(dir_name)
+    
+    if d_upper in ("LEFT", "L")
+        idx_x = dir_00 > 0 ? bounds[2] : bounds[1]
+        sub_arr = arr[idx_x, :, :]
+        y_proj = Array(dropdims(any(sub_arr .> 0, dims=2), dims=2))
+        z_proj = Array(dropdims(any(sub_arr .> 0, dims=1), dims=1))
+        idx_y = findfirst(y_proj)
+        idx_z = findfirst(z_proj)
+        return [origin[1] + (Float64(idx_x)-1.0)*spacing[1]*dir_00,
+                origin[2] + (Float64(idx_y !== nothing ? idx_y : bounds[3])-1.0)*spacing[2]*dir_11,
+                origin[3] + (Float64(idx_z !== nothing ? idx_z : bounds[5])-1.0)*spacing[3]*dir_22]
+    elseif d_upper in ("RIGHT", "R")
+        idx_x = dir_00 > 0 ? bounds[1] : bounds[2]
+        sub_arr = arr[idx_x, :, :]
+        y_proj = Array(dropdims(any(sub_arr .> 0, dims=2), dims=2))
+        z_proj = Array(dropdims(any(sub_arr .> 0, dims=1), dims=1))
+        idx_y = findfirst(y_proj)
+        idx_z = findfirst(z_proj)
+        return [origin[1] + (Float64(idx_x)-1.0)*spacing[1]*dir_00,
+                origin[2] + (Float64(idx_y !== nothing ? idx_y : bounds[3])-1.0)*spacing[2]*dir_11,
+                origin[3] + (Float64(idx_z !== nothing ? idx_z : bounds[5])-1.0)*spacing[3]*dir_22]
+    elseif d_upper in ("ANTERIOR", "ANT")
+        idx_y = dir_11 > 0 ? bounds[3] : bounds[4]
+        return [origin[1] + ((bounds[1]+bounds[2])/2.0 - 1.0)*spacing[1]*dir_00,
+                origin[2] + (Float64(idx_y)-1.0)*spacing[2]*dir_11,
+                origin[3] + ((bounds[5]+bounds[6])/2.0 - 1.0)*spacing[3]*dir_22]
+    elseif d_upper in ("POSTERIOR", "POST")
+        idx_y = dir_11 > 0 ? bounds[4] : bounds[3]
+        return [origin[1] + ((bounds[1]+bounds[2])/2.0 - 1.0)*spacing[1]*dir_00,
+                origin[2] + (Float64(idx_y)-1.0)*spacing[2]*dir_11,
+                origin[3] + ((bounds[5]+bounds[6])/2.0 - 1.0)*spacing[3]*dir_22]
+    elseif d_upper in ("SUPERIOR", "SUP", "TOP")
+        idx_z = dir_22 > 0 ? bounds[6] : bounds[5]
+        return [origin[1] + ((bounds[1]+bounds[2])/2.0 - 1.0)*spacing[1]*dir_00,
+                origin[2] + ((bounds[3]+bounds[4])/2.0 - 1.0)*spacing[2]*dir_11,
+                origin[3] + (Float64(idx_z)-1.0)*spacing[3]*dir_22]
+    else # INFERIOR
+        idx_z = dir_22 > 0 ? bounds[5] : bounds[6]
+        return [origin[1] + ((bounds[1]+bounds[2])/2.0 - 1.0)*spacing[1]*dir_00,
+                origin[2] + ((bounds[3]+bounds[4])/2.0 - 1.0)*spacing[2]*dir_11,
+                origin[3] + (Float64(idx_z)-1.0)*spacing[3]*dir_22]
+    end
+end
+
+"""
+    precalculate_all_gpu_landmarks!(computed_landmarks, masks, spacing, origin, direction; backend=CUDA.functional() ? CUDABackend() : CPU())
+Performs full GPU-accelerated anatomical and geometric landmark, plane, and line extraction.
+"""
+
+function count_2d_components(slice::AbstractMatrix)
+    visited = falses(size(slice))
+    components = 0
+    w, h = size(slice)
+    for j in 1:h, i in 1:w
+        if slice[i,j] > 0 && !visited[i,j]
+            components += 1
+            # BFS
+            q = [(i,j)]
+            visited[i,j] = true
+            while !isempty(q)
+                cx, cy = popfirst!(q)
+                for (dx, dy) in ((1,0), (-1,0), (0,1), (0,-1))
+                    nx, ny = cx + dx, cy + dy
+                    if 1 <= nx <= w && 1 <= ny <= h
+                        if slice[nx, ny] > 0 && !visited[nx, ny]
+                            visited[nx, ny] = true
+                            push!(q, (nx, ny))
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return components
+end
+
+function precalculate_all_gpu_landmarks!(
+    computed_landmarks::Dict{String, Any},
+    masks::AbstractDict,
+    spacing::Tuple{Float64, Float64, Float64},
+    origin::Tuple{Float64, Float64, Float64},
+    direction::Tuple;
+    backend::KernelAbstractions.Backend = CUDA.functional() ? CUDABackend() : CPU()
+)
+    dir_00 = direction[1]; dir_11 = direction[5]; dir_22 = direction[9]
+    is_lps = (dir_00 > 0 && dir_11 > 0 && dir_22 > 0)
+    
+    # 1. Trachea & Carina
+    trachea = get(masks, "trachea", nothing)
+    if trachea !== nothing
+        tr_b = gpu_compute_mask_bounds(trachea)
+        if tr_b[5] > 0
+            carina_z = (Float64(tr_b[5]) - 1.0) * spacing[3] * dir_22
+            tr_top_z = (Float64(tr_b[6]) - 1.0) * spacing[3] * dir_22
+            computed_landmarks["carina_computed"] = carina_z
+            computed_landmarks["trachea_top_z"] = tr_top_z
+            
+            p_left_tr = gpu_get_extreme_point(trachea, spacing, origin, direction, "Left")
+            if p_left_tr !== nothing
+                computed_landmarks["plane_trachea_left"] = (p_left_tr, [1.0, 0.0, 0.0])
+                computed_landmarks["ligamentum_plane_proxy"] = (p_left_tr, [1.0, 0.0, 0.0])
+            end
+            p_right_tr = gpu_get_extreme_point(trachea, spacing, origin, direction, "Right")
+            if p_right_tr !== nothing
+                computed_landmarks["plane_trachea_right"] = (p_right_tr, [-1.0, 0.0, 0.0])
+            end
+        end
+    end
+    
+    # 2. Aorta & Aortic Arch
+    aorta = get(masks, "aorta", nothing)
+    if aorta !== nothing
+        ao_b = gpu_compute_mask_bounds(aorta)
+        if ao_b[6] > 0
+            top_idx = Int(ao_b[6])
+            bot_idx = Int(ao_b[5])
+            
+            top_ao_z = (Float64(top_idx) - 1.0) * spacing[3] * dir_22
+            bot_ao_z = (Float64(bot_idx) - 1.0) * spacing[3] * dir_22
+            
+            # Transfer aorta to CPU to run 2D connected components slice by slice
+            aorta_cpu = Array(aorta)
+            split_z_idx = top_idx
+            persistence = 0
+            for z in top_idx:-1:bot_idx
+                c = count_2d_components(view(aorta_cpu, :, :, z))
+                if c >= 2
+                    persistence += 1
+                    if persistence >= 5
+                        split_z_idx = z + 5
+                        break
+                    end
+                else
+                    persistence = 0
+                end
+            end
+            
+            arch_bot_z = (Float64(split_z_idx) - 1.0) * spacing[3] * dir_22
+            
+            # Create a 3D mask for aortic_arch_computed
+            # Zero out everything below split_z_idx on CPU, then send to GPU
+            aorta_cpu[:, :, 1:split_z_idx-1] .= 0
+            # Must remain on CPU as a BitArray so MaskPacker can pack it properly
+            aortic_arch_mask = BitArray(aorta_cpu)
+            masks["aortic_arch_computed"] = aortic_arch_mask
+            
+            computed_landmarks["aortic_arch_top"] = top_ao_z
+            computed_landmarks["aortic_arch_bottom"] = arch_bot_z
+            computed_landmarks["station_2_inf_z_left"] = top_ao_z
+            computed_landmarks["station_2L_inf_z"] = top_ao_z
+            computed_landmarks["aortic_bifurcation"] = bot_ao_z
+        end
+    end
+    
+    # 3. Thoracic Station 2 Boundaries (Paratracheal)
+    vein_l = get(masks, "brachiocephalic_vein_left", nothing)
+    s2r_inf_z = get(computed_landmarks, "station_2_inf_z_left", 0.0)
+    if trachea !== nothing && vein_l !== nothing
+        tr_b = gpu_compute_mask_bounds(trachea)
+        v_b = gpu_compute_mask_bounds(vein_l)
+        if tr_b[1] > 0 && v_b[1] > 0
+            x_min, x_max = tr_b[1], tr_b[2]
+            v_sub = vein_l[x_min:x_max, :, :]
+            v_sub_b = gpu_compute_mask_bounds(v_sub)
+            if v_sub_b[5] > 0
+                s2r_inf_z = origin[3] + (Float64(v_sub_b[5]) - 1.0) * spacing[3] * dir_22
+            end
+        end
+    end
+    s2l_inf_z = get(computed_landmarks, "station_2_inf_z_left", s2r_inf_z)
+    if s2r_inf_z < s2l_inf_z
+        s2r_inf_z = s2l_inf_z
+    end
+    computed_landmarks["station_2_inf_z_right"] = s2r_inf_z
+    computed_landmarks["station_2R_inf_z"] = s2r_inf_z
+    computed_landmarks["station_2_inf_z"] = s2l_inf_z
+    
+    # Superior station 2 limit: Top of lungs
+    lung_tops = Float64[]
+    for lk in ("lung_left", "lung_right", "lung_upper_lobe_left", "lung_upper_lobe_right")
+        l_arr = get(masks, lk, nothing)
+        if l_arr !== nothing
+            lb = gpu_compute_mask_bounds(l_arr)
+            if lb[6] > 0
+                push!(lung_tops, origin[3] + (Float64(lb[6]) - 1.0) * spacing[3] * dir_22)
+            end
+        end
+    end
+    manu = get(masks, "manubrium", nothing)
+    if manu !== nothing
+        mb = gpu_compute_mask_bounds(manu)
+        if mb[6] > 0
+            push!(lung_tops, origin[3] + (Float64(mb[6]) - 1.0) * spacing[3] * dir_22)
+        end
+    end
+    s2_sup_z = !isempty(lung_tops) ? maximum(lung_tops) : (get(computed_landmarks, "trachea_top_z", 0.0))
+    computed_landmarks["station_2_sup_z"] = s2_sup_z
+    computed_landmarks["station_2_sup_z_left"] = s2_sup_z
+    computed_landmarks["station_2_sup_z_right"] = s2_sup_z
+    computed_landmarks["station_2L_sup_z"] = s2_sup_z
+    computed_landmarks["station_2R_sup_z"] = s2_sup_z
+    
+    # 4. Pulmonary Artery Left
+    pa = get(masks, "pulmonary_artery", get(masks, "pulmonary_artery_left", nothing))
+    if pa !== nothing
+        pab = gpu_compute_mask_bounds(pa)
+        if pab[6] > 0
+            computed_landmarks["pulmonary_artery_left_max_z"] = origin[3] + (Float64(pab[6]) - 1.0) * spacing[3] * dir_22
+        end
+    end
+    
+    # 5. Mandible & Digastric & Hyoid Planes (Neck Nodes)
+    mandible = get(masks, "mandible", nothing)
+    hyoid = get(masks, "hyoid", nothing)
+    
+    if mandible !== nothing
+        mb = gpu_compute_mask_bounds(mandible)
+        if mb[1] > 0
+            x_mid = (mb[1] + mb[2]) / 2.0
+            y_mid = (mb[3] + mb[4]) / 2.0
+            
+            p1_z = Float64(mb[5])
+            p2_z = Float64(mb[6])
+            
+            # Find the true most anterior midline point of the mandible (symphysis / chin)
+            # This matches Landmarks.jl and Python precalc.py
+            mid_tol_vox = 15.0 / spacing[1]
+            min_y_ant = typemax(Int)
+            ant_vox_x = round(Int, x_mid)
+            ant_vox_z = round(Int, (mb[5] + mb[6]) / 2.0)
+            
+            i_min = max(mb[1], round(Int, x_mid - mid_tol_vox))
+            i_max = min(mb[2], round(Int, x_mid + mid_tol_vox))
+            
+            n_cols = i_max - i_min + 1
+            n_slices = mb[6] - mb[5] + 1
+            y_min_col = KernelAbstractions.zeros(backend, Int32, n_cols, n_slices)
+            y_min_col .= Int32(999999)
+            
+            mand_gpu = (mandible isa CuArray) ? mandible : adapt(backend, UInt8.(mandible .> 0))
+            k_mand! = find_anterior_midline_mandible_kernel!(backend)
+            k_mand!(y_min_col, mand_gpu, Int32(i_min), Int32(i_max), Int32(mb[3]), Int32(mb[4]), Int32(mb[5]), Int32(mb[6]), ndrange=(n_cols, n_slices))
+            KernelAbstractions.synchronize(backend)
+            
+            y_min_cpu = adapt(Array, y_min_col)
+            for s_idx in 1:n_slices
+                k = mb[5] + s_idx - 1
+                for c_idx in 1:n_cols
+                    i = i_min + c_idx - 1
+                    j = y_min_cpu[c_idx, s_idx]
+                    if j != 999999 && j < min_y_ant
+                        min_y_ant = j
+                        ant_vox_x = i
+                        ant_vox_z = k
+                    end
+                end
+            end
+            
+            p_ant = [origin[1] + (Float64(ant_vox_x) - 1.0) * spacing[1] * dir_00,
+                     origin[2] + (Float64(min_y_ant) - 1.0) * spacing[2] * dir_11,
+                     origin[3] + (Float64(ant_vox_z) - 1.0) * spacing[3] * dir_22]
+
+            p1 = [p_ant[1], p_ant[2], origin[3] + (p1_z - 1.0) * spacing[3] * dir_22]
+                  
+            p3 = [origin[1] + (Float64(mb[1]) - 1.0) * spacing[1] * dir_00,
+                  origin[2] + (Float64(mb[4]) - 1.0) * spacing[2] * dir_11,
+                  origin[3] + (p1_z - 1.0) * spacing[3] * dir_22]
+                  
+            p4 = [origin[1] + (Float64(mb[2]) - 1.0) * spacing[1] * dir_00,
+                  origin[2] + (Float64(mb[4]) - 1.0) * spacing[2] * dir_11,
+                  origin[3] + (p1_z - 1.0) * spacing[3] * dir_22]
+                  
+            v1 = p3 .- p1
+            v2 = p4 .- p1
+            norm_m = cross(v1, v2)
+            n_len = norm(norm_m)
+            if n_len > 1e-6
+                norm_m = norm_m ./ n_len
+            else
+                norm_m = [0.0, 0.0, 1.0]
+            end
+            if norm_m[3] < 0; norm_m = -norm_m; end
+            
+            computed_landmarks["mandible_plane"] = (p1, norm_m)
+            
+            dist_mand = abs(p2_z - p1_z) * spacing[3]
+            if dist_mand < 15.0; dist_mand = 20.0; end
+            p_high = [p1[1], p1[2], p1[3] + dist_mand]
+            computed_landmarks["high_mandible_plane"] = (p_high, norm_m)
+            
+            if hyoid !== nothing
+                hb = gpu_compute_mask_bounds(hyoid)
+                if hb[5] > 0
+                    h_mid_z = origin[3] + ((hb[5] + hb[6]) / 2.0 - 1.0) * spacing[3] * dir_22
+                    p_low = [p1[1], p1[2], h_mid_z]
+                    computed_landmarks["low_mandible_plane"] = (p_low, norm_m)
+                else
+                    computed_landmarks["low_mandible_plane"] = (p1, norm_m)
+                end
+            else
+                computed_landmarks["low_mandible_plane"] = (p1, norm_m)
+            end
+            
+            # Ramus planes
+            computed_landmarks["mandible_ramus_plane_left"] = (p4, [-1.0, 0.0, 0.0])
+            computed_landmarks["mandible_ramus_plane_right"] = (p3, [1.0, 0.0, 0.0])
+            
+            # Digastric planes: top of digastric is 15mm superior and lateral from anterior chin (p_ant)
+            dig_top_l = [p_ant[1] + 15.0, p_ant[2], p_ant[3] + 15.0]
+            dig_top_r = [p_ant[1] - 15.0, p_ant[2], p_ant[3] + 15.0]
+            computed_landmarks["dig_top_left"] = dig_top_l
+            computed_landmarks["dig_top_right"] = dig_top_r
+            computed_landmarks["dig_top"] = dig_top_l[3] >= dig_top_r[3] ? dig_top_l : dig_top_r
+            
+            if hyoid !== nothing
+                hb = gpu_compute_mask_bounds(hyoid)
+                if hb[1] > 0
+                    h_bot_z = origin[3] + (Float64(hb[5]) - 1.0) * spacing[3] * dir_22
+                    h_ant_y = origin[2] + ((Float64(hb[3]) + Float64(hb[4])) / 2.0 - 1.0) * spacing[2] * dir_11
+                    dig_bot_l = [origin[1] + (Float64(hb[2]) - 1.0) * spacing[1] * dir_00, h_ant_y, h_bot_z]
+                    dig_bot_r = [origin[1] + (Float64(hb[1]) - 1.0) * spacing[1] * dir_00, h_ant_y, h_bot_z]
+                    computed_landmarks["dig_bot_left"] = dig_bot_l
+                    computed_landmarks["dig_bot_right"] = dig_bot_r
+                    
+                    vl_l = dig_bot_l .- dig_top_l
+                    vp_l = cross(vl_l, [0.0, 0.0, 1.0])
+                    if vp_l[1] > 0; vp_l = -vp_l; end
+                    if norm(vp_l) > 1e-6; vp_l = vp_l ./ norm(vp_l); end
+                    computed_landmarks["digastric_plane_left"] = (dig_top_l, vp_l)
+                    
+                    vl_r = dig_bot_r .- dig_top_r
+                    vp_r = cross(vl_r, [0.0, 0.0, 1.0])
+                    if vp_r[1] < 0; vp_r = -vp_r; end
+                    if norm(vp_r) > 1e-6; vp_r = vp_r ./ norm(vp_r); end
+                    computed_landmarks["digastric_plane_right"] = (dig_top_r, vp_r)
+                end
+            end
+        end
+    end
+    
+    # 6. Cricoid Cartilage & Proxy
+    cricoid = get(masks, "cricoid_cartilage", get(masks, "thyroid_cartilage", nothing))
+    if cricoid !== nothing
+        cb = gpu_compute_mask_bounds(cricoid)
+        if cb[5] > 0
+            cric_z = origin[3] + (Float64(cb[5]) - 1.0) * spacing[3] * dir_22
+            computed_landmarks["cricoid"] = cric_z
+            computed_landmarks["low_cricoid_plane"] = cric_z
+        end
+    end
+    
+    # 7. Pelvic & Inguinal Lines / Planes
+    sacrum = get(masks, "sacrum", nothing)
+    l5 = get(masks, "vertebrae_L5", nothing)
+    if l5 !== nothing
+        l5_b = gpu_compute_mask_bounds(l5)
+        if l5_b[5] > 0
+            l5_inf_z = origin[3] + (Float64(l5_b[5]) - 1.0) * spacing[3] * dir_22
+            pt_div = [origin[1] + ((l5_b[1]+l5_b[2])/2.0 - 1.0)*spacing[1]*dir_00,
+                      origin[2] + ((l5_b[3]+l5_b[4])/2.0 - 1.0)*spacing[2]*dir_11,
+                      l5_inf_z]
+            computed_landmarks["iliac_division_plane"] = (pt_div, [0.0, 0.0, 1.0])
+        end
+    end
+    
+    sacrum = get(masks, "sacrum", nothing)
+    for side in ("left", "right")
+        hip = get(masks, "hip_$side", get(masks, "hip", nothing))
+        art_k = "iliac_artery_internal_$side"
+        art = get(masks, art_k, get(masks, "iliac_artery_$side", nothing))
+        
+        p1 = nothing
+        if art !== nothing
+            ab = gpu_compute_mask_bounds(art)
+            if ab[6] > 0
+                p1_z = origin[3] + (Float64(ab[6]) - 1.0) * spacing[3] * dir_22
+                
+                # NEW ILIAC LOGIC: Find bifurcation of iliac_artery_$side
+                cpu_art = backend isa CPU ? art : Array(art)
+                found_bifurcation = false
+                z_bifurcation = ab[6]
+                for z in ab[6]:-1:ab[5]
+                    slice_2d = cpu_art[:, :, z] .> 0
+                    if sum(slice_2d) < 10
+                        continue
+                    end
+                    labeled = zeros(Int, size(slice_2d))
+                    label_count = 0
+                    for j in 1:size(slice_2d, 2), i in 1:size(slice_2d, 1)
+                        if slice_2d[i, j] && labeled[i, j] == 0
+                            label_count += 1
+                            queue = Tuple{Int,Int}[(i, j)]
+                            labeled[i, j] = label_count
+                            while !isempty(queue)
+                                ci, cj = popfirst!(queue)
+                                for (di, dj) in ((-1, 0), (1, 0), (0, -1), (0, 1))
+                                    ni, nj = ci + di, cj + dj
+                                    if 1 <= ni <= size(slice_2d, 1) && 1 <= nj <= size(slice_2d, 2)
+                                        if slice_2d[ni, nj] && labeled[ni, nj] == 0
+                                            labeled[ni, nj] = label_count
+                                            push!(queue, (ni, nj))
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
+                    sizes = zeros(Int, label_count)
+                    for j in 1:size(slice_2d, 2), i in 1:size(slice_2d, 1)
+                        if labeled[i, j] > 0
+                            sizes[labeled[i, j]] += 1
+                        end
+                    end
+                    sig_count = sum(sizes .>= 10)
+                    if sig_count >= 2
+                        found_bifurcation = true
+                        z_bifurcation = z
+                        break
+                    end
+                end
+                
+                if found_bifurcation
+                    p1_z = origin[3] + (Float64(z_bifurcation) - 1.0) * spacing[3] * dir_22
+                    computed_landmarks["iliac_bifurcation_z_$side"] = p1_z
+                end
+
+                p1 = [origin[1] + ((ab[1]+ab[2])/2.0 - 1.0)*spacing[1]*dir_00,
+                      origin[2] + (Float64(ab[3]) - 1.0)*spacing[2]*dir_11,
+                      p1_z]
+                      
+                if found_bifurcation
+                    slice_2d = cpu_art[:, :, z_bifurcation] .> 0
+                    idx = findall(slice_2d)
+                    if !isempty(idx)
+                        cx = sum(i[1] for i in idx) / length(idx)
+                        cy = sum(i[2] for i in idx) / length(idx)
+                        p1[1] = origin[1] + (cx - 1.0) * spacing[1] * dir_00
+                        p1[2] = origin[2] + (cy - 1.0) * spacing[2] * dir_11
+                    end
+                end
+
+                computed_landmarks["internal_iliac_p1_$side"] = p1
+                
+                if side == "left" && found_bifurcation
+                    computed_landmarks["iliac_division_plane"] = (p1, [0.0, 0.0, 1.0])
+                end
+            end
+        end
+        
+        p2 = nothing
+        if sacrum !== nothing && hip !== nothing
+            p2 = Landmarks.compute_internal_iliac_p2(sacrum, hip, spacing, origin, direction)
+            if p2 !== nothing
+                computed_landmarks["internal_iliac_p2_$side"] = p2
+            end
+        end
+        
+        if p2 === nothing && art !== nothing
+            # Fallback to art
+            ab = gpu_compute_mask_bounds(art)
+            if ab[5] > 0
+                p2_z = origin[3] + (Float64(ab[5]) - 1.0) * spacing[3] * dir_22
+                p2 = [origin[1] + ((ab[1]+ab[2])/2.0 - 1.0)*spacing[1]*dir_00,
+                      origin[2] + (Float64(ab[4]) - 1.0)*spacing[2]*dir_11,
+                      p2_z]
+                computed_landmarks["internal_iliac_p2_$side"] = p2
+            end
+        end
+    end
+
+    
+
+
+    # --- Plane Limits for Station 1 & 2 ---
+    manubrium = get(masks, "manubrium", nothing)
+    rib_l_1 = get(masks, "rib_left_1", nothing)
+    rib_r_1 = get(masks, "rib_right_1", nothing)
+    lung_l = get(masks, "lung_left", nothing)
+    lung_r = get(masks, "lung_right", nothing)
+    
+    dims = isempty(masks) ? (512, 512, 284) : size(first(values(masks)))
+    midline_x = origin[1] + (dims[1]/2.0) * spacing[1] * dir_00
+    manu_z = origin[3]
+    if manubrium !== nothing
+        mb = gpu_compute_mask_bounds(manubrium)
+        if mb[6] > 0
+            # Get centroid of max Z slice
+            z_idx = mb[6]
+            manu_slice = Array(manubrium[:, :, z_idx])
+            ys, xs = [], []
+            for j in 1:dims[2], i in 1:dims[1]
+                if manu_slice[i, j] > 0
+                    push!(ys, j); push!(xs, i)
+                end
+            end
+            if !isempty(xs)
+                midline_x = origin[1] + (mean(xs) - 1.0) * spacing[1] * dir_00
+            end
+            manu_z = origin[3] + (Float64(mb[6]) - 1.0) * spacing[3] * dir_22
+        end
+    end
+    
+    function compute_rib_plane(rib_arr, origin, spacing, dir_00, dir_11, dir_22, midline_x, is_left, backend)
+        dims = size(rib_arr)
+        # Ensure UInt8 on GPU
+        if rib_arr isa CuArray
+            # Already on GPU — convert element type on GPU if needed
+            rib_gpu = eltype(rib_arr) == UInt8 ? rib_arr : map(x -> UInt8(x > zero(eltype(rib_arr))), rib_arr)
+        else
+            # CPU array or BitArray — convert to UInt8 and upload once
+            rib_gpu = adapt(backend, UInt8.(rib_arr))
+        end
+        
+        # 1. Compute Centroid
+        stats_d = KernelAbstractions.zeros(backend, Float64, 4)
+        k_cent! = compute_centroid_kernel!(backend)
+        k_cent!(rib_gpu, stats_d, Float32(origin[1]), Float32(origin[2]), Float32(origin[3]), Float32(spacing[1]), Float32(spacing[2]), Float32(spacing[3]), Float32(dir_00), Float32(dir_11), Float32(dir_22), Int32(dims[1]), Int32(dims[2]), Int32(dims[3]), ndrange=dims)
+        KernelAbstractions.synchronize(backend)
+        
+        stats = Array(stats_d)
+        if stats[4] < 100.0
+            return nothing
+        end
+        
+        cx = stats[1] / stats[4]
+        cy = stats[2] / stats[4]
+        cz = stats[3] / stats[4]
+        centroid = [cx, cy, cz]
+        
+        # 2. Compute Covariance Matrix
+        stats_cov = KernelAbstractions.zeros(backend, Float64, 7)
+        init_cov = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 100000.0]
+        KernelAbstractions.copyto!(backend, stats_cov, init_cov)
+        
+        k_cov! = compute_covariance_kernel!(backend)
+        k_cov!(rib_gpu, stats_cov, Float32(cx), Float32(cy), Float32(cz), Float32(origin[1]), Float32(origin[2]), Float32(origin[3]), Float32(spacing[1]), Float32(spacing[2]), Float32(spacing[3]), Float32(dir_00), Float32(dir_11), Float32(dir_22), Int32(dims[1]), Int32(dims[2]), Int32(dims[3]), ndrange=dims)
+        KernelAbstractions.synchronize(backend)
+        
+        cov_cpu = Array(stats_cov)
+        cov_mat = [
+            cov_cpu[1] cov_cpu[2] cov_cpu[3];
+            cov_cpu[2] cov_cpu[4] cov_cpu[5];
+            cov_cpu[3] cov_cpu[5] cov_cpu[6]
+        ]
+        
+        # 3. PCA via eigen
+        F = eigen(cov_mat)
+        norm_vec = vec(F.vectors[:, 1]) # Smallest eigenvalue eigenvector
+        
+        if norm_vec[3] < 0; norm_vec = -norm_vec; end
+        
+        # Apply sign constraints (superior, left/right-downward, anterior-downward)
+        if is_left
+            if norm_vec[1] < 0; norm_vec[1] = -norm_vec[1]; end
+            if norm_vec[2] > 0; norm_vec[2] = -norm_vec[2]; end
+        else
+            if norm_vec[1] > 0; norm_vec[1] = -norm_vec[1]; end
+            if norm_vec[2] > 0; norm_vec[2] = -norm_vec[2]; end
+        end
+        
+        n_len = norm(norm_vec)
+        if n_len > 1e-6
+            norm_vec = norm_vec ./ n_len
+        end
+        
+        # 4. Find shift 'd' that intersects most rib voxels
+        hist_d = KernelAbstractions.zeros(backend, Int32, 201)
+        k_hist! = compute_plane_histogram_kernel!(backend)
+        k_hist!(rib_gpu, hist_d, Float32(norm_vec[1]), Float32(norm_vec[2]), Float32(norm_vec[3]), Float32(cx), Float32(cy), Float32(cz), Float32(origin[1]), Float32(origin[2]), Float32(origin[3]), Float32(spacing[1]), Float32(spacing[2]), Float32(spacing[3]), Float32(dir_00), Float32(dir_11), Float32(dir_22), Int32(dims[1]), Int32(dims[2]), Int32(dims[3]), ndrange=dims)
+        KernelAbstractions.synchronize(backend)
+        
+        hist_cpu = Array(hist_d)
+        best_bin = argmax(hist_cpu)
+        best_dist = Float64(best_bin - 100)
+        
+        # Offset the centroid along the normal
+        best_cx = cx + best_dist * norm_vec[1]
+        best_cy = cy + best_dist * norm_vec[2]
+        best_cz = cz + best_dist * norm_vec[3]
+        
+        if abs(norm_vec[3]) > 1e-6
+            # Project to midline for standard anchor format
+            q_z = best_cz - (norm_vec[1] / norm_vec[3]) * (midline_x - best_cx)
+            return ([midline_x, best_cy, q_z], norm_vec)
+        end
+        return nothing
+    end
+
+    if rib_l_1 !== nothing
+        fit_l = compute_rib_plane(rib_l_1, origin, spacing, dir_00, dir_11, dir_22, midline_x, true, backend)
+        if fit_l !== nothing
+            computed_landmarks["plane_station_2_sup_left"] = (fit_l[1], fit_l[2])
+        else
+            # Fallback to lung apex
+            z_l = manu_z + 40.0
+            x_l = midline_x + 70.0
+            if lung_l !== nothing
+                lb = gpu_compute_mask_bounds(lung_l)
+                if lb[6] > 0
+                    z_l = max(z_l, origin[3] + (Float64(lb[6]) - 1.0) * spacing[3] * dir_22)
+                end
+            end
+            dx = x_l - midline_x
+            dz = z_l - manu_z
+            norm_l = [-dz, 0.0, dx]
+            if norm_l[3] < 0; norm_l = -norm_l; end
+            if norm_l[1] > 0; norm_l[1] = -norm_l[1]; end
+            n_len = norm(norm_l)
+            if n_len > 1e-6; norm_l ./= n_len; end
+            computed_landmarks["plane_station_2_sup_left"] = ([midline_x, origin[2], manu_z], norm_l)
+        end
+    end
+
+    if rib_r_1 !== nothing
+        fit_r = compute_rib_plane(rib_r_1, origin, spacing, dir_00, dir_11, dir_22, midline_x, false, backend)
+        if fit_r !== nothing
+            computed_landmarks["plane_station_2_sup_right"] = (fit_r[1], fit_r[2])
+        else
+            z_r = manu_z + 40.0
+            x_r = midline_x - 70.0
+            if lung_r !== nothing
+                rb = gpu_compute_mask_bounds(lung_r)
+                if rb[6] > 0
+                    z_r = max(z_r, origin[3] + (Float64(rb[6]) - 1.0) * spacing[3] * dir_22)
+                end
+            end
+            dx = x_r - midline_x
+            dz = z_r - manu_z
+            norm_r = [dz, 0.0, -dx]
+            if norm_r[3] < 0; norm_r = -norm_r; end
+            if norm_r[1] < 0; norm_r[1] = -norm_r[1]; end
+            n_len = norm(norm_r)
+            if n_len > 1e-6; norm_r ./= n_len; end
+            computed_landmarks["plane_station_2_sup_right"] = ([midline_x, origin[2], manu_z], norm_r)
+        end
+    end
+
+    # 8. Diaphragm level
+    heart = get(masks, "heart", nothing)
+    if heart !== nothing
+        hb = gpu_compute_mask_bounds(heart)
+        if hb[5] > 0
+            computed_landmarks["diaphragm_level"] = origin[3] + (Float64(hb[5]) - 1.0) * spacing[3] * dir_22
+        end
+    end
+    
+    return computed_landmarks
+end
+
+end # module

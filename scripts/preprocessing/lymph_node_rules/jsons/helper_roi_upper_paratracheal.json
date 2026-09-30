@@ -1,0 +1,11 @@
+{
+    "helper_roi_upper_paratracheal": {
+        "rule": "Union",
+        "is_helper": true,
+        "input_landmarks": [
+            "trachea",
+            "sternum"
+        ],
+        "comments": "Union of trachea and sternum for SBB processing"
+    }
+}

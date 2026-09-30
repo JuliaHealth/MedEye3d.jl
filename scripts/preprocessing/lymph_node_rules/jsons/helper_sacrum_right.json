@@ -1,0 +1,11 @@
+{
+    "helper_sacrum_right": {
+        "rule": "SplitMask",
+        "landmark": "sacrum",
+        "axis": "x",
+        "split_method": "center",
+        "keep": "negative",
+        "is_bilateral": false,
+        "is_helper": true
+    }
+}

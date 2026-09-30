@@ -1,0 +1,17 @@
+{
+    "helper_common_iliac_top_part": {
+        "rule": "BitwiseOr",
+        "inputs": ["helper_common_iliac_combined"],
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "helper_common_iliac_combined",
+                "boundary_part": "max",
+                "offset_mm": -5.0
+            }
+        ],
+        "depends_on": ["helper_common_iliac_combined"],
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

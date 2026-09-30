@@ -1,0 +1,35 @@
+{
+    "helper_prevascular_paratracheal_union": {
+        "rule": "Combine",
+        "method": "union",
+        "components": [
+            "Thoracic_Station_3A_Prevascular_Left",
+            "Thoracic_Station_3A_Prevascular_Right",
+            "Thoracic_Station_2_UpperParatracheal_Left",
+            "Thoracic_Station_2_UpperParatracheal_Right",
+            "Thoracic_Station_4_LowerParatracheal_Left",
+            "Thoracic_Station_4_LowerParatracheal_Right"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "Thoracic_Station_3A_Prevascular_Left",
+            "Thoracic_Station_3A_Prevascular_Right",
+            "Thoracic_Station_2_UpperParatracheal_Left",
+            "Thoracic_Station_2_UpperParatracheal_Right",
+            "Thoracic_Station_4_LowerParatracheal_Left",
+            "Thoracic_Station_4_LowerParatracheal_Right"
+        ]
+    },
+    "helper_prevascular_paratracheal_dilated": {
+        "rule": "Morphology",
+        "operation": "dilate",
+        "radius_mm": 10.0,
+        "landmark": "helper_prevascular_paratracheal_union",
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_prevascular_paratracheal_union"
+        ]
+    }
+}

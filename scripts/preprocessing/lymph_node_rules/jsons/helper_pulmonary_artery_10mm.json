@@ -1,0 +1,9 @@
+{
+    "helper_pulmonary_artery_10mm": {
+        "rule": "DilatedMask",
+        "base_landmark": "pulmonary_artery",
+        "margin_mm": 10.0,
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

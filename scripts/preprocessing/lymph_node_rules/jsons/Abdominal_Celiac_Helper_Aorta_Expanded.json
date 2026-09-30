@@ -1,0 +1,84 @@
+{
+    "Abdominal_Celiac_Helper_Aorta_Expanded": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "aorta",
+        "margins_mm": {
+            "anterior": 40,
+            "posterior": 0,
+            "left": 40,
+            "right": 40,
+            "superior": 0,
+            "inferior": 0
+        },
+        "z_plane_restriction": {
+            "superior": "portal_vein_and_splenic_vein",
+            "superior_part": "max",
+            "inferior": "pancreas",
+            "inferior_part": "min"
+        },
+        "constraints": [
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "aorta",
+                "boundary_part": "min",
+                "offset_mm": 0
+            }
+        ],
+        "comments": "Helper mask: Aorta dilated anteriorly/laterally, strictly restricted to be anterior to the aorta's anterior wall. Z-limited from pancreas bottom to portal vein max.",
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "keep_all_components": false,
+        "assertions": [
+            {
+                "type": "RelativePosition",
+                "target": "stomach",
+                "direction": "posterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "aorta_centroid",
+                "direction": "anterior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "pancreas",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "aorta",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "liver",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "celiac_inf_plane",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "P_sma",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vertebrae_T10_min",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vertebrae_L2_max",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vertebrae_T12_anterior_margin",
+                "direction": "anterior"
+            }
+        ]
+    }
+}

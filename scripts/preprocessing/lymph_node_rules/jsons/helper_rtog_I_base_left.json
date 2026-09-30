@@ -1,0 +1,10 @@
+{
+    "helper_rtog_I_base_left": {
+        "rule": "Union",
+        "inputs": [
+            "helper_b_axilla_left",
+            "helper_rtog_II_hull_left"
+        ],
+        "is_helper": true
+    }
+}

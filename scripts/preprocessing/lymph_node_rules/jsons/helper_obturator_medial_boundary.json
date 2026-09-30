@@ -1,0 +1,19 @@
+{
+    "helper_obturator_medial_boundary": {
+        "rule": "BitwiseOr",
+        "is_bilateral": false,
+        "target_landmarks": [
+            "prostate",
+            "urinary_bladder",
+            "helper_rectum_dilated_2cm"
+        ],
+        "depends_on": [
+            "helper_rectum_dilated_2cm"
+        ],
+        "ancillary_landmarks": [
+            "prostate",
+            "urinary_bladder",
+            "helper_rectum_dilated_2cm"
+        ]
+    }
+}

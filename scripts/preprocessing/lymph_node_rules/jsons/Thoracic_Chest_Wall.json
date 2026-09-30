@@ -1,0 +1,13 @@
+{
+    "Thoracic_Chest_Wall": {
+        "rule": "Mask",
+        "mask_name": "thorax_wall",
+        "category": "Helper",
+        "is_helper": true,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "keep_all_components": true,
+        "overlap_precedence": [],
+        "comments": "Thoracic Chest Wall (Helper). Using pre-calculated thorax_wall mask (Ribs + Sternum + Intercostal gaps)."
+    }
+}

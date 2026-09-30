@@ -1,0 +1,38 @@
+{
+    "Abdominal_Inferior_Pancreas": {
+        "rule": "ConvexHull",
+        "landmarks": [
+            "pancreas",
+            "helper_Abdominal_Paraaortic"
+        ],
+        "mode": "2D",
+        "constraints": [
+            {
+                "constraint_type": "Superior",
+                "landmarks": [
+                    "pancreas"
+                ]
+            },
+            {
+                "constraint_type": "Inferior",
+                "landmarks": [
+                    "pancreas"
+                ]
+            }
+        ],
+        "exclude": [
+            "pancreas",
+            "aorta",
+            "kidney_left",
+            "kidney_right",
+            "stomach",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "liver",
+            "spleen",
+            "gallbladder"
+        ],
+        "comments": "2D Convex Hull of pancreas and Paraaortic restricted to the Z bounds of pancreas."
+    }
+}

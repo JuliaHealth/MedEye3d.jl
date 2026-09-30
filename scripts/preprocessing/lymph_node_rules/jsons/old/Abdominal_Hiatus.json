@@ -1,0 +1,54 @@
+{
+    "Abdominal_Paraoesophageal_Hiatus": {
+        "rule": "DilatedMask",
+        "base_landmark": "esophagus",
+        "dilation_mm": 10.0,
+        "is_bilateral": false,
+        "z_plane_restriction": {
+            "superior": "esophagus",
+            "superior_part": "min",
+            "superior_offset_mm": 10.0,
+            "inferior": "helper_cardia",
+            "inferior_part": "min"
+        },
+        "exclude": [
+            "esophagus",
+            "stomach",
+            "liver",
+            "heart",
+            "aorta",
+            "inferior_vena_cava",
+            "fused_spine",
+            "spinal_cord",
+            "lung",
+            "lung_left",
+            "lung_right",
+            "pancreas",
+            "spleen",
+            "diaphragm_proxy",
+            "helper_Abdominal_Paraaortic",
+            "Abdominal_Station_9_Celiac",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right"
+        ],
+        "depends_on": [
+            "helper_cardia",
+            "helper_Abdominal_Paraaortic",
+            "Abdominal_Station_9_Celiac"
+        ],
+        "ignore_global_exclusion": true,
+        "keep_all_components": true,
+        "category": "Lymph_Node",
+        "group": "Abdominal",
+        "color": [
+            200,
+            150,
+            255
+        ],
+        "comments": "1cm around esophageal hiatus (diaphragm transition)"
+    }
+}

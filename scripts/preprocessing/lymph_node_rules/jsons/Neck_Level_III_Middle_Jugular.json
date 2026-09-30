@@ -1,0 +1,83 @@
+{
+    "helper_Neck_Level_III_hull": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "common_carotid_artery",
+            "internal_jugular_vein",
+            "sternocleidomastoid",
+            "anterior_scalene"
+        ],
+        "is_bilateral": true,
+        "is_helper": true,
+        "category": "new_helpers",
+        "dependencies": [
+            "common_carotid_artery",
+            "internal_jugular_vein",
+            "sternocleidomastoid",
+            "anterior_scalene"
+        ]
+    },
+    "Neck_Level_III_Middle_Jugular": {
+        "rule": "BitwiseOr",
+        "targets": [
+            "helper_Neck_Level_III_hull"
+        ],
+        "is_bilateral": true,
+        "z_plane_restriction": {
+            "superior": "hyoid",
+            "superior_part": "max",
+            "inferior": "cricoid_cartilage",
+            "inferior_part": "min",
+            "comment": "Superior: hyoid top. Inferior: cricoid bottom."
+        },
+        "exclude": [
+            "sternocleidomastoid",
+            "common_carotid_artery",
+            "internal_jugular_vein",
+            "internal_carotid_artery",
+            "thyroid_gland",
+            "trachea",
+            "esophagus",
+            "fused_spine",
+            "spinal_cord",
+            "pharynx",
+            "prevertebral",
+            "anterior_scalene",
+            "middle_scalene",
+            "posterior_scalene",
+            "levator_scapulae",
+            "trapezius",
+            "platysma",
+            "digastric",
+            "submandibular_gland",
+            "parotid_gland",
+            "larynx",
+            "cricoid_cartilage",
+            "thyroid_cartilage"
+        ],
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "keep_all_components": false,
+        "group": "Neck",
+        "category": "Lymph_Node",
+        "color": [100, 200, 150],
+        "depends_on": [
+            "helper_Neck_Level_III_hull",
+            "Neck_Level_IV_Lower_Jugular"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "SideLimit",
+                "landmark": "trachea",
+                "slice_wise": true,
+                "comment": "Left variant: left of trachea left margin. Right variant: right of trachea right margin."
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "Neck_Level_IV_Lower_Jugular",
+                "boundary_part": "max",
+                "comment": "Ensure Middle Jugular is above Lower Jugular"
+            }
+        ]
+    }
+}

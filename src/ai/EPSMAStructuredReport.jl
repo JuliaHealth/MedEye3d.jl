@@ -256,7 +256,12 @@ function classify_mitnm(organ::String, sublocation::String, details::String, les
     if is_ln_type
         if occursin("retroperiton", lo) || occursin("paraort", lo) || occursin("para-aort", lo) || occursin("mediastin", lo) ||
            occursin("supraclav", lo) || occursin("inguin", lo) || occursin("axill", lo) ||
-           occursin("aorta", lo) || occursin("aortic", lo) || occursin("vena_cava", lo) || occursin("caval", lo)
+           occursin("aorta", lo) || occursin("aortic", lo) || occursin("vena_cava", lo) || occursin("caval", lo) ||
+           occursin("thoracic", lo) || occursin("neck", lo) || occursin("cervical", lo) || occursin("jugular", lo) ||
+           occursin("common_iliac", lo) || occursin("mesenteric", lo) || occursin("celiac", lo) || occursin("pancreatic", lo) ||
+           occursin("gastric", lo) || occursin("hepatic", lo) || occursin("splenic", lo) || occursin("rotter", lo) ||
+           occursin("subcarin", lo) || occursin("subaortic", lo) || occursin("prevascular", lo) || occursin("paraoesophageal", lo) ||
+           occursin("distant", lo)
             return "miM1a"
         else
             return "miN1"
@@ -271,11 +276,17 @@ function classify_mitnm(organ::String, sublocation::String, details::String, les
     end
 
     # ── 4. Lymph nodes (from keywords in organ name) ──
-    is_ln_kw = occursin("lymph", lo) || occursin("node", lo) || occursin("knoten", lo) || occursin("obturat", lo) || occursin("presacr", lo) || (occursin("iliac", lo) && !occursin("crest", lo))
+    is_ln_kw = occursin("lymph", lo) || occursin("node", lo) || occursin("knoten", lo) || occursin("obturat", lo) || occursin("presacr", lo) || (occursin("iliac", lo) && !occursin("crest", lo)) ||
+               startswith(lo, "neck_") || startswith(lo, "thoracic_") || startswith(lo, "axillary_") || startswith(lo, "abdominal_")
     if is_ln_kw
         if occursin("retroperiton", lo) || occursin("paraort", lo) || occursin("para-aort", lo) || occursin("mediastin", lo) ||
            occursin("supraclav", lo) || occursin("inguin", lo) || occursin("axill", lo) ||
-           occursin("aorta", lo) || occursin("aortic", lo) || occursin("vena_cava", lo) || occursin("caval", lo)
+           occursin("aorta", lo) || occursin("aortic", lo) || occursin("vena_cava", lo) || occursin("caval", lo) ||
+           occursin("thoracic", lo) || occursin("neck", lo) || occursin("cervical", lo) || occursin("jugular", lo) ||
+           occursin("common_iliac", lo) || occursin("mesenteric", lo) || occursin("celiac", lo) || occursin("pancreatic", lo) ||
+           occursin("gastric", lo) || occursin("hepatic", lo) || occursin("splenic", lo) || occursin("rotter", lo) ||
+           occursin("subcarin", lo) || occursin("subaortic", lo) || occursin("prevascular", lo) || occursin("paraoesophageal", lo) ||
+           occursin("distant", lo)
             return "miM1a"
         else
             return "miN1"
@@ -1027,9 +1038,15 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
             end
         end
         
-        # 1d. Auto-infer LN from atlas vascular names (iliac vessels, aorta = LN stations)
+        # 1d. Auto-infer LN from clinical station or atlas vascular names
         if ltype in ("Lesion", "Organ Meta", "") && !is_artifact
-            if occursin("iliac", organ_lo) && !occursin("crest", organ_lo)
+            if occursin("lymph", organ_lo) || occursin("knoten", organ_lo) || occursin("node", organ_lo) ||
+               startswith(organ_lo, "neck_") || startswith(organ_lo, "thoracic_") ||
+               startswith(organ_lo, "axillary_") || startswith(organ_lo, "abdominal_") ||
+               occursin("inguinal", organ_lo)
+                ltype = "Lymph Node"
+                @info "[E-PSMA] Atlas station→Lymph Node for lesion $lid (atlas: '$raw_organ_name')"
+            elseif occursin("iliac", organ_lo) && !occursin("crest", organ_lo)
                 ltype = "Lymph Node"  # Pelvic LN station (near iliac vessels)
                 @info "[E-PSMA] Atlas vascular→Lymph Node for lesion $lid (atlas: '$raw_organ_name')"
             elseif occursin("aorta", organ_lo) || occursin("vena_cava", organ_lo) || occursin("caval", organ_lo)
@@ -1038,11 +1055,9 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
             end
         end
         
-        # 1e. Override artifact/muscle flag when segment name explicitly identifies a lymph node
-        # The atlas centroid may land on adjacent muscle/bone (e.g., iliopsoas), but the
-        # clinical annotation from Slicer says it IS a lymph node — trust the annotation.
-        if ltype == "Lymph Node" && (is_artifact || is_muscle)
-            @info "[E-PSMA] Overriding artifact flag for lesion $lid: seg_name='$seg_name' says Lymph Node but atlas='$raw_organ_name' triggered muscle/artifact"
+        # 1e. Override artifact/muscle flag when lesion or segment is a lymph node
+        if (ltype == "Lymph Node" || ltype == "Lymph Node Meta") && (is_artifact || is_muscle)
+            @info "[E-PSMA] Overriding artifact flag for lesion $lid: ltype='$ltype' but atlas='$raw_organ_name' triggered muscle/artifact"
             is_artifact = false
             is_muscle = false
         end

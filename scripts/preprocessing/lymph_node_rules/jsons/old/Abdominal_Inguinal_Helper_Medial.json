@@ -1,0 +1,140 @@
+{
+    "Abdominal_Inguinal_Helper_Medial_Left": {
+        "rule": "SplitMask",
+        "is_bilateral": false,
+        "landmark": "hip_left",
+        "axis": "x",
+        "split_method": "center",
+        "side_to_keep": "min",
+        "comments": "Left Hip (High X). Medial side is towards center (Lower X). Keep MIN.",
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "keep_all_components": false,
+        "assertions": [
+            {
+                "type": "RelativePosition",
+                "target": "iliac_artery_external",
+                "direction": "inferior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "tissue_muscle",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p_Pubic_Tubercle",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p_ASIS",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Deep_Inguinal",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "femoral_artery",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "femoral_vein",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p_Pubic_Tubercle_Left",
+                "direction": "lateral"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Inguinal_Right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Deep_Inguinal",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "femoral_vein",
+                "expected": 0
+            }
+        ]
+    },
+    "Abdominal_Inguinal_Helper_Medial_Right": {
+        "rule": "SplitMask",
+        "is_bilateral": false,
+        "landmark": "hip_right",
+        "axis": "x",
+        "split_method": "center",
+        "side_to_keep": "max",
+        "comments": "Right Hip (Low X). Medial side is towards center (Higher X). Keep MAX.",
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "keep_all_components": false,
+        "assertions": [
+            {
+                "type": "RelativePosition",
+                "target": "iliac_artery_external",
+                "direction": "inferior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "tissue_muscle",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p_Pubic_Tubercle",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p_ASIS",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Deep_Inguinal",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "femoral_artery",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "femoral_vein",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p_Pubic_Tubercle_Left",
+                "direction": "lateral"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Inguinal_Right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Deep_Inguinal",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "femoral_vein",
+                "expected": 0
+            }
+        ]
+    }
+}

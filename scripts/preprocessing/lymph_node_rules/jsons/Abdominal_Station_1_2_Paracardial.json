@@ -1,0 +1,39 @@
+{
+    "Abdominal_Station_1_2_Paracardial": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "stomach",
+        "margins_mm": {
+            "anterior": 15,
+            "superior": 20,
+            "posterior": 15,
+            "left": 15,
+            "right": 15,
+            "inferior": 0
+        },
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmarks": [
+                    "stomach"
+                ],
+                "boundary_part": "center"
+            }
+        ],
+        "is_bilateral": false,
+        "exclude": [
+            "stomach",
+            "liver",
+            "heart",
+            "aorta",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "spleen",
+            "pancreas",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right"
+        ],
+        "comments": "Paracardial nodes (1 and 2) around upper stomach."
+    }
+}

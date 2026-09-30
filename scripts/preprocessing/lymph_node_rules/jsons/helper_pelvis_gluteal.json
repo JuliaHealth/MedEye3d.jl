@@ -1,0 +1,22 @@
+{
+    "helper_pelvis_gluteal": {
+        "rule": "VolumetricBoundary2D",
+        "is_bilateral": true,
+        "growth_mode": "sideways",
+        "boundaries": {
+            "lateral": [
+                "gluteus_maximus",
+                "gluteus_medius",
+                "gluteus_minimus"
+            ],
+            "medial": "hip"
+        },
+        "ancillary_landmarks": [
+            "hip",
+            "gluteus_maximus",
+            "gluteus_medius",
+            "gluteus_minimus"
+        ],
+        "is_helper": true
+    }
+}

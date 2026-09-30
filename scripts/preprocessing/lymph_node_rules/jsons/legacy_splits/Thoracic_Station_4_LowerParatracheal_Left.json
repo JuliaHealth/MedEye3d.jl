@@ -1,0 +1,138 @@
+{
+    "Thoracic_Station_4_LowerParatracheal_Left": {
+        "rule": "AnisotropicMargin",
+        "is_bilateral": false,
+        "base_landmark": "trachea",
+        "margins_mm": {
+            "posterior": 20,
+            "anterior": 50,
+            "left": 100,
+            "right": 20,
+            "superior": 0,
+            "inferior": 0
+        },
+        "z_plane_restriction": {
+            "superior": "aorta",
+            "superior_part": "max",
+            "inferior": "carina",
+            "inferior_part": "min",
+            "inferior_offset_mm": 1.0
+        },
+        "constraints": [
+            {
+                "constraint_type": "MedialTo",
+                "landmark": "fused_spine",
+                "boundary_part": "lateral",
+                "offset_mm": -20.0,
+                "slice_wise": true,
+                "comment": "Limit lateral reach to 2cm BEYOND vertebral column edge (per slice)."
+            },
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": [
+                    "superior_vena_cava",
+                    "brachiocephalic_vein"
+                ],
+                "slice_wise": true,
+                "boundary_part": "center",
+                "offset_mm": -10.0,
+                "comment": "Never extend posterior to the center of the Great Vessels (relaxed)."
+            },
+            {
+                "constraint_type": "LineLimitBetweenLandmarks",
+                "landmark_1": "aorta_ascending",
+                "landmark_2": "aorta_descending",
+                "label_value": 1,
+                "comment": "Keep Medial (Right) side relative to aorta split line."
+            },
+            {
+                "constraint_type": "LeftOf",
+                "landmark": "trachea",
+                "boundary_part": "max",
+                "slice_wise": true,
+                "comment": "Keep Left of tracheal wall."
+            }
+        ],
+        "exclude": [
+            "fused_spine",
+            "Thoracic_Station_6_Paraaortic",
+            "trachea",
+            "esophagus",
+            "aorta",
+            "lung",
+            "lung_upper_lobe_left",
+            "lung_lower_lobe_left",
+            "lung_upper_lobe_right",
+            "lung_middle_lobe_right",
+            "lung_lower_lobe_right"
+        ],
+        "comments": "Station 4L (Left Lower Paratracheal). Uses AortaMidlineLimit to separate from Station 6.",
+        "ignore_global_exclusion": true,
+        "overlap_precedence": [
+            "Thoracic_Station_6_Paraaortic"
+        ],
+        "ignore_fat": true,
+        "keep_all_components": true,
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "trachea",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "lung_right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "lung_left",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "superior_vena_cava",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vertebrae_T",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "sternum",
+                "direction": "posterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Z_4R_lower",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Z_4L_lower",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "carina_computed_Z",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "plane_ligamentum_arteriosum",
+                "direction": "medial"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Level_4L",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 500
+            }
+        ]
+    }
+}

@@ -1,0 +1,32 @@
+{
+    "helper_sacrum_autochthon": {
+        "rule": "VolumetricBoundary2D",
+        "is_bilateral": true,
+        "boundaries": {
+            "structures": [
+                "helper_sacrum",
+                "autochthon"
+            ]
+        },
+        "roi": {
+            "landmark": [
+                "helper_sacrum",
+                "autochthon"
+            ],
+            "padding_mm": [
+                20,
+                20,
+                20
+            ]
+        },
+        "keep_all_components": true,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "comments": "Convex hull of sacrum and autochthon per side",
+        "depends_on": [
+            "helper_sacrum_left",
+            "helper_sacrum_right"
+        ],
+        "is_helper": true
+    }
+}

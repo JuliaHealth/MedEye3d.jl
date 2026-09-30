@@ -1,0 +1,23 @@
+{
+    "Abdominal_Mesenteric_Helper_Base": {
+        "rule": "BooleanOperation",
+        "op": "Union",
+        "inputs": [
+            "colon",
+            "small_bowel"
+        ],
+        "ignore_global_exclusion": true,
+        "exclude": [
+            "stomach",
+            "duodenum",
+            "liver",
+            "spleen",
+            "pancreas",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right"
+        ],
+        "ignore_fat": true,
+        "keep_all_components": false
+    }
+}

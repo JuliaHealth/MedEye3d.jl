@@ -1,0 +1,69 @@
+{
+    "helper_stylohyoid_proxy": {
+        "rule": "GeometricPrimitive",
+        "primitive": "Cylinder",
+        "is_bilateral": true,
+        "category": "helper_planes",
+        "p1": {
+            "name": "Styloid Process Bottom",
+            "landmark": "styloid_process",
+            "direction": "inferior"
+        },
+        "p2": {
+            "name": "Hyoid Top",
+            "landmark": "hyoid",
+            "split": "lateral",
+            "direction": "superior"
+        },
+        "radius_mm": 2.0,
+        "comments": "Stylohyoid proxy. Connects styloid process tip to highest point of hyoid lateral half."
+    },
+    "helper_sternohyoid_proxy": {
+        "rule": "GeometricPrimitive",
+        "primitive": "Cylinder",
+        "is_bilateral": true,
+        "category": "helper_planes",
+        "p1": {
+            "name": "Hyoid Bottom",
+            "landmark": "hyoid",
+            "split": "lateral",
+            "direction": "inferior"
+        },
+        "p2": {
+            "name": "Sternum Top",
+            "landmark": "sternum",
+            "direction": "superior"
+        },
+        "radius_mm": 2.0,
+        "comments": "Sternohyoid proxy. Connects bottom center of hyoid lateral half to top of sternum."
+    },
+    "helper_jugular_anterior_proxy": {
+        "rule": "BitwiseOr",
+        "targets": [
+            "helper_stylohyoid_proxy",
+            "helper_sternohyoid_proxy"
+        ],
+        "is_bilateral": true,
+        "category": "helper_planes",
+        "comments": "Union of stylohyoid and sternohyoid to form the anterior boundary of jugular regions."
+    },
+    "helper_digastric_proxy": {
+        "rule": "GeometricPrimitive",
+        "primitive": "Cylinder",
+        "is_bilateral": true,
+        "category": "helper_planes",
+        "p1": {
+            "name": "Digastric Top",
+            "landmark": "digastric",
+            "direction": "superior"
+        },
+        "p2": {
+            "name": "Hyoid Bottom",
+            "landmark": "hyoid",
+            "split": "lateral",
+            "direction": "inferior"
+        },
+        "radius_mm": 2.0,
+        "comments": "Digastric proxy. Connects top of digastric to bottom of hyoid lateral half."
+    }
+}

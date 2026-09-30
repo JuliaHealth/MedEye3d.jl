@@ -500,43 +500,140 @@ function load_nrrd_labelmap(nrrd_path::String)
 end
 
 """
+    is_lymph_node_structure(name::String)::Bool
+
+Determine whether a structure name represents a clinical lymph node area/station.
+Checks known clinical station prefixes, substrings (lymph, node, knoten), and regional definitions.
+"""
+function is_lymph_node_structure(name::String)::Bool
+    isempty(name) && return false
+    ln = lowercase(name)
+    
+    # Substring checks
+    (occursin("lymph", ln) || occursin("knoten", ln) || occursin("node", ln)) && return true
+    
+    # Clinical station prefixes and patterns in max_anatomy
+    prefixes = ["neck_", "thoracic_station_", "axillary_", "abdominal_station_",
+                "abdominal_mesenteric", "abdominal_obturator", "abdominal_presacral",
+                "abdominal_pararectal", "abdominal_renal_hilar", "abdominal_common_iliac",
+                "abdominal_external_iliac", "abdominal_internal_iliac", "abdominal_inguinal",
+                "deep_inguinal", "superficial_inguinal", "inguinal_"]
+    for p in prefixes
+        startswith(ln, p) && return true
+    end
+    
+    return false
+end
+
+"""
+    is_pelvic_lymph_node(name::String)::Bool
+
+Determine whether a lymph node station is a regional pelvic lymph node (miN1).
+Includes internal iliac, external iliac, obturator, presacral, and pararectal stations.
+"""
+function is_pelvic_lymph_node(name::String)::Bool
+    ln = lowercase(name)
+    # Check regional pelvic nodal stations
+    is_pelv = occursin("obturator", ln) || occursin("presacral", ln) || occursin("pararectal", ln) ||
+              occursin("perirectal", ln) || occursin("internal_iliac", ln) || occursin("external_iliac", ln) ||
+              (occursin("pelvic", ln) && occursin("lymph", ln))
+    # Common iliac is extra-pelvic / distant (M1a) in prostate cancer staging
+    if occursin("common_iliac", ln)
+        return false
+    end
+    return is_pelv
+end
+
+"""
+    classify_lymph_node_location(organ_name::String) -> Tuple{String, String}
+
+Return (anatomic_location, anatomical_sublocation) corresponding to UI dropdown options.
+- Regional pelvic nodes -> ("Pelvic Lymph Node", sublocation)
+- Extra-pelvic distant nodes -> ("Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)", sublocation)
+"""
+function classify_lymph_node_location(organ_name::String)::Tuple{String, String}
+    ln = lowercase(organ_name)
+    if is_pelvic_lymph_node(organ_name)
+        subloc = if occursin("obturator", ln)
+            "Obturator"
+        elseif occursin("external_iliac", ln)
+            "External Iliac"
+        elseif occursin("internal_iliac", ln)
+            "Internal Iliac"
+        elseif occursin("presacral", ln)
+            "Presacral"
+        elseif occursin("pararectal", ln) || occursin("perirectal", ln)
+            "Perirectal"
+        else
+            "Intranodal Cortex (Asymmetric Gradient)"
+        end
+        return ("Pelvic Lymph Node", subloc)
+    else
+        subloc = if occursin("common_iliac", ln)
+            "Common Iliac"
+        elseif occursin("paraort", ln) || occursin("para-aort", ln) || occursin("aortic_hiatus", ln) || occursin("station_16", ln)
+            "Retroperitoneal / Para-Aortic"
+        elseif occursin("inguin", ln)
+            "Inguinal"
+        elseif occursin("supraclav", ln)
+            "Supraclavicular"
+        elseif occursin("axill", ln) || occursin("rotter", ln)
+            "Axillary"
+        elseif occursin("thoracic", ln) || occursin("prevascular", ln) || occursin("subcarin", ln) || occursin("subaortic", ln) || occursin("hilar", ln) || occursin("paraoesophageal", ln)
+            "Anterior Mediastinum"
+        elseif occursin("neck", ln) || occursin("cervical", ln) || occursin("jugular", ln)
+            "Cervical / Neck"
+        elseif occursin("mesenteric", ln) || occursin("celiac", ln) || occursin("pancreatic", ln) || occursin("gastric", ln) || occursin("hepatic", ln) || occursin("splenic", ln)
+            "Abdominal / Mesenteric"
+        else
+            "Testicular Lymph Node Route (Para-aortic / Renal Hilum)"
+        end
+        return ("Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)", subloc)
+    end
+end
+
+"""
     classify_tissue_priority(organ_name::String) → Int
 
-Classify a TotalSegmentator organ name into a tissue priority class.
+Classify a structure name into a tissue priority class.
 Lower number = higher priority for lesion naming.
-  1 = Bone, 2 = Solid Organ, 3 = Lymph, 4 = Vessel, 5 = Muscle/Soft Tissue
+  1 = Prostate, 2 = Lymph Node, 3 = Bone, 4 = Solid Organ, 5 = Vessel, 6 = Muscle/Soft Tissue
 """
 function classify_tissue_priority(name::String)::Int
     ln = lowercase(name)
     
-    # Bone keywords — highest priority for lesion naming
+    # 1. Prostate gland primary site
+    occursin("prostate", ln) && return 1
+    
+    # 2. Lymph node stations (takes priority over organs, vessels, and muscles)
+    is_lymph_node_structure(name) && return 2
+    
+    # 3. Bone keywords — skeletal structures
     bone_kw = ["vertebra", "rib_", "femur", "humerus", "scapula_", "hip_",
                "sacrum", "skull", "sternum", "clavicle", "costal", "hyoid",
                "mandible", "styloid", "zygomatic", "cricoid", "thyroid_cartilage",
-               "ilium", "ischium", "pubis", "tibia"]
-    # Vascular exclusions — some share bone keywords (e.g. "iliac_artery")
+               "ilium", "ischium", "pubis", "tibia", "bone", "spine"]
     vessel_excl = ["artery", "vein", "vena", "vessel"]
-    # Muscle exclusions — muscles containing bone keywords (levator_scapulae, subscapularis)
     muscle_excl = ["levator", "subscapularis", "infraspinatus", "supraspinatus",
                    "teres", "coracobrachial"]
     
     if any(k -> occursin(k, ln), bone_kw) && !any(v -> occursin(v, ln), vessel_excl) && !any(m -> occursin(m, ln), muscle_excl)
-        return 1  # Bone
+        return 3  # Bone
     end
     
+    # 4. Solid organs
     organ_kw = ["liver", "kidney", "lung", "spleen", "pancreas", "heart",
                 "thyroid_gland", "adrenal", "stomach", "colon", "rectum",
-                "esophagus", "gallbladder", "bladder", "prostate", "bowel",
+                "esophagus", "gallbladder", "bladder", "bowel",
                 "duodenum", "trachea", "brain", "spinal_cord", "eye",
                 "parotid", "submandibular", "optic_nerve"]
-    any(k -> occursin(k, ln), organ_kw) && return 2  # Solid organ
+    any(k -> occursin(k, ln), organ_kw) && return 4  # Solid organ
     
-    occursin("lymph", ln) && return 3  # Lymph node
-    
+    # 5. Vessels
     vessel_kw = ["aorta", "artery", "vein", "vena", "trunk", "carotid", "jugular"]
-    any(k -> occursin(k, ln), vessel_kw) && return 4  # Vessel
+    any(k -> occursin(k, ln), vessel_kw) && return 5  # Vessel
     
-    return 5  # Muscle / soft tissue
+    return 6  # Muscle / soft tissue
 end
 
 """
@@ -574,23 +671,52 @@ end
 """
     pick_best_organ(counts, ts_names) → String
 
-Given atlas label counts, pick the best organ using tissue priority:
-bone > solid organ > lymph > vessel > muscle.
-Within the same priority class, picks the label with the most voxels.
+Given atlas label counts, pick the best organ using clinical priority rules:
+1. Prostate Primary: Any non-zero overlap in prostate gland.
+2. Lymph Node Rule: Any non-zero overlap in a lymph node area takes absolute priority
+   over adjacent organs, muscles, and vessels (even if abutting or partially in muscle/organ).
+   Ties between lymph node stations are broken by voxel count.
+3. Fallback: Standard priority (Bone > Solid Organ > Vessel > Muscle).
 """
 function pick_best_organ(counts::Dict{Int,Int}, ts_names::Dict{Int,String})::String
+    isempty(counts) && return ""
+    
+    # Rule 1: Prostate-wins rule for primary tumor inside prostate
+    for (label_id, cnt) in counts
+        cnt <= 0 && continue
+        name = get(ts_names, label_id, "")
+        if occursin("prostate", lowercase(name))
+            return name
+        end
+    end
+    
+    # Rule 2: Lymph node rule: ANY overlap in a lymph node station takes priority
+    # over adjacent organ, muscle, or vessel.
+    ln_candidates = Tuple{String, Int}[]
+    for (label_id, cnt) in counts
+        cnt <= 0 && continue
+        name = get(ts_names, label_id, "")
+        isempty(name) && continue
+        if is_lymph_node_structure(name)
+            push!(ln_candidates, (name, cnt))
+        end
+    end
+    
+    if !isempty(ln_candidates)
+        # Pick the lymph node station with the largest overlapping voxel count
+        sort!(ln_candidates, by = x -> x[2], rev = true)
+        return ln_candidates[1][1]
+    end
+    
+    # Rule 3: General tissue priority fallback (Bone > Solid Organ > Vessel > Muscle)
     best_name = ""
-    best_priority = 6
+    best_priority = 7
     best_count = 0
     
     for (label_id, cnt) in counts
+        cnt <= 0 && continue
         name = get(ts_names, label_id, "")
         isempty(name) && continue
-        
-        # Prostate-wins rule: ANY overlap with prostate → classify as prostate
-        if occursin("prostate", lowercase(name)) && cnt > 0
-            return name
-        end
         
         priority = classify_tissue_priority(name)
         if priority < best_priority || (priority == best_priority && cnt > best_count)
@@ -730,15 +856,309 @@ function classify_organ_to_lesion_type(organ_name::String)::String
 
     if occursin("prostate", org)
         return "Prostate"
+    elseif is_lymph_node_structure(organ_name)
+        return "Lymph Node Meta"
     elseif is_muscle
         return "Technical Artifact"
     elseif is_bone
         return "Bone Meta"
-    elseif occursin("lymph", org) || occursin("node", org)
-        return "Lymph Node Meta"
     else
         return "Organ Meta"
     end
+end
+
+"""
+    format_clinical_station_name(raw_name::String) → String
+
+Convert a raw max_anatomy lymph node station name (e.g. `"Abdominal_Obturator_Left"`,
+`"Thoracic_Station_7_Subcarinial"`, `"Neck_Level_IIa_Upper_Jugular_Left"`)
+into a clinician-friendly display name (e.g. `"Obturator Lymph Node (Left)"`,
+`"Station 7 Subcarinal Lymph Node"`, `"Neck Level IIa Upper Jugular Lymph Node (Left)"`).
+"""
+function format_clinical_station_name(raw_name::String)::String
+    isempty(raw_name) && return ""
+    ln = lowercase(raw_name)
+
+    # Determine side suffix
+    side = if occursin("_left", ln) || endswith(ln, "left")
+        " (Left)"
+    elseif occursin("_right", ln) || endswith(ln, "right")
+        " (Right)"
+    else
+        ""
+    end
+
+    # ── Pelvic / Abdominal non-station nodes ──
+    occursin("obturator", ln) && return "Obturator Lymph Node$side"
+    occursin("internal_iliac", ln) && return "Internal Iliac Lymph Node$side"
+    occursin("external_iliac", ln) && return "External Iliac Lymph Node$side"
+    occursin("common_iliac", ln) && return "Common Iliac Lymph Node$side"
+    occursin("presacral", ln) && return "Presacral Lymph Node"
+    (occursin("pararectal", ln) || occursin("perirectal", ln)) && return "Pararectal Lymph Node"
+    occursin("mesenteric", ln) && return "Mesenteric Interenteric Lymph Node"
+    occursin("renal_hilar", ln) && return "Renal Hilar Lymph Node$side"
+    occursin("paraaortic", ln) && !occursin("station_", ln) && return "Para-Aortic Lymph Node"
+
+    # ── Japanese Gastric Cancer Association (JGCA) abdominal stations ──
+    occursin("station_10", ln) && return "Station 10 Splenic Hilum Lymph Node"
+    occursin("station_11", ln) && return "Station 11 Splenic Artery Lymph Node"
+    occursin("station_13", ln) && return "Station 13 Posterior Pancreaticoduodenal Lymph Node"
+    occursin("station_14", ln) && return "Station 14 Superior Mesenteric Artery (SMA) Lymph Node"
+    occursin("station_16a1", ln) && return "Station 16a1 Aortic Hiatus Lymph Node"
+    occursin("station_16a2", ln) && return "Station 16a2 Upper Middle Paraaortic Lymph Node"
+    occursin("station_16b1", ln) && return "Station 16b1 Lower Middle Paraaortic Lymph Node"
+    occursin("station_16b2", ln) && return "Station 16b2 Caudal Paraaortic Lymph Node"
+    occursin("station_17", ln) && return "Station 17 Anterior Pancreaticoduodenal Lymph Node"
+    (occursin("station_1_2", ln) || occursin("station_1+2", ln)) && return "Station 1/2 Paracardial Lymph Node"
+    occursin("station_1_right", ln) && return "Station 1 Right Paracardial Lymph Node"
+    occursin("station_2_left", ln) && return "Station 2 Left Paracardial Lymph Node"
+    occursin("station_3_lesser", ln) && return "Station 3 Lesser Curvature Lymph Node"
+    occursin("station_4_greater", ln) && return "Station 4 Greater Curvature Lymph Node"
+    occursin("station_5_6", ln) && return "Station 5/6 Pyloric Lymph Node"
+    occursin("station_5_supra", ln) && return "Station 5 Suprapyloric Lymph Node"
+    occursin("station_6_infra", ln) && return "Station 6 Infrapyloric Lymph Node"
+    occursin("station_7_left_gastric", ln) && return "Station 7 Left Gastric Lymph Node"
+    occursin("station_8_common_hepatic", ln) && return "Station 8 Common Hepatic Lymph Node"
+    occursin("station_9_celiac", ln) && return "Station 9 Celiac Lymph Node"
+    occursin("inferior_pancreatic", ln) && return "Inferior Pancreatic Lymph Node"
+
+    # ── Inguinal nodes ──
+    occursin("deep_inguinal", ln) && return "Deep Inguinal Lymph Node$side"
+    occursin("superficial_inguinal", ln) && return "Superficial Inguinal Lymph Node$side"
+    occursin("inguinal", ln) && return "Inguinal Lymph Node$side"
+
+    # ── Axillary nodes ──
+    (occursin("axillary_level_i_", ln) || endswith(ln, "axillary_level_i")) && return "Axillary Level I Lymph Node$side"
+    occursin("axillary_level_ii_", ln) && return "Axillary Level II Lymph Node$side"
+    occursin("axillary_level_iii", ln) && return "Axillary Level III Lymph Node$side"
+    occursin("rotter", ln) && return "Rotter Interpectoral Lymph Node$side"
+    occursin("axillary", ln) && return "Axillary Lymph Node$side"
+
+    # ── Thoracic mediastinal stations (IASLC) ──
+    occursin("mammary", ln) && return "Internal Mammary Lymph Node$side"
+    if occursin("upperparatracheal", ln) || (occursin("station_2_", ln) && !occursin("left_paracardial", ln))
+        st = occursin("left", ln) ? "2L" : (occursin("right", ln) ? "2R" : "2")
+        return "Station $st Upper Paratracheal Lymph Node"
+    end
+    occursin("prevascular", ln) && return "Station 3A Prevascular Lymph Node$side"
+    occursin("retrotracheal", ln) && return "Station 3P Retrotracheal Lymph Node$side"
+    if occursin("lowerparatracheal", ln) || (occursin("station_4_", ln) && occursin("paratracheal", ln))
+        st = occursin("left", ln) ? "4L" : (occursin("right", ln) ? "4R" : "4")
+        return "Station $st Lower Paratracheal Lymph Node"
+    end
+    occursin("subaortic", ln) && return "Station 5 Subaortic (AP Window) Lymph Node"
+    (occursin("station_6_paraaortic", ln) || (occursin("station_6", ln) && occursin("paraaortic", ln))) && return "Station 6 Paraaortic (Ascending Aorta) Lymph Node"
+    (occursin("station_7", ln) || occursin("subcarin", ln)) && return "Station 7 Subcarinal Lymph Node"
+    (occursin("station_8", ln) || occursin("paraoesophageal", ln)) && return "Station 8 Paraesophageal Lymph Node$side"
+    (occursin("hilar", ln) || occursin("interlobar", ln)) && return "Station 10/11 Hilar / Interlobar Lymph Node$side"
+    occursin("prepericardial", ln) && return "Prepericardial Lymph Node$side"
+    occursin("supraclavicular", ln) && return "Supraclavicular Lymph Node$side"
+    occursin("chest_wall", ln) && return "Chest Wall Lymph Node$side"
+
+    # ── Neck levels ──
+    (occursin("level_ia", ln) || occursin("submental", ln)) && return "Neck Level Ia Submental Lymph Node"
+    (occursin("level_ib", ln) || occursin("submandibular", ln)) && return "Neck Level Ib Submandibular Lymph Node$side"
+    occursin("level_iia", ln) && return "Neck Level IIa Upper Jugular Lymph Node$side"
+    occursin("level_iib", ln) && return "Neck Level IIb Upper Jugular Lymph Node$side"
+    (occursin("level_iii", ln) || occursin("middle_jugular", ln)) && return "Neck Level III Middle Jugular Lymph Node$side"
+    (occursin("level_iv", ln) || occursin("lower_jugular", ln)) && return "Neck Level IV Lower Jugular Lymph Node$side"
+    (occursin("level_va", ln) || occursin("posterior_triangle", ln)) && return "Neck Level Va Upper Posterior Triangle Lymph Node$side"
+    (occursin("level_vi", ln) || occursin("anterior_cervical", ln)) && return "Neck Level VI Anterior Cervical Lymph Node"
+    (occursin("level_xb", ln) || occursin("occipital", ln)) && return "Neck Level Xb Occipital Lymph Node$side"
+    occursin("parotid", ln) && return "Parotid Lymph Node$side"
+    occursin("retropharyngeal", ln) && return "Retropharyngeal Lymph Node"
+
+    # ── Fallback: titlecase with underscores → spaces ──
+    return titlecase(replace(strip(raw_name), "_" => " "))
+end
+
+"""
+    format_adjacent_structure_name(raw_name::String) → String
+
+Convert a raw TotalSegmentator / max_anatomy structure name into a clinician-friendly
+name suitable for the "Adjacent To" rows of Anatomical Details.
+E.g. `"iliopsoas_left"` → `"Iliopsoas Muscle (Left)"`.
+"""
+function format_adjacent_structure_name(raw_name::String)::String
+    isempty(raw_name) && return ""
+    ln = lowercase(raw_name)
+
+    # Determine side
+    side = if endswith(ln, "_left")
+        " (Left)"
+    elseif endswith(ln, "_right")
+        " (Right)"
+    else
+        ""
+    end
+
+    # Strip side suffix for matching
+    base = replace(replace(ln, r"_left$" => ""), r"_right$" => "")
+
+    # Skip known lymph node structures — they are already formatted elsewhere
+    is_lymph_node_structure(raw_name) && return format_clinical_station_name(raw_name)
+
+    # Named muscle mapping
+    muscle_map = Dict(
+        "iliopsoas" => "Iliopsoas Muscle",
+        "obturator_internus" => "Obturator Internus Muscle",
+        "piriformis" => "Piriformis Muscle",
+        "gluteus_maximus" => "Gluteus Maximus Muscle",
+        "gluteus_medius" => "Gluteus Medius Muscle",
+        "gluteus_minimus" => "Gluteus Minimus Muscle",
+        "pectoralis_major" => "Pectoralis Major Muscle",
+        "pectoralis_minor" => "Pectoralis Minor Muscle",
+        "psoas_major" => "Psoas Major Muscle",
+        "rectus_abdominis" => "Rectus Abdominis Muscle",
+        "sternocleidomastoid" => "Sternocleidomastoid Muscle",
+        "subscapularis" => "Subscapularis Muscle",
+        "latissimus_dorsi" => "Latissimus Dorsi Muscle",
+        "serratus_anterior" => "Serratus Anterior Muscle",
+        "deltoid" => "Deltoid Muscle",
+        "trapezius" => "Trapezius Muscle",
+        "sartorius" => "Sartorius Muscle",
+        "quadriceps_femoris" => "Quadriceps Femoris Muscle",
+        "scalene" => "Scalene Muscle",
+        "digastric" => "Digastric Muscle",
+        "platysma" => "Platysma Muscle",
+        "masseter" => "Masseter Muscle",
+        "levator_scapulae" => "Levator Scapulae Muscle",
+    )
+
+    if haskey(muscle_map, base)
+        return "$(muscle_map[base])$side"
+    end
+
+    # Named organ mapping
+    organ_map = Dict(
+        "prostate" => "Prostate Gland",
+        "urinary_bladder" => "Urinary Bladder",
+        "rectum" => "Rectum",
+        "esophagus" => "Esophagus",
+        "trachea" => "Trachea",
+        "stomach" => "Stomach",
+        "liver" => "Liver",
+        "spleen" => "Spleen",
+        "pancreas" => "Pancreas",
+        "heart" => "Heart",
+        "aorta" => "Aorta",
+        "kidney" => "Kidney",
+        "adrenal_gland" => "Adrenal Gland",
+        "gallbladder" => "Gallbladder",
+        "duodenum" => "Duodenum",
+        "colon" => "Colon",
+        "thyroid_gland" => "Thyroid Gland",
+        "spinal_cord" => "Spinal Cord",
+        "lung" => "Lung",
+        "uterus" => "Uterus",
+    )
+
+    if haskey(organ_map, base)
+        return "$(organ_map[base])$side"
+    end
+
+    # Vessel patterns
+    for (pat, label) in [("iliac_artery" => "Iliac Artery"), ("iliac_vein" => "Iliac Vein"),
+                         ("femoral_artery" => "Femoral Artery"), ("femoral_vein" => "Femoral Vein"),
+                         ("carotid" => "Carotid Artery"), ("jugular" => "Jugular Vein"),
+                         ("subclavian_artery" => "Subclavian Artery"), ("subclavian_vein" => "Subclavian Vein"),
+                         ("pulmonary_artery" => "Pulmonary Artery"), ("pulmonary_vein" => "Pulmonary Vein"),
+                         ("portal_vein" => "Portal Vein"), ("splenic_vein" => "Splenic Vein"),
+                         ("hepatic_artery" => "Hepatic Artery"), ("celiac_trunk" => "Celiac Trunk"),
+                         ("superior_mesenteric_artery" => "Superior Mesenteric Artery"),
+                         ("inferior_vena_cava" => "Inferior Vena Cava"),
+                         ("superior_vena_cava" => "Superior Vena Cava"),
+                         ("brachiocephalic_vein" => "Brachiocephalic Vein"),
+                         ("brachiocephalic_trunk" => "Brachiocephalic Trunk")]
+        if occursin(pat, ln)
+            return "$label$side"
+        end
+    end
+
+    # Bone patterns
+    for (pat, label) in [("vertebra" => "Vertebra"), ("femur" => "Femur"), ("hip" => "Hip Bone"),
+                         ("sacrum" => "Sacrum"), ("sternum" => "Sternum"), ("rib" => "Rib"),
+                         ("scapula" => "Scapula"), ("clavicle" => "Clavicle"), ("humerus" => "Humerus"),
+                         ("mandible" => "Mandible"), ("hyoid" => "Hyoid Bone")]
+        if occursin(pat, ln)
+            return "$label$side"
+        end
+    end
+
+    # Generic muscle detection
+    if any(kw -> occursin(kw, ln), ["muscle", "gluteus", "psoas", "autochthon", "erector",
+                                     "oblique", "transversospinalis", "rectus_abdominis"])
+        name_clean = titlecase(replace(base, "_" => " "))
+        if !occursin("Muscle", name_clean)
+            name_clean *= " Muscle"
+        end
+        return "$name_clean$side"
+    end
+
+    # Fallback: titlecase
+    return titlecase(replace(strip(raw_name), "_" => " "))
+end
+
+"""
+    generate_detailed_anatomy_rows(counts::Dict{Int,Int}, ts_names::Dict{Int,String}; max_rows::Int=4) → String
+
+Generate a pipe-separated Anatomical Details string from atlas overlap counts.
+- Row 1: `"Inside / Contained In:Station Name"` (the primary lymph node station with highest overlap)
+- Rows 2+: `"Adjacent To:Structure Name"` for secondary overlapping structures (non-LN organs, vessels, muscles)
+  filtered to ≥ 3 voxels and sorted descending by count.
+
+Returns "" if no lymph node overlap is found.
+
+The output format matches MedEye3d's serialization: `"Rel1:Struct1 | Rel2:Struct2 | ..."`.
+"""
+function generate_detailed_anatomy_rows(counts::Dict{Int,Int}, ts_names::Dict{Int,String}; max_rows::Int=4)::String
+    isempty(counts) && return ""
+
+    # Separate lymph node stations from other structures
+    ln_entries = Tuple{String, Int}[]
+    other_entries = Tuple{String, Int}[]
+
+    for (label_id, cnt) in counts
+        cnt <= 0 && continue
+        name = get(ts_names, label_id, "")
+        isempty(name) && continue
+        if is_lymph_node_structure(name)
+            push!(ln_entries, (name, cnt))
+        else
+            push!(other_entries, (name, cnt))
+        end
+    end
+
+    # No lymph node overlap → no detailed rows
+    isempty(ln_entries) && return ""
+
+    # Primary: lymph node station with largest overlap
+    sort!(ln_entries, by = x -> x[2], rev = true)
+    primary_raw = ln_entries[1][1]
+    primary_formatted = format_clinical_station_name(primary_raw)
+
+    parts = String[]
+    push!(parts, "Inside / Contained In:$primary_formatted")
+
+    # Secondary LN stations (if lesion overlaps multiple)
+    for i in 2:min(length(ln_entries), max_rows)
+        sec_raw = ln_entries[i][1]
+        sec_cnt = ln_entries[i][2]
+        sec_cnt < 3 && continue  # skip negligible overlaps
+        sec_formatted = format_clinical_station_name(sec_raw)
+        push!(parts, "Adjacent To:$sec_formatted")
+    end
+
+    # Adjacent non-LN structures (organs, muscles, vessels)
+    sort!(other_entries, by = x -> x[2], rev = true)
+    for (name, cnt) in other_entries
+        length(parts) >= max_rows && break
+        cnt < 3 && continue  # skip tiny overlaps
+        adj_formatted = format_adjacent_structure_name(name)
+        push!(parts, "Adjacent To:$adj_formatted")
+    end
+
+    return join(parts, " | ")
 end
 
 """
@@ -753,5 +1173,7 @@ end
 
 export load_nrrd_labelmap, map_lesions_to_organs, classify_organ_to_lesion_type
 export classify_tissue_priority, classify_and_pick_best_organ, count_atlas_overlap, pick_best_organ, lookup_anatomy
+export is_lymph_node_structure, is_pelvic_lymph_node, classify_lymph_node_location
+export format_clinical_station_name, format_adjacent_structure_name, generate_detailed_anatomy_rows
 
 end # module

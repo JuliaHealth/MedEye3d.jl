@@ -1,0 +1,132 @@
+{
+    "Thoracic_Station_3P_Retrotracheal": {
+        "rule": "VolumetricBoundary2D",
+        "is_bilateral": true,
+        "keep_all_components": true,
+        "boundaries": {
+            "lung_left": "lung_left",
+            "lung_right": "lung_right"
+        },
+        "roi": {
+            "landmark": "trachea",
+            "padding_mm": [
+                50,
+                50,
+                50
+            ]
+        },
+        "constraints": [
+            {
+                "constraint_type": "PlaneLimit",
+                "landmark": "plane_station_2_sup_right",
+                "side_to_keep": "negative"
+            },
+            {
+                "constraint_type": "PlaneLimit",
+                "landmark": "plane_station_2_sup_left",
+                "side_to_keep": "negative"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "carina_computed",
+                "boundary_part": "min",
+                "offset_mm": -6.0,
+                "comment": "Superior to carina - 6mm to bridge gap with Subcarinal"
+            },
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "trachea",
+                "boundary_part": "posterior",
+                "slice_wise": true
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "spinal_cord",
+                "boundary_part": "anterior",
+                "slice_wise": true
+            }
+        ],
+        "exclude": [
+            "trachea",
+            "esophagus",
+            "fused_spine",
+            "lung_left",
+            "lung_right",
+            "aorta_descending",
+            "aorta_ascending",
+            "aorta_arch",
+            "aortic_arch_computed",
+            "azygos_vein",
+            "superior_vena_cava",
+            "pulmonary_artery",
+            "ribs_combined",
+            "spinal_cord_dilated_1cm",
+            "helper_pleural_space_left",
+            "helper_pleural_space_right",
+            "aorta"
+        ],
+        "assertions": [
+            {
+                "type": "RelativePosition",
+                "target": "trachea",
+                "direction": "posterior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "trachea",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "esophagus",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "superior_vena_cava",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "fused_spine",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "lung_left",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "lung_right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "aorta_descending",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 5
+            }
+        ],
+        "ancillary_landmarks": [
+            "trachea",
+            "esophagus",
+            "fused_spine",
+            "lung_left",
+            "lung_right",
+            "aorta_descending",
+            "azygos_vein",
+            "carina_computed",
+            "superior_vena_cava",
+            "spinal_cord",
+            "ribs_combined",
+            "spinal_cord_dilated_1cm"
+        ],
+        "overlap_precedence": [
+            "Thoracic_Station_6_Paraaortic"
+        ]
+    }
+}

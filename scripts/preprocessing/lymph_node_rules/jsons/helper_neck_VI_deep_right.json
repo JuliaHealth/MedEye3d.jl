@@ -1,0 +1,45 @@
+{
+    "helper_neck_VI_deep_right": {
+        "rule": "GeometricConstraint",
+        "base_landmark": "helper_neck_VI_reach",
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_neck_VI_reach",
+            "helper_neck_VI_trachea_esophagus",
+            "helper_neck_VI_visceral_block"
+        ],
+        "z_plane_restriction": {
+            "superior": "cricoid_cartilage",
+            "superior_part": "min",
+            "inferior": "sternum",
+            "inferior_part": "max"
+        },
+        "constraints": [
+            {
+                "constraint_type": "LeftOf",
+                "landmark": "common_carotid_artery_right",
+                "boundary_part": "min",
+                "slice_wise": true
+            },
+            {
+                "constraint_type": "RightOf",
+                "landmark": "helper_neck_VI_trachea_esophagus",
+                "boundary_part": "max",
+                "slice_wise": true
+            },
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "helper_neck_VI_visceral_block",
+                "boundary_part": "max",
+                "slice_wise": true
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "vertebrae",
+                "boundary_part": "max",
+                "slice_wise": true
+            }
+        ]
+    }
+}

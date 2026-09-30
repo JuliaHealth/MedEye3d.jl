@@ -1,0 +1,8 @@
+{
+    "helper_desc_aorta_left_lung_hull": {
+        "rule": "ConvexHull2D",
+        "targets": ["aorta_descending", "lung_left"],
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

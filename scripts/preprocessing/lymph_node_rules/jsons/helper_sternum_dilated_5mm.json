@@ -1,0 +1,14 @@
+{
+    "helper_sternum_dilated_5mm": {
+        "rule": "DilatedMask",
+        "is_bilateral": false,
+        "input_landmarks": [
+            "sternum"
+        ],
+        "dilation_mm": 5.0,
+        "slice_wise": true,
+        "ancillary_landmarks": [
+            "sternum"
+        ]
+    }
+}

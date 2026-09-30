@@ -1,0 +1,21 @@
+{
+    "helper_aorta_dilated_1cm": {
+        "rule": "DilatedMask",
+        "base_landmark": "aorta",
+        "dilation_mm": 10.0,
+        "is_helper": true,
+        "category": "new_helpers"
+    },
+    "helper_diaphragm_1cm_aorta": {
+        "rule": "BitwiseAnd",
+        "targets": [
+            "helper_aorta_dilated_1cm",
+            "diaphragm_proxy"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_aorta_dilated_1cm"
+        ]
+    }
+}

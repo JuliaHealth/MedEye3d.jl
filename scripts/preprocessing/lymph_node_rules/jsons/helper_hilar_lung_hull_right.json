@@ -1,0 +1,28 @@
+{
+    "helper_hilar_lung_hull_right": {
+        "rule": "ConvexHull2D",
+        "targets": ["helper_Thoracic_Station_Hilar_Interlobar_Base_Right", "lung_right"],
+        "is_bilateral": false,
+        "is_helper": true,
+        "category": "new_helpers",
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "bronchi_main_right",
+                "boundary_part": "min"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "bronchi_main_right",
+                "boundary_part": "max"
+            }
+        ],
+        "exclude": [
+            "lung_left", "lung_right", "heart", "aorta",
+            "esophagus", "fused_spine", "spinal_cord",
+            "pulmonary_artery", "superior_vena_cava",
+            "trachea", "sternum"
+        ],
+        "depends_on": ["helper_Thoracic_Station_Hilar_Interlobar_Base"]
+    }
+}

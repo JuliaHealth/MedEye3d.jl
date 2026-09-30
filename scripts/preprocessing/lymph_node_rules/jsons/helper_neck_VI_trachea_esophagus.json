@@ -1,0 +1,12 @@
+{
+    "helper_neck_VI_trachea_esophagus": {
+        "rule": "Combine",
+        "method": "union",
+        "components": [
+            "trachea",
+            "esophagus"
+        ],
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

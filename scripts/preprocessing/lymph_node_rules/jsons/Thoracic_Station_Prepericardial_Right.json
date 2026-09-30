@@ -1,0 +1,39 @@
+{
+    "Thoracic_Station_Prepericardial_Right": {
+        "rule": "Combine",
+        "inputs": [
+            "Thoracic_Station_Prepericardial_Base_Right"
+        ],
+        "category": "Lymph_Node",
+        "group": "Thoracic",
+        "color": [
+            100,
+            200,
+            150
+        ],
+        "exclude": [
+            "helper_heart_hull_2d",
+            "heart",
+            "aorta",
+            "aorta_ascending",
+            "aorta_descending",
+            "aortic_arch_computed",
+            "pulmonary_artery",
+            "superior_vena_cava",
+            "inferior_vena_cava",
+            "brachiocephalic_vein_left",
+            "brachiocephalic_vein_right",
+            "common_carotid_artery_left",
+            "common_carotid_artery_right",
+            "lung_left",
+            "lung_right",
+            "sternum",
+            "liver",
+            "trachea",
+            "helper_costal_sternum_hull",
+            "helper_pleural_space_left",
+            "helper_pleural_space_right"
+        ],
+        "ignore_global_exclusion": true
+    }
+}

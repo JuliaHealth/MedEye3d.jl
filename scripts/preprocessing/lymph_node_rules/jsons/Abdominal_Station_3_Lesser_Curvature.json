@@ -1,0 +1,38 @@
+{
+    "Abdominal_Station_3_Lesser_Curvature": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "stomach",
+        "margins_mm": {
+            "anterior": 10,
+            "superior": 10,
+            "posterior": 10,
+            "left": 0,
+            "right": 25,
+            "inferior": 0
+        },
+        "is_bilateral": false,
+        "exclude": [
+            "stomach",
+            "liver",
+            "pancreas",
+            "aorta",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "spleen",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right",
+            "Abdominal_Station_1_Right_Paracardial",
+            "Abdominal_Station_2_Left_Paracardial",
+            "Abdominal_Station_5_6_Pyloric",
+            "helper_stomach_left_of_axis",
+            "heart"
+        ],
+        "depends_on": [
+            "helper_stomach_right_of_axis",
+            "helper_stomach_left_of_axis"
+        ],
+        "comments": "Lesser curvature nodes (3) on right/medial aspect of stomach."
+    }
+}

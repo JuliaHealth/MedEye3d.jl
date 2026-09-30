@@ -1,0 +1,34 @@
+{
+    "Abdominal_Station_14_SMA": {
+        "rule": "DilatedMask",
+        "base_landmark": [
+            "superior_mesenteric_artery"
+        ],
+        "dilation_mm": 10.0,
+        "is_bilateral": false,
+        "constraints": [
+            {
+                "constraint_type": "PosteriorTo",
+                "landmarks": [
+                    "pancreas"
+                ]
+            }
+        ],
+        "exclude": [
+            "aorta",
+            "pancreas",
+            "duodenum",
+            "stomach",
+            "small_bowel",
+            "colon",
+            "liver",
+            "spleen",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right",
+            "Abdominal_Station_16a2_Upper_Middle_Paraaortic"
+        ],
+        "comments": "Station 14 (SMA) around the superior_mesenteric_artery, constrained posteriorly to pancreas.",
+        "depends_on": []
+    }
+}

@@ -1,0 +1,38 @@
+{
+    "Abdominal_Station_4_Greater_Curvature": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "stomach",
+        "margins_mm": {
+            "anterior": 10,
+            "superior": 0,
+            "posterior": 10,
+            "left": 25,
+            "right": 0,
+            "inferior": 15
+        },
+        "is_bilateral": false,
+        "exclude": [
+            "stomach",
+            "spleen",
+            "colon",
+            "duodenum",
+            "small_bowel",
+            "liver",
+            "pancreas",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right",
+            "Abdominal_Station_1_Right_Paracardial",
+            "Abdominal_Station_2_Left_Paracardial",
+            "Abdominal_Station_5_6_Pyloric",
+            "Abdominal_Station_3_Lesser_Curvature",
+            "helper_stomach_right_of_axis",
+            "heart"
+        ],
+        "depends_on": [
+            "helper_stomach_right_of_axis",
+            "helper_stomach_left_of_axis"
+        ],
+        "comments": "Greater curvature nodes (4) on left/lateral and inferior aspect of stomach."
+    }
+}

@@ -1,0 +1,16 @@
+{
+    "helper_spleen_hull": {
+        "rule": "VolumetricBoundary2D",
+        "boundaries": {"all": "spleen"},
+        "comments": "2D Convex Hull of Spleen (per slice)"
+    },
+    "Abdominal_Splenic": {
+        "rule": "BitwiseOr",
+        "targets": ["helper_spleen_hull"],
+        "is_bilateral": false,
+        "keep_all_components": false,
+        "exclude": ["spleen", "stomach", "pancreas", "kidney_left", "colon", "lung_left", "heart"],
+        "comments": "Splenic lymph nodes at the hilum of the spleen, generated via 2D convex hull subtraction, then largest CC (keep_all_components: false)",
+        "depends_on": ["helper_spleen_hull"]
+    }
+}

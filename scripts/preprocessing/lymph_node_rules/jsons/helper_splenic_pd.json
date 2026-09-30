@@ -1,0 +1,10 @@
+{
+    "helper_splenic_pd": {
+        "rule": "HelperSplenicPDCustom",
+        "custom_rule": "HelperSplenicPDCustom",
+        "depends_on": ["spleen"],
+        "base_landmark": "spleen",
+        "input": "spleen",
+        "comments": "Computes the reflected PD point on the medial side of the spleen for the hilum convex hull."
+    }
+}

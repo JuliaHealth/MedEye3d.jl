@@ -1,0 +1,22 @@
+{
+    "helper_Stomach_Greater_Curvature": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "stomach",
+        "margins_mm": {
+            "anterior": 0.0,
+            "posterior": 0.0,
+            "left": 0.0,
+            "right": 0.0
+        },
+        "constraints": [
+            {
+                "constraint_type": "LeftOf",
+                "landmark": "stomach",
+                "boundary_part": "center",
+                "comment": "Greater curvature is on the lateral (left) side of the stomach"
+            }
+        ],
+        "is_helper": true,
+        "comments": "Proxy for Greater Curvature (Stations 4, 6)"
+    }
+}

@@ -1,0 +1,25 @@
+{
+    "helper_Inferior_Mesenteric_Artery_Proxy": {
+        "rule": "DilatedMask",
+        "base_landmark": "aorta",
+        "dilation_mm": 15.0,
+        "is_helper": true,
+        "is_bilateral": false,
+        "ignore_global_exclusion": true,
+        "keep_all_components": true,
+        "z_plane_restriction": {
+            "superior": "vertebrae_L3",
+            "inferior": "vertebrae_L3"
+        },
+        "constraints": [
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "aorta",
+                "boundary_part": "center",
+                "slice_wise": true,
+                "comment": "IMA branches anteriorly off the aorta"
+            }
+        ],
+        "comments": "Proxy for IMA origin at L3 level. Used as Z-boundary for paraaortic station 16b1/16b2."
+    }
+}

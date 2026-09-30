@@ -1,0 +1,14 @@
+{
+    "helper_trachea_dilated_1cm": {
+        "rule": "DilatedMask",
+        "is_bilateral": false,
+        "input_landmarks": [
+            "trachea"
+        ],
+        "dilation_mm": 10.0,
+        "ancillary_landmarks": [
+            "trachea"
+        ],
+        "is_helper": true
+    }
+}

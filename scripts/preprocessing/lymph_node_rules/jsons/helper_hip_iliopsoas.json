@@ -1,0 +1,11 @@
+{
+    "helper_hip_iliopsoas": {
+        "rule": "VolumetricBoundary2D",
+        "is_bilateral": true,
+        "growth_mode": "sideways",
+        "boundaries": {
+            "lateral": "hip",
+            "medial": "iliopsoas"
+        }
+    }
+}

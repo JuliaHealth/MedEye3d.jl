@@ -247,6 +247,54 @@ function main()
                     println("    Run manually: bash scripts/ai/run_all_timepoints.sh")
                 end
             end
+            
+            # --- NEW: Lymph Node Pipeline Integration ---
+            primary_h5_path = joinpath(tp_anat_dir, "primary_masks.h5")
+            if !isfile(primary_h5_path)
+                println("    Packing NIfTI files into $primary_h5_path...")
+                pack_script_1 = joinpath(@__DIR__, "pack_h5_gzip.py")
+                pack_script_2 = joinpath(@__DIR__, "pack_h5_meta.py")
+                try
+                    run(`python3 $pack_script_1 $tp_anat_dir`)
+                    run(`python3 $pack_script_2 $tp_anat_dir`)
+                catch e
+                    println("    ⚠️ Failed to pack HDF5: $e")
+                end
+            end
+
+            if isfile(primary_h5_path)
+                ln_script = joinpath(@__DIR__, "lymph_node_rules", "src", "julia_gpu", "main", "run_pure_julia_pipeline.jl")
+                ln_out_h5 = joinpath(tp_anat_dir, "lymph_node_results.h5")
+                mb_script = joinpath(@__DIR__, "lymph_node_rules", "src", "julia_gpu", "main", "MaxAnatomyBuilder.jl")
+                try
+                    if !isfile(ln_out_h5)
+                        println("    Triggering Lymph Node Pipeline on $primary_h5_path...")
+                        json_dir = joinpath(@__DIR__, "lymph_node_rules", "jsons")
+                        run(`julia --project=$(joinpath(@__DIR__, "lymph_node_rules", "src", "julia_gpu")) $ln_script --h5 $primary_h5_path --out $ln_out_h5 --jsons $json_dir`)
+                        println("    ✅ Lymph Node Pipeline completed.")
+                        
+                        # Consolidate JSONs
+                        cons_script = joinpath(dirname(dirname(dirname(@__DIR__))), "lymph_node_rules", "scripts", "consolidate_jsons.py")
+                        used_json = joinpath(tp_anat_dir, "used_lymph_node_rules.json")
+                        if isfile(cons_script)
+                            run(`python3 $cons_script --h5 $ln_out_h5 --jsons $json_dir --out $used_json`)
+                        end
+                    end
+                    
+                    # Rebuild max_anatomy with lymph nodes
+                    if isfile(mb_script) && isfile(ln_out_h5)
+                        println("    Rebuilding max_anatomy with lymph nodes in $tp_anat_dir...")
+                        run(`julia --project=$(joinpath(@__DIR__, "lymph_node_rules", "src", "julia_gpu")) -e "
+                            include(\"$mb_script\")
+                            using .MaxAnatomyBuilder
+                            MaxAnatomyBuilder.build_and_save_max_anatomy_from_h5(\"$primary_h5_path\", \"$ln_out_h5\", \"$tp_anat_dir\")
+                        "`)
+                        println("    ✅ Rebuilt max_anatomy with lymph nodes.")
+                    end
+                catch e
+                    println("    ⚠️  Lymph Node Pipeline / Max Anatomy rebuild failed: $e")
+                end
+            end
         end
         
         tfm_path = tfm_fname != "" ? joinpath(data_dir, tfm_fname) : ""
@@ -364,10 +412,11 @@ function main()
     # Store max_anatomy labels JSON
     if !isempty(max_anatomy_labels_file)
         labels_path = joinpath(data_dir, max_anatomy_labels_file)
-        # Prefer real names if available
-        real_labels_path = joinpath(data_dir, "anatomy_out", "max_anatomy_labels.json")
-        if isfile(real_labels_path)
-            labels_path = real_labels_path
+        if !isfile(labels_path)
+            real_labels_path = joinpath(data_dir, "anatomy_out", "max_anatomy_labels.json")
+            if isfile(real_labels_path)
+                labels_path = real_labels_path
+            end
         end
         if isfile(labels_path)
             println("  Storing max_anatomy labels...")

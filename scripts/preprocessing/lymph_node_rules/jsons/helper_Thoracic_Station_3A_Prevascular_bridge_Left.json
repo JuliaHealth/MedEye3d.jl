@@ -1,0 +1,62 @@
+{
+    "helper_Thoracic_Station_3A_Prevascular_bridge_Left": {
+        "rule": "VolumetricBoundary2D",
+        "is_helper": true,
+        "is_bilateral": false,
+        "growth_mode": "anterior_posterior",
+        "side": "Left",
+        "boundaries": {
+            "posterior": "Thoracic_Station_3A_Prevascular_Base_Left",
+            "anterior": "sternum"
+        },
+        "exclude": [
+            "sternum",
+            "manubrium",
+            "heart",
+            "trachea",
+            "lung_left",
+            "lung_right",
+            "thorax_wall",
+            "helper_subcutaneous_anterior_chest",
+            "superior_vena_cava",
+            "aorta",
+            "aorta_ascending",
+            "aortic_arch_computed",
+            "common_carotid_artery_left",
+            "common_carotid_artery_right",
+            "brachiocephalic_vein_left",
+            "brachiocephalic_vein_right"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "sternum",
+                "boundary_part": "max",
+                "comment": "Superior limit is the top of the sternum"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "carina_computed",
+                "comment": "Inferior limit is the carina"
+            },
+            {
+                "constraint_type": "SideLimit",
+                "landmark": "trachea",
+                "boundary_part": "center",
+                "slice_wise": true,
+                "comment": "Separation of left and right using middle of trachea"
+            }
+        ],
+        "depends_on": [
+            "Thoracic_Station_3A_Prevascular_Base_Left"
+        ],
+        "ancillary_landmarks": [
+            "Thoracic_Station_3A_Prevascular_Base_Left",
+            "sternum",
+            "carina_computed",
+            "helper_subcutaneous_anterior_chest"
+        ],
+        "ignore_global_exclusion": true,
+        "ignore_fat": true
+    }
+}

@@ -1,0 +1,29 @@
+{
+    "helper_gap_stomach_lung_left": {
+        "rule": "VolumetricBoundary2D",
+        "boundaries": {
+            "stomach": "stomach",
+            "lung": "lung_left"
+        },
+        "is_bilateral": false,
+        "keep_all_components": true,
+        "z_plane_restriction": {
+            "superior": "stomach",
+            "superior_part": "max"
+        },
+        "constraints": [
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "heart",
+                "boundary_part": "mid",
+                "slice_wise": true
+            }
+        ],
+        "ancillary_landmarks": [
+            "stomach",
+            "lung_left",
+            "heart"
+        ],
+        "is_helper": true
+    }
+}

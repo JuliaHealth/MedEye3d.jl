@@ -1,0 +1,87 @@
+{
+    "Abdominal_Celiac_Helper_Pancreas": {
+        "rule": "GeometricConstraint",
+        "base_landmark": "body",
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "pancreas",
+                "offset_mm": 50.0,
+                "boundary_part": "max"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "pancreas",
+                "offset_mm": -50.0,
+                "boundary_part": "min"
+            }
+        ],
+        "ignore_global_exclusion": true,
+        "exclude": [
+            "stomach",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "liver",
+            "spleen",
+            "pancreas",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right"
+        ],
+        "ignore_fat": true,
+        "keep_all_components": false,
+        "assertions": [
+            {
+                "type": "RelativePosition",
+                "target": "stomach",
+                "direction": "posterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "aorta_centroid",
+                "direction": "anterior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "pancreas",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "aorta",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "liver",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "celiac_inf_plane",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "P_sma",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vertebrae_T10_min",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vertebrae_L2_max",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vertebrae_T12_anterior_margin",
+                "direction": "anterior"
+            }
+        ]
+    }
+}

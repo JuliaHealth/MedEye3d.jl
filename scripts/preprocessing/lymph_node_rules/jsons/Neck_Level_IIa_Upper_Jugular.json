@@ -1,0 +1,112 @@
+{
+    "Neck_Level_IIa_Upper_Jugular": {
+        "rule": "VolumetricBoundary2DLateralGrowth",
+        "sublevel": "IIa",
+        "is_bilateral": true,
+        "depends_on": [
+            "Neck_Level_Ib_Submandibular",
+            "lev_vert"
+        ],
+        "exclude": [
+            "parotid_gland",
+            "submandibular_gland",
+            "sternocleidomastoid",
+            "internal_jugular_vein",
+            "internal_carotid_artery",
+            "common_carotid_artery",
+            "pharynx",
+            "larynx",
+            "thyroid_gland",
+            "trachea",
+            "esophagus",
+            "fused_spine",
+            "spinal_cord",
+            "anterior_scalene",
+            "middle_scalene",
+            "posterior_scalene",
+            "levator_scapulae",
+            "trapezius",
+            "platysma",
+            "digastric",
+            "lev_vert",
+            "thyroid_cartilage",
+            "cricoid_cartilage"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "helper_jugular_anterior_proxy",
+                "boundary_part": "min",
+                "slice_wise": true,
+                "only_where_present": true,
+                "comment": "Anterior constraint: sternohyoid/stylohyoid proxies"
+            }
+        ],
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "sternocleidomastoid",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "internal_jugular_vein",
+                "expected": 0
+            }
+        ],
+        "ancillary_landmarks": [
+            "common_carotid_artery",
+            "digastric",
+            "hyoid",
+            "internal_carotid_artery",
+            "internal_jugular_vein",
+            "parotid_gland",
+            "pharynx",
+            "skull",
+            "sternocleidomastoid",
+            "submandibular_gland",
+            "Neck_Level_Ib_Submandibular",
+            "lev_vert"
+        ],
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "limit_to_obstacle_min_if_no_hit": true,
+        "comments": "Neck Level IIa: Custom growing logic deep to SCM/Parotid, anterior/wrapping IJV.",
+        "roi": {
+            "landmark": [
+                "internal_jugular_vein",
+                "internal_carotid_artery",
+                "common_carotid_artery"
+            ],
+            "padding_mm": [
+                30,
+                30,
+                30
+            ]
+        },
+        "boundaries": {
+            "lateral": [
+                "sternocleidomastoid",
+                "parotid_gland"
+            ],
+            "medial": [
+                "internal_jugular_vein",
+                "internal_carotid_artery",
+                "common_carotid_artery"
+            ],
+            "anterior": [
+                "Neck_Level_Ib_Submandibular",
+                "submandibular_gland"
+            ],
+            "superior": "skull",
+            "inferior": "hyoid"
+        },
+        "z_plane_restriction": {
+            "superior": "skull",
+            "superior_part": "max",
+            "inferior": "hyoid",
+            "inferior_part": "min",
+            "comment": "Superior: top of skull. Inferior: bottom of hyoid."
+        }
+    }
+}

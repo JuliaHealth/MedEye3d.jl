@@ -1,0 +1,2124 @@
+{
+    "Abdominal_Pararectal": {
+        "rule": "DistanceExpansion",
+        "base_landmark": "rectum",
+        "distance_mm": 25.0,
+        "roi": {
+            "landmark": "rectum",
+            "padding_mm": [
+                40,
+                20,
+                20
+            ]
+        },
+        "exclude": [
+            "sacrum",
+            "pelvis",
+            "urinary_bladder",
+            "prostate",
+            "vagina",
+            "uterus",
+            "iliac_artery",
+            "iliac_vena"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "rectum",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 5000
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "sacrum",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "prostate",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "urinary_bladder",
+                "direction": "posterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "iliac_artery",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Z_inf",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "sacrum_promontory_max",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "lowest_pelvic_bone_voxel",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "sacrum_posterior_margin",
+                "direction": "anterior"
+            }
+        ],
+        "is_bilateral": false,
+        "ancillary_landmarks": [
+            "iliac_artery",
+            "iliac_vena",
+            "pelvis",
+            "prostate",
+            "rectum",
+            "sacrum",
+            "urinary_bladder",
+            "uterus",
+            "vagina"
+        ]
+    },
+    "Abdominal_Obturator_Left": {
+        "rule": "DistanceExpansion",
+        "base_landmark": "obturator_foramen_left",
+        "distance_mm": 20.0,
+        "roi": {
+            "landmark": "obturator_foramen_left",
+            "padding_mm": [
+                20,
+                20,
+                20
+            ]
+        },
+        "exclude": [
+            "urinary_bladder",
+            "rectum",
+            "prostate",
+            "vagina",
+            "uterus",
+            "pelvis"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "urinary_bladder",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 1000
+            },
+            {
+                "type": "VolumeMin",
+                "value": 10000
+            },
+            {
+                "type": "RelativePosition",
+                "target": "rectum",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "obturator_internus",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "central_viscera",
+                "direction": "lateral"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "vessel_composite",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "inferior_obturator_plane",
+                "direction": "superior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Obturator_LN_Right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "pelvis",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 5000
+            }
+        ],
+        "is_bilateral": false,
+        "side": "Left",
+        "ancillary_landmarks": [
+            "obturator_foramen_left",
+            "pelvis",
+            "prostate",
+            "rectum",
+            "urinary_bladder",
+            "uterus",
+            "vagina"
+        ]
+    },
+    "Abdominal_Obturator_Right": {
+        "rule": "DistanceExpansion",
+        "base_landmark": "obturator_foramen_right",
+        "distance_mm": 20.0,
+        "roi": {
+            "landmark": "obturator_foramen_right",
+            "padding_mm": [
+                20,
+                20,
+                20
+            ]
+        },
+        "exclude": [
+            "urinary_bladder",
+            "rectum",
+            "prostate",
+            "vagina",
+            "uterus",
+            "pelvis"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "urinary_bladder",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 1000
+            },
+            {
+                "type": "VolumeMin",
+                "value": 10000
+            },
+            {
+                "type": "RelativePosition",
+                "target": "rectum",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "obturator_internus",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "central_viscera",
+                "direction": "lateral"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "vessel_composite",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "inferior_obturator_plane",
+                "direction": "superior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Obturator_LN_Right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "pelvis",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 5000
+            }
+        ],
+        "is_bilateral": false,
+        "side": "Right",
+        "ancillary_landmarks": [
+            "obturator_foramen_right",
+            "pelvis",
+            "prostate",
+            "rectum",
+            "urinary_bladder",
+            "uterus",
+            "vagina"
+        ]
+    },
+    "Abdominal_Internal_Iliac_Left": {
+        "rule": "DistanceExpansion",
+        "base_landmark": "iliac_artery_internal_left",
+        "distance_mm": 15.0,
+        "roi": {
+            "landmark": "iliac_artery_internal_left",
+            "padding_mm": [
+                20,
+                20,
+                20
+            ]
+        },
+        "exclude": [
+            "urinary_bladder",
+            "rectum",
+            "prostate",
+            "vagina",
+            "uterus",
+            "pelvis"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 1000
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "urinary_bladder",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "rectum",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "iliac_artery_common_max",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "pelvic_floor_min",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "iliac_artery_external",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "sacrum",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "External_Iliac_Centroid",
+                "direction": "posterior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Internal_Iliac_Right",
+                "expected": 0
+            }
+        ],
+        "is_bilateral": false,
+        "side": "Left",
+        "ancillary_landmarks": [
+            "iliac_artery_internal_left",
+            "pelvis",
+            "prostate",
+            "rectum",
+            "urinary_bladder",
+            "uterus",
+            "vagina"
+        ]
+    },
+    "Abdominal_Internal_Iliac_Right": {
+        "rule": "DistanceExpansion",
+        "base_landmark": "iliac_artery_internal_right",
+        "distance_mm": 15.0,
+        "roi": {
+            "landmark": "iliac_artery_internal_right",
+            "padding_mm": [
+                20,
+                20,
+                20
+            ]
+        },
+        "exclude": [
+            "urinary_bladder",
+            "rectum",
+            "prostate",
+            "vagina",
+            "uterus",
+            "pelvis"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 1000
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "urinary_bladder",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "rectum",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "iliac_artery_common_max",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "pelvic_floor_min",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "iliac_artery_external",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "sacrum",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "External_Iliac_Centroid",
+                "direction": "posterior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Internal_Iliac_Right",
+                "expected": 0
+            }
+        ],
+        "is_bilateral": false,
+        "side": "Right",
+        "ancillary_landmarks": [
+            "iliac_artery_internal_right",
+            "pelvis",
+            "prostate",
+            "rectum",
+            "urinary_bladder",
+            "uterus",
+            "vagina"
+        ]
+    },
+    "Abdominal_External_Iliac_Left": {
+        "rule": "DistanceExpansion",
+        "base_landmark": "iliac_artery_external_left",
+        "distance_mm": 15.0,
+        "roi": {
+            "landmark": "iliac_artery_external_left",
+            "padding_mm": [
+                20,
+                20,
+                20
+            ]
+        },
+        "exclude": [
+            "psoas_major_left",
+            "iliopsoas_left",
+            "pelvis",
+            "urinary_bladder",
+            "rectum"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "psoas_major_left",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 1000
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "urinary_bladder",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "pelvis",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "iliopsoas",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "sacrum",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "iliac_artery_common_min",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "femur_max",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Z_inf",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "urinary_bladder",
+                "direction": "lateral"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "External_Iliac_Right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 5000
+            }
+        ],
+        "is_bilateral": false,
+        "side": "Left",
+        "ancillary_landmarks": [
+            "iliac_artery_external_left",
+            "iliopsoas_left",
+            "pelvis",
+            "psoas_major_left",
+            "rectum",
+            "urinary_bladder"
+        ]
+    },
+    "Abdominal_External_Iliac_Right": {
+        "rule": "DistanceExpansion",
+        "base_landmark": "iliac_artery_external_right",
+        "distance_mm": 15.0,
+        "roi": {
+            "landmark": "iliac_artery_external_right",
+            "padding_mm": [
+                20,
+                20,
+                20
+            ]
+        },
+        "exclude": [
+            "psoas_major_right",
+            "iliopsoas_right",
+            "pelvis",
+            "urinary_bladder",
+            "rectum"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "psoas_major_right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 1000
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "urinary_bladder",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "pelvis",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "iliopsoas",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "sacrum",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "iliac_artery_common_min",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "femur_max",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Z_inf",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "urinary_bladder",
+                "direction": "lateral"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "External_Iliac_Right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 5000
+            }
+        ],
+        "is_bilateral": false,
+        "side": "Right",
+        "ancillary_landmarks": [
+            "iliac_artery_external_right",
+            "iliopsoas_right",
+            "pelvis",
+            "psoas_major_right",
+            "rectum",
+            "urinary_bladder"
+        ]
+    },
+    "Abdominal_Retroperitoneal_OLD": {
+        "rule": "DistanceExpansion",
+        "base_landmark": "aorta",
+        "distance_mm": 20.0,
+        "roi": {
+            "landmark": "aorta",
+            "padding_mm": [
+                50,
+                40,
+                0
+            ]
+        },
+        "exclude": [
+            "kidney_left",
+            "kidney_right",
+            "psoas_major_left",
+            "psoas_major_right",
+            "iliopsoas_left",
+            "iliopsoas_right",
+            "fused_spine",
+            "liver",
+            "stomach",
+            "pancreas",
+            "spleen",
+            "small_bowel",
+            "duodenum",
+            "colon"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "fused_spine",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 5000
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "aorta",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "inferior_vena_cava",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "psoas_major",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "pancreas",
+                "direction": "posterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "duodenum",
+                "direction": "posterior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "small_bowel",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "z_inferior",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "aortic_bifurcation",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "diaphragm_crura_approx",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "kidney_right",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "kidney_left",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vertebrae_L1_L5",
+                "direction": "anterior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Right_Paracaval",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Pre_aortic",
+                "expected": 0
+            }
+        ],
+        "is_bilateral": false,
+        "ancillary_landmarks": [
+            "aorta",
+            "colon",
+            "duodenum",
+            "fused_spine",
+            "iliopsoas_left",
+            "iliopsoas_right",
+            "kidney_left",
+            "kidney_right",
+            "liver",
+            "pancreas",
+            "psoas_major_left",
+            "psoas_major_right",
+            "small_bowel",
+            "spleen",
+            "stomach"
+        ]
+    },
+    "Abdominal_Celiac": {
+        "rule": "DistanceExpansion",
+        "base_landmark": "celiac_trunk",
+        "distance_mm": 25.0,
+        "roi": {
+            "landmark": "celiac_trunk",
+            "padding_mm": [
+                30,
+                30,
+                30
+            ]
+        },
+        "exclude": [
+            "liver",
+            "stomach",
+            "pancreas",
+            "spleen",
+            "aorta"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "stomach",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 1000
+            },
+            {
+                "type": "RelativePosition",
+                "target": "stomach",
+                "direction": "posterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "aorta_centroid",
+                "direction": "anterior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "pancreas",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "aorta",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "liver",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "celiac_inf_plane",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "P_sma",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vertebrae_T10_min",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vertebrae_L2_max",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vertebrae_T12_anterior_margin",
+                "direction": "anterior"
+            }
+        ],
+        "is_bilateral": false,
+        "ancillary_landmarks": [
+            "aorta",
+            "celiac_trunk",
+            "liver",
+            "pancreas",
+            "spleen",
+            "stomach"
+        ]
+    },
+    "Abdominal_Inguinal_Left": {
+        "rule": "DistanceExpansion",
+        "base_landmark": "femoral_artery_left",
+        "distance_mm": 20.0,
+        "roi": {
+            "landmark": "femoral_artery_left",
+            "padding_mm": [
+                20,
+                20,
+                20
+            ]
+        },
+        "exclude": [
+            "femur_left",
+            "pelvis",
+            "sartorius_left",
+            "urinary_bladder",
+            "prostate",
+            "uterus",
+            "vagina"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "femur_left",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 2000
+            },
+            {
+                "type": "RelativePosition",
+                "target": "iliac_artery_external",
+                "direction": "inferior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "tissue_muscle",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p_Pubic_Tubercle",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p_ASIS",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Deep_Inguinal",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "femoral_artery",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "femoral_vein",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p_Pubic_Tubercle_Left",
+                "direction": "lateral"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Inguinal_Right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Deep_Inguinal",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "femoral_vein",
+                "expected": 0
+            }
+        ],
+        "is_bilateral": false,
+        "side": "Left",
+        "ancillary_landmarks": [
+            "femoral_artery_left",
+            "femur_left",
+            "pelvis",
+            "prostate",
+            "sartorius_left",
+            "urinary_bladder",
+            "uterus",
+            "vagina"
+        ]
+    },
+    "Abdominal_Inguinal_Right": {
+        "rule": "DistanceExpansion",
+        "base_landmark": "femoral_artery_right",
+        "distance_mm": 20.0,
+        "roi": {
+            "landmark": "femoral_artery_right",
+            "padding_mm": [
+                20,
+                20,
+                20
+            ]
+        },
+        "exclude": [
+            "femur_right",
+            "pelvis",
+            "sartorius_right",
+            "urinary_bladder",
+            "prostate",
+            "uterus",
+            "vagina"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "femur_right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 2000
+            },
+            {
+                "type": "RelativePosition",
+                "target": "iliac_artery_external",
+                "direction": "inferior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "tissue_muscle",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p_Pubic_Tubercle",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p_ASIS",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Deep_Inguinal",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "femoral_artery",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "femoral_vein",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p_Pubic_Tubercle_Left",
+                "direction": "lateral"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Inguinal_Right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Deep_Inguinal",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "femoral_vein",
+                "expected": 0
+            }
+        ],
+        "is_bilateral": false,
+        "side": "Right",
+        "ancillary_landmarks": [
+            "femoral_artery_right",
+            "femur_right",
+            "pelvis",
+            "prostate",
+            "sartorius_right",
+            "urinary_bladder",
+            "uterus",
+            "vagina"
+        ]
+    },
+    "Thoracic_Station_7_Subcarinial": {
+        "rule": "ConvexHullBridge",
+        "landmark_1": "bronchi_left",
+        "landmark_2": "bronchi_right",
+        "roi": {
+            "landmark": "carina_computed",
+            "padding_mm": [
+                20,
+                20,
+                50
+            ]
+        },
+        "exclude": [
+            "heart",
+            "pulmonary_artery",
+            "esophagus",
+            "aorta_descending",
+            "lung_left",
+            "lung_right",
+            "lung",
+            "trachea",
+            "trachea_split",
+            "lung_trachea_bronchia"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "trachea",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "heart",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 2000
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "esophagus",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "pulmonary_artery",
+                "direction": "posterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vertebrae_T",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "carina_computed_min_Z",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Z_inf_left",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Z_inf_right",
+                "direction": "superior"
+            }
+        ],
+        "is_bilateral": false,
+        "ancillary_landmarks": [
+            "aorta_descending",
+            "esophagus",
+            "heart",
+            "lung",
+            "lung_left",
+            "lung_right",
+            "lung_trachea_bronchia",
+            "pulmonary_artery",
+            "trachea",
+            "trachea_split"
+        ]
+    },
+    "Thoracic_Station_8_Paraesophageal": {
+        "rule": "DistanceExpansion",
+        "base_landmark": "esophagus",
+        "distance_mm": 15.0,
+        "roi": {
+            "landmark": "esophagus",
+            "padding_mm": [
+                30,
+                20,
+                0
+            ]
+        },
+        "exclude": [
+            "heart",
+            "aorta_descending",
+            "fused_spine",
+            "lung"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "fused_spine",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 2000
+            }
+        ],
+        "is_bilateral": false,
+        "ancillary_landmarks": [
+            "aorta_descending",
+            "esophagus",
+            "fused_spine",
+            "heart",
+            "lung"
+        ]
+    },
+    "Thoracic_Station_4_LowerParatracheal_Left": {
+        "rule": "DistanceExpansion",
+        "base_landmark": "trachea",
+        "distance_mm": 15.0,
+        "roi": {
+            "landmark": "trachea",
+            "padding_mm": [
+                20,
+                20,
+                0
+            ]
+        },
+        "exclude": [
+            "aorta_arch",
+            "aorta_ascending",
+            "aorta_descending",
+            "aorta",
+            "esophagus",
+            "pulmonary_artery",
+            "lung"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 1000
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "trachea",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "lung_right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "lung_left",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "superior_vena_cava",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vertebrae_T",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "sternum",
+                "direction": "posterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Z_4R_lower",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Z_4L_lower",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "carina_computed_Z",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "plane_ligamentum_arteriosum",
+                "direction": "medial"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Level_4L",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 500
+            }
+        ],
+        "is_bilateral": false,
+        "side": "Left",
+        "ancillary_landmarks": [
+            "aorta",
+            "aorta_arch",
+            "aorta_ascending",
+            "aorta_descending",
+            "esophagus",
+            "lung",
+            "pulmonary_artery",
+            "trachea"
+        ]
+    },
+    "Thoracic_Station_4_LowerParatracheal_Right": {
+        "rule": "DistanceExpansion",
+        "base_landmark": "trachea",
+        "distance_mm": 15.0,
+        "roi": {
+            "landmark": "trachea",
+            "padding_mm": [
+                20,
+                20,
+                0
+            ]
+        },
+        "exclude": [
+            "superior_vena_cava",
+            "esophagus",
+            "lung"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 1000
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "trachea",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "lung_right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "lung_left",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "superior_vena_cava",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vertebrae_T",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "sternum",
+                "direction": "posterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Z_4R_lower",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Z_4L_lower",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "carina_computed_Z",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "plane_ligamentum_arteriosum",
+                "direction": "medial"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Level_4L",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 500
+            }
+        ],
+        "is_bilateral": false,
+        "side": "Right",
+        "ancillary_landmarks": [
+            "esophagus",
+            "lung",
+            "superior_vena_cava",
+            "trachea"
+        ]
+    },
+    "Thoracic_Station_2_UpperParatracheal_Right": {
+        "rule": "DistanceExpansion",
+        "base_landmark": "trachea",
+        "distance_mm": 15.0,
+        "roi": {
+            "landmark": "trachea",
+            "padding_mm": [
+                20,
+                20,
+                0
+            ]
+        },
+        "exclude": [
+            "brachiocephalic_vein_right",
+            "common_carotid_artery_right",
+            "lung",
+            "esophagus",
+            "fused_spine"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 1000
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "trachea",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "lung_right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "lung_left",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "superior_vena_cava",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "aorta",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "esophagus",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vertebrae_T1_T5",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Z_inf_2R",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Z_inf_2L",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "carina_computed_max",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "esophagus_max",
+                "direction": "anterior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Level_2L",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 500
+            }
+        ],
+        "is_bilateral": false,
+        "side": "Right",
+        "ancillary_landmarks": [
+            "brachiocephalic_vein_right",
+            "common_carotid_artery_right",
+            "esophagus",
+            "fused_spine",
+            "lung",
+            "trachea"
+        ]
+    },
+    "Thoracic_Station_2_UpperParatracheal_Left": {
+        "rule": "DistanceExpansion",
+        "base_landmark": "trachea",
+        "distance_mm": 15.0,
+        "roi": {
+            "landmark": "trachea",
+            "padding_mm": [
+                20,
+                20,
+                0
+            ]
+        },
+        "exclude": [
+            "common_carotid_artery_left",
+            "subclavian_artery_left",
+            "lung",
+            "esophagus",
+            "fused_spine",
+            "aorta"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 1000
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "trachea",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "lung_right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "lung_left",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "superior_vena_cava",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "aorta",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "esophagus",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vertebrae_T1_T5",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Z_inf_2R",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Z_inf_2L",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "carina_computed_max",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "esophagus_max",
+                "direction": "anterior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Level_2L",
+                "expected": 0
+            },
+            {
+                "type": "VolumeMin",
+                "value": 500
+            }
+        ],
+        "is_bilateral": false,
+        "side": "Left",
+        "ancillary_landmarks": [
+            "aorta",
+            "common_carotid_artery_left",
+            "esophagus",
+            "fused_spine",
+            "lung",
+            "subclavian_artery_left",
+            "trachea"
+        ]
+    },
+    "Neck_Level_IIa_Left": {
+        "rule": "DynamicSurfaceSplit",
+        "target_landmark": "internal_jugular_vein_left",
+        "divider_landmark": "internal_jugular_vein_left",
+        "divider_edge": "posterior",
+        "keep_mode": "anterior",
+        "roi": {
+            "landmark": "internal_jugular_vein_left",
+            "padding_mm": [
+                25,
+                25,
+                40
+            ]
+        },
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "internal_jugular_vein_left",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vein_internal_jugular",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "artery_internal_carotid",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "muscle_sternocleidomastoid",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "gland_parotid_max",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "gland_thyroid_max",
+                "direction": "superior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "airway_pharynx",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "cervical_spine",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "low_mandible_plane",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p1",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "most_anterior_mandible",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "dig_bot",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid_bone",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "mandible_symphysis",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid_bone_min",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p3",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p4",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid_bone",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid_bone_anterior_margin",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "stylohyoid_line",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Level_IB_Left",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Level_IB_Right",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "digastric_plane_left",
+                "direction": "lateral"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Level_IB_Left",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "gland_submandibular",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Mandible_Bone",
+                "expected": 0
+            }
+        ],
+        "is_bilateral": false,
+        "side": "Left"
+    },
+    "Neck_Level_IIb_Left": {
+        "rule": "DynamicSurfaceSplit",
+        "target_landmark": "internal_jugular_vein_left",
+        "divider_landmark": "internal_jugular_vein_left",
+        "divider_edge": "posterior",
+        "keep_mode": "posterior",
+        "roi": {
+            "landmark": "internal_jugular_vein_left",
+            "padding_mm": [
+                25,
+                25,
+                40
+            ]
+        },
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "internal_jugular_vein_left",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vein_internal_jugular",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "artery_internal_carotid",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "muscle_sternocleidomastoid",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "gland_parotid_max",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "gland_thyroid_max",
+                "direction": "superior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "airway_pharynx",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "cervical_spine",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "low_mandible_plane",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p1",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "most_anterior_mandible",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "dig_bot",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid_bone",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "mandible_symphysis",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid_bone_min",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p3",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p4",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid_bone",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid_bone_anterior_margin",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "stylohyoid_line",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Level_IB_Left",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Level_IB_Right",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "digastric_plane_left",
+                "direction": "lateral"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Level_IB_Left",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "gland_submandibular",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Mandible_Bone",
+                "expected": 0
+            }
+        ],
+        "is_bilateral": false,
+        "side": "Left"
+    },
+    "Neck_Level_IIa_Right": {
+        "rule": "DynamicSurfaceSplit",
+        "target_landmark": "internal_jugular_vein_right",
+        "divider_landmark": "internal_jugular_vein_right",
+        "divider_edge": "posterior",
+        "keep_mode": "anterior",
+        "roi": {
+            "landmark": "internal_jugular_vein_right",
+            "padding_mm": [
+                25,
+                25,
+                40
+            ]
+        },
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "internal_jugular_vein_right",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vein_internal_jugular",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "artery_internal_carotid",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "muscle_sternocleidomastoid",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "gland_parotid_max",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "gland_thyroid_max",
+                "direction": "superior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "airway_pharynx",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "cervical_spine",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "low_mandible_plane",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p1",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "most_anterior_mandible",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "dig_bot",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid_bone",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "mandible_symphysis",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid_bone_min",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p3",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p4",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid_bone",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid_bone_anterior_margin",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "stylohyoid_line",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Level_IB_Left",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Level_IB_Right",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "digastric_plane_left",
+                "direction": "lateral"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Level_IB_Left",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "gland_submandibular",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Mandible_Bone",
+                "expected": 0
+            }
+        ],
+        "is_bilateral": false,
+        "side": "Right"
+    },
+    "Neck_Level_IIb_Right": {
+        "rule": "DynamicSurfaceSplit",
+        "target_landmark": "internal_jugular_vein_right",
+        "divider_landmark": "internal_jugular_vein_right",
+        "divider_edge": "posterior",
+        "keep_mode": "posterior",
+        "roi": {
+            "landmark": "internal_jugular_vein_right",
+            "padding_mm": [
+                25,
+                25,
+                40
+            ]
+        },
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "internal_jugular_vein_right",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "vein_internal_jugular",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "artery_internal_carotid",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "muscle_sternocleidomastoid",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "gland_parotid_max",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "gland_thyroid_max",
+                "direction": "superior"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "airway_pharynx",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "cervical_spine",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "low_mandible_plane",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p1",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "most_anterior_mandible",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "dig_bot",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid_bone",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "mandible_symphysis",
+                "direction": "inferior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid_bone_min",
+                "direction": "superior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p3",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "p4",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid_bone",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "hyoid_bone_anterior_margin",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "stylohyoid_line",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Level_IB_Left",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "Level_IB_Right",
+                "direction": "medial"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "digastric_plane_left",
+                "direction": "lateral"
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Level_IB_Left",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "gland_submandibular",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "Mandible_Bone",
+                "expected": 0
+            }
+        ],
+        "is_bilateral": false,
+        "side": "Right"
+    }
+}

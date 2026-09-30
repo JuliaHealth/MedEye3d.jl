@@ -1,0 +1,65 @@
+{
+    "Thoracic_Station_Prepericardial_Base_Left": {
+        "rule": "GeometricConstraint",
+        "side": "Left",
+        "base_landmark": "helper_Prepericardial_Hull",
+        "dependencies": [
+            "helper_Prepericardial_Hull",
+            "heart",
+            "sternum"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "heart",
+                "boundary_part": "center",
+                "slice_wise": true,
+                "comment": "Constrain to anterior of mid heart"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "carina_computed",
+                "boundary_part": "min"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "heart",
+                "boundary_part": "min",
+                "offset_mm": 10.0
+            },
+            {
+                "constraint_type": "SideLimit",
+                "landmark": "sternum",
+                "boundary_part": "center",
+                "slice_wise": true,
+                "comment": "L/R split at sternum center"
+            }
+        ],
+        "exclude": [
+            "helper_heart_hull_2d",
+            "heart",
+            "aorta",
+            "aorta_ascending",
+            "aorta_descending",
+            "aortic_arch_computed",
+            "pulmonary_artery",
+            "superior_vena_cava",
+            "inferior_vena_cava",
+            "brachiocephalic_vein_left",
+            "brachiocephalic_vein_right",
+            "common_carotid_artery_left",
+            "common_carotid_artery_right",
+            "lung_left",
+            "lung_right",
+            "sternum",
+            "liver",
+            "trachea",
+            "esophagus",
+            "subclavian_artery",
+            "brachiocephalic_trunk"
+        ],
+        "is_helper": true,
+        "ignore_global_exclusion": true,
+        "keep_all_components": false
+    }
+}

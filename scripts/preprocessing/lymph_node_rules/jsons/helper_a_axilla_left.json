@@ -1,0 +1,22 @@
+{
+    "helper_a_axilla_left": {
+        "rule": "VolumetricBoundary2D",
+        "growth_mode": "convex_hull",
+        "boundaries": {
+            "anterior": "pectoralis_major_left",
+            "posterior": "helper_subscapularis_left"
+        },
+        "side": "left",
+        "group": "Helper",
+        "exclude": [
+            "lung_left",
+            "lung_right",
+            "tissue_muscle",
+            "scapula",
+            "subscapularis",
+            "deltoid",
+            "latissimus_dorsi"
+        ],
+        "is_helper": true
+    }
+}

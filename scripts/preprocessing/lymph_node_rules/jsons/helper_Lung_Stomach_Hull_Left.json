@@ -1,0 +1,17 @@
+{
+    "helper_Lung_Stomach_Hull_Left": {
+        "rule": "ConvexHullBridging",
+        "input": "body_trunc",
+        "bridge_landmarks": [
+            "lung_left",
+            "stomach"
+        ],
+        "apply_convex_hull_2d": true,
+        "is_bilateral": false,
+        "keep_all_components": true,
+        "ancillary_landmarks": [
+            "lung_left",
+            "stomach"
+        ]
+    }
+}

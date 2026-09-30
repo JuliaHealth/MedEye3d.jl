@@ -1,0 +1,13 @@
+{
+    "Helper_ChestWall_Bridge": {
+        "rule": "VolumetricBoundary2D",
+        "input": [
+            "ribs_combined",
+            "sternum"
+        ],
+        "is_bilateral": false,
+        "group": "Helper",
+        "category": "Helper",
+        "keep_all_components": true
+    }
+}

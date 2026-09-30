@@ -1,0 +1,43 @@
+{
+    "Abdominal_Iliac_Bifurcation_Left": {
+        "rule": "IliacBifurcationCustom",
+        "side": "Left",
+        "padding_mm": 7.0,
+        "exclude": [
+            "pelvis",
+            "femur",
+            "iliopsoas",
+            "helper_pelvis_gluteal",
+            "stomach",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "liver",
+            "spleen",
+            "pancreas",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right"
+        ],
+        "overlap_precedence": [
+            "Abdominal_Mesenteric_Interenteric"
+        ],
+        "ancillary_landmarks": [
+            "femur",
+            "iliac_artery",
+            "iliac_vena",
+            "pelvis",
+            "iliopsoas",
+            "helper_pelvis_gluteal"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 5
+            }
+        ],
+        "depends_on": [
+            "helper_pelvis_gluteal"
+        ]
+    }
+}

@@ -1,0 +1,45 @@
+{
+    "helper_bronchi_left_temp": {
+        "rule": "SplitMask",
+        "input": "bronchi_sanitized",
+        "side": "left",
+        "keep": "max",
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": ["bronchi_sanitized"]
+    },
+    "helper_bronchi_right_temp": {
+        "rule": "SplitMask",
+        "input": "bronchi_sanitized",
+        "side": "right",
+        "keep": "min",
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": ["bronchi_sanitized"]
+    },
+    "bronchi_main_left": {
+        "rule": "Combine",
+        "method": "union",
+        "components": ["helper_bronchi_left_temp"],
+        "exclude": ["lung_left"],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": ["helper_bronchi_left_temp"]
+    },
+    "bronchi_main_right": {
+        "rule": "Combine",
+        "method": "union",
+        "components": ["helper_bronchi_right_temp"],
+        "exclude": ["lung_right"],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": ["helper_bronchi_right_temp"]
+    },
+    "bronchi_main": {
+        "rule": "Combine",
+        "method": "union",
+        "components": ["bronchi_main_left", "bronchi_main_right"],
+        "is_helper": true,
+        "depends_on": ["bronchi_main_left", "bronchi_main_right"]
+    }
+}

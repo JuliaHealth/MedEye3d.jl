@@ -1,0 +1,120 @@
+{
+    "Neck_Level_Va_Upper_Posterior_Triangle": {
+        "rule": "AnisotropicMargin",
+        "is_bilateral": true,
+        "input": "body",
+        "constraints": [
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "sternocleidomastoid",
+                "boundary_part": "max",
+                "slice_wise": true,
+                "comment": "Anterior boundary: behind the posterior edge of SCM per slice"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "vertebrae",
+                "boundary_part": "max",
+                "slice_wise": true,
+                "comment": "Posterior limit: 3cm posterior to spinous process tip",
+                "offset_mm": 30.0
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "sternocleidomastoid",
+                "boundary_part": "max",
+                "comment": "Superior limit: top of SCM"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "coracoid_process",
+                "boundary_part": "max",
+                "comment": "Bottom constraint: coracoid process (most anterior point of scapula)"
+            },
+            {
+                "constraint_type": "LateralTo",
+                "landmark": "vertebrae",
+                "boundary_part": "lateral",
+                "slice_wise": true,
+                "comment": "Medial constraint: most lateral of vertebral column"
+            },
+            {
+                "constraint_type": "MedialTo",
+                "landmark": "clavicula",
+                "boundary_part": "lateral",
+                "slice_wise": true,
+                "allow_missing": true,
+                "offset_mm": -20.0,
+                "comment": "Lateral constraint: most lateral slice of clavicle when present, 4cm when absent"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "trapezius",
+                "boundary_part": "min",
+                "slice_wise": true,
+                "allow_missing": true,
+                "comment": "Posterior limit: anterior border of trapezius"
+            }
+        ],
+        "exclude": [
+            "sternocleidomastoid",
+            "trapezius",
+            "clavicula",
+            "internal_jugular_vein",
+            "fused_spine",
+            "spinal_cord",
+            "lung",
+            "subclavian_artery",
+            "subclavian_vein",
+            "prevertebral",
+            "anterior_scalene",
+            "middle_scalene",
+            "posterior_scalene",
+            "levator_scapulae",
+            "erector_spinae",
+            "platysma",
+            "esophagus",
+            "thyroid_gland",
+            "autochthon",
+            "transversospinalis",
+            "latissimus_dorsi",
+            "serratus_anterior",
+            "pectoralis_major",
+            "scapula",
+            "lung_left",
+            "lung_right",
+            "deltoid",
+            "humerus",
+            "supraspinatus",
+            "infraspinatus",
+            "subscapularis",
+            "teres_major",
+            "teres_minor",
+            "pectoralis_minor",
+            "trachea",
+            "larynx",
+            "thyroid_cartilage",
+            "cricoid_cartilage",
+            "common_carotid_artery_left",
+            "common_carotid_artery_right",
+            "carotid_artery",
+            "helper_inside_chest",
+            "thoracic_cavity",
+            "helper_chest_cavity",
+            "biceps_brachii",
+            "triceps_brachii",
+            "coracobrachialis",
+            "intercostal_muscles",
+            "ribs_combined",
+            "skeletal_muscle"
+        ],
+        "ignore_global_exclusion": true,
+        "group": "Neck",
+        "category": "Lymph_Node",
+        "color": [
+            200,
+            100,
+            200
+        ]
+    }
+}

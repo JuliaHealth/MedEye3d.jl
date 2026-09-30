@@ -1,0 +1,47 @@
+{
+    "helper_pancreaticoduodenal_base": {
+        "rule": "ConvexHull",
+        "targets": ["helper_pancreas_head", "duodenum"],
+        "planes": ["axial", "coronal", "sagittal"],
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "pancreas",
+                "boundary_part": "min"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "pancreas",
+                "boundary_part": "max"
+            }
+        ],
+        "exclude": [
+            "pancreas", "duodenum", "stomach", "liver", "colon",
+            "small_bowel", "spleen", "gallbladder", "kidney_left", "kidney_right",
+            "aorta", "inferior_vena_cava"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": ["helper_pancreas_head"],
+        "comments": "Base region for pancreaticoduodenal nodes: 2D convex hull of pancreas head + duodenum"
+    },
+    "Abdominal_Station_13_Posterior_Pancreaticoduodenal": {
+        "rule": "BitwiseAnd",
+        "mask_name": "helper_pancreaticoduodenal_base",
+        "constraints": [
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "pancreas",
+                "boundary_part": "center",
+                "slice_wise": true
+            }
+        ],
+        "exclude": [],
+        "depends_on": ["helper_pancreaticoduodenal_base"],
+        "overlap_precedence": ["Abdominal_Station_9_Celiac", "Abdominal_Station_14_SMA"],
+        "category": "Lymph_Node",
+        "group": "Abdominal",
+        "color": [200, 160, 120],
+        "comments": "Station 13: Posterior half of pancreaticoduodenal base"
+    }
+}

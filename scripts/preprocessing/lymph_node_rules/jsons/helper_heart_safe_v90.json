@@ -1,0 +1,32 @@
+{
+    "helper_hilar_lateral_both": {
+        "rule": "Combine",
+        "operation": "union",
+        "components": [
+            "helper_hilar_subcarinial_lateral_left",
+            "helper_hilar_subcarinial_lateral_right"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_hilar_subcarinial_lateral_left",
+            "helper_hilar_subcarinial_lateral_right"
+        ]
+    },
+    "helper_heart_hull_2d_dilated_safe": {
+        "rule": "Combine",
+        "operation": "difference",
+        "components": [
+            "helper_heart_hull_2d_dilated"
+        ],
+        "exclude": [
+            "helper_hilar_lateral_both"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_heart_hull_2d_dilated",
+            "helper_hilar_lateral_both"
+        ]
+    }
+}

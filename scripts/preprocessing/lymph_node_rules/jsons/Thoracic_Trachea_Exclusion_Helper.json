@@ -1,0 +1,12 @@
+{
+    "Thoracic_Trachea_2cm_Exclusion_Helper": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "trachea",
+        "margins_mm": 20,
+        "is_bilateral": false,
+        "comments": "Helper to define a 2cm buffer around the trachea for exclusion.",
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "keep_all_components": true
+    }
+}

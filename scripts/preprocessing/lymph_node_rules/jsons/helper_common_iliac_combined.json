@@ -1,0 +1,9 @@
+{
+    "helper_common_iliac_combined": {
+        "rule": "BitwiseOr",
+        "inputs": ["Abdominal_Common_Iliac_Left", "Abdominal_Common_Iliac_Right"],
+        "is_bilateral": false,
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

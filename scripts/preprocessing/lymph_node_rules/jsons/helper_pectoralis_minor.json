@@ -1,0 +1,15 @@
+{
+    "helper_pectoralis_minor_left": {
+        "rule": "SplitConnectedComponents",
+        "side": "left",
+        "input_image": "pectoralis_minor",
+        "group": "Helper",
+        "is_helper": true
+    },
+    "helper_pectoralis_minor_right": {
+        "rule": "SplitConnectedComponents",
+        "side": "right",
+        "input_image": "pectoralis_minor",
+        "group": "Helper"
+    }
+}

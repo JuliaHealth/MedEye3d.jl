@@ -1,0 +1,84 @@
+{
+    "helper_paraaortic_kidney_right_hull": {
+        "rule": "ConvexHull",
+        "targets": [
+            "helper_Abdominal_Paraaortic",
+            "kidney_right"
+        ],
+        "mode": "2D",
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "pancreas",
+                "boundary_part": "min"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "pancreas",
+                "boundary_part": "max"
+            }
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_Abdominal_Paraaortic"
+        ],
+        "comments": "2D convex hull between paraaortic and right kidney for exclusion from inferior pancreatic",
+        "overlap_precedence": [
+            "Abdominal_Station_11_Splenic_Artery"
+        ]
+    },
+    "Abdominal_Station_Inferior_Pancreatic": {
+        "rule": "ConvexHull",
+        "targets": [
+            "helper_Abdominal_Paraaortic",
+            "pancreas"
+        ],
+        "mode": "2D",
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "pancreas",
+                "boundary_part": "min"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "pancreas",
+                "boundary_part": "max"
+            }
+        ],
+        "exclude": [
+            "pancreas",
+            "aorta",
+            "inferior_vena_cava",
+            "stomach",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "liver",
+            "spleen",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right",
+            "fused_spine",
+            "helper_paraaortic_kidney_right_hull"
+        ],
+        "depends_on": [
+            "helper_Abdominal_Paraaortic",
+            "helper_paraaortic_kidney_right_hull"
+        ],
+        "overlap_precedence": [
+            "Abdominal_Station_9_Celiac",
+            "Abdominal_Station_14_SMA"
+        ],
+        "category": "Lymph_Node",
+        "group": "Abdominal",
+        "color": [
+            180,
+            140,
+            200
+        ],
+        "post_overlap_lcc": true,
+        "comments": "Inferior pancreatic nodes: 2D convex hull between paraaortic nodes and pancreas, Z-constrained to pancreas extent."
+    }
+}

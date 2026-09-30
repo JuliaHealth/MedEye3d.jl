@@ -1,0 +1,15 @@
+{
+    "helper_Mammary_Prevascular_Bridge": {
+        "rule": "VolumetricBoundary2D",
+        "is_bilateral": true,
+        "boundaries": {
+            "anterior": "Thoracic_Mammary",
+            "posterior": "Thoracic_Station_3A_Prevascular"
+        },
+        "ancillary_landmarks": [
+            "Thoracic_Mammary",
+            "Thoracic_Station_3A_Prevascular"
+        ],
+        "is_helper": true
+    }
+}

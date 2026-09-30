@@ -1,0 +1,1068 @@
+module CustomRules
+
+using CUDA
+using KernelAbstractions
+using KernelAbstractions: @index, @synchronize
+using Adapt
+using Statistics
+import Main.DagVm.RuleExecutors: execute_anisotropic_expansion
+
+export HilarAnteriorHelper, InternalIliacCustom, AxillaryRTOGRelaxed, AnteriorGrowthMask, PosteriorGrowthMask, VolumetricBoundary2DLateralGrowth, LimitZByLandmark, limit_z_by_landmark_kernel!, AnteriorExtrusion, anterior_growth_kernel!, PropagateZ, propagate_z_kernel!, Station1LowCervical, IliacBifurcationCustom, AxillaryRTOG, ExternalIliacCustom, CommonIliacCustom, AxillaryHelperB, PleuralSpaceCustom, PresacralAnteriorCustom, split_mask_kernel!, cylinder_primitive_kernel!, VolumetricBoundary2D, compute_2d_convex_hull_per_slice!
+
+# =====================================================================
+# 0. SplitMask / SplitConnectedComponents (Pure GPU)
+# =====================================================================
+@kernel function split_mask_kernel!(output, input, dims, axis_idx::Int, split_val::Int, keep_min::Bool)
+    I, J, K = @index(Global, NTuple)
+    if I <= dims[1] && J <= dims[2] && K <= dims[3]
+        if input[I, J, K] > 0
+            coord = axis_idx == 1 ? I : (axis_idx == 2 ? J : K)
+            if (keep_min && coord <= split_val) || (!keep_min && coord > split_val)
+                output[I, J, K] = UInt8(1)
+            else
+                output[I, J, K] = UInt8(0)
+            end
+        else
+            output[I, J, K] = UInt8(0)
+        end
+    end
+end
+
+@kernel function cylinder_primitive_kernel!(output, p1_x, p1_y, p1_z, p2_x, p2_y, p2_z, radius_mm, orig_x, orig_y, orig_z, sp_x, sp_y, sp_z)
+    I, J, K = @index(Global, NTuple)
+    dims = size(output)
+    if I <= dims[1] && J <= dims[2] && K <= dims[3]
+        phys_x = Float32(orig_x) + (Float32(I) - 1.0f0) * Float32(sp_x)
+        phys_y = Float32(orig_y) + (Float32(J) - 1.0f0) * Float32(sp_y)
+        phys_z = Float32(orig_z) + (Float32(K) - 1.0f0) * Float32(sp_z)
+        
+        dx = Float32(p2_x) - Float32(p1_x)
+        dy = Float32(p2_y) - Float32(p1_y)
+        dz = Float32(p2_z) - Float32(p1_z)
+        len = sqrt(dx*dx + dy*dy + dz*dz)
+        
+        if len > 0.0f0
+            ux = dx / len
+            uy = dy / len
+            uz = dz / len
+            
+            vx = phys_x - Float32(p1_x)
+            vy = phys_y - Float32(p1_y)
+            vz = phys_z - Float32(p1_z)
+            
+            proj = vx*ux + vy*uy + vz*uz
+            if proj >= 0.0f0 && proj <= len
+                dist2 = (vx*vx + vy*vy + vz*vz) - proj*proj
+                r = Float32(radius_mm)
+                if dist2 <= r * r
+                    output[I, J, K] = UInt8(1)
+                end
+            end
+        end
+    end
+end
+
+# =====================================================================
+# 1. HilarAnteriorHelper (Pure GPU)
+# =====================================================================
+@kernel function hilar_anterior_helper_kernel!(output, input, dims, voxel_offset_y, y_is_posterior)
+    I, K = @index(Global, NTuple)
+    if I <= dims[1] && K <= dims[3]
+        if y_is_posterior
+            y_front = 0
+            for j in 1:dims[2]
+                if input[I, j, K] > 0
+                    y_front = j
+                    break
+                end
+            end
+            if y_front > 0
+                y_start = max(1, y_front - voxel_offset_y)
+                for j in y_start:y_front
+                    output[I, j, K] = 1
+                end
+            end
+        else
+            y_front = 0
+            for j in dims[2]:-1:1
+                if input[I, j, K] > 0
+                    y_front = j
+                    break
+                end
+            end
+            if y_front > 0
+                y_end = min(dims[2], y_front + voxel_offset_y)
+                for j in y_front:y_end
+                    output[I, j, K] = 1
+                end
+            end
+        end
+    end
+end
+
+function HilarAnteriorHelper(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, in_device::AbstractArray{UInt8, 3}, args...)
+    dims = size(out_device)
+    offset_mm = Float32(get(params, "offset_mm", 40.0))
+    spacing_y = Float32(get(params, "spacing_y", 1.0))
+    y_is_posterior = get(params, "y_is_posterior", true)
+    voxel_offset_y = Int(round(offset_mm / spacing_y))
+    
+    fill!(out_device, 0)
+    kernel! = hilar_anterior_helper_kernel!(tm.backend)
+    kernel!(out_device, in_device, dims, voxel_offset_y, y_is_posterior, ndrange=(dims[1], dims[3]))
+    KernelAbstractions.synchronize(tm.backend)
+end
+
+# =====================================================================
+# 2. InternalIliacCustom (Pure GPU)
+# =====================================================================
+@kernel function internal_iliac_split_kernel!(output, input, dims, mid_x, is_left)
+    I, J, K = @index(Global, NTuple)
+    if I <= dims[1] && J <= dims[2] && K <= dims[3]
+        if input[I, J, K] > 0
+            if (is_left && I >= mid_x) || (!is_left && I <= mid_x)
+                output[I, J, K] = input[I, J, K]
+            else
+                output[I, J, K] = 0
+            end
+        else
+            output[I, J, K] = 0
+        end
+    end
+end
+
+function InternalIliacCustom(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, prim_device::AbstractArray{UInt8, 3}, art_l::AbstractArray{UInt8, 3}, art_r::AbstractArray{UInt8, 3}, args...)
+    dims = size(prim_device)
+    side = get(params, "side", "Left")
+    is_left = lowercase(side) == "left"
+    
+    # Midline X in 512 grid is dims[1] ÷ 2
+    mid_x = dims[1] ÷ 2
+    
+    kernel! = internal_iliac_split_kernel!(tm.backend)
+    kernel!(out_device, prim_device, dims, mid_x, is_left, ndrange=dims)
+    KernelAbstractions.synchronize(tm.backend)
+end
+
+# =====================================================================
+# 3. ExternalIliacCustom & IliacBifurcationCustom (Pure GPU)
+# =====================================================================
+@kernel function iliac_split_kernel!(output, input, dims, z_min, z_max, mid_x, is_left)
+    I, J, K = @index(Global, NTuple)
+    if I <= dims[1] && J <= dims[2] && K <= dims[3]
+        if K >= z_min && K <= z_max && input[I, J, K] > 0
+            if (is_left && I >= mid_x) || (!is_left && I <= mid_x)
+                output[I, J, K] = 1
+            else
+                output[I, J, K] = 0
+            end
+        else
+            output[I, J, K] = 0
+        end
+    end
+end
+
+@kernel function iliac_split_slicewise_kernel!(output, input, dims, z_min, z_max, mid_limits, is_left)
+    I, J, K = @index(Global, NTuple)
+    if I <= dims[1] && J <= dims[2] && K <= dims[3]
+        if K >= z_min && K <= z_max && input[I, J, K] > 0
+            mid_x = mid_limits[K]
+            if mid_x <= Int32(0)
+                mid_x = Int32(dims[1] ÷ 2)
+            end
+            if (is_left && I >= mid_x) || (!is_left && I <= mid_x)
+                output[I, J, K] = 1
+            else
+                output[I, J, K] = 0
+            end
+        else
+            output[I, J, K] = 0
+        end
+    end
+end
+
+function ExternalIliacCustom(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, computed_landmarks::Dict, prim_device::AbstractArray{UInt8, 3}, femur_device::AbstractArray{UInt8, 3}, art_l_device::AbstractArray{UInt8, 3}, art_r_device::AbstractArray{UInt8, 3}, ven_l_device::AbstractArray{UInt8, 3}, ven_r_device::AbstractArray{UInt8, 3}, args...)
+    side = get(params, "side", "Left")
+    is_left = lowercase(side) == "left"
+    padding_mm = Float32(get(params, "padding_mm", 7.0))
+    sp_x = Float32(get(params, "spacing_x", 1.0))
+    sp_y = Float32(get(params, "spacing_y", 1.0))
+    sp_z = Float32(get(params, "spacing_z", 1.0))
+    orig_x = Float32(get(params, "origin_x", 0.0))
+    orig_y = Float32(get(params, "origin_y", 0.0))
+    orig_z = Float32(get(params, "origin_z", 0.0))
+    dims = size(out_device)
+    
+    # 1. Base vessel union on GPU (same side artery & vein)
+    vessel_union = KernelAbstractions.zeros(tm.backend, UInt8, dims...)
+    art_dev = is_left ? art_l_device : art_r_device
+    ven_dev = is_left ? ven_l_device : ven_r_device
+    
+    vessel_union .= art_dev .| ven_dev
+    
+    # 2. Anisotropic dilation on GPU (7mm)
+    dil_arr = KernelAbstractions.zeros(tm.backend, UInt8, dims...)
+    dil_arr .= execute_anisotropic_expansion(tm.backend, vessel_union, size(vessel_union), (Float64(sp_x), Float64(sp_y), Float64(sp_z)), Dict("all" => padding_mm))
+    
+    # 3. Z-plane limits from computed landmarks
+    p1_key = "internal_iliac_p1_" * lowercase(side)
+    z_bif = 1
+    if haskey(computed_landmarks, p1_key)
+        p1 = computed_landmarks[p1_key]
+        z_bif = round(Int, (Float64(p1[3]) - Float64(orig_z)) / Float64(sp_z)) + 1
+    end
+    
+    z_femur = 1
+    femur_idx = findall(adapt(CPU(), femur_device) .> 0)
+    if !isempty(femur_idx)
+        z_femur = maximum(i[3] for i in femur_idx)
+    end
+    
+    z_min = min(z_bif, z_femur)
+    z_max = max(z_bif, z_femur)
+    
+    # Dynamic midline split per slice
+    art_l_cpu = adapt(CPU(), art_l_device)
+    art_r_cpu = adapt(CPU(), art_r_device)
+    
+    mid_limits = fill(Int32(0), dims[3])
+    for k in z_min:z_max
+        xl = findall(art_l_cpu[:, :, k] .> 0)
+        xr = findall(art_r_cpu[:, :, k] .> 0)
+        if !isempty(xl) && !isempty(xr)
+            mean_xl = mean(Float64(p[1]) for p in xl)
+            mean_xr = mean(Float64(p[1]) for p in xr)
+            mid_limits[k] = Int32(round((mean_xl + mean_xr) / 2.0))
+        end
+    end
+    
+    mid_limits_gpu = adapt(CuArray, mid_limits)
+    
+    kernel! = iliac_split_slicewise_kernel!(tm.backend)
+    kernel!(out_device, dil_arr, dims, z_min, z_max, mid_limits_gpu, is_left, ndrange=dims)
+    KernelAbstractions.synchronize(tm.backend)
+end
+
+function CommonIliacCustom(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, computed_landmarks::Dict, aorta_device::AbstractArray{UInt8, 3}, art_l_device::AbstractArray{UInt8, 3}, art_r_device::AbstractArray{UInt8, 3}, ven_l_device::AbstractArray{UInt8, 3}, ven_r_device::AbstractArray{UInt8, 3}, args...)
+    side = get(params, "side", "Left")
+    is_left = lowercase(side) == "left"
+    padding_mm = Float32(get(params, "padding_mm", 7.0))
+    sp_x = Float32(get(params, "spacing_x", 1.0))
+    sp_y = Float32(get(params, "spacing_y", 1.0))
+    sp_z = Float32(get(params, "spacing_z", 1.0))
+    orig_x = Float32(get(params, "origin_x", 0.0))
+    orig_y = Float32(get(params, "origin_y", 0.0))
+    orig_z = Float32(get(params, "origin_z", 0.0))
+    dims = size(out_device)
+    
+    # 1. Base vessel union on GPU (same side artery & vein)
+    vessel_union = KernelAbstractions.zeros(tm.backend, UInt8, dims...)
+    art_dev = is_left ? art_l_device : art_r_device
+    ven_dev = is_left ? ven_l_device : ven_r_device
+    vessel_union .= art_dev .| ven_dev
+    
+    # 2. Anisotropic dilation on GPU (7mm)
+    dil_arr = KernelAbstractions.zeros(tm.backend, UInt8, dims...)
+    dil_arr .= execute_anisotropic_expansion(tm.backend, vessel_union, size(vessel_union), (Float64(sp_x), Float64(sp_y), Float64(sp_z)), Dict("all" => padding_mm))
+    
+    # 3. Z-plane limits: z_bif up to z_aorta (bottom of aorta)
+    p1_key = "internal_iliac_p1_" * lowercase(side)
+    z_bif = 1
+    if haskey(computed_landmarks, p1_key)
+        p1 = computed_landmarks[p1_key]
+        z_bif = round(Int, (Float64(p1[3]) - Float64(orig_z)) / Float64(sp_z)) + 1
+    end
+    
+    z_aorta = 1
+    aorta_idx = findall(adapt(CPU(), aorta_device) .> 0)
+    if !isempty(aorta_idx)
+        z_aorta = minimum(i[3] for i in aorta_idx)
+    end
+    
+    z_min = min(z_bif, z_aorta)
+    z_max = max(z_bif, z_aorta)
+    println("    [DEBUG CommonIliacCustom] z_bif=$z_bif, z_aorta=$z_aorta, z_min=$z_min, z_max=$z_max")
+    
+    # Dynamic midline split per slice
+    art_l_cpu = adapt(CPU(), art_l_device)
+    art_r_cpu = adapt(CPU(), art_r_device)
+    
+    mid_limits = fill(Int32(0), dims[3])
+    for k in z_min:z_max
+        xl = findall(art_l_cpu[:, :, k] .> 0)
+        xr = findall(art_r_cpu[:, :, k] .> 0)
+        if !isempty(xl) && !isempty(xr)
+            mean_xl = mean(Float64(p[1]) for p in xl)
+            mean_xr = mean(Float64(p[1]) for p in xr)
+            mid_limits[k] = Int32(round((mean_xl + mean_xr) / 2.0))
+        end
+    end
+    
+    mid_limits_gpu = adapt(CuArray, mid_limits)
+    
+    kernel! = iliac_split_slicewise_kernel!(tm.backend)
+    kernel!(out_device, dil_arr, dims, z_min, z_max, mid_limits_gpu, is_left, ndrange=dims)
+    KernelAbstractions.synchronize(tm.backend)
+end
+
+function IliacBifurcationCustom(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, computed_landmarks::Dict, art_l_device::AbstractArray{UInt8, 3}, art_r_device::AbstractArray{UInt8, 3}, ven_l_device::AbstractArray{UInt8, 3}, ven_r_device::AbstractArray{UInt8, 3}, args...)
+    side = get(params, "side", "Left")
+    is_left = lowercase(side) == "left"
+    padding_mm = Float32(get(params, "padding_mm", 7.0))
+    sp_x = Float32(get(params, "spacing_x", 1.0))
+    sp_y = Float32(get(params, "spacing_y", 1.0))
+    sp_z = Float32(get(params, "spacing_z", 1.0))
+    orig_x = Float32(get(params, "origin_x", 0.0))
+    orig_y = Float32(get(params, "origin_y", 0.0))
+    orig_z = Float32(get(params, "origin_z", 0.0))
+    dims = size(out_device)
+    
+    # 1. Base vessel union on GPU
+    vessel_union = KernelAbstractions.zeros(tm.backend, UInt8, dims...)
+    art_dev = is_left ? art_l_device : art_r_device
+    ven_dev = is_left ? ven_l_device : ven_r_device
+    vessel_union .= art_dev .| ven_dev
+    
+    # 2. Anisotropic dilation on GPU (7mm)
+    dil_arr = KernelAbstractions.zeros(tm.backend, UInt8, dims...)
+    dil_arr .= execute_anisotropic_expansion(tm.backend, vessel_union, size(vessel_union), (Float64(sp_x), Float64(sp_y), Float64(sp_z)), Dict("all" => padding_mm))
+    
+    # 3. Z-plane bounds (+/- 10mm around bifurcation)
+    p1_key = "internal_iliac_p1_" * lowercase(side)
+    z_bif = dims[3] ÷ 2
+    if haskey(computed_landmarks, p1_key)
+        p1 = computed_landmarks[p1_key]
+        z_bif = round(Int, (Float64(p1[3]) - Float64(orig_z)) / Float64(sp_z)) + 1
+    end
+    
+    z_offset_idx = round(Int, 10.0 / sp_z)
+    z_min = max(1, z_bif - z_offset_idx)
+    z_max = min(dims[3], z_bif + z_offset_idx)
+    
+    # Dynamic midline split per slice between left and right iliac arteries
+    art_l_cpu = adapt(CPU(), art_l_device)
+    art_r_cpu = adapt(CPU(), art_r_device)
+    
+    mid_limits = fill(Int32(0), dims[3])
+    for k in z_min:z_max
+        xl = findall(art_l_cpu[:, :, k] .> 0)
+        xr = findall(art_r_cpu[:, :, k] .> 0)
+        if !isempty(xl) && !isempty(xr)
+            mean_xl = mean(Float64(p[1]) for p in xl)
+            mean_xr = mean(Float64(p[1]) for p in xr)
+            mid_limits[k] = Int32(round((mean_xl + mean_xr) / 2.0))
+        end
+    end
+    
+    mid_limits_gpu = adapt(CuArray, mid_limits)
+    
+    kernel! = iliac_split_slicewise_kernel!(tm.backend)
+    kernel!(out_device, dil_arr, dims, z_min, z_max, mid_limits_gpu, is_left, ndrange=dims)
+    KernelAbstractions.synchronize(tm.backend)
+end
+
+# =====================================================================
+# 4. AxillaryRTOG / AxillaryRTOGRelaxed / AxillaryHelperB (Pure GPU)
+# =====================================================================
+@kernel function axillary_rtog_plane_kernel!(output, flood, dims, orig_x, orig_y, orig_z, sp_x, sp_y, sp_z, 
+    coracoid_x, coracoid_y, coracoid_z, 
+    rib5_x, rib5_y, rib5_z,
+    rib3_x, rib3_y, rib3_z,
+    pm_nx, pm_ny, pm_nz,
+    is_left, level, z_min_phys, z_max_phys)
+    
+    I, J, K = @index(Global, NTuple)
+    if I <= dims[1] && J <= dims[2] && K <= dims[3]
+        if flood[I, J, K] > 0
+            px = Float32(orig_x) + (Float32(I) - 1.0f0) * Float32(sp_x)
+            py = Float32(orig_y) + (Float32(J) - 1.0f0) * Float32(sp_y)
+            pz = Float32(orig_z) + (Float32(K) - 1.0f0) * Float32(sp_z)
+            
+            if pz >= min(Float32(z_min_phys), Float32(z_max_phys)) && pz <= max(Float32(z_min_phys), Float32(z_max_phys))
+                # Lateral boundary line from coracoid to rib 5
+                dz_lat = Float32(coracoid_z - rib5_z)
+                if abs(dz_lat) < 1f-6; dz_lat = 1f-6; end
+                t_lat = (pz - Float32(rib5_z)) / dz_lat
+                x_lat = Float32(rib5_x) + t_lat * Float32(coracoid_x - rib5_x)
+                
+                # Medial boundary line from coracoid to rib 3
+                dz_med = Float32(coracoid_z - rib3_z)
+                if abs(dz_med) < 1f-6; dz_med = 1f-6; end
+                t_med = (pz - Float32(rib3_z)) / dz_med
+                x_med = Float32(rib3_x) + t_med * Float32(coracoid_x - rib3_x)
+                
+                # Signed distance to PM plane
+                plane_dist = Float32(pm_nx) * (px - Float32(coracoid_x)) + 
+                             Float32(pm_ny) * (py - Float32(coracoid_y)) + 
+                             Float32(pm_nz) * (pz - Float32(coracoid_z))
+                
+                post_to_pm = plane_dist >= -10.0f0
+                ant_to_pm = plane_dist < 10.0f0
+                
+                valid = false
+                if is_left
+                    if level == 1
+                        valid = (px >= x_lat) && post_to_pm
+                    elseif level == 2
+                        valid = (px < x_lat) && (px >= x_med) && post_to_pm
+                    elseif level == 3
+                        valid = (px < x_med) && (px >= x_med - 35.0f0) && (px >= 15.0f0) && post_to_pm
+                    elseif level == 4  # Rotter
+                        valid = (px < x_lat) && (px >= x_med) && ant_to_pm
+                    end
+                else
+                    if level == 1
+                        valid = (px <= x_lat) && post_to_pm
+                    elseif level == 2
+                        valid = (px > x_lat) && (px <= x_med) && post_to_pm
+                    elseif level == 3
+                        valid = (px > x_med) && (px <= x_med + 35.0f0) && (px <= -15.0f0) && post_to_pm
+                    elseif level == 4  # Rotter
+                        valid = (px > x_lat) && (px <= x_med) && ant_to_pm
+                    end
+                end
+                
+                output[I, J, K] = valid ? UInt8(1) : UInt8(0)
+            else
+                output[I, J, K] = UInt8(0)
+            end
+        else
+            output[I, J, K] = UInt8(0)
+        end
+    end
+end
+
+
+function AxillaryRTOG(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, bounds_device::AbstractArray{UInt8, 3}, computed_landmarks::Dict, pec_view::AbstractArray{UInt8, 3}, sub_view::AbstractArray{UInt8, 3}, args...)
+    side = get(params, "side", "left")
+    side_norm = lowercase(side)
+    is_left = side_norm == "left"
+    level_str = lowercase(get(params, "level", "i"))
+    
+    level = 1
+    if level_str == "ii"; level = 2;
+    elseif level_str == "iii"; level = 3;
+    elseif level_str == "rotter"; level = 4;
+    end
+    
+    geom_key = "axillary_geometry_$side_norm"
+    if !haskey(computed_landmarks, geom_key)
+        println("    [WARNING] Axillary geometry missing for $side_norm. Outputting empty.")
+        fill!(out_device, 0)
+        return
+    end
+    geom = computed_landmarks[geom_key]
+    
+    sp_x = Float32(get(params, "spacing_x", 1.0))
+    sp_y = Float32(get(params, "spacing_y", 1.0))
+    sp_z = Float32(get(params, "spacing_z", 1.0))
+    orig_x = Float32(get(params, "origin_x", 0.0))
+    orig_y = Float32(get(params, "origin_y", 0.0))
+    orig_z = Float32(get(params, "origin_z", 0.0))
+    dims = size(out_device)
+    
+    coracoid_x = Float64(geom["coracoid_x"])
+    coracoid_y = Float64(geom["coracoid_y"])
+    coracoid_z = Float64(geom["coracoid_z"])
+    rib5_x = Float64(geom["rib5_x"])
+    rib5_y = Float64(geom["rib5_y"])
+    rib5_z = Float64(geom["rib5_z"])
+    rib3_x = Float64(geom["rib3_x"])
+    rib3_y = Float64(geom["rib3_y"])
+    rib3_z = Float64(geom["rib3_z"])
+    pm_nx = Float64(geom["pm_nx"])
+    pm_ny = Float64(geom["pm_ny"])
+    pm_nz = Float64(geom["pm_nz"])
+    
+    clav_max_z = get(geom, "clav_max_z", coracoid_z + 15.0)
+    z_cranial_limit = Float32(clav_max_z + 15.0)
+    
+    # Inferior limit per level
+    if level == 1 || level == 2
+        z_min_phys = Float32(rib3_z)
+    elseif level == 3
+        z_min_phys = Float32(coracoid_z - 55.0)
+    else # Rotter
+        z_min_phys = Float32(coracoid_z - 65.0)
+    end
+    z_max_phys = z_cranial_limit
+    
+    # Generate flooding distance from pec_major (or subclavian_artery for level 3)
+    flood = KernelAbstractions.zeros(tm.backend, UInt8, dims...)
+    art_view = length(args) > 0 ? args[1] : sub_view
+    
+    if level == 1
+        # Level 1: within 75mm of pec_major
+        flood .= execute_anisotropic_expansion(tm.backend, pec_view, size(pec_view), (Float64(sp_x), Float64(sp_y), Float64(sp_z)), Dict("all" => 75.0))
+    elseif level == 2
+        # Level 2: within 55mm of pec_major
+        flood .= execute_anisotropic_expansion(tm.backend, pec_view, size(pec_view), (Float64(sp_x), Float64(sp_y), Float64(sp_z)), Dict("all" => 55.0))
+    elseif level == 3
+        # Level 3: within 25mm of subclavian artery or 30mm of pec_major
+        art_sum = sum(Array(art_view) .> 0)
+        if art_sum > 0
+            flood .= execute_anisotropic_expansion(tm.backend, art_view, size(art_view), (Float64(sp_x), Float64(sp_y), Float64(sp_z)), Dict("all" => 25.0))
+        else
+            flood .= execute_anisotropic_expansion(tm.backend, pec_view, size(pec_view), (Float64(sp_x), Float64(sp_y), Float64(sp_z)), Dict("all" => 30.0))
+        end
+    else # Rotter
+        # Rotter: within 12mm of pec_major
+        flood .= execute_anisotropic_expansion(tm.backend, pec_view, size(pec_view), (Float64(sp_x), Float64(sp_y), Float64(sp_z)), Dict("all" => 12.0))
+    end
+    
+    # Apply plane-based level partition
+    kernel! = axillary_rtog_plane_kernel!(tm.backend)
+    kernel!(out_device, flood, dims, orig_x, orig_y, orig_z, sp_x, sp_y, sp_z,
+            Float32(coracoid_x), Float32(coracoid_y), Float32(coracoid_z),
+            Float32(rib5_x), Float32(rib5_y), Float32(rib5_z),
+            Float32(rib3_x), Float32(rib3_y), Float32(rib3_z),
+            Float32(pm_nx), Float32(pm_ny), Float32(pm_nz),
+            is_left, level, z_min_phys, z_max_phys, ndrange=dims)
+    KernelAbstractions.synchronize(tm.backend)
+end
+
+function AxillaryRTOGRelaxed(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, bounds_device::AbstractArray{UInt8, 3}, computed_landmarks::Dict, pec_view::AbstractArray{UInt8, 3}, sub_view::AbstractArray{UInt8, 3}, args...)
+    AxillaryRTOG(tm, out_device, params, bounds_device, computed_landmarks, pec_view, sub_view, args...)
+end
+
+function AxillaryHelperB(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, pec_device::AbstractArray{UInt8, 3}, sub_device::AbstractArray{UInt8, 3}, args...)
+    out_device .= pec_device .| sub_device
+end
+
+# =====================================================================
+# 5. AnteriorGrowthMask & PosteriorGrowthMask (Pure GPU)
+# =====================================================================
+@kernel function anterior_growth_kernel!(output, input, dims, voxel_dist)
+    I, K = @index(Global, NTuple)
+    if I <= dims[1] && K <= dims[3]
+        for j in 1:dims[2]
+            if input[I, j, K] > 0
+                y_start = max(1, j - voxel_dist)
+                for y in y_start:j
+                    output[I, y, K] = 1
+                end
+            end
+        end
+    end
+end
+
+function AnteriorGrowthMask(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, in_device::AbstractArray{UInt8, 3}, args...)
+    dims = size(out_device)
+    dist = Float32(get(params, "distance", get(params, "growth_mm", get(params, "distance_mm", 10.0))))
+    sp_y = Float32(get(params, "spacing_y", 1.0))
+    voxel_dist = Int(round(dist / sp_y))
+    
+    fill!(out_device, 0)
+    kernel! = anterior_growth_kernel!(tm.backend)
+    kernel!(out_device, in_device, dims, voxel_dist, ndrange=(dims[1], dims[3]))
+    KernelAbstractions.synchronize(tm.backend)
+end
+
+@kernel function posterior_growth_kernel!(output, input, dims, voxel_dist)
+    I, K = @index(Global, NTuple)
+    if I <= dims[1] && K <= dims[3]
+        for j in 1:dims[2]
+            if input[I, j, K] > 0
+                y_end = min(dims[2], j + voxel_dist)
+                for y in j:y_end
+                    output[I, y, K] = 1
+                end
+            end
+        end
+    end
+end
+
+function PosteriorGrowthMask(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, in_device::AbstractArray{UInt8, 3}, args...)
+    dims = size(out_device)
+    dist = Float32(get(params, "distance", get(params, "growth_mm", get(params, "distance_mm", 10.0))))
+    sp_y = Float32(get(params, "spacing_y", 1.0))
+    voxel_dist = Int(round(dist / sp_y))
+    
+    fill!(out_device, 0)
+    kernel! = posterior_growth_kernel!(tm.backend)
+    kernel!(out_device, in_device, dims, voxel_dist, ndrange=(dims[1], dims[3]))
+    KernelAbstractions.synchronize(tm.backend)
+end
+
+# =====================================================================
+# 6. VolumetricBoundary2DLateralGrowth (Pure GPU)
+# =====================================================================
+@kernel function volumetric_boundary_2d_lateral_growth_kernel!(output, obstacle, dims, step_x::Int, sublevel_code::Int, max_dist_px::Int, start_x_map, ijv_max_y_map, scm_max_y_map, y_min_map, y_max_map)
+    J, K = @index(Global, NTuple)
+    if J <= dims[2] && K <= dims[3]
+        start_x = start_x_map[K]
+        if start_x > 0 && J >= y_min_map[K] && J <= y_max_map[K]
+            ijv_max_y = ijv_max_y_map[K]
+            scm_max_y = scm_max_y_map[K]
+            
+            valid_sublevel = true
+            if sublevel_code == 1 # IIa: anterior/at IJV
+                if ijv_max_y > 0 && J > ijv_max_y
+                    valid_sublevel = false
+                end
+            elseif sublevel_code == 2 # IIb: posterior to IJV, anterior to posterior SCM
+                if (ijv_max_y > 0 && J <= ijv_max_y) || (scm_max_y > 0 && J > scm_max_y)
+                    valid_sublevel = false
+                end
+            end
+            
+            if valid_sublevel
+                curr_x = start_x
+                dist = 0
+                while curr_x >= 1 && curr_x <= dims[1] && dist < max_dist_px
+                    if obstacle[curr_x, J, K] > 0
+                        break
+                    end
+                    output[curr_x, J, K] = UInt8(1)
+                    curr_x += step_x
+                    dist += 1
+                end
+            end
+        end
+    end
+end
+
+function VolumetricBoundary2DLateralGrowth(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, in_device::AbstractArray{UInt8, 3}, obs_device::AbstractArray{UInt8, 3}, ijv_device::AbstractArray{UInt8, 3}, args...)
+    dims = size(out_device)
+    side = lowercase(get(params, "side", ""))
+    step_x = side == "right" ? -1 : 1
+    
+    sublevel = get(params, "sublevel", "")
+    sublevel_code = sublevel == "IIa" ? 1 : (sublevel == "IIb" ? 2 : 0)
+    
+    sp_x = Float32(get(params, "spacing_x", 1.0))
+    max_dist_px = round(Int, 85.0 / sp_x)
+    
+    # Precalculate slice reference coordinates in CPU
+    in_host = adapt(CPU(), in_device)
+    ijv_host = adapt(CPU(), ijv_device)
+    obs_host = adapt(CPU(), obs_device)
+    
+    start_x_host = zeros(Int32, dims[3])
+    ijv_max_y_host = zeros(Int32, dims[3])
+    scm_max_y_host = zeros(Int32, dims[3])
+    y_min_host = zeros(Int32, dims[3])
+    y_max_host = zeros(Int32, dims[3])
+    
+    for k in 1:dims[3]
+        v_idx = findall(view(in_host, :, :, k) .> 0)
+        if !isempty(v_idx)
+            start_x_host[k] = step_x > 0 ? minimum(i[1] for i in v_idx) : maximum(i[1] for i in v_idx)
+        end
+        ijv_idx = findall(view(ijv_host, :, :, k) .> 0)
+        if !isempty(ijv_idx)
+            ijv_max_y_host[k] = maximum(i[2] for i in ijv_idx)
+        end
+        obs_idx = findall(view(obs_host, :, :, k) .> 0)
+        if !isempty(obs_idx)
+            scm_max_y_host[k] = maximum(i[2] for i in obs_idx)
+            y_min_host[k] = max(1, minimum(i[2] for i in obs_idx) - 5)
+            y_max_host[k] = min(dims[2], maximum(i[2] for i in obs_idx) + 5)
+        elseif !isempty(v_idx)
+            y_min_host[k] = max(1, minimum(i[2] for i in v_idx) - 10)
+            y_max_host[k] = min(dims[2], maximum(i[2] for i in v_idx) + 15)
+        end
+    end
+    
+    # Restrict interpolation ONLY within the valid anatomical neck slice range
+    valid_zs = findall(start_x_host .> 0)
+    if !isempty(valid_zs)
+        min_z = minimum(valid_zs)
+        max_z = maximum(valid_zs)
+        for k in min_z:max_z
+            if start_x_host[k] == 0
+                closest_z = valid_zs[argmin(abs.(valid_zs .- k))]
+                start_x_host[k] = start_x_host[closest_z]
+                y_min_host[k] = y_min_host[closest_z]
+                y_max_host[k] = y_max_host[closest_z]
+            end
+        end
+    end
+    
+    start_x_device = adapt(tm.backend, start_x_host)
+    ijv_max_y_device = adapt(tm.backend, ijv_max_y_host)
+    scm_max_y_device = adapt(tm.backend, scm_max_y_host)
+    y_min_device = adapt(tm.backend, y_min_host)
+    y_max_device = adapt(tm.backend, y_max_host)
+    
+    fill!(out_device, 0)
+    kernel! = volumetric_boundary_2d_lateral_growth_kernel!(tm.backend)
+    kernel!(out_device, obs_device, dims, step_x, sublevel_code, max_dist_px, start_x_device, ijv_max_y_device, scm_max_y_device, y_min_device, y_max_device, ndrange=(dims[2], dims[3]))
+    KernelAbstractions.synchronize(tm.backend)
+end
+
+# =====================================================================
+# 7. LimitZByLandmark (Pure GPU)
+# =====================================================================
+# 7. LimitZByLandmark (Pure GPU)
+# =====================================================================
+@kernel function limit_z_by_landmark_kernel!(output, input, dims, z_min::Int, z_max::Int)
+    I, J, K = @index(Global, NTuple)
+    if I <= dims[1] && J <= dims[2] && K <= dims[3]
+        if K >= z_min && K <= z_max
+            output[I, J, K] = input[I, J, K]
+        else
+            output[I, J, K] = UInt8(0)
+        end
+    end
+end
+
+function LimitZByLandmark(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, in_device::AbstractArray{UInt8, 3}, args...)
+    copyto!(out_device, in_device)
+end
+
+function AnteriorExtrusion(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, in_device::AbstractArray{UInt8, 3}, args...)
+    AnteriorGrowthMask(tm, out_device, params, in_device, args...)
+end
+
+@kernel function propagate_z_kernel!(output, input, dims, is_inferior::Bool, z_terminus::Int)
+    I, J = @index(Global, NTuple)
+    if I <= dims[1] && J <= dims[2]
+        if is_inferior
+            top_z = 0
+            for k in 1:dims[3]
+                if input[I, J, k] > 0
+                    top_z = k
+                    break
+                end
+            end
+            if top_z > 0
+                term_z = max(1, z_terminus)
+                for k in top_z:-1:term_z
+                    output[I, J, k] = 1
+                end
+            end
+        else
+            bot_z = 0
+            for k in 1:dims[3]
+                if input[I, J, k] > 0
+                    bot_z = k
+                    break
+                end
+            end
+            if bot_z > 0
+                term_z = min(dims[3], z_terminus)
+                for k in bot_z:term_z
+                    output[I, J, k] = 1
+                end
+            end
+        end
+    end
+end
+
+function PropagateZ(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, in_device::AbstractArray{UInt8, 3}, args...)
+    direction = get(params, "direction", "inferior")
+    is_inferior = lowercase(direction) == "inferior"
+    z_term = is_inferior ? 1 : size(out_device, 3)
+    fill!(out_device, 0)
+    kernel! = propagate_z_kernel!(tm.backend)
+    kernel!(out_device, in_device, size(out_device), is_inferior, z_term, ndrange=(size(out_device, 1), size(out_device, 2)))
+    KernelAbstractions.synchronize(tm.backend)
+end
+
+@kernel function station1_filter_kernel!(out, in_mask, trachea, esophagus, thyroid, lung_l, lung_r, scm, scalene, cricoid, manubrium, clavicle, dims, cricoid_z_min::Int, mid_x_z, side_is_left::Bool, side_is_right::Bool, floor_z_map)
+    I, J, K = @index(Global, NTuple)
+    if I <= dims[1] && J <= dims[2] && K <= dims[3]
+        if in_mask[I, J, K] > 0 && K >= floor_z_map[I, J] && K <= cricoid_z_min
+            mid_x = mid_x_z[K]
+            is_valid_side = (!side_is_left && !side_is_right) || (side_is_left && I >= mid_x) || (side_is_right && I <= mid_x)
+            
+            if is_valid_side
+                is_excluded = (trachea[I, J, K] > 0) || (esophagus[I, J, K] > 0) || (thyroid[I, J, K] > 0) ||
+                              (lung_l[I, J, K] > 0) || (lung_r[I, J, K] > 0) || (scm[I, J, K] > 0) || (scalene[I, J, K] > 0) ||
+                              (cricoid[I, J, K] > 0) || (manubrium[I, J, K] > 0) || (clavicle[I, J, K] > 0)
+                out[I, J, K] = is_excluded ? UInt8(0) : UInt8(1)
+            else
+                out[I, J, K] = UInt8(0)
+            end
+        else
+            out[I, J, K] = UInt8(0)
+        end
+    end
+end
+
+function Station1LowCervical(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, in_device::AbstractArray{UInt8, 3},
+                             cricoid_device::AbstractArray{UInt8, 3}, trachea_device::AbstractArray{UInt8, 3},
+                             manubrium_device::AbstractArray{UInt8, 3}, clavicle_device::AbstractArray{UInt8, 3},
+                             esophagus_device::AbstractArray{UInt8, 3}, thyroid_device::AbstractArray{UInt8, 3},
+                             lung_l_device::AbstractArray{UInt8, 3}, lung_r_device::AbstractArray{UInt8, 3},
+                             scm_device::AbstractArray{UInt8, 3}, scalene_device::AbstractArray{UInt8, 3}, args...)
+    side = lowercase(get(params, "side", ""))
+    side_is_left = side == "left"
+    side_is_right = side == "right"
+    dims = size(out_device)
+    sp_x = Float32(get(params, "spacing_x", 1.0))
+    sp_y = Float32(get(params, "spacing_y", 1.0))
+    
+    # 1. Cricoid Superior Bound (in CPU for fast reduction)
+    cricoid_host = adapt(CPU(), cricoid_device)
+    trachea_host = adapt(CPU(), trachea_device)
+    
+    c_idx = findall(cricoid_host .> 0)
+    cricoid_z_min = dims[3]
+    if !isempty(c_idx)
+        cricoid_z_min = minimum(i[3] for i in c_idx)
+    else
+        tr_idx = findall(trachea_host .> 0)
+        if !isempty(tr_idx)
+            cricoid_z_min = maximum(i[3] for i in tr_idx)
+        end
+    end
+    
+    # 2. Trachea Midline per slice
+    mid_x_host = fill(Int32(div(dims[1], 2)), dims[3])
+    mid_y_host = fill(Int32(div(dims[2], 2)), dims[3])
+    global_mid_x = div(dims[1], 2)
+    global_mid_y = div(dims[2], 2)
+    tr_all = findall(trachea_host .> 0)
+    if !isempty(tr_all)
+        global_mid_x = round(Int32, sum(i[1] for i in tr_all) / length(tr_all))
+        global_mid_y = round(Int32, sum(i[2] for i in tr_all) / length(tr_all))
+    end
+    for k in 1:dims[3]
+        tr_k = findall(view(trachea_host, :, :, k) .> 0)
+        if !isempty(tr_k)
+            mid_x_host[k] = round(Int32, sum(i[1] for i in tr_k) / length(tr_k))
+            mid_y_host[k] = round(Int32, sum(i[2] for i in tr_k) / length(tr_k))
+        else
+            mid_x_host[k] = global_mid_x
+            mid_y_host[k] = global_mid_y
+        end
+    end
+    
+    # 3. Bone Floor Map (manubrium + clavicles)
+    bones_host = (adapt(CPU(), manubrium_device) .> 0) .| (adapt(CPU(), clavicle_device) .> 0)
+    floor_z_host = zeros(Int32, dims[1], dims[2])
+    has_bone = falses(dims[1], dims[2])
+    for j in 1:dims[2], i in 1:dims[1]
+        for k in dims[3]:-1:1
+            if bones_host[i, j, k]
+                floor_z_host[i, j] = Int32(k)
+                has_bone[i, j] = true
+                break
+            end
+        end
+    end
+    
+    # Propagate bone floor across XY grid via multi-pass nearest neighbor
+    if any(has_bone)
+        for pass in 1:512
+            for j in 1:dims[2], i in 1:dims[1]
+                if !has_bone[i, j]
+                    if i > 1 && has_bone[i-1, j]
+                        floor_z_host[i, j] = floor_z_host[i-1, j]; has_bone[i, j] = true
+                    elseif j > 1 && has_bone[i, j-1]
+                        floor_z_host[i, j] = floor_z_host[i, j-1]; has_bone[i, j] = true
+                    end
+                end
+            end
+            for j in dims[2]:-1:1, i in dims[1]:-1:1
+                if !has_bone[i, j]
+                    if i < dims[1] && has_bone[i+1, j]
+                        floor_z_host[i, j] = floor_z_host[i+1, j]; has_bone[i, j] = true
+                    elseif j < dims[2] && has_bone[i, j+1]
+                        floor_z_host[i, j] = floor_z_host[i, j+1]; has_bone[i, j] = true
+                    end
+                end
+            end
+        end
+    end
+    
+    # Move auxiliary lookup tables to GPU
+    mid_x_device = adapt(tm.backend, mid_x_host)
+    mid_y_device = adapt(tm.backend, mid_y_host)
+    floor_z_device = adapt(tm.backend, floor_z_host)
+    
+    fill!(out_device, 0)
+    kernel! = station1_filter_kernel!(tm.backend)
+    kernel!(out_device, in_device, trachea_device, esophagus_device, thyroid_device,
+            lung_l_device, lung_r_device, scm_device, scalene_device,
+            cricoid_device, manubrium_device, clavicle_device,
+            dims, cricoid_z_min, mid_x_device, side_is_left, side_is_right, floor_z_device, ndrange=dims)
+    KernelAbstractions.synchronize(tm.backend)
+end
+
+function convex_hull_2d(pts::Vector{Tuple{Int, Int}})
+    n = length(pts)
+    if n <= 2
+        return pts
+    end
+    sort!(pts)
+    
+    cross_prod(o, a, b) = (a[1] - o[1]) * (b[2] - o[2]) - (a[2] - o[2]) * (b[1] - o[1])
+    
+    lower = Tuple{Int, Int}[]
+    for p in pts
+        while length(lower) >= 2 && cross_prod(lower[end-1], lower[end], p) <= 0
+            pop!(lower)
+        end
+        push!(lower, p)
+    end
+    
+    upper = Tuple{Int, Int}[]
+    for i in n:-1:1
+        p = pts[i]
+        while length(upper) >= 2 && cross_prod(upper[end-1], upper[end], p) <= 0
+            pop!(upper)
+        end
+        push!(upper, p)
+    end
+    
+    pop!(lower)
+    pop!(upper)
+    return vcat(lower, upper)
+end
+
+function fill_2d_polygon!(slice_out::AbstractMatrix{UInt8}, hull::Vector{Tuple{Int, Int}})
+    if length(hull) < 3
+        for p in hull
+            slice_out[p[1], p[2]] = UInt8(1)
+        end
+        return
+    end
+    
+    min_y = minimum(p[2] for p in hull)
+    max_y = maximum(p[2] for p in hull)
+    
+    n = length(hull)
+    for y in min_y:max_y
+        nodes = Int[]
+        j = n
+        for i in 1:n
+            p1 = hull[i]
+            p2 = hull[j]
+            if (p1[2] < y && p2[2] >= y) || (p2[2] < y && p1[2] >= y)
+                x = p1[1] + div((y - p1[2]) * (p2[1] - p1[1]), (p2[2] - p1[2]))
+                push!(nodes, x)
+            end
+            j = i
+        end
+        sort!(nodes)
+        for k in 1:2:length(nodes)-1
+            for x in max(1, nodes[k]):min(size(slice_out, 1), nodes[k+1])
+                slice_out[x, y] = UInt8(1)
+            end
+        end
+    end
+end
+
+function compute_2d_convex_hull_per_slice!(out_device::AbstractArray{UInt8, 3}, in_device::AbstractArray{UInt8, 3})
+    in_host = adapt(Array, in_device)
+    dims = size(in_host)
+    out_host = zeros(UInt8, dims)
+    
+    Threads.@threads for k in 1:dims[3]
+        pts = Tuple{Int, Int}[]
+        for j in 1:dims[2]
+            min_i = 0
+            max_i = 0
+            for i in 1:dims[1]
+                if in_host[i, j, k] > 0
+                    if min_i == 0 min_i = i end
+                    max_i = i
+                end
+            end
+            if min_i > 0
+                push!(pts, (min_i, j))
+                if max_i > min_i
+                    push!(pts, (max_i, j))
+                end
+            end
+        end
+        
+        if length(pts) >= 3
+            hull = convex_hull_2d(pts)
+            slice_m = @view out_host[:, :, k]
+            fill_2d_polygon!(slice_m, hull)
+        elseif !isempty(pts)
+            for p in pts
+                out_host[p[1], p[2], k] = UInt8(1)
+            end
+        end
+    end
+    
+    copyto!(out_device, adapt(typeof(out_device), out_host))
+end
+
+function VolumetricBoundary2D(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, in_device::AbstractArray{UInt8, 3}, args...)
+    compute_2d_convex_hull_per_slice!(out_device, in_device)
+end
+
+function PleuralSpaceCustom(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, in_device::AbstractArray{UInt8, 3}, args...)
+    copyto!(out_device, in_device)
+end
+
+@kernel function presacral_anterior_kernel!(output, input, dims, voxel_dist::Int32, mode::Int32)
+    I, K = @index(Global, NTuple)
+    if I <= dims[1] && K <= dims[3]
+        min_y = Int32(0)
+        for j in Int32(1):dims[2]
+            if input[I, j, K] > UInt8(0)
+                min_y = j
+                break
+            end
+        end
+        if min_y > Int32(0)
+            start_y = max(Int32(1), min_y - voxel_dist)
+            if mode == Int32(1) # front_line
+                output[I, min_y, K] = UInt8(1)
+            elseif mode == Int32(2) # moved_line
+                output[I, start_y, K] = UInt8(1)
+            else # zone (3)
+                for j in (start_y + Int32(1)):(min_y - Int32(1))
+                    output[I, j, K] = UInt8(1)
+                end
+            end
+        end
+    end
+end
+
+function PresacralAnteriorCustom(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, in_device::AbstractArray{UInt8, 3}, args...)
+    out_type = lowercase(get(params, "output_type", "zone"))
+    dims = size(out_device)
+    dist = Float32(get(params, "distance", get(params, "growth_mm", get(params, "distance_mm", 10.0))))
+    sp_y = Float32(get(params, "spacing_y", 1.0))
+    voxel_dist = Int32(round(dist / sp_y))
+    
+    mode = Int32(3) # default: zone
+    if out_type == "front_line"
+        mode = Int32(1)
+    elseif out_type == "moved_line" || out_type == "shifted"
+        mode = Int32(2)
+    end
+    
+    fill!(out_device, UInt8(0))
+    kernel! = presacral_anterior_kernel!(tm.backend)
+    kernel!(out_device, in_device, (Int32(dims[1]), Int32(dims[2]), Int32(dims[3])), voxel_dist, mode, ndrange=(dims[1], dims[3]))
+    KernelAbstractions.synchronize(tm.backend)
+end
+
+@kernel function split_components_x_kernel!(output, input, dims, is_left)
+    I, J, K = @index(Global, NTuple)
+    if I <= dims[1] && J <= dims[2] && K <= dims[3]
+        mid_x = dims[1] ÷ 2
+        if input[I, J, K] > 0
+            if is_left && I >= mid_x
+                output[I, J, K] = UInt8(1)
+            elseif !is_left && I < mid_x
+                output[I, J, K] = UInt8(1)
+            else
+                output[I, J, K] = UInt8(0)
+            end
+        else
+            output[I, J, K] = UInt8(0)
+        end
+    end
+end
+
+function SplitConnectedComponents(tm, out_device::AbstractArray{UInt8, 3}, params::Dict, in_device::AbstractArray{UInt8, 3}, args...)
+    dims = size(out_device)
+    side = lowercase(get(params, "side", "left"))
+    is_left = side == "left"
+    
+    kernel! = split_components_x_kernel!(tm.backend)
+    kernel!(out_device, in_device, dims, is_left, ndrange=dims)
+    KernelAbstractions.synchronize(tm.backend)
+end
+
+end # module

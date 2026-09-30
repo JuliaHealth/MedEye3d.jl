@@ -1,0 +1,19 @@
+{
+    "helper_Axillary_Level_I_base_Right": {
+        "rule": "AxillaryRTOG",
+        "side": "right",
+        "level": "i",
+        "is_helper": true,
+        "keep_all_components": true,
+        "dependencies": [
+            "helper_chestwall_bridge",
+            "pectoralis_major_right",
+            "subscapularis_right",
+            "subclavian_artery_right",
+            "scapula_right",
+            "clavicula_right",
+            "rib_3_right",
+            "rib_5_right"
+        ]
+    }
+}

@@ -1,0 +1,28 @@
+{
+    "Abdominal_Mesenteric_Interenteric": {
+        "rule": "GeometricConstraint",
+        "mask_name": "Abdominal_Mesenteric_Helper_Dilated",
+        "landmark": "acetabulum_proxy",
+        "constraint_type": "SuperiorTo",
+        "boundary_part": "max",
+        "overlap_precedence": [
+            "Abdominal_Pararectal"
+        ],
+        "comments": "Dilated Colon/SB constrained Superior to Acetabulum (Hip) Top. Pararectal has precedence.",
+        "ignore_global_exclusion": true,
+        "exclude": [],
+        "ignore_fat": true,
+        "keep_all_components": false,
+        "ancillary_landmarks": [
+            "acetabulum_proxy"
+        ],
+        "roi": {
+            "landmark": "superior_mesenteric_artery",
+            "padding_mm": [
+                150,
+                150,
+                500
+            ]
+        }
+    }
+}

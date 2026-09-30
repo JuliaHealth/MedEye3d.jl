@@ -1,0 +1,14 @@
+{
+    "Abdominal_Superior_Mesenteric_Artery": {
+        "rule": "DilatedMask",
+        "base_landmark": ["superior_mesenteric_artery"],
+        "dilation_mm": 10.0,
+        "is_bilateral": false,
+        "exclude": [
+            "aorta",
+            "pancreas",
+            "duodenum",
+            "stomach", "small_bowel", "colon", "liver", "spleen", "gallbladder", "kidney_left", "kidney_right"
+        ]
+    }
+}

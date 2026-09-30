@@ -1,0 +1,102 @@
+{
+    "Neck_Retropharyngeal": {
+        "rule": "VolumetricBoundary2D",
+        "boundaries": {
+            "anterior": "pharynx",
+            "posterior": "fused_spine",
+            "lateral": "internal_carotid_artery"
+        },
+        "z_plane_restriction": {
+            "superior": "skull",
+            "superior_part": "max",
+            "inferior": "hyoid",
+            "inferior_part": "min"
+        },
+        "is_bilateral": false,
+        "constraints": [
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "pharynx",
+                "boundary_part": "min",
+                "slice_wise": true,
+                "offset_mm": -20.0,
+                "comment": "Anterior limit: 20mm anterior to pharynx min"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "fused_spine",
+                "boundary_part": "max",
+                "slice_wise": true,
+                "comment": "Posterior limit: Anterior to spine"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": [
+                    "brain",
+                    "spinal_cord"
+                ],
+                "boundary_part": "min",
+                "slice_wise": true,
+                "offset_mm": -10.0,
+                "comment": "1 cm anterior to most anterior part of the brain and spinal cord"
+            }
+        ],
+        "exclude": [
+            "internal_carotid_artery",
+            "spinal_cord",
+            "internal_jugular_vein",
+            "pharynx",
+            "fused_spine",
+            "longus_colli",
+            "lev_vert",
+            "thorax_wall"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 5
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "pharynx",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "fused_spine",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "internal_carotid_artery",
+                "expected": 0
+            }
+        ],
+        "keep_all_components": false,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "comments": "Neck Level VIIA (Retropharyngeal): Volumetric boundary 2D classic convex hull between pharynx, spine, and internal carotids.",
+        "ancillary_landmarks": [
+            "fused_spine",
+            "internal_carotid_artery",
+            "internal_jugular_vein",
+            "longus_colli",
+            "pharynx",
+            "spinal_cord",
+            "lev_vert"
+        ],
+        "roi": {
+            "landmark": "pharynx",
+            "padding_mm": [
+                30,
+                30,
+                30
+            ]
+        },
+        "depends_on": [
+            "lev_vert",
+            "brain",
+            "spinal_cord"
+        ]
+    }
+}

@@ -1,0 +1,27 @@
+{
+    "helper_RPC_exclude": {
+        "rule": "AnisotropicMargin",
+        "base_landmark": "inferior_vena_cava",
+        "margins_mm": {
+            "anterior": 20.0,
+            "posterior": 20.0,
+            "left": 0.0,
+            "right": 20.0
+        },
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "vertebrae_L2",
+                "boundary_part": "max",
+                "comment": "Exclude area ABOVE L1-L2 interspace (top of L2)"
+            },
+            {
+                "constraint_type": "RightOf",
+                "landmark": "inferior_vena_cava",
+                "boundary_part": "center",
+                "comment": "Right para-caval region"
+            }
+        ],
+        "is_helper": true
+    }
+}

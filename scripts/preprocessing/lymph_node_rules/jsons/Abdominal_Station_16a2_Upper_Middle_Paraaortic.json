@@ -1,0 +1,68 @@
+{
+    "helper_Abdominal_Station_16a2_Upper_Middle_Paraaortic_base": {
+        "rule": "BitwiseAnd",
+        "mask_name": "helper_Abdominal_Paraaortic",
+        "is_bilateral": false,
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "celiac_trunk",
+                "boundary_part": "min"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "renal_vein_left",
+                "boundary_part": "min",
+                "fallback_landmark": "vertebrae_L1",
+                "fallback_boundary_part": "min"
+            }
+        ],
+        "comments": "Station 16a2: Celiac Trunk to Left Renal Vein",
+        "is_helper": true,
+        "category": "new_helpers"
+    },
+    "Abdominal_Station_16a2_Upper_Middle_Paraaortic": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_Abdominal_Station_16a2_Upper_Middle_Paraaortic_base"
+        ],
+        "is_bilateral": false,
+        "exclude": [
+            "spleen",
+            "kidney_left",
+            "kidney_right",
+            "colon",
+            "aorta",
+            "spinal_cord",
+            "pancreas",
+            "psoas_major_right",
+            "liver",
+            "inferior_vena_cava",
+            "fused_spine",
+            "psoas_major_left",
+            "diaphragm_proxy",
+            "gallbladder",
+            "small_bowel",
+            "stomach",
+            "duodenum"
+        ],
+        "overlap_precedence": [],
+        "per_slice_lcc": true,
+        "keep_all_components": false,
+        "depends_on": [
+            "helper_Abdominal_Station_16a2_Upper_Middle_Paraaortic_base",
+            "Abdominal_Station_16a1_Aortic_Hiatus"
+        ],
+        "group": "Abdominal",
+        "category": "Lymph_Node",
+        "color": [
+            200,
+            200,
+            200
+        ],
+        "z_plane_restriction": {
+            "superior": "Abdominal_Station_16a1_Aortic_Hiatus",
+            "superior_part": "absolute_min"
+        }
+    }
+}

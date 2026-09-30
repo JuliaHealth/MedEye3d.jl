@@ -1,0 +1,151 @@
+{
+    "Neck_Level_Ib_Submandibular": {
+        "rule": "AnisotropicMargin",
+        "is_bilateral": true,
+        "overlap_precedence": [
+            "Neck_Level_Ia_Submental",
+            "Neck_Level_IIa_Upper_Jugular",
+            "Neck_Level_III_Middle_Jugular"
+        ],
+        "input": "body",
+        "allow_parallel": false,
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "dig_top",
+                "boundary_part": "max",
+                "ignore_side": true,
+                "comment": "Superior limit: top of digastric"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "hyoid",
+                "boundary_part": "min",
+                "ignore_side": true,
+                "comment": "Inferior limit: inferior border of hyoid"
+            },
+            {
+                "constraint_type": "PlaneLimit",
+                "landmark": "digastric_plane",
+                "side_to_keep": "negative",
+                "comment": "Medial limit: Digastric proxy plane"
+            },
+            {
+                "constraint_type": "MedialTo",
+                "landmark": "Neck_Level_Va_Upper_Posterior_Triangle",
+                "boundary_part": "lateral",
+                "slice_wise": true,
+                "comment": "Lateral limit: most lateral voxel of posterior triangle on per layer basis"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmarks": [
+                    "submandibular_gland_left",
+                    "submandibular_gland_right",
+                    "submandibular_gland"
+                ],
+                "slice_wise": true,
+                "boundary_part": "max",
+                "allow_missing": true,
+                "fallback": {
+                    "constraint_type": "AnteriorTo",
+                    "landmarks": [
+                        "parotid_gland_left",
+                        "parotid_gland_right",
+                        "parotid_gland"
+                    ],
+                    "boundary_part": "min",
+                    "allow_missing": true,
+                    "fallback": {
+                        "constraint_type": "AnteriorTo",
+                        "landmarks": [
+                            "sternocleidomastoid_left",
+                            "sternocleidomastoid_right",
+                            "sternocleidomastoid"
+                        ],
+                        "boundary_part": "min",
+                        "allow_missing": true
+                    }
+                },
+                "comment": "Posterior limit: back of submandibular glands, fallback to anterior parotid, then anterior SCM"
+            }
+        ],
+        "exclude": [
+            "submandibular_gland",
+            "mandible",
+            "hyoid",
+            "skull",
+            "lev_vert"
+        ],
+        "assertions": [
+            {
+                "type": "TargetVolumeMin",
+                "target": "skull",
+                "value": 100,
+                "message": "FOV cuts off top of head (skull_real is missing), rejecting submandibular."
+            },
+            {
+                "type": "TargetVolumeMin",
+                "target": "mandible",
+                "value": 100,
+                "message": "ERROR: Mandible is missing, rejecting submandibular."
+            },
+
+            {
+                "type": "VolumeMin",
+                "value": 100
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "submandibular_gland",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "mandible",
+                "expected": 0
+            }
+        ],
+        "keep_all_components": false,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "comments": "Neck Level IB (Submandibular): Implementation exactly as per docs/new_defs_manual/neck/Ia_Ib.md",
+        "ancillary_landmarks": [
+            "mandible_p1",
+            "mandible_p2",
+            "mandible_p3",
+            "mandible_p4",
+            "mandible_plane",
+            "mandible_ramus_plane",
+            "mandible_ramus_plane_left",
+            "mandible_ramus_plane_right",
+            "high_mandible_plane",
+            "low_mandible_plane",
+            "digastric_line",
+            "dig_top",
+            "dig_top_left",
+            "dig_top_right",
+            "dig_bot_left",
+            "dig_bot_right",
+            "digastric_plane",
+            "stylohyoid_line",
+            "skull",
+            "lev_vert",
+            "sternocleidomastoid",
+            "Neck_Level_Va_Upper_Posterior_Triangle"
+        ],
+        "roi": {
+            "landmark": "body",
+            "padding_mm": [
+                50,
+                50,
+                50
+            ]
+        },
+        "allow_missing": true,
+        "depends_on": [
+            "lev_vert",
+            "Neck_Level_Va_Upper_Posterior_Triangle"
+        ]
+    }
+}

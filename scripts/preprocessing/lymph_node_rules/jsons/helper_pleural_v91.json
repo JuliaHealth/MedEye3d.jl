@@ -1,0 +1,48 @@
+{
+    "helper_pleural_space_left": {
+        "rule": "PleuralSpaceCustom",
+        "lung_landmark": "lung_left",
+        "side": "left",
+        "distance_lateral_mm": 10.0,
+        "distance_medial_mm": 10.0,
+        "is_helper": true,
+        "category": "new_helpers"
+    },
+    "helper_pleural_space_right": {
+        "rule": "PleuralSpaceCustom",
+        "lung_landmark": "lung_right",
+        "side": "right",
+        "distance_lateral_mm": 10.0,
+        "distance_medial_mm": 10.0,
+        "is_helper": true,
+        "category": "new_helpers"
+    },
+    "helper_pleural_hull_v91_left": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_pleural_space_left"
+        ],
+        "planes": [
+            "axial"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_pleural_space_left"
+        ]
+    },
+    "helper_pleural_hull_v91_right": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_pleural_space_right"
+        ],
+        "planes": [
+            "axial"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_pleural_space_right"
+        ]
+    }
+}

@@ -1,0 +1,10 @@
+{
+    "helper_clavicle_bridge": {
+        "rule": "ConvexHullBridge",
+        "bridge_landmarks": [
+            "clavicula_left",
+            "clavicula_right"
+        ],
+        "is_helper": true
+    }
+}

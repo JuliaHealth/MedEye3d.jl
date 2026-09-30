@@ -1,0 +1,58 @@
+{
+    "helper_Neck_Level_IV_hull_Left": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "common_carotid_artery_left",
+            "internal_jugular_vein_left",
+            "sternocleidomastoid_left",
+            "anterior_scalene_left"
+        ],
+        "is_bilateral": false,
+        "is_helper": true,
+        "category": "new_helpers",
+        "dependencies": [
+            "common_carotid_artery_left",
+            "internal_jugular_vein_left",
+            "sternocleidomastoid_left",
+            "anterior_scalene_left"
+        ]
+    },
+    "helper_Neck_Level_IV_hull_Right": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "common_carotid_artery_right",
+            "internal_jugular_vein_right",
+            "sternocleidomastoid_right",
+            "anterior_scalene_right"
+        ],
+        "is_bilateral": false,
+        "is_helper": true,
+        "category": "new_helpers",
+        "dependencies": [
+            "common_carotid_artery_right",
+            "internal_jugular_vein_right",
+            "sternocleidomastoid_right",
+            "anterior_scalene_right"
+        ]
+    },
+    "Neck_Level_IV_Lower_Jugular": {
+        "rule": "BitwiseOr",
+        "targets": [
+            "Neck_Level_IV_Lower_Jugular_Left",
+            "Neck_Level_IV_Lower_Jugular_Right"
+        ],
+        "category": "Lymph_Node",
+        "group": "Neck",
+        "color": [
+            200,
+            150,
+            100
+        ],
+        "dependencies": [
+            "Neck_Level_IV_Lower_Jugular_Left",
+            "Neck_Level_IV_Lower_Jugular_Right"
+        ],
+        "is_helper": true,
+        "comments": "Fused left and right for constraint logic."
+    }
+}

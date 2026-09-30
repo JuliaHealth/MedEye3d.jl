@@ -1,0 +1,13 @@
+{
+    "helper_rectum_dilated_2cm": {
+        "rule": "DilatedMask",
+        "is_bilateral": false,
+        "input_landmarks": [
+            "rectum"
+        ],
+        "dilation_mm": 20.0,
+        "ancillary_landmarks": [
+            "rectum"
+        ]
+    }
+}

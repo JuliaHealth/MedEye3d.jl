@@ -1,0 +1,135 @@
+{
+    "helper_Superficial_Inguinal_base": {
+        "rule": "AnisotropicMargin",
+        "is_bilateral": true,
+        "base_landmark": "iliac_vena",
+        "roi": {
+            "landmark": "iliac_vena",
+            "padding_mm": [
+                50,
+                50,
+                150
+            ]
+        },
+        "margins_mm": {
+            "lateral": 25,
+            "medial": 15,
+            "anterior": 30,
+            "posterior": 0,
+            "superior": 20,
+            "inferior": 80,
+            "use_edt": true
+        },
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "hip",
+                "boundary_part": "min",
+                "comment": "Ischial tuberosity proxy for VSIF inferior border"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "femur",
+                "boundary_part": "max",
+                "comment": "Acetabulum roof proxy for HSIF superior border"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "Abdominal_Obturator_Base",
+                "boundary_part": "min",
+                "mode": "per_layer",
+                "comment": "Gold standard: inguinal nodes are anterior to the obturator nodes on each slice"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "Inguinal_Ligament",
+                "boundary_part": "max",
+                "offset_mm": 3.0,
+                "comment": "Clip inferior extent to just below the inguinal ligament top"
+            }
+        ],
+        "exclude": [
+            "Deep_Inguinal",
+            "pelvis",
+            "hip",
+            "femur",
+            "iliac_vena",
+            "iliac_artery",
+            "tissue_muscle",
+            "urinary_bladder",
+            "skeletal_muscle",
+            "abdominal_cavity"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 5
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": [
+                    "tissue_muscle",
+                    "urinary_bladder"
+                ],
+                "expected": 0
+            }
+        ],
+        "x_range_clip_mm": 12,
+        "x_range_landmark": "femoral_vena",
+        "ancillary_landmarks": [
+            "Deep_Inguinal",
+            "femur",
+            "hip",
+            "iliac_vena",
+            "iliac_artery",
+            "tissue_muscle",
+            "urinary_bladder",
+            "tissue_fat",
+            "pelvis"
+        ],
+        "comments": "Superficial ILNs via EDT-based AnisotropicMargin from iliac_vena + subcutaneous_fat intersection.",
+        "is_helper": true,
+        "depends_on": [
+            "Abdominal_Obturator_Base",
+            "Inguinal_Ligament"
+        ],
+        "category": "new_helpers",
+        "ignore_fat": false
+    },
+    "Superficial_Inguinal_Left": {
+        "rule": "InguinalAnteriorProxy",
+        "input": "helper_Superficial_Inguinal_base_Left",
+        "side": "left",
+        "is_bilateral": false,
+        "depends_on": [
+            "helper_Superficial_Inguinal_base",
+            "hip"
+        ],
+        "post_overlap_lcc": true,
+        "category": "Lymph_Node",
+        "group": "Abdominal",
+        "overlap_precedence": [
+            "Abdominal_External_Iliac",
+            "Abdominal_Obturator",
+            "Abdominal_Internal_Iliac"
+        ]
+    },
+    "Superficial_Inguinal_Right": {
+        "rule": "InguinalAnteriorProxy",
+        "input": "helper_Superficial_Inguinal_base_Right",
+        "side": "right",
+        "is_bilateral": false,
+        "depends_on": [
+            "helper_Superficial_Inguinal_base",
+            "hip"
+        ],
+        "post_overlap_lcc": true,
+        "category": "Lymph_Node",
+        "group": "Abdominal",
+        "overlap_precedence": [
+            "Abdominal_External_Iliac",
+            "Abdominal_Obturator",
+            "Abdominal_Internal_Iliac"
+        ]
+    }
+}

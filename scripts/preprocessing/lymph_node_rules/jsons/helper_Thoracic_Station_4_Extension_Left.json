@@ -1,0 +1,93 @@
+{
+    "helper_Thoracic_Station_4_Extension_Left": {
+        "rule": "ConvexHullBridging",
+        "is_bilateral": false,
+        "keep_all_components": true,
+        "side": "Left",
+        "input": "body_trunc",
+        "bridge_landmarks": [
+            "trachea",
+            "lung_left"
+        ],
+        "exclude": [
+            "trachea",
+            "lung_left",
+            "superior_vena_cava",
+            "azygos_vein",
+            "aorta",
+            "aorta_ascending",
+            "aorta_descending",
+            "aortic_arch_computed",
+            "esophagus",
+            "heart",
+            "Thoracic_Station_3P_Retrotracheal",
+            "Thoracic_Station_5_Subaortic",
+            "Thoracic_Station_6_Paraaortic",
+            "thorax_wall",
+            "brachiocephalic_vein_left",
+            "common_carotid_artery_left",
+            "helper_pleural_space_left",
+            "helper_pleural_space_right"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "station_2_inf_z"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "carina_computed",
+                "boundary_part": "min"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "trachea",
+                "boundary_part": "posterior",
+                "slice_wise": true
+            },
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "sternum",
+                "boundary_part": "anterior",
+                "slice_wise": true
+            },
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": [
+                    "common_carotid_artery_left",
+                    "superior_vena_cava",
+                    "aorta",
+                    "heart",
+                    "brachiocephalic_vein_left"
+                ],
+                "boundary_part": "anterior",
+                "slice_wise": true
+            }
+        ],
+        "ancillary_landmarks": [
+            "trachea",
+            "lung_left",
+            "station_2_inf_z",
+            "carina_computed",
+            "superior_vena_cava",
+            "azygos_vein",
+            "aorta",
+            "aorta_ascending",
+            "aorta_descending",
+            "aortic_arch_computed",
+            "esophagus",
+            "heart",
+            "thorax_wall",
+            "brachiocephalic_vein_left",
+            "common_carotid_artery_left",
+            "body_trunc",
+            "sternum",
+            "helper_pleural_space_left"
+        ],
+        "depends_on": [
+            "helper_pleural_space_left",
+            "helper_pleural_space_right"
+        ],
+        "is_helper": true
+    }
+}

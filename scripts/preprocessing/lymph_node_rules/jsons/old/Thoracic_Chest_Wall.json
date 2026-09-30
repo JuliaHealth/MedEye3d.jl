@@ -1,0 +1,26 @@
+{
+    "Thoracic_Chest_Wall": {
+        "rule": "Mask",
+        "mask_name": "thorax_wall",
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "keep_all_components": true,
+        "overlap_precedence": [],
+        "comments": "Thoracic Chest Wall. Using pre-calculated thorax_wall mask (Ribs + Sternum + Intercostal gaps).",
+        "ancillary_landmarks": [
+            "aortic_arch_computed",
+            "carina_computed",
+            "aorta_midline_plane",
+            "thorax_wall",
+            "fused_spine"
+        ],
+        "roi": {
+            "landmark": "thorax_wall",
+            "padding_mm": [
+                50,
+                50,
+                50
+            ]
+        }
+    }
+}

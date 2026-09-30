@@ -1,0 +1,27 @@
+{
+    "Axillary_Level_I_Relaxed_Right": {
+        "rule": "Mask",
+        "side": "right",
+        "level": "i",
+        "color": [
+            255,
+            100,
+            100
+        ],
+        "group": "Thoracic",
+        "category": "Lymph_Node",
+        "exclude": [
+            "scapula",
+            "pectoralis_major",
+            "latissimus_dorsi",
+            "serratus_anterior",
+            "subscapularis",
+            "deltoid",
+            "pectoralis_minor",
+            "humerus"
+        ],
+        "keep_all_components": true,
+        "intersect": [],
+        "mask_name": "helper_rtog_I_z_right"
+    }
+}

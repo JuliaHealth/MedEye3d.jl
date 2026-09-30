@@ -1,0 +1,16 @@
+{
+    "helper_thorax_wall_left": {
+        "rule": "Mask",
+        "mask_name": "thorax_wall",
+        "constraints": [
+            {
+                "constraint_type": "LineLimitBetweenLandmarks",
+                "landmark_1": "fused_spine",
+                "landmark_2": "sternum",
+                "label_value": 1,
+                "comment": "Keep Left side"
+            }
+        ],
+        "is_helper": true
+    }
+}

@@ -1,0 +1,90 @@
+{
+    "helper_16b2_base": {
+        "rule": "BitwiseAnd",
+        "mask_name": "helper_Abdominal_Paraaortic",
+        "is_bilateral": false,
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "inferior_mesenteric_artery",
+                "boundary_part": "max",
+                "fallback_landmark": "vertebrae_L3",
+                "fallback_boundary_part": "min"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "Abdominal_Common_Iliac_Left",
+                "boundary_part": "max",
+                "offset_mm": -5.0,
+                "fallback_landmark": "vertebrae_L4",
+                "fallback_boundary_part": "min",
+                "comment": "Extend down to top of common iliac for continuity"
+            }
+        ],
+        "depends_on": [
+            "Abdominal_Common_Iliac_Left"
+        ],
+        "per_slice_lcc": true,
+        "comments": "Station 16b2: IMA to Aortic Bifurcation",
+        "is_helper": true,
+        "category": "new_helpers"
+    },
+    "helper_Abdominal_Station_16b2_Caudal_Paraaortic_base": {
+        "rule": "BitwiseOr",
+        "inputs": [
+            "helper_16b2_base",
+            "helper_paraaortic_iliac_bridge"
+        ],
+        "depends_on": [
+            "helper_16b2_base",
+            "helper_paraaortic_iliac_bridge"
+        ],
+        "category": "new_helpers",
+        "group": "Abdominal",
+        "color": [
+            200,
+            100,
+            100
+        ],
+        "is_helper": true
+    },
+    "Abdominal_Station_16b2_Caudal_Paraaortic": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_Abdominal_Station_16b2_Caudal_Paraaortic_base"
+        ],
+        "is_bilateral": false,
+        "exclude": [
+            "spleen",
+            "kidney_left",
+            "kidney_right",
+            "colon",
+            "aorta",
+            "spinal_cord",
+            "pancreas",
+            "psoas_major_right",
+            "liver",
+            "inferior_vena_cava",
+            "fused_spine",
+            "psoas_major_left",
+            "diaphragm_proxy",
+            "gallbladder",
+            "small_bowel",
+            "stomach",
+            "duodenum"
+        ],
+        "overlap_precedence": [],
+        "per_slice_lcc": true,
+        "keep_all_components": false,
+        "depends_on": [
+            "helper_Abdominal_Station_16b2_Caudal_Paraaortic_base"
+        ],
+        "group": "Abdominal",
+        "category": "Lymph_Node",
+        "color": [
+            200,
+            100,
+            100
+        ]
+    }
+}

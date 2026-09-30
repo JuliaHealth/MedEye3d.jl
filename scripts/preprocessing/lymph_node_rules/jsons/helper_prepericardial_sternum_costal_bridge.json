@@ -1,0 +1,14 @@
+{
+    "helper_prepericardial_sternum_costal_bridge": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "sternum",
+            "costal_cartilages"
+        ],
+        "is_helper": true,
+        "dependencies": [
+            "sternum",
+            "costal_cartilages"
+        ]
+    }
+}

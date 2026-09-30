@@ -1,0 +1,21 @@
+{
+    "helper_ribs_sternum": {
+        "rule": "Union",
+        "inputs": [
+            "rib_1",
+            "rib_2",
+            "rib_3",
+            "rib_4",
+            "rib_5",
+            "rib_6",
+            "rib_7",
+            "rib_8",
+            "rib_9",
+            "rib_10",
+            "rib_11",
+            "rib_12",
+            "sternum"
+        ],
+        "is_helper": true
+    }
+}

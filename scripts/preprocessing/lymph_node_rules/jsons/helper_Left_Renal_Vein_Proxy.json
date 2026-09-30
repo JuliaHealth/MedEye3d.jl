@@ -1,0 +1,17 @@
+{
+    "helper_Left_Renal_Vein_Proxy": {
+        "rule": "GeometricPrimitive",
+        "primitive_type": "cylinder",
+        "p1": {
+            "landmark": "kidney_left",
+            "direction": "right"
+        },
+        "p2": {
+            "landmark": "inferior_vena_cava",
+            "direction": "left"
+        },
+        "radius_mm": 10.0,
+        "is_helper": true,
+        "comments": "Proxy for Left Renal Vein, acting as Z-boundary for Paraaortic 16a2/16b1"
+    }
+}

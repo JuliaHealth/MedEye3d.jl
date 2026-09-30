@@ -1,0 +1,117 @@
+{
+    "Neck_Level_Ia_Submental": {
+        "rule": "AnisotropicMargin",
+        "input": "body",
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "dig_top",
+                "boundary_part": "max",
+                "comment": "Superior limit: top of digastric"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "hyoid",
+                "boundary_part": "min",
+                "comment": "Inferior limit: inferior border of hyoid"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmarks": [
+                    "superior_pharyngeal_constrictor",
+                    "middle_pharyngeal_constrictor",
+                    "inferior_pharyngeal_constrictor",
+                    "nasopharynx",
+                    "oropharynx",
+                    "hypopharynx"
+                ],
+                "slice_wise": true,
+                "boundary_part": "min",
+                "allow_missing": true,
+                "comment": "Posterior limit: anterior to pharynx (per-slice basis)"
+            },
+            {
+                "constraint_type": "PlaneLimit",
+                "landmark": "digastric_plane_left",
+                "side_to_keep": "positive",
+                "comment": "Medial bound (Left)"
+            },
+            {
+                "constraint_type": "PlaneLimit",
+                "landmark": "digastric_plane_right",
+                "side_to_keep": "positive",
+                "comment": "Medial bound (Right)"
+            }
+        ],
+        "exclude": [
+            "mandible",
+            "hyoid",
+            "skull",
+            "lev_vert",
+            "submandibular_gland_left",
+            "submandibular_gland_right"
+        ],
+        "assertions": [
+            {
+                "type": "TargetVolumeMin",
+                "target": "skull",
+                "value": 100,
+                "message": "FOV cuts off top of head (skull_real is missing), rejecting submental."
+            },
+            {
+                "type": "TargetVolumeMin",
+                "target": "mandible",
+                "value": 100,
+                "message": "ERROR: Mandible is missing, rejecting submental."
+            },
+
+            {
+                "type": "VolumeMin",
+                "value": 100
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "mandible",
+                "expected": 0
+            }
+        ],
+        "keep_all_components": false,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "comments": "Neck Level IA (Submental): Implementation exactly as per docs/new_defs_manual/neck/Ia_Ib.md",
+        "ancillary_landmarks": [
+            "mandible_p1",
+            "mandible_p2",
+            "mandible_p3",
+            "mandible_p4",
+            "mandible_plane",
+            "high_mandible_plane",
+            "low_mandible_plane",
+            "digastric_line",
+            "dig_top",
+            "dig_top_left",
+            "dig_top_right",
+            "dig_bot_left",
+            "dig_bot_right",
+            "digastric_plane",
+            "stylohyoid_line",
+            "skull",
+            "submandibular_gland",
+            "parotid_gland_left",
+            "parotid_gland_right",
+            "lev_vert"
+        ],
+        "roi": {
+            "landmark": "mandible",
+            "padding_mm": [
+                100,
+                100,
+                50
+            ]
+        },
+        "allow_missing": true,
+        "depends_on": [
+            "lev_vert"
+        ]
+    }
+}

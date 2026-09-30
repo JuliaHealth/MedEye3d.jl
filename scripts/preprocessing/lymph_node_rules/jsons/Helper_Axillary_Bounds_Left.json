@@ -1,0 +1,15 @@
+{
+    "Helper_Axillary_Bounds_Left": {
+        "rule": "AxillaryHelperB",
+        "side": "left",
+        "is_bilateral": false,
+        "input": "pectoralis_major_left",
+        "dependencies": {
+            "pectoralis_major_left": "pectoralis_major_left",
+            "subscapularis_left": "subscapularis_left"
+        },
+        "group": "Helper",
+        "category": "Helper",
+        "keep_all_components": true
+    }
+}

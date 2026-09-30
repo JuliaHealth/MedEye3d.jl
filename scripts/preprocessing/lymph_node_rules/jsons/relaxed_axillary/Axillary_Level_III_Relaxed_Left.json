@@ -1,0 +1,27 @@
+{
+    "Axillary_Level_III_Relaxed_Left": {
+        "rule": "Mask",
+        "side": "left",
+        "level": "iii",
+        "color": [
+            100,
+            100,
+            255
+        ],
+        "group": "Thoracic",
+        "category": "Lymph_Node",
+        "exclude": [
+            "scapula",
+            "pectoralis_major",
+            "latissimus_dorsi",
+            "serratus_anterior",
+            "subscapularis",
+            "deltoid",
+            "pectoralis_minor",
+            "humerus"
+        ],
+        "keep_all_components": true,
+        "intersect": [],
+        "mask_name": "helper_rtog_III_z_left"
+    }
+}

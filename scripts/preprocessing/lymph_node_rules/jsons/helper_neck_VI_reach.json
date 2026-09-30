@@ -1,0 +1,16 @@
+{
+    "helper_neck_VI_reach": {
+        "rule": "Combine",
+        "method": "intersection",
+        "components": [
+            "helper_neck_VI_visceral_block_dilated",
+            "helper_neck_VI_body_eroded"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_neck_VI_visceral_block_dilated",
+            "helper_neck_VI_body_eroded"
+        ]
+    }
+}

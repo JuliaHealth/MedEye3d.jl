@@ -1,0 +1,130 @@
+{
+    "Thoracic_Axillary_Nodes": {
+        "rule": "ThoracicAxillaryCustom",
+        "is_bilateral": true,
+        "keep_all_components": true,
+        "input_landmarks": [
+            "subclavian_vein",
+            "subclavian_artery"
+        ],
+        "comments": "Thoracic Axillary Nodes: Levels I, II, III partitioned by pectoralis minor oblique planes anchored to coracoid and ribs.",
+        "ancillary_landmarks": [
+            "clavicula",
+            "humerus",
+            "latissimus_dorsi",
+            "lung",
+            "rib_1",
+            "rib_2",
+            "rib_3",
+            "rib_4",
+            "rib_5",
+            "rib_6",
+            "rib_7",
+            "rib_8",
+            "scapula",
+            "serratus_anterior",
+            "subclavian_artery",
+            "subclavian_vein",
+            "p_coracoid_left",
+            "p_coracoid_right",
+            "p_rib_lateral_left",
+            "p_rib_lateral_right",
+            "p_rib_medial_left",
+            "p_rib_medial_right",
+            "lateral_pec_minor_plane_left",
+            "lateral_pec_minor_plane_right",
+            "medial_pec_minor_plane_left",
+            "medial_pec_minor_plane_right",
+            "Thoracic_Axillary_Nodes_Level_I_left",
+            "Thoracic_Axillary_Nodes_Level_I_right",
+            "Thoracic_Axillary_Nodes_Level_II_left",
+            "Thoracic_Axillary_Nodes_Level_II_right",
+            "Thoracic_Axillary_Nodes_Level_III_left",
+            "Thoracic_Axillary_Nodes_Level_III_right"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 5
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "lung",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "clavicula",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "scapula",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "humerus",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "rib_1",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "rib_2",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "rib_3",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "rib_4",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "rib_5",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "rib_6",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "rib_7",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "rib_8",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "scapula",
+                "direction": "anterior"
+            },
+            {
+                "type": "RelativePosition",
+                "target": "latissimus_dorsi",
+                "direction": "anterior"
+            }
+        ],
+        "roi": {
+            "landmark": "subclavian_vein",
+            "padding_mm": [
+                60,
+                60,
+                60
+            ]
+        }
+    }
+}

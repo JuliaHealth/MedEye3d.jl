@@ -1,0 +1,9 @@
+{
+    "bronchi_sanitized": {
+        "rule": "ConvexHull2D",
+        "targets": ["helper_bronchi_all"],
+        "is_bilateral": false,
+        "is_helper": true,
+        "depends_on": ["helper_bronchi_all"]
+    }
+}

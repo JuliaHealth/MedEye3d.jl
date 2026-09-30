@@ -1,0 +1,13 @@
+{
+    "helper_neck_VI_visceral_block_dilated": {
+        "rule": "Morphology",
+        "operation": "dilate",
+        "radius_mm": 20.0,
+        "landmark": "helper_neck_VI_visceral_block",
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_neck_VI_visceral_block"
+        ]
+    }
+}

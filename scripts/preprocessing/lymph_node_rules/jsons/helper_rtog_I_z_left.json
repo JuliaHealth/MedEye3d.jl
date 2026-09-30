@@ -1,0 +1,10 @@
+{
+    "helper_rtog_I_z_left": {
+        "rule": "LimitZByLandmark",
+        "input": "helper_rtog_I_base_left",
+        "landmark": "pectoralis_minor",
+        "mode": "top_only",
+        "side": "left",
+        "is_helper": true
+    }
+}

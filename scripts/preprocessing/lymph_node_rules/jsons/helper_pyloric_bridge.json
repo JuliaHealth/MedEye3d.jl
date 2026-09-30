@@ -1,0 +1,22 @@
+{
+    "helper_pyloric_bridge": {
+        "rule": "GeometricPrimitive",
+        "depends_on": [
+            "helper_stomach_right_third",
+            "helper_duodenum_right_third_of_right_third"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "primitive_type": "cylinder",
+        "radius_mm": 1.0,
+        "is_bilateral": false,
+        "p1": {
+            "landmark": "helper_stomach_right_third",
+            "direction": "inferior"
+        },
+        "p2": {
+            "landmark": "helper_duodenum_right_third_of_right_third",
+            "direction": "superior"
+        }
+    }
+}

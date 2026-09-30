@@ -1,0 +1,32 @@
+{
+    "Abdominal_Station_11_Splenic_Artery": {
+        "rule": "DilatedMask",
+        "base_landmark": [
+            "splenic_vein"
+        ],
+        "dilation_mm": 10.0,
+        "is_bilateral": false,
+        "constraints": [],
+        "exclude": [
+            "pancreas",
+            "spleen",
+            "stomach",
+            "kidney_left",
+            "adrenal_gland_left",
+            "liver",
+            "aorta",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "gallbladder",
+            "kidney_right",
+            "Abdominal_Station_16a1_Aortic_Hiatus",
+            "Abdominal_Station_16a2_Upper_Middle_Paraaortic",
+            "Abdominal_Station_16b1_Lower_Middle_Paraaortic",
+            "Abdominal_Station_16b2_Caudal_Paraaortic",
+            "Abdominal_Station_13_Posterior_Pancreaticoduodenal",
+            "Abdominal_Station_17_Anterior_Pancreaticoduodenal"
+        ],
+        "comments": "Splenic Artery nodal station derived from splenic vein."
+    }
+}

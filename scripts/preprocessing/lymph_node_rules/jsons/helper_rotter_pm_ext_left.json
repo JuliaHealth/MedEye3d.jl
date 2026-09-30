@@ -1,0 +1,9 @@
+{
+    "helper_rotter_pm_ext_left": {
+        "rule": "AnteriorExtrusion",
+        "input": "pectoralis_minor",
+        "distance_mm": 10.0,
+        "side": "left",
+        "is_helper": true
+    }
+}

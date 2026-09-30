@@ -1,0 +1,12 @@
+{
+    "helper_hip_iliopsoas_right": {
+        "rule": "VolumetricBoundary2D",
+        "is_bilateral": false,
+        "boundaries": {
+            "hip_right": "hip_right",
+            "iliopsoas_right": "iliopsoas_right"
+        },
+        "comment": "Volumetric boundary covering the space between the right hip and the right iliopsoas muscle.",
+        "is_helper": true
+    }
+}

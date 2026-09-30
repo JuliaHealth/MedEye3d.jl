@@ -1,0 +1,137 @@
+import os
+import sys
+import glob
+import logging
+import subprocess
+import SimpleITK as sitk
+import numpy as np
+
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+logger = logging.getLogger(__name__)
+
+# Add wrappers to path
+import sys
+sys.path.insert(0, 'src/anatomy_segmentation')
+from wrappers.nv_segment import run_nv_segmentator
+
+REGIONS = {
+    "neck": {
+        "requires": ["skull", "lung_left"], 
+        "expected": [
+            "mandible", "hyoid", "esophagus", "trachea",
+            "internal_jugular_vein_left", "internal_jugular_vein_right",
+            "common_carotid_artery_left", "common_carotid_artery_right",
+            "sternocleidomastoid_left", "sternocleidomastoid_right"
+        ],
+    },
+    "thorax": {
+        "requires": ["lung_left", "liver"], 
+        "expected": [
+            "heart", "aorta", "trachea", "esophagus",
+            "lung_left", "lung_right",
+            "pulmonary_artery", "superior_vena_cava",
+            "brachiocephalic_trunk", "subclavian_artery_left",
+            "sternum", "thoracic_cavity"
+        ],
+    },
+    "abdomen": {
+        "requires": ["liver", "hip_left"],
+        "expected": [
+            "stomach", "pancreas", "spleen", "liver",
+            "kidney_left", "kidney_right",
+            "celiac_trunk", "superior_mesenteric_artery",
+            "inferior_vena_cava"
+        ],
+    },
+}
+
+def has_mask(seg_dir, name):
+    p = os.path.join(seg_dir, f"{name}.nii.gz")
+    if not os.path.exists(p): return False
+    img = sitk.ReadImage(p)
+    arr = sitk.GetArrayViewFromImage(img)
+    return arr.max() > 0
+
+def check_case(case_dir):
+    ct = os.path.join(case_dir, "Fixed_CT_Volume.nii.gz")
+    seg = os.path.join(case_dir, "segmentations")
+    if not os.path.exists(ct) or not os.path.exists(seg):
+        logger.error(f"Missing CT or seg dir for {case_dir}")
+        return
+        
+    logger.info(f"Checking {os.path.basename(case_dir)}")
+    
+    available_regions = []
+    for r, info in REGIONS.items():
+        if all(has_mask(seg, req) for req in info["requires"]):
+            available_regions.append(r)
+            
+    logger.info(f"  Regions covered: {available_regions}")
+    
+    missing = []
+    for r in available_regions:
+        for exp in REGIONS[r]["expected"]:
+            if not has_mask(seg, exp):
+                missing.append(exp)
+                
+    if missing:
+        logger.warning(f"  Missing required masks: {missing}")
+        logger.info(f"  Running NV-Segment fallback...")
+        try:
+            # We don't overwrite TS, NV-Segment wrapper avoids overwriting existing
+            run_nv_segmentator(ct, seg)
+        except Exception as e:
+            logger.error(f"  NV-Segment fallback failed: {e}")
+            
+        # Re-check missing
+        still_missing = []
+        for m in missing:
+            if not has_mask(seg, m):
+                still_missing.append(m)
+                
+        if still_missing:
+            logger.warning(f"  Still missing after NV-Segment: {still_missing}")
+            logger.info(f"  Running VoxTell fallback for remaining...")
+            # Run VoxTell for still missing
+            cmd = [
+                "/home/jm/segmentation_venv/bin/voxtell-predict",
+                "-i", ct,
+                "-o", seg,
+                "-m", "data/vox_models/.cache/huggingface/download/voxtell_v1.1",
+                "-p"
+            ]
+            # Replace underscores with spaces for prompts
+            prompts = [m.replace("_", " ") for m in still_missing]
+            cmd.extend(prompts)
+            try:
+                subprocess.run(cmd, check=True)
+                # VoxTell outputs as Fixed_CT_Volume_<prompt>.nii.gz, rename them
+                for m, p in zip(still_missing, prompts):
+                    out_file = os.path.join(seg, f"Fixed_CT_Volume_{p.replace(' ', '_')}.nii.gz")
+                    target_file = os.path.join(seg, f"{m}.nii.gz")
+                    if os.path.exists(out_file):
+                        import shutil
+                        shutil.move(out_file, target_file)
+                        logger.info(f"  VoxTell produced {m}")
+            except Exception as e:
+                logger.error(f"  VoxTell fallback failed: {e}")
+    else:
+        logger.info("  All expected masks present.")
+        
+    # Check celiac trunk quality
+    celiac = os.path.join(seg, "celiac_trunk.nii.gz")
+    if os.path.exists(celiac):
+        img = sitk.ReadImage(celiac)
+        arr = sitk.GetArrayViewFromImage(img)
+        z_inds = np.where(arr.max(axis=(1,2)) > 0)[0]
+        if len(z_inds) > 0:
+            z_range = z_inds[-1] - z_inds[0] + 1
+            if z_range > 25:
+                logger.error(f"  celiac_trunk spans {z_range} slices! (Quality check failed)")
+            else:
+                logger.info(f"  celiac_trunk spans {z_range} slices. (OK)")
+                
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        for d in sys.argv[1:]:
+            check_case(d)

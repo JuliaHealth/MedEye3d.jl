@@ -1,0 +1,63 @@
+{
+    "Thoracic_Prepericardial": {
+        "rule": "AnisotropicMargin",
+        "is_bilateral": false,
+        "base_landmark": "heart",
+        "margins_mm": {
+            "anterior": 30,
+            "lateral": 60,
+            "posterior": 0,
+            "superior": 0,
+            "inferior": 0
+        },
+        "z_plane_restriction": {
+            "superior": "carina",
+            "inferior": [
+                {
+                    "landmark": "heart",
+                    "part": "min",
+                    "offset_mm": 10.0
+                }
+            ]
+        },
+        "constraints": [
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "heart",
+                "slice_wise": true,
+                "boundary_part": "center",
+                "comment": "Must stay anterior to the middle of the heart."
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "sternum",
+                "boundary_part": "max",
+                "comment": "Must be posterior to the sternum (Prepericardial is retrosternal fat)."
+            }
+        ],
+        "exclude": [
+            "heart",
+            "lung",
+            "lung_upper_lobe_left",
+            "lung_lower_lobe_left",
+            "lung_upper_lobe_right",
+            "lung_middle_lobe_right",
+            "lung_lower_lobe_right",
+            "sternum",
+            "liver",
+            "trachea",
+            "helper_prepericardial_sternum_costal_bridge",
+            "helper_costal_sternum_hull",
+            "helper_pleural_space_left",
+            "helper_pleural_space_right"
+        ],
+        "dependencies": [
+            "helper_prepericardial_sternum_costal_bridge"
+        ],
+        "comments": "Prepericardial: 3cm anterior and lateral around heart, restricted to retrosternal space. Excludes all lung lobes and liver.",
+        "ignore_global_exclusion": true,
+        "overlap_precedence": [],
+        "ignore_fat": true,
+        "keep_all_components": false
+    }
+}

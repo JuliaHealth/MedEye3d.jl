@@ -1,0 +1,10 @@
+{
+    "helper_rtog_III_z_right": {
+        "rule": "LimitZByLandmark",
+        "input": "helper_rtog_III_base_right",
+        "landmark": "coracoid_process_right",
+        "mode": "top_only",
+        "side": "right",
+        "is_helper": true
+    }
+}

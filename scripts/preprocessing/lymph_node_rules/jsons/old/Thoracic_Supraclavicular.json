@@ -1,0 +1,59 @@
+{
+    "Thoracic_Supraclavicular": {
+        "rule": "DilatedMask",
+        "is_bilateral": true,
+        "input_landmarks": ["internal_jugular_vein", "subclavian_vein"],
+        "dilation_mm": 20.0,
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "rib_1",
+                "boundary_part": "min",
+                "comment": "Inferior limit: Rib 1"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "cricoid_cartilage",
+                "boundary_part": "min",
+                "comment": "Superior limit: Cricoid"
+            },
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "internal_jugular_vein",
+                "boundary_part": "max",
+                "comment": "Anterior limit: posterior to IJV"
+            }
+        ],
+        "exclude": [
+            "lung",
+            "aorta",
+            "clavicula",
+            "internal_jugular_vein",
+            "subclavian_vein",
+            "sternocleidomastoid"
+        ],
+        "assertions": [
+            { "type": "VolumeMin", "value": 5 },
+            { "type": "VolumeIntersection", "target": "lung", "expected": 0 },
+            { "type": "VolumeIntersection", "target": "aorta", "expected": 0 }
+        ],
+        "keep_all_components": true,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "comments": "Supraclavicular Nodes: 20mm expansion from IJV/Subclavian, posterior to IJV.",
+        "ancillary_landmarks": [
+            "lung",
+            "aorta",
+            "clavicula",
+            "internal_jugular_vein",
+            "subclavian_vein",
+            "sternocleidomastoid",
+            "cricoid_cartilage",
+            "rib_1"
+        ],
+        "roi": {
+            "landmark": "internal_jugular_vein",
+            "padding_mm": [40, 40, 40]
+        }
+    }
+}

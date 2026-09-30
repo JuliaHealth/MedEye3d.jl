@@ -1,0 +1,46 @@
+{
+    "helper_greater_gastric_curvature": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "spleen",
+            "diaphragm_proxy",
+            "colon",
+            "stomach"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "x_plane_restriction": {
+            "right": "stomach",
+            "right_part": "min"
+        },
+        "z_plane_restriction": {
+            "superior": "stomach",
+            "superior_part": "max",
+            "inferior": "stomach",
+            "inferior_part": "min"
+        },
+        "exclude": [
+            "liver",
+            "stomach",
+            "esophagus",
+            "heart",
+            "aorta",
+            "inferior_vena_cava",
+            "pancreas",
+            "spleen",
+            "fused_spine",
+            "lung",
+            "lung_left",
+            "lung_right",
+            "diaphragm_proxy",
+            "helper_Abdominal_Paraaortic",
+            "Abdominal_Station_9_Celiac"
+        ],
+        "dependencies": [
+            "spleen",
+            "diaphragm_proxy",
+            "colon",
+            "stomach"
+        ]
+    }
+}

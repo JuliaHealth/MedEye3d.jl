@@ -1,0 +1,55 @@
+{
+    "Neck_Level_Xa_RetroAuricular": {
+        "rule": "DilatedMask",
+        "is_bilateral": true,
+        "input_landmarks": ["sternocleidomastoid"],
+        "dilation_mm": 20.0,
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "mandible",
+                "boundary_part": "max",
+                "comment": "Superior limit: Mandibular condyle max Z"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "sternocleidomastoid",
+                "boundary_part": "max",
+                "offset_mm": -15.0,
+                "comment": "Inferior limit: Mastoid tip area (15mm below SCM apex)"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "sternocleidomastoid",
+                "boundary_part": "max",
+                "slice_wise": true,
+                "comment": "Posterior limit: Anterior to SCM back edge"
+            }
+        ],
+        "exclude": [
+            "skull",
+            "sternocleidomastoid",
+            "parotid_gland"
+        ],
+        "assertions": [
+            { "type": "VolumeMin", "value": 5 },
+            { "type": "VolumeIntersection", "target": "skull", "expected": 0 },
+            { "type": "VolumeIntersection", "target": "sternocleidomastoid", "expected": 0 },
+            { "type": "VolumeIntersection", "target": "parotid_gland", "expected": 0 }
+        ],
+        "keep_all_components": false,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "comments": "Neck Level XA (Retro-auricular): 20mm expansion from SCM apex.",
+        "ancillary_landmarks": [
+            "mandible",
+            "sternocleidomastoid",
+            "parotid_gland",
+            "skull"
+        ],
+        "roi": {
+            "landmark": "sternocleidomastoid",
+            "padding_mm": [30, 30, 30]
+        }
+    }
+}

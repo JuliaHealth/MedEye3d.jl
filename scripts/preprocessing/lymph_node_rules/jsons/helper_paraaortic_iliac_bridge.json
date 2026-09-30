@@ -1,0 +1,28 @@
+{
+    "helper_paraaortic_iliac_bridge": {
+        "rule": "BitwiseOr",
+        "inputs": [
+            "helper_paraaortic_iliac_bridge_coronal",
+            "helper_paraaortic_iliac_bridge_sagittal"
+        ],
+        "depends_on": [
+            "helper_paraaortic_iliac_bridge_coronal",
+            "helper_paraaortic_iliac_bridge_sagittal"
+        ],
+        "exclude": [
+            "aorta",
+            "inferior_vena_cava",
+            "kidney_left",
+            "kidney_right",
+            "psoas_major_left",
+            "psoas_major_right",
+            "psoas_major",
+            "fused_spine",
+            "bowel",
+            "skeletal_muscle"
+        ],
+        "post_overlap_lcc": true,
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

@@ -1,0 +1,8 @@
+{
+    "helper_heart_vertebrae_hull": {
+        "rule": "ConvexHull2D",
+        "targets": ["heart", "vertebrae"],
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

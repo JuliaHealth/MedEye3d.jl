@@ -1,0 +1,30 @@
+{
+    "Abdominal_Station_9_Celiac": {
+        "rule": "DilatedMask",
+        "is_bilateral": false,
+        "input_landmarks": [
+            "celiac_trunk"
+        ],
+        "dilation_mm": 10.0,
+        "comments": "2 cm around celiac trunk (Station 9).",
+        "exclude": [
+            "celiac_trunk",
+            "pancreas",
+            "stomach",
+            "liver",
+            "aorta",
+            "duodenum",
+            "small_bowel",
+            "colon",
+            "spleen",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right",
+            "Abdominal_Station_16a2_Upper_Middle_Paraaortic",
+            "Abdominal_Station_16a1_Aortic_Hiatus"
+        ],
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "keep_all_components": false
+    }
+}

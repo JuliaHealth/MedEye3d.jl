@@ -1,0 +1,26 @@
+{
+    "helper_Thoracic_Station_8_Paraoesophageal_LungLeft_Spleen": {
+        "rule": "ConvexHullBridge",
+        "erode_iterations": 2,
+        "landmark_1": "lung_left",
+        "landmark_2": "spleen",
+        "is_bilateral": false,
+        "ancillary_landmarks": [
+            "lung_left",
+            "spleen",
+            "esophagus"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "esophagus",
+                "boundary_part": "mid",
+                "slice_wise": true
+            }
+        ],
+        "exclude": [
+            "helper_lung_convex_hull_left",
+            "helper_lung_convex_hull_right"
+        ]
+    }
+}

@@ -1,0 +1,118 @@
+{
+    "Thoracic_Supraclavicular_Left": {
+        "is_bilateral": false,
+        "rule": "AnisotropicMargin",
+        "base_landmark": "internal_jugular_vein_left",
+        "margins_mm": {
+            "posterior": 60,
+            "lateral": 40,
+            "anterior": 0,
+            "superior": 0,
+            "inferior": 0
+        },
+        "side": "left",
+        "constraints": [
+            {
+                "constraint_type": "LeftOf",
+                "landmark": "internal_jugular_vein_left",
+                "slice_wise": true,
+                "boundary_part": "lateral"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "scapula",
+                "boundary_part": "min",
+                "mode": "per_layer"
+            },
+            {
+                "constraint_type": "LateralTo",
+                "landmark": "fused_spine",
+                "slice_wise": true,
+                "boundary_part": "lateral",
+                "comment": "Must be lateral to the outer edge of the spine on each slice."
+            }
+        ],
+        "z_plane_restriction": {
+            "superior": "rib_1",
+            "superior_part": "max",
+            "superior_offset_mm": 10.0,
+            "inferior": "rib_1",
+            "inferior_part": "center"
+        },
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "exclude": [
+            "lung",
+            "lung_upper_lobe_left",
+            "lung_lower_lobe_left",
+            "lung_upper_lobe_right",
+            "lung_middle_lobe_right",
+            "lung_lower_lobe_right",
+            "aorta",
+            "trachea"
+        ],
+        "overlap_precedence": [
+            "Thoracic_Axillary_Nodes_Left"
+        ],
+        "comments": "Lower Level V / Supraclavicular. Strictly posterior and lateral to IJV. Lateral margin 40mm.",
+        "keep_all_components": false
+    },
+    "Thoracic_Supraclavicular_Right": {
+        "is_bilateral": false,
+        "rule": "AnisotropicMargin",
+        "base_landmark": "internal_jugular_vein_right",
+        "margins_mm": {
+            "posterior": 60,
+            "lateral": 40,
+            "anterior": 0,
+            "superior": 0,
+            "inferior": 0
+        },
+        "side": "right",
+        "constraints": [
+            {
+                "constraint_type": "RightOf",
+                "landmark": "internal_jugular_vein_right",
+                "slice_wise": true,
+                "boundary_part": "lateral"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "scapula",
+                "boundary_part": "min",
+                "mode": "per_layer"
+            },
+            {
+                "constraint_type": "LateralTo",
+                "landmark": "fused_spine",
+                "slice_wise": true,
+                "boundary_part": "lateral",
+                "comment": "Must be lateral to the outer edge of the spine on each slice."
+            }
+        ],
+        "z_plane_restriction": {
+            "superior": "rib_1",
+            "superior_part": "max",
+            "superior_offset_mm": 10.0,
+            "inferior": "rib_1",
+            "inferior_part": "center"
+        },
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "exclude": [
+            "lung",
+            "lung_upper_lobe_left",
+            "lung_lower_lobe_left",
+            "lung_upper_lobe_right",
+            "lung_middle_lobe_right",
+            "lung_lower_lobe_right",
+            "aorta",
+            "trachea"
+        ],
+        "overlap_precedence": [
+            "Thoracic_Axillary_Nodes_Right"
+        ],
+        "comments": "Lower Level V / Supraclavicular. Strictly posterior and lateral to IJV. Lateral margin 40mm.",
+        "keep_all_components": false
+    }
+}

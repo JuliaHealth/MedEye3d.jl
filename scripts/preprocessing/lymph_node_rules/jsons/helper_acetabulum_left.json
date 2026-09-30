@@ -1,0 +1,36 @@
+{
+    "helper_femur_margin_left": {
+        "rule": "DilatedMask",
+        "input": "femur_left",
+        "dilation_mm": 10.0,
+        "margin_mm": 10.0,
+        "margins_mm": {
+            "all": 10.0
+        },
+        "side": "left",
+        "is_helper": true,
+        "dependencies": [
+            "femur_left"
+        ]
+    },
+    "helper_acetabulum_left": {
+        "rule": "Combine",
+        "method": "intersection",
+        "components": [
+            "helper_hip_base_left",
+            "helper_femur_margin_left"
+        ],
+        "side": "left",
+        "is_helper": true,
+        "dependencies": [
+            "helper_hip_base_left",
+            "helper_femur_margin_left"
+        ]
+    },
+    "helper_hip_base_left": {
+        "rule": "Mask",
+        "input": "hip_left",
+        "is_helper": true,
+        "category": "new_helpers"
+    }
+}

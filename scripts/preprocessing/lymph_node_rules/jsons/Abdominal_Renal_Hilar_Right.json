@@ -1,0 +1,46 @@
+{
+    "helper_kidney_right_hull": {
+        "rule": "VolumetricBoundary2D",
+        "boundaries": {
+            "all": "kidney_right"
+        },
+        "comments": "2D Convex Hull of Kidney Right (per slice)"
+    },
+    "helper_kidney_right_hull_eroded": {
+        "rule": "ErosionHelper",
+        "custom_rule": "ErosionHelper",
+        "input": "helper_kidney_right_hull",
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_kidney_right_hull"
+        ],
+        "comments": "Eroded kidney hull for tighter hilum definition"
+    },
+    "Abdominal_Renal_Hilar_Right": {
+        "rule": "BitwiseOr",
+        "targets": [
+            "helper_kidney_right_hull_eroded"
+        ],
+        "is_bilateral": false,
+        "keep_all_components": false,
+        "exclude": [
+            "kidney_right",
+            "liver",
+            "duodenum",
+            "colon",
+            "lung_right",
+            "heart",
+            "stomach",
+            "pancreas",
+            "small_bowel",
+            "gallbladder",
+            "kidney_left",
+            "spleen"
+        ],
+        "depends_on": [
+            "helper_kidney_right_hull_eroded"
+        ],
+        "comments": "Renal hilar: eroded hull, single largest CC."
+    }
+}

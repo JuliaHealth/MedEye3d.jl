@@ -1,0 +1,65 @@
+{
+    "helper_Abdominal_Station_16b1_Lower_Middle_Paraaortic_base": {
+        "rule": "BitwiseAnd",
+        "mask_name": "helper_Abdominal_Paraaortic",
+        "is_bilateral": false,
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "renal_vein_left",
+                "boundary_part": "min",
+                "fallback_landmark": "vertebrae_L1",
+                "fallback_boundary_part": "min"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "inferior_mesenteric_artery",
+                "boundary_part": "max",
+                "fallback_landmark": "vertebrae_L3",
+                "fallback_boundary_part": "min"
+            }
+        ],
+        "comments": "Station 16b1: Left Renal Vein to IMA",
+        "is_helper": true,
+        "category": "new_helpers"
+    },
+    "Abdominal_Station_16b1_Lower_Middle_Paraaortic": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_Abdominal_Station_16b1_Lower_Middle_Paraaortic_base"
+        ],
+        "is_bilateral": false,
+        "exclude": [
+            "spleen",
+            "kidney_left",
+            "kidney_right",
+            "colon",
+            "aorta",
+            "spinal_cord",
+            "pancreas",
+            "psoas_major_right",
+            "liver",
+            "inferior_vena_cava",
+            "fused_spine",
+            "psoas_major_left",
+            "diaphragm_proxy",
+            "gallbladder",
+            "small_bowel",
+            "stomach",
+            "duodenum"
+        ],
+        "overlap_precedence": [],
+        "per_slice_lcc": true,
+        "keep_all_components": false,
+        "depends_on": [
+            "helper_Abdominal_Station_16b1_Lower_Middle_Paraaortic_base"
+        ],
+        "group": "Abdominal",
+        "category": "Lymph_Node",
+        "color": [
+            200,
+            200,
+            200
+        ]
+    }
+}

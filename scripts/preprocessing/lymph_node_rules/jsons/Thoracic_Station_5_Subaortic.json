@@ -1,0 +1,72 @@
+{
+    "Thoracic_Station_5_Subaortic": {
+        "rule": "Combine",
+        "inputs": [
+            "Thoracic_Station_5_Subaortic_Base",
+            "helper_subaortic_prevascular_bridge"
+        ],
+        "category": "Lymph_Node",
+        "keep_all_components": false,
+        "group": "Thoracic",
+        "color": [
+            255,
+            150,
+            50
+        ],
+        "constraints": [
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "aortic_arch_computed",
+                "boundary_part": "min",
+                "fallback_landmark": "aortic_arch_bottom",
+                "comment": "Superior limit: below bottom of aortic arch"
+            },
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "carina",
+                "boundary_part": "center",
+                "comment": "Lower limit: carina"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "aorta",
+                "boundary_part": "max",
+                "slice_wise": true,
+                "comment": "Posterior limit: most posterior voxel of descending aorta per slice"
+            }
+        ],
+        "exclude": [
+            "helper_aorta_medial_line",
+            "lung_left",
+            "lung_right",
+            "aorta",
+            "vena_cava",
+            "pulmonary_artery",
+            "trachea",
+            "Thoracic_Station_3A_Prevascular_Left",
+            "Thoracic_Station_3A_Prevascular_Right",
+            "helper_sternum_costal_cartilages_bridge",
+            "helper_pleural_space_left",
+            "helper_pleural_space_right",
+            "heart",
+            "aortic_arch_computed",
+            "liver",
+            "stomach",
+            "esophagus",
+            "fused_spine",
+            "spinal_cord"
+        ],
+        "overlap_precedence": [
+            "Thoracic_Station_6_Paraaortic",
+            "Thoracic_Station_Prepericardial_Left",
+            "Thoracic_Station_Prepericardial_Right",
+            "Thoracic_Station_7_Subcarinial"
+        ],
+        "ancillary_landmarks": [
+            "aortic_arch_computed",
+            "aortic_arch_bottom"
+        ],
+        "per_slice_lcc": true,
+        "post_overlap_lcc": true
+    }
+}

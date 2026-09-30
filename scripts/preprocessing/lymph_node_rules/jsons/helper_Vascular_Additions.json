@@ -1,0 +1,26 @@
+{
+    "helper_superior_mesenteric_artery": {
+        "rule": "DilatedMask",
+        "dilation_mm": 0.0,
+        "input_landmarks": ["superior_mesenteric_artery"],
+        "is_helper": true,
+        "is_bilateral": false,
+        "category": "new_helpers"
+    },
+    "helper_inferior_mesenteric_artery": {
+        "rule": "DilatedMask",
+        "dilation_mm": 0.0,
+        "input_landmarks": ["inferior_mesenteric_artery"],
+        "is_helper": true,
+        "is_bilateral": false,
+        "category": "new_helpers"
+    },
+    "helper_greater_saphenous_vein": {
+        "rule": "DilatedMask",
+        "dilation_mm": 0.0,
+        "input_landmarks": ["greater_saphenous_vein"],
+        "is_helper": true,
+        "is_bilateral": true,
+        "category": "new_helpers"
+    }
+}

@@ -1,0 +1,11 @@
+{
+    "helper_lung_convex_hull_left": {
+        "rule": "VolumetricBoundary2D",
+        "erode_iterations": 2,
+        "is_bilateral": false,
+        "boundaries": {
+            "lung": "lung_left"
+        },
+        "comment": "Convex hull of left lung"
+    }
+}

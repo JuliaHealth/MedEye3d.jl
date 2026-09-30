@@ -1,0 +1,45 @@
+{
+    "helper_heart_chambers_union": {
+        "rule": "Combine",
+        "method": "union",
+        "components": [
+            "heart_atrium_left",
+            "heart_atrium_right",
+            "heart_ventricle_left",
+            "heart_ventricle_right",
+            "atrial_appendage_left",
+            "heart_myocardium"
+        ],
+        "is_helper": true,
+        "category": "new_helpers"
+    },
+    "helper_heart_chambers_hull": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_heart_chambers_union"
+        ],
+        "planes": [
+            "axial"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_heart_chambers_union"
+        ]
+    },
+    "helper_heart_chambers_costal_hull": {
+        "rule": "ConvexHull2D",
+        "targets": [
+            "helper_heart_chambers_hull",
+            "costal_cartilages"
+        ],
+        "planes": [
+            "axial"
+        ],
+        "is_helper": true,
+        "category": "new_helpers",
+        "depends_on": [
+            "helper_heart_chambers_hull"
+        ]
+    }
+}

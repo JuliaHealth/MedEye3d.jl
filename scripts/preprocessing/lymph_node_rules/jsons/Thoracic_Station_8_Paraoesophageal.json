@@ -1,0 +1,173 @@
+{
+    "Thoracic_Station_8_Paraoesophageal": {
+        "rule": "VolumetricBoundary2D",
+        "per_slice_lcc": true,
+        "is_bilateral": true,
+        "keep_all_components": true,
+        "boundaries": {
+            "lung_left": "lung_left",
+            "lung_right": "lung_right"
+        },
+        "z_plane_restriction": {
+            "superior": "lung_trachea_bronchia",
+            "superior_part": "min",
+            "superior_selection_mode": "min_physical",
+            "inferior": [
+                {
+                    "landmark": "helper_diaphragm_1cm_aorta",
+                    "part": "center"
+                },
+                {
+                    "landmark": "heart",
+                    "part": "min"
+                }
+            ],
+            "comment": "Inferior: top of aortic hiatus station for continuity",
+            "inferior_selection_mode": "first"
+        },
+        "constraints": [
+            {
+                "constraint_type": "PosteriorTo",
+                "landmark": "heart",
+                "boundary_part": "mid",
+                "slice_wise": true,
+                "comment": "Anterior border is the middle of the heart"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "spinal_cord",
+                "boundary_part": "anterior",
+                "slice_wise": true,
+                "comment": "Posterior border is anterior of spinal cord"
+            }
+        ],
+        "exclude": [
+            "fused_spine",
+            "adrenal_gland_right",
+            "superior_vena_cava",
+            "helper_pleural_space_right",
+            "colon",
+            "kidney_right",
+            "aortic_arch_computed",
+            "ribs_combined",
+            "gallbladder",
+            "helper_Lung_Stomach_Hull_Left",
+            "spinal_cord_dilated_1cm",
+            "duodenum",
+            "small_bowel",
+            "kidney_left",
+            "stomach",
+            "aorta_ascending",
+            "aorta_arch",
+            "thorax_wall",
+            "helper_pleural_space_left",
+            "adrenal_gland_left",
+            "lung_left",
+            "trachea",
+            "helper_sternum_dilated_5mm",
+            "esophagus",
+            "liver",
+            "aorta",
+            "pulmonary_artery",
+            "helper_heart_hull_2d",
+            "helper_Thoracic_Station_8_Paraoesophageal_LungRight_Liver",
+            "helper_Thoracic_Station_8_Paraoesophageal_LungLeft_Spleen",
+            "aorta_descending",
+            "azygos_vein",
+            "spleen",
+            "pancreas",
+            "lung_right",
+            "helper_lung_convex_hull_right",
+            "heart",
+            "helper_lung_convex_hull_left"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeIntersection",
+                "target": "esophagus",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "aorta_descending",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "lung_left",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "lung_right",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "heart",
+                "expected": 0
+            },
+            {
+                "type": "RelativePosition",
+                "target": "heart",
+                "direction": "posterior"
+            }
+        ],
+        "ancillary_landmarks": [
+            "aorta_descending",
+            "aorta_ascending",
+            "aorta_arch",
+            "aortic_arch_computed",
+            "azygos_vein",
+            "bronchi_main_left",
+            "bronchi_main_right",
+            "carina_computed",
+            "esophagus",
+            "heart",
+            "lung_left",
+            "lung_right",
+            "stomach",
+            "trachea",
+            "fused_spine",
+            "superior_vena_cava",
+            "pulmonary_artery",
+            "ribs_combined",
+            "spinal_cord",
+            "spinal_cord_dilated_1cm",
+            "liver",
+            "spleen",
+            "gallbladder",
+            "pancreas",
+            "colon",
+            "small_bowel",
+            "duodenum",
+            "kidney_left",
+            "kidney_right",
+            "adrenal_gland_left",
+            "adrenal_gland_right",
+            "helper_Thoracic_Station_8_Paraoesophageal_LungLeft_Spleen",
+            "helper_Thoracic_Station_8_Paraoesophageal_LungRight_Liver",
+            "helper_lung_convex_hull_left",
+            "helper_lung_convex_hull_right",
+            "helper_sternum_dilated_5mm",
+            "helper_Lung_Stomach_Hull_Left",
+            "Thoracic_Station_Hilar_Interlobar",
+            "Thoracic_Station_Hilar_Interlobar"
+        ],
+        "roi": {
+            "landmark": "esophagus",
+            "padding_mm": [
+                50,
+                50,
+                50
+            ]
+        },
+        "depends_on": [
+            "helper_sternum_dilated_5mm",
+            "helper_Lung_Stomach_Hull_Left",
+            "Thoracic_Station_Hilar_Interlobar",
+            "Abdominal_Station_16a1_Aortic_Hiatus",
+            "helper_diaphragm_1cm_aorta"
+        ]
+    }
+}

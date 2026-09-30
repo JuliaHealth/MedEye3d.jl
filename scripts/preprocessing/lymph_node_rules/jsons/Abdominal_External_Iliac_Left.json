@@ -1,0 +1,65 @@
+{
+    "helper_external_iliac_artery_dilated_Left": {
+        "rule": "Morphology",
+        "operation": "dilate",
+        "radius_mm": 7.0,
+        "landmark": "iliac_artery_external_left",
+        "is_helper": true,
+        "category": "new_helpers"
+    },
+    "helper_external_iliac_vein_dilated_Left": {
+        "rule": "Morphology",
+        "operation": "dilate",
+        "radius_mm": 7.0,
+        "landmark": "iliac_vena_external_left",
+        "is_helper": true,
+        "category": "new_helpers"
+    },
+    "Abdominal_External_Iliac_Left": {
+        "rule": "Combine",
+        "method": "union",
+        "components": [
+            "helper_external_iliac_artery_dilated_Left",
+            "helper_external_iliac_vein_dilated_Left"
+        ],
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "femur",
+                "boundary_part": "max",
+                "offset_mm": -3.0,
+                "comment": "Inferior constraint: 1 slice lower than superior constraint of deep inguinal"
+            }
+        ],
+        "exclude": [
+            "iliac_artery_external_left",
+            "iliac_vena_external_left",
+            "psoas_major_left",
+            "vertebrae_L4",
+            "vertebrae_L5",
+            "sacrum",
+            "small_bowel",
+            "sigmoid",
+            "iliopsoas",
+            "helper_pelvis_gluteal",
+            "stomach",
+            "duodenum",
+            "colon",
+            "liver",
+            "spleen",
+            "pancreas",
+            "gallbladder",
+            "kidney_left",
+            "kidney_right"
+        ],
+        "depends_on": [
+            "helper_external_iliac_artery_dilated_Left",
+            "helper_external_iliac_vein_dilated_Left",
+            "helper_pelvis_gluteal"
+        ],
+        "overlap_precedence": [],
+        "per_slice_lcc": true,
+        "is_bilateral": false,
+        "side": "Left"
+    }
+}

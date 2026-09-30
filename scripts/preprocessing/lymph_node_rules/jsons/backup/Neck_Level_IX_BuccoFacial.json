@@ -1,0 +1,87 @@
+{
+    "Neck_Level_IX_BuccoFacial": {
+        "rule": "AnisotropicMargin",
+        "is_bilateral": true,
+        "input": "masseter",
+        "margins_mm": {
+            "anterior": 30.0
+        },
+        "roi": {
+            "landmark": "masseter",
+            "padding_mm": [
+                100,
+                100,
+                150
+            ]
+        },
+        "constraints": [
+            {
+                "constraint_type": "SuperiorTo",
+                "landmark": "mandible",
+                "boundary_part": "min",
+                "comment": "Inferior limit: menton of mandible"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "eyeball",
+                "boundary_part": "min",
+                "comment": "Superior limit: orbital floor"
+            },
+            {
+                "constraint_type": "AnteriorTo",
+                "landmark": "masseter",
+                "boundary_part": "min",
+                "comment": "Posterior limit: anterior margin of masseter"
+            }
+        ],
+        "exclude": [
+            "gland_parotid",
+            "gland_submandibular",
+            "masseter",
+            "mandible",
+            "skull",
+            "skull_real",
+            "pharynx"
+        ],
+        "assertions": [
+            {
+                "type": "VolumeMin",
+                "value": 5
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "gland_parotid",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "gland_submandibular",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "mandible",
+                "expected": 0
+            },
+            {
+                "type": "VolumeIntersection",
+                "target": "pharynx",
+                "expected": 0
+            }
+        ],
+        "keep_all_components": true,
+        "ignore_global_exclusion": true,
+        "ignore_fat": true,
+        "comments": "Level IX (Bucco-Facial): 30mm anterior expansion from masseter, carved by facial bones and constraints.",
+        "ancillary_landmarks": [
+            "eyeball",
+            "gland_parotid",
+            "gland_submandibular",
+            "mandible",
+            "masseter",
+            "pharynx",
+            "skull",
+            "skull_real"
+        ]
+    }
+}

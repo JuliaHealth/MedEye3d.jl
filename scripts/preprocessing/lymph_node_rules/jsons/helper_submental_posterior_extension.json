@@ -1,0 +1,13 @@
+{
+    "helper_submental_posterior_extension": {
+        "rule": "PosteriorGrowthMask",
+        "input_mask": "Neck_Level_Ia_Submental",
+        "growth_mm": 100.0,
+        "is_bilateral": false,
+        "allow_missing": true,
+        "depends_on": [
+            "Neck_Level_Ia_Submental"
+        ],
+        "is_helper": true
+    }
+}
