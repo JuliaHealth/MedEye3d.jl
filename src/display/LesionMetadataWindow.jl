@@ -492,13 +492,14 @@ function load_radlex()::Vector{String}
             label = strip(parts[2])
             (isempty(rid) || isempty(label)) && continue
             push!(terms, "$(rid) - $(label)")
-            length(terms) >= RADLEX_MAX_TERMS && break
+            # Removed truncation to load all 45k terms for SQLite FTS5 search
         end
         @info "Loaded $(length(terms)) RadLex terms"
     else
         @warn "RadLex CSV not found at $(RADLEX_CSV_PATH)"
     end
     _radlex_cache[] = isempty(terms) ? ["(none)"] : sort(terms)
+    _build_fts!("radlex_fts", _radlex_cache[])
     return _radlex_cache[]
 end
 
@@ -625,12 +626,19 @@ function load_anatomy_ontology()::Vector{String}
     # Pre-compute lowercase for fast searchable_menu filtering
     _searchable_lc_cache[] = [lowercase(t) for t in _anatomy_cache[]]
     # Build FTS5 index for high-performance ranked search
-    _build_anatomy_fts!(_anatomy_cache[])
+    _build_fts!("anatomy_fts", _anatomy_cache[])
     return _anatomy_cache[]
 end
 
 # ─── In-Memory SQLite FTS5 Anatomy Search Engine ─────────────────────────────
-const _anatomy_fts_db = Ref{Union{Nothing, SQLite.DB}}(nothing)
+const _fts_db = Ref{Union{Nothing, SQLite.DB}}(nothing)
+
+function _init_fts_db!()
+    if _fts_db[] === nothing
+        _fts_db[] = SQLite.DB()
+    end
+    return _fts_db[]
+end
 
 # Clinical synonym expansion for search queries
 const CLINICAL_SYNONYMS = Dict{String, String}(
@@ -650,42 +658,40 @@ const CLINICAL_SYNONYMS = Dict{String, String}(
     "windpipe" => "trachea",
 )
 
-"""Build in-memory SQLite FTS5 index from anatomy terms for high-performance search.
-Uses BM25 ranking, prefix indexing (1-3 chars), and unicode61 tokenizer."""
-function _build_anatomy_fts!(terms::Vector{String})
+"""Build in-memory SQLite FTS5 index from terms for high-performance search."""
+function _build_fts!(table::String, terms::Vector{String})
     try
-        db = SQLite.DB()  # in-memory database
-        DBInterface.execute(db, """CREATE VIRTUAL TABLE anatomy_fts USING fts5(
+        db = _init_fts_db!()
+        DBInterface.execute(db, "DROP TABLE IF EXISTS $(table);")
+        DBInterface.execute(db, """CREATE VIRTUAL TABLE $(table) USING fts5(
             term, tokenize="unicode61", prefix="1,2,3"
         );""")
         for t in terms
-            DBInterface.execute(db, "INSERT INTO anatomy_fts (term) VALUES (?);", [t])
+            DBInterface.execute(db, "INSERT INTO $(table) (term) VALUES (?);", [t])
         end
-        _anatomy_fts_db[] = db
-        @info "[ANAT] Built FTS5 index with $(length(terms)) anatomy terms"
+        @info "[FTS] Built FTS5 index '$table' with $(length(terms)) terms"
     catch e
-        @warn "[ANAT] Failed to build FTS5 index, falling back to linear search: $e"
-        _anatomy_fts_db[] = nothing
+        @warn "[FTS] Failed to build FTS5 index for '$table': $e"
     end
 end
 
-"""Search anatomy terms using FTS5 with BM25 ranking and prefix matching.
-Returns ranked results (most relevant first). Falls back to empty if FTS5 unavailable."""
-function fts_anatomy_search(query::String; limit::Int=25)::Vector{String}
-    db = _anatomy_fts_db[]
+"""Search terms using FTS5 with BM25 ranking and prefix matching."""
+function fts_search(table::String, query::String; limit::Int=25)::Vector{String}
+    db = _fts_db[]
     db === nothing && return String[]
     q = lowercase(strip(query))
     isempty(q) && return String[]
     
-    # Expand clinical synonyms
-    for (syn, canonical) in CLINICAL_SYNONYMS
-        if occursin(syn, q)
-            q = replace(q, syn => canonical)
+    if table == "anatomy_fts"
+        # Expand clinical synonyms
+        for (syn, canonical) in CLINICAL_SYNONYMS
+            if occursin(syn, q)
+                q = replace(q, syn => canonical)
+            end
         end
+        # Normalize plurals
+        q = replace(q, r"(ae|es|s)$" => "")
     end
-    
-    # Normalize plurals: vertebrae→vertebra, bones→bone
-    q = replace(q, r"(ae|es|s)$" => "")
     
     # Build FTS5 query: last token gets * for prefix/autocomplete matching
     tokens = split(q)
@@ -699,12 +705,12 @@ function fts_anatomy_search(query::String; limit::Int=25)::Vector{String}
     results = String[]
     try
         for row in DBInterface.execute(db,
-            "SELECT term FROM anatomy_fts WHERE anatomy_fts MATCH ? ORDER BY rank LIMIT ?;",
+            "SELECT term FROM $(table) WHERE $(table) MATCH ? ORDER BY rank LIMIT ?;",
             [fts_query, limit])
             push!(results, row.term)
         end
     catch e
-        @debug "[ANAT] FTS5 query failed for '$fts_query': $e"
+        @debug "[FTS] Query failed on '$table' for '$fts_query': $e"
     end
     return results
 end
@@ -2123,6 +2129,7 @@ Closing the dropdown restores all options.
 function searchable_menu(g, row, cols;
         options,
         default = 1,
+        fts_table = "anatomy_fts",
         fontsize = 10)
 
     # Snapshot original full options
@@ -2169,7 +2176,7 @@ function searchable_menu(g, row, cols;
             else
                 # Standard restore logic if they didn't type anything new (or if they actually clicked an item)
                 if !isempty(filter_buf[])
-                    _apply_searchable_filter!(menu, "", all_opts[])
+                    _apply_searchable_filter!(menu, "", all_opts[], fts_table)
                 end
                 if sel !== nothing && !isempty(string(sel))
                     sel_str = string(sel)
@@ -2246,7 +2253,7 @@ function searchable_menu(g, row, cols;
         on(options) do new_opts
             all_opts[] = collect(String, new_opts)
             if !menu.is_open[]
-                _apply_searchable_filter!(menu, "", all_opts[])
+                _apply_searchable_filter!(menu, "", all_opts[], fts_table)
             end
         end
     end
@@ -2264,7 +2271,7 @@ end
 """Apply the current filter text to a searchable menu's options.
 Uses SQLite FTS5 for ranked search with BM25 relevance scoring on large option sets (anatomy).
 Falls back to linear substring scan for small sets or when FTS5 returns empty."""
-function _apply_searchable_filter!(menu, query::String, full_opts::Vector{String})
+function _apply_searchable_filter!(menu, query::String, full_opts::Vector{String}, fts_table="anatomy_fts")
     MAX_DISPLAY = 25  # Limit displayed matches to prevent Makie layout rebuild bottleneck
     if isempty(query)
         # Show only first MAX_DISPLAY items when no filter (avoids 16K item rebuild)
@@ -2283,8 +2290,8 @@ function _apply_searchable_filter!(menu, query::String, full_opts::Vector{String
     else
         # For large option sets (anatomy, 16K+ items), use FTS5 ranked search
         # For small sets (<100 items), skip FTS5 overhead and use linear scan directly
-        use_fts = length(full_opts) >= 100
-        filtered = use_fts ? fts_anatomy_search(query; limit = MAX_DISPLAY) : String[]
+        use_fts = (fts_table != "") && length(full_opts) >= 100
+        filtered = use_fts ? fts_search(fts_table, query; limit = MAX_DISPLAY) : String[]
         
         # Linear substring scan (primary for small sets, fallback for large)
         if isempty(filtered)
@@ -4654,7 +4661,11 @@ function create_metadata_window(
             radlex_filtered[] = isempty(radlex) ? ["(none)"] : (length(radlex) > 200 ? radlex[1:200] : radlex)
         else
             tl = lowercase(t)
-            hits = filter(s -> occursin(tl, lowercase(s)), radlex)
+            hits = fts_search("radlex_fts", tl; limit=200)
+            if isempty(hits)
+                # Fallback to linear
+                hits = filter(s -> occursin(tl, lowercase(s)), radlex)
+            end
             radlex_filtered[] = isempty(hits) ? ["(none)"] : (length(hits) > 200 ? hits[1:200] : hits)
         end
     end
