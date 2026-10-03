@@ -7895,18 +7895,32 @@ function create_metadata_window(
 
     obs_next_lesion = Observable(0)
     obs_prev_lesion = Observable(0)
+    
+    _lesion_nav_subject = Subject(Bool)
+    _lesion_nav_accum = Ref(0)
+    
     on(obs_next_lesion) do _
-        opts = lesion_ids[]; isempty(opts) && return
-        idx = findfirst(==(active_lesion_id[]), opts)
-        new_idx = idx === nothing ? 1 : (idx == length(opts) ? 1 : idx + 1)
-        active_lesion_id[] = opts[new_idx]
+        _lesion_nav_accum[] += 1
+        next!(_lesion_nav_subject, true)
     end
     on(obs_prev_lesion) do _
-        opts = lesion_ids[]; isempty(opts) && return
-        idx = findfirst(==(active_lesion_id[]), opts)
-        new_idx = idx === nothing ? 1 : (idx == 1 ? length(opts) : idx - 1)
-        active_lesion_id[] = opts[new_idx]
+        _lesion_nav_accum[] -= 1
+        next!(_lesion_nav_subject, true)
     end
+
+    subscribe!(_lesion_nav_subject |> debounce_time(100), actor(Bool) do _
+        delta = _lesion_nav_accum[]
+        _lesion_nav_accum[] = 0
+        if delta != 0
+            opts = lesion_ids[]
+            isempty(opts) && return
+            idx = findfirst(==(active_lesion_id[]), opts)
+            idx = idx === nothing ? 1 : idx
+            new_idx = mod1(idx + delta, length(opts))
+            active_lesion_id[] = opts[new_idx]
+        end
+    end)
+    
     _lmw_observables[:obs_next_lesion] = obs_next_lesion
     _lmw_observables[:obs_prev_lesion] = obs_prev_lesion
 
