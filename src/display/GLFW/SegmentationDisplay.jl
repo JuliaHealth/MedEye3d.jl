@@ -1521,6 +1521,9 @@ function coordinateDisplay(
                         end
                     end
                 end
+                
+                # Prevent event processing from starving the main thread's render loop
+                yield()
             catch e
                 if (e isa InvalidStateException && e.state === :closed) || !isopen(mainChannel)
                     shouldStop[1] = true
