@@ -71,9 +71,18 @@
             "gallbladder",
             "small_bowel",
             "stomach",
-            "duodenum"
+            "duodenum",
+            "Abdominal_Common_Iliac_Left",
+            "Abdominal_Common_Iliac_Right"
         ],
-        "overlap_precedence": [],
+        "overlap_precedence": [
+            "Abdominal_Common_Iliac_Left",
+            "Abdominal_Common_Iliac_Right",
+            "Abdominal_External_Iliac_Left",
+            "Abdominal_External_Iliac_Right",
+            "Abdominal_Internal_Iliac_Left",
+            "Abdominal_Internal_Iliac_Right"
+        ],
         "per_slice_lcc": true,
         "keep_all_components": false,
         "depends_on": [

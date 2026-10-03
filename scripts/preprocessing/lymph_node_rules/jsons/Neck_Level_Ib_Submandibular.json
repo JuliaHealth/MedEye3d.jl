@@ -90,7 +90,6 @@
                 "value": 100,
                 "message": "ERROR: Mandible is missing, rejecting submandibular."
             },
-
             {
                 "type": "VolumeMin",
                 "value": 100
@@ -106,7 +105,6 @@
                 "expected": 0
             }
         ],
-        "keep_all_components": false,
         "ignore_global_exclusion": true,
         "ignore_fat": true,
         "comments": "Neck Level IB (Submandibular): Implementation exactly as per docs/new_defs_manual/neck/Ia_Ib.md",
@@ -146,6 +144,7 @@
         "depends_on": [
             "lev_vert",
             "Neck_Level_Va_Upper_Posterior_Triangle"
-        ]
+        ],
+        "keep_component_adjacent_to": "submandibular_gland"
     }
 }

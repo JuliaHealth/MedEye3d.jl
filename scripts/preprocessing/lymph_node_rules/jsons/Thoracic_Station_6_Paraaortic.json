@@ -7,15 +7,18 @@
             "aortic_arch_computed"
         ],
         "is_bilateral": false,
+        "constraints": [
+            {
+                "constraint_type": "LineLimitBetweenLandmarks",
+                "landmark_1": "aorta_ascending",
+                "landmark_2": "aorta_descending",
+                "label_value": 2,
+                "comment": "Keep Lateral (Left) side of asc-desc aorta centerline — Station 6 is between arch and left lung"
+            }
+        ],
         "overlap_precedence": [
             "Thoracic_Station_Prepericardial_Left",
-            "Thoracic_Station_Prepericardial_Right",
-            "Thoracic_Station_2_UpperParatracheal_Left",
-            "Thoracic_Station_2_UpperParatracheal_Right",
-            "Thoracic_Station_2_UpperParatracheal",
-            "Thoracic_Station_4_LowerParatracheal_Left",
-            "Thoracic_Station_4_LowerParatracheal_Right",
-            "Thoracic_Station_4_LowerParatracheal"
+            "Thoracic_Station_Prepericardial_Right"
         ],
         "exclude": [
             "aorta",

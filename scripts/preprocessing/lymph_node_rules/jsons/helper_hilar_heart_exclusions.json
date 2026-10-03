@@ -1,0 +1,33 @@
+{
+  "helper_heart_chambers_hull_dilated_20mm": {
+    "rule": "AnisotropicMargin",
+    "base_landmark": "helper_heart_chambers_hull",
+    "margins_mm": {
+      "left": 20.0,
+      "right": 20.0,
+      "anterior": 0.0,
+      "posterior": 0.0,
+      "slice_wise": true
+    },
+    "is_helper": true,
+    "category": "new_helpers",
+    "depends_on": [
+      "helper_heart_chambers_hull"
+    ],
+    "comments": "Extend heart chambers hull 2cm laterally (left + right) only, per-slice, to create boundary lines for hilar exclusion"
+  },
+  "helper_heart_chambers_hull_lateral_extended": {
+    "rule": "ConvexHull2D",
+    "targets": [
+      "helper_heart_chambers_hull_dilated_20mm"
+    ],
+    "planes": [
+      "axial"
+    ],
+    "is_helper": true,
+    "category": "new_helpers",
+    "depends_on": [
+      "helper_heart_chambers_hull_dilated_20mm"
+    ]
+  }
+}

@@ -292,7 +292,33 @@ function main()
                     end
             end
         end
-        println("Done saving HDF5 to $h5_output.")
+    used_rules = Dict{String, Any}()
+    all_rules = DagVm.load_all_rules(json_dir)
+    function add_rule_and_deps(name)
+        if haskey(used_rules, name); return; end
+        if !haskey(all_rules, name); return; end
+        rule = all_rules[name]
+        used_rules[name] = rule
+        if haskey(rule, "components")
+            for comp in rule["components"]; add_rule_and_deps(comp); end
+        end
+        if haskey(rule, "depends_on")
+            for dep in rule["depends_on"]; add_rule_and_deps(dep); end
+        end
+        if haskey(rule, "z_plane_restriction")
+            z = rule["z_plane_restriction"]
+            if haskey(z, "superior"); add_rule_and_deps(z["superior"]); end
+            if haskey(z, "inferior"); add_rule_and_deps(z["inferior"]); end
+        end
+    end
+    for k in keys(gen_masks)
+        add_rule_and_deps(k)
+    end
+    json_out_path = joinpath(dirname(h5_output), "used_lymph_node_rules.json")
+    open(json_out_path, "w") do io
+        JSON.print(io, used_rules, 4)
+    end
+    println("Done saving HDF5 to $h5_output and used rules to $json_out_path")
         return
     end
 

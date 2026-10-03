@@ -10,7 +10,9 @@
             "pectoralis_major_right",
             "pectoralis_minor_right",
             "ribs_combined",
-            "helper_Axillary_II_lung_hull_Right"
+            "helper_Axillary_II_lung_hull_Right",
+            "lung_left",
+            "lung_right"
         ],
         "side": "right",
         "level": "i",

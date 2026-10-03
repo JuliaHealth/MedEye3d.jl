@@ -76,7 +76,7 @@ function pack_masks(masks::AbstractDict; backend=CPU())
     
     first_mask = first(values(masks))
     dims = (size(first_mask, 1), size(first_mask, 2), size(first_mask, 3))
-    packed = PackedTensor(dims; capacity=80, backend=CPU())
+    packed = PackedTensor(dims; capacity=96, backend=CPU())
     
     # Pre-count voxels once per mask
     counts = Dict{String, Int}()

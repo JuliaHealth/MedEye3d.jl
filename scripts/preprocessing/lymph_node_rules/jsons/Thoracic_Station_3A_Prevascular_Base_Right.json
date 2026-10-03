@@ -14,6 +14,10 @@
                 "comment": "Separation of left and right using middle of trachea"
             }
         ],
-        "keep_all_components": true
+        "keep_all_components": true,
+        "exclude": [
+            "lung_left",
+            "lung_right"
+        ]
     }
 }

@@ -5,7 +5,8 @@
         "is_bilateral": true,
         "depends_on": [
             "Neck_Level_Ib_Submandibular",
-            "lev_vert"
+            "lev_vert",
+            "brain"
         ],
         "exclude": [
             "parotid_gland",
@@ -40,6 +41,12 @@
                 "slice_wise": true,
                 "only_where_present": true,
                 "comment": "Anterior constraint: sternohyoid/stylohyoid proxies"
+            },
+            {
+                "constraint_type": "InferiorTo",
+                "landmark": "brain",
+                "boundary_part": "min",
+                "comment": "Cranial constraint: do not extend superior to the bottom of the brain"
             }
         ],
         "assertions": [
@@ -98,15 +105,15 @@
                 "Neck_Level_Ib_Submandibular",
                 "submandibular_gland"
             ],
-            "superior": "skull",
+            "superior": "brain",
             "inferior": "hyoid"
         },
         "z_plane_restriction": {
-            "superior": "skull",
-            "superior_part": "max",
+            "superior": "brain",
+            "superior_part": "min",
             "inferior": "hyoid",
             "inferior_part": "min",
-            "comment": "Superior: top of skull. Inferior: bottom of hyoid."
+            "comment": "Superior: bottom of brain. Inferior: bottom of hyoid."
         }
     }
 }

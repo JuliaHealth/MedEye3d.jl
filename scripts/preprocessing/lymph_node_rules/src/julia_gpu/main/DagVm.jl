@@ -354,6 +354,46 @@ function run_dag_vm_pipeline(
         masks["sacrum"] = copy(s1_mask)
     end
     if haskey(masks, "urinary_bladder"); masks["bladder"] = masks["urinary_bladder"]; end
+
+    # Build fused vertebral column: pairwise coronal+sagittal convex hull bridging
+    # between adjacent vertebrae to fill intervertebral disc gaps while preserving curvature
+    println("  -> Building fused vertebral column (pairwise hull bridging)...")
+    vertebrae_order = [
+        "vertebrae_C1", "vertebrae_C2", "vertebrae_C3", "vertebrae_C4", "vertebrae_C5", "vertebrae_C6", "vertebrae_C7",
+        "vertebrae_T1", "vertebrae_T2", "vertebrae_T3", "vertebrae_T4", "vertebrae_T5", "vertebrae_T6", "vertebrae_T7",
+        "vertebrae_T8", "vertebrae_T9", "vertebrae_T10", "vertebrae_T11", "vertebrae_T12",
+        "vertebrae_L1", "vertebrae_L2", "vertebrae_L3", "vertebrae_L4", "vertebrae_L5",
+        "vertebrae_S1", "sacrum"
+    ]
+    present_verts = [k for k in vertebrae_order if haskey(masks, k) && masks[k] !== nothing && any(masks[k] .> 0)]
+    if length(present_verts) >= 2
+        fused_spine_gpu = KernelAbstractions.zeros(backend, UInt8, dims)
+        # Base union of all present vertebrae
+        for k in present_verts
+            m_gpu = backend isa CPU ? masks[k] : adapt(backend, masks[k])
+            fused_spine_gpu .|= (m_gpu .> UInt8(0))
+        end
+        # Pairwise convex hull bridging between adjacent vertebrae
+        n_bridged = 0
+        for i in 1:(length(present_verts) - 1)
+            k1, k2 = present_verts[i], present_verts[i+1]
+            m1 = backend isa CPU ? masks[k1] : adapt(backend, masks[k1])
+            m2 = backend isa CPU ? masks[k2] : adapt(backend, masks[k2])
+            try
+                cor = RuleExecutors.execute_convex_hull_bridge(backend, m1, m2, dims, spacing, origin, direction; plane="coronal")
+                sag = RuleExecutors.execute_convex_hull_bridge(backend, m1, m2, dims, spacing, origin, direction; plane="sagittal")
+                # Intersect coronal & sagittal bridges and accumulate
+                fused_spine_gpu .|= (cor .& sag)
+                n_bridged += 1
+            catch e
+                # Skip pairs that fail (e.g. too few voxels for hull)
+            end
+        end
+        fused_spine_cpu = Array(fused_spine_gpu)
+        masks["fused_spine"] = fused_spine_cpu
+        masks["vertebral_column_fused"] = fused_spine_cpu
+        println("  -> Fused spine: $(sum(fused_spine_cpu .> 0)) voxels, $(n_bridged) bridges from $(length(present_verts)) vertebrae")
+    end
     if haskey(masks, "thorax_wall"); masks["chest_wall"] = masks["thorax_wall"]; end
     if haskey(masks, "psoas_major"); masks["psoas"] = masks["psoas_major"]; end
     if !haskey(masks, "bronchi_left") && haskey(masks, "bronchi_main_left"); masks["bronchi_left"] = masks["bronchi_main_left"]; end
@@ -369,9 +409,9 @@ function run_dag_vm_pipeline(
     t_arena_start = time()
     StaticArena.init_edt_arena(backend, dims)
     println("  -> Initialized StaticArena (EDT Arena preallocated).")
-    StaticArena.init_vm_arena(backend, dims; max_rules=64)
+    StaticArena.init_vm_arena(backend, dims; max_rules=32)
     println("  -> Initialized StaticArena (VM level_output Arena preallocated: 32 channels UInt8).")
-    StaticArena.init_mask_arena(backend, dims; num_masks=20)
+    StaticArena.init_mask_arena(backend, dims; num_masks=12)
     println("  -> Initialized StaticArena (MASK_ARENA preallocated: 20 × UInt8 3D buffers).")
     StaticArena.init_ccl_arena(backend, dims)
     println("  -> Initialized StaticArena (CCL_ARENA preallocated: labels+counts+output).")
@@ -737,6 +777,21 @@ function run_dag_vm_pipeline(
                 return rib1_u
             end
         end
+
+        # Generic rib_N -> rib_left_N + rib_right_N (handles rib_2 through rib_12)
+        m_rib = match(r"^rib_(\d+)$", nl)
+        if m_rib !== nothing
+            n = m_rib.captures[1]
+            r_l = get_mask("rib_left_$(n)"); r_r = get_mask("rib_right_$(n)")
+            if r_l !== nothing || r_r !== nothing
+                rib_u = KernelAbstractions.zeros(backend, UInt8, dims)
+                if r_l !== nothing; rib_u .|= (r_l .> UInt8(0)); end
+                if r_r !== nothing; rib_u .|= (r_r .> UInt8(0)); end
+                composite_cache[nl] = rib_u
+                return rib_u
+            end
+        end
+
 
         if nl == "manubrium"
             stern = get_mask("sternum")
@@ -2597,7 +2652,103 @@ function run_dag_vm_pipeline(
                 end
             end
             rdef = get(rules, base_rule_name, Dict())
-            if !get(rdef, "keep_all_components", false)
+            adjacent_to = get(rdef, "keep_component_adjacent_to", nothing)
+            if adjacent_to !== nothing
+                # Select largest component that overlaps with anchor mask (dilated by ~5mm)
+                v_ch = view(level_output_buf, :, :, :, r_idx)
+                if gpu_count(v_ch) > 0
+                    # Get anchor mask from packed_tensor
+                    anchor_name = adjacent_to
+                    # For bilateral rules, append side suffix
+                    if endswith(out_k, "_Left") && !haskey(packed_tensor.registry, anchor_name)
+                        anchor_name = anchor_name * "_left"
+                    elseif endswith(out_k, "_Right") && !haskey(packed_tensor.registry, anchor_name)
+                        anchor_name = anchor_name * "_right"
+                    end
+                    anchor_mask = haskey(packed_tensor.registry, anchor_name) ? MaskPacker.unpack_mask(packed_tensor, anchor_name) : nothing
+                    if anchor_mask !== nothing
+                        # Dilate anchor by 5mm on CPU for adjacency tolerance
+                        anchor_cpu = Array(anchor_mask)
+                        dilate_vox = max(2, round(Int, 10.0 / minimum(spacing)))
+                        # Simple 3D dilation on CPU: expand any nonzero voxel by dilate_vox in each direction
+                        anchor_dilated_cpu = copy(anchor_cpu)
+                        nz_indices = findall(x -> x > UInt8(0), anchor_cpu)
+                        for idx in nz_indices
+                            ci = Tuple(idx)
+                            for dz in -dilate_vox:dilate_vox, dy in -dilate_vox:dilate_vox, dx in -dilate_vox:dilate_vox
+                                nz_i = ci[1] + dz
+                                ny_i = ci[2] + dy
+                                nx_i = ci[3] + dx
+                                if 1 <= nz_i <= dims[1] && 1 <= ny_i <= dims[2] && 1 <= nx_i <= dims[3]
+                                    anchor_dilated_cpu[nz_i, ny_i, nx_i] = UInt8(1)
+                                end
+                            end
+                        end
+                        
+                        # Run CCL steps 1-4 (label + count)
+                        n_voxels = Int32(dims[1] * dims[2] * dims[3])
+                        fill!(StaticArena.CCL_ARENA[:counts], Int32(0))
+                        kernel_init = GpuCCL.ccl_init_kernel!(backend, 256)
+                        kernel_init(StaticArena.CCL_ARENA[:labels], v_ch, n_voxels; ndrange=Int(n_voxels))
+                        KernelAbstractions.synchronize(backend)
+                        kernel_merge = GpuCCL.ccl_merge_kernel!(backend, (8, 4, 4))
+                        kernel_merge(StaticArena.CCL_ARENA[:labels], v_ch, Int32(dims[1]), Int32(dims[2]), Int32(dims[3]); ndrange=(Int(dims[1]), Int(dims[2]), Int(dims[3])))
+                        KernelAbstractions.synchronize(backend)
+                        kernel_compress = GpuCCL.ccl_compress_kernel!(backend, 256)
+                        kernel_compress(StaticArena.CCL_ARENA[:labels], n_voxels; ndrange=Int(n_voxels))
+                        KernelAbstractions.synchronize(backend)
+                        kernel_count = GpuCCL.ccl_count_kernel!(backend, 256)
+                        kernel_count(StaticArena.CCL_ARENA[:counts], StaticArena.CCL_ARENA[:labels], n_voxels; ndrange=Int(n_voxels))
+                        KernelAbstractions.synchronize(backend)
+                        
+                        # Transfer labels to CPU for component analysis
+                        labels_cpu = Array(StaticArena.CCL_ARENA[:labels])
+                        counts_cpu = Array(StaticArena.CCL_ARENA[:counts])
+                        
+                        # Find all unique labels that overlap with dilated anchor
+                        adjacent_labels = Set{Int32}()
+                        anchor_flat = vec(anchor_dilated_cpu)
+                        for i in 1:length(labels_cpu)
+                            if labels_cpu[i] > 0 && anchor_flat[i] > 0
+                                push!(adjacent_labels, labels_cpu[i])
+                            end
+                        end
+                        
+                        if !isempty(adjacent_labels)
+                            # Pick largest among adjacent components
+                            best_label = Int32(0)
+                            best_count = Int32(0)
+                            for lbl in adjacent_labels
+                                if counts_cpu[lbl] > best_count
+                                    best_count = counts_cpu[lbl]
+                                    best_label = lbl
+                                end
+                            end
+                            # Extract the winning component
+                            kernel_extract = GpuCCL.ccl_extract_kernel!(backend, 256)
+                            kernel_extract(v_ch, StaticArena.CCL_ARENA[:labels], best_label, n_voxels; ndrange=Int(n_voxels))
+                            KernelAbstractions.synchronize(backend)
+                            println("    [CCL-Adjacent] $out_k: selected component $best_label ($best_count voxels) adjacent to $anchor_name ($(length(adjacent_labels)) candidates)")
+                        else
+                            println("    [CCL-Adjacent] $out_k: no component adjacent to $anchor_name, falling back to standard LCC")
+                            GpuCCL.gpu_largest_connected_component!(
+                                backend, v_ch, v_ch, dims,
+                                StaticArena.CCL_ARENA[:labels], StaticArena.CCL_ARENA[:counts];
+                                block_val=get(StaticArena.CCL_ARENA, :block_val, nothing),
+                                block_idx=get(StaticArena.CCL_ARENA, :block_idx, nothing)
+                            )
+                        end
+                    else
+                        println("    [CCL-Adjacent] $out_k: anchor '$anchor_name' not found, falling back to standard LCC")
+                        GpuCCL.gpu_largest_connected_component!(
+                            backend, v_ch, v_ch, dims,
+                            StaticArena.CCL_ARENA[:labels], StaticArena.CCL_ARENA[:counts];
+                            block_val=get(StaticArena.CCL_ARENA, :block_val, nothing),
+                            block_idx=get(StaticArena.CCL_ARENA, :block_idx, nothing)
+                        )
+                    end
+                end
+            elseif !get(rdef, "keep_all_components", false)
                 v_ch = view(level_output_buf, :, :, :, r_idx)
                 if gpu_count(v_ch) > 0
                     GpuCCL.gpu_largest_connected_component!(

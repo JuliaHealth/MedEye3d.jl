@@ -2,6 +2,7 @@
     "Neck_Level_Va_Upper_Posterior_Triangle": {
         "rule": "AnisotropicMargin",
         "is_bilateral": true,
+        "keep_all_components": true,
         "input": "body",
         "constraints": [
             {

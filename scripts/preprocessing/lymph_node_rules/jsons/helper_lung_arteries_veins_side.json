@@ -1,0 +1,58 @@
+{
+  "helper_lung_arteries_left_side": {
+    "rule": "GeometricConstraint",
+    "landmark": "lung_arteries",
+    "constraints": [
+      {
+        "constraint_type": "LeftOf",
+        "landmark": "vertebrae",
+        "boundary_part": "center",
+        "slice_wise": true
+      }
+    ],
+    "is_helper": true,
+    "category": "new_helpers"
+  },
+  "helper_lung_arteries_right_side": {
+    "rule": "GeometricConstraint",
+    "landmark": "lung_arteries",
+    "constraints": [
+      {
+        "constraint_type": "RightOf",
+        "landmark": "vertebrae",
+        "boundary_part": "center",
+        "slice_wise": true
+      }
+    ],
+    "is_helper": true,
+    "category": "new_helpers"
+  },
+  "helper_lung_veins_left_side": {
+    "rule": "GeometricConstraint",
+    "landmark": "lung_veins",
+    "constraints": [
+      {
+        "constraint_type": "LeftOf",
+        "landmark": "vertebrae",
+        "boundary_part": "center",
+        "slice_wise": true
+      }
+    ],
+    "is_helper": true,
+    "category": "new_helpers"
+  },
+  "helper_lung_veins_right_side": {
+    "rule": "GeometricConstraint",
+    "landmark": "lung_veins",
+    "constraints": [
+      {
+        "constraint_type": "RightOf",
+        "landmark": "vertebrae",
+        "boundary_part": "center",
+        "slice_wise": true
+      }
+    ],
+    "is_helper": true,
+    "category": "new_helpers"
+  }
+}
