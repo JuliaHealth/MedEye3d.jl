@@ -59,7 +59,8 @@
             "Thoracic_Station_5_Subaortic",
             "Thoracic_Station_5_Subaortic_Left",
             "Abdominal_Station_16a1_Aortic_Hiatus",
-            "Abdominal_Station_16a2_Upper_Middle_Paraaortic"
+            "Abdominal_Station_16a2_Upper_Middle_Paraaortic",
+            "Thoracic_Station_6_Paraaortic"
         ],
         "keep_all_components": false,
         "post_overlap_lcc": true

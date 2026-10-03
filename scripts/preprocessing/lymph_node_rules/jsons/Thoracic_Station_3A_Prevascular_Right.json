@@ -31,8 +31,8 @@
         "exclude": [
             "sternum",
             "manubrium",
-            "clavicle_left",
-            "clavicle_right",
+            "clavicula_left",
+            "clavicula_right",
             "heart",
             "trachea",
             "lung_left",

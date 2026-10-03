@@ -98,10 +98,9 @@ function run_dag_execution(case_dir::String, h5_path::String; output_dir::String
     
     # 3. Save NIfTI outputs
     
-    h5_out = joinpath(dirname(h5_path), "..", "..", "final_results_gpu.h5") # or just "final_results_gpu.h5" in current dir
-    h5_out_local = "final_results_gpu.h5"
+    h5_out_local = joinpath(case_dir, "final_results_gpu.h5")
     println("\nSaving $(length(gen_masks)) raw masks to $h5_out_local...")
-    h5open(h5_out_local, "w") do f
+    h5open(h5_out_local, "w"; libver_bounds=(v"1.8", v"1.10")) do f
         for (k, v) in gen_masks
             try
                 arr = collect(v)

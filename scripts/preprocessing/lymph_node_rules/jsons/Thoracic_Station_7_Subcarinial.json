@@ -51,7 +51,8 @@
             "lung_lower_lobe_left",
             "lung_upper_lobe_right",
             "lung_middle_lobe_right",
-            "lung_lower_lobe_right"
+            "lung_lower_lobe_right",
+            "superior_vena_cava"
         ],
         "keep_all_components": false,
         "z_plane_restriction": {
@@ -122,7 +123,10 @@
             "lung_upper_lobe_right",
             "lung_middle_lobe_right",
             "lung_lower_lobe_right",
-            "aorta"
+            "aorta",
+            "superior_vena_cava",
+            "lung_left",
+            "lung_right"
         ],
         "overlap_precedence": [
             "Thoracic_Station_8_Paraoesophageal",
@@ -179,7 +183,8 @@
         ],
         "exclude": [
             "lung_left",
-            "lung_right"
+            "lung_right",
+            "superior_vena_cava"
         ],
         "keep_all_components": false,
         "is_helper": true,
@@ -271,7 +276,8 @@
             "vertebrae",
             "spinal_cord",
             "lung_left",
-            "lung_right"
+            "lung_right",
+            "superior_vena_cava"
         ],
         "is_helper": true,
         "category": "new_helpers",

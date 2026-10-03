@@ -457,7 +457,11 @@ function execute_axillary_rtog(
     keep_larger = is_ras ? !is_left : is_left
     keep_side_str = keep_larger ? "max" : "min"
 
-    
+    # Reclaim GPU memory before heavy EDT allocations
+    GC.gc(false)
+    if backend isa CUDABackend; CUDA.reclaim(); end
+
+
     scapula = get_mask_fn("scapula_$s_lower")
     if scapula === nothing
         scapula = get_mask_fn("scapula")

@@ -4,6 +4,7 @@ using LinearAlgebra
 using Statistics
 using Adapt
 using CUDA
+using ImageMorphology: label_components
 import ..Landmarks
 
 @kernel function compute_centroid_kernel!(mask, stats, ox::Float32, oy::Float32, oz::Float32, sx::Float32, sy::Float32, sz::Float32, d00::Float32, d11::Float32, d22::Float32, dx::Int32, dy::Int32, dz::Int32)
@@ -339,7 +340,20 @@ function precalculate_all_gpu_landmarks!(
     hyoid = get(masks, "hyoid", nothing)
     
     if mandible !== nothing
-        mb = gpu_compute_mask_bounds(mandible)
+        # Filter mandible to Largest Connected Component to remove spurious artifacts
+        # (e.g., arm/headrest voxels from dental segmentation that corrupt chin landmark)
+        mand_cpu = mandible isa CuArray ? Array(mandible) : Array(mandible)
+        mand_bool = mand_cpu .> UInt8(0)
+        labels = label_components(mand_bool)
+        if maximum(labels) > 1
+            counts = [count(==(i), labels) for i in 1:maximum(labels)]
+            biggest = argmax(counts)
+            mandible_lcc = CuArray(UInt8.(labels .== biggest))
+            println("    [LCC] Mandible: $(sum(mand_bool)) voxels → LCC $(counts[biggest]) voxels ($(maximum(labels)) components, removed $(sum(mand_bool) - counts[biggest]) artifact voxels)")
+        else
+            mandible_lcc = mandible isa CuArray ? mandible : CuArray(UInt8.(mand_bool))
+        end
+        mb = gpu_compute_mask_bounds(mandible_lcc)
         if mb[1] > 0
             x_mid = (mb[1] + mb[2]) / 2.0
             y_mid = (mb[3] + mb[4]) / 2.0
@@ -362,7 +376,7 @@ function precalculate_all_gpu_landmarks!(
             y_min_col = KernelAbstractions.zeros(backend, Int32, n_cols, n_slices)
             y_min_col .= Int32(999999)
             
-            mand_gpu = (mandible isa CuArray) ? mandible : adapt(backend, UInt8.(mandible .> 0))
+            mand_gpu = (mandible_lcc isa CuArray) ? mandible_lcc : adapt(backend, UInt8.(mandible_lcc .> 0))
             k_mand! = find_anterior_midline_mandible_kernel!(backend)
             k_mand!(y_min_col, mand_gpu, Int32(i_min), Int32(i_max), Int32(mb[3]), Int32(mb[4]), Int32(mb[5]), Int32(mb[6]), ndrange=(n_cols, n_slices))
             KernelAbstractions.synchronize(backend)

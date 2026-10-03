@@ -2,6 +2,7 @@ module MedImagesIO
 
 using MedImages
 using HDF5
+using NIfTI
 
 export load_ct_volume, load_organ_masks, save_nifti_mask
 
@@ -65,9 +66,15 @@ Saves a 3D UInt8 array `arr` as a NIfTI file with geometry copied from `ref_path
 """
 function save_nifti_mask(arr::AbstractArray{UInt8, 3}, ref_path::String, out_path::String)
     mkpath(dirname(out_path))
-    ref_img = MedImages.load_image(ref_path)
-    out_img = MedImages.update_voxel_data(ref_img, arr)
-    MedImages.create_nii_from_medimage(out_img, out_path)
+    try
+        ref_img = MedImages.load_image(ref_path)
+        out_img = MedImages.update_voxel_data(ref_img, arr)
+        MedImages.create_nii_from_medimage(out_img, out_path)
+    catch e
+        # Fallback: use NIfTI.jl directly if MedImages fails
+        ref_nii = niread(ref_path)
+        niwrite(out_path, NIVolume(ref_nii.header, ref_nii.extensions, arr))
+    end
 end
 
 end # module MedImagesIO

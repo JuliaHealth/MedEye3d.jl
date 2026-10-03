@@ -1,126 +1,128 @@
 {
-    "helper_lung_arteries_left_side": {
-        "rule": "GeometricConstraint",
-        "landmark": "lung_arteries",
-        "constraints": [
-            {
-                "constraint_type": "LeftOf",
-                "landmark": "vertebrae",
-                "boundary_part": "center",
-                "slice_wise": true
-            }
-        ],
-        "is_helper": true,
-        "category": "new_helpers"
+  "helper_pulmonary_artery_left_side": {
+    "rule": "GeometricConstraint",
+    "landmark": "lung_arteries",
+    "constraints": [
+      {
+        "constraint_type": "LeftOf",
+        "landmark": "vertebrae",
+        "boundary_part": "center",
+        "slice_wise": true
+      }
+    ],
+    "is_helper": true,
+    "category": "new_helpers"
+  },
+  "helper_pulmonary_vein_left_side": {
+    "rule": "GeometricConstraint",
+    "landmark": "lung_veins",
+    "constraints": [
+      {
+        "constraint_type": "LeftOf",
+        "landmark": "vertebrae",
+        "boundary_part": "center",
+        "slice_wise": true
+      }
+    ],
+    "is_helper": true,
+    "category": "new_helpers"
+  },
+  "helper_hilar_base_left": {
+    "rule": "ConvexHull2D",
+    "input_a": "helper_lung_arteries_left_side",
+    "input_b": "helper_lung_veins_left_side",
+    "depends_on": [
+      "helper_lung_arteries_left_side",
+      "helper_lung_veins_left_side"
+    ],
+    "is_helper": true,
+    "category": "new_helpers"
+  },
+  "Thoracic_Station_Hilar_Interlobar_Left": {
+    "rule": "Combine",
+    "method": "union",
+    "components": [
+      "helper_hilar_base_left"
+    ],
+    "exclude": [
+      "lung_upper_lobe_left",
+      "lung_lower_lobe_left",
+      "lung_upper_lobe_right",
+      "lung_middle_lobe_right",
+      "lung_lower_lobe_right",
+      "lung_left",
+      "lung_right",
+      "heart",
+      "heart_atrium_left",
+      "heart_atrium_right",
+      "heart_ventricle_left",
+      "heart_ventricle_right",
+      "heart_myocardium",
+      "atrial_appendage_left",
+      "aorta",
+      "pulmonary_artery",
+      "pulmonary_vein",
+      "vertebrae",
+      "spine",
+      "spinal_cord",
+      "helper_vertebrae_dilated",
+      "trachea",
+      "esophagus",
+      "inferior_vena_cava",
+      "superior_vena_cava",
+      "brachiocephalic_vein_left",
+      "brachiocephalic_vein_right",
+      "helper_pleural_space_left",
+      "helper_heart_chambers_hull",
+      "helper_heart_chambers_costal_hull",
+      "helper_heart_chambers_hull_lateral_extended",
+      "helper_prevascular_paratracheal_dilated",
+      "costal_cartilages"
+    ],
+    "constraints": [
+      {
+        "constraint_type": "AnteriorTo",
+        "landmark": "vertebrae",
+        "boundary_part": "min"
+      },
+      {
+        "constraint_type": "LeftOf",
+        "landmark": "spinal_cord",
+        "boundary_part": "center",
+        "slice_wise": true
+      }
+    ],
+    "z_plane_restriction": {
+      "inferior": "liver",
+      "inferior_part": "absolute_max"
     },
-    "helper_lung_veins_left_side": {
-        "rule": "GeometricConstraint",
-        "landmark": "lung_veins",
-        "constraints": [
-            {
-                "constraint_type": "LeftOf",
-                "landmark": "vertebrae",
-                "boundary_part": "center",
-                "slice_wise": true
-            }
-        ],
-        "is_helper": true,
-        "category": "new_helpers"
-    },
-    "helper_hilar_base_left": {
-        "rule": "ConvexHull2D",
-        "input_a": "helper_lung_arteries_left_side",
-        "input_b": "helper_lung_veins_left_side",
-        "depends_on": [
-            "helper_lung_arteries_left_side",
-            "helper_lung_veins_left_side"
-        ],
-        "is_helper": true,
-        "category": "new_helpers"
-    },
-    "Thoracic_Station_Hilar_Interlobar_Left": {
-        "rule": "Combine",
-        "method": "union",
-        "components": [
-            "helper_hilar_base_left"
-        ],
-        "exclude": [
-            "lung_upper_lobe_left",
-            "lung_lower_lobe_left",
-            "lung_upper_lobe_right",
-            "lung_middle_lobe_right",
-            "lung_lower_lobe_right",
-            "lung_left",
-            "lung_right",
-            "heart",
-            "heart_atrium_left",
-            "heart_atrium_right",
-            "heart_ventricle_left",
-            "heart_ventricle_right",
-            "heart_myocardium",
-            "atrial_appendage_left",
-            "aorta",
-            "pulmonary_artery",
-            "pulmonary_vein",
-            "vertebrae",
-            "spine",
-            "spinal_cord",
-            "helper_vertebrae_dilated",
-            "trachea",
-            "esophagus",
-            "inferior_vena_cava",
-            "superior_vena_cava",
-            "brachiocephalic_vein_left",
-            "brachiocephalic_vein_right",
-            "helper_pleural_space_left",
-            "helper_heart_chambers_hull",
-            "helper_heart_chambers_costal_hull",
-            "helper_prevascular_paratracheal_dilated",
-            "costal_cartilages"
-        ],
-        "constraints": [
-            {
-                "constraint_type": "AnteriorTo",
-                "landmark": "vertebrae",
-                "boundary_part": "min"
-            },
-            {
-                "constraint_type": "LeftOf",
-                "landmark": "spinal_cord",
-                "boundary_part": "center",
-                "slice_wise": true
-            }
-        ],
-        "z_plane_restriction": {
-            "inferior": "liver",
-            "inferior_part": "absolute_max"
-        },
-        "overlap_precedence": [
-            "Thoracic_Station_2_UpperParatracheal",
-            "Thoracic_Station_3A_Prevascular",
-            "Thoracic_Station_3P_Retrotracheal",
-            "Thoracic_Station_4_LowerParatracheal",
-            "Thoracic_Station_5_Subaortic",
-            "Thoracic_Station_6_Paraaortic",
-            "Thoracic_Station_7_Subcarinial",
-            "Thoracic_Station_8_Paraoesophageal",
-            "Thoracic_Station_Prepericardial",
-            "Thoracic_Mammary",
-            "Thoracic_Supraclavicular",
-            "Abdominal_Station_16a1_Aortic_Hiatus",
-            "Thoracic_Station_Prepericardial_Left",
-            "Thoracic_Station_Prepericardial_Right"
-        ],
-        "per_slice_lcc": true,
-        "depends_on": [
-            "helper_hilar_base_left",
-            "helper_pleural_space_left",
-            "helper_heart_chambers_hull",
-            "helper_heart_chambers_costal_hull",
-            "helper_vertebrae_dilated",
-            "helper_prevascular_paratracheal_dilated"
-        ],
-        "is_bilateral": false,
-        "side": "Left"
-    }
+    "overlap_precedence": [
+      "Thoracic_Station_2_UpperParatracheal",
+      "Thoracic_Station_3A_Prevascular",
+      "Thoracic_Station_3P_Retrotracheal",
+      "Thoracic_Station_4_LowerParatracheal",
+      "Thoracic_Station_5_Subaortic",
+      "Thoracic_Station_6_Paraaortic",
+      "Thoracic_Station_7_Subcarinial",
+      "Thoracic_Station_8_Paraoesophageal",
+      "Thoracic_Station_Prepericardial",
+      "Thoracic_Mammary",
+      "Thoracic_Supraclavicular",
+      "Abdominal_Station_16a1_Aortic_Hiatus",
+      "Thoracic_Station_Prepericardial_Left",
+      "Thoracic_Station_Prepericardial_Right"
+    ],
+    "per_slice_lcc": true,
+    "depends_on": [
+      "helper_hilar_base_left",
+      "helper_pleural_space_left",
+      "helper_heart_chambers_hull",
+      "helper_heart_chambers_costal_hull",
+      "helper_heart_chambers_hull_lateral_extended",
+      "helper_vertebrae_dilated",
+      "helper_prevascular_paratracheal_dilated"
+    ],
+    "is_bilateral": false,
+    "side": "Left"
+  }
 }

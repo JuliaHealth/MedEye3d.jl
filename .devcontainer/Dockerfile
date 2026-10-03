@@ -108,6 +108,16 @@ RUN apt-get update -q -y && \
 RUN python3 -m pip install --no-cache-dir \
     gdown==3.3.1 monai==1.3.0 nibabel torch scipy
 
+# Anatomical segmentation models for lymph node rules pipeline
+RUN python3 -m pip install --no-cache-dir \
+    TotalSegmentator \
+    nnunetv2 \
+    transformers \
+    git+https://github.com/cpwardell/Skellytour.git \
+    && cd /tmp && git clone --depth 1 https://github.com/MuscleMap/MuscleMap.git \
+    && cd MuscleMap && pip3 install --no-deps . \
+    && rm -rf /tmp/MuscleMap
+
 RUN apt-get install --yes --no-install-recommends wget build-essential libcurl4 && \
     wget https://curl.se/download/curl-7.81.0.tar.gz && \
     tar -xvf curl-7.81.0.tar.gz && cd curl-7.81.0 && \

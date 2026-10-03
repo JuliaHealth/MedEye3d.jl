@@ -50,8 +50,8 @@
 		// "ms-python.vscode-pylance"
 	],
 	"mounts": [
-		"source=${localWorkspaceFolder}/../MedImages.jl,target=/workspaces/MedImages.jl,type=bind,consistency=cached"
-		// "source=/media/jm/hddData/datasets/Task09_Spleen,target=/home/data,type=bind,consistency=cached"
+		"source=${localWorkspaceFolder}/../MedImages.jl,target=/workspaces/MedImages.jl,type=bind,consistency=cached",
+		"source=/mnt/big/project_ssd/project_ssd,target=/mnt/big/project_ssd/project_ssd,type=bind,consistency=cached"
 	  ],
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
