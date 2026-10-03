@@ -5917,13 +5917,7 @@ function create_metadata_window(
             d["NoCTCorrelate"] = "true"
         end
         
-        # Windowing values
-        d["_CT_Min"] = _safe_strip(tb_ct_min.stored_string[])
-        d["_CT_Max"] = _safe_strip(tb_ct_max.stored_string[])
-        d["_PET_Min"] = _safe_strip(tb_pet_min.stored_string[])
-        d["_PET_Max"] = _safe_strip(tb_pet_max.stored_string[])
-        d["_SPECT_Min"] = _safe_strip(tb_spect_min.stored_string[])
-        d["_SPECT_Max"] = _safe_strip(tb_spect_max.stored_string[])
+        # (Windowing values are no longer saved per-lesion to prevent unexpected window jumping)
 
         for q in schema
             w = get(field_widgets, q.short, nothing)
@@ -6959,34 +6953,7 @@ function create_metadata_window(
         no_ct_val = _nct === true || _nct == "true" || _nct == "1" || _nct == 1
         _set!(no_ct_toggle.active, no_ct_val)
         
-        # Restore windowing if present
-        if haskey(data, "_CT_Min") && haskey(data, "_CT_Max")
-            _set_tb_val!(tb_ct_min, data["_CT_Min"])
-            _set_tb_val!(tb_ct_max, data["_CT_Max"])
-            v_min = tryparse(Float32, data["_CT_Min"])
-            v_max = tryparse(Float32, data["_CT_Max"])
-            if v_min !== nothing && v_max !== nothing
-                put!(channel, WindowingEvent("CT", v_min, v_max))
-            end
-        end
-        if haskey(data, "_PET_Min") && haskey(data, "_PET_Max")
-            _set_tb_val!(tb_pet_min, data["_PET_Min"])
-            _set_tb_val!(tb_pet_max, data["_PET_Max"])
-            v_min = tryparse(Float32, data["_PET_Min"])
-            v_max = tryparse(Float32, data["_PET_Max"])
-            if v_min !== nothing && v_max !== nothing
-                put!(channel, WindowingEvent("PET", v_min, v_max))
-            end
-        end
-        if haskey(data, "_SPECT_Min") && haskey(data, "_SPECT_Max")
-            _set_tb_val!(tb_spect_min, data["_SPECT_Min"])
-            _set_tb_val!(tb_spect_max, data["_SPECT_Max"])
-            v_min = tryparse(Float32, data["_SPECT_Min"])
-            v_max = tryparse(Float32, data["_SPECT_Max"])
-            if v_min !== nothing && v_max !== nothing
-                put!(channel, WindowingEvent("SPECT", v_min, v_max))
-            end
-        end
+        # (Windowing restoration removed to prevent jumping when navigating lesions)
 
         for q in schema
             w = get(field_widgets, q.short, nothing)
