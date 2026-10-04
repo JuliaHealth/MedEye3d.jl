@@ -705,8 +705,14 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
             is_nuc_tex = tex.studyType == "PET" || tex.studyType == "SPECT" || tex.isNuclearMask
             if is_main_match && is_ct_tex
                 tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
+                if state.mainForDisplayObjects.vulkanPipelineState !== nothing
+                    state.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                end
             elseif is_nuc_match && is_nuc_tex
                 tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
+                if state.mainForDisplayObjects.vulkanPipelineState !== nothing
+                    state.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                end
             end
         end
     end

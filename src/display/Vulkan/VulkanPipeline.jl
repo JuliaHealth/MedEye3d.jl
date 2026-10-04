@@ -386,6 +386,9 @@ function update_ubo!(ctx::VkCtx, state::VkPipelineState, texture_specs)
 
     for i in 1:n
         spec = texture_specs[i]
+        if spec.name == "PET"
+            @info "UBO PET" minAndMaxValue=spec.minAndMaxValue isVisible=spec.isVisible
+        end
         offset = (i - 1) * TEXTURE_PARAMS_SIZE
 
         # Pack fields into std140 layout (all via unsafe_store!, 0 allocs)

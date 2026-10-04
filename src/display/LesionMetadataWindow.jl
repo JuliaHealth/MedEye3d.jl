@@ -2334,6 +2334,8 @@ This enables creating the Makie GUI before the Vulkan display channel exists.
 """
 struct ChannelProxy
     ref::Ref{Union{Base.Channel, Nothing}}
+    queue::Vector{Any}
+    ChannelProxy(ref) = new(ref, Any[])
 end
 
 function Base.put!(proxy::ChannelProxy, event)
@@ -2342,6 +2344,8 @@ function Base.put!(proxy::ChannelProxy, event)
         @async try
             put!(ch, event)
         catch; end
+    else
+        push!(proxy.queue, event)
     end
 end
 
@@ -2355,12 +2359,21 @@ mutable struct MetadataWindowResult
     set_compare_mode::Observable{Bool}
     ui_queue::Vector{Function}
     ui_lock::ReentrantLock
-    MetadataWindowResult(fig, ch_ref, ldb=nothing) = new(fig, ch_ref, ldb, Observable(false), Observable("Pure PET (Current TP)"), Observable(false), Function[], ReentrantLock())
+    proxy::Union{ChannelProxy, Nothing}
+    MetadataWindowResult(fig, ch_ref, ldb=nothing, proxy=nothing) = new(fig, ch_ref, ldb, Observable(false), Observable("Pure PET (Current TP)"), Observable(false), Function[], ReentrantLock(), proxy)
 end
 
 """Connect a live channel to a previously created metadata window (greyed-out → active)."""
 function connect_channel!(win::MetadataWindowResult, ch::Base.Channel)
     win.channel_ref[] = ch
+    if win.proxy !== nothing
+        @async try
+            for ev in win.proxy.queue
+                put!(ch, ev)
+            end
+            empty!(win.proxy.queue)
+        catch; end
+    end
     println("  [MAKIE] Channel connected — all controls now active"); flush(stdout)
 end
 
@@ -2385,7 +2398,7 @@ function create_metadata_window(
     ui_lock = ReentrantLock()
     # Wrap channel in Ref for deferred connection (parallel startup)
     channel_ref = Ref{Union{Base.Channel, Nothing}}(channel_arg)
-    # Proxy that silently drops events when channel is not yet connected
+    # Proxy that queues events when channel is not yet connected
     channel = ChannelProxy(channel_ref)
     local _build_match_display!
     schema   = load_schema()
@@ -3551,7 +3564,7 @@ function create_metadata_window(
     Label(g[pet_lbl_r, 1:4], "-- PET Window & Offsets (SUV) --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
     
     pet_s_r = nr!()
-    islider_pet = IntervalSlider(g[pet_s_r, 1:4], range = 0.0:0.1:50.0, startvalues = (0.0, 10.0))
+    islider_pet = IntervalSlider(g[pet_s_r, 1:4], range = 0.1:0.1:50.0, startvalues = (0.1, 10.0))
     rowsize!(g, pet_s_r, Fixed(28)); register_fixed_row!(pet_s_r, 28)
     
     pet_p_r = nr!()
@@ -3562,7 +3575,7 @@ function create_metadata_window(
 
     pet_c_r = nr!()
     btn_pet_minus = Button(g[pet_c_r, 1], label = "- 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    tb_pet_min = styled_textbox(g[pet_c_r, 2]; placeholder = "Min (0.0)", stored_string = "0.0", fontsize = 10)
+    tb_pet_min = styled_textbox(g[pet_c_r, 2]; placeholder = "Min (0.1)", stored_string = "0.1", fontsize = 10)
     tb_pet_max = styled_textbox(g[pet_c_r, 3]; placeholder = "Max (10.0)", stored_string = "10.0", fontsize = 10)
     btn_pet_plus  = Button(g[pet_c_r, 4], label = "+ 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     rowsize!(g, pet_c_r, Fixed(28)); register_fixed_row!(pet_c_r, 28)
@@ -3589,16 +3602,16 @@ function create_metadata_window(
     end
 
     on(islider_pet.interval) do (min_v, max_v); apply_pet_win(min_v, max_v); end
-    on(btn_pet_5.clicks)  do _; apply_pet_win(0.0, 5.0) end
-    on(btn_pet_10.clicks) do _; apply_pet_win(0.0, 10.0) end
-    on(btn_pet_15.clicks) do _; apply_pet_win(0.0, 15.0) end
+    on(btn_pet_5.clicks)  do _; apply_pet_win(0.1, 5.0) end
+    on(btn_pet_10.clicks) do _; apply_pet_win(0.1, 10.0) end
+    on(btn_pet_15.clicks) do _; apply_pet_win(0.1, 15.0) end
     on(btn_pet_minus.clicks) do _
-        v_min = tryparse(Float32, _safe_strip(tb_pet_min.stored_string[])); v_min = v_min === nothing ? 0.0f0 : v_min - 0.5f0
+        v_min = tryparse(Float32, _safe_strip(tb_pet_min.stored_string[])); v_min = v_min === nothing ? 0.1f0 : max(0.1f0, v_min - 0.5f0)
         v_max = tryparse(Float32, _safe_strip(tb_pet_max.stored_string[])); v_max = v_max === nothing ? 10.0f0 : v_max - 0.5f0
         apply_pet_win(v_min, v_max)
     end
     on(btn_pet_plus.clicks) do _
-        v_min = tryparse(Float32, _safe_strip(tb_pet_min.stored_string[])); v_min = v_min === nothing ? 0.0f0 : v_min + 0.5f0
+        v_min = tryparse(Float32, _safe_strip(tb_pet_min.stored_string[])); v_min = v_min === nothing ? 0.1f0 : max(0.1f0, v_min + 0.5f0)
         v_max = tryparse(Float32, _safe_strip(tb_pet_max.stored_string[])); v_max = v_max === nothing ? 10.0f0 : v_max + 0.5f0
         apply_pet_win(v_min, v_max)
     end
@@ -6069,10 +6082,17 @@ function create_metadata_window(
                 end
             end
             if haskey(gst, "PET_Min") && haskey(gst, "PET_Max")
-                _set_tb_val!(tb_pet_min, gst["PET_Min"])
-                _set_tb_val!(tb_pet_max, gst["PET_Max"])
                 v_min = tryparse(Float32, gst["PET_Min"])
                 v_max = tryparse(Float32, gst["PET_Max"])
+                
+                # Upgrade old saves that had 0.0 to 0.1 to avoid yellow background
+                if v_min !== nothing && v_min <= 0.001f0
+                    v_min = 0.1f0
+                    gst["PET_Min"] = "0.1"
+                end
+                
+                _set_tb_val!(tb_pet_min, gst["PET_Min"])
+                _set_tb_val!(tb_pet_max, gst["PET_Max"])
                 if v_min !== nothing && v_max !== nothing
                     put!(channel, WindowingEvent("PET", v_min, v_max))
                 end
@@ -7803,7 +7823,7 @@ function create_metadata_window(
         dict_text[] = de_desc
     end
 
-    res = MetadataWindowResult(fig, channel_ref, lesion_db)
+    res = MetadataWindowResult(fig, channel_ref, lesion_db, channel)
     _lmw_observables[:fig] = fig
     res.trigger_m2 = obs_m2
     res.set_compare_mode = obs_set_compare_mode
