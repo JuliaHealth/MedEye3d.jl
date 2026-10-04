@@ -1883,8 +1883,12 @@ function displayImage(
 
     if typeof(textureSpecArray) == Vector{TextureSpec}
         for textur in textureSpecArray
-            if textur.studyType == "PET"
-                textur.minAndMaxValue = Float32.([median(voxelDataTupleVector[1][2]) - std(voxelDataTupleVector[1][2]) / 2, median(voxelDataTupleVector[1][2]) + std(voxelDataTupleVector[1][2]) * 2])
+            if textur.studyType == "PET" && isempty(textur.minAndMaxValue)
+                pet_idx = findfirst(t -> t[1] == "PET" || t[1] == "SPECT", voxelDataTupleVector)
+                if pet_idx !== nothing
+                    pet_data = voxelDataTupleVector[pet_idx][2]
+                    textur.minAndMaxValue = Float32.([median(pet_data) - std(pet_data) / 2, median(pet_data) + std(pet_data) * 2])
+                end
             end
         end
 
@@ -1892,8 +1896,12 @@ function displayImage(
 
         for (index, texturVector) in enumerate(textureSpecArray)
             for textur in texturVector
-                if textur.studyType == "PET"
-                    textur.minAndMaxValue = Float32.([median(voxelDataTupleVector[index][1][2]) - std(voxelDataTupleVector[index][1][2]) / 2, median(voxelDataTupleVector[index][1][2]) + std(voxelDataTupleVector[index][1][2]) * 2])
+                if textur.studyType == "PET" && isempty(textur.minAndMaxValue)
+                    pet_idx = findfirst(t -> t[1] == "PET" || t[1] == "SPECT", voxelDataTupleVector[index])
+                    if pet_idx !== nothing
+                        pet_data = voxelDataTupleVector[index][pet_idx][2]
+                        textur.minAndMaxValue = Float32.([median(pet_data) - std(pet_data) / 2, median(pet_data) + std(pet_data) * 2])
+                    end
                 end
             end
         end

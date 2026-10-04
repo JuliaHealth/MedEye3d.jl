@@ -765,13 +765,13 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     init_label_opacity = Float32(get(display_cfg, "label_opacity", 0.5))
 
     textureSpec_ct = TextureSpec{Float32}(name="CT", isMainImage=true, studyType="CT", color=RGB(1.0, 1.0, 1.0), minAndMaxValue=Float32.([-150, 250]))
-    textureSpec_pet = TextureSpec{Float32}(name="PET", isMainImage=false, isNuclearMask=true, studyType="PET", color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0, 10]), maskContribution=init_pet_blend)
+    textureSpec_pet = TextureSpec{Float32}(name="PET", isMainImage=false, isNuclearMask=true, studyType="PET", color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0.1, 10.0]), maskContribution=init_pet_blend)
     textureSpec_mask = TextureSpec{Int16}(
         name="Mask", isMainImage=false, isMultiDiscreteMask=true, isIntegerTexture=true,
         colorSet=colors_mapped, minAndMaxValue=Int16.([0, length(colors_mapped)]),
         isEditable=true, maskContribution=init_label_opacity
     )
-    textureSpec_pure_pet = TextureSpec{Float32}(name="PET", isMainImage=true, studyType="PET", color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0, 10]))
+    textureSpec_pure_pet = TextureSpec{Float32}(name="PET", isMainImage=true, studyType="PET", color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0.1, 10.0]))
     textureSpec_bone = TextureSpec{Int8}(
         name="Bone_Overlay", isMainImage=false, isIntegerTexture=true,
         color=RGB(0.0, 1.0, 1.0), minAndMaxValue=Int8.([0, 3]),
