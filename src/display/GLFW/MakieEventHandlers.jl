@@ -1374,14 +1374,14 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                     end
                     # Write combined mask: surface=1, marrow=2, both=3
                     all_indices = CartesianIndex{3}[]
-                    if !isempty(surf_indices)
+                    if !isempty(surf_indices) && _bone_surf_active[]
                         valid_surf = filter(idx -> checkbounds(Bool, scrDat.dat, idx), surf_indices)
                         if !isempty(valid_surf)
                             scrDat.dat[valid_surf] .= Int8(1)
                         end
                         append!(all_indices, valid_surf)
                     end
-                    if !isempty(marr_indices)
+                    if !isempty(marr_indices) && _bone_marr_active[]
                         # For overlapping voxels, add (1+2=3), for marrow-only set to 2
                         for idx in marr_indices
                             if checkbounds(Bool, scrDat.dat, idx)
@@ -1525,6 +1525,10 @@ function reactToBoneSubsegResult(data::BoneSubsegResultEvent, stateObjects::Vect
     # Re-render if this lesion is still the active one
     if current_active_lesion_id[] == data.target_id && data.target_id > 0
         reactToSyncLesion(SyncLesionEvent(data.target_id), stateObjects)
+        # Force a re-render now that the data is ready!
+        for state in stateObjects
+            state.isSliceChanged = true
+        end
     end
 end
 
@@ -3204,8 +3208,17 @@ end
 
 const MASK_BACKUP = Dict{UInt64, Array{Float32, 3}}()
 
+const _bone_surf_active = Ref(true)
+const _bone_marr_active = Ref(true)
+
 function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{StateDataFields})
     @debug "reactToShowMaskLayer: layer=$(data.layer) active=$(data.active)"
+    
+    if data.layer == 2
+        _bone_surf_active[] = data.active
+    elseif data.layer == 3
+        _bone_marr_active[] = data.active
+    end
     
     tex_target = if data.layer == 1
         "Mask"
@@ -3220,71 +3233,36 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
     toggled_count = 0
     for (si, state) in enumerate(stateObjects)
         for textSpec in state.mainForDisplayObjects.listOfTextSpecifications
-            if (tex_target == "Mask" && (textSpec.name == "Mask" || textSpec.name == "manualModif" || textSpec.name == "segmentation")) ||
-               (textSpec.name == tex_target)
+            if (tex_target == "Mask" && (textSpec.name == "Mask" || textSpec.name == "manualModif" || textSpec.name == "segmentation"))
                 textSpec.isVisible = data.active
                 toggled_count += 1
-                @debug "  Panel $si: set isVisible=$(data.active) for texture $(textSpec.name)"
+            elseif textSpec.name == "Bone_Overlay" && tex_target == "Bone_Overlay"
+                textSpec.isVisible = _bone_surf_active[] || _bone_marr_active[]
+                toggled_count += 1
+            elseif textSpec.name == tex_target
+                textSpec.isVisible = data.active
+                toggled_count += 1
             end
         end
     end
     @debug "  Toggled $toggled_count textures for layer=$(data.layer)"
     
-    # If bone surface or marrow is toggled, also sync dataToScroll buffer directly
+    # If bone surface or marrow is toggled, re-sync to apply the new state flags
     if data.layer == 2 || data.layer == 3
         cur_lid = (current_active_lesion_id[] > 0) ? current_active_lesion_id[] : round(Int, stateObjects[1].valueForMasToSet.value)
         @debug "  Bone data sync: cur_lid=$cur_lid"
-        for (panel_idx, stateObject) in enumerate(stateObjects)
-            for scrDat in stateObject.onScrollData.dataToScroll
-                if scrDat.name == "Bone_Overlay"
-                    if !data.active
+        if cur_lid > 0
+            reactToSyncLesion(SyncLesionEvent(cur_lid), stateObjects)
+        else
+            for (panel_idx, stateObject) in enumerate(stateObjects)
+                for scrDat in stateObject.onScrollData.dataToScroll
+                    if scrDat.name == "Bone_Overlay"
                         if haskey(last_bone_overlay_indices, panel_idx) && !isempty(last_bone_overlay_indices[panel_idx])
                             scrDat.dat[last_bone_overlay_indices[panel_idx]] .= Int8(0)
                             delete!(last_bone_overlay_indices, panel_idx)
                         else
                             fill!(scrDat.dat, Int8(0))
                         end
-                    elseif cur_lid > 0
-                        panel_tp = (panel_idx == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
-                        panel_lid = cur_lid
-                        if panel_idx == 5 && compare_mode[] && length(stateObjects) >= 5 && cur_lid > 0
-                            try
-                                left_node = get_node_name_for_tp(current_tp_index[])
-                                right_node = get_node_name_for_tp(compare_right_tp[])
-                                match_mod = _get_la()
-                                if match_mod !== nothing
-                                    matched_ids = match_mod.find_cross_tp_lesion(left_node, cur_lid, right_node)
-                                    if !isempty(matched_ids)
-                                        panel_lid = matched_ids[1]
-                                    end
-                                end
-                            catch e
-                            end
-                        end
-                        panel_surf_pts, panel_marr_pts = try
-                            _get_or_compute_bone_subseg(stateObject, panel_lid, panel_tp)
-                        catch e
-                            println("Failed to recalc bone for panel $panel_idx (toggle): $e")
-                            (CartesianIndex{3}[], CartesianIndex{3}[])
-                        end
-                        panel_pts = (data.layer == 2) ? panel_surf_pts : panel_marr_pts
-                        # Use canonical indices matching reactToSyncLesion and reactToActiveLesionChanged
-                        indices = if panel_idx == 3 # Sagittal (Y, Z, X)
-                            [CartesianIndex(I[2], I[3], I[1]) for I in panel_pts]
-                        elseif panel_idx == 4 # Coronal (X, Z, Y)
-                            [CartesianIndex(I[1], I[3], I[2]) for I in panel_pts]
-                        else # Axial (X, Y, Z)
-                            panel_pts
-                        end
-                        # Clear previous and set new for combined overlay
-                        if haskey(last_bone_overlay_indices, panel_idx) && !isempty(last_bone_overlay_indices[panel_idx])
-                            scrDat.dat[last_bone_overlay_indices[panel_idx]] .= Int8(0)
-                        end
-                        if !isempty(indices)
-                            val = (data.layer == 2) ? Int8(1) : Int8(2)
-                            scrDat.dat[indices] .= val
-                        end
-                        last_bone_overlay_indices[panel_idx] = indices
                     end
                 end
             end

@@ -8147,10 +8147,20 @@ function display_metadata_window(fig::Figure)
         end
     end
 
-    login_grid = GridLayout(fig.layout[1:end, 1:end], tellwidth=false, tellheight=false)
-    login_bg = Box(login_grid[1, 1], color=(:black, 0.92), strokewidth=0, visible=_login_visible)
+    login_bg = Box(fig[1, 1], color=(:black, 0.92), strokewidth=0, visible=_login_visible)
     
-    login_inner = GridLayout(login_grid[1, 1], tellwidth=false, tellheight=false)
+    # Bulletproof layout with explicit Auto margins to center the 310x175 modal
+    center_grid = GridLayout(fig[1, 1], tellwidth=false, tellheight=false)
+    Box(center_grid[1, 1], visible=false)
+    Box(center_grid[3, 3], visible=false)
+    colsize!(center_grid, 1, Auto())
+    colsize!(center_grid, 2, Fixed(310))
+    colsize!(center_grid, 3, Auto())
+    rowsize!(center_grid, 1, Auto())
+    rowsize!(center_grid, 2, Fixed(175))
+    rowsize!(center_grid, 3, Auto())
+
+    login_inner = GridLayout(center_grid[2, 2])
     login_inner_bg = Button(login_inner[1:end, 1:end], label="", buttoncolor=:transparent, buttoncolor_active=:transparent, buttoncolor_hover=:transparent, strokewidth=0, width=nothing, height=nothing)
     on(_login_visible) do vis; login_inner_bg.blockscene.visible[] = vis; end
     
@@ -8221,53 +8231,37 @@ function display_metadata_window(fig::Figure)
     _lmw_observables[:login_user] = login_tb_user
 
     # ── Intercept Clicks to Prevent Click-Through ─────────────────────────────
-    on(events(fig.scene).mousebutton, priority=100) do event
-        if !_login_authenticated[]
-            if event.action == Mouse.press
-                pos = events(fig.scene).mouseposition[]
-                bbox = login_inner.layoutobservables.computedbbox[]
-                
-                # Explicitly hit-test the Login Button to bypass the Menu ghost (priority 64)
-                btn_bbox = login_btn.layoutobservables.computedbbox[]
-                if pos[1] >= btn_bbox.origin[1] && pos[1] <= btn_bbox.origin[1] + btn_bbox.widths[1] &&
-                   pos[2] >= btn_bbox.origin[2] && pos[2] <= btn_bbox.origin[2] + btn_bbox.widths[2]
-                    
-                    # Also trigger the visual click on the button manually
-                    login_btn.buttoncolor = RGBf(0.1, 0.4, 0.2)
-                    _do_login()
-                    return Consume(true)
-                end
-                
-                # Check if mouse is inside the login modal area
-                if pos[1] >= bbox.origin[1] && pos[1] <= bbox.origin[1] + bbox.widths[1] &&
-                   pos[2] >= bbox.origin[2] && pos[2] <= bbox.origin[2] + bbox.widths[2]
-                    return Consume(false) # Inside login panel: allow Textboxes to process (priority 70)
-                else
-                    return Consume(true) # Outside: block it so underlying Dropdowns don't trigger!
-                end
-            elseif event.action == Mouse.release
-                login_btn.buttoncolor = RGBf(0.2, 0.6, 0.3) # Reset button color
+on(events(fig.scene).mousebutton, priority=100) do event
+    if !_login_authenticated[]
+        if event.action == Mouse.press
+            pos = events(fig.scene).mouseposition[]
+            
+            # Check Textboxes
+            user_bbox = login_tb_user.layoutobservables.computedbbox[]
+            pass_bbox = login_tb_pass.layoutobservables.computedbbox[]
+            btn_bbox = login_btn.layoutobservables.computedbbox[]
+            
+            # Function to check if pos is in bbox
+            in_rect(p, b) = (p[1] >= b.origin[1] && p[1] <= b.origin[1] + b.widths[1] &&
+                             p[2] >= b.origin[2] && p[2] <= b.origin[2] + b.widths[2])
+            
+            if in_rect(pos, btn_bbox)
+                login_btn.buttoncolor = RGBf(0.1, 0.4, 0.2)
+                _do_login()
+                return Consume(true)
+            elseif in_rect(pos, user_bbox) || in_rect(pos, pass_bbox)
+                return Consume(false) # Let the Textboxes (priority 60) handle it!
+            else
+                return Consume(true) # Block everything else (like Menus at 64)
             end
-        elseif time() - _login_success_time[] < 1.0
-            # Block all clicks for 1 second after login to prevent queued double-clicks from hitting dropdowns
-            return Consume(true)
+        elseif event.action == Mouse.release
+            login_btn.buttoncolor = RGBf(0.2, 0.6, 0.3)
         end
-        return Consume(false)
+    elseif time() - _login_success_time[] < 1.0
+        return Consume(true)
     end
-
-    # ── Starve the Ghost (Priority 65 Interceptor) ────────────────────────────
-    # Makie's Textbox processes clicks at priority 70 and returns Consume(false).
-    # Makie's Menu listens at priority 64 and consumes clicks, stealing them.
-    # By intercepting at priority 65, we allow Textboxes to work, but we 
-    # completely block the event from reaching the Menus and other underlying elements.
-    on(events(fig.scene).mousebutton, priority=65) do event
-        if !_login_authenticated[]
-            # If we get here, Textboxes (70) have already processed the event.
-            # We unconditionally consume it to protect the login panel from priority 64/60 elements.
-            return Consume(true)
-        end
-        return Consume(false)
-    end
+    return Consume(false)
+end
 
     lock(GLOBAL_OPENGL_LOCK) do
         display(screen, fig)
