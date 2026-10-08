@@ -1,6 +1,6 @@
 # MedEye3d Keyboard Shortcuts & Controls Reference
 
-> **Last Updated**: 2026-09-22 — Full shortcut overhaul: F1-F9 windowing, N/P/S/T/B/Del remapped.
+> **Last Updated**: 2026-10-07 — Added G key for Heat-GDT mode toggle, Heat-GDT hold-to-grow.
 
 ---
 
@@ -42,14 +42,32 @@
 | **E** | Enter edit/paint mode | ✅ Paint button turns green |
 | **Esc** | Cancel edit, return to view mode | ✅ View button turns blue |
 | **Del** | Toggle erase mode (brush erases) | ✅ Erase button turns red |
+| **G** | Toggle Heat-GDT segmentation mode | ✅ Algorithm dropdown syncs |
+| **W** | One-Shot Heat-GDT Wand (Creates new lesion + auto-arms Heat-GDT) | ✅ Auto-labels, enters Edit/Heat-GDT mode |
 | **Left click + drag** | Paint with current brush | — |
+| **Left click + hold** | Heat-GDT: grow segmentation (when G or W mode active + edit mode) | ✅ Status bar shows K |
 | **[ (left bracket)** | Decrease brush width | ✅ Brush slider moves |
 | **] (right bracket)** | Increase brush width | ✅ Brush slider moves |
+
+> **Heat-GDT Mode**: Press **G** to toggle Heat-GDT mode, or press **W** for the One-Shot Wand (which creates a new lesion and auto-arms Heat-GDT). When active, hold the left mouse button to run heat diffusion — the longer you hold, the more the segmentation grows (K increases at 30 steps/second). You must be in **edit mode** (press **E** first, unless you used **W**) for the hold to work. If you used **W**, Heat-GDT mode will automatically deactivate when you release the mouse button.
+
+## Lesion Display Modes (Single / Multi)
+
+You can toggle between viewing only the active lesion (Single Lesion Mode) or all lesions simultaneously (Multi Lesion Mode).
+
+| Shortcut | Action | Window Support | GUI Sync |
+|----------|--------|----------------|----------|
+| **M** | Toggle Single Lesion vs Multi Lesion Mode | Works in **Main Window** and **Makie Window** | ✅ Button text toggles (Single/All) |
+
+> **Note**: In the Makie Metadata Window, the **M** shortcut is suppressed if you are currently typing in any Textbox (focus guard). You can also click the "Single Lesion" / "All Lesions" button in the Makie UI to toggle this mode manually.
 
 ## Mask & Display
 
 | Shortcut | Action | GUI Sync |
 |----------|--------|----------|
+| **K** | Toggle Lesion mask visibility | ✅ Lesion button toggles |
+| **J** | Toggle Bone Marrow visibility | ✅ Marrow button toggles |
+| **I** | Toggle Bone Surface visibility | ✅ Surf button toggles |
 | **Q (hold)** | Temporarily hide all mask overlays | ✅ Preserves prior manual mask state |
 | **P (hold)** | Hide masks (keeps CT and PET/SPECT visible) | ✅ Preserves prior manual mask state |
 | **T (hold)** | Show only CT (hides everything else) | ✅ Preserves prior manual mask state |

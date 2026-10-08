@@ -313,6 +313,30 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
                 ch !== nothing && put!(ch, MakieEvents.MarkResolvedEvent())
             end
             return
+            
+        # K - Toggle Lesion mask visibility
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_K)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.KeyboardToggleLayerEvent(1))
+            end
+            return
+            
+        # J - Toggle Marrow visibility
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_J)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.KeyboardToggleLayerEvent(3))
+            end
+            return
+            
+        # I - Toggle Surface visibility
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_I)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.KeyboardToggleLayerEvent(2))
+            end
+            return
 
         # N - New Lesion (same as "New" button in GUI)
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_N)
@@ -364,11 +388,17 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             end
             return
 
-        # M - Toggle measurement mode (Shift+M)
+        # M - Toggle single vs multi-lesion mode (unmodified M) / Toggle measurement mode (Shift+M)
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_M)
-            if keyInputInfo.action == GLFW.PRESS && is_shift_down_ref[]
+            if keyInputInfo.action == GLFW.PRESS
                 ch = _get_event_channel()
-                ch !== nothing && put!(ch, MakieEvents.ToggleMeasurementModeEvent())
+                if ch !== nothing
+                    if is_shift_down_ref[]
+                        put!(ch, MakieEvents.ToggleMeasurementModeEvent())
+                    else
+                        put!(ch, MakieEvents.ToggleSingleMultiLesionEvent())
+                    end
+                end
             end
             return
 
@@ -468,6 +498,21 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             if keyInputInfo.action == GLFW.PRESS
                 ch = _get_event_channel()
                 ch !== nothing && put!(ch, MakieEvents.SetTPLastEvent())
+            end
+            return
+
+        # G - Toggle Heat-GDT segmentation mode
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_G)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.ToggleHeatGDTModeEvent())
+            end
+            return
+        # W - One-Shot Heat-GDT Wand Mode
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_W)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.OneShotHeatGDTEvent())
             end
             return
 

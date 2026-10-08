@@ -39,14 +39,14 @@ else
     println("  PASS: reactToScroll removed from reactToShowSingleLesion")
 end
 
-has_uniform_update = occursin("coontrolMinMaxUniformVals", func_body)
-println("  Contains uniform update: $has_uniform_update")
+has_range_update = occursin("minAndMaxValue", func_body)
+println("  Contains minAndMaxValue update: $has_range_update")
 
-if !has_uniform_update
-    println("  FAIL: reactToShowSingleLesion doesn't update uniforms!")
+if !has_range_update
+    println("  FAIL: reactToShowSingleLesion doesn't update minAndMaxValue!")
     exit(1)
 else
-    println("  PASS: Uniform updates present")
+    println("  PASS: minAndMaxValue updates present")
 end
 
 println("\n=== ALL COMPILATION AND STRUCTURE TESTS PASSED ===")

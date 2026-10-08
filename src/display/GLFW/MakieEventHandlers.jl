@@ -15,11 +15,11 @@ using HDF5
 export reactToChangePlane, reactToCompareTimePoints, reactToShowSingleLesion
 export reactToWindowing, reactToPaintVal, reactToSyncLesion, reactToChangeBrushSize, reactToPetBlend, reactToLabelOpacity
 export reactToChangeTimePoint, reactToSetTimePoint, reactToToggleLesion, reactToRefreshList
-export reactToAddAutoPet, reactToAIInferenceResult, reactToSyncMissing, reactToGenManual
+export reactToAddAutoPet, reactToAIInferenceResult, reactToSyncMissing, reactToGenManual, reactToHeatGDTHold
 export reactToMapLink, reactToAutoRunPreprocess, reactToRunPreprocess, reactToShowBoneMask, reactToShowMaskLayer, reactToSaveMRB
 export register_h5_mask_saver!, mark_tp_mask_dirty!, save_tp_mask_to_h5, flush_all_dirty_masks!, dirty_mask_tps
 export _clinical_phase, get_clinical_phase, set_clinical_phase!, _phase_display_name
-export reactToEditMode, reactToViewMode, reactToSetTPFirst, reactToSetTPLast, reactToToggleMaskVisibility, reactToShowOnlyPET, reactToShowOnlyCT, reactToToggleSyncScroll
+export reactToEditMode, reactToViewMode, reactToSetTPFirst, reactToSetTPLast, reactToToggleMaskVisibility, reactToShowOnlyPET, reactToShowOnlyCT, reactToToggleSyncScroll, reactToToggleHeatGDTMode, reactToOneShotHeatGDT
 using ...InferenceClient
 using ...LesionAssociation
 using ...TextureManag
@@ -159,7 +159,7 @@ export cursor_info_text, cursor_study_text, set_ai_status!, current_viewer_posit
 function safe_status_text(msg::String)
     s = replace(msg, "\u2014" => "-", "\u2026" => "...")
     s = String(filter(c -> isascii(c), collect(s)))
-    return length(s) > 80 ? s[1:80] * "..." : s
+    return length(s) > 80 ? first(s, 80) * "..." : s
 end
 
 # Thread-safe AI status updater (ensures Observable mutation doesn't race GLMakie renderloop)
@@ -171,6 +171,10 @@ function set_ai_status!(msg::String)
         catch; end
     end
 end
+
+# Heat-GDT slider parameter refs (written by LesionMetadataWindow, read by inference worker)
+const heatgdt_K = Ref{Int}(40)
+const heatgdt_theta = Ref{Float32}(0.001f0)
 
 # Internal inference queue — serializes all Docker communication through a single worker thread
 struct InferenceJob
@@ -222,6 +226,16 @@ function start_inference_worker()
                     mask = InferenceClient.run_helpnet_inference(
                         job.ct_vol, job.pet_vol, job.points_vol,
                         job.cx, job.cy, job.cz)
+                elseif job.algorithm == "Heat-GDT"
+                    # Heat-GDT runs natively in Julia — no Docker/TCP needed
+                    # Uses precomputed diffusivity field + PDE solver
+                    K_val = heatgdt_K[]
+                    theta_val = heatgdt_theta[]
+                    set_ai_status!("[Processing] Heat-GDT PDE solver (K=$K_val, θ=$theta_val)...")
+                    mask = InferenceClient.run_heatgdt(
+                        job.ct_vol, job.pet_vol, job.points_vol,
+                        job.cx, job.cy, job.cz;
+                        K=K_val, theta=theta_val)
                 else
                     @debug "[AI Worker] WARNING: Unknown algorithm: $(job.algorithm)"
                     set_ai_status!("[Warning] Unknown algorithm: $(job.algorithm)")
@@ -613,6 +627,33 @@ end
         tp_switched[] = tp_switched[] + 1
     end
 end
+
+function reactToToggleSingleMultiLesion(data::MakieEvents.ToggleSingleMultiLesionEvent, stateObjects::Vector{StateDataFields})
+    is_single_lesion_mode[] = !is_single_lesion_mode[]
+    
+    # We use reactToShowSingleLesion logic with the current active ID
+    lesion_id = is_single_lesion_mode[] ? current_active_lesion_id[] : 0
+    changed = reactToShowSingleLesion(ShowSingleLesionEvent(lesion_id), stateObjects)
+    
+    # Tell LesionMetadataWindow about the change if it exists
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing && hasproperty(LMW, :_lmw_observables)
+            obs_dict = getfield(LMW, :_lmw_observables)
+            if haskey(obs_dict, :obs_single_multi_mode)
+                obs_dict[:obs_single_multi_mode][] = is_single_lesion_mode[]
+            end
+        end
+    catch e
+        @warn "Failed to update LesionMetadataWindow UI on M key: $e"
+    end
+    
+    # And trigger render
+    if changed
+        ReactToScroll.reactToScrollMultiPanel!(collect(1:length(stateObjects)), stateObjects)
+    end
+end
+export reactToToggleSingleMultiLesion
 
 # Flag controlling single vs all lesions display mode (default: true = display SINGLE lesion on start)
 const is_single_lesion_mode = Ref(true)
@@ -1742,7 +1783,7 @@ const _measurement_dirty = Ref(false)
 function _ensure_mask_autosave_task!()
     _mask_autosave_task_started[] && return
     _mask_autosave_task_started[] = true
-    @async begin
+    Threads.@spawn begin
         while true
             sleep(2.0)
             if !isempty(dirty_mask_tps) && !isempty(h5_save_path_ref[])
@@ -1889,7 +1930,8 @@ function _get_main_display_objects()
     _main_obj_ref[]
 end
 const _main_obj_ref = Ref{Any}(nothing)
-export _main_obj_ref
+const _state_instances_ref = Ref{Any}(nothing)
+export _main_obj_ref, _state_instances_ref
 
 function register_main_channel!(ch::Channel)
     main_event_channel[] = ch
@@ -2406,6 +2448,39 @@ export tp_data_cache, _tp_cache_lock, _hdf5_io_lock, bone_subsegments_cache, les
 export _m2_crosshair_sync, compare_mode, compare_right_tp, tp_switched, get_node_name_for_tp, tp_node_names, _m2_reference_tp
 export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, h5_path_ref, tp_modalities, volume_z_size, anatomy_labels_cache, tp_segment_names, tp_organ_mapping
 export organ_mapping_updated
+
+const _ai_mask_backups = Dict{Tuple{Int, Int}, Any}()  # (tp_idx, lesion_id) -> original mask voxels
+
+function ensure_ai_mask_backup!(lesion_id::Int, tp_idx::Int, stateObject=nothing)
+    lesion_id <= 0 && return nothing
+    if !haskey(_ai_mask_backups, (tp_idx, lesion_id))
+        entry = lock(_tp_cache_lock) do
+            haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
+        end
+        if entry !== nothing && entry.mask_i16 !== nothing
+            vox = findall(==(Int16(lesion_id)), entry.mask_i16)
+            _ai_mask_backups[(tp_idx, lesion_id)] = vox
+        end
+    end
+    return nothing
+end
+
+function mark_expert_edit!(lesion_id::Int)
+    lesion_id <= 0 && return nothing
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing
+            db = LMW.lesion_db[]
+            k = string(lesion_id)
+            if haskey(db, k) && get(db[k], "SegmentationOrigin", "") != "EXPERT_CORRECTION"
+                db[k]["SegmentationOrigin"] = "EXPERT_CORRECTION"
+            end
+        end
+    catch; end
+    return nothing
+end
+
+export ensure_ai_mask_backup!, mark_expert_edit!
 
 
 function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector{StateDataFields})
@@ -3208,13 +3283,16 @@ end
 
 const MASK_BACKUP = Dict{UInt64, Array{Float32, 3}}()
 
+const _lesion_active = Ref(true)
 const _bone_surf_active = Ref(true)
 const _bone_marr_active = Ref(true)
 
 function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{StateDataFields})
     @debug "reactToShowMaskLayer: layer=$(data.layer) active=$(data.active)"
     
-    if data.layer == 2
+    if data.layer == 1
+        _lesion_active[] = data.active
+    elseif data.layer == 2
         _bone_surf_active[] = data.active
     elseif data.layer == 3
         _bone_marr_active[] = data.active
@@ -3642,6 +3720,207 @@ function reactToEditLineMeasurement(data::MakieEvents.EditLineMeasurementEvent, 
     if length(stateObjects) >= 5; targets[5] = mz; end
     ReactToScroll = parentmodule(parentmodule(@__MODULE__)).ReactToScroll
     ReactToScroll.reactToScrollMultiPanel!(collect(keys(targets)), stateObjects, targets)
+end
+
+"""
+Handle G key: toggle Heat-GDT segmentation mode on/off.
+When active, mouse hold-and-release triggers heat diffusion.
+Only allowed when in annotation/edit mode (is_painting_active).
+"""
+function reactToToggleHeatGDTMode(data::MakieEvents.ToggleHeatGDTModeEvent, stateObjects::Vector{StateDataFields})
+    # Access the ReactOnMouseClickAndDrag module's toggle ref
+    romcad = nothing
+    try
+        romcad = parentmodule(@__MODULE__).ReactOnMouseClickAndDrag
+    catch
+        try
+            romcad = parentmodule(parentmodule(@__MODULE__)).ReactOnMouseClickAndDrag
+        catch; end
+    end
+    
+    if romcad === nothing
+        @warn "[Heat-GDT] Cannot find ReactOnMouseClickAndDrag module"
+        return
+    end
+    
+    new_state = !romcad._heatgdt_mode_active[]
+    romcad._heatgdt_mode_active[] = new_state
+    
+    status_msg = new_state ? "[Heat-GDT] Mode ENABLED (G key) — hold left click to grow" : "[Heat-GDT] Mode DISABLED (G key)"
+    set_ai_status!(status_msg)
+    if PERF_LOG[]; println(status_msg); flush(stdout); end
+    
+    # Also sync the GUI dropdown if available
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing
+            obs_dict = getfield(LMW, :_lmw_observables)
+            if haskey(obs_dict, :algo_combo_selection)
+                if new_state
+                    obs_dict[:algo_combo_selection][] = "Heat-GDT"
+                end
+            end
+        end
+    catch; end
+end
+
+"""
+Handle Heat-GDT mouse hold release: the hold duration determines the number of
+diffusion steps K. Longer holds = more steps = larger segmentation area.
+K_total = K_base + hold_duration_s * K_rate, capped at 200.
+"""
+function reactToHeatGDTHold(event::HeatGDTHoldEvent, stateObjects::Vector{StateDataFields})
+    # Scale K based on hold duration: K_base + hold_duration * K_rate
+    K_base = heatgdt_K[]
+    K_rate = 30  # Additional diffusion steps per second of holding
+    K_total = min(K_base + round(Int, event.hold_duration_s * K_rate), 200)
+    theta_val = heatgdt_theta[]
+    
+    @debug "[Heat-GDT Hold] duration=$(round(event.hold_duration_s, digits=2))s, K=$K_total, θ=$theta_val"
+    set_ai_status!("[Heat-GDT Hold] $(round(event.hold_duration_s, digits=1))s → K=$K_total")
+    
+    # Temporarily override K for this inference job
+    old_K = heatgdt_K[]
+    heatgdt_K[] = K_total
+    
+    try
+        tp1_state = stateObjects[1]
+        
+        # Guard: only run Heat-GDT in annotation/edit mode (press E to enable painting)
+        if !tp1_state.valueForMasToSet.is_painting_active
+            set_ai_status!("[Heat-GDT] Hold ignored — enter Edit mode first (press E)")
+            return
+        end
+        seg_vol = nothing
+        ct_vol = nothing
+        pet_vol = nothing
+        for dat in tp1_state.onScrollData.dataToScroll
+            if dat.name == "CT" && ct_vol === nothing
+                ct_vol = dat.dat
+            elseif dat.name == "PET" && pet_vol === nothing
+                pet_vol = dat.dat
+            elseif (dat.name == "Mask" || dat.name == "segmentation") && seg_vol === nothing
+                seg_vol = dat.dat
+            end
+        end
+        
+        if ct_vol === nothing || seg_vol === nothing
+            set_ai_status!("[Error] CT/Mask not found for Heat-GDT hold")
+            return
+        end
+        
+        # Find scribble center from painted voxels
+        active_id = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
+        T_elem = eltype(seg_vol)
+        v_act = round(T_elem, active_id)
+        painted_pts = findall(seg_vol .== v_act)
+        
+        if isempty(painted_pts)
+            vpos = current_viewer_position[]
+            if vpos[1] > 0 && vpos[2] > 0 && vpos[3] > 0
+                cx, cy, cz = vpos[1], vpos[2], vpos[3]
+                painted_pts = [CartesianIndex(cx, cy, cz)]
+                if checkbounds(Bool, seg_vol, cx, cy, cz)
+                    seg_vol[cx, cy, cz] = v_act
+                end
+            else
+                set_ai_status!("[Error] No scribbles for Heat-GDT hold — paint on lesion first")
+                return
+            end
+        else
+            cx = round(Int, mean([p[1] for p in painted_pts]))
+            cy = round(Int, mean([p[2] for p in painted_pts]))
+            cz = round(Int, mean([p[3] for p in painted_pts]))
+        end
+        
+        points_vol = zeros(Float32, size(ct_vol))
+        for idx in painted_pts
+            if checkbounds(Bool, points_vol, idx)
+                points_vol[idx] = 1.0f0
+            end
+        end
+        
+        ct_spacing = try
+            tp1_state.onScrollData.dataToScrollDims.voxelSize
+        catch
+            (1.0, 1.0, 1.0)
+        end
+        
+        pet_vol_safe = pet_vol !== nothing ? pet_vol : zeros(Float32, size(ct_vol))
+        channel = tp1_state.mainForDisplayObjects.mainChannel
+        put!(inference_queue, InferenceJob(
+            "Heat-GDT", ct_vol, pet_vol_safe, points_vol,
+            cx, cy, cz, active_id, seg_vol, channel,
+            Vector{Int}[], Vector{Int}[], ct_spacing))
+    catch e
+        err_msg = sprint(showerror, e)
+        @debug "[Heat-GDT Hold] ERROR: $err_msg"
+        set_ai_status!("[Error] Heat-GDT Hold: $err_msg")
+    finally
+        heatgdt_K[] = old_K  # Restore original K
+        
+        # Deactivate if one-shot mode was active
+        if _heatgdt_oneshot[]
+            _heatgdt_oneshot[] = false
+            romcad = nothing
+            try
+                romcad = parentmodule(@__MODULE__).ReactOnMouseClickAndDrag
+            catch
+                try
+                    romcad = parentmodule(parentmodule(@__MODULE__)).ReactOnMouseClickAndDrag
+                catch; end
+            end
+            if romcad !== nothing
+                romcad._heatgdt_mode_active[] = false
+                set_ai_status!("[Heat-GDT Wand] Lesion created. Wand deactivated.")
+            end
+        end
+    end
+end
+
+const _heatgdt_oneshot = Ref{Bool}(false)
+
+function reactToOneShotHeatGDT(data::MakieEvents.OneShotHeatGDTEvent, stateObjects::Vector{StateDataFields})
+    # 1. Create a new lesion
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing
+            obs_dict = getfield(LMW, :_lmw_observables)
+            if haskey(obs_dict, :obs_new_lesion)
+                obs_dict[:obs_new_lesion][] = obs_dict[:obs_new_lesion][] + 1
+            end
+        end
+    catch; end
+    
+    # 2. Enter Edit/Paint mode
+    reactToEditMode(MakieEvents.EditModeEvent(), stateObjects)
+    
+    # 3. Enable Heat-GDT mode
+    romcad = nothing
+    try
+        romcad = parentmodule(@__MODULE__).ReactOnMouseClickAndDrag
+    catch
+        try
+            romcad = parentmodule(parentmodule(@__MODULE__)).ReactOnMouseClickAndDrag
+        catch; end
+    end
+    
+    if romcad !== nothing
+        romcad._heatgdt_mode_active[] = true
+        _heatgdt_oneshot[] = true
+        set_ai_status!("[Heat-GDT Wand] Enabled. Click & hold to grow lesion.")
+        
+        # Sync GUI dropdown
+        @async try
+            LMW = _get_lmw()
+            if LMW !== nothing
+                obs_dict = getfield(LMW, :_lmw_observables)
+                if haskey(obs_dict, :algo_combo_selection)
+                    obs_dict[:algo_combo_selection][] = "Heat-GDT"
+                end
+            end
+        catch; end
+    end
 end
 
 end

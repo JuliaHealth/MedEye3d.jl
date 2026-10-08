@@ -132,7 +132,6 @@ for frame in 1:n_frames
 
     panel = PanelRenderData(
         pipeline_state,
-        quad,
         push_data,
         0.0f0, 0.0f0,              # viewport x, y
         Float32(ctx.width),         # viewport w

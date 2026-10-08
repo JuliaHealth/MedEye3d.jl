@@ -6,10 +6,16 @@ using Base64
 using MedImages
 using ..ConnectedComponents
 
+try
+    using CUDA: CuArray
+catch
+end
+
 export start_python_worker, run_helpnet_inference, run_nninteractive, run_bone_subsegmentation_remote,
        insert_patch!, preload_ct_for_nninteractive, send_json_request,
        prompt_start_ai_models, is_worker_reachable, is_ai_enabled, set_ai_enabled!,
-       get_last_ai_error, set_last_ai_error!, find_ai_script, get_inference_dir
+       get_last_ai_error, set_last_ai_error!, find_ai_script, get_inference_dir,
+       run_heatgdt, is_heatgdt_available, precompute_heatgdt_diffusivity
 
 """
     read_with_timeout(conn::TCPSocket, timeout_s::Real=30.0) -> String
@@ -874,6 +880,182 @@ function run_bone_subsegmentation_remote(lesion_mask::AbstractArray{T, 3}, bone_
     catch e
         println("[InferenceClient ERROR] Failed to communicate with Python Worker at $host:$port: $e"); flush(stdout)
         return nothing, nothing
+    end
+end
+
+# ── Heat-GDT Native Julia Inference ─────────────────────────────────────────
+# Unlike HELPNet/nnInteractive, Heat-GDT runs entirely in Julia — no Docker needed.
+# The edge network produces a diffusivity field D(x) once per volume load.
+# Interactive clicks then run a lightweight PDE solver on the precomputed field.
+
+const _heatgdt_diffusivity = Ref{Union{Nothing, Array{Float32, 3}}}(nothing)
+const _heatgdt_edge_map = Ref{Union{Nothing, Array{Float32, 3}}}(nothing)
+
+"""
+    is_heatgdt_available() -> Bool
+
+Checks if the Heat-GDT diffusivity field has been precomputed for the current volume.
+"""
+function is_heatgdt_available()::Bool
+    return _heatgdt_diffusivity[] !== nothing
+end
+
+"""
+    precompute_heatgdt_diffusivity(diffusivity_vol::Array{Float32, 3})
+
+Stores a precomputed diffusivity field D(x) for the current volume.
+Called when a study is loaded and the edge/diffusivity NIfTI exists.
+"""
+function precompute_heatgdt_diffusivity(diffusivity_vol::Array{Float32, 3})
+    _heatgdt_diffusivity[] = diffusivity_vol
+    @info "[InferenceClient] Heat-GDT diffusivity field loaded ($(size(diffusivity_vol)))"
+end
+
+"""
+    run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
+                points_vol::Array{Float32,3}, cx::Int, cy::Int, cz::Int;
+                K::Int=40, dt::Float32=0.16f0, theta::Float32=0.001f0, tau::Float32=0.0001f0)
+
+Run Heat-GDT interactive segmentation on a 64³ patch centered at (cx, cy, cz).
+Uses the precomputed diffusivity field if available, otherwise falls back to
+constant diffusivity (no edge detection).
+
+Returns a binary `Array{UInt8, 3}` mask (64³ patch coordinates), or `nothing` on failure.
+"""
+function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
+                     points_vol::Array{Float32,3}, cx::Int, cy::Int, cz::Int;
+                     K::Int=40, dt::Float32=0.16f0, theta::Float32=0.001f0, tau::Float32=0.0001f0)
+    
+    # Extract 64³ diffusivity patch
+    D_patch = if _heatgdt_diffusivity[] !== nothing
+        extract_patch(_heatgdt_diffusivity[], cx, cy, cz; pad_val=1.0f0)
+    else
+        # Fallback: uniform diffusivity (no edge information)
+        @warn "[InferenceClient] Heat-GDT: No precomputed diffusivity. Using uniform D=1.0."
+        ones(Float32, 64, 64, 64)
+    end
+    
+    # Create seed from the painted scribble points (mean position = center of patch)
+    seed_mask = zeros(Float32, 64, 64, 64)
+    seed_mask[33, 33, 33] = 1.0f0  # Center of 64³ patch
+    
+    # Reshape for batch dimension: (X, Y, Z, B)
+    D_4d = reshape(D_patch, 64, 64, 64, 1)
+    seed_4d = reshape(seed_mask, 64, 64, 64, 1)
+    
+    try
+        # Try GPU path first
+        D_gpu = nothing
+        seed_gpu = nothing
+        use_gpu = false
+        
+        try
+            # Attempt CUDA
+            D_gpu = CuArray{Float32}(D_4d)
+            seed_gpu = CuArray{Float32}(seed_4d)
+            use_gpu = true
+        catch
+            # CPU fallback
+            D_gpu = D_4d
+            seed_gpu = seed_4d
+        end
+        
+        # Run heat diffusion with replicate (Neumann zero-flux) boundary conditions.
+        # This matches the Vulkan compute shader (diffuse_step.comp) exactly:
+        #   neighbor = clamp(pos ± 1, 0, dims-1)
+        #
+        # For GPU arrays, we use a pad→crop approach to avoid per-element indexing:
+        #   padded = pad_replicate(u)   — adds 1 voxel on each side (replicating edges)
+        #   neighbor = padded[shifted_range]
+        #   face_D = 0.5*(D_center + D_neighbor_padded)
+        
+        N = 64  # patch size
+        
+        # Helper: replicate-pad a 3D (N,N,N,1) array by 1 on each side → (N+2,N+2,N+2,1)
+        # Then extract shifted neighbor views
+        function _replicate_pad(arr)
+            # arr is (N, N, N, B) where B=1
+            # Pad each spatial dim by 1 on each side using edge replication
+            s = size(arr)
+            padded = similar(arr, s[1]+2, s[2]+2, s[3]+2, s[4])
+            # Copy center
+            padded[2:end-1, 2:end-1, 2:end-1, :] .= arr
+            # Replicate edges (6 faces)
+            padded[1, :, :, :] .= padded[2, :, :, :]
+            padded[end, :, :, :] .= padded[end-1, :, :, :]
+            padded[:, 1, :, :] .= padded[:, 2, :, :]
+            padded[:, end, :, :] .= padded[:, end-1, :, :]
+            padded[:, :, 1, :] .= padded[:, :, 2, :]
+            padded[:, :, end, :] .= padded[:, :, end-1, :]
+            return padded
+        end
+        
+        # Precompute face conductivities with replicate boundaries
+        D_padded = _replicate_pad(D_gpu)
+        # Neighbor D values extracted from padded array
+        D_xp_nbr = D_padded[3:N+2, 2:N+1, 2:N+1, :]  # x+1
+        D_xm_nbr = D_padded[1:N,   2:N+1, 2:N+1, :]  # x-1
+        D_yp_nbr = D_padded[2:N+1, 3:N+2, 2:N+1, :]  # y+1
+        D_ym_nbr = D_padded[2:N+1, 1:N,   2:N+1, :]  # y-1
+        D_zp_nbr = D_padded[2:N+1, 2:N+1, 3:N+2, :]  # z+1
+        D_zm_nbr = D_padded[2:N+1, 2:N+1, 1:N,   :]  # z-1
+        
+        # Face-averaged conductivities (arithmetic mean of adjacent voxels)
+        D_xp = 0.5f0 .* (D_gpu .+ D_xp_nbr)
+        D_xm = 0.5f0 .* (D_gpu .+ D_xm_nbr)
+        D_yp = 0.5f0 .* (D_gpu .+ D_yp_nbr)
+        D_ym = 0.5f0 .* (D_gpu .+ D_ym_nbr)
+        D_zp = 0.5f0 .* (D_gpu .+ D_zp_nbr)
+        D_zm = 0.5f0 .* (D_gpu .+ D_zm_nbr)
+        
+        # Run heat diffusion (K steps of the PDE: ∂u/∂t = ∇·(D∇u))
+        u = seed_gpu
+        for k in 1:K
+            # Replicate-pad current heat field
+            u_padded = _replicate_pad(u)
+            
+            # Extract shifted neighbors from padded array
+            u_xp = u_padded[3:N+2, 2:N+1, 2:N+1, :]
+            u_xm = u_padded[1:N,   2:N+1, 2:N+1, :]
+            u_yp = u_padded[2:N+1, 3:N+2, 2:N+1, :]
+            u_ym = u_padded[2:N+1, 1:N,   2:N+1, :]
+            u_zp = u_padded[2:N+1, 2:N+1, 3:N+2, :]
+            u_zm = u_padded[2:N+1, 2:N+1, 1:N,   :]
+            
+            flux = D_xp .* (u_xp .- u) .+
+                   D_xm .* (u_xm .- u) .+
+                   D_yp .* (u_yp .- u) .+
+                   D_ym .* (u_ym .- u) .+
+                   D_zp .* (u_zp .- u) .+
+                   D_zm .* (u_zm .- u)
+            u = u .+ dt .* flux
+        end
+        
+        # Extract mask via sigmoid thresholding
+        mask_field = 1.0f0 ./ (1.0f0 .+ exp.(-(u .- theta) ./ tau))
+        
+        # Move to CPU and binarize
+        mask_cpu = use_gpu ? Array(mask_field[:, :, :, 1]) : mask_field[:, :, :, 1]
+        binary_mask = UInt8.(mask_cpu .> 0.5f0)
+        
+        # Post-process: extract largest connected component
+        clean_mask = try
+            ConnectedComponents.extract_largest_connected_component(binary_mask)
+        catch lcc_err
+            @warn "[InferenceClient] Heat-GDT LCC fallback to raw mask: $lcc_err"
+            binary_mask
+        end
+        
+        voxels = count(clean_mask .> 0)
+        println("[InferenceClient] Heat-GDT: $(voxels) voxels segmented (K=$K, θ=$theta, τ=$tau)"); flush(stdout)
+        set_last_ai_error!("")
+        return clean_mask
+        
+    catch e
+        err_msg = "Heat-GDT inference failed: $e"
+        set_last_ai_error!(err_msg)
+        println("[InferenceClient ERROR] $err_msg"); flush(stdout)
+        return nothing
     end
 end
 

@@ -1,0 +1,23 @@
+#version 450
+// seed_init.comp — Initializes the heat field with a single seed point set to 1.0
+// All other voxels are set to 0.0
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
+
+layout(set = 0, binding = 0, r32f) uniform writeonly image3D img_u;
+
+layout(push_constant) uniform PushConstants {
+    ivec4 seed_pos;  // xyz = seed voxel coordinates, w = unused
+} pc;
+
+void main() {
+    ivec3 pos = ivec3(gl_GlobalInvocationID.xyz);
+    ivec3 dims = imageSize(img_u);
+    if (any(greaterThanEqual(pos, dims))) return;
+
+    float val = 0.0;
+    if (pos.x == pc.seed_pos.x && pos.y == pc.seed_pos.y && pos.z == pc.seed_pos.z) {
+        val = 1.0;
+    }
+    imageStore(img_u, pos, vec4(val, 0.0, 0.0, 0.0));
+}

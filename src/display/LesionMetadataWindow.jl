@@ -38,6 +38,7 @@ import ..LesionAssociation as LA
 import ..LLMDictation
 import ..EPSMAStructuredReport as ESR
 import ..EPSMAReportWindow as ERW
+import ..SegmentationDisplay.ReactOnMouseClickAndDrag as _ROMCAD
 
 export create_metadata_window, display_metadata_window, get_active_lesion_db, get_mask_ids, lookup_anatomy
 
@@ -80,8 +81,15 @@ end
     _set_menu_idx!(menu, idx) — Set Menu i_selected only if changed.
 """
 @inline function _set_menu_idx!(menu, idx::Integer)
-    menu.i_selected[] == idx && return
-    menu.i_selected[] = idx
+    opts = menu.options[]
+    val = (idx >= 1 && idx <= length(opts)) ? opts[idx] : nothing
+    
+    if menu.i_selected[] != idx
+        menu.i_selected[] = idx
+    end
+    if menu.selection[] != val
+        menu.selection[] = val
+    end
 end
 export current_has_expert_edits, current_seg_origin, mark_expert_correction!, mark_prompt_segmentation!, mark_reverted_to_ai!, request_autosave, get_lesion_has_expert_edits, get_lesion_segmentation_origin, _current_user
 
@@ -2396,6 +2404,7 @@ function create_metadata_window(
     obs_set_compare_mode = Observable(false)
     ui_queue = Function[]
     ui_lock = ReentrantLock()
+    _safe_ui_update(f::Function) = lock(ui_lock) do; push!(ui_queue, f); end
     # Wrap channel in Ref for deferred connection (parallel startup)
     channel_ref = Ref{Union{Base.Channel, Nothing}}(channel_arg)
     # Proxy that queues events when channel is not yet connected
@@ -3409,6 +3418,20 @@ function create_metadata_window(
                 btn_next_unreviewed.clicks[] = btn_next_unreviewed.clicks[] + 1
             end
             return Consume(true)
+        elseif (event.action == Makie.Keyboard.press || event.action == Makie.Keyboard.release) && event.key == Makie.Keyboard.m
+            any_focused = false
+            for tb in _all_textboxes
+                try
+                    if tb.focused[]
+                        any_focused = true
+                        break
+                    end
+                catch; end
+            end
+            if !any_focused && event.action == Makie.Keyboard.press
+                put!(channel, MakieEvents.ToggleSingleMultiLesionEvent())
+                return Consume(true)
+            end
         end
         return Consume(false)
     end
@@ -3416,20 +3439,34 @@ function create_metadata_window(
     # Merged overlay/single/all/refresh into one compact row
     vc2_r = nr!()
     btn_tl = Button(g[vc2_r, 1], label = "Overlay", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_single = Button(g[vc2_r, 2], label = "Single", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_all = Button(g[vc2_r, 3], label = "All",    buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_single = Button(g[vc2_r, 2], label = "Single", buttoncolor = _MEH.is_single_lesion_mode[] ? BLU_BTN : BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_all = Button(g[vc2_r, 3], label = "All",    buttoncolor = !_MEH.is_single_lesion_mode[] ? BLU_BTN : BG_PNL, labelcolor = TXT, fontsize = 10)
     btn_rf = Button(g[vc2_r, 4], label = "Refresh",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+
+    obs_single_multi_mode = Observable(_MEH.is_single_lesion_mode[])
+    _lmw_observables[:obs_single_multi_mode] = obs_single_multi_mode
+    on(obs_single_multi_mode) do is_single
+        if is_single
+            btn_single.buttoncolor[] = BLU_BTN
+            btn_all.buttoncolor[] = BG_PNL
+        else
+            btn_single.buttoncolor[] = BG_PNL
+            btn_all.buttoncolor[] = BLU_BTN
+        end
+    end
+
     on(btn_tl.clicks) do _; put!(channel, ToggleLesionEvent()) end
     on(btn_rf.clicks) do _; put!(channel, RefreshListEvent()) end
     on(btn_single.clicks) do _
         id_str = active_lesion_id[]
         parsed = parse_lesion_id(id_str)
-        if parsed !== nothing
-            put!(channel, ShowSingleLesionEvent(parsed))
-        end
+        target_id = parsed !== nothing ? parsed : 1
+        put!(channel, ShowSingleLesionEvent(target_id))
+        obs_single_multi_mode[] = true
     end
     on(btn_all.clicks) do _
         put!(channel, ShowSingleLesionEvent(0))
+        obs_single_multi_mode[] = false
     end
     
     end_section!(sec_view)
@@ -4411,7 +4448,7 @@ function create_metadata_window(
 
     # Pre-declare variables that will be created inside the "Identification" group injection
     # (Julia if-blocks create local scope, so we need outer-scope declarations)
-    local btn_type_prostate, btn_type_bone, btn_type_organ, btn_type_ln
+    local btn_type_prostate, btn_type_bone, btn_type_organ, btn_type_ln, btn_type_artifact
     local active_lesion_type, menu_base_anat, ba_all_opts, menu_side
     local anat_detail_label_r, btn_add_anat_rel
     local ANAT_RELATIONS, MAX_ANAT_ROWS
@@ -4526,18 +4563,20 @@ function create_metadata_window(
             btn_type_bone     = Button(g[lt_r, 2], label = "Bone Meta",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
             btn_type_organ    = Button(g[lt_r, 3], label = "Organ Meta", buttoncolor = ACCENT, labelcolor = TXT, fontsize = 10)
             btn_type_ln       = Button(g[lt_r, 4], label = "Lymph Node", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+            btn_type_artifact = Button(g[lt_r, 5], label = "Artifact",   buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
             
             active_lesion_type = Observable("Organ Meta")
             _last_bone_state = Ref(false)
             
             function update_type_buttons(t)
-                # Skip if type unchanged (saves 4 button color updates + bone event)
+                # Skip if type unchanged (saves button color updates + bone event)
                 active_lesion_type[] == t && return
                 active_lesion_type[] = t
                 btn_type_prostate.buttoncolor[] = (t == "Prostate") ? ACCENT : BG_PNL
                 btn_type_bone.buttoncolor[]     = (t == "Bone Meta") ? ACCENT : BG_PNL
                 btn_type_organ.buttoncolor[]    = (t == "Organ Meta") ? ACCENT : BG_PNL
                 btn_type_ln.buttoncolor[]       = (t == "Lymph Node" || t == "Lymph Node Meta") ? ACCENT : BG_PNL
+                btn_type_artifact.buttoncolor[] = (t == "Technical Artifact") ? ACCENT : BG_PNL
                 
                 is_bone = (t == "Bone Meta")
                 # Only send bone mask event if visibility actually changes (avoids ~580ms re-render)
@@ -4552,6 +4591,7 @@ function create_metadata_window(
             on(btn_type_bone.clicks)     do _; update_type_buttons("Bone Meta") end
             on(btn_type_organ.clicks)    do _; update_type_buttons("Organ Meta") end
             on(btn_type_ln.clicks)       do _; update_type_buttons("Lymph Node Meta") end
+            on(btn_type_artifact.clicks) do _; update_type_buttons("Technical Artifact") end
             
             # Base Anatomy (filterable Menu) + Side
             ba_r = nr!()
@@ -4928,6 +4968,26 @@ function create_metadata_window(
                     set_row_visible!(row_idx, visible)
                 end
             end
+            
+            # Hide Bone Surface and Marrow toggles if not Bone Meta
+            btn_vis_surface.blockscene.visible[] = is_bm
+            btn_vis_marrow.blockscene.visible[] = is_bm
+            
+            if !is_bm
+                if vis_surface_active[]
+                    vis_surface_active[] = false
+                    btn_vis_surface.label[] = "Surf: OFF"
+                    btn_vis_surface.buttoncolor[] = BG_PNL
+                    put!(channel, ShowMaskLayerEvent(2, false))
+                end
+                if vis_marrow_active[]
+                    vis_marrow_active[] = false
+                    btn_vis_marrow.label[] = "Marrow: OFF"
+                    btn_vis_marrow.buttoncolor[] = BG_PNL
+                    put!(channel, ShowMaskLayerEvent(3, false))
+                end
+            end
+            
         finally
             # g.block_updates = false
             # try Makie.GridLayoutBase.update!(g) catch; end
@@ -4987,6 +5047,32 @@ function create_metadata_window(
         end
     end
 
+    on(btn_type_artifact.clicks) do _
+        update_type_buttons("Technical Artifact")
+        no_ct_toggle.active[] = true
+        if haskey(field_widgets, "Certainty")
+            cert_w = field_widgets["Certainty"]
+            if cert_w isa Slider
+                cert_w.selected_index[] = 1
+            end
+        end
+        if haskey(field_widgets, "Alternative Hypothesis (False Positive)") && field_widgets["Alternative Hypothesis (False Positive)"] isa Menu
+            w = field_widgets["Alternative Hypothesis (False Positive)"]
+            opts = w.options[]
+            idx = findfirst(==("Technical Artifact"), opts)
+            if idx === nothing
+                opts = vcat(opts, ["Technical Artifact"])
+                w.options[] = opts
+                idx = length(opts)
+            end
+            _set_menu_idx!(w, idx)
+            if w.selection[] != "Technical Artifact"
+                w.selection[] = "Technical Artifact"
+            end
+        end
+        trigger_autosave()
+    end
+
 
 
 
@@ -5011,6 +5097,11 @@ function create_metadata_window(
     current_paint_mode = Observable(:view)
     
     on(btn_new_lesion.clicks) do _
+        # Flush any pending autosaves for the PREVIOUS lesion before switching
+        if _is_autosaving[] == false && active_lesion_id[] != ""
+            try trigger_autosave(skip_dictation=true) catch; end
+        end
+        
         max_id = 0
         for opt in lesion_ids[]
             cp = findfirst(':', opt)
@@ -5116,7 +5207,12 @@ function create_metadata_window(
         end
         
         new_name = "$(new_id): $(display_name)"
-        db = copy(lesion_db[]); db[string(new_id)] = Dict{String, Any}("_display_name" => new_name); lesion_db[] = db
+        db = copy(lesion_db[])
+        db[string(new_id)] = Dict{String, Any}(
+            "_display_name" => new_name,
+            "SegmentationOrigin" => "MANUAL"
+        )
+        lesion_db[] = db
         opts = copy(lesion_ids[]); push!(opts, new_name)
         is_syncing_selection[] = true
         try
@@ -5130,14 +5226,14 @@ function create_metadata_window(
         empty!(_MASK_IDS_CACHE)
         empty!(_cached_lesion_ids)
         empty!(_organ_classification_cache)
-        # For a NEW lesion, do NOT send SyncLesionEvent — it has no voxels yet,
-        # so the centroid lookup defaults to the volume center (jumping to middle slice).
-        # Instead: activate painting and show ALL lesion IDs so newly painted voxels are visible.
+        # Activate painting and show the new lesion (or all lesions if in multi mode)
+        if _MEH.is_single_lesion_mode[]
+            put!(channel, ShowSingleLesionEvent(new_id))
+        else
+            put!(channel, ShowSingleLesionEvent(0))
+        end
         put!(channel, PaintValEvent(new_id, true))
-        put!(channel, ShowSingleLesionEvent(0))  # show all lesions (0 = show all)
-        # Force texture re-upload via zero-scroll to ensure painted voxels are visible
-        put!(channel, MakieEvents.ScrollEvent(0, 1))
-        println("[NEW LESION] Created lesion $new_id, paint mode active, val=$new_id")
+        println("[NEW LESION] Created lesion $new_id, paint mode active, val=$new_id (single_mode=$(_MEH.is_single_lesion_mode[]))")
         flush(stdout)
     end
     on(btn_paint.clicks) do _
@@ -5147,6 +5243,11 @@ function create_metadata_window(
         empty!(_cached_lesion_ids)
         empty!(_organ_classification_cache)
         val = (p = parse_lesion_id(active_lesion_id[])) !== nothing ? p : 1
+        if _MEH.is_single_lesion_mode[]
+            put!(channel, ShowSingleLesionEvent(val))
+        else
+            put!(channel, ShowSingleLesionEvent(0))
+        end
         put!(channel, PaintValEvent(val, true))
         _MEH.set_workflow_state!(_MEH.ScientificWorkflow.WF_EDIT_MASK)
     end
@@ -5183,9 +5284,34 @@ function create_metadata_window(
     # Row 3: Algorithm dropdown (fixed height for Menu dropdown clearance)
     seg_r3 = nr!()
     Label(g[seg_r3, 1], "AI:", halign=:right, fontsize=10, color=LBL_FG)
-    algo_combo = Menu(g[seg_r3, 2:3], options = ["HELPNet (AI)", "NNInteractive", "Traditional (PETTumor)"], default = "HELPNet (AI)", fontsize = 10); _register_menu!(algo_combo)
+    algo_combo = Menu(g[seg_r3, 2:3], options = ["HELPNet (AI)", "NNInteractive", "Heat-GDT", "Traditional (PETTumor)"], default = "HELPNet (AI)", fontsize = 10); _register_menu!(algo_combo)
     btn_add_ai = Button(g[seg_r3, 4], label = "Run AI", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
     rowsize!(g, seg_r3, Fixed(30)); register_fixed_row!(seg_r3, 30)
+
+    # Row 3b: Heat-GDT parameters (only visible when Heat-GDT is selected)
+    seg_r3b = nr!()
+    Label(g[seg_r3b, 1], "θ:", halign=:right, fontsize=10, color=LBL_FG)
+    slider_heatgdt_theta = Slider(g[seg_r3b, 2], range = 0.0001:0.0001:0.01, startvalue = 0.001)
+    Label(g[seg_r3b, 3], "K:", halign=:right, fontsize=10, color=LBL_FG)
+    slider_heatgdt_K = Slider(g[seg_r3b, 4], range = 10:5:100, startvalue = 40)
+    rowsize!(g, seg_r3b, Fixed(30)); register_fixed_row!(seg_r3b, 30)
+    
+    on(slider_heatgdt_theta.value) do val
+        _MEH.heatgdt_theta[] = Float32(val)
+    end
+    on(slider_heatgdt_K.value) do val
+        _MEH.heatgdt_K[] = Int(val)
+    end
+
+    # Show/hide Heat-GDT params based on algorithm selection
+    heatgdt_row_visible = Observable(false)
+    on(algo_combo.selection) do sel
+        heatgdt_row_visible[] = (sel == "Heat-GDT")
+        rowsize!(g, seg_r3b, Fixed(heatgdt_row_visible[] ? 30 : 0))
+        # Enable/disable Heat-GDT mouse-hold interaction mode
+        _ROMCAD._heatgdt_mode_active[] = (sel == "Heat-GDT")
+    end
+    rowsize!(g, seg_r3b, Fixed(0))  # Hidden by default
     on(btn_add_ai.clicks) do _
         @async try
             put!(channel, AddAutoPetEvent(algo_combo.selection[], channel))
@@ -6183,17 +6309,7 @@ function create_metadata_window(
             _set!(current_has_expert_edits, has_edits)
 
         t_type = if haskey(data, "LesionType")
-            # Saved type exists — override if anatomy mapping disagrees
-            _tp_o = get(_MEH.tp_organ_mapping, _MEH.current_tp_index[], Dict{Int,String}())
-            raw_organ_for_type = get(_tp_o, lid, get(_MEH.global_organ_mapping[], lid, ""))
-            json_entry_for_type = lookup_anatomy(raw_organ_for_type)
-            saved_type = data["LesionType"]
-            if json_entry_for_type !== nothing
-                mapped_type = get(json_entry_for_type, "lesion_type", "")
-                (!isempty(mapped_type) && mapped_type != saved_type) ? mapped_type : saved_type
-            else
-                saved_type
-            end
+            data["LesionType"]
         else
             # Auto-detect lesion type: try JSON mapping first, then keyword fallback
             _tp_o2 = get(_MEH.tp_organ_mapping, _MEH.current_tp_index[], Dict{Int,String}())
@@ -7007,6 +7123,10 @@ function create_metadata_window(
                     if w.i_selected[] != idx
                         w.i_selected[] = idx
                     end
+                    if w.selection[] != val_str
+                        w.selection[] = val_str
+                    end
+                    notify(w.selection)
                 else
                     if q.short == "Radioligand Type"
                         opts = w.options[]
@@ -7094,6 +7214,10 @@ function create_metadata_window(
         end
         _t_total = round((time_ns()-_t_apply_start)/1e6, digits=1)
         println("[APPLY] type=$(_t_type)ms anat=$(_t_anatomy)ms suv=$(_t_suv)ms fields=$(_t_fields)ms TOTAL=$(_t_total)ms"); flush(stdout)
+        
+        # Apply dynamic visibility after state is loaded
+        update_dynamic_visibility!(active_lesion_type[])
+        
         finally
             # g.block_updates = false
             # try Makie.GridLayoutBase.update!(g) catch; end
@@ -7603,7 +7727,8 @@ function create_metadata_window(
     # ── Auto-fill BaseAnatomy, Side, and LesionType when organ mapping updates after painting ──
     try
         on(_MEH.organ_mapping_updated) do (lid, organ_name)
-                    try
+            _safe_ui_update(() -> begin
+                try
                         @debug "[PAINT→FILL] Received organ_mapping_updated: lid=$lid, organ='$organ_name'"
                         lid == 0 && return  # skip initial value
                         cur_lesion_str = active_lesion_display[]
@@ -7687,12 +7812,28 @@ function create_metadata_window(
                                     end
                                     
                                     if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
-                                        if loc in field_widgets["Anatomic Location"].options[]
+                                        opts = field_widgets["Anatomic Location"].options[]
+                                        idx = findfirst(==(loc), opts)
+                                        if idx === nothing
+                                            opts = vcat(opts, [loc])
+                                            field_widgets["Anatomic Location"].options[] = opts
+                                            idx = length(opts)
+                                        end
+                                        _set_menu_idx!(field_widgets["Anatomic Location"], idx)
+                                        if field_widgets["Anatomic Location"].selection[] != loc
                                             field_widgets["Anatomic Location"].selection[] = loc
                                         end
                                     end
                                     if !isempty(subloc) && haskey(field_widgets, "Anatomical Sublocation") && field_widgets["Anatomical Sublocation"] isa Menu
-                                        if subloc in field_widgets["Anatomical Sublocation"].options[]
+                                        opts = field_widgets["Anatomical Sublocation"].options[]
+                                        idx = findfirst(==(subloc), opts)
+                                        if idx === nothing
+                                            opts = vcat(opts, [subloc])
+                                            field_widgets["Anatomical Sublocation"].options[] = opts
+                                            idx = length(opts)
+                                        end
+                                        _set_menu_idx!(field_widgets["Anatomical Sublocation"], idx)
+                                        if field_widgets["Anatomical Sublocation"].selection[] != subloc
                                             field_widgets["Anatomical Sublocation"].selection[] = subloc
                                         end
                                     end
@@ -7758,6 +7899,7 @@ function create_metadata_window(
                     catch e
                         @warn "Failed inside organ_mapping_updated callback: $e"
                     end
+            end)
         end
         @debug "[PAINT→FILL] Successfully registered organ_mapping_updated listener"
     catch e
@@ -7980,83 +8122,99 @@ function create_metadata_window(
     # New Lesion observable (keyboard N)
     obs_new_lesion = Observable(0)
     on(obs_new_lesion) do _
-        # Simulate btn_new_lesion click
-        btn_new_lesion.clicks[] = btn_new_lesion.clicks[] + 1
+        _safe_ui_update(() -> begin
+            # Simulate btn_new_lesion click
+            btn_new_lesion.clicks[] = btn_new_lesion.clicks[] + 1
+        end)
     end
     _lmw_observables[:obs_new_lesion] = obs_new_lesion
 
     # Erase mode observable (keyboard Del)
     obs_erase_mode = Observable(0)
     on(obs_erase_mode) do _
-        if current_paint_mode[] != :erase
-            # Switch to erase mode (same as btn_erase click)
-            btn_erase.clicks[] = btn_erase.clicks[] + 1
-        end
+        _safe_ui_update(() -> begin
+            if current_paint_mode[] != :erase
+                # Switch to erase mode (same as btn_erase click)
+                btn_erase.clicks[] = btn_erase.clicks[] + 1
+            end
+        end)
     end
     _lmw_observables[:obs_erase_mode] = obs_erase_mode
 
     # Toggle anatomy observable (keyboard B)
     obs_toggle_anatomy = Observable(0)
     on(obs_toggle_anatomy) do _
-        btn_vis_anatomy.clicks[] = btn_vis_anatomy.clicks[] + 1
+        _safe_ui_update(() -> begin
+            btn_vis_anatomy.clicks[] = btn_vis_anatomy.clicks[] + 1
+        end)
     end
     _lmw_observables[:obs_toggle_anatomy] = obs_toggle_anatomy
 
     # Toggle crosshair observable (keyboard H)
     obs_toggle_crosshair = Observable(0)
     on(obs_toggle_crosshair) do _
-        btn_vis_crosshair.clicks[] = btn_vis_crosshair.clicks[] + 1
+        _safe_ui_update(() -> begin
+            btn_vis_crosshair.clicks[] = btn_vis_crosshair.clicks[] + 1
+        end)
     end
     _lmw_observables[:obs_toggle_crosshair] = obs_toggle_crosshair
 
     # Sync scroll state change — updates the GUI button
     obs_sync_scroll_changed = Observable(0)
     on(obs_sync_scroll_changed) do _
-        try
-            # Read current state from the first stateObject — we check via the event handler result
-            # For now just toggle the button label
-            current_label = btn_sync_scroll.label[]
-            if current_label == "Sync: ON"
-                btn_sync_scroll.label[] = "Sync: OFF"
-                btn_sync_scroll.buttoncolor[] = BG_PNL
-            else
-                btn_sync_scroll.label[] = "Sync: ON"
-                btn_sync_scroll.buttoncolor[] = RGBf(0.2, 0.6, 0.3)
-            end
-        catch; end
+        _safe_ui_update(() -> begin
+            try
+                # Read current state from the first stateObject — we check via the event handler result
+                # For now just toggle the button label
+                current_label = btn_sync_scroll.label[]
+                if current_label == "Sync: ON"
+                    btn_sync_scroll.label[] = "Sync: OFF"
+                    btn_sync_scroll.buttoncolor[] = BG_PNL
+                else
+                    btn_sync_scroll.label[] = "Sync: ON"
+                    btn_sync_scroll.buttoncolor[] = RGBf(0.2, 0.6, 0.3)
+                end
+            catch; end
+        end)
     end
     _lmw_observables[:obs_sync_scroll_changed] = obs_sync_scroll_changed
 
     obs_edit_mode = Observable(0)
     on(obs_edit_mode) do _
-        # Same as btn_paint click — update GUI button colors + paint mode
-        current_paint_mode[] = :paint
-        btn_paint.buttoncolor[] = GRN
-        btn_erase.buttoncolor[] = BG_PNL
-        btn_view_mode.buttoncolor[] = BG_PNL
-        empty!(_MASK_IDS_CACHE)
-        empty!(_cached_lesion_ids)
-        empty!(_organ_classification_cache)
-        @info "[KEYBOARD] E → Paint mode GUI updated"
+        _safe_ui_update(() -> begin
+            # Same as btn_paint click — update GUI button colors + paint mode
+            current_paint_mode[] = :paint
+            btn_paint.buttoncolor[] = GRN
+            btn_erase.buttoncolor[] = BG_PNL
+            btn_view_mode.buttoncolor[] = BG_PNL
+            empty!(_MASK_IDS_CACHE)
+            empty!(_cached_lesion_ids)
+            empty!(_organ_classification_cache)
+            @info "[KEYBOARD] E → Paint mode GUI updated"
+        end)
     end
     _lmw_observables[:obs_edit_mode] = obs_edit_mode
 
     obs_view_mode = Observable(0)
     on(obs_view_mode) do _
-        # Same as btn_view_mode click — update GUI button colors + view mode
-        current_paint_mode[] = :view
-        btn_paint.buttoncolor[] = BG_PNL
-        btn_erase.buttoncolor[] = BG_PNL
-        btn_view_mode.buttoncolor[] = BLU_BTN
-        @info "[KEYBOARD] Esc → View mode GUI updated"
+        _safe_ui_update(() -> begin
+            # Same as btn_view_mode click — update GUI button colors + view mode
+            current_paint_mode[] = :view
+            btn_paint.buttoncolor[] = BG_PNL
+            btn_erase.buttoncolor[] = BG_PNL
+            btn_view_mode.buttoncolor[] = BLU_BTN
+            @info "[KEYBOARD] Esc → View mode GUI updated"
+        end)
     end
     _lmw_observables[:obs_view_mode] = obs_view_mode
 
     obs_flag_reg = Observable(0)
     on(obs_flag_reg) do _
-        @info "[KEYBOARD] Shift+R → Flag registration"
-        menu_reg_qc.selection[] = "QUESTIONABLE"
-        try trigger_autosave() catch; end
+        _safe_ui_update(() -> begin
+            @info "[KEYBOARD] Shift+R → Flag registration"
+            menu_reg_qc.selection[] = "QUESTIONABLE"
+            try trigger_autosave() catch; end
+        end)
     end
     _lmw_observables[:obs_flag_reg] = obs_flag_reg
 
@@ -8213,6 +8371,7 @@ function display_metadata_window(fig::Figure)
         # Hide login overlay
         _login_visible[] = false
         login_msg.text[] = ""
+        try; _MEH.app_is_loading[] = false; catch; end
         println("[LOGIN] User '$(user)' authenticated at $(Dates.format(Dates.now(), "HH:MM:SS"))"); flush(stdout)
     end
     

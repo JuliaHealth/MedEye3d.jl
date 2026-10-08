@@ -113,8 +113,7 @@ function subscribeGLFWtoActor(window::GLFW.Window, mainMedEye3dObject::MainMedEy
     ReactOnKeyboard.registerKeyboardFunctions(window, mainMedEye3dObject.channel)
     ReactOnMouseClickAndDrag.registerMouseClickFunctions(window, calcDim, mainMedEye3dObject.channel)
 
-    # Window management events routed directly through the channel
-    GLFW.SetWindowCloseCallback(window, (_) -> put!(mainMedEye3dObject.channel, CloseWindowEvent()))
+    # Window management events routed directly through the channel (CloseWindowEvent handled in SegmentationDisplay.jl)
     GLFW.SetFramebufferSizeCallback(window, (win, fb_w, fb_h) -> begin
         # GLFW cursor coords are in WINDOW space, not framebuffer space.
         # Use window size for CalcDimsStruct (quad vertices / coordinate mapping),

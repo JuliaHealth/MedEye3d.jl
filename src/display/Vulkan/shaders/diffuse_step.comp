@@ -1,0 +1,64 @@
+#version 450
+// diffuse_step.comp — Single explicit Euler step of 3D inhomogeneous heat diffusion
+// Implements: u_new = u + dt * sum_d [ D_face_d * (u_neighbor - u_center) ]
+// Uses replicate (clamped) boundary conditions for zero normal flux.
+// This shader is dispatched K times, ping-ponging between img_u_in and img_u_out.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
+
+layout(set = 0, binding = 0, r32f) uniform readonly image3D img_D;     // Precomputed diffusivity
+layout(set = 0, binding = 1, r32f) uniform readonly image3D img_u_in;  // Current heat field
+layout(set = 0, binding = 2, r32f) uniform writeonly image3D img_u_out; // Next heat field
+
+layout(push_constant) uniform PushConstants {
+    float dt;  // Time step size (0.16)
+} pc;
+
+void main() {
+    ivec3 pos = ivec3(gl_GlobalInvocationID.xyz);
+    ivec3 dims = imageSize(img_u_in);
+    if (any(greaterThanEqual(pos, dims))) return;
+
+    ivec3 maxCoord = dims - ivec3(1);
+
+    // Replicate-padded neighbor coordinates (Neumann zero-flux BC)
+    ivec3 p_xp = ivec3(min(pos.x + 1, maxCoord.x), pos.y, pos.z);
+    ivec3 p_xm = ivec3(max(pos.x - 1, 0),          pos.y, pos.z);
+    ivec3 p_yp = ivec3(pos.x, min(pos.y + 1, maxCoord.y), pos.z);
+    ivec3 p_ym = ivec3(pos.x, max(pos.y - 1, 0),          pos.z);
+    ivec3 p_zp = ivec3(pos.x, pos.y, min(pos.z + 1, maxCoord.z));
+    ivec3 p_zm = ivec3(pos.x, pos.y, max(pos.z - 1, 0));
+
+    // Load center values
+    float u_c = imageLoad(img_u_in, pos).r;
+    float D_c = imageLoad(img_D, pos).r;
+
+    // Load neighbor heat values
+    float u_xp = imageLoad(img_u_in, p_xp).r;
+    float u_xm = imageLoad(img_u_in, p_xm).r;
+    float u_yp = imageLoad(img_u_in, p_yp).r;
+    float u_ym = imageLoad(img_u_in, p_ym).r;
+    float u_zp = imageLoad(img_u_in, p_zp).r;
+    float u_zm = imageLoad(img_u_in, p_zm).r;
+
+    // Face-averaged conductivities (arithmetic mean of adjacent voxels)
+    float D_xp = 0.5 * (D_c + imageLoad(img_D, p_xp).r);
+    float D_xm = 0.5 * (D_c + imageLoad(img_D, p_xm).r);
+    float D_yp = 0.5 * (D_c + imageLoad(img_D, p_yp).r);
+    float D_ym = 0.5 * (D_c + imageLoad(img_D, p_ym).r);
+    float D_zp = 0.5 * (D_c + imageLoad(img_D, p_zp).r);
+    float D_zm = 0.5 * (D_c + imageLoad(img_D, p_zm).r);
+
+    // Net flux divergence
+    float flux = D_xp * (u_xp - u_c)
+               + D_xm * (u_xm - u_c)
+               + D_yp * (u_yp - u_c)
+               + D_ym * (u_ym - u_c)
+               + D_zp * (u_zp - u_c)
+               + D_zm * (u_zm - u_c);
+
+    // Explicit Euler update
+    float u_next = u_c + pc.dt * flux;
+
+    imageStore(img_u_out, pos, vec4(u_next, 0.0, 0.0, 0.0));
+}

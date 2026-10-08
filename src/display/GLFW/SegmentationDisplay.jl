@@ -18,6 +18,7 @@ include("MakieEventHandlers.jl")
 using .MakieEventHandlers
 
 const GLOBAL_OPENGL_LOCK = ReentrantLock()
+const glfw_call_queue = Channel{Function}(1000)
 # Flag for safe cross-task report window hiding (set by EPSMAReportWindow, checked by renderloop)
 const _report_hide_flag = Ref{Bool}(false)
 const _report_screen_ref = Ref{Any}(nothing)
@@ -411,7 +412,8 @@ end
 
 function reactToSetWindowTitle(data::SetWindowTitleEvent, stateObjects::Vector{StateDataFields})
     if !isempty(stateObjects) && stateObjects[1].mainForDisplayObjects.window.handle != C_NULL
-        GLFW.SetWindowTitle(stateObjects[1].mainForDisplayObjects.window, data.title)
+        win = stateObjects[1].mainForDisplayObjects.window
+        put!(glfw_call_queue, () -> GLFW.SetWindowTitle(win, data.title))
     end
 end
 
@@ -445,6 +447,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::PrevPhaseEvent) = reactToP
 on_next!(stateObjects::Vector{StateDataFields}, data::SetPhaseEvent) = reactToSetPhase(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::CompareTimePointsEvent) = reactToCompareTimePoints(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ShowSingleLesionEvent) = reactToShowSingleLesion(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleSingleMultiLesionEvent) = MakieEventHandlers.reactToToggleSingleMultiLesion(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::WindowingEvent) = reactToWindowing(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::PaintValEvent) = reactToPaintVal(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ChangeBrushSizeEvent) = reactToChangeBrushSize(data, stateObjects)
@@ -459,6 +462,9 @@ on_next!(stateObjects::Vector{StateDataFields}, data::LabelOpacityEvent) = react
 
 on_next!(stateObjects::Vector{StateDataFields}, data::RefreshListEvent) = reactToRefreshList(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::AddAutoPetEvent) = reactToAddAutoPet(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::HeatGDTHoldEvent) = reactToHeatGDTHold(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::ToggleHeatGDTModeEvent) = reactToToggleHeatGDTMode(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::OneShotHeatGDTEvent) = reactToOneShotHeatGDT(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::AIInferenceResultEvent) = reactToAIInferenceResult(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SyncMissingEvent) = reactToSyncMissing(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::GenManualEvent) = reactToGenManual(data, stateObjects)
@@ -467,6 +473,16 @@ on_next!(stateObjects::Vector{StateDataFields}, data::AutoRunPreprocessEvent) = 
 on_next!(stateObjects::Vector{StateDataFields}, data::RunPreprocessEvent) = reactToRunPreprocess(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ShowBoneMaskEvent) = reactToShowBoneMask(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ShowMaskLayerEvent) = reactToShowMaskLayer(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::KeyboardToggleLayerEvent) = begin
+    LMW = parentmodule(@__MODULE__).LesionMetadataWindow
+    if data.layer == 1
+        LMW._global_toggle_lesion_cb[]()
+    elseif data.layer == 2
+        LMW._global_toggle_surface_cb[]()
+    elseif data.layer == 3
+        LMW._global_toggle_marrow_cb[]()
+    end
+end
 on_next!(stateObjects::Vector{StateDataFields}, data::SetM2ReferenceEvent) = reactToSetM2Reference(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SaveMRBEvent) = reactToSaveMRB(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::CloseWindowEvent) = nothing
@@ -477,6 +493,20 @@ on_next!(stateObjects::Vector{StateDataFields}, data::AIStatusUpdateEvent) = (Ma
 on_next!(stateObjects::Vector{StateDataFields}, data::BoneSubsegResultEvent) = MakieEventHandlers.reactToBoneSubsegResult(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ScreenshotEvent) = reactToScreenshot(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::LaunchM2Event) = nothing
+on_next!(stateObjects::Vector{StateDataFields}, data::CloseSecondaryWindowEvent) = begin
+    if m2_vk[] !== nothing
+        vk_ctx = stateObjects[1].mainForDisplayObjects.vulkanCtx
+        if vk_ctx !== nothing
+            try
+                VulkanContext.destroy_secondary_window!(vk_ctx, m2_vk[])
+            catch e
+                @warn "Failed to destroy secondary window cleanly: $e"
+            end
+        end
+        m2_vk[] = nothing
+    end
+    m2_glfw[] = nothing
+end
 
 on_next!(stateObjects::Vector{StateDataFields}, data::SyncViewsEvent) = nothing
 # --- Handlers for keyboard shortcut events that bridge to LesionMetadataWindow ---
@@ -1048,6 +1078,13 @@ function coordinateDisplay(
 
     # Set callback to trigger channel shutdown
     GLFW.SetWindowCloseCallback(window, (_) -> begin
+        # Reset GLFW's internal shouldClose flag immediately so the main loop
+        # does not terminate before the consumer task finishes orderly teardown.
+        GLFW.SetWindowShouldClose(window, false)
+        if MakieEventHandlers.app_is_loading[]
+            println("[Display] Ignoring Wayland compositor close event during startup.")
+            return
+        end
         try
             put!(mainMedEye3dInstance.channel, CloseWindowEvent())
         catch
@@ -1071,6 +1108,7 @@ function coordinateDisplay(
                 # Register panel 1's display objects for measurement autosave (once)
                 if MakieEventHandlers._main_obj_ref[] === nothing && !isempty(stateInstances)
                     MakieEventHandlers._main_obj_ref[] = stateInstances[1].mainForDisplayObjects
+                    MakieEventHandlers._state_instances_ref[] = stateInstances
                     println("  [MEAS-INIT] Registered _main_obj_ref, h5_path='$(MakieEventHandlers.h5_save_path_ref[])', tp=$(MakieEventHandlers.current_tp_index[])"); flush(stdout)
                     # Load saved measurements from HDF5
                     try
@@ -1134,9 +1172,9 @@ function coordinateDisplay(
                     
                     try
                         if window.handle != C_NULL
+                            # Signal the main thread to close the window
+                            # Do NOT call DestroyWindow here (unsafe from background task)
                             GLFW.SetWindowShouldClose(window, true)
-                            GLFW.DestroyWindow(window)
-                            window.handle = C_NULL
                         end
                     catch e
                         @warn "Error destroying GLFW window: $e"
@@ -1411,7 +1449,7 @@ function coordinateDisplay(
                             end
                         end
                         push_consts[9] = cx; push_consts[10] = cy
-                        push_consts[11] = show_crosshair; push_consts[12] = MakieEventHandlers.app_is_loading[] ? 0.3f0 : 1.0f0
+                        push_consts[11] = show_crosshair; push_consts[12] = 1.0f0
 
                         
                         w = (panel_idx > 5 && m2_vk[] !== nothing) ? Float32(m2_vk[].swapchain_extent.width) : Float32(obj.vulkanCtx.width)
@@ -1471,41 +1509,19 @@ function coordinateDisplay(
                     _t_before_render = time_ns()
                     if !isempty(_vk_main_panels) && vk_ctx !== nothing
                         if !VulkanRender.render_frame!(vk_ctx, _vk_main_panels)
-                            # Swapchain out of date — recreate from current framebuffer size
-                            try
-                                w_new, h_new = GLFW.GetFramebufferSize(window)
-                                if w_new > 0 && h_new > 0
-                                    VulkanContext.recreate_swapchain!(vk_ctx, Int(w_new), Int(h_new))
-                                    println("Swapchain recreated after error: $(w_new)x$(h_new)"); flush(stdout)
-                                end
-                            catch re
-                                @warn "Failed to recreate swapchain: $re"
-                            end
+                            # Swapchain out of date — it will be recreated by the next ResizeWindowEvent
+                            # from the main thread.
                         end
                     end
                     
-                    if m2_vk[] !== nothing && m2_glfw[] !== nothing
-                        if GLFW.WindowShouldClose(m2_glfw[])
-                            try
-                                VulkanContext.destroy_secondary_window!(vk_ctx, m2_vk[])
-                            catch e
-                                @warn "Failed to destroy secondary window cleanly: $e"
+                    if m2_vk[] !== nothing
+                        try
+                            if !isempty(_vk_m2_panels) && !VulkanRender.render_frame!(vk_ctx, _vk_m2_panels, m2_vk[])
+                                # Swapchain out of date — it will be recreated by the next ResizeWindowEvent
                             end
-                            m2_glfw[] = nothing
-                            m2_vk[] = nothing
-                        else
-                            try
-                                if !isempty(_vk_m2_panels) && !VulkanRender.render_frame!(vk_ctx, _vk_m2_panels, m2_vk[])
-                                    w_new, h_new = GLFW.GetFramebufferSize(m2_glfw[])
-                                    if w_new > 0 && h_new > 0
-                                        VulkanContext.recreate_secondary_swapchain!(vk_ctx, m2_vk[], Int(w_new), Int(h_new))
-                                        println("M2 Swapchain recreated after error: $(w_new)x$(h_new)"); flush(stdout)
-                                    end
-                                end
-                            catch e
-                                println(">> [DEBUG] M2 Render Error: ", e)
-                                flush(stdout)
-                            end
+                        catch e
+                            println(">> [DEBUG] M2 Render Error: ", e)
+                            flush(stdout)
                         end
                     end
                     _t_after_render = time_ns()
@@ -1537,19 +1553,19 @@ function coordinateDisplay(
                     # Truncate error output to prevent terminal flood (BoundsError can include huge arrays)
                     err_msg = try sprint(showerror, e; context=:limit=>true) catch; string(typeof(e)) end
                     if length(err_msg) > 500
-                        err_msg = err_msg[1:500] * "... [truncated]"
+                        err_msg = first(err_msg, 500) * "... [truncated]"
                     end
                     println("CONSUMER ERROR (continuing): ", err_msg)
                     bt = try sprint(showerror, e, catch_backtrace(); context=:limit=>true) catch; "" end
                     if length(bt) > 2000
-                        bt = bt[1:2000] * "... [truncated]"
+                        bt = first(bt, 2000) * "... [truncated]"
                     end
                     println(bt)
                     flush(stdout)
                     # Update AI status label so user sees the error
                     try
                         ai_msg = try sprint(showerror, e; context=:limit=>true) catch; string(typeof(e)) end
-                        if length(ai_msg) > 200; ai_msg = ai_msg[1:200] * "..."; end
+                        if length(ai_msg) > 200; ai_msg = first(ai_msg, 200) * "..."; end
                         MakieEventHandlers.set_ai_status!("[Error] $ai_msg")
                     catch; end
                     # Log to file for post-mortem analysis (full output OK in file)

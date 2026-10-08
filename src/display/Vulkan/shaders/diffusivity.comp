@@ -1,0 +1,24 @@
+#version 450
+// diffusivity.comp — Converts an edge probability map E(x) to a diffusivity field D(x)
+// D(x) = epsilon_D + (1 - epsilon_D) * exp(-gamma * E(x))
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
+
+layout(set = 0, binding = 0, r32f) uniform readonly image3D img_edge;
+layout(set = 0, binding = 1, r32f) uniform writeonly image3D img_diffusivity;
+
+layout(push_constant) uniform PushConstants {
+    float epsilon_D;  // 0.01 — minimum conductance floor
+    float gamma;      // 5.0 — edge attenuation slope
+} pc;
+
+void main() {
+    ivec3 pos = ivec3(gl_GlobalInvocationID.xyz);
+    ivec3 dims = imageSize(img_edge);
+    if (any(greaterThanEqual(pos, dims))) return;
+
+    float e = imageLoad(img_edge, pos).r;
+    float D = pc.epsilon_D + (1.0 - pc.epsilon_D) * exp(-pc.gamma * e);
+
+    imageStore(img_diffusivity, pos, vec4(D, 0.0, 0.0, 0.0));
+}
