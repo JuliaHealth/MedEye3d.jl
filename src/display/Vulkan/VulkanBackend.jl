@@ -43,6 +43,7 @@ include("VulkanPipeline.jl")
 include("VulkanRender.jl")
 include("VulkanScreenshot.jl")
 include("VulkanStaging.jl")
+include("VulkanHeatDiffusion.jl")
 
 # Re-export all sub-modules
 using .VulkanContext
@@ -53,8 +54,10 @@ using .VulkanPipeline
 using .VulkanRender
 using .VulkanScreenshot
 using .VulkanStaging
+using .VulkanHeatDiffusion
 
 export VulkanContext, VulkanShaders, VulkanBuffers, VulkanTextures
 export VulkanPipeline, VulkanRender, VulkanScreenshot, VulkanStaging
+export VulkanHeatDiffusion
 
 end # module VulkanBackend

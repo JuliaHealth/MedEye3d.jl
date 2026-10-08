@@ -2,8 +2,8 @@ module MakieEvents
 export ChangePlaneEvent, CompareTimePointsEvent, ShowSingleLesionEvent, ScrollZoomEvent, ScrollEvent
 export WindowingEvent, PaintValEvent, SyncLesionEvent
 export ChangeTimePointEvent, SetTimePointEvent, ToggleLesionEvent, RefreshListEvent, SetM2ReferenceEvent
-export AddAutoPetEvent, AIInferenceResultEvent, AIStatusUpdateEvent, SyncMissingEvent, GenManualEvent
-export MapLinkEvent, AutoRunPreprocessEvent, RunPreprocessEvent, ShowBoneMaskEvent, ShowMaskLayerEvent, SaveMRBEvent
+export AddAutoPetEvent, AIInferenceResultEvent, AIStatusUpdateEvent, SyncMissingEvent, GenManualEvent, HeatGDTHoldEvent
+export MapLinkEvent, AutoRunPreprocessEvent, RunPreprocessEvent, ShowBoneMaskEvent, ShowMaskLayerEvent, SaveMRBEvent, KeyboardToggleLayerEvent
 export CloseWindowEvent, ResizeWindowEvent, SetWindowTitleEvent, ChangeBrushSizeEvent, ToggleMoveLesionModeEvent
 export PetBlendEvent, BoneSubsegResultEvent, ScreenshotEvent, LabelOpacityEvent, SyncViewsEvent, LaunchM2Event
 export AcceptLesionEvent, RejectLesionEvent, MarkUncertainEvent, MarkResolvedEvent
@@ -12,7 +12,7 @@ export FlagRegistrationEvent, SetRegistrationQCEvent, ValidateReportEvent, CaseQ
 export NextPhaseEvent, PrevPhaseEvent, SetPhaseEvent
 export EditModeEvent, ViewModeEvent, SetTPFirstEvent, SetTPLastEvent
 export NewLesionEvent, EraseModeEvent, ShowOnlyPETEvent, ShowOnlyCTEvent, ToggleAnatomyEvent, ToggleSyncScrollEvent
-export ToggleCrosshairEvent
+export ToggleCrosshairEvent, ToggleSingleMultiLesionEvent, ToggleHeatGDTModeEvent, OneShotHeatGDTEvent
 
 struct NextPhaseEvent end
 struct PrevPhaseEvent end
@@ -33,6 +33,8 @@ end
 struct ShowSingleLesionEvent
     lesion_id::Int
 end
+
+struct ToggleSingleMultiLesionEvent end
 
 struct ScrollZoomEvent
     zoom_delta::Float64
@@ -81,6 +83,15 @@ end
 struct ToggleLesionEvent end
 struct RefreshListEvent end
 
+struct HeatGDTHoldEvent
+    x::Int
+    y::Int
+    hold_duration_s::Float64
+    actualWindowWidth::Int
+    actualWindowHeight::Int
+    window_id::Int
+end
+
 struct AddAutoPetEvent 
     algorithm::String
     channel::Any  # Channel{Any} or ChannelProxy (parallel startup)
@@ -117,6 +128,9 @@ struct ShowMaskLayerEvent
     layer :: Int
     active :: Bool
 end
+struct KeyboardToggleLayerEvent
+    layer :: Int
+end
 struct SaveMRBEvent end
 
 struct CloseWindowEvent end
@@ -130,6 +144,10 @@ end
 # Backward-compatible constructors
 ResizeWindowEvent(w::Int, h::Int) = ResizeWindowEvent(w, h, w, h, 1)
 ResizeWindowEvent(w::Int, h::Int, fb_w::Int, fb_h::Int) = ResizeWindowEvent(w, h, fb_w, fb_h, 1)
+
+export CloseSecondaryWindowEvent
+struct CloseSecondaryWindowEvent end
+
 struct SetWindowTitleEvent
     title :: String
 end
@@ -219,6 +237,8 @@ end
 struct ToggleAnatomyEvent end
 struct ToggleSyncScrollEvent end
 struct ToggleCrosshairEvent end    # H key - toggle crosshair overlay
+struct ToggleHeatGDTModeEvent end  # G key - toggle Heat-GDT segmentation mode
+struct OneShotHeatGDTEvent end  # W key - one-shot wand mode
 
 # Measurement mode events
 struct ToggleMeasurementModeEvent end

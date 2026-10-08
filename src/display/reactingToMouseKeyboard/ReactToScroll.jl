@@ -287,7 +287,7 @@ function reactToScrollMultiPanel!(panels::Vector{Int}, mainStates::Vector{StateD
         current = clamp(current, 1, lastSlice)
         slice_changed = (current != prev_slice) || (panelState.currentlyDispDat.sliceNumber == 0)
         panelState.currentDisplayedSlice = current
-        panelState.isSliceChanged = slice_changed
+        panelState.isSliceChanged = true
         
         # Slice 3D→2D for all textures in this panel
         singleSlDat = panelState.onScrollData.dataToScroll |>

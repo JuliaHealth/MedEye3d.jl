@@ -1,0 +1,35 @@
+#version 450
+// extract_mask.comp — Thresholds the heat field to produce a binary/soft segmentation mask
+// Supports both hard thresholding and soft sigmoid thresholding.
+// The output is written directly to the label texture for immediate display.
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
+
+layout(set = 0, binding = 0, r32f) uniform readonly image3D img_u;      // Final heat field
+layout(set = 0, binding = 1, r32f) uniform writeonly image3D img_mask;   // Output mask
+
+layout(push_constant) uniform PushConstants {
+    float theta;       // Threshold (0.001 default, controlled by slider)
+    float tau;         // Temperature for soft sigmoid (0.0001 for near-binary)
+    int   hard_thresh; // 1 = binary step function, 0 = differentiable sigmoid
+    int   label_id;    // Integer label ID to write (for multi-label support)
+} pc;
+
+void main() {
+    ivec3 pos = ivec3(gl_GlobalInvocationID.xyz);
+    ivec3 dims = imageSize(img_u);
+    if (any(greaterThanEqual(pos, dims))) return;
+
+    float u = imageLoad(img_u, pos).r;
+    float m;
+
+    if (pc.hard_thresh == 1) {
+        // Hard binary threshold (fastest, used in production)
+        m = (u >= pc.theta) ? 1.0 : 0.0;
+    } else {
+        // Soft sigmoid threshold (differentiable, used during training)
+        m = 1.0 / (1.0 + exp(-(u - pc.theta) / max(pc.tau, 1e-8)));
+    }
+
+    imageStore(img_mask, pos, vec4(m, 0.0, 0.0, 0.0));
+}

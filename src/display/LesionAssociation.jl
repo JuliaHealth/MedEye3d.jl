@@ -835,8 +835,7 @@ function classify_organ_to_lesion_type(organ_name::String)::String
     bone_kws = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula", "clavicle",
                 "humerus", "scapula", "sternum", "skull", "palate", "bone", "spine",
                 "ilium", "ischium", "pubis", "tibia", "radius", "carpal", "tarsal",
-                "costal_cartilage", "mandible", "hyoid", "styloid", "zygomatic",
-                "cricoid", "thyroid_cartilage"]
+                "mandible", "hyoid", "styloid", "zygomatic"]
     
     # Muscle keywords — max_anatomy has 90 muscles
     muscle_kws = ["gluteus", "autochthon", "iliopsoas", "pectoralis", "subscapularis",

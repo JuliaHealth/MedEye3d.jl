@@ -684,7 +684,7 @@ using JSON
         end
 
         @testset "Positional constructor" begin
-            ae = AuditEvent("E1", "2026-01-01", "C1", 1, 0, "ACCEPT", "UNREVIEWED", "ACCEPTED", "v1", "kbd", "ok")
+            ae = AuditEvent("E1", "2026-01-01", "testuser", "C1", 1, 0, "ACCEPT", "UNREVIEWED", "ACCEPTED", "v1", "kbd", "ok")
             @test ae.event_id == "E1"
             @test ae.case_id == "C1"
             @test ae.lesion_track_id == 1

@@ -2,8 +2,9 @@ module AIInference
 
 using MedImages
 using JSON
+using Statistics
 
-export run_helpnet_inference, run_skellytour_segmentation, run_bone_subsegmentation, run_nninteractive_inference
+export run_helpnet_inference, run_skellytour_segmentation, run_bone_subsegmentation, run_nninteractive_inference, run_heatgdt_inference
 
 # Resolve pyenv relative to the project root (works inside Docker and on host)
 const _PROJECT_ROOT = abspath(joinpath(@__DIR__, "..", ".."))
@@ -141,6 +142,124 @@ print('nnInteractive session running on', '$(image_path)')
     cmd = `$(pyenv) -c $(cmd_str)`
     run(cmd)
     return out_path
+end
+
+# ── Heat-GDT Constants ──────────────────────────────────────────────────────
+const HEATGDT_PROJECT_DIR = normpath(joinpath(@__DIR__, "..", "..", "..", "semiautomatic", "JuliaHELPNet"))
+const HEATGDT_DIR = joinpath(HEATGDT_PROJECT_DIR, "HeatGDT")
+const HEATGDT_CHAMPION_PATH = joinpath(HEATGDT_DIR, "champion_model.jld2")
+
+# Lazy-loaded singleton for the Heat-GDT model (loaded once, reused across calls)
+const _HEATGDT_STATE = Ref{Any}(nothing)
+
+"""
+    _ensure_heatgdt_loaded!()
+
+Lazy-loads the Heat-GDT champion model (HED3D edge network + PDE parameters).
+Loaded once per session from `champion_model.jld2`.
+"""
+function _ensure_heatgdt_loaded!()
+    if _HEATGDT_STATE[] !== nothing
+        return _HEATGDT_STATE[]
+    end
+    
+    @info "[Heat-GDT] Loading champion model from $(HEATGDT_CHAMPION_PATH)..."
+    
+    if !isfile(HEATGDT_CHAMPION_PATH)
+        error("Heat-GDT champion model not found at $(HEATGDT_CHAMPION_PATH). Run training first.")
+    end
+    
+    # Load the model using JLD2
+    try
+        @eval begin
+            using Pkg
+            Pkg.activate($(HEATGDT_PROJECT_DIR))
+            include(joinpath($(HEATGDT_DIR), "model.jl"))
+            using .HeatGDTModel
+            using JLD2, Lux, CUDA, Random
+        end
+        
+        checkpoint = JLD2.load(HEATGDT_CHAMPION_PATH)
+        ps_trained = checkpoint["ps"] |> Lux.gpu
+        st_trained = checkpoint["st"] |> Lux.gpu
+        config = checkpoint["config"]
+        
+        # Reconstruct the framework with champion parameters
+        framework = HeatGDTModel.HeatGDTFramework(
+            in_channels=3,
+            edge_type=Symbol(get(config, "edge_type", "deep")),
+            K=get(config, "K", 40),
+            dt=Float32(get(config, "dt", 0.16)),
+            theta=Float32(get(config, "theta", 0.001)),
+            tau=Float32(get(config, "tau", 0.0001))
+        )
+        
+        _HEATGDT_STATE[] = (framework=framework, ps=ps_trained, st=st_trained, config=config)
+        @info "[Heat-GDT] Champion model loaded successfully ($(config))"
+        return _HEATGDT_STATE[]
+    catch e
+        @error "[Heat-GDT] Failed to load champion model" exception=(e, catch_backtrace())
+        rethrow(e)
+    end
+end
+
+"""
+    run_heatgdt_inference(ct_patch::Array{Float32,3}, pet_patch::Array{Float32,3},
+                          ts_patch::Array{Float32,3}, seed_x::Int, seed_y::Int, seed_z::Int;
+                          K::Int=40, dt::Float32=0.16f0, theta::Float32=0.001f0, tau::Float32=0.0001f0)
+
+Runs Heat-GDT segmentation natively in Julia (no Docker/Python needed).
+Takes a 64³ CT, PET, and TotalSegmentator patch centered on the seed point.
+Returns a binary UInt8 mask of the segmented lesion.
+
+The method:
+1. Runs the HED3D edge detection network to produce edge map E(x)
+2. Converts edges to diffusivity: D(x) = 0.01 + 0.99 * exp(-5 * E(x))
+3. Runs K steps of heat diffusion from the seed point
+4. Thresholds the heat field to produce a binary mask
+"""
+function run_heatgdt_inference(ct_patch::Array{Float32,3}, pet_patch::Array{Float32,3},
+                                ts_patch::Array{Float32,3}, seed_x::Int, seed_y::Int, seed_z::Int;
+                                K::Int=40, dt::Float32=0.16f0, theta::Float32=0.001f0, tau::Float32=0.0001f0)
+    state = _ensure_heatgdt_loaded!()
+    framework = state.framework
+    ps = state.ps
+    st = state.st
+    
+    # Normalize CT patch (z-score)
+    ct_mean = mean(ct_patch)
+    ct_std = std(ct_patch) + 1f-6
+    ct_norm = (ct_patch .- ct_mean) ./ ct_std
+    
+    # TotalSegmentator: normalize to [0, 1]
+    ts_norm = Float32.(ts_patch) ./ 117.0f0
+    
+    # Stack into (X, Y, Z, 3, 1) tensor
+    x = cat(reshape(ct_norm, 64, 64, 64, 1),
+            reshape(pet_patch, 64, 64, 64, 1),
+            reshape(ts_norm, 64, 64, 64, 1), dims=4)
+    x = reshape(x, 64, 64, 64, 3, 1)
+    
+    # Create seed mask
+    seed_mask = zeros(Float32, 64, 64, 64, 1)
+    seed_mask[seed_x, seed_y, seed_z, 1] = 1.0f0
+    
+    # Move to GPU
+    x_gpu = CUDA.cu(x)
+    seed_gpu = CUDA.cu(seed_mask)
+    
+    # Run inference in test mode (no gradient tracking)
+    st_test = Lux.testmode(st)
+    result, _ = framework((x_gpu, seed_gpu), ps, st_test)
+    
+    # Extract binary mask
+    mask_gpu = result.mask
+    mask_cpu = Array(mask_gpu[:, :, :, 1])
+    
+    # Binarize
+    binary_mask = UInt8.(mask_cpu .> 0.5f0)
+    
+    return binary_mask
 end
 
 end # module AIInference

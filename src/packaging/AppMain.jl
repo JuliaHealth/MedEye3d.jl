@@ -186,6 +186,9 @@ function run_viewer_loop(mainViewer, makie_win=nothing)
             exit(0)
         end
 
+        if window !== nothing
+            GLFW.SetWindowShouldClose(window, false)
+        end
         println("Channel open? ", isopen(mainViewer.channel), " window should close? ", window !== nothing ? GLFW.WindowShouldClose(window) : "none"); while isopen(mainViewer.channel) && (window === nothing || !GLFW.WindowShouldClose(window))
             GLFW.PollEvents()
             
@@ -960,6 +963,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     # 3. Lesion List & Match Groups
     try; LesionAssociation.load_matches_from_h5(h5_path); catch; end
     match_groups = LesionAssociation.get_match_groups()
+    try; GLFW.PollEvents(); catch; end
 
     unique_vals = sort(unique(first_mask))
     lesion_ids_ints = filter(x -> x > 0, unique_vals)
@@ -970,6 +974,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         end
     end
     sort!(lesion_ids_ints)
+    try; GLFW.PollEvents(); catch; end
 
     lesion_list = if isempty(lesion_ids_ints)
         ["(none)"]
@@ -1058,8 +1063,10 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
 
     # 6. Connect Makie window to Vulkan channel & display
     println("Connecting Makie window to Vulkan channel...")
+    try; GLFW.PollEvents(); catch; end
     LesionMetadataWindow.connect_channel!(makie_win, mainViewer.channel)
     makie_screen = LesionMetadataWindow.display_metadata_window(makie_win.fig)
+    try; GLFW.PollEvents(); catch; end
     
     # 6b. Multi-Monitor M2 Launcher
     m2_window_cache = Ref{Any}(nothing)
@@ -1070,6 +1077,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         m3_win = hasproperty(makie_screen, :glscreen) ? makie_screen.glscreen : nothing
         auto_place_windows!(m1_win, m2_window_cache[], m3_win)
     end
+    try; GLFW.PollEvents(); catch; end
 
     on(makie_win.trigger_m2) do _
         println(">> [MULTI-MONITOR] Requesting Secondary Window spawn (mode: $(makie_win.m2_mode[]))...")
@@ -1170,6 +1178,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 gui_ready = true
                 break
             end
+            try; GLFW.PollEvents(); catch; end
             sleep(0.1)
         end
         if !gui_ready
@@ -1191,12 +1200,21 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 end
             end
             
+            # Flush any Wayland compositor close events queued during heavy startup
+            GLFW.PollEvents()
+            win = (!isempty(mainViewer.states) && mainViewer.states[1].mainForDisplayObjects !== nothing) ? mainViewer.states[1].mainForDisplayObjects.window : nothing
+            if win !== nothing
+                GLFW.SetWindowShouldClose(win, false)
+            end
+            
             MEH.app_is_loading[] = false
             put!(mainViewer.channel, MedEye3d.MakieEvents.RenderRequestEvent())
             t_ms = (time_ns() - t_startup) / 1e6
             println("[STARTUP] App ready in $(round(t_ms, digits=0))ms (gui_ready=$gui_ready)"); flush(stdout)
         catch e
             @warn "Failed to hide loading screen: $e"
+        finally
+            MEH.app_is_loading[] = false
         end
     end
 

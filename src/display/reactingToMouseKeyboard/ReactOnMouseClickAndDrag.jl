@@ -57,6 +57,10 @@ imageWidth adn imageHeight are the dimensions of textures that we use to display
 # Module-level timestamp for double-click detection (avoids GLFW.GetTime which doesn't exist in Julia GLFW.jl)
 const lastLeftClickTimestamp = Ref{Float64}(0.0)
 
+# Heat-GDT mouse hold tracking
+const _heatgdt_press_start = Ref{Float64}(0.0)
+const _heatgdt_mode_active = Ref{Bool}(false)
+
 function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct, mainChannel::Base.Channel{Any}, window_id::Int=1)
     xmin = Int32(calcD.windowWidthCorr)
     xmax = Int32(calcD.avWindWidtForMain - calcD.windowWidthCorr)
@@ -134,6 +138,25 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
                 ))
             end
             lastLeftClickTimestamp[] = now
+        end
+
+        # Heat-GDT hold tracking: record press start time
+        if leftMouseButtonDownResult
+            _heatgdt_press_start[] = time()
+        end
+        
+        # Heat-GDT hold release: compute duration and fire event
+        if button == GLFW.MOUSE_BUTTON_1 && action == GLFW.RELEASE && _heatgdt_mode_active[]
+            hold_duration = max(0.01, time() - _heatgdt_press_start[])
+            coords = mouseStructInstance.lastCoordinates
+            put!(mainChannel, HeatGDTHoldEvent(
+                isempty(coords) ? 0 : coords[1][1],
+                isempty(coords) ? 0 : coords[1][2],
+                hold_duration,
+                mouseStructInstance.actualWindowWidth,
+                mouseStructInstance.actualWindowHeight,
+                window_id
+            ))
         end
 
         # Snapshot regular mouse event (for right-click and position tracking)
@@ -335,10 +358,133 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
         val = -val
     end
     toSet = convert(twoDimDat.type, convert(parameter_type(texture), val))
-    strokeW = Int(texture.strokeWidth)
+    strokeW = max(1, Int(texture.strokeWidth))
+
+    # Determine the target based on visibility toggles
+    MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+    
+    lesion_vis = isdefined(MEH, :_lesion_active) ? MEH._lesion_active[] : true
+    surf_vis = isdefined(MEH, :_bone_surf_active) ? MEH._bone_surf_active[] : true
+    marr_vis = isdefined(MEH, :_bone_marr_active) ? MEH._bone_marr_active[] : true
+    
+    target_mode = :lesion
+    if !lesion_vis
+        if surf_vis && marr_vis
+            target_mode = :surface
+        elseif surf_vis
+            target_mode = :surface
+        elseif marr_vis
+            target_mode = :marrow
+        end
+    end
+
+    # Defensive check: ensure mask is visible and minAndMaxValue covers the painted ID
+    is_mask = (texture.isMultiDiscreteMask || texture.name == "Mask" || texture.name == "manualModif" || texture.name == "segmentation") && texture.name != "Anatomy"
+    
+    if target_mode == :lesion
+        if !texture.isVisible && is_mask
+            texture.isVisible = true
+            if isdefined(stateObject.mainForDisplayObjects, :vulkanPipelineState) && stateObject.mainForDisplayObjects.vulkanPipelineState !== nothing
+                stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+            end
+        end
+        if is_mask && val > 0 && !isempty(texture.minAndMaxValue)
+            T_mm = eltype(texture.minAndMaxValue)
+            if MEH.is_single_lesion_mode[]
+                if texture.minAndMaxValue[1] != T_mm(val) || texture.minAndMaxValue[2] != T_mm(val)
+                    texture.minAndMaxValue = T_mm.([val, val])
+                    if isdefined(stateObject.mainForDisplayObjects, :vulkanPipelineState) && stateObject.mainForDisplayObjects.vulkanPipelineState !== nothing
+                        stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                    end
+                end
+            else
+                if texture.minAndMaxValue[2] < T_mm(val)
+                    texture.minAndMaxValue = T_mm.([1, max(10000, val)])
+                    if isdefined(stateObject.mainForDisplayObjects, :vulkanPipelineState) && stateObject.mainForDisplayObjects.vulkanPipelineState !== nothing
+                        stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                    end
+                end
+            end
+        end
+    end
+
+    if target_mode != :lesion
+        is_erase = (is_ctrl || val == 0)
+        tmp_dat = zeros(Int8, size(twoDimDat.dat))
+        StrokeRasterization.rasterize_polyline!(tmp_dat, pointsToRasterize, strokeW, Int8(1))
+        painted_2d = findall(tmp_dat .> 0)
+        
+        z = stateObject.currentDisplayedSlice
+        dim = stateObject.onScrollData.dimensionToScroll
+        painted_3d = CartesianIndex{3}[]
+        for pt in painted_2d
+            x, y = pt[1], pt[2]
+            idx3d = if dim == 1
+                CartesianIndex(z, x, y)
+            elseif dim == 2
+                CartesianIndex(x, z, y)
+            else
+                CartesianIndex(x, y, z)
+            end
+            push!(painted_3d, idx3d)
+        end
+        
+        target_id = MEH.current_active_lesion_id[]
+        tp_idx = MEH.current_tp_index[]
+        cached = if haskey(MEH.bone_subsegments_cache, (tp_idx, target_id))
+            MEH.bone_subsegments_cache[(tp_idx, target_id)]
+        elseif haskey(MEH.bone_subsegments_cache, (MEH.get_node_name_for_tp(tp_idx), target_id))
+            MEH.bone_subsegments_cache[(MEH.get_node_name_for_tp(tp_idx), target_id)]
+        else
+            nothing
+        end
+        if cached === nothing
+            # create empty cache if missing so manual painting works without AI
+            cached = (CartesianIndex{3}[], CartesianIndex{3}[])
+            MEH.bone_subsegments_cache[(tp_idx, target_id)] = cached
+        end
+        
+        if cached !== :computing
+            surf_pts, marr_pts = cached
+            painted_set = Set(painted_3d)
+            
+            # Helper to efficiently filter painted points against the huge cache
+            # by only checking against cache points on the current slice
+            get_slice_set = (pts) -> begin
+                slice_pts = filter(p -> (dim == 1 ? p[1] : (dim == 2 ? p[2] : p[3])) == z, pts)
+                return Set(slice_pts)
+            end
+
+            if target_mode == :surface
+                if is_erase
+                    filter!(idx -> !(idx in painted_set), surf_pts)
+                else
+                    surf_slice_set = get_slice_set(surf_pts)
+                    new_pts = filter(idx -> !(idx in surf_slice_set), painted_3d)
+                    append!(surf_pts, new_pts)
+                end
+            elseif target_mode == :marrow
+                if is_erase
+                    filter!(idx -> !(idx in painted_set), marr_pts)
+                else
+                    marr_slice_set = get_slice_set(marr_pts)
+                    new_pts = filter(idx -> !(idx in marr_slice_set), painted_3d)
+                    append!(marr_pts, new_pts)
+                end
+            end
+            MEH.reactToSyncLesion(MEH.SyncLesionEvent(target_id), mainStates)
+        end
+        
+        stateObject.isSliceChanged = true
+        for s in mainStates
+            if s !== stateObject && sum(abs.(s.calcDimsStruct.mainImageQuadVert)) > 0.01f0
+                s.isSliceChanged = true
+            end
+        end
+        return
+    end
 
     # ── AI Mask Immutability: Backup original AI mask before first expert edit ──
-    MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
     tp_idx = MEH.current_tp_index[]
     raw_val = round(Int, stateObject.valueForMasToSet.value)
     lesion_id = raw_val > 0 ? raw_val : MEH.current_active_lesion_id[]
@@ -391,11 +537,30 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
             end
             if entry !== nothing
                 try
-                    entry.mask_i16[:, :, cur_slice] .= Int16.(twoDimDat.dat)
+                    dim = stateObject.onScrollData.dimensionToScroll
+                    if dim == 3
+                        entry.mask_i16[:, :, cur_slice] .= Int16.(twoDimDat.dat)
+                    elseif dim == 1
+                        entry.mask_i16[cur_slice, :, :] .= Int16.(twoDimDat.dat)
+                    elseif dim == 2
+                        entry.mask_i16[:, cur_slice, :] .= Int16.(twoDimDat.dat)
+                    end
                     if entry.mask isa Array{Int8, 3}
-                        entry.mask[:, :, cur_slice] .= clamp.(twoDimDat.dat, Int8(-128), Int8(127))
-                    else
-                        entry.mask[:, :, cur_slice] .= twoDimDat.dat
+                        if dim == 3
+                            entry.mask[:, :, cur_slice] .= clamp.(twoDimDat.dat, Int8(-128), Int8(127))
+                        elseif dim == 1
+                            entry.mask[cur_slice, :, :] .= clamp.(twoDimDat.dat, Int8(-128), Int8(127))
+                        elseif dim == 2
+                            entry.mask[:, cur_slice, :] .= clamp.(twoDimDat.dat, Int8(-128), Int8(127))
+                        end
+                    elseif entry.mask !== nothing
+                        if dim == 3
+                            entry.mask[:, :, cur_slice] .= twoDimDat.dat
+                        elseif dim == 1
+                            entry.mask[cur_slice, :, :] .= twoDimDat.dat
+                        elseif dim == 2
+                            entry.mask[:, cur_slice, :] .= twoDimDat.dat
+                        end
                     end
                 catch; end
             end
