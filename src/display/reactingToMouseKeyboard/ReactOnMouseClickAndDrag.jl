@@ -14,6 +14,7 @@ module ReactOnMouseClickAndDrag
 using Logging, Parameters, Setfield, GLFW, Dates, Parameters, Logging, Base.Threads
 using ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils
 using ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForLine, ..ReactToScroll, ..DisplayWords, ..StrokeRasterization
+using ..MakieEvents: HeatGDTHoldEvent
 import Logging, Base.Threads
 export registerMouseClickFunctions
 export reactToMouseDrag
