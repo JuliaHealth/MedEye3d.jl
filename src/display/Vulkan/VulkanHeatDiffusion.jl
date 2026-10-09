@@ -318,8 +318,8 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     state.dsl_slice = unwrap(create_descriptor_set_layout(dev, DescriptorSetLayoutCreateInfo(bindings_extract)))
     
     # 4. Create pipeline layouts with push constants
-    # seed_init: push ivec4 (16 bytes)
-    pc_seed = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, 16)]
+    # seed_init: push 2x ivec4 (32 bytes)
+    pc_seed = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, 32)]
     state.layout_seed_init = unwrap(create_pipeline_layout(dev, PipelineLayoutCreateInfo([state.dsl_seed_init], pc_seed)))
     
     # diffuse_step: push float dt + box... (48 bytes)
@@ -363,9 +363,9 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     
     # 7. Create descriptor pool and allocate descriptor sets
     pool_sizes = [
-        DescriptorPoolSize(DESCRIPTOR_TYPE_STORAGE_IMAGE, 20)  # plenty for all sets
+        DescriptorPoolSize(DESCRIPTOR_TYPE_STORAGE_IMAGE, 64)  # plenty for all sets
     ]
-    state.descriptor_pool = unwrap(create_descriptor_pool(dev, DescriptorPoolCreateInfo(16, pool_sizes)))
+    state.descriptor_pool = unwrap(create_descriptor_pool(dev, DescriptorPoolCreateInfo(32, pool_sizes)))
     
     # Create dummy sampler for DescriptorImageInfo
     sampler_info = SamplerCreateInfo(
@@ -419,22 +419,30 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     mem_props = get_physical_device_memory_properties(pdev)
     mem_type = UInt32(0)
     found_type = false
-    for i in 0:(mem_props.memory_type_count - 1)
-        if (mem_reqs.memory_type_bits & (1 << i)) != 0 &&
-           (mem_props.memory_types[i + 1].property_flags & (MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT)) == (MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT)
-            try
-                state.staging_box_mem = unwrap(allocate_memory(dev, MemoryAllocateInfo(mem_reqs.size, UInt32(i))))
-                mem_type = UInt32(i)
-                found_type = true
-                break
-            catch e
-                if e isa Vulkan.VulkanError && e.code == Vulkan.ERROR_OUT_OF_DEVICE_MEMORY
-                    @warn "Staging buffer memory allocation failed on heap $(i), trying next suitable heap..."
-                    continue
+    for pass in 1:2
+        target_flags = MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT
+        if pass == 1
+            target_flags |= MEMORY_PROPERTY_HOST_CACHED_BIT
+        end
+        
+        for i in 0:(mem_props.memory_type_count - 1)
+            if (mem_reqs.memory_type_bits & (1 << i)) != 0 &&
+               (mem_props.memory_types[i + 1].property_flags & target_flags) == target_flags
+                try
+                    state.staging_box_mem = unwrap(allocate_memory(dev, MemoryAllocateInfo(mem_reqs.size, UInt32(i))))
+                    mem_type = UInt32(i)
+                    found_type = true
+                    break
+                catch e
+                    if e isa Vulkan.VulkanError && e.code == Vulkan.ERROR_OUT_OF_DEVICE_MEMORY
+                        @warn "Staging buffer memory allocation failed on heap $(i), trying next suitable heap..."
+                        continue
+                    end
+                    rethrow(e)
                 end
-                rethrow(e)
             end
         end
+        if found_type; break; end
     end
     if !found_type
         error("Failed to find HOST_VISIBLE | HOST_COHERENT memory or out of memory for staging box buffer")
@@ -584,6 +592,7 @@ function upload_diffusivity!(state::HeatDiffusionState, ctx, diffusivity_data::A
     # Staging buffer and memory will be cleaned up by Vulkan.jl GC finalizers
     staging_buf = nothing
     staging_mem = nothing
+    GC.gc(false)
     
     state.diffusivity_uploaded = true
     @info "[HeatDiffusion] Diffusivity upload complete."
@@ -796,6 +805,7 @@ function read_mask_to_cpu(state::HeatDiffusionState, ctx)::Array{Float32, 3}
     # Staging buffer and memory will be cleaned up by Vulkan.jl GC finalizers
     staging_buf = nothing
     staging_mem = nothing
+    GC.gc(false)
     
     return result
 end
@@ -838,11 +848,12 @@ function seed_only!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y::Int, se
                          src_stage_mask=PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                          dst_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT)
     
-    # Clear both ping and pong buffers to 0.0 (fast fixed-function clear)
+    # Clear ping, pong, and mask buffers to 0.0 (fast fixed-function clear)
     clear_color = ClearColorValue((0.0f0, 0.0f0, 0.0f0, 0.0f0))
     subres = ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)
     cmd_clear_color_image(cmd, state.img_u_ping, IMAGE_LAYOUT_GENERAL, clear_color, [subres])
     cmd_clear_color_image(cmd, state.img_u_pong, IMAGE_LAYOUT_GENERAL, clear_color, [subres])
+    cmd_clear_color_image(cmd, state.img_mask, IMAGE_LAYOUT_GENERAL, clear_color, [subres])
     
     # Barrier after clear
     clear_barrier = MemoryBarrier(C_NULL, ACCESS_TRANSFER_WRITE_BIT, ACCESS_SHADER_WRITE_BIT)
@@ -853,11 +864,28 @@ function seed_only!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y::Int, se
     # Seed init into ping buffer
     cmd_bind_pipeline(cmd, PIPELINE_BIND_POINT_COMPUTE, state.pipeline_seed_init)
     cmd_bind_descriptor_sets(cmd, PIPELINE_BIND_POINT_COMPUTE, state.layout_seed_init, 0, [state.ds_seed_ping], [])
-    seed_data = Int32[seed_x - 1, seed_y - 1, seed_z - 1, seed_radius]
+    
+    # Calculate small bounding box around seed
+    r = seed_radius
+    xmin = max(1, seed_x - r)
+    xmax = min(w, seed_x + r)
+    ymin = max(1, seed_y - r)
+    ymax = min(h, seed_y + r)
+    zmin = max(1, seed_z - r)
+    zmax = min(d, seed_z + r)
+    
+    bw = xmax - xmin + 1
+    bh = ymax - ymin + 1
+    bd = zmax - zmin + 1
+    
+    seed_data = Int32[
+        seed_x - 1, seed_y - 1, seed_z - 1, seed_radius,
+        xmin - 1, ymin - 1, zmin - 1, 0
+    ]
     GC.@preserve seed_data begin
         cmd_push_constants(cmd, state.layout_seed_init, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(seed_data), Ptr{Cvoid}(pointer(seed_data)))
     end
-    cmd_dispatch(cmd, gx, gy, gz)
+    cmd_dispatch(cmd, cld(bw, 8), cld(bh, 8), cld(bd, 8))
     
     barrier_compute = MemoryBarrier(C_NULL, ACCESS_SHADER_WRITE_BIT, ACCESS_SHADER_READ_BIT)
     cmd_pipeline_barrier(cmd, [barrier_compute], BufferMemoryBarrier[], ImageMemoryBarrier[];
@@ -897,8 +925,10 @@ function run_incremental_steps!(state::HeatDiffusionState, ctx, n_steps::Int;
     w, h, d = state.width, state.height, state.depth
     
     total_steps = state.accumulated_steps + n_steps
-    # Expand bounding box
-    R = state.seed_radius + round(Int, 1.2 * total_steps) + 6
+    # Expand bounding box based on actual heat diffusion distance (approx 3 std devs)
+    # std_dev = sqrt(2 * D * t) where D <= 1.0 and t = total_steps * dt
+    # 3 * sqrt(2 * 0.16 * total_steps) ≈ 3 * sqrt(0.32 * total_steps) ≈ 1.7 * sqrt(total_steps)
+    R = state.seed_radius + round(Int, 2.0 * sqrt(max(0, total_steps))) + 6
     xmin = max(1, state.seed_x - R)
     xmax = min(w, state.seed_x + R)
     ymin = max(1, state.seed_y - R)
@@ -926,6 +956,9 @@ function run_incremental_steps!(state::HeatDiffusionState, ctx, n_steps::Int;
     gx = cld(bw, 8)
     gy = cld(bh, 8)
     gz = cld(bd, 8)
+    
+    # DEBUG
+    # println("[HeatDiffusion] total_steps=$total_steps, R=$R, bbox=($bw x $bh x $bd), workgroups=($gx x $gy x $gz)")
     
     cmd = state.compute_cmd_buffer
     unwrap(reset_command_buffer(cmd))

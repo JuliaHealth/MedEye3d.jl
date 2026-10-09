@@ -1,6 +1,7 @@
 #version 450
 // seed_init.comp — Initializes the heat field with a seed sphere of radius r set to 1.0
-// All other voxels are set to 0.0
+// We only dispatch this shader over a small bounding box around the seed.
+// The rest of the volume is already cleared to 0.0 by cmd_clear_color_image.
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
 
@@ -8,25 +9,21 @@ layout(set = 0, binding = 0, r32f) uniform writeonly image3D img_u;
 
 layout(push_constant) uniform PushConstants {
     ivec4 seed_pos;  // xyz = seed voxel coordinates, w = seed_radius (in voxels)
+    ivec4 box_min;   // xyz = min bounding box voxel
 } pc;
 
 void main() {
-    ivec3 pos = ivec3(gl_GlobalInvocationID.xyz);
+    ivec3 pos = pc.box_min.xyz + ivec3(gl_GlobalInvocationID.xyz);
     ivec3 dims = imageSize(img_u);
     if (any(greaterThanEqual(pos, dims))) return;
+    if (any(lessThan(pos, ivec3(0)))) return;
 
     float r = float(pc.seed_pos.w);
     float val = 0.0;
-    if (r <= 0.0) {
-        if (pos.x == pc.seed_pos.x && pos.y == pc.seed_pos.y && pos.z == pc.seed_pos.z) {
-            val = 1.0;
-        }
-    } else {
-        vec3 diff = vec3(pos - pc.seed_pos.xyz);
-        float d = length(diff);
-        if (d <= r) {
-            val = 1.0;
-        }
+    vec3 diff = vec3(pos - pc.seed_pos.xyz);
+    float d = length(diff);
+    if (d <= max(r, 0.5)) {
+        val = 1.0;
+        imageStore(img_u, pos, vec4(val, 0.0, 0.0, 0.0));
     }
-    imageStore(img_u, pos, vec4(val, 0.0, 0.0, 0.0));
 }
