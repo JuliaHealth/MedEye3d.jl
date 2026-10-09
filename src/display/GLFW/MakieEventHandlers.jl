@@ -4118,22 +4118,31 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
     # Seed the GPU heat field at cursor position (no diffusion steps yet)
     try
         println("[Heat-GDT START] Calling seed_only! at ($cx,$cy,$cz)..."); flush(stdout)
-        VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, cx, cy, cz; seed_radius=1)
+        VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, cx, cy, cz; seed_radius=3)
         set_ai_status!("[Heat-GDT GPU] Growing from ($cx,$cy,$cz)...")
         println("[Heat-GDT START] seed_only! SUCCESS — GPU diffusion active"); flush(stdout)
         
         # Run 6 initial steps immediately so the lesion appears instantly on click
         theta_val = heatgdt_theta[]
-        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 6; theta=theta_val, copy_box_to_cpu=true)
+        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 6; theta=theta_val, copy_box_to_cpu=false)
         _vk_heat_total_steps[] += 6
         
-        active_id = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
-        if seg_vol !== nothing
-            label_val = eltype(seg_vol)(active_id)
-            VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)
-        end
+        active_id = UInt32(current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1)
         for state in stateObjects
-            state.isSliceChanged = true
+            obj = state.mainForDisplayObjects
+            if obj === nothing || obj.vulkanTextures === nothing || isempty(obj.vulkanTextures)
+                continue
+            end
+            mask_idx = findfirst(d -> d.name == "Mask" || d.name == "segmentation", state.onScrollData.dataToScroll)
+            if mask_idx !== nothing && mask_idx <= length(obj.vulkanTextures)
+                vk_tex = obj.vulkanTextures[mask_idx]
+                slice_dim = state.onScrollData.dimensionToScroll
+                slice_idx = state.currentlyDispDat.sliceNumber - 1
+                VulkanHeatDiffusion.render_slice_to_texture!(heat_state, vk_ctx, vk_tex, slice_dim, slice_idx, active_id; theta=theta_val)
+                if obj.vulkanPipelineState !== nothing
+                    obj.vulkanPipelineState.ubo_dirty = true
+                end
+            end
         end
     catch e
         _vk_heat_active[] = false
@@ -4175,45 +4184,49 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
     if heat_state === nothing || vk_ctx === nothing; return; end
     
     try
-        # ── Run a small batch of diffusion steps on GPU ──
-        steps_per_tick = 16
+        # ── Run a larger batch of diffusion steps on GPU (100% GPU) ──
+        steps_per_tick = 50
         theta_val = heatgdt_theta[]
         
         t0 = time_ns()
         VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, steps_per_tick;
-            theta=theta_val, copy_box_to_cpu=true)
+            theta=theta_val, copy_box_to_cpu=false)
         t_gpu = time_ns()
         _vk_heat_total_steps[] += steps_per_tick
         
-        # ── Write bounding box to seg_vol ──
-        tp1 = stateObjects[1]
-        seg_vol = nothing
-        for dat in tp1.onScrollData.dataToScroll
-            if dat.name == "Mask" || dat.name == "segmentation"
-                seg_vol = dat.dat
-                break
+        # ── 100% GPU Overlay Rendering ──
+        # Directly slice the 3D heat field onto the 2D UI texture for each panel.
+        for state in stateObjects
+            obj = state.mainForDisplayObjects
+            if obj === nothing || obj.vulkanTextures === nothing || isempty(obj.vulkanTextures)
+                continue
+            end
+            
+            # Find Mask texture index
+            mask_idx = findfirst(d -> d.name == "Mask" || d.name == "segmentation", state.onScrollData.dataToScroll)
+            if mask_idx !== nothing && mask_idx <= length(obj.vulkanTextures)
+                vk_tex = obj.vulkanTextures[mask_idx]
+                
+                # 1=sagittal(X), 2=coronal(Y), 3=axial(Z)
+                slice_dim = state.onScrollData.dimensionToScroll
+                slice_idx = state.currentlyDispDat.sliceNumber - 1  # 0-indexed for shader
+                
+                active_id = UInt32(current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1)
+                
+                VulkanHeatDiffusion.render_slice_to_texture!(heat_state, vk_ctx, vk_tex, slice_dim, slice_idx, active_id; theta=theta_val)
+                
+                if obj.vulkanPipelineState !== nothing
+                    obj.vulkanPipelineState.ubo_dirty = true
+                end
             end
         end
-        if seg_vol !== nothing
-            active_id = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
-            label_val = eltype(seg_vol)(active_id)
-            VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)
-        end
-        t_apply = time_ns()
+        t_render = time_ns()
         
-        # ── Mark ALL panels dirty → axial + sagittal + coronal all refresh ──
-        for state in stateObjects
-            state.isSliceChanged = true
-        end
-        t_end = time_ns()
-        
-        # Benchmark logging
         gpu_ms = (t_gpu - t0) / 1e6
-        apply_ms = (t_apply - t_gpu) / 1e6
-        render_ms = (t_end - t_apply) / 1e6
-        total_ms = (t_end - t0) / 1e6
+        render_ms = (t_render - t_gpu) / 1e6
+        total_ms = (t_render - t0) / 1e6
         
-        log_line = "[Heat-GDT GPU Tick] steps=$(steps_per_tick), total=$(round(total_ms, digits=2))ms (gpu=$(round(gpu_ms, digits=2)), apply=$(round(apply_ms, digits=2)), trigger_render=$(round(render_ms, digits=2)))"
+        log_line = "[Heat-GDT GPU Tick] steps=$(steps_per_tick), total=$(round(total_ms, digits=2))ms (gpu=$(round(gpu_ms, digits=2)), slice_render=$(round(render_ms, digits=2)))"
         if PERF_LOG[]
             println(log_line)
         end
@@ -4221,6 +4234,7 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
             println(f, log_line)
         end
     catch e
+        open("heatgdt_perf.log", "a") do f; println(f, "Tick failed: ", e); end
         @warn "[Heat-GDT GPU] Tick failed" exception=(e, catch_backtrace())
     end
 end
