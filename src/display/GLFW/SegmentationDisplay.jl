@@ -63,6 +63,7 @@ function ensure_heatgdt_gpu!(vk_ctx; force_reload=false)::Bool
             end
             heat_state = nothing
             MakieEventHandlers._vk_heat_state[] = nothing
+            GC.gc(true)
             _vk_heat_uploaded[] = false
         elseif heat_state.diffusivity_uploaded && !force_reload
             _vk_heat_uploaded[] = true
@@ -1230,6 +1231,7 @@ function coordinateDisplay(
                         if heat_s !== nothing
                             try VulkanHeatDiffusion.destroy_heat_diffusion!(heat_s, vk_ctx) catch; end
                             MakieEventHandlers._vk_heat_state[] = nothing
+            GC.gc(true)
                             MakieEventHandlers._vk_heat_ctx[] = nothing
                         end
                         vk_ctx = stateInstances[1].mainForDisplayObjects.vulkanCtx
@@ -1678,6 +1680,7 @@ function coordinateDisplay(
                 VulkanHeatDiffusion.destroy_heat_diffusion!(heat_s, vk_ctx)
             catch; end
             MakieEventHandlers._vk_heat_state[] = nothing
+            GC.gc(true)
             MakieEventHandlers._vk_heat_ctx[] = nothing
         end
         if vk_ctx !== nothing
