@@ -1,0 +1,5 @@
+content = read("src/display/reactingToMouseKeyboard/ReactOnMouseClickAndDrag.jl", String)
+content = replace(content, "lesion_vis = MEH._lesion_active[]" => "lesion_vis = isdefined(MEH, :_lesion_active) ? MEH._lesion_active[] : true")
+content = replace(content, "surf_vis = MEH._bone_surf_active[]" => "surf_vis = isdefined(MEH, :_bone_surf_active) ? MEH._bone_surf_active[] : true")
+content = replace(content, "marr_vis = MEH._bone_marr_active[]" => "marr_vis = isdefined(MEH, :_bone_marr_active) ? MEH._bone_marr_active[] : true")
+write("src/display/reactingToMouseKeyboard/ReactOnMouseClickAndDrag.jl", content)

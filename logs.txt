@@ -1,0 +1,566 @@
+Precompiling packages...
+┌ Warning: attempting to remove probably stale pidfile
+│   path = "/home/jm/.julia/compiled/v1.12/CxxWrap/WGIJU_MoZ7d.ji.pidfile"
+└ @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:250
+              ✗ CxxWrap
+┌ Warning: attempting to remove probably stale pidfile
+│   path = "/home/jm/.julia/compiled/v1.12/ITKIOWrapper/ExcUS_MoZ7d.ji.pidfile"
+└ @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:250
+              ✗ ITKIOWrapper
+┌ Warning: attempting to remove probably stale pidfile
+│   path = "/home/jm/.julia/compiled/v1.12/MedImages/Prci9_MoZ7d.ji.pidfile"
+└ @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:250
+              ✗ MedImages
+Info Given MedEye3d was explicitly requested, output will be shown live [0K
+[0KC++ exception while wrapping module StdLib: invalid subtyping in definition of StdString with supertype CppBasicString
+[0KERROR: LoadError: invalid subtyping in definition of StdString with supertype CppBasicString
+[0KStacktrace:
+[0K  [1] register_julia_module
+[0K    @ ~/.julia/packages/CxxWrap/I0P2E/src/CxxWrap.jl:432 [inlined]
+[0K  [2] readmodule(so_path_cb::typeof(CxxWrap.StdLib.get_libcxxwrap_julia_stl_path), funcname::Symbol, m::Module, flags::UInt32)
+[0K    @ CxxWrap.CxxWrapCore ~/.julia/packages/CxxWrap/I0P2E/src/CxxWrap.jl:825
+[0K  [3] wrapmodule(so_path_cb::Function, funcname::Symbol, m::Module, flags::UInt32)
+[0K    @ CxxWrap.CxxWrapCore ~/.julia/packages/CxxWrap/I0P2E/src/CxxWrap.jl:835
+[0K  [4] include(mapexpr::Function, mod::Module, _path::String)
+[0K    @ Base ./Base.jl:307
+[0K  [5] include(mod::Module, _path::String)
+[0K    @ Base ./Base.jl:306
+[0K  [6] include_package_for_output(pkg::Base.PkgId, input::String, depot_path::Vector{String}, dl_load_path::Vector{String}, load_path::Vector{String}, concrete_deps::Vector{Pair{Base.PkgId, UInt128}}, source::String)
+[0K    @ Base ./loading.jl:3028
+[0K  [7] eval(m::Module, e::Any)
+[0K    @ Core ./boot.jl:489
+[0K  [8] include_string(mapexpr::typeof(identity), mod::Module, code::String, filename::String)
+[0K    @ Base ./loading.jl:2874
+[0K  [9] include_string
+[0K    @ ./loading.jl:2884 [inlined]
+[0K [10] exec_options(opts::Base.JLOptions)
+[0K    @ Base ./client.jl:315
+[0K [11] _start()
+[0K    @ Base ./client.jl:550
+[0Kin expression starting at /home/jm/.julia/packages/CxxWrap/I0P2E/src/StdLib.jl:1
+[0Kin expression starting at /home/jm/.julia/packages/CxxWrap/I0P2E/src/CxxWrap.jl:1
+[0Kin expression starting at stdin:5
+[0KERROR: LoadError: Failed to precompile CxxWrap [1f15a43c-97ca-5a2a-ae31-89f07a497df4] to "/home/jm/.julia/compiled/v1.12/CxxWrap/jl_Pkls3S".
+[0KStacktrace:
+[0K  [1] error(s::String)
+[0K    @ Base ./error.jl:44
+[0K  [2] compilecache(pkg::Base.PkgId, path::String, internal_stderr::IO, internal_stdout::IO, keep_loaded_modules::Bool; flags::Cmd, cacheflags::Base.CacheFlags, reasons::Dict{String, Int64}, loadable_exts::Nothing)
+[0K    @ Base ./loading.jl:3315
+[0K  [3] (::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}})()
+[0K    @ Base ./loading.jl:2683
+[0K  [4] mkpidlock(f::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}}, at::String, pid::Int32; kwopts::@Kwargs{stale_age::Int64, wait::Bool})
+[0K    @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:96
+[0K  [5] #mkpidlock#7
+[0K    @ ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:91 [inlined]
+[0K  [6] trymkpidlock(::Function, ::Vararg{Any}; kwargs::@Kwargs{stale_age::Int64})
+[0K    @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:117
+[0K  [7] #invokelatest_gr#232
+[0K    @ ./reflection.jl:1297 [inlined]
+[0K  [8] invokelatest_gr
+[0K    @ ./reflection.jl:1289 [inlined]
+[0K  [9] maybe_cachefile_lock(f::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}}, pkg::Base.PkgId, srcpath::String; stale_age::Int64)
+[0K    @ Base ./loading.jl:3886
+[0K [10] maybe_cachefile_lock
+[0K    @ ./loading.jl:3883 [inlined]
+[0K [11] __require_prelocked(pkg::Base.PkgId, env::String)
+[0K    @ Base ./loading.jl:2669
+[0K [12] _require_prelocked(uuidkey::Base.PkgId, env::String)
+[0K    @ Base ./loading.jl:2495
+[0K [13] macro expansion
+[0K    @ ./loading.jl:2423 [inlined]
+[0K [14] macro expansion
+[0K    @ ./lock.jl:376 [inlined]
+[0K [15] __require(into::Module, mod::Symbol)
+[0K    @ Base ./loading.jl:2388
+[0K [16] require(into::Module, mod::Symbol)
+[0K    @ Base ./loading.jl:2364
+[0K [17] top-level scope
+[0K    @ ~/.julia/packages/ITKIOWrapper/ZDi9K/src/ITKIOWrapper.jl:2
+[0K [18] include(mod::Module, _path::String)
+[0K    @ Base ./Base.jl:306
+[0K [19] include_package_for_output(pkg::Base.PkgId, input::String, depot_path::Vector{String}, dl_load_path::Vector{String}, load_path::Vector{String}, concrete_deps::Vector{Pair{Base.PkgId, UInt128}}, source::String)
+[0K    @ Base ./loading.jl:3028
+[0K [20] top-level scope
+[0K    @ stdin:5
+[0K [21] eval(m::Module, e::Any)
+[0K    @ Core ./boot.jl:489
+[0K [22] include_string(mapexpr::typeof(identity), mod::Module, code::String, filename::String)
+[0K    @ Base ./loading.jl:2874
+[0K [23] include_string
+[0K    @ ./loading.jl:2884 [inlined]
+[0K [24] exec_options(opts::Base.JLOptions)
+[0K    @ Base ./client.jl:315
+[0K [25] _start()
+[0K    @ Base ./client.jl:550
+[0Kin expression starting at /home/jm/.julia/packages/ITKIOWrapper/ZDi9K/src/ITKIOWrapper.jl:1
+[0Kin expression starting at stdin:5
+[0KERROR: LoadError: Failed to precompile ITKIOWrapper [8538b10a-c1b7-4e8d-b607-b3a5053e6a1f] to "/home/jm/.julia/compiled/v1.12/ITKIOWrapper/jl_ziVF2i".
+[0KStacktrace:
+[0K  [1] error(s::String)
+[0K    @ Base ./error.jl:44
+[0K  [2] compilecache(pkg::Base.PkgId, path::String, internal_stderr::IO, internal_stdout::IO, keep_loaded_modules::Bool; flags::Cmd, cacheflags::Base.CacheFlags, reasons::Dict{String, Int64}, loadable_exts::Nothing)
+[0K    @ Base ./loading.jl:3315
+[0K  [3] (::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}})()
+[0K    @ Base ./loading.jl:2683
+[0K  [4] mkpidlock(f::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}}, at::String, pid::Int32; kwopts::@Kwargs{stale_age::Int64, wait::Bool})
+[0K    @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:96
+[0K  [5] #mkpidlock#7
+[0K    @ ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:91 [inlined]
+[0K  [6] trymkpidlock(::Function, ::Vararg{Any}; kwargs::@Kwargs{stale_age::Int64})
+[0K    @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:117
+[0K  [7] #invokelatest_gr#232
+[0K    @ ./reflection.jl:1297 [inlined]
+[0K  [8] invokelatest_gr
+[0K    @ ./reflection.jl:1289 [inlined]
+[0K  [9] maybe_cachefile_lock(f::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}}, pkg::Base.PkgId, srcpath::String; stale_age::Int64)
+[0K    @ Base ./loading.jl:3886
+[0K [10] maybe_cachefile_lock
+[0K    @ ./loading.jl:3883 [inlined]
+[0K [11] __require_prelocked(pkg::Base.PkgId, env::String)
+[0K    @ Base ./loading.jl:2669
+[0K [12] _require_prelocked(uuidkey::Base.PkgId, env::String)
+[0K    @ Base ./loading.jl:2495
+[0K [13] macro expansion
+[0K    @ ./loading.jl:2423 [inlined]
+[0K [14] macro expansion
+[0K    @ ./lock.jl:376 [inlined]
+[0K [15] __require(into::Module, mod::Symbol)
+[0K    @ Base ./loading.jl:2388
+[0K [16] require(into::Module, mod::Symbol)
+[0K    @ Base ./loading.jl:2364
+[0K [17] top-level scope
+[0K    @ /mnt/big/project_ssd/project_ssd/MedImages.jl/src/Load_and_save.jl:3
+[0K [18] include(mapexpr::Function, mod::Module, _path::String)
+[0K    @ Base ./Base.jl:307
+[0K [19] top-level scope
+[0K    @ /mnt/big/project_ssd/project_ssd/MedImages.jl/src/MedImages.jl:42
+[0K [20] include(mod::Module, _path::String)
+[0K    @ Base ./Base.jl:306
+[0K [21] include_package_for_output(pkg::Base.PkgId, input::String, depot_path::Vector{String}, dl_load_path::Vector{String}, load_path::Vector{String}, concrete_deps::Vector{Pair{Base.PkgId, UInt128}}, source::String)
+[0K    @ Base ./loading.jl:3028
+[0K [22] top-level scope
+[0K    @ stdin:5
+[0K [23] eval(m::Module, e::Any)
+[0K    @ Core ./boot.jl:489
+[0K [24] include_string(mapexpr::typeof(identity), mod::Module, code::String, filename::String)
+[0K    @ Base ./loading.jl:2874
+[0K [25] include_string
+[0K    @ ./loading.jl:2884 [inlined]
+[0K [26] exec_options(opts::Base.JLOptions)
+[0K    @ Base ./client.jl:315
+[0K [27] _start()
+[0K    @ Base ./client.jl:550
+[0Kin expression starting at /mnt/big/project_ssd/project_ssd/MedImages.jl/src/Load_and_save.jl:1
+[0Kin expression starting at /mnt/big/project_ssd/project_ssd/MedImages.jl/src/MedImages.jl:1
+[0Kin expression starting at stdin:5
+[0KERROR: LoadError: Failed to precompile MedImages [fbff095b-7891-4fc4-b5e5-3cd99b9dd225] to "/home/jm/.julia/compiled/v1.12/MedImages/jl_UlCpkU".
+[0KStacktrace:
+[0K  [1] error(s::String)
+[0K    @ Base ./error.jl:44
+[0K  [2] compilecache(pkg::Base.PkgId, path::String, internal_stderr::IO, internal_stdout::IO, keep_loaded_modules::Bool; flags::Cmd, cacheflags::Base.CacheFlags, reasons::Dict{String, Int64}, loadable_exts::Nothing)
+[0K    @ Base ./loading.jl:3315
+[0K  [3] (::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}})()
+[0K    @ Base ./loading.jl:2683
+[0K  [4] mkpidlock(f::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}}, at::String, pid::Int32; kwopts::@Kwargs{stale_age::Int64, wait::Bool})
+[0K    @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:96
+[0K  [5] #mkpidlock#7
+[0K    @ ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:91 [inlined]
+[0K  [6] trymkpidlock(::Function, ::Vararg{Any}; kwargs::@Kwargs{stale_age::Int64})
+[0K    @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:117
+[0K  [7] #invokelatest_gr#232
+[0K    @ ./reflection.jl:1297 [inlined]
+[0K  [8] invokelatest_gr
+[0K    @ ./reflection.jl:1289 [inlined]
+[0K  [9] maybe_cachefile_lock(f::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}}, pkg::Base.PkgId, srcpath::String; stale_age::Int64)
+[0K    @ Base ./loading.jl:3886
+[0K [10] maybe_cachefile_lock
+[0K    @ ./loading.jl:3883 [inlined]
+[0K [11] __require_prelocked(pkg::Base.PkgId, env::String)
+[0K    @ Base ./loading.jl:2669
+[0K [12] _require_prelocked(uuidkey::Base.PkgId, env::String)
+[0K    @ Base ./loading.jl:2495
+[0K [13] macro expansion
+[0K    @ ./loading.jl:2423 [inlined]
+[0K [14] macro expansion
+[0K    @ ./lock.jl:376 [inlined]
+[0K [15] __require(into::Module, mod::Symbol)
+[0K    @ Base ./loading.jl:2388
+[0K [16] require(into::Module, mod::Symbol)
+[0K    @ Base ./loading.jl:2364
+[0K [17] top-level scope
+[0K    @ /mnt/big/project_ssd/project_ssd/MedEye3d.jl/src/display/InferenceClient.jl:6
+[0K [18] include(mapexpr::Function, mod::Module, _path::String)
+[0K    @ Base ./Base.jl:307
+[0K [19] top-level scope
+[0K    @ /mnt/big/project_ssd/project_ssd/MedEye3d.jl/src/MedEye3d.jl:109
+[0K [20] include(mod::Module, _path::String)
+[0K    @ Base ./Base.jl:306
+[0K [21] include_package_for_output(pkg::Base.PkgId, input::String, depot_path::Vector{String}, dl_load_path::Vector{String}, load_path::Vector{String}, concrete_deps::Vector{Pair{Base.PkgId, UInt128}}, source::Nothing)
+[0K    @ Base ./loading.jl:3028
+[0K [22] top-level scope
+[0K    @ stdin:5
+[0K [23] eval(m::Module, e::Any)
+[0K    @ Core ./boot.jl:489
+[0K [24] include_string(mapexpr::typeof(identity), mod::Module, code::String, filename::String)
+[0K    @ Base ./loading.jl:2874
+[0K [25] include_string
+[0K    @ ./loading.jl:2884 [inlined]
+[0K [26] exec_options(opts::Base.JLOptions)
+[0K    @ Base ./client.jl:315
+[0K [27] _start()
+[0K    @ Base ./client.jl:550
+[0Kin expression starting at /mnt/big/project_ssd/project_ssd/MedEye3d.jl/src/display/InferenceClient.jl:1
+[0Kin expression starting at /mnt/big/project_ssd/project_ssd/MedEye3d.jl/src/MedEye3d.jl:1
+[0Kin expression starting at stdin:5
+              ✗ MedEye3d
+  0 dependencies successfully precompiled in 22 seconds. 840 already precompiled.
+
+ERROR: The following 2 direct dependencies failed to precompile:
+
+MedImages 
+
+Failed to precompile MedImages [fbff095b-7891-4fc4-b5e5-3cd99b9dd225] to "/home/jm/.julia/compiled/v1.12/MedImages/jl_v9kftz".
+C++ exception while wrapping module StdLib: invalid subtyping in definition of StdString with supertype CppBasicString
+ERROR: LoadError: invalid subtyping in definition of StdString with supertype CppBasicString
+Stacktrace:
+  [1] register_julia_module
+    @ ~/.julia/packages/CxxWrap/I0P2E/src/CxxWrap.jl:432 [inlined]
+  [2] readmodule(so_path_cb::typeof(CxxWrap.StdLib.get_libcxxwrap_julia_stl_path), funcname::Symbol, m::Module, flags::UInt32)
+    @ CxxWrap.CxxWrapCore ~/.julia/packages/CxxWrap/I0P2E/src/CxxWrap.jl:825
+  [3] wrapmodule(so_path_cb::Function, funcname::Symbol, m::Module, flags::UInt32)
+    @ CxxWrap.CxxWrapCore ~/.julia/packages/CxxWrap/I0P2E/src/CxxWrap.jl:835
+  [4] include(mapexpr::Function, mod::Module, _path::String)
+    @ Base ./Base.jl:307
+  [5] include(mod::Module, _path::String)
+    @ Base ./Base.jl:306
+  [6] include_package_for_output(pkg::Base.PkgId, input::String, depot_path::Vector{String}, dl_load_path::Vector{String}, load_path::Vector{String}, concrete_deps::Vector{Pair{Base.PkgId, UInt128}}, source::String)
+    @ Base ./loading.jl:3028
+  [7] eval(m::Module, e::Any)
+    @ Core ./boot.jl:489
+  [8] include_string(mapexpr::typeof(identity), mod::Module, code::String, filename::String)
+    @ Base ./loading.jl:2874
+  [9] include_string
+    @ ./loading.jl:2884 [inlined]
+ [10] exec_options(opts::Base.JLOptions)
+    @ Base ./client.jl:315
+ [11] _start()
+    @ Base ./client.jl:550
+in expression starting at /home/jm/.julia/packages/CxxWrap/I0P2E/src/StdLib.jl:1
+in expression starting at /home/jm/.julia/packages/CxxWrap/I0P2E/src/CxxWrap.jl:1
+in expression starting at stdin:5
+ERROR: LoadError: Failed to precompile CxxWrap [1f15a43c-97ca-5a2a-ae31-89f07a497df4] to "/home/jm/.julia/compiled/v1.12/CxxWrap/jl_dBZLET".
+Stacktrace:
+  [1] error(s::String)
+    @ Base ./error.jl:44
+  [2] compilecache(pkg::Base.PkgId, path::String, internal_stderr::IO, internal_stdout::IO, keep_loaded_modules::Bool; flags::Cmd, cacheflags::Base.CacheFlags, reasons::Dict{String, Int64}, loadable_exts::Nothing)
+    @ Base ./loading.jl:3315
+  [3] (::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}})()
+    @ Base ./loading.jl:2683
+  [4] mkpidlock(f::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}}, at::String, pid::Int32; kwopts::@Kwargs{stale_age::Int64, wait::Bool})
+    @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:96
+  [5] #mkpidlock#7
+    @ ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:91 [inlined]
+  [6] trymkpidlock(::Function, ::Vararg{Any}; kwargs::@Kwargs{stale_age::Int64})
+    @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:117
+  [7] #invokelatest_gr#232
+    @ ./reflection.jl:1297 [inlined]
+  [8] invokelatest_gr
+    @ ./reflection.jl:1289 [inlined]
+  [9] maybe_cachefile_lock(f::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}}, pkg::Base.PkgId, srcpath::String; stale_age::Int64)
+    @ Base ./loading.jl:3886
+ [10] maybe_cachefile_lock
+    @ ./loading.jl:3883 [inlined]
+ [11] __require_prelocked(pkg::Base.PkgId, env::String)
+    @ Base ./loading.jl:2669
+ [12] _require_prelocked(uuidkey::Base.PkgId, env::String)
+    @ Base ./loading.jl:2495
+ [13] macro expansion
+    @ ./loading.jl:2423 [inlined]
+ [14] macro expansion
+    @ ./lock.jl:376 [inlined]
+ [15] __require(into::Module, mod::Symbol)
+    @ Base ./loading.jl:2388
+ [16] require(into::Module, mod::Symbol)
+    @ Base ./loading.jl:2364
+ [17] top-level scope
+    @ ~/.julia/packages/ITKIOWrapper/ZDi9K/src/ITKIOWrapper.jl:2
+ [18] include(mod::Module, _path::String)
+    @ Base ./Base.jl:306
+ [19] include_package_for_output(pkg::Base.PkgId, input::String, depot_path::Vector{String}, dl_load_path::Vector{String}, load_path::Vector{String}, concrete_deps::Vector{Pair{Base.PkgId, UInt128}}, source::String)
+    @ Base ./loading.jl:3028
+ [20] top-level scope
+    @ stdin:5
+ [21] eval(m::Module, e::Any)
+    @ Core ./boot.jl:489
+ [22] include_string(mapexpr::typeof(identity), mod::Module, code::String, filename::String)
+    @ Base ./loading.jl:2874
+ [23] include_string
+    @ ./loading.jl:2884 [inlined]
+ [24] exec_options(opts::Base.JLOptions)
+    @ Base ./client.jl:315
+ [25] _start()
+    @ Base ./client.jl:550
+in expression starting at /home/jm/.julia/packages/ITKIOWrapper/ZDi9K/src/ITKIOWrapper.jl:1
+in expression starting at stdin:5
+ERROR: LoadError: Failed to precompile ITKIOWrapper [8538b10a-c1b7-4e8d-b607-b3a5053e6a1f] to "/home/jm/.julia/compiled/v1.12/ITKIOWrapper/jl_4E7pVr".
+Stacktrace:
+  [1] error(s::String)
+    @ Base ./error.jl:44
+  [2] compilecache(pkg::Base.PkgId, path::String, internal_stderr::IO, internal_stdout::IO, keep_loaded_modules::Bool; flags::Cmd, cacheflags::Base.CacheFlags, reasons::Dict{String, Int64}, loadable_exts::Nothing)
+    @ Base ./loading.jl:3315
+  [3] (::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}})()
+    @ Base ./loading.jl:2683
+  [4] mkpidlock(f::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}}, at::String, pid::Int32; kwopts::@Kwargs{stale_age::Int64, wait::Bool})
+    @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:96
+  [5] #mkpidlock#7
+    @ ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:91 [inlined]
+  [6] trymkpidlock(::Function, ::Vararg{Any}; kwargs::@Kwargs{stale_age::Int64})
+    @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:117
+  [7] #invokelatest_gr#232
+    @ ./reflection.jl:1297 [inlined]
+  [8] invokelatest_gr
+    @ ./reflection.jl:1289 [inlined]
+  [9] maybe_cachefile_lock(f::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}}, pkg::Base.PkgId, srcpath::String; stale_age::Int64)
+    @ Base ./loading.jl:3886
+ [10] maybe_cachefile_lock
+    @ ./loading.jl:3883 [inlined]
+ [11] __require_prelocked(pkg::Base.PkgId, env::String)
+    @ Base ./loading.jl:2669
+ [12] _require_prelocked(uuidkey::Base.PkgId, env::String)
+    @ Base ./loading.jl:2495
+ [13] macro expansion
+    @ ./loading.jl:2423 [inlined]
+ [14] macro expansion
+    @ ./lock.jl:376 [inlined]
+ [15] __require(into::Module, mod::Symbol)
+    @ Base ./loading.jl:2388
+ [16] require(into::Module, mod::Symbol)
+    @ Base ./loading.jl:2364
+ [17] top-level scope
+    @ /mnt/big/project_ssd/project_ssd/MedImages.jl/src/Load_and_save.jl:3
+ [18] include(mapexpr::Function, mod::Module, _path::String)
+    @ Base ./Base.jl:307
+ [19] top-level scope
+    @ /mnt/big/project_ssd/project_ssd/MedImages.jl/src/MedImages.jl:42
+ [20] include(mod::Module, _path::String)
+    @ Base ./Base.jl:306
+ [21] include_package_for_output(pkg::Base.PkgId, input::String, depot_path::Vector{String}, dl_load_path::Vector{String}, load_path::Vector{String}, concrete_deps::Vector{Pair{Base.PkgId, UInt128}}, source::Nothing)
+    @ Base ./loading.jl:3028
+ [22] top-level scope
+    @ stdin:5
+ [23] eval(m::Module, e::Any)
+    @ Core ./boot.jl:489
+ [24] include_string(mapexpr::typeof(identity), mod::Module, code::String, filename::String)
+    @ Base ./loading.jl:2874
+ [25] include_string
+    @ ./loading.jl:2884 [inlined]
+ [26] exec_options(opts::Base.JLOptions)
+    @ Base ./client.jl:315
+ [27] _start()
+    @ Base ./client.jl:550
+in expression starting at /mnt/big/project_ssd/project_ssd/MedImages.jl/src/Load_and_save.jl:1
+in expression starting at /mnt/big/project_ssd/project_ssd/MedImages.jl/src/MedImages.jl:1
+in expression starting at stdin:5
+MedEye3d 
+
+Failed to precompile MedEye3d [48a1af7b-3279-4eeb-8f2b-7ca229bb51b1] to "/home/jm/.julia/compiled/v1.12/MedEye3d/jl_u7Ldz5".
+C++ exception while wrapping module StdLib: invalid subtyping in definition of StdString with supertype CppBasicString
+ERROR: LoadError: invalid subtyping in definition of StdString with supertype CppBasicString
+Stacktrace:
+  [1] register_julia_module
+    @ ~/.julia/packages/CxxWrap/I0P2E/src/CxxWrap.jl:432 [inlined]
+  [2] readmodule(so_path_cb::typeof(CxxWrap.StdLib.get_libcxxwrap_julia_stl_path), funcname::Symbol, m::Module, flags::UInt32)
+    @ CxxWrap.CxxWrapCore ~/.julia/packages/CxxWrap/I0P2E/src/CxxWrap.jl:825
+  [3] wrapmodule(so_path_cb::Function, funcname::Symbol, m::Module, flags::UInt32)
+    @ CxxWrap.CxxWrapCore ~/.julia/packages/CxxWrap/I0P2E/src/CxxWrap.jl:835
+  [4] include(mapexpr::Function, mod::Module, _path::String)
+    @ Base ./Base.jl:307
+  [5] include(mod::Module, _path::String)
+    @ Base ./Base.jl:306
+  [6] include_package_for_output(pkg::Base.PkgId, input::String, depot_path::Vector{String}, dl_load_path::Vector{String}, load_path::Vector{String}, concrete_deps::Vector{Pair{Base.PkgId, UInt128}}, source::String)
+    @ Base ./loading.jl:3028
+  [7] eval(m::Module, e::Any)
+    @ Core ./boot.jl:489
+  [8] include_string(mapexpr::typeof(identity), mod::Module, code::String, filename::String)
+    @ Base ./loading.jl:2874
+  [9] include_string
+    @ ./loading.jl:2884 [inlined]
+ [10] exec_options(opts::Base.JLOptions)
+    @ Base ./client.jl:315
+ [11] _start()
+    @ Base ./client.jl:550
+in expression starting at /home/jm/.julia/packages/CxxWrap/I0P2E/src/StdLib.jl:1
+in expression starting at /home/jm/.julia/packages/CxxWrap/I0P2E/src/CxxWrap.jl:1
+in expression starting at stdin:5
+ERROR: LoadError: Failed to precompile CxxWrap [1f15a43c-97ca-5a2a-ae31-89f07a497df4] to "/home/jm/.julia/compiled/v1.12/CxxWrap/jl_Pkls3S".
+Stacktrace:
+  [1] error(s::String)
+    @ Base ./error.jl:44
+  [2] compilecache(pkg::Base.PkgId, path::String, internal_stderr::IO, internal_stdout::IO, keep_loaded_modules::Bool; flags::Cmd, cacheflags::Base.CacheFlags, reasons::Dict{String, Int64}, loadable_exts::Nothing)
+    @ Base ./loading.jl:3315
+  [3] (::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}})()
+    @ Base ./loading.jl:2683
+  [4] mkpidlock(f::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}}, at::String, pid::Int32; kwopts::@Kwargs{stale_age::Int64, wait::Bool})
+    @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:96
+  [5] #mkpidlock#7
+    @ ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:91 [inlined]
+  [6] trymkpidlock(::Function, ::Vararg{Any}; kwargs::@Kwargs{stale_age::Int64})
+    @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:117
+  [7] #invokelatest_gr#232
+    @ ./reflection.jl:1297 [inlined]
+  [8] invokelatest_gr
+    @ ./reflection.jl:1289 [inlined]
+  [9] maybe_cachefile_lock(f::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}}, pkg::Base.PkgId, srcpath::String; stale_age::Int64)
+    @ Base ./loading.jl:3886
+ [10] maybe_cachefile_lock
+    @ ./loading.jl:3883 [inlined]
+ [11] __require_prelocked(pkg::Base.PkgId, env::String)
+    @ Base ./loading.jl:2669
+ [12] _require_prelocked(uuidkey::Base.PkgId, env::String)
+    @ Base ./loading.jl:2495
+ [13] macro expansion
+    @ ./loading.jl:2423 [inlined]
+ [14] macro expansion
+    @ ./lock.jl:376 [inlined]
+ [15] __require(into::Module, mod::Symbol)
+    @ Base ./loading.jl:2388
+ [16] require(into::Module, mod::Symbol)
+    @ Base ./loading.jl:2364
+ [17] top-level scope
+    @ ~/.julia/packages/ITKIOWrapper/ZDi9K/src/ITKIOWrapper.jl:2
+ [18] include(mod::Module, _path::String)
+    @ Base ./Base.jl:306
+ [19] include_package_for_output(pkg::Base.PkgId, input::String, depot_path::Vector{String}, dl_load_path::Vector{String}, load_path::Vector{String}, concrete_deps::Vector{Pair{Base.PkgId, UInt128}}, source::String)
+    @ Base ./loading.jl:3028
+ [20] top-level scope
+    @ stdin:5
+ [21] eval(m::Module, e::Any)
+    @ Core ./boot.jl:489
+ [22] include_string(mapexpr::typeof(identity), mod::Module, code::String, filename::String)
+    @ Base ./loading.jl:2874
+ [23] include_string
+    @ ./loading.jl:2884 [inlined]
+ [24] exec_options(opts::Base.JLOptions)
+    @ Base ./client.jl:315
+ [25] _start()
+    @ Base ./client.jl:550
+in expression starting at /home/jm/.julia/packages/ITKIOWrapper/ZDi9K/src/ITKIOWrapper.jl:1
+in expression starting at stdin:5
+ERROR: LoadError: Failed to precompile ITKIOWrapper [8538b10a-c1b7-4e8d-b607-b3a5053e6a1f] to "/home/jm/.julia/compiled/v1.12/ITKIOWrapper/jl_ziVF2i".
+Stacktrace:
+  [1] error(s::String)
+    @ Base ./error.jl:44
+  [2] compilecache(pkg::Base.PkgId, path::String, internal_stderr::IO, internal_stdout::IO, keep_loaded_modules::Bool; flags::Cmd, cacheflags::Base.CacheFlags, reasons::Dict{String, Int64}, loadable_exts::Nothing)
+    @ Base ./loading.jl:3315
+  [3] (::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}})()
+    @ Base ./loading.jl:2683
+  [4] mkpidlock(f::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}}, at::String, pid::Int32; kwopts::@Kwargs{stale_age::Int64, wait::Bool})
+    @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:96
+  [5] #mkpidlock#7
+    @ ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:91 [inlined]
+  [6] trymkpidlock(::Function, ::Vararg{Any}; kwargs::@Kwargs{stale_age::Int64})
+    @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:117
+  [7] #invokelatest_gr#232
+    @ ./reflection.jl:1297 [inlined]
+  [8] invokelatest_gr
+    @ ./reflection.jl:1289 [inlined]
+  [9] maybe_cachefile_lock(f::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}}, pkg::Base.PkgId, srcpath::String; stale_age::Int64)
+    @ Base ./loading.jl:3886
+ [10] maybe_cachefile_lock
+    @ ./loading.jl:3883 [inlined]
+ [11] __require_prelocked(pkg::Base.PkgId, env::String)
+    @ Base ./loading.jl:2669
+ [12] _require_prelocked(uuidkey::Base.PkgId, env::String)
+    @ Base ./loading.jl:2495
+ [13] macro expansion
+    @ ./loading.jl:2423 [inlined]
+ [14] macro expansion
+    @ ./lock.jl:376 [inlined]
+ [15] __require(into::Module, mod::Symbol)
+    @ Base ./loading.jl:2388
+ [16] require(into::Module, mod::Symbol)
+    @ Base ./loading.jl:2364
+ [17] top-level scope
+    @ /mnt/big/project_ssd/project_ssd/MedImages.jl/src/Load_and_save.jl:3
+ [18] include(mapexpr::Function, mod::Module, _path::String)
+    @ Base ./Base.jl:307
+ [19] top-level scope
+    @ /mnt/big/project_ssd/project_ssd/MedImages.jl/src/MedImages.jl:42
+ [20] include(mod::Module, _path::String)
+    @ Base ./Base.jl:306
+ [21] include_package_for_output(pkg::Base.PkgId, input::String, depot_path::Vector{String}, dl_load_path::Vector{String}, load_path::Vector{String}, concrete_deps::Vector{Pair{Base.PkgId, UInt128}}, source::String)
+    @ Base ./loading.jl:3028
+ [22] top-level scope
+    @ stdin:5
+ [23] eval(m::Module, e::Any)
+    @ Core ./boot.jl:489
+ [24] include_string(mapexpr::typeof(identity), mod::Module, code::String, filename::String)
+    @ Base ./loading.jl:2874
+ [25] include_string
+    @ ./loading.jl:2884 [inlined]
+ [26] exec_options(opts::Base.JLOptions)
+    @ Base ./client.jl:315
+ [27] _start()
+    @ Base ./client.jl:550
+in expression starting at /mnt/big/project_ssd/project_ssd/MedImages.jl/src/Load_and_save.jl:1
+in expression starting at /mnt/big/project_ssd/project_ssd/MedImages.jl/src/MedImages.jl:1
+in expression starting at stdin:5
+ERROR: LoadError: Failed to precompile MedImages [fbff095b-7891-4fc4-b5e5-3cd99b9dd225] to "/home/jm/.julia/compiled/v1.12/MedImages/jl_UlCpkU".
+Stacktrace:
+  [1] error(s::String)
+    @ Base ./error.jl:44
+  [2] compilecache(pkg::Base.PkgId, path::String, internal_stderr::IO, internal_stdout::IO, keep_loaded_modules::Bool; flags::Cmd, cacheflags::Base.CacheFlags, reasons::Dict{String, Int64}, loadable_exts::Nothing)
+    @ Base ./loading.jl:3315
+  [3] (::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}})()
+    @ Base ./loading.jl:2683
+  [4] mkpidlock(f::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}}, at::String, pid::Int32; kwopts::@Kwargs{stale_age::Int64, wait::Bool})
+    @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:96
+  [5] #mkpidlock#7
+    @ ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:91 [inlined]
+  [6] trymkpidlock(::Function, ::Vararg{Any}; kwargs::@Kwargs{stale_age::Int64})
+    @ FileWatching.Pidfile ~/.julia/juliaup/julia-1.12.6+0.x64.linux.gnu/share/julia/stdlib/v1.12/FileWatching/src/pidfile.jl:117
+  [7] #invokelatest_gr#232
+    @ ./reflection.jl:1297 [inlined]
+  [8] invokelatest_gr
+    @ ./reflection.jl:1289 [inlined]
+  [9] maybe_cachefile_lock(f::Base.var"#__require_prelocked##0#__require_prelocked##1"{Base.PkgId, String, Dict{String, Int64}}, pkg::Base.PkgId, srcpath::String; stale_age::Int64)
+    @ Base ./loading.jl:3886
+ [10] maybe_cachefile_lock
+    @ ./loading.jl:3883 [inlined]
+ [11] __require_prelocked(pkg::Base.PkgId, env::String)
+    @ Base ./loading.jl:2669
+ [12] _require_prelocked(uuidkey::Base.PkgId, env::String)
+    @ Base ./loading.jl:2495
+ [13] macro expansion
+    @ ./loading.jl:2423 [inlined]
+ [14] macro expansion
+    @ ./lock.jl:376 [inlined]
+ [15] __require(into::Module, mod::Symbol)
+    @ Base ./loading.jl:2388
+ [16] require(into::Module, mod::Symbol)
+    @ Base ./loading.jl:2364
+ [17] top-level scope
+    @ /mnt/big/project_ssd/project_ssd/MedEye3d.jl/src/display/InferenceClient.jl:6
+ [18] include(mapexpr::Function, mod::Module, _path::String)
+    @ Base ./Base.jl:307
+ [19] top-level scope
+    @ /mnt/big/project_ssd/project_ssd/MedEye3d.jl/src/MedEye3d.jl:109
+ [20] include(mod::Module, _path::String)
+    @ Base ./Base.jl:306
+ [21] include_package_for_output(pkg::Base.PkgId, input::String, depot_path::Vector{String}, dl_load_path::Vector{String}, load_path::Vector{String}, concrete_deps::Vector{Pair{Base.PkgId, UInt128}}, source::Nothing)
+    @ Base ./loading.jl:3028
+ [22] top-level scope
+    @ stdin:5
+ [23] eval(m::Module, e::Any)
+    @ Core ./boot.jl:489
+ [24] include_string(mapexpr::typeof(identity), mod::Module, code::String, filename::String)
+    @ Base ./loading.jl:2874
+ [25] include_string
+    @ ./loading.jl:2884 [inlined]
+ [26] exec_options(opts::Base.JLOptions)
+    @ Base ./client.jl:315
+ [27] _start()
+    @ Base ./client.jl:550
+in expression starting at /mnt/big/project_ssd/project_ssd/MedEye3d.jl/src/display/InferenceClient.jl:1
+in expression starting at /mnt/big/project_ssd/project_ssd/MedEye3d.jl/src/MedEye3d.jl:1
+in expression starting at stdin:5

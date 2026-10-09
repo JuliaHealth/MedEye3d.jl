@@ -14,6 +14,31 @@ fi
 export MESA_GL_VERSION_OVERRIDE=4.3
 export MESA_GLSL_VERSION_OVERRIDE=430
 
+# Ensure MPICH is installed (needed by HDF5_jll mpi+mpich artifact variant)
+if ! dpkg -l libmpich-dev &>/dev/null 2>&1; then
+    echo "Installing MPICH for HDF5_jll..."
+    sudo apt-get update -qq && sudo apt-get install -y -qq libmpich-dev 2>/dev/null || true
+fi
+
+# Fix HDF5_jll RTLD_DEEPBIND issue: libhdf5_fortran.so needs symbols from libhdf5.so
+# to be globally visible. The JLL wrapper uses RTLD_DEEPBIND which isolates symbol scopes.
+# Patch the wrapper to add RTLD_GLOBAL alongside RTLD_DEEPBIND.
+HDF5_WRAPPER=$(find /data/packages/HDF5_jll -name "x86_64-linux-gnu-*mpi+mpich.jl" 2>/dev/null | head -1)
+if [ -n "$HDF5_WRAPPER" ] && ! grep -q "RTLD_GLOBAL" "$HDF5_WRAPPER" 2>/dev/null; then
+    echo "  [HDF5] Patching RTLD_DEEPBIND → RTLD_DEEPBIND | RTLD_GLOBAL..."
+    python3 -c "
+with open('$HDF5_WRAPPER', 'r') as f:
+    c = f.read()
+c = c.replace('RTLD_LAZY | RTLD_DEEPBIND,', 'RTLD_LAZY | RTLD_DEEPBIND | RTLD_GLOBAL,')
+with open('$HDF5_WRAPPER', 'w') as f:
+    f.write(c)
+" 2>/dev/null || true
+    # Clear stale precompiled caches
+    find /data/compiled -name "*HDF5*" -exec rm -rf {} + 2>/dev/null || true
+    find /data/compiled -name "*MedImages*" -exec rm -rf {} + 2>/dev/null || true
+    find /data/compiled -name "*MedEye3d*" -exec rm -rf {} + 2>/dev/null || true
+fi
+
 
 
 echo ""
@@ -47,16 +72,30 @@ if [ -n "$MANIFEST_VER" ] && [ "$CURRENT_JULIA_VER" != "$MANIFEST_VER" ]; then
     rm -f Manifest.toml
     julia --project=. -e '
         using Pkg
+        devpkgs = PackageSpec[]
         # Re-add local dev dependency if MedImages.jl is available
         for p in ["/workspaces/MedImages.jl", "/mnt/big/project_ssd/project_ssd/MedImages.jl"]
             if isdir(p)
-                Pkg.develop(path=p)
+                push!(devpkgs, PackageSpec(path=p))
                 break
             end
+        end
+        # Re-add local ITKIOWrapper.jl (PythonCall fork) if available
+        for p in ["/workspaces/ITKIOWrapper.jl", "/mnt/big/project_ssd/project_ssd/ITKIOWrapper.jl"]
+            if isdir(p)
+                push!(devpkgs, PackageSpec(path=p))
+                break
+            end
+        end
+        if !isempty(devpkgs)
+            Pkg.develop(devpkgs)
         end
         Pkg.instantiate()
     '
     echo "  [MANIFEST] Resolved for Julia $CURRENT_JULIA_VER"
 fi
 
-JULIA_NUM_THREADS=3,1 julia --project=. scripts/app/run_interactive_mrb.jl "$@" 2>&1 | tee "$LOG_FILE"
+# Julia 1.11 has a known multi-threading SIGSEGV bug during JIT compilation of large
+# codebases (Makie/GLMakie). Using 1 thread avoids the race in jl_mutex_wait.
+# Threads.@spawn for IO and AI inference still works (runs on the single-thread pool).
+julia --project=. --threads=1 scripts/app/run_interactive_mrb.jl "$@" 2>&1 | tee "$LOG_FILE"

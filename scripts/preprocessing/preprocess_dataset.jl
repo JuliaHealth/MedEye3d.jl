@@ -729,8 +729,40 @@ function main()
     rm(joinpath(data_dir, "temp_skelly_resampled.nii.gz"), force=true)
     rm(joinpath(data_dir, "temp_max_anatomy_resampled.nii.gz"), force=true)
     
+    # ═══════════════════════════════════════════════════════════════════════
+    # Phase 4: Compute HED3D-Wide Edge Detection + Diffusivity for Heat-GDT
+    # This runs the HED3D-Wide neural network on CT+PET+TotalSeg per timepoint
+    # and stores the diffusivity field D(x) directly in the HDF5 file.
+    # ═══════════════════════════════════════════════════════════════════════
+    
+    println("\n=== Phase 4: Computing Edge Detection + Diffusivity (Heat-GDT) ===")
+    diffusivity_script = joinpath(@__DIR__, "compute_diffusivity.jl")
+    if isfile(diffusivity_script)
+        println("  Running: julia compute_diffusivity.jl $data_dir")
+        println("  (This uses the JuliaHELPNet environment and runs HED3D-Wide NN inference)")
+        try
+            # Run as subprocess because it needs a different Julia project environment
+            proc = run(pipeline(
+                `julia $diffusivity_script $data_dir`,
+                stdout=stdout, stderr=stderr
+            ), wait=true)
+            if proc.exitcode == 0
+                println("  ✅ Diffusivity computation completed successfully")
+            else
+                println("  ⚠️  Diffusivity computation exited with code $(proc.exitcode)")
+                println("  Run manually: julia $diffusivity_script $data_dir")
+            end
+        catch e
+            println("  ⚠️  Diffusivity computation failed: $e")
+            println("  Run manually: julia $diffusivity_script $data_dir")
+        end
+    else
+        println("  ⚠️  compute_diffusivity.jl not found at: $diffusivity_script")
+        println("  Diffusivity must be computed separately for Heat-GDT to work.")
+    end
+    
     println("\n✅ Pre-processing complete. HDF5 is now the single source of truth.")
-    println("   All atlas, centroids, organ mapping, and bone subsegments stored in: $h5_path")
+    println("   All atlas, centroids, organ mapping, bone subsegments, and diffusivity stored in: $h5_path")
 end
 
 main()

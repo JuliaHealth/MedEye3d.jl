@@ -15,7 +15,7 @@ export start_python_worker, run_helpnet_inference, run_nninteractive, run_bone_s
        insert_patch!, preload_ct_for_nninteractive, send_json_request,
        prompt_start_ai_models, is_worker_reachable, is_ai_enabled, set_ai_enabled!,
        get_last_ai_error, set_last_ai_error!, find_ai_script, get_inference_dir,
-       run_heatgdt, is_heatgdt_available, precompute_heatgdt_diffusivity
+       run_heatgdt, is_heatgdt_available, precompute_heatgdt_diffusivity, clear_heatgdt_diffusivity!
 
 """
     read_with_timeout(conn::TCPSocket, timeout_s::Real=30.0) -> String
@@ -890,6 +890,7 @@ end
 
 const _heatgdt_diffusivity = Ref{Union{Nothing, Array{Float32, 3}}}(nothing)
 const _heatgdt_edge_map = Ref{Union{Nothing, Array{Float32, 3}}}(nothing)
+const _heatgdt_diffusivity_tp = Ref{Int}(-1)  # Which TP index the current diffusivity belongs to
 
 """
     is_heatgdt_available() -> Bool
@@ -901,14 +902,26 @@ function is_heatgdt_available()::Bool
 end
 
 """
-    precompute_heatgdt_diffusivity(diffusivity_vol::Array{Float32, 3})
+    precompute_heatgdt_diffusivity(diffusivity_vol::Array{Float32, 3}; tp_index::Int=-1)
 
 Stores a precomputed diffusivity field D(x) for the current volume.
-Called when a study is loaded and the edge/diffusivity NIfTI exists.
+Called when a study is loaded and the diffusivity dataset exists in the HDF5 file.
 """
-function precompute_heatgdt_diffusivity(diffusivity_vol::Array{Float32, 3})
+function precompute_heatgdt_diffusivity(diffusivity_vol::Array{Float32, 3}; tp_index::Int=-1)
     _heatgdt_diffusivity[] = diffusivity_vol
-    @info "[InferenceClient] Heat-GDT diffusivity field loaded ($(size(diffusivity_vol)))"
+    _heatgdt_diffusivity_tp[] = tp_index
+    @info "[InferenceClient] Heat-GDT diffusivity field loaded ($(size(diffusivity_vol)), tp=$tp_index)"
+end
+
+"""
+    clear_heatgdt_diffusivity!()
+
+Clears the cached diffusivity field. Called when switching time points
+so the GPU buffer can be re-uploaded with the new TP's diffusivity.
+"""
+function clear_heatgdt_diffusivity!()
+    _heatgdt_diffusivity[] = nothing
+    _heatgdt_diffusivity_tp[] = -1
 end
 
 """
@@ -935,9 +948,13 @@ function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
         ones(Float32, 64, 64, 64)
     end
     
-    # Create seed from the painted scribble points (mean position = center of patch)
-    seed_mask = zeros(Float32, 64, 64, 64)
-    seed_mask[33, 33, 33] = 1.0f0  # Center of 64³ patch
+    # Create seed from the painted scribble points
+    seed_mask = extract_patch(points_vol, cx, cy, cz; pad_val=0.0f0)
+    
+    # Ensure at least one seed voxel if the patch extraction somehow missed it
+    if sum(seed_mask) == 0
+        seed_mask[33, 33, 33] = 1.0f0
+    end
     
     # Reshape for batch dimension: (X, Y, Z, B)
     D_4d = reshape(D_patch, 64, 64, 64, 1)

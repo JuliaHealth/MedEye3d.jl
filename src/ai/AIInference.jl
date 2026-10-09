@@ -147,7 +147,7 @@ end
 # ── Heat-GDT Constants ──────────────────────────────────────────────────────
 const HEATGDT_PROJECT_DIR = normpath(joinpath(@__DIR__, "..", "..", "..", "semiautomatic", "JuliaHELPNet"))
 const HEATGDT_DIR = joinpath(HEATGDT_PROJECT_DIR, "HeatGDT")
-const HEATGDT_CHAMPION_PATH = joinpath(HEATGDT_DIR, "champion_model.jld2")
+const HEATGDT_CHAMPION_PATH = joinpath(HEATGDT_DIR, "champion_pretrained_hed3d_wide.jld2")
 
 # Lazy-loaded singleton for the Heat-GDT model (loaded once, reused across calls)
 const _HEATGDT_STATE = Ref{Any}(nothing)
@@ -155,8 +155,8 @@ const _HEATGDT_STATE = Ref{Any}(nothing)
 """
     _ensure_heatgdt_loaded!()
 
-Lazy-loads the Heat-GDT champion model (HED3D edge network + PDE parameters).
-Loaded once per session from `champion_model.jld2`.
+Lazy-loads the Heat-GDT champion model (HED3D-Wide edge network + PDE parameters).
+Loaded once per session from `champion_pretrained_hed3d_wide.jld2`.
 """
 function _ensure_heatgdt_loaded!()
     if _HEATGDT_STATE[] !== nothing
@@ -175,6 +175,7 @@ function _ensure_heatgdt_loaded!()
             using Pkg
             Pkg.activate($(HEATGDT_PROJECT_DIR))
             include(joinpath($(HEATGDT_DIR), "model.jl"))
+            include(joinpath($(HEATGDT_DIR), "architectures", "hed3d_wide.jl"))
             using .HeatGDTModel
             using JLD2, Lux, CUDA, Random
         end
@@ -182,12 +183,19 @@ function _ensure_heatgdt_loaded!()
         checkpoint = JLD2.load(HEATGDT_CHAMPION_PATH)
         ps_trained = checkpoint["ps"] |> Lux.gpu
         st_trained = checkpoint["st"] |> Lux.gpu
-        config = checkpoint["config"]
+        
+        # Handle both old (config dict) and new (edge_type string) checkpoint formats
+        config = if haskey(checkpoint, "config")
+            checkpoint["config"]
+        else
+            Dict("edge_type" => get(checkpoint, "edge_type", "hed3d_wide"),
+                 "K" => 40, "dt" => 0.16, "theta" => 0.001, "tau" => 0.0001)
+        end
         
         # Reconstruct the framework with champion parameters
         framework = HeatGDTModel.HeatGDTFramework(
             in_channels=3,
-            edge_type=Symbol(get(config, "edge_type", "deep")),
+            edge_type=Symbol(get(config, "edge_type", "hed3d_wide")),
             K=get(config, "K", 40),
             dt=Float32(get(config, "dt", 0.16)),
             theta=Float32(get(config, "theta", 0.001)),
@@ -213,7 +221,7 @@ Takes a 64³ CT, PET, and TotalSegmentator patch centered on the seed point.
 Returns a binary UInt8 mask of the segmented lesion.
 
 The method:
-1. Runs the HED3D edge detection network to produce edge map E(x)
+1. Runs the HED3D-Wide edge detection network to produce edge map E(x)
 2. Converts edges to diffusivity: D(x) = 0.01 + 0.99 * exp(-5 * E(x))
 3. Runs K steps of heat diffusion from the seed point
 4. Thresholds the heat field to produce a binary mask

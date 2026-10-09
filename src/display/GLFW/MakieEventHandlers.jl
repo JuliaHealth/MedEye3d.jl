@@ -16,6 +16,7 @@ export reactToChangePlane, reactToCompareTimePoints, reactToShowSingleLesion
 export reactToWindowing, reactToPaintVal, reactToSyncLesion, reactToChangeBrushSize, reactToPetBlend, reactToLabelOpacity
 export reactToChangeTimePoint, reactToSetTimePoint, reactToToggleLesion, reactToRefreshList
 export reactToAddAutoPet, reactToAIInferenceResult, reactToSyncMissing, reactToGenManual, reactToHeatGDTHold
+export reactToHeatGDTStart, reactToHeatGDTTick, reactToHeatGDTStop
 export reactToMapLink, reactToAutoRunPreprocess, reactToRunPreprocess, reactToShowBoneMask, reactToShowMaskLayer, reactToSaveMRB
 export register_h5_mask_saver!, mark_tp_mask_dirty!, save_tp_mask_to_h5, flush_all_dirty_masks!, dirty_mask_tps
 export _clinical_phase, get_clinical_phase, set_clinical_phase!, _phase_display_name
@@ -23,6 +24,7 @@ export reactToEditMode, reactToViewMode, reactToSetTPFirst, reactToSetTPLast, re
 using ...InferenceClient
 using ...LesionAssociation
 using ...TextureManag
+using ...VulkanBackend: VulkanHeatDiffusion
 # ModernGL removed — Vulkan UBO updates happen in consumer loop via update_ubo!
 # Uniforms module no longer needed — TextureSpec fields are read directly by UBO packer
 using Observables
@@ -175,6 +177,79 @@ end
 # Heat-GDT slider parameter refs (written by LesionMetadataWindow, read by inference worker)
 const heatgdt_K = Ref{Int}(40)
 const heatgdt_theta = Ref{Float32}(0.001f0)
+
+# ── Vulkan GPU Heat-GDT interactive state ──────────────────────────────────
+const _vk_heat_state = Ref{Any}(nothing)            # VulkanHeatDiffusion.HeatDiffusionState or nothing
+const _vk_heat_ctx = Ref{Any}(nothing)               # VulkanContext (cached from consumer thread)
+const _vk_heat_active = Ref{Bool}(false)              # True while left-click is held AND GPU heat-GDT mode is active
+const _vk_heat_total_steps = Ref{Int}(0)              # Accumulated diffusion steps during current hold
+const _vk_heat_seed = Ref{Tuple{Int,Int,Int}}((0,0,0))  # 3D seed voxel for current interaction
+const _vk_heat_last_dispatch = Ref{Float64}(0.0)      # Timestamp of last GPU dispatch (for debouncing)
+const HEAT_TICK_MIN_INTERVAL_S = 0.05                  # 50ms minimum interval between GPU dispatches (~20 Hz)
+
+"""
+    reload_heatgdt_diffusivity_for_tp!(new_tp::Int)
+
+Load the per-timepoint diffusivity field from the HDF5 file's TP group
+(e.g. `BASELINE/diffusivity` for tp=0, `TFM_.../diffusivity` for followups).
+If found, re-upload to the GPU heat state. If not found, clear the current
+diffusivity — no gradient or NIfTI fallbacks are used.
+"""
+function reload_heatgdt_diffusivity_for_tp!(new_tp::Int)
+    # Skip if already loaded for this TP
+    if InferenceClient._heatgdt_diffusivity_tp[] == new_tp
+        return
+    end
+    
+    h5_path = h5_save_path_ref[]
+    if isempty(h5_path) || !isfile(h5_path)
+        return
+    end
+    
+    local diff_vol::Union{Nothing, Array{Float32, 3}} = nothing
+    try
+        HDF5.h5open(h5_path, "r") do h5
+            all_keys = keys(h5)
+            study_keys = filter(k -> !(k in ("_meta_", "ATLAS", "CENTROIDS", "BONE_SUBSEG")), all_keys)
+            
+            # Sort with BASELINE first
+            sort!(study_keys, by = x -> startswith(x, "BASELINE") ? "" : x)
+            
+            tp_idx_1 = new_tp + 1
+            if tp_idx_1 <= length(study_keys)
+                group_name = study_keys[tp_idx_1]
+                if haskey(h5[group_name], "diffusivity")
+                    @info "[HeatDiffusion] Loading diffusivity for TP=$new_tp from HDF5 group: $group_name"
+                    diff_vol = Float32.(read(h5[group_name]["diffusivity"]))
+                    
+                    is_preflipped = haskey(h5, "_meta_/preflipped") && read(h5["_meta_/preflipped"]) == 1
+                    if !is_preflipped
+                        diff_vol = reverse(diff_vol, dims=2)
+                    end
+                else
+                    @warn "[HeatDiffusion] 'diffusivity' dataset missing in HDF5 group '$group_name' for TP=$new_tp. No fallback available."
+                end
+            end
+        end
+    catch e
+        @warn "[HeatDiffusion] Failed to load diffusivity from HDF5 for TP=$new_tp: $e"
+    end
+    
+    if diff_vol !== nothing
+        InferenceClient.precompute_heatgdt_diffusivity(diff_vol; tp_index=new_tp)
+        # Re-upload or re-initialize GPU pipeline for new timepoint
+        vk_ctx = _vk_heat_ctx[]
+        if vk_ctx !== nothing
+            parentmodule(@__MODULE__).ensure_heatgdt_gpu!(vk_ctx; force_reload=true)
+        end
+    else
+        # No TP-specific diffusivity found
+        # Clear current diffusivity so the GPU doesn't use a stale tensor
+        InferenceClient._heatgdt_diffusivity[] = nothing
+        InferenceClient._heatgdt_diffusivity_tp[] = -1
+        parentmodule(@__MODULE__)._vk_heat_uploaded[] = false
+    end
+end
 
 # Internal inference queue — serializes all Docker communication through a single worker thread
 struct InferenceJob
@@ -1752,7 +1827,7 @@ function save_tp_mask_to_h5(tp_i::Int)::Bool
                     if haskey(h5_file, ds_path_expert)
                         h5_file[ds_path_expert][:, :, :] = Int16.(raw_to_write)
                     else
-                        h5_file[ds_path_expert, chunk=(32,32,32), compress=3] = Int16.(raw_to_write)
+                        h5_file[ds_path_expert] = Int16.(raw_to_write)
                     end
                     println("  [AUTOSAVE-MASK] Saved mask for TP $tp_i to $ds_path_expert ($(count(>(0), mask_to_save)) non-zero voxels)"); flush(stdout)
                 end
@@ -1956,6 +2031,10 @@ function _ensure_io_task!()
     _io_task_started[] = true
     io_channel[] = Channel{Any}(16)
     Threads.@spawn begin
+        # Delay IO thread startup to avoid Julia 1.11 multi-threaded JIT SIGSEGV.
+        # When JULIA_NUM_THREADS > 1, this thread triggers JIT compilation concurrently
+        # with the main thread's Makie layout compilation, causing a race in jl_mutex_wait.
+        sleep(5.0)
         for msg in io_channel[]
             try
                 if msg isa PreloadTPMessage
@@ -2033,7 +2112,12 @@ function register_tp_loader!(fn)
     # Sliding window preload: only preload TP 1 (adjacent to startup TP 0)
     # Further TPs are loaded lazily on demand via EvictAndPreloadMessage
     Threads.@spawn begin
-        sleep(0.5)  # Allow initial display to finish first
+        # Wait long enough for Makie JIT compilation to complete on the main thread.
+        # Julia 1.11 has a known race condition where concurrent JIT compilation from
+        # different threads can SIGSEGV in _jl_mutex_wait → jl_generate_fptr_impl.
+        # Makie layout compilation takes ~30-60s on first run, so we wait 15s to let
+        # the critical JIT compilation pass finish before triggering new compilations.
+        sleep(15.0)
         tp_indices = sort(collect(keys(tp_labels)))
         # Only preload TP index 1 if not already cached
         for tp_idx in tp_indices
@@ -2521,6 +2605,13 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
             load_measurements_from_h5!(new_tp, _main_obj_ref[])
         end
     catch; end
+    
+    # Reload diffusivity tensor for new TP (GPU re-upload if heat state exists)
+    try
+        reload_heatgdt_diffusivity_for_tp!(new_tp)
+    catch e
+        @warn "[HeatDiffusion] Diffusivity reload on TP switch failed" exception=(e, catch_backtrace())
+    end
     
     label = get(tp_labels, new_tp, "TP $new_tp")
     @debug "TP Navigation: switching to $label (index=$new_tp)"
@@ -3828,9 +3919,14 @@ function reactToHeatGDTHold(event::HeatGDTHoldEvent, stateObjects::Vector{StateD
                 return
             end
         else
-            cx = round(Int, mean([p[1] for p in painted_pts]))
-            cy = round(Int, mean([p[2] for p in painted_pts]))
-            cz = round(Int, mean([p[3] for p in painted_pts]))
+            vpos = current_viewer_position[]
+            if vpos[1] > 0 && vpos[2] > 0 && vpos[3] > 0
+                cx, cy, cz = vpos[1], vpos[2], vpos[3]
+            else
+                cx = round(Int, mean([p[1] for p in painted_pts]))
+                cy = round(Int, mean([p[2] for p in painted_pts]))
+                cz = round(Int, mean([p[3] for p in painted_pts]))
+            end
         end
         
         points_vol = zeros(Float32, size(ct_vol))
@@ -3858,44 +3954,13 @@ function reactToHeatGDTHold(event::HeatGDTHoldEvent, stateObjects::Vector{StateD
         set_ai_status!("[Error] Heat-GDT Hold: $err_msg")
     finally
         heatgdt_K[] = old_K  # Restore original K
-        
-        # Deactivate if one-shot mode was active
-        if _heatgdt_oneshot[]
-            _heatgdt_oneshot[] = false
-            romcad = nothing
-            try
-                romcad = parentmodule(@__MODULE__).ReactOnMouseClickAndDrag
-            catch
-                try
-                    romcad = parentmodule(parentmodule(@__MODULE__)).ReactOnMouseClickAndDrag
-                catch; end
-            end
-            if romcad !== nothing
-                romcad._heatgdt_mode_active[] = false
-                set_ai_status!("[Heat-GDT Wand] Lesion created. Wand deactivated.")
-            end
-        end
     end
 end
 
 const _heatgdt_oneshot = Ref{Bool}(false)
 
 function reactToOneShotHeatGDT(data::MakieEvents.OneShotHeatGDTEvent, stateObjects::Vector{StateDataFields})
-    # 1. Create a new lesion
-    try
-        LMW = _get_lmw()
-        if LMW !== nothing
-            obs_dict = getfield(LMW, :_lmw_observables)
-            if haskey(obs_dict, :obs_new_lesion)
-                obs_dict[:obs_new_lesion][] = obs_dict[:obs_new_lesion][] + 1
-            end
-        end
-    catch; end
-    
-    # 2. Enter Edit/Paint mode
-    reactToEditMode(MakieEvents.EditModeEvent(), stateObjects)
-    
-    # 3. Enable Heat-GDT mode
+    println("[Heat-GDT WAND] W key pressed — reactToOneShotHeatGDT entered"); flush(stdout)
     romcad = nothing
     try
         romcad = parentmodule(@__MODULE__).ReactOnMouseClickAndDrag
@@ -3906,20 +3971,326 @@ function reactToOneShotHeatGDT(data::MakieEvents.OneShotHeatGDTEvent, stateObjec
     end
     
     if romcad !== nothing
-        romcad._heatgdt_mode_active[] = true
-        _heatgdt_oneshot[] = true
-        set_ai_status!("[Heat-GDT Wand] Enabled. Click & hold to grow lesion.")
+        is_active = romcad._heatgdt_mode_active[]
         
-        # Sync GUI dropdown
-        @async try
-            LMW = _get_lmw()
-            if LMW !== nothing
-                obs_dict = getfield(LMW, :_lmw_observables)
-                if haskey(obs_dict, :algo_combo_selection)
-                    obs_dict[:algo_combo_selection][] = "Heat-GDT"
+        if is_active
+            # Toggle OFF
+            romcad._heatgdt_mode_active[] = false
+            set_ai_status!("[Heat-GDT Wand] Disabled.")
+        else
+            # Toggle ON
+            # 1. Create a new lesion
+            try
+                LMW = _get_lmw()
+                if LMW !== nothing
+                    obs_dict = getfield(LMW, :_lmw_observables)
+                    if haskey(obs_dict, :obs_new_lesion)
+                        obs_dict[:obs_new_lesion][] = obs_dict[:obs_new_lesion][] + 1
+                    end
                 end
+            catch; end
+            
+            # 2. Enter Edit/Paint mode
+            reactToEditMode(MakieEvents.EditModeEvent(), stateObjects)
+            
+            romcad._heatgdt_mode_active[] = true
+            set_ai_status!("[Heat-GDT Wand] Enabled. Click & hold to grow lesion.")
+            println("[Heat-GDT WAND] Mode ON. heat_state=$(_vk_heat_state[] !== nothing), vk_ctx=$(_vk_heat_ctx[] !== nothing), uploaded=$(parentmodule(@__MODULE__)._vk_heat_uploaded[]), diffusivity=$(InferenceClient._heatgdt_diffusivity[] !== nothing)"); flush(stdout)
+            
+            # Sync GUI dropdown
+            @async try
+                LMW = _get_lmw()
+                if LMW !== nothing
+                    obs_dict = getfield(LMW, :_lmw_observables)
+                    if haskey(obs_dict, :algo_combo_selection)
+                        obs_dict[:algo_combo_selection][] = "Heat-GDT"
+                    end
+                end
+            catch; end
+        end
+    end
+end
+
+# ── Vulkan GPU Heat-GDT Interactive Handlers ─────────────────────────────────
+
+"""
+Apply GPU mask to the shared 3D seg_vol array. Since all panels slice from this
+same array, marking all panels dirty causes axial+sagittal+coronal to refresh.
+"""
+function _apply_gpu_mask_to_segvol!(mask_3d::Array{Float32,3}, stateObjects::Vector{StateDataFields})
+    tp1 = stateObjects[1]
+    seg_vol = nothing
+    for dat in tp1.onScrollData.dataToScroll
+        if dat.name == "Mask" || dat.name == "segmentation"
+            seg_vol = dat.dat
+            break
+        end
+    end
+    seg_vol === nothing && return
+    
+    # Ensure dimensions match
+    if size(mask_3d) != size(seg_vol)
+        @warn "[Heat-GDT GPU] Mask size $(size(mask_3d)) != seg_vol size $(size(seg_vol))"
+        return
+    end
+    
+    active_id = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
+    label_val = eltype(seg_vol)(active_id)
+    theta = heatgdt_theta[]
+    
+    # Write all voxels above threshold into the 3D seg_vol
+    @inbounds for k in axes(mask_3d, 3), j in axes(mask_3d, 2), i in axes(mask_3d, 1)
+        if mask_3d[i, j, k] >= theta
+            seg_vol[i, j, k] = label_val
+        end
+    end
+end
+
+"""
+GPU Heat-GDT: mouse press starts diffusion — seed the GPU heat field at the cursor's 3D position.
+"""
+function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects::Vector{StateDataFields})
+    println("[Heat-GDT START] Entered reactToHeatGDTStart (window_id=$(event.window_id))"); flush(stdout)
+    # Block heat-GDT annotation on M2 (second monitor) — only main window allowed
+    if event.window_id == 2
+        set_ai_status!("[Heat-GDT] Not available on M2 compare screen")
+        println("[Heat-GDT START] BLOCKED: window_id==2 (M2 screen)"); flush(stdout)
+        return
+    end
+    
+    heat_state = _vk_heat_state[]
+    vk_ctx = _vk_heat_ctx[]
+    
+    # On-demand initialization / upload if not ready yet
+    if (heat_state === nothing || !heat_state.diffusivity_uploaded || !parentmodule(@__MODULE__)._vk_heat_uploaded[]) && vk_ctx !== nothing
+        parentmodule(@__MODULE__).ensure_heatgdt_gpu!(vk_ctx)
+        heat_state = _vk_heat_state[]
+    end
+    
+    if heat_state === nothing || vk_ctx === nothing
+        set_ai_status!("[Heat-GDT] GPU not initialized — falling back to CPU on release")
+        println("[Heat-GDT START] BLOCKED: heat_state=$(heat_state === nothing ? "nothing" : "ok"), vk_ctx=$(vk_ctx === nothing ? "nothing" : "ok")"); flush(stdout)
+        return
+    end
+    
+    if !parentmodule(@__MODULE__)._vk_heat_uploaded[] || !heat_state.diffusivity_uploaded
+        set_ai_status!("[Heat-GDT] GPU not ready: Diffusivity is missing or not uploaded")
+        println("[Heat-GDT START] BLOCKED: _vk_heat_uploaded=$(parentmodule(@__MODULE__)._vk_heat_uploaded[]), heat_state.diffusivity_uploaded=$(heat_state.diffusivity_uploaded)"); flush(stdout)
+        return
+    end
+    
+    tp1 = stateObjects[1]
+    if !tp1.valueForMasToSet.is_painting_active
+        set_ai_status!("[Heat-GDT] Enter Edit mode first (press E)")
+        println("[Heat-GDT START] BLOCKED: is_painting_active=false (edit mode not enabled)"); flush(stdout)
+        return
+    end
+    
+    # Use current_viewer_position which is already updated by mouse move → reactToMouseDrag
+    vpos = current_viewer_position[]
+    cx, cy, cz = vpos[1], vpos[2], vpos[3]
+    println("[Heat-GDT START] cursor position: ($cx, $cy, $cz)"); flush(stdout)
+    if cx <= 0 || cy <= 0 || cz <= 0
+        set_ai_status!("[Heat-GDT GPU] Invalid cursor position — move cursor over image first")
+        println("[Heat-GDT START] BLOCKED: invalid cursor position ($cx,$cy,$cz)"); flush(stdout)
+        return
+    end
+    
+    # Validate seed is within volume bounds
+    seg_vol = nothing
+    for dat in tp1.onScrollData.dataToScroll
+        if dat.name == "Mask" || dat.name == "segmentation"
+            seg_vol = dat.dat
+            break
+        end
+    end
+    if seg_vol !== nothing && !checkbounds(Bool, seg_vol, cx, cy, cz)
+        set_ai_status!("[Heat-GDT GPU] Seed ($cx,$cy,$cz) out of bounds")
+        println("[Heat-GDT START] BLOCKED: seed ($cx,$cy,$cz) out of bounds for seg_vol $(size(seg_vol))"); flush(stdout)
+        return
+    end
+    
+    _vk_heat_seed[] = (cx, cy, cz)
+    _vk_heat_total_steps[] = 0
+    _vk_heat_active[] = true
+    _vk_heat_last_dispatch[] = time()
+    
+    # Seed the GPU heat field at cursor position (no diffusion steps yet)
+    try
+        println("[Heat-GDT START] Calling seed_only! at ($cx,$cy,$cz)..."); flush(stdout)
+        VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, cx, cy, cz; seed_radius=1)
+        set_ai_status!("[Heat-GDT GPU] Growing from ($cx,$cy,$cz)...")
+        println("[Heat-GDT START] seed_only! SUCCESS — GPU diffusion active"); flush(stdout)
+        
+        # Run 6 initial steps immediately so the lesion appears instantly on click
+        theta_val = heatgdt_theta[]
+        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 6; theta=theta_val, copy_box_to_cpu=true)
+        _vk_heat_total_steps[] += 6
+        
+        active_id = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
+        if seg_vol !== nothing
+            label_val = eltype(seg_vol)(active_id)
+            VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)
+        end
+        for state in stateObjects
+            state.isSliceChanged = true
+        end
+    catch e
+        _vk_heat_active[] = false
+        set_ai_status!("[Heat-GDT GPU] Seed failed: $(sprint(showerror, e))")
+        @warn "[Heat-GDT GPU] seed_only! failed" exception=(e, catch_backtrace())
+        println("[Heat-GDT START] BLOCKED: seed_only! threw: $(sprint(showerror, e))"); flush(stdout)
+        return
+    end
+    
+    # Start an async loop to continuously grow the lesion while button is held
+    @async begin
+        while _vk_heat_active[]
+            sleep(0.05) # 20 Hz
+            ch = main_event_channel[]
+            if ch !== nothing && isopen(ch)
+                put!(ch, MakieEvents.HeatGDTTickEvent())
             end
-        catch; end
+        end
+    end
+end
+
+"""
+GPU Heat-GDT: mouse move tick — run a small batch of diffusion steps on the GPU,
+read the full 3D mask back, update seg_vol, mark all panels dirty.
+Debounced to ≥50ms between GPU dispatches (~20 Hz update rate).
+"""
+function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector{StateDataFields})
+    if !_vk_heat_active[]; return; end
+    
+    # ── Debounce: skip if too soon since last dispatch ──
+    now = time()
+    if (now - _vk_heat_last_dispatch[]) < HEAT_TICK_MIN_INTERVAL_S
+        return
+    end
+    _vk_heat_last_dispatch[] = now
+    
+    heat_state = _vk_heat_state[]
+    vk_ctx = _vk_heat_ctx[]
+    if heat_state === nothing || vk_ctx === nothing; return; end
+    
+    try
+        # ── Run a small batch of diffusion steps on GPU ──
+        steps_per_tick = 16
+        theta_val = heatgdt_theta[]
+        
+        t0 = time_ns()
+        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, steps_per_tick;
+            theta=theta_val, copy_box_to_cpu=true)
+        t_gpu = time_ns()
+        _vk_heat_total_steps[] += steps_per_tick
+        
+        # ── Write bounding box to seg_vol ──
+        tp1 = stateObjects[1]
+        seg_vol = nothing
+        for dat in tp1.onScrollData.dataToScroll
+            if dat.name == "Mask" || dat.name == "segmentation"
+                seg_vol = dat.dat
+                break
+            end
+        end
+        if seg_vol !== nothing
+            active_id = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
+            label_val = eltype(seg_vol)(active_id)
+            VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)
+        end
+        t_apply = time_ns()
+        
+        # ── Mark ALL panels dirty → axial + sagittal + coronal all refresh ──
+        for state in stateObjects
+            state.isSliceChanged = true
+        end
+        t_end = time_ns()
+        
+        # Benchmark logging
+        gpu_ms = (t_gpu - t0) / 1e6
+        apply_ms = (t_apply - t_gpu) / 1e6
+        render_ms = (t_end - t_apply) / 1e6
+        total_ms = (t_end - t0) / 1e6
+        
+        log_line = "[Heat-GDT GPU Tick] steps=$(steps_per_tick), total=$(round(total_ms, digits=2))ms (gpu=$(round(gpu_ms, digits=2)), apply=$(round(apply_ms, digits=2)), trigger_render=$(round(render_ms, digits=2)))"
+        if PERF_LOG[]
+            println(log_line)
+        end
+        open("heatgdt_perf.log", "a") do f
+            println(f, log_line)
+        end
+    catch e
+        @warn "[Heat-GDT GPU] Tick failed" exception=(e, catch_backtrace())
+    end
+end
+
+"""
+GPU Heat-GDT: mouse release — final commit of 3D mask to seg_vol.
+"""
+function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector{StateDataFields})
+    if !_vk_heat_active[]; return; end
+    _vk_heat_active[] = false
+    
+    heat_state = _vk_heat_state[]
+    vk_ctx = _vk_heat_ctx[]
+    if heat_state === nothing || vk_ctx === nothing; return; end
+    
+    try
+        # Final bounding-box commit to seg_vol
+        tp1 = stateObjects[1]
+        seg_vol = nothing
+        for dat in tp1.onScrollData.dataToScroll
+            if dat.name == "Mask" || dat.name == "segmentation"
+                seg_vol = dat.dat
+                break
+            end
+        end
+        
+        if seg_vol !== nothing
+            theta_val = heatgdt_theta[]
+            active_id = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
+            label_val = eltype(seg_vol)(active_id)
+            
+            # Make sure GPU has finished the final step and read back the box
+            VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 0;
+                theta=theta_val, copy_box_to_cpu=true)
+            VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)
+        end
+        
+        # Mark ALL panels dirty for final render
+        for state in stateObjects
+            state.isSliceChanged = true
+        end
+        
+        if seg_vol !== nothing
+            tp_idx = current_tp_index[]
+            entry = lock(_tp_cache_lock) do
+                haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
+            end
+            if entry !== nothing
+                if entry.mask isa Array{Int8, 3}
+                    entry.mask .= clamp.(seg_vol, Int8(-128), Int8(127))
+                elseif entry.mask !== seg_vol
+                    entry.mask .= seg_vol
+                end
+                if entry.mask_i16 !== seg_vol
+                    entry.mask_i16 .= seg_vol
+                end
+                mark_tp_mask_dirty!(tp_idx)
+            end
+        end
+        
+        total = _vk_heat_total_steps[]
+        theta_val = heatgdt_theta[]
+        voxels = count(x -> x >= theta_val, mask_3d)
+        set_ai_status!("[Heat-GDT GPU] Done: $total steps, $voxels voxels")
+        if PERF_LOG[]
+            println("[Heat-GDT GPU] Complete: $total steps, $voxels voxels segmented"); flush(stdout)
+        end
+    catch e
+        @warn "[Heat-GDT GPU] Stop/commit failed" exception=(e, catch_backtrace())
+        set_ai_status!("[Heat-GDT GPU] Commit failed: $(sprint(showerror, e))")
     end
 end
 

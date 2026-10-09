@@ -1,0 +1,35 @@
+--- src/display/GLFW/MakieEventHandlers.jl
++++ src/display/GLFW/MakieEventHandlers.jl
+@@ -628,6 +628,30 @@
+     end
+ end
+ 
++function reactToToggleSingleMultiLesion(data::MakieEvents.ToggleSingleMultiLesionEvent, stateObjects::Vector{StateDataFields})
++    is_single_lesion_mode[] = !is_single_lesion_mode[]
++    
++    # We use reactToShowSingleLesion logic with the current active ID
++    lesion_id = is_single_lesion_mode[] ? current_active_lesion_id[] : 0
++    changed = reactToShowSingleLesion(ShowSingleLesionEvent(lesion_id), stateObjects)
++    
++    # Tell LesionMetadataWindow about the change if it exists
++    try
++        LMW = _get_lmw()
++        if LMW !== nothing && hasproperty(LMW, :_lmw_observables)
++            obs_dict = getfield(LMW, :_lmw_observables)
++            if haskey(obs_dict, :obs_single_multi_mode)
++                obs_dict[:obs_single_multi_mode][] = is_single_lesion_mode[]
++            end
++        end
++    catch e
++        @warn "Failed to update LesionMetadataWindow UI on M key: $e"
++    end
++    
++    if changed
++        ReactToScroll.reactToScrollMultiPanel!(collect(1:length(stateObjects)), stateObjects, Dict(i => stateObjects[i].valueForMasToSet.textDispCoords for i in 1:length(stateObjects)))
++    end
++end
++export reactToToggleSingleMultiLesion
++
+ # Flag controlling single vs all lesions display mode (default: true = display SINGLE lesion on start)
+ const is_single_lesion_mode = Ref(true)
+ export is_single_lesion_mode

@@ -13,6 +13,7 @@ export NextPhaseEvent, PrevPhaseEvent, SetPhaseEvent
 export EditModeEvent, ViewModeEvent, SetTPFirstEvent, SetTPLastEvent
 export NewLesionEvent, EraseModeEvent, ShowOnlyPETEvent, ShowOnlyCTEvent, ToggleAnatomyEvent, ToggleSyncScrollEvent
 export ToggleCrosshairEvent, ToggleSingleMultiLesionEvent, ToggleHeatGDTModeEvent, OneShotHeatGDTEvent
+export HeatGDTStartEvent, HeatGDTTickEvent, HeatGDTStopEvent
 
 struct NextPhaseEvent end
 struct PrevPhaseEvent end
@@ -260,6 +261,21 @@ struct EditMeasurementEvent
 end
 struct EditLineMeasurementEvent
     id::Int
+end
+
+# Heat-GDT GPU Vulkan compute events (interactive segmentation)
+struct HeatGDTStartEvent
+    x::Int              # cursor x (window coordinates)
+    y::Int              # cursor y (window coordinates)
+    actualWindowWidth::Int
+    actualWindowHeight::Int
+    window_id::Int
+end
+
+struct HeatGDTTickEvent end  # Lightweight: signals "run more GPU diffusion steps if throttle allows"
+
+struct HeatGDTStopEvent
+    window_id::Int
 end
 
 end # module MakieEvents

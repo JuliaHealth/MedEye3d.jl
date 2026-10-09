@@ -1,0 +1,82 @@
+Opening HDF5 medical dataset: /workspaces/MedEye3d.jl/data/pat_6_files/preprocessed_volumes.h5
+  [IO] Background IO task started
+  [AUTOSAVE-MASK] Registered HDF5 mask persistence: /workspaces/MedEye3d.jl/data/pat_6_files/preprocessed_volumes.h5 (8 studies)
+Creating Makie control panel layout...
+[ANATOMY] Loaded 422 max_anatomy→ontology mappings (495 with normalized keys)
+[APPLY] type=30.0ms anat=86.8ms suv=102.8ms fields=214.3ms TOTAL=272.6ms
+[LESION-NAV] 1: Femur Right [Grp 23, 8 TPs]: apply=346.9ms map=0.0ms sync=0.0ms dict=0.4ms TOTAL=347.3ms
+[APPLY] type=0.0ms anat=0.1ms suv=0.1ms fields=89.5ms TOTAL=89.5ms
+MESA: warning: Driver does not support the 0x7d67 PCI ID.
+MESA: warning: Driver does not support the 0x7d67 PCI ID.
+Launching MedEye3D Vulkan display...
+  [STARTUP] Dispatched background preload for TP 1
+  [AUTOSAVE-MASK] Saved mask for TP 0 to BASELINE/PET_Lesions_0.nii.gz_expert (130652 non-zero voxels)
+  [IO] Preloaded TP 1 in 3.0s
+[PRELOAD] BBox cache built: 328 widgets
+[PRELOAD] Scroll enabled
+[PRELOAD] GUI preload complete in 4542.0ms
+Connecting Makie window to Vulkan channel...
+  [MAKIE] Channel connected — all controls now active
+  [MEAS-INIT] Registered _main_obj_ref, h5_path='/workspaces/MedEye3d.jl/data/pat_6_files/preprocessed_volumes.h5', tp=0
+[RENDERLOOP] Main screen self-registered: 11025240546267058181
+MedEye3D interactive clinical workflow initialized.
+MedEye3D main event loop active. Window: ready
+Channel open? true window should close? false
+  [MEAS-INIT] Deferred load (async, after 2700ms): tp=0
+[STARTUP] E-PSMA reports pre-built
+  [BENCH] reactToScrollMultiPanel!(10 panels, 14 tex): 50.6ms
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+[SYNC-LESION] lid=1 vis=3.9ms bone=62.5ms TOTAL=150.1ms
+[COMPARE] OFF: clearing compare state
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+[SYNC-LESION] lid=1 vis=0.0ms bone=0.1ms TOTAL=0.3ms
+[COMPARE] OFF: done
+[APPLY] type=0.0ms anat=0.1ms suv=0.3ms fields=0.4ms TOTAL=0.4ms
+[LESION-NAV] 1: Femur Right: apply=2.5ms map=0.0ms sync=0.0ms dict=0.0ms TOTAL=2.5ms
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+[SYNC-LESION] lid=1 vis=0.0ms bone=0.1ms TOTAL=0.2ms

@@ -1,0 +1,83 @@
+Opening HDF5 medical dataset: /workspaces/MedEye3d.jl/data/pat_6_files/preprocessed_volumes.h5
+  [IO] Background IO task started
+  [AUTOSAVE-MASK] Registered HDF5 mask persistence: /workspaces/MedEye3d.jl/data/pat_6_files/preprocessed_volumes.h5 (8 studies)
+Creating Makie control panel layout...
+[ANATOMY] Loaded 422 max_anatomy→ontology mappings (495 with normalized keys)
+[DEBUG-PREFILL] existing_loc was empty/NA. Set target_loc='Appendicular Skeleton (Limbs, Pelvis, Scapulae, Clavicles, Hands, Feet)'
+[LESION-NAV] 1: Femur Right [Grp 23, 8 TPs]: apply=234.2ms map=0.0ms sync=0.0ms dict=0.0ms TOTAL=234.3ms
+MESA: warning: Driver does not support the 0x7d67 PCI ID.
+MESA: warning: Driver does not support the 0x7d67 PCI ID.
+[DEBUG-PREFILL] existing_loc was empty/NA. Set target_loc='Appendicular Skeleton (Limbs, Pelvis, Scapulae, Clavicles, Hands, Feet)'
+Launching MedEye3D Vulkan display...
+  [STARTUP] Dispatched background preload for TP 1
+  [IO] Preloaded TP 1 in 3.0s
+[PRELOAD] BBox cache built: 338 widgets
+[PRELOAD] Scroll enabled
+[PRELOAD] GUI preload complete in 3284.0ms
+  [AUTOSAVE-MASK] Saved mask for TP 0 to BASELINE/PET_Lesions_0.nii.gz_expert (130652 non-zero voxels)
+Connecting Makie window to Vulkan channel...
+  [MAKIE] Channel connected — all controls now active
+  [MEAS-INIT] Registered _main_obj_ref, h5_path='/workspaces/MedEye3d.jl/data/pat_6_files/preprocessed_volumes.h5', tp=0
+[RENDERLOOP] Main screen self-registered: 15491932516069399361
+MedEye3D interactive clinical workflow initialized.
+MedEye3D main event loop active. Window: ready
+Channel open? true window should close? false
+  [MEAS-INIT] Deferred load (async, after 2800ms): tp=0
+[STARTUP] E-PSMA reports pre-built
+[RENDERLOOP] Secondary screen started: 6110914124565038547, main=15491932516069399361
+  [BENCH] reactToScrollMultiPanel!(10 panels, 14 tex): 51.8ms
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+[SYNC-LESION] lid=1 vis=4.2ms bone=60.7ms TOTAL=149.6ms
+[COMPARE] OFF: clearing compare state
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+[SYNC-LESION] lid=1 vis=0.0ms bone=0.1ms TOTAL=0.3ms
+[COMPARE] OFF: done
+[DEBUG-PREFILL] existing_loc was empty/NA. Set target_loc='Appendicular Skeleton (Limbs, Pelvis, Scapulae, Clavicles, Hands, Feet)'
+[LESION-NAV] 1: Femur Right: apply=144.9ms map=0.0ms sync=0.0ms dict=12.0ms TOTAL=156.9ms
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+  [BONE] Cache HIT by (tp=0, lid=1)
+  [BONE] Result: 0 surf, 0 marr
+[SYNC-LESION] lid=1 vis=0.0ms bone=0.1ms TOTAL=0.2ms

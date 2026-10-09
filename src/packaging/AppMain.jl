@@ -135,6 +135,31 @@ function run_viewer_loop(mainViewer, makie_win=nothing)
             put!(mainViewer.channel, MedEye3d.ForDisplayStructs.DoubleClickEvent(x=100, y=100, actualWindowWidth=1100, actualWindowHeight=1100, window_id=1))
             for _ in 1:10; GLFW.PollEvents(); sleep(0.01); end
 
+            println(">> [TEST_MODE] Testing Heat-GDT Wand (W key) & mouse seed/diffusion...")
+            # Wait for startup phase to finish loading overlay if still loading
+            for _ in 1:100
+                if !MedEye3d.SegmentationDisplay.MakieEventHandlers.app_is_loading[]
+                    break
+                end
+                GLFW.PollEvents()
+                sleep(0.1)
+            end
+            println(">> [TEST_MODE] app_is_loading = ", MedEye3d.SegmentationDisplay.MakieEventHandlers.app_is_loading[], ", _vk_heat_uploaded = ", MedEye3d.SegmentationDisplay._vk_heat_uploaded[])
+            @assert MedEye3d.SegmentationDisplay._vk_heat_uploaded[] "Heat diffusion not uploaded on startup!"
+
+            # 2. Press W key (Toggle Heat-GDT Wand)
+            put!(mainViewer.channel, MedEye3d.ForDisplayStructs.KeyInputFields(key=GLFW.KEY_W, action=GLFW.PRESS))
+            for _ in 1:10; GLFW.PollEvents(); sleep(0.01); end
+
+            # 3. Simulate mouse click in image (HeatGDTStartEvent)
+            put!(mainViewer.channel, MedEye3d.MakieEvents.HeatGDTStartEvent(256, 256, 1100, 1100, 1))
+            for _ in 1:20; GLFW.PollEvents(); sleep(0.01); end
+
+            # 4. Simulate mouse release (HeatGDTStopEvent)
+            put!(mainViewer.channel, MedEye3d.MakieEvents.HeatGDTStopEvent(1))
+            for _ in 1:10; GLFW.PollEvents(); sleep(0.01); end
+            println(">> [TEST_MODE] Heat-GDT Wand seed and diffusion test completed successfully!")
+
             if makie_win !== nothing
                 println(">> [TEST_MODE] Triggering M2 window launch in default mode '$(makie_win.m2_mode[])'...")
                 notify(makie_win.trigger_m2)
@@ -588,11 +613,32 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
 
     is_preflipped = haskey(h5_init, "_meta_/preflipped") && read(h5_init["_meta_/preflipped"]) == 1
     if haskey(h5_init, "BASELINE/$(base_mask_fname)_expert")
-        raw_first_mask = read(h5_init["BASELINE/$(base_mask_fname)_expert"])
+        try
+            raw_first_mask = read(h5_init["BASELINE/$(base_mask_fname)_expert"])
+        catch e
+            @warn "[AppMain] Corrupted _expert mask, falling back to original" exception=(e, catch_backtrace())
+            raw_first_mask = read(h5_init["BASELINE/$base_mask_fname"])
+        end
     else
         raw_first_mask = read(h5_init["BASELINE/$base_mask_fname"])
     end
     first_mask = is_preflipped ? Float32.(raw_first_mask) : reverse(Float32.(raw_first_mask), dims=2)
+
+    # Auto-load precomputed Heat-GDT diffusivity if available
+    try
+        if haskey(h5_init, "BASELINE/diffusivity")
+            @info "[HeatDiffusion] Loading diffusivity tensor from HDF5 (BASELINE/diffusivity)"
+            diff_vol = Float32.(read(h5_init["BASELINE/diffusivity"]))
+            if !is_preflipped
+                diff_vol = reverse(diff_vol, dims=2)
+            end
+            MedEye3d.InferenceClient.precompute_heatgdt_diffusivity(diff_vol; tp_index=0)
+        else
+            @warn "[HeatDiffusion] 'diffusivity' dataset missing in HDF5 group 'BASELINE'. No fallback available."
+        end
+    catch e
+        @warn "Failed to load diffusivity tensor from HDF5: $e"
+    end
 
     ts_atlas_aligned = nothing
     ts_names = Dict{Int,String}()
@@ -848,7 +894,12 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             ct_vol = Float32.(read(h5_file["$group/$ct_fname"]))
             pet_vol = Float32.(read(h5_file["$group/$pet_fname"]))
             if haskey(h5_file, "$group/$(mask_fname)_expert")
-                mask_vol = read(h5_file["$group/$(mask_fname)_expert"])
+                try
+                    mask_vol = read(h5_file["$group/$(mask_fname)_expert"])
+                catch e
+                    @warn "[AppMain] Corrupted _expert mask for $group, falling back to original" exception=(e, catch_backtrace())
+                    mask_vol = read(h5_file["$group/$mask_fname"])
+                end
             else
                 mask_vol = read(h5_file["$group/$mask_fname"])
             end
@@ -1169,20 +1220,24 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             @warn "[STARTUP] E-PSMA report pre-build failed" exception=(e, catch_backtrace())
         end
         
-        # Phase 2: Wait for GUI preload (bbox cache, scroll, etc.) to complete
-        # Instead of a fixed sleep, we poll the coordinated readiness signal.
+        # Phase 2: Wait for GUI preload (bbox cache, scroll, etc.) AND GPU Heat Diffusion to complete
+        # Polling ensures all engines and HDF5 preloads are fully initialized before loading screen vanishes.
         obs = makie_win !== nothing ? MedEye3d.LesionMetadataWindow._lmw_observables : Dict()
-        gui_ready = false
-        for _i in 1:100  # Wait up to 10 seconds (100 × 100ms)
-            if haskey(obs, :gui_preload_done) && obs[:gui_preload_done][]
-                gui_ready = true
+        all_ready = false
+        for _i in 1:200  # Wait up to 20 seconds (200 × 100ms)
+            gui_done = !haskey(obs, :gui_preload_done) || obs[:gui_preload_done][]
+            heat_done = (!MedEye3d.InferenceClient.is_heatgdt_available() || MedEye3d.SegmentationDisplay._vk_heat_uploaded[])
+            if gui_done && heat_done
+                all_ready = true
                 break
             end
             try; GLFW.PollEvents(); catch; end
             sleep(0.1)
         end
-        if !gui_ready
-            @warn "[STARTUP] GUI preload did not complete within 10s, proceeding anyway"
+        if !all_ready
+            gui_ok = !haskey(obs, :gui_preload_done) || obs[:gui_preload_done][]
+            heat_ok = MedEye3d.SegmentationDisplay._vk_heat_uploaded[]
+            @warn "[STARTUP] Preload did not fully complete within 20s (gui=$gui_ok, heat_uploaded=$heat_ok), proceeding anyway"
         end
         
         # Phase 3: Small settle time for rendering/shaders
@@ -1210,7 +1265,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             MEH.app_is_loading[] = false
             put!(mainViewer.channel, MedEye3d.MakieEvents.RenderRequestEvent())
             t_ms = (time_ns() - t_startup) / 1e6
-            println("[STARTUP] App ready in $(round(t_ms, digits=0))ms (gui_ready=$gui_ready)"); flush(stdout)
+            println("[STARTUP] App ready in $(round(t_ms, digits=0))ms (all_ready=$all_ready, heat_uploaded=$(MedEye3d.SegmentationDisplay._vk_heat_uploaded[]))"); flush(stdout)
         catch e
             @warn "Failed to hide loading screen: $e"
         finally
