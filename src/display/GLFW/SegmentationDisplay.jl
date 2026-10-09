@@ -3,11 +3,11 @@ Main module controlling displaying segmentations image and data
 
 """
 module SegmentationDisplay
-export loadRegisteredImages, displayImage, coordinateDisplay, passDataForScrolling, close_window, set_window_title, resize_window, GLOBAL_OPENGL_LOCK, synchronized_makie_renderloop, _report_hide_flag, _report_screen_ref, _first_screen_ref
+export loadRegisteredImages, displayImage, coordinateDisplay, passDataForScrolling, close_window, set_window_title, resize_window, GLOBAL_OPENGL_LOCK, synchronized_makie_renderloop, _report_hide_flag, _report_screen_ref, _first_screen_ref, ensure_heatgdt_gpu!
 using Dates
 using ColorTypes, MedImages, GLFW, Dictionaries, Logging, Setfield, FreeTypeAbstraction, Statistics, Observables, FileIO
 using ..ForDisplayStructs, ..distinctColorsSaved
-using ..VulkanBackend: VulkanContext, VulkanPipeline, VulkanRender, VulkanTextures, VulkanScreenshot, VulkanShaders, VulkanBuffers, VulkanStaging
+using ..VulkanBackend: VulkanContext, VulkanPipeline, VulkanRender, VulkanTextures, VulkanScreenshot, VulkanShaders, VulkanBuffers, VulkanStaging, VulkanHeatDiffusion
 using Vulkan
 using ..ReactingToInput, ..ReactToScroll, ..DataStructs, ..StructsManag, ..Measurements
 using ..ReactOnKeyboard, ..ReactOnMouseClickAndDrag, ..DisplayDataManag
@@ -26,6 +26,73 @@ const _first_screen_ref = Ref{Any}(nothing)  # First renderloop = main window (s
 const _m2_glfw_ref = Ref{Any}(nothing)
 const _m2_vk_ref = Ref{Any}(nothing)
 const _current_m2_mode = Ref("Pure PET (Current TP)")
+const _vk_heat_uploaded = Ref(false)  # GPU heat diffusion init flag (module-level so MakieEventHandlers can read it)
+
+"""
+    ensure_heatgdt_gpu!(vk_ctx; force_reload=false)::Bool
+
+Ensure the GPU Heat-GDT pipeline is initialized and diffusivity tensor uploaded.
+Dimensions are taken directly from `InferenceClient._heatgdt_diffusivity[]`.
+Returns true if GPU is ready for diffusion, false otherwise.
+"""
+function ensure_heatgdt_gpu!(vk_ctx; force_reload=false)::Bool
+    if vk_ctx === nothing
+        return false
+    end
+    
+    diff_vol = InferenceClient._heatgdt_diffusivity[]
+    if diff_vol === nothing
+        return false
+    end
+    
+    w, h, d = size(diff_vol)
+    if w <= 2 || h <= 2 || d <= 2
+        return false
+    end
+    
+    heat_state = MakieEventHandlers._vk_heat_state[]
+    
+    # If dimensions changed or re-upload requested, destroy old pipeline
+    if heat_state !== nothing && heat_state.is_initialized
+        if (heat_state.width, heat_state.height, heat_state.depth) != (w, h, d)
+            println("[HeatDiffusion] Dimensions changed ($(heat_state.width)×$(heat_state.height)×$(heat_state.depth) → $(w)×$(h)×$(d)), recreating pipeline..."); flush(stdout)
+            try
+                VulkanHeatDiffusion.destroy_heat_diffusion!(heat_state, vk_ctx)
+            catch e
+                @warn "[HeatDiffusion] Error destroying old pipeline: $e"
+            end
+            heat_state = nothing
+            MakieEventHandlers._vk_heat_state[] = nothing
+            _vk_heat_uploaded[] = false
+        elseif heat_state.diffusivity_uploaded && !force_reload
+            _vk_heat_uploaded[] = true
+            return true
+        end
+    end
+    
+    try
+        if heat_state === nothing
+            println("[HeatDiffusion INIT] Creating GPU pipeline ($(w)×$(h)×$(d))..."); flush(stdout)
+            heat_state = VulkanHeatDiffusion.HeatDiffusionState()
+            VulkanHeatDiffusion.init_heat_diffusion!(heat_state, vk_ctx, w, h, d)
+            MakieEventHandlers._vk_heat_state[] = heat_state
+            MakieEventHandlers._vk_heat_ctx[] = vk_ctx
+            println("[HeatDiffusion INIT] Pipeline created OK"); flush(stdout)
+        end
+        
+        println("[HeatDiffusion INIT] Uploading diffusivity ($(size(diff_vol)))..."); flush(stdout)
+        VulkanHeatDiffusion.upload_diffusivity!(heat_state, vk_ctx, diff_vol)
+        _vk_heat_uploaded[] = true
+        println("[HeatDiffusion INIT] ✅ GPU fully ready — _vk_heat_uploaded=true"); flush(stdout)
+        return true
+    catch e
+        @warn "[HeatDiffusion] GPU init failed: $e" exception=(e, catch_backtrace())
+        println("[HeatDiffusion INIT] ❌ FAILED: $e"); flush(stdout)
+        _vk_heat_uploaded[] = false
+        return false
+    end
+end
+
 function synchronized_makie_renderloop(screen)
     # Find GLMakie from loaded modules — it may not be in Main scope
     # (e.g., when imported inside a submodule like LesionMetadataWindow)
@@ -465,6 +532,9 @@ on_next!(stateObjects::Vector{StateDataFields}, data::AddAutoPetEvent) = reactTo
 on_next!(stateObjects::Vector{StateDataFields}, data::HeatGDTHoldEvent) = reactToHeatGDTHold(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ToggleHeatGDTModeEvent) = reactToToggleHeatGDTMode(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::OneShotHeatGDTEvent) = reactToOneShotHeatGDT(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.HeatGDTStartEvent) = reactToHeatGDTStart(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.HeatGDTTickEvent) = reactToHeatGDTTick(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.HeatGDTStopEvent) = reactToHeatGDTStop(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::AIInferenceResultEvent) = reactToAIInferenceResult(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SyncMissingEvent) = reactToSyncMissing(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::GenManualEvent) = reactToGenManual(data, stateObjects)
@@ -843,6 +913,8 @@ function coordinateDisplay(
     win_w, win_h = GLFW.GetWindowSize(window)
     vk_ctx = VulkanContext.init_vulkan_context(window, Int(fb_w), Int(fb_h))
     vk_ctx.staging_pool = VulkanStaging.create_staging_pool(vk_ctx, 64)
+    MakieEventHandlers._vk_heat_ctx[] = vk_ctx
+    ensure_heatgdt_gpu!(vk_ctx)
     
     # Update CalcDimsStruct to use actual WINDOW size (may differ from requested due to WM/DPI)
     if Int(win_w) != calcDimStructs[1].windowWidth || Int(win_h) != calcDimStructs[1].windowHeight
@@ -1153,6 +1225,13 @@ function coordinateDisplay(
                                 obj.vulkanPipelineState = nothing
                             end
                         end
+                        # Destroy GPU heat diffusion resources BEFORE vk_ctx
+                        heat_s = MakieEventHandlers._vk_heat_state[]
+                        if heat_s !== nothing
+                            try VulkanHeatDiffusion.destroy_heat_diffusion!(heat_s, vk_ctx) catch; end
+                            MakieEventHandlers._vk_heat_state[] = nothing
+                            MakieEventHandlers._vk_heat_ctx[] = nothing
+                        end
                         vk_ctx = stateInstances[1].mainForDisplayObjects.vulkanCtx
                         if vk_ctx !== nothing
                             if vk_ctx.staging_pool !== nothing
@@ -1253,7 +1332,7 @@ function coordinateDisplay(
                     stateInstances[1].switchIndex = channelData.imagePos
                 end
 
-                if !(channelData isa MouseStruct) && !(channelData isa Vector{MouseStruct}) && !(channelData isa Int64)
+                if !(channelData isa MouseStruct) && !(channelData isa Vector{MouseStruct}) && !(channelData isa Int64) && !(channelData isa MakieEvents.HeatGDTTickEvent)
                     @debug "[CONSUMER] dispatch" event_type=string(typeof(channelData))
                 end
                 # Breadcrumb: log dangerous events (CompareTimePoints, SetTimePoint) before dispatch
@@ -1270,7 +1349,7 @@ function coordinateDisplay(
                 # Universal interaction timing: log any event taking >5ms (skip raw mouse moves to avoid spam)
                 if MakieEventHandlers.PERF_LOG[]
                     _dispatch_ms = (_t_after_dispatch - _t_dispatch) / 1e6
-                    if _dispatch_ms > 5.0 && !(channelData isa MouseStruct)
+                    if _dispatch_ms > 5.0 && !(channelData isa MouseStruct) && !(channelData isa MakieEvents.HeatGDTTickEvent)
                         _evt_name = string(typeof(channelData))
                         _dot = findlast('.', _evt_name)
                         if _dot !== nothing; _evt_name = _evt_name[_dot+1:end]; end
@@ -1281,7 +1360,7 @@ function coordinateDisplay(
                 # Mark UBO dirty for events that may change uniform parameters
                 # (visibility toggles, ctrl+scroll windowing, mask contribution, etc.)
                 # Skip for mouse-only and scroll-only events (they don't change UBO)
-                if !(channelData isa MouseStruct) && !(channelData isa Vector{MouseStruct}) && !(channelData isa Int64)
+                if !(channelData isa MouseStruct) && !(channelData isa Vector{MouseStruct}) && !(channelData isa Int64) && !(channelData isa MakieEvents.HeatGDTTickEvent)
                     for s in stateInstances
                         obj = s.mainForDisplayObjects
                         if obj.vulkanPipelineState !== nothing
@@ -1298,6 +1377,11 @@ function coordinateDisplay(
                             s.isSliceChanged = true
                         end
                         first_frame[] = false
+                    end
+                    
+                    # GPU Heat-GDT initialization fallback: if not uploaded yet, try ensuring it
+                    if !_vk_heat_uploaded[] && vk_ctx !== nothing && InferenceClient._heatgdt_diffusivity[] !== nothing
+                        ensure_heatgdt_gpu!(vk_ctx)
                     end
                     
                     # 1. Collect all dirty textures across ALL panels into ONE batch
@@ -1587,9 +1671,20 @@ function coordinateDisplay(
             m2_glfw[] = nothing
             m2_vk[] = nothing
         end
-        try
-            VulkanContext.destroy_vulkan_context!(vk_ctx)
-        catch; end
+        # Clean up GPU heat diffusion resources (may already be cleaned up by CloseWindowEvent)
+        heat_s = MakieEventHandlers._vk_heat_state[]
+        if heat_s !== nothing && vk_ctx !== nothing
+            try
+                VulkanHeatDiffusion.destroy_heat_diffusion!(heat_s, vk_ctx)
+            catch; end
+            MakieEventHandlers._vk_heat_state[] = nothing
+            MakieEventHandlers._vk_heat_ctx[] = nothing
+        end
+        if vk_ctx !== nothing
+            try
+                VulkanContext.destroy_vulkan_context!(vk_ctx)
+            catch; end
+        end
     end #end of consumer
 
     # Release context from the main thread so the background consumer task can claim it (or just release it)

@@ -1,0 +1,18 @@
+--- src/display/GLFW/MakieEventHandlers.jl
++++ src/display/GLFW/MakieEventHandlers.jl
+@@ -4075,6 +4075,15 @@
+         _vk_heat_active[] = false
+         set_ai_status!("[Heat-GDT GPU] Seed failed: $(sprint(showerror, e))")
+         @warn "[Heat-GDT GPU] seed_only! failed" exception=(e, catch_backtrace())
++        return
++    end
++    
++    # Start an async loop to continuously grow the lesion while button is held
++    @async begin
++        while _vk_heat_active[]
++            sleep(0.05) # 20 Hz
++            put!(parentmodule(@__MODULE__).SegmentationDisplay.mainChannel, MakieEvents.HeatGDTTickEvent())
++        end
+     end
+ end
+ 

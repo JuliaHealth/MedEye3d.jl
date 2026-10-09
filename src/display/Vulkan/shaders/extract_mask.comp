@@ -12,13 +12,22 @@ layout(push_constant) uniform PushConstants {
     float theta;       // Threshold (0.001 default, controlled by slider)
     float tau;         // Temperature for soft sigmoid (0.0001 for near-binary)
     int   hard_thresh; // 1 = binary step function, 0 = differentiable sigmoid
-    int   label_id;    // Integer label ID to write (for multi-label support)
+    int   use_box;     // 0 = full volume, 1 = use box_min and box_max
+    ivec4 box_min;     // xyz = min bounding box voxel
+    ivec4 box_max;     // xyz = max bounding box voxel
 } pc;
 
 void main() {
-    ivec3 pos = ivec3(gl_GlobalInvocationID.xyz);
     ivec3 dims = imageSize(img_u);
+    ivec3 pos;
+    if (pc.use_box == 1) {
+        pos = pc.box_min.xyz + ivec3(gl_GlobalInvocationID.xyz);
+        if (any(greaterThan(pos, pc.box_max.xyz))) return;
+    } else {
+        pos = ivec3(gl_GlobalInvocationID.xyz);
+    }
     if (any(greaterThanEqual(pos, dims))) return;
+    if (any(lessThan(pos, ivec3(0)))) return;
 
     float u = imageLoad(img_u, pos).r;
     float m;

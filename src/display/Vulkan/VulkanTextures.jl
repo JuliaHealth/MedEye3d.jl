@@ -101,7 +101,7 @@ function create_vulkan_texture(ctx::VkCtx, width::Int, height::Int,
         1, 1,  # mip levels, array layers
         SAMPLE_COUNT_1_BIT,
         IMAGE_TILING_OPTIMAL,
-        IMAGE_USAGE_TRANSFER_DST_BIT | IMAGE_USAGE_SAMPLED_BIT,
+        IMAGE_USAGE_TRANSFER_DST_BIT | IMAGE_USAGE_SAMPLED_BIT | IMAGE_USAGE_STORAGE_BIT,
         SHARING_MODE_EXCLUSIVE,
         UInt32[],
         IMAGE_LAYOUT_UNDEFINED

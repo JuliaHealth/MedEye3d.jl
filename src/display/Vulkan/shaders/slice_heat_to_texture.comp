@@ -1,0 +1,32 @@
+#version 450
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, r32f) uniform readonly image3D img_heat;
+layout(set = 0, binding = 1, r8ui) uniform writeonly uimage2D img_tex;
+
+layout(push_constant) uniform PushConstants {
+    float theta;
+    int slice_dim; // 1=X (sagittal), 2=Y (coronal), 3=Z (axial)
+    int slice_idx; // 0-indexed slice coordinate in that dimension
+    uint active_id; // the label to write if threshold passed
+} pc;
+
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 tex_size = imageSize(img_tex);
+    if (any(greaterThanEqual(pos, tex_size))) return;
+
+    ivec3 vol_pos;
+    if (pc.slice_dim == 1) {
+        vol_pos = ivec3(pc.slice_idx, pos.x, pos.y);
+    } else if (pc.slice_dim == 2) {
+        vol_pos = ivec3(pos.x, pc.slice_idx, pos.y);
+    } else {
+        vol_pos = ivec3(pos.x, pos.y, pc.slice_idx);
+    }
+
+    float heat = imageLoad(img_heat, vol_pos).r;
+    if (heat >= pc.theta) {
+        imageStore(img_tex, pos, uvec4(pc.active_id, 0, 0, 0));
+    }
+}

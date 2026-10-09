@@ -14,7 +14,7 @@ module ReactOnMouseClickAndDrag
 using Logging, Parameters, Setfield, GLFW, Dates, Parameters, Logging, Base.Threads
 using ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils
 using ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForLine, ..ReactToScroll, ..DisplayWords, ..StrokeRasterization
-using ..MakieEvents: HeatGDTHoldEvent
+using ..MakieEvents: HeatGDTHoldEvent, HeatGDTStartEvent, HeatGDTTickEvent, HeatGDTStopEvent
 import Logging, Base.Threads
 export registerMouseClickFunctions
 export reactToMouseDrag
@@ -104,6 +104,13 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
                 actualWindowHeight = aH,
                 window_id = window_id
             ))
+            
+            # Heat-GDT GPU: inject tick events while left button held — handler debounces internally
+            if mouseStructInstance.isLeftButtonDown && _heatgdt_mode_active[]
+                if !isready(mainChannel) || length(mainChannel.data) < 950
+                    put!(mainChannel, HeatGDTTickEvent())
+                end
+            end
         end
     end)# and  for example : cursor: 29.0, 469.0  types   Float64  Float64
     GLFW.SetMouseButtonCallback(window, (a, button, action, mods) -> begin
@@ -141,23 +148,22 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
             lastLeftClickTimestamp[] = now
         end
 
-        # Heat-GDT hold tracking: record press start time
-        if leftMouseButtonDownResult
+        # Heat-GDT hold tracking: fire GPU start event on press
+        if leftMouseButtonDownResult && _heatgdt_mode_active[]
             _heatgdt_press_start[] = time()
-        end
-        
-        # Heat-GDT hold release: compute duration and fire event
-        if button == GLFW.MOUSE_BUTTON_1 && action == GLFW.RELEASE && _heatgdt_mode_active[]
-            hold_duration = max(0.01, time() - _heatgdt_press_start[])
             coords = mouseStructInstance.lastCoordinates
-            put!(mainChannel, HeatGDTHoldEvent(
+            put!(mainChannel, HeatGDTStartEvent(
                 isempty(coords) ? 0 : coords[1][1],
                 isempty(coords) ? 0 : coords[1][2],
-                hold_duration,
                 mouseStructInstance.actualWindowWidth,
                 mouseStructInstance.actualWindowHeight,
                 window_id
             ))
+        end
+        
+        # Heat-GDT hold release: fire GPU stop event to commit final mask
+        if button == GLFW.MOUSE_BUTTON_1 && action == GLFW.RELEASE && _heatgdt_mode_active[]
+            put!(mainChannel, HeatGDTStopEvent(window_id))
         end
 
         # Snapshot regular mouse event (for right-click and position tracking)
@@ -311,6 +317,11 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     if !stateObject.valueForMasToSet.is_painting_active || isempty(stateObject.textureToModifyVec)
         return
     end
+    
+    if _heatgdt_mode_active[]
+        return # Skip manual 2D paintbrush when Heat-GDT is active
+    end
+    
     _t_paint = time_ns()
     texture = stateObject.textureToModifyVec[1]
     calcDim = stateObject.calcDimsStruct

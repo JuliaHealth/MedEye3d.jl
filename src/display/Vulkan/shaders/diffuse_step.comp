@@ -11,13 +11,25 @@ layout(set = 0, binding = 1, r32f) uniform readonly image3D img_u_in;  // Curren
 layout(set = 0, binding = 2, r32f) uniform writeonly image3D img_u_out; // Next heat field
 
 layout(push_constant) uniform PushConstants {
-    float dt;  // Time step size (0.16)
+    float dt;         // Time step size (0.16)
+    int   use_box;    // 0 = full volume, 1 = use box_min and box_max
+    int   pad0;       // alignment padding
+    int   pad1;       // alignment padding
+    ivec4 box_min;    // xyz = min bounding box voxel
+    ivec4 box_max;    // xyz = max bounding box voxel
 } pc;
 
 void main() {
-    ivec3 pos = ivec3(gl_GlobalInvocationID.xyz);
     ivec3 dims = imageSize(img_u_in);
+    ivec3 pos;
+    if (pc.use_box == 1) {
+        pos = pc.box_min.xyz + ivec3(gl_GlobalInvocationID.xyz);
+        if (any(greaterThan(pos, pc.box_max.xyz))) return;
+    } else {
+        pos = ivec3(gl_GlobalInvocationID.xyz);
+    }
     if (any(greaterThanEqual(pos, dims))) return;
+    if (any(lessThan(pos, ivec3(0)))) return;
 
     ivec3 maxCoord = dims - ivec3(1);
 
@@ -49,13 +61,15 @@ void main() {
     float D_zp = 0.5 * (D_c + imageLoad(img_D, p_zp).r);
     float D_zm = 0.5 * (D_c + imageLoad(img_D, p_zm).r);
 
-    // Net flux divergence
-    float flux = D_xp * (u_xp - u_c)
-               + D_xm * (u_xm - u_c)
-               + D_yp * (u_yp - u_c)
-               + D_ym * (u_ym - u_c)
-               + D_zp * (u_zp - u_c)
-               + D_zm * (u_zm - u_c);
+    // Net flux divergence (optimized to reduce ALU instructions)
+    float sum_D = D_xp + D_xm + D_yp + D_ym + D_zp + D_zm;
+    float flux = D_xp * u_xp
+               + D_xm * u_xm
+               + D_yp * u_yp
+               + D_ym * u_ym
+               + D_zp * u_zp
+               + D_zm * u_zm
+               - u_c * sum_D;
 
     // Explicit Euler update
     float u_next = u_c + pc.dt * flux;
