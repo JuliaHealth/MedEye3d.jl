@@ -695,9 +695,11 @@ function run_heat_diffusion!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y
         cmd_bind_descriptor_sets(cmd, PIPELINE_BIND_POINT_COMPUTE, state.layout_extract_mask, 0, [state.ds_extract_from_ping], [])
     end
     
-    extract_data = ExtractMaskPC[ExtractMaskPC(Float32(theta), Float32(tau), Int32(1), Int32(1))]
-    GC.@preserve extract_data begin
-        cmd_push_constants(cmd, state.layout_extract_mask, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(extract_data), Ptr{Cvoid}(pointer(extract_data)))
+    # use_box=0 since run_full_diffusion! does the whole volume, but we must pass all 12 arguments to the struct constructor
+    pc_extract = ExtractMaskPC(Float32(theta), Float32(tau), Int32(1), Int32(0), Int32(0), Int32(0), Int32(0), Int32(0), Int32(0), Int32(0), Int32(0), Int32(0))
+    ref_extract = Ref(pc_extract)
+    GC.@preserve ref_extract begin
+        cmd_push_constants(cmd, state.layout_extract_mask, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc_extract), Base.unsafe_convert(Ptr{Cvoid}, ref_extract))
     end
     cmd_dispatch(cmd, gx, gy, gz)
     
@@ -987,8 +989,9 @@ function run_incremental_steps!(state::HeatDiffusionState, ctx, n_steps::Int;
         else
             cmd_bind_descriptor_sets(cmd, PIPELINE_BIND_POINT_COMPUTE, state.layout_diffuse_step, 0, [state.ds_diffuse_pong_to_ping], [])
         end
-        GC.@preserve pc_diffuse begin
-            cmd_push_constants(cmd, state.layout_diffuse_step, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc_diffuse), Ptr{Cvoid}(pointer_from_objref(Ref(pc_diffuse))))
+        ref_diffuse = Ref(pc_diffuse)
+        GC.@preserve ref_diffuse begin
+            cmd_push_constants(cmd, state.layout_diffuse_step, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc_diffuse), Base.unsafe_convert(Ptr{Cvoid}, ref_diffuse))
         end
         cmd_dispatch(cmd, gx, gy, gz)
         cmd_pipeline_barrier(cmd, [barrier_compute], BufferMemoryBarrier[], ImageMemoryBarrier[];
@@ -1007,8 +1010,9 @@ function run_incremental_steps!(state::HeatDiffusionState, ctx, n_steps::Int;
         box_min_glsl[1], box_min_glsl[2], box_min_glsl[3], Int32(0),
         box_max_glsl[1], box_max_glsl[2], box_max_glsl[3], Int32(0)
     )
-    GC.@preserve pc_extract begin
-        cmd_push_constants(cmd, state.layout_extract_mask, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc_extract), Ptr{Cvoid}(pointer_from_objref(Ref(pc_extract))))
+    ref_extract = Ref(pc_extract)
+    GC.@preserve ref_extract begin
+        cmd_push_constants(cmd, state.layout_extract_mask, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc_extract), Base.unsafe_convert(Ptr{Cvoid}, ref_extract))
     end
     cmd_dispatch(cmd, gx, gy, gz)
     

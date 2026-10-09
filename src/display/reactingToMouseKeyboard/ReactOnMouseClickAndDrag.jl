@@ -61,6 +61,7 @@ const lastLeftClickTimestamp = Ref{Float64}(0.0)
 # Heat-GDT mouse hold tracking
 const _heatgdt_press_start = Ref{Float64}(0.0)
 const _heatgdt_mode_active = Ref{Bool}(false)
+const is_left_button_down = Ref{Bool}(false)
 
 function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct, mainChannel::Base.Channel{Any}, window_id::Int=1)
     xmin = Int32(calcD.windowWidthCorr)
@@ -124,6 +125,7 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
         # Only update the flag for the button that actually changed
         if button == GLFW.MOUSE_BUTTON_1
             mouseStructInstance.isLeftButtonDown = (action == GLFW.PRESS)
+            is_left_button_down[] = (action == GLFW.PRESS)
         elseif button == GLFW.MOUSE_BUTTON_2
             mouseStructInstance.isRightButtonDown = (action == GLFW.PRESS)
         end

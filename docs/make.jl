@@ -21,7 +21,9 @@ makedocs(;
             "QuadView & 3D Navigation" => "manual/quad_view_and_navigation.md",
             "Bone Subsegmentation & MRB" => "manual/bone_subsegmentation_and_mrb.md",
             "GUI Controls & Windowing" => "manual/gui_controls_and_windowing.md",
-            "Lesion Metadata & Tracking" => "manual/lesion_metadata_and_tracking.md"
+            "Lesion Metadata & Tracking" => "manual/lesion_metadata_and_tracking.md",
+            "Market Comparison" => "market_comparison_interactive_3d_segmentation.md",
+            "Heat-GDT GPU Pipeline" => "manual/heat_gdt_gpu_pipeline.md"
         ],
         "Developers' documentation" => [
             "Visualization Playbook" => "devs/playbook.md"

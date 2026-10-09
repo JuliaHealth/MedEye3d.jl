@@ -2404,7 +2404,7 @@ function create_metadata_window(
     obs_set_compare_mode = Observable(false)
     ui_queue = Function[]
     ui_lock = ReentrantLock()
-    _safe_ui_update(f::Function) = lock(ui_lock) do; push!(ui_queue, f); end
+    _safe_ui_update(f::Function) = f()
     # Wrap channel in Ref for deferred connection (parallel startup)
     channel_ref = Ref{Union{Base.Channel, Nothing}}(channel_arg)
     # Proxy that queues events when channel is not yet connected
@@ -5097,6 +5097,7 @@ function create_metadata_window(
     current_paint_mode = Observable(:view)
     
     on(btn_new_lesion.clicks) do _
+        println("[LMW] btn_new_lesion clicked! Computing new_id..."); flush(stdout)
         # Flush any pending autosaves for the PREVIOUS lesion before switching
         if _is_autosaving[] == false && active_lesion_id[] != ""
             try trigger_autosave(skip_dictation=true) catch; end
@@ -5124,7 +5125,7 @@ function create_metadata_window(
         # Also check actual mask for highest real segment ID
         try
             entry = lock(_MEH._tp_cache_lock) do
-                get(_MEH.tp_data_cache, _MEH.current_tp[], nothing)
+                get(_MEH.tp_data_cache, _MEH.current_tp_index[], nothing)
             end
             if entry !== nothing && entry.mask_i16 !== nothing
                 mask_max = Int(maximum(entry.mask_i16))
@@ -5232,6 +5233,7 @@ function create_metadata_window(
         else
             put!(channel, ShowSingleLesionEvent(0))
         end
+        _MEH.current_active_lesion_id[] = new_id
         put!(channel, PaintValEvent(new_id, true))
         println("[NEW LESION] Created lesion $new_id, paint mode active, val=$new_id (single_mode=$(_MEH.is_single_lesion_mode[]))")
         flush(stdout)
@@ -5248,6 +5250,7 @@ function create_metadata_window(
         else
             put!(channel, ShowSingleLesionEvent(0))
         end
+        _MEH.current_active_lesion_id[] = val
         put!(channel, PaintValEvent(val, true))
         _MEH.set_workflow_state!(_MEH.ScientificWorkflow.WF_EDIT_MASK)
     end

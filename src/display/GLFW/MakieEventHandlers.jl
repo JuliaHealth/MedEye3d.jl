@@ -183,9 +183,21 @@ const _vk_heat_state = Ref{Any}(nothing)            # VulkanHeatDiffusion.HeatDi
 const _vk_heat_ctx = Ref{Any}(nothing)               # VulkanContext (cached from consumer thread)
 const _vk_heat_active = Ref{Bool}(false)              # True while left-click is held AND GPU heat-GDT mode is active
 const _vk_heat_total_steps = Ref{Int}(0)              # Accumulated diffusion steps during current hold
+const _vk_heat_display_steps = Ref{Int}(0)            # Visual catch-up steps displayed to UI
 const _vk_heat_seed = Ref{Tuple{Int,Int,Int}}((0,0,0))  # 3D seed voxel for current interaction
 const _vk_heat_last_dispatch = Ref{Float64}(0.0)      # Timestamp of last GPU dispatch (for debouncing)
+const _vk_heat_start_time = Ref{Float64}(0.0)         # Wall-clock timestamp of Heat-GDT start (for display theta ramp)
 const HEAT_TICK_MIN_INTERVAL_S = 0.05                  # 50ms minimum interval between GPU dispatches (~20 Hz)
+# Display theta ramp: theta_display = max(real_theta, RAMP_START * exp(-RAMP_RATE * elapsed_seconds))
+# This makes the lesion appear to grow smoothly from a small dot to the full segmentation
+const HEAT_DISPLAY_RAMP_START = 0.05f0                  # Start display threshold (only show very hot center)
+const HEAT_DISPLAY_RAMP_RATE  = 3.0f0                  # Exponential decay rate (larger = faster catch-up)
+# ── Final Commit Threshold ──
+# When the user releases the mouse, the GPU heat tensor is thresholded at this value
+# to produce discrete integer labels in seg_vol.  Refreshed at each mouse-release
+# and each W-toggle-off so downstream code always sees the latest threshold.
+const HEAT_GDT_COMMIT_THETA = Ref{Float32}(0.001f0)    # Threshold for GPU→CPU discrete mask conversion
+const HEAT_GDT_LAST_DISPLAY_THETA = Ref{Float32}(0.5f0) # Display theta at the moment of last mouse-release
 
 """
     reload_heatgdt_diffusivity_for_tp!(new_tp::Int)
@@ -1705,24 +1717,7 @@ end
 On MRI, mask is always clamped to [1,3] — anatomy toggle controls the separate Anatomy texture.
 Safe to call on any modality — no-ops on non-MRI TPs."""
 function _mri_clamp_mask_range!(stateObjects::Vector{StateDataFields})
-
-    # Check each panel individually based on its actual TP
-    for (i, stateObject) in enumerate(stateObjects)
-        tp = (i == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
-        panel_mod = uppercase(get(tp_modalities, tp, "PET"))
-        if !(panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI"))
-            continue
-        end
-        for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-            if textSpec.name == "Mask" || textSpec.name == "segmentation" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy" && textSpec.name != "Bone_Overlay")
-                T_mm = eltype(textSpec.minAndMaxValue)
-                cur_max = textSpec.minAndMaxValue[2]
-                if cur_max > T_mm(3)
-                    textSpec.minAndMaxValue = T_mm.([textSpec.minAndMaxValue[1], 3])
-                end
-            end
-        end
-    end
+    # No-op: clamping max to 3 hides lesions > 3 on MRI.
 end
 
 """Update quad layout: hide Panel 2 (PET-only) when modality is MRI."""
@@ -2010,6 +2005,93 @@ export _main_obj_ref, _state_instances_ref
 
 function register_main_channel!(ch::Channel)
     main_event_channel[] = ch
+    # ── File-based event injection for automated testing ──
+    # Write commands to /tmp/test_inject.txt to inject events:
+    #   W              → toggle HeatGDT wand mode
+    #   CLICK x y z    → simulate HeatGDTStartEvent at voxel (x,y,z)
+    #   STOP           → simulate HeatGDTStopEvent
+    #   HOLD_MS N      → CLICK + sleep N ms + STOP
+    @async begin
+        inject_path = "/tmp/test_inject.txt"
+        while true
+            sleep(0.2)
+            if isfile(inject_path)
+                try
+                    cmd = strip(read(inject_path, String))
+                    rm(inject_path; force=true)
+                    if !isempty(cmd)
+                        println("[TEST-INJECT] Processing: '$cmd'"); flush(stdout)
+                        _ch = main_event_channel[]
+                        if _ch === nothing || !isopen(_ch)
+                            println("[TEST-INJECT] Channel not ready"); flush(stdout)
+                            continue
+                        end
+                        if cmd == "W"
+                            put!(_ch, MakieEvents.OneShotHeatGDTEvent())
+                            println("[TEST-INJECT] Sent OneShotHeatGDTEvent"); flush(stdout)
+                        elseif startswith(cmd, "CLICK")
+                            parts = split(cmd)
+                            if length(parts) >= 4
+                                x, y, z = parse(Int, parts[2]), parse(Int, parts[3]), parse(Int, parts[4])
+                                current_viewer_position[] = (x, y, z)
+                                parentmodule(@__MODULE__).ReactOnMouseClickAndDrag.is_left_button_down[] = true
+                                put!(_ch, MakieEvents.HeatGDTStartEvent(0, 0, 1024, 1024, 1))
+                                println("[TEST-INJECT] Sent HeatGDTStartEvent at ($x,$y,$z)"); flush(stdout)
+                            end
+                                                elseif cmd == "M"
+                            put!(_ch, MakieEvents.ToggleSingleMultiLesionEvent())
+                            println("[TEST-INJECT] Sent ToggleSingleMultiLesionEvent"); flush(stdout)
+                        elseif cmd == "STOP"
+                            parentmodule(@__MODULE__).ReactOnMouseClickAndDrag.is_left_button_down[] = false
+                            put!(_ch, MakieEvents.HeatGDTStopEvent(1))
+                            println("[TEST-INJECT] Sent HeatGDTStopEvent"); flush(stdout)
+                        elseif startswith(cmd, "HOLD_MS")
+                            parts = split(cmd)
+                            ms = length(parts) >= 2 ? parse(Int, parts[2]) : 3000
+                            # Compute seed from current viewer position (center of the visible axial slice)
+                            # This ensures the grown region is visible on the currently displayed slice.
+                            vpos = current_viewer_position[]
+                            seed_x = vpos[1] > 0 ? vpos[1] : 256
+                            seed_y = vpos[2] > 0 ? vpos[2] : 256
+                            seed_z = vpos[3] > 0 ? vpos[3] : 180
+                            current_viewer_position[] = (seed_x, seed_y, seed_z)
+                            parentmodule(@__MODULE__).ReactOnMouseClickAndDrag.is_left_button_down[] = true
+                            put!(_ch, MakieEvents.HeatGDTStartEvent(0, 0, 1024, 1024, 1))
+                            println("[TEST-INJECT] HOLD: Started at ($seed_x,$seed_y,$seed_z), will stop in $(ms)ms"); flush(stdout)
+                            @async begin
+                                sleep(ms / 1000.0)
+                                parentmodule(@__MODULE__).ReactOnMouseClickAndDrag.is_left_button_down[] = false
+                                _ch2 = main_event_channel[]
+                                if _ch2 !== nothing && isopen(_ch2)
+                                    put!(_ch2, MakieEvents.HeatGDTStopEvent(1))
+                                    println("[TEST-INJECT] HOLD: Stopped after $(ms)ms"); flush(stdout)
+                                end
+                            end
+                        elseif startswith(cmd, "SCROLL")
+                            # SCROLL N — scroll by N slices (positive = forward, negative = back)
+                            parts = split(cmd)
+                            if length(parts) >= 2
+                                delta = parse(Int, parts[2])
+                                for _ in 1:abs(delta)
+                                    put!(_ch, MakieEvents.ScrollEvent(sign(delta)))
+                                end
+                                println("[TEST-INJECT] Scrolled by $delta slices"); flush(stdout)
+                            end
+                        elseif cmd == "SCREENSHOT"
+                            try
+                                run(`scrot /tmp/test_screenshot.png`)
+                                println("[TEST-INJECT] Screenshot saved to /tmp/test_screenshot.png"); flush(stdout)
+                            catch; end
+                        else
+                            println("[TEST-INJECT] Unknown command: $cmd"); flush(stdout)
+                        end
+                    end
+                catch e
+                    println("[TEST-INJECT] Error: $(sprint(showerror, e))"); flush(stdout)
+                end
+            end
+        end
+    end
 end
 
 # IO channel message types for background TP loading/eviction
@@ -3974,8 +4056,10 @@ function reactToOneShotHeatGDT(data::MakieEvents.OneShotHeatGDTEvent, stateObjec
         is_active = romcad._heatgdt_mode_active[]
         
         if is_active
-            # Toggle OFF
+            # Toggle OFF — refresh commit theta constants
             romcad._heatgdt_mode_active[] = false
+            HEAT_GDT_COMMIT_THETA[] = heatgdt_theta[]           # Refresh to current default
+            HEAT_GDT_LAST_DISPLAY_THETA[] = HEAT_DISPLAY_RAMP_START  # Reset ramp
             set_ai_status!("[Heat-GDT Wand] Disabled.")
         else
             # Toggle ON
@@ -3985,10 +4069,17 @@ function reactToOneShotHeatGDT(data::MakieEvents.OneShotHeatGDTEvent, stateObjec
                 if LMW !== nothing
                     obs_dict = getfield(LMW, :_lmw_observables)
                     if haskey(obs_dict, :obs_new_lesion)
+                        println("[Heat-GDT WAND] Triggering obs_new_lesion"); flush(stdout)
                         obs_dict[:obs_new_lesion][] = obs_dict[:obs_new_lesion][] + 1
+                    else
+                        println("[Heat-GDT WAND] obs_new_lesion NOT FOUND in _lmw_observables"); flush(stdout)
                     end
+                else
+                    println("[Heat-GDT WAND] LMW is nothing"); flush(stdout)
                 end
-            catch; end
+            catch e
+                println("[Heat-GDT WAND] Error triggering obs_new_lesion: $e"); flush(stdout)
+            end
             
             # 2. Enter Edit/Paint mode
             reactToEditMode(MakieEvents.EditModeEvent(), stateObjects)
@@ -4112,8 +4203,33 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
     
     _vk_heat_seed[] = (cx, cy, cz)
     _vk_heat_total_steps[] = 0
+    _vk_heat_display_steps[] = 0
     _vk_heat_active[] = true
+
+    # Update UBO minAndMaxValue to include the active ID so the shader does not filter it out
+    active_id = UInt32(current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1)
+    for state in stateObjects
+        obj = state.mainForDisplayObjects
+        if obj !== nothing && obj.listOfTextSpecifications !== nothing
+            for ts in obj.listOfTextSpecifications
+                if ts.name == "Mask" || ts.name == "segmentation"
+                    if !isempty(ts.minAndMaxValue)
+                        if ts.minAndMaxValue[1] > active_id || ts.minAndMaxValue[2] < active_id
+                            ts.minAndMaxValue[1] = min(ts.minAndMaxValue[1], Float32(active_id))
+                            ts.minAndMaxValue[2] = max(ts.minAndMaxValue[2], Float32(active_id))
+                            if obj.vulkanPipelineState !== nothing
+                                obj.vulkanPipelineState.ubo_dirty = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
     _vk_heat_last_dispatch[] = time()
+    _vk_heat_start_time[] = time()    # Record start for display theta ramp
+    HEAT_GDT_COMMIT_THETA[] = heatgdt_theta[]           # Refresh commit threshold from current config
+    HEAT_GDT_LAST_DISPLAY_THETA[] = HEAT_DISPLAY_RAMP_START  # Reset display theta to ramp start
     
     # Seed the GPU heat field at cursor position (no diffusion steps yet)
     try
@@ -4127,6 +4243,10 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
         VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 6; theta=theta_val, copy_box_to_cpu=false)
         _vk_heat_total_steps[] += 6
         
+        # ── Display theta ramp: at t=0, start with high theta so only hot center shows ──
+        display_theta = Float32(max(theta_val, HEAT_DISPLAY_RAMP_START))  # At t=0, exp(0)=1 so display_theta = RAMP_START = 0.5
+        try; open("/tmp/heatgdt_debug.log", "a") do f; println(f, "[$(round(time(), digits=3))] START: seed+6steps DONE at ($cx,$cy,$cz), display_theta=$display_theta, real_theta=$theta_val, active=$(_vk_heat_active[]), channel=$(main_event_channel[] !== nothing ? "ok" : "nothing")"); end; catch; end
+        
         active_id = UInt32(current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1)
         for state in stateObjects
             obj = state.mainForDisplayObjects
@@ -4137,9 +4257,18 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
             if mask_idx !== nothing && mask_idx <= length(obj.vulkanTextures)
                 vk_tex = obj.vulkanTextures[mask_idx]
                 try
-                    slice_dim = state.onScrollData.dimensionToScroll
+                    
+                    panel_idx = findfirst(s -> s === state, stateObjects)
+                    slice_dim = if panel_idx in (3, 8)
+                        1 # Sagittal
+                    elseif panel_idx in (4, 9)
+                        2 # Coronal
+                    else
+                        3 # Axial
+                    end
                     slice_idx = state.currentlyDispDat.sliceNumber - 1
-                    VulkanHeatDiffusion.render_slice_to_texture!(heat_state, vk_ctx, vk_tex, slice_dim, slice_idx, active_id; theta=theta_val)
+                    # Use display_theta (high) so only the seed center shows initially
+                    VulkanHeatDiffusion.render_slice_to_texture!(heat_state, vk_ctx, vk_tex, slice_dim, slice_idx, active_id; theta=display_theta)
                     if obj.vulkanPipelineState !== nothing
                         obj.vulkanPipelineState.ubo_dirty = true
                     end
@@ -4159,13 +4288,22 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
     
     # Start an async loop to continuously grow the lesion while button is held
     @async begin
+        try; open("/tmp/heatgdt_debug.log", "a") do f; println(f, "[$(round(time(), digits=3))] ASYNC LOOP STARTED"); end; catch; end
+        tick_count = 0
         while _vk_heat_active[]
             sleep(0.05) # 20 Hz
             ch = main_event_channel[]
             if ch !== nothing && isopen(ch)
                 put!(ch, MakieEvents.HeatGDTTickEvent())
+                tick_count += 1
+                if tick_count <= 5 || tick_count % 20 == 0
+                    try; open("/tmp/heatgdt_debug.log", "a") do f; println(f, "[$(round(time(), digits=3))] ASYNC: injected tick #$(tick_count)"); end; catch; end
+                end
+            else
+                try; open("/tmp/heatgdt_debug.log", "a") do f; println(f, "[$(round(time(), digits=3))] ASYNC: channel not ready ch=$(ch === nothing ? "nothing" : "ok"), open=$(ch !== nothing ? isopen(ch) : false)"); end; catch; end
             end
         end
+        try; open("/tmp/heatgdt_debug.log", "a") do f; println(f, "[$(round(time(), digits=3))] ASYNC LOOP ENDED (tick_count=$tick_count, _vk_heat_active=$(_vk_heat_active[]))"); end; catch; end
     end
 end
 
@@ -4175,23 +4313,59 @@ read the full 3D mask back, update seg_vol, mark all panels dirty.
 Debounced to ≥50ms between GPU dispatches (~20 Hz update rate).
 """
 function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector{StateDataFields})
-    if !_vk_heat_active[]; return; end
+    _dbg(msg) = try; open("/tmp/heatgdt_debug.log", "a") do f; println(f, "[$(round(time(), digits=3))] $msg"); end; catch; end
     
+    if !_vk_heat_active[]
+        _dbg("SKIP: _vk_heat_active=false")
+        return
+    end
+    
+    # ── Immediate Stop Check ──
+    btn_down = true  # default: assume button is still down
+    try
+        btn_down = parentmodule(@__MODULE__).ReactOnMouseClickAndDrag.is_left_button_down[]
+    catch e
+        _dbg("WARN: is_left_button_down check failed: $(sprint(showerror, e))")
+    end
+    if !btn_down
+        _dbg("SKIP: is_left_button_down=false")
+        return
+    end
+
     # ── Debounce: skip if too soon since last dispatch ──
     now = time()
-    if (now - _vk_heat_last_dispatch[]) < HEAT_TICK_MIN_INTERVAL_S
+    debounce_elapsed = now - _vk_heat_last_dispatch[]
+    if debounce_elapsed < HEAT_TICK_MIN_INTERVAL_S
+        _dbg("SKIP: debounce elapsed=$(round(debounce_elapsed*1000, digits=1))ms < $(HEAT_TICK_MIN_INTERVAL_S*1000)ms")
         return
     end
     _vk_heat_last_dispatch[] = now
     
     heat_state = _vk_heat_state[]
     vk_ctx = _vk_heat_ctx[]
-    if heat_state === nothing || vk_ctx === nothing; return; end
+    if heat_state === nothing || vk_ctx === nothing
+        _dbg("SKIP: heat_state=$(heat_state === nothing ? "nothing" : "ok"), vk_ctx=$(vk_ctx === nothing ? "nothing" : "ok")")
+        return
+    end
     
     try
         # ── Run a larger batch of diffusion steps on GPU (100% GPU) ──
         steps_per_tick = 50
+        
         theta_val = heatgdt_theta[]
+        
+        # ── Display theta ramp: GPU computes with real theta, display uses ramped theta ──
+        # theta_display = max(real_theta, RAMP_START * exp(-RAMP_RATE * elapsed))
+        # At t=0s: display_theta ≈ 0.5 (only seed center visible)
+        # At t=0.5s: ≈ 0.14 (moderate growth)
+        # At t=1.0s: ≈ 0.04 (significant growth)
+        # At t=2.0s: ≈ 0.003 (nearly full computation visible)
+        # At t=2.5s+: clamped to real_theta (0.001)
+        elapsed = now - _vk_heat_start_time[]
+        display_theta = Float32(max(theta_val, HEAT_DISPLAY_RAMP_START * exp(-HEAT_DISPLAY_RAMP_RATE * elapsed)))
+        HEAT_GDT_LAST_DISPLAY_THETA[] = display_theta  # Track for stop-time logging
+        
+        _dbg("TICK: steps=$steps_per_tick, theta=$theta_val, display_theta=$display_theta, elapsed=$(round(elapsed, digits=2))s, accumulated=$(heat_state.accumulated_steps), seed=($(heat_state.seed_x),$(heat_state.seed_y),$(heat_state.seed_z)), ping=$(heat_state.current_buffer_is_ping)")
         
         t0 = time_ns()
         VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, steps_per_tick;
@@ -4199,8 +4373,10 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
         t_gpu = time_ns()
         _vk_heat_total_steps[] += steps_per_tick
         
-        # ── 100% GPU Overlay Rendering ──
-        # Directly slice the 3D heat field onto the 2D UI texture for each panel.
+        _dbg("  GPU done: $(round((t_gpu - t0) / 1e6, digits=2))ms, new_accumulated=$(heat_state.accumulated_steps), box_min=$(heat_state.current_box_min), box_max=$(heat_state.current_box_max)")
+        
+        # ── 100% GPU Overlay Rendering (using display_theta for progressive reveal) ──
+        n_panels_rendered = 0
         for state in stateObjects
             obj = state.mainForDisplayObjects
             if obj === nothing || obj.vulkanTextures === nothing || isempty(obj.vulkanTextures)
@@ -4214,18 +4390,28 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
                 
                 try
                     # 1=sagittal(X), 2=coronal(Y), 3=axial(Z)
-                    slice_dim = state.onScrollData.dimensionToScroll
+                    
+                    panel_idx = findfirst(s -> s === state, stateObjects)
+                    slice_dim = if panel_idx in (3, 8)
+                        1 # Sagittal
+                    elseif panel_idx in (4, 9)
+                        2 # Coronal
+                    else
+                        3 # Axial
+                    end
                     slice_idx = state.currentlyDispDat.sliceNumber - 1  # 0-indexed for shader
                     
                     active_id = UInt32(current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1)
                     
-                    VulkanHeatDiffusion.render_slice_to_texture!(heat_state, vk_ctx, vk_tex, slice_dim, slice_idx, active_id; theta=theta_val)
+                    # Use display_theta (ramped) instead of theta_val for progressive display
+                    VulkanHeatDiffusion.render_slice_to_texture!(heat_state, vk_ctx, vk_tex, slice_dim, slice_idx, active_id; theta=display_theta)
                     
                     if obj.vulkanPipelineState !== nothing
                         obj.vulkanPipelineState.ubo_dirty = true
                     end
+                    n_panels_rendered += 1
                 catch e
-                    @debug "[Heat-GDT GPU] Ignoring panel error: $e"
+                    _dbg("  Panel render ERROR: $(sprint(showerror, e))")
                 end
             end
         end
@@ -4235,21 +4421,29 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
         render_ms = (t_render - t_gpu) / 1e6
         total_ms = (t_render - t0) / 1e6
         
-        log_line = "[Heat-GDT GPU Tick] steps=$(steps_per_tick), total=$(round(total_ms, digits=2))ms (gpu=$(round(gpu_ms, digits=2)), slice_render=$(round(render_ms, digits=2)))"
+        _dbg("  Render done: $(n_panels_rendered) panels, display_theta=$(display_theta), total=$(round(total_ms, digits=2))ms (gpu=$(round(gpu_ms, digits=2)), render=$(round(render_ms, digits=2)))")
+        
+        log_line = "[Heat-GDT GPU Tick] steps=$(steps_per_tick), display_theta=$(round(display_theta, digits=4)), elapsed=$(round(elapsed, digits=2))s, total=$(round(total_ms, digits=2))ms (gpu=$(round(gpu_ms, digits=2)), slice_render=$(round(render_ms, digits=2)))"
         if PERF_LOG[]
             println(log_line)
         end
-        open("heatgdt_perf.log", "a") do f
-            println(f, log_line)
-        end
+        try; open("/tmp/heatgdt_perf.log", "a") do f; println(f, log_line); end; catch; end
     catch e
-        open("heatgdt_perf.log", "a") do f; println(f, "Tick failed: ", e); end
+        _dbg("TICK EXCEPTION: $(sprint(showerror, e))\n$(sprint(Base.show_backtrace, catch_backtrace()))")
+        try; open("/tmp/heatgdt_perf.log", "a") do f; println(f, "Tick failed: ", e); end; catch; end
         @warn "[Heat-GDT GPU] Tick failed" exception=(e, catch_backtrace())
     end
 end
 
 """
-GPU Heat-GDT: mouse release — final commit of 3D mask to seg_vol.
+GPU Heat-GDT: mouse release — final commit of GPU heat tensor to discrete labels in seg_vol.
+
+The GPU heat tensor is thresholded at `HEAT_GDT_COMMIT_THETA` and every voxel above that
+threshold is written as an integer label (`active_id`) into the shared 3D `seg_vol` array.
+This converts the continuous floating-point heat field into a discrete segmentation mask.
+
+After commit, `HEAT_GDT_COMMIT_THETA` and `HEAT_GDT_LAST_DISPLAY_THETA` are refreshed
+to their default values, ready for the next grow operation.
 """
 function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector{StateDataFields})
     if !_vk_heat_active[]; return; end
@@ -4259,8 +4453,17 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
     vk_ctx = _vk_heat_ctx[]
     if heat_state === nothing || vk_ctx === nothing; return; end
     
+    # Snapshot the commit theta and display theta at the moment of release
+    commit_theta = HEAT_GDT_COMMIT_THETA[]
+    last_display_theta = HEAT_GDT_LAST_DISPLAY_THETA[]
+    total_steps = _vk_heat_total_steps[]
+    elapsed = time() - _vk_heat_start_time[]
+    
     try
-        # Final bounding-box commit to seg_vol
+        # ── GPU → CPU: read back heat tensor via staging buffer ──
+        # The heat field is a 3D float32 tensor on the GPU.  We read back the
+        # bounding-box region around the seed into a CPU-mapped staging buffer,
+        # then threshold at HEAT_GDT_COMMIT_THETA to produce discrete labels.
         tp1 = stateObjects[1]
         seg_vol = nothing
         for dat in tp1.onScrollData.dataToScroll
@@ -4271,21 +4474,37 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
         end
         
         if seg_vol !== nothing
-            theta_val = heatgdt_theta[]
             active_id = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
             label_val = eltype(seg_vol)(active_id)
             
-            # Make sure GPU has finished the final step and read back the box
+            # Run 0 additional steps but copy the bounding-box to CPU staging buffer
             VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 0;
-                theta=theta_val, copy_box_to_cpu=true)
-            VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)
+                theta=commit_theta, copy_box_to_cpu=true)
+            
+            # ── Discrete mask commit: float heat → integer labels ──
+            # apply_box_mask_to_segvol! reads the staging buffer and writes label_val
+            # into seg_vol[x,y,z] wherever the heat value >= commit_theta.
+            VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=commit_theta)
+            
+            println("[Heat-GDT STOP] Committed to seg_vol: commit_theta=$(commit_theta), label=$(active_id), total_steps=$(total_steps), elapsed=$(round(elapsed, digits=2))s, last_display_theta=$(last_display_theta)"); flush(stdout)
         end
         
-        # Mark ALL panels dirty for final render
-        for state in stateObjects
-            state.isSliceChanged = true
+        # Re-extract 2D slices from the modified 3D seg_vol.
+        # currentlyDispDat contains a materialized COPY of the 2D slice, so simply
+        # setting isSliceChanged = true would upload stale (pre-commit) data.
+        # _force_texture_upload! re-slices from the 3D volume and populates
+        # currentlyDispDat with the updated data before the consumer uploads.
+        for (pi, state) in enumerate(stateObjects)
+            try
+                _force_texture_upload!(stateObjects, pi)
+            catch e
+                # Fallback: just mark dirty (will show stale data until next scroll)
+                state.isSliceChanged = true
+                @debug "[Heat-GDT STOP] _force_texture_upload! failed for panel $pi: $e"
+            end
         end
         
+        # ── Sync discrete mask to TP cache (for autosave/HDF5 persistence) ──
         if seg_vol !== nothing
             tp_idx = current_tp_index[]
             entry = lock(_tp_cache_lock) do
@@ -4304,17 +4523,21 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
             end
         end
         
-        total = _vk_heat_total_steps[]
-        theta_val = heatgdt_theta[]
-        voxels = count(x -> x >= theta_val, mask_3d)
-        set_ai_status!("[Heat-GDT GPU] Done: $total steps, $voxels voxels")
+        set_ai_status!("[Heat-GDT GPU] Done: $(total_steps) steps in $(round(elapsed, digits=1))s")
         if PERF_LOG[]
-            println("[Heat-GDT GPU] Complete: $total steps, $voxels voxels segmented"); flush(stdout)
+            println("[Heat-GDT GPU] Complete: $(total_steps) steps, commit_theta=$(commit_theta), elapsed=$(round(elapsed, digits=2))s"); flush(stdout)
         end
+        try; open("/tmp/heatgdt_debug.log", "a") do f
+            println(f, "[$(round(time(), digits=3))] STOP: steps=$(total_steps), commit_theta=$(commit_theta), display_theta=$(last_display_theta), elapsed=$(round(elapsed, digits=2))s")
+        end; catch; end
     catch e
         @warn "[Heat-GDT GPU] Stop/commit failed" exception=(e, catch_backtrace())
         set_ai_status!("[Heat-GDT GPU] Commit failed: $(sprint(showerror, e))")
     end
+    
+    # ── Refresh constants for next operation ──
+    HEAT_GDT_COMMIT_THETA[] = heatgdt_theta[]           # Reset to default
+    HEAT_GDT_LAST_DISPLAY_THETA[] = HEAT_DISPLAY_RAMP_START  # Reset to ramp start
 end
 
 end
