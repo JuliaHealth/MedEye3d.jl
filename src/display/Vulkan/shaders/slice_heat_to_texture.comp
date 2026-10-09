@@ -2,7 +2,7 @@
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, r32f) uniform readonly image3D img_heat;
-layout(set = 0, binding = 1, r8ui) uniform writeonly uimage2D img_tex;
+layout(set = 0, binding = 1, r16i) uniform writeonly iimage2D img_tex;
 
 layout(push_constant) uniform PushConstants {
     float theta;
@@ -27,6 +27,6 @@ void main() {
 
     float heat = imageLoad(img_heat, vol_pos).r;
     if (heat >= pc.theta) {
-        imageStore(img_tex, pos, uvec4(pc.active_id, 0, 0, 0));
+        imageStore(img_tex, pos, ivec4(int(pc.active_id), 0, 0, 0));
     }
 }

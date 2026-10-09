@@ -104,6 +104,7 @@ mutable struct HeatDiffusionState
     dsl_diffuse_step::DescriptorSetLayout
     dsl_extract_mask::DescriptorSetLayout
     dsl_diffusivity::DescriptorSetLayout
+    dsl_slice::DescriptorSetLayout
     
     # Descriptor pool and sets
     descriptor_pool::DescriptorPool
@@ -114,6 +115,8 @@ mutable struct HeatDiffusionState
     ds_extract_from_ping::DescriptorSet     # extract mask from ping
     ds_extract_from_pong::DescriptorSet     # extract mask from pong
     ds_compute_diffusivity::DescriptorSet   # edge→diffusivity conversion
+    ds_slice_ping::DescriptorSet            # slice from ping
+    ds_slice_pong::DescriptorSet            # slice from pong
     
     # Compute command pool and buffer
     compute_cmd_pool::CommandPool
@@ -211,20 +214,28 @@ function create_storage_image_3d(device::Device, pdev::PhysicalDevice, w::Int, h
     
     mem_type_idx = UInt32(0)
     found = false
+    local mem
     for i in 0:(mem_props.memory_type_count - 1)
         if (mem_reqs.memory_type_bits & (1 << i)) != 0 &&
            (mem_props.memory_types[i + 1].property_flags & MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0
-            mem_type_idx = UInt32(i)
-            found = true
-            break
+            try
+                alloc_info = MemoryAllocateInfo(mem_reqs.size, UInt32(i))
+                mem = unwrap(allocate_memory(device, alloc_info))
+                mem_type_idx = UInt32(i)
+                found = true
+                break
+            catch e
+                if e isa Vulkan.VulkanError && e.code == Vulkan.ERROR_OUT_OF_DEVICE_MEMORY
+                    @warn "Memory allocation failed on heap $(i), trying next suitable heap..."
+                    continue
+                end
+                rethrow(e)
+            end
         end
     end
     if !found
-        error("Failed to find suitable memory type for 3D storage image")
+        error("Failed to find suitable memory type or out of memory for 3D storage image")
     end
-    
-    alloc_info = MemoryAllocateInfo(mem_reqs.size, mem_type_idx)
-    mem = unwrap(allocate_memory(device, alloc_info))
     unwrap(bind_image_memory(device, img, mem, 0))
     
     # Create image view
@@ -278,6 +289,7 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     mod_diffuse = load_shader_module(dev, "diffuse_step.spv")
     mod_extract = load_shader_module(dev, "extract_mask.spv")
     mod_diff = load_shader_module(dev, "diffusivity.spv")
+    mod_slice = load_shader_module(dev, "slice_heat_to_texture.spv")
     
     # 3. Create descriptor set layouts
     # seed_init: 1 storage image (writeonly)
@@ -301,6 +313,9 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     
     # diffusivity: 2 storage images (edge readonly, diffusivity writeonly)
     state.dsl_diffusivity = unwrap(create_descriptor_set_layout(dev, DescriptorSetLayoutCreateInfo(bindings_extract)))
+
+    # slice: 2 storage images (u readonly, tex writeonly)
+    state.dsl_slice = unwrap(create_descriptor_set_layout(dev, DescriptorSetLayoutCreateInfo(bindings_extract)))
     
     # 4. Create pipeline layouts with push constants
     # seed_init: push ivec4 (16 bytes)
@@ -319,6 +334,10 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     pc_diff = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, 8)]
     state.layout_diffusivity = unwrap(create_pipeline_layout(dev, PipelineLayoutCreateInfo([state.dsl_diffusivity], pc_diff)))
     
+    # slice: push float theta + int slice_dim + int slice_idx + uint active_id (16 bytes)
+    pc_slice = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, 16)]
+    state.layout_slice = unwrap(create_pipeline_layout(dev, PipelineLayoutCreateInfo([state.dsl_slice], pc_slice)))
+    
     # 5. Create compute pipelines
     stage_seed = PipelineShaderStageCreateInfo(SHADER_STAGE_COMPUTE_BIT, mod_seed, "main")
     state.pipeline_seed_init = unwrap(create_compute_pipelines(dev, [ComputePipelineCreateInfo(stage_seed, state.layout_seed_init, -1)]))[1][1]
@@ -331,18 +350,22 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     
     stage_diff = PipelineShaderStageCreateInfo(SHADER_STAGE_COMPUTE_BIT, mod_diff, "main")
     state.pipeline_diffusivity = unwrap(create_compute_pipelines(dev, [ComputePipelineCreateInfo(stage_diff, state.layout_diffusivity, -1)]))[1][1]
+
+    stage_slice = PipelineShaderStageCreateInfo(SHADER_STAGE_COMPUTE_BIT, mod_slice, "main")
+    state.pipeline_slice = unwrap(create_compute_pipelines(dev, [ComputePipelineCreateInfo(stage_slice, state.layout_slice, -1)]))[1][1]
     
     # 6. Shader modules are garbage collected automatically by Vulkan.jl
     # destroy_shader_module(dev, mod_seed)
     # destroy_shader_module(dev, mod_diffuse)
     # destroy_shader_module(dev, mod_extract)
     # destroy_shader_module(dev, mod_diff)
+    # destroy_shader_module(dev, mod_slice)
     
     # 7. Create descriptor pool and allocate descriptor sets
     pool_sizes = [
         DescriptorPoolSize(DESCRIPTOR_TYPE_STORAGE_IMAGE, 20)  # plenty for all sets
     ]
-    state.descriptor_pool = unwrap(create_descriptor_pool(dev, DescriptorPoolCreateInfo(8, pool_sizes)))
+    state.descriptor_pool = unwrap(create_descriptor_pool(dev, DescriptorPoolCreateInfo(16, pool_sizes)))
     
     # Create dummy sampler for DescriptorImageInfo
     sampler_info = SamplerCreateInfo(
@@ -360,7 +383,9 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
         state.dsl_diffuse_step,    # ds_diffuse_pong_to_ping
         state.dsl_extract_mask,    # ds_extract_from_ping
         state.dsl_extract_mask,    # ds_extract_from_pong
-        state.dsl_diffusivity      # ds_compute_diffusivity
+        state.dsl_diffusivity,     # ds_compute_diffusivity
+        state.dsl_slice,           # ds_slice_ping
+        state.dsl_slice            # ds_slice_pong
     ])
     sets = unwrap(Vulkan.allocate_descriptor_sets(dev, alloc_ds))
     state.ds_seed_ping = sets[1]
@@ -370,6 +395,8 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     state.ds_extract_from_ping = sets[5]
     state.ds_extract_from_pong = sets[6]
     state.ds_compute_diffusivity = sets[7]
+    state.ds_slice_ping = sets[8]
+    state.ds_slice_pong = sets[9]
     
     # 8. Write descriptor sets
     _write_descriptors!(state, dev)
@@ -395,16 +422,23 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     for i in 0:(mem_props.memory_type_count - 1)
         if (mem_reqs.memory_type_bits & (1 << i)) != 0 &&
            (mem_props.memory_types[i + 1].property_flags & (MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT)) == (MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT)
-            mem_type = UInt32(i)
-            found_type = true
-            break
+            try
+                state.staging_box_mem = unwrap(allocate_memory(dev, MemoryAllocateInfo(mem_reqs.size, UInt32(i))))
+                mem_type = UInt32(i)
+                found_type = true
+                break
+            catch e
+                if e isa Vulkan.VulkanError && e.code == Vulkan.ERROR_OUT_OF_DEVICE_MEMORY
+                    @warn "Staging buffer memory allocation failed on heap $(i), trying next suitable heap..."
+                    continue
+                end
+                rethrow(e)
+            end
         end
     end
     if !found_type
-        error("Failed to find HOST_VISIBLE | HOST_COHERENT memory for staging box buffer")
+        error("Failed to find HOST_VISIBLE | HOST_COHERENT memory or out of memory for staging box buffer")
     end
-    
-    state.staging_box_mem = unwrap(allocate_memory(dev, MemoryAllocateInfo(mem_reqs.size, mem_type)))
     unwrap(bind_buffer_memory(dev, state.staging_box_buf, state.staging_box_mem, 0))
     state.staging_box_ptr = unwrap(map_memory(dev, state.staging_box_mem, 0, box_buf_size))
     state.staging_box_capacity = box_buf_size
@@ -447,6 +481,11 @@ function _write_descriptors!(state::HeatDiffusionState, dev::Device)
     push!(writes, WriteDescriptorSet(state.ds_compute_diffusivity, 0, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_u_ping)], [], []))  # reuse ping for edge input
     push!(writes, WriteDescriptorSet(state.ds_compute_diffusivity, 1, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_diffusivity)], [], []))
     
+    # slice to texture: u_ping/u_pong → tex_out
+    push!(writes, WriteDescriptorSet(state.ds_slice_ping, 0, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_u_ping)], [], []))
+    push!(writes, WriteDescriptorSet(state.ds_slice_pong, 0, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_u_pong)], [], []))
+    # Note: binding 1 (tex_out) is written dynamically per-tick since the texture view changes
+    
     update_descriptor_sets(dev, writes, [])
 end
 
@@ -476,16 +515,29 @@ function upload_diffusivity!(state::HeatDiffusionState, ctx, diffusivity_data::A
     mem_reqs = get_buffer_memory_requirements(dev, staging_buf)
     mem_props = get_physical_device_memory_properties(pdev)
     mem_type = UInt32(0)
+    found_type = false
+    local staging_mem
     for i in 0:(mem_props.memory_type_count - 1)
         if (mem_reqs.memory_type_bits & (1 << i)) != 0 &&
            (mem_props.memory_types[i + 1].property_flags & (MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT)) ==
            (MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT)
-            mem_type = UInt32(i)
-            break
+            try
+                staging_mem = unwrap(allocate_memory(dev, MemoryAllocateInfo(mem_reqs.size, UInt32(i))))
+                mem_type = UInt32(i)
+                found_type = true
+                break
+            catch e
+                if e isa Vulkan.VulkanError && e.code == Vulkan.ERROR_OUT_OF_DEVICE_MEMORY
+                    @warn "Diffusivity staging buffer memory allocation failed on heap $(i), trying next suitable heap..."
+                    continue
+                end
+                rethrow(e)
+            end
         end
     end
-    
-    staging_mem = unwrap(allocate_memory(dev, MemoryAllocateInfo(mem_reqs.size, mem_type)))
+    if !found_type
+        error("Failed to find suitable memory for diffusivity staging buffer or out of memory")
+    end
     unwrap(bind_buffer_memory(dev, staging_buf, staging_mem, 0))
     
     # Map and copy data
@@ -676,16 +728,29 @@ function read_mask_to_cpu(state::HeatDiffusionState, ctx)::Array{Float32, 3}
     mem_reqs = get_buffer_memory_requirements(dev, staging_buf)
     mem_props = get_physical_device_memory_properties(pdev)
     mem_type = UInt32(0)
+    found_type = false
+    local staging_mem
     for i in 0:(mem_props.memory_type_count - 1)
         if (mem_reqs.memory_type_bits & (1 << i)) != 0 &&
            (mem_props.memory_types[i + 1].property_flags & (MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT)) ==
            (MEMORY_PROPERTY_HOST_VISIBLE_BIT | MEMORY_PROPERTY_HOST_COHERENT_BIT)
-            mem_type = UInt32(i)
-            break
+            try
+                staging_mem = unwrap(allocate_memory(dev, MemoryAllocateInfo(mem_reqs.size, UInt32(i))))
+                mem_type = UInt32(i)
+                found_type = true
+                break
+            catch e
+                if e isa Vulkan.VulkanError && e.code == Vulkan.ERROR_OUT_OF_DEVICE_MEMORY
+                    @warn "Mask staging buffer memory allocation failed on heap $(i), trying next suitable heap..."
+                    continue
+                end
+                rethrow(e)
+            end
         end
     end
-    
-    staging_mem = unwrap(allocate_memory(dev, MemoryAllocateInfo(mem_reqs.size, mem_type)))
+    if !found_type
+        error("Failed to find suitable memory for mask staging buffer or out of memory")
+    end
     unwrap(bind_buffer_memory(dev, staging_buf, staging_mem, 0))
     
     # Copy image to buffer
@@ -807,6 +872,10 @@ function seed_only!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y::Int, se
     
     state.current_buffer_is_ping = true
     state.accumulated_steps = 0
+    state.seed_x = seed_x
+    state.seed_y = seed_y
+    state.seed_z = seed_z
+    state.seed_radius = seed_radius
     @debug "[HeatDiffusion] Seeded at ($seed_x, $seed_y, $seed_z)"
 end
 
@@ -822,7 +891,7 @@ function run_incremental_steps!(state::HeatDiffusionState, ctx, n_steps::Int;
                                  dt::Float32=0.16f0, theta::Float32=0.001f0, tau::Float32=0.0001f0, copy_box_to_cpu::Bool=false)
     @assert state.is_initialized "Heat diffusion not initialized"
     @assert state.diffusivity_uploaded "Diffusivity not uploaded"
-    n_steps <= 0 && return
+    n_steps <= 0 && !copy_box_to_cpu && return
     
     dev = ctx.device
     w, h, d = state.width, state.height, state.depth
@@ -1016,6 +1085,68 @@ function apply_box_mask_to_segvol!(state::HeatDiffusionState, seg_vol::AbstractA
             end
         end
     end
+end
+
+
+# ─── GPU Direct Slice Rendering ──────────────────────────────────────────
+
+"""
+    render_slice_to_texture!(state, ctx, tex, slice_dim, slice_idx, active_id; theta=0.001f0)
+
+Directly computes a 2D slice from the 3D heat mask and writes it to `tex.image` (a VkTexture).
+Eliminates CPU roundtrips completely for UI preview rendering.
+"""
+function render_slice_to_texture!(state::HeatDiffusionState, ctx, tex::Any, slice_dim::Int, slice_idx::Int, active_id::UInt32; theta::Float32=0.001f0)
+    dev = ctx.device
+    is_ping = state.current_buffer_is_ping
+    ds = is_ping ? state.ds_slice_ping : state.ds_slice_pong
+    
+    # 1. Update descriptor set with the target texture view
+    di = DescriptorImageInfo(state.dummy_sampler, tex.view, IMAGE_LAYOUT_GENERAL)
+    write = WriteDescriptorSet(ds, 1, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di], [], [])
+    update_descriptor_sets(dev, [write], [])
+    
+    # 2. Dispatch
+    cmd = state.compute_cmd_buffer
+    unwrap(reset_command_buffer(cmd))
+    begin_info = CommandBufferBeginInfo(flags = COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
+    unwrap(begin_command_buffer(cmd, begin_info))
+    
+    barrier_to_general = ImageMemoryBarrier(
+        C_NULL, ACCESS_SHADER_READ_BIT, ACCESS_SHADER_WRITE_BIT,
+        IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, IMAGE_LAYOUT_GENERAL,
+        0, 0, tex.image, ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)
+    )
+    cmd_pipeline_barrier(cmd, MemoryBarrier[], BufferMemoryBarrier[], [barrier_to_general];
+                         src_stage_mask=PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         dst_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT)
+    
+    cmd_bind_pipeline(cmd, PIPELINE_BIND_POINT_COMPUTE, state.pipeline_slice)
+    cmd_bind_descriptor_sets(cmd, PIPELINE_BIND_POINT_COMPUTE, state.layout_slice, 0, [ds], [])
+    
+    pc_u32 = UInt32[reinterpret(UInt32, theta), UInt32(slice_dim), UInt32(slice_idx), active_id]
+    GC.@preserve pc_u32 begin
+        cmd_push_constants(cmd, state.layout_slice, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc_u32), Ptr{Cvoid}(pointer(pc_u32)))
+    end
+    
+    gx = cld(tex.width, 8)
+    gy = cld(tex.height, 8)
+    cmd_dispatch(cmd, gx, gy, 1)
+    
+    barrier_to_read = ImageMemoryBarrier(
+        C_NULL, ACCESS_SHADER_WRITE_BIT, ACCESS_SHADER_READ_BIT,
+        IMAGE_LAYOUT_GENERAL, IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        0, 0, tex.image, ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)
+    )
+    cmd_pipeline_barrier(cmd, MemoryBarrier[], BufferMemoryBarrier[], [barrier_to_read];
+                         src_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         dst_stage_mask=PIPELINE_STAGE_FRAGMENT_SHADER_BIT)
+                         
+    unwrap(end_command_buffer(cmd))
+    submit_info = SubmitInfo([], [], [cmd], [])
+    unwrap(reset_fences(dev, [state.compute_fence]))
+    unwrap(queue_submit(ctx.graphics_queue, [submit_info]; fence=state.compute_fence))
+    unwrap(wait_for_fences(dev, [state.compute_fence], true, typemax(UInt64)))
 end
 
 end # module VulkanHeatDiffusion
