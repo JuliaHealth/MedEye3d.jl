@@ -187,11 +187,11 @@ const _vk_heat_display_steps = Ref{Int}(0)            # Visual catch-up steps di
 const _vk_heat_seed = Ref{Tuple{Int,Int,Int}}((0,0,0))  # 3D seed voxel for current interaction
 const _vk_heat_last_dispatch = Ref{Float64}(0.0)      # Timestamp of last GPU dispatch (for debouncing)
 const _vk_heat_start_time = Ref{Float64}(0.0)         # Wall-clock timestamp of Heat-GDT start (for display theta ramp)
-const HEAT_TICK_MIN_INTERVAL_S = 0.05                  # 50ms minimum interval between GPU dispatches (~20 Hz)
+const HEAT_TICK_MIN_INTERVAL_S = 0.015                 # 15ms minimum interval between GPU dispatches (~66 Hz)
 # Display theta ramp: theta_display = max(real_theta, RAMP_START * exp(-RAMP_RATE * elapsed_seconds))
 # This makes the lesion appear to grow smoothly from a small dot to the full segmentation
-const HEAT_DISPLAY_RAMP_START = 0.05f0                  # Start display threshold (only show very hot center)
-const HEAT_DISPLAY_RAMP_RATE  = 3.0f0                  # Exponential decay rate (larger = faster catch-up)
+const HEAT_DISPLAY_RAMP_START = 0.01f0                  # Start display threshold (only show very hot center)
+const HEAT_DISPLAY_RAMP_RATE  = 0.5f0                  # Exponential decay rate (larger = faster catch-up)
 # ── Final Commit Threshold ──
 # When the user releases the mouse, the GPU heat tensor is thresholded at this value
 # to produce discrete integer labels in seg_vol.  Refreshed at each mouse-release
@@ -4061,6 +4061,20 @@ function reactToOneShotHeatGDT(data::MakieEvents.OneShotHeatGDTEvent, stateObjec
             HEAT_GDT_COMMIT_THETA[] = heatgdt_theta[]           # Refresh to current default
             HEAT_GDT_LAST_DISPLAY_THETA[] = HEAT_DISPLAY_RAMP_START  # Reset ramp
             set_ai_status!("[Heat-GDT Wand] Disabled.")
+            
+            # Reset algorithm to Manual Brush
+            @async try
+                LMW = _get_lmw()
+                if LMW !== nothing
+                    obs_dict = getfield(LMW, :_lmw_observables)
+                    if haskey(obs_dict, :algo_combo_selection)
+                        obs_dict[:algo_combo_selection][] = "Manual Brush"
+                    end
+                end
+            catch; end
+            
+            # Exit editing mode
+            reactToViewMode(MakieEvents.ViewModeEvent(), stateObjects)
         else
             # Toggle ON
             # 1. Create a new lesion
@@ -4234,14 +4248,14 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
     # Seed the GPU heat field at cursor position (no diffusion steps yet)
     try
         println("[Heat-GDT START] Calling seed_only! at ($cx,$cy,$cz)..."); flush(stdout)
-        VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, cx, cy, cz; seed_radius=3)
+        VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, cx, cy, cz; seed_radius=1)
         set_ai_status!("[Heat-GDT GPU] Growing from ($cx,$cy,$cz)...")
         println("[Heat-GDT START] seed_only! SUCCESS — GPU diffusion active"); flush(stdout)
         
-        # Run 6 initial steps immediately so the lesion appears instantly on click
+        # Run 1 initial step immediately so a short click creates a very small area
         theta_val = heatgdt_theta[]
-        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 6; theta=theta_val, copy_box_to_cpu=false)
-        _vk_heat_total_steps[] += 6
+        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 1; theta=theta_val, copy_box_to_cpu=false)
+        _vk_heat_total_steps[] += 1
         
         # ── Display theta ramp: at t=0, start with high theta so only hot center shows ──
         display_theta = Float32(max(theta_val, HEAT_DISPLAY_RAMP_START))  # At t=0, exp(0)=1 so display_theta = RAMP_START = 0.5
@@ -4291,7 +4305,7 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
         try; open("/tmp/heatgdt_debug.log", "a") do f; println(f, "[$(round(time(), digits=3))] ASYNC LOOP STARTED"); end; catch; end
         tick_count = 0
         while _vk_heat_active[]
-            sleep(0.05) # 20 Hz
+            sleep(0.015) # ~66 Hz
             ch = main_event_channel[]
             if ch !== nothing && isopen(ch)
                 put!(ch, MakieEvents.HeatGDTTickEvent())
@@ -4349,8 +4363,8 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
     end
     
     try
-        # ── Run a larger batch of diffusion steps on GPU (100% GPU) ──
-        steps_per_tick = 50
+        # ── Run a smaller batch of diffusion steps on GPU to prevent blocking UI thread ──
+        steps_per_tick = 5
         
         theta_val = heatgdt_theta[]
         
@@ -4428,6 +4442,9 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
             println(log_line)
         end
         try; open("/tmp/heatgdt_perf.log", "a") do f; println(f, log_line); end; catch; end
+        
+        # Yield to allow GLMakie renderloop to poll events (e.g. mouse release) and swap buffers
+        yield()
     catch e
         _dbg("TICK EXCEPTION: $(sprint(showerror, e))\n$(sprint(Base.show_backtrace, catch_backtrace()))")
         try; open("/tmp/heatgdt_perf.log", "a") do f; println(f, "Tick failed: ", e); end; catch; end
@@ -4454,7 +4471,9 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
     if heat_state === nothing || vk_ctx === nothing; return; end
     
     # Snapshot the commit theta and display theta at the moment of release
-    commit_theta = HEAT_GDT_COMMIT_THETA[]
+    # The user requested to keep ONLY the part that is visible at the moment of mouse release
+    # so we use HEAT_GDT_LAST_DISPLAY_THETA[] instead of HEAT_GDT_COMMIT_THETA[].
+    commit_theta = HEAT_GDT_LAST_DISPLAY_THETA[]
     last_display_theta = HEAT_GDT_LAST_DISPLAY_THETA[]
     total_steps = _vk_heat_total_steps[]
     elapsed = time() - _vk_heat_start_time[]
@@ -4484,9 +4503,9 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
             # ── Discrete mask commit: float heat → integer labels ──
             # apply_box_mask_to_segvol! reads the staging buffer and writes label_val
             # into seg_vol[x,y,z] wherever the heat value >= commit_theta.
-            VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=commit_theta)
+            vox_count = VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=commit_theta)
             
-            println("[Heat-GDT STOP] Committed to seg_vol: commit_theta=$(commit_theta), label=$(active_id), total_steps=$(total_steps), elapsed=$(round(elapsed, digits=2))s, last_display_theta=$(last_display_theta)"); flush(stdout)
+            println("[Heat-GDT STOP] Committed to seg_vol: commit_theta=$(commit_theta), label=$(active_id), voxels=$(vox_count), total_steps=$(total_steps), elapsed=$(round(elapsed, digits=2))s, last_display_theta=$(last_display_theta)"); flush(stdout)
         end
         
         # Re-extract 2D slices from the modified 3D seg_vol.

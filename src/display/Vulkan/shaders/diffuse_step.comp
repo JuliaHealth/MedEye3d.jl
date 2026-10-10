@@ -13,10 +13,10 @@ layout(set = 0, binding = 2, r32f) uniform writeonly image3D img_u_out; // Next 
 layout(push_constant) uniform PushConstants {
     float dt;         // Time step size (0.16)
     int   use_box;    // 0 = full volume, 1 = use box_min and box_max
-    int   pad0;       // alignment padding
-    int   pad1;       // alignment padding
-    ivec4 box_min;    // xyz = min bounding box voxel
-    ivec4 box_max;    // xyz = max bounding box voxel
+    int   seed_x;
+    int   seed_y;
+    ivec4 box_min;    // xyz = min bounding box voxel, w = seed_z
+    ivec4 box_max;    // xyz = max bounding box voxel, w = seed_radius
 } pc;
 
 void main() {
@@ -73,6 +73,15 @@ void main() {
 
     // Explicit Euler update
     float u_next = u_c + pc.dt * flux;
+
+    // Continuous heat source: keep seed region at 1.0
+    float r = float(pc.box_max.w);
+    if (r > 0.0) {
+        vec3 diff = vec3(pos) - vec3(pc.seed_x, pc.seed_y, pc.box_min.w);
+        if (length(diff) <= max(r, 0.5)) {
+            u_next = 1.0;
+        }
+    }
 
     imageStore(img_u_out, pos, vec4(u_next, 0.0, 0.0, 0.0));
 }

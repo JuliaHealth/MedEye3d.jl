@@ -27,8 +27,8 @@ export seed_only!, run_incremental_steps!
 struct DiffuseStepPC
     dt::Float32
     use_box::Int32
-    pad0::Int32
-    pad1::Int32
+    seed_x::Int32
+    seed_y::Int32
     box_min_x::Int32
     box_min_y::Int32
     box_min_z::Int32
@@ -665,7 +665,12 @@ function run_heat_diffusion!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y
     # --- Step 3: Run K diffusion steps (ping-pong) ---
     cmd_bind_pipeline(cmd, PIPELINE_BIND_POINT_COMPUTE, state.pipeline_diffuse_step)
     
-    dt_arr = Float32[dt]
+    pc_diffuse = DiffuseStepPC(
+        dt, Int32(0), Int32(seed_x - 1), Int32(seed_y - 1),
+        Int32(0), Int32(0), Int32(0), Int32(seed_z - 1),
+        Int32(0), Int32(0), Int32(0), Int32(3) # default seed radius 3
+    )
+    
     for k in 1:K
         if isodd(k)
             # Read from ping, write to pong
@@ -674,8 +679,9 @@ function run_heat_diffusion!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y
             # Read from pong, write to ping
             cmd_bind_descriptor_sets(cmd, PIPELINE_BIND_POINT_COMPUTE, state.layout_diffuse_step, 0, [state.ds_diffuse_pong_to_ping], [])
         end
-        GC.@preserve dt_arr begin
-            cmd_push_constants(cmd, state.layout_diffuse_step, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(dt_arr), Ptr{Cvoid}(pointer(dt_arr)))
+        ref_diffuse = Ref(pc_diffuse)
+        GC.@preserve ref_diffuse begin
+            cmd_push_constants(cmd, state.layout_diffuse_step, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc_diffuse), Base.unsafe_convert(Ptr{Cvoid}, ref_diffuse))
         end
         cmd_dispatch(cmd, gx, gy, gz)
         
@@ -974,9 +980,9 @@ function run_incremental_steps!(state::HeatDiffusionState, ctx, n_steps::Int;
     box_max_glsl = Int32[xmax - 1, ymax - 1, zmax - 1, 0]
     
     pc_diffuse = DiffuseStepPC(
-        dt, Int32(1), Int32(0), Int32(0),
-        box_min_glsl[1], box_min_glsl[2], box_min_glsl[3], Int32(0),
-        box_max_glsl[1], box_max_glsl[2], box_max_glsl[3], Int32(0)
+        dt, Int32(1), Int32(state.seed_x - 1), Int32(state.seed_y - 1),
+        box_min_glsl[1], box_min_glsl[2], box_min_glsl[3], Int32(state.seed_z - 1),
+        box_max_glsl[1], box_max_glsl[2], box_max_glsl[3], Int32(state.seed_radius)
     )
     
     # ── Diffusion steps (continue from current ping/pong state) ──
@@ -1109,6 +1115,7 @@ function apply_box_mask_to_segvol!(state::HeatDiffusionState, seg_vol::AbstractA
     
     ptr = Ptr{Float32}(state.staging_box_ptr)
     
+    vox_count = 0
     @inbounds for kz in 1:bd
         z = zmin + kz - 1
         for ky in 1:bh
@@ -1118,10 +1125,12 @@ function apply_box_mask_to_segvol!(state::HeatDiffusionState, seg_vol::AbstractA
                 val = unsafe_load(ptr, kx + (ky - 1) * bw + (kz - 1) * bw * bh)
                 if val >= theta
                     seg_vol[x, y, z] = label_val
+                    vox_count += 1
                 end
             end
         end
     end
+    return vox_count
 end
 
 
