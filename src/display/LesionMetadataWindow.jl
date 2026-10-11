@@ -5815,17 +5815,16 @@ function create_metadata_window(
                         menu_l = searchable_menu(map_grid, 2, 1:2, options = Observable(l_opts), fontsize = 9)
                         menu_r = searchable_menu(map_grid, 2, 3:4, options = Observable(r_opts), fontsize = 9)
                         
-                        function sync_mapping_and_display!()
+                        # Create a single specific mapping pair and refresh display.
+                        # IMPORTANT: Do NOT iterate all left×right — that causes transitive
+                        # mega-merging in update_match_group! (Bug B fix).
+                        function sync_mapping_and_display!(new_l::Int, new_r::Int)
                             h5_path = _MEH.h5_path_ref[]
-                            if !isempty(h5_path) && !isempty(map_selected_left[]) && !isempty(map_selected_right[])
-                                for l_id in map_selected_left[]
-                                    for r_id in map_selected_right[]
-                                        LA.update_match_group!(left_node, l_id, right_node, r_id, h5_path)
-                                    end
-                                end
+                            if !isempty(h5_path) && new_l > 0 && new_r > 0
+                                LA.update_match_group!(left_node, new_l, right_node, new_r, h5_path)
                             end
                             if !isempty(map_selected_left[])
-                                put!(channel, SyncLesionEvent(map_selected_left[][1]))
+                                put!(channel, SyncLesionEvent(map_selected_left[][1], false))  # false = don't jump to center
                             end
                             _build_match_display!()
                         end
@@ -5838,7 +5837,13 @@ function create_metadata_window(
                             if lid !== nothing && !(lid in map_selected_left[])
                                 push!(map_selected_left[], lid)
                                 notify(map_selected_left)
-                                sync_mapping_and_display!()
+                                # Map new left lesion to each existing right lesion
+                                for r_id in map_selected_right[]
+                                    sync_mapping_and_display!(lid, r_id)
+                                end
+                                if isempty(map_selected_right[])
+                                    _build_match_display!()
+                                end
                             end
                         end
                         
@@ -5850,7 +5855,13 @@ function create_metadata_window(
                             if rid !== nothing && !(rid in map_selected_right[])
                                 push!(map_selected_right[], rid)
                                 notify(map_selected_right)
-                                sync_mapping_and_display!()
+                                # Map each existing left lesion to the new right lesion
+                                for l_id in map_selected_left[]
+                                    sync_mapping_and_display!(l_id, rid)
+                                end
+                                if isempty(map_selected_left[])
+                                    _build_match_display!()
+                                end
                             end
                         end
                         
@@ -5909,13 +5920,12 @@ function create_metadata_window(
     end
     _lmw_observables[:build_match_display] = () -> _build_match_display!()
 
-    function apply_compare_mode_ui_impl!(active::Bool)
+     function apply_compare_mode_ui_impl!(active::Bool)
         println("[COMPARE-UI] apply_compare_mode_ui_impl!(active=$active) — START"); flush(stdout)
         cv_active[] = active
         btn_cv.buttoncolor[] = cv_active[] ? GRN : BLU_BTN
         update_tp_dropdown_visibility!()
         sync_tp_menus_to_current!()
-        # g.block_updates = true
         try
             if cv_active[]
                 for sec in (sec_meta, sec_seg, sec_report)
@@ -5957,9 +5967,17 @@ function create_metadata_window(
                 update_dynamic_visibility!(active_lesion_type[])
                 notify(anat_active_count)
             end
-        finally
-            # g.block_updates = false
-            # try Makie.GridLayoutBase.update!(g) catch; end
+            # Refresh layout so sections are properly visible/scrollable (Bug A fix)
+            _invalidate_row_cache!()
+            g.block_updates = false
+            @async begin
+                sleep(0.20)  # let layout solver finish recomputing positions
+                _cache_widget_bboxes!()
+                g.block_updates = true
+                _apply_scroll!(0.0f0)  # scroll to top to reveal Map Lesions section
+            end
+        catch e
+            @warn "[COMPARE-UI] Error in apply_compare_mode_ui_impl!: $e"
         end
         println("[COMPARE-UI] Sending CompareTimePointsEvent($(cv_active[])) to channel..."); flush(stdout)
         put!(channel, CompareTimePointsEvent(cv_active[]))
