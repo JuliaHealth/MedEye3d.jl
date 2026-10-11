@@ -1218,10 +1218,71 @@ end
 
 const current_active_lesion_id = Ref(0)
 
+const DEFAULT_BONE_LABEL_IDS = Set{Int}([
+    # TotalSegmentator vertebrae, ribs, pelvic bones, extremities
+    27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50,
+    51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74,
+    75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98,
+    99, 100, 101, 102, 103, 104, 136, 145, 153, 164, 182
+])
+const bone_label_ids = Ref{Set{Int}}(copy(DEFAULT_BONE_LABEL_IDS))
+
+"""
+    is_bone_lesion(panel_tp::Int, lid::Int)::Bool
+
+Determines whether a lesion is classified as a bone lesion type ("Bone Meta").
+Checks in order:
+1. Active Lesion DB in LesionMetadataWindow (for user-selected or auto-assigned "LesionType" == "Bone Meta")
+2. Per-TP organ mapping (tp_organ_mapping[panel_tp][lid]) via classify_organ_to_lesion_type or keyword match
+3. Global organ mapping (global_organ_mapping[][lid]) via classify_organ_to_lesion_type or keyword match
+4. Conservative fallback: returns false for non-bone or unknown lesions.
+"""
+function is_bone_lesion(panel_tp::Int, lid::Int)::Bool
+    if lid <= 0
+        return false
+    end
+    # 1. Check Lesion DB in LMW
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing && isdefined(LMW, :get_active_lesion_db)
+            db = LMW.get_active_lesion_db()
+            lid_str = string(lid)
+            if haskey(db, lid_str)
+                ltype = get(db[lid_str], "LesionType", "")
+                if !isempty(ltype)
+                    return ltype == "Bone Meta"
+                end
+            end
+        end
+    catch; end
+
+    # 2. Check per-TP organ mapping
+    organ = ""
+    if haskey(tp_organ_mapping, panel_tp) && haskey(tp_organ_mapping[panel_tp], lid)
+        organ = tp_organ_mapping[panel_tp][lid]
+    elseif haskey(global_organ_mapping[], lid)
+        organ = global_organ_mapping[][lid]
+    end
+
+    if !isempty(organ) && organ != "Unknown"
+        LA = _get_la()
+        if LA !== nothing && isdefined(LA, :classify_organ_to_lesion_type)
+            try
+                return LA.classify_organ_to_lesion_type(organ) == "Bone Meta"
+            catch; end
+        end
+        # Regex keyword match fallback
+        return occursin(r"(bone|vertebra|rib|femur|pelvis|sacrum|skull|sternum|ilium|ischium|pubis|clavicle|scapula|humerus|tibia|fibula|spine|c[1-7]|t[1-9]|t1[0-2]|l[1-5]|s[1-5])"i, organ)
+    end
+
+    return false
+end
+export is_bone_lesion, bone_label_ids
+
 """
 Fast on-the-fly computation of bone surface (cortex) and bone marrow (trabecula) subsegments around a bone lesion.
 """
-function compute_bone_subsegments_fast(mask_vol::AbstractArray{<:Integer, 3}, skelly_vol::AbstractArray{<:Real, 3}, target_id::Int; spacing=(1.0, 1.0, 2.0))
+function compute_bone_subsegments_fast(mask_vol::AbstractArray{<:Integer, 3}, skelly_vol::AbstractArray{<:Real, 3}, target_id::Int; spacing=(1.0, 1.0, 2.0), offset=(1, 1, 1))
     lesion_vox = findall(mask_vol .== target_id)
     if isempty(lesion_vox) || isempty(skelly_vol)
         return (CartesianIndex{3}[], CartesianIndex{3}[])
@@ -1236,12 +1297,16 @@ function compute_bone_subsegments_fast(mask_vol::AbstractArray{<:Integer, 3}, sk
     margin_y = ceil(Int, 20.0 / spacing[2])
     margin_z = ceil(Int, 20.0 / spacing[3])
     
-    x_min = max(1, minimum(xs) - margin_x); x_max = min(sz[1], maximum(xs) + margin_x)
-    y_min = max(1, minimum(ys) - margin_y); y_max = min(sz[2], maximum(ys) + margin_y)
-    z_min = max(1, minimum(zs) - margin_z); z_max = min(sz[3], maximum(zs) + margin_z)
+    x_min, x_max, y_min, y_max, z_min, z_max = if offset == (1, 1, 1)
+        (max(1, minimum(xs) - margin_x), min(sz[1], maximum(xs) + margin_x),
+         max(1, minimum(ys) - margin_y), min(sz[2], maximum(ys) + margin_y),
+         max(1, minimum(zs) - margin_z), min(sz[3], maximum(zs) + margin_z))
+    else
+        (1, sz[1], 1, sz[2], 1, sz[3])
+    end
     
-    crop_mask = view(mask_vol, x_min:x_max, y_min:y_max, z_min:z_max)
-    crop_skelly = view(skelly_vol, x_min:x_max, y_min:y_max, z_min:z_max)
+    crop_mask = offset == (1, 1, 1) ? view(mask_vol, x_min:x_max, y_min:y_max, z_min:z_max) : mask_vol
+    crop_skelly = offset == (1, 1, 1) ? view(skelly_vol, x_min:x_max, y_min:y_max, z_min:z_max) : skelly_vol
     
     crop_lesion = findall(crop_mask .== target_id)
     crop_bone_vox = findall(crop_skelly .> 0)
@@ -1289,6 +1354,10 @@ function compute_bone_subsegments_fast(mask_vol::AbstractArray{<:Integer, 3}, sk
     surf_pts = CartesianIndex{3}[]
     marr_pts = CartesianIndex{3}[]
     
+    base_x = offset == (1, 1, 1) ? x_min : offset[1]
+    base_y = offset == (1, 1, 1) ? y_min : offset[2]
+    base_z = offset == (1, 1, 1) ? z_min : offset[3]
+
     for b_idx in crop_bone_vox
         bx = Float32(b_idx[1])
         by = Float32(b_idx[2])
@@ -1308,7 +1377,7 @@ function compute_bone_subsegments_fast(mask_vol::AbstractArray{<:Integer, 3}, sk
             end
         end
         
-        global_idx = CartesianIndex(x_min + b_idx[1] - 1, y_min + b_idx[2] - 1, z_min + b_idx[3] - 1)
+        global_idx = CartesianIndex(base_x + b_idx[1] - 1, base_y + b_idx[2] - 1, base_z + b_idx[3] - 1)
         
         # Surface: only bone voxels on the outer shell (NOT interior) within distance
         if !is_interior[b_idx] && min_d2 <= max_surf_dist_mm2
@@ -1325,11 +1394,11 @@ function compute_bone_subsegments_fast(mask_vol::AbstractArray{<:Integer, 3}, sk
 end
 
 """
-Retrieve bone subsegments from cache or compute on-the-fly using global bone atlas / Skellytour.
+Retrieve bone subsegments from cache or compute on-the-fly using per-TP anatomy or global bone atlas / Skellytour.
 Returns (surf_pts::Vector{CartesianIndex{3}}, marr_pts::Vector{CartesianIndex{3}})
 """
 function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
-    if target_id <= 0
+    if target_id <= 0 || !is_bone_lesion(panel_tp, target_id)
         return (CartesianIndex{3}[], CartesianIndex{3}[])
     end
     
@@ -1358,8 +1427,7 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
         return (surf_res, marr_res)
     end
     
-    # Fast on-the-fly extraction using global bone atlas / skellytour
-    skelly_vol = global_bone_atlas[]
+    # Fetch mask volume for this TP
     mask_vol = lock(_tp_cache_lock) do
         haskey(tp_data_cache, panel_tp) ? tp_data_cache[panel_tp].mask_i16 : nothing
     end
@@ -1367,110 +1435,126 @@ function _get_or_compute_bone_subseg(stateObject, target_id::Int, panel_tp::Int)
         if stateObject !== nothing && isdefined(stateObject, :onScrollData)
             for scr in stateObject.onScrollData.dataToScroll
                 if scr.name == "Mask"
-                    mask_vol = scr.dat
+                    mask_vol = scr.dat isa PermutedDimsArray ? parent(scr.dat) : scr.dat
                     break
                 end
             end
         end
     end
     
-    # Cache bone atlas presence check (avoid scanning entire volume every time)
-    has_bone = if _bone_atlas_has_data[] !== nothing
-        _bone_atlas_has_data[]
+    if mask_vol === nothing
+        bone_subsegments_cache[(panel_tp, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
+        return (CartesianIndex{3}[], CartesianIndex{3}[])
+    end
+
+    # Crop to bounding box for transfer efficiency
+    sz = size(mask_vol)
+    lesion_vox = findall(mask_vol .== target_id)
+    if isempty(lesion_vox)
+        bone_subsegments_cache[(panel_tp, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
+        return (CartesianIndex{3}[], CartesianIndex{3}[])
+    end
+    xs = [I[1] for I in lesion_vox]; ys = [I[2] for I in lesion_vox]; zs = [I[3] for I in lesion_vox]
+    margin = 30
+    x_min = max(1, minimum(xs) - margin); x_max = min(sz[1], maximum(xs) + margin)
+    y_min = max(1, minimum(ys) - margin); y_max = min(sz[2], maximum(ys) + margin)
+    z_min = max(1, minimum(zs) - margin); z_max = min(sz[3], maximum(zs) + margin)
+    
+    crop_mask = view(mask_vol, x_min:x_max, y_min:y_max, z_min:z_max)
+    les_arr = convert(Array{UInt8,3}, crop_mask .== target_id)
+
+    # Fast on-the-fly bone extraction: use per-TP anatomy first, fallback to global bone atlas
+    anat_vol = lock(_tp_cache_lock) do
+        haskey(tp_data_cache, panel_tp) ? (tp_data_cache[panel_tp].anat_i16 !== nothing ? tp_data_cache[panel_tp].anat_i16 : tp_data_cache[panel_tp].anatomy) : nothing
+    end
+    skelly_vol = global_bone_atlas[]
+
+    bone_arr = if anat_vol !== nothing
+        crop_anat = view(anat_vol, x_min:x_max, y_min:y_max, z_min:z_max)
+        b_ids = bone_label_ids[]
+        b_arr = convert(Array{UInt8,3}, in.(crop_anat, Ref(b_ids)))
+        if count(b_arr .> 0) > 0
+            b_arr
+        elseif skelly_vol !== nothing
+            crop_skelly = view(skelly_vol, x_min:x_max, y_min:y_max, z_min:z_max)
+            convert(Array{UInt8,3}, crop_skelly .> 0)
+        else
+            b_arr
+        end
     elseif skelly_vol !== nothing
-        v = count(skelly_vol .> 0) > 0
-        _bone_atlas_has_data[] = v
-        v
+        crop_skelly = view(skelly_vol, x_min:x_max, y_min:y_max, z_min:z_max)
+        convert(Array{UInt8,3}, crop_skelly .> 0)
     else
-        false
+        zeros(UInt8, size(crop_mask))
+    end
+
+    if count(bone_arr .> 0) == 0
+        bone_subsegments_cache[(panel_tp, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
+        return (CartesianIndex{3}[], CartesianIndex{3}[])
+    end
+
+    # Get spacing from stateObject or use default
+    sp = try
+        sv = stateObject.spacingsValue
+        isa(sv, Tuple) ? sv : sv[1]
+    catch
+        (1.0, 1.0, 2.0)
+    end
+
+    # Mark as computing (sentinel prevents re-dispatch)
+    bone_subsegments_cache[(panel_tp, target_id)] = :computing
+    if !isempty(node_name)
+        bone_subsegments_cache[(node_name, target_id)] = :computing
     end
     
-    if skelly_vol !== nothing && mask_vol !== nothing && has_bone
-        # Get spacing from stateObject or use default
-        sp = try
-            sv = stateObject.spacingsValue
-            isa(sv, Tuple) ? sv : sv[1]
-        catch
-            (1.0, 1.0, 2.0)
-        end
-        
-        # Crop to bounding box for transfer efficiency
-        sz = size(mask_vol)
-        lesion_vox = findall(mask_vol .== target_id)
-        if isempty(lesion_vox)
-            bone_subsegments_cache[(panel_tp, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
-            return (CartesianIndex{3}[], CartesianIndex{3}[])
-        end
-        xs = [I[1] for I in lesion_vox]; ys = [I[2] for I in lesion_vox]; zs = [I[3] for I in lesion_vox]
-        margin = 30
-        x_min = max(1, minimum(xs) - margin); x_max = min(sz[1], maximum(xs) + margin)
-        y_min = max(1, minimum(ys) - margin); y_max = min(sz[2], maximum(ys) + margin)
-        z_min = max(1, minimum(zs) - margin); z_max = min(sz[3], maximum(zs) + margin)
-        
-        crop_mask = view(mask_vol, x_min:x_max, y_min:y_max, z_min:z_max)
-        crop_skelly = view(skelly_vol, x_min:x_max, y_min:y_max, z_min:z_max)
-        
-        les_arr = convert(Array{UInt8,3}, crop_mask .== target_id)
-        bone_arr = convert(Array{UInt8,3}, crop_skelly .> 0)
-        
-        # Mark as computing (sentinel prevents re-dispatch — see line 808)
-        bone_subsegments_cache[(panel_tp, target_id)] = :computing
-        if !isempty(node_name)
-            bone_subsegments_cache[(node_name, target_id)] = :computing
-        end
-        
-        # Async: spawn background task for the remote call so consumer is NOT blocked
-        let les_arr=les_arr, bone_arr=bone_arr, sp=sp,
-            x_min=x_min, y_min=y_min, z_min=z_min,
-            panel_tp=panel_tp, target_id=target_id, node_name=node_name,
-            mask_vol=mask_vol, skelly_vol=skelly_vol
-            Threads.@spawn begin
-                try
-                    if PERF_LOG[]; println("  [BONE-ASYNC] Starting remote bone subseg for lid=$target_id tp=$panel_tp"); flush(stdout); end
-                    surf_crop, marr_crop = Main.MedEye3d.InferenceClient.run_bone_subsegmentation_remote(les_arr, bone_arr, sp)
-                    
-                    s_pts = CartesianIndex{3}[]
-                    m_pts = CartesianIndex{3}[]
-                    if surf_crop !== nothing && marr_crop !== nothing
-                        for I in findall(surf_crop)
-                            push!(s_pts, CartesianIndex(I[1] + x_min - 1, I[2] + y_min - 1, I[3] + z_min - 1))
-                        end
-                        for I in findall(marr_crop)
-                            push!(m_pts, CartesianIndex(I[1] + x_min - 1, I[2] + y_min - 1, I[3] + z_min - 1))
-                        end
+    # Async: spawn background task for the remote call so consumer is NOT blocked
+    let les_arr=les_arr, bone_arr=bone_arr, sp=sp,
+        x_min=x_min, y_min=y_min, z_min=z_min,
+        panel_tp=panel_tp, target_id=target_id, node_name=node_name,
+        crop_mask=crop_mask
+        Threads.@spawn begin
+            try
+                if PERF_LOG[]; println("  [BONE-ASYNC] Starting remote bone subseg for lid=$target_id tp=$panel_tp"); flush(stdout); end
+                surf_crop, marr_crop = Main.MedEye3d.InferenceClient.run_bone_subsegmentation_remote(les_arr, bone_arr, sp)
+                
+                s_pts = CartesianIndex{3}[]
+                m_pts = CartesianIndex{3}[]
+                if surf_crop !== nothing && marr_crop !== nothing
+                    for I in findall(surf_crop)
+                        push!(s_pts, CartesianIndex(I[1] + x_min - 1, I[2] + y_min - 1, I[3] + z_min - 1))
                     end
-                    
-                    if PERF_LOG[]; println("  [BONE-ASYNC] Remote done: $(length(s_pts)) surf, $(length(m_pts)) marrow"); flush(stdout); end
-                    
-                    # Feed result back to consumer via existing BoneSubsegResultEvent
+                    for I in findall(marr_crop)
+                        push!(m_pts, CartesianIndex(I[1] + x_min - 1, I[2] + y_min - 1, I[3] + z_min - 1))
+                    end
+                end
+                
+                if PERF_LOG[]; println("  [BONE-ASYNC] Remote done: $(length(s_pts)) surf, $(length(m_pts)) marrow"); flush(stdout); end
+                
+                # Feed result back to consumer via existing BoneSubsegResultEvent
+                ch = main_event_channel[]
+                if ch !== nothing
+                    put!(ch, BoneSubsegResultEvent(panel_tp, target_id, s_pts, m_pts))
+                end
+            catch e
+                if PERF_LOG[]; println("  [BONE-ASYNC] Remote failed: $e — trying fast fallback"); flush(stdout); end
+                try
+                    res = compute_bone_subsegments_fast(crop_mask, bone_arr, target_id; spacing=sp, offset=(x_min, y_min, z_min))
                     ch = main_event_channel[]
                     if ch !== nothing
-                        put!(ch, BoneSubsegResultEvent(panel_tp, target_id, s_pts, m_pts))
+                        put!(ch, BoneSubsegResultEvent(panel_tp, target_id, res[1], res[2]))
                     end
-                catch e
-                    if PERF_LOG[]; println("  [BONE-ASYNC] Remote failed: $e — trying fast fallback"); flush(stdout); end
-                    try
-                        res = compute_bone_subsegments_fast(mask_vol, skelly_vol, target_id)
-                        ch = main_event_channel[]
-                        if ch !== nothing
-                            put!(ch, BoneSubsegResultEvent(panel_tp, target_id, res[1], res[2]))
-                        end
-                    catch e2
-                        if PERF_LOG[]; println("  [BONE-ASYNC] Fast fallback also failed: $e2"); flush(stdout); end
-                        bone_subsegments_cache[(panel_tp, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
-                        if !isempty(node_name)
-                            bone_subsegments_cache[(node_name, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
-                        end
+                catch e2
+                    if PERF_LOG[]; println("  [BONE-ASYNC] Fast fallback also failed: $e2"); flush(stdout); end
+                    bone_subsegments_cache[(panel_tp, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
+                    if !isempty(node_name)
+                        bone_subsegments_cache[(node_name, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
                     end
                 end
             end
         end
-        
-        # Return empty immediately — overlay will be populated when BoneSubsegResultEvent arrives
-        return (CartesianIndex{3}[], CartesianIndex{3}[])
     end
     
-    bone_subsegments_cache[(panel_tp, target_id)] = (CartesianIndex{3}[], CartesianIndex{3}[])
+    # Return empty immediately — overlay will be populated when BoneSubsegResultEvent arrives
     return (CartesianIndex{3}[], CartesianIndex{3}[])
 end
 
@@ -1483,7 +1567,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     end
 
     # 1. Update OpenGL visibility constants for masks
-    panel5_lesion_id = data.lesion_id
+    panel5_lesion_id = 0
     panel5_all_ids = Int[]
     if compare_mode[] && length(stateObjects) >= 5 && data.lesion_id > 0
         try
@@ -1551,28 +1635,36 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             panel_tp = is_right_tp ? compare_right_tp[] : current_tp_index[]
             panel_lid = is_right_tp ? panel5_lesion_id : data.lesion_id
 
-            panel_surf_pts, panel_marr_pts = try
-                _get_or_compute_bone_subseg(stateObject, panel_lid, panel_tp)
-            catch e
-                (CartesianIndex{3}[], CartesianIndex{3}[])
-            end
-            surf_indices = if panel_idx == 3  # Sagittal (Y, Z, X)
-                [CartesianIndex(I[2], I[3], I[1]) for I in panel_surf_pts]
-            elseif panel_idx == 4  # Coronal (X, Z, Y)
-                [CartesianIndex(I[1], I[3], I[2]) for I in panel_surf_pts]
-            else  # Axial (panels 1, 2, 5)
-                panel_surf_pts
-            end
-            marr_indices = if panel_idx == 3
-                [CartesianIndex(I[2], I[3], I[1]) for I in panel_marr_pts]
-            elseif panel_idx == 4
-                [CartesianIndex(I[1], I[3], I[2]) for I in panel_marr_pts]
-            else
-                panel_marr_pts
-            end
+            panel_has_bone = false
+            surf_indices = CartesianIndex{3}[]
+            marr_indices = CartesianIndex{3}[]
 
-            if !isempty(surf_indices) || !isempty(marr_indices)
-                has_any_bone_data = true
+            if panel_lid > 0 && is_bone_lesion(panel_tp, panel_lid)
+                panel_surf_pts, panel_marr_pts = try
+                    _get_or_compute_bone_subseg(stateObject, panel_lid, panel_tp)
+                catch e
+                    (CartesianIndex{3}[], CartesianIndex{3}[])
+                end
+                panel_idx_mapped = panel_idx > 5 ? panel_idx - 5 : panel_idx
+                surf_indices = if panel_idx_mapped == 3  # Sagittal (Y, Z, X)
+                    [CartesianIndex(I[2], I[3], I[1]) for I in panel_surf_pts]
+                elseif panel_idx_mapped == 4  # Coronal (X, Z, Y)
+                    [CartesianIndex(I[1], I[3], I[2]) for I in panel_surf_pts]
+                else  # Axial (panels 1, 2, 5, 6, 7)
+                    panel_surf_pts
+                end
+                marr_indices = if panel_idx_mapped == 3
+                    [CartesianIndex(I[2], I[3], I[1]) for I in panel_marr_pts]
+                elseif panel_idx_mapped == 4
+                    [CartesianIndex(I[1], I[3], I[2]) for I in panel_marr_pts]
+                else
+                    panel_marr_pts
+                end
+
+                if !isempty(surf_indices) || !isempty(marr_indices)
+                    panel_has_bone = true
+                    has_any_bone_data = true
+                end
             end
 
             for scrDat in stateObject.onScrollData.dataToScroll
@@ -1606,15 +1698,11 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                     last_bone_overlay_indices[panel_idx] = unique(all_indices)
                 end
             end
-        end
 
-        # Ensure bone overlay texture is visible in the shader when bone data exists
-        if has_any_bone_data
-            for stateObject in stateObjects
-                for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-                    if textSpec.name == "Bone_Overlay"
-                        textSpec.isVisible = true
-                    end
+            # Ensure bone overlay texture is visible in shader only when bone data exists for this panel
+            for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
+                if textSpec.name == "Bone_Overlay"
+                    textSpec.isVisible = panel_has_bone && (_bone_surf_active[] || _bone_marr_active[])
                 end
             end
         end
@@ -1654,7 +1742,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     end
 
     # 3. Emulate Right Click behavior to jump panels exactly as right click does
-    if canonical_center !== nothing
+    if data.jump_to_center && canonical_center !== nothing
         origX, origY, origZ = canonical_center[1], canonical_center[2], canonical_center[3]
 
         for i in 1:length(stateObjects)
@@ -1736,7 +1824,7 @@ function reactToBoneSubsegResult(data::BoneSubsegResultEvent, stateObjects::Vect
     
     # Re-render if this lesion is still the active one
     if current_active_lesion_id[] == data.target_id && data.target_id > 0
-        reactToSyncLesion(SyncLesionEvent(data.target_id), stateObjects)
+        reactToSyncLesion(SyncLesionEvent(data.target_id, false), stateObjects)
         # Force a re-render now that the data is ready!
         for state in stateObjects
             state.isSliceChanged = true
@@ -3568,8 +3656,8 @@ function toggle_lesion_mapping!(left_tp::Int, left_lid::Int, right_tp::Int, righ
         LA.update_match_group!(left_node, left_lid, right_node, right_lid, !isempty(h5_path) && isfile(h5_path) ? h5_path : "")
     end
     
-    # Re-sync lesion visibility & UBOs across all panels
-    reactToSyncLesion(SyncLesionEvent(left_lid), stateObjects)
+    # Re-sync lesion visibility & UBOs across all panels (no centroid jump!)
+    reactToSyncLesion(SyncLesionEvent(left_lid, false), stateObjects)
     
     # Force texture / slice updates on compare panels so screen updates immediately
     for idx in (5, 6, 7, 8, 9)
@@ -3590,7 +3678,9 @@ function toggle_lesion_mapping!(left_tp::Int, left_lid::Int, right_tp::Int, righ
                 new_matches = LA.find_cross_tp_lesion(left_node, left_lid, right_node)
                 obs_dict[:map_selected_right][] = new_matches
             end
-            if isdefined(LMW, :_build_match_display!)
+            if haskey(obs_dict, :build_match_display)
+                obs_dict[:build_match_display]()
+            elseif isdefined(LMW, :_build_match_display!)
                 LMW._build_match_display!()
             end
         end

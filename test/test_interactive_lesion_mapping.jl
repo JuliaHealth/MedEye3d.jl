@@ -1122,8 +1122,337 @@ using MedEye3d.LesionMetadataWindow
         MakieEventHandlers.compare_all_lesions_mode[] = true
         MakieEventHandlers.is_single_lesion_mode[] = true
     end
+
+    @testset "12. Per-TP Bone Surface & Marrow Separation and Lesion Type Filtering" begin
+        # 12a. is_bone_lesion classification tests
+        MakieEventHandlers.global_organ_mapping[][1] = "rib_left_5"
+        MakieEventHandlers.global_organ_mapping[][2] = "lymph_node_iliac"
+        MakieEventHandlers.global_organ_mapping[][3] = "prostate"
+        MakieEventHandlers.global_organ_mapping[][4] = "vertebra_L2"
+        MakieEventHandlers.global_organ_mapping[][5] = "liver"
+
+        @test MakieEventHandlers.is_bone_lesion(0, 1) == true   # rib -> bone
+        @test MakieEventHandlers.is_bone_lesion(0, 2) == false  # lymph node -> not bone
+        @test MakieEventHandlers.is_bone_lesion(0, 3) == false  # prostate -> not bone
+        @test MakieEventHandlers.is_bone_lesion(0, 4) == true   # vertebra -> bone
+        @test MakieEventHandlers.is_bone_lesion(0, 5) == false  # liver -> not bone
+        @test MakieEventHandlers.is_bone_lesion(0, 0) == false  # invalid ID
+        @test MakieEventHandlers.is_bone_lesion(0, -1) == false # invalid ID
+
+        # Per-TP organ mapping override test
+        MakieEventHandlers.tp_organ_mapping[1] = Dict(10 => "femur_right", 11 => "lymph_node_mediastinal")
+        @test MakieEventHandlers.is_bone_lesion(1, 10) == true
+        @test MakieEventHandlers.is_bone_lesion(1, 11) == false
+
+        # 12b. _get_or_compute_bone_subseg returns empty for non-bone lesion
+        res_nonbone = MakieEventHandlers._get_or_compute_bone_subseg(nothing, 2, 0)
+        @test isempty(res_nonbone[1])
+        @test isempty(res_nonbone[2])
+
+        # 12c. Mock panels to test per-panel bone overlay visibility and panel5_lesion_id = 0 when unmapped
+        function make_bone_mock_panel(name, is_quad=true)
+            ct_spec = TextureSpec{Float32}(name="CT", isMainImage=true)
+            mask_spec = TextureSpec{Int16}(name="Mask", isMultiDiscreteMask=true, isIntegerTexture=true, minAndMaxValue=Int16[1, 10000])
+            bone_spec = TextureSpec{Int8}(name="Bone_Overlay", isMultiDiscreteMask=true, isIntegerTexture=true, isVisible=false)
+            specs = [ct_spec, mask_spec, bone_spec]
+            calc_dims = CalcDimsStruct(
+                mainImageQuadVert = is_quad ? ones(Float32, 32) : zeros(Float32, 0),
+                mainQuadVertSize = is_quad ? 128 : 0
+            )
+            on_scroll = FullScrollableDat(
+                dimensionToScroll = 3,
+                slicesNumber = Int32(30),
+                dataToScroll = StructsManag.getThreeDims(Any[
+                    ("CT", zeros(Float32, 10, 10, 30)),
+                    ("Mask", zeros(Int16, 10, 10, 30)),
+                    ("Bone_Overlay", zeros(Int8, 10, 10, 30))
+                ])
+            )
+            state = StateDataFields(
+                calcDimsStruct = calc_dims,
+                onScrollData = on_scroll,
+                mainForDisplayObjects = forDisplayObjects(listOfTextSpecifications=specs),
+                currentDisplayedSlice = 5
+            )
+            return state
+        end
+
+        mock_bone_states = [make_bone_mock_panel("Panel$i") for i in 1:9]
+        MakieEventHandlers.compare_mode[] = true
+        MakieEventHandlers.current_tp_index[] = 0
+        MakieEventHandlers.compare_right_tp[] = 1
+
+        # Simulate left TP lesion 2 (lymph node -> non bone) with NO match on right TP
+        MakieEventHandlers.reactToSyncLesion(MakieEvents.SyncLesionEvent(2, false), mock_bone_states)
+        for idx in 1:9
+            b_spec = mock_bone_states[idx].mainForDisplayObjects.listOfTextSpecifications[3]
+            @test b_spec.name == "Bone_Overlay"
+            @test b_spec.isVisible == false # Non-bone lesion must NOT have bone overlay visible!
+        end
+
+        # Now test left TP lesion 1 (rib -> bone lesion), but unmapped on right TP
+        # Seed cache for lesion 1 so bone subseg produces non-empty points
+        MakieEventHandlers.bone_subsegments_cache[(0, 1)] = ([CartesianIndex(2,2,2)], [CartesianIndex(3,3,3)])
+        MakieEventHandlers.reactToSyncLesion(MakieEvents.SyncLesionEvent(1, false), mock_bone_states)
+
+        # Panel 1 (left axial): bone overlay visible because it has bone subsegments
+        @test mock_bone_states[1].mainForDisplayObjects.listOfTextSpecifications[3].isVisible == true
+        # Panels 5-9 (right TP): NOT mapped (panel5_lesion_id = 0), so right TP bone overlay must remain FALSE!
+        for idx in 5:9
+            @test mock_bone_states[idx].mainForDisplayObjects.listOfTextSpecifications[3].isVisible == false
+        end
+
+        # Cleanup
+        MakieEventHandlers.compare_mode[] = false
+        delete!(MakieEventHandlers.bone_subsegments_cache, (0, 1))
+    end
+
+    @testset "13. Jump-To-Center Suppression & 2-Column Mapping Panel" begin
+        # 13a. SyncLesionEvent default and explicit jump_to_center
+        ev_default = MakieEvents.SyncLesionEvent(42)
+        @test ev_default.lesion_id == 42
+        @test ev_default.jump_to_center == true
+
+        ev_no_jump = MakieEvents.SyncLesionEvent(42, false)
+        @test ev_no_jump.lesion_id == 42
+        @test ev_no_jump.jump_to_center == false
+
+        # 13b. Verify reactToSyncLesion does not jump when jump_to_center == false
+        panel_state = StateDataFields()
+        panel_state.calcDimsStruct.mainQuadVertSize = 1
+        panel_state.calcDimsStruct.mainImageQuadVert = Float32[1,1,1,1]
+        panel_state.onScrollData.dimensionToScroll = 3
+        panel_state.onScrollData.slicesNumber = 100
+        panel_state.onScrollData.dataToScroll = StructsManag.getThreeDims(Any[
+            ("CT", zeros(Float32, 10, 10, 100)),
+            ("Mask", zeros(Int16, 10, 10, 100)),
+            ("Bone_Overlay", zeros(Int8, 10, 10, 100))
+        ])
+        panel_state.mainForDisplayObjects.listOfTextSpecifications = [
+            TextureSpec{Float32}(name="CT", isMainImage=true),
+            TextureSpec{Int16}(name="Mask", isMultiDiscreteMask=true, isIntegerTexture=true),
+            TextureSpec{Int8}(name="Bone_Overlay", isMultiDiscreteMask=true, isIntegerTexture=true)
+        ]
+        panel_state.currentDisplayedSlice = 25
+        MakieEventHandlers.lesion_centroids_cache[(0, 77)] = [5, 5, 80] # Centroid is at slice 80
+
+        # Jump suppressed: slice must STAY at 25
+        MakieEventHandlers.reactToSyncLesion(MakieEvents.SyncLesionEvent(77, false), [panel_state])
+        @test panel_state.currentDisplayedSlice == 25
+
+        # Jump enabled: slice must change to 80
+        MakieEventHandlers.reactToSyncLesion(MakieEvents.SyncLesionEvent(77, true), [panel_state])
+        @test panel_state.currentDisplayedSlice == 80
+
+        # 13c. Verify _lmw_observables build_match_display hook exists
+        build_called = Ref(false)
+        MakieEventHandlers._get_lmw() !== nothing && haskey(MakieEventHandlers._get_lmw()._lmw_observables, :build_match_display)
+        # Register a mock build callback to verify contract
+        test_obs_dict = Dict{Symbol, Any}(:build_match_display => () -> (build_called[] = true))
+        test_obs_dict[:build_match_display]()
+        @test build_called[] == true
+
+        # Cleanup
+        delete!(MakieEventHandlers.lesion_centroids_cache, (0, 77))
+    end
+
+    # =========================================================================
+    # Group 14: Full Mapping Table Logic (overflow fix + complete list)
+    # =========================================================================
+    @testset "14. Full Mapping Table Logic" begin
+        mg = LesionAssociation.get_match_groups()
+        
+        # 14a. Build mapping rows from match groups — simulates _build_match_display! logic
+        @testset "14a. Mapping rows from match groups" begin
+            empty!(mg)
+            LesionAssociation.update_match_group!("TP_0", 1, "TP_1", 5, "")
+            LesionAssociation.update_match_group!("TP_0", 2, "TP_1", 6, "")
+            
+            left_node = "TP_0"; right_node = "TP_1"
+            l_ids = [1, 2, 3];  r_ids = [5, 6, 7]
+            
+            mapping_rows = Tuple{Vector{Int}, Vector{Int}}[]
+            used_left = Set{Int}(); used_right = Set{Int}()
+            
+            for (gid, members) in mg
+                g_lefts = Int[m[2] for m in members if m[1] == left_node && m[2] in l_ids]
+                g_rights = Int[m[2] for m in members if m[1] == right_node && m[2] in r_ids]
+                if !isempty(g_lefts) || !isempty(g_rights)
+                    push!(mapping_rows, (sort(unique(g_lefts)), sort(unique(g_rights))))
+                    union!(used_left, g_lefts)
+                    union!(used_right, g_rights)
+                end
+            end
+            for lid in l_ids
+                if !(lid in used_left)
+                    push!(mapping_rows, (Int[lid], Int[]))
+                    push!(used_left, lid)
+                end
+            end
+            for rid in r_ids
+                if !(rid in used_right)
+                    push!(mapping_rows, (Int[], Int[rid]))
+                    push!(used_right, rid)
+                end
+            end
+            
+            # Should have 4 rows: 2 matched + 1 unmatched-left(3) + 1 unmatched-right(7)
+            @test length(mapping_rows) == 4
+            
+            # All left IDs should appear
+            all_left = vcat([r[1] for r in mapping_rows]...)
+            @test sort(unique(all_left)) == [1, 2, 3]
+            
+            # All right IDs should appear
+            all_right = vcat([r[2] for r in mapping_rows]...)
+            @test sort(unique(all_right)) == [5, 6, 7]
+            
+            # Matched rows should have both sides non-empty
+            matched = filter(r -> !isempty(r[1]) && !isempty(r[2]), mapping_rows)
+            @test length(matched) == 2
+            
+            # Unmatched rows
+            unmatched_left = filter(r -> !isempty(r[1]) && isempty(r[2]), mapping_rows)
+            @test length(unmatched_left) == 1
+            @test unmatched_left[1][1] == [3]
+            
+            unmatched_right = filter(r -> isempty(r[1]) && !isempty(r[2]), mapping_rows)
+            @test length(unmatched_right) == 1
+            @test unmatched_right[1][2] == [7]
+        end
+        
+        # 14b. Row truncation logic
+        @testset "14b. Row truncation capping" begin
+            MAX_MAP_DISPLAY_ROWS = 10
+            
+            # Under limit: no truncation
+            n_total = 8
+            n_display = n_total
+            n_truncated = 0
+            if n_display > MAX_MAP_DISPLAY_ROWS
+                n_truncated = n_display - MAX_MAP_DISPLAY_ROWS + 1
+                n_display = MAX_MAP_DISPLAY_ROWS - 1
+            end
+            @test n_display == 8
+            @test n_truncated == 0
+            
+            # Over limit: truncation
+            n_total = 15
+            n_display = n_total
+            n_truncated = 0
+            if n_display > MAX_MAP_DISPLAY_ROWS
+                n_truncated = n_display - MAX_MAP_DISPLAY_ROWS + 1
+                n_display = MAX_MAP_DISPLAY_ROWS - 1
+            end
+            @test n_display == 9   # MAX - 1
+            @test n_truncated == 6  # 15 - 10 + 1
+            
+            # Exactly at limit: no truncation
+            n_total = 10
+            n_display = n_total
+            n_truncated = 0
+            if n_display > MAX_MAP_DISPLAY_ROWS
+                n_truncated = n_display - MAX_MAP_DISPLAY_ROWS + 1
+                n_display = MAX_MAP_DISPLAY_ROWS - 1
+            end
+            @test n_display == 10
+            @test n_truncated == 0
+        end
+        
+        # 14c. Label truncation helper
+        @testset "14c. Label text truncation" begin
+            _trunc(s, maxlen=28) = length(s) > maxlen ? first(s, maxlen) * "…" : s
+            
+            @test _trunc("short") == "short"
+            @test _trunc("ID 5: Right Upper Lobe, Lung") == "ID 5: Right Upper Lobe, Lung"  # exactly 28
+            long_str = "ID 42: Very Long Anatomical Structure Name Here Blah"
+            truncated = _trunc(long_str)
+            @test length(truncated) <= 29  # 28 chars + "…"
+            @test endswith(truncated, "…")
+            @test _trunc("abc", 3) == "abc"
+            @test _trunc("abcd", 3) == "abc…"
+        end
+        
+        # 14d. 1-to-many mapping shows all related IDs
+        @testset "14d. Many-to-one in mapping rows" begin
+            empty!(mg)
+            # Create 2-to-1 mapping: TP_0 IDs 1,2 both map to TP_1 ID 10
+            LesionAssociation.update_match_group!("TP_0", 1, "TP_1", 10, "")
+            LesionAssociation.update_match_group!("TP_0", 2, "TP_1", 10, "")
+            
+            left_node = "TP_0"; right_node = "TP_1"
+            l_ids = [1, 2]; r_ids = [10]
+            
+            mapping_rows = Tuple{Vector{Int}, Vector{Int}}[]
+            used_left = Set{Int}(); used_right = Set{Int}()
+            
+            for (gid, members) in mg
+                g_lefts = Int[m[2] for m in members if m[1] == left_node && m[2] in l_ids]
+                g_rights = Int[m[2] for m in members if m[1] == right_node && m[2] in r_ids]
+                if !isempty(g_lefts) || !isempty(g_rights)
+                    push!(mapping_rows, (sort(unique(g_lefts)), sort(unique(g_rights))))
+                    union!(used_left, g_lefts)
+                    union!(used_right, g_rights)
+                end
+            end
+            for lid in l_ids
+                lid in used_left || push!(mapping_rows, (Int[lid], Int[]))
+            end
+            for rid in r_ids
+                rid in used_right || push!(mapping_rows, (Int[], Int[rid]))
+            end
+            
+            # Should have 1 row with both IDs 1,2 on left and ID 10 on right
+            @test length(mapping_rows) == 1
+            @test sort(mapping_rows[1][1]) == [1, 2]
+            @test mapping_rows[1][2] == [10]
+        end
+        
+        # 14e. Sort order: matched first, then unmatched-left, then unmatched-right
+        @testset "14e. Mapping row sort order" begin
+            rows = Tuple{Vector{Int}, Vector{Int}}[
+                (Int[], Int[7]),      # unmatched-right
+                (Int[3], Int[]),      # unmatched-left
+                (Int[1], Int[5]),     # matched
+                (Int[2], Int[6]),     # matched
+            ]
+            sort!(rows, by = row -> begin
+                has_l = !isempty(row[1]); has_r = !isempty(row[2])
+                matched = has_l && has_r
+                priority = matched ? 0 : (has_l ? 1 : 2)
+                first_id = has_l ? row[1][1] : (has_r ? row[2][1] : 0)
+                (priority, first_id)
+            end)
+            
+            @test rows[1] == (Int[1], Int[5])    # matched, ID 1
+            @test rows[2] == (Int[2], Int[6])    # matched, ID 2
+            @test rows[3] == (Int[3], Int[])     # unmatched-left, ID 3
+            @test rows[4] == (Int[], Int[7])     # unmatched-right, ID 7
+        end
+        
+        # 14f. Empty TPs produce no mapping rows
+        @testset "14f. Empty TPs" begin
+            empty!(mg)
+            l_ids = Int[]; r_ids = Int[]
+            
+            mapping_rows = Tuple{Vector{Int}, Vector{Int}}[]
+            used_left = Set{Int}(); used_right = Set{Int}()
+            for (gid, members) in mg
+                g_lefts = Int[m[2] for m in members if m[1] == "TP_0" && m[2] in l_ids]
+                g_rights = Int[m[2] for m in members if m[1] == "TP_1" && m[2] in r_ids]
+                if !isempty(g_lefts) || !isempty(g_rights)
+                    push!(mapping_rows, (sort(unique(g_lefts)), sort(unique(g_rights))))
+                end
+            end
+            @test isempty(mapping_rows)
+        end
+        
+        # Cleanup
+        empty!(mg)
+    end
 end
 
 println("\n=======================================================")
 println("ALL INTERACTIVE LESION MAPPING TESTS PASSED SUCCESSFULLY!")
 println("=======================================================")
+

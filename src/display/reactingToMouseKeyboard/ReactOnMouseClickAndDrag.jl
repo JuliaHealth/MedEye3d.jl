@@ -1144,7 +1144,7 @@ function _handle_lesion_click(coord, clickedPanel::Int, mousestr::MouseStruct, m
         # Clicked on left/current panel or normal non-compare mode: select clicked lesion as active
         println("[CLICK-MAP] Clicked panel $clickedPanel: selecting Lesion $clicked_lid as active")
         MEH.current_active_lesion_id[] = clicked_lid
-        MEH.reactToSyncLesion(MEH.SyncLesionEvent(clicked_lid), mainStates)
+        MEH.reactToSyncLesion(MEH.SyncLesionEvent(clicked_lid, false), mainStates)
         try
             LMW = MEH._get_lmw()
             if LMW !== nothing
@@ -1152,7 +1152,9 @@ function _handle_lesion_click(coord, clickedPanel::Int, mousestr::MouseStruct, m
                 if haskey(obs_dict, :obs_select_lesion_id)
                     obs_dict[:obs_select_lesion_id][] = clicked_lid
                 end
-                if isdefined(LMW, :_build_match_display!)
+                if haskey(obs_dict, :build_match_display)
+                    obs_dict[:build_match_display]()
+                elseif isdefined(LMW, :_build_match_display!)
                     LMW._build_match_display!()
                 end
             end

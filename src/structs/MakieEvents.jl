@@ -66,6 +66,8 @@ end
 
 struct SyncLesionEvent
     lesion_id :: Int
+    jump_to_center :: Bool
+    SyncLesionEvent(lesion_id::Int, jump_to_center::Bool=true) = new(lesion_id, jump_to_center)
 end
 
 struct ChangeTimePointEvent

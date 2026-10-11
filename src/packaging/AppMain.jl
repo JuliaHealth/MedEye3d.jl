@@ -673,6 +673,15 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 end
             end
         end
+        if haskey(h5_init, "_meta_/bone_label_ids")
+            try
+                raw_b = read(h5_init["_meta_/bone_label_ids"])
+                MEH.bone_label_ids[] = Set{Int}(Int.(raw_b))
+                println("[AppMain] Loaded $(length(MEH.bone_label_ids[])) bone label IDs from _meta_/bone_label_ids"); flush(stdout)
+            catch e
+                @warn "Failed to read _meta_/bone_label_ids: $e"
+            end
+        end
         if haskey(h5_init, "_meta_/organ_mapping")
             try
                 raw = JSON.parse(read(h5_init["_meta_/organ_mapping"]))
@@ -1184,6 +1193,10 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
         if m2_window_cache[] !== nothing
             put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], val))
+        end
+        is_cmp = (val == "Compare Curr/Next TP")
+        if makie_win.set_compare_mode[] != is_cmp
+            makie_win.set_compare_mode[] = is_cmp
         end
     end
     
