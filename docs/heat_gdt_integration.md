@@ -80,6 +80,8 @@ st_gpu = ckpt["st"].edge_net |> gpu
 st_gpu = Lux.testmode(st_gpu)            # CRITICAL: Disable BatchNorm updates
 ```
 
+
+
 ### 3.2 Run Edge Network (Once per Session/Patch)
 
 ```julia
