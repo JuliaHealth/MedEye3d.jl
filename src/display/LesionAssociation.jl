@@ -172,13 +172,13 @@ function update_match_group!(src_node::String, src_seg_int::Int, dst_node::Strin
             delete!(MATCH_GROUPS, gid)
         end
         
-        # Ensure src and dst are in the primary group
+        # Ensure src and dst are in the primary group (deduplicate by node+seg_int)
         src_entry = (src_node, src_seg_int, "manual_$(src_seg_int)_$(src_node)")
         dst_entry = (dst_node, dst_seg_int, "manual_$(dst_seg_int)_$(dst_node)")
-        if !(src_entry in MATCH_GROUPS[primary_gid])
+        if !any(m -> m[1] == src_node && m[2] == src_seg_int, MATCH_GROUPS[primary_gid])
             push!(MATCH_GROUPS[primary_gid], src_entry)
         end
-        if !(dst_entry in MATCH_GROUPS[primary_gid])
+        if !any(m -> m[1] == dst_node && m[2] == dst_seg_int, MATCH_GROUPS[primary_gid])
             push!(MATCH_GROUPS[primary_gid], dst_entry)
         end
     end
@@ -316,7 +316,7 @@ function find_cross_tp_lesion(src_node_name::String, src_segment_int::Int, dst_n
             end
         end
     end
-    return results
+    return unique(results)
 end
 
 # ── Existing association functions (for manual overrides) ────────────────────
