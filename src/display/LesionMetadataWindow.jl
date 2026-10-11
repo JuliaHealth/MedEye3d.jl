@@ -2570,6 +2570,7 @@ function create_metadata_window(
     _bbox_cache = Dict{Int, Makie.GeometryBasics.HyperRectangle{2, Float32}}()
     _bbox_cache_ready = Ref(false)
     Rect2f_scroll = Makie.GeometryBasics.HyperRectangle{2, Float32}
+    _row_visibility_state = Dict{Int, Bool}()  # tracks current visibility to skip no-ops and bound scroll
     
     _max_scroll_px = Ref(0.0f0)  # pre-computed max scrollable range
     
@@ -2580,12 +2581,20 @@ function create_metadata_window(
             bb = w.layoutobservables.computedbbox[]
             _bbox_cache[i] = Rect2f_scroll(Float32[bb.origin[1], bb.origin[2]], Float32[bb.widths[1], bb.widths[2]])
         end
-        # Pre-compute scrollable range
+        # Pre-compute scrollable range using only visible rows
         if !isempty(_bbox_cache)
-            min_y = minimum(bb.origin[2] for bb in values(_bbox_cache))
-            max_y = maximum(bb.origin[2] + bb.widths[2] for bb in values(_bbox_cache))
-            window_h = Float32(size(fig.scene)[2])
-            _max_scroll_px[] = max(0.0f0, (max_y - min_y) - window_h + 100.0f0)
+            vis_bbs = [
+                _bbox_cache[i] for (i, c) in enumerate(g.content)
+                if any(r_idx -> get(_row_visibility_state, r_idx, true), c.span.rows.start:c.span.rows.stop)
+            ]
+            if !isempty(vis_bbs)
+                min_y = minimum(bb.origin[2] for bb in vis_bbs)
+                max_y = maximum(bb.origin[2] + bb.widths[2] for bb in vis_bbs)
+                window_h = Float32(size(fig.scene)[2])
+                _max_scroll_px[] = max(0.0f0, (max_y - min_y) - window_h + 100.0f0)
+            else
+                _max_scroll_px[] = 0.0f0
+            end
         else
             _max_scroll_px[] = 0.0f0
         end
@@ -2666,7 +2675,6 @@ function create_metadata_window(
 
     # Row→widget index: maps row_idx → Vector of (blockscene_or_visible_obs) for O(1) lookup
     _row_widget_cache = Dict{Int, Vector{Any}}()
-    _row_visibility_state = Dict{Int, Bool}()  # tracks current visibility to skip no-ops
     _row_cache_ready = Ref(false)  # Set to true AFTER construction is complete
     
     function _ensure_row_cache_built!()
@@ -2682,6 +2690,39 @@ function create_metadata_window(
     
     function _invalidate_row_cache!()
         empty!(_row_widget_cache)
+    end
+
+    function _set_widget_visible!(w, visible::Bool)
+        if @isdefined(meas_list_grid) && w === meas_list_grid
+            if !visible
+                if @isdefined(_empty_meas_lbl)
+                    _empty_meas_lbl.visible[] = false
+                    hasproperty(_empty_meas_lbl, :blockscene) && (_empty_meas_lbl.blockscene.visible[] = false)
+                end
+                if @isdefined(_meas_pool)
+                    for p in _meas_pool
+                        p.visible[] = false
+                    end
+                end
+            else
+                if @isdefined(_rebuild_measurement_list!) && haskey(_lmw_observables, :obs_refresh_measurements)
+                    _rebuild_measurement_list!(meas_list_grid, _lmw_observables[:obs_refresh_measurements][])
+                end
+            end
+            return
+        end
+        if w isa Makie.GridLayoutBase.GridLayout
+            for elem in contents(w)
+                _set_widget_visible!(elem, visible)
+            end
+        elseif hasproperty(w, :blockscene)
+            w.blockscene.visible[] = visible
+            if hasproperty(w, :visible)
+                w.visible[] = visible
+            end
+        elseif hasproperty(w, :visible)
+            w.visible[] = visible
+        end
     end
 
     function set_row_visible!(row_idx::Int, visible::Bool)
@@ -2708,21 +2749,13 @@ function create_metadata_window(
         if !isempty(_row_widget_cache)
             widgets = get(_row_widget_cache, row_idx, Any[])
             for w in widgets
-                if hasproperty(w, :blockscene)
-                    w.blockscene.visible[] = visible
-                elseif hasproperty(w, :visible)
-                    w.visible[] = visible
-                end
+                _set_widget_visible!(w, visible)
             end
         else
             # Fallback: scan g.content directly (during construction or before cache is ready)
             for c in g.content
                 if c.span.rows.start <= row_idx && c.span.rows.stop >= row_idx
-                    if hasproperty(c.content, :blockscene)
-                        c.content.blockscene.visible[] = visible
-                    elseif hasproperty(c.content, :visible)
-                        c.content.visible[] = visible
-                    end
+                    _set_widget_visible!(c.content, visible)
                 end
             end
         end
@@ -2750,6 +2783,7 @@ function create_metadata_window(
         # If default_open is false, collapse immediately (DURING CONSTRUCTION — use raw scans, not cache)
         if !is_open[]
             for i in start_row:end_row
+                _row_visibility_state[i] = false
                 rowsize!(g, i, Fixed(0))
             end
             for i in (start_row > 1 ? start_row - 1 : start_row):min(end_row, r[1] - 1)
@@ -2757,9 +2791,7 @@ function create_metadata_window(
             end
             for c in g.content
                 if c.span.rows.start >= start_row && c.span.rows.stop <= end_row
-                    if hasproperty(c.content, :blockscene)
-                        c.content.blockscene.visible[] = false
-                    end
+                    _set_widget_visible!(c.content, false)
                 end
             end
         end
@@ -2772,14 +2804,12 @@ function create_metadata_window(
                 for i in start_row:end_row
                     set_row_visible!(i, is_open[])
                 end
+                _invalidate_row_cache!()
+                Makie.GridLayoutBase.update!(g)
+                _cache_widget_bboxes!()
             finally
-                # Re-cache bboxes and re-block after layout settles
-                @async begin
-                    sleep(0.15)  # let layout solver finish
-                    _cache_widget_bboxes!()
-                    g.block_updates = true
-                    _apply_scroll!(_scroll_offset_px[])  # re-apply current scroll
-                end
+                g.block_updates = true
+                _apply_scroll!(_scroll_offset_px[])
             end
         end
     end
@@ -5716,11 +5746,9 @@ function create_metadata_window(
     function _build_match_display!()
         # Skip building map display when not in compare mode (prevents layout overlap)
         if !cv_active[] && !_MEH.compare_mode[]
-            for elem in contents(map_grid); delete!(elem); end
+            for elem in contents(map_grid); try delete!(elem) catch; end; end
             return
         end
-        for elem in contents(map_grid); delete!(elem); end
-        Label(map_grid[1, 1:4], "Loading matches...", fontsize=9, color=SUBTXT, halign=:center)
         
         tp_left = _MEH.current_tp_index[]
         tp_right = _MEH.compare_right_tp[]
@@ -5800,100 +5828,130 @@ function create_metadata_window(
                 begin
                     try
                         (cv_active[] || _MEH.compare_mode[]) || return
-                        try; empty!(map_grid); catch e; @warn "map_grid cleanup: $e"; end
-                        
-                        lbl_map_left.text[] = "Current TP: $left_lbl ($left_node)"
-                        lbl_map_right.text[] = "Compare TP: $right_lbl ($right_node)"
-                        
-                        # Track active lesion + its connected right lesions
-                        map_selected_left[] = active_lid > 0 ? Int[active_lid] : Int[]
-                        map_selected_right[] = copy(connected_right)
-                        
-                        Label(map_grid[1, 1:2], "Add Left Lesion:", fontsize=9, color=LBL_FG, halign=:left)
-                        Label(map_grid[1, 3:4], "Add Right Lesion:", fontsize=9, color=LBL_FG, halign=:left)
-                        
-                        menu_l = searchable_menu(map_grid, 2, 1:2, options = Observable(l_opts), fontsize = 9)
-                        menu_r = searchable_menu(map_grid, 2, 3:4, options = Observable(r_opts), fontsize = 9)
-                        
-                        # Create a single specific mapping pair and refresh display.
-                        # IMPORTANT: Do NOT iterate all left×right — that causes transitive
-                        # mega-merging in update_match_group! (Bug B fix).
-                        function sync_mapping_and_display!(new_l::Int, new_r::Int)
-                            h5_path = _MEH.h5_path_ref[]
-                            if !isempty(h5_path) && new_l > 0 && new_r > 0
-                                LA.update_match_group!(left_node, new_l, right_node, new_r, h5_path)
-                            end
-                            if !isempty(map_selected_left[])
-                                put!(channel, SyncLesionEvent(map_selected_left[][1], false))  # false = don't jump to center
-                            end
-                            _build_match_display!()
-                        end
-                        
-                        on(menu_l.selection) do sel
-                            _is_applying_state[] && return
-                            sel_str = string(sel)
-                            (isempty(sel_str) || sel_str == "- select lesion -") && return
-                            lid = parse_lesion_id(sel_str)
-                            if lid !== nothing && !(lid in map_selected_left[])
-                                push!(map_selected_left[], lid)
-                                notify(map_selected_left)
-                                # Map new left lesion to each existing right lesion
-                                for r_id in map_selected_right[]
-                                    sync_mapping_and_display!(lid, r_id)
-                                end
-                                if isempty(map_selected_right[])
+                        g.block_updates = false
+                        try
+                            for elem in contents(map_grid); try delete!(elem) catch; end; end
+                            
+                            lbl_map_left.text[] = "Current TP: $left_lbl ($left_node)"
+                            lbl_map_right.text[] = "Compare TP: $right_lbl ($right_node)"
+                            
+                            # Track active lesion + its connected right lesions
+                            map_selected_left[] = active_lid > 0 ? Int[active_lid] : Int[]
+                            map_selected_right[] = copy(connected_right)
+                            
+                            Label(map_grid[1, 1:2], "Add Left Lesion:", fontsize=9, color=LBL_FG, halign=:left)
+                            Label(map_grid[1, 3:4], "Add Right Lesion:", fontsize=9, color=LBL_FG, halign=:left)
+                            
+                            menu_l = searchable_menu(map_grid, 2, 1:2, options = Observable(l_opts), fontsize = 9)
+                            menu_r = searchable_menu(map_grid, 2, 3:4, options = Observable(r_opts), fontsize = 9)
+                            
+                            on(menu_l.selection) do sel
+                                _is_applying_state[] && return
+                                sel_str = string(sel)
+                                (isempty(sel_str) || sel_str == "- select lesion -") && return
+                                lid = parse_lesion_id(sel_str)
+                                if lid !== nothing && !(lid in map_selected_left[])
+                                    push!(map_selected_left[], lid)
+                                    notify(map_selected_left)
+                                    h5_path = _MEH.h5_path_ref[]
+                                    if isempty(h5_path) || !isfile(h5_path)
+                                        h5_path = _MEH.h5_save_path_ref[]
+                                    end
+                                    if !isempty(h5_path) && !isempty(map_selected_right[])
+                                        for r_id in map_selected_right[]
+                                            LA.update_match_group!(left_node, lid, right_node, r_id, h5_path)
+                                        end
+                                    end
+                                    put!(channel, SyncLesionEvent(lid, false))
                                     _build_match_display!()
                                 end
                             end
-                        end
-                        
-                        on(menu_r.selection) do sel
-                            _is_applying_state[] && return
-                            sel_str = string(sel)
-                            (isempty(sel_str) || sel_str == "- select lesion -") && return
-                            rid = parse_lesion_id(sel_str)
-                            if rid !== nothing && !(rid in map_selected_right[])
-                                push!(map_selected_right[], rid)
-                                notify(map_selected_right)
-                                # Map each existing left lesion to the new right lesion
-                                for l_id in map_selected_left[]
-                                    sync_mapping_and_display!(l_id, rid)
-                                end
-                                if isempty(map_selected_left[])
+                            
+                            on(menu_r.selection) do sel
+                                _is_applying_state[] && return
+                                sel_str = string(sel)
+                                (isempty(sel_str) || sel_str == "- select lesion -") && return
+                                rid = parse_lesion_id(sel_str)
+                                if rid !== nothing && !(rid in map_selected_right[])
+                                    push!(map_selected_right[], rid)
+                                    notify(map_selected_right)
+                                    h5_path = _MEH.h5_path_ref[]
+                                    if isempty(h5_path) || !isfile(h5_path)
+                                        h5_path = _MEH.h5_save_path_ref[]
+                                    end
+                                    if !isempty(h5_path) && !isempty(map_selected_left[])
+                                        for l_id in map_selected_left[]
+                                            LA.update_match_group!(left_node, l_id, right_node, rid, h5_path)
+                                        end
+                                    end
+                                    if !isempty(map_selected_left[])
+                                        put!(channel, SyncLesionEvent(map_selected_left[][1], false))
+                                    end
                                     _build_match_display!()
                                 end
                             end
-                        end
-                        
-                        row_offset = 3
-                        # Left column: single active lesion
-                        if active_lid > 0
-                            Label(map_grid[row_offset, 1:2], active_left_name, fontsize=8,
-                                color=isempty(connected_right) ? TXT : RGBf(0.4, 0.85, 0.4), halign=:left)
-                        else
-                            Label(map_grid[row_offset, 1:2], "(no active lesion)", fontsize=8, color=SUBTXT, halign=:left)
-                        end
-                        
-                        # Right column: all connected lesions (or "(unmapped)")
-                        if isempty(connected_right)
-                            Label(map_grid[row_offset, 3:4], "(unmapped)", fontsize=8, color=SUBTXT, halign=:left)
-                        else
-                            n_display = length(connected_right)
-                            n_truncated = 0
-                            if n_display > MAX_MAP_DISPLAY_ROWS
-                                n_truncated = n_display - MAX_MAP_DISPLAY_ROWS + 1
-                                n_display = MAX_MAP_DISPLAY_ROWS - 1
+                            
+                            row_offset = 3
+                            # Left column: single active lesion
+                            if active_lid > 0
+                                Label(map_grid[row_offset, 1:2], active_left_name, fontsize=8,
+                                    color=isempty(connected_right) ? TXT : RGBf(0.4, 0.85, 0.4), halign=:left)
+                            else
+                                Label(map_grid[row_offset, 1:2], "(no active lesion)", fontsize=8, color=SUBTXT, halign=:left)
                             end
-                            for j in 1:n_display
-                                lbl_txt = right_names[j]
-                                Label(map_grid[row_offset + j - 1, 3:4], lbl_txt, fontsize=8,
-                                    color=RGBf(0.4, 0.85, 0.4), halign=:left)
+                            
+                            # Right column: all connected lesions (or "(unmapped)")
+                            if isempty(connected_right)
+                                Label(map_grid[row_offset, 3:4], "(unmapped)", fontsize=8, color=SUBTXT, halign=:left)
+                            else
+                                n_display = length(connected_right)
+                                n_truncated = 0
+                                if n_display > MAX_MAP_DISPLAY_ROWS
+                                    n_truncated = n_display - MAX_MAP_DISPLAY_ROWS + 1
+                                    n_display = MAX_MAP_DISPLAY_ROWS - 1
+                                end
+                                for j in 1:n_display
+                                    lbl_txt = right_names[j]
+                                    rid = connected_right[j]
+                                    Label(map_grid[row_offset + j - 1, 3], lbl_txt, fontsize=8,
+                                        color=RGBf(0.4, 0.85, 0.4), halign=:left)
+                                    btn_un = Button(map_grid[row_offset + j - 1, 4], label="[x]",
+                                        buttoncolor=BG_PNL, labelcolor=RGBf(0.9, 0.3, 0.3), fontsize=8,
+                                        width=22, height=18, tellwidth=true, tellheight=true)
+                                    on(btn_un.clicks) do _
+                                        h5_path = _MEH.h5_path_ref[]
+                                        if isempty(h5_path) || !isfile(h5_path)
+                                            h5_path = _MEH.h5_save_path_ref[]
+                                        end
+                                        for (gid, members) in LA.get_match_groups()
+                                            idx_r = findfirst(m -> m[1] == right_node && m[2] == rid, members)
+                                            has_l = any(m -> m[1] == left_node && m[2] == active_lid, members)
+                                            if idx_r !== nothing && has_l
+                                                deleteat!(members, idx_r)
+                                                if length(members) <= 1
+                                                    delete!(LA.get_match_groups(), gid)
+                                                end
+                                                break
+                                            end
+                                        end
+                                        if !isempty(h5_path) && isfile(h5_path)
+                                            LA.save_matches_to_h5(h5_path)
+                                        end
+                                        put!(channel, SyncLesionEvent(active_lid, false))
+                                        _build_match_display!()
+                                    end
+                                end
+                                if n_truncated > 0
+                                    Label(map_grid[row_offset + n_display, 3:4],
+                                        "(+$n_truncated more)",
+                                        fontsize=8, color=SUBTXT, halign=:left)
+                                end
                             end
-                            if n_truncated > 0
-                                Label(map_grid[row_offset + n_display, 3:4],
-                                    "(+$n_truncated more)",
-                                    fontsize=8, color=SUBTXT, halign=:left)
-                            end
+                            Makie.GridLayoutBase.update!(g)
+                            _cache_widget_bboxes!()
+                        finally
+                            g.block_updates = true
+                            _apply_scroll!(_scroll_offset_px[])
                         end
                     catch e
                         @warn "Match display UI building failed" e
@@ -5928,7 +5986,7 @@ function create_metadata_window(
         sync_tp_menus_to_current!()
         try
             if cv_active[]
-                for sec in (sec_meta, sec_seg, sec_report)
+                for sec in (sec_meta, sec_seg, sec_report, sec_meas)
                     hide_section!(sec)
                 end
                 # Collapse clinical section (keep header visible, hide content)
@@ -5951,7 +6009,7 @@ function create_metadata_window(
                     println("[COMPARE-UI] WARNING: _build_match_display! failed: $e"); flush(stdout)
                 end
             else
-                for sec in (sec_meta, sec_seg, sec_report)
+                for sec in (sec_meta, sec_seg, sec_report, sec_meas)
                     show_section!(sec)
                 end
                 # Restore clinical section to its default open state
@@ -5963,19 +6021,21 @@ function create_metadata_window(
                     end
                 end
                 sec_map_lesions[1][] = false
-                try for elem in contents(map_grid); delete!(elem); end catch; end
+                _, start_row_map, _, _, end_row_ref_map = sec_map_lesions
+                for i in start_row_map:end_row_ref_map[]
+                    set_row_visible!(i, false)
+                end
+                for elem in contents(map_grid); try delete!(elem) catch; end; end
                 update_dynamic_visibility!(active_lesion_type[])
                 notify(anat_active_count)
             end
             # Refresh layout so sections are properly visible/scrollable (Bug A fix)
             _invalidate_row_cache!()
             g.block_updates = false
-            @async begin
-                sleep(0.20)  # let layout solver finish recomputing positions
-                _cache_widget_bboxes!()
-                g.block_updates = true
-                _apply_scroll!(0.0f0)  # scroll to top to reveal Map Lesions section
-            end
+            Makie.GridLayoutBase.update!(g)
+            _cache_widget_bboxes!()
+            g.block_updates = true
+            _apply_scroll!(0.0f0)  # scroll to top to reveal Map Lesions section
         catch e
             @warn "[COMPARE-UI] Error in apply_compare_mode_ui_impl!: $e"
         end

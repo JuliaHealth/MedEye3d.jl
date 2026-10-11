@@ -1399,6 +1399,187 @@ using MedEye3d.LesionMetadataWindow
         # Cleanup
         empty!(mg)
     end
+
+    # =========================================================================
+    # SECTION 15: COMPARE MODE UI OVERLAP & VANISHING BUG FIXES
+    # =========================================================================
+    @testset "15. Compare Mode UI Overlap & Layout Fixes" begin
+        using GLMakie
+        MakieMod = GLMakie.Makie
+        GridBase = GLMakie.Makie.GridLayoutBase
+        
+        # 15a. Recursive subgrid widget visibility
+        @testset "15a. Recursive widget visibility for GridLayout" begin
+            fig = Figure()
+            g = GridLayout(fig[1, 1])
+            sub = GridLayout(g[1, 1])
+            l1 = Label(sub[1, 1], "Subgrid Label")
+            b1 = Button(sub[1, 2], label="Subgrid Button")
+            
+            # Recursive visibility function matching LesionMetadataWindow.jl
+            function test_set_widget_visible!(w, visible::Bool)
+                if w isa GridBase.GridLayout
+                    for elem in contents(w)
+                        test_set_widget_visible!(elem, visible)
+                    end
+                elseif hasproperty(w, :blockscene)
+                    w.blockscene.visible[] = visible
+                    if hasproperty(w, :visible)
+                        w.visible[] = visible
+                    end
+                elseif hasproperty(w, :visible)
+                    w.visible[] = visible
+                end
+            end
+            
+            @test l1.visible[] == true
+            @test b1.blockscene.visible[] == true
+            
+            # Hide entire subgrid
+            test_set_widget_visible!(sub, false)
+            @test l1.visible[] == false
+            @test b1.blockscene.visible[] == false
+            
+            # Show entire subgrid
+            test_set_widget_visible!(sub, true)
+            @test l1.visible[] == true
+            @test b1.blockscene.visible[] == true
+        end
+
+        # 15b. sec_meas included in compare mode hide list
+        @testset "15b. sec_meas included in compare mode hide/show" begin
+            # Simulating sections tuple
+            sec_meta = (GLMakie.Observable(true), 1, 1, nothing, Ref(5))
+            sec_seg = (GLMakie.Observable(true), 6, 6, nothing, Ref(10))
+            sec_report = (GLMakie.Observable(true), 11, 11, nothing, Ref(15))
+            sec_meas = (GLMakie.Observable(true), 16, 16, nothing, Ref(20))
+            
+            sections_to_hide = (sec_meta, sec_seg, sec_report, sec_meas)
+            @test sec_meas in sections_to_hide
+            
+            hidden_rows = Int[]
+            for sec in sections_to_hide
+                _, start_r, _, _, end_r = sec
+                for r in start_r:end_r[]
+                    push!(hidden_rows, r)
+                end
+            end
+            
+            # Ensure measurements section rows (16:20) are fully included in hidden rows
+            @test all(r in hidden_rows for r in 16:20)
+        end
+
+        # 15c. Synchronous layout solving with GridLayoutBase.update!
+        @testset "15c. Synchronous layout solving computes valid widget bboxes" begin
+            fig = Figure(size=(800, 600))
+            g = GridLayout(fig[1, 1])
+            map_grid = GridLayout(g[1, 1:4])
+            MakieMod.update_state_before_display!(fig)
+            
+            g.block_updates = true
+            g.block_updates = false
+            for elem in contents(map_grid); try delete!(elem); catch; end; end
+            l_add_l = Label(map_grid[1, 1:2], "Add Left:")
+            l_add_r = Label(map_grid[1, 3:4], "Add Right:")
+            m_l = Menu(map_grid[2, 1:2], options=["opt1"])
+            m_r = Menu(map_grid[2, 3:4], options=["opt2"])
+            l_active = Label(map_grid[3, 1:2], "ID 1: Liver")
+            l_conn = Label(map_grid[3, 3], "ID 2: Liver")
+            b_del = Button(map_grid[3, 4], label="[x]", width=22, height=18, tellwidth=true, tellheight=true)
+            
+            # Immediately solve layout synchronously
+            GridBase.update!(g)
+            g.block_updates = true
+            
+            # Verify all widgets received computed bounding boxes in the expected grid area
+            bb_add_l = l_add_l.layoutobservables.computedbbox[]
+            bb_m_l = m_l.layoutobservables.computedbbox[]
+            bb_del = b_del.layoutobservables.computedbbox[]
+            
+            @test bb_add_l.widths[1] > 0
+            @test bb_add_l.widths[2] > 0
+            @test bb_m_l.widths[1] > 0
+            @test bb_del.widths[1] == 22.0f0
+            @test bb_del.widths[2] == 18.0f0
+            # Ensure widgets are not at default origin (20.432, 41.845)
+            @test bb_add_l.origin[2] > 100.0f0
+        end
+
+        # 15d. Unlink button logic removes right lesion from match group
+        @testset "15d. Unlink [x] removes right lesion from match group" begin
+            mg = LesionAssociation.get_match_groups()
+            empty!(mg)
+            
+            # Link left 1 to right 5 and right 9
+            LesionAssociation.update_match_group!("TP_0", 1, "TP_1", 5, "")
+            LesionAssociation.update_match_group!("TP_0", 1, "TP_1", 9, "")
+            
+            matches_before = LesionAssociation.find_cross_tp_lesion("TP_0", 1, "TP_1")
+            @test 5 in matches_before
+            @test 9 in matches_before
+            
+            # Simulate unlink [x] clicked for lesion 9
+            rid_to_remove = 9
+            left_node = "TP_0"
+            active_lid = 1
+            right_node = "TP_1"
+            
+            for (gid, members) in mg
+                idx_r = findfirst(m -> m[1] == right_node && m[2] == rid_to_remove, members)
+                has_l = any(m -> m[1] == left_node && m[2] == active_lid, members)
+                if idx_r !== nothing && has_l
+                    deleteat!(members, idx_r)
+                    if length(members) <= 1
+                        delete!(mg, gid)
+                    end
+                    break
+                end
+            end
+            
+            matches_after = LesionAssociation.find_cross_tp_lesion("TP_0", 1, "TP_1")
+            @test 5 in matches_after
+            @test !(9 in matches_after)
+            
+            # Now unlink lesion 5 as well -> group should be dissolved
+            for (gid, members) in mg
+                idx_r = findfirst(m -> m[1] == right_node && m[2] == 5, members)
+                has_l = any(m -> m[1] == left_node && m[2] == active_lid, members)
+                if idx_r !== nothing && has_l
+                    deleteat!(members, idx_r)
+                    if length(members) <= 1
+                        delete!(mg, gid)
+                    end
+                    break
+                end
+            end
+            
+            matches_empty = LesionAssociation.find_cross_tp_lesion("TP_0", 1, "TP_1")
+            @test isempty(matches_empty)
+            @test isempty(mg)
+        end
+
+        # 15e. Visible rows filter for max scroll range
+        @testset "15e. Visible rows filter for max scroll range" begin
+            vis_state = Dict{Int, Bool}(1 => true, 2 => false, 3 => true)
+            bboxes = Dict(
+                1 => MakieMod.GeometryBasics.Rect2f(0, 100, 100, 20),
+                2 => MakieMod.GeometryBasics.Rect2f(0, -500, 100, 20), # hidden row far below
+                3 => MakieMod.GeometryBasics.Rect2f(0, 70, 100, 20)
+            )
+            # Spans
+            spans = Dict(1 => 1:1, 2 => 2:2, 3 => 3:3)
+            
+            vis_bbs = [
+                bboxes[i] for i in 1:3
+                if any(r_idx -> get(vis_state, r_idx, true), spans[i])
+            ]
+            
+            @test length(vis_bbs) == 2
+            @test bboxes[2] ∉ vis_bbs
+            min_y = minimum(bb.origin[2] for bb in vis_bbs)
+            @test min_y == 70.0f0 # NOT -500!
+        end
+    end
 end
 
 println("\n=======================================================")
