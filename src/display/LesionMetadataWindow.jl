@@ -5742,6 +5742,7 @@ function create_metadata_window(
         left_lbl = get(_MEH.tp_labels, tp_left, "TP $tp_left")
         right_lbl = get(_MEH.tp_labels, tp_right, "TP $tp_right")
         
+        cur_act = active_lesion_id[]
         cur_lesion_ids = copy(lesion_ids[])
 
         # Helper: truncate long label text for compact display
@@ -5769,65 +5770,21 @@ function create_metadata_window(
                 l_ids = get_mask_ids(tp_left)
                 r_ids = get_mask_ids(tp_right)
                 
-                # ── Build full mapping table: all match groups + unmatched ──
-                # Each "mapping row" is (left_ids::Vector{Int}, right_ids::Vector{Int})
-                mapping_rows = Tuple{Vector{Int}, Vector{Int}}[]
-                used_left = Set{Int}()
-                used_right = Set{Int}()
+                # ── Active lesion on left, connected lesions on right ──
+                active_lid = parse_lesion_id(cur_act)
+                active_lid = active_lid !== nothing ? active_lid : (isempty(l_ids) ? 0 : l_ids[1])
                 
-                # Walk all match groups and extract rows relevant to these two TPs
-                for (gid, members) in LA.get_match_groups()
-                    g_lefts = Int[m[2] for m in members if m[1] == left_node && m[2] in l_ids]
-                    g_rights = Int[m[2] for m in members if m[1] == right_node && m[2] in r_ids]
-                    if !isempty(g_lefts) || !isempty(g_rights)
-                        push!(mapping_rows, (sort(unique(g_lefts)), sort(unique(g_rights))))
-                        union!(used_left, g_lefts)
-                        union!(used_right, g_rights)
-                    end
+                # Find all right-TP lesions connected to the active left lesion
+                connected_right = Int[]
+                if active_lid > 0
+                    connected_right = LA.find_cross_tp_lesion(left_node, active_lid, right_node)
                 end
+                # Filter to only IDs that actually exist in the right TP mask
+                connected_right = filter(rid -> rid in r_ids, connected_right)
                 
-                # Add unmatched left lesions
-                for lid in l_ids
-                    if !(lid in used_left)
-                        push!(mapping_rows, (Int[lid], Int[]))
-                        push!(used_left, lid)
-                    end
-                end
-                # Add unmatched right lesions
-                for rid in r_ids
-                    if !(rid in used_right)
-                        push!(mapping_rows, (Int[], Int[rid]))
-                        push!(used_right, rid)
-                    end
-                end
-                
-                # Sort mapping rows: matched pairs first, then unmatched left, then unmatched right
-                sort!(mapping_rows, by = row -> begin
-                    has_l = !isempty(row[1])
-                    has_r = !isempty(row[2])
-                    matched = has_l && has_r
-                    # Sort key: matched first (0), then unmatched-left (1), then unmatched-right (2)
-                    # Within each group, sort by first lesion ID
-                    priority = matched ? 0 : (has_l ? 1 : 2)
-                    first_id = has_l ? row[1][1] : (has_r ? row[2][1] : 0)
-                    (priority, first_id)
-                end)
-                
-                # Precompute labels for each mapping row
-                row_labels = Tuple{String, String}[]
-                for (lids, rids) in mapping_rows
-                    l_txt = if isempty(lids)
-                        "(unmapped)"
-                    else
-                        join([_trunc(_lesion_display_name(lid, cur_lesion_ids)) for lid in lids], ", ")
-                    end
-                    r_txt = if isempty(rids)
-                        "(unmapped)"
-                    else
-                        join([_trunc(_lesion_display_name(rid, cur_lesion_ids)) for rid in rids], ", ")
-                    end
-                    push!(row_labels, (l_txt, r_txt))
-                end
+                # Build display names
+                active_left_name = active_lid > 0 ? _trunc(_lesion_display_name(active_lid, cur_lesion_ids)) : "(none)"
+                right_names = [_trunc(_lesion_display_name(rid, cur_lesion_ids)) for rid in connected_right]
 
                 # Build dropdown options for adding new mappings
                 l_opts = String["- select lesion -"]
@@ -5848,15 +5805,9 @@ function create_metadata_window(
                         lbl_map_left.text[] = "Current TP: $left_lbl ($left_node)"
                         lbl_map_right.text[] = "Compare TP: $right_lbl ($right_node)"
                         
-                        # Update selected state to include ALL mapped lesions
-                        all_left_sel = Int[]
-                        all_right_sel = Int[]
-                        for (lids, rids) in mapping_rows
-                            append!(all_left_sel, lids)
-                            append!(all_right_sel, rids)
-                        end
-                        map_selected_left[] = unique(all_left_sel)
-                        map_selected_right[] = unique(all_right_sel)
+                        # Track active lesion + its connected right lesions
+                        map_selected_left[] = active_lid > 0 ? Int[active_lid] : Int[]
+                        map_selected_right[] = copy(connected_right)
                         
                         Label(map_grid[1, 1:2], "Add Left Lesion:", fontsize=9, color=LBL_FG, halign=:left)
                         Label(map_grid[1, 3:4], "Add Right Lesion:", fontsize=9, color=LBL_FG, halign=:left)
@@ -5904,32 +5855,33 @@ function create_metadata_window(
                         end
                         
                         row_offset = 3
-                        n_display = length(mapping_rows)
-                        n_truncated = 0
-                        if n_display > MAX_MAP_DISPLAY_ROWS
-                            n_truncated = n_display - MAX_MAP_DISPLAY_ROWS + 1  # +1 for the "(+N more)" label
-                            n_display = MAX_MAP_DISPLAY_ROWS - 1
+                        # Left column: single active lesion
+                        if active_lid > 0
+                            Label(map_grid[row_offset, 1:2], active_left_name, fontsize=8,
+                                color=isempty(connected_right) ? TXT : RGBf(0.4, 0.85, 0.4), halign=:left)
+                        else
+                            Label(map_grid[row_offset, 1:2], "(no active lesion)", fontsize=8, color=SUBTXT, halign=:left)
                         end
                         
-                        if isempty(mapping_rows)
-                            Label(map_grid[row_offset, 1:4], "(No lesions found in either TP)", fontsize=9, color=SUBTXT, halign=:center)
+                        # Right column: all connected lesions (or "(unmapped)")
+                        if isempty(connected_right)
+                            Label(map_grid[row_offset, 3:4], "(unmapped)", fontsize=8, color=SUBTXT, halign=:left)
                         else
-                            for i in 1:n_display
-                                lids, rids = mapping_rows[i]
-                                l_txt, r_txt = row_labels[i]
-                                is_matched = !isempty(lids) && !isempty(rids)
-                                
-                                # Color: matched=green accent, unmatched=dimmed
-                                l_color = isempty(lids) ? SUBTXT : (is_matched ? RGBf(0.4, 0.85, 0.4) : TXT)
-                                r_color = isempty(rids) ? SUBTXT : (is_matched ? RGBf(0.4, 0.85, 0.4) : TXT)
-                                
-                                Label(map_grid[row_offset + i - 1, 1:2], l_txt, fontsize=8, color=l_color, halign=:left)
-                                Label(map_grid[row_offset + i - 1, 3:4], r_txt, fontsize=8, color=r_color, halign=:left)
+                            n_display = length(connected_right)
+                            n_truncated = 0
+                            if n_display > MAX_MAP_DISPLAY_ROWS
+                                n_truncated = n_display - MAX_MAP_DISPLAY_ROWS + 1
+                                n_display = MAX_MAP_DISPLAY_ROWS - 1
+                            end
+                            for j in 1:n_display
+                                lbl_txt = right_names[j]
+                                Label(map_grid[row_offset + j - 1, 3:4], lbl_txt, fontsize=8,
+                                    color=RGBf(0.4, 0.85, 0.4), halign=:left)
                             end
                             if n_truncated > 0
-                                Label(map_grid[row_offset + n_display, 1:4],
-                                    "(+$n_truncated more — use Refresh to see all)",
-                                    fontsize=8, color=SUBTXT, halign=:center)
+                                Label(map_grid[row_offset + n_display, 3:4],
+                                    "(+$n_truncated more)",
+                                    fontsize=8, color=SUBTXT, halign=:left)
                             end
                         end
                     catch e
@@ -5969,6 +5921,15 @@ function create_metadata_window(
                 for sec in (sec_meta, sec_seg, sec_report)
                     hide_section!(sec)
                 end
+                # Collapse clinical section (keep header visible, hide content)
+                if sec_clinical[1][]
+                    sec_clinical[1][] = false
+                    _, start_row_cl, _, _, end_row_ref_cl = sec_clinical
+                    for i in start_row_cl:end_row_ref_cl[]
+                        set_row_visible!(i, false)
+                    end
+                end
+                # Auto-open Map Lesions section
                 sec_map_lesions[1][] = true
                 show_section!(sec_map_lesions)
                 notify(anat_active_count)
@@ -5982,6 +5943,14 @@ function create_metadata_window(
             else
                 for sec in (sec_meta, sec_seg, sec_report)
                     show_section!(sec)
+                end
+                # Restore clinical section to its default open state
+                if !sec_clinical[1][]
+                    sec_clinical[1][] = true
+                    _, start_row_cl, _, _, end_row_ref_cl = sec_clinical
+                    for i in start_row_cl:end_row_ref_cl[]
+                        set_row_visible!(i, true)
+                    end
                 end
                 sec_map_lesions[1][] = false
                 try for elem in contents(map_grid); delete!(elem); end catch; end

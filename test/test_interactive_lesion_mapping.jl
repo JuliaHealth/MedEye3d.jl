@@ -1257,78 +1257,74 @@ using MedEye3d.LesionMetadataWindow
     end
 
     # =========================================================================
-    # Group 14: Full Mapping Table Logic (overflow fix + complete list)
+    # Group 14: Active Lesion Mapping Display Logic
+    # (left=active lesion, right=connected lesions via match groups)
     # =========================================================================
-    @testset "14. Full Mapping Table Logic" begin
+    @testset "14. Active Lesion Mapping Display" begin
         mg = LesionAssociation.get_match_groups()
         
-        # 14a. Build mapping rows from match groups — simulates _build_match_display! logic
-        @testset "14a. Mapping rows from match groups" begin
+        # 14a. Single active lesion finds connected right-TP lesions
+        @testset "14a. Active lesion → connected right lesions" begin
             empty!(mg)
             LesionAssociation.update_match_group!("TP_0", 1, "TP_1", 5, "")
             LesionAssociation.update_match_group!("TP_0", 2, "TP_1", 6, "")
             
             left_node = "TP_0"; right_node = "TP_1"
-            l_ids = [1, 2, 3];  r_ids = [5, 6, 7]
+            r_ids = [5, 6, 7]  # available right-TP lesion IDs
             
-            mapping_rows = Tuple{Vector{Int}, Vector{Int}}[]
-            used_left = Set{Int}(); used_right = Set{Int}()
+            # Active lesion 1 → should find [5]
+            active_lid = 1
+            connected = LesionAssociation.find_cross_tp_lesion(left_node, active_lid, right_node)
+            connected = filter(rid -> rid in r_ids, connected)
+            @test connected == [5]
             
-            for (gid, members) in mg
-                g_lefts = Int[m[2] for m in members if m[1] == left_node && m[2] in l_ids]
-                g_rights = Int[m[2] for m in members if m[1] == right_node && m[2] in r_ids]
-                if !isempty(g_lefts) || !isempty(g_rights)
-                    push!(mapping_rows, (sort(unique(g_lefts)), sort(unique(g_rights))))
-                    union!(used_left, g_lefts)
-                    union!(used_right, g_rights)
-                end
-            end
-            for lid in l_ids
-                if !(lid in used_left)
-                    push!(mapping_rows, (Int[lid], Int[]))
-                    push!(used_left, lid)
-                end
-            end
-            for rid in r_ids
-                if !(rid in used_right)
-                    push!(mapping_rows, (Int[], Int[rid]))
-                    push!(used_right, rid)
-                end
-            end
+            # Active lesion 2 → should find [6]
+            active_lid = 2
+            connected = LesionAssociation.find_cross_tp_lesion(left_node, active_lid, right_node)
+            connected = filter(rid -> rid in r_ids, connected)
+            @test connected == [6]
             
-            # Should have 4 rows: 2 matched + 1 unmatched-left(3) + 1 unmatched-right(7)
-            @test length(mapping_rows) == 4
-            
-            # All left IDs should appear
-            all_left = vcat([r[1] for r in mapping_rows]...)
-            @test sort(unique(all_left)) == [1, 2, 3]
-            
-            # All right IDs should appear
-            all_right = vcat([r[2] for r in mapping_rows]...)
-            @test sort(unique(all_right)) == [5, 6, 7]
-            
-            # Matched rows should have both sides non-empty
-            matched = filter(r -> !isempty(r[1]) && !isempty(r[2]), mapping_rows)
-            @test length(matched) == 2
-            
-            # Unmatched rows
-            unmatched_left = filter(r -> !isempty(r[1]) && isempty(r[2]), mapping_rows)
-            @test length(unmatched_left) == 1
-            @test unmatched_left[1][1] == [3]
-            
-            unmatched_right = filter(r -> isempty(r[1]) && !isempty(r[2]), mapping_rows)
-            @test length(unmatched_right) == 1
-            @test unmatched_right[1][2] == [7]
+            # Active lesion 3 (not mapped) → should find nothing
+            active_lid = 3
+            connected = LesionAssociation.find_cross_tp_lesion(left_node, active_lid, right_node)
+            connected = filter(rid -> rid in r_ids, connected)
+            @test isempty(connected)
         end
         
-        # 14b. Row truncation logic
-        @testset "14b. Row truncation capping" begin
+        # 14b. Many-to-one: active lesion has multiple connected right lesions
+        @testset "14b. Active lesion with multiple right connections" begin
+            empty!(mg)
+            # 1 maps to both 10 and 11
+            LesionAssociation.update_match_group!("TP_0", 1, "TP_1", 10, "")
+            LesionAssociation.update_match_group!("TP_0", 1, "TP_1", 11, "")
+            
+            r_ids = [10, 11, 12]
+            connected = LesionAssociation.find_cross_tp_lesion("TP_0", 1, "TP_1")
+            connected = filter(rid -> rid in r_ids, connected)
+            @test sort(connected) == [10, 11]
+        end
+        
+        # 14c. Two-to-one: active lesion in a many-to-one group
+        @testset "14c. Many-to-one group lookup" begin
+            empty!(mg)
+            LesionAssociation.update_match_group!("TP_0", 1, "TP_1", 10, "")
+            LesionAssociation.update_match_group!("TP_0", 2, "TP_1", 10, "")
+            
+            r_ids = [10]
+            # Both lesion 1 and 2 should find [10]
+            for active_lid in [1, 2]
+                connected = LesionAssociation.find_cross_tp_lesion("TP_0", active_lid, "TP_1")
+                connected = filter(rid -> rid in r_ids, connected)
+                @test connected == [10]
+            end
+        end
+        
+        # 14d. Row truncation logic (for right column with many connected lesions)
+        @testset "14d. Row truncation capping" begin
             MAX_MAP_DISPLAY_ROWS = 10
             
             # Under limit: no truncation
-            n_total = 8
-            n_display = n_total
-            n_truncated = 0
+            n_display = 8; n_truncated = 0
             if n_display > MAX_MAP_DISPLAY_ROWS
                 n_truncated = n_display - MAX_MAP_DISPLAY_ROWS + 1
                 n_display = MAX_MAP_DISPLAY_ROWS - 1
@@ -1337,9 +1333,7 @@ using MedEye3d.LesionMetadataWindow
             @test n_truncated == 0
             
             # Over limit: truncation
-            n_total = 15
-            n_display = n_total
-            n_truncated = 0
+            n_display = 15; n_truncated = 0
             if n_display > MAX_MAP_DISPLAY_ROWS
                 n_truncated = n_display - MAX_MAP_DISPLAY_ROWS + 1
                 n_display = MAX_MAP_DISPLAY_ROWS - 1
@@ -1348,9 +1342,7 @@ using MedEye3d.LesionMetadataWindow
             @test n_truncated == 6  # 15 - 10 + 1
             
             # Exactly at limit: no truncation
-            n_total = 10
-            n_display = n_total
-            n_truncated = 0
+            n_display = 10; n_truncated = 0
             if n_display > MAX_MAP_DISPLAY_ROWS
                 n_truncated = n_display - MAX_MAP_DISPLAY_ROWS + 1
                 n_display = MAX_MAP_DISPLAY_ROWS - 1
@@ -1359,8 +1351,8 @@ using MedEye3d.LesionMetadataWindow
             @test n_truncated == 0
         end
         
-        # 14c. Label truncation helper
-        @testset "14c. Label text truncation" begin
+        # 14e. Label truncation helper
+        @testset "14e. Label text truncation" begin
             _trunc(s, maxlen=28) = length(s) > maxlen ? first(s, maxlen) * "…" : s
             
             @test _trunc("short") == "short"
@@ -1373,78 +1365,35 @@ using MedEye3d.LesionMetadataWindow
             @test _trunc("abcd", 3) == "abc…"
         end
         
-        # 14d. 1-to-many mapping shows all related IDs
-        @testset "14d. Many-to-one in mapping rows" begin
+        # 14f. Filter connected_right to only IDs in r_ids
+        @testset "14f. Filter connected to existing right IDs" begin
             empty!(mg)
-            # Create 2-to-1 mapping: TP_0 IDs 1,2 both map to TP_1 ID 10
-            LesionAssociation.update_match_group!("TP_0", 1, "TP_1", 10, "")
-            LesionAssociation.update_match_group!("TP_0", 2, "TP_1", 10, "")
+            LesionAssociation.update_match_group!("TP_0", 1, "TP_1", 99, "")
             
-            left_node = "TP_0"; right_node = "TP_1"
-            l_ids = [1, 2]; r_ids = [10]
+            # If 99 doesn't exist in mask, it should be filtered out
+            r_ids = [5, 6, 7]  # 99 not in r_ids
+            connected = LesionAssociation.find_cross_tp_lesion("TP_0", 1, "TP_1")
+            connected = filter(rid -> rid in r_ids, connected)
+            @test isempty(connected)
             
-            mapping_rows = Tuple{Vector{Int}, Vector{Int}}[]
-            used_left = Set{Int}(); used_right = Set{Int}()
-            
-            for (gid, members) in mg
-                g_lefts = Int[m[2] for m in members if m[1] == left_node && m[2] in l_ids]
-                g_rights = Int[m[2] for m in members if m[1] == right_node && m[2] in r_ids]
-                if !isempty(g_lefts) || !isempty(g_rights)
-                    push!(mapping_rows, (sort(unique(g_lefts)), sort(unique(g_rights))))
-                    union!(used_left, g_lefts)
-                    union!(used_right, g_rights)
-                end
-            end
-            for lid in l_ids
-                lid in used_left || push!(mapping_rows, (Int[lid], Int[]))
-            end
-            for rid in r_ids
-                rid in used_right || push!(mapping_rows, (Int[], Int[rid]))
-            end
-            
-            # Should have 1 row with both IDs 1,2 on left and ID 10 on right
-            @test length(mapping_rows) == 1
-            @test sort(mapping_rows[1][1]) == [1, 2]
-            @test mapping_rows[1][2] == [10]
+            # If 99 is in r_ids, it should stay
+            r_ids2 = [5, 6, 99]
+            connected2 = LesionAssociation.find_cross_tp_lesion("TP_0", 1, "TP_1")
+            connected2 = filter(rid -> rid in r_ids2, connected2)
+            @test connected2 == [99]
         end
         
-        # 14e. Sort order: matched first, then unmatched-left, then unmatched-right
-        @testset "14e. Mapping row sort order" begin
-            rows = Tuple{Vector{Int}, Vector{Int}}[
-                (Int[], Int[7]),      # unmatched-right
-                (Int[3], Int[]),      # unmatched-left
-                (Int[1], Int[5]),     # matched
-                (Int[2], Int[6]),     # matched
-            ]
-            sort!(rows, by = row -> begin
-                has_l = !isempty(row[1]); has_r = !isempty(row[2])
-                matched = has_l && has_r
-                priority = matched ? 0 : (has_l ? 1 : 2)
-                first_id = has_l ? row[1][1] : (has_r ? row[2][1] : 0)
-                (priority, first_id)
-            end)
-            
-            @test rows[1] == (Int[1], Int[5])    # matched, ID 1
-            @test rows[2] == (Int[2], Int[6])    # matched, ID 2
-            @test rows[3] == (Int[3], Int[])     # unmatched-left, ID 3
-            @test rows[4] == (Int[], Int[7])     # unmatched-right, ID 7
-        end
-        
-        # 14f. Empty TPs produce no mapping rows
-        @testset "14f. Empty TPs" begin
+        # 14g. No active lesion (lid=0) → no connected right
+        @testset "14g. No active lesion" begin
             empty!(mg)
-            l_ids = Int[]; r_ids = Int[]
+            LesionAssociation.update_match_group!("TP_0", 1, "TP_1", 5, "")
             
-            mapping_rows = Tuple{Vector{Int}, Vector{Int}}[]
-            used_left = Set{Int}(); used_right = Set{Int}()
-            for (gid, members) in mg
-                g_lefts = Int[m[2] for m in members if m[1] == "TP_0" && m[2] in l_ids]
-                g_rights = Int[m[2] for m in members if m[1] == "TP_1" && m[2] in r_ids]
-                if !isempty(g_lefts) || !isempty(g_rights)
-                    push!(mapping_rows, (sort(unique(g_lefts)), sort(unique(g_rights))))
-                end
+            active_lid = 0
+            connected = Int[]
+            if active_lid > 0
+                connected = LesionAssociation.find_cross_tp_lesion("TP_0", active_lid, "TP_1")
             end
-            @test isempty(mapping_rows)
+            @test isempty(connected)
         end
         
         # Cleanup
@@ -1455,4 +1404,5 @@ end
 println("\n=======================================================")
 println("ALL INTERACTIVE LESION MAPPING TESTS PASSED SUCCESSFULLY!")
 println("=======================================================")
+
 
