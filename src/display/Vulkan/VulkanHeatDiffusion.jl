@@ -1123,7 +1123,7 @@ function apply_box_mask_to_segvol!(state::HeatDiffusionState, seg_vol::AbstractA
             for kx in 1:bw
                 x = xmin + kx - 1
                 val = unsafe_load(ptr, kx + (ky - 1) * bw + (kz - 1) * bw * bh)
-                if val >= theta
+                if val > 0.5f0
                     seg_vol[x, y, z] = label_val
                     vox_count += 1
                 end

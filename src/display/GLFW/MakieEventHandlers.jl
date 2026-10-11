@@ -8,6 +8,7 @@ using ...ReactToScroll
 using ...DisplayWords
 using DataTypesBasic
 using Setfield
+using ColorTypes
 using Statistics: mean
 using Dates
 using HDF5
@@ -16,7 +17,7 @@ export reactToChangePlane, reactToCompareTimePoints, reactToShowSingleLesion
 export reactToWindowing, reactToPaintVal, reactToSyncLesion, reactToChangeBrushSize, reactToPetBlend, reactToLabelOpacity
 export reactToChangeTimePoint, reactToSetTimePoint, reactToToggleLesion, reactToRefreshList
 export reactToAddAutoPet, reactToAIInferenceResult, reactToSyncMissing, reactToGenManual, reactToHeatGDTHold
-export reactToHeatGDTStart, reactToHeatGDTTick, reactToHeatGDTStop
+export reactToHeatGDTStart, reactToHeatGDTTick, reactToHeatGDTStop, reactToHeatGDTPosthocSize
 export reactToMapLink, reactToAutoRunPreprocess, reactToRunPreprocess, reactToShowBoneMask, reactToShowMaskLayer, reactToSaveMRB
 export register_h5_mask_saver!, mark_tp_mask_dirty!, save_tp_mask_to_h5, flush_all_dirty_masks!, dirty_mask_tps
 export _clinical_phase, get_clinical_phase, set_clinical_phase!, _phase_display_name
@@ -190,14 +191,20 @@ const _vk_heat_start_time = Ref{Float64}(0.0)         # Wall-clock timestamp of 
 const HEAT_TICK_MIN_INTERVAL_S = 0.015                 # 15ms minimum interval between GPU dispatches (~66 Hz)
 # Display theta ramp: theta_display = max(real_theta, RAMP_START * exp(-RAMP_RATE * elapsed_seconds))
 # This makes the lesion appear to grow smoothly from a small dot to the full segmentation
-const HEAT_DISPLAY_RAMP_START = 0.01f0                  # Start display threshold (only show very hot center)
-const HEAT_DISPLAY_RAMP_RATE  = 0.5f0                  # Exponential decay rate (larger = faster catch-up)
+const HEAT_DISPLAY_RAMP_START = 0.5f0                  # Start display threshold (only show very hot center)
+const HEAT_DISPLAY_RAMP_RATE  = Ref{Float32}(5.0f0)                  # Exponential decay rate (larger = faster catch-up)
 # ── Final Commit Threshold ──
 # When the user releases the mouse, the GPU heat tensor is thresholded at this value
 # to produce discrete integer labels in seg_vol.  Refreshed at each mouse-release
 # and each W-toggle-off so downstream code always sees the latest threshold.
 const HEAT_GDT_COMMIT_THETA = Ref{Float32}(0.001f0)    # Threshold for GPU→CPU discrete mask conversion
 const HEAT_GDT_LAST_DISPLAY_THETA = Ref{Float32}(0.5f0) # Display theta at the moment of last mouse-release
+# Post-hoc Size Adjustment State
+const HEAT_GDT_UNDO_LABELS = Ref{Array{UInt16, 3}}()
+const HEAT_GDT_UNDO_BOX_MIN = Ref{CartesianIndex{3}}()
+const HEAT_GDT_UNDO_BOX_MAX = Ref{CartesianIndex{3}}()
+const HEAT_GDT_LAST_SEG_VOL = Ref{Any}(nothing)
+const HEAT_GDT_LAST_TARGET_ID = Ref{UInt16}(0)
 
 """
     reload_heatgdt_diffusivity_for_tp!(new_tp::Int)
@@ -531,6 +538,12 @@ const active_measurement_radius_mm = Observable{Float32}(10.0f0)
 const measurement_sub_mode = Observable{Symbol}(:sphere)  # :sphere or :line
 export measurements_mode, active_measurement_radius_mm, measurement_sub_mode
 
+# Interactive Lesion Mapping across time points
+const compare_all_lesions_mode = Ref(true)
+const mapping_alpha_linked = Ref(0.25f0)
+const mapping_alpha_unlinked = Ref(0.80f0)
+export compare_all_lesions_mode, mapping_alpha_linked, mapping_alpha_unlinked
+
 """Force direct texture upload for a panel — bypasses scroll pipeline entirely."""
 function _force_texture_upload!(stateObjects::Vector{StateDataFields}, panel_idx::Int)
     panelState = stateObjects[panel_idx]
@@ -653,12 +666,29 @@ end
                 
                 # Load right TP data into panel 5
                 entry = get_or_load_tp_data(right_tp)
+                if entry === nothing
+                    println("[COMPARE] WARNING: get_or_load_tp_data returned nothing for TP=$right_tp, searching for fallback TP..."); flush(stdout)
+                    for alt_tp in tp_indices
+                        if alt_tp != current_tp_index[] && alt_tp != right_tp
+                            alt_entry = get_or_load_tp_data(alt_tp)
+                            if alt_entry !== nothing
+                                println("[COMPARE] Fallback to TP=$alt_tp successful"); flush(stdout)
+                                right_tp = alt_tp
+                                compare_right_tp[] = right_tp
+                                entry = alt_entry
+                                break
+                            end
+                        end
+                    end
+                end
                 if entry !== nothing
                     println("[COMPARE] Got entry for TP=$right_tp, loading into panel 5..."); flush(stdout)
                     _load_tp_from_entry!(stateObjects, entry, 5)
                     println("[COMPARE] Panel 5 data loaded"); flush(stdout)
                 else
-                    println("[COMPARE] WARNING: get_or_load_tp_data returned nothing for TP=$right_tp"); flush(stdout)
+                    println("[COMPARE] ERROR: No valid timepoint could be loaded for comparison"); flush(stdout)
+                    compare_mode[] = false
+                    return
                 end
             end
 
@@ -742,6 +772,35 @@ function reactToToggleSingleMultiLesion(data::MakieEvents.ToggleSingleMultiLesio
 end
 export reactToToggleSingleMultiLesion
 
+function reactToToggleMapMode(::MakieEvents.ToggleMapModeEvent, stateObjects::Vector{StateDataFields})
+    compare_all_lesions_mode[] = !compare_all_lesions_mode[]
+    println("[INTERACTIVE-MAP] compare_all_lesions_mode toggled to: $(compare_all_lesions_mode[])")
+    cur_lid = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
+    reactToSyncLesion(SyncLesionEvent(cur_lid), stateObjects)
+    for idx in (5, 6, 7, 8, 9)
+        if idx <= length(stateObjects)
+            stateObjects[idx].isSliceChanged = true
+            if stateObjects[idx].mainForDisplayObjects.vulkanPipelineState !== nothing
+                stateObjects[idx].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+            end
+        end
+    end
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing && hasproperty(LMW, :_lmw_observables)
+            obs_dict = getfield(LMW, :_lmw_observables)
+            if haskey(obs_dict, :btn_map_mode_toggle)
+                btn = obs_dict[:btn_map_mode_toggle]
+                btn.label[] = compare_all_lesions_mode[] ? "Interactive Map Mode: ON" : "Interactive Map Mode: OFF"
+                btn.buttoncolor[] = compare_all_lesions_mode[] ? LMW.GRN : LMW.BG_PNL
+            end
+        end
+    catch e
+        @debug "Failed to update LMW on toggle map mode: $e"
+    end
+end
+export reactToToggleMapMode
+
 # Flag controlling single vs all lesions display mode (default: true = display SINGLE lesion on start)
 const is_single_lesion_mode = Ref(true)
 export is_single_lesion_mode
@@ -754,11 +813,19 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
     else
         is_single_lesion_mode[] = false
     end
-    for stateObject in stateObjects
+    for (idx, stateObject) in enumerate(stateObjects)
+        # Skip right compare panels — they are managed independently by reactToSyncLesion
+        # with differential opacity (compare_all_lesions_mode). The M key should only
+        # affect left/current TP panels (1-4).
+        is_right = compare_mode[] && idx in (5, 6, 7, 8, 9)
+        if is_right
+            continue
+        end
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if (textSpec.name == "Mask" || textSpec.name == "segmentation") && textSpec.name != "Anatomy"
                 # Clear allowed IDs filter (only for lesion masks, not anatomical atlas)
                 textSpec.allowedIDs = Float32[]
+                textSpec.colorMask = RGBA(0.0f0, 0.0f0, 0.0f0, 1.0f0)
                 T_mm = eltype(textSpec.minAndMaxValue)
                 if !is_single_lesion_mode[]
                     textSpec.minAndMaxValue = T_mm.([1, 10000])
@@ -772,6 +839,11 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
     lbl = is_single_lesion_mode[] ? string(data.lesion_id) : "all"
     @debug "Show single lesion: $lbl (single_mode=$(is_single_lesion_mode[]))"
     _mri_clamp_mask_range!(stateObjects)
+    # Re-sync right compare panels so differential opacity is maintained
+    if compare_mode[] && current_active_lesion_id[] > 0
+        cur_lid = current_active_lesion_id[]
+        reactToSyncLesion(SyncLesionEvent(cur_lid), stateObjects)
+    end
     return changed
 end
 
@@ -798,7 +870,7 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
     end
     
     for (panel_idx, state) in enumerate(stateObjects)
-        panel_tp = if compare_mode[] && panel_idx == 5
+        panel_tp = if compare_mode[] && panel_idx in (5, 6, 7, 8, 9)
             compare_right_tp[]
         else
             state.onScrollData.currentTpIndex > 0 ? state.onScrollData.currentTpIndex : current_tp_index[]
@@ -1431,19 +1503,31 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     end
 
     for (idx, stateObject) in enumerate(stateObjects)
-        target_id = (idx == 5 && compare_mode[]) ? panel5_lesion_id : data.lesion_id
+        is_right = compare_mode[] && idx in (5, 6, 7, 8, 9)
+        target_id = is_right ? panel5_lesion_id : data.lesion_id
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if textSpec.name == "Mask" || textSpec.name == "segmentation"
                 T_mm = eltype(textSpec.minAndMaxValue)
-                if idx == 5 && compare_mode[] && !isempty(panel5_all_ids)
+                if is_right && compare_all_lesions_mode[]
+                    # Interactive mapping mode: display ALL lesions on right TP,
+                    # but linked lesions get smaller alpha, unlinked lesions get normal opacity
+                    textSpec.minAndMaxValue = T_mm.([1, 10000])
                     textSpec.allowedIDs = Float32.(panel5_all_ids)
+                    textSpec.colorMask = RGBA(mapping_alpha_linked[], mapping_alpha_unlinked[], 1.0f0, 1.0f0)
+                elseif is_right && !isempty(panel5_all_ids)
+                    textSpec.allowedIDs = Float32.(panel5_all_ids)
+                    textSpec.colorMask = RGBA(0.0f0, 0.0f0, 0.0f0, 1.0f0)
                 else
                     textSpec.allowedIDs = Float32[]
+                    textSpec.colorMask = RGBA(0.0f0, 0.0f0, 0.0f0, 1.0f0)
                     if is_single_lesion_mode[] && target_id > 0
                         textSpec.minAndMaxValue = T_mm.([target_id, target_id])
                     else
                         textSpec.minAndMaxValue = T_mm.([1, 10000])
                     end
+                end
+                if stateObject.mainForDisplayObjects.vulkanPipelineState !== nothing
+                    stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
                 end
             elseif textSpec.name == "manualModif"
                 textSpec.minAndMaxValue = Float32.([0.0, 10000.0])
@@ -1688,7 +1772,7 @@ function _force_mri_show_all!(stateObjects::Vector{StateDataFields})
     max_label = 3  # MRI: always clamp mask to lesion labels 1-3 (never show gland label 4)
 
     for (i, stateObject) in enumerate(stateObjects)
-        tp = (i == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
+        tp = (i in (5, 6, 7, 8, 9) && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
         panel_mod = uppercase(get(tp_modalities, tp, "PET"))
         if !(panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI"))
             continue
@@ -2333,7 +2417,7 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
     stateObjects[panel_idx].onScrollData.nameIndexes = DataStructs.getLocationDict(newDataToScroll)
     
     # Track which TP this panel holds
-    panel_tp = if compare_mode[] && panel_idx == 5
+    panel_tp = if compare_mode[] && panel_idx in (5, 6, 7, 8, 9)
         compare_right_tp[]
     else
         current_tp_index[]
@@ -2893,6 +2977,13 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
                 stateObjects[5].calcDimsStruct.panY = stateObjects[1].calcDimsStruct.panY
                 stateObjects[5].isSliceChanged = true
                 _force_texture_upload!(stateObjects, 5)
+                if length(stateObjects) >= 9
+                    for p in 6:9
+                        _load_tp_from_entry!(stateObjects, entry_right, p)
+                        stateObjects[p].isSliceChanged = true
+                        _force_texture_upload!(stateObjects, p)
+                    end
+                end
             end
             
             if current_active_lesion_id[] > 0
@@ -3229,8 +3320,8 @@ function reactToAIInferenceResult(data::AIInferenceResultEvent, stateObjects::Ve
 
     # Update bone surface & marrow textures in all panels
     for (panel_idx, stateObject) in enumerate(stateObjects)
-        panel_tp = (panel_idx == 5 && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
-        panel_lid = (panel_idx == 5 && compare_mode[]) ? panel5_lesion_id : target_lid
+        panel_tp = (panel_idx in (5, 6, 7, 8, 9) && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
+        panel_lid = (panel_idx in (5, 6, 7, 8, 9) && compare_mode[]) ? panel5_lesion_id : target_lid
         
         panel_surf_pts, panel_marr_pts = try
             _get_or_compute_bone_subseg(stateObject, panel_lid, panel_tp)
@@ -3426,6 +3517,90 @@ function reactToMapLink(data::MapLinkEvent, stateObjects::Vector{StateDataFields
         @debug "Successfully mapped between TP1 and TP2"
     end
 end
+
+"""
+    toggle_lesion_mapping!(left_tp::Int, left_lid::Int, right_tp::Int, right_lid::Int, stateObjects::Vector{StateDataFields})
+
+Interactively toggle lesion correspondence between the left (earlier) time point lesion `left_lid`
+and the right (comparison) time point lesion `right_lid`:
+- If already linked: unlinks `right_lid` from `left_lid` (reverts to normal opacity).
+- If unlinked: links `right_lid` to `left_lid` (drops to smaller opacity).
+Persists changes to HDF5 matches dataset and live-updates UBOs and GUI.
+"""
+function toggle_lesion_mapping!(left_tp::Int, left_lid::Int, right_tp::Int, right_lid::Int, stateObjects::Vector{StateDataFields})
+    if left_lid <= 0 || right_lid <= 0
+        return false
+    end
+    left_node = get_node_name_for_tp(left_tp)
+    right_node = get_node_name_for_tp(right_tp)
+    LA = _get_la()
+    if LA === nothing
+        @warn "[INTERACTIVE-MAP] LesionAssociation module not found"
+        return false
+    end
+    
+    h5_path = h5_save_path_ref[]
+    if isempty(h5_path) || !isfile(h5_path)
+        h5_path = h5_path_ref[]
+    end
+    
+    current_matches = LA.find_cross_tp_lesion(left_node, left_lid, right_node)
+    is_already_mapped = right_lid in current_matches
+    
+    if is_already_mapped
+        println("[INTERACTIVE-MAP] Unlinking: $left_node ID $left_lid <-> $right_node ID $right_lid")
+        for (gid, members) in LA.get_match_groups()
+            idx_r = findfirst(m -> m[1] == right_node && m[2] == right_lid, members)
+            has_l = any(m -> m[1] == left_node && m[2] == left_lid, members)
+            if idx_r !== nothing && has_l
+                deleteat!(members, idx_r)
+                if length(members) <= 1
+                    delete!(LA.get_match_groups(), gid)
+                end
+                break
+            end
+        end
+        if !isempty(h5_path) && isfile(h5_path)
+            LA.save_matches_to_h5(h5_path)
+        end
+    else
+        println("[INTERACTIVE-MAP] Linking: $left_node ID $left_lid <-> $right_node ID $right_lid")
+        LA.update_match_group!(left_node, left_lid, right_node, right_lid, !isempty(h5_path) && isfile(h5_path) ? h5_path : "")
+    end
+    
+    # Re-sync lesion visibility & UBOs across all panels
+    reactToSyncLesion(SyncLesionEvent(left_lid), stateObjects)
+    
+    # Force texture / slice updates on compare panels so screen updates immediately
+    for idx in (5, 6, 7, 8, 9)
+        if idx <= length(stateObjects)
+            stateObjects[idx].isSliceChanged = true
+            if stateObjects[idx].mainForDisplayObjects.vulkanPipelineState !== nothing
+                stateObjects[idx].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+            end
+        end
+    end
+    
+    # Live refresh GUI in LesionMetadataWindow
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing
+            obs_dict = getfield(LMW, :_lmw_observables)
+            if haskey(obs_dict, :map_selected_right)
+                new_matches = LA.find_cross_tp_lesion(left_node, left_lid, right_node)
+                obs_dict[:map_selected_right][] = new_matches
+            end
+            if isdefined(LMW, :_build_match_display!)
+                LMW._build_match_display!()
+            end
+        end
+    catch e
+        @debug "[INTERACTIVE-MAP] LMW sync warning: $e"
+    end
+    
+    return true
+end
+export toggle_lesion_mapping!
 
 function reactToAutoRunPreprocess(data::AutoRunPreprocessEvent, stateObjects::Vector{StateDataFields})
     @debug "Auto-run preprocessing toggled to $(data.active)"
@@ -4068,7 +4243,7 @@ function reactToOneShotHeatGDT(data::MakieEvents.OneShotHeatGDTEvent, stateObjec
                 if LMW !== nothing
                     obs_dict = getfield(LMW, :_lmw_observables)
                     if haskey(obs_dict, :algo_combo_selection)
-                        obs_dict[:algo_combo_selection][] = "Manual Brush"
+                        obs_dict[:algo_combo_selection][] = "HELPNet (AI)"
                     end
                 end
             catch; end
@@ -4376,7 +4551,7 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
         # At t=2.0s: ≈ 0.003 (nearly full computation visible)
         # At t=2.5s+: clamped to real_theta (0.001)
         elapsed = now - _vk_heat_start_time[]
-        display_theta = Float32(max(theta_val, HEAT_DISPLAY_RAMP_START * exp(-HEAT_DISPLAY_RAMP_RATE * elapsed)))
+        display_theta = Float32(max(theta_val, HEAT_DISPLAY_RAMP_START * exp(-HEAT_DISPLAY_RAMP_RATE[] * elapsed)))
         HEAT_GDT_LAST_DISPLAY_THETA[] = display_theta  # Track for stop-time logging
         
         _dbg("TICK: steps=$steps_per_tick, theta=$theta_val, display_theta=$display_theta, elapsed=$(round(elapsed, digits=2))s, accumulated=$(heat_state.accumulated_steps), seed=($(heat_state.seed_x),$(heat_state.seed_y),$(heat_state.seed_z)), ping=$(heat_state.current_buffer_is_ping)")
@@ -4446,7 +4621,7 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
         # Yield to allow GLMakie renderloop to poll events (e.g. mouse release) and swap buffers
         yield()
     catch e
-        _dbg("TICK EXCEPTION: $(sprint(showerror, e))\n$(sprint(Base.show_backtrace, catch_backtrace()))")
+        _dbg("TICK EXCEPTION: $(sprint(showerror, e))$(sprint(Base.show_backtrace, catch_backtrace()))")
         try; open("/tmp/heatgdt_perf.log", "a") do f; println(f, "Tick failed: ", e); end; catch; end
         @warn "[Heat-GDT GPU] Tick failed" exception=(e, catch_backtrace())
     end
@@ -4471,12 +4646,15 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
     if heat_state === nothing || vk_ctx === nothing; return; end
     
     # Snapshot the commit theta and display theta at the moment of release
-    # The user requested to keep ONLY the part that is visible at the moment of mouse release
-    # so we use HEAT_GDT_LAST_DISPLAY_THETA[] instead of HEAT_GDT_COMMIT_THETA[].
-    commit_theta = HEAT_GDT_LAST_DISPLAY_THETA[]
+    # The user requested to keep ONLY the part that is visible at the moment of mouse release.
+    # To prevent the lesion from "growing after release" due to human reaction time (~200ms) 
+    # and rendering lag, we calculate the effective theta from a slightly earlier time.
+    elapsed = time() - _vk_heat_start_time[]
+    effective_elapsed = max(0.0, elapsed - 0.2) # 200ms reaction time compensation
+    
+    commit_theta = Float32(max(heatgdt_theta[], HEAT_DISPLAY_RAMP_START * exp(-HEAT_DISPLAY_RAMP_RATE[] * effective_elapsed)))
     last_display_theta = HEAT_GDT_LAST_DISPLAY_THETA[]
     total_steps = _vk_heat_total_steps[]
-    elapsed = time() - _vk_heat_start_time[]
     
     try
         # ── GPU → CPU: read back heat tensor via staging buffer ──
@@ -4495,6 +4673,15 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
         if seg_vol !== nothing
             active_id = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
             label_val = eltype(seg_vol)(active_id)
+            
+            # Save undo state for post-hoc size adjustment
+            box_min = heat_state.current_box_min
+            box_max = heat_state.current_box_max
+            HEAT_GDT_UNDO_BOX_MIN[] = CartesianIndex(box_min[1], box_min[2], box_min[3])
+            HEAT_GDT_UNDO_BOX_MAX[] = CartesianIndex(box_max[1], box_max[2], box_max[3])
+            HEAT_GDT_UNDO_LABELS[] = seg_vol[box_min[1]:box_max[1], box_min[2]:box_max[2], box_min[3]:box_max[3]]
+            HEAT_GDT_LAST_SEG_VOL[] = seg_vol
+            HEAT_GDT_LAST_TARGET_ID[] = UInt16(active_id)
             
             # Run 0 additional steps but copy the bounding-box to CPU staging buffer
             VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 0;
@@ -4559,4 +4746,63 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
     HEAT_GDT_LAST_DISPLAY_THETA[] = HEAT_DISPLAY_RAMP_START  # Reset to ramp start
 end
 
+function reactToHeatGDTPosthocSize(event::MakieEvents.HeatGDTPosthocSizeEvent, stateObjects::Vector{StateDataFields})
+    if HEAT_GDT_LAST_SEG_VOL[] === nothing || !isassigned(HEAT_GDT_UNDO_LABELS) || !isassigned(HEAT_GDT_UNDO_BOX_MIN) || !isassigned(HEAT_GDT_UNDO_BOX_MAX)
+        @warn "No post-hoc HeatGDT state available."
+        return
+    end
+    
+    heat_state = _vk_heat_state[]
+    if heat_state === nothing || heat_state.staging_box_ptr == C_NULL
+        @warn "No valid GPU staging buffer found for post-hoc size adjustment."
+        return
+    end
+
+    seg_vol = HEAT_GDT_LAST_SEG_VOL[]
+    new_theta = event.new_theta
+    label_val = eltype(seg_vol)(HEAT_GDT_LAST_TARGET_ID[])
+    
+    box_min = HEAT_GDT_UNDO_BOX_MIN[]
+    box_max = HEAT_GDT_UNDO_BOX_MAX[]
+
+    # 1. Restore the region to its original pre-commit state
+    seg_vol[box_min[1]:box_max[1], box_min[2]:box_max[2], box_min[3]:box_max[3]] .= HEAT_GDT_UNDO_LABELS[]
+    
+    # 2. Re-apply the mask with the new threshold
+    vox_count = VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=new_theta)
+    
+    println("[Heat-GDT Post-Hoc] Re-applied mask with theta=$(new_theta), voxels=$(vox_count)")
+    
+    # Update HEAT_GDT_LAST_DISPLAY_THETA[] and HEAT_GDT_COMMIT_THETA[] so subsequent operations reflect this
+    HEAT_GDT_COMMIT_THETA[] = new_theta
+    HEAT_GDT_LAST_DISPLAY_THETA[] = new_theta
+
+    # 3. Force texture upload and mark HDF5 dirty
+    for (pi, state) in enumerate(stateObjects)
+        try
+            _force_texture_upload!(stateObjects, pi)
+        catch e
+            state.isSliceChanged = true
+        end
+    end
+    
+    # ── Sync discrete mask to TP cache (for autosave/HDF5 persistence) ──
+    if seg_vol !== nothing
+        tp_idx = current_tp_index[]
+        entry = lock(_tp_cache_lock) do
+            haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
+        end
+        if entry !== nothing
+            if entry.mask isa Array{Int8, 3}
+                entry.mask .= clamp.(seg_vol, Int8(-128), Int8(127))
+            elseif entry.mask !== seg_vol
+                entry.mask .= seg_vol
+            end
+            if entry.mask_i16 !== seg_vol
+                entry.mask_i16 .= seg_vol
+            end
+            mark_tp_mask_dirty!(tp_idx)
+        end
+    end
 end
+end # module

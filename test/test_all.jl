@@ -199,4 +199,5 @@ using JSON
     include("test_ai_mask_versioning.jl")
     include("test_auto_advance.jl")
     include("test_new_features.jl")
+    include("test_interactive_lesion_mapping.jl")
 end

@@ -5,16 +5,16 @@
         julia compute_diffusivity.jl <data_dir>
     
     Reads CT, PET, and max_anatomy (TotalSeg) from the preprocessed_volumes.h5 file,
-    runs the HED3D-Wide edge network (sliding-window inference), computes the diffusivity
+    runs the HED3D-Ultra edge network (sliding-window inference), computes the diffusivity
     field D(x) = ε + (1-ε)·exp(-γ·E(x)), and stores it back in the same HDF5 file
     as a `diffusivity` dataset in each TP group.
     
-    The HED3D-Wide model checkpoint and architecture are loaded from:
+    The HED3D-Ultra model checkpoint and architecture are loaded from:
         /mnt/big/project_ssd/project_ssd/semiautomatic/JuliaHELPNet/HeatGDT/
 """
 
 using Pkg
-Pkg.activate("/mnt/big/project_ssd/project_ssd/semiautomatic/JuliaHELPNet")
+Pkg.activate("/workspaces/MedEye3d.jl/tmp_juliahelpnet")
 
 using Lux
 using LuxCUDA
@@ -27,7 +27,7 @@ using CUDA
 using HDF5
 using JSON
 
-include("/mnt/big/project_ssd/project_ssd/semiautomatic/JuliaHELPNet/HeatGDT/architectures/hed3d_wide.jl")
+include("/workspaces/MedEye3d.jl/tmp_juliahelpnet/HeatGDT/architectures/hed3d_ultra.jl")
 
 # Device helpers
 const gdev = gpu_device()
@@ -48,7 +48,7 @@ end
 """
     sliding_window_edge_inference(ct, pet, ts, model, ps, st; patch_size=64, stride=32)
 
-Run HED3D-Wide edge network on a full volume using sliding-window inference.
+Run HED3D-Ultra edge network on a full volume using sliding-window inference.
 Inputs must be in NATIVE (un-flipped) space, Float32.
 
 Returns Float32 edge volume (same size as inputs), values ∈ [0,1].
@@ -178,15 +178,15 @@ function main()
     end
     
     println("═══════════════════════════════════════════════════")
-    println("  Computing HED3D-Wide Edge Detection + Diffusivity    ")
+    println("  Computing HED3D-Ultra Edge Detection + Diffusivity    ")
     println("═══════════════════════════════════════════════════")
     println("  HDF5: $h5_path")
     
     # ── Load model ──────────────────────────────────────────
-    println("\n[1/3] Loading HED3D-Wide edge network (best pretrained model)...")
-    model = HED3D_Wide(3)
+    println("\n[1/3] Loading HED3D-Ultra edge network (best pretrained model)...")
+    model = HED3D_Ultra(3)
     
-    jld_path = "/mnt/big/project_ssd/project_ssd/semiautomatic/JuliaHELPNet/HeatGDT/champion_pretrained_hed3d_wide.jld2"
+    jld_path = "/workspaces/MedEye3d.jl/tmp_juliahelpnet/HeatGDT/champion_pretrained_hed3d_ultra.jld2"
     if !isfile(jld_path)
         error("Model checkpoint not found: $jld_path")
     end
@@ -226,8 +226,8 @@ function main()
         # Check if diffusivity already exists
         diff_key = "$group_name/diffusivity"
         if haskey(h5_file, diff_key)
-            println("    ⏭  Diffusivity already exists, skipping")
-            continue
+            println("    🗑  Diffusivity already exists, deleting to overwrite...")
+            delete_object(h5_file, diff_key)
         end
         
         # Find CT volume in this group
@@ -240,7 +240,7 @@ function main()
             if startswith(k, "Fixed_CT_Volume") || (occursin("CT", k) && !occursin("PET", k) && !occursin("Lesion", k) && !occursin("anatomy", k) && !occursin("prostate", k))
                 ct_key = k
             end
-            if startswith(k, "SUV_PET") || (occursin("PET", k) && occursin("SUV", k))
+            if startswith(k, "SUV_PET") || (occursin("PET", k) && occursin("SUV", k)) || occursin("SPECT_NM", k) || occursin("SPECT", k) && !occursin("CT", k) && !occursin("Lesion", k)
                 pet_key = k
             end
             if k == "max_anatomy.nii.gz"
@@ -253,12 +253,12 @@ function main()
             continue
         end
         if pet_key === nothing
-            println("    ⚠️  No PET volume found in $group_name, skipping")
+            println("    ⚠️  No PET/SPECT volume found in $group_name, skipping")
             continue
         end
         
         println("    CT:  $ct_key")
-        println("    PET: $pet_key")
+        println("    PET/SPECT: $pet_key")
         
         # Load volumes (already preflipped in HDF5)
         ct_vol = Float32.(read(h5_file["$group_name/$ct_key"]))

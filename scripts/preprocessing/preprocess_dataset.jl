@@ -27,11 +27,8 @@ const HIRES_FACTOR = 1.0
 GPU-accelerated resample_to_image: moves voxel data to GPU, resamples, moves back to CPU.
 """
 function gpu_resample_to_image(im_fixed::MedImages.MedImage, im_moving::MedImages.MedImage, interp::MedImages.Interpolator_enum)
-    gpu_fixed = MedImages.update_voxel_data(im_fixed, CuArray(Float32.(im_fixed.voxel_data)))
-    gpu_moving = MedImages.update_voxel_data(im_moving, CuArray(Float32.(im_moving.voxel_data)))
-    gpu_result = MedImages.resample_to_image(gpu_fixed, gpu_moving, interp)
-    cpu_result = MedImages.update_voxel_data(gpu_result, Array(gpu_result.voxel_data))
-    return cpu_result
+    println("      (Resampling on CPU to avoid CUDA VRAM fragmentation...)")
+    return MedImages.resample_to_image(im_fixed, im_moving, interp)
 end
 
 function main()
@@ -79,8 +76,8 @@ function main()
         end
     end
     
-    # 3. Process All Nodes
-    h5_path = joinpath(data_dir, "preprocessed_volumes.h5")
+    out_filename = length(ARGS) >= 2 ? ARGS[2] : "preprocessed_volumes.h5"
+    h5_path = joinpath(data_dir, out_filename)
     println("Resampling and saving to $h5_path")
     h5_file = h5open(h5_path, "w")
     
@@ -161,9 +158,14 @@ function main()
         end
         
         println("  Processing $name...")
-        img_type = "CT" # default
-        if occursin("PET", name) || occursin("SPECT", name) || occursin("SUV", name) || occursin("NM", name)
-            img_type = occursin("SPECT", name) || occursin("NM", name) ? "NM" : "PET"
+        img_type = if occursin("CT", name)
+            "CT"
+        elseif occursin("NM", name) || occursin("SPECT", name)
+            "NM"
+        elseif occursin("PET", name) || occursin("SUV", name)
+            "PET"
+        else
+            "CT"
         end
         
         img = if endswith(name, ".seg.nrrd")
@@ -204,6 +206,13 @@ function main()
         img_flipped = MedImages.update_voxel_data(img_res, reverse(img_res.voxel_data, dims=2))
         MedImages.save_med_image(h5_file, group_name, name, img_flipped; compress=3)
         println("    Saved native pre-flipped ($(size(img_flipped.voxel_data))) to $group_name/$name")
+        
+        img = nothing
+        img_tfm = nothing
+        img_res = nothing
+        img_flipped = nothing
+        GC.gc(true)
+        CUDA.reclaim()
     end
     
     for study in studies
@@ -737,7 +746,7 @@ function main()
     
     println("\n=== Phase 4: Computing Edge Detection + Diffusivity (Heat-GDT) ===")
     diffusivity_script = joinpath(@__DIR__, "compute_diffusivity.jl")
-    if isfile(diffusivity_script)
+    if isfile(diffusivity_script) && !any(a -> a == "--skip-diffusivity", ARGS)
         println("  Running: julia compute_diffusivity.jl $data_dir")
         println("  (This uses the JuliaHELPNet environment and runs HED3D-Wide NN inference)")
         try

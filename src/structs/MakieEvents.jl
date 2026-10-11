@@ -13,7 +13,7 @@ export NextPhaseEvent, PrevPhaseEvent, SetPhaseEvent
 export EditModeEvent, ViewModeEvent, SetTPFirstEvent, SetTPLastEvent
 export NewLesionEvent, EraseModeEvent, ShowOnlyPETEvent, ShowOnlyCTEvent, ToggleAnatomyEvent, ToggleSyncScrollEvent
 export ToggleCrosshairEvent, ToggleSingleMultiLesionEvent, ToggleHeatGDTModeEvent, OneShotHeatGDTEvent
-export HeatGDTStartEvent, HeatGDTTickEvent, HeatGDTStopEvent
+export HeatGDTStartEvent, HeatGDTTickEvent, HeatGDTStopEvent, HeatGDTPosthocSizeEvent, ToggleMapModeEvent
 
 struct NextPhaseEvent end
 struct PrevPhaseEvent end
@@ -36,6 +36,7 @@ struct ShowSingleLesionEvent
 end
 
 struct ToggleSingleMultiLesionEvent end
+struct ToggleMapModeEvent end
 
 struct ScrollZoomEvent
     zoom_delta::Float64
@@ -276,6 +277,10 @@ struct HeatGDTTickEvent end  # Lightweight: signals "run more GPU diffusion step
 
 struct HeatGDTStopEvent
     window_id::Int
+end
+
+struct HeatGDTPosthocSizeEvent
+    new_theta::Float32
 end
 
 end # module MakieEvents

@@ -418,6 +418,14 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             end
             return
 
+        # O - Toggle interactive mapping mode (all right lesions vs single lesion)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_O)
+            if keyInputInfo.action == GLFW.PRESS
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.ToggleMapModeEvent())
+            end
+            return
+
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_KP_ADD) || keyInputInfo.scancode == Int32(GLFW.KEY_EQUAL)
             scCode = "+"
 

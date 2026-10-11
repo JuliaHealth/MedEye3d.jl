@@ -63,6 +63,11 @@ const _heatgdt_press_start = Ref{Float64}(0.0)
 const _heatgdt_mode_active = Ref{Bool}(false)
 const is_left_button_down = Ref{Bool}(false)
 
+# Single-click tracking for lesion mapping / selection
+const _last_left_press_time = Ref{Float64}(0.0)
+const _last_left_press_coords = Ref{Tuple{Float64, Float64}}((0.0, 0.0))
+const _left_was_pressed = Ref{Bool}(false)
+
 function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct, mainChannel::Base.Channel{Any}, window_id::Int=1)
     xmin = Int32(calcD.windowWidthCorr)
     xmax = Int32(calcD.avWindWidtForMain - calcD.windowWidthCorr)
@@ -126,6 +131,18 @@ function registerMouseClickFunctions(window::GLFW.Window, calcD::CalcDimsStruct,
         if button == GLFW.MOUSE_BUTTON_1
             mouseStructInstance.isLeftButtonDown = (action == GLFW.PRESS)
             is_left_button_down[] = (action == GLFW.PRESS)
+            if action == GLFW.PRESS
+                _left_was_pressed[] = true
+                _last_left_press_time[] = time()
+                try
+                    cx, cy = GLFW.GetCursorPos(window)
+                    _last_left_press_coords[] = (Float64(cx), Float64(cy))
+                catch
+                    if !isempty(mouseStructInstance.lastCoordinates)
+                        _last_left_press_coords[] = (Float64(mouseStructInstance.lastCoordinates[1][1]), Float64(mouseStructInstance.lastCoordinates[1][2]))
+                    end
+                end
+            end
         elseif button == GLFW.MOUSE_BUTTON_2
             mouseStructInstance.isRightButtonDown = (action == GLFW.PRESS)
         end
@@ -1039,6 +1056,113 @@ end
 # ── End Measurement Helper Functions ──────────────────────────────────────────
 
 """
+    _handle_lesion_click(coord, clickedPanel, mousestr, mainStates, MEH)
+
+Handles clicking on a lesion directly on the viewer screen:
+- Left / current panel: Selects the clicked lesion as the active single lesion.
+- Right / compare panel (in compare mode): Toggles lesion correspondence between the
+  active lesion of the earlier time point and the clicked lesion of the comparison time point.
+"""
+function _handle_lesion_click(coord, clickedPanel::Int, mousestr::MouseStruct, mainStates::Vector{StateDataFields}, MEH)
+    if clickedPanel < 1 || clickedPanel > length(mainStates)
+        return
+    end
+    panelState = mainStates[clickedPanel]
+    calcDim = panelState.calcDimsStruct
+    actualW = mousestr.actualWindowWidth > 0 ? Float64(mousestr.actualWindowWidth) : Float64(calcDim.windowWidth)
+    actualH = mousestr.actualWindowHeight > 0 ? Float64(mousestr.actualWindowHeight) : Float64(calcDim.windowHeight)
+    
+    texX, texY = StructsManag.getTextureCoordinatesFromScreen(coord[1], coord[2], calcDim, actualW, actualH)
+    ix, iy = round(Int, texX), round(Int, texY)
+    slice = panelState.currentDisplayedSlice
+    
+    # Locate segmentation mask array
+    seg_vol = nothing
+    for scrDat in panelState.onScrollData.dataToScroll
+        if scrDat.name == "Mask" || scrDat.name == "segmentation"
+            seg_vol = scrDat.dat
+            break
+        end
+    end
+    if seg_vol === nothing
+        for scrDat in panelState.onScrollData.dataToScroll
+            if scrDat.name == "manualModif"
+                seg_vol = scrDat.dat
+                break
+            end
+        end
+    end
+    if seg_vol === nothing
+        return
+    end
+    
+    dim = panelState.onScrollData.dimensionToScroll
+    
+    # Neighborhood search: check center pixel and radial kernel (up to 3 px)
+    offsets = Tuple{Int,Int}[(0,0), (-1,0), (1,0), (0,-1), (0,1),
+                            (-1,-1), (1,-1), (-1,1), (1,1),
+                            (-2,0), (2,0), (0,-2), (0,2),
+                            (-2,-1), (-2,1), (2,-1), (2,1), (-1,-2), (1,-2), (-1,2), (1,2),
+                            (-3,0), (3,0), (0,-3), (0,3)]
+    
+    clicked_lid = 0
+    for (dx, dy) in offsets
+        px = ix + dx
+        py = iy + dy
+        idx3d = if dim == 1
+            CartesianIndex(slice, px, py)
+        elseif dim == 2
+            CartesianIndex(px, slice, py)
+        else
+            CartesianIndex(px, py, slice)
+        end
+        if checkbounds(Bool, seg_vol, idx3d)
+            val = round(Int, seg_vol[idx3d])
+            if val > 0
+                clicked_lid = val
+                break
+            end
+        end
+    end
+    
+    if clicked_lid <= 0
+        return
+    end
+    
+    is_compare_right = MEH.compare_mode[] && (clickedPanel in (5, 6, 7, 8, 9))
+    if is_compare_right
+        left_tp = MEH.current_tp_index[]
+        right_tp = MEH.compare_right_tp[]
+        cur_act_lid = MEH.current_active_lesion_id[]
+        if cur_act_lid > 0 && right_tp >= 0
+            println("[CLICK-MAP] Clicked compare panel $clickedPanel: toggling mapping between Left TP $left_tp Lesion $cur_act_lid <-> Right TP $right_tp Lesion $clicked_lid")
+            MEH.toggle_lesion_mapping!(left_tp, cur_act_lid, right_tp, clicked_lid, mainStates)
+        else
+            println("[CLICK-MAP] Compare panel clicked, but active lesion ($cur_act_lid) or right TP ($right_tp) not set")
+        end
+    else
+        # Clicked on left/current panel or normal non-compare mode: select clicked lesion as active
+        println("[CLICK-MAP] Clicked panel $clickedPanel: selecting Lesion $clicked_lid as active")
+        MEH.current_active_lesion_id[] = clicked_lid
+        MEH.reactToSyncLesion(MEH.SyncLesionEvent(clicked_lid), mainStates)
+        try
+            LMW = MEH._get_lmw()
+            if LMW !== nothing
+                obs_dict = getfield(LMW, :_lmw_observables)
+                if haskey(obs_dict, :obs_select_lesion_id)
+                    obs_dict[:obs_select_lesion_id][] = clicked_lid
+                end
+                if isdefined(LMW, :_build_match_display!)
+                    LMW._build_match_display!()
+                end
+            end
+        catch e
+            @debug "[CLICK-MAP] LMW sync warning: $e"
+        end
+    end
+end
+
+"""
 we use mouse coordinate to modify the texture that is currently active for modifications
     - we take information about texture currently active for modifications from variables stored in actor
     from texture specification we take also its id and its properties ...
@@ -1162,6 +1286,28 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             end
         end
         # --- END MEASUREMENT INTERCEPT ---
+
+        # --- Interactive Lesion Selection & Mapping on Single Click ---
+        if _left_was_pressed[]
+            _left_was_pressed[] = false
+            now_t = time()
+            dt = now_t - _last_left_press_time[]
+            MEH_clk = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+            is_painting = !isempty(mainStates) && isdefined(mainStates[1], :valueForMasToSet) && mainStates[1].valueForMasToSet.is_painting_active
+            meas_active = MEH_clk.measurements_mode[]
+            heat_active = _heatgdt_mode_active[]
+            
+            if !is_painting && !meas_active && !heat_active && dt < 0.45
+                c_end = !isempty(mouseCoords) ? mouseCoords[1] : CartesianIndex(round(Int, _last_left_press_coords[][1]), round(Int, _last_left_press_coords[][2]))
+                dx_press = Float64(c_end[1]) - _last_left_press_coords[][1]
+                dy_press = Float64(c_end[2]) - _last_left_press_coords[][2]
+                press_dist = sqrt(dx_press^2 + dy_press^2)
+                
+                if press_dist < 8.0 # confirmed click without significant drag
+                    _handle_lesion_click(c_end, mainState.switchIndex, mousestr, mainStates, MEH_clk)
+                end
+            end
+        end
     end
 
     # 2. Right-click cross-plane jumping or panning

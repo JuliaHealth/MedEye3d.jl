@@ -22,7 +22,7 @@ mutable struct PackedTensor
     bboxes::Dict{String, Tuple{Int, Int, Int, Int, Int, Int}} # mask_name -> (min_i, max_i, min_j, max_j, min_k, max_k)
 end
 
-function PackedTensor(dims::Tuple{Int, Int, Int}; capacity::Int=102, backend=CPU())
+function PackedTensor(dims::Tuple{Int, Int, Int}; capacity::Int=64, backend=CPU())
     if backend isa CPU || !CUDA.functional()
         init_data = zeros(UInt8, dims[1], dims[2], dims[3], capacity)
         overlap_flag = zeros(Int32, 1)
@@ -76,7 +76,7 @@ function pack_masks(masks::AbstractDict; backend=CPU())
     
     first_mask = first(values(masks))
     dims = (size(first_mask, 1), size(first_mask, 2), size(first_mask, 3))
-    packed = PackedTensor(dims; capacity=96, backend=CPU())
+    packed = PackedTensor(dims; capacity=64, backend=CPU())
     
     # Pre-count voxels once per mask
     counts = Dict{String, Int}()

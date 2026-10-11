@@ -1,0 +1,11 @@
+
+julia:777867 terminated with signal 11 at PC=7a362f5b9824 SP=7a34834695f0.  Backtrace:
+/usr/local/bin/../lib/julia/libjulia-internal.so.1.11(ijl_process_events+0x24)[0x7a362f5b9824]
+/usr/local/bin/../lib/julia/libjulia-internal.so.1.11(ijl_task_get_next+0x1a7)[0x7a362f5d3157]
+/usr/local/lib/julia/sys.so(+0xcc3103)[0x7a361ac0c103]
+/usr/local/lib/julia/sys.so(+0x1d71633)[0x7a361bcba633]
+/usr/local/lib/julia/sys.so(+0x1dc2294)[0x7a361bd0b294]
+[0x7a35b265b597]
+[0x7a35b265b885]
+[0x7a35b265b8e6]
+/usr/local/share/julia/compiled/v1.11/CUDACore/mcKyc_t4Vsa.so(+0x437a1)[0x7a35902fa7a1]

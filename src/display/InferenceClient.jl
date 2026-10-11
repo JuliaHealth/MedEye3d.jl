@@ -295,12 +295,12 @@ function prompt_start_ai_models(args::Vector{String}=ARGS)::Bool
     return false
 end
 
-function send_json_request(req::Dict; port=get_ai_port())
+function send_json_request(req::Dict; port=get_ai_port(), timeout_s=3600.0)
     host = get_ai_host()
     try
         conn = connect(host, port)
         write(conn, JSON.json(req))
-        resp_str = read_with_timeout(conn, 30.0)
+        resp_str = read_with_timeout(conn, timeout_s)
         close(conn)
         return JSON.parse(resp_str)
     catch e

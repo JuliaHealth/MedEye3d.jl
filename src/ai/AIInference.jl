@@ -147,7 +147,7 @@ end
 # ── Heat-GDT Constants ──────────────────────────────────────────────────────
 const HEATGDT_PROJECT_DIR = normpath(joinpath(@__DIR__, "..", "..", "..", "semiautomatic", "JuliaHELPNet"))
 const HEATGDT_DIR = joinpath(HEATGDT_PROJECT_DIR, "HeatGDT")
-const HEATGDT_CHAMPION_PATH = joinpath(HEATGDT_DIR, "champion_pretrained_hed3d_wide.jld2")
+const HEATGDT_CHAMPION_PATH = joinpath(HEATGDT_DIR, "champion_pretrained_hed3d_ultra.jld2")
 
 # Lazy-loaded singleton for the Heat-GDT model (loaded once, reused across calls)
 const _HEATGDT_STATE = Ref{Any}(nothing)
@@ -155,8 +155,8 @@ const _HEATGDT_STATE = Ref{Any}(nothing)
 """
     _ensure_heatgdt_loaded!()
 
-Lazy-loads the Heat-GDT champion model (HED3D-Wide edge network + PDE parameters).
-Loaded once per session from `champion_pretrained_hed3d_wide.jld2`.
+Lazy-loads the Heat-GDT champion model (HED3D-Ultra edge network + PDE parameters).
+Loaded once per session from `champion_pretrained_hed3d_ultra.jld2`.
 """
 function _ensure_heatgdt_loaded!()
     if _HEATGDT_STATE[] !== nothing
@@ -175,7 +175,7 @@ function _ensure_heatgdt_loaded!()
             using Pkg
             Pkg.activate($(HEATGDT_PROJECT_DIR))
             include(joinpath($(HEATGDT_DIR), "model.jl"))
-            include(joinpath($(HEATGDT_DIR), "architectures", "hed3d_wide.jl"))
+            include(joinpath($(HEATGDT_DIR), "architectures", "hed3d_ultra.jl"))
             using .HeatGDTModel
             using JLD2, Lux, CUDA, Random
         end
@@ -188,14 +188,14 @@ function _ensure_heatgdt_loaded!()
         config = if haskey(checkpoint, "config")
             checkpoint["config"]
         else
-            Dict("edge_type" => get(checkpoint, "edge_type", "hed3d_wide"),
+            Dict("edge_type" => get(checkpoint, "edge_type", "hed3d_ultra"),
                  "K" => 40, "dt" => 0.16, "theta" => 0.001, "tau" => 0.0001)
         end
         
         # Reconstruct the framework with champion parameters
         framework = HeatGDTModel.HeatGDTFramework(
             in_channels=3,
-            edge_type=Symbol(get(config, "edge_type", "hed3d_wide")),
+            edge_type=Symbol(get(config, "edge_type", "hed3d_ultra")),
             K=get(config, "K", 40),
             dt=Float32(get(config, "dt", 0.16)),
             theta=Float32(get(config, "theta", 0.001)),

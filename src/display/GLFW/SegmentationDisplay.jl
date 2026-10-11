@@ -259,6 +259,7 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
         MakieEventHandlers.updateQuadVertices!(stateInstances[9], :Hidden)
         MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
     elseif mode == "Compare Curr/Next TP"
+        MakieEventHandlers.compare_mode[] = true
         # M2 window shows a QUAD VIEW of the next (compare) TP
         for i in 6:10
             stateInstances[i].displayMode = QuadImage
@@ -419,6 +420,22 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
                 MakieEventHandlers._force_texture_upload!(stateInstances, i)
             end
         end
+        
+        # Re-apply differential opacity for M2 compare panels.
+        # _load_tp_from_entry! does NOT set mask colorMask/allowedIDs/minAndMaxValue
+        # for compare mode — that's done by reactToSyncLesion which must run AFTER
+        # data loading so the Mask TextureSpecs get the right differential settings.
+        if MakieEventHandlers.compare_mode[]
+            cur_lid = MakieEventHandlers.current_active_lesion_id[] > 0 ? MakieEventHandlers.current_active_lesion_id[] : 1
+            try
+                MakieEventHandlers.reactToSyncLesion(
+                    MakieEvents.SyncLesionEvent(cur_lid),
+                    stateInstances
+                )
+            catch e
+                @debug "[M2-LAYOUT] reactToSyncLesion after M2 load failed: $e"
+            end
+        end
     end
 end
 
@@ -516,6 +533,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::SetPhaseEvent) = reactToSe
 on_next!(stateObjects::Vector{StateDataFields}, data::CompareTimePointsEvent) = reactToCompareTimePoints(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ShowSingleLesionEvent) = reactToShowSingleLesion(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleSingleMultiLesionEvent) = MakieEventHandlers.reactToToggleSingleMultiLesion(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleMapModeEvent) = MakieEventHandlers.reactToToggleMapMode(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::WindowingEvent) = reactToWindowing(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::PaintValEvent) = reactToPaintVal(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ChangeBrushSizeEvent) = reactToChangeBrushSize(data, stateObjects)
@@ -536,6 +554,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::OneShotHeatGDTEvent) = rea
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.HeatGDTStartEvent) = reactToHeatGDTStart(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.HeatGDTTickEvent) = reactToHeatGDTTick(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.HeatGDTStopEvent) = reactToHeatGDTStop(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.HeatGDTPosthocSizeEvent) = reactToHeatGDTPosthocSize(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::AIInferenceResultEvent) = reactToAIInferenceResult(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SyncMissingEvent) = reactToSyncMissing(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::GenManualEvent) = reactToGenManual(data, stateObjects)

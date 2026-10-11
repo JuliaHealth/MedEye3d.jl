@@ -1,0 +1,5 @@
+[deps]
+h5py = ""
+numpy = ""
+scipy = ""
+nibabel = ""

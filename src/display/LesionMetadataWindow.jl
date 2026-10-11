@@ -283,7 +283,8 @@ function load_display_config()::Dict{String,Any}
     end
     return Dict{String,Any}(
         "label_opacity" => 0.5,
-        "pet_ct_blend" => 0.5
+        "pet_ct_blend" => 0.5,
+        "heatgdt_ramp_speed" => 5.0
     )
 end
 
@@ -5299,11 +5300,52 @@ function create_metadata_window(
     slider_heatgdt_K = Slider(g[seg_r3b, 4], range = 10:5:100, startvalue = 40)
     rowsize!(g, seg_r3b, Fixed(30)); register_fixed_row!(seg_r3b, 30)
     
+    seg_r3c = nr!()
+    Label(g[seg_r3c, 1], "Speed:", halign=:right, fontsize=10, color=LBL_FG)
+    init_ramp_speed = Float32(get(display_cfg, "heatgdt_ramp_speed", 5.0))
+    _MEH.HEAT_DISPLAY_RAMP_RATE[] = init_ramp_speed
+    slider_heatgdt_ramp = Slider(g[seg_r3c, 2:4], range = 0.1:0.1:5.0, startvalue = init_ramp_speed)
+    rowsize!(g, seg_r3c, Fixed(30)); register_fixed_row!(seg_r3c, 30)
+
     on(slider_heatgdt_theta.value) do val
         _MEH.heatgdt_theta[] = Float32(val)
     end
     on(slider_heatgdt_K.value) do val
         _MEH.heatgdt_K[] = Int(val)
+    end
+    on(slider_heatgdt_ramp.value) do val
+        v = Float32(val)
+        _MEH.HEAT_DISPLAY_RAMP_RATE[] = v
+        display_cfg["heatgdt_ramp_speed"] = v
+        next!(_display_cfg_save_subject, true)
+    end
+
+    seg_r3d = nr!()
+    Label(g[seg_r3d, 1], "Size ±:", halign=:right, fontsize=10, color=LBL_FG)
+    slider_heatgdt_posthoc = Slider(g[seg_r3d, 2:3], range = -5:0.1:5, startvalue = 0.0)
+    btn_posthoc_reset = Button(g[seg_r3d, 4], label="Reset", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=10)
+    rowsize!(g, seg_r3d, Fixed(30)); register_fixed_row!(seg_r3d, 30)
+
+    seg_r3_tt = nr!()
+    Label(g[seg_r3_tt, 1:4], "θ controls sensitivity (size). K controls boundary smoothness.", halign=:center, fontsize=9, color=SUBTXT)
+    rowsize!(g, seg_r3_tt, Fixed(15)); register_fixed_row!(seg_r3_tt, 15)
+
+    on(slider_heatgdt_posthoc.value) do val
+        # val is in [-5, 5]. We map this to a multiplier for theta
+        # If val > 0, we shrink the lesion by INCREASING theta
+        # If val < 0, we grow the lesion by DECREASING theta
+        base_theta = _MEH.heatgdt_theta[]
+        new_theta = Float32(base_theta * (10 ^ (val / 3.0)))
+        
+        @async try
+            put!(channel, MakieEvents.HeatGDTPosthocSizeEvent(new_theta))
+        catch e
+            @warn "Failed to dispatch posthoc size event: $e"
+        end
+    end
+
+    on(btn_posthoc_reset.clicks) do _
+        set_close_to!(slider_heatgdt_posthoc, 0.0)
     end
 
     # Show/hide Heat-GDT params based on algorithm selection
@@ -5311,10 +5353,16 @@ function create_metadata_window(
     on(algo_combo.selection) do sel
         heatgdt_row_visible[] = (sel == "Heat-GDT")
         rowsize!(g, seg_r3b, Fixed(heatgdt_row_visible[] ? 30 : 0))
+        rowsize!(g, seg_r3c, Fixed(heatgdt_row_visible[] ? 30 : 0))
+        rowsize!(g, seg_r3d, Fixed(heatgdt_row_visible[] ? 30 : 0))
+        rowsize!(g, seg_r3_tt, Fixed(heatgdt_row_visible[] ? 15 : 0))
         # Enable/disable Heat-GDT mouse-hold interaction mode
         _ROMCAD._heatgdt_mode_active[] = (sel == "Heat-GDT")
     end
     rowsize!(g, seg_r3b, Fixed(0))  # Hidden by default
+    rowsize!(g, seg_r3c, Fixed(0))  # Hidden by default
+    rowsize!(g, seg_r3d, Fixed(0))  # Hidden by default
+    rowsize!(g, seg_r3_tt, Fixed(0))  # Hidden by default
     on(btn_add_ai.clicks) do _
         @async try
             put!(channel, AddAutoPetEvent(algo_combo.selection[], channel))
@@ -5598,7 +5646,57 @@ function create_metadata_window(
     lbl_map_left = Label(g[map_info_r, 1:2], "Current TP: ...", fontsize=10, font=:bold, color=LBL_FG, halign=:left)
     lbl_map_right = Label(g[map_info_r, 3:4], "Compare TP: ...", fontsize=10, font=:bold, color=LBL_FG, halign=:left)
     
-    btn_refresh_map = Button(g[nr!(), 1:4], label="Refresh Associations", buttoncolor = BG_PNL, labelcolor = TXT, fontsize=10)
+    map_ctrl_r = nr!()
+    btn_map_mode_toggle = Button(g[map_ctrl_r, 1:2],
+        label = _MEH.compare_all_lesions_mode[] ? "Interactive Map: ON" : "Interactive Map: OFF",
+        buttoncolor = _MEH.compare_all_lesions_mode[] ? GRN : BG_PNL,
+        labelcolor = TXT, fontsize = 10)
+    btn_refresh_map = Button(g[map_ctrl_r, 3:4], label="Refresh Associations", buttoncolor = BG_PNL, labelcolor = TXT, fontsize=10)
+    rowsize!(g, map_ctrl_r, Fixed(28)); register_fixed_row!(map_ctrl_r, 28)
+
+    on(btn_map_mode_toggle.clicks) do _
+        _MEH.compare_all_lesions_mode[] = !_MEH.compare_all_lesions_mode[]
+        btn_map_mode_toggle.label[] = _MEH.compare_all_lesions_mode[] ? "Interactive Map: ON" : "Interactive Map: OFF"
+        btn_map_mode_toggle.buttoncolor[] = _MEH.compare_all_lesions_mode[] ? GRN : BG_PNL
+        cur_lid = _MEH.current_active_lesion_id[] > 0 ? _MEH.current_active_lesion_id[] : 1
+        put!(channel, SyncLesionEvent(cur_lid))
+        trigger_autosave()
+    end
+
+    # Differential Opacity Sliders (Linked vs Unlinked)
+    sl_link_r = nr!()
+    Label(g[sl_link_r, 1], "Linked α:", fontsize = 10, color = LBL_FG, halign = :right)
+    slider_alpha_linked = Slider(g[sl_link_r, 2:3], range = 0.05:0.05:1.0, startvalue = _MEH.mapping_alpha_linked[],
+        color_active = ACCENT, color_inactive = RGBf(0.3, 0.3, 0.35))
+    lbl_alpha_linked = Label(g[sl_link_r, 4], @lift(string(round($(slider_alpha_linked.value), digits=2))),
+        fontsize = 10, color = TXT, halign = :left)
+    rowsize!(g, sl_link_r, Fixed(26)); register_fixed_row!(sl_link_r, 26)
+
+    sl_unlink_r = nr!()
+    Label(g[sl_unlink_r, 1], "Unlinked α:", fontsize = 10, color = LBL_FG, halign = :right)
+    slider_alpha_unlinked = Slider(g[sl_unlink_r, 2:3], range = 0.10:0.05:1.0, startvalue = _MEH.mapping_alpha_unlinked[],
+        color_active = ACCENT, color_inactive = RGBf(0.3, 0.3, 0.35))
+    lbl_alpha_unlinked = Label(g[sl_unlink_r, 4], @lift(string(round($(slider_alpha_unlinked.value), digits=2))),
+        fontsize = 10, color = TXT, halign = :left)
+    rowsize!(g, sl_unlink_r, Fixed(26)); register_fixed_row!(sl_unlink_r, 26)
+
+    on(slider_alpha_linked.value) do val
+        _MEH.mapping_alpha_linked[] = Float32(val)
+        cur_lid = _MEH.current_active_lesion_id[] > 0 ? _MEH.current_active_lesion_id[] : 1
+        put!(channel, SyncLesionEvent(cur_lid))
+        trigger_autosave()
+    end
+
+    on(slider_alpha_unlinked.value) do val
+        _MEH.mapping_alpha_unlinked[] = Float32(val)
+        cur_lid = _MEH.current_active_lesion_id[] > 0 ? _MEH.current_active_lesion_id[] : 1
+        put!(channel, SyncLesionEvent(cur_lid))
+        trigger_autosave()
+    end
+
+    _lmw_observables[:btn_map_mode_toggle] = btn_map_mode_toggle
+    _lmw_observables[:slider_alpha_linked] = slider_alpha_linked
+    _lmw_observables[:slider_alpha_unlinked] = slider_alpha_unlinked
     
     map_container_r = nr!()
     map_grid = GridLayout(g[map_container_r, 1:4])
@@ -6150,6 +6248,9 @@ function create_metadata_window(
                     "vis_surface" => string(vis_surface_active[]),
                     "vis_marrow"  => string(vis_marrow_active[]),
                     "vis_anatomy" => string(vis_anatomy_active[]),
+                    "compare_all_lesions_mode" => string(_MEH.compare_all_lesions_mode[]),
+                    "mapping_alpha_linked" => string(_MEH.mapping_alpha_linked[]),
+                    "mapping_alpha_unlinked" => string(_MEH.mapping_alpha_unlinked[]),
                     "_current_user" => _current_user[],
                     "_last_save_at" => Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
                 )
@@ -6261,6 +6362,26 @@ function create_metadata_window(
                 btn_vis_anatomy.label[] = vis_anatomy_active[] ? "Anatomy: ON" : "Anatomy: OFF"
                 btn_vis_anatomy.buttoncolor[] = vis_anatomy_active[] ? RGBf(0.5, 0.0, 0.8) : BG_PNL
                 put!(channel, ShowMaskLayerEvent(4, vis_anatomy_active[]))
+            end
+            if haskey(gst, "compare_all_lesions_mode")
+                m_mode = (gst["compare_all_lesions_mode"] == "true")
+                _MEH.compare_all_lesions_mode[] = m_mode
+                btn_map_mode_toggle.label[] = m_mode ? "Interactive Map: ON" : "Interactive Map: OFF"
+                btn_map_mode_toggle.buttoncolor[] = m_mode ? GRN : BG_PNL
+            end
+            if haskey(gst, "mapping_alpha_linked")
+                val_l = tryparse(Float32, gst["mapping_alpha_linked"])
+                if val_l !== nothing
+                    _MEH.mapping_alpha_linked[] = val_l
+                    set_close_to!(slider_alpha_linked, val_l)
+                end
+            end
+            if haskey(gst, "mapping_alpha_unlinked")
+                val_u = tryparse(Float32, gst["mapping_alpha_unlinked"])
+                if val_u !== nothing
+                    _MEH.mapping_alpha_unlinked[] = val_u
+                    set_close_to!(slider_alpha_unlinked, val_u)
+                end
             end
         catch e
             @warn "Failed to apply global state: $e"
@@ -7554,7 +7675,10 @@ function create_metadata_window(
             "vis_lesion" => string(vis_lesion_active[]),
             "vis_surface" => string(vis_surface_active[]),
             "vis_marrow" => string(vis_marrow_active[]),
-            "vis_anatomy" => string(vis_anatomy_active[])
+            "vis_anatomy" => string(vis_anatomy_active[]),
+            "compare_all_lesions_mode" => string(_MEH.compare_all_lesions_mode[]),
+            "mapping_alpha_linked" => string(_MEH.mapping_alpha_linked[]),
+            "mapping_alpha_unlinked" => string(_MEH.mapping_alpha_unlinked[])
         )
         global_st = Dict{String, Any}(
             "windowing" => Dict(
@@ -8069,6 +8193,24 @@ function create_metadata_window(
     _lmw_observables[:obs_next_lesion] = obs_next_lesion
     _lmw_observables[:obs_prev_lesion] = obs_prev_lesion
 
+    obs_select_lesion_id = Observable{Int}(0)
+    on(obs_select_lesion_id) do target_lid
+        target_lid <= 0 && return
+        opts = lesion_ids[]
+        idx = findfirst(opt -> parse_lesion_id(opt) == target_lid, opts)
+        if idx !== nothing
+            is_syncing_selection[] = true
+            try
+                les_menu.selection[] = opts[idx]
+                les_menu.i_selected[] = idx
+            finally
+                is_syncing_selection[] = false
+            end
+            active_lesion_id[] = opts[idx]
+        end
+    end
+    _lmw_observables[:obs_select_lesion_id] = obs_select_lesion_id
+
     # ── Keyboard-triggered action observables ──────────────────────────────
     # These are triggered from MakieEventHandlers when keyboard shortcuts fire,
     # executing the same logic as the GUI buttons.
@@ -8220,6 +8362,7 @@ function create_metadata_window(
         end)
     end
     _lmw_observables[:obs_flag_reg] = obs_flag_reg
+    _lmw_observables[:algo_combo_selection] = algo_combo.selection
 
     # Enable row widget cache NOW that all sections are built
     _row_cache_ready[] = true

@@ -1,0 +1,242 @@
+[
+  {
+    "best_val_dice_fixed": 0.12251893430948257,
+    "click_ms": 46.82,
+    "edge_type": "hed3d",
+    "epochs": 5,
+    "loss_type": "dice_bce_edge",
+    "n_params": 14137675,
+    "name": "H1_HED_PureDiff_DiceBCE",
+    "optimal_slider_dice": 0.16846469044685364,
+    "optimal_theta": 0.004999999888241291,
+    "pde_type": "pure_diffusion",
+    "precomp_ms": 60.95,
+    "val_dice_history": [
+      0.09441785514354706,
+      0.11589723080396652,
+      0.1214141994714737,
+      0.12251893430948257,
+      0.11129865795373917
+    ]
+  },
+  {
+    "best_val_dice_fixed": 0.012958449311554432,
+    "click_ms": 46.8,
+    "edge_type": "hed3d",
+    "epochs": 5,
+    "loss_type": "dice_dtm_edge",
+    "n_params": 14137675,
+    "name": "H2_HED_ReacDiff_DiceDTM",
+    "optimal_slider_dice": 0.12978775799274445,
+    "optimal_theta": 0.004999999888241291,
+    "pde_type": "reaction_diffusion",
+    "precomp_ms": 87.99,
+    "val_dice_history": [
+      0.012958449311554432,
+      0.011551680974662304,
+      0.0059290616773068905,
+      0.0062182992696762085,
+      0.000836896535474807
+    ]
+  },
+  {
+    "best_val_dice_fixed": 0.013877560384571552,
+    "click_ms": 47.03,
+    "edge_type": "hed3d",
+    "epochs": 5,
+    "loss_type": "focal_tversky_dtm",
+    "n_params": 14137675,
+    "name": "H3_HED_ReacDiff_FocalTversky",
+    "optimal_slider_dice": 0.1239205151796341,
+    "optimal_theta": 0.004999999888241291,
+    "pde_type": "reaction_diffusion",
+    "precomp_ms": 88.52,
+    "val_dice_history": [
+      0.013877560384571552,
+      0.003648062702268362,
+      0.0029856220353394747,
+      6.737591462524506e-8,
+      6.737591462524506e-8
+    ]
+  },
+  {
+    "best_val_dice_fixed": 0.1151876151561737,
+    "click_ms": 46.75,
+    "edge_type": "dexined3d",
+    "epochs": 5,
+    "loss_type": "dice_dtm",
+    "n_params": 218917,
+    "name": "H4_DexiNed_PureDiff_DiceDTM",
+    "optimal_slider_dice": 0.1410977989435196,
+    "optimal_theta": 0.004999999888241291,
+    "pde_type": "pure_diffusion",
+    "precomp_ms": 121.49,
+    "val_dice_history": [
+      0.10916470736265182,
+      0.10299186408519745,
+      0.10671304166316986,
+      0.10650408267974854,
+      0.1151876151561737
+    ]
+  },
+  {
+    "best_val_dice_fixed": 0.01300633791834116,
+    "click_ms": 51.02,
+    "edge_type": "dexined3d",
+    "epochs": 5,
+    "loss_type": "dice_dtm_edge",
+    "n_params": 218917,
+    "name": "H5_DexiNed_ReacDiff_DiceDTM",
+    "optimal_slider_dice": 0.061217911541461945,
+    "optimal_theta": 0.004999999888241291,
+    "pde_type": "reaction_diffusion",
+    "precomp_ms": 158.27,
+    "val_dice_history": [
+      0.011694642715156078,
+      0.012296522036194801,
+      0.012992559000849724,
+      0.012992559000849724,
+      0.01300633791834116
+    ]
+  },
+  {
+    "best_val_dice_fixed": 0.11632247269153595,
+    "click_ms": 46.92,
+    "edge_type": "dexined3d",
+    "epochs": 5,
+    "loss_type": "compound_dtm",
+    "n_params": 218917,
+    "name": "H6_DexiNed_AdvecDiff",
+    "optimal_slider_dice": 0.13886766135692596,
+    "optimal_theta": 0.004999999888241291,
+    "pde_type": "advection_diffusion",
+    "precomp_ms": 149.45,
+    "val_dice_history": [
+      0.11632247269153595,
+      0.11537642031908035,
+      0.11335469782352448,
+      0.11565151065587997,
+      0.1159825474023819
+    ]
+  },
+  {
+    "best_val_dice_fixed": 6.737591462524506e-8,
+    "click_ms": 46.74,
+    "edge_type": "dframenet",
+    "epochs": 5,
+    "loss_type": "dice_dtm",
+    "n_params": 1442372,
+    "name": "H7_DFrame_AdvecDiff_DTM",
+    "optimal_slider_dice": 6.031608279499778e-8,
+    "optimal_theta": 0.004999999888241291,
+    "pde_type": "advection_diffusion",
+    "precomp_ms": 108.92,
+    "val_dice_history": [
+      6.737591462524506e-8,
+      6.737591462524506e-8,
+      6.737591462524506e-8,
+      6.737591462524506e-8,
+      6.737591462524506e-8
+    ]
+  },
+  {
+    "best_val_dice_fixed": 0.012599692679941654,
+    "click_ms": 46.72,
+    "edge_type": "hybrid25d",
+    "epochs": 5,
+    "loss_type": "dice_dtm",
+    "n_params": 84977,
+    "name": "H8_Hybrid25D_ReacDiff_DiceDTM",
+    "optimal_slider_dice": 0.09700343012809753,
+    "optimal_theta": 0.004999999888241291,
+    "pde_type": "reaction_diffusion",
+    "precomp_ms": 93.57,
+    "val_dice_history": [
+      0.009994495660066605,
+      0.011690392158925533,
+      0.012599692679941654,
+      0.012156723998486996,
+      0.011733470484614372
+    ]
+  },
+  {
+    "best_val_dice_fixed": 0.008457418531179428,
+    "click_ms": 46.98,
+    "edge_type": "heavy",
+    "epochs": 5,
+    "loss_type": "compound_dtm",
+    "n_params": 23555973,
+    "name": "H9_Heavy_ReacDiff_CompoundDTM",
+    "optimal_slider_dice": 0.024122294038534164,
+    "optimal_theta": 0.004999999888241291,
+    "pde_type": "reaction_diffusion",
+    "precomp_ms": 124.55,
+    "val_dice_history": [
+      6.737591462524506e-8,
+      6.737591462524506e-8,
+      4.204890501569025e-5,
+      0.008457418531179428,
+      0.006647808011621237
+    ]
+  },
+  {
+    "best_val_dice_fixed": 0.08580338209867477,
+    "click_ms": 50.52,
+    "edge_type": "heavy",
+    "epochs": 5,
+    "loss_type": "dice_dtm",
+    "n_params": 23555973,
+    "name": "H10_Heavy_PureDiff_DiceDTM",
+    "optimal_slider_dice": 0.0810479149222374,
+    "optimal_theta": 0.004999999888241291,
+    "pde_type": "pure_diffusion",
+    "precomp_ms": 106.06,
+    "val_dice_history": [
+      0.06624051183462143,
+      0.06624051183462143,
+      0.07414700090885162,
+      0.08566543459892273,
+      0.08580338209867477
+    ]
+  },
+  {
+    "best_val_dice_fixed": 0.013002165593206882,
+    "click_ms": 47.83,
+    "edge_type": "deep",
+    "epochs": 5,
+    "loss_type": "dice_dtm_edge",
+    "n_params": 1429972,
+    "name": "H11_Deep_ReacDiff_DiceDTM",
+    "optimal_slider_dice": 0.09087614715099335,
+    "optimal_theta": 0.004999999888241291,
+    "pde_type": "reaction_diffusion",
+    "precomp_ms": 114.06,
+    "val_dice_history": [
+      0.012008479796350002,
+      0.01291380263864994,
+      0.012908974662423134,
+      0.012998185120522976,
+      0.013002165593206882
+    ]
+  },
+  {
+    "best_val_dice_fixed": 0.00650814501568675,
+    "click_ms": 47.83,
+    "edge_type": "heavy",
+    "epochs": 5,
+    "loss_type": "compound_dtm",
+    "n_params": 23555973,
+    "name": "H12_Heavy_FullRDA_Compound",
+    "optimal_slider_dice": 0.01762336865067482,
+    "optimal_theta": 0.004999999888241291,
+    "pde_type": "full_rda",
+    "precomp_ms": 127.22,
+    "val_dice_history": [
+      6.737591462524506e-8,
+      4.204890501569025e-5,
+      0.0010215089423581958,
+      0.005055130925029516,
+      0.00650814501568675
+    ]
+  }
+]

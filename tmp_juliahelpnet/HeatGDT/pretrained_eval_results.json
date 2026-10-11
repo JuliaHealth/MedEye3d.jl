@@ -1,0 +1,298 @@
+{
+  "HED3D + pretrain (PET/CT)": {
+    "best_dice": 0.42927827863645135,
+    "best_theta": 0.0010000000474974513,
+    "checkpoint": "champion_pretrained_hed3d.jld2",
+    "edge_type": "hed3d",
+    "modality": "PET/CT",
+    "per_threshold": {
+      "0.0001": {
+        "dice": 0.022243317183750725,
+        "n_samples": 793.0
+      },
+      "0.0005": {
+        "dice": 0.14679511039885415,
+        "n_samples": 793.0
+      },
+      "0.001": {
+        "dice": 0.42927827863645135,
+        "n_samples": 793.0
+      },
+      "0.005": {
+        "dice": 0.22469330999018416,
+        "n_samples": 793.0
+      },
+      "0.01": {
+        "dice": 0.137778050661989,
+        "n_samples": 793.0
+      },
+      "0.05": {
+        "dice": 0.03223888059281762,
+        "n_samples": 793.0
+      },
+      "0.1": {
+        "dice": 0.004926932038455112,
+        "n_samples": 793.0
+      }
+    }
+  },
+  "HED3D + pretrain (Pure CT)": {
+    "best_dice": 0.24749663280508707,
+    "best_theta": 0.0010000000474974513,
+    "checkpoint": "champion_pretrained_hed3d.jld2",
+    "edge_type": "hed3d",
+    "modality": "Pure CT",
+    "per_threshold": {
+      "0.0001": {
+        "dice": 0.021052163531169916,
+        "n_samples": 793.0
+      },
+      "0.0005": {
+        "dice": 0.0956745660320056,
+        "n_samples": 793.0
+      },
+      "0.001": {
+        "dice": 0.24749663280508707,
+        "n_samples": 793.0
+      },
+      "0.005": {
+        "dice": 0.11101004237034282,
+        "n_samples": 793.0
+      },
+      "0.01": {
+        "dice": 0.06236020418313833,
+        "n_samples": 793.0
+      },
+      "0.05": {
+        "dice": 0.0386826970237501,
+        "n_samples": 793.0
+      },
+      "0.1": {
+        "dice": 0.007136229157898796,
+        "n_samples": 793.0
+      }
+    }
+  },
+  "HED3D-Wide + pretrain (PET/CT)": {
+    "best_dice": 0.42353575827946127,
+    "best_theta": 0.0010000000474974513,
+    "checkpoint": "champion_pretrained_hed3d_wide.jld2",
+    "edge_type": "hed3d_wide",
+    "modality": "PET/CT",
+    "per_threshold": {
+      "0.0001": {
+        "dice": 0.02148595433517783,
+        "n_samples": 793.0
+      },
+      "0.0005": {
+        "dice": 0.14087975724197427,
+        "n_samples": 793.0
+      },
+      "0.001": {
+        "dice": 0.42353575827946127,
+        "n_samples": 793.0
+      },
+      "0.005": {
+        "dice": 0.2397445537253256,
+        "n_samples": 793.0
+      },
+      "0.01": {
+        "dice": 0.14265713678182,
+        "n_samples": 793.0
+      },
+      "0.05": {
+        "dice": 0.023912063763391174,
+        "n_samples": 793.0
+      },
+      "0.1": {
+        "dice": 0.003793553701715842,
+        "n_samples": 793.0
+      }
+    }
+  },
+  "HED3D-Wide + pretrain (Pure CT)": {
+    "best_dice": 0.3047772614381653,
+    "best_theta": 0.0010000000474974513,
+    "checkpoint": "champion_pretrained_hed3d_wide.jld2",
+    "edge_type": "hed3d_wide",
+    "modality": "Pure CT",
+    "per_threshold": {
+      "0.0001": {
+        "dice": 0.020535648320091027,
+        "n_samples": 793.0
+      },
+      "0.0005": {
+        "dice": 0.10453582185814991,
+        "n_samples": 793.0
+      },
+      "0.001": {
+        "dice": 0.3047772614381653,
+        "n_samples": 793.0
+      },
+      "0.005": {
+        "dice": 0.1557740386467413,
+        "n_samples": 793.0
+      },
+      "0.01": {
+        "dice": 0.08187691019883223,
+        "n_samples": 793.0
+      },
+      "0.05": {
+        "dice": 0.03476978814015623,
+        "n_samples": 793.0
+      },
+      "0.1": {
+        "dice": 0.006676862624674697,
+        "n_samples": 793.0
+      }
+    }
+  },
+  "Heavy UNet + pretrain (PET/CT)": {
+    "best_dice": 0.4292939292527688,
+    "best_theta": 0.0010000000474974513,
+    "checkpoint": "champion_pretrained_heavy.jld2",
+    "edge_type": "heavy",
+    "modality": "PET/CT",
+    "per_threshold": {
+      "0.0001": {
+        "dice": 0.02163044493856827,
+        "n_samples": 793.0
+      },
+      "0.0005": {
+        "dice": 0.14466451719158985,
+        "n_samples": 793.0
+      },
+      "0.001": {
+        "dice": 0.4292939292527688,
+        "n_samples": 793.0
+      },
+      "0.005": {
+        "dice": 0.2278468921536305,
+        "n_samples": 793.0
+      },
+      "0.01": {
+        "dice": 0.13239611036990961,
+        "n_samples": 793.0
+      },
+      "0.05": {
+        "dice": 0.027196711429581515,
+        "n_samples": 793.0
+      },
+      "0.1": {
+        "dice": 0.004520091778994508,
+        "n_samples": 793.0
+      }
+    }
+  },
+  "Heavy UNet + pretrain (Pure CT)": {
+    "best_dice": 0.2709178861423218,
+    "best_theta": 0.0010000000474974513,
+    "checkpoint": "champion_pretrained_heavy.jld2",
+    "edge_type": "heavy",
+    "modality": "Pure CT",
+    "per_threshold": {
+      "0.0001": {
+        "dice": 0.021589133958948816,
+        "n_samples": 793.0
+      },
+      "0.0005": {
+        "dice": 0.10438874194781386,
+        "n_samples": 793.0
+      },
+      "0.001": {
+        "dice": 0.2709178861423218,
+        "n_samples": 793.0
+      },
+      "0.005": {
+        "dice": 0.11623376728156476,
+        "n_samples": 793.0
+      },
+      "0.01": {
+        "dice": 0.07230099828967831,
+        "n_samples": 793.0
+      },
+      "0.05": {
+        "dice": 0.03493042806959693,
+        "n_samples": 793.0
+      },
+      "0.1": {
+        "dice": 0.0067189511705617435,
+        "n_samples": 793.0
+      }
+    }
+  },
+  "HED3D-Ultra + pretrain (PET/CT)": {
+    "best_dice": 0.41902449760881977,
+    "best_theta": 0.0010000000474974513,
+    "checkpoint": "champion_pretrained_hed3d_ultra.jld2",
+    "edge_type": "hed3d_ultra",
+    "modality": "PET/CT",
+    "per_threshold": {
+      "0.0001": {
+        "dice": 0.02216302551808303,
+        "n_samples": 793.0
+      },
+      "0.0005": {
+        "dice": 0.14455221151794492,
+        "n_samples": 793.0
+      },
+      "0.001": {
+        "dice": 0.41902449760881977,
+        "n_samples": 793.0
+      },
+      "0.005": {
+        "dice": 0.24261027198721752,
+        "n_samples": 793.0
+      },
+      "0.01": {
+        "dice": 0.138881471463741,
+        "n_samples": 793.0
+      },
+      "0.05": {
+        "dice": 0.017301426634361586,
+        "n_samples": 793.0
+      },
+      "0.1": {
+        "dice": 0.0027587474670265843,
+        "n_samples": 793.0
+      }
+    }
+  },
+  "HED3D-Ultra + pretrain (Pure CT)": {
+    "best_dice": 0.3131951843805301,
+    "best_theta": 0.0010000000474974513,
+    "checkpoint": "champion_pretrained_hed3d_ultra.jld2",
+    "edge_type": "hed3d_ultra",
+    "modality": "Pure CT",
+    "per_threshold": {
+      "0.0001": {
+        "dice": 0.021000209552192447,
+        "n_samples": 793.0
+      },
+      "0.0005": {
+        "dice": 0.11085084069421583,
+        "n_samples": 793.0
+      },
+      "0.001": {
+        "dice": 0.3131951843805301,
+        "n_samples": 793.0
+      },
+      "0.005": {
+        "dice": 0.1476986472874241,
+        "n_samples": 793.0
+      },
+      "0.01": {
+        "dice": 0.07755137933007104,
+        "n_samples": 793.0
+      },
+      "0.05": {
+        "dice": 0.030805770566153797,
+        "n_samples": 793.0
+      },
+      "0.1": {
+        "dice": 0.005835417089666725,
+        "n_samples": 793.0
+      }
+    }
+  }
+}

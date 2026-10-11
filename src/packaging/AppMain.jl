@@ -889,89 +889,98 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname = study[1:8]
         group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
         
-        HDF5.h5open(h5_path, "r") do h5_file
-            is_pf = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
-            ct_vol = Float32.(read(h5_file["$group/$ct_fname"]))
-            pet_vol = Float32.(read(h5_file["$group/$pet_fname"]))
-            if haskey(h5_file, "$group/$(mask_fname)_expert")
-                try
-                    mask_vol = read(h5_file["$group/$(mask_fname)_expert"])
-                catch e
-                    @warn "[AppMain] Corrupted _expert mask for $group, falling back to original" exception=(e, catch_backtrace())
+        try
+            return HDF5.h5open(h5_path, "r") do h5_file
+                if !haskey(h5_file, group)
+                    @warn "[AppMain] Timepoint $tp_i group '$group' not found in $h5_path"
+                    return nothing
+                end
+                is_pf = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
+                ct_vol = Float32.(read(h5_file["$group/$ct_fname"]))
+                pet_vol = Float32.(read(h5_file["$group/$pet_fname"]))
+                if haskey(h5_file, "$group/$(mask_fname)_expert")
+                    try
+                        mask_vol = read(h5_file["$group/$(mask_fname)_expert"])
+                    catch e
+                        @warn "[AppMain] Corrupted _expert mask for $group, falling back to original" exception=(e, catch_backtrace())
+                        mask_vol = read(h5_file["$group/$mask_fname"])
+                    end
+                else
                     mask_vol = read(h5_file["$group/$mask_fname"])
                 end
-            else
-                mask_vol = read(h5_file["$group/$mask_fname"])
-            end
-            
-            if modality == "SPECT"
-                pos_dat = pet_vol[pet_vol .> 0]
-                p99 = isempty(pos_dat) ? 1.0f0 : Float32(quantile(pos_dat, 0.99))
-                scale_factor = 8.0f0 / max(p99, 1.0f0)
-                pet_vol = max.(0.0f0, pet_vol .* scale_factor)
-            end
-            
-            needs_reverse = !is_pf
-            if needs_reverse
-                ct_vol_base = reverse(ct_vol, dims=2)
-                pet_vol_base = reverse(pet_vol, dims=2)
-                mask_vol_base = reverse(mask_vol, dims=2)
-            else
-                ct_vol_base = ct_vol; pet_vol_base = pet_vol; mask_vol_base = mask_vol
-            end
-            
-            lock(MEH._centroids_lock) do
-                MEH.pet_volumes_cache[tp_i] = pet_vol_base
-            end
-            
-            if eltype(mask_vol_base) == Int16
-                mask_compact = mask_vol_base
-            elseif eltype(mask_vol_base) <: Integer
-                mask_compact = Int16.(mask_vol_base)
-            else
-                mask_vol_base = max.(0.0f0, mask_vol_base)
-                mask_compact = Int16.(round.(mask_vol_base))
-            end
-            
-            sz = size(ct_vol_base)
-            bone_mask = zeros(Int8, sz)
-            
-            anatomy_vol = nothing
-            try
-                for k in keys(h5_file[group])
-                    if k == "max_anatomy.nii.gz" || startswith(k, "max_anatomy")
-                        raw_anat = read(h5_file["$group/$k"])
-                        if needs_reverse
-                            raw_anat = reverse(Float32.(raw_anat), dims=2)
-                        end
-                        anatomy_vol = eltype(raw_anat) <: Integer ? UInt16.(raw_anat) : UInt16.(round.(max.(0.0f0, Float32.(raw_anat))))
-                        break
-                    end
+                
+                if modality == "SPECT"
+                    pos_dat = pet_vol[pet_vol .> 0]
+                    p99 = isempty(pos_dat) ? 1.0f0 : Float32(quantile(pos_dat, 0.99))
+                    scale_factor = 8.0f0 / max(p99, 1.0f0)
+                    pet_vol = max.(0.0f0, pet_vol .* scale_factor)
                 end
-            catch; end
-            # Fallback: if no per-TP anatomy, reuse ATLAS or BASELINE anatomy
-            # (MRI TPs are registered to baseline space, so the atlas is valid)
-            if anatomy_vol === nothing
-                for fallback_path in ["ATLAS/max_anatomy", "BASELINE/max_anatomy.nii.gz"]
-                    if haskey(h5_file, fallback_path)
-                        try
-                            raw_anat = read(h5_file[fallback_path])
+                
+                needs_reverse = !is_pf
+                if needs_reverse
+                    ct_vol_base = reverse(ct_vol, dims=2)
+                    pet_vol_base = reverse(pet_vol, dims=2)
+                    mask_vol_base = reverse(mask_vol, dims=2)
+                else
+                    ct_vol_base = ct_vol; pet_vol_base = pet_vol; mask_vol_base = mask_vol
+                end
+                
+                lock(MEH._centroids_lock) do
+                    MEH.pet_volumes_cache[tp_i] = pet_vol_base
+                end
+                
+                if eltype(mask_vol_base) == Int16
+                    mask_compact = mask_vol_base
+                elseif eltype(mask_vol_base) <: Integer
+                    mask_compact = Int16.(mask_vol_base)
+                else
+                    mask_vol_base = max.(0.0f0, mask_vol_base)
+                    mask_compact = Int16.(round.(mask_vol_base))
+                end
+                
+                sz = size(ct_vol_base)
+                bone_mask = zeros(Int8, sz)
+                
+                anatomy_vol = nothing
+                try
+                    for k in keys(h5_file[group])
+                        if k == "max_anatomy.nii.gz" || startswith(k, "max_anatomy")
+                            raw_anat = read(h5_file["$group/$k"])
                             if needs_reverse
                                 raw_anat = reverse(Float32.(raw_anat), dims=2)
                             end
                             anatomy_vol = eltype(raw_anat) <: Integer ? UInt16.(raw_anat) : UInt16.(round.(max.(0.0f0, Float32.(raw_anat))))
-                            println("  [TP $tp_i] Using fallback anatomy from $fallback_path"); flush(stdout)
                             break
-                        catch; end
+                        end
+                    end
+                catch; end
+                # Fallback: if no per-TP anatomy, reuse ATLAS or BASELINE anatomy
+                # (MRI TPs are registered to baseline space, so the atlas is valid)
+                if anatomy_vol === nothing
+                    for fallback_path in ["ATLAS/max_anatomy", "BASELINE/max_anatomy.nii.gz"]
+                        if haskey(h5_file, fallback_path)
+                            try
+                                raw_anat = read(h5_file[fallback_path])
+                                if needs_reverse
+                                    raw_anat = reverse(Float32.(raw_anat), dims=2)
+                                end
+                                anatomy_vol = eltype(raw_anat) <: Integer ? UInt16.(raw_anat) : UInt16.(round.(max.(0.0f0, Float32.(raw_anat))))
+                                println("  [TP $tp_i] Using fallback anatomy from $fallback_path"); flush(stdout)
+                                break
+                            catch; end
+                        end
                     end
                 end
+                
+                mask_i16 = Int16.(mask_compact)
+                anat_i16 = anatomy_vol !== nothing ? Int16.(anatomy_vol) : nothing
+                MEH.precompute_mask_centroids!(mask_compact, tp_i, node_name)
+                try; MedEye3d.LesionMetadataWindow.precompute_all_volumes!(mask_compact, tp_i); catch; end
+                return MEH.TpCacheEntry(ct_vol_base, pet_vol_base, mask_compact, bone_mask, anatomy_vol, mask_i16, anat_i16)
             end
-            
-            mask_i16 = Int16.(mask_compact)
-            anat_i16 = anatomy_vol !== nothing ? Int16.(anatomy_vol) : nothing
-            MEH.precompute_mask_centroids!(mask_compact, tp_i, node_name)
-            try; MedEye3d.LesionMetadataWindow.precompute_all_volumes!(mask_compact, tp_i); catch; end
-            return MEH.TpCacheEntry(ct_vol_base, pet_vol_base, mask_compact, bone_mask, anatomy_vol, mask_i16, anat_i16)
+        catch e
+            @warn "[AppMain] Failed to load timepoint $tp_i ($group) from HDF5: $e" exception=(e, catch_backtrace())
+            return nothing
         end
     end
 

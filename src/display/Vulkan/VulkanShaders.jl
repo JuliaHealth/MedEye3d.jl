@@ -423,7 +423,26 @@ function _generate_mask_overlay_code(notcont, cont, discrete)
             code *= """
                 if (params.$(n)isVisible == 1 && abs($(n)Res) > 0.00001) {
                     bool showThis_$(n) = false;
-                    if (params.$(n)allowedIDCount > 0) {
+                    float alpha_$(n) = clamp(params.$(n)maskContribution, 0.0, 1.0);
+                    if (params.$(n)ColorMask.b > 0.5) {
+                        // Differential opacity mapping mode (Compare TP)
+                        showThis_$(n) = ($(n)Res >= params.$(n)minValue - 0.1) && ($(n)Res <= params.$(n)maxValue + 0.1);
+                        if (showThis_$(n)) {
+                            bool isMapped_$(n) = false;
+                            for (int _aidx = 0; _aidx < 16; _aidx++) {
+                                if (_aidx >= params.$(n)allowedIDCount) { break; }
+                                if (abs($(n)Res - params.$(n)allowedIDs[_aidx]) < 0.1) {
+                                    isMapped_$(n) = true;
+                                    break;
+                                }
+                            }
+                            if (isMapped_$(n)) {
+                                alpha_$(n) = clamp(params.$(n)ColorMask.r, 0.0, 1.0);
+                            } else {
+                                alpha_$(n) = clamp(params.$(n)ColorMask.g, 0.0, 1.0);
+                            }
+                        }
+                    } else if (params.$(n)allowedIDCount > 0) {
                         for (int _aidx = 0; _aidx < 16; _aidx++) {
                             if (_aidx >= params.$(n)allowedIDCount) { break; }
                             if (abs($(n)Res - params.$(n)allowedIDs[_aidx]) < 0.1) {
@@ -435,10 +454,9 @@ function _generate_mask_overlay_code(notcont, cont, discrete)
                         showThis_$(n) = ($(n)Res >= params.$(n)minValue - 0.1) && ($(n)Res <= params.$(n)maxValue + 0.1);
                     }
                     if (showThis_$(n)) {
-                        float alpha = clamp(params.$(n)maskContribution, 0.0, 1.0);
                         vec3 maskColor = getDiscreteColor_$(n)($(n)Res);
                         if (maskColor != vec3(0.0)) {
-                            baseColor = mix(baseColor, maskColor, alpha);
+                            baseColor = mix(baseColor, maskColor, alpha_$(n));
                         }
                     }
                 }
