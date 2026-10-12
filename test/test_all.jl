@@ -200,4 +200,6 @@ using JSON
     include("test_auto_advance.jl")
     include("test_new_features.jl")
     include("test_interactive_lesion_mapping.jl")
+    include("test_lesion_anatomy_isolation.jl")
+    include("test_live_navigation_e2e.jl")
 end

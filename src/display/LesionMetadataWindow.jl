@@ -91,6 +91,57 @@ end
         menu.selection[] = val
     end
 end
+
+"""
+    _set_menu_selection_string!(menu, val; all_opts=nothing)
+
+Safely select string `val` in `menu`.
+If `val` is empty (or whitespace), selects the empty option `""`. If no empty option exists,
+prepends `""` at index 1 and selects it.
+If `val` is non-empty:
+- If `val` is in `menu.options[]`, selects its index.
+- If not in `menu.options[]`, inserts `val` while ensuring `""` is preserved at index 1
+  (inserting at index 2 if index 1 is `""`), and selects it.
+This ensures subsequent resets to `""` will always resolve to `""`, never mistakenly
+selecting `val` for subsequent lesions!
+"""
+function _set_menu_selection_string!(menu::Makie.Menu, val::Union{AbstractString, Nothing}; all_opts=nothing)
+    v_clean = val === nothing ? "" : String(strip(val))
+    opts = copy(menu.options[])
+    
+    if isempty(v_clean)
+        empty_idx = findfirst(opt -> isempty(strip(string(opt))), opts)
+        if empty_idx !== nothing
+            _set_menu_idx!(menu, empty_idx)
+        else
+            new_opts = vcat([""], opts)
+            menu.options[] = new_opts
+            _set_menu_idx!(menu, 1)
+        end
+        return
+    end
+
+    idx = findfirst(==(v_clean), opts)
+    if idx !== nothing
+        _set_menu_idx!(menu, idx)
+    else
+        empty_idx = findfirst(opt -> isempty(strip(string(opt))), opts)
+        if empty_idx == 1
+            new_opts = vcat([opts[1], v_clean], opts[2:end])
+            menu.options[] = new_opts
+            _set_menu_idx!(menu, 2)
+        else
+            new_opts = vcat([v_clean], opts)
+            menu.options[] = new_opts
+            _set_menu_idx!(menu, 1)
+        end
+        if all_opts !== nothing && all_opts isa Observable
+            if !(v_clean in all_opts[])
+                all_opts[] = vcat(all_opts[], [v_clean])
+            end
+        end
+    end
+end
 export current_has_expert_edits, current_seg_origin, mark_expert_correction!, mark_prompt_segmentation!, mark_reverted_to_ai!, request_autosave, get_lesion_has_expert_edits, get_lesion_segmentation_origin, _current_user
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
@@ -759,7 +810,7 @@ end
 Look up a raw max_anatomy organ name in the JSON mapping.
 Returns a Dict with keys: "detailed", "generalized", "side", "anatomic_location", "lesion_type".
 """
-function lookup_anatomy(raw_organ::String)
+function lookup_anatomy(raw_organ::AbstractString)
     isempty(raw_organ) && return nothing
     mapping = load_anatomy_mapping()
     key = lowercase(strip(raw_organ))
@@ -973,34 +1024,35 @@ Handles keys like "1", "1: Femur", "1: Femur [Grp 1, 3 TPs]", etc.
 """
 function get_lesion_state(db::Dict, key::String)::Dict{String,Any}
     res = Dict{String,Any}()
-    # 1. Exact match
-    if haskey(db, key)
+    lid = parse_lesion_id(key)
+    
+    # 1. Prefer canonical integer string key (e.g. "1") since modern saves and flushes use this
+    if lid !== nothing
+        lid_str = string(lid)
+        if haskey(db, lid_str)
+            v = db[lid_str]
+            res = v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : Dict{String,Any}()
+        end
+    end
+    
+    # 2. Exact match on display key if not found under canonical key
+    if isempty(res) && haskey(db, key)
         v = db[key]
         res = v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : Dict{String,Any}()
-    else
-        # 2. Extract numeric ID from key (e.g. "1: femur" -> 1, "1 - New" -> 1)
-        lid = parse_lesion_id(key)
-        
-        if lid !== nothing
-            # Check canonical integer string key (e.g. "1") — preferred since autosave now uses this
-            lid_str = string(lid)
-            if haskey(db, lid_str)
-                v = db[lid_str]
-                res = v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : Dict{String,Any}()
-            else
-                # Backward compat: search all display-name keys, prefer the one with most data
-                best_v = Dict{String,Any}()
-                best_count = 0
-                for (k, v) in db
-                    k_lid = parse_lesion_id(k)
-                    if k_lid == lid && v isa AbstractDict && length(v) > best_count
-                        best_v = Dict{String,Any}(string(ik) => iv for (ik, iv) in v)
-                        best_count = length(v)
-                    end
-                end
-                res = best_v
+    end
+    
+    # 3. Backward compat: search all display-name keys, prefer the one with most data
+    if isempty(res) && lid !== nothing
+        best_v = Dict{String,Any}()
+        best_count = 0
+        for (k, v) in db
+            k_lid = parse_lesion_id(k)
+            if k_lid == lid && v isa AbstractDict && length(v) > best_count
+                best_v = Dict{String,Any}(string(ik) => iv for (ik, iv) in v)
+                best_count = length(v)
             end
         end
+        res = best_v
     end
     
     # Sanitize loaded BaseAnatomy against physical Z-axis location
@@ -2272,10 +2324,17 @@ function searchable_menu(g, row, cols;
                 typed_str = filter_buf[]
                 current_opts = all_opts[]
                 if !(typed_str in current_opts)
-                    # Custom text: prepend to options so it's a valid selection
-                    menu.options[] = vcat([typed_str], current_opts)
-                    sel = typed_str
-                    menu.i_selected[] = 1
+                    # Custom text: insert into options so it's a valid selection, preserving "" at index 1
+                    empty_idx = findfirst(opt -> isempty(strip(string(opt))), current_opts)
+                    if empty_idx == 1
+                        menu.options[] = vcat([current_opts[1], typed_str], current_opts[2:end])
+                        sel = typed_str
+                        menu.i_selected[] = 2
+                    else
+                        menu.options[] = vcat([typed_str], current_opts)
+                        sel = typed_str
+                        menu.i_selected[] = 1
+                    end
                 else
                     # Exists in options: select it
                     menu.options[] = current_opts
@@ -2297,8 +2356,14 @@ function searchable_menu(g, row, cols;
                     if idx !== nothing
                         menu.i_selected[] = idx
                     else
-                        menu.options[] = vcat([sel_str], current_opts)
-                        menu.i_selected[] = 1
+                        empty_idx = findfirst(opt -> isempty(strip(string(opt))), current_opts)
+                        if empty_idx == 1
+                            menu.options[] = vcat([current_opts[1], sel_str], current_opts[2:end])
+                            menu.i_selected[] = 2
+                        else
+                            menu.options[] = vcat([sel_str], current_opts)
+                            menu.i_selected[] = 1
+                        end
                     end
                 end
                 filter_buf[] = ""
@@ -3063,8 +3128,6 @@ function create_metadata_window(
         sel === nothing && return
         s = string(sel)
         if s != active_lesion_id[]
-            # Save current lesion's state BEFORE switching (captures in-progress textbox edits)
-            try trigger_autosave() catch; end
             is_syncing_selection[] = true
             try
                 active_lesion_id[] = s
@@ -4838,8 +4901,8 @@ function create_metadata_window(
                             anat_rel_menus[j].i_selected[] = anat_rel_menus[j+1].i_selected[]
                             anat_struct_menus[j].i_selected[] = anat_struct_menus[j+1].i_selected[]
                         end
-                        anat_rel_menus[n].i_selected[] = 1
-                        anat_struct_menus[n].i_selected[] = 1
+                        _set_menu_selection_string!(anat_rel_menus[n], "")
+                        _set_menu_selection_string!(anat_struct_menus[n], "")
                         anat_active_count[] = n - 1
                     end
                 end
@@ -6399,30 +6462,69 @@ function create_metadata_window(
     end
 
     _is_applying_state = Ref(false)
+    _apply_state_failed = Ref(false)
     _is_dictating_update = Ref(false)
     _last_snapshot = Ref{Any}(nothing)  # holds (id, state, global_state, tp_idx, skip_dict)
+
+    function _flush_lesion!(lid::Int)
+        (lid <= 0 || _is_applying_state[] || _apply_state_failed[]) && return
+        canonical_key = string(lid)
+        snap_state = collect_state()
+        cur_opts = lesion_ids[]
+        idx = findfirst(opt -> parse_lesion_id(opt) == lid, cur_opts)
+        disp_name = idx !== nothing ? cur_opts[idx] : string(lid)
+        snap_state["_display_name"] = disp_name
+        
+        db = copy(lesion_db[])
+        old_st = get(db, canonical_key, Dict{String,Any}())
+        if old_st isa AbstractDict && !isempty(old_st)
+            try _append_edit_history!(snap_state, old_st) catch; end
+        end
+        db[canonical_key] = snap_state
+        lesion_db[] = db
+        _db_dirty[] = true
+        try
+            put!(db_channel, SaveDBMessage(db, global_app_state, save_path, DEFAULT_HDF5_PATH))
+        catch; end
+    end
+
     # ── Rocket.jl autosave debounce ──────────────────────────────────────────
-    # Use a Rocket Subject + debounce_time(300) instead of manual sleep/pending.
-    _autosave_subject = Subject(Tuple{Bool})
+    # Pass target lesion ID to ensure debounced saves never overwrite another lesion
+    _autosave_subject = Subject(Tuple{Int, Bool})
     _autosave_debounced = _autosave_subject |> debounce_time(300)
     
     function trigger_autosave(; skip_dictation=false)
         _is_applying_state[] && return
-        
+        cur_id = active_lesion_id[]
+        lid = parse_lesion_id(cur_id)
+        (lid === nothing || lid <= 0) && return
         # Push into Rocket Subject — debounce_time handles coalescing
-        next!(_autosave_subject, (skip_dictation,))
+        next!(_autosave_subject, (lid, skip_dictation))
         return
     end
     
     # The debounced handler runs the actual save logic
     subscribe!(_autosave_debounced, lambda(
         on_next = (args) -> @async begin
-            skip_dictation_val = args[1]
+            target_lid = args[1]
+            skip_dictation_val = args[2]
+            
+            # Isolation guard: only save if user is still on the same lesion and not applying state
+            cur_id = active_lesion_id[]
+            cur_lid = parse_lesion_id(cur_id)
+            if cur_lid != target_lid
+                @debug "Autosave skipped: target lesion $target_lid != active lesion $cur_lid"
+                return
+            end
+            if _is_applying_state[]
+                @debug "Autosave skipped: currently applying state"
+                return
+            end
+
             _autosave_pending[] = true
             try
-                
-                # Capture state NOW after debounce (reads Makie Observables, safe in Julia)
-                snap_id = active_lesion_id[]
+                canonical_key = string(target_lid)
+                snap_id = cur_id
                 snap_state = collect_state()
                 snap_state["_display_name"] = snap_id
                 snap_global = Dict{String,String}(
@@ -6444,9 +6546,6 @@ function create_metadata_window(
                 )
                 snap_tp = try _MEH.current_tp_index[] catch; 0 end
                 snap_skip_dict = skip_dictation_val
-                
-                lid = parse_lesion_id(snap_id)
-                canonical_key = lid !== nothing ? string(lid) : snap_id
                 
                 _is_autosaving[] = true
                 try
@@ -6579,13 +6678,14 @@ function create_metadata_window(
         end
     end
 
-    function apply_state(data::AbstractDict)
+    function apply_state(data::AbstractDict; target_id::String = active_lesion_id[])
         _t_apply_start = time_ns()
         _is_applying_state[] = true
+        _apply_state_failed[] = true
         is_syncing_selection[] = true
         # g.block_updates = true
         try
-            cur_id_str = active_lesion_id[]
+            cur_id_str = target_id
             db_updates = Dict{String, Any}()
             lid = (p = parse_lesion_id(cur_id_str)) !== nothing ? p : 1
 
@@ -6620,194 +6720,6 @@ function create_metadata_window(
             end
             _set!(current_has_expert_edits, has_edits)
 
-        t_type = if haskey(data, "LesionType")
-            data["LesionType"]
-        else
-            # Auto-detect lesion type: try JSON mapping first, then keyword fallback
-            _tp_o2 = get(_MEH.tp_organ_mapping, _MEH.current_tp_index[], Dict{Int,String}())
-            raw_organ_for_type = get(_tp_o2, lid, get(_MEH.global_organ_mapping[], lid, ""))
-            if isempty(raw_organ_for_type) || raw_organ_for_type == "Unknown"
-                # Fast centroid-based atlas lookup (O(1) instead of O(N) findall scan)
-                tp = _MEH.current_tp_index[]
-                if _MEH.global_ts_atlas[] !== nothing
-                    try
-                        ts_atlas = _MEH.global_ts_atlas[]
-                        ts_names = _MEH.global_ts_names[]
-                        centroid_for_map = if haskey(_MEH.lesion_centroids_cache, (tp, lid))
-                            _MEH.lesion_centroids_cache[(tp, lid)]
-                        elseif haskey(_MEH.lesion_centroids_cache, lid)
-                            _MEH.lesion_centroids_cache[lid]
-                        else
-                            nothing
-                        end
-                        if centroid_for_map !== nothing
-                            # Scale centroid from mask space to atlas space
-                            mask_sz = lock(_MEH._tp_cache_lock) do
-                                haskey(_MEH.tp_data_cache, tp) ? size(_MEH.tp_data_cache[tp].mask) : nothing
-                            end
-                            if mask_sz !== nothing
-                                scale_x = size(ts_atlas, 1) / mask_sz[1]
-                                scale_y = size(ts_atlas, 2) / mask_sz[2]
-                                scale_z = size(ts_atlas, 3) / mask_sz[3]
-                                sx = clamp(round(Int, centroid_for_map[1] * scale_x), 1, size(ts_atlas, 1))
-                                sy = clamp(round(Int, centroid_for_map[2] * scale_y), 1, size(ts_atlas, 2))
-                                sz = clamp(round(Int, centroid_for_map[3] * scale_z), 1, size(ts_atlas, 3))
-                            else
-                                sx = clamp(centroid_for_map[1], 1, size(ts_atlas, 1))
-                                sy = clamp(centroid_for_map[2], 1, size(ts_atlas, 2))
-                                sz = clamp(centroid_for_map[3], 1, size(ts_atlas, 3))
-                            end
-                            ts_val = Int(ts_atlas[sx, sy, sz])
-                            if ts_val > 0 && haskey(ts_names, ts_val)
-                                organ_name = ts_names[ts_val]
-                                _MEH.global_organ_mapping[][lid] = organ_name
-                                raw_organ_for_type = organ_name
-                                if _MEH.PERF_LOG[]; println("[DYNAMIC MAP] Fast centroid lookup: lesion $lid → '$organ_name' at [$sx,$sy,$sz]"); flush(stdout); end
-                            end
-                        end
-                    catch e
-                        @warn "Dynamic organ mapping failed for lesion $lid: $e"
-                    end
-                end
-            end
-            json_entry = lookup_anatomy(raw_organ_for_type)
-            
-            if json_entry !== nothing
-                get(json_entry, "lesion_type", "Organ Meta")
-            else
-                # Keyword fallback for organs not in JSON mapping
-                base_anat = lowercase(get(data, "BaseAnatomy", ""))
-                raw_organ = lowercase(raw_organ_for_type)
-                # Include original RTOG/clinical segment name for classification hints
-                # (e.g., "Knochen Beckengürtel" → bone, "Lymphknoten Obturator" → lymph node)
-                seg_name_for_type = ""
-                if isdefined(_MEH, :tp_segment_names)
-                    tp_segs = get(_MEH.tp_segment_names, _MEH.current_tp_index[], Dict{Int,String}())
-                    seg_name_for_type = lowercase(get(tp_segs, lid, ""))
-                end
-                combined = base_anat * " " * raw_organ * " " * seg_name_for_type
-                
-                muscle_kws = ["gluteus", "autochthon", "iliopsoas", "pectoralis", "subscapularis",
-                              "supraspinatus", "infraspinatus", "latissimus", "rectus_abdominis",
-                              "oblique", "erector", "trapezius", "deltoid", "sartorius", "quadriceps",
-                              "scalene", "platysma", "masseter", "temporalis", "pterygoid",
-                              "coracobrachial", "serratus", "teres_major", "triceps", "psoas",
-                              "quadratus", "sternocleidomastoid", "pharyngeal", "prevertebral",
-                              "tongue", "digastric", "thigh_medial", "thigh_posterior",
-                              "levator_scapulae", "sterno_thyroid", "thyrohyoid", "transversospinalis", "muscle"]
-                is_muscle_kw = any(kw -> occursin(kw, combined), muscle_kws)
-
-                bone_kws = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula",
-                            "clavicle", "humerus", "scapula", "sternum", "skull",
-                            "palate", "bone", "spine", "ilium", "ischium", "pubis",
-                            "tibia", "radius", "carpal", "tarsal", "costal_cartilage",
-                            # German bone keywords from RTOG naming
-                            "knochen", "skelett", "wirbel", "rippe", "becken", "kamm"]
-                vascular_exclusions = ["vena", "artery", "vein", "vessel", "trunk"]
-                
-                is_bone_kw = !is_muscle_kw && any(kw -> occursin(kw, combined), bone_kws) &&
-                             !any(v -> occursin(v, combined), vascular_exclusions)
-                
-                # Only consider bone_subsegments_cache if it actually has non-empty data
-                has_real_bone_subseg = if haskey(_MEH.bone_subsegments_cache, (_MEH.current_tp_index[], lid))
-                    cached_data = _MEH.bone_subsegments_cache[(_MEH.current_tp_index[], lid)]
-                    cached_data isa Tuple && length(cached_data) >= 2 &&
-                        (!isempty(cached_data[1]) || !isempty(cached_data[2]))
-                else
-                    false
-                end
-                
-                LA = _MEH._get_la()
-                is_ln_struct = LA !== nothing && LA.is_lymph_node_structure(raw_organ_for_type)
-                if occursin("prostate", combined) || occursin("prostat", combined)
-                    "Prostate"
-                elseif is_ln_struct || occursin("lymph", combined) || occursin("node", combined) || occursin("knoten", combined)
-                    "Lymph Node Meta"
-                elseif is_muscle_kw
-                    "Technical Artifact"
-                elseif is_bone_kw || (has_real_bone_subseg && !is_muscle_kw)
-                    "Bone Meta"
-                else
-                    "Organ Meta"
-                end
-            end
-        end
-        update_type_buttons(t_type)
-        _t_type = round((time_ns()-_t_apply_start)/1e6, digits=1)
-
-        # ── Muscular false positive & edge-slice artefact detection ───────
-        # Ensure json_entry is always defined (it may only be set inside the else branch of t_type)
-        if !@isdefined(json_entry)
-            json_entry = lookup_anatomy(raw_organ_for_type)
-        end
-        LA_mod = _MEH._get_la()
-        is_ln = (LA_mod !== nothing && LA_mod.is_lymph_node_structure(raw_organ_for_type)) ||
-                (t_type in ("Lymph Node", "Lymph Node Meta"))
-        is_muscle_lesion = !is_ln && ((json_entry !== nothing && (get(json_entry, "is_muscle", false) || get(json_entry, "lesion_type", "") == "Technical Artifact")) ||
-                           t_type == "Technical Artifact")
-        if is_muscle_lesion && !haskey(data, "Certainty")
-            if haskey(field_widgets, "Alternative Hypothesis (False Positive)") && field_widgets["Alternative Hypothesis (False Positive)"] isa Menu
-                opts = field_widgets["Alternative Hypothesis (False Positive)"].options[]
-                idx = findfirst(==("Technical Artifact"), opts)
-                if idx !== nothing
-                    _set_menu_idx!(field_widgets["Alternative Hypothesis (False Positive)"], idx)
-                end
-            end
-            if haskey(field_widgets, "Certainty")
-                cert_w = field_widgets["Certainty"]
-                if cert_w isa Slider
-                    cert_w.selected_index[] = 1  # index 1 = value 0 in range 0:10
-                elseif cert_w isa Menu
-                    opts = cert_w.options[]
-                    idx = findfirst(==("0"), opts)
-                    if idx !== nothing; _set_menu_idx!(cert_w, idx); end
-                end
-            end
-            db_updates["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
-            db_updates["Certainty"] = "0"
-            db_updates["LesionType"] = "Technical Artifact"
-            if _MEH.PERF_LOG[]; println("Muscular artefact: lesion $lid → Technical Artifact, Certainty=0"); flush(stdout); end
-        end
-
-        cur_tp = _MEH.current_tp_index[]
-        centroid = if haskey(_MEH.lesion_centroids_cache, (cur_tp, lid))
-            _MEH.lesion_centroids_cache[(cur_tp, lid)]
-        elseif haskey(_MEH.lesion_centroids_cache, lid)
-            _MEH.lesion_centroids_cache[lid]
-        else
-            nothing
-        end
-        if lid > 0 && centroid !== nothing && _MEH.volume_z_size[] > 0
-            z_slice = centroid[3]
-            total_z = _MEH.volume_z_size[]
-            
-            if (z_slice <= 2 || z_slice >= total_z - 1) && !haskey(data, "Certainty")
-                # Set Alternative Hypothesis to "Technical Artifact"
-                if haskey(field_widgets, "Alternative Hypothesis (False Positive)") && field_widgets["Alternative Hypothesis (False Positive)"] isa Menu
-                    opts = field_widgets["Alternative Hypothesis (False Positive)"].options[]
-                    idx = findfirst(==("Technical Artifact"), opts)
-                    if idx !== nothing
-                        _set_menu_idx!(field_widgets["Alternative Hypothesis (False Positive)"], idx)
-                    end
-                end
-                # Set Certainty to 0
-                if haskey(field_widgets, "Certainty")
-                    cert_w = field_widgets["Certainty"]
-                    if cert_w isa Slider
-                        cert_w.selected_index[] = 1  # index 1 = value 0 in range 0:10
-                    elseif cert_w isa Menu
-                        opts = cert_w.options[]
-                        idx = findfirst(==("0"), opts)
-                        if idx !== nothing; _set_menu_idx!(cert_w, idx); end
-                    end
-                end
-                # Persist in db_updates
-                db_updates["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
-                db_updates["Certainty"] = "0"
-                if _MEH.PERF_LOG[]; println("Edge-slice artefact: lesion $lid z=$z_slice/$total_z → Technical Artifact, Certainty=0"); flush(stdout); end
-            end
-        end
-        
         t_base = get(data, "BaseAnatomy", "")
         t_side = get(data, "BaseAnatomySide", "")
         
@@ -6832,8 +6744,6 @@ function create_metadata_window(
         end
         
         # Check if an original RTOG / clinical name is available from HDF5 or annotations
-        # NOTE: orig_rtog_name is NOT used for BaseAnatomy prefill — atlas-based anatomy takes priority.
-        # It's still needed for seg_name_for_type classification below.
         orig_rtog_name = get(data, "ClinicalLesionName", get(data, "OriginalName", ""))
         if isempty(orig_rtog_name) && lid > 0
             tp_idx_cur = _MEH.current_tp_index[]
@@ -6872,9 +6782,9 @@ function create_metadata_window(
                         tp_entry = _MEH.get_or_load_tp_data(tp_idx)
                         mask_vol = tp_entry !== nothing ? tp_entry.mask : nothing
                     end
-                    if mask_vol !== nothing
-                        best = LA.classify_and_pick_best_organ(mask_vol, atlas, ts_nm, lid)
-                        if LA_z !== nothing && cz_san > 0
+                    if mask_vol !== nothing && LA_z !== nothing
+                        best = LA_z.classify_and_pick_best_organ(mask_vol, atlas, ts_nm, lid)
+                        if cz_san > 0
                             best, _ = LA_z.sanitize_anatomy_by_z(best, "", cz_san, _MEH.volume_z_size[])
                         end
                         if !isempty(best)
@@ -6893,10 +6803,8 @@ function create_metadata_window(
                         if centroid === nothing
                             centroid = get(_MEH.lesion_centroids_cache, lid, nothing)
                         end
-                        if centroid !== nothing
+                        if centroid !== nothing && LA_z !== nothing
                             cx, cy, cz = clamp(centroid[1], 1, size(atlas,1)), clamp(centroid[2], 1, size(atlas,2)), clamp(centroid[3], 1, size(atlas,3))
-                            # Use expanding sphere with tissue priority instead of single-voxel lookup
-                            # to avoid bias towards large structures like femur
                             sphere_organ = ""
                             for radius in [0, 1, 2, 4, 8, 12, 16, 24, 32]
                                 sphere_counts = Dict{Int,Int}()
@@ -6913,8 +6821,8 @@ function create_metadata_window(
                                     end
                                 end
                                 if !isempty(sphere_counts)
-                                    cand = LA.pick_best_organ(sphere_counts, ts_nm)
-                                    if LA_z !== nothing && cz_san > 0
+                                    cand = LA_z.pick_best_organ(sphere_counts, ts_nm)
+                                    if cz_san > 0
                                         cand, _ = LA_z.sanitize_anatomy_by_z(cand, "", cz_san, _MEH.volume_z_size[])
                                     end
                                     if !isempty(cand)
@@ -6940,7 +6848,6 @@ function create_metadata_window(
         end
         
         # Fallback: if atlas scan didn't find raw_organ, try the HDF5 segment name
-        # (e.g., "quadriceps_femoris_left" from tp_segment_names / scene_hierarchy)
         if (isempty(raw_organ) || raw_organ == "Unknown") && !isempty(orig_rtog_name)
             lc = lowercase(orig_rtog_name)
             if !startswith(lc, "segment") && !startswith(lc, "unknown") && !startswith(lc, "artificial_") && !startswith(lc, "lesion") && !occursin("postprocessed", lc)
@@ -6954,9 +6861,10 @@ function create_metadata_window(
         
         # Head / skull fallback when cz_san >= 240 and raw_organ is still empty or unknown
         if (isempty(raw_organ) || raw_organ == "Unknown") && cz_san >= 240
-            if t_type == "Bone Meta"
+            saved_type = get(data, "LesionType", "")
+            if saved_type == "Bone Meta"
                 raw_organ = "skull"
-            elseif t_type in ("Lymph Node", "Lymph Node Meta")
+            elseif saved_type in ("Lymph Node", "Lymph Node Meta")
                 raw_organ = "Neck_Level_IIa_Upper_Jugular_Right"
             elseif cz_san >= 270
                 raw_organ = "brain"
@@ -6967,11 +6875,139 @@ function create_metadata_window(
             get!(_MEH.tp_organ_mapping, tp_idx_cur, Dict{Int,String}())[lid] = raw_organ
             _MEH.global_organ_mapping[][lid] = raw_organ
         end
-        
-        # Lookup the anatomy ontology entry (used for both BaseAnatomy and Location)
-        anat_entry = (!isempty(raw_organ) && raw_organ != "Unknown") ? lookup_anatomy(raw_organ) : nothing
-        @debug "[PREFILL] lid=$lid, raw_organ=$raw_organ, t_base=$t_base"
-        
+
+        # Lookup the anatomy ontology entry (used for lesion_type, BaseAnatomy, and Location)
+        raw_organ_for_type = raw_organ
+        json_entry = (!isempty(raw_organ) && raw_organ != "Unknown") ? lookup_anatomy(raw_organ) : nothing
+        if json_entry === nothing && !isempty(t_base)
+            json_entry = lookup_anatomy(t_base)
+        end
+        anat_entry = json_entry
+
+        t_type = if haskey(data, "LesionType")
+            data["LesionType"]
+        elseif json_entry !== nothing
+            get(json_entry, "lesion_type", "Organ Meta")
+        else
+            # Keyword fallback for organs not in JSON mapping
+            base_anat = lowercase(get(data, "BaseAnatomy", t_base))
+            raw_organ_lc = lowercase(raw_organ)
+            seg_name_for_type = ""
+            if isdefined(_MEH, :tp_segment_names)
+                tp_segs = get(_MEH.tp_segment_names, _MEH.current_tp_index[], Dict{Int,String}())
+                seg_name_for_type = lowercase(get(tp_segs, lid, ""))
+            end
+            combined = base_anat * " " * raw_organ_lc * " " * seg_name_for_type
+            
+            muscle_kws = ["gluteus", "autochthon", "iliopsoas", "pectoralis", "subscapularis",
+                          "supraspinatus", "infraspinatus", "latissimus", "rectus_abdominis",
+                          "oblique", "erector", "trapezius", "deltoid", "sartorius", "quadriceps",
+                          "scalene", "platysma", "masseter", "temporalis", "pterygoid",
+                          "coracobrachial", "serratus", "teres_major", "triceps", "psoas",
+                          "quadratus", "sternocleidomastoid", "pharyngeal", "prevertebral",
+                          "tongue", "digastric", "thigh_medial", "thigh_posterior",
+                          "levator_scapulae", "sterno_thyroid", "thyrohyoid", "transversospinalis", "muscle"]
+            is_muscle_kw = any(kw -> occursin(kw, combined), muscle_kws)
+
+            bone_kws = ["femur", "hip", "vertebra", "rib", "sacrum", "clavicula",
+                        "clavicle", "humerus", "scapula", "sternum", "skull",
+                        "palate", "bone", "spine", "ilium", "ischium", "pubis",
+                        "tibia", "radius", "carpal", "tarsal", "costal_cartilage",
+                        # German bone keywords from RTOG naming
+                        "knochen", "skelett", "wirbel", "rippe", "becken", "kamm"]
+            vascular_exclusions = ["vena", "artery", "vein", "vessel", "trunk"]
+            
+            is_bone_kw = !is_muscle_kw && any(kw -> occursin(kw, combined), bone_kws) &&
+                         !any(v -> occursin(v, combined), vascular_exclusions)
+            
+            # Only consider bone_subsegments_cache if it actually has non-empty data
+            has_real_bone_subseg = if haskey(_MEH.bone_subsegments_cache, (_MEH.current_tp_index[], lid))
+                cached_data = _MEH.bone_subsegments_cache[(_MEH.current_tp_index[], lid)]
+                cached_data isa Tuple && length(cached_data) >= 2 &&
+                    (!isempty(cached_data[1]) || !isempty(cached_data[2]))
+            else
+                false
+            end
+            
+            LA = _MEH._get_la()
+            is_ln_struct = LA !== nothing && LA.is_lymph_node_structure(raw_organ)
+            if occursin("prostate", combined) || occursin("prostat", combined)
+                "Prostate"
+            elseif is_ln_struct || occursin("lymph", combined) || occursin("node", combined) || occursin("knoten", combined)
+                "Lymph Node Meta"
+            elseif is_muscle_kw
+                "Technical Artifact"
+            elseif is_bone_kw || (has_real_bone_subseg && !is_muscle_kw)
+                "Bone Meta"
+            else
+                "Organ Meta"
+            end
+        end
+        update_type_buttons(t_type)
+        _t_type = round((time_ns()-_t_apply_start)/1e6, digits=1)
+
+        # ── Muscular false positive & edge-slice artefact detection ───────
+        LA_mod = _MEH._get_la()
+        is_ln = (LA_mod !== nothing && !isempty(raw_organ) && LA_mod.is_lymph_node_structure(raw_organ)) ||
+                (t_type in ("Lymph Node", "Lymph Node Meta"))
+        is_muscle_lesion = !is_ln && ((json_entry !== nothing && (get(json_entry, "is_muscle", false) || get(json_entry, "lesion_type", "") == "Technical Artifact")) ||
+                           t_type == "Technical Artifact")
+        if is_muscle_lesion && !haskey(data, "Certainty")
+            if haskey(field_widgets, "Alternative Hypothesis (False Positive)") && field_widgets["Alternative Hypothesis (False Positive)"] isa Menu
+                opts = field_widgets["Alternative Hypothesis (False Positive)"].options[]
+                idx = findfirst(==("Technical Artifact"), opts)
+                if idx !== nothing
+                    _set_menu_idx!(field_widgets["Alternative Hypothesis (False Positive)"], idx)
+                end
+            end
+            if haskey(field_widgets, "Certainty")
+                cert_w = field_widgets["Certainty"]
+                if cert_w isa Slider
+                    cert_w.selected_index[] = 1  # index 1 = value 0 in range 0:10
+                elseif cert_w isa Menu
+                    opts = cert_w.options[]
+                    idx = findfirst(==("0"), opts)
+                    if idx !== nothing; _set_menu_idx!(cert_w, idx); end
+                end
+            end
+            db_updates["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
+            db_updates["Certainty"] = "0"
+            db_updates["LesionType"] = "Technical Artifact"
+            if _MEH.PERF_LOG[]; println("Muscular artefact: lesion $lid → Technical Artifact, Certainty=0"); flush(stdout); end
+        end
+
+        centroid = cent_san
+        if lid > 0 && centroid !== nothing && _MEH.volume_z_size[] > 0
+            z_slice = centroid[3]
+            total_z = _MEH.volume_z_size[]
+            
+            if (z_slice <= 2 || z_slice >= total_z - 1) && !haskey(data, "Certainty")
+                # Set Alternative Hypothesis to "Technical Artifact"
+                if haskey(field_widgets, "Alternative Hypothesis (False Positive)") && field_widgets["Alternative Hypothesis (False Positive)"] isa Menu
+                    opts = field_widgets["Alternative Hypothesis (False Positive)"].options[]
+                    idx = findfirst(==("Technical Artifact"), opts)
+                    if idx !== nothing
+                        _set_menu_idx!(field_widgets["Alternative Hypothesis (False Positive)"], idx)
+                    end
+                end
+                # Set Certainty to 0
+                if haskey(field_widgets, "Certainty")
+                    cert_w = field_widgets["Certainty"]
+                    if cert_w isa Slider
+                        cert_w.selected_index[] = 1  # index 1 = value 0 in range 0:10
+                    elseif cert_w isa Menu
+                        opts = cert_w.options[]
+                        idx = findfirst(==("0"), opts)
+                        if idx !== nothing; _set_menu_idx!(cert_w, idx); end
+                    end
+                end
+                # Persist in db_updates
+                db_updates["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
+                db_updates["Certainty"] = "0"
+                if _MEH.PERF_LOG[]; println("Edge-slice artefact: lesion $lid z=$z_slice/$total_z → Technical Artifact, Certainty=0"); flush(stdout); end
+            end
+        end
+
         # Auto-detect BaseAnatomy from max_anatomy JSON mapping if not saved
         if isempty(t_base) && anat_entry !== nothing
             t_base = get(anat_entry, "detailed", "")
@@ -7115,13 +7151,18 @@ function create_metadata_window(
             end
         end
         
-        # ── Auto-rename "New Lesion" entries when anatomy is determined ──
-        if lid > 0 && occursin("New Lesion", cur_id_str) && !isempty(t_base)
+        # ── Auto-rename generic lesion entries when anatomy is determined ──
+        is_generic_name = occursin("New Lesion", cur_id_str) || 
+                          occursin("Lesion $lid", cur_id_str) || 
+                          occursin("Lesion $(lid):", cur_id_str) || 
+                          strip(cur_id_str) == string(lid) || 
+                          startswith(lowercase(strip(cur_id_str)), "lesion")
+        if lid > 0 && is_generic_name && !isempty(t_base)
             new_display_name = "$lid: $t_base"
             if new_display_name != cur_id_str
                 # Rename in dropdown list
                 opts = copy(lesion_ids[])
-                idx = findfirst(==(cur_id_str), opts)
+                idx = findfirst(opt -> parse_lesion_id(opt) == lid, opts)
                 if idx !== nothing
                     opts[idx] = new_display_name
                     is_syncing_selection[] = true
@@ -7137,21 +7178,12 @@ function create_metadata_window(
                 # Update in lesion_db: store under canonical key string(lid)
                 db = copy(lesion_db[])
                 can_k = string(lid)
-                if haskey(db, can_k)
-                    if db[can_k] isa AbstractDict
-                        db[can_k]["_display_name"] = new_display_name
-                    end
-                elseif haskey(db, cur_id_str)
-                    d_old = pop!(db, cur_id_str)
-                    if d_old isa AbstractDict
-                        d_old["_display_name"] = new_display_name
-                    end
-                    db[can_k] = d_old
+                if haskey(db, can_k) && db[can_k] isa AbstractDict
+                    db[can_k]["_display_name"] = new_display_name
                 else
                     db[can_k] = Dict{String, Any}("_display_name" => new_display_name)
                 end
                 lesion_db[] = db
-                # Update internal reference (but do NOT set active_lesion_id[] to avoid recursive callback)
                 active_lesion_display[] = new_display_name
                 cur_id_str = new_display_name
                 if _MEH.PERF_LOG[]; println("Auto-renamed lesion to '$new_display_name'"); flush(stdout); end
@@ -7159,27 +7191,8 @@ function create_metadata_window(
         end
         
         # Set Base Anatomy menu selection
-        if !isempty(t_base)
-            ba_opts = menu_base_anat.options[]
-            ba_idx = findfirst(==(t_base), ba_opts)
-            if ba_idx !== nothing
-                _set_menu_idx!(menu_base_anat, ba_idx)
-            else
-                # Value not in options — prepend it (menu limits display to ~25 items)
-                new_ba_opts = vcat([t_base], ba_opts)
-                menu_base_anat.options[] = new_ba_opts
-                _set_menu_idx!(menu_base_anat, 1)
-                if !(t_base in ba_all_opts[])
-                    ba_all_opts[] = vcat(ba_all_opts[], [t_base])
-                end
-            end
-        else
-            _set_menu_idx!(menu_base_anat, 1)  # reset to ""
-        end
-        
-        side_opts = menu_side.options[]
-        s_idx = findfirst(==(t_side), side_opts)
-        _set_menu_idx!(menu_side, s_idx !== nothing ? s_idx : 1)
+        _set_menu_selection_string!(menu_base_anat, t_base; all_opts = ba_all_opts)
+        _set_menu_selection_string!(menu_side, t_side)
         
         # ── Restore OntologyBuilder anatomical detail rows ─────────────────
         anat_details_raw = get(data, "Anatomical Details", "")
@@ -7196,21 +7209,8 @@ function create_metadata_window(
                     rel_str = ""
                     struct_str = p
                 end
-                # Set relation menu
-                rel_opts = anat_rel_menus[i].options[]
-                r_idx = findfirst(==(rel_str), rel_opts)
-                _set_menu_idx!(anat_rel_menus[i], r_idx !== nothing ? r_idx : 1)
-                # Set structure menu
-                struct_opts = anat_struct_menus[i].options[]
-                st_idx = findfirst(==(struct_str), struct_opts)
-                if st_idx !== nothing
-                    _set_menu_idx!(anat_struct_menus[i], st_idx)
-                else
-                    # Value not in options — prepend it (searchable_menu limits to ~25 items)
-                    new_sopts = vcat([struct_str], struct_opts)
-                    anat_struct_menus[i].options[] = new_sopts
-                    _set_menu_idx!(anat_struct_menus[i], 1)
-                end
+                _set_menu_selection_string!(anat_rel_menus[i], rel_str)
+                _set_menu_selection_string!(anat_struct_menus[i], struct_str)
             end
             anat_active_count[] = count
         else
@@ -7259,26 +7259,16 @@ function create_metadata_window(
                         rel_str = ""
                         struct_str = p
                     end
-                    rel_opts = anat_rel_menus[i].options[]
-                    r_idx = findfirst(==(rel_str), rel_opts)
-                    _set_menu_idx!(anat_rel_menus[i], r_idx !== nothing ? r_idx : 1)
-                    struct_opts = anat_struct_menus[i].options[]
-                    st_idx = findfirst(==(struct_str), struct_opts)
-                    if st_idx !== nothing
-                        _set_menu_idx!(anat_struct_menus[i], st_idx)
-                    else
-                        new_sopts = vcat([struct_str], struct_opts)
-                        anat_struct_menus[i].options[] = new_sopts
-                        _set_menu_idx!(anat_struct_menus[i], 1)
-                    end
+                    _set_menu_selection_string!(anat_rel_menus[i], rel_str)
+                    _set_menu_selection_string!(anat_struct_menus[i], struct_str)
                 end
                 anat_active_count[] = auto_count
                 @debug "[ANAT_DETAILS] Auto-generated $(auto_count) rows for lymph node lesion $lid"
             else
                 # Clear all rows
                 for i in 1:MAX_ANAT_ROWS
-                    _set_menu_idx!(anat_rel_menus[i], 1)
-                    _set_menu_idx!(anat_struct_menus[i], 1)
+                    _set_menu_selection_string!(anat_rel_menus[i], "")
+                    _set_menu_selection_string!(anat_struct_menus[i], "")
                 end
                 _set!(anat_active_count, 0)
             end
@@ -7601,9 +7591,7 @@ function create_metadata_window(
         # ── Single batch commit for all metadata updates ──────────────────
         _t_fields = round((time_ns()-_t_apply_start)/1e6, digits=1)
         if !isempty(db_updates)
-            display_id = active_lesion_id[]
-            lid = parse_lesion_id(display_id)
-            canonical_key = lid !== nothing ? string(lid) : display_id
+            canonical_key = string(lid)
             db = copy(lesion_db[])
             cur_ld = copy(get(db, canonical_key, Dict{String,Any}()))
             for (k, v) in db_updates
@@ -7620,6 +7608,7 @@ function create_metadata_window(
         # Apply dynamic visibility after state is loaded
         update_dynamic_visibility!(active_lesion_type[])
         
+        _apply_state_failed[] = false
         finally
             # g.block_updates = false
             # try Makie.GridLayoutBase.update!(g) catch; end
@@ -7644,13 +7633,12 @@ function create_metadata_window(
             delete!(organ_map, lid)
             _MEH.global_organ_mapping[] = organ_map
 
-            # 2. Directly clear anatomy-related fields from lesion_db
+            # 2. Directly clear anatomy-related fields from lesion_db for all keys of this lesion
             db = copy(lesion_db[])
-            for target_k in [canonical_key, cur_id_str]
-                if haskey(db, target_k) && db[target_k] isa AbstractDict
-                    entry = db[target_k]
-                    for k in ["BaseAnatomy", "BaseAnatomySide", "Side", "Anatomic Location", "Anatomical Sublocation", "Anatomical Details", "ClinicalLesionName", "OriginalName", "LesionType"]
-                        delete!(entry, k)
+            for (k, entry) in db
+                if parse_lesion_id(k) == lid && entry isa AbstractDict
+                    for fld in ["BaseAnatomy", "BaseAnatomySide", "Side", "Anatomic Location", "Anatomical Sublocation", "Anatomical Details", "ClinicalLesionName", "OriginalName", "LesionType"]
+                        delete!(entry, fld)
                     end
                 end
             end
@@ -7658,16 +7646,17 @@ function create_metadata_window(
 
             # 3. Clear fields from local state dictionary
             data = get_lesion_state(db, cur_id_str)
-            for k in ["BaseAnatomy", "BaseAnatomySide", "Side", "Anatomic Location", "Anatomical Sublocation", "Anatomical Details", "ClinicalLesionName", "OriginalName", "LesionType"]
-                delete!(data, k)
+            for fld in ["BaseAnatomy", "BaseAnatomySide", "Side", "Anatomic Location", "Anatomical Sublocation", "Anatomical Details", "ClinicalLesionName", "OriginalName", "LesionType"]
+                delete!(data, fld)
             end
 
             # 4. Re-run apply_state which will re-classify from live atlas with physical Z-constraint
-            apply_state(data)
+            apply_state(data; target_id = cur_id_str)
 
             # 5. Collect freshly applied state and persist to database & disk
             refreshed_state = collect_state()
             refreshed_state["_display_name"] = cur_id_str
+            db = copy(lesion_db[])
             old_st = get(db, canonical_key, Dict{String,Any}())
             if old_st isa AbstractDict && !isempty(old_st)
                 try _append_edit_history!(refreshed_state, old_st) catch; end
@@ -7686,7 +7675,7 @@ function create_metadata_window(
                 clean_name = titlecase(replace(clean_name, "_" => " "))
                 new_display = "$lid: $clean_name"
                 curr_opts = copy(lesion_ids[])
-                idx = findfirst(==(cur_id_str), curr_opts)
+                idx = findfirst(opt -> parse_lesion_id(opt) == lid, curr_opts)
                 if idx !== nothing
                     curr_opts[idx] = new_display
                     is_syncing_selection[] = true
@@ -7695,6 +7684,7 @@ function create_metadata_window(
                         les_menu.options[] = curr_opts
                         les_menu.selection[] = new_display
                         les_menu.i_selected[] = idx
+                        _skip_apply_state[] = true
                         active_lesion_id[] = new_display
                     finally
                         is_syncing_selection[] = false
@@ -7709,13 +7699,42 @@ function create_metadata_window(
     end
     _lmw_observables[:btn_refresh_anat] = btn_refresh_anat
 
+    _current_displayed_lid = Ref{Int}(-1)
+    _skip_apply_state = Ref{Bool}(false)
+
     # ── Wire callbacks ────────────────────────────────────────────────────────
     on(active_lesion_id) do id
         t_cb = time_ns()
+        
+        if _skip_apply_state[]
+            _skip_apply_state[] = false
+            lid_val = parse_lesion_id(id)
+            if lid_val !== nothing && lid_val > 0
+                _current_displayed_lid[] = lid_val
+            end
+            active_lesion_display[] = id
+            return
+        end
+        
+        new_lid = parse_lesion_id(id)
+        if new_lid !== nothing && new_lid > 0
+            old_lid = _current_displayed_lid[]
+            if old_lid > 0 && old_lid != new_lid && !_is_applying_state[]
+                # Synchronously flush leaving lesion's widget state before loading the new lesion
+                _flush_lesion!(old_lid)
+            end
+            _current_displayed_lid[] = new_lid
+        end
+        
+        active_lesion_display[] = id
         db = lesion_db[]
         try
-            apply_state(get_lesion_state(db, id))
+            apply_state(get_lesion_state(db, id); target_id = id)
         catch e
+            println("💥💥💥 EXCEPTION in apply_state for lesion $id: ", e)
+            Base.showerror(stdout, e, catch_backtrace())
+            println()
+            flush(stdout)
             @warn "Failed to apply state for lesion $id: $e"
         end
         _apply_ms = round((time_ns()-t_cb)/1e6, digits=1)
@@ -8358,18 +8377,8 @@ function create_metadata_window(
                                             rel_str = ""
                                             struct_str = p
                                         end
-                                        rel_opts = anat_rel_menus[i].options[]
-                                        r_idx = findfirst(==(rel_str), rel_opts)
-                                        _set_menu_idx!(anat_rel_menus[i], r_idx !== nothing ? r_idx : 1)
-                                        struct_opts = anat_struct_menus[i].options[]
-                                        st_idx = findfirst(==(struct_str), struct_opts)
-                                        if st_idx !== nothing
-                                            _set_menu_idx!(anat_struct_menus[i], st_idx)
-                                        else
-                                            new_sopts = vcat([struct_str], struct_opts)
-                                            anat_struct_menus[i].options[] = new_sopts
-                                            _set_menu_idx!(anat_struct_menus[i], 1)
-                                        end
+                                        _set_menu_selection_string!(anat_rel_menus[i], rel_str)
+                                        _set_menu_selection_string!(anat_struct_menus[i], struct_str)
                                     end
                                     anat_active_count[] = pd_count
                                     @debug "[PAINT→ANAT_DETAILS] Auto-generated $(pd_count) rows for LN lesion $lid"
@@ -8465,6 +8474,10 @@ function create_metadata_window(
     # Register observables for MakieEventHandlers / keyboard shortcuts
     _lmw_observables[:active_lesion_id] = active_lesion_id
     _lmw_observables[:lesion_ids] = lesion_ids
+    _lmw_observables[:menu_base_anat] = menu_base_anat
+    _lmw_observables[:anat_active_count] = anat_active_count
+    _lmw_observables[:field_widgets] = field_widgets
+    _lmw_observables[:lesion_db] = lesion_db
     _lmw_observables[:obs_state] = menu_obs_state.selection
     _lmw_observables[:menu_obs_state] = menu_obs_state
     _lmw_observables[:btn_prev] = btn_prev
