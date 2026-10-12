@@ -4518,7 +4518,7 @@ function create_metadata_window(
     # (Julia if-blocks create local scope, so we need outer-scope declarations)
     local btn_type_prostate, btn_type_bone, btn_type_organ, btn_type_ln, btn_type_artifact
     local active_lesion_type, menu_base_anat, ba_all_opts, menu_side
-    local anat_detail_label_r, btn_add_anat_rel
+    local anat_detail_label_r, btn_add_anat_rel, btn_refresh_anat
     local ANAT_RELATIONS, MAX_ANAT_ROWS
     local anat_row_indices, anat_rel_menus, anat_struct_menus, anat_rm_btns, anat_active_count
     local update_type_buttons
