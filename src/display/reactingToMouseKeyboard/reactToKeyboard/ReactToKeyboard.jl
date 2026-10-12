@@ -248,11 +248,21 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             end
             return
 
-        # C - Toggle synchronized scrolling (same as S)
+        # C - Toggle compare mode (spawns M2 window if needed, then activates compare view)
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_C)
             if keyInputInfo.action == GLFW.PRESS
-                ch = _get_event_channel()
-                ch !== nothing && put!(ch, MakieEvents.ToggleSyncScrollEvent())
+                try
+                    top = parentmodule(@__MODULE__)
+                    if isdefined(top, :LesionMetadataWindow)
+                        lmw_obs = getfield(top.LesionMetadataWindow, :_lmw_observables)
+                        if haskey(lmw_obs, :obs_set_compare_mode)
+                            obs = lmw_obs[:obs_set_compare_mode]
+                            obs[] = !obs[]
+                        end
+                    end
+                catch e
+                    @warn "[KEY_C] Compare mode toggle failed: $e"
+                end
             end
             return
 

@@ -767,7 +767,10 @@ function map_lesions_to_organs(lesion_mask::AbstractArray, ts_atlas::AbstractArr
         organ_name = classify_and_pick_best_organ(lesion_mask, ts_atlas, ts_names, seg_int)
         
         if isempty(organ_name)
-            # Fallback: expanding sphere from centroid for zero-overlap lesions
+            # Fallback: expanding sphere from centroid for zero-overlap lesions.
+            # Collect ALL known atlas labels within each radius sphere, then use
+            # pick_best_organ (tissue priority: prostate > LN > bone > organ > vessel > muscle)
+            # instead of returning the first voxel found by arbitrary loop order.
             indices = findall(x -> x == lesion_val, lesion_mask)
             if !isempty(indices)
                 cx_raw = mean(i[1] for i in indices)
@@ -783,6 +786,7 @@ function map_lesions_to_organs(lesion_mask::AbstractArray, ts_atlas::AbstractArr
                 cz = clamp(round(Int, cz_raw * scale_z), 1, size(ts_atlas, 3))
                 
                 for radius in [0, 1, 2, 4, 8, 16, 32]
+                    sphere_counts = Dict{Int,Int}()
                     for dx in -radius:radius
                         for dy in -radius:radius
                             for dz in -radius:radius
@@ -794,15 +798,15 @@ function map_lesions_to_organs(lesion_mask::AbstractArray, ts_atlas::AbstractArr
                                 nz = clamp(cz + dz, 1, size(ts_atlas, 3))
                                 ts_val = Int(ts_atlas[nx, ny, nz])
                                 if ts_val > 0 && haskey(ts_names, ts_val)
-                                    organ_name = ts_names[ts_val]
-                                    break
+                                    sphere_counts[ts_val] = get(sphere_counts, ts_val, 0) + 1
                                 end
                             end
-                            !isempty(organ_name) && break
                         end
-                        !isempty(organ_name) && break
                     end
-                    !isempty(organ_name) && break
+                    if !isempty(sphere_counts)
+                        organ_name = pick_best_organ(sphere_counts, ts_names)
+                        break
+                    end
                 end
             end
         end

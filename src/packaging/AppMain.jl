@@ -688,16 +688,35 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 if !isempty(raw)
                     first_val = first(values(raw))
                     if first_val isa Dict
-                        # New per-TP format
-                        for (tp_str, tp_map) in raw
+                        # New per-TP format — process TPs sorted with baseline (0) LAST
+                        # so baseline values take precedence in the global mapping.
+                        # Within each TP, use tissue priority to avoid overwriting a
+                        # better organ (e.g., bone) with a worse one (e.g., muscle).
+                        sorted_tps = sort(collect(keys(raw)); by = k -> (parse(Int, k) == 0 ? typemax(Int) : parse(Int, k)))
+                        for tp_str in sorted_tps
+                            tp_map = raw[tp_str]
                             tp_idx = parse(Int, tp_str)
                             MEH.tp_organ_mapping[tp_idx] = Dict{Int, String}()
                             for (lid_str, organ) in tp_map
                                 lid = parse(Int, lid_str)
                                 MEH.tp_organ_mapping[tp_idx][lid] = organ
-                                # Also populate global for backward compat
-                                MEH.global_organ_mapping[][lid] = organ
-                                organ_mapping[lid] = organ
+                                # Only populate global if key is new, existing is Unknown/empty,
+                                # or new organ has equal/better tissue priority
+                                existing = get(MEH.global_organ_mapping[], lid, "")
+                                should_write = isempty(existing) || existing == "Unknown"
+                                if !should_write
+                                    try
+                                        new_pri = LesionAssociation.classify_tissue_priority(organ)
+                                        old_pri = LesionAssociation.classify_tissue_priority(existing)
+                                        should_write = new_pri <= old_pri  # lower = better priority
+                                    catch
+                                        should_write = (tp_idx == 0)  # fallback: baseline wins
+                                    end
+                                end
+                                if should_write
+                                    MEH.global_organ_mapping[][lid] = organ
+                                    organ_mapping[lid] = organ
+                                end
                             end
                         end
                     else
@@ -1202,9 +1221,14 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     
     # Compare mode is decoupled from M2 window creation.
     # Compare button only preloads next-TP data. If M2 is already open, auto-update it.
+    # If M2 is NOT open, create it first, then switch to compare mode.
     on(makie_win.set_compare_mode) do val
-        if val && m2_window_cache[] !== nothing
-            # M2 is already open — switch it to show the compare TP's quad view
+        if val
+            if m2_window_cache[] === nothing
+                # M2 doesn't exist yet — trigger creation first
+                notify(makie_win.trigger_m2)
+            end
+            # Now M2 should be open — switch it to compare mode
             tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
             if makie_win.m2_mode[] != "Compare Curr/Next TP"
                 makie_win.m2_mode[] = "Compare Curr/Next TP"

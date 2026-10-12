@@ -2403,6 +2403,7 @@ function create_metadata_window(
     empty!(_all_textboxes)  # clear textbox registry on (re-)creation
     obs_m2 = Observable(false)
     obs_set_compare_mode = Observable(false)
+    _lmw_observables[:obs_set_compare_mode] = obs_set_compare_mode
     ui_queue = Function[]
     ui_lock = ReentrantLock()
     _safe_ui_update(f::Function) = f()
@@ -3461,6 +3462,20 @@ function create_metadata_window(
             end
             if !any_focused && event.action == Makie.Keyboard.press
                 put!(channel, MakieEvents.ToggleSingleMultiLesionEvent())
+                return Consume(true)
+            end
+        elseif (event.action == Makie.Keyboard.press || event.action == Makie.Keyboard.release) && event.key == Makie.Keyboard.c
+            any_focused = false
+            for tb in _all_textboxes
+                try
+                    if tb.focused[]
+                        any_focused = true
+                        break
+                    end
+                catch; end
+            end
+            if !any_focused && event.action == Makie.Keyboard.press
+                obs_set_compare_mode[] = !cv_active[]
                 return Consume(true)
             end
         end
@@ -6040,6 +6055,19 @@ function create_metadata_window(
             @warn "[COMPARE-UI] Error in apply_compare_mode_ui_impl!: $e"
         end
         println("[COMPARE-UI] Sending CompareTimePointsEvent($(cv_active[])) to channel..."); flush(stdout)
+        if cv_active[]
+            # Ensure M2 window is spawned BEFORE activating compare mode.
+            # Set M2 mode dropdown to "Compare Curr/Next TP" and trigger obs_m2
+            # which fires on(makie_win.trigger_m2) in AppMain to create the GLFW window.
+            try
+                m2_idx = findfirst(==("Compare Curr/Next TP"), menu_m2_mode.options[])
+                if m2_idx !== nothing
+                    menu_m2_mode.i_selected[] = m2_idx
+                end
+            catch; end
+            # Trigger M2 window creation (obs_m2 is makie_win.trigger_m2)
+            notify(obs_m2)
+        end
         put!(channel, CompareTimePointsEvent(cv_active[]))
         println("[COMPARE-UI] Event sent, apply_compare_mode_ui_impl! DONE"); flush(stdout)
     end
@@ -6689,14 +6717,33 @@ function create_metadata_window(
                         end
                         if centroid !== nothing
                             cx, cy, cz = clamp(centroid[1], 1, size(atlas,1)), clamp(centroid[2], 1, size(atlas,2)), clamp(centroid[3], 1, size(atlas,3))
-                            anat_val = Int(atlas[cx, cy, cz])
-                            if anat_val > 0
-                                raw_organ = get(ts_nm, anat_val, "")
-                                if !isempty(raw_organ)
-                                    organ_map[lid] = raw_organ
-                                    _MEH.global_organ_mapping[] = organ_map
-                                    if _MEH.PERF_LOG[]; println("Auto-named lesion $lid from centroid at [$cx,$cy,$cz]: '$raw_organ'"); flush(stdout); end
+                            # Use expanding sphere with tissue priority instead of single-voxel lookup
+                            # to avoid bias towards large structures like femur
+                            sphere_organ = ""
+                            for radius in [0, 1, 2, 4]
+                                sphere_counts = Dict{Int,Int}()
+                                for dx in -radius:radius, dy in -radius:radius, dz in -radius:radius
+                                    if dx*dx + dy*dy + dz*dz > radius*radius
+                                        continue
+                                    end
+                                    nx = clamp(cx + dx, 1, size(atlas, 1))
+                                    ny = clamp(cy + dy, 1, size(atlas, 2))
+                                    nz = clamp(cz + dz, 1, size(atlas, 3))
+                                    av = Int(atlas[nx, ny, nz])
+                                    if av > 0 && haskey(ts_nm, av)
+                                        sphere_counts[av] = get(sphere_counts, av, 0) + 1
+                                    end
                                 end
+                                if !isempty(sphere_counts)
+                                    sphere_organ = LA.pick_best_organ(sphere_counts, ts_nm)
+                                    break
+                                end
+                            end
+                            if !isempty(sphere_organ)
+                                raw_organ = sphere_organ
+                                organ_map[lid] = raw_organ
+                                _MEH.global_organ_mapping[] = organ_map
+                                if _MEH.PERF_LOG[]; println("Auto-named lesion $lid from centroid sphere at [$cx,$cy,$cz]: '$raw_organ'"); flush(stdout); end
                             end
                         end
                     end
