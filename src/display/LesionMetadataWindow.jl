@@ -4664,7 +4664,7 @@ function create_metadata_window(
             # Refresh Anatomy button — re-runs live atlas lookup, overriding stale cached values
             refresh_anat_r = nr!()
             push!(all_metadata_rows, refresh_anat_r)
-            btn_refresh_anat = Button(g[refresh_anat_r, 3:4], label = "🔄 Refresh Anatomy",
+            btn_refresh_anat = Button(g[refresh_anat_r, 3:4], label = "Refresh Anatomy",
                 buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
             rowsize!(g, refresh_anat_r, Fixed(24)); register_fixed_row!(refresh_anat_r, 24)
             
