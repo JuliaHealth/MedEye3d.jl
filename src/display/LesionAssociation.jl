@@ -709,22 +709,40 @@ function pick_best_organ(counts::Dict{Int,Int}, ts_names::Dict{Int,String})::Str
     end
     
     # Rule 3: General tissue priority fallback (Bone > Solid Organ > Vessel > Muscle)
-    best_name = ""
-    best_priority = 7
-    best_count = 0
+    # Bone only wins over other tissues if it represents a meaningful fraction (>=10%)
+    # of the total voxels. This prevents a single stray bone voxel from overriding
+    # hundreds of closer organ/muscle voxels in expanding sphere lookups.
+    total_voxels = sum(cnt for (_, cnt) in counts if cnt > 0)
     
+    # Collect all candidates with their priority and count
+    candidates = Tuple{String, Int, Int}[]  # (name, priority, count)
     for (label_id, cnt) in counts
         cnt <= 0 && continue
         name = get(ts_names, label_id, "")
         isempty(name) && continue
-        
         priority = classify_tissue_priority(name)
-        if priority < best_priority || (priority == best_priority && cnt > best_count)
-            best_name = name
-            best_priority = priority
-            best_count = cnt
+        push!(candidates, (name, priority, cnt))
+    end
+    isempty(candidates) && return ""
+    
+    # Sort by priority first (lower=better), then by count descending
+    sort!(candidates, by = x -> (x[2], -x[3]))
+    
+    best_name = candidates[1][1]
+    best_priority = candidates[1][2]
+    best_count = candidates[1][3]
+    
+    # If the best-priority candidate has <10% of voxels, check if a lower-priority
+    # candidate with much higher count should win instead (majority rule)
+    if best_count < total_voxels * 0.10 && length(candidates) > 1
+        # Find the candidate with the highest voxel count overall
+        majority = argmax(c -> c[3], candidates)
+        # If majority has >50% of voxels and the priority winner has <10%, prefer majority
+        if majority[3] > total_voxels * 0.50
+            best_name = majority[1]
         end
     end
+    
     return best_name
 end
 
@@ -785,7 +803,7 @@ function map_lesions_to_organs(lesion_mask::AbstractArray, ts_atlas::AbstractArr
                 cy = clamp(round(Int, cy_raw * scale_y), 1, size(ts_atlas, 2))
                 cz = clamp(round(Int, cz_raw * scale_z), 1, size(ts_atlas, 3))
                 
-                for radius in [0, 1, 2, 4, 8, 16, 32]
+                for radius in [0, 1, 2, 4, 8]
                     sphere_counts = Dict{Int,Int}()
                     for dx in -radius:radius
                         for dy in -radius:radius
