@@ -1499,7 +1499,15 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                         old_dx, old_dy, old_dz = old_d[1], old_d[2], old_d[3]
                         
                         MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
-                        panels_to_update = (MEH.compare_mode[] && clickedPanel == 5) ? [5] : collect(1:length(mainStates))
+                        # Only modify panels belonging to the SAME timepoint as the clicked panel.
+                        # Panels 1-4 = current/left TP; panels 5+ = compare/right TP (M2 window).
+                        # Modifying all panels would corrupt the other TP's mask data.
+                        n_panels = length(mainStates)
+                        panels_to_update = if clickedPanel >= 5
+                            collect(5:n_panels)
+                        else
+                            collect(1:min(4, n_panels))
+                        end
                         
                         source_name = panelState.movingLesionSourceName
                         processed_arrays = Set{UInt}()  # track objectid to skip duplicate array refs

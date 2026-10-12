@@ -3478,8 +3478,30 @@ function create_metadata_window(
                 obs_set_compare_mode[] = !cv_active[]
                 return Consume(true)
             end
+        elseif (event.action == Makie.Keyboard.press || event.action == Makie.Keyboard.release) && event.key == Makie.Keyboard.v
+            any_focused = false
+            for tb in _all_textboxes
+                try
+                    if tb.focused[]
+                        any_focused = true
+                        break
+                    end
+                catch; end
+            end
+            if !any_focused && event.action == Makie.Keyboard.press
+                # Toggle move lesion mode by simulating button click
+                btn_move_lesion.clicks[] = btn_move_lesion.clicks[] + 1
+                return Consume(true)
+            end
         end
         return Consume(false)
+    end
+
+    # Observable for GLFW KEY_V handler to trigger move lesion toggle
+    obs_toggle_move_lesion = Observable(0)
+    _lmw_observables[:obs_toggle_move_lesion] = obs_toggle_move_lesion
+    on(obs_toggle_move_lesion) do _
+        btn_move_lesion.clicks[] = btn_move_lesion.clicks[] + 1
     end
 
     # Merged overlay/single/all/refresh into one compact row
@@ -4638,6 +4660,13 @@ function create_metadata_window(
             on(btn_type_organ.clicks)    do _; update_type_buttons("Organ Meta") end
             on(btn_type_ln.clicks)       do _; update_type_buttons("Lymph Node Meta") end
             on(btn_type_artifact.clicks) do _; update_type_buttons("Technical Artifact") end
+            
+            # Refresh Anatomy button — re-runs live atlas lookup, overriding stale cached values
+            refresh_anat_r = nr!()
+            push!(all_metadata_rows, refresh_anat_r)
+            btn_refresh_anat = Button(g[refresh_anat_r, 3:4], label = "🔄 Refresh Anatomy",
+                buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+            rowsize!(g, refresh_anat_r, Fixed(24)); register_fixed_row!(refresh_anat_r, 24)
             
             # Base Anatomy (filterable Menu) + Side
             ba_r = nr!()
@@ -7412,6 +7441,36 @@ function create_metadata_window(
             is_syncing_selection[] = false
         end
     end
+
+    # ── Refresh Anatomy button handler ────────────────────────────────────────
+    on(btn_refresh_anat.clicks) do _
+        cur_id_str = active_lesion_id[]
+        lid = parse_lesion_id(cur_id_str)
+        (lid === nothing || lid <= 0) && return
+        try
+            # 1. Clear cached organ mapping for this lesion so apply_state re-runs live atlas lookup
+            tp_idx = _MEH.current_tp_index[]
+            tp_organs = get(_MEH.tp_organ_mapping, tp_idx, Dict{Int,String}())
+            delete!(tp_organs, lid)
+            organ_map = _MEH.global_organ_mapping[]
+            delete!(organ_map, lid)
+            _MEH.global_organ_mapping[] = organ_map
+
+            # 2. Get current data, clear anatomy-related fields to force re-detection
+            db = lesion_db[]
+            data = get_lesion_state(db, cur_id_str)
+            for k in ["BaseAnatomy", "Side", "Anatomic Location", "Anatomical Sublocation", "Anatomical Details"]
+                delete!(data, k)
+            end
+
+            # 3. Re-run apply_state which will re-classify from atlas
+            apply_state(data)
+            if _MEH.PERF_LOG[]; println("🔄 Refreshed anatomy for lesion $lid"); flush(stdout); end
+        catch e
+            @warn "Refresh anatomy failed for lesion $lid: $e"
+        end
+    end
+    _lmw_observables[:btn_refresh_anat] = btn_refresh_anat
 
     # ── Wire callbacks ────────────────────────────────────────────────────────
     on(active_lesion_id) do id

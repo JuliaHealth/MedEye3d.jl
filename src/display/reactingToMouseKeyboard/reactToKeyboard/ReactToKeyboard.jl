@@ -412,6 +412,24 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             end
             return
 
+        # V - Toggle move lesion mode (moVe)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_V)
+            if keyInputInfo.action == GLFW.PRESS
+                try
+                    top = parentmodule(@__MODULE__)
+                    if isdefined(top, :LesionMetadataWindow)
+                        lmw_obs = getfield(top.LesionMetadataWindow, :_lmw_observables)
+                        if haskey(lmw_obs, :obs_toggle_move_lesion)
+                            obs = lmw_obs[:obs_toggle_move_lesion]
+                            obs[] = obs[] + 1  # trigger toggle
+                        end
+                    end
+                catch e
+                    @warn "[KEY_V] Move lesion toggle failed: $e"
+                end
+            end
+            return
+
         # L - Cycle measurement sub-mode: Sphere ↔ Line (Shift+L)
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_L)
             if keyInputInfo.action == GLFW.PRESS && is_shift_down_ref[]
