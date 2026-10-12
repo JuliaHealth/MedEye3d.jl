@@ -917,42 +917,114 @@ function parse_lesion_id(id_str::String)::Union{Int, Nothing}
 end
 
 """
+    _extract_z_from_entry(entry::AbstractDict, lid::Union{Int,Nothing}=nothing) -> Int
+
+Extract physical Z coordinate from an annotation entry or cache.
+Checks `_Centroid`, `Centroid`, `_Slice_Z`, `Slice_Z`, and `_MEH.lesion_centroids_cache`.
+"""
+function _extract_z_from_entry(entry::AbstractDict, lid::Union{Int,Nothing}=nothing)::Int
+    # 1. From _Centroid or Centroid
+    for ck in ("_Centroid", "Centroid")
+        if haskey(entry, ck)
+            c = entry[ck]
+            if (c isa AbstractVector || c isa Tuple) && length(c) >= 3
+                pz = tryparse(Float64, string(c[3]))
+                pz !== nothing && return Int(round(pz))
+            elseif c isa AbstractString
+                m = match(r"\[?\s*([0-9\.\-]+)\s*,\s*([0-9\.\-]+)\s*,\s*([0-9\.\-]+)\s*\]?", c)
+                if m !== nothing
+                    pz = tryparse(Float64, m.captures[3])
+                    pz !== nothing && return Int(round(pz))
+                end
+            end
+        end
+    end
+    # 2. From _Slice_Z or Slice_Z
+    for zk in ("_Slice_Z", "Slice_Z")
+        if haskey(entry, zk)
+            v = entry[zk]
+            if v isa Number
+                return Int(round(v))
+            elseif v isa AbstractString
+                pz = tryparse(Float64, v)
+                pz !== nothing && return Int(round(pz))
+            end
+        end
+    end
+    # 3. From MakieEventHandlers lesion_centroids_cache
+    if lid !== nothing && lid > 0
+        try
+            _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+            cur_tp = try _MEH.current_tp_index[] catch; 0 end
+            cent = get(_MEH.lesion_centroids_cache, (cur_tp, lid), get(_MEH.lesion_centroids_cache, (0, lid), get(_MEH.lesion_centroids_cache, lid, nothing)))
+            if cent !== nothing && length(cent) >= 3
+                return Int(round(cent[3]))
+            end
+        catch; end
+    end
+    return 0
+end
+
+"""
     get_lesion_state(db::Dict, key::String) -> Dict{String,Any}
 
 Robust lookup of lesion metadata from database `db` by exact key match or numeric lesion ID.
 Handles keys like "1", "1: Femur", "1: Femur [Grp 1, 3 TPs]", etc.
 """
 function get_lesion_state(db::Dict, key::String)::Dict{String,Any}
+    res = Dict{String,Any}()
     # 1. Exact match
     if haskey(db, key)
         v = db[key]
-        return v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : Dict{String,Any}()
-    end
-    
-    # 2. Extract numeric ID from key (e.g. "1: femur" -> 1, "1 - New" -> 1)
-    lid = parse_lesion_id(key)
-    
-    if lid !== nothing
-        # Check canonical integer string key (e.g. "1") — preferred since autosave now uses this
-        lid_str = string(lid)
-        if haskey(db, lid_str)
-            v = db[lid_str]
-            return v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : Dict{String,Any}()
-        end
-        # Backward compat: search all display-name keys, prefer the one with most data
-        best_v = Dict{String,Any}()
-        best_count = 0
-        for (k, v) in db
-            k_lid = parse_lesion_id(k)
-            if k_lid == lid && v isa AbstractDict && length(v) > best_count
-                best_v = Dict{String,Any}(string(ik) => iv for (ik, iv) in v)
-                best_count = length(v)
+        res = v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : Dict{String,Any}()
+    else
+        # 2. Extract numeric ID from key (e.g. "1: femur" -> 1, "1 - New" -> 1)
+        lid = parse_lesion_id(key)
+        
+        if lid !== nothing
+            # Check canonical integer string key (e.g. "1") — preferred since autosave now uses this
+            lid_str = string(lid)
+            if haskey(db, lid_str)
+                v = db[lid_str]
+                res = v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : Dict{String,Any}()
+            else
+                # Backward compat: search all display-name keys, prefer the one with most data
+                best_v = Dict{String,Any}()
+                best_count = 0
+                for (k, v) in db
+                    k_lid = parse_lesion_id(k)
+                    if k_lid == lid && v isa AbstractDict && length(v) > best_count
+                        best_v = Dict{String,Any}(string(ik) => iv for (ik, iv) in v)
+                        best_count = length(v)
+                    end
+                end
+                res = best_v
             end
         end
-        return best_v
     end
     
-    return Dict{String,Any}()
+    # Sanitize loaded BaseAnatomy against physical Z-axis location
+    if !isempty(res) && haskey(res, "BaseAnatomy")
+        ba = res["BaseAnatomy"]
+        lid = parse_lesion_id(key)
+        cz = _extract_z_from_entry(res, lid)
+        if cz > 0
+            LA_mod = try _MEH._get_la() catch; try parentmodule(@__MODULE__).LesionAssociation catch; nothing end end
+            if LA_mod !== nothing
+                tot_z = try _MEH.volume_z_size[] catch; 0 end
+                tot_z = tot_z > 0 ? tot_z : 326
+                _, clean_ba = LA_mod.sanitize_anatomy_by_z("", ba, cz, tot_z)
+                if isempty(clean_ba)
+                    delete!(res, "BaseAnatomy")
+                    delete!(res, "BaseAnatomySide")
+                    delete!(res, "Anatomic Location")
+                    delete!(res, "Anatomical Sublocation")
+                end
+            end
+        end
+    end
+    
+    return res
 end
 
 # ─── Edit History Tracking ────────────────────────────────────────────────────
@@ -1097,6 +1169,36 @@ function _migrate_db(raw_db::Dict)::Dict{String,Any}
             migrated[canonical] = v isa AbstractDict ? Dict{String,Any}(string(ik) => iv for (ik, iv) in v) : v
         end
     end
+    
+    # Sanitize migrated entries against physical Z-axis location
+    LA_mod = try parentmodule(@__MODULE__).LesionAssociation catch; nothing end
+    for (k, entry) in migrated
+        if entry isa AbstractDict
+            lid = parse_lesion_id(k)
+            cz = _extract_z_from_entry(entry, lid)
+            ba = string(get(entry, "BaseAnatomy", ""))
+            raw_org = string(get(entry, "OriginalName", get(entry, "ClinicalLesionName", "")))
+            if cz > 0 && LA_mod !== nothing && (!isempty(ba) || !isempty(raw_org))
+                san_org, san_ba = LA_mod.sanitize_anatomy_by_z(raw_org, ba, cz, 326)
+                if isempty(san_ba) && !isempty(ba)
+                    delete!(entry, "BaseAnatomy")
+                    delete!(entry, "BaseAnatomySide")
+                    loc = string(get(entry, "Anatomic Location", ""))
+                    if (loc == "Appendicular Skeleton" || loc == "Lower Extremity") && cz > 180
+                        delete!(entry, "Anatomic Location")
+                        delete!(entry, "Anatomical Sublocation")
+                    end
+                elseif san_ba != ba
+                    entry["BaseAnatomy"] = san_ba
+                end
+                if isempty(san_org) && !isempty(raw_org)
+                    delete!(entry, "ClinicalLesionName")
+                    delete!(entry, "OriginalName")
+                end
+            end
+        end
+    end
+    
     return migrated
 end
 
@@ -3312,9 +3414,14 @@ function create_metadata_window(
                     tp_organs = get(_MEH.tp_organ_mapping, tp, Dict{Int,String}())
                     if haskey(tp_organs, sid)
                         raw = tp_organs[sid]
-                        d_name = try LA.lookup_anatomy(raw) catch; "" end
-                        if isempty(d_name) || d_name == raw
-                            d_name = replace(raw, "_" => " ")
+                        centroid = get(_MEH.lesion_centroids_cache, (tp, sid), get(_MEH.lesion_centroids_cache, sid, nothing))
+                        cz = centroid !== nothing ? centroid[3] : 0
+                        raw, _ = LA.sanitize_anatomy_by_z(raw, "", cz, _MEH.volume_z_size[])
+                        if !isempty(raw)
+                            d_name = try LA.lookup_anatomy(raw) catch; "" end
+                            if isempty(d_name) || d_name == raw
+                                d_name = replace(raw, "_" => " ")
+                            end
                         end
                     end
                 end
@@ -3322,15 +3429,23 @@ function create_metadata_window(
                 # 3. Try global_organ_mapping (legacy baseline fallback)
                 if isempty(d_name) && haskey(_MEH.global_organ_mapping[], sid)
                     raw = _MEH.global_organ_mapping[][sid]
-                    d_name = try LA.lookup_anatomy(raw) catch; replace(raw, "_" => " ") end
+                    centroid = get(_MEH.lesion_centroids_cache, (tp, sid), get(_MEH.lesion_centroids_cache, sid, nothing))
+                    cz = centroid !== nothing ? centroid[3] : 0
+                    raw, _ = LA.sanitize_anatomy_by_z(raw, "", cz, _MEH.volume_z_size[])
+                    if !isempty(raw)
+                        d_name = try LA.lookup_anatomy(raw) catch; replace(raw, "_" => " ") end
+                    end
                 end
                 
                 # 4. Try user-saved BaseAnatomy from lesion_db
                 if isempty(d_name)
                     lid_data = get(db, string(sid), Dict{String,Any}())
                     saved_anat = get(lid_data, "BaseAnatomy", "")
+                    centroid = get(_MEH.lesion_centroids_cache, (tp, sid), get(_MEH.lesion_centroids_cache, sid, nothing))
+                    cz = centroid !== nothing ? centroid[3] : 0
+                    _, saved_anat = LA.sanitize_anatomy_by_z("", saved_anat, cz, _MEH.volume_z_size[])
                     if !isempty(saved_anat) && saved_anat != "Unknown" && saved_anat != "(select)"
-                        d_name = saved_anat
+                        d_name = replace(saved_anat, r"\s*\(UBERON\)" => "")
                     end
                 end
                 
@@ -6562,7 +6677,6 @@ function create_metadata_window(
             else
                 # Keyword fallback for organs not in JSON mapping
                 base_anat = lowercase(get(data, "BaseAnatomy", ""))
-                id_low = lowercase(cur_id_str)
                 raw_organ = lowercase(raw_organ_for_type)
                 # Include original RTOG/clinical segment name for classification hints
                 # (e.g., "Knochen Beckengürtel" → bone, "Lymphknoten Obturator" → lymph node)
@@ -6571,7 +6685,7 @@ function create_metadata_window(
                     tp_segs = get(_MEH.tp_segment_names, _MEH.current_tp_index[], Dict{Int,String}())
                     seg_name_for_type = lowercase(get(tp_segs, lid, ""))
                 end
-                combined = base_anat * " " * id_low * " " * raw_organ * " " * seg_name_for_type
+                combined = base_anat * " " * raw_organ * " " * seg_name_for_type
                 
                 muscle_kws = ["gluteus", "autochthon", "iliopsoas", "pectoralis", "subscapularis",
                               "supraspinatus", "infraspinatus", "latissimus", "rectus_abdominis",
@@ -6697,6 +6811,26 @@ function create_metadata_window(
         t_base = get(data, "BaseAnatomy", "")
         t_side = get(data, "BaseAnatomySide", "")
         
+        # Physical Z-axis sanity check for BaseAnatomy
+        cur_tp_san = _MEH.current_tp_index[]
+        cent_san = if haskey(_MEH.lesion_centroids_cache, (cur_tp_san, lid))
+            _MEH.lesion_centroids_cache[(cur_tp_san, lid)]
+        elseif haskey(_MEH.lesion_centroids_cache, lid)
+            _MEH.lesion_centroids_cache[lid]
+        else
+            nothing
+        end
+        cz_san = cent_san !== nothing ? cent_san[3] : 0
+        LA_z = _MEH._get_la()
+        if LA_z !== nothing && cz_san > 0
+            _, t_base = LA_z.sanitize_anatomy_by_z("", t_base, cz_san, _MEH.volume_z_size[])
+            if isempty(t_base)
+                delete!(data, "BaseAnatomy")
+                delete!(data, "BaseAnatomySide")
+                t_side = ""
+            end
+        end
+        
         # Check if an original RTOG / clinical name is available from HDF5 or annotations
         # NOTE: orig_rtog_name is NOT used for BaseAnatomy prefill — atlas-based anatomy takes priority.
         # It's still needed for seg_name_for_type classification below.
@@ -6712,10 +6846,16 @@ function create_metadata_window(
             # Check per-TP organ mapping first (avoids last-writer-wins from global flat map)
             tp_organs = get(_MEH.tp_organ_mapping, _MEH.current_tp_index[], Dict{Int,String}())
             raw_organ = get(tp_organs, lid, "")
+            if LA_z !== nothing && cz_san > 0
+                raw_organ, _ = LA_z.sanitize_anatomy_by_z(raw_organ, "", cz_san, _MEH.volume_z_size[])
+            end
             # Fallback to global flat mapping
             if isempty(raw_organ)
                 organ_map = _MEH.global_organ_mapping[]
                 raw_organ = get(organ_map, lid, "")
+                if LA_z !== nothing && cz_san > 0
+                    raw_organ, _ = LA_z.sanitize_anatomy_by_z(raw_organ, "", cz_san, _MEH.volume_z_size[])
+                end
             end
             # Fallback: if organ mapping is empty or "Unknown", try volume-based scan
             if (isempty(raw_organ) || raw_organ == "Unknown") && _MEH.global_ts_atlas[] !== nothing
@@ -6728,10 +6868,19 @@ function create_metadata_window(
                     mask_vol = lock(_MEH._tp_cache_lock) do
                         haskey(_MEH.tp_data_cache, tp_idx) ? _MEH.tp_data_cache[tp_idx].mask : nothing
                     end
+                    if mask_vol === nothing && isdefined(_MEH, :get_or_load_tp_data)
+                        tp_entry = _MEH.get_or_load_tp_data(tp_idx)
+                        mask_vol = tp_entry !== nothing ? tp_entry.mask : nothing
+                    end
                     if mask_vol !== nothing
                         best = LA.classify_and_pick_best_organ(mask_vol, atlas, ts_nm, lid)
+                        if LA_z !== nothing && cz_san > 0
+                            best, _ = LA_z.sanitize_anatomy_by_z(best, "", cz_san, _MEH.volume_z_size[])
+                        end
                         if !isempty(best)
                             raw_organ = best
+                            get!(_MEH.tp_organ_mapping, tp_idx, Dict{Int,String}())[lid] = raw_organ
+                            organ_map = _MEH.global_organ_mapping[]
                             organ_map[lid] = raw_organ
                             _MEH.global_organ_mapping[] = organ_map
                             if _MEH.PERF_LOG[]; println("Auto-named lesion $lid via volume scan (bone priority): '$raw_organ'"); flush(stdout); end
@@ -6749,7 +6898,7 @@ function create_metadata_window(
                             # Use expanding sphere with tissue priority instead of single-voxel lookup
                             # to avoid bias towards large structures like femur
                             sphere_organ = ""
-                            for radius in [0, 1, 2, 4]
+                            for radius in [0, 1, 2, 4, 8, 12, 16, 24, 32]
                                 sphere_counts = Dict{Int,Int}()
                                 for dx in -radius:radius, dy in -radius:radius, dz in -radius:radius
                                     if dx*dx + dy*dy + dz*dz > radius*radius
@@ -6764,12 +6913,20 @@ function create_metadata_window(
                                     end
                                 end
                                 if !isempty(sphere_counts)
-                                    sphere_organ = LA.pick_best_organ(sphere_counts, ts_nm)
-                                    break
+                                    cand = LA.pick_best_organ(sphere_counts, ts_nm)
+                                    if LA_z !== nothing && cz_san > 0
+                                        cand, _ = LA_z.sanitize_anatomy_by_z(cand, "", cz_san, _MEH.volume_z_size[])
+                                    end
+                                    if !isempty(cand)
+                                        sphere_organ = cand
+                                        break
+                                    end
                                 end
                             end
                             if !isempty(sphere_organ)
                                 raw_organ = sphere_organ
+                                get!(_MEH.tp_organ_mapping, tp_idx, Dict{Int,String}())[lid] = raw_organ
+                                organ_map = _MEH.global_organ_mapping[]
                                 organ_map[lid] = raw_organ
                                 _MEH.global_organ_mapping[] = organ_map
                                 if _MEH.PERF_LOG[]; println("Auto-named lesion $lid from centroid sphere at [$cx,$cy,$cz]: '$raw_organ'"); flush(stdout); end
@@ -6787,8 +6944,28 @@ function create_metadata_window(
         if (isempty(raw_organ) || raw_organ == "Unknown") && !isempty(orig_rtog_name)
             lc = lowercase(orig_rtog_name)
             if !startswith(lc, "segment") && !startswith(lc, "unknown") && !startswith(lc, "artificial_") && !startswith(lc, "lesion") && !occursin("postprocessed", lc)
-                raw_organ = orig_rtog_name
+                cand_sn = orig_rtog_name
+                if LA_z !== nothing && cz_san > 0
+                    cand_sn, _ = LA_z.sanitize_anatomy_by_z(cand_sn, "", cz_san, _MEH.volume_z_size[])
+                end
+                raw_organ = cand_sn
             end
+        end
+        
+        # Head / skull fallback when cz_san >= 240 and raw_organ is still empty or unknown
+        if (isempty(raw_organ) || raw_organ == "Unknown") && cz_san >= 240
+            if t_type == "Bone Meta"
+                raw_organ = "skull"
+            elseif t_type in ("Lymph Node", "Lymph Node Meta")
+                raw_organ = "Neck_Level_IIa_Upper_Jugular_Right"
+            elseif cz_san >= 270
+                raw_organ = "brain"
+            else
+                raw_organ = "skull"
+            end
+            tp_idx_cur = _MEH.current_tp_index[]
+            get!(_MEH.tp_organ_mapping, tp_idx_cur, Dict{Int,String}())[lid] = raw_organ
+            _MEH.global_organ_mapping[][lid] = raw_organ
         end
         
         # Lookup the anatomy ontology entry (used for both BaseAnatomy and Location)
@@ -6819,6 +6996,15 @@ function create_metadata_window(
             if !isempty(formatted_ba)
                 t_base = formatted_ba
             end
+        end
+        
+        # Persist newly determined anatomy in db_updates
+        if !isempty(t_base)
+            db_updates["BaseAnatomy"] = t_base
+            if !isempty(t_side)
+                db_updates["BaseAnatomySide"] = t_side
+            end
+            db_updates["LesionType"] = t_type
         end
         
         # ── Auto-fill Anatomic Location & Sublocation (independent of BaseAnatomy) ──
@@ -7448,26 +7634,77 @@ function create_metadata_window(
         lid = parse_lesion_id(cur_id_str)
         (lid === nothing || lid <= 0) && return
         try
-            # 1. Clear cached organ mapping for this lesion so apply_state re-runs live atlas lookup
             tp_idx = _MEH.current_tp_index[]
+            canonical_key = string(lid)
+            
+            # 1. Clear cached organ mappings across caches
             tp_organs = get(_MEH.tp_organ_mapping, tp_idx, Dict{Int,String}())
             delete!(tp_organs, lid)
             organ_map = _MEH.global_organ_mapping[]
             delete!(organ_map, lid)
             _MEH.global_organ_mapping[] = organ_map
 
-            # 2. Get current data, clear anatomy-related fields to force re-detection
-            db = lesion_db[]
+            # 2. Directly clear anatomy-related fields from lesion_db
+            db = copy(lesion_db[])
+            for target_k in [canonical_key, cur_id_str]
+                if haskey(db, target_k) && db[target_k] isa AbstractDict
+                    entry = db[target_k]
+                    for k in ["BaseAnatomy", "BaseAnatomySide", "Side", "Anatomic Location", "Anatomical Sublocation", "Anatomical Details", "ClinicalLesionName", "OriginalName", "LesionType"]
+                        delete!(entry, k)
+                    end
+                end
+            end
+            lesion_db[] = db
+
+            # 3. Clear fields from local state dictionary
             data = get_lesion_state(db, cur_id_str)
-            for k in ["BaseAnatomy", "Side", "Anatomic Location", "Anatomical Sublocation", "Anatomical Details"]
+            for k in ["BaseAnatomy", "BaseAnatomySide", "Side", "Anatomic Location", "Anatomical Sublocation", "Anatomical Details", "ClinicalLesionName", "OriginalName", "LesionType"]
                 delete!(data, k)
             end
 
-            # 3. Re-run apply_state which will re-classify from atlas
+            # 4. Re-run apply_state which will re-classify from live atlas with physical Z-constraint
             apply_state(data)
-            if _MEH.PERF_LOG[]; println("🔄 Refreshed anatomy for lesion $lid"); flush(stdout); end
+
+            # 5. Collect freshly applied state and persist to database & disk
+            refreshed_state = collect_state()
+            refreshed_state["_display_name"] = cur_id_str
+            old_st = get(db, canonical_key, Dict{String,Any}())
+            if old_st isa AbstractDict && !isempty(old_st)
+                try _append_edit_history!(refreshed_state, old_st) catch; end
+            end
+            db[canonical_key] = refreshed_state
+            lesion_db[] = db
+            _db_dirty[] = true
+            try
+                put!(db_channel, SaveDBMessage(db, global_app_state, save_path, DEFAULT_HDF5_PATH))
+            catch; end
+
+            # 6. Update dropdown option display name in lesion_ids & les_menu
+            new_anat = get(refreshed_state, "BaseAnatomy", "")
+            if !isempty(new_anat)
+                clean_name = replace(new_anat, r"\s*\(UBERON\)" => "")
+                clean_name = titlecase(replace(clean_name, "_" => " "))
+                new_display = "$lid: $clean_name"
+                curr_opts = copy(lesion_ids[])
+                idx = findfirst(==(cur_id_str), curr_opts)
+                if idx !== nothing
+                    curr_opts[idx] = new_display
+                    is_syncing_selection[] = true
+                    try
+                        lesion_ids[] = curr_opts
+                        les_menu.options[] = curr_opts
+                        les_menu.selection[] = new_display
+                        les_menu.i_selected[] = idx
+                        active_lesion_id[] = new_display
+                    finally
+                        is_syncing_selection[] = false
+                    end
+                end
+            end
+
+            if _MEH.PERF_LOG[]; println("🔄 Refreshed anatomy for lesion $lid: $(get(refreshed_state, "BaseAnatomy", "unknown"))"); flush(stdout); end
         catch e
-            @warn "Refresh anatomy failed for lesion $lid: $e"
+            @warn "Refresh anatomy failed for lesion $lid: $e" exception=(e, catch_backtrace())
         end
     end
     _lmw_observables[:btn_refresh_anat] = btn_refresh_anat

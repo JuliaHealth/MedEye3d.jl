@@ -637,6 +637,41 @@ function classify_tissue_priority(name::String)::Int
 end
 
 """
+    sanitize_anatomy_by_z(organ::String, base_anat::String, z::Real, total_z::Real=326) -> Tuple{String, String}
+
+Sanity check organ and base anatomy against physical Z position in the body.
+In whole-body CT/PET, Z ranges from inferior (pelvis/thighs at z low) to superior (vertex at z high).
+- Lower limb / pelvis (femur, tibia, fibula, patella, hip, ilium, ischium, pubis, sacrum): physically impossible at z > 200 (or z/total_z > 0.55).
+- Skull, calvarium, brain, eyes, palate, mandible, C1-C3: physically impossible at z < 100 (or z/total_z < 0.30).
+"""
+function sanitize_anatomy_by_z(organ::String, base_anat::String, z::Real, total_z::Real=326)::Tuple{String, String}
+    z <= 0 && return (organ, base_anat)
+    rel_z = total_z > 0 ? z / total_z : (z > 200 ? 0.8 : 0.2)
+    
+    # Superior region (thorax/neck/head, z > 180 or rel_z > 0.50)
+    if z > 180 || rel_z > 0.50
+        lower_limb_kws = ["femur", "tibia", "fibula", "patella", "hip", "ilium", "ischium", "pubis", "sacrum", "gluteus", "thigh"]
+        org_lc = lowercase(organ)
+        base_lc = lowercase(base_anat)
+        if any(kw -> occursin(kw, org_lc), lower_limb_kws) || any(kw -> occursin(kw, base_lc), lower_limb_kws)
+            return ("", "")
+        end
+    end
+
+    # Inferior region (pelvis/legs, z < 100 or rel_z < 0.30)
+    if z < 100 || rel_z < 0.30
+        head_kws = ["skull", "calvarium", "brain", "eye", "palate", "mandible", "nasopharynx", "temporalis", "cervical"]
+        org_lc = lowercase(organ)
+        base_lc = lowercase(base_anat)
+        if any(kw -> occursin(kw, org_lc), head_kws) || any(kw -> occursin(kw, base_lc), head_kws)
+            return ("", "")
+        end
+    end
+    
+    return (organ, base_anat)
+end
+
+"""
     count_atlas_overlap(mask, atlas, lid, ts_names) → Dict{Int,Int}
 
 Count how many voxels of lesion `lid` in `mask` overlap each KNOWN atlas label.
@@ -1193,7 +1228,7 @@ function lookup_anatomy(raw_organ::String)
 end
 
 export load_nrrd_labelmap, map_lesions_to_organs, classify_organ_to_lesion_type
-export classify_tissue_priority, classify_and_pick_best_organ, count_atlas_overlap, pick_best_organ, lookup_anatomy
+export classify_tissue_priority, classify_and_pick_best_organ, count_atlas_overlap, pick_best_organ, lookup_anatomy, sanitize_anatomy_by_z
 export is_lymph_node_structure, is_pelvic_lymph_node, classify_lymph_node_location
 export format_clinical_station_name, format_adjacent_structure_name, generate_detailed_anatomy_rows
 

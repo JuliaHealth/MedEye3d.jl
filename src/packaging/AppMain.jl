@@ -1074,7 +1074,12 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             if haskey(tp0_sn, seg_int) && !isempty(tp0_sn[seg_int])
                 sn = tp0_sn[seg_int]
                 if !startswith(sn, "unknown_") && !startswith(sn, "Segment") && !startswith(sn, "artificial_")
-                    display_name = sn
+                    cent = get(MEH.lesion_centroids_cache, (0, seg_int), get(MEH.lesion_centroids_cache, seg_int, nothing))
+                    cz = cent !== nothing ? cent[3] : 0
+                    sn, _ = LesionAssociation.sanitize_anatomy_by_z(sn, "", cz, MEH.volume_z_size[])
+                    if !isempty(sn)
+                        display_name = sn
+                    end
                 end
             end
             # 2. Try per-TP organ mapping (from preprocessing)
@@ -1082,13 +1087,23 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 tp0_organs = MEH.tp_organ_mapping[0]
                 if haskey(tp0_organs, seg_int)
                     raw = tp0_organs[seg_int]
-                    display_name = titlecase(replace(raw, "_" => " "))
+                    cent = get(MEH.lesion_centroids_cache, (0, seg_int), get(MEH.lesion_centroids_cache, seg_int, nothing))
+                    cz = cent !== nothing ? cent[3] : 0
+                    raw, _ = LesionAssociation.sanitize_anatomy_by_z(raw, "", cz, MEH.volume_z_size[])
+                    if !isempty(raw)
+                        display_name = titlecase(replace(raw, "_" => " "))
+                    end
                 end
             end
             # 3. Try legacy organ_mapping
             if isempty(display_name) && haskey(organ_mapping, seg_int)
                 raw = organ_mapping[seg_int]
-                display_name = titlecase(replace(raw, "_" => " "))
+                cent = get(MEH.lesion_centroids_cache, (0, seg_int), get(MEH.lesion_centroids_cache, seg_int, nothing))
+                cz = cent !== nothing ? cent[3] : 0
+                raw, _ = LesionAssociation.sanitize_anatomy_by_z(raw, "", cz, MEH.volume_z_size[])
+                if !isempty(raw)
+                    display_name = titlecase(replace(raw, "_" => " "))
+                end
             end
             # 4. Fallback
             if isempty(display_name)
