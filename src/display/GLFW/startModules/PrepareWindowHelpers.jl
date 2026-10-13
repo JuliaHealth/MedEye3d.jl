@@ -11,7 +11,18 @@ function initializeWindow(width::Int, height::Int)
     # Create GLFW window with NO_API for Vulkan
     GLFW.WindowHint(GLFW.CLIENT_API, GLFW.NO_API)
     GLFW.WindowHint(GLFW.RESIZABLE, true)
+    GLFW.WindowHint(GLFW.VISIBLE, true)
     window = GLFW.CreateWindow(width, height, "MedEye3d")
+    # Explicitly show and pump events so the X11 window manager maps the window.
+    # This is critical in Docker/X11-forwarded environments where mapping can be
+    # delayed, causing Vulkan surface capabilities to report stale dimensions.
+    GLFW.ShowWindow(window)
+    for _ in 1:10
+        GLFW.PollEvents()
+        fb_w, fb_h = GLFW.GetFramebufferSize(window)
+        fb_w > 0 && fb_h > 0 && break
+        sleep(0.05)
+    end
     # Reset CLIENT_API hint so GLMakie (Makie control window) can create OpenGL windows later
     GLFW.WindowHint(GLFW.CLIENT_API, GLFW.OPENGL_API)
     return window

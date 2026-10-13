@@ -167,11 +167,21 @@ function create_swapchain(ctx_or_device, pdev, surface, qfi, width, height;
         end
     end
 
-    # Clamp extent
-    extent = Extent2D(
-        clamp(UInt32(width),  caps.min_image_extent.width,  caps.max_image_extent.width),
-        clamp(UInt32(height), caps.min_image_extent.height, caps.max_image_extent.height)
-    )
+    # Determine extent per Vulkan spec §33.9.3:
+    # If currentExtent is NOT 0xFFFFFFFF, the surface size is fixed — MUST use currentExtent.
+    # If currentExtent IS 0xFFFFFFFF, we may choose any size within [min, max].
+    cur_w = caps.current_extent.width
+    cur_h = caps.current_extent.height
+    if cur_w != 0xFFFFFFFF && cur_h != 0xFFFFFFFF && cur_w > 0 && cur_h > 0
+        extent = caps.current_extent
+        @info "Vulkan swapchain: using currentExtent $(cur_w)×$(cur_h)"
+    else
+        extent = Extent2D(
+            clamp(UInt32(width),  caps.min_image_extent.width,  caps.max_image_extent.width),
+            clamp(UInt32(height), caps.min_image_extent.height, caps.max_image_extent.height)
+        )
+        @info "Vulkan swapchain: using clamped extent $(extent.width)×$(extent.height) (requested $(width)×$(height))"
+    end
 
     image_count = caps.min_image_count + 1
     if caps.max_image_count > 0
@@ -191,6 +201,11 @@ function create_swapchain(ctx_or_device, pdev, surface, qfi, width, height;
     end
 
     device = ctx_or_device isa VkCtx ? ctx_or_device.device : ctx_or_device
+
+    # Log surface capabilities for diagnostics (helps debug Docker/X11 issues)
+    @info "Vulkan surface caps: min=$(caps.min_image_extent.width)×$(caps.min_image_extent.height) " *
+          "max=$(caps.max_image_extent.width)×$(caps.max_image_extent.height) " *
+          "current=$(cur_w)×$(cur_h) imageCount=$(image_count) presentMode=$(present_mode)"
 
     sci = SwapchainCreateInfoKHR(
         surface,
@@ -385,9 +400,47 @@ function init_vulkan_context(window::GLFW.Window, width::Int, height::Int)::VkCt
     if !device_created
         error("All Vulkan devices failed. Last error: $last_err")
     end
-    # ── Swapchain ──
-    swapchain, sc_format, sc_extent, sc_images, sc_views =
-        create_swapchain(device, pdev, surface, qfi, width, height)
+
+    # ── Ensure window is visible (Docker/X11 may have delayed window mapping) ──
+    # Poll events and re-query framebuffer size to ensure the window is fully mapped
+    # before querying Vulkan surface capabilities for swapchain creation.
+    for wait_i in 1:20
+        GLFW.PollEvents()
+        fb_w, fb_h = GLFW.GetFramebufferSize(window)
+        if fb_w > 0 && fb_h > 0
+            width = Int(fb_w)
+            height = Int(fb_h)
+            break
+        end
+        @warn "Waiting for GLFW window to map (attempt $wait_i/20, fb=$(fb_w)×$(fb_h))..."
+        sleep(0.1)
+    end
+
+    # ── Swapchain (with retry for Docker/X11 timing) ──
+    local swapchain, sc_format, sc_extent, sc_images, sc_views
+    max_retries = 5
+    for attempt in 1:max_retries
+        try
+            swapchain, sc_format, sc_extent, sc_images, sc_views =
+                create_swapchain(device, pdev, surface, qfi, width, height)
+            break
+        catch ex
+            if attempt < max_retries
+                @warn "Swapchain creation failed (attempt $attempt/$max_retries), retrying after delay..." exception=ex
+                # Process pending X11 events and wait for window manager
+                for _ in 1:5; GLFW.PollEvents(); sleep(0.1); end
+                # Re-query framebuffer size in case it changed
+                fb_w, fb_h = GLFW.GetFramebufferSize(window)
+                if fb_w > 0 && fb_h > 0
+                    width = Int(fb_w)
+                    height = Int(fb_h)
+                end
+            else
+                @error "Swapchain creation failed after $max_retries attempts"
+                rethrow()
+            end
+        end
+    end
 
     # ── Render pass ──
     render_pass = create_render_pass(device, sc_format)
