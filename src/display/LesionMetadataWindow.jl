@@ -1056,7 +1056,11 @@ function get_lesion_state(db::Dict, key::String)::Dict{String,Any}
     end
     
     # Sanitize loaded BaseAnatomy against physical Z-axis location
-    if !isempty(res) && haskey(res, "BaseAnatomy")
+    # Skip when user explicitly edited the anatomy — respect their choice
+    is_user_edited = let v = get(res, "_user_edited_anatomy", false)
+        v === true || v == "true" || v == 1 || v == "1"
+    end
+    if !is_user_edited && !isempty(res) && haskey(res, "BaseAnatomy")
         ba = res["BaseAnatomy"]
         lid = parse_lesion_id(key)
         cz = _extract_z_from_entry(res, lid)
@@ -1089,7 +1093,7 @@ const _EDIT_HISTORY_EXCLUDED_FIELDS = Set{String}([
     "_display_name", "_Centroid", "_Diameter_mm", "_Volume_cc", "_Volume_mm3",
     "_Slice_Z", "_TimePoint", "_Modality", "_NodeName",
     "_last_seg_edit_by", "_last_seg_edit_at",
-    "_edit_history",
+    "_edit_history", "_user_edited_anatomy",
 ])
 
 """Maximum number of edit history entries per lesion (safety cap)."""
@@ -2672,10 +2676,20 @@ function create_metadata_window(
     # Helper for safely extracting and stripping text from Makie Textboxes
     _safe_strip(x) = x === nothing ? "" : String(strip(x))
 
-    # Helper for safely updating Textbox displayed and stored values simultaneously
+    # Helper for safely updating Textbox displayed and stored values simultaneously.
+    # Resets the internal EditableText cursor to position 0 before changing text
+    # to prevent a Makie BoundsError in selection_rects_for_range when the stale
+    # cursor position from previous (longer) text exceeds the new text's line_idx bounds.
     function _set_tb_val!(tb::Textbox, val)
         v = _safe_strip(val)
         tb.stored_string[] == v && return  # skip if unchanged
+        # Reset cursor to avoid BoundsError in Makie's editabletext internals
+        try
+            et = getfield(tb, :editor)
+            if et !== nothing && hasproperty(et, :cursors)
+                et.cursors[] = [Makie.EditCursor(0)]
+            end
+        catch; end
         tb.displayed_string[] = v
         tb.stored_string[] = v
     end
@@ -6394,6 +6408,9 @@ function create_metadata_window(
         if side_sel !== nothing && !isempty(string(side_sel))
             d["BaseAnatomySide"] = string(side_sel)
         end
+        if _user_edited_anatomy[]
+            d["_user_edited_anatomy"] = true
+        end
         
         # Serialize OntologyBuilder anatomical detail rows
         n = anat_active_count[]
@@ -6465,6 +6482,7 @@ function create_metadata_window(
     _apply_state_failed = Ref(false)
     _is_dictating_update = Ref(false)
     _last_snapshot = Ref{Any}(nothing)  # holds (id, state, global_state, tp_idx, skip_dict)
+    _user_edited_anatomy = Ref(false)   # true when user manually changed BaseAnatomy dropdown
 
     function _flush_lesion!(lid::Int)
         (lid <= 0 || _is_applying_state[] || _apply_state_failed[]) && return
@@ -6722,6 +6740,11 @@ function create_metadata_window(
 
         t_base = get(data, "BaseAnatomy", "")
         t_side = get(data, "BaseAnatomySide", "")
+        # Restore per-lesion user-edited-anatomy flag
+        _saved_user_edited = let v = get(data, "_user_edited_anatomy", false)
+            v === true || v == "true" || v == 1 || v == "1"
+        end
+        _user_edited_anatomy[] = _saved_user_edited
         
         # Physical Z-axis sanity check for BaseAnatomy
         cur_tp_san = _MEH.current_tp_index[]
@@ -6734,7 +6757,7 @@ function create_metadata_window(
         end
         cz_san = cent_san !== nothing ? cent_san[3] : 0
         LA_z = _MEH._get_la()
-        if LA_z !== nothing && cz_san > 0
+        if LA_z !== nothing && cz_san > 0 && !_saved_user_edited
             _, t_base = LA_z.sanitize_anatomy_by_z("", t_base, cz_san, _MEH.volume_z_size[])
             if isempty(t_base)
                 delete!(data, "BaseAnatomy")
@@ -7026,16 +7049,17 @@ function create_metadata_window(
         end
         
         # ── Override BaseAnatomy with formatted clinical station name for LN ──
+        # Skip if user manually edited anatomy — respect their choice
         LA_ba = _MEH._get_la()
-        if LA_ba !== nothing && !isempty(raw_organ) && LA_ba.is_lymph_node_structure(raw_organ)
+        if !_saved_user_edited && LA_ba !== nothing && !isempty(raw_organ) && LA_ba.is_lymph_node_structure(raw_organ)
             formatted_ba = LA_ba.format_clinical_station_name(raw_organ)
             if !isempty(formatted_ba)
                 t_base = formatted_ba
             end
         end
         
-        # Persist newly determined anatomy in db_updates
-        if !isempty(t_base)
+        # Persist newly determined anatomy in db_updates (only for auto-detected, not user-edited)
+        if !_saved_user_edited && !isempty(t_base)
             db_updates["BaseAnatomy"] = t_base
             if !isempty(t_side)
                 db_updates["BaseAnatomySide"] = t_side
@@ -7632,12 +7656,15 @@ function create_metadata_window(
             organ_map = _MEH.global_organ_mapping[]
             delete!(organ_map, lid)
             _MEH.global_organ_mapping[] = organ_map
+            
+            # Reset user-edited flag so fresh atlas detection takes effect
+            _user_edited_anatomy[] = false
 
             # 2. Directly clear anatomy-related fields from lesion_db for all keys of this lesion
             db = copy(lesion_db[])
             for (k, entry) in db
                 if parse_lesion_id(k) == lid && entry isa AbstractDict
-                    for fld in ["BaseAnatomy", "BaseAnatomySide", "Side", "Anatomic Location", "Anatomical Sublocation", "Anatomical Details", "ClinicalLesionName", "OriginalName", "LesionType"]
+                    for fld in ["BaseAnatomy", "BaseAnatomySide", "Side", "Anatomic Location", "Anatomical Sublocation", "Anatomical Details", "ClinicalLesionName", "OriginalName", "LesionType", "_user_edited_anatomy"]
                         delete!(entry, fld)
                     end
                 end
@@ -7646,7 +7673,7 @@ function create_metadata_window(
 
             # 3. Clear fields from local state dictionary
             data = get_lesion_state(db, cur_id_str)
-            for fld in ["BaseAnatomy", "BaseAnatomySide", "Side", "Anatomic Location", "Anatomical Sublocation", "Anatomical Details", "ClinicalLesionName", "OriginalName", "LesionType"]
+            for fld in ["BaseAnatomy", "BaseAnatomySide", "Side", "Anatomic Location", "Anatomical Sublocation", "Anatomical Details", "ClinicalLesionName", "OriginalName", "LesionType", "_user_edited_anatomy"]
                 delete!(data, fld)
             end
 
@@ -8177,7 +8204,12 @@ function create_metadata_window(
     
     # ── Wire autosave triggers for all metadata UI elements ──────────
     on(menu_obs_state.selection) do _; trigger_autosave(); end
-    on(menu_base_anat.selection) do _; trigger_autosave(); end
+    on(menu_base_anat.selection) do _
+        if !_is_applying_state[]
+            _user_edited_anatomy[] = true
+        end
+        trigger_autosave()
+    end
     # OntologyBuilder anatomical detail rows
     for i in 1:MAX_ANAT_ROWS
         on(anat_struct_menus[i].selection) do _; trigger_autosave(); end
