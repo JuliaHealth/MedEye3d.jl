@@ -59,7 +59,7 @@ struct LoadDBMessage <: DBMessage
     LoadDBMessage(path_json::String, reply_channel::Channel{Dict}, path_hdf5::String=DEFAULT_HDF5_PATH) = new(path_json, reply_channel, path_hdf5)
 end
 
-export create_metadata_window, load_annotations, save_annotations, load_annotations_hdf5, save_annotations_hdf5, get_lesion_state, display_metadata_window
+export create_metadata_window, load_annotations, save_annotations, load_annotations_hdf5, save_annotations_hdf5, persist_to_active_dataset_h5!, get_lesion_state, display_metadata_window
 
 # ── Skip no-op Observable updates (each avoided update saves ~1-5ms) ─────────
 """
@@ -195,6 +195,19 @@ const _login_authenticated = Ref{Bool}(false)
 const _login_success_time = Ref{Float64}(0.0)
 const _LOGIN_PASSWORD = "lu"
 
+"""
+    _get_current_username() -> String
+
+Returns the current active username (from login dialog or environment variables fallback).
+"""
+function _get_current_username()::String
+    if !isempty(_current_user[])
+        return _current_user[]
+    end
+    u = get(ENV, "USER", get(ENV, "LOGNAME", get(ENV, "USERNAME", "")))
+    return isempty(u) ? "user" : u
+end
+
 _lmw_observables[:has_expert_edits] = current_has_expert_edits
 _lmw_observables[:seg_origin] = current_seg_origin
 
@@ -212,15 +225,10 @@ function mark_expert_correction!(lid=nothing)
         if haskey(db, lid_str) && db[lid_str] isa AbstractDict
             db[lid_str]["has_expert_edits"] = true
             db[lid_str]["SegmentationOrigin"] = "EXPERT_CORRECTION"
-            # Audit: record last segmentation edit
-            if !isempty(_current_user[])
-                db[lid_str]["_last_seg_edit_by"] = _current_user[]
-            end
+            # Audit: record last segmentation edit (last change only to preserve storage)
+            db[lid_str]["_last_seg_edit_by"] = _get_current_username()
             db[lid_str]["_last_seg_edit_at"] = Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
-            # Full edit history: append segmentation edit event
-            try
-                _append_seg_edit_to_history!(db[lid_str], _current_user[], "paint_brush")
-            catch; end
+            db[lid_str]["_last_seg_edit_tool"] = "paint_brush"
             _active_lesion_db[][] = db
         end
     end
@@ -239,6 +247,9 @@ function mark_prompt_segmentation!(lid=nothing)
         db = copy(_active_lesion_db[][])
         if haskey(db, lid_str) && db[lid_str] isa AbstractDict
             db[lid_str]["SegmentationOrigin"] = "PROMPT_SEGMENTATION"
+            db[lid_str]["_last_seg_edit_by"] = _get_current_username()
+            db[lid_str]["_last_seg_edit_at"] = Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
+            db[lid_str]["_last_seg_edit_tool"] = "prompt_segmentation"
             _active_lesion_db[][] = db
         end
     end
@@ -505,6 +516,21 @@ function _builtin_schema()::Vector{QuestionDef}
             String["Reporting"], "both", ""),
     ]
 end
+
+const DISPLAY_LABEL_OVERRIDES = Dict{String, String}(
+    "Other Structural & Soft Tissue Changes (Surrounding Changes Part C)" => "Other Structural",
+    "Relation to Bone Marrow (Surrounding Changes Part A)" => "Marrow Changes",
+    "Periosteal Reaction (Surrounding Changes Part B)" => "Periosteal Reaction",
+    "Macroscopic Pattern" => "Macro Pattern",
+    "Inner Texture / Density / Attenuation" => "Inner Texture/HU",
+    "Border and Margin" => "Border / Margin",
+    "Lesion Orientation" => "Orientation",
+    "SUV Quantitative Metrics & References" => "SUV Metrics/Ref",
+    "Clinical Context & Staging Variables" => "Clinical Context",
+    "Alternative Hypothesis (False Positive)" => "Alt. Hypothesis",
+    "PRIMARY score pattern?" => "PRIMARY Pattern",
+    "Lesion tracking name?" => "Tracking Name",
+)
 
 function load_schema()::Vector{QuestionDef}
     isempty(_schema_cache[]) || return _schema_cache[]
@@ -1092,7 +1118,7 @@ const _EDIT_HISTORY_EXCLUDED_FIELDS = Set{String}([
     "_CT_Min", "_CT_Max", "_PET_Min", "_PET_Max", "_SPECT_Min", "_SPECT_Max",
     "_display_name", "_Centroid", "_Diameter_mm", "_Volume_cc", "_Volume_mm3",
     "_Slice_Z", "_TimePoint", "_Modality", "_NodeName",
-    "_last_seg_edit_by", "_last_seg_edit_at",
+    "_last_seg_edit_by", "_last_seg_edit_at", "_last_seg_edit_tool",
     "_edit_history", "_user_edited_anatomy",
 ])
 
@@ -1141,7 +1167,7 @@ function _append_edit_history!(new_state::Dict, old_state::AbstractDict)
     
     if !isempty(changes)
         entry = Dict{String,Any}(
-            "user"      => _current_user[],
+            "user"      => _get_current_username(),
             "timestamp" => Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS"),
             "action"    => "metadata_edit",
             "changes"   => changes
@@ -1158,30 +1184,14 @@ end
 """
     _append_seg_edit_to_history!(lesion_data, user, tool)
 
-Appends a segmentation edit event to the lesion's _edit_history.
+Records the last segmentation edit event (user, timestamp, tool) directly on the lesion dict.
+Does not add image mask edits to the full _edit_history list to conserve disk and memory space.
 """
 function _append_seg_edit_to_history!(lesion_data::AbstractDict, user::String, tool::String="paint_brush")
-    existing = get(lesion_data, "_edit_history", Any[])
-    if existing isa AbstractString
-        try existing = JSON.parse(existing) catch; existing = Any[] end
-    end
-    if !(existing isa AbstractArray)
-        existing = Any[]
-    end
-    existing = collect(Any, existing)
-    
-    entry = Dict{String,Any}(
-        "user"      => user,
-        "timestamp" => Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS"),
-        "action"    => "segmentation_edit",
-        "changes"   => [Dict{String,String}("field" => "SegmentationMask", "old" => "", "new" => "EXPERT_CORRECTION")],
-        "tool"      => tool
-    )
-    push!(existing, entry)
-    if length(existing) > _MAX_EDIT_HISTORY
-        existing = existing[end-_MAX_EDIT_HISTORY+1:end]
-    end
-    lesion_data["_edit_history"] = existing
+    u = isempty(user) ? _get_current_username() : user
+    lesion_data["_last_seg_edit_by"] = u
+    lesion_data["_last_seg_edit_at"] = Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
+    lesion_data["_last_seg_edit_tool"] = tool
 end
 
 """
@@ -1230,11 +1240,14 @@ function _migrate_db(raw_db::Dict)::Dict{String,Any}
     LA_mod = try parentmodule(@__MODULE__).LesionAssociation catch; nothing end
     for (k, entry) in migrated
         if entry isa AbstractDict
+            user_edited = let v = get(entry, "_user_edited_anatomy", false)
+                v === true || v == "true" || v == 1 || v == "1"
+            end
             lid = parse_lesion_id(k)
             cz = _extract_z_from_entry(entry, lid)
             ba = string(get(entry, "BaseAnatomy", ""))
             raw_org = string(get(entry, "OriginalName", get(entry, "ClinicalLesionName", "")))
-            if cz > 0 && LA_mod !== nothing && (!isempty(ba) || !isempty(raw_org))
+            if !user_edited && cz > 0 && LA_mod !== nothing && (!isempty(ba) || !isempty(raw_org))
                 san_org, san_ba = LA_mod.sanitize_anatomy_by_z(raw_org, ba, cz, 326)
                 if isempty(san_ba) && !isempty(ba)
                     delete!(entry, "BaseAnatomy")
@@ -1259,6 +1272,110 @@ function _migrate_db(raw_db::Dict)::Dict{String,Any}
 end
 
 """
+    persist_to_active_dataset_h5!(db::Dict, h5_path::String)
+
+Persist the newest anatomical names, organ mappings, segment names, and full lesion
+annotations into the active dataset HDF5 file in "r+" mode under the HDF5 IO lock.
+Updates `_meta_/organ_mapping`, `_meta_/segment_names.json`, and `_meta_/lesion_annotations.json`.
+"""
+function persist_to_active_dataset_h5!(db::Dict, h5_path::String)
+    (isempty(h5_path) || !isfile(h5_path)) && return
+    _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+    lock(_MEH._hdf5_io_lock) do
+        try
+            HDF5.h5open(h5_path, "r+") do file
+                meta_grp = if !haskey(file, "_meta_")
+                    create_group(file, "_meta_")
+                else
+                    file["_meta_"]
+                end
+
+                # 1. Update _meta_/organ_mapping
+                existing_om = Dict{String, Any}()
+                if haskey(meta_grp, "organ_mapping")
+                    try
+                        existing_om = JSON.parse(read(meta_grp["organ_mapping"]))
+                    catch; end
+                end
+                for (tp_i, lmap) in _MEH.tp_organ_mapping
+                    tp_str = string(tp_i)
+                    sub = get!(existing_om, tp_str, Dict{String, Any}())
+                    for (lid_i, organ) in lmap
+                        sub[string(lid_i)] = string(organ)
+                    end
+                end
+                cur_tp = string(try _MEH.current_tp_index[] catch; 0 end)
+                sub_cur = get!(existing_om, cur_tp, Dict{String, Any}())
+                for (k, v) in db
+                    if !startswith(string(k), "_") && v isa AbstractDict
+                        lid = parse_lesion_id(string(k))
+                        if lid !== nothing
+                            anat = get(v, "BaseAnatomy", "")
+                            if !isempty(anat)
+                                organ = replace(string(anat), r"\s*\(UBERON\)" => "")
+                                sub_cur[string(lid)] = organ
+                            end
+                        end
+                    end
+                end
+                if haskey(meta_grp, "organ_mapping")
+                    delete_object(meta_grp, "organ_mapping")
+                end
+                meta_grp["organ_mapping"] = JSON.json(existing_om, 2)
+
+                # 2. Update _meta_/segment_names.json
+                existing_sn = Dict{String, Any}()
+                if haskey(meta_grp, "segment_names.json")
+                    try
+                        existing_sn = JSON.parse(read(meta_grp["segment_names.json"]))
+                    catch; end
+                end
+                for (tp_i, smap) in _MEH.tp_segment_names
+                    tp_str = string(tp_i)
+                    sub = get!(existing_sn, tp_str, Dict{String, Any}())
+                    for (lid_i, sname) in smap
+                        sub[string(lid_i)] = string(sname)
+                    end
+                end
+                sub_sn_cur = get!(existing_sn, cur_tp, Dict{String, Any}())
+                for (k, v) in db
+                    if !startswith(string(k), "_") && v isa AbstractDict
+                        lid = parse_lesion_id(string(k))
+                        if lid !== nothing
+                            anat = get(v, "BaseAnatomy", "")
+                            side = get(v, "BaseAnatomySide", "")
+                            disp = get(v, "_display_name", "")
+                            clean_disp = !isempty(disp) ? replace(disp, Regex("^$(lid):\\s*") => "") : ""
+                            if !isempty(clean_disp) && !startswith(clean_disp, "Lesion ")
+                                sub_sn_cur[string(lid)] = clean_disp
+                            elseif !isempty(anat)
+                                clean = replace(string(anat), r"\s*\(UBERON\)" => "")
+                                clean = titlecase(replace(clean, "_" => " "))
+                                name = (isempty(side) || side == "None" ? "" : "$side ") * clean
+                                sub_sn_cur[string(lid)] = name
+                            end
+                        end
+                    end
+                end
+                if haskey(meta_grp, "segment_names.json")
+                    delete_object(meta_grp, "segment_names.json")
+                end
+                meta_grp["segment_names.json"] = JSON.json(existing_sn, 2)
+
+                # 3. Update _meta_/lesion_annotations.json
+                if haskey(meta_grp, "lesion_annotations.json")
+                    delete_object(meta_grp, "lesion_annotations.json")
+                end
+                meta_grp["lesion_annotations.json"] = JSON.json(db, 2)
+            end
+            @debug "[HDF5] Persisted lesion metadata to $h5_path"
+        catch e
+            @warn "Failed to persist to active dataset HDF5 $h5_path: $e"
+        end
+    end
+end
+
+"""
     load_annotations_hdf5(path = DEFAULT_HDF5_PATH) -> Dict{String,Dict{String,Any}}
 
 Load all lesion metadata, button states, and global app states from HDF5 database.
@@ -1268,29 +1385,53 @@ function load_annotations_hdf5(path::String = DEFAULT_HDF5_PATH)::Dict{String,Di
     try
         out = Dict{String,Dict{String,Any}}()
         h5open(path, "r") do file
-            for id in keys(file)
-                obj = file[id]
-                if obj isa HDF5.Group
-                    inner = Dict{String,Any}()
-                    for k in keys(obj)
-                        try
-                            val = read(obj[k])
-                            # If value is a JSON string representing a dict/array, parse it
-                            if val isa AbstractString && (startswith(strip(val), "{") || startswith(strip(val), "["))
-                                try
-                                    parsed = JSON.parse(val)
-                                    inner[k] = parsed
-                                catch
-                                    inner[k] = val
+            # 1. First check if unified _meta_/lesion_annotations.json is present
+            if haskey(file, "_meta_") && haskey(file["_meta_"], "lesion_annotations.json")
+                try
+                    raw_str = read(file["_meta_/lesion_annotations.json"])
+                    parsed = JSON.parse(raw_str)
+                    if parsed isa AbstractDict
+                        for (k, v) in parsed
+                            if v isa AbstractDict
+                                inner = Dict{String, Any}()
+                                for (ik, iv) in v
+                                    inner[string(ik)] = iv
                                 end
-                            else
-                                inner[k] = val
+                                out[string(k)] = inner
                             end
-                        catch e
-                            @warn "Error reading HDF5 key $k in group $id: $e"
                         end
                     end
-                    out[id] = inner
+                catch e
+                    @warn "Error reading _meta_/lesion_annotations.json in $(path): $e"
+                end
+            end
+            # 2. If out is empty, read per-lesion groups
+            if isempty(out)
+                for id in keys(file)
+                    id == "_meta_" && continue
+                    obj = file[id]
+                    if obj isa HDF5.Group
+                        inner = Dict{String,Any}()
+                        for k in keys(obj)
+                            try
+                                val = read(obj[k])
+                                # If value is a JSON string representing a dict/array, parse it
+                                if val isa AbstractString && (startswith(strip(val), "{") || startswith(strip(val), "["))
+                                    try
+                                        parsed = JSON.parse(val)
+                                        inner[k] = parsed
+                                    catch
+                                        inner[k] = val
+                                    end
+                                else
+                                    inner[k] = val
+                                end
+                            catch e
+                                @warn "Error reading HDF5 key $k in group $id: $e"
+                            end
+                        end
+                        out[id] = inner
+                    end
                 end
             end
         end
@@ -1334,8 +1475,17 @@ function load_annotations(path::String = DEFAULT_SAVE_PATH)::Dict{String,Dict{St
         end
     end
     
-    # If JSON is empty or missing, try loading from default HDF5
-    if isempty(out) && isfile(DEFAULT_HDF5_PATH)
+    # If JSON is empty or missing, try loading from active HDF5 if set, or default HDF5
+    if isempty(out)
+        try
+            _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+            h5_path = _MEH.h5_path_ref[]
+            if !isempty(h5_path) && isfile(h5_path)
+                out = load_annotations_hdf5(h5_path)
+            end
+        catch; end
+    end
+    if isempty(out) && path == DEFAULT_SAVE_PATH && isfile(DEFAULT_HDF5_PATH)
         out = load_annotations_hdf5(DEFAULT_HDF5_PATH)
     end
     
@@ -1356,6 +1506,14 @@ end
 
 function save_annotations_hdf5(db::Dict, path::String=DEFAULT_HDF5_PATH)
     try
+        # Guard: If path is the active dataset HDF5 (contains volumes / images), NEVER overwrite with "w"!
+        _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+        active_h5 = try _MEH.h5_path_ref[] catch; "" end
+        if !isempty(active_h5) && (path == active_h5 || normpath(path) == normpath(active_h5))
+            persist_to_active_dataset_h5!(db, path)
+            return
+        end
+
         h5open(path, "w") do file
             for (id, lesion_data) in db
                 g = create_group(file, string(id))
@@ -1377,6 +1535,8 @@ function save_annotations_hdf5(db::Dict, path::String=DEFAULT_HDF5_PATH)
                     write(g, "value", string(lesion_data))
                 end
             end
+            meta_grp = create_group(file, "_meta_")
+            meta_grp["lesion_annotations.json"] = JSON.json(db, 2)
         end
         @debug "Annotations saved to HDF5 → $path ($(length(db)) entries)"
     catch e
@@ -2588,11 +2748,30 @@ function create_metadata_window(
     anatomy_ontology = load_anatomy_ontology()  # FoundationalAnatomy labels for Base Anatomy autocomplete
     all_cats = all_categories(schema)
 
-    # In-memory DB
-    lesion_db = Observable{Dict}(Dict{String,Dict{String,Any}}())
+    # In-memory DB with synchronous initial load for instant startup consistency
+    init_h5 = save_path == DEFAULT_SAVE_PATH ? DEFAULT_HDF5_PATH : replace(save_path, r"\.json$"i => ".h5")
+    try
+        _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+        h5_act = _MEH.h5_path_ref[]
+        if !isempty(h5_act) && isfile(h5_act)
+            init_h5 = h5_act
+        end
+    catch; end
+    initial_db = try
+        raw = load_annotations(save_path)
+        if isempty(raw) && isfile(init_h5)
+            raw = load_annotations_hdf5(init_h5)
+        end
+        _migrate_db(raw)
+    catch e
+        @warn "Direct load of annotations failed: $e"
+        Dict{String,Dict{String,Any}}()
+    end
+    lesion_db = Observable{Dict}(initial_db)
     is_starred = Observable(false)
     _active_lesion_db[] = lesion_db
     _db_dirty = Ref(false)
+    global_app_state = Dict{String, Any}("windowing" => (0.0f0, 0.0f0))
     
     save_status_text = Observable("Ready")
     save_status_color = Observable(RGBf(0.4, 0.9, 0.4))
@@ -2606,6 +2785,15 @@ function create_metadata_window(
                         db_to_save = copy(msg.db)
                         save_annotations(db_to_save, msg.path_json)
                         save_annotations_hdf5(db_to_save, msg.path_hdf5)
+                        try
+                            _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+                            h5_active = _MEH.h5_path_ref[]
+                            if !isempty(h5_active) && isfile(h5_active)
+                                persist_to_active_dataset_h5!(db_to_save, h5_active)
+                            end
+                        catch e
+                            @warn "Active HDF5 dataset persistence failed" e
+                        end
                         # Also save measurements alongside annotations
                         try
                             _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
@@ -2653,24 +2841,6 @@ function create_metadata_window(
                 end
             end
         end
-    end
-    
-    # Load initial db asynchronously with migration to canonical numeric keys
-    @async begin
-        reply = Channel{Dict}(1)
-        put!(db_channel, LoadDBMessage(save_path, reply, DEFAULT_HDF5_PATH))
-        raw_db = take!(reply)
-        migrated = _migrate_db(raw_db)
-        n_before = length(raw_db)
-        n_after = length(migrated)
-        if n_before != n_after
-            println("  [DB] Migrated $n_before entries → $n_after canonical keys"); flush(stdout)
-            _db_dirty[] = true
-            try
-                put!(db_channel, SaveDBMessage(migrated, Dict{String, Any}(), save_path, DEFAULT_HDF5_PATH))
-            catch; end
-        end
-        lesion_db[] = migrated
     end
 
     # Helper for safely extracting and stripping text from Makie Textboxes
@@ -2819,9 +2989,9 @@ function create_metadata_window(
         return Consume(true)
     end
     
-    rowgap!(g, 2)   # compact spacing: 2px gap between rows (prevents Menu/Slider overlap)
+    rowgap!(g, 3)   # 3px gap — prevents text bleed between rows
     colgap!(g, 2)   # compact columns
-    colsize!(g, 1, Auto())
+    colsize!(g, 1, Fixed(125))  # wider label column for longer field names
     r = [0]  # row counter as array for mutation in closures
     nr!() = (r[1] += 1; r[1])
 
@@ -4683,17 +4853,18 @@ function create_metadata_window(
     
     # --- Scientific Workflow & Key Image ---
     wf_r = nr!()
-    btn_accept = Button(g[wf_r, 1], label = "Accept", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
-    btn_reject = Button(g[wf_r, 2], label = "Reject", buttoncolor = RGBf(0.8, 0.2, 0.2), labelcolor = TXT, fontsize = 10)
-    btn_correct = Button(g[wf_r, 3], label = "Correct", buttoncolor = RGBf(0.8, 0.8, 0.2), labelcolor = TXT, fontsize = 10)
-    btn_export = Button(g[wf_r, 4], label = "Export", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_validate = Button(g[wf_r, 5], label = "Validate", buttoncolor = RGBf(0.2, 0.4, 0.8), labelcolor = TXT, fontsize = 10)
-    btn_qc = Button(g[wf_r, 6], label = "Case QC", buttoncolor = RGBf(0.6, 0.2, 0.8), labelcolor = TXT, fontsize = 10)
+    wf_subgrid = GridLayout(g[wf_r, 1:4], tellwidth = false)
+    btn_accept = Button(wf_subgrid[1, 1], label = "Accept", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
+    btn_reject = Button(wf_subgrid[1, 2], label = "Reject", buttoncolor = RGBf(0.8, 0.2, 0.2), labelcolor = TXT, fontsize = 10)
+    btn_correct = Button(wf_subgrid[1, 3], label = "Correct", buttoncolor = RGBf(0.8, 0.8, 0.2), labelcolor = TXT, fontsize = 10)
+    btn_export = Button(wf_subgrid[1, 4], label = "Export", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_validate = Button(wf_subgrid[1, 5], label = "Validate", buttoncolor = RGBf(0.2, 0.4, 0.8), labelcolor = TXT, fontsize = 10)
+    btn_qc = Button(wf_subgrid[1, 6], label = "Case QC", buttoncolor = RGBf(0.6, 0.2, 0.8), labelcolor = TXT, fontsize = 10)
     rowsize!(g, wf_r, Fixed(28)); register_fixed_row!(wf_r, 28)
     push!(all_metadata_rows, wf_r)
 
     val_r = nr!()
-    lbl_val_status = Label(g[val_r, 1:6], "", fontsize = 10, color = RGBf(0.8, 0.8, 0.2), halign = :left, justification = :left, word_wrap=true)
+    lbl_val_status = Label(g[val_r, 1:4], "", fontsize = 10, color = RGBf(0.8, 0.8, 0.2), halign = :left, justification = :left, word_wrap=true)
     rowsize!(g, val_r, Fixed(60)); register_fixed_row!(val_r, 60)
     push!(all_metadata_rows, val_r)
 
@@ -4729,7 +4900,8 @@ function create_metadata_window(
             push!(all_metadata_rows, q_r)
             q_rows = Int[q_r]
 
-            Label(g[q_r, 1], q.short * ":",
+            display_lbl = get(DISPLAY_LABEL_OVERRIDES, q.short, q.short)
+            Label(g[q_r, 1], display_lbl * ":",
                 fontsize = 10, color = LBL_FG,
                 halign = :right, tellwidth = false)
 
@@ -4810,7 +4982,17 @@ function create_metadata_window(
                 end
             end
 
-            # Compact: skip tooltip row (tooltips are too verbose for compact layout)
+            # Show truncated description as a subtle hint below the field
+            if !isempty(q.full) && q.full != q.short
+                tt_r = nr!()
+                push!(all_metadata_rows, tt_r)
+                push!(q_rows, tt_r)
+                desc_text = length(q.full) > 80 ? q.full[1:80] * "..." : q.full
+                Label(g[tt_r, 1:4], desc_text,
+                    fontsize = 8, color = RGBf(0.45, 0.45, 0.5),
+                    halign = :left, tellwidth = false)
+                rowsize!(g, tt_r, Fixed(14)); register_fixed_row!(tt_r, 14)
+            end
             q_row_indices[q.short] = q_rows
         end
         
@@ -4819,11 +5001,13 @@ function create_metadata_window(
             # Type buttons row
             lt_r = nr!()
             push!(all_metadata_rows, lt_r)
-            btn_type_prostate = Button(g[lt_r, 1], label = "Prostate",   buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-            btn_type_bone     = Button(g[lt_r, 2], label = "Bone Meta",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-            btn_type_organ    = Button(g[lt_r, 3], label = "Organ Meta", buttoncolor = ACCENT, labelcolor = TXT, fontsize = 10)
-            btn_type_ln       = Button(g[lt_r, 4], label = "Lymph Node", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-            btn_type_artifact = Button(g[lt_r, 5], label = "Artifact",   buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+            lt_subgrid = GridLayout(g[lt_r, 1:4], tellwidth = false)
+            btn_type_prostate = Button(lt_subgrid[1, 1], label = "Prostate",   buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+            btn_type_bone     = Button(lt_subgrid[1, 2], label = "Bone Meta",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+            btn_type_organ    = Button(lt_subgrid[1, 3], label = "Organ Meta", buttoncolor = ACCENT, labelcolor = TXT, fontsize = 10)
+            btn_type_ln       = Button(lt_subgrid[1, 4], label = "Lymph Node", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+            btn_type_artifact = Button(lt_subgrid[1, 5], label = "Artifact",   buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+            rowsize!(g, lt_r, Fixed(28)); register_fixed_row!(lt_r, 28)
             
             active_lesion_type = Observable("Organ Meta")
             _last_bone_state = Ref(false)
@@ -4856,7 +5040,7 @@ function create_metadata_window(
             # Refresh Anatomy button — re-runs live atlas lookup, overriding stale cached values
             refresh_anat_r = nr!()
             push!(all_metadata_rows, refresh_anat_r)
-            btn_refresh_anat = Button(g[refresh_anat_r, 3:4], label = "Refresh Anatomy",
+            btn_refresh_anat = Button(g[refresh_anat_r, 1:4], label = "Refresh Anatomy",
                 buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
             rowsize!(g, refresh_anat_r, Fixed(24)); register_fixed_row!(refresh_anat_r, 24)
             
@@ -4875,6 +5059,7 @@ function create_metadata_window(
             Label(g[anat_detail_label_r, 1:3], "Anatomical Details:", fontsize = 10, color = LBL_FG, halign = :left, tellwidth = false)
             btn_add_anat_rel = Button(g[anat_detail_label_r, 4], label = "+ Row",
                 buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
+            rowsize!(g, anat_detail_label_r, Fixed(24)); register_fixed_row!(anat_detail_label_r, 24)
             
             ANAT_RELATIONS = ["", "Inside / Contained In", "Surrounded By", "Adjacent To",
                 "Anterior To", "Posterior To", "Superior To", "Inferior To",
@@ -4893,6 +5078,7 @@ function create_metadata_window(
                 ar = nr!()
                 push!(anat_row_indices, ar)
                 push!(all_metadata_rows, ar)
+                register_fixed_row!(ar, 28)
                 rel_m = searchable_menu(g, ar, 1, options = ANAT_RELATIONS, fontsize = 10)
                 struct_opts_i = Observable(String[""; anatomy_ontology])
                 struct_m = searchable_menu(g, ar, 2:3, options = struct_opts_i, fontsize = 10)
@@ -4924,13 +5110,19 @@ function create_metadata_window(
             
             # Show/hide rows based on active count
             on(anat_active_count) do n
-                for i in 1:MAX_ANAT_ROWS
-                    visible = (i <= n) && !cv_active[]
-                    ar = anat_row_indices[i]
-                    rowsize!(g, ar, visible ? Auto() : Fixed(0))
-                    anat_rel_menus[i].blockscene.visible[] = visible
-                    anat_struct_menus[i].blockscene.visible[] = visible
-                    anat_rm_btns[i].blockscene.visible[] = visible
+                g.block_updates = false
+                try
+                    for i in 1:MAX_ANAT_ROWS
+                        visible = (i <= n) && !cv_active[]
+                        ar = anat_row_indices[i]
+                        set_row_visible!(ar, visible)
+                    end
+                    _invalidate_row_cache!()
+                    Makie.GridLayoutBase.update!(g)
+                    _cache_widget_bboxes!()
+                finally
+                    g.block_updates = true
+                    _apply_scroll!(_scroll_offset_px[])
                 end
             end
             
@@ -5011,34 +5203,36 @@ function create_metadata_window(
                   for i in 1:RL_SLOTS]
     # Initialize all slots as hidden (zero height)
     for i in 1:RL_SLOTS
-        rowsize!(g, rl_slot_row_start + i - 1, Fixed(0))
+        ar_rl = rl_slot_row_start + i - 1
+        register_fixed_row!(ar_rl, 24)
+        rowsize!(g, ar_rl, Fixed(0))
         rl_rm_btns[i].blockscene.visible[] = false
         rl_labels[i].blockscene.visible[] = false
-        if (rl_slot_row_start + i - 1) < r[1]
-            rowgap!(g, rl_slot_row_start + i - 1, 0)
+        if ar_rl < r[1]
+            rowgap!(g, ar_rl, 0)
         end
     end
     r[1] = rl_slot_row_start + RL_SLOTS - 1
 
     on(radlex_selected) do terms
-        for i in 1:RL_SLOTS
-            if i <= length(terms)
-                rl_labels[i].text[] = terms[i]
-                rowsize!(g, rl_slot_row_start + i - 1, Auto())
-                rl_rm_btns[i].blockscene.visible[] = true
-                rl_labels[i].blockscene.visible[] = true
-                if (rl_slot_row_start + i - 1) < r[1]
-                    rowgap!(g, rl_slot_row_start + i - 1, 1)
-                end
-            else
-                rl_labels[i].text[] = ""
-                rowsize!(g, rl_slot_row_start + i - 1, Fixed(0))
-                rl_rm_btns[i].blockscene.visible[] = false
-                rl_labels[i].blockscene.visible[] = false
-                if (rl_slot_row_start + i - 1) < r[1]
-                    rowgap!(g, rl_slot_row_start + i - 1, 0)
+        g.block_updates = false
+        try
+            for i in 1:RL_SLOTS
+                ar_rl = rl_slot_row_start + i - 1
+                vis = i <= length(terms)
+                set_row_visible!(ar_rl, vis)
+                if vis
+                    rl_labels[i].text[] = terms[i]
+                else
+                    rl_labels[i].text[] = ""
                 end
             end
+            _invalidate_row_cache!()
+            Makie.GridLayoutBase.update!(g)
+            _cache_widget_bboxes!()
+        finally
+            g.block_updates = true
+            _apply_scroll!(_scroll_offset_px[])
         end
     end
     for i in 1:RL_SLOTS
@@ -5212,7 +5406,7 @@ function create_metadata_window(
         is_bm = (active_type == "Bone Meta")
         no_ct = no_ct_toggle.active[]
         
-        # g.block_updates = true
+        g.block_updates = false
         try
             for (sq, rows) in q_row_indices
                 visible = true
@@ -5255,9 +5449,12 @@ function create_metadata_window(
                 end
             end
             
+            _invalidate_row_cache!()
+            Makie.GridLayoutBase.update!(g)
+            _cache_widget_bboxes!()
         finally
-            # g.block_updates = false
-            # try Makie.GridLayoutBase.update!(g) catch; end
+            g.block_updates = true
+            _apply_scroll!(_scroll_offset_px[])
         end
     end
 
@@ -6388,9 +6585,7 @@ function create_metadata_window(
         d["has_expert_edits"] = current_has_expert_edits[]
         d["SegmentationOrigin"] = current_seg_origin[]
         # Audit trail: who and when
-        if !isempty(_current_user[])
-            d["_last_modified_by"] = _current_user[]
-        end
+        d["_last_modified_by"] = _get_current_username()
         d["_last_modified_at"] = Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
         
         reg_status = menu_reg_qc.selection[]
@@ -6559,7 +6754,7 @@ function create_metadata_window(
                     "compare_all_lesions_mode" => string(_MEH.compare_all_lesions_mode[]),
                     "mapping_alpha_linked" => string(_MEH.mapping_alpha_linked[]),
                     "mapping_alpha_unlinked" => string(_MEH.mapping_alpha_unlinked[]),
-                    "_current_user" => _current_user[],
+                    "_current_user" => _get_current_username(),
                     "_last_save_at" => Dates.format(Dates.now(), "yyyy-mm-ddTHH:MM:SS")
                 )
                 snap_tp = try _MEH.current_tp_index[] catch; 0 end
@@ -6582,8 +6777,14 @@ function create_metadata_window(
                     lesion_db[] = db  # Observable — must stay on main thread
                     _db_dirty[] = true
                     try
-                        # File I/O happens on background thread via db_channel consumer (Threads.@spawn at line 2170)
-                        put!(db_channel, SaveDBMessage(db, global_app_state, save_path, DEFAULT_HDF5_PATH))
+                        h5_target = DEFAULT_HDF5_PATH
+                        try
+                            h5_act = _MEH.h5_path_ref[]
+                            if !isempty(h5_act) && isfile(h5_act)
+                                h5_target = h5_act
+                            end
+                        catch; end
+                        put!(db_channel, SaveDBMessage(db, global_app_state, save_path, h5_target))
                     catch; end
                 finally
                     _is_autosaving[] = false
@@ -6986,17 +7187,17 @@ function create_metadata_window(
             if haskey(field_widgets, "Certainty")
                 cert_w = field_widgets["Certainty"]
                 if cert_w isa Slider
-                    cert_w.selected_index[] = 1  # index 1 = value 0 in range 0:10
+                    cert_w.selected_index[] = 1  # index 1 = value 1 (min of range 1:10)
                 elseif cert_w isa Menu
                     opts = cert_w.options[]
-                    idx = findfirst(==("0"), opts)
+                    idx = findfirst(==("1"), opts)
                     if idx !== nothing; _set_menu_idx!(cert_w, idx); end
                 end
             end
             db_updates["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
-            db_updates["Certainty"] = "0"
+            db_updates["Certainty"] = "1"   # minimum of slider range 1:10
             db_updates["LesionType"] = "Technical Artifact"
-            if _MEH.PERF_LOG[]; println("Muscular artefact: lesion $lid → Technical Artifact, Certainty=0"); flush(stdout); end
+            if _MEH.PERF_LOG[]; println("Muscular artefact: lesion $lid → Technical Artifact, Certainty=1"); flush(stdout); end
         end
 
         centroid = cent_san
@@ -7017,17 +7218,17 @@ function create_metadata_window(
                 if haskey(field_widgets, "Certainty")
                     cert_w = field_widgets["Certainty"]
                     if cert_w isa Slider
-                        cert_w.selected_index[] = 1  # index 1 = value 0 in range 0:10
+                        cert_w.selected_index[] = 1  # index 1 = value 1 (min of range 1:10)
                     elseif cert_w isa Menu
                         opts = cert_w.options[]
-                        idx = findfirst(==("0"), opts)
+                        idx = findfirst(==("1"), opts)
                         if idx !== nothing; _set_menu_idx!(cert_w, idx); end
                     end
                 end
                 # Persist in db_updates
                 db_updates["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
-                db_updates["Certainty"] = "0"
-                if _MEH.PERF_LOG[]; println("Edge-slice artefact: lesion $lid z=$z_slice/$total_z → Technical Artifact, Certainty=0"); flush(stdout); end
+                db_updates["Certainty"] = "1"   # minimum of slider range 1:10
+                if _MEH.PERF_LOG[]; println("Edge-slice artefact: lesion $lid z=$z_slice/$total_z → Technical Artifact, Certainty=1"); flush(stdout); end
             end
         end
 
@@ -7634,8 +7835,9 @@ function create_metadata_window(
         
         _apply_state_failed[] = false
         finally
-            # g.block_updates = false
-            # try Makie.GridLayoutBase.update!(g) catch; end
+            # Yield to let any pending reactive Observable callbacks fire
+            # while the guard is still set (prevents spurious autosave triggers)
+            yield()
             _is_applying_state[] = false
             is_syncing_selection[] = false
         end
@@ -7682,7 +7884,29 @@ function create_metadata_window(
 
             # 5. Collect freshly applied state and persist to database & disk
             refreshed_state = collect_state()
-            refreshed_state["_display_name"] = cur_id_str
+            new_anat = get(refreshed_state, "BaseAnatomy", "")
+            new_side = get(refreshed_state, "BaseAnatomySide", "")
+            clean_name = ""
+            full_name = ""
+            if !isempty(new_anat)
+                clean_name = replace(new_anat, r"\s*\(UBERON\)" => "")
+                clean_name = titlecase(replace(clean_name, "_" => " "))
+                side_prefix = (isempty(new_side) || new_side == "None") ? "" : "$new_side "
+                full_name = side_prefix * clean_name
+                refreshed_state["_display_name"] = "$lid: $full_name"
+            else
+                refreshed_state["_display_name"] = cur_id_str
+            end
+
+            # Update in-memory organ & segment caches
+            if !isempty(clean_name)
+                target_om = get!(_MEH.tp_organ_mapping, tp_idx, Dict{Int, String}())
+                target_om[lid] = clean_name
+                _MEH.global_organ_mapping[][lid] = clean_name
+                target_sn = get!(_MEH.tp_segment_names, tp_idx, Dict{Int, String}())
+                target_sn[lid] = full_name
+            end
+
             db = copy(lesion_db[])
             old_st = get(db, canonical_key, Dict{String,Any}())
             if old_st isa AbstractDict && !isempty(old_st)
@@ -7691,16 +7915,24 @@ function create_metadata_window(
             db[canonical_key] = refreshed_state
             lesion_db[] = db
             _db_dirty[] = true
+
+            # Direct active dataset HDF5 persistence
+            try
+                h5_active = _MEH.h5_path_ref[]
+                if !isempty(h5_active) && isfile(h5_active)
+                    persist_to_active_dataset_h5!(db, h5_active)
+                end
+            catch e
+                @warn "Active HDF5 persistence on refresh failed" e
+            end
+
             try
                 put!(db_channel, SaveDBMessage(db, global_app_state, save_path, DEFAULT_HDF5_PATH))
             catch; end
 
             # 6. Update dropdown option display name in lesion_ids & les_menu
-            new_anat = get(refreshed_state, "BaseAnatomy", "")
-            if !isempty(new_anat)
-                clean_name = replace(new_anat, r"\s*\(UBERON\)" => "")
-                clean_name = titlecase(replace(clean_name, "_" => " "))
-                new_display = "$lid: $clean_name"
+            if !isempty(full_name)
+                new_display = "$lid: $full_name"
                 curr_opts = copy(lesion_ids[])
                 idx = findfirst(opt -> parse_lesion_id(opt) == lid, curr_opts)
                 if idx !== nothing
@@ -8099,7 +8331,15 @@ function create_metadata_window(
     on(btn_load.clicks) do _
         @async begin
             reply = Channel{Dict}(1)
-            put!(db_channel, LoadDBMessage(save_path, reply, DEFAULT_HDF5_PATH))
+            load_h5 = save_path == DEFAULT_SAVE_PATH ? DEFAULT_HDF5_PATH : replace(save_path, r"\.json$"i => ".h5")
+            try
+                _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+                h5_act = _MEH.h5_path_ref[]
+                if !isempty(h5_act) && isfile(h5_act)
+                    load_h5 = h5_act
+                end
+            catch; end
+            put!(db_channel, LoadDBMessage(save_path, reply, load_h5))
             raw_db = take!(reply)
             db = _migrate_db(raw_db)
             lesion_db[] = db
@@ -8204,9 +8444,46 @@ function create_metadata_window(
     
     # ── Wire autosave triggers for all metadata UI elements ──────────
     on(menu_obs_state.selection) do _; trigger_autosave(); end
-    on(menu_base_anat.selection) do _
+    on(menu_base_anat.selection) do sel
         if !_is_applying_state[]
             _user_edited_anatomy[] = true
+            cur_id_str = active_lesion_id[]
+            lid = parse_lesion_id(cur_id_str)
+            if lid !== nothing && lid > 0
+                tp_idx = try _MEH.current_tp_index[] catch; 0 end
+                base_val = sel === nothing ? "" : String(sel)
+                clean_name = replace(base_val, r"\s*\(UBERON\)" => "")
+                clean_name = titlecase(replace(clean_name, "_" => " "))
+                side_val = menu_side.selection[] === nothing ? "" : String(menu_side.selection[])
+                side_prefix = (isempty(side_val) || side_val == "None") ? "" : "$side_val "
+                full_name = side_prefix * clean_name
+                
+                target_om = get!(_MEH.tp_organ_mapping, tp_idx, Dict{Int, String}())
+                target_om[lid] = clean_name
+                _MEH.global_organ_mapping[][lid] = clean_name
+                target_sn = get!(_MEH.tp_segment_names, tp_idx, Dict{Int, String}())
+                target_sn[lid] = full_name
+
+                if !isempty(clean_name)
+                    new_display = "$lid: $full_name"
+                    curr_opts = copy(lesion_ids[])
+                    idx = findfirst(opt -> parse_lesion_id(opt) == lid, curr_opts)
+                    if idx !== nothing
+                        curr_opts[idx] = new_display
+                        is_syncing_selection[] = true
+                        try
+                            lesion_ids[] = curr_opts
+                            les_menu.options[] = curr_opts
+                            les_menu.selection[] = new_display
+                            les_menu.i_selected[] = idx
+                            _skip_apply_state[] = true
+                            active_lesion_id[] = new_display
+                        finally
+                            is_syncing_selection[] = false
+                        end
+                    end
+                end
+            end
         end
         trigger_autosave()
     end
@@ -8216,7 +8493,46 @@ function create_metadata_window(
         on(anat_rel_menus[i].selection) do _; trigger_autosave(); end
     end
     on(anat_active_count) do _; trigger_autosave(); end
-    on(menu_side.selection) do _; trigger_autosave(); end
+    on(menu_side.selection) do sel
+        if !_is_applying_state[]
+            cur_id_str = active_lesion_id[]
+            lid = parse_lesion_id(cur_id_str)
+            if lid !== nothing && lid > 0
+                tp_idx = try _MEH.current_tp_index[] catch; 0 end
+                base_sel = menu_base_anat.selection[]
+                base_val = base_sel === nothing ? "" : String(base_sel)
+                clean_name = replace(base_val, r"\s*\(UBERON\)" => "")
+                clean_name = titlecase(replace(clean_name, "_" => " "))
+                side_val = sel === nothing ? "" : String(sel)
+                side_prefix = (isempty(side_val) || side_val == "None") ? "" : "$side_val "
+                full_name = side_prefix * clean_name
+                
+                target_sn = get!(_MEH.tp_segment_names, tp_idx, Dict{Int, String}())
+                target_sn[lid] = full_name
+
+                if !isempty(clean_name)
+                    new_display = "$lid: $full_name"
+                    curr_opts = copy(lesion_ids[])
+                    idx = findfirst(opt -> parse_lesion_id(opt) == lid, curr_opts)
+                    if idx !== nothing
+                        curr_opts[idx] = new_display
+                        is_syncing_selection[] = true
+                        try
+                            lesion_ids[] = curr_opts
+                            les_menu.options[] = curr_opts
+                            les_menu.selection[] = new_display
+                            les_menu.i_selected[] = idx
+                            _skip_apply_state[] = true
+                            active_lesion_id[] = new_display
+                        finally
+                            is_syncing_selection[] = false
+                        end
+                    end
+                end
+            end
+        end
+        trigger_autosave()
+    end
     on(active_lesion_type) do t
         _is_applying_state[] && return  # skip during apply_state (it handles visibility itself)
         update_dynamic_visibility!(t)
@@ -8453,6 +8769,13 @@ function create_metadata_window(
                 db = lesion_db[]
                 save_annotations(db, save_path)
                 save_annotations_hdf5(db, DEFAULT_HDF5_PATH)
+                try
+                    _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+                    h5_active = _MEH.h5_path_ref[]
+                    if !isempty(h5_active) && isfile(h5_active)
+                        persist_to_active_dataset_h5!(db, h5_active)
+                    end
+                catch; end
                 println("  [AUTOSAVE] Final save on exit"); flush(stdout)
             catch e
                 @warn "atexit save failed" e
@@ -8480,6 +8803,68 @@ function create_metadata_window(
             @warn "Failed initial apply_state: $e"
         end
     end
+
+    # Re-apply state and sync lesion IDs whenever the database loads / updates
+    on(lesion_db) do db_val
+        (_is_autosaving[] || _is_applying_state[]) && return
+        cur_id = active_lesion_id[]
+        cur_lid = parse_lesion_id(cur_id)
+        if cur_lid !== nothing && cur_lid > 0 && db_val isa AbstractDict && !isempty(db_val)
+            opts = copy(lesion_ids[])
+            changed = false
+            for (opt_i, opt) in enumerate(opts)
+                opt_lid = parse_lesion_id(opt)
+                if opt_lid !== nothing
+                    entry = get_lesion_state(db_val, string(opt_lid))
+                    if !isempty(entry)
+                        d_disp = get(entry, "_display_name", "")
+                        d_anat = get(entry, "BaseAnatomy", "")
+                        d_side = get(entry, "BaseAnatomySide", "")
+                        clean_disp = ""
+                        if !isempty(d_disp) && !startswith(d_disp, "Lesion ")
+                            clean_disp = replace(d_disp, Regex("^$(opt_lid):\\s*") => "")
+                        elseif !isempty(d_anat)
+                            clean_a = replace(d_anat, r"\s*\(UBERON\)" => "")
+                            clean_a = titlecase(replace(clean_a, "_" => " "))
+                            clean_disp = (isempty(d_side) || d_side == "None" ? "" : "$d_side ") * clean_a
+                        end
+                        if !isempty(clean_disp)
+                            new_opt = "$opt_lid: $clean_disp"
+                            if opts[opt_i] != new_opt
+                                opts[opt_i] = new_opt
+                                changed = true
+                            end
+                        end
+                    end
+                end
+            end
+            if changed
+                is_syncing_selection[] = true
+                try
+                    lesion_ids[] = opts
+                    les_menu.options[] = opts
+                    cur_idx = findfirst(opt -> parse_lesion_id(opt) == cur_lid, opts)
+                    new_sel = cur_idx !== nothing ? opts[cur_idx] : (1 <= les_menu.i_selected[] <= length(opts) ? opts[les_menu.i_selected[]] : opts[1])
+                    new_idx = cur_idx !== nothing ? cur_idx : (1 <= les_menu.i_selected[] <= length(opts) ? les_menu.i_selected[] : 1)
+                    les_menu.i_selected[] = new_idx
+                    les_menu.selection[] = new_sel
+                    _skip_apply_state[] = true
+                    active_lesion_id[] = new_sel
+                finally
+                    is_syncing_selection[] = false
+                end
+            end
+            target_id = active_lesion_id[]
+            st = get_lesion_state(db_val, target_id)
+            if !isempty(st)
+                try
+                    apply_state(st; target_id = target_id)
+                catch e
+                    @warn "Failed to apply state on db load: $e"
+                end
+            end
+        end
+    end
     # Ensure dictation is populated if empty
     tp_cur = _MEH.current_tp_index[]
     de_desc = get(_MEH.tp_descriptions, tp_cur, "")
@@ -8489,6 +8874,8 @@ function create_metadata_window(
 
     res = MetadataWindowResult(fig, channel_ref, lesion_db, channel)
     _lmw_observables[:fig] = fig
+    _lmw_observables[:g] = g
+    _lmw_observables[:apply_scroll] = _apply_scroll!
     res.trigger_m2 = obs_m2
     res.set_compare_mode = obs_set_compare_mode
     res.m2_mode[] = menu_m2_mode.selection[]
@@ -8507,7 +8894,16 @@ function create_metadata_window(
     _lmw_observables[:active_lesion_id] = active_lesion_id
     _lmw_observables[:lesion_ids] = lesion_ids
     _lmw_observables[:menu_base_anat] = menu_base_anat
+    _lmw_observables[:menu_side] = menu_side
     _lmw_observables[:anat_active_count] = anat_active_count
+    _lmw_observables[:active_lesion_type] = active_lesion_type
+    _lmw_observables[:no_ct_toggle] = no_ct_toggle
+    _lmw_observables[:update_type_buttons] = update_type_buttons
+    _lmw_observables[:btn_type_prostate] = btn_type_prostate
+    _lmw_observables[:btn_type_bone] = btn_type_bone
+    _lmw_observables[:btn_type_organ] = btn_type_organ
+    _lmw_observables[:btn_type_ln] = btn_type_ln
+    _lmw_observables[:btn_type_artifact] = btn_type_artifact
     _lmw_observables[:field_widgets] = field_widgets
     _lmw_observables[:lesion_db] = lesion_db
     _lmw_observables[:obs_state] = menu_obs_state.selection
