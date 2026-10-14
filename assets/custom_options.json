@@ -1,6 +1,13 @@
 {
     "Lesion Orientation": [
         "Anterior-Posterior (AP) Orientation of Long Axis",
-        "anterior posterior orientation of long axis"
+        "anterior posterior orientation of long axis",
+        "Test Lateral Angled Axis 1791972652",
+        "long axis hour 5",
+        "long axis hour 7"
+    ],
+    "Orientation": [
+        "long axis hour 5",
+        "long axis hour 7"
     ]
 }
