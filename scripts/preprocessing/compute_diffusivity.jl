@@ -14,7 +14,13 @@
 """
 
 using Pkg
-Pkg.activate("/workspaces/MedEye3d.jl/tmp_juliahelpnet")
+
+const HEATGDT_DIR = get(ENV, "HEATGDT_DIR", normpath(joinpath(@__DIR__, "..", "..", "..", "semiautomatic", "JuliaHELPNet", "HeatGDT")))
+const HEATGDT_PROJECT = dirname(HEATGDT_DIR)
+
+if isdir(HEATGDT_PROJECT) && isfile(joinpath(HEATGDT_PROJECT, "Project.toml"))
+    Pkg.activate(HEATGDT_PROJECT)
+end
 
 using Lux
 using LuxCUDA
@@ -27,7 +33,9 @@ using CUDA
 using HDF5
 using JSON
 
-include("/workspaces/MedEye3d.jl/tmp_juliahelpnet/HeatGDT/architectures/hed3d_ultra.jl")
+if isfile(joinpath(HEATGDT_DIR, "architectures", "hed3d_ultra.jl"))
+    include(joinpath(HEATGDT_DIR, "architectures", "hed3d_ultra.jl"))
+end
 
 # Device helpers
 const gdev = gpu_device()
@@ -186,7 +194,7 @@ function main()
     println("\n[1/3] Loading HED3D-Ultra edge network (best pretrained model)...")
     model = HED3D_Ultra(3)
     
-    jld_path = "/workspaces/MedEye3d.jl/tmp_juliahelpnet/HeatGDT/champion_pretrained_hed3d_ultra.jld2"
+    jld_path = get(ENV, "HEATGDT_CHECKPOINT", joinpath(HEATGDT_DIR, "champion_pretrained_hed3d_ultra.jld2"))
     if !isfile(jld_path)
         error("Model checkpoint not found: $jld_path")
     end
