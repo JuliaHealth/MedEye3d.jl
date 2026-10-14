@@ -188,6 +188,26 @@ Base.getindex(m::Module, s::Symbol) = (m == LesionMetadataWindow ? _lmw_observab
 
 # Registry of all Textbox widgets — used by focus guard to suppress shortcuts when typing
 const _all_textboxes = Any[]
+const _is_syncing_m2_from_backend = Ref(false)
+
+"""Check if any Textbox has focus or any Menu dropdown is open (typing/interaction guard)."""
+function _is_any_typing_active()
+    for tb in _all_textboxes
+        try
+            if tb.focused[]
+                return true
+            end
+        catch; end
+    end
+    for m in _ALL_MENUS
+        try
+            if m.is_open[]
+                return true
+            end
+        catch; end
+    end
+    return false
+end
 
 const current_has_expert_edits = Observable(false)
 const current_seg_origin = Observable("AI_PRESEGMENTATION")
@@ -4089,61 +4109,21 @@ function create_metadata_window(
     end
     
     on(events(fig).keyboardbutton) do event
+        # Typing/dropdown guard: never trigger shortcuts if user is typing in a Textbox or has a Menu open
+        if _is_any_typing_active()
+            return Consume(false)
+        end
+
         if event.action == Makie.Keyboard.release && event.key == Makie.Keyboard.space
-            # Focus guard: don't trigger Next Unreviewed if any Textbox has focus
-            # (prevents Space key leak when typing in windowing/notes/comments fields)
-            any_focused = false
-            for tb in _all_textboxes
-                try
-                    if tb.focused[]
-                        any_focused = true
-                        break
-                    end
-                catch; end
-            end
-            if !any_focused
-                btn_next_unreviewed.clicks[] = btn_next_unreviewed.clicks[] + 1
-            end
+            btn_next_unreviewed.clicks[] = btn_next_unreviewed.clicks[] + 1
             return Consume(true)
         elseif (event.action == Makie.Keyboard.press || event.action == Makie.Keyboard.release) && event.key == Makie.Keyboard.m
-            any_focused = false
-            for tb in _all_textboxes
-                try
-                    if tb.focused[]
-                        any_focused = true
-                        break
-                    end
-                catch; end
-            end
-            if !any_focused && event.action == Makie.Keyboard.press
+            if event.action == Makie.Keyboard.press
                 put!(channel, MakieEvents.ToggleSingleMultiLesionEvent())
                 return Consume(true)
             end
-        elseif (event.action == Makie.Keyboard.press || event.action == Makie.Keyboard.release) && event.key == Makie.Keyboard.c
-            any_focused = false
-            for tb in _all_textboxes
-                try
-                    if tb.focused[]
-                        any_focused = true
-                        break
-                    end
-                catch; end
-            end
-            if !any_focused && event.action == Makie.Keyboard.press
-                obs_set_compare_mode[] = !cv_active[]
-                return Consume(true)
-            end
         elseif (event.action == Makie.Keyboard.press || event.action == Makie.Keyboard.release) && event.key == Makie.Keyboard.v
-            any_focused = false
-            for tb in _all_textboxes
-                try
-                    if tb.focused[]
-                        any_focused = true
-                        break
-                    end
-                catch; end
-            end
-            if !any_focused && event.action == Makie.Keyboard.press
+            if event.action == Makie.Keyboard.press
                 # Toggle move lesion mode by simulating button click
                 btn_move_lesion.clicks[] = btn_move_lesion.clicks[] + 1
                 return Consume(true)
@@ -6878,17 +6858,29 @@ function create_metadata_window(
         end
         println("[COMPARE-UI] Sending CompareTimePointsEvent($(cv_active[])) to channel..."); flush(stdout)
         if cv_active[]
-            # Ensure M2 window is spawned BEFORE activating compare mode.
-            # Set M2 mode dropdown to "Compare Curr/Next TP" and trigger obs_m2
-            # which fires on(makie_win.trigger_m2) in AppMain to create the GLFW window.
+            # Ensure M2 window mode is Compare Curr/Next TP
+            _is_syncing_m2_from_backend[] = true
             try
+                res.m2_mode[] = "Compare Curr/Next TP"
                 m2_idx = findfirst(==("Compare Curr/Next TP"), menu_m2_mode.options[])
-                if m2_idx !== nothing
+                if m2_idx !== nothing && menu_m2_mode.i_selected[] != m2_idx
                     menu_m2_mode.i_selected[] = m2_idx
                 end
-            catch; end
-            # Trigger M2 window creation (obs_m2 is makie_win.trigger_m2)
+            finally
+                _is_syncing_m2_from_backend[] = false
+            end
             notify(obs_m2)
+        else
+            _is_syncing_m2_from_backend[] = true
+            try
+                res.m2_mode[] = "Pure PET (Current TP)"
+                m2_idx = findfirst(==("Pure PET (Current TP)"), menu_m2_mode.options[])
+                if m2_idx !== nothing && menu_m2_mode.i_selected[] != m2_idx
+                    menu_m2_mode.i_selected[] = m2_idx
+                end
+            finally
+                _is_syncing_m2_from_backend[] = false
+            end
         end
         put!(channel, CompareTimePointsEvent(cv_active[]))
         println("[COMPARE-UI] Event sent, apply_compare_mode_ui_impl! DONE"); flush(stdout)
@@ -9306,15 +9298,34 @@ function create_metadata_window(
     _lmw_observables[:apply_scroll] = _apply_scroll!
     res.trigger_m2 = obs_m2
     res.set_compare_mode = obs_set_compare_mode
+    _lmw_observables[:is_syncing_m2_from_backend] = _is_syncing_m2_from_backend
     res.m2_mode[] = menu_m2_mode.selection[]
     on(menu_m2_mode.selection) do val
+        if _is_syncing_m2_from_backend[]
+            return
+        end
         if val !== nothing && res.m2_mode[] != val
-            res.m2_mode[] = val
+            _is_syncing_m2_from_backend[] = true
+            try
+                res.m2_mode[] = val
+            finally
+                _is_syncing_m2_from_backend[] = false
+            end
         end
     end
     on(res.m2_mode) do val
-        if menu_m2_mode.selection[] != val
-            menu_m2_mode.selection[] = val
+        if _is_syncing_m2_from_backend[]
+            return
+        end
+        val === nothing && return
+        idx = findfirst(==(val), menu_m2_mode.options[])
+        if idx !== nothing && menu_m2_mode.i_selected[] != idx
+            _is_syncing_m2_from_backend[] = true
+            try
+                menu_m2_mode.i_selected[] = idx
+            finally
+                _is_syncing_m2_from_backend[] = false
+            end
         end
     end
 

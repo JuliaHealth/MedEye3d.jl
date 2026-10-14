@@ -160,9 +160,12 @@ end
 
 # switch_gl_context! removed — Vulkan doesn't use GL context switching
 function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String, tp_index::Int; load_data::Bool = true)
+    if _current_m2_mode[] == mode && !load_data
+        return
+    end
     _current_m2_mode[] = mode
     
-    # Sync GUI M2 mode dropdown
+    # Sync GUI M2 mode dropdown without triggering feedback loop
     try
         LMW = MakieEventHandlers._get_lmw()
         if LMW !== nothing
@@ -171,7 +174,13 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
                 menu = obs_dict[:menu_m2_mode]
                 idx = findfirst(==(mode), menu.options[])
                 if idx !== nothing && menu.i_selected[] != idx
-                    menu.i_selected[] = idx
+                    sync_ref = get(obs_dict, :is_syncing_m2_from_backend, nothing)
+                    if sync_ref !== nothing; sync_ref[] = true; end
+                    try
+                        menu.i_selected[] = idx
+                    finally
+                        if sync_ref !== nothing; sync_ref[] = false; end
+                    end
                 end
             end
             _notify_makie_scene(obs_dict)

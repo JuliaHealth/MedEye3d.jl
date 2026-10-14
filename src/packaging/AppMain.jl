@@ -1370,13 +1370,19 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         
         mode_val = makie_win.m2_mode[]
         tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
-        put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], mode_val))
+        if MedEye3d.SegmentationDisplay._current_m2_mode[] != mode_val
+            put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], mode_val))
+        end
     end
     
     on(makie_win.m2_mode) do val
-        tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
-        if m2_window_cache[] !== nothing
-            put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], val))
+        val === nothing && return
+        # Prevent re-dispatch loop if backend is already in this mode
+        if MedEye3d.SegmentationDisplay._current_m2_mode[] != val
+            tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
+            if m2_window_cache[] !== nothing
+                put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], val))
+            end
         end
         is_cmp = (val == "Compare Curr/Next TP")
         if makie_win.set_compare_mode[] != is_cmp
@@ -1397,8 +1403,12 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
             if makie_win.m2_mode[] != "Compare Curr/Next TP"
                 makie_win.m2_mode[] = "Compare Curr/Next TP"
-            else
+            elseif MedEye3d.SegmentationDisplay._current_m2_mode[] != "Compare Curr/Next TP"
                 put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], "Compare Curr/Next TP"))
+            end
+        else
+            if makie_win.m2_mode[] == "Compare Curr/Next TP"
+                makie_win.m2_mode[] = "Pure PET (Current TP)"
             end
         end
     end
