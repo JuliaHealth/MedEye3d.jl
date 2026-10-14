@@ -10072,6 +10072,51 @@ function display_metadata_window(fig::Figure)
         return false
     end
 
+    function _is_inside_menu_options(pos, m::Makie.Menu)::Bool
+        try
+            if hasproperty(m, :blockscene) && !isempty(m.blockscene.children)
+                vp = m.blockscene.children[1].viewport[]
+                return (pos[1] >= vp.origin[1] && pos[1] <= vp.origin[1] + vp.widths[1] &&
+                        pos[2] >= vp.origin[2] && pos[2] <= vp.origin[2] + vp.widths[2])
+            end
+        catch; end
+        return false
+    end
+
+    function _is_inside_menu_button(pos, m::Makie.Menu)::Bool
+        try
+            bb = m.layoutobservables.computedbbox[]
+            return in_rect(pos, bb)
+        catch; end
+        return false
+    end
+
+    function _pick_and_select_menu_option!(m::Makie.Menu, pos)
+        try
+            if hasproperty(m, :blockscene) && !isempty(m.blockscene.children)
+                menuscene = m.blockscene.children[1]
+                poly_plots = [p for p in menuscene.plots if p isa Makie.Poly]
+                if !isempty(poly_plots)
+                    rects = poly_plots[1][1][]
+                    t = translation(menuscene)[]
+                    mp = Makie.screen_relative(menuscene, pos)
+                    ytrans = mp[2] - t[2]
+                    matched_idx = findfirst(r -> (mp[1] >= r.origin[1] && mp[1] <= r.origin[1] + r.widths[1] &&
+                                                   ytrans >= r.origin[2] && ytrans <= r.origin[2] + r.widths[2]), rects)
+                    if matched_idx !== nothing
+                        m.i_selected[] = matched_idx
+                        if !isempty(m.options[]) && matched_idx <= length(m.options[])
+                            opt_val = m.options[][matched_idx]
+                            opt_str = string(opt_val isa Pair ? opt_val[1] : opt_val)
+                            _set_menu_selection_string!(m, opt_str)
+                        end
+                        trigger_autosave()
+                    end
+                end
+            end
+        catch; end
+    end
+
     # Priority 100: Top-Level Modal Interceptor (Login Lock & Dropdown Lock)
     on(events(fig.scene).mousebutton, priority=100) do event
         # 1. Loading Overlay: Block all clicks while application / engines initialize
@@ -10108,51 +10153,69 @@ function display_metadata_window(fig::Figure)
             return Consume(true) # Settle period after successful login
         end
 
-        # 3. Plus Buttons & Custom Option Controls: NEVER block clicks on '+' or add row inputs
-        pos = events(fig.scene).mouseposition[]
-        if _is_on_custom_option_control(pos)
-            open_menu = _get_active_open_menu()
-            if open_menu !== nothing
+        # 3. Dropdown Active Modal Handling: When a dropdown is open, handle its selection and lock ALL controls underneath
+        open_menu = _get_active_open_menu()
+        if open_menu !== nothing
+            pos = events(fig.scene).mouseposition[]
+
+            # Case A: Click inside the expanded options list scene
+            if _is_inside_menu_options(pos, open_menu)
+                if event.action == Mouse.release
+                    _pick_and_select_menu_option!(open_menu, pos)
+                    try open_menu.is_open[] = false catch; end
+                    _active_open_menu[] = nothing
+                    _menu_just_closed_time[] = time()
+                end
+                _dropdown_event_active[] = false
+                return Consume(true) # ALWAYS consume: Never let any underlying Textbox (70), Menu (64), or Button/Slider (1) activate!
+            end
+
+            # Case B: Click on the open dropdown's own button (toggle/close)
+            if _is_inside_menu_button(pos, open_menu)
+                if event.action == Mouse.release
+                    try open_menu.is_open[] = false catch; end
+                    _active_open_menu[] = nothing
+                    _menu_just_closed_time[] = time()
+                end
+                _dropdown_event_active[] = false
+                return Consume(true)
+            end
+
+            # Case C: Click OUTSIDE the open dropdown on a '+' button or custom option control
+            if _is_on_custom_option_control(pos)
                 try open_menu.is_open[] = false catch; end
                 _active_open_menu[] = nothing
+                _dropdown_event_active[] = false
+                return Consume(false) # Let the '+' button or add row receive the click!
             end
+
+            # Case D: Click OUTSIDE on any other area
+            try open_menu.is_open[] = false catch; end
+            _active_open_menu[] = nothing
+            _menu_just_closed_time[] = time()
             _dropdown_event_active[] = false
-            return Consume(false)
+            return Consume(true) # Modal lock: consume click so nothing outside activates
         end
 
         # 4. Dropdown Settle Lock: Block clicks immediately after any dropdown closes
         if time() - _menu_just_closed_time[] < 0.25
+            pos = events(fig.scene).mouseposition[]
+            if _is_on_custom_option_control(pos)
+                return Consume(false)
+            end
             return Consume(true)
         end
 
-        # 5. Dropdown Modal Lock: If any dropdown is currently open, lock ALL other controls
-        open_menu = _get_active_open_menu()
-        if open_menu !== nothing
-            pos = events(fig.scene).mouseposition[]
-            inside = _is_inside_menu(pos, open_menu)
-            if inside
-                _dropdown_event_active[] = true
-                return Consume(false) # Allow single open Menu (priority 64) to handle its selection / button
-            else
-                # Click outside: close the open dropdown and consume event so NO control below fires!
-                try open_menu.is_open[] = false catch; end
-                _active_open_menu[] = nothing
-                _menu_just_closed_time[] = time()
-                return Consume(true)
-            end
-        else
-            # No dropdown is currently open. Check if user is clicking to open a dropdown button.
-            # If clicking a menu button, mark _dropdown_event_active so Priority 2 blocker protects any widget below!
-            pos = events(fig.scene).mouseposition[]
-            for m in _ALL_MENUS
-                try
-                    bb = m.layoutobservables.computedbbox[]
-                    if in_rect(pos, bb)
-                        _dropdown_event_active[] = true
-                        return Consume(false)
-                    end
-                catch
+        # 5. Dropdown Button Click Protection when no dropdown is currently open
+        pos = events(fig.scene).mouseposition[]
+        for m in _ALL_MENUS
+            try
+                bb = m.layoutobservables.computedbbox[]
+                if in_rect(pos, bb)
+                    _dropdown_event_active[] = true
+                    return Consume(false)
                 end
+            catch
             end
         end
 

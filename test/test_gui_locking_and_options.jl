@@ -209,6 +209,61 @@ import MedEye3d.SegmentationDisplay.MakieEventHandlers as MEH
     yield(); sleep(0.2)
     @test custom_add_open[orient_ar][] == false
 
+    # ── 8. Dropdown Option Selection Blocks Underlying Controls ──────────────
+    # Scroll so orient_menu is visible in viewport
+    apply_scroll(2000.0f0)
+    yield(); sleep(0.2)
+
+    # Open orient_menu
+    orient_menu.is_open[] = true
+    yield(); sleep(0.2)
+    @test orient_menu.is_open[] == true
+
+    # Find an underlying menu at row 76 that is overlapped by orient_menu options
+    local row76_menu = nothing
+    for c in main_g.content
+        if c.span.rows.start == 76 && c.content isa Makie.Menu
+            row76_menu = c.content
+            break
+        end
+    end
+    @test row76_menu !== nothing
+    @test row76_menu.is_open[] == false
+
+    # Click on Option 3 ("Anterior-Posterior (AP) Orientation of Long Axis")
+    # Coordinates of Option 3 overlap row76_menu
+    menuscene = orient_menu.blockscene.children[1]
+    poly_plots = [p for p in menuscene.plots if p isa Makie.Poly]
+    @test !isempty(poly_plots)
+    rects = poly_plots[1][1][]
+    t = translation(menuscene)[]
+    vp = menuscene.viewport[]
+    r3 = rects[3]
+    opt3_x = vp.origin[1] + r3.origin[1] + r3.widths[1] / 2
+    opt3_y = vp.origin[2] + t[2] + r3.origin[2] + r3.widths[2] / 2
+
+    # Disconnect GLFW mouse cursor updater so synthetic mouseposition is preserved during headless test
+    GLMakie.disconnect!(screen, Makie.mouse_position)
+    events(win.fig.scene).hasfocus[] = true
+    events(win.fig.scene).mouseposition[] = (opt3_x, opt3_y)
+    push!(events(win.fig.scene).mousebuttonstate, Mouse.left)
+    events(win.fig.scene).mousebutton[] = Makie.MouseButtonEvent(Mouse.left, Mouse.press)
+    empty!(events(win.fig.scene).mousebuttonstate)
+    events(win.fig.scene).mousebutton[] = Makie.MouseButtonEvent(Mouse.left, Mouse.release)
+    yield(); sleep(0.5)
+
+    # Verification:
+    # 1. orient_menu has closed and selected Option 3
+    @test orient_menu.is_open[] == false
+    @test occursin("Anterior-Posterior", orient_menu.selection[])
+
+    # 2. Underlying menu at row 76 was NOT opened or activated
+    @test row76_menu.is_open[] == false
+
+    # Reset scroll offset
+    apply_scroll(0.0f0)
+    yield(); sleep(0.2)
+
     # Cleanup test option so git repo stays clean
     try
         opts = LMW.load_custom_options()
