@@ -114,6 +114,45 @@ import MedEye3d.SegmentationDisplay.MakieEventHandlers as MEH
     consumed_press = events(win.fig.scene).mousebutton[] = Makie.MouseButtonEvent(Mouse.left, Mouse.press)
     empty!(events(win.fig.scene).mousebuttonstate)
     consumed_release = events(win.fig.scene).mousebutton[] = Makie.MouseButtonEvent(Mouse.left, Mouse.release)
+
+    # ── 6. Inline Custom Option Add Rows (Hidden by default, Only on '+' click) ─
+    custom_add_open = LMW._lmw_observables[:custom_add_row_open]
+    q_add_rows = LMW._lmw_observables[:q_add_rows]
+    add_btns = LMW._lmw_observables[:add_opt_buttons]
+
+    # Macroscopic Pattern add row must exist and be strictly closed by default
+    @test haskey(q_add_rows, "Macroscopic Pattern")
+    macro_ar = q_add_rows["Macroscopic Pattern"]
+    @test haskey(custom_add_open, macro_ar)
+    @test custom_add_open[macro_ar][] == false
+
+    # All add rows must be closed initially across all questions
+    for (ar, is_open_ref) in custom_add_open
+        @test is_open_ref[] == false
+    end
+
+    # Clicking '+' button for Macroscopic Pattern opens the row
+    @test haskey(add_btns, "Macroscopic Pattern")
+    macro_btn_add = add_btns["Macroscopic Pattern"]
+    notify(macro_btn_add.clicks)
+    yield(); sleep(0.2)
+    @test custom_add_open[macro_ar][] == true
+
+    # Clicking '+' again closes it
+    notify(macro_btn_add.clicks)
+    yield(); sleep(0.2)
+    @test custom_add_open[macro_ar][] == false
+
+    # Opening and navigating lesion closes it automatically
+    notify(macro_btn_add.clicks)
+    yield(); sleep(0.2)
+    @test custom_add_open[macro_ar][] == true
+    active_lesion[] = "2: New Lesion"
+    yield(); sleep(0.2)
+    @test custom_add_open[macro_ar][] == false
+    active_lesion[] = "1: Femur Right"
+    yield(); sleep(0.2)
+
     # Cleanup test option so git repo stays clean
     try
         opts = LMW.load_custom_options()

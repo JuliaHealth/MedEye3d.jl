@@ -3407,6 +3407,15 @@ function create_metadata_window(
         _row_fixed_heights[row_idx] = height
     end
 
+    # Tracking for inline expandable custom-option add rows (must only be visible when '+' is clicked)
+    _custom_add_row_open = Dict{Int, Base.RefValue{Bool}}()
+    _custom_add_row_closers = Dict{Int, Function}()
+    function _close_all_add_rows!()
+        for closer in values(_custom_add_row_closers)
+            closer()
+        end
+    end
+
     # Row→widget index: maps row_idx → Vector of (blockscene_or_visible_obs) for O(1) lookup
     _row_widget_cache = Dict{Int, Vector{Any}}()
     _row_cache_ready = Ref(false)  # Set to true AFTER construction is complete
@@ -3473,6 +3482,12 @@ function create_metadata_window(
     end
 
     function set_row_visible!(row_idx::Int, visible::Bool)
+        # Custom add-option rows can only be visible if explicitly opened via its '+' button
+        if haskey(_custom_add_row_open, row_idx)
+            if visible && !_custom_add_row_open[row_idx][]
+                visible = false
+            end
+        end
         # Skip if this row is already in the desired state
         if haskey(_row_visibility_state, row_idx) && _row_visibility_state[row_idx] == visible
             return
@@ -5125,6 +5140,8 @@ function create_metadata_window(
     # ── All Annotation Fields (single section, like Slicer extension) ─────────
     field_widgets = Dict{String, Any}()
     q_row_indices = Dict{String, Vector{Int}}()
+    q_add_rows = Dict{String, Int}()
+    add_opt_buttons = Dict{String, Any}()
     all_metadata_rows = Int[]
     
     schema_dict = Dict(q.short => q for q in schema)
@@ -5320,29 +5337,36 @@ function create_metadata_window(
                 btn_add_opt = Button(g[q_r, 4], label = "+", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
                 rowsize!(g, q_r, Fixed(28)); register_fixed_row!(q_r, 28)
                 field_widgets[q.short] = m
+                add_opt_buttons[q.short] = btn_add_opt
 
                 # Inline expandable row for entering and persisting new custom options
+                # Hidden by default; only shown when the user explicitly clicks the '+' button
                 add_r = nr!()
-                push!(all_metadata_rows, add_r)
-                push!(q_rows, add_r)
-                add_subgrid = GridLayout(g[add_r, 2:4], tellwidth = false)
+                q_add_rows[q.short] = add_r
+                add_subgrid = GridLayout(g[add_r, 2:4], tellwidth = false, tellheight = false)
                 disp_name = get(DISPLAY_LABEL_OVERRIDES, q.short, q.short)
-                tb_new_opt = styled_textbox(add_subgrid[1, 1]; placeholder = "New option for $(disp_name)...", fontsize = 10)
-                btn_save_opt = Button(add_subgrid[1, 2], label = "Save", buttoncolor = RGBf(0.15, 0.45, 0.2), labelcolor = :white, fontsize = 10, width = 45)
-                btn_cancel_opt = Button(add_subgrid[1, 3], label = "✕", buttoncolor = RGBf(0.4, 0.2, 0.2), labelcolor = :white, fontsize = 10, width = 25)
+                tb_new_opt = styled_textbox(add_subgrid[1, 1]; placeholder = "New option for $(disp_name)...", fontsize = 10, tellwidth = false, tellheight = false)
+                btn_save_opt = Button(add_subgrid[1, 2], label = "Save", buttoncolor = RGBf(0.15, 0.45, 0.2), labelcolor = :white, fontsize = 10, width = 45, tellheight = false)
+                btn_cancel_opt = Button(add_subgrid[1, 3], label = "✕", buttoncolor = RGBf(0.4, 0.2, 0.2), labelcolor = :white, fontsize = 10, width = 25, tellheight = false)
                 colsize!(add_subgrid, 2, Fixed(45))
                 colsize!(add_subgrid, 3, Fixed(25))
                 rowsize!(g, add_r, Fixed(0)); register_fixed_row!(add_r, 0)
                 tb_new_opt.blockscene.visible[] = false
                 btn_save_opt.blockscene.visible[] = false
                 btn_cancel_opt.blockscene.visible[] = false
+                _set_widget_visible!(add_subgrid, false)
+                _row_visibility_state[add_r] = false
 
-                let q_name = q.short, menu_w = m, obs = opts_obs, tb = tb_new_opt, b_save = btn_save_opt, b_cancel = btn_cancel_opt, ar = add_r
+                let q_name = q.short, menu_w = m, obs = opts_obs, tb = tb_new_opt, b_save = btn_save_opt, b_cancel = btn_cancel_opt, ar = add_r, sub = add_subgrid
                     _add_row_open = Ref(false)
+                    _custom_add_row_open[ar] = _add_row_open
 
                     function _close_add_row!()
                         _add_row_open[] = false
-                        rowsize!(g, ar, Fixed(0)); register_fixed_row!(ar, 0)
+                        _row_fixed_heights[ar] = 0
+                        delete!(_row_visibility_state, ar)
+                        set_row_visible!(ar, false)
+                        _set_widget_visible!(sub, false)
                         tb.blockscene.visible[] = false
                         b_save.blockscene.visible[] = false
                         b_cancel.blockscene.visible[] = false
@@ -5350,6 +5374,7 @@ function create_metadata_window(
                         tb.stored_string[] = ""
                         tb.focused[] = false
                     end
+                    _custom_add_row_closers[ar] = _close_add_row!
 
                     function _commit_new_opt!()
                         raw_val = strip(tb.displayed_string[])
@@ -5380,6 +5405,15 @@ function create_metadata_window(
                             trigger_autosave()
                             
                             _close_add_row!()
+                            g.block_updates = false
+                            try
+                                _invalidate_row_cache!()
+                                Makie.GridLayoutBase.update!(g)
+                                _cache_widget_bboxes!()
+                            finally
+                                g.block_updates = true
+                                _apply_scroll!(_scroll_offset_px[])
+                            end
                         end
                     end
 
@@ -5390,8 +5424,12 @@ function create_metadata_window(
                         prefill = !isempty(val_from_filter) && val_from_filter != "Select..." ? val_from_filter : last_filter
                         
                         if !_add_row_open[]
+                            _close_all_add_rows!()
                             _add_row_open[] = true
-                            rowsize!(g, ar, Fixed(28)); register_fixed_row!(ar, 28)
+                            _row_fixed_heights[ar] = 28
+                            delete!(_row_visibility_state, ar)
+                            set_row_visible!(ar, true)
+                            _set_widget_visible!(sub, true)
                             tb.blockscene.visible[] = true
                             b_save.blockscene.visible[] = true
                             b_cancel.blockscene.visible[] = true
@@ -5403,6 +5441,15 @@ function create_metadata_window(
                         else
                             _close_add_row!()
                         end
+                        g.block_updates = false
+                        try
+                            _invalidate_row_cache!()
+                            Makie.GridLayoutBase.update!(g)
+                            _cache_widget_bboxes!()
+                        finally
+                            g.block_updates = true
+                            _apply_scroll!(_scroll_offset_px[])
+                        end
                     end
 
                     on(b_save.clicks) do _
@@ -5413,6 +5460,15 @@ function create_metadata_window(
                     end
                     on(b_cancel.clicks) do _
                         _close_add_row!()
+                        g.block_updates = false
+                        try
+                            _invalidate_row_cache!()
+                            Makie.GridLayoutBase.update!(g)
+                            _cache_widget_bboxes!()
+                        finally
+                            g.block_updates = true
+                            _apply_scroll!(_scroll_offset_px[])
+                        end
                     end
                 end
             end
@@ -5450,6 +5506,7 @@ function create_metadata_window(
             function update_type_buttons(t)
                 # Skip if type unchanged (saves button color updates + bone event)
                 active_lesion_type[] == t && return
+                _close_all_add_rows!()
                 active_lesion_type[] = t
                 btn_type_prostate.buttoncolor[] = (t == "Prostate") ? ACCENT : BG_PNL
                 btn_type_bone.buttoncolor[]     = (t == "Bone Meta") ? ACCENT : BG_PNL
@@ -5972,6 +6029,13 @@ function create_metadata_window(
 
                 for row_idx in rows
                     set_row_visible!(row_idx, visible)
+                end
+
+                if !visible && haskey(q_add_rows, sq)
+                    ar = q_add_rows[sq]
+                    if haskey(_custom_add_row_closers, ar)
+                        _custom_add_row_closers[ar]()
+                    end
                 end
             end
             
@@ -8535,6 +8599,7 @@ function create_metadata_window(
     # ── Wire callbacks ────────────────────────────────────────────────────────
     on(active_lesion_id) do id
         t_cb = time_ns()
+        _close_all_add_rows!()
         
         if _skip_apply_state[]
             _skip_apply_state[] = false
@@ -9520,6 +9585,10 @@ function create_metadata_window(
     _lmw_observables[:dict_text] = dict_text
     _lmw_observables[:current_dict_lang] = current_dict_lang
     _lmw_observables[:update_old_report_display] = update_old_report_display!
+    _lmw_observables[:custom_add_row_open] = _custom_add_row_open
+    _lmw_observables[:custom_add_row_closers] = _custom_add_row_closers
+    _lmw_observables[:q_add_rows] = q_add_rows
+    _lmw_observables[:add_opt_buttons] = add_opt_buttons
 
     # CT/PET GUI-only sync functions (update slider/textbox without re-sending event)
     function _sync_ct_gui(min_v, max_v)
