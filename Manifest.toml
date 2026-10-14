@@ -603,6 +603,12 @@ git-tree-sha1 = "1a3f97f907e6dd8983b744d2642651bb162a3f7a"
 uuid = "dc8bdbbb-1ca9-579f-8c36-e416f6a65cce"
 version = "1.0.2"
 
+[[deps.CxxWrap]]
+deps = ["Libdl", "MacroTools", "libcxxwrap_julia_jll"]
+git-tree-sha1 = "3d05a37a8d40524752524da392ec0c2fbee32543"
+uuid = "1f15a43c-97ca-5a2a-ae31-89f07a497df4"
+version = "0.16.2"
+
 [[deps.DBInterface]]
 git-tree-sha1 = "a444404b3f94deaa43ca2a58e18153a82695282b"
 uuid = "a10d1c49-ce27-4219-8d33-6db1a4562965"
@@ -1444,10 +1450,23 @@ uuid = "7869d1d1-7146-5819-86e3-90919afe41df"
 version = "0.4.20"
 
 [[deps.ITKIOWrapper]]
-deps = ["PythonCall"]
-path = "/workspaces/ITKIOWrapper.jl"
+deps = ["CxxWrap", "ITKIOWrapper_jll"]
+git-tree-sha1 = "cf1e6d9a94da93055d06ea04f572558b80e27675"
 uuid = "8538b10a-c1b7-4e8d-b607-b3a5053e6a1f"
 version = "4.0.2"
+
+[[deps.ITKIOWrapper_jll]]
+deps = ["Artifacts", "ITK_jll", "JLLWrappers", "Libdl", "libcxxwrap_julia_jll"]
+git-tree-sha1 = "ec4c474886b2d86e2bed7a60e804364a7cbc0d33"
+uuid = "b6265aa4-802f-522b-a8eb-4519ac77ab09"
+version = "3.0.1+1"
+
+[[deps.ITK_jll]]
+deps = ["Artifacts", "Expat_jll", "FFTW_jll", "HDF5_jll", "JLLWrappers", "JpegTurbo_jll", "Libdl", "Libtiff_jll", "Zlib_jll", "libpng_jll"]
+git-tree-sha1 = "2f8c1b4cf2016e66eccdd308b8928cd92bc74e0e"
+uuid = "3324d3a8-621a-5aaa-97fa-c3bc8dfc0481"
+version = "5.3.3+0"
+
 
 [[deps.IfElse]]
 git-tree-sha1 = "debdd00ffef04665ccbb3e150747a77560e8fad1"
@@ -2384,7 +2403,7 @@ version = "2.28.6+0"
 
 [[deps.MedImages]]
 deps = ["Accessors", "Adapt", "Atomix", "BenchmarkTools", "CSV", "CUDA", "ChainRulesCore", "ColorTypes", "Combinatorics", "ComponentArrays", "CoordinateTransformations", "DICOM", "DataFrames", "Dates", "Dictionaries", "DifferentialEquations", "Documenter", "DocumenterVitepress", "Enzyme", "EzXML", "FiniteDifferences", "Flux", "ForwardDiff", "Functors", "HDF5", "ITKIOWrapper", "ImageMorphology", "ImageTransformations", "Images", "Interpolations", "JLD", "JSON", "KernelAbstractions", "LinearAlgebra", "Lux", "LuxCUDA", "MPI", "NIfTI", "NNlib", "NPZ", "Optimisers", "Optimization", "OptimizationOptimJL", "OptimizationOptimisers", "OrdinaryDiffEq", "Parameters", "ProgressMeter", "Random", "Rotations", "SciMLSensitivity", "Setfield", "StaticArrays", "Statistics", "Tracker", "UUIDs", "ZipFile", "Zygote"]
-path = "/workspaces/MedImages.jl"
+path = "../MedImages.jl"
 uuid = "fbff095b-7891-4fc4-b5e5-3cd99b9dd225"
 version = "2.0.1"
 
@@ -4297,6 +4316,12 @@ version = "0.17.4+0"
 deps = ["Artifacts", "Libdl"]
 uuid = "8e850b90-86db-534c-a0d3-1478176c7d93"
 version = "5.11.0+0"
+
+[[deps.libcxxwrap_julia_jll]]
+deps = ["Artifacts", "JLLWrappers", "Libdl"]
+git-tree-sha1 = "70091a11c756455c15bc6380ea000c16f38f2d3e"
+uuid = "3eaa8342-bff7-56a5-9981-c04077f7cee7"
+version = "0.13.4+0"
 
 [[deps.libdecor_jll]]
 deps = ["Artifacts", "Dbus_jll", "JLLWrappers", "Libdl", "Libglvnd_jll", "Pango_jll", "Wayland_jll", "xkbcommon_jll"]
