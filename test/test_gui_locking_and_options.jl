@@ -153,6 +153,62 @@ import MedEye3d.SegmentationDisplay.MakieEventHandlers as MEH
     active_lesion[] = "1: Femur Right"
     yield(); sleep(0.2)
 
+    # ── 7. Plus Button Click While Dropdown Is Open & Scrolling Position ─────
+    orient_ar = q_add_rows["Lesion Orientation"]
+    orient_btn = add_btns["Lesion Orientation"]
+    
+    # Open orientation menu first (user looking through options)
+    orient_menu.is_open[] = true
+    yield(); sleep(0.2)
+    @test orient_menu.is_open[] == true
+
+    # Simulate mouse click on '+' button while menu is open
+    events(win.fig.scene).hasfocus[] = false
+    bb = orient_btn.layoutobservables.computedbbox[]
+    cx = bb.origin[1] + bb.widths[1] / 2
+    cy = bb.origin[2] + bb.widths[2] / 2
+    events(win.fig.scene).mouseposition[] = (cx, cy)
+    push!(events(win.fig.scene).mousebuttonstate, Mouse.left)
+    events(win.fig.scene).mousebutton[] = Makie.MouseButtonEvent(Mouse.left, Mouse.press)
+    empty!(events(win.fig.scene).mousebuttonstate)
+    events(win.fig.scene).mousebutton[] = Makie.MouseButtonEvent(Mouse.left, Mouse.release)
+    yield(); sleep(0.5)
+
+    # Menu must close, and add row must open
+    @test orient_menu.is_open[] == false
+    @test custom_add_open[orient_ar][] == true
+
+    # Verify scroll positions propagate to nested subgrid children
+    apply_scroll = LMW._lmw_observables[:apply_scroll]
+    apply_scroll(2000.0f0)
+    yield(); sleep(0.2)
+
+    menu_scrolled_bb = orient_menu.layoutobservables.computedbbox[]
+    @test menu_scrolled_bb.origin[2] > 0  # visible on screen
+
+    main_g = LMW._lmw_observables[:g]
+    for c in main_g.content
+        if c.span.rows.start <= orient_ar && c.span.rows.stop >= orient_ar
+            @test c.content isa Makie.GridLayoutBase.GridLayout
+            sub_g = c.content
+            for sc in sub_g.content
+                # Each child widget in the subgrid (textbox, save, cancel) must have scrolled y > 0
+                child_bb = sc.content.layoutobservables.computedbbox[]
+                @test child_bb.origin[2] > 0
+                @test abs(child_bb.origin[2] - (menu_scrolled_bb.origin[2] - 30.0f0)) < 15.0f0
+            end
+        end
+    end
+
+    # Reset scroll offset
+    apply_scroll(0.0f0)
+    yield(); sleep(0.2)
+
+    # Close add row
+    notify(orient_btn.clicks)
+    yield(); sleep(0.2)
+    @test custom_add_open[orient_ar][] == false
+
     # Cleanup test option so git repo stays clean
     try
         opts = LMW.load_custom_options()

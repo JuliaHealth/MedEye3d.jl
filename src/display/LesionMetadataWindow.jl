@@ -3297,6 +3297,7 @@ function create_metadata_window(
     # Benchmark: 3.7ms/scroll vs ~200ms/scroll with layout solver.
     _scroll_offset_px = Ref(0.0f0)   # current scroll offset in pixels
     _bbox_cache = Dict{Int, Makie.GeometryBasics.HyperRectangle{2, Float32}}()
+    _sub_bbox_cache = Dict{Tuple{Int, Int}, Makie.GeometryBasics.HyperRectangle{2, Float32}}()
     _bbox_cache_ready = Ref(false)
     Rect2f_scroll = Makie.GeometryBasics.HyperRectangle{2, Float32}
     _row_visibility_state = Dict{Int, Bool}()  # tracks current visibility to skip no-ops and bound scroll
@@ -3305,10 +3306,18 @@ function create_metadata_window(
     
     function _cache_widget_bboxes!()
         empty!(_bbox_cache)
+        empty!(_sub_bbox_cache)
         for (i, c) in enumerate(g.content)
             w = c.content
             bb = w.layoutobservables.computedbbox[]
             _bbox_cache[i] = Rect2f_scroll(Float32[bb.origin[1], bb.origin[2]], Float32[bb.widths[1], bb.widths[2]])
+            if w isa Makie.GridLayoutBase.GridLayout
+                for (j, sc) in enumerate(w.content)
+                    sw = sc.content
+                    sbb = sw.layoutobservables.computedbbox[]
+                    _sub_bbox_cache[(i, j)] = Rect2f_scroll(Float32[sbb.origin[1], sbb.origin[2]], Float32[sbb.widths[1], sbb.widths[2]])
+                end
+            end
         end
         # Pre-compute scrollable range using only visible rows
         if !isempty(_bbox_cache)
@@ -3343,6 +3352,15 @@ function create_metadata_window(
             orig === nothing && continue
             new_bbox = Rect2f_scroll(Float32[orig.origin[1], orig.origin[2] + offset_px], orig.widths)
             w.layoutobservables.computedbbox[] = new_bbox
+            if w isa Makie.GridLayoutBase.GridLayout
+                for (j, sc) in enumerate(w.content)
+                    sw = sc.content
+                    sorig = get(_sub_bbox_cache, (i, j), nothing)
+                    sorig === nothing && continue
+                    snew_bbox = Rect2f_scroll(Float32[sorig.origin[1], sorig.origin[2] + offset_px], sorig.widths)
+                    sw.layoutobservables.computedbbox[] = snew_bbox
+                end
+            end
         end
     end
     
@@ -10006,6 +10024,35 @@ function display_metadata_window(fig::Figure)
     in_rect(p, b) = (p[1] >= b.origin[1] && p[1] <= b.origin[1] + b.widths[1] &&
                      p[2] >= b.origin[2] && p[2] <= b.origin[2] + b.widths[2])
 
+    function _is_on_custom_option_control(pos)::Bool
+        add_btns = get(_lmw_observables, :add_opt_buttons, nothing)
+        if add_btns !== nothing
+            for (_, btn) in add_btns
+                try
+                    bb = btn.layoutobservables.computedbbox[]
+                    in_rect(pos, bb) && return true
+                catch; end
+            end
+        end
+        custom_open = get(_lmw_observables, :custom_add_row_open, nothing)
+        main_g = get(_lmw_observables, :g, nothing)
+        if custom_open !== nothing && main_g !== nothing
+            for (ar, is_open_ref) in custom_open
+                if is_open_ref[]
+                    for c in main_g.content
+                        if c.span.rows.start <= ar && c.span.rows.stop >= ar
+                            try
+                                bb = c.content.layoutobservables.computedbbox[]
+                                in_rect(pos, bb) && return true
+                            catch; end
+                        end
+                    end
+                end
+            end
+        end
+        return false
+    end
+
     # Priority 100: Top-Level Modal Interceptor (Login Lock & Dropdown Lock)
     on(events(fig.scene).mousebutton, priority=100) do event
         # 1. Loading Overlay: Block all clicks while application / engines initialize
@@ -10042,12 +10089,24 @@ function display_metadata_window(fig::Figure)
             return Consume(true) # Settle period after successful login
         end
 
-        # 3. Dropdown Settle Lock: Block clicks immediately after any dropdown closes
+        # 3. Plus Buttons & Custom Option Controls: NEVER block clicks on '+' or add row inputs
+        pos = events(fig.scene).mouseposition[]
+        if _is_on_custom_option_control(pos)
+            open_menu = _get_active_open_menu()
+            if open_menu !== nothing
+                try open_menu.is_open[] = false catch; end
+                _active_open_menu[] = nothing
+            end
+            _dropdown_event_active[] = false
+            return Consume(false)
+        end
+
+        # 4. Dropdown Settle Lock: Block clicks immediately after any dropdown closes
         if time() - _menu_just_closed_time[] < 0.25
             return Consume(true)
         end
 
-        # 4. Dropdown Modal Lock: If any dropdown is currently open, lock ALL other controls
+        # 5. Dropdown Modal Lock: If any dropdown is currently open, lock ALL other controls
         open_menu = _get_active_open_menu()
         if open_menu !== nothing
             pos = events(fig.scene).mouseposition[]
