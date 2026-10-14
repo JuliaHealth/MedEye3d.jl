@@ -219,12 +219,23 @@ import MedEye3d.SegmentationDisplay.MakieEventHandlers as MEH
     yield(); sleep(0.2)
     @test orient_menu.is_open[] == true
 
-    # Find an underlying menu at row 76 that is overlapped by orient_menu options
+    # Find an underlying menu below orient_menu that is overlapped by orient_menu options
     local row76_menu = nothing
+    orient_row = 0
     for c in main_g.content
-        if c.span.rows.start == 76 && c.content isa Makie.Menu
-            row76_menu = c.content
+        if c.content === orient_menu
+            orient_row = c.span.rows.start
             break
+        end
+    end
+    min_dist = 9999
+    for c in main_g.content
+        if c.span.rows.start > orient_row && c.content isa Makie.Menu
+            dist = c.span.rows.start - orient_row
+            if dist < min_dist
+                min_dist = dist
+                row76_menu = c.content
+            end
         end
     end
     @test row76_menu !== nothing

@@ -98,7 +98,7 @@ mkpath(dist_assets_dir)
 for dir_name in ["data", "assets"]
     src_dir = joinpath(project_root, dir_name)
     if isdir(src_dir)
-        for fname in ["def.json", "RadLex.csv", "FoundationalAnatomy.csv", "custom_options.json", "max_anatomy_to_ontology.json"]
+        for fname in ["def.json", "RadLex.csv", "FoundationalAnatomy.csv", "custom_options.json", "max_anatomy_to_ontology.json", "metadata_presets.json"]
             src_f = joinpath(src_dir, fname)
             if isfile(src_f)
                 cp(src_f, joinpath(dist_data_dir, fname); force=true)

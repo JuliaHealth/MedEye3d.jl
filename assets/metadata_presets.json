@@ -1,0 +1,47 @@
+{
+    "Right Lacrimal Gland (Benign)": {
+        "Alternative Hypothesis (False Positive)": "Physiological uptake",
+        "BaseAnatomy": "lacrimal gland",
+        "BaseAnatomySide": "Right",
+        "NoCTCorrelate": "true",
+        "LesionType": "Organ Meta",
+        "ObservationState": "ACCEPTED",
+        "Certainty": "0"
+    },
+    "Trigeminal Ganglion (Benign)": {
+        "Alternative Hypothesis (False Positive)": "Trigeminal Ganglion",
+        "BaseAnatomy": "trigeminal ganglion",
+        "BaseAnatomySide": "None",
+        "NoCTCorrelate": "true",
+        "LesionType": "Organ Meta",
+        "ObservationState": "ACCEPTED",
+        "Certainty": "0"
+    },
+    "Left Lacrimal Gland (Benign)": {
+        "Alternative Hypothesis (False Positive)": "Physiological uptake",
+        "BaseAnatomy": "lacrimal gland",
+        "BaseAnatomySide": "Left",
+        "NoCTCorrelate": "true",
+        "LesionType": "Organ Meta",
+        "ObservationState": "ACCEPTED",
+        "Certainty": "0"
+    },
+    "Technical Artifact (Edge Slices / Benign)": {
+        "Alternative Hypothesis (False Positive)": "Technical Artifact",
+        "NoCTCorrelate": "true",
+        "LesionType": "Technical Artifact",
+        "ObservationState": "ACCEPTED",
+        "Certainty": "0"
+    },
+    "Test Sclerotic Femur Island": {
+        "Alternative Hypothesis (False Positive)": "Bone Island / Enostosis",
+        "BaseAnatomy": "femur",
+        "BaseAnatomySide": "Right",
+        "Texture": "Homogeneous",
+        "Margins": "Sclerotic rim",
+        "NoCTCorrelate": "false",
+        "LesionType": "Bone Meta",
+        "ObservationState": "ACCEPTED",
+        "Certainty": "2"
+    }
+}

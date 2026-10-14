@@ -42,7 +42,9 @@ import ..PriorReportWindow as PRW
 import ..SegmentationDisplay.ReactOnMouseClickAndDrag as _ROMCAD
 
 export create_metadata_window, display_metadata_window, get_active_lesion_db, get_mask_ids, lookup_anatomy, PRW,
-       compute_lesion_suv_metrics, precompute_all_suv_metrics!, get_lesion_suv_metrics, _get_suv_max, _get_suv_mean, _get_suv_peak
+       compute_lesion_suv_metrics, precompute_all_suv_metrics!, get_lesion_suv_metrics, _get_suv_max, _get_suv_mean, _get_suv_peak,
+       load_metadata_presets, save_metadata_presets!, add_metadata_preset!,
+       propagate_metadata_to_descendants!, find_linked_descendants, is_field_manually_set_in_lesion
 
 # Registry of all Menu widgets for global click-outside-to-close dismiss
 const _ALL_MENUS = Makie.Menu[]
@@ -174,6 +176,7 @@ const DEF_JSON_PATH       = _find_metadata_data_file("def.json")
 const RADLEX_CSV_PATH     = _find_metadata_data_file("RadLex.csv")
 const ANATOMY_CSV_PATH    = _find_metadata_data_file("FoundationalAnatomy.csv")
 const CUSTOM_OPTS_PATH    = _find_metadata_data_file("custom_options.json")
+const METADATA_PRESETS_PATH = _find_metadata_data_file("metadata_presets.json")
 
 # Module-level anatomy visibility state (mirrored from the local vis_anatomy_active Ref)
 # Allows MakieEventHandlers to query anatomy toggle state without direct access
@@ -442,9 +445,11 @@ const DEFAULT_SAVE_PATH   = joinpath(homedir(), "medeye3d_lesion_annotations.jso
 const DEFAULT_HDF5_PATH   = joinpath(homedir(), "medeye3d_lesion_annotations.h5")
 const ANATOMY_MAPPING_PATH= _find_metadata_data_file("max_anatomy_to_ontology.json")
 const GLOBAL_CUSTOM_OPTS_PATH = joinpath(homedir(), ".medeye3d_custom_options.json")
+const GLOBAL_METADATA_PRESETS_PATH = joinpath(homedir(), ".medeye3d_metadata_presets.json")
 
 const _custom_opts_cache = Ref{Dict{String,Any}}(Dict{String,Any}())
 const _custom_fields_cache = Ref{Dict{String,String}}(Dict{String,String}())
+const _metadata_presets_cache = Ref{Dict{String,Any}}(Dict{String,Any}())
 
 # Persistent display preferences (PET/CT blend, Label Opacity)
 const GLOBAL_DISPLAY_CONFIG_PATH = joinpath(homedir(), ".medeye3d_display_config.json")
@@ -549,6 +554,274 @@ function save_global_custom_fields(fields::Dict)
     catch e
         @warn "Failed to save global custom fields: $e"
     end
+end
+
+# ─── Metadata Presets & Downstream Propagation ──────────────────────────────
+
+function load_metadata_presets()::Dict{String,Any}
+    isempty(_metadata_presets_cache[]) || return _metadata_presets_cache[]
+    res = Dict{String,Any}()
+    
+    # Built-in fallback presets for frequently-used benign findings and technical artifacts
+    default_builtin = Dict{String,Any}(
+        "Left Lacrimal Gland (Benign)" => Dict{String,Any}(
+            "BaseAnatomy" => "lacrimal gland",
+            "BaseAnatomySide" => "Left",
+            "LesionType" => "Organ Meta",
+            "Certainty" => "0",
+            "NoCTCorrelate" => "true",
+            "Alternative Hypothesis (False Positive)" => "Physiological uptake",
+            "ObservationState" => "ACCEPTED"
+        ),
+        "Right Lacrimal Gland (Benign)" => Dict{String,Any}(
+            "BaseAnatomy" => "lacrimal gland",
+            "BaseAnatomySide" => "Right",
+            "LesionType" => "Organ Meta",
+            "Certainty" => "0",
+            "NoCTCorrelate" => "true",
+            "Alternative Hypothesis (False Positive)" => "Physiological uptake",
+            "ObservationState" => "ACCEPTED"
+        ),
+        "Trigeminal Ganglion (Benign)" => Dict{String,Any}(
+            "BaseAnatomy" => "trigeminal ganglion",
+            "BaseAnatomySide" => "None",
+            "LesionType" => "Organ Meta",
+            "Certainty" => "0",
+            "NoCTCorrelate" => "true",
+            "Alternative Hypothesis (False Positive)" => "Trigeminal Ganglion",
+            "ObservationState" => "ACCEPTED"
+        ),
+        "Technical Artifact (Edge Slices / Benign)" => Dict{String,Any}(
+            "LesionType" => "Technical Artifact",
+            "Certainty" => "0",
+            "NoCTCorrelate" => "true",
+            "Alternative Hypothesis (False Positive)" => "Technical Artifact",
+            "ObservationState" => "ACCEPTED"
+        )
+    )
+    
+    # 1. Base assets presets
+    if isfile(METADATA_PRESETS_PATH)
+        try
+            merge!(res, JSON.parse(read(METADATA_PRESETS_PATH, String)))
+        catch e
+            @warn "Failed to load $METADATA_PRESETS_PATH: $e"
+        end
+    end
+    # Ensure default builtins exist
+    for (k, v) in default_builtin
+        if !haskey(res, k)
+            res[k] = v
+        end
+    end
+    
+    # 2. User presets from GLOBAL_METADATA_PRESETS_PATH
+    if isfile(GLOBAL_METADATA_PRESETS_PATH)
+        try
+            user_presets = JSON.parse(read(GLOBAL_METADATA_PRESETS_PATH, String))
+            for (k, v) in user_presets
+                res[k] = v
+            end
+        catch e
+            @warn "Failed to load global presets from $GLOBAL_METADATA_PRESETS_PATH: $e"
+        end
+    end
+    
+    _metadata_presets_cache[] = res
+    return _metadata_presets_cache[]
+end
+
+function save_metadata_presets!(presets::Dict)
+    _metadata_presets_cache[] = copy(presets)
+    for p in [GLOBAL_METADATA_PRESETS_PATH, METADATA_PRESETS_PATH]
+        try
+            mkpath(dirname(p))
+            open(p, "w") do f
+                JSON.print(f, presets, 4)
+            end
+        catch e
+            @warn "Failed to save metadata presets to $p: $e"
+        end
+    end
+end
+
+const _PRESET_EXCLUDED_FIELDS = Set{String}([
+    "_last_modified_by", "_last_modified_at",
+    "_CT_Min", "_CT_Max", "_PET_Min", "_PET_Max", "_SPECT_Min", "_SPECT_Max",
+    "_display_name", "_Centroid", "_Diameter_mm", "_Volume_cc", "_Volume_mm3",
+    "_Slice_Z", "_TimePoint", "_Modality", "_NodeName",
+    "_last_seg_edit_by", "_last_seg_edit_at", "_last_seg_edit_tool",
+    "_edit_history", "_user_edited_anatomy", "_manually_edited_fields",
+    "KeyImage", "RegistrationQC", "RegistrationComment",
+    "SUV max", "SUV mean", "SUV peak", "SUV Volume (cc)",
+    "Lesion tracking name?",
+    "RadiologicalDictation", "RadiologicalDictationEN", "RadiologicalReportOutput",
+    "has_expert_edits", "SegmentationOrigin"
+])
+
+function add_metadata_preset!(name::String, preset_data::AbstractDict)
+    (isempty(strip(name)) || isempty(preset_data)) && return load_metadata_presets()
+    presets = load_metadata_presets()
+    clean_name = String(strip(name))
+    
+    clean_data = Dict{String,Any}()
+    for (k, v) in preset_data
+        startswith(string(k), "_") && continue
+        string(k) in _PRESET_EXCLUDED_FIELDS && continue
+        v_str = string(v)
+        isempty(strip(v_str)) && continue
+        clean_data[string(k)] = v
+    end
+    
+    presets[clean_name] = clean_data
+    save_metadata_presets!(presets)
+    @info "Persisted metadata preset: '$clean_name' ($(length(clean_data)) fields)"
+    return presets
+end
+
+function _extract_tp_from_node(node::AbstractString)::Int
+    s = strip(string(node))
+    m = match(r"(\d+)$", s)
+    if m !== nothing
+        p = tryparse(Int, m.captures[1])
+        p !== nothing && return p
+    end
+    parts = split(s, "_")
+    p = tryparse(Int, parts[end])
+    return p !== nothing ? p : 999
+end
+
+function find_linked_descendants(src_lid::Int, src_tp::Int)::Vector{Tuple{Int, Int}}
+    (src_lid <= 0 || src_tp < 0) && return Tuple{Int, Int}[]
+    results = Tuple{Int, Int}[]
+    
+    LA_mod = try
+        _MEH._get_la()
+    catch
+        try parentmodule(@__MODULE__).LesionAssociation catch; nothing end
+    end
+    
+    if LA_mod !== nothing
+        mg = LA_mod.get_match_groups()
+        for (gid, members) in mg
+            in_group = false
+            for (node, seg_int, name) in members
+                m_tp = _extract_tp_from_node(node)
+                if seg_int == src_lid && (m_tp == src_tp || m_tp == 999)
+                    in_group = true
+                    break
+                end
+            end
+            if in_group
+                for (node, seg_int, name) in members
+                    dst_tp = _extract_tp_from_node(node)
+                    if dst_tp > src_tp && seg_int > 0
+                        push!(results, (dst_tp, seg_int))
+                    end
+                end
+            end
+        end
+        
+        if isdefined(LA_mod, :OVERLAP_MAPPING)
+            for ((p_name, c_name, p_sid), c_ids) in LA_mod.OVERLAP_MAPPING
+                p_tp = _extract_tp_from_node(p_name)
+                c_tp = _extract_tp_from_node(c_name)
+                p_lid = parse_lesion_id(p_sid)
+                if p_lid == src_lid && p_tp == src_tp && c_tp > src_tp
+                    for cid in c_ids
+                        c_lid = parse_lesion_id(cid)
+                        if c_lid !== nothing && c_lid > 0
+                            push!(results, (c_tp, c_lid))
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    return unique(results)
+end
+
+function is_field_manually_set_in_lesion(lesion_dict::AbstractDict, field::String)::Bool
+    # 1. Direct explicit record of manually edited fields
+    if haskey(lesion_dict, "_manually_edited_fields")
+        m_fields = lesion_dict["_manually_edited_fields"]
+        if m_fields isa AbstractVector && field in m_fields
+            return true
+        end
+    end
+    # 2. Check user-edited anatomy flag for anatomy fields
+    if field in ("BaseAnatomy", "BaseAnatomySide")
+        if get(lesion_dict, "_user_edited_anatomy", false) in (true, "true", 1, "1")
+            return true
+        end
+    end
+    # 3. Check _edit_history entries
+    if haskey(lesion_dict, "_edit_history")
+        hist = lesion_dict["_edit_history"]
+        if hist isa AbstractVector
+            for entry in hist
+                if entry isa AbstractDict && haskey(entry, "changes")
+                    chgs = entry["changes"]
+                    if chgs isa AbstractVector
+                        for c in chgs
+                            if c isa AbstractDict && get(c, "field", "") == field
+                                return true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return false
+end
+
+const _PROPAGATION_EXCLUDED_FIELDS = _PRESET_EXCLUDED_FIELDS
+
+function propagate_metadata_to_descendants!(src_lid::Int, src_tp::Int, src_data::AbstractDict, db::Dict)
+    descendants = find_linked_descendants(src_lid, src_tp)
+    isempty(descendants) && return db
+    
+    # Collect non-internal, non-empty metadata fields from src_data
+    to_propagate = Dict{String, Any}()
+    for (k, v) in src_data
+        startswith(string(k), "_") && continue
+        string(k) in _PROPAGATION_EXCLUDED_FIELDS && continue
+        v_str = string(v)
+        isempty(strip(v_str)) && continue
+        to_propagate[string(k)] = v
+    end
+    isempty(to_propagate) && return db
+    
+    for (dst_tp, dst_lid) in descendants
+        dst_key = string(dst_lid)
+        dst_data = nothing
+        if haskey(db, dst_key) && db[dst_key] isa AbstractDict
+            dst_data = db[dst_key]
+        else
+            for (k, v) in db
+                if parse_lesion_id(string(k)) == dst_lid && v isa AbstractDict
+                    dst_key = string(k)
+                    dst_data = v
+                    break
+                end
+            end
+        end
+        if dst_data === nothing
+            dst_data = Dict{String, Any}()
+            db[dst_key] = dst_data
+        end
+        
+        # Copy each entry if NOT manually set in dst_data
+        for (field, val) in to_propagate
+            if !is_field_manually_set_in_lesion(dst_data, field)
+                dst_data[field] = val
+            end
+        end
+    end
+    
+    return db
 end
 
 # ─── Schema ───────────────────────────────────────────────────────────────────
@@ -1308,6 +1581,24 @@ function _append_edit_history!(new_state::Dict, old_state::AbstractDict)
     end
     
     new_state["_edit_history"] = existing
+
+    # Accumulate manually edited fields
+    manual_fields = Set{String}()
+    if haskey(old_state, "_manually_edited_fields")
+        m_old = old_state["_manually_edited_fields"]
+        if m_old isa AbstractVector
+            union!(manual_fields, string.(m_old))
+        end
+    end
+    for c in changes
+        f_name = get(c, "field", "")
+        !isempty(f_name) && push!(manual_fields, f_name)
+    end
+    if get(new_state, "_user_edited_anatomy", false) in (true, "true", 1, "1") || get(old_state, "_user_edited_anatomy", false) in (true, "true", 1, "1")
+        push!(manual_fields, "BaseAnatomy")
+        push!(manual_fields, "BaseAnatomySide")
+    end
+    new_state["_manually_edited_fields"] = sort(collect(manual_fields))
 end
 
 """
@@ -5271,7 +5562,6 @@ function create_metadata_window(
     push!(all_metadata_rows, state_r)
     # ----------------------------------------
 
-
     # Pre-declare variables that will be created inside the "Identification" group injection
     # (Julia if-blocks create local scope, so we need outer-scope declarations)
     local btn_type_prostate, btn_type_bone, btn_type_organ, btn_type_ln, btn_type_artifact
@@ -5281,6 +5571,128 @@ function create_metadata_window(
     local anat_row_indices, anat_rel_menus, anat_struct_menus, anat_rm_btns, anat_active_count
     local update_type_buttons
     local no_ct_toggle, lbl_suv_comparison, lbl_suv, lbl_match_analysis
+    local menu_presets, btn_add_preset, preset_opts_obs, collect_state, apply_preset_to_active_lesion!
+
+    # --- Presets Row ---
+    preset_r = nr!()
+    Label(g[preset_r, 1], "Preset:", fontsize = 10, color = LBL_FG, halign = :right)
+    presets_dict = load_metadata_presets()
+    preset_opts = vcat(["- select preset -"], sort(collect(keys(presets_dict))))
+    preset_opts_obs = Observable(preset_opts)
+    menu_presets = searchable_menu(g, preset_r, 2:3, options = preset_opts_obs, default = 1, fontsize = 10)
+    btn_add_preset = Button(g[preset_r, 4], label = "+ Preset", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, preset_r, Fixed(28)); register_fixed_row!(preset_r, 28)
+    push!(all_metadata_rows, preset_r)
+    add_opt_buttons["__PRESET__"] = btn_add_preset
+
+    # Inline expandable row for saving the current lesion's metadata as a new preset
+    preset_save_r = nr!()
+    push!(all_metadata_rows, preset_save_r)
+    preset_subgrid = GridLayout(g[preset_save_r, 2:4], tellwidth = false, tellheight = false)
+    tb_new_preset = styled_textbox(preset_subgrid[1, 1]; placeholder = "Preset name (e.g. Left Lacrimal)...", fontsize = 10, tellwidth = false, tellheight = false)
+    btn_save_preset = Button(preset_subgrid[1, 2], label = "Save", buttoncolor = RGBf(0.15, 0.45, 0.2), labelcolor = :white, fontsize = 10, width = 45, tellheight = false)
+    btn_cancel_preset = Button(preset_subgrid[1, 3], label = "✕", buttoncolor = RGBf(0.4, 0.2, 0.2), labelcolor = :white, fontsize = 10, width = 25, tellheight = false)
+    colsize!(preset_subgrid, 2, Fixed(45))
+    colsize!(preset_subgrid, 3, Fixed(25))
+    rowsize!(g, preset_save_r, Fixed(0)); register_fixed_row!(preset_save_r, 0)
+    tb_new_preset.blockscene.visible[] = false
+    btn_save_preset.blockscene.visible[] = false
+    btn_cancel_preset.blockscene.visible[] = false
+    _set_widget_visible!(preset_subgrid, false)
+    _row_visibility_state[preset_save_r] = false
+
+    _preset_add_row_open = Ref(false)
+    _custom_add_row_open[preset_save_r] = _preset_add_row_open
+
+    function _close_preset_add_row!()
+        _preset_add_row_open[] = false
+        _row_fixed_heights[preset_save_r] = 0
+        delete!(_row_visibility_state, preset_save_r)
+        set_row_visible!(preset_save_r, false)
+        _set_widget_visible!(preset_subgrid, false)
+        tb_new_preset.blockscene.visible[] = false
+        btn_save_preset.blockscene.visible[] = false
+        btn_cancel_preset.blockscene.visible[] = false
+        tb_new_preset.displayed_string[] = ""
+        tb_new_preset.stored_string[] = ""
+        tb_new_preset.focused[] = false
+    end
+    _custom_add_row_closers[preset_save_r] = _close_preset_add_row!
+
+    function _commit_new_preset!()
+        raw_val = strip(tb_new_preset.displayed_string[])
+        isempty(raw_val) && (raw_val = strip(tb_new_preset.stored_string[]))
+        if !isempty(raw_val)
+            val_str = String(raw_val)
+            cur_st = collect_state()
+            add_metadata_preset!(val_str, cur_st)
+            
+            p_dict = load_metadata_presets()
+            updated_opts = vcat(["- select preset -"], sort(collect(keys(p_dict))))
+            preset_opts_obs[] = updated_opts
+            if !(val_str in menu_presets.options[])
+                menu_presets.options[] = updated_opts
+            end
+            _set_menu_selection_string!(menu_presets, val_str)
+            
+            _close_preset_add_row!()
+            g.block_updates = false
+            try
+                _invalidate_row_cache!()
+                Makie.GridLayoutBase.update!(g)
+                _cache_widget_bboxes!()
+            finally
+                g.block_updates = true
+                _apply_scroll!(_scroll_offset_px[])
+            end
+        end
+    end
+
+    on(btn_add_preset.clicks) do _
+        if _preset_add_row_open[]
+            _close_preset_add_row!()
+        else
+            _close_all_add_rows!()
+            _preset_add_row_open[] = true
+            _row_fixed_heights[preset_save_r] = 28
+            set_row_visible!(preset_save_r, true)
+            _set_widget_visible!(preset_subgrid, true)
+            tb_new_preset.blockscene.visible[] = true
+            btn_save_preset.blockscene.visible[] = true
+            btn_cancel_preset.blockscene.visible[] = true
+            tb_new_preset.focused[] = true
+        end
+        g.block_updates = false
+        try
+            _invalidate_row_cache!()
+            Makie.GridLayoutBase.update!(g)
+            _cache_widget_bboxes!()
+        finally
+            g.block_updates = true
+            _apply_scroll!(_scroll_offset_px[])
+        end
+    end
+
+    on(btn_save_preset.clicks) do _
+        _commit_new_preset!()
+    end
+
+    on(btn_cancel_preset.clicks) do _
+        _close_preset_add_row!()
+        g.block_updates = false
+        try
+            _invalidate_row_cache!()
+            Makie.GridLayoutBase.update!(g)
+            _cache_widget_bboxes!()
+        finally
+            g.block_updates = true
+            _apply_scroll!(_scroll_offset_px[])
+        end
+    end
+
+    on(tb_new_preset.stored_string) do _
+        _commit_new_preset!()
+    end
 
     for (group_title, q_list) in metadata_groups
         # Sub-headers removed for compactness — field names are descriptive enough
@@ -7352,6 +7764,12 @@ function create_metadata_window(
             try _append_edit_history!(snap_state, old_st) catch; end
         end
         db[canonical_key] = snap_state
+        try
+            tp_idx = try _MEH.current_tp_index[] catch; 0 end
+            propagate_metadata_to_descendants!(lid, tp_idx, snap_state, db)
+        catch e
+            @debug "Flush propagation error: $e"
+        end
         lesion_db[] = db
         _db_dirty[] = true
         try
@@ -7439,6 +7857,11 @@ function create_metadata_window(
                     end
                     db[canonical_key] = snap_state
                     db["_GLOBAL_APP_STATE"] = snap_global
+                    try
+                        propagate_metadata_to_descendants!(target_lid, snap_tp, snap_state, db)
+                    catch e
+                        @debug "Autosave propagation error: $e"
+                    end
                     lesion_db[] = db  # Observable — must stay on main thread
                     _db_dirty[] = true
                     try
@@ -7573,6 +7996,9 @@ function create_metadata_window(
             cur_id_str = target_id
             db_updates = Dict{String, Any}()
             lid = (p = parse_lesion_id(cur_id_str)) !== nothing ? p : 1
+
+            # Reset preset menu selection
+            _set_menu_selection_string!(menu_presets, "- select preset -")
 
             # Restore ObservationState — must use i_selected[] for Makie to update the visual
             obs_val = get(data, "ObservationState", "UNREVIEWED")
@@ -7865,11 +8291,10 @@ function create_metadata_window(
         end
 
         centroid = cent_san
-        if lid > 0 && centroid !== nothing && _MEH.volume_z_size[] > 0
-            z_slice = centroid[3]
-            total_z = _MEH.volume_z_size[]
-            
-            if (z_slice <= 2 || z_slice >= total_z - 1) && !haskey(data, "Certainty")
+        z_slice = centroid !== nothing ? centroid[3] : (cz_san > 0 ? cz_san : 0)
+        total_z = _MEH.volume_z_size[] > 0 ? _MEH.volume_z_size[] : 326
+        if lid > 0 && z_slice > 0
+            if (z_slice <= 2 || z_slice >= total_z - 1) && (!haskey(data, "Certainty") || !haskey(data, "NoCTCorrelate"))
                 # Set Alternative Hypothesis to "Technical Artifact"
                 if haskey(field_widgets, "Alternative Hypothesis (False Positive)") && field_widgets["Alternative Hypothesis (False Positive)"] isa Menu
                     _set_menu_selection_string!(field_widgets["Alternative Hypothesis (False Positive)"], "Technical Artifact")
@@ -7884,12 +8309,40 @@ function create_metadata_window(
                         _set_menu_selection_string!(cert_w, "0")
                     end
                 end
+                # Set No CT Correlate
+                _set!(no_ct_toggle.active, true)
+                data["NoCTCorrelate"] = "true"
+                db_updates["NoCTCorrelate"] = "true"
+
+                # Set LesionType to Technical Artifact
+                t_type = "Technical Artifact"
+                try update_type_buttons("Technical Artifact") catch; end
+                data["LesionType"] = "Technical Artifact"
+                db_updates["LesionType"] = "Technical Artifact"
+
+                # Set ObservationState to ACCEPTED if unreviewed or missing
+                if !haskey(data, "ObservationState") || data["ObservationState"] == "UNREVIEWED"
+                    _set_menu_selection_string!(menu_obs_state, "ACCEPTED")
+                    data["ObservationState"] = "ACCEPTED"
+                    db_updates["ObservationState"] = "ACCEPTED"
+                end
+
                 # Persist in data and db_updates
                 data["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
                 data["Certainty"] = "0"
                 db_updates["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
                 db_updates["Certainty"] = "0"
-                if _MEH.PERF_LOG[]; println("Edge-slice artefact: lesion $lid z=$z_slice/$total_z → Technical Artifact, Certainty=0"); flush(stdout); end
+
+                # Propagate to linked descendants
+                try
+                    db_prop = copy(lesion_db[])
+                    propagate_metadata_to_descendants!(lid, cur_tp_san, db_updates, db_prop)
+                    lesion_db[] = db_prop
+                catch e
+                    @debug "Edge slice propagation failed: $e"
+                end
+
+                if _MEH.PERF_LOG[]; println("Edge-slice artefact: lesion $lid z=$z_slice/$total_z → Technical Artifact, Certainty=0, NoCTCorrelate=true"); flush(stdout); end
             end
         end
 
@@ -8629,6 +9082,133 @@ function create_metadata_window(
         end
     end
     _lmw_observables[:btn_refresh_anat] = btn_refresh_anat
+    _lmw_observables[:menu_presets] = menu_presets
+    _lmw_observables[:btn_add_preset] = btn_add_preset
+
+    function apply_preset_to_active_lesion!(preset_name::String)
+        presets = load_metadata_presets()
+        haskey(presets, preset_name) || return false
+        p_data = presets[preset_name]
+        
+        cur_id = active_lesion_id[]
+        cur_lid = parse_lesion_id(cur_id)
+        (cur_lid === nothing || cur_lid <= 0) && return false
+        cur_tp = try _MEH.current_tp_index[] catch; 0 end
+
+        _is_applying_state[] = true
+        is_syncing_selection[] = true
+        try
+            # 1. LesionType
+            if haskey(p_data, "LesionType")
+                t_type = String(p_data["LesionType"])
+                active_lesion_type[] = t_type
+                try update_type_buttons(t_type) catch; end
+            end
+            
+            # 2. ObservationState
+            if haskey(p_data, "ObservationState")
+                _set_menu_selection_string!(menu_obs_state, String(p_data["ObservationState"]))
+            end
+            
+            # 3. NoCTCorrelate
+            if haskey(p_data, "NoCTCorrelate")
+                no_ct_val = p_data["NoCTCorrelate"] in ("true", true, 1, "1")
+                _set!(no_ct_toggle.active, no_ct_val)
+            end
+            
+            # 4. BaseAnatomy & Side
+            if haskey(p_data, "BaseAnatomy")
+                ba = String(p_data["BaseAnatomy"])
+                _set_menu_selection_string!(menu_base_anat, ba; all_opts = ba_all_opts)
+                _user_edited_anatomy[] = true
+            end
+            if haskey(p_data, "BaseAnatomySide")
+                _set_menu_selection_string!(menu_side, String(p_data["BaseAnatomySide"]))
+            end
+            
+            # 5. Anatomical Details
+            if haskey(p_data, "Anatomical Details")
+                raw_det = String(p_data["Anatomical Details"])
+                parts = split(raw_det, " | ")
+                cnt = min(length(parts), MAX_ANAT_ROWS)
+                for i in 1:cnt
+                    p = strip(parts[i])
+                    colon = findfirst(':', p)
+                    if colon !== nothing
+                        rel_str = strip(p[1:colon-1])
+                        struct_str = strip(p[colon+1:end])
+                    else
+                        rel_str = ""
+                        struct_str = p
+                    end
+                    _set_menu_selection_string!(anat_rel_menus[i], rel_str)
+                    _set_menu_selection_string!(anat_struct_menus[i], struct_str)
+                end
+                anat_active_count[] = cnt
+            end
+            
+            # 6. Schema questions (Certainty, Alternative Hypothesis, Margins, Texture, etc.)
+            for q in schema
+                haskey(p_data, q.short) || continue
+                val_str = String(p_data[q.short])
+                w = get(field_widgets, q.short, nothing)
+                w === nothing && continue
+                if w isa Textbox
+                    _set_tb_val!(w, val_str)
+                elseif w isa Menu
+                    _set_menu_selection_string!(w, val_str)
+                elseif w isa Slider
+                    pval = tryparse(Int, val_str)
+                    if pval !== nothing
+                        r = w.range[]
+                        clamped = clamp(pval, first(r), last(r))
+                        w.selected_index[] = clamped - first(r) + 1
+                        try set_close_to!(w, clamped) catch; end
+                    end
+                end
+            end
+            
+            # 7. Custom fields
+            for (k, v) in p_data
+                if startswith(string(k), "Custom:")
+                    ck = string(k)[8:end]
+                    custom_db[][ck] = string(v)
+                end
+            end
+        finally
+            _is_applying_state[] = false
+            is_syncing_selection[] = false
+        end
+
+        # 8. Collect new state, update lesion_db, propagate to descendants, and autosave
+        snap_state = collect_state()
+        can_k = string(cur_lid)
+        db = copy(lesion_db[])
+        old_state = get(db, can_k, Dict{String, Any}())
+        if old_state isa AbstractDict && !isempty(old_state)
+            try _append_edit_history!(snap_state, old_state) catch; end
+        end
+        db[can_k] = snap_state
+        
+        # Propagate to descendants down the line
+        try
+            propagate_metadata_to_descendants!(cur_lid, cur_tp, snap_state, db)
+        catch e
+            @debug "Preset propagation error: $e"
+        end
+        lesion_db[] = db
+        _db_dirty[] = true
+        
+        trigger_autosave()
+        return true
+    end
+
+    on(menu_presets.selection) do sel
+        (sel === nothing || _is_applying_state[]) && return
+        sel_str = String(sel)
+        (sel_str == "- select preset -" || isempty(sel_str)) && return
+        apply_preset_to_active_lesion!(sel_str)
+    end
 
     _current_displayed_lid = Ref{Int}(-1)
     _skip_apply_state = Ref{Bool}(false)
