@@ -275,6 +275,116 @@ import MedEye3d.SegmentationDisplay.MakieEventHandlers as MEH
     apply_scroll(0.0f0)
     yield(); sleep(0.2)
 
+    # ── 9. Anatomical Details Row Operations (+ Row and - Button) ─────────────
+    # Verify that + Row and - (remove) buttons work properly and are not blocked by GUI locks.
+    anat_count = LMW._lmw_observables[:anat_active_count]
+    btn_add_anat = LMW._lmw_observables[:btn_add_anat_rel]
+    anat_rm_btns = LMW._lmw_observables[:anat_rm_btns]
+    anat_rel_menus = LMW._lmw_observables[:anat_rel_menus]
+    anat_struct_menus = LMW._lmw_observables[:anat_struct_menus]
+
+    init_anat = anat_count[]
+    
+    # 9a. Add row via direct click notification
+    notify(btn_add_anat.clicks)
+    yield(); sleep(0.2)
+    @test anat_count[] == init_anat + 1
+    @test anat_rel_menus[init_anat + 1].blockscene.visible[] == true
+    @test anat_struct_menus[init_anat + 1].blockscene.visible[] == true
+
+    # 9b. Add another row via simulated mouse click on btn_add_anat
+    bb_add = btn_add_anat.layoutobservables.computedbbox[]
+    add_cx = bb_add.origin[1] + bb_add.widths[1] / 2
+    add_cy = bb_add.origin[2] + bb_add.widths[2] / 2
+    events(win.fig.scene).mouseposition[] = (add_cx, add_cy)
+    push!(events(win.fig.scene).mousebuttonstate, Mouse.left)
+    events(win.fig.scene).mousebutton[] = Makie.MouseButtonEvent(Mouse.left, Mouse.press)
+    empty!(events(win.fig.scene).mousebuttonstate)
+    events(win.fig.scene).mousebutton[] = Makie.MouseButtonEvent(Mouse.left, Mouse.release)
+    yield(); sleep(0.3)
+    @test anat_count[] == init_anat + 2
+
+    # 9c. Populate row 1 and row 2 with test values
+    LMW._set_menu_selection_string!(anat_rel_menus[1], "Adjacent To")
+    LMW._set_menu_selection_string!(anat_struct_menus[1], "Aorta")
+    LMW._set_menu_selection_string!(anat_rel_menus[2], "Inside / Contained In")
+    LMW._set_menu_selection_string!(anat_struct_menus[2], "Prostate Gland")
+    @test string(anat_rel_menus[1].selection[]) == "Adjacent To"
+    @test string(anat_struct_menus[1].selection[]) == "Aorta"
+    @test string(anat_rel_menus[2].selection[]) == "Inside / Contained In"
+    @test string(anat_struct_menus[2].selection[]) == "Prostate Gland"
+
+    # 9d. Remove row 1 via simulated mouse click on the red minus button
+    curr_n = anat_count[]
+    rm_btn1 = anat_rm_btns[1]
+    bb_rm = rm_btn1.layoutobservables.computedbbox[]
+    rm_cx = bb_rm.origin[1] + bb_rm.widths[1] / 2
+    rm_cy = bb_rm.origin[2] + bb_rm.widths[2] / 2
+    events(win.fig.scene).mouseposition[] = (rm_cx, rm_cy)
+    push!(events(win.fig.scene).mousebuttonstate, Mouse.left)
+    events(win.fig.scene).mousebutton[] = Makie.MouseButtonEvent(Mouse.left, Mouse.press)
+    empty!(events(win.fig.scene).mousebuttonstate)
+    events(win.fig.scene).mousebutton[] = Makie.MouseButtonEvent(Mouse.left, Mouse.release)
+    yield(); sleep(0.3)
+
+    # Values from row 2 must have shifted to row 1, row 2 cleared, and count decremented by 1
+    @test anat_count[] == curr_n - 1
+    @test string(anat_rel_menus[1].selection[]) == "Inside / Contained In"
+    @test string(anat_struct_menus[1].selection[]) == "Prostate Gland"
+    @test string(anat_rel_menus[2].selection[]) == ""
+    @test string(anat_struct_menus[2].selection[]) == ""
+
+    # ── 10. Artifact Reclassification from Lymph Node Lesion ──────────────────
+    # User scenario: Lesion currently classified as lymph node, wants to reclassify as Technical Artifact
+    btn_ln = LMW._lmw_observables[:add_opt_buttons]["__TYPE_LN__"]
+    notify(btn_ln.clicks)
+    yield(); sleep(0.2)
+    @test LMW._lmw_observables[:active_lesion_type][] == "Lymph Node Meta"
+
+    # Click the Artifact button via simulated mouse click
+    btn_art = LMW._lmw_observables[:add_opt_buttons]["__TYPE_ARTIFACT__"]
+    bb_art = btn_art.layoutobservables.computedbbox[]
+    art_cx = bb_art.origin[1] + bb_art.widths[1] / 2
+    art_cy = bb_art.origin[2] + bb_art.widths[2] / 2
+    events(win.fig.scene).mouseposition[] = (art_cx, art_cy)
+    push!(events(win.fig.scene).mousebuttonstate, Mouse.left)
+    events(win.fig.scene).mousebutton[] = Makie.MouseButtonEvent(Mouse.left, Mouse.press)
+    empty!(events(win.fig.scene).mousebuttonstate)
+    events(win.fig.scene).mousebutton[] = Makie.MouseButtonEvent(Mouse.left, Mouse.release)
+    yield(); sleep(0.4)
+
+    # Verify complete reclassification:
+    @test LMW._lmw_observables[:active_lesion_type][] == "Technical Artifact"
+    @test LMW._lmw_observables[:no_ct_toggle].active[] == true
+    
+    cert_w = LMW._lmw_observables[:field_widgets]["Certainty"]
+    if cert_w isa Slider
+        @test cert_w.value[] == 0
+    elseif cert_w isa Menu
+        @test string(cert_w.selection[]) == "0"
+    end
+    
+    alt_hyp_w = LMW._lmw_observables[:field_widgets]["Alternative Hypothesis (False Positive)"]
+    @test string(alt_hyp_w.selection[]) == "Technical Artifact"
+
+    # Verify that clicking Artifact while a dropdown is open or immediately closing is NOT blocked
+    # Open orient menu
+    orient_menu.is_open[] = true
+    yield(); sleep(0.2)
+    @test orient_menu.is_open[] == true
+    
+    # Click Artifact button while menu was open
+    events(win.fig.scene).mouseposition[] = (art_cx, art_cy)
+    push!(events(win.fig.scene).mousebuttonstate, Mouse.left)
+    events(win.fig.scene).mousebutton[] = Makie.MouseButtonEvent(Mouse.left, Mouse.press)
+    empty!(events(win.fig.scene).mousebuttonstate)
+    events(win.fig.scene).mousebutton[] = Makie.MouseButtonEvent(Mouse.left, Mouse.release)
+    yield(); sleep(0.4)
+
+    # Menu should close and Artifact button should be responsive
+    @test orient_menu.is_open[] == false
+    @test LMW._lmw_observables[:active_lesion_type][] == "Technical Artifact"
+
     # Cleanup test option so git repo stays clean
     try
         opts = LMW.load_custom_options()

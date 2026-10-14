@@ -248,7 +248,12 @@ function _get_active_open_menu()::Union{Makie.Menu, Nothing}
     if _active_open_menu[] !== nothing
         try
             if _active_open_menu[].is_open[]
-                return _active_open_menu[]
+                if hasproperty(_active_open_menu[], :blockscene) && !_active_open_menu[].blockscene.visible[]
+                    _active_open_menu[].is_open[] = false
+                    _active_open_menu[] = nothing
+                else
+                    return _active_open_menu[]
+                end
             end
         catch
         end
@@ -256,6 +261,10 @@ function _get_active_open_menu()::Union{Makie.Menu, Nothing}
     for m in _ALL_MENUS
         try
             if m.is_open[]
+                if hasproperty(m, :blockscene) && !m.blockscene.visible[]
+                    m.is_open[] = false
+                    continue
+                end
                 _active_open_menu[] = m
                 return m
             end
@@ -5934,30 +5943,31 @@ function create_metadata_window(
             _last_bone_state = Ref(false)
             
             function update_type_buttons(t)
-                # Skip if type unchanged (saves button color updates + bone event)
-                active_lesion_type[] == t && return
+                norm_t = (t == "Artifact" || t == "Technical Artifact") ? "Technical Artifact" :
+                         (t == "Lymph Node" || t == "Lymph Node Meta") ? "Lymph Node Meta" : t
                 _close_all_add_rows!()
-                active_lesion_type[] = t
-                btn_type_prostate.buttoncolor[] = (t == "Prostate") ? ACCENT : BG_PNL
-                btn_type_bone.buttoncolor[]     = (t == "Bone Meta") ? ACCENT : BG_PNL
-                btn_type_organ.buttoncolor[]    = (t == "Organ Meta") ? ACCENT : BG_PNL
-                btn_type_ln.buttoncolor[]       = (t == "Lymph Node" || t == "Lymph Node Meta") ? ACCENT : BG_PNL
-                btn_type_artifact.buttoncolor[] = (t == "Technical Artifact") ? ACCENT : BG_PNL
+                active_lesion_type[] = norm_t
+                btn_type_prostate.buttoncolor[] = (norm_t == "Prostate") ? ACCENT : BG_PNL
+                btn_type_bone.buttoncolor[]     = (norm_t == "Bone Meta") ? ACCENT : BG_PNL
+                btn_type_organ.buttoncolor[]    = (norm_t == "Organ Meta") ? ACCENT : BG_PNL
+                btn_type_ln.buttoncolor[]       = (norm_t == "Lymph Node Meta") ? ACCENT : BG_PNL
+                btn_type_artifact.buttoncolor[] = (norm_t == "Technical Artifact") ? ACCENT : BG_PNL
                 
-                is_bone = (t == "Bone Meta")
+                is_bone = (norm_t == "Bone Meta")
                 # Only send bone mask event if visibility actually changes (avoids ~580ms re-render)
                 if is_bone != _last_bone_state[]
                     _last_bone_state[] = is_bone
-                    if _MEH.PERF_LOG[]; println("Lesion type '$t' -> ShowBoneMaskEvent($is_bone)"); flush(stdout); end
+                    if _MEH.PERF_LOG[]; println("Lesion type '$norm_t' -> ShowBoneMaskEvent($is_bone)"); flush(stdout); end
                     put!(channel, ShowBoneMaskEvent(is_bone))
                 end
             end
             
-            on(btn_type_prostate.clicks) do _; update_type_buttons("Prostate") end
-            on(btn_type_bone.clicks)     do _; update_type_buttons("Bone Meta") end
-            on(btn_type_organ.clicks)    do _; update_type_buttons("Organ Meta") end
-            on(btn_type_ln.clicks)       do _; update_type_buttons("Lymph Node Meta") end
-            on(btn_type_artifact.clicks) do _; update_type_buttons("Technical Artifact") end
+            # Register type buttons and refresh anatomy in add_opt_buttons for click protection
+            add_opt_buttons["__TYPE_PROSTATE__"] = btn_type_prostate
+            add_opt_buttons["__TYPE_BONE__"]     = btn_type_bone
+            add_opt_buttons["__TYPE_ORGAN__"]    = btn_type_organ
+            add_opt_buttons["__TYPE_LN__"]       = btn_type_ln
+            add_opt_buttons["__TYPE_ARTIFACT__"] = btn_type_artifact
             
             # Refresh Anatomy button — re-runs live atlas lookup, overriding stale cached values
             refresh_anat_r = nr!()
@@ -5965,6 +5975,7 @@ function create_metadata_window(
             btn_refresh_anat = Button(g[refresh_anat_r, 1:4], label = "Refresh Anatomy",
                 buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
             rowsize!(g, refresh_anat_r, Fixed(24)); register_fixed_row!(refresh_anat_r, 24)
+            add_opt_buttons["__REFRESH_ANAT__"] = btn_refresh_anat
             
             # Base Anatomy (filterable Menu) + Side
             ba_r = nr!()
@@ -5982,6 +5993,7 @@ function create_metadata_window(
             btn_add_anat_rel = Button(g[anat_detail_label_r, 4], label = "+ Row",
                 buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
             rowsize!(g, anat_detail_label_r, Fixed(24)); register_fixed_row!(anat_detail_label_r, 24)
+            add_opt_buttons["__ADD_ANAT_ROW__"] = btn_add_anat_rel
             
             ANAT_RELATIONS = ["", "Inside / Contained In", "Surrounded By", "Adjacent To",
                 "Anterior To", "Posterior To", "Superior To", "Inferior To",
@@ -6008,6 +6020,7 @@ function create_metadata_window(
                 push!(anat_rel_menus, rel_m)
                 push!(anat_struct_menus, struct_m)
                 push!(anat_rm_btns, rm_btn)
+                add_opt_buttons["__RM_ANAT_$(i)__"] = rm_btn
                 # Hide by default
                 rowsize!(g, ar, Fixed(0))
                 rel_m.blockscene.visible[] = false
@@ -6020,12 +6033,15 @@ function create_metadata_window(
                         n = anat_active_count[]
                         n <= 0 && return
                         for j in idx:(n-1)
-                            anat_rel_menus[j].i_selected[] = anat_rel_menus[j+1].i_selected[]
-                            anat_struct_menus[j].i_selected[] = anat_struct_menus[j+1].i_selected[]
+                            sel_rel = anat_rel_menus[j+1].selection[]
+                            sel_struct = anat_struct_menus[j+1].selection[]
+                            _set_menu_selection_string!(anat_rel_menus[j], sel_rel === nothing ? "" : string(sel_rel))
+                            _set_menu_selection_string!(anat_struct_menus[j], sel_struct === nothing ? "" : string(sel_struct))
                         end
                         _set_menu_selection_string!(anat_rel_menus[n], "")
                         _set_menu_selection_string!(anat_struct_menus[n], "")
                         anat_active_count[] = n - 1
+                        trigger_autosave()
                     end
                 end
             end
@@ -6051,7 +6067,10 @@ function create_metadata_window(
             # Add row button
             on(btn_add_anat_rel.clicks) do _
                 n = anat_active_count[]
-                n < MAX_ANAT_ROWS && (anat_active_count[] = n + 1)
+                if n < MAX_ANAT_ROWS
+                    anat_active_count[] = n + 1
+                    trigger_autosave()
+                end
             end
         end  # end "Identification" injection
 
@@ -6062,6 +6081,7 @@ function create_metadata_window(
             no_ct_toggle = Toggle(g[ncc_r, 1], active = false, buttoncolor = ACCENT)
             Label(g[ncc_r, 2], "No CT Correlate", fontsize = 10, color = LBL_FG, halign = :left)
             rowsize!(g, ncc_r, Fixed(24)); register_fixed_row!(ncc_r, 24)
+            add_opt_buttons["__NO_CT_TOGGLE__"] = no_ct_toggle
             
             suv_comparison_r = nr!()
             push!(all_metadata_rows, suv_comparison_r)
@@ -6507,23 +6527,25 @@ function create_metadata_window(
     on(btn_type_prostate.clicks) do _
         update_type_buttons("Prostate")
         if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
-            field_widgets["Anatomic Location"].selection[] = "Prostate Gland"
+            _set_menu_selection_string!(field_widgets["Anatomic Location"], "Prostate Gland")
         end
         if haskey(field_widgets, "Anatomical Sublocation") && field_widgets["Anatomical Sublocation"] isa Menu
-            field_widgets["Anatomical Sublocation"].selection[] = "Prostate Peripheral Zone (PZ)"
+            _set_menu_selection_string!(field_widgets["Anatomical Sublocation"], "Prostate Peripheral Zone (PZ)")
         end
         if haskey(field_widgets, "Macroscopic Pattern") && field_widgets["Macroscopic Pattern"] isa Menu
-            field_widgets["Macroscopic Pattern"].selection[] = "Solitary / Isolated Focus"
+            _set_menu_selection_string!(field_widgets["Macroscopic Pattern"], "Solitary / Isolated Focus")
         end
+        update_dynamic_visibility!("Prostate")
+        trigger_autosave()
     end
     
     on(btn_type_bone.clicks) do _
         update_type_buttons("Bone Meta")
         if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
-            field_widgets["Anatomic Location"].selection[] = "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)"
+            _set_menu_selection_string!(field_widgets["Anatomic Location"], "Axial Skeleton (Spine, Pelvis, Ribs, Skull, Sternum, Clavicles)")
         end
         if haskey(field_widgets, "Inner Texture / Density / Attenuation") && field_widgets["Inner Texture / Density / Attenuation"] isa Menu
-            field_widgets["Inner Texture / Density / Attenuation"].selection[] = "Sclerotic / Blastic / Ivory (>1000 HU)"
+            _set_menu_selection_string!(field_widgets["Inner Texture / Density / Attenuation"], "Sclerotic / Blastic / Ivory (>1000 HU)")
         end
         
         # Trigger GenManualEvent to ensure bone subsegmentation is calculated for manually painted lesions
@@ -6534,20 +6556,26 @@ function create_metadata_window(
                 put!(channel, GenManualEvent(lid))
             end
         end
+        update_dynamic_visibility!("Bone Meta")
+        trigger_autosave()
     end
     
     on(btn_type_organ.clicks) do _
         update_type_buttons("Organ Meta")
         if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
-            field_widgets["Anatomic Location"].selection[] = "Solid Organ / Viscera"
+            _set_menu_selection_string!(field_widgets["Anatomic Location"], "Solid Organ / Viscera")
         end
+        update_dynamic_visibility!("Organ Meta")
+        trigger_autosave()
     end
     
     on(btn_type_ln.clicks) do _
         update_type_buttons("Lymph Node Meta")
         if haskey(field_widgets, "Anatomic Location") && field_widgets["Anatomic Location"] isa Menu
-            field_widgets["Anatomic Location"].selection[] = "Pelvic Lymph Node"
+            _set_menu_selection_string!(field_widgets["Anatomic Location"], "Pelvic Lymph Node")
         end
+        update_dynamic_visibility!("Lymph Node Meta")
+        trigger_autosave()
     end
 
     on(btn_type_artifact.clicks) do _
@@ -6557,23 +6585,32 @@ function create_metadata_window(
             cert_w = field_widgets["Certainty"]
             if cert_w isa Slider
                 cert_w.selected_index[] = 1
+                try set_close_to!(cert_w, first(cert_w.range[])) catch; end
+            elseif cert_w isa Menu
+                _set_menu_selection_string!(cert_w, "0")
             end
         end
         if haskey(field_widgets, "Alternative Hypothesis (False Positive)") && field_widgets["Alternative Hypothesis (False Positive)"] isa Menu
-            w = field_widgets["Alternative Hypothesis (False Positive)"]
-            opts = w.options[]
-            idx = findfirst(==("Technical Artifact"), opts)
-            if idx === nothing
-                opts = vcat(opts, ["Technical Artifact"])
-                w.options[] = opts
-                idx = length(opts)
-            end
-            _set_menu_idx!(w, idx)
-            if w.selection[] != "Technical Artifact"
-                w.selection[] = "Technical Artifact"
-            end
+            _set_menu_selection_string!(field_widgets["Alternative Hypothesis (False Positive)"], "Technical Artifact")
         end
+        update_dynamic_visibility!("Technical Artifact")
         trigger_autosave()
+        try
+            cur_lid = parse_lesion_id(active_lesion_id[])
+            if cur_lid !== nothing && cur_lid > 0
+                db_updates = Dict{String, Any}(
+                    "LesionType" => "Technical Artifact",
+                    "NoCTCorrelate" => "true",
+                    "Certainty" => "0",
+                    "Alternative Hypothesis (False Positive)" => "Technical Artifact"
+                )
+                db_prop = copy(lesion_db[])
+                propagate_metadata_to_descendants!(cur_lid, _MEH.current_tp_index[], db_updates, db_prop)
+                lesion_db[] = db_prop
+            end
+        catch e
+            @warn "Failed to propagate artifact classification: $e"
+        end
     end
 
 
@@ -10206,6 +10243,24 @@ function create_metadata_window(
     _lmw_observables[:custom_add_row_closers] = _custom_add_row_closers
     _lmw_observables[:q_add_rows] = q_add_rows
     _lmw_observables[:add_opt_buttons] = add_opt_buttons
+    
+    action_buttons = Any[
+        btn_add_anat_rel,
+        btn_type_prostate, btn_type_bone, btn_type_organ, btn_type_ln, btn_type_artifact,
+        btn_refresh_anat,
+        btn_add_preset, btn_save_preset, btn_cancel_preset,
+        no_ct_toggle,
+        btn_prev, btn_next, btn_pt, btn_nt
+    ]
+    append!(action_buttons, anat_rm_btns)
+    for (_, b) in add_opt_buttons
+        !(b in action_buttons) && push!(action_buttons, b)
+    end
+    _lmw_observables[:action_buttons] = action_buttons
+    _lmw_observables[:btn_add_anat_rel] = btn_add_anat_rel
+    _lmw_observables[:anat_rm_btns] = anat_rm_btns
+    _lmw_observables[:anat_rel_menus] = anat_rel_menus
+    _lmw_observables[:anat_struct_menus] = anat_struct_menus
 
     # CT/PET GUI-only sync functions (update slider/textbox without re-sending event)
     function _sync_ct_gui(min_v, max_v)
@@ -10623,11 +10678,26 @@ function display_metadata_window(fig::Figure)
     in_rect(p, b) = (p[1] >= b.origin[1] && p[1] <= b.origin[1] + b.widths[1] &&
                      p[2] >= b.origin[2] && p[2] <= b.origin[2] + b.widths[2])
 
-    function _is_on_custom_option_control(pos)::Bool
+    function _is_on_action_control(pos)::Bool
+        act_btns = get(_lmw_observables, :action_buttons, nothing)
+        if act_btns !== nothing
+            for btn in act_btns
+                try
+                    if hasproperty(btn, :blockscene) && !btn.blockscene.visible[]
+                        continue
+                    end
+                    bb = btn.layoutobservables.computedbbox[]
+                    in_rect(pos, bb) && return true
+                catch; end
+            end
+        end
         add_btns = get(_lmw_observables, :add_opt_buttons, nothing)
         if add_btns !== nothing
             for (_, btn) in add_btns
                 try
+                    if hasproperty(btn, :blockscene) && !btn.blockscene.visible[]
+                        continue
+                    end
                     bb = btn.layoutobservables.computedbbox[]
                     in_rect(pos, bb) && return true
                 catch; end
@@ -10651,6 +10721,7 @@ function display_metadata_window(fig::Figure)
         end
         return false
     end
+    _is_on_custom_option_control = _is_on_action_control
 
     function _is_inside_menu_options(pos, m::Makie.Menu)::Bool
         try
@@ -10761,12 +10832,12 @@ function display_metadata_window(fig::Figure)
                 return Consume(true)
             end
 
-            # Case C: Click OUTSIDE the open dropdown on a '+' button or custom option control
-            if _is_on_custom_option_control(pos)
+            # Case C: Click OUTSIDE the open dropdown on an action button or custom option control
+            if _is_on_action_control(pos)
                 try open_menu.is_open[] = false catch; end
                 _active_open_menu[] = nothing
                 _dropdown_event_active[] = false
-                return Consume(false) # Let the '+' button or add row receive the click!
+                return Consume(false) # Let the action button receive the click immediately!
             end
 
             # Case D: Click OUTSIDE on any other area
@@ -10780,7 +10851,7 @@ function display_metadata_window(fig::Figure)
         # 4. Dropdown Settle Lock: Block clicks immediately after any dropdown closes
         if time() - _menu_just_closed_time[] < 0.25
             pos = events(fig.scene).mouseposition[]
-            if _is_on_custom_option_control(pos)
+            if _is_on_action_control(pos)
                 return Consume(false)
             end
             return Consume(true)
@@ -10788,8 +10859,15 @@ function display_metadata_window(fig::Figure)
 
         # 5. Dropdown Button Click Protection when no dropdown is currently open
         pos = events(fig.scene).mouseposition[]
+        if _is_on_action_control(pos)
+            _dropdown_event_active[] = false
+            return Consume(false)
+        end
         for m in _ALL_MENUS
             try
+                if hasproperty(m, :blockscene) && !m.blockscene.visible[]
+                    continue
+                end
                 bb = m.layoutobservables.computedbbox[]
                 if in_rect(pos, bb)
                     _dropdown_event_active[] = true
@@ -10806,6 +10884,11 @@ function display_metadata_window(fig::Figure)
     # Catches any press/release that passed through Menu (priority 64) but must not reach Button/Toggle (priority 1)
     on(events(fig.scene).mousebutton, priority=2) do event
         if _dropdown_event_active[]
+            pos = events(fig.scene).mouseposition[]
+            if _is_on_action_control(pos)
+                _dropdown_event_active[] = false
+                return Consume(false)
+            end
             _dropdown_event_active[] = false
             return Consume(true) # Block priority 1 controls!
         end
