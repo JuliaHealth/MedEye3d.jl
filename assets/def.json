@@ -565,6 +565,16 @@
     "default_answer": "0.0"
   },
   {
+    "full": "Mean SUV value across all voxels in this lesion",
+    "allowed_answer": [],
+    "short q": "SUV mean",
+    "category": [
+      "Quantitative"
+    ],
+    "meta_or_prostate": "both",
+    "default_answer": "0.0"
+  },
+  {
     "full": "Automatically calculated PRIMARY score (v1.0) based on zonal location and SUVmax.",
     "allowed_answer": [],
     "short q": "PRIMARY score pattern?",

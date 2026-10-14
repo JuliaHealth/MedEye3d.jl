@@ -30,6 +30,7 @@
 		// "python.linting.pydocstylePath": "/usr/local/py-utils/bin/pydocstyle",
 		// "python.linting.pylintPath": "/usr/local/py-utils/bin/pylint"
 	},
+	"initializeCommand": "xhost +local:root || xhost +local: || true; if [ -n \"$DISPLAY\" ] && [ -d \"${localWorkspaceFolder}\" ]; then xauth nextract - \"$DISPLAY\" > \"${localWorkspaceFolder}/.docker.xauth\" 2>/dev/null && chmod 644 \"${localWorkspaceFolder}/.docker.xauth\" 2>/dev/null || true; fi",
 	"runArgs": [
 		"--init", "--gpus", "all"
         ,"--ipc", "host",

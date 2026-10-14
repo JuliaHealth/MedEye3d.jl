@@ -6,6 +6,10 @@
 set -e
 export DEBIAN_FRONTEND=noninteractive
 
+# Ensure X11 display authorization
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+[ -f "$SCRIPT_DIR/ensure_x11.sh" ] && source "$SCRIPT_DIR/ensure_x11.sh"
+
 # Ensure clipboard support for Makie textboxes (Ctrl+C/V)
 if ! command -v xclip &>/dev/null && ! command -v xsel &>/dev/null; then
     echo "Installing xclip for clipboard support..."

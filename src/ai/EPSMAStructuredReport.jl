@@ -33,6 +33,7 @@ Base.@kwdef struct EPSMALesionRow
     num_lesions::Int = 1
     psma_q::String = ""
     suv_max::Float32 = 0.0f0
+    suv_mean::Float32 = 0.0f0
     psma_v::String = "Score 0"
     psma_v_num::Int = 0
     reader_confidence::Int = 5
@@ -119,9 +120,15 @@ Base.@kwdef mutable struct EPSMAReport
     conclusion_de::String = ""
     default_lang::String = "EN"
     
-    # Prior report reference (loaded from file for comparison / templating)
+    # Original Radiological Report (pre-existing clinical dictation from metadata.json)
+    original_report_en::String = ""
+    original_report_de::String = ""
+    
+    # Prior report reference (loaded from file or auto-populated from prior time points)
     prior_report_text::String = ""
     prior_report_path::String = ""
+    prior_report_en::String = ""
+    prior_report_de::String = ""
     
     # Section-level edit tracking: maps section key → overridden text
     section_overrides::Dict{String, String} = Dict{String, String}()
@@ -728,12 +735,7 @@ function generate_negative_statements(synoptic_rows::Vector{EPSMALesionRow},
     return (join(neg_en, "\n"), join(neg_de, "\n"))
 end
 
-# ── Automatic Report Aggregation ─────────────────────────────────────────────
-"""
-    build_epsma_data(tp_idx::Int; lang="EN") -> EPSMAReport
-
-Aggregates all metadata, background references, quantitative metrics, and longitudinal trajectories
-into a structured E-PSMA report object conforming to the EANM v1.0 consensus.
+# ── DICOM Tech Params Extraction ─────────────────────────────────────────────
 function _extract_dicom_tech_params(_MEH, LMW, db)
 
     base = EPSMATechnicalParams()
@@ -777,33 +779,19 @@ function _extract_dicom_tech_params(_MEH, LMW, db)
         
 
         acq = "(not specified)"
-
         if occursin("ManufacturerModelName", m_str)
-
-            m_model = match(r"ManufacturerModelName.*?:.*?"([^"]+)"", m_str)
-
+            m_model = match(r"ManufacturerModelName.*?:.*?\"([^\"]+)\"", m_str)
             if m_model !== nothing
-
                 acq = m_model.captures[1] * " PET/CT"
-
             end
-
         end
 
-        
-
         recon = "(not specified)"
-
         if occursin("ReconstructionMethod", m_str)
-
-            m_recon = match(r"ReconstructionMethod.*?:.*?"([^"]+)"", m_str)
-
+            m_recon = match(r"ReconstructionMethod.*?:.*?\"([^\"]+)\"", m_str)
             if m_recon !== nothing
-
                 recon = m_recon.captures[1]
-
             end
-
         end
 
         
@@ -858,6 +846,11 @@ function _extract_dicom_tech_params(_MEH, LMW, db)
 
 end
 
+"""
+    build_epsma_data(tp_idx::Int; lang="EN") -> EPSMAReport
+
+Aggregates all metadata, background references, quantitative metrics, and longitudinal trajectories
+into a structured E-PSMA report object conforming to the EANM v1.0 consensus.
 """
 function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
     _MEH = _get_meh()
@@ -1126,8 +1119,10 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
         
         # 3. SUVmax
         suv_max = 0.0f0
+        suv_mean = 0.0f0
         if LMW !== nothing
             try suv_max = LMW._get_suv_max(lid, tp_idx) catch; end
+            try suv_mean = LMW._get_suv_mean(lid, tp_idx) catch; end
         end
         
         # 4. Visual score & Confidence
@@ -1161,7 +1156,7 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
         end
         
         size_display = diam_mm > 0 ? "$(round(diam_mm, digits=1)) mm ($(round(vol_cc, digits=2)) cc)" : "$(round(vol_cc, digits=2)) cc"
-        q_display = "SUVmax $(round(suv_max, digits=1))"
+        q_display = suv_mean > 0.01f0 ? "SUVmax $(round(suv_max, digits=1)), Mean $(round(suv_mean, digits=1))" : "SUVmax $(round(suv_max, digits=1))"
         
         # 6. Separate PCa metastases from Technical Artifacts / False Positives
         if is_artifact
@@ -1176,6 +1171,7 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
                 num_lesions = 1,
                 psma_q = q_display,
                 suv_max = suv_max,
+                suv_mean = suv_mean,
                 psma_v = psma_v_str,
                 psma_v_num = psma_v_num,
                 reader_confidence = 1, # Benign / Artifact
@@ -1215,6 +1211,7 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
                 num_lesions = 1,
                 psma_q = q_display,
                 suv_max = suv_max,
+                suv_mean = suv_mean,
                 psma_v = psma_v_str,
                 psma_v_num = psma_v_num,
                 reader_confidence = conf,
@@ -1490,16 +1487,36 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
         push!(history_de_parts, "• Klinische Anamnese: $c_notes")
     end
     
+    orig_hdr_en = "\n\n--- Translated Original Radiological Report ---\n"
+    orig_hdr_de = "\n\n--- Originalbefund (Radiologie/Nuklearmedizin) ---\n"
+
     full_history_en = if !isempty(history_en_parts)
-        join(history_en_parts, "\n") * (!isempty(desc_en) ? "\n\n" * desc_en : "")
+        join(history_en_parts, "\n") * (!isempty(desc_en) ? orig_hdr_en * desc_en : (!isempty(desc_de) ? orig_hdr_de * desc_de : ""))
     else
-        !isempty(desc_en) ? desc_en : (!isempty(desc_de) ? desc_de : "")
+        !isempty(desc_en) ? orig_hdr_en * desc_en : (!isempty(desc_de) ? orig_hdr_de * desc_de : "")
     end
     
     full_history_de = if !isempty(history_de_parts)
-        join(history_de_parts, "\n") * (!isempty(desc_de) ? "\n\n" * desc_de : "")
+        join(history_de_parts, "\n") * (!isempty(desc_de) ? orig_hdr_de * desc_de : (!isempty(desc_en) ? orig_hdr_en * desc_en : ""))
     else
-        !isempty(desc_de) ? desc_de : ""
+        !isempty(desc_de) ? orig_hdr_de * desc_de : (!isempty(desc_en) ? orig_hdr_en * desc_en : "")
+    end
+
+    prior_rep_text = ""
+    prior_rep_path = ""
+    prior_rep_en = ""
+    prior_rep_de = ""
+    if has_prior_studies
+        prior_tp = maximum(all_prior_tp_indices)
+        prior_rep_en = _MEH !== nothing ? get(_MEH.tp_english_descriptions, prior_tp, "") : ""
+        prior_rep_de = _MEH !== nothing ? get(_MEH.tp_descriptions, prior_tp, "") : ""
+        prior_rep_text = (lang == "DE" ? (!isempty(prior_rep_de) ? prior_rep_de : prior_rep_en) : (!isempty(prior_rep_en) ? prior_rep_en : prior_rep_de))
+        prior_rep_path = "Prior TP $prior_tp (metadata.json)"
+    elseif !isempty(desc_en) || !isempty(desc_de)
+        prior_rep_en = desc_en
+        prior_rep_de = desc_de
+        prior_rep_text = (lang == "DE" ? (!isempty(desc_de) ? desc_de : desc_en) : (!isempty(desc_en) ? desc_en : desc_de))
+        prior_rep_path = "Baseline TP $tp_idx (metadata.json)"
     end
 
     # ── Generate Negative Statements (consolidated uninvolved regions) ──
@@ -1583,7 +1600,13 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
         negative_statements_en = neg_stmts_en,
         negative_statements_de = neg_stmts_de,
         conclusion_en = concl_en,
-        conclusion_de = concl_de
+        conclusion_de = concl_de,
+        original_report_en = desc_en,
+        original_report_de = desc_de,
+        prior_report_text = prior_rep_text,
+        prior_report_path = prior_rep_path,
+        prior_report_en = prior_rep_en,
+        prior_report_de = prior_rep_de
     )
 end
 
@@ -1754,6 +1777,7 @@ function to_dict(rep::EPSMAReport)::Dict{String, Any}
                 "num_lesions" => r.num_lesions,
                 "psma_q" => r.psma_q,
                 "suv_max" => r.suv_max,
+                "suv_mean" => r.suv_mean,
                 "psma_v" => r.psma_v,
                 "psma_v_num" => r.psma_v_num,
                 "reader_confidence" => r.reader_confidence,
@@ -1775,6 +1799,7 @@ function to_dict(rep::EPSMAReport)::Dict{String, Any}
                 "num_lesions" => r.num_lesions,
                 "psma_q" => r.psma_q,
                 "suv_max" => r.suv_max,
+                "suv_mean" => r.suv_mean,
                 "psma_v" => r.psma_v,
                 "psma_v_num" => r.psma_v_num,
                 "reader_confidence" => r.reader_confidence,
@@ -1795,8 +1820,12 @@ function to_dict(rep::EPSMAReport)::Dict{String, Any}
         "negative_statements_de" => rep.negative_statements_de,
         "conclusion_en" => rep.conclusion_en,
         "conclusion_de" => rep.conclusion_de,
+        "original_report_en" => rep.original_report_en,
+        "original_report_de" => rep.original_report_de,
         "prior_report_text" => rep.prior_report_text,
         "prior_report_path" => rep.prior_report_path,
+        "prior_report_en" => rep.prior_report_en,
+        "prior_report_de" => rep.prior_report_de,
         "section_overrides" => rep.section_overrides,
         "section_provenance" => rep.section_provenance
     )

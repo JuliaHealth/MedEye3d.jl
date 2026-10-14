@@ -806,45 +806,60 @@ const is_single_lesion_mode = Ref(true)
 export is_single_lesion_mode
 
 function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vector{StateDataFields})
-    changed = false
     if data.lesion_id > 0
-        current_active_lesion_id[] = data.lesion_id
         is_single_lesion_mode[] = true
+        current_active_lesion_id[] = data.lesion_id
+        return reactToSyncLesion(SyncLesionEvent(data.lesion_id, true), stateObjects)
     else
         is_single_lesion_mode[] = false
-    end
-    for (idx, stateObject) in enumerate(stateObjects)
-        # Skip right compare panels — they are managed independently by reactToSyncLesion
-        # with differential opacity (compare_all_lesions_mode). The M key should only
-        # affect left/current TP panels (1-4).
-        is_right = compare_mode[] && idx in (5, 6, 7, 8, 9)
-        if is_right
-            continue
-        end
-        for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-            if (textSpec.name == "Mask" || textSpec.name == "segmentation") && textSpec.name != "Anatomy"
-                # Clear allowed IDs filter (only for lesion masks, not anatomical atlas)
-                textSpec.allowedIDs = Float32[]
-                textSpec.colorMask = RGBA(0.0f0, 0.0f0, 0.0f0, 1.0f0)
-                T_mm = eltype(textSpec.minAndMaxValue)
-                if !is_single_lesion_mode[]
+        changed = false
+        for (idx, stateObject) in enumerate(stateObjects)
+            # Skip right compare panels — they are managed independently by reactToSyncLesion
+            # with differential opacity (compare_all_lesions_mode). The M key should only
+            # affect left/current TP panels (1-4).
+            is_right = compare_mode[] && idx in (5, 6, 7, 8, 9)
+            if is_right
+                continue
+            end
+            for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
+                if textSpec.name == "Mask" || textSpec.name == "segmentation" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy" && textSpec.name != "Bone_Overlay")
+                    # Clear allowed IDs filter (only for lesion masks, not anatomical atlas)
+                    textSpec.allowedIDs = Float32[]
+                    textSpec.colorMask = RGBA(0.0f0, 0.0f0, 0.0f0, 1.0f0)
+                    T_mm = eltype(textSpec.minAndMaxValue)
                     textSpec.minAndMaxValue = T_mm.([1, 10000])
-                else
-                    textSpec.minAndMaxValue = T_mm.([data.lesion_id, data.lesion_id])
+                    textSpec.isVisible = true
+                    if textSpec.maskContribution <= 0.05f0
+                        textSpec.maskContribution = 0.5f0
+                    end
+                    if stateObject.mainForDisplayObjects.vulkanPipelineState !== nothing
+                        stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                    end
+                    changed = true
+                elseif textSpec.name == "manualModif"
+                    textSpec.minAndMaxValue = Float32.([0.0, 10000.0])
+                    textSpec.allowedIDs = Float32[]
+                    textSpec.isVisible = true
                 end
-                changed = true
+            end
+            # Force slice refresh on visible panels so showing all lesions appears immediately
+            if stateObject.calcDimsStruct.mainQuadVertSize > 0 && !all(iszero, stateObject.calcDimsStruct.mainImageQuadVert)
+                curSlice = clamp(stateObject.currentDisplayedSlice, 1, max(1, stateObject.onScrollData.slicesNumber))
+                stateObject.currentlyDispDat = stateObject.onScrollData.dataToScroll |>
+                    (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(curSlice), stateObject.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
+                    (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=curSlice, textToDisp=getTextForCurrentSlice(stateObject.onScrollData, Int32(curSlice)))
+                stateObject.isSliceChanged = true
             end
         end
+        @debug "Show single lesion: all (single_mode=false)"
+        _mri_clamp_mask_range!(stateObjects)
+        # Re-sync right compare panels so differential opacity is maintained
+        if compare_mode[] && current_active_lesion_id[] > 0
+            cur_lid = current_active_lesion_id[]
+            reactToSyncLesion(SyncLesionEvent(cur_lid, false), stateObjects)
+        end
+        return changed
     end
-    lbl = is_single_lesion_mode[] ? string(data.lesion_id) : "all"
-    @debug "Show single lesion: $lbl (single_mode=$(is_single_lesion_mode[]))"
-    _mri_clamp_mask_range!(stateObjects)
-    # Re-sync right compare panels so differential opacity is maintained
-    if compare_mode[] && current_active_lesion_id[] > 0
-        cur_lid = current_active_lesion_id[]
-        reactToSyncLesion(SyncLesionEvent(cur_lid), stateObjects)
-    end
-    return changed
 end
 
 const current_windowing = Dict{String, Vector{Float32}}(
@@ -1590,7 +1605,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         is_right = compare_mode[] && idx in (5, 6, 7, 8, 9)
         target_id = is_right ? panel5_lesion_id : data.lesion_id
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-            if textSpec.name == "Mask" || textSpec.name == "segmentation"
+            if textSpec.name == "Mask" || textSpec.name == "segmentation" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy" && textSpec.name != "Bone_Overlay")
                 T_mm = eltype(textSpec.minAndMaxValue)
                 if is_right && compare_all_lesions_mode[]
                     # Interactive mapping mode: display ALL lesions on right TP,
@@ -1610,12 +1625,17 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                         textSpec.minAndMaxValue = T_mm.([1, 10000])
                     end
                 end
+                textSpec.isVisible = true
+                if textSpec.maskContribution <= 0.05f0
+                    textSpec.maskContribution = 0.5f0
+                end
                 if stateObject.mainForDisplayObjects.vulkanPipelineState !== nothing
                     stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
                 end
             elseif textSpec.name == "manualModif"
                 textSpec.minAndMaxValue = Float32.([0.0, 10000.0])
                 textSpec.allowedIDs = Float32[]
+                textSpec.isVisible = true
             end
         end
     end
@@ -1717,23 +1737,71 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             lesion_centroids_cache[(panel_tp_cur, data.lesion_id)]
         elseif haskey(lesion_centroids_cache, (get_node_name_for_tp(panel_tp_cur), data.lesion_id))
             lesion_centroids_cache[(get_node_name_for_tp(panel_tp_cur), data.lesion_id)]
+        elseif haskey(lesion_centroids_cache, (0, data.lesion_id))
+            lesion_centroids_cache[(0, data.lesion_id)]
         elseif haskey(lesion_centroids_cache, data.lesion_id)
             lesion_centroids_cache[data.lesion_id]
         else
             # on-the-fly computation if cache miss
             cc = nothing
+            # 1. Search in stateObjects' dataToScroll
             for (si, stateObject) in enumerate(stateObjects)
-                for (scrIdx, scrDat) in enumerate(stateObject.onScrollData.dataToScroll)
-                    texSpec = stateObject.mainForDisplayObjects.listOfTextSpecifications[scrIdx]
-                    if (texSpec.name == "Mask" || texSpec.name == "manualModif") && stateObject.onScrollData.dimensionToScroll == 3
-                        cc = find_lesion_center(scrDat.dat, Float32(data.lesion_id))
-                        if cc !== nothing
-                            lesion_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
-                            break
+                if stateObject.onScrollData.dimensionToScroll == 3
+                    for scrDat in stateObject.onScrollData.dataToScroll
+                        if scrDat.name in ("Mask", "segmentation", "manualModif", "mask")
+                            cc = find_lesion_center(scrDat.dat, Float32(data.lesion_id))
+                            if cc !== nothing
+                                lesion_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
+                                lesion_centroids_cache[data.lesion_id] = cc
+                                break
+                            end
                         end
                     end
                 end
                 cc !== nothing && break
+            end
+            # 2. Search in tp_data_cache for current TP
+            if cc === nothing && haskey(tp_data_cache, panel_tp_cur)
+                tp_ent = tp_data_cache[panel_tp_cur]
+                if tp_ent.mask !== nothing
+                    cc = find_lesion_center(tp_ent.mask, Float32(data.lesion_id))
+                    if cc !== nothing
+                        lesion_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
+                        lesion_centroids_cache[data.lesion_id] = cc
+                    end
+                end
+            end
+            # 3. Search in tp_data_cache for baseline (TP 0)
+            if cc === nothing && haskey(tp_data_cache, 0)
+                tp_ent0 = tp_data_cache[0]
+                if tp_ent0.mask !== nothing
+                    cc = find_lesion_center(tp_ent0.mask, Float32(data.lesion_id))
+                    if cc !== nothing
+                        lesion_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
+                        lesion_centroids_cache[data.lesion_id] = cc
+                    end
+                end
+            end
+            # 4. Search in active lesion database / LMW cache
+            if cc === nothing
+                try
+                    _LMW = parentmodule(@__MODULE__).LesionMetadataWindow
+                    db = _LMW.get_active_lesion_db()
+                    if !isempty(db)
+                        st = _LMW.get_lesion_state(db, string(data.lesion_id))
+                        for ck in ("_Centroid", "Centroid")
+                            if haskey(st, ck)
+                                c_raw = st[ck]
+                                if (c_raw isa AbstractVector || c_raw isa Tuple) && length(c_raw) >= 3
+                                    cc = [round(Int, c_raw[1]), round(Int, c_raw[2]), round(Int, c_raw[3])]
+                                    lesion_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
+                                    lesion_centroids_cache[data.lesion_id] = cc
+                                    break
+                                end
+                            end
+                        end
+                    end
+                catch; end
             end
             cc
         end
@@ -1767,8 +1835,10 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             push!(targets, (9, origY))  # M2 Coronal (like panel 4)
         end
 
+        target_panel_set = Set{Int}()
         for (p_idx, targetSlice) in targets
             if p_idx <= length(stateObjects)
+                push!(target_panel_set, p_idx)
                 otherState = stateObjects[p_idx]
                 # Skip hidden panels (Fix ❸: no work for invisible panels)
                 if otherState.calcDimsStruct.mainQuadVertSize <= 0 || all(iszero, otherState.calcDimsStruct.mainImageQuadVert)
@@ -1790,7 +1860,35 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                 otherState.isSliceChanged = true
             end
         end
+        # Also ensure any other visible panels (not in targets) re-slice at their current slice
+        for p_idx in 1:length(stateObjects)
+            if !(p_idx in target_panel_set)
+                otherState = stateObjects[p_idx]
+                if otherState.calcDimsStruct.mainQuadVertSize > 0 && !all(iszero, otherState.calcDimsStruct.mainImageQuadVert)
+                    curSlice = clamp(otherState.currentDisplayedSlice, 1, max(1, otherState.onScrollData.slicesNumber))
+                    otherState.currentlyDispDat = otherState.onScrollData.dataToScroll |>
+                        (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(curSlice), otherState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
+                        (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=curSlice, textToDisp=getTextForCurrentSlice(otherState.onScrollData, Int32(curSlice)))
+                    otherState.isSliceChanged = true
+                end
+            end
+        end
         changed = true
+    else
+        # If jump_to_center is false or canonical_center is not found,
+        # STILL force slice evaluation & isSliceChanged for ALL visible panels
+        # so updated bone overlay and mask visibility flags render immediately!
+        for p_idx in 1:length(stateObjects)
+            otherState = stateObjects[p_idx]
+            if otherState.calcDimsStruct.mainQuadVertSize > 0 && !all(iszero, otherState.calcDimsStruct.mainImageQuadVert)
+                curSlice = clamp(otherState.currentDisplayedSlice, 1, max(1, otherState.onScrollData.slicesNumber))
+                otherState.currentlyDispDat = otherState.onScrollData.dataToScroll |>
+                    (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(curSlice), otherState.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
+                    (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=curSlice, textToDisp=getTextForCurrentSlice(otherState.onScrollData, Int32(curSlice)))
+                otherState.isSliceChanged = true
+                changed = true
+            end
+        end
     end
 
     t_total_ms = (time_ns() - t_total) / 1e6
@@ -2577,6 +2675,9 @@ function invalidate_suv_for_lesion(lesion_id::Int, tp_idx::Int)
             if isdefined(LMW, :_lesion_suv_cache)
                 delete!(LMW._lesion_suv_cache, (tp_idx, lesion_id))
             end
+            if isdefined(LMW, :_lesion_suv_metrics_cache)
+                delete!(LMW._lesion_suv_metrics_cache, (tp_idx, lesion_id))
+            end
             if isdefined(LMW, :_volume_cache)
                 delete!(LMW._volume_cache, (tp_idx, lesion_id))
             end
@@ -2741,11 +2842,12 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
             LMW = _get_lmw()
             if LMW !== nothing
                 vol = LMW.compute_lesion_volume(lesion_id, tp_idx)
+                suv_metrics = LMW.get_lesion_suv_metrics(lesion_id, tp_idx)
                 suv_str = LMW.compute_lesion_suv_string(lesion_id, tp_idx)
                 if !isempty(suv_str)
                     LMW._lesion_suv_cache[(tp_idx, lesion_id)] = suv_str
                 end
-                @debug "  [SUV] Async recomputed metrics for lesion $lesion_id @ TP $tp_idx: vol=$(round(vol["volume_cc"], digits=2))cc, suv=$(suv_str)"
+                @debug "  [SUV] Async recomputed metrics for lesion $lesion_id @ TP $tp_idx: vol=$(round(vol["volume_cc"], digits=2))cc, suv_max=$(suv_metrics.max), suv_mean=$(suv_metrics.mean)"
             end
         catch e
             @warn "Async SUV/volume recompute failed for lesion $lesion_id: $e"
@@ -2994,6 +3096,9 @@ end
                         iv = Int(v)
                         iv > 0 && push!(unique_ids, iv)
                     end
+                    if isdefined(LMW, :precompute_all_suv_metrics!) && cached_entry.pet !== nothing
+                        try LMW.precompute_all_suv_metrics!(cached_entry.pet, cached_entry.mask, tp_for_bg) catch; end
+                    end
                     for lid in unique_ids
                         key = (tp_for_bg, lid)
                         !haskey(LMW._lesion_suv_cache, key) && 
@@ -3171,6 +3276,9 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
                     for v in cached_entry.mask
                         iv = Int(v)
                         iv > 0 && push!(unique_ids, iv)
+                    end
+                    if isdefined(LMW, :precompute_all_suv_metrics!) && cached_entry.pet !== nothing
+                        try LMW.precompute_all_suv_metrics!(cached_entry.pet, cached_entry.mask, tp_for_bg) catch; end
                     end
                     for lid in unique_ids
                         key = (tp_for_bg, lid)

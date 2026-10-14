@@ -1,5 +1,6 @@
 [deps]
 h5py = ""
+python-docx = ""
 numpy = ""
 scipy = ""
 nibabel = ""

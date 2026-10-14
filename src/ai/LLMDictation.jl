@@ -11,6 +11,7 @@ export compile_timepoint_clinical_data,
        generate_report_async,
        extract_clinical_fields,
        extract_clinical_fields_async,
+       translate_report_to_english,
        copy_to_clipboard,
        TimePointClinicalData,
        LesionFinding,
@@ -603,6 +604,64 @@ function generate_report_async(
             end
         end
     end
+end
+
+"""
+    translate_report_to_english(german_text::String; api_key="", api_base="", model="") -> String
+
+Translates German radiological report to English. Uses DIZ LLM platform if DIZ_API_KEY
+is present, otherwise calls AcademicCloud Qwen.
+"""
+function translate_report_to_english(
+    german_text::String;
+    api_key::String = "",
+    api_base::String = "",
+    model::String = ""
+)::String
+    isempty(strip(german_text)) && return ""
+
+    diz_key = !isempty(api_key) ? api_key : get(ENV, "DIZ_API_KEY", "")
+    diz_base = !isempty(api_base) ? api_base : get(ENV, "DIZ_API_BASE", "https://ki-plattform.diz-ag.med.ovgu.de/api/")
+    diz_model = !isempty(model) ? model : get(ENV, "DIZ_MODEL", "gpt-oss:120b")
+
+    messages = [
+        Dict("role" => "system",
+             "content" => "You are an expert radiologist and medical translator."),
+        Dict("role" => "user",
+             "content" => "Translate the following German radiological dictation to English. Only output the English translation and nothing else:\n\n$german_text")
+    ]
+
+    if !isempty(diz_key)
+        url = rstrip(diz_base, '/') * "/chat/completions"
+        body_dict = Dict(
+            "model" => diz_model,
+            "messages" => messages
+        )
+        body_json = JSON.json(body_dict)
+        (tmp_path, tmp_io) = mktemp()
+        try
+            write(tmp_io, body_json)
+            close(tmp_io)
+            cmd = `curl -s --retry 2 --max-time 120 -X POST $url -H "Authorization: Bearer $diz_key" -H "Content-Type: application/json" -d @$tmp_path`
+            output = read(cmd, String)
+            resp = JSON.parse(output)
+            choices = get(resp, "choices", [])
+            if !isempty(choices)
+                msg = get(choices[1], "message", Dict())
+                c = strip(get(msg, "content", ""))
+                if !isempty(c) && !startswith(c, "Error")
+                    return c
+                end
+            end
+        catch e
+            @warn "[TranslateReport] DIZ translation failed: $e, falling back to AcademicCloud"
+        finally
+            rm(tmp_path, force=true)
+        end
+    end
+
+    # Fallback to AcademicCloud Qwen
+    return call_academiccloud_chat(messages; model=DEFAULT_MODEL, max_tokens=3000, temperature=0.1)
 end
 
 """

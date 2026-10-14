@@ -202,4 +202,8 @@ using JSON
     include("test_interactive_lesion_mapping.jl")
     include("test_lesion_anatomy_isolation.jl")
     include("test_live_navigation_e2e.jl")
+    include("test_anatomy_persistence_and_overlap.jl")
+    include("test_autosave_and_history.jl")
+    include("test_report_translation.jl")
+    include("test_lesion_suv_metrics.jl")
 end

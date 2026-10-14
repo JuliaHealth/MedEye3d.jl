@@ -265,8 +265,8 @@ using MedEye3d.EPSMAReportWindow
             ]
         )
 
-        out_en = "/home/jm/.gemini/antigravity-cli/brain/853d9462-f5ad-4cf0-874c-6c7072725016/scratch/test_export_EN.docx"
-        out_de = "/home/jm/.gemini/antigravity-cli/brain/853d9462-f5ad-4cf0-874c-6c7072725016/scratch/test_export_DE.docx"
+        out_en = joinpath(tempdir(), "test_export_EN.docx")
+        out_de = joinpath(tempdir(), "test_export_DE.docx")
 
         res_en = export_to_docx(rep, out_en; lang = "EN")
         @test isfile(res_en)
@@ -277,14 +277,41 @@ using MedEye3d.EPSMAReportWindow
         @test filesize(res_de) > 10000
     end
 
-    # ── Test 6: Makie Window Lifecycle ───────────────────────────────────────
-    @testset "Makie Report Window Lifecycle" begin
+    # ── Test 6: Makie Window Lifecycle & Fluid Scrolling ─────────────────────
+    @testset "Makie Report Window Lifecycle & Fluid Scrolling" begin
         rep = EPSMAReport(patient_id = "PAT_UI_TEST")
-        # In test mode, verify window opens and closes without crashing
+        # In test mode, verify window opens, scrolls smoothly, and closes without crashing
         ENV["MEDEYE3D_TEST_MODE"] = "true"
         try
             screen = open_epsma_report_window(rep)
             @test active_report_screen[] !== nothing
+            sleep(0.5)
+
+            fig = EPSMAReportWindow.active_report_fig[]
+            @test fig !== nothing
+
+            # Verify scroll down via mouse wheel event
+            fig.scene.events.scroll[] = (0.0f0, -2.0f0)
+            sleep(0.1)
+            body_scroll = fig.layout[3, 1]
+            sl = contents(body_scroll[1, 2])[1]
+            @test sl.value[] < 1.0
+
+            # Verify keyboard navigation
+            fig.scene.events.keyboardbutton[] = Makie.KeyEvent(Makie.Keyboard.down, Makie.Keyboard.press)
+            sleep(0.05)
+            @test sl.value[] < 1.0
+
+            # Verify End key jumps to bottom
+            fig.scene.events.keyboardbutton[] = Makie.KeyEvent(Makie.Keyboard._end, Makie.Keyboard.press)
+            sleep(0.05)
+            @test sl.value[] == 0.0
+
+            # Verify Home key jumps back to top
+            fig.scene.events.keyboardbutton[] = Makie.KeyEvent(Makie.Keyboard.home, Makie.Keyboard.press)
+            sleep(0.05)
+            @test sl.value[] == 1.0
+
             close_epsma_report_window()
             # After close, screen is hidden (not destroyed) for fast reopen
             @test active_report_screen[] !== nothing

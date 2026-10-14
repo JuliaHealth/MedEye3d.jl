@@ -7,6 +7,7 @@ import ..SegmentationDisplay: synchronized_makie_renderloop, GLOBAL_OPENGL_LOCK,
 import ..SegmentationDisplay.MakieEventHandlers as _MEH
 import ..EPSMAStructuredReport as ESR
 import ..LLMDictation
+import ..PriorReportWindow as PRW
 
 export open_epsma_report_window, close_epsma_report_window, active_report_screen, active_report_fig
 
@@ -103,7 +104,7 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
     
     btn_export = Button(tb_layout[1, 5], label = "Export Word (.docx)", buttoncolor = GRN, labelcolor = TXT, fontsize = 11)
     btn_copy   = Button(tb_layout[1, 6], label = "Copy Text", buttoncolor = BG_CARD, labelcolor = TXT, fontsize = 11)
-    btn_prior  = Button(tb_layout[1, 7], label = "[+] Load Prior Report", buttoncolor = BG_CARD, labelcolor = TXT, fontsize = 11)
+    btn_prior  = Button(tb_layout[1, 7], label = "[V] Prior Report", buttoncolor = BG_CARD, labelcolor = TXT, fontsize = 11)
     btn_refresh= Button(tb_layout[1, 8], label = "Refresh", buttoncolor = BG_CARD, labelcolor = TXT, fontsize = 11)
     btn_close  = Button(tb_layout[1, 9], label = "← Return to Main Panel", buttoncolor = RGBf(0.4, 0.15, 0.15), labelcolor = TXT, fontsize = 11)
 
@@ -114,26 +115,150 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
 
     # Scrollable Main Body Layout — expanded width
     body_scroll = GridLayout(fig[3, 1])
-    sl = Slider(body_scroll[1, 2], range = 0:0.005:1, startvalue = 1, horizontal = false, tellheight = false)
+    rowsize!(fig.layout, 3, Relative(1.0))
 
-    g = GridLayout(body_scroll[1, 1], tellheight = false, halign = :left, valign = sl.value)
+    sl = Slider(body_scroll[1, 2], range = 0.0:0.002:1.0, startvalue = 1.0, horizontal = false, tellheight = false)
+    g = GridLayout(body_scroll[1, 1], tellheight = false, halign = :left, valign = :top)
     rowgap!(g, 10)
 
     # CRITICAL: Enforce full-width expansion across all layout levels so text fields never shrinkwrap!
     colsize!(fig.layout, 1, Relative(1.0))
-    colsize!(body_scroll, 1, Relative(0.99))
-    colsize!(body_scroll, 2, Fixed(16))
+    colsize!(body_scroll, 1, Relative(0.985))
+    colsize!(body_scroll, 2, Fixed(18))
     colsize!(g, 1, Relative(1.0))
 
-    on(fig.scene.events.scroll) do scroll
-        content_h = g.layoutobservables.computedbbox[].widths[2]
-        window_h = size(fig.scene)[2]
-        if content_h > window_h * 0.4
-            sl.value[] = clamp(sl.value[] + scroll[2] * 0.04, 0.0, 1.0)
-        else
-            sl.value[] = 1.0
+    # ── High-Performance Direct BBox Scroll Engine ───────────────────────────
+    # Directly offsets computedbbox of widgets in O(1) time (~3ms),
+    # completely bypassing the heavy GridLayout solver that caused freezing/stuttering.
+    _scroll_offset_px = Ref(0.0f0)
+    _max_scroll_px = Ref(0.0f0)
+    _bbox_cache = Dict{Int, Makie.GeometryBasics.HyperRectangle{2, Float32}}()
+    _bbox_cache_ready = Ref(false)
+    _is_syncing_slider = Ref(false)
+    _scroll_ready = Ref(false)
+    Rect2f_scroll = Makie.GeometryBasics.HyperRectangle{2, Float32}
+
+    function _cache_widget_bboxes!()
+        empty!(_bbox_cache)
+        for (i, c) in enumerate(g.content)
+            w = c.content
+            bb = w.layoutobservables.computedbbox[]
+            _bbox_cache[i] = Rect2f_scroll(Float32[bb.origin[1], bb.origin[2]], Float32[bb.widths[1], bb.widths[2]])
         end
+        if !isempty(_bbox_cache)
+            all_bbs = values(_bbox_cache)
+            min_y = minimum(bb.origin[2] for bb in all_bbs)
+            max_y = maximum(bb.origin[2] + bb.widths[2] for bb in all_bbs)
+            content_h = max_y - min_y
+            if content_h < 50.0f0
+                return false
+            end
+            window_h = Float32(body_scroll.layoutobservables.computedbbox[].widths[2])
+            if window_h < 100.0f0
+                window_h = Float32(size(fig.scene)[2] - 100)
+            end
+            _max_scroll_px[] = max(0.0f0, content_h - window_h + 80.0f0)
+            _bbox_cache_ready[] = true
+            return true
+        else
+            _max_scroll_px[] = 0.0f0
+            return false
+        end
+    end
+
+    function _apply_scroll!(offset_px::Float32; sync_slider::Bool = true)
+        _scroll_offset_px[] = offset_px
+        !_bbox_cache_ready[] && return
+        for (i, c) in enumerate(g.content)
+            w = c.content
+            orig = get(_bbox_cache, i, nothing)
+            orig === nothing && continue
+            new_bbox = Rect2f_scroll(Float32[orig.origin[1], orig.origin[2] + offset_px], orig.widths)
+            w.layoutobservables.computedbbox[] = new_bbox
+        end
+        if sync_slider && _max_scroll_px[] > 1.0f0
+            _is_syncing_slider[] = true
+            try
+                sl_val = clamp(1.0 - Float64(offset_px / _max_scroll_px[]), 0.0, 1.0)
+                set_close_to!(sl, sl_val)
+            finally
+                _is_syncing_slider[] = false
+            end
+        end
+    end
+
+    # Slider Drag Handler: smooth dragging without triggering layout solver
+    on(sl.value) do val
+        _is_syncing_slider[] && return
+        if !_bbox_cache_ready[]
+            _cache_widget_bboxes!() && (g.block_updates = true)
+        end
+        !_bbox_cache_ready[] && return
+        _max_scroll_px[] <= 1.0f0 && return
+        target_offset = Float32((1.0 - val) * _max_scroll_px[])
+        _apply_scroll!(target_offset; sync_slider = false)
+    end
+
+    # Mouse Wheel Scroll Handler: 60px/step responsive scroll
+    on(fig.scene.events.scroll) do scroll
+        if !_bbox_cache_ready[]
+            _cache_widget_bboxes!() && (g.block_updates = true)
+        end
+        !_bbox_cache_ready[] && return Consume(true)
+        _max_scroll_px[] <= 1.0f0 && return Consume(true)
+        step_px = Float32(-scroll[2] * 60.0f0)
+        new_offset = clamp(_scroll_offset_px[] + step_px, 0.0f0, _max_scroll_px[])
+        _apply_scroll!(new_offset; sync_slider = true)
         return Consume(true)
+    end
+
+    # Keyboard Navigation: Up/Down arrow keys, PageUp/PageDown, Home/End
+    on(fig.scene.events.keyboardbutton) do event
+        event.action != Makie.Keyboard.press && event.action != Makie.Keyboard.repeat && return Consume(false)
+        if !_bbox_cache_ready[]
+            _cache_widget_bboxes!() && (g.block_updates = true)
+        end
+        !_bbox_cache_ready[] && return Consume(false)
+        _max_scroll_px[] <= 1.0f0 && return Consume(false)
+
+        step_px = if event.key == Makie.Keyboard.down
+            80.0f0
+        elseif event.key == Makie.Keyboard.up
+            -80.0f0
+        elseif event.key == Makie.Keyboard.page_down
+            400.0f0
+        elseif event.key == Makie.Keyboard.page_up
+            -400.0f0
+        elseif event.key == Makie.Keyboard.home
+            -_scroll_offset_px[]
+        elseif event.key == Makie.Keyboard._end
+            _max_scroll_px[] - _scroll_offset_px[]
+        else
+            0.0f0
+        end
+
+        if step_px != 0.0f0
+            new_offset = clamp(_scroll_offset_px[] + step_px, 0.0f0, _max_scroll_px[])
+            _apply_scroll!(new_offset; sync_slider = true)
+            return Consume(true)
+        end
+        return Consume(false)
+    end
+
+    # Window Resize Handler: recalculate scroll boundaries when window is resized
+    on(fig.scene.events.window_area) do _
+        _refresh_scroll_cache!()
+    end
+
+    function _refresh_scroll_cache!()
+        @async begin
+            sleep(0.05)
+            g.block_updates = false
+            sleep(0.08)
+            _cache_widget_bboxes!()
+            g.block_updates = true
+            _apply_scroll!(_scroll_offset_px[]; sync_slider = true)
+        end
     end
 
     r = [0]
@@ -221,8 +346,15 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
     end
 
     # Prior report panel state
-    prior_report_obs = Observable(report.prior_report_text)
-    prior_panel_visible = Observable(!isempty(report.prior_report_text))
+    init_prior = if !isempty(report.prior_report_text)
+        report.prior_report_text
+    else
+        is_de_init = (init_lang == "DE")
+        is_de_init ? (!isempty(report.original_report_de) ? report.original_report_de : report.original_report_en) :
+                     (!isempty(report.original_report_en) ? report.original_report_en : report.original_report_de)
+    end
+    prior_report_obs = Observable(init_prior)
+    prior_panel_visible = Observable(!isempty(init_prior))
 
     # Function to apply language switch
     function set_language!(lang::String)
@@ -307,8 +439,18 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
         
         # Section 7 title
         sec7_title[] = is_de ? "7. Technische Parameter (Benutzereingabe)" : "7. Technical Parameters (User Input)"
+        
+        # Update prior report observable if auto-loaded from metadata
+        if startswith(report.prior_report_path, "Prior TP") || startswith(report.prior_report_path, "Baseline TP")
+            prior_report_obs[] = is_de ?
+                (!isempty(report.prior_report_de) ? report.prior_report_de : (!isempty(report.original_report_de) ? report.original_report_de : report.prior_report_text)) :
+                (!isempty(report.prior_report_en) ? report.prior_report_en : (!isempty(report.original_report_en) ? report.original_report_en : report.prior_report_text))
+        end
             
         status_text[] = is_de ? "Status: Sprache auf Deutsch gesetzt" : "Status: Language switched to English"
+        if _bbox_cache_ready[]
+            _refresh_scroll_cache!()
+        end
     end
 
     on(btn_lang_en.clicks) do _; set_language!("EN"); end
@@ -796,46 +938,9 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
     
     # Load Prior Report handler
     on(btn_prior.clicks) do _
-        @async begin
-            status_text[] = "[...] Choosing prior report file..."
-            
-            # Show native file dialog (zenity on Linux)
-            file_path = try
-                cmd = Cmd(["zenity", "--file-selection",
-                           "--title=Load Prior Report (Vorbefund)",
-                           "--file-filter=Report files (txt, docx)|*.txt *.docx *.text *.md",
-                           "--file-filter=All files|*"])
-                chomp(read(cmd, String))
-            catch
-                nothing
-            end
-            
-            if file_path === nothing || isempty(file_path)
-                status_text[] = "[CANCELLED] Prior report loading cancelled"
-                return
-            end
-            
-            status_text[] = "[...] Reading prior report: $(basename(file_path))..."
-            txt = ESR.read_prior_report(file_path)
-            
-            if isempty(txt)
-                status_text[] = "[ERR] Could not read prior report or file is empty: $(basename(file_path))"
-                return
-            end
-            
-            # Store in report and update UI
-            report.prior_report_text = txt
-            report.prior_report_path = file_path
-            prior_report_obs[] = txt
-            prior_panel_visible[] = true
-            
-            lang = current_lang[]
-            is_de = lang == "DE"
-            status_text[] = is_de ? 
-                "Vorbefund geladen: $(basename(file_path)) ($(length(txt)) Zeichen)" :
-                "Prior report loaded: $(basename(file_path)) ($(length(txt)) chars)"
-            println("[E-PSMA] Prior report loaded from $file_path ($(length(txt)) chars)")
-        end
+        status_text[] = "Opening Prior Report Window ($(current_lang[]))..."
+        PRW.open_prior_report_window(report.tp_index; lang = current_lang[])
+        status_text[] = "Prior Report Window opened for TP $(report.tp_index)"
     end
 
     on(btn_export.clicks) do _
@@ -948,6 +1053,7 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
             hdr_mitnm_lbl[] = "miTNM: $(report.final_mitnm)  |  TMTV: $(round(report.tmtv_cc, digits=2)) cc"
             set_language!(current_lang[])
             status_text[] = "[OK] Report refreshed with latest metadata!"
+            _refresh_scroll_cache!()
             if on_refresh !== nothing
                 on_refresh()
             end
@@ -1024,6 +1130,21 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
     active_report_fig[] = fig
     _report_screen_ref[] = screen
     println("[E-PSMA] Report window opened (independent screen: $(objectid(screen)), glscreen: $(screen.glscreen))")
+
+    # Coordinated startup for Direct BBox scroll engine
+    @async begin
+        for attempt in 1:25
+            sleep(0.04)
+            if _cache_widget_bboxes!()
+                g.block_updates = true
+                _scroll_ready[] = true
+                _apply_scroll!(_scroll_offset_px[]; sync_slider = true)
+                println("[E-PSMA] Direct BBox scroll engine ready: $(length(_bbox_cache)) widgets, max_scroll=$(round(_max_scroll_px[], digits=1))px")
+                break
+            end
+        end
+    end
+
     return screen
 end
 

@@ -130,6 +130,10 @@ include(joinpath("display", "EPSMAReportWindow.jl"))
 using .EPSMAReportWindow
 export EPSMAReportWindow, open_epsma_report_window, close_epsma_report_window
 
+include(joinpath("display", "PriorReportWindow.jl"))
+using .PriorReportWindow
+export PriorReportWindow, open_prior_report_window, close_prior_report_window
+
 
 # BoneSubsegmentation removed — bone surface/marrow data is purely precomputed
 # in preprocessing (recompute_bones.jl) using max_anatomy + Skellytour.

@@ -457,27 +457,52 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     # 1. Parse studies and time points from scene_hierarchy / metadata
     meta_dates = Dict{String, String}()
     meta_modalities = Dict{String, String}()
+    date_entries_map = Dict{String, Dict{String, Any}}()
+    meta_json = nothing
     if haskey(h5_init, "_meta_/metadata.json")
         try
             meta_json = JSON.parse(read(h5_init["_meta_/metadata.json"]))
+        catch e
+            @warn "Could not parse _meta_/metadata.json: $e"
+        end
+    end
+    if meta_json === nothing
+        meta_fallback = joinpath(dirname(h5_path), "metadata.json")
+        if isfile(meta_fallback)
+            try
+                meta_json = JSON.parsefile(meta_fallback)
+            catch e
+                @warn "Could not parse fallback metadata.json: $e"
+            end
+        end
+    end
+
+    if meta_json !== nothing
+        try
             MEH.global_dicom_metadata[] = meta_json isa Dict ? meta_json : Dict("items" => meta_json)
-            for item in meta_json
-                for (k, v) in item
-                    if v isa Dict
-                        d_str = if length(k) >= 8 && all(isdigit, k[1:8])
-                            prefix = "$(k[1:4])-$(k[5:6])-$(k[7:8])"
-                            suffix = length(k) > 8 ? " (" * replace(strip(c -> c == '_', k[9:end]), "_" => " ") * ")" : ""
-                            prefix * suffix
-                        else
-                            k
-                        end
-                        for sub_k in keys(v)
-                            sub_dict = v[sub_k]
-                            if sub_dict isa Dict && haskey(sub_dict, "name")
-                                v_name = sub_dict["name"]
-                                meta_dates[v_name] = d_str
-                                if haskey(sub_dict, "Modality")
-                                    meta_modalities[v_name] = sub_dict["Modality"]
+            meta_items = meta_json isa AbstractVector ? meta_json : [meta_json]
+            for item in meta_items
+                if item isa Dict
+                    for (k, v) in item
+                        if v isa Dict
+                            if length(k) >= 8 && all(isdigit, k[1:8])
+                                date_entries_map[k] = v
+                            end
+                            d_str = if length(k) >= 8 && all(isdigit, k[1:8])
+                                prefix = "$(k[1:4])-$(k[5:6])-$(k[7:8])"
+                                suffix = length(k) > 8 ? " (" * replace(strip(c -> c == '_', k[9:end]), "_" => " ") * ")" : ""
+                                prefix * suffix
+                            else
+                                k
+                            end
+                            for sub_k in keys(v)
+                                sub_dict = v[sub_k]
+                                if sub_dict isa Dict && haskey(sub_dict, "name")
+                                    v_name = sub_dict["name"]
+                                    meta_dates[v_name] = d_str
+                                    if haskey(sub_dict, "Modality")
+                                        meta_modalities[v_name] = sub_dict["Modality"]
+                                    end
                                 end
                             end
                         end
@@ -650,6 +675,33 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         ts_atlas_aligned = read(h5_init["ATLAS/max_anatomy"])
     end
 
+    persisted_annotations = Dict{String, Any}()
+    if haskey(h5_init, "_meta_")
+        if haskey(h5_init, "_meta_/lesion_annotations.json")
+            try
+                persisted_annotations = JSON.parse(read(h5_init["_meta_/lesion_annotations.json"]))
+                println("[AppMain] Loaded $(length(persisted_annotations)) persisted lesion annotations from _meta_/lesion_annotations.json"); flush(stdout)
+            catch e
+                @warn "Failed to parse _meta_/lesion_annotations.json: $e"
+            end
+        end
+    end
+    if isempty(persisted_annotations)
+        companion_json = replace(h5_path, r"\.(h5|hdf5)$"i => "_annotations.json")
+        for cand_json in [companion_json, DEFAULT_SAVE_PATH]
+            if isfile(cand_json)
+                try
+                    persisted_annotations = JSON.parse(read(cand_json, String))
+                    if !isempty(persisted_annotations)
+                        println("[AppMain] Loaded $(length(persisted_annotations)) persisted lesion annotations from companion $cand_json"); flush(stdout)
+                        break
+                    end
+                catch e
+                    @warn "Failed to parse companion annotations $cand_json: $e"
+                end
+            end
+        end
+    end
     if haskey(h5_init, "_meta_")
         if haskey(h5_init, "_meta_/max_anatomy_labels.json")
             try
@@ -879,12 +931,92 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
 
     tp_labels_map = Dict{Int, String}()
     tp_nodes_map = Dict{Int, String}()
+
+    # Build chronological date lists for PET and SPECT from metadata.json
+    pet_meta_dates = sort([k for (k, v) in date_entries_map if haskey(v, "PET") || haskey(v, "PT")])
+    spect_meta_dates = sort([k for (k, v) in date_entries_map if haskey(v, "SPECT") || haskey(v, "NM")])
+    all_meta_dates = sort(collect(keys(date_entries_map)))
+
+    pet_counter = 0
+    spect_counter = 0
+
     for (s_idx, study) in enumerate(studies)
         tp_i = s_idx - 1
         modality = study[1]
         orig_tp = study[2]
         date_str = study[3]
         node_name = study[7]
+        ct_fname = length(study) >= 4 ? study[4] : ""
+        pet_fname = length(study) >= 5 ? study[5] : ""
+
+        # Resolve matching date entry from metadata.json
+        matched_date_key = ""
+        matched_info = Dict{String, Any}()
+
+        # Strategy 1: Check if ct_fname or pet_fname has date string in it
+        for (dk, dv) in date_entries_map
+            if occursin(dk, ct_fname) || occursin(dk, pet_fname)
+                matched_date_key = dk
+                matched_info = dv
+                break
+            end
+        end
+
+        # Strategy 2: Check by modality and chronological/orig_tp index
+        if isempty(matched_date_key)
+            if uppercase(modality) == "PET"
+                pet_counter += 1
+                if orig_tp + 1 <= length(pet_meta_dates)
+                    matched_date_key = pet_meta_dates[orig_tp + 1]
+                elseif pet_counter <= length(pet_meta_dates)
+                    matched_date_key = pet_meta_dates[pet_counter]
+                end
+            elseif uppercase(modality) == "SPECT"
+                spect_counter += 1
+                if spect_counter <= length(spect_meta_dates)
+                    matched_date_key = spect_meta_dates[spect_counter]
+                end
+            elseif s_idx <= length(all_meta_dates)
+                matched_date_key = all_meta_dates[s_idx]
+            end
+            if !isempty(matched_date_key) && haskey(date_entries_map, matched_date_key)
+                matched_info = date_entries_map[matched_date_key]
+            end
+        end
+
+        # Format date string nicely if date was resolved
+        if !isempty(matched_date_key) && length(matched_date_key) >= 8 && all(isdigit, matched_date_key[1:8])
+            formatted_date = "$(matched_date_key[1:4])-$(matched_date_key[5:6])-$(matched_date_key[7:8])"
+            # Update date_str if it was generic
+            if startswith(date_str, "PET TP") || startswith(date_str, "SPECT TP")
+                date_str = formatted_date
+            end
+        end
+
+        # Extract German and English descriptions
+        desc_de = get(matched_info, "Description", "")
+        desc_en = get(matched_info, "EnglishDescription", "")
+
+        # If English description is missing but German is available, translate on-the-fly
+        if isempty(desc_en) && !isempty(desc_de)
+            try
+                @info "[Translation] Translating German description for TP $tp_i ($matched_date_key)..."
+                desc_en = MedEye3d.LLMDictation.translate_report_to_english(desc_de)
+                if !isempty(desc_en) && !startswith(desc_en, "Error") && !startswith(desc_en, "API Error") && !startswith(desc_en, "Connection Error")
+                    matched_info["EnglishDescription"] = desc_en
+                    @info "[Translation] Successfully translated TP $tp_i ($matched_date_key): $(length(desc_en)) chars"
+                else
+                    desc_en = ""
+                end
+            catch te
+                @warn "[Translation] Could not translate description for TP $tp_i: $te"
+            end
+        end
+
+        MEH.tp_descriptions[tp_i] = desc_de
+        MEH.tp_english_descriptions[tp_i] = desc_en
+        @info "[AppMain] TP $tp_i ($modality $date_str): desc_de=$(length(desc_de)) chars, desc_en=$(length(desc_en)) chars"
+
         lbl = "$modality $date_str (TP $tp_i)"
         tp_labels_map[tp_i] = lbl
         tp_nodes_map[tp_i] = node_name
@@ -1070,9 +1202,26 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         map(lesion_ids_ints) do i
             seg_int = Int(i)
             display_name = ""
+            # 0. Try persisted annotations first
+            if haskey(persisted_annotations, string(seg_int))
+                p_entry = persisted_annotations[string(seg_int)]
+                if p_entry isa AbstractDict
+                    p_disp = get(p_entry, "_display_name", "")
+                    p_anat = get(p_entry, "BaseAnatomy", "")
+                    p_side = get(p_entry, "BaseAnatomySide", "")
+                    if !isempty(p_disp) && !startswith(p_disp, "Lesion ")
+                        clean_disp = replace(p_disp, Regex("^$(seg_int):\\s*") => "")
+                        display_name = clean_disp
+                    elseif !isempty(p_anat)
+                        clean_a = replace(p_anat, r"\s*\(UBERON\)" => "")
+                        clean_a = titlecase(replace(clean_a, "_" => " "))
+                        display_name = (isempty(p_side) || p_side == "None" ? "" : "$p_side ") * clean_a
+                    end
+                end
+            end
             # 1. Try seg_names, skip generic placeholders
-            if haskey(tp0_sn, seg_int) && !isempty(tp0_sn[seg_int])
-                sn = tp0_sn[seg_int]
+            if isempty(display_name) && haskey(tp0_sn, seg_int) && !isempty(tp0_sn[seg_int])
+                sn = replace(tp0_sn[seg_int], Regex("^$(seg_int):\\s*") => "")
                 if !startswith(sn, "unknown_") && !startswith(sn, "Segment") && !startswith(sn, "artificial_")
                     cent = get(MEH.lesion_centroids_cache, (0, seg_int), get(MEH.lesion_centroids_cache, seg_int, nothing))
                     cz = cent !== nothing ? cent[3] : 0
@@ -1149,7 +1298,8 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
 
     # 4. Create Makie control window layout
     println("Creating Makie control panel layout...")
-    makie_win = LesionMetadataWindow.create_metadata_window(active_lesion, lesion_ids, nothing)
+    annot_companion = replace(h5_path, r"\.(h5|hdf5)$"i => "_annotations.json")
+    makie_win = LesionMetadataWindow.create_metadata_window(active_lesion, lesion_ids, nothing; save_path = annot_companion)
 
     # 5. Launch Vulkan display
     println("Launching MedEye3D Vulkan display...")

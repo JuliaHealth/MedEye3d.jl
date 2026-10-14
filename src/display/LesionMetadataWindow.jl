@@ -38,9 +38,11 @@ import ..LesionAssociation as LA
 import ..LLMDictation
 import ..EPSMAStructuredReport as ESR
 import ..EPSMAReportWindow as ERW
+import ..PriorReportWindow as PRW
 import ..SegmentationDisplay.ReactOnMouseClickAndDrag as _ROMCAD
 
-export create_metadata_window, display_metadata_window, get_active_lesion_db, get_mask_ids, lookup_anatomy
+export create_metadata_window, display_metadata_window, get_active_lesion_db, get_mask_ids, lookup_anatomy, PRW,
+       compute_lesion_suv_metrics, precompute_all_suv_metrics!, get_lesion_suv_metrics, _get_suv_max, _get_suv_mean, _get_suv_peak
 
 # Registry of all Menu widgets for global click-outside-to-close dismiss
 const _ALL_MENUS = Makie.Menu[]
@@ -291,6 +293,24 @@ function request_autosave(; skip_dictation=false)
     end
 end
 
+const _global_flush_lesion = Ref{Any}(nothing)
+
+"""
+    flush_current_lesion!(lid=nothing)
+
+Synchronously flushes current widget state of lesion `lid` to database and disk channel.
+"""
+function flush_current_lesion!(lid=nothing)
+    if _global_flush_lesion[] !== nothing
+        try
+            _global_flush_lesion[](lid)
+        catch e
+            @debug "Error executing flush_current_lesion!: $e"
+        end
+    end
+end
+export flush_current_lesion!
+
 """
     get_lesion_has_expert_edits(lid)::Bool
 
@@ -496,6 +516,9 @@ function _builtin_schema()::Vector{QuestionDef}
         QuestionDef("SUV max", "Maximum & Peak SUV values in this lesion",
             String[],
             String["Quantitative"], "both", "0.0"),
+        QuestionDef("SUV mean", "Mean SUV value across all voxels in this lesion",
+            String[],
+            String["Quantitative"], "both", "0.0"),
         QuestionDef("PRIMARY score pattern?", "Automatically calculated PRIMARY score (v1.0) based on zonal location and SUVmax.",
             String[],
             String["Prostate Analysis", "PROMISE V2"], "prostate", "Pending..."),
@@ -505,8 +528,8 @@ function _builtin_schema()::Vector{QuestionDef}
         QuestionDef("Alternative Hypothesis (False Positive)", "Inferred alternative diagnosis or benign mimic based on morphological and clinical criteria.",
             String["None / Malignant Suspected", "Technical Artifact", "Physiological uptake", "Small blood vessel / tubular structure", "Bone Scar / Hardware Graft", "Bone Island / Enostosis", "Osteopoikilosis / Dysplasia", "Bone Infarction / Osteonecrosis", "Trauma / Stress Fracture", "Benign Osteoporotic Collapse", "Fibrous Dysplasia", "Liposclerosing Myxofibrous Tumor (LSMFT)", "Degenerative Osteoarthritis", "Enchondroma", "Paget's Disease", "Osseous Hemangioma", "Osteoma", "Severe Osteoporosis (RID39300)", "Multiple Myeloma", "Chronic Osteomyelitis", "Brodie Abscess", "Giant Cell Tumor (GCT)", "Telangiectatic Osteosarcoma", "Osteosarcoma", "Desmoplastic Fibroma", "Blowout Metastasis (RCC / Thyroid)", "Low-Grade Central Osteosarcoma", "Trigeminal Ganglion", "Stellate Ganglion", "Coeliac Ganglion", "Hypogastric Ganglion", "Sacral Ganglion", "Sympathetic Ganglion", "Testicular Distant Nodal Route", "Sarcoidosis", "Lung Fibrosis", "Reactive Lymph Node", "Suspicious Lymph Node", "Benign Adrenal Adenoma", "Adrenal Metastasis / Malignancy", "Pancreatic Neuroendocrine Tumor (PanNET)", "Pancreatic Ductal Adenocarcinoma (PDAC)", "Accessory Spleen / Splenosis", "Schwannoma / Nerve Sheath Tumor", "Vestibular Schwannoma", "Glomus Tumor (Paraganglioma)", "Meningioma", "Liver Hemangioma", "Liver Hematoma", "CZ Mickey Mouse Base", "Symmetric BPH", "Prostatitis", "Extraprostatic extension (T3b/T4)", "PZ Prostate Cancer", "TZ Prostate Cancer", "PSMA-Cold Malignancy Suspected", "Aneurysmal Bone Cyst (ABC)", "Simple Bone Cyst (SBC)", "Radiation-Induced Sarcoma", "Brown Tumor (Hyperparathyroidism)", "Modic Type 1 Endplate Changes", "Diffuse Bone Marrow Activation (Anemia)", "Inflammatory Spondylitis (AS)", "Osteoid Osteoma", "Desmoid Tumor (Aggressive Fibromatosis)", "Nodular Fasciitis", "Lipoma / Angiolipoma / Hibernoma", "Intramuscular Myxoma", "Gynecomastia / PASH", "Elastofibroma Dorsi", "Thyroid / Parathyroid Adenoma", "Thymoma / Thymic Hyperplasia", "Cerebral Infarction (Stroke)", "Synchronous Colorectal Cancer", "Primary Lung Cancer", "Malignant Melanoma Metastasis", "Lymphoma (DLBCL / FL)", "Tuberculosis (TB)", "Diverticulitis", "Cholelithiasis (Gallbladder Stones)", "Dermatofibroma / Acrochordon", "Active Vascular Calcification", "Esophagitis / Swallowed Saliva", "Bronchogenic Cyst", "Pheochromocytoma"],
             String["Final Assessment"], "both", "None / Malignant Suspected"),
-        QuestionDef("Certainty", "Degree of diagnostic certainty (1 = very low, 10 = very high)",
-            String["slider", "1", "10"],
+        QuestionDef("Certainty", "Degree of diagnostic certainty (0 = very low / artefact, 10 = very high)",
+            String["slider", "0", "10"],
             String["Final Assessment"], "both", "10"),
         QuestionDef("Comment", "Additional clinical comments or observations.",
             String[],
@@ -520,16 +543,19 @@ end
 const DISPLAY_LABEL_OVERRIDES = Dict{String, String}(
     "Other Structural & Soft Tissue Changes (Surrounding Changes Part C)" => "Other Structural",
     "Relation to Bone Marrow (Surrounding Changes Part A)" => "Marrow Changes",
-    "Periosteal Reaction (Surrounding Changes Part B)" => "Periosteal Reaction",
+    "Periosteal Reaction (Surrounding Changes Part B)" => "Periosteal React",
     "Macroscopic Pattern" => "Macro Pattern",
     "Inner Texture / Density / Attenuation" => "Inner Texture/HU",
     "Border and Margin" => "Border / Margin",
+    "Lesion Shape" => "Shape",
     "Lesion Orientation" => "Orientation",
     "SUV Quantitative Metrics & References" => "SUV Metrics/Ref",
     "Clinical Context & Staging Variables" => "Clinical Context",
     "Alternative Hypothesis (False Positive)" => "Alt. Hypothesis",
     "PRIMARY score pattern?" => "PRIMARY Pattern",
     "Lesion tracking name?" => "Tracking Name",
+    "SUV max" => "SUV max",
+    "SUV mean" => "SUV mean",
 )
 
 function load_schema()::Vector{QuestionDef}
@@ -554,6 +580,15 @@ function load_schema()::Vector{QuestionDef}
             string(get(q, "meta_or_prostate", "both")),
             string(get(q, "default_answer", ""))
         ))
+    end
+    if !any(q -> q.short == "SUV mean", result)
+        suv_max_idx = findfirst(q -> q.short == "SUV max", result)
+        suv_mean_q = QuestionDef("SUV mean", "Mean SUV value across all voxels in this lesion", String[], String["Quantitative"], "both", "0.0")
+        if suv_max_idx !== nothing
+            insert!(result, suv_max_idx + 1, suv_mean_q)
+        else
+            push!(result, suv_mean_q)
+        end
     end
     if !any(q -> q.short == "Caption", result)
         push!(result, QuestionDef("Caption", "Auto-generated caption for key images.", String[], String["Reporting"], "both", ""))
@@ -1651,87 +1686,189 @@ end
 export save_measurements, load_measurements
 
 # ─── SUV Computation ─────────────────────────────────────────────────────────
+
+function _get_display_spacing()::Tuple{Float64, Float64, Float64}
+    native_spacing = try
+        Main.first_spacing
+    catch
+        (1.0, 1.0, 2.0)
+    end
+    hires_factor = try
+        Main.HIRES_FACTOR
+    catch
+        2.0
+    end
+    sp_x = Float64(native_spacing[1]) / Float64(hires_factor)
+    sp_y = Float64(native_spacing[2]) / Float64(hires_factor)
+    sp_z = Float64(native_spacing[3])
+    return (sp_x, sp_y, sp_z)
+end
+
+function _get_tp_pet_and_mask(tp_idx::Int)
+    _MEH === nothing && return (nothing, nothing)
+    
+    pet = try
+        lock(_MEH._centroids_lock) do
+            get(_MEH.pet_volumes_cache, tp_idx, nothing)
+        end
+    catch
+        get(_MEH.pet_volumes_cache, tp_idx, nothing)
+    end
+    
+    entry = try
+        lock(_MEH._tp_cache_lock) do
+            get(_MEH.tp_data_cache, tp_idx, nothing)
+        end
+    catch
+        get(_MEH.tp_data_cache, tp_idx, nothing)
+    end
+    if entry === nothing
+        try
+            entry = _MEH.get_or_load_tp_data(tp_idx)
+        catch
+            entry = nothing
+        end
+    end
+    
+    mask = nothing
+    if entry !== nothing
+        if pet === nothing && isdefined(entry, :pet)
+            pet = entry.pet
+        end
+        mask = if isdefined(entry, :mask_i16) && entry.mask_i16 !== nothing
+            entry.mask_i16
+        elseif isdefined(entry, :mask) && entry.mask !== nothing
+            entry.mask
+        else
+            nothing
+        end
+    end
+    
+    return (pet, mask)
+end
+
 """
     compute_suv_max_at_centroid(pet_vol, centroid) -> Float32
 
-Compute SUVmax in a 3x3x3 voxel neighborhood around the lesion centroid.
+Compute SUVmax in a 3x3x3 voxel neighborhood around the lesion centroid (fallback).
 `centroid` is [x, y, z] in voxel coordinates (1-indexed).
 """
-function compute_suv_max_at_centroid(pet_vol::AbstractArray{Float32, 3}, centroid::Vector{Int})::Float32
+function compute_suv_max_at_centroid(pet_vol::AbstractArray{<:Real, 3}, centroid::Vector{Int})::Float32
     suv_max = 0.0f0
     cx, cy, cz = centroid
     for dz in -1:1, dy in -1:1, dx in -1:1
         nx, ny, nz = cx + dx, cy + dy, cz + dz
         if 1 <= nx <= size(pet_vol, 1) && 1 <= ny <= size(pet_vol, 2) && 1 <= nz <= size(pet_vol, 3)
-            val = pet_vol[nx, ny, nz]
-            if val > suv_max; suv_max = val; end
+            val = Float32(pet_vol[nx, ny, nz])
+            if isfinite(val) && val > suv_max
+                suv_max = val
+            end
         end
     end
     return suv_max
 end
 
 """
-    compute_suv_peak(pet_vol, mask_vol, target_id, sp_x, sp_y, sp_z) -> Float32
+    compute_lesion_suv_metrics(pet_vol, mask_vol, lesion_id; sp_x=1.0, sp_y=1.0, sp_z=1.0) -> (max::Float32, mean::Float32, peak::Float32)
 
-Compute SUVpeak as the mean SUV in a 1cm³ spherical ROI centered at the voxel
-with the highest SUV within the lesion mask.
+Compute SUVmax, SUVmean, and SUVpeak strictly across the voxels belonging to `lesion_id` in `mask_vol`.
+- `suv_max`: Maximum PET voxel value where `mask_vol == lesion_id`.
+- `suv_mean`: Arithmetic mean of PET voxel values where `mask_vol == lesion_id`.
+- `suv_peak`: Mean SUV in a 1cm³ spherical ROI centered at the maximum SUV voxel and intersected with the lesion mask.
 """
-function compute_suv_peak(pet_vol::AbstractArray{Float32, 3}, mask_vol::AbstractArray{<:Integer, 3}, target_id::Int, sp_x::Float64, sp_y::Float64, sp_z::Float64)::Float32
-    lesion_vox = findall(mask_vol .== target_id)
+function compute_lesion_suv_metrics(pet_vol::AbstractArray{<:Real, 3},
+                                     mask_vol::AbstractArray{<:Real, 3},
+                                     lesion_id::Int;
+                                     sp_x::Float64 = 1.0,
+                                     sp_y::Float64 = 1.0,
+                                     sp_z::Float64 = 1.0)::NamedTuple{(:max, :mean, :peak), Tuple{Float32, Float32, Float32}}
+    lesion_id <= 0 && return (max=0.0f0, mean=0.0f0, peak=0.0f0)
+    
+    # 1. Collect lesion voxel indices
+    lesion_vox = findall(mask_vol .== lesion_id)
     if isempty(lesion_vox)
-        return 0.0f0
+        return (max=0.0f0, mean=0.0f0, peak=0.0f0)
     end
     
-    # 1. Find max SUV voxel in the lesion mask
-    max_suv = -1.0f0
+    sx, sy, sz = size(pet_vol)
+    if size(mask_vol) != (sx, sy, sz)
+        @warn "Dimension mismatch between PET $(size(pet_vol)) and Mask $(size(mask_vol))"
+        return (max=0.0f0, mean=0.0f0, peak=0.0f0)
+    end
+    
+    # 2. Compute SUV max, mean, and find coordinate of maximum
+    max_suv = -Inf32
     max_idx = lesion_vox[1]
+    sum_suv = 0.0
+    n_vox = 0
+    
     for idx in lesion_vox
-        val = pet_vol[idx]
-        if val > max_suv
-            max_suv = val
-            max_idx = idx
+        val = Float32(pet_vol[idx])
+        if isfinite(val)
+            val_clamped = max(0.0f0, val)
+            sum_suv += val_clamped
+            n_vox += 1
+            if val_clamped > max_suv
+                max_suv = val_clamped
+                max_idx = idx
+            end
         end
     end
     
-    # 2. 1cm³ sphere = 1000mm³ -> radius ≈ 6.2035mm
-    radius_mm = 6.2035
+    if n_vox == 0 || max_suv < 0.0f0
+        return (max=0.0f0, mean=0.0f0, peak=0.0f0)
+    end
+    
+    suv_mean = Float32(sum_suv / n_vox)
+    
+    # 3. Compute SUV peak (1cm³ sphere around max_idx, intersected with lesion mask)
+    radius_mm = 6.2035  # (3/(4*pi)*1000)^(1/3) ≈ 6.2035 mm
     radius_mm_sq = radius_mm^2
     
-    # Bounding box in voxels for the sphere
-    rad_x = ceil(Int, radius_mm / sp_x)
-    rad_y = ceil(Int, radius_mm / sp_y)
-    rad_z = ceil(Int, radius_mm / sp_z)
+    rad_x = max(1, ceil(Int, radius_mm / sp_x))
+    rad_y = max(1, ceil(Int, radius_mm / sp_y))
+    rad_z = max(1, ceil(Int, radius_mm / sp_z))
     
-    cx, cy, cz = max_idx[1], max_idx[2], max_idx[3]
-    sx, sy, sz = size(pet_vol)
-    
+    cx, cy, cz = Tuple(max_idx)
     xmin, xmax = max(1, cx - rad_x), min(sx, cx + rad_x)
     ymin, ymax = max(1, cy - rad_y), min(sy, cy + rad_y)
     zmin, zmax = max(1, cz - rad_z), min(sz, cz + rad_z)
     
-    sum_suv = 0.0f0
-    count = 0
+    peak_sum = 0.0
+    peak_count = 0
     for z in zmin:zmax
-        dz_mm = (z - cz) * sp_z
-        dz_mm_sq = dz_mm^2
+        dz_sq = ((z - cz) * sp_z)^2
         for y in ymin:ymax
-            dy_mm = (y - cy) * sp_y
-            dy_mm_sq = dy_mm^2
+            dy_sq = ((y - cy) * sp_y)^2
             for x in xmin:xmax
-                dx_mm = (x - cx) * sp_x
-                dx_mm_sq = dx_mm^2
-                if dx_mm_sq + dy_mm_sq + dz_mm_sq <= radius_mm_sq
-                    # Intersect with lesion mask
-                    if mask_vol[x, y, z] == target_id
-                        sum_suv += pet_vol[x, y, z]
-                        count += 1
+                dx_sq = ((x - cx) * sp_x)^2
+                if dx_sq + dy_sq + dz_sq <= radius_mm_sq
+                    if mask_vol[x, y, z] == lesion_id
+                        v = Float32(pet_vol[x, y, z])
+                        if isfinite(v)
+                            peak_sum += max(0.0f0, v)
+                            peak_count += 1
+                        end
                     end
                 end
             end
         end
     end
     
-    return count > 0 ? (sum_suv / count) : 0.0f0
+    suv_peak = peak_count > 0 ? Float32(peak_sum / peak_count) : max_suv
+    
+    return (max=max_suv, mean=suv_mean, peak=suv_peak)
+end
+
+"""
+    compute_suv_peak(pet_vol, mask_vol, target_id, sp_x, sp_y, sp_z) -> Float32
+
+Compute SUVpeak as the mean SUV in a 1cm³ spherical ROI centered at the voxel
+with the highest SUV strictly within the lesion mask.
+"""
+function compute_suv_peak(pet_vol::AbstractArray{<:Real, 3}, mask_vol::AbstractArray{<:Real, 3}, target_id::Int, sp_x::Float64, sp_y::Float64, sp_z::Float64)::Float32
+    m = compute_lesion_suv_metrics(pet_vol, mask_vol, target_id; sp_x=sp_x, sp_y=sp_y, sp_z=sp_z)
+    return m.peak
 end
 
 """
@@ -1859,6 +1996,88 @@ end
 # Background SUVs cache (computed once per TP, reused for all lesions)
 const _bg_suv_cache = Dict{Int, Dict{String, Float32}}()
 const _lesion_suv_cache = Dict{Tuple{Int,Int}, String}()  # (tp_idx, lesion_id) → SUV string
+const _lesion_suv_metrics_cache = Dict{Tuple{Int,Int}, NamedTuple{(:max, :mean, :peak), Tuple{Float32, Float32, Float32}}}()
+
+"""
+    precompute_all_suv_metrics!(pet_vol, mask_vol, tp_idx)
+
+Single O(N) pass over the volume to compute SUVmax, SUVmean, and SUVpeak for ALL lesions on a TP.
+Populates `_lesion_suv_metrics_cache`.
+"""
+function precompute_all_suv_metrics!(pet_vol::AbstractArray{<:Real, 3},
+                                     mask_vol::AbstractArray{<:Real, 3},
+                                     tp_idx::Int)
+    sp_x, sp_y, sp_z = _get_display_spacing()
+    counts = Dict{Int, Int}()
+    sums = Dict{Int, Float64}()
+    maxs = Dict{Int, Float32}()
+    max_coords = Dict{Int, CartesianIndex{3}}()
+    
+    sx, sy, sz = size(pet_vol)
+    if size(mask_vol) != (sx, sy, sz)
+        return
+    end
+    
+    @inbounds for idx in CartesianIndices(mask_vol)
+        v = Int(round(mask_vol[idx]))
+        if v > 0
+            val = Float32(pet_vol[idx])
+            if isfinite(val)
+                val_c = max(0.0f0, val)
+                counts[v] = get(counts, v, 0) + 1
+                sums[v] = get(sums, v, 0.0) + val_c
+                cur_max = get(maxs, v, -Inf32)
+                if val_c > cur_max
+                    maxs[v] = val_c
+                    max_coords[v] = idx
+                end
+            end
+        end
+    end
+    
+    radius_mm = 6.2035
+    radius_mm_sq = radius_mm^2
+    rad_x = max(1, ceil(Int, radius_mm / sp_x))
+    rad_y = max(1, ceil(Int, radius_mm / sp_y))
+    rad_z = max(1, ceil(Int, radius_mm / sp_z))
+    
+    for (lid, count) in counts
+        count == 0 && continue
+        s_max = maxs[lid]
+        s_mean = Float32(sums[lid] / count)
+        
+        # SUV peak
+        max_idx = max_coords[lid]
+        cx, cy, cz = Tuple(max_idx)
+        xmin, xmax = max(1, cx - rad_x), min(sx, cx + rad_x)
+        ymin, ymax = max(1, cy - rad_y), min(sy, cy + rad_y)
+        zmin, zmax = max(1, cz - rad_z), min(sz, cz + rad_z)
+        
+        peak_sum = 0.0
+        peak_cnt = 0
+        for z in zmin:zmax
+            dz_sq = ((z - cz) * sp_z)^2
+            for y in ymin:ymax
+                dy_sq = ((y - cy) * sp_y)^2
+                for x in xmin:xmax
+                    dx_sq = ((x - cx) * sp_x)^2
+                    if dx_sq + dy_sq + dz_sq <= radius_mm_sq
+                        if Int(round(mask_vol[x, y, z])) == lid
+                            v = Float32(pet_vol[x, y, z])
+                            if isfinite(v)
+                                peak_sum += max(0.0f0, v)
+                                peak_cnt += 1
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        s_peak = peak_cnt > 0 ? Float32(peak_sum / peak_cnt) : s_max
+        
+        _lesion_suv_metrics_cache[(tp_idx, lid)] = (max=s_max, mean=s_mean, peak=s_peak)
+    end
+end
 
 """
     get_background_suvs(tp_idx) -> Dict{String, Float32}
@@ -1879,27 +2098,50 @@ function get_background_suvs(tp_idx::Int)::Dict{String, Float32}
 end
 
 """
+    get_lesion_suv_metrics(lid, tp_idx) -> NamedTuple{(:max, :mean, :peak), Tuple{Float32, Float32, Float32}}
+
+Get cached or compute fresh SUV metrics strictly within the lesion segmentation mask.
+"""
+function get_lesion_suv_metrics(lid::Int, tp_idx::Int)::NamedTuple{(:max, :mean, :peak), Tuple{Float32, Float32, Float32}}
+    cache_key = (tp_idx, lid)
+    if haskey(_lesion_suv_metrics_cache, cache_key)
+        return _lesion_suv_metrics_cache[cache_key]
+    end
+    
+    pet_vol, mask_vol = _get_tp_pet_and_mask(tp_idx)
+    if pet_vol !== nothing && mask_vol !== nothing
+        sp_x, sp_y, sp_z = _get_display_spacing()
+        metrics = compute_lesion_suv_metrics(pet_vol, mask_vol, lid; sp_x=sp_x, sp_y=sp_y, sp_z=sp_z)
+        _lesion_suv_metrics_cache[cache_key] = metrics
+        return metrics
+    end
+    
+    # Fallback to string cache or centroid
+    cached_str = get(_lesion_suv_cache, cache_key, "")
+    if !isempty(cached_str)
+        fields = parse_suv_fields(cached_str)
+        m = get(fields, "max", 0.0f0)
+        mn = get(fields, "mean", 0.0f0)
+        p = get(fields, "peak", m)
+        return (max=m, mean=mn, peak=p)
+    end
+    
+    return (max=0.0f0, mean=0.0f0, peak=0.0f0)
+end
+
+"""
     compute_lesion_suv_string(lesion_id, tp_idx) -> String
 
-Auto-compute SUV max and background references, returning formatted string:
-"Max: X.X ; Parotid: X.X ; Liver: X.X ; Blood: X.X"
+Auto-compute lesion SUV metrics and background references, returning formatted string:
+"Max: X.X ; Mean: X.X ; Peak: X.X ; Blood: X.X ; Liver: X.X ; Parotid: X.X"
 """
 function compute_lesion_suv_string(lesion_id::Int, tp_idx::Int)::String
-    pet_vol = get(_MEH.pet_volumes_cache, tp_idx, nothing)
-    centroid = if haskey(_MEH.lesion_centroids_cache, (tp_idx, lesion_id))
-        _MEH.lesion_centroids_cache[(tp_idx, lesion_id)]
-    elseif haskey(_MEH.lesion_centroids_cache, lesion_id)
-        _MEH.lesion_centroids_cache[lesion_id]
-    else
-        nothing
-    end
-    if pet_vol === nothing || centroid === nothing
-        return ""
-    end
-    suv_max = compute_suv_max_at_centroid(pet_vol, centroid)
-    suv_peak = _get_suv_peak(lesion_id, tp_idx)
+    metrics = get_lesion_suv_metrics(lesion_id, tp_idx)
+    suv_max = metrics.max
+    suv_mean = metrics.mean
+    suv_peak = metrics.peak
     bg = get_background_suvs(tp_idx)
-    return "Max: $(round(suv_max, digits=1)) ; Peak: $(round(suv_peak, digits=1)) ; Parotid: $(round(bg["parotid"], digits=1)) ; Liver: $(round(bg["liver"], digits=1)) ; Blood: $(round(bg["blood"], digits=1))"
+    return "Max: $(round(suv_max, digits=1)) ; Mean: $(round(suv_mean, digits=1)) ; Peak: $(round(suv_peak, digits=1)) ; Blood: $(round(bg["blood"], digits=1)) ; Liver: $(round(bg["liver"], digits=1)) ; Parotid: $(round(bg["parotid"], digits=1))"
 end
 
 """
@@ -1912,21 +2154,32 @@ function generate_tracking_name(lesion_id::Int, organ_name::String, tp_idx::Int,
     organ_clean = isempty(organ_name) ? "Lesion" : replace(strip(organ_name), " " => "_")
     return "$(organ_clean)_L$(lesion_id)_$(modality)_TP$(tp_idx)_$(patient_id_str)"
 end
+
 """
     parse_suv_fields(suv_str) -> Dict{String,Float32}
 
-Parse the formatted SUV string "Max: X.X ; Parotid: X.X ; Liver: X.X ; Blood: X.X"
-into a Dict with keys "max", "parotid", "liver", "blood".
+Parse SUV string into a Dict with keys "max", "mean", "peak", "blood", "liver", "parotid".
+Supports both formatted strings ("Max: 4.5 ; Mean: 2.1 ; ...") and plain float numbers ("4.5").
 """
 function parse_suv_fields(suv_str::String)::Dict{String, Float32}
     result = Dict{String, Float32}()
-    for part in split(suv_str, ";")
-        sp = strip(part)
-        colon = findfirst(':', sp)
-        colon === nothing && continue
-        key = lowercase(strip(sp[1:colon-1]))
-        val = tryparse(Float32, strip(sp[colon+1:end]))
-        val !== nothing && (result[key] = val)
+    sp_str = strip(suv_str)
+    isempty(sp_str) && return result
+    
+    if occursin(":", sp_str) || occursin(";", sp_str)
+        for part in split(sp_str, ";")
+            sp = strip(part)
+            colon = findfirst(':', sp)
+            colon === nothing && continue
+            key = lowercase(strip(sp[1:colon-1]))
+            val = tryparse(Float32, strip(sp[colon+1:end]))
+            val !== nothing && (result[key] = val)
+        end
+    else
+        val = tryparse(Float32, sp_str)
+        if val !== nothing
+            result["max"] = val
+        end
     end
     return result
 end
@@ -2265,81 +2518,47 @@ end
 """
     _get_suv_max(lid, tp_idx) -> Float32
 
-Get SUVmax for a lesion, using cache if available.
+Get SUVmax for a lesion (maximum across all voxels strictly within the lesion mask).
 """
 function _get_suv_max(lid::Int, tp_idx::Int)::Float32
-    cache_key = (tp_idx, lid)
-    cached = get(_lesion_suv_cache, cache_key, "")
-    if !isempty(cached)
-        fields = parse_suv_fields(cached)
-        return get(fields, "max", 0.0f0)
-    end
-    # Compute fresh
-    pet_vol = get(_MEH.pet_volumes_cache, tp_idx, nothing)
-    centroid = if haskey(_MEH.lesion_centroids_cache, (tp_idx, lid))
-        _MEH.lesion_centroids_cache[(tp_idx, lid)]
-    elseif haskey(_MEH.lesion_centroids_cache, lid)
-        _MEH.lesion_centroids_cache[lid]
-    else
-        nothing
-    end
-    (pet_vol === nothing || centroid === nothing) && return 0.0f0
-    return compute_suv_max_at_centroid(pet_vol, centroid)
+    return get_lesion_suv_metrics(lid, tp_idx).max
+end
+
+"""
+    _get_suv_mean(lid, tp_idx) -> Float32
+
+Get SUVmean for a lesion (mean across all voxels strictly within the lesion mask).
+"""
+function _get_suv_mean(lid::Int, tp_idx::Int)::Float32
+    return get_lesion_suv_metrics(lid, tp_idx).mean
 end
 
 """
     _get_suv_peak(lid, tp_idx) -> Float32
 
-Get SUVpeak for a lesion, using cache if available.
+Get SUVpeak for a lesion (mean SUV in 1cm³ sphere around max voxel within the lesion mask).
 """
 function _get_suv_peak(lid::Int, tp_idx::Int)::Float32
-    cache_key = (tp_idx, lid)
-    cached = get(_lesion_suv_cache, cache_key, "")
-    if !isempty(cached)
-        fields = parse_suv_fields(cached)
-        return get(fields, "peak", 0.0f0)
-    end
-    # Compute fresh
-    pet_vol = get(_MEH.pet_volumes_cache, tp_idx, nothing)
-    mask_vol = lock(_MEH._tp_cache_lock) do
-        haskey(_MEH.tp_data_cache, tp_idx) ? _MEH.tp_data_cache[tp_idx].mask_i16 : nothing
-    end
-    if pet_vol === nothing || mask_vol === nothing
-        return 0.0f0
-    end
-    
-    native_spacing = try
-        Main.first_spacing
-    catch
-        (1.0, 1.0, 2.0)
-    end
-    hires_factor = try
-        Main.HIRES_FACTOR
-    catch
-        2.0
-    end
-    sp_x = native_spacing[1] / hires_factor
-    sp_y = native_spacing[2] / hires_factor
-    sp_z = native_spacing[3]
-    
-    return compute_suv_peak(pet_vol, mask_vol, lid, Float64(sp_x), Float64(sp_y), Float64(sp_z))
+    return get_lesion_suv_metrics(lid, tp_idx).peak
 end
 
 """
     precompute_metrics_for_tp!(tp_idx::Int)
 
-Pre-computes metrics (background SUVs, volume, SUV max, SUV peak) for all lesions on a TP in the background.
+Pre-computes metrics (background SUVs, volume, SUV max, SUV mean, SUV peak) for all lesions on a TP in the background.
 """
 function precompute_metrics_for_tp!(tp_idx::Int)
     Threads.@spawn begin
         try
-            haskey(_MEH.tp_data_cache, tp_idx) || return
-            
             # Pre-compute background SUVs (slowest first-call)
             try get_background_suvs(tp_idx) catch; end
             
-            # Get lesion IDs
-            mask = lock(_MEH._tp_cache_lock) do
+            pet_vol, mask_vol = _get_tp_pet_and_mask(tp_idx)
+            if pet_vol !== nothing && mask_vol !== nothing
+                precompute_all_suv_metrics!(pet_vol, mask_vol, tp_idx)
+            end
+            
+            mask = mask_vol !== nothing ? mask_vol : lock(_MEH._tp_cache_lock) do
                 if haskey(_MEH.tp_data_cache, tp_idx)
                     entry = _MEH.tp_data_cache[tp_idx]
                     isdefined(entry, :mask_i16) ? entry.mask_i16 : entry.mask
@@ -2352,8 +2571,8 @@ function precompute_metrics_for_tp!(tp_idx::Int)
             
             for lid in lesion_ids
                 try compute_lesion_volume(Int(lid), tp_idx) catch; end
-                try _get_suv_max(Int(lid), tp_idx) catch; end  
-                try _get_suv_peak(Int(lid), tp_idx) catch; end
+                try get_lesion_suv_metrics(Int(lid), tp_idx) catch; end
+                try compute_lesion_suv_string(Int(lid), tp_idx) catch; end
             end
             @debug "[PRECOMPUTE] TP $tp_idx: $(length(lesion_ids)) lesions done"
         catch e
@@ -2464,15 +2683,25 @@ function searchable_menu(g, row, cols;
     isempty(opts_vec) && (opts_vec = ["(none)"])
     all_opts = Ref(opts_vec)
 
-    # Standard Menu — limit initial options to avoid 26K-item layout at construction
-    MAX_INIT = 25
-    init_opts = length(all_opts[]) > MAX_INIT ?
+    # Standard Menu — limit initial options only if large ontology (>150 items)
+    MAX_INIT = 50
+    init_opts = length(all_opts[]) > 150 ?
         vcat(all_opts[][1:MAX_INIT], ["(type to filter $(length(all_opts[])) items...)"]) :
         copy(all_opts[])
     menu = Menu(g[row, cols];
         options  = init_opts,
         default  = default,
         fontsize = fontsize)
+
+    # Keep all_opts in sync if options is an Observable
+    if options isa Observable
+        on(options) do updated
+            all_opts[] = copy(updated)
+            if length(all_opts[]) <= 150
+                menu.options[] = copy(all_opts[])
+            end
+        end
+    end
 
     filter_buf = Ref("")
 
@@ -2514,21 +2743,7 @@ function searchable_menu(g, row, cols;
                 end
                 if sel !== nothing && !isempty(string(sel))
                     sel_str = string(sel)
-                    current_opts = menu.options[]
-                    
-                    idx = findfirst(==(sel_str), current_opts)
-                    if idx !== nothing
-                        menu.i_selected[] = idx
-                    else
-                        empty_idx = findfirst(opt -> isempty(strip(string(opt))), current_opts)
-                        if empty_idx == 1
-                            menu.options[] = vcat([current_opts[1], sel_str], current_opts[2:end])
-                            menu.i_selected[] = 2
-                        else
-                            menu.options[] = vcat([sel_str], current_opts)
-                            menu.i_selected[] = 1
-                        end
-                    end
+                    _set_menu_selection_string!(menu, sel_str; all_opts = (options isa Observable ? options : nothing))
                 end
                 filter_buf[] = ""
             end
@@ -2598,13 +2813,31 @@ function searchable_menu(g, row, cols;
         end
     end
 
-    push!(_ALL_MENUS, menu)
-    return menu
+    return _register_menu!(menu)
 end
 
-"""Register a plain Menu widget in the global dismiss registry."""
+const _REGISTERED_MENUS = Set{UInt64}()
+
+"""Register a Menu widget in the global registry and enforce that opening any menu closes all others."""
 function _register_menu!(m::Makie.Menu)
-    push!(_ALL_MENUS, m)
+    !(m in _ALL_MENUS) && push!(_ALL_MENUS, m)
+    m_id = objectid(m)
+    if !(m_id in _REGISTERED_MENUS)
+        push!(_REGISTERED_MENUS, m_id)
+        on(m.is_open) do is_open
+            if is_open
+                for other in _ALL_MENUS
+                    if other !== m
+                        try
+                            if other.is_open[]
+                                other.is_open[] = false
+                            end
+                        catch; end
+                    end
+                end
+            end
+        end
+    end
     return m
 end
 
@@ -2612,17 +2845,37 @@ end
 Uses SQLite FTS5 for ranked search with BM25 relevance scoring on large option sets (anatomy).
 Falls back to linear substring scan for small sets or when FTS5 returns empty."""
 function _apply_searchable_filter!(menu, query::String, full_opts::Vector{String}, fts_table="anatomy_fts")
-    MAX_DISPLAY = 25  # Limit displayed matches to prevent Makie layout rebuild bottleneck
+    MAX_DISPLAY = 50  # Limit displayed matches to prevent Makie layout rebuild bottleneck
     if isempty(query)
-        # Show only first MAX_DISPLAY items when no filter (avoids 16K item rebuild)
-        if length(full_opts) > MAX_DISPLAY
+        # Show all items if <= 150 items (small schema dropdowns), else first MAX_DISPLAY items
+        if length(full_opts) > 150
             new_opts = vcat(full_opts[1:MAX_DISPLAY], ["(type to filter $(length(full_opts)) items...)"])
+            # CRITICAL: Preserve current selection in new_opts so Makie does not erase it!
+            cur_sel = menu.selection[]
+            if cur_sel !== nothing && !isempty(string(cur_sel))
+                cur_str = string(cur_sel)
+                if !(cur_str in new_opts)
+                    empty_idx = findfirst(opt -> isempty(strip(string(opt))), new_opts)
+                    if empty_idx == 1
+                        new_opts = vcat([new_opts[1], cur_str], new_opts[2:end])
+                    else
+                        new_opts = vcat([cur_str], new_opts)
+                    end
+                end
+            end
         else
-            new_opts = full_opts
+            new_opts = copy(full_opts)
         end
         # Skip no-op: avoid Makie layout rebuild if options haven't changed
         if menu.options[] != new_opts
+            cur_s = menu.selection[]
             menu.options[] = new_opts
+            if cur_s !== nothing && !isempty(string(cur_s))
+                idx = findfirst(==(string(cur_s)), new_opts)
+                if idx !== nothing
+                    _set_menu_idx!(menu, idx)
+                end
+            end
         end
         if menu.prompt[] != "Select..."
             menu.prompt[]  = "Select..."
@@ -2652,9 +2905,24 @@ function _apply_searchable_filter!(menu, query::String, full_opts::Vector{String
         else
             filtered
         end
+        # CRITICAL: Preserve current selection in new_opts during filtering so Makie keeps it valid
+        cur_sel = menu.selection[]
+        if cur_sel !== nothing && !isempty(string(cur_sel))
+            cur_str = string(cur_sel)
+            if !(cur_str in new_opts) && new_opts != ["(no match for '$query')"]
+                new_opts = vcat([cur_str], new_opts)
+            end
+        end
         # Skip no-op: avoid Makie layout rebuild if options haven't changed
         if menu.options[] != new_opts
+            cur_s = menu.selection[]
             menu.options[] = new_opts
+            if cur_s !== nothing && !isempty(string(cur_s))
+                idx = findfirst(==(string(cur_s)), new_opts)
+                if idx !== nothing
+                    _set_menu_idx!(menu, idx)
+                end
+            end
         end
         new_prompt = "Filter: $query"
         if menu.prompt[] != new_prompt
@@ -2681,9 +2949,11 @@ end
 function Base.put!(proxy::ChannelProxy, event)
     ch = proxy.ref[]
     if ch !== nothing
-        @async try
+        try
             put!(ch, event)
-        catch; end
+        catch e
+            @warn "ChannelProxy put! failed: $e"
+        end
     else
         push!(proxy.queue, event)
     end
@@ -2732,6 +3002,8 @@ function create_metadata_window(
         save_path::String = DEFAULT_SAVE_PATH,
         ui_hooks::Dict{Symbol, Observable} = Dict{Symbol, Observable}())
     empty!(_all_textboxes)  # clear textbox registry on (re-)creation
+    empty!(_ALL_MENUS)
+    empty!(_REGISTERED_MENUS)
     obs_m2 = Observable(false)
     obs_set_compare_mode = Observable(false)
     _lmw_observables[:obs_set_compare_mode] = obs_set_compare_mode
@@ -2954,6 +3226,10 @@ function create_metadata_window(
     end
     
     function _apply_scroll!(offset_px::Float32)
+        # Close any open dropdowns before scrolling to prevent floating overlays
+        for m in _ALL_MENUS
+            try; m.is_open[] && (m.is_open[] = false); catch; end
+        end
         _scroll_offset_px[] = offset_px
         !_bbox_cache_ready[] && return
         for (i, c) in enumerate(g.content)
@@ -2991,7 +3267,7 @@ function create_metadata_window(
     
     rowgap!(g, 3)   # 3px gap — prevents text bleed between rows
     colgap!(g, 2)   # compact columns
-    colsize!(g, 1, Fixed(125))  # wider label column for longer field names
+    colsize!(g, 1, Fixed(115))  # compact label column (Fixed 115) to prevent overlap
     r = [0]  # row counter as array for mutation in closures
     nr!() = (r[1] += 1; r[1])
 
@@ -3063,7 +3339,20 @@ function create_metadata_window(
             end
             return
         end
-        if w isa Makie.GridLayoutBase.GridLayout
+        if w isa Makie.Menu
+            if !visible
+                try; w.is_open[] = false; catch; end
+            end
+            if hasproperty(w, :blockscene) && w.blockscene !== nothing
+                w.blockscene.visible[] = visible
+                for ch in w.blockscene.children
+                    ch.visible[] = visible
+                end
+            end
+            if hasproperty(w, :visible)
+                w.visible[] = visible
+            end
+        elseif w isa Makie.GridLayoutBase.GridLayout
             for elem in contents(w)
                 _set_widget_visible!(elem, visible)
             end
@@ -3403,6 +3692,7 @@ function create_metadata_window(
     local sync_tp_menus_to_current!
     local load_clinical_info_for_tp! = nothing
     local apply_compare_mode_ui! = nothing
+    local update_old_report_display! = nothing
     on(btn_cv.clicks) do _
         obs_set_compare_mode[] = !cv_active[]
     end
@@ -3567,6 +3857,9 @@ function create_metadata_window(
             refresh_lesion_dropdown_for_tp!(_MEH.current_tp_index[])
             if load_clinical_info_for_tp! !== nothing
                 load_clinical_info_for_tp!(_MEH.current_tp_index[])
+            end
+            if update_old_report_display! !== nothing
+                update_old_report_display!()
             end
         catch e
             @warn "[tp_switched] Error syncing UI: $e"
@@ -4789,6 +5082,7 @@ function create_metadata_window(
         ],
         "Clinical Context" => [
             "SUV max",
+            "SUV mean",
             "SUV Quantitative Metrics & References"
         ],
         "PRIMARY Score" => [
@@ -5139,15 +5433,18 @@ function create_metadata_window(
             push!(all_metadata_rows, ncc_r)
             no_ct_toggle = Toggle(g[ncc_r, 1], active = false, buttoncolor = ACCENT)
             Label(g[ncc_r, 2], "No CT Correlate", fontsize = 10, color = LBL_FG, halign = :left)
+            rowsize!(g, ncc_r, Fixed(24)); register_fixed_row!(ncc_r, 24)
             
             suv_comparison_r = nr!()
             push!(all_metadata_rows, suv_comparison_r)
             lbl_suv_comparison = Label(g[suv_comparison_r, 1:4], "", fontsize = 9, color = GRN, halign = :left, tellwidth = false)
             lbl_suv = lbl_suv_comparison
+            rowsize!(g, suv_comparison_r, Fixed(18)); register_fixed_row!(suv_comparison_r, 18)
             
             match_analysis_r = nr!()
             push!(all_metadata_rows, match_analysis_r)
             lbl_match_analysis = Label(g[match_analysis_r, 1:4], "", fontsize = 9, color = RGBf(0.6, 0.8, 1.0), halign = :left, tellwidth = false)
+            rowsize!(g, match_analysis_r, Fixed(18)); register_fixed_row!(match_analysis_r, 18)
         end
     end
     
@@ -5273,66 +5570,165 @@ function create_metadata_window(
     # ── Radiological Report ──────────────────────────────────────────────────
     sec_report = begin_section!("Radiological Report"; default_open=true)
 
-    dict_hdr_r = nr!()
-    Label(g[dict_hdr_r, 1], "Dictation:", fontsize = 10, color = LBL_FG, halign = :right)
-    lang_btn_de = Button(g[dict_hdr_r, 2], label="DE", buttoncolor=GRN, labelcolor=TXT, fontsize=9)
-    lang_btn_en = Button(g[dict_hdr_r, 3], label="EN", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=9)
-    current_dict_lang = Observable("DE")
+    current_dict_lang = Observable("EN")
 
-    dict_r = nr!()
-    dict_text = Observable{String}("Radiological dictation...")
-    dict_lbl = Label(g[dict_r, 1:4], dict_text, word_wrap = true, tellwidth = false, fontsize = 9,
-        color = LBL_FG, halign = :left)
+    # ── 1. Original / Old Radiological Report (Input JSON / Vorbefund) ───────
+    orig_hdr_r = nr!()
+    btn_open_prior_win = Button(g[orig_hdr_r, 1:2], label="[V] View Prior/Original Report", buttoncolor=ACCENT, labelcolor=TXT, fontsize=10)
+    lang_btn_en = Button(g[orig_hdr_r, 3], label="[EN] English", buttoncolor=GRN, labelcolor=TXT, fontsize=9)
+    lang_btn_de = Button(g[orig_hdr_r, 4], label="[DE] Deutsch", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=9)
+    rowsize!(g, orig_hdr_r, Fixed(28)); register_fixed_row!(orig_hdr_r, 28)
+
+    # Aliases for external compatibility
+    btn_ai_en = lang_btn_en
+    btn_ai_de = lang_btn_de
+
+    orig_info_r = nr!()
+    lbl_orig_info = Label(g[orig_info_r, 1:4], "Study: Initializing...", fontsize = 9, color = SUBTXT, halign = :left)
+    rowsize!(g, orig_info_r, Fixed(18)); register_fixed_row!(orig_info_r, 18)
+
+    orig_act_r = nr!()
+    btn_copy_orig = Button(g[orig_act_r, 1], label="Copy", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=9)
+    btn_copy_to_anamnese = Button(g[orig_act_r, 2:3], label = "[->] Copy to Anamnese Notes", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 9)
+    btn_translate_orig = Button(g[orig_act_r, 4], label = "[T] Translate", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+    rowsize!(g, orig_act_r, Fixed(26)); register_fixed_row!(orig_act_r, 26)
+
+    # Underlying observable kept for state persistence, autosave, and test compatibility
+    dict_text = Observable{String}("Loading original radiological report...")
+
+    # Connect callback for PriorReportWindow to copy into Anamnese notes
+    PRW.on_copy_to_anamnese[] = (txt) -> begin
+        _set_tb_val!(tb_clinical_notes, txt)
+        trigger_autosave()
+    end
+
+    update_old_report_display! = function ()
+        tp = _MEH.current_tp_index[]
+        lang = current_dict_lang[]
+        is_en = (lang == "EN")
+        lang_btn_en.buttoncolor[] = is_en ? GRN : BG_PNL
+        lang_btn_de.buttoncolor[] = !is_en ? GRN : BG_PNL
+
+        lbl = get(_MEH.tp_labels, tp, "TP $tp")
+        en_desc = get(_MEH.tp_english_descriptions, tp, "")
+        de_desc = get(_MEH.tp_descriptions, tp, "")
+
+        if is_en
+            if !isempty(en_desc)
+                _set!(dict_text, en_desc)
+                lbl_orig_info.text[] = "Study: $lbl | Translated English ($(length(en_desc)) chars)"
+                lbl_orig_info.color[] = GRN
+            elseif !isempty(de_desc)
+                _set!(dict_text, "(English translation unavailable — showing German original):\n\n" * de_desc)
+                lbl_orig_info.text[] = "Study: $lbl | German Fallback ($(length(de_desc)) chars)"
+                lbl_orig_info.color[] = GOLD
+            else
+                _set!(dict_text, "(No original report available for this timepoint in metadata.json)")
+                lbl_orig_info.text[] = "Study: $lbl | No report found in metadata.json"
+                lbl_orig_info.color[] = SUBTXT
+            end
+        else
+            if !isempty(de_desc)
+                _set!(dict_text, de_desc)
+                lbl_orig_info.text[] = "Study: $lbl | Original German ($(length(de_desc)) chars)"
+                lbl_orig_info.color[] = GRN
+            elseif !isempty(en_desc)
+                _set!(dict_text, "(Original German unavailable — showing English):\n\n" * en_desc)
+                lbl_orig_info.text[] = "Study: $lbl | English Fallback ($(length(en_desc)) chars)"
+                lbl_orig_info.color[] = GOLD
+            else
+                _set!(dict_text, "(No original report available for this timepoint in metadata.json)")
+                lbl_orig_info.text[] = "Study: $lbl | No report found in metadata.json"
+                lbl_orig_info.color[] = SUBTXT
+            end
+        end
+
+        if PRW.active_prior_screen[] !== nothing
+            try
+                if isopen(PRW.active_prior_screen[])
+                    PRW.update_prior_report_tp!(tp; lang = lang)
+                end
+            catch; end
+        end
+    end
+
+    on(btn_open_prior_win.clicks) do _
+        tp = _MEH.current_tp_index[]
+        lang = current_dict_lang[]
+        lbl_orig_info.text[] = "Opening Prior Report Window ($lang)..."
+        PRW.open_prior_report_window(tp; lang = lang)
+        lbl_orig_info.text[] = "Study: $(get(_MEH.tp_labels, tp, "TP $tp")) | Prior Report Window Open ($lang)"
+    end
+
+    on(btn_translate_orig.clicks) do _
+        tp = _MEH.current_tp_index[]
+        de_text = get(_MEH.tp_descriptions, tp, "")
+        if isempty(strip(de_text))
+            lbl_orig_info.text[] = "[!] No German report text found for TP $tp"
+            lbl_orig_info.color[] = RGBf(0.85, 0.25, 0.25)
+            return
+        end
+        lbl_orig_info.text[] = "[...] Translating report for TP $tp..."
+        lbl_orig_info.color[] = GOLD
+        @async begin
+            try
+                trans = LLMDictation.translate_report_to_english(de_text)
+                if !isempty(trans) && !startswith(trans, "Error") && !startswith(trans, "API Error")
+                    _MEH.tp_english_descriptions[tp] = trans
+                    current_dict_lang[] = "EN"
+                    update_old_report_display!()
+                    if PRW.active_prior_screen[] !== nothing
+                        try PRW.update_prior_report_tp!(tp; lang = "EN") catch; end
+                    end
+                    lbl_orig_info.text[] = "[OK] Translated report for TP $tp ($(length(trans)) chars)"
+                    lbl_orig_info.color[] = GRN
+                else
+                    lbl_orig_info.text[] = "[ERR] Translation returned empty response"
+                    lbl_orig_info.color[] = RGBf(0.85, 0.25, 0.25)
+                end
+            catch e
+                lbl_orig_info.text[] = "[ERR] Translation failed: $e"
+                lbl_orig_info.color[] = RGBf(0.85, 0.25, 0.25)
+            end
+        end
+    end
 
     on(lang_btn_de.clicks) do _
         current_dict_lang[] = "DE"
-        lang_btn_de.buttoncolor[] = GRN
-        lang_btn_en.buttoncolor[] = BG_PNL
-        tp = _MEH.current_tp_index[]
-        de_desc = get(_MEH.tp_descriptions, tp, "")
-        dict_text[] = isempty(de_desc) ? "(No dictation available)" : de_desc
+        update_old_report_display!()
     end
 
     on(lang_btn_en.clicks) do _
         current_dict_lang[] = "EN"
-        lang_btn_en.buttoncolor[] = GRN
-        lang_btn_de.buttoncolor[] = BG_PNL
-        tp = _MEH.current_tp_index[]
-        en_desc = get(_MEH.tp_english_descriptions, tp, "")
-        dict_text[] = isempty(en_desc) ? "(No English translation available)" : en_desc
+        update_old_report_display!()
     end
 
-    # ── AI Radiological Dictation (Qwen 3.5 397B on AcademicCloud) ────────────
-    ai_lang_r = nr!()
-    Label(g[ai_lang_r, 1], "Report Language:", fontsize = 9, color = ACCENT, halign = :right)
-    btn_ai_de = Button(g[ai_lang_r, 2], label = "[DE] Deutsch", buttoncolor = (current_dict_lang[] == "DE" ? ACCENT : BG_PNL), labelcolor = TXT, fontsize = 9)
-    btn_ai_en = Button(g[ai_lang_r, 3], label = "[EN] English", buttoncolor = (current_dict_lang[] == "EN" ? ACCENT : BG_PNL), labelcolor = TXT, fontsize = 9)
-    rowsize!(g, ai_lang_r, Fixed(24)); register_fixed_row!(ai_lang_r, 24)
-
-    on(btn_ai_de.clicks) do _
-        current_dict_lang[] = "DE"
-        btn_ai_de.buttoncolor[] = ACCENT
-        btn_ai_en.buttoncolor[] = BG_PNL
-        lang_btn_de.buttoncolor[] = GRN
-        lang_btn_en.buttoncolor[] = BG_PNL
-        tp = _MEH.current_tp_index[]
-        de_desc = get(_MEH.tp_descriptions, tp, "")
-        dict_text[] = isempty(de_desc) ? "(No dictation available)" : de_desc
+    on(btn_copy_orig.clicks) do _
+        txt = dict_text[]
+        if !isempty(txt) && !startswith(txt, "(")
+            ok = LLMDictation.copy_to_clipboard(txt)
+            if ok
+                lbl_orig_info.text[] = "[OK] Copied original report to clipboard"
+                lbl_orig_info.color[] = GRN
+            else
+                lbl_orig_info.text[] = "Copied to clipboard (or check stdout)"
+                lbl_orig_info.color[] = SUBTXT
+            end
+        end
     end
 
-    on(btn_ai_en.clicks) do _
-        current_dict_lang[] = "EN"
-        btn_ai_en.buttoncolor[] = ACCENT
-        btn_ai_de.buttoncolor[] = BG_PNL
-        lang_btn_en.buttoncolor[] = GRN
-        lang_btn_de.buttoncolor[] = BG_PNL
-        tp = _MEH.current_tp_index[]
-        en_desc = get(_MEH.tp_english_descriptions, tp, "")
-        dict_text[] = isempty(en_desc) ? "(No English translation available)" : en_desc
+    on(btn_copy_to_anamnese.clicks) do _
+        txt = dict_text[]
+        if !isempty(txt) && !startswith(txt, "(")
+            _set_tb_val!(tb_clinical_notes, txt)
+            lbl_orig_info.text[] = "[OK] Copied report into Anamnese Notes"
+            lbl_orig_info.color[] = GRN
+        end
     end
 
+    # ── 2. New Report (E-PSMA Structured Reporting & AI Dictation) ─────────
     ai_hdr_r = nr!()
-    Label(g[ai_hdr_r, 1], "AI Dictation:", fontsize = 10, color = ACCENT, halign = :right)
+    Label(g[ai_hdr_r, 1], "New Report:", fontsize = 10, font = :bold, color = ACCENT, halign = :right)
     btn_open_report = Button(g[ai_hdr_r, 2:3], label = "[R] E-PSMA Report", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
     btn_copy_rpt = Button(g[ai_hdr_r, 4], label = "Copy", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     rowsize!(g, ai_hdr_r, Fixed(28)); register_fixed_row!(ai_hdr_r, 28)
@@ -5342,7 +5738,7 @@ function create_metadata_window(
     rowsize!(g, ai_status_r, Fixed(18)); register_fixed_row!(ai_status_r, 18)
 
     rpt_r = nr!()
-    report_text = Observable{String}("(Auto-generating background radiological dictation for this time point...)")
+    report_text = Observable{String}("(Click '[R] E-PSMA Report' to create/view structured report or generate AI dictation)")
     report_lbl = Label(g[rpt_r, 1:4], report_text, word_wrap = true, tellwidth = false, fontsize = 9,
         color = TXT, halign = :left)
     rpt_tb = Textbox(g[nr!(), 1:4], height = 0)
@@ -5383,6 +5779,9 @@ function create_metadata_window(
         end
     end
 
+    # Initialize old report display immediately
+    update_old_report_display!()
+
     end_section!(sec_report)
 
     # CT-specific fields hidden when "No CT Correlate" is checked
@@ -5400,6 +5799,11 @@ function create_metadata_window(
     function update_dynamic_visibility!(active_type::String)
         if cv_active[]
             return # Let Compare Mode keep everything hidden
+        end
+        
+        # Dismiss any open menus so hidden rows do not leave open popups
+        for m in _ALL_MENUS
+            try; m.is_open[] && (m.is_open[] = false); catch; end
         end
         
         is_p = (active_type == "Prostate")
@@ -6697,7 +7101,14 @@ function create_metadata_window(
         lesion_db[] = db
         _db_dirty[] = true
         try
-            put!(db_channel, SaveDBMessage(db, global_app_state, save_path, DEFAULT_HDF5_PATH))
+            h5_target = DEFAULT_HDF5_PATH
+            try
+                h5_act = _MEH.h5_path_ref[]
+                if !isempty(h5_act) && isfile(h5_act)
+                    h5_target = h5_act
+                end
+            catch; end
+            put!(db_channel, SaveDBMessage(db, global_app_state, save_path, h5_target))
         catch; end
     end
 
@@ -6803,6 +7214,7 @@ function create_metadata_window(
         end
     ))
     _global_trigger_autosave[] = trigger_autosave
+    _global_flush_lesion[] = (l) -> _flush_lesion!(l === nothing ? (parse_lesion_id(active_lesion_id[]) !== nothing ? parse_lesion_id(active_lesion_id[]) : 0) : (l isa Integer ? Int(l) : (parse_lesion_id(string(l)) !== nothing ? parse_lesion_id(string(l)) : 0)))
     function apply_global_state(gst::AbstractDict)
         _is_applying_state[] = true
         is_syncing_selection[] = true
@@ -7178,26 +7590,24 @@ function create_metadata_window(
                            t_type == "Technical Artifact")
         if is_muscle_lesion && !haskey(data, "Certainty")
             if haskey(field_widgets, "Alternative Hypothesis (False Positive)") && field_widgets["Alternative Hypothesis (False Positive)"] isa Menu
-                opts = field_widgets["Alternative Hypothesis (False Positive)"].options[]
-                idx = findfirst(==("Technical Artifact"), opts)
-                if idx !== nothing
-                    _set_menu_idx!(field_widgets["Alternative Hypothesis (False Positive)"], idx)
-                end
+                _set_menu_selection_string!(field_widgets["Alternative Hypothesis (False Positive)"], "Technical Artifact")
             end
             if haskey(field_widgets, "Certainty")
                 cert_w = field_widgets["Certainty"]
                 if cert_w isa Slider
-                    cert_w.selected_index[] = 1  # index 1 = value 1 (min of range 1:10)
+                    cert_w.selected_index[] = 1  # minimum of slider range
+                    try set_close_to!(cert_w, first(cert_w.range[])) catch; end
                 elseif cert_w isa Menu
-                    opts = cert_w.options[]
-                    idx = findfirst(==("1"), opts)
-                    if idx !== nothing; _set_menu_idx!(cert_w, idx); end
+                    _set_menu_selection_string!(cert_w, "0")
                 end
             end
+            data["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
+            data["Certainty"] = "0"
+            data["LesionType"] = "Technical Artifact"
             db_updates["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
-            db_updates["Certainty"] = "1"   # minimum of slider range 1:10
+            db_updates["Certainty"] = "0"
             db_updates["LesionType"] = "Technical Artifact"
-            if _MEH.PERF_LOG[]; println("Muscular artefact: lesion $lid → Technical Artifact, Certainty=1"); flush(stdout); end
+            if _MEH.PERF_LOG[]; println("Muscular artefact: lesion $lid → Technical Artifact, Certainty=0"); flush(stdout); end
         end
 
         centroid = cent_san
@@ -7208,27 +7618,24 @@ function create_metadata_window(
             if (z_slice <= 2 || z_slice >= total_z - 1) && !haskey(data, "Certainty")
                 # Set Alternative Hypothesis to "Technical Artifact"
                 if haskey(field_widgets, "Alternative Hypothesis (False Positive)") && field_widgets["Alternative Hypothesis (False Positive)"] isa Menu
-                    opts = field_widgets["Alternative Hypothesis (False Positive)"].options[]
-                    idx = findfirst(==("Technical Artifact"), opts)
-                    if idx !== nothing
-                        _set_menu_idx!(field_widgets["Alternative Hypothesis (False Positive)"], idx)
-                    end
+                    _set_menu_selection_string!(field_widgets["Alternative Hypothesis (False Positive)"], "Technical Artifact")
                 end
                 # Set Certainty to 0
                 if haskey(field_widgets, "Certainty")
                     cert_w = field_widgets["Certainty"]
                     if cert_w isa Slider
-                        cert_w.selected_index[] = 1  # index 1 = value 1 (min of range 1:10)
+                        cert_w.selected_index[] = 1  # minimum of slider range
+                        try set_close_to!(cert_w, first(cert_w.range[])) catch; end
                     elseif cert_w isa Menu
-                        opts = cert_w.options[]
-                        idx = findfirst(==("1"), opts)
-                        if idx !== nothing; _set_menu_idx!(cert_w, idx); end
+                        _set_menu_selection_string!(cert_w, "0")
                     end
                 end
-                # Persist in db_updates
+                # Persist in data and db_updates
+                data["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
+                data["Certainty"] = "0"
                 db_updates["Alternative Hypothesis (False Positive)"] = "Technical Artifact"
-                db_updates["Certainty"] = "1"   # minimum of slider range 1:10
-                if _MEH.PERF_LOG[]; println("Edge-slice artefact: lesion $lid z=$z_slice/$total_z → Technical Artifact, Certainty=1"); flush(stdout); end
+                db_updates["Certainty"] = "0"
+                if _MEH.PERF_LOG[]; println("Edge-slice artefact: lesion $lid z=$z_slice/$total_z → Technical Artifact, Certainty=0"); flush(stdout); end
             end
         end
 
@@ -7528,7 +7935,12 @@ function create_metadata_window(
 
         Threads.@spawn begin
             try
-                # 1. Auto-fill SUV max
+                # 1. Auto-compute SUV metrics (per lesion, across all mask voxels)
+                suv_metrics = get_lesion_suv_metrics(cur_lid, cur_tp)
+                suv_max_val = suv_metrics.max
+                suv_mean_val = suv_metrics.mean
+                suv_peak_val = suv_metrics.peak
+
                 suv_str = ""
                 try
                     cache_key = (cur_tp, cur_lid)
@@ -7543,21 +7955,12 @@ function create_metadata_window(
                     @warn "Auto-SUV computation failed for lesion $cur_lid: $e"
                 end
 
-                # 2. Auto-compute PROMISE score and SUV comparison
+                # 2. Auto-compute PROMISE score and SUV comparison against background organs
                 cmp_str = ""
                 try
-                    s_for_cmp = !isempty(suv_str) ? suv_str : get(cur_data, "SUV max", "")
-                    if !isempty(s_for_cmp)
-                        fields = parse_suv_fields(s_for_cmp)
-                        suv_max = get(fields, "max", 0.0f0)
-                        if suv_max > 0
-                            bg = Dict{String,Float32}(
-                                "liver" => get(fields, "liver", 0.0f0),
-                                "parotid" => get(fields, "parotid", 0.0f0),
-                                "blood" => get(fields, "blood", 0.0f0)
-                            )
-                            cmp_str = compute_suv_comparison_string(suv_max, bg)
-                        end
+                    if suv_max_val > 0
+                        bg = get_background_suvs(cur_tp)
+                        cmp_str = compute_suv_comparison_string(suv_max_val, bg)
                     end
                 catch e
                     @warn "PROMISE auto-computation failed: $e"
@@ -7566,36 +7969,32 @@ function create_metadata_window(
                 # 3. Auto-fill SUV Quantitative Metrics & References
                 best_opt = nothing
                 try
-                    s_for_quant = !isempty(suv_str) ? suv_str : get(cur_data, "SUV max", "")
-                    if !isempty(s_for_quant)
-                        qf = parse_suv_fields(s_for_quant)
-                        q_suv_max  = get(qf, "max", 0.0f0)
-                        q_blood    = get(qf, "blood", 0.0f0)
-                        q_liver    = get(qf, "liver", 0.0f0)
-                        q_parotid  = get(qf, "parotid", 0.0f0)
+                    if suv_max_val > 0
+                        bg = get_background_suvs(cur_tp)
+                        q_blood   = get(bg, "blood", 0.0f0)
+                        q_liver   = get(bg, "liver", 0.0f0)
+                        q_parotid = get(bg, "parotid", 0.0f0)
                         
-                        if q_suv_max > 0
-                            if q_suv_max >= q_parotid && q_parotid > 0
-                                best_opt = "SUVpeak > Parotid SUVmean (PROMISE = 3)"
-                            elseif q_suv_max >= q_liver && q_liver > 0
-                                best_opt = "SUVpeak > Liver SUVmean (PROMISE ≥ 2)"
-                            elseif q_suv_max >= q_blood && q_blood > 0
-                                best_opt = "SUVpeak > Blood Pool SUVmean (PSMA Avid)"
-                            elseif q_blood > 0 && q_suv_max < q_blood
-                                best_opt = "SUVpeak < Blood Pool SUVmean (PSMA Cold)"
-                            end
-                            if q_suv_max > 12.0
-                                best_opt = "SUVmax > 12 (Definite Primary)"
-                            end
-                            if q_liver > 0 && q_suv_max / q_liver > 2.5
-                                best_opt = something(best_opt, "Lesion-to-Background Ratio (LBR) > 2.5")
-                            end
-                            if cur_radioligand == "18F-PSMA-1007" && cur_lesion_type == "Bone Meta" && q_suv_max < 10.0
-                                best_opt = "18F-PSMA-1007 Bone Lesion with SUV < 10 (FPR 51.4%)"
-                            end
-                            if cur_lesion_type == "Bone Meta" && q_blood > 0 && q_suv_max < q_blood
-                                best_opt = "Unspecified Bone Uptake (UBU)"
-                            end
+                        if suv_peak_val >= q_parotid && q_parotid > 0
+                            best_opt = "SUVpeak > Parotid SUVmean (PROMISE = 3)"
+                        elseif suv_peak_val >= q_liver && q_liver > 0
+                            best_opt = "SUVpeak > Liver SUVmean (PROMISE ≥ 2)"
+                        elseif suv_peak_val >= q_blood && q_blood > 0
+                            best_opt = "SUVpeak > Blood Pool SUVmean (PSMA Avid)"
+                        elseif q_blood > 0 && suv_peak_val < q_blood
+                            best_opt = "SUVpeak < Blood Pool SUVmean (PSMA Cold)"
+                        end
+                        if suv_max_val > 12.0
+                            best_opt = "SUVmax > 12 (Definite Primary)"
+                        end
+                        if q_liver > 0 && suv_max_val / q_liver > 2.5
+                            best_opt = something(best_opt, "Lesion-to-Background Ratio (LBR) > 2.5")
+                        end
+                        if cur_radioligand == "18F-PSMA-1007" && cur_lesion_type == "Bone Meta" && suv_max_val < 10.0
+                            best_opt = "18F-PSMA-1007 Bone Lesion with SUV < 10 (FPR 51.4%)"
+                        end
+                        if cur_lesion_type == "Bone Meta" && q_blood > 0 && suv_max_val < q_blood
+                            best_opt = "Unspecified Bone Uptake (UBU)"
                         end
                     end
                 catch e
@@ -7640,8 +8039,21 @@ function create_metadata_window(
                             lbl_suv_comparison.text[] = !isempty(cmp_str) ? cmp_str : ""
                             lbl_match_analysis.text[] = analysis_str
 
-                            if !isempty(suv_str) && haskey(field_widgets, "SUV max") && field_widgets["SUV max"] isa Textbox
-                                _set_tb_val!(field_widgets["SUV max"], suv_str)
+                            suv_max_str = suv_max_val > 0.0f0 ? string(round(suv_max_val, digits=1)) : "0.0"
+                            suv_mean_str = suv_mean_val > 0.0f0 ? string(round(suv_mean_val, digits=1)) : "0.0"
+
+                            if haskey(field_widgets, "SUV max") && field_widgets["SUV max"] isa Textbox
+                                cur_tb = _safe_strip(field_widgets["SUV max"].displayed_string[])
+                                if isempty(cur_tb) || cur_tb == "0.0" || cur_tb == "0" || occursin(":", cur_tb) || occursin(";", cur_tb)
+                                    _set_tb_val!(field_widgets["SUV max"], suv_max_str)
+                                end
+                            end
+
+                            if haskey(field_widgets, "SUV mean") && field_widgets["SUV mean"] isa Textbox
+                                cur_tb = _safe_strip(field_widgets["SUV mean"].displayed_string[])
+                                if isempty(cur_tb) || cur_tb == "0.0" || cur_tb == "0" || occursin(":", cur_tb) || occursin(";", cur_tb)
+                                    _set_tb_val!(field_widgets["SUV mean"], suv_mean_str)
+                                end
                             end
 
                             saved_quant = get(cur_data, "SUV Quantitative Metrics & References", "")
@@ -7661,8 +8073,13 @@ function create_metadata_window(
 
                         # Persist computed metrics into DB
                         async_db_updates = Dict{String, Any}()
-                        if !isempty(suv_str)
-                            async_db_updates["SUV max"] = suv_str
+                        if suv_max_val > 0.0f0
+                            suv_max_str = string(round(suv_max_val, digits=1))
+                            suv_mean_str = string(round(suv_mean_val, digits=1))
+                            async_db_updates["SUV max"] = suv_max_str
+                            async_db_updates["SUV mean"] = suv_mean_str
+                            async_db_updates["_SUV_peak"] = string(round(suv_peak_val, digits=1))
+                            async_db_updates["_SUV_metrics"] = suv_str
                         end
                         saved_quant = get(cur_data, "SUV Quantitative Metrics & References", "")
                         if (isempty(saved_quant) || saved_quant == "- select -") && best_opt !== nothing
@@ -7724,26 +8141,18 @@ function create_metadata_window(
             w === nothing && continue
             val = get(data, q.short, nothing)
             if w isa Textbox
-                target_str = val === nothing ? "" : String(val)
+                target_str = val === nothing ? "" : string(val)
+                if (q.short == "SUV max" || q.short == "SUV mean") && (occursin(":", target_str) || occursin(";", target_str))
+                    parsed_f = parse_suv_fields(target_str)
+                    k = q.short == "SUV max" ? "max" : "mean"
+                    num = get(parsed_f, k, 0.0f0)
+                    target_str = num > 0 ? string(round(num, digits=1)) : "0.0"
+                end
                 _set_tb_val!(w, target_str)
             elseif w isa Menu
-                if val !== nothing && !isempty(String(val))
-                    val_str = String(val)
-                    opts = w.options[]
-                    idx = findfirst(==(val_str), opts)
-                    if idx === nothing
-                        new_opts = copy(opts)
-                        push!(new_opts, val_str)
-                        w.options[] = new_opts
-                        idx = length(new_opts)
-                    end
-                    if w.i_selected[] != idx
-                        w.i_selected[] = idx
-                    end
-                    if w.selection[] != val_str
-                        w.selection[] = val_str
-                    end
-                    notify(w.selection)
+                if val !== nothing && !isempty(string(val))
+                    val_str = string(val)
+                    _set_menu_selection_string!(w, val_str)
                 else
                     if q.short == "Radioligand Type"
                         opts = w.options[]
@@ -7759,7 +8168,7 @@ function create_metadata_window(
                 end
             elseif w isa Slider
                 if val !== nothing
-                    parsed = tryparse(Int, String(val))
+                    parsed = val isa Integer ? Int(val) : tryparse(Int, string(val))
                     if parsed !== nothing
                         r = w.range[]
                         clamped = clamp(parsed, first(r), last(r))
@@ -7767,14 +8176,16 @@ function create_metadata_window(
                         if w.selected_index[] != new_idx
                             w.selected_index[] = new_idx
                         end
+                        try set_close_to!(w, clamped) catch; end
                     end
                 else
                     # Default: use the default_answer from QuestionDef
-                    def = isempty(q.default_answer) ? last(w.range[]) : parse(Int, q.default_answer)
+                    def = isempty(q.default_answer) ? last(w.range[]) : (tryparse(Int, q.default_answer) !== nothing ? parse(Int, q.default_answer) : last(w.range[]))
                     new_idx = def - first(w.range[]) + 1
                     if w.selected_index[] != new_idx
                         w.selected_index[] = new_idx
                     end
+                    try set_close_to!(w, def) catch; end
                 end
             end
         end
@@ -7927,7 +8338,14 @@ function create_metadata_window(
             end
 
             try
-                put!(db_channel, SaveDBMessage(db, global_app_state, save_path, DEFAULT_HDF5_PATH))
+                h5_target = DEFAULT_HDF5_PATH
+                try
+                    h5_act = _MEH.h5_path_ref[]
+                    if !isempty(h5_act) && isfile(h5_act)
+                        h5_target = h5_act
+                    end
+                catch; end
+                put!(db_channel, SaveDBMessage(db, global_app_state, save_path, h5_target))
             catch; end
 
             # 6. Update dropdown option display name in lesion_ids & les_menu
@@ -7983,6 +8401,22 @@ function create_metadata_window(
                 _flush_lesion!(old_lid)
             end
             _current_displayed_lid[] = new_lid
+            
+            # Immediately synchronize lesion with 3D viewer (strict FIFO order, no race conditions)
+            if _skip_sync_on_lesion_change[]
+                _skip_sync_on_lesion_change[] = false
+            else
+                try
+                    put!(channel, SyncLesionEvent(new_lid))
+                catch e
+                    @warn "Failed to send SyncLesionEvent: $e"
+                end
+            end
+        end
+        
+        # Close any open dropdown menus when navigating to another lesion
+        for m in _ALL_MENUS
+            try; m.is_open[] && (m.is_open[] = false); catch; end
         end
         
         active_lesion_display[] = id
@@ -8009,29 +8443,13 @@ function create_metadata_window(
         end
         _map_ms = round((time_ns()-t_sync)/1e6, digits=1)
         
-        # Synchronize lesion with viewer (filters mask and jumps to slice)
-        t_event = time_ns()
-        if _skip_sync_on_lesion_change[]
-            _skip_sync_on_lesion_change[] = false
-        else
-            @async try
-                lid = parse_lesion_id(id)
-                if lid !== nothing
-                    put!(channel, SyncLesionEvent(lid))
-                end
-            catch e
-                @warn "Failed to send SyncLesionEvent: $e"
-            end
-        end
-        _event_ms = round((time_ns()-t_event)/1e6, digits=1)
-        
         # Trigger auto dictation generation on lesion switch
         t_dict = time_ns()
         try request_auto_dictation!(_MEH.current_tp_index[]) catch; end
         _dict_ms = round((time_ns()-t_dict)/1e6, digits=1)
         
         _total_ms = round((time_ns()-t_cb)/1e6, digits=1)
-        println("[LESION-NAV] $id: apply=$(_apply_ms)ms map=$(_map_ms)ms sync=$(_event_ms)ms dict=$(_dict_ms)ms TOTAL=$(_total_ms)ms"); flush(stdout)
+        println("[LESION-NAV] $id: apply=$(_apply_ms)ms map=$(_map_ms)ms dict=$(_dict_ms)ms TOTAL=$(_total_ms)ms"); flush(stdout)
     end
     if active_lesion_id[] != "" && active_lesion_id[] != "(none)"
         notify(active_lesion_id)
@@ -8408,7 +8826,9 @@ function create_metadata_window(
                                     rep.conclusion_en = report_str
                                 end
                                 
-                                try ERW.open_epsma_report_window(rep) catch; end
+                                if ERW.active_report_screen[] !== nothing
+                                    try ERW.open_epsma_report_window(rep) catch; end
+                                end
                                 
                                 trigger_autosave(; skip_dictation=true)
                             finally
@@ -8423,7 +8843,9 @@ function create_metadata_window(
                         @async begin
                             lbl_dict_status.text[] = "[ERR] Generation failed: $err"
                             lbl_dict_status.color[] = RGBf(0.9, 0.2, 0.2)
-                            try ERW.open_epsma_report_window(rep) catch; end
+                            if ERW.active_report_screen[] !== nothing
+                                try ERW.open_epsma_report_window(rep) catch; end
+                            end
                             lock(_auto_dict_lock) do
                                 _dictation_running[] = false
                             end
@@ -8748,21 +9170,38 @@ function create_metadata_window(
     @async begin
         while true
             sleep(5.0)
-            if _db_dirty[]
-                _db_dirty[] = false
-                try
-                    db = lesion_db[]
-                    put!(db_channel, SaveDBMessage(db, global_app_state, save_path, DEFAULT_HDF5_PATH))
-                    @debug "  [AUTOSAVE] Saved (dirty flag was set)"
-                catch e
-                    @warn "Background autosave enqueue failed" e
+            try
+                if !_is_applying_state[] && !_is_autosaving[]
+                    trigger_autosave()
                 end
+                if _db_dirty[]
+                    _db_dirty[] = false
+                    db = copy(lesion_db[])
+                    h5_target = DEFAULT_HDF5_PATH
+                    try
+                        _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+                        h5_act = _MEH.h5_path_ref[]
+                        if !isempty(h5_act) && isfile(h5_act)
+                            h5_target = h5_act
+                        end
+                    catch; end
+                    put!(db_channel, SaveDBMessage(db, global_app_state, save_path, h5_target))
+                    @debug "  [AUTOSAVE] Saved (dirty flag was set)"
+                end
+            catch e
+                @warn "Background 5s autosave failed" e
             end
         end
     end
 
     # Flush-on-close: save any pending dirty state on graceful shutdown
     atexit() do
+        try
+            cur_lid = parse_lesion_id(active_lesion_id[])
+            if cur_lid !== nothing && cur_lid > 0
+                _flush_lesion!(cur_lid)
+            end
+        catch; end
         if _db_dirty[]
             _db_dirty[] = false
             try
@@ -8854,22 +9293,11 @@ function create_metadata_window(
                     is_syncing_selection[] = false
                 end
             end
-            target_id = active_lesion_id[]
-            st = get_lesion_state(db_val, target_id)
-            if !isempty(st)
-                try
-                    apply_state(st; target_id = target_id)
-                catch e
-                    @warn "Failed to apply state on db load: $e"
-                end
-            end
         end
     end
-    # Ensure dictation is populated if empty
-    tp_cur = _MEH.current_tp_index[]
-    de_desc = get(_MEH.tp_descriptions, tp_cur, "")
-    if !isempty(de_desc) && isempty(_safe_strip(dict_text[]))
-        dict_text[] = de_desc
+    # Ensure old report is populated if empty
+    if update_old_report_display! !== nothing
+        update_old_report_display!()
     end
 
     res = MetadataWindowResult(fig, channel_ref, lesion_db, channel)
@@ -8917,6 +9345,9 @@ function create_metadata_window(
     _lmw_observables[:menu_tp_right] = menu_tp_right
     _lmw_observables[:btn_prev_tp] = btn_pt
     _lmw_observables[:btn_next_tp] = btn_nt
+    _lmw_observables[:dict_text] = dict_text
+    _lmw_observables[:current_dict_lang] = current_dict_lang
+    _lmw_observables[:update_old_report_display] = update_old_report_display!
 
     # CT/PET GUI-only sync functions (update slider/textbox without re-sending event)
     function _sync_ct_gui(min_v, max_v)

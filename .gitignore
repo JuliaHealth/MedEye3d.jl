@@ -429,3 +429,4 @@ scripts/ai/helpnet_bundle/checkpoints/
 *.pth
 dist/
 build/
+.docker.xauth
