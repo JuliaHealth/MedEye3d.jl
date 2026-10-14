@@ -294,6 +294,8 @@
     "full": "The spatial alignment of the lesion relative to anatomical landmarks (such as the long axis of bone, joints, or vessels).",
     "allowed_answer": [
       "Parallel to the Long Axis of Bone",
+      "Anterior-Posterior (AP) Orientation of Long Axis",
+      "anterior posterior orientation of long axis",
       "Horizontal",
       "Vertical",
       "Radial / Sunburst",
@@ -710,7 +712,7 @@
     "default_answer": "None / Malignant Suspected"
   },
   {
-    "full": "Degree of diagnostic certainty (1 = very low, 10 = very high)",
+    "full": "Degree of diagnostic certainty: 0 = sure alternative hypothesis / benign mimic, 10 = sure prostate cancer",
     "allowed_answer": [
       "slider",
       0,

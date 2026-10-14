@@ -206,4 +206,5 @@ using JSON
     include("test_autosave_and_history.jl")
     include("test_report_translation.jl")
     include("test_lesion_suv_metrics.jl")
+    include("test_gui_locking_and_options.jl")
 end

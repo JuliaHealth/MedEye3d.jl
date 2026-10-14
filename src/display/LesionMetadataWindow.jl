@@ -46,6 +46,7 @@ export create_metadata_window, display_metadata_window, get_active_lesion_db, ge
 
 # Registry of all Menu widgets for global click-outside-to-close dismiss
 const _ALL_MENUS = Makie.Menu[]
+const _last_menu_filter_text = Dict{UInt64, String}()
 
 abstract type DBMessage end
 struct SaveDBMessage <: DBMessage
@@ -192,6 +193,10 @@ const _is_syncing_m2_from_backend = Ref(false)
 
 """Check if any Textbox has focus or any Menu dropdown is open (typing/interaction guard)."""
 function _is_any_typing_active()
+    # Guard: if login modal is visible and unauthenticated, typing/interaction is strictly confined to login
+    if !_login_authenticated[] && get(_lmw_observables, :login_visible, Ref(Observable(false)))[][]
+        return true
+    end
     for tb in _all_textboxes
         try
             if tb.focused[]
@@ -208,6 +213,75 @@ function _is_any_typing_active()
     end
     return false
 end
+
+const _active_open_menu = Ref{Union{Makie.Menu, Nothing}}(nothing)
+const _menu_just_closed_time = Ref{Float64}(0.0)
+const _dropdown_event_active = Ref{Bool}(false)
+
+"""Check if any Makie.Menu dropdown is currently open."""
+function _any_menu_open()::Bool
+    if _active_open_menu[] !== nothing
+        try
+            if _active_open_menu[].is_open[]
+                return true
+            end
+        catch
+        end
+    end
+    for m in _ALL_MENUS
+        try
+            if m.is_open[]
+                _active_open_menu[] = m
+                return true
+            end
+        catch
+        end
+    end
+    return false
+end
+
+"""Get the currently open Makie.Menu, or nothing if no menu is open."""
+function _get_active_open_menu()::Union{Makie.Menu, Nothing}
+    if _active_open_menu[] !== nothing
+        try
+            if _active_open_menu[].is_open[]
+                return _active_open_menu[]
+            end
+        catch
+        end
+    end
+    for m in _ALL_MENUS
+        try
+            if m.is_open[]
+                _active_open_menu[] = m
+                return m
+            end
+        catch
+        end
+    end
+    _active_open_menu[] = nothing
+    return nothing
+end
+
+"""Check if a 2D point (pos) is inside a Makie.Menu's button or expanded options scene."""
+function _is_inside_menu(pos, m::Makie.Menu)::Bool
+    try
+        bb = m.layoutobservables.computedbbox[]
+        (pos[1] >= bb.origin[1] && pos[1] <= bb.origin[1] + bb.widths[1] &&
+         pos[2] >= bb.origin[2] && pos[2] <= bb.origin[2] + bb.widths[2]) && return true
+    catch
+    end
+    try
+        if hasproperty(m, :blockscene) && !isempty(m.blockscene.children)
+            vp = m.blockscene.children[1].viewport[]
+            (pos[1] >= vp.origin[1] && pos[1] <= vp.origin[1] + vp.widths[1] &&
+             pos[2] >= vp.origin[2] && pos[2] <= vp.origin[2] + vp.widths[2]) && return true
+        end
+    catch
+    end
+    return false
+end
+
 
 const current_has_expert_edits = Observable(false)
 const current_seg_origin = Observable("AI_PRESEGMENTATION")
@@ -440,7 +514,7 @@ function save_custom_options!(db::Dict)
 end
 
 function add_global_custom_option(category::String, option::String)
-    isempty(category) || isempty(option) && return
+    (isempty(category) || isempty(option)) && return
     opts = load_custom_options()
     cur = get(opts, category, Any[])
     if !(option in cur)
@@ -513,7 +587,7 @@ function _builtin_schema()::Vector{QuestionDef}
             String["Spherical", "Oval / Bean-Shaped", "Round", "Teardrop / Comma-Shaped", "Elongated (Spanning >3 Vertebrae / Parallel to Bone)", "Wedge-Shaped", "Annular / Constricting ('Apple Core')", "Dumbbell Shaped", "Broad-Based / Dural-Based", "Tuberous / Lobulated", "Expansile / Ballooning / Blowout"],
             String["Morphology"], "both", ""),
         QuestionDef("Lesion Orientation", "The spatial alignment of the lesion relative to anatomical landmarks (such as the long axis of bone, joints, or vessels).",
-            String["Parallel to the Long Axis of Bone", "Horizontal", "Vertical", "Radial / Sunburst", "Centripetal Enhancement", "Perilymphatic Distribution", "Symmetric / Bilateral"],
+            String["Parallel to the Long Axis of Bone", "Anterior-Posterior (AP) Orientation of Long Axis", "anterior posterior orientation of long axis", "Horizontal", "Vertical", "Radial / Sunburst", "Centripetal Enhancement", "Perilymphatic Distribution", "Symmetric / Bilateral"],
             String["Morphology"], "both", ""),
         QuestionDef("Macroscopic Pattern", "Multi-lesion spatial distributions or alignment patterns across the scan volume, highly indicative of etiology.",
             String["Linear Alignment Across Ribs ('Pearls on a string')", "Bilateral and Symmetric Distribution", "Asymmetric / Unilateral Focus", "Solitary / Isolated Focus", "Multifocal / Polyostotic (>5 foci)", "Monostotic (Single Bone)", "Scattered / Spotted Sclerosis"],
@@ -548,7 +622,7 @@ function _builtin_schema()::Vector{QuestionDef}
         QuestionDef("Alternative Hypothesis (False Positive)", "Inferred alternative diagnosis or benign mimic based on morphological and clinical criteria.",
             String["None / Malignant Suspected", "Technical Artifact", "Physiological uptake", "Small blood vessel / tubular structure", "Bone Scar / Hardware Graft", "Bone Island / Enostosis", "Osteopoikilosis / Dysplasia", "Bone Infarction / Osteonecrosis", "Trauma / Stress Fracture", "Benign Osteoporotic Collapse", "Fibrous Dysplasia", "Liposclerosing Myxofibrous Tumor (LSMFT)", "Degenerative Osteoarthritis", "Enchondroma", "Paget's Disease", "Osseous Hemangioma", "Osteoma", "Severe Osteoporosis (RID39300)", "Multiple Myeloma", "Chronic Osteomyelitis", "Brodie Abscess", "Giant Cell Tumor (GCT)", "Telangiectatic Osteosarcoma", "Osteosarcoma", "Desmoplastic Fibroma", "Blowout Metastasis (RCC / Thyroid)", "Low-Grade Central Osteosarcoma", "Trigeminal Ganglion", "Stellate Ganglion", "Coeliac Ganglion", "Hypogastric Ganglion", "Sacral Ganglion", "Sympathetic Ganglion", "Testicular Distant Nodal Route", "Sarcoidosis", "Lung Fibrosis", "Reactive Lymph Node", "Suspicious Lymph Node", "Benign Adrenal Adenoma", "Adrenal Metastasis / Malignancy", "Pancreatic Neuroendocrine Tumor (PanNET)", "Pancreatic Ductal Adenocarcinoma (PDAC)", "Accessory Spleen / Splenosis", "Schwannoma / Nerve Sheath Tumor", "Vestibular Schwannoma", "Glomus Tumor (Paraganglioma)", "Meningioma", "Liver Hemangioma", "Liver Hematoma", "CZ Mickey Mouse Base", "Symmetric BPH", "Prostatitis", "Extraprostatic extension (T3b/T4)", "PZ Prostate Cancer", "TZ Prostate Cancer", "PSMA-Cold Malignancy Suspected", "Aneurysmal Bone Cyst (ABC)", "Simple Bone Cyst (SBC)", "Radiation-Induced Sarcoma", "Brown Tumor (Hyperparathyroidism)", "Modic Type 1 Endplate Changes", "Diffuse Bone Marrow Activation (Anemia)", "Inflammatory Spondylitis (AS)", "Osteoid Osteoma", "Desmoid Tumor (Aggressive Fibromatosis)", "Nodular Fasciitis", "Lipoma / Angiolipoma / Hibernoma", "Intramuscular Myxoma", "Gynecomastia / PASH", "Elastofibroma Dorsi", "Thyroid / Parathyroid Adenoma", "Thymoma / Thymic Hyperplasia", "Cerebral Infarction (Stroke)", "Synchronous Colorectal Cancer", "Primary Lung Cancer", "Malignant Melanoma Metastasis", "Lymphoma (DLBCL / FL)", "Tuberculosis (TB)", "Diverticulitis", "Cholelithiasis (Gallbladder Stones)", "Dermatofibroma / Acrochordon", "Active Vascular Calcification", "Esophagitis / Swallowed Saliva", "Bronchogenic Cyst", "Pheochromocytoma"],
             String["Final Assessment"], "both", "None / Malignant Suspected"),
-        QuestionDef("Certainty", "Degree of diagnostic certainty (0 = very low / artefact, 10 = very high)",
+        QuestionDef("Certainty", "Degree of diagnostic certainty: 0 = sure alternative hypothesis / benign mimic, 10 = sure prostate cancer",
             String["slider", "0", "10"],
             String["Final Assessment"], "both", "10"),
         QuestionDef("Comment", "Additional clinical comments or observations.",
@@ -2730,6 +2804,9 @@ function searchable_menu(g, row, cols;
         if is_open
             filter_buf[] = ""
         else
+            if !isempty(filter_buf[])
+                _last_menu_filter_text[objectid(menu)] = filter_buf[]
+            end
             sel = menu.selection[]
             
             # If the user typed something but just clicked away without selecting, auto-commit their typed text
@@ -2846,6 +2923,7 @@ function _register_menu!(m::Makie.Menu)
         push!(_REGISTERED_MENUS, m_id)
         on(m.is_open) do is_open
             if is_open
+                _active_open_menu[] = m
                 for other in _ALL_MENUS
                     if other !== m
                         try
@@ -2855,6 +2933,11 @@ function _register_menu!(m::Makie.Menu)
                         catch; end
                     end
                 end
+            else
+                if _active_open_menu[] === m
+                    _active_open_menu[] = nothing
+                end
+                _menu_just_closed_time[] = time()
             end
         end
     end
@@ -3024,6 +3107,8 @@ function create_metadata_window(
     empty!(_all_textboxes)  # clear textbox registry on (re-)creation
     empty!(_ALL_MENUS)
     empty!(_REGISTERED_MENUS)
+    _active_open_menu[] = nothing
+    _dropdown_event_active[] = false
     obs_m2 = Observable(false)
     obs_set_compare_mode = Observable(false)
     _lmw_observables[:obs_set_compare_mode] = obs_set_compare_mode
@@ -3274,7 +3359,8 @@ function create_metadata_window(
     ))
     
     on(fig.scene.events.scroll) do scroll
-        if !_scroll_ready[] || !_bbox_cache_ready[]
+        is_login_active = !_login_authenticated[] && get(_lmw_observables, :login_visible, Ref(Observable(false)))[][]
+        if !_scroll_ready[] || !_bbox_cache_ready[] || is_login_active || _any_menu_open()
             return Consume(true)
         end
         # Push each scroll delta directly — debounce_time(16) handles coalescing
@@ -5219,7 +5305,10 @@ function create_metadata_window(
                 field_widgets[q.short] = cert_sl
             else
                 # Inject saved custom options into dropdown
-                saved_opts = String[string(s) for s in get(custom_opts_db, q.short, Any[])]
+                saved_opts = unique(vcat(
+                    String[string(s) for s in get(custom_opts_db, q.short, Any[])],
+                    String[string(s) for s in get(custom_opts_db, get(DISPLAY_LABEL_OVERRIDES, q.short, ""), Any[])]
+                ))
                 all_opts = String["- select -"; q.options; saved_opts]
                 opts_obs = Observable(all_opts)
                 def_idx = 1
@@ -5231,37 +5320,109 @@ function create_metadata_window(
                 btn_add_opt = Button(g[q_r, 4], label = "+", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
                 rowsize!(g, q_r, Fixed(28)); register_fixed_row!(q_r, 28)
                 field_widgets[q.short] = m
-                
-                let q_name = q.short, menu_w = m, obs = opts_obs
-                    on(btn_add_opt.clicks) do _
-                        typed_prompt = menu_w.prompt[]
-                        val_to_add = startswith(typed_prompt, "Filter: ") ? strip(typed_prompt[9:end]) : ""
-                        if isempty(val_to_add) || val_to_add == "Select..."
-                            menu_w.is_open[] = true
-                        else
-                            val_str = String(val_to_add)
+
+                # Inline expandable row for entering and persisting new custom options
+                add_r = nr!()
+                push!(all_metadata_rows, add_r)
+                push!(q_rows, add_r)
+                add_subgrid = GridLayout(g[add_r, 2:4], tellwidth = false)
+                disp_name = get(DISPLAY_LABEL_OVERRIDES, q.short, q.short)
+                tb_new_opt = styled_textbox(add_subgrid[1, 1]; placeholder = "New option for $(disp_name)...", fontsize = 10)
+                btn_save_opt = Button(add_subgrid[1, 2], label = "Save", buttoncolor = RGBf(0.15, 0.45, 0.2), labelcolor = :white, fontsize = 10, width = 45)
+                btn_cancel_opt = Button(add_subgrid[1, 3], label = "✕", buttoncolor = RGBf(0.4, 0.2, 0.2), labelcolor = :white, fontsize = 10, width = 25)
+                colsize!(add_subgrid, 2, Fixed(45))
+                colsize!(add_subgrid, 3, Fixed(25))
+                rowsize!(g, add_r, Fixed(0)); register_fixed_row!(add_r, 0)
+                tb_new_opt.blockscene.visible[] = false
+                btn_save_opt.blockscene.visible[] = false
+                btn_cancel_opt.blockscene.visible[] = false
+
+                let q_name = q.short, menu_w = m, obs = opts_obs, tb = tb_new_opt, b_save = btn_save_opt, b_cancel = btn_cancel_opt, ar = add_r
+                    _add_row_open = Ref(false)
+
+                    function _close_add_row!()
+                        _add_row_open[] = false
+                        rowsize!(g, ar, Fixed(0)); register_fixed_row!(ar, 0)
+                        tb.blockscene.visible[] = false
+                        b_save.blockscene.visible[] = false
+                        b_cancel.blockscene.visible[] = false
+                        tb.displayed_string[] = ""
+                        tb.stored_string[] = ""
+                        tb.focused[] = false
+                    end
+
+                    function _commit_new_opt!()
+                        raw_val = strip(tb.displayed_string[])
+                        isempty(raw_val) && (raw_val = strip(tb.stored_string[]))
+                        if !isempty(raw_val)
+                            val_str = String(raw_val)
+                            # Persist custom option globally across runs
                             add_global_custom_option(q_name, val_str)
+                            alias_name = get(DISPLAY_LABEL_OVERRIDES, q_name, "")
+                            !isempty(alias_name) && add_global_custom_option(alias_name, val_str)
+                            
+                            # Add to Observable options
                             cur_opts = copy(obs[])
                             if !(val_str in cur_opts)
                                 push!(cur_opts, val_str)
                                 obs[] = cur_opts
                             end
+                            
+                            # Add to Menu options and select it
+                            if !(val_str in menu_w.options[])
+                                menu_w.options[] = vcat(menu_w.options[], [val_str])
+                            end
                             idx = findfirst(==(val_str), menu_w.options[])
                             if idx !== nothing
                                 menu_w.i_selected[] = idx
                             end
+                            _set_menu_selection_string!(menu_w, val_str)
                             trigger_autosave()
+                            
+                            _close_add_row!()
                         end
+                    end
+
+                    on(btn_add_opt.clicks) do _
+                        typed_prompt = menu_w.prompt[]
+                        val_from_filter = startswith(typed_prompt, "Filter: ") ? strip(typed_prompt[9:end]) : ""
+                        last_filter = get(_last_menu_filter_text, objectid(menu_w), "")
+                        prefill = !isempty(val_from_filter) && val_from_filter != "Select..." ? val_from_filter : last_filter
+                        
+                        if !_add_row_open[]
+                            _add_row_open[] = true
+                            rowsize!(g, ar, Fixed(28)); register_fixed_row!(ar, 28)
+                            tb.blockscene.visible[] = true
+                            b_save.blockscene.visible[] = true
+                            b_cancel.blockscene.visible[] = true
+                            if !isempty(prefill)
+                                tb.displayed_string[] = prefill
+                                tb.stored_string[] = prefill
+                            end
+                            tb.focused[] = true
+                        else
+                            _close_add_row!()
+                        end
+                    end
+
+                    on(b_save.clicks) do _
+                        _commit_new_opt!()
+                    end
+                    on(tb.stored_string) do _
+                        _commit_new_opt!()
+                    end
+                    on(b_cancel.clicks) do _
+                        _close_add_row!()
                     end
                 end
             end
 
-            # Show truncated description as a subtle hint below the field
+            # Show subtle hint below the field
             if !isempty(q.full) && q.full != q.short
                 tt_r = nr!()
                 push!(all_metadata_rows, tt_r)
                 push!(q_rows, tt_r)
-                desc_text = length(q.full) > 80 ? q.full[1:80] * "..." : q.full
+                desc_text = (q.short == "Certainty" || length(q.full) <= 120) ? q.full : (q.full[1:117] * "...")
                 Label(g[tt_r, 1:4], desc_text,
                     fontsize = 8, color = RGBf(0.45, 0.45, 0.5),
                     halign = :left, tellwidth = false)
@@ -9772,38 +9933,94 @@ function display_metadata_window(fig::Figure)
     _lmw_observables[:login_bg] = login_bg
     _lmw_observables[:login_user] = login_tb_user
 
-    # ── Intercept Clicks to Prevent Click-Through ─────────────────────────────
-on(events(fig.scene).mousebutton, priority=100) do event
-    if !_login_authenticated[]
-        if event.action == Mouse.press
+    # ── Intercept Clicks to Prevent Click-Through & Lock GUI Controls ─────────
+    in_rect(p, b) = (p[1] >= b.origin[1] && p[1] <= b.origin[1] + b.widths[1] &&
+                     p[2] >= b.origin[2] && p[2] <= b.origin[2] + b.widths[2])
+
+    # Priority 100: Top-Level Modal Interceptor (Login Lock & Dropdown Lock)
+    on(events(fig.scene).mousebutton, priority=100) do event
+        # 1. Loading Overlay: Block all clicks while application / engines initialize
+        is_loading = try loading_bg.visible[] catch; false end
+        if is_loading
+            return Consume(true)
+        end
+
+        # 2. Login Modal Lock: If login is visible and unauthenticated, lock ALL controls except login fields and button
+        if !_login_authenticated[] && _login_visible[]
             pos = events(fig.scene).mouseposition[]
-            
-            # Check Textboxes
             user_bbox = login_tb_user.layoutobservables.computedbbox[]
             pass_bbox = login_tb_pass.layoutobservables.computedbbox[]
-            btn_bbox = login_btn.layoutobservables.computedbbox[]
+            btn_bbox  = login_btn.layoutobservables.computedbbox[]
             
-            # Function to check if pos is in bbox
-            in_rect(p, b) = (p[1] >= b.origin[1] && p[1] <= b.origin[1] + b.widths[1] &&
-                             p[2] >= b.origin[2] && p[2] <= b.origin[2] + b.widths[2])
+            in_user = in_rect(pos, user_bbox)
+            in_pass = in_rect(pos, pass_bbox)
+            in_btn  = in_rect(pos, btn_bbox)
             
-            if in_rect(pos, btn_bbox)
-                login_btn.buttoncolor = RGBf(0.1, 0.4, 0.2)
-                _do_login()
-                return Consume(true)
-            elseif in_rect(pos, user_bbox) || in_rect(pos, pass_bbox)
-                return Consume(false) # Let the Textboxes (priority 60) handle it!
+            if in_btn
+                if event.action == Mouse.press
+                    login_btn.buttoncolor = RGBf(0.1, 0.4, 0.2)
+                    _do_login()
+                elseif event.action == Mouse.release
+                    login_btn.buttoncolor = RGBf(0.2, 0.6, 0.3)
+                end
+                return Consume(true) # Always consume clicks on login button
+            elseif in_user || in_pass
+                return Consume(false) # Let Textboxes (priority 70) handle focus / typing
             else
-                return Consume(true) # Block everything else (like Menus at 64)
+                return Consume(true) # Lock ALL other GUI controls
             end
-        elseif event.action == Mouse.release
-            login_btn.buttoncolor = RGBf(0.2, 0.6, 0.3)
+        elseif time() - _login_success_time[] < 1.0
+            return Consume(true) # Settle period after successful login
         end
-    elseif time() - _login_success_time[] < 1.0
-        return Consume(true)
+
+        # 3. Dropdown Settle Lock: Block clicks immediately after any dropdown closes
+        if time() - _menu_just_closed_time[] < 0.25
+            return Consume(true)
+        end
+
+        # 4. Dropdown Modal Lock: If any dropdown is currently open, lock ALL other controls
+        open_menu = _get_active_open_menu()
+        if open_menu !== nothing
+            pos = events(fig.scene).mouseposition[]
+            inside = _is_inside_menu(pos, open_menu)
+            if inside
+                _dropdown_event_active[] = true
+                return Consume(false) # Allow single open Menu (priority 64) to handle its selection / button
+            else
+                # Click outside: close the open dropdown and consume event so NO control below fires!
+                try open_menu.is_open[] = false catch; end
+                _active_open_menu[] = nothing
+                _menu_just_closed_time[] = time()
+                return Consume(true)
+            end
+        else
+            # No dropdown is currently open. Check if user is clicking to open a dropdown button.
+            # If clicking a menu button, mark _dropdown_event_active so Priority 2 blocker protects any widget below!
+            pos = events(fig.scene).mouseposition[]
+            for m in _ALL_MENUS
+                try
+                    bb = m.layoutobservables.computedbbox[]
+                    if in_rect(pos, bb)
+                        _dropdown_event_active[] = true
+                        return Consume(false)
+                    end
+                catch
+                end
+            end
+        end
+
+        return Consume(false)
     end
-    return Consume(false)
-end
+
+    # Priority 2: Dropdown Leakage Blocker
+    # Catches any press/release that passed through Menu (priority 64) but must not reach Button/Toggle (priority 1)
+    on(events(fig.scene).mousebutton, priority=2) do event
+        if _dropdown_event_active[]
+            _dropdown_event_active[] = false
+            return Consume(true) # Block priority 1 controls!
+        end
+        return Consume(false)
+    end
 
     lock(GLOBAL_OPENGL_LOCK) do
         display(screen, fig)
