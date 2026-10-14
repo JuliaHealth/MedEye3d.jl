@@ -67,6 +67,8 @@ Source: "app_icon.ico"; DestDir: "{app}\bin"; Flags: ignoreversion
 [Icons]
 ; Start Menu shortcuts
 Name: "{autoprograms}\{#MyAppName}\{#MyAppName}"; Filename: "{app}\bin\{#MyAppExeName}"; IconFilename: "{app}\bin\app_icon.ico"
+Name: "{autoprograms}\{#MyAppName}\Open MedEye3D Logs Folder"; Filename: "{win}\explorer.exe"; Parameters: """{userappdata}\MedEye3D\logs"""
+Name: "{autoprograms}\{#MyAppName}\MedEye3D Live Log Monitor"; Filename: "{app}\bin\monitor_logs.bat"
 Name: "{autoprograms}\{#MyAppName}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
 ; Optional Desktop shortcut

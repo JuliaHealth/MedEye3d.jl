@@ -82,6 +82,80 @@ function get_writable_log_dir()::String
 end
 
 """
+    handle_log_cli_args(args::Vector{String})::Cint
+
+Handles log inspection CLI options (--logs, --open-logs, --log-dir, --show-logs, --view-logs, --tail-logs, --follow-logs)
+before standard application startup so logs are not cleared or rotated prematurely.
+"""
+function handle_log_cli_args(args::Vector{String})::Cint
+    log_dir = get_writable_log_dir()
+    out_log = joinpath(log_dir, "medeye3d_output.log")
+    err_log = joinpath(log_dir, "medeye3d_error.log")
+    session_log = joinpath(log_dir, "medeye3d_session.log")
+
+    if "--log-dir" in args
+        try
+            println(stdout, log_dir)
+            flush(stdout)
+        catch
+        end
+        return Cint(0)
+    elseif "--show-logs" in args || "--view-logs" in args
+        try
+            println(stdout, "=======================================================")
+            println(stdout, " MedEye3D Output Log: $out_log")
+            println(stdout, "=======================================================")
+            if isfile(out_log)
+                print(stdout, read(out_log, String))
+            else
+                println(stdout, "(No active output log file found at $out_log)")
+            end
+            println(stdout, "\n=======================================================")
+            println(stdout, " MedEye3D Error Log: $err_log")
+            println(stdout, "=======================================================")
+            if isfile(err_log)
+                print(stdout, read(err_log, String))
+            else
+                println(stdout, "(No error log file found at $err_log)")
+            end
+            flush(stdout)
+        catch
+        end
+        return Cint(0)
+    elseif "--tail-logs" in args || "--follow-logs" in args
+        try
+            println(stdout, "=======================================================")
+            println(stdout, " Tailing MedEye3D Output Log ($out_log)")
+            println(stdout, " Press Ctrl+C to stop following")
+            println(stdout, "=======================================================")
+            flush(stdout)
+            if Sys.iswindows()
+                run(`powershell.exe -NoProfile -Command "if (Test-Path '$out_log') { Get-Content -Path '$out_log' -Wait -Tail 40 } else { Write-Host 'Waiting for MedEye3D to generate logs at $out_log...'; while (-not (Test-Path '$out_log')) { Start-Sleep -Milliseconds 500 }; Get-Content -Path '$out_log' -Wait -Tail 40 }"`)
+            end
+        catch
+        end
+        return Cint(0)
+    else # --logs or --open-logs
+        try
+            println(stdout, "=======================================================")
+            println(stdout, " MedEye3D Application Logs")
+            println(stdout, "=======================================================")
+            println(stdout, " Directory:   $log_dir")
+            println(stdout, " Output Log:  $out_log")
+            println(stdout, " Error Log:   $err_log")
+            println(stdout, " Session Log: $session_log")
+            println(stdout, "=======================================================")
+            flush(stdout)
+            if Sys.iswindows()
+                run(`explorer.exe $(replace(log_dir, '/' => '\\'))`)
+            end
+        catch
+        end
+        return Cint(0)
+    end
+end
+
+"""
     run_viewer_loop(mainViewer)
 
 Continuously pumps GLFW OS window events on the main thread and keeps the visualizer and Makie control panel responsive until closed.
@@ -1544,6 +1618,10 @@ function run_app(args::Vector{String})
         Options:
           -h, --help        Show this help message
           -v, --version     Show version information
+          --logs, --open-logs Open the logs directory in Windows Explorer
+          --log-dir         Print the path to the logs directory
+          --show-logs       Print the latest output and error logs to console
+          --tail-logs       Follow the application output log in real-time
           --ai, --enable-ai Enable and run local AI inference models (nnInteractive & HELPNet)
           --no-ai           Disable AI inference models (run in viewer-only mode)
           --demo            Launch default test case or synthetic 3D phantom viewer
@@ -1636,6 +1714,11 @@ Captures stdio and stderr into real-time flushed log files in `%APPDATA%\\MedEye
 initializes loggers, catches unhandled exceptions, and returns exit code 0.
 """
 function julia_main()::Cint
+    # Intercept log inspection and monitoring flags before rotating files
+    if any(a -> a in ARGS, ["--logs", "--open-logs", "--log-dir", "--show-logs", "--view-logs", "--tail-logs", "--follow-logs"])
+        return handle_log_cli_args(ARGS)
+    end
+
     log_dir = get_writable_log_dir()
     out_log_path = joinpath(log_dir, "medeye3d_output.log")
     err_log_path = joinpath(log_dir, "medeye3d_error.log")

@@ -137,7 +137,20 @@ ssh -N -o "ServerAliveInterval=30" -o "ServerAliveCountMax=3" -L 5005:localhost:
 When diagnosing issues (such as failed AI inference, missing files, or crashes), consult the following three log sources:
 
 ### 1. Application Runtime Logs (Windows Client)
-Because `MedEye3D.exe` runs as a native Windows GUI application, `stdout` and `stderr` are redirected to disk to prevent OS descriptor `-2` crashes:
+Because `MedEye3D.exe` runs as a native Windows GUI application, `stdout` and `stderr` are redirected to disk to prevent OS descriptor `-2` crashes.
+
+#### Quick Ways to Access Application Logs:
+1. **Windows Start Menu**:
+   - `Start Menu` $\to$ **`MedEye3D`** $\to$ **`Open MedEye3D Logs Folder`**: opens `%APPDATA%\MedEye3D\logs\` directly in File Explorer.
+   - `Start Menu` $\to$ **`MedEye3D`** $\to$ **`MedEye3D Live Log Monitor`**: launches a live streaming PowerShell console showing log output as it occurs.
+2. **From Inside MedEye3D GUI**:
+   - In the right-hand panel, expand **Settings & Export** $\to$ click **`[ Open Application Logs Folder ]`**.
+3. **From Command Line / PowerShell**:
+   - `MedEye3D.exe --logs`: Opens Explorer at `%APPDATA%\MedEye3D\logs\` and outputs paths.
+   - `MedEye3D.exe --tail-logs`: Streams the application output log in the terminal in real time.
+   - `MedEye3D.exe --show-logs`: Prints output and error log contents.
+4. **From Installed Folder Scripts**:
+   - In `{app}\bin`: double-click `open_logs.bat` or `monitor_logs.bat`.
 
 - **Log Directory**: `%APPDATA%\MedEye3D\logs\` (usually `C:\Users\<Username>\AppData\Roaming\MedEye3D\logs\`)
 - **Key Files**:

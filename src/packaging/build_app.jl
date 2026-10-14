@@ -81,6 +81,15 @@ if isfile(license_path)
     println("✓ Copied LICENSE.")
 end
 
+# Copy logging helper batch scripts into bin/
+for bat_name in ["open_logs.bat", "monitor_logs.bat"]
+    bat_src = joinpath(@__DIR__, bat_name)
+    if isfile(bat_src)
+        cp(bat_src, joinpath(bin_dir, bat_name); force=true)
+        println("✓ Copied $bat_name to bin/.")
+    end
+end
+
 # Copy metadata schema, ontologies, and custom options into distribution bundle
 dist_data_dir = joinpath(build_output_dir, "data")
 dist_assets_dir = joinpath(build_output_dir, "assets")

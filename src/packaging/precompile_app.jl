@@ -182,6 +182,13 @@ try
 catch e
 end
 
+# Trace log directory resolution and log CLI handler
+try
+    log_dir = MedEye3dApp.get_writable_log_dir()
+    MedEye3dApp.handle_log_cli_args(["--log-dir"])
+catch e
+end
+
 # Trace SQLite FTS5 anatomy indexing and queries
 try
     terms = LesionMetadataWindow.load_anatomy_ontology()

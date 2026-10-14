@@ -91,6 +91,18 @@ MedEye3D.exe --help
 # Display version
 MedEye3D.exe --version
 
+# Open application logs folder in Windows Explorer
+MedEye3D.exe --logs
+
+# Follow / tail the live application log stream in terminal
+MedEye3D.exe --tail-logs
+
+# Print existing output and error logs to console
+MedEye3D.exe --show-logs
+
+# Print log directory path
+MedEye3D.exe --log-dir
+
 # Launch interactive demo with synthetic CT/PET phantom (no patient files needed)
 MedEye3D.exe --demo
 
@@ -115,15 +127,36 @@ MedEye3D.exe --no-ai
 
 ## 🔍 Locating Logs & Debugging Issues
 
-When diagnosing issues (e.g., failed AI inference, missing files, or crashes), consult the following log sources:
+When diagnosing issues (e.g., failed AI inference, missing files, performance checks, or crashes), you have **multiple convenient ways to access logs**:
+
+### How to Access Application Logs
+
+1. **Via Windows Start Menu (Installed Application)**:
+   - Go to Start Menu $\to$ **MedEye3D** $\to$ **`Open MedEye3D Logs Folder`**: opens `%APPDATA%\MedEye3D\logs\` directly in File Explorer.
+   - Go to Start Menu $\to$ **MedEye3D** $\to$ **`MedEye3D Live Log Monitor`**: launches a real-time streaming PowerShell console that displays live logs as the application runs.
+
+2. **Via Application GUI (While Running)**:
+   - In the right-hand panel, expand the **Settings & Export** section.
+   - Click the button **`[ Open Application Logs Folder ]`** to open `%APPDATA%\MedEye3D\logs\` immediately in Windows File Explorer.
+
+3. **Via Command Line / PowerShell**:
+   - `MedEye3D.exe --logs`: Opens the logs directory in Windows Explorer and prints file paths.
+   - `MedEye3D.exe --tail-logs`: Streams the output log in real-time in the terminal.
+   - `MedEye3D.exe --show-logs`: Prints recent contents of both output and error logs.
+   - `MedEye3D.exe --log-dir`: Returns the log directory path.
+
+4. **Via Installation Directory Batch Scripts**:
+   - In `C:\Users\<user>\AppData\Local\Programs\MedEye3D\bin\` (or `C:\Program Files\MedEye3D\bin\`):
+     - `open_logs.bat`: double-click to open logs folder in Explorer.
+     - `monitor_logs.bat`: double-click to open live real-time log monitoring terminal.
 
 ### 1. Application Runtime Logs (Windows Client)
 Because `MedEye3D.exe` runs as a native Windows GUI application, `stdout` and `stderr` are redirected to disk to prevent OS descriptor crashes:
 
 - **Log Directory**: `%APPDATA%\MedEye3D\logs\` (usually `C:\Users\<Username>\AppData\Roaming\MedEye3D\logs\`)
 - **Key Files**:
-  - `medeye3d_output.log`: Standard output (startup messages, model results, voxel counts).
-  - `medeye3d_error.log`: Standard error and warning traces.
+  - `medeye3d_output.log`: Standard output (startup messages, model results, voxel counts, frame performance).
+  - `medeye3d_error.log`: Standard error, warnings, and unhandled exception stack traces.
   - `medeye3d_session.log`: Chronological history of all sessions, launch arguments, and exit codes.
   - `medeye3d_output_prev.log` / `medeye3d_error_prev.log`: Retained logs from the preceding session.
 

@@ -7183,6 +7183,25 @@ function create_metadata_window(
         display(GLMakie.Screen(), f_hist)
     end
     
+    # Application Logs button
+    log_r = nr!()
+    btn_open_logs = Button(g[log_r, 1:4], label = "Open Application Logs Folder",
+        buttoncolor = BG_PNL, labelcolor = RGBf(0.4, 0.8, 1.0), fontsize = 10)
+    rowsize!(g, log_r, Fixed(28)); register_fixed_row!(log_r, 28)
+    on(btn_open_logs.clicks) do _
+        try
+            log_dir = joinpath(get(ENV, "APPDATA", ""), "MedEye3D", "logs")
+            if !isdir(log_dir)
+                log_dir = joinpath(tempdir(), "MedEye3D_logs")
+            end
+            if Sys.iswindows()
+                run(`explorer.exe $(replace(log_dir, '/' => '\\'))`)
+            end
+        catch e
+            @warn "Failed to open logs directory: $e"
+        end
+    end
+    
     # Preprocessing
     pre_r1 = nr!()
     tog_autorun = Toggle(g[pre_r1, 1], active=false)
