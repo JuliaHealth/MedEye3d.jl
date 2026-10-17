@@ -762,7 +762,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     end
     if isempty(persisted_annotations)
         companion_json = replace(h5_path, r"\.(h5|hdf5)$"i => "_annotations.json")
-        for cand_json in [companion_json, DEFAULT_SAVE_PATH]
+        for cand_json in [companion_json, LesionMetadataWindow.DEFAULT_SAVE_PATH]
             if isfile(cand_json)
                 try
                     persisted_annotations = JSON.parse(read(cand_json, String))

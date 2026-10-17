@@ -42,6 +42,7 @@ import ..PriorReportWindow as PRW
 import ..SegmentationDisplay.ReactOnMouseClickAndDrag as _ROMCAD
 
 export create_metadata_window, display_metadata_window, get_active_lesion_db, get_mask_ids, lookup_anatomy, PRW,
+       DEFAULT_SAVE_PATH,
        compute_lesion_suv_metrics, precompute_all_suv_metrics!, get_lesion_suv_metrics, _get_suv_max, _get_suv_mean, _get_suv_peak,
        load_metadata_presets, save_metadata_presets!, add_metadata_preset!,
        propagate_metadata_to_descendants!, find_linked_descendants, is_field_manually_set_in_lesion
