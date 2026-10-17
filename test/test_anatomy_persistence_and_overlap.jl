@@ -275,6 +275,8 @@ import MedEye3d.SegmentationDisplay.MakieEventHandlers as MEH
         MEH.current_tp_index[] = 0
         MEH.volume_z_size[] = 326
         MEH.tp_segment_names[0] = Dict(1 => "Segment 1")
+        empty!(MEH.tp_organ_mapping)
+        empty!(MEH.global_organ_mapping[])
         MEH.global_organ_mapping[][1] = ""
 
         active_lesion = Observable("1: Segment 1")
