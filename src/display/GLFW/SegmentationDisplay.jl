@@ -661,7 +661,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.PrevLesionEven
 # Mask visibility toggle (Q hold/release)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleMaskVisibilityEvent) = MakieEventHandlers.reactToToggleMaskVisibility(data, stateObjects)
 
-on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.RevertToAIEvent) = nothing
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.RevertToAIEvent) = MakieEventHandlers.reactToRevertToAI(data, stateObjects)
 
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ShowOnlyPETEvent) = MakieEventHandlers.reactToShowOnlyPET(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ShowOnlyCTEvent) = MakieEventHandlers.reactToShowOnlyCT(data, stateObjects)

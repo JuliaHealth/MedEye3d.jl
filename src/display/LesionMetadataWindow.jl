@@ -464,7 +464,66 @@ const _metadata_presets_cache = Ref{Dict{String,Any}}(Dict{String,Any}())
 # Persistent display preferences (PET/CT blend, Label Opacity)
 const GLOBAL_DISPLAY_CONFIG_PATH = joinpath(homedir(), ".medeye3d_display_config.json")
 
+function _get_active_h5_path()::String
+    try
+        _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+        p = _MEH_mod.h5_path_ref[]
+        if !isempty(p) && isfile(p)
+            return p
+        end
+        p2 = _MEH_mod.h5_save_path_ref[]
+        if !isempty(p2) && isfile(p2)
+            return p2
+        end
+    catch
+    end
+    return ""
+end
+
+function _write_meta_json_to_h5!(key::String, data, h5_path::String = _get_active_h5_path())::Bool
+    (isempty(h5_path) || !isfile(h5_path)) && return false
+    try
+        _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+        lock(_MEH_mod._hdf5_io_lock) do
+            HDF5.h5open(h5_path, "r+") do file
+                meta_grp = haskey(file, "_meta_") ? file["_meta_"] : create_group(file, "_meta_")
+                if haskey(meta_grp, key)
+                    delete_object(meta_grp, key)
+                end
+                meta_grp[key] = JSON.json(data, 2)
+            end
+        end
+        return true
+    catch e
+        @warn "Failed to write _meta_/$key to HDF5 $h5_path: $e"
+        return false
+    end
+end
+
+function _read_meta_json_from_h5(key::String, h5_path::String = _get_active_h5_path())
+    (isempty(h5_path) || !isfile(h5_path)) && return nothing
+    try
+        _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+        return lock(_MEH_mod._hdf5_io_lock) do
+            HDF5.h5open(h5_path, "r") do file
+                if haskey(file, "_meta_") && haskey(file["_meta_"], key)
+                    raw = read(file["_meta_"][key])
+                    return JSON.parse(String(raw))
+                end
+                return nothing
+            end
+        end
+    catch e
+        @warn "Failed to read _meta_/$key from HDF5 $h5_path: $e"
+        return nothing
+    end
+end
+
 function load_display_config()::Dict{String,Any}
+    h5_cfg = _read_meta_json_from_h5("display_config.json")
+    if h5_cfg isa AbstractDict
+        return Dict{String,Any}(string(k) => v for (k, v) in h5_cfg)
+    end
     if isfile(GLOBAL_DISPLAY_CONFIG_PATH)
         try
             return JSON.parse(read(GLOBAL_DISPLAY_CONFIG_PATH, String))
@@ -480,6 +539,7 @@ function load_display_config()::Dict{String,Any}
 end
 
 function save_display_config(cfg::Dict{String,Any})
+    _write_meta_json_to_h5!("display_config.json", cfg)
     try
         write(GLOBAL_DISPLAY_CONFIG_PATH, JSON.json(cfg, 4))
     catch e
@@ -488,7 +548,10 @@ function save_display_config(cfg::Dict{String,Any})
 end
 
 function load_custom_options()::Dict{String,Any}
-    isempty(_custom_opts_cache[]) || return _custom_opts_cache[]
+    h5_opts = _read_meta_json_from_h5("custom_options.json")
+    if !isempty(_custom_opts_cache[]) && h5_opts === nothing
+        return _custom_opts_cache[]
+    end
     res = Dict{String,Any}()
     # Merge package/slicer default custom options
     if isfile(CUSTOM_OPTS_PATH)
@@ -510,12 +573,24 @@ function load_custom_options()::Dict{String,Any}
             @warn "Failed to load global custom options: $e"
         end
     end
+    # Merge active HDF5 custom options
+    if h5_opts isa AbstractDict
+        for (k, v) in h5_opts
+            cur = get(res, string(k), Any[])
+            res[string(k)] = v isa AbstractVector ? unique(vcat(cur, v)) : unique(vcat(cur, [v]))
+        end
+    end
+    for (k, v) in _custom_opts_cache[]
+        cur = get(res, string(k), Any[])
+        res[string(k)] = v isa AbstractVector ? unique(vcat(cur, v)) : unique(vcat(cur, [v]))
+    end
     _custom_opts_cache[] = res
     return _custom_opts_cache[]
 end
 
 function save_custom_options!(db::Dict)
     _custom_opts_cache[] = copy(db)
+    _write_meta_json_to_h5!("custom_options.json", db)
     for p in [GLOBAL_CUSTOM_OPTS_PATH, CUSTOM_OPTS_PATH]
         try
             mkpath(dirname(p))
@@ -535,27 +610,42 @@ function add_global_custom_option(category::String, option::String)
     if !(option in cur)
         push!(cur, option)
         opts[category] = cur
-        save_custom_options!(opts)
-        @info "Persisted global custom option: [$category] -> '$option'"
     end
+    save_custom_options!(opts)
+    @info "Persisted global custom option: [$category] -> '$option'"
 end
 
 function load_global_custom_fields()::Dict{String,String}
-    isempty(_custom_fields_cache[]) || return _custom_fields_cache[]
+    h5_fields = _read_meta_json_from_h5("custom_fields.json")
+    if !isempty(_custom_fields_cache[]) && h5_fields === nothing
+        return _custom_fields_cache[]
+    end
+    res = Dict{String,String}()
     if isfile(GLOBAL_CUSTOM_FIELDS_PATH)
         try
             raw = JSON.parse(read(GLOBAL_CUSTOM_FIELDS_PATH, String))
-            _custom_fields_cache[] = Dict{String,String}(string(k) => string(v) for (k, v) in raw)
+            for (k, v) in raw
+                res[string(k)] = string(v)
+            end
         catch e
             @warn "Failed to load global custom fields: $e"
-            _custom_fields_cache[] = Dict{String,String}()
         end
     end
+    if h5_fields isa AbstractDict
+        for (k, v) in h5_fields
+            res[string(k)] = string(v)
+        end
+    end
+    for (k, v) in _custom_fields_cache[]
+        res[string(k)] = string(v)
+    end
+    _custom_fields_cache[] = res
     return _custom_fields_cache[]
 end
 
 function save_global_custom_fields(fields::Dict)
     _custom_fields_cache[] = Dict{String,String}(string(k) => string(v) for (k, v) in fields)
+    _write_meta_json_to_h5!("custom_fields.json", _custom_fields_cache[])
     try
         mkpath(dirname(GLOBAL_CUSTOM_FIELDS_PATH))
         open(GLOBAL_CUSTOM_FIELDS_PATH, "w") do f
@@ -569,7 +659,10 @@ end
 # ─── Metadata Presets & Downstream Propagation ──────────────────────────────
 
 function load_metadata_presets()::Dict{String,Any}
-    isempty(_metadata_presets_cache[]) || return _metadata_presets_cache[]
+    h5_presets = _read_meta_json_from_h5("metadata_presets.json")
+    if !isempty(_metadata_presets_cache[]) && h5_presets === nothing
+        return _metadata_presets_cache[]
+    end
     res = Dict{String,Any}()
     
     # Built-in fallback presets for frequently-used benign findings and technical artifacts
@@ -637,12 +730,23 @@ function load_metadata_presets()::Dict{String,Any}
         end
     end
     
+    # 3. Active HDF5 presets
+    if h5_presets isa AbstractDict
+        for (k, v) in h5_presets
+            res[string(k)] = v
+        end
+    end
+    for (k, v) in _metadata_presets_cache[]
+        res[string(k)] = v
+    end
+    
     _metadata_presets_cache[] = res
     return _metadata_presets_cache[]
 end
 
 function save_metadata_presets!(presets::Dict)
     _metadata_presets_cache[] = copy(presets)
+    _write_meta_json_to_h5!("metadata_presets.json", presets)
     for p in [GLOBAL_METADATA_PRESETS_PATH, METADATA_PRESETS_PATH]
         try
             mkpath(dirname(p))
@@ -1797,6 +1901,26 @@ function persist_to_active_dataset_h5!(db::Dict, h5_path::String)
                     delete_object(meta_grp, "lesion_annotations.json")
                 end
                 meta_grp["lesion_annotations.json"] = JSON.json(db, 2)
+
+                # 4. Also persist metadata_presets.json, custom_options.json, and custom_fields.json if populated
+                if !isempty(_metadata_presets_cache[])
+                    if haskey(meta_grp, "metadata_presets.json")
+                        delete_object(meta_grp, "metadata_presets.json")
+                    end
+                    meta_grp["metadata_presets.json"] = JSON.json(_metadata_presets_cache[], 2)
+                end
+                if !isempty(_custom_opts_cache[])
+                    if haskey(meta_grp, "custom_options.json")
+                        delete_object(meta_grp, "custom_options.json")
+                    end
+                    meta_grp["custom_options.json"] = JSON.json(_custom_opts_cache[], 2)
+                end
+                if !isempty(_custom_fields_cache[])
+                    if haskey(meta_grp, "custom_fields.json")
+                        delete_object(meta_grp, "custom_fields.json")
+                    end
+                    meta_grp["custom_fields.json"] = JSON.json(_custom_fields_cache[], 2)
+                end
             end
             @debug "[HDF5] Persisted lesion metadata to $h5_path"
         catch e
@@ -1814,53 +1938,56 @@ function load_annotations_hdf5(path::String = DEFAULT_HDF5_PATH)::Dict{String,Di
     isfile(path) || return Dict{String,Dict{String,Any}}()
     try
         out = Dict{String,Dict{String,Any}}()
-        h5open(path, "r") do file
-            # 1. First check if unified _meta_/lesion_annotations.json is present
-            if haskey(file, "_meta_") && haskey(file["_meta_"], "lesion_annotations.json")
-                try
-                    raw_str = read(file["_meta_/lesion_annotations.json"])
-                    parsed = JSON.parse(raw_str)
-                    if parsed isa AbstractDict
-                        for (k, v) in parsed
-                            if v isa AbstractDict
-                                inner = Dict{String, Any}()
-                                for (ik, iv) in v
-                                    inner[string(ik)] = iv
+        _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+        lock(_MEH._hdf5_io_lock) do
+            h5open(path, "r") do file
+                # 1. First check if unified _meta_/lesion_annotations.json is present
+                if haskey(file, "_meta_") && haskey(file["_meta_"], "lesion_annotations.json")
+                    try
+                        raw_str = read(file["_meta_/lesion_annotations.json"])
+                        parsed = JSON.parse(String(raw_str))
+                        if parsed isa AbstractDict
+                            for (k, v) in parsed
+                                if v isa AbstractDict
+                                    inner = Dict{String, Any}()
+                                    for (ik, iv) in v
+                                        inner[string(ik)] = iv
+                                    end
+                                    out[string(k)] = inner
                                 end
-                                out[string(k)] = inner
                             end
                         end
+                    catch e
+                        @warn "Error reading _meta_/lesion_annotations.json in $(path): $e"
                     end
-                catch e
-                    @warn "Error reading _meta_/lesion_annotations.json in $(path): $e"
                 end
-            end
-            # 2. If out is empty, read per-lesion groups
-            if isempty(out)
-                for id in keys(file)
-                    id == "_meta_" && continue
-                    obj = file[id]
-                    if obj isa HDF5.Group
-                        inner = Dict{String,Any}()
-                        for k in keys(obj)
-                            try
-                                val = read(obj[k])
-                                # If value is a JSON string representing a dict/array, parse it
-                                if val isa AbstractString && (startswith(strip(val), "{") || startswith(strip(val), "["))
-                                    try
-                                        parsed = JSON.parse(val)
-                                        inner[k] = parsed
-                                    catch
+                # 2. If out is empty, read per-lesion groups
+                if isempty(out)
+                    for id in keys(file)
+                        id in ("_meta_", "CENTROIDS", "BONE_SUBSEG", "TOTAL_SEG") && continue
+                        startswith(id, "timepoint_") && continue
+                        obj = file[id]
+                        if obj isa HDF5.Group
+                            inner = Dict{String,Any}()
+                            for k in keys(obj)
+                                try
+                                    val = read(obj[k])
+                                    if val isa AbstractString && (startswith(strip(val), "{") || startswith(strip(val), "["))
+                                        try
+                                            parsed = JSON.parse(val)
+                                            inner[k] = parsed
+                                        catch
+                                            inner[k] = val
+                                        end
+                                    else
                                         inner[k] = val
                                     end
-                                else
-                                    inner[k] = val
+                                catch e
+                                    @warn "Error reading HDF5 key $k in group $id: $e"
                                 end
-                            catch e
-                                @warn "Error reading HDF5 key $k in group $id: $e"
                             end
+                            out[id] = inner
                         end
-                        out[id] = inner
                     end
                 end
             end
@@ -1886,8 +2013,17 @@ function load_annotations_hdf5(path::String = DEFAULT_HDF5_PATH)::Dict{String,Di
 end
 
 function load_annotations(path::String = DEFAULT_SAVE_PATH)::Dict{String,Dict{String,Any}}
-    # Try loading from JSON
+    if endswith(lowercase(path), ".h5") || endswith(lowercase(path), ".hdf5")
+        return load_annotations_hdf5(path)
+    end
+
     out = Dict{String,Dict{String,Any}}()
+    # If loading from default save path and an active HDF5 is configured, check active HDF5 first
+    h5_act = _get_active_h5_path()
+    if path == DEFAULT_SAVE_PATH && !isempty(h5_act) && isfile(h5_act)
+        out = load_annotations_hdf5(h5_act)
+    end
+
     if isfile(path)
         try
             raw = JSON.parse(read(path, String))
@@ -1897,7 +2033,9 @@ function load_annotations(path::String = DEFAULT_SAVE_PATH)::Dict{String,Dict{St
                     for (ik, iv) in v
                         inner[string(ik)] = iv
                     end
-                    out[string(k)] = inner
+                    if !haskey(out, string(k))
+                        out[string(k)] = inner
+                    end
                 end
             end
         catch e
@@ -1906,14 +2044,8 @@ function load_annotations(path::String = DEFAULT_SAVE_PATH)::Dict{String,Dict{St
     end
     
     # If JSON is empty or missing, try loading from active HDF5 if set, or default HDF5
-    if isempty(out)
-        try
-            _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
-            h5_path = _MEH.h5_path_ref[]
-            if !isempty(h5_path) && isfile(h5_path)
-                out = load_annotations_hdf5(h5_path)
-            end
-        catch; end
+    if isempty(out) && !isempty(h5_act) && isfile(h5_act)
+        out = load_annotations_hdf5(h5_act)
     end
     if isempty(out) && path == DEFAULT_SAVE_PATH && isfile(DEFAULT_HDF5_PATH)
         out = load_annotations_hdf5(DEFAULT_HDF5_PATH)
@@ -1937,11 +2069,24 @@ end
 function save_annotations_hdf5(db::Dict, path::String=DEFAULT_HDF5_PATH)
     try
         # Guard: If path is the active dataset HDF5 (contains volumes / images), NEVER overwrite with "w"!
-        _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
-        active_h5 = try _MEH.h5_path_ref[] catch; "" end
+        active_h5 = _get_active_h5_path()
         if !isempty(active_h5) && (path == active_h5 || normpath(path) == normpath(active_h5))
             persist_to_active_dataset_h5!(db, path)
             return
+        end
+        # Also guard any existing HDF5 file that already contains timepoint_0 or TOTAL_SEG
+        if isfile(path)
+            is_dataset_h5 = try
+                HDF5.h5open(path, "r") do f
+                    haskey(f, "timepoint_0") || haskey(f, "TOTAL_SEG")
+                end
+            catch
+                false
+            end
+            if is_dataset_h5
+                persist_to_active_dataset_h5!(db, path)
+                return
+            end
         end
 
         h5open(path, "w") do file
@@ -1976,6 +2121,14 @@ end
 
 function save_annotations(db::Dict,
                           path::String = DEFAULT_SAVE_PATH)
+    if endswith(lowercase(path), ".h5") || endswith(lowercase(path), ".hdf5")
+        save_annotations_hdf5(db, path)
+        return
+    end
+    active_h5 = _get_active_h5_path()
+    if !isempty(active_h5) && isfile(active_h5)
+        persist_to_active_dataset_h5!(db, active_h5)
+    end
     try
         open(path, "w") do io
             JSON.print(io, db, 2)
@@ -3429,16 +3582,15 @@ function create_metadata_window(
     # In-memory DB with synchronous initial load for instant startup consistency
     init_h5 = save_path == DEFAULT_SAVE_PATH ? DEFAULT_HDF5_PATH : replace(save_path, r"\.json$"i => ".h5")
     try
-        _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
-        h5_act = _MEH.h5_path_ref[]
+        h5_act = _get_active_h5_path()
         if !isempty(h5_act) && isfile(h5_act)
             init_h5 = h5_act
         end
     catch; end
     initial_db = try
-        raw = load_annotations(save_path)
-        if isempty(raw) && isfile(init_h5)
-            raw = load_annotations_hdf5(init_h5)
+        raw = isfile(init_h5) ? load_annotations_hdf5(init_h5) : Dict{String,Dict{String,Any}}()
+        if isempty(raw)
+            raw = load_annotations(save_path)
         end
         _migrate_db(raw)
     catch e
@@ -3464,28 +3616,27 @@ function create_metadata_window(
                         save_annotations(db_to_save, msg.path_json)
                         save_annotations_hdf5(db_to_save, msg.path_hdf5)
                         try
-                            _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
-                            h5_active = _MEH.h5_path_ref[]
+                            h5_active = _get_active_h5_path()
                             if !isempty(h5_active) && isfile(h5_active)
                                 persist_to_active_dataset_h5!(db_to_save, h5_active)
                             end
                         catch e
                             @warn "Active HDF5 dataset persistence failed" e
                         end
-                        # Also save measurements alongside annotations
+                        # Also save measurements alongside annotations (both to HDF5 and companion JSON)
                         try
                             _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
-                            main_channel_ref = _MEH.main_event_channel
-                            # Get measurements from the state objects (via the forDisplayObjects)
-                            # We save to a companion file next to the annotations
                             meas_path = replace(msg.path_json, ".json" => "_measurements.json")
                             if @isdefined(_viewer_state_ref) && _viewer_state_ref[] !== nothing
                                 obj = _viewer_state_ref[].mainForDisplayObjects
+                                try _MEH.save_measurements_to_h5(_MEH.current_tp_index[]; obj = obj) catch; end
                                 saved_spheres = filter(m -> !m.is_active, obj.measurements)
                                 saved_lines = filter(m -> !m.is_active, obj.line_measurements)
                                 if !isempty(saved_spheres) || !isempty(saved_lines)
                                     save_measurements(saved_spheres, saved_lines, meas_path)
                                 end
+                            else
+                                try _MEH.save_measurements_to_h5() catch; end
                             end
                         catch; end
                         @async begin
@@ -3501,9 +3652,9 @@ function create_metadata_window(
                     end
                 elseif msg isa LoadDBMessage
                     try
-                        db = load_annotations(msg.path_json)
-                        if isempty(db) && isfile(msg.path_hdf5)
-                            db = load_annotations_hdf5(msg.path_hdf5)
+                        db = isfile(msg.path_hdf5) ? load_annotations_hdf5(msg.path_hdf5) : Dict{String,Dict{String,Any}}()
+                        if isempty(db)
+                            db = load_annotations(msg.path_json)
                         end
                         put!(msg.reply_channel, db)
                     catch e
@@ -9612,9 +9763,16 @@ function create_metadata_window(
         )
         lesion_db[] = db
         _db_dirty[] = false
-        put!(db_channel, SaveDBMessage(db, global_st, save_path, DEFAULT_HDF5_PATH))
+        h5_target = _get_active_h5_path()
+        if isempty(h5_target)
+            h5_target = DEFAULT_HDF5_PATH
+        else
+            try persist_to_active_dataset_h5!(db, h5_target) catch; end
+        end
+        put!(db_channel, SaveDBMessage(db, global_st, save_path, h5_target))
         try
             _MEH.flush_all_dirty_masks!()
+            _MEH.save_measurements_to_h5()
         catch; end
         status_lbl.text[] = "Saved at $(Dates.format(Dates.now(), "HH:MM:SS"))"
     end
@@ -9624,8 +9782,7 @@ function create_metadata_window(
             reply = Channel{Dict}(1)
             load_h5 = save_path == DEFAULT_SAVE_PATH ? DEFAULT_HDF5_PATH : replace(save_path, r"\.json$"i => ".h5")
             try
-                _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
-                h5_act = _MEH.h5_path_ref[]
+                h5_act = _get_active_h5_path()
                 if !isempty(h5_act) && isfile(h5_act)
                     load_h5 = h5_act
                 end

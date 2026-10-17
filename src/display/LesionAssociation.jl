@@ -89,24 +89,55 @@ function load_matches_json(json_path::String)
     return MATCH_GROUPS
 end
 
+function _get_active_h5_for_assoc()::String
+    try
+        _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+        p = _MEH.h5_path_ref[]
+        if !isempty(p) && isfile(p)
+            return p
+        end
+        p2 = _MEH.h5_save_path_ref[]
+        if !isempty(p2) && isfile(p2)
+            return p2
+        end
+    catch
+    end
+    return ""
+end
+
+function _with_h5_lock(f::Function)
+    lck = try
+        parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers._hdf5_io_lock
+    catch
+        nothing
+    end
+    if lck !== nothing
+        return lock(f, lck)
+    else
+        return f()
+    end
+end
+
 """
 Load match groups from the 'matches.json' HDF5 string attribute.
 HDF5 is the single source of truth after preprocessing.
 """
-function load_matches_from_h5(h5_path::String)
+function load_matches_from_h5(h5_path::String = _get_active_h5_for_assoc())
     empty!(MATCH_GROUPS)
-    if !isfile(h5_path)
+    if isempty(h5_path) || !isfile(h5_path)
         @warn "HDF5 file not found: $h5_path"
         return MATCH_GROUPS
     end
     try
-        HDF5.h5open(h5_path, "r") do f
-            if haskey(f, "_meta_") && haskey(f["_meta_"], "matches.json")
-                json_str = read(f["_meta_/matches.json"])
-                _parse_matches_data(JSON.parse(json_str))
-                @info "Loaded $(length(MATCH_GROUPS)) match groups from HDF5 _meta_ dataset"
-            else
-                @warn "No _meta_/matches.json dataset in $h5_path"
+        _with_h5_lock() do
+            HDF5.h5open(h5_path, "r") do f
+                if haskey(f, "_meta_") && haskey(f["_meta_"], "matches.json")
+                    json_str = read(f["_meta_/matches.json"])
+                    _parse_matches_data(JSON.parse(String(json_str)))
+                    @info "Loaded $(length(MATCH_GROUPS)) match groups from HDF5 _meta_ dataset"
+                else
+                    @warn "No _meta_/matches.json dataset in $h5_path"
+                end
             end
         end
     catch e
@@ -118,33 +149,37 @@ end
 """
 Rebuild matches.json from MATCH_GROUPS and save as HDF5 dataset in _meta_ group.
 """
-function save_matches_to_h5(h5_path::String)
-    if !isfile(h5_path)
+function save_matches_to_h5(h5_path::String = _get_active_h5_for_assoc())
+    if isempty(h5_path) || !isfile(h5_path)
         @warn "HDF5 file not found for saving: $h5_path"
-        return
+        return false
     end
     output = _match_groups_to_json()
     json_str = JSON.json(output, 4)
     try
-        HDF5.h5open(h5_path, "r+") do f
-            if !haskey(f, "_meta_")
-                create_group(f, "_meta_")
+        _with_h5_lock() do
+            HDF5.h5open(h5_path, "r+") do f
+                if !haskey(f, "_meta_")
+                    create_group(f, "_meta_")
+                end
+                if haskey(f["_meta_"], "matches.json")
+                    delete_object(f["_meta_"], "matches.json")
+                end
+                f["_meta_/matches.json"] = json_str
             end
-            if haskey(f["_meta_"], "matches.json")
-                delete_object(f["_meta_"], "matches.json")
-            end
-            f["_meta_/matches.json"] = json_str
         end
         @info "Saved $(length(MATCH_GROUPS)) match groups to HDF5 _meta_ dataset"
+        return true
     catch e
         @warn "Failed to save matches to HDF5: $e"
+        return false
     end
 end
 
 """
 Link src and dst lesions in a match group and persist to HDF5.
 """
-function update_match_group!(src_node::String, src_seg_int::Int, dst_node::String, dst_seg_int::Int, h5_path::String)
+function update_match_group!(src_node::String, src_seg_int::Int, dst_node::String, dst_seg_int::Int, h5_path::String = _get_active_h5_for_assoc())
     # Find all groups containing EITHER src OR dst
     matching_gids = Int[]
     for (gid, members) in MATCH_GROUPS
@@ -189,7 +224,7 @@ end
 """
 Remove a lesion from its match group and persist to HDF5.
 """
-function remove_from_match_group!(node::String, seg_int::Int, h5_path::String)
+function remove_from_match_group!(node::String, seg_int::Int, h5_path::String = _get_active_h5_for_assoc())
     for (gid, members) in MATCH_GROUPS
         idx = findfirst(m -> m[1] == node && m[2] == seg_int, members)
         if idx !== nothing
@@ -321,13 +356,32 @@ end
 
 # ── Existing association functions (for manual overrides) ────────────────────
 
-function load_associations()
+function load_associations(h5_path::String = _get_active_h5_for_assoc())
     empty!(OVERLAP_MAPPING)
-    if !isfile(ASSOC_JSON_PATH)
-        return
+    data = nothing
+    if !isempty(h5_path) && isfile(h5_path)
+        try
+            _with_h5_lock() do
+                HDF5.h5open(h5_path, "r") do f
+                    if haskey(f, "_meta_") && haskey(f["_meta_"], "lesion_associations.json")
+                        raw_str = read(f["_meta_/lesion_associations.json"])
+                        data = JSON.parse(String(raw_str))
+                    end
+                end
+            end
+        catch e
+            @warn "Failed to load lesion_associations.json from HDF5: $e"
+        end
     end
+    if data === nothing && isfile(ASSOC_JSON_PATH)
+        try
+            data = JSON.parse(read(ASSOC_JSON_PATH, String))
+        catch e
+            @warn "Failed to load lesion associations from JSON: $e"
+        end
+    end
+    data === nothing && return
     try
-        data = JSON.parse(read(ASSOC_JSON_PATH, String))
         for entry in data
             p_name = get(entry, "parent_name", "")
             p_sid = get(entry, "parent_lesion", "")
@@ -362,13 +416,26 @@ function load_associations()
             end
         end
     catch e
-        @warn "Failed to load lesion associations: $e"
+        @warn "Failed to parse lesion associations: $e"
     end
 end
 
-function save_associations(p_name::String, c_name::String, p_sid::String, c_sids::Vector{String})
+function save_associations(p_name::String, c_name::String, p_sid::String, c_sids::Vector{String}; h5_path::String = _get_active_h5_for_assoc())
     data = []
-    if isfile(ASSOC_JSON_PATH)
+    if !isempty(h5_path) && isfile(h5_path)
+        try
+            _with_h5_lock() do
+                HDF5.h5open(h5_path, "r") do f
+                    if haskey(f, "_meta_") && haskey(f["_meta_"], "lesion_associations.json")
+                        data = JSON.parse(String(read(f["_meta_/lesion_associations.json"])))
+                    end
+                end
+            end
+        catch
+            data = []
+        end
+    end
+    if isempty(data) && isfile(ASSOC_JSON_PATH)
         try
             data = JSON.parse(read(ASSOC_JSON_PATH, String))
         catch
@@ -389,11 +456,31 @@ function save_associations(p_name::String, c_name::String, p_sid::String, c_sids
         ))
     end
     
-    open(ASSOC_JSON_PATH, "w") do f
-        write(f, JSON.json(data, 4))
+    json_str = JSON.json(data, 4)
+    if !isempty(h5_path) && isfile(h5_path)
+        try
+            _with_h5_lock() do
+                HDF5.h5open(h5_path, "r+") do f
+                    if !haskey(f, "_meta_")
+                        create_group(f, "_meta_")
+                    end
+                    if haskey(f["_meta_"], "lesion_associations.json")
+                        delete_object(f["_meta_"], "lesion_associations.json")
+                    end
+                    f["_meta_/lesion_associations.json"] = json_str
+                end
+            end
+        catch e
+            @warn "Failed to save lesion_associations.json to HDF5: $e"
+        end
     end
+    try
+        open(ASSOC_JSON_PATH, "w") do f
+            write(f, json_str)
+        end
+    catch; end
     
-    load_associations()
+    load_associations(h5_path)
 end
 
 function get_children(p_name::String, c_name::String, p_sid::String)

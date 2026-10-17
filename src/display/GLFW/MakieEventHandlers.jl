@@ -1925,6 +1925,11 @@ const last_bone_overlay_indices = Dict{Int, Vector{CartesianIndex{3}}}()
 function reactToBoneSubsegResult(data::BoneSubsegResultEvent, stateObjects::Vector{StateDataFields})
     println("[BONE-RESULT] Received: lid=$(data.target_id) tp=$(data.panel_tp) surf=$(length(data.pts_surf)) marr=$(length(data.pts_marr))"); flush(stdout)
     bone_subsegments_cache[(data.panel_tp, data.target_id)] = (data.pts_surf, data.pts_marr)
+    node_name = get_node_name_for_tp(data.panel_tp)
+    if !isempty(node_name)
+        bone_subsegments_cache[(node_name, data.target_id)] = (data.pts_surf, data.pts_marr)
+    end
+    mark_bone_subseg_dirty!(data.panel_tp, data.target_id)
     
     # Re-render if this lesion is still the active one
     if current_active_lesion_id[] == data.target_id && data.target_id > 0
@@ -2012,11 +2017,13 @@ const main_event_channel = Ref{Any}(nothing)
 export register_tp_loader!, register_main_channel!, get_or_load_tp_data, last_bone_overlay_indices
 export TpCacheEntry, invalidate_suv_for_lesion, invalidate_and_recompute_lesion_metrics_async!
 
-# ── HDF5 Mask Auto-Save & Persistence ─────────────────────────────────────────
+# ── HDF5 Mask & Bone Subsegmentation Auto-Save & Persistence ──────────────────
 const dirty_mask_tps = Set{Int}()
+const dirty_bone_subsegs = Set{Tuple{Int, Int}}()
 const _mask_save_lock = ReentrantLock()
 const h5_save_path_ref = Ref{String}("")
 const studies_ref = Ref{Vector}([])
+export dirty_bone_subsegs, mark_bone_subseg_dirty!, save_bone_subseg_to_h5, flush_all_dirty_bone_subsegs!
 
 function register_h5_mask_saver!(h5_path::String, studies_list::Vector)
     h5_save_path_ref[] = h5_path
@@ -2058,6 +2065,105 @@ function mark_tp_mask_dirty!(tp_idx::Int)
     catch; end
 end
 
+function mark_bone_subseg_dirty!(tp_idx::Int, lid::Int)
+    (tp_idx < 0 || lid <= 0) && return
+    lock(_mask_save_lock) do
+        push!(dirty_bone_subsegs, (tp_idx, lid))
+    end
+end
+
+function save_bone_subseg_to_h5(tp_i::Int, lid::Int)::Bool
+    h5_path = h5_save_path_ref[]
+    if isempty(h5_path) || !isfile(h5_path)
+        h5_path = h5_path_ref[]
+    end
+    if isempty(h5_path) || !isfile(h5_path) || lid <= 0 || tp_i < 0
+        return false
+    end
+    node_name = ""
+    studies_list = studies_ref[]
+    if tp_i >= 0 && tp_i < length(studies_list) && length(studies_list[tp_i + 1]) >= 7
+        node_name = String(studies_list[tp_i + 1][7])
+    elseif haskey(tp_node_names, tp_i)
+        node_name = tp_node_names[tp_i]
+    end
+
+    cached = if haskey(bone_subsegments_cache, (tp_i, lid))
+        bone_subsegments_cache[(tp_i, lid)]
+    elseif !isempty(node_name) && haskey(bone_subsegments_cache, (node_name, lid))
+        bone_subsegments_cache[(node_name, lid)]
+    else
+        nothing
+    end
+    if cached === nothing || cached === :computing
+        return false
+    end
+    raw_surf, raw_marr = cached
+    surf_pts = raw_surf isa AbstractArray{<:CartesianIndex} ? raw_surf : findall(raw_surf .> 0)
+    marr_pts = raw_marr isa AbstractArray{<:CartesianIndex} ? raw_marr : findall(raw_marr .> 0)
+
+    vol_size = lock(_tp_cache_lock) do
+        if haskey(tp_data_cache, tp_i) && tp_data_cache[tp_i].mask_i16 !== nothing
+            size(tp_data_cache[tp_i].mask_i16)
+        elseif global_ts_atlas[] !== nothing
+            size(global_ts_atlas[])
+        else
+            (512, 512, 326)
+        end
+    end
+    cis = CartesianIndices(vol_size)
+    lin_idx = LinearIndices(cis)
+    lin_surf = Int64[lin_idx[idx] for idx in surf_pts if checkbounds(Bool, cis, idx)]
+    lin_marr = Int64[lin_idx[idx] for idx in marr_pts if checkbounds(Bool, cis, idx)]
+
+    lock(_mask_save_lock) do
+        try
+            lock(_hdf5_io_lock) do
+                HDF5.h5open(h5_path, "r+") do h5_file
+                    if !haskey(h5_file, "BONE_SUBSEG")
+                        HDF5.create_group(h5_file, "BONE_SUBSEG")
+                    end
+                    bone_grp = h5_file["BONE_SUBSEG"]
+                    keys_to_write = Tuple{String, String}[
+                        ("tp_$(tp_i)_lesion_$(lid)_surf", "tp_$(tp_i)_lesion_$(lid)_marr")
+                    ]
+                    if !isempty(node_name) && !startswith(node_name, "Unknown_TP_")
+                        push!(keys_to_write, ("$(node_name)_lesion_$(lid)_surf", "$(node_name)_lesion_$(lid)_marr"))
+                    end
+                    if tp_i == 0
+                        push!(keys_to_write, ("lesion_$(lid)_surf", "lesion_$(lid)_marr"))
+                    end
+                    for (sk, mk) in unique(keys_to_write)
+                        if haskey(bone_grp, sk)
+                            HDF5.delete_object(bone_grp, sk)
+                        end
+                        bone_grp[sk] = lin_surf
+                        if haskey(bone_grp, mk)
+                            HDF5.delete_object(bone_grp, mk)
+                        end
+                        bone_grp[mk] = lin_marr
+                    end
+                end
+            end
+            delete!(dirty_bone_subsegs, (tp_i, lid))
+            println("  [AUTOSAVE-BONE] Saved bone subseg for TP $tp_i lesion $lid ($(length(lin_surf)) surf, $(length(lin_marr)) marr)"); flush(stdout)
+            return true
+        catch e
+            @error "Failed to save bone subseg for TP $tp_i lesion $lid to $h5_path" exception=(e, catch_backtrace())
+            return false
+        end
+    end
+end
+
+function flush_all_dirty_bone_subsegs!()
+    items = lock(_mask_save_lock) do
+        collect(dirty_bone_subsegs)
+    end
+    for (tp_i, lid) in items
+        save_bone_subseg_to_h5(tp_i, lid)
+    end
+end
+
 function save_tp_mask_to_h5(tp_i::Int)::Bool
     h5_path = h5_save_path_ref[]
     studies_list = studies_ref[]
@@ -2086,6 +2192,9 @@ function save_tp_mask_to_h5(tp_i::Int)::Bool
     modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname = study[1:8]
     group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
     
+    # Precompute mask centroids for this TP before writing so we can persist CENTROIDS to HDF5 as well
+    precompute_mask_centroids!(mask_to_save, tp_i, node_name)
+    
     lock(_mask_save_lock) do
         try
             lock(_hdf5_io_lock) do
@@ -2096,16 +2205,45 @@ function save_tp_mask_to_h5(tp_i::Int)::Bool
                     raw_to_write = needs_reverse ? reverse(mask_to_save, dims=2) : mask_to_save
                     ds_path_expert = "$group/$(mask_fname)_expert"
                     if haskey(h5_file, ds_path_expert)
-                        h5_file[ds_path_expert][:, :, :] = Int16.(raw_to_write)
+                        try
+                            h5_file[ds_path_expert][:, :, :] = Int16.(raw_to_write)
+                        catch
+                            HDF5.delete_object(h5_file, ds_path_expert)
+                            h5_file[ds_path_expert] = Int16.(raw_to_write)
+                        end
                     else
                         h5_file[ds_path_expert] = Int16.(raw_to_write)
                     end
+                    # Also persist updated centroids for this TP into CENTROIDS group
+                    try
+                        cent_grp = if !haskey(h5_file, "CENTROIDS")
+                            HDF5.create_group(h5_file, "CENTROIDS")
+                        else
+                            h5_file["CENTROIDS"]
+                        end
+                        lock(_centroids_lock) do
+                            for (k, coords) in lesion_centroids_cache
+                                if k isa Tuple{Int, Int} && k[1] == tp_i
+                                    lid_c = k[2]
+                                    ckey = "tp$(tp_i)_lid$(lid_c)"
+                                    if haskey(cent_grp, ckey)
+                                        try
+                                            cent_grp[ckey][:] = Int32.(coords)
+                                        catch
+                                            HDF5.delete_object(cent_grp, ckey)
+                                            cent_grp[ckey] = Int32.(coords)
+                                        end
+                                    else
+                                        cent_grp[ckey] = Int32.(coords)
+                                    end
+                                end
+                            end
+                        end
+                    catch; end
                     println("  [AUTOSAVE-MASK] Saved mask for TP $tp_i to $ds_path_expert ($(count(>(0), mask_to_save)) non-zero voxels)"); flush(stdout)
                 end
             end
             delete!(dirty_mask_tps, tp_i)
-            # Precompute mask centroids for this TP
-            precompute_mask_centroids!(mask_to_save, tp_i, node_name)
             return true
         catch e
             @error "Failed to save mask for TP $tp_i to $h5_path" exception=(e, catch_backtrace())
@@ -2121,6 +2259,7 @@ function flush_all_dirty_masks!()
     for tp in tps
         save_tp_mask_to_h5(tp)
     end
+    flush_all_dirty_bone_subsegs!()
 end
 
 const _mask_autosave_task_started = Ref(false)
@@ -2132,7 +2271,7 @@ function _ensure_mask_autosave_task!()
     Threads.@spawn begin
         while true
             sleep(2.0)
-            if !isempty(dirty_mask_tps) && !isempty(h5_save_path_ref[])
+            if (!isempty(dirty_mask_tps) || !isempty(dirty_bone_subsegs)) && !isempty(h5_save_path_ref[])
                 flush_all_dirty_masks!()
             end
             # Also autosave measurements if dirty
@@ -2156,28 +2295,28 @@ function mark_measurements_dirty!()
 end
 
 """Save current measurements to HDF5 as a string attribute on the time point group."""
-function save_measurements_to_h5()
+function save_measurements_to_h5(tp_i::Int = current_tp_index[]; obj = nothing)
     h5_path = h5_save_path_ref[]
     studies_list = studies_ref[]
     if isempty(h5_path) || !isfile(h5_path) || isempty(studies_list)
         println("  [AUTOSAVE-MEAS] Skip: h5_path='$(h5_path)' isfile=$(isfile(h5_path)) nstudies=$(length(studies_list))"); flush(stdout)
-        return
+        return false
     end
-    tp_i = current_tp_index[]
     if tp_i < 0 || tp_i >= length(studies_list)
         println("  [AUTOSAVE-MEAS] Skip: tp_i=$tp_i out of range (nstudies=$(length(studies_list)))"); flush(stdout)
-        return
+        return false
     end
     
     # Get measurements from the display objects (stored on panel 1)
     Meas = parentmodule(parentmodule(@__MODULE__)).Measurements
-    obj = nothing
-    try
-        obj = _get_main_display_objects()
-    catch; end
+    if obj === nothing
+        try
+            obj = _get_main_display_objects()
+        catch; end
+    end
     if obj === nothing
         println("  [AUTOSAVE-MEAS] Skip: _main_obj_ref is nothing"); flush(stdout)
-        return
+        return false
     end
     
     serialized = Meas.serialize_measurements(obj.measurements, obj.line_measurements)
@@ -2202,6 +2341,7 @@ function save_measurements_to_h5()
             end
         end
     end
+    return true
 end
 
 """Load measurements from HDF5 for the given time point and populate the display objects."""
@@ -2926,7 +3066,73 @@ function mark_expert_edit!(lesion_id::Int)
     return nothing
 end
 
-export ensure_ai_mask_backup!, mark_expert_edit!
+function reactToRevertToAI(data::MakieEvents.RevertToAIEvent, stateObjects::Vector{StateDataFields})
+    lid = data.lesion_id
+    tp_idx = data.tp_index
+    lid <= 0 && return nothing
+    entry = lock(_tp_cache_lock) do
+        haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
+    end
+    entry === nothing && return nothing
+    mask_i16 = entry.mask_i16
+    mask_i16 === nothing && return nothing
+
+    orig_vox = get(_ai_mask_backups, (tp_idx, lid), nothing)
+    if orig_vox === nothing
+        # Fallback: load original unedited mask from HDF5 (non-_expert dataset)
+        h5_path = !isempty(h5_save_path_ref[]) ? h5_save_path_ref[] : h5_path_ref[]
+        studies_list = studies_ref[]
+        if !isempty(h5_path) && isfile(h5_path) && tp_idx >= 0 && tp_idx < length(studies_list)
+            study = studies_list[tp_idx + 1]
+            mask_fname = study[6]
+            tfm_fname = study[8]
+            group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
+            try
+                lock(_hdf5_io_lock) do
+                    HDF5.h5open(h5_path, "r") do h5_file
+                        if haskey(h5_file, "$group/$mask_fname")
+                            raw_m = read(h5_file["$group/$mask_fname"])
+                            is_pf = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
+                            base_m = !is_pf ? reverse(raw_m, dims=2) : raw_m
+                            orig_vox = findall(x -> round(Int, x) == lid, base_m)
+                            _ai_mask_backups[(tp_idx, lid)] = orig_vox
+                        end
+                    end
+                end
+            catch e
+                @warn "Failed to read original AI mask from HDF5 for RevertToAI: $e"
+            end
+        end
+    end
+
+    if orig_vox !== nothing
+        mask_i16[mask_i16 .== Int16(lid)] .= Int16(0)
+        for idx in orig_vox
+            if checkbounds(Bool, mask_i16, idx)
+                mask_i16[idx] = Int16(lid)
+            end
+        end
+        if entry.mask !== nothing && entry.mask !== mask_i16
+            if entry.mask isa Array{Int8, 3}
+                entry.mask .= clamp.(mask_i16, Int8(-128), Int8(127))
+            else
+                entry.mask .= mask_i16
+            end
+        end
+        mark_tp_mask_dirty!(tp_idx)
+        invalidate_and_recompute_lesion_metrics_async!(lid, tp_idx, mask_i16)
+        for (pi, st) in enumerate(stateObjects)
+            try
+                _force_texture_upload!(stateObjects, pi)
+            catch
+                st.isSliceChanged = true
+            end
+        end
+    end
+    return nothing
+end
+
+export ensure_ai_mask_backup!, mark_expert_edit!, reactToRevertToAI
 
 
 function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector{StateDataFields})
@@ -4930,6 +5136,9 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
                     entry.mask_i16 .= seg_vol
                 end
                 mark_tp_mask_dirty!(tp_idx)
+                active_id_int = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
+                mark_expert_edit!(active_id_int)
+                invalidate_and_recompute_lesion_metrics_async!(active_id_int, tp_idx, seg_vol)
             end
         end
         
@@ -5006,6 +5215,11 @@ function reactToHeatGDTPosthocSize(event::MakieEvents.HeatGDTPosthocSizeEvent, s
                 entry.mask_i16 .= seg_vol
             end
             mark_tp_mask_dirty!(tp_idx)
+            active_id_int = Int(HEAT_GDT_LAST_TARGET_ID[])
+            if active_id_int > 0
+                mark_expert_edit!(active_id_int)
+                invalidate_and_recompute_lesion_metrics_async!(active_id_int, tp_idx, seg_vol)
+            end
         end
     end
 end

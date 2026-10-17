@@ -456,6 +456,17 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
         end
     end
 
+    clickedPanel_idx = something(findfirst(s -> s === stateObject, mainStates), mainStates[1].switchIndex)
+    cp_mapped = clickedPanel_idx > 5 ? clickedPanel_idx - 5 : clickedPanel_idx
+    tp_idx = (MEH.compare_mode[] && clickedPanel_idx >= 5 && MEH.compare_right_tp[] >= 0) ? MEH.compare_right_tp[] : MEH.current_tp_index[]
+    eff_dim = if cp_mapped == 3
+        1  # Sagittal panel wraps (2,3,1) and scrolls dim 3 -> axial dim 1 (X)
+    elseif cp_mapped == 4
+        2  # Coronal panel wraps (1,3,2) and scrolls dim 3 -> axial dim 2 (Y)
+    else
+        Int(stateObject.onScrollData.dimensionToScroll)
+    end
+
     if target_mode != :lesion
         is_erase = (is_ctrl || val == 0)
         tmp_dat = zeros(Int8, size(twoDimDat.dat))
@@ -463,13 +474,12 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
         painted_2d = findall(tmp_dat .> 0)
         
         z = stateObject.currentDisplayedSlice
-        dim = stateObject.onScrollData.dimensionToScroll
         painted_3d = CartesianIndex{3}[]
         for pt in painted_2d
             x, y = pt[1], pt[2]
-            idx3d = if dim == 1
+            idx3d = if eff_dim == 1
                 CartesianIndex(z, x, y)
-            elseif dim == 2
+            elseif eff_dim == 2
                 CartesianIndex(x, z, y)
             else
                 CartesianIndex(x, y, z)
@@ -477,12 +487,12 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
             push!(painted_3d, idx3d)
         end
         
-        target_id = MEH.current_active_lesion_id[]
-        tp_idx = MEH.current_tp_index[]
+        target_id = MEH.current_active_lesion_id[] > 0 ? MEH.current_active_lesion_id[] : max(1, round(Int, abs(stateObject.valueForMasToSet.value)))
+        node_name = MEH.get_node_name_for_tp(tp_idx)
         cached = if haskey(MEH.bone_subsegments_cache, (tp_idx, target_id))
             MEH.bone_subsegments_cache[(tp_idx, target_id)]
-        elseif haskey(MEH.bone_subsegments_cache, (MEH.get_node_name_for_tp(tp_idx), target_id))
-            MEH.bone_subsegments_cache[(MEH.get_node_name_for_tp(tp_idx), target_id)]
+        elseif haskey(MEH.bone_subsegments_cache, (node_name, target_id))
+            MEH.bone_subsegments_cache[(node_name, target_id)]
         else
             nothing
         end
@@ -499,7 +509,7 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
             # Helper to efficiently filter painted points against the huge cache
             # by only checking against cache points on the current slice
             get_slice_set = (pts) -> begin
-                slice_pts = filter(p -> (dim == 1 ? p[1] : (dim == 2 ? p[2] : p[3])) == z, pts)
+                slice_pts = filter(p -> (eff_dim == 1 ? p[1] : (eff_dim == 2 ? p[2] : p[3])) == z, pts)
                 return Set(slice_pts)
             end
 
@@ -520,7 +530,12 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
                     append!(marr_pts, new_pts)
                 end
             end
-            MEH.reactToSyncLesion(MEH.SyncLesionEvent(target_id), mainStates)
+            MEH.bone_subsegments_cache[(tp_idx, target_id)] = (surf_pts, marr_pts)
+            if !isempty(node_name)
+                MEH.bone_subsegments_cache[(node_name, target_id)] = (surf_pts, marr_pts)
+            end
+            MEH.mark_bone_subseg_dirty!(tp_idx, target_id)
+            MEH.reactToSyncLesion(MEH.SyncLesionEvent(target_id, false), mainStates)
         end
         
         stateObject.isSliceChanged = true
@@ -533,7 +548,6 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     end
 
     # ── AI Mask Immutability: Backup original AI mask before first expert edit ──
-    tp_idx = MEH.current_tp_index[]
     raw_val = round(Int, stateObject.valueForMasToSet.value)
     lesion_id = raw_val > 0 ? raw_val : MEH.current_active_lesion_id[]
     if lesion_id <= 0
@@ -559,66 +573,90 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
         end
     end
 
-    @debug "[PAINT-DBG] panel=$(mainStates[1].switchIndex) tex='$(texture.name)' val=$toSet pts=$(length(pointsToRasterize))"
+    @debug "[PAINT-DBG] panel=$(clickedPanel_idx) tex='$(texture.name)' val=$toSet pts=$(length(pointsToRasterize))"
 
     # Mark slice changed so consumer loop uploads dirty texture to GPU
     stateObject.isSliceChanged = true
 
-    # Synchronize dirty flag on other visible panels
-    for s in mainStates
-        if s !== stateObject && sum(abs.(s.calcDimsStruct.mainImageQuadVert)) > 0.01f0
-            s.isSliceChanged = true
-        end
-    end
-
     # Invalidate SUV/volume/centroid caches, async-recompute metrics, and mark mask dirty for auto-save
     try
-        MEH.mark_tp_mask_dirty!(MEH.current_tp_index[])
+        MEH.mark_tp_mask_dirty!(tp_idx)
         paint_id = round(Int, stateObject.valueForMasToSet.value)
         edit_id = paint_id > 0 ? paint_id : MEH.current_active_lesion_id[]
         if edit_id > 0 || paint_id == 0
-            # Sync painted slice to tp_data_cache so organ mapping can find new voxels
-            tp_idx = MEH.current_tp_index[]
+            # Sync painted slice to tp_data_cache so organ mapping & HDF5 autosave have exact 3D voxels
             cur_slice = stateObject.currentDisplayedSlice
             entry = lock(MEH._tp_cache_lock) do
                 haskey(MEH.tp_data_cache, tp_idx) ? MEH.tp_data_cache[tp_idx] : nothing
             end
             if entry !== nothing
                 try
-                    dim = stateObject.onScrollData.dimensionToScroll
-                    if dim == 3
-                        entry.mask_i16[:, :, cur_slice] .= Int16.(twoDimDat.dat)
-                    elseif dim == 1
-                        entry.mask_i16[cur_slice, :, :] .= Int16.(twoDimDat.dat)
-                    elseif dim == 2
-                        entry.mask_i16[:, cur_slice, :] .= Int16.(twoDimDat.dat)
+                    if eff_dim == 3
+                        entry.mask_i16[:, :, cur_slice] .= round.(Int16, twoDimDat.dat)
+                    elseif eff_dim == 1
+                        entry.mask_i16[cur_slice, :, :] .= round.(Int16, twoDimDat.dat)
+                    elseif eff_dim == 2
+                        entry.mask_i16[:, cur_slice, :] .= round.(Int16, twoDimDat.dat)
                     end
                     if entry.mask isa Array{Int8, 3}
-                        if dim == 3
-                            entry.mask[:, :, cur_slice] .= clamp.(twoDimDat.dat, Int8(-128), Int8(127))
-                        elseif dim == 1
-                            entry.mask[cur_slice, :, :] .= clamp.(twoDimDat.dat, Int8(-128), Int8(127))
-                        elseif dim == 2
-                            entry.mask[:, cur_slice, :] .= clamp.(twoDimDat.dat, Int8(-128), Int8(127))
+                        if eff_dim == 3
+                            entry.mask[:, :, cur_slice] .= clamp.(round.(Int16, twoDimDat.dat), Int8(-128), Int8(127))
+                        elseif eff_dim == 1
+                            entry.mask[cur_slice, :, :] .= clamp.(round.(Int16, twoDimDat.dat), Int8(-128), Int8(127))
+                        elseif eff_dim == 2
+                            entry.mask[:, cur_slice, :] .= clamp.(round.(Int16, twoDimDat.dat), Int8(-128), Int8(127))
                         end
-                    elseif entry.mask !== nothing
-                        if dim == 3
-                            entry.mask[:, :, cur_slice] .= twoDimDat.dat
-                        elseif dim == 1
-                            entry.mask[cur_slice, :, :] .= twoDimDat.dat
-                        elseif dim == 2
-                            entry.mask[:, cur_slice, :] .= twoDimDat.dat
+                    elseif entry.mask !== nothing && entry.mask !== entry.mask_i16
+                        if eff_dim == 3
+                            entry.mask[:, :, cur_slice] .= round.(eltype(entry.mask), twoDimDat.dat)
+                        elseif eff_dim == 1
+                            entry.mask[cur_slice, :, :] .= round.(eltype(entry.mask), twoDimDat.dat)
+                        elseif eff_dim == 2
+                            entry.mask[:, cur_slice, :] .= round.(eltype(entry.mask), twoDimDat.dat)
+                        end
+                    end
+                catch e_sync
+                    @debug "Failed to sync painted slice to tp_data_cache: $e_sync"
+                end
+            else
+                # Also sync to stateObject's underlying 3D dataToScroll array if twoDimDat.dat was a materialized copy
+                try
+                    for scrDat in stateObject.onScrollData.dataToScroll
+                        if scrDat.name == texture.name
+                            dim_local = stateObject.onScrollData.dimensionToScroll
+                            selectdim(scrDat.dat, dim_local, cur_slice) .= round.(eltype(scrDat.dat), twoDimDat.dat)
+                            break
                         end
                     end
                 catch; end
             end
             if edit_id > 0
-                MEH.invalidate_and_recompute_lesion_metrics_async!(edit_id, MEH.current_tp_index[])
+                MEH.invalidate_and_recompute_lesion_metrics_async!(edit_id, tp_idx)
             end
         end
     catch e
         # Log errors instead of silently swallowing
         println("[PAINT-ERR] SUV/organ mapping failed: $e"); flush(stdout)
+    end
+
+    # Synchronize dirty flag & refresh materialized slices on other visible panels of the same TP
+    for (s_idx, s) in enumerate(mainStates)
+        if s !== stateObject && sum(abs.(s.calcDimsStruct.mainImageQuadVert)) > 0.01f0
+            s_tp = (MEH.compare_mode[] && s_idx >= 5 && MEH.compare_right_tp[] >= 0) ? MEH.compare_right_tp[] : MEH.current_tp_index[]
+            if s_tp == tp_idx && haskey(s.currentlyDispDat.nameIndexes, texture.name)
+                try
+                    t_idx = s.currentlyDispDat.nameIndexes[texture.name]
+                    for scrDat in s.onScrollData.dataToScroll
+                        if scrDat.name == texture.name
+                            sl_s = clamp(s.currentDisplayedSlice, 1, size(scrDat.dat, s.onScrollData.dimensionToScroll))
+                            s.currentlyDispDat.listOfDataAndImageNames[t_idx].dat .= selectdim(scrDat.dat, s.onScrollData.dimensionToScroll, sl_s)
+                            break
+                        end
+                    end
+                catch; end
+            end
+            s.isSliceChanged = true
+        end
     end
     _paint_ms = (time_ns() - _t_paint) / 1e6
     if MEH.PERF_LOG[] && _paint_ms > 5.0
@@ -1531,11 +1569,12 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                         
                         for p_idx in panels_to_update
                             st = mainStates[p_idx]
-                            p_delta = (p_idx == 3) ? CartesianIndex(dy, dz, dx) : ((p_idx == 4) ? CartesianIndex(dx, dz, dy) : CartesianIndex(dx, dy, dz))
-                            p_old_d = (p_idx == 3) ? CartesianIndex(old_dy, old_dz, old_dx) : ((p_idx == 4) ? CartesianIndex(old_dx, old_dz, old_dy) : CartesianIndex(old_dx, old_dy, old_dz))
+                            p_mapped = p_idx > 5 ? p_idx - 5 : p_idx
+                            p_delta = (p_mapped == 3) ? CartesianIndex(dy, dz, dx) : ((p_mapped == 4) ? CartesianIndex(dx, dz, dy) : CartesianIndex(dx, dy, dz))
+                            p_old_d = (p_mapped == 3) ? CartesianIndex(old_dy, old_dz, old_dx) : ((p_mapped == 4) ? CartesianIndex(old_dx, old_dz, old_dy) : CartesianIndex(old_dx, old_dy, old_dz))
                             
                             p_orig_coords = map(orig_coords) do c
-                                (p_idx == 3) ? CartesianIndex(c[2], c[3], c[1]) : ((p_idx == 4) ? CartesianIndex(c[1], c[3], c[2]) : c)
+                                (p_mapped == 3) ? CartesianIndex(c[2], c[3], c[1]) : ((p_mapped == 4) ? CartesianIndex(c[1], c[3], c[2]) : c)
                             end
                             
                             for dat in st.onScrollData.dataToScroll
@@ -1571,7 +1610,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                         # Synchronize tp_data_cache
                         try
                             MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
-                            tp_idx = (MEH.compare_mode[] && clickedPanel == 5) ? MEH.compare_right_tp[] : MEH.current_tp_index[]
+                            tp_idx = (MEH.compare_mode[] && clickedPanel >= 5 && MEH.compare_right_tp[] >= 0) ? MEH.compare_right_tp[] : MEH.current_tp_index[]
                             entry = lock(MEH._tp_cache_lock) do
                                 haskey(MEH.tp_data_cache, tp_idx) ? MEH.tp_data_cache[tp_idx] : nothing
                             end
@@ -1580,12 +1619,13 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                                 # We sync it from the canonical axial panel
                                 if source_name == "Mask" || source_name == "manualModif"
                                     # Find the corresponding dataToScroll in the current panel
+                                    cp_mapped_mv = clickedPanel > 5 ? clickedPanel - 5 : clickedPanel
                                     for st_dat in mainStates[clickedPanel].onScrollData.dataToScroll
                                         if st_dat.name == source_name
                                             # We need to reshape/permute back to axial based on clickedPanel
-                                            vol = if clickedPanel == 3 # Sagittal (Y, Z, X) -> back to (X, Y, Z)
+                                            vol = if cp_mapped_mv == 3 # Sagittal (Y, Z, X) -> back to (X, Y, Z)
                                                 permutedims(st_dat.dat, (3, 1, 2))
-                                            elseif clickedPanel == 4 # Coronal (X, Z, Y) -> back to (X, Y, Z)
+                                            elseif cp_mapped_mv == 4 # Coronal (X, Z, Y) -> back to (X, Y, Z)
                                                 permutedims(st_dat.dat, (1, 3, 2))
                                             else # Axial (1, 2, 5)
                                                 st_dat.dat
@@ -1601,6 +1641,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                                             end
                                             MEH.mark_tp_mask_dirty!(tp_idx)
                                             MEH.mark_expert_edit!(panelState.movingLesionID)
+                                            MEH.invalidate_and_recompute_lesion_metrics_async!(panelState.movingLesionID, tp_idx, entry.mask_i16)
                                             break
                                         end
                                     end
