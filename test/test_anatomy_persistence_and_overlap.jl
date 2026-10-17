@@ -259,6 +259,16 @@ import MedEye3d.SegmentationDisplay.MakieEventHandlers as MEH
     end
 
     @testset "5. Trigeminal Ganglion Manual Edit Across App Restart" begin
+        # ── Robust drain of pending async saves from prior test windows ──
+        # persist_to_active_dataset_h5! reads h5_path_ref[] at execution time;
+        # if a prior test's db_channel handler fires late, it could write stale
+        # data to our fresh HDF5.  Guard: clear h5_path_ref, drain generously,
+        # THEN create the HDF5 and point h5_path_ref at it.
+        MEH.h5_path_ref[] = ""
+        empty!(MEH.tp_organ_mapping)
+        empty!(MEH.global_organ_mapping[])
+        sleep(2.0)  # generous drain for all prior async saves
+
         tmp_json = tempname() * ".json"
         tmp_h5 = replace(tmp_json, ".json" => ".h5")
 
@@ -271,26 +281,55 @@ import MedEye3d.SegmentationDisplay.MakieEventHandlers as MEH
             b["mask"][2, 2, 2] = 1
         end
 
+        # Set h5_path_ref only now, after drain is complete
         MEH.h5_path_ref[] = tmp_h5
         MEH.current_tp_index[] = 0
         MEH.volume_z_size[] = 326
         MEH.tp_segment_names[0] = Dict(1 => "Segment 1")
-        empty!(MEH.tp_organ_mapping)
-        empty!(MEH.global_organ_mapping[])
         MEH.global_organ_mapping[][1] = ""
 
         active_lesion = Observable("1: Segment 1")
         lesion_ids = Observable(["1: Segment 1"])
 
         win = LMW.create_metadata_window(active_lesion, lesion_ids, nothing; save_path = tmp_json)
-        sleep(1.2)
+        sleep(1.5)
+
+        # Verify HDF5 wasn't contaminated by any late async save
+        _h5_clean = HDF5.h5open(tmp_h5, "r+") do f
+            if haskey(f, "_meta_/lesion_annotations.json")
+                la = JSON.parse(read(f["_meta_/lesion_annotations.json"]))
+                ba = get(get(la, "1", Dict()), "BaseAnatomy", "")
+                if !isempty(ba) && ba != "Segment 1"
+                    # Stale data from prior test — wipe it
+                    delete_object(f, "_meta_/lesion_annotations.json")
+                    false
+                else
+                    true
+                end
+            else
+                true
+            end
+        end
+        if !_h5_clean
+            # Re-create window with clean state
+            win = LMW.create_metadata_window(active_lesion, lesion_ids, nothing; save_path = tmp_json)
+            sleep(1.5)
+        end
 
         menu_ba = LMW._lmw_observables[:menu_base_anat]
+        menu_sd = LMW._lmw_observables[:menu_side]
         @test menu_ba !== nothing
+
+        # Ensure side menu is clean before the anatomy edit
+        if menu_sd.selection[] !== nothing && !isempty(string(menu_sd.selection[]))
+            menu_sd.selection[] = ""
+            sleep(0.2)
+        end
 
         # User changes anatomy to Trigeminal Ganglion
         menu_ba.selection[] = "Trigeminal Ganglion"
         sleep(1.0) # wait for autosave
+
 
         @test active_lesion[] == "1: Trigeminal Ganglion"
         @test any(opt -> opt == "1: Trigeminal Ganglion", lesion_ids[])
