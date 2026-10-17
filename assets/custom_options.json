@@ -1,9 +1,23 @@
 {
+    "Alternative Hypothesis (False Positive)": [
+        "Technical Artifact from foreign body",
+        "TEchnical Artifact - Edge of acquisition"
+    ],
     "Lesion Orientation": [
         "Anterior-Posterior (AP) Orientation of Long Axis",
         "anterior posterior orientation of long axis",
         "long axis hour 5",
         "long axis hour 7"
+    ],
+    "Alt. Hypothesis": [
+        "Technical Artifact from foreign body",
+        "TEchnical Artifact - Edge of acquisition"
+    ],
+    "Shape": [
+        "Elongated"
+    ],
+    "Lesion Shape": [
+        "Elongated"
     ],
     "Orientation": [
         "long axis hour 5",

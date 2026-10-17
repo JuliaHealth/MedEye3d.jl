@@ -167,4 +167,68 @@ end
         end
     end
 
+    @testset "Brush Circle Display (Draw & Erase, 50% Opacity)" begin
+        MockCalcDims = @NamedTuple{imageTextureWidth::Int, imageTextureHeight::Int}
+        MockPanelState = @NamedTuple{
+            currentDisplayedSlice::Int,
+            calcDimsStruct::MockCalcDims,
+            spacingsValue::Vector{NTuple{3, Float64}}
+        }
+        sp = [(2.0, 2.0, 3.0)]
+        mock_states = [
+            (currentDisplayedSlice = 100, calcDimsStruct = (imageTextureWidth = 512, imageTextureHeight = 512), spacingsValue = sp),
+            (currentDisplayedSlice = 100, calcDimsStruct = (imageTextureWidth = 512, imageTextureHeight = 512), spacingsValue = sp),
+            (currentDisplayedSlice = 250, calcDimsStruct = (imageTextureWidth = 512, imageTextureHeight = 326), spacingsValue = sp),
+            (currentDisplayedSlice = 260, calcDimsStruct = (imageTextureWidth = 512, imageTextureHeight = 326), spacingsValue = sp),
+        ]
+
+        # 1. Draw mode on Axial panel 1 (radius = 5 voxels)
+        verts_draw = MedEye3d.Measurements.compute_brush_circle_vertices(
+            mock_states, 1, (250.0f0, 260.0f0, 100.0f0), 5; is_erase = false
+        )
+        # 64 segments * 6 vertices/segment * 6 floats/vertex = 2304 floats
+        @test length(verts_draw) == 64 * 6 * 6
+        # Verify 50% opacity (alpha == 0.5f0) and green color (0.3, 0.85, 0.3) on all vertices
+        for v_idx in 1:6:length(verts_draw)
+            @test verts_draw[v_idx + 2] ≈ 0.3f0
+            @test verts_draw[v_idx + 3] ≈ 0.85f0
+            @test verts_draw[v_idx + 4] ≈ 0.3f0
+            @test verts_draw[v_idx + 5] == 0.5f0
+        end
+
+        # 2. Erase mode on Axial panel 1 (radius = 8 voxels)
+        verts_erase = MedEye3d.Measurements.compute_brush_circle_vertices(
+            mock_states, 1, (250.0f0, 260.0f0, 100.0f0), 8; is_erase = true
+        )
+        @test length(verts_erase) == 64 * 6 * 6
+        # Verify 50% opacity (alpha == 0.5f0) and red color (1.0, 0.3, 0.3)
+        for v_idx in 1:6:length(verts_erase)
+            @test verts_erase[v_idx + 2] ≈ 1.0f0
+            @test verts_erase[v_idx + 3] ≈ 0.3f0
+            @test verts_erase[v_idx + 4] ≈ 0.3f0
+            @test verts_erase[v_idx + 5] == 0.5f0
+        end
+
+        # Verify radius scales when stroke_width increases from 5 to 8
+        u_vals_5 = [verts_draw[i] for i in 1:6:length(verts_draw)]
+        u_vals_8 = [verts_erase[i] for i in 1:6:length(verts_erase)]
+        span_5 = maximum(u_vals_5) - minimum(u_vals_5)
+        span_8 = maximum(u_vals_8) - minimum(u_vals_8)
+        @test span_8 > span_5
+
+        # 3. Sagittal (panel 3) and Coronal (panel 4) views
+        verts_sag = MedEye3d.Measurements.compute_brush_circle_vertices(
+            mock_states, 3, (250.0f0, 260.0f0, 100.0f0), 6; is_erase = false
+        )
+        @test length(verts_sag) == 64 * 6 * 6
+        @test verts_sag[6] == 0.5f0
+
+        verts_cor = MedEye3d.Measurements.compute_brush_circle_vertices(
+            mock_states, 4, (250.0f0, 260.0f0, 100.0f0), 6; is_erase = true
+        )
+        @test length(verts_cor) == 64 * 6 * 6
+        @test verts_cor[6] == 0.5f0
+        println("✓ Brush circle display test passed (Draw & Erase at 50% opacity)")
+    end
+
 end

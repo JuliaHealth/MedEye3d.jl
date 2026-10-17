@@ -1,7 +1,7 @@
 module Measurements
 using Base: @kwdef
 
-export SphereMeasurement, LineMeasurement, MeasurementData, compute_measurement_vertices, compute_line_vertices
+export SphereMeasurement, LineMeasurement, MeasurementData, compute_measurement_vertices, compute_line_vertices, compute_brush_circle_vertices
 export MEASUREMENT_COLORS, get_measurement_color
 
 # ─── Color Palette ────────────────────────────────────────────────────────────
@@ -189,6 +189,8 @@ function compute_measurement_vertices(measurements::Vector{SphereMeasurement}, s
     if spacing_y <= 0; spacing_y = 1.0f0; end
     if spacing_z <= 0; spacing_z = 1.0f0; end
     
+    p_mapped = panel_id > 5 ? panel_id - 5 : panel_id
+    
     for m in measurements
         cx, cy, cz = m.center_idx
         rx, ry, rz = _get_effective_radii(m)
@@ -196,13 +198,13 @@ function compute_measurement_vertices(measurements::Vector{SphereMeasurement}, s
         # Determine distance 'd' from center to slice plane based on panel orientation
         d_mm = 0.0f0
         R_axis = 0.0f0  # radius along the slice-normal axis
-        if panel_id == 1 || panel_id == 2 || panel_id == 5
+        if p_mapped == 1 || p_mapped == 2 || p_mapped == 5
             d_mm = abs(cz - currentSlice) * spacing_z
             R_axis = rz
-        elseif panel_id == 3
+        elseif p_mapped == 3
             d_mm = abs(cx - currentSlice) * spacing_x
             R_axis = rx
-        elseif panel_id == 4
+        elseif p_mapped == 4
             d_mm = abs(cy - currentSlice) * spacing_y
             R_axis = ry
         end
@@ -210,8 +212,10 @@ function compute_measurement_vertices(measurements::Vector{SphereMeasurement}, s
         if d_mm < R_axis
             # Color from palette (no text labels)
             color = get_measurement_color(m.color_idx)
-            # Make active measurements slightly brighter / more opaque
-            if m.is_active
+            # Brush preview circle (id == -2) uses 50% opacity so underlying anatomy/lesion stays visible
+            if m.id == -2
+                color[4] = 0.5f0
+            elseif m.is_active
                 color[4] = 0.7f0
             end
             
@@ -222,13 +226,13 @@ function compute_measurement_vertices(measurements::Vector{SphereMeasurement}, s
             
             # Determine the 2D radii in the slice plane (in mm)
             r_horiz_mm, r_vert_mm = 0.0f0, 0.0f0
-            if panel_id == 1 || panel_id == 2 || panel_id == 5
+            if p_mapped == 1 || p_mapped == 2 || p_mapped == 5
                 r_horiz_mm = rx * scale_factor
                 r_vert_mm = ry * scale_factor
-            elseif panel_id == 3
+            elseif p_mapped == 3
                 r_horiz_mm = ry * scale_factor
                 r_vert_mm = rz * scale_factor
-            elseif panel_id == 4
+            elseif p_mapped == 4
                 r_horiz_mm = rx * scale_factor
                 r_vert_mm = rz * scale_factor
             end
@@ -245,13 +249,13 @@ function compute_measurement_vertices(measurements::Vector{SphereMeasurement}, s
                     off_x_mm = r_horiz_mm * cos(t)
                     off_y_mm = r_vert_mm * sin(t)
                     
-                    if panel_id == 1 || panel_id == 2 || panel_id == 5
+                    if p_mapped == 1 || p_mapped == 2 || p_mapped == 5
                         px = cx + off_x_mm / spacing_x
                         py = cy + off_y_mm / spacing_y
-                    elseif panel_id == 3
+                    elseif p_mapped == 3
                         px = cy + off_x_mm / spacing_y
                         py = cz + off_y_mm / spacing_z
-                    elseif panel_id == 4
+                    elseif p_mapped == 4
                         px = cx + off_x_mm / spacing_x
                         py = cz + off_y_mm / spacing_z
                     else
@@ -276,6 +280,41 @@ function compute_measurement_vertices(measurements::Vector{SphereMeasurement}, s
     end
     
     return vertices
+end
+
+"""
+    compute_brush_circle_vertices(state, panel_id, center_idx, stroke_width; is_erase=false)
+
+Generates the vector buffer (vec2 pos, vec4 color) for the active drawing/erasing
+brush circle on `panel_id`, reusing the SUV sphere measurement circle logic (`compute_measurement_vertices`)
+with 50% opacity (`alpha = 0.5f0`) so underlying anatomy and lesions remain visible.
+"""
+function compute_brush_circle_vertices(
+    state,
+    panel_id::Int,
+    center_idx::NTuple{3, Float32},
+    stroke_width::Real;
+    is_erase::Bool = false
+)::Vector{Float32}
+    isempty(state) && return Float32[]
+    orig_sp = state[1].spacingsValue[1]
+    sx = orig_sp[1] > 0 ? Float32(orig_sp[1]) : 1.0f0
+    sy = orig_sp[2] > 0 ? Float32(orig_sp[2]) : 1.0f0
+    sz = orig_sp[3] > 0 ? Float32(orig_sp[3]) : 1.0f0
+    sw = max(1.0f0, Float32(stroke_width))
+    brush_sphere = SphereMeasurement(
+        id = -2,
+        center_idx = center_idx,
+        radius_mm = sw * min(sx, sy, sz),
+        radius_x_mm = sw * sx,
+        radius_y_mm = sw * sy,
+        radius_z_mm = sw * sz,
+        suv_mean = 0.0f0,
+        suv_max = 0.0f0,
+        is_active = true,
+        color_idx = is_erase ? 1 : 2
+    )
+    return compute_measurement_vertices(SphereMeasurement[brush_sphere], state, panel_id)
 end
 
 """

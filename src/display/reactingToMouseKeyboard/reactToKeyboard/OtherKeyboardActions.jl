@@ -59,15 +59,25 @@ function processKeysInfo(annot::Identity{AnnotationStruct}, stateObject::StateDa
         texture = textureList[1]
         oldsWidth = texture.strokeWidth
         newWidth = oldsWidth + annot.value.strokeWidthChange
-        newWidth = clamp(newWidth, 1, 20)
+        newWidth = clamp(newWidth, Int32(1), Int32(20))
         texture.strokeWidth = newWidth
+        for ts in stateObject.mainForDisplayObjects.listOfTextSpecifications
+            if ts.isEditable || ts.name == "Mask" || ts.name == "manualModif" || ts.isMultiDiscreteMask
+                ts.strokeWidth = newWidth
+            end
+        end
         # Sync GUI brush slider
         try
             top = parentmodule(@__MODULE__)
             if isdefined(top, :LesionMetadataWindow)
                 obs_dict = getfield(top.LesionMetadataWindow, :_lmw_observables)
                 if haskey(obs_dict, :slider_brush)
-                    obs_dict[:slider_brush].value[] = newWidth
+                    sl = obs_dict[:slider_brush]
+                    try
+                        sl.selected_index[] = clamp(Int(newWidth), 1, length(sl.range[]))
+                    catch
+                        try sl.value[] = newWidth catch; end
+                    end
                 end
                 # Force Makie redraw (safe)
                 if haskey(obs_dict, :redraw_trigger)

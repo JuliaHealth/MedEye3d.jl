@@ -375,6 +375,23 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     # Store last point for next frame
     stateObject.lastPaintCoords = [CartesianIndex(sampledPoints[end][1], sampledPoints[end][2])]
 
+    # Keep current_viewer_position updated during active paint/erase drag so brush circle tracks cursor
+    try
+        MEH_pos = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+        ix_p, iy_p = sampledPoints[end][1], sampledPoints[end][2]
+        clickedPanel_p = mainStates[1].switchIndex
+        cp_mapped_p = clickedPanel_p > 5 ? clickedPanel_p - 5 : clickedPanel_p
+        slice_p = stateObject.currentDisplayedSlice
+        vox_p = if cp_mapped_p == 3
+            (slice_p, ix_p, iy_p)
+        elseif cp_mapped_p == 4
+            (ix_p, slice_p, iy_p)
+        else
+            (ix_p, iy_p, slice_p)
+        end
+        MEH_pos.current_viewer_position[] = vox_p
+    catch; end
+
     # Access current slice data
     if !haskey(stateObject.currentlyDispDat.nameIndexes, texture.name)
         println("[PAINT-DBG] ERROR: texture '$(texture.name)' not found in nameIndexes: $(collect(keys(stateObject.currentlyDispDat.nameIndexes)))"); flush(stdout)
@@ -1878,9 +1895,10 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             # Panels 1,2,5 are axial: (ix, iy, slice) maps to (x, y, z)
             # Panel 3 is sagittal: data is PermutedDimsArray(vol, (3,2,1)), so (ix,iy,slice)→(slice,iy,ix)
             # Panel 4 is coronal:  data is PermutedDimsArray(vol, (1,3,2)), so (ix,iy,slice)→(ix,slice,iy)
-            vox = if clickedPanel == 3
-                (currentSlice, iy, ix)
-            elseif clickedPanel == 4
+            cp_mapped = clickedPanel > 5 ? clickedPanel - 5 : clickedPanel
+            vox = if cp_mapped == 3
+                (currentSlice, ix, iy)
+            elseif cp_mapped == 4
                 (ix, currentSlice, iy)
             else
                 (ix, iy, currentSlice)

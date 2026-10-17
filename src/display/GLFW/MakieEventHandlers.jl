@@ -1011,9 +1011,15 @@ function reactToPaintVal(data::PaintValEvent, stateObjects::Vector{StateDataFiel
 end
 
 function reactToChangeBrushSize(data::ChangeBrushSizeEvent, stateObjects::Vector{StateDataFields})
+    sz = Int32(max(1, data.size))
     for state in stateObjects
-        if !isempty(state.textureToModifyVec)
-            state.textureToModifyVec[1].strokeWidth = Int32(data.size)
+        for ts in state.textureToModifyVec
+            ts.strokeWidth = sz
+        end
+        for ts in state.mainForDisplayObjects.listOfTextSpecifications
+            if ts.isEditable || ts.name == "Mask" || ts.name == "manualModif" || ts.isMultiDiscreteMask
+                ts.strokeWidth = sz
+            end
         end
     end
     if DEBUG_VERBOSE[]; println("Brush size updated to $(data.size)"); flush(stdout); end

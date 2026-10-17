@@ -1596,6 +1596,35 @@ function coordinateDisplay(
                                 append!(vector_vertices, line_verts)
                             end
                         end
+                        if state.valueForMasToSet.is_painting_active &&
+                           !MakieEventHandlers.measurements_mode[] &&
+                           !ReactOnMouseClickAndDrag._heatgdt_mode_active[] &&
+                           ix > 0 && iy > 0 && iz > 0
+                            p_mapped_b = panel_idx > 5 ? panel_idx - 5 : panel_idx
+                            h_mapped_b = hovered_idx > 5 ? hovered_idx - 5 : hovered_idx
+                            same_orient = (hovered_idx <= 0) || (p_mapped_b == h_mapped_b) ||
+                                          (p_mapped_b in (1, 2, 5) && h_mapped_b in (1, 2, 5))
+                            if same_orient
+                                stroke_w = !isempty(state.textureToModifyVec) ? max(1, Int(state.textureToModifyVec[1].strokeWidth)) :
+                                           (!isempty(stateInstances[1].textureToModifyVec) ? max(1, Int(stateInstances[1].textureToModifyVec[1].strokeWidth)) : 1)
+                                is_ctrl = stateInstances[1].fieldKeyboardStruct.isCtrlPressed
+                                is_erase = is_ctrl || (state.valueForMasToSet.value <= 0)
+                                cur_sl = Float32(state.currentDisplayedSlice)
+                                b_center = if p_mapped_b == 3
+                                    (cur_sl, Float32(iy), Float32(iz))
+                                elseif p_mapped_b == 4
+                                    (Float32(ix), cur_sl, Float32(iz))
+                                else
+                                    (Float32(ix), Float32(iy), cur_sl)
+                                end
+                                brush_verts = Measurements.compute_brush_circle_vertices(stateInstances, panel_idx, b_center, stroke_w; is_erase=is_erase)
+                                if isempty(vector_vertices)
+                                    vector_vertices = brush_verts
+                                elseif !isempty(brush_verts)
+                                    append!(vector_vertices, brush_verts)
+                                end
+                            end
+                        end
                         
                         # Ensure VBO is large enough for this frame's vector data
                         vbo_for_panel = obj.vulkanVectorVBO
