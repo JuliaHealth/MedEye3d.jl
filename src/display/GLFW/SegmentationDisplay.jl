@@ -691,6 +691,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleMeasurem
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.CycleMeasurementSubModeEvent) = MakieEventHandlers.reactToCycleMeasurementSubMode(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.EditMeasurementEvent) = MakieEventHandlers.reactToEditMeasurement(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.EditLineMeasurementEvent) = MakieEventHandlers.reactToEditLineMeasurement(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.SetLNValidationModeEvent) = MakieEventHandlers.reactToSetLNValidationMode(data, stateObjects)
 
 on_error!(stateObjects::Vector{StateDataFields}, err) = error(err)
 on_complete!(stateObjects::Vector{StateDataFields}) = ""

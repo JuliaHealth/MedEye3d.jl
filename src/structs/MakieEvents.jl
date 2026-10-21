@@ -285,4 +285,10 @@ struct HeatGDTPosthocSizeEvent
     new_theta::Float32
 end
 
+struct SetLNValidationModeEvent
+    active::Bool
+end
+
+export SetLNValidationModeEvent
+
 end # module MakieEvents

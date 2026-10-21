@@ -402,21 +402,22 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
 
     is_ctrl = mainStates[1].fieldKeyboardStruct.isCtrlPressed
     val = stateObject.valueForMasToSet.value
+    # Determine the target based on visibility toggles
+    MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+    is_ln_mode = isdefined(MEH, :lymph_node_validation_mode) && MEH.lymph_node_validation_mode[]
+
     if is_ctrl && val > 0
-        val = -val
+        val = is_ln_mode ? 0 : -val
     end
     toSet = convert(twoDimDat.type, convert(parameter_type(texture), val))
     strokeW = max(1, Int(texture.strokeWidth))
-
-    # Determine the target based on visibility toggles
-    MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
     
     lesion_vis = isdefined(MEH, :_lesion_active) ? MEH._lesion_active[] : true
     surf_vis = isdefined(MEH, :_bone_surf_active) ? MEH._bone_surf_active[] : true
     marr_vis = isdefined(MEH, :_bone_marr_active) ? MEH._bone_marr_active[] : true
     
     target_mode = :lesion
-    if !lesion_vis
+    if !lesion_vis && !is_ln_mode
         if surf_vis && marr_vis
             target_mode = :surface
         elseif surf_vis
@@ -427,7 +428,11 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     end
 
     # Defensive check: ensure mask is visible and minAndMaxValue covers the painted ID
-    is_mask = (texture.isMultiDiscreteMask || texture.name == "Mask" || texture.name == "manualModif" || texture.name == "segmentation") && texture.name != "Anatomy"
+    is_mask = if is_ln_mode
+        texture.name == "Anatomy" || texture.isMultiDiscreteMask
+    else
+        (texture.isMultiDiscreteMask || texture.name == "Mask" || texture.name == "manualModif" || texture.name == "segmentation") && texture.name != "Anatomy"
+    end
     
     if target_mode == :lesion
         if !texture.isVisible && is_mask
@@ -555,7 +560,11 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     end
     if lesion_id > 0
         try
-            MEH.ensure_ai_mask_backup!(lesion_id, tp_idx, stateObject)
+            if is_ln_mode || texture.name == "Anatomy"
+                MEH.ensure_ai_anatomy_backup!(lesion_id, tp_idx, stateObject)
+            else
+                MEH.ensure_ai_mask_backup!(lesion_id, tp_idx, stateObject)
+            end
         catch e
             @warn "Failed to ensure AI mask backup: $e"
         end
@@ -580,7 +589,11 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
 
     # Invalidate SUV/volume/centroid caches, async-recompute metrics, and mark mask dirty for auto-save
     try
-        MEH.mark_tp_mask_dirty!(tp_idx)
+        if is_ln_mode || texture.name == "Anatomy"
+            MEH.mark_tp_anatomy_dirty!(tp_idx)
+        else
+            MEH.mark_tp_mask_dirty!(tp_idx)
+        end
         paint_id = round(Int, stateObject.valueForMasToSet.value)
         edit_id = paint_id > 0 ? paint_id : MEH.current_active_lesion_id[]
         if edit_id > 0 || paint_id == 0
@@ -591,28 +604,49 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
             end
             if entry !== nothing
                 try
-                    if eff_dim == 3
-                        entry.mask_i16[:, :, cur_slice] .= round.(Int16, twoDimDat.dat)
-                    elseif eff_dim == 1
-                        entry.mask_i16[cur_slice, :, :] .= round.(Int16, twoDimDat.dat)
-                    elseif eff_dim == 2
-                        entry.mask_i16[:, cur_slice, :] .= round.(Int16, twoDimDat.dat)
-                    end
-                    if entry.mask isa Array{Int8, 3}
-                        if eff_dim == 3
-                            entry.mask[:, :, cur_slice] .= clamp.(round.(Int16, twoDimDat.dat), Int8(-128), Int8(127))
-                        elseif eff_dim == 1
-                            entry.mask[cur_slice, :, :] .= clamp.(round.(Int16, twoDimDat.dat), Int8(-128), Int8(127))
-                        elseif eff_dim == 2
-                            entry.mask[:, cur_slice, :] .= clamp.(round.(Int16, twoDimDat.dat), Int8(-128), Int8(127))
+                    if is_ln_mode || texture.name == "Anatomy"
+                        if entry.anat_i16 !== nothing
+                            if eff_dim == 3
+                                entry.anat_i16[:, :, cur_slice] .= round.(Int16, twoDimDat.dat)
+                            elseif eff_dim == 1
+                                entry.anat_i16[cur_slice, :, :] .= round.(Int16, twoDimDat.dat)
+                            elseif eff_dim == 2
+                                entry.anat_i16[:, cur_slice, :] .= round.(Int16, twoDimDat.dat)
+                            end
                         end
-                    elseif entry.mask !== nothing && entry.mask !== entry.mask_i16
+                        if entry.anatomy !== nothing && entry.anatomy !== entry.anat_i16
+                            if eff_dim == 3
+                                entry.anatomy[:, :, cur_slice] .= UInt16.(max.(0, round.(Int, twoDimDat.dat)))
+                            elseif eff_dim == 1
+                                entry.anatomy[cur_slice, :, :] .= UInt16.(max.(0, round.(Int, twoDimDat.dat)))
+                            elseif eff_dim == 2
+                                entry.anatomy[:, cur_slice, :] .= UInt16.(max.(0, round.(Int, twoDimDat.dat)))
+                            end
+                        end
+                    else
                         if eff_dim == 3
-                            entry.mask[:, :, cur_slice] .= round.(eltype(entry.mask), twoDimDat.dat)
+                            entry.mask_i16[:, :, cur_slice] .= round.(Int16, twoDimDat.dat)
                         elseif eff_dim == 1
-                            entry.mask[cur_slice, :, :] .= round.(eltype(entry.mask), twoDimDat.dat)
+                            entry.mask_i16[cur_slice, :, :] .= round.(Int16, twoDimDat.dat)
                         elseif eff_dim == 2
-                            entry.mask[:, cur_slice, :] .= round.(eltype(entry.mask), twoDimDat.dat)
+                            entry.mask_i16[:, cur_slice, :] .= round.(Int16, twoDimDat.dat)
+                        end
+                        if entry.mask isa Array{Int8, 3}
+                            if eff_dim == 3
+                                entry.mask[:, :, cur_slice] .= clamp.(round.(Int16, twoDimDat.dat), Int8(-128), Int8(127))
+                            elseif eff_dim == 1
+                                entry.mask[cur_slice, :, :] .= clamp.(round.(Int16, twoDimDat.dat), Int8(-128), Int8(127))
+                            elseif eff_dim == 2
+                                entry.mask[:, cur_slice, :] .= clamp.(round.(Int16, twoDimDat.dat), Int8(-128), Int8(127))
+                            end
+                        elseif entry.mask !== nothing && entry.mask !== entry.mask_i16
+                            if eff_dim == 3
+                                entry.mask[:, :, cur_slice] .= round.(eltype(entry.mask), twoDimDat.dat)
+                            elseif eff_dim == 1
+                                entry.mask[cur_slice, :, :] .= round.(eltype(entry.mask), twoDimDat.dat)
+                            elseif eff_dim == 2
+                                entry.mask[:, cur_slice, :] .= round.(eltype(entry.mask), twoDimDat.dat)
+                            end
                         end
                     end
                 catch e_sync
@@ -631,7 +665,12 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
                 catch; end
             end
             if edit_id > 0
-                MEH.invalidate_and_recompute_lesion_metrics_async!(edit_id, tp_idx)
+                vol_for_recompute = if entry !== nothing && (is_ln_mode || texture.name == "Anatomy")
+                    entry.anat_i16 !== nothing ? entry.anat_i16 : entry.anatomy
+                else
+                    nothing
+                end
+                MEH.invalidate_and_recompute_lesion_metrics_async!(edit_id, tp_idx, vol_for_recompute)
             end
         end
     catch e
@@ -1132,18 +1171,29 @@ function _handle_lesion_click(coord, clickedPanel::Int, mousestr::MouseStruct, m
     slice = panelState.currentDisplayedSlice
     
     # Locate segmentation mask array
+    MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+    is_ln_mode = isdefined(MEH, :lymph_node_validation_mode) && MEH.lymph_node_validation_mode[]
     seg_vol = nothing
-    for scrDat in panelState.onScrollData.dataToScroll
-        if scrDat.name == "Mask" || scrDat.name == "segmentation"
-            seg_vol = scrDat.dat
-            break
-        end
-    end
-    if seg_vol === nothing
+    if is_ln_mode
         for scrDat in panelState.onScrollData.dataToScroll
-            if scrDat.name == "manualModif"
+            if scrDat.name == "Anatomy"
                 seg_vol = scrDat.dat
                 break
+            end
+        end
+    else
+        for scrDat in panelState.onScrollData.dataToScroll
+            if scrDat.name == "Mask" || scrDat.name == "segmentation"
+                seg_vol = scrDat.dat
+                break
+            end
+        end
+        if seg_vol === nothing
+            for scrDat in panelState.onScrollData.dataToScroll
+                if scrDat.name == "manualModif"
+                    seg_vol = scrDat.dat
+                    break
+                end
             end
         end
     end
@@ -1152,6 +1202,7 @@ function _handle_lesion_click(coord, clickedPanel::Int, mousestr::MouseStruct, m
     end
     
     dim = panelState.onScrollData.dimensionToScroll
+    ln_valid_ids = is_ln_mode ? MEH.get_lymph_node_label_ids(MEH.current_tp_index[]) : nothing
     
     # Neighborhood search: check center pixel and radial kernel (up to 3 px)
     offsets = Tuple{Int,Int}[(0,0), (-1,0), (1,0), (0,-1), (0,1),
@@ -1173,7 +1224,7 @@ function _handle_lesion_click(coord, clickedPanel::Int, mousestr::MouseStruct, m
         end
         if checkbounds(Bool, seg_vol, idx3d)
             val = round(Int, seg_vol[idx3d])
-            if val > 0
+            if val > 0 && (!is_ln_mode || val in ln_valid_ids)
                 clicked_lid = val
                 break
             end
@@ -1383,11 +1434,18 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             texX, texY = getTextureCoordinatesFromScreen(x, y, panelState.calcDimsStruct, actualW, actualH)
             
             if panelState.moveLesionMode
-                target_id = 0
-                for ts in panelState.mainForDisplayObjects.listOfTextSpecifications
-                    if (ts.isMultiDiscreteMask || ts.name == "Mask" || ts.name == "manualModif") && ts.name != "Anatomy" && !isempty(ts.minAndMaxValue) && ts.minAndMaxValue[1] > 0
-                        target_id = Int(round(ts.minAndMaxValue[1]))
-                        break
+                MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+                is_ln_mode = isdefined(MEH, :lymph_node_validation_mode) && MEH.lymph_node_validation_mode[]
+                target_id = is_ln_mode ? MEH.current_active_lesion_id[] : 0
+                if target_id <= 0
+                    for ts in panelState.mainForDisplayObjects.listOfTextSpecifications
+                        if is_ln_mode && ts.name == "Anatomy" && !isempty(ts.minAndMaxValue) && ts.minAndMaxValue[1] > 0
+                            target_id = Int(round(ts.minAndMaxValue[1]))
+                            break
+                        elseif !is_ln_mode && (ts.isMultiDiscreteMask || ts.name == "Mask" || ts.name == "manualModif") && ts.name != "Anatomy" && !isempty(ts.minAndMaxValue) && ts.minAndMaxValue[1] > 0
+                            target_id = Int(round(ts.minAndMaxValue[1]))
+                            break
+                        end
                     end
                 end
                 if target_id <= 0
@@ -1395,7 +1453,10 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 end
                 if target_id <= 0
                     for ts in mainStates[1].mainForDisplayObjects.listOfTextSpecifications
-                        if (ts.isMultiDiscreteMask || ts.name == "Mask" || ts.name == "manualModif") && ts.name != "Anatomy" && !isempty(ts.minAndMaxValue) && ts.minAndMaxValue[1] > 0
+                        if is_ln_mode && ts.name == "Anatomy" && !isempty(ts.minAndMaxValue) && ts.minAndMaxValue[1] > 0
+                            target_id = Int(round(ts.minAndMaxValue[1]))
+                            break
+                        elseif !is_ln_mode && (ts.isMultiDiscreteMask || ts.name == "Mask" || ts.name == "manualModif") && ts.name != "Anatomy" && !isempty(ts.minAndMaxValue) && ts.minAndMaxValue[1] > 0
                             target_id = Int(round(ts.minAndMaxValue[1]))
                             break
                         end
@@ -1411,10 +1472,13 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 panelState.movingLesionSourceName = ""
                 seg_vol = nothing
                 # In compare mode, search the right panel's data for the lesion
-                MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
                 search_panel = (MEH.compare_mode[] && clickedPanel == 5) ? mainStates[5] : mainStates[1]
                 for dat in search_panel.onScrollData.dataToScroll
-                    if dat.name == "Mask" || dat.name == "segmentation"
+                    if is_ln_mode && dat.name == "Anatomy"
+                        seg_vol = dat.dat
+                        panelState.movingLesionSourceName = dat.name
+                        break
+                    elseif !is_ln_mode && (dat.name == "Mask" || dat.name == "segmentation")
                         T_elem = eltype(dat.dat)
                         if panelState.movingLesionID > 0 && any(dat.dat .== round(T_elem, panelState.movingLesionID))
                             seg_vol = dat.dat
@@ -1424,7 +1488,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                             seg_vol = dat.dat
                             panelState.movingLesionSourceName = dat.name
                         end
-                    elseif dat.name == "manualModif" && seg_vol === nothing
+                    elseif !is_ln_mode && dat.name == "manualModif" && seg_vol === nothing
                         seg_vol = dat.dat
                         panelState.movingLesionSourceName = dat.name
                     end
@@ -1432,9 +1496,12 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 
                 if seg_vol !== nothing && panelState.movingLesionID > 0
                     try
-                        MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
                         tp_idx = (MEH.compare_mode[] && clickedPanel == 5) ? MEH.compare_right_tp[] : MEH.current_tp_index[]
-                        MEH.ensure_ai_mask_backup!(panelState.movingLesionID, tp_idx, panelState)
+                        if is_ln_mode
+                            MEH.ensure_ai_anatomy_backup!(panelState.movingLesionID, tp_idx, panelState)
+                        else
+                            MEH.ensure_ai_mask_backup!(panelState.movingLesionID, tp_idx, panelState)
+                        end
                     catch; end
                     T_elem = eltype(seg_vol)
                     panelState.movingLesionOriginalCoords = findall(seg_vol .== round(T_elem, panelState.movingLesionID))
@@ -1615,9 +1682,9 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                                 haskey(MEH.tp_data_cache, tp_idx) ? MEH.tp_data_cache[tp_idx] : nothing
                             end
                             if entry !== nothing
-                                # The source_name should be "Mask" or "manualModif"
+                                # The source_name should be "Mask", "manualModif", or "Anatomy"
                                 # We sync it from the canonical axial panel
-                                if source_name == "Mask" || source_name == "manualModif"
+                                if source_name == "Mask" || source_name == "manualModif" || source_name == "Anatomy"
                                     # Find the corresponding dataToScroll in the current panel
                                     cp_mapped_mv = clickedPanel > 5 ? clickedPanel - 5 : clickedPanel
                                     for st_dat in mainStates[clickedPanel].onScrollData.dataToScroll
@@ -1631,17 +1698,29 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                                                 st_dat.dat
                                             end
                                             
-                                            if entry.mask isa Array{Int8, 3}
-                                                entry.mask .= round.(Int8, vol)
+                                            if source_name == "Anatomy"
+                                                if entry.anat_i16 !== nothing
+                                                    entry.anat_i16 .= round.(Int16, vol)
+                                                end
+                                                if entry.anatomy !== nothing && entry.anatomy !== entry.anat_i16
+                                                    entry.anatomy .= UInt16.(max.(0, round.(Int, vol)))
+                                                end
+                                                MEH.mark_tp_anatomy_dirty!(tp_idx)
+                                                MEH.mark_expert_edit!(panelState.movingLesionID)
+                                                MEH.invalidate_and_recompute_lesion_metrics_async!(panelState.movingLesionID, tp_idx, entry.anat_i16)
                                             else
-                                                entry.mask .= round.(Int16, vol)
+                                                if entry.mask isa Array{Int8, 3}
+                                                    entry.mask .= round.(Int8, vol)
+                                                else
+                                                    entry.mask .= round.(Int16, vol)
+                                                end
+                                                if entry.mask_i16 !== nothing
+                                                    entry.mask_i16 .= round.(Int16, vol)
+                                                end
+                                                MEH.mark_tp_mask_dirty!(tp_idx)
+                                                MEH.mark_expert_edit!(panelState.movingLesionID)
+                                                MEH.invalidate_and_recompute_lesion_metrics_async!(panelState.movingLesionID, tp_idx, entry.mask_i16)
                                             end
-                                            if entry.mask_i16 !== nothing
-                                                entry.mask_i16 .= round.(Int16, vol)
-                                            end
-                                            MEH.mark_tp_mask_dirty!(tp_idx)
-                                            MEH.mark_expert_edit!(panelState.movingLesionID)
-                                            MEH.invalidate_and_recompute_lesion_metrics_async!(panelState.movingLesionID, tp_idx, entry.mask_i16)
                                             break
                                         end
                                     end

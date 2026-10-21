@@ -436,6 +436,71 @@ function precompute_mask_centroids!(mask_vol::AbstractArray{T, 3}, tp_idx::Int, 
     end
 end
 
+"""
+    get_lymph_node_label_ids(tp_idx::Int = current_tp_index[])::Set{Int}
+Return the set of anatomical label IDs that correspond to lymph node areas.
+"""
+function get_lymph_node_label_ids(tp_idx::Int = current_tp_index[])::Set{Int}
+    ts_map = get(anatomy_labels_cache, tp_idx, global_ts_names[])
+    if isempty(ts_map)
+        ts_map = global_ts_names[]
+    end
+    LA = _get_la()
+    res = Set{Int}()
+    if !isempty(ts_map) && LA !== nothing
+        for (aid, name) in ts_map
+            if LA.is_lymph_node_structure(name)
+                push!(res, aid)
+            end
+        end
+    end
+    if isempty(res)
+        # Fallback: standard max_anatomy_labels 1..63 are lymph node areas
+        for aid in 1:63
+            push!(res, aid)
+        end
+    end
+    return res
+end
+
+"""
+    precompute_anatomy_ln_centroids!(anat_vol::AbstractArray{T, 3}, tp_idx::Int, node_name::String="")
+Single-pass O(V) centroid calculation for all lymph node IDs in `anat_vol`.
+Populates `ln_centroids_cache` with `(tp_idx, aid)`, `(node_name, aid)`, and `aid` keys.
+"""
+function precompute_anatomy_ln_centroids!(anat_vol::AbstractArray{T, 3}, tp_idx::Int, node_name::String="") where T
+    ln_ids = get_lymph_node_label_ids(tp_idx)
+    sx, sy, sz = size(anat_vol)
+    sums_x = Dict{Int, Int}()
+    sums_y = Dict{Int, Int}()
+    sums_z = Dict{Int, Int}()
+    counts = Dict{Int, Int}()
+
+    @inbounds for z in 1:sz, y in 1:sy, x in 1:sx
+        v = Int(round(anat_vol[x, y, z]))
+        if v > 0 && v in ln_ids
+            sums_x[v] = get(sums_x, v, 0) + x
+            sums_y[v] = get(sums_y, v, 0) + y
+            sums_z[v] = get(sums_z, v, 0) + z
+            counts[v] = get(counts, v, 0) + 1
+        end
+    end
+
+    lock(_centroids_lock) do
+        for (aid, n) in counts
+            c = [round(Int, sums_x[aid] / n), round(Int, sums_y[aid] / n), round(Int, sums_z[aid] / n)]
+            ln_centroids_cache[(tp_idx, aid)] = c
+            if !isempty(node_name)
+                ln_centroids_cache[(node_name, aid)] = c
+            end
+            if tp_idx == current_tp_index[]
+                ln_centroids_cache[aid] = c
+            end
+        end
+    end
+end
+export get_lymph_node_label_ids, precompute_anatomy_ln_centroids!
+
 function reactToChangePlane(data::ChangePlaneEvent, stateObjects::Vector{StateDataFields})
     dim = 3
     if data.plane == :Sagittal
@@ -822,7 +887,30 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
                 continue
             end
             for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-                if textSpec.name == "Mask" || textSpec.name == "segmentation" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy" && textSpec.name != "Bone_Overlay")
+                if lymph_node_validation_mode[]
+                    if textSpec.name == "Anatomy"
+                        ln_ids = get_lymph_node_label_ids(current_tp_index[])
+                        max_ln = isempty(ln_ids) ? 63 : maximum(ln_ids)
+                        min_ln = isempty(ln_ids) ? 1 : minimum(ln_ids)
+                        T_mm = eltype(textSpec.minAndMaxValue)
+                        textSpec.allowedIDs = Float32[]
+                        textSpec.colorMask = RGBA(0.0f0, 0.0f0, 0.0f0, 1.0f0)
+                        textSpec.minAndMaxValue = T_mm.([min_ln, max_ln])
+                        textSpec.isVisible = true
+                        if textSpec.maskContribution <= 0.05f0
+                            textSpec.maskContribution = 0.5f0
+                        end
+                        if stateObject.mainForDisplayObjects.vulkanPipelineState !== nothing
+                            stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                        end
+                        changed = true
+                    elseif textSpec.name == "Mask" || textSpec.name == "segmentation" || textSpec.name == "Bone_Overlay"
+                        textSpec.isVisible = false
+                        if stateObject.mainForDisplayObjects.vulkanPipelineState !== nothing
+                            stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                        end
+                    end
+                elseif textSpec.name == "Mask" || textSpec.name == "segmentation" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy" && textSpec.name != "Bone_Overlay")
                     # Clear allowed IDs filter (only for lesion masks, not anatomical atlas)
                     textSpec.allowedIDs = Float32[]
                     textSpec.colorMask = RGBA(0.0f0, 0.0f0, 0.0f0, 1.0f0)
@@ -994,7 +1082,12 @@ function reactToPaintVal(data::PaintValEvent, stateObjects::Vector{StateDataFiel
         if data.active
             target_ts = nothing
             for textSpec in state.mainForDisplayObjects.listOfTextSpecifications
-                if textSpec.name == "Mask" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy")
+                if lymph_node_validation_mode[]
+                    if textSpec.name == "Anatomy"
+                        target_ts = textSpec
+                        break
+                    end
+                elseif textSpec.name == "Mask" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy")
                     target_ts = textSpec
                     break
                 elseif textSpec.name == "manualModif" && target_ts === nothing
@@ -1003,6 +1096,7 @@ function reactToPaintVal(data::PaintValEvent, stateObjects::Vector{StateDataFiel
             end
             if target_ts !== nothing
                 target_ts.isVisible = true
+                target_ts.isEditable = true
                 state.textureToModifyVec = [target_ts]
             end
         end
@@ -1609,9 +1703,37 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
 
     for (idx, stateObject) in enumerate(stateObjects)
         is_right = compare_mode[] && idx in (5, 6, 7, 8, 9)
-        target_id = is_right ? panel5_lesion_id : data.lesion_id
+        panel_tp = is_right ? compare_right_tp[] : current_tp_index[]
+        target_id = lymph_node_validation_mode[] ? data.lesion_id : (is_right ? panel5_lesion_id : data.lesion_id)
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-            if textSpec.name == "Mask" || textSpec.name == "segmentation" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy" && textSpec.name != "Bone_Overlay")
+            if lymph_node_validation_mode[]
+                if textSpec.name == "Anatomy"
+                    T_mm = eltype(textSpec.minAndMaxValue)
+                    textSpec.allowedIDs = Float32[]
+                    textSpec.colorMask = RGBA(0.0f0, 0.0f0, 0.0f0, 1.0f0)
+                    if is_single_lesion_mode[] && target_id > 0
+                        textSpec.minAndMaxValue = T_mm.([target_id, target_id])
+                    else
+                        ln_ids = get_lymph_node_label_ids(panel_tp)
+                        max_ln = isempty(ln_ids) ? 63 : maximum(ln_ids)
+                        min_ln = isempty(ln_ids) ? 1 : minimum(ln_ids)
+                        textSpec.minAndMaxValue = T_mm.([min_ln, max_ln])
+                    end
+                    textSpec.isVisible = true
+                    textSpec.isEditable = true
+                    if textSpec.maskContribution <= 0.05f0
+                        textSpec.maskContribution = 0.5f0
+                    end
+                    if stateObject.mainForDisplayObjects.vulkanPipelineState !== nothing
+                        stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                    end
+                elseif textSpec.name == "Mask" || textSpec.name == "segmentation" || textSpec.name == "Bone_Overlay"
+                    textSpec.isVisible = false
+                    if stateObject.mainForDisplayObjects.vulkanPipelineState !== nothing
+                        stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                    end
+                end
+            elseif textSpec.name == "Mask" || textSpec.name == "segmentation" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy" && textSpec.name != "Bone_Overlay")
                 T_mm = eltype(textSpec.minAndMaxValue)
                 if is_right && compare_all_lesions_mode[]
                     # Interactive mapping mode: display ALL lesions on right TP,
@@ -1651,7 +1773,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     if PERF_LOG[]; println("[SYNC-LESION] Visibility updated, bone subseg..."); flush(stdout); end
     # 1b. Update bone subseg 3D arrays for visible panels only
     has_any_bone_data = false
-    if data.lesion_id > 0
+    if data.lesion_id > 0 && !lymph_node_validation_mode[]
         for (panel_idx, stateObject) in enumerate(stateObjects)
             # Skip hidden panels (Fix ❸: avoid bone overlay work for invisible panels)
             if stateObject.calcDimsStruct.mainQuadVertSize <= 0 || all(iszero, stateObject.calcDimsStruct.mainImageQuadVert)
@@ -1738,15 +1860,17 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     _t_bone = round((time_ns()-t_total)/1e6, digits=1)
     # 2. Get canonical center
     panel_tp_cur = current_tp_index[]
+    active_centroids_cache = lymph_node_validation_mode[] ? ln_centroids_cache : lesion_centroids_cache
+    target_tex_names = lymph_node_validation_mode[] ? ("Anatomy",) : ("Mask", "segmentation", "manualModif", "mask")
     canonical_center = if data.lesion_id > 0
-        if haskey(lesion_centroids_cache, (panel_tp_cur, data.lesion_id))
-            lesion_centroids_cache[(panel_tp_cur, data.lesion_id)]
-        elseif haskey(lesion_centroids_cache, (get_node_name_for_tp(panel_tp_cur), data.lesion_id))
-            lesion_centroids_cache[(get_node_name_for_tp(panel_tp_cur), data.lesion_id)]
-        elseif haskey(lesion_centroids_cache, (0, data.lesion_id))
-            lesion_centroids_cache[(0, data.lesion_id)]
-        elseif haskey(lesion_centroids_cache, data.lesion_id)
-            lesion_centroids_cache[data.lesion_id]
+        if haskey(active_centroids_cache, (panel_tp_cur, data.lesion_id))
+            active_centroids_cache[(panel_tp_cur, data.lesion_id)]
+        elseif haskey(active_centroids_cache, (get_node_name_for_tp(panel_tp_cur), data.lesion_id))
+            active_centroids_cache[(get_node_name_for_tp(panel_tp_cur), data.lesion_id)]
+        elseif haskey(active_centroids_cache, (0, data.lesion_id))
+            active_centroids_cache[(0, data.lesion_id)]
+        elseif haskey(active_centroids_cache, data.lesion_id)
+            active_centroids_cache[data.lesion_id]
         else
             # on-the-fly computation if cache miss
             cc = nothing
@@ -1754,11 +1878,11 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             for (si, stateObject) in enumerate(stateObjects)
                 if stateObject.onScrollData.dimensionToScroll == 3
                     for scrDat in stateObject.onScrollData.dataToScroll
-                        if scrDat.name in ("Mask", "segmentation", "manualModif", "mask")
+                        if scrDat.name in target_tex_names
                             cc = find_lesion_center(scrDat.dat, Float32(data.lesion_id))
                             if cc !== nothing
-                                lesion_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
-                                lesion_centroids_cache[data.lesion_id] = cc
+                                active_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
+                                active_centroids_cache[data.lesion_id] = cc
                                 break
                             end
                         end
@@ -1769,22 +1893,24 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             # 2. Search in tp_data_cache for current TP
             if cc === nothing && haskey(tp_data_cache, panel_tp_cur)
                 tp_ent = tp_data_cache[panel_tp_cur]
-                if tp_ent.mask !== nothing
-                    cc = find_lesion_center(tp_ent.mask, Float32(data.lesion_id))
+                vol_search = lymph_node_validation_mode[] ? (tp_ent.anat_i16 !== nothing ? tp_ent.anat_i16 : tp_ent.anatomy) : tp_ent.mask
+                if vol_search !== nothing
+                    cc = find_lesion_center(vol_search, Float32(data.lesion_id))
                     if cc !== nothing
-                        lesion_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
-                        lesion_centroids_cache[data.lesion_id] = cc
+                        active_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
+                        active_centroids_cache[data.lesion_id] = cc
                     end
                 end
             end
             # 3. Search in tp_data_cache for baseline (TP 0)
             if cc === nothing && haskey(tp_data_cache, 0)
                 tp_ent0 = tp_data_cache[0]
-                if tp_ent0.mask !== nothing
-                    cc = find_lesion_center(tp_ent0.mask, Float32(data.lesion_id))
+                vol_search0 = lymph_node_validation_mode[] ? (tp_ent0.anat_i16 !== nothing ? tp_ent0.anat_i16 : tp_ent0.anatomy) : tp_ent0.mask
+                if vol_search0 !== nothing
+                    cc = find_lesion_center(vol_search0, Float32(data.lesion_id))
                     if cc !== nothing
-                        lesion_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
-                        lesion_centroids_cache[data.lesion_id] = cc
+                        active_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
+                        active_centroids_cache[data.lesion_id] = cc
                     end
                 end
             end
@@ -1800,8 +1926,8 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                                 c_raw = st[ck]
                                 if (c_raw isa AbstractVector || c_raw isa Tuple) && length(c_raw) >= 3
                                     cc = [round(Int, c_raw[1]), round(Int, c_raw[2]), round(Int, c_raw[3])]
-                                    lesion_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
-                                    lesion_centroids_cache[data.lesion_id] = cc
+                                    active_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
+                                    active_centroids_cache[data.lesion_id] = cc
                                     break
                                 end
                             end
@@ -1920,8 +2046,11 @@ const _tp_cache_lock = ReentrantLock()   # Protects tp_data_cache Dict operation
 const _hdf5_io_lock = ReentrantLock()    # Serializes ALL HDF5 file access (libhdf5 is NOT thread-safe)
 const bone_subsegments_cache = Dict{Any, Any}()
 const lesion_centroids_cache = Dict{Any, Vector{Int}}()
+const ln_centroids_cache = Dict{Any, Vector{Int}}()
+const lymph_node_validation_mode = Ref{Bool}(false)
 const _centroids_lock = ReentrantLock()
 const last_bone_overlay_indices = Dict{Int, Vector{CartesianIndex{3}}}()
+export lymph_node_validation_mode, ln_centroids_cache
 function reactToBoneSubsegResult(data::BoneSubsegResultEvent, stateObjects::Vector{StateDataFields})
     println("[BONE-RESULT] Received: lid=$(data.target_id) tp=$(data.panel_tp) surf=$(length(data.pts_surf)) marr=$(length(data.pts_marr))"); flush(stdout)
     bone_subsegments_cache[(data.panel_tp, data.target_id)] = (data.pts_surf, data.pts_marr)
@@ -2019,11 +2148,13 @@ export TpCacheEntry, invalidate_suv_for_lesion, invalidate_and_recompute_lesion_
 
 # ── HDF5 Mask & Bone Subsegmentation Auto-Save & Persistence ──────────────────
 const dirty_mask_tps = Set{Int}()
+const dirty_anatomy_tps = Set{Int}()
 const dirty_bone_subsegs = Set{Tuple{Int, Int}}()
 const _mask_save_lock = ReentrantLock()
 const h5_save_path_ref = Ref{String}("")
 const studies_ref = Ref{Vector}([])
 export dirty_bone_subsegs, mark_bone_subseg_dirty!, save_bone_subseg_to_h5, flush_all_dirty_bone_subsegs!
+export dirty_anatomy_tps, mark_tp_anatomy_dirty!, save_tp_anatomy_to_h5, flush_all_dirty_anatomy!
 
 function register_h5_mask_saver!(h5_path::String, studies_list::Vector)
     h5_save_path_ref[] = h5_path
@@ -2063,6 +2194,104 @@ function mark_tp_mask_dirty!(tp_idx::Int)
             delete!(LMW._cached_lesion_ids, tp_idx)
         end
     catch; end
+end
+
+function mark_tp_anatomy_dirty!(tp_idx::Int)
+    lock(_mask_save_lock) do
+        push!(dirty_anatomy_tps, tp_idx)
+    end
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing && isdefined(LMW, :_cached_lesion_ids)
+            delete!(LMW._cached_lesion_ids, tp_idx)
+        end
+    catch; end
+end
+
+function save_tp_anatomy_to_h5(tp_i::Int)::Bool
+    h5_path = h5_save_path_ref[]
+    if isempty(h5_path) || !isfile(h5_path)
+        h5_path = h5_path_ref[]
+    end
+    studies_list = studies_ref[]
+    if isempty(h5_path) || !isfile(h5_path) || isempty(studies_list)
+        return false
+    end
+    if tp_i < 0 || tp_i >= length(studies_list)
+        return false
+    end
+    entry = lock(_tp_cache_lock) do
+        haskey(tp_data_cache, tp_i) ? tp_data_cache[tp_i] : nothing
+    end
+    entry === nothing && return false
+    anat_vol = entry.anat_i16 !== nothing ? entry.anat_i16 : entry.anatomy
+    anat_vol === nothing && return false
+
+    study = studies_list[tp_i + 1]
+    tfm_fname = study[8]
+    group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
+
+    lock(_mask_save_lock) do
+        try
+            lock(_hdf5_io_lock) do
+                HDF5.h5open(h5_path, "r+") do h5_file
+                    is_pf = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
+                    anat_to_save = !is_pf ? reverse(anat_vol, dims=2) : copy(anat_vol)
+                    if !haskey(h5_file, group)
+                        HDF5.create_group(h5_file, group)
+                    end
+                    ds_path_expert = "$group/max_anatomy.nii.gz_expert"
+                    if haskey(h5_file, ds_path_expert)
+                        HDF5.delete_object(h5_file, ds_path_expert)
+                    end
+                    h5_file[ds_path_expert] = UInt16.(max.(0, anat_to_save))
+                    if tp_i == 0
+                        if !haskey(h5_file, "ATLAS")
+                            HDF5.create_group(h5_file, "ATLAS")
+                        end
+                        if haskey(h5_file, "ATLAS/max_anatomy_expert")
+                            HDF5.delete_object(h5_file, "ATLAS/max_anatomy_expert")
+                        end
+                        h5_file["ATLAS/max_anatomy_expert"] = UInt16.(max.(0, anat_to_save))
+                    end
+                    # Also persist updated LN centroids in CENTROIDS group
+                    try
+                        if !haskey(h5_file, "CENTROIDS")
+                            HDF5.create_group(h5_file, "CENTROIDS")
+                        end
+                        c_grp = h5_file["CENTROIDS"]
+                        lock(_centroids_lock) do
+                            for (k, coords) in ln_centroids_cache
+                                if k isa Tuple{Int, Int} && k[1] == tp_i
+                                    aid = k[2]
+                                    ckey = "tp$(tp_i)_ln$(aid)"
+                                    if haskey(c_grp, ckey)
+                                        HDF5.delete_object(c_grp, ckey)
+                                    end
+                                    c_grp[ckey] = Int32.(coords)
+                                end
+                            end
+                        end
+                    catch; end
+                    println("  [AUTOSAVE-ANATOMY] Saved edited anatomy for TP $tp_i to $ds_path_expert"); flush(stdout)
+                end
+            end
+            delete!(dirty_anatomy_tps, tp_i)
+            return true
+        catch e
+            @error "Failed to save edited anatomy for TP $tp_i to $h5_path" exception=(e, catch_backtrace())
+            return false
+        end
+    end
+end
+
+function flush_all_dirty_anatomy!()
+    tps = lock(_mask_save_lock) do
+        collect(dirty_anatomy_tps)
+    end
+    for tp in tps
+        save_tp_anatomy_to_h5(tp)
+    end
 end
 
 function mark_bone_subseg_dirty!(tp_idx::Int, lid::Int)
@@ -2259,6 +2488,7 @@ function flush_all_dirty_masks!()
     for tp in tps
         save_tp_mask_to_h5(tp)
     end
+    flush_all_dirty_anatomy!()
     flush_all_dirty_bone_subsegs!()
 end
 
@@ -2271,7 +2501,7 @@ function _ensure_mask_autosave_task!()
     Threads.@spawn begin
         while true
             sleep(2.0)
-            if (!isempty(dirty_mask_tps) || !isempty(dirty_bone_subsegs)) && !isempty(h5_save_path_ref[])
+            if (!isempty(dirty_mask_tps) || !isempty(dirty_anatomy_tps) || !isempty(dirty_bone_subsegs)) && !isempty(h5_save_path_ref[])
                 flush_all_dirty_masks!()
             end
             # Also autosave measurements if dirty
@@ -2837,6 +3067,10 @@ function invalidate_suv_for_lesion(lesion_id::Int, tp_idx::Int)
     catch; end
     delete!(lesion_centroids_cache, (tp_idx, lesion_id))
     delete!(lesion_centroids_cache, lesion_id)
+    if lymph_node_validation_mode[]
+        delete!(ln_centroids_cache, (tp_idx, lesion_id))
+        delete!(ln_centroids_cache, lesion_id)
+    end
     @debug "  [SUV] Invalidated cache for lesion $lesion_id @ TP $tp_idx"
 end
 
@@ -2852,6 +3086,8 @@ Called when a lesion is painted or modified.
 function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::Int, mask_vol::Union{AbstractArray, Nothing}=nothing)
     # 1. Invalidate caches (synchronous)
     invalidate_suv_for_lesion(lesion_id, tp_idx)
+    is_ln_mode = lymph_node_validation_mode[]
+    target_cache = is_ln_mode ? ln_centroids_cache : lesion_centroids_cache
     
     # Debounce the heavy background task
     now_t = time()
@@ -2875,9 +3111,9 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
                     cx = round(Int, mean(i[1] for i in indices))
                     cy = round(Int, mean(i[2] for i in indices))
                     cz = round(Int, mean(i[3] for i in indices))
-                    lesion_centroids_cache[(tp_idx, lesion_id)] = [cx, cy, cz]
+                    target_cache[(tp_idx, lesion_id)] = [cx, cy, cz]
                     if tp_idx == current_tp_index[]
-                        lesion_centroids_cache[lesion_id] = [cx, cy, cz]
+                        target_cache[lesion_id] = [cx, cy, cz]
                     end
                     centroid_found = true
                     @debug "  [SUV] Recomputed centroid for lesion $lesion_id @ TP $tp_idx: ($cx,$cy,$cz)"
@@ -2887,31 +3123,33 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
             end
         end
         
-        # Try mask_i16 from tp_data_cache
+        # Try mask_i16 / anat_i16 from tp_data_cache
         if !centroid_found
             entry = lock(_tp_cache_lock) do
                 haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
             end
             if entry !== nothing
                 try
-                    m = entry.mask_i16
-                    # Optimize: avoid anonymous function overhead for Int16 arrays
-                    indices = findall(==(Int16(lesion_id)), m)
-                    if !isempty(indices)
-                        cx = round(Int, mean(i[1] for i in indices))
-                        cy = round(Int, mean(i[2] for i in indices))
-                        cz = round(Int, mean(i[3] for i in indices))
-                        lesion_centroids_cache[(tp_idx, lesion_id)] = [cx, cy, cz]
-                        if tp_idx == current_tp_index[]
-                            lesion_centroids_cache[lesion_id] = [cx, cy, cz]
+                    m = is_ln_mode ? (entry.anat_i16 !== nothing ? entry.anat_i16 : entry.anatomy) : entry.mask_i16
+                    if m !== nothing
+                        indices = findall(==(Int16(lesion_id)), m)
+                        if !isempty(indices)
+                            cx = round(Int, mean(i[1] for i in indices))
+                            cy = round(Int, mean(i[2] for i in indices))
+                            cz = round(Int, mean(i[3] for i in indices))
+                            target_cache[(tp_idx, lesion_id)] = [cx, cy, cz]
+                            if tp_idx == current_tp_index[]
+                                target_cache[lesion_id] = [cx, cy, cz]
+                            end
+                            centroid_found = true
                         end
-                        centroid_found = true
                     end
                 catch; end
             end
         end
         
-        # 3. Update organ mapping from atlas
+        # 3. Update organ mapping from atlas (only in normal lesion mode)
+        if !is_ln_mode
         try
             atlas = global_ts_atlas[]
             ts_nm = global_ts_names[]
@@ -2982,6 +3220,7 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
         catch e
             @warn "Organ mapping update failed for lesion $lesion_id: $e"
         end
+        end
         
         # 4. Recompute SUV/volume
         try
@@ -3036,6 +3275,7 @@ export pet_volumes_cache, global_ts_atlas, global_ts_names, patient_id, h5_path_
 export organ_mapping_updated
 
 const _ai_mask_backups = Dict{Tuple{Int, Int}, Any}()  # (tp_idx, lesion_id) -> original mask voxels
+const _ai_anatomy_backups = Dict{Tuple{Int, Int}, Any}()  # (tp_idx, anat_id) -> original anatomy voxels
 
 function ensure_ai_mask_backup!(lesion_id::Int, tp_idx::Int, stateObject=nothing)
     lesion_id <= 0 && return nothing
@@ -3051,15 +3291,33 @@ function ensure_ai_mask_backup!(lesion_id::Int, tp_idx::Int, stateObject=nothing
     return nothing
 end
 
+function ensure_ai_anatomy_backup!(anat_id::Int, tp_idx::Int, stateObject=nothing)
+    anat_id <= 0 && return nothing
+    if !haskey(_ai_anatomy_backups, (tp_idx, anat_id))
+        entry = lock(_tp_cache_lock) do
+            haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
+        end
+        if entry !== nothing
+            anat_vol = entry.anat_i16 !== nothing ? entry.anat_i16 : entry.anatomy
+            if anat_vol !== nothing
+                vox = findall(x -> Int(x) == anat_id, anat_vol)
+                _ai_anatomy_backups[(tp_idx, anat_id)] = vox
+            end
+        end
+    end
+    return nothing
+end
+
 function mark_expert_edit!(lesion_id::Int)
     lesion_id <= 0 && return nothing
     try
         LMW = _get_lmw()
         if LMW !== nothing
-            db = LMW.lesion_db[]
+            db = LMW.get_active_lesion_db()
             k = string(lesion_id)
-            if haskey(db, k) && get(db[k], "SegmentationOrigin", "") != "EXPERT_CORRECTION"
+            if haskey(db, k)
                 db[k]["SegmentationOrigin"] = "EXPERT_CORRECTION"
+                db[k]["has_expert_edits"] = true
             end
         end
     catch; end
@@ -3074,6 +3332,61 @@ function reactToRevertToAI(data::MakieEvents.RevertToAIEvent, stateObjects::Vect
         haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
     end
     entry === nothing && return nothing
+
+    if lymph_node_validation_mode[]
+        anat_i16 = entry.anat_i16
+        anat_i16 === nothing && return nothing
+        orig_vox = get(_ai_anatomy_backups, (tp_idx, lid), nothing)
+        if orig_vox === nothing
+            h5_path = !isempty(h5_save_path_ref[]) ? h5_save_path_ref[] : h5_path_ref[]
+            studies_list = studies_ref[]
+            if !isempty(h5_path) && isfile(h5_path) && tp_idx >= 0 && tp_idx < length(studies_list)
+                study = studies_list[tp_idx + 1]
+                tfm_fname = study[8]
+                group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
+                try
+                    lock(_hdf5_io_lock) do
+                        HDF5.h5open(h5_path, "r") do h5_file
+                            for cand in ["$group/max_anatomy.nii.gz", "ATLAS/max_anatomy", "BASELINE/max_anatomy.nii.gz"]
+                                if haskey(h5_file, cand)
+                                    raw_a = read(h5_file[cand])
+                                    is_pf = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
+                                    base_a = !is_pf ? reverse(raw_a, dims=2) : raw_a
+                                    orig_vox = findall(x -> round(Int, x) == lid, base_a)
+                                    _ai_anatomy_backups[(tp_idx, lid)] = orig_vox
+                                    break
+                                end
+                            end
+                        end
+                    end
+                catch e
+                    @warn "Failed to read original AI anatomy from HDF5 for RevertToAI: $e"
+                end
+            end
+        end
+        if orig_vox !== nothing
+            anat_i16[anat_i16 .== Int16(lid)] .= Int16(0)
+            for idx in orig_vox
+                if checkbounds(Bool, anat_i16, idx)
+                    anat_i16[idx] = Int16(lid)
+                end
+            end
+            if entry.anatomy !== nothing && entry.anatomy !== anat_i16
+                entry.anatomy .= UInt16.(max.(0, anat_i16))
+            end
+            mark_tp_anatomy_dirty!(tp_idx)
+            invalidate_and_recompute_lesion_metrics_async!(lid, tp_idx, anat_i16)
+            for (pi, st) in enumerate(stateObjects)
+                try
+                    _force_texture_upload!(stateObjects, pi)
+                catch
+                    st.isSliceChanged = true
+                end
+            end
+        end
+        return nothing
+    end
+
     mask_i16 = entry.mask_i16
     mask_i16 === nothing && return nothing
 
@@ -3132,13 +3445,76 @@ function reactToRevertToAI(data::MakieEvents.RevertToAIEvent, stateObjects::Vect
     return nothing
 end
 
-export ensure_ai_mask_backup!, mark_expert_edit!, reactToRevertToAI
+function reactToSetLNValidationMode(data::MakieEvents.SetLNValidationModeEvent, stateObjects::Vector{StateDataFields})
+    lymph_node_validation_mode[] = data.active
+    is_single_lesion_mode[] = true
+    for (idx, stateObject) in enumerate(stateObjects)
+        is_right = compare_mode[] && idx in (5, 6, 7, 8, 9)
+        panel_tp = is_right ? compare_right_tp[] : current_tp_index[]
+        for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
+            if data.active
+                if textSpec.name == "Anatomy"
+                    textSpec.isVisible = true
+                    textSpec.isEditable = true
+                    if textSpec.maskContribution <= 0.05f0
+                        textSpec.maskContribution = 0.5f0
+                    end
+                elseif textSpec.name == "Mask" || textSpec.name == "segmentation" || textSpec.name == "Bone_Overlay"
+                    textSpec.isVisible = false
+                end
+            else
+                if textSpec.name == "Anatomy"
+                    textSpec.isVisible = false
+                    T_mm = eltype(textSpec.minAndMaxValue)
+                    textSpec.minAndMaxValue = T_mm.([0, 400])
+                elseif textSpec.name == "Mask" || textSpec.name == "segmentation"
+                    textSpec.isVisible = true
+                end
+            end
+            if stateObject.mainForDisplayObjects.vulkanPipelineState !== nothing
+                stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+            end
+        end
+        if stateObject.valueForMasToSet.is_painting_active
+            for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
+                if data.active && textSpec.name == "Anatomy"
+                    stateObject.textureToModifyVec = [textSpec]
+                    break
+                elseif !data.active && textSpec.name == "Mask"
+                    stateObject.textureToModifyVec = [textSpec]
+                    break
+                end
+            end
+        end
+        stateObject.isSliceChanged = true
+    end
+    if current_active_lesion_id[] > 0
+        reactToSyncLesion(SyncLesionEvent(current_active_lesion_id[], true), stateObjects)
+    end
+    return nothing
+end
+
+function auto_advance_after_decision!()
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing && isdefined(LMW, :_lmw_observables)
+            obs = LMW._lmw_observables
+            if haskey(obs, :btn_next_unreviewed)
+                btn = obs[:btn_next_unreviewed]
+                btn.clicks[] = btn.clicks[] + 1
+            end
+        end
+    catch; end
+    return nothing
+end
+
+export ensure_ai_mask_backup!, ensure_ai_anatomy_backup!, mark_expert_edit!, reactToRevertToAI, reactToSetLNValidationMode, auto_advance_after_decision!
 
 
 function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector{StateDataFields})
     t_total = time_ns()
     # Flush any modified masks before changing timepoint or evicting
-    if !isempty(dirty_mask_tps); Threads.@spawn flush_all_dirty_masks!(); end
+    if !isempty(dirty_mask_tps) || !isempty(dirty_anatomy_tps); Threads.@spawn flush_all_dirty_masks!(); end
     if isempty(tp_labels)
         @debug "No TP labels loaded. TP navigation disabled."
         return

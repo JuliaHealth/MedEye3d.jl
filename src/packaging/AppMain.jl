@@ -745,7 +745,9 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     skelly_atlas = nothing
     organ_mapping = Dict{Int, String}()
 
-    if haskey(h5_init, "ATLAS/max_anatomy")
+    if haskey(h5_init, "ATLAS/max_anatomy_expert")
+        ts_atlas_aligned = read(h5_init["ATLAS/max_anatomy_expert"])
+    elseif haskey(h5_init, "ATLAS/max_anatomy")
         ts_atlas_aligned = read(h5_init["ATLAS/max_anatomy"])
     end
 
@@ -897,6 +899,25 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 if tp_idx == 0
                     MEH.lesion_centroids_cache[lid] = c
                 end
+                continue
+            end
+            parts_ln = split(key, "_ln")
+            if length(parts_ln) == 2
+                tp_str = replace(parts_ln[1], "tp" => "")
+                tp_idx = tryparse(Int, tp_str)
+                aid = tryparse(Int, parts_ln[2])
+                if tp_idx !== nothing && aid !== nothing
+                    coords = read(h5_init["CENTROIDS/$key"])
+                    c = [Int(coords[1]), Int(coords[2]), Int(coords[3])]
+                    MEH.ln_centroids_cache[(tp_idx, aid)] = c
+                    node_name = get(Dict(s_idx - 1 => study[7] for (s_idx, study) in enumerate(studies)), tp_idx, "")
+                    if !isempty(node_name)
+                        MEH.ln_centroids_cache[(node_name, aid)] = c
+                    end
+                    if tp_idx == 0
+                        MEH.ln_centroids_cache[aid] = c
+                    end
+                end
             end
         end
     end
@@ -984,7 +1005,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     textureSpec_anatomy = TextureSpec{Int16}(
         name="Anatomy", isMainImage=false, isMultiDiscreteMask=true, isIntegerTexture=true,
         colorSet=anatomy_colors, minAndMaxValue=Int16.([0, 400]),
-        isVisible=false, maskContribution=init_label_opacity
+        isEditable=true, isVisible=false, maskContribution=init_label_opacity
     )
 
     textureSpecArray = Vector{Vector{TextureSpec}}([
@@ -1177,21 +1198,29 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 
                 anatomy_vol = nothing
                 try
-                    for k in keys(h5_file[group])
-                        if k == "max_anatomy.nii.gz" || startswith(k, "max_anatomy")
-                            raw_anat = read(h5_file["$group/$k"])
-                            if needs_reverse
-                                raw_anat = reverse(Float32.(raw_anat), dims=2)
+                    if haskey(h5_file, "$group/max_anatomy.nii.gz_expert")
+                        raw_anat = read(h5_file["$group/max_anatomy.nii.gz_expert"])
+                        if needs_reverse
+                            raw_anat = reverse(Float32.(raw_anat), dims=2)
+                        end
+                        anatomy_vol = eltype(raw_anat) <: Integer ? UInt16.(raw_anat) : UInt16.(round.(max.(0.0f0, Float32.(raw_anat))))
+                    else
+                        for k in keys(h5_file[group])
+                            if k == "max_anatomy.nii.gz" || startswith(k, "max_anatomy")
+                                raw_anat = read(h5_file["$group/$k"])
+                                if needs_reverse
+                                    raw_anat = reverse(Float32.(raw_anat), dims=2)
+                                end
+                                anatomy_vol = eltype(raw_anat) <: Integer ? UInt16.(raw_anat) : UInt16.(round.(max.(0.0f0, Float32.(raw_anat))))
+                                break
                             end
-                            anatomy_vol = eltype(raw_anat) <: Integer ? UInt16.(raw_anat) : UInt16.(round.(max.(0.0f0, Float32.(raw_anat))))
-                            break
                         end
                     end
                 catch; end
                 # Fallback: if no per-TP anatomy, reuse ATLAS or BASELINE anatomy
                 # (MRI TPs are registered to baseline space, so the atlas is valid)
                 if anatomy_vol === nothing
-                    for fallback_path in ["ATLAS/max_anatomy", "BASELINE/max_anatomy.nii.gz"]
+                    for fallback_path in ["ATLAS/max_anatomy_expert", "BASELINE/max_anatomy.nii.gz_expert", "ATLAS/max_anatomy", "BASELINE/max_anatomy.nii.gz"]
                         if haskey(h5_file, fallback_path)
                             try
                                 raw_anat = read(h5_file[fallback_path])
@@ -1209,6 +1238,9 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 mask_i16 = Int16.(mask_compact)
                 anat_i16 = anatomy_vol !== nothing ? Int16.(anatomy_vol) : nothing
                 MEH.precompute_mask_centroids!(mask_compact, tp_i, node_name)
+                if anat_i16 !== nothing
+                    try MEH.precompute_anatomy_ln_centroids!(anat_i16, tp_i, node_name) catch; end
+                end
                 try; MedEye3d.LesionMetadataWindow.precompute_all_volumes!(mask_compact, tp_i); catch; end
                 return MEH.TpCacheEntry(ct_vol_base, pet_vol_base, mask_compact, bone_mask, anatomy_vol, mask_i16, anat_i16)
             end

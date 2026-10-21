@@ -1805,16 +1805,55 @@ function _migrate_db(raw_db::Dict)::Dict{String,Any}
     return migrated
 end
 
+const ln_validation_db = Ref{Dict{String, Any}}(Dict{String, Any}())
+const _lesion_only_db_backup = Ref{Dict{String, Any}}(Dict{String, Any}())
+
+"""
+    load_ln_validations(h5_path::String = _get_active_h5_path())::Dict{String, Dict{String, Any}}
+Load per-lymph-node-area validation metadata from `_meta_/lymph_node_validations.json` in the active HDF5 file.
+"""
+function load_ln_validations(h5_path::String = _get_active_h5_path())::Dict{String, Dict{String, Any}}
+    out = Dict{String, Dict{String, Any}}()
+    raw = _read_meta_json_from_h5("lymph_node_validations.json", h5_path)
+    if raw isa AbstractDict
+        for (k, v) in raw
+            if v isa AbstractDict
+                inner = Dict{String, Any}()
+                for (ik, iv) in v
+                    inner[string(ik)] = iv
+                end
+                out[string(k)] = inner
+            end
+        end
+    end
+    return out
+end
+
+"""
+    save_ln_validations(db::Dict, h5_path::String = _get_active_h5_path())::Bool
+Persist per-lymph-node-area validation metadata to `_meta_/lymph_node_validations.json` in the active HDF5 file.
+"""
+function save_ln_validations(db::Dict, h5_path::String = _get_active_h5_path())::Bool
+    ln_validation_db[] = deepcopy(Dict{String, Any}(string(k) => v for (k, v) in db))
+    return _write_meta_json_to_h5!("lymph_node_validations.json", db, h5_path)
+end
+export ln_validation_db, load_ln_validations, save_ln_validations
+
 """
     persist_to_active_dataset_h5!(db::Dict, h5_path::String)
 
 Persist the newest anatomical names, organ mappings, segment names, and full lesion
 annotations into the active dataset HDF5 file in "r+" mode under the HDF5 IO lock.
-Updates `_meta_/organ_mapping`, `_meta_/segment_names.json`, and `_meta_/lesion_annotations.json`.
+Updates `_meta_/organ_mapping`, `_meta_/segment_names.json`, and `_meta_/lesion_annotations.json`
+(or `_meta_/lymph_node_validations.json` when in Lymph Node Validation Mode).
 """
 function persist_to_active_dataset_h5!(db::Dict, h5_path::String)
     (isempty(h5_path) || !isfile(h5_path)) && return
     _MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+    if isdefined(_MEH, :lymph_node_validation_mode) && _MEH.lymph_node_validation_mode[]
+        save_ln_validations(db, h5_path)
+        return
+    end
     lock(_MEH._hdf5_io_lock) do
         try
             HDF5.h5open(h5_path, "r+") do file
@@ -2121,6 +2160,14 @@ end
 
 function save_annotations(db::Dict,
                           path::String = DEFAULT_SAVE_PATH)
+    _MEH_loc = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+    if isdefined(_MEH_loc, :lymph_node_validation_mode) && _MEH_loc.lymph_node_validation_mode[]
+        active_h5_ln = _get_active_h5_path()
+        if !isempty(active_h5_ln) && isfile(active_h5_ln)
+            save_ln_validations(db, active_h5_ln)
+        end
+        return
+    end
     if endswith(lowercase(path), ".h5") || endswith(lowercase(path), ".hdf5")
         save_annotations_hdf5(db, path)
         return
@@ -2283,12 +2330,22 @@ function _get_tp_pet_and_mask(tp_idx::Int)
         if pet === nothing && isdefined(entry, :pet)
             pet = entry.pet
         end
-        mask = if isdefined(entry, :mask_i16) && entry.mask_i16 !== nothing
-            entry.mask_i16
-        elseif isdefined(entry, :mask) && entry.mask !== nothing
-            entry.mask
+        if isdefined(_MEH, :lymph_node_validation_mode) && _MEH.lymph_node_validation_mode[]
+            mask = if isdefined(entry, :anat_i16) && entry.anat_i16 !== nothing
+                entry.anat_i16
+            elseif isdefined(entry, :anatomy) && entry.anatomy !== nothing
+                entry.anatomy
+            else
+                _MEH.global_ts_atlas[]
+            end
         else
-            nothing
+            mask = if isdefined(entry, :mask_i16) && entry.mask_i16 !== nothing
+                entry.mask_i16
+            elseif isdefined(entry, :mask) && entry.mask !== nothing
+                entry.mask
+            else
+                nothing
+            end
         end
     end
     
@@ -2853,7 +2910,12 @@ function compute_lesion_volume(lid::Int, tp_idx::Int)::Dict{String, Float64}
     try
         entry = _MEH.get_or_load_tp_data(tp_idx)
         entry === nothing && return result
-        mask = entry.mask
+        mask = if isdefined(_MEH, :lymph_node_validation_mode) && _MEH.lymph_node_validation_mode[]
+            entry.anat_i16 !== nothing ? entry.anat_i16 : (entry.anatomy !== nothing ? entry.anatomy : _MEH.global_ts_atlas[])
+        else
+            entry.mask
+        end
+        mask === nothing && return result
         
         # Count voxels with this label
         voxel_count = count(x -> x == lid, mask)
@@ -3613,15 +3675,22 @@ function create_metadata_window(
                 if msg isa SaveDBMessage
                     try
                         db_to_save = copy(msg.db)
-                        save_annotations(db_to_save, msg.path_json)
-                        save_annotations_hdf5(db_to_save, msg.path_hdf5)
-                        try
+                        if isdefined(_MEH, :lymph_node_validation_mode) && _MEH.lymph_node_validation_mode[]
                             h5_active = _get_active_h5_path()
                             if !isempty(h5_active) && isfile(h5_active)
-                                persist_to_active_dataset_h5!(db_to_save, h5_active)
+                                save_ln_validations(db_to_save, h5_active)
                             end
-                        catch e
-                            @warn "Active HDF5 dataset persistence failed" e
+                        else
+                            save_annotations(db_to_save, msg.path_json)
+                            save_annotations_hdf5(db_to_save, msg.path_hdf5)
+                            try
+                                h5_active = _get_active_h5_path()
+                                if !isempty(h5_active) && isfile(h5_active)
+                                    persist_to_active_dataset_h5!(db_to_save, h5_active)
+                                end
+                            catch e
+                                @warn "Active HDF5 dataset persistence failed" e
+                            end
                         end
                         # Also save measurements alongside annotations (both to HDF5 and companion JSON)
                         try
@@ -4104,7 +4173,8 @@ function create_metadata_window(
     rowsize!(g, queue_r, Fixed(28)); register_fixed_row!(queue_r, 28)
     
     unrev_r = nr!()
-    btn_next_unreviewed = Button(g[unrev_r, 1:4], label = "Next Unreviewed (Space)", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_next_unreviewed = Button(g[unrev_r, 1:2], label = "Next Unreviewed (Space)", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_ln_validation = Button(g[unrev_r, 3:4], label = "LN Validation Mode: OFF", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     rowsize!(g, unrev_r, Fixed(28)); register_fixed_row!(unrev_r, 28)
     
     nav_r = nr!()
@@ -4462,22 +4532,59 @@ function create_metadata_window(
     end
 
     function refresh_lesion_dropdown_for_tp!(tp::Int)
+        is_ln_mode = isdefined(_MEH, :lymph_node_validation_mode) && _MEH.lymph_node_validation_mode[]
         seg_names = get(_MEH.tp_segment_names, tp, Dict{Int, String}())
         
-        # 1. Determine lesion integer IDs present at this time point
+        # 1. Determine lesion or lymph-node-area integer IDs present at this time point
         l_ints = Int[]
-        mask_ref = lock(_MEH._tp_cache_lock) do
-            haskey(_MEH.tp_data_cache, tp) ? _MEH.tp_data_cache[tp].mask : nothing
-        end
-        if mask_ref !== nothing
-            l_ints = get!(_cached_lesion_ids, tp) do
-                filter(x -> x > 0, sort(unique(mask_ref)))
+        if is_ln_mode
+            ln_set = _MEH.get_lymph_node_label_ids(tp)
+            anat_ref = lock(_MEH._tp_cache_lock) do
+                if haskey(_MEH.tp_data_cache, tp)
+                    e = _MEH.tp_data_cache[tp]
+                    e.anat_i16 !== nothing ? e.anat_i16 : e.anatomy
+                else
+                    nothing
+                end
             end
-        elseif haskey(_MEH.lesion_centroids_cache, tp)
-            l_ints = sort([k[2] for k in keys(_MEH.lesion_centroids_cache) if k isa Tuple && k[1] == tp])
-        end
-        if isempty(l_ints) && !isempty(seg_names)
-            l_ints = sort(collect(keys(seg_names)))
+            if anat_ref === nothing && _MEH.global_ts_atlas[] !== nothing
+                anat_ref = _MEH.global_ts_atlas[]
+            end
+            if anat_ref !== nothing
+                if isempty(_MEH.ln_centroids_cache)
+                    try _MEH.precompute_anatomy_ln_centroids!(anat_ref, tp, _MEH.get_node_name_for_tp(tp)) catch; end
+                end
+                l_ints = get!(_cached_lesion_ids, tp) do
+                    present = filter(x -> x > 0 && (Int(x) in ln_set), sort(unique(Int.(anat_ref))))
+                    isempty(present) ? sort(collect(ln_set)) : present
+                end
+            else
+                l_ints = sort(collect(ln_set))
+            end
+            # Ensure any previously validated/edited LN IDs in lesion_db are also included
+            for k in keys(lesion_db[])
+                if !startswith(string(k), "_")
+                    aid = parse_lesion_id(string(k))
+                    if aid !== nothing && (aid in ln_set) && !(aid in l_ints)
+                        push!(l_ints, aid)
+                    end
+                end
+            end
+            sort!(l_ints)
+        else
+            mask_ref = lock(_MEH._tp_cache_lock) do
+                haskey(_MEH.tp_data_cache, tp) ? _MEH.tp_data_cache[tp].mask : nothing
+            end
+            if mask_ref !== nothing
+                l_ints = get!(_cached_lesion_ids, tp) do
+                    filter(x -> x > 0, sort(unique(mask_ref)))
+                end
+            elseif haskey(_MEH.lesion_centroids_cache, tp)
+                l_ints = sort([k[2] for k in keys(_MEH.lesion_centroids_cache) if k isa Tuple && k[1] == tp])
+            end
+            if isempty(l_ints) && !isempty(seg_names)
+                l_ints = sort(collect(keys(seg_names)))
+            end
         end
         
         # --- Apply filter & sort ---
@@ -4530,6 +4637,18 @@ function create_metadata_window(
             ["(none)"]
         else
             map(filtered_l_ints) do sid
+                if is_ln_mode
+                    ts_map = get(_MEH.anatomy_labels_cache, tp, _MEH.global_ts_names[])
+                    if isempty(ts_map)
+                        ts_map = _MEH.global_ts_names[]
+                    end
+                    raw_ln = get(ts_map, sid, "LN_$sid")
+                    d_name = try LA.format_clinical_station_name(raw_ln) catch; replace(raw_ln, "_" => " ") end
+                    if isempty(d_name)
+                        d_name = "LN Area $sid"
+                    end
+                    return "$sid: $d_name"
+                end
                 d_name = ""
                 
                 # 1. Try seg_names, but skip generic placeholders
@@ -8257,7 +8376,16 @@ function create_metadata_window(
         
         # Resolve the raw organ name for this lesion (used for BaseAnatomy + Location auto-fill)
         raw_organ = ""
-        if lid > 0
+        if lid > 0 && isdefined(_MEH, :lymph_node_validation_mode) && _MEH.lymph_node_validation_mode[]
+            ts_map = get(_MEH.anatomy_labels_cache, _MEH.current_tp_index[], _MEH.global_ts_names[])
+            if isempty(ts_map)
+                ts_map = _MEH.global_ts_names[]
+            end
+            raw_organ = get(ts_map, lid, "")
+            if isempty(orig_rtog_name) && !isempty(raw_organ)
+                orig_rtog_name = raw_organ
+            end
+        elseif lid > 0
             # Check per-TP organ mapping first (avoids last-writer-wins from global flat map)
             tp_organs = get(_MEH.tp_organ_mapping, _MEH.current_tp_index[], Dict{Int,String}())
             raw_organ = get(tp_organs, lid, "")
@@ -9482,23 +9610,112 @@ function create_metadata_window(
     # ── Scientific Workflow Actions ────────────────────────────────────────────
     on(btn_accept.clicks) do _
         @info "Action: Accept"
-        menu_obs_state.selection[] = "ACCEPTED"
+        _set_menu_selection_string!(menu_obs_state, "ACCEPTED")
+        cur_lid = parse_lesion_id(active_lesion_id[])
+        if cur_lid !== nothing && cur_lid > 0
+            _flush_lesion!(cur_lid)
+        end
         trigger_autosave()
-        _MEH.auto_advance_after_decision!()
+        try _MEH.auto_advance_after_decision!() catch; end
     end
 
     on(btn_reject.clicks) do _
         @info "Action: Reject"
-        menu_obs_state.selection[] = "REJECTED"
+        _set_menu_selection_string!(menu_obs_state, "REJECTED")
+        cur_lid = parse_lesion_id(active_lesion_id[])
+        if cur_lid !== nothing && cur_lid > 0
+            _flush_lesion!(cur_lid)
+        end
         trigger_autosave()
-        _MEH.auto_advance_after_decision!()
+        try _MEH.auto_advance_after_decision!() catch; end
     end
 
     on(btn_correct.clicks) do _
         @info "Action: Correct"
-        menu_obs_state.selection[] = "CORRECTED"
+        _set_menu_selection_string!(menu_obs_state, "CORRECTED")
+        cur_lid = parse_lesion_id(active_lesion_id[])
+        if cur_lid !== nothing && cur_lid > 0
+            _flush_lesion!(cur_lid)
+        end
         trigger_autosave()
-        _MEH.auto_advance_after_decision!()
+        try _MEH.auto_advance_after_decision!() catch; end
+    end
+
+    function set_ln_validation_mode!(active::Bool)
+        was_active = isdefined(_MEH, :lymph_node_validation_mode) && _MEH.lymph_node_validation_mode[]
+        cur_lid = parse_lesion_id(active_lesion_id[])
+        if cur_lid !== nothing && cur_lid > 0
+            try _flush_lesion!(cur_lid) catch; end
+        end
+        h5_act = _get_active_h5_path()
+        if was_active
+            ln_validation_db[] = deepcopy(lesion_db[])
+            if !isempty(h5_act) && isfile(h5_act)
+                save_ln_validations(ln_validation_db[], h5_act)
+            end
+        else
+            _lesion_only_db_backup[] = deepcopy(lesion_db[])
+            if !isempty(h5_act) && isfile(h5_act)
+                persist_to_active_dataset_h5!(lesion_db[], h5_act)
+            end
+        end
+
+        _MEH.lymph_node_validation_mode[] = active
+        if active
+            loaded_ln = (!isempty(h5_act) && isfile(h5_act)) ? load_ln_validations(h5_act) : Dict{String, Dict{String, Any}}()
+            for (k, v) in loaded_ln
+                ln_validation_db[][k] = v
+            end
+            lesion_db[] = deepcopy(ln_validation_db[])
+            btn_ln_validation.label[] = "LN Validation Mode: ON"
+            btn_ln_validation.buttoncolor[] = RGBf(0.5, 0.0, 0.8)
+            vis_anatomy_active[] = true
+            btn_vis_anatomy.label[] = "Anatomy: ON"
+            btn_vis_anatomy.buttoncolor[] = RGBf(0.5, 0.0, 0.8)
+            vis_lesion_active[] = false
+            btn_vis_lesion.label[] = "Lesion: OFF"
+            btn_vis_lesion.buttoncolor[] = BG_PNL
+        else
+            if !isempty(_lesion_only_db_backup[])
+                lesion_db[] = deepcopy(_lesion_only_db_backup[])
+            else
+                lesion_db[] = load_annotations(save_path)
+            end
+            btn_ln_validation.label[] = "LN Validation Mode: OFF"
+            btn_ln_validation.buttoncolor[] = BG_PNL
+            vis_anatomy_active[] = false
+            btn_vis_anatomy.label[] = "Anatomy: OFF"
+            btn_vis_anatomy.buttoncolor[] = BG_PNL
+            vis_lesion_active[] = true
+            btn_vis_lesion.label[] = "Lesion: ON"
+            btn_vis_lesion.buttoncolor[] = GRN
+        end
+
+        empty!(_cached_lesion_ids)
+        empty!(_MASK_IDS_CACHE)
+        empty!(_volume_cache)
+        empty!(_lesion_suv_metrics_cache)
+        empty!(_lesion_suv_cache)
+        _current_displayed_lid[] = -1
+
+        try
+            put!(channel, SetLNValidationModeEvent(active))
+        catch e
+            @warn "Failed to send SetLNValidationModeEvent: $e"
+        end
+
+        tp_now = try _MEH.current_tp_index[] catch; 0 end
+        refresh_lesion_dropdown_for_tp!(tp_now)
+        cur_sel = active_lesion_id[]
+        if !isempty(cur_sel) && cur_sel != "(none)"
+            notify(active_lesion_id)
+        end
+        return active
+    end
+
+    on(btn_ln_validation.clicks) do _
+        new_active = !(isdefined(_MEH, :lymph_node_validation_mode) && _MEH.lymph_node_validation_mode[])
+        set_ln_validation_mode!(new_active)
     end
 
     on(btn_validate.clicks) do _
@@ -10387,6 +10604,15 @@ function create_metadata_window(
     _lmw_observables[:menu_obs_state] = menu_obs_state
     _lmw_observables[:btn_prev] = btn_prev
     _lmw_observables[:btn_next] = btn_next
+    _lmw_observables[:btn_next_unreviewed] = btn_next_unreviewed
+    _lmw_observables[:btn_ln_validation] = btn_ln_validation
+    _lmw_observables[:set_ln_validation_mode!] = set_ln_validation_mode!
+    _lmw_observables[:btn_accept] = btn_accept
+    _lmw_observables[:btn_reject] = btn_reject
+    _lmw_observables[:btn_correct] = btn_correct
+    _lmw_observables[:btn_paint] = btn_paint
+    _lmw_observables[:btn_erase] = btn_erase
+    _lmw_observables[:btn_revert_ai] = btn_revert_ai
     _lmw_observables[:menu_tp_single] = menu_tp_single
     _lmw_observables[:obs_tp] = menu_tp_single.selection
     _lmw_observables[:current_tp] = menu_tp_single.selection
@@ -10408,7 +10634,10 @@ function create_metadata_window(
         btn_refresh_anat,
         btn_add_preset, btn_save_preset, btn_cancel_preset,
         no_ct_toggle,
-        btn_prev, btn_next, btn_pt, btn_nt
+        btn_prev, btn_next, btn_next_unreviewed, btn_ln_validation,
+        btn_accept, btn_reject, btn_correct,
+        btn_paint, btn_erase, btn_revert_ai,
+        btn_pt, btn_nt
     ]
     append!(action_buttons, anat_rm_btns)
     for (_, b) in add_opt_buttons
