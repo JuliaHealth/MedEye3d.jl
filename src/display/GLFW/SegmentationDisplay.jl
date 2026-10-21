@@ -1295,7 +1295,7 @@ function coordinateDisplay(
                 # get the aggregation here, only when the type is mouseStruct.
                 if typeof(channelData) == MouseStruct
                     # Fix 2D: Close any open Makie dropdowns when the 3D viewer receives a click
-                    if channelData.isLeftButtonDown
+                    if channelData.isLeftButtonDown && LesionMetadataWindow._active_open_menu[] !== nothing
                         try
                             for m in LesionMetadataWindow._ALL_MENUS
                                 m.is_open[] && (m.is_open[] = false)
@@ -1432,7 +1432,24 @@ function coordinateDisplay(
                         
                         # Only upload if slice has changed or initial upload is needed
                         if state.isSliceChanged && state.currentlyDispDat !== nothing && !isempty(state.currentlyDispDat.listOfDataAndImageNames)
+                            is_paint_event = channelData isa Vector{MouseStruct}
+                            mod_tex_name = if is_paint_event
+                                if !MakieEventHandlers._lesion_active[] && !MakieEventHandlers.lymph_node_validation_mode[]
+                                    "Bone_Overlay"
+                                elseif !isempty(state.textureToModifyVec)
+                                    state.textureToModifyVec[1].name
+                                elseif MakieEventHandlers.lymph_node_validation_mode[]
+                                    "Anatomy"
+                                else
+                                    "Mask"
+                                end
+                            else
+                                ""
+                            end
                             for updateDat in state.currentlyDispDat.listOfDataAndImageNames
+                                if is_paint_event && updateDat.name != mod_tex_name
+                                    continue
+                                end
                                 for vk_tex in obj.vulkanTextures
                                     if hasproperty(vk_tex, :name) && vk_tex.name == updateDat.name
                                         push!(_upload_batch, VulkanStaging.TextureUploadBatchItem(vk_tex, updateDat.dat))

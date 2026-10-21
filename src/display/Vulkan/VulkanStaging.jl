@@ -131,16 +131,32 @@ end
     if stride(data, 1) == 1 && stride(data, 2) == size(data, 1)
         unsafe_copyto!(dest, pointer(data), n)
     else
-        @inbounds for i in 1:n
-            unsafe_store!(dest, data[i], i)
+        w_d, h_d = size(data, 1), size(data, 2)
+        idx = 1
+        @inbounds for col in 1:h_d, row in 1:w_d
+            if idx <= n
+                unsafe_store!(dest, data[row, col], idx)
+                idx += 1
+            end
         end
     end
 end
 
 @inline function copy_data_to_staging_f32!(dest::Ptr{Float32}, data::AbstractArray, w::Int, h::Int)
     n = min(length(data), w * h)
-    @inbounds for i in 1:n
-        unsafe_store!(dest, Float32(data[i]), i)
+    if ndims(data) == 2
+        w_d, h_d = size(data, 1), size(data, 2)
+        idx = 1
+        @inbounds for col in 1:h_d, row in 1:w_d
+            if idx <= n
+                unsafe_store!(dest, Float32(data[row, col]), idx)
+                idx += 1
+            end
+        end
+    else
+        @inbounds for i in 1:n
+            unsafe_store!(dest, Float32(data[i]), i)
+        end
     end
 end
 
@@ -151,21 +167,37 @@ end
     unsafe_copyto!(dest, pointer(data), n)
 end
 
-@inline function copy_data_to_staging_i16!(dest::Ptr{Int16}, data::SubArray{Int16, 2}, w::Int, h::Int)
+@inline function copy_data_to_staging_i16!(dest::Ptr{Int16}, data::SubArray{Int16, 2, Array{Int16, 3}}, w::Int, h::Int)
     n = min(length(data), w * h)
     if stride(data, 1) == 1 && stride(data, 2) == size(data, 1)
         unsafe_copyto!(dest, pointer(data), n)
     else
-        @inbounds for i in 1:n
-            unsafe_store!(dest, data[i], i)
+        w_d, h_d = size(data, 1), size(data, 2)
+        idx = 1
+        @inbounds for col in 1:h_d, row in 1:w_d
+            if idx <= n
+                unsafe_store!(dest, data[row, col], idx)
+                idx += 1
+            end
         end
     end
 end
 
 @inline function copy_data_to_staging_i16!(dest::Ptr{Int16}, data::AbstractArray, w::Int, h::Int)
     n = min(length(data), w * h)
-    @inbounds for i in 1:n
-        unsafe_store!(dest, Int16(data[i]), i)
+    if ndims(data) == 2
+        w_d, h_d = size(data, 1), size(data, 2)
+        idx = 1
+        @inbounds for col in 1:h_d, row in 1:w_d
+            if idx <= n
+                unsafe_store!(dest, Int16(data[row, col]), idx)
+                idx += 1
+            end
+        end
+    else
+        @inbounds for i in 1:n
+            unsafe_store!(dest, Int16(data[i]), i)
+        end
     end
 end
 
@@ -176,21 +208,37 @@ end
     unsafe_copyto!(dest, pointer(data), n)
 end
 
-@inline function copy_data_to_staging_i8!(dest::Ptr{Int8}, data::SubArray{Int8, 2}, w::Int, h::Int)
+@inline function copy_data_to_staging_i8!(dest::Ptr{Int8}, data::SubArray{Int8, 2, Array{Int8, 3}}, w::Int, h::Int)
     n = min(length(data), w * h)
     if stride(data, 1) == 1 && stride(data, 2) == size(data, 1)
         unsafe_copyto!(dest, pointer(data), n)
     else
-        @inbounds for i in 1:n
-            unsafe_store!(dest, data[i], i)
+        w_d, h_d = size(data, 1), size(data, 2)
+        idx = 1
+        @inbounds for col in 1:h_d, row in 1:w_d
+            if idx <= n
+                unsafe_store!(dest, data[row, col], idx)
+                idx += 1
+            end
         end
     end
 end
 
 @inline function copy_data_to_staging_i8!(dest::Ptr{Int8}, data::AbstractArray, w::Int, h::Int)
     n = min(length(data), w * h)
-    @inbounds for i in 1:n
-        unsafe_store!(dest, Int8(data[i]), i)
+    if ndims(data) == 2
+        w_d, h_d = size(data, 1), size(data, 2)
+        idx = 1
+        @inbounds for col in 1:h_d, row in 1:w_d
+            if idx <= n
+                unsafe_store!(dest, Int8(data[row, col]), idx)
+                idx += 1
+            end
+        end
+    else
+        @inbounds for i in 1:n
+            unsafe_store!(dest, Int8(data[i]), i)
+        end
     end
 end
 

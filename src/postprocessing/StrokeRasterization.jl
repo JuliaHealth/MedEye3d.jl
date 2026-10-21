@@ -78,12 +78,32 @@ function rasterize_thick_line!(
         return mask
     end
 
-    backend = (use_gpu && CUDA.functional() && (mask isa CuArray)) ? CUDABackend() : CPU()
-    kernel! = rasterize_thick_segment_kernel!(backend)
-
     radius_sq = Float32(rad * rad)
-    kernel!(mask, p1[1], p1[2], p2[1], p2[2], radius_sq, val, min_x, min_y, max_x, max_y, ndrange=(w, h))
-    KernelAbstractions.synchronize(backend)
+    if use_gpu && CUDA.functional() && (mask isa CuArray)
+        backend = CUDABackend()
+        kernel! = rasterize_thick_segment_kernel!(backend)
+        kernel!(mask, p1[1], p1[2], p2[1], p2[2], radius_sq, val, min_x, min_y, max_x, max_y, ndrange=(w, h))
+        KernelAbstractions.synchronize(backend)
+    else
+        p1x = Float32(p1[1])
+        p1y = Float32(p1[2])
+        dx = Float32(p2[1] - p1[1])
+        dy = Float32(p2[2] - p1[2])
+        l2 = dx * dx + dy * dy
+        inv_l2 = l2 > 0.0f0 ? (1.0f0 / l2) : 0.0f0
+        @inbounds for y in min_y:max_y
+            uy = Float32(y) - p1y
+            for x in min_x:max_x
+                ux = Float32(x) - p1x
+                t = l2 > 0.0f0 ? clamp((ux * dx + uy * dy) * inv_l2, 0.0f0, 1.0f0) : 0.0f0
+                rx = ux - t * dx
+                ry = uy - t * dy
+                if rx * rx + ry * ry <= radius_sq
+                    mask[x, y] = val
+                end
+            end
+        end
+    end
     return mask
 end
 
@@ -106,8 +126,11 @@ function rasterize_polyline!(
         return rasterize_thick_line!(mask, points[1], points[1], radius, val; use_gpu=use_gpu)
     end
 
-    for i in 1:length(points)-1
-        rasterize_thick_line!(mask, points[i], points[i+1], radius, val; use_gpu=use_gpu)
+    rasterize_thick_line!(mask, points[1], points[2], radius, val; use_gpu=use_gpu)
+    for i in 2:length(points)-1
+        if points[i] != points[i+1]
+            rasterize_thick_line!(mask, points[i], points[i+1], radius, val; use_gpu=use_gpu)
+        end
     end
     return mask
 end

@@ -1862,7 +1862,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     panel_tp_cur = current_tp_index[]
     active_centroids_cache = lymph_node_validation_mode[] ? ln_centroids_cache : lesion_centroids_cache
     target_tex_names = lymph_node_validation_mode[] ? ("Anatomy",) : ("Mask", "segmentation", "manualModif", "mask")
-    canonical_center = if data.lesion_id > 0
+    canonical_center = if data.jump_to_center && data.lesion_id > 0
         if haskey(active_centroids_cache, (panel_tp_cur, data.lesion_id))
             active_centroids_cache[(panel_tp_cur, data.lesion_id)]
         elseif haskey(active_centroids_cache, (get_node_name_for_tp(panel_tp_cur), data.lesion_id))
@@ -1872,15 +1872,18 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         elseif haskey(active_centroids_cache, data.lesion_id)
             active_centroids_cache[data.lesion_id]
         else
-            # on-the-fly computation if cache miss
             cc = nothing
-            # 1. Search in stateObjects' dataToScroll
-            for (si, stateObject) in enumerate(stateObjects)
-                if stateObject.onScrollData.dimensionToScroll == 3
-                    for scrDat in stateObject.onScrollData.dataToScroll
-                        if scrDat.name in target_tex_names
-                            cc = find_lesion_center(scrDat.dat, Float32(data.lesion_id))
-                            if cc !== nothing
+            # 1. First check in active lesion database / LMW cache (O(1) in-memory lookup, avoids 85M voxel scan)
+            try
+                _LMW = parentmodule(@__MODULE__).LesionMetadataWindow
+                db = _LMW.get_active_lesion_db()
+                if !isempty(db)
+                    st = _LMW.get_lesion_state(db, string(data.lesion_id))
+                    for ck in ("_Centroid", "Centroid")
+                        if haskey(st, ck)
+                            c_raw = st[ck]
+                            if (c_raw isa AbstractVector || c_raw isa Tuple) && length(c_raw) >= 3
+                                cc = [round(Int, c_raw[1]), round(Int, c_raw[2]), round(Int, c_raw[3])]
                                 active_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
                                 active_centroids_cache[data.lesion_id] = cc
                                 break
@@ -1888,13 +1891,13 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                         end
                     end
                 end
-                cc !== nothing && break
-            end
-            # 2. Search in tp_data_cache for current TP
+            catch; end
+
+            # 2. Only if not in DB, search contiguous 3D volume in tp_data_cache for current TP
             if cc === nothing && haskey(tp_data_cache, panel_tp_cur)
                 tp_ent = tp_data_cache[panel_tp_cur]
-                vol_search = lymph_node_validation_mode[] ? (tp_ent.anat_i16 !== nothing ? tp_ent.anat_i16 : tp_ent.anatomy) : tp_ent.mask
-                if vol_search !== nothing
+                vol_search = lymph_node_validation_mode[] ? (tp_ent.anat_i16 !== nothing ? tp_ent.anat_i16 : tp_ent.anatomy) : (tp_ent.mask_i16 !== nothing ? tp_ent.mask_i16 : tp_ent.mask)
+                if vol_search !== nothing && !(vol_search isa PermutedDimsArray)
                     cc = find_lesion_center(vol_search, Float32(data.lesion_id))
                     if cc !== nothing
                         active_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
@@ -1902,38 +1905,18 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                     end
                 end
             end
-            # 3. Search in tp_data_cache for baseline (TP 0)
-            if cc === nothing && haskey(tp_data_cache, 0)
+
+            # 3. Search baseline (TP 0) if different
+            if cc === nothing && panel_tp_cur != 0 && haskey(tp_data_cache, 0)
                 tp_ent0 = tp_data_cache[0]
-                vol_search0 = lymph_node_validation_mode[] ? (tp_ent0.anat_i16 !== nothing ? tp_ent0.anat_i16 : tp_ent0.anatomy) : tp_ent0.mask
-                if vol_search0 !== nothing
+                vol_search0 = lymph_node_validation_mode[] ? (tp_ent0.anat_i16 !== nothing ? tp_ent0.anat_i16 : tp_ent0.anatomy) : (tp_ent0.mask_i16 !== nothing ? tp_ent0.mask_i16 : tp_ent0.mask)
+                if vol_search0 !== nothing && !(vol_search0 isa PermutedDimsArray)
                     cc = find_lesion_center(vol_search0, Float32(data.lesion_id))
                     if cc !== nothing
                         active_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
                         active_centroids_cache[data.lesion_id] = cc
                     end
                 end
-            end
-            # 4. Search in active lesion database / LMW cache
-            if cc === nothing
-                try
-                    _LMW = parentmodule(@__MODULE__).LesionMetadataWindow
-                    db = _LMW.get_active_lesion_db()
-                    if !isempty(db)
-                        st = _LMW.get_lesion_state(db, string(data.lesion_id))
-                        for ck in ("_Centroid", "Centroid")
-                            if haskey(st, ck)
-                                c_raw = st[ck]
-                                if (c_raw isa AbstractVector || c_raw isa Tuple) && length(c_raw) >= 3
-                                    cc = [round(Int, c_raw[1]), round(Int, c_raw[2]), round(Int, c_raw[3])]
-                                    active_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
-                                    active_centroids_cache[data.lesion_id] = cc
-                                    break
-                                end
-                            end
-                        end
-                    end
-                catch; end
             end
             cc
         end
@@ -2184,7 +2167,11 @@ function register_h5_mask_saver!(h5_path::String, studies_list::Vector)
     end
 end
 
+const _last_paint_event_time = Ref{Float64}(0.0)
+
 function mark_tp_mask_dirty!(tp_idx::Int)
+    _last_paint_event_time[] = time()
+    (tp_idx in dirty_mask_tps) && return
     lock(_mask_save_lock) do
         push!(dirty_mask_tps, tp_idx)
     end
@@ -2197,6 +2184,8 @@ function mark_tp_mask_dirty!(tp_idx::Int)
 end
 
 function mark_tp_anatomy_dirty!(tp_idx::Int)
+    _last_paint_event_time[] = time()
+    (tp_idx in dirty_anatomy_tps) && return
     lock(_mask_save_lock) do
         push!(dirty_anatomy_tps, tp_idx)
     end
@@ -2231,57 +2220,57 @@ function save_tp_anatomy_to_h5(tp_i::Int)::Bool
     tfm_fname = study[8]
     group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
 
-    lock(_mask_save_lock) do
-        try
-            lock(_hdf5_io_lock) do
-                HDF5.h5open(h5_path, "r+") do h5_file
-                    is_pf = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
-                    anat_to_save = !is_pf ? reverse(anat_vol, dims=2) : copy(anat_vol)
-                    if !haskey(h5_file, group)
-                        HDF5.create_group(h5_file, group)
+    try
+        lock(_hdf5_io_lock) do
+            HDF5.h5open(h5_path, "r+") do h5_file
+                is_pf = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
+                anat_to_save = !is_pf ? reverse(anat_vol, dims=2) : copy(anat_vol)
+                if !haskey(h5_file, group)
+                    HDF5.create_group(h5_file, group)
+                end
+                ds_path_expert = "$group/max_anatomy.nii.gz_expert"
+                if haskey(h5_file, ds_path_expert)
+                    HDF5.delete_object(h5_file, ds_path_expert)
+                end
+                h5_file[ds_path_expert] = UInt16.(max.(0, anat_to_save))
+                if tp_i == 0
+                    if !haskey(h5_file, "ATLAS")
+                        HDF5.create_group(h5_file, "ATLAS")
                     end
-                    ds_path_expert = "$group/max_anatomy.nii.gz_expert"
-                    if haskey(h5_file, ds_path_expert)
-                        HDF5.delete_object(h5_file, ds_path_expert)
+                    if haskey(h5_file, "ATLAS/max_anatomy_expert")
+                        HDF5.delete_object(h5_file, "ATLAS/max_anatomy_expert")
                     end
-                    h5_file[ds_path_expert] = UInt16.(max.(0, anat_to_save))
-                    if tp_i == 0
-                        if !haskey(h5_file, "ATLAS")
-                            HDF5.create_group(h5_file, "ATLAS")
-                        end
-                        if haskey(h5_file, "ATLAS/max_anatomy_expert")
-                            HDF5.delete_object(h5_file, "ATLAS/max_anatomy_expert")
-                        end
-                        h5_file["ATLAS/max_anatomy_expert"] = UInt16.(max.(0, anat_to_save))
+                    h5_file["ATLAS/max_anatomy_expert"] = UInt16.(max.(0, anat_to_save))
+                end
+                # Also persist updated LN centroids in CENTROIDS group
+                try
+                    if !haskey(h5_file, "CENTROIDS")
+                        HDF5.create_group(h5_file, "CENTROIDS")
                     end
-                    # Also persist updated LN centroids in CENTROIDS group
-                    try
-                        if !haskey(h5_file, "CENTROIDS")
-                            HDF5.create_group(h5_file, "CENTROIDS")
-                        end
-                        c_grp = h5_file["CENTROIDS"]
-                        lock(_centroids_lock) do
-                            for (k, coords) in ln_centroids_cache
-                                if k isa Tuple{Int, Int} && k[1] == tp_i
-                                    aid = k[2]
-                                    ckey = "tp$(tp_i)_ln$(aid)"
-                                    if haskey(c_grp, ckey)
-                                        HDF5.delete_object(c_grp, ckey)
-                                    end
-                                    c_grp[ckey] = Int32.(coords)
+                    c_grp = h5_file["CENTROIDS"]
+                    lock(_centroids_lock) do
+                        for (k, coords) in ln_centroids_cache
+                            if k isa Tuple{Int, Int} && k[1] == tp_i
+                                aid = k[2]
+                                ckey = "tp$(tp_i)_ln$(aid)"
+                                if haskey(c_grp, ckey)
+                                    HDF5.delete_object(c_grp, ckey)
                                 end
+                                c_grp[ckey] = Int32.(coords)
                             end
                         end
-                    catch; end
-                    println("  [AUTOSAVE-ANATOMY] Saved edited anatomy for TP $tp_i to $ds_path_expert"); flush(stdout)
-                end
+                    end
+                catch; end
+                println("  [AUTOSAVE-ANATOMY] Saved edited anatomy for TP $tp_i to $ds_path_expert"); flush(stdout)
             end
-            delete!(dirty_anatomy_tps, tp_i)
-            return true
-        catch e
-            @error "Failed to save edited anatomy for TP $tp_i to $h5_path" exception=(e, catch_backtrace())
-            return false
         end
+        lock(_mask_save_lock) do
+            delete!(dirty_anatomy_tps, tp_i)
+        end
+        return true
+    catch e
+        @error "Failed to save edited anatomy for TP $tp_i to $h5_path" exception=(e, catch_backtrace())
+        return false
     end
 end
 
@@ -2421,63 +2410,60 @@ function save_tp_mask_to_h5(tp_i::Int)::Bool
     modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname = study[1:8]
     group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
     
-    # Precompute mask centroids for this TP before writing so we can persist CENTROIDS to HDF5 as well
-    precompute_mask_centroids!(mask_to_save, tp_i, node_name)
-    
-    lock(_mask_save_lock) do
-        try
-            lock(_hdf5_io_lock) do
-                HDF5.h5open(h5_path, "r+") do h5_file
-                    is_pf = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
-                    needs_reverse = !is_pf
-                    
-                    raw_to_write = needs_reverse ? reverse(mask_to_save, dims=2) : mask_to_save
-                    ds_path_expert = "$group/$(mask_fname)_expert"
-                    if haskey(h5_file, ds_path_expert)
-                        try
-                            h5_file[ds_path_expert][:, :, :] = Int16.(raw_to_write)
-                        catch
-                            HDF5.delete_object(h5_file, ds_path_expert)
-                            h5_file[ds_path_expert] = Int16.(raw_to_write)
-                        end
-                    else
+    try
+        lock(_hdf5_io_lock) do
+            HDF5.h5open(h5_path, "r+") do h5_file
+                is_pf = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
+                needs_reverse = !is_pf
+                
+                raw_to_write = needs_reverse ? reverse(mask_to_save, dims=2) : mask_to_save
+                ds_path_expert = "$group/$(mask_fname)_expert"
+                if haskey(h5_file, ds_path_expert)
+                    try
+                        h5_file[ds_path_expert][:, :, :] = Int16.(raw_to_write)
+                    catch
+                        HDF5.delete_object(h5_file, ds_path_expert)
                         h5_file[ds_path_expert] = Int16.(raw_to_write)
                     end
-                    # Also persist updated centroids for this TP into CENTROIDS group
-                    try
-                        cent_grp = if !haskey(h5_file, "CENTROIDS")
-                            HDF5.create_group(h5_file, "CENTROIDS")
-                        else
-                            h5_file["CENTROIDS"]
-                        end
-                        lock(_centroids_lock) do
-                            for (k, coords) in lesion_centroids_cache
-                                if k isa Tuple{Int, Int} && k[1] == tp_i
-                                    lid_c = k[2]
-                                    ckey = "tp$(tp_i)_lid$(lid_c)"
-                                    if haskey(cent_grp, ckey)
-                                        try
-                                            cent_grp[ckey][:] = Int32.(coords)
-                                        catch
-                                            HDF5.delete_object(cent_grp, ckey)
-                                            cent_grp[ckey] = Int32.(coords)
-                                        end
-                                    else
+                else
+                    h5_file[ds_path_expert] = Int16.(raw_to_write)
+                end
+                # Also persist updated centroids for this TP into CENTROIDS group
+                try
+                    cent_grp = if !haskey(h5_file, "CENTROIDS")
+                        HDF5.create_group(h5_file, "CENTROIDS")
+                    else
+                        h5_file["CENTROIDS"]
+                    end
+                    lock(_centroids_lock) do
+                        for (k, coords) in lesion_centroids_cache
+                            if k isa Tuple{Int, Int} && k[1] == tp_i
+                                lid_c = k[2]
+                                ckey = "tp$(tp_i)_lid$(lid_c)"
+                                if haskey(cent_grp, ckey)
+                                    try
+                                        cent_grp[ckey][:] = Int32.(coords)
+                                    catch
+                                        HDF5.delete_object(cent_grp, ckey)
                                         cent_grp[ckey] = Int32.(coords)
                                     end
+                                else
+                                    cent_grp[ckey] = Int32.(coords)
                                 end
                             end
                         end
-                    catch; end
-                    println("  [AUTOSAVE-MASK] Saved mask for TP $tp_i to $ds_path_expert ($(count(>(0), mask_to_save)) non-zero voxels)"); flush(stdout)
-                end
+                    end
+                catch; end
+                println("  [AUTOSAVE-MASK] Saved mask for TP $tp_i to $ds_path_expert"); flush(stdout)
             end
-            delete!(dirty_mask_tps, tp_i)
-            return true
-        catch e
-            @error "Failed to save mask for TP $tp_i to $h5_path" exception=(e, catch_backtrace())
-            return false
         end
+        lock(_mask_save_lock) do
+            delete!(dirty_mask_tps, tp_i)
+        end
+        return true
+    catch e
+        @error "Failed to save mask for TP $tp_i to $h5_path" exception=(e, catch_backtrace())
+        return false
     end
 end
 
@@ -2501,6 +2487,10 @@ function _ensure_mask_autosave_task!()
     Threads.@spawn begin
         while true
             sleep(2.0)
+            # Defer heavy HDF5 disk writes while user is actively painting/erasing
+            if time() - _last_paint_event_time[] < 3.0
+                continue
+            end
             if (!isempty(dirty_mask_tps) || !isempty(dirty_anatomy_tps) || !isempty(dirty_bone_subsegs)) && !isempty(h5_save_path_ref[])
                 flush_all_dirty_masks!()
             end
@@ -3075,167 +3065,136 @@ function invalidate_suv_for_lesion(lesion_id::Int, tp_idx::Int)
 end
 
 const _async_suv_debounce = Dict{Tuple{Int, Int}, Float64}()
+const _async_suv_pending = Dict{Tuple{Int, Int}, Tuple{Bool, Any}}()
+const _async_suv_worker_running = Ref(false)
+
+function _compute_lesion_centroid_fast!(target_cache, m::AbstractArray{T, 3}, tp_idx::Int, lesion_id::Int) where {T}
+    target_val = round(T, lesion_id)
+    sum_x = 0
+    sum_y = 0
+    sum_z = 0
+    cnt = 0
+    nx, ny, nz = size(m)
+    @inbounds for z in 1:nz
+        for y in 1:ny
+            for x in 1:nx
+                if m[x, y, z] == target_val
+                    sum_x += x
+                    sum_y += y
+                    sum_z += z
+                    cnt += 1
+                end
+            end
+        end
+        # Yield periodically so single-threaded UI loop never stalls
+        if (z & 31) == 0
+            yield()
+        end
+    end
+    if cnt > 0
+        cx = round(Int, sum_x / cnt)
+        cy = round(Int, sum_y / cnt)
+        cz = round(Int, sum_z / cnt)
+        target_cache[(tp_idx, lesion_id)] = [cx, cy, cz]
+        if tp_idx == current_tp_index[]
+            target_cache[lesion_id] = [cx, cy, cz]
+        end
+        return true
+    end
+    return false
+end
 
 """
     invalidate_and_recompute_lesion_metrics_async!(lesion_id, tp_idx, mask_vol)
 
 Called when a lesion is painted or modified.
 1. Synchronously invalidates caches.
-2. Schedules a debounced background task to recompute metrics.
+2. Schedules a single debounced background worker to recompute metrics after painting stops.
 """
 function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::Int, mask_vol::Union{AbstractArray, Nothing}=nothing)
-    # 1. Invalidate caches (synchronous)
-    invalidate_suv_for_lesion(lesion_id, tp_idx)
-    is_ln_mode = lymph_node_validation_mode[]
-    target_cache = is_ln_mode ? ln_centroids_cache : lesion_centroids_cache
-    
-    # Debounce the heavy background task
     now_t = time()
+    _last_paint_event_time[] = now_t
+    prev_t = get(_async_suv_debounce, (tp_idx, lesion_id), 0.0)
     _async_suv_debounce[(tp_idx, lesion_id)] = now_t
-    
-    Threads.@spawn begin
-        # Wait a short period to batch updates
-        sleep(0.5)
-        
-        # Abort if a newer event arrived
-        if get(_async_suv_debounce, (tp_idx, lesion_id), 0.0) > now_t
-            return
-        end
-        
-        # 2. Recompute centroid from current mask
-        centroid_found = false
-        if mask_vol !== nothing
+    is_ln_mode = lymph_node_validation_mode[]
+    _async_suv_pending[(tp_idx, lesion_id)] = (is_ln_mode, mask_vol)
+
+    # Only run synchronous Dict invalidations at the start of a stroke (or >0.25s since last invalidation)
+    if now_t - prev_t > 0.25
+        invalidate_suv_for_lesion(lesion_id, tp_idx)
+    end
+
+    if !_async_suv_worker_running[]
+        _async_suv_worker_running[] = true
+        Threads.@spawn begin
             try
-                indices = findall(==(lesion_id), mask_vol)
-                if !isempty(indices)
-                    cx = round(Int, mean(i[1] for i in indices))
-                    cy = round(Int, mean(i[2] for i in indices))
-                    cz = round(Int, mean(i[3] for i in indices))
-                    target_cache[(tp_idx, lesion_id)] = [cx, cy, cz]
-                    if tp_idx == current_tp_index[]
-                        target_cache[lesion_id] = [cx, cy, cz]
+                while !isempty(_async_suv_pending)
+                    sleep(0.5)
+                    # Wait until user has stopped painting/erasing for at least 1.5s
+                    if time() - _last_paint_event_time[] < 1.5
+                        continue
                     end
-                    centroid_found = true
-                    @debug "  [SUV] Recomputed centroid for lesion $lesion_id @ TP $tp_idx: ($cx,$cy,$cz)"
-                end
-            catch e
-                @warn "Centroid recompute failed for lesion $lesion_id: $e"
-            end
-        end
-        
-        # Try mask_i16 / anat_i16 from tp_data_cache
-        if !centroid_found
-            entry = lock(_tp_cache_lock) do
-                haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
-            end
-            if entry !== nothing
-                try
-                    m = is_ln_mode ? (entry.anat_i16 !== nothing ? entry.anat_i16 : entry.anatomy) : entry.mask_i16
-                    if m !== nothing
-                        indices = findall(==(Int16(lesion_id)), m)
-                        if !isempty(indices)
-                            cx = round(Int, mean(i[1] for i in indices))
-                            cy = round(Int, mean(i[2] for i in indices))
-                            cz = round(Int, mean(i[3] for i in indices))
-                            target_cache[(tp_idx, lesion_id)] = [cx, cy, cz]
-                            if tp_idx == current_tp_index[]
-                                target_cache[lesion_id] = [cx, cy, cz]
-                            end
-                            centroid_found = true
+                    # Pop one ready item
+                    ready_key = nothing
+                    for (k, _) in _async_suv_pending
+                        if time() - get(_async_suv_debounce, k, 0.0) >= 1.2
+                            ready_key = k
+                            break
                         end
                     end
-                catch; end
-            end
-        end
-        
-        # 3. Update organ mapping from atlas (only in normal lesion mode)
-        if !is_ln_mode
-        try
-            atlas = global_ts_atlas[]
-            ts_nm = global_ts_names[]
-            if atlas !== nothing && ts_nm !== nothing
-                organ_name = ""
-                # Try volume-based scan first
-                if mask_vol !== nothing
-                    LA = _get_la()
-                    if LA !== nothing
-                        organ_name = LA.classify_and_pick_best_organ(mask_vol, atlas, ts_nm, lesion_id)
+                    if ready_key === nothing
+                        continue
                     end
-                else
-                    cached_mask = lock(_tp_cache_lock) do
-                        haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx].mask_i16 : nothing
-                    end
-                    if cached_mask !== nothing
-                        LA = _get_la()
-                        if LA !== nothing
-                            organ_name = LA.classify_and_pick_best_organ(cached_mask, atlas, ts_nm, lesion_id)
-                        end
-                    end
-                end
-                
-                # Fallback: centroid-based atlas lookup
-                if isempty(organ_name) && centroid_found
-                    centroid = lesion_centroids_cache[(tp_idx, lesion_id)]
-                    mask_sz = lock(_tp_cache_lock) do
-                        haskey(tp_data_cache, tp_idx) ? size(tp_data_cache[tp_idx].mask) : nothing
-                    end
-                    if mask_sz !== nothing
-                        sx = clamp(round(Int, centroid[1] * size(atlas,1) / mask_sz[1]), 1, size(atlas,1))
-                        sy = clamp(round(Int, centroid[2] * size(atlas,2) / mask_sz[2]), 1, size(atlas,2))
-                        sz = clamp(round(Int, centroid[3] * size(atlas,3) / mask_sz[3]), 1, size(atlas,3))
-                    else
-                        sx = clamp(centroid[1], 1, size(atlas,1))
-                        sy = clamp(centroid[2], 1, size(atlas,2))
-                        sz = clamp(centroid[3], 1, size(atlas,3))
-                    end
-                    anat_val = Int(atlas[sx, sy, sz])
-                    if anat_val > 0 && haskey(ts_nm, anat_val)
-                        organ_name = ts_nm[anat_val]
-                    end
-                end
-                
-                if !isempty(organ_name)
-                    existing = get(global_organ_mapping[], lesion_id, "")
-                    should_update = isempty(existing) || existing in ("Unknown",)
-                    if !should_update
-                        LA = _get_la()
-                        if LA !== nothing
-                            new_pri = LA.classify_tissue_priority(organ_name)
-                            old_pri = LA.classify_tissue_priority(existing)
-                            should_update = new_pri <= old_pri
-                        end
-                    end
-                    if should_update
-                        global_organ_mapping[][lesion_id] = organ_name
-                        @debug "  [SUV] Auto-mapped lesion $lesion_id → '$organ_name' from paint voxels"
+                    tp_i, lid_i = ready_key
+                    ln_mode_i, mvol_i = pop!(_async_suv_pending, ready_key)
+                    t_cache = ln_mode_i ? ln_centroids_cache : lesion_centroids_cache
+
+                    centroid_found = false
+                    if mvol_i isa AbstractArray{<:Any, 3}
                         try
-                            organ_mapping_updated[] = (lesion_id, organ_name)
-                            @debug "  [SUV] Fired organ_mapping_updated for lesion $lesion_id → '$organ_name'"
-                        catch e
-                            @debug "  [SUV] organ_mapping_updated FAILED: $e"
+                            centroid_found = _compute_lesion_centroid_fast!(t_cache, mvol_i, tp_i, lid_i)
+                        catch; end
+                    end
+                    if !centroid_found
+                        entry = lock(_tp_cache_lock) do
+                            haskey(tp_data_cache, tp_i) ? tp_data_cache[tp_i] : nothing
+                        end
+                        if entry !== nothing
+                            try
+                                m = ln_mode_i ? (entry.anat_i16 !== nothing ? entry.anat_i16 : entry.anatomy) : entry.mask_i16
+                                if m !== nothing
+                                    centroid_found = _compute_lesion_centroid_fast!(t_cache, m, tp_i, lid_i)
+                                end
+                            catch; end
                         end
                     end
+
+                    # Fast O(1) centroid-based organ mapping lookup from atlas (avoids another 85M-voxel scan)
+                    if !ln_mode_i && centroid_found
+                        try
+                            atlas = global_ts_atlas[]
+                            ts_nm = global_ts_names[]
+                            if atlas !== nothing && ts_nm !== nothing && haskey(lesion_centroids_cache, (tp_i, lid_i))
+                                centroid = lesion_centroids_cache[(tp_i, lid_i)]
+                                sx = clamp(centroid[1], 1, size(atlas, 1))
+                                sy = clamp(centroid[2], 1, size(atlas, 2))
+                                sz = clamp(centroid[3], 1, size(atlas, 3))
+                                anat_val = Int(atlas[sx, sy, sz])
+                                if anat_val > 0 && haskey(ts_nm, anat_val)
+                                    organ_name = ts_nm[anat_val]
+                                    existing = get(global_organ_mapping[], lid_i, "")
+                                    if isempty(existing) || existing == "Unknown"
+                                        global_organ_mapping[][lid_i] = organ_name
+                                        try organ_mapping_updated[] = (lid_i, organ_name) catch; end
+                                    end
+                                end
+                            end
+                        catch; end
+                    end
                 end
+            finally
+                _async_suv_worker_running[] = false
             end
-        catch e
-            @warn "Organ mapping update failed for lesion $lesion_id: $e"
-        end
-        end
-        
-        # 4. Recompute SUV/volume
-        try
-            LMW = _get_lmw()
-            if LMW !== nothing
-                vol = LMW.compute_lesion_volume(lesion_id, tp_idx)
-                suv_metrics = LMW.get_lesion_suv_metrics(lesion_id, tp_idx)
-                suv_str = LMW.compute_lesion_suv_string(lesion_id, tp_idx)
-                if !isempty(suv_str)
-                    LMW._lesion_suv_cache[(tp_idx, lesion_id)] = suv_str
-                end
-                @debug "  [SUV] Async recomputed metrics for lesion $lesion_id @ TP $tp_idx: vol=$(round(vol["volume_cc"], digits=2))cc, suv_max=$(suv_metrics.max), suv_mean=$(suv_metrics.mean)"
-            end
-        catch e
-            @warn "Async SUV/volume recompute failed for lesion $lesion_id: $e"
         end
     end
 end
@@ -3276,8 +3235,59 @@ export organ_mapping_updated
 
 const _ai_mask_backups = Dict{Tuple{Int, Int}, Any}()  # (tp_idx, lesion_id) -> original mask voxels
 const _ai_anatomy_backups = Dict{Tuple{Int, Int}, Any}()  # (tp_idx, anat_id) -> original anatomy voxels
+const _ai_slice_backups = Dict{Tuple{Int, Bool, Int, Int}, Matrix{Int16}}()  # (tp_idx, is_ln, eff_dim, cur_slice) -> original 2D slice
 
-function ensure_ai_mask_backup!(lesion_id::Int, tp_idx::Int, stateObject=nothing)
+function ensure_ai_slice_backup!(tp_idx::Int, is_ln::Bool, eff_dim::Int, cur_slice::Int)
+    key = (tp_idx, is_ln, eff_dim, cur_slice)
+    haskey(_ai_slice_backups, key) && return nothing
+    entry = lock(_tp_cache_lock) do
+        haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
+    end
+    entry === nothing && return nothing
+    vol = is_ln ? (entry.anat_i16 !== nothing ? entry.anat_i16 : entry.anatomy) : entry.mask_i16
+    vol === nothing && return nothing
+    if cur_slice >= 1 && cur_slice <= size(vol, eff_dim)
+        sl_view = selectdim(vol, eff_dim, cur_slice)
+        bak = Matrix{Int16}(undef, size(sl_view))
+        @inbounds for j in axes(sl_view, 2), i in axes(sl_view, 1)
+            bak[i, j] = round(Int16, sl_view[i, j])
+        end
+        _ai_slice_backups[key] = bak
+    end
+    return nothing
+end
+
+function _infer_panel_eff_dim(stateObject)::Int
+    try
+        for scrDat in stateObject.onScrollData.dataToScroll
+            if scrDat.dat isa PermutedDimsArray
+                # Sagittal wraps (2,3,1) or (3,2,1) -> scrolls X (dim 1); Coronal wraps (1,3,2) -> scrolls Y (dim 2)
+                s1 = size(scrDat.dat, 1)
+                s3 = size(scrDat.dat, 3)
+                p_vol = parent(scrDat.dat)
+                if s3 == size(p_vol, 1) && s3 != size(p_vol, 2)
+                    return 1
+                elseif s3 == size(p_vol, 2) && s3 != size(p_vol, 1)
+                    return 2
+                elseif s1 != size(p_vol, 1)
+                    return 1
+                else
+                    return 2
+                end
+            end
+        end
+        return Int(stateObject.onScrollData.dimensionToScroll)
+    catch
+        return 3
+    end
+end
+
+function ensure_ai_mask_backup!(lesion_id::Int, tp_idx::Int, stateObject=nothing, eff_dim::Int=0)
+    if stateObject !== nothing
+        edim = eff_dim > 0 ? eff_dim : _infer_panel_eff_dim(stateObject)
+        ensure_ai_slice_backup!(tp_idx, false, edim, stateObject.currentDisplayedSlice)
+        return nothing
+    end
     lesion_id <= 0 && return nothing
     if !haskey(_ai_mask_backups, (tp_idx, lesion_id))
         entry = lock(_tp_cache_lock) do
@@ -3291,7 +3301,12 @@ function ensure_ai_mask_backup!(lesion_id::Int, tp_idx::Int, stateObject=nothing
     return nothing
 end
 
-function ensure_ai_anatomy_backup!(anat_id::Int, tp_idx::Int, stateObject=nothing)
+function ensure_ai_anatomy_backup!(anat_id::Int, tp_idx::Int, stateObject=nothing, eff_dim::Int=0)
+    if stateObject !== nothing
+        edim = eff_dim > 0 ? eff_dim : _infer_panel_eff_dim(stateObject)
+        ensure_ai_slice_backup!(tp_idx, true, edim, stateObject.currentDisplayedSlice)
+        return nothing
+    end
     anat_id <= 0 && return nothing
     if !haskey(_ai_anatomy_backups, (tp_idx, anat_id))
         entry = lock(_tp_cache_lock) do
@@ -3324,6 +3339,27 @@ function mark_expert_edit!(lesion_id::Int)
     return nothing
 end
 
+function _restore_from_slice_backups!(vol_i16::AbstractArray{Int16, 3}, tp_idx::Int, is_ln::Bool, lid::Int)::Bool
+    restored_any = false
+    lid_i16 = Int16(lid)
+    for ((t, ln_flag, edim, sl), orig_sl) in _ai_slice_backups
+        if t == tp_idx && ln_flag == is_ln && sl >= 1 && sl <= size(vol_i16, edim)
+            sl_view = selectdim(vol_i16, edim, sl)
+            if size(sl_view) == size(orig_sl)
+                @inbounds for j in axes(sl_view, 2), i in axes(sl_view, 1)
+                    if orig_sl[i, j] == lid_i16
+                        sl_view[i, j] = lid_i16
+                    elseif sl_view[i, j] == lid_i16
+                        sl_view[i, j] = orig_sl[i, j]
+                    end
+                end
+                restored_any = true
+            end
+        end
+    end
+    return restored_any
+end
+
 function reactToRevertToAI(data::MakieEvents.RevertToAIEvent, stateObjects::Vector{StateDataFields})
     lid = data.lesion_id
     tp_idx = data.tp_index
@@ -3337,7 +3373,11 @@ function reactToRevertToAI(data::MakieEvents.RevertToAIEvent, stateObjects::Vect
         anat_i16 = entry.anat_i16
         anat_i16 === nothing && return nothing
         orig_vox = get(_ai_anatomy_backups, (tp_idx, lid), nothing)
+        slice_restored = false
         if orig_vox === nothing
+            slice_restored = _restore_from_slice_backups!(anat_i16, tp_idx, true, lid)
+        end
+        if orig_vox === nothing && !slice_restored
             h5_path = !isempty(h5_save_path_ref[]) ? h5_save_path_ref[] : h5_path_ref[]
             studies_list = studies_ref[]
             if !isempty(h5_path) && isfile(h5_path) && tp_idx >= 0 && tp_idx < length(studies_list)
@@ -3364,11 +3404,13 @@ function reactToRevertToAI(data::MakieEvents.RevertToAIEvent, stateObjects::Vect
                 end
             end
         end
-        if orig_vox !== nothing
-            anat_i16[anat_i16 .== Int16(lid)] .= Int16(0)
-            for idx in orig_vox
-                if checkbounds(Bool, anat_i16, idx)
-                    anat_i16[idx] = Int16(lid)
+        if orig_vox !== nothing || slice_restored
+            if orig_vox !== nothing
+                anat_i16[anat_i16 .== Int16(lid)] .= Int16(0)
+                for idx in orig_vox
+                    if checkbounds(Bool, anat_i16, idx)
+                        anat_i16[idx] = Int16(lid)
+                    end
                 end
             end
             if entry.anatomy !== nothing && entry.anatomy !== anat_i16
@@ -3391,7 +3433,11 @@ function reactToRevertToAI(data::MakieEvents.RevertToAIEvent, stateObjects::Vect
     mask_i16 === nothing && return nothing
 
     orig_vox = get(_ai_mask_backups, (tp_idx, lid), nothing)
+    slice_restored = false
     if orig_vox === nothing
+        slice_restored = _restore_from_slice_backups!(mask_i16, tp_idx, false, lid)
+    end
+    if orig_vox === nothing && !slice_restored
         # Fallback: load original unedited mask from HDF5 (non-_expert dataset)
         h5_path = !isempty(h5_save_path_ref[]) ? h5_save_path_ref[] : h5_path_ref[]
         studies_list = studies_ref[]
@@ -3418,11 +3464,13 @@ function reactToRevertToAI(data::MakieEvents.RevertToAIEvent, stateObjects::Vect
         end
     end
 
-    if orig_vox !== nothing
-        mask_i16[mask_i16 .== Int16(lid)] .= Int16(0)
-        for idx in orig_vox
-            if checkbounds(Bool, mask_i16, idx)
-                mask_i16[idx] = Int16(lid)
+    if orig_vox !== nothing || slice_restored
+        if orig_vox !== nothing
+            mask_i16[mask_i16 .== Int16(lid)] .= Int16(0)
+            for idx in orig_vox
+                if checkbounds(Bool, mask_i16, idx)
+                    mask_i16[idx] = Int16(lid)
+                end
             end
         end
         if entry.mask !== nothing && entry.mask !== mask_i16
