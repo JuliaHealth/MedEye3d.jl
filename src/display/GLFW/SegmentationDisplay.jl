@@ -1200,7 +1200,8 @@ function coordinateDisplay(
         _upload_batch = VulkanStaging.TextureUploadBatchItem[]
         _vk_main_panels = VulkanRender.PanelRenderData[]
         _vk_m2_panels = VulkanRender.PanelRenderData[]
-        _push_consts = Vector{Float32}(undef, 12)  # scale(2) + offset(2) + ndc(4) + crosshairUV(2) + showCrosshair+pad(2)
+        _push_consts_pool = [Vector{Float32}(undef, 12) for _ in 1:16]  # scale(2) + offset(2) + ndc(4) + crosshairUV(2) + showCrosshair+pad(2)
+        _mouse_agg_buf = MouseStruct[]
         m2_glfw = SegmentationDisplay._m2_glfw_ref
         m2_vk = SegmentationDisplay._m2_vk_ref
         while !shouldStop[1]
@@ -1309,15 +1310,16 @@ function coordinateDisplay(
                     end
                     # Left-button drag aggregation for mask painting OR measurements when active.
                     if channelData.isLeftButtonDown && (stateInstances[1].valueForMasToSet.is_painting_active || MakieEventHandlers.measurements_mode[])
-                        mouseStructAggregationArray::Vector{MouseStruct} = [channelData]
+                        empty!(_mouse_agg_buf)
+                        push!(_mouse_agg_buf, channelData)
                         while !isempty(mainChannel) && typeof(fetch(mainChannel)) == MouseStruct
                             peeked = fetch(mainChannel)
                             if !peeked.isLeftButtonDown
                                 break
                             end
-                            push!(mouseStructAggregationArray, take!(mainChannel))
+                            push!(_mouse_agg_buf, take!(mainChannel))
                         end
-                        channelData = mouseStructAggregationArray
+                        channelData = _mouse_agg_buf
                     else
                         # Coalesce rapid non-painting mouse movements: drain stale intermediate moves,
                         # but preserve button state transitions (press / release).
@@ -1492,6 +1494,12 @@ function coordinateDisplay(
                     empty!(_vk_main_panels)
                     empty!(_vk_m2_panels)
                     _ubo_dirty_count = 0
+                    LMW = MakieEventHandlers._get_lmw()
+                    is_crosshair_on = (LMW !== nothing) ? LMW.is_crosshair_visible() : false
+                    ix, iy, iz = MakieEventHandlers.current_viewer_position[]
+                    hovered_idx = stateInstances[1].switchIndex
+                    _meas_obj = !isempty(stateInstances) ? stateInstances[1].mainForDisplayObjects : nothing
+
                     for (panel_idx, state) in enumerate(stateInstances)
                         if state.calcDimsStruct.mainQuadVertSize <= 0 || all(iszero, state.calcDimsStruct.mainImageQuadVert)
                             continue
@@ -1551,20 +1559,14 @@ function coordinateDisplay(
                             ndc_top    =  1.0f0
                         end
                         
-                        push_consts = Vector{Float32}(undef, 12)
+                        push_consts = _push_consts_pool[min(panel_idx, 16)]
                         push_consts[1] = scale_x; push_consts[2] = scale_y
                         push_consts[3] = offsetX + offset_corr_x; push_consts[4] = offsetY + offset_corr_y
                         push_consts[5] = ndc_left; push_consts[6] = ndc_bottom
                         push_consts[7] = ndc_right; push_consts[8] = ndc_top
                         
-                        ix, iy, iz = MakieEventHandlers.current_viewer_position[]
-                        hovered_idx = stateInstances[1].switchIndex
                         show_crosshair = 0.0f0
                         cx, cy = 0.0f0, 0.0f0
-
-                        # Determine if crosshair toggle is active from LesionMetadataWindow
-                        LMW = MakieEventHandlers._get_lmw()
-                        is_crosshair_on = (LMW !== nothing) ? LMW.is_crosshair_visible() : false
 
                         if is_crosshair_on && ix > 0 && iy > 0 && iz > 0 && hovered_idx > 0 && panel_idx != hovered_idx
                             show_crosshair = reinterpret(Float32, Int32(1))
@@ -1593,30 +1595,22 @@ function coordinateDisplay(
                         h = (panel_idx > 5 && m2_vk[] !== nothing) ? Float32(m2_vk[].swapchain_extent.height) : Float32(obj.vulkanCtx.height)
                         
                         # Use panel 1's measurements for cross-view visibility
-                        # (measurements are stored on the clicked panel's obj, which may differ)
-                        _meas_obj = stateInstances[1].mainForDisplayObjects
-                        _all_spheres = _meas_obj.measurements
-                        _all_lines = _meas_obj.line_measurements
-                        # Also gather measurements from the current panel's obj (in case they differ)
-                        if obj !== _meas_obj
-                            if !isempty(obj.measurements)
-                                _all_spheres = vcat(_all_spheres, obj.measurements)
-                            end
-                            if !isempty(obj.line_measurements)
-                                _all_lines = vcat(_all_lines, obj.line_measurements)
-                            end
-                        end
-                        
                         vector_vertices = Float32[]
-                        if !isempty(_all_spheres)
-                            vector_vertices = Measurements.compute_measurement_vertices(_all_spheres, stateInstances, panel_idx)
-                        end
-                        if !isempty(_all_lines)
-                            line_verts = Measurements.compute_line_vertices(_all_lines, stateInstances, panel_idx)
-                            if isempty(vector_vertices)
-                                vector_vertices = line_verts
-                            elseif !isempty(line_verts)
-                                append!(vector_vertices, line_verts)
+                        if _meas_obj !== nothing
+                            has_spheres = !isempty(_meas_obj.measurements) || (obj !== _meas_obj && !isempty(obj.measurements))
+                            has_lines = !isempty(_meas_obj.line_measurements) || (obj !== _meas_obj && !isempty(obj.line_measurements))
+                            if has_spheres
+                                _all_spheres = (obj !== _meas_obj && !isempty(obj.measurements)) ? vcat(_meas_obj.measurements, obj.measurements) : _meas_obj.measurements
+                                vector_vertices = Measurements.compute_measurement_vertices(_all_spheres, stateInstances, panel_idx)
+                            end
+                            if has_lines
+                                _all_lines = (obj !== _meas_obj && !isempty(obj.line_measurements)) ? vcat(_meas_obj.line_measurements, obj.line_measurements) : _meas_obj.line_measurements
+                                line_verts = Measurements.compute_line_vertices(_all_lines, stateInstances, panel_idx)
+                                if isempty(vector_vertices)
+                                    vector_vertices = line_verts
+                                elseif !isempty(line_verts)
+                                    append!(vector_vertices, line_verts)
+                                end
                             end
                         end
                         if state.valueForMasToSet.is_painting_active &&

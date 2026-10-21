@@ -253,6 +253,32 @@ function _detect_clicked_panel(x::Real, y::Real, actualW::Real, actualH::Real, w
     end
 end
 
+const _sampled_points_buf = Tuple{Int,Int}[]
+const _rasterize_points_buf = Tuple{Int,Int}[]
+const _last_expert_marked_id = Ref{Int}(0)
+const _last_backed_up_slice = Ref{Tuple{Int,Bool,Int,Int}}((0, false, 0, 0))
+const _cached_tp_idx = Ref{Int}(-1)
+const _cached_tp_entry = Ref{Any}(nothing)
+
+@inline _cast_val(::Type{T}, v::Integer) where {T<:Integer} = T(v)
+@inline _cast_val(::Type{T}, v) where {T} = round(T, v)
+
+@inline function _copy_bbox_2d_to_3d!(vol3d::AbstractArray{T, 3}, eff_dim::Int, cur_slice::Int, src::AbstractMatrix, min_x::Int, max_x::Int, min_y::Int, max_y::Int) where {T}
+    if eff_dim == 3
+        @inbounds for y in min_y:max_y, x in min_x:max_x
+            vol3d[x, y, cur_slice] = _cast_val(T, src[x, y])
+        end
+    elseif eff_dim == 1
+        @inbounds for y in min_y:max_y, x in min_x:max_x
+            vol3d[cur_slice, x, y] = _cast_val(T, src[x, y])
+        end
+    else
+        @inbounds for y in min_y:max_y, x in min_x:max_x
+            vol3d[x, cur_slice, y] = _cast_val(T, src[x, y])
+        end
+    end
+end
+
 """
 used when we want to save some manual modifications
 """
@@ -345,8 +371,8 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     texture = stateObject.textureToModifyVec[1]
     calcDim = stateObject.calcDimsStruct
 
-    # Extract all sampled mouse coordinates in texture pixel space
-    sampledPoints = Tuple{Int,Int}[]
+    # Extract all sampled mouse coordinates in texture pixel space (zero-allocation buffer)
+    empty!(_sampled_points_buf)
     for mouseStruct in mouseStructArray
         mouseCoords = mouseStruct.lastCoordinates
         actualW = Float64(mouseStruct.actualWindowWidth)
@@ -355,30 +381,31 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
             texX, texY = StructsManag.getTextureCoordinatesFromScreen(c[1], c[2], calcDim, actualW, actualH)
             ix, iy = Int(round(texX)), Int(round(texY))
             if ix >= 1 && ix <= calcDim.imageTextureWidth && iy >= 1 && iy <= calcDim.imageTextureHeight
-                push!(sampledPoints, (ix, iy))
+                push!(_sampled_points_buf, (ix, iy))
             end
         end
     end
 
-    if isempty(sampledPoints)
+    if isempty(_sampled_points_buf)
         return
     end
 
-    # Build polyline: connect from last point of previous frame if on the same slice
-    pointsToRasterize = Tuple{Int,Int}[]
+    # Build polyline: connect from last point of previous frame if on the same slice (zero-allocation buffer)
+    empty!(_rasterize_points_buf)
     if !stateObject.isSliceChanged && !isempty(stateObject.lastPaintCoords)
-        push!(pointsToRasterize, (stateObject.lastPaintCoords[1][1], stateObject.lastPaintCoords[1][2]))
+        push!(_rasterize_points_buf, (stateObject.lastPaintCoords[1][1], stateObject.lastPaintCoords[1][2]))
     end
-    append!(pointsToRasterize, sampledPoints)
+    append!(_rasterize_points_buf, _sampled_points_buf)
+    pointsToRasterize = _rasterize_points_buf
     stateObject.isSliceChanged = false
 
     # Store last point for next frame
-    stateObject.lastPaintCoords = [CartesianIndex(sampledPoints[end][1], sampledPoints[end][2])]
+    stateObject.lastPaintCoords = [CartesianIndex(_sampled_points_buf[end][1], _sampled_points_buf[end][2])]
 
     # Keep current_viewer_position updated during active paint/erase drag so brush circle tracks cursor
     try
         MEH_pos = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
-        ix_p, iy_p = sampledPoints[end][1], sampledPoints[end][2]
+        ix_p, iy_p = _sampled_points_buf[end][1], _sampled_points_buf[end][2]
         clickedPanel_p = mainStates[1].switchIndex
         cp_mapped_p = clickedPanel_p > 5 ? clickedPanel_p - 5 : clickedPanel_p
         slice_p = stateObject.currentDisplayedSlice
@@ -577,17 +604,24 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     if lesion_id <= 0
         lesion_id = MEH.current_active_lesion_id[]
     end
-    try
-        MEH.ensure_ai_slice_backup!(tp_idx, is_ln_mode || texture.name == "Anatomy", eff_dim, stateObject.currentDisplayedSlice)
-    catch e
-        @warn "Failed to ensure AI slice backup: $e"
+    cur_slice = stateObject.currentDisplayedSlice
+    is_ln_or_anat = is_ln_mode || texture.name == "Anatomy"
+    slice_key = (tp_idx, is_ln_or_anat, eff_dim, cur_slice)
+    if _last_backed_up_slice[] != slice_key
+        try
+            MEH.ensure_ai_slice_backup!(tp_idx, is_ln_or_anat, eff_dim, cur_slice)
+            _last_backed_up_slice[] = slice_key
+        catch e
+            @warn "Failed to ensure AI slice backup: $e"
+        end
     end
 
     # In-place continuous thick-line interpolation
     StrokeRasterization.rasterize_polyline!(twoDimDat.dat, pointsToRasterize, strokeW, toSet)
 
     # ── Mark expert edit & set origin to EXPERT_CORRECTION ──
-    if lesion_id > 0
+    if lesion_id > 0 && _last_expert_marked_id[] != lesion_id
+        _last_expert_marked_id[] = lesion_id
         try
             MEH.mark_expert_edit!(lesion_id)
         catch e
@@ -600,25 +634,18 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     # Mark slice changed so consumer loop uploads dirty texture to GPU
     stateObject.isSliceChanged = true
 
-    # Helper to copy only the painted bounding box (min_bx:max_bx, min_by:max_by) into a 3D volume slice
-    _sync_bbox_to_vol! = (vol3d, conv_fn) -> begin
-        sl_v = selectdim(vol3d, eff_dim, stateObject.currentDisplayedSlice)
-        # Skip if twoDimDat.dat is already a SubArray view backed by vol3d
+    # Check if twoDimDat.dat is already a SubArray view backed by a volume
+    _is_sharing_vol = (vol3d) -> begin
         if twoDimDat.dat isa SubArray
             p = parent(twoDimDat.dat)
-            if p === vol3d || (p isa PermutedDimsArray && parent(p) === vol3d)
-                return
-            end
+            return p === vol3d || (p isa PermutedDimsArray && parent(p) === vol3d)
         end
-        src = twoDimDat.dat
-        @inbounds for y in min_by:max_by, x in min_bx:max_bx
-            sl_v[x, y] = conv_fn(src[x, y])
-        end
+        return false
     end
 
     # Invalidate SUV/volume/centroid caches, async-recompute metrics, and mark mask dirty for auto-save
     try
-        if is_ln_mode || texture.name == "Anatomy"
+        if is_ln_or_anat
             MEH.mark_tp_anatomy_dirty!(tp_idx)
         else
             MEH.mark_tp_mask_dirty!(tp_idx)
@@ -627,28 +654,33 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
         edit_id = paint_id > 0 ? paint_id : MEH.current_active_lesion_id[]
         if edit_id > 0 || paint_id == 0
             # Sync painted bounding box to tp_data_cache so organ mapping & HDF5 autosave have exact 3D voxels
-            cur_slice = stateObject.currentDisplayedSlice
-            entry = lock(MEH._tp_cache_lock) do
-                haskey(MEH.tp_data_cache, tp_idx) ? MEH.tp_data_cache[tp_idx] : nothing
+            entry = if _cached_tp_idx[] == tp_idx && _cached_tp_entry[] !== nothing
+                _cached_tp_entry[]
+            else
+                e = lock(MEH._tp_cache_lock) do
+                    haskey(MEH.tp_data_cache, tp_idx) ? MEH.tp_data_cache[tp_idx] : nothing
+                end
+                _cached_tp_idx[] = tp_idx
+                _cached_tp_entry[] = e
+                e
             end
             if entry !== nothing
                 try
                     if is_ln_mode || texture.name == "Anatomy"
-                        if entry.anat_i16 !== nothing
-                            _sync_bbox_to_vol!(entry.anat_i16, v -> round(Int16, v))
+                        if entry.anat_i16 !== nothing && !_is_sharing_vol(entry.anat_i16)
+                            _copy_bbox_2d_to_3d!(entry.anat_i16, eff_dim, cur_slice, twoDimDat.dat, min_bx, max_bx, min_by, max_by)
                         end
-                        if entry.anatomy !== nothing && entry.anatomy !== entry.anat_i16
-                            _sync_bbox_to_vol!(entry.anatomy, v -> UInt16(max(0, round(Int, v))))
+                        if entry.anatomy !== nothing && entry.anatomy !== entry.anat_i16 && !_is_sharing_vol(entry.anatomy)
+                            _copy_bbox_2d_to_3d!(entry.anatomy, eff_dim, cur_slice, twoDimDat.dat, min_bx, max_bx, min_by, max_by)
                         end
                     else
-                        if entry.mask_i16 !== nothing
-                            _sync_bbox_to_vol!(entry.mask_i16, v -> round(Int16, v))
+                        if entry.mask_i16 !== nothing && !_is_sharing_vol(entry.mask_i16)
+                            _copy_bbox_2d_to_3d!(entry.mask_i16, eff_dim, cur_slice, twoDimDat.dat, min_bx, max_bx, min_by, max_by)
                         end
-                        if entry.mask isa Array{Int8, 3}
-                            _sync_bbox_to_vol!(entry.mask, v -> clamp(round(Int16, v), Int8(-128), Int8(127)))
-                        elseif entry.mask !== nothing && entry.mask !== entry.mask_i16
-                            T_m = eltype(entry.mask)
-                            _sync_bbox_to_vol!(entry.mask, v -> round(T_m, v))
+                        if entry.mask isa Array{Int8, 3} && !_is_sharing_vol(entry.mask)
+                            _copy_bbox_2d_to_3d!(entry.mask, eff_dim, cur_slice, twoDimDat.dat, min_bx, max_bx, min_by, max_by)
+                        elseif entry.mask !== nothing && entry.mask !== entry.mask_i16 && !_is_sharing_vol(entry.mask)
+                            _copy_bbox_2d_to_3d!(entry.mask, eff_dim, cur_slice, twoDimDat.dat, min_bx, max_bx, min_by, max_by)
                         end
                     end
                 catch e_sync
@@ -660,13 +692,8 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
                     try
                         for scrDat in stateObject.onScrollData.dataToScroll
                             if scrDat.name == texture.name
-                                dim_local = stateObject.onScrollData.dimensionToScroll
-                                sl_v = selectdim(scrDat.dat, dim_local, cur_slice)
-                                T_s = eltype(scrDat.dat)
-                                src = twoDimDat.dat
-                                @inbounds for y in min_by:max_by, x in min_bx:max_bx
-                                    sl_v[x, y] = round(T_s, src[x, y])
-                                end
+                                dim_local = Int(stateObject.onScrollData.dimensionToScroll)
+                                _copy_bbox_2d_to_3d!(scrDat.dat, dim_local, cur_slice, twoDimDat.dat, min_bx, max_bx, min_by, max_by)
                                 break
                             end
                         end

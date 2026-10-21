@@ -282,12 +282,19 @@ function compute_measurement_vertices(measurements::Vector{SphereMeasurement}, s
     return vertices
 end
 
+const _BRUSH_SEGS = 32
+const _BRUSH_COS = Float32[cos(i / 32 * 2pi) for i in 0:32]
+const _BRUSH_SIN = Float32[sin(i / 32 * 2pi) for i in 0:32]
+const _COLOR_ERASE = Float32[0.96f0, 0.26f0, 0.21f0, 0.5f0]
+const _COLOR_PAINT = Float32[0.30f0, 0.69f0, 0.31f0, 0.5f0]
+
 """
     compute_brush_circle_vertices(state, panel_id, center_idx, stroke_width; is_erase=false)
 
 Generates the vector buffer (vec2 pos, vec4 color) for the active drawing/erasing
-brush circle on `panel_id`, reusing the SUV sphere measurement circle logic (`compute_measurement_vertices`)
-with 50% opacity (`alpha = 0.5f0`) so underlying anatomy and lesions remain visible.
+brush circle on `panel_id` with 50% opacity (`alpha = 0.5f0`) so underlying anatomy
+and lesions remain visible. Uses a precomputed 32-segment circle lookup table for
+instant, zero-allocation vertex generation.
 """
 function compute_brush_circle_vertices(
     state,
@@ -297,24 +304,57 @@ function compute_brush_circle_vertices(
     is_erase::Bool = false
 )::Vector{Float32}
     isempty(state) && return Float32[]
-    orig_sp = state[1].spacingsValue[1]
-    sx = orig_sp[1] > 0 ? Float32(orig_sp[1]) : 1.0f0
-    sy = orig_sp[2] > 0 ? Float32(orig_sp[2]) : 1.0f0
-    sz = orig_sp[3] > 0 ? Float32(orig_sp[3]) : 1.0f0
+    panelState = state[panel_id]
+    w = Float32(panelState.calcDimsStruct.imageTextureWidth)
+    h = Float32(panelState.calcDimsStruct.imageTextureHeight)
+    if w <= 0 || h <= 0
+        return Float32[]
+    end
+
+    p_mapped = panel_id > 5 ? panel_id - 5 : panel_id
+    cx, cy, cz = center_idx
+    currentSlice = Float32(panelState.currentDisplayedSlice)
     sw = max(1.0f0, Float32(stroke_width))
-    brush_sphere = SphereMeasurement(
-        id = -2,
-        center_idx = center_idx,
-        radius_mm = sw * min(sx, sy, sz),
-        radius_x_mm = sw * sx,
-        radius_y_mm = sw * sy,
-        radius_z_mm = sw * sz,
-        suv_mean = 0.0f0,
-        suv_max = 0.0f0,
-        is_active = true,
-        color_idx = is_erase ? 1 : 2
-    )
-    return compute_measurement_vertices(SphereMeasurement[brush_sphere], state, panel_id)
+
+    d_slice = if p_mapped in (1, 2, 5)
+        abs(cz - currentSlice)
+    elseif p_mapped == 3
+        abs(cx - currentSlice)
+    else
+        abs(cy - currentSlice)
+    end
+    if d_slice >= sw
+        return Float32[]
+    end
+
+    scale_factor = sqrt(max(0.0f0, 1.0f0 - (d_slice / sw)^2))
+    rad_pix = sw * scale_factor
+
+    px_c, py_c = if p_mapped in (1, 2, 5)
+        (cx, cy)
+    elseif p_mapped == 3
+        (cy, cz)
+    else
+        (cx, cz)
+    end
+
+    u_c = (px_c - 0.5f0) / w
+    v_c = (py_c - 0.5f0) / h
+    r_u = rad_pix / w
+    r_v = rad_pix / h
+
+    color = is_erase ? _COLOR_ERASE : _COLOR_PAINT
+    vertices = Float32[]
+    sizehint!(vertices, _BRUSH_SEGS * 36)
+
+    @inbounds for i in 1:_BRUSH_SEGS
+        u1 = u_c + r_u * _BRUSH_COS[i]
+        v1 = v_c + r_v * _BRUSH_SIN[i]
+        u2 = u_c + r_u * _BRUSH_COS[i+1]
+        v2 = v_c + r_v * _BRUSH_SIN[i+1]
+        _push_thick_line!(vertices, u1, v1, u2, v2, color, w, h, 0.001f0)
+    end
+    return vertices
 end
 
 """

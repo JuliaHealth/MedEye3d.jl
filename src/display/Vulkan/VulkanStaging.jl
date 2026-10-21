@@ -132,11 +132,19 @@ end
         unsafe_copyto!(dest, pointer(data), n)
     else
         w_d, h_d = size(data, 1), size(data, 2)
-        idx = 1
-        @inbounds for col in 1:h_d, row in 1:w_d
-            if idx <= n
+        if w_d * h_d <= n
+            idx = 1
+            @inbounds for col in 1:h_d, row in 1:w_d
                 unsafe_store!(dest, data[row, col], idx)
                 idx += 1
+            end
+        else
+            idx = 1
+            @inbounds for col in 1:h_d, row in 1:w_d
+                if idx <= n
+                    unsafe_store!(dest, data[row, col], idx)
+                    idx += 1
+                end
             end
         end
     end
@@ -146,11 +154,19 @@ end
     n = min(length(data), w * h)
     if ndims(data) == 2
         w_d, h_d = size(data, 1), size(data, 2)
-        idx = 1
-        @inbounds for col in 1:h_d, row in 1:w_d
-            if idx <= n
+        if w_d * h_d <= n
+            idx = 1
+            @inbounds for col in 1:h_d, row in 1:w_d
                 unsafe_store!(dest, Float32(data[row, col]), idx)
                 idx += 1
+            end
+        else
+            idx = 1
+            @inbounds for col in 1:h_d, row in 1:w_d
+                if idx <= n
+                    unsafe_store!(dest, Float32(data[row, col]), idx)
+                    idx += 1
+                end
             end
         end
     else
@@ -173,11 +189,19 @@ end
         unsafe_copyto!(dest, pointer(data), n)
     else
         w_d, h_d = size(data, 1), size(data, 2)
-        idx = 1
-        @inbounds for col in 1:h_d, row in 1:w_d
-            if idx <= n
+        if w_d * h_d <= n
+            idx = 1
+            @inbounds for col in 1:h_d, row in 1:w_d
                 unsafe_store!(dest, data[row, col], idx)
                 idx += 1
+            end
+        else
+            idx = 1
+            @inbounds for col in 1:h_d, row in 1:w_d
+                if idx <= n
+                    unsafe_store!(dest, data[row, col], idx)
+                    idx += 1
+                end
             end
         end
     end
@@ -187,11 +211,19 @@ end
     n = min(length(data), w * h)
     if ndims(data) == 2
         w_d, h_d = size(data, 1), size(data, 2)
-        idx = 1
-        @inbounds for col in 1:h_d, row in 1:w_d
-            if idx <= n
+        if w_d * h_d <= n
+            idx = 1
+            @inbounds for col in 1:h_d, row in 1:w_d
                 unsafe_store!(dest, Int16(data[row, col]), idx)
                 idx += 1
+            end
+        else
+            idx = 1
+            @inbounds for col in 1:h_d, row in 1:w_d
+                if idx <= n
+                    unsafe_store!(dest, Int16(data[row, col]), idx)
+                    idx += 1
+                end
             end
         end
     else
@@ -214,11 +246,19 @@ end
         unsafe_copyto!(dest, pointer(data), n)
     else
         w_d, h_d = size(data, 1), size(data, 2)
-        idx = 1
-        @inbounds for col in 1:h_d, row in 1:w_d
-            if idx <= n
+        if w_d * h_d <= n
+            idx = 1
+            @inbounds for col in 1:h_d, row in 1:w_d
                 unsafe_store!(dest, data[row, col], idx)
                 idx += 1
+            end
+        else
+            idx = 1
+            @inbounds for col in 1:h_d, row in 1:w_d
+                if idx <= n
+                    unsafe_store!(dest, data[row, col], idx)
+                    idx += 1
+                end
             end
         end
     end
@@ -228,11 +268,19 @@ end
     n = min(length(data), w * h)
     if ndims(data) == 2
         w_d, h_d = size(data, 1), size(data, 2)
-        idx = 1
-        @inbounds for col in 1:h_d, row in 1:w_d
-            if idx <= n
+        if w_d * h_d <= n
+            idx = 1
+            @inbounds for col in 1:h_d, row in 1:w_d
                 unsafe_store!(dest, Int8(data[row, col]), idx)
                 idx += 1
+            end
+        else
+            idx = 1
+            @inbounds for col in 1:h_d, row in 1:w_d
+                if idx <= n
+                    unsafe_store!(dest, Int8(data[row, col]), idx)
+                    idx += 1
+                end
             end
         end
     else
@@ -346,11 +394,13 @@ function upload_textures_batched!(ctx::VkCtx, pool::VkStagingPool, batch::Vector
         # during unsafe_copyto!. Without this, a concurrent GC could free the parent
         # array while we're reading from it via pointer(), causing a segfault.
         GC.@preserve data begin
-            # Zero the full texture area first, then copy actual data on top.
-            # When plane changes (e.g., axial→coronal), the slice may be smaller
-            # than the texture. Zeroing prevents stale garbage pixels from
-            # Vulkan reading past the valid data in the Extent3D copy region.
-            ccall(:memset, Ptr{Nothing}, (Ptr{Nothing}, Cint, Csize_t), dest_ptr, 0, data_bytes)
+            # Zero the full texture area only when the incoming data slice is smaller
+            # than the texture (e.g. edge slices after plane orientation change).
+            # When actual_pixels >= expected_pixels (standard rendering/painting),
+            # copy_data_to_staging! completely overwrites all pixels, making memset redundant.
+            if actual_pixels < expected_pixels
+                ccall(:memset, Ptr{Nothing}, (Ptr{Nothing}, Cint, Csize_t), dest_ptr, 0, data_bytes)
+            end
             # Copy actual data (uses min(length(data), w*h) so safe for smaller slices)
             copy_data_to_staging!(dest_ptr, data, w, h, tex.format)
         end

@@ -90,16 +90,33 @@ function rasterize_thick_line!(
         dx = Float32(p2[1] - p1[1])
         dy = Float32(p2[2] - p1[2])
         l2 = dx * dx + dy * dy
-        inv_l2 = l2 > 0.0f0 ? (1.0f0 / l2) : 0.0f0
-        @inbounds for y in min_y:max_y
-            uy = Float32(y) - p1y
-            for x in min_x:max_x
-                ux = Float32(x) - p1x
-                t = l2 > 0.0f0 ? clamp((ux * dx + uy * dy) * inv_l2, 0.0f0, 1.0f0) : 0.0f0
-                rx = ux - t * dx
-                ry = uy - t * dy
-                if rx * rx + ry * ry <= radius_sq
-                    mask[x, y] = val
+        if l2 == 0.0f0
+            # Optimized horizontal circle chord fill for stationary point / dot
+            @inbounds for y in min_y:max_y
+                uy = Float32(y) - p1y
+                uy_sq = uy * uy
+                if uy_sq <= radius_sq
+                    span = sqrt(radius_sq - uy_sq)
+                    x_start = clamp(round(Int, p1x - span), min_x, max_x)
+                    x_end = clamp(round(Int, p1x + span), min_x, max_x)
+                    for x in x_start:x_end
+                        mask[x, y] = val
+                    end
+                end
+            end
+        else
+            inv_l2 = 1.0f0 / l2
+            @inbounds for y in min_y:max_y
+                uy = Float32(y) - p1y
+                dot_y = uy * dy
+                for x in min_x:max_x
+                    ux = Float32(x) - p1x
+                    t = clamp((ux * dx + dot_y) * inv_l2, 0.0f0, 1.0f0)
+                    rx = ux - t * dx
+                    ry = uy - t * dy
+                    if rx * rx + ry * ry <= radius_sq
+                        mask[x, y] = val
+                    end
                 end
             end
         end
@@ -126,10 +143,11 @@ function rasterize_polyline!(
         return rasterize_thick_line!(mask, points[1], points[1], radius, val; use_gpu=use_gpu)
     end
 
-    rasterize_thick_line!(mask, points[1], points[2], radius, val; use_gpu=use_gpu)
-    for i in 2:length(points)-1
-        if points[i] != points[i+1]
-            rasterize_thick_line!(mask, points[i], points[i+1], radius, val; use_gpu=use_gpu)
+    @inbounds for i in 1:length(points)-1
+        p1 = points[i]
+        p2 = points[i+1]
+        if i == 1 || p1 != p2
+            rasterize_thick_line!(mask, p1, p2, radius, val; use_gpu=use_gpu)
         end
     end
     return mask
