@@ -1295,10 +1295,15 @@ function coordinateDisplay(
                 # get the aggregation here, only when the type is mouseStruct.
                 if typeof(channelData) == MouseStruct
                     # Fix 2D: Close any open Makie dropdowns when the 3D viewer receives a click
-                    if channelData.isLeftButtonDown && LesionMetadataWindow._active_open_menu[] !== nothing
+                    if channelData.isLeftButtonDown
                         try
-                            for m in LesionMetadataWindow._ALL_MENUS
-                                m.is_open[] && (m.is_open[] = false)
+                            LMW = MakieEventHandlers._get_lmw()
+                            if LMW !== nothing && isdefined(LMW, :_active_open_menu) && LMW._active_open_menu[] !== nothing
+                                if isdefined(LMW, :_ALL_MENUS)
+                                    for m in LMW._ALL_MENUS
+                                        m.is_open[] && (m.is_open[] = false)
+                                    end
+                                end
                             end
                         catch; end
                     end
