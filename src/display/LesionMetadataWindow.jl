@@ -11546,6 +11546,7 @@ function display_metadata_window(fig::Figure)
     cached_init = XnatAuth.load_cached_credentials()
     init_url = cached_init !== nothing ? cached_init.server_url : "https://xnat.bmia.nl"
     init_alias = cached_init !== nothing ? cached_init.alias : ""
+    init_secret = cached_init !== nothing ? cached_init.secret : ""
     init_user = cached_init !== nothing ? cached_init.username : ""
 
     lbl_url = Label(login_inner[2, 1], "XNAT URL:", color=:white, fontsize=12, halign=:right, visible=_login_visible)
@@ -11563,11 +11564,29 @@ function display_metadata_window(fig::Figure)
     on(_login_visible) do vis; login_tb_alias.blockscene.visible[] = vis; end
 
     lbl_secret = Label(login_inner[4, 1], "24h Secret:", color=:white, fontsize=12, halign=:right, visible=_login_visible)
-    login_tb_secret = Textbox(login_inner[4, 2], placeholder="Enter Secret Token", fontsize=12, width=230,
+    login_tb_secret = Textbox(login_inner[4, 2], placeholder="Enter Secret Token", stored_string=init_secret, displayed_string=init_secret, fontsize=12, width=230,
         textcolor=RGBf(0.95, 0.95, 0.95), textcolor_placeholder=RGBf(0.55, 0.58, 0.65), 
         boxcolor=RGBf(0.14, 0.16, 0.20), boxcolor_focused=RGBf(0.20, 0.24, 0.32), boxcolor_hover=RGBf(0.17, 0.20, 0.27),
         bordercolor=RGBf(0.30, 0.35, 0.45), cursorcolor=RGBf(0.95, 0.95, 0.95))
-    on(_login_visible) do vis; login_tb_secret.blockscene.visible[] = vis; end
+    on(_login_visible) do vis
+        login_tb_secret.blockscene.visible[] = vis
+        if vis
+            cached_now = XnatAuth.load_cached_credentials()
+            if cached_now !== nothing
+                login_tb_url.displayed_string[] = cached_now.server_url
+                login_tb_url.stored_string[] = cached_now.server_url
+                login_tb_alias.displayed_string[] = cached_now.alias
+                login_tb_alias.stored_string[] = cached_now.alias
+                login_tb_secret.displayed_string[] = cached_now.secret
+                login_tb_secret.stored_string[] = cached_now.secret
+                login_tb_user.displayed_string[] = cached_now.username
+                login_tb_user.stored_string[] = cached_now.username
+            else
+                login_tb_secret.displayed_string[] = ""
+                login_tb_secret.stored_string[] = ""
+            end
+        end
+    end
 
     lbl_user = Label(login_inner[5, 1], "Username:", color=:white, fontsize=12, halign=:right, visible=_login_visible)
     login_tb_user = Textbox(login_inner[5, 2], placeholder="Enter username", stored_string=init_user, displayed_string=init_user, fontsize=12, width=230,
@@ -11620,12 +11639,20 @@ function display_metadata_window(fig::Figure)
         
         # Priority 1: 24h Alias & Secret Token
         if !isempty(alias) && !isempty(secret)
+            now_t = time()
+            cached_prev = XnatAuth.load_cached_credentials()
+            # If alias & secret match cached, retain original issued_at time; otherwise first provided now
+            issued_t = (cached_prev !== nothing && cached_prev.alias == alias && cached_prev.secret == secret) ?
+                        cached_prev.issued_at : now_t
+            exp_t = issued_t + 86400.0
+
             new_creds = XnatAuth.XnatCredentials(
                 server_url = url,
                 alias = alias,
                 secret = secret,
                 username = !isempty(user) ? user : alias,
-                expires_at = time() + 86400.0
+                issued_at = issued_t,
+                expires_at = exp_t
             )
             login_msg.text[] = "Validating token with XNAT..."
             login_msg.color[] = RGBf(0.4, 0.8, 1.0)

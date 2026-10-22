@@ -170,6 +170,50 @@ using HDF5
         @test haskey(h5, "BASELINE")
         @test haskey(h5["BASELINE"], "Fixed_CT_Volume_0.nii.gz")
     end
+
+    # 15. Secret autosave and 24h expiration cleanup
+    test_creds_dir = mktempdir()
+    test_creds_file = joinpath(test_creds_dir, "xnat_credentials.json")
+    ENV["MEDEYE3D_XNAT_CREDS"] = test_creds_file
+    try
+        # Valid fresh token
+        fresh_creds = XnatCredentials(
+            server_url = "https://xnat.test",
+            alias = "test_alias",
+            secret = "super_secret_token",
+            issued_at = time(),
+            expires_at = time() + 86400.0,
+            username = "test_user"
+        )
+        @test XnatAuth.save_cached_credentials(fresh_creds) == true
+        @test isfile(test_creds_file)
+
+        loaded_fresh = XnatAuth.load_cached_credentials()
+        @test loaded_fresh !== nothing
+        @test loaded_fresh.secret == "super_secret_token"
+        @test loaded_fresh.alias == "test_alias"
+        @test XnatAuth.is_token_valid_locally(loaded_fresh) == true
+
+        # Expired token (> 24 hours since first provided)
+        expired_creds = XnatCredentials(
+            server_url = "https://xnat.test",
+            alias = "test_alias",
+            secret = "super_secret_token",
+            issued_at = time() - 86500.0,
+            expires_at = time() + 1000.0, # even if expires_at was altered, issued_at > 24h expires it
+            username = "test_user"
+        )
+        @test XnatAuth.save_cached_credentials(expired_creds) == true
+        @test XnatAuth.is_token_valid_locally(expired_creds) == false
+        
+        # load_cached_credentials should auto-clear file and return nothing
+        loaded_expired = XnatAuth.load_cached_credentials()
+        @test loaded_expired === nothing
+        @test !isfile(test_creds_file)
+    finally
+        delete!(ENV, "MEDEYE3D_XNAT_CREDS")
+        rm(test_creds_dir, recursive=true, force=true)
+    end
 end
 
 ccall(:_exit, Cvoid, (Cint,), 0)

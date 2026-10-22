@@ -107,8 +107,16 @@ function load_cached_credentials()::Union{XnatCredentials, Nothing}
         alias = get(raw, "alias", "")
         secret = get(raw, "secret", "")
         issued_at = Float64(get(raw, "issued_at", time()))
-        expires_at = Float64(get(raw, "expires_at", time() + 86400.0))
+        expires_at = Float64(get(raw, "expires_at", issued_at + 86400.0))
         username = get(raw, "username", "")
+
+        # Check if more than 24 hours elapsed since token was first provided
+        now_sec = time()
+        if (now_sec - issued_at) >= 86400.0 || now_sec >= expires_at
+            @info "[XNAT] 24 hours elapsed since token was first provided. Clearing cached secret and credentials."
+            clear_cached_credentials()
+            return nothing
+        end
 
         if isempty(server_url) || isempty(alias) || isempty(secret)
             return nothing
@@ -177,13 +185,18 @@ end
 """
     is_token_valid_locally(creds::XnatCredentials) -> Bool
 
-Checks if token expiration time has not elapsed (with 15 minute safety margin).
+Checks if token expiration time has not elapsed (with 15 minute safety margin)
+and has not exceeded 24 hours since it was first provided.
 """
 function is_token_valid_locally(creds::XnatCredentials)::Bool
     if isempty(creds.alias) || isempty(creds.secret) || isempty(creds.server_url)
         return false
     end
-    return time() < (creds.expires_at - 900.0)
+    now_sec = time()
+    if (now_sec - creds.issued_at) >= 86400.0 || now_sec >= creds.expires_at
+        return false
+    end
+    return now_sec < (creds.expires_at - 900.0)
 end
 
 """
@@ -330,7 +343,8 @@ function auto_verify_credentials(; timeout::Float64=5.0)::Tuple{Bool, Union{Xnat
 
     # Check local expiration first
     if !is_token_valid_locally(creds)
-        return (false, creds, "Token has expired locally")
+        clear_cached_credentials()
+        return (false, nothing, "Token has expired locally (>24h since first provided)")
     end
 
     ok, msg = validate_credentials(creds; timeout=timeout)
