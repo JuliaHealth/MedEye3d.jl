@@ -35,18 +35,43 @@ struct XnatCredentials
     issued_at::Float64
     expires_at::Float64
     username::String
+
+    function XnatCredentials(
+        server_url::AbstractString,
+        alias::AbstractString,
+        secret::AbstractString,
+        issued_at::Real,
+        expires_at::Real,
+        username::AbstractString
+    )
+        clean_url = String(rstrip(strip(server_url), '/'))
+        new(
+            clean_url,
+            String(strip(alias)),
+            String(strip(secret)),
+            Float64(issued_at),
+            Float64(expires_at),
+            String(strip(username))
+        )
+    end
 end
 
 function XnatCredentials(;
-    server_url::String="",
-    alias::String="",
-    secret::String="",
-    issued_at::Float64=time(),
-    expires_at::Float64=time() + 86400.0,
-    username::String=""
+    server_url::AbstractString="",
+    alias::AbstractString="",
+    secret::AbstractString="",
+    issued_at::Real=time(),
+    expires_at::Real=time() + 86400.0,
+    username::AbstractString=""
 )
-    clean_url = rstrip(strip(server_url), '/')
-    return XnatCredentials(clean_url, strip(alias), strip(secret), issued_at, expires_at, strip(username))
+    return XnatCredentials(
+        server_url,
+        alias,
+        secret,
+        issued_at,
+        expires_at,
+        username
+    )
 end
 
 """
@@ -223,18 +248,20 @@ Contacts XNAT `POST /data/services/tokens/issue` using standard credentials to r
 a fresh 24-hour Alias and Secret Token. Automatically persists the resulting credentials.
 """
 function issue_token_from_userpass(
-    server_url::String,
-    username::String,
-    password::String;
+    server_url::AbstractString,
+    username::AbstractString,
+    password::AbstractString;
     timeout::Float64=10.0
 )::Tuple{Union{XnatCredentials, Nothing}, String}
-    clean_url = rstrip(strip(server_url), '/')
-    if isempty(clean_url) || isempty(username) || isempty(password)
+    clean_url = String(rstrip(strip(server_url), '/'))
+    user_str = String(strip(username))
+    pass_str = String(strip(password))
+    if isempty(clean_url) || isempty(user_str) || isempty(pass_str)
         return (nothing, "Server URL, username, and password are required")
     end
 
     issue_url = "$clean_url/data/services/tokens/issue"
-    basic_token = Base64.base64encode("$username:$password")
+    basic_token = Base64.base64encode("$user_str:$pass_str")
     headers = [
         "Authorization" => "Basic $basic_token",
         "Accept" => "application/json"
@@ -262,11 +289,11 @@ function issue_token_from_userpass(
         now_t = time()
         creds = XnatCredentials(
             server_url = clean_url,
-            alias = alias,
-            secret = secret,
+            alias = String(alias),
+            secret = String(secret),
             issued_at = now_t,
             expires_at = now_t + exp_sec,
-            username = username
+            username = user_str
         )
         save_cached_credentials(creds)
         return (creds, "Token issued successfully (valid for $(round(exp_sec/3600, digits=1)) hours)")

@@ -23,6 +23,24 @@ using Dates
     @test creds.secret == "secret_123"
     @test creds.username == "tester"
 
+    # 2b. XnatCredentials with SubString inputs (prevent TypeError on strip())
+    sub_url = strip("  https://xnat.bmia.nl/  ")
+    sub_alias = strip("  token_alias_abc  ")
+    sub_sec = strip("  token_sec_123  ")
+    sub_user = strip("  john_doe  ")
+    @test sub_url isa SubString
+    creds_sub = XnatCredentials(
+        server_url = sub_url,
+        alias = sub_alias,
+        secret = sub_sec,
+        username = sub_user
+    )
+    @test creds_sub.server_url isa String
+    @test creds_sub.server_url == "https://xnat.bmia.nl"
+    @test creds_sub.alias == "token_alias_abc"
+    @test creds_sub.secret == "token_sec_123"
+    @test creds_sub.username == "john_doe"
+
     # 3. Local token validity check
     @test XnatAuth.is_token_valid_locally(creds) == true
     

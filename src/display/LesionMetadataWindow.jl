@@ -4362,14 +4362,15 @@ function create_metadata_window(
 
     on(menu_xnat_proj.selection) do proj_name
         proj_name === nothing && return
-        proj = strip(proj_name)
+        proj = String(strip(proj_name))
         (isempty(proj) || proj == "(None)") && return
         
         Threads.@spawn begin
             creds = _active_xnat_creds[]
             subjs = String[]
             if creds !== nothing
-                subjs = XnatClient.list_subjects(creds, proj)
+                subjs_raw = XnatClient.list_subjects(creds, proj)
+                subjs = String[String(get(item, "label", get(item, "ID", ""))) for item in subjs_raw if !isempty(get(item, "label", get(item, "ID", "")))]
             end
             if isempty(subjs)
                 cache_base = XnatPreloader.get_local_cache_dir(proj, "")
@@ -11489,12 +11490,12 @@ function display_metadata_window(fig::Figure)
     push!(_all_textboxes, login_tb_pass)
     
     function _do_login()
-        url = strip(login_tb_url.displayed_string[])
+        url = String(strip(login_tb_url.displayed_string[]))
         isempty(url) && (url = "https://xnat.bmia.nl")
-        alias = strip(login_tb_alias.displayed_string[])
-        secret = strip(login_tb_secret.displayed_string[])
-        user = strip(login_tb_user.displayed_string[])
-        pass = strip(login_tb_pass.displayed_string[])
+        alias = String(strip(login_tb_alias.displayed_string[]))
+        secret = String(strip(login_tb_secret.displayed_string[]))
+        user = String(strip(login_tb_user.displayed_string[]))
+        pass = String(strip(login_tb_pass.displayed_string[]))
         
         # Priority 1: 24h Alias & Secret Token
         if !isempty(alias) && !isempty(secret)
@@ -11508,7 +11509,7 @@ function display_metadata_window(fig::Figure)
             login_msg.text[] = "Validating token with XNAT..."
             login_msg.color[] = RGBf(0.4, 0.8, 1.0)
             Threads.@spawn begin
-                is_valid = XnatAuth.validate_credentials(new_creds)
+                is_valid, val_msg = XnatAuth.validate_credentials(new_creds)
                 @async begin
                     if is_valid
                         XnatAuth.save_cached_credentials(new_creds)
@@ -11524,7 +11525,7 @@ function display_metadata_window(fig::Figure)
                         println("[LOGIN] User '$(new_creds.username)' authenticated via 24h token"); flush(stdout)
                     else
                         login_msg.color[] = RGBf(1.0, 0.3, 0.3)
-                        login_msg.text[] = "Invalid Alias/Secret token for $url"
+                        login_msg.text[] = !isempty(val_msg) ? val_msg : "Invalid Alias/Secret token for $url"
                     end
                 end
             end
@@ -11534,22 +11535,27 @@ function display_metadata_window(fig::Figure)
         # Priority 2: Standard Username & Password
         if !isempty(user)
             if pass == _LOGIN_PASSWORD || isempty(_LOGIN_PASSWORD)
+                login_msg.text[] = "Connecting to XNAT..."
+                login_msg.color[] = RGBf(0.4, 0.8, 1.0)
                 Threads.@spawn begin
-                    tok_ok, tok_creds, tok_msg = XnatAuth.issue_token_from_userpass(url, user, pass)
+                    tok_creds, tok_msg = XnatAuth.issue_token_from_userpass(url, user, pass)
                     @async begin
-                        if tok_ok && tok_creds !== nothing
+                        if tok_creds !== nothing
                             XnatAuth.save_cached_credentials(tok_creds)
                             _active_xnat_creds[] = tok_creds
                             up_fn = get(_lmw_observables, :update_auth_status, nothing)
                             up_fn !== nothing && up_fn(tok_creds)
+                            _current_user[] = user
+                            _login_authenticated[] = true
+                            _login_success_time[] = time()
+                            _login_visible[] = false
+                            login_msg.text[] = ""
+                            try; _MEH.app_is_loading[] = false; catch; end
+                            println("[LOGIN] User '$(user)' authenticated at $(Dates.format(Dates.now(), "HH:MM:SS"))"); flush(stdout)
+                        else
+                            login_msg.color[] = RGBf(1.0, 0.3, 0.3)
+                            login_msg.text[] = !isempty(tok_msg) ? tok_msg : "Authentication failed"
                         end
-                        _current_user[] = user
-                        _login_authenticated[] = true
-                        _login_success_time[] = time()
-                        _login_visible[] = false
-                        login_msg.text[] = ""
-                        try; _MEH.app_is_loading[] = false; catch; end
-                        println("[LOGIN] User '$(user)' authenticated at $(Dates.format(Dates.now(), "HH:MM:SS"))"); flush(stdout)
                     end
                 end
                 return

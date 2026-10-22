@@ -30,9 +30,9 @@ const _preload_active = Ref{Bool}(false)
 
 Returns the persistent local cache path for an XNAT subject's preprocessed volumes.
 """
-function get_local_cache_dir(project_id::String, subject_id::String)::String
-    clean_p = replace(project_id, r"[^a-zA-Z0-9_\-]" => "_")
-    clean_s = replace(subject_id, r"[^a-zA-Z0-9_\-]" => "_")
+function get_local_cache_dir(project_id::AbstractString, subject_id::AbstractString)::String
+    clean_p = replace(String(project_id), r"[^a-zA-Z0-9_\-]" => "_")
+    clean_s = replace(String(subject_id), r"[^a-zA-Z0-9_\-]" => "_")
     if Sys.iswindows()
         appdata = get(ENV, "APPDATA", "")
         base = !isempty(appdata) ? joinpath(appdata, "MedEye3D", "xnat_cache") : joinpath(homedir(), "AppData", "Roaming", "MedEye3D", "xnat_cache")
@@ -51,14 +51,14 @@ background download if that case is not yet cached locally.
 """
 function notify_patient_selected(
     creds::XnatCredentials,
-    project_id::String,
-    current_subject_id::String,
-    subject_queue::Vector{String}
+    project_id::AbstractString,
+    current_subject_id::AbstractString,
+    subject_queue::Vector{<:AbstractString}
 )
-    _current_project[] = project_id
-    _current_subject[] = current_subject_id
+    _current_project[] = String(project_id)
+    _current_subject[] = String(current_subject_id)
 
-    curr_idx = findfirst(==(current_subject_id), subject_queue)
+    curr_idx = findfirst(==(String(current_subject_id)), String.(subject_queue))
     if curr_idx === nothing || curr_idx >= length(subject_queue)
         return nothing
     end
@@ -108,11 +108,11 @@ function notify_patient_selected(
 end
 
 """
-    get_preloaded_case(subject_id::String) -> Union{String, Nothing}
+    get_preloaded_case(subject_id) -> Union{String, Nothing}
 
 Returns the cached HDF5 file path if `subject_id` is preloaded and ready.
 """
-function get_preloaded_case(subject_id::String)::Union{String, Nothing}
+function get_preloaded_case(subject_id::AbstractString)::Union{String, Nothing}
     if _preloaded_subject[] == subject_id && isfile(_preloaded_h5_path[])
         return _preloaded_h5_path[]
     end
@@ -120,11 +120,11 @@ function get_preloaded_case(subject_id::String)::Union{String, Nothing}
 end
 
 """
-    is_case_preloaded(subject_id::String) -> Bool
+    is_case_preloaded(subject_id) -> Bool
 
 Returns true if `subject_id` has been completely downloaded and cached locally.
 """
-function is_case_preloaded(subject_id::String)::Bool
+function is_case_preloaded(subject_id::AbstractString)::Bool
     return get_preloaded_case(subject_id) !== nothing
 end
 
