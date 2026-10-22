@@ -195,7 +195,7 @@ function get_auth_headers(creds::XnatCredentials)::Vector{Pair{String, String}}
     token = Base64.base64encode("$(creds.alias):$(creds.secret)")
     return [
         "Authorization" => "Basic $token",
-        "Accept" => "application/json"
+        "Accept" => "application/json, text/plain, */*"
     ]
 end
 
@@ -203,36 +203,47 @@ end
     validate_credentials(creds::XnatCredentials; timeout::Float64=5.0) -> Tuple{Bool, String}
 
 Directly pings the XNAT server to verify the token is active.
-Tries `/data/services/tokens/validate` first, falling back to `/data/JSESSION`.
+Tries `/data/JSESSION` first (accepting `text/plain, */*`), falling back to `/data/projects?format=json`.
 """
 function validate_credentials(creds::XnatCredentials; timeout::Float64=5.0)::Tuple{Bool, String}
     if isempty(creds.server_url) || isempty(creds.alias) || isempty(creds.secret)
         return (false, "Missing server URL or token credentials")
     end
 
-    headers = get_auth_headers(creds)
-    # Check token validate endpoint
-    validate_url = "$(creds.server_url)/data/services/tokens/validate"
+    auth_token = Base64.base64encode("$(creds.alias):$(creds.secret)")
+
+    # 1. Primary check: /data/JSESSION (standard XNAT session endpoint, returns 200 + JSESSIONID)
+    jsession_url = "$(creds.server_url)/data/JSESSION"
     try
         buf = IOBuffer()
-        resp = Downloads.request(validate_url; method="GET", headers=headers, output=buf, timeout=timeout)
+        js_headers = [
+            "Authorization" => "Basic $auth_token",
+            "Accept" => "text/plain, */*"
+        ]
+        resp = Downloads.request(jsession_url; method="GET", headers=js_headers, output=buf, timeout=timeout)
         if resp.status == 200
             return (true, "Token valid")
         elseif resp.status == 401
             return (false, "Token expired or unauthorized (HTTP 401)")
         end
     catch e
-        # If /data/services/tokens/validate is not found or fails, fallback to checking /data/JSESSION
     end
 
-    jsession_url = "$(creds.server_url)/data/JSESSION"
+    # 2. Secondary check: /data/projects?format=json
+    proj_url = "$(creds.server_url)/data/projects?format=json"
     try
         buf = IOBuffer()
-        resp = Downloads.request(jsession_url; method="GET", headers=headers, output=buf, timeout=timeout)
+        proj_headers = [
+            "Authorization" => "Basic $auth_token",
+            "Accept" => "application/json, */*"
+        ]
+        resp = Downloads.request(proj_url; method="GET", headers=proj_headers, output=buf, timeout=timeout)
         if resp.status == 200
-            return (true, "Connection active")
+            return (true, "Token valid")
         elseif resp.status == 401
             return (false, "Token expired or unauthorized (HTTP 401)")
+        elseif resp.status == 403
+            return (false, "Access forbidden (HTTP 403)")
         else
             return (false, "Server returned HTTP $(resp.status)")
         end
