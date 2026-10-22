@@ -363,6 +363,9 @@ function auto_verify_credentials(; timeout::Float64=5.0)::Tuple{Bool, Union{Xnat
     if ok
         return (true, creds, "Authenticated")
     else
+        if occursin("401", msg)
+            clear_cached_credentials()
+        end
         return (false, creds, msg)
     end
 end
