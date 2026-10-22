@@ -3191,6 +3191,25 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
                             end
                         catch; end
                     end
+
+                    # Auto-propagate newly created/painted lesion across subsequent TPs via OrganHeatLesionTracker
+                    if !ln_mode_i && centroid_found && !isempty(h5_path_ref[]) && isfile(h5_path_ref[])
+                        try
+                            entry = lock(_tp_cache_lock) do
+                                haskey(tp_data_cache, tp_i) ? tp_data_cache[tp_i] : nothing
+                            end
+                            if entry !== nothing && entry.mask_i16 !== nothing
+                                MedEye3d.OrganHeatLesionTracker.async_propagate_new_lesion!(
+                                    h5_path_ref[], tp_i, lid_i, entry.mask_i16;
+                                    on_complete=(msg) -> begin
+                                        println("[OrganHeatTracker] $msg")
+                                    end
+                                )
+                            end
+                        catch err
+                            @debug "Async organ heat propagation: $err"
+                        end
+                    end
                 end
             finally
                 _async_suv_worker_running[] = false

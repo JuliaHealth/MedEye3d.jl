@@ -151,6 +151,10 @@ export XnatPreloader
 # in preprocessing (recompute_bones.jl) using max_anatomy + Skellytour.
 # Loaded from Bone_Subsegments_0.h5 at startup into bone_subsegments_cache.
 
+include(joinpath("preprocessing", "OrganHeatLesionTracker.jl"))
+using .OrganHeatLesionTracker
+export OrganHeatLesionTracker
+
 
 include(joinpath("display", "LesionMetadataWindow.jl"))
 include(joinpath("display", "HeuristicsEngine.jl"))

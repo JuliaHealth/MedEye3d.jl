@@ -770,8 +770,21 @@ function main()
         println("  Diffusivity must be computed separately for Heat-GDT to work.")
     end
     
+    # ═══════════════════════════════════════════════════════════════════════
+    # Phase 5: 5-Organ Anatomical Relative Mapping & Heat-Kernel Lesion Growth
+    # Maps all clinical lesions across time points using organ anchors and Heat-GDT
+    # ═══════════════════════════════════════════════════════════════════════
+    println("\n=== Phase 5: 5-Organ Anatomical Mapping & Heat-Kernel Lesion Growth ===")
+    try
+        using MedEye3d.OrganHeatLesionTracker
+        OrganHeatLesionTracker.propagate_all_timepoints!(h5_path; verbose=true)
+        println("  ✅ 5-Organ Heat-Kernel Lesion Mapping complete!")
+    catch e
+        println("  ⚠️ Organ-Heat Lesion Tracking encountered: $e")
+    end
+
     println("\n✅ Pre-processing complete. HDF5 is now the single source of truth.")
-    println("   All atlas, centroids, organ mapping, bone subsegments, and diffusivity stored in: $h5_path")
+    println("   All atlas, centroids, organ mapping, bone subsegments, diffusivity, and matches stored in: $h5_path")
 end
 
 main()

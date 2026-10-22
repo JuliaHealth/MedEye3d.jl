@@ -84,39 +84,45 @@ function _load_h5_cached_arrays(cache, h5_path::String, node_name::String)
     try
         res = HDF5.h5open(h5_path, "r") do f
             target_grp = nothing
-            for cand in ("timepoint_$tp", tp == "0" ? "BASELINE" : "TFM_$tp", "BASELINE")
-                if haskey(f, cand) && (haskey(f[cand], expert_name) || haskey(f[cand], mask_name))
-                    target_grp = f[cand]
-                    break
-                end
-            end
-            if target_grp === nothing
-                for k in keys(f)
-                    k in ("_meta_", "ATLAS", "CENTROIDS", "BONE_SUBSEG") && continue
-                    g = f[k]
-                    if g isa HDF5.Group && (haskey(g, expert_name) || haskey(g, mask_name))
+            # Check target groups with and without .nii.gz suffix
+            for k in keys(f)
+                k in ("_meta_", "ATLAS", "CENTROIDS", "BONE_SUBSEG", "ORGAN_CENTROIDS") && continue
+                g = f[k]
+                if g isa HDF5.Group
+                    # Check if this group matches the modality and TP
+                    has_mask = haskey(g, mask_name) || haskey(g, "$(mask_name).nii.gz") ||
+                               haskey(g, expert_name) || haskey(g, "$(expert_name).nii.gz")
+                    if has_mask
                         target_grp = g
                         break
                     end
                 end
             end
             target_grp === nothing && return (nothing, nothing)
+
             func_arr = if haskey(target_grp, func_name)
-                read(target_grp[func_name])
+                Float32.(read(target_grp[func_name]))
+            elseif haskey(target_grp, "$(func_name).nii.gz")
+                Float32.(read(target_grp["$(func_name).nii.gz"]))
             else
                 found_f = nothing
                 for dk in keys(target_grp)
                     if startswith(dk, "SUV_PET_Image") || startswith(dk, "SPECT_NM_Vendor_Volume")
-                        found_f = read(target_grp[dk])
+                        found_f = Float32.(read(target_grp[dk]))
                         break
                     end
                 end
                 found_f
             end
-            mask_arr = if haskey(target_grp, expert_name)
-                read(target_grp[expert_name])
+
+            mask_arr = if haskey(target_grp, "$(expert_name).nii.gz")
+                Int32.(read(target_grp["$(expert_name).nii.gz"]))
+            elseif haskey(target_grp, expert_name)
+                Int32.(read(target_grp[expert_name]))
+            elseif haskey(target_grp, "$(mask_name).nii.gz")
+                Int32.(read(target_grp["$(mask_name).nii.gz"]))
             elseif haskey(target_grp, mask_name)
-                read(target_grp[mask_name])
+                Int32.(read(target_grp[mask_name]))
             else
                 nothing
             end
