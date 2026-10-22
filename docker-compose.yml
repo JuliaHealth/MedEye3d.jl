@@ -33,4 +33,24 @@ services:
     volumes:
       - /mnt/big/project_ssd/project_ssd:/mnt/big/project_ssd/project_ssd
       - /home/jm:/home/jm
+      - .:/workspaces/MedEye3d.jl
+      - .:/app
     network_mode: host
+
+  medeye3d-xnat-preproc:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+    container_name: medeye3d-xnat-preproc
+    environment:
+      - XNAT_SERVER=${XNAT_SERVER}
+      - XNAT_ALIAS=${XNAT_ALIAS}
+      - XNAT_SECRET=${XNAT_SECRET}
+      - JULIA_NUM_THREADS=auto,1
+      - HDF5_USE_FILE_LOCKING=FALSE
+    volumes:
+      - .:/workspace
+      - /tmp/medeye3d_xnat_preproc:/tmp/medeye3d_xnat_preproc
+    network_mode: host
+    working_dir: /workspace
+    command: ["./scripts/xnat/xnat_preprocess_patient.sh", "--help"]

@@ -134,6 +134,18 @@ include(joinpath("display", "EPSMAReportWindow.jl"))
 using .EPSMAReportWindow
 export EPSMAReportWindow, open_epsma_report_window, close_epsma_report_window
 
+include(joinpath("xnat", "XnatAuth.jl"))
+using .XnatAuth
+export XnatAuth
+
+include(joinpath("xnat", "XnatClient.jl"))
+using .XnatClient
+export XnatClient
+
+include(joinpath("xnat", "XnatPreloader.jl"))
+using .XnatPreloader
+export XnatPreloader
+
 
 # BoneSubsegmentation removed — bone surface/marrow data is purely precomputed
 # in preprocessing (recompute_bones.jl) using max_anatomy + Skellytour.

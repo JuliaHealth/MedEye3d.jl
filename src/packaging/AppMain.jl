@@ -1706,6 +1706,29 @@ function run_app(args::Vector{String})
     default_h5_idx = findfirst(isfile, default_h5_candidates)
     default_h5 = default_h5_idx !== nothing ? default_h5_candidates[default_h5_idx] : nothing
 
+    proj_idx = findfirst(==("--xnat-project"), args)
+    subj_idx = findfirst(==("--xnat-subject"), args)
+    if proj_idx !== nothing && proj_idx < length(args) && subj_idx !== nothing && subj_idx < length(args)
+        xnat_proj = args[proj_idx + 1]
+        xnat_subj = args[subj_idx + 1]
+        println("[STARTUP] Direct XNAT launch requested: $xnat_proj / $xnat_subj")
+        ok, creds, msg = MedEye3d.XnatAuth.auto_verify_credentials()
+        if ok && creds !== nothing
+            cache_dir = MedEye3d.XnatPreloader.get_local_cache_dir(xnat_proj, xnat_subj)
+            target_h5 = joinpath(cache_dir, "$(xnat_subj)_preprocessed.h5")
+            println("[STARTUP] Fetching preprocessed HDF5 from XNAT ($target_h5)...")
+            dl_ok = MedEye3d.XnatClient.download_preprocessed_hdf5(creds, xnat_proj, xnat_subj, target_h5)
+            if dl_ok && isfile(target_h5)
+                launch_from_h5(target_h5; quad=true)
+                return
+            else
+                println("[STARTUP] Warning: Could not download preprocessed HDF5 for $xnat_subj. Falling back to file selector.")
+            end
+        else
+            println("[STARTUP] XNAT credentials invalid: $msg. Falling back to file selector.")
+        end
+    end
+
     file_args = filter(a -> !startswith(a, "-"), args)
     if !isempty(file_args) && isfile(file_args[1])
         MedEye3d.Telemetry.log_action("CLI_LOAD_FILE", Dict("path" => basename(file_args[1])))

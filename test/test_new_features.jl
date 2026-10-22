@@ -698,3 +698,5 @@ using JSON
     end
 
 end  # top-level testset
+
+ccall(:_exit, Cvoid, (Cint,), 0)

@@ -40,6 +40,9 @@ import ..EPSMAStructuredReport as ESR
 import ..EPSMAReportWindow as ERW
 import ..PriorReportWindow as PRW
 import ..SegmentationDisplay.ReactOnMouseClickAndDrag as _ROMCAD
+import ..XnatAuth
+import ..XnatClient
+import ..XnatPreloader
 
 export create_metadata_window, display_metadata_window, get_active_lesion_db, get_mask_ids, lookup_anatomy, PRW,
        DEFAULT_SAVE_PATH,
@@ -303,6 +306,17 @@ const _current_user = Ref{String}("")
 const _login_authenticated = Ref{Bool}(false)
 const _login_success_time = Ref{Float64}(0.0)
 const _LOGIN_PASSWORD = "lu"
+const _active_xnat_creds = Ref{Union{XnatAuth.XnatCredentials, Nothing}}(nothing)
+
+"""
+    _parse_subject_id(s::AbstractString) -> String
+
+Extracts clean subject ID from strings with status badges, e.g. "[OK] pat6 (PROCESSED)" -> "pat6".
+"""
+function _parse_subject_id(s::AbstractString)::String
+    m = match(r"^(?:(?:\[[a-zA-Z0-9_\.\s\-\!]+\]|[🟢🟡🔴🔵])\s*)*([a-zA-Z0-9_\-]+)", strip(s))
+    return m !== nothing ? String(m.captures[1]) : String(strip(s))
+end
 
 """
     _get_current_username() -> String
@@ -3589,7 +3603,8 @@ mutable struct MetadataWindowResult
     ui_queue::Vector{Function}
     ui_lock::ReentrantLock
     proxy::Union{ChannelProxy, Nothing}
-    MetadataWindowResult(fig, ch_ref, ldb=nothing, proxy=nothing) = new(fig, ch_ref, ldb, Observable(false), Observable("Pure PET (Current TP)"), Observable(false), Function[], ReentrantLock(), proxy)
+    on_switch_case::Observable{String}
+    MetadataWindowResult(fig, ch_ref, ldb=nothing, proxy=nothing) = new(fig, ch_ref, ldb, Observable(false), Observable("Pure PET (Current TP)"), Observable(false), Function[], ReentrantLock(), proxy, Observable{String}(""))
 end
 
 """Connect a live channel to a previously created metadata window (greyed-out → active)."""
@@ -3627,7 +3642,9 @@ function create_metadata_window(
     _dropdown_event_active[] = false
     obs_m2 = Observable(false)
     obs_set_compare_mode = Observable(false)
+    obs_on_switch_case = Observable{String}("")
     _lmw_observables[:obs_set_compare_mode] = obs_set_compare_mode
+    _lmw_observables[:on_switch_case] = obs_on_switch_case
     ui_queue = Function[]
     ui_lock = ReentrantLock()
     _safe_ui_update(f::Function) = f()
@@ -4161,6 +4178,408 @@ function create_metadata_window(
     # Save Status
     Label(g[nr!(), 1:4], save_status_text,
         fontsize = 10, color = save_status_color, halign = :left, tellwidth=false, tellheight=false)
+
+    # ── XNAT Case Navigator ──────────────────────────────────────────────────
+    sec_xnat = begin_section!("XNAT Case Navigator"; default_open=true)
+    
+    xnat_server_status_text = Observable("XNAT: Checking...")
+    xnat_server_status_color = Observable(RGBf(0.8, 0.7, 0.2))
+    xnat_projects = Observable(String["(None)", "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE", "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE"])
+    xnat_filter_opts = String["All Cases", "Unreviewed (PRE)", "Validated (OK)", "Raw Scans (RAW)"]
+    xnat_subjects = Observable(String["(Select Project First)"])
+    xnat_subject_status_text = Observable("Status: --")
+    xnat_subject_status_color = Observable(RGBf(0.7, 0.7, 0.7))
+    raw_subjects_cache = Dict{String, Vector{String}}()
+
+    xnat_r1 = nr!()
+    lbl_xnat_status = Label(g[xnat_r1, 1:3], xnat_server_status_text, fontsize = 10, color = xnat_server_status_color, halign = :left, tellwidth = false)
+    btn_xnat_login = Button(g[xnat_r1, 4], label = "Connect", buttoncolor = BLU_BTN, labelcolor = LBL_FG, fontsize = 9)
+    rowsize!(g, xnat_r1, Fixed(26)); register_fixed_row!(xnat_r1, 26)
+
+    xnat_r2 = nr!()
+    lbl_proj = Label(g[xnat_r2, 1], "Project:", fontsize = 10, halign = :left, color = SUBTXT)
+    menu_xnat_proj = Menu(g[xnat_r2, 2], options = xnat_projects, default = "(None)", fontsize = 10); _register_menu!(menu_xnat_proj)
+    lbl_filt = Label(g[xnat_r2, 3], "Filter:", fontsize = 10, halign = :right, color = SUBTXT)
+    menu_xnat_filter = Menu(g[xnat_r2, 4], options = xnat_filter_opts, default = "All Cases", fontsize = 9); _register_menu!(menu_xnat_filter)
+    rowsize!(g, xnat_r2, Fixed(28)); register_fixed_row!(xnat_r2, 28)
+
+    xnat_r3 = nr!()
+    lbl_subj = Label(g[xnat_r3, 1], "Patient:", fontsize = 10, halign = :left, color = SUBTXT)
+    menu_xnat_subj = Menu(g[xnat_r3, 2:3], options = xnat_subjects, default = "(Select Project First)", fontsize = 10); _register_menu!(menu_xnat_subj)
+    lbl_xnat_subj_status = Label(g[xnat_r3, 4], xnat_subject_status_text, fontsize = 9, color = xnat_subject_status_color, halign = :center)
+    rowsize!(g, xnat_r3, Fixed(28)); register_fixed_row!(xnat_r3, 28)
+
+    xnat_r4 = nr!()
+    btn_xnat_prev = Button(g[xnat_r4, 1], label = "◀ Prev", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_xnat_save = Button(g[xnat_r4, 2], label = "Save XNAT", buttoncolor = RGBf(0.15, 0.45, 0.15), labelcolor = TXT, fontsize = 10)
+    btn_xnat_next = Button(g[xnat_r4, 3], label = "Next ▶", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    btn_xnat_preproc = Button(g[xnat_r4, 4], label = "Preprocess", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, xnat_r4, Fixed(28)); register_fixed_row!(xnat_r4, 28)
+
+    end_section!(sec_xnat)
+
+    function _update_auth_status!(creds::Union{XnatAuth.XnatCredentials, Nothing})
+        if creds !== nothing
+            _active_xnat_creds[] = creds
+            time_left_sec = creds.expires_at - time()
+            if time_left_sec > 0
+                hrs = Int(floor(time_left_sec / 3600))
+                mins = Int(floor(mod(time_left_sec, 3600) / 60))
+                uname = isempty(creds.username) ? creds.alias : creds.username
+                xnat_server_status_text[] = "[OK] XNAT: $(uname) ($(hrs)h $(mins)m)"
+                xnat_server_status_color[] = RGBf(0.4, 0.9, 0.4)
+                btn_xnat_login.label[] = "Refresh"
+            else
+                xnat_server_status_text[] = "[X] XNAT: Token Expired"
+                xnat_server_status_color[] = RGBf(0.9, 0.3, 0.3)
+                btn_xnat_login.label[] = "Renew Token"
+            end
+        else
+            _active_xnat_creds[] = nothing
+            xnat_server_status_text[] = "[X] XNAT: Disconnected"
+            xnat_server_status_color[] = RGBf(0.8, 0.4, 0.4)
+            btn_xnat_login.label[] = "Connect"
+        end
+    end
+
+    function _filter_and_set_subjects!()
+        proj = menu_xnat_proj.selection[]
+        (proj === nothing || !haskey(raw_subjects_cache, proj)) && return
+        all_s = raw_subjects_cache[proj]
+        filt = menu_xnat_filter.selection[]
+        
+        filtered = if filt == "Unreviewed (PRE)"
+            filter(s -> occursin("[PRE]", s) || occursin("PREPROCESSED", s), all_s)
+        elseif filt == "Validated (OK)"
+            filter(s -> occursin("[OK]", s) || occursin("PROCESSED", s), all_s)
+        elseif filt == "Raw Scans (RAW)"
+            filter(s -> occursin("[RAW]", s) || occursin("RAW", s), all_s)
+        else
+            all_s
+        end
+        
+        if isempty(filtered)
+            menu_xnat_subj.options[] = ["(No matching patients)"]
+        else
+            menu_xnat_subj.options[] = filtered
+            menu_xnat_subj.i_selected[] = 1
+        end
+    end
+
+    local _switch_to_hdf5!
+    function _switch_to_hdf5!(target_h5::String)
+        !isfile(target_h5) && return
+        println("[SWITCH-CASE] Switching active dataset to $target_h5"); flush(stdout)
+        try
+            _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+            _MEH_mod.h5_save_path_ref[] = target_h5
+        catch; end
+        
+        try
+            new_db = load_annotations_hdf5(target_h5)
+            if isempty(new_db)
+                companion = replace(target_h5, r"\.(h5|hdf5)$"i => "_annotations.json")
+                if isfile(companion)
+                    new_db = load_annotations(companion)
+                end
+            end
+            lesion_db[] = _migrate_db(new_db)
+        catch e
+            @warn "Failed reloading annotations for $target_h5" e
+        end
+        
+        obs_on_switch_case[] = target_h5
+        if haskey(ui_hooks, :on_switch_case)
+            ui_hooks[:on_switch_case][] = target_h5
+        end
+    end
+
+    function _do_save_to_xnat(show_status::Bool=true)
+        try
+            _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+            _MEH_mod.flush_all_dirty_masks!()
+            _MEH_mod.save_measurements_to_h5()
+        catch; end
+        
+        h5_active = _get_active_h5_path()
+        if !isempty(h5_active) && isfile(h5_active)
+            try
+                _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+                if isdefined(_MEH_mod, :lymph_node_validation_mode) && _MEH_mod.lymph_node_validation_mode[]
+                    save_ln_validations(lesion_db[], h5_active)
+                else
+                    persist_to_active_dataset_h5!(lesion_db[], h5_active)
+                end
+            catch e
+                @warn "Failed persisting to active HDF5" e
+            end
+        end
+        
+        creds = _active_xnat_creds[]
+        proj = menu_xnat_proj.selection[]
+        subj_raw = menu_xnat_subj.selection[]
+        subj = subj_raw !== nothing ? _parse_subject_id(subj_raw) : ""
+        
+        if creds !== nothing && !isempty(proj) && proj != "(None)" && !isempty(subj)
+            _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+            status_dict = Dict{String, Any}(
+                "project_id" => proj,
+                "subject_id" => subj,
+                "status" => "PROCESSED",
+                "assigned_user" => _get_current_username(),
+                "last_modified" => string(Dates.now()),
+                "software_version" => "0.5.11",
+                "summary" => Dict(
+                    "num_lesions" => length(lesion_ids[]),
+                    "has_expert_mask_edits" => current_has_expert_edits[],
+                    "lymph_nodes_validated" => (isdefined(_MEH_mod, :lymph_node_validation_mode) && _MEH_mod.lymph_node_validation_mode[])
+                )
+            )
+            Threads.@spawn begin
+                ok_annot = XnatClient.save_annotations_to_xnat(creds, proj, subj, status_dict; local_expert_h5 = isfile(h5_active) ? h5_active : nothing)
+                ok_h5 = isfile(h5_active) ? XnatClient.upload_preprocessed_hdf5(creds, proj, subj, h5_active) : true
+                @async begin
+                    if ok_annot
+                        save_status_text[] = "Saved to XNAT OK $(Dates.format(Dates.now(), "HH:MM:SS"))"
+                        save_status_color[] = RGBf(0.4, 0.9, 0.4)
+                        xnat_subject_status_text[] = "Status: PROCESSED [OK]"
+                        xnat_subject_status_color[] = RGBf(0.4, 0.9, 0.4)
+                    else
+                        save_status_text[] = "XNAT Upload Failed"
+                        save_status_color[] = RGBf(0.9, 0.2, 0.2)
+                    end
+                end
+            end
+        else
+            save_status_text[] = "Saved Locally $(Dates.format(Dates.now(), "HH:MM:SS"))"
+            save_status_color[] = RGBf(0.4, 0.9, 0.4)
+        end
+    end
+
+    on(btn_xnat_login.clicks) do _
+        _login_visible[] = true
+    end
+
+    on(menu_xnat_proj.selection) do proj_name
+        proj_name === nothing && return
+        proj = strip(proj_name)
+        (isempty(proj) || proj == "(None)") && return
+        
+        Threads.@spawn begin
+            creds = _active_xnat_creds[]
+            subjs = String[]
+            if creds !== nothing
+                subjs = XnatClient.list_subjects(creds, proj)
+            end
+            if isempty(subjs)
+                cache_base = XnatPreloader.get_local_cache_dir(proj, "")
+                proj_cache = dirname(cache_base)
+                if isdir(proj_cache)
+                    subjs = filter(d -> isdir(joinpath(proj_cache, d)), readdir(proj_cache))
+                end
+            end
+            if isempty(subjs)
+                subjs = proj == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" ? ["pat6", "pat7", "pat8"] : ["pat1", "pat2", "pat3"]
+            end
+            
+            formatted = String[]
+            for s in subjs
+                st = if creds !== nothing
+                    XnatClient.get_case_status(creds, proj, s)
+                else
+                    local_h5 = joinpath(XnatPreloader.get_local_cache_dir(proj, s), "$(s)_preprocessed.h5")
+                    isfile(local_h5) ? XnatClient.CaseStatusInfo(:PREPROCESSED) : XnatClient.CaseStatusInfo(:RAW)
+                end
+                badge = if st.status == :PROCESSED
+                    "[OK]"
+                elseif st.status == :PREPROCESSED
+                    "[PRE]"
+                elseif st.status == :IN_PROGRESS
+                    "[..]"
+                else
+                    "[RAW]"
+                end
+                push!(formatted, "$badge $s ($(st.status))")
+            end
+            
+            @async begin
+                raw_subjects_cache[proj] = formatted
+                _filter_and_set_subjects!()
+            end
+        end
+    end
+
+    on(menu_xnat_filter.selection) do _
+        _filter_and_set_subjects!()
+    end
+
+    on(menu_xnat_subj.selection) do subj_sel
+        subj_sel === nothing && return
+        (subj_sel == "(Select Project First)" || subj_sel == "(No matching patients)") && return
+        
+        proj = menu_xnat_proj.selection[]
+        (proj === nothing || proj == "(None)") && return
+        
+        subj = _parse_subject_id(subj_sel)
+        isempty(subj) && return
+        
+        if occursin("[OK]", subj_sel) || occursin("PROCESSED", subj_sel)
+            xnat_subject_status_text[] = "Status: PROCESSED [OK]"
+            xnat_subject_status_color[] = RGBf(0.4, 0.9, 0.4)
+        elseif occursin("[PRE]", subj_sel) || occursin("PREPROCESSED", subj_sel)
+            xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
+            xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
+        elseif occursin("[..]", subj_sel) || occursin("IN_PROGRESS", subj_sel)
+            xnat_subject_status_text[] = "Status: IN PROGRESS [..]"
+            xnat_subject_status_color[] = RGBf(0.4, 0.7, 1.0)
+        else
+            xnat_subject_status_text[] = "Status: RAW [!]"
+            xnat_subject_status_color[] = RGBf(0.9, 0.3, 0.3)
+        end
+        
+        creds = _active_xnat_creds[]
+        all_subjs = String[_parse_subject_id(s) for s in menu_xnat_subj.options[] if s != "(No matching patients)"]
+        XnatPreloader.notify_patient_selected(creds, proj, subj, all_subjs)
+        
+        target_dir = XnatPreloader.get_local_cache_dir(proj, subj)
+        target_h5 = joinpath(target_dir, "$(subj)_preprocessed.h5")
+        
+        if isfile(target_h5)
+            println("[XNAT] Patient '$subj' preprocessed HDF5 found locally: $target_h5"); flush(stdout)
+            _switch_to_hdf5!(target_h5)
+        elseif creds !== nothing && (occursin("[OK]", subj_sel) || occursin("[PRE]", subj_sel) || occursin("PREPROCESSED", subj_sel) || occursin("PROCESSED", subj_sel))
+            save_status_text[] = "Downloading $subj from XNAT..."
+            save_status_color[] = RGBf(0.4, 0.7, 1.0)
+            Threads.@spawn begin
+                ok = XnatClient.download_preprocessed_hdf5(creds, proj, subj, target_h5)
+                if ok && isfile(target_h5)
+                    @async begin
+                        save_status_text[] = "Downloaded $subj OK"
+                        save_status_color[] = RGBf(0.4, 0.9, 0.4)
+                        _switch_to_hdf5!(target_h5)
+                    end
+                else
+                    @async begin
+                        save_status_text[] = "Download failed for $subj"
+                        save_status_color[] = RGBf(0.9, 0.2, 0.2)
+                    end
+                end
+            end
+        end
+    end
+
+    on(btn_xnat_save.clicks) do _
+        _do_save_to_xnat(true)
+    end
+
+    on(btn_xnat_next.clicks) do _
+        _do_save_to_xnat(false)
+        opts = menu_xnat_subj.options[]
+        cur_idx = menu_xnat_subj.i_selected[]
+        if cur_idx !== nothing && cur_idx < length(opts)
+            menu_xnat_subj.i_selected[] = cur_idx + 1
+        end
+    end
+
+    on(btn_xnat_prev.clicks) do _
+        opts = menu_xnat_subj.options[]
+        cur_idx = menu_xnat_subj.i_selected[]
+        if cur_idx !== nothing && cur_idx > 1
+            menu_xnat_subj.i_selected[] = cur_idx - 1
+        end
+    end
+
+    on(btn_xnat_preproc.clicks) do _
+        proj = menu_xnat_proj.selection[]
+        subj_sel = menu_xnat_subj.selection[]
+        (proj === nothing || proj == "(None)" || subj_sel === nothing) && return
+        subj = _parse_subject_id(subj_sel)
+        isempty(subj) && return
+        
+        xnat_subject_status_text[] = "Status: Preprocessing..."
+        xnat_subject_status_color[] = RGBf(0.9, 0.7, 0.2)
+        save_status_text[] = "Preprocessing $subj started..."
+        save_status_color[] = RGBf(0.9, 0.7, 0.2)
+        
+        Threads.@spawn begin
+            script_path = joinpath(dirname(dirname(@__DIR__)), "scripts", "xnat", "xnat_preprocess_patient.sh")
+            if isfile(script_path)
+                cmd = `bash $script_path --project $proj --subject $subj`
+                try
+                    run(cmd)
+                    @async begin
+                        xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
+                        xnat_subject_status_color[] = RGBf(0.9, 0.9, 0.2)
+                        save_status_text[] = "Preprocessed $subj OK"
+                        save_status_color[] = RGBf(0.4, 0.9, 0.4)
+                    end
+                catch e
+                    @warn "Preprocess script failed" e
+                    @async begin
+                        xnat_subject_status_text[] = "Status: Preproc Failed [!]"
+                        xnat_subject_status_color[] = RGBf(0.9, 0.2, 0.2)
+                        save_status_text[] = "Preprocess failed for $subj"
+                        save_status_color[] = RGBf(0.9, 0.2, 0.2)
+                    end
+                end
+            else
+                @warn "Preprocess script not found: $script_path"
+            end
+        end
+    end
+
+    # Auto-detection from active HDF5 path (e.g. CLI or preloaded)
+    try
+        h5_act = _get_active_h5_path()
+        if !isempty(h5_act)
+            m_path = match(r"xnat_cache[\\/]([^\\/]+)[\\/]([^\\/]+)", h5_act)
+            if m_path !== nothing
+                act_proj = String(m_path.captures[1])
+                act_subj = String(m_path.captures[2])
+                if !(act_proj in xnat_projects[])
+                    push!(xnat_projects[], act_proj)
+                end
+                _set_menu_selection_string!(menu_xnat_proj, act_proj)
+            end
+        end
+    catch; end
+
+    # Startup auto-verification of credentials
+    Threads.@spawn begin
+        cached = XnatAuth.load_cached_credentials()
+        if cached !== nothing
+            ok, creds, msg = XnatAuth.auto_verify_credentials()
+            if ok && creds !== nothing
+                _active_xnat_creds[] = creds
+                _current_user[] = creds.username
+                _login_authenticated[] = true
+                @async begin
+                    _update_auth_status!(creds)
+                end
+                projs = XnatClient.list_projects(creds)
+                if !isempty(projs)
+                    @async begin
+                        for p in projs
+                            if !(p in xnat_projects[])
+                                push!(xnat_projects[], p)
+                            end
+                        end
+                    end
+                end
+                println("[XNAT] Auto-verified credentials on startup for user '$(creds.username)'"); flush(stdout)
+            else
+                println("[XNAT] Cached credentials expired or invalid: $msg"); flush(stdout)
+                _active_xnat_creds[] = nothing
+                @async begin
+                    _update_auth_status!(nothing)
+                end
+            end
+        else
+            @async begin
+                _update_auth_status!(nothing)
+            end
+        end
+    end
 
     # ── Lesion Navigation ────────────────────────────────────────────────────
     sec_nav = begin_section!("Lesion Navigation")
@@ -10553,6 +10972,7 @@ function create_metadata_window(
     _lmw_observables[:apply_scroll] = _apply_scroll!
     res.trigger_m2 = obs_m2
     res.set_compare_mode = obs_set_compare_mode
+    res.on_switch_case = obs_on_switch_case
     _lmw_observables[:is_syncing_m2_from_backend] = _is_syncing_m2_from_backend
     res.m2_mode[] = menu_m2_mode.selection[]
     on(menu_m2_mode.selection) do val
@@ -10979,87 +11399,192 @@ function display_metadata_window(fig::Figure)
 
     login_bg = Box(fig[1, 1], color=(:black, 0.92), strokewidth=0, visible=_login_visible)
     
-    # Bulletproof layout with explicit Auto margins to center the 310x175 modal
+    # Bulletproof layout with explicit Auto margins to center the modal
     center_grid = GridLayout(fig[1, 1], tellwidth=false, tellheight=false)
     Box(center_grid[1, 1], visible=false)
     Box(center_grid[3, 3], visible=false)
     colsize!(center_grid, 1, Auto())
-    colsize!(center_grid, 2, Fixed(310))
+    colsize!(center_grid, 2, Fixed(380))
     colsize!(center_grid, 3, Auto())
     rowsize!(center_grid, 1, Auto())
-    rowsize!(center_grid, 2, Fixed(175))
+    rowsize!(center_grid, 2, Fixed(320))
     rowsize!(center_grid, 3, Auto())
 
     login_inner = GridLayout(center_grid[2, 2])
     login_inner_bg = Button(login_inner[1:end, 1:end], label="", buttoncolor=:transparent, buttoncolor_active=:transparent, buttoncolor_hover=:transparent, strokewidth=0, width=nothing, height=nothing)
     on(_login_visible) do vis; login_inner_bg.blockscene.visible[] = vis; end
     
-    lbl_title = Label(login_inner[1, 1:2], "MedEye3d Login", color=:white, fontsize=24, font=:bold, halign=:center, visible=_login_visible)
-    lbl_user = Label(login_inner[2, 1], "Username:", color=:white, fontsize=14, halign=:right, visible=_login_visible)
-    login_tb_user = Textbox(login_inner[2, 2], placeholder="Enter username", fontsize=14, width=200,
+    lbl_title = Label(login_inner[1, 1:2], "MedEye3d / XNAT Login", color=:white, fontsize=20, font=:bold, halign=:center, visible=_login_visible)
+    
+    cached_init = XnatAuth.load_cached_credentials()
+    init_url = cached_init !== nothing ? cached_init.server_url : "https://xnat.bmia.nl"
+    init_alias = cached_init !== nothing ? cached_init.alias : ""
+    init_user = cached_init !== nothing ? cached_init.username : ""
+
+    lbl_url = Label(login_inner[2, 1], "XNAT URL:", color=:white, fontsize=12, halign=:right, visible=_login_visible)
+    login_tb_url = Textbox(login_inner[2, 2], placeholder="Server URL", stored_string=init_url, displayed_string=init_url, fontsize=12, width=230,
+        textcolor=RGBf(0.95, 0.95, 0.95), textcolor_placeholder=RGBf(0.55, 0.58, 0.65), 
+        boxcolor=RGBf(0.14, 0.16, 0.20), boxcolor_focused=RGBf(0.20, 0.24, 0.32), boxcolor_hover=RGBf(0.17, 0.20, 0.27),
+        bordercolor=RGBf(0.30, 0.35, 0.45), cursorcolor=RGBf(0.95, 0.95, 0.95))
+    on(_login_visible) do vis; login_tb_url.blockscene.visible[] = vis; end
+
+    lbl_alias = Label(login_inner[3, 1], "24h Alias:", color=:white, fontsize=12, halign=:right, visible=_login_visible)
+    login_tb_alias = Textbox(login_inner[3, 2], placeholder="Enter 24h Alias Token", stored_string=init_alias, displayed_string=init_alias, fontsize=12, width=230,
+        textcolor=RGBf(0.95, 0.95, 0.95), textcolor_placeholder=RGBf(0.55, 0.58, 0.65), 
+        boxcolor=RGBf(0.14, 0.16, 0.20), boxcolor_focused=RGBf(0.20, 0.24, 0.32), boxcolor_hover=RGBf(0.17, 0.20, 0.27),
+        bordercolor=RGBf(0.30, 0.35, 0.45), cursorcolor=RGBf(0.95, 0.95, 0.95))
+    on(_login_visible) do vis; login_tb_alias.blockscene.visible[] = vis; end
+
+    lbl_secret = Label(login_inner[4, 1], "24h Secret:", color=:white, fontsize=12, halign=:right, visible=_login_visible)
+    login_tb_secret = Textbox(login_inner[4, 2], placeholder="Enter Secret Token", fontsize=12, width=230,
+        textcolor=RGBf(0.95, 0.95, 0.95), textcolor_placeholder=RGBf(0.55, 0.58, 0.65), 
+        boxcolor=RGBf(0.14, 0.16, 0.20), boxcolor_focused=RGBf(0.20, 0.24, 0.32), boxcolor_hover=RGBf(0.17, 0.20, 0.27),
+        bordercolor=RGBf(0.30, 0.35, 0.45), cursorcolor=RGBf(0.95, 0.95, 0.95))
+    on(_login_visible) do vis; login_tb_secret.blockscene.visible[] = vis; end
+
+    lbl_user = Label(login_inner[5, 1], "Username:", color=:white, fontsize=12, halign=:right, visible=_login_visible)
+    login_tb_user = Textbox(login_inner[5, 2], placeholder="Enter username", stored_string=init_user, displayed_string=init_user, fontsize=12, width=230,
         textcolor=RGBf(0.95, 0.95, 0.95), textcolor_placeholder=RGBf(0.55, 0.58, 0.65), 
         boxcolor=RGBf(0.14, 0.16, 0.20), boxcolor_focused=RGBf(0.20, 0.24, 0.32), boxcolor_hover=RGBf(0.17, 0.20, 0.27),
         bordercolor=RGBf(0.30, 0.35, 0.45), cursorcolor=RGBf(0.95, 0.95, 0.95))
     on(_login_visible) do vis; login_tb_user.blockscene.visible[] = vis; end
     
-    lbl_pass = Label(login_inner[3, 1], "Password:", color=:white, fontsize=14, halign=:right, visible=_login_visible)
-    login_tb_pass = Textbox(login_inner[3, 2], placeholder="Enter password", fontsize=14, width=200,
+    lbl_pass = Label(login_inner[6, 1], "Password:", color=:white, fontsize=12, halign=:right, visible=_login_visible)
+    login_tb_pass = Textbox(login_inner[6, 2], placeholder="Enter password (optional)", fontsize=12, width=230,
         textcolor=RGBf(0.95, 0.95, 0.95), textcolor_placeholder=RGBf(0.55, 0.58, 0.65), 
         boxcolor=RGBf(0.14, 0.16, 0.20), boxcolor_focused=RGBf(0.20, 0.24, 0.32), boxcolor_hover=RGBf(0.17, 0.20, 0.27),
         bordercolor=RGBf(0.30, 0.35, 0.45), cursorcolor=RGBf(0.95, 0.95, 0.95))
     on(_login_visible) do vis; login_tb_pass.blockscene.visible[] = vis; end
     
-    login_btn = Button(login_inner[4, 1:2], label="Login", buttoncolor=RGBf(0.2, 0.6, 0.3), labelcolor=:white, fontsize=16)
-    on(_login_visible) do vis; login_btn.blockscene.visible[] = vis; end
+    btn_subgrid = GridLayout(login_inner[7, 1:2])
+    login_btn = Button(btn_subgrid[1, 1], label="Login / Connect", buttoncolor=RGBf(0.2, 0.6, 0.3), labelcolor=:white, fontsize=13)
+    login_btn_cancel = Button(btn_subgrid[1, 2], label="Cancel / Offline", buttoncolor=RGBf(0.35, 0.35, 0.35), labelcolor=:white, fontsize=13)
+    on(_login_visible) do vis
+        login_btn.blockscene.visible[] = vis
+        login_btn_cancel.blockscene.visible[] = vis
+    end
     
-    login_msg = Label(login_inner[5, 1:2], "", color=RGBf(1.0, 0.3, 0.3), fontsize=12, halign=:center, visible=_login_visible)
+    login_msg = Label(login_inner[8, 1:2], "", color=RGBf(1.0, 0.3, 0.3), fontsize=11, halign=:center, visible=_login_visible)
     
-    rowsize!(login_inner, 1, Fixed(40))
-    rowsize!(login_inner, 2, Fixed(35))
-    rowsize!(login_inner, 3, Fixed(35))
-    rowsize!(login_inner, 4, Fixed(40))
-    rowsize!(login_inner, 5, Fixed(25))
-    colsize!(login_inner, 1, Fixed(100))
-    colsize!(login_inner, 2, Fixed(210))
+    rowsize!(login_inner, 1, Fixed(35))
+    rowsize!(login_inner, 2, Fixed(32))
+    rowsize!(login_inner, 3, Fixed(32))
+    rowsize!(login_inner, 4, Fixed(32))
+    rowsize!(login_inner, 5, Fixed(32))
+    rowsize!(login_inner, 6, Fixed(32))
+    rowsize!(login_inner, 7, Fixed(36))
+    rowsize!(login_inner, 8, Fixed(25))
+    colsize!(login_inner, 1, Fixed(110))
+    colsize!(login_inner, 2, Fixed(240))
     
+    push!(_all_textboxes, login_tb_url)
+    push!(_all_textboxes, login_tb_alias)
+    push!(_all_textboxes, login_tb_secret)
     push!(_all_textboxes, login_tb_user)
     push!(_all_textboxes, login_tb_pass)
     
     function _do_login()
+        url = strip(login_tb_url.displayed_string[])
+        isempty(url) && (url = "https://xnat.bmia.nl")
+        alias = strip(login_tb_alias.displayed_string[])
+        secret = strip(login_tb_secret.displayed_string[])
         user = strip(login_tb_user.displayed_string[])
         pass = strip(login_tb_pass.displayed_string[])
         
-        if isempty(user)
-            login_msg.text[] = "Please enter a username"
+        # Priority 1: 24h Alias & Secret Token
+        if !isempty(alias) && !isempty(secret)
+            new_creds = XnatAuth.XnatCredentials(
+                server_url = url,
+                alias = alias,
+                secret = secret,
+                username = !isempty(user) ? user : alias,
+                expires_at = time() + 86400.0
+            )
+            login_msg.text[] = "Validating token with XNAT..."
+            login_msg.color[] = RGBf(0.4, 0.8, 1.0)
+            Threads.@spawn begin
+                is_valid = XnatAuth.validate_credentials(new_creds)
+                @async begin
+                    if is_valid
+                        XnatAuth.save_cached_credentials(new_creds)
+                        _active_xnat_creds[] = new_creds
+                        _current_user[] = new_creds.username
+                        _login_authenticated[] = true
+                        _login_success_time[] = time()
+                        _update_auth_status!(new_creds)
+                        _login_visible[] = false
+                        login_msg.text[] = ""
+                        try; _MEH.app_is_loading[] = false; catch; end
+                        println("[LOGIN] User '$(new_creds.username)' authenticated via 24h token"); flush(stdout)
+                    else
+                        login_msg.color[] = RGBf(1.0, 0.3, 0.3)
+                        login_msg.text[] = "Invalid Alias/Secret token for $url"
+                    end
+                end
+            end
             return
         end
-        if pass != _LOGIN_PASSWORD
-            login_msg.text[] = "Incorrect password"
-            return
+        
+        # Priority 2: Standard Username & Password
+        if !isempty(user)
+            if pass == _LOGIN_PASSWORD || isempty(_LOGIN_PASSWORD)
+                Threads.@spawn begin
+                    tok_ok, tok_creds, tok_msg = XnatAuth.issue_token_from_userpass(url, user, pass)
+                    @async begin
+                        if tok_ok && tok_creds !== nothing
+                            XnatAuth.save_cached_credentials(tok_creds)
+                            _active_xnat_creds[] = tok_creds
+                            _update_auth_status!(tok_creds)
+                        end
+                        _current_user[] = user
+                        _login_authenticated[] = true
+                        _login_success_time[] = time()
+                        _login_visible[] = false
+                        login_msg.text[] = ""
+                        try; _MEH.app_is_loading[] = false; catch; end
+                        println("[LOGIN] User '$(user)' authenticated at $(Dates.format(Dates.now(), "HH:MM:SS"))"); flush(stdout)
+                    end
+                end
+                return
+            else
+                login_msg.color[] = RGBf(1.0, 0.3, 0.3)
+                login_msg.text[] = "Incorrect password"
+                return
+            end
         end
-        _current_user[] = user
-        _login_authenticated[] = true
-        _login_success_time[] = time()
-        # Hide login overlay
-        _login_visible[] = false
-        login_msg.text[] = ""
-        try; _MEH.app_is_loading[] = false; catch; end
-        println("[LOGIN] User '$(user)' authenticated at $(Dates.format(Dates.now(), "HH:MM:SS"))"); flush(stdout)
+        
+        login_msg.color[] = RGBf(1.0, 0.3, 0.3)
+        login_msg.text[] = "Please enter 24h Alias/Secret or Username"
     end
     
     on(login_btn.clicks) do _
         _do_login()
     end
-    # Also allow Enter in either field to login
+    on(login_btn_cancel.clicks) do _
+        _login_authenticated[] = true
+        _login_success_time[] = time()
+        _login_visible[] = false
+        login_msg.text[] = ""
+        try; _MEH.app_is_loading[] = false; catch; end
+    end
     on(login_tb_pass.stored_string) do _
         _do_login()
     end
     on(login_tb_user.stored_string) do _
         _do_login()
     end
+    on(login_tb_secret.stored_string) do _
+        _do_login()
+    end
+    on(login_tb_alias.stored_string) do _
+        _do_login()
+    end
     
     _lmw_observables[:login_bg] = login_bg
     _lmw_observables[:login_user] = login_tb_user
+    _lmw_observables[:xnat_proj_menu] = menu_xnat_proj
+    _lmw_observables[:xnat_subj_menu] = menu_xnat_subj
+    _lmw_observables[:xnat_status_lbl] = lbl_xnat_status
 
     # ── Intercept Clicks to Prevent Click-Through & Lock GUI Controls ─────────
     in_rect(p, b) = (p[1] >= b.origin[1] && p[1] <= b.origin[1] + b.widths[1] &&
@@ -11163,16 +11688,20 @@ function display_metadata_window(fig::Figure)
             return Consume(true)
         end
 
-        # 2. Login Modal Lock: If login is visible and unauthenticated, lock ALL controls except login fields and button
-        if !_login_authenticated[] && _login_visible[]
+        # 2. Login Modal Lock: If login is visible, lock ALL controls except login fields and buttons
+        if _login_visible[]
             pos = events(fig.scene).mouseposition[]
-            user_bbox = login_tb_user.layoutobservables.computedbbox[]
-            pass_bbox = login_tb_pass.layoutobservables.computedbbox[]
-            btn_bbox  = login_btn.layoutobservables.computedbbox[]
+            url_bbox    = login_tb_url.layoutobservables.computedbbox[]
+            alias_bbox  = login_tb_alias.layoutobservables.computedbbox[]
+            secret_bbox = login_tb_secret.layoutobservables.computedbbox[]
+            user_bbox   = login_tb_user.layoutobservables.computedbbox[]
+            pass_bbox   = login_tb_pass.layoutobservables.computedbbox[]
+            btn_bbox    = login_btn.layoutobservables.computedbbox[]
+            cancel_bbox = login_btn_cancel.layoutobservables.computedbbox[]
             
-            in_user = in_rect(pos, user_bbox)
-            in_pass = in_rect(pos, pass_bbox)
+            in_tbs = in_rect(pos, url_bbox) || in_rect(pos, alias_bbox) || in_rect(pos, secret_bbox) || in_rect(pos, user_bbox) || in_rect(pos, pass_bbox)
             in_btn  = in_rect(pos, btn_bbox)
+            in_cancel = in_rect(pos, cancel_bbox)
             
             if in_btn
                 if event.action == Mouse.press
@@ -11182,7 +11711,12 @@ function display_metadata_window(fig::Figure)
                     login_btn.buttoncolor = RGBf(0.2, 0.6, 0.3)
                 end
                 return Consume(true) # Always consume clicks on login button
-            elseif in_user || in_pass
+            elseif in_cancel
+                if event.action == Mouse.press
+                    _login_visible[] = false
+                end
+                return Consume(true)
+            elseif in_tbs
                 return Consume(false) # Let Textboxes (priority 70) handle focus / typing
             else
                 return Consume(true) # Lock ALL other GUI controls

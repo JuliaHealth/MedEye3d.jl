@@ -54,7 +54,7 @@ docker run -d --rm --name medeye3d-ai --gpus '"device=1"' \
     -v "$HOST_INFERENCE_DIR":/tmp/medeye3d_inference \
     -v "$HOST_APP_DIR":/app \
     -v "/mnt/big/project_ssd/project_ssd:/mnt/big/project_ssd/project_ssd" \
-    -v "/mnt/big/project_ssd/project_ssd/MedEye3d.jl:/workspaces/MedEye3d.jl" \
+    -v "$HOST_PROJECT_DIR:/workspaces/MedEye3d.jl" \
     -v "/home/jm:/home/jm" \
     medeye3d-ai:latest
 

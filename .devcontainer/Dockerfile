@@ -53,6 +53,7 @@ RUN apt-get update -q -y && \
         jupyter-core\
         zip\
         p7zip-full\
+        dcm2niix\
         apt-utils\
         octave\
         kmod\
@@ -106,7 +107,7 @@ RUN apt-get update -q -y && \
         apt-get install -q -y --reinstall ca-certificates
 
 RUN python3 -m pip install --no-cache-dir \
-    gdown==3.3.1 monai==1.3.0 nibabel torch scipy
+    gdown==3.3.1 monai==1.3.0 nibabel torch scipy h5py requests
 
 # Anatomical segmentation models for lymph node rules pipeline
 RUN python3 -m pip install --no-cache-dir \
