@@ -4241,8 +4241,8 @@ function create_metadata_window(
             end
         else
             _active_xnat_creds[] = nothing
-            xnat_server_status_text[] = "[X] XNAT: Disconnected"
-            xnat_server_status_color[] = RGBf(0.8, 0.4, 0.4)
+            xnat_server_status_text[] = "[X] XNAT: Offline (Maintenance)"
+            xnat_server_status_color[] = RGBf(0.8, 0.5, 0.3)
             btn_xnat_login.label[] = "Connect"
         end
     end
@@ -4573,36 +4573,33 @@ function create_metadata_window(
         target_h5 = joinpath(target_dir, "$(subj)_preprocessed.h5")
         
         # 1. Local cache check
-        is_already_on_xnat = occursin("[OK]", subj_sel) || occursin("PROCESSED", subj_sel) || occursin("[PRE]", subj_sel) || occursin("PREPROCESSED", subj_sel)
-        if is_already_on_xnat && isfile(target_h5) && filesize(target_h5) > 1024
+        if isfile(target_h5) && filesize(target_h5) > 1024
             println("[XNAT] Patient '$subj' preprocessed HDF5 found locally: $target_h5"); flush(stdout)
             _switch_to_hdf5!(target_h5)
             return
         end
 
         # 1b. Check local repository files (e.g. pat6 / pat_6 or pat1 / psma_patient_all_tp)
-        if is_already_on_xnat
-            if ((proj == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" || proj == "Lu177_PSMA_PIPELINE") && occursin(r"[pP]at_?6"i, subj))
-                repo_pat6 = joinpath(dirname(dirname(@__DIR__)), "data", "pat_6_files", "preprocessed_volumes.h5")
-                if isfile(repo_pat6)
-                    mkpath(target_dir)
-                    try cp(repo_pat6, target_h5, force=true) catch; end
-                    if isfile(target_h5) && filesize(target_h5) > 1024
-                        println("[XNAT] Linked local repo pat6 file to cache: $target_h5"); flush(stdout)
-                        _switch_to_hdf5!(target_h5)
-                        return
-                    end
+        if ((proj == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" || proj == "Lu177_PSMA_PIPELINE") && occursin(r"[pP]at_?6"i, subj))
+            repo_pat6 = joinpath(dirname(dirname(@__DIR__)), "data", "pat_6_files", "preprocessed_volumes.h5")
+            if isfile(repo_pat6)
+                mkpath(target_dir)
+                try cp(repo_pat6, target_h5, force=true) catch; end
+                if isfile(target_h5) && filesize(target_h5) > 1024
+                    println("[XNAT] Linked local repo pat6 file to cache: $target_h5"); flush(stdout)
+                    _switch_to_hdf5!(target_h5)
+                    return
                 end
-            elseif ((proj == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" || proj == "Prostata_bimodal_PIPELINE") && (occursin(r"[pP]at_?1"i, subj) || subj == "psma_patient_all_tp"))
-                repo_pat1 = joinpath(dirname(dirname(@__DIR__)), "data", "cases", "psma_patient_all_tp", "preprocessed_volumes.h5")
-                if isfile(repo_pat1)
-                    mkpath(target_dir)
-                    try cp(repo_pat1, target_h5, force=true) catch; end
-                    if isfile(target_h5) && filesize(target_h5) > 1024
-                        println("[XNAT] Linked local repo pat1 (Prostata bimodal) file to cache: $target_h5"); flush(stdout)
-                        _switch_to_hdf5!(target_h5)
-                        return
-                    end
+            end
+        elseif ((proj == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" || proj == "Prostata_bimodal_PIPELINE") && (occursin(r"[pP]at_?1"i, subj) || subj == "psma_patient_all_tp"))
+            repo_pat1 = joinpath(dirname(dirname(@__DIR__)), "data", "cases", "psma_patient_all_tp", "preprocessed_volumes.h5")
+            if isfile(repo_pat1)
+                mkpath(target_dir)
+                try cp(repo_pat1, target_h5, force=true) catch; end
+                if isfile(target_h5) && filesize(target_h5) > 1024
+                    println("[XNAT] Linked local repo pat1 (Prostata bimodal) file to cache: $target_h5"); flush(stdout)
+                    _switch_to_hdf5!(target_h5)
+                    return
                 end
             end
         end
@@ -4628,7 +4625,7 @@ function create_metadata_window(
                 end
             end
         else
-            save_status_text[] = "No local HDF5 for $subj. Connect to XNAT to download/preprocess."
+            save_status_text[] = "Working Offline: no local HDF5 for $subj"
             save_status_color[] = RGBf(0.9, 0.7, 0.2)
         end
     end
@@ -4702,6 +4699,10 @@ function create_metadata_window(
                         xnat_server_status_text[] = "[X] XNAT: Token Expired"
                         xnat_server_status_color[] = RGBf(0.9, 0.3, 0.3)
                         btn_xnat_login.label[] = "Renew Token"
+                    elseif occursin("502", msg) || occursin("503", msg) || occursin("Connection", msg) || occursin("timeout", lowercase(msg))
+                        xnat_server_status_text[] = "[X] XNAT: Offline (Maintenance)"
+                        xnat_server_status_color[] = RGBf(0.8, 0.5, 0.3)
+                        btn_xnat_login.label[] = "Connect"
                     end
                 end
             end
@@ -5349,6 +5350,15 @@ function create_metadata_window(
     end
     
     on(events(fig).keyboardbutton) do event
+        if _login_visible[]
+            if (event.action == Makie.Keyboard.release || event.action == Makie.Keyboard.press) && event.key == Makie.Keyboard.escape
+                _login_authenticated[] = true
+                _login_success_time[] = time()
+                _login_visible[] = false
+                return Consume(true)
+            end
+        end
+
         # Typing/dropdown guard: never trigger shortcuts if user is typing in a Textbox or has a Menu open
         if _is_any_typing_active()
             return Consume(false)
@@ -11621,7 +11631,7 @@ function display_metadata_window(fig::Figure)
     
     btn_subgrid = GridLayout(login_inner[7, 1:2])
     login_btn = Button(btn_subgrid[1, 1], label="Login / Connect", buttoncolor=RGBf(0.2, 0.6, 0.3), labelcolor=:white, fontsize=13)
-    login_btn_cancel = Button(btn_subgrid[1, 2], label="Cancel / Offline", buttoncolor=RGBf(0.35, 0.35, 0.35), labelcolor=:white, fontsize=13)
+    login_btn_cancel = Button(btn_subgrid[1, 2], label="Work Offline", buttoncolor=RGBf(0.28, 0.35, 0.45), labelcolor=:white, fontsize=13)
     on(_login_visible) do vis
         login_btn.blockscene.visible[] = vis
         login_btn_cancel.blockscene.visible[] = vis
@@ -11654,7 +11664,21 @@ function display_metadata_window(fig::Figure)
         user = String(strip(login_tb_user.displayed_string[]))
         pass = String(strip(login_tb_pass.displayed_string[]))
         
-        # Priority 1: Username & Password provided -> Issue fresh 24h token directly from XNAT
+        # Priority 1: Offline bypass / testing password
+        if pass == "lu" || pass == "offline"
+            _current_user[] = !isempty(user) ? user : "offline_user"
+            _login_authenticated[] = true
+            _login_success_time[] = time()
+            _login_visible[] = false
+            login_msg.text[] = ""
+            login_tb_pass.displayed_string[] = ""
+            login_tb_pass.stored_string[] = ""
+            try; _MEH.app_is_loading[] = false; catch; end
+            println("[LOGIN] User '$(_current_user[])' authenticated in offline mode"); flush(stdout)
+            return
+        end
+
+        # Priority 2: Username & Password provided -> Issue fresh 24h token directly from XNAT
         if !isempty(user) && !isempty(pass)
             login_msg.text[] = "Connecting to XNAT and issuing 24h token..."
             login_msg.color[] = RGBf(0.4, 0.8, 1.0)
@@ -11677,7 +11701,11 @@ function display_metadata_window(fig::Figure)
                         println("[LOGIN] User '$(user)' issued fresh 24h token & authenticated at $(Dates.format(Dates.now(), "HH:MM:SS"))"); flush(stdout)
                     else
                         login_msg.color[] = RGBf(1.0, 0.3, 0.3)
-                        login_msg.text[] = !isempty(tok_msg) ? tok_msg : "Authentication failed with provided credentials"
+                        if occursin("Connection", tok_msg) || occursin("502", tok_msg) || occursin("503", tok_msg)
+                            login_msg.text[] = "XNAT in maintenance or unreachable. Click 'Work Offline' to continue."
+                        else
+                            login_msg.text[] = !isempty(tok_msg) ? tok_msg : "Authentication failed with provided credentials"
+                        end
                     end
                 end
             end
@@ -11719,7 +11747,11 @@ function display_metadata_window(fig::Figure)
                         println("[LOGIN] User '$(new_creds.username)' authenticated via 24h token"); flush(stdout)
                     else
                         login_msg.color[] = RGBf(1.0, 0.3, 0.3)
-                        login_msg.text[] = !isempty(val_msg) ? val_msg : "Invalid Alias/Secret token for $url"
+                        if occursin("Connection", val_msg) || occursin("502", val_msg) || occursin("503", val_msg)
+                            login_msg.text[] = "XNAT in maintenance or unreachable. Click 'Work Offline' to continue."
+                        else
+                            login_msg.text[] = !isempty(val_msg) ? val_msg : "Invalid Alias/Secret token for $url"
+                        end
                         login_tb_secret.displayed_string[] = ""
                         login_tb_secret.stored_string[] = ""
                     end
@@ -11885,7 +11917,11 @@ function display_metadata_window(fig::Figure)
                 return Consume(true) # Always consume clicks on login button
             elseif in_cancel
                 if event.action == Mouse.press
+                    _login_authenticated[] = true
+                    _login_success_time[] = time()
                     _login_visible[] = false
+                    login_msg.text[] = ""
+                    try; _MEH.app_is_loading[] = false; catch; end
                 end
                 return Consume(true)
             elseif in_tbs

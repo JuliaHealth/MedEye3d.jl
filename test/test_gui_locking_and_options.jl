@@ -180,7 +180,7 @@ import MedEye3d.SegmentationDisplay.MakieEventHandlers as MEH
 
     # Verify scroll positions propagate to nested subgrid children
     apply_scroll = LMW._lmw_observables[:apply_scroll]
-    apply_scroll(2000.0f0)
+    apply_scroll(2100.0f0)
     yield(); sleep(0.2)
 
     menu_scrolled_bb = orient_menu.layoutobservables.computedbbox[]

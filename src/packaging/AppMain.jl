@@ -1576,9 +1576,6 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 if haskey(obs, :loading_overlay_bg)
                     obs[:loading_overlay_bg].visible = false
                     obs[:loading_overlay_txt].visible = false
-                    if haskey(obs, :login_visible)
-                        obs[:login_visible][] = true
-                    end
                 end
             end
             
