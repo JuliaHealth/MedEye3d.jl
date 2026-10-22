@@ -11057,7 +11057,8 @@ function create_metadata_window(
         btn_prev, btn_next, btn_next_unreviewed, btn_ln_validation,
         btn_accept, btn_reject, btn_correct,
         btn_paint, btn_erase, btn_revert_ai,
-        btn_pt, btn_nt
+        btn_pt, btn_nt,
+        btn_xnat_login, btn_xnat_prev, btn_xnat_save, btn_xnat_next, btn_xnat_preproc
     ]
     append!(action_buttons, anat_rm_btns)
     for (_, b) in add_opt_buttons
@@ -11068,6 +11069,10 @@ function create_metadata_window(
     _lmw_observables[:anat_rm_btns] = anat_rm_btns
     _lmw_observables[:anat_rel_menus] = anat_rel_menus
     _lmw_observables[:anat_struct_menus] = anat_struct_menus
+    _lmw_observables[:xnat_proj_menu] = menu_xnat_proj
+    _lmw_observables[:xnat_subj_menu] = menu_xnat_subj
+    _lmw_observables[:xnat_status_lbl] = lbl_xnat_status
+    _lmw_observables[:update_auth_status] = _update_auth_status!
 
     # CT/PET GUI-only sync functions (update slider/textbox without re-sending event)
     function _sync_ct_gui(min_v, max_v)
@@ -11511,7 +11516,8 @@ function display_metadata_window(fig::Figure)
                         _current_user[] = new_creds.username
                         _login_authenticated[] = true
                         _login_success_time[] = time()
-                        _update_auth_status!(new_creds)
+                        up_fn = get(_lmw_observables, :update_auth_status, nothing)
+                        up_fn !== nothing && up_fn(new_creds)
                         _login_visible[] = false
                         login_msg.text[] = ""
                         try; _MEH.app_is_loading[] = false; catch; end
@@ -11534,7 +11540,8 @@ function display_metadata_window(fig::Figure)
                         if tok_ok && tok_creds !== nothing
                             XnatAuth.save_cached_credentials(tok_creds)
                             _active_xnat_creds[] = tok_creds
-                            _update_auth_status!(tok_creds)
+                            up_fn = get(_lmw_observables, :update_auth_status, nothing)
+                            up_fn !== nothing && up_fn(tok_creds)
                         end
                         _current_user[] = user
                         _login_authenticated[] = true
@@ -11582,9 +11589,6 @@ function display_metadata_window(fig::Figure)
     
     _lmw_observables[:login_bg] = login_bg
     _lmw_observables[:login_user] = login_tb_user
-    _lmw_observables[:xnat_proj_menu] = menu_xnat_proj
-    _lmw_observables[:xnat_subj_menu] = menu_xnat_subj
-    _lmw_observables[:xnat_status_lbl] = lbl_xnat_status
 
     # ── Intercept Clicks to Prevent Click-Through & Lock GUI Controls ─────────
     in_rect(p, b) = (p[1] >= b.origin[1] && p[1] <= b.origin[1] + b.widths[1] &&
