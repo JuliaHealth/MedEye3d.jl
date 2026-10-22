@@ -45,7 +45,7 @@ XNAT clusters frequently enforce temporary 24-hour Alias and Secret tokens gener
 ### 2.1. The "Verify-First" Policy
 1. On startup or when opening the application, MedEye3d inspects `xnat_credentials.json` (stored securely in `%APPDATA%/MedEye3D/` on Windows or `~/.medeye3d/` on Linux).
 2. It validates the local expiration timestamp ($T_{\text{now}} < T_{\text{expires}} - 15\text{min}$).
-3. It dispatches a silent verification ping to the server (`GET /data/JSESSION`).
+3. It dispatches a silent verification ping to the server (`GET /data/JSESSION`). Note: XNAT's session endpoint strictly serves `text/plain`, so MedEye3d provides compliant `Accept: text/plain, */*` headers, preventing HTTP 406 Not Acceptable rejections.
 4. If valid, the user is authenticated silently without interrupting their workflow.
 5. If expired or missing, the login overlay opens, displaying fields for **XNAT URL**, **24h Alias Token**, **24h Secret Token**, or **Username / Password**.
 
@@ -168,12 +168,16 @@ The **XNAT Case Navigator** panel is positioned at the top of the Makie control 
 - **Filter Dropdown (`menu_xnat_filter`)**:
   Filters patient dropdown to show *All Cases*, *Unreviewed (🟡)*, *Validated (🟢)*, or *Raw Scans (🔴)*.
 - **Patient Dropdown (`menu_xnat_subj`)**:
-  Displays patients with status badges. Selecting a patient triggers background preloading for subsequent cases and switches the active dataset.
+  Displays patients with status badges (`[OK]`, `[PRE]`, `[..]`, `[RAW]`). Selecting any patient:
+  1. Checks the local cache (`~/.medeye3d/xnat_cache/{proj}/{subj}/` or repo directory). If present, loads immediately.
+  2. If not in local cache, queries XNAT to stream the preprocessed HDF5.
+  3. **Automatic Preprocessing Fallback**: If no preprocessed HDF5 is present on XNAT (case is `[RAW]` or newly acquired), MedEye3d automatically triggers the preprocessing pipeline (`_run_preprocess_and_upload`) in the background. It downloads scans, executes multi-modal alignment, bone subsegmentation, and organ/lymph node rules, saves a local copy in the cache directory, uploads the generated HDF5 and `PREPROCESSED` status marker back to XNAT, updates the badge to `[PRE]`, and switches the viewer into the newly preprocessed case.
+  4. Triggers background preloading for subsequent cases in the queue.
 - **Action Buttons**:
   - `[ ◀ Prev ]`: Moves to previous patient in the queue.
   - `[ Save XNAT 💾 ]`: Flushes all modified mask layers (`flush_all_dirty_masks!`), measurements (`save_measurements_to_h5`), and annotations (`persist_to_active_dataset_h5!`), then uploads `status.json` and the updated HDF5 to XNAT.
   - `[ Next ▶ ]`: Auto-saves current patient edits in the background and advances immediately to the preloaded patient $N+1$.
-  - `[ Preproc ⚙ ]`: Launches the preprocessing script for the current patient if only raw scans are present.
+  - `[ Preproc ⚙ ]`: Manually forces a rerun of preprocessing and upload for the selected patient (`--overwrite`).
 
 ---
 

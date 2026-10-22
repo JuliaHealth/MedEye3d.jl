@@ -92,6 +92,9 @@ while [[ $# -gt 0 ]]; do
             print_help
             exit 0
             ;;
+        "")
+            shift
+            ;;
         *)
             echo "Unknown option: $1"
             print_help
@@ -126,7 +129,7 @@ echo " Project: $PROJECT"
 echo "=============================================================================="
 echo "▶ Verifying XNAT credentials..."
 
-AUTH_CHECK=$(julia --project=. -e '
+AUTH_CHECK=$(julia -t 1 --project=. -e '
 using MedEye3d.XnatAuth
 ok, creds, msg = XnatAuth.auto_verify_credentials()
 if ok
@@ -158,11 +161,15 @@ process_patient() {
 
     # Check status on XNAT if not overwrite
     if [ "$OVERWRITE" = false ]; then
-        STATUS=$(julia --project=. -e '
+        STATUS=$(julia -t 1 --project=. -e '
 using MedEye3d.XnatAuth, MedEye3d.XnatClient
 ok, creds, _ = XnatAuth.auto_verify_credentials()
-st = XnatClient.get_case_status(creds, ARGS[1], ARGS[2])
-println(st.status)
+if ok && creds !== nothing
+    st = XnatClient.get_case_status(creds, ARGS[1], ARGS[2])
+    println(st.status)
+else
+    println("UNKNOWN")
+end
 ' "$PROJECT" "$SUBJ")
         if [ "$STATUS" = "PROCESSED" ] || [ "$STATUS" = "PREPROCESSED" ]; then
             echo "ℹ Case $SUBJ is already $STATUS on XNAT. Skipping (use --overwrite to force)."
@@ -174,7 +181,7 @@ println(st.status)
 
     # 1. Download scans
     echo "Step 1/4: Downloading scans from XNAT..."
-    julia --project=. "$SCRIPT_DIR/xnat_preproc_worker.jl" download \
+    julia -t 1 --project=. "$SCRIPT_DIR/xnat_preproc_worker.jl" download \
         --project "$PROJECT" --subject "$SUBJ" --out-dir "$SUBJ_WORK_DIR"
 
     # 2. Process: Skellytour + Lymph Node Rules + Alignment + HDF5 packing
@@ -183,13 +190,24 @@ println(st.status)
     if [ "$SKIP_SKELLY" = true ]; then
         EXTRA_FLAGS="--skip-skellytour"
     fi
-    julia --project=. "$SCRIPT_DIR/xnat_preproc_worker.jl" process \
+    julia -t 1 --project=. "$SCRIPT_DIR/xnat_preproc_worker.jl" process \
         --dir "$SUBJ_WORK_DIR" --out-h5 "${SUBJ}_preprocessed.h5" $EXTRA_FLAGS
 
     # 3. Upload to XNAT
     echo "Step 3/4: Uploading preprocessed HDF5 to XNAT..."
-    julia --project=. "$SCRIPT_DIR/xnat_preproc_worker.jl" upload \
+    julia -t 1 --project=. "$SCRIPT_DIR/xnat_preproc_worker.jl" upload \
         --project "$PROJECT" --subject "$SUBJ" --h5 "$H5_FILE" --status "PREPROCESSED"
+
+    # Copy to persistent local cache
+    LOCAL_CACHE_DIR=$(julia -t 1 --project=. -e '
+using MedEye3d.XnatPreloader
+println(XnatPreloader.get_local_cache_dir(ARGS[1], ARGS[2]))
+' "$PROJECT" "$SUBJ")
+    mkdir -p "$LOCAL_CACHE_DIR"
+    if [ -f "$H5_FILE" ]; then
+        cp -f "$H5_FILE" "$LOCAL_CACHE_DIR/${SUBJ}_preprocessed.h5"
+        echo "✓ Copied preprocessed HDF5 to local cache: $LOCAL_CACHE_DIR/${SUBJ}_preprocessed.h5"
+    fi
 
     # 4. Cleanup
     if [ "$KEEP_WORK_DIR" = false ]; then
@@ -205,13 +223,15 @@ println(st.status)
 
 if [ "$ALL_SUBJECTS" = true ]; then
     echo "▶ Querying all subjects for project: $PROJECT..."
-    SUBJECTS=$(julia --project=. -e '
+    SUBJECTS=$(julia -t 1 --project=. -e '
 using MedEye3d.XnatAuth, MedEye3d.XnatClient
 ok, creds, _ = XnatAuth.auto_verify_credentials()
-subjects = XnatClient.list_subjects(creds, ARGS[1])
-for s in subjects
-    lbl = get(s, "label", get(s, "ID", ""))
-    !isempty(lbl) && println(lbl)
+if ok && creds !== nothing
+    subjects = XnatClient.list_subjects(creds, ARGS[1])
+    for s in subjects
+        lbl = get(s, "label", get(s, "ID", ""))
+        !isempty(lbl) && println(lbl)
+    end
 end
 ' "$PROJECT")
 

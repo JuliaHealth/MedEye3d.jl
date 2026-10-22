@@ -4234,6 +4234,27 @@ function create_metadata_window(
                 xnat_server_status_color[] = RGBf(0.9, 0.3, 0.3)
                 btn_xnat_login.label[] = "Renew Token"
             end
+
+            # Asynchronously fetch and populate all accessible projects from XNAT
+            Threads.@spawn begin
+                try
+                    projs_raw = XnatClient.list_projects(creds)
+                    if !isempty(projs_raw)
+                        p_list = String["(None)"]
+                        for item in projs_raw
+                            pid = String(get(item, "ID", get(item, "name", "")))
+                            if !isempty(pid) && !(pid in p_list)
+                                push!(p_list, pid)
+                            end
+                        end
+                        @async begin
+                            xnat_projects[] = p_list
+                        end
+                    end
+                catch e
+                    @warn "Failed to populate projects from XNAT" e
+                end
+            end
         else
             _active_xnat_creds[] = nothing
             xnat_server_status_text[] = "[X] XNAT: Disconnected"
@@ -4272,7 +4293,16 @@ function create_metadata_window(
         println("[SWITCH-CASE] Switching active dataset to $target_h5"); flush(stdout)
         try
             _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+            _MEH_mod.h5_path_ref[] = target_h5
             _MEH_mod.h5_save_path_ref[] = target_h5
+            _MEH_mod.patient_id[] = basename(target_h5)
+            lock(_MEH_mod._tp_cache_lock) do
+                empty!(_MEH_mod.tp_data_cache)
+            end
+            lock(_MEH_mod._centroids_lock) do
+                empty!(_MEH_mod.lesion_centroids_cache)
+                empty!(_MEH_mod.pet_volumes_cache)
+            end
         catch; end
         
         try
@@ -4284,6 +4314,16 @@ function create_metadata_window(
                 end
             end
             lesion_db[] = _migrate_db(new_db)
+
+            new_lids = String[]
+            for k in sort(collect(keys(lesion_db[])))
+                !startswith(k, "_") && push!(new_lids, k)
+            end
+            if isempty(new_lids)
+                new_lids = ["(none)"]
+            end
+            lesion_ids[] = new_lids
+            active_lesion_id[] = new_lids[1]
         catch e
             @warn "Failed reloading annotations for $target_h5" e
         end
@@ -4291,6 +4331,105 @@ function create_metadata_window(
         obs_on_switch_case[] = target_h5
         if haskey(ui_hooks, :on_switch_case)
             ui_hooks[:on_switch_case][] = target_h5
+        end
+    end
+
+    local _run_preprocess_and_upload
+    function _run_preprocess_and_upload(proj::String, subj::String, target_h5::String; force::Bool=false)
+        creds = _active_xnat_creds[]
+        if creds === nothing
+            save_status_text[] = "Please connect to XNAT first"
+            save_status_color[] = RGBf(0.9, 0.3, 0.3)
+            return
+        end
+
+        xnat_subject_status_text[] = "Status: Preprocessing..."
+        xnat_subject_status_color[] = RGBf(0.9, 0.7, 0.2)
+        save_status_text[] = "Preprocessing $subj from XNAT..."
+        save_status_color[] = RGBf(0.9, 0.7, 0.2)
+
+        Threads.@spawn begin
+            script_path = joinpath(dirname(dirname(@__DIR__)), "scripts", "xnat", "xnat_preprocess_patient.sh")
+            worker_path = joinpath(dirname(dirname(@__DIR__)), "scripts", "xnat", "xnat_preproc_worker.jl")
+            target_dir = dirname(target_h5)
+            mkpath(target_dir)
+
+            try
+                if isfile(script_path)
+                    cmd = force ? `bash $script_path --project $proj --subject $subj --overwrite` : `bash $script_path --project $proj --subject $subj`
+                    run(cmd)
+                elseif isfile(worker_path)
+                    cmd = `julia -t 1 --project=. $worker_path full --project $proj --subject $subj --work-dir $target_dir`
+                    run(cmd)
+                end
+            catch e
+                @warn "Preprocessing execution error: $e"
+            end
+
+            # Ensure preprocessed HDF5 is present at target_h5
+            if !isfile(target_h5)
+                candidate_paths = String[
+                    joinpath("/tmp", "medeye3d_xnat_preproc", proj, subj, "$(subj)_preprocessed.h5"),
+                    joinpath("/tmp", "medeye3d_xnat_preproc", proj, subj, "preprocessed_volumes.h5"),
+                    joinpath(target_dir, "preprocessed_volumes.h5"),
+                    joinpath("/tmp", "xnat_work", proj, subj, "preprocessed_volumes.h5"),
+                    joinpath("/tmp", "xnat_work", proj, subj, "$(subj)_preprocessed.h5")
+                ]
+                for cp_path in candidate_paths
+                    if isfile(cp_path)
+                        cp(cp_path, target_h5, force=true)
+                        break
+                    end
+                end
+            end
+
+            if isfile(target_h5)
+                # Upload to XNAT MEDEYE3D resource and update status
+                try
+                    println("[XNAT] Uploading preprocessed HDF5 to XNAT for $subj..."); flush(stdout)
+                    XnatClient.upload_preprocessed_hdf5(creds, proj, subj, target_h5)
+                    status_dict = Dict{String, Any}(
+                        "project_id" => proj,
+                        "subject_id" => subj,
+                        "status" => "PREPROCESSED",
+                        "assigned_user" => _get_current_username(),
+                        "last_modified" => string(Dates.now()),
+                        "software_version" => "0.5.11",
+                        "summary" => Dict(
+                            "preprocessed_file" => basename(target_h5),
+                            "file_size_bytes" => filesize(target_h5)
+                        )
+                    )
+                    XnatClient.save_annotations_to_xnat(creds, proj, subj, status_dict)
+                catch e
+                    @warn "Failed uploading to XNAT: $e"
+                end
+
+                @async begin
+                    xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
+                    xnat_subject_status_color[] = RGBf(0.9, 0.9, 0.2)
+                    save_status_text[] = "Preprocessed & Uploaded $subj OK"
+                    save_status_color[] = RGBf(0.4, 0.9, 0.4)
+                    _switch_to_hdf5!(target_h5)
+
+                    if haskey(raw_subjects_cache, proj)
+                        for (i, entry) in enumerate(raw_subjects_cache[proj])
+                            if occursin(subj, entry)
+                                raw_subjects_cache[proj][i] = "[PRE] $subj (PREPROCESSED)"
+                                break
+                            end
+                        end
+                        _filter_and_set_subjects!()
+                    end
+                end
+            else
+                @async begin
+                    xnat_subject_status_text[] = "Status: Preproc Failed [!]"
+                    xnat_subject_status_color[] = RGBf(0.9, 0.2, 0.2)
+                    save_status_text[] = "Preprocessing failed for $subj"
+                    save_status_color[] = RGBf(0.9, 0.2, 0.2)
+                end
+            end
         end
     end
 
@@ -4445,27 +4584,50 @@ function create_metadata_window(
         target_dir = XnatPreloader.get_local_cache_dir(proj, subj)
         target_h5 = joinpath(target_dir, "$(subj)_preprocessed.h5")
         
-        if isfile(target_h5)
+        # 1. Local cache check
+        if isfile(target_h5) && filesize(target_h5) > 1024
             println("[XNAT] Patient '$subj' preprocessed HDF5 found locally: $target_h5"); flush(stdout)
             _switch_to_hdf5!(target_h5)
-        elseif creds !== nothing && (occursin("[OK]", subj_sel) || occursin("[PRE]", subj_sel) || occursin("PREPROCESSED", subj_sel) || occursin("PROCESSED", subj_sel))
-            save_status_text[] = "Downloading $subj from XNAT..."
+            return
+        end
+
+        # 1b. Check local repository files (e.g. pat6 / pat_6)
+        if (subj == "pat6" || subj == "pat_6")
+            repo_pat6 = joinpath(dirname(dirname(@__DIR__)), "data", "pat_6_files", "preprocessed_volumes.h5")
+            if isfile(repo_pat6)
+                mkpath(target_dir)
+                try cp(repo_pat6, target_h5, force=true) catch; end
+                if isfile(target_h5) && filesize(target_h5) > 1024
+                    println("[XNAT] Linked local repo pat6 file to cache: $target_h5"); flush(stdout)
+                    _switch_to_hdf5!(target_h5)
+                    return
+                end
+            end
+        end
+        
+        # 2. Check XNAT for preprocessed HDF5
+        if creds !== nothing
+            save_status_text[] = "Checking XNAT for $subj preprocessed HDF5..."
             save_status_color[] = RGBf(0.4, 0.7, 1.0)
             Threads.@spawn begin
                 ok = XnatClient.download_preprocessed_hdf5(creds, proj, subj, target_h5)
-                if ok && isfile(target_h5)
+                if ok && isfile(target_h5) && filesize(target_h5) > 1024
                     @async begin
-                        save_status_text[] = "Downloaded $subj OK"
+                        save_status_text[] = "Downloaded $subj from XNAT OK"
                         save_status_color[] = RGBf(0.4, 0.9, 0.4)
                         _switch_to_hdf5!(target_h5)
                     end
                 else
+                    # 3. No preprocessed HDF5 on XNAT: run preprocessing, save local copy, and upload to XNAT!
+                    println("[XNAT] No preprocessed HDF5 found on XNAT for $subj. Starting preprocessing pipeline..."); flush(stdout)
                     @async begin
-                        save_status_text[] = "Download failed for $subj"
-                        save_status_color[] = RGBf(0.9, 0.2, 0.2)
+                        _run_preprocess_and_upload(proj, subj, target_h5; force=false)
                     end
                 end
             end
+        else
+            save_status_text[] = "No local HDF5 for $subj. Connect to XNAT to download/preprocess."
+            save_status_color[] = RGBf(0.9, 0.7, 0.2)
         end
     end
 
@@ -4496,37 +4658,9 @@ function create_metadata_window(
         (proj === nothing || proj == "(None)" || subj_sel === nothing) && return
         subj = _parse_subject_id(subj_sel)
         isempty(subj) && return
-        
-        xnat_subject_status_text[] = "Status: Preprocessing..."
-        xnat_subject_status_color[] = RGBf(0.9, 0.7, 0.2)
-        save_status_text[] = "Preprocessing $subj started..."
-        save_status_color[] = RGBf(0.9, 0.7, 0.2)
-        
-        Threads.@spawn begin
-            script_path = joinpath(dirname(dirname(@__DIR__)), "scripts", "xnat", "xnat_preprocess_patient.sh")
-            if isfile(script_path)
-                cmd = `bash $script_path --project $proj --subject $subj`
-                try
-                    run(cmd)
-                    @async begin
-                        xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
-                        xnat_subject_status_color[] = RGBf(0.9, 0.9, 0.2)
-                        save_status_text[] = "Preprocessed $subj OK"
-                        save_status_color[] = RGBf(0.4, 0.9, 0.4)
-                    end
-                catch e
-                    @warn "Preprocess script failed" e
-                    @async begin
-                        xnat_subject_status_text[] = "Status: Preproc Failed [!]"
-                        xnat_subject_status_color[] = RGBf(0.9, 0.2, 0.2)
-                        save_status_text[] = "Preprocess failed for $subj"
-                        save_status_color[] = RGBf(0.9, 0.2, 0.2)
-                    end
-                end
-            else
-                @warn "Preprocess script not found: $script_path"
-            end
-        end
+        target_dir = XnatPreloader.get_local_cache_dir(proj, subj)
+        target_h5 = joinpath(target_dir, "$(subj)_preprocessed.h5")
+        _run_preprocess_and_upload(proj, subj, target_h5; force=true)
     end
 
     # Auto-detection from active HDF5 path (e.g. CLI or preloaded)
@@ -4561,8 +4695,9 @@ function create_metadata_window(
                 if !isempty(projs)
                     @async begin
                         for p in projs
-                            if !(p in xnat_projects[])
-                                push!(xnat_projects[], p)
+                            pid = String(get(p, "ID", get(p, "name", "")))
+                            if !isempty(pid) && !(pid in xnat_projects[])
+                                push!(xnat_projects[], pid)
                             end
                         end
                     end

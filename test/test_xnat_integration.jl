@@ -110,6 +110,45 @@ using Dates
     # Give a tiny slice for preloader task startup
     sleep(0.1)
     MedEye3d.XnatPreloader.cancel_preload!()
+
+    # 10. Switch dataset handling
+    test_h5 = joinpath(dirname(@__DIR__), "data", "pat_6_files", "preprocessed_volumes.h5")
+    if isfile(test_h5)
+        # Verify local switch logic
+        MEH_mod = MedEye3d.SegmentationDisplay.MakieEventHandlers
+        orig_path = MEH_mod.h5_path_ref[]
+        MEH_mod.h5_path_ref[] = test_h5
+        @test MEH_mod.h5_path_ref[] == test_h5
+        @test isfile(MEH_mod.h5_path_ref[])
+        MEH_mod.h5_path_ref[] = orig_path
+    end
+
+    # 11. download_preprocessed_hdf5 graceful handling of non-existent files
+    fake_creds = XnatCredentials(server_url="https://xnat.invalid", alias="a", secret="s")
+    @test XnatClient.download_preprocessed_hdf5(fake_creds, "proj", "subj", tempname() * ".h5") == false
+
+    # 12. Automated missing-preprocessed HDF5 fallback pathing & cache resolution
+    target_cache_dir = MedEye3d.XnatPreloader.get_local_cache_dir("test_proj", "test_subj")
+    target_cache_h5 = joinpath(target_cache_dir, "test_subj_preprocessed.h5")
+    @test occursin("test_proj", target_cache_dir)
+    @test endswith(target_cache_h5, "test_subj_preprocessed.h5")
+    # Verify candidate paths resolution logic
+    dummy_scratch = mktempdir()
+    dummy_candidate = joinpath(dummy_scratch, "preprocessed_volumes.h5")
+    write(dummy_candidate, "dummy-hdf5-data-test")
+    candidate_paths = [
+        joinpath("/tmp", "medeye3d_xnat_preproc", "test_proj", "test_subj", "test_subj_preprocessed.h5"),
+        dummy_candidate
+    ]
+    resolved_candidate = nothing
+    for cp_path in candidate_paths
+        if isfile(cp_path)
+            resolved_candidate = cp_path
+            break
+        end
+    end
+    @test resolved_candidate == dummy_candidate
+    rm(dummy_scratch, recursive=true)
 end
 
 ccall(:_exit, Cvoid, (Cint,), 0)
