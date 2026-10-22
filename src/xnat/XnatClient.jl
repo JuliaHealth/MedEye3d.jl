@@ -256,14 +256,22 @@ end
 Creates the specified resource folder under the subject if it does not yet exist.
 """
 function ensure_subject_resource(creds::XnatCredentials, project_id::AbstractString, subject_id::AbstractString, resource_name::AbstractString)::Bool
-    res_url = "$(creds.server_url)/data/projects/$(strip(project_id))/subjects/$(strip(subject_id))/resources/$(strip(resource_name))"
+    p = strip(project_id)
+    s = strip(subject_id)
+    r = strip(resource_name)
+    existing = list_subject_resources(creds, p, s)
+    if r in existing
+        return true
+    end
+
+    res_url = "$(creds.server_url)/data/projects/$p/subjects/$s/resources/$r"
     headers = XnatAuth.get_auth_headers(creds)
     try
         buf = IOBuffer()
         resp = Downloads.request(res_url; method="PUT", headers=headers, output=buf, timeout=10.0)
         return resp.status in (200, 201)
     catch e
-        @warn "Error ensuring resource $resource_name: $e"
+        @warn "Error ensuring resource $r for $p/$s: $e"
         return false
     end
 end
@@ -322,7 +330,10 @@ function upload_preprocessed_hdf5(
     !isfile(h5_path) && return false
     p = strip(project_id)
     s = strip(subject_id)
-    ensure_subject_resource(creds, p, s, "MEDEYE3D")
+    if !ensure_subject_resource(creds, p, s, "MEDEYE3D")
+        @warn "Cannot access or create MEDEYE3D resource on remote XNAT for $p/$s. Remote upload skipped."
+        return false
+    end
     
     remote_url = "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files/$(s)_preprocessed.h5?overwrite=true"
     return upload_file(creds, remote_url, h5_path)
@@ -342,7 +353,10 @@ function save_annotations_to_xnat(
 )::Bool
     p = strip(project_id)
     s = strip(subject_id)
-    ensure_subject_resource(creds, p, s, "ANNOTATIONS")
+    if !ensure_subject_resource(creds, p, s, "ANNOTATIONS")
+        @warn "Cannot access or create ANNOTATIONS resource on remote XNAT for $p/$s. Remote upload skipped."
+        return false
+    end
 
     # 1. Upload status.json
     tmp_json = tempname() * ".json"

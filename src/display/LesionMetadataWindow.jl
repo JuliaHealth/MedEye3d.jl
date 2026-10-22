@@ -53,6 +53,10 @@ export create_metadata_window, display_metadata_window, get_active_lesion_db, ge
 # Registry of all Menu widgets for global click-outside-to-close dismiss
 const _ALL_MENUS = Makie.Menu[]
 const _last_menu_filter_text = Dict{UInt64, String}()
+const ALLOWED_XNAT_PROJECTS = String[
+    "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE",
+    "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE"
+]
 
 abstract type DBMessage end
 struct SaveDBMessage <: DBMessage
@@ -4184,7 +4188,7 @@ function create_metadata_window(
     
     xnat_server_status_text = Observable("XNAT: Checking...")
     xnat_server_status_color = Observable(RGBf(0.8, 0.7, 0.2))
-    xnat_projects = Observable(String["(None)", "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE", "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE"])
+    xnat_projects = Observable(copy(ALLOWED_XNAT_PROJECTS))
     xnat_filter_opts = String["All Cases", "Unreviewed (PRE)", "Validated (OK)", "Raw Scans (RAW)"]
     xnat_subjects = Observable(String["(Select Project First)"])
     xnat_subject_status_text = Observable("Status: --")
@@ -4198,7 +4202,7 @@ function create_metadata_window(
 
     xnat_r2 = nr!()
     lbl_proj = Label(g[xnat_r2, 1], "Project:", fontsize = 10, halign = :left, color = SUBTXT)
-    menu_xnat_proj = Menu(g[xnat_r2, 2], options = xnat_projects, default = "(None)", fontsize = 10); _register_menu!(menu_xnat_proj)
+    menu_xnat_proj = Menu(g[xnat_r2, 2], options = xnat_projects, default = "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE", fontsize = 10); _register_menu!(menu_xnat_proj)
     lbl_filt = Label(g[xnat_r2, 3], "Filter:", fontsize = 10, halign = :right, color = SUBTXT)
     menu_xnat_filter = Menu(g[xnat_r2, 4], options = xnat_filter_opts, default = "All Cases", fontsize = 9); _register_menu!(menu_xnat_filter)
     rowsize!(g, xnat_r2, Fixed(28)); register_fixed_row!(xnat_r2, 28)
@@ -4233,27 +4237,6 @@ function create_metadata_window(
                 xnat_server_status_text[] = "[X] XNAT: Token Expired"
                 xnat_server_status_color[] = RGBf(0.9, 0.3, 0.3)
                 btn_xnat_login.label[] = "Renew Token"
-            end
-
-            # Asynchronously fetch and populate all accessible projects from XNAT
-            Threads.@spawn begin
-                try
-                    projs_raw = XnatClient.list_projects(creds)
-                    if !isempty(projs_raw)
-                        p_list = String["(None)"]
-                        for item in projs_raw
-                            pid = String(get(item, "ID", get(item, "name", "")))
-                            if !isempty(pid) && !(pid in p_list)
-                                push!(p_list, pid)
-                            end
-                        end
-                        @async begin
-                            xnat_projects[] = p_list
-                        end
-                    end
-                catch e
-                    @warn "Failed to populate projects from XNAT" e
-                end
             end
         else
             _active_xnat_creds[] = nothing
@@ -4373,10 +4356,14 @@ function create_metadata_window(
                     joinpath("/tmp", "medeye3d_xnat_preproc", proj, subj, "preprocessed_volumes.h5"),
                     joinpath(target_dir, "preprocessed_volumes.h5"),
                     joinpath("/tmp", "xnat_work", proj, subj, "preprocessed_volumes.h5"),
-                    joinpath("/tmp", "xnat_work", proj, subj, "$(subj)_preprocessed.h5")
+                    joinpath("/tmp", "xnat_work", proj, subj, "$(subj)_preprocessed.h5"),
+                    (proj == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" && (subj == "pat6" || subj == "pat_6")) ?
+                        joinpath(dirname(dirname(@__DIR__)), "data", "pat_6_files", "preprocessed_volumes.h5") : "",
+                    (proj == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" && (subj == "pat1" || subj == "pat_1" || subj == "psma_patient_all_tp")) ?
+                        joinpath(dirname(dirname(@__DIR__)), "data", "cases", "psma_patient_all_tp", "preprocessed_volumes.h5") : ""
                 ]
                 for cp_path in candidate_paths
-                    if isfile(cp_path)
+                    if !isempty(cp_path) && isfile(cp_path)
                         cp(cp_path, target_h5, force=true)
                         break
                     end
@@ -4591,14 +4578,25 @@ function create_metadata_window(
             return
         end
 
-        # 1b. Check local repository files (e.g. pat6 / pat_6)
-        if (subj == "pat6" || subj == "pat_6")
+        # 1b. Check local repository files (e.g. pat6 / pat_6 or pat1 / psma_patient_all_tp)
+        if (proj == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" && (subj == "pat6" || subj == "pat_6"))
             repo_pat6 = joinpath(dirname(dirname(@__DIR__)), "data", "pat_6_files", "preprocessed_volumes.h5")
             if isfile(repo_pat6)
                 mkpath(target_dir)
                 try cp(repo_pat6, target_h5, force=true) catch; end
                 if isfile(target_h5) && filesize(target_h5) > 1024
                     println("[XNAT] Linked local repo pat6 file to cache: $target_h5"); flush(stdout)
+                    _switch_to_hdf5!(target_h5)
+                    return
+                end
+            end
+        elseif (proj == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" && (subj == "pat1" || subj == "pat_1" || subj == "psma_patient_all_tp"))
+            repo_pat1 = joinpath(dirname(dirname(@__DIR__)), "data", "cases", "psma_patient_all_tp", "preprocessed_volumes.h5")
+            if isfile(repo_pat1)
+                mkpath(target_dir)
+                try cp(repo_pat1, target_h5, force=true) catch; end
+                if isfile(target_h5) && filesize(target_h5) > 1024
+                    println("[XNAT] Linked local repo pat1 (Prostata bimodal) file to cache: $target_h5"); flush(stdout)
                     _switch_to_hdf5!(target_h5)
                     return
                 end
@@ -4671,10 +4669,9 @@ function create_metadata_window(
             if m_path !== nothing
                 act_proj = String(m_path.captures[1])
                 act_subj = String(m_path.captures[2])
-                if !(act_proj in xnat_projects[])
-                    push!(xnat_projects[], act_proj)
+                if (act_proj in ALLOWED_XNAT_PROJECTS)
+                    _set_menu_selection_string!(menu_xnat_proj, act_proj)
                 end
-                _set_menu_selection_string!(menu_xnat_proj, act_proj)
             end
         end
     catch; end
@@ -4690,17 +4687,6 @@ function create_metadata_window(
                 _login_authenticated[] = true
                 @async begin
                     _update_auth_status!(creds)
-                end
-                projs = XnatClient.list_projects(creds)
-                if !isempty(projs)
-                    @async begin
-                        for p in projs
-                            pid = String(get(p, "ID", get(p, "name", "")))
-                            if !isempty(pid) && !(pid in xnat_projects[])
-                                push!(xnat_projects[], pid)
-                            end
-                        end
-                    end
                 end
                 println("[XNAT] Auto-verified credentials on startup for user '$(creds.username)'"); flush(stdout)
             else

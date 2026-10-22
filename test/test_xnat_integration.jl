@@ -4,6 +4,7 @@ using MedEye3d.XnatAuth
 using MedEye3d.XnatClient
 using JSON
 using Dates
+using HDF5
 
 @testset "XNAT Integration Unit Tests" begin
     # 1. Credentials path
@@ -149,6 +150,26 @@ using Dates
     end
     @test resolved_candidate == dummy_candidate
     rm(dummy_scratch, recursive=true)
+
+    # 13. Allowed XNAT Projects constraint
+    allowed_projs = MedEye3d.LesionMetadataWindow.ALLOWED_XNAT_PROJECTS
+    @test length(allowed_projs) == 2
+    @test "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" in allowed_projs
+    @test "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" in allowed_projs
+
+    # 14. Validation of both cases (Lu177 pat6 and Prostata bimodal pat1)
+    pat6_h5 = joinpath(dirname(@__DIR__), "data", "pat_6_files", "preprocessed_volumes.h5")
+    pat1_h5 = joinpath(dirname(@__DIR__), "data", "cases", "psma_patient_all_tp", "preprocessed_volumes.h5")
+    @test isfile(pat6_h5)
+    @test isfile(pat1_h5)
+    HDF5.h5open(pat6_h5, "r") do h5
+        @test haskey(h5, "BASELINE")
+        @test haskey(h5["BASELINE"], "Fixed_CT_Volume_0.nii.gz")
+    end
+    HDF5.h5open(pat1_h5, "r") do h5
+        @test haskey(h5, "BASELINE")
+        @test haskey(h5["BASELINE"], "Fixed_CT_Volume_0.nii.gz")
+    end
 end
 
 ccall(:_exit, Cvoid, (Cint,), 0)

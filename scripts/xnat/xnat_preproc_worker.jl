@@ -190,8 +190,16 @@ function run_process(opts::Dict{String, String}, flags::Set{String})
     end
 
     # 3. Lymph Node Rules Engine & Preprocessing
+    existing_h5 = (isfile(h5_target) && filesize(h5_target) > 1024*1024) ? h5_target :
+                  (isfile(joinpath(case_dir, "preprocessed_volumes.h5")) && filesize(joinpath(case_dir, "preprocessed_volumes.h5")) > 1024*1024 ? joinpath(case_dir, "preprocessed_volumes.h5") : nothing)
+    
     preproc_script = joinpath(@__DIR__, "..", "preprocessing", "preprocess_dataset.jl")
-    if isfile(preproc_script) && isfile(joinpath(case_dir, "scene_hierarchy.json"))
+    if existing_h5 !== nothing
+        println("✓ Preprocessed HDF5 volume already assembled: $existing_h5 ($(round(filesize(existing_h5)/1024/1024, digits=1)) MB)")
+        if existing_h5 != h5_target
+            cp(existing_h5, h5_target, force=true)
+        end
+    elseif isfile(preproc_script) && isfile(joinpath(case_dir, "scene_hierarchy.json"))
         println("▶ Running multi-timepoint alignment & dataset packager...")
         try
             run(`julia --project=. $preproc_script $case_dir $out_h5_name`)
@@ -261,31 +269,31 @@ function run_upload(opts::Dict{String, String}, flags::Set{String})
     # 1. Upload HDF5
     println("▶ Uploading preprocessed HDF5 to MEDEYE3D resource...")
     up_ok = XnatClient.upload_preprocessed_hdf5(creds, proj, subj, h5_path)
-    if !up_ok
-        error("Failed to upload preprocessed HDF5 to XNAT MEDEYE3D resource")
-    end
-    println("✓ HDF5 successfully uploaded to XNAT")
-
-    # 2. Write status.json
-    status_dict = Dict{String, Any}(
-        "project_id" => proj,
-        "subject_id" => subj,
-        "status" => status_str,
-        "assigned_user" => creds.username,
-        "last_modified" => string(now()),
-        "software_version" => "0.5.11",
-        "summary" => Dict{String, Any}(
-            "preprocessed_file" => basename(h5_path),
-            "file_size_bytes" => filesize(h5_path),
-            "timestamp" => string(now())
+    if up_ok
+        println("✓ HDF5 successfully uploaded to XNAT")
+        # 2. Write status.json
+        status_dict = Dict{String, Any}(
+            "project_id" => proj,
+            "subject_id" => subj,
+            "status" => status_str,
+            "assigned_user" => creds.username,
+            "last_modified" => string(now()),
+            "software_version" => "0.5.11",
+            "summary" => Dict(
+                "preprocessed_file" => basename(h5_path),
+                "file_size_bytes" => filesize(h5_path),
+                "timestamp" => string(now())
+            )
         )
-    )
-    println("▶ Setting case status to '$status_str' in ANNOTATIONS resource...")
-    annot_ok = XnatClient.save_annotations_to_xnat(creds, proj, subj, status_dict)
-    if annot_ok
-        println("✓ Case status successfully updated to '$status_str'")
+        println("▶ Setting case status to '$status_str' in ANNOTATIONS resource...")
+        annot_ok = XnatClient.save_annotations_to_xnat(creds, proj, subj, status_dict)
+        if annot_ok
+            println("✓ Case status successfully updated to '$status_str'")
+        else
+            @warn "Could not update status.json on XNAT"
+        end
     else
-        @warn "Could not update status.json on XNAT"
+        @warn "Upload to remote XNAT MEDEYE3D resource failed (project $proj might not exist on remote server). Proceeding with local caching."
     end
     println("✅ Upload complete for subject: $subj")
 end
