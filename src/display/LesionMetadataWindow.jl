@@ -205,7 +205,7 @@ const _is_syncing_m2_from_backend = Ref(false)
 """Check if any Textbox has focus or any Menu dropdown is open (typing/interaction guard)."""
 function _is_any_typing_active()
     # Guard: if login modal is visible and unauthenticated, typing/interaction is strictly confined to login
-    if !_login_authenticated[] && get(_lmw_observables, :login_visible, Ref(Observable(false)))[][]
+    if !_login_authenticated[] && _login_visible[]
         return true
     end
     for tb in _all_textboxes
@@ -308,6 +308,8 @@ const current_seg_origin = Observable("AI_PRESEGMENTATION")
 const _global_trigger_autosave = Ref{Any}(nothing)
 const _current_user = Ref{String}("")
 const _login_authenticated = Ref{Bool}(false)
+const _login_visible = Observable(false)
+_lmw_observables[:login_visible] = _login_visible
 const _login_success_time = Ref{Float64}(0.0)
 const _LOGIN_PASSWORD = "lu"
 const _active_xnat_creds = Ref{Union{XnatAuth.XnatCredentials, Nothing}}(nothing)
@@ -3919,7 +3921,7 @@ function create_metadata_window(
     ))
     
     on(fig.scene.events.scroll) do scroll
-        is_login_active = !_login_authenticated[] && get(_lmw_observables, :login_visible, Ref(Observable(false)))[][]
+        is_login_active = !_login_authenticated[] && _login_visible[]
         if !_scroll_ready[] || !_bbox_cache_ready[] || is_login_active || _any_menu_open()
             return Consume(true)
         end
@@ -11512,7 +11514,7 @@ function display_metadata_window(fig::Figure)
     _lmw_observables[:loading_overlay_txt] = loading_txt
 
     # ── Login Overlay ─────────────────────────────────────────────────────────
-    _login_visible = Observable(false)
+    _login_visible[] = false
     _lmw_observables[:login_visible] = _login_visible
     
     # Hide all dropdowns while login is active so they cannot steal clicks (since they were added first)
