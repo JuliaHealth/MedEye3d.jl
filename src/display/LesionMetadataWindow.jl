@@ -4357,9 +4357,9 @@ function create_metadata_window(
                     joinpath(target_dir, "preprocessed_volumes.h5"),
                     joinpath("/tmp", "xnat_work", proj, subj, "preprocessed_volumes.h5"),
                     joinpath("/tmp", "xnat_work", proj, subj, "$(subj)_preprocessed.h5"),
-                    (proj == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" && (subj == "pat6" || subj == "pat_6")) ?
+                    ((proj == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" || proj == "Lu177_PSMA_PIPELINE") && occursin(r"[pP]at_?6"i, subj)) ?
                         joinpath(dirname(dirname(@__DIR__)), "data", "pat_6_files", "preprocessed_volumes.h5") : "",
-                    (proj == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" && (subj == "pat1" || subj == "pat_1" || subj == "psma_patient_all_tp")) ?
+                    ((proj == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" || proj == "Prostata_bimodal_PIPELINE") && (occursin(r"[pP]at_?1"i, subj) || subj == "psma_patient_all_tp")) ?
                         joinpath(dirname(dirname(@__DIR__)), "data", "cases", "psma_patient_all_tp", "preprocessed_volumes.h5") : ""
                 ]
                 for cp_path in candidate_paths
@@ -4572,33 +4572,36 @@ function create_metadata_window(
         target_h5 = joinpath(target_dir, "$(subj)_preprocessed.h5")
         
         # 1. Local cache check
-        if isfile(target_h5) && filesize(target_h5) > 1024
+        is_already_on_xnat = occursin("[OK]", subj_sel) || occursin("PROCESSED", subj_sel) || occursin("[PRE]", subj_sel) || occursin("PREPROCESSED", subj_sel)
+        if is_already_on_xnat && isfile(target_h5) && filesize(target_h5) > 1024
             println("[XNAT] Patient '$subj' preprocessed HDF5 found locally: $target_h5"); flush(stdout)
             _switch_to_hdf5!(target_h5)
             return
         end
 
         # 1b. Check local repository files (e.g. pat6 / pat_6 or pat1 / psma_patient_all_tp)
-        if (proj == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" && (subj == "pat6" || subj == "pat_6"))
-            repo_pat6 = joinpath(dirname(dirname(@__DIR__)), "data", "pat_6_files", "preprocessed_volumes.h5")
-            if isfile(repo_pat6)
-                mkpath(target_dir)
-                try cp(repo_pat6, target_h5, force=true) catch; end
-                if isfile(target_h5) && filesize(target_h5) > 1024
-                    println("[XNAT] Linked local repo pat6 file to cache: $target_h5"); flush(stdout)
-                    _switch_to_hdf5!(target_h5)
-                    return
+        if is_already_on_xnat
+            if ((proj == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" || proj == "Lu177_PSMA_PIPELINE") && occursin(r"[pP]at_?6"i, subj))
+                repo_pat6 = joinpath(dirname(dirname(@__DIR__)), "data", "pat_6_files", "preprocessed_volumes.h5")
+                if isfile(repo_pat6)
+                    mkpath(target_dir)
+                    try cp(repo_pat6, target_h5, force=true) catch; end
+                    if isfile(target_h5) && filesize(target_h5) > 1024
+                        println("[XNAT] Linked local repo pat6 file to cache: $target_h5"); flush(stdout)
+                        _switch_to_hdf5!(target_h5)
+                        return
+                    end
                 end
-            end
-        elseif (proj == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" && (subj == "pat1" || subj == "pat_1" || subj == "psma_patient_all_tp"))
-            repo_pat1 = joinpath(dirname(dirname(@__DIR__)), "data", "cases", "psma_patient_all_tp", "preprocessed_volumes.h5")
-            if isfile(repo_pat1)
-                mkpath(target_dir)
-                try cp(repo_pat1, target_h5, force=true) catch; end
-                if isfile(target_h5) && filesize(target_h5) > 1024
-                    println("[XNAT] Linked local repo pat1 (Prostata bimodal) file to cache: $target_h5"); flush(stdout)
-                    _switch_to_hdf5!(target_h5)
-                    return
+            elseif ((proj == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" || proj == "Prostata_bimodal_PIPELINE") && (occursin(r"[pP]at_?1"i, subj) || subj == "psma_patient_all_tp"))
+                repo_pat1 = joinpath(dirname(dirname(@__DIR__)), "data", "cases", "psma_patient_all_tp", "preprocessed_volumes.h5")
+                if isfile(repo_pat1)
+                    mkpath(target_dir)
+                    try cp(repo_pat1, target_h5, force=true) catch; end
+                    if isfile(target_h5) && filesize(target_h5) > 1024
+                        println("[XNAT] Linked local repo pat1 (Prostata bimodal) file to cache: $target_h5"); flush(stdout)
+                        _switch_to_hdf5!(target_h5)
+                        return
+                    end
                 end
             end
         end
@@ -11544,7 +11547,7 @@ function display_metadata_window(fig::Figure)
     lbl_title = Label(login_inner[1, 1:2], "MedEye3d / XNAT Login", color=:white, fontsize=20, font=:bold, halign=:center, visible=_login_visible)
     
     cached_init = XnatAuth.load_cached_credentials()
-    init_url = cached_init !== nothing ? cached_init.server_url : "https://xnat.bmia.nl"
+    init_url = XnatAuth.DEFAULT_XNAT_SERVER
     init_alias = cached_init !== nothing ? cached_init.alias : ""
     init_secret = cached_init !== nothing ? cached_init.secret : ""
     init_user = cached_init !== nothing ? cached_init.username : ""
@@ -11631,7 +11634,7 @@ function display_metadata_window(fig::Figure)
     
     function _do_login()
         url = String(strip(login_tb_url.displayed_string[]))
-        isempty(url) && (url = "https://xnat.bmia.nl")
+        (isempty(url) || occursin("bmia.nl", url)) && (url = XnatAuth.DEFAULT_XNAT_SERVER)
         alias = String(strip(login_tb_alias.displayed_string[]))
         secret = String(strip(login_tb_secret.displayed_string[]))
         user = String(strip(login_tb_user.displayed_string[]))

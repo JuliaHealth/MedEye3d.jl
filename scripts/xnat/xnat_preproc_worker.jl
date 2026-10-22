@@ -85,7 +85,58 @@ function run_download(opts::Dict{String, String}, flags::Set{String})
     # 1. Query experiments
     experiments = XnatClient.list_experiments(creds, proj, subj)
     if isempty(experiments)
-        println("⚠️ No imaging experiments found for subject '$subj' in project '$proj'")
+        println("ℹ No imaging experiments found for subject '$subj' in project '$proj'")
+        println("▶ Checking subject-level resources (e.g. slicer_*, scans, etc.)...")
+        p = XnatClient.resolve_project_id(proj)
+        s = XnatClient.resolve_subject_label(creds, p, subj)
+        res_list = XnatClient.list_subject_resources(creds, p, s)
+        println("  Found subject resources: ", res_list)
+        chosen_res = ""
+        for r in ["slicer_3.6", "slicer_final", "slicer_3.5", "slicer_3.4", "slicer_3.3", "slicer_3.1", "slicer_2.2", "scans_SUV_CT_PET", "scans"]
+            if r in res_list
+                chosen_res = r
+                break
+            end
+        end
+        if isempty(chosen_res)
+            for r in res_list
+                if startswith(r, "slicer")
+                    chosen_res = r
+                    break
+                end
+            end
+        end
+
+        if !isempty(chosen_res)
+            println("▶ Downloading files from subject resource: $chosen_res...")
+            res_zip_url = "/data/projects/$p/subjects/$s/resources/$chosen_res/files?format=zip"
+            zip_dest = joinpath(out_dir, "$(s)_$(chosen_res).zip")
+            if XnatClient.download_file(creds, res_zip_url, zip_dest)
+                println("✓ Downloaded resource catalog zip ($(round(filesize(zip_dest)/1024/1024, digits=1)) MB)")
+                try
+                    run(`unzip -q -o $zip_dest -d $out_dir`)
+                    rm(zip_dest, force=true)
+                    # Flatten any nested directories created by XNAT zip export
+                    for (root, _, files) in walkdir(out_dir)
+                        if root != out_dir
+                            for f in files
+                                src_f = joinpath(root, f)
+                                dst_f = joinpath(out_dir, f)
+                                if !isfile(dst_f)
+                                    mv(src_f, dst_f, force=true)
+                                end
+                            end
+                        end
+                    end
+                    println("✓ Extracted and flattened resource files to $out_dir")
+                catch e
+                    @warn "Failed to unzip $zip_dest: $e"
+                end
+            end
+        else
+            println("⚠️ No usable scan resources found for subject '$s'")
+            return
+        end
         return
     end
 

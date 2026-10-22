@@ -13,6 +13,7 @@ using Downloads
 using Dates
 
 export XnatCredentials,
+       DEFAULT_XNAT_SERVER,
        get_credentials_path,
        load_cached_credentials,
        save_cached_credentials,
@@ -22,6 +23,13 @@ export XnatCredentials,
        validate_credentials,
        issue_token_from_userpass,
        auto_verify_credentials
+
+"""
+    DEFAULT_XNAT_SERVER
+
+Hardcoded primary XNAT endpoint URL for MedEye3d pipelines.
+"""
+const DEFAULT_XNAT_SERVER = "https://imaging-platform.diz-ag.med.ovgu.de"
 
 """
     XnatCredentials
@@ -44,7 +52,8 @@ struct XnatCredentials
         expires_at::Real,
         username::AbstractString
     )
-        clean_url = String(rstrip(strip(server_url), '/'))
+        s_url = isempty(strip(server_url)) ? DEFAULT_XNAT_SERVER : String(strip(server_url))
+        clean_url = String(rstrip(s_url, '/'))
         new(
             clean_url,
             String(strip(alias)),
@@ -57,7 +66,7 @@ struct XnatCredentials
 end
 
 function XnatCredentials(;
-    server_url::AbstractString="",
+    server_url::AbstractString=DEFAULT_XNAT_SERVER,
     alias::AbstractString="",
     secret::AbstractString="",
     issued_at::Real=time(),
@@ -103,7 +112,10 @@ function load_cached_credentials()::Union{XnatCredentials, Nothing}
     !isfile(path) && return nothing
     try
         raw = JSON.parse(read(path, String))
-        server_url = get(raw, "server_url", "")
+        server_url = get(raw, "server_url", DEFAULT_XNAT_SERVER)
+        if isempty(server_url) || occursin("bmia.nl", server_url)
+            server_url = DEFAULT_XNAT_SERVER
+        end
         alias = get(raw, "alias", "")
         secret = get(raw, "secret", "")
         issued_at = Float64(get(raw, "issued_at", time()))

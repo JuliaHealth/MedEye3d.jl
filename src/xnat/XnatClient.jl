@@ -23,6 +23,8 @@ export list_projects,
        download_preprocessed_hdf5,
        upload_preprocessed_hdf5,
        save_annotations_to_xnat,
+       resolve_project_id,
+       resolve_subject_label,
        CaseStatusInfo
 
 """
@@ -62,6 +64,54 @@ function _xnat_get_json(creds::XnatCredentials, endpoint::AbstractString; timeou
 end
 
 """
+    resolve_project_id(project_id::AbstractString) -> String
+
+Maps pipeline display names to their actual XNAT project IDs (e.g. `FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE` -> `Lu177_PSMA_PIPELINE`).
+"""
+function resolve_project_id(project_id::AbstractString)::String
+    p = strip(project_id)
+    if p == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" || p == "Lu177_PSMA"
+        return "Lu177_PSMA_PIPELINE"
+    elseif p == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" || p == "Prostata_bimodal"
+        return "Prostata_bimodal_PIPELINE"
+    end
+    return String(p)
+end
+
+"""
+    resolve_subject_label(creds::XnatCredentials, project_id::AbstractString, subject_id::AbstractString) -> String
+
+Finds the matching subject label on XNAT. If `subject_id` (e.g. `pat6` or `pat1`) is a shorthand,
+resolves it to the full XNAT subject label (e.g. `FDM_DPI-2024-7-KRN_Lu177_PSMA__PETPSMA_0__Pat6`).
+"""
+function resolve_subject_label(creds::XnatCredentials, project_id::AbstractString, subject_id::AbstractString)::String
+    s = strip(subject_id)
+    p = resolve_project_id(project_id)
+    subjects = list_subjects(creds, p)
+    # 1. Exact match on ID or label
+    for subj in subjects
+        lbl = get(subj, "label", "")
+        id = get(subj, "ID", "")
+        if lbl == s || id == s
+            return lbl
+        end
+    end
+    # 2. Case-insensitive suffix or pattern match (e.g. "pat6" or "Pat6")
+    m_num = match(r"[pP]at_?(\d+)", s)
+    target_num = m_num !== nothing ? m_num.captures[1] : ""
+    if !isempty(target_num)
+        for subj in subjects
+            lbl = get(subj, "label", "")
+            if occursin(Regex("[pP]at$(target_num)(?:[\\s_]|\$)"), lbl)
+                return lbl
+            end
+        end
+    end
+    # Fallback to input string
+    return String(s)
+end
+
+"""
     list_projects(creds::XnatCredentials) -> Vector{Dict{String, Any}}
 
 Queries `GET /data/projects?format=json` and returns all projects accessible to the user.
@@ -84,7 +134,7 @@ end
 Queries `GET /data/projects/{project_id}/subjects?format=json`.
 """
 function list_subjects(creds::XnatCredentials, project_id::AbstractString)::Vector{Dict{String, Any}}
-    clean_proj = strip(project_id)
+    clean_proj = resolve_project_id(project_id)
     isempty(clean_proj) && return Dict{String, Any}[]
     data = _xnat_get_json(creds, "/data/projects/$(clean_proj)/subjects?format=json")
     data === nothing && return Dict{String, Any}[]
@@ -103,7 +153,9 @@ end
 Queries imaging sessions (experiments) for a subject.
 """
 function list_experiments(creds::XnatCredentials, project_id::AbstractString, subject_id::AbstractString)::Vector{Dict{String, Any}}
-    endpoint = "/data/projects/$(strip(project_id))/subjects/$(strip(subject_id))/experiments?format=json"
+    p = resolve_project_id(project_id)
+    s = resolve_subject_label(creds, p, subject_id)
+    endpoint = "/data/projects/$p/subjects/$s/experiments?format=json"
     data = _xnat_get_json(creds, endpoint)
     data === nothing && return Dict{String, Any}[]
     try
@@ -133,7 +185,9 @@ end
 Returns a list of resource folder names attached to the subject (e.g. `["MEDEYE3D", "ANNOTATIONS"]`).
 """
 function list_subject_resources(creds::XnatCredentials, project_id::AbstractString, subject_id::AbstractString)::Vector{String}
-    endpoint = "/data/projects/$(strip(project_id))/subjects/$(strip(subject_id))/resources?format=json"
+    p = resolve_project_id(project_id)
+    s = resolve_subject_label(creds, p, subject_id)
+    endpoint = "/data/projects/$p/subjects/$s/resources?format=json"
     data = _xnat_get_json(creds, endpoint)
     data === nothing && return String[]
     try
@@ -156,8 +210,8 @@ Determines whether a patient's case is:
 - `:RAW`: Only raw DICOM scans exist on XNAT
 """
 function get_case_status(creds::XnatCredentials, project_id::AbstractString, subject_id::AbstractString)::CaseStatusInfo
-    p = strip(project_id)
-    s = strip(subject_id)
+    p = resolve_project_id(project_id)
+    s = resolve_subject_label(creds, p, subject_id)
     if isempty(p) || isempty(s)
         return CaseStatusInfo(:RAW)
     end
@@ -234,6 +288,11 @@ function upload_file(
     src_path = String(local_src)
     !isfile(src_path) && return false
     full_url = startswith(remote_url_or_endpoint, "http") ? String(remote_url_or_endpoint) : "$(creds.server_url)$(remote_url_or_endpoint)"
+    # Ensure inbody=true for XNAT REST API payload upload
+    if !occursin("inbody=true", full_url)
+        sep = occursin('?', full_url) ? "&" : "?"
+        full_url = full_url * sep * "inbody=true"
+    end
     headers = [
         XnatAuth.get_auth_headers(creds)...,
         "Content-Type" => String(content_type)
@@ -241,7 +300,7 @@ function upload_file(
     try
         open(src_path, "r") do in_io
             buf = IOBuffer()
-            resp = Downloads.request(full_url; method="PUT", headers=headers, input=in_io, output=buf, timeout=600.0)
+            resp = Downloads.request(full_url; method="PUT", headers=headers, input=in_io, output=buf, timeout=1800.0)
             return resp.status in (200, 201)
         end
     catch e
@@ -256,8 +315,8 @@ end
 Creates the specified resource folder under the subject if it does not yet exist.
 """
 function ensure_subject_resource(creds::XnatCredentials, project_id::AbstractString, subject_id::AbstractString, resource_name::AbstractString)::Bool
-    p = strip(project_id)
-    s = strip(subject_id)
+    p = resolve_project_id(project_id)
+    s = resolve_subject_label(creds, p, subject_id)
     r = strip(resource_name)
     existing = list_subject_resources(creds, p, s)
     if r in existing
@@ -294,8 +353,8 @@ function download_preprocessed_hdf5(
         return true
     end
 
-    p = strip(project_id)
-    s = strip(subject_id)
+    p = resolve_project_id(project_id)
+    s = resolve_subject_label(creds, p, subject_id)
     # Search for preprocessed hdf5 in MEDEYE3D resource
     medeye_files = _xnat_get_json(creds, "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files?format=json")
     target_name = "$(s)_preprocessed.h5"
@@ -303,7 +362,7 @@ function download_preprocessed_hdf5(
         try
             for r in medeye_files["ResultSet"]["Result"]
                 fn = get(r, "Name", "")
-                if endswith(fn, ".h5") || endswith(fn, ".hdf5")
+                if fn == "$(s)_preprocessed.h5" || fn == "preprocessed_volumes.h5" || occursin("preprocessed", lowercase(fn))
                     target_name = fn
                     break
                 end
@@ -328,14 +387,14 @@ function upload_preprocessed_hdf5(
 )::Bool
     h5_path = String(local_h5)
     !isfile(h5_path) && return false
-    p = strip(project_id)
-    s = strip(subject_id)
+    p = resolve_project_id(project_id)
+    s = resolve_subject_label(creds, p, subject_id)
     if !ensure_subject_resource(creds, p, s, "MEDEYE3D")
         @warn "Cannot access or create MEDEYE3D resource on remote XNAT for $p/$s. Remote upload skipped."
         return false
     end
     
-    remote_url = "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files/$(s)_preprocessed.h5?overwrite=true"
+    remote_url = "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files/$(s)_preprocessed.h5?overwrite=true&inbody=true"
     return upload_file(creds, remote_url, h5_path)
 end
 
@@ -351,8 +410,8 @@ function save_annotations_to_xnat(
     status_dict::Dict{String, Any};
     local_expert_h5::Union{AbstractString, Nothing}=nothing
 )::Bool
-    p = strip(project_id)
-    s = strip(subject_id)
+    p = resolve_project_id(project_id)
+    s = resolve_subject_label(creds, p, subject_id)
     if !ensure_subject_resource(creds, p, s, "ANNOTATIONS")
         @warn "Cannot access or create ANNOTATIONS resource on remote XNAT for $p/$s. Remote upload skipped."
         return false
@@ -363,12 +422,12 @@ function save_annotations_to_xnat(
     open(tmp_json, "w") do io
         JSON.print(io, status_dict, 2)
     end
-    status_ok = upload_file(creds, "/data/projects/$p/subjects/$s/resources/ANNOTATIONS/files/status.json?overwrite=true", tmp_json; content_type="application/json")
+    status_ok = upload_file(creds, "/data/projects/$p/subjects/$s/resources/ANNOTATIONS/files/status.json?overwrite=true&inbody=true", tmp_json; content_type="application/json")
     try rm(tmp_json, force=true) catch end
 
     # 2. Upload expert HDF5 if provided
     if local_expert_h5 !== nothing && isfile(local_expert_h5)
-        upload_file(creds, "/data/projects/$p/subjects/$s/resources/ANNOTATIONS/files/$(s)_annotations.h5?overwrite=true", String(local_expert_h5))
+        upload_file(creds, "/data/projects/$p/subjects/$s/resources/ANNOTATIONS/files/$(s)_annotations.h5?overwrite=true&inbody=true", String(local_expert_h5))
     end
 
     return status_ok

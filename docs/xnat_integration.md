@@ -5,11 +5,13 @@
 MedEye3d integrates natively with **XNAT (Extensible Neuroimaging Archive Toolkit)** to provide seamless access to longitudinal, multi-modal imaging archives. Clinicians and researchers can browse repositories, stream pre-aligned and calibrated multi-timepoint HDF5 datasets, review and validate lesions and anatomical lymph node areas, edit segmentations, and save validated annotations back to XNAT with full audit tracking.
 
 ### Key Capabilities:
-- **24-Hour Rotating Alias/Secret Token Authentication**: Automated "verify-first" token lifecycle management, offline resilience, and interactive renewal dialogs.
-- **Support for Multi-Timepoint Regimens**:
-  - `FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE`: Co-registered $^{68}\text{Ga}$/$^{18}\text{F}$-PSMA PET/CT and multiparametric Prostate MRI (T2w, ADC, DWI) across multiple clinical timepoints.
-  - `FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE`: Pre-therapeutic screening PSMA PET/CT paired with sequential post-therapy $^{177}\text{Lu}$ SPECT/CT scans (e.g., `pat6`).
+- **Hardcoded Hospital XNAT Server**: Preconfigured to `https://imaging-platform.diz-ag.med.ovgu.de` as single authoritative cluster endpoint.
+- **24-Hour Rotating Alias/Secret Token Authentication**: Automated "verify-first" token lifecycle management, offline resilience, interactive renewal dialogs, and automatic credential clearing after 24 hours.
+- **Strictly Scoped Two-Project Support**:
+  - `FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE`: Co-registered $^{68}\text{Ga}$/$^{18}\text{F}$-PSMA PET/CT and multiparametric Prostate MRI (T2w, ADC, DWI) across multiple clinical timepoints (e.g., `Pat1`, `Pat44`).
+  - `FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE`: Pre-therapeutic screening PSMA PET/CT paired with sequential post-therapy $^{177}\text{Lu}$ SPECT/CT scans (e.g., `Pat6`).
 - **Standardized Preprocessing Pipeline**: Standalone bash/Julia orchestrator (`scripts/xnat/xnat_preprocess_patient.sh`) executing full reruns of Skellytour cortical/trabecular bone extraction and the Lymph Node Rules Engine before packaging into ultra-fast HDF5 volumes.
+- **Automatic Fallback Preprocessing & Upload**: If any patient is selected in the GUI and no preprocessed HDF5 is present on XNAT, MedEye3d automatically downloads the raw scans/slicer packages from XNAT subject resources, runs full multi-timepoint alignment and rule extraction, persists a local HDF5 cache, uploads the HDF5 back to XNAT `MEDEYE3D`, and updates audit tracking in `ANNOTATIONS/status.json` with status `PREPROCESSED`.
 - **Fast Status Badging & Audit Tracking**: Immediate visual indicators (`RAW` 🔴, `PREPROCESSED` 🟡, `IN_PROGRESS` 🔵, `PROCESSED` 🟢) backed by `status.json`.
 - **Zero-Latency Background Preloader**: Automatic background caching of patient $N+1$ ensures instantaneous case switching when clicking **Next Case**.
 
@@ -42,12 +44,18 @@ XNAT clusters frequently enforce temporary 24-hour Alias and Secret tokens gener
                                Enter Alias & Secret
 ```
 
-### 2.1. The "Verify-First" Policy
-1. On startup or when opening the application, MedEye3d inspects `xnat_credentials.json` (stored securely in `%APPDATA%/MedEye3D/` on Windows or `~/.medeye3d/` on Linux).
-2. It validates the local expiration timestamp ($T_{\text{now}} < T_{\text{expires}} - 15\text{min}$).
-3. It dispatches a silent verification ping to the server (`GET /data/JSESSION`). Note: XNAT's session endpoint strictly serves `text/plain`, so MedEye3d provides compliant `Accept: text/plain, */*` headers, preventing HTTP 406 Not Acceptable rejections.
-4. If valid, the user is authenticated silently without interrupting their workflow.
-5. If expired or missing, the login overlay opens, displaying fields for **XNAT URL**, **24h Alias Token**, **24h Secret Token**, or **Username / Password**.
+### 2.1. The "Verify-First" Policy & 24h Expiration
+1. **Server Hardcoding**: All XNAT requests are directed to `https://imaging-platform.diz-ag.med.ovgu.de` (`XnatAuth.DEFAULT_XNAT_SERVER`), eliminating ambiguity or inadvertent connections to external development instances.
+2. **Credential Autosave**: When alias and secret credentials are provided, they are persisted to `xnat_credentials.json` (stored securely in `%APPDATA%/MedEye3D/` on Windows or `~/.medeye3d/` on Linux with `0o600` POSIX permissions).
+3. **24-Hour Expiration Enforcement**:
+   - `issued_at` records the exact epoch timestamp when credentials were first supplied.
+   - If `(time() - issued_at) >= 86400.0` (more than 24 hours), `load_cached_credentials` and `auto_verify_credentials` automatically delete `xnat_credentials.json` via `clear_cached_credentials()` and require token re-entry.
+4. **Silent Verification**:
+   - MedEye3d dispatches a silent verification ping to the server (`GET /data/JSESSION`) with headers `Accept: text/plain, */*` and HTTP Basic Authentication.
+   - If HTTP 200 is returned, a session cookie (`JSESSIONID`) is acquired and reused for all subsequent REST operations.
+5. **Interactive Login & Renewal Dialog**:
+   - If tokens have expired or are missing, an interactive modal appears pre-filled with `DEFAULT_XNAT_SERVER` and preserved alias/secret for review.
+   - The status bar displays real-time countdown to token expiration: `[OK] XNAT: jm (23h 45m)`.
 
 ### 2.2. Interactive Token Renewal
 Clinicians can click the **Connect 🔑** / **Refresh 🔄** button in the XNAT Case Navigator header at any time to inspect their remaining token validity or paste newly generated 24-hour tokens.

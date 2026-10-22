@@ -1722,7 +1722,21 @@ function run_app(args::Vector{String})
                 launch_from_h5(target_h5; quad=true)
                 return
             else
-                println("[STARTUP] Warning: Could not download preprocessed HDF5 for $xnat_subj. Falling back to file selector.")
+                println("[STARTUP] No preprocessed HDF5 found on XNAT for $xnat_subj. Running automatic preprocessing & upload...")
+                script_path = joinpath(dirname(@__DIR__), "..", "scripts", "xnat", "xnat_preprocess_patient.sh")
+                if isfile(script_path)
+                    try
+                        run(`bash $script_path --project $xnat_proj --subject $xnat_subj`)
+                    catch e
+                        @warn "Preprocessing execution error: $e"
+                    end
+                end
+                if isfile(target_h5)
+                    launch_from_h5(target_h5; quad=true)
+                    return
+                else
+                    println("[STARTUP] Warning: Could not preprocess or download HDF5 for $xnat_subj. Falling back to file selector.")
+                end
             end
         else
             println("[STARTUP] XNAT credentials invalid: $msg. Falling back to file selector.")

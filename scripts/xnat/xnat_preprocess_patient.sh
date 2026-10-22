@@ -187,15 +187,18 @@ end
     julia -t 1 --project=. "$SCRIPT_DIR/xnat_preproc_worker.jl" download \
         --project "$PROJECT" --subject "$SUBJ" --out-dir "$SUBJ_WORK_DIR" || true
 
+    # Flatten any nested directory from XNAT unzip
+    find "$SUBJ_WORK_DIR" -mindepth 2 -type f -exec mv -n {} "$SUBJ_WORK_DIR/" \; 2>/dev/null || true
+
     # If no scans were downloaded from XNAT, check for local repository project files
     if [ ! -f "$SUBJ_WORK_DIR/scene_hierarchy.json" ]; then
-        if [ "$PROJECT" = "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" ] && ([ "$SUBJ" = "pat6" ] || [ "$SUBJ" = "pat_6" ]); then
+        if ([ "$PROJECT" = "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" ] || [ "$PROJECT" = "Lu177_PSMA_PIPELINE" ]) && [[ "$SUBJ" =~ [pP]at_?6 ]]; then
             echo "ℹ Seeding workspace from local repository files: data/pat_6_files..."
             find "$SCRIPT_DIR/../../data/pat_6_files" -maxdepth 1 ! -name "*.bak" ! -name "pat_6_files" -exec cp -r {} "$SUBJ_WORK_DIR/" \; 2>/dev/null || true
             if [ -f "$SUBJ_WORK_DIR/preprocessed_volumes.h5" ]; then
                 cp -l "$SUBJ_WORK_DIR/preprocessed_volumes.h5" "$H5_FILE" 2>/dev/null || cp -f "$SUBJ_WORK_DIR/preprocessed_volumes.h5" "$H5_FILE"
             fi
-        elif [ "$PROJECT" = "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" ] && ([ "$SUBJ" = "pat1" ] || [ "$SUBJ" = "pat_1" ] || [ "$SUBJ" = "psma_patient_all_tp" ]); then
+        elif ([ "$PROJECT" = "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" ] || [ "$PROJECT" = "Prostata_bimodal_PIPELINE" ]) && ([[ "$SUBJ" =~ [pP]at_?1 ]] || [ "$SUBJ" = "psma_patient_all_tp" ]); then
             echo "ℹ Seeding workspace from local repository files: data/cases/psma_patient_all_tp..."
             find "$SCRIPT_DIR/../../data/cases/psma_patient_all_tp" -maxdepth 1 ! -name "*.bak" ! -name "psma_patient_all_tp" -exec cp -r {} "$SUBJ_WORK_DIR/" \; 2>/dev/null || true
             if [ -f "$SUBJ_WORK_DIR/preprocessed_volumes.h5" ]; then
