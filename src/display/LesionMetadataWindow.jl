@@ -4558,12 +4558,16 @@ function create_metadata_window(
         proj = String(strip(proj_name))
         (isempty(proj) || proj == "(None)") && return
         
-        Threads.@spawn begin
+        @async begin
             creds = _active_xnat_creds[]
             subjs = String[]
             if creds !== nothing
-                subjs_raw = XnatClient.list_subjects(creds, proj)
-                subjs = String[String(get(item, "label", get(item, "ID", ""))) for item in subjs_raw if !isempty(get(item, "label", get(item, "ID", "")))]
+                try
+                    subjs_raw = XnatClient.list_subjects(creds, proj)
+                    subjs = String[String(get(item, "label", get(item, "ID", ""))) for item in subjs_raw if !isempty(get(item, "label", get(item, "ID", "")))]
+                catch e
+                    @warn "Failed listing XNAT subjects: $e"
+                end
             end
             if isempty(subjs)
                 cache_base = XnatPreloader.get_local_cache_dir(proj, "")
@@ -4576,30 +4580,20 @@ function create_metadata_window(
                 subjs = proj == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" ? ["pat6", "pat7", "pat8"] : ["pat1", "pat2", "pat3"]
             end
             
+            # Instantaneous local cache badging — never blocks the UI with hundreds of remote queries
             formatted = String[]
             for s in subjs
-                st = if creds !== nothing
-                    XnatClient.get_case_status(creds, proj, s)
-                else
-                    local_h5 = joinpath(XnatPreloader.get_local_cache_dir(proj, s), "$(s)_preprocessed.h5")
-                    isfile(local_h5) ? XnatClient.CaseStatusInfo(:PREPROCESSED) : XnatClient.CaseStatusInfo(:RAW)
-                end
-                badge = if st.status == :PROCESSED
-                    "[OK]"
-                elseif st.status == :PREPROCESSED
+                local_h5 = joinpath(XnatPreloader.get_local_cache_dir(proj, s), "$(s)_preprocessed.h5")
+                badge = if isfile(local_h5) && filesize(local_h5) > 1024
                     "[PRE]"
-                elseif st.status == :IN_PROGRESS
-                    "[..]"
                 else
                     "[RAW]"
                 end
-                push!(formatted, "$badge $s ($(st.status))")
+                push!(formatted, "$badge $s")
             end
             
-            @async begin
-                raw_subjects_cache[proj] = formatted
-                _filter_and_set_subjects!()
-            end
+            raw_subjects_cache[proj] = formatted
+            _filter_and_set_subjects!()
         end
     end
 

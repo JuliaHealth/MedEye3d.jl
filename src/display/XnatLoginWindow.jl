@@ -54,7 +54,6 @@ function close_xnat_login_window()
             lock(GLOBAL_OPENGL_LOCK) do
                 if isopen(scr) && scr.owns_glscreen && GLMakie.GLAbstraction.context_alive(scr.glscreen)
                     GLMakie.GLFW.SetWindowShouldClose(scr.glscreen, true)
-                    GLMakie.GLFW.PollEvents()
                 end
             end
         catch e
@@ -217,26 +216,28 @@ function open_xnat_login_window(; on_success=nothing, on_close=nothing)
         if !isempty(user) && !isempty(pass)
             login_status_obs[] = "Connecting to XNAT and issuing 24h token..."
             login_status_color[] = RGBf(0.40, 0.80, 1.00)
-            Threads.@spawn begin
-                tok_creds, tok_msg = XnatAuth.issue_token_from_userpass(url, user, pass)
-                @async begin
-                    if tok_creds !== nothing
-                        XnatAuth.save_cached_credentials(tok_creds)
-                        login_status_obs[] = "Success! Issued token for '$(tok_creds.username)'"
-                        login_status_color[] = RGBf(0.40, 0.90, 0.40)
-                        cb = on_login_success[]
-                        if cb !== nothing
-                            try cb(tok_creds; offline=false) catch; end
-                        end
-                        sleep(0.5)
-                        close_xnat_login_window()
+            @async begin
+                tok_creds, tok_msg = try
+                    XnatAuth.issue_token_from_userpass(url, user, pass)
+                catch e
+                    (nothing, "Connection error: $e")
+                end
+                if tok_creds !== nothing
+                    XnatAuth.save_cached_credentials(tok_creds)
+                    login_status_obs[] = "Success! Issued token for '$(tok_creds.username)'"
+                    login_status_color[] = RGBf(0.40, 0.90, 0.40)
+                    cb = on_login_success[]
+                    if cb !== nothing
+                        try cb(tok_creds; offline=false) catch e; @error "Login callback error: $e"; end
+                    end
+                    sleep(0.4)
+                    close_xnat_login_window()
+                else
+                    login_status_color[] = RGBf(1.00, 0.30, 0.30)
+                    if occursin("Connection", tok_msg) || occursin("502", tok_msg) || occursin("503", tok_msg)
+                        login_status_obs[] = "XNAT in maintenance or unreachable. You can Work Offline."
                     else
-                        login_status_color[] = RGBf(1.00, 0.30, 0.30)
-                        if occursin("Connection", tok_msg) || occursin("502", tok_msg) || occursin("503", tok_msg)
-                            login_status_obs[] = "XNAT in maintenance or unreachable. You can Work Offline."
-                        else
-                            login_status_obs[] = !isempty(tok_msg) ? tok_msg : "Authentication failed with provided credentials"
-                        end
+                        login_status_obs[] = !isempty(tok_msg) ? tok_msg : "Authentication failed with provided credentials"
                     end
                 end
             end
@@ -261,29 +262,31 @@ function open_xnat_login_window(; on_success=nothing, on_close=nothing)
             )
             login_status_obs[] = "Validating token with XNAT..."
             login_status_color[] = RGBf(0.40, 0.80, 1.00)
-            Threads.@spawn begin
-                is_valid, val_msg = XnatAuth.validate_credentials(new_creds)
-                @async begin
-                    if is_valid
-                        XnatAuth.save_cached_credentials(new_creds)
-                        login_status_obs[] = "Success! Authenticated via 24h token"
-                        login_status_color[] = RGBf(0.40, 0.90, 0.40)
-                        cb = on_login_success[]
-                        if cb !== nothing
-                            try cb(new_creds; offline=false) catch; end
-                        end
-                        sleep(0.5)
-                        close_xnat_login_window()
-                    else
-                        login_status_color[] = RGBf(1.00, 0.30, 0.30)
-                        if occursin("Connection", val_msg) || occursin("502", val_msg) || occursin("503", val_msg)
-                            login_status_obs[] = "XNAT in maintenance or unreachable. You can Work Offline."
-                        else
-                            login_status_obs[] = !isempty(val_msg) ? val_msg : "Invalid Alias/Secret token for $url"
-                        end
-                        tb_secret.displayed_string[] = ""
-                        tb_secret.stored_string[] = ""
+            @async begin
+                is_valid, val_msg = try
+                    XnatAuth.validate_credentials(new_creds)
+                catch e
+                    (false, "Connection error: $e")
+                end
+                if is_valid
+                    XnatAuth.save_cached_credentials(new_creds)
+                    login_status_obs[] = "Success! Authenticated via 24h token"
+                    login_status_color[] = RGBf(0.40, 0.90, 0.40)
+                    cb = on_login_success[]
+                    if cb !== nothing
+                        try cb(new_creds; offline=false) catch e; @error "Login callback error: $e"; end
                     end
+                    sleep(0.4)
+                    close_xnat_login_window()
+                else
+                    login_status_color[] = RGBf(1.00, 0.30, 0.30)
+                    if occursin("Connection", val_msg) || occursin("502", val_msg) || occursin("503", val_msg)
+                        login_status_obs[] = "XNAT in maintenance or unreachable. You can Work Offline."
+                    else
+                        login_status_obs[] = !isempty(val_msg) ? val_msg : "Invalid Alias/Secret token for $url"
+                    end
+                    tb_secret.displayed_string[] = ""
+                    tb_secret.stored_string[] = ""
                 end
             end
             return
