@@ -1445,6 +1445,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             # Create the window on the main thread (thread 1) to avoid X11/Wayland deadlocks
             GLFW.WindowHint(GLFW.CLIENT_API, GLFW.NO_API)
             new_window = GLFW.CreateWindow(1200, 800, "MedEye3D - Compare (M2)")
+            GLFW.WindowHint(GLFW.CLIENT_API, GLFW.OPENGL_API)
             
             if new_window !== nothing
                 GLFW.ShowWindow(new_window)

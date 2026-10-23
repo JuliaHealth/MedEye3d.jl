@@ -4216,6 +4216,15 @@ function create_metadata_window(
     lbl_xnat_subj_status = Label(g[xnat_r3, 4], xnat_subject_status_text, fontsize = 9, color = xnat_subject_status_color, halign = :center)
     rowsize!(g, xnat_r3, Fixed(28)); register_fixed_row!(xnat_r3, 28)
 
+    xnat_r_search = nr!()
+    lbl_search = Label(g[xnat_r_search, 1], "Search/Load:", fontsize = 10, halign = :left, color = SUBTXT)
+    tb_patient_search = Textbox(g[xnat_r_search, 2:3], placeholder = "Type patient ID (e.g. pat15 or filter)...", fontsize = 10,
+        textcolor = TXT, boxcolor = BG_PNL, boxcolor_focused = RGBf(0.25, 0.30, 0.40),
+        bordercolor = RGBf(0.35, 0.40, 0.50), cursorcolor = :white)
+    push!(_all_textboxes, tb_patient_search)
+    btn_load_patient = Button(g[xnat_r_search, 4], label = "Fetch/Load", buttoncolor = BLU_BTN, labelcolor = LBL_FG, fontsize = 9)
+    rowsize!(g, xnat_r_search, Fixed(28)); register_fixed_row!(xnat_r_search, 28)
+
     xnat_r4 = nr!()
     btn_xnat_prev = Button(g[xnat_r4, 1], label = "◀ Prev", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     btn_xnat_save = Button(g[xnat_r4, 2], label = "Save XNAT", buttoncolor = RGBf(0.15, 0.45, 0.15), labelcolor = TXT, fontsize = 10)
@@ -4255,7 +4264,8 @@ function create_metadata_window(
         end
     end
 
-    function _filter_and_set_subjects!()
+    is_filtering_patients = Ref(false)
+    function _filter_and_set_subjects!(; query::AbstractString="")
         proj = menu_xnat_proj.selection[]
         (proj === nothing || !haskey(raw_subjects_cache, proj)) && return
         all_s = raw_subjects_cache[proj]
@@ -4271,11 +4281,20 @@ function create_metadata_window(
             all_s
         end
         
-        if isempty(filtered)
-            menu_xnat_subj.options[] = ["(No matching patients)"]
-        else
-            menu_xnat_subj.options[] = filtered
-            menu_xnat_subj.i_selected[] = 1
+        q = strip(lowercase(query))
+        if !isempty(q)
+            filtered = filter(s -> occursin(q, lowercase(s)), filtered)
+        end
+        
+        is_filtering_patients[] = true
+        try
+            if isempty(filtered)
+                menu_xnat_subj.options[] = ["(No matching patients)"]
+            else
+                menu_xnat_subj.options[] = filtered
+            end
+        finally
+            is_filtering_patients[] = false
         end
     end
 
@@ -4491,6 +4510,9 @@ function create_metadata_window(
         end
     end
 
+    local _refresh_xnat_projects_and_subjects!
+    local _fetch_and_populate_subjects!
+
     _is_opening_login = Ref(false)
     function _open_login_dialog()
         _is_opening_login[] && return
@@ -4514,7 +4536,7 @@ function create_metadata_window(
                         _active_xnat_creds[] = creds
                         _current_user[] = creds.username
                         _update_auth_status!(creds; offline=false)
-                        try notify(menu_xnat_proj.selection) catch; end
+                        _refresh_xnat_projects_and_subjects!(creds)
                     else
                         _update_auth_status!(nothing; offline=offline)
                     end
@@ -4555,77 +4577,9 @@ function create_metadata_window(
         end
     end
 
-    on(menu_xnat_proj.selection) do proj_name
-        proj_name === nothing && return
-        proj = String(strip(proj_name))
-        (isempty(proj) || proj == "(None)") && return
-        
-        @async begin
-            creds = _active_xnat_creds[]
-            subjs = String[]
-            if creds !== nothing
-                try
-                    subjs_raw = XnatClient.list_subjects(creds, proj)
-                    subjs = String[String(get(item, "label", get(item, "ID", ""))) for item in subjs_raw if !isempty(get(item, "label", get(item, "ID", "")))]
-                catch e
-                    @warn "Failed listing XNAT subjects: $e"
-                end
-            end
-            if isempty(subjs)
-                cache_base = XnatPreloader.get_local_cache_dir(proj, "")
-                proj_cache = dirname(cache_base)
-                if isdir(proj_cache)
-                    subjs = filter(d -> isdir(joinpath(proj_cache, d)), readdir(proj_cache))
-                end
-            end
-            if isempty(subjs)
-                subjs = proj == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" ? ["pat6", "pat7", "pat8"] : ["pat1", "pat2", "pat3"]
-            end
-            
-            # Instantaneous local cache badging — never blocks the UI with hundreds of remote queries
-            formatted = String[]
-            for s in subjs
-                local_h5 = joinpath(XnatPreloader.get_local_cache_dir(proj, s), "$(s)_preprocessed.h5")
-                badge = if isfile(local_h5) && filesize(local_h5) > 1024
-                    "[PRE]"
-                else
-                    "[RAW]"
-                end
-                push!(formatted, "$badge $s")
-            end
-            
-            raw_subjects_cache[proj] = formatted
-            _filter_and_set_subjects!()
-        end
-    end
-
-    on(menu_xnat_filter.selection) do _
-        _filter_and_set_subjects!()
-    end
-
-    on(menu_xnat_subj.selection) do subj_sel
-        subj_sel === nothing && return
-        (subj_sel == "(Select Project First)" || subj_sel == "(No matching patients)") && return
-        
-        proj = menu_xnat_proj.selection[]
-        (proj === nothing || proj == "(None)") && return
-        
-        subj = _parse_subject_id(subj_sel)
+    function _load_patient_direct(proj::String, subj::String)
         isempty(subj) && return
-        
-        if occursin("[OK]", subj_sel) || occursin("PROCESSED", subj_sel)
-            xnat_subject_status_text[] = "Status: PROCESSED [OK]"
-            xnat_subject_status_color[] = RGBf(0.4, 0.9, 0.4)
-        elseif occursin("[PRE]", subj_sel) || occursin("PREPROCESSED", subj_sel)
-            xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
-            xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
-        elseif occursin("[..]", subj_sel) || occursin("IN_PROGRESS", subj_sel)
-            xnat_subject_status_text[] = "Status: IN PROGRESS [..]"
-            xnat_subject_status_color[] = RGBf(0.4, 0.7, 1.0)
-        else
-            xnat_subject_status_text[] = "Status: RAW [!]"
-            xnat_subject_status_color[] = RGBf(0.9, 0.3, 0.3)
-        end
+        (isempty(proj) || proj == "(None)") && return
         
         creds = _active_xnat_creds[]
         all_subjs = String[_parse_subject_id(s) for s in menu_xnat_subj.options[] if s != "(No matching patients)"]
@@ -4637,6 +4591,8 @@ function create_metadata_window(
         # 1. Local cache check
         if isfile(target_h5) && filesize(target_h5) > 1024
             println("[XNAT] Patient '$subj' preprocessed HDF5 found locally: $target_h5"); flush(stdout)
+            xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
+            xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
             _switch_to_hdf5!(target_h5)
             return
         end
@@ -4676,6 +4632,8 @@ function create_metadata_window(
                     @async begin
                         save_status_text[] = "Downloaded $subj from XNAT OK"
                         save_status_color[] = RGBf(0.4, 0.9, 0.4)
+                        xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
+                        xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
                         _switch_to_hdf5!(target_h5)
                     end
                 else
@@ -4690,6 +4648,161 @@ function create_metadata_window(
             save_status_text[] = "Working Offline: no local HDF5 for $subj"
             save_status_color[] = RGBf(0.9, 0.7, 0.2)
         end
+    end
+
+    function _fetch_and_populate_subjects!(proj::String)
+        creds = _active_xnat_creds[]
+        @async begin
+            subjs = String[]
+            if creds !== nothing
+                try
+                    subjs_raw = XnatClient.list_subjects(creds, proj)
+                    subjs = String[String(get(item, "label", get(item, "ID", ""))) for item in subjs_raw if !isempty(get(item, "label", get(item, "ID", "")))]
+                    println("[XNAT] Fetched $(length(subjs)) subjects for project '$proj' from XNAT"); flush(stdout)
+                catch e
+                    @warn "Failed listing XNAT subjects: $e"
+                end
+            end
+            if isempty(subjs)
+                cache_base = XnatPreloader.get_local_cache_dir(proj, "")
+                proj_cache = dirname(cache_base)
+                if isdir(proj_cache)
+                    subjs = filter(d -> isdir(joinpath(proj_cache, d)), readdir(proj_cache))
+                end
+            end
+            if isempty(subjs)
+                subjs = occursin(r"Lu177"i, proj) ? ["pat6", "pat7", "pat8"] : ["pat1", "pat2", "pat3"]
+            end
+            
+            # Instantaneous local cache badging — never blocks the UI with hundreds of remote queries
+            formatted = String[]
+            for s in subjs
+                local_h5 = joinpath(XnatPreloader.get_local_cache_dir(proj, s), "$(s)_preprocessed.h5")
+                badge = if isfile(local_h5) && filesize(local_h5) > 1024
+                    "[PRE]"
+                else
+                    "[RAW]"
+                end
+                push!(formatted, "$badge $s")
+            end
+            
+            raw_subjects_cache[proj] = formatted
+            _filter_and_set_subjects!(query = tb_patient_search.displayed_string[])
+        end
+    end
+
+    function _refresh_xnat_projects_and_subjects!(creds)
+        creds === nothing && return
+        @async begin
+            try
+                remote_projs = XnatClient.list_projects(creds)
+                if !isempty(remote_projs)
+                    p_list = String[]
+                    for primary in ALLOWED_XNAT_PROJECTS
+                        if any(p -> get(p, "ID", "") == primary || get(p, "name", "") == primary, remote_projs)
+                            push!(p_list, primary)
+                        end
+                    end
+                    for p in remote_projs
+                        pid = String(get(p, "ID", ""))
+                        pname = String(get(p, "name", ""))
+                        for cand in (pid, pname)
+                            if !isempty(cand) && !(cand in p_list)
+                                push!(p_list, cand)
+                            end
+                        end
+                    end
+                    if !isempty(p_list)
+                        menu_xnat_proj.options[] = p_list
+                    end
+                end
+            catch e
+                @warn "Failed querying XNAT project list: $e"
+            end
+            
+            cur_proj = menu_xnat_proj.selection[]
+            if cur_proj !== nothing && cur_proj != "(None)"
+                _fetch_and_populate_subjects!(String(strip(cur_proj)))
+            end
+        end
+    end
+
+    function _load_patient_by_query(query_str::String)
+        q = String(strip(query_str))
+        isempty(q) && return
+        clean_id = _parse_subject_id(q)
+        isempty(clean_id) && return
+        
+        proj = menu_xnat_proj.selection[]
+        (proj === nothing || proj == "(None)") && return
+        
+        # Check if matching subject exists in options
+        opts = menu_xnat_subj.options[]
+        exact_match = findfirst(s -> _parse_subject_id(s) == clean_id, opts)
+        if exact_match !== nothing
+            menu_xnat_subj.i_selected[] = exact_match
+            return
+        end
+        
+        partial = findfirst(s -> occursin(lowercase(clean_id), lowercase(s)), opts)
+        if partial !== nothing
+            menu_xnat_subj.i_selected[] = partial
+            return
+        end
+        
+        println("[XNAT] Directly requesting patient '$clean_id' from project '$proj'..."); flush(stdout)
+        _load_patient_direct(proj, clean_id)
+    end
+
+    on(btn_load_patient.clicks) do _
+        _load_patient_by_query(tb_patient_search.displayed_string[])
+    end
+
+    on(tb_patient_search.stored_string) do q_str
+        _load_patient_by_query(q_str)
+    end
+
+    on(tb_patient_search.displayed_string) do q_text
+        _filter_and_set_subjects!(query = q_text)
+    end
+
+    on(menu_xnat_proj.selection) do proj_name
+        proj_name === nothing && return
+        proj = String(strip(proj_name))
+        (isempty(proj) || proj == "(None)") && return
+        _fetch_and_populate_subjects!(proj)
+    end
+
+    on(menu_xnat_filter.selection) do _
+        _filter_and_set_subjects!(query = tb_patient_search.displayed_string[])
+    end
+
+    on(menu_xnat_subj.selection) do subj_sel
+        is_filtering_patients[] && return
+        subj_sel === nothing && return
+        (subj_sel == "(Select Project First)" || subj_sel == "(No matching patients)") && return
+        
+        proj = menu_xnat_proj.selection[]
+        (proj === nothing || proj == "(None)") && return
+        
+        subj = _parse_subject_id(subj_sel)
+        isempty(subj) && return
+        
+        if occursin("[OK]", subj_sel) || occursin("PROCESSED", subj_sel)
+            xnat_subject_status_text[] = "Status: PROCESSED [OK]"
+            xnat_subject_status_color[] = RGBf(0.4, 0.9, 0.4)
+        elseif occursin("[PRE]", subj_sel) || occursin("PREPROCESSED", subj_sel)
+            xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
+            xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
+        elseif occursin("[..]", subj_sel) || occursin("IN_PROGRESS", subj_sel)
+            xnat_subject_status_text[] = "Status: IN PROGRESS [..]"
+            xnat_subject_status_color[] = RGBf(0.4, 0.7, 1.0)
+        else
+            xnat_subject_status_text[] = "Status: RAW [!]"
+            xnat_subject_status_color[] = RGBf(0.9, 0.3, 0.3)
+        end
+        
+        _load_patient_direct(proj, subj)
     end
 
     on(btn_xnat_save.clicks) do _
@@ -4750,6 +4863,7 @@ function create_metadata_window(
                 _login_authenticated[] = true
                 @async begin
                     _update_auth_status!(creds)
+                    _refresh_xnat_projects_and_subjects!(creds)
                 end
                 println("[XNAT] Auto-verified credentials on startup for user '$(creds.username)'"); flush(stdout)
             else
@@ -11276,6 +11390,8 @@ function create_metadata_window(
     _lmw_observables[:btn_xnat_login] = btn_xnat_login
     _lmw_observables[:xnat_proj_menu] = menu_xnat_proj
     _lmw_observables[:xnat_subj_menu] = menu_xnat_subj
+    _lmw_observables[:tb_patient_search] = tb_patient_search
+    _lmw_observables[:btn_load_patient] = btn_load_patient
     _lmw_observables[:xnat_status_lbl] = lbl_xnat_status
     _lmw_observables[:update_auth_status] = _update_auth_status!
 

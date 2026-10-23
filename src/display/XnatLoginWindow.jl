@@ -385,6 +385,7 @@ function open_xnat_login_window(; on_success=nothing, on_close=nothing)
 
     # Display independent screen using synchronized renderloop
     screen = lock(GLOBAL_OPENGL_LOCK) do
+        GLMakie.GLFW.WindowHint(GLMakie.GLFW.CLIENT_API, GLMakie.GLFW.OPENGL_API)
         s = GLMakie.Screen(;
             renderloop = synchronized_makie_renderloop,
             title = "MedEye3D — XNAT Authentication",
