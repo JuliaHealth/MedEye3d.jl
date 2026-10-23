@@ -43,6 +43,7 @@ import ..SegmentationDisplay.ReactOnMouseClickAndDrag as _ROMCAD
 import ..XnatAuth
 import ..XnatClient
 import ..XnatPreloader
+import ..XnatLoginWindow: open_xnat_login_window, close_xnat_login_window, is_login_window_open, login_tb_user_ref, login_tb_pass_ref
 
 export create_metadata_window, display_metadata_window, get_active_lesion_db, get_mask_ids, lookup_anatomy, PRW,
        DEFAULT_SAVE_PATH,
@@ -4483,8 +4484,63 @@ function create_metadata_window(
         end
     end
 
+    _is_opening_login = Ref(false)
+    function _open_login_dialog()
+        _is_opening_login[] && return
+        if is_login_window_open()
+            return
+        end
+        _is_opening_login[] = true
+        try
+            if !_login_visible[]
+                _login_visible[] = true
+            end
+            open_xnat_login_window(;
+                on_success = (creds; offline=false) -> begin
+                    _login_authenticated[] = true
+                    _login_visible[] = false
+                    if login_tb_user_ref[] !== nothing
+                        filter!(x -> x !== login_tb_user_ref[], _all_textboxes)
+                    end
+                    if login_tb_pass_ref[] !== nothing
+                        filter!(x -> x !== login_tb_pass_ref[], _all_textboxes)
+                    end
+                    if !offline && creds !== nothing
+                        _active_xnat_creds[] = creds
+                        _current_user[] = creds.username
+                        _update_auth_status!(creds)
+                        try notify(menu_xnat_proj.selection) catch; end
+                    else
+                        _update_auth_status!(nothing)
+                    end
+                end
+            )
+            if login_tb_user_ref[] !== nothing
+                _lmw_observables[:login_user] = login_tb_user_ref[]
+                push!(_all_textboxes, login_tb_user_ref[])
+            end
+            if login_tb_pass_ref[] !== nothing
+                push!(_all_textboxes, login_tb_pass_ref[])
+            end
+        finally
+            _is_opening_login[] = false
+        end
+    end
+
     on(btn_xnat_login.clicks) do _
-        _login_visible[] = true
+        _open_login_dialog()
+    end
+
+    on(_login_visible) do vis
+        if vis
+            if !_is_opening_login[] && !is_login_window_open()
+                _open_login_dialog()
+            end
+        else
+            if is_login_window_open()
+                close_xnat_login_window()
+            end
+        end
     end
 
     on(menu_xnat_proj.selection) do proj_name
@@ -5355,6 +5411,7 @@ function create_metadata_window(
                 _login_authenticated[] = true
                 _login_success_time[] = time()
                 _login_visible[] = false
+                close_xnat_login_window()
                 return Consume(true)
             end
         end
@@ -11527,268 +11584,11 @@ function display_metadata_window(fig::Figure)
     _lmw_observables[:loading_overlay_bg] = loading_bg
     _lmw_observables[:loading_overlay_txt] = loading_txt
 
-    # ── Login Overlay ─────────────────────────────────────────────────────────
+    # ── Login State (Managed via separate XnatLoginWindow) ────────────────────
     _login_visible[] = false
     _lmw_observables[:login_visible] = _login_visible
-    
-    # Hide all dropdowns while login is active so they cannot steal clicks (since they were added first)
-    on(_login_visible) do vis
-        for m in _ALL_MENUS
-            try
-                if hasproperty(m, :blockscene)
-                    m.blockscene.visible[] = !vis
-                end
-            catch
-            end
-        end
-    end
-
-    login_bg = Box(fig[1, 1], color=(:black, 0.92), strokewidth=0, visible=_login_visible)
-    
-    # Bulletproof layout with explicit Auto margins to center the modal
-    center_grid = GridLayout(fig[1, 1], tellwidth=false, tellheight=false)
-    Box(center_grid[1, 1], visible=false)
-    Box(center_grid[3, 3], visible=false)
-    colsize!(center_grid, 1, Auto())
-    colsize!(center_grid, 2, Fixed(380))
-    colsize!(center_grid, 3, Auto())
-    rowsize!(center_grid, 1, Auto())
-    rowsize!(center_grid, 2, Fixed(320))
-    rowsize!(center_grid, 3, Auto())
-
-    login_inner = GridLayout(center_grid[2, 2])
-    login_inner_bg = Button(login_inner[1:end, 1:end], label="", buttoncolor=:transparent, buttoncolor_active=:transparent, buttoncolor_hover=:transparent, strokewidth=0, width=nothing, height=nothing)
-    on(_login_visible) do vis; login_inner_bg.blockscene.visible[] = vis; end
-    
-    lbl_title = Label(login_inner[1, 1:2], "MedEye3d / XNAT Login", color=:white, fontsize=20, font=:bold, halign=:center, visible=_login_visible)
-    
-    cached_init = XnatAuth.load_cached_credentials()
-    init_url = XnatAuth.DEFAULT_XNAT_SERVER
-    init_alias = cached_init !== nothing ? cached_init.alias : ""
-    init_secret = cached_init !== nothing ? cached_init.secret : ""
-    init_user = cached_init !== nothing ? cached_init.username : ""
-
-    lbl_url = Label(login_inner[2, 1], "XNAT URL:", color=:white, fontsize=12, halign=:right, visible=_login_visible)
-    login_tb_url = Textbox(login_inner[2, 2], placeholder="Server URL", stored_string=init_url, displayed_string=init_url, fontsize=12, width=230,
-        textcolor=RGBf(0.95, 0.95, 0.95), textcolor_placeholder=RGBf(0.55, 0.58, 0.65), 
-        boxcolor=RGBf(0.14, 0.16, 0.20), boxcolor_focused=RGBf(0.20, 0.24, 0.32), boxcolor_hover=RGBf(0.17, 0.20, 0.27),
-        bordercolor=RGBf(0.30, 0.35, 0.45), cursorcolor=RGBf(0.95, 0.95, 0.95))
-    on(_login_visible) do vis; login_tb_url.blockscene.visible[] = vis; end
-
-    lbl_alias = Label(login_inner[3, 1], "24h Alias:", color=:white, fontsize=12, halign=:right, visible=_login_visible)
-    login_tb_alias = Textbox(login_inner[3, 2], placeholder="Enter 24h Alias Token", stored_string=init_alias, displayed_string=init_alias, fontsize=12, width=230,
-        textcolor=RGBf(0.95, 0.95, 0.95), textcolor_placeholder=RGBf(0.55, 0.58, 0.65), 
-        boxcolor=RGBf(0.14, 0.16, 0.20), boxcolor_focused=RGBf(0.20, 0.24, 0.32), boxcolor_hover=RGBf(0.17, 0.20, 0.27),
-        bordercolor=RGBf(0.30, 0.35, 0.45), cursorcolor=RGBf(0.95, 0.95, 0.95))
-    on(_login_visible) do vis; login_tb_alias.blockscene.visible[] = vis; end
-
-    lbl_secret = Label(login_inner[4, 1], "24h Secret:", color=:white, fontsize=12, halign=:right, visible=_login_visible)
-    login_tb_secret = Textbox(login_inner[4, 2], placeholder="Enter Secret Token", stored_string=init_secret, displayed_string=init_secret, fontsize=12, width=230,
-        textcolor=RGBf(0.95, 0.95, 0.95), textcolor_placeholder=RGBf(0.55, 0.58, 0.65), 
-        boxcolor=RGBf(0.14, 0.16, 0.20), boxcolor_focused=RGBf(0.20, 0.24, 0.32), boxcolor_hover=RGBf(0.17, 0.20, 0.27),
-        bordercolor=RGBf(0.30, 0.35, 0.45), cursorcolor=RGBf(0.95, 0.95, 0.95))
-    on(_login_visible) do vis
-        login_tb_secret.blockscene.visible[] = vis
-        if vis
-            cached_now = XnatAuth.load_cached_credentials()
-            if cached_now !== nothing
-                login_tb_url.displayed_string[] = cached_now.server_url
-                login_tb_url.stored_string[] = cached_now.server_url
-                login_tb_alias.displayed_string[] = cached_now.alias
-                login_tb_alias.stored_string[] = cached_now.alias
-                login_tb_user.displayed_string[] = cached_now.username
-                login_tb_user.stored_string[] = cached_now.username
-                if _active_xnat_creds[] !== nothing
-                    login_tb_secret.displayed_string[] = cached_now.secret
-                    login_tb_secret.stored_string[] = cached_now.secret
-                else
-                    # Active session is not connected or token expired: clear secret box
-                    login_tb_secret.displayed_string[] = ""
-                    login_tb_secret.stored_string[] = ""
-                    login_msg.text[] = "Please enter fresh 24h Alias & Secret or Username & Password"
-                    login_msg.color[] = RGBf(0.9, 0.7, 0.2)
-                end
-            else
-                login_tb_secret.displayed_string[] = ""
-                login_tb_secret.stored_string[] = ""
-            end
-        end
-    end
-
-    lbl_user = Label(login_inner[5, 1], "Username:", color=:white, fontsize=12, halign=:right, visible=_login_visible)
-    login_tb_user = Textbox(login_inner[5, 2], placeholder="Enter username", stored_string=init_user, displayed_string=init_user, fontsize=12, width=230,
-        textcolor=RGBf(0.95, 0.95, 0.95), textcolor_placeholder=RGBf(0.55, 0.58, 0.65), 
-        boxcolor=RGBf(0.14, 0.16, 0.20), boxcolor_focused=RGBf(0.20, 0.24, 0.32), boxcolor_hover=RGBf(0.17, 0.20, 0.27),
-        bordercolor=RGBf(0.30, 0.35, 0.45), cursorcolor=RGBf(0.95, 0.95, 0.95))
-    on(_login_visible) do vis; login_tb_user.blockscene.visible[] = vis; end
-    
-    lbl_pass = Label(login_inner[6, 1], "Password:", color=:white, fontsize=12, halign=:right, visible=_login_visible)
-    login_tb_pass = Textbox(login_inner[6, 2], placeholder="Enter password (optional)", fontsize=12, width=230,
-        textcolor=RGBf(0.95, 0.95, 0.95), textcolor_placeholder=RGBf(0.55, 0.58, 0.65), 
-        boxcolor=RGBf(0.14, 0.16, 0.20), boxcolor_focused=RGBf(0.20, 0.24, 0.32), boxcolor_hover=RGBf(0.17, 0.20, 0.27),
-        bordercolor=RGBf(0.30, 0.35, 0.45), cursorcolor=RGBf(0.95, 0.95, 0.95))
-    on(_login_visible) do vis; login_tb_pass.blockscene.visible[] = vis; end
-    
-    btn_subgrid = GridLayout(login_inner[7, 1:2])
-    login_btn = Button(btn_subgrid[1, 1], label="Login / Connect", buttoncolor=RGBf(0.2, 0.6, 0.3), labelcolor=:white, fontsize=13)
-    login_btn_cancel = Button(btn_subgrid[1, 2], label="Work Offline", buttoncolor=RGBf(0.28, 0.35, 0.45), labelcolor=:white, fontsize=13)
-    on(_login_visible) do vis
-        login_btn.blockscene.visible[] = vis
-        login_btn_cancel.blockscene.visible[] = vis
-    end
-    
-    login_msg = Label(login_inner[8, 1:2], "", color=RGBf(1.0, 0.3, 0.3), fontsize=11, halign=:center, visible=_login_visible)
-    
-    rowsize!(login_inner, 1, Fixed(35))
-    rowsize!(login_inner, 2, Fixed(32))
-    rowsize!(login_inner, 3, Fixed(32))
-    rowsize!(login_inner, 4, Fixed(32))
-    rowsize!(login_inner, 5, Fixed(32))
-    rowsize!(login_inner, 6, Fixed(32))
-    rowsize!(login_inner, 7, Fixed(36))
-    rowsize!(login_inner, 8, Fixed(25))
-    colsize!(login_inner, 1, Fixed(110))
-    colsize!(login_inner, 2, Fixed(240))
-    
-    push!(_all_textboxes, login_tb_url)
-    push!(_all_textboxes, login_tb_alias)
-    push!(_all_textboxes, login_tb_secret)
-    push!(_all_textboxes, login_tb_user)
-    push!(_all_textboxes, login_tb_pass)
-    
-    function _do_login()
-        url = String(strip(login_tb_url.displayed_string[]))
-        (isempty(url) || occursin("bmia.nl", url)) && (url = XnatAuth.DEFAULT_XNAT_SERVER)
-        alias = String(strip(login_tb_alias.displayed_string[]))
-        secret = String(strip(login_tb_secret.displayed_string[]))
-        user = String(strip(login_tb_user.displayed_string[]))
-        pass = String(strip(login_tb_pass.displayed_string[]))
-        
-        # Priority 1: Offline bypass / testing password
-        if pass == "lu" || pass == "offline"
-            _current_user[] = !isempty(user) ? user : "offline_user"
-            _login_authenticated[] = true
-            _login_success_time[] = time()
-            _login_visible[] = false
-            login_msg.text[] = ""
-            login_tb_pass.displayed_string[] = ""
-            login_tb_pass.stored_string[] = ""
-            try; _MEH.app_is_loading[] = false; catch; end
-            println("[LOGIN] User '$(_current_user[])' authenticated in offline mode"); flush(stdout)
-            return
-        end
-
-        # Priority 2: Username & Password provided -> Issue fresh 24h token directly from XNAT
-        if !isempty(user) && !isempty(pass)
-            login_msg.text[] = "Connecting to XNAT and issuing 24h token..."
-            login_msg.color[] = RGBf(0.4, 0.8, 1.0)
-            Threads.@spawn begin
-                tok_creds, tok_msg = XnatAuth.issue_token_from_userpass(url, user, pass)
-                @async begin
-                    if tok_creds !== nothing
-                        XnatAuth.save_cached_credentials(tok_creds)
-                        _active_xnat_creds[] = tok_creds
-                        up_fn = get(_lmw_observables, :update_auth_status, nothing)
-                        up_fn !== nothing && up_fn(tok_creds)
-                        _current_user[] = user
-                        _login_authenticated[] = true
-                        _login_success_time[] = time()
-                        _login_visible[] = false
-                        login_msg.text[] = ""
-                        login_tb_pass.displayed_string[] = ""
-                        login_tb_pass.stored_string[] = ""
-                        try; _MEH.app_is_loading[] = false; catch; end
-                        println("[LOGIN] User '$(user)' issued fresh 24h token & authenticated at $(Dates.format(Dates.now(), "HH:MM:SS"))"); flush(stdout)
-                    else
-                        login_msg.color[] = RGBf(1.0, 0.3, 0.3)
-                        if occursin("Connection", tok_msg) || occursin("502", tok_msg) || occursin("503", tok_msg)
-                            login_msg.text[] = "XNAT in maintenance or unreachable. Click 'Work Offline' to continue."
-                        else
-                            login_msg.text[] = !isempty(tok_msg) ? tok_msg : "Authentication failed with provided credentials"
-                        end
-                    end
-                end
-            end
-            return
-        end
-
-        # Priority 2: 24h Rotating Alias & Secret Token
-        if !isempty(alias) && !isempty(secret)
-            now_t = time()
-            cached_prev = XnatAuth.load_cached_credentials()
-            issued_t = (cached_prev !== nothing && cached_prev.alias == alias && cached_prev.secret == secret) ?
-                        cached_prev.issued_at : now_t
-            exp_t = issued_t + 86400.0
-
-            new_creds = XnatAuth.XnatCredentials(
-                server_url = url,
-                alias = alias,
-                secret = secret,
-                username = !isempty(user) ? user : alias,
-                issued_at = issued_t,
-                expires_at = exp_t
-            )
-            login_msg.text[] = "Validating token with XNAT..."
-            login_msg.color[] = RGBf(0.4, 0.8, 1.0)
-            Threads.@spawn begin
-                is_valid, val_msg = XnatAuth.validate_credentials(new_creds)
-                @async begin
-                    if is_valid
-                        XnatAuth.save_cached_credentials(new_creds)
-                        _active_xnat_creds[] = new_creds
-                        _current_user[] = new_creds.username
-                        _login_authenticated[] = true
-                        _login_success_time[] = time()
-                        up_fn = get(_lmw_observables, :update_auth_status, nothing)
-                        up_fn !== nothing && up_fn(new_creds)
-                        _login_visible[] = false
-                        login_msg.text[] = ""
-                        try; _MEH.app_is_loading[] = false; catch; end
-                        println("[LOGIN] User '$(new_creds.username)' authenticated via 24h token"); flush(stdout)
-                    else
-                        login_msg.color[] = RGBf(1.0, 0.3, 0.3)
-                        if occursin("Connection", val_msg) || occursin("502", val_msg) || occursin("503", val_msg)
-                            login_msg.text[] = "XNAT in maintenance or unreachable. Click 'Work Offline' to continue."
-                        else
-                            login_msg.text[] = !isempty(val_msg) ? val_msg : "Invalid Alias/Secret token for $url"
-                        end
-                        login_tb_secret.displayed_string[] = ""
-                        login_tb_secret.stored_string[] = ""
-                    end
-                end
-            end
-            return
-        end
-        
-        login_msg.color[] = RGBf(1.0, 0.3, 0.3)
-        login_msg.text[] = "Please provide 24h Alias & Secret, or Username & Password"
-    end
-    
-    on(login_btn.clicks) do _
-        _do_login()
-    end
-    on(login_btn_cancel.clicks) do _
-        _login_authenticated[] = true
-        _login_success_time[] = time()
-        _login_visible[] = false
-        login_msg.text[] = ""
-        try; _MEH.app_is_loading[] = false; catch; end
-    end
-    on(login_tb_pass.stored_string) do _
-        _do_login()
-    end
-    on(login_tb_user.stored_string) do _
-        _do_login()
-    end
-    on(login_tb_secret.stored_string) do _
-        _do_login()
-    end
-    on(login_tb_alias.stored_string) do _
-        _do_login()
-    end
-    
-    _lmw_observables[:login_bg] = login_bg
-    _lmw_observables[:login_user] = login_tb_user
+    _lmw_observables[:login_user] = (displayed_string = Observable{String}(""), stored_string = Observable{String}(""), placeholder = Observable{String}("user"))
+    _lmw_observables[:login_bg] = loading_bg
 
     # ── Intercept Clicks to Prevent Click-Through & Lock GUI Controls ─────────
     in_rect(p, b) = (p[1] >= b.origin[1] && p[1] <= b.origin[1] + b.widths[1] &&
@@ -11884,53 +11684,12 @@ function display_metadata_window(fig::Figure)
         catch; end
     end
 
-    # Priority 100: Top-Level Modal Interceptor (Login Lock & Dropdown Lock)
+    # Priority 100: Top-Level Modal Interceptor (Loading Lock & Dropdown Lock)
     on(events(fig.scene).mousebutton, priority=100) do event
         # 1. Loading Overlay: Block all clicks while application / engines initialize
         is_loading = try loading_bg.visible[] catch; false end
         if is_loading
             return Consume(true)
-        end
-
-        # 2. Login Modal Lock: If login is visible, lock ALL controls except login fields and buttons
-        if _login_visible[]
-            pos = events(fig.scene).mouseposition[]
-            url_bbox    = login_tb_url.layoutobservables.computedbbox[]
-            alias_bbox  = login_tb_alias.layoutobservables.computedbbox[]
-            secret_bbox = login_tb_secret.layoutobservables.computedbbox[]
-            user_bbox   = login_tb_user.layoutobservables.computedbbox[]
-            pass_bbox   = login_tb_pass.layoutobservables.computedbbox[]
-            btn_bbox    = login_btn.layoutobservables.computedbbox[]
-            cancel_bbox = login_btn_cancel.layoutobservables.computedbbox[]
-            
-            in_tbs = in_rect(pos, url_bbox) || in_rect(pos, alias_bbox) || in_rect(pos, secret_bbox) || in_rect(pos, user_bbox) || in_rect(pos, pass_bbox)
-            in_btn  = in_rect(pos, btn_bbox)
-            in_cancel = in_rect(pos, cancel_bbox)
-            
-            if in_btn
-                if event.action == Mouse.press
-                    login_btn.buttoncolor = RGBf(0.1, 0.4, 0.2)
-                    _do_login()
-                elseif event.action == Mouse.release
-                    login_btn.buttoncolor = RGBf(0.2, 0.6, 0.3)
-                end
-                return Consume(true) # Always consume clicks on login button
-            elseif in_cancel
-                if event.action == Mouse.press
-                    _login_authenticated[] = true
-                    _login_success_time[] = time()
-                    _login_visible[] = false
-                    login_msg.text[] = ""
-                    try; _MEH.app_is_loading[] = false; catch; end
-                end
-                return Consume(true)
-            elseif in_tbs
-                return Consume(false) # Let Textboxes (priority 70) handle focus / typing
-            else
-                return Consume(true) # Lock ALL other GUI controls
-            end
-        elseif time() - _login_success_time[] < 1.0
-            return Consume(true) # Settle period after successful login
         end
 
         # 3. Dropdown Active Modal Handling: When a dropdown is open, handle its selection and lock ALL controls underneath

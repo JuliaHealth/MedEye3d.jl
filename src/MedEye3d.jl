@@ -156,6 +156,10 @@ using .OrganHeatLesionTracker
 export OrganHeatLesionTracker
 
 
+include(joinpath("display", "XnatLoginWindow.jl"))
+using .XnatLoginWindow
+export XnatLoginWindow, open_xnat_login_window, close_xnat_login_window, is_login_window_open
+
 include(joinpath("display", "LesionMetadataWindow.jl"))
 include(joinpath("display", "HeuristicsEngine.jl"))
 include(joinpath("display", "StudySelectorWindow.jl"))
