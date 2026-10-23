@@ -144,9 +144,20 @@ function open_xnat_login_window(; on_success=nothing, on_close=nothing)
         fontsize = 10, color = SUBTXT_CLR, halign = :center)
 
     # Status / Error message label
-    login_status_obs[] = (cached !== nothing && !XnatAuth.is_token_valid_locally(cached)) ?
-        "Previous token expired. Please enter new credentials." : ""
-    login_status_color[] = RGBf(0.95, 0.75, 0.30)
+    if cached !== nothing && XnatAuth.is_token_valid_locally(cached)
+        time_left_sec = cached.expires_at - time()
+        hrs = max(0, Int(floor(time_left_sec / 3600)))
+        mins = max(0, Int(floor(mod(time_left_sec, 3600) / 60)))
+        uname = isempty(cached.username) ? cached.alias : cached.username
+        login_status_obs[] = "Active session for '$(uname)' ($(hrs)h $(mins)m remaining)"
+        login_status_color[] = RGBf(0.40, 0.90, 0.40)
+    elseif cached !== nothing && !XnatAuth.is_token_valid_locally(cached)
+        login_status_obs[] = "Previous token expired. Please enter new credentials."
+        login_status_color[] = RGBf(0.95, 0.75, 0.30)
+    else
+        login_status_obs[] = ""
+        login_status_color[] = RGBf(0.95, 0.75, 0.30)
+    end
     Label(fig[3, 1:2], login_status_obs,
         fontsize = 11, color = login_status_color, halign = :center, tellwidth = false)
 
@@ -353,7 +364,12 @@ function open_xnat_login_window(; on_success=nothing, on_close=nothing)
     end
 
     on(tb_pass.stored_string)   do _; _execute_login(); end
-    on(tb_user.stored_string)   do _; _execute_login(); end
+    on(tb_user.stored_string)   do _
+        pass_str = String(strip(string(tb_pass.displayed_string[])))
+        if !isempty(pass_str)
+            _execute_login()
+        end
+    end
     on(tb_secret.stored_string) do _; _execute_login(); end
     on(tb_alias.stored_string)  do _; _execute_login(); end
 

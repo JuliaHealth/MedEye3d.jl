@@ -4539,6 +4539,7 @@ function create_metadata_window(
     end
 
     on(btn_xnat_login.clicks) do _
+        println("[XNAT] Login button in sidebar clicked, opening dialog..."); flush(stdout)
         _open_login_dialog()
     end
 
