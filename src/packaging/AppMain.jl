@@ -1577,9 +1577,27 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                     obs[:loading_overlay_bg].visible = false
                     obs[:loading_overlay_txt].visible = false
                 end
-                # Open separate XNAT companion window on startup
-                if haskey(obs, :login_visible)
+                # Open separate XNAT companion window on startup only if not already authenticated
+                cached_creds = MedEye3d.XnatAuth.load_cached_credentials()
+                if cached_creds !== nothing && MedEye3d.XnatAuth.is_token_valid_locally(cached_creds)
+                    t_wait_start = time()
+                    while time() - t_wait_start < 1.5
+                        if haskey(obs, :login_authenticated) && obs[:login_authenticated][]
+                            break
+                        end
+                        sleep(0.1)
+                    end
+                end
+
+                is_auth = false
+                if haskey(obs, :login_authenticated)
+                    try is_auth = obs[:login_authenticated][] catch; end
+                end
+                if !is_auth && haskey(obs, :login_visible)
+                    println("[STARTUP] User not yet authenticated to XNAT, opening companion login window"); flush(stdout)
                     obs[:login_visible][] = true
+                else
+                    println("[STARTUP] User already authenticated to XNAT, keeping companion login window closed"); flush(stdout)
                 end
             end
             

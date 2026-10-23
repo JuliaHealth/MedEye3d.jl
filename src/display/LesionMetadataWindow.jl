@@ -308,8 +308,9 @@ const current_has_expert_edits = Observable(false)
 const current_seg_origin = Observable("AI_PRESEGMENTATION")
 const _global_trigger_autosave = Ref{Any}(nothing)
 const _current_user = Ref{String}("")
-const _login_authenticated = Ref{Bool}(false)
+const _login_authenticated = Observable{Bool}(false)
 const _login_visible = Observable(false)
+_lmw_observables[:login_authenticated] = _login_authenticated
 _lmw_observables[:login_visible] = _login_visible
 const _login_success_time = Ref{Float64}(0.0)
 const _active_xnat_creds = Ref{Union{XnatAuth.XnatCredentials, Nothing}}(nothing)
@@ -4224,7 +4225,7 @@ function create_metadata_window(
 
     end_section!(sec_xnat)
 
-    function _update_auth_status!(creds::Union{XnatAuth.XnatCredentials, Nothing})
+    function _update_auth_status!(creds::Union{XnatAuth.XnatCredentials, Nothing}; offline::Bool=false)
         if creds !== nothing
             _active_xnat_creds[] = creds
             time_left_sec = creds.expires_at - time()
@@ -4242,9 +4243,15 @@ function create_metadata_window(
             end
         else
             _active_xnat_creds[] = nothing
-            xnat_server_status_text[] = "[X] XNAT: Offline (Maintenance)"
-            xnat_server_status_color[] = RGBf(0.8, 0.5, 0.3)
-            btn_xnat_login.label[] = "Connect"
+            if offline
+                xnat_server_status_text[] = "[Offline Mode]"
+                xnat_server_status_color[] = RGBf(0.55, 0.65, 0.75)
+                btn_xnat_login.label[] = "Connect"
+            else
+                xnat_server_status_text[] = "[X] XNAT: Offline (Maintenance)"
+                xnat_server_status_color[] = RGBf(0.8, 0.5, 0.3)
+                btn_xnat_login.label[] = "Connect"
+            end
         end
     end
 
@@ -4500,29 +4507,23 @@ function create_metadata_window(
                 on_success = (creds; offline=false) -> begin
                     _login_authenticated[] = true
                     _login_visible[] = false
-                    if login_tb_user_ref[] !== nothing
-                        filter!(x -> x !== login_tb_user_ref[], _all_textboxes)
-                    end
-                    if login_tb_pass_ref[] !== nothing
-                        filter!(x -> x !== login_tb_pass_ref[], _all_textboxes)
-                    end
+                    tb_u = login_tb_user_ref[]
+                    tb_p = login_tb_pass_ref[]
+                    filter!(x -> (tb_u === nothing || x !== tb_u) && (tb_p === nothing || x !== tb_p), _all_textboxes)
                     if !offline && creds !== nothing
                         _active_xnat_creds[] = creds
                         _current_user[] = creds.username
-                        _update_auth_status!(creds)
+                        _update_auth_status!(creds; offline=false)
                         try notify(menu_xnat_proj.selection) catch; end
                     else
-                        _update_auth_status!(nothing)
+                        _update_auth_status!(nothing; offline=offline)
                     end
                 end,
                 on_close = () -> begin
                     _login_visible[] = false
-                    if login_tb_user_ref[] !== nothing
-                        filter!(x -> x !== login_tb_user_ref[], _all_textboxes)
-                    end
-                    if login_tb_pass_ref[] !== nothing
-                        filter!(x -> x !== login_tb_pass_ref[], _all_textboxes)
-                    end
+                    tb_u = login_tb_user_ref[]
+                    tb_p = login_tb_pass_ref[]
+                    filter!(x -> (tb_u === nothing || x !== tb_u) && (tb_p === nothing || x !== tb_p), _all_textboxes)
                 end
             )
             if login_tb_user_ref[] !== nothing
@@ -11591,6 +11592,7 @@ function display_metadata_window(fig::Figure)
 
     # ── Login State (Managed via separate XnatLoginWindow) ────────────────────
     _login_visible[] = false
+    _lmw_observables[:login_authenticated] = _login_authenticated
     _lmw_observables[:login_visible] = _login_visible
     _lmw_observables[:login_user] = (displayed_string = Observable{String}(""), stored_string = Observable{String}(""), placeholder = Observable{String}("user"))
     _lmw_observables[:login_bg] = loading_bg

@@ -49,23 +49,41 @@ Safely closes the separate XNAT login window if open.
 """
 function close_xnat_login_window()
     scr = active_login_screen[]
+    active_login_screen[] = nothing
+    active_login_fig[] = nothing
+    cb_close = on_login_close[]
+    on_login_close[] = nothing
+    on_login_success[] = nothing
+
     if scr !== nothing
+        println("[LOGIN] Closing companion login window..."); flush(stdout)
         try
-            lock(GLOBAL_OPENGL_LOCK) do
-                if isopen(scr) && scr.owns_glscreen && GLMakie.GLAbstraction.context_alive(scr.glscreen)
-                    GLMakie.GLFW.SetWindowShouldClose(scr.glscreen, true)
-                end
+            scr.stop_renderloop[] = true
+            if scr.owns_glscreen && GLMakie.GLAbstraction.context_alive(scr.glscreen)
+                GLMakie.GLFW.HideWindow(scr.glscreen)
+                GLMakie.GLFW.SetWindowShouldClose(scr.glscreen, true)
             end
         catch e
             @warn "Failed closing XNAT login window: $e"
         end
+        @async begin
+            try
+                scr.stop_renderloop[] = true
+                if scr.rendertask !== nothing && Base.current_task() != scr.rendertask
+                    try wait(scr.rendertask) catch; end
+                end
+                scr.rendertask = nothing
+                lock(GLOBAL_OPENGL_LOCK) do
+                    close(scr; reuse=false)
+                end
+                println("[LOGIN] Companion login window closed and cleaned up successfully"); flush(stdout)
+            catch e
+                @debug "Async screen close cleanup: $e"
+            end
+        end
     end
-    active_login_screen[] = nothing
-    active_login_fig[] = nothing
-    if on_login_close[] !== nothing
-        cb = on_login_close[]
-        on_login_close[] = nothing
-        try cb() catch; end
+    if cb_close !== nothing
+        try cb_close() catch e; @error "Login on_close callback error: $e"; end
     end
 end
 
@@ -189,56 +207,74 @@ function open_xnat_login_window(; on_success=nothing, on_close=nothing)
     rowsize!(fig.layout, 5, Fixed(44))
 
     # ── Login Logic ──────────────────────────────────────────────────────────
+    _is_executing_login = Ref(false)
     function _execute_login()
-        url = String(strip(tb_url.displayed_string[]))
+        if _is_executing_login[]
+            println("[LOGIN] Login request already in progress, ignoring duplicate trigger"); flush(stdout)
+            return
+        end
+        get_str(tb) = begin
+            disp = tb.displayed_string[]
+            stor = tb.stored_string[]
+            s_disp = disp === nothing ? "" : String(strip(string(disp)))
+            s_stor = stor === nothing ? "" : String(strip(string(stor)))
+            isempty(s_disp) ? s_stor : s_disp
+        end
+        url = get_str(tb_url)
         (isempty(url) || occursin("bmia.nl", url)) && (url = XnatAuth.DEFAULT_XNAT_SERVER)
-        alias = String(strip(tb_alias.displayed_string[]))
-        secret = String(strip(tb_secret.displayed_string[]))
-        user = String(strip(tb_user.displayed_string[]))
-        pass = String(strip(tb_pass.displayed_string[]))
+        alias = get_str(tb_alias)
+        secret = get_str(tb_secret)
+        user = get_str(tb_user)
+        pass = get_str(tb_pass)
+
+        println("[LOGIN] Login triggered (url='$url', user='$user', has_pass=$(!isempty(pass)), alias='$(isempty(alias) ? "" : alias[1:min(8,length(alias))])...', has_secret=$(!isempty(secret)))"); flush(stdout)
 
         # Priority 1: Offline bypass / testing password
         if pass == "lu" || pass == "offline"
+            println("[LOGIN] Priority 1: Authenticating in offline/bypass mode"); flush(stdout)
             login_status_obs[] = "Authenticated locally (offline mode)"
             login_status_color[] = RGBf(0.40, 0.90, 0.40)
             cb = on_login_success[]
             if cb !== nothing
-                try cb(nothing; offline=true) catch; end
+                try cb(nothing; offline=true) catch e; @error "Login callback error: $e"; end
             end
-            @async begin
-                sleep(0.3)
-                close_xnat_login_window()
-            end
+            close_xnat_login_window()
             return
         end
 
         # Priority 2: Direct Username & Password login -> Issues fresh 24h token from XNAT
         if !isempty(user) && !isempty(pass)
+            _is_executing_login[] = true
+            println("[LOGIN] Priority 2: Connecting to XNAT and issuing 24h token for user '$user'..."); flush(stdout)
             login_status_obs[] = "Connecting to XNAT and issuing 24h token..."
             login_status_color[] = RGBf(0.40, 0.80, 1.00)
             @async begin
-                tok_creds, tok_msg = try
-                    XnatAuth.issue_token_from_userpass(url, user, pass)
-                catch e
-                    (nothing, "Connection error: $e")
-                end
-                if tok_creds !== nothing
-                    XnatAuth.save_cached_credentials(tok_creds)
-                    login_status_obs[] = "Success! Issued token for '$(tok_creds.username)'"
-                    login_status_color[] = RGBf(0.40, 0.90, 0.40)
-                    cb = on_login_success[]
-                    if cb !== nothing
-                        try cb(tok_creds; offline=false) catch e; @error "Login callback error: $e"; end
+                try
+                    tok_creds, tok_msg = try
+                        XnatAuth.issue_token_from_userpass(url, user, pass)
+                    catch e
+                        (nothing, "Connection error: $e")
                     end
-                    sleep(0.4)
-                    close_xnat_login_window()
-                else
-                    login_status_color[] = RGBf(1.00, 0.30, 0.30)
-                    if occursin("Connection", tok_msg) || occursin("502", tok_msg) || occursin("503", tok_msg)
-                        login_status_obs[] = "XNAT in maintenance or unreachable. You can Work Offline."
+                    println("[LOGIN] Issue token response: $(tok_creds !== nothing ? "SUCCESS" : "FAILED") ($tok_msg)"); flush(stdout)
+                    if tok_creds !== nothing
+                        XnatAuth.save_cached_credentials(tok_creds)
+                        login_status_obs[] = "Success! Issued token for '$(tok_creds.username)'"
+                        login_status_color[] = RGBf(0.40, 0.90, 0.40)
+                        cb = on_login_success[]
+                        if cb !== nothing
+                            try cb(tok_creds; offline=false) catch e; @error "Login callback error: $e"; end
+                        end
+                        close_xnat_login_window()
                     else
-                        login_status_obs[] = !isempty(tok_msg) ? tok_msg : "Authentication failed with provided credentials"
+                        login_status_color[] = RGBf(1.00, 0.30, 0.30)
+                        if occursin("Connection", tok_msg) || occursin("502", tok_msg) || occursin("503", tok_msg)
+                            login_status_obs[] = "XNAT in maintenance or unreachable. You can Work Offline."
+                        else
+                            login_status_obs[] = !isempty(tok_msg) ? tok_msg : "Authentication failed with provided credentials"
+                        end
                     end
+                finally
+                    _is_executing_login[] = false
                 end
             end
             return
@@ -246,6 +282,8 @@ function open_xnat_login_window(; on_success=nothing, on_close=nothing)
 
         # Priority 3: 24h Rotating Alias & Secret Token
         if !isempty(alias) && !isempty(secret)
+            _is_executing_login[] = true
+            println("[LOGIN] Priority 3: Validating 24h token for user '$user' against '$url'..."); flush(stdout)
             now_t = time()
             cached_prev = XnatAuth.load_cached_credentials()
             issued_t = (cached_prev !== nothing && cached_prev.alias == alias && cached_prev.secret == secret) ?
@@ -263,35 +301,40 @@ function open_xnat_login_window(; on_success=nothing, on_close=nothing)
             login_status_obs[] = "Validating token with XNAT..."
             login_status_color[] = RGBf(0.40, 0.80, 1.00)
             @async begin
-                is_valid, val_msg = try
-                    XnatAuth.validate_credentials(new_creds)
-                catch e
-                    (false, "Connection error: $e")
-                end
-                if is_valid
-                    XnatAuth.save_cached_credentials(new_creds)
-                    login_status_obs[] = "Success! Authenticated via 24h token"
-                    login_status_color[] = RGBf(0.40, 0.90, 0.40)
-                    cb = on_login_success[]
-                    if cb !== nothing
-                        try cb(new_creds; offline=false) catch e; @error "Login callback error: $e"; end
+                try
+                    is_valid, val_msg = try
+                        XnatAuth.validate_credentials(new_creds)
+                    catch e
+                        (false, "Connection error: $e")
                     end
-                    sleep(0.4)
-                    close_xnat_login_window()
-                else
-                    login_status_color[] = RGBf(1.00, 0.30, 0.30)
-                    if occursin("Connection", val_msg) || occursin("502", val_msg) || occursin("503", val_msg)
-                        login_status_obs[] = "XNAT in maintenance or unreachable. You can Work Offline."
+                    println("[LOGIN] Token validation response: $(is_valid ? "SUCCESS" : "FAILED") ($val_msg)"); flush(stdout)
+                    if is_valid
+                        XnatAuth.save_cached_credentials(new_creds)
+                        login_status_obs[] = "Success! Authenticated via 24h token"
+                        login_status_color[] = RGBf(0.40, 0.90, 0.40)
+                        cb = on_login_success[]
+                        if cb !== nothing
+                            try cb(new_creds; offline=false) catch e; @error "Login callback error: $e"; end
+                        end
+                        close_xnat_login_window()
                     else
-                        login_status_obs[] = !isempty(val_msg) ? val_msg : "Invalid Alias/Secret token for $url"
+                        login_status_color[] = RGBf(1.00, 0.30, 0.30)
+                        if occursin("Connection", val_msg) || occursin("502", val_msg) || occursin("503", val_msg)
+                            login_status_obs[] = "XNAT in maintenance or unreachable. You can Work Offline."
+                        else
+                            login_status_obs[] = !isempty(val_msg) ? val_msg : "Invalid Alias/Secret token for $url"
+                        end
+                        tb_secret.displayed_string[] = ""
+                        tb_secret.stored_string[] = ""
                     end
-                    tb_secret.displayed_string[] = ""
-                    tb_secret.stored_string[] = ""
+                finally
+                    _is_executing_login[] = false
                 end
             end
             return
         end
 
+        println("[LOGIN] Insufficient credentials: need alias & secret or user & pass"); flush(stdout)
         login_status_color[] = RGBf(1.00, 0.30, 0.30)
         login_status_obs[] = "Please provide 24h Alias & Secret, or Username & Password"
     end
@@ -301,6 +344,11 @@ function open_xnat_login_window(; on_success=nothing, on_close=nothing)
     end
 
     on(btn_offline.clicks) do _
+        println("[LOGIN] 'Work Offline / Close' clicked"); flush(stdout)
+        cb = on_login_success[]
+        if cb !== nothing
+            try cb(nothing; offline=true) catch e; @error "Login callback error: $e"; end
+        end
         close_xnat_login_window()
     end
 
@@ -312,6 +360,7 @@ function open_xnat_login_window(; on_success=nothing, on_close=nothing)
     # Escape key dismisses window
     on(events(fig).keyboardbutton) do event
         if (event.action == Makie.Keyboard.release || event.action == Makie.Keyboard.press) && event.key == Makie.Keyboard.escape
+            println("[LOGIN] Escape pressed, closing companion login window"); flush(stdout)
             close_xnat_login_window()
             return Consume(true)
         end
