@@ -23,6 +23,7 @@ const active_login_fig = Ref{Any}(nothing)
 const login_status_obs = Observable{String}("")
 const login_status_color = Observable{RGBf}(RGBf(0.85, 0.88, 0.92))
 const on_login_success = Ref{Any}(nothing)
+const on_login_close = Ref{Any}(nothing)
 const login_tb_user_ref = Ref{Any}(nothing)
 const login_tb_pass_ref = Ref{Any}(nothing)
 
@@ -62,16 +63,24 @@ function close_xnat_login_window()
     end
     active_login_screen[] = nothing
     active_login_fig[] = nothing
+    if on_login_close[] !== nothing
+        cb = on_login_close[]
+        on_login_close[] = nothing
+        try cb() catch; end
+    end
 end
 
 """
-    open_xnat_login_window(; on_success=nothing) -> Union{GLMakie.Screen, Nothing}
+    open_xnat_login_window(; on_success=nothing, on_close=nothing) -> Union{GLMakie.Screen, Nothing}
 
 Opens (or focuses/brings to front) the dedicated XNAT login window.
 """
-function open_xnat_login_window(; on_success=nothing)
+function open_xnat_login_window(; on_success=nothing, on_close=nothing)
     if on_success !== nothing
         on_login_success[] = on_success
+    end
+    if on_close !== nothing
+        on_login_close[] = on_close
     end
 
     # If already open and active, bring to front and focus
@@ -319,6 +328,15 @@ function open_xnat_login_window(; on_success=nothing)
 
     active_login_screen[] = screen
     active_login_fig[] = fig
+
+    try
+        if screen.owns_glscreen && GLMakie.GLAbstraction.context_alive(screen.glscreen)
+            GLMakie.GLFW.SetWindowCloseCallback(screen.glscreen) do _
+                close_xnat_login_window()
+            end
+        end
+    catch; end
+
     println("[XNAT] Separate login window opened (glscreen: $(screen.glscreen))"); flush(stdout)
     return screen
 end

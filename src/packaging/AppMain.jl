@@ -1577,6 +1577,10 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                     obs[:loading_overlay_bg].visible = false
                     obs[:loading_overlay_txt].visible = false
                 end
+                # Open separate XNAT companion window on startup
+                if haskey(obs, :login_visible)
+                    obs[:login_visible][] = true
+                end
             end
             
             # Flush any Wayland compositor close events queued during heavy startup

@@ -4488,6 +4488,7 @@ function create_metadata_window(
     function _open_login_dialog()
         _is_opening_login[] && return
         if is_login_window_open()
+            open_xnat_login_window()
             return
         end
         _is_opening_login[] = true
@@ -4512,6 +4513,15 @@ function create_metadata_window(
                         try notify(menu_xnat_proj.selection) catch; end
                     else
                         _update_auth_status!(nothing)
+                    end
+                end,
+                on_close = () -> begin
+                    _login_visible[] = false
+                    if login_tb_user_ref[] !== nothing
+                        filter!(x -> x !== login_tb_user_ref[], _all_textboxes)
+                    end
+                    if login_tb_pass_ref[] !== nothing
+                        filter!(x -> x !== login_tb_pass_ref[], _all_textboxes)
                     end
                 end
             )
@@ -11267,6 +11277,7 @@ function create_metadata_window(
     _lmw_observables[:anat_rm_btns] = anat_rm_btns
     _lmw_observables[:anat_rel_menus] = anat_rel_menus
     _lmw_observables[:anat_struct_menus] = anat_struct_menus
+    _lmw_observables[:btn_xnat_login] = btn_xnat_login
     _lmw_observables[:xnat_proj_menu] = menu_xnat_proj
     _lmw_observables[:xnat_subj_menu] = menu_xnat_subj
     _lmw_observables[:xnat_status_lbl] = lbl_xnat_status
