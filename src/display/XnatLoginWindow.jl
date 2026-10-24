@@ -233,68 +233,17 @@ function open_xnat_login_window(; on_success=nothing, on_close=nothing)
         end
         url = get_str(tb_url)
         (isempty(url) || occursin("bmia.nl", url)) && (url = XnatAuth.DEFAULT_XNAT_SERVER)
-        alias = get_str(tb_alias)
-        secret = get_str(tb_secret)
+        alias = replace(get_str(tb_alias), r"[\r\n\t ]+" => "")
+        secret = replace(get_str(tb_secret), r"[\r\n\t ]+" => "")
         user = get_str(tb_user)
         pass = get_str(tb_pass)
 
         println("[LOGIN] Login triggered (url='$url', user='$user', has_pass=$(!isempty(pass)), alias='$(isempty(alias) ? "" : alias[1:min(8,length(alias))])...', has_secret=$(!isempty(secret)))"); flush(stdout)
 
-        # Priority 1: Offline bypass / testing password
-        if pass == "lu" || pass == "offline"
-            println("[LOGIN] Priority 1: Authenticating in offline/bypass mode"); flush(stdout)
-            login_status_obs[] = "Authenticated locally (offline mode)"
-            login_status_color[] = RGBf(0.40, 0.90, 0.40)
-            cb = on_login_success[]
-            if cb !== nothing
-                try cb(nothing; offline=true) catch e; @error "Login callback error: $e"; end
-            end
-            close_xnat_login_window()
-            return
-        end
-
-        # Priority 2: Direct Username & Password login -> Issues fresh 24h token from XNAT
-        if !isempty(user) && !isempty(pass)
-            _is_executing_login[] = true
-            println("[LOGIN] Priority 2: Connecting to XNAT and issuing 24h token for user '$user'..."); flush(stdout)
-            login_status_obs[] = "Connecting to XNAT and issuing 24h token..."
-            login_status_color[] = RGBf(0.40, 0.80, 1.00)
-            @async begin
-                try
-                    tok_creds, tok_msg = try
-                        XnatAuth.issue_token_from_userpass(url, user, pass)
-                    catch e
-                        (nothing, "Connection error: $e")
-                    end
-                    println("[LOGIN] Issue token response: $(tok_creds !== nothing ? "SUCCESS" : "FAILED") ($tok_msg)"); flush(stdout)
-                    if tok_creds !== nothing
-                        XnatAuth.save_cached_credentials(tok_creds)
-                        login_status_obs[] = "Success! Issued token for '$(tok_creds.username)'"
-                        login_status_color[] = RGBf(0.40, 0.90, 0.40)
-                        cb = on_login_success[]
-                        if cb !== nothing
-                            try cb(tok_creds; offline=false) catch e; @error "Login callback error: $e"; end
-                        end
-                        close_xnat_login_window()
-                    else
-                        login_status_color[] = RGBf(1.00, 0.30, 0.30)
-                        if occursin("Connection", tok_msg) || occursin("502", tok_msg) || occursin("503", tok_msg)
-                            login_status_obs[] = "XNAT in maintenance or unreachable. You can Work Offline."
-                        else
-                            login_status_obs[] = !isempty(tok_msg) ? tok_msg : "Authentication failed with provided credentials"
-                        end
-                    end
-                finally
-                    _is_executing_login[] = false
-                end
-            end
-            return
-        end
-
-        # Priority 3: 24h Rotating Alias & Secret Token
+        # Priority 1: 24h Rotating Alias & Secret Token (Preferred XNAT Method)
         if !isempty(alias) && !isempty(secret)
             _is_executing_login[] = true
-            println("[LOGIN] Priority 3: Validating 24h token for user '$user' against '$url'..."); flush(stdout)
+            println("[LOGIN] Priority 1: Validating 24h token for user '$user' against '$url'..."); flush(stdout)
             now_t = time()
             cached_prev = XnatAuth.load_cached_credentials()
             issued_t = (cached_prev !== nothing && cached_prev.alias == alias && cached_prev.secret == secret) ?
@@ -342,6 +291,57 @@ function open_xnat_login_window(; on_success=nothing, on_close=nothing)
                     _is_executing_login[] = false
                 end
             end
+            return
+        end
+
+        # Priority 2: Direct Username & Password login -> Issues fresh 24h token from XNAT
+        if !isempty(user) && !isempty(pass) && pass != "offline" && pass != "lu"
+            _is_executing_login[] = true
+            println("[LOGIN] Priority 2: Connecting to XNAT and issuing 24h token for user '$user'..."); flush(stdout)
+            login_status_obs[] = "Connecting to XNAT and issuing 24h token..."
+            login_status_color[] = RGBf(0.40, 0.80, 1.00)
+            @async begin
+                try
+                    tok_creds, tok_msg = try
+                        XnatAuth.issue_token_from_userpass(url, user, pass)
+                    catch e
+                        (nothing, "Connection error: $e")
+                    end
+                    println("[LOGIN] Issue token response: $(tok_creds !== nothing ? "SUCCESS" : "FAILED") ($tok_msg)"); flush(stdout)
+                    if tok_creds !== nothing
+                        XnatAuth.save_cached_credentials(tok_creds)
+                        login_status_obs[] = "Success! Issued token for '$(tok_creds.username)'"
+                        login_status_color[] = RGBf(0.40, 0.90, 0.40)
+                        cb = on_login_success[]
+                        if cb !== nothing
+                            try cb(tok_creds; offline=false) catch e; @error "Login callback error: $e"; end
+                        end
+                        close_xnat_login_window()
+                    else
+                        login_status_color[] = RGBf(1.00, 0.30, 0.30)
+                        if occursin("Connection", tok_msg) || occursin("502", tok_msg) || occursin("503", tok_msg)
+                            login_status_obs[] = "XNAT in maintenance or unreachable. You can Work Offline."
+                        else
+                            login_status_obs[] = !isempty(tok_msg) ? tok_msg : "Authentication failed with provided credentials"
+                        end
+                    end
+                finally
+                    _is_executing_login[] = false
+                end
+            end
+            return
+        end
+
+        # Priority 3: Offline bypass / testing password (only if no token was provided)
+        if isempty(alias) && isempty(secret) && (pass == "lu" || pass == "offline")
+            println("[LOGIN] Priority 3: Authenticating in offline/bypass mode"); flush(stdout)
+            login_status_obs[] = "Authenticated locally (offline mode)"
+            login_status_color[] = RGBf(0.40, 0.90, 0.40)
+            cb = on_login_success[]
+            if cb !== nothing
+                try cb(nothing; offline=true) catch e; @error "Login callback error: $e"; end
+            end
+            close_xnat_login_window()
             return
         end
 
