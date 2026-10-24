@@ -1,5 +1,8 @@
 # MedEye3d XNAT Integration: Architecture & User Guide
 
+> [!NOTE]
+> For a complete operational manual covering Docker setup, TotalSegmentator/lymph node mask reuse, Lutetium pipelines, MRI registration/preprocessing scripts, and XNAT storage conventions, see the **[Preprocessing & XNAT Guide](preprocessing_and_xnat_guide.md)**.
+
 ## 1. Overview & System Goals
 
 MedEye3d integrates natively with **XNAT (Extensible Neuroimaging Archive Toolkit)** to provide seamless access to longitudinal, multi-modal imaging archives. Clinicians and researchers can browse repositories, stream pre-aligned and calibrated multi-timepoint HDF5 datasets, review and validate lesions and anatomical lymph node areas, edit segmentations, and save validated annotations back to XNAT with full audit tracking.

@@ -350,9 +350,9 @@ function run_upload(opts::Dict{String, String}, flags::Set{String})
 end
 
 function main()
-    if isempty(ARGS)
+    if isempty(ARGS) || "--help" in ARGS || "-h" in ARGS
         print_usage()
-        exit(1)
+        exit(0)
     end
 
     cmd = ARGS[1]

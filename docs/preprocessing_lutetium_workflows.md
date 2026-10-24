@@ -1,5 +1,8 @@
 # Lutetium Workflows: Automated Dataset Preprocessing
 
+> [!NOTE]
+> For the comprehensive guide covering multi-timepoint SPECT normalization, MRI bimodal registration, TotalSegmentator reuse, Docker setup, and XNAT discoverability, see the **[Preprocessing & XNAT Guide](preprocessing_and_xnat_guide.md)**.
+
 The Lutetium therapy and diagnostic workflows (involving `Lu-177` SPECT/CT and `Ga-68` PET/CT scans) generate massive amounts of multi-modal, longitudinal imaging data. Manually parsing NIfTI files, matching spatial transforms, and registering baseline geometries at runtime is too slow for clinical use.
 
 MedEye3d solves this via a robust, highly optimized automated preprocessing pipeline that aligns, crops, AI-segments, and compresses your longitudinal data into ultra-fast `HDF5` structures.

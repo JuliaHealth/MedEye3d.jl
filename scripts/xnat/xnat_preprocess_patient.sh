@@ -159,8 +159,8 @@ process_patient() {
     echo "Workspace:          $SUBJ_WORK_DIR"
     echo "------------------------------------------------------------------------------"
 
-    # Check status on XNAT if not overwrite
-    if [ "$OVERWRITE" = false ]; then
+    # Check status on XNAT if not overwrite and local preprocessed file already exists
+    if [ "$OVERWRITE" = false ] && [ -f "$H5_FILE" ] && [ $(wc -c < "$H5_FILE" 2>/dev/null || echo 0) -gt 1024 ]; then
         STATUS=$(julia -t 1 --project=. -e '
 using MedEye3d.XnatAuth, MedEye3d.XnatClient
 ok, creds, _ = XnatAuth.auto_verify_credentials()
@@ -172,7 +172,7 @@ else
 end
 ' "$PROJECT" "$SUBJ")
         if [ "$STATUS" = "PROCESSED" ] || [ "$STATUS" = "PREPROCESSED" ]; then
-            echo "ℹ Case $SUBJ is already $STATUS on XNAT. Skipping (use --overwrite to force)."
+            echo "ℹ Case $SUBJ is already $STATUS on XNAT with local H5. Skipping (use --overwrite to force)."
             return 0
         fi
     fi
