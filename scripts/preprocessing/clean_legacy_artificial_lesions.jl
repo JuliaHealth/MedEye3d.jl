@@ -46,38 +46,53 @@ function clean_legacy_artificial_lesions(h5_path::String)
 
     h5open(h5_path, "r+") do h5
         # 1. Clean PET datasets
+        if haskey(h5, "BASELINE") && haskey(h5["BASELINE"], "PET_Lesions_0.nii.gz_expert")
+            delete_object(h5["BASELINE"], "PET_Lesions_0.nii.gz_expert")
+            println("  [Removed Stale Expert] BASELINE/PET_Lesions_0.nii.gz_expert")
+        end
+
         for (grp_name, min_art) in pet_cutoffs
             if haskey(h5, grp_name)
                 grp = h5[grp_name]
-                for ds_name in keys(grp)
+                for ds_name in collect(keys(grp))
                     if occursin("Lesions", ds_name)
-                        arr = read(grp[ds_name])
-                        art_voxels = count(v -> (v >= min_art), arr)
-                        if art_voxels > 0
-                            arr[arr .>= min_art] .= 0
+                        if occursin("_expert", ds_name)
                             delete_object(grp, ds_name)
-                            grp[ds_name] = arr
-                            println("  [Cleaned] $grp_name/$ds_name: zeroed $art_voxels voxels (values >= $min_art)")
+                            println("  [Removed Stale Expert] $grp_name/$ds_name")
                         else
-                            println("  [Clean] $grp_name/$ds_name: no voxels >= $min_art found")
+                            arr = read(grp[ds_name])
+                            art_voxels = count(v -> (v >= min_art), arr)
+                            if art_voxels > 0
+                                arr[arr .>= min_art] .= 0
+                                delete_object(grp, ds_name)
+                                grp[ds_name] = arr
+                                println("  [Cleaned] $grp_name/$ds_name: zeroed $art_voxels voxels (values >= $min_art)")
+                            else
+                                println("  [Clean] $grp_name/$ds_name: no voxels >= $min_art found")
+                            end
                         end
                     end
                 end
             end
         end
 
-        # 2. Reset SPECT datasets to zeros so they are populated via 5-organ heat diffusion
+        # 2. Reset SPECT datasets to zeros and remove stale expert masks
         for grp_name in spect_groups
             if haskey(h5, grp_name)
                 grp = h5[grp_name]
-                for ds_name in keys(grp)
-                    if occursin("Lesions", ds_name) && !occursin("_expert", ds_name)
-                        arr = read(grp[ds_name])
-                        nonzeros = count(v -> v > 0, arr)
-                        fill!(arr, 0)
-                        delete_object(grp, ds_name)
-                        grp[ds_name] = arr
-                        println("  [Reset SPECT] $grp_name/$ds_name: reset $nonzeros voxels to 0")
+                for ds_name in collect(keys(grp))
+                    if occursin("Lesions", ds_name)
+                        if occursin("_expert", ds_name)
+                            delete_object(grp, ds_name)
+                            println("  [Removed Stale Expert] $grp_name/$ds_name")
+                        else
+                            arr = read(grp[ds_name])
+                            nonzeros = count(v -> v > 0, arr)
+                            fill!(arr, 0)
+                            delete_object(grp, ds_name)
+                            grp[ds_name] = arr
+                            println("  [Reset SPECT] $grp_name/$ds_name: reset $nonzeros voxels to 0")
+                        end
                     end
                 end
             end

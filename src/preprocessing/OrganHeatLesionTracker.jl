@@ -55,6 +55,26 @@ function compute_organ_centroids(max_anatomy::AbstractArray{<:Integer, 3})::Dict
 end
 
 """
+    compute_organ_centroids(max_anatomy::AbstractArray{<:Integer, 3}, label_dict::Dict{String, String}) -> Dict{String, Vector{Float64}}
+
+Computes organ centroids keyed by canonical organ name strings, filtering out dummy/class labels.
+"""
+function compute_organ_centroids(max_anatomy::AbstractArray{<:Integer, 3}, label_dict::Dict{String, String})::Dict{String, Vector{Float64}}
+    int_cents = compute_organ_centroids(max_anatomy)
+    named_cents = Dict{String, Vector{Float64}}()
+    for (lbl, coords) in int_cents
+        s_lbl = string(lbl)
+        if haskey(label_dict, s_lbl)
+            name = label_dict[s_lbl]
+            if !occursin("_class_", name)
+                named_cents[name] = coords
+            end
+        end
+    end
+    return named_cents
+end
+
+"""
     compute_lesion_centroid(mask::AbstractArray{<:Integer, 3}, lid::Integer) -> Union{Vector{Float64}, Nothing}
 
 Computes the 3D centroid of a specific lesion label ID in a mask volume.
@@ -158,35 +178,36 @@ end
 
 """
     find_5_closest_organs(lesion_center::Vector{Float64},
-                          centroids_A::Dict{Int, Vector{Float64}},
-                          centroids_B::Dict{Int, Vector{Float64}}) -> Vector{Int}
+                          centroids_A::Dict{T, Vector{Float64}},
+                          centroids_B::Dict{T, Vector{Float64}}) where {T} -> Vector{T}
 
 Identifies the 5 closest shared organs between timepoints A and B relative to `lesion_center`.
+Works on canonical organ name strings (`T=String`) or integer IDs (`T=Int`).
 """
 function find_5_closest_organs(lesion_center::Vector{Float64},
-                               centroids_A::Dict{Int, Vector{Float64}},
-                               centroids_B::Dict{Int, Vector{Float64}})::Vector{Int}
-    common_labels = intersect(keys(centroids_A), keys(centroids_B))
-    if isempty(common_labels)
-        return Int[]
+                              centroids_A::Dict{T, Vector{Float64}},
+                              centroids_B::Dict{T, Vector{Float64}})::Vector{T} where {T}
+    common_keys = intersect(keys(centroids_A), keys(centroids_B))
+    if isempty(common_keys)
+        return T[]
     end
 
-    dists = Tuple{Float64, Int}[]
-    for lid in common_labels
-        cA = centroids_A[lid]
+    dists = Tuple{Float64, T}[]
+    for k in common_keys
+        cA = centroids_A[k]
         d = norm(lesion_center .- cA)
-        push!(dists, (d, lid))
+        push!(dists, (d, k))
     end
     sort!(dists, by=first)
-    k = min(5, length(dists))
-    return [dists[i][2] for i in 1:k]
+    k_num = min(5, length(dists))
+    return [dists[i][2] for i in 1:k_num]
 end
 
 """
     translate_lesion_center(lesion_center::Vector{Float64},
-                            organ_ids::Vector{Int},
-                            centroids_A::Dict{Int, Vector{Float64}},
-                            centroids_B::Dict{Int, Vector{Float64}}) -> Vector{Float64}
+                            organ_keys::Vector{T},
+                            centroids_A::Dict{T, Vector{Float64}},
+                            centroids_B::Dict{T, Vector{Float64}}) where {T} -> Vector{Float64}
 
 Translates the lesion center from timepoint A to timepoint B using Inverse Distance Weighting (IDW)
 over the displacements of the selected anchor organs:
@@ -194,21 +215,22 @@ over the displacements of the selected anchor organs:
   w_i = 1 / (||L - P_i||^2 + 1.0)
   Δ_L = Σ w_i Δ_i / Σ w_i
   L_B = L_A + Δ_L
+Works on canonical organ name strings (`T=String`) or integer IDs (`T=Int`).
 """
 function translate_lesion_center(lesion_center::Vector{Float64},
-                                 organ_ids::Vector{Int},
-                                 centroids_A::Dict{Int, Vector{Float64}},
-                                 centroids_B::Dict{Int, Vector{Float64}})::Vector{Float64}
-    if isempty(organ_ids)
+                                 organ_keys::Vector{T},
+                                 centroids_A::Dict{T, Vector{Float64}},
+                                 centroids_B::Dict{T, Vector{Float64}})::Vector{Float64} where {T}
+    if isempty(organ_keys)
         return copy(lesion_center)
     end
 
     total_weight = 0.0
     delta_sum = zeros(Float64, 3)
 
-    for lid in organ_ids
-        P_i = centroids_A[lid]
-        Q_i = centroids_B[lid]
+    for k in organ_keys
+        P_i = centroids_A[k]
+        Q_i = centroids_B[k]
         disp = Q_i .- P_i
         dist = norm(lesion_center .- P_i)
         w = 1.0 / (dist^2 + 1.0) # p=2, epsilon=1.0 mm/voxel
@@ -257,10 +279,12 @@ end
                             center::Vector{Float64},
                             target_volume_voxels::Int;
                             patch_size::Int=64,
-                            K::Int=25,
+                            K::Union{Int, Nothing}=nothing,
                             dt::Float32=0.16f0) -> Tuple{Array{UInt8, 3}, NTuple{6, Int}}
 
 Runs heat diffusion starting from a single-voxel seed at `center` inside `diffusivity`.
+Dynamically scales diffusion steps K and bounding patch size P to allow large lesions
+(e.g. > 50,000 voxels) to reach their full anatomical volume without artificial truncation.
 Uses binary search on threshold θ to grow the segmented volume until it matches
 `target_volume_voxels` within tolerance.
 Returns:
@@ -271,13 +295,14 @@ function grow_heat_kernel_lesion(diffusivity::Array{Float32, 3},
                                  center::Vector{Float64},
                                  target_volume_voxels::Int;
                                  patch_size::Int=64,
-                                 K::Int=25,
+                                 K::Union{Int, Nothing}=nothing,
                                  dt::Float32=0.16f0)
     nx_full, ny_full, nz_full = size(diffusivity)
     
-    # Choose patch size large enough for target volume
-    req_radius = ceil(Int, (target_volume_voxels * 3 / (4 * π))^(1/3)) + 8
-    P = max(patch_size, min(req_radius * 2, 128))
+    # Choose patch size and K dynamically scaled to target volume
+    req_radius = ceil(Int, (max(1, target_volume_voxels) * 3 / (4 * π))^(1/3))
+    P = max(patch_size, min(2 * req_radius + 20, 192))
+    effective_K = K !== nothing ? K : max(30, min(140, ceil(Int, 4.8 * req_radius)))
     
     cx = clamp(round(Int, center[1]), 1, nx_full)
     cy = clamp(round(Int, center[2]), 1, ny_full)
@@ -314,7 +339,7 @@ function grow_heat_kernel_lesion(diffusivity::Array{Float32, 3},
     D_zm = 0.5f0 .* (D_patch .+ D_pad[2:px+1, 2:py+1, 1:pz])
 
     # Run diffusion PDE steps
-    for k in 1:K
+    for k in 1:effective_K
         u_pad = _replicate_pad_3d(u)
         u_xp = u_pad[3:px+2, 2:py+1, 2:pz+1]
         u_xm = u_pad[1:px,   2:py+1, 2:pz+1]
@@ -333,12 +358,12 @@ function grow_heat_kernel_lesion(diffusivity::Array{Float32, 3},
     end
 
     # Binary search on threshold θ to match target_volume_voxels
-    low_θ = 1.0f-7
+    low_θ = 1.0f-8
     high_θ = maximum(u) * 0.999f0
     best_θ = low_θ
     best_diff = Inf
 
-    for b in 1:20
+    for b in 1:25
         mid_θ = (low_θ + high_θ) / 2.0f0
         v_count = count(u .> mid_θ)
         diff = abs(v_count - target_volume_voxels)
@@ -423,6 +448,61 @@ end
 # -----------------------------------------------------------------------------
 
 """
+    get_group_label_mapping(h5::HDF5.File) -> Dict{String, Dict{String, String}}
+
+Maps each HDF5 volume group (e.g. "BASELINE", "TFM_Transform_FollowUp_to_Baseline_1.tfm", etc.)
+to its corresponding label dictionary (organ ID string => canonical organ name string).
+Resolves through `_meta_/scene_hierarchy.json` or falls back to `_meta_/anatomy_labels_tp_*.json`
+and `_meta_/max_anatomy_labels.json`.
+"""
+function get_group_label_mapping(h5::HDF5.File)::Dict{String, Dict{String, String}}
+    mapping = Dict{String, Dict{String, String}}()
+    if !haskey(h5, "_meta_")
+        return mapping
+    end
+    meta = h5["_meta_"]
+
+    # 1. Parse scene_hierarchy.json if available
+    if haskey(meta, "scene_hierarchy.json")
+        try
+            scene = JSON.parse(read(meta["scene_hierarchy.json"]))
+            if haskey(meta, "anatomy_labels_tp_0.json")
+                mapping["BASELINE"] = Dict{String, String}(string(k) => string(v) for (k, v) in JSON.parse(read(meta["anatomy_labels_tp_0.json"])))
+            end
+            study_idx = 1
+            for node in scene
+                if get(node, "type", "") == "vtkMRMLLinearTransformNode"
+                    grp = "TFM_" * get(node, "name", "") * ".tfm"
+                    lbl_k = "anatomy_labels_tp_$(study_idx).json"
+                    if haskey(meta, lbl_k)
+                        mapping[grp] = Dict{String, String}(string(k) => string(v) for (k, v) in JSON.parse(read(meta[lbl_k])))
+                    end
+                    study_idx += 1
+                end
+            end
+        catch e
+            @warn "[OrganHeatTracker] Could not parse scene_hierarchy.json for group label mapping: $e"
+        end
+    end
+
+    # Fallback to max_anatomy_labels.json if any group is missing
+    fallback_labels = Dict{String, String}()
+    if haskey(meta, "max_anatomy_labels.json")
+        try
+            fallback_labels = Dict{String, String}(string(k) => string(v) for (k, v) in JSON.parse(read(meta["max_anatomy_labels.json"])))
+        catch; end
+    end
+
+    for k in keys(h5)
+        if !haskey(mapping, k) && !isempty(fallback_labels)
+            mapping[k] = fallback_labels
+        end
+    end
+
+    return mapping
+end
+
+"""
     propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
 
 Executes the complete 5-organ heat-kernel mapping pipeline for a case:
@@ -464,22 +544,31 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
     sorted_tps = sort(collect(keys(tp_groups)))
     verbose && println("  Found $(length(sorted_tps)) longitudinal PET timepoints: $sorted_tps")
 
-    # 2. Precompute and persist organ centroids for each TP
-    all_tp_centroids = Dict{Int, Dict{Int, Vector{Float64}}}()
+    # 2. Precompute and persist organ centroids for each TP (both integer and canonical name mapped)
+    all_tp_centroids_int = Dict{Int, Dict{Int, Vector{Float64}}}()
+    all_tp_centroids_named = Dict{Int, Dict{String, Vector{Float64}}}()
+    group_labels = Dict{String, Dict{String, String}}()
+
     h5open(h5_path, "r+") do h5
+        group_labels = get_group_label_mapping(h5)
         for tp in sorted_tps
             grp_name = tp_groups[tp]
             if haskey(h5[grp_name], "max_anatomy.nii.gz")
                 ma_arr = read(h5["$grp_name/max_anatomy.nii.gz"])
-                cents = compute_organ_centroids(ma_arr)
-                all_tp_centroids[tp] = cents
-                verbose && println("  [TP $tp] Computed $(length(cents)) organ centroids from max_anatomy")
+                cents_int = compute_organ_centroids(ma_arr)
+                all_tp_centroids_int[tp] = cents_int
+                
+                lbl_dict = get(group_labels, grp_name, Dict{String, String}())
+                cents_named = compute_organ_centroids(ma_arr, lbl_dict)
+                all_tp_centroids_named[tp] = cents_named
+                verbose && println("  [TP $tp] Computed $(length(cents_named)) named organ centroids ($(length(cents_int)) integer IDs)")
             else
                 @warn "No max_anatomy.nii.gz in $grp_name"
-                all_tp_centroids[tp] = Dict{Int, Vector{Float64}}()
+                all_tp_centroids_int[tp] = Dict{Int, Vector{Float64}}()
+                all_tp_centroids_named[tp] = Dict{String, Vector{Float64}}()
             end
         end
-        save_organ_centroids_to_h5!(h5, all_tp_centroids)
+        save_organ_centroids_to_h5!(h5, all_tp_centroids_int)
     end
 
     # 3. Read initial original lesion masks and volumes
@@ -506,7 +595,6 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
 
     # 4. Tracking Data Structures
     # group_id => [ {name, raw_lesion, lesion, volume_mm3, match_type, IoU, group_id}, ... ]
-    # Group origin tracked via group_id
     match_tree = []
     next_group_id = 1
     
@@ -560,8 +648,8 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
         mask_next = masks_by_tp[tp_next]
         diff_next = diffs_by_tp[tp_next]
         
-        cents_curr = all_tp_centroids[tp_curr]
-        cents_next = all_tp_centroids[tp_next]
+        cents_curr_named = all_tp_centroids_named[tp_curr]
+        cents_next_named = all_tp_centroids_named[tp_next]
 
         # Get all lesions currently tracked at tp_curr
         curr_lids = sort([Int(x) for x in filter(x -> x > 0, unique(mask_curr))])
@@ -576,11 +664,11 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
             
             vol_curr = count(mask_curr .== lid)
             
-            # 1. Select 5 closest organs
-            closest_organs = find_5_closest_organs(c_curr, cents_curr, cents_next)
+            # 1. Select 5 closest organs by CANONICAL NAME
+            closest_organs = find_5_closest_organs(c_curr, cents_curr_named, cents_next_named)
             
             # 2. Translate center to tp_next using IDW
-            c_next = translate_lesion_center(c_curr, closest_organs, cents_curr, cents_next)
+            c_next = translate_lesion_center(c_curr, closest_organs, cents_curr_named, cents_next_named)
             
             # 3. Grow Heat-Kernel lesion to match volume
             heat_patch, bbox = grow_heat_kernel_lesion(diff_next, c_next, vol_curr; patch_size=64)
@@ -686,7 +774,7 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
 
     # Write updated PET masks and generate heat-kernel SPECT masks in HDF5
     h5open(h5_path, "r+") do h5
-        # 1. Write back updated PET lesion masks
+        # 1. Write back updated PET lesion masks (and remove stale _expert masks)
         for tp in sorted_tps
             grp = tp_groups[tp]
             ds_name = "PET_Lesions_$tp.nii.gz"
@@ -694,6 +782,9 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
                 delete_object(h5[grp], ds_name)
             end
             h5["$grp/$ds_name"] = masks_by_tp[tp]
+            if haskey(h5[grp], "$(ds_name)_expert")
+                delete_object(h5[grp], "$(ds_name)_expert")
+            end
         end
 
         # 2. For each SPECT study, translate from paired PET study via 5-organ IDW and grow via heat diffusion
@@ -712,9 +803,10 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
             spect_diff = haskey(h5[grp_name], "diffusivity") ? 
                 Float32.(read(h5["$grp_name/diffusivity"])) : fill(1.0f0, size(spect_ma))
 
-            # Compute organ centroids for this SPECT study
-            cents_spect = compute_organ_centroids(spect_ma)
-            cents_pet = all_tp_centroids[pet_tp]
+            # Compute canonical named centroids for SPECT
+            spect_lbl_dict = get(group_labels, grp_name, Dict{String, String}())
+            cents_spect_named = compute_organ_centroids(spect_ma, spect_lbl_dict)
+            cents_pet_named = all_tp_centroids_named[pet_tp]
 
             pet_mask = masks_by_tp[pet_tp]
             spect_mask = zeros(Int16, size(spect_ma))
@@ -728,16 +820,16 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
                 vol_pet = count(pet_mask .== lid)
                 vol_pet == 0 && continue
 
-                # 1. Select 5 closest shared organs between PET and SPECT
-                closest_organs = find_5_closest_organs(c_pet, cents_pet, cents_spect)
+                # 1. Select 5 closest shared organs between PET and SPECT by CANONICAL NAME
+                closest_organs = find_5_closest_organs(c_pet, cents_pet_named, cents_spect_named)
 
                 # 2. Translate centroid from PET to SPECT frame via IDW
-                c_spect = translate_lesion_center(c_pet, closest_organs, cents_pet, cents_spect)
+                c_spect = translate_lesion_center(c_pet, closest_organs, cents_pet_named, cents_spect_named)
 
                 # 3. Grow heat-kernel lesion in SPECT diffusivity to match target volume
                 heat_patch, bbox = grow_heat_kernel_lesion(spect_diff, c_spect, vol_pet; patch_size=64)
 
-                # 4. Write heat_patch into spect_mask (avoiding collision with already-written voxels)
+                # 4. Write heat_patch into spect_mask
                 x_min, x_max, y_min, y_max, z_min, z_max = bbox
                 sub_spect = view(spect_mask, x_min:x_max, y_min:y_max, z_min:z_max)
                 @inbounds for iz in 1:size(heat_patch, 3), iy in 1:size(heat_patch, 2), ix in 1:size(heat_patch, 1)
@@ -770,12 +862,15 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
 
             spect_masks[spect_tp] = spect_mask
 
-            # Overwrite SPECT lesion dataset in HDF5
+            # Overwrite SPECT lesion dataset in HDF5 and remove stale _expert mask
             ds_name = "SPECT_Lesions_$spect_tp.nii.gz"
             if haskey(h5[grp_name], ds_name)
                 delete_object(h5[grp_name], ds_name)
             end
             h5["$grp_name/$ds_name"] = spect_mask
+            if haskey(h5[grp_name], "$(ds_name)_expert")
+                delete_object(h5[grp_name], "$(ds_name)_expert")
+            end
             verbose && println("  [SPECT] Generated $grp_name/$ds_name: $mapped_count lesions mapped via organ heat diffusion")
         end
 
@@ -819,6 +914,46 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
         JSON.print(f, out_matches, 2)
     end
     verbose && println("  [PERSIST] Saved $disk_matches_path")
+
+    # 9. Sync updated masks to disk NIfTIs if adjacent
+    try
+        py_sync_code = """
+import os, sys, h5py
+import nibabel as nib
+import numpy as np
+
+h5_path = sys.argv[1]
+data_dir = os.path.dirname(h5_path)
+
+with h5py.File(h5_path, 'r') as h5:
+    # 1. Sync PET masks
+    for tp, grp in [(0, 'BASELINE'), (1, 'TFM_Transform_FollowUp_to_Baseline_1.tfm'), 
+                    (2, 'TFM_Transform_FollowUp_to_Baseline_2.tfm'), (3, 'TFM_Transform_FollowUp_to_Baseline_3.tfm')]:
+        ds_name = f'PET_Lesions_{tp}.nii.gz'
+        nii_path = os.path.join(data_dir, ds_name)
+        if grp in h5 and ds_name in h5[grp] and os.path.isfile(nii_path):
+            arr = h5[grp][ds_name][:]
+            ref_img = nib.load(nii_path)
+            new_img = nib.Nifti1Image(arr.astype(np.int16), ref_img.affine, ref_img.header)
+            nib.save(new_img, nii_path)
+
+    # 2. Sync SPECT masks
+    for tp, grp in [(0, 'TFM_Transform_SPECT_to_Baseline_0.tfm'), (1, 'TFM_Transform_SPECT_to_Baseline_1.tfm'),
+                    (2, 'TFM_Transform_SPECT_to_Baseline_2.tfm'), (4, 'TFM_Transform_SPECT_to_Baseline_4.tfm')]:
+        ds_name = f'SPECT_Lesions_{tp}.nii.gz'
+        nii_path = os.path.join(data_dir, ds_name)
+        if grp in h5 and ds_name in h5[grp] and os.path.isfile(nii_path):
+            arr = h5[grp][ds_name][:]
+            ref_img = nib.load(nii_path)
+            new_img = nib.Nifti1Image(arr.astype(np.int16), ref_img.affine, ref_img.header)
+            nib.save(new_img, nii_path)
+"""
+        cmd = `python3 -c $py_sync_code $h5_path`
+        run(cmd)
+        verbose && println("  [PERSIST] Synchronized disk NIfTI files with updated HDF5 masks")
+    catch e
+        @warn "Failed syncing disk NIfTI files: $e"
+    end
 
     verbose && println("\n[Success] Organ-Heat Lesion Tracking complete across $(length(sorted_tps)) timepoints.")
     return groups
