@@ -161,7 +161,16 @@ using MedEye3d.OrganHeatLesionTracker
 
         @test "ORGAN_HEAT_MATCH" in all_child_types
         @test "HEAT_KERNEL_SYNTHETIC" in all_child_types
-        @test "SPECT_MIRROR" in all_child_types
+        @test "SPECT_ORGAN_HEAT_MAPPED" in all_child_types
+        @test !("SPECT_MIRROR" in all_child_types)
+
+        # Verify that SPECT lesions are not an identical copy of PET lesions
+        h5open(h5_path, "r") do h5
+            pet0 = read(h5["BASELINE/PET_Lesions_0.nii.gz"])
+            spect0 = read(h5["TFM_Transform_SPECT_to_Baseline_0.tfm/SPECT_Lesions_0.nii.gz"])
+            @test count(spect0 .> 0) > 0
+            @test !isequal(pet0, spect0)
+        end
 
         # Verify that synthetic volumes are dynamic (NOT constant 1343.63)
         @test length(all_synth_volumes) > 0

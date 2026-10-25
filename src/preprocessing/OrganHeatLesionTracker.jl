@@ -374,20 +374,22 @@ end
     detect_overlap_and_link(heat_patch::Array{UInt8, 3},
                             bbox::NTuple{6, Int},
                             target_mask::AbstractArray{<:Integer, 3};
-                            max_original_id::Int=typemax(Int)) -> Tuple{Int, Int}
+                            max_original_id::Int=typemax(Int),
+                            claimed_lids::Set{Int}=Set{Int}()) -> Tuple{Int, Int}
 
 Checks for collision between `heat_patch` and existing original lesions in `target_mask`
 using a simple boolean AND operation:
   overlap_count = count((heat_patch .> 0) .& (target_sub .== k_B))
 
-Only matches against original lesions (cand_lid <= max_original_id).
+Only matches against original lesions (cand_lid <= max_original_id) that are not already claimed.
 Returns `(best_candidate_lid, max_overlapping_voxels)`.
 If no existing original lesion overlaps, returns `(0, 0)`.
 """
 function detect_overlap_and_link(heat_patch::Array{UInt8, 3},
                                 bbox::NTuple{6, Int},
                                 target_mask::AbstractArray{<:Integer, 3};
-                                max_original_id::Int=typemax(Int))::Tuple{Int, Int}
+                                max_original_id::Int=typemax(Int),
+                                claimed_lids::Set{Int}=Set{Int}())::Tuple{Int, Int}
     x_min, x_max, y_min, y_max, z_min, z_max = bbox
     target_sub = view(target_mask, x_min:x_max, y_min:y_max, z_min:z_max)
 
@@ -396,7 +398,7 @@ function detect_overlap_and_link(heat_patch::Array{UInt8, 3},
 
     for idx in heat_indices
         cand_lid = Int(target_sub[idx])
-        if cand_lid > 0 && cand_lid <= max_original_id
+        if cand_lid > 0 && cand_lid <= max_original_id && !(cand_lid in claimed_lids)
             overlap_counts[cand_lid] = get(overlap_counts, cand_lid, 0) + 1
         end
     end
@@ -563,6 +565,7 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
 
         # Get all lesions currently tracked at tp_curr
         curr_lids = sort([Int(x) for x in filter(x -> x > 0, unique(mask_curr))])
+        claimed_lids = Set{Int}()
         
         for lid in curr_lids
             gid = get(lesion_to_group, (tp_curr, lid), 0)
@@ -582,11 +585,12 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
             # 3. Grow Heat-Kernel lesion to match volume
             heat_patch, bbox = grow_heat_kernel_lesion(diff_next, c_next, vol_curr; patch_size=64)
             
-            # 4. Check for collision via Boolean AND
-            cand_lid, overlap_vox = detect_overlap_and_link(heat_patch, bbox, mask_next; max_original_id=orig_max_id[tp_next])
+            # 4. Check for collision via Boolean AND (only with unclaimed original lesions)
+            cand_lid, overlap_vox = detect_overlap_and_link(heat_patch, bbox, mask_next; max_original_id=orig_max_id[tp_next], claimed_lids=claimed_lids)
             
             if cand_lid > 0
                 # Overlapping lesion found! Link existing lesion
+                push!(claimed_lids, cand_lid)
                 lesion_to_group[(tp_next, cand_lid)] = gid
                 cand_vol = count(mask_next .== cand_lid)
                 iou = round(overlap_vox / (vol_curr + cand_vol - overlap_vox), digits=2)
@@ -661,8 +665,8 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
         end
     end
 
-    # 7. Mirror to SPECT Timepoints
-    verbose && println("\n--- Phase C: Mirroring to Paired SPECT Studies ---")
+    # 7. 5-Organ Anatomical Registration & Heat-Kernel Diffusion for paired SPECT studies
+    verbose && println("\n--- Phase C: 5-Organ Registration & Heat Kernel Diffusion for Paired SPECT Studies ---")
     spect_groups = Dict{Int, String}()
     h5open(h5_path, "r") do h5
         for k in keys(h5)
@@ -676,7 +680,11 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
         end
     end
 
-    # Write updated PET masks and mirror to SPECT in HDF5
+    # Paired timepoint mapping: SPECT 0 -> PET 0, SPECT 1 -> PET 1, SPECT 2 -> PET 2, SPECT 4 -> PET 3
+    spect_to_pet = Dict(0 => 0, 1 => 1, 2 => 2, 4 => 3)
+    spect_masks = Dict{Int, Array{Int16, 3}}()
+
+    # Write updated PET masks and generate heat-kernel SPECT masks in HDF5
     h5open(h5_path, "r+") do h5
         # 1. Write back updated PET lesion masks
         for tp in sorted_tps
@@ -688,59 +696,87 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
             h5["$grp/$ds_name"] = masks_by_tp[tp]
         end
 
-        # 2. Write matching SPECT masks
-        for (tp, grp_name) in spect_groups
-            # Map SPECT timepoint 4 to PET timepoint 3 if needed
-            pet_tp = (tp == 4 && !haskey(masks_by_tp, 4) && haskey(masks_by_tp, 3)) ? 3 : tp
-            if haskey(masks_by_tp, pet_tp)
-                ds_name = "SPECT_Lesions_$tp.nii.gz"
-                if haskey(h5[grp_name], ds_name)
-                    delete_object(h5[grp_name], ds_name)
-                end
-                h5["$grp_name/$ds_name"] = masks_by_tp[pet_tp]
-                verbose && println("  [SPECT] Synchronized $grp_name/$ds_name from PET TP $pet_tp")
+        # 2. For each SPECT study, translate from paired PET study via 5-organ IDW and grow via heat diffusion
+        for spect_tp in sort(collect(keys(spect_groups)))
+            grp_name = spect_groups[spect_tp]
+            pet_tp = get(spect_to_pet, spect_tp, spect_tp)
+            if !haskey(masks_by_tp, pet_tp)
+                verbose && println("  [SPECT] Skipping SPECT TP $spect_tp (no PET TP $pet_tp)")
+                continue
             end
-        end
 
-        # 3. Add SPECT children to match groups
-        for (gid, parent) in groups
-            children_to_add = Any[]
-            # Parent SPECT counterpart
-            p_node = parent["name"]
-            p_raw = parent["raw_lesion"]
-            p_seg = parse(Int, replace(p_raw, "Segment_" => ""))
-            m = match(r"PET_Lesions_(\d+)", p_node)
-            if m !== nothing
-                p_tp = parse(Int, m.captures[1])
-                spect_tp = (p_tp == 3 && haskey(spect_groups, 4)) ? 4 : p_tp
-                push!(children_to_add, Dict{String, Any}(
-                    "name" => "SPECT_Lesions_$spect_tp",
-                    "raw_lesion" => p_raw,
-                    "lesion" => "unknown_$(p_seg)_SPECT_$spect_tp",
-                    "volume_mm3" => parent["volume_mm3"],
-                    "match_type" => "SPECT_MIRROR",
-                    "group_id" => gid
-                ))
-            end
-            for c in parent["children"]
-                c_node = c["name"]
-                c_raw = c["raw_lesion"]
-                c_seg = parse(Int, replace(c_raw, "Segment_" => ""))
-                cm = match(r"PET_Lesions_(\d+)", c_node)
-                if cm !== nothing
-                    c_tp = parse(Int, cm.captures[1])
-                    spect_tp = (c_tp == 3 && haskey(spect_groups, 4)) ? 4 : c_tp
-                    push!(children_to_add, Dict{String, Any}(
+            verbose && println("  [SPECT] Mapping SPECT TP $spect_tp from PET TP $pet_tp ($grp_name)...")
+
+            # Load SPECT max_anatomy and diffusivity
+            spect_ma = read(h5["$grp_name/max_anatomy.nii.gz"])
+            spect_diff = haskey(h5[grp_name], "diffusivity") ? 
+                Float32.(read(h5["$grp_name/diffusivity"])) : fill(1.0f0, size(spect_ma))
+
+            # Compute organ centroids for this SPECT study
+            cents_spect = compute_organ_centroids(spect_ma)
+            cents_pet = all_tp_centroids[pet_tp]
+
+            pet_mask = masks_by_tp[pet_tp]
+            spect_mask = zeros(Int16, size(spect_ma))
+
+            pet_lids = sort([Int(x) for x in filter(x -> x > 0, unique(pet_mask))])
+            mapped_count = 0
+
+            for lid in pet_lids
+                c_pet = compute_lesion_centroid(pet_mask, lid)
+                c_pet === nothing && continue
+                vol_pet = count(pet_mask .== lid)
+                vol_pet == 0 && continue
+
+                # 1. Select 5 closest shared organs between PET and SPECT
+                closest_organs = find_5_closest_organs(c_pet, cents_pet, cents_spect)
+
+                # 2. Translate centroid from PET to SPECT frame via IDW
+                c_spect = translate_lesion_center(c_pet, closest_organs, cents_pet, cents_spect)
+
+                # 3. Grow heat-kernel lesion in SPECT diffusivity to match target volume
+                heat_patch, bbox = grow_heat_kernel_lesion(spect_diff, c_spect, vol_pet; patch_size=64)
+
+                # 4. Write heat_patch into spect_mask (avoiding collision with already-written voxels)
+                x_min, x_max, y_min, y_max, z_min, z_max = bbox
+                sub_spect = view(spect_mask, x_min:x_max, y_min:y_max, z_min:z_max)
+                @inbounds for iz in 1:size(heat_patch, 3), iy in 1:size(heat_patch, 2), ix in 1:size(heat_patch, 1)
+                    if heat_patch[ix, iy, iz] > 0 && sub_spect[ix, iy, iz] == 0
+                        sub_spect[ix, iy, iz] = Int16(lid)
+                    end
+                end
+
+                spect_vol = count(spect_mask .== lid)
+                spect_vol_mm3 = round(spect_vol * 1.0, digits=2)
+
+                # 5. Link in match groups
+                gid = get(lesion_to_group, (pet_tp, lid), 0)
+                if gid > 0
+                    is_synth = (lid > orig_max_id[pet_tp])
+                    lesion_name = is_synth ? "artificial_heat_$(lid)_SPECT_$spect_tp" : "unknown_$(lid)_ORGAN_HEAT_SPECT_$spect_tp"
+                    match_type_str = is_synth ? "SPECT_HEAT_KERNEL_SYNTHETIC" : "SPECT_ORGAN_HEAT_MAPPED"
+
+                    push!(groups[gid]["children"], Dict{String, Any}(
                         "name" => "SPECT_Lesions_$spect_tp",
-                        "raw_lesion" => c_raw,
-                        "lesion" => replace(c["lesion"], "PET" => "SPECT"),
-                        "volume_mm3" => c["volume_mm3"],
-                        "match_type" => "SPECT_MIRROR",
+                        "raw_lesion" => "Segment_$lid",
+                        "lesion" => lesion_name,
+                        "volume_mm3" => spect_vol_mm3,
+                        "match_type" => match_type_str,
                         "group_id" => gid
                     ))
+                    mapped_count += 1
                 end
             end
-            append!(parent["children"], children_to_add)
+
+            spect_masks[spect_tp] = spect_mask
+
+            # Overwrite SPECT lesion dataset in HDF5
+            ds_name = "SPECT_Lesions_$spect_tp.nii.gz"
+            if haskey(h5[grp_name], ds_name)
+                delete_object(h5[grp_name], ds_name)
+            end
+            h5["$grp_name/$ds_name"] = spect_mask
+            verbose && println("  [SPECT] Generated $grp_name/$ds_name: $mapped_count lesions mapped via organ heat diffusion")
         end
 
         # 4. Serialize and persist matches.json to _meta_
