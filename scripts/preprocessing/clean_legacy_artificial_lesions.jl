@@ -16,6 +16,9 @@ in Patient 6 files and preprocessed_volumes.h5:
 
 using HDF5
 using JSON
+using Statistics
+using MedEye3d
+using MedEye3d.OrganHeatLesionTracker: get_group_label_mapping, get_exclusion_organ_ids, filter_exclusion_lesions!
 
 function clean_legacy_artificial_lesions(h5_path::String)
     println("=" ^ 70)
@@ -69,6 +72,29 @@ function clean_legacy_artificial_lesions(h5_path::String)
                                 println("  [Cleaned] $grp_name/$ds_name: zeroed $art_voxels voxels (values >= $min_art)")
                             else
                                 println("  [Clean] $grp_name/$ds_name: no voxels >= $min_art found")
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        # 1.5 Filter out physiological uptake in parotid glands, lacrimal glands, and urinary bladder
+        group_labels = get_group_label_mapping(h5)
+        for grp_name in ["BASELINE", keys(pet_cutoffs)...]
+            if haskey(h5, grp_name) && haskey(h5[grp_name], "max_anatomy.nii.gz")
+                anat = read(h5["$grp_name/max_anatomy.nii.gz"])
+                lbl_dict = get(group_labels, grp_name, Dict{String, String}())
+                excl_ids = get_exclusion_organ_ids(lbl_dict)
+                if !isempty(excl_ids)
+                    for ds_name in collect(keys(h5[grp_name]))
+                        if occursin("Lesions", ds_name)
+                            mask = read(h5["$grp_name/$ds_name"])
+                            rem_lids = filter_exclusion_lesions!(mask, anat, excl_ids)
+                            if !isempty(rem_lids)
+                                delete_object(h5[grp_name], ds_name)
+                                h5["$grp_name/$ds_name"] = mask
+                                println("  [Cleaned Physiological] $grp_name/$ds_name: removed lesions $rem_lids in parotid/lacrimal/bladder")
                             end
                         end
                     end
@@ -148,23 +174,24 @@ function clean_legacy_artificial_lesions(h5_path::String)
     # Clean disk NIfTI files if python & nibabel available
     try
         py_clean_code = """
-import os, sys
+import os, sys, h5py
 import nibabel as nib
 import numpy as np
 
-data_dir = sys.argv[1]
-pet_cutoffs = {1: 46, 2: 37, 3: 55}
-for tp, cutoff in pet_cutoffs.items():
-    p = os.path.join(data_dir, f'PET_Lesions_{tp}.nii.gz')
-    if os.path.isfile(p):
-        img = nib.load(p)
-        arr = img.get_fdata()
-        cnt = np.count_nonzero(arr >= cutoff)
-        if cnt > 0:
-            arr[arr >= cutoff] = 0
-            new_img = nib.Nifti1Image(arr.astype(np.int16), img.affine, img.header)
+h5_path = sys.argv[1]
+data_dir = sys.argv[2]
+
+with h5py.File(h5_path, 'r') as h5:
+    for tp, grp in [(0, 'BASELINE'), (1, 'TFM_Transform_FollowUp_to_Baseline_1.tfm'), 
+                    (2, 'TFM_Transform_FollowUp_to_Baseline_2.tfm'), (3, 'TFM_Transform_FollowUp_to_Baseline_3.tfm')]:
+        ds_name = f'PET_Lesions_{tp}.nii.gz'
+        p = os.path.join(data_dir, ds_name)
+        if grp in h5 and ds_name in h5[grp] and os.path.isfile(p):
+            arr = h5[grp][ds_name][:]
+            ref_img = nib.load(p)
+            new_img = nib.Nifti1Image(arr.astype(np.int16), ref_img.affine, ref_img.header)
             nib.save(new_img, p)
-            print(f'  [Cleaned Disk NIfTI] {os.path.basename(p)}: zeroed {cnt} voxels >= {cutoff}')
+            print(f'  [Synced Disk NIfTI] {ds_name}: synchronized with cleaned HDF5 mask')
 
 for tp in [0, 1, 2, 4]:
     p = os.path.join(data_dir, f'SPECT_Lesions_{tp}.nii.gz')
@@ -177,7 +204,7 @@ for tp in [0, 1, 2, 4]:
         nib.save(new_img, p)
         print(f'  [Reset Disk NIfTI] {os.path.basename(p)}: reset {cnt} voxels to 0')
 """
-        cmd = `python3 -c $py_clean_code $data_dir`
+        cmd = `python3 -c $py_clean_code $h5_path $data_dir`
         run(cmd)
     catch e
         @warn "Failed cleaning disk NIfTI files with python nibabel: $e"

@@ -9,6 +9,7 @@ using ..ConnectedComponents
 export compute_organ_centroids, save_organ_centroids_to_h5!, load_organ_centroids_from_h5
 export find_5_closest_organs, translate_lesion_center
 export grow_heat_kernel_lesion, detect_overlap_and_link
+export get_exclusion_organ_ids, filter_exclusion_lesions!, get_group_label_mapping
 export propagate_lesions_between_tps!, propagate_all_timepoints!
 export async_propagate_new_lesion!
 
@@ -173,6 +174,86 @@ function load_organ_centroids_from_h5(h5_file::HDF5.File, tp::Int)::Dict{Int, Ve
 end
 
 # -----------------------------------------------------------------------------
+# 1b. Physiological Organ Exclusion (Parotid, Lacrimal, Urinary Bladder)
+# -----------------------------------------------------------------------------
+
+"""
+    get_exclusion_organ_ids(label_dict::Dict{String, String}) -> Set{Int}
+
+Identifies label IDs for physiological uptake structures that should not contain tumor lesions:
+- Parotid glands (e.g. `parotid_gland_left`, `parotid_gland_right`, `Neck_Parotid_Left`, `Neck_Parotid_Right`)
+- Lacrimal glands (e.g. `lacrimal_gland_left`, `lacrimal_gland_right` if present)
+- Urinary bladder (e.g. `urinary_bladder`)
+"""
+function get_exclusion_organ_ids(label_dict::Dict{String, String})::Set{Int}
+    excl = Set{Int}()
+    for (id_str, name) in label_dict
+        lname = lowercase(name)
+        if occursin("parotid", lname) || occursin("lacrimal", lname) || occursin("urinary_bladder", lname) || (occursin("bladder", lname) && !occursin("gall", lname))
+            try
+                push!(excl, parse(Int, id_str))
+            catch; end
+        end
+    end
+    return excl
+end
+
+"""
+    filter_exclusion_lesions!(mask::AbstractArray{<:Integer, 3},
+                             max_anatomy::AbstractArray{<:Integer, 3},
+                             excl_ids::Set{Int};
+                             overlap_threshold::Float64=0.15) -> Vector{Int}
+
+Removes lesions whose centroid is inside any exclusion organ or whose overlap
+fraction with exclusion organs exceeds `overlap_threshold` (e.g. 15%).
+For any remaining lesions that merely border an exclusion organ, zeroes out any
+voxels that lie directly inside the exclusion organ (e.g. bladder lumen).
+Returns the list of removed lesion label IDs.
+"""
+function filter_exclusion_lesions!(mask::AbstractArray{<:Integer, 3},
+                                  max_anatomy::AbstractArray{<:Integer, 3},
+                                  excl_ids::Set{Int};
+                                  overlap_threshold::Float64=0.15)::Vector{Int}
+    if isempty(excl_ids)
+        return Int[]
+    end
+
+    removed_lids = Int[]
+    all_lids = sort([Int(x) for x in filter(x -> x > 0, unique(mask))])
+
+    for lid in all_lids
+        pts = findall(mask .== lid)
+        isempty(pts) && continue
+        N = length(pts)
+        N_excl = count(p -> max_anatomy[p] in excl_ids, pts)
+        
+        # Centroid calculation
+        cx = round(Int, mean([p[1] for p in pts]))
+        cy = round(Int, mean([p[2] for p in pts]))
+        cz = round(Int, mean([p[3] for p in pts]))
+        
+        centroid_in_excl = (max_anatomy[clamp(cx, 1, size(max_anatomy, 1)),
+                                        clamp(cy, 1, size(max_anatomy, 2)),
+                                        clamp(cz, 1, size(max_anatomy, 3))] in excl_ids)
+        frac = N_excl / N
+
+        if centroid_in_excl || frac > overlap_threshold
+            # Entire lesion is physiological uptake in parotid/bladder/lacrimal -> zero out
+            mask[mask .== lid] .= 0
+            push!(removed_lids, lid)
+        elseif N_excl > 0
+            # Clip only the overlapping voxels inside the exclusion organ (e.g. bladder lumen)
+            @inbounds for p in pts
+                if max_anatomy[p] in excl_ids
+                    mask[p] = 0
+                end
+            end
+        end
+    end
+    return removed_lids
+end
+
+# -----------------------------------------------------------------------------
 # 2. 5-Closest-Organ Selection & IDW Translation
 # -----------------------------------------------------------------------------
 
@@ -327,16 +408,33 @@ function grow_heat_kernel_lesion(diffusivity::Array{Float32, 3},
     scx = clamp(cx - x_min + 1, 1, px)
     scy = clamp(cy - y_min + 1, 1, py)
     scz = clamp(cz - z_min + 1, 1, pz)
+
+    # If seed voxel has zero diffusivity (in exclusion organ), find nearest valid non-zero voxel
+    if D_patch[scx, scy, scz] == 0.0f0
+        valid_indices = findall(D_patch .> 0.0f0)
+        if !isempty(valid_indices)
+            best_idx = valid_indices[1]
+            min_d2 = Inf
+            for vi in valid_indices
+                d2 = (vi[1] - scx)^2 + (vi[2] - scy)^2 + (vi[3] - scz)^2
+                if d2 < min_d2
+                    min_d2 = d2
+                    best_idx = vi
+                end
+            end
+            scx, scy, scz = best_idx[1], best_idx[2], best_idx[3]
+        end
+    end
     u[scx, scy, scz] = 1.0f0
 
-    # Precompute conductivities with replicate padding
+    # Precompute conductivities: min ensures that non-conductive boundary (D=0) strictly stops heat flux
     D_pad = _replicate_pad_3d(D_patch)
-    D_xp = 0.5f0 .* (D_patch .+ D_pad[3:px+2, 2:py+1, 2:pz+1])
-    D_xm = 0.5f0 .* (D_patch .+ D_pad[1:px,   2:py+1, 2:pz+1])
-    D_yp = 0.5f0 .* (D_patch .+ D_pad[2:px+1, 3:py+2, 2:pz+1])
-    D_ym = 0.5f0 .* (D_patch .+ D_pad[2:px+1, 1:py,   2:pz+1])
-    D_zp = 0.5f0 .* (D_patch .+ D_pad[2:px+1, 2:py+1, 3:pz+2])
-    D_zm = 0.5f0 .* (D_patch .+ D_pad[2:px+1, 2:py+1, 1:pz])
+    D_xp = min.(D_patch, D_pad[3:px+2, 2:py+1, 2:pz+1])
+    D_xm = min.(D_patch, D_pad[1:px,   2:py+1, 2:pz+1])
+    D_yp = min.(D_patch, D_pad[2:px+1, 3:py+2, 2:pz+1])
+    D_ym = min.(D_patch, D_pad[2:px+1, 1:py,   2:pz+1])
+    D_zp = min.(D_patch, D_pad[2:px+1, 2:py+1, 3:pz+2])
+    D_zm = min.(D_patch, D_pad[2:px+1, 2:py+1, 1:pz])
 
     # Run diffusion PDE steps
     for k in 1:effective_K
@@ -355,6 +453,7 @@ function grow_heat_kernel_lesion(diffusivity::Array{Float32, 3},
                D_zp .* (u_zp .- u) .+
                D_zm .* (u_zm .- u)
         u .+= dt .* flux
+        u[D_patch .== 0.0f0] .= 0.0f0
     end
 
     # Binary search on threshold θ to match target_volume_voxels
@@ -379,6 +478,7 @@ function grow_heat_kernel_lesion(diffusivity::Array{Float32, 3},
     end
 
     binary_mask = UInt8.(u .> best_θ)
+    binary_mask[D_patch .== 0.0f0] .= 0
     
     # Connected component cleanup
     clean_mask = try
@@ -386,6 +486,7 @@ function grow_heat_kernel_lesion(diffusivity::Array{Float32, 3},
     catch
         binary_mask
     end
+    clean_mask[D_patch .== 0.0f0] .= 0
 
     bbox = (x_min, x_max, y_min, y_max, z_min, z_max)
     return clean_mask, bbox
@@ -574,6 +675,8 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
     # 3. Read initial original lesion masks and volumes
     masks_by_tp = Dict{Int, Array{Int16, 3}}()
     diffs_by_tp = Dict{Int, Array{Float32, 3}}()
+    mas_by_tp = Dict{Int, Array{UInt16, 3}}()
+    excl_by_tp = Dict{Int, Set{Int}}()
 
     h5open(h5_path, "r") do h5
         for tp in sorted_tps
@@ -589,6 +692,25 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
             else
                 # Fallback to uniform diffusivity if missing
                 diffs_by_tp[tp] = fill(1.0f0, size(masks_by_tp[tp]))
+            end
+
+            # Filter out physiological uptake in parotid glands, lacrimal glands, and urinary bladder
+            lbl_dict = get(group_labels, grp, Dict{String, String}())
+            excl_ids = get_exclusion_organ_ids(lbl_dict)
+            excl_by_tp[tp] = excl_ids
+            if haskey(h5[grp], "max_anatomy.nii.gz")
+                ma = UInt16.(read(h5["$grp/max_anatomy.nii.gz"]))
+                mas_by_tp[tp] = ma
+                if !isempty(excl_ids)
+                    removed = filter_exclusion_lesions!(masks_by_tp[tp], ma, excl_ids)
+                    if !isempty(removed)
+                        verbose && println("  [TP $tp] Removed $(length(removed)) lesions in parotid/bladder/lacrimal: $removed")
+                    end
+                    # Mask diffusivity so heat diffusion cannot enter parotid glands, lacrimal glands, or urinary bladder
+                    for p in findall(x -> x in excl_ids, ma)
+                        diffs_by_tp[tp][p] = 0.0f0
+                    end
+                end
             end
         end
     end
@@ -700,14 +822,19 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
                 synth_id = next_synth_id[tp_next]
                 next_synth_id[tp_next] += 1
                 
-                # Write heat_patch into mask_next
+                # Write heat_patch into mask_next (guaranteeing no overlap with exclusion organs)
                 x_min, x_max, y_min, y_max, z_min, z_max = bbox
                 sub_next = view(mask_next, x_min:x_max, y_min:y_max, z_min:z_max)
+                ma_next = get(mas_by_tp, tp_next, nothing)
+                excl_next = get(excl_by_tp, tp_next, Set{Int}())
+                sub_ma_next = ma_next !== nothing ? view(ma_next, x_min:x_max, y_min:y_max, z_min:z_max) : nothing
                 synth_voxels = 0
                 @inbounds for iz in 1:size(heat_patch, 3), iy in 1:size(heat_patch, 2), ix in 1:size(heat_patch, 1)
                     if heat_patch[ix, iy, iz] > 0 && sub_next[ix, iy, iz] == 0
-                        sub_next[ix, iy, iz] = Int16(synth_id)
-                        synth_voxels += 1
+                        if sub_ma_next === nothing || !(sub_ma_next[ix, iy, iz] in excl_next)
+                            sub_next[ix, iy, iz] = Int16(synth_id)
+                            synth_voxels += 1
+                        end
                     end
                 end
                 
@@ -778,6 +905,11 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
         for tp in sorted_tps
             grp = tp_groups[tp]
             ds_name = "PET_Lesions_$tp.nii.gz"
+            ma = get(mas_by_tp, tp, nothing)
+            excl = get(excl_by_tp, tp, Set{Int}())
+            if ma !== nothing && !isempty(excl)
+                filter_exclusion_lesions!(masks_by_tp[tp], ma, excl)
+            end
             if haskey(h5[grp], ds_name)
                 delete_object(h5[grp], ds_name)
             end
@@ -803,8 +935,16 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
             spect_diff = haskey(h5[grp_name], "diffusivity") ? 
                 Float32.(read(h5["$grp_name/diffusivity"])) : fill(1.0f0, size(spect_ma))
 
-            # Compute canonical named centroids for SPECT
+            # Mask SPECT diffusivity to prevent growth into parotid glands, lacrimal glands, or urinary bladder
             spect_lbl_dict = get(group_labels, grp_name, Dict{String, String}())
+            spect_excl_ids = get_exclusion_organ_ids(spect_lbl_dict)
+            if !isempty(spect_excl_ids)
+                for p in findall(x -> x in spect_excl_ids, spect_ma)
+                    spect_diff[p] = 0.0f0
+                end
+            end
+
+            # Compute canonical named centroids for SPECT
             cents_spect_named = compute_organ_centroids(spect_ma, spect_lbl_dict)
             cents_pet_named = all_tp_centroids_named[pet_tp]
 
@@ -829,12 +969,15 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
                 # 3. Grow heat-kernel lesion in SPECT diffusivity to match target volume
                 heat_patch, bbox = grow_heat_kernel_lesion(spect_diff, c_spect, vol_pet; patch_size=64)
 
-                # 4. Write heat_patch into spect_mask
+                # 4. Write heat_patch into spect_mask (excluding voxels in exclusion organs)
                 x_min, x_max, y_min, y_max, z_min, z_max = bbox
                 sub_spect = view(spect_mask, x_min:x_max, y_min:y_max, z_min:z_max)
+                sub_ma = view(spect_ma, x_min:x_max, y_min:y_max, z_min:z_max)
                 @inbounds for iz in 1:size(heat_patch, 3), iy in 1:size(heat_patch, 2), ix in 1:size(heat_patch, 1)
                     if heat_patch[ix, iy, iz] > 0 && sub_spect[ix, iy, iz] == 0
-                        sub_spect[ix, iy, iz] = Int16(lid)
+                        if !(sub_ma[ix, iy, iz] in spect_excl_ids)
+                            sub_spect[ix, iy, iz] = Int16(lid)
+                        end
                     end
                 end
 
@@ -858,6 +1001,10 @@ function propagate_all_timepoints!(h5_path::String; verbose::Bool=true)
                     ))
                     mapped_count += 1
                 end
+            end
+
+            if !isempty(spect_excl_ids)
+                filter_exclusion_lesions!(spect_mask, spect_ma, spect_excl_ids)
             end
 
             spect_masks[spect_tp] = spect_mask

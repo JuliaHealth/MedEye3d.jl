@@ -187,6 +187,45 @@ using MedEye3d.OrganHeatLesionTracker
         @test length(synth_suvs) > 0
         avg_synth_suv = sum(synth_suvs) / length(synth_suvs)
         @test avg_synth_suv < 3.0
+
+        # 4. Verify physiological uptake exclusion (Parotid glands and Urinary bladder)
+        h5open(h5_path, "r") do h5
+            mapping = get_group_label_mapping(h5)
+            # Verify across all PET timepoints
+            for (tp, grp) in [(0, "BASELINE"), 
+                              (1, "TFM_Transform_FollowUp_to_Baseline_1.tfm"),
+                              (2, "TFM_Transform_FollowUp_to_Baseline_2.tfm"),
+                              (3, "TFM_Transform_FollowUp_to_Baseline_3.tfm")]
+                ma = read(h5["$grp/max_anatomy.nii.gz"])
+                lbls = mapping[grp]
+                excl = get_exclusion_organ_ids(lbls)
+                @test !isempty(excl)
+                mask = read(h5["$grp/PET_Lesions_$tp.nii.gz"])
+                for eid in excl
+                    overlap_vox = count((ma .== eid) .& (mask .> 0))
+                    @test overlap_vox == 0
+                end
+            end
+
+            # Verify across paired SPECT timepoints
+            for grp in keys(h5)
+                if occursin("TFM_Transform_SPECT", grp) && haskey(h5[grp], "max_anatomy.nii.gz")
+                    ma = read(h5["$grp/max_anatomy.nii.gz"])
+                    lbls = mapping[grp]
+                    excl = get_exclusion_organ_ids(lbls)
+                    @test !isempty(excl)
+                    for k in keys(h5[grp])
+                        if occursin("SPECT_Lesions", k) && !occursin("_expert", k)
+                            mask = read(h5["$grp/$k"])
+                            for eid in excl
+                                overlap_vox = count((ma .== eid) .& (mask .> 0))
+                                @test overlap_vox == 0
+                            end
+                        end
+                    end
+                end
+            end
+        end
     end
 
 end
