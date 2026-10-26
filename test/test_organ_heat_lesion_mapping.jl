@@ -188,7 +188,7 @@ using MedEye3d.OrganHeatLesionTracker
         avg_synth_suv = sum(synth_suvs) / length(synth_suvs)
         @test avg_synth_suv < 3.0
 
-        # 4. Verify physiological uptake exclusion (Parotid glands and Urinary bladder)
+        # 4. Verify physiological uptake exclusion (Parotid, Submandibular glands, and Urinary bladder)
         h5open(h5_path, "r") do h5
             mapping = get_group_label_mapping(h5)
             # Verify across all PET timepoints
@@ -200,6 +200,11 @@ using MedEye3d.OrganHeatLesionTracker
                 lbls = mapping[grp]
                 excl = get_exclusion_organ_ids(lbls)
                 @test !isempty(excl)
+                # Verify submandibular glands are in excl
+                submand_ids = [parse(Int, k) for (k, v) in lbls if occursin("submandibular_gland", lowercase(v))]
+                for sid in submand_ids
+                    @test sid in excl
+                end
                 mask = read(h5["$grp/PET_Lesions_$tp.nii.gz"])
                 for eid in excl
                     overlap_vox = count((ma .== eid) .& (mask .> 0))

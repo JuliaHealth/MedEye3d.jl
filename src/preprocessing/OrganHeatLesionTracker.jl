@@ -182,6 +182,7 @@ end
 
 Identifies label IDs for physiological uptake structures that should not contain tumor lesions:
 - Parotid glands (e.g. `parotid_gland_left`, `parotid_gland_right`, `Neck_Parotid_Left`, `Neck_Parotid_Right`)
+- Submandibular glands (e.g. `submandibular_gland_left`, `submandibular_gland_right`)
 - Lacrimal glands (e.g. `lacrimal_gland_left`, `lacrimal_gland_right` if present)
 - Urinary bladder (e.g. `urinary_bladder`)
 """
@@ -189,7 +190,12 @@ function get_exclusion_organ_ids(label_dict::Dict{String, String})::Set{Int}
     excl = Set{Int}()
     for (id_str, name) in label_dict
         lname = lowercase(name)
-        if occursin("parotid", lname) || occursin("lacrimal", lname) || occursin("urinary_bladder", lname) || (occursin("bladder", lname) && !occursin("gall", lname))
+        if occursin("parotid", lname) || 
+           (occursin("mandibul", lname) && occursin("gland", lname)) || 
+           occursin("submandibular_gland", lname) || 
+           occursin("lacrimal", lname) || 
+           occursin("urinary_bladder", lname) || 
+           (occursin("bladder", lname) && !occursin("gall", lname))
             try
                 push!(excl, parse(Int, id_str))
             catch; end
