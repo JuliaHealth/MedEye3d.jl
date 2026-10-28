@@ -41,16 +41,30 @@ end
 const gdev = gpu_device()
 const cdev = cpu_device()
 
+# Constants matching DATA_AND_MODEL_ACCESS_GUIDE.md
+const CT_CLIP = (-1024.0f0, 1500.0f0)
+const CT_MEAN = -200.0f0
+const CT_STD  = 400.0f0
+const PET_CLIP_MAX = 20.0f0
+
+const CHAMPION_GAMMA = 10.095886f0
+const CHAMPION_EPS_D = 1.0f-5
+const CHAMPION_THETA = 0.00104404625f0
+const CHAMPION_DT    = 0.16f0
+const CHAMPION_K     = 200
+
 """
-    compute_diffusivity(edge_map; epsilon_D=0.01f0, gamma=5.0f0)
+    compute_diffusivity(edge_map; epsilon_D=1.0f-5, gamma=10.096f0)
 
 Convert edge probability map E ∈ [0,1] to diffusivity field D:
     D(x) = ε_D + (1 - ε_D) · exp(-γ · E(x))
 
+Uses learned champion parameters (Epoch 105 TotalSeg-Edge-PDE):
 High edges → low diffusivity (heat blocked), low edges → high diffusivity (heat flows freely).
 """
-function compute_diffusivity(edge_map; epsilon_D::Float32=0.01f0, gamma::Float32=5.0f0)
-    return epsilon_D .+ (1.0f0 - epsilon_D) .* exp.(-gamma .* edge_map)
+function compute_diffusivity(edge_map; epsilon_D::Float32=CHAMPION_EPS_D, gamma::Float32=CHAMPION_GAMMA)
+    D = epsilon_D .+ (1.0f0 - epsilon_D) .* exp.(-gamma .* edge_map)
+    return clamp.(D, epsilon_D, 1.0f0)
 end
 
 """
@@ -103,13 +117,9 @@ function sliding_window_edge_inference(ct::Array{Float32,3}, pet::Array{Float32,
                 pet_patch = @view pet[x1:x2, y1:y2, z1:z2]
                 ts_patch = @view ts[x1:x2, y1:y2, z1:z2]
                 
-                # z-score normalization per patch (matching training)
-                ct_m = mean(ct_patch)
-                ct_s = std(ct_patch) + 1f-6
-                
-                # Fill pre-allocated buffer
-                @views input_buf[:,:,:,1,1] .= (ct_patch .- ct_m) ./ ct_s
-                @views input_buf[:,:,:,2,1] .= pet_patch
+                # TotalSeg-Edge-PDE standard normalization (DATA_AND_MODEL_ACCESS_GUIDE.md)
+                @views input_buf[:,:,:,1,1] .= (clamp.(ct_patch, CT_CLIP[1], CT_CLIP[2]) .- CT_MEAN) ./ CT_STD
+                @views input_buf[:,:,:,2,1] .= clamp.(pet_patch, 0.0f0, PET_CLIP_MAX) ./ PET_CLIP_MAX
                 @views input_buf[:,:,:,3,1] .= ts_patch ./ 117.0f0
                 
                 x_gpu = input_buf |> gdev

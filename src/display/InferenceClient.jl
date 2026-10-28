@@ -927,17 +927,17 @@ end
 """
     run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
                 points_vol::Array{Float32,3}, cx::Int, cy::Int, cz::Int;
-                K::Int=40, dt::Float32=0.16f0, theta::Float32=0.001f0, tau::Float32=0.0001f0)
+                K::Int=200, dt::Float32=0.16f0, theta::Float32=0.001044f0, tau::Float32=0.0001f0)
 
 Run Heat-GDT interactive segmentation on a 64³ patch centered at (cx, cy, cz).
-Uses the precomputed diffusivity field if available, otherwise falls back to
-constant diffusivity (no edge detection).
+Uses learned champion TotalSeg-Edge-PDE parameters (Epoch 105) and BFS connected-component extraction.
+Uses precomputed diffusivity field if available, otherwise falls back to constant diffusivity.
 
 Returns a binary `Array{UInt8, 3}` mask (64³ patch coordinates), or `nothing` on failure.
 """
 function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
                      points_vol::Array{Float32,3}, cx::Int, cy::Int, cz::Int;
-                     K::Int=40, dt::Float32=0.16f0, theta::Float32=0.001f0, tau::Float32=0.0001f0)
+                     K::Int=200, dt::Float32=0.16f0, theta::Float32=0.001044f0, tau::Float32=0.0001f0)
     
     # Extract 64³ diffusivity patch
     D_patch = if _heatgdt_diffusivity[] !== nothing
@@ -1055,12 +1055,68 @@ function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
         mask_cpu = use_gpu ? Array(mask_field[:, :, :, 1]) : mask_field[:, :, :, 1]
         binary_mask = UInt8.(mask_cpu .> 0.5f0)
         
-        # Post-process: extract largest connected component
-        clean_mask = try
-            ConnectedComponents.extract_largest_connected_component(binary_mask)
-        catch lcc_err
-            @warn "[InferenceClient] Heat-GDT LCC fallback to raw mask: $lcc_err"
-            binary_mask
+        # Post-process: extract connected component from seed voxels (Protocol B)
+        clean_mask = zeros(UInt8, 64, 64, 64)
+        seed_pts = findall(seed_mask .> 0.5f0)
+        if !isempty(seed_pts)
+            # Find closest binary_mask voxel if seed voxel wasn't above threshold
+            active_seeds = Tuple{Int, Int, Int}[]
+            for pt in seed_pts
+                if binary_mask[pt] > 0
+                    push!(active_seeds, (pt[1], pt[2], pt[3]))
+                end
+            end
+            if isempty(active_seeds)
+                # Expand search near primary seed (33, 33, 33)
+                p0 = seed_pts[1]
+                min_d2 = Inf
+                best_pt = nothing
+                for dz in -3:3, dy in -3:3, dx in -3:3
+                    qx, qy, qz = p0[1] + dx, p0[2] + dy, p0[3] + dz
+                    if 1 <= qx <= 64 && 1 <= qy <= 64 && 1 <= qz <= 64
+                        if binary_mask[qx, qy, qz] > 0
+                            d2 = dx^2 + dy^2 + dz^2
+                            if d2 < min_d2
+                                min_d2 = d2
+                                best_pt = (qx, qy, qz)
+                            end
+                        end
+                    end
+                end
+                if best_pt !== nothing
+                    push!(active_seeds, best_pt)
+                end
+            end
+
+            if !isempty(active_seeds)
+                queue = copy(active_seeds)
+                for s in queue
+                    clean_mask[s[1], s[2], s[3]] = 0x01
+                end
+                head = 1
+                shifts = ((-1,0,0), (1,0,0), (0,-1,0), (0,1,0), (0,0,-1), (0,0,1))
+                while head <= length(queue)
+                    qx, qy, qz = queue[head]
+                    head += 1
+                    for (dx, dy, dz) in shifts
+                        nx, ny, nz = qx + dx, qy + dy, qz + dz
+                        if 1 <= nx <= 64 && 1 <= ny <= 64 && 1 <= nz <= 64
+                            if binary_mask[nx, ny, nz] > 0 && clean_mask[nx, ny, nz] == 0
+                                clean_mask[nx, ny, nz] = 0x01
+                                push!(queue, (nx, ny, nz))
+                            end
+                        end
+                    end
+                end
+            else
+                clean_mask = binary_mask
+            end
+        else
+            clean_mask = try
+                ConnectedComponents.extract_largest_connected_component(binary_mask)
+            catch lcc_err
+                binary_mask
+            end
         end
         
         voxels = count(clean_mask .> 0)

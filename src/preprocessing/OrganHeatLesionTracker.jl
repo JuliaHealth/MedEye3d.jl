@@ -386,10 +386,10 @@ function grow_heat_kernel_lesion(diffusivity::Array{Float32, 3},
                                  dt::Float32=0.16f0)
     nx_full, ny_full, nz_full = size(diffusivity)
     
-    # Choose patch size and K dynamically scaled to target volume
+    # Choose patch size and K dynamically scaled to target volume (matching optimal K=280 sweep)
     req_radius = ceil(Int, (max(1, target_volume_voxels) * 3 / (4 * π))^(1/3))
     P = max(patch_size, min(2 * req_radius + 20, 192))
-    effective_K = K !== nothing ? K : max(30, min(140, ceil(Int, 4.8 * req_radius)))
+    effective_K = K !== nothing ? K : max(30, min(280, ceil(Int, 5.0 * req_radius)))
     
     cx = clamp(round(Int, center[1]), 1, nx_full)
     cy = clamp(round(Int, center[2]), 1, ny_full)
@@ -433,14 +433,22 @@ function grow_heat_kernel_lesion(diffusivity::Array{Float32, 3},
     end
     u[scx, scy, scz] = 1.0f0
 
-    # Precompute conductivities: min ensures that non-conductive boundary (D=0) strictly stops heat flux
+    # Precompute conductivities: arithmetic mean matching DATA_AND_MODEL_ACCESS_GUIDE.md,
+    # with zero conductance if either voxel is in an exclusion organ (D=0)
     D_pad = _replicate_pad_3d(D_patch)
-    D_xp = min.(D_patch, D_pad[3:px+2, 2:py+1, 2:pz+1])
-    D_xm = min.(D_patch, D_pad[1:px,   2:py+1, 2:pz+1])
-    D_yp = min.(D_patch, D_pad[2:px+1, 3:py+2, 2:pz+1])
-    D_ym = min.(D_patch, D_pad[2:px+1, 1:py,   2:pz+1])
-    D_zp = min.(D_patch, D_pad[2:px+1, 2:py+1, 3:pz+2])
-    D_zm = min.(D_patch, D_pad[2:px+1, 2:py+1, 1:pz])
+    D_xp = 0.5f0 .* (D_patch .+ D_pad[3:px+2, 2:py+1, 2:pz+1])
+    D_xm = 0.5f0 .* (D_patch .+ D_pad[1:px,   2:py+1, 2:pz+1])
+    D_yp = 0.5f0 .* (D_patch .+ D_pad[2:px+1, 3:py+2, 2:pz+1])
+    D_ym = 0.5f0 .* (D_patch .+ D_pad[2:px+1, 1:py,   2:pz+1])
+    D_zp = 0.5f0 .* (D_patch .+ D_pad[2:px+1, 2:py+1, 3:pz+2])
+    D_zm = 0.5f0 .* (D_patch .+ D_pad[2:px+1, 2:py+1, 1:pz])
+
+    D_xp[(D_patch .== 0.0f0) .| (D_pad[3:px+2, 2:py+1, 2:pz+1] .== 0.0f0)] .= 0.0f0
+    D_xm[(D_patch .== 0.0f0) .| (D_pad[1:px,   2:py+1, 2:pz+1] .== 0.0f0)] .= 0.0f0
+    D_yp[(D_patch .== 0.0f0) .| (D_pad[2:px+1, 3:py+2, 2:pz+1] .== 0.0f0)] .= 0.0f0
+    D_ym[(D_patch .== 0.0f0) .| (D_pad[2:px+1, 1:py,   2:pz+1] .== 0.0f0)] .= 0.0f0
+    D_zp[(D_patch .== 0.0f0) .| (D_pad[2:px+1, 2:py+1, 3:pz+2] .== 0.0f0)] .= 0.0f0
+    D_zm[(D_patch .== 0.0f0) .| (D_pad[2:px+1, 2:py+1, 1:pz]   .== 0.0f0)] .= 0.0f0
 
     # Run diffusion PDE steps
     for k in 1:effective_K

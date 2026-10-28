@@ -189,16 +189,16 @@ function _ensure_heatgdt_loaded!()
             checkpoint["config"]
         else
             Dict("edge_type" => get(checkpoint, "edge_type", "hed3d_ultra"),
-                 "K" => 40, "dt" => 0.16, "theta" => 0.001, "tau" => 0.0001)
+                 "K" => 200, "dt" => 0.16, "theta" => 0.001044, "tau" => 0.0001)
         end
         
         # Reconstruct the framework with champion parameters
         framework = HeatGDTModel.HeatGDTFramework(
             in_channels=3,
             edge_type=Symbol(get(config, "edge_type", "hed3d_ultra")),
-            K=get(config, "K", 40),
+            K=get(config, "K", 200),
             dt=Float32(get(config, "dt", 0.16)),
-            theta=Float32(get(config, "theta", 0.001)),
+            theta=Float32(get(config, "theta", 0.001044)),
             tau=Float32(get(config, "tau", 0.0001))
         )
         
@@ -214,37 +214,33 @@ end
 """
     run_heatgdt_inference(ct_patch::Array{Float32,3}, pet_patch::Array{Float32,3},
                           ts_patch::Array{Float32,3}, seed_x::Int, seed_y::Int, seed_z::Int;
-                          K::Int=40, dt::Float32=0.16f0, theta::Float32=0.001f0, tau::Float32=0.0001f0)
+                          K::Int=200, dt::Float32=0.16f0, theta::Float32=0.001044f0, tau::Float32=0.0001f0)
 
 Runs Heat-GDT segmentation natively in Julia (no Docker/Python needed).
 Takes a 64³ CT, PET, and TotalSegmentator patch centered on the seed point.
+Uses standard intensity normalization matching DATA_AND_MODEL_ACCESS_GUIDE.md:
+- CT: (clamp(CT, -1024, 1500) - (-200)) / 400
+- PET: clamp(PET, 0, 20) / 20
 Returns a binary UInt8 mask of the segmented lesion.
-
-The method:
-1. Runs the HED3D-Wide edge detection network to produce edge map E(x)
-2. Converts edges to diffusivity: D(x) = 0.01 + 0.99 * exp(-5 * E(x))
-3. Runs K steps of heat diffusion from the seed point
-4. Thresholds the heat field to produce a binary mask
 """
 function run_heatgdt_inference(ct_patch::Array{Float32,3}, pet_patch::Array{Float32,3},
                                 ts_patch::Array{Float32,3}, seed_x::Int, seed_y::Int, seed_z::Int;
-                                K::Int=40, dt::Float32=0.16f0, theta::Float32=0.001f0, tau::Float32=0.0001f0)
+                                K::Int=200, dt::Float32=0.16f0, theta::Float32=0.001044f0, tau::Float32=0.0001f0)
     state = _ensure_heatgdt_loaded!()
     framework = state.framework
     ps = state.ps
     st = state.st
     
-    # Normalize CT patch (z-score)
-    ct_mean = mean(ct_patch)
-    ct_std = std(ct_patch) + 1f-6
-    ct_norm = (ct_patch .- ct_mean) ./ ct_std
+    # Standard normalization matching DATA_AND_MODEL_ACCESS_GUIDE.md
+    ct_norm = (clamp.(ct_patch, -1024.0f0, 1500.0f0) .- (-200.0f0)) ./ 400.0f0
+    pet_norm = clamp.(pet_patch, 0.0f0, 20.0f0) ./ 20.0f0
     
     # TotalSegmentator: normalize to [0, 1]
     ts_norm = Float32.(ts_patch) ./ 117.0f0
     
     # Stack into (X, Y, Z, 3, 1) tensor
     x = cat(reshape(ct_norm, 64, 64, 64, 1),
-            reshape(pet_patch, 64, 64, 64, 1),
+            reshape(pet_norm, 64, 64, 64, 1),
             reshape(ts_norm, 64, 64, 64, 1), dims=4)
     x = reshape(x, 64, 64, 64, 3, 1)
     

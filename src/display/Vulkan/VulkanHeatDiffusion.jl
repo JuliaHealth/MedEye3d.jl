@@ -601,7 +601,7 @@ end
 # ─── Run heat diffusion ─────────────────────────────────────────────────
 
 """
-    run_heat_diffusion!(state, ctx, seed_x, seed_y, seed_z; K=40, dt=0.16f0, theta=0.001f0, tau=0.0001f0)
+    run_heat_diffusion!(state, ctx, seed_x, seed_y, seed_z; K=200, dt=0.16f0, theta=0.001044f0, tau=0.0001f0)
 
 Runs the complete heat diffusion pipeline on the GPU:
 1. Initialize heat field with seed impulse
@@ -612,7 +612,7 @@ Returns nothing — the mask is stored in `state.img_mask` on the GPU.
 Use `read_mask_to_cpu` to retrieve it.
 """
 function run_heat_diffusion!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y::Int, seed_z::Int;
-                              K::Int=40, dt::Float32=0.16f0, theta::Float32=0.001f0, tau::Float32=0.0001f0)
+                              K::Int=200, dt::Float32=0.16f0, theta::Float32=0.001044f0, tau::Float32=0.0001f0)
     @assert state.is_initialized "Heat diffusion not initialized"
     @assert state.diffusivity_uploaded "Diffusivity not uploaded"
     
@@ -1099,12 +1099,12 @@ end
 # ─── Read bounding box mask directly to seg_vol ──────────────────────────
 
 """
-    apply_box_mask_to_segvol!(state, seg_vol::AbstractArray{T, 3}, label_val::T; theta=0.001f0) where {T}
+    apply_box_mask_to_segvol!(state, seg_vol::AbstractArray{T, 3}, label_val::T; theta=0.001044f0) where {T}
 
 Applies the bounding-box mask retrieved from GPU directly into `seg_vol`.
 Reads from the persistently mapped `staging_box_ptr` with ZERO allocations.
 """
-function apply_box_mask_to_segvol!(state::HeatDiffusionState, seg_vol::AbstractArray{T, 3}, label_val::T; theta::Float32=0.001f0) where {T}
+function apply_box_mask_to_segvol!(state::HeatDiffusionState, seg_vol::AbstractArray{T, 3}, label_val::T; theta::Float32=0.001044f0) where {T}
     state.staging_box_ptr == C_NULL && return
     
     xmin, ymin, zmin = state.current_box_min

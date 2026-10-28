@@ -2,7 +2,7 @@
 
 julia_version = "1.11.3"
 manifest_format = "2.0"
-project_hash = "5375af8f557ddbe6a2b6fa2eaec222957dfa645f"
+project_hash = "4623122a6200392ffe7b2dc868f4b522dd80bdf2"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "0a81a018463de6c3f4f2c9360121c562e5add9e4"
@@ -1467,7 +1467,6 @@ git-tree-sha1 = "2f8c1b4cf2016e66eccdd308b8928cd92bc74e0e"
 uuid = "3324d3a8-621a-5aaa-97fa-c3bc8dfc0481"
 version = "5.3.3+0"
 
-
 [[deps.IfElse]]
 git-tree-sha1 = "debdd00ffef04665ccbb3e150747a77560e8fad1"
 uuid = "615f187c-cbe4-4ef1-ba3b-2fcf58d6d173"
@@ -2240,10 +2239,12 @@ deps = ["DataAPI", "SimpleTraits", "Tables"]
 git-tree-sha1 = "c4ab44fe709638fda6f2c0cbfea2c114932d6c2f"
 uuid = "c2834f40-e789-41da-a90e-33b280584a8c"
 version = "1.1.0"
-weakdeps = ["PythonCall"]
 
     [deps.MLCore.extensions]
     MLCorePythonCallExt = "PythonCall"
+
+    [deps.MLCore.weakdeps]
+    PythonCall = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
 
 [[deps.MLDataDevices]]
 deps = ["Adapt", "Functors", "Preferences", "Random", "SciMLPublic"]
@@ -3129,20 +3130,6 @@ weakdeps = ["ForwardDiff"]
     [deps.PureKLU.extensions]
     PureKLUForwardDiffExt = "ForwardDiff"
 
-[[deps.PythonCall]]
-deps = ["CondaPkg", "Dates", "Libdl", "MacroTools", "Markdown", "Preferences", "Serialization", "Tables", "UnsafePointers"]
-git-tree-sha1 = "2b67e030054dd9438a00e3d7f59927e839b00569"
-uuid = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
-version = "0.9.35"
-
-    [deps.PythonCall.extensions]
-    CategoricalArraysExt = "CategoricalArrays"
-    PyCallExt = "PyCall"
-
-    [deps.PythonCall.weakdeps]
-    CategoricalArrays = "324d7699-5711-5eae-9e2f-1d82baa6b597"
-    PyCall = "438e738f-606a-5dbb-bf0a-cddfbfd45ab0"
-
 [[deps.QOI]]
 deps = ["ColorTypes", "FileIO", "FixedPointNumbers"]
 git-tree-sha1 = "472daaa816895cb7aee81658d4e7aec901fa1106"
@@ -3980,11 +3967,6 @@ weakdeps = ["LLVM"]
 
     [deps.UnsafeAtomics.extensions]
     UnsafeAtomicsLLVM = ["LLVM"]
-
-[[deps.UnsafePointers]]
-git-tree-sha1 = "c81331b3b2e60a982be57c046ec91f599ede674a"
-uuid = "e17b2a0c-0bdf-430a-bd0c-3a23cae4ff39"
-version = "1.0.0"
 
 [[deps.VectorizationBase]]
 deps = ["ArrayInterface", "CPUSummary", "HostCPUFeatures", "IfElse", "LayoutPointers", "Libdl", "LinearAlgebra", "SIMDTypes", "Static", "StaticArrayInterface"]

@@ -8,8 +8,8 @@ layout(set = 0, binding = 0, r32f) uniform readonly image3D img_edge;
 layout(set = 0, binding = 1, r32f) uniform writeonly image3D img_diffusivity;
 
 layout(push_constant) uniform PushConstants {
-    float epsilon_D;  // 0.01 — minimum conductance floor
-    float gamma;      // 5.0 — edge attenuation slope
+    float epsilon_D;  // 1.0e-5 — minimum conductance floor (learned TotalSeg-Edge-PDE)
+    float gamma;      // 10.096 — edge attenuation slope (learned TotalSeg-Edge-PDE)
 } pc;
 
 void main() {
