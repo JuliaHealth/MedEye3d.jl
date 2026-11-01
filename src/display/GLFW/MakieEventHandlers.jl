@@ -18,10 +18,12 @@ export reactToWindowing, reactToPaintVal, reactToSyncLesion, reactToChangeBrushS
 export reactToChangeTimePoint, reactToSetTimePoint, reactToToggleLesion, reactToRefreshList
 export reactToAddAutoPet, reactToAIInferenceResult, reactToSyncMissing, reactToGenManual, reactToHeatGDTHold
 export reactToHeatGDTStart, reactToHeatGDTTick, reactToHeatGDTStop, reactToHeatGDTPosthocSize
-export reactToMapLink, reactToAutoRunPreprocess, reactToRunPreprocess, reactToShowBoneMask, reactToShowMaskLayer, reactToSaveMRB
+export reactToMapLink, reactToAutoRunPreprocess, reactToRunPreprocess, reactToShowBoneMask, reactToShowMaskLayer, reactToSaveMRB, _anatomy_active
 export register_h5_mask_saver!, mark_tp_mask_dirty!, save_tp_mask_to_h5, flush_all_dirty_masks!, dirty_mask_tps
 export _clinical_phase, get_clinical_phase, set_clinical_phase!, _phase_display_name
-export reactToEditMode, reactToViewMode, reactToSetTPFirst, reactToSetTPLast, reactToToggleMaskVisibility, reactToShowOnlyPET, reactToShowOnlyCT, reactToToggleSyncScroll, reactToToggleHeatGDTMode, reactToOneShotHeatGDT
+export reactToEditMode, reactToViewMode, reactToSetTPFirst, reactToSetTPLast, reactToToggleMaskVisibility, reactToShowOnlyPET, reactToShowOnlyCT, reactToToggleSyncScroll, reactToToggleHeatGDTMode, reactToOneShotHeatGDT, reactToZoomToFit
+export mri_compare_mode, mri_compare_tps, mri_compare_plane, get_mri_comparison_tps
+export mri_main_multimodal_mode, reactToToggleMRIMultimodal, sync_mri_mask_across_modalities!
 using ...InferenceClient
 using ...LesionAssociation
 using ...TextureManag
@@ -49,6 +51,66 @@ const cursor_study_text = Observable{String}("")     # "PET TP0" or "L: PET TP0 
 const cursor_voxel_pos = Observable{Tuple{Int,Int,Int}}((0,0,0))
 # Measurement info — dedicated Observable for live measurement values during drag
 const measurement_info_text = Observable{String}("")  # "⬤ Sphere: SUVmean=0.42 SUVmax=1.23 R=10.0mm"
+
+# 4-Corner layout info Observable (for displaying quadrant modalities in GUI and Window Title)
+const quad_corner_info = Observable{NamedTuple{(:header, :tl, :tr, :bl, :br), NTuple{5, String}}}((
+    header = "⊞ Quad View: Multi-Planar + PET",
+    tl = "↖ TL: Axial (CT / Overlay)",
+    tr = "↗ TR: Pure PET / SPECT",
+    bl = "↙ BL: Sagittal (CT / Overlay)",
+    br = "↘ BR: Coronal (CT / Overlay)"
+))
+
+function get_quad_corner_labels()
+    if mri_main_multimodal_mode[]
+        tps = !isempty(mri_compare_tps) ? mri_compare_tps : get_mri_comparison_tps(current_tp_index[])
+        function format_slot(slot)
+            if slot <= length(tps)
+                tp = tps[slot]
+                mod = uppercase(get(tp_modalities, tp, "MRI"))
+                if mod == "T2"
+                    return "T2 (Anatomy)"
+                elseif mod == "ADC"
+                    return "ADC Map (Diffusion Metric)"
+                elseif mod == "DWI"
+                    return "DWI (Diffusion Weighted)"
+                elseif mod in ("T1", "DCE", "DYNAMIC")
+                    return "$mod (Contrast / Marrow)"
+                else
+                    return "$mod"
+                end
+            end
+            return "(empty)"
+        end
+        return (
+            header = "⊞ Quad View: 4 Distinct MRI Modalities",
+            tl = "↖ TL: " * format_slot(1),
+            tr = "↗ TR: " * format_slot(2),
+            bl = "↙ BL: " * format_slot(3),
+            br = "↘ BR: " * format_slot(4)
+        )
+    elseif mri_compare_mode[]
+        return (
+            header = "⊞ Quad View: MRI Comparison (M2)",
+            tl = "↖ TL: T2 MRI (Anatomy)",
+            tr = "↗ TR: ADC Map (Diffusion)",
+            bl = "↙ BL: DWI (High-B)",
+            br = "↘ BR: T1 / DCE (Contrast)"
+        )
+    else
+        return (
+            header = "⊞ Quad View: Multi-Planar + PET",
+            tl = "↖ TL: Axial (CT / Overlay)",
+            tr = "↗ TR: Pure PET / SPECT",
+            bl = "↙ BL: Sagittal (CT / Overlay)",
+            br = "↘ BR: Coronal (CT / Overlay)"
+        )
+    end
+end
+
+function update_quad_corner_info!()
+    quad_corner_info[] = get_quad_corner_labels()
+end
 
 """Safe Makie redraw trigger — uses a dedicated no-op Observable instead of
 notify(fig.scene.visible) which can cause blinking by toggling scene visibility."""
@@ -156,7 +218,7 @@ end
 const current_viewer_position = Ref((0, 0, 0))
 const app_is_loading = Ref(true)
 const current_hovered_panel = Ref{Int}(0)
-export cursor_info_text, cursor_study_text, set_ai_status!, current_viewer_position, current_hovered_panel, measurement_info_text
+export cursor_info_text, cursor_study_text, set_ai_status!, current_viewer_position, current_hovered_panel, measurement_info_text, quad_corner_info, get_quad_corner_labels, update_quad_corner_info!
 
 # Sanitize AI status text for Makie Label rendering (ASCII-only, truncated)
 function safe_status_text(msg::String)
@@ -510,34 +572,55 @@ function reactToChangePlane(data::ChangePlaneEvent, stateObjects::Vector{StateDa
     elseif data.plane == :Axial
         dim = 3
     end
+    mri_compare_plane[] = dim
     
     dummy_kb = KeyboardStruct()
     panel_indices = Int[]
+    vpos = current_viewer_position[]
     for (idx, stateObject) in enumerate(stateObjects)
         # Panels 3 (Sagittal) and 4 (Coronal) have pre-permuted data that
-        # must always slice along dimension 3. Skip plane changes for them.
-        if idx in (3, 4)
+        # must always slice along dimension 3. Skip plane changes for them unless mri_main_multimodal_mode is active.
+        # In standard quad modes (not mri_compare_mode), panels 8 and 9 are also pre-permuted.
+        if (!mri_main_multimodal_mode[] && idx in (3, 4)) || (!mri_compare_mode[] && idx in (8, 9))
             push!(panel_indices, idx)
             continue
         end
         
         old_scroll = stateObject.onScrollData.dataToScrollDims
-        new_scroll = DataToScrollDims(imageSize=old_scroll.imageSize, voxelSize=old_scroll.voxelSize, dimensionToScroll=dim)
+        img_sz = old_scroll.imageSize
+        if (isempty(img_sz) || img_sz == (0, 0, 0)) && !isempty(stateObject.onScrollData.dataToScroll)
+            img_sz = size(stateObject.onScrollData.dataToScroll[1].dat)
+        end
+        vox_sz = old_scroll.voxelSize
+        if (isempty(vox_sz) || vox_sz == (0.0, 0.0, 0.0)) && !isempty(stateObjects[1].onScrollData.dataToScrollDims.voxelSize)
+            vox_sz = stateObjects[1].onScrollData.dataToScrollDims.voxelSize
+        end
+        new_scroll = DataToScrollDims(imageSize=img_sz, voxelSize=vox_sz, dimensionToScroll=dim)
         
-        stateObject.lastRecordedMousePosition = CartesianIndex(
-            max(1, round(Int, old_scroll.imageSize[1] / 2)),
-            max(1, round(Int, old_scroll.imageSize[2] / 2)),
-            max(1, round(Int, old_scroll.imageSize[3] / 2))
-        )
+        if vpos[1] > 0 && vpos[2] > 0 && vpos[3] > 0
+            stateObject.lastRecordedMousePosition = CartesianIndex(
+                clamp(vpos[1], 1, max(1, img_sz[1])),
+                clamp(vpos[2], 1, max(1, img_sz[2])),
+                clamp(vpos[3], 1, max(1, img_sz[3]))
+            )
+        else
+            stateObject.lastRecordedMousePosition = CartesianIndex(
+                max(1, round(Int, img_sz[1] / 2)),
+                max(1, round(Int, img_sz[2] / 2)),
+                max(1, round(Int, img_sz[3] / 2))
+            )
+        end
         
         ChangePlane.processKeysInfo(Identity(new_scroll), stateObject, dummy_kb, false)
         
-        if compare_mode[]
-            if idx == 1
-                updateQuadVertices!(stateObject, :LeftHalf)
-            elseif idx == 5
-                updateQuadVertices!(stateObject, :RightHalf)
-            elseif idx in (2, 3, 4)
+        if mri_main_multimodal_mode[] && idx in (1, 2, 3, 4)
+            layout_sym = idx == 1 ? :TopLeft : (idx == 2 ? :TopRight : (idx == 3 ? :BottomLeft : :BottomRight))
+            updateQuadVertices!(stateObject, layout_sym)
+        elseif mri_compare_mode[] && idx in (6, 7, 8, 9)
+            layout_sym = idx == 6 ? :TopLeft : (idx == 7 ? :TopRight : (idx == 8 ? :BottomLeft : :BottomRight))
+            updateQuadVertices!(stateObject, layout_sym)
+        elseif compare_mode[]
+            if idx == 5
                 updateQuadVertices!(stateObject, :Hidden)
             end
         else
@@ -589,9 +672,282 @@ end
 
 const compare_mode = Ref(false)
 const compare_right_tp = Ref(-1)  # TP index shown in right panel (panel 5)
+const mri_compare_mode = Ref(false)
+const mri_compare_tps = Int[]     # Up to 4 TP indices displayed in M2 panels 6, 7, 8, 9
+const mri_compare_plane = Ref{Int}(3) # 3 = Axial, 2 = Coronal, 1 = Sagittal
+const mri_main_multimodal_mode = Ref(false)
 const tp_switched = Observable{Int}(0)
 const _m2_reference_tp = Ref{Int}(-1)
 const _m2_crosshair_sync = Ref(true)
+
+"""
+    get_mri_comparison_tps(current_tp::Int)::Vector{Int}
+
+Select up to 4 timepoints for MRI Comparison Quad View in priority order:
+1. T2 / MRI / MR (anatomical reference)
+2. ADC
+3. DWI
+4. Any 4th MRI modality (e.g., T1, second T2/DWI) or `current_tp` (e.g., PET/CT) as 4th reference panel.
+"""
+function get_mri_comparison_tps(current_tp::Int = current_tp_index[])::Vector{Int}
+    tp_indices = sort(collect(keys(tp_labels)))
+    isempty(tp_indices) && return Int[current_tp, current_tp, current_tp, current_tp]
+
+    t2_tps = Int[]
+    adc_tps = Int[]
+    dwi_tps = Int[]
+    other_mri_tps = Int[]
+
+    for tp in tp_indices
+        mod = uppercase(get(tp_modalities, tp, ""))
+        lbl = uppercase(get(tp_labels, tp, ""))
+        if mod == "ADC" || occursin("ADC", lbl)
+            push!(adc_tps, tp)
+        elseif mod == "DWI" || occursin("DWI", lbl)
+            push!(dwi_tps, tp)
+        elseif mod in ("T2", "MRI", "MR") || occursin("T2", lbl)
+            push!(t2_tps, tp)
+        elseif mod in ("T1", "DCE", "DYNAMIC") || occursin("T1", lbl) || occursin("DCE", lbl) || occursin("DYN", lbl) || occursin("MR", lbl)
+            push!(other_mri_tps, tp)
+        end
+    end
+
+    selected = Int[]
+    # Round 1: Select one representative TP from each distinct modality category
+    # Priority order: T2 (anatomy), ADC (diffusion metric), DWI (diffusion weighted), Other MRI (T1, DCE, etc.)
+    for group in (t2_tps, adc_tps, dwi_tps, other_mri_tps)
+        for tp in group
+            if !(tp in selected)
+                push!(selected, tp)
+                break
+            end
+        end
+        length(selected) >= 4 && break
+    end
+
+    # Round 2: If we still have slots (< 4), pick remaining distinct MRI modalities from other_mri_tps (e.g. DCE if T1 was picked)
+    if length(selected) < 4
+        for tp in other_mri_tps
+            if !(tp in selected)
+                push!(selected, tp)
+                length(selected) >= 4 && break
+            end
+        end
+    end
+
+    # Round 3: If still < 4, pick any remaining MRI sequences (e.g., additional T2 planes like coronal/sagittal)
+    if length(selected) < 4
+        for tp in vcat(t2_tps, adc_tps, dwi_tps)
+            if !(tp in selected)
+                push!(selected, tp)
+                length(selected) >= 4 && break
+            end
+        end
+    end
+
+    # Round 4: If still < 4, include current_tp (e.g. PET/CT reference) in remaining slot
+    if length(selected) < 4 && !(current_tp in selected) && (current_tp in tp_indices)
+        push!(selected, current_tp)
+    end
+    # Round 5: Fill any remaining slots up to 4 with other available TPs or repeat first selected
+    for tp in tp_indices
+        length(selected) >= 4 && break
+        if !(tp in selected)
+            push!(selected, tp)
+        end
+    end
+    while length(selected) < 4
+        push!(selected, isempty(selected) ? current_tp : selected[1])
+    end
+    return selected[1:4]
+end
+
+"""
+    sync_mri_mask_across_modalities!(source_tp::Int, modified_bbox_3d=nothing)
+
+Automatically copies the updated lesion mask from `source_tp` into ALL other MRI modalities
+for the current patient (`mri_compare_tps`), marks them dirty for HDF5 autosave, and refreshes
+all visible panels (Window 1 and Window 2) displaying any MRI modality.
+"""
+function sync_mri_mask_across_modalities!(source_tp::Int, modified_bbox_3d=nothing)
+    mri_tps = mri_compare_tps
+    if isempty(mri_tps)
+        mri_tps = get_mri_comparison_tps(source_tp)
+    end
+    if !(source_tp in mri_tps)
+        return
+    end
+    
+    src_entry = lock(_tp_cache_lock) do
+        haskey(tp_data_cache, source_tp) ? tp_data_cache[source_tp] : nothing
+    end
+    if src_entry === nothing || src_entry.mask_i16 === nothing
+        return
+    end
+    
+    src_mask = src_entry.mask_i16
+    
+    for other_tp in mri_tps
+        other_tp == source_tp && continue
+        
+        target_entry = lock(_tp_cache_lock) do
+            haskey(tp_data_cache, other_tp) ? tp_data_cache[other_tp] : nothing
+        end
+        if target_entry === nothing
+            target_entry = get_or_load_tp_data(other_tp)
+        end
+        if target_entry !== nothing && target_entry.mask_i16 !== nothing
+            if modified_bbox_3d !== nothing
+                bx, by, bz = modified_bbox_3d
+                sz_t = size(target_entry.mask_i16)
+                bx_c = clamp(first(bx), 1, sz_t[1]):clamp(last(bx), 1, sz_t[1])
+                by_c = clamp(first(by), 1, sz_t[2]):clamp(last(by), 1, sz_t[2])
+                bz_c = clamp(first(bz), 1, sz_t[3]):clamp(last(bz), 1, sz_t[3])
+                
+                target_entry.mask_i16[bx_c, by_c, bz_c] .= src_mask[bx_c, by_c, bz_c]
+                if target_entry.mask !== target_entry.mask_i16 && target_entry.mask !== nothing
+                    target_entry.mask[bx_c, by_c, bz_c] .= src_mask[bx_c, by_c, bz_c]
+                end
+            else
+                target_entry.mask_i16 .= src_mask
+                if target_entry.mask !== target_entry.mask_i16 && target_entry.mask !== nothing
+                    target_entry.mask .= src_mask
+                end
+            end
+            mark_tp_mask_dirty!(other_tp)
+        end
+    end
+end
+
+"""
+    reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, stateObjects::Vector{StateDataFields})
+
+Toggles MRI Multimodal mode on the Main Screen (Panels 1–4).
+When enabled, Panels 1–4 load 4 distinct MRI modalities (T2, DWI, ADC, T1/DCE) unpermuted and in sync.
+"""
+function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, stateObjects::Vector{StateDataFields})
+    if length(stateObjects) < 4; return; end
+    mri_main_multimodal_mode[] = !mri_main_multimodal_mode[]
+    
+    tp_cur = current_tp_index[]
+    if mri_main_multimodal_mode[]
+        mri_tps = get_mri_comparison_tps(tp_cur)
+        empty!(mri_compare_tps)
+        append!(mri_compare_tps, mri_tps)
+        
+        plane_dim = mri_compare_plane[] > 0 ? mri_compare_plane[] : 3
+        for slot_idx in 1:min(4, length(mri_tps))
+            p_idx = slot_idx
+            tp_for_panel = mri_tps[slot_idx]
+            entry_mri = get_or_load_tp_data(tp_for_panel)
+            if entry_mri !== nothing
+                _load_tp_from_entry!(
+                    stateObjects, entry_mri, p_idx;
+                    force_unpermuted=true, tp_override=tp_for_panel
+                )
+            end
+        end
+        
+        for p in 1:4
+            stateObjects[p].displayMode = QuadImage
+            stateObjects[p].onScrollData.dimensionToScroll = plane_dim
+            if !isempty(stateObjects[p].onScrollData.dataToScroll)
+                ChangePlane.processKeysInfo(Identity(stateObjects[p].onScrollData.dataToScrollDims), stateObjects[p], KeyboardStruct(), false)
+            end
+    for ts in stateObjects[p].mainForDisplayObjects.listOfTextSpecifications
+                if ts.name == "CT"
+                    ts.isVisible = (p == 2 ? mri_main_multimodal_mode[] : true)
+                    ts.maskContribution = 0.0f0
+                elseif ts.name == "PET" || ts.name == "SPECT"
+                    if p == 2
+                        ts.isVisible = !mri_main_multimodal_mode[]
+                    end
+                    ts.maskContribution = 0.0f0
+                end
+            end
+            if stateObjects[p].mainForDisplayObjects.vulkanPipelineState !== nothing
+                stateObjects[p].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+            end
+        end
+        updateQuadVertices!(stateObjects[1], :TopLeft)
+        updateQuadVertices!(stateObjects[2], :TopRight)
+        updateQuadVertices!(stateObjects[3], :BottomLeft)
+        updateQuadVertices!(stateObjects[4], :BottomRight)
+
+        # Explicitly apply each modality's validated default windowing to its respective quadrant
+        for slot_idx in 1:min(4, length(mri_tps))
+            p_idx = slot_idx
+            tp_panel = mri_tps[slot_idx]
+            pmod = uppercase(get(tp_modalities, tp_panel, ""))
+            win = if pmod in ("T2", "MRI", "MR")
+                get(current_windowing, "T2", Float32[0.0, 1000.0])
+            elseif pmod == "ADC"
+                get(current_windowing, "ADC", Float32[0.0, 2200.0])
+            elseif pmod == "DWI"
+                get(current_windowing, "DWI", Float32[50.0, 1200.0])
+            elseif pmod == "T1"
+                get(current_windowing, "T1", Float32[0.0, 700.0])
+            elseif pmod in ("DCE", "DYNAMIC")
+                get(current_windowing, "DCE", Float32[0.0, 500.0])
+            else
+                Float32[0.0, 1000.0]
+            end
+            for tex in stateObjects[p_idx].mainForDisplayObjects.listOfTextSpecifications
+                if tex.name == "CT" || tex.isMainImage
+                    tex.minAndMaxValue = Float32.([win[1], win[2]])
+                end
+            end
+            if stateObjects[p_idx].mainForDisplayObjects.vulkanPipelineState !== nothing
+                stateObjects[p_idx].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+            end
+        end
+        
+        ref_sl = stateObjects[1].currentDisplayedSlice
+        for p in 1:4
+            max_sl = max(1, Int(stateObjects[p].onScrollData.slicesNumber))
+            stateObjects[p].currentDisplayedSlice = clamp(ref_sl, 1, max_sl)
+            stateObjects[p].calcDimsStruct.zoom = stateObjects[1].calcDimsStruct.zoom
+            stateObjects[p].calcDimsStruct.panX = stateObjects[1].calcDimsStruct.panX
+            stateObjects[p].calcDimsStruct.panY = stateObjects[1].calcDimsStruct.panY
+            stateObjects[p].isSliceChanged = true
+            _force_texture_upload!(stateObjects, p)
+        end
+        println(">> [MRI-MULTIMODAL] Main screen switched to 4 distinct MRI modalities: $(mri_tps)"); flush(stdout)
+    else
+        entry = get_or_load_tp_data(tp_cur)
+        if entry !== nothing
+            for p in 1:min(4, length(stateObjects))
+                _load_tp_from_entry!(stateObjects, entry, p)
+                stateObjects[p].isSliceChanged = true
+                _force_texture_upload!(stateObjects, p)
+                if stateObjects[p].mainForDisplayObjects.vulkanPipelineState !== nothing
+                    stateObjects[p].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                end
+            end
+            _update_quad_layout_for_modality!(stateObjects, tp_cur)
+        end
+        println(">> [MRI-MULTIMODAL] Main screen reverted to standard view."); flush(stdout)
+    end
+    update_quad_corner_info!()
+    try
+        if !isempty(stateObjects) && stateObjects[1].mainForDisplayObjects !== nothing && stateObjects[1].mainForDisplayObjects.window !== nothing
+            title = mri_main_multimodal_mode[] ?
+                "MedEye3d [Quad MRI] - TL: T2 | TR: ADC | BL: DWI | BR: T1" :
+                "MedEye3d [Standard] - TL: Axial CT | TR: Pure PET | BL: Sagittal CT | BR: Coronal CT"
+            GLFW.SetWindowTitle(stateObjects[1].mainForDisplayObjects.window, title)
+        end
+    catch; end
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing
+            obs_dict = getfield(LMW, :_lmw_observables)
+            if haskey(obs_dict, :btn_mri_main)
+                btn = obs_dict[:btn_mri_main]
+                btn.buttoncolor = mri_main_multimodal_mode[] ? RGBf(0.15, 0.45, 0.8) : RGBf(0.18, 0.20, 0.25)
+            end
+        end
+    catch; end
+end
 
 const _flicker_active = Ref(false)
 const _flicker_show_current = Ref(true)
@@ -604,7 +960,7 @@ const measurement_sub_mode = Observable{Symbol}(:sphere)  # :sphere or :line
 export measurements_mode, active_measurement_radius_mm, measurement_sub_mode
 
 # Interactive Lesion Mapping across time points
-const compare_all_lesions_mode = Ref(true)
+const compare_all_lesions_mode = Ref(false)
 const mapping_alpha_linked = Ref(0.25f0)
 const mapping_alpha_unlinked = Ref(0.80f0)
 export compare_all_lesions_mode, mapping_alpha_linked, mapping_alpha_unlinked
@@ -877,89 +1233,23 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
         return reactToSyncLesion(SyncLesionEvent(data.lesion_id, true), stateObjects)
     else
         is_single_lesion_mode[] = false
-        changed = false
-        for (idx, stateObject) in enumerate(stateObjects)
-            # Skip right compare panels — they are managed independently by reactToSyncLesion
-            # with differential opacity (compare_all_lesions_mode). The M key should only
-            # affect left/current TP panels (1-4).
-            is_right = compare_mode[] && idx in (5, 6, 7, 8, 9)
-            if is_right
-                continue
-            end
-            for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-                if lymph_node_validation_mode[]
-                    if textSpec.name == "Anatomy"
-                        ln_ids = get_lymph_node_label_ids(current_tp_index[])
-                        max_ln = isempty(ln_ids) ? 63 : maximum(ln_ids)
-                        min_ln = isempty(ln_ids) ? 1 : minimum(ln_ids)
-                        T_mm = eltype(textSpec.minAndMaxValue)
-                        textSpec.allowedIDs = Float32[]
-                        textSpec.colorMask = RGBA(0.0f0, 0.0f0, 0.0f0, 1.0f0)
-                        textSpec.minAndMaxValue = T_mm.([min_ln, max_ln])
-                        textSpec.isVisible = true
-                        if textSpec.maskContribution <= 0.05f0
-                            textSpec.maskContribution = 0.5f0
-                        end
-                        if stateObject.mainForDisplayObjects.vulkanPipelineState !== nothing
-                            stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
-                        end
-                        changed = true
-                    elseif textSpec.name == "Mask" || textSpec.name == "segmentation" || textSpec.name == "Bone_Overlay"
-                        textSpec.isVisible = false
-                        if stateObject.mainForDisplayObjects.vulkanPipelineState !== nothing
-                            stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
-                        end
-                    end
-                elseif textSpec.name == "Mask" || textSpec.name == "segmentation" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy" && textSpec.name != "Bone_Overlay")
-                    # Clear allowed IDs filter (only for lesion masks, not anatomical atlas)
-                    textSpec.allowedIDs = Float32[]
-                    textSpec.colorMask = RGBA(0.0f0, 0.0f0, 0.0f0, 1.0f0)
-                    T_mm = eltype(textSpec.minAndMaxValue)
-                    textSpec.minAndMaxValue = T_mm.([1, 10000])
-                    textSpec.isVisible = true
-                    if textSpec.maskContribution <= 0.05f0
-                        textSpec.maskContribution = 0.5f0
-                    end
-                    if stateObject.mainForDisplayObjects.vulkanPipelineState !== nothing
-                        stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
-                    end
-                    changed = true
-                elseif textSpec.name == "manualModif"
-                    textSpec.minAndMaxValue = Float32.([0.0, 10000.0])
-                    textSpec.allowedIDs = Float32[]
-                    textSpec.isVisible = true
-                end
-            end
-            # Force slice refresh on visible panels so showing all lesions appears immediately
-            if stateObject.calcDimsStruct.mainQuadVertSize > 0 && !all(iszero, stateObject.calcDimsStruct.mainImageQuadVert)
-                curSlice = clamp(stateObject.currentDisplayedSlice, 1, max(1, stateObject.onScrollData.slicesNumber))
-                stateObject.currentlyDispDat = stateObject.onScrollData.dataToScroll |>
-                    (scrDat) -> map(threeDimDat -> threeToTwoDimm(threeDimDat.type, Int64(curSlice), stateObject.onScrollData.dimensionToScroll, threeDimDat), scrDat) |>
-                    (twoDimList) -> SingleSliceDat(listOfDataAndImageNames=twoDimList, sliceNumber=curSlice, textToDisp=getTextForCurrentSlice(stateObject.onScrollData, Int32(curSlice)))
-                stateObject.isSliceChanged = true
-            end
-        end
-        @debug "Show single lesion: all (single_mode=false)"
-        _mri_clamp_mask_range!(stateObjects)
-        # Re-sync right compare panels so differential opacity is maintained
-        if compare_mode[] && current_active_lesion_id[] > 0
-            cur_lid = current_active_lesion_id[]
-            reactToSyncLesion(SyncLesionEvent(cur_lid, false), stateObjects)
-        end
-        return changed
+        cur_lid = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
+        return reactToSyncLesion(SyncLesionEvent(cur_lid, false), stateObjects)
     end
 end
 
 const current_windowing = Dict{String, Vector{Float32}}(
-    "CT"    => Float32[-160.0, 240.0],
-    "PET"   => Float32[0.0, 10.0],
-    "SPECT" => Float32[0.0, 10.0],
-    "T2"    => Float32[0.0, 1000.0],
-    "MRI"   => Float32[0.0, 1000.0],
-    "MR"    => Float32[0.0, 1000.0],
-    "T1"    => Float32[0.0, 600.0],
-    "ADC"   => Float32[0.0, 1500.0],
-    "DWI"   => Float32[0.0, 500.0]
+    "CT"      => Float32[-160.0, 240.0],
+    "PET"     => Float32[0.0, 10.0],
+    "SPECT"   => Float32[0.0, 10.0],
+    "T2"      => Float32[0.0, 1000.0],
+    "MRI"     => Float32[0.0, 1000.0],
+    "MR"      => Float32[0.0, 1000.0],
+    "T1"      => Float32[0.0, 700.0],
+    "ADC"     => Float32[0.0, 2200.0],
+    "DWI"     => Float32[50.0, 1200.0],
+    "DCE"     => Float32[0.0, 500.0],
+    "DYNAMIC" => Float32[0.0, 500.0]
 )
 export current_windowing
 
@@ -973,7 +1263,11 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
     end
     
     for (panel_idx, state) in enumerate(stateObjects)
-        panel_tp = if compare_mode[] && panel_idx in (5, 6, 7, 8, 9)
+        panel_tp = if mri_main_multimodal_mode[] && panel_idx in (1, 2, 3, 4)
+            state.onScrollData.currentTpIndex >= 0 ? state.onScrollData.currentTpIndex : current_tp_index[]
+        elseif mri_compare_mode[] && panel_idx in (6, 7, 8, 9)
+            state.onScrollData.currentTpIndex >= 0 ? state.onScrollData.currentTpIndex : current_tp_index[]
+        elseif compare_mode[] && panel_idx in (5, 6, 7, 8, 9)
             compare_right_tp[]
         else
             state.onScrollData.currentTpIndex > 0 ? state.onScrollData.currentTpIndex : current_tp_index[]
@@ -989,12 +1283,16 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
             is_main_match = (panel_mod in ("T2", "MRI", "MR"))
         elseif target_mod == "T1"
             is_main_match = (panel_mod == "T1")
+            is_nuc_match = (panel_mod == "T1")
         elseif target_mod == "ADC"
             is_main_match = (panel_mod == "ADC")
-            is_nuc_match = (panel_mod in ("T2", "MRI", "MR") || panel_mod == "ADC")
+            is_nuc_match = (panel_mod == "ADC")
         elseif target_mod == "DWI"
             is_main_match = (panel_mod == "DWI")
             is_nuc_match = (panel_mod == "DWI")
+        elseif target_mod in ("DCE", "DYNAMIC")
+            is_main_match = (panel_mod in ("DCE", "DYNAMIC"))
+            is_nuc_match = (panel_mod in ("DCE", "DYNAMIC"))
         elseif target_mod == "PET"
             is_nuc_match = (panel_mod == "PET" || panel_mod == "CT")
         elseif target_mod == "SPECT"
@@ -1008,11 +1306,13 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
             is_nuc_tex = tex.studyType == "PET" || tex.studyType == "SPECT" || tex.isNuclearMask
             if is_main_match && is_ct_tex
                 tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
+                state.isSliceChanged = true
                 if state.mainForDisplayObjects.vulkanPipelineState !== nothing
                     state.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
                 end
             elseif is_nuc_match && is_nuc_tex
                 tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
+                state.isSliceChanged = true
                 if state.mainForDisplayObjects.vulkanPipelineState !== nothing
                     state.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
                 end
@@ -1301,6 +1601,181 @@ function reactToToggleSyncScroll(data::MakieEvents.ToggleSyncScrollEvent, stateO
             end
         end
     catch; end
+end
+
+"""
+    reactToZoomToFit(data::MakieEvents.ZoomToFitEvent, stateObjects::Vector{StateDataFields})
+
+Fits the image to the panel window by computing the optimal `zoom`, `panX`, and `panY`
+for the non-background anatomy bounding box on the current slice (e.g., cropping black padding around
+small-FOV pelvic MRI resampled to a whole-body CT grid), or toggles back to full-window fit
+(`zoom = 1.0f0, panX = 0.0f0, panY = 0.0f0`) if already fitted. Also exits single-panel double-click zoom if active.
+"""
+function reactToZoomToFit(data::MakieEvents.ZoomToFitEvent, stateObjects::Vector{StateDataFields})
+    # Exit single-panel double-click zoom if active
+    wins_to_check = data.window_id == 1 ? (1:1) : (data.window_id == 2 ? (2:2) : (1:2))
+    for w_idx in wins_to_check
+        if w_idx <= length(quadZoomStates) && quadZoomStates[w_idx].isZoomed
+            zs = quadZoomStates[w_idx]
+            p_range = (w_idx == 2 && length(stateObjects) >= 10) ? (6:10) : (1:min(5, length(stateObjects)))
+            for (offset, p_i) in enumerate(p_range)
+                if offset <= length(zs.savedVerts)
+                    stateObjects[p_i].calcDimsStruct = Setfield.setproperties(
+                        stateObjects[p_i].calcDimsStruct,
+                        (mainImageQuadVert = zs.savedVerts[offset],
+                         mainQuadVertSize  = zs.savedVertSizes[offset])
+                    )
+                end
+            end
+            zs.isZoomed = false
+        end
+    end
+
+    panel_range = if data.window_id == 1
+        1:min(5, length(stateObjects))
+    elseif data.window_id == 2
+        6:length(stateObjects)
+    else
+        1:length(stateObjects)
+    end
+
+    # Helper: compute non-background bounding box fit (zoom, panX, panY) for a panel's current slice
+    function _compute_panel_fit(state::StateDataFields, panel_idx::Int)
+        w = max(1, Int(state.calcDimsStruct.imageTextureWidth))
+        h = max(1, Int(state.calcDimsStruct.imageTextureHeight))
+        if isempty(state.onScrollData.dataToScroll)
+            return (1.0f0, 0.0f0, 0.0f0)
+        end
+        # Pick primary image volume ("CT" first, otherwise first volume)
+        vol = nothing
+        for scr in state.onScrollData.dataToScroll
+            if scr.name == "CT"
+                vol = scr.dat
+                break
+            end
+        end
+        if vol === nothing
+            vol = state.onScrollData.dataToScroll[1].dat
+        end
+        dim = clamp(Int(state.onScrollData.dimensionToScroll), 1, 3)
+        sl = clamp(Int(state.currentDisplayedSlice), 1, max(1, size(vol, dim)))
+        slice_2d = selectdim(vol, dim, sl)
+        sw, sh = size(slice_2d, 1), size(slice_2d, 2)
+        if sw <= 1 || sh <= 1
+            return (1.0f0, 0.0f0, 0.0f0)
+        end
+
+        panel_tp = if mri_compare_mode[] && panel_idx in (6, 7, 8, 9)
+            state.onScrollData.currentTpIndex >= 0 ? state.onScrollData.currentTpIndex : current_tp_index[]
+        elseif compare_mode[] && panel_idx in (5, 6, 7, 8, 9)
+            compare_right_tp[]
+        else
+            state.onScrollData.currentTpIndex >= 0 ? state.onScrollData.currentTpIndex : current_tp_index[]
+        end
+        panel_mod = uppercase(get(tp_modalities, panel_tp, "PET"))
+        is_mri_mod = panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC")
+
+        min_v = Inf32
+        max_v = -Inf32
+        @inbounds for j in 1:sh, i in 1:sw
+            v = Float32(slice_2d[i, j])
+            if isfinite(v)
+                v < min_v && (min_v = v)
+                v > max_v && (max_v = v)
+            end
+        end
+        if !isfinite(min_v) || max_v <= min_v
+            return (1.0f0, 0.0f0, 0.0f0)
+        end
+
+        thresh = if is_mri_mod
+            max(1e-3f0, min_v + 0.01f0 * (max_v - min_v))
+        elseif min_v < -500.0f0
+            # CT in HU: tissue/body > -500 HU
+            -500.0f0
+        else
+            min_v + 0.02f0 * (max_v - min_v)
+        end
+
+        min_x = sw + 1; max_x = 0
+        min_y = sh + 1; max_y = 0
+        @inbounds for j in 1:sh, i in 1:sw
+            v = Float32(slice_2d[i, j])
+            if isfinite(v) && v > thresh
+                i < min_x && (min_x = i)
+                i > max_x && (max_x = i)
+                j < min_y && (min_y = j)
+                j > max_y && (max_y = j)
+            end
+        end
+
+        if max_x <= min_x || max_y <= min_y
+            return (1.0f0, 0.0f0, 0.0f0)
+        end
+
+        span_x = Float32(max_x - min_x + 1) / Float32(w)
+        span_y = Float32(max_y - min_y + 1) / Float32(h)
+        max_span = max(span_x, span_y)
+        # If non-zero content already fills >= 90% of the frame, fit is 1.0x centered
+        if max_span >= 0.90f0
+            return (1.0f0, 0.0f0, 0.0f0)
+        end
+
+        # Fit with 6% margin around the non-zero anatomy bounding box
+        fit_zoom = clamp(1.0f0 / (max_span * 1.06f0), 1.0f0, 12.0f0)
+        cx_norm = (Float32(min_x + max_x) * 0.5f0) / Float32(w)
+        cy_norm = (Float32(min_y + max_y) * 0.5f0) / Float32(h)
+        # Note: in MedEye3d shader, offsetX = panY (horizontal UV shift) and offsetY = panX (vertical UV shift)
+        fit_panY = clamp(cx_norm - 0.5f0, -0.5f0, 0.5f0)
+        fit_panX = clamp(cy_norm - 0.5f0, -0.5f0, 0.5f0)
+        return (fit_zoom, fit_panX, fit_panY)
+    end
+
+    # In MRI Comparison mode, compute a unified bounding box fit from panel 6 (T2 reference)
+    # so all 4 synchronized MRI modalities share the exact same zoom and pan!
+    mri_shared_fit = nothing
+    if mri_compare_mode[] && length(stateObjects) >= 9 && (6 in panel_range)
+        f_z, f_px, f_py = _compute_panel_fit(stateObjects[6], 6)
+        cur_z = stateObjects[6].calcDimsStruct.zoom
+        cur_px = stateObjects[6].calcDimsStruct.panX
+        cur_py = stateObjects[6].calcDimsStruct.panY
+        # Toggle: if already at fit_zoom (or if fit_zoom == 1.0), reset to 1.0; otherwise apply fit_zoom
+        if abs(cur_z - f_z) < 0.08f0 && abs(cur_px - f_px) < 0.03f0 && abs(cur_py - f_py) < 0.03f0
+            mri_shared_fit = (1.0f0, 0.0f0, 0.0f0)
+        else
+            mri_shared_fit = (f_z, f_px, f_py)
+        end
+    end
+
+    for idx in panel_range
+        state = stateObjects[idx]
+        if state.calcDimsStruct.mainQuadVertSize <= 0 || all(iszero, state.calcDimsStruct.mainImageQuadVert)
+            state.calcDimsStruct.zoom = 1.0f0
+            state.calcDimsStruct.panX = 0.0f0
+            state.calcDimsStruct.panY = 0.0f0
+            continue
+        end
+        if mri_compare_mode[] && idx in (6, 7, 8, 9) && mri_shared_fit !== nothing
+            state.calcDimsStruct.zoom = mri_shared_fit[1]
+            state.calcDimsStruct.panX = mri_shared_fit[2]
+            state.calcDimsStruct.panY = mri_shared_fit[3]
+        else
+            f_z, f_px, f_py = _compute_panel_fit(state, idx)
+            cur_z = state.calcDimsStruct.zoom
+            cur_px = state.calcDimsStruct.panX
+            cur_py = state.calcDimsStruct.panY
+            if abs(cur_z - f_z) < 0.08f0 && abs(cur_px - f_px) < 0.03f0 && abs(cur_py - f_py) < 0.03f0
+                state.calcDimsStruct.zoom = 1.0f0
+                state.calcDimsStruct.panX = 0.0f0
+                state.calcDimsStruct.panY = 0.0f0
+            else
+                state.calcDimsStruct.zoom = f_z
+                state.calcDimsStruct.panX = f_px
+                state.calcDimsStruct.panY = f_py
+            end
+        end
+    end
+    @info "[VIEWPORT] Zoom to Fit applied (window=$(data.window_id))"
 end
 
 function _get_lmw()
@@ -1702,9 +2177,31 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     end
 
     for (idx, stateObject) in enumerate(stateObjects)
-        is_right = compare_mode[] && idx in (5, 6, 7, 8, 9)
-        panel_tp = is_right ? compare_right_tp[] : current_tp_index[]
-        target_id = lymph_node_validation_mode[] ? data.lesion_id : (is_right ? panel5_lesion_id : data.lesion_id)
+        is_mri_cmp_panel = mri_compare_mode[] && idx in (6, 7, 8, 9)
+        is_right = (compare_mode[] && idx in (5, 6, 7, 8, 9)) || is_mri_cmp_panel
+        panel_tp = if is_mri_cmp_panel
+            stateObject.onScrollData.currentTpIndex >= 0 ? stateObject.onScrollData.currentTpIndex : current_tp_index[]
+        elseif is_right
+            compare_right_tp[]
+        else
+            current_tp_index[]
+        end
+        panel_all_ids = if is_mri_cmp_panel && data.lesion_id > 0 && panel_tp != current_tp_index[]
+            try
+                left_node = get_node_name_for_tp(current_tp_index[])
+                p_node = get_node_name_for_tp(panel_tp)
+                match_mod = _get_la()
+                match_mod !== nothing ? match_mod.find_cross_tp_lesion(left_node, data.lesion_id, p_node) : Int[]
+            catch
+                Int[]
+            end
+        elseif is_mri_cmp_panel && panel_tp == current_tp_index[]
+            data.lesion_id > 0 ? Int[data.lesion_id] : Int[]
+        else
+            panel5_all_ids
+        end
+        panel_matched_lid = isempty(panel_all_ids) ? 0 : panel_all_ids[1]
+        target_id = lymph_node_validation_mode[] ? data.lesion_id : (is_right ? panel_matched_lid : data.lesion_id)
         for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
             if lymph_node_validation_mode[]
                 if textSpec.name == "Anatomy"
@@ -1715,7 +2212,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                         textSpec.minAndMaxValue = T_mm.([target_id, target_id])
                     else
                         ln_ids = get_lymph_node_label_ids(panel_tp)
-                        max_ln = isempty(ln_ids) ? 63 : maximum(ln_ids)
+                        max_ln = isempty(ln_ids) ? 400 : max(400, maximum(ln_ids))
                         min_ln = isempty(ln_ids) ? 1 : minimum(ln_ids)
                         textSpec.minAndMaxValue = T_mm.([min_ln, max_ln])
                     end
@@ -1735,25 +2232,42 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                 end
             elseif textSpec.name == "Mask" || textSpec.name == "segmentation" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy" && textSpec.name != "Bone_Overlay")
                 T_mm = eltype(textSpec.minAndMaxValue)
-                if is_right && compare_all_lesions_mode[]
+                if is_right && !is_single_lesion_mode[] && compare_all_lesions_mode[]
                     # Interactive mapping mode: display ALL lesions on right TP,
                     # but linked lesions get smaller alpha, unlinked lesions get normal opacity
                     textSpec.minAndMaxValue = T_mm.([1, 10000])
-                    textSpec.allowedIDs = Float32.(panel5_all_ids)
+                    textSpec.allowedIDs = Float32.(panel_all_ids)
                     textSpec.colorMask = RGBA(mapping_alpha_linked[], mapping_alpha_unlinked[], 1.0f0, 1.0f0)
-                elseif is_right && !isempty(panel5_all_ids)
-                    textSpec.allowedIDs = Float32.(panel5_all_ids)
+                elseif is_right
                     textSpec.colorMask = RGBA(0.0f0, 0.0f0, 0.0f0, 1.0f0)
-                else
-                    textSpec.allowedIDs = Float32[]
-                    textSpec.colorMask = RGBA(0.0f0, 0.0f0, 0.0f0, 1.0f0)
-                    if is_single_lesion_mode[] && target_id > 0
-                        textSpec.minAndMaxValue = T_mm.([target_id, target_id])
+                    if is_single_lesion_mode[]
+                        if !isempty(panel_all_ids)
+                            textSpec.minAndMaxValue = T_mm.([minimum(panel_all_ids), maximum(panel_all_ids)])
+                            textSpec.allowedIDs = Float32.(panel_all_ids)
+                        else
+                            textSpec.minAndMaxValue = T_mm.([0, 0])
+                            textSpec.allowedIDs = Float32[-1.0f0]
+                        end
                     else
                         textSpec.minAndMaxValue = T_mm.([1, 10000])
+                        textSpec.allowedIDs = Float32[]
+                    end
+                else
+                    textSpec.colorMask = RGBA(0.0f0, 0.0f0, 0.0f0, 1.0f0)
+                    if is_single_lesion_mode[]
+                        if target_id > 0
+                            textSpec.minAndMaxValue = T_mm.([target_id, target_id])
+                            textSpec.allowedIDs = Float32[Float32(target_id)]
+                        else
+                            textSpec.minAndMaxValue = T_mm.([0, 0])
+                            textSpec.allowedIDs = Float32[-1.0f0]
+                        end
+                    else
+                        textSpec.minAndMaxValue = T_mm.([1, 10000])
+                        textSpec.allowedIDs = Float32[]
                     end
                 end
-                textSpec.isVisible = true
+                textSpec.isVisible = _lesion_active[]
                 if textSpec.maskContribution <= 0.05f0
                     textSpec.maskContribution = 0.5f0
                 end
@@ -1763,11 +2277,24 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             elseif textSpec.name == "manualModif"
                 textSpec.minAndMaxValue = Float32.([0.0, 10000.0])
                 textSpec.allowedIDs = Float32[]
-                textSpec.isVisible = true
+                textSpec.isVisible = _lesion_active[]
+                if stateObject.mainForDisplayObjects.vulkanPipelineState !== nothing
+                    stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                end
+            elseif textSpec.name == "Anatomy"
+                T_mm = eltype(textSpec.minAndMaxValue)
+                textSpec.minAndMaxValue = T_mm.([1, 400])
+                textSpec.allowedIDs = Float32[]
+                textSpec.isVisible = _anatomy_active[]
+                if textSpec.maskContribution <= 0.05f0
+                    textSpec.maskContribution = 0.35f0
+                end
+                if stateObject.mainForDisplayObjects.vulkanPipelineState !== nothing
+                    stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                end
             end
         end
     end
-    _mri_clamp_mask_range!(stateObjects)
     _t_vis = round((time_ns()-t_total)/1e6, digits=1)
 
     if PERF_LOG[]; println("[SYNC-LESION] Visibility updated, bone subseg..."); flush(stdout); end
@@ -1779,9 +2306,32 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             if stateObject.calcDimsStruct.mainQuadVertSize <= 0 || all(iszero, stateObject.calcDimsStruct.mainImageQuadVert)
                 continue
             end
-            is_right_tp = compare_mode[] && panel_idx in (5, 6, 7, 8, 9)
-            panel_tp = is_right_tp ? compare_right_tp[] : current_tp_index[]
-            panel_lid = is_right_tp ? panel5_lesion_id : data.lesion_id
+            is_mri_cmp_p = mri_compare_mode[] && panel_idx in (6, 7, 8, 9)
+            is_right_tp = (compare_mode[] && panel_idx in (5, 6, 7, 8, 9)) || is_mri_cmp_p
+            panel_tp = if is_mri_cmp_p
+                stateObject.onScrollData.currentTpIndex >= 0 ? stateObject.onScrollData.currentTpIndex : current_tp_index[]
+            elseif is_right_tp
+                compare_right_tp[]
+            else
+                current_tp_index[]
+            end
+            panel_lid = if is_mri_cmp_p && data.lesion_id > 0 && panel_tp != current_tp_index[]
+                try
+                    left_node = get_node_name_for_tp(current_tp_index[])
+                    p_node = get_node_name_for_tp(panel_tp)
+                    match_mod = _get_la()
+                    m_ids = match_mod !== nothing ? match_mod.find_cross_tp_lesion(left_node, data.lesion_id, p_node) : Int[]
+                    isempty(m_ids) ? 0 : m_ids[1]
+                catch
+                    0
+                end
+            elseif is_mri_cmp_p
+                data.lesion_id
+            elseif is_right_tp
+                panel5_lesion_id
+            else
+                data.lesion_id
+            end
 
             panel_has_bone = false
             surf_indices = CartesianIndex{3}[]
@@ -1793,7 +2343,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                 catch e
                     (CartesianIndex{3}[], CartesianIndex{3}[])
                 end
-                panel_idx_mapped = panel_idx > 5 ? panel_idx - 5 : panel_idx
+                panel_idx_mapped = (is_mri_cmp_p) ? 1 : (panel_idx > 5 ? panel_idx - 5 : panel_idx)
                 surf_indices = if panel_idx_mapped == 3  # Sagittal (Y, Z, X)
                     [CartesianIndex(I[2], I[3], I[1]) for I in panel_surf_pts]
                 elseif panel_idx_mapped == 4  # Coronal (X, Z, Y)
@@ -1927,9 +2477,12 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
     # 3. Emulate Right Click behavior to jump panels exactly as right click does
     if data.jump_to_center && canonical_center !== nothing
         origX, origY, origZ = canonical_center[1], canonical_center[2], canonical_center[3]
+        current_viewer_position[] = (origX, origY, origZ)
 
         for i in 1:length(stateObjects)
-            if i in (1, 2, 5, 6, 7)  # Axial panels (main + M2)
+            if mri_compare_mode[] && i in (6, 7, 8, 9)
+                stateObjects[i].lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
+            elseif i in (1, 2, 5, 6, 7)  # Axial panels (main + M2)
                 stateObjects[i].lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
             elseif i in (3, 8)  # Sagittal panels (main + M2)
                 stateObjects[i].lastRecordedMousePosition = CartesianIndex(origY, origZ, origX)
@@ -1942,12 +2495,20 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         if length(stateObjects) >= 5
             push!(targets, (5, origZ))
         end
-        # M2 Quad View panels mirror main window layout
+        # M2 Quad View panels mirror main window layout (or follow active mri_compare_plane in MRI Comparison mode)
         if length(stateObjects) >= 9
-            push!(targets, (6, origZ))  # M2 Axial (like panel 1)
-            push!(targets, (7, origZ))  # M2 PET (like panel 2)
-            push!(targets, (8, origX))  # M2 Sagittal (like panel 3)
-            push!(targets, (9, origY))  # M2 Coronal (like panel 4)
+            if mri_compare_mode[]
+                for p_mri in 6:9
+                    dim_mri = stateObjects[p_mri].onScrollData.dimensionToScroll
+                    sl_mri = dim_mri == 1 ? origX : (dim_mri == 2 ? origY : origZ)
+                    push!(targets, (p_mri, sl_mri))
+                end
+            else
+                push!(targets, (6, origZ))  # M2 Axial (like panel 1)
+                push!(targets, (7, origZ))  # M2 PET (like panel 2)
+                push!(targets, (8, origX))  # M2 Sagittal (like panel 3)
+                push!(targets, (9, origY))  # M2 Coronal (like panel 4)
+            end
         end
 
         target_panel_set = Set{Int}()
@@ -2074,36 +2635,16 @@ function _clamp_lid_for_tp(lid::Int, tp::Int)::Int
     return lid
 end
 
-"""On MRI modalities, show lesion segments in Mask texture.
-If anatomy toggle is ON, also show prostate gland (label 4+).
-Call this after reactToSyncLesion which may have re-applied single-lesion filtering."""
+"""Sync MRI modalities using unified lesion and anatomy rules."""
 function _force_mri_show_all!(stateObjects::Vector{StateDataFields})
-    max_label = 3  # MRI: always clamp mask to lesion labels 1-3 (never show gland label 4)
-
-    for (i, stateObject) in enumerate(stateObjects)
-        tp = (i in (5, 6, 7, 8, 9) && compare_mode[]) ? compare_right_tp[] : current_tp_index[]
-        panel_mod = uppercase(get(tp_modalities, tp, "PET"))
-        if !(panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI"))
-            continue
-        end
-        for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-            if textSpec.name == "Mask" || textSpec.name == "segmentation" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy" && textSpec.name != "Bone_Overlay")
-                T_mm = eltype(textSpec.minAndMaxValue)
-                textSpec.minAndMaxValue = T_mm.([1, max_label])
-                textSpec.isVisible = true
-                # Ensure mask is rendered with non-zero opacity
-                if textSpec.maskContribution <= 0.0f0
-                    textSpec.maskContribution = 0.5f0
-                end
-            end
-        end
-    end
+    lid = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
+    reactToSyncLesion(SyncLesionEvent(lid, is_single_lesion_mode[]), stateObjects)
 end
 
 """Check if timepoint modality has PET/SPECT data (not MRI-only)."""
 function _has_nuclear_modality(tp::Int)::Bool
     panel_mod = uppercase(get(tp_modalities, tp, "PET"))
-    return !(panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI"))
+    return !(panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC"))
 end
 
 """Clamp mask minAndMaxValue on MRI TPs to hide gland (label 4+).
@@ -2113,8 +2654,12 @@ function _mri_clamp_mask_range!(stateObjects::Vector{StateDataFields})
     # No-op: clamping max to 3 hides lesions > 3 on MRI.
 end
 
-"""Update quad layout: hide Panel 2 (PET-only) when modality is MRI."""
+"""Update quad layout: hide Panel 2 (PET-only) when modality is MRI (unless in MRI Multimodal mode)."""
 function _update_quad_layout_for_modality!(stateObjects::Vector{StateDataFields}, tp::Int)
+    if mri_main_multimodal_mode[]
+        updateQuadVertices!(stateObjects[2], :TopRight)
+        return
+    end
     if _has_nuclear_modality(tp)
         updateQuadVertices!(stateObjects[2], :TopRight)
     else
@@ -2890,7 +3435,7 @@ end
 """Load a TpCacheEntry into a specific panel.
 Integer textures (mask, anatomy, bone) use native Int16/Int8 types — no Float32 conversion.
 Bone_Surface + Bone_Marrow are merged into a single Bone_Overlay (surface=1, marrow=2, both=3)."""
-function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
+function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx; force_unpermuted::Bool=false, tp_override::Int=-1)
     if panel_idx > length(stateObjects)
         return
     end
@@ -2916,7 +3461,23 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
         return zeros(Int8, req_size)
     end
 
-    panel_idx_mapped = panel_idx > 5 ? panel_idx - 5 : panel_idx
+    use_unpermuted = force_unpermuted || (mri_compare_mode[] && panel_idx in (6, 7, 8, 9)) || (mri_main_multimodal_mode[] && panel_idx in (1, 2, 3, 4))
+    panel_idx_mapped = use_unpermuted ? 1 : (panel_idx > 5 ? panel_idx - 5 : panel_idx)
+    
+    # Track which TP and modality this panel holds
+    panel_tp = if tp_override >= 0
+        tp_override
+    elseif mri_main_multimodal_mode[] && panel_idx in (1, 2, 3, 4)
+        mri_tps = !isempty(mri_compare_tps) ? mri_compare_tps : get_mri_comparison_tps(current_tp_index[])
+        slot = min(panel_idx, length(mri_tps))
+        mri_tps[slot]
+    elseif compare_mode[] && panel_idx in (5, 6, 7, 8, 9)
+        compare_right_tp[]
+    else
+        current_tp_index[]
+    end
+    panel_mod = uppercase(get(tp_modalities, panel_tp, "PET"))
+    has_ct_spec = any(ts -> ts.name == "CT", stateObjects[panel_idx].mainForDisplayObjects.listOfTextSpecifications)
     
     panel_voxels = if panel_idx_mapped == 3  # Sagittal (Y,Z,X)
         sz = (size(entry.ct, 2), size(entry.ct, 3), size(entry.ct, 1))
@@ -2932,9 +3493,13 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
             ("Mask", PermutedDimsArray(mask_i16, (1,3,2))),
             ("Bone_Overlay", get_or_create_bone_i8(panel_idx, sz)),
             ("Anatomy", anat_i16 !== nothing ? PermutedDimsArray(anat_i16, (1,3,2)) : zeros(Int16, sz))]
-    elseif panel_idx_mapped == 2  # PET-only
-        Any[("PET", entry.pet)]
-    else  # Axial (panels 1, 5) — each gets its own bone copy
+    elseif panel_idx_mapped == 2 && !has_ct_spec  # PET-only (Panel 2 in Main Window)
+        if panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC")
+            Any[("PET", entry.ct)]
+        else
+            Any[("PET", entry.pet)]
+        end
+    else  # Axial / Unpermuted (panels 1, 5, 6, 7, and 8, 9 in MRI Comparison mode)
         sz = size(entry.ct)
         Any[("CT", entry.ct), ("PET", entry.pet), ("Mask", mask_i16),
             ("Bone_Overlay", get_or_create_bone_i8(panel_idx, sz)),
@@ -2968,12 +3533,23 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
     stateObjects[panel_idx].onScrollData.dataToScroll = newDataToScroll
     stateObjects[panel_idx].onScrollData.nameIndexes = DataStructs.getLocationDict(newDataToScroll)
     
-    # Track which TP this panel holds
-    panel_tp = if compare_mode[] && panel_idx in (5, 6, 7, 8, 9)
-        compare_right_tp[]
+    # Ensure dataToScrollDims reflects the loaded volume orientation (unpermuted vs permuted)
+    base_vox_sz = !isempty(stateObjects) ? stateObjects[1].onScrollData.dataToScrollDims.voxelSize : (1.0, 1.0, 2.0)
+    vol_sz = size(newDataToScroll[1].dat)
+    target_dim = use_unpermuted ? ((mri_compare_mode[] || mri_main_multimodal_mode[]) ? mri_compare_plane[] : stateObjects[1].onScrollData.dimensionToScroll) : 3
+    panel_vox_sz = if panel_idx_mapped == 3
+        (base_vox_sz[2], base_vox_sz[3], base_vox_sz[1])
+    elseif panel_idx_mapped == 4
+        (base_vox_sz[1], base_vox_sz[3], base_vox_sz[2])
     else
-        current_tp_index[]
+        base_vox_sz
     end
+    new_scroll_dims = DataToScrollDims(imageSize=vol_sz, voxelSize=panel_vox_sz, dimensionToScroll=target_dim)
+    stateObjects[panel_idx].onScrollData.dataToScrollDims = new_scroll_dims
+    stateObjects[panel_idx].onScrollData.dimensionToScroll = target_dim
+    stateObjects[panel_idx].calcDimsStruct = getHeightToWidthRatio(stateObjects[panel_idx].calcDimsStruct, new_scroll_dims)
+
+    # Track which TP this panel holds
     stateObjects[panel_idx].onScrollData.currentTpIndex = panel_tp
     stateObjects[panel_idx].onScrollData.totalTpCount = length(tp_labels)
     stateObjects[panel_idx].onScrollData.tpIndices = sort(collect(keys(tp_labels)))
@@ -2984,42 +3560,56 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
     main_win = if panel_mod in ("T2", "MRI", "MR")
         get(current_windowing, "T2", Float32[0.0, 1000.0])
     elseif panel_mod == "T1"
-        get(current_windowing, "T1", Float32[0.0, 600.0])
+        get(current_windowing, "T1", Float32[0.0, 700.0])
     elseif panel_mod == "ADC"
         get(current_windowing, "ADC", Float32[0.0, 2200.0])
     elseif panel_mod == "DWI"
-        get(current_windowing, "DWI", Float32[0.0, 120.0])
+        get(current_windowing, "DWI", Float32[50.0, 1200.0])
+    elseif panel_mod in ("DCE", "DYNAMIC")
+        get(current_windowing, "DCE", Float32[0.0, 500.0])
     else
         get(current_windowing, "CT", Float32[-160.0, 240.0])
     end
     
     nuc_win = if panel_mod in ("T2", "MRI", "MR")
-        get(current_windowing, "ADC", Float32[0.0, 2200.0])
+        get(current_windowing, "T2", Float32[0.0, 1000.0])
     elseif panel_mod == "SPECT"
         get(current_windowing, "SPECT", Float32[0.0, 10.0])
-    elseif panel_mod in ("ADC", "DWI", "T1")
+    elseif panel_mod in ("ADC", "DWI", "T1", "DCE", "DYNAMIC")
         main_win
     else
         get(current_windowing, "PET", Float32[0.0, 10.0])
     end
     
+    is_mri_active_mode = mri_main_multimodal_mode[] || (mri_compare_mode[] && panel_idx in (6, 7, 8, 9)) || (panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC"))
+
     for tex in stateObjects[panel_idx].mainForDisplayObjects.listOfTextSpecifications
         if tex.name == "CT" || (tex.isMainImage && tex.name != "PET" && tex.name != "SPECT")
             tex.minAndMaxValue = Float32.([main_win[1], main_win[2]])
-        elseif tex.name == "PET" || tex.name == "SPECT" || tex.isNuclearMask
-            tex.minAndMaxValue = Float32.([nuc_win[1], nuc_win[2]])
-            # Default PET/nuclear overlay to 0% blend on MRI modalities
-            if panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI")
+            if panel_idx == 2
+                tex.isVisible = mri_main_multimodal_mode[]
                 tex.maskContribution = 0.0f0
             end
-        elseif panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI") && (tex.name == "Mask" || tex.name == "segmentation" || (tex.isMultiDiscreteMask && tex.name != "Anatomy" && tex.name != "Bone_Overlay"))
-            # Show lesion segments on MRI; show gland (label 4+) only if anatomy toggle is ON
-            max_label = 3  # MRI: always clamp to lesion labels 1-3
-            T_mm = eltype(tex.minAndMaxValue)
-            tex.minAndMaxValue = T_mm.([1, max_label])
-            tex.isVisible = true
+        elseif tex.name == "PET" || tex.name == "SPECT" || tex.isNuclearMask
+            tex.minAndMaxValue = Float32.([nuc_win[1], nuc_win[2]])
+            if panel_idx == 2
+                tex.isVisible = !mri_main_multimodal_mode[]
+                tex.maskContribution = mri_main_multimodal_mode[] ? 0.0f0 : 1.0f0
+            elseif is_mri_active_mode && !tex.isMainImage
+                tex.maskContribution = 0.0f0
+            end
+        elseif tex.name == "Mask" || tex.name == "segmentation" || (tex.isMultiDiscreteMask && tex.name != "Anatomy" && tex.name != "Bone_Overlay")
+            tex.isVisible = _lesion_active[]
             if tex.maskContribution <= 0.0f0
                 tex.maskContribution = 0.5f0
+            end
+        elseif tex.name == "Anatomy"
+            T_mm = eltype(tex.minAndMaxValue)
+            tex.minAndMaxValue = T_mm.([1, 400])
+            tex.allowedIDs = Float32[]
+            tex.isVisible = _anatomy_active[]
+            if tex.maskContribution <= 0.0f0
+                tex.maskContribution = 0.35f0
             end
         end
     end
@@ -3030,6 +3620,11 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx)
     end
     stateObjects[panel_idx].currentDisplayedSlice = max(1, stateObjects[panel_idx].onScrollData.slicesNumber ÷ 2)
     stateObjects[panel_idx].currentlyDispDat = SingleSliceDat(sliceNumber=0)
+
+    # Immediately mark UBO dirty so updated windowing/visibility propagates to GPU
+    if stateObjects[panel_idx].mainForDisplayObjects.vulkanPipelineState !== nothing
+        stateObjects[panel_idx].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+    end
 end
 
 
@@ -3122,6 +3717,10 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
     # Only run synchronous Dict invalidations at the start of a stroke (or >0.25s since last invalidation)
     if now_t - prev_t > 0.25
         invalidate_suv_for_lesion(lesion_id, tp_idx)
+    end
+
+    if ccall(:jl_generating_output, Cint, ()) != 0
+        return
     end
 
     if !_async_suv_worker_running[]
@@ -3636,12 +4235,21 @@ function reactToChangeTimePoint(data::ChangeTimePointEvent, stateObjects::Vector
         
         t_panel_left = @elapsed begin
             if entry_left !== nothing
-                _load_tp_from_entry!(stateObjects, entry_left, 1)
+                for i in 1:min(4, length(stateObjects))
+                    _load_tp_from_entry!(stateObjects, entry_left, i)
+                end
             end
         end
         if DEBUG_VERBOSE[]; println("  [BENCH] _load_tp_from_entry!(left): $(round(t_panel_left*1000, digits=1))ms"); flush(stdout); end
         
-        # Right panel: next TP chronologically
+        if mri_compare_mode[]
+            if current_active_lesion_id[] > 0
+                lid_cmp = _clamp_lid_for_tp(current_active_lesion_id[], new_tp)
+                reactToSyncLesion(SyncLesionEvent(lid_cmp), stateObjects)
+            end
+            _update_quad_layout_for_modality!(stateObjects, new_tp)
+        else
+            # Right panel: next TP chronologically
 if _m2_reference_tp[] == -1
     next_pos = new_pos < num_tps ? new_pos + 1 : 1
     right_tp = tp_indices[next_pos]
@@ -3650,32 +4258,46 @@ elseif _m2_reference_tp[] == 0
 else
     right_tp = _m2_reference_tp[]
 end
-                # right_tp assigned above
-        compare_right_tp[] = right_tp
-        
-        t_load_r = @elapsed begin
-            entry_right = get_or_load_tp_data(right_tp)
-        end
-        if DEBUG_VERBOSE[]; println("  [BENCH] get_or_load_tp_data(right): $(round(t_load_r, digits=3))s"); flush(stdout); end
-        
-        t_panel_right = @elapsed begin
-            if entry_right !== nothing
-                _load_tp_from_entry!(stateObjects, entry_right, 5)
+                    # right_tp assigned above
+            compare_right_tp[] = right_tp
+            
+            t_load_r = @elapsed begin
+                entry_right = get_or_load_tp_data(right_tp)
             end
+            if DEBUG_VERBOSE[]; println("  [BENCH] get_or_load_tp_data(right): $(round(t_load_r, digits=3))s"); flush(stdout); end
+            
+            t_panel_right = @elapsed begin
+                if entry_right !== nothing
+                    _load_tp_from_entry!(stateObjects, entry_right, 5)
+                    if length(stateObjects) >= 9
+                        for p in 6:9
+                            _load_tp_from_entry!(stateObjects, entry_right, p)
+                        end
+                        stateObjects[6].currentDisplayedSlice = max(1, stateObjects[1].currentDisplayedSlice)
+                        stateObjects[7].currentDisplayedSlice = max(1, stateObjects[2].currentDisplayedSlice)
+                        stateObjects[8].currentDisplayedSlice = max(1, stateObjects[3].currentDisplayedSlice)
+                        stateObjects[9].currentDisplayedSlice = max(1, stateObjects[4].currentDisplayedSlice)
+                        for p in 6:9
+                            stateObjects[p].isSliceChanged = true
+                            _force_texture_upload!(stateObjects, p)
+                        end
+                    end
+                end
+            end
+            if DEBUG_VERBOSE[]; println("  [BENCH] _load_tp_from_entry!(right): $(round(t_panel_right*1000, digits=1))ms"); flush(stdout); end
+            
+            # Skip initial per-panel reactToScroll — reactToSyncLesion below covers [1, 5]
+            if DEBUG_VERBOSE[]; println("  [BENCH] skipping redundant initial scroll in compare mode"); flush(stdout); end
+            
+            # Re-apply bone overlay for active lesion after TP data replacement
+            if current_active_lesion_id[] > 0
+                lid_cmp = _clamp_lid_for_tp(current_active_lesion_id[], new_tp)
+                reactToSyncLesion(SyncLesionEvent(lid_cmp), stateObjects)
+            end
+            
+            right_label = get(tp_labels, right_tp, "TP $right_tp")
+            @debug "Compare: Left=$label, Right=$right_label"
         end
-        if DEBUG_VERBOSE[]; println("  [BENCH] _load_tp_from_entry!(right): $(round(t_panel_right*1000, digits=1))ms"); flush(stdout); end
-        
-        # Skip initial per-panel reactToScroll — reactToSyncLesion below covers [1, 5]
-        if DEBUG_VERBOSE[]; println("  [BENCH] skipping redundant initial scroll in compare mode"); flush(stdout); end
-        
-        # Re-apply bone overlay for active lesion after TP data replacement
-        if current_active_lesion_id[] > 0
-            lid_cmp = _clamp_lid_for_tp(current_active_lesion_id[], new_tp)
-            reactToSyncLesion(SyncLesionEvent(lid_cmp), stateObjects)
-        end
-        
-        right_label = get(tp_labels, right_tp, "TP $right_tp")
-        @debug "Compare: Left=$label, Right=$right_label"
     else
         # Normal mode: load current TP into all panels
         t_load = @elapsed begin
@@ -3709,8 +4331,6 @@ end
                 end
             end
             if DEBUG_VERBOSE[]; println("  [BENCH] bone overlay (reactToSyncLesion): $(round(t_bone_overlay*1000, digits=1))ms"); flush(stdout); end
-            # On MRI: force show-all segments (override single-lesion filter from reactToSyncLesion)
-            _force_mri_show_all!(stateObjects)
             # Hide/show Panel 2 (PET-only) based on modality
             if !compare_mode[]
                 _update_quad_layout_for_modality!(stateObjects, new_tp)
@@ -3729,6 +4349,14 @@ end
             
             # Evict TPs that are far from current (keep current ± 1 only)
             keep_set = Set{Int}([new_tp, tp_indices[prev_pos], tp_indices[next_pos_n]])
+            if compare_mode[] && compare_right_tp[] >= 0
+                push!(keep_set, compare_right_tp[])
+            end
+            if mri_compare_mode[]
+                for mtp in mri_compare_tps
+                    push!(keep_set, mtp)
+                end
+            end
             evict_tps = filter(tp -> !in(tp, keep_set), lock(_tp_cache_lock) do; collect(keys(tp_data_cache)); end)
             
             if !isempty(neighbors) || !isempty(evict_tps)
@@ -3825,9 +4453,15 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
                 stateObjects[5].calcDimsStruct.panY = stateObjects[1].calcDimsStruct.panY
                 stateObjects[5].isSliceChanged = true
                 _force_texture_upload!(stateObjects, 5)
-                if length(stateObjects) >= 9
+                if length(stateObjects) >= 9 && !mri_compare_mode[]
                     for p in 6:9
                         _load_tp_from_entry!(stateObjects, entry_right, p)
+                    end
+                    stateObjects[6].currentDisplayedSlice = max(1, stateObjects[1].currentDisplayedSlice)
+                    stateObjects[7].currentDisplayedSlice = max(1, stateObjects[2].currentDisplayedSlice)
+                    stateObjects[8].currentDisplayedSlice = max(1, stateObjects[3].currentDisplayedSlice)
+                    stateObjects[9].currentDisplayedSlice = max(1, stateObjects[4].currentDisplayedSlice)
+                    for p in 6:9
                         stateObjects[p].isSliceChanged = true
                         _force_texture_upload!(stateObjects, p)
                     end
@@ -3839,7 +4473,7 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
                 try reactToSyncLesion(SyncLesionEvent(lid_cmp), stateObjects) catch; end
             end
         else
-            # Set Left panel (panel 1)
+            # Set Left panel (panels 1..4)
             left_tp = target_tp
             current_tp_index[] = left_tp
             left_label = get(tp_labels, left_tp, "TP $left_tp")
@@ -3847,9 +4481,12 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
             
             entry_left = get_or_load_tp_data(left_tp)
             if entry_left !== nothing && length(stateObjects) >= 1
-                _load_tp_from_entry!(stateObjects, entry_left, 1)
-                stateObjects[1].isSliceChanged = true
-                _force_texture_upload!(stateObjects, 1)
+                for p in 1:min(4, length(stateObjects))
+                    _load_tp_from_entry!(stateObjects, entry_left, p)
+                    stateObjects[p].isSliceChanged = true
+                    _force_texture_upload!(stateObjects, p)
+                end
+                _update_quad_layout_for_modality!(stateObjects, left_tp)
             end
             
             if current_active_lesion_id[] > 0
@@ -3887,11 +4524,20 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
             catch e
                 @debug "WARNING: Failed to sync Lesion $lid on TP set: $e"
             end
-            # On MRI: force show-all segments
-            _force_mri_show_all!(stateObjects)
             # Hide/show Panel 2 (PET-only) based on modality
             if !compare_mode[]
                 _update_quad_layout_for_modality!(stateObjects, target_tp)
+            end
+            
+            # Immediately upload textures to GPU for active panels
+            for p in 1:min(5, length(stateObjects))
+                if stateObjects[p].calcDimsStruct.mainQuadVertSize > 0 && !all(iszero, stateObjects[p].calcDimsStruct.mainImageQuadVert)
+                    stateObjects[p].isSliceChanged = true
+                    _force_texture_upload!(stateObjects, p)
+                    if stateObjects[p].mainForDisplayObjects.vulkanPipelineState !== nothing
+                        stateObjects[p].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                    end
+                end
             end
         end
     end
@@ -3909,6 +4555,11 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
             keep_set = Set{Int}([target_tp, tp_indices[prev_pos], tp_indices[next_pos_n]])
             if compare_mode[] && compare_right_tp[] >= 0
                 push!(keep_set, compare_right_tp[])
+            end
+            if mri_compare_mode[]
+                for mtp in mri_compare_tps
+                    push!(keep_set, mtp)
+                end
             end
             evict_tps = filter(tp -> !in(tp, keep_set), lock(_tp_cache_lock) do; collect(keys(tp_data_cache)); end)
             
@@ -4487,6 +5138,8 @@ const MASK_BACKUP = Dict{UInt64, Array{Float32, 3}}()
 const _lesion_active = Ref(true)
 const _bone_surf_active = Ref(true)
 const _bone_marr_active = Ref(true)
+const _anatomy_active = Ref(false)
+export _lesion_active, _bone_surf_active, _bone_marr_active, _anatomy_active
 
 function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{StateDataFields})
     @debug "reactToShowMaskLayer: layer=$(data.layer) active=$(data.active)"
@@ -4497,6 +5150,8 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
         _bone_surf_active[] = data.active
     elseif data.layer == 3
         _bone_marr_active[] = data.active
+    elseif data.layer == 4
+        _anatomy_active[] = data.active
     end
     
     tex_target = if data.layer == 1
@@ -4522,6 +5177,9 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
                 textSpec.isVisible = data.active
                 toggled_count += 1
             end
+        end
+        if state.mainForDisplayObjects.vulkanPipelineState !== nothing
+            state.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
         end
     end
     @debug "  Toggled $toggled_count textures for layer=$(data.layer)"
@@ -4566,37 +5224,24 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
         end
     end
     
-    # Force re-upload of texture data after visibility toggle to ensure
-    # anatomy texture data reaches the GPU (may have been skipped on prior scroll)
-    if data.layer == 4 && data.active
-        for idx in visible_panels
+    # Force re-upload of texture data and update parameters after visibility toggle
+    if data.layer == 4
+        for idx in 1:length(stateObjects)
             stateObjects[idx].isSliceChanged = true
-            # Enforce full anatomy range — undo any prior single-lesion filter
             for ts in stateObjects[idx].mainForDisplayObjects.listOfTextSpecifications
                 if ts.name == "Anatomy"
-                    ts.minAndMaxValue = Int16[0, 400]
-                    ts.allowedIDs = Float32[]
+                    ts.isVisible = data.active
+                    if data.active
+                        ts.minAndMaxValue = Int16[1, 400]
+                        ts.allowedIDs = Float32[]
+                        if ts.maskContribution <= 0.05f0
+                            ts.maskContribution = 0.35f0
+                        end
+                    end
                 end
             end
-            # Mark UBO dirty so shader reads updated minAndMaxValue
             if stateObjects[idx].mainForDisplayObjects.vulkanPipelineState !== nothing
                 stateObjects[idx].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
-            end
-        end
-    end
-    
-    # On MRI modalities: update Mask label range to show/hide prostate gland (label 4+)
-    if data.layer == 4
-        tp = current_tp_index[]
-        panel_mod = uppercase(get(tp_modalities, tp, "PET"))
-        if panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI")
-            _force_mri_show_all!(stateObjects)
-            # Force re-render to reflect the updated mask range
-            for idx in visible_panels
-                stateObjects[idx].isSliceChanged = true
-                if stateObjects[idx].mainForDisplayObjects.vulkanPipelineState !== nothing
-                    stateObjects[idx].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
-                end
             end
         end
     end
@@ -5583,6 +6228,20 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
                 mark_expert_edit!(active_id_int)
                 invalidate_and_recompute_lesion_metrics_async!(active_id_int, tp_idx, seg_vol)
             end
+            
+            # ── Synchronize Heat-GDT lesion mask across all MRI modalities ──
+            if (tp_idx in mri_compare_tps || mri_main_multimodal_mode[] || mri_compare_mode[])
+                b_min = heat_state.current_box_min
+                b_max = heat_state.current_box_max
+                bbox_heat = (b_min[1]:b_max[1], b_min[2]:b_max[2], b_min[3]:b_max[3])
+                sync_mri_mask_across_modalities!(tp_idx, bbox_heat)
+                
+                for pi in 1:length(stateObjects)
+                    try
+                        _force_texture_upload!(stateObjects, pi)
+                    catch; end
+                end
+            end
         end
         
         set_ai_status!("[Heat-GDT GPU] Done: $(total_steps) steps in $(round(elapsed, digits=1))s")
@@ -5662,6 +6321,20 @@ function reactToHeatGDTPosthocSize(event::MakieEvents.HeatGDTPosthocSizeEvent, s
             if active_id_int > 0
                 mark_expert_edit!(active_id_int)
                 invalidate_and_recompute_lesion_metrics_async!(active_id_int, tp_idx, seg_vol)
+            end
+            
+            # ── Synchronize Heat-GDT lesion mask across all MRI modalities ──
+            if (tp_idx in mri_compare_tps || mri_main_multimodal_mode[] || mri_compare_mode[])
+                b_min = heat_state.current_box_min
+                b_max = heat_state.current_box_max
+                bbox_heat = (b_min[1]:b_max[1], b_min[2]:b_max[2], b_min[3]:b_max[3])
+                sync_mri_mask_across_modalities!(tp_idx, bbox_heat)
+                
+                for pi in 1:length(stateObjects)
+                    try
+                        _force_texture_upload!(stateObjects, pi)
+                    catch; end
+                end
             end
         end
     end

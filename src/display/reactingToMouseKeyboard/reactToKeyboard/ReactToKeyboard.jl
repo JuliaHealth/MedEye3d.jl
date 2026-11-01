@@ -224,12 +224,29 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             return
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_Z)
+            if keyInputInfo.action == GLFW.PRESS && !is_ctrl_down_ref[]
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.ZoomToFitEvent(0))
+                return
+            end
             scCode = "z"
+
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_0) || keyInputInfo.scancode == Int32(GLFW.KEY_KP_0)
+            if keyInputInfo.action == GLFW.PRESS && !is_ctrl_down_ref[] && !is_shift_down_ref[] && !is_alt_down_ref[]
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.ZoomToFitEvent(0))
+                return
+            end
+            scCode = "0"
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F)
             if keyInputInfo.action == GLFW.PRESS
                 ch = _get_event_channel()
-                ch !== nothing && put!(ch, MakieEvents.ToggleFlickerEvent())
+                if is_shift_down_ref[]
+                    ch !== nothing && put!(ch, MakieEvents.ZoomToFitEvent(0))
+                else
+                    ch !== nothing && put!(ch, MakieEvents.ToggleFlickerEvent())
+                end
             end
             scCode = "f"
 
@@ -248,20 +265,47 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             end
             return
 
-        # C - Toggle compare mode (spawns M2 window if needed, then activates compare view)
+        # C - Toggle compare mode (unmodified C) / Toggle MRI Comparison mode (Shift+C)
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_C)
             if keyInputInfo.action == GLFW.PRESS
                 try
                     top = parentmodule(@__MODULE__)
                     if isdefined(top, :LesionMetadataWindow)
                         lmw_obs = getfield(top.LesionMetadataWindow, :_lmw_observables)
-                        if haskey(lmw_obs, :obs_set_compare_mode)
+                        if is_shift_down_ref[] && haskey(lmw_obs, :obs_toggle_mri_compare)
+                            obs = lmw_obs[:obs_toggle_mri_compare]
+                            obs[] = obs[] + 1
+                        elseif haskey(lmw_obs, :obs_set_compare_mode)
                             obs = lmw_obs[:obs_set_compare_mode]
                             obs[] = !obs[]
                         end
                     end
                 catch e
                     @warn "[KEY_C] Compare mode toggle failed: $e"
+                end
+            end
+            return
+
+        # Y - Toggle MRI Multimodal mode directly on Main Screen (Panels 1–4)
+        # Shift+Y - Toggle MRI Comparison mode (M2 window)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_Y)
+            if keyInputInfo.action == GLFW.PRESS
+                try
+                    if is_shift_down_ref[]
+                        top = parentmodule(@__MODULE__)
+                        if isdefined(top, :LesionMetadataWindow)
+                            lmw_obs = getfield(top.LesionMetadataWindow, :_lmw_observables)
+                            if haskey(lmw_obs, :obs_toggle_mri_compare)
+                                obs = lmw_obs[:obs_toggle_mri_compare]
+                                obs[] = obs[] + 1
+                            end
+                        end
+                    else
+                        ch = _get_event_channel()
+                        ch !== nothing && put!(ch, MakieEvents.ToggleMRIMultimodalEvent(true))
+                    end
+                catch e
+                    @warn "[KEY_Y] MRI mode toggle failed: $e"
                 end
             end
             return

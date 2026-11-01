@@ -222,7 +222,7 @@ function run_viewer_loop(mainViewer, makie_win=nothing)
             @assert MedEye3d.SegmentationDisplay._vk_heat_uploaded[] "Heat diffusion not uploaded on startup!"
 
             # 2. Press W key (Toggle Heat-GDT Wand)
-            put!(mainViewer.channel, MedEye3d.ForDisplayStructs.KeyInputFields(key=GLFW.KEY_W, action=GLFW.PRESS))
+            put!(mainViewer.channel, MedEye3d.ForDisplayStructs.KeyInputFields(scancode=Int32(0), action=GLFW.PRESS))
             for _ in 1:10; GLFW.PollEvents(); sleep(0.01); end
 
             # 3. Simulate mouse click in image (HeatGDTStartEvent)
@@ -266,7 +266,8 @@ function run_viewer_loop(mainViewer, makie_win=nothing)
 
                 println(">> [TEST_MODE] Switching M2 to 'Compare Curr/Next TP' (triggers Compare Mode)...")
                 makie_win.m2_mode[] = "Compare Curr/Next TP"
-                for _ in 1:30; GLFW.PollEvents(); sleep(0.01); end
+                for _ in 1:60; GLFW.PollEvents(); sleep(0.02); end
+                try; run(`scrot /tmp/test_compare_curr_next.png`); catch; end
 
                 println(">> [TEST_MODE] Switching M2 back to 'Pure PET (Current TP)' (triggers Main View)...")
                 makie_win.m2_mode[] = "Pure PET (Current TP)"
@@ -598,25 +599,26 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                     if child["type"] == "vtkMRMLLinearTransformNode"; continue; end
                     name = child["name"]
                     child_mod = get(child, "modality", get(child, "Modality", get(meta_modalities, name, "")))
-                    if !isempty(child_mod)
-                        modality = child_mod
-                    end
                     if child["type"] == "vtkMRMLScalarVolumeNode"
                         if occursin("NM", name) || occursin("PET", name) || occursin("SUV", name)
                             pet_name = name * ".nii.gz"
-                            if isempty(child_mod) && (occursin("NM", name) || occursin("SPECT", name)); modality = "SPECT"; end
-                        elseif occursin("CT", name) || occursin("MR", name) || occursin("T2", name) || occursin("ADC", name) || occursin("DWI", name) || occursin("T1", name)
+                            if isempty(ct_name) && isempty(child_mod) && (occursin("NM", name) || occursin("SPECT", name)); modality = "SPECT"; end
+                        elseif occursin("CT", name) || occursin("MR", name) || occursin("T2", name) || occursin("ADC", name) || occursin("DWI", name) || occursin("T1", name) || occursin("DCE", name) || occursin("DYN", name)
                             ct_name = name * ".nii.gz"
-                            if isempty(child_mod)
-                                if occursin("ADC", name)
-                                    modality = "ADC"
-                                elseif occursin("DWI", name) || occursin("BVAL", name)
-                                    modality = "DWI"
-                                elseif occursin("T1", name)
-                                    modality = "T1"
-                                elseif occursin("MR", name) || occursin("T2", name)
-                                    modality = "T2"
-                                end
+                            if !isempty(child_mod)
+                                modality = child_mod
+                            elseif occursin("ADC", name)
+                                modality = "ADC"
+                            elseif occursin("DWI", name) || occursin("BVAL", name)
+                                modality = "DWI"
+                            elseif occursin("T1", name)
+                                modality = "T1"
+                            elseif occursin("DCE", name) || occursin("DYN", name)
+                                modality = "DCE"
+                            elseif occursin("MR", name) || occursin("T2", name)
+                                modality = "T2"
+                            else
+                                modality = "CT"
                             end
                         end
                     elseif child["type"] == "vtkMRMLSegmentationNode"
@@ -755,8 +757,24 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     if haskey(h5_init, "_meta_")
         if haskey(h5_init, "_meta_/lesion_annotations.json")
             try
-                persisted_annotations = JSON.parse(read(h5_init["_meta_/lesion_annotations.json"]))
-                println("[AppMain] Loaded $(length(persisted_annotations)) persisted lesion annotations from _meta_/lesion_annotations.json"); flush(stdout)
+                dset = h5_init["_meta_/lesion_annotations.json"]
+                dt = HDF5.datatype(dset)
+                skip = false
+                try
+                    if !HDF5.h5t_is_variable_str(dt.id) && HDF5.sizeof(dt) > 50 * 1024 * 1024
+                        @warn "_meta_/lesion_annotations.json fixed string is excessively large ($(HDF5.sizeof(dt)) bytes), skipping."
+                        skip = true
+                    end
+                catch; end
+                if !skip
+                    raw_str = read(dset)
+                    if sizeof(raw_str) < 50 * 1024 * 1024
+                        persisted_annotations = JSON.parse(raw_str)
+                        println("[AppMain] Loaded $(length(persisted_annotations)) persisted lesion annotations from _meta_/lesion_annotations.json"); flush(stdout)
+                    else
+                        @warn "_meta_/lesion_annotations.json content exceeds 50MB ($(sizeof(raw_str)) bytes), skipping."
+                    end
+                end
             catch e
                 @warn "Failed to parse _meta_/lesion_annotations.json: $e"
             end
@@ -766,6 +784,10 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         companion_json = replace(h5_path, r"\.(h5|hdf5)$"i => "_annotations.json")
         for cand_json in [companion_json, LesionMetadataWindow.DEFAULT_SAVE_PATH]
             if isfile(cand_json)
+                if filesize(cand_json) > 50 * 1024 * 1024
+                    @warn "Companion annotations file $cand_json is too large ($(filesize(cand_json)) bytes), skipping."
+                    continue
+                end
                 try
                     persisted_annotations = JSON.parse(read(cand_json, String))
                     if !isempty(persisted_annotations)
@@ -1008,17 +1030,21 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         isEditable=true, isVisible=false, maskContribution=init_label_opacity
     )
 
+    textureSpec_ct_p2 = deepcopy(textureSpec_ct)
+    textureSpec_ct_p2.isVisible = false
+    textureSpec_ct_p2.maskContribution = 0.0f0
+
     textureSpecArray = Vector{Vector{TextureSpec}}([
         # Main Window (TP 0) Quad View
         TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
-        TextureSpec[deepcopy(textureSpec_pure_pet)],
+        TextureSpec[textureSpec_ct_p2, deepcopy(textureSpec_pure_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
         TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
         TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
         TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
         
         # M2 Window (TP 1) Quad View
         TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
-        TextureSpec[deepcopy(textureSpec_pure_pet)],
+        TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
         TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
         TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)],
         TextureSpec[deepcopy(textureSpec_ct), deepcopy(textureSpec_pet), deepcopy(textureSpec_mask), deepcopy(textureSpec_bone), deepcopy(textureSpec_anatomy)]
@@ -1027,9 +1053,10 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     tp_labels_map = Dict{Int, String}()
     tp_nodes_map = Dict{Int, String}()
 
-    # Build chronological date lists for PET and SPECT from metadata.json
-    pet_meta_dates = sort([k for (k, v) in date_entries_map if haskey(v, "PET") || haskey(v, "PT")])
-    spect_meta_dates = sort([k for (k, v) in date_entries_map if haskey(v, "SPECT") || haskey(v, "NM")])
+    # Build chronological date lists for PET, SPECT, and MRI from metadata.json
+    pet_meta_dates = sort([k for (k, v) in date_entries_map if haskey(v, "PET") || haskey(v, "PT") || occursin("PET", k)])
+    spect_meta_dates = sort([k for (k, v) in date_entries_map if haskey(v, "SPECT") || haskey(v, "NM") || occursin("SPECT", k)])
+    mri_meta_dates = sort([k for (k, v) in date_entries_map if haskey(v, "MRI") || haskey(v, "MR") || occursin("MRI", k) || occursin("MR", k)])
     all_meta_dates = sort(collect(keys(date_entries_map)))
 
     pet_counter = 0
@@ -1071,6 +1098,10 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 if spect_counter <= length(spect_meta_dates)
                     matched_date_key = spect_meta_dates[spect_counter]
                 end
+            elseif uppercase(modality) in ("T2", "MRI", "MR", "ADC", "DWI", "T1", "DCE", "DYNAMIC")
+                if !isempty(mri_meta_dates)
+                    matched_date_key = mri_meta_dates[1]
+                end
             elseif s_idx <= length(all_meta_dates)
                 matched_date_key = all_meta_dates[s_idx]
             end
@@ -1106,6 +1137,19 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             catch te
                 @warn "[Translation] Could not translate description for TP $tp_i: $te"
             end
+        elseif isempty(desc_de) && !isempty(desc_en)
+            try
+                @info "[Translation] Translating English description to German for TP $tp_i ($matched_date_key)..."
+                desc_de = MedEye3d.LLMDictation.translate_report_to_german(desc_en)
+                if !isempty(desc_de) && !startswith(desc_de, "Error") && !startswith(desc_de, "API Error") && !startswith(desc_de, "Connection Error")
+                    matched_info["Description"] = desc_de
+                    @info "[Translation] Successfully translated TP $tp_i ($matched_date_key) to German: $(length(desc_de)) chars"
+                else
+                    desc_de = ""
+                end
+            catch te
+                @warn "[Translation] Could not translate description to German for TP $tp_i: $te"
+            end
         end
 
         MEH.tp_descriptions[tp_i] = desc_de
@@ -1120,15 +1164,18 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         MEH.tp_node_names[tp_i] = node_name
     end
 
-    # Load prostate-specific anatomy labels for MRI timepoints (must run after tp_modalities is populated)
+    # Initialize anatomy labels for all timepoints, layering prostate-specific labels on MRI TPs
+    for (tp_i, mod) in MEH.tp_modalities
+        MEH.anatomy_labels_cache[tp_i] = copy(ts_names)
+    end
     HDF5.h5open(h5_path, "r") do h5_r
         if haskey(h5_r, "_meta_/prostate_anatomy_labels.json")
             try
                 raw_prostate = JSON.parse(read(h5_r["_meta_/prostate_anatomy_labels.json"]))
                 prostate_labels = Dict{Int,String}(parse(Int, k) => v for (k, v) in raw_prostate)
                 for (tp_i, mod) in MEH.tp_modalities
-                    if uppercase(mod) in ("T2", "MRI", "MR", "T1", "ADC", "DWI")
-                        MEH.anatomy_labels_cache[tp_i] = prostate_labels
+                    if uppercase(mod) in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC")
+                        MEH.anatomy_labels_cache[tp_i] = merge(copy(ts_names), prostate_labels)
                     end
                 end
                 @info "Loaded prostate anatomy labels for MRI TPs: $(collect(values(prostate_labels)))"
@@ -1169,6 +1216,17 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                     p99 = isempty(pos_dat) ? 1.0f0 : Float32(quantile(pos_dat, 0.99))
                     scale_factor = 8.0f0 / max(p99, 1.0f0)
                     pet_vol = max.(0.0f0, pet_vol .* scale_factor)
+                elseif uppercase(modality) in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC")
+                    ct_vol = max.(0.0f0, ct_vol)
+                    pos_dat = ct_vol[ct_vol .> 0]
+                    if !isempty(pos_dat)
+                        p99 = Float32(quantile(pos_dat, 0.99))
+                        if p99 > 1500.0f0 || p99 < 400.0f0
+                            scale_factor = 1000.0f0 / max(p99, 1.0f0)
+                            ct_vol = ct_vol .* scale_factor
+                            @info "[MRI Normalization] Rescaled $modality TP $orig_tp to [0, 1000] (p99=$p99 -> 1000.0, scale=$scale_factor)"
+                        end
+                    end
                 end
                 
                 needs_reverse = !is_pf
@@ -1271,14 +1329,16 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         sz = size(e.ct)
         Vector{Vector{Any}}([
             Any[("CT", e.ct), ("PET", e.pet), ("Mask", mask_i16), ("Bone_Overlay", bone_i8), ("Anatomy", anat_i16)],
-            Any[("PET", e.pet)],
+            Any[("CT", e.ct), ("PET", e.pet), ("Mask", mask_i16), ("Bone_Overlay", bone_i8), ("Anatomy", anat_i16)],
             Any[("CT", PermutedDimsArray(e.ct, (2,3,1))), ("PET", PermutedDimsArray(e.pet, (2,3,1))), ("Mask", PermutedDimsArray(mask_i16, (2,3,1))), ("Bone_Overlay", zeros(Int8, sz[2], sz[3], sz[1])), ("Anatomy", PermutedDimsArray(anat_i16, (2,3,1)))],
             Any[("CT", PermutedDimsArray(e.ct, (1,3,2))), ("PET", PermutedDimsArray(e.pet, (1,3,2))), ("Mask", PermutedDimsArray(mask_i16, (1,3,2))), ("Bone_Overlay", zeros(Int8, sz[1], sz[3], sz[2])), ("Anatomy", PermutedDimsArray(anat_i16, (1,3,2)))],
             Any[("CT", e.ct), ("PET", e.pet), ("Mask", mask_i16), ("Bone_Overlay", zeros(Int8, sz)), ("Anatomy", anat_i16)]
         ])
     end
     first_voxelDataTupleVector = entry_to_vdt(first_entry)
-    append!(first_voxelDataTupleVector, entry_to_vdt(first_entry)) # Append 5 more panels for M2 (starts as a copy of TP0)
+    m2_vdt = entry_to_vdt(first_entry)
+    m2_vdt[2] = deepcopy(m2_vdt[5]) # Panel 7 (M2 Top-Right) gets full 5-texture spec for MRI Comparison & Quad modes
+    append!(first_voxelDataTupleVector, m2_vdt) # Append 5 more panels for M2 (starts as a copy of TP0)
 
     ds = display_spacing
     spacings = [[ds], [ds], [(ds[2], ds[3], ds[1])], [(ds[1], ds[3], ds[2])], [ds]]
@@ -1489,6 +1549,8 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             tp_cur = MedEye3d.SegmentationDisplay.MakieEventHandlers.current_tp_index[]
             if m2_window_cache[] !== nothing
                 put!(mainViewer.channel, LaunchM2Event(tp_cur, m2_window_cache[], val))
+            elseif val != "Pure PET (Current TP)"
+                notify(makie_win.trigger_m2)
             end
         end
         is_cmp = (val == "Compare Curr/Next TP")

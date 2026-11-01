@@ -137,6 +137,19 @@ function reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFi
     end
     
     mainState.calcDimsStruct.zoom = newZoom
+    if isdefined(MEH, :mri_main_multimodal_mode) && MEH.mri_main_multimodal_mode[] && panelIdx in (1, 2, 3, 4)
+        for p in 1:min(4, length(mainStates))
+            mainStates[p].calcDimsStruct.zoom = newZoom
+            mainStates[p].calcDimsStruct.panX = mainState.calcDimsStruct.panX
+            mainStates[p].calcDimsStruct.panY = mainState.calcDimsStruct.panY
+        end
+    elseif isdefined(MEH, :mri_compare_mode) && MEH.mri_compare_mode[] && panelIdx in (6, 7, 8, 9) && length(mainStates) >= 9
+        for p_mri in 6:9
+            mainStates[p_mri].calcDimsStruct.zoom = newZoom
+            mainStates[p_mri].calcDimsStruct.panX = mainState.calcDimsStruct.panX
+            mainStates[p_mri].calcDimsStruct.panY = mainState.calcDimsStruct.panY
+        end
+    end
     @debug "Shift-Scroll Zoom: $(round(newZoom, digits=2))x (panel=$panelIdx)"
     # GPU zoom: no reactToScroll needed — render loop picks up new zoom via push constants
 end
@@ -195,11 +208,105 @@ function reactToScroll(data::ScrollEvent, mainStates::Vector{StateDataFields}, t
         end
         reactToScrollMultiPanel!(active_panels, mainStates, slice_overrides)
     else
-        # Single panel scroll
+        # Single panel scroll (with compare mode dual-window pairing)
         lastSlice = mainState.onScrollData.slicesNumber
         if lastSlice > 0
             newSlice = clamp(mainState.currentDisplayedSlice + delta, 1, lastSlice)
-            reactToScrollMultiPanel!([clickedPanel], mainStates, Dict(clickedPanel => newSlice))
+            active_panels = Int[clickedPanel]
+            slice_overrides = Dict{Int,Int}(clickedPanel => newSlice)
+            
+            # If compare mode is active and secondary window panels exist (6..9),
+            # synchronize the paired panel to the EXACT same slice!
+            try
+                MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+                if isdefined(MEH, :mri_main_multimodal_mode) && MEH.mri_main_multimodal_mode[] && clickedPanel in (1, 2, 3, 4)
+                    for p in 1:min(4, length(mainStates))
+                        if p != clickedPanel
+                            p_last = mainStates[p].onScrollData.slicesNumber
+                            if p_last > 0
+                                push!(active_panels, p)
+                                slice_overrides[p] = clamp(newSlice, 1, p_last)
+                            end
+                        end
+                    end
+                    if isdefined(MEH, :mri_compare_mode) && MEH.mri_compare_mode[] && length(mainStates) >= 9
+                        for p_mri in 6:9
+                            p_last = mainStates[p_mri].onScrollData.slicesNumber
+                            if p_last > 0
+                                push!(active_panels, p_mri)
+                                slice_overrides[p_mri] = clamp(newSlice, 1, p_last)
+                            end
+                        end
+                    end
+                elseif isdefined(MEH, :mri_compare_mode) && MEH.mri_compare_mode[] && length(mainStates) >= 9
+                    plane_mri = mainStates[6].onScrollData.dimensionToScroll
+                    if clickedPanel in (6, 7, 8, 9)
+                        for p_mri in 6:9
+                            if p_mri != clickedPanel
+                                p_last = mainStates[p_mri].onScrollData.slicesNumber
+                                if p_last > 0
+                                    push!(active_panels, p_mri)
+                                    slice_overrides[p_mri] = clamp(newSlice, 1, p_last)
+                                end
+                            end
+                        end
+                        # Also sync matching orientation in Main Window (1/2 for Axial, 3 for Sagittal, 4 for Coronal)
+                        w1_pairs = plane_mri == 1 ? [3] : (plane_mri == 2 ? [4] : [1, 2])
+                        for w1_p in w1_pairs
+                            if w1_p <= length(mainStates)
+                                p_last = mainStates[w1_p].onScrollData.slicesNumber
+                                if p_last > 0
+                                    push!(active_panels, w1_p)
+                                    slice_overrides[w1_p] = clamp(newSlice, 1, p_last)
+                                end
+                            end
+                        end
+                    else
+                        # Scrolled in Main Window (1..4) — sync panels 6..9 if orientation matches
+                        w1_dim = clickedPanel == 3 ? 1 : (clickedPanel == 4 ? 2 : mainStates[clickedPanel].onScrollData.dimensionToScroll)
+                        if clickedPanel == 1 && mainStates[2].onScrollData.slicesNumber > 0
+                            push!(active_panels, 2)
+                            slice_overrides[2] = clamp(newSlice, 1, mainStates[2].onScrollData.slicesNumber)
+                        elseif clickedPanel == 2 && mainStates[1].onScrollData.slicesNumber > 0
+                            push!(active_panels, 1)
+                            slice_overrides[1] = clamp(newSlice, 1, mainStates[1].onScrollData.slicesNumber)
+                        end
+                        if w1_dim == plane_mri
+                            for p_mri in 6:9
+                                p_last = mainStates[p_mri].onScrollData.slicesNumber
+                                if p_last > 0
+                                    push!(active_panels, p_mri)
+                                    slice_overrides[p_mri] = clamp(newSlice, 1, p_last)
+                                end
+                            end
+                        end
+                    end
+                elseif MEH.compare_mode[] && length(mainStates) >= 9
+                    pair_map = Dict(
+                        1 => [6, 7, 2],
+                        2 => [7, 1, 6],
+                        3 => [8],
+                        4 => [9],
+                        6 => [1, 2, 7],
+                        7 => [2, 1, 6],
+                        8 => [3],
+                        9 => [4]
+                    )
+                    if haskey(pair_map, clickedPanel)
+                        for paired_idx in pair_map[clickedPanel]
+                            if paired_idx <= length(mainStates)
+                                p_last = mainStates[paired_idx].onScrollData.slicesNumber
+                                if p_last > 0
+                                    push!(active_panels, paired_idx)
+                                    slice_overrides[paired_idx] = clamp(newSlice, 1, p_last)
+                                end
+                            end
+                        end
+                    end
+                end
+            catch; end
+            
+            reactToScrollMultiPanel!(active_panels, mainStates, slice_overrides)
         end
     end
 

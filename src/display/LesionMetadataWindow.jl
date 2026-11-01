@@ -1861,6 +1861,42 @@ end
 export ln_validation_db, load_ln_validations, save_ln_validations
 
 """
+    _sanitize_annotation_db(db::Dict) -> Dict{String, Any}
+
+Filters out any non-lesion groups (e.g. volume datasets, BASELINE, ATLAS, TFM transforms)
+and ensures multi-dimensional image arrays are never serialized into JSON or annotations.
+"""
+function _sanitize_annotation_db(db::Dict)
+    clean_db = Dict{String, Any}()
+    for (k, v) in db
+        k_str = string(k)
+        if startswith(k_str, "_")
+            if v isa AbstractDict
+                clean_db[k_str] = v
+            end
+            continue
+        end
+        lid = parse_lesion_id(k_str)
+        if lid === nothing && tryparse(Int, k_str) === nothing
+            # Skip non-lesion groups like "BASELINE", "ATLAS", "TFM_..."
+            continue
+        end
+        if v isa AbstractDict
+            clean_lesion = Dict{String, Any}()
+            for (field_k, field_v) in v
+                # Never keep multi-dimensional arrays (volumes) inside lesion annotations
+                if field_v isa AbstractArray && ndims(field_v) > 1
+                    continue
+                end
+                clean_lesion[string(field_k)] = field_v
+            end
+            clean_db[k_str] = clean_lesion
+        end
+    end
+    return clean_db
+end
+
+"""
     persist_to_active_dataset_h5!(db::Dict, h5_path::String)
 
 Persist the newest anatomical names, organ mappings, segment names, and full lesion
@@ -1957,10 +1993,11 @@ function persist_to_active_dataset_h5!(db::Dict, h5_path::String)
                 meta_grp["segment_names.json"] = JSON.json(existing_sn, 2)
 
                 # 3. Update _meta_/lesion_annotations.json
+                clean_db = _sanitize_annotation_db(db)
                 if haskey(meta_grp, "lesion_annotations.json")
                     delete_object(meta_grp, "lesion_annotations.json")
                 end
-                meta_grp["lesion_annotations.json"] = JSON.json(db, 2)
+                meta_grp["lesion_annotations.json"] = JSON.json(clean_db, 2)
 
                 # 4. Also persist metadata_presets.json, custom_options.json, and custom_fields.json if populated
                 if !isempty(_metadata_presets_cache[])
@@ -2024,14 +2061,21 @@ function load_annotations_hdf5(path::String = DEFAULT_HDF5_PATH)::Dict{String,Di
                 # 2. If out is empty, read per-lesion groups
                 if isempty(out)
                     for id in keys(file)
-                        id in ("_meta_", "CENTROIDS", "BONE_SUBSEG", "TOTAL_SEG") && continue
-                        startswith(id, "timepoint_") && continue
+                        id in ("_meta_", "CENTROIDS", "BONE_SUBSEG", "TOTAL_SEG", "BASELINE", "ATLAS") && continue
+                        (startswith(id, "timepoint_") || startswith(id, "TFM_")) && continue
+                        # Only consider groups that represent lesion IDs (digits or lesion_X)
+                        parse_lesion_id(id) === nothing && tryparse(Int, id) === nothing && !startswith(id, "lesion_") && continue
                         obj = file[id]
                         if obj isa HDF5.Group
                             inner = Dict{String,Any}()
                             for k in keys(obj)
+                                dset = obj[k]
+                                # NEVER read 3D arrays or volumes into annotations
+                                if dset isa HDF5.Dataset && ndims(dset) > 1
+                                    continue
+                                end
                                 try
-                                    val = read(obj[k])
+                                    val = read(dset)
                                     if val isa AbstractString && (startswith(strip(val), "{") || startswith(strip(val), "["))
                                         try
                                             parsed = JSON.parse(val)
@@ -2039,7 +2083,7 @@ function load_annotations_hdf5(path::String = DEFAULT_HDF5_PATH)::Dict{String,Di
                                         catch
                                             inner[k] = val
                                         end
-                                    else
+                                    elseif val isa Number || val isa AbstractString || val isa Bool
                                         inner[k] = val
                                     end
                                 catch e
@@ -2171,7 +2215,8 @@ function save_annotations_hdf5(db::Dict, path::String=DEFAULT_HDF5_PATH)
                 end
             end
             meta_grp = create_group(file, "_meta_")
-            meta_grp["lesion_annotations.json"] = JSON.json(db, 2)
+            clean_db = _sanitize_annotation_db(db)
+            meta_grp["lesion_annotations.json"] = JSON.json(clean_db, 2)
         end
         @debug "Annotations saved to HDF5 → $path ($(length(db)) entries)"
     catch e
@@ -2189,19 +2234,20 @@ function save_annotations(db::Dict,
         end
         return
     end
+    clean_db = _sanitize_annotation_db(db)
     if endswith(lowercase(path), ".h5") || endswith(lowercase(path), ".hdf5")
-        save_annotations_hdf5(db, path)
+        save_annotations_hdf5(clean_db, path)
         return
     end
     active_h5 = _get_active_h5_path()
     if !isempty(active_h5) && isfile(active_h5)
-        persist_to_active_dataset_h5!(db, active_h5)
+        persist_to_active_dataset_h5!(clean_db, active_h5)
     end
     try
         open(path, "w") do io
-            JSON.print(io, db, 2)
+            JSON.print(io, clean_db, 2)
         end
-        @debug "Annotations saved → $(path)  ($(length(db)) lesions)"
+        @debug "Annotations saved → $(path) ($(length(clean_db)) lesions)"
     catch e
         @warn "Cannot save annotations: $(e)"
     end
@@ -5035,9 +5081,13 @@ function create_metadata_window(
     sec_view = begin_section!("Viewport & Windowing")
     
     m2_r = nr!()
-    btn_m2 = Button(g[m2_r, 1:2], label = "[Launch M2]", buttoncolor = RGBf(0.2, 0.4, 0.6), labelcolor = TXT, fontsize = 10)
-    menu_m2_mode = Menu(g[m2_r, 3:4], options = ["Pure PET (Current TP)", "Compare Curr/Next TP", "Flicker", "Overlay"], default = "Pure PET (Current TP)", fontsize = 10); _register_menu!(menu_m2_mode)
+    btn_m2 = Button(g[m2_r, 1], label = "[M2]", buttoncolor = RGBf(0.2, 0.4, 0.6), labelcolor = TXT, fontsize = 10)
+    btn_fit = Button(g[m2_r, 2], label = "Fit (0)", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    menu_m2_mode = Menu(g[m2_r, 3:4], options = ["Pure PET (Current TP)", "Compare Curr/Next TP", "MRI Comparison", "Flicker", "Overlay"], default = "Pure PET (Current TP)", fontsize = 10); _register_menu!(menu_m2_mode)
     rowsize!(g, m2_r, Fixed(28)); register_fixed_row!(m2_r, 28)
+    on(btn_fit.clicks) do _
+        put!(channel, MakieEvents.ZoomToFitEvent(0))
+    end
     m2_ref_r = nr!()
     Label(g[m2_ref_r, 1:2], "Reference TP:", fontsize = 10, color = LBL_FG, halign = :left)
     menu_m2_ref = Menu(g[m2_ref_r, 3:4], options = ["Next TP", "Baseline (TP0)"], default = "Next TP", fontsize = 10); _register_menu!(menu_m2_ref)
@@ -5089,6 +5139,59 @@ function create_metadata_window(
         if apply_compare_mode_ui! !== nothing && cv_active[] != val
             apply_compare_mode_ui!(val)
         end
+    end
+
+    vmri_r = nr!()
+    btn_mri_main = Button(g[vmri_r, 1:2], label = "MRI Multi (Main)", buttoncolor = _MEH.mri_main_multimodal_mode[] ? BLU_BTN : BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_mri_comp = Button(g[vmri_r, 3:4], label = "MRI Comp (M2)",   buttoncolor = _MEH.mri_compare_mode[] ? BLU_BTN : BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, vmri_r, Fixed(28)); register_fixed_row!(vmri_r, 28)
+
+    # ── 4-Corner Layout Display (Shows modality in each viewer quadrant) ───────
+    obs_quad_hdr = Observable("⊞ Quad View: Multi-Planar + PET")
+    obs_quad_tl  = Observable("↖ TL: Axial (CT / Overlay)")
+    obs_quad_tr  = Observable("↗ TR: Pure PET / SPECT")
+    obs_quad_bl  = Observable("↙ BL: Sagittal (CT / Overlay)")
+    obs_quad_br  = Observable("↘ BR: Coronal (CT / Overlay)")
+
+    try
+        init_q = _MEH.quad_corner_info[]
+        obs_quad_hdr[] = init_q.header
+        obs_quad_tl[]  = init_q.tl
+        obs_quad_tr[]  = init_q.tr
+        obs_quad_bl[]  = init_q.bl
+        obs_quad_br[]  = init_q.br
+    catch; end
+
+    on(_MEH.quad_corner_info) do q
+        obs_quad_hdr[] = q.header
+        obs_quad_tl[]  = q.tl
+        obs_quad_tr[]  = q.tr
+        obs_quad_bl[]  = q.bl
+        obs_quad_br[]  = q.br
+    end
+
+    quad_info_hdr_r = nr!()
+    lbl_quad_hdr = Label(g[quad_info_hdr_r, 1:4], obs_quad_hdr,
+        fontsize = 9, font = :bold, color = ACCENT, halign = :left)
+    rowsize!(g, quad_info_hdr_r, Fixed(16)); register_fixed_row!(quad_info_hdr_r, 16)
+
+    quad_r1 = nr!()
+    lbl_quad_tl = Label(g[quad_r1, 1:2], obs_quad_tl, fontsize = 9, color = RGBf(0.3, 0.8, 1.0), halign = :left)
+    lbl_quad_tr = Label(g[quad_r1, 3:4], obs_quad_tr, fontsize = 9, color = RGBf(0.4, 0.9, 0.5), halign = :left)
+    rowsize!(g, quad_r1, Fixed(16)); register_fixed_row!(quad_r1, 16)
+
+    quad_r2 = nr!()
+    lbl_quad_bl = Label(g[quad_r2, 1:2], obs_quad_bl, fontsize = 9, color = RGBf(1.0, 0.75, 0.3), halign = :left)
+    lbl_quad_br = Label(g[quad_r2, 3:4], obs_quad_br, fontsize = 9, color = RGBf(0.85, 0.6, 0.95), halign = :left)
+    rowsize!(g, quad_r2, Fixed(16)); register_fixed_row!(quad_r2, 16)
+
+    on(btn_mri_main.clicks) do _
+        put!(channel, MakieEvents.ToggleMRIMultimodalEvent(true))
+        btn_mri_main.buttoncolor = _MEH.mri_main_multimodal_mode[] ? BLU_BTN : BG_PNL
+    end
+    on(btn_mri_comp.clicks) do _
+        obs_toggle_mri_compare[] = obs_toggle_mri_compare[] + 1
+        btn_mri_comp.buttoncolor = (_MEH.mri_compare_mode[] || menu_m2_mode.selection[] == "MRI Comparison") ? BLU_BTN : BG_PNL
     end
 
     vc_r = nr!()
@@ -5525,6 +5628,27 @@ function create_metadata_window(
         end
     end
     
+    # Observable for GLFW KEY_V handler to trigger move lesion toggle
+    obs_toggle_move_lesion = Observable(0)
+    _lmw_observables[:obs_toggle_move_lesion] = obs_toggle_move_lesion
+    on(obs_toggle_move_lesion) do _
+        btn_move_lesion.clicks[] = btn_move_lesion.clicks[] + 1
+    end
+
+    # Observable for GLFW KEY_Y / Shift+KEY_C handler to toggle MRI Comparison mode
+    obs_toggle_mri_compare = Observable(0)
+    _lmw_observables[:obs_toggle_mri_compare] = obs_toggle_mri_compare
+    on(obs_toggle_mri_compare) do _
+        cur_sel = menu_m2_mode.selection[]
+        new_mode = (cur_sel == "MRI Comparison") ? "Pure PET (Current TP)" : "MRI Comparison"
+        idx = findfirst(==(new_mode), menu_m2_mode.options[])
+        if idx !== nothing
+            menu_m2_mode.i_selected[] = idx
+            menu_m2_mode.selection[] = new_mode
+        end
+        btn_mri_comp.buttoncolor = (new_mode == "MRI Comparison") ? BLU_BTN : BG_PNL
+    end
+
     on(events(fig).keyboardbutton) do event
         if _login_visible[]
             if (event.action == Makie.Keyboard.release || event.action == Makie.Keyboard.press) && event.key == Makie.Keyboard.escape
@@ -5555,15 +5679,26 @@ function create_metadata_window(
                 btn_move_lesion.clicks[] = btn_move_lesion.clicks[] + 1
                 return Consume(true)
             end
+        elseif event.action == Makie.Keyboard.press && (event.key == Makie.Keyboard._0 || event.key == Makie.Keyboard.kp_0 || event.key == Makie.Keyboard.z)
+            put!(channel, MakieEvents.ZoomToFitEvent(0))
+            return Consume(true)
+        elseif event.action == Makie.Keyboard.press && event.key == Makie.Keyboard.y
+            if (Makie.Keyboard.left_shift in events(fig).keyboardstate) || (Makie.Keyboard.right_shift in events(fig).keyboardstate)
+                obs_toggle_mri_compare[] = obs_toggle_mri_compare[] + 1
+            else
+                put!(channel, MakieEvents.ToggleMRIMultimodalEvent(true))
+                btn_mri_main.buttoncolor = _MEH.mri_main_multimodal_mode[] ? BLU_BTN : BG_PNL
+            end
+            return Consume(true)
+        elseif event.action == Makie.Keyboard.press && event.key == Makie.Keyboard.c
+            if (Makie.Keyboard.left_shift in events(fig).keyboardstate) || (Makie.Keyboard.right_shift in events(fig).keyboardstate)
+                obs_toggle_mri_compare[] = obs_toggle_mri_compare[] + 1
+            else
+                obs_set_compare_mode[] = !cv_active[]
+            end
+            return Consume(true)
         end
         return Consume(false)
-    end
-
-    # Observable for GLFW KEY_V handler to trigger move lesion toggle
-    obs_toggle_move_lesion = Observable(0)
-    _lmw_observables[:obs_toggle_move_lesion] = obs_toggle_move_lesion
-    on(obs_toggle_move_lesion) do _
-        btn_move_lesion.clicks[] = btn_move_lesion.clicks[] + 1
     end
 
     # Merged overlay/single/all/refresh into one compact row
@@ -5862,76 +5997,116 @@ function create_metadata_window(
             apply_spect_win(v_min, v_max)
         end
     end
-    # MRI Windowing (T2, T1, ADC, DWI)
-    mri_lbl_r = nr!()
-    Label(g[mri_lbl_r, 1:4], "-- MRI Window & Offsets (T2 / ADC / DWI / T1) --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
-    
-    mri_s_r = nr!()
-    islider_mri = IntervalSlider(g[mri_s_r, 1:4], range = 0.0:10.0:3000.0, startvalues = (0.0, 1000.0))
-    rowsize!(g, mri_s_r, Fixed(28)); register_fixed_row!(mri_s_r, 28)
-    
-    mri_p_r = nr!()
-    btn_mri_t2  = Button(g[mri_p_r, 1], label = "T2 [0-1000]",   buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
-    btn_mri_adc = Button(g[mri_p_r, 2], label = "ADC [0-2200]",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
-    btn_mri_dwi = Button(g[mri_p_r, 3], label = "DWI [0-120]",   buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
-    btn_mri_t1  = Button(g[mri_p_r, 4], label = "T1 [0-600]",    buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
-
-    mri_c_r = nr!()
-    btn_mri_minus = Button(g[mri_c_r, 1], label = "- 50", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    tb_mri_min = styled_textbox(g[mri_c_r, 2]; placeholder = "Min (0)", stored_string = "0.0", fontsize = 10)
-    tb_mri_max = styled_textbox(g[mri_c_r, 3]; placeholder = "Max (1000)", stored_string = "1000.0", fontsize = 10)
-    btn_mri_plus  = Button(g[mri_c_r, 4], label = "+ 50", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    rowsize!(g, mri_c_r, Fixed(28)); register_fixed_row!(mri_c_r, 28)
-
-    is_syncing_mri = Ref(false)
-    active_mri_submod = Ref("T2")
-
-    function apply_mri_win(mod::String, min_v::Real, max_v::Real)
-        is_syncing_mri[] && return
-        is_syncing_selection[] && return
-        is_syncing_mri[] = true
-        try
-            active_mri_submod[] = mod
-            s_min = string(round(min_v, digits=1))
-            s_max = string(round(max_v, digits=1))
-            _set!(tb_mri_min.stored_string, s_min)
-            _set!(tb_mri_min.displayed_string, s_min)
-            _set!(tb_mri_max.stored_string, s_max)
-            _set!(tb_mri_max.displayed_string, s_max)
-            set_close_to!(islider_mri, Float32(min_v), Float32(max_v))
-            next!(_windowing_subject, (mod, Float32(min_v), Float32(max_v)))
-        finally
-            is_syncing_mri[] = false
+    # ── MRI Modalities Windowing (T2, ADC, DWI, T1, DCE) ────────────────────
+    function build_modality_window_block(mod_name::String, display_title::String, slider_range, default_range, presets::Vector{Tuple{String, Float32, Float32}}, step_val::Float32)
+        lbl_r = nr!()
+        Label(g[lbl_r, 1:4], "-- $display_title --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
+        
+        s_r = nr!()
+        islider = IntervalSlider(g[s_r, 1:4], range = slider_range, startvalues = (default_range[1], default_range[2]))
+        rowsize!(g, s_r, Fixed(26)); register_fixed_row!(s_r, 26)
+        
+        p_r = nr!()
+        Label(g[p_r, 1], "Presets:", fontsize = 9, color = SUBTXT, halign = :right)
+        for (pi, (p_lbl, p_min, p_max)) in enumerate(presets[1:min(3, length(presets))])
+            col = pi + 1
+            btn_p = Button(g[p_r, col], label = p_lbl, buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+            on(btn_p.clicks) do _; apply_win(p_min, p_max) end
         end
+        rowsize!(g, p_r, Fixed(24)); register_fixed_row!(p_r, 24)
+        
+        c_r = nr!()
+        btn_minus = Button(g[c_r, 1], label = "- $(round(Int, step_val))", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+        tb_min = styled_textbox(g[c_r, 2]; placeholder = "Min ($(default_range[1]))", stored_string = string(round(default_range[1], digits=1)), fontsize = 9)
+        tb_max = styled_textbox(g[c_r, 3]; placeholder = "Max ($(default_range[2]))", stored_string = string(round(default_range[2], digits=1)), fontsize = 9)
+        btn_plus  = Button(g[c_r, 4], label = "+ $(round(Int, step_val))", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+        rowsize!(g, c_r, Fixed(26)); register_fixed_row!(c_r, 26)
+        
+        is_syncing = Ref(false)
+        function apply_win(min_v::Real, max_v::Real)
+            is_syncing[] && return
+            is_syncing_selection[] && return
+            is_syncing[] = true
+            try
+                s_min = string(round(min_v, digits=1))
+                s_max = string(round(max_v, digits=1))
+                _set!(tb_min.stored_string, s_min)
+                _set!(tb_min.displayed_string, s_min)
+                _set!(tb_max.stored_string, s_max)
+                _set!(tb_max.displayed_string, s_max)
+                set_close_to!(islider, Float32(min_v), Float32(max_v))
+                next!(_windowing_subject, (mod_name, Float32(min_v), Float32(max_v)))
+            finally
+                is_syncing[] = false
+            end
+        end
+        
+        on(islider.interval) do (min_v, max_v); apply_win(min_v, max_v); end
+        on(btn_minus.clicks) do _
+            v_min = tryparse(Float32, _safe_strip(tb_min.stored_string[])); v_min = v_min === nothing ? default_range[1] : v_min - step_val
+            v_max = tryparse(Float32, _safe_strip(tb_max.stored_string[])); v_max = v_max === nothing ? default_range[2] : v_max - step_val
+            apply_win(v_min, v_max)
+        end
+        on(btn_plus.clicks) do _
+            v_min = tryparse(Float32, _safe_strip(tb_min.stored_string[])); v_min = v_min === nothing ? default_range[1] : v_min + step_val
+            v_max = tryparse(Float32, _safe_strip(tb_max.stored_string[])); v_max = v_max === nothing ? default_range[2] : v_max + step_val
+            apply_win(v_min, v_max)
+        end
+        
+        function apply_from_text()
+            s_min = !isempty(tb_min.displayed_string[]) ? tb_min.displayed_string[] : tb_min.stored_string[]
+            s_max = !isempty(tb_max.displayed_string[]) ? tb_max.displayed_string[] : tb_max.stored_string[]
+            v_min = tryparse(Float32, _safe_strip(s_min))
+            v_max = tryparse(Float32, _safe_strip(s_max))
+            if v_min !== nothing && v_max !== nothing
+                apply_win(v_min, v_max)
+            end
+        end
+        on(tb_min.stored_string) do _; apply_from_text(); end
+        on(tb_max.stored_string) do _; apply_from_text(); end
+        
+        return apply_win
     end
 
-    on(islider_mri.interval) do (min_v, max_v); apply_mri_win(active_mri_submod[], min_v, max_v); end
-    on(btn_mri_t2.clicks)  do _; apply_mri_win("T2", 0.0, 1000.0) end
-    on(btn_mri_adc.clicks) do _; apply_mri_win("ADC", 0.0, 2200.0) end
-    on(btn_mri_dwi.clicks) do _; apply_mri_win("DWI", 0.0, 120.0) end
-    on(btn_mri_t1.clicks)  do _; apply_mri_win("T1", 0.0, 600.0) end
-    on(btn_mri_minus.clicks) do _
-        v_min = tryparse(Float32, _safe_strip(tb_mri_min.stored_string[])); v_min = v_min === nothing ? 0.0f0 : v_min - 50.0f0
-        v_max = tryparse(Float32, _safe_strip(tb_mri_max.stored_string[])); v_max = v_max === nothing ? 1000.0f0 : v_max - 50.0f0
-        apply_mri_win(active_mri_submod[], v_min, v_max)
-    end
-    on(btn_mri_plus.clicks) do _
-        v_min = tryparse(Float32, _safe_strip(tb_mri_min.stored_string[])); v_min = v_min === nothing ? 0.0f0 : v_min + 50.0f0
-        v_max = tryparse(Float32, _safe_strip(tb_mri_max.stored_string[])); v_max = v_max === nothing ? 1000.0f0 : v_max + 50.0f0
-        apply_mri_win(active_mri_submod[], v_min, v_max)
-    end
-    
-    function apply_mri_from_text()
-        s_min = !isempty(tb_mri_min.displayed_string[]) ? tb_mri_min.displayed_string[] : tb_mri_min.stored_string[]
-        s_max = !isempty(tb_mri_max.displayed_string[]) ? tb_mri_max.displayed_string[] : tb_mri_max.stored_string[]
-        v_min = tryparse(Float32, _safe_strip(s_min))
-        v_max = tryparse(Float32, _safe_strip(s_max))
-        if v_min !== nothing && v_max !== nothing
-            apply_mri_win(active_mri_submod[], v_min, v_max)
-        end
-    end
-    on(tb_mri_min.stored_string) do _; apply_mri_from_text(); end
-    on(tb_mri_max.stored_string) do _; apply_mri_from_text(); end
+    # 1. T2-weighted MRI Windowing (Top-Left Corner)
+    apply_t2_win = build_modality_window_block(
+        "T2", "MRI T2 Window (Anatomy - Top-Left)",
+        0.0:10.0:3000.0, (0.0f0, 1000.0f0),
+        [("T2 Standard [0-1000]", 0.0f0, 1000.0f0), ("T2 Contrast [100-800]", 100.0f0, 800.0f0), ("T2 Wide [0-1500]", 0.0f0, 1500.0f0)],
+        50.0f0
+    )
+
+    # 2. ADC Map Windowing (PI-RADS v2.1 Standards - Top-Right Corner)
+    apply_adc_win = build_modality_window_block(
+        "ADC", "MRI ADC Window (Diffusion Metric - Top-Right)",
+        0.0:10.0:3500.0, (0.0f0, 2200.0f0),
+        [("ADC Standard [0-2200]", 0.0f0, 2200.0f0), ("PI-RADS [700-2100]", 700.0f0, 2100.0f0), ("ADC Wide [0-3000]", 0.0f0, 3000.0f0)],
+        50.0f0
+    )
+
+    # 3. DWI (High B-Value) Windowing (Bottom-Left Corner)
+    apply_dwi_win = build_modality_window_block(
+        "DWI", "MRI DWI Window (Diffusion Weighted - Bottom-Left)",
+        0.0:10.0:3000.0, (50.0f0, 1200.0f0),
+        [("PI-RADS Standard [50-1200]", 50.0f0, 1200.0f0), ("High-Contrast Tumor [100-900]", 100.0f0, 900.0f0), ("Low-Noise Background [150-1400]", 150.0f0, 1400.0f0), ("DWI Wide [0-1800]", 0.0f0, 1800.0f0)],
+        25.0f0
+    )
+
+    # 4. T1-weighted MRI Windowing (Bottom-Right Corner)
+    apply_t1_win = build_modality_window_block(
+        "T1", "MRI T1 Window (Pelvis / Marrow / Fat - Bottom-Right)",
+        0.0:10.0:2500.0, (0.0f0, 700.0f0),
+        [("T1 Standard [0-700]", 0.0f0, 700.0f0), ("Hemorrhage [100-800]", 100.0f0, 800.0f0), ("T1 Wide [0-1200]", 0.0f0, 1200.0f0)],
+        50.0f0
+    )
+
+    # 5. Dynamic Contrast-Enhanced (DCE) MRI Windowing (Additional MRI)
+    apply_dce_win = build_modality_window_block(
+        "DCE", "MRI DCE Window (Dynamic Contrast - Additional MRI)",
+        0.0:10.0:2000.0, (0.0f0, 500.0f0),
+        [("DCE Standard [0-500]", 0.0f0, 500.0f0), ("Early Wash [50-400]", 50.0f0, 400.0f0), ("DCE Wide [0-1000]", 0.0f0, 1000.0f0)],
+        25.0f0
+    )
 
     end_section!(sec_win)
 
@@ -11375,7 +11550,7 @@ function create_metadata_window(
         btn_prev, btn_next, btn_next_unreviewed, btn_ln_validation,
         btn_accept, btn_reject, btn_correct,
         btn_paint, btn_erase, btn_revert_ai,
-        btn_pt, btn_nt,
+        btn_pt, btn_nt, btn_m2, btn_fit, btn_ax, btn_cor, btn_sag, btn_cv, btn_mri_main, btn_mri_comp, btn_ps, btn_ns,
         btn_xnat_login, btn_xnat_prev, btn_xnat_save, btn_xnat_next, btn_xnat_preproc
     ]
     append!(action_buttons, anat_rm_btns)
@@ -11383,6 +11558,8 @@ function create_metadata_window(
         !(b in action_buttons) && push!(action_buttons, b)
     end
     _lmw_observables[:action_buttons] = action_buttons
+    _lmw_observables[:btn_mri_main] = btn_mri_main
+    _lmw_observables[:btn_mri_comp] = btn_mri_comp
     _lmw_observables[:btn_add_anat_rel] = btn_add_anat_rel
     _lmw_observables[:anat_rm_btns] = anat_rm_btns
     _lmw_observables[:anat_rel_menus] = anat_rel_menus

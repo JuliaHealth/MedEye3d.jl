@@ -600,10 +600,7 @@ function is_lymph_node_structure(name::String)::Bool
     (occursin("lymph", ln) || occursin("knoten", ln) || occursin("node", ln)) && return true
     
     # Clinical station prefixes and patterns in max_anatomy
-    prefixes = ["neck_", "thoracic_station_", "axillary_", "abdominal_station_",
-                "abdominal_mesenteric", "abdominal_obturator", "abdominal_presacral",
-                "abdominal_pararectal", "abdominal_renal_hilar", "abdominal_common_iliac",
-                "abdominal_external_iliac", "abdominal_internal_iliac", "abdominal_inguinal",
+    prefixes = ["neck_", "thoracic_", "axillary_", "abdominal_",
                 "deep_inguinal", "superficial_inguinal", "inguinal_"]
     for p in prefixes
         startswith(ln, p) && return true

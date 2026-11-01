@@ -692,6 +692,12 @@ on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.CycleMeasureme
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.EditMeasurementEvent) = MakieEventHandlers.reactToEditMeasurement(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.EditLineMeasurementEvent) = MakieEventHandlers.reactToEditLineMeasurement(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.SetLNValidationModeEvent) = MakieEventHandlers.reactToSetLNValidationMode(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleMRIMultimodalEvent) = MakieEventHandlers.reactToToggleMRIMultimodal(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ZoomToFitEvent) = MakieEventHandlers.reactToZoomToFit(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::Any) = begin
+    @warn "Unhandled channel event in on_next!: $(typeof(data))"
+    nothing
+end
 
 on_error!(stateObjects::Vector{StateDataFields}, err) = error(err)
 on_complete!(stateObjects::Vector{StateDataFields}) = ""
@@ -974,10 +980,24 @@ function coordinateDisplay(
     initializedTextures::Vector{Vector{TextureSpec}} = []
     forDispObjs::Vector{forDisplayObjects} = Vector{forDisplayObjects}()
 
+    # Find the maximum spatial dimension across all volumes so Vulkan textures
+    # can accommodate any plane orientation (Axial 512x512, Coronal/Sagittal 512x284)
+    # without dropping upper slice rows or vertically stretching lower-row panels in Quad MRI mode.
+    max_tex_dim = 512
+    if dataToScrollDims isa Vector{DataToScrollDims}
+        for sd in dataToScrollDims
+            max_tex_dim = max(max_tex_dim, maximum(sd.imageSize))
+        end
+    elseif dataToScrollDims isa DataToScrollDims
+        max_tex_dim = max(max_tex_dim, maximum(dataToScrollDims.imageSize))
+    end
+
     foreach(enumerate(calcDimStructs)) do (index, calcDimStruct)
         textSpecVec = listOfTextSpecsMapped[index]
-        w = calcDimStruct.imageTextureWidth
-        h = calcDimStruct.imageTextureHeight
+        w = max(calcDimStruct.imageTextureWidth, Int32(max_tex_dim))
+        h = max(calcDimStruct.imageTextureHeight, Int32(max_tex_dim))
+        calcDimStruct.gpuTextureWidth = w
+        calcDimStruct.gpuTextureHeight = h
 
         # Create Vulkan textures for this panel
         vk_textures = Any[]

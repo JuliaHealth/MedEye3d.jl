@@ -1,6 +1,6 @@
 # MedEye3d Keyboard Shortcuts & Controls Reference
 
-> **Last Updated**: 2026-10-07 — Added G key for Heat-GDT mode toggle, Heat-GDT hold-to-grow.
+> **Last Updated**: 2026-11-01 — Added **MRI Multimodal Mode on Main Screen** (`Ctrl+Y` / `Shift+Y` and `MRI Multi (Main)` button with cross-modality annotation synchronization & Heat-GDT support), **Dedicated MRI Windowing Sliders** (T2, ADC, DWI, T1, DCE with PI-RADS v2.1 presets), **Zoom to Fit** (`0`, `Z`, `Shift+F`, and `Fit (0)` button), and **MRI Comparison Mode in M2** (`Y` / `Shift+C`).
 
 ---
 
@@ -94,27 +94,52 @@ You can toggle between viewing only the active lesion (Single Lesion Mode) or al
 | **F8** | SUV 0–10 | 0 to 10 |
 | **F9** | SUV 0–15 | 0 to 15 |
 
-## Compare & Review Mode (M2 Window)
+## Dedicated MRI Modality Windowing (PI-RADS v2.1 Evidence-Based)
 
-| Shortcut | Action | GUI Sync |
+Each MRI modality has its own independent slider in the Makie sidebar under **"MRI Windowing"**:
+
+| Modality | Default Window | Slider Range | Quick Presets | Step Size | Clinical / PI-RADS Standard |
+|----------|----------------|--------------|---------------|-----------|-----------------------------|
+| **T2** | `[0, 1000]` | `0:10:3000` | `[0-1000]`, `[100-800]`, `[0-1500]` | `±50` | Standard pelvic anatomy, prostate zonal delineation |
+| **ADC** | `[0, 2200]` | `0:10:3500` | `[0-2200]`, `[700-2100]`, `[0-3000]` | `±50` | PI-RADS v2.1: `[700-2100]` drives restricted diffusion (<700 $\mu\text{m}^2/\text{s}$) to black |
+| **DWI** | `[0, 150]` | `0:5:1500` | `[0-150]`, `[0-100]`, `[0-300]` | `±10` | High b-value ($b \ge 1400$) focal hyperintensity detection |
+| **T1** | `[0, 700]` | `0:10:2500` | `[0-700]`, `[100-800]`, `[0-1200]` | `±50` | Hemorrhage exclusion and pelvic lymph node assessment |
+| **DCE** | `[0, 500]` | `0:10:2000` | `[0-500]`, `[50-400]`, `[0-1000]` | `±25` | Early wash-in dynamic contrast enhancement |
+
+## MRI Multimodal & Comparison Modes
+
+| Shortcut / Button | Target Display | Action | GUI Sync |
+|-------------------|----------------|--------|----------|
+| **Y** or **`MRI Multi (Main)`** button | **Main Screen (Panels 1–4)** | Toggle **MRI Multimodal mode on Main Screen**. Displays 4 distinct co-registered MRI modalities (e.g. `T2`, `DWI`, `ADC`, `T1`/`DCE`) in Quad layout. Full interactive annotation tools (Heat-GDT GPU diffusion, 2D paintbrush, erase) are active. Slices, pan/zoom, and plane changes apply synchronously across all 4 panels. Does NOT open Window 2. | ✅ **`MRI Multi (Main)`** button turns blue |
+| **Shift + Y** or **Shift + C** or **`MRI Comp (M2)`** button | **M2 Window (Panels 6–9)** | Toggle **MRI Comparison mode in Window 2**. Opens M2 if closed, displaying 4 distinct MRI modalities in Quad layout for cross-study comparison alongside CT/PET on the main window. | ✅ M2 mode dropdown & **`MRI Comp (M2)`** button sync |
+| **C** | **M2 Window** | Toggle Compare Curr/Next TP mode (opens M2 window if closed) | ✅ Compare button & M2 mode dropdown update |
+| **F** | **M2 Window** | Toggle flicker mode | ✅ M2 mode dropdown updates |
+| **O** | **M2 Window** | Toggle interactive lesion mapping mode (all right lesions vs single matched lesion) | ✅ Interactive Map Mode button updates |
+
+### Automatic Cross-Modality Annotation Synchronization
+When in MRI Multimodal mode (or viewing multiple MRI sequences), **drawing or editing on any MRI panel immediately and automatically synchronizes the 3D lesion mask to all other MRI modalities** for that patient. 
+- Bounding box voxels are copied directly into the in-memory cache (`tp_data_cache`) across all MRI timepoints.
+- All target timepoints are flagged as dirty and autosaved to HDF5.
+- Vulkan textures on both Window 1 (Main) and Window 2 (M2) update instantly without needing manual re-drawing.
+
+## Scrolling, Zooming & Panning
+
+| Shortcut / Control | Action | GUI Sync |
 |----------|--------|----------|
-| **F** | Toggle flicker mode | ✅ M2 mode dropdown updates |
-| **O** | Toggle overlay mode | ✅ M2 mode dropdown updates |
-| **V** | Set M2 reference to prior TP | ✅ Right TP dropdown updates |
-
-## Scrolling & Zooming
-
-| Shortcut | Action | GUI Sync |
-|----------|--------|----------|
-| **Scroll wheel** | Navigate through slices | ✅ |
-| **Shift + Scroll** | Zoom in/out | ✅ |
+| **Scroll wheel** | Navigate through slices (syncs across all 4 MRI panels in MRI Comparison mode) | ✅ |
+| **Shift + Scroll** | Zoom in/out (syncs across all 4 MRI panels in MRI Comparison mode) | ✅ |
 | **Alt + Scroll** | Zoom in/out (alternative) | ✅ |
+| **Right-click** | Crosshair jump to 3D point across all orthogonal / comparison views | ✅ |
+| **Right-click + drag** | Pan image within viewport (syncs across all 4 MRI panels in MRI Comparison mode) | ✅ |
+| **Double-click** | Toggle single-panel full-window zoom on/off | ✅ |
+| **0** / **Numpad 0** / **Z** / **Shift + F** | **Zoom to Fit** — crops black background padding to fit non-zero anatomy to the viewport, or resets zoom/pan to `1.0×` when already fitted (also exits double-click zoom). Works in both **GLFW Viewer** and **Makie Metadata Window** | ✅ **Fit (0)** button in Viewport |
 | **Ctrl + Scroll** | Adjust PET/CT blend ratio | ✅ Blend slider moves |
 
 ## Plane Selection
 
-| Shortcut | Action | Notes |
+| Shortcut / Button | Action | Notes |
 |----------|--------|-------|
+| **Axial** / **Coronal** / **Sagittal** *(Buttons)* | Switch viewing plane (Transverse / Coronal / Sagittal) | In **MRI Comparison** mode, switches all 4 MRI panels simultaneously |
 | **Space + 1** | Switch to transverse (axial) | ⚠️ Timing-dependent: Space must be released after number |
 | **Space + 2** | Switch to coronal | ⚠️ Same timing caveat |
 | **Space + 3** | Switch to sagittal | ⚠️ Same timing caveat |
@@ -166,7 +191,7 @@ Synchronized scrolling is **ON by default**. When enabled, scrolling on any pane
 
 | Shortcut | Intended Action | Status |
 |----------|----------------|--------|
-| **Z** | Undo last action | ❌ Undo history vector never populated |
+| **Ctrl + Z** | Undo last action | ❌ Undo history vector never populated (unmodified **Z** is now **Zoom to Fit**) |
 | **Tab + number** | Set paint value (lesion ID) | ❌ Flag overwrite prevents combo |
 | **Tab + Plus/Minus** | Adjust stroke width | ❌ isPlusPressed comparison type bug |
 | **Shift + number** | Show mask N | ❌ setTextureVisibility is no-op stub |

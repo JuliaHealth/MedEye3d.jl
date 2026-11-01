@@ -253,6 +253,28 @@ function _detect_clicked_panel(x::Real, y::Real, actualW::Real, actualH::Real, w
     end
 end
 
+"""
+Maps 2D panel texture coordinates (ix, iy) and current displayed slice to patient world 3D coordinates (origX, origY, origZ).
+Correctly accounts for unpermuted quad MRI multimodal modes on both windows (panels 1-4 and 6-9) as well as pre-permuted Sagittal (3) and Coronal (4) panels.
+"""
+function _map_panel_coords_to_world(panel_idx::Int, ix::Int, iy::Int, slice::Int, state::StateDataFields, MEH)::Tuple{Int, Int, Int}
+    is_mri_quad = (isdefined(MEH, :mri_main_multimodal_mode) && MEH.mri_main_multimodal_mode[] && panel_idx in (1, 2, 3, 4)) ||
+                  (isdefined(MEH, :mri_compare_mode) && MEH.mri_compare_mode[] && panel_idx in (6, 7, 8, 9))
+    if is_mri_quad
+        p_dim = state.onScrollData.dimensionToScroll
+        return p_dim == 1 ? (slice, ix, iy) : (p_dim == 2 ? (ix, slice, iy) : (ix, iy, slice))
+    end
+    cp_mapped = panel_idx > 5 ? panel_idx - 5 : panel_idx
+    if cp_mapped == 3  # Sagittal: data is (2,3,1)
+        return (slice, ix, iy)
+    elseif cp_mapped == 4  # Coronal: data is (1,3,2)
+        return (ix, slice, iy)
+    else  # Axial (1, 2, 5)
+        p_dim = state.onScrollData.dimensionToScroll
+        return p_dim == 1 ? (slice, ix, iy) : (p_dim == 2 ? (ix, slice, iy) : (ix, iy, slice))
+    end
+end
+
 const _sampled_points_buf = Tuple{Int,Int}[]
 const _rasterize_points_buf = Tuple{Int,Int}[]
 const _last_expert_marked_id = Ref{Int}(0)
@@ -326,14 +348,7 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
         clickedPanel = mainStates[1].switchIndex
         slice = stateObject.currentDisplayedSlice
         
-        cp_mapped = clickedPanel > 5 ? clickedPanel - 5 : clickedPanel
-        if cp_mapped == 3 # Sagittal
-            origX, origY, origZ = slice, ix, iy
-        elseif cp_mapped == 4 # Coronal
-            origX, origY, origZ = ix, slice, iy
-        else # Axial (1,2,5)
-            origX, origY, origZ = ix, iy, slice
-        end
+        origX, origY, origZ = _map_panel_coords_to_world(clickedPanel, ix, iy, slice, stateObject, MEH)
         
         # Clean up active ghost measurements from other panels
         for i in 1:length(mainStates)
@@ -407,15 +422,8 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
         MEH_pos = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
         ix_p, iy_p = _sampled_points_buf[end][1], _sampled_points_buf[end][2]
         clickedPanel_p = mainStates[1].switchIndex
-        cp_mapped_p = clickedPanel_p > 5 ? clickedPanel_p - 5 : clickedPanel_p
         slice_p = stateObject.currentDisplayedSlice
-        vox_p = if cp_mapped_p == 3
-            (slice_p, ix_p, iy_p)
-        elseif cp_mapped_p == 4
-            (ix_p, slice_p, iy_p)
-        else
-            (ix_p, iy_p, slice_p)
-        end
+        vox_p = _map_panel_coords_to_world(clickedPanel_p, ix_p, iy_p, slice_p, stateObject, MEH_pos)
         MEH_pos.current_viewer_position[] = vox_p
     catch; end
 
@@ -490,8 +498,18 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
 
     clickedPanel_idx = something(findfirst(s -> s === stateObject, mainStates), mainStates[1].switchIndex)
     cp_mapped = clickedPanel_idx > 5 ? clickedPanel_idx - 5 : clickedPanel_idx
-    tp_idx = (MEH.compare_mode[] && clickedPanel_idx >= 5 && MEH.compare_right_tp[] >= 0) ? MEH.compare_right_tp[] : MEH.current_tp_index[]
-    eff_dim = if cp_mapped == 3
+    is_mri_quad_paint = (isdefined(MEH, :mri_main_multimodal_mode) && MEH.mri_main_multimodal_mode[] && clickedPanel_idx in (1, 2, 3, 4)) ||
+                        (isdefined(MEH, :mri_compare_mode) && MEH.mri_compare_mode[] && clickedPanel_idx in (6, 7, 8, 9))
+    tp_idx = if is_mri_quad_paint
+        stateObject.onScrollData.currentTpIndex >= 0 ? stateObject.onScrollData.currentTpIndex : MEH.current_tp_index[]
+    elseif MEH.compare_mode[] && clickedPanel_idx >= 5 && MEH.compare_right_tp[] >= 0
+        MEH.compare_right_tp[]
+    else
+        MEH.current_tp_index[]
+    end
+    eff_dim = if is_mri_quad_paint
+        Int(stateObject.onScrollData.dimensionToScroll)
+    elseif cp_mapped == 3
         1  # Sagittal panel wraps (2,3,1) and scrolls dim 3 -> axial dim 1 (X)
     elseif cp_mapped == 4
         2  # Coronal panel wraps (1,3,2) and scrolls dim 3 -> axial dim 2 (Y)
@@ -686,6 +704,18 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
                 catch e_sync
                     @debug "Failed to sync painted slice to tp_data_cache: $e_sync"
                 end
+                
+                # Broadcast painted annotation across all MRI modalities:
+                if !is_ln_mode && texture.name != "Anatomy" && (tp_idx in MEH.mri_compare_tps || (isdefined(MEH, :mri_main_multimodal_mode) && MEH.mri_main_multimodal_mode[]) || (isdefined(MEH, :mri_compare_mode) && MEH.mri_compare_mode[]))
+                    bx3d = if eff_dim == 1
+                        (cur_slice:cur_slice, min_bx:max_bx, min_by:max_by)
+                    elseif eff_dim == 2
+                        (min_bx:max_bx, cur_slice:cur_slice, min_by:max_by)
+                    else
+                        (min_bx:max_bx, min_by:max_by, cur_slice:cur_slice)
+                    end
+                    MEH.sync_mri_mask_across_modalities!(tp_idx, bx3d)
+                end
             else
                 # Also sync bounding box to stateObject's underlying 3D dataToScroll array if twoDimDat.dat was a materialized copy
                 if !(twoDimDat.dat isa SubArray)
@@ -718,10 +748,21 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     cur_slice = stateObject.currentDisplayedSlice
     for (s_idx, s) in enumerate(mainStates)
         if s !== stateObject && sum(abs.(s.calcDimsStruct.mainImageQuadVert)) > 0.01f0
-            s_tp = (MEH.compare_mode[] && s_idx >= 5 && MEH.compare_right_tp[] >= 0) ? MEH.compare_right_tp[] : MEH.current_tp_index[]
-            if s_tp == tp_idx && haskey(s.currentlyDispDat.nameIndexes, texture.name)
+            s_tp = if (isdefined(MEH, :mri_main_multimodal_mode) && MEH.mri_main_multimodal_mode[]) && s_idx in (1, 2, 3, 4)
+                s.onScrollData.currentTpIndex
+            elseif (isdefined(MEH, :mri_compare_mode) && MEH.mri_compare_mode[]) && s_idx in (6, 7, 8, 9)
+                s.onScrollData.currentTpIndex
+            elseif MEH.compare_mode[] && s_idx >= 5 && MEH.compare_right_tp[] >= 0
+                MEH.compare_right_tp[]
+            else
+                MEH.current_tp_index[]
+            end
+            is_mri_sync = (tp_idx in MEH.mri_compare_tps) && (s_tp in MEH.mri_compare_tps)
+            if (s_tp == tp_idx || is_mri_sync) && haskey(s.currentlyDispDat.nameIndexes, texture.name)
                 s_mapped = s_idx > 5 ? s_idx - 5 : s_idx
-                s_eff_dim = s_mapped == 3 ? 1 : (s_mapped == 4 ? 2 : Int(s.onScrollData.dimensionToScroll))
+                s_is_mri_quad = (isdefined(MEH, :mri_main_multimodal_mode) && MEH.mri_main_multimodal_mode[] && s_idx in (1, 2, 3, 4)) ||
+                                (isdefined(MEH, :mri_compare_mode) && MEH.mri_compare_mode[] && s_idx in (6, 7, 8, 9))
+                s_eff_dim = s_is_mri_quad ? Int(s.onScrollData.dimensionToScroll) : (s_mapped == 3 ? 1 : (s_mapped == 4 ? 2 : Int(s.onScrollData.dimensionToScroll)))
                 sl_s = s.currentDisplayedSlice
                 intersects = if s_eff_dim == eff_dim
                     sl_s == cur_slice
@@ -1289,14 +1330,18 @@ function _handle_lesion_click(coord, clickedPanel::Int, mousestr::MouseStruct, m
         return
     end
     
-    is_compare_right = MEH.compare_mode[] && (clickedPanel in (5, 6, 7, 8, 9))
+    is_mri_cmp = isdefined(MEH, :mri_compare_mode) && MEH.mri_compare_mode[] && (clickedPanel in (6, 7, 8, 9))
+    is_compare_right = (MEH.compare_mode[] && (clickedPanel in (5, 6, 7, 8, 9))) || is_mri_cmp
     if is_compare_right
         left_tp = MEH.current_tp_index[]
-        right_tp = MEH.compare_right_tp[]
+        right_tp = is_mri_cmp ? (panelState.onScrollData.currentTpIndex >= 0 ? panelState.onScrollData.currentTpIndex : MEH.compare_right_tp[]) : MEH.compare_right_tp[]
         cur_act_lid = MEH.current_active_lesion_id[]
-        if cur_act_lid > 0 && right_tp >= 0
+        if cur_act_lid > 0 && right_tp >= 0 && right_tp != left_tp
             println("[CLICK-MAP] Clicked compare panel $clickedPanel: toggling mapping between Left TP $left_tp Lesion $cur_act_lid <-> Right TP $right_tp Lesion $clicked_lid")
             MEH.toggle_lesion_mapping!(left_tp, cur_act_lid, right_tp, clicked_lid, mainStates)
+        elseif right_tp == left_tp
+            MEH.current_active_lesion_id[] = clicked_lid
+            MEH.reactToSyncLesion(MEH.SyncLesionEvent(clicked_lid, false), mainStates)
         else
             println("[CLICK-MAP] Compare panel clicked, but active lesion ($cur_act_lid) or right TP ($right_tp) not set")
         end
@@ -1429,14 +1474,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                     ix, iy = round(Int, texX), round(Int, texY)
                     slice = stateObject.currentDisplayedSlice
                     
-                    cp_mapped = clickedPanel > 5 ? clickedPanel - 5 : clickedPanel
-                    if cp_mapped == 3 # Sagittal
-                        origX, origY, origZ = slice, ix, iy
-                    elseif cp_mapped == 4 # Coronal
-                        origX, origY, origZ = ix, slice, iy
-                    else # Axial
-                        origX, origY, origZ = ix, iy, slice
-                    end
+                    origX, origY, origZ = _map_panel_coords_to_world(clickedPanel, ix, iy, slice, stateObject, MEH)
                     
                     meas_obj_rel = mainStates[1].mainForDisplayObjects
                     if sub_mode == :sphere
@@ -1577,20 +1615,21 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             @info "  texX=$texX texY=$texY"
             
             currentSlice = panelState.currentDisplayedSlice
+            MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+            is_mri_cmp_jump = isdefined(MEH, :mri_compare_mode) && MEH.mri_compare_mode[]
             
-            clickedPanel_mapped = clickedPanel > 5 ? clickedPanel - 5 : clickedPanel
-            if clickedPanel_mapped == 1 || clickedPanel_mapped == 2 || clickedPanel_mapped == 5
-                origX, origY, origZ = texX, texY, currentSlice
-            elseif clickedPanel_mapped == 3  # Sagittal
-                origY, origZ, origX = texX, texY, currentSlice
-            else # Bottom-Right (4) (Coronal)
-                origX, origZ, origY = texX, texY, currentSlice
-            end
+            is_mri_main_multimodal = isdefined(MEH, :mri_main_multimodal_mode) && MEH.mri_main_multimodal_mode[] && (clickedPanel in (1, 2, 3, 4))
+            origX, origY, origZ = _map_panel_coords_to_world(clickedPanel, Int(round(texX)), Int(round(texY)), currentSlice, panelState, MEH)
+            MEH.current_viewer_position[] = (origX, origY, origZ)
             
             # Ensure lastRecordedMousePosition is updated for ALL panels so scroll sync knows the intersection!
             for i in 1:length(mainStates)
                 i_mapped = i > 5 ? i - 5 : i
-                if i_mapped == 1 || i_mapped == 2 || i_mapped == 5
+                if is_mri_main_multimodal && i in (1, 2, 3, 4)
+                    mainStates[i].lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
+                elseif is_mri_cmp_jump && i in (6, 7, 8, 9)
+                    mainStates[i].lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
+                elseif i_mapped == 1 || i_mapped == 2 || i_mapped == 5
                     mainStates[i].lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
                 elseif i_mapped == 3
                     mainStates[i].lastRecordedMousePosition = CartesianIndex(origY, origZ, origX)
@@ -1600,18 +1639,30 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             end
             
             @info "  origX=$origX origY=$origY origZ=$origZ currentSlice=$currentSlice"
-            @info "  Axial scrolls Z(1-$(mainStates[1].onScrollData.slicesNumber)) Sag scrolls origX(1-$(mainStates[3].onScrollData.slicesNumber)) Cor scrolls origY(1-$(mainStates[4].onScrollData.slicesNumber))"
-            
-            MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
             
             # Jump other panels to the corresponding slices
-            # Panel 1, 2 & 5 scroll through Z (origZ), Panel 3 scrolls through origX, Panel 4 scrolls through origY
-            targets = [(1, origZ), (2, origZ), (3, origX), (4, origY)]
-            if length(mainStates) >= 5
-                push!(targets, (5, origZ))
+            targets = Tuple{Int, Int}[]
+            if is_mri_main_multimodal
+                p_dim_mri = panelState.onScrollData.dimensionToScroll
+                sl_mri = p_dim_mri == 1 ? origX : (p_dim_mri == 2 ? origY : origZ)
+                targets = [(1, sl_mri), (2, sl_mri), (3, sl_mri), (4, sl_mri)]
+            else
+                targets = [(1, origZ), (2, origZ), (3, origX), (4, origY)]
+                if length(mainStates) >= 5
+                    push!(targets, (5, origZ))
+                end
             end
             if length(mainStates) >= 10 && MEH._m2_crosshair_sync[]
-                push!(targets, (6, origZ), (7, origZ), (8, origX), (9, origY), (10, origZ))
+                if is_mri_cmp_jump || is_mri_main_multimodal
+                    for p_mri in 6:9
+                        dim_mri = mainStates[p_mri].onScrollData.dimensionToScroll
+                        sl_mri = dim_mri == 1 ? origX : (dim_mri == 2 ? origY : origZ)
+                        push!(targets, (p_mri, sl_mri))
+                    end
+                    push!(targets, (10, origZ))
+                else
+                    push!(targets, (6, origZ), (7, origZ), (8, origX), (9, origY), (10, origZ))
+                end
             end
             
             for (p_idx, targetSlice) in targets
@@ -1810,6 +1861,20 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             # Drag down  (dy > 0) -> panX increases -> image shifts down  (follows cursor)
             panelState.calcDimsStruct.panY = clamp(panelState.calcDimsStruct.panY - panSpeedHoriz, -1.0f0, 1.0f0)
             panelState.calcDimsStruct.panX = clamp(panelState.calcDimsStruct.panX + panSpeedVert, -1.0f0, 1.0f0)
+            try
+                MEH_pan = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+                if isdefined(MEH_pan, :mri_main_multimodal_mode) && MEH_pan.mri_main_multimodal_mode[] && clickedPanel in (1, 2, 3, 4)
+                    for p in 1:min(4, length(mainStates))
+                        mainStates[p].calcDimsStruct.panY = panelState.calcDimsStruct.panY
+                        mainStates[p].calcDimsStruct.panX = panelState.calcDimsStruct.panX
+                    end
+                elseif isdefined(MEH_pan, :mri_compare_mode) && MEH_pan.mri_compare_mode[] && clickedPanel in (6, 7, 8, 9) && length(mainStates) >= 9
+                    for p_mri in 6:9
+                        mainStates[p_mri].calcDimsStruct.panY = panelState.calcDimsStruct.panY
+                        mainStates[p_mri].calcDimsStruct.panX = panelState.calcDimsStruct.panX
+                    end
+                end
+            catch; end
             
             panelState.lastPanDragCoords = [CartesianIndex(Int(round(x)), Int(round(y)))]
             # GPU pan: no reactToScroll needed — render loop picks up new pan via setZoomPanUniforms
@@ -1860,14 +1925,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 ix_g, iy_g = round(Int, texX_g), round(Int, texY_g)
                 slice_g = stObj_g.currentDisplayedSlice
                 
-                cp_mapped_g = clickedPanel_g > 5 ? clickedPanel_g - 5 : clickedPanel_g
-                if cp_mapped_g == 3
-                    origX_g, origY_g, origZ_g = slice_g, ix_g, iy_g
-                elseif cp_mapped_g == 4
-                    origX_g, origY_g, origZ_g = ix_g, slice_g, iy_g
-                else
-                    origX_g, origY_g, origZ_g = ix_g, iy_g, slice_g
-                end
+                origX_g, origY_g, origZ_g = _map_panel_coords_to_world(clickedPanel_g, ix_g, iy_g, slice_g, stObj_g, MEH_ghost)
                 
                 meas_obj_g = mainStates[1].mainForDisplayObjects
                 point3d_g = (Float32(origX_g), Float32(origY_g), Float32(origZ_g))
@@ -1967,14 +2025,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             # Panels 1,2,5 are axial: (ix, iy, slice) maps to (x, y, z)
             # Panel 3 is sagittal: data is PermutedDimsArray(vol, (3,2,1)), so (ix,iy,slice)→(slice,iy,ix)
             # Panel 4 is coronal:  data is PermutedDimsArray(vol, (1,3,2)), so (ix,iy,slice)→(ix,slice,iy)
-            cp_mapped = clickedPanel > 5 ? clickedPanel - 5 : clickedPanel
-            vox = if cp_mapped == 3
-                (currentSlice, ix, iy)
-            elseif cp_mapped == 4
-                (ix, currentSlice, iy)
-            else
-                (ix, iy, currentSlice)
-            end
+            vox = _map_panel_coords_to_world(clickedPanel, ix, iy, currentSlice, panelState, MEH)
             MEH.current_viewer_position[] = vox
 
             # Throttle string formatting and X11/Wayland GLFW.SetWindowTitle IPC calls during rapid cursor movement / painting
@@ -1987,74 +2038,139 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             # Build info parts
             parts = String[]
 
-            # Study label (compare mode aware)
+            cp_mapped = clickedPanel > 5 ? clickedPanel - 5 : clickedPanel
+            is_mri_main_cur = isdefined(MEH, :mri_main_multimodal_mode) && MEH.mri_main_multimodal_mode[] && (clickedPanel in (1, 2, 3, 4))
+            is_mri_cmp_cur = (isdefined(MEH, :mri_compare_mode) && MEH.mri_compare_mode[] && (clickedPanel in (6, 7, 8, 9))) || is_mri_main_cur
+
+            # Corner indicator for quad view quadrants
+            corner_tag = if clickedPanel in (1, 6)
+                "Top-Left (TL)"
+            elseif clickedPanel in (2, 7)
+                "Top-Right (TR)"
+            elseif clickedPanel in (3, 8)
+                "Bottom-Left (BL)"
+            elseif clickedPanel in (4, 9)
+                "Bottom-Right (BR)"
+            else
+                "Panel $clickedPanel"
+            end
+
+            # Study label (compare & multimodal aware)
             tp_idx = MEH.current_tp_index[]
             tp_label = get(MEH.tp_labels, tp_idx, "TP $tp_idx")
-            if MEH.compare_mode[]
+            if is_mri_cmp_cur
+                p_tp = panelState.onScrollData.currentTpIndex >= 0 ? panelState.onScrollData.currentTpIndex : tp_idx
+                p_label = get(MEH.tp_labels, p_tp, "TP $p_tp")
+                p_mod = uppercase(get(MEH.tp_modalities, p_tp, "MRI"))
+                study_str = "[$corner_tag: $p_mod] $p_label"
+            elseif MEH.compare_mode[]
                 r_idx = MEH.compare_right_tp[]
                 r_label = get(MEH.tp_labels, r_idx, "TP $r_idx")
-                study_str = "L: $tp_label | R: $r_label"
+                study_str = "[$corner_tag] L: $tp_label | R: $r_label"
             else
-                study_str = tp_label
+                view_std = cp_mapped == 1 ? "Axial" : (cp_mapped == 2 ? "PET" : (cp_mapped == 3 ? "Sagittal" : "Coronal"))
+                study_str = "[$corner_tag: $view_std] $tp_label"
             end
 
             # Read values from 3D volumes using panel-local coordinates
-            # (panels 3,4 have reoriented data, so ix,iy,currentSlice are already correct)
+            # (panels 3,4 have reoriented data, so ix,iy,currentSlice are already correct;
+            #  in MRI Comparison mode panels 6..9 are unpermuted and slice along dimensionToScroll)
+            p_dim_cur = panelState.onScrollData.dimensionToScroll
+            lx, ly, lz = if is_mri_cmp_cur || (cp_mapped in (1, 2, 5) && p_dim_cur != 3)
+                p_dim_cur == 1 ? (currentSlice, ix, iy) : (p_dim_cur == 2 ? (ix, currentSlice, iy) : (ix, iy, currentSlice))
+            else
+                (ix, iy, currentSlice)
+            end
             for dat in panelState.onScrollData.dataToScroll
-                if dat.name == "CT" && checkbounds(Bool, dat.dat, ix, iy, currentSlice)
-                    hu = dat.dat[ix, iy, currentSlice]
-                    push!(parts, "HU: $(round(Int, hu))")
-                elseif dat.name == "PET" && checkbounds(Bool, dat.dat, ix, iy, currentSlice)
-                    suv = dat.dat[ix, iy, currentSlice]
+                if dat.name == "CT" && checkbounds(Bool, dat.dat, lx, ly, lz)
+                    hu = dat.dat[lx, ly, lz]
+                    push!(parts, "Val: $(round(Int, hu))")
+                elseif dat.name == "PET" && checkbounds(Bool, dat.dat, lx, ly, lz)
+                    suv = dat.dat[lx, ly, lz]
                     push!(parts, "SUV: $(round(suv, digits=2))")
-                elseif (dat.name == "Mask" || dat.name == "segmentation") && checkbounds(Bool, dat.dat, ix, iy, currentSlice)
-                    mask_val = dat.dat[ix, iy, currentSlice]
-                    if mask_val > 0
+                elseif (dat.name == "Mask" || dat.name == "segmentation") && checkbounds(Bool, dat.dat, lx, ly, lz)
+                    mask_val = dat.dat[lx, ly, lz]
+                    if mask_val > 0 && MEH._lesion_active[]
                         lid = Int(round(mask_val))
-                        # Look up lesion name: prioritize RTOG / clinical name from HDF5
-                        organ = try
-                            tp = MEH.current_tp_index[]
-                            seg_names = get(MEH.tp_segment_names, tp, Dict{Int, String}())
-                            s_name = get(seg_names, lid, "")
-                            if isempty(s_name) && tp != 0
-                                s_name = get(get(MEH.tp_segment_names, 0, Dict{Int, String}()), lid, "")
-                            end
-                            !isempty(s_name) ? s_name : get(MEH.global_organ_mapping[], lid, "")
-                        catch
-                            ""
+                        is_right_panel = (MEH.compare_mode[] && clickedPanel in (5, 6, 7, 8, 9)) || is_mri_cmp_cur
+                        panel_tp = if is_mri_cmp_cur
+                            panelState.onScrollData.currentTpIndex >= 0 ? panelState.onScrollData.currentTpIndex : MEH.current_tp_index[]
+                        elseif is_right_panel
+                            MEH.compare_right_tp[]
+                        else
+                            MEH.current_tp_index[]
                         end
-                        label = isempty(organ) ? "Lesion $lid" : "$organ (L$lid)"
                         
-                        # On MRI: also show the anatomy zone from max_anatomy under this voxel
-                        try
-                            tp = MEH.current_tp_index[]
-                            panel_mod = uppercase(get(MEH.tp_modalities, tp, "PET"))
-                            if panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI")
-                                for adat in panelState.onScrollData.dataToScroll
-                                    if adat.name == "Anatomy" && checkbounds(Bool, adat.dat, ix, iy, currentSlice)
-                                        anat_val = Int(round(adat.dat[ix, iy, currentSlice]))
-                                        if anat_val > 0
-                                            labels = get(MEH.anatomy_labels_cache, tp, Dict{Int,String}())
-                                            anat_lbl = get(labels, anat_val, get(MEH.global_ts_names[], anat_val, ""))
-                                            if !isempty(anat_lbl)
-                                                label = "$label in $anat_lbl"
+                        # In single lesion mode, only report the lesion that is actually displayed
+                        is_visible_lid = if !MEH.is_single_lesion_mode[]
+                            true
+                        elseif !is_right_panel || panel_tp == MEH.current_tp_index[]
+                            lid == MEH.current_active_lesion_id[]
+                        else
+                            try
+                                left_node = MEH.get_node_name_for_tp(MEH.current_tp_index[])
+                                right_node = MEH.get_node_name_for_tp(panel_tp)
+                                match_mod = MEH._get_la()
+                                matched = match_mod !== nothing ? match_mod.find_cross_tp_lesion(left_node, MEH.current_active_lesion_id[], right_node) : Int[]
+                                lid in matched
+                            catch
+                                false
+                            end
+                        end
+                        
+                        if is_visible_lid
+                            # Look up lesion name: prioritize RTOG / clinical name from HDF5
+                            organ = try
+                                seg_names = get(MEH.tp_segment_names, panel_tp, Dict{Int, String}())
+                                s_name = get(seg_names, lid, "")
+                                if isempty(s_name) && panel_tp != 0
+                                    s_name = get(get(MEH.tp_segment_names, 0, Dict{Int, String}()), lid, "")
+                                end
+                                !isempty(s_name) ? s_name : get(MEH.global_organ_mapping[], lid, "")
+                            catch
+                                ""
+                            end
+                            label = isempty(organ) ? "Lesion $lid" : "$organ (L$lid)"
+                            
+                            # On MRI: also show the anatomy zone from max_anatomy under this voxel (only when anatomy is active)
+                            if MEH._anatomy_active[]
+                                try
+                                    panel_mod = uppercase(get(MEH.tp_modalities, panel_tp, "PET"))
+                                    if panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI")
+                                        for adat in panelState.onScrollData.dataToScroll
+                                            if adat.name == "Anatomy" && checkbounds(Bool, adat.dat, lx, ly, lz)
+                                                anat_val = Int(round(adat.dat[lx, ly, lz]))
+                                                if anat_val > 0
+                                                    labels = get(MEH.anatomy_labels_cache, panel_tp, Dict{Int,String}())
+                                                    anat_lbl = get(labels, anat_val, get(MEH.global_ts_names[], anat_val, ""))
+                                                    if !isempty(anat_lbl)
+                                                        label = "$label in $anat_lbl"
+                                                    end
+                                                end
+                                                break
                                             end
                                         end
-                                        break
                                     end
-                                end
+                                catch; end
                             end
-                        catch; end
-                        
-                        push!(parts, label)
+                            
+                            push!(parts, label)
+                        end
                     end
-                elseif dat.name == "Anatomy" && checkbounds(Bool, dat.dat, ix, iy, currentSlice)
-                    anat_val = Int(round(dat.dat[ix, iy, currentSlice]))
+                elseif dat.name == "Anatomy" && MEH._anatomy_active[] && checkbounds(Bool, dat.dat, lx, ly, lz)
+                    anat_val = Int(round(dat.dat[lx, ly, lz]))
                     if anat_val > 0
+                        is_right_panel = (MEH.compare_mode[] && clickedPanel in (5, 6, 7, 8, 9)) || is_mri_cmp_cur
+                        panel_tp = if is_mri_cmp_cur
+                            panelState.onScrollData.currentTpIndex >= 0 ? panelState.onScrollData.currentTpIndex : MEH.current_tp_index[]
+                        elseif is_right_panel
+                            MEH.compare_right_tp[]
+                        else
+                            MEH.current_tp_index[]
+                        end
                         # Look up anatomy label from per-TP cached names or global
                         anat_name = try
-                            tp = MEH.current_tp_index[]
-                            labels = get(MEH.anatomy_labels_cache, tp, Dict{Int,String}())
+                            labels = get(MEH.anatomy_labels_cache, panel_tp, Dict{Int,String}())
                             lbl = get(labels, anat_val, "")
                             if isempty(lbl) || occursin("class_", lbl)
                                 # Fallback to global ts_names (actual organ names)
@@ -2073,9 +2189,11 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
             end
 
             # Panel orientation indicator
-            view_name = if clickedPanel == 1 || clickedPanel == 2 || clickedPanel == 5
-                "Ax"
-            elseif clickedPanel == 3
+            view_name = if is_mri_cmp_cur
+                p_dim_cur == 1 ? "Sag" : (p_dim_cur == 2 ? "Cor" : "Ax")
+            elseif cp_mapped in (1, 2, 5)
+                p_dim_cur == 1 ? "Sag" : (p_dim_cur == 2 ? "Cor" : "Ax")
+            elseif cp_mapped == 3
                 "Sag"
             else
                 "Cor"

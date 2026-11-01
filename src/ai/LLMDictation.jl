@@ -12,6 +12,7 @@ export compile_timepoint_clinical_data,
        extract_clinical_fields,
        extract_clinical_fields_async,
        translate_report_to_english,
+       translate_report_to_german,
        copy_to_clipboard,
        TimePointClinicalData,
        LesionFinding,
@@ -661,6 +662,66 @@ function translate_report_to_english(
     end
 
     # Fallback to AcademicCloud Qwen
+    return call_academiccloud_chat(messages; model=DEFAULT_MODEL, max_tokens=3000, temperature=0.1)
+end
+
+"""
+    translate_report_to_german(english_text::String; api_key="", api_base="", model="") -> String
+
+Translates English radiological report to German using local MarianMT model or DIZ/AcademicCloud.
+"""
+function translate_report_to_german(
+    english_text::String;
+    api_key::String = "",
+    api_base::String = "",
+    model::String = ""
+)::String
+    isempty(strip(english_text)) && return ""
+    (strip(english_text) == "keine Angaben") && return "keine Angaben"
+
+    # Fast path: Local MarianMT via python
+    try
+        (tmp_in, io_in) = mktemp()
+        write(io_in, english_text)
+        close(io_in)
+        py_script = """
+import sys, torch
+from transformers import MarianTokenizer, MarianMTModel
+model_name = 'Helsinki-NLP/opus-mt-en-de'
+device = 'cuda' if torch.cuda.is_available() else 'cpu'
+tokenizer = MarianTokenizer.from_pretrained(model_name)
+model = MarianMTModel.from_pretrained(model_name).to(device)
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    text = f.read()
+paras = text.split('\\n')
+trans_paras = []
+for p in paras:
+    p_strip = p.strip()
+    if not p_strip:
+        trans_paras.append('')
+        continue
+    inputs = tokenizer(p_strip, return_tensors='pt', truncation=True, max_length=512).to(device)
+    outputs = model.generate(**inputs, max_length=512)
+    trans_paras.append(tokenizer.decode(outputs[0], skip_special_tokens=True))
+print('\\n'.join(trans_paras))
+"""
+        cmd = `python3 -c $py_script $tmp_in`
+        res = strip(read(cmd, String))
+        rm(tmp_in, force=true)
+        if !isempty(res)
+            return res
+        end
+    catch e
+        @warn "[TranslateReportToGerman] MarianMT failed: $e"
+    end
+
+    # Fallback to DIZ / AcademicCloud
+    messages = [
+        Dict("role" => "system",
+             "content" => "You are an expert radiologist and medical translator."),
+        Dict("role" => "user",
+             "content" => "Translate the following English radiological report into German. Only output the German translation and nothing else:\n\n$english_text")
+    ]
     return call_academiccloud_chat(messages; model=DEFAULT_MODEL, max_tokens=3000, temperature=0.1)
 end
 

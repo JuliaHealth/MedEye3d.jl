@@ -122,29 +122,34 @@ Fast fused copy and type conversion directly into mapped GPU staging memory.
 Zero heap allocations regardless of input array type (Float32, Int8, UInt16, Float16, SubArray).
 """
 @inline function copy_data_to_staging_f32!(dest::Ptr{Float32}, data::Matrix{Float32}, w::Int, h::Int)
-    n = min(length(data), w * h)
-    unsafe_copyto!(dest, pointer(data), n)
+    w_d, h_d = size(data, 1), size(data, 2)
+    if w_d == w
+        n = min(length(data), w * h)
+        unsafe_copyto!(dest, pointer(data), n)
+    else
+        cols = min(h_d, h)
+        rows = min(w_d, w)
+        @inbounds for col in 1:cols
+            base_dest = (col - 1) * w
+            for row in 1:rows
+                unsafe_store!(dest, data[row, col], base_dest + row)
+            end
+        end
+    end
 end
 
 @inline function copy_data_to_staging_f32!(dest::Ptr{Float32}, data::SubArray{Float32, 2, Array{Float32, 3}}, w::Int, h::Int)
-    n = min(length(data), w * h)
-    if stride(data, 1) == 1 && stride(data, 2) == size(data, 1)
+    w_d, h_d = size(data, 1), size(data, 2)
+    if stride(data, 1) == 1 && stride(data, 2) == w_d && w_d == w
+        n = min(length(data), w * h)
         unsafe_copyto!(dest, pointer(data), n)
     else
-        w_d, h_d = size(data, 1), size(data, 2)
-        if w_d * h_d <= n
-            idx = 1
-            @inbounds for col in 1:h_d, row in 1:w_d
-                unsafe_store!(dest, data[row, col], idx)
-                idx += 1
-            end
-        else
-            idx = 1
-            @inbounds for col in 1:h_d, row in 1:w_d
-                if idx <= n
-                    unsafe_store!(dest, data[row, col], idx)
-                    idx += 1
-                end
+        cols = min(h_d, h)
+        rows = min(w_d, w)
+        @inbounds for col in 1:cols
+            base_dest = (col - 1) * w
+            for row in 1:rows
+                unsafe_store!(dest, data[row, col], base_dest + row)
             end
         end
     end
@@ -154,19 +159,12 @@ end
     n = min(length(data), w * h)
     if ndims(data) == 2
         w_d, h_d = size(data, 1), size(data, 2)
-        if w_d * h_d <= n
-            idx = 1
-            @inbounds for col in 1:h_d, row in 1:w_d
-                unsafe_store!(dest, Float32(data[row, col]), idx)
-                idx += 1
-            end
-        else
-            idx = 1
-            @inbounds for col in 1:h_d, row in 1:w_d
-                if idx <= n
-                    unsafe_store!(dest, Float32(data[row, col]), idx)
-                    idx += 1
-                end
+        cols = min(h_d, h)
+        rows = min(w_d, w)
+        @inbounds for col in 1:cols
+            base_dest = (col - 1) * w
+            for row in 1:rows
+                unsafe_store!(dest, Float32(data[row, col]), base_dest + row)
             end
         end
     else
@@ -179,29 +177,34 @@ end
 # ─── Int16 staging copy (for R16_SINT mask/anatomy textures) ─────────────
 
 @inline function copy_data_to_staging_i16!(dest::Ptr{Int16}, data::Matrix{Int16}, w::Int, h::Int)
-    n = min(length(data), w * h)
-    unsafe_copyto!(dest, pointer(data), n)
+    w_d, h_d = size(data, 1), size(data, 2)
+    if w_d == w
+        n = min(length(data), w * h)
+        unsafe_copyto!(dest, pointer(data), n)
+    else
+        cols = min(h_d, h)
+        rows = min(w_d, w)
+        @inbounds for col in 1:cols
+            base_dest = (col - 1) * w
+            for row in 1:rows
+                unsafe_store!(dest, data[row, col], base_dest + row)
+            end
+        end
+    end
 end
 
 @inline function copy_data_to_staging_i16!(dest::Ptr{Int16}, data::SubArray{Int16, 2, Array{Int16, 3}}, w::Int, h::Int)
-    n = min(length(data), w * h)
-    if stride(data, 1) == 1 && stride(data, 2) == size(data, 1)
+    w_d, h_d = size(data, 1), size(data, 2)
+    if stride(data, 1) == 1 && stride(data, 2) == w_d && w_d == w
+        n = min(length(data), w * h)
         unsafe_copyto!(dest, pointer(data), n)
     else
-        w_d, h_d = size(data, 1), size(data, 2)
-        if w_d * h_d <= n
-            idx = 1
-            @inbounds for col in 1:h_d, row in 1:w_d
-                unsafe_store!(dest, data[row, col], idx)
-                idx += 1
-            end
-        else
-            idx = 1
-            @inbounds for col in 1:h_d, row in 1:w_d
-                if idx <= n
-                    unsafe_store!(dest, data[row, col], idx)
-                    idx += 1
-                end
+        cols = min(h_d, h)
+        rows = min(w_d, w)
+        @inbounds for col in 1:cols
+            base_dest = (col - 1) * w
+            for row in 1:rows
+                unsafe_store!(dest, data[row, col], base_dest + row)
             end
         end
     end
@@ -211,19 +214,12 @@ end
     n = min(length(data), w * h)
     if ndims(data) == 2
         w_d, h_d = size(data, 1), size(data, 2)
-        if w_d * h_d <= n
-            idx = 1
-            @inbounds for col in 1:h_d, row in 1:w_d
-                unsafe_store!(dest, Int16(data[row, col]), idx)
-                idx += 1
-            end
-        else
-            idx = 1
-            @inbounds for col in 1:h_d, row in 1:w_d
-                if idx <= n
-                    unsafe_store!(dest, Int16(data[row, col]), idx)
-                    idx += 1
-                end
+        cols = min(h_d, h)
+        rows = min(w_d, w)
+        @inbounds for col in 1:cols
+            base_dest = (col - 1) * w
+            for row in 1:rows
+                unsafe_store!(dest, Int16(data[row, col]), base_dest + row)
             end
         end
     else
@@ -236,29 +232,34 @@ end
 # ─── Int8 staging copy (for R8_SINT bone overlay textures) ──────────────
 
 @inline function copy_data_to_staging_i8!(dest::Ptr{Int8}, data::Matrix{Int8}, w::Int, h::Int)
-    n = min(length(data), w * h)
-    unsafe_copyto!(dest, pointer(data), n)
+    w_d, h_d = size(data, 1), size(data, 2)
+    if w_d == w
+        n = min(length(data), w * h)
+        unsafe_copyto!(dest, pointer(data), n)
+    else
+        cols = min(h_d, h)
+        rows = min(w_d, w)
+        @inbounds for col in 1:cols
+            base_dest = (col - 1) * w
+            for row in 1:rows
+                unsafe_store!(dest, data[row, col], base_dest + row)
+            end
+        end
+    end
 end
 
 @inline function copy_data_to_staging_i8!(dest::Ptr{Int8}, data::SubArray{Int8, 2, Array{Int8, 3}}, w::Int, h::Int)
-    n = min(length(data), w * h)
-    if stride(data, 1) == 1 && stride(data, 2) == size(data, 1)
+    w_d, h_d = size(data, 1), size(data, 2)
+    if stride(data, 1) == 1 && stride(data, 2) == w_d && w_d == w
+        n = min(length(data), w * h)
         unsafe_copyto!(dest, pointer(data), n)
     else
-        w_d, h_d = size(data, 1), size(data, 2)
-        if w_d * h_d <= n
-            idx = 1
-            @inbounds for col in 1:h_d, row in 1:w_d
-                unsafe_store!(dest, data[row, col], idx)
-                idx += 1
-            end
-        else
-            idx = 1
-            @inbounds for col in 1:h_d, row in 1:w_d
-                if idx <= n
-                    unsafe_store!(dest, data[row, col], idx)
-                    idx += 1
-                end
+        cols = min(h_d, h)
+        rows = min(w_d, w)
+        @inbounds for col in 1:cols
+            base_dest = (col - 1) * w
+            for row in 1:rows
+                unsafe_store!(dest, data[row, col], base_dest + row)
             end
         end
     end
@@ -268,19 +269,12 @@ end
     n = min(length(data), w * h)
     if ndims(data) == 2
         w_d, h_d = size(data, 1), size(data, 2)
-        if w_d * h_d <= n
-            idx = 1
-            @inbounds for col in 1:h_d, row in 1:w_d
-                unsafe_store!(dest, Int8(data[row, col]), idx)
-                idx += 1
-            end
-        else
-            idx = 1
-            @inbounds for col in 1:h_d, row in 1:w_d
-                if idx <= n
-                    unsafe_store!(dest, Int8(data[row, col]), idx)
-                    idx += 1
-                end
+        cols = min(h_d, h)
+        rows = min(w_d, w)
+        @inbounds for col in 1:cols
+            base_dest = (col - 1) * w
+            for row in 1:rows
+                unsafe_store!(dest, Int8(data[row, col]), base_dest + row)
             end
         end
     else
@@ -398,7 +392,7 @@ function upload_textures_batched!(ctx::VkCtx, pool::VkStagingPool, batch::Vector
             # than the texture (e.g. edge slices after plane orientation change).
             # When actual_pixels >= expected_pixels (standard rendering/painting),
             # copy_data_to_staging! completely overwrites all pixels, making memset redundant.
-            if actual_pixels < expected_pixels
+            if actual_pixels < expected_pixels || (ndims(data) == 2 && (size(data, 1) < w || size(data, 2) < h))
                 ccall(:memset, Ptr{Nothing}, (Ptr{Nothing}, Cint, Csize_t), dest_ptr, 0, data_bytes)
             end
             # Copy actual data (uses min(length(data), w*h) so safe for smaller slices)

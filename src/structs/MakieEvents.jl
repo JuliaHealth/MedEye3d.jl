@@ -13,7 +13,9 @@ export NextPhaseEvent, PrevPhaseEvent, SetPhaseEvent
 export EditModeEvent, ViewModeEvent, SetTPFirstEvent, SetTPLastEvent
 export NewLesionEvent, EraseModeEvent, ShowOnlyPETEvent, ShowOnlyCTEvent, ToggleAnatomyEvent, ToggleSyncScrollEvent
 export ToggleCrosshairEvent, ToggleSingleMultiLesionEvent, ToggleHeatGDTModeEvent, OneShotHeatGDTEvent
+export ToggleMRIMultimodalEvent
 export HeatGDTStartEvent, HeatGDTTickEvent, HeatGDTStopEvent, HeatGDTPosthocSizeEvent, ToggleMapModeEvent
+export ZoomToFitEvent
 
 struct NextPhaseEvent end
 struct PrevPhaseEvent end
@@ -26,6 +28,11 @@ struct ValidateReportEvent end
 struct ChangePlaneEvent
     plane :: Symbol # :Axial, :Coronal, :Sagittal
 end
+
+struct ToggleMRIMultimodalEvent
+    is_main_screen :: Bool
+end
+ToggleMRIMultimodalEvent() = ToggleMRIMultimodalEvent(true)
 
 struct CompareTimePointsEvent
     compare :: Bool
@@ -289,6 +296,11 @@ struct SetLNValidationModeEvent
     active::Bool
 end
 
-export SetLNValidationModeEvent
+struct ZoomToFitEvent
+    window_id::Int
+    ZoomToFitEvent(window_id::Int=0) = new(window_id)
+end
+
+export SetLNValidationModeEvent, ZoomToFitEvent
 
 end # module MakieEvents
