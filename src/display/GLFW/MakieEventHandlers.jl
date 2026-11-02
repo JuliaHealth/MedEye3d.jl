@@ -943,6 +943,10 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
                     stateObjects[p].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
                 end
             end
+            updateQuadVertices!(stateObjects[1], :TopLeft)
+            updateQuadVertices!(stateObjects[2], :TopRight)
+            updateQuadVertices!(stateObjects[3], :BottomLeft)
+            updateQuadVertices!(stateObjects[4], :BottomRight)
             _update_quad_layout_for_modality!(stateObjects, tp_cur)
         end
         println(">> [MRI-MULTIMODAL] Main screen reverted to standard view."); flush(stdout)
@@ -3589,6 +3593,11 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx; forc
     stateObjects[panel_idx].onScrollData.dataToScrollDims = new_scroll_dims
     stateObjects[panel_idx].onScrollData.dimensionToScroll = target_dim
     stateObjects[panel_idx].calcDimsStruct = getHeightToWidthRatio(stateObjects[panel_idx].calcDimsStruct, new_scroll_dims)
+    pos_mapped = panel_idx > 5 ? panel_idx - 5 : panel_idx
+    pos_quad = pos_mapped in (1, 2, 3, 4) ? pos_mapped : 1
+    if stateObjects[panel_idx].calcDimsStruct.mainQuadVertSize > 0 && !all(iszero, stateObjects[panel_idx].calcDimsStruct.mainImageQuadVert)
+        stateObjects[panel_idx].calcDimsStruct = StructsManag.getMainVerticies(stateObjects[panel_idx].calcDimsStruct, stateObjects[panel_idx].displayMode, pos_quad)
+    end
 
     # Track which TP this panel holds
     stateObjects[panel_idx].onScrollData.currentTpIndex = panel_tp

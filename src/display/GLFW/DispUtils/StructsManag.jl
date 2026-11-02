@@ -327,14 +327,14 @@ function getMainVerticies(calcDimStruct::CalcDimsStruct, displayMode::DisplayMod
   left_x  = Float32(x_center - half_span_x)
   right_x = Float32(x_center + half_span_x)
 
-  # Y coordinates: center vertically in MultiImage and QuadImage modes
-  if displayMode == MultiImage || displayMode == QuadImage
+  # Y coordinates: center vertically in MultiImage mode, top-gravity in QuadImage and SingleImage modes
+  if displayMode == MultiImage
     y_center = (y_min + y_max) / 2.0
     half_span_y = ((y_max - y_min) / 2.0) * scale_y
     top_y    = Float32(y_center + half_span_y)
     bottom_y = Float32(y_center - half_span_y)
   else
-    # SingleImage: top-gravity (image is flush with top edge of screen, black bar at bottom)
+    # Top-gravity: image is flush with top edge of quadrant/window, black bar at bottom down
     top_y    = Float32(y_max)
     bottom_y = Float32(y_max - (y_max - y_min) * scale_y)
   end
