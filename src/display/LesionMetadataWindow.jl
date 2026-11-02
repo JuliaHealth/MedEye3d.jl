@@ -4081,7 +4081,12 @@ function create_metadata_window(
                 _set_widget_visible!(elem, visible)
             end
         elseif hasproperty(w, :blockscene)
-            w.blockscene.visible[] = visible
+            if w.blockscene !== nothing
+                w.blockscene.visible[] = visible
+                for ch in w.blockscene.children
+                    try; ch.visible[] = visible; catch; end
+                end
+            end
             if hasproperty(w, :visible)
                 w.visible[] = visible
             end
@@ -4176,7 +4181,11 @@ function create_metadata_window(
                     set_row_visible!(i, is_open[])
                 end
                 _invalidate_row_cache!()
-                Makie.GridLayoutBase.update!(g)
+                try
+                    Makie.GridLayoutBase.update!(fig.layout)
+                catch
+                    Makie.GridLayoutBase.update!(g)
+                end
                 _cache_widget_bboxes!()
             finally
                 g.block_updates = true
@@ -5737,7 +5746,7 @@ function create_metadata_window(
     end_section!(sec_view)
 
     # ── Dedicated Windowing & Image Offsets Subpanel ─────────────────────────
-    sec_win = begin_section!("Windowing & Image Offsets"; default_open=false)
+    sec_win = begin_section!("Windowing & Image Offsets"; default_open=true)
 
     display_cfg = load_display_config()
     init_blend = Float32(get(display_cfg, "pet_ct_blend", 0.5))
@@ -5783,6 +5792,7 @@ function create_metadata_window(
         # CT Windowing
     ct_lbl_r = nr!()
     Label(g[ct_lbl_r, 1:4], "-- CT Window & Offsets (HU) --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
+    rowsize!(g, ct_lbl_r, Fixed(20)); register_fixed_row!(ct_lbl_r, 20)
     
     ct_s_r = nr!()
     islider_ct = IntervalSlider(g[ct_s_r, 1:4], range = -1500.0:10.0:3000.0, startvalues = (-150.0, 250.0))
@@ -5793,6 +5803,7 @@ function create_metadata_window(
     btn_soft = Button(g[ct_p_r, 2], label = "Soft Tissue", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     btn_bone = Button(g[ct_p_r, 3], label = "Bone",        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     btn_lung = Button(g[ct_p_r, 4], label = "Lung",        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, ct_p_r, Fixed(24)); register_fixed_row!(ct_p_r, 24)
 
     ct_c_r = nr!()
     btn_ct_minus = Button(g[ct_c_r, 1], label = "- 50", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
@@ -5864,6 +5875,7 @@ function create_metadata_window(
     # PET Windowing
     pet_lbl_r = nr!()
     Label(g[pet_lbl_r, 1:4], "-- PET Window & Offsets (SUV) --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
+    rowsize!(g, pet_lbl_r, Fixed(20)); register_fixed_row!(pet_lbl_r, 20)
     
     pet_s_r = nr!()
     islider_pet = IntervalSlider(g[pet_s_r, 1:4], range = 0.1:0.1:50.0, startvalues = (0.1, 10.0))
@@ -5874,6 +5886,7 @@ function create_metadata_window(
     btn_pet_5  = Button(g[pet_p_r, 2], label = "SUV 0-5",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     btn_pet_10 = Button(g[pet_p_r, 3], label = "SUV 0-10", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     btn_pet_15 = Button(g[pet_p_r, 4], label = "SUV 0-15", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, pet_p_r, Fixed(24)); register_fixed_row!(pet_p_r, 24)
 
     pet_c_r = nr!()
     btn_pet_minus = Button(g[pet_c_r, 1], label = "- 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
@@ -5934,6 +5947,7 @@ function create_metadata_window(
     # SPECT Windowing
     spect_lbl_r = nr!()
     Label(g[spect_lbl_r, 1:4], "-- SPECT Window & Offsets (Counts) --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
+    rowsize!(g, spect_lbl_r, Fixed(20)); register_fixed_row!(spect_lbl_r, 20)
     
     spect_s_r = nr!()
     islider_spect = IntervalSlider(g[spect_s_r, 1:4], range = 0.0:0.1:100.0, startvalues = (0.0, 10.0))
@@ -5944,6 +5958,7 @@ function create_metadata_window(
     btn_spect_5  = Button(g[spect_p_r, 2], label = "SPECT 0-5",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     btn_spect_10 = Button(g[spect_p_r, 3], label = "SPECT 0-10", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     btn_spect_20 = Button(g[spect_p_r, 4], label = "SPECT 0-20", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, spect_p_r, Fixed(24)); register_fixed_row!(spect_p_r, 24)
 
     spect_c_r = nr!()
     btn_spect_minus = Button(g[spect_c_r, 1], label = "- 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
@@ -6001,6 +6016,7 @@ function create_metadata_window(
     function build_modality_window_block(mod_name::String, display_title::String, slider_range, default_range, presets::Vector{Tuple{String, Float32, Float32}}, step_val::Float32)
         lbl_r = nr!()
         Label(g[lbl_r, 1:4], "-- $display_title --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
+        rowsize!(g, lbl_r, Fixed(20)); register_fixed_row!(lbl_r, 20)
         
         s_r = nr!()
         islider = IntervalSlider(g[s_r, 1:4], range = slider_range, startvalues = (default_range[1], default_range[2]))
@@ -6831,7 +6847,11 @@ function create_metadata_window(
             g.block_updates = false
             try
                 _invalidate_row_cache!()
-                Makie.GridLayoutBase.update!(g)
+                try
+                    Makie.GridLayoutBase.update!(fig.layout)
+                catch
+                    Makie.GridLayoutBase.update!(g)
+                end
                 _cache_widget_bboxes!()
             finally
                 g.block_updates = true

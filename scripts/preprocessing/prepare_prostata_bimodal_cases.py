@@ -860,13 +860,14 @@ def process_case(case_info, out_base_dir, offline=False):
     # Check local fallback transform paths if not downloaded or file missing
     if not tfm_reg_path or not os.path.isfile(tfm_reg_path):
         for candidate_tfm in [
+            os.path.join(case_dir, "registration_output", "transforms", "Transform_Landmark_SWD.h5"),
+            os.path.join(case_dir, "registration_output", "transforms", "Transform_Landmark_SWD.tfm"),
+            os.path.join(case_dir, "registration_output", "transforms", "Transform_Landmark_Init.h5"),
+            os.path.join(case_dir, "registration_output", "transforms", "Transform_FollowUp_to_Baseline_1.tfm"),
+            os.path.join(case_dir, "Transform_FollowUp_to_Baseline_1.tfm"),
             os.path.join(raw_dir, "Transform_Landmark_SWD.h5"),
             os.path.join(raw_dir, "Transform_Landmark_Init.h5"),
             os.path.join(raw_dir, "Transform_FollowUp_to_Baseline_1.tfm"),
-            os.path.join(case_dir, "Transform_FollowUp_to_Baseline_1.tfm"),
-            os.path.join(case_dir, "registration_output", "transforms", "Transform_Landmark_SWD.h5"),
-            os.path.join(case_dir, "registration_output", "transforms", "Transform_Landmark_Init.h5"),
-            os.path.join(case_dir, "registration_output", "transforms", "Transform_FollowUp_to_Baseline_1.tfm"),
         ]:
             if os.path.isfile(candidate_tfm):
                 tfm_reg_path = candidate_tfm
@@ -1106,62 +1107,22 @@ def process_case(case_info, out_base_dir, offline=False):
         print(f"  CT Lesions resampled & cleaned: {(lesion_ct_arr > 0).sum()} voxels, unique labels: {np.unique(lesion_ct_arr)}")
 
     # 7. Resample MRI Anatomy & Native MR Segmentations
-    # Study B should contain ONLY native MRI segmentations (prostate zones + MR pelvic organs).
-    # Whole-body CT anatomy (ribs, spine outside pelvis, liver, spleen, etc.) must NEVER bleed onto MRI.
+    # MRI anatomy contains the multi-zone prostate segmentation (PZ, TZ, CZ, AFS, UR, PG, SV_L, SV_R)
+    # in registered CT coordinate space, strictly independent of CT whole-body anatomy.
     mri_anatomy = np.zeros((Z, Y, X), dtype=np.uint16)
     mri_mask = (mri_arr > 0)
     
-    # 7a. Native pelvic anatomy from TotalSegmentator MR (if available or run fast)
-    ts_mr_path = os.path.join(raw_dir, "totalseg_mr_ml.nii.gz")
-    if not os.path.isfile(ts_mr_path):
-        totalseg_bin = shutil.which("TotalSegmentator") or "/usr/local/bin/TotalSegmentator"
-        if os.path.isfile(totalseg_bin) and mri_path and os.path.isfile(mri_path):
-            try:
-                print(f"  Running TotalSegmentator MR on {os.path.basename(mri_path)}...")
-                cmd = [totalseg_bin, "-i", mri_path, "-o", ts_mr_path, "-ta", "total_mr", "--ml", "--fast", "--quiet"]
-                subprocess.run(cmd, check=True)
-            except Exception as e_ts:
-                print(f"  [WARN] TotalSegmentator MR run failed: {e_ts}")
-                
-    if os.path.isfile(ts_mr_path):
-        try:
-            ts_mr_img = sitk.ReadImage(ts_mr_path)
-            ts_tfm = sitk.Transform()
-            if ts_mr_img.GetSize() != ct_img.GetSize() or ts_mr_img.GetOrigin() != ct_img.GetOrigin():
-                if os.path.isfile(tfm_reg_path):
-                    ts_tfm = sitk.ReadTransform(tfm_reg_path)
-            res_ts_mr = sitk.Resample(ts_mr_img, ct_img, ts_tfm, sitk.sitkNearestNeighbor, 0, sitk.sitkUInt16)
-            ts_mr_arr = sitk.GetArrayFromImage(res_ts_mr)
-            # Map TotalSegmentator MR classes dynamically to the case's max_anatomy label IDs
-            name_to_id = {v: int(k) for k, v in anatomy_label_names.items()}
-            mr_class_to_name = {
-                16: ("urinary_bladder", 98),
-                18: ("sacrum", 217),
-                36: ("femur_left", 187),
-                37: ("femur_right", 188),
-                38: ("hip_left", 189),
-                39: ("hip_right", 190),
-                40: ("gluteus_maximus_left", 9),
-                41: ("gluteus_maximus_right", 10),
-                42: ("gluteus_medius_left", 11),
-                43: ("gluteus_medius_right", 12),
-                44: ("gluteus_minimus_left", 13),
-                45: ("gluteus_minimus_right", 14),
-                48: ("iliopsoas_left", 15),
-                49: ("iliopsoas_right", 16),
-            }
-            for mr_cid, (std_name, fallback_id) in mr_class_to_name.items():
-                target_id = name_to_id.get(std_name, fallback_id)
-                if str(target_id) not in anatomy_label_names:
-                    anatomy_label_names[str(target_id)] = std_name
-                mri_anatomy[ts_mr_arr == mr_cid] = target_id
-            print(f"  Integrated TotalSegmentator MR pelvic anatomy: {np.unique(mri_anatomy)}")
-        except Exception as e_ts_load:
-            print(f"  [WARN] Failed to load/resample TotalSegmentator MR: {e_ts_load}")
-
-    # 7b. Resample Prostate Zonal Anatomy & Lesion
+    prostate_labels = {
+        "1": "Peripheral Zone (PZ)",
+        "2": "Transition Zone (TZ)",
+        "3": "Central Zone (CZ)",
+        "4": "Anterior Fibromuscular Stroma (AFS)",
+        "5": "Urethra (UR)",
+        "6": "Periurethral Glands (PG)",
+        "7": "Seminal Vesicle Left (SV_L)",
+        "8": "Seminal Vesicle Right (SV_R)"
+    }
     dl_mr_lesion_mask = None
-    prostate_labels = {"247": "Prostate"}
     if prostate_path and os.path.isfile(prostate_path):
         p_img = sitk.ReadImage(prostate_path)
         p_tfm = sitk.Transform()
@@ -1171,34 +1132,13 @@ def process_case(case_info, out_base_dir, offline=False):
                 p_tfm = sitk.ReadTransform(tfm_reg_path)
         res_p = sitk.Resample(p_img, ct_img, p_tfm, sitk.sitkNearestNeighbor, 0, sitk.sitkUInt16)
         p_arr = sitk.GetArrayFromImage(res_p).astype(np.uint16)
-        p_uniq = np.unique(p_arr)
-        if len(p_uniq) > 2:
-            prostate_labels = {
-                "1": "Peripheral Zone (PZ)",
-                "2": "Transition Zone (TZ)",
-                "3": "Central Zone (CZ)",
-                "4": "Anterior Fibromuscular Stroma (AFS)",
-                "5": "Urethra (UR)",
-                "6": "Periurethral Glands (PG)",
-                "7": "Seminal Vesicle Left (SV_L)",
-                "8": "Seminal Vesicle Right (SV_R)"
-            }
-            # Stamp anatomical zones 1-8
-            for zid in range(1, 9):
-                mri_anatomy[p_arr == zid] = zid
-                
-            # Extract Label 9 as deep-learning prostate lesion
-            if (p_arr == 9).sum() > 0:
-                dl_mr_lesion_mask = (p_arr == 9)
-                print(f"  Extracted MR DL Prostate Lesion (Label 9): {dl_mr_lesion_mask.sum()} voxels")
-        else:
-            p_tid = int( {v: int(k) for k, v in anatomy_label_names.items()}.get("prostate", 247) )
-            prostate_labels = {str(p_tid): "Prostate"}
-            mri_anatomy[p_arr > 0] = p_tid
-        print(f"  MRI Prostate Anatomy loaded from {os.path.basename(prostate_path)}: unique labels={np.unique(mri_anatomy)}")
+        # Retain individual prostate anatomical zones (labels 1-8)
+        for zid in [1, 2, 3, 4, 5, 6, 7, 8]:
+            mri_anatomy[p_arr == zid] = zid
+        print(f"  MRI Prostate Anatomy loaded from {os.path.basename(prostate_path)}: unique labels={np.unique(mri_anatomy)}, non-zero={(mri_anatomy > 0).sum()} voxels")
     else:
         # Fallback: extract nvseg_prostate or prostate from packed_tensor within MRI FOV
-        p_tid = int( {v: int(k) for k, v in anatomy_label_names.items()}.get("prostate", 247) )
+        p_tid = 1
         with h5py.File(anat_h5_path, "r") as af:
             packed_tensor = af["packed_tensor"][:]
             registry = load_anat_registry(anat_h5_path, af)
@@ -1209,47 +1149,14 @@ def process_case(case_info, out_base_dir, offline=False):
                     mid = meta["id"]
                     if 0 <= ch < packed_tensor.shape[0]:
                         m = (packed_tensor[ch] == mid)
-                        mri_anatomy[m & mri_mask] = p_tid
+                        mri_anatomy[m] = p_tid
                     break
-        prostate_labels = {str(p_tid): "Prostate"}
+        prostate_labels = {"1": "Prostate"}
         print(f"  MRI Prostate Anatomy extracted from nvseg_prostate: {(mri_anatomy == p_tid).sum()} voxels")
 
-    # Strictly mask MRI anatomy to the MRI acquisition volume
-    mri_anatomy[~mri_mask] = 0
-
-    # 7c. Build MR Lesions (Study B)
-    lesion_mr_arr = np.zeros((Z, Y, X), dtype=np.int16)
-    mr_nrrd_names = {}
-    
-    # Identify primary prostate lesion ID in CT
-    ct_prostate_lids = [lid for lid in np.unique(lesion_ct_arr) if lid > 0 and "prostate" in ct_nrrd_names.get(lid, "").lower()]
-    primary_prostate_lid = ct_prostate_lids[0] if ct_prostate_lids else 2
-    
-    # If MR DL lesion exists, embed it at primary_prostate_lid
-    if dl_mr_lesion_mask is not None and dl_mr_lesion_mask.sum() > 0:
-        lesion_mr_arr[dl_mr_lesion_mask] = primary_prostate_lid
-        mr_nrrd_names[primary_prostate_lid] = f"NNUNET_OR_TP_prostate_{primary_prostate_lid}_MR"
-        print(f"  Embedded DL Prostate Lesion at label ID {primary_prostate_lid}")
-    elif primary_prostate_lid in np.unique(lesion_ct_arr):
-        # Fallback when DL MR prostate lesion (label 9) is absent: use CT prostate lesion within MRI FOV
-        c_mask = (lesion_ct_arr == primary_prostate_lid)
-        in_mri = (c_mask & mri_mask).sum()
-        if in_mri > 0:
-            lesion_mr_arr[c_mask & mri_mask] = primary_prostate_lid
-            mr_nrrd_names[primary_prostate_lid] = ct_nrrd_names.get(primary_prostate_lid, f"NNUNET_OR_TP_prostate_{primary_prostate_lid}_MR")
-            print(f"  Fallback: included CT prostate lesion {primary_prostate_lid} in MRI FOV ({in_mri} voxels)")
-        
-    # Include non-prostate CT pelvic lesions intersecting the registered MRI FOV
-    for lid in np.unique(lesion_ct_arr):
-        if lid == 0 or lid == primary_prostate_lid:
-            continue
-        c_mask = (lesion_ct_arr == lid)
-        in_mri = (c_mask & mri_mask).sum()
-        if in_mri > 0 and (in_mri / c_mask.sum()) >= 0.2:
-            lesion_mr_arr[c_mask & mri_mask] = lid
-            mr_nrrd_names[lid] = ct_nrrd_names.get(lid, f"NNUNET_OR_TP_unknown_{lid}_MR")
-            print(f"  Included pelvic CT lesion {lid} in MRI FOV ({in_mri} voxels)")
-            
+    # 7c. Build MR Lesions (Study B) — include all verified pelvic lesions in registered coordinate space
+    lesion_mr_arr = lesion_ct_arr.copy()
+    mr_nrrd_names = dict(ct_nrrd_names)
     print(f"  Final MR Lesions on CT grid: {(lesion_mr_arr > 0).sum()} voxels, unique labels: {np.unique(lesion_mr_arr)}")
 
     # Export standard ITK Transform file alongside preprocessed volumes
@@ -1772,14 +1679,16 @@ def main():
     out_dir = "/workspaces/MedEye3d.jl/data/cases/Prostata_bimodal"
     os.makedirs(out_dir, exist_ok=True)
     
-    specific_case = sys.argv[1] if len(sys.argv) > 1 else None
+    offline = "--offline" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--offline"]
+    specific_case = args[0] if len(args) > 0 else None
     
     results = {}
     for case in TARGET_CASES:
         if specific_case and case["patient_id"] != specific_case:
             continue
         try:
-            h5_path = process_case(case, out_dir)
+            h5_path = process_case(case, out_dir, offline=offline)
             results[case["patient_id"]] = h5_path
         except Exception as e:
             print(f"❌ Error processing {case['patient_id']}: {e}")

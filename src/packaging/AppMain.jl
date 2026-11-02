@@ -1175,7 +1175,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 prostate_labels = Dict{Int,String}(parse(Int, k) => v for (k, v) in raw_prostate)
                 for (tp_i, mod) in MEH.tp_modalities
                     if uppercase(mod) in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC")
-                        MEH.anatomy_labels_cache[tp_i] = merge(copy(ts_names), prostate_labels)
+                        MEH.anatomy_labels_cache[tp_i] = prostate_labels
                     end
                 end
                 @info "Loaded prostate anatomy labels for MRI TPs: $(collect(values(prostate_labels)))"
@@ -1251,6 +1251,25 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                     mask_compact = Int16.(round.(mask_vol_base))
                 end
                 
+                # For MRI timepoints (TP >= 1): ensure all verified baseline lesions are registered & present
+                if group != "BASELINE" && haskey(h5_file, "BASELINE/PET_Lesions_0.nii.gz")
+                    try
+                        raw_base_mask = read(h5_file["BASELINE/PET_Lesions_0.nii.gz"])
+                        if needs_reverse
+                            raw_base_mask = reverse(Float32.(raw_base_mask), dims=2)
+                        end
+                        base_mask_i16 = Int16.(round.(max.(0.0f0, Float32.(raw_base_mask))))
+                        for idx in eachindex(base_mask_i16)
+                            b_lid = base_mask_i16[idx]
+                            if b_lid > 0
+                                mask_compact[idx] = b_lid
+                            end
+                        end
+                    catch e_bmask
+                        @debug "[AppMain] Base mask merge note: $e_bmask"
+                    end
+                end
+
                 sz = size(ct_vol_base)
                 bone_mask = zeros(Int8, sz)
                 
@@ -1275,18 +1294,20 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                         end
                     end
                 catch; end
-                # Fallback: if no per-TP anatomy, reuse ATLAS or BASELINE anatomy
-                # (MRI TPs are registered to baseline space, so the atlas is valid)
-                if anatomy_vol === nothing
+
+                # For non-MRI timepoints without native anatomy, fallback to baseline / atlas anatomy
+                is_mri_tp = modality in ("T2", "MRI", "MR", "ADC", "DWI", "T1", "DCE", "DYNAMIC")
+                if !is_mri_tp && (anatomy_vol === nothing || length(unique(anatomy_vol)) <= 2)
                     for fallback_path in ["ATLAS/max_anatomy_expert", "BASELINE/max_anatomy.nii.gz_expert", "ATLAS/max_anatomy", "BASELINE/max_anatomy.nii.gz"]
                         if haskey(h5_file, fallback_path)
                             try
-                                raw_anat = read(h5_file[fallback_path])
+                                raw_fallback = read(h5_file[fallback_path])
                                 if needs_reverse
-                                    raw_anat = reverse(Float32.(raw_anat), dims=2)
+                                    raw_fallback = reverse(Float32.(raw_fallback), dims=2)
                                 end
-                                anatomy_vol = eltype(raw_anat) <: Integer ? UInt16.(raw_anat) : UInt16.(round.(max.(0.0f0, Float32.(raw_anat))))
-                                println("  [TP $tp_i] Using fallback anatomy from $fallback_path"); flush(stdout)
+                                base_anat = eltype(raw_fallback) <: Integer ? UInt16.(raw_fallback) : UInt16.(round.(max.(0.0f0, Float32.(raw_fallback))))
+                                anatomy_vol = base_anat
+                                println("  [TP $tp_i] Integrated full baseline anatomy from $fallback_path"); flush(stdout)
                                 break
                             catch; end
                         end

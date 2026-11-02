@@ -854,7 +854,7 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
             if !isempty(stateObjects[p].onScrollData.dataToScroll)
                 ChangePlane.processKeysInfo(Identity(stateObjects[p].onScrollData.dataToScrollDims), stateObjects[p], KeyboardStruct(), false)
             end
-    for ts in stateObjects[p].mainForDisplayObjects.listOfTextSpecifications
+            for ts in stateObjects[p].mainForDisplayObjects.listOfTextSpecifications
                 if ts.name == "CT"
                     ts.isVisible = (p == 2 ? mri_main_multimodal_mode[] : true)
                     ts.maskContribution = 0.0f0
@@ -863,6 +863,10 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
                         ts.isVisible = !mri_main_multimodal_mode[]
                     end
                     ts.maskContribution = 0.0f0
+                elseif ts.name == "Mask"
+                    ts.isVisible = _lesion_active[]
+                elseif ts.name == "Anatomy"
+                    ts.isVisible = _anatomy_active[]
                 end
             end
             if stateObjects[p].mainForDisplayObjects.vulkanPipelineState !== nothing
@@ -2479,8 +2483,11 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         origX, origY, origZ = canonical_center[1], canonical_center[2], canonical_center[3]
         current_viewer_position[] = (origX, origY, origZ)
 
+        is_mri_main_multimodal = mri_main_multimodal_mode[]
         for i in 1:length(stateObjects)
-            if mri_compare_mode[] && i in (6, 7, 8, 9)
+            if is_mri_main_multimodal && i in 1:4
+                stateObjects[i].lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
+            elseif mri_compare_mode[] && i in (6, 7, 8, 9)
                 stateObjects[i].lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
             elseif i in (1, 2, 5, 6, 7)  # Axial panels (main + M2)
                 stateObjects[i].lastRecordedMousePosition = CartesianIndex(origX, origY, origZ)
@@ -2491,7 +2498,13 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
             end
         end
 
-        targets = [(1, origZ), (2, origZ), (3, origX), (4, origY)]
+        targets = if is_mri_main_multimodal
+            dim_mri = mri_compare_plane[] > 0 ? mri_compare_plane[] : 3
+            sl_mri = dim_mri == 1 ? origX : (dim_mri == 2 ? origY : origZ)
+            [(1, sl_mri), (2, sl_mri), (3, sl_mri), (4, sl_mri)]
+        else
+            [(1, origZ), (2, origZ), (3, origX), (4, origY)]
+        end
         if length(stateObjects) >= 5
             push!(targets, (5, origZ))
         end
