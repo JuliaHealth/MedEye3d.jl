@@ -337,10 +337,10 @@ function generate_vulkan_fragment_shader(texture_specs, color)::String
         if (pc.showCrosshair == 1) {
             float dx = abs(TexCoord0.x - pc.crosshairUV.x);
             float dy = abs(TexCoord0.y - pc.crosshairUV.y);
-            // Targeting reticle: clean lines, short arms, empty center
-            float lineW = 0.0020;  // line thickness in UV (~1 pixel on 512x512)
-            float armLen = 0.022;  // arm length in UV
-            float gap = 0.0035;    // empty center radius in UV
+            // Targeting reticle: clean lines, short compact arms, empty center, reliable rasterization
+            float lineW = 0.0020;  // compact line thickness in UV (~1 pixel on 512x512)
+            float armLen = 0.0048; // shorter, compact reticle arms (~2.5 pixels)
+            float gap = 0.0018;    // clean empty center radius in UV
             bool onH = (dy < lineW) && (dx > gap) && (dx < gap + armLen);
             bool onV = (dx < lineW) && (dy > gap) && (dy < gap + armLen);
             if (onH || onV) {

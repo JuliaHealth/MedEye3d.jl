@@ -1590,45 +1590,39 @@ function coordinateDisplay(
 
                         if is_crosshair_on && ix > 0 && iy > 0 && iz > 0
                             show_crosshair = reinterpret(Float32, Int32(1))
-                            # Map world (origX, origY, origZ) to panel's 2D texture UV
-                            # Must match the right-click jump logic in ReactOnMouseClickAndDrag.jl:460-466
-                            w = Float32(state.calcDimsStruct.imageTextureWidth)
-                            h = Float32(state.calcDimsStruct.imageTextureHeight)
+                            # Map world (ix, iy, iz) to panel's 2D texture UV matching getPixelColor(TexCoord0)
+                            tex_w_gpu = !isempty(obj.vulkanTextures) ? Float32(obj.vulkanTextures[1].width) : Float32(state.calcDimsStruct.imageTextureWidth)
+                            tex_h_gpu = !isempty(obj.vulkanTextures) ? Float32(obj.vulkanTextures[1].height) : Float32(state.calcDimsStruct.imageTextureHeight)
                             
                             is_mri_quad = (MakieEventHandlers.mri_main_multimodal_mode[] && panel_idx in (1, 2, 3, 4)) ||
                                           (MakieEventHandlers.mri_compare_mode[] && panel_idx in (6, 7, 8, 9))
-                            if is_mri_quad
+                            vx, vy = if is_mri_quad
                                 p_dim = state.onScrollData.dimensionToScroll
                                 if p_dim == 1
-                                    cx = Float32(iy) / w
-                                    cy = Float32(iz) / h
+                                    (iy, iz)
                                 elseif p_dim == 2
-                                    cx = Float32(ix) / w
-                                    cy = Float32(iz) / h
+                                    (ix, iz)
                                 else
-                                    cx = Float32(ix) / w
-                                    cy = Float32(iy) / h
+                                    (ix, iy)
                                 end
                             else
                                 panel_idx_mapped = panel_idx > 5 ? panel_idx - 5 : panel_idx
                                 if panel_idx_mapped == 3  # Sagittal: texX=origY, texY=origZ
-                                    cx = Float32(iy) / w
-                                    cy = Float32(iz) / h
+                                    (iy, iz)
                                 elseif panel_idx_mapped == 4  # Coronal: texX=origX, texY=origZ
-                                    cx = Float32(ix) / w
-                                    cy = Float32(iz) / h
+                                    (ix, iz)
                                 else  # Axial (panels 1,2,5): texX=origX, texY=origY
-                                    cx = Float32(ix) / w
-                                    cy = Float32(iy) / h
+                                    (ix, iy)
                                 end
                             end
+                            cx = (Float32(vx) - 0.5f0) / max(1.0f0, tex_w_gpu)
+                            cy = (Float32(vy) - 0.5f0) / max(1.0f0, tex_h_gpu)
                         end
                         push_consts[9] = cx; push_consts[10] = cy
                         push_consts[11] = show_crosshair; push_consts[12] = 1.0f0
 
-                        
-                        w = (panel_idx > 5 && m2_vk[] !== nothing) ? Float32(m2_vk[].swapchain_extent.width) : Float32(obj.vulkanCtx.width)
-                        h = (panel_idx > 5 && m2_vk[] !== nothing) ? Float32(m2_vk[].swapchain_extent.height) : Float32(obj.vulkanCtx.height)
+                        w_screen = (panel_idx > 5 && m2_vk[] !== nothing) ? Float32(m2_vk[].swapchain_extent.width) : Float32(obj.vulkanCtx.width)
+                        h_screen = (panel_idx > 5 && m2_vk[] !== nothing) ? Float32(m2_vk[].swapchain_extent.height) : Float32(obj.vulkanCtx.height)
                         
                         # Use panel 1's measurements for cross-view visibility
                         vector_vertices = Float32[]
@@ -1691,7 +1685,7 @@ function coordinateDisplay(
                             obj.vulkanPipelineState,
                             obj.vulkanVectorPipelineState,
                             push_consts,
-                            Float32(0), Float32(0), w, h,
+                            Float32(0), Float32(0), w_screen, h_screen,
                             vector_vertices,
                             vbo_for_panel
                         )

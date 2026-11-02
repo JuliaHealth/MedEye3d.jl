@@ -405,8 +405,8 @@ function reactToScrollMultiPanel!(panels::Vector{Int}, mainStates::Vector{StateD
         modulelistOfTextSpecs = panelState.mainForDisplayObjects.listOfTextSpecifications
         calcDimStruct = panelState.calcDimsStruct
         for updateDat in singleSlDat.listOfDataAndImageNames
-            # Optimization: if slice didn't change, only upload dynamic overlays (Bone, Mask)
-            if !slice_changed && updateDat.name != "Bone_Overlay" && updateDat.name != "Mask" && updateDat.name != "manualModif"
+            # Optimization: if slice didn't change, only upload dynamic overlays (Bone, Mask, Anatomy)
+            if !slice_changed && updateDat.name != "Bone_Overlay" && updateDat.name != "Mask" && updateDat.name != "manualModif" && updateDat.name != "Anatomy"
                 continue
             end
             idx = findfirst(ts -> ts.name == updateDat.name, modulelistOfTextSpecs)

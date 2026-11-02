@@ -2093,8 +2093,8 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                     if mask_val > 0 && MEH._lesion_active[]
                         lid = Int(round(mask_val))
                         is_right_panel = (MEH.compare_mode[] && clickedPanel in (5, 6, 7, 8, 9)) || is_mri_cmp_cur
-                        panel_tp = if is_mri_cmp_cur
-                            panelState.onScrollData.currentTpIndex >= 0 ? panelState.onScrollData.currentTpIndex : MEH.current_tp_index[]
+                        panel_tp = if panelState.onScrollData.currentTpIndex >= 0
+                            panelState.onScrollData.currentTpIndex
                         elseif is_right_panel
                             MEH.compare_right_tp[]
                         else
@@ -2161,8 +2161,8 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                     anat_val = Int(round(dat.dat[lx, ly, lz]))
                     if anat_val > 0
                         is_right_panel = (MEH.compare_mode[] && clickedPanel in (5, 6, 7, 8, 9)) || is_mri_cmp_cur
-                        panel_tp = if is_mri_cmp_cur
-                            panelState.onScrollData.currentTpIndex >= 0 ? panelState.onScrollData.currentTpIndex : MEH.current_tp_index[]
+                        panel_tp = if panelState.onScrollData.currentTpIndex >= 0
+                            panelState.onScrollData.currentTpIndex
                         elseif is_right_panel
                             MEH.compare_right_tp[]
                         else

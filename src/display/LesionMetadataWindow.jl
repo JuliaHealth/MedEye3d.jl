@@ -3818,18 +3818,24 @@ function create_metadata_window(
     # Resets the internal EditableText cursor to position 0 before changing text
     # to prevent a Makie BoundsError in selection_rects_for_range when the stale
     # cursor position from previous (longer) text exceeds the new text's line_idx bounds.
-    function _set_tb_val!(tb::Textbox, val)
-        v = _safe_strip(val)
-        tb.stored_string[] == v && return  # skip if unchanged
-        # Reset cursor to avoid BoundsError in Makie's editabletext internals
-        try
-            et = getfield(tb, :editor)
-            if et !== nothing && hasproperty(et, :cursors)
-                et.cursors[] = [Makie.EditCursor(0)]
-            end
-        catch; end
-        tb.displayed_string[] = v
-        tb.stored_string[] = v
+    function _set_tb_val!(tb, val)
+        if tb isa Textbox
+            v = _safe_strip(val)
+            tb.stored_string[] == v && return  # skip if unchanged
+            # Reset cursor to avoid BoundsError in Makie's editabletext internals
+            try
+                et = getfield(tb, :editor)
+                if et !== nothing && hasproperty(et, :cursors)
+                    et.cursors[] = [Makie.EditCursor(0)]
+                end
+            catch; end
+            tb.displayed_string[] = v
+            tb.stored_string[] = v
+        elseif hasproperty(tb, :stored_string)
+            v = _safe_strip(val)
+            try tb.stored_string[] = v catch; end
+            try tb.displayed_string[] = v catch; end
+        end
     end
 
     # ── Theme ──────────────────────────────────────────────────────────────
@@ -3929,6 +3935,8 @@ function create_metadata_window(
         end
         _bbox_cache_ready[] = true
     end
+
+    is_syncing_sl = Ref(false)
     
     function _apply_scroll!(offset_px::Float32)
         # Close any open dropdowns before scrolling to prevent floating overlays
@@ -3953,6 +3961,30 @@ function create_metadata_window(
                 end
             end
         end
+
+        # Keep vertical slider in sync with current scroll position
+        if !is_syncing_sl[] && _max_scroll_px[] > 0.0f0
+            sl_val = clamp(1.0f0 - (offset_px / _max_scroll_px[]), 0.0f0, 1.0f0)
+            is_syncing_sl[] = true
+            try
+                sl.value[] = sl_val
+            finally
+                is_syncing_sl[] = false
+            end
+        end
+    end
+
+    # Connect vertical slider drag to scroll
+    on(sl.value) do v
+        is_syncing_sl[] && return
+        !_bbox_cache_ready[] && return
+        is_syncing_sl[] = true
+        try
+            offset = (1.0f0 - Float32(v)) * _max_scroll_px[]
+            _apply_scroll!(offset)
+        finally
+            is_syncing_sl[] = false
+        end
     end
     
     # Rocket Subject for scroll — debounce at 50ms (20 Hz, now feasible)
@@ -3968,8 +4000,7 @@ function create_metadata_window(
     ))
     
     on(fig.scene.events.scroll) do scroll
-        is_login_active = !_login_authenticated[] && _login_visible[]
-        if !_scroll_ready[] || !_bbox_cache_ready[] || is_login_active || _any_menu_open()
+        if !_scroll_ready[] || !_bbox_cache_ready[] || _any_menu_open()
             return Consume(true)
         end
         # Push each scroll delta directly — debounce_time(16) handles coalescing
@@ -4078,7 +4109,18 @@ function create_metadata_window(
                 try; w.is_open[] = false; catch; end
             end
             if hasproperty(w, :blockscene) && w.blockscene !== nothing
-                _set_scene_plots_visible!(w.blockscene, visible)
+                w.blockscene.visible[] = visible
+                for p in w.blockscene.plots
+                    try; p.visible[] = visible; catch; end
+                end
+                if !isempty(w.blockscene.children)
+                    menuscene = w.blockscene.children[1]
+                    is_drop_open = visible && try w.is_open[] catch; false end
+                    menuscene.visible[] = is_drop_open
+                    for p in menuscene.plots
+                        try; p.visible[] = is_drop_open; catch; end
+                    end
+                end
             end
             if hasproperty(w, :visible) && (w.visible isa Observable)
                 w.visible[] = visible
@@ -4144,11 +4186,14 @@ function create_metadata_window(
     # Header removed for compactness — title was decorative only
 
     # ── Section helper ──────────────────────────────────────────────────────
+    all_section_buttons = Button[]
     function begin_section!(title; default_open=true)
         is_open = Observable(default_open)
         header_r = nr!()
         btn = Button(g[header_r, 1:4], label = @lift($is_open ? "▼  $(title)" : "▶  $(title)"),
-            buttoncolor = SEC_HDR, labelcolor = ACCENT, fontsize = 11, halign = :left)
+            buttoncolor = SEC_HDR, labelcolor = ACCENT, fontsize = 11, halign = :left, width = Relative(1.0))
+        push!(all_section_buttons, btn)
+        rowsize!(g, header_r, Fixed(26)); register_fixed_row!(header_r, 26)
         
         start_row = r[1] + 1
         end_row_ref = Ref(start_row)  # updated by end_section!
@@ -4178,6 +4223,7 @@ function create_metadata_window(
         
         on(btn.clicks) do _
             is_open[] = !is_open[]
+            println("[MAKIE-SECTION] $(btn.label[]) -> is_open=$(is_open[])"); flush(stdout)
             # Temporarily unblock layout solver for section collapse/expand
             g.block_updates = false
             try
@@ -4190,6 +4236,7 @@ function create_metadata_window(
                 catch
                     Makie.GridLayoutBase.update!(g)
                 end
+                Makie.GridLayoutBase.update!(g)
                 _cache_widget_bboxes!()
             finally
                 g.block_updates = true
@@ -4247,7 +4294,7 @@ function create_metadata_window(
         fontsize = 10, color = save_status_color, halign = :left, tellwidth=false, tellheight=false)
 
     # ── XNAT Case Navigator ──────────────────────────────────────────────────
-    sec_xnat = begin_section!("XNAT Case Navigator"; default_open=true)
+    sec_xnat = begin_section!("XNAT Case Navigator"; default_open=false)
     
     xnat_server_status_text = Observable("XNAT: Checking...")
     xnat_server_status_color = Observable(RGBf(0.8, 0.7, 0.2))
@@ -4950,7 +4997,7 @@ function create_metadata_window(
     end
 
     # ── Lesion Navigation ────────────────────────────────────────────────────
-    sec_nav = begin_section!("Lesion Navigation")
+    sec_nav = begin_section!("Lesion Navigation"; default_open=true)
     
     queue_r = nr!()
     filter_opts = ["All", "Unreviewed", "Accepted", "Corrected", "Rejected", "Uncertain", "New", "Resolved", "Key Images"]
@@ -5092,7 +5139,7 @@ function create_metadata_window(
     end_section!(sec_nav)
 
     # ── Viewport Controls ────────────────────────────────────────────────────
-    sec_view = begin_section!("Viewport & Windowing")
+    sec_view = begin_section!("Viewport & Multi-Planar Layout"; default_open=false)
     
     m2_r = nr!()
     btn_m2 = Button(g[m2_r, 1], label = "[M2]", buttoncolor = RGBf(0.2, 0.4, 0.6), labelcolor = TXT, fontsize = 10)
@@ -5794,345 +5841,99 @@ function create_metadata_window(
         put!(channel, LabelOpacityEvent(v))
     end
 
-        # CT Windowing
-    ct_lbl_r = nr!()
-    Label(g[ct_lbl_r, 1:4], "-- CT Window & Offsets (HU) --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
-    rowsize!(g, ct_lbl_r, Fixed(20)); register_fixed_row!(ct_lbl_r, 20)
-    
-    ct_s_r = nr!()
-    islider_ct = IntervalSlider(g[ct_s_r, 1:4], range = -1500.0:10.0:3000.0, startvalues = (-150.0, 250.0))
-    rowsize!(g, ct_s_r, Fixed(28)); register_fixed_row!(ct_s_r, 28)
-    
-    ct_p_r = nr!()
-    Label(g[ct_p_r, 1], "Presets:", fontsize = 10, color = SUBTXT, halign = :right)
-    btn_soft = Button(g[ct_p_r, 2], label = "Soft Tissue", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_bone = Button(g[ct_p_r, 3], label = "Bone",        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_lung = Button(g[ct_p_r, 4], label = "Lung",        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    rowsize!(g, ct_p_r, Fixed(24)); register_fixed_row!(ct_p_r, 24)
+    # ── Compact Multi-Modality Windowing (2x2 Quad Grid: T2, ADC, DWI, T1 + CT & PET) ──
+    mri_hdr_r = nr!()
+    Label(g[mri_hdr_r, 1:4], "-- MRI Quad Windowing (T2, ADC, DWI, T1) --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
+    rowsize!(g, mri_hdr_r, Fixed(20)); register_fixed_row!(mri_hdr_r, 20)
 
-    ct_c_r = nr!()
-    btn_ct_minus = Button(g[ct_c_r, 1], label = "- 50", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    tb_ct_min = styled_textbox(g[ct_c_r, 2]; placeholder = "Min (-150)", stored_string = "-150.0", fontsize = 10)
-    tb_ct_max = styled_textbox(g[ct_c_r, 3]; placeholder = "Max (250)",  stored_string = "250.0",  fontsize = 10)
-    btn_ct_plus  = Button(g[ct_c_r, 4], label = "+ 50", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    rowsize!(g, ct_c_r, Fixed(28)); register_fixed_row!(ct_c_r, 28)
-    
-    # Apply CT removed — slider drag and Enter-in-textbox already apply
-
-    is_syncing_ct = Ref(false)
-    # ── Rocket debounce for windowing events ──────────────────────────────
-    # Slider drag fires per-pixel. Debounce at 50ms to limit Vulkan re-renders to 20Hz.
-    _windowing_subject = Subject(Tuple{String, Float32, Float32})
-    _windowing_debounced = _windowing_subject |> debounce_time(50)
-    subscribe!(_windowing_debounced, lambda(
-        on_next = (args) -> begin
-            mod, min_v, max_v = args
-            put!(channel, WindowingEvent(mod, min_v, max_v))
-        end
-    ))
-
-    function apply_ct_win(min_v::Real, max_v::Real)
-        is_syncing_ct[] && return
-        is_syncing_selection[] && return
-        is_syncing_ct[] = true
-        try
-            s_min = string(round(min_v, digits=1))
-            s_max = string(round(max_v, digits=1))
-            _set!(tb_ct_min.stored_string, s_min)
-            _set!(tb_ct_min.displayed_string, s_min)
-            _set!(tb_ct_max.stored_string, s_max)
-            _set!(tb_ct_max.displayed_string, s_max)
-            set_close_to!(islider_ct, Float32(min_v), Float32(max_v))
-            next!(_windowing_subject, ("CT", Float32(min_v), Float32(max_v)))
-        finally
-            is_syncing_ct[] = false
-        end
-    end
-
-    on(islider_ct.interval) do (min_v, max_v); apply_ct_win(min_v, max_v); end
-    on(btn_soft.clicks) do _; apply_ct_win(-160.0, 240.0) end
-    on(btn_bone.clicks) do _; apply_ct_win(-450.0, 1050.0) end
-    on(btn_lung.clicks) do _; apply_ct_win(-1350.0, 150.0) end
-    on(btn_ct_minus.clicks) do _
-        v_min = tryparse(Float32, _safe_strip(tb_ct_min.stored_string[])); v_min = v_min === nothing ? -150.0f0 : v_min - 50.0f0
-        v_max = tryparse(Float32, _safe_strip(tb_ct_max.stored_string[])); v_max = v_max === nothing ? 250.0f0 : v_max - 50.0f0
-        apply_ct_win(v_min, v_max)
-    end
-    on(btn_ct_plus.clicks) do _
-        v_min = tryparse(Float32, _safe_strip(tb_ct_min.stored_string[])); v_min = v_min === nothing ? -150.0f0 : v_min + 50.0f0
-        v_max = tryparse(Float32, _safe_strip(tb_ct_max.stored_string[])); v_max = v_max === nothing ? 250.0f0 : v_max + 50.0f0
-        apply_ct_win(v_min, v_max)
-    end
-    
-    function apply_ct_from_text()
-        is_syncing_selection[] && return
-        s_min = !isempty(tb_ct_min.displayed_string[]) ? tb_ct_min.displayed_string[] : tb_ct_min.stored_string[]
-        s_max = !isempty(tb_ct_max.displayed_string[]) ? tb_ct_max.displayed_string[] : tb_ct_max.stored_string[]
-        v_min = tryparse(Float32, _safe_strip(s_min))
-        v_max = tryparse(Float32, _safe_strip(s_max))
-        if v_min !== nothing && v_max !== nothing
-            apply_ct_win(v_min, v_max)
-        end
-    end
-    on(tb_ct_min.stored_string) do _; apply_ct_from_text(); end
-    on(tb_ct_max.stored_string) do _; apply_ct_from_text(); end
-
-    # PET Windowing
-    pet_lbl_r = nr!()
-    Label(g[pet_lbl_r, 1:4], "-- PET Window & Offsets (SUV) --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
-    rowsize!(g, pet_lbl_r, Fixed(20)); register_fixed_row!(pet_lbl_r, 20)
-    
-    pet_s_r = nr!()
-    islider_pet = IntervalSlider(g[pet_s_r, 1:4], range = 0.1:0.1:50.0, startvalues = (0.1, 10.0))
-    rowsize!(g, pet_s_r, Fixed(28)); register_fixed_row!(pet_s_r, 28)
-    
-    pet_p_r = nr!()
-    Label(g[pet_p_r, 1], "Presets:", fontsize = 10, color = SUBTXT, halign = :right)
-    btn_pet_5  = Button(g[pet_p_r, 2], label = "SUV 0-5",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_pet_10 = Button(g[pet_p_r, 3], label = "SUV 0-10", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_pet_15 = Button(g[pet_p_r, 4], label = "SUV 0-15", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    rowsize!(g, pet_p_r, Fixed(24)); register_fixed_row!(pet_p_r, 24)
-
-    pet_c_r = nr!()
-    btn_pet_minus = Button(g[pet_c_r, 1], label = "- 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    tb_pet_min = styled_textbox(g[pet_c_r, 2]; placeholder = "Min (0.1)", stored_string = "0.1", fontsize = 10)
-    tb_pet_max = styled_textbox(g[pet_c_r, 3]; placeholder = "Max (10.0)", stored_string = "10.0", fontsize = 10)
-    btn_pet_plus  = Button(g[pet_c_r, 4], label = "+ 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    rowsize!(g, pet_c_r, Fixed(28)); register_fixed_row!(pet_c_r, 28)
-    
-    # Apply PET removed — slider drag and Enter-in-textbox already apply
-
-    is_syncing_pet = Ref(false)
-    function apply_pet_win(min_v::Real, max_v::Real)
-        is_syncing_pet[] && return
-        is_syncing_selection[] && return
-        is_syncing_pet[] = true
-        try
-            s_min = string(round(min_v, digits=1))
-            s_max = string(round(max_v, digits=1))
-            _set!(tb_pet_min.stored_string, s_min)
-            _set!(tb_pet_min.displayed_string, s_min)
-            _set!(tb_pet_max.stored_string, s_max)
-            _set!(tb_pet_max.displayed_string, s_max)
-            set_close_to!(islider_pet, Float32(min_v), Float32(max_v))
-            next!(_windowing_subject, ("PET", Float32(min_v), Float32(max_v)))
-        finally
-            is_syncing_pet[] = false
-        end
-    end
-
-    on(islider_pet.interval) do (min_v, max_v); apply_pet_win(min_v, max_v); end
-    on(btn_pet_5.clicks)  do _; apply_pet_win(0.1, 5.0) end
-    on(btn_pet_10.clicks) do _; apply_pet_win(0.1, 10.0) end
-    on(btn_pet_15.clicks) do _; apply_pet_win(0.1, 15.0) end
-    on(btn_pet_minus.clicks) do _
-        v_min = tryparse(Float32, _safe_strip(tb_pet_min.stored_string[])); v_min = v_min === nothing ? 0.1f0 : max(0.1f0, v_min - 0.5f0)
-        v_max = tryparse(Float32, _safe_strip(tb_pet_max.stored_string[])); v_max = v_max === nothing ? 10.0f0 : v_max - 0.5f0
-        apply_pet_win(v_min, v_max)
-    end
-    on(btn_pet_plus.clicks) do _
-        v_min = tryparse(Float32, _safe_strip(tb_pet_min.stored_string[])); v_min = v_min === nothing ? 0.1f0 : max(0.1f0, v_min + 0.5f0)
-        v_max = tryparse(Float32, _safe_strip(tb_pet_max.stored_string[])); v_max = v_max === nothing ? 10.0f0 : v_max + 0.5f0
-        apply_pet_win(v_min, v_max)
-    end
-    
-    function apply_pet_from_text()
-        is_syncing_selection[] && return
-        s_min = !isempty(tb_pet_min.displayed_string[]) ? tb_pet_min.displayed_string[] : tb_pet_min.stored_string[]
-        s_max = !isempty(tb_pet_max.displayed_string[]) ? tb_pet_max.displayed_string[] : tb_pet_max.stored_string[]
-        v_min = tryparse(Float32, _safe_strip(s_min))
-        v_max = tryparse(Float32, _safe_strip(s_max))
-        if v_min !== nothing && v_max !== nothing
-            apply_pet_win(v_min, v_max)
-        end
-    end
-    on(tb_pet_min.stored_string) do _; apply_pet_from_text(); end
-    on(tb_pet_max.stored_string) do _; apply_pet_from_text(); end
-
-    # SPECT Windowing
-    spect_lbl_r = nr!()
-    Label(g[spect_lbl_r, 1:4], "-- SPECT Window & Offsets (Counts) --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
-    rowsize!(g, spect_lbl_r, Fixed(20)); register_fixed_row!(spect_lbl_r, 20)
-    
-    spect_s_r = nr!()
-    islider_spect = IntervalSlider(g[spect_s_r, 1:4], range = 0.0:0.1:100.0, startvalues = (0.0, 10.0))
-    rowsize!(g, spect_s_r, Fixed(28)); register_fixed_row!(spect_s_r, 28)
-    
-    spect_p_r = nr!()
-    Label(g[spect_p_r, 1], "Presets:", fontsize = 10, color = SUBTXT, halign = :right)
-    btn_spect_5  = Button(g[spect_p_r, 2], label = "SPECT 0-5",  buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_spect_10 = Button(g[spect_p_r, 3], label = "SPECT 0-10", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_spect_20 = Button(g[spect_p_r, 4], label = "SPECT 0-20", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    rowsize!(g, spect_p_r, Fixed(24)); register_fixed_row!(spect_p_r, 24)
-
-    spect_c_r = nr!()
-    btn_spect_minus = Button(g[spect_c_r, 1], label = "- 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    tb_spect_min = styled_textbox(g[spect_c_r, 2]; placeholder = "Min (0.0)", stored_string = "0.0", fontsize = 10)
-    tb_spect_max = styled_textbox(g[spect_c_r, 3]; placeholder = "Max (10.0)", stored_string = "10.0", fontsize = 10)
-    btn_spect_plus  = Button(g[spect_c_r, 4], label = "+ 0.5", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    rowsize!(g, spect_c_r, Fixed(28)); register_fixed_row!(spect_c_r, 28)
-    
-    # Apply SPECT removed — slider drag and Enter-in-textbox already apply
-
-    is_syncing_spect = Ref(false)
-    function apply_spect_win(min_v::Real, max_v::Real)
-        is_syncing_spect[] && return
-        is_syncing_selection[] && return
-        is_syncing_spect[] = true
-        try
-            s_min = string(round(min_v, digits=1))
-            s_max = string(round(max_v, digits=1))
-            _set!(tb_spect_min.stored_string, s_min)
-            _set!(tb_spect_min.displayed_string, s_min)
-            _set!(tb_spect_max.stored_string, s_max)
-            _set!(tb_spect_max.displayed_string, s_max)
-            set_close_to!(islider_spect, Float32(min_v), Float32(max_v))
-            next!(_windowing_subject, ("SPECT", Float32(min_v), Float32(max_v)))
-        finally
-            is_syncing_spect[] = false
-        end
-    end
-
-    on(islider_spect.interval) do (min_v, max_v); apply_spect_win(min_v, max_v); end
-    on(btn_spect_5.clicks)  do _; apply_spect_win(0.0, 5.0) end
-    on(btn_spect_10.clicks) do _; apply_spect_win(0.0, 10.0) end
-    on(btn_spect_20.clicks) do _; apply_spect_win(0.0, 20.0) end
-    on(btn_spect_minus.clicks) do _
-        v_min = tryparse(Float32, _safe_strip(tb_spect_min.stored_string[])); v_min = v_min === nothing ? 0.0f0 : v_min - 0.5f0
-        v_max = tryparse(Float32, _safe_strip(tb_spect_max.stored_string[])); v_max = v_max === nothing ? 10.0f0 : v_max - 0.5f0
-        apply_spect_win(v_min, v_max)
-    end
-    on(btn_spect_plus.clicks) do _
-        v_min = tryparse(Float32, _safe_strip(tb_spect_min.stored_string[])); v_min = v_min === nothing ? 0.0f0 : v_min + 0.5f0
-        v_max = tryparse(Float32, _safe_strip(tb_spect_max.stored_string[])); v_max = v_max === nothing ? 10.0f0 : v_max + 0.5f0
-        apply_spect_win(v_min, v_max)
-    end
-    
-    function apply_spect_from_text()
-        s_min = !isempty(tb_spect_min.displayed_string[]) ? tb_spect_min.displayed_string[] : tb_spect_min.stored_string[]
-        s_max = !isempty(tb_spect_max.displayed_string[]) ? tb_spect_max.displayed_string[] : tb_spect_max.stored_string[]
-        v_min = tryparse(Float32, _safe_strip(s_min))
-        v_max = tryparse(Float32, _safe_strip(s_max))
-        if v_min !== nothing && v_max !== nothing
-            apply_spect_win(v_min, v_max)
-        end
-    end
-    # ── MRI Modalities Windowing (T2, ADC, DWI, T1, DCE) ────────────────────
-    function build_modality_window_block(mod_name::String, display_title::String, slider_range, default_range, presets::Vector{Tuple{String, Float32, Float32}}, step_val::Float32)
-        lbl_r = nr!()
-        Label(g[lbl_r, 1:4], "-- $display_title --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
-        rowsize!(g, lbl_r, Fixed(20)); register_fixed_row!(lbl_r, 20)
+    function build_compact_modality_block(h_row::Int, s_row::Int, col_span, mod_name::String, display_title::String, slider_range, default_range, presets::Vector{Tuple{String, Float32, Float32}})
+        title_obs = Observable("$display_title: [$(round(Int, default_range[1]))-$(round(Int, default_range[2]))]")
+        Label(g[h_row, col_span[1]], title_obs, fontsize = 9, color = ACCENT, halign = :left, tellwidth = false)
         
-        s_r = nr!()
-        islider = IntervalSlider(g[s_r, 1:4], range = slider_range, startvalues = (default_range[1], default_range[2]))
-        rowsize!(g, s_r, Fixed(26)); register_fixed_row!(s_r, 26)
+        sub_p = g[h_row, col_span[2]] = GridLayout()
+        colgap!(sub_p, 2)
         
-        p_r = nr!()
-        Label(g[p_r, 1], "Presets:", fontsize = 9, color = SUBTXT, halign = :right)
-        for (pi, (p_lbl, p_min, p_max)) in enumerate(presets[1:min(3, length(presets))])
-            col = pi + 1
-            btn_p = Button(g[p_r, col], label = p_lbl, buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
-            on(btn_p.clicks) do _; apply_win(p_min, p_max) end
-        end
-        rowsize!(g, p_r, Fixed(24)); register_fixed_row!(p_r, 24)
+        islider = IntervalSlider(g[s_row, col_span], range = slider_range, startvalues = (default_range[1], default_range[2]))
         
-        c_r = nr!()
-        btn_minus = Button(g[c_r, 1], label = "- $(round(Int, step_val))", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
-        tb_min = styled_textbox(g[c_r, 2]; placeholder = "Min ($(default_range[1]))", stored_string = string(round(default_range[1], digits=1)), fontsize = 9)
-        tb_max = styled_textbox(g[c_r, 3]; placeholder = "Max ($(default_range[2]))", stored_string = string(round(default_range[2], digits=1)), fontsize = 9)
-        btn_plus  = Button(g[c_r, 4], label = "+ $(round(Int, step_val))", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
-        rowsize!(g, c_r, Fixed(26)); register_fixed_row!(c_r, 26)
-        
+        tb_min_obs = Observable(string(round(default_range[1], digits=1)))
+        tb_max_obs = Observable(string(round(default_range[2], digits=1)))
+        tb_min = (stored_string = tb_min_obs, displayed_string = tb_min_obs)
+        tb_max = (stored_string = tb_max_obs, displayed_string = tb_max_obs)
+
         is_syncing = Ref(false)
         function apply_win(min_v::Real, max_v::Real)
             is_syncing[] && return
-            is_syncing_selection[] && return
             is_syncing[] = true
             try
                 s_min = string(round(min_v, digits=1))
                 s_max = string(round(max_v, digits=1))
-                _set!(tb_min.stored_string, s_min)
-                _set!(tb_min.displayed_string, s_min)
-                _set!(tb_max.stored_string, s_max)
-                _set!(tb_max.displayed_string, s_max)
+                tb_min_obs[] = s_min
+                tb_max_obs[] = s_max
                 set_close_to!(islider, Float32(min_v), Float32(max_v))
-                next!(_windowing_subject, (mod_name, Float32(min_v), Float32(max_v)))
+                title_obs[] = "$display_title: [$(round(Int, min_v))-$(round(Int, max_v))]"
+                put!(channel, WindowingEvent(mod_name, Float32(min_v), Float32(max_v)))
+                println("[GUI-WINDOWING] Sent $(mod_name): [$(Float32(min_v)), $(Float32(max_v))]"); flush(stdout)
             finally
                 is_syncing[] = false
             end
         end
-        
-        on(islider.interval) do (min_v, max_v); apply_win(min_v, max_v); end
-        on(btn_minus.clicks) do _
-            v_min = tryparse(Float32, _safe_strip(tb_min.stored_string[])); v_min = v_min === nothing ? default_range[1] : v_min - step_val
-            v_max = tryparse(Float32, _safe_strip(tb_max.stored_string[])); v_max = v_max === nothing ? default_range[2] : v_max - step_val
-            apply_win(v_min, v_max)
-        end
-        on(btn_plus.clicks) do _
-            v_min = tryparse(Float32, _safe_strip(tb_min.stored_string[])); v_min = v_min === nothing ? default_range[1] : v_min + step_val
-            v_max = tryparse(Float32, _safe_strip(tb_max.stored_string[])); v_max = v_max === nothing ? default_range[2] : v_max + step_val
-            apply_win(v_min, v_max)
+
+        for (pi, (p_lbl, p_min, p_max)) in enumerate(presets[1:min(3, length(presets))])
+            btn_p = Button(sub_p[1, pi], label = p_lbl, buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 8, height = 18)
+            on(btn_p.clicks) do _; apply_win(p_min, p_max); end
         end
         
-        function apply_from_text()
-            s_min = !isempty(tb_min.displayed_string[]) ? tb_min.displayed_string[] : tb_min.stored_string[]
-            s_max = !isempty(tb_max.displayed_string[]) ? tb_max.displayed_string[] : tb_max.stored_string[]
-            v_min = tryparse(Float32, _safe_strip(s_min))
-            v_max = tryparse(Float32, _safe_strip(s_max))
-            if v_min !== nothing && v_max !== nothing
-                apply_win(v_min, v_max)
-            end
+        on(islider.interval) do (min_v, max_v)
+            is_syncing[] && return
+            title_obs[] = "$display_title: [$(round(Int, min_v))-$(round(Int, max_v))]"
+            tb_min_obs[] = string(round(min_v, digits=1))
+            tb_max_obs[] = string(round(max_v, digits=1))
+            put!(channel, WindowingEvent(mod_name, Float32(min_v), Float32(max_v)))
         end
-        on(tb_min.stored_string) do _; apply_from_text(); end
-        on(tb_max.stored_string) do _; apply_from_text(); end
         
-        return apply_win
+        return (apply_win, tb_min, tb_max, islider)
     end
 
-    # 1. T2-weighted MRI Windowing (Top-Left Corner)
-    apply_t2_win = build_modality_window_block(
-        "T2", "MRI T2 Window (Anatomy - Top-Left)",
-        0.0:10.0:3000.0, (0.0f0, 1000.0f0),
-        [("T2 Standard [0-1000]", 0.0f0, 1000.0f0), ("T2 Contrast [100-800]", 100.0f0, 800.0f0), ("T2 Wide [0-1500]", 0.0f0, 1500.0f0)],
-        50.0f0
-    )
+    # Row pair 1: Top-Left T2 and Top-Right ADC
+    r_top_hdr = nr!()
+    r_top_sl  = nr!()
+    (apply_t2_win, tb_t2_min, tb_t2_max, islider_t2) = build_compact_modality_block(r_top_hdr, r_top_sl, 1:2, "T2", "T2 (TL)", 0.0:10.0:3000.0, (0.0f0, 1000.0f0), [("Std [0-1k]", 0.0f0, 1000.0f0), ("Contrast [100-800]", 100.0f0, 800.0f0), ("Wide [0-1.5k]", 0.0f0, 1500.0f0)])
+    (apply_adc_win, tb_adc_min, tb_adc_max, islider_adc) = build_compact_modality_block(r_top_hdr, r_top_sl, 3:4, "ADC", "ADC (TR)", 0.0:10.0:3500.0, (0.0f0, 2200.0f0), [("Std [0-2.2k]", 0.0f0, 2200.0f0), ("PI-RADS [700-2.1k]", 700.0f0, 2100.0f0), ("Wide [0-3k]", 0.0f0, 3000.0f0)])
+    rowsize!(g, r_top_hdr, Fixed(20)); register_fixed_row!(r_top_hdr, 20)
+    rowsize!(g, r_top_sl,  Fixed(22)); register_fixed_row!(r_top_sl,  22)
 
-    # 2. ADC Map Windowing (PI-RADS v2.1 Standards - Top-Right Corner)
-    apply_adc_win = build_modality_window_block(
-        "ADC", "MRI ADC Window (Diffusion Metric - Top-Right)",
-        0.0:10.0:3500.0, (0.0f0, 2200.0f0),
-        [("ADC Standard [0-2200]", 0.0f0, 2200.0f0), ("PI-RADS [700-2100]", 700.0f0, 2100.0f0), ("ADC Wide [0-3000]", 0.0f0, 3000.0f0)],
-        50.0f0
-    )
+    # Row pair 2: Bottom-Left DWI and Bottom-Right T1
+    r_bot_hdr = nr!()
+    r_bot_sl  = nr!()
+    (apply_dwi_win, tb_dwi_min, tb_dwi_max, islider_dwi) = build_compact_modality_block(r_bot_hdr, r_bot_sl, 1:2, "DWI", "DWI (BL)", 0.0:5.0:2500.0, (0.0f0, 600.0f0), [("Std [0-600]", 0.0f0, 600.0f0), ("Contrast [0-400]", 0.0f0, 400.0f0), ("Wide [0-1k]", 0.0f0, 1000.0f0)])
+    (apply_t1_win, tb_t1_min, tb_t1_max, islider_t1) = build_compact_modality_block(r_bot_hdr, r_bot_sl, 3:4, "T1", "T1 (BR)", 0.0:10.0:2500.0, (0.0f0, 700.0f0), [("Std [0-700]", 0.0f0, 700.0f0), ("Hem [100-800]", 100.0f0, 800.0f0), ("Wide [0-1.2k]", 0.0f0, 1200.0f0)])
+    rowsize!(g, r_bot_hdr, Fixed(20)); register_fixed_row!(r_bot_hdr, 20)
+    rowsize!(g, r_bot_sl,  Fixed(22)); register_fixed_row!(r_bot_sl,  22)
 
-    # 3. DWI (High B-Value) Windowing (Bottom-Left Corner)
-    apply_dwi_win = build_modality_window_block(
-        "DWI", "MRI DWI Window (Diffusion Weighted - Bottom-Left)",
-        0.0:10.0:3000.0, (50.0f0, 1200.0f0),
-        [("PI-RADS Standard [50-1200]", 50.0f0, 1200.0f0), ("High-Contrast Tumor [100-900]", 100.0f0, 900.0f0), ("Low-Noise Background [150-1400]", 150.0f0, 1400.0f0), ("DWI Wide [0-1800]", 0.0f0, 1800.0f0)],
-        25.0f0
-    )
+    # Row pair 3: CT (Left) and PET (Right)
+    ct_pet_hdr_r = nr!()
+    Label(g[ct_pet_hdr_r, 1:4], "-- CT & PET Windowing --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
+    rowsize!(g, ct_pet_hdr_r, Fixed(20)); register_fixed_row!(ct_pet_hdr_r, 20)
+    
+    r_ctpet_hdr = nr!()
+    r_ctpet_sl  = nr!()
+    (apply_ct_win, tb_ct_min, tb_ct_max, islider_ct) = build_compact_modality_block(r_ctpet_hdr, r_ctpet_sl, 1:2, "CT", "CT (HU)", -1500.0:10.0:3000.0, (-160.0f0, 240.0f0), [("Soft [-160,240]", -160.0f0, 240.0f0), ("Bone [-450,1050]", -450.0f0, 1050.0f0), ("Lung [-1350,150]", -1350.0f0, 150.0f0)])
+    (apply_pet_win, tb_pet_min, tb_pet_max, islider_pet) = build_compact_modality_block(r_ctpet_hdr, r_ctpet_sl, 3:4, "PET", "PET (SUV)", 0.1:0.1:50.0, (0.1f0, 10.0f0), [("SUV 5", 0.1f0, 5.0f0), ("SUV 10", 0.1f0, 10.0f0), ("SUV 15", 0.1f0, 15.0f0)])
+    rowsize!(g, r_ctpet_hdr, Fixed(20)); register_fixed_row!(r_ctpet_hdr, 20)
+    rowsize!(g, r_ctpet_sl,  Fixed(22)); register_fixed_row!(r_ctpet_sl,  22)
 
-    # 4. T1-weighted MRI Windowing (Bottom-Right Corner)
-    apply_t1_win = build_modality_window_block(
-        "T1", "MRI T1 Window (Pelvis / Marrow / Fat - Bottom-Right)",
-        0.0:10.0:2500.0, (0.0f0, 700.0f0),
-        [("T1 Standard [0-700]", 0.0f0, 700.0f0), ("Hemorrhage [100-800]", 100.0f0, 800.0f0), ("T1 Wide [0-1200]", 0.0f0, 1200.0f0)],
-        50.0f0
-    )
-
-    # 5. Dynamic Contrast-Enhanced (DCE) MRI Windowing (Additional MRI)
-    apply_dce_win = build_modality_window_block(
-        "DCE", "MRI DCE Window (Dynamic Contrast - Additional MRI)",
-        0.0:10.0:2000.0, (0.0f0, 500.0f0),
-        [("DCE Standard [0-500]", 0.0f0, 500.0f0), ("Early Wash [50-400]", 50.0f0, 400.0f0), ("DCE Wide [0-1000]", 0.0f0, 1000.0f0)],
-        25.0f0
-    )
+    # Row pair 4: DCE (Left) and SPECT (Right)
+    r_dcespect_hdr = nr!()
+    r_dcespect_sl  = nr!()
+    (apply_dce_win, tb_dce_min, tb_dce_max, islider_dce) = build_compact_modality_block(r_dcespect_hdr, r_dcespect_sl, 1:2, "DCE", "DCE (MR)", 0.0:10.0:2000.0, (0.0f0, 500.0f0), [("Std [0-500]", 0.0f0, 500.0f0), ("Early [50-400]", 50.0f0, 400.0f0), ("Wide [0-1k]", 0.0f0, 1000.0f0)])
+    (apply_spect_win, tb_spect_min, tb_spect_max, islider_spect) = build_compact_modality_block(r_dcespect_hdr, r_dcespect_sl, 3:4, "SPECT", "SPECT", 0.0:0.1:100.0, (0.0f0, 10.0f0), [("0-5", 0.0f0, 5.0f0), ("0-10", 0.0f0, 10.0f0), ("0-20", 0.0f0, 20.0f0)])
+    rowsize!(g, r_dcespect_hdr, Fixed(20)); register_fixed_row!(r_dcespect_hdr, 20)
+    rowsize!(g, r_dcespect_sl,  Fixed(22)); register_fixed_row!(r_dcespect_sl,  22)
 
     end_section!(sec_win)
 
     # ── Clinical Information & Patient History ───────────────────────────────
-    sec_clinical = begin_section!("Clinical Information & Indication"; default_open=true)
+    sec_clinical = begin_section!("Clinical Information & Indication"; default_open=false)
     
     # 0. Profile & Radioligand
     clin_prof_r = nr!()
@@ -6711,7 +6512,7 @@ function create_metadata_window(
     custom_opts_db = load_custom_options()
     
     # Registration QC section
-    sec_reg_qc = begin_section!("Registration QC"; default_open=true)
+    sec_reg_qc = begin_section!("Registration QC"; default_open=false)
     reg_r1 = nr!()
     Label(g[reg_r1, 1], "Reg QC:", fontsize = 10, color = LBL_FG, halign = :left)
     menu_reg_qc = Menu(g[reg_r1, 2:3],
@@ -7425,7 +7226,7 @@ function create_metadata_window(
     end_section!(sec_meta)
 
     # ── Radiological Report ──────────────────────────────────────────────────
-    sec_report = begin_section!("Radiological Report"; default_open=true)
+    sec_report = begin_section!("Radiological Report"; default_open=false)
 
     current_dict_lang = Observable("EN")
 
@@ -7826,7 +7627,7 @@ function create_metadata_window(
 
 
     # ── Segmentation Mini Manager (compact) ────────────────────────────────
-    sec_seg = begin_section!("Segmentation & AI")
+    sec_seg = begin_section!("Segmentation & AI"; default_open=false)
     
     # Mode indicator
     mode_r = nr!()
@@ -8142,7 +7943,7 @@ function create_metadata_window(
     end_section!(sec_seg)
 
     # ── Measurements Section ─────────────────────────────────────────────────
-    sec_meas = begin_section!("Measurements"; default_open=true)
+    sec_meas = begin_section!("Measurements"; default_open=false)
 
     # Mode toggle button
     meas_mode_obs = Observable(false)
@@ -11580,6 +11381,7 @@ function create_metadata_window(
         btn_xnat_login, btn_xnat_prev, btn_xnat_save, btn_xnat_next, btn_xnat_preproc
     ]
     append!(action_buttons, anat_rm_btns)
+    append!(action_buttons, all_section_buttons)
     for (_, b) in add_opt_buttons
         !(b in action_buttons) && push!(action_buttons, b)
     end
@@ -12019,7 +11821,7 @@ function display_metadata_window(fig::Figure)
             return Consume(true)
         end
 
-        # 3. Dropdown Active Modal Handling: When a dropdown is open, handle its selection and lock ALL controls underneath
+        # 3. Dropdown Active Modal Handling: When a dropdown is open, handle its selection and lock ONLY controls directly underneath the popup
         open_menu = _get_active_open_menu()
         if open_menu !== nothing
             pos = events(fig.scene).mouseposition[]
@@ -12030,10 +11832,9 @@ function display_metadata_window(fig::Figure)
                     _pick_and_select_menu_option!(open_menu, pos)
                     try open_menu.is_open[] = false catch; end
                     _active_open_menu[] = nothing
-                    _menu_just_closed_time[] = time()
                 end
                 _dropdown_event_active[] = false
-                return Consume(true) # ALWAYS consume: Never let any underlying Textbox (70), Menu (64), or Button/Slider (1) activate!
+                return Consume(true) # Protect whatever was underneath the options dropdown
             end
 
             # Case B: Click on the open dropdown's own button (toggle/close)
@@ -12041,72 +11842,18 @@ function display_metadata_window(fig::Figure)
                 if event.action == Mouse.release
                     try open_menu.is_open[] = false catch; end
                     _active_open_menu[] = nothing
-                    _menu_just_closed_time[] = time()
                 end
                 _dropdown_event_active[] = false
                 return Consume(true)
             end
 
-            # Case C: Click OUTSIDE the open dropdown on an action button or custom option control
-            if _is_on_action_control(pos)
-                try open_menu.is_open[] = false catch; end
-                _active_open_menu[] = nothing
-                _dropdown_event_active[] = false
-                return Consume(false) # Let the action button receive the click immediately!
-            end
-
-            # Case D: Click OUTSIDE on any other area
+            # Case C: Click OUTSIDE the open dropdown on any other area (button, slider, section header, etc.)
             try open_menu.is_open[] = false catch; end
             _active_open_menu[] = nothing
-            _menu_just_closed_time[] = time()
             _dropdown_event_active[] = false
-            return Consume(true) # Modal lock: consume click so nothing outside activates
+            return Consume(false) # Let the clicked control receive the click cleanly and immediately!
         end
 
-        # 4. Dropdown Settle Lock: Block clicks immediately after any dropdown closes
-        if time() - _menu_just_closed_time[] < 0.25
-            pos = events(fig.scene).mouseposition[]
-            if _is_on_action_control(pos)
-                return Consume(false)
-            end
-            return Consume(true)
-        end
-
-        # 5. Dropdown Button Click Protection when no dropdown is currently open
-        pos = events(fig.scene).mouseposition[]
-        if _is_on_action_control(pos)
-            _dropdown_event_active[] = false
-            return Consume(false)
-        end
-        for m in _ALL_MENUS
-            try
-                if hasproperty(m, :blockscene) && !m.blockscene.visible[]
-                    continue
-                end
-                bb = m.layoutobservables.computedbbox[]
-                if in_rect(pos, bb)
-                    _dropdown_event_active[] = true
-                    return Consume(false)
-                end
-            catch
-            end
-        end
-
-        return Consume(false)
-    end
-
-    # Priority 2: Dropdown Leakage Blocker
-    # Catches any press/release that passed through Menu (priority 64) but must not reach Button/Toggle (priority 1)
-    on(events(fig.scene).mousebutton, priority=2) do event
-        if _dropdown_event_active[]
-            pos = events(fig.scene).mouseposition[]
-            if _is_on_action_control(pos)
-                _dropdown_event_active[] = false
-                return Consume(false)
-            end
-            _dropdown_event_active[] = false
-            return Consume(true) # Block priority 1 controls!
-        end
         return Consume(false)
     end
 

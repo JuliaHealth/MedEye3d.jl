@@ -848,12 +848,16 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
             end
         end
         
+        base_vox_sz = stateObjects[1].onScrollData.dataToScrollDims.voxelSize
         for p in 1:4
-            stateObjects[p].displayMode = QuadImage
+            vol_sz = size(stateObjects[p].onScrollData.dataToScroll[1].dat)
+            new_scroll_dims = DataToScrollDims(imageSize=vol_sz, voxelSize=base_vox_sz, dimensionToScroll=plane_dim)
+            stateObjects[p].onScrollData.dataToScrollDims = new_scroll_dims
             stateObjects[p].onScrollData.dimensionToScroll = plane_dim
-            if !isempty(stateObjects[p].onScrollData.dataToScroll)
-                ChangePlane.processKeysInfo(Identity(stateObjects[p].onScrollData.dataToScrollDims), stateObjects[p], KeyboardStruct(), false)
-            end
+            stateObjects[p].onScrollData.slicesNumber = Int32(vol_sz[plane_dim])
+            stateObjects[p].calcDimsStruct = StructsManag.getHeightToWidthRatio(stateObjects[p].calcDimsStruct, new_scroll_dims)
+            stateObjects[p].displayMode = QuadImage
+            
             for ts in stateObjects[p].mainForDisplayObjects.listOfTextSpecifications
                 if ts.name == "CT"
                     ts.isVisible = (p == 2 ? mri_main_multimodal_mode[] : true)
@@ -888,7 +892,7 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
             elseif pmod == "ADC"
                 get(current_windowing, "ADC", Float32[0.0, 2200.0])
             elseif pmod == "DWI"
-                get(current_windowing, "DWI", Float32[50.0, 1200.0])
+                get(current_windowing, "DWI", Float32[0.0, 600.0])
             elseif pmod == "T1"
                 get(current_windowing, "T1", Float32[0.0, 700.0])
             elseif pmod in ("DCE", "DYNAMIC")
@@ -907,6 +911,17 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
         end
         
         ref_sl = stateObjects[1].currentDisplayedSlice
+        # Prostate MRI sequences only cover pelvis/prostate slices (Z ~ 41..60).
+        # If ref_sl is outside this range (e.g. initial CT slice 142), center on active prostate lesion or prostate centroid (Z ~ 48).
+        if ref_sl < 30 || ref_sl > 75
+            prostate_z = 48
+            cur_lid = (current_active_lesion_id[] > 0) ? current_active_lesion_id[] : round(Int, stateObjects[1].valueForMasToSet.value)
+            cent = get(lesion_centroids_cache, (0, cur_lid), get(lesion_centroids_cache, cur_lid, nothing))
+            if cent !== nothing && length(cent) >= 3 && cent[3] > 0
+                prostate_z = cent[3]
+            end
+            ref_sl = prostate_z
+        end
         for p in 1:4
             max_sl = max(1, Int(stateObjects[p].onScrollData.slicesNumber))
             stateObjects[p].currentDisplayedSlice = clamp(ref_sl, 1, max_sl)
@@ -1251,7 +1266,7 @@ const current_windowing = Dict{String, Vector{Float32}}(
     "MR"      => Float32[0.0, 1000.0],
     "T1"      => Float32[0.0, 700.0],
     "ADC"     => Float32[0.0, 2200.0],
-    "DWI"     => Float32[50.0, 1200.0],
+    "DWI"     => Float32[0.0, 600.0],
     "DCE"     => Float32[0.0, 500.0],
     "DYNAMIC" => Float32[0.0, 500.0]
 )
@@ -1266,6 +1281,8 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
         current_windowing["MR"] = Float32.([data.min_val, data.max_val])
     end
     
+    println("[WINDOWING-DISPATCH] Received $(target_mod) -> [$(data.min_val), $(data.max_val)] on $(length(stateObjects)) panels (MRI quad: $(mri_main_multimodal_mode[]))"); flush(stdout)
+
     for (panel_idx, state) in enumerate(stateObjects)
         panel_tp = if mri_main_multimodal_mode[] && panel_idx in (1, 2, 3, 4)
             mri_tps = !isempty(mri_compare_tps) ? mri_compare_tps : get_mri_comparison_tps(current_tp_index[])
@@ -1289,6 +1306,7 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
             is_main_match = (panel_mod == "CT" || panel_mod == "PET" || panel_mod == "SPECT")
         elseif target_mod in ("T2", "MRI", "MR")
             is_main_match = (panel_mod in ("T2", "MRI", "MR"))
+            is_nuc_match = (panel_mod in ("T2", "MRI", "MR"))
         elseif target_mod == "T1"
             is_main_match = (panel_mod == "T1")
             is_nuc_match = (panel_mod == "T1")
@@ -1318,18 +1336,17 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
                 if state.mainForDisplayObjects.vulkanPipelineState !== nothing
                     state.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
                 end
-                @info "[WINDOWING] Modality: $(target_mod) -> [$(data.min_val), $(data.max_val)] on Panel $(panel_idx)"
+                println("[WINDOWING-DISPATCH] Matched Panel $(panel_idx) ($(panel_mod)) Main/CT texture $(tex.name): [$(data.min_val), $(data.max_val)]"); flush(stdout)
             elseif is_nuc_match && is_nuc_tex
                 tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
                 state.isSliceChanged = true
                 if state.mainForDisplayObjects.vulkanPipelineState !== nothing
                     state.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
                 end
-                @info "[WINDOWING] Modality: $(target_mod) -> [$(data.min_val), $(data.max_val)] on Panel $(panel_idx)"
+                println("[WINDOWING-DISPATCH] Matched Panel $(panel_idx) ($(panel_mod)) Nuc/PET texture $(tex.name): [$(data.min_val), $(data.max_val)]"); flush(stdout)
             end
         end
     end
-    @debug "Updated windowing for $(data.modality): [$(data.min_val), $(data.max_val)]"
 end
 
 function reactToPetBlend(data::PetBlendEvent, stateObjects::Vector{StateDataFields})
@@ -3498,7 +3515,12 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx; forc
     panel_mod = uppercase(get(tp_modalities, panel_tp, "PET"))
     has_ct_spec = any(ts -> ts.name == "CT", stateObjects[panel_idx].mainForDisplayObjects.listOfTextSpecifications)
     
-    panel_voxels = if panel_idx_mapped == 3  # Sagittal (Y,Z,X)
+    panel_voxels = if use_unpermuted
+        sz = size(entry.ct)
+        Any[("CT", entry.ct), ("PET", entry.pet), ("Mask", mask_i16),
+            ("Bone_Overlay", get_or_create_bone_i8(panel_idx, sz)),
+            ("Anatomy", anat_i16 !== nothing ? anat_i16 : zeros(Int16, sz))]
+    elseif panel_idx_mapped == 3  # Sagittal (Y,Z,X)
         sz = (size(entry.ct, 2), size(entry.ct, 3), size(entry.ct, 1))
         Any[("CT", PermutedDimsArray(entry.ct, (2,3,1))),
             ("PET", PermutedDimsArray(entry.pet, (2,3,1))),
@@ -3518,7 +3540,7 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx; forc
         else
             Any[("PET", entry.pet)]
         end
-    else  # Axial / Unpermuted (panels 1, 5, 6, 7, and 8, 9 in MRI Comparison mode)
+    else  # Axial / Unpermuted (panels 1, 5)
         sz = size(entry.ct)
         Any[("CT", entry.ct), ("PET", entry.pet), ("Mask", mask_i16),
             ("Bone_Overlay", get_or_create_bone_i8(panel_idx, sz)),
@@ -3556,9 +3578,9 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx; forc
     base_vox_sz = !isempty(stateObjects) ? stateObjects[1].onScrollData.dataToScrollDims.voxelSize : (1.0, 1.0, 2.0)
     vol_sz = size(newDataToScroll[1].dat)
     target_dim = use_unpermuted ? ((mri_compare_mode[] || mri_main_multimodal_mode[]) ? mri_compare_plane[] : stateObjects[1].onScrollData.dimensionToScroll) : 3
-    panel_vox_sz = if panel_idx_mapped == 3
+    panel_vox_sz = if !use_unpermuted && panel_idx_mapped == 3
         (base_vox_sz[2], base_vox_sz[3], base_vox_sz[1])
-    elseif panel_idx_mapped == 4
+    elseif !use_unpermuted && panel_idx_mapped == 4
         (base_vox_sz[1], base_vox_sz[3], base_vox_sz[2])
     else
         base_vox_sz
@@ -3583,7 +3605,7 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx; forc
     elseif panel_mod == "ADC"
         get(current_windowing, "ADC", Float32[0.0, 2200.0])
     elseif panel_mod == "DWI"
-        get(current_windowing, "DWI", Float32[50.0, 1200.0])
+        get(current_windowing, "DWI", Float32[0.0, 600.0])
     elseif panel_mod in ("DCE", "DYNAMIC")
         get(current_windowing, "DCE", Float32[0.0, 500.0])
     else
@@ -5261,6 +5283,9 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
             end
             if stateObjects[idx].mainForDisplayObjects.vulkanPipelineState !== nothing
                 stateObjects[idx].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+            end
+            if data.active && ((mri_main_multimodal_mode[] && idx in (1, 2, 3, 4)) || (mri_compare_mode[] && idx in (6, 7, 8, 9)))
+                _force_texture_upload!(stateObjects, idx)
             end
         end
     end

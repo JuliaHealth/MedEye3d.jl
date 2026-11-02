@@ -1171,15 +1171,19 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     HDF5.h5open(h5_path, "r") do h5_r
         if haskey(h5_r, "_meta_/prostate_anatomy_labels.json")
             try
-                raw_prostate = JSON.parse(read(h5_r["_meta_/prostate_anatomy_labels.json"]))
-                prostate_labels = Dict{Int,String}(parse(Int, k) => v for (k, v) in raw_prostate)
+                raw_data = read(h5_r["_meta_/prostate_anatomy_labels.json"])
+                json_str = raw_data isa AbstractString ? String(raw_data) : String(copy(raw_data))
+                raw_prostate = JSON.parse(json_str)
+                prostate_labels = Dict{Int,String}(parse(Int, string(k)) => string(v) for (k, v) in raw_prostate)
                 for (tp_i, mod) in MEH.tp_modalities
-                    if uppercase(mod) in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC")
-                        MEH.anatomy_labels_cache[tp_i] = prostate_labels
+                    if uppercase(strip(mod)) in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE")
+                        MEH.anatomy_labels_cache[tp_i] = copy(prostate_labels)
                     end
                 end
-                @info "Loaded prostate anatomy labels for MRI TPs: $(collect(values(prostate_labels)))"
-            catch; end
+                println("[ANATOMY] Loaded $(length(prostate_labels)) prostate anatomy labels for MRI timepoints: $(collect(values(prostate_labels)))"); flush(stdout)
+            catch e
+                @warn "[ANATOMY] Failed to load prostate anatomy labels: $e" exception=(e, catch_backtrace())
+            end
         end
     end
 
@@ -1250,25 +1254,6 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                     mask_vol_base = max.(0.0f0, mask_vol_base)
                     mask_compact = Int16.(round.(mask_vol_base))
                 end
-                
-                # For MRI timepoints (TP >= 1): ensure all verified baseline lesions are registered & present
-                if group != "BASELINE" && haskey(h5_file, "BASELINE/PET_Lesions_0.nii.gz")
-                    try
-                        raw_base_mask = read(h5_file["BASELINE/PET_Lesions_0.nii.gz"])
-                        if needs_reverse
-                            raw_base_mask = reverse(Float32.(raw_base_mask), dims=2)
-                        end
-                        base_mask_i16 = Int16.(round.(max.(0.0f0, Float32.(raw_base_mask))))
-                        for idx in eachindex(base_mask_i16)
-                            b_lid = base_mask_i16[idx]
-                            if b_lid > 0
-                                mask_compact[idx] = b_lid
-                            end
-                        end
-                    catch e_bmask
-                        @debug "[AppMain] Base mask merge note: $e_bmask"
-                    end
-                end
 
                 sz = size(ct_vol_base)
                 bone_mask = zeros(Int8, sz)
@@ -1296,7 +1281,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 catch; end
 
                 # For non-MRI timepoints without native anatomy, fallback to baseline / atlas anatomy
-                is_mri_tp = modality in ("T2", "MRI", "MR", "ADC", "DWI", "T1", "DCE", "DYNAMIC")
+                is_mri_tp = uppercase(strip(modality)) in ("T2", "MRI", "MR", "ADC", "DWI", "T1", "DCE", "DYNAMIC", "PROSTATE")
                 if !is_mri_tp && (anatomy_vol === nothing || length(unique(anatomy_vol)) <= 2)
                     for fallback_path in ["ATLAS/max_anatomy_expert", "BASELINE/max_anatomy.nii.gz_expert", "ATLAS/max_anatomy", "BASELINE/max_anatomy.nii.gz"]
                         if haskey(h5_file, fallback_path)
