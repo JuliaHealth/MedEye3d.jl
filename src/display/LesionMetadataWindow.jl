@@ -4200,7 +4200,7 @@ function create_metadata_window(
         return (is_open, start_row, header_r, btn, end_row_ref)
     end
     
-    function end_section!(sec_data)
+    function end_section!(sec_data; post_toggle=nothing)
         is_open, start_row, header_r, btn, end_row_ref = sec_data
         end_row = r[1]
         end_row_ref[] = end_row
@@ -4229,6 +4229,9 @@ function create_metadata_window(
             try
                 for i in start_row:end_row
                     set_row_visible!(i, is_open[])
+                end
+                if post_toggle !== nothing
+                    post_toggle(is_open[])
                 end
                 _invalidate_row_cache!()
                 try
@@ -5307,6 +5310,16 @@ function create_metadata_window(
             end
             
             r_idx = _MEH.compare_right_tp[]
+            if r_idx < 0
+                tp_indices = sort(collect(keys(_MEH.tp_labels)))
+                if length(tp_indices) > 1
+                    cur_pos = findfirst(==(cur_idx), tp_indices)
+                    next_pos = (cur_pos !== nothing && cur_pos < length(tp_indices)) ? cur_pos + 1 : 1
+                    r_idx = tp_indices[next_pos]
+                else
+                    r_idx = cur_idx
+                end
+            end
             if r_idx >= 0
                 idx_r = findfirst(opt -> startswith(opt, "$r_idx:"), opts)
                 if idx_r !== nothing
@@ -5370,6 +5383,9 @@ function create_metadata_window(
         s == "(none)" && return
         try
             tp_idx = parse(Int, split(s, ':')[1])
+            if !cv_active[]
+                obs_set_compare_mode[] = true
+            end
             if tp_idx != _MEH.compare_right_tp[]
                 put!(channel, SetTimePointEvent(tp_idx, 5))
             end
@@ -5392,6 +5408,11 @@ function create_metadata_window(
         end
     end
     on(_MEH.tp_switched) do _
+        if cv_active[] != _MEH.compare_mode[]
+            cv_active[] = _MEH.compare_mode[]
+            btn_cv.buttoncolor[] = cv_active[] ? GRN : BLU_BTN
+            update_tp_dropdown_visibility!()
+        end
         update_tp_label()
         
         # Sync TP dropdown menus directly (ui_queue was never drained)
@@ -5795,7 +5816,16 @@ function create_metadata_window(
         obs_single_multi_mode[] = false
     end
     
-    end_section!(sec_view)
+    end_section!(sec_view; post_toggle = (open) -> begin
+        if open
+            update_tp_dropdown_visibility!()
+        end
+    end)
+    on(sec_view[1]) do is_open
+        if is_open
+            update_tp_dropdown_visibility!()
+        end
+    end
 
     # ── Dedicated Windowing & Image Offsets Subpanel ─────────────────────────
     sec_win = begin_section!("Windowing & Image Offsets"; default_open=true)

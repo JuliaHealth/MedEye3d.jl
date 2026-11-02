@@ -1086,12 +1086,22 @@ function reactToToggleOverlay(data::MakieEvents.ToggleOverlayEvent, stateObjects
     # We can't access apply_m2_layout! directly from MakieEventHandlers unless we pass it or it's visible.
     # apply_m2_layout! is in SegmentationDisplay.jl which imports MakieEventHandlers.
 end
+function _is_m2_window_active()::Bool
+    try
+        p = parentmodule(@__MODULE__)
+        if isdefined(p, :_m2_vk_ref) && p._m2_vk_ref[] !== nothing
+            return true
+        end
+    catch; end
+    return false
+end
+
 function reactToCompareTimePoints(data::CompareTimePointsEvent, stateObjects::Vector{StateDataFields})
     if length(stateObjects) >= 5
         compare_mode[] = data.compare
         if data.compare
             println("[COMPARE] ON: preloading next TP data..."); flush(stdout)
-            # Load the NEXT TP into panel 5 (hidden — for M2 window use)
+            # Load the NEXT TP into panel 5
             tp_indices = sort(collect(keys(tp_labels)))
             if !isempty(tp_indices)
                 cur_pos = findfirst(==(current_tp_index[]), tp_indices)
@@ -1136,7 +1146,7 @@ end
                 end
             end
 
-            # Sync panel 5 scroll/zoom with panel 1 (for M2 use)
+            # Sync panel 5 scroll/zoom with panel 1
             stateObjects[5].onScrollData.dimensionToScroll = stateObjects[1].onScrollData.dimensionToScroll
             stateObjects[5].currentDisplayedSlice = stateObjects[1].currentDisplayedSlice
             stateObjects[5].onScrollData.slicesNumber = stateObjects[1].onScrollData.slicesNumber
@@ -1147,16 +1157,30 @@ end
             stateObjects[5].calcDimsStruct.imageTextureHeight = stateObjects[1].calcDimsStruct.imageTextureHeight
             stateObjects[5].calcDimsStruct.heightToWithRatio = stateObjects[1].calcDimsStruct.heightToWithRatio
 
-            # Keep quad layout — NO vertex changes. Panel 5 stays hidden.
-            # The actual side-by-side comparison happens in the M2 window.
-            updateQuadVertices!(stateObjects[5], :Hidden)
+            if !_is_m2_window_active()
+                # Single window mode: 2-pane side-by-side comparison on Window 1
+                updateQuadVertices!(stateObjects[1], :LeftHalf)
+                updateQuadVertices!(stateObjects[5], :RightHalf)
+                updateQuadVertices!(stateObjects[2], :Hidden)
+                updateQuadVertices!(stateObjects[3], :Hidden)
+                updateQuadVertices!(stateObjects[4], :Hidden)
+                stateObjects[1].isSliceChanged = true
+                stateObjects[5].isSliceChanged = true
+                _force_texture_upload!(stateObjects, 1)
+                _force_texture_upload!(stateObjects, 5)
+                if stateObjects[5].mainForDisplayObjects.vulkanPipelineState !== nothing
+                    stateObjects[5].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                end
+                println("[COMPARE] Quad vertices updated (2-pane layout on Window 1)"); flush(stdout)
+            else
+                # Multi-window mode: Window 1 shows Left TP in quad view, M2 shows Right TP in quad view
+                updateQuadVertices!(stateObjects[5], :Hidden)
+                _force_texture_upload!(stateObjects, 5)
+            end
 
             left_label = get(tp_labels, current_tp_index[], "TP $(current_tp_index[])")
             right_label = get(tp_labels, compare_right_tp[], "TP $(compare_right_tp[])")
             println("[COMPARE] Current=$left_label, Compare=$right_label (data preloaded in panel 5)"); flush(stdout)
-            
-            # Preload panel 5 texture data (ready for M2)
-            _force_texture_upload!(stateObjects, 5)
             
             # Sync active lesion visibility
             if current_active_lesion_id[] > 0
@@ -1166,15 +1190,23 @@ end
                     println("[COMPARE] WARNING: reactToSyncLesion failed: $e"); flush(stdout)
                 end
             end
-            println("[COMPARE] ON: setup complete (quad view unchanged, data preloaded for M2)"); flush(stdout)
+            println("[COMPARE] ON: setup complete"); flush(stdout)
         else
             println("[COMPARE] OFF: clearing compare state"); flush(stdout)
             compare_right_tp[] = -1
             # Hide panel 5 (compare data no longer needed)
             updateQuadVertices!(stateObjects[5], :Hidden)
             
-            # Quad layout was never changed, so no vertex restoration needed.
-            # Just sync lesion visibility back to single-TP mode.
+            # Restore 4-quadrant layout on Window 1
+            updateQuadVertices!(stateObjects[1], :TopLeft)
+            _update_quad_layout_for_modality!(stateObjects, current_tp_index[])
+            updateQuadVertices!(stateObjects[3], :BottomLeft)
+            updateQuadVertices!(stateObjects[4], :BottomRight)
+            for i in 1:4
+                stateObjects[i].isSliceChanged = true
+                _force_texture_upload!(stateObjects, i)
+            end
+            
             if current_active_lesion_id[] > 0
                 try
                     lid_off = _clamp_lid_for_tp(current_active_lesion_id[], current_tp_index[])
@@ -4484,6 +4516,10 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
     target_pos = findfirst(==(target_tp), tp_indices)
     target_pos = target_pos === nothing ? 1 : target_pos
 
+    if !compare_mode[] && data.panel == 5
+        reactToCompareTimePoints(CompareTimePointsEvent(true), stateObjects)
+    end
+
     if compare_mode[]
         if data.panel == 5
             # Set Right panel (panel 5)
@@ -4501,19 +4537,22 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
                 stateObjects[5].calcDimsStruct.zoom = stateObjects[1].calcDimsStruct.zoom
                 stateObjects[5].calcDimsStruct.panX = stateObjects[1].calcDimsStruct.panX
                 stateObjects[5].calcDimsStruct.panY = stateObjects[1].calcDimsStruct.panY
+                if !_is_m2_window_active()
+                    updateQuadVertices!(stateObjects[5], :RightHalf)
+                end
                 stateObjects[5].isSliceChanged = true
                 _force_texture_upload!(stateObjects, 5)
+                if stateObjects[5].mainForDisplayObjects.vulkanPipelineState !== nothing
+                    stateObjects[5].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                end
                 if length(stateObjects) >= 9 && !mri_compare_mode[]
                     for p in 6:9
                         _load_tp_from_entry!(stateObjects, entry_right, p)
-                    end
-                    stateObjects[6].currentDisplayedSlice = max(1, stateObjects[1].currentDisplayedSlice)
-                    stateObjects[7].currentDisplayedSlice = max(1, stateObjects[2].currentDisplayedSlice)
-                    stateObjects[8].currentDisplayedSlice = max(1, stateObjects[3].currentDisplayedSlice)
-                    stateObjects[9].currentDisplayedSlice = max(1, stateObjects[4].currentDisplayedSlice)
-                    for p in 6:9
                         stateObjects[p].isSliceChanged = true
                         _force_texture_upload!(stateObjects, p)
+                        if stateObjects[p].mainForDisplayObjects.vulkanPipelineState !== nothing
+                            stateObjects[p].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                        end
                     end
                 end
             end
@@ -4535,8 +4574,18 @@ function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{State
                     _load_tp_from_entry!(stateObjects, entry_left, p)
                     stateObjects[p].isSliceChanged = true
                     _force_texture_upload!(stateObjects, p)
+                    if stateObjects[p].mainForDisplayObjects.vulkanPipelineState !== nothing
+                        stateObjects[p].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                    end
                 end
-                _update_quad_layout_for_modality!(stateObjects, left_tp)
+                if !_is_m2_window_active()
+                    updateQuadVertices!(stateObjects[1], :LeftHalf)
+                    updateQuadVertices!(stateObjects[2], :Hidden)
+                    updateQuadVertices!(stateObjects[3], :Hidden)
+                    updateQuadVertices!(stateObjects[4], :Hidden)
+                else
+                    _update_quad_layout_for_modality!(stateObjects, left_tp)
+                end
             end
             
             if current_active_lesion_id[] > 0

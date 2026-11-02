@@ -1873,6 +1873,16 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                         mainStates[p_mri].calcDimsStruct.panY = panelState.calcDimsStruct.panY
                         mainStates[p_mri].calcDimsStruct.panX = panelState.calcDimsStruct.panX
                     end
+                elseif isdefined(MEH_pan, :compare_mode) && MEH_pan.compare_mode[] && length(mainStates) >= 5
+                    is_m2 = false
+                    try; is_m2 = MEH_pan._is_m2_window_active(); catch; end
+                    if !is_m2
+                        other_p = clickedPanel == 1 ? 5 : (clickedPanel == 5 ? 1 : 0)
+                        if other_p > 0 && other_p <= length(mainStates)
+                            mainStates[other_p].calcDimsStruct.panY = panelState.calcDimsStruct.panY
+                            mainStates[other_p].calcDimsStruct.panX = panelState.calcDimsStruct.panX
+                        end
+                    end
                 end
             catch; end
             

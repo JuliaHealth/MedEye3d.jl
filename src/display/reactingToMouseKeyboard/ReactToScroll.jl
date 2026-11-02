@@ -149,6 +149,17 @@ function reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFi
             mainStates[p_mri].calcDimsStruct.panX = mainState.calcDimsStruct.panX
             mainStates[p_mri].calcDimsStruct.panY = mainState.calcDimsStruct.panY
         end
+    elseif isdefined(MEH, :compare_mode) && MEH.compare_mode[] && length(mainStates) >= 5
+        is_m2 = false
+        try; is_m2 = MEH._is_m2_window_active(); catch; end
+        if !is_m2
+            other_p = panelIdx == 1 ? 5 : (panelIdx == 5 ? 1 : 0)
+            if other_p > 0 && other_p <= length(mainStates)
+                mainStates[other_p].calcDimsStruct.zoom = newZoom
+                mainStates[other_p].calcDimsStruct.panX = mainState.calcDimsStruct.panX
+                mainStates[other_p].calcDimsStruct.panY = mainState.calcDimsStruct.panY
+            end
+        end
     end
     @debug "Shift-Scroll Zoom: $(round(newZoom, digits=2))x (panel=$panelIdx)"
     # GPU zoom: no reactToScroll needed — render loop picks up new zoom via push constants
@@ -281,17 +292,23 @@ function reactToScroll(data::ScrollEvent, mainStates::Vector{StateDataFields}, t
                             end
                         end
                     end
-                elseif MEH.compare_mode[] && length(mainStates) >= 9
-                    pair_map = Dict(
-                        1 => [6, 7, 2],
-                        2 => [7, 1, 6],
-                        3 => [8],
-                        4 => [9],
-                        6 => [1, 2, 7],
-                        7 => [2, 1, 6],
-                        8 => [3],
-                        9 => [4]
-                    )
+                elseif MEH.compare_mode[] && length(mainStates) >= 5
+                    is_m2 = false
+                    try; is_m2 = MEH._is_m2_window_active(); catch; end
+                    if !is_m2
+                        pair_map = Dict(1 => [5], 5 => [1])
+                    else
+                        pair_map = Dict(
+                            1 => [6, 7, 2],
+                            2 => [7, 1, 6],
+                            3 => [8],
+                            4 => [9],
+                            6 => [1, 2, 7],
+                            7 => [2, 1, 6],
+                            8 => [3],
+                            9 => [4]
+                        )
+                    end
                     if haskey(pair_map, clickedPanel)
                         for paired_idx in pair_map[clickedPanel]
                             if paired_idx <= length(mainStates)
