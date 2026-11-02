@@ -4044,12 +4044,22 @@ function create_metadata_window(
         empty!(_row_widget_cache)
     end
 
+    function _set_scene_plots_visible!(sc::Scene, visible::Bool)
+        sc.visible[] = visible
+        for p in sc.plots
+            try; p.visible[] = visible; catch; end
+        end
+        for ch in sc.children
+            _set_scene_plots_visible!(ch, visible)
+        end
+    end
+
     function _set_widget_visible!(w, visible::Bool)
         if @isdefined(meas_list_grid) && w === meas_list_grid
             if !visible
                 if @isdefined(_empty_meas_lbl)
                     _empty_meas_lbl.visible[] = false
-                    hasproperty(_empty_meas_lbl, :blockscene) && (_empty_meas_lbl.blockscene.visible[] = false)
+                    hasproperty(_empty_meas_lbl, :blockscene) && _set_scene_plots_visible!(_empty_meas_lbl.blockscene, false)
                 end
                 if @isdefined(_meas_pool)
                     for p in _meas_pool
@@ -4068,12 +4078,9 @@ function create_metadata_window(
                 try; w.is_open[] = false; catch; end
             end
             if hasproperty(w, :blockscene) && w.blockscene !== nothing
-                w.blockscene.visible[] = visible
-                for ch in w.blockscene.children
-                    ch.visible[] = visible
-                end
+                _set_scene_plots_visible!(w.blockscene, visible)
             end
-            if hasproperty(w, :visible)
+            if hasproperty(w, :visible) && (w.visible isa Observable)
                 w.visible[] = visible
             end
         elseif w isa Makie.GridLayoutBase.GridLayout
@@ -4082,15 +4089,12 @@ function create_metadata_window(
             end
         elseif hasproperty(w, :blockscene)
             if w.blockscene !== nothing
-                w.blockscene.visible[] = visible
-                for ch in w.blockscene.children
-                    try; ch.visible[] = visible; catch; end
-                end
+                _set_scene_plots_visible!(w.blockscene, visible)
             end
-            if hasproperty(w, :visible)
+            if hasproperty(w, :visible) && (w.visible isa Observable)
                 w.visible[] = visible
             end
-        elseif hasproperty(w, :visible)
+        elseif hasproperty(w, :visible) && (w.visible isa Observable)
             w.visible[] = visible
         end
     end
@@ -4189,6 +4193,7 @@ function create_metadata_window(
                 _cache_widget_bboxes!()
             finally
                 g.block_updates = true
+                _scroll_offset_px[] = clamp(_scroll_offset_px[], 0.0f0, _max_scroll_px[])
                 _apply_scroll!(_scroll_offset_px[])
             end
         end
@@ -6855,6 +6860,7 @@ function create_metadata_window(
                 _cache_widget_bboxes!()
             finally
                 g.block_updates = true
+                _scroll_offset_px[] = clamp(_scroll_offset_px[], 0.0f0, _max_scroll_px[])
                 _apply_scroll!(_scroll_offset_px[])
             end
         end

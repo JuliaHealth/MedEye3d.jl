@@ -1588,23 +1588,39 @@ function coordinateDisplay(
                         show_crosshair = 0.0f0
                         cx, cy = 0.0f0, 0.0f0
 
-                        if is_crosshair_on && ix > 0 && iy > 0 && iz > 0 && hovered_idx > 0 && panel_idx != hovered_idx
+                        if is_crosshair_on && ix > 0 && iy > 0 && iz > 0
                             show_crosshair = reinterpret(Float32, Int32(1))
                             # Map world (origX, origY, origZ) to panel's 2D texture UV
                             # Must match the right-click jump logic in ReactOnMouseClickAndDrag.jl:460-466
                             w = Float32(state.calcDimsStruct.imageTextureWidth)
                             h = Float32(state.calcDimsStruct.imageTextureHeight)
                             
-                            panel_idx_mapped = panel_idx > 5 ? panel_idx - 5 : panel_idx
-                            if panel_idx_mapped == 3  # Sagittal: texX=origY, texY=origZ
-                                cx = Float32(iy) / w
-                                cy = Float32(iz) / h
-                            elseif panel_idx_mapped == 4  # Coronal: texX=origX, texY=origZ
-                                cx = Float32(ix) / w
-                                cy = Float32(iz) / h
-                            else  # Axial (panels 1,2,5): texX=origX, texY=origY
-                                cx = Float32(ix) / w
-                                cy = Float32(iy) / h
+                            is_mri_quad = (MakieEventHandlers.mri_main_multimodal_mode[] && panel_idx in (1, 2, 3, 4)) ||
+                                          (MakieEventHandlers.mri_compare_mode[] && panel_idx in (6, 7, 8, 9))
+                            if is_mri_quad
+                                p_dim = state.onScrollData.dimensionToScroll
+                                if p_dim == 1
+                                    cx = Float32(iy) / w
+                                    cy = Float32(iz) / h
+                                elseif p_dim == 2
+                                    cx = Float32(ix) / w
+                                    cy = Float32(iz) / h
+                                else
+                                    cx = Float32(ix) / w
+                                    cy = Float32(iy) / h
+                                end
+                            else
+                                panel_idx_mapped = panel_idx > 5 ? panel_idx - 5 : panel_idx
+                                if panel_idx_mapped == 3  # Sagittal: texX=origY, texY=origZ
+                                    cx = Float32(iy) / w
+                                    cy = Float32(iz) / h
+                                elseif panel_idx_mapped == 4  # Coronal: texX=origX, texY=origZ
+                                    cx = Float32(ix) / w
+                                    cy = Float32(iz) / h
+                                else  # Axial (panels 1,2,5): texX=origX, texY=origY
+                                    cx = Float32(ix) / w
+                                    cy = Float32(iy) / h
+                                end
                             end
                         end
                         push_consts[9] = cx; push_consts[10] = cy

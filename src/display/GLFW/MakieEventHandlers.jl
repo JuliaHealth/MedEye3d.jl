@@ -1268,9 +1268,13 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
     
     for (panel_idx, state) in enumerate(stateObjects)
         panel_tp = if mri_main_multimodal_mode[] && panel_idx in (1, 2, 3, 4)
-            state.onScrollData.currentTpIndex >= 0 ? state.onScrollData.currentTpIndex : current_tp_index[]
+            mri_tps = !isempty(mri_compare_tps) ? mri_compare_tps : get_mri_comparison_tps(current_tp_index[])
+            slot = min(panel_idx, length(mri_tps))
+            mri_tps[slot]
         elseif mri_compare_mode[] && panel_idx in (6, 7, 8, 9)
-            state.onScrollData.currentTpIndex >= 0 ? state.onScrollData.currentTpIndex : current_tp_index[]
+            mri_tps = !isempty(mri_compare_tps) ? mri_compare_tps : get_mri_comparison_tps(current_tp_index[])
+            slot = min(panel_idx - 5, length(mri_tps))
+            mri_tps[slot]
         elseif compare_mode[] && panel_idx in (5, 6, 7, 8, 9)
             compare_right_tp[]
         else
@@ -1308,18 +1312,20 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
             # (but exclude PET/SPECT textures that have isMainImage=true on pure-PET panels)
             is_ct_tex = tex.studyType == "CT" || (isempty(tex.studyType) && tex.isMainImage && !tex.isNuclearMask && !(uppercase(tex.name) in ("PET", "SPECT")))
             is_nuc_tex = tex.studyType == "PET" || tex.studyType == "SPECT" || tex.isNuclearMask
-            if is_main_match && is_ct_tex
+            if is_main_match && (is_ct_tex || tex.name == "CT" || (tex.isMainImage && !tex.isNuclearMask))
                 tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
                 state.isSliceChanged = true
                 if state.mainForDisplayObjects.vulkanPipelineState !== nothing
                     state.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
                 end
+                @info "[WINDOWING] Modality: $(target_mod) -> [$(data.min_val), $(data.max_val)] on Panel $(panel_idx)"
             elseif is_nuc_match && is_nuc_tex
                 tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
                 state.isSliceChanged = true
                 if state.mainForDisplayObjects.vulkanPipelineState !== nothing
                     state.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
                 end
+                @info "[WINDOWING] Modality: $(target_mod) -> [$(data.min_val), $(data.max_val)] on Panel $(panel_idx)"
             end
         end
     end
