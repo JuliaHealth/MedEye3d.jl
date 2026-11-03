@@ -317,6 +317,7 @@ Structure for handling key input
 @with_kw struct KeyInputFields
   scancode::Int32
   action::GLFW.Action
+  mods::Int32 = Int32(0)  # GLFW modifier flags (GLFW_MOD_SHIFT=1, GLFW_MOD_CONTROL=2, GLFW_MOD_ALT=4)
 end
 
 

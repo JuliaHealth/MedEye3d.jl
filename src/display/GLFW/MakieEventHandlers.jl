@@ -1882,6 +1882,7 @@ Deletes a lesion: zeros its mask voxels, removes metadata from lesion_db, clears
 and pushes an UndoRecord so it can be restored with Ctrl+Z.
 """
 function reactToDeleteLesion(data::MakieEvents.DeleteLesionEvent, stateObjects::Vector{StateDataFields})
+    println("[DELETE] reactToDeleteLesion ENTERED, lesion_id=$(data.lesion_id)"); flush(stdout)
     lid = data.lesion_id
     if lid <= 0
         @warn "[DELETE] Invalid lesion ID: $lid"

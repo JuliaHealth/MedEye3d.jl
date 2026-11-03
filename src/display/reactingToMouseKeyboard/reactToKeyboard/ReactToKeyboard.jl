@@ -71,7 +71,10 @@ function registerKeyboardFunctions(window::GLFW.Window, mainChannel::Base.Channe
         if key == GLFW.KEY_LEFT_SHIFT || key == GLFW.KEY_RIGHT_SHIFT
             is_shift_down_ref[] = (action != GLFW.RELEASE)
         end
-        keyInputInstance = KeyInputFields(scancode=Int32(key), action=action)
+        if key == GLFW.KEY_LEFT_CONTROL || key == GLFW.KEY_RIGHT_CONTROL
+            is_ctrl_down_ref[] = (action != GLFW.RELEASE)
+        end
+        keyInputInstance = KeyInputFields(scancode=Int32(key), action=action, mods=Int32(mods))
         put!(mainChannel, keyInputInstance)
     end)
 end #registerKeyboardFunctions
@@ -486,10 +489,13 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
         # Del - Toggle erase mode (in paint mode)
         # Ctrl+Del - Delete current lesion (with undo via Ctrl+Z)
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_DELETE)
+            _ctrl_from_mods = (keyInputInfo.mods & Int32(0x0002)) != 0  # GLFW_MOD_CONTROL
+            println("[KEY_DELETE] action=$(keyInputInfo.action) ctrl_ref=$(is_ctrl_down_ref[]) ctrl_mods=$(_ctrl_from_mods) mods=$(keyInputInfo.mods)"); flush(stdout)
             if keyInputInfo.action == GLFW.PRESS
-                if is_ctrl_down_ref[]
+                if is_ctrl_down_ref[] || _ctrl_from_mods
                     # Ctrl+Delete: delete current lesion
                     ch = _get_event_channel()
+                    println("[KEY_CTRL_DELETE] channel=$(ch !== nothing ? "OK" : "NULL")"); flush(stdout)
                     if ch !== nothing
                         try
                             top = parentmodule(@__MODULE__)
@@ -497,8 +503,10 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
                             if isdefined(top, :MakieEventHandlers)
                                 lid = top.MakieEventHandlers.current_active_lesion_id[]
                             end
+                            println("[KEY_CTRL_DELETE] lid=$lid"); flush(stdout)
                             if lid > 0
                                 put!(ch, MakieEvents.DeleteLesionEvent(lid))
+                                println("[KEY_CTRL_DELETE] DeleteLesionEvent($lid) queued"); flush(stdout)
                             else
                                 @warn "[KEY_CTRL_DELETE] No active lesion to delete"
                             end
@@ -515,7 +523,9 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
 
         # Ctrl+Backspace - Also delete current lesion (alternative shortcut)
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_BACKSPACE)
-            if keyInputInfo.action == GLFW.PRESS && is_ctrl_down_ref[]
+            _ctrl_from_mods_bs = (keyInputInfo.mods & Int32(0x0002)) != 0
+            if keyInputInfo.action == GLFW.PRESS && (is_ctrl_down_ref[] || _ctrl_from_mods_bs)
+                println("[KEY_CTRL_BACKSPACE] Triggered, looking up lesion..."); flush(stdout)
                 ch = _get_event_channel()
                 if ch !== nothing
                     try
