@@ -5534,9 +5534,16 @@ function create_metadata_window(
     end
     on(_MEH.tp_switched) do _
         if cv_active[] != _MEH.compare_mode[]
-            cv_active[] = _MEH.compare_mode[]
-            btn_cv.buttoncolor[] = cv_active[] ? GRN : BLU_BTN
-            update_tp_dropdown_visibility!()
+            # Route through apply_compare_mode_ui! to properly show/hide sections
+            # (including auto-opening Map Lesions when compare mode activates)
+            if apply_compare_mode_ui! !== nothing
+                apply_compare_mode_ui!(_MEH.compare_mode[])
+            else
+                # Fallback: shallow sync if apply_compare_mode_ui! not yet assigned
+                cv_active[] = _MEH.compare_mode[]
+                btn_cv.buttoncolor[] = cv_active[] ? GRN : BLU_BTN
+                update_tp_dropdown_visibility!()
+            end
         end
         update_tp_label()
         
@@ -8526,8 +8533,9 @@ function create_metadata_window(
     # Uses module-level get_mask_ids(tp)
 
     function _build_match_display!()
-        # Skip building map display when not in compare mode (prevents layout overlap)
-        if !cv_active[] && !_MEH.compare_mode[]
+        # Build map display when compare mode is active OR when the Map Lesions section is expanded
+        is_cmp = cv_active[] || _MEH.compare_mode[] || (isdefined(_MEH, :mri_compare_mode) && _MEH.mri_compare_mode[]) || sec_map_lesions[1][]
+        if !is_cmp
             for elem in contents(map_grid); try delete!(elem) catch; end; end
             return
         end
@@ -8609,7 +8617,7 @@ function create_metadata_window(
                 # UI creation — runs synchronously on the GL-safe calling thread
                 begin
                     try
-                        (cv_active[] || _MEH.compare_mode[]) || return
+                        (cv_active[] || _MEH.compare_mode[] || (isdefined(_MEH, :mri_compare_mode) && _MEH.mri_compare_mode[]) || sec_map_lesions[1][]) || return
                         g.block_updates = false
                         try
                             for elem in contents(map_grid); try delete!(elem) catch; end; end
@@ -8847,8 +8855,15 @@ function create_metadata_window(
                 _is_syncing_m2_from_backend[] = false
             end
         end
-        put!(channel, CompareTimePointsEvent(cv_active[]))
-        println("[COMPARE-UI] Event sent, apply_compare_mode_ui_impl! DONE"); flush(stdout)
+        # Only send CompareTimePointsEvent if GLFW compare_mode is not already in the desired state
+        # (avoids redundant event when C key already triggered compare_mode from GLFW side)
+        if _MEH.compare_mode[] != cv_active[]
+            put!(channel, CompareTimePointsEvent(cv_active[]))
+            println("[COMPARE-UI] Event sent to channel"); flush(stdout)
+        else
+            println("[COMPARE-UI] GLFW compare_mode already $(cv_active[]), skipping event"); flush(stdout)
+        end
+        println("[COMPARE-UI] apply_compare_mode_ui_impl! DONE"); flush(stdout)
     end
     apply_compare_mode_ui! = apply_compare_mode_ui_impl!
 
@@ -10587,8 +10602,8 @@ function create_metadata_window(
         _apply_ms = round((time_ns()-t_cb)/1e6, digits=1)
         
         t_sync = time_ns()
-        # Refresh Map Lesions full mapping table on lesion change
-        if cv_active[] && sec_map_lesions[1][]
+        # Refresh Map Lesions full mapping table on lesion change if section is open
+        if sec_map_lesions[1][]
             try
                 _build_match_display!()
             catch e
