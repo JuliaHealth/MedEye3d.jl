@@ -1,6 +1,6 @@
 # MedEye3d Keyboard Shortcuts & Controls Reference
 
-> **Last Updated**: 2026-11-01 — Added **MRI Multimodal Mode on Main Screen** (`Ctrl+Y` / `Shift+Y` and `MRI Multi (Main)` button with cross-modality annotation synchronization & Heat-GDT support), **Dedicated MRI Windowing Sliders** (T2, ADC, DWI, T1, DCE with PI-RADS v2.1 presets), **Zoom to Fit** (`0`, `Z`, `Shift+F`, and `Fit (0)` button), and **MRI Comparison Mode in M2** (`Y` / `Shift+C`).
+> **Last Updated**: 2026-11-03 — Added **Lesion Deletion** (`Ctrl+Del`, `Ctrl+Backspace`, or `[x]` GUI button) with full **Ctrl+Z undo** support, and **Move Lesion Mode** (`V` key). Fixed crosshair display on bottom row of quad MRI view on M2 second screen.
 
 ---
 
@@ -25,6 +25,23 @@
 | **Up ↑** | Previous lesion in queue | ✅ Lesion dropdown + view centers |
 | **D** | Center view on current lesion (re-sync) | ✅ View re-centers |
 | **N** | Create new lesion at cursor position | ✅ Lesion dropdown + enters paint mode |
+
+## Lesion Deletion & Undo
+
+| Shortcut | Action | GUI Sync |
+|----------|--------|----------|
+| **Ctrl + Del** | Delete the currently active lesion (zeros mask voxels, removes metadata) | ✅ Lesion dropdown + metadata update |
+| **Ctrl + Backspace** | Delete the currently active lesion (alternative shortcut) | ✅ Same as Ctrl+Del |
+| **[x]** button *(Makie sidebar)* | Delete lesion via GUI — shows "Yes, Delete" / "Cancel" confirmation | ✅ Confirmation row toggles |
+| **Ctrl + Z** | Undo last action (restores deleted lesion — mask voxels, metadata, mappings) | ✅ Full restore |
+
+> **Safety**: `Ctrl+Del` and `Ctrl+Backspace` delete immediately without confirmation (from the GLFW viewer window). The `[x]` button in the Makie sidebar shows a confirmation prompt. All deletions can be reversed with **Ctrl+Z** — the undo stack preserves mask voxels, metadata, organ mappings, and segment data.
+
+## Move Lesion Mode
+
+| Shortcut | Action | GUI Sync |
+|----------|--------|----------|
+| **V** | Toggle move lesion mode — click to reposition the current lesion centroid | ✅ "Move" button turns green |
 
 ## Timepoint Navigation
 
@@ -191,7 +208,6 @@ Synchronized scrolling is **ON by default**. When enabled, scrolling on any pane
 
 | Shortcut | Intended Action | Status |
 |----------|----------------|--------|
-| **Ctrl + Z** | Undo last action | ❌ Undo history vector never populated (unmodified **Z** is now **Zoom to Fit**) |
 | **Tab + number** | Set paint value (lesion ID) | ❌ Flag overwrite prevents combo |
 | **Tab + Plus/Minus** | Adjust stroke width | ❌ isPlusPressed comparison type bug |
 | **Shift + number** | Show mask N | ❌ setTextureVisibility is no-op stub |
