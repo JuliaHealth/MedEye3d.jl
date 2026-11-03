@@ -6808,12 +6808,11 @@ function create_metadata_window(
                 q = QuestionDef(sq, sq, String[], ["General"], "both", "")
             end
 
-            # ── Combined row: SUV mean shares a row with SUV max ──
+            # ── Combined row: SUV mean & PSMA-RADS 2.0 share a row with SUV max ──
             if q.short == "SUV mean" && haskey(field_widgets, "SUV max")
-                # Place SUV mean on the same row as SUV max (columns 3:4)
                 suv_max_row = first(q_row_indices["SUV max"])
-                tb_mean = Textbox(g[suv_max_row, 4],
-                    placeholder = "0.0",
+                tb_mean = Textbox(g[suv_max_row, 3],
+                    placeholder = "mean: 0.0",
                     fontsize = 10,
                     textcolor = RGBf(0.9, 0.9, 0.9),
                     boxcolor = RGBf(0.15, 0.15, 0.18),
@@ -6822,18 +6821,14 @@ function create_metadata_window(
                     bordercolor_focused = RGBf(0.4, 0.5, 0.9))
                 field_widgets["SUV mean"] = tb_mean
                 q_row_indices["SUV mean"] = q_row_indices["SUV max"]  # same rows
+                on(tb_mean.focused) do f; f && _show_field_tooltip!("SUV mean"); end
                 continue  # skip normal row creation
             end
 
-            # ── Combined row: PSMA-RADS 2.0 shares a row with PRIMARY score ──
-            if q.short == "PSMA-RADS 2.0" && haskey(field_widgets, "PRIMARY score pattern?")
-                # Place PSMA-RADS on the same row as PRIMARY score (columns 3:4)
-                primary_row = first(q_row_indices["PRIMARY score pattern?"])
-                Label(g[primary_row, 3], "RADS:",
-                    fontsize = 10, color = RGBf(0.55, 0.65, 0.85),
-                    halign = :right, tellwidth = false)
-                tb_rads = Textbox(g[primary_row, 4],
-                    placeholder = "Pending...",
+            if q.short == "PSMA-RADS 2.0" && haskey(field_widgets, "SUV max")
+                suv_max_row = first(q_row_indices["SUV max"])
+                tb_rads = Textbox(g[suv_max_row, 4],
+                    placeholder = "RADS: Pending...",
                     fontsize = 10,
                     textcolor = RGBf(0.9, 0.9, 0.9),
                     boxcolor = RGBf(0.15, 0.15, 0.18),
@@ -6841,8 +6836,9 @@ function create_metadata_window(
                     bordercolor = RGBf(0.3, 0.3, 0.35),
                     bordercolor_focused = RGBf(0.4, 0.5, 0.9))
                 field_widgets["PSMA-RADS 2.0"] = tb_rads
-                q_row_indices["PSMA-RADS 2.0"] = q_row_indices["PRIMARY score pattern?"]
-                continue
+                q_row_indices["PSMA-RADS 2.0"] = q_row_indices["SUV max"]  # same rows
+                on(tb_rads.focused) do f; f && _show_field_tooltip!("PSMA-RADS 2.0"); end
+                continue  # skip normal row creation
             end
 
             q_r = nr!()
@@ -6856,14 +6852,13 @@ function create_metadata_window(
                 _tooltip_field_descs[q.short] = q.full
             end
             lbl_text = has_desc ? display_lbl * " ℹ:" : display_lbl * ":"
-            # SUV max gets a combined label "SUV max / mean:"
+            # SUV max row combines SUV max, SUV mean, and PSMA-RADS 2.0
             if q.short == "SUV max"
-                lbl_text = "SUV max/mean ℹ:"
-                _tooltip_field_descs["SUV max"] = "SUV max: Maximum SUV value. SUV mean: Mean SUV across all voxels."
-            end
-            # PRIMARY score gets a combined label "PRIMARY/RADS:"
-            if q.short == "PRIMARY score pattern?"
-                lbl_text = "PRIMARY/RADS ℹ:"
+                lbl_text = "SUV / RADS ℹ:"
+                desc_combined = "SUV max: Maximum SUV value. SUV mean: Mean SUV across voxels. PSMA-RADS: Assessment score (1-5)."
+                _tooltip_field_descs["SUV max"] = desc_combined
+                _tooltip_field_descs["SUV mean"] = desc_combined
+                _tooltip_field_descs["PSMA-RADS 2.0"] = desc_combined
             end
             Label(g[q_r, 1], lbl_text,
                 fontsize = 10, color = has_desc ? RGBf(0.55, 0.65, 0.85) : LBL_FG,
@@ -6885,10 +6880,11 @@ function create_metadata_window(
                         cursorcolor = RGBf(0.9, 0.9, 0.9))
                     rowsize!(g, q_r, Fixed(80)); register_fixed_row!(q_r, 80)
                 else
-                    # For combined-row fields, use narrower column span
-                    tb_cols = (q.short == "SUV max" || q.short == "PRIMARY score pattern?") ? (2:3) : (2:4)
+                    # SUV max takes column 2 (SUV mean is col 3, PSMA-RADS is col 4)
+                    tb_cols = (q.short == "SUV max") ? 2 : (2:4)
+                    tb_ph = (q.short == "SUV max") ? "max: 0.0" : (isempty(q.default_answer) ? "..." : q.default_answer)
                     tb = Textbox(g[q_r, tb_cols],
-                        placeholder = isempty(q.default_answer) ? "..." : q.default_answer,
+                        placeholder = tb_ph,
                         fontsize = 10,
                         textcolor = RGBf(0.9, 0.9, 0.9),
                         boxcolor = RGBf(0.15, 0.15, 0.18),
@@ -6898,6 +6894,13 @@ function create_metadata_window(
                     rowsize!(g, q_r, Fixed(28)); register_fixed_row!(q_r, 28)
                 end
                 field_widgets[q.short] = tb
+                if has_desc
+                    let _q_short = q.short
+                        on(tb.focused) do f
+                            f && _show_field_tooltip!(_q_short)
+                        end
+                    end
+                end
             elseif length(q.options) >= 1 && q.options[1] == "slider"
                 # Slider widget (e.g., Certainty: 0-10)
                 range_min = length(q.options) >= 2 ? parse(Int, q.options[2]) : 0
@@ -7626,22 +7629,11 @@ function create_metadata_window(
                     visible = false
                 elseif sq == "PRIMARY score pattern?"
                     visible = is_p
-                    # PRIMARY shares a row with PSMA-RADS — always keep row visible,
-                    # just hide/show individual widgets
-                    if haskey(field_widgets, "PRIMARY score pattern?")
-                        w = field_widgets["PRIMARY score pattern?"]
-                        if hasproperty(w, :blockscene); w.blockscene.visible[] = is_p; end
-                    end
-                    if haskey(field_widgets, "PSMA-RADS 2.0")
-                        w = field_widgets["PSMA-RADS 2.0"]
-                        if hasproperty(w, :blockscene); w.blockscene.visible[] = !is_p; end
-                    end
-                    visible = true  # row always stays visible
                 elseif sq == "Relation to Bone Marrow (Surrounding Changes Part A)" || 
                        sq == "Periosteal Reaction (Surrounding Changes Part B)"
                     visible = is_bm && !no_ct
                 elseif sq == "PSMA-RADS 2.0"
-                    continue  # handled together with PRIMARY score above
+                    continue  # shares suv_row which is always visible
                 elseif sq == "Alternative Hypothesis (False Positive)"
                     visible = !is_p
                 end
@@ -11525,6 +11517,8 @@ function create_metadata_window(
     _lmw_observables[:custom_add_row_open] = _custom_add_row_open
     _lmw_observables[:custom_add_row_closers] = _custom_add_row_closers
     _lmw_observables[:q_add_rows] = q_add_rows
+    _lmw_observables[:q_row_indices] = q_row_indices
+    _lmw_observables[:row_visibility_state] = _row_visibility_state
     _lmw_observables[:add_opt_buttons] = add_opt_buttons
     
     action_buttons = Any[
