@@ -133,6 +133,18 @@ Each MRI modality has its own independent slider in the Makie sidebar under **"M
 | **F** | **M2 Window** | Toggle flicker mode | ✅ M2 mode dropdown updates |
 | **O** | **M2 Window** | Toggle interactive lesion mapping mode (all right lesions vs single matched lesion) | ✅ Interactive Map Mode button updates |
 
+### Cross-Modality Lesion Mapping Workflow (MRI ↔ CT)
+
+To create a lesion on MRI, then on CT, and link them:
+
+1. **Y** → MRI Quad View → **W** + click & hold → grow MRI lesion → **Esc**
+2. **Y** → back to CT → **Home** (BASELINE) → **W** + click & hold → grow CT lesion → **Esc**
+3. **C** → Compare mode (M2) → **Alt+→** to show MRI TP on right
+4. **O** → Interactive Map ON → select CT lesion (↑/↓) → **click** MRI lesion on right panel
+5. Lesions are linked! Click again to unlink. Mappings auto-persist to HDF5.
+
+> The sidebar's *"Map Lesions (Compare Mode)"* section shows linked associations and provides **Linked α** / **Unlinked α** opacity sliders to control visual differentiation.
+
 ### Automatic Cross-Modality Annotation Synchronization
 When in MRI Multimodal mode (or viewing multiple MRI sequences), **drawing or editing on any MRI panel immediately and automatically synchronizes the 3D lesion mask to all other MRI modalities** for that patient. 
 - Bounding box voxels are copied directly into the in-memory cache (`tp_data_cache`) across all MRI timepoints.
