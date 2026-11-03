@@ -6830,6 +6830,43 @@ function create_metadata_window(
                 q = QuestionDef(sq, sq, String[], ["General"], "both", "")
             end
 
+            # ── Combined row: SUV mean shares a row with SUV max ──
+            if q.short == "SUV mean" && haskey(field_widgets, "SUV max")
+                # Place SUV mean on the same row as SUV max (columns 3:4)
+                suv_max_row = first(q_row_indices["SUV max"])
+                tb_mean = Textbox(g[suv_max_row, 4],
+                    placeholder = "0.0",
+                    fontsize = 10,
+                    textcolor = RGBf(0.9, 0.9, 0.9),
+                    boxcolor = RGBf(0.15, 0.15, 0.18),
+                    boxcolor_focused = RGBf(0.2, 0.2, 0.25),
+                    bordercolor = RGBf(0.3, 0.3, 0.35),
+                    bordercolor_focused = RGBf(0.4, 0.5, 0.9))
+                field_widgets["SUV mean"] = tb_mean
+                q_row_indices["SUV mean"] = q_row_indices["SUV max"]  # same rows
+                continue  # skip normal row creation
+            end
+
+            # ── Combined row: PSMA-RADS 2.0 shares a row with PRIMARY score ──
+            if q.short == "PSMA-RADS 2.0" && haskey(field_widgets, "PRIMARY score pattern?")
+                # Place PSMA-RADS on the same row as PRIMARY score (columns 3:4)
+                primary_row = first(q_row_indices["PRIMARY score pattern?"])
+                Label(g[primary_row, 3], "RADS:",
+                    fontsize = 10, color = RGBf(0.55, 0.65, 0.85),
+                    halign = :right, tellwidth = false)
+                tb_rads = Textbox(g[primary_row, 4],
+                    placeholder = "Pending...",
+                    fontsize = 10,
+                    textcolor = RGBf(0.9, 0.9, 0.9),
+                    boxcolor = RGBf(0.15, 0.15, 0.18),
+                    boxcolor_focused = RGBf(0.2, 0.2, 0.25),
+                    bordercolor = RGBf(0.3, 0.3, 0.35),
+                    bordercolor_focused = RGBf(0.4, 0.5, 0.9))
+                field_widgets["PSMA-RADS 2.0"] = tb_rads
+                q_row_indices["PSMA-RADS 2.0"] = q_row_indices["PRIMARY score pattern?"]
+                continue
+            end
+
             q_r = nr!()
             push!(all_metadata_rows, q_r)
             q_rows = Int[q_r]
@@ -6841,6 +6878,15 @@ function create_metadata_window(
                 _tooltip_field_descs[q.short] = q.full
             end
             lbl_text = has_desc ? display_lbl * " ℹ:" : display_lbl * ":"
+            # SUV max gets a combined label "SUV max / mean:"
+            if q.short == "SUV max"
+                lbl_text = "SUV max/mean ℹ:"
+                _tooltip_field_descs["SUV max"] = "SUV max: Maximum SUV value. SUV mean: Mean SUV across all voxels."
+            end
+            # PRIMARY score gets a combined label "PRIMARY/RADS:"
+            if q.short == "PRIMARY score pattern?"
+                lbl_text = "PRIMARY/RADS ℹ:"
+            end
             Label(g[q_r, 1], lbl_text,
                 fontsize = 10, color = has_desc ? RGBf(0.55, 0.65, 0.85) : LBL_FG,
                 halign = :right, tellwidth = false)
@@ -6861,7 +6907,9 @@ function create_metadata_window(
                         cursorcolor = RGBf(0.9, 0.9, 0.9))
                     rowsize!(g, q_r, Fixed(80)); register_fixed_row!(q_r, 80)
                 else
-                    tb = Textbox(g[q_r, 2:4],
+                    # For combined-row fields, use narrower column span
+                    tb_cols = (q.short == "SUV max" || q.short == "PRIMARY score pattern?") ? (2:3) : (2:4)
+                    tb = Textbox(g[q_r, tb_cols],
                         placeholder = isempty(q.default_answer) ? "..." : q.default_answer,
                         fontsize = 10,
                         textcolor = RGBf(0.9, 0.9, 0.9),
@@ -7197,16 +7245,13 @@ function create_metadata_window(
             end
         end  # end "Identification" injection
 
-        # Inject "No CT Correlate" toggle (hidden — kept for logic) + SUV comparison after Identification
+        # Inject "No CT Correlate" toggle + SUV comparison after Identification
         if group_title == "Identification"
             ncc_r = nr!()
             push!(all_metadata_rows, ncc_r)
             no_ct_toggle = Toggle(g[ncc_r, 1], active = false, buttoncolor = ACCENT)
             Label(g[ncc_r, 2], "No CT Correlate", fontsize = 10, color = LBL_FG, halign = :left)
-            # Hidden from UI — toggle is driven programmatically (e.g. by Artifact type button)
-            rowsize!(g, ncc_r, Fixed(0)); register_fixed_row!(ncc_r, 0)
-            try; rowgap!(g, ncc_r, 0); catch; end  # may fail if ncc_r is last row during creation
-            no_ct_toggle.blockscene.visible[] = false
+            rowsize!(g, ncc_r, Fixed(24)); register_fixed_row!(ncc_r, 24)
             add_opt_buttons["__NO_CT_TOGGLE__"] = no_ct_toggle
             
             suv_comparison_r = nr!()
@@ -7222,6 +7267,15 @@ function create_metadata_window(
         end
     end
     
+    # ── Deferred: zero out rowgaps for hidden anatomical detail rows ──────────
+    # (During initial creation, some rows may have been the last row so rowgap! failed.
+    # Now all rows exist, so we can safely set the gaps.)
+    if @isdefined(anat_row_indices)
+        for ar in anat_row_indices
+            try; rowgap!(g, ar, 0); catch; end
+        end
+    end
+
     # ── RadLex Multi-Value Panel ──────────────────────────────────────────────
     Label(g[nr!(), 1:4], "-- RadLex Ontology Properties --", fontsize = 11, color = ACCENT, halign = :center, tellwidth = false)
     radlex_selected = Observable(String[])
@@ -7594,11 +7648,22 @@ function create_metadata_window(
                     visible = false
                 elseif sq == "PRIMARY score pattern?"
                     visible = is_p
+                    # PRIMARY shares a row with PSMA-RADS — always keep row visible,
+                    # just hide/show individual widgets
+                    if haskey(field_widgets, "PRIMARY score pattern?")
+                        w = field_widgets["PRIMARY score pattern?"]
+                        if hasproperty(w, :blockscene); w.blockscene.visible[] = is_p; end
+                    end
+                    if haskey(field_widgets, "PSMA-RADS 2.0")
+                        w = field_widgets["PSMA-RADS 2.0"]
+                        if hasproperty(w, :blockscene); w.blockscene.visible[] = !is_p; end
+                    end
+                    visible = true  # row always stays visible
                 elseif sq == "Relation to Bone Marrow (Surrounding Changes Part A)" || 
                        sq == "Periosteal Reaction (Surrounding Changes Part B)"
                     visible = is_bm && !no_ct
                 elseif sq == "PSMA-RADS 2.0"
-                    visible = !is_p
+                    continue  # handled together with PRIMARY score above
                 elseif sq == "Alternative Hypothesis (False Positive)"
                     visible = !is_p
                 end
