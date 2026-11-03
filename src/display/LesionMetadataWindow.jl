@@ -3948,11 +3948,15 @@ function create_metadata_window(
     end
 
     is_syncing_sl = Ref(false)
+    _suppress_menu_close = Ref(false)  # Set true during tooltip layout updates to prevent _apply_scroll! from closing menus
     
     function _apply_scroll!(offset_px::Float32)
         # Close any open dropdowns before scrolling to prevent floating overlays
-        for m in _ALL_MENUS
-            try; m.is_open[] && (m.is_open[] = false); catch; end
+        # (but NOT when called from tooltip show/hide — the menu triggered the tooltip)
+        if !_suppress_menu_close[]
+            for m in _ALL_MENUS
+                try; m.is_open[] && (m.is_open[] = false); catch; end
+            end
         end
         _scroll_offset_px[] = offset_px
         !_bbox_cache_ready[] && return
@@ -6769,15 +6773,16 @@ function create_metadata_window(
         _commit_new_preset!()
     end
 
-    # ── Shared tooltip row — shows field description when user clicks a field label ──
+    # ── Shared tooltip row — shows field description when user opens a dropdown ──
+    # Height is always Fixed(18) to avoid layout reflow when showing/hiding.
+    # Only the label text changes — no rowsize!, no grid update needed.
     _tooltip_row = nr!()
     push!(all_metadata_rows, _tooltip_row)
     _tooltip_obs = Observable("")
     _tooltip_lbl = Label(g[_tooltip_row, 1:4], _tooltip_obs,
         fontsize = 8, color = RGBf(0.55, 0.65, 0.85),
         halign = :left, tellwidth = false, word_wrap = true)
-    rowsize!(g, _tooltip_row, Fixed(0)); register_fixed_row!(_tooltip_row, 0)
-    _tooltip_lbl.blockscene.visible[] = false
+    rowsize!(g, _tooltip_row, Fixed(18)); register_fixed_row!(_tooltip_row, 18)
     _tooltip_timer = Ref{Any}(nothing)
     _tooltip_field_descs = Dict{String, String}()  # field_short => description
 
@@ -6785,39 +6790,12 @@ function create_metadata_window(
         desc = get(_tooltip_field_descs, field_short, "")
         isempty(desc) && return
         _tooltip_obs[] = "ℹ $field_short: $desc"
-        _tooltip_lbl.blockscene.visible[] = true
-        _row_fixed_heights[_tooltip_row] = 36
-        _row_visibility_state[_tooltip_row] = true
-        g.block_updates = false
-        try
-            rowsize!(g, _tooltip_row, Fixed(36))
-            try; rowgap!(g, _tooltip_row, 2); catch; end
-            _invalidate_row_cache!()
-            Makie.GridLayoutBase.update!(g)
-            _cache_widget_bboxes!()
-        finally
-            g.block_updates = true
-            _apply_scroll!(_scroll_offset_px[])
-        end
-        # Auto-hide after 4 seconds
-        old_timer = _tooltip_timer[]
+        # No layout changes needed — tooltip row has a permanent Fixed(18) height.
+        # Just updating the Observable text is enough; Makie will re-render the Label.
+        # Auto-hide text after 4 seconds
         _tooltip_timer[] = @async begin
             sleep(4.0)
             _tooltip_obs[] = ""
-            _tooltip_lbl.blockscene.visible[] = false
-            _row_fixed_heights[_tooltip_row] = 0
-            _row_visibility_state[_tooltip_row] = false
-            g.block_updates = false
-            try
-                rowsize!(g, _tooltip_row, Fixed(0))
-                try; rowgap!(g, _tooltip_row, 0); catch; end
-                _invalidate_row_cache!()
-                Makie.GridLayoutBase.update!(g)
-                _cache_widget_bboxes!()
-            finally
-                g.block_updates = true
-                _apply_scroll!(_scroll_offset_px[])
-            end
         end
     end
 
