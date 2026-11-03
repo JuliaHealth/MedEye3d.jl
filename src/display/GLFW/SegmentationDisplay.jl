@@ -1597,7 +1597,7 @@ function coordinateDisplay(
                             tex_h_gpu = !isempty(obj.vulkanTextures) ? Float32(obj.vulkanTextures[1].height) : Float32(state.calcDimsStruct.imageTextureHeight)
                             
                             is_mri_quad = (MakieEventHandlers.mri_main_multimodal_mode[] && panel_idx in (1, 2, 3, 4)) ||
-                                          (MakieEventHandlers.mri_compare_mode[] && panel_idx in (6, 7, 8, 9))
+                                          ((MakieEventHandlers.mri_compare_mode[] || MakieEventHandlers.mri_main_multimodal_mode[]) && panel_idx in (6, 7, 8, 9))
                             vx, vy = if is_mri_quad
                                 p_dim = state.onScrollData.dimensionToScroll
                                 if p_dim == 1
