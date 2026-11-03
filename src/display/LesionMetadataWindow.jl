@@ -5065,7 +5065,7 @@ function create_metadata_window(
         buttoncolor = RGBf(0.6, 0.15, 0.15), labelcolor = :white, fontsize = 9)
     btn_del_cancel = Button(g[del_r, 4], label = "Cancel",
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
-    btn_delete_lesion = Button(g[del_r, 5], label = "🗑️",
+    btn_delete_lesion = Button(g[del_r, 5], label = "[x]",
         buttoncolor = RGBf(0.5, 0.15, 0.15), labelcolor = :white, fontsize = 12,
         width = 30, tellwidth = false)
     # Button/Label do NOT support `visible` as constructor kwarg — toggle via blockscene.visible
