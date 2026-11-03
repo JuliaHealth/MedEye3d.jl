@@ -35,7 +35,7 @@
 | **[x]** button *(Makie sidebar)* | Delete lesion via GUI — shows "Yes, Delete" / "Cancel" confirmation | ✅ Confirmation row toggles |
 | **Ctrl + Z** | Undo last action (restores deleted lesion — mask voxels, metadata, mappings) | ✅ Full restore |
 
-> **Safety**: `Ctrl+Del` and `Ctrl+Backspace` delete immediately without confirmation (from the GLFW viewer window). The `[x]` button in the Makie sidebar shows a confirmation prompt. All deletions can be reversed with **Ctrl+Z** — the undo stack preserves mask voxels, metadata, organ mappings, and segment data.
+> **Safety**: `Ctrl+Del` and `Ctrl+Backspace` delete immediately without confirmation (works in both the **GLFW viewer** and the **Makie metadata window**). The `[x]` button in the Makie sidebar shows a confirmation prompt. All deletions can be reversed with **Ctrl+Z** (in both windows) — the undo stack preserves mask voxels, metadata, organ mappings, and segment data.
 
 ## Move Lesion Mode
 
