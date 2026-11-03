@@ -3507,6 +3507,17 @@ function _register_menu!(m::Makie.Menu)
         on(m.is_open) do is_open
             if is_open
                 _active_open_menu[] = m
+                # Ensure popup scene and all its option plots are visible when menu opens.
+                # This is needed because _set_widget_visible! may have set menuscene.visible=false
+                # or plot.visible=false when hiding/showing section rows. Without this,
+                # the dropdown options list would not render even though is_open=true.
+                if hasproperty(m, :blockscene) && !isempty(m.blockscene.children)
+                    menuscene = m.blockscene.children[1]
+                    menuscene.visible[] = true
+                    for p in menuscene.plots
+                        try; p.visible[] = true; catch; end
+                    end
+                end
                 for other in _ALL_MENUS
                     if other !== m
                         try
@@ -4081,7 +4092,23 @@ function create_metadata_window(
             try; p.visible[] = visible; catch; end
         end
         for ch in sc.children
-            _set_scene_plots_visible!(ch, visible)
+            # Do NOT recursively hide plots inside menuscene (Makie Menu popup).
+            # Menuscene visibility is managed directly by Menu.is_open and its plots must stay visible=true.
+            is_menuscene = false
+            for m in _ALL_MENUS
+                if hasproperty(m, :blockscene) && !isempty(m.blockscene.children) && m.blockscene.children[1] === ch
+                    is_menuscene = true
+                    break
+                end
+            end
+            if is_menuscene
+                ch.visible[] = false
+                for p in ch.plots
+                    try; p.visible[] = true; catch; end
+                end
+            else
+                _set_scene_plots_visible!(ch, visible)
+            end
         end
     end
 
@@ -4115,10 +4142,9 @@ function create_metadata_window(
                 end
                 if !isempty(w.blockscene.children)
                     menuscene = w.blockscene.children[1]
-                    is_drop_open = visible && try w.is_open[] catch; false end
-                    menuscene.visible[] = is_drop_open
+                    menuscene.visible[] = visible && (try w.is_open[] catch; false end)
                     for p in menuscene.plots
-                        try; p.visible[] = is_drop_open; catch; end
+                        try; p.visible[] = true; catch; end
                     end
                 end
             end
