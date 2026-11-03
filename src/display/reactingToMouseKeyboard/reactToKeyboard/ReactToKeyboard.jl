@@ -44,6 +44,36 @@ function _is_lesion_review()
     return true
 end
 
+function _get_active_lesion_id()
+    try
+        p = parentmodule(@__MODULE__)
+        if isdefined(p, :SegmentationDisplay) && isdefined(p.SegmentationDisplay, :MakieEventHandlers)
+            MEH = p.SegmentationDisplay.MakieEventHandlers
+            LMW = MEH._get_lmw()
+            if LMW !== nothing
+                if haskey(LMW._lmw_observables, :active_lesion_id)
+                    lid_str = LMW._lmw_observables[:active_lesion_id][]
+                    parsed = LMW.parse_lesion_id(lid_str)
+                    if parsed !== nothing && parsed > 0
+                        return parsed
+                    end
+                elseif isdefined(LMW, :active_lesion_id)
+                    lid_str = LMW.active_lesion_id[]
+                    parsed = LMW.parse_lesion_id(lid_str)
+                    if parsed !== nothing && parsed > 0
+                        return parsed
+                    end
+                end
+            end
+            lid = MEH.current_active_lesion_id[]
+            if lid > 0
+                return lid
+            end
+        end
+    catch; end
+    return 0
+end
+
 function _sync_windowing_gui(modality::String, min_v::Float32, max_v::Float32)
     try
         top = parentmodule(@__MODULE__)
@@ -358,12 +388,6 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             end
             return
 
-        elseif keyInputInfo.scancode == Int32(GLFW.KEY_V)
-            if keyInputInfo.action == GLFW.PRESS
-                ch = _get_event_channel()
-                ch !== nothing && put!(ch, MakieEvents.SetM2ReferenceEvent(-1))
-            end
-            return
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_X)
             if keyInputInfo.action == GLFW.PRESS && _is_lesion_review()
@@ -498,11 +522,7 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
                     println("[KEY_CTRL_DELETE] channel=$(ch !== nothing ? "OK" : "NULL")"); flush(stdout)
                     if ch !== nothing
                         try
-                            top = parentmodule(@__MODULE__)
-                            lid = 0
-                            if isdefined(top, :MakieEventHandlers)
-                                lid = top.MakieEventHandlers.current_active_lesion_id[]
-                            end
+                            lid = _get_active_lesion_id()
                             println("[KEY_CTRL_DELETE] lid=$lid"); flush(stdout)
                             if lid > 0
                                 put!(ch, MakieEvents.DeleteLesionEvent(lid))
@@ -529,11 +549,7 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
                 ch = _get_event_channel()
                 if ch !== nothing
                     try
-                        top = parentmodule(@__MODULE__)
-                        lid = 0
-                        if isdefined(top, :MakieEventHandlers)
-                            lid = top.MakieEventHandlers.current_active_lesion_id[]
-                        end
+                        lid = _get_active_lesion_id()
                         if lid > 0
                             put!(ch, MakieEvents.DeleteLesionEvent(lid))
                         else

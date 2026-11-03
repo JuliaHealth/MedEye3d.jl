@@ -1892,37 +1892,22 @@ function reactToDeleteLesion(data::MakieEvents.DeleteLesionEvent, stateObjects::
 
     # Access LMW for lesion_db and autosave
     LMW = _get_lmw()
-    if LMW === nothing
-        @warn "[DELETE] LesionMetadataWindow not available"
-        return
+    local db_ref = nothing
+    if LMW !== nothing
+        try
+            db_ref = getfield(LMW, :_active_lesion_db)[]
+        catch; end
     end
 
-    local db_ref
-    try
-        db_ref = getfield(LMW, :_active_lesion_db)[]
-    catch
-        @warn "[DELETE] Cannot access _active_lesion_db"
-        return
-    end
-    if db_ref === nothing || !isa(db_ref, Observable)
-        @warn "[DELETE] lesion_db Observable not initialized"
-        return
-    end
-
-    db_dict = db_ref[]
-    if !haskey(db_dict, lid_str)
-        @warn "[DELETE] Lesion $lid not found in lesion_db"
-        return
-    end
-
-    println("[DELETE] Deleting lesion $lid..."); flush(stdout)
-    t_start = time()
-
-    # 1. Snapshot metadata for undo
-    meta_backup = deepcopy(db_dict[lid_str])
+    has_meta = (db_ref !== nothing && isa(db_ref, Observable) && haskey(db_ref[], lid_str))
+    db_dict = has_meta ? db_ref[] : Dict{String, Any}()
+    meta_backup = has_meta ? deepcopy(db_dict[lid_str]) : Dict{String, Any}("_display_name" => "Lesion $lid")
     display_name = get(meta_backup, "_display_name", "Lesion $lid")
 
-    # 2. Snapshot mask voxels from all timepoints
+    println("[DELETE] Deleting lesion $lid ($display_name)..."); flush(stdout)
+    t_start = time()
+
+    # 1. Snapshot mask voxels from all timepoints for undo
     mask_backups = Dict{Int, Vector{Tuple{CartesianIndex{3}, Int16}}}()
     lock(_tp_cache_lock) do
         for (tp_i, entry) in tp_data_cache
@@ -1933,7 +1918,7 @@ function reactToDeleteLesion(data::MakieEvents.DeleteLesionEvent, stateObjects::
         end
     end
 
-    # 3. Snapshot organ/segment mappings
+    # 2. Snapshot organ/segment mappings
     organ_backup = Dict{Int, String}()
     seg_backup = Dict{Int, String}()
     for tp_i in keys(tp_data_cache)
@@ -1946,14 +1931,14 @@ function reactToDeleteLesion(data::MakieEvents.DeleteLesionEvent, stateObjects::
     end
     global_organ_bak = haskey(global_organ_mapping[], lid) ? global_organ_mapping[][lid] : nothing
 
-    # 4. Build undo closure
+    # 3. Build undo closure
     undo_fn = function()
         _restore_deleted_lesion(lid, meta_backup, mask_backups, organ_backup, seg_backup, global_organ_bak, stateObjects)
     end
     UndoStack.push_undo!(UndoStack.UndoRecord(
         "Delete $display_name", undo_fn, time()))
 
-    # 5. Zero mask voxels across all TPs
+    # 4. Zero mask voxels across all TPs in tp_data_cache
     lock(_tp_cache_lock) do
         for (tp_i, entry) in tp_data_cache
             changed = false
@@ -1972,13 +1957,39 @@ function reactToDeleteLesion(data::MakieEvents.DeleteLesionEvent, stateObjects::
         end
     end
 
-    # 6. Remove from lesion_db
-    new_db = copy(db_dict)
-    delete!(new_db, lid_str)
-    db_ref[] = new_db  # triggers Observable listeners
+    # 4b. Zero matching mask voxels directly in stateObjects onScrollData buffers
+    for p in 1:length(stateObjects)
+        for scrDat in stateObjects[p].onScrollData.dataToScroll
+            if scrDat.name in ("Mask", "manualModif", "segmentation", "mask")
+                try
+                    for idx in findall(x -> x == lid, scrDat.dat)
+                        scrDat.dat[idx] = zero(eltype(scrDat.dat))
+                    end
+                catch; end
+            end
+        end
+    end
 
-    # 7. Invalidate all caches referencing this lesion
+    # 5. Remove from lesion_db if present
+    if has_meta && db_ref !== nothing
+        new_db = copy(db_dict)
+        delete!(new_db, lid_str)
+        db_ref[] = new_db  # triggers Observable listeners
+    end
+
+    # 6. Invalidate all caches referencing this lesion
     _invalidate_lesion_caches(lid)
+
+    # 7. Remove from UI dropdown list
+    if LMW !== nothing
+        try
+            if isdefined(LMW, :remove_lesion_from_ui!)
+                LMW.remove_lesion_from_ui!(lid)
+            end
+        catch e
+            @warn "[DELETE] remove_lesion_from_ui failed: $e"
+        end
+    end
 
     # 8. Remove from match groups
     try
@@ -2001,27 +2012,55 @@ function reactToDeleteLesion(data::MakieEvents.DeleteLesionEvent, stateObjects::
     catch; end
 
     # 10. Trigger autosave via LMW
-    try
-        LMW.request_autosave(skip_dictation=true)
-    catch; end
+    if LMW !== nothing
+        try
+            LMW.request_autosave(skip_dictation=true)
+        catch; end
+    end
 
-    # 11. Re-upload mask textures for visible panels
+    # 11. Determine next active lesion and sync
+    remaining = Int[]
+    if db_ref !== nothing && isa(db_ref, Observable)
+        for k in keys(db_ref[])
+            p = tryparse(Int, k)
+            p !== nothing && p != lid && push!(remaining, p)
+        end
+    end
+    sort!(remaining)
+
+    if !isempty(remaining)
+        next_lid = first(remaining)
+        current_active_lesion_id[] = next_lid
+        try
+            reactToSyncLesion(SyncLesionEvent(next_lid, is_single_lesion_mode[]), stateObjects)
+        catch; end
+        if LMW !== nothing
+            try
+                lmw_lid_obs = getfield(LMW, :active_lesion_id)
+                lmw_lid_obs[] = string(next_lid)
+            catch; end
+        end
+    else
+        current_active_lesion_id[] = 0
+        try
+            reactToSyncLesion(SyncLesionEvent(0, is_single_lesion_mode[]), stateObjects)
+        catch; end
+        if LMW !== nothing
+            try
+                lmw_lid_obs = getfield(LMW, :active_lesion_id)
+                lmw_lid_obs[] = "(none)"
+            catch; end
+        end
+    end
+
+    # 12. Re-upload mask textures for visible panels & mark UBO dirty
     for p in 1:min(length(stateObjects), 10)
         try
             stateObjects[p].isSliceChanged = true
             _force_texture_upload!(stateObjects, p)
-        catch; end
-    end
-
-    # 12. Navigate to next available lesion
-    remaining = sort(parse.(Int, collect(keys(db_ref[]))))
-    if !isempty(remaining)
-        next_lid = first(remaining)
-        try
-            next_lid_str = string(next_lid)
-            # Update the LMW active_lesion_id Observable
-            lmw_lid_obs = getfield(LMW, :active_lesion_id)
-            lmw_lid_obs[] = next_lid_str
+            if stateObjects[p].mainForDisplayObjects.vulkanPipelineState !== nothing
+                stateObjects[p].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+            end
         catch; end
     end
 
@@ -2171,15 +2210,42 @@ function _restore_deleted_lesion(lid::Int, meta_backup::Dict, mask_backups::Dict
         LMW.request_autosave(skip_dictation=true)
     catch; end
 
-    # 6. Re-upload mask textures
+    # 5b. Restore to UI dropdown list
+    display_name = get(meta_backup, "_display_name", "Lesion $lid")
+    try
+        if isdefined(LMW, :add_or_restore_lesion_in_ui!)
+            LMW.add_or_restore_lesion_in_ui!(lid, display_name)
+        end
+    catch e
+        @warn "[UNDO] add_or_restore_lesion_in_ui failed: $e"
+    end
+
+    # 5c. Reload panel data from tp_data_cache to ensure dataToScroll is restored
+    for p in 1:min(length(stateObjects), 10)
+        panel_tp = (compare_mode[] && p in (5, 6, 7, 8, 9)) ? compare_right_tp[] : current_tp_index[]
+        if haskey(tp_data_cache, panel_tp)
+            try
+                _load_tp_from_entry!(stateObjects, tp_data_cache[panel_tp], p)
+            catch; end
+        end
+    end
+
+    # 6. Re-upload mask textures & mark UBO dirty
     for p in 1:min(length(stateObjects), 10)
         try
             stateObjects[p].isSliceChanged = true
             _force_texture_upload!(stateObjects, p)
+            if stateObjects[p].mainForDisplayObjects.vulkanPipelineState !== nothing
+                stateObjects[p].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+            end
         catch; end
     end
 
     # 7. Navigate to restored lesion
+    current_active_lesion_id[] = lid
+    try
+        reactToSyncLesion(SyncLesionEvent(lid, is_single_lesion_mode[]), stateObjects)
+    catch; end
     try
         lmw_lid_obs = getfield(LMW, :active_lesion_id)
         lmw_lid_obs[] = string(lid)

@@ -1531,6 +1531,49 @@ function parse_lesion_id(id_str::String)::Union{Int, Nothing}
 end
 
 """
+    remove_lesion_from_ui!(lid::Int)
+
+Removes a deleted lesion from the UI dropdown and selection list.
+"""
+function remove_lesion_from_ui!(lid::Int)
+    if haskey(_lmw_observables, :lesion_ids) && haskey(_lmw_observables, :active_lesion_id)
+        l_ids = _lmw_observables[:lesion_ids]
+        act_id = _lmw_observables[:active_lesion_id]
+        curr = copy(l_ids[])
+        filtered = filter(opt -> parse_lesion_id(opt) != lid, curr)
+        if isempty(filtered)
+            filtered = ["(none)"]
+        end
+        l_ids[] = filtered
+        cur_lid = parse_lesion_id(act_id[])
+        if cur_lid == lid || !(act_id[] in filtered)
+            act_id[] = filtered[1]
+        end
+    end
+end
+
+"""
+    add_or_restore_lesion_in_ui!(lid::Int, d_name::String="Lesion")
+
+Restores or adds a lesion to the UI dropdown and selects it.
+"""
+function add_or_restore_lesion_in_ui!(lid::Int, d_name::String="Lesion")
+    if haskey(_lmw_observables, :lesion_ids) && haskey(_lmw_observables, :active_lesion_id)
+        l_ids = _lmw_observables[:lesion_ids]
+        act_id = _lmw_observables[:active_lesion_id]
+        curr = copy(l_ids[])
+        filter!(opt -> opt != "(none)" && parse_lesion_id(opt) != lid, curr)
+        clean_disp = replace(d_name, Regex("^$(lid):\\s*") => "")
+        new_entry = "$lid: $clean_disp"
+        push!(curr, new_entry)
+        sort!(curr, by = opt -> (p = parse_lesion_id(opt); p === nothing ? 9999 : p))
+        l_ids[] = curr
+        act_id[] = new_entry
+    end
+end
+export remove_lesion_from_ui!, add_or_restore_lesion_in_ui!
+
+"""
     _extract_z_from_entry(entry::AbstractDict, lid::Union{Int,Nothing}=nothing) -> Int
 
 Extract physical Z coordinate from an annotation entry or cache.
@@ -3709,6 +3752,8 @@ function create_metadata_window(
     obs_on_switch_case = Observable{String}("")
     _lmw_observables[:obs_set_compare_mode] = obs_set_compare_mode
     _lmw_observables[:on_switch_case] = obs_on_switch_case
+    _lmw_observables[:active_lesion_id] = active_lesion_id
+    _lmw_observables[:lesion_ids] = lesion_ids
     ui_queue = Function[]
     ui_lock = ReentrantLock()
     _safe_ui_update(f::Function) = f()
@@ -5842,8 +5887,25 @@ function create_metadata_window(
                 return Consume(true)
             end
         elseif event.action == Makie.Keyboard.press && (event.key == Makie.Keyboard._0 || event.key == Makie.Keyboard.kp_0 || event.key == Makie.Keyboard.z)
-            put!(channel, MakieEvents.ZoomToFitEvent(0))
+            is_ctrl = (Makie.Keyboard.left_control in events(fig).keyboardstate) || (Makie.Keyboard.right_control in events(fig).keyboardstate)
+            if is_ctrl && event.key == Makie.Keyboard.z
+                println("[MAKIE_KEY] Ctrl+Z triggered Undo"); flush(stdout)
+                put!(channel, MakieEvents.UndoEvent())
+            else
+                put!(channel, MakieEvents.ZoomToFitEvent(0))
+            end
             return Consume(true)
+        elseif event.action == Makie.Keyboard.press && (event.key == Makie.Keyboard.delete || event.key == Makie.Keyboard.backspace)
+            is_ctrl = (Makie.Keyboard.left_control in events(fig).keyboardstate) || (Makie.Keyboard.right_control in events(fig).keyboardstate)
+            if is_ctrl
+                lid_str = active_lesion_id[]
+                lid = parse_lesion_id(lid_str)
+                if lid !== nothing && lid > 0
+                    println("[MAKIE_KEY] Ctrl+Del / Ctrl+Backspace triggered delete for lesion $lid"); flush(stdout)
+                    put!(channel, MakieEvents.DeleteLesionEvent(lid))
+                    return Consume(true)
+                end
+            end
         elseif event.action == Makie.Keyboard.press && event.key == Makie.Keyboard.y
             if (Makie.Keyboard.left_shift in events(fig).keyboardstate) || (Makie.Keyboard.right_shift in events(fig).keyboardstate)
                 obs_toggle_mri_compare[] = obs_toggle_mri_compare[] + 1
@@ -11438,6 +11500,19 @@ function create_metadata_window(
         if cur_lid !== nothing && cur_lid > 0 && db_val isa AbstractDict && !isempty(db_val)
             opts = copy(lesion_ids[])
             changed = false
+            valid_keys = Set(keys(db_val))
+            len_before = length(opts)
+            filter!(opt -> begin
+                opt == "(none)" && return true
+                olid = parse_lesion_id(opt)
+                olid === nothing ? true : string(olid) in valid_keys
+            end, opts)
+            if isempty(opts)
+                opts = ["(none)"]
+            end
+            if length(opts) != len_before
+                changed = true
+            end
             for (opt_i, opt) in enumerate(opts)
                 opt_lid = parse_lesion_id(opt)
                 if opt_lid !== nothing
