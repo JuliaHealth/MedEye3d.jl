@@ -6769,6 +6769,58 @@ function create_metadata_window(
         _commit_new_preset!()
     end
 
+    # ── Shared tooltip row — shows field description when user clicks a field label ──
+    _tooltip_row = nr!()
+    push!(all_metadata_rows, _tooltip_row)
+    _tooltip_obs = Observable("")
+    _tooltip_lbl = Label(g[_tooltip_row, 1:4], _tooltip_obs,
+        fontsize = 8, color = RGBf(0.55, 0.65, 0.85),
+        halign = :left, tellwidth = false, word_wrap = true)
+    rowsize!(g, _tooltip_row, Fixed(0)); register_fixed_row!(_tooltip_row, 0)
+    _tooltip_lbl.blockscene.visible[] = false
+    _tooltip_timer = Ref{Any}(nothing)
+    _tooltip_field_descs = Dict{String, String}()  # field_short => description
+
+    function _show_field_tooltip!(field_short::String)
+        desc = get(_tooltip_field_descs, field_short, "")
+        isempty(desc) && return
+        _tooltip_obs[] = "ℹ $field_short: $desc"
+        _tooltip_lbl.blockscene.visible[] = true
+        _row_fixed_heights[_tooltip_row] = 36
+        _row_visibility_state[_tooltip_row] = true
+        g.block_updates = false
+        try
+            rowsize!(g, _tooltip_row, Fixed(36))
+            try; rowgap!(g, _tooltip_row, 2); catch; end
+            _invalidate_row_cache!()
+            Makie.GridLayoutBase.update!(g)
+            _cache_widget_bboxes!()
+        finally
+            g.block_updates = true
+            _apply_scroll!(_scroll_offset_px[])
+        end
+        # Auto-hide after 4 seconds
+        old_timer = _tooltip_timer[]
+        _tooltip_timer[] = @async begin
+            sleep(4.0)
+            _tooltip_obs[] = ""
+            _tooltip_lbl.blockscene.visible[] = false
+            _row_fixed_heights[_tooltip_row] = 0
+            _row_visibility_state[_tooltip_row] = false
+            g.block_updates = false
+            try
+                rowsize!(g, _tooltip_row, Fixed(0))
+                try; rowgap!(g, _tooltip_row, 0); catch; end
+                _invalidate_row_cache!()
+                Makie.GridLayoutBase.update!(g)
+                _cache_widget_bboxes!()
+            finally
+                g.block_updates = true
+                _apply_scroll!(_scroll_offset_px[])
+            end
+        end
+    end
+
     for (group_title, q_list) in metadata_groups
         # Sub-headers removed for compactness — field names are descriptive enough
 
@@ -6783,8 +6835,14 @@ function create_metadata_window(
             q_rows = Int[q_r]
 
             display_lbl = get(DISPLAY_LABEL_OVERRIDES, q.short, q.short)
-            Label(g[q_r, 1], display_lbl * ":",
-                fontsize = 10, color = LBL_FG,
+            # Store description for tooltip display; show "ℹ" suffix if description exists
+            has_desc = !isempty(q.full) && q.full != q.short
+            if has_desc
+                _tooltip_field_descs[q.short] = q.full
+            end
+            lbl_text = has_desc ? display_lbl * " ℹ:" : display_lbl * ":"
+            Label(g[q_r, 1], lbl_text,
+                fontsize = 10, color = has_desc ? RGBf(0.55, 0.65, 0.85) : LBL_FG,
                 halign = :right, tellwidth = false)
 
             if isempty(q.options)
@@ -6843,6 +6901,14 @@ function create_metadata_window(
                 rowsize!(g, q_r, Fixed(28)); register_fixed_row!(q_r, 28)
                 field_widgets[q.short] = m
                 add_opt_buttons[q.short] = btn_add_opt
+                # Show tooltip when this menu opens
+                if has_desc
+                    let _q_short = q.short
+                        on(m.is_open) do is_open
+                            is_open && _show_field_tooltip!(_q_short)
+                        end
+                    end
+                end
 
                 # Inline expandable row for entering and persisting new custom options
                 # Hidden by default; only shown when the user explicitly clicks the '+' button
@@ -6978,17 +7044,7 @@ function create_metadata_window(
                 end
             end
 
-            # Show subtle hint below the field
-            if !isempty(q.full) && q.full != q.short
-                tt_r = nr!()
-                push!(all_metadata_rows, tt_r)
-                push!(q_rows, tt_r)
-                desc_text = (q.short == "Certainty" || length(q.full) <= 120) ? q.full : (q.full[1:117] * "...")
-                Label(g[tt_r, 1:4], desc_text,
-                    fontsize = 8, color = RGBf(0.45, 0.45, 0.5),
-                    halign = :left, tellwidth = false)
-                rowsize!(g, tt_r, Fixed(14)); register_fixed_row!(tt_r, 14)
-            end
+            # Descriptions now shown as tooltips (via shared _tooltip_row) — no dedicated rows needed
             q_row_indices[q.short] = q_rows
         end
         
@@ -7087,8 +7143,9 @@ function create_metadata_window(
                 push!(anat_struct_menus, struct_m)
                 push!(anat_rm_btns, rm_btn)
                 add_opt_buttons["__RM_ANAT_$(i)__"] = rm_btn
-                # Hide by default
+                # Hide by default — zero height AND zero rowgap to eliminate phantom spacing
                 rowsize!(g, ar, Fixed(0))
+                try; rowgap!(g, ar, 0); catch; end  # gap may not exist yet if ar is the last row
                 rel_m.blockscene.visible[] = false
                 struct_m.blockscene.visible[] = false
                 rm_btn.blockscene.visible[] = false
@@ -7140,13 +7197,16 @@ function create_metadata_window(
             end
         end  # end "Identification" injection
 
-        # Inject "No CT Correlate" toggle + SUV comparison after Identification
+        # Inject "No CT Correlate" toggle (hidden — kept for logic) + SUV comparison after Identification
         if group_title == "Identification"
             ncc_r = nr!()
             push!(all_metadata_rows, ncc_r)
             no_ct_toggle = Toggle(g[ncc_r, 1], active = false, buttoncolor = ACCENT)
             Label(g[ncc_r, 2], "No CT Correlate", fontsize = 10, color = LBL_FG, halign = :left)
-            rowsize!(g, ncc_r, Fixed(24)); register_fixed_row!(ncc_r, 24)
+            # Hidden from UI — toggle is driven programmatically (e.g. by Artifact type button)
+            rowsize!(g, ncc_r, Fixed(0)); register_fixed_row!(ncc_r, 0)
+            try; rowgap!(g, ncc_r, 0); catch; end  # may fail if ncc_r is last row during creation
+            no_ct_toggle.blockscene.visible[] = false
             add_opt_buttons["__NO_CT_TOGGLE__"] = no_ct_toggle
             
             suv_comparison_r = nr!()
