@@ -734,6 +734,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 diff_vol = reverse(diff_vol, dims=2)
             end
             MedEye3d.InferenceClient.precompute_heatgdt_diffusivity(diff_vol; tp_index=0)
+            MEH._tp_diffusivity_cache[0] = diff_vol
         else
             @warn "[HeatDiffusion] 'diffusivity' dataset missing in HDF5 group 'BASELINE'. No fallback available."
         end

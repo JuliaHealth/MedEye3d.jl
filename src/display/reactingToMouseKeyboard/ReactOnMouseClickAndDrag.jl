@@ -2020,6 +2020,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
     try
         MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
         clickedPanel = mainState.switchIndex
+        MEH.current_hovered_panel[] = clickedPanel
         if clickedPanel >= 1 && clickedPanel <= length(mainStates) && !isempty(mouseCoords)
             panelState = mainStates[clickedPanel]
             viewportW = Float64(mainStates[1].calcDimsStruct.windowWidth)

@@ -279,44 +279,51 @@ Load the per-timepoint diffusivity field from the HDF5 file's TP group
 If found, re-upload to the GPU heat state. If not found, clear the current
 diffusivity — no gradient or NIfTI fallbacks are used.
 """
+const _tp_diffusivity_cache = Dict{Int, Array{Float32, 3}}()
+
 function reload_heatgdt_diffusivity_for_tp!(new_tp::Int)
     # Skip if already loaded for this TP
     if InferenceClient._heatgdt_diffusivity_tp[] == new_tp
         return
     end
     
-    h5_path = h5_save_path_ref[]
-    if isempty(h5_path) || !isfile(h5_path)
-        return
-    end
-    
     local diff_vol::Union{Nothing, Array{Float32, 3}} = nothing
-    try
-        HDF5.h5open(h5_path, "r") do h5
-            all_keys = keys(h5)
-            study_keys = filter(k -> !(k in ("_meta_", "ATLAS", "CENTROIDS", "BONE_SUBSEG")), all_keys)
-            
-            # Sort with BASELINE first
-            sort!(study_keys, by = x -> startswith(x, "BASELINE") ? "" : x)
-            
-            tp_idx_1 = new_tp + 1
-            if tp_idx_1 <= length(study_keys)
-                group_name = study_keys[tp_idx_1]
-                if haskey(h5[group_name], "diffusivity")
-                    @info "[HeatDiffusion] Loading diffusivity for TP=$new_tp from HDF5 group: $group_name"
-                    diff_vol = Float32.(read(h5[group_name]["diffusivity"]))
-                    
-                    is_preflipped = haskey(h5, "_meta_/preflipped") && read(h5["_meta_/preflipped"]) == 1
-                    if !is_preflipped
-                        diff_vol = reverse(diff_vol, dims=2)
+    if haskey(_tp_diffusivity_cache, new_tp)
+        diff_vol = _tp_diffusivity_cache[new_tp]
+    else
+        h5_path = h5_save_path_ref[]
+        if !isempty(h5_path) && isfile(h5_path)
+            try
+                HDF5.h5open(h5_path, "r") do h5
+                    group_name = if new_tp == 0
+                        "BASELINE"
+                    elseif haskey(h5, "TFM_Transform_FollowUp_to_Baseline_$(new_tp).tfm")
+                        "TFM_Transform_FollowUp_to_Baseline_$(new_tp).tfm"
+                    else
+                        all_keys = keys(h5)
+                        study_keys = filter(k -> !(k in ("_meta_", "ATLAS", "CENTROIDS", "BONE_SUBSEG")), all_keys)
+                        sort!(study_keys, by = x -> startswith(x, "BASELINE") ? -1 : (m = match(r"_(\d+)\.", x); m !== nothing ? parse(Int, m.captures[1]) : 999))
+                        tp_idx_1 = new_tp + 1
+                        tp_idx_1 <= length(study_keys) ? study_keys[tp_idx_1] : ""
                     end
-                else
-                    @warn "[HeatDiffusion] 'diffusivity' dataset missing in HDF5 group '$group_name' for TP=$new_tp. No fallback available."
+                    
+                    if !isempty(group_name) && haskey(h5, group_name) && haskey(h5[group_name], "diffusivity")
+                        @info "[HeatDiffusion] Loading diffusivity for TP=$new_tp from HDF5 group: $group_name"
+                        diff_vol = Float32.(read(h5[group_name]["diffusivity"]))
+                        
+                        is_preflipped = haskey(h5, "_meta_/preflipped") && read(h5["_meta_/preflipped"]) == 1
+                        if !is_preflipped
+                            diff_vol = reverse(diff_vol, dims=2)
+                        end
+                        _tp_diffusivity_cache[new_tp] = diff_vol
+                    else
+                        @warn "[HeatDiffusion] 'diffusivity' dataset missing in HDF5 group '$group_name' for TP=$new_tp. No fallback available."
+                    end
                 end
+            catch e
+                @warn "[HeatDiffusion] Failed to load diffusivity from HDF5 for TP=$new_tp: $e"
             end
         end
-    catch e
-        @warn "[HeatDiffusion] Failed to load diffusivity from HDF5 for TP=$new_tp: $e"
     end
     
     if diff_vol !== nothing
@@ -958,6 +965,13 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
         end
         target_str = use_m2 ? "M2 (panels 6-9)" : "Main (panels 1-4)"
         println(">> [MRI-MULTIMODAL] $target_str switched to 4 distinct MRI modalities: $(mri_tps)"); flush(stdout)
+        if !use_m2 && !isempty(mri_tps)
+            try
+                reload_heatgdt_diffusivity_for_tp!(mri_tps[1])
+            catch e
+                @warn "[HeatDiffusion] Failed to reload diffusivity for MRI quad view: $e"
+            end
+        end
     else
         entry = get_or_load_tp_data(tp_cur)
         if entry !== nothing
@@ -980,6 +994,13 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
         end
         target_str = use_m2 ? "M2 (panels 6-9)" : "Main (panels 1-4)"
         println(">> [MRI-MULTIMODAL] $target_str reverted to standard view."); flush(stdout)
+        if !use_m2
+            try
+                reload_heatgdt_diffusivity_for_tp!(tp_cur)
+            catch e
+                @warn "[HeatDiffusion] Failed to reload diffusivity on MRI quad exit: $e"
+            end
+        end
     end
     update_quad_corner_info!()
     try
@@ -6372,6 +6393,19 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
         return
     end
     
+    # In MRI Multimodal Quad view, switch GPU diffusivity to the active/clicked quadrant
+    if mri_main_multimodal_mode[]
+        p_act = current_hovered_panel[]
+        if !(p_act in (1, 2, 3, 4))
+            p_act = 1
+        end
+        target_tp = stateObjects[p_act].onScrollData.currentTpIndex
+        if target_tp >= 0 && InferenceClient._heatgdt_diffusivity_tp[] != target_tp
+            @info "[Heat-GDT Quad] Switching diffusivity to panel $p_act (TP=$target_tp)"
+            reload_heatgdt_diffusivity_for_tp!(target_tp)
+        end
+    end
+    
     heat_state = _vk_heat_state[]
     vk_ctx = _vk_heat_ctx[]
     
@@ -6482,7 +6516,9 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
                 try
                     
                     panel_idx = findfirst(s -> s === state, stateObjects)
-                    slice_dim = if panel_idx in (3, 8)
+                    slice_dim = if (mri_main_multimodal_mode[] && panel_idx in (1, 2, 3, 4)) || (mri_compare_mode[] && panel_idx in (6, 7, 8, 9))
+                        Int(state.onScrollData.dimensionToScroll)
+                    elseif panel_idx in (3, 8)
                         1 # Sagittal
                     elseif panel_idx in (4, 9)
                         2 # Coronal
@@ -6615,7 +6651,9 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
                     # 1=sagittal(X), 2=coronal(Y), 3=axial(Z)
                     
                     panel_idx = findfirst(s -> s === state, stateObjects)
-                    slice_dim = if panel_idx in (3, 8)
+                    slice_dim = if (mri_main_multimodal_mode[] && panel_idx in (1, 2, 3, 4)) || (mri_compare_mode[] && panel_idx in (6, 7, 8, 9))
+                        Int(state.onScrollData.dimensionToScroll)
+                    elseif panel_idx in (3, 8)
                         1 # Sagittal
                     elseif panel_idx in (4, 9)
                         2 # Coronal
@@ -6746,7 +6784,12 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
         
         # ── Sync discrete mask to TP cache (for autosave/HDF5 persistence) ──
         if seg_vol !== nothing
-            tp_idx = current_tp_index[]
+            tp_idx = if mri_main_multimodal_mode[]
+                p_act = current_hovered_panel[]
+                (p_act in (1, 2, 3, 4) && stateObjects[p_act].onScrollData.currentTpIndex >= 0) ? stateObjects[p_act].onScrollData.currentTpIndex : (current_tp_index[] > 0 ? current_tp_index[] : 1)
+            else
+                current_tp_index[]
+            end
             entry = lock(_tp_cache_lock) do
                 haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
             end

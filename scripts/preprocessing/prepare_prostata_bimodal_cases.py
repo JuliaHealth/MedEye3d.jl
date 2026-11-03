@@ -627,6 +627,69 @@ def compute_champion_diffusivity(ct_arr, pet_arr, exclusion_mask):
         
     return D
 
+def compute_mri_diffusivity(mri_arr, pet_arr=None, anat_vol=None, exclusion_mask=None, modality="T2", companion_edges=None):
+    """
+    Computes genuine edge-preserving diffusivity tensor D(x) for an MRI sequence
+    using normalized 3D gradient magnitude, prostate capsule boundaries,
+    PET uptake edges, and exclusion organ insulation.
+    """
+    pos = mri_arr[mri_arr > 0]
+    if len(pos) == 0:
+        return np.ones_like(mri_arr, dtype=np.float32)
+    p99 = np.percentile(pos, 99)
+    p01 = np.percentile(pos, 1)
+    norm = np.clip((mri_arr - p01) / max(p99 - p01, 1e-4), 0.0, 1.5)
+    
+    gz, gy, gx = np.gradient(norm)
+    mag = gaussian_filter(np.sqrt(gz**2 + gy**2 + gx**2), sigma=0.8)
+    
+    mod_str = str(modality).upper()
+    if "ADC" in mod_str:
+        p_mid, slope = 0.08, 16.0
+    elif "DWI" in mod_str or "BVAL" in mod_str:
+        p_mid, slope = 0.08, 16.0
+    elif "T1" in mod_str:
+        p_mid, slope = 0.10, 15.0
+    elif "DCE" in mod_str:
+        p_mid, slope = 0.09, 15.0
+    else:
+        p_mid, slope = 0.12, 15.0
+        
+    edge_raw = 1.0 / (1.0 + np.exp(-slope * (mag - p_mid)))
+    edge_zero = 1.0 / (1.0 + np.exp(-slope * (-p_mid)))
+    E = np.clip((edge_raw - edge_zero) / (1.0 - edge_zero), 0.0, 1.0).astype(np.float32)
+    
+    if companion_edges:
+        for ce in companion_edges:
+            if ce is not None:
+                E = np.maximum(E, 0.75 * ce)
+                
+    if pet_arr is not None and np.max(pet_arr) > 0.5:
+        pet_norm = np.clip(pet_arr, 0.0, 20.0) / 20.0
+        gz_p, gy_p, gx_p = np.gradient(pet_norm)
+        mag_p = gaussian_filter(np.sqrt(gz_p**2 + gy_p**2 + gx_p**2), sigma=0.8)
+        edge_p_raw = 1.0 / (1.0 + np.exp(-8.0 * (mag_p - 0.15)))
+        edge_p_zero = 1.0 / (1.0 + np.exp(-8.0 * (-0.15)))
+        edge_pet = np.clip((edge_p_raw - edge_p_zero) / (1.0 - edge_p_zero), 0.0, 1.0).astype(np.float32)
+        E = np.maximum(E, edge_pet)
+        
+    if anat_vol is not None and np.max(anat_vol) > 0:
+        pros_mask = (anat_vol > 0).astype(np.float32)
+        if pros_mask.sum() > 0:
+            gz_a, gy_a, gx_a = np.gradient(pros_mask)
+            mag_a = gaussian_filter(np.sqrt(gz_a**2 + gy_a**2 + gx_a**2), sigma=0.6)
+            edge_capsule = np.clip(mag_a * 2.0, 0.0, 1.0).astype(np.float32)
+            E = np.maximum(E, edge_capsule)
+            
+    E = np.clip(E, 0.0, 1.0).astype(np.float32)
+    D = CHAMPION_EPS_D + (1.0 - CHAMPION_EPS_D) * np.exp(-CHAMPION_GAMMA * E)
+    D = np.clip(D, CHAMPION_EPS_D, 1.0).astype(np.float32)
+    
+    if exclusion_mask is not None:
+        D[exclusion_mask > 0] = 0.0
+        
+    return D
+
 def process_case(case_info, out_base_dir, offline=False):
     pat_id = case_info["patient_id"]
     subj_id = case_info["subject_id"]
@@ -1235,8 +1298,11 @@ def process_case(case_info, out_base_dir, offline=False):
     print("  Mapped CT lesions to organs:", organ_mapping["0"])
     print("  Mapped MR lesions to organs:", organ_mapping["1"])
 
-    # 9. Compute champion diffusivity field
+    # 9. Compute champion diffusivity fields
     diff_arr = compute_champion_diffusivity(ct_arr, pet_arr, exclusion_mask)
+    mri_diff_arr = compute_mri_diffusivity(mri_arr, pet_arr=pet_arr, anat_vol=mri_anatomy, exclusion_mask=exclusion_mask, modality="T2")
+    for s in extra_mri_series:
+        s["diff"] = compute_mri_diffusivity(s["arr"], pet_arr=pet_arr, anat_vol=mri_anatomy, exclusion_mask=exclusion_mask, modality=s["mod"])
     
     # 10. Pre-flip ALL volumes along Y (axis 1) for standard radiological orientation
     print("▶ Pre-flipping all volumes along Y (axis 1) for MedEye3d standard orientation...")
@@ -1248,10 +1314,12 @@ def process_case(case_info, out_base_dir, offline=False):
     max_anatomy = np.flip(max_anatomy, axis=1)
     mri_anatomy = np.flip(mri_anatomy, axis=1)
     diff_arr = np.flip(diff_arr, axis=1)
+    mri_diff_arr = np.flip(mri_diff_arr, axis=1)
     bone_atlas = np.flip(bone_mask, axis=1)
     skellytour = np.flip(skellytour, axis=1)
     for s in extra_mri_series:
         s["arr"] = np.flip(s["arr"], axis=1)
+        s["diff"] = np.flip(s["diff"], axis=1)
     
     # 11. Assemble HDF5 Package
     h5_target = os.path.join(case_dir, "preprocessed_volumes.h5")
@@ -1614,7 +1682,7 @@ def process_case(case_info, out_base_dir, offline=False):
         ds_l1 = g_tfm.create_dataset("PET_Lesions_1.nii.gz", data=lesion_mr_arr, compression="gzip", compression_opts=1)
         ds_l1.attrs["spacing"] = np.array(spacing, dtype=np.float64)
         
-        g_tfm.create_dataset("diffusivity", data=diff_arr, compression="gzip", compression_opts=1)
+        g_tfm.create_dataset("diffusivity", data=mri_diff_arr, compression="gzip", compression_opts=1)
         g_tfm.create_dataset("max_anatomy.nii.gz", data=mri_anatomy, compression="gzip", compression_opts=1)
         
         # Additional MRI Groups (TP 2, TP 3, TP 4, etc.)
@@ -1632,7 +1700,7 @@ def process_case(case_info, out_base_dir, offline=False):
             ds_l_e = g_extra.create_dataset(f"PET_Lesions_{tp_i}.nii.gz", data=lesion_mr_arr, compression="gzip", compression_opts=1)
             ds_l_e.attrs["spacing"] = np.array(spacing, dtype=np.float64)
 
-            g_extra.create_dataset("diffusivity", data=diff_arr, compression="gzip", compression_opts=1)
+            g_extra.create_dataset("diffusivity", data=s["diff"], compression="gzip", compression_opts=1)
             g_extra.create_dataset("max_anatomy.nii.gz", data=mri_anatomy, compression="gzip", compression_opts=1)
             print(f"  Packaged multi-modal MRI TP {tp_i}: {s['mod']} ({s['desc']})")
 
