@@ -5058,20 +5058,27 @@ function create_metadata_window(
     del_r = nr!()
     _confirm_delete_active = Observable(false)
     _confirm_delete_lid = Observable(0)
-    _confirm_vis = map(identity, _confirm_delete_active)       # true when confirming
-    _confirm_invis = map(!, _confirm_delete_active)            # true when NOT confirming
+    # Visibility toggling for delete confirmation is handled via _set_widget_visible! below
     confirm_label = Label(g[del_r, 1:2], text = @lift($(_confirm_delete_active) ? "Delete lesion $($(_confirm_delete_lid))?" : ""),
-        fontsize = 10, color = :red, halign = :left, visible = _confirm_vis)
+        fontsize = 10, color = :red, halign = :left)
     btn_del_yes = Button(g[del_r, 3], label = "Yes, Delete",
-        buttoncolor = RGBf(0.6, 0.15, 0.15), labelcolor = :white, fontsize = 9,
-        visible = _confirm_vis)
+        buttoncolor = RGBf(0.6, 0.15, 0.15), labelcolor = :white, fontsize = 9)
     btn_del_cancel = Button(g[del_r, 4], label = "Cancel",
-        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9,
-        visible = _confirm_vis)
+        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
     btn_delete_lesion = Button(g[del_r, 5], label = "🗑️",
         buttoncolor = RGBf(0.5, 0.15, 0.15), labelcolor = :white, fontsize = 12,
-        width = 30, tellwidth = false,
-        visible = _confirm_invis)
+        width = 30, tellwidth = false)
+    # Button/Label do NOT support `visible` as constructor kwarg — toggle via blockscene.visible
+    _set_widget_visible!(confirm_label, false)
+    _set_widget_visible!(btn_del_yes, false)
+    _set_widget_visible!(btn_del_cancel, false)
+    # btn_delete_lesion starts visible (confirm not active)
+    on(_confirm_delete_active; update=true) do is_confirming
+        _set_widget_visible!(confirm_label, is_confirming)
+        _set_widget_visible!(btn_del_yes, is_confirming)
+        _set_widget_visible!(btn_del_cancel, is_confirming)
+        _set_widget_visible!(btn_delete_lesion, !is_confirming)
+    end
     rowsize!(g, del_r, Fixed(26)); register_fixed_row!(del_r, 26)
 
     on(btn_delete_lesion.clicks) do _
