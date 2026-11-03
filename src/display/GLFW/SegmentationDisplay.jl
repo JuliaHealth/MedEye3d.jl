@@ -693,6 +693,8 @@ on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.EditMeasuremen
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.EditLineMeasurementEvent) = MakieEventHandlers.reactToEditLineMeasurement(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.SetLNValidationModeEvent) = MakieEventHandlers.reactToSetLNValidationMode(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleMRIMultimodalEvent) = MakieEventHandlers.reactToToggleMRIMultimodal(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.DeleteLesionEvent) = MakieEventHandlers.reactToDeleteLesion(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.UndoEvent) = MakieEventHandlers.reactToUndo(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ZoomToFitEvent) = MakieEventHandlers.reactToZoomToFit(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::Any) = begin
     @warn "Unhandled channel event in on_next!: $(typeof(data))"

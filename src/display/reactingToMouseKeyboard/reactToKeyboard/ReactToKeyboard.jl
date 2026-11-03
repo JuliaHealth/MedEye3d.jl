@@ -228,6 +228,11 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
                 ch = _get_event_channel()
                 ch !== nothing && put!(ch, MakieEvents.ZoomToFitEvent(0))
                 return
+            elseif keyInputInfo.action == GLFW.PRESS && is_ctrl_down_ref[]
+                # Ctrl+Z: undo last action (lesion deletion, etc.)
+                ch = _get_event_channel()
+                ch !== nothing && put!(ch, MakieEvents.UndoEvent())
+                return
             end
             scCode = "z"
 
@@ -286,23 +291,19 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             end
             return
 
-        # Y - Toggle MRI Multimodal mode directly on Main Screen (Panels 1–4)
-        # Shift+Y - Toggle MRI Comparison mode (M2 window)
+        # Y - Toggle MRI Multimodal mode: auto-routes to M2 if open, else main window
+        # Shift+Y - Force MRI Multimodal on main window (Panels 1–4), regardless of M2
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_Y)
             if keyInputInfo.action == GLFW.PRESS
                 try
                     if is_shift_down_ref[]
-                        top = parentmodule(@__MODULE__)
-                        if isdefined(top, :LesionMetadataWindow)
-                            lmw_obs = getfield(top.LesionMetadataWindow, :_lmw_observables)
-                            if haskey(lmw_obs, :obs_toggle_mri_compare)
-                                obs = lmw_obs[:obs_toggle_mri_compare]
-                                obs[] = obs[] + 1
-                            end
-                        end
-                    else
+                        # Shift+Y: force main window
                         ch = _get_event_channel()
-                        ch !== nothing && put!(ch, MakieEvents.ToggleMRIMultimodalEvent(true))
+                        ch !== nothing && put!(ch, MakieEvents.ToggleMRIMultimodalEvent(true, :main))
+                    else
+                        # Y: auto-route — M2 if open, else main
+                        ch = _get_event_channel()
+                        ch !== nothing && put!(ch, MakieEvents.ToggleMRIMultimodalEvent(true, :auto))
                     end
                 catch e
                     @warn "[KEY_Y] MRI mode toggle failed: $e"
@@ -483,10 +484,55 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             return
 
         # Del - Toggle erase mode (in paint mode)
+        # Ctrl+Del - Delete current lesion (with undo via Ctrl+Z)
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_DELETE)
             if keyInputInfo.action == GLFW.PRESS
+                if is_ctrl_down_ref[]
+                    # Ctrl+Delete: delete current lesion
+                    ch = _get_event_channel()
+                    if ch !== nothing
+                        try
+                            top = parentmodule(@__MODULE__)
+                            lid = 0
+                            if isdefined(top, :MakieEventHandlers)
+                                lid = top.MakieEventHandlers.current_active_lesion_id[]
+                            end
+                            if lid > 0
+                                put!(ch, MakieEvents.DeleteLesionEvent(lid))
+                            else
+                                @warn "[KEY_CTRL_DELETE] No active lesion to delete"
+                            end
+                        catch e
+                            @warn "[KEY_CTRL_DELETE] Delete lesion failed: $e"
+                        end
+                    end
+                else
+                    ch = _get_event_channel()
+                    ch !== nothing && put!(ch, MakieEvents.EraseModeEvent())
+                end
+            end
+            return
+
+        # Ctrl+Backspace - Also delete current lesion (alternative shortcut)
+        elseif keyInputInfo.scancode == Int32(GLFW.KEY_BACKSPACE)
+            if keyInputInfo.action == GLFW.PRESS && is_ctrl_down_ref[]
                 ch = _get_event_channel()
-                ch !== nothing && put!(ch, MakieEvents.EraseModeEvent())
+                if ch !== nothing
+                    try
+                        top = parentmodule(@__MODULE__)
+                        lid = 0
+                        if isdefined(top, :MakieEventHandlers)
+                            lid = top.MakieEventHandlers.current_active_lesion_id[]
+                        end
+                        if lid > 0
+                            put!(ch, MakieEvents.DeleteLesionEvent(lid))
+                        else
+                            @warn "[KEY_CTRL_BACKSPACE] No active lesion to delete"
+                        end
+                    catch e
+                        @warn "[KEY_CTRL_BACKSPACE] Delete lesion failed: $e"
+                    end
+                end
             end
             return
 

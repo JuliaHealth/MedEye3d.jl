@@ -5054,6 +5054,49 @@ function create_metadata_window(
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     rowsize!(g, nav_r, Fixed(28)); register_fixed_row!(nav_r, 28)
 
+    # Delete lesion button + confirmation row
+    del_r = nr!()
+    _confirm_delete_active = Observable(false)
+    _confirm_delete_lid = Observable(0)
+    _confirm_vis = map(identity, _confirm_delete_active)       # true when confirming
+    _confirm_invis = map(!, _confirm_delete_active)            # true when NOT confirming
+    confirm_label = Label(g[del_r, 1:2], text = @lift($(_confirm_delete_active) ? "Delete lesion $($(_confirm_delete_lid))?" : ""),
+        fontsize = 10, color = :red, halign = :left, visible = _confirm_vis)
+    btn_del_yes = Button(g[del_r, 3], label = "Yes, Delete",
+        buttoncolor = RGBf(0.6, 0.15, 0.15), labelcolor = :white, fontsize = 9,
+        visible = _confirm_vis)
+    btn_del_cancel = Button(g[del_r, 4], label = "Cancel",
+        buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9,
+        visible = _confirm_vis)
+    btn_delete_lesion = Button(g[del_r, 5], label = "🗑️",
+        buttoncolor = RGBf(0.5, 0.15, 0.15), labelcolor = :white, fontsize = 12,
+        width = 30, tellwidth = false,
+        visible = _confirm_invis)
+    rowsize!(g, del_r, Fixed(26)); register_fixed_row!(del_r, 26)
+
+    on(btn_delete_lesion.clicks) do _
+        lid_str = active_lesion_id[]
+        lid_str == "(none)" && return
+        lid_str == "" && return
+        lid = parse_lesion_id(lid_str)
+        lid <= 0 && return
+        _confirm_delete_lid[] = lid
+        _confirm_delete_active[] = true
+    end
+    on(btn_del_cancel.clicks) do _
+        _confirm_delete_active[] = false
+    end
+    on(btn_del_yes.clicks) do _
+        lid = _confirm_delete_lid[]
+        _confirm_delete_active[] = false
+        lid <= 0 && return
+        try
+            put!(channel, MakieEvents.DeleteLesionEvent(lid))
+        catch e
+            @warn "[LMW-DELETE] Failed to send delete event: $e"
+        end
+    end
+
     # Active lesion display kept for callbacks (no visible label — shown in dropdown)
     active_lesion_display = Observable{String}("(none)")
 

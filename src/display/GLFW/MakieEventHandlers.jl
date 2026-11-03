@@ -24,10 +24,13 @@ export _clinical_phase, get_clinical_phase, set_clinical_phase!, _phase_display_
 export reactToEditMode, reactToViewMode, reactToSetTPFirst, reactToSetTPLast, reactToToggleMaskVisibility, reactToShowOnlyPET, reactToShowOnlyCT, reactToToggleSyncScroll, reactToToggleHeatGDTMode, reactToOneShotHeatGDT, reactToZoomToFit
 export mri_compare_mode, mri_compare_tps, mri_compare_plane, get_mri_comparison_tps
 export mri_main_multimodal_mode, reactToToggleMRIMultimodal, sync_mri_mask_across_modalities!
+export reactToDeleteLesion, reactToUndo
 using ...InferenceClient
 using ...LesionAssociation
 using ...TextureManag
 using ...VulkanBackend: VulkanHeatDiffusion
+include("UndoStack.jl")
+using .UndoStack
 # ModernGL removed — Vulkan UBO updates happen in consumer loop via update_ubo!
 # Uniforms module no longer needed — TextureSpec fields are read directly by UBO packer
 using Observables
@@ -822,11 +825,31 @@ end
 """
     reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, stateObjects::Vector{StateDataFields})
 
-Toggles MRI Multimodal mode on the Main Screen (Panels 1–4).
-When enabled, Panels 1–4 load 4 distinct MRI modalities (T2, DWI, ADC, T1/DCE) unpermuted and in sync.
+Toggles MRI Multimodal mode. Target routing:
+- :auto → M2 (panels 6–9) if second window is open, else Main (panels 1–4)
+- :main → always Main (panels 1–4)
+- :m2   → always M2 (panels 6–9), only if M2 is open
 """
 function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, stateObjects::Vector{StateDataFields})
-    if length(stateObjects) < 4; return; end
+    # Determine target panels based on routing
+    target = data.target
+    m2_open = _is_m2_window_active()
+    use_m2 = if target == :m2
+        m2_open
+    elseif target == :main
+        false
+    else  # :auto
+        m2_open
+    end
+    panel_offset = use_m2 ? 5 : 0  # panels 6-9 for M2, 1-4 for main
+
+    if use_m2 && length(stateObjects) < 9
+        @warn "[MRI-MULTIMODAL] M2 panels 6-9 not available (only $(length(stateObjects)) panels)"
+        return
+    elseif !use_m2 && length(stateObjects) < 4
+        return
+    end
+
     mri_main_multimodal_mode[] = !mri_main_multimodal_mode[]
     
     tp_cur = current_tp_index[]
@@ -837,7 +860,7 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
         
         plane_dim = mri_compare_plane[] > 0 ? mri_compare_plane[] : 3
         for slot_idx in 1:min(4, length(mri_tps))
-            p_idx = slot_idx
+            p_idx = slot_idx + panel_offset
             tp_for_panel = mri_tps[slot_idx]
             entry_mri = get_or_load_tp_data(tp_for_panel)
             if entry_mri !== nothing
@@ -848,8 +871,9 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
             end
         end
         
-        base_vox_sz = stateObjects[1].onScrollData.dataToScrollDims.voxelSize
-        for p in 1:4
+        base_vox_sz = stateObjects[1 + panel_offset].onScrollData.dataToScrollDims.voxelSize
+        for i in 1:4
+            p = i + panel_offset
             vol_sz = size(stateObjects[p].onScrollData.dataToScroll[1].dat)
             new_scroll_dims = DataToScrollDims(imageSize=vol_sz, voxelSize=base_vox_sz, dimensionToScroll=plane_dim)
             stateObjects[p].onScrollData.dataToScrollDims = new_scroll_dims
@@ -860,10 +884,10 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
             
             for ts in stateObjects[p].mainForDisplayObjects.listOfTextSpecifications
                 if ts.name == "CT"
-                    ts.isVisible = (p == 2 ? mri_main_multimodal_mode[] : true)
+                    ts.isVisible = (i == 2 ? mri_main_multimodal_mode[] : true)
                     ts.maskContribution = 0.0f0
                 elseif ts.name == "PET" || ts.name == "SPECT"
-                    if p == 2
+                    if i == 2
                         ts.isVisible = !mri_main_multimodal_mode[]
                     end
                     ts.maskContribution = 0.0f0
@@ -877,14 +901,14 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
                 stateObjects[p].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
             end
         end
-        updateQuadVertices!(stateObjects[1], :TopLeft)
-        updateQuadVertices!(stateObjects[2], :TopRight)
-        updateQuadVertices!(stateObjects[3], :BottomLeft)
-        updateQuadVertices!(stateObjects[4], :BottomRight)
+        updateQuadVertices!(stateObjects[1 + panel_offset], :TopLeft)
+        updateQuadVertices!(stateObjects[2 + panel_offset], :TopRight)
+        updateQuadVertices!(stateObjects[3 + panel_offset], :BottomLeft)
+        updateQuadVertices!(stateObjects[4 + panel_offset], :BottomRight)
 
         # Explicitly apply each modality's validated default windowing to its respective quadrant
         for slot_idx in 1:min(4, length(mri_tps))
-            p_idx = slot_idx
+            p_idx = slot_idx + panel_offset
             tp_panel = mri_tps[slot_idx]
             pmod = uppercase(get(tp_modalities, tp_panel, ""))
             win = if pmod in ("T2", "MRI", "MR")
@@ -910,32 +934,35 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
             end
         end
         
-        ref_sl = stateObjects[1].currentDisplayedSlice
+        ref_sl = stateObjects[1 + panel_offset].currentDisplayedSlice
         # Prostate MRI sequences only cover pelvis/prostate slices (Z ~ 41..60).
         # If ref_sl is outside this range (e.g. initial CT slice 142), center on active prostate lesion or prostate centroid (Z ~ 48).
         if ref_sl < 30 || ref_sl > 75
             prostate_z = 48
-            cur_lid = (current_active_lesion_id[] > 0) ? current_active_lesion_id[] : round(Int, stateObjects[1].valueForMasToSet.value)
+            cur_lid = (current_active_lesion_id[] > 0) ? current_active_lesion_id[] : round(Int, stateObjects[1 + panel_offset].valueForMasToSet.value)
             cent = get(lesion_centroids_cache, (0, cur_lid), get(lesion_centroids_cache, cur_lid, nothing))
             if cent !== nothing && length(cent) >= 3 && cent[3] > 0
                 prostate_z = cent[3]
             end
             ref_sl = prostate_z
         end
-        for p in 1:4
+        for i in 1:4
+            p = i + panel_offset
             max_sl = max(1, Int(stateObjects[p].onScrollData.slicesNumber))
             stateObjects[p].currentDisplayedSlice = clamp(ref_sl, 1, max_sl)
-            stateObjects[p].calcDimsStruct.zoom = stateObjects[1].calcDimsStruct.zoom
-            stateObjects[p].calcDimsStruct.panX = stateObjects[1].calcDimsStruct.panX
-            stateObjects[p].calcDimsStruct.panY = stateObjects[1].calcDimsStruct.panY
+            stateObjects[p].calcDimsStruct.zoom = stateObjects[1 + panel_offset].calcDimsStruct.zoom
+            stateObjects[p].calcDimsStruct.panX = stateObjects[1 + panel_offset].calcDimsStruct.panX
+            stateObjects[p].calcDimsStruct.panY = stateObjects[1 + panel_offset].calcDimsStruct.panY
             stateObjects[p].isSliceChanged = true
             _force_texture_upload!(stateObjects, p)
         end
-        println(">> [MRI-MULTIMODAL] Main screen switched to 4 distinct MRI modalities: $(mri_tps)"); flush(stdout)
+        target_str = use_m2 ? "M2 (panels 6-9)" : "Main (panels 1-4)"
+        println(">> [MRI-MULTIMODAL] $target_str switched to 4 distinct MRI modalities: $(mri_tps)"); flush(stdout)
     else
         entry = get_or_load_tp_data(tp_cur)
         if entry !== nothing
-            for p in 1:min(4, length(stateObjects))
+            for i in 1:min(4, length(stateObjects) - panel_offset)
+                p = i + panel_offset
                 _load_tp_from_entry!(stateObjects, entry, p)
                 stateObjects[p].isSliceChanged = true
                 _force_texture_upload!(stateObjects, p)
@@ -943,13 +970,16 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
                     stateObjects[p].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
                 end
             end
-            updateQuadVertices!(stateObjects[1], :TopLeft)
-            updateQuadVertices!(stateObjects[2], :TopRight)
-            updateQuadVertices!(stateObjects[3], :BottomLeft)
-            updateQuadVertices!(stateObjects[4], :BottomRight)
-            _update_quad_layout_for_modality!(stateObjects, tp_cur)
+            updateQuadVertices!(stateObjects[1 + panel_offset], :TopLeft)
+            updateQuadVertices!(stateObjects[2 + panel_offset], :TopRight)
+            updateQuadVertices!(stateObjects[3 + panel_offset], :BottomLeft)
+            updateQuadVertices!(stateObjects[4 + panel_offset], :BottomRight)
+            if !use_m2
+                _update_quad_layout_for_modality!(stateObjects, tp_cur)
+            end
         end
-        println(">> [MRI-MULTIMODAL] Main screen reverted to standard view."); flush(stdout)
+        target_str = use_m2 ? "M2 (panels 6-9)" : "Main (panels 1-4)"
+        println(">> [MRI-MULTIMODAL] $target_str reverted to standard view."); flush(stdout)
     end
     update_quad_corner_info!()
     try
@@ -1839,6 +1869,343 @@ function reactToZoomToFit(data::MakieEvents.ZoomToFitEvent, stateObjects::Vector
         end
     end
     @info "[VIEWPORT] Zoom to Fit applied (window=$(data.window_id))"
+end
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Lesion Deletion + Undo
+# ──────────────────────────────────────────────────────────────────────────────
+
+"""
+    reactToDeleteLesion(data::MakieEvents.DeleteLesionEvent, stateObjects::Vector{StateDataFields})
+
+Deletes a lesion: zeros its mask voxels, removes metadata from lesion_db, clears all caches,
+and pushes an UndoRecord so it can be restored with Ctrl+Z.
+"""
+function reactToDeleteLesion(data::MakieEvents.DeleteLesionEvent, stateObjects::Vector{StateDataFields})
+    lid = data.lesion_id
+    if lid <= 0
+        @warn "[DELETE] Invalid lesion ID: $lid"
+        return
+    end
+    lid_str = string(lid)
+
+    # Access LMW for lesion_db and autosave
+    LMW = _get_lmw()
+    if LMW === nothing
+        @warn "[DELETE] LesionMetadataWindow not available"
+        return
+    end
+
+    local db_ref
+    try
+        db_ref = getfield(LMW, :_active_lesion_db)[]
+    catch
+        @warn "[DELETE] Cannot access _active_lesion_db"
+        return
+    end
+    if db_ref === nothing || !isa(db_ref, Observable)
+        @warn "[DELETE] lesion_db Observable not initialized"
+        return
+    end
+
+    db_dict = db_ref[]
+    if !haskey(db_dict, lid_str)
+        @warn "[DELETE] Lesion $lid not found in lesion_db"
+        return
+    end
+
+    println("[DELETE] Deleting lesion $lid..."); flush(stdout)
+    t_start = time()
+
+    # 1. Snapshot metadata for undo
+    meta_backup = deepcopy(db_dict[lid_str])
+    display_name = get(meta_backup, "_display_name", "Lesion $lid")
+
+    # 2. Snapshot mask voxels from all timepoints
+    mask_backups = Dict{Int, Vector{Tuple{CartesianIndex{3}, Int16}}}()
+    lock(_tp_cache_lock) do
+        for (tp_i, entry) in tp_data_cache
+            coords = findall(==(Int16(lid)), entry.mask_i16)
+            if !isempty(coords)
+                mask_backups[tp_i] = [(c, Int16(lid)) for c in coords]
+            end
+        end
+    end
+
+    # 3. Snapshot organ/segment mappings
+    organ_backup = Dict{Int, String}()
+    seg_backup = Dict{Int, String}()
+    for tp_i in keys(tp_data_cache)
+        if haskey(tp_organ_mapping, tp_i) && haskey(tp_organ_mapping[tp_i], lid)
+            organ_backup[tp_i] = tp_organ_mapping[tp_i][lid]
+        end
+        if haskey(tp_segment_names, tp_i) && haskey(tp_segment_names[tp_i], lid)
+            seg_backup[tp_i] = tp_segment_names[tp_i][lid]
+        end
+    end
+    global_organ_bak = haskey(global_organ_mapping[], lid) ? global_organ_mapping[][lid] : nothing
+
+    # 4. Build undo closure
+    undo_fn = function()
+        _restore_deleted_lesion(lid, meta_backup, mask_backups, organ_backup, seg_backup, global_organ_bak, stateObjects)
+    end
+    UndoStack.push_undo!(UndoStack.UndoRecord(
+        "Delete $display_name", undo_fn, time()))
+
+    # 5. Zero mask voxels across all TPs
+    lock(_tp_cache_lock) do
+        for (tp_i, entry) in tp_data_cache
+            changed = false
+            for idx in findall(==(Int16(lid)), entry.mask_i16)
+                entry.mask_i16[idx] = Int16(0)
+                if eltype(entry.mask) == Int8
+                    entry.mask[idx] = Int8(0)
+                else
+                    entry.mask[idx] = zero(eltype(entry.mask))
+                end
+                changed = true
+            end
+            if changed
+                mark_tp_mask_dirty!(tp_i)
+            end
+        end
+    end
+
+    # 6. Remove from lesion_db
+    new_db = copy(db_dict)
+    delete!(new_db, lid_str)
+    db_ref[] = new_db  # triggers Observable listeners
+
+    # 7. Invalidate all caches referencing this lesion
+    _invalidate_lesion_caches(lid)
+
+    # 8. Remove from match groups
+    try
+        LA = _get_la()
+        if LA !== nothing
+            node_name = get_node_name_for_tp(current_tp_index[])
+            LA.remove_from_match_group!(node_name, lid)
+        end
+    catch e
+        @warn "[DELETE] Failed to remove from match groups: $e"
+    end
+
+    # 9. Invalidate E-PSMA report
+    try
+        p = parentmodule(parentmodule(@__MODULE__))
+        if isdefined(p, :EPSMAStructuredReport)
+            ESR = getfield(p, :EPSMAStructuredReport)
+            ESR.invalidate_report!(current_tp_index[])
+        end
+    catch; end
+
+    # 10. Trigger autosave via LMW
+    try
+        LMW.request_autosave(skip_dictation=true)
+    catch; end
+
+    # 11. Re-upload mask textures for visible panels
+    for p in 1:min(length(stateObjects), 10)
+        try
+            stateObjects[p].isSliceChanged = true
+            _force_texture_upload!(stateObjects, p)
+        catch; end
+    end
+
+    # 12. Navigate to next available lesion
+    remaining = sort(parse.(Int, collect(keys(db_ref[]))))
+    if !isempty(remaining)
+        next_lid = first(remaining)
+        try
+            next_lid_str = string(next_lid)
+            # Update the LMW active_lesion_id Observable
+            lmw_lid_obs = getfield(LMW, :active_lesion_id)
+            lmw_lid_obs[] = next_lid_str
+        catch; end
+    end
+
+    elapsed = round((time() - t_start) * 1000, digits=1)
+    println("[DELETE] ✅ Lesion $lid ($display_name) deleted in $(elapsed)ms. Ctrl+Z to undo."); flush(stdout)
+end
+
+"""
+    _invalidate_lesion_caches(lid::Int)
+
+Clears all caches that might reference the given lesion ID.
+"""
+function _invalidate_lesion_caches(lid::Int)
+    # Clear all mask ID caches (they'll repopulate on next scan)
+    try
+        LMW = _get_lmw()
+        if LMW !== nothing
+            try empty!(getfield(LMW, :_MASK_IDS_CACHE)) catch; end
+            # Remove volume cache entries for this lid
+            try
+                vc = getfield(LMW, :_volume_cache)
+                for key in collect(keys(vc))
+                    _, l = key
+                    l == lid && delete!(vc, key)
+                end
+            catch; end
+            # Remove organ classification cache
+            try
+                oc = getfield(LMW, :_organ_classification_cache)
+                for key in collect(keys(oc))
+                    _, l = key
+                    l == lid && delete!(oc, key)
+                end
+            catch; end
+            # Clear cached lesion IDs
+            try empty!(getfield(LMW, :_cached_lesion_ids)) catch; end
+            # Clear SUV cache
+            try
+                sc = getfield(LMW, :_lesion_suv_cache)
+                for key in collect(keys(sc))
+                    _, l = key
+                    l == lid && delete!(sc, key)
+                end
+            catch; end
+        end
+    catch; end
+
+    # Clear centroids cache
+    for key in collect(keys(lesion_centroids_cache))
+        if key isa Tuple && length(key) >= 2 && last(key) == lid
+            delete!(lesion_centroids_cache, key)
+        elseif key == lid
+            delete!(lesion_centroids_cache, key)
+        end
+    end
+    # Clear bone subsegments cache
+    for key in collect(keys(bone_subsegments_cache))
+        if key isa Tuple && any(x -> x isa Int && x == lid, key)
+            delete!(bone_subsegments_cache, key)
+        end
+    end
+    # Remove from organ/segment mappings
+    for (tp_i, mapping) in tp_organ_mapping
+        delete!(mapping, lid)
+    end
+    for (tp_i, mapping) in tp_segment_names
+        delete!(mapping, lid)
+    end
+    haskey(global_organ_mapping[], lid) && delete!(global_organ_mapping[], lid)
+    # Clear AI backups
+    for key in collect(keys(_ai_mask_backups))
+        _, l = key
+        l == lid && delete!(_ai_mask_backups, key)
+    end
+    for key in collect(keys(_ai_anatomy_backups))
+        _, l = key
+        l == lid && delete!(_ai_anatomy_backups, key)
+    end
+end
+
+"""
+    _restore_deleted_lesion(...)
+
+Undo function: restores a previously deleted lesion's metadata, mask voxels, and mappings.
+"""
+function _restore_deleted_lesion(lid::Int, meta_backup::Dict, mask_backups::Dict,
+                                  organ_backup::Dict, seg_backup::Dict,
+                                  global_organ_bak, stateObjects::Vector{StateDataFields})
+    lid_str = string(lid)
+    println("[UNDO] Restoring lesion $lid..."); flush(stdout)
+
+    LMW = _get_lmw()
+    if LMW === nothing
+        @error "[UNDO] LesionMetadataWindow not available — cannot restore"
+        return
+    end
+
+    local db_ref
+    try
+        db_ref = getfield(LMW, :_active_lesion_db)[]
+    catch
+        @error "[UNDO] Cannot access _active_lesion_db"
+        return
+    end
+
+    # 1. Restore metadata
+    new_db = copy(db_ref[])
+    new_db[lid_str] = meta_backup
+    db_ref[] = new_db
+
+    # 2. Restore mask voxels
+    lock(_tp_cache_lock) do
+        for (tp_i, coords_vals) in mask_backups
+            if haskey(tp_data_cache, tp_i)
+                entry = tp_data_cache[tp_i]
+                for (c, v) in coords_vals
+                    entry.mask_i16[c] = v
+                    if eltype(entry.mask) == Int8
+                        entry.mask[c] = Int8(clamp(v, typemin(Int8), typemax(Int8)))
+                    else
+                        entry.mask[c] = eltype(entry.mask)(v)
+                    end
+                end
+                mark_tp_mask_dirty!(tp_i)
+            end
+        end
+    end
+
+    # 3. Restore organ/segment mappings
+    for (tp_i, name) in organ_backup
+        haskey(tp_organ_mapping, tp_i) || (tp_organ_mapping[tp_i] = Dict{Int,String}())
+        tp_organ_mapping[tp_i][lid] = name
+    end
+    for (tp_i, name) in seg_backup
+        haskey(tp_segment_names, tp_i) || (tp_segment_names[tp_i] = Dict{Int,String}())
+        tp_segment_names[tp_i][lid] = name
+    end
+    if global_organ_bak !== nothing
+        global_organ_mapping[][lid] = global_organ_bak
+    end
+
+    # 4. Invalidate caches (will repopulate on access)
+    _invalidate_lesion_caches(lid)
+
+    # 5. Trigger autosave
+    try
+        LMW.request_autosave(skip_dictation=true)
+    catch; end
+
+    # 6. Re-upload mask textures
+    for p in 1:min(length(stateObjects), 10)
+        try
+            stateObjects[p].isSliceChanged = true
+            _force_texture_upload!(stateObjects, p)
+        catch; end
+    end
+
+    # 7. Navigate to restored lesion
+    try
+        lmw_lid_obs = getfield(LMW, :active_lesion_id)
+        lmw_lid_obs[] = string(lid)
+    catch; end
+
+    # 8. Invalidate E-PSMA report
+    try
+        p_mod = parentmodule(parentmodule(@__MODULE__))
+        if isdefined(p_mod, :EPSMAStructuredReport)
+            ESR = getfield(p_mod, :EPSMAStructuredReport)
+            ESR.invalidate_report!(current_tp_index[])
+        end
+    catch; end
+
+    println("[UNDO] ✅ Lesion $lid restored."); flush(stdout)
+end
+
+"""
+    reactToUndo(data::MakieEvents.UndoEvent, stateObjects::Vector{StateDataFields})
+
+Pops the most recent undoable action from the UndoStack and executes it.
+"""
+function reactToUndo(data::MakieEvents.UndoEvent, stateObjects::Vector{StateDataFields})
+    desc = UndoStack.pop_undo!()
+    if desc === nothing
+        println("[UNDO] Nothing to undo."); flush(stdout)
+    end
 end
 
 function _get_lmw()

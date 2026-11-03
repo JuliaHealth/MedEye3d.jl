@@ -13,7 +13,7 @@ export NextPhaseEvent, PrevPhaseEvent, SetPhaseEvent
 export EditModeEvent, ViewModeEvent, SetTPFirstEvent, SetTPLastEvent
 export NewLesionEvent, EraseModeEvent, ShowOnlyPETEvent, ShowOnlyCTEvent, ToggleAnatomyEvent, ToggleSyncScrollEvent
 export ToggleCrosshairEvent, ToggleSingleMultiLesionEvent, ToggleHeatGDTModeEvent, OneShotHeatGDTEvent
-export ToggleMRIMultimodalEvent
+export ToggleMRIMultimodalEvent, DeleteLesionEvent, UndoEvent
 export HeatGDTStartEvent, HeatGDTTickEvent, HeatGDTStopEvent, HeatGDTPosthocSizeEvent, ToggleMapModeEvent
 export ZoomToFitEvent
 
@@ -31,8 +31,16 @@ end
 
 struct ToggleMRIMultimodalEvent
     is_main_screen :: Bool
+    target :: Symbol  # :auto, :main, :m2
 end
-ToggleMRIMultimodalEvent() = ToggleMRIMultimodalEvent(true)
+ToggleMRIMultimodalEvent() = ToggleMRIMultimodalEvent(true, :auto)
+ToggleMRIMultimodalEvent(is_main::Bool) = ToggleMRIMultimodalEvent(is_main, :auto)
+
+struct DeleteLesionEvent
+    lesion_id::Int
+end
+
+struct UndoEvent end
 
 struct CompareTimePointsEvent
     compare :: Bool
