@@ -1287,6 +1287,43 @@ def process_case(case_info, out_base_dir, offline=False):
                 return m.group(1).lower()
         return "pelvic_lymph_node"
 
+    def find_best_mr_organ_for_lesion(lesion_vol, lid, nrrd_name):
+        pts = np.argwhere(lesion_vol == lid)
+        if len(pts) == 0:
+            return "Prostate"
+        # 1. Direct overlap with mri_anatomy (prostate zones)
+        vox_vals = mri_anatomy[lesion_vol == lid]
+        nz = vox_vals[vox_vals > 0]
+        if len(nz) > 0:
+            vals, counts = np.unique(nz, return_counts=True)
+            best_idx = np.argmax(counts)
+            best_val = vals[best_idx]
+            return prostate_labels.get(str(best_val), "Prostate")
+        
+        # 2. Expanding search around centroid in mri_anatomy
+        cz, cy, cx = np.round(pts.mean(axis=0)).astype(int)
+        for r in [2, 4, 8, 16, 24, 32, 48]:
+            z0, z1 = max(0, cz - r), min(Z, cz + r + 1)
+            y0, y1 = max(0, cy - r), min(Y, cy + r + 1)
+            x0, x1 = max(0, cx - r), min(X, cx + r + 1)
+            sub = mri_anatomy[z0:z1, y0:y1, x0:x1]
+            nz_sub = sub[sub > 0]
+            if len(nz_sub) > 0:
+                vals, counts = np.unique(nz_sub, return_counts=True)
+                best_idx = np.argmax(counts)
+                best_val = vals[best_idx]
+                return prostate_labels.get(str(best_val), "Prostate")
+        
+        # Check NRRD name
+        if nrrd_name:
+            m = re.search(r"NNUNET_OR_TP_(.*)_(\d+)_(CT|MR)", nrrd_name)
+            if m and "unknown" not in m.group(1):
+                raw = m.group(1).lower()
+                if "prostate" in raw or "tz" in raw or "pz" in raw or "cz" in raw:
+                    return "Prostate"
+        # On prostate MRI, all segmented lesions in the prostate FOV belong to the prostate
+        return "Prostate"
+
     organ_mapping = {"0": {}, "1": {}}
     for lid in ct_labels:
         raw_name = ct_nrrd_names.get(lid, "")
@@ -1296,8 +1333,7 @@ def process_case(case_info, out_base_dir, offline=False):
 
     for lid in mr_labels:
         raw_name = mr_nrrd_names.get(lid, "")
-        org = find_best_organ_for_lesion(lesion_mr_arr, lid, raw_name)
-        disp = org.replace("_", " ").title()
+        disp = find_best_mr_organ_for_lesion(lesion_mr_arr, lid, raw_name)
         organ_mapping["1"][str(lid)] = disp
 
     print("  Mapped CT lesions to organs:", organ_mapping["0"])

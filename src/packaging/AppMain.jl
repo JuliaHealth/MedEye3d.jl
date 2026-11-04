@@ -668,23 +668,35 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                         # Match this segmentation node to the correct study by mask filename
                         seg_base = replace(name, ".nii.gz" => "")
                         matched_idx = -1
+                        matched_modality = ""
                         for (si, study) in enumerate(studies_list)
                             mask_base = replace(study[6], ".nii.gz" => "")
                             if seg_base == mask_base
                                 matched_idx = si - 1  # 0-indexed study index
+                                matched_modality = uppercase(string(study[1]))
                                 break
                             end
                         end
                         if matched_idx >= 0
+                            is_mri_tp = matched_modality in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE")
                             segs = node["segments"]
                             if segs isa AbstractVector
                                 dict = get!(MEH.tp_segment_names, matched_idx, Dict{Int, String}())
                                 for (idx, item) in enumerate(segs)
-                                    if item isa AbstractDict
-                                        dict[idx] = get(item, "name", "Segment $idx")
-                                    else
-                                        dict[idx] = string(item)
+                                    s_val = item isa AbstractDict ? get(item, "name", "Segment $idx") : string(item)
+                                    p_lid = LesionMetadataWindow.parse_lesion_id(s_val)
+                                    target_lid = p_lid !== nothing ? p_lid : idx
+                                    # On MRI timepoints, sanitize stale CT lymph node names
+                                    if is_mri_tp
+                                        parts = split(s_val, ": "; limit=2)
+                                        if length(parts) == 2
+                                            organ_part = strip(parts[2])
+                                            if LesionAssociation.is_lymph_node_structure(organ_part)
+                                                s_val = "Lesion $target_lid: Prostate"
+                                            end
+                                        end
                                     end
+                                    dict[target_lid] = s_val
                                 end
                             end
                         end
@@ -861,7 +873,8 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                                         old_pri = LesionAssociation.classify_tissue_priority(existing)
                                         should_write = new_pri <= old_pri  # lower = better priority
                                     catch
-                                        should_write = (tp_idx == 0)  # fallback: baseline wins
+                                        # Don't overwrite prostate with lymph node even on baseline
+                                        should_write = (tp_idx == 0) && !LesionAssociation.is_prostate_structure(existing)
                                     end
                                 end
                                 if should_write
@@ -898,6 +911,8 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     end
 
     # Sanitize stale lymph-node misclassifications for prostate lesions in persisted annotations
+    # Also detect bimodal prostate cases (any study has MRI modality)
+    has_mri_modality = any(s -> uppercase(string(s[1])) in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE"), studies)
     for (k, entry) in persisted_annotations
         if entry isa AbstractDict && !startswith(k, "_")
             lid = LesionMetadataWindow.parse_lesion_id(k)
@@ -907,7 +922,11 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 curr_org = get(organ_mapping, lid, get(MEH.global_organ_mapping[], lid, ""))
                 ba = get(entry, "BaseAnatomy", "")
                 disp = get(entry, "_display_name", "")
-                if LesionAssociation.is_prostate_structure(curr_org) && (LesionAssociation.is_lymph_node_structure(ba) || occursin("Inguinal", disp) || occursin("Inguinal", ba))
+                is_stale_ln = LesionAssociation.is_lymph_node_structure(ba) || occursin("Inguinal", disp) || occursin("Inguinal", ba)
+                # Sanitize if: (a) organ_mapping says prostate but BaseAnatomy says lymph node, OR
+                #              (b) this is a bimodal MRI case and BaseAnatomy says lymph node (organ_mapping may be empty/corrupted)
+                should_sanitize = is_stale_ln && (LesionAssociation.is_prostate_structure(curr_org) || (has_mri_modality && (isempty(curr_org) || curr_org == "Unknown")))
+                if should_sanitize
                     delete!(entry, "BaseAnatomy")
                     delete!(entry, "BaseAnatomySide")
                     delete!(entry, "ClinicalLesionName")
@@ -915,9 +934,13 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                     delete!(entry, "Anatomic Location")
                     delete!(entry, "Anatomical Sublocation")
                     delete!(entry, "Anatomical Details")
-                    clean_org = replace(curr_org, "_" => " ")
+                    clean_org = if !isempty(curr_org) && curr_org != "Unknown"
+                        replace(curr_org, "_" => " ")
+                    else
+                        "Prostate"
+                    end
                     entry["_display_name"] = "$lid: $clean_org"
-                    println("[AppMain] Sanitized stale lymph-node annotation for prostate lesion $lid (was '$ba' -> '$curr_org')")
+                    println("[AppMain] Sanitized stale lymph-node annotation for prostate lesion $lid (was '$ba' -> '$clean_org')")
                 end
             end
         end

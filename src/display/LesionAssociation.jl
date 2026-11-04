@@ -619,7 +619,8 @@ and seminal vesicles.
 """
 function is_prostate_structure(name::String)::Bool
     isempty(name) && return false
-    ln = lowercase(name)
+    ln = lowercase(strip(name))
+    ln in ("pz", "tz", "cz", "afs", "ur", "pg", "sv_l", "sv_r", "svl", "svr") && return true
     occursin("prostate", ln) && return true
     occursin("prostat", ln) && return true
     occursin("peripheral zone", ln) && return true
@@ -830,13 +831,18 @@ Given atlas label counts, pick the best organ using clinical priority rules:
 function pick_best_organ(counts::Dict{Int,Int}, ts_names::Dict{Int,String})::String
     isempty(counts) && return ""
     
-    # Rule 1: Prostate-wins rule for primary tumor inside prostate
+    # Rule 1: Prostate-wins rule for primary tumor inside prostate (pick zone with largest count)
+    prostate_cands = Tuple{String, Int}[]
     for (label_id, cnt) in counts
         cnt <= 0 && continue
         name = get(ts_names, label_id, "")
         if is_prostate_structure(name)
-            return name
+            push!(prostate_cands, (name, cnt))
         end
+    end
+    if !isempty(prostate_cands)
+        sort!(prostate_cands, by = x -> x[2], rev = true)
+        return prostate_cands[1][1]
     end
     
     # Rule 2: Lymph node rule: ANY overlap in a lymph node station takes priority
@@ -1024,7 +1030,7 @@ function classify_organ_to_lesion_type(organ_name::String)::String
     is_muscle = any(kw -> occursin(kw, org), muscle_kws)
     is_bone = !is_muscle && any(kw -> occursin(kw, org), bone_kws) && !any(v -> occursin(v, org), vascular_exclusions)
 
-    if occursin("prostate", org)
+    if is_prostate_structure(organ_name)
         return "Prostate"
     elseif is_lymph_node_structure(organ_name)
         return "Lymph Node Meta"

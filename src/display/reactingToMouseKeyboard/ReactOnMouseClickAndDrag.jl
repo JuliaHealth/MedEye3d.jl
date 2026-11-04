@@ -2141,6 +2141,18 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                             catch
                                 ""
                             end
+                            # On MRI timepoints, sanitize stale lymph node names from CT preprocessing
+                            panel_mod_up = uppercase(get(MEH.tp_modalities, panel_tp, "PET"))
+                            is_mri_panel = panel_mod_up in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE") || (MEH.mri_main_multimodal_mode[] && panel_tp > 0)
+                            if is_mri_panel && !isempty(organ) && (occursin("Inguinal", organ) || occursin("Superficial", organ) || occursin("Lymph", organ))
+                                # Try per-TP organ mapping (already sanitized)
+                                tp_org = get(get(MEH.tp_organ_mapping, panel_tp, Dict{Int,String}()), lid, "")
+                                if !isempty(tp_org) && !occursin("Inguinal", tp_org)
+                                    organ = tp_org
+                                else
+                                    organ = "Prostate"
+                                end
+                            end
                             label = isempty(organ) ? "Lesion $lid" : "$organ (L$lid)"
                             
                             # On MRI: also show the anatomy zone from max_anatomy under this voxel (only when anatomy is active)

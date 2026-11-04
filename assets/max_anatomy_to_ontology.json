@@ -3931,5 +3931,269 @@
     "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
     "lesion_type": "Lymph Node Meta",
     "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "prostate gland": {
+    "detailed": "prostate gland (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Prostate Gland"
+  },
+  "prostate_gland": {
+    "detailed": "prostate gland (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Prostate Gland"
+  },
+  "prostate gland (uberon)": {
+    "detailed": "prostate gland (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Prostate Gland"
+  },
+  "pz": {
+    "detailed": "peripheral zone of prostate (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Prostate Peripheral Zone (PZ)"
+  },
+  "peripheral_zone": {
+    "detailed": "peripheral zone of prostate (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Prostate Peripheral Zone (PZ)"
+  },
+  "peripheral zone of prostate": {
+    "detailed": "peripheral zone of prostate (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Prostate Peripheral Zone (PZ)"
+  },
+  "tz": {
+    "detailed": "transition zone of prostate (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Prostate Transition Zone (TZ)"
+  },
+  "transition_zone": {
+    "detailed": "transition zone of prostate (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Prostate Transition Zone (TZ)"
+  },
+  "transition zone of prostate": {
+    "detailed": "transition zone of prostate (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Prostate Transition Zone (TZ)"
+  },
+  "cz": {
+    "detailed": "central zone of prostate (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Prostate Central Zone (CZ)"
+  },
+  "central_zone": {
+    "detailed": "central zone of prostate (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Prostate Central Zone (CZ)"
+  },
+  "central zone of prostate": {
+    "detailed": "central zone of prostate (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Prostate Central Zone (CZ)"
+  },
+  "afs": {
+    "detailed": "anterior fibromuscular stroma of prostate (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Anterior Fibromuscular Stroma (AFS)"
+  },
+  "anterior_fibromuscular_stroma": {
+    "detailed": "anterior fibromuscular stroma of prostate (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Anterior Fibromuscular Stroma (AFS)"
+  },
+  "anterior fibromuscular stroma of prostate": {
+    "detailed": "anterior fibromuscular stroma of prostate (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Anterior Fibromuscular Stroma (AFS)"
+  },
+  "ur": {
+    "detailed": "prostatic urethra (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Prostatic Urethra (UR)"
+  },
+  "prostatic urethra": {
+    "detailed": "prostatic urethra (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Prostatic Urethra (UR)"
+  },
+  "prostatic_urethra": {
+    "detailed": "prostatic urethra (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Prostatic Urethra (UR)"
+  },
+  "pg": {
+    "detailed": "periurethral gland of prostate (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Periurethral Glands (PG)"
+  },
+  "periurethral_glands": {
+    "detailed": "periurethral gland of prostate (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Periurethral Glands (PG)"
+  },
+  "periurethral gland": {
+    "detailed": "periurethral gland of prostate (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Periurethral Glands (PG)"
+  },
+  "periurethral_gland": {
+    "detailed": "periurethral gland of prostate (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Periurethral Glands (PG)"
+  },
+  "periurethral tissue": {
+    "detailed": "periurethral tissue (UBERON)",
+    "generalized": "prostate gland (UBERON)",
+    "side": "",
+    "anatomic_location": "Prostate Gland",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Periurethral Glands (PG)"
+  },
+  "sv_l": {
+    "detailed": "seminal vesicle (UBERON)",
+    "generalized": "seminal vesicle (UBERON)",
+    "side": "Left",
+    "anatomic_location": "Seminal Vesicle",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Seminal Vesicle Left (SV_L)"
+  },
+  "svl": {
+    "detailed": "seminal vesicle (UBERON)",
+    "generalized": "seminal vesicle (UBERON)",
+    "side": "Left",
+    "anatomic_location": "Seminal Vesicle",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Seminal Vesicle Left (SV_L)"
+  },
+  "seminal vesicle left": {
+    "detailed": "seminal vesicle (UBERON)",
+    "generalized": "seminal vesicle (UBERON)",
+    "side": "Left",
+    "anatomic_location": "Seminal Vesicle",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Seminal Vesicle Left (SV_L)"
+  },
+  "seminal_vesicle_left": {
+    "detailed": "seminal vesicle (UBERON)",
+    "generalized": "seminal vesicle (UBERON)",
+    "side": "Left",
+    "anatomic_location": "Seminal Vesicle",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Seminal Vesicle Left (SV_L)"
+  },
+  "sv_r": {
+    "detailed": "seminal vesicle (UBERON)",
+    "generalized": "seminal vesicle (UBERON)",
+    "side": "Right",
+    "anatomic_location": "Seminal Vesicle",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Seminal Vesicle Right (SV_R)"
+  },
+  "svr": {
+    "detailed": "seminal vesicle (UBERON)",
+    "generalized": "seminal vesicle (UBERON)",
+    "side": "Right",
+    "anatomic_location": "Seminal Vesicle",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Seminal Vesicle Right (SV_R)"
+  },
+  "seminal vesicle right": {
+    "detailed": "seminal vesicle (UBERON)",
+    "generalized": "seminal vesicle (UBERON)",
+    "side": "Right",
+    "anatomic_location": "Seminal Vesicle",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Seminal Vesicle Right (SV_R)"
+  },
+  "seminal_vesicle_right": {
+    "detailed": "seminal vesicle (UBERON)",
+    "generalized": "seminal vesicle (UBERON)",
+    "side": "Right",
+    "anatomic_location": "Seminal Vesicle",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Seminal Vesicle Right (SV_R)"
+  },
+  "seminal vesicle": {
+    "detailed": "seminal vesicle (UBERON)",
+    "generalized": "seminal vesicle (UBERON)",
+    "side": "",
+    "anatomic_location": "Seminal Vesicle",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Seminal Vesicle"
+  },
+  "seminal_vesicle": {
+    "detailed": "seminal vesicle (UBERON)",
+    "generalized": "seminal vesicle (UBERON)",
+    "side": "",
+    "anatomic_location": "Seminal Vesicle",
+    "lesion_type": "Prostate",
+    "anatomical_sublocation": "Seminal Vesicle"
   }
 }

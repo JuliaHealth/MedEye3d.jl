@@ -1445,7 +1445,12 @@ const TS_TO_ANATOMY = Dict{String, String}(
     "colon" => "Colon", "duodenum" => "Duodenum", "small_bowel" => "Small Bowel",
     "lung_upper_lobe" => "Lung Upper Lobe", "lung_lower_lobe" => "Lung Lower Lobe",
     "lung_middle_lobe" => "Lung Middle Lobe",
-    "brain" => "Brain", "prostate" => "Prostate Gland",
+    "brain" => "Brain", "prostate" => "Prostate Gland", "prostate_gland" => "Prostate Gland",
+    "peripheral_zone" => "Peripheral Zone", "transition_zone" => "Transition Zone",
+    "central_zone" => "Central Zone", "anterior_fibromuscular_stroma" => "Anterior Fibromuscular Stroma",
+    "urethra" => "Prostatic Urethra", "periurethral_glands" => "Periurethral Glands",
+    "seminal_vesicle" => "Seminal Vesicle", "seminal_vesicle_left" => "Seminal Vesicle Left",
+    "seminal_vesicle_right" => "Seminal Vesicle Right",
     "urinary_bladder" => "Urinary Bladder", "thyroid_gland" => "Thyroid Gland",
     "adrenal_gland" => "Adrenal Gland",
     # Vasculature
@@ -8378,20 +8383,48 @@ function create_metadata_window(
         
         # Auto-name from anatomy atlas at the CURRENT cursor position
         display_name = "New Lesion"
+        entry = nothing
+        is_mri_new = false
         try
-            # Use per-TP anatomy atlas and label map for MRI TPs (prostate zones),
-            # falling back to global body atlas for CT/PET TPs
+            # In MRI quad view or compare mode, resolve active MRI timepoint
             tp_idx_new = _MEH.current_tp_index[]
-            tp_entry_new = lock(_MEH._tp_cache_lock) do
-                get(_MEH.tp_data_cache, tp_idx_new, nothing)
+            if _MEH.mri_main_multimodal_mode[]
+                p_hov = _MEH.current_hovered_panel[]
+                if p_hov in (1, 2, 3, 4) && length(_MEH.mri_compare_tps) >= p_hov
+                    tp_idx_new = _MEH.mri_compare_tps[p_hov]
+                elseif !isempty(_MEH.mri_compare_tps)
+                    tp_idx_new = _MEH.mri_compare_tps[1]
+                end
+            end
+            
+            is_mri_new = uppercase(get(_MEH.tp_modalities, tp_idx_new, "")) in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE") || _MEH.mri_main_multimodal_mode[]
+            
+            # Load TP data to ensure native anatomy is cached
+            tp_entry_new = if isdefined(_MEH, :get_or_load_tp_data)
+                _MEH.get_or_load_tp_data(tp_idx_new)
+            else
+                lock(_MEH._tp_cache_lock) do
+                    get(_MEH.tp_data_cache, tp_idx_new, nothing)
+                end
             end
             atlas = if tp_entry_new !== nothing && tp_entry_new.anatomy !== nothing
                 tp_entry_new.anatomy
             else
                 _MEH.global_ts_atlas[]
             end
-            ts_names = get(_MEH.anatomy_labels_cache, tp_idx_new, _MEH.global_ts_names[])
-            println("[NEW LESION] tp=$tp_idx_new atlas=$(atlas !== nothing ? "$(size(atlas))" : "null"), ts_names=$(ts_names !== nothing ? "$(length(ts_names)) entries" : "null")")
+            
+            prostate_default_labels = Dict{Int,String}(
+                1 => "Peripheral Zone (PZ)", 2 => "Transition Zone (TZ)", 3 => "Central Zone (CZ)",
+                4 => "Anterior Fibromuscular Stroma (AFS)", 5 => "Urethra (UR)", 6 => "Periurethral Glands (PG)",
+                7 => "Seminal Vesicle Left (SV_L)", 8 => "Seminal Vesicle Right (SV_R)"
+            )
+            ts_names = if is_mri_new
+                cached_p = get(_MEH.anatomy_labels_cache, tp_idx_new, Dict{Int,String}())
+                !isempty(cached_p) ? cached_p : prostate_default_labels
+            else
+                get(_MEH.anatomy_labels_cache, tp_idx_new, _MEH.global_ts_names[])
+            end
+            println("[NEW LESION] tp=$tp_idx_new (is_mri=$is_mri_new) atlas=$(atlas !== nothing ? "$(size(atlas))" : "null"), ts_names=$(ts_names !== nothing ? "$(length(ts_names)) entries" : "null")")
             if atlas !== nothing && ts_names !== nothing
                 # Use the actual viewer cursor position (tracked in ReactOnMouseClickAndDrag)
                 vpos = _MEH.current_viewer_position[]
@@ -8406,9 +8439,8 @@ function create_metadata_window(
                 
                 # If exact voxel is unlabeled, try expanding sphere search with tissue priority
                 if anat_val <= 0
-                    # Collect all candidate labels within radius and pick best by tissue priority
                     candidates = Dict{Int,Int}()
-                    for radius in [1, 2, 4, 8, 16]
+                    for radius in [1, 2, 4, 8, 16, 24, 32]
                         for dz in -radius:radius, dy in -radius:radius, dx in -radius:radius
                             dx*dx + dy*dy + dz*dz > radius*radius && continue
                             nx = clamp(cx + dx, 1, size(atlas, 1))
@@ -8420,11 +8452,9 @@ function create_metadata_window(
                             end
                         end
                         if !isempty(candidates)
-                            # Pick best using tissue priority (bone > organ > lymph > vessel > muscle)
                             LA = parentmodule(@__MODULE__).LesionAssociation
                             best_organ = LA.pick_best_organ(candidates, ts_names)
                             if !isempty(best_organ)
-                                # Find the label ID for the best organ
                                 for (k, v) in ts_names
                                     if v == best_organ && haskey(candidates, k)
                                         anat_val = k
@@ -8437,19 +8467,25 @@ function create_metadata_window(
                     end
                 end
                 
+                organ_name = ""
                 if anat_val > 0
                     organ_name = get(ts_names, anat_val, "")
-                    if !isempty(organ_name)
-                        # Store in global_organ_mapping so metadata autofill works
-                        _MEH.global_organ_mapping[][new_id] = organ_name
-                        @info "[NEW LESION] Mapped lesion $new_id → '$organ_name' from atlas"
-                        entry = lookup_anatomy(organ_name)
-                        if entry !== nothing
-                            detailed = get(entry, "detailed", "")
-                            display_name = !isempty(detailed) ? detailed : organ_name
-                        else
-                            display_name = organ_name
-                        end
+                elseif is_mri_new
+                    organ_name = "Prostate"
+                end
+                
+                if !isempty(organ_name)
+                    _MEH.global_organ_mapping[][new_id] = organ_name
+                    get!(_MEH.tp_organ_mapping, tp_idx_new, Dict{Int,String}())[new_id] = organ_name
+                    @info "[NEW LESION] Mapped lesion $new_id → '$organ_name' from atlas (is_mri=$is_mri_new)"
+                    entry = lookup_anatomy(organ_name)
+                    if entry !== nothing
+                        detailed = get(entry, "detailed", "")
+                        clean_disp = replace(detailed, r"\s*\(UBERON\)" => "")
+                        clean_disp = titlecase(replace(clean_disp, "_" => " "))
+                        display_name = !isempty(clean_disp) ? clean_disp : organ_name
+                    else
+                        display_name = organ_name
                     end
                 end
             end
@@ -8459,10 +8495,22 @@ function create_metadata_window(
         
         new_name = "$(new_id): $(display_name)"
         db = copy(lesion_db[])
-        db[string(new_id)] = Dict{String, Any}(
+        new_annot = Dict{String, Any}(
             "_display_name" => new_name,
             "SegmentationOrigin" => "MANUAL"
         )
+        if entry !== nothing
+            new_annot["BaseAnatomy"] = get(entry, "detailed", "")
+            new_annot["BaseAnatomySide"] = get(entry, "side", "")
+            new_annot["LesionType"] = get(entry, "lesion_type", is_mri_new ? "Prostate" : "Organ Meta")
+            new_annot["Anatomic Location"] = get(entry, "anatomic_location", is_mri_new ? "Prostate Gland" : "")
+            new_annot["Anatomical Sublocation"] = get(entry, "anatomical_sublocation", "")
+        elseif is_mri_new
+            new_annot["BaseAnatomy"] = "prostate gland (UBERON)"
+            new_annot["LesionType"] = "Prostate"
+            new_annot["Anatomic Location"] = "Prostate Gland"
+        end
+        db[string(new_id)] = new_annot
         lesion_db[] = db
         opts = copy(lesion_ids[]); push!(opts, new_name)
         is_syncing_selection[] = true
@@ -9526,8 +9574,20 @@ function create_metadata_window(
                 orig_rtog_name = raw_organ
             end
         elseif lid > 0
+            # Resolve active timepoint (handles MRI quad view / compare mode)
+            tp_idx_cur = _MEH.current_tp_index[]
+            if _MEH.mri_main_multimodal_mode[]
+                p_hov = _MEH.current_hovered_panel[]
+                if p_hov in (1, 2, 3, 4) && length(_MEH.mri_compare_tps) >= p_hov
+                    tp_idx_cur = _MEH.mri_compare_tps[p_hov]
+                elseif !isempty(_MEH.mri_compare_tps)
+                    tp_idx_cur = _MEH.mri_compare_tps[1]
+                end
+            end
+            is_mri_cur = uppercase(get(_MEH.tp_modalities, tp_idx_cur, "")) in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE") || _MEH.mri_main_multimodal_mode[]
+
             # Check per-TP organ mapping first (avoids last-writer-wins from global flat map)
-            tp_organs = get(_MEH.tp_organ_mapping, _MEH.current_tp_index[], Dict{Int,String}())
+            tp_organs = get(_MEH.tp_organ_mapping, tp_idx_cur, Dict{Int,String}())
             raw_organ = get(tp_organs, lid, "")
             if LA_z !== nothing && cz_san > 0
                 raw_organ, _ = LA_z.sanitize_anatomy_by_z(raw_organ, "", cz_san, _MEH.volume_z_size[])
@@ -9540,40 +9600,53 @@ function create_metadata_window(
                     raw_organ, _ = LA_z.sanitize_anatomy_by_z(raw_organ, "", cz_san, _MEH.volume_z_size[])
                 end
             end
+
+            # On MRI cases / timepoints, clear any stale lymph node / Inguinal assignment since MRI anatomy has no LNs
+            if is_mri_cur && !_saved_user_edited && (
+                (LA_z !== nothing && (LA_z.is_lymph_node_structure(raw_organ) || LA_z.is_lymph_node_structure(t_base))) ||
+                occursin("Inguinal", t_base) || occursin("Inguinal", raw_organ) || occursin("Inguinal", cur_id_str)
+            )
+                raw_organ = ""
+                t_base = ""
+                t_side = ""
+                delete!(data, "BaseAnatomy")
+                delete!(data, "BaseAnatomySide")
+            end
+
             # Fallback: if organ mapping is empty or "Unknown", or if auto-detected as lymph node (recheck for prostate/bone priority), run volume-based scan
             needs_atlas_scan = (isempty(raw_organ) || raw_organ == "Unknown") ||
-                               (!_saved_user_edited && LA_z !== nothing && (LA_z.is_lymph_node_structure(raw_organ) || LA_z.is_lymph_node_structure(t_base)))
-            if needs_atlas_scan && (_MEH.global_ts_atlas[] !== nothing || haskey(_MEH.tp_data_cache, _MEH.current_tp_index[]))
+                               (!_saved_user_edited && LA_z !== nothing && (LA_z.is_lymph_node_structure(raw_organ) || LA_z.is_lymph_node_structure(t_base))) ||
+                               (is_mri_cur && !_saved_user_edited && !LA_z.is_prostate_structure(raw_organ))
+            if needs_atlas_scan && (_MEH.global_ts_atlas[] !== nothing || haskey(_MEH.tp_data_cache, tp_idx_cur) || isdefined(_MEH, :get_or_load_tp_data))
                 try
-                    tp_idx = _MEH.current_tp_index[]
-                    # In MRI quad view or compare mode, use active quadrant/panel TP if available
-                    if _MEH.mri_main_multimodal_mode[]
-                        p_hov = _MEH.current_hovered_panel[]
-                        if p_hov in (1, 2, 3, 4) && length(_MEH.mri_compare_tps) >= p_hov
-                            tp_idx = _MEH.mri_compare_tps[p_hov]
-                        elseif !isempty(_MEH.mri_compare_tps)
-                            tp_idx = _MEH.mri_compare_tps[1]
+                    tp_idx = tp_idx_cur
+                    # Load TP data to ensure native anatomy is cached
+                    tp_entry = if isdefined(_MEH, :get_or_load_tp_data)
+                        _MEH.get_or_load_tp_data(tp_idx)
+                    else
+                        lock(_MEH._tp_cache_lock) do
+                            get(_MEH.tp_data_cache, tp_idx, nothing)
                         end
                     end
-                    # Use per-TP anatomy atlas and label map (prostate zones for MRI, body for CT/PET)
-                    tp_entry_fb = lock(_MEH._tp_cache_lock) do
-                        get(_MEH.tp_data_cache, tp_idx, nothing)
-                    end
-                    atlas = if tp_entry_fb !== nothing && tp_entry_fb.anatomy !== nothing
-                        tp_entry_fb.anatomy
+                    atlas = if tp_entry !== nothing && tp_entry.anatomy !== nothing
+                        tp_entry.anatomy
                     else
                         _MEH.global_ts_atlas[]
                     end
-                    ts_nm = get(_MEH.anatomy_labels_cache, tp_idx, _MEH.global_ts_names[])
+                    prostate_default_labels = Dict{Int,String}(
+                        1 => "Peripheral Zone (PZ)", 2 => "Transition Zone (TZ)", 3 => "Central Zone (CZ)",
+                        4 => "Anterior Fibromuscular Stroma (AFS)", 5 => "Urethra (UR)", 6 => "Periurethral Glands (PG)",
+                        7 => "Seminal Vesicle Left (SV_L)", 8 => "Seminal Vesicle Right (SV_R)"
+                    )
+                    ts_nm = if is_mri_cur
+                        labels = get(_MEH.anatomy_labels_cache, tp_idx, Dict{Int,String}())
+                        !isempty(labels) ? labels : prostate_default_labels
+                    else
+                        get(_MEH.anatomy_labels_cache, tp_idx, _MEH.global_ts_names[])
+                    end
                     
                     # Try volume-based scan from tp_data_cache mask
-                    mask_vol = lock(_MEH._tp_cache_lock) do
-                        haskey(_MEH.tp_data_cache, tp_idx) ? _MEH.tp_data_cache[tp_idx].mask : nothing
-                    end
-                    if mask_vol === nothing && isdefined(_MEH, :get_or_load_tp_data)
-                        tp_entry = _MEH.get_or_load_tp_data(tp_idx)
-                        mask_vol = tp_entry !== nothing ? tp_entry.mask : nothing
-                    end
+                    mask_vol = tp_entry !== nothing ? tp_entry.mask : nothing
                     if mask_vol !== nothing && LA_z !== nothing
                         best = LA_z.classify_and_pick_best_organ(mask_vol, atlas, ts_nm, lid)
                         if cz_san > 0
@@ -9585,7 +9658,7 @@ function create_metadata_window(
                             organ_map = _MEH.global_organ_mapping[]
                             organ_map[lid] = raw_organ
                             _MEH.global_organ_mapping[] = organ_map
-                            if _MEH.PERF_LOG[]; println("Auto-named lesion $lid via volume scan (bone priority): '$raw_organ'"); flush(stdout); end
+                            if _MEH.PERF_LOG[]; println("Auto-named lesion $lid via volume scan (prostate/bone priority): '$raw_organ'"); flush(stdout); end
                         end
                     end
                     
@@ -9632,6 +9705,12 @@ function create_metadata_window(
                                 if _MEH.PERF_LOG[]; println("Auto-named lesion $lid from centroid sphere at [$cx,$cy,$cz]: '$raw_organ'"); flush(stdout); end
                             end
                         end
+                    end
+                    # If still empty on MRI, safely default to Prostate
+                    if is_mri_cur && (isempty(raw_organ) || raw_organ == "Unknown")
+                        raw_organ = "Prostate"
+                        get!(_MEH.tp_organ_mapping, tp_idx, Dict{Int,String}())[lid] = raw_organ
+                        _MEH.global_organ_mapping[][lid] = raw_organ
                     end
                 catch e
                     @warn "Anatomy atlas lookup for lesion $lid failed: $e"
@@ -9976,14 +10055,18 @@ function create_metadata_window(
             end
         end
         
-        # ── Auto-rename generic lesion entries when anatomy is determined ──
+        # ── Auto-rename generic or stale lesion entries when anatomy is determined ──
         is_generic_name = occursin("New Lesion", cur_id_str) || 
                           occursin("Lesion $lid", cur_id_str) || 
                           occursin("Lesion $(lid):", cur_id_str) || 
                           strip(cur_id_str) == string(lid) || 
                           startswith(lowercase(strip(cur_id_str)), "lesion")
-        if lid > 0 && is_generic_name && !isempty(t_base)
-            new_display_name = "$lid: $t_base"
+        is_stale_ln_on_mri = (is_mri_cur || (LA_z !== nothing && LA_z.is_prostate_structure(raw_organ))) &&
+                             (occursin("Inguinal", cur_id_str) || occursin("Lymph", cur_id_str) || occursin("Node", cur_id_str))
+        if lid > 0 && (is_generic_name || is_stale_ln_on_mri) && !isempty(t_base)
+            clean_disp = replace(t_base, r"\s*\(UBERON\)" => "")
+            clean_disp = titlecase(replace(clean_disp, "_" => " "))
+            new_display_name = "$lid: $clean_disp"
             if new_display_name != cur_id_str
                 # Rename in dropdown list
                 opts = copy(lesion_ids[])
