@@ -269,6 +269,8 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
         MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
     elseif mode == "Compare Curr/Next TP"
         MakieEventHandlers.compare_mode[] = true
+        # Reset MRI multimodal mode — Compare replaces M2 panel data
+        MakieEventHandlers.mri_main_multimodal_mode[] = false
         # M2 window shows a QUAD VIEW of the next (compare) TP
         for i in 6:10
             stateInstances[i].displayMode = QuadImage
@@ -316,6 +318,8 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
         end
         ReactToScroll._pet_blend_ref_w2[] = default_blend
     elseif mode == "Flicker"
+        # Reset MRI multimodal mode — Flicker replaces M2 panel data
+        MakieEventHandlers.mri_main_multimodal_mode[] = false
         for i in 6:10
             stateInstances[i].displayMode = QuadImage
         end
@@ -329,6 +333,9 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
         MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
         
     elseif mode == "Overlay"
+        # Reset MRI multimodal mode — Overlay mode replaces M2 panel data
+        # with CT+PET overlay, which conflicts with MRI quad data/permutations
+        MakieEventHandlers.mri_main_multimodal_mode[] = false
         for i in 6:10
             stateInstances[i].displayMode = QuadImage
         end

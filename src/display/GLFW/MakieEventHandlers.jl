@@ -2793,27 +2793,31 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                 end
             elseif textSpec.name == "Mask" || textSpec.name == "segmentation" || (textSpec.isMultiDiscreteMask && textSpec.name != "Anatomy" && textSpec.name != "Bone_Overlay")
                 T_mm = eltype(textSpec.minAndMaxValue)
-                if is_right && !is_single_lesion_mode[] && compare_all_lesions_mode[]
-                    # Interactive mapping mode: display ALL lesions on right TP,
-                    # but linked lesions get smaller alpha, unlinked lesions get normal opacity
+                is_in_compare = compare_mode[] || mri_compare_mode[]
+                if is_right && is_in_compare
+                    # RIGHT panels in compare mode: ALWAYS show ALL lesions with
+                    # differential opacity — linked lesions get lower alpha,
+                    # unlinked lesions get higher alpha for visual distinction.
                     textSpec.minAndMaxValue = T_mm.([1, 10000])
                     textSpec.allowedIDs = Float32.(panel_all_ids)
                     textSpec.colorMask = RGBA(mapping_alpha_linked[], mapping_alpha_unlinked[], 1.0f0, 1.0f0)
                 elseif is_right
+                    # Right panel but NOT in compare mode (e.g. quad view)
                     textSpec.colorMask = RGBA(0.0f0, 0.0f0, 0.0f0, 1.0f0)
-                    if is_single_lesion_mode[]
-                        if !isempty(panel_all_ids)
-                            textSpec.minAndMaxValue = T_mm.([minimum(panel_all_ids), maximum(panel_all_ids)])
-                            textSpec.allowedIDs = Float32.(panel_all_ids)
-                        else
-                            textSpec.minAndMaxValue = T_mm.([0, 0])
-                            textSpec.allowedIDs = Float32[-1.0f0]
-                        end
+                    textSpec.minAndMaxValue = T_mm.([1, 10000])
+                    textSpec.allowedIDs = Float32[]
+                elseif is_in_compare
+                    # LEFT panels in compare mode: show ONLY the active lesion
+                    textSpec.colorMask = RGBA(0.0f0, 0.0f0, 0.0f0, 1.0f0)
+                    if target_id > 0
+                        textSpec.minAndMaxValue = T_mm.([target_id, target_id])
+                        textSpec.allowedIDs = Float32[Float32(target_id)]
                     else
-                        textSpec.minAndMaxValue = T_mm.([1, 10000])
-                        textSpec.allowedIDs = Float32[]
+                        textSpec.minAndMaxValue = T_mm.([0, 0])
+                        textSpec.allowedIDs = Float32[-1.0f0]
                     end
                 else
+                    # Normal (non-compare) mode
                     textSpec.colorMask = RGBA(0.0f0, 0.0f0, 0.0f0, 1.0f0)
                     if is_single_lesion_mode[]
                         if target_id > 0
