@@ -5991,7 +5991,7 @@ function create_metadata_window(
     
     # Awareness banner: multi-parametric MRI & PET/CT same timepoint reminder
     map_banner_r = nr!()
-    Label(g[map_banner_r, 1:4], "💡 MRI modalities (T2/ADC/DWI/T1) share mapping; PET+CT share mapping.",
+    Label(g[map_banner_r, 1:4], "[Info] MRI modalities (T2/ADC/DWI/T1) share mapping; PET+CT share mapping.",
         fontsize=9, color=SUBTXT, halign=:left)
     rowsize!(g, map_banner_r, Fixed(18)); register_fixed_row!(map_banner_r, 18)
 
