@@ -257,7 +257,7 @@ const HEAT_TICK_MIN_INTERVAL_S = 0.015                 # 15ms minimum interval b
 # Display theta ramp: theta_display = max(real_theta, RAMP_START * exp(-RAMP_RATE * elapsed_seconds))
 # This makes the lesion appear to grow smoothly from a small dot to the full segmentation
 const HEAT_DISPLAY_RAMP_START = 0.5f0                  # Start display threshold (only show very hot center)
-const HEAT_DISPLAY_RAMP_RATE  = Ref{Float32}(5.0f0)                  # Exponential decay rate (larger = faster catch-up)
+const HEAT_DISPLAY_RAMP_RATE  = Ref{Float32}(12.0f0)                 # Exponential decay rate (larger = faster catch-up, was 5.0)
 # ── Final Commit Threshold ──
 # When the user releases the mouse, the GPU heat tensor is thresholded at this value
 # to produce discrete integer labels in seg_vol.  Refreshed at each mouse-release
@@ -6564,10 +6564,10 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
         set_ai_status!("[Heat-GDT GPU] Growing from ($cx,$cy,$cz)...")
         println("[Heat-GDT START] seed_only! SUCCESS — GPU diffusion active"); flush(stdout)
         
-        # Run 1 initial step immediately so a short click creates a very small area
+        # Run initial steps immediately so even a very short click produces a visible area
         theta_val = heatgdt_theta[]
-        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 1; theta=theta_val, copy_box_to_cpu=false)
-        _vk_heat_total_steps[] += 1
+        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 10; theta=theta_val, copy_box_to_cpu=false)
+        _vk_heat_total_steps[] += 10
         
         # ── Display theta ramp: at t=0, start with high theta so only hot center shows ──
         display_theta = Float32(max(theta_val, HEAT_DISPLAY_RAMP_START))  # At t=0, exp(0)=1 so display_theta = RAMP_START = 0.5
@@ -6677,8 +6677,8 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
     end
     
     try
-        # ── Run a smaller batch of diffusion steps on GPU to prevent blocking UI thread ──
-        steps_per_tick = 5
+        # ── Run diffusion steps on GPU — larger batches for faster growth ──
+        steps_per_tick = 15  # Was 5; increased for faster lesion expansion per frame
         
         theta_val = heatgdt_theta[]
         
@@ -6793,7 +6793,12 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
     elapsed = time() - _vk_heat_start_time[]
     effective_elapsed = max(0.0, elapsed - 0.2) # 200ms reaction time compensation
     
-    commit_theta = Float32(max(heatgdt_theta[], HEAT_DISPLAY_RAMP_START * exp(-HEAT_DISPLAY_RAMP_RATE[] * effective_elapsed)))
+    # Use the base heatgdt_theta for commit — NOT the display ramp.
+    # The display ramp (HEAT_DISPLAY_RAMP_START * exp(-rate * t)) is for progressive visual reveal only.
+    # Previously, short clicks committed with a very high threshold (0.3-0.5) resulting in only ~7 voxels.
+    # Now we always commit at the user-configured theta (default 0.001), so quick clicks still produce
+    # a reasonably sized lesion from whatever diffusion steps ran during the hold.
+    commit_theta = Float32(heatgdt_theta[])
     last_display_theta = HEAT_GDT_LAST_DISPLAY_THETA[]
     total_steps = _vk_heat_total_steps[]
     

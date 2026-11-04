@@ -8322,7 +8322,7 @@ function create_metadata_window(
 
 
     # ── Segmentation Mini Manager (compact) ────────────────────────────────
-    sec_seg = begin_section!("Segmentation & AI"; default_open=false)
+    sec_seg = begin_section!("Segmentation & AI"; default_open=true)
     
     # Mode indicator
     mode_r = nr!()
@@ -8599,9 +8599,9 @@ function create_metadata_window(
     
     seg_r3c = nr!()
     Label(g[seg_r3c, 1], "Speed:", halign=:right, fontsize=10, color=LBL_FG)
-    init_ramp_speed = Float32(get(display_cfg, "heatgdt_ramp_speed", 5.0))
+    init_ramp_speed = Float32(get(display_cfg, "heatgdt_ramp_speed", 12.0))
     _MEH.HEAT_DISPLAY_RAMP_RATE[] = init_ramp_speed
-    slider_heatgdt_ramp = Slider(g[seg_r3c, 2:4], range = 0.1:0.1:5.0, startvalue = init_ramp_speed)
+    slider_heatgdt_ramp = Slider(g[seg_r3c, 2:4], range = 1.0:0.5:25.0, startvalue = init_ramp_speed)
     rowsize!(g, seg_r3c, Fixed(30)); register_fixed_row!(seg_r3c, 30)
 
     on(slider_heatgdt_theta.value) do val
