@@ -4195,5 +4195,333 @@
     "anatomic_location": "Seminal Vesicle",
     "lesion_type": "Prostate",
     "anatomical_sublocation": "Seminal Vesicle"
+  },
+  "vertebrae_t6": {
+    "detailed": "vertebrae t6",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "vertebrae_c6": {
+    "detailed": "vertebrae c6",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "coracobrachialis": {
+    "detailed": "coracobrachialis",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "pectoralis_minor": {
+    "detailed": "pectoralis minor",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "vertebrae_t11": {
+    "detailed": "vertebrae t11",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "vertebrae_t3": {
+    "detailed": "vertebrae t3",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "vertebrae_c7": {
+    "detailed": "vertebrae c7",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "vertebrae_t1": {
+    "detailed": "vertebrae t1",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "vertebrae_t8": {
+    "detailed": "vertebrae t8",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "Thoracic_Prepericardial_Right": {
+    "detailed": "Thoracic Prepericardial Right Lymph Node",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "vertebrae_c1": {
+    "detailed": "vertebrae c1",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "triceps_brachii": {
+    "detailed": "triceps brachii",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "vertebrae_c4": {
+    "detailed": "vertebrae c4",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "vertebrae_c2": {
+    "detailed": "vertebrae c2",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "vertebrae_t10": {
+    "detailed": "vertebrae t10",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "Thoracic_Mammary_Right": {
+    "detailed": "Thoracic Mammary Right Lymph Node",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "Thoracic_Station_3P_Retrotracheal_Right": {
+    "detailed": "Thoracic Station 3P Retrotracheal Right Lymph Node",
+    "generalized": "",
+    "side": "Right",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "vertebrae_c3": {
+    "detailed": "vertebrae c3",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "deltoid": {
+    "detailed": "deltoid",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "vertebrae_l5": {
+    "detailed": "vertebrae l5",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "supraspinatus": {
+    "detailed": "supraspinatus",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "Thoracic_Station_3P_Retrotracheal_Left": {
+    "detailed": "Thoracic Station 3P Retrotracheal Left Lymph Node",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "vertebrae_t9": {
+    "detailed": "vertebrae t9",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "vertebrae_s1": {
+    "detailed": "vertebrae s1",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "vertebrae_t4": {
+    "detailed": "vertebrae t4",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "vertebrae_l4": {
+    "detailed": "vertebrae l4",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "vertebrae_t2": {
+    "detailed": "vertebrae t2",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "coracobrachial": {
+    "detailed": "coracobrachial",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "vertebrae_c5": {
+    "detailed": "vertebrae c5",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "infraspinatus": {
+    "detailed": "infraspinatus",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "subscapularis": {
+    "detailed": "subscapularis",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Appendicular Skeleton"
+  },
+  "Thoracic_Prepericardial_Left": {
+    "detailed": "Thoracic Prepericardial Left Lymph Node",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "vertebrae_l2": {
+    "detailed": "vertebrae l2",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "vertebrae_t7": {
+    "detailed": "vertebrae t7",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "vertebrae_t12": {
+    "detailed": "vertebrae t12",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "pharynx": {
+    "detailed": "pharynx",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "Thoracic_Mammary_Left": {
+    "detailed": "Thoracic Mammary Left Lymph Node",
+    "generalized": "",
+    "side": "Left",
+    "anatomic_location": "Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)",
+    "lesion_type": "Lymph Node Meta",
+    "anatomical_sublocation": "Anterior Mediastinum"
+  },
+  "vertebrae_l1": {
+    "detailed": "vertebrae l1",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "teres_major": {
+    "detailed": "teres major",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "N/A (General Organ)"
+  },
+  "vertebrae_t5": {
+    "detailed": "vertebrae t5",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
+  },
+  "vertebrae_l3": {
+    "detailed": "vertebrae l3",
+    "generalized": "",
+    "side": "",
+    "anatomic_location": "Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Axial Skeleton"
   }
 }
