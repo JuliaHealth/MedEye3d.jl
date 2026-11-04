@@ -607,7 +607,7 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
 
         # Up arrow - previous lesion (Ctrl+Up = previous unreviewed)
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_UP)
-            if keyInputInfo.action == GLFW.PRESS
+            if keyInputInfo.action in (GLFW.PRESS, GLFW.REPEAT)
                 ch = _get_event_channel()
                 ch !== nothing && put!(ch, MakieEvents.PrevLesionEvent())
             end
@@ -615,7 +615,7 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
 
         # Down arrow - next lesion (Ctrl+Down = next unreviewed)
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_DOWN)
-            if keyInputInfo.action == GLFW.PRESS
+            if keyInputInfo.action in (GLFW.PRESS, GLFW.REPEAT)
                 ch = _get_event_channel()
                 ch !== nothing && put!(ch, MakieEvents.NextLesionEvent())
             end

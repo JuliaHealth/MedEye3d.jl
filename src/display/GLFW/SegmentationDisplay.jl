@@ -160,43 +160,48 @@ end
 
 # switch_gl_context! removed — Vulkan doesn't use GL context switching
 function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String, tp_index::Int; load_data::Bool = true)
-    if _current_m2_mode[] == mode && !load_data
-        return
-    end
+    is_resize_only = (_current_m2_mode[] == mode && !load_data)
     _current_m2_mode[] = mode
     
     # Sync GUI M2 mode dropdown without triggering feedback loop
-    try
-        LMW = MakieEventHandlers._get_lmw()
-        if LMW !== nothing
-            obs_dict = getfield(LMW, :_lmw_observables)
-            if haskey(obs_dict, :menu_m2_mode)
-                menu = obs_dict[:menu_m2_mode]
-                idx = findfirst(==(mode), menu.options[])
-                if idx !== nothing && menu.i_selected[] != idx
-                    sync_ref = get(obs_dict, :is_syncing_m2_from_backend, nothing)
-                    if sync_ref !== nothing; sync_ref[] = true; end
-                    try
-                        menu.i_selected[] = idx
-                    finally
-                        if sync_ref !== nothing; sync_ref[] = false; end
+    if !is_resize_only
+        try
+            LMW = MakieEventHandlers._get_lmw()
+            if LMW !== nothing
+                obs_dict = getfield(LMW, :_lmw_observables)
+                if haskey(obs_dict, :menu_m2_mode)
+                    menu = obs_dict[:menu_m2_mode]
+                    idx = findfirst(==(mode), menu.options[])
+                    if idx !== nothing && menu.i_selected[] != idx
+                        sync_ref = get(obs_dict, :is_syncing_m2_from_backend, nothing)
+                        if sync_ref !== nothing; sync_ref[] = true; end
+                        try
+                            menu.i_selected[] = idx
+                        finally
+                            if sync_ref !== nothing; sync_ref[] = false; end
+                        end
                     end
                 end
+                _notify_makie_scene(obs_dict)
             end
-            _notify_makie_scene(obs_dict)
-        end
-    catch; end
+        catch; end
+    end
     
-    # Always sync aspect ratio data from main window panels BEFORE vertex calculation.
+    # Always sync aspect ratio data BEFORE vertex calculation.
     # This ensures correct proportions on window resize/maximize (load_data=false).
     for i in 6:min(10, length(stateInstances))
-        target_ref = i - 5
-        if target_ref > 1 && stateInstances[target_ref].currentDisplayedSlice <= 0
-            target_ref = 1
+        st = stateInstances[i]
+        if !isempty(st.onScrollData.dataToScroll) && st.onScrollData.dataToScrollDims.imageSize[1] > 0
+            st.calcDimsStruct = StructsManag.getHeightToWidthRatio(st.calcDimsStruct, st.onScrollData.dataToScrollDims)
+        else
+            target_ref = i - 5
+            if target_ref > 1 && stateInstances[target_ref].currentDisplayedSlice <= 0
+                target_ref = 1
+            end
+            st.calcDimsStruct.imageTextureWidth = stateInstances[target_ref].calcDimsStruct.imageTextureWidth
+            st.calcDimsStruct.imageTextureHeight = stateInstances[target_ref].calcDimsStruct.imageTextureHeight
+            st.calcDimsStruct.heightToWithRatio = stateInstances[target_ref].calcDimsStruct.heightToWithRatio
         end
-        stateInstances[i].calcDimsStruct.imageTextureWidth = stateInstances[target_ref].calcDimsStruct.imageTextureWidth
-        stateInstances[i].calcDimsStruct.imageTextureHeight = stateInstances[target_ref].calcDimsStruct.imageTextureHeight
-        stateInstances[i].calcDimsStruct.heightToWithRatio = stateInstances[target_ref].calcDimsStruct.heightToWithRatio
     end
     
     if mode == "Pure PET (Current TP)"
@@ -399,6 +404,29 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
             end
         end
         ReactToScroll._pet_blend_ref_w2[] = default_blend
+    elseif mode == "MRI Comparison"
+        MakieEventHandlers.mri_compare_mode[] = true
+        for i in 6:10
+            stateInstances[i].displayMode = QuadImage
+        end
+        if load_data
+            mri_tps = MakieEventHandlers.get_mri_comparison_tps(tp_index)
+            empty!(MakieEventHandlers.mri_compare_tps)
+            append!(MakieEventHandlers.mri_compare_tps, mri_tps)
+            for slot_idx in 1:min(4, length(mri_tps))
+                p_idx = slot_idx + 5
+                tp_p = mri_tps[slot_idx]
+                entry_mri = MakieEventHandlers.get_or_load_tp_data(tp_p)
+                if entry_mri !== nothing
+                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_mri, p_idx; force_unpermuted=true, tp_override=tp_p)
+                end
+            end
+        end
+        MakieEventHandlers.updateQuadVertices!(stateInstances[6], :TopLeft)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[7], :TopRight)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
+        MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
     else # "Quad View" or "Current TP (Quad View)"
         for i in 6:10
             stateInstances[i].displayMode = QuadImage
@@ -457,18 +485,21 @@ end
 
 function reactToResizeWindow(data::ResizeWindowEvent, stateObjects::Vector{StateDataFields})
     if data.width > 0 && data.height > 0
-        range_to_update = data.window_id == 2 ? (6:length(stateObjects)) : (1:min(5, length(stateObjects)))
+        range_to_update = data.window_id == 2 ? (6:min(10, length(stateObjects))) : (1:min(5, length(stateObjects)))
         for idx in range_to_update
             state = stateObjects[idx]
             state.calcDimsStruct.windowWidth = Int64(data.width)
             state.calcDimsStruct.windowHeight = Int64(data.height)
-            state.calcDimsStruct.avWindWidtForMain = Int32(round(data.width * state.calcDimsStruct.fractionOfMainIm))
+            frac = (data.window_id == 2) ? 1.0f0 : state.calcDimsStruct.fractionOfMainIm
+            state.calcDimsStruct.fractionOfMainIm = frac
+            state.calcDimsStruct.avWindWidtForMain = Int32(round(data.width * frac))
             state.calcDimsStruct.avWindHeightForMain = Int32(data.height)
             state.calcDimsStruct.avMainImRatio = Float32(data.height / max(1, state.calcDimsStruct.avWindWidtForMain))
             
-            if data.window_id == 1
+            pos = state.calcDimsStruct.imagePos
+            if pos > 0
                 try
-                    state.calcDimsStruct = StructsManag.getMainVerticies(state.calcDimsStruct, state.displayMode, state.calcDimsStruct.imagePos)
+                    state.calcDimsStruct = StructsManag.getMainVerticies(state.calcDimsStruct, state.displayMode, pos)
                 catch e
                     @warn "Error updating quad vertices on window resize: $e"
                 end

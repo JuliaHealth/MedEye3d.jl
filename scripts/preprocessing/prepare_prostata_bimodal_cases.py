@@ -611,9 +611,14 @@ def compute_champion_diffusivity(ct_arr, pet_arr, exclusion_mask):
     mag_pet = np.sqrt(gz_pet**2 + gy_pet**2 + gx_pet**2)
     mag_pet = gaussian_filter(mag_pet, sigma=0.8)
     
-    # Sigmoidal edge probability
-    edge_ct = 1.0 / (1.0 + np.exp(-3.0 * (mag_ct - 0.5)))
-    edge_pet = 1.0 / (1.0 + np.exp(-4.0 * (mag_pet - 0.4)))
+    # Sigmoidal edge probability with zero-baseline normalization
+    edge_ct_raw = 1.0 / (1.0 + np.exp(-4.0 * (mag_ct - 0.25)))
+    edge_ct_zero = 1.0 / (1.0 + np.exp(-4.0 * (-0.25)))
+    edge_ct = np.clip((edge_ct_raw - edge_ct_zero) / (1.0 - edge_ct_zero), 0.0, 1.0).astype(np.float32)
+
+    edge_pet_raw = 1.0 / (1.0 + np.exp(-6.0 * (mag_pet - 0.20)))
+    edge_pet_zero = 1.0 / (1.0 + np.exp(-6.0 * (-0.20)))
+    edge_pet = np.clip((edge_pet_raw - edge_pet_zero) / (1.0 - edge_pet_zero), 0.0, 1.0).astype(np.float32)
     E = np.maximum(edge_ct, edge_pet).astype(np.float32)
     
     # Compute diffusivity: D = eps_D + (1 - eps_D) * exp(-gamma * E)

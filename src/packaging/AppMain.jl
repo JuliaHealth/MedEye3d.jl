@@ -897,6 +897,32 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         end
     end
 
+    # Sanitize stale lymph-node misclassifications for prostate lesions in persisted annotations
+    for (k, entry) in persisted_annotations
+        if entry isa AbstractDict && !startswith(k, "_")
+            lid = LesionMetadataWindow.parse_lesion_id(k)
+            lid === nothing && continue
+            user_ed = get(entry, "_user_edited_anatomy", false)
+            if user_ed === false || user_ed == "false"
+                curr_org = get(organ_mapping, lid, get(MEH.global_organ_mapping[], lid, ""))
+                ba = get(entry, "BaseAnatomy", "")
+                disp = get(entry, "_display_name", "")
+                if LesionAssociation.is_prostate_structure(curr_org) && (LesionAssociation.is_lymph_node_structure(ba) || occursin("Inguinal", disp) || occursin("Inguinal", ba))
+                    delete!(entry, "BaseAnatomy")
+                    delete!(entry, "BaseAnatomySide")
+                    delete!(entry, "ClinicalLesionName")
+                    delete!(entry, "OriginalName")
+                    delete!(entry, "Anatomic Location")
+                    delete!(entry, "Anatomical Sublocation")
+                    delete!(entry, "Anatomical Details")
+                    clean_org = replace(curr_org, "_" => " ")
+                    entry["_display_name"] = "$lid: $clean_org"
+                    println("[AppMain] Sanitized stale lymph-node annotation for prostate lesion $lid (was '$ba' -> '$curr_org')")
+                end
+            end
+        end
+    end
+
     if haskey(h5_init, "ATLAS/skellytour")
         skelly_atlas = read(h5_init["ATLAS/skellytour"])
     end

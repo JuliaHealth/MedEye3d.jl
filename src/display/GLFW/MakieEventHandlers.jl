@@ -6467,6 +6467,12 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
             @info "[Heat-GDT Quad] Switching diffusivity to panel $p_act (TP=$target_tp)"
             reload_heatgdt_diffusivity_for_tp!(target_tp)
         end
+    else
+        cur_tp = current_tp_index[]
+        if cur_tp >= 0 && InferenceClient._heatgdt_diffusivity_tp[] != cur_tp
+            @info "[Heat-GDT] Switching diffusivity to current TP=$cur_tp"
+            reload_heatgdt_diffusivity_for_tp!(cur_tp)
+        end
     end
     
     heat_state = _vk_heat_state[]

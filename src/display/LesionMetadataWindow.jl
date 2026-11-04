@@ -5894,6 +5894,13 @@ function create_metadata_window(
         if event.action == Makie.Keyboard.release && event.key == Makie.Keyboard.space
             btn_next_unreviewed.clicks[] = btn_next_unreviewed.clicks[] + 1
             return Consume(true)
+        elseif (event.action == Makie.Keyboard.press || event.action == Makie.Keyboard.repeat) && (event.key == Makie.Keyboard.up || event.key == Makie.Keyboard.down)
+            if event.key == Makie.Keyboard.up
+                obs_prev_lesion[] = obs_prev_lesion[] + 1
+            else
+                obs_next_lesion[] = obs_next_lesion[] + 1
+            end
+            return Consume(true)
         elseif (event.action == Makie.Keyboard.press || event.action == Makie.Keyboard.release) && event.key == Makie.Keyboard.m
             if event.action == Makie.Keyboard.press
                 put!(channel, MakieEvents.ToggleSingleMultiLesionEvent())
@@ -9533,10 +9540,21 @@ function create_metadata_window(
                     raw_organ, _ = LA_z.sanitize_anatomy_by_z(raw_organ, "", cz_san, _MEH.volume_z_size[])
                 end
             end
-            # Fallback: if organ mapping is empty or "Unknown", try volume-based scan
-            if (isempty(raw_organ) || raw_organ == "Unknown") && _MEH.global_ts_atlas[] !== nothing
+            # Fallback: if organ mapping is empty or "Unknown", or if auto-detected as lymph node (recheck for prostate/bone priority), run volume-based scan
+            needs_atlas_scan = (isempty(raw_organ) || raw_organ == "Unknown") ||
+                               (!_saved_user_edited && LA_z !== nothing && (LA_z.is_lymph_node_structure(raw_organ) || LA_z.is_lymph_node_structure(t_base)))
+            if needs_atlas_scan && (_MEH.global_ts_atlas[] !== nothing || haskey(_MEH.tp_data_cache, _MEH.current_tp_index[]))
                 try
                     tp_idx = _MEH.current_tp_index[]
+                    # In MRI quad view or compare mode, use active quadrant/panel TP if available
+                    if _MEH.mri_main_multimodal_mode[]
+                        p_hov = _MEH.current_hovered_panel[]
+                        if p_hov in (1, 2, 3, 4) && length(_MEH.mri_compare_tps) >= p_hov
+                            tp_idx = _MEH.mri_compare_tps[p_hov]
+                        elseif !isempty(_MEH.mri_compare_tps)
+                            tp_idx = _MEH.mri_compare_tps[1]
+                        end
+                    end
                     # Use per-TP anatomy atlas and label map (prostate zones for MRI, body for CT/PET)
                     tp_entry_fb = lock(_MEH._tp_cache_lock) do
                         get(_MEH.tp_data_cache, tp_idx, nothing)
@@ -9804,6 +9822,14 @@ function create_metadata_window(
             end
         end
 
+        # If t_base was previously set to a lymph node but raw_organ is actually a prostate structure, override!
+        if !_saved_user_edited && LA_z !== nothing && !isempty(raw_organ) && LA_z.is_prostate_structure(raw_organ) && LA_z.is_lymph_node_structure(t_base)
+            t_base = ""
+            t_side = ""
+            delete!(data, "BaseAnatomy")
+            delete!(data, "BaseAnatomySide")
+        end
+
         # Auto-detect BaseAnatomy from max_anatomy JSON mapping if not saved
         if isempty(t_base) && anat_entry !== nothing
             t_base = get(anat_entry, "detailed", "")
@@ -9821,10 +9847,12 @@ function create_metadata_window(
             if _MEH.PERF_LOG[]; println("Auto-detected BaseAnatomy for lesion $lid: '$t_base' (side='$t_side') via keyword fallback from '$raw_organ'"); flush(stdout); end
         end
         
-        # ── Override BaseAnatomy with formatted clinical station name for LN ──
+        # ── Override BaseAnatomy with formatted clinical station name for LN / Prostate ──
         # Skip if user manually edited anatomy — respect their choice
         LA_ba = _MEH._get_la()
-        if !_saved_user_edited && LA_ba !== nothing && !isempty(raw_organ) && LA_ba.is_lymph_node_structure(raw_organ)
+        if !_saved_user_edited && LA_ba !== nothing && !isempty(raw_organ) && LA_ba.is_prostate_structure(raw_organ)
+            t_type = "Prostate"
+        elseif !_saved_user_edited && LA_ba !== nothing && !isempty(raw_organ) && LA_ba.is_lymph_node_structure(raw_organ)
             formatted_ba = LA_ba.format_clinical_station_name(raw_organ)
             if !isempty(formatted_ba)
                 t_base = formatted_ba
@@ -10434,6 +10462,9 @@ function create_metadata_window(
             organ_map = _MEH.global_organ_mapping[]
             delete!(organ_map, lid)
             _MEH.global_organ_mapping[] = organ_map
+            for seg_dict in values(_MEH.tp_segment_names)
+                delete!(seg_dict, lid)
+            end
             
             # Reset user-edited flag so fresh atlas detection takes effect
             _user_edited_anatomy[] = false
@@ -11639,18 +11670,21 @@ function create_metadata_window(
         if cur_lid !== nothing && cur_lid > 0 && db_val isa AbstractDict && !isempty(db_val)
             opts = copy(lesion_ids[])
             changed = false
-            valid_keys = Set(keys(db_val))
-            len_before = length(opts)
-            filter!(opt -> begin
-                opt == "(none)" && return true
-                olid = parse_lesion_id(opt)
-                olid === nothing ? true : string(olid) in valid_keys
-            end, opts)
-            if isempty(opts)
-                opts = ["(none)"]
-            end
-            if length(opts) != len_before
-                changed = true
+            is_ln_mode = isdefined(_MEH, :lymph_node_validation_mode) && _MEH.lymph_node_validation_mode[]
+            if !is_ln_mode
+                valid_keys = Set(keys(db_val))
+                len_before = length(opts)
+                filter!(opt -> begin
+                    opt == "(none)" && return true
+                    olid = parse_lesion_id(opt)
+                    olid === nothing ? true : string(olid) in valid_keys
+                end, opts)
+                if isempty(opts)
+                    opts = ["(none)"]
+                end
+                if length(opts) != len_before
+                    changed = true
+                end
             end
             for (opt_i, opt) in enumerate(opts)
                 opt_lid = parse_lesion_id(opt)
@@ -11871,15 +11905,19 @@ function create_metadata_window(
 
     subscribe!(_lesion_nav_subject |> debounce_time(100), lambda(
         on_next = (_) -> begin
-            delta = _lesion_nav_accum[]
-            _lesion_nav_accum[] = 0
-            if delta != 0
-                opts = lesion_ids[]
-                isempty(opts) && return
-                idx = findfirst(==(active_lesion_id[]), opts)
-                idx = idx === nothing ? 1 : idx
-                new_idx = mod1(idx + delta, length(opts))
-                active_lesion_id[] = opts[new_idx]
+            try
+                delta = _lesion_nav_accum[]
+                _lesion_nav_accum[] = 0
+                if delta != 0
+                    opts = lesion_ids[]
+                    isempty(opts) && return
+                    idx = findfirst(==(active_lesion_id[]), opts)
+                    idx = idx === nothing ? 1 : idx
+                    new_idx = mod1(idx + delta, length(opts))
+                    active_lesion_id[] = opts[new_idx]
+                end
+            catch e
+                @warn "[LESION-NAV] Error in debounced lesion nav: $e"
             end
         end
     ))

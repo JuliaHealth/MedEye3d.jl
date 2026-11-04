@@ -610,6 +610,36 @@ function is_lymph_node_structure(name::String)::Bool
 end
 
 """
+    is_prostate_structure(name::String)::Bool
+
+Determine whether a structure name belongs to the prostate gland or its zones.
+Includes prostate, peripheral zone (pz), transition zone (tz), central zone (cz),
+anterior fibromuscular stroma (afs), urethra (ur), periurethral glands (pg),
+and seminal vesicles.
+"""
+function is_prostate_structure(name::String)::Bool
+    isempty(name) && return false
+    ln = lowercase(name)
+    occursin("prostate", ln) && return true
+    occursin("prostat", ln) && return true
+    occursin("peripheral zone", ln) && return true
+    occursin("(pz)", ln) && return true
+    occursin("transition zone", ln) && return true
+    occursin("(tz)", ln) && return true
+    occursin("central zone", ln) && return true
+    occursin("(cz)", ln) && return true
+    occursin("anterior fibromuscular stroma", ln) && return true
+    occursin("(afs)", ln) && return true
+    occursin("periurethral", ln) && return true
+    occursin("(pg)", ln) && return true
+    occursin("urethra", ln) && return true
+    occursin("(ur)", ln) && return true
+    occursin("seminal vesicle", ln) && return true
+    occursin("(sv_", ln) && return true
+    return false
+end
+
+"""
     is_pelvic_lymph_node(name::String)::Bool
 
 Determine whether a lymph node station is a regional pelvic lymph node (miN1).
@@ -686,8 +716,8 @@ Lower number = higher priority for lesion naming.
 function classify_tissue_priority(name::String)::Int
     ln = lowercase(name)
     
-    # 1. Prostate gland primary site
-    occursin("prostate", ln) && return 1
+    # 1. Prostate gland primary site & prostate zones
+    is_prostate_structure(name) && return 1
     
     # 2. Lymph node stations (takes priority over organs, vessels, and muscles)
     is_lymph_node_structure(name) && return 2
@@ -804,7 +834,7 @@ function pick_best_organ(counts::Dict{Int,Int}, ts_names::Dict{Int,String})::Str
     for (label_id, cnt) in counts
         cnt <= 0 && continue
         name = get(ts_names, label_id, "")
-        if occursin("prostate", lowercase(name))
+        if is_prostate_structure(name)
             return name
         end
     end
@@ -1313,7 +1343,7 @@ end
 
 export load_nrrd_labelmap, map_lesions_to_organs, classify_organ_to_lesion_type
 export classify_tissue_priority, classify_and_pick_best_organ, count_atlas_overlap, pick_best_organ, lookup_anatomy, sanitize_anatomy_by_z
-export is_lymph_node_structure, is_pelvic_lymph_node, classify_lymph_node_location
+export is_prostate_structure, is_lymph_node_structure, is_pelvic_lymph_node, classify_lymph_node_location
 export format_clinical_station_name, format_adjacent_structure_name, generate_detailed_anatomy_rows
 
 end # module
