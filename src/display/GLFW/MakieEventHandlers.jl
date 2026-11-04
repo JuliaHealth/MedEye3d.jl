@@ -2307,6 +2307,9 @@ function _get_lmw()
 end
 
 function _get_la()
+    if isdefined(@__MODULE__, :LesionAssociation)
+        return getfield(@__MODULE__, :LesionAssociation)
+    end
     p = parentmodule(parentmodule(@__MODULE__))
     if isdefined(p, :LesionAssociation)
         return getfield(p, :LesionAssociation)
@@ -2323,6 +2326,46 @@ function get_node_name_for_tp(tp_idx::Int)::String
     @warn "No node name for TP $tp_idx — tp_node_names not populated from HDF5"
     return "Unknown_TP_$tp_idx"
 end
+
+"""
+    get_companion_nodes_for_tp(tp_idx::Int) -> Vector{String}
+
+Return all node names corresponding to the same multi-parametric exam / time point as `tp_idx`.
+For MRI (T2, ADC, DWI, T1, DCE, etc.), all co-registered MRI time points share the same lesion mask
+and match group. For CT/PET, returns the baseline/PET node.
+"""
+function get_companion_nodes_for_tp(tp_idx::Int)::Vector{String}
+    is_mri(t::Int) = begin
+        mod = uppercase(strip(get(tp_modalities, t, "")))
+        if mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE")
+            return true
+        end
+        lbl = uppercase(strip(get(tp_labels, t, "")))
+        if occursin("T2", lbl) || occursin("ADC", lbl) || occursin("DWI", lbl) || occursin("T1", lbl) || occursin("DCE", lbl) || occursin("DYNAMIC", lbl) || occursin("PROSTATE", lbl) || occursin("MR", lbl)
+            return true
+        end
+        return false
+    end
+
+    all_known_tps = sort(unique(vcat(collect(keys(tp_labels)), collect(keys(tp_node_names)), mri_compare_tps)))
+
+    if is_mri(tp_idx)
+        mri_tps = filter(is_mri, all_known_tps)
+        if !isempty(mri_compare_tps)
+            mri_tps = sort(unique(vcat(mri_tps, mri_compare_tps)))
+        end
+        nodes = String[get_node_name_for_tp(t) for t in mri_tps if haskey(tp_node_names, t) && !isempty(tp_node_names[t])]
+        if isempty(nodes)
+            cur = get_node_name_for_tp(tp_idx)
+            !isempty(cur) && push!(nodes, cur)
+        end
+        return unique(nodes)
+    end
+
+    node = get_node_name_for_tp(tp_idx)
+    return isempty(node) ? String[] : String[node]
+end
+export get_companion_nodes_for_tp
 
 const current_active_lesion_id = Ref(0)
 
@@ -5583,7 +5626,7 @@ and the right (comparison) time point lesion `right_lid`:
 - If unlinked: links `right_lid` to `left_lid` (drops to smaller opacity).
 Persists changes to HDF5 matches dataset and live-updates UBOs and GUI.
 """
-function toggle_lesion_mapping!(left_tp::Int, left_lid::Int, right_tp::Int, right_lid::Int, stateObjects::Vector{StateDataFields})
+function toggle_lesion_mapping!(left_tp::Int, left_lid::Int, right_tp::Int, right_lid::Int, stateObjects::Vector{StateDataFields} = StateDataFields[])
     if left_lid <= 0 || right_lid <= 0
         return false
     end
@@ -5603,25 +5646,33 @@ function toggle_lesion_mapping!(left_tp::Int, left_lid::Int, right_tp::Int, righ
     current_matches = LA.find_cross_tp_lesion(left_node, left_lid, right_node)
     is_already_mapped = right_lid in current_matches
     
+    left_companions = get_companion_nodes_for_tp(left_tp)
+    right_companions = get_companion_nodes_for_tp(right_tp)
+    
     if is_already_mapped
-        println("[INTERACTIVE-MAP] Unlinking: $left_node ID $left_lid <-> $right_node ID $right_lid")
+        println("[INTERACTIVE-MAP] Unlinking: $left_node ID $left_lid <-> $right_node ID $right_lid (and companion modalities)")
         for (gid, members) in LA.get_match_groups()
-            idx_r = findfirst(m -> m[1] == right_node && m[2] == right_lid, members)
-            has_l = any(m -> m[1] == left_node && m[2] == left_lid, members)
-            if idx_r !== nothing && has_l
-                deleteat!(members, idx_r)
-                if length(members) <= 1
-                    delete!(LA.get_match_groups(), gid)
+            for r_node in right_companions
+                idx_r = findfirst(m -> m[1] == r_node && m[2] == right_lid, members)
+                has_l = any(m -> m[1] in left_companions && m[2] == left_lid, members)
+                if idx_r !== nothing && has_l
+                    deleteat!(members, idx_r)
                 end
-                break
+            end
+            if length(members) <= 1
+                delete!(LA.get_match_groups(), gid)
             end
         end
         if !isempty(h5_path) && isfile(h5_path)
             LA.save_matches_to_h5(h5_path)
         end
     else
-        println("[INTERACTIVE-MAP] Linking: $left_node ID $left_lid <-> $right_node ID $right_lid")
-        LA.update_match_group!(left_node, left_lid, right_node, right_lid, !isempty(h5_path) && isfile(h5_path) ? h5_path : "")
+        println("[INTERACTIVE-MAP] Linking: $left_node ID $left_lid <-> $right_node ID $right_lid (and companion modalities)")
+        for l_node in left_companions
+            for r_node in right_companions
+                LA.update_match_group!(l_node, left_lid, r_node, right_lid, !isempty(h5_path) && isfile(h5_path) ? h5_path : "")
+            end
+        end
     end
     
     # Re-sync lesion visibility & UBOs across all panels (no centroid jump!)

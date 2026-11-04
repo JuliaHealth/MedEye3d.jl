@@ -3762,6 +3762,7 @@ function create_metadata_window(
     # Proxy that queues events when channel is not yet connected
     channel = ChannelProxy(channel_ref)
     local _build_match_display!
+    local sec_map_lesions = nothing
     schema   = load_schema()
     radlex   = load_radlex()
     anatomy_ontology = load_anatomy_ontology()  # FoundationalAnatomy labels for Base Anatomy autocomplete
@@ -5457,6 +5458,9 @@ function create_metadata_window(
         end
     end
 
+    local menu_map_tp_left = nothing
+    local menu_map_tp_right = nothing
+
     function refresh_tp_dropdown_options!()
         tp_indices = sort(collect(keys(_MEH.tp_labels)))
         opts = if isempty(tp_indices)
@@ -5468,6 +5472,12 @@ function create_metadata_window(
         menu_m2_ref.options[] = vcat(["Next TP", "Baseline (TP0)"], opts)
         menu_tp_left.options[] = opts
         menu_tp_right.options[] = opts
+        if menu_map_tp_left !== nothing
+            menu_map_tp_left.options[] = vcat(["(current)"], opts)
+        end
+        if menu_map_tp_right !== nothing
+            menu_map_tp_right.options[] = vcat(["(compare)"], opts)
+        end
         sync_tp_menus_to_current!()
     end
 
@@ -5556,7 +5566,7 @@ function create_metadata_window(
             else
                 sync_tp_menus_to_current!()
             end
-            if cv_active[]
+            if cv_active[] || (sec_map_lesions !== nothing && sec_map_lesions[1][])
                 _build_match_display!()
             end
             refresh_lesion_dropdown_for_tp!(_MEH.current_tp_index[])
@@ -5975,6 +5985,350 @@ function create_metadata_window(
             update_tp_dropdown_visibility!()
         end
     end
+
+    # ── Lesion Mapping (Cross-Timepoint & Modalities) ──────────────────────────
+    sec_map_lesions = begin_section!("Lesion Mapping (Timepoints & Modalities)"; default_open=true)
+    
+    # Awareness banner: multi-parametric MRI & PET/CT same timepoint reminder
+    map_banner_r = nr!()
+    Label(g[map_banner_r, 1:4], "💡 MRI modalities (T2/ADC/DWI/T1) share mapping; PET+CT share mapping.",
+        fontsize=9, color=SUBTXT, halign=:left)
+    rowsize!(g, map_banner_r, Fixed(18)); register_fixed_row!(map_banner_r, 18)
+
+    map_info_r = nr!()
+    lbl_map_left = Label(g[map_info_r, 1:2], "Current TP: ...", fontsize=10, font=:bold, color=LBL_FG, halign=:left)
+    lbl_map_right = Label(g[map_info_r, 3:4], "Compare TP: ...", fontsize=10, font=:bold, color=LBL_FG, halign=:left)
+    rowsize!(g, map_info_r, Fixed(20)); register_fixed_row!(map_info_r, 20)
+
+    # TP Selector menus: allow user to choose which two time points / studies to map
+    map_menus_r = nr!()
+    Label(g[map_menus_r, 1], "Left Study:", fontsize=9, color=LBL_FG, halign=:right)
+    menu_map_tp_left = Menu(g[map_menus_r, 2], options=Observable(["(current)"]), fontsize=9); _register_menu!(menu_map_tp_left)
+    Label(g[map_menus_r, 3], "Right Study:", fontsize=9, color=LBL_FG, halign=:right)
+    menu_map_tp_right = Menu(g[map_menus_r, 4], options=Observable(["(compare)"]), fontsize=9); _register_menu!(menu_map_tp_right)
+    rowsize!(g, map_menus_r, Fixed(26)); register_fixed_row!(map_menus_r, 26)
+
+    map_ctrl_r = nr!()
+    btn_map_mode_toggle = Button(g[map_ctrl_r, 1:2],
+        label = _MEH.compare_all_lesions_mode[] ? "Interactive Map: ON" : "Interactive Map: OFF",
+        buttoncolor = _MEH.compare_all_lesions_mode[] ? GRN : BG_PNL,
+        labelcolor = TXT, fontsize = 10)
+    btn_refresh_map = Button(g[map_ctrl_r, 3:4], label="Refresh Associations", buttoncolor = BG_PNL, labelcolor = TXT, fontsize=10)
+    rowsize!(g, map_ctrl_r, Fixed(28)); register_fixed_row!(map_ctrl_r, 28)
+
+    on(btn_map_mode_toggle.clicks) do _
+        _MEH.compare_all_lesions_mode[] = !_MEH.compare_all_lesions_mode[]
+        btn_map_mode_toggle.label[] = _MEH.compare_all_lesions_mode[] ? "Interactive Map: ON" : "Interactive Map: OFF"
+        btn_map_mode_toggle.buttoncolor[] = _MEH.compare_all_lesions_mode[] ? GRN : BG_PNL
+        cur_lid = _MEH.current_active_lesion_id[] > 0 ? _MEH.current_active_lesion_id[] : 1
+        put!(channel, SyncLesionEvent(cur_lid))
+        trigger_autosave()
+    end
+
+    # Differential Opacity Sliders (Linked vs Unlinked)
+    sl_link_r = nr!()
+    Label(g[sl_link_r, 1], "Linked α:", fontsize = 10, color = LBL_FG, halign = :right)
+    slider_alpha_linked = Slider(g[sl_link_r, 2:3], range = 0.05:0.05:1.0, startvalue = _MEH.mapping_alpha_linked[],
+        color_active = ACCENT, color_inactive = RGBf(0.3, 0.3, 0.35))
+    lbl_alpha_linked = Label(g[sl_link_r, 4], @lift(string(round($(slider_alpha_linked.value), digits=2))),
+        fontsize = 10, color = TXT, halign = :left)
+    rowsize!(g, sl_link_r, Fixed(26)); register_fixed_row!(sl_link_r, 26)
+
+    sl_unlink_r = nr!()
+    Label(g[sl_unlink_r, 1], "Unlinked α:", fontsize = 10, color = LBL_FG, halign = :right)
+    slider_alpha_unlinked = Slider(g[sl_unlink_r, 2:3], range = 0.10:0.05:1.0, startvalue = _MEH.mapping_alpha_unlinked[],
+        color_active = ACCENT, color_inactive = RGBf(0.3, 0.3, 0.35))
+    lbl_alpha_unlinked = Label(g[sl_unlink_r, 4], @lift(string(round($(slider_alpha_unlinked.value), digits=2))),
+        fontsize = 10, color = TXT, halign = :left)
+    rowsize!(g, sl_unlink_r, Fixed(26)); register_fixed_row!(sl_unlink_r, 26)
+
+    on(slider_alpha_linked.value) do val
+        _MEH.mapping_alpha_linked[] = Float32(val)
+        cur_lid = _MEH.current_active_lesion_id[] > 0 ? _MEH.current_active_lesion_id[] : 1
+        put!(channel, SyncLesionEvent(cur_lid))
+        trigger_autosave()
+    end
+
+    on(slider_alpha_unlinked.value) do val
+        _MEH.mapping_alpha_unlinked[] = Float32(val)
+        cur_lid = _MEH.current_active_lesion_id[] > 0 ? _MEH.current_active_lesion_id[] : 1
+        put!(channel, SyncLesionEvent(cur_lid))
+        trigger_autosave()
+    end
+
+    _lmw_observables[:btn_map_mode_toggle] = btn_map_mode_toggle
+    _lmw_observables[:slider_alpha_linked] = slider_alpha_linked
+    _lmw_observables[:slider_alpha_unlinked] = slider_alpha_unlinked
+    
+    map_container_r = nr!()
+    map_grid = GridLayout(g[map_container_r, 1:4])
+    MAX_MAP_DISPLAY_ROWS = 10    # max lesion mapping rows visible
+    MAP_ROW_PX = 22              # approx height per lesion label row
+    MAP_HEADER_PX = 52           # "Add Lesion:" labels (24px) + menu row (28px)
+    MAX_MAP_DISPLAY_HEIGHT = MAP_HEADER_PX + MAX_MAP_DISPLAY_ROWS * MAP_ROW_PX  # ~272px
+    rowsize!(g, map_container_r, Fixed(MAX_MAP_DISPLAY_HEIGHT)); register_fixed_row!(map_container_r, MAX_MAP_DISPLAY_HEIGHT)
+    
+    map_selected_left = Observable{Vector{Int}}(Int[])
+    map_selected_right = Observable{Vector{Int}}(Int[])
+
+    function _build_match_display!()
+        is_cmp = cv_active[] || _MEH.compare_mode[] || (isdefined(_MEH, :mri_compare_mode) && _MEH.mri_compare_mode[]) || sec_map_lesions[1][]
+        if !is_cmp
+            for elem in contents(map_grid); try delete!(elem) catch; end; end
+            return
+        end
+        
+        tp_left = _MEH.current_tp_index[]
+        if menu_map_tp_left !== nothing && menu_map_tp_left.selection[] !== nothing
+            s = string(menu_map_tp_left.selection[])
+            if s != "(current)" && occursin(':', s)
+                p = tryparse(Int, split(s, ':')[1])
+                p !== nothing && (tp_left = p)
+            end
+        end
+
+        tp_right = _MEH.compare_right_tp[]
+        if menu_map_tp_right !== nothing && menu_map_tp_right.selection[] !== nothing
+            s = string(menu_map_tp_right.selection[])
+            if s != "(compare)" && occursin(':', s)
+                p = tryparse(Int, split(s, ':')[1])
+                p !== nothing && (tp_right = p)
+            end
+        end
+
+        if tp_right < 0 || tp_right == tp_left
+            tp_indices = sort(collect(keys(_MEH.tp_labels)))
+            if !isempty(tp_indices)
+                cur_pos = findfirst(==(tp_left), tp_indices)
+                cur_pos = cur_pos === nothing ? 1 : cur_pos
+                next_pos = mod1(cur_pos + 1, length(tp_indices))
+                tp_right = tp_indices[next_pos]
+            else
+                tp_right = (tp_left == 0 ? 1 : 0)
+            end
+        end
+        
+        left_node = _MEH.get_node_name_for_tp(tp_left)
+        right_node = _MEH.get_node_name_for_tp(tp_right)
+        
+        left_lbl = get(_MEH.tp_labels, tp_left, "TP $tp_left")
+        right_lbl = get(_MEH.tp_labels, tp_right, "TP $tp_right")
+        
+        cur_act = active_lesion_id[]
+        cur_lesion_ids = copy(lesion_ids[])
+
+        _trunc(s, maxlen=28) = length(s) > maxlen ? first(s, maxlen) * "…" : s
+
+        function _lesion_display_name(lid::Int, lesion_id_list)
+            for opt in lesion_id_list
+                p = parse_lesion_id(opt)
+                if p == lid; return opt; end
+            end
+            organ = get(_MEH.global_organ_mapping[], lid, "")
+            if !isempty(organ) && organ != "Unknown"
+                entry = lookup_anatomy(organ)
+                detailed = entry !== nothing ? get(entry, "detailed", organ) : organ
+                return "ID $lid: $detailed"
+            end
+            return "ID $lid"
+        end
+
+        begin
+            try
+                l_ids = get_mask_ids(tp_left)
+                r_ids = get_mask_ids(tp_right)
+                
+                active_lid = parse_lesion_id(cur_act)
+                active_lid = active_lid !== nothing ? active_lid : (isempty(l_ids) ? 0 : l_ids[1])
+                
+                connected_right = Int[]
+                if active_lid > 0
+                    connected_right = LA.find_cross_tp_lesion(left_node, active_lid, right_node)
+                end
+                connected_right = filter(rid -> rid in r_ids, connected_right)
+                
+                active_left_name = active_lid > 0 ? _trunc(_lesion_display_name(active_lid, cur_lesion_ids)) : "(none)"
+                right_names = [_trunc(_lesion_display_name(rid, cur_lesion_ids)) for rid in connected_right]
+
+                l_opts = String["- select lesion -"]
+                for lid in l_ids
+                    push!(l_opts, _lesion_display_name(lid, cur_lesion_ids))
+                end
+                r_opts = String["- select lesion -"]
+                for rid in r_ids
+                    push!(r_opts, _lesion_display_name(rid, cur_lesion_ids))
+                end
+                
+                begin
+                    try
+                        (cv_active[] || _MEH.compare_mode[] || (isdefined(_MEH, :mri_compare_mode) && _MEH.mri_compare_mode[]) || sec_map_lesions[1][]) || return
+                        g.block_updates = false
+                        try
+                            for elem in contents(map_grid); try delete!(elem) catch; end; end
+                            
+                            lbl_map_left.text[] = "Left: $left_lbl ($left_node)"
+                            lbl_map_right.text[] = "Right: $right_lbl ($right_node)"
+                            
+                            map_selected_left[] = active_lid > 0 ? Int[active_lid] : Int[]
+                            map_selected_right[] = copy(connected_right)
+                            
+                            Label(map_grid[1, 1:2], "Add Left Lesion:", fontsize=9, color=LBL_FG, halign=:left)
+                            Label(map_grid[1, 3:4], "Add Right Lesion:", fontsize=9, color=LBL_FG, halign=:left)
+                            
+                            menu_l = searchable_menu(map_grid, 2, 1:2, options = Observable(l_opts), fontsize = 9)
+                            menu_r = searchable_menu(map_grid, 2, 3:4, options = Observable(r_opts), fontsize = 9)
+                            
+                            on(menu_l.selection) do sel
+                                _is_applying_state[] && return
+                                sel_str = string(sel)
+                                (isempty(sel_str) || sel_str == "- select lesion -") && return
+                                lid = parse_lesion_id(sel_str)
+                                if lid !== nothing && !(lid in map_selected_left[])
+                                    push!(map_selected_left[], lid)
+                                    notify(map_selected_left)
+                                    h5_path = _MEH.h5_path_ref[]
+                                    if isempty(h5_path) || !isfile(h5_path)
+                                        h5_path = _MEH.h5_save_path_ref[]
+                                    end
+                                    if !isempty(h5_path) && !isempty(map_selected_right[])
+                                        left_companions = _MEH.get_companion_nodes_for_tp(tp_left)
+                                        right_companions = _MEH.get_companion_nodes_for_tp(tp_right)
+                                        for r_id in map_selected_right[]
+                                            for l_node in left_companions
+                                                for r_node in right_companions
+                                                    LA.update_match_group!(l_node, lid, r_node, r_id, h5_path)
+                                                end
+                                            end
+                                        end
+                                    end
+                                    put!(channel, SyncLesionEvent(lid, false))
+                                    _build_match_display!()
+                                end
+                            end
+                            
+                            on(menu_r.selection) do sel
+                                _is_applying_state[] && return
+                                sel_str = string(sel)
+                                (isempty(sel_str) || sel_str == "- select lesion -") && return
+                                rid = parse_lesion_id(sel_str)
+                                if rid !== nothing && !(rid in map_selected_right[])
+                                    push!(map_selected_right[], rid)
+                                    notify(map_selected_right)
+                                    h5_path = _MEH.h5_path_ref[]
+                                    if isempty(h5_path) || !isfile(h5_path)
+                                        h5_path = _MEH.h5_save_path_ref[]
+                                    end
+                                    if !isempty(h5_path) && !isempty(map_selected_left[])
+                                        left_companions = _MEH.get_companion_nodes_for_tp(tp_left)
+                                        right_companions = _MEH.get_companion_nodes_for_tp(tp_right)
+                                        for l_id in map_selected_left[]
+                                            for l_node in left_companions
+                                                for r_node in right_companions
+                                                    LA.update_match_group!(l_node, l_id, r_node, rid, h5_path)
+                                                end
+                                            end
+                                        end
+                                    end
+                                    if !isempty(map_selected_left[])
+                                        put!(channel, SyncLesionEvent(map_selected_left[][1], false))
+                                    end
+                                    _build_match_display!()
+                                end
+                            end
+                            
+                            row_offset = 3
+                            if active_lid > 0
+                                Label(map_grid[row_offset, 1:2], active_left_name, fontsize=8,
+                                    color=isempty(connected_right) ? TXT : RGBf(0.4, 0.85, 0.4), halign=:left)
+                            else
+                                Label(map_grid[row_offset, 1:2], "(no active lesion)", fontsize=8, color=SUBTXT, halign=:left)
+                            end
+                            
+                            if isempty(connected_right)
+                                Label(map_grid[row_offset, 3:4], "(unmapped)", fontsize=8, color=SUBTXT, halign=:left)
+                            else
+                                n_display = length(connected_right)
+                                n_truncated = 0
+                                if n_display > MAX_MAP_DISPLAY_ROWS
+                                    n_truncated = n_display - MAX_MAP_DISPLAY_ROWS + 1
+                                    n_display = MAX_MAP_DISPLAY_ROWS - 1
+                                end
+                                for j in 1:n_display
+                                    lbl_txt = right_names[j]
+                                    rid = connected_right[j]
+                                    Label(map_grid[row_offset + j - 1, 3], lbl_txt, fontsize=8,
+                                        color=RGBf(0.4, 0.85, 0.4), halign=:left)
+                                    btn_un = Button(map_grid[row_offset + j - 1, 4], label="[x]",
+                                        buttoncolor=BG_PNL, labelcolor=RGBf(0.9, 0.3, 0.3), fontsize=8,
+                                        width=22, height=18, tellwidth=true, tellheight=true)
+                                    on(btn_un.clicks) do _
+                                        h5_path = _MEH.h5_path_ref[]
+                                        if isempty(h5_path) || !isfile(h5_path)
+                                            h5_path = _MEH.h5_save_path_ref[]
+                                        end
+                                        left_companions = _MEH.get_companion_nodes_for_tp(tp_left)
+                                        right_companions = _MEH.get_companion_nodes_for_tp(tp_right)
+                                        for (gid, members) in LA.get_match_groups()
+                                            for r_node in right_companions
+                                                idx_r = findfirst(m -> m[1] == r_node && m[2] == rid, members)
+                                                has_l = any(m -> m[1] in left_companions && m[2] == active_lid, members)
+                                                if idx_r !== nothing && has_l
+                                                    deleteat!(members, idx_r)
+                                                end
+                                            end
+                                            if length(members) <= 1
+                                                delete!(LA.get_match_groups(), gid)
+                                            end
+                                        end
+                                        if !isempty(h5_path) && isfile(h5_path)
+                                            LA.save_matches_to_h5(h5_path)
+                                        end
+                                        put!(channel, SyncLesionEvent(active_lid, false))
+                                        _build_match_display!()
+                                    end
+                                end
+                                if n_truncated > 0
+                                    Label(map_grid[row_offset + n_display, 3:4],
+                                        "(+$n_truncated more)",
+                                        fontsize=8, color=SUBTXT, halign=:left)
+                                end
+                            end
+                            Makie.GridLayoutBase.update!(g)
+                            _cache_widget_bboxes!()
+                        finally
+                            g.block_updates = true
+                            _apply_scroll!(_scroll_offset_px[])
+                        end
+                    catch e
+                        @warn "Match display UI building failed" e
+                    end
+                end
+            catch e
+                @warn "Match display computation failed" e
+            end
+        end
+    end
+    
+    on(btn_refresh_map.clicks) do _
+        empty!(_MASK_IDS_CACHE)
+        empty!(_cached_lesion_ids)
+        empty!(_organ_classification_cache)
+        _build_match_display!()
+    end
+    on(menu_map_tp_left.selection) do _
+        _build_match_display!()
+    end
+    on(menu_map_tp_right.selection) do _
+        _build_match_display!()
+    end
+
+    end_section!(sec_map_lesions)
+    on(sec_map_lesions[1]) do is_open
+        if is_open
+            _build_match_display!()
+        end
+    end
+    _lmw_observables[:build_match_display] = () -> _build_match_display!()
 
     # ── Dedicated Windowing & Image Offsets Subpanel ─────────────────────────
     sec_win = begin_section!("Windowing & Image Offsets"; default_open=true)
@@ -8459,315 +8813,6 @@ function create_metadata_window(
 
     end_section!(sec_meas)
 
-    sec_map_lesions = begin_section!("Map Lesions (Compare Mode)"; default_open=false)
-    
-    map_info_r = nr!()
-    lbl_map_left = Label(g[map_info_r, 1:2], "Current TP: ...", fontsize=10, font=:bold, color=LBL_FG, halign=:left)
-    lbl_map_right = Label(g[map_info_r, 3:4], "Compare TP: ...", fontsize=10, font=:bold, color=LBL_FG, halign=:left)
-    
-    map_ctrl_r = nr!()
-    btn_map_mode_toggle = Button(g[map_ctrl_r, 1:2],
-        label = _MEH.compare_all_lesions_mode[] ? "Interactive Map: ON" : "Interactive Map: OFF",
-        buttoncolor = _MEH.compare_all_lesions_mode[] ? GRN : BG_PNL,
-        labelcolor = TXT, fontsize = 10)
-    btn_refresh_map = Button(g[map_ctrl_r, 3:4], label="Refresh Associations", buttoncolor = BG_PNL, labelcolor = TXT, fontsize=10)
-    rowsize!(g, map_ctrl_r, Fixed(28)); register_fixed_row!(map_ctrl_r, 28)
-
-    on(btn_map_mode_toggle.clicks) do _
-        _MEH.compare_all_lesions_mode[] = !_MEH.compare_all_lesions_mode[]
-        btn_map_mode_toggle.label[] = _MEH.compare_all_lesions_mode[] ? "Interactive Map: ON" : "Interactive Map: OFF"
-        btn_map_mode_toggle.buttoncolor[] = _MEH.compare_all_lesions_mode[] ? GRN : BG_PNL
-        cur_lid = _MEH.current_active_lesion_id[] > 0 ? _MEH.current_active_lesion_id[] : 1
-        put!(channel, SyncLesionEvent(cur_lid))
-        trigger_autosave()
-    end
-
-    # Differential Opacity Sliders (Linked vs Unlinked)
-    sl_link_r = nr!()
-    Label(g[sl_link_r, 1], "Linked α:", fontsize = 10, color = LBL_FG, halign = :right)
-    slider_alpha_linked = Slider(g[sl_link_r, 2:3], range = 0.05:0.05:1.0, startvalue = _MEH.mapping_alpha_linked[],
-        color_active = ACCENT, color_inactive = RGBf(0.3, 0.3, 0.35))
-    lbl_alpha_linked = Label(g[sl_link_r, 4], @lift(string(round($(slider_alpha_linked.value), digits=2))),
-        fontsize = 10, color = TXT, halign = :left)
-    rowsize!(g, sl_link_r, Fixed(26)); register_fixed_row!(sl_link_r, 26)
-
-    sl_unlink_r = nr!()
-    Label(g[sl_unlink_r, 1], "Unlinked α:", fontsize = 10, color = LBL_FG, halign = :right)
-    slider_alpha_unlinked = Slider(g[sl_unlink_r, 2:3], range = 0.10:0.05:1.0, startvalue = _MEH.mapping_alpha_unlinked[],
-        color_active = ACCENT, color_inactive = RGBf(0.3, 0.3, 0.35))
-    lbl_alpha_unlinked = Label(g[sl_unlink_r, 4], @lift(string(round($(slider_alpha_unlinked.value), digits=2))),
-        fontsize = 10, color = TXT, halign = :left)
-    rowsize!(g, sl_unlink_r, Fixed(26)); register_fixed_row!(sl_unlink_r, 26)
-
-    on(slider_alpha_linked.value) do val
-        _MEH.mapping_alpha_linked[] = Float32(val)
-        cur_lid = _MEH.current_active_lesion_id[] > 0 ? _MEH.current_active_lesion_id[] : 1
-        put!(channel, SyncLesionEvent(cur_lid))
-        trigger_autosave()
-    end
-
-    on(slider_alpha_unlinked.value) do val
-        _MEH.mapping_alpha_unlinked[] = Float32(val)
-        cur_lid = _MEH.current_active_lesion_id[] > 0 ? _MEH.current_active_lesion_id[] : 1
-        put!(channel, SyncLesionEvent(cur_lid))
-        trigger_autosave()
-    end
-
-    _lmw_observables[:btn_map_mode_toggle] = btn_map_mode_toggle
-    _lmw_observables[:slider_alpha_linked] = slider_alpha_linked
-    _lmw_observables[:slider_alpha_unlinked] = slider_alpha_unlinked
-    
-    map_container_r = nr!()
-    map_grid = GridLayout(g[map_container_r, 1:4])
-    # Cap map grid height to prevent overflow into sections below.
-    # Grows with content but never exceeds MAX_MAP_DISPLAY_HEIGHT.
-    MAX_MAP_DISPLAY_ROWS = 10    # max lesion mapping rows visible
-    MAP_ROW_PX = 22              # approx height per lesion label row
-    MAP_HEADER_PX = 52           # "Add Lesion:" labels (24px) + menu row (28px)
-    MAX_MAP_DISPLAY_HEIGHT = MAP_HEADER_PX + MAX_MAP_DISPLAY_ROWS * MAP_ROW_PX  # ~272px
-    rowsize!(g, map_container_r, Fixed(MAX_MAP_DISPLAY_HEIGHT)); register_fixed_row!(map_container_r, MAX_MAP_DISPLAY_HEIGHT)
-    
-    map_selected_left = Observable{Vector{Int}}(Int[])
-    map_selected_right = Observable{Vector{Int}}(Int[])
-
-    # Uses module-level get_mask_ids(tp)
-
-    function _build_match_display!()
-        # Build map display when compare mode is active OR when the Map Lesions section is expanded
-        is_cmp = cv_active[] || _MEH.compare_mode[] || (isdefined(_MEH, :mri_compare_mode) && _MEH.mri_compare_mode[]) || sec_map_lesions[1][]
-        if !is_cmp
-            for elem in contents(map_grid); try delete!(elem) catch; end; end
-            return
-        end
-        
-        tp_left = _MEH.current_tp_index[]
-        tp_right = _MEH.compare_right_tp[]
-        if tp_right < 0
-            tp_indices = sort(collect(keys(_MEH.tp_labels)))
-            if !isempty(tp_indices)
-                cur_pos = findfirst(==(tp_left), tp_indices)
-                cur_pos = cur_pos === nothing ? 1 : cur_pos
-                next_pos = mod1(cur_pos + 1, length(tp_indices))
-                tp_right = tp_indices[next_pos]
-            else
-                tp_right = (tp_left + 1)
-            end
-        end
-        
-        left_node = _MEH.get_node_name_for_tp(tp_left)
-        right_node = _MEH.get_node_name_for_tp(tp_right)
-        
-        left_lbl = get(_MEH.tp_labels, tp_left, "TP $tp_left")
-        right_lbl = get(_MEH.tp_labels, tp_right, "TP $tp_right")
-        
-        cur_act = active_lesion_id[]
-        cur_lesion_ids = copy(lesion_ids[])
-
-        # Helper: truncate long label text for compact display
-        _trunc(s, maxlen=28) = length(s) > maxlen ? first(s, maxlen) * "…" : s
-
-        # Helper: build display name for a lesion ID
-        function _lesion_display_name(lid::Int, lesion_id_list)
-            for opt in lesion_id_list
-                p = parse_lesion_id(opt)
-                if p == lid; return opt; end
-            end
-            organ = get(_MEH.global_organ_mapping[], lid, "")
-            if !isempty(organ) && organ != "Unknown"
-                entry = lookup_anatomy(organ)
-                detailed = entry !== nothing ? get(entry, "detailed", organ) : organ
-                return "ID $lid: $detailed"
-            end
-            return "ID $lid"
-        end
-
-        # Run synchronously — UI widget creation (Label, Button) needs the GL thread.
-        # Threads.@spawn causes segfault in glGenBuffers.
-        begin
-            try
-                l_ids = get_mask_ids(tp_left)
-                r_ids = get_mask_ids(tp_right)
-                
-                # ── Active lesion on left, connected lesions on right ──
-                active_lid = parse_lesion_id(cur_act)
-                active_lid = active_lid !== nothing ? active_lid : (isempty(l_ids) ? 0 : l_ids[1])
-                
-                # Find all right-TP lesions connected to the active left lesion
-                connected_right = Int[]
-                if active_lid > 0
-                    connected_right = LA.find_cross_tp_lesion(left_node, active_lid, right_node)
-                end
-                # Filter to only IDs that actually exist in the right TP mask
-                connected_right = filter(rid -> rid in r_ids, connected_right)
-                
-                # Build display names
-                active_left_name = active_lid > 0 ? _trunc(_lesion_display_name(active_lid, cur_lesion_ids)) : "(none)"
-                right_names = [_trunc(_lesion_display_name(rid, cur_lesion_ids)) for rid in connected_right]
-
-                # Build dropdown options for adding new mappings
-                l_opts = String["- select lesion -"]
-                for lid in l_ids
-                    push!(l_opts, _lesion_display_name(lid, cur_lesion_ids))
-                end
-                r_opts = String["- select lesion -"]
-                for rid in r_ids
-                    push!(r_opts, _lesion_display_name(rid, cur_lesion_ids))
-                end
-                
-                # UI creation — runs synchronously on the GL-safe calling thread
-                begin
-                    try
-                        (cv_active[] || _MEH.compare_mode[] || (isdefined(_MEH, :mri_compare_mode) && _MEH.mri_compare_mode[]) || sec_map_lesions[1][]) || return
-                        g.block_updates = false
-                        try
-                            for elem in contents(map_grid); try delete!(elem) catch; end; end
-                            
-                            lbl_map_left.text[] = "Current TP: $left_lbl ($left_node)"
-                            lbl_map_right.text[] = "Compare TP: $right_lbl ($right_node)"
-                            
-                            # Track active lesion + its connected right lesions
-                            map_selected_left[] = active_lid > 0 ? Int[active_lid] : Int[]
-                            map_selected_right[] = copy(connected_right)
-                            
-                            Label(map_grid[1, 1:2], "Add Left Lesion:", fontsize=9, color=LBL_FG, halign=:left)
-                            Label(map_grid[1, 3:4], "Add Right Lesion:", fontsize=9, color=LBL_FG, halign=:left)
-                            
-                            menu_l = searchable_menu(map_grid, 2, 1:2, options = Observable(l_opts), fontsize = 9)
-                            menu_r = searchable_menu(map_grid, 2, 3:4, options = Observable(r_opts), fontsize = 9)
-                            
-                            on(menu_l.selection) do sel
-                                _is_applying_state[] && return
-                                sel_str = string(sel)
-                                (isempty(sel_str) || sel_str == "- select lesion -") && return
-                                lid = parse_lesion_id(sel_str)
-                                if lid !== nothing && !(lid in map_selected_left[])
-                                    push!(map_selected_left[], lid)
-                                    notify(map_selected_left)
-                                    h5_path = _MEH.h5_path_ref[]
-                                    if isempty(h5_path) || !isfile(h5_path)
-                                        h5_path = _MEH.h5_save_path_ref[]
-                                    end
-                                    if !isempty(h5_path) && !isempty(map_selected_right[])
-                                        for r_id in map_selected_right[]
-                                            LA.update_match_group!(left_node, lid, right_node, r_id, h5_path)
-                                        end
-                                    end
-                                    put!(channel, SyncLesionEvent(lid, false))
-                                    _build_match_display!()
-                                end
-                            end
-                            
-                            on(menu_r.selection) do sel
-                                _is_applying_state[] && return
-                                sel_str = string(sel)
-                                (isempty(sel_str) || sel_str == "- select lesion -") && return
-                                rid = parse_lesion_id(sel_str)
-                                if rid !== nothing && !(rid in map_selected_right[])
-                                    push!(map_selected_right[], rid)
-                                    notify(map_selected_right)
-                                    h5_path = _MEH.h5_path_ref[]
-                                    if isempty(h5_path) || !isfile(h5_path)
-                                        h5_path = _MEH.h5_save_path_ref[]
-                                    end
-                                    if !isempty(h5_path) && !isempty(map_selected_left[])
-                                        for l_id in map_selected_left[]
-                                            LA.update_match_group!(left_node, l_id, right_node, rid, h5_path)
-                                        end
-                                    end
-                                    if !isempty(map_selected_left[])
-                                        put!(channel, SyncLesionEvent(map_selected_left[][1], false))
-                                    end
-                                    _build_match_display!()
-                                end
-                            end
-                            
-                            row_offset = 3
-                            # Left column: single active lesion
-                            if active_lid > 0
-                                Label(map_grid[row_offset, 1:2], active_left_name, fontsize=8,
-                                    color=isempty(connected_right) ? TXT : RGBf(0.4, 0.85, 0.4), halign=:left)
-                            else
-                                Label(map_grid[row_offset, 1:2], "(no active lesion)", fontsize=8, color=SUBTXT, halign=:left)
-                            end
-                            
-                            # Right column: all connected lesions (or "(unmapped)")
-                            if isempty(connected_right)
-                                Label(map_grid[row_offset, 3:4], "(unmapped)", fontsize=8, color=SUBTXT, halign=:left)
-                            else
-                                n_display = length(connected_right)
-                                n_truncated = 0
-                                if n_display > MAX_MAP_DISPLAY_ROWS
-                                    n_truncated = n_display - MAX_MAP_DISPLAY_ROWS + 1
-                                    n_display = MAX_MAP_DISPLAY_ROWS - 1
-                                end
-                                for j in 1:n_display
-                                    lbl_txt = right_names[j]
-                                    rid = connected_right[j]
-                                    Label(map_grid[row_offset + j - 1, 3], lbl_txt, fontsize=8,
-                                        color=RGBf(0.4, 0.85, 0.4), halign=:left)
-                                    btn_un = Button(map_grid[row_offset + j - 1, 4], label="[x]",
-                                        buttoncolor=BG_PNL, labelcolor=RGBf(0.9, 0.3, 0.3), fontsize=8,
-                                        width=22, height=18, tellwidth=true, tellheight=true)
-                                    on(btn_un.clicks) do _
-                                        h5_path = _MEH.h5_path_ref[]
-                                        if isempty(h5_path) || !isfile(h5_path)
-                                            h5_path = _MEH.h5_save_path_ref[]
-                                        end
-                                        for (gid, members) in LA.get_match_groups()
-                                            idx_r = findfirst(m -> m[1] == right_node && m[2] == rid, members)
-                                            has_l = any(m -> m[1] == left_node && m[2] == active_lid, members)
-                                            if idx_r !== nothing && has_l
-                                                deleteat!(members, idx_r)
-                                                if length(members) <= 1
-                                                    delete!(LA.get_match_groups(), gid)
-                                                end
-                                                break
-                                            end
-                                        end
-                                        if !isempty(h5_path) && isfile(h5_path)
-                                            LA.save_matches_to_h5(h5_path)
-                                        end
-                                        put!(channel, SyncLesionEvent(active_lid, false))
-                                        _build_match_display!()
-                                    end
-                                end
-                                if n_truncated > 0
-                                    Label(map_grid[row_offset + n_display, 3:4],
-                                        "(+$n_truncated more)",
-                                        fontsize=8, color=SUBTXT, halign=:left)
-                                end
-                            end
-                            Makie.GridLayoutBase.update!(g)
-                            _cache_widget_bboxes!()
-                        finally
-                            g.block_updates = true
-                            _apply_scroll!(_scroll_offset_px[])
-                        end
-                    catch e
-                        @warn "Match display UI building failed" e
-                    end
-                end
-            catch e
-                @warn "Match display computation failed" e
-            end
-        end
-    end
-    
-    on(btn_refresh_map.clicks) do _
-        empty!(_MASK_IDS_CACHE)
-        empty!(_cached_lesion_ids)
-        empty!(_organ_classification_cache)
-        _build_match_display!()
-    end
-    
-    end_section!(sec_map_lesions)
-    on(sec_map_lesions[1]) do is_open
-        if is_open
-            _build_match_display!()
-        end
-    end
-    _lmw_observables[:build_match_display] = () -> _build_match_display!()
-
      function apply_compare_mode_ui_impl!(active::Bool)
         println("[COMPARE-UI] apply_compare_mode_ui_impl!(active=$active) — START"); flush(stdout)
         cv_active[] = active
@@ -8787,7 +8832,7 @@ function create_metadata_window(
                         set_row_visible!(i, false)
                     end
                 end
-                # Auto-open Map Lesions section
+                # Ensure Map Lesions section is open and refreshed
                 sec_map_lesions[1][] = true
                 show_section!(sec_map_lesions)
                 notify(anat_active_count)
@@ -8810,12 +8855,14 @@ function create_metadata_window(
                         set_row_visible!(i, true)
                     end
                 end
-                sec_map_lesions[1][] = false
-                _, start_row_map, _, _, end_row_ref_map = sec_map_lesions
-                for i in start_row_map:end_row_ref_map[]
-                    set_row_visible!(i, false)
+                # Keep Map Lesions section permanently open and refreshed
+                sec_map_lesions[1][] = true
+                show_section!(sec_map_lesions)
+                try
+                    _build_match_display!()
+                catch e
+                    @warn "Failed to rebuild match display on compare mode exit" e
                 end
-                for elem in contents(map_grid); try delete!(elem) catch; end; end
                 update_dynamic_visibility!(active_lesion_type[])
                 notify(anat_active_count)
             end
