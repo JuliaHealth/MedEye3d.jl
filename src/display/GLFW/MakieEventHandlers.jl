@@ -4355,8 +4355,16 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
                     # Fast O(1) centroid-based organ mapping lookup from atlas (avoids another 85M-voxel scan)
                     if !ln_mode_i && centroid_found
                         try
-                            atlas = global_ts_atlas[]
-                            ts_nm = global_ts_names[]
+                            # Use per-TP anatomy atlas and label map for MRI TPs (prostate zones)
+                            tp_entry_anat = lock(_tp_cache_lock) do
+                                get(tp_data_cache, tp_i, nothing)
+                            end
+                            atlas = if tp_entry_anat !== nothing && tp_entry_anat.anatomy !== nothing
+                                tp_entry_anat.anatomy
+                            else
+                                global_ts_atlas[]
+                            end
+                            ts_nm = get(anatomy_labels_cache, tp_i, global_ts_names[])
                             if atlas !== nothing && ts_nm !== nothing && haskey(lesion_centroids_cache, (tp_i, lid_i))
                                 centroid = lesion_centroids_cache[(tp_i, lid_i)]
                                 sx = clamp(centroid[1], 1, size(atlas, 1))

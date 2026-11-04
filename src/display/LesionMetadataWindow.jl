@@ -3309,7 +3309,9 @@ function get_cached_organ_name(sid::Int, tp::Int)
         entry === nothing && return ""
         entry.anatomy === nothing && return ""
         try
-            organ = LA.classify_and_pick_best_organ(entry.mask_i16, entry.anatomy, _MEH.global_ts_names[], sid)
+            # Use per-TP label map (prostate zones for MRI TPs, body labels for CT/PET)
+            ts_names_for_tp = get(_MEH.anatomy_labels_cache, tp, _MEH.global_ts_names[])
+            organ = LA.classify_and_pick_best_organ(entry.mask_i16, entry.anatomy, ts_names_for_tp, sid)
             organ === nothing && return ""
             formatted = try LA.lookup_anatomy(organ) catch; "" end
             if isempty(formatted) || formatted == organ
@@ -6173,10 +6175,10 @@ function create_metadata_window(
                             map_selected_right[] = copy(connected_right)
                             
                             Label(map_grid[1, 1:2], "Add Left Lesion:", fontsize=9, color=LBL_FG, halign=:left)
-                            Label(map_grid[1, 3:4], "Add Right Lesion:", fontsize=9, color=LBL_FG, halign=:left)
+                            Label(map_grid[1, 3:5], "Add Right Lesion:", fontsize=9, color=LBL_FG, halign=:left)
                             
                             menu_l = searchable_menu(map_grid, 2, 1:2, options = Observable(l_opts), fontsize = 9)
-                            menu_r = searchable_menu(map_grid, 2, 3:4, options = Observable(r_opts), fontsize = 9)
+                            menu_r = searchable_menu(map_grid, 2, 3:5, options = Observable(r_opts), fontsize = 9)
                             
                             on(menu_l.selection) do sel
                                 _is_applying_state[] && return
@@ -6238,14 +6240,27 @@ function create_metadata_window(
                             
                             row_offset = 3
                             if active_lid > 0
-                                Label(map_grid[row_offset, 1:2], active_left_name, fontsize=8,
+                                Label(map_grid[row_offset, 1], active_left_name, fontsize=8,
                                     color=isempty(connected_right) ? TXT : RGBf(0.4, 0.85, 0.4), halign=:left)
+                                # Jump-to button for active left lesion
+                                btn_jump_l = Button(map_grid[row_offset, 2], label=">>",
+                                    buttoncolor=BG_PNL, labelcolor=RGBf(0.5, 0.8, 1.0), fontsize=8,
+                                    width=22, height=18, tellwidth=true, tellheight=true)
+                                let jump_lid = active_lid
+                                    on(btn_jump_l.clicks) do _
+                                        try
+                                            put!(channel, SyncLesionEvent(jump_lid, true))
+                                        catch e
+                                            @warn "Jump to left lesion failed" e
+                                        end
+                                    end
+                                end
                             else
                                 Label(map_grid[row_offset, 1:2], "(no active lesion)", fontsize=8, color=SUBTXT, halign=:left)
                             end
                             
                             if isempty(connected_right)
-                                Label(map_grid[row_offset, 3:4], "(unmapped)", fontsize=8, color=SUBTXT, halign=:left)
+                                Label(map_grid[row_offset, 3:5], "(unmapped)", fontsize=8, color=SUBTXT, halign=:left)
                             else
                                 n_display = length(connected_right)
                                 n_truncated = 0
@@ -6258,7 +6273,51 @@ function create_metadata_window(
                                     rid = connected_right[j]
                                     Label(map_grid[row_offset + j - 1, 3], lbl_txt, fontsize=8,
                                         color=RGBf(0.4, 0.85, 0.4), halign=:left)
-                                    btn_un = Button(map_grid[row_offset + j - 1, 4], label="[x]",
+                                    # Jump-to button for right-side mapped lesion
+                                    let jump_rid = rid, jump_tp = tp_right, cur_left_lid = active_lid
+                                        btn_jump_r = Button(map_grid[row_offset + j - 1, 4], label=">>",
+                                            buttoncolor=BG_PNL, labelcolor=RGBf(0.5, 0.8, 1.0), fontsize=8,
+                                            width=22, height=18, tellwidth=true, tellheight=true)
+                                        on(btn_jump_r.clicks) do _
+                                            try
+                                                # Find centroid of right-TP lesion and jump viewer to it
+                                                centroid = get(_MEH.lesion_centroids_cache, (jump_tp, jump_rid), nothing)
+                                                if centroid === nothing
+                                                    r_node = _MEH.get_node_name_for_tp(jump_tp)
+                                                    centroid = get(_MEH.lesion_centroids_cache, (r_node, jump_rid), nothing)
+                                                end
+                                                if centroid === nothing
+                                                    # Compute centroid from right TP's mask volume
+                                                    r_entry = lock(_MEH._tp_cache_lock) do
+                                                        get(_MEH.tp_data_cache, jump_tp, nothing)
+                                                    end
+                                                    if r_entry !== nothing
+                                                        mask_vol = r_entry.mask_i16 !== nothing ? r_entry.mask_i16 : r_entry.mask
+                                                        if mask_vol !== nothing && !(mask_vol isa PermutedDimsArray)
+                                                            centroid = _MEH.find_lesion_center(mask_vol, Float32(jump_rid))
+                                                            if centroid !== nothing
+                                                                _MEH.lesion_centroids_cache[(jump_tp, jump_rid)] = centroid
+                                                            end
+                                                        end
+                                                    end
+                                                end
+                                                if centroid !== nothing
+                                                    # Pre-cache centroid under current TP so SyncLesionEvent can find it
+                                                    # (coordinates are valid across TPs since volumes are spatially registered)
+                                                    cur_tp = _MEH.current_tp_index[]
+                                                    _MEH.lesion_centroids_cache[(cur_tp, jump_rid)] = centroid
+                                                    _MEH.lesion_centroids_cache[jump_rid] = centroid
+                                                    # Jump viewer to the right-TP lesion's position
+                                                    put!(channel, SyncLesionEvent(jump_rid, true))
+                                                else
+                                                    @warn "[MAP-JUMP] Could not find centroid for lesion $jump_rid in TP $jump_tp"
+                                                end
+                                            catch e
+                                                @warn "Jump to right lesion failed" e
+                                            end
+                                        end
+                                    end
+                                    btn_un = Button(map_grid[row_offset + j - 1, 5], label="[x]",
                                         buttoncolor=BG_PNL, labelcolor=RGBf(0.9, 0.3, 0.3), fontsize=8,
                                         width=22, height=18, tellwidth=true, tellheight=true)
                                     on(btn_un.clicks) do _
@@ -6288,7 +6347,7 @@ function create_metadata_window(
                                     end
                                 end
                                 if n_truncated > 0
-                                    Label(map_grid[row_offset + n_display, 3:4],
+                                    Label(map_grid[row_offset + n_display, 3:5],
                                         "(+$n_truncated more)",
                                         fontsize=8, color=SUBTXT, halign=:left)
                                 end
@@ -8313,9 +8372,19 @@ function create_metadata_window(
         # Auto-name from anatomy atlas at the CURRENT cursor position
         display_name = "New Lesion"
         try
-            atlas = _MEH.global_ts_atlas[]
-            ts_names = _MEH.global_ts_names[]
-            println("[NEW LESION] atlas=$(atlas !== nothing ? "$(size(atlas))" : "null"), ts_names=$(ts_names !== nothing ? "$(length(ts_names)) entries" : "null")")
+            # Use per-TP anatomy atlas and label map for MRI TPs (prostate zones),
+            # falling back to global body atlas for CT/PET TPs
+            tp_idx_new = _MEH.current_tp_index[]
+            tp_entry_new = lock(_MEH._tp_cache_lock) do
+                get(_MEH.tp_data_cache, tp_idx_new, nothing)
+            end
+            atlas = if tp_entry_new !== nothing && tp_entry_new.anatomy !== nothing
+                tp_entry_new.anatomy
+            else
+                _MEH.global_ts_atlas[]
+            end
+            ts_names = get(_MEH.anatomy_labels_cache, tp_idx_new, _MEH.global_ts_names[])
+            println("[NEW LESION] tp=$tp_idx_new atlas=$(atlas !== nothing ? "$(size(atlas))" : "null"), ts_names=$(ts_names !== nothing ? "$(length(ts_names)) entries" : "null")")
             if atlas !== nothing && ts_names !== nothing
                 # Use the actual viewer cursor position (tracked in ReactOnMouseClickAndDrag)
                 vpos = _MEH.current_viewer_position[]
@@ -9467,9 +9536,17 @@ function create_metadata_window(
             # Fallback: if organ mapping is empty or "Unknown", try volume-based scan
             if (isempty(raw_organ) || raw_organ == "Unknown") && _MEH.global_ts_atlas[] !== nothing
                 try
-                    atlas = _MEH.global_ts_atlas[]
-                    ts_nm = _MEH.global_ts_names[]
                     tp_idx = _MEH.current_tp_index[]
+                    # Use per-TP anatomy atlas and label map (prostate zones for MRI, body for CT/PET)
+                    tp_entry_fb = lock(_MEH._tp_cache_lock) do
+                        get(_MEH.tp_data_cache, tp_idx, nothing)
+                    end
+                    atlas = if tp_entry_fb !== nothing && tp_entry_fb.anatomy !== nothing
+                        tp_entry_fb.anatomy
+                    else
+                        _MEH.global_ts_atlas[]
+                    end
+                    ts_nm = get(_MEH.anatomy_labels_cache, tp_idx, _MEH.global_ts_names[])
                     
                     # Try volume-based scan from tp_data_cache mask
                     mask_vol = lock(_MEH._tp_cache_lock) do

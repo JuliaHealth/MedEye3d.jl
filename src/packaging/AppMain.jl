@@ -1182,6 +1182,27 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                     end
                 end
                 println("[ANATOMY] Loaded $(length(prostate_labels)) prostate anatomy labels for MRI timepoints: $(collect(values(prostate_labels)))"); flush(stdout)
+                # Clear stale organ mappings for MRI TP lesions that were previously classified
+                # using body atlas labels instead of prostate-specific labels (label-map mismatch fix)
+                mri_tps = Set{Int}()
+                for (tp_i, mod) in MEH.tp_modalities
+                    if uppercase(strip(mod)) in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE")
+                        push!(mri_tps, tp_i)
+                    end
+                end
+                if !isempty(mri_tps)
+                    n_cleared = 0
+                    for tp_i in mri_tps
+                        tp_organs = get(MEH.tp_organ_mapping, tp_i, nothing)
+                        if tp_organs !== nothing
+                            n_cleared += length(tp_organs)
+                            empty!(tp_organs)
+                        end
+                    end
+                    if n_cleared > 0
+                        println("[ANATOMY] Cleared $n_cleared stale organ mappings for MRI TPs (will reclassify with prostate labels)"); flush(stdout)
+                    end
+                end
             catch e
                 @warn "[ANATOMY] Failed to load prostate anatomy labels: $e" exception=(e, catch_backtrace())
             end
