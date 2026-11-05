@@ -169,7 +169,16 @@ var
 begin
   if CurStep = ssPostInstall then
   begin
-    LogDir := LogDirPage.Values[0];
+    LogDir := Trim(LogDirPage.Values[0]);
+    if LogDir = '' then
+      LogDir := ExpandConstant('{userappdata}\MedEye3D\logs')
+    else if (Length(LogDir) < 2) or (LogDir[2] <> ':') then
+    begin
+      // Relative path entered (e.g. "docs" or "MedEye3D_logs") -> resolve to user's Documents
+      if LogDir[1] <> '\' then
+        LogDir := '\' + LogDir;
+      LogDir := ExpandConstant('{userdocs}') + LogDir;
+    end;
     SelectedLogDir := LogDir;
 
     // Create the log directory itself

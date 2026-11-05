@@ -89,8 +89,16 @@ function get_writable_log_dir()::String
                 cfg = JSON.parse(read(cfg_candidate, String))
                 custom_dir = get(cfg, "log_dir", "")
                 if !isempty(custom_dir)
-                    mkpath(custom_dir)
-                    return custom_dir
+                    # Handle relative paths (e.g. "docs" or "Documents/MedEye3D_logs")
+                    if !isabspath(custom_dir)
+                        custom_dir = joinpath(homedir(), "Documents", custom_dir)
+                    end
+                    try
+                        mkpath(custom_dir)
+                        return custom_dir
+                    catch err
+                        # If creation fails, continue search/fallback
+                    end
                 end
             catch
             end
@@ -1872,7 +1880,9 @@ function run_app(args::Vector{String})
         MedEye3d.InferenceClient.set_ai_enabled!(false)
     end
 
+    app_root = dirname(Sys.BINDIR)
     default_h5_candidates = [
+        joinpath(app_root, "data", "preprocessed_volumes.h5"),
         "D:\\MedEye3d.jl\\data\\preprocessed_volumes.h5",
         joinpath(@__DIR__, "..", "..", "data", "preprocessed_volumes.h5"),
         joinpath(get(ENV, "APPDATA", ""), "MedEye3D", "data", "preprocessed_volumes.h5"),

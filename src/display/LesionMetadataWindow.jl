@@ -160,32 +160,38 @@ export current_has_expert_edits, current_seg_origin, mark_expert_correction!, ma
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 function _find_metadata_data_file(filename::String)::String
+    app_root = dirname(Sys.BINDIR)
     candidates = [
-        normpath(joinpath(@__DIR__, "..", "..", "assets", filename)),
-        normpath(joinpath(@__DIR__, "..", "..", "data", filename)),
-        joinpath(dirname(Sys.BINDIR), "assets", filename),
-        joinpath(dirname(Sys.BINDIR), "data", filename),
-        joinpath(Sys.BINDIR, "assets", filename),
+        joinpath(app_root, "data", filename),
+        joinpath(app_root, "assets", filename),
         joinpath(Sys.BINDIR, "data", filename),
-        joinpath(get(ENV, "APPDATA", ""), "MedEye3D", "assets", filename),
+        joinpath(Sys.BINDIR, "assets", filename),
         joinpath(get(ENV, "APPDATA", ""), "MedEye3D", "data", filename),
-        joinpath(homedir(), "AppData", "Local", "Programs", "MedEye3D", "assets", filename),
+        joinpath(get(ENV, "APPDATA", ""), "MedEye3D", "assets", filename),
         joinpath(homedir(), "AppData", "Local", "Programs", "MedEye3D", "data", filename),
-        joinpath("D:\\slicer_lesion_text_extension", "data", filename),
-        "/mnt/big/project_ssd/project_ssd/slicer_lesion_text_extension/data/$filename",
+        joinpath(homedir(), "AppData", "Local", "Programs", "MedEye3D", "assets", filename),
+        normpath(joinpath(@__DIR__, "..", "..", "data", filename)),
+        normpath(joinpath(@__DIR__, "..", "..", "assets", filename)),
         normpath(joinpath(@__DIR__, "..", "..", "extension", "data", filename))
     ]
     for c in candidates
-        isfile(c) && return c
+        try
+            if isfile(c)
+                return c
+            end
+        catch
+        end
     end
-    return normpath(joinpath(@__DIR__, "..", "..", "assets", filename))
+    return joinpath(app_root, "data", filename)
 end
 
-const DEF_JSON_PATH       = _find_metadata_data_file("def.json")
-const RADLEX_CSV_PATH     = _find_metadata_data_file("RadLex.csv")
-const ANATOMY_CSV_PATH    = _find_metadata_data_file("FoundationalAnatomy.csv")
-const CUSTOM_OPTS_PATH    = _find_metadata_data_file("custom_options.json")
-const METADATA_PRESETS_PATH = _find_metadata_data_file("metadata_presets.json")
+# Dynamic path accessors that evaluate at runtime on the active installation machine
+get_def_json_path()::String          = _find_metadata_data_file("def.json")
+get_radlex_csv_path()::String        = _find_metadata_data_file("RadLex.csv")
+get_anatomy_csv_path()::String       = _find_metadata_data_file("FoundationalAnatomy.csv")
+get_custom_opts_path()::String       = _find_metadata_data_file("custom_options.json")
+get_metadata_presets_path()::String  = _find_metadata_data_file("metadata_presets.json")
+get_anatomy_mapping_path()::String   = _find_metadata_data_file("max_anatomy_to_ontology.json")
 
 # Module-level anatomy visibility state (mirrored from the local vis_anatomy_active Ref)
 # Allows MakieEventHandlers to query anatomy toggle state without direct access
@@ -474,7 +480,7 @@ end
 
 const DEFAULT_SAVE_PATH   = joinpath(homedir(), "medeye3d_lesion_annotations.json")
 const DEFAULT_HDF5_PATH   = joinpath(homedir(), "medeye3d_lesion_annotations.h5")
-const ANATOMY_MAPPING_PATH= _find_metadata_data_file("max_anatomy_to_ontology.json")
+# ANATOMY_MAPPING_PATH resolved dynamically via get_anatomy_mapping_path()
 const GLOBAL_CUSTOM_OPTS_PATH = joinpath(homedir(), ".medeye3d_custom_options.json")
 const GLOBAL_METADATA_PRESETS_PATH = joinpath(homedir(), ".medeye3d_metadata_presets.json")
 
@@ -575,9 +581,10 @@ function load_custom_options()::Dict{String,Any}
     end
     res = Dict{String,Any}()
     # Merge package/slicer default custom options
-    if isfile(CUSTOM_OPTS_PATH)
+    custom_opts_p = get_custom_opts_path()
+    if isfile(custom_opts_p)
         try
-            merge!(res, JSON.parse(read(CUSTOM_OPTS_PATH, String)))
+            merge!(res, JSON.parse(read(custom_opts_p, String)))
         catch e
             @warn "Failed to load custom_options.json: $e"
         end
@@ -612,7 +619,7 @@ end
 function save_custom_options!(db::Dict)
     _custom_opts_cache[] = copy(db)
     _write_meta_json_to_h5!("custom_options.json", db)
-    for p in [GLOBAL_CUSTOM_OPTS_PATH, CUSTOM_OPTS_PATH]
+    for p in [GLOBAL_CUSTOM_OPTS_PATH, get_custom_opts_path()]
         try
             mkpath(dirname(p))
             open(p, "w") do f
@@ -725,11 +732,12 @@ function load_metadata_presets()::Dict{String,Any}
     )
     
     # 1. Base assets presets
-    if isfile(METADATA_PRESETS_PATH)
+    meta_presets_p = get_metadata_presets_path()
+    if isfile(meta_presets_p)
         try
-            merge!(res, JSON.parse(read(METADATA_PRESETS_PATH, String)))
+            merge!(res, JSON.parse(read(meta_presets_p, String)))
         catch e
-            @warn "Failed to load $METADATA_PRESETS_PATH: $e"
+            @warn "Failed to load $(meta_presets_p): $e"
         end
     end
     # Ensure default builtins exist
@@ -768,7 +776,7 @@ end
 function save_metadata_presets!(presets::Dict)
     _metadata_presets_cache[] = copy(presets)
     _write_meta_json_to_h5!("metadata_presets.json", presets)
-    for p in [GLOBAL_METADATA_PRESETS_PATH, METADATA_PRESETS_PATH]
+    for p in [GLOBAL_METADATA_PRESETS_PATH, get_metadata_presets_path()]
         try
             mkpath(dirname(p))
             open(p, "w") do f
@@ -969,11 +977,15 @@ struct QuestionDef
     default_answer::String
 end
 
+# 5-argument constructor fallback (derives short label if omitted)
+QuestionDef(full::String, options::Vector{String}, categories::Vector{String}, mode::String, default_answer::String) =
+    QuestionDef(isempty(categories) ? "Question" : categories[1], full, options, categories, mode, default_answer)
+
 const _schema_cache = Ref{Vector{QuestionDef}}(QuestionDef[])
 
 function _builtin_schema()::Vector{QuestionDef}
     QuestionDef[
-        QuestionDef("The specific radioligand used for this PSMA-PET scan, influencing pharmacokinetic thresholds.",
+        QuestionDef("Radioligand", "The specific radioligand used for this PSMA-PET scan, influencing pharmacokinetic thresholds.",
             String["68Ga-PSMA-11", "18F-PSMA-1007", "18F-DCFPyL", "Other"],
             String["Technical Parameters"], "both", "68Ga-PSMA-11"),
         QuestionDef("Lesion tracking name?", "What is the specific anatomical descriptor or tracking name for this lesion?",
@@ -1062,12 +1074,13 @@ const DISPLAY_LABEL_OVERRIDES = Dict{String, String}(
 
 function load_schema()::Vector{QuestionDef}
     isempty(_schema_cache[]) || return _schema_cache[]
-    if !isfile(DEF_JSON_PATH)
-        @warn "def.json not found at $(DEF_JSON_PATH), falling back to builtin 20-question schema"
+    def_json_p = get_def_json_path()
+    if !isfile(def_json_p)
+        @warn "def.json not found at $(def_json_p), falling back to builtin 20-question schema"
         _schema_cache[] = _builtin_schema()
         return _schema_cache[]
     end
-    raw = JSON.parse(read(DEF_JSON_PATH, String))
+    raw = JSON.parse(read(def_json_p, String))
     result = QuestionDef[]
     for q in raw
         # JSON.parse returns String keys
@@ -1106,8 +1119,9 @@ const RADLEX_MAX_TERMS = 2000
 function load_radlex()::Vector{String}
     isempty(_radlex_cache[]) || return _radlex_cache[]
     terms = String[]
-    if isfile(RADLEX_CSV_PATH)
-        for (i, line) in enumerate(eachline(RADLEX_CSV_PATH))
+    radlex_p = get_radlex_csv_path()
+    if isfile(radlex_p)
+        for (i, line) in enumerate(eachline(radlex_p))
             i == 1 && continue   # skip header
             parts = split(line, ','; limit = 4)
             length(parts) >= 2 || continue
@@ -1119,7 +1133,7 @@ function load_radlex()::Vector{String}
         end
         @info "Loaded $(length(terms)) RadLex terms"
     else
-        @warn "RadLex CSV not found at $(RADLEX_CSV_PATH)"
+        @warn "RadLex CSV not found at $(get_radlex_csv_path())"
     end
     _radlex_cache[] = isempty(terms) ? ["(none)"] : sort(terms)
     _build_fts!("radlex_fts", _radlex_cache[])
@@ -1216,9 +1230,10 @@ Prepends common clinical aliases for quick access."""
 function load_anatomy_ontology()::Vector{String}
     isempty(_anatomy_cache[]) || return _anatomy_cache[]
     terms = String[]
-    if isfile(ANATOMY_CSV_PATH)
+    anatomy_p = get_anatomy_csv_path()
+    if isfile(anatomy_p)
         seen = Set{String}()
-        for (i, line) in enumerate(eachline(ANATOMY_CSV_PATH))
+        for (i, line) in enumerate(eachline(anatomy_p))
             i == 1 && continue   # header: Name,ID
             parts = split(strip(line), ','; limit = 2)
             length(parts) >= 2 || continue
@@ -1235,7 +1250,7 @@ function load_anatomy_ontology()::Vector{String}
         end
         @info "Loaded $(length(terms)) UBERON anatomy terms for Base Anatomy autocomplete (filtered from CSV)"
     else
-        @warn "FoundationalAnatomy CSV not found at $(ANATOMY_CSV_PATH)"
+        @warn "FoundationalAnatomy CSV not found at $(get_anatomy_csv_path())"
     end
     # Prepend clinical aliases (deduped against UBERON terms)
     alias_terms = String[]
@@ -1344,9 +1359,10 @@ const _anatomy_mapping_cache = Ref{Dict{String,Any}}(Dict{String,Any}())
 """Load the hand-crafted max_anatomy → UBERON ontology mapping from JSON."""
 function load_anatomy_mapping()::Dict{String,Any}
     isempty(_anatomy_mapping_cache[]) || return _anatomy_mapping_cache[]
-    if isfile(ANATOMY_MAPPING_PATH)
+    mapping_p = get_anatomy_mapping_path()
+    if isfile(mapping_p)
         try
-            raw = JSON.parsefile(ANATOMY_MAPPING_PATH)
+            raw = JSON.parsefile(mapping_p)
             # Normalize all keys to lowercase for reliable lookup
             normalized = Dict{String,Any}()
             for (k, v) in raw
@@ -1361,8 +1377,8 @@ function load_anatomy_mapping()::Dict{String,Any}
             @warn "Failed to load anatomy mapping JSON: $e"
         end
     else
-        println("[ANATOMY] Anatomy mapping JSON not found at $(ANATOMY_MAPPING_PATH)"); flush(stdout)
-        @warn "Anatomy mapping JSON not found at $(ANATOMY_MAPPING_PATH)"
+        println("[ANATOMY] Anatomy mapping JSON not found at $(mapping_p)"); flush(stdout)
+        @warn "Anatomy mapping JSON not found at $(mapping_p)"
     end
     return _anatomy_mapping_cache[]
 end
@@ -9098,7 +9114,22 @@ function create_metadata_window(
     rowsize!(g, log_r, Fixed(28)); register_fixed_row!(log_r, 28)
     on(btn_open_logs.clicks) do _
         try
-            log_dir = joinpath(get(ENV, "APPDATA", ""), "MedEye3D", "logs")
+            log_dir = ""
+            for cfg_p in [
+                joinpath(dirname(Sys.BINDIR), "data", "log_config.json"),
+                joinpath(Sys.BINDIR, "log_config.json")
+            ]
+                if isfile(cfg_p)
+                    try
+                        cfg = JSON.parse(read(cfg_p, String))
+                        log_dir = get(cfg, "log_dir", "")
+                        break
+                    catch; end
+                end
+            end
+            if isempty(log_dir) || !isdir(log_dir)
+                log_dir = joinpath(get(ENV, "APPDATA", ""), "MedEye3D", "logs")
+            end
             if !isdir(log_dir)
                 log_dir = joinpath(tempdir(), "MedEye3D_logs")
             end

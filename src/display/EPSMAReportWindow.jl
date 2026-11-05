@@ -946,8 +946,8 @@ function open_epsma_report_window(report::ESR.EPSMAReport; on_refresh::Union{Fun
     on(btn_export.clicks) do _
         @async begin
             lang = current_lang[]
-            default_dir = joinpath(@__DIR__, "..", "..", "data", "reports")
-            isdir(default_dir) || mkpath(default_dir)
+            default_dir = joinpath(homedir(), "Documents", "MedEye3D_Reports")
+            try isdir(default_dir) || mkpath(default_dir); catch; default_dir = tempdir(); end
             default_name = "E_PSMA_Report_$(report.patient_id)_TP$(report.tp_index)_$(lang).docx"
             default_path = joinpath(default_dir, default_name)
             

@@ -3,16 +3,17 @@ import Logging
 using Logging
 using Base.Threads
 
-# Configure logging to save to data/log.txt automatically (falling back to temporary/null logger if read-only)
+# In standalone/packaged mode, application logging is managed by AppMain.jl.
+# In development mode, optionally log to data/log.txt if local development data directory exists.
 function __init__()
     try
-        log_dir = joinpath(@__DIR__, "..", "data")
-        if !isdir(log_dir)
-            mkdir(log_dir)
+        dev_data_dir = normpath(joinpath(@__DIR__, "..", "data"))
+        if isdir(dev_data_dir) && isfile(joinpath(dev_data_dir, "def.json"))
+            log_file = joinpath(dev_data_dir, "log.txt")
+            global_logger(SimpleLogger(open(log_file, "a")))
         end
-        global_logger(SimpleLogger(open(joinpath(log_dir, "log.txt"), "a")))
     catch
-        # Read-only or packaged installation fallback
+        # Read-only or packaged installation fallback — do not interfere
     end
 end
 
