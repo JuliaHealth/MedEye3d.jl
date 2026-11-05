@@ -59,9 +59,45 @@ export julia_main
     get_writable_log_dir() -> String
 
 Returns a writable directory path for application log files on Windows.
-Prefers `%APPDATA%\\MedEye3D\\logs` or `%LOCALAPPDATA%\\MedEye3D\\logs`, falling back to `tempdir()`.
+Priority order:
+  1. MEDEYE3D_LOG_DIR environment variable
+  2. Custom log directory set by the installer (stored in `log_config.json` in the app data/ dir)
+  3. `%APPDATA%\\MedEye3D\\logs` or `%LOCALAPPDATA%\\MedEye3D\\logs`
+  4. `tempdir()`
 """
 function get_writable_log_dir()::String
+    # 1. Environment variable override
+    env_log_dir = get(ENV, "MEDEYE3D_LOG_DIR", "")
+    if !isempty(env_log_dir)
+        try
+            mkpath(env_log_dir)
+            return env_log_dir
+        catch
+        end
+    end
+
+    # 2. Installer-configured log directory (log_config.json in app bundle)
+    #    Use Sys.BINDIR for runtime path (works in PackageCompiler compiled apps)
+    #    Sys.BINDIR points to {app}/bin/ at runtime
+    app_root = dirname(Sys.BINDIR)
+    for cfg_candidate in [
+        joinpath(app_root, "data", "log_config.json"),    # {app}/data/log_config.json (installer writes here)
+        joinpath(Sys.BINDIR, "log_config.json"),           # {app}/bin/log_config.json (fallback)
+    ]
+        if isfile(cfg_candidate)
+            try
+                cfg = JSON.parse(read(cfg_candidate, String))
+                custom_dir = get(cfg, "log_dir", "")
+                if !isempty(custom_dir)
+                    mkpath(custom_dir)
+                    return custom_dir
+                end
+            catch
+            end
+        end
+    end
+
+    # 3. Default: %APPDATA%\MedEye3D\logs or %LOCALAPPDATA%\MedEye3D\logs
     appdata = get(ENV, "APPDATA", "")
     base_dir = if !isempty(appdata) && isdir(appdata)
         joinpath(appdata, "MedEye3D", "logs")
@@ -1946,8 +1982,36 @@ function julia_main()::Cint
     catch
     end
 
-    out_file = open(out_log_path, "w")
-    err_file = open(err_log_path, "w")
+    # Wrap log file creation in try/catch — if this fails, write emergency crash log next to exe
+    local out_file, err_file
+    try
+        mkpath(log_dir)
+        out_file = open(out_log_path, "w")
+        err_file = open(err_log_path, "w")
+    catch log_err
+        # Emergency fallback: write crash info next to the executable
+        emergency_log = joinpath(Sys.BINDIR, "medeye3d_CRASH.log")
+        try
+            open(emergency_log, "w") do ef
+                println(ef, "MedEye3D EMERGENCY CRASH LOG - $(Dates.now())")
+                println(ef, "Failed to create log files in: $log_dir")
+                println(ef, "Error: $log_err")
+                println(ef, "out_log_path: $out_log_path")
+                println(ef, "err_log_path: $err_log_path")
+                println(ef, "Sys.BINDIR: $(Sys.BINDIR)")
+                println(ef, "APPDATA: ", get(ENV, "APPDATA", "<not set>"))
+                println(ef, "pwd: $(pwd())")
+                flush(ef)
+            end
+        catch; end
+        # Fall back to temp directory
+        log_dir = tempdir()
+        out_log_path = joinpath(log_dir, "medeye3d_output.log")
+        err_log_path = joinpath(log_dir, "medeye3d_error.log")
+        session_log_path = joinpath(log_dir, "medeye3d_session.log")
+        out_file = open(out_log_path, "w")
+        err_file = open(err_log_path, "w")
+    end
 
     init_msg = """
     =======================================================

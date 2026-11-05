@@ -251,46 +251,10 @@ function prompt_start_ai_models(args::Vector{String}=ARGS)::Bool
         return true
     end
 
-    # 6. Native dialog prompt on Windows
-    if Sys.iswindows()
-        prompt_text = "Would you like to run the AI inference models (nnInteractive & HELPNet) locally?\\n\\nIn case of capable hardware (GPU / Docker / Python), running the models locally enables interactive AI segmentation tools automatically.\\n\\n• Click 'Yes' to run/connect local AI models\\n• Click 'No' for viewer-only mode"
-        prompt_title = "MedEye3D - AI Inference Models"
-        ps_cmd = """
-        Add-Type -AssemblyName System.Windows.Forms
-        \$res = [System.Windows.Forms.MessageBox]::Show(
-            "$prompt_text",
-            "$prompt_title",
-            [System.Windows.Forms.MessageBoxButtons]::YesNo,
-            [System.Windows.Forms.MessageBoxIcon]::Question
-        )
-        Write-Output \$res
-        """
-        try
-            out = read(`powershell -NoProfile -Command $ps_cmd`, String)
-            result = strip(out)
-            if result == "Yes"
-                println("[InferenceClient] User selected YES to run AI inference models.")
-                set_ai_enabled!(true)
-                return true
-            else
-                println("[InferenceClient] User selected NO to AI inference models.")
-                set_ai_enabled!(false)
-                return false
-            end
-        catch e
-            @warn "[InferenceClient] Failed to display native dialog: $e"
-            set_ai_enabled!(false)
-            return false
-        end
-    elseif isinteractive()
-        print("Would you like to run the AI inference models (nnInteractive & HELPNet)? [y/N]: ")
-        flush(stdout)
-        ans = readline()
-        selected = lowercase(strip(ans)) in ("y", "yes")
-        set_ai_enabled!(selected)
-        return selected
-    end
-
+    # 6. Docker/AI prompt disabled -- default to viewer-only mode.
+    #    AI inference can still be enabled via CLI flags (--ai), env var (MEDEYE3D_START_AI=1),
+    #    or saved preference in ~/.medeye3d_display_config.json {"start_ai_models": "always"}.
+    println("[InferenceClient] AI inference models dialog skipped (disabled). Use --ai flag or config to enable.")
     set_ai_enabled!(false)
     return false
 end

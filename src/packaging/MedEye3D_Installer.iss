@@ -67,7 +67,7 @@ Source: "app_icon.ico"; DestDir: "{app}\bin"; Flags: ignoreversion
 [Icons]
 ; Start Menu shortcuts
 Name: "{autoprograms}\{#MyAppName}\{#MyAppName}"; Filename: "{app}\bin\{#MyAppExeName}"; IconFilename: "{app}\bin\app_icon.ico"
-Name: "{autoprograms}\{#MyAppName}\Open MedEye3D Logs Folder"; Filename: "{win}\explorer.exe"; Parameters: """{userappdata}\MedEye3D\logs"""
+Name: "{autoprograms}\{#MyAppName}\Open MedEye3D Logs Folder"; Filename: "{win}\explorer.exe"; Parameters: """{code:GetLogDir}"""
 Name: "{autoprograms}\{#MyAppName}\MedEye3D Live Log Monitor"; Filename: "{app}\bin\monitor_logs.bat"
 Name: "{autoprograms}\{#MyAppName}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 
@@ -98,6 +98,10 @@ Root: HKA; Subkey: "Software\Classes\MedEye3D.HDF5\shell\open\command"; ValueTyp
 Filename: "{app}\bin\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+var
+  LogDirPage: TInputDirWizardPage;
+  SelectedLogDir: String;
+
 // Helper function to find previously installed version's uninstaller
 function GetUninstallString(): String;
 var
@@ -111,6 +115,15 @@ begin
     RegQueryStringValue(HKEY_LOCAL_MACHINE, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\' + sAppId + '_is1', 'UninstallString', sUnInstPath);
   end;
   Result := sUnInstPath;
+end;
+
+// Returns the selected log directory (used by {code:GetLogDir} in [Icons])
+function GetLogDir(Param: String): String;
+begin
+  if SelectedLogDir <> '' then
+    Result := SelectedLogDir
+  else
+    Result := ExpandConstant('{userappdata}\MedEye3D\logs');
 end;
 
 // Automatically uninstall previous version before proceeding
@@ -129,5 +142,45 @@ begin
       // Execute uninstaller silently and wait for it to finish
       Exec(sUnInstallString, '/VERYSILENT /NORESTART /SUPPRESSMSGBOXES', '', SW_HIDE, ewWaitUntilTerminated, iResultCode);
     end;
+  end;
+end;
+
+// Create log directory picker wizard page
+procedure InitializeWizard();
+begin
+  LogDirPage := CreateInputDirPage(wpSelectDir,
+    'Log Files Location',
+    'Where should MedEye3D store application log files?',
+    'Select the folder where MedEye3D will write diagnostic log files (output, error, and session logs).' + #13#10 + #13#10 +
+    'This makes it easier to find and share logs for debugging.' + #13#10 +
+    'To use the default location, click Next.',
+    False, '');
+  LogDirPage.Add('');
+  LogDirPage.Values[0] := ExpandConstant('{userappdata}\MedEye3D\logs');
+end;
+
+// Write log_config.json into {app}\data\ after installation completes
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  LogConfigPath: String;
+  LogDir: String;
+  LogDirJson: String;
+  JsonContent: String;
+begin
+  if CurStep = ssPostInstall then
+  begin
+    LogDir := LogDirPage.Values[0];
+    SelectedLogDir := LogDir;
+
+    // Create the log directory itself
+    ForceDirectories(LogDir);
+
+    // Write config: escape backslashes for valid JSON (C:\Users\... -> C:\\Users\\...)
+    LogConfigPath := ExpandConstant('{app}\data\log_config.json');
+    LogDirJson := LogDir;
+    StringChangeEx(LogDirJson, '\', '\\', True);
+    JsonContent := '{"log_dir": "' + LogDirJson + '"}';
+    ForceDirectories(ExpandConstant('{app}\data'));
+    SaveStringToFile(LogConfigPath, JsonContent, False);
   end;
 end;
