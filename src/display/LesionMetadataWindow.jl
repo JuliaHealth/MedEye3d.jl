@@ -7937,7 +7937,7 @@ function create_metadata_window(
     end_section!(sec_meta)
 
     # ── Radiological Report ──────────────────────────────────────────────────
-    sec_report = begin_section!("Radiological Report"; default_open=false)
+    sec_report = begin_section!("Radiological Report"; default_open=true)
 
     current_dict_lang = Observable("EN")
 
