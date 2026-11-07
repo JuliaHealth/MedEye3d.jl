@@ -17,6 +17,7 @@ module VulkanHeatDiffusion
 using Vulkan
 using VulkanCore
 using Logging
+using ..VulkanShaders: compile_glsl_to_spirv
 
 export HeatDiffusionState, init_heat_diffusion!, destroy_heat_diffusion!
 export upload_diffusivity!, run_heat_diffusion!, read_mask_to_cpu
@@ -856,14 +857,101 @@ end
 
 # ─── Shader loading ──────────────────────────────────────────────────────
 
-const SHADER_DIR = joinpath(@__DIR__, "shaders")
+"""
+    get_shader_dir() -> String
+
+Dynamically resolves the directory containing compiled Vulkan SPIR-V (.spv) shaders.
+Searches in order:
+1. `Sys.BINDIR/shaders` (installed app binary directory)
+2. `app_root/shaders` (installed app root directory)
+3. `app_root/src/display/Vulkan/shaders` (relative to app bundle)
+4. `%APPDATA%/MedEye3D/shaders`
+5. Local user app data paths
+6. Source directory relative to `@__DIR__`
+"""
+function get_shader_dir()::String
+    app_root = dirname(Sys.BINDIR)
+    candidates = [
+        joinpath(Sys.BINDIR, "shaders"),
+        joinpath(app_root, "shaders"),
+        joinpath(app_root, "src", "display", "Vulkan", "shaders"),
+        joinpath(get(ENV, "APPDATA", ""), "MedEye3D", "shaders"),
+        joinpath(homedir(), "AppData", "Local", "Programs", "MedEye3D", "shaders"),
+        joinpath(homedir(), "AppData", "Local", "Programs", "MedEye3D", "bin", "shaders"),
+        normpath(joinpath(@__DIR__, "shaders")),
+        normpath(joinpath(@__DIR__, "..", "..", "display", "Vulkan", "shaders")),
+        normpath(joinpath(@__DIR__, "..", "src", "display", "Vulkan", "shaders"))
+    ]
+    for c in candidates
+        try
+            if isdir(c) && isfile(joinpath(c, "seed_init.spv"))
+                return c
+            end
+        catch
+        end
+    end
+    for c in candidates
+        try
+            if isdir(c)
+                return c
+            end
+        catch
+        end
+    end
+    return normpath(joinpath(@__DIR__, "shaders"))
+end
+
+"""
+    find_shader_file(filename::String) -> String
+
+Finds the absolute path to a specific shader file (.spv or .comp).
+"""
+function find_shader_file(filename::String)::String
+    sdir = get_shader_dir()
+    p = joinpath(sdir, filename)
+    if isfile(p)
+        return p
+    end
+    app_root = dirname(Sys.BINDIR)
+    candidates = [
+        joinpath(Sys.BINDIR, "shaders", filename),
+        joinpath(app_root, "shaders", filename),
+        joinpath(app_root, "src", "display", "Vulkan", "shaders", filename),
+        joinpath(get(ENV, "APPDATA", ""), "MedEye3D", "shaders", filename),
+        joinpath(homedir(), "AppData", "Local", "Programs", "MedEye3D", "shaders", filename),
+        joinpath(homedir(), "AppData", "Local", "Programs", "MedEye3D", "bin", "shaders", filename),
+        normpath(joinpath(@__DIR__, "shaders", filename)),
+        normpath(joinpath(@__DIR__, "..", "..", "display", "Vulkan", "shaders", filename))
+    ]
+    for c in candidates
+        try
+            if isfile(c)
+                return c
+            end
+        catch
+        end
+    end
+    return p
+end
+
+const SHADER_DIR = normpath(joinpath(@__DIR__, "shaders"))
 
 function load_shader_module(device::Device, filename::String)
-    spv_path = joinpath(SHADER_DIR, filename)
-    if !isfile(spv_path)
-        error("SPIR-V shader not found: $spv_path")
+    spv_path = find_shader_file(filename)
+    local code::Vector{UInt8}
+    if isfile(spv_path)
+        code = read(spv_path)
+    else
+        # Fallback: check if .comp file exists and compile dynamically
+        comp_name = replace(filename, r"\.spv$" => ".comp")
+        comp_path = find_shader_file(comp_name)
+        if isfile(comp_path)
+            @info "[VulkanHeatDiffusion] Compiling shader from source: $comp_path"
+            code = compile_glsl_to_spirv(:comp, read(comp_path, String))
+        else
+            error("SPIR-V shader not found: $spv_path (get_shader_dir() = $(get_shader_dir()))")
+        end
     end
-    code = read(spv_path)
     # Vulkan expects UInt32 aligned code
     code_u32 = reinterpret(UInt32, code)
     create_info = ShaderModuleCreateInfo(sizeof(code), code_u32)

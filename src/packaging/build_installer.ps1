@@ -109,6 +109,18 @@ if (-not $SkipCompile) {
     }
 }
 
+# Ensure Vulkan shaders are bundled into build directory
+$srcShaders = Join-Path $ProjectRoot "src\display\Vulkan\shaders"
+$distShaders = Join-Path $BuildDir "shaders"
+$distBinShaders = Join-Path $BuildDir "bin\shaders"
+if (Test-Path $srcShaders) {
+    if (-not (Test-Path $distShaders)) { New-Item -ItemType Directory -Path $distShaders -Force | Out-Null }
+    if (-not (Test-Path $distBinShaders)) { New-Item -ItemType Directory -Path $distBinShaders -Force | Out-Null }
+    Copy-Item -Path (Join-Path $srcShaders "*") -Destination $distShaders -Recurse -Force
+    Copy-Item -Path (Join-Path $srcShaders "*") -Destination $distBinShaders -Recurse -Force
+    Write-Host "[Bundle] Synced Vulkan SPIR-V shaders into build directory." -ForegroundColor Green
+}
+
 # -------------------------------------------------------------------------
 # Step 4: Find / Install Inno Setup Compiler (ISCC.exe)
 # -------------------------------------------------------------------------

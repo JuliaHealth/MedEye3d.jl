@@ -142,6 +142,23 @@ if isdir(src_scripts_export)
     end
 end
 
+# Copy Vulkan compute shaders into distribution bundle (both app_root/shaders and bin/shaders)
+dist_shaders_dir = joinpath(build_output_dir, "shaders")
+dist_bin_shaders_dir = joinpath(bin_dir, "shaders")
+mkpath(dist_shaders_dir)
+mkpath(dist_bin_shaders_dir)
+src_shaders_dir = joinpath(project_root, "src", "display", "Vulkan", "shaders")
+if isdir(src_shaders_dir)
+    for sfile in readdir(src_shaders_dir)
+        if endswith(sfile, ".spv") || endswith(sfile, ".comp")
+            src_spv = joinpath(src_shaders_dir, sfile)
+            cp(src_spv, joinpath(dist_shaders_dir, sfile); force=true)
+            cp(src_spv, joinpath(dist_bin_shaders_dir, sfile); force=true)
+            println("✓ Copied Vulkan shader $sfile to distribution bundle.")
+        end
+    end
+end
+
 # Create a default configuration / info file
 info_file = joinpath(build_output_dir, "app_info.json")
 write(info_file, """
