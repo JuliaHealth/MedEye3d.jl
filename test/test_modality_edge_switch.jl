@@ -95,6 +95,46 @@ println("=" ^ 70)
     MEH.switch_heatgdt_edge_modality!(:combined)
 end
 
+@testset "Path Resolution Fallback (h5_path_ref when h5_save_path_ref is empty)" begin
+    tmp_h5 = tempname() * ".h5"
+    w, h, d = 8, 8, 8
+    val_ct = fill(0.33f0, w, h, d)
+    val_pet = fill(0.88f0, w, h, d)
+    
+    h5open(tmp_h5, "w") do h5
+        g = create_group(h5, "BASELINE")
+        g["diffusivity"] = fill(0.5f0, w, h, d)
+        g["diffusivity_ct"] = val_ct
+        g["diffusivity_pet"] = val_pet
+        gm = create_group(h5, "_meta_")
+        gm["preflipped"] = Int32(1)
+    end
+    
+    # Simulate AppMain.jl launch where h5_save_path_ref is empty and only h5_path_ref is set
+    MEH.h5_save_path_ref[] = ""
+    MEH.h5_path_ref[] = tmp_h5
+    empty!(MEH._tp_diffusivity_cache)
+    InferenceClient.clear_heatgdt_diffusivity!()
+    MEH.current_tp_index[] = 0
+    
+    # Test CT Only with empty h5_save_path_ref
+    MEH.switch_heatgdt_edge_modality!(:ct_only)
+    @test MEH.heatgdt_edge_modality[] == :ct_only
+    @test InferenceClient._heatgdt_diffusivity[] !== nothing
+    @test InferenceClient._heatgdt_diffusivity[][1, 1, 1] ≈ 0.33f0
+    println("  ✓ Fallback from h5_save_path_ref to h5_path_ref loaded CT diffusivity (0.33)")
+    
+    # Test PET Only with empty h5_save_path_ref
+    MEH.switch_heatgdt_edge_modality!(:pet_only)
+    @test MEH.heatgdt_edge_modality[] == :pet_only
+    @test InferenceClient._heatgdt_diffusivity[][1, 1, 1] ≈ 0.88f0
+    println("  ✓ Fallback from h5_save_path_ref to h5_path_ref loaded PET diffusivity (0.88)")
+    
+    rm(tmp_h5, force=true)
+    MEH.h5_path_ref[] = ""
+    MEH.switch_heatgdt_edge_modality!(:combined)
+end
+
 println("\n" * "=" ^ 70)
 println("  Modality Edge Switch Tests PASSED!")
 println("=" ^ 70)

@@ -299,7 +299,7 @@ function reload_heatgdt_diffusivity_for_tp!(new_tp::Int; force::Bool=false)
     elseif mod === :combined && haskey(_tp_diffusivity_cache, new_tp)
         diff_vol = _tp_diffusivity_cache[new_tp]
     else
-        h5_path = h5_save_path_ref[]
+        h5_path = !isempty(h5_save_path_ref[]) && isfile(h5_save_path_ref[]) ? h5_save_path_ref[] : h5_path_ref[]
         if !isempty(h5_path) && isfile(h5_path)
             try
                 HDF5.h5open(h5_path, "r") do h5
@@ -342,8 +342,11 @@ function reload_heatgdt_diffusivity_for_tp!(new_tp::Int; force::Bool=false)
                             if !is_preflipped
                                 diff_vol = reverse(diff_vol, dims=2)
                             end
-                            _tp_diffusivity_cache[cache_key] = diff_vol
-                            if mod === :combined
+                            if ds_to_read == target_dataset
+                                _tp_diffusivity_cache[cache_key] = diff_vol
+                            end
+                            if ds_to_read == "diffusivity"
+                                _tp_diffusivity_cache[(new_tp, :combined)] = diff_vol
                                 _tp_diffusivity_cache[new_tp] = diff_vol
                             end
                         else
@@ -387,11 +390,18 @@ function switch_heatgdt_edge_modality!(new_mod::Symbol, vk_ctx=nothing)
     end
     @info "[HeatDiffusion] Switching edge modality from $(heatgdt_edge_modality[]) to $new_mod"
     heatgdt_edge_modality[] = new_mod
-    if vk_ctx !== nothing && _vk_heat_ctx[] === nothing
+    if vk_ctx !== nothing
         _vk_heat_ctx[] = vk_ctx
     end
     cur_tp = max(0, current_tp_index[])
     reload_heatgdt_diffusivity_for_tp!(cur_tp; force=true)
+
+    mod_lbl = new_mod === :ct_only ? "CT Only" : (new_mod === :pet_only ? "PET Only" : "Combined")
+    is_uploaded = isdefined(parentmodule(@__MODULE__), :_vk_heat_uploaded) && parentmodule(@__MODULE__)._vk_heat_uploaded[]
+    status_msg = is_uploaded ? "[Heat-GDT] Edge modality: $mod_lbl (GPU ready)" : "[Heat-GDT] Edge modality: $mod_lbl (loaded)"
+    try
+        set_ai_status!(status_msg)
+    catch; end
 end
 
 # Internal inference queue — serializes all Docker communication through a single worker thread

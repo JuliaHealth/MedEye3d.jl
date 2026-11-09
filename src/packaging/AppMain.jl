@@ -1095,6 +1095,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     MEH.global_ts_names[] = ts_names
     MEH.patient_id[] = basename(h5_path)
     MEH.h5_path_ref[] = h5_path
+    MEH.h5_save_path_ref[] = h5_path
     MEH.current_tp_index[] = 0
     MEH.volume_z_size[] = size(first_mask, 3)
 
