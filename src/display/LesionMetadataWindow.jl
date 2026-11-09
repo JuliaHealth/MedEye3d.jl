@@ -5565,6 +5565,43 @@ function create_metadata_window(
     btn_add_ai = Button(g[seg_r3, 4], label = "Run AI", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
     rowsize!(g, seg_r3, Fixed(30)); register_fixed_row!(seg_r3, 30)
 
+    # Row 3_mode: Heat-GDT Operation Mode (1-Click vs Wand / Hold)
+    seg_r3_mode = nr!()
+    Label(g[seg_r3_mode, 1], "Mode:", halign=:right, fontsize=10, color=LBL_FG)
+    init_1click = get(display_cfg, "heatgdt_one_click_mode", _MEH.heatgdt_one_click_mode[])
+    _MEH.heatgdt_one_click_mode[] = init_1click
+    btn_mode_1click = Button(g[seg_r3_mode, 2], label = "1-Click",
+        buttoncolor = (init_1click ? GRN : BG_PNL),
+        labelcolor = TXT, fontsize = 10)
+    btn_mode_wand = Button(g[seg_r3_mode, 3:4], label = "Wand (Hold)",
+        buttoncolor = (!init_1click ? GRN : BG_PNL),
+        labelcolor = TXT, fontsize = 10)
+    rowsize!(g, seg_r3_mode, Fixed(30)); register_fixed_row!(seg_r3_mode, 30)
+
+    function update_heatgdt_mode_btn_colors!(is_1click::Bool)
+        btn_mode_1click.buttoncolor[] = (is_1click ? GRN : BG_PNL)
+        btn_mode_wand.buttoncolor[]   = (!is_1click ? GRN : BG_PNL)
+    end
+
+    on(btn_mode_1click.clicks) do _
+        _MEH.toggle_heatgdt_one_click_mode!(true)
+        update_heatgdt_mode_btn_colors!(true)
+        display_cfg["heatgdt_one_click_mode"] = true
+        next!(_display_cfg_save_subject, true)
+    end
+    on(btn_mode_wand.clicks) do _
+        _MEH.toggle_heatgdt_one_click_mode!(false)
+        update_heatgdt_mode_btn_colors!(false)
+        display_cfg["heatgdt_one_click_mode"] = false
+        next!(_display_cfg_save_subject, true)
+    end
+
+    if _MEH.heatgdt_one_click_mode isa Observable
+        on(_MEH.heatgdt_one_click_mode) do is_1click
+            update_heatgdt_mode_btn_colors!(is_1click)
+        end
+    end
+
     # Row 3b: Heat-GDT parameters (visible by default when Heat-GDT selected)
     seg_r3b = nr!()
     Label(g[seg_r3b, 1], "θ:", halign=:right, fontsize=10, color=LBL_FG)
@@ -5655,7 +5692,7 @@ function create_metadata_window(
     end
 
     seg_r3_tt = nr!()
-    Label(g[seg_r3_tt, 1:4], "θ: sensitivity (size) | K: smoothness | Edge: [Both]/[CT]/[PET]", halign=:center, fontsize=9, color=SUBTXT)
+    Label(g[seg_r3_tt, 1:4], "Mode: [1-Click]/[Wand] | θ: size | K: steps | Edge: [Both]/[CT]/[PET]", halign=:center, fontsize=9, color=SUBTXT)
     rowsize!(g, seg_r3_tt, Fixed(15)); register_fixed_row!(seg_r3_tt, 15)
 
     on(slider_heatgdt_posthoc.value) do val
@@ -5674,7 +5711,7 @@ function create_metadata_window(
     end
 
     # Show/hide Heat-GDT params based on algorithm selection with proper layout updates
-    heatgdt_rows = (seg_r3b, seg_r3c, seg_r3d, seg_r3e, seg_r3f, seg_r3_tt)
+    heatgdt_rows = (seg_r3_mode, seg_r3b, seg_r3c, seg_r3d, seg_r3e, seg_r3f, seg_r3_tt)
     function _set_heatgdt_rows_visible!(vis::Bool)
         g.block_updates = false
         try
@@ -11982,6 +12019,8 @@ function create_metadata_window(
     _lmw_observables[:btn_edge_both] = btn_edge_both
     _lmw_observables[:btn_edge_ct] = btn_edge_ct
     _lmw_observables[:btn_edge_pet] = btn_edge_pet
+    _lmw_observables[:btn_mode_1click] = btn_mode_1click
+    _lmw_observables[:btn_mode_wand] = btn_mode_wand
     _lmw_observables[:cb_adaptive] = cb_adaptive
     _lmw_observables[:slider_sens] = slider_sens
     _lmw_observables[:open_sec_seg!] = () -> begin
@@ -12018,6 +12057,7 @@ function create_metadata_window(
         btn_prev, btn_next, btn_next_unreviewed, btn_ln_validation,
         btn_accept, btn_reject, btn_correct,
         btn_new_lesion, btn_paint, btn_erase, btn_view_mode, btn_revert_ai,
+        btn_mode_1click, btn_mode_wand,
         btn_edge_both, btn_edge_ct, btn_edge_pet,
         btn_pt, btn_nt, btn_m2, btn_fit, btn_ax, btn_cor, btn_sag, btn_cv, btn_mri_main, btn_mri_comp, btn_ps, btn_ns,
         btn_xnat_login, btn_xnat_prev, btn_xnat_save, btn_xnat_next, btn_xnat_preproc

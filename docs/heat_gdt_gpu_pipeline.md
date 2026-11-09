@@ -149,6 +149,7 @@ The **Segmentation & AI** section is permanently positioned at the top of the si
 │ [ New ]  [ Paint ]  [ Erase ]  [ View ]                │
 │ Brush: [───●──────────────────] [ Move ]               │
 │ AI: [ Heat-GDT              ▼ ] [ Run AI ]             │
+│ Mode: [ 1-Click ] [ Wand (Hold) ]                      │
 │ θ: [───●──────────────────────] K: [──────●──────────] │
 │ Speed: [─────────●────────────]                        │
 │ Size ±: [──────────●───────────] [ Reset ]             │
@@ -162,20 +163,26 @@ The **Segmentation & AI** section is permanently positioned at the top of the si
 
 | Control | Parameter | Default | Function |
 | :--- | :--- | :--- | :--- |
+| **Mode** | `heatgdt_one_click_mode` | `1-Click` | **Operation Mode**: `[ 1-Click ]` runs full $K$-step diffusion and commits immediately upon a single mouse click; `[ Wand (Hold) ]` expands diffusion progressively across frames while holding the mouse button down. |
 | **θ (Theta)** | `heatgdt_theta` | `0.001` | **Base Segmentation Threshold**. Lower values (e.g. 0.0005) produce larger, more inclusive segmentations; higher values (e.g. 0.005) produce tighter, core-only segmentations. |
 | **K** | `heatgdt_K` | `40` | **Diffusion Iterations / Boundary Smoothness**. Number of Euler steps. Higher values yield smoother geodesic boundaries. |
-| **Speed** | `HEAT_DISPLAY_RAMP_RATE` | `12.0` | **Visual Expansion Speed**. Decoupled exponential display ramp rate. Controls how quickly the visual overlay catches up to the underlying GPU computation. |
-| **Size ±** | Post-hoc adjustment | `0.0` | **Live Lesion Resizing**. Allows growing or shrinking the committed lesion mask after mouse release without re-painting. |
+| **Speed** | `HEAT_DISPLAY_RAMP_RATE` | `12.0` | **Visual Expansion Speed (Wand mode)**. Decoupled exponential display ramp rate. Controls how quickly the visual overlay catches up to the underlying GPU computation. |
+| **Size ±** | Post-hoc adjustment | `0.0` | **Live Lesion Resizing**. Allows growing or shrinking the committed lesion mask after mouse release or one-click execution without re-painting. |
 | **Edge Toggle** | `heatgdt_edge_modality` | `Both` | **Dedicated 3-Button Guidance Toggle**: `[Both]` (dual CT+PET), `[CT Only]` (pure anatomical CT edges), or `[PET Only]` (pure metabolic PET edges). Active mode glows green. Swaps GPU barrier tensors immediately on click. |
 | **Adapt** | `heatgdt_adaptive_contrast`| `true` | **Adaptive Local Contrast Boost**. When enabled, dynamically measures edge strength around the advancing shell and sharpens soft-tissue margins. |
 | **Sens** | `heatgdt_sensitivity` | `1.0` | **Contrast Sensitivity**. Exponent scale (0.5 to 2.0). Increase to 1.5–2.0 for very faint soft-tissue lesions. |
 
-### 4.3 Click-and-Hold Workflow
-1. Move the cursor over the lesion center in any 2D view (axial, sagittal, coronal, or MRI quadrant).
-2. **Click and hold the Left Mouse Button**.
-3. Watch the green/colored overlay expand smoothly in real time across all viewing planes at >60 FPS.
-4. **Release the mouse button** when the lesion boundary matches the anatomical tumor margin. The continuous heat field is automatically discretized into integer labels in `seg_vol` and autosaved.
-5. If the lesion is slightly too small or large, adjust the **Size ±** slider to expand or contract it post-hoc.
+### 4.3 One-Click vs Wand (Hold) Workflows
+
+- **One-Click Mode (`[ 1-Click ]`, Default)**:
+  1. Select an existing lesion label or click `[ New ]`.
+  2. Single-click on the lesion center in any 2D view (axial, sagittal, coronal, or MRI quadrant).
+  3. The GPU immediately seeds and computes full $K$-step diffusion (~5ms on Vulkan), reads back the bounding box, commits the discrete mask to `seg_vol`, updates the timepoint cache, and refreshes 2D textures.
+  4. If fine-tuning is desired, adjust the **Size ±** slider to expand or contract the segmented volume post-hoc.
+- **Wand (Hold) Mode (`[ Wand (Hold) ]`)**:
+  1. Click and hold the Left Mouse Button on the lesion center.
+  2. Watch the overlay expand smoothly in real time across all viewing planes at >60 FPS.
+  3. Release the mouse button when the lesion boundary matches the anatomical tumor margin. Discrete commit occurs upon mouse release.
 
 ---
 
@@ -189,8 +196,8 @@ All source code and automated test scripts are located directly within the repos
 | :--- | :--- | :--- |
 | [`src/display/Vulkan/shaders/diffuse_step.comp`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/shaders/diffuse_step.comp) | Vulkan GLSL compute shader | PDE finite difference update, metric weights `inv_d2.xyz`, self-normalizing frontier transition `mix(s_boost, 1.0, w)` |
 | [`src/display/Vulkan/VulkanHeatDiffusion.jl`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl) | Julia Vulkan compute wrapper | [`compute_frontier_edge_scale`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L219-L315), [`seed_only!`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L973-L1068), [`run_incremental_steps!`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L1077-L1190), [`DiffuseStepPC`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L42-L52) |
-| [`src/display/GLFW/MakieEventHandlers.jl`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl) | Event dispatch & async tick loop | [`reactToOneShotHeatGDT`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6398-L6495), [`reactToHeatGDTStart`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6530-L6715), [`reactToHeatGDTTick`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6740-L6880), [`reactToHeatGDTStop`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6890-L6970), [`switch_heatgdt_edge_modality!`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L383-L396) |
-| [`src/display/LesionMetadataWindow.jl`](file:///workspaces/MedEye3d.jl/src/display/LesionMetadataWindow.jl) | Makie GUI controls | Top-level `sec_seg` section, 3-button edge toggle, adaptive toggle, sensitivity slider ([lines 5278–5725](file:///workspaces/MedEye3d.jl/src/display/LesionMetadataWindow.jl#L5278-L5725)) |
+| [`src/display/GLFW/MakieEventHandlers.jl`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl) | Event dispatch & async tick loop | [`execute_one_click_heatgdt!`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6564-L6760), [`toggle_heatgdt_one_click_mode!`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L254-L260), [`reactToOneShotHeatGDT`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6440-L6535), [`reactToHeatGDTStart`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6840-L6880), [`reactToHeatGDTTick`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6890-L6970), [`reactToHeatGDTStop`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6980-L7040), [`switch_heatgdt_edge_modality!`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L383-L396) |
+| [`src/display/LesionMetadataWindow.jl`](file:///workspaces/MedEye3d.jl/src/display/LesionMetadataWindow.jl) | Makie GUI controls | Top-level `sec_seg` section, Mode `[1-Click] [Wand]` toggle, 3-button edge toggle, adaptive toggle, sensitivity slider ([lines 5278–5750](file:///workspaces/MedEye3d.jl/src/display/LesionMetadataWindow.jl#L5278-L5750)) |
 | [`src/display/reactingToMouseKeyboard/reactToKeyboard/ReactToKeyboard.jl`](file:///workspaces/MedEye3d.jl/src/display/reactingToMouseKeyboard/reactToKeyboard/ReactToKeyboard.jl) | Keyboard shortcut handler | `W` key dispatch to `OneShotHeatGDTEvent` ([line 667](file:///workspaces/MedEye3d.jl/src/display/reactingToMouseKeyboard/reactToKeyboard/ReactToKeyboard.jl#L667)) |
 | [`src/display/reactingToMouseKeyboard/ReactOnMouseClickAndDrag.jl`](file:///workspaces/MedEye3d.jl/src/display/reactingToMouseKeyboard/ReactOnMouseClickAndDrag.jl) | Mouse hold & drag handler | Left-button press/release triggering `HeatGDTStartEvent` and `HeatGDTStopEvent` ([lines 171–186](file:///workspaces/MedEye3d.jl/src/display/reactingToMouseKeyboard/ReactOnMouseClickAndDrag.jl#L171-L186)) |
 | [`src/display/InferenceClient.jl`](file:///workspaces/MedEye3d.jl/src/display/InferenceClient.jl) | CPU fallback Heat-GDT | [`run_heatgdt`](file:///workspaces/MedEye3d.jl/src/display/InferenceClient.jl#L938-L985) with anisotropic spacing and `s_boost` |
@@ -250,7 +257,14 @@ Verifies that the Segmentation & AI section is visible at the top of the sidebar
 ```bash
 CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_gui_segmentation_controls.jl
 ```
-*Expected Result:* `Test Summary: Pass 23, Total 23. All tests PASSED.`
+*Expected Result:* `Test Summary: Pass 25, Total 25. All tests PASSED.`
+
+#### Test 8: One-Click Mode Toggling, GUI Buttons & GPU Execution
+Verifies observable state (`heatgdt_one_click_mode`), GUI button toggling (`[1-Click]` vs `[Wand]`), and live single-click Vulkan GPU execution committing complete lesion segmentation in ~5ms:
+```bash
+CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_heatgdt_one_click.jl
+```
+*Expected Result:* `ALL ONE-CLICK HEAT-GDT TESTS PASSED ✓`
 
 ---
 

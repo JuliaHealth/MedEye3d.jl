@@ -22,6 +22,7 @@ export reactToMapLink, reactToAutoRunPreprocess, reactToRunPreprocess, reactToSh
 export register_h5_mask_saver!, mark_tp_mask_dirty!, save_tp_mask_to_h5, flush_all_dirty_masks!, dirty_mask_tps
 export _clinical_phase, get_clinical_phase, set_clinical_phase!, _phase_display_name
 export reactToEditMode, reactToViewMode, reactToSetTPFirst, reactToSetTPLast, reactToToggleMaskVisibility, reactToShowOnlyPET, reactToShowOnlyCT, reactToToggleSyncScroll, reactToToggleHeatGDTMode, reactToOneShotHeatGDT, reactToZoomToFit
+export heatgdt_one_click_mode, toggle_heatgdt_one_click_mode!, execute_one_click_heatgdt!
 export mri_compare_mode, mri_compare_tps, mri_compare_plane, get_mri_comparison_tps
 export mri_main_multimodal_mode, reactToToggleMRIMultimodal, sync_mri_mask_across_modalities!
 export reactToDeleteLesion, reactToUndo
@@ -247,6 +248,25 @@ const heatgdt_edge_modality = Observable{Symbol}(:combined)  # :combined, :ct_on
 const heatgdt_adaptive_contrast = Ref{Bool}(true)
 const heatgdt_sensitivity = Ref{Float32}(1.0f0)
 const heatgdt_current_loaded_modality = Ref{Symbol}(:combined)
+const heatgdt_one_click_mode = Observable{Bool}(true)  # Default: One-Click mode enabled (single click to segment)
+
+"""
+    toggle_heatgdt_one_click_mode!(enabled::Union{Bool, Nothing}=nothing)
+
+Toggle or set Heat-GDT One-Click mode. When enabled, a single click on a lesion
+seeds and runs complete segmentation (K steps) on the GPU and commits immediately,
+without requiring mouse hold.
+"""
+function toggle_heatgdt_one_click_mode!(enabled::Union{Bool, Nothing}=nothing)
+    new_val = enabled !== nothing ? enabled : !heatgdt_one_click_mode[]
+    heatgdt_one_click_mode[] = new_val
+    msg = new_val ? "[Heat-GDT] One-Click Mode ENABLED — single click to segment" : "[Heat-GDT] Wand Mode ENABLED — click & hold to grow"
+    try
+        set_ai_status!(msg)
+    catch; end
+    @info msg
+    return new_val
+end
 
 # ── Vulkan GPU Heat-GDT interactive state ──────────────────────────────────
 const _vk_heat_state = Ref{Any}(nothing)            # VulkanHeatDiffusion.HeatDiffusionState or nothing
@@ -6470,7 +6490,8 @@ function reactToOneShotHeatGDT(data::MakieEvents.OneShotHeatGDTEvent, stateObjec
             
             romcad._heatgdt_mode_active[] = true
             heatgdt_adaptive_contrast[] = true  # Activate self-normalizing adaptive local edges
-            set_ai_status!("[Heat-GDT Wand] Enabled (Self-Normalizing Adaptive Edges). Click & hold to grow lesion.")
+            mode_desc = heatgdt_one_click_mode[] ? "One-Click Mode (Click to Segment)" : "Wand Mode (Click & Hold to Grow)"
+            set_ai_status!("[Heat-GDT] Enabled: $mode_desc (Self-Normalizing Adaptive Edges)")
             
             # Eagerly warm up GPU Heat-GDT pipeline
             vk_ctx = _vk_heat_ctx[]
@@ -6538,6 +6559,207 @@ function _apply_gpu_mask_to_segvol!(mask_3d::Array{Float32,3}, stateObjects::Vec
             seg_vol[i, j, k] = label_val
         end
     end
+end
+
+"""
+    execute_one_click_heatgdt!(stateObjects::Vector{StateDataFields}, cx::Int, cy::Int, cz::Int;
+                               K::Union{Int, Nothing}=nothing,
+                               theta::Union{Float32, Nothing}=nothing,
+                               active_id::Union{Int, Nothing}=nothing)
+
+Executes a complete single-click Heat-GDT segmentation on the active lesion seeded at (cx, cy, cz).
+Runs K diffusion steps on the GPU (or CPU fallback), commits the discrete segmentation to seg_vol,
+updates all 2D slice textures, and synchronizes with the timepoint cache.
+"""
+function execute_one_click_heatgdt!(stateObjects::Vector{StateDataFields}, cx::Int, cy::Int, cz::Int;
+                                   K::Union{Int, Nothing}=nothing,
+                                   theta::Union{Float32, Nothing}=nothing,
+                                   active_id::Union{Int, Nothing}=nothing)
+    t_start = time()
+    if isempty(stateObjects)
+        @warn "[Heat-GDT 1-Click] stateObjects is empty"
+        return false
+    end
+    tp1 = stateObjects[1]
+    
+    # 1. Resolve volumes
+    seg_vol = nothing
+    ct_vol = nothing
+    pet_vol = nothing
+    for dat in tp1.onScrollData.dataToScroll
+        if (dat.name == "Mask" || dat.name == "segmentation") && seg_vol === nothing
+            seg_vol = dat.dat
+        elseif dat.name == "CT" && ct_vol === nothing
+            ct_vol = dat.dat
+        elseif dat.name == "PET" && pet_vol === nothing
+            pet_vol = dat.dat
+        end
+    end
+    if seg_vol === nothing
+        set_ai_status!("[Heat-GDT 1-Click] No segmentation mask found")
+        println("[Heat-GDT 1-Click] FAILED: seg_vol is nothing"); flush(stdout)
+        return false
+    end
+    if !checkbounds(Bool, seg_vol, cx, cy, cz)
+        set_ai_status!("[Heat-GDT 1-Click] Seed ($cx,$cy,$cz) out of bounds")
+        println("[Heat-GDT 1-Click] FAILED: seed ($cx,$cy,$cz) out of bounds for seg_vol $(size(seg_vol))"); flush(stdout)
+        return false
+    end
+
+    # 2. Parameters
+    K_val = K !== nothing ? K : heatgdt_K[]
+    theta_val = theta !== nothing ? Float32(theta) : Float32(heatgdt_theta[])
+    target_id = active_id !== nothing ? active_id : (current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1)
+    label_val = eltype(seg_vol)(target_id)
+
+    # 3. Spacing
+    ct_spacing = try
+        tp1.onScrollData.dataToScrollDims.voxelSize
+    catch
+        (1.0, 1.0, 1.0)
+    end
+    if any(s <= 0 for s in ct_spacing)
+        ct_spacing = (1.0, 1.0, 1.0)
+    end
+
+    # 4. In Multimodal Quad or timepoint view, ensure correct timepoint diffusivity is loaded
+    if mri_main_multimodal_mode[]
+        p_act = current_hovered_panel[]
+        if !(p_act in (1, 2, 3, 4)); p_act = 1; end
+        target_tp = stateObjects[p_act].onScrollData.currentTpIndex
+        if target_tp >= 0 && InferenceClient._heatgdt_diffusivity_tp[] != target_tp
+            reload_heatgdt_diffusivity_for_tp!(target_tp)
+        end
+    else
+        cur_tp = current_tp_index[]
+        if cur_tp >= 0 && InferenceClient._heatgdt_diffusivity_tp[] != cur_tp
+            reload_heatgdt_diffusivity_for_tp!(cur_tp)
+        end
+    end
+
+    # 5. Adaptive frontier contrast boost (s_boost)
+    diff_vol = InferenceClient._heatgdt_diffusivity[]
+    s_boost = 1.0f0
+    if heatgdt_adaptive_contrast[] && diff_vol !== nothing
+        mean_sp = (ct_spacing[1] + ct_spacing[2] + ct_spacing[3]) / 3.0
+        R_phys = max(10.0, 3.0 + 2.0 * sqrt(K_val * 0.16) * mean_sp)
+        s_boost = VulkanHeatDiffusion.compute_frontier_edge_scale(
+            diff_vol, cx, cy, cz, R_phys, ct_spacing;
+            sensitivity=heatgdt_sensitivity[]
+        )
+    end
+
+    # 6. Check GPU readiness
+    heat_state = _vk_heat_state[]
+    vk_ctx = _vk_heat_ctx[]
+    gpu_ready = heat_state !== nothing && vk_ctx !== nothing && heat_state.diffusivity_uploaded && parentmodule(@__MODULE__)._vk_heat_uploaded[]
+    if !gpu_ready && vk_ctx !== nothing
+        parentmodule(@__MODULE__).ensure_heatgdt_gpu!(vk_ctx)
+        heat_state = _vk_heat_state[]
+        gpu_ready = heat_state !== nothing && heat_state.diffusivity_uploaded && parentmodule(@__MODULE__)._vk_heat_uploaded[]
+    end
+
+    vox_count = 0
+    if gpu_ready
+        # Update UBO minAndMaxValue for active ID
+        u_active = UInt32(target_id)
+        for state in stateObjects
+            obj = state.mainForDisplayObjects
+            if obj !== nothing && obj.listOfTextSpecifications !== nothing
+                for ts in obj.listOfTextSpecifications
+                    if (ts.name == "Mask" || ts.name == "segmentation") && !isempty(ts.minAndMaxValue)
+                        if ts.minAndMaxValue[1] > u_active || ts.minAndMaxValue[2] < u_active
+                            ts.minAndMaxValue[1] = min(ts.minAndMaxValue[1], Float32(u_active))
+                            ts.minAndMaxValue[2] = max(ts.minAndMaxValue[2], Float32(u_active))
+                            if obj.vulkanPipelineState !== nothing
+                                obj.vulkanPipelineState.ubo_dirty = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        # Seed and diffuse K steps on GPU
+        VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, cx, cy, cz; seed_radius=1, spacing=ct_spacing, s_boost=s_boost)
+        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, K_val;
+            theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost)
+
+        # Populate undo state for post-hoc size adjustment
+        box_min = heat_state.current_box_min
+        box_max = heat_state.current_box_max
+        HEAT_GDT_UNDO_BOX_MIN[] = CartesianIndex(box_min[1], box_min[2], box_min[3])
+        HEAT_GDT_UNDO_BOX_MAX[] = CartesianIndex(box_max[1], box_max[2], box_max[3])
+        HEAT_GDT_UNDO_LABELS[] = copy(seg_vol[box_min[1]:box_max[1], box_min[2]:box_max[2], box_min[3]:box_max[3]])
+        HEAT_GDT_LAST_SEG_VOL[] = seg_vol
+        HEAT_GDT_LAST_TARGET_ID[] = UInt16(target_id)
+
+        # Commit discrete mask
+        vox_count = VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)
+    else
+        # CPU Fallback
+        if ct_vol !== nothing
+            pts = zeros(Float32, size(ct_vol))
+            pts[cx, cy, cz] = 1.0f0
+            pet_safe = pet_vol !== nothing ? pet_vol : zeros(Float32, size(ct_vol))
+            mask_cpu = InferenceClient.run_heatgdt(ct_vol, pet_safe, pts, cx, cy, cz;
+                K=K_val, theta=theta_val, spacing=ct_spacing, s_boost=s_boost)
+            if mask_cpu !== nothing
+                vox_count = count(mask_cpu .> 0)
+                seg_vol[mask_cpu .> 0] .= label_val
+            end
+        end
+    end
+
+    # 7. Update display textures across all panels
+    for pi in 1:length(stateObjects)
+        try
+            _force_texture_upload!(stateObjects, pi)
+        catch
+            stateObjects[pi].isSliceChanged = true
+        end
+    end
+
+    # 8. Synchronize discrete mask to TP cache
+    tp_idx = if mri_main_multimodal_mode[]
+        p_act = current_hovered_panel[]
+        (p_act in (1, 2, 3, 4) && stateObjects[p_act].onScrollData.currentTpIndex >= 0) ? stateObjects[p_act].onScrollData.currentTpIndex : (current_tp_index[] > 0 ? current_tp_index[] : 1)
+    else
+        current_tp_index[]
+    end
+    entry = lock(_tp_cache_lock) do
+        haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
+    end
+    if entry !== nothing
+        if entry.mask isa Array{Int8, 3}
+            entry.mask .= clamp.(seg_vol, Int8(-128), Int8(127))
+        elseif entry.mask !== seg_vol
+            entry.mask .= seg_vol
+        end
+        if entry.mask_i16 !== seg_vol
+            entry.mask_i16 .= seg_vol
+        end
+        mark_tp_mask_dirty!(tp_idx)
+        mark_expert_edit!(target_id)
+        invalidate_and_recompute_lesion_metrics_async!(target_id, tp_idx, seg_vol)
+    end
+
+    # 9. Cross-modality sync for MRI if active
+    if (tp_idx in mri_compare_tps || mri_main_multimodal_mode[] || mri_compare_mode[]) && heat_state !== nothing
+        b_min = heat_state.current_box_min
+        b_max = heat_state.current_box_max
+        bbox_heat = (b_min[1]:b_max[1], b_min[2]:b_max[2], b_min[3]:b_max[3])
+        sync_mri_mask_across_modalities!(tp_idx, bbox_heat)
+        for pi in 1:length(stateObjects)
+            try; _force_texture_upload!(stateObjects, pi); catch; end
+        end
+    end
+
+    dt_ms = (time() - t_start) * 1000.0
+    backend_str = gpu_ready ? "GPU" : "CPU"
+    set_ai_status!("[Heat-GDT 1-Click ($backend_str)] $(vox_count) voxels (K=$K_val, θ=$theta_val, s_boost=$(round(s_boost, digits=2))) in $(round(dt_ms, digits=1))ms")
+    println("[Heat-GDT 1-Click] Committed ($backend_str): seed=($cx,$cy,$cz), K=$K_val, θ=$theta_val, s_boost=$(round(s_boost, digits=2)), voxels=$vox_count, time=$(round(dt_ms, digits=1))ms"); flush(stdout)
+    return true
 end
 
 """
@@ -6620,6 +6842,13 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
     if seg_vol !== nothing && !checkbounds(Bool, seg_vol, cx, cy, cz)
         set_ai_status!("[Heat-GDT GPU] Seed ($cx,$cy,$cz) out of bounds")
         println("[Heat-GDT START] BLOCKED: seed ($cx,$cy,$cz) out of bounds for seg_vol $(size(seg_vol))"); flush(stdout)
+        return
+    end
+
+    # ── One-Click Mode: execute full segmentation in one shot without requiring mouse hold ──
+    if heatgdt_one_click_mode[]
+        execute_one_click_heatgdt!(stateObjects, cx, cy, cz)
+        _vk_heat_active[] = false
         return
     end
     
