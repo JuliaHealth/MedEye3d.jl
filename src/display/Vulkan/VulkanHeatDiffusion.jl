@@ -500,238 +500,358 @@ function compute_directional_relative_edge_params(diffusivity::Array{Float32,3},
     D_seed = diffusivity[cx, cy, cz]
     E_seed = -log(clamp(D_seed, 1.0f-5, 1.0f0)) * 0.09905025f0
     
-    # 2. Ray-trace along the 6 cardinal directions to measure wall proximity and axis resistance
-    step_mm = 0.5
-    max_ray_mm = min(14.0, max(8.0, Float64(R_phys)))
-    n_ray_steps = max(4, round(Int, max_ray_mm / step_mm))
+    # 2. Analyze candidate axis A in (3=Z, 1=X, 2=Y) for narrow tubular channel
+    # (Breakthrough 7: Lumen Ridge/Valley Follower with Curvature-Adaptive Corridor Tracking)
+    best_axis = 3
+    best_reach = 0.0
+    best_lumen_samples = Float32[]
+    best_wall_dist = 999.0
+    best_wall_edges = Float32[]
     
-    ray_dirs = (
-        (1.0, 0.0, 0.0), (-1.0, 0.0, 0.0),
-        (0.0, 1.0, 0.0), (0.0, -1.0, 0.0),
-        (0.0, 0.0, 1.0), (0.0, 0.0, -1.0)
-    )
-    
-    ray_wall_dist = fill(max_ray_mm, 6)
-    ray_resistances = zeros(Float64, 6)
-    ray_max_edges = zeros(Float32, 6)
-    
-    wall_thresh = max(E_seed + 0.12f0, 0.30f0)
-    
-    for k in 1:6
-        dir = ray_dirs[k]
-        wall_found = false
-        max_e = 0.0f0
-        res = 0.0
-        for s in 1:n_ray_steps
-            dist_mm = s * step_mm
-            px = clamp(round(Int, cx + dir[1] * dist_mm / dx), 1, w)
-            py = clamp(round(Int, cy + dir[2] * dist_mm / dy), 1, h)
-            pz = clamp(round(Int, cz + dir[3] * dist_mm / dz), 1, d)
-            e_val = -log(clamp(diffusivity[px, py, pz], 1.0f-5, 1.0f0)) * 0.09905025f0
-            res += e_val
-            max_e = max(max_e, e_val)
-            if !wall_found && (e_val >= wall_thresh || e_val >= 0.40f0)
-                ray_wall_dist[k] = dist_mm
-                wall_found = true
+    for axis in (3, 1, 2)
+        step_vox = (axis == 3) ? dz : ((axis == 2) ? dy : dx)
+        max_steps = max(3, round(Int, 35.0 / step_vox))
+        
+        s_r1 = (axis == 1) ? max(1, round(Int, 2.5 / dy)) : max(1, round(Int, 2.5 / dx))
+        s_r2 = (axis == 3) ? max(1, round(Int, 2.5 / dy)) : max(1, round(Int, 2.5 / dz))
+        
+        # Initial 2D centering at seed slice
+        min_e_seed = E_seed
+        best_pt_seed = (cx, cy, cz)
+        
+        if axis == 3
+            for y in max(1, cy - s_r2):min(h, cy + s_r2)
+                for x in max(1, cx - s_r1):min(w, cx + s_r1)
+                    e = -log(clamp(diffusivity[x, y, cz], 1.0f-5, 1.0f0)) * 0.09905025f0
+                    if e < min_e_seed; min_e_seed = e; best_pt_seed = (x, y, cz); end
+                end
+            end
+        elseif axis == 1
+            for z in max(1, cz - s_r2):min(d, cz + s_r2)
+                for y in max(1, cy - s_r1):min(h, cy + s_r1)
+                    e = -log(clamp(diffusivity[cx, y, z], 1.0f-5, 1.0f0)) * 0.09905025f0
+                    if e < min_e_seed; min_e_seed = e; best_pt_seed = (cx, y, z); end
+                end
+            end
+        else # axis == 2
+            for z in max(1, cz - s_r2):min(d, cz + s_r2)
+                for x in max(1, cx - s_r1):min(w, cx + s_r1)
+                    e = -log(clamp(diffusivity[x, cy, z], 1.0f-5, 1.0f0)) * 0.09905025f0
+                    if e < min_e_seed; min_e_seed = e; best_pt_seed = (x, cy, z); end
+                end
             end
         end
-        ray_resistances[k] = res
-        ray_max_edges[k] = max_e
-    end
-    
-    # Axis resistances: (X, Y, Z)
-    res_x = ray_resistances[1] + ray_resistances[2]
-    res_y = ray_resistances[3] + ray_resistances[4]
-    res_z = ray_resistances[5] + ray_resistances[6]
-    
-    min_res_axis = argmin((res_x, res_y, res_z)) # 1=X, 2=Y, 3=Z
-    max_res = max(res_x, res_y, res_z)
-    min_res = min(res_x, res_y, res_z)
-    
-    # Transverse wall distance relative to candidate tube axis:
-    min_wall_transverse = if min_res_axis == 3
-        min(ray_wall_dist[1], ray_wall_dist[2], ray_wall_dist[3], ray_wall_dist[4])
-    elseif min_res_axis == 1
-        min(ray_wall_dist[3], ray_wall_dist[4], ray_wall_dist[5], ray_wall_dist[6])
-    else
-        min(ray_wall_dist[1], ray_wall_dist[2], ray_wall_dist[5], ray_wall_dist[6])
-    end
-    
-    long_wall_dist = max(ray_wall_dist[2*min_res_axis - 1], ray_wall_dist[2*min_res_axis])
-    
-    # Tubular structure detection:
-    # 1. Close transverse walls (radius <= 3.5 mm)
-    # 2. Longitudinal resistance significantly lower than transverse, or longitudinal reach much longer
-    is_tubular = (min_wall_transverse <= 3.5) && (min_res < 0.75 * max_res || long_wall_dist >= 1.6 * min_wall_transverse)
-    
-    # Adaptive Core Radius & Barrier Ceiling
-    R_core_mm = is_tubular ? max(1.0, 0.75 * min_wall_transverse) : 4.0
-    R_outer_mm = max(8.0, Float64(R_phys))
-    E_barrier = is_tubular ? max(0.40f0, E_seed + 0.15f0) : max(0.35f0, E_seed + 0.10f0)
-    
-    rx_out = max(2, round(Int, R_outer_mm / dx))
-    ry_out = max(2, round(Int, R_outer_mm / dy))
-    rz_out = max(1, round(Int, R_outer_mm / dz))
-    
-    rx_core = max(1, round(Int, R_core_mm / dx))
-    ry_core = max(1, round(Int, R_core_mm / dy))
-    rz_core = max(1, round(Int, R_core_mm / dz))
-    
-    x1, x2 = max(1, cx - rx_out), min(w, cx + rx_out)
-    y1, y2 = max(1, cy - ry_out), min(h, cy + ry_out)
-    z1, z2 = max(1, cz - rz_out), min(d, cz + rz_out)
-    
-    inv_rx_out2 = 1.0 / (rx_out^2)
-    inv_ry_out2 = 1.0 / (ry_out^2)
-    inv_rz_out2 = 1.0 / (rz_out^2)
-    
-    inv_rx_core2 = 1.0 / (rx_core^2)
-    inv_ry_core2 = 1.0 / (ry_core^2)
-    inv_rz_core2 = 1.0 / (rz_core^2)
-    
-    core_samples = Float32[]
-    shell_samples = Float32[]
-    shell_xp = Float32[]
-    shell_xm = Float32[]
-    shell_yp = Float32[]
-    shell_ym = Float32[]
-    shell_zp = Float32[]
-    shell_zm = Float32[]
-    
-    sizehint!(core_samples, 200)
-    sizehint!(shell_samples, 1000)
-    sizehint!(shell_xp, 200); sizehint!(shell_xm, 200)
-    sizehint!(shell_yp, 200); sizehint!(shell_ym, 200)
-    sizehint!(shell_zp, 200); sizehint!(shell_zm, 200)
-    
-    step_x = (x2 - x1 > 40) ? 2 : 1
-    step_y = (y2 - y1 > 40) ? 2 : 1
-    step_z = (z2 - z1 > 40) ? 2 : 1
-    
-    for z in z1:step_z:z2
-        dz_out2 = (z - cz)^2 * inv_rz_out2
-        dz_out2 > 1.0 && continue
-        dz_core2 = (z - cz)^2 * inv_rz_core2
-        dz_mm = (Float64(z) - Float64(cz)) * dz
-        abs_dz = abs(dz_mm)
         
-        for y in y1:step_y:y2
-            dy_out2 = (y - cy)^2 * inv_ry_out2
-            (dz_out2 + dy_out2) > 1.0 && continue
-            dy_core2 = (y - cy)^2 * inv_ry_core2
-            dy_mm = (Float64(y) - Float64(cy)) * dy
-            abs_dy = abs(dy_mm)
+        # Measure transverse wall distance and peak wall edges at centered seed
+        t_wall_dist = fill(8.0, 4)
+        t_wall_edges = Float32[]
+        wall_thresh = max(0.35f0, min_e_seed + 0.12f0)
+        
+        if axis == 3
+            dirs = ((1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0))
+            for k in 1:4
+                dir = dirs[k]
+                max_ray_e = 0.0f0
+                for s in 1:16
+                    d_mm = s * 0.5
+                    px = clamp(round(Int, best_pt_seed[1] + dir[1] * d_mm / dx), 1, w)
+                    py = clamp(round(Int, best_pt_seed[2] + dir[2] * d_mm / dy), 1, h)
+                    e = -log(clamp(diffusivity[px, py, cz], 1.0f-5, 1.0f0)) * 0.09905025f0
+                    max_ray_e = max(max_ray_e, e)
+                    if (e >= wall_thresh || e >= 0.85f0) && t_wall_dist[k] == 8.0
+                        t_wall_dist[k] = d_mm
+                    end
+                end
+                push!(t_wall_edges, max_ray_e)
+            end
+        elseif axis == 1
+            dirs = ((0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1))
+            for k in 1:4
+                dir = dirs[k]
+                max_ray_e = 0.0f0
+                for s in 1:16
+                    d_mm = s * 0.5
+                    py = clamp(round(Int, best_pt_seed[2] + dir[2] * d_mm / dy), 1, h)
+                    pz = clamp(round(Int, best_pt_seed[3] + dir[3] * d_mm / dz), 1, d)
+                    e = -log(clamp(diffusivity[best_pt_seed[1], py, pz], 1.0f-5, 1.0f0)) * 0.09905025f0
+                    max_ray_e = max(max_ray_e, e)
+                    if (e >= wall_thresh || e >= 0.85f0) && t_wall_dist[k] == 8.0
+                        t_wall_dist[k] = d_mm
+                    end
+                end
+                push!(t_wall_edges, max_ray_e)
+            end
+        else # axis == 2
+            dirs = ((1, 0, 0), (-1, 0, 0), (0, 0, 1), (0, 0, -1))
+            for k in 1:4
+                dir = dirs[k]
+                max_ray_e = 0.0f0
+                for s in 1:16
+                    d_mm = s * 0.5
+                    px = clamp(round(Int, best_pt_seed[1] + dir[1] * d_mm / dx), 1, w)
+                    pz = clamp(round(Int, best_pt_seed[3] + dir[3] * d_mm / dz), 1, d)
+                    e = -log(clamp(diffusivity[px, best_pt_seed[2], pz], 1.0f-5, 1.0f0)) * 0.09905025f0
+                    max_ray_e = max(max_ray_e, e)
+                    if (e >= wall_thresh || e >= 0.85f0) && t_wall_dist[k] == 8.0
+                        t_wall_dist[k] = d_mm
+                    end
+                end
+                push!(t_wall_edges, max_ray_e)
+            end
+        end
+        
+        min_wall_mm = minimum(t_wall_dist)
+        
+        if min_wall_mm <= 4.0
+            lumen_samples = Float32[min_e_seed]
+            wall_samples = copy(t_wall_edges)
+            reach_fwd = 0.0
+            reach_bwd = 0.0
             
-            for x in x1:step_x:x2
-                dx_out2 = (x - cx)^2 * inv_rx_out2
-                d_out2 = dz_out2 + dy_out2 + dx_out2
-                d_out2 > 1.0 && continue
+            # Forward trace
+            cur_p = best_pt_seed
+            for s in 1:max_steps
+                if axis == 3
+                    z = cur_p[3] + 1; z > d && break
+                    bx, by, be = cur_p[1], cur_p[2], 1.0f0
+                    for y in max(1, cur_p[2] - s_r2):min(h, cur_p[2] + s_r2)
+                        for x in max(1, cur_p[1] - s_r1):min(w, cur_p[1] + s_r1)
+                            e = -log(clamp(diffusivity[x, y, z], 1.0f-5, 1.0f0)) * 0.09905025f0
+                            if e < be; be = e; bx, by = x, y; end
+                        end
+                    end
+                    if be >= 0.88f0 || be >= min_e_seed + 0.25f0 || (min_e_seed < 0.30f0 && be >= 0.40f0); break; end
+                    cur_p = (bx, by, z); push!(lumen_samples, be); reach_fwd += dz
+                elseif axis == 1
+                    x = cur_p[1] + 1; x > w && break
+                    by, bz, be = cur_p[2], cur_p[3], 1.0f0
+                    for z in max(1, cur_p[3] - s_r2):min(d, cur_p[3] + s_r2)
+                        for y in max(1, cur_p[2] - s_r1):min(h, cur_p[2] + s_r1)
+                            e = -log(clamp(diffusivity[x, y, z], 1.0f-5, 1.0f0)) * 0.09905025f0
+                            if e < be; be = e; by, bz = y, z; end
+                        end
+                    end
+                    if be >= 0.88f0 || be >= min_e_seed + 0.25f0 || (min_e_seed < 0.30f0 && be >= 0.40f0); break; end
+                    cur_p = (x, by, bz); push!(lumen_samples, be); reach_fwd += dx
+                else # axis == 2
+                    y = cur_p[2] + 1; y > h && break
+                    bx, bz, be = cur_p[1], cur_p[3], 1.0f0
+                    for z in max(1, cur_p[3] - s_r2):min(d, cur_p[3] + s_r2)
+                        for x in max(1, cur_p[1] - s_r1):min(w, cur_p[1] + s_r1)
+                            e = -log(clamp(diffusivity[x, y, z], 1.0f-5, 1.0f0)) * 0.09905025f0
+                            if e < be; be = e; bx, bz = x, z; end
+                        end
+                    end
+                    if be >= 0.88f0 || be >= min_e_seed + 0.25f0 || (min_e_seed < 0.30f0 && be >= 0.40f0); break; end
+                    cur_p = (bx, y, bz); push!(lumen_samples, be); reach_fwd += dy
+                end
+            end
+            
+            # Backward trace
+            cur_p = best_pt_seed
+            for s in 1:max_steps
+                if axis == 3
+                    z = cur_p[3] - 1; z < 1 && break
+                    bx, by, be = cur_p[1], cur_p[2], 1.0f0
+                    for y in max(1, cur_p[2] - s_r2):min(h, cur_p[2] + s_r2)
+                        for x in max(1, cur_p[1] - s_r1):min(w, cur_p[1] + s_r1)
+                            e = -log(clamp(diffusivity[x, y, z], 1.0f-5, 1.0f0)) * 0.09905025f0
+                            if e < be; be = e; bx, by = x, y; end
+                        end
+                    end
+                    if be >= 0.88f0 || be >= min_e_seed + 0.25f0 || (min_e_seed < 0.30f0 && be >= 0.40f0); break; end
+                    cur_p = (bx, by, z); push!(lumen_samples, be); reach_bwd += dz
+                elseif axis == 1
+                    x = cur_p[1] - 1; x < 1 && break
+                    by, bz, be = cur_p[2], cur_p[3], 1.0f0
+                    for z in max(1, cur_p[3] - s_r2):min(d, cur_p[3] + s_r2)
+                        for y in max(1, cur_p[2] - s_r1):min(h, cur_p[2] + s_r1)
+                            e = -log(clamp(diffusivity[x, y, z], 1.0f-5, 1.0f0)) * 0.09905025f0
+                            if e < be; be = e; by, bz = y, z; end
+                        end
+                    end
+                    if be >= 0.88f0 || be >= min_e_seed + 0.25f0 || (min_e_seed < 0.30f0 && be >= 0.40f0); break; end
+                    cur_p = (x, by, bz); push!(lumen_samples, be); reach_bwd += dx
+                else # axis == 2
+                    y = cur_p[2] - 1; y < 1 && break
+                    bx, bz, be = cur_p[1], cur_p[3], 1.0f0
+                    for z in max(1, cur_p[3] - s_r2):min(d, cur_p[3] + s_r2)
+                        for x in max(1, cur_p[1] - s_r1):min(w, cur_p[1] + s_r1)
+                            e = -log(clamp(diffusivity[x, y, z], 1.0f-5, 1.0f0)) * 0.09905025f0
+                            if e < be; be = e; bx, bz = x, z; end
+                        end
+                    end
+                    if be >= 0.88f0 || be >= min_e_seed + 0.25f0 || (min_e_seed < 0.30f0 && be >= 0.40f0); break; end
+                    cur_p = (bx, y, bz); push!(lumen_samples, be); reach_bwd += dy
+                end
+            end
+            
+            tot_reach = reach_fwd + reach_bwd
+            if tot_reach > best_reach
+                best_reach = tot_reach
+                best_axis = axis
+                best_lumen_samples = lumen_samples
+                best_wall_dist = min_wall_mm
+                best_wall_edges = wall_samples
+            end
+        end
+    end
+    
+    is_tubular = (best_wall_dist <= 4.0) && (best_reach >= 8.0)
+    
+    if is_tubular
+        sort!(best_lumen_samples)
+        p50_lumen = best_lumen_samples[min(length(best_lumen_samples), max(1, round(Int, 0.50 * length(best_lumen_samples))))]
+        p85_lumen = best_lumen_samples[min(length(best_lumen_samples), max(1, round(Int, 0.85 * length(best_lumen_samples))))]
+        E_bg = if E_seed < 0.30f0
+            p50_lumen
+        else
+            min(0.80f0, max(E_seed, p85_lumen))
+        end
+        
+        E_barrier = if !isempty(best_wall_edges)
+            sort!(best_wall_edges)
+            p75_wall = best_wall_edges[min(length(best_wall_edges), max(1, round(Int, 0.75 * length(best_wall_edges))))]
+            max(0.38f0, min(0.96f0, p75_wall - 0.02f0))
+        else
+            max(0.40f0, E_seed + 0.15f0)
+        end
+        E_barrier = max(E_barrier, E_bg + 0.08f0)
+        
+        p_long = min(E_bg + 0.04f0, E_barrier - 0.02f0)
+        p_trans = max(0.40f0, E_barrier)
+        
+        p_xp, p_xm, p_yp, p_ym, p_zp, p_zm = if best_axis == 3
+            p_trans, p_trans, p_trans, p_trans, p_long, p_long
+        elseif best_axis == 1
+            p_long, p_long, p_trans, p_trans, p_trans, p_trans
+        else
+            p_trans, p_trans, p_long, p_long, p_trans, p_trans
+        end
+        
+        gamma_eff = clamp(10.0f0 * sensitivity, 8.0f0, 20.0f0)
+        return (Float32(p_xp), Float32(p_xm), Float32(p_yp), Float32(p_ym), Float32(p_zp), Float32(p_zm),
+                Float32(E_bg), Float32(edge_clip), Float32(gamma_eff), 1.0f0, Float32(E_barrier), 1.0f0)
+    else
+        # Standard directional relative edge normalization (Breakthrough 5)
+        R_outer_mm = max(8.0, Float64(R_phys))
+        R_core_mm = 4.0
+        
+        rx_out = max(2, round(Int, R_outer_mm / dx))
+        ry_out = max(2, round(Int, R_outer_mm / dy))
+        rz_out = max(1, round(Int, R_outer_mm / dz))
+        
+        rx_core = max(1, round(Int, R_core_mm / dx))
+        ry_core = max(1, round(Int, R_core_mm / dy))
+        rz_core = max(1, round(Int, R_core_mm / dz))
+        
+        x1, x2 = max(1, cx - rx_out), min(w, cx + rx_out)
+        y1, y2 = max(1, cy - ry_out), min(h, cy + ry_out)
+        z1, z2 = max(1, cz - rz_out), min(d, cz + rz_out)
+        
+        inv_rx_out2 = 1.0 / (rx_out^2)
+        inv_ry_out2 = 1.0 / (ry_out^2)
+        inv_rz_out2 = 1.0 / (rz_out^2)
+        
+        inv_rx_core2 = 1.0 / (rx_core^2)
+        inv_ry_core2 = 1.0 / (ry_core^2)
+        inv_rz_core2 = 1.0 / (rz_core^2)
+        
+        core_samples = Float32[]
+        shell_samples = Float32[]
+        shell_xp = Float32[]; shell_xm = Float32[]
+        shell_yp = Float32[]; shell_ym = Float32[]
+        shell_zp = Float32[]; shell_zm = Float32[]
+        
+        sizehint!(core_samples, 200)
+        sizehint!(shell_samples, 1000)
+        sizehint!(shell_xp, 200); sizehint!(shell_xm, 200)
+        sizehint!(shell_yp, 200); sizehint!(shell_ym, 200)
+        sizehint!(shell_zp, 200); sizehint!(shell_zm, 200)
+        
+        step_x = (x2 - x1 > 40) ? 2 : 1
+        step_y = (y2 - y1 > 40) ? 2 : 1
+        step_z = (z2 - z1 > 40) ? 2 : 1
+        
+        for z in z1:step_z:z2
+            dz_out2 = (z - cz)^2 * inv_rz_out2
+            dz_out2 > 1.0 && continue
+            dz_core2 = (z - cz)^2 * inv_rz_core2
+            dz_mm = (Float64(z) - Float64(cz)) * dz
+            abs_dz = abs(dz_mm)
+            
+            for y in y1:step_y:y2
+                dy_out2 = (y - cy)^2 * inv_ry_out2
+                (dz_out2 + dy_out2) > 1.0 && continue
+                dy_core2 = (y - cy)^2 * inv_ry_core2
+                dy_mm = (Float64(y) - Float64(cy)) * dy
+                abs_dy = abs(dy_mm)
                 
-                D_val = diffusivity[x, y, z]
-                # E = -ln(D) / 10.095886
-                E_val = -log(clamp(D_val, 1.0f-5, 1.0f0)) * 0.09905025f0
-                
-                # Check if in core
-                d_core2 = dz_core2 + dy_core2 + (x - cx)^2 * inv_rx_core2
-                if d_core2 <= 1.0
-                    push!(core_samples, E_val)
-                else
-                    push!(shell_samples, E_val)
-                    dx_mm = (Float64(x) - Float64(cx)) * dx
-                    abs_dx = abs(dx_mm)
+                for x in x1:step_x:x2
+                    dx_out2 = (x - cx)^2 * inv_rx_out2
+                    (dz_out2 + dy_out2 + dx_out2) > 1.0 && continue
                     
-                    # Dominant cardinal cone
-                    if abs_dx >= abs_dy && abs_dx >= abs_dz
-                        if dx_mm >= 0.0
-                            push!(shell_xp, E_val)
-                        else
-                            push!(shell_xm, E_val)
-                        end
-                    elseif abs_dy >= abs_dx && abs_dy >= abs_dz
-                        if dy_mm >= 0.0
-                            push!(shell_yp, E_val)
-                        else
-                            push!(shell_ym, E_val)
-                        end
+                    D_val = diffusivity[x, y, z]
+                    E_val = -log(clamp(D_val, 1.0f-5, 1.0f0)) * 0.09905025f0
+                    
+                    d_core2 = dz_core2 + dy_core2 + (x - cx)^2 * inv_rx_core2
+                    if d_core2 <= 1.0
+                        push!(core_samples, E_val)
                     else
-                        if dz_mm >= 0.0
-                            push!(shell_zp, E_val)
+                        push!(shell_samples, E_val)
+                        dx_mm = (Float64(x) - Float64(cx)) * dx
+                        abs_dx = abs(dx_mm)
+                        
+                        if abs_dx >= abs_dy && abs_dx >= abs_dz
+                            (dx_mm >= 0.0) ? push!(shell_xp, E_val) : push!(shell_xm, E_val)
+                        elseif abs_dy >= abs_dx && abs_dy >= abs_dz
+                            (dy_mm >= 0.0) ? push!(shell_yp, E_val) : push!(shell_ym, E_val)
                         else
-                            push!(shell_zm, E_val)
+                            (dz_mm >= 0.0) ? push!(shell_zp, E_val) : push!(shell_zm, E_val)
                         end
                     end
                 end
             end
         end
-    end
-    
-    E_bg = if !isempty(core_samples)
-        sort!(core_samples)
-        idx = is_tubular ? max(1, round(Int, 0.10 * length(core_samples))) : max(1, round(Int, 0.25 * length(core_samples)))
-        min(E_seed, core_samples[idx])
-    else
-        min(E_seed, 0.05f0)
-    end
-    
-    global_shell_peak = if !isempty(shell_samples)
-        sort!(shell_samples)
-        idx = min(length(shell_samples), max(1, round(Int, 0.95 * length(shell_samples))))
-        shell_samples[idx]
-    else
-        0.20f0
-    end
-    
-    function _calc_peak(samples::Vector{Float32})
-        if length(samples) >= 5
-            sort!(samples)
-            idx = min(length(samples), max(1, round(Int, 0.95 * length(samples))))
-            return max(samples[idx], E_bg + 0.02f0)
+        
+        E_bg = if !isempty(core_samples)
+            sort!(core_samples)
+            idx = max(1, round(Int, 0.25 * length(core_samples)))
+            min(E_seed, core_samples[idx])
         else
-            return max(global_shell_peak, E_bg + 0.02f0)
+            min(E_seed, 0.05f0)
         end
-    end
-    
-    p_xp = _calc_peak(shell_xp)
-    p_xm = _calc_peak(shell_xm)
-    p_yp = _calc_peak(shell_yp)
-    p_ym = _calc_peak(shell_ym)
-    p_zp = _calc_peak(shell_zp)
-    p_zm = _calc_peak(shell_zm)
-    
-    # If tubular, adjust longitudinal vs transverse peaks:
-    if is_tubular
-        # For transverse axes: enforce firm wall barrier
-        if min_res_axis == 3 # Tube along Z
-            p_xp = max(p_xp, ray_max_edges[1], 0.35f0)
-            p_xm = max(p_xm, ray_max_edges[2], 0.35f0)
-            p_yp = max(p_yp, ray_max_edges[3], 0.35f0)
-            p_ym = max(p_ym, ray_max_edges[4], 0.35f0)
-            # For longitudinal axis (+Z, -Z): do not let wide cone exterior tissue inflate peak
-            # Along open lumen, peak is bounded by ray edge
-            p_zp = max(E_bg + 0.04f0, ray_max_edges[5])
-            p_zm = max(E_bg + 0.04f0, ray_max_edges[6])
-        elseif min_res_axis == 1 # Tube along X
-            p_yp = max(p_yp, ray_max_edges[3], 0.35f0)
-            p_ym = max(p_ym, ray_max_edges[4], 0.35f0)
-            p_zp = max(p_zp, ray_max_edges[5], 0.35f0)
-            p_zm = max(p_zm, ray_max_edges[6], 0.35f0)
-            p_xp = max(E_bg + 0.04f0, ray_max_edges[1])
-            p_xm = max(E_bg + 0.04f0, ray_max_edges[2])
-        else # Tube along Y
-            p_xp = max(p_xp, ray_max_edges[1], 0.35f0)
-            p_xm = max(p_xm, ray_max_edges[2], 0.35f0)
-            p_zp = max(p_zp, ray_max_edges[5], 0.35f0)
-            p_zm = max(p_zm, ray_max_edges[6], 0.35f0)
-            p_yp = max(E_bg + 0.04f0, ray_max_edges[3])
-            p_ym = max(E_bg + 0.04f0, ray_max_edges[4])
+        
+        global_shell_peak = if !isempty(shell_samples)
+            sort!(shell_samples)
+            idx = min(length(shell_samples), max(1, round(Int, 0.95 * length(shell_samples))))
+            shell_samples[idx]
+        else
+            0.20f0
         end
+        
+        function _calc_peak(samples::Vector{Float32})
+            if length(samples) >= 5
+                sort!(samples)
+                idx = min(length(samples), max(1, round(Int, 0.95 * length(samples))))
+                return max(samples[idx], E_bg + 0.02f0)
+            else
+                return max(global_shell_peak, E_bg + 0.02f0)
+            end
+        end
+        
+        p_xp = _calc_peak(shell_xp)
+        p_xm = _calc_peak(shell_xm)
+        p_yp = _calc_peak(shell_yp)
+        p_ym = _calc_peak(shell_ym)
+        p_zp = _calc_peak(shell_zp)
+        p_zm = _calc_peak(shell_zm)
+        
+        E_barrier = max(0.35f0, E_seed + 0.10f0)
+        gamma_eff = clamp(12.0f0 * sensitivity, 8.0f0, 24.0f0)
+        return (Float32(p_xp), Float32(p_xm), Float32(p_yp), Float32(p_ym), Float32(p_zp), Float32(p_zm),
+                Float32(E_bg), Float32(edge_clip), Float32(gamma_eff), 1.0f0, Float32(E_barrier), 0.0f0)
     end
-    
-    gamma_eff = clamp(12.0f0 * sensitivity, 8.0f0, 24.0f0)
-    is_tubular_val = is_tubular ? 1.0f0 : 0.0f0
-    
-    return (Float32(p_xp), Float32(p_xm), Float32(p_yp), Float32(p_ym), Float32(p_zp), Float32(p_zm),
-            Float32(E_bg), Float32(edge_clip), Float32(gamma_eff), 1.0f0, Float32(E_barrier), is_tubular_val)
 end
 
 # ─── Shader loading ──────────────────────────────────────────────────────

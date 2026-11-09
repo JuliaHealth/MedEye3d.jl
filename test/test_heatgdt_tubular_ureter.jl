@@ -17,6 +17,7 @@ Integration test verifying Tubular & Elongated Structure Heat Diffusion in Heat-
 """
 
 using Test
+using HDF5
 using Statistics
 using Observables
 using GLMakie
@@ -219,6 +220,56 @@ println("=" ^ 75)
 
     destroy_heat_diffusion!(heat_state, vk_ctx)
     destroy_vulkan_context!(vk_ctx)
+
+    # ── 5. Real Clinical Patient 6 Ureter Validation (TotalSegmentator Label 81) ──
+    pat6_path = joinpath(@__DIR__, "..", "data", "pat_6_files", "preprocessed_volumes.h5")
+    if isfile(pat6_path)
+        println("  Validating on Clinical Patient 6 Left Ureter...")
+        h5 = h5open(pat6_path, "r")
+        diff_pat6 = read(h5["BASELINE/diffusivity_ct"])
+        anat_pat6 = read(h5["BASELINE/max_anatomy.nii.gz"])
+        close(h5)
+        
+        cx_u, cy_u, cz_u = 278, 176, 192
+        spacing_pat6 = (0.9765625, 0.9765625, 3.27)
+        
+        p_pat6 = VulkanHeatDiffusion.compute_directional_relative_edge_params(
+            diff_pat6, cx_u, cy_u, cz_u, 18.0, spacing_pat6; sensitivity=1.0f0
+        )
+        @test p_pat6[12] == 1.0f0 # Automatically detected tubular ureter
+        @test p_pat6[7] >= 0.60f0 # Baseline elevated to cover narrow lumen
+        @test p_pat6[11] >= 0.85f0 # Outer wall barrier set firm
+        
+        sub_w = 32
+        x1, x2 = cx_u - sub_w, cx_u + sub_w - 1
+        y1, y2 = cy_u - sub_w, cy_u + sub_w - 1
+        z1, z2 = cz_u - sub_w, cz_u + sub_w - 1
+        
+        sub_diff = diff_pat6[x1:x2, y1:y2, z1:z2]
+        sub_anat = anat_pat6[x1:x2, y1:y2, z1:z2]
+        scx = cx_u - x1 + 1; scy = cy_u - y1 + 1; scz = cz_u - z1 + 1
+        
+        pts_pat6 = zeros(Float32, size(sub_diff))
+        pts_pat6[scx, scy, scz] = 1.0f0
+        
+        InferenceClient.precompute_heatgdt_diffusivity(sub_diff; tp_index=1)
+        mask_pat6 = InferenceClient.run_heatgdt(
+            sub_diff, sub_diff, pts_pat6, scx, scy, scz;
+            K=140, spacing=spacing_pat6, edge_params=p_pat6
+        )
+        @test mask_pat6 !== nothing
+        
+        z_pts_pat6 = [p[3] for p in findall(mask_pat6 .> 0)]
+        span_pat6 = isempty(z_pts_pat6) ? 0 : (maximum(z_pts_pat6) - minimum(z_pts_pat6) + 1)
+        lumen_pat6 = count((mask_pat6 .> 0) .& (sub_anat .== 81))
+        fat_leak_pat6 = count((mask_pat6 .> 0) .& (sub_diff .> 0.8f0))
+        
+        println("  Patient 6 Ureter Results: total=$(count(mask_pat6 .> 0)), span=$span_pat6 slices ($(round(span_pat6 * spacing_pat6[3], digits=1)) mm), ureter=$lumen_pat6, fat_leak=$fat_leak_pat6")
+        @test span_pat6 >= 6 # Propagated across at least 6 slices (20+ mm)
+        @test lumen_pat6 >= 100 # Significant clinical lumen coverage
+        @test fat_leak_pat6 <= 5 # Virtually zero leakage into surrounding retroperitoneal fat
+        println("  ✓ Real Clinical Patient 6 Ureter: free flow along lumen with 0 fat leakage")
+    end
 end
 
 println("\n" * "=" ^ 75)

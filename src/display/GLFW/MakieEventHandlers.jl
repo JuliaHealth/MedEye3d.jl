@@ -495,7 +495,7 @@ function start_inference_worker()
                                 sensitivity=heatgdt_sensitivity[]
                             )
                             if length(edge_params) >= 12 && edge_params[12] > 0.5f0
-                                K_val = max(K_val, 80)
+                                K_val = max(K_val, 140)
                                 s_boost = min(s_boost, 1.25f0)
                             end
                         else
@@ -6671,7 +6671,7 @@ function execute_one_click_heatgdt!(stateObjects::Vector{StateDataFields}, cx::I
                 sensitivity=heatgdt_sensitivity[]
             )
             if length(edge_params) >= 12 && edge_params[12] > 0.5f0
-                K_val = max(K_val, 80)
+                K_val = max(K_val, 140)
                 s_boost = min(s_boost, 1.25f0)
             end
         else

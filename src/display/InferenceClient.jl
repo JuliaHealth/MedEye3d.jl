@@ -940,7 +940,11 @@ function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
                 dist2 = disp_x^2 + disp_y^2 + disp_z^2
                 
                 E_peak_dir = if dist2 < 1.0f-8
-                    (p_xp + p_xm + p_yp + p_ym + p_zp + p_zm) / 6.0f0
+                    if is_tubular
+                        min(p_xp, p_xm, p_yp, p_ym, p_zp, p_zm)
+                    else
+                        (p_xp + p_xm + p_yp + p_ym + p_zp + p_zm) / 6.0f0
+                    end
                 else
                     inv_dist = 1.0f0 / sqrt(dist2)
                     dx = disp_x * inv_dist

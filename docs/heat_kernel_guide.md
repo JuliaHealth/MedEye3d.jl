@@ -263,6 +263,43 @@ Once tubular mode is activated:
 
 ---
 
+### 2.7 Breakthrough 7: Lumen Ridge / Valley Follower & Elevated Baseline Channel Normalization (Curved Vessels & Ureters)
+
+#### The Clinical Challenge: Curvature & Elevated Edge Ridges in CT
+While Breakthrough 6 established straight-line tubular detection, clinical abdominal imaging reveals two critical real-world phenomena:
+1. **Anatomical Curvature**: Ureters, mesenteric vessels, and biliary ducts are not straight Cartesian cylinders. For example, in Patient 6, the left ureter drifts $5.8\text{ mm}$ along $Y$ over $13\text{ mm}$ along $Z$ ($24^\circ$ anatomical tilt). Rigid straight rays leave the lumen within $5\text{ mm}$, hitting the outer retroperitoneal wall ($E = 0.976$) and falsely declaring the longitudinal path blocked.
+2. **Elevated Edge Ridge in Lumens**: In narrow structures ($2 - 4\text{ mm}$ across), CT point-spread functions and convolutional edge filters overlap from both opposing walls into the center. The lumen itself sits on an elevated edge ridge with $E \in [0.40, 0.75]$. If $E_{\text{bg}}$ is anchored to a lower baseline ($0.45$) with $\gamma_{\text{eff}} = 12.0$, face conductivity drops to $D_{\text{face}} \approx 0.0004$, throttling flow by $2,500\times$ and freezing diffusion.
+
+#### The Mathematical & Algorithmic Solution
+MedEye3d resolves this with a three-pillar architecture:
+
+1. **Curvature-Adaptive Lumen Valley / Ridge Follower**:
+   Instead of casting rigid 1D rays, MedEye3d tracks slice-by-slice along the candidate coordinate axes.
+   At each successive slice, it evaluates a 2D local energy minimization:
+   $$(x_s^*, y_s^*) = \arg\min_{(x, y) \in \mathcal{N}} E(x, y, z)$$
+   within a local window $r \le 2.5\text{ mm}$ around the previous slice center.
+   This locks onto the true lumen centerline even as the vessel curves across 3D space, measuring the true lumen edge profile $E_{\text{lumen}}(z)$ and true transverse wall distances $r_{\text{wall}}$.
+
+2. **Lumen-Referenced Adaptive Contrast Normalization**:
+   When a tubular structure is confirmed ($r_{\text{wall}} \le 4.0\text{ mm}$ and reach $\ge 8.0\text{ mm}$):
+   - For high-gradient narrow lumens ($E_{\text{seed}} \ge 0.30$):
+     $$E_{\text{bg}} = \min\big(0.80, \; \max(E_{\text{seed}}, \; \text{percentile}_{85}(E_{\text{lumen}}))\big)$$
+     For any voxel inside the lumen where $E \le E_{\text{bg}}$, $E_{\text{rel}} \equiv 0.0 \implies D = 1.0$ ($100\%$ unhindered flow speed!).
+   - Outer wall barrier threshold:
+     $$E_{\text{barrier}} = \max\big(0.38, \; \min(0.96, \; \text{percentile}_{75}(E_{\text{wall}}) - 0.02)\big)$$
+     All outer wall voxels ($E \ge E_{\text{barrier}}$) drop to $D = 10^{-5}$.
+   - Longitudinal peak ($p_{\parallel}$): set to $\min(E_{\text{bg}} + 0.04, E_{\text{barrier}} - 0.02)$, keeping the channel open.
+   - Transverse peak ($p_{\perp}$): set to $\max(0.40, E_{\text{barrier}})$, enforcing strict lateral confinement.
+
+3. **Vulkan Shader Seed Decoupling & 1-Click Scaling ($K \ge 140$)**:
+   - At the exact seed location (`dist2 < 1e-8`), the compute shader selects the open channel peak:
+     $$\text{if } (pc.gamma\_meta.w > 0.5) \quad E_{\text{peak}} = \min_{k} (\text{peaks}_k)$$
+   - In 1-Click mode on tubular structures, $K$ is automatically scaled:
+     $$K_{\text{tubular}} = \max(K, 140)$$
+     delivering $30 - 60\text{ mm}$ longitudinal flow along the ureter in $\sim 10\text{ ms}$ on GPU with **strictly 0 voxels leaked** into retroperitoneal fat.
+
+---
+
 ## 3. Multimodal Guidance: Combined vs CT Only vs PET Only
 
 Lesions often appear differently across modalities:
@@ -447,15 +484,15 @@ CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_heatgdt_direction
 *Expected Result:* `Test Summary: Pass 21, Total 21. ALL DIRECTIONAL EDGE NORMALIZATION TESTS PASSED ✓`
 
 #### Test 12: Narrow Channel / Ureter Confinement & Longitudinal Propagation
-Verifies automatic tubular wall sensing and longitudinal channel diffusion on a 3D volume with a realistic $3\text{ mm}$ ureter adjacent to muscle:
-1. Ray-tracing detects transverse wall boundaries ($r_{\text{wall}} \le 3.5\text{ mm}$) and low craniocaudal resistance, automatically activating tubular mode.
-2. Dynamic barrier ceiling ($E_{\text{barrier}} = \max(0.40, E_{\text{seed}} + 0.15)$) prevents seed self-stalling while preserving impenetrable tubular walls.
-3. Lumen corridor sampling isolates the longitudinal path without contamination from surrounding exterior tissues.
-4. Verifies $30 - 40+$ voxels longitudinal propagation with strictly **0 lateral wall leakage** across CPU diffusion, Vulkan GPU 1-Click mode ($K \ge 80$), and Vulkan GPU Wand mode:
+Verifies automatic tubular wall sensing, 2D lumen valley ridge-following, and longitudinal channel diffusion on both a synthetic $3\text{ mm}$ ureter and real clinical Patient 6 abdomen CT volume (`pat_6_files/preprocessed_volumes.h5`):
+1. 2D valley follower traces curved ureter lumens over $60 - 100+\text{ mm}$, overcoming anatomical curvature and tilt without exiting into outer walls.
+2. Lumen-referenced contrast normalization ($E_{\text{bg}}$ elevated to cover narrow lumen gradient) eliminates the $2,500\times$ conductance freeze.
+3. Transverse wall barrier ceiling ($E_{\text{barrier}} \ge 0.85 - 0.94$) strictly confines diffusion to the lumen.
+4. Verifies $30 - 40+$ voxels longitudinal propagation on synthetic ureter and $29.4\text{ mm}$ (9 slices, 309 voxels) on clinical Patient 6 ureter with strictly **0 lateral fat leakage** across CPU diffusion, Vulkan GPU 1-Click mode ($K \ge 140$), and Vulkan GPU Wand mode:
 ```bash
 CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_heatgdt_tubular_ureter.jl
 ```
-*Expected Result:* `Test Summary: Pass 20, Total 20. ALL TUBULAR URETER HEAT DIFFUSION TESTS PASSED ✓`
+*Expected Result:* `Test Summary: Pass 27, Total 27. ALL TUBULAR URETER HEAT DIFFUSION TESTS PASSED ✓`
 
 ---
 

@@ -48,10 +48,17 @@ float compute_effective_D(float raw_D, ivec3 voxel_pos, float u_val, float s_boo
                 vec3 disp = (vec3(voxel_pos) - active_seed) * inversesqrt(max(pc.inv_d2.xyz, vec3(1e-6)));
                 float dist2 = dot(disp, disp);
                 if (dist2 < 1e-8) {
-                    // At exact seed location, average cardinal peaks
-                    E_peak_dir = 0.16666667 * (pc.edge_peaks_xy.x + pc.edge_peaks_xy.y +
-                                               pc.edge_peaks_xy.z + pc.edge_peaks_xy.w +
-                                               pc.edge_peaks_z_meta.x + pc.edge_peaks_z_meta.y);
+                    if (pc.gamma_meta.w > 0.5) {
+                        // In tubular mode: at exact seed location, adopt minimum peak (open channel corridor)
+                        E_peak_dir = min(min(pc.edge_peaks_xy.x, pc.edge_peaks_xy.y),
+                                     min(min(pc.edge_peaks_xy.z, pc.edge_peaks_xy.w),
+                                         min(pc.edge_peaks_z_meta.x, pc.edge_peaks_z_meta.y)));
+                    } else {
+                        // At exact seed location, average cardinal peaks
+                        E_peak_dir = 0.16666667 * (pc.edge_peaks_xy.x + pc.edge_peaks_xy.y +
+                                                   pc.edge_peaks_xy.z + pc.edge_peaks_xy.w +
+                                                   pc.edge_peaks_z_meta.x + pc.edge_peaks_z_meta.y);
+                    }
                 } else {
                     vec3 dir = disp * inversesqrt(dist2);
                     // Quadratic projection (exact partition of unity: sum of weights == 1.0)
