@@ -106,39 +106,51 @@ println("=" ^ 70)
         @test MakieEventHandlers._vk_heat_total_steps[] == 30
         println("  ✓ Tick 1: total_steps=$(MakieEventHandlers._vk_heat_total_steps[]) (+10 steps)")
         
-        # ── Test 4: Tick 2 (30 -> 40 steps, hits K=40 target) ──
+        # ── Test 4: Tick 2 (30 -> 40 steps) ──
         sleep(0.06) # wait for debounce
         MakieEventHandlers.reactToHeatGDTTick(MedEye3d.MakieEvents.HeatGDTTickEvent(), stateObjects)
         @test MakieEventHandlers._vk_heat_total_steps[] == 40
-        println("  ✓ Tick 2: total_steps=$(MakieEventHandlers._vk_heat_total_steps[]) (hit target K=40)")
+        println("  ✓ Tick 2: total_steps=$(MakieEventHandlers._vk_heat_total_steps[])")
         
-        # ── Test 5: Tick 3 (prolonged hold: must stay at 40, NO over-diffusion) ──
+        # ── Test 5: Tick 3 (prolonged hold: smooth progressive expansion 40 -> 50 steps) ──
         sleep(0.06)
         MakieEventHandlers.reactToHeatGDTTick(MedEye3d.MakieEvents.HeatGDTTickEvent(), stateObjects)
-        @test MakieEventHandlers._vk_heat_total_steps[] == 40
-        println("  ✓ Tick 3 (prolonged hold): total_steps=$(MakieEventHandlers._vk_heat_total_steps[]) (clamped, zero leakage)")
+        @test MakieEventHandlers._vk_heat_total_steps[] == 50
+        println("  ✓ Tick 3 (prolonged hold): total_steps=$(MakieEventHandlers._vk_heat_total_steps[]) (smooth continuous growth)")
         
-        # ── Test 6: Stop and commit ──
+        # ── Test 6: Mouse Drag / Move Cursor (continue same lesion, update seed point) ──
+        # Simulate moving cursor 4 voxels in X direction while left button is held
+        drag_cx = cx + 4
+        MakieEventHandlers.current_viewer_position[] = CartesianIndex(drag_cx, cy, cz)
+        sleep(0.06)
+        MakieEventHandlers.reactToHeatGDTTick(MedEye3d.MakieEvents.HeatGDTTickEvent(), stateObjects)
+        
+        @test MakieEventHandlers._vk_heat_seed[][1] == drag_cx
+        println("  ✓ Drag / Move cursor: seed point updated to ($drag_cx, $cy, $cz)")
+        @test seg_vol[drag_cx, cy, cz] == 3
+        @test seg_vol[cx, cy, cz] == 3 # original seed point still preserved!
+        println("  ✓ Continued same active lesion: both seeds present with label=3")
+        
+        # ── Test 7: Stop and commit ──
         println("  Triggering reactToHeatGDTStop...")
         MakieEventHandlers.reactToHeatGDTStop(MedEye3d.MakieEvents.HeatGDTStopEvent(1), stateObjects)
         @test MakieEventHandlers._vk_heat_active[] == false
         
         voxels_wand = count(seg_vol .== 3)
-        println("  ✓ Committed Wand mask: $voxels_wand voxels")
-        @test voxels_wand > 50
+        println("  ✓ Committed multi-seed Wand mask: $voxels_wand voxels")
+        @test voxels_wand > 100
         @test seg_vol[cx, cy, cz] == 3
+        @test seg_vol[drag_cx, cy, cz] == 3
         
-        # ── Test 7: Verify against 1-Click execution on fresh volume ──
+        # ── Test 8: Verify 1-Click execution on fresh volume ──
         seg_vol_1click = zeros(Int16, w, h, d)
         stateObjects[1].onScrollData.dataToScroll[1].dat = seg_vol_1click
         MakieEventHandlers.current_active_lesion_id[] = 3
         
         MakieEventHandlers.execute_one_click_heatgdt!(stateObjects, cx, cy, cz; K=40, theta=0.001f0)
         voxels_1click = count(seg_vol_1click .== 3)
-        println("  ✓ Comparison: Wand (40 steps) = $voxels_wand voxels vs 1-Click (40 steps) = $voxels_1click voxels")
-        
-        # Should match very closely (within bounding box readback)
-        @test abs(voxels_wand - voxels_1click) / max(voxels_1click, 1) < 0.05
+        println("  ✓ Single seed 1-Click (40 steps) = $voxels_1click voxels vs multi-seed stroke Wand = $voxels_wand voxels")
+        @test voxels_wand > voxels_1click # multi-seed stroke covers more volume along the path
     finally
         # Cleanup
         VulkanHeatDiffusion.destroy_heat_diffusion!(heat_state, vk_ctx)

@@ -6821,9 +6821,28 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
         return
     end
     
-    # Use current_viewer_position which is already updated by mouse move → reactToMouseDrag
-    vpos = current_viewer_position[]
-    cx, cy, cz = vpos[1], vpos[2], vpos[3]
+    # Direct click coordinate mapping if provided, otherwise fallback to current_viewer_position
+    cx, cy, cz = 0, 0, 0
+    if event.x > 0 && event.y > 0 && !isempty(stateObjects)
+        try
+            aW = Float64(event.actualWindowWidth > 0 ? event.actualWindowWidth : stateObjects[1].calcDimsStruct.windowWidth)
+            aH = Float64(event.actualWindowHeight > 0 ? event.actualWindowHeight : stateObjects[1].calcDimsStruct.windowHeight)
+            p_idx = parentmodule(@__MODULE__).ReactOnMouseClickAndDrag._detect_clicked_panel(event.x, event.y, aW, aH, event.window_id, stateObjects)
+            if p_idx >= 1 && p_idx <= length(stateObjects)
+                pst = stateObjects[p_idx]
+                tx, ty = DispUtils.StructsManag.getTextureCoordinatesFromScreen(event.x, event.y, pst.calcDimsStruct, aW, aH)
+                cur_sl = pst.currentDisplayedSlice
+                cx, cy, cz = parentmodule(@__MODULE__).ReactOnMouseClickAndDrag._map_panel_coords_to_world(p_idx, Int(round(tx)), Int(round(ty)), cur_sl, pst, @__MODULE__)
+                current_viewer_position[] = (cx, cy, cz)
+            end
+        catch e
+            @debug "[Heat-GDT] Direct coordinate mapping failed: $e"
+        end
+    end
+    if cx <= 0 || cy <= 0 || cz <= 0
+        vpos = current_viewer_position[]
+        cx, cy, cz = vpos[1], vpos[2], vpos[3]
+    end
     println("[Heat-GDT START] cursor position: ($cx, $cy, $cz)"); flush(stdout)
     if cx <= 0 || cy <= 0 || cz <= 0
         set_ai_status!("[Heat-GDT GPU] Invalid cursor position — move cursor over image first")
@@ -6914,13 +6933,18 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
         # Initial step bounded at 20 steps (or min(20, K_target))
         initial_steps = min(20, K_target)
         theta_val = Float32(heatgdt_theta[])
-        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, initial_steps; theta=theta_val, copy_box_to_cpu=false, spacing=ct_spacing, s_boost=s_boost)
+        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, initial_steps; theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost)
         _vk_heat_total_steps[] = initial_steps
         HEAT_GDT_LAST_DISPLAY_THETA[] = theta_val
         
-        try; open("/tmp/heatgdt_debug.log", "a") do f; println(f, "[$(round(time(), digits=3))] START: seed+$initial_steps steps DONE at ($cx,$cy,$cz), theta=$theta_val, active=$(_vk_heat_active[]), channel=$(main_event_channel[] !== nothing ? "ok" : "nothing")"); end; catch; end
-        
+        # Commit initial seed to seg_vol immediately
         active_id = UInt32(current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1)
+        if seg_vol !== nothing
+            label_val = eltype(seg_vol)(active_id)
+            VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)
+        end
+        
+        try; open("/tmp/heatgdt_debug.log", "a") do f; println(f, "[$(round(time(), digits=3))] START: seed+$initial_steps steps DONE at ($cx,$cy,$cz), theta=$theta_val, active=$(_vk_heat_active[]), channel=$(main_event_channel[] !== nothing ? "ok" : "nothing")"); end; catch; end
         for state in stateObjects
             obj = state.mainForDisplayObjects
             if obj === nothing || obj.vulkanTextures === nothing || isempty(obj.vulkanTextures)
@@ -7024,21 +7048,7 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
     end
     
     try
-        # ── Run diffusion steps on GPU — bounded progression (20 -> 30 -> 40) matching single-click mode ──
-        K_target = heatgdt_K[]
-        if _vk_heat_total_steps[] >= K_target
-            # Target reached: stop diffusion to guarantee zero edge leakage!
-            return
-        end
-        
-        steps_per_tick = min(10, K_target - _vk_heat_total_steps[])
-        if steps_per_tick <= 0
-            return
-        end
-        
-        theta_val = Float32(heatgdt_theta[])
-        HEAT_GDT_LAST_DISPLAY_THETA[] = theta_val
-        
+        # ── 1. Spacing and target segmentation volume ──
         ct_spacing = try
             stateObjects[1].onScrollData.dataToScrollDims.voxelSize
         catch
@@ -7048,16 +7058,85 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
             ct_spacing = (1.0, 1.0, 1.0)
         end
         
-        # Keep the exact upfront calibrated s_boost from seed_only! (matching single-click mode)
-        s_boost = heat_state.current_s_boost
+        tp1 = stateObjects[1]
+        seg_vol = nothing
+        for dat in tp1.onScrollData.dataToScroll
+            if dat.name == "Mask" || dat.name == "segmentation"
+                seg_vol = dat.dat
+                break
+            end
+        end
+        active_id = UInt32(current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1)
+        label_val = seg_vol !== nothing ? eltype(seg_vol)(active_id) : Int16(active_id)
         
-        _dbg("TICK: steps=$steps_per_tick, total=$(_vk_heat_total_steps[] + steps_per_tick)/$K_target, theta=$theta_val, s_boost=$s_boost, accumulated=$(heat_state.accumulated_steps)")
+        theta_val = Float32(heatgdt_theta[])
+        HEAT_GDT_LAST_DISPLAY_THETA[] = theta_val
+        
+        # ── 2. Check cursor movement for drag / stroke continuation ──
+        vpos = current_viewer_position[]
+        cx, cy, cz = vpos[1], vpos[2], vpos[3]
+        old_seed = _vk_heat_seed[]
+        dist_vox = sqrt((Float64(cx) - Float64(old_seed[1]))^2 + 
+                        (Float64(cy) - Float64(old_seed[2]))^2 + 
+                        (Float64(cz) - Float64(old_seed[3]))^2)
+        
+        diff_vol = InferenceClient._heatgdt_diffusivity[]
+        max_wand_steps = max(heatgdt_K[], 200)
         
         t0 = time_ns()
-        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, steps_per_tick;
-            theta=theta_val, copy_box_to_cpu=false, spacing=ct_spacing, s_boost=s_boost)
+        if dist_vox >= 2.0
+            # ── DRAG MODE: User moved cursor while holding button — continue lesion at new seed ──
+            # Interpolate points along the path so rapid mouse motion leaves no gaps
+            n_pts = max(1, min(10, round(Int, dist_vox / 2.0)))
+            burst_steps = min(20, max_wand_steps)
+            mean_sp = (ct_spacing[1] + ct_spacing[2] + ct_spacing[3]) / 3.0
+            R_phys = max(10.0, 3.0 + 2.0 * sqrt(heatgdt_K[] * 0.16) * mean_sp)
+            
+            for step_i in 1:n_pts
+                alpha = step_i / n_pts
+                px = clamp(round(Int, Float64(old_seed[1]) + alpha * (Float64(cx) - Float64(old_seed[1]))), 1, heat_state.width)
+                py = clamp(round(Int, Float64(old_seed[2]) + alpha * (Float64(cy) - Float64(old_seed[2]))), 1, heat_state.height)
+                pz = clamp(round(Int, Float64(old_seed[3]) + alpha * (Float64(cz) - Float64(old_seed[3]))), 1, heat_state.depth)
+                
+                s_boost = 1.0f0
+                if heatgdt_adaptive_contrast[] && diff_vol !== nothing
+                    s_boost = VulkanHeatDiffusion.compute_frontier_edge_scale(
+                        diff_vol, px, py, pz, R_phys, ct_spacing;
+                        sensitivity=heatgdt_sensitivity[]
+                    )
+                end
+                
+                VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, px, py, pz; seed_radius=1, spacing=ct_spacing, s_boost=s_boost)
+                VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, burst_steps;
+                    theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost)
+                if seg_vol !== nothing
+                    VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)
+                end
+            end
+            _vk_heat_seed[] = (cx, cy, cz)
+            _vk_heat_total_steps[] = burst_steps
+            _dbg("DRAG: seed updated to ($cx,$cy,$cz) via $n_pts intermediate points, burst=$burst_steps")
+        else
+            # ── HOLD MODE: Cursor stationary — progressive continuous growth (10 steps per tick) ──
+            if _vk_heat_total_steps[] >= max_wand_steps
+                return  # Maximum safe ceiling reached
+            end
+            
+            steps_per_tick = min(10, max_wand_steps - _vk_heat_total_steps[])
+            if steps_per_tick <= 0
+                return
+            end
+            
+            s_boost = heat_state.current_s_boost
+            VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, steps_per_tick;
+                theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost)
+            _vk_heat_total_steps[] += steps_per_tick
+            if seg_vol !== nothing
+                VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)
+            end
+            _dbg("HOLD: steps=+$steps_per_tick (total=$(_vk_heat_total_steps[])/$max_wand_steps)")
+        end
         t_gpu = time_ns()
-        _vk_heat_total_steps[] += steps_per_tick
         
         _dbg("  GPU done: $(round((t_gpu - t0) / 1e6, digits=2))ms, new_accumulated=$(heat_state.accumulated_steps), box_min=$(heat_state.current_box_min), box_max=$(heat_state.current_box_max)")
         

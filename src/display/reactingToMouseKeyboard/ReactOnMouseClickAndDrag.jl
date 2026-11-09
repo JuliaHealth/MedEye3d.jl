@@ -379,6 +379,29 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
     end
     
     if _heatgdt_mode_active[]
+        # During Heat-GDT Wand mode: extract sampled mouse coords and keep current_viewer_position
+        # updated during mouse drag so reactToHeatGDTTick can track cursor motion and update seed point!
+        calcDim = stateObject.calcDimsStruct
+        empty!(_sampled_points_buf)
+        for mouseStruct in mouseStructArray
+            mouseCoords = mouseStruct.lastCoordinates
+            actualW = Float64(mouseStruct.actualWindowWidth)
+            actualH = Float64(mouseStruct.actualWindowHeight)
+            for c in mouseCoords
+                texX, texY = StructsManag.getTextureCoordinatesFromScreen(c[1], c[2], calcDim, actualW, actualH)
+                ix, iy = Int(round(texX)), Int(round(texY))
+                if ix >= 1 && ix <= calcDim.imageTextureWidth && iy >= 1 && iy <= calcDim.imageTextureHeight
+                    push!(_sampled_points_buf, (ix, iy))
+                end
+            end
+        end
+        if !isempty(_sampled_points_buf)
+            ix_p, iy_p = _sampled_points_buf[end][1], _sampled_points_buf[end][2]
+            clickedPanel_p = mainStates[1].switchIndex
+            slice_p = stateObject.currentDisplayedSlice
+            vox_p = _map_panel_coords_to_world(clickedPanel_p, ix_p, iy_p, slice_p, stateObject, MEH)
+            MEH.current_viewer_position[] = vox_p
+        end
         return # Skip manual 2D paintbrush when Heat-GDT is active
     end
     

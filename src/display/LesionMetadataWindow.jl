@@ -5607,7 +5607,7 @@ function create_metadata_window(
     Label(g[seg_r3b, 1], "θ:", halign=:right, fontsize=10, color=LBL_FG)
     slider_heatgdt_theta = Slider(g[seg_r3b, 2], range = 0.0001:0.0001:0.01, startvalue = 0.001)
     Label(g[seg_r3b, 3], "K:", halign=:right, fontsize=10, color=LBL_FG)
-    slider_heatgdt_K = Slider(g[seg_r3b, 4], range = 10:5:100, startvalue = 40)
+    slider_heatgdt_K = Slider(g[seg_r3b, 4], range = 10:5:200, startvalue = 40)
     rowsize!(g, seg_r3b, Fixed(30)); register_fixed_row!(seg_r3b, 30)
     
     seg_r3c = nr!()
