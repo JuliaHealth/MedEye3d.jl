@@ -11982,6 +11982,8 @@ function create_metadata_window(
     _lmw_observables[:btn_edge_both] = btn_edge_both
     _lmw_observables[:btn_edge_ct] = btn_edge_ct
     _lmw_observables[:btn_edge_pet] = btn_edge_pet
+    _lmw_observables[:cb_adaptive] = cb_adaptive
+    _lmw_observables[:slider_sens] = slider_sens
     _lmw_observables[:open_sec_seg!] = () -> begin
         if !sec_seg[1][]
             sec_seg[4].clicks[] = sec_seg[4].clicks[] + 1

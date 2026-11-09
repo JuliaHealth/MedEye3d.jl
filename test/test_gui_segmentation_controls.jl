@@ -71,16 +71,20 @@ import MedEye3d.SegmentationDisplay.MakieEventHandlers as MEH
     @test_nowarn obs_dict[:open_sec_seg!]()
     @test_nowarn obs_dict[:scroll_to_top!]()
 
-    # 8. Test W key wand mode activation
+    # 8. Test W key wand mode activation & self-normalizing adaptive edge kernel
     println("Testing OneShotHeatGDTEvent (W key)...")
     stateObjects = MedEye3d.StructsManag.StateDataFields[]
-    # Ensure mode starts inactive
+    # Ensure mode starts inactive and adaptive contrast was false to test auto-activation
     romcad = MedEye3d.ReactOnMouseClickAndDrag
     romcad._heatgdt_mode_active[] = false
+    MEH.heatgdt_adaptive_contrast[] = false
     
     MEH.reactToOneShotHeatGDT(MedEye3d.MakieEvents.OneShotHeatGDTEvent(), stateObjects)
     @test romcad._heatgdt_mode_active[] == true
+    @test MEH.heatgdt_adaptive_contrast[] == true
     @test obs_dict[:algo_combo_selection][] == "Heat-GDT"
+    sleep(0.05)
+    @test obs_dict[:cb_adaptive].active[] == true
     
     println("✅ All GUI segmentation control and edge toggle tests PASSED!")
 end

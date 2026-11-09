@@ -1,4 +1,4 @@
-# Heat-GDT GPU Interactive Segmentation & Heat Kernel Guide
+# Complete Guide to the Heat-GDT GPU Interactive Segmentation Kernel
 
 ## 1. Executive Summary & Theoretical Foundations
 
@@ -131,19 +131,30 @@ When the user selects an edge source from the GUI, [`switch_heatgdt_edge_modalit
 
 ## 4. How to Use Heat-GDT in the MedEye3d GUI
 
-### 4.1 Activation
-1. **Shortcut**: Press the **`W`** key anywhere in the viewer to toggle Wand / Heat-GDT mode.
-2. **GUI Menu**: In the **Lesion Metadata Window** (right-hand panel), open the **AI** dropdown and select **`Heat-GDT`**.
+### 4.1 Activation & Visibility
+The **Segmentation & AI** section is permanently positioned at the top of the sidebar directly beneath **Lesion Navigation**, ensuring all controls are visible and accessible without scrolling through patient metadata or radiological reports.
+
+1. **Shortcut**: Press the **`W`** key anywhere in the 3D viewer. This automatically:
+   - Expands the **Segmentation & AI** accordion section if collapsed.
+   - Scrolls the sidebar to the top so segmentation parameters are in full view.
+   - Sets the algorithm selection to **`Heat-GDT`**.
+   - Primes the GPU Heat-GDT pipeline with the active modality diffusivity.
+   - Enters painting mode with a new or active lesion ID.
+2. **GUI Section**: Alternatively, open the **Segmentation & AI** section and set the **AI** menu to **`Heat-GDT`** (which is selected by default).
 
 ```
 ┌────────────────────────────────────────────────────────┐
+│ [▼ Segmentation & AI]                                  │
+│                   VIEW MODE / EDIT MODE                │
+│ [ New ]  [ Paint ]  [ Erase ]  [ View ]                │
+│ Brush: [───●──────────────────] [ Move ]               │
 │ AI: [ Heat-GDT              ▼ ] [ Run AI ]             │
 │ θ: [───●──────────────────────] K: [──────●──────────] │
 │ Speed: [─────────●────────────]                        │
 │ Size ±: [──────────●───────────] [ Reset ]             │
-│ Edge: [ Combined            ▼ ]                        │
+│ Edge: [ Both (Combined) ] [ CT Only ] [ PET Only ]     │
 │ Adapt: [ON]    Sens: [────●───]                        │
-│ θ controls sensitivity (size). K controls smoothness.  │
+│ θ: sensitivity (size) | K: smoothness | Edge: [Both]   │
 └────────────────────────────────────────────────────────┘
 ```
 
@@ -155,7 +166,7 @@ When the user selects an edge source from the GUI, [`switch_heatgdt_edge_modalit
 | **K** | `heatgdt_K` | `40` | **Diffusion Iterations / Boundary Smoothness**. Number of Euler steps. Higher values yield smoother geodesic boundaries. |
 | **Speed** | `HEAT_DISPLAY_RAMP_RATE` | `12.0` | **Visual Expansion Speed**. Decoupled exponential display ramp rate. Controls how quickly the visual overlay catches up to the underlying GPU computation. |
 | **Size ±** | Post-hoc adjustment | `0.0` | **Live Lesion Resizing**. Allows growing or shrinking the committed lesion mask after mouse release without re-painting. |
-| **Edge** | `heatgdt_edge_modality` | `Combined` | **Edge Guidance Source**. Dropdown options: `Combined`, `CT Only`, or `PET Only`. Immediately switches the active GPU barrier tensor. |
+| **Edge Toggle** | `heatgdt_edge_modality` | `Both` | **Dedicated 3-Button Guidance Toggle**: `[Both]` (dual CT+PET), `[CT Only]` (pure anatomical CT edges), or `[PET Only]` (pure metabolic PET edges). Active mode glows green. Swaps GPU barrier tensors immediately on click. |
 | **Adapt** | `heatgdt_adaptive_contrast`| `true` | **Adaptive Local Contrast Boost**. When enabled, dynamically measures edge strength around the advancing shell and sharpens soft-tissue margins. |
 | **Sens** | `heatgdt_sensitivity` | `1.0` | **Contrast Sensitivity**. Exponent scale (0.5 to 2.0). Increase to 1.5–2.0 for very faint soft-tissue lesions. |
 
@@ -176,12 +187,14 @@ All source code and automated test scripts are located directly within the repos
 
 | File Path | Description | Key Functions / Structs |
 | :--- | :--- | :--- |
-| [`src/display/Vulkan/shaders/diffuse_step.comp`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/shaders/diffuse_step.comp) | Vulkan GLSL compute shader | PDE finite difference update, metric weights `inv_d2.xyz`, frontier transition `mix(s_boost, 1.0, w)` |
-| [`src/display/Vulkan/VulkanHeatDiffusion.jl`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl) | Julia Vulkan compute wrapper | [`compute_frontier_edge_scale`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L219), [`seed_only!`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L973), [`run_incremental_steps!`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L1077), [`DiffuseStepPC`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L42) |
-| [`src/display/GLFW/MakieEventHandlers.jl`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl) | Event dispatch & async tick loop | [`reactToHeatGDTStart`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6470), [`reactToHeatGDTTick`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6671), [`reactToHeatGDTStop`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6809), [`switch_heatgdt_edge_modality!`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L358) |
-| [`src/display/LesionMetadataWindow.jl`](file:///workspaces/MedEye3d.jl/src/display/LesionMetadataWindow.jl) | Makie GUI controls | Menu dropdown, adaptive toggle, sensitivity slider (lines 8620–8665) |
-| [`src/display/InferenceClient.jl`](file:///workspaces/MedEye3d.jl/src/display/InferenceClient.jl) | CPU fallback Heat-GDT | [`run_heatgdt`](file:///workspaces/MedEye3d.jl/src/display/InferenceClient.jl#L938) with anisotropic spacing and `s_boost` |
-| [`src/preprocessing/OrganHeatLesionTracker.jl`](file:///workspaces/MedEye3d.jl/src/preprocessing/OrganHeatLesionTracker.jl) | Multi-timepoint lesion propagation | [`grow_heat_kernel_lesion`](file:///workspaces/MedEye3d.jl/src/preprocessing/OrganHeatLesionTracker.jl#L381) with anisotropic spacing and `s_boost` |
+| [`src/display/Vulkan/shaders/diffuse_step.comp`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/shaders/diffuse_step.comp) | Vulkan GLSL compute shader | PDE finite difference update, metric weights `inv_d2.xyz`, self-normalizing frontier transition `mix(s_boost, 1.0, w)` |
+| [`src/display/Vulkan/VulkanHeatDiffusion.jl`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl) | Julia Vulkan compute wrapper | [`compute_frontier_edge_scale`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L219-L315), [`seed_only!`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L973-L1068), [`run_incremental_steps!`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L1077-L1190), [`DiffuseStepPC`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L42-L52) |
+| [`src/display/GLFW/MakieEventHandlers.jl`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl) | Event dispatch & async tick loop | [`reactToOneShotHeatGDT`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6398-L6495), [`reactToHeatGDTStart`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6530-L6715), [`reactToHeatGDTTick`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6740-L6880), [`reactToHeatGDTStop`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6890-L6970), [`switch_heatgdt_edge_modality!`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L383-L396) |
+| [`src/display/LesionMetadataWindow.jl`](file:///workspaces/MedEye3d.jl/src/display/LesionMetadataWindow.jl) | Makie GUI controls | Top-level `sec_seg` section, 3-button edge toggle, adaptive toggle, sensitivity slider ([lines 5278–5725](file:///workspaces/MedEye3d.jl/src/display/LesionMetadataWindow.jl#L5278-L5725)) |
+| [`src/display/reactingToMouseKeyboard/reactToKeyboard/ReactToKeyboard.jl`](file:///workspaces/MedEye3d.jl/src/display/reactingToMouseKeyboard/reactToKeyboard/ReactToKeyboard.jl) | Keyboard shortcut handler | `W` key dispatch to `OneShotHeatGDTEvent` ([line 667](file:///workspaces/MedEye3d.jl/src/display/reactingToMouseKeyboard/reactToKeyboard/ReactToKeyboard.jl#L667)) |
+| [`src/display/reactingToMouseKeyboard/ReactOnMouseClickAndDrag.jl`](file:///workspaces/MedEye3d.jl/src/display/reactingToMouseKeyboard/ReactOnMouseClickAndDrag.jl) | Mouse hold & drag handler | Left-button press/release triggering `HeatGDTStartEvent` and `HeatGDTStopEvent` ([lines 171–186](file:///workspaces/MedEye3d.jl/src/display/reactingToMouseKeyboard/ReactOnMouseClickAndDrag.jl#L171-L186)) |
+| [`src/display/InferenceClient.jl`](file:///workspaces/MedEye3d.jl/src/display/InferenceClient.jl) | CPU fallback Heat-GDT | [`run_heatgdt`](file:///workspaces/MedEye3d.jl/src/display/InferenceClient.jl#L938-L985) with anisotropic spacing and `s_boost` |
+| [`src/preprocessing/OrganHeatLesionTracker.jl`](file:///workspaces/MedEye3d.jl/src/preprocessing/OrganHeatLesionTracker.jl) | Multi-timepoint lesion propagation | [`grow_heat_kernel_lesion`](file:///workspaces/MedEye3d.jl/src/preprocessing/OrganHeatLesionTracker.jl#L381-L470) with anisotropic spacing and `s_boost` |
 | [`scripts/preprocessing/generate_modality_diffusivities.jl`](file:///workspaces/MedEye3d.jl/scripts/preprocessing/generate_modality_diffusivities.jl) | Batch precomputation CLI on GPU 1 | Sliding-window HED3D-Ultra inference with channel masking for HDF5 |
 
 ---
@@ -231,6 +244,13 @@ Verifies organ centroid IDW tracking, exclusion organ masking, and heat-kernel l
 CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_organ_heat_lesion_mapping.jl
 ```
 *Expected Result:* `Test Summary: Pass 112, Total 112. All tests PASSED.`
+
+#### Test 7: GUI Segmentation Controls, Modality Toggles & W Key Activation
+Verifies that the Segmentation & AI section is visible at the top of the sidebar, algorithm defaults to Heat-GDT, edge guidance toggle buttons (`[Both]`, `[CT Only]`, `[PET Only]`) cleanly switch active GPU tensors and button highlights, and pressing `W` automatically expands the section and activates Wand mode:
+```bash
+CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_gui_segmentation_controls.jl
+```
+*Expected Result:* `Test Summary: Pass 23, Total 23. All tests PASSED.`
 
 ---
 

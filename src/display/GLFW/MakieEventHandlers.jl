@@ -446,14 +446,23 @@ function start_inference_worker()
                         job.cx, job.cy, job.cz)
                 elseif job.algorithm == "Heat-GDT"
                     # Heat-GDT runs natively in Julia — no Docker/TCP needed
-                    # Uses precomputed diffusivity field + PDE solver
+                    # Uses precomputed diffusivity field + self-normalizing adaptive edge PDE solver
                     K_val = heatgdt_K[]
                     theta_val = heatgdt_theta[]
-                    set_ai_status!("[Processing] Heat-GDT PDE solver (K=$K_val, θ=$theta_val)...")
+                    s_boost = 1.0f0
+                    if heatgdt_adaptive_contrast[] && InferenceClient._heatgdt_diffusivity[] !== nothing
+                        mean_sp = (job.spacing[1] + job.spacing[2] + job.spacing[3]) / 3.0
+                        R_phys = max(10.0, 3.0 + 2.0 * sqrt(K_val * 0.16) * mean_sp)
+                        s_boost = VulkanHeatDiffusion.compute_frontier_edge_scale(
+                            InferenceClient._heatgdt_diffusivity[], job.cx, job.cy, job.cz, R_phys, job.spacing;
+                            sensitivity=heatgdt_sensitivity[]
+                        )
+                    end
+                    set_ai_status!("[Processing] Heat-GDT PDE solver (K=$K_val, θ=$theta_val, s_boost=$(round(s_boost, digits=2)))...")
                     mask = InferenceClient.run_heatgdt(
                         job.ct_vol, job.pet_vol, job.points_vol,
                         job.cx, job.cy, job.cz;
-                        K=K_val, theta=theta_val, spacing=job.spacing)
+                        K=K_val, theta=theta_val, spacing=job.spacing, s_boost=s_boost)
                 else
                     @debug "[AI Worker] WARNING: Unknown algorithm: $(job.algorithm)"
                     set_ai_status!("[Warning] Unknown algorithm: $(job.algorithm)")
@@ -6450,7 +6459,8 @@ function reactToOneShotHeatGDT(data::MakieEvents.OneShotHeatGDTEvent, stateObjec
             reactToEditMode(MakieEvents.EditModeEvent(), stateObjects)
             
             romcad._heatgdt_mode_active[] = true
-            set_ai_status!("[Heat-GDT Wand] Enabled. Click & hold to grow lesion.")
+            heatgdt_adaptive_contrast[] = true  # Activate self-normalizing adaptive local edges
+            set_ai_status!("[Heat-GDT Wand] Enabled (Self-Normalizing Adaptive Edges). Click & hold to grow lesion.")
             
             # Eagerly warm up GPU Heat-GDT pipeline
             vk_ctx = _vk_heat_ctx[]
@@ -6458,7 +6468,7 @@ function reactToOneShotHeatGDT(data::MakieEvents.OneShotHeatGDTEvent, stateObjec
                 parentmodule(@__MODULE__).ensure_heatgdt_gpu!(vk_ctx)
             end
             
-            println("[Heat-GDT WAND] Mode ON. heat_state=$(_vk_heat_state[] !== nothing), vk_ctx=$(_vk_heat_ctx[] !== nothing), uploaded=$(parentmodule(@__MODULE__)._vk_heat_uploaded[]), diffusivity=$(InferenceClient._heatgdt_diffusivity[] !== nothing), modality=$(heatgdt_edge_modality[])"); flush(stdout)
+            println("[Heat-GDT WAND] Mode ON. heat_state=$(_vk_heat_state[] !== nothing), vk_ctx=$(_vk_heat_ctx[] !== nothing), uploaded=$(parentmodule(@__MODULE__)._vk_heat_uploaded[]), diffusivity=$(InferenceClient._heatgdt_diffusivity[] !== nothing), modality=$(heatgdt_edge_modality[]), adaptive_edges=$(heatgdt_adaptive_contrast[])"); flush(stdout)
             
             # Sync GUI dropdown, open segmentation section, and scroll to top
             @async try
@@ -6473,6 +6483,9 @@ function reactToOneShotHeatGDT(data::MakieEvents.OneShotHeatGDTEvent, stateObjec
                     end
                     if haskey(obs_dict, :algo_combo_selection)
                         obs_dict[:algo_combo_selection][] = "Heat-GDT"
+                    end
+                    if haskey(obs_dict, :cb_adaptive)
+                        obs_dict[:cb_adaptive].active[] = true
                     end
                 end
             catch e
@@ -6641,12 +6654,14 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
             ct_spacing = (1.0, 1.0, 1.0)
         end
 
-        # Adaptive local edge contrast scaling
+        # Adaptive local edge contrast scaling (self-normalizing based on mean frontier gradient)
         diff_vol = InferenceClient._heatgdt_diffusivity[]
         s_boost = 1.0f0
         if heatgdt_adaptive_contrast[] && diff_vol !== nothing
+            mean_sp = (ct_spacing[1] + ct_spacing[2] + ct_spacing[3]) / 3.0
+            R_phys = max(10.0, 3.0 + 2.0 * sqrt(10 * 0.16) * mean_sp)
             s_boost = VulkanHeatDiffusion.compute_frontier_edge_scale(
-                diff_vol, cx, cy, cz, 18.0, ct_spacing;
+                diff_vol, cx, cy, cz, R_phys, ct_spacing;
                 sensitivity=heatgdt_sensitivity[]
             )
         end
