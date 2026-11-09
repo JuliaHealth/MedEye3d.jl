@@ -2,7 +2,10 @@
 // diffuse_step.comp — Single explicit Euler step of 3D inhomogeneous heat diffusion
 // Implements: u_new = u + dt * sum_d [ D_face_d * (u_neighbor - u_center) ]
 // Uses replicate (clamped) boundary conditions for zero normal flux.
-// This shader is dispatched K times, ping-ponging between img_u_in and img_u_out.
+// Face conductivities use harmonic mean: D_face = (2 * D_c * D_nbr) / (D_c + D_nbr + 1e-7)
+// to prevent leakage across sharp and relatively strong edge barriers.
+// Local relative edge normalization decouples core diffusion speed from background soft tissue
+// and turns local boundary peaks into firm stopping walls.
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
 
@@ -11,14 +14,48 @@ layout(set = 0, binding = 1, r32f) uniform readonly image3D img_u_in;  // Curren
 layout(set = 0, binding = 2, r32f) uniform writeonly image3D img_u_out; // Next heat field
 
 layout(push_constant) uniform PushConstants {
-    float dt;         // Time step size (0.16)
-    int   use_box;    // 0 = full volume, 1 = use box_min and box_max
+    float dt;          // Time step size (0.16)
+    int   use_box;     // 0 = full volume, 1 = use box_min and box_max
     int   seed_x;
     int   seed_y;
-    ivec4 box_min;    // xyz = min bounding box voxel, w = seed_z
-    ivec4 box_max;    // xyz = max bounding box voxel, w = seed_radius
-    vec4  inv_d2;     // xyz = 1/(dx²), 1/(dy²), 1/(dz²) normalized, w = unused
+    ivec4 box_min;     // xyz = min bounding box voxel, w = seed_z
+    ivec4 box_max;     // xyz = max bounding box voxel, w = seed_radius
+    vec4  inv_d2;      // xyz = 1/(dx²), 1/(dy²), 1/(dz²) normalized, w = s_boost
+    vec4  edge_params; // x = E_bg, y = E_scale, z = gamma_eff, w = edge_clip
 } pc;
+
+float compute_effective_D(float raw_D, float u_val, float s_boost) {
+    float D = raw_D;
+    if (pc.edge_params.y > 0.0) {
+        // Invert precomputed D in [1e-5, 1.0] to raw edge E in [0, 1]
+        // D = exp(-10.1 * E) => E = -ln(D) / 10.095886
+        float E = -log(clamp(raw_D, 1.0e-5, 1.0)) * 0.09905025;
+        // Any globally strong edge (E >= 0.35, e.g. bone, skin, air) is an absolute barrier
+        if (E >= 0.35) {
+            D = 1.0e-5;
+        } else {
+            // Local relative edge normalization in immediate vicinity
+            float E_rel = clamp((E - pc.edge_params.x) * pc.edge_params.y, 0.0, 1.0);
+            if (E_rel >= pc.edge_params.w) {
+                D = 1.0e-5;
+            } else {
+                D = clamp(exp(-pc.edge_params.z * E_rel), 1.0e-5, 1.0);
+            }
+        }
+    }
+
+    // Shape-adaptive heat-level transition:
+    // Core (u >= u_core) maintains s = 1.0 (free internal flow)
+    // Advancing frontier (u < u_core) blends to boosted s
+    if (abs(s_boost - 1.0) > 0.01) {
+        float u_core = 0.05;
+        float u_floor = 0.001; // commit threshold theta
+        float w_u = clamp((u_core - u_val) / max(u_core - u_floor, 1e-5), 0.0, 1.0);
+        float s_eff = 1.0 + (s_boost - 1.0) * w_u;
+        D = clamp(pow(D, s_eff), 1.0e-5, 1.0);
+    }
+    return D;
+}
 
 void main() {
     ivec3 dims = imageSize(img_u_in);
@@ -44,20 +81,8 @@ void main() {
 
     // Load center values
     float u_c = imageLoad(img_u_in, pos).r;
-    float D_c = imageLoad(img_D, pos).r;
-
-    // Shape-adaptive heat-level transition:
-    // Core (u >= u_core) maintains s = 1.0 (free internal flow)
-    // Advancing frontier (u < u_core) blends to boosted s
     float s_boost = (pc.inv_d2.w > 0.05) ? pc.inv_d2.w : 1.0;
-    float s_eff = 1.0;
-    if (abs(s_boost - 1.0) > 0.01) {
-        float u_core = 0.05;
-        float u_floor = 0.001; // commit threshold theta
-        float w_u = clamp((u_core - u_c) / max(u_core - u_floor, 1e-5), 0.0, 1.0);
-        s_eff = 1.0 + (s_boost - 1.0) * w_u;
-        D_c = clamp(pow(D_c, s_eff), 1.0e-5, 1.0);
-    }
+    float D_c = compute_effective_D(imageLoad(img_D, pos).r, u_c, s_boost);
 
     // Load neighbor heat values
     float u_xp = imageLoad(img_u_in, p_xp).r;
@@ -67,30 +92,25 @@ void main() {
     float u_zp = imageLoad(img_u_in, p_zp).r;
     float u_zm = imageLoad(img_u_in, p_zm).r;
 
-    // Load neighbor diffusivities and apply effective exponent if active
-    float D_xp_raw = imageLoad(img_D, p_xp).r;
-    float D_xm_raw = imageLoad(img_D, p_xm).r;
-    float D_yp_raw = imageLoad(img_D, p_yp).r;
-    float D_ym_raw = imageLoad(img_D, p_ym).r;
-    float D_zp_raw = imageLoad(img_D, p_zp).r;
-    float D_zm_raw = imageLoad(img_D, p_zm).r;
+    // Load neighbor diffusivities and compute effective conductivities
+    float D_xp_val = compute_effective_D(imageLoad(img_D, p_xp).r, u_xp, s_boost);
+    float D_xm_val = compute_effective_D(imageLoad(img_D, p_xm).r, u_xm, s_boost);
+    float D_yp_val = compute_effective_D(imageLoad(img_D, p_yp).r, u_yp, s_boost);
+    float D_ym_val = compute_effective_D(imageLoad(img_D, p_ym).r, u_ym, s_boost);
+    float D_zp_val = compute_effective_D(imageLoad(img_D, p_zp).r, u_zp, s_boost);
+    float D_zm_val = compute_effective_D(imageLoad(img_D, p_zm).r, u_zm, s_boost);
 
-    if (abs(s_eff - 1.0) > 0.01) {
-        D_xp_raw = clamp(pow(D_xp_raw, s_eff), 1.0e-5, 1.0);
-        D_xm_raw = clamp(pow(D_xm_raw, s_eff), 1.0e-5, 1.0);
-        D_yp_raw = clamp(pow(D_yp_raw, s_eff), 1.0e-5, 1.0);
-        D_ym_raw = clamp(pow(D_ym_raw, s_eff), 1.0e-5, 1.0);
-        D_zp_raw = clamp(pow(D_zp_raw, s_eff), 1.0e-5, 1.0);
-        D_zm_raw = clamp(pow(D_zm_raw, s_eff), 1.0e-5, 1.0);
-    }
-
-    // Face-averaged conductivities (arithmetic mean of adjacent voxels)
-    float D_xp = 0.5 * (D_c + D_xp_raw);
-    float D_xm = 0.5 * (D_c + D_xm_raw);
-    float D_yp = 0.5 * (D_c + D_yp_raw);
-    float D_ym = 0.5 * (D_c + D_ym_raw);
-    float D_zp = 0.5 * (D_c + D_zp_raw);
-    float D_zm = 0.5 * (D_c + D_zm_raw);
+    // Face-averaged conductivities using harmonic mean:
+    // D_face = (2.0 * D_c * D_nbr) / (D_c + D_nbr + 1.0e-7)
+    // Arithmetic mean leaked through 1-voxel barrier walls.
+    // Harmonic mean acts as a true barrier at interface faces while maintaining
+    // 1.0 conductivity in open interior regions.
+    float D_xp = (2.0 * D_c * D_xp_val) / (D_c + D_xp_val + 1.0e-7);
+    float D_xm = (2.0 * D_c * D_xm_val) / (D_c + D_xm_val + 1.0e-7);
+    float D_yp = (2.0 * D_c * D_yp_val) / (D_c + D_yp_val + 1.0e-7);
+    float D_ym = (2.0 * D_c * D_ym_val) / (D_c + D_ym_val + 1.0e-7);
+    float D_zp = (2.0 * D_c * D_zp_val) / (D_c + D_zp_val + 1.0e-7);
+    float D_zm = (2.0 * D_c * D_zm_val) / (D_c + D_zm_val + 1.0e-7);
 
     // Net flux divergence weighted by anisotropic voxel spacing (w_x = 1/dx^2, etc.)
     float wx = pc.inv_d2.x;

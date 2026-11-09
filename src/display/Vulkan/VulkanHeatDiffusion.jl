@@ -20,7 +20,7 @@ using Logging
 
 export HeatDiffusionState, init_heat_diffusion!, destroy_heat_diffusion!
 export upload_diffusivity!, run_heat_diffusion!, read_mask_to_cpu
-export seed_only!, run_incremental_steps!, compute_frontier_edge_scale
+export seed_only!, run_incremental_steps!, compute_frontier_edge_scale, compute_local_relative_edge_params
 
 # ─── Push Constants ──────────────────────────────────────────────────────
 
@@ -56,6 +56,10 @@ struct DiffuseStepPC
     inv_dy2::Float32
     inv_dz2::Float32
     s_boost::Float32
+    edge_bg::Float32
+    edge_scale::Float32
+    gamma_eff::Float32
+    edge_clip::Float32
 end
 
 struct ExtractMaskPC
@@ -163,6 +167,7 @@ mutable struct HeatDiffusionState
     current_box_max::NTuple{3, Int}
     spacing::NTuple{3, Float64}
     current_s_boost::Float32
+    current_edge_params::NTuple{4, Float32}
     
     # Dummy sampler for DescriptorImageInfo
     dummy_sampler::Sampler
@@ -191,6 +196,7 @@ mutable struct HeatDiffusionState
         state.current_box_max = (1, 1, 1)
         state.spacing = (1.0, 1.0, 1.0)
         state.current_s_boost = 1.0f0
+        state.current_edge_params = (0.0f0, 0.0f0, 12.0f0, 0.85f0)
         return state
     end
 end
@@ -303,6 +309,120 @@ function compute_frontier_edge_scale(diffusivity::Array{Float32,3}, cx::Int, cy:
     s_raw = (E_ref / mean_E_clamped)^sensitivity
     s_boost = clamp(s_raw, 0.5f0, 10.0f0)
     return Float32(s_boost)
+end
+
+"""
+    compute_local_relative_edge_params(diffusivity::Array{Float32,3}, cx::Int, cy::Int, cz::Int,
+                                       R_phys::Real, spacing::NTuple{3,Real};
+                                       sensitivity::Float32=1.0f0,
+                                       edge_clip::Float32=0.85f0)::NTuple{4, Float32}
+
+Analyzes the local neighborhood around the seed (cx, cy, cz) to compute relative edge normalization parameters:
+1. Samples the inner core (r <= 4.0 mm) to find the baseline interior edge strength E_bg
+   (using 25th percentile of core samples, ensuring baseline represents pure lesion interior).
+2. Samples the surrounding vicinity shell (4.0 mm < r <= R_phys mm) to determine the peak local edge E_peak
+   (using 95th percentile of shell samples to resist noise spikes).
+3. Computes:
+   - E_bg: baseline interior edge
+   - E_scale: 1.0 / max(E_peak - E_bg, 0.02)
+   - gamma_eff: 12.0 * sensitivity (clamped to [8.0, 24.0])
+   - edge_clip: relative edge threshold (default 0.85) above which D_eff is forced to 1.0e-5.
+
+Inside the lesion core where E <= E_bg, E_rel = 0.0 -> D_eff = 1.0 (free internal flow independent
+of absolute background soft tissue attenuation).
+At the strongest edge in the immediate vicinity (E -> E_peak), E_rel -> 1.0 -> D_eff = 1.0e-5
+(acts as an impenetrable barrier, even for weak soft-tissue boundaries).
+"""
+function compute_local_relative_edge_params(diffusivity::Array{Float32,3}, cx::Int, cy::Int, cz::Int,
+                                            R_phys::Real, spacing::NTuple{3,Real};
+                                            sensitivity::Float32=1.0f0,
+                                            edge_clip::Float32=0.85f0)::NTuple{4, Float32}
+    w, h, d = size(diffusivity)
+    dx, dy, dz = Float64.(spacing)
+    
+    R_core_mm = 4.0
+    R_outer_mm = max(8.0, Float64(R_phys))
+    
+    rx_out = max(2, round(Int, R_outer_mm / dx))
+    ry_out = max(2, round(Int, R_outer_mm / dy))
+    rz_out = max(1, round(Int, R_outer_mm / dz))
+    
+    rx_core = max(1, round(Int, R_core_mm / dx))
+    ry_core = max(1, round(Int, R_core_mm / dy))
+    rz_core = max(1, round(Int, R_core_mm / dz))
+    
+    x1, x2 = max(1, cx - rx_out), min(w, cx + rx_out)
+    y1, y2 = max(1, cy - ry_out), min(h, cy + ry_out)
+    z1, z2 = max(1, cz - rz_out), min(d, cz + rz_out)
+    
+    inv_rx_out2 = 1.0 / (rx_out^2)
+    inv_ry_out2 = 1.0 / (ry_out^2)
+    inv_rz_out2 = 1.0 / (rz_out^2)
+    
+    inv_rx_core2 = 1.0 / (rx_core^2)
+    inv_ry_core2 = 1.0 / (ry_core^2)
+    inv_rz_core2 = 1.0 / (rz_core^2)
+    
+    core_samples = Float32[]
+    shell_samples = Float32[]
+    sizehint!(core_samples, 200)
+    sizehint!(shell_samples, 1000)
+    
+    step_x = (x2 - x1 > 40) ? 2 : 1
+    step_y = (y2 - y1 > 40) ? 2 : 1
+    step_z = (z2 - z1 > 40) ? 2 : 1
+    
+    for z in z1:step_z:z2
+        dz_out2 = (z - cz)^2 * inv_rz_out2
+        dz_out2 > 1.0 && continue
+        dz_core2 = (z - cz)^2 * inv_rz_core2
+        
+        for y in y1:step_y:y2
+            dy_out2 = (y - cy)^2 * inv_ry_out2
+            (dz_out2 + dy_out2) > 1.0 && continue
+            dy_core2 = (y - cy)^2 * inv_ry_core2
+            
+            for x in x1:step_x:x2
+                dx_out2 = (x - cx)^2 * inv_rx_out2
+                d_out2 = dz_out2 + dy_out2 + dx_out2
+                d_out2 > 1.0 && continue
+                
+                D_val = diffusivity[x, y, z]
+                # E = -ln(D) / 10.095886
+                E_val = -log(clamp(D_val, 1.0f-5, 1.0f0)) * 0.09905025f0
+                
+                # Check if in core
+                d_core2 = dz_core2 + dy_core2 + (x - cx)^2 * inv_rx_core2
+                if d_core2 <= 1.0
+                    push!(core_samples, E_val)
+                else
+                    push!(shell_samples, E_val)
+                end
+            end
+        end
+    end
+    
+    E_bg = if !isempty(core_samples)
+        sort!(core_samples)
+        idx = max(1, round(Int, 0.25 * length(core_samples)))
+        core_samples[idx]
+    else
+        0.05f0
+    end
+    
+    E_peak = if !isempty(shell_samples)
+        sort!(shell_samples)
+        idx = min(length(shell_samples), max(1, round(Int, 0.95 * length(shell_samples))))
+        shell_samples[idx]
+    else
+        0.20f0
+    end
+    
+    delta_E = max(E_peak - E_bg, 0.02f0)
+    E_scale = 1.0f0 / delta_E
+    gamma_eff = clamp(12.0f0 * sensitivity, 8.0f0, 24.0f0)
+    
+    return (Float32(E_bg), Float32(E_scale), Float32(gamma_eff), Float32(edge_clip))
 end
 
 # ─── Shader loading ──────────────────────────────────────────────────────
@@ -455,8 +575,8 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     pc_seed = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, 48)]
     state.layout_seed_init = unwrap(create_pipeline_layout(dev, PipelineLayoutCreateInfo([state.dsl_seed_init], pc_seed)))
     
-    # diffuse_step: push float dt + box... + inv_d2 (64 bytes)
-    pc_diffuse = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, 64)]
+    # diffuse_step: push float dt + box... + inv_d2 + edge_params (80 bytes)
+    pc_diffuse = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, 80)]
     state.layout_diffuse_step = unwrap(create_pipeline_layout(dev, PipelineLayoutCreateInfo([state.dsl_diffuse_step], pc_diffuse)))
     
     # extract_mask: push float theta + tau + box... (48 bytes)
@@ -746,12 +866,14 @@ Use `read_mask_to_cpu` to retrieve it.
 """
 function run_heat_diffusion!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y::Int, seed_z::Int;
                               K::Int=200, dt::Float32=0.16f0, theta::Float32=0.001044f0, tau::Float32=0.0001f0,
-                              spacing::NTuple{3, Real}=state.spacing, s_boost::Float32=1.0f0)
+                              spacing::NTuple{3, Real}=state.spacing, s_boost::Float32=1.0f0,
+                              edge_params::NTuple{4, Real}=state.current_edge_params)
     @assert state.is_initialized "Heat diffusion not initialized"
     @assert state.diffusivity_uploaded "Diffusivity not uploaded"
     
     state.spacing = (Float64(spacing[1]), Float64(spacing[2]), Float64(spacing[3]))
     state.current_s_boost = s_boost
+    state.current_edge_params = (Float32(edge_params[1]), Float32(edge_params[2]), Float32(edge_params[3]), Float32(edge_params[4]))
     inv_dx2, inv_dy2, inv_dz2 = _compute_spacing_weights(state.spacing)
     
     dev = ctx.device
@@ -812,7 +934,9 @@ function run_heat_diffusion!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y
         dt, Int32(0), Int32(seed_x - 1), Int32(seed_y - 1),
         Int32(0), Int32(0), Int32(0), Int32(seed_z - 1),
         Int32(0), Int32(0), Int32(0), Int32(3), # default seed radius 3
-        inv_dx2, inv_dy2, inv_dz2, s_boost
+        inv_dx2, inv_dy2, inv_dz2, s_boost,
+        state.current_edge_params[1], state.current_edge_params[2],
+        state.current_edge_params[3], state.current_edge_params[4]
     )
     
     for k in 1:K
@@ -972,12 +1096,14 @@ without running any diffusion steps. Call `run_incremental_steps!` afterwards
 to add diffusion steps incrementally (e.g., per-frame during a mouse hold).
 """
 function seed_only!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y::Int, seed_z::Int;
-                     seed_radius::Int=3, spacing::NTuple{3, Real}=state.spacing, s_boost::Float32=1.0f0)
+                     seed_radius::Int=3, spacing::NTuple{3, Real}=state.spacing, s_boost::Float32=1.0f0,
+                     edge_params::NTuple{4, Real}=state.current_edge_params)
     @assert state.is_initialized "Heat diffusion not initialized"
     @assert state.diffusivity_uploaded "Diffusivity not uploaded"
     
     state.spacing = (Float64(spacing[1]), Float64(spacing[2]), Float64(spacing[3]))
     state.current_s_boost = s_boost
+    state.current_edge_params = (Float32(edge_params[1]), Float32(edge_params[2]), Float32(edge_params[3]), Float32(edge_params[4]))
     inv_dx2, inv_dy2, inv_dz2 = _compute_spacing_weights(state.spacing)
     
     dev = ctx.device
@@ -1076,13 +1202,15 @@ After the diffusion steps, automatically runs the extract_mask shader so
 """
 function run_incremental_steps!(state::HeatDiffusionState, ctx, n_steps::Int;
                                  dt::Float32=0.16f0, theta::Float32=0.001f0, tau::Float32=0.0001f0, copy_box_to_cpu::Bool=false,
-                                 spacing::NTuple{3, Real}=state.spacing, s_boost::Float32=state.current_s_boost)
+                                 spacing::NTuple{3, Real}=state.spacing, s_boost::Float32=state.current_s_boost,
+                                 edge_params::NTuple{4, Real}=state.current_edge_params)
     @assert state.is_initialized "Heat diffusion not initialized"
     @assert state.diffusivity_uploaded "Diffusivity not uploaded"
     n_steps <= 0 && !copy_box_to_cpu && return
     
     state.spacing = (Float64(spacing[1]), Float64(spacing[2]), Float64(spacing[3]))
     state.current_s_boost = s_boost
+    state.current_edge_params = (Float32(edge_params[1]), Float32(edge_params[2]), Float32(edge_params[3]), Float32(edge_params[4]))
     inv_dx2, inv_dy2, inv_dz2 = _compute_spacing_weights(state.spacing)
     
     dev = ctx.device
@@ -1139,7 +1267,9 @@ function run_incremental_steps!(state::HeatDiffusionState, ctx, n_steps::Int;
         dt, Int32(1), Int32(state.seed_x - 1), Int32(state.seed_y - 1),
         box_min_glsl[1], box_min_glsl[2], box_min_glsl[3], Int32(state.seed_z - 1),
         box_max_glsl[1], box_max_glsl[2], box_max_glsl[3], Int32(state.seed_radius),
-        inv_dx2, inv_dy2, inv_dz2, state.current_s_boost
+        inv_dx2, inv_dy2, inv_dz2, state.current_s_boost,
+        state.current_edge_params[1], state.current_edge_params[2],
+        state.current_edge_params[3], state.current_edge_params[4]
     )
     
     # ── Diffusion steps (continue from current ping/pong state) ──

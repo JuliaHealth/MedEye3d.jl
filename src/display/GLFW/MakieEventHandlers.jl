@@ -6637,13 +6637,18 @@ function execute_one_click_heatgdt!(stateObjects::Vector{StateDataFields}, cx::I
         end
     end
 
-    # 5. Adaptive frontier contrast boost (s_boost)
+    # 5. Adaptive frontier contrast boost and local relative edge normalization
     diff_vol = InferenceClient._heatgdt_diffusivity[]
     s_boost = 1.0f0
+    edge_params = (0.0f0, 0.0f0, 12.0f0, 0.85f0)
     if heatgdt_adaptive_contrast[] && diff_vol !== nothing
         mean_sp = (ct_spacing[1] + ct_spacing[2] + ct_spacing[3]) / 3.0
         R_phys = max(10.0, 3.0 + 2.0 * sqrt(K_val * 0.16) * mean_sp)
         s_boost = VulkanHeatDiffusion.compute_frontier_edge_scale(
+            diff_vol, cx, cy, cz, R_phys, ct_spacing;
+            sensitivity=heatgdt_sensitivity[]
+        )
+        edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
             diff_vol, cx, cy, cz, R_phys, ct_spacing;
             sensitivity=heatgdt_sensitivity[]
         )
@@ -6681,9 +6686,9 @@ function execute_one_click_heatgdt!(stateObjects::Vector{StateDataFields}, cx::I
         end
 
         # Seed and diffuse K steps on GPU
-        VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, cx, cy, cz; seed_radius=1, spacing=ct_spacing, s_boost=s_boost)
+        VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, cx, cy, cz; seed_radius=1, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
         VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, K_val;
-            theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost)
+            theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
 
         # Populate undo state for post-hoc size adjustment
         box_min = heat_state.current_box_min
@@ -6703,7 +6708,7 @@ function execute_one_click_heatgdt!(stateObjects::Vector{StateDataFields}, cx::I
             pts[cx, cy, cz] = 1.0f0
             pet_safe = pet_vol !== nothing ? pet_vol : zeros(Float32, size(ct_vol))
             mask_cpu = InferenceClient.run_heatgdt(ct_vol, pet_safe, pts, cx, cy, cz;
-                K=K_val, theta=theta_val, spacing=ct_spacing, s_boost=s_boost)
+                K=K_val, theta=theta_val, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
             if mask_cpu !== nothing
                 vox_count = count(mask_cpu .> 0)
                 seg_vol[mask_cpu .> 0] .= label_val
@@ -6912,9 +6917,10 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
             ct_spacing = (1.0, 1.0, 1.0)
         end
 
-        # Adaptive local edge contrast scaling (self-normalizing based on mean frontier gradient)
+        # Adaptive local edge contrast scaling and relative edge normalization
         diff_vol = InferenceClient._heatgdt_diffusivity[]
         s_boost = 1.0f0
+        edge_params = (0.0f0, 0.0f0, 12.0f0, 0.85f0)
         K_target = heatgdt_K[]
         if heatgdt_adaptive_contrast[] && diff_vol !== nothing
             mean_sp = (ct_spacing[1] + ct_spacing[2] + ct_spacing[3]) / 3.0
@@ -6923,17 +6929,21 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
                 diff_vol, cx, cy, cz, R_phys, ct_spacing;
                 sensitivity=heatgdt_sensitivity[]
             )
+            edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
+                diff_vol, cx, cy, cz, R_phys, ct_spacing;
+                sensitivity=heatgdt_sensitivity[]
+            )
         end
 
-        println("[Heat-GDT START] Calling seed_only! at ($cx,$cy,$cz) with spacing=$ct_spacing, s_boost=$s_boost..."); flush(stdout)
-        VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, cx, cy, cz; seed_radius=1, spacing=ct_spacing, s_boost=s_boost)
+        println("[Heat-GDT START] Calling seed_only! at ($cx,$cy,$cz) with spacing=$ct_spacing, s_boost=$s_boost, edge_params=$edge_params..."); flush(stdout)
+        VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, cx, cy, cz; seed_radius=1, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
         set_ai_status!("[Heat-GDT GPU] Growing from ($cx,$cy,$cz)...")
         println("[Heat-GDT START] seed_only! SUCCESS — GPU diffusion active (s_boost=$s_boost)"); flush(stdout)
         
         # Initial step bounded at 20 steps (or min(20, K_target))
         initial_steps = min(20, K_target)
         theta_val = Float32(heatgdt_theta[])
-        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, initial_steps; theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost)
+        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, initial_steps; theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
         _vk_heat_total_steps[] = initial_steps
         HEAT_GDT_LAST_DISPLAY_THETA[] = theta_val
         
@@ -7099,16 +7109,21 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
                 pz = clamp(round(Int, Float64(old_seed[3]) + alpha * (Float64(cz) - Float64(old_seed[3]))), 1, heat_state.depth)
                 
                 s_boost = 1.0f0
+                edge_params = (0.0f0, 0.0f0, 12.0f0, 0.85f0)
                 if heatgdt_adaptive_contrast[] && diff_vol !== nothing
                     s_boost = VulkanHeatDiffusion.compute_frontier_edge_scale(
                         diff_vol, px, py, pz, R_phys, ct_spacing;
                         sensitivity=heatgdt_sensitivity[]
                     )
+                    edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
+                        diff_vol, px, py, pz, R_phys, ct_spacing;
+                        sensitivity=heatgdt_sensitivity[]
+                    )
                 end
                 
-                VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, px, py, pz; seed_radius=1, spacing=ct_spacing, s_boost=s_boost)
+                VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, px, py, pz; seed_radius=1, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
                 VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, burst_steps;
-                    theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost)
+                    theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
                 if seg_vol !== nothing
                     VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)
                 end
@@ -7128,8 +7143,9 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
             end
             
             s_boost = heat_state.current_s_boost
+            edge_params = heat_state.current_edge_params
             VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, steps_per_tick;
-                theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost)
+                theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
             _vk_heat_total_steps[] += steps_per_tick
             if seg_vol !== nothing
                 VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)

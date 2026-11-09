@@ -113,6 +113,50 @@ $$D_{\text{eff}} = \text{clamp}(D_c^{s_{\text{eff}}}, 10^{-5}, 1.0)$$
 
 ---
 
+### 2.3 Breakthrough 3: Zero Interface Leakage via Harmonic Mean Face Conductivity
+A critical vulnerability in discrete finite-volume diffusion on grids with sharp boundaries is the computation of inter-voxel interface conductance. In prior formulations, the face conductivity between adjacent voxels $D_c$ and $D_n$ was evaluated using the **arithmetic mean**:
+
+$$D_{\text{face}}^{\text{arithmetic}} = \frac{1}{2}\big(D_c + D_n\big)$$
+
+#### The 50,000x Permeability Bug
+When heat diffuses from an open interior voxel ($D_c = 1.0$) toward a strong barrier voxel ($D_n = 10^{-5}$):
+$$D_{\text{face}}^{\text{arithmetic}} = 0.5 \times (1.0 + 10^{-5}) = 0.500005$$
+The effective interface conductance was **50,000 times higher** than the barrier voxel itself! Heat flowed through single-voxel anatomical boundaries at half the speed of vacuum, breaching organs and bone edges within a few iterations.
+
+#### The Physical Solution: Harmonic Mean Interface Conductance
+In physical transport phenomena across discontinuous material interfaces (e.g., Patankar finite-volume formulation), the exact interface conductivity is the **harmonic mean**:
+
+$$D_{\text{face}}^{\text{harmonic}} = \frac{2 D_c D_n}{D_c + D_n + \epsilon_{\text{face}}}, \quad \epsilon_{\text{face}} = 10^{-7}$$
+
+Between an interior voxel ($D_c = 1.0$) and a strong barrier ($D_n = 10^{-5}$):
+$$D_{\text{face}}^{\text{harmonic}} = \frac{2 \times 1.0 \times 10^{-5}}{1.0 + 10^{-5} + 10^{-7}} = 1.9998 \times 10^{-5}$$
+This slashes interface flux by **$25,000\times$**, completely eliminating edge leakage and turning single-voxel anatomical barriers into true insulators on both Vulkan GPU and CPU fallback.
+
+---
+
+### 2.4 Breakthrough 4: Local Relative Edge Normalization in Soft Tissue
+In homogeneous soft tissues (e.g. liver parenchyma, prostate, brain), background image noise produces a non-zero edge baseline $E_{\text{bg}} \approx 0.05 - 0.10$. Under fixed global mapping $D = \exp(-10.1 E)$, this caused two problems:
+1. **Sluggish Core Growth**: Diffusion inside the core was dragged down to $D \approx 0.35 - 0.50$, making growth speed dependent on absolute Hounsfield attenuation rather than relative contrast.
+2. **Weak Edge Breaching**: A subtle lesion boundary in soft tissue might only peak at $E \approx 0.15 - 0.20$ ($D \approx 0.15 - 0.22$). While higher than background, $D \approx 0.18$ was not a complete stopping wall.
+
+#### Local Adaptive Edge Contrast Formula
+To solve both problems simultaneously, MedEye3d introduces **Local Relative Edge Normalization** within the immediate neighborhood ($R_{\text{phys}}$) of the seed:
+1. Measure interior baseline edge $E_{\text{bg}}$ by sampling the core ($r \le 4.0\text{ mm}$, 25th percentile).
+2. Measure local boundary peak $E_{\text{peak}}$ from the vicinity shell ($4.0\text{ mm} < r \le R_{\text{phys}}$, 95th percentile).
+3. Compute scale factor $E_{\text{scale}} = \frac{1}{\max(E_{\text{peak}} - E_{\text{bg}}, 0.02)}$.
+4. Normalize local edge contrast:
+   $$E_{\text{rel}}(\mathbf{x}) = \text{clamp}\Big((E(\mathbf{x}) - E_{\text{bg}}) \cdot E_{\text{scale}}, 0.0, 1.0\Big)$$
+5. Compute effective diffusivity:
+   - For any globally strong edge ($E \ge 0.35$, e.g. bone, skin, air) or relative boundary peak ($E_{\text{rel}} \ge 0.85$): $D_{\text{eff}} = 10^{-5}$ (solid wall).
+   - Otherwise: $D_{\text{eff}} = \exp(-\gamma_{\text{eff}} \cdot E_{\text{rel}})$, where $\gamma_{\text{eff}} = 12.0 \cdot \text{sensitivity}$.
+
+**Result**:
+- Inside the lesion core ($E \le E_{\text{bg}}$): $E_{\text{rel}} = 0.0 \implies D_{\text{eff}} = 1.0$. Flow is $100\%$ full speed, completely decoupled from background soft-tissue attenuation!
+- At the local boundary ($E \to E_{\text{peak}}$): $E_{\text{rel}} \to 1.0 \implies D_{\text{eff}} = 10^{-5}$. Even faint soft-tissue margins act as firm stopping walls!
+- Strong anatomical edges ($E \ge 0.35$): Always impassable barriers by default in both Wand and 1-Click modes.
+
+---
+
 ## 3. Multimodal Guidance: Combined vs CT Only vs PET Only
 
 Lesions often appear differently across modalities:
@@ -197,13 +241,13 @@ All source code and automated test scripts are located directly within the repos
 
 | File Path | Description | Key Functions / Structs |
 | :--- | :--- | :--- |
-| [`src/display/Vulkan/shaders/diffuse_step.comp`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/shaders/diffuse_step.comp) | Vulkan GLSL compute shader | PDE finite difference update, metric weights `inv_d2.xyz`, self-normalizing frontier transition `mix(s_boost, 1.0, w)` |
-| [`src/display/Vulkan/VulkanHeatDiffusion.jl`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl) | Julia Vulkan compute wrapper | [`compute_frontier_edge_scale`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L219-L315), [`seed_only!`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L973-L1068), [`run_incremental_steps!`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L1077-L1190), [`DiffuseStepPC`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L42-L52) |
-| [`src/display/GLFW/MakieEventHandlers.jl`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl) | Event dispatch & async tick loop | [`execute_one_click_heatgdt!`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6564-L6760), [`toggle_heatgdt_one_click_mode!`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L254-L260), [`reactToOneShotHeatGDT`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6440-L6535), [`reactToHeatGDTStart`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6840-L6880), [`reactToHeatGDTTick`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6890-L6970), [`reactToHeatGDTStop`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6980-L7040), [`switch_heatgdt_edge_modality!`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L383-L396) |
+| [`src/display/Vulkan/shaders/diffuse_step.comp`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/shaders/diffuse_step.comp) | Vulkan GLSL compute shader | PDE Euler step, 80-byte push constants (`edge_params`), **harmonic mean interface conductivity** (`2*Dc*Dn/(Dc+Dn+1e-7)`), **local relative edge normalization** `clamp((E-E_bg)*scale, 0, 1)`, hard absolute barriers (`E >= 0.35`) |
+| [`src/display/Vulkan/VulkanHeatDiffusion.jl`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl) | Julia Vulkan compute wrapper | [`compute_local_relative_edge_params`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L313-L395), [`compute_frontier_edge_scale`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L220-L310), [`seed_only!`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L1094-L1190), [`run_incremental_steps!`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L1200-L1320), [`DiffuseStepPC`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L42-L60) |
+| [`src/display/GLFW/MakieEventHandlers.jl`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl) | Event dispatch & async tick loop | [`execute_one_click_heatgdt!`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6574-L6720), [`toggle_heatgdt_one_click_mode!`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L254-L260), [`reactToOneShotHeatGDT`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6440-L6535), [`reactToHeatGDTStart`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6840-L6970), [`reactToHeatGDTTick`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L7014-L7160), [`reactToHeatGDTStop`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L7218-L7295), [`switch_heatgdt_edge_modality!`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L383-L396) |
 | [`src/display/LesionMetadataWindow.jl`](file:///workspaces/MedEye3d.jl/src/display/LesionMetadataWindow.jl) | Makie GUI controls | Top-level `sec_seg` section, Mode `[1-Click] [Wand]` toggle, 3-button edge toggle, adaptive toggle, sensitivity slider ([lines 5278–5750](file:///workspaces/MedEye3d.jl/src/display/LesionMetadataWindow.jl#L5278-L5750)) |
 | [`src/display/reactingToMouseKeyboard/reactToKeyboard/ReactToKeyboard.jl`](file:///workspaces/MedEye3d.jl/src/display/reactingToMouseKeyboard/reactToKeyboard/ReactToKeyboard.jl) | Keyboard shortcut handler | `W` key dispatch to `OneShotHeatGDTEvent` ([line 667](file:///workspaces/MedEye3d.jl/src/display/reactingToMouseKeyboard/reactToKeyboard/ReactToKeyboard.jl#L667)) |
 | [`src/display/reactingToMouseKeyboard/ReactOnMouseClickAndDrag.jl`](file:///workspaces/MedEye3d.jl/src/display/reactingToMouseKeyboard/ReactOnMouseClickAndDrag.jl) | Mouse hold & drag handler | Left-button press/release triggering `HeatGDTStartEvent` and `HeatGDTStopEvent` ([lines 171–186](file:///workspaces/MedEye3d.jl/src/display/reactingToMouseKeyboard/ReactOnMouseClickAndDrag.jl#L171-L186)) |
-| [`src/display/InferenceClient.jl`](file:///workspaces/MedEye3d.jl/src/display/InferenceClient.jl) | CPU fallback Heat-GDT | [`run_heatgdt`](file:///workspaces/MedEye3d.jl/src/display/InferenceClient.jl#L938-L985) with anisotropic spacing and `s_boost` |
+| [`src/display/InferenceClient.jl`](file:///workspaces/MedEye3d.jl/src/display/InferenceClient.jl) | CPU fallback Heat-GDT | [`run_heatgdt`](file:///workspaces/MedEye3d.jl/src/display/InferenceClient.jl#L938-L1085) with harmonic mean conductivities, Dirichlet continuous source, and `edge_params` |
 | [`src/preprocessing/OrganHeatLesionTracker.jl`](file:///workspaces/MedEye3d.jl/src/preprocessing/OrganHeatLesionTracker.jl) | Multi-timepoint lesion propagation | [`grow_heat_kernel_lesion`](file:///workspaces/MedEye3d.jl/src/preprocessing/OrganHeatLesionTracker.jl#L381-L470) with anisotropic spacing and `s_boost` |
 | [`scripts/preprocessing/generate_modality_diffusivities.jl`](file:///workspaces/MedEye3d.jl/scripts/preprocessing/generate_modality_diffusivities.jl) | Batch precomputation CLI on GPU 1 | Sliding-window HED3D-Ultra inference with channel masking for HDF5 |
 
@@ -269,12 +313,22 @@ CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_heatgdt_one_click
 ```
 *Expected Result:* `ALL ONE-CLICK HEAT-GDT TESTS PASSED ✓`
 
-#### Test 9: Wand Mode Bounded Progression & 1-Click Parity
-Verifies that Wand mode executes bounded stepping (20 → 30 → 40), halts at $K = \text{heatgdt\_K}[]$, prevents over-diffusion during prolonged holds, and commits bitwise identical voxels to 1-Click mode:
+#### Test 9: Wand Mode Bounded Progression & Cursor Drag Stroke Painting
+Verifies that Wand mode executes bounded stepping (20 → 30 → 40), halts at $K = \text{heatgdt\_K}[]$, supports drag-to-paint seed updates along the mouse cursor trajectory, and commits discrete masks without post-release jumps:
 ```bash
 CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_heatgdt_wand_fidelity.jl
 ```
-*Expected Result:* `Test Summary: Pass 13, Total 13. All tests PASSED.`
+*Expected Result:* `Test Summary: Pass 17, Total 17. All tests PASSED.`
+
+#### Test 10: Relative Edge Normalization, Core Growth Speed & Zero Leakage
+Verifies that:
+1. Relative edge normalization in soft tissue maps core voxels ($E \le E_{\text{bg}}$) to $D_{\text{eff}} \approx 1.0$, allowing unhindered diffusion regardless of background soft-tissue noise.
+2. Weak local boundary peaks ($E \to E_{\text{peak}}$) are stretched to $E_{\text{rel}} \to 1.0 \implies D_{\text{eff}} = 10^{-5}$, forming firm stopping walls at soft-tissue margins.
+3. Harmonic mean face conductivities guarantee exactly **0 voxels leakage** across strong barriers ($E \ge 0.35$) in both Wand and 1-Click modes across both CPU and Vulkan GPU:
+```bash
+CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_heatgdt_edge_leakage_and_relative_speed.jl
+```
+*Expected Result:* `Test Summary: Pass 14, Total 14. ALL RELATIVE EDGE AND ZERO LEAKAGE TESTS PASSED ✓`
 
 ---
 

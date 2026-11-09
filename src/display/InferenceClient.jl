@@ -902,7 +902,8 @@ Returns a binary `Array{UInt8, 3}` mask (64³ patch coordinates), or `nothing` o
 function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
                      points_vol::Array{Float32,3}, cx::Int, cy::Int, cz::Int;
                      K::Int=200, dt::Float32=0.16f0, theta::Float32=0.001044f0, tau::Float32=0.0001f0,
-                     spacing::NTuple{3,Real}=(1.0, 1.0, 1.0), s_boost::Float32=1.0f0)
+                     spacing::NTuple{3,Real}=(1.0, 1.0, 1.0), s_boost::Float32=1.0f0,
+                     edge_params::Union{Nothing, NTuple{4, Real}}=nothing)
     
     # Extract 64³ diffusivity patch
     D_patch = if _heatgdt_diffusivity[] !== nothing
@@ -911,6 +912,16 @@ function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
         # Fallback: uniform diffusivity (no edge information)
         @warn "[InferenceClient] Heat-GDT: No precomputed diffusivity. Using uniform D=1.0."
         ones(Float32, 64, 64, 64)
+    end
+
+    if edge_params !== nothing && edge_params[2] > 0.0f0
+        E_bg, E_scale, gamma_eff, edge_clip = Float32.(edge_params)
+        E_raw = -log.(clamp.(D_patch, 1.0f-5, 1.0f0)) .* 0.09905025f0
+        E_rel = clamp.((E_raw .- E_bg) .* E_scale, 0.0f0, 1.0f0)
+        D_eff = clamp.(exp.(-gamma_eff .* E_rel), 1.0f-5, 1.0f0)
+        barrier_mask = (E_rel .>= edge_clip) .| (E_raw .>= 0.35f0)
+        D_eff[barrier_mask] .= 1.0f-5
+        D_patch = D_eff
     end
 
     if s_boost != 1.0f0
@@ -986,13 +997,14 @@ function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
         D_zp_nbr = D_padded[2:N+1, 2:N+1, 3:N+2, :]  # z+1
         D_zm_nbr = D_padded[2:N+1, 2:N+1, 1:N,   :]  # z-1
         
-        # Face-averaged conductivities (arithmetic mean of adjacent voxels)
-        D_xp = 0.5f0 .* (D_gpu .+ D_xp_nbr)
-        D_xm = 0.5f0 .* (D_gpu .+ D_xm_nbr)
-        D_yp = 0.5f0 .* (D_gpu .+ D_yp_nbr)
-        D_ym = 0.5f0 .* (D_gpu .+ D_ym_nbr)
-        D_zp = 0.5f0 .* (D_gpu .+ D_zp_nbr)
-        D_zm = 0.5f0 .* (D_gpu .+ D_zm_nbr)
+        # Face-averaged conductivities using harmonic mean to prevent leakage across sharp barriers
+        eps_face = 1.0f-7
+        D_xp = (2.0f0 .* D_gpu .* D_xp_nbr) ./ (D_gpu .+ D_xp_nbr .+ eps_face)
+        D_xm = (2.0f0 .* D_gpu .* D_xm_nbr) ./ (D_gpu .+ D_xm_nbr .+ eps_face)
+        D_yp = (2.0f0 .* D_gpu .* D_yp_nbr) ./ (D_gpu .+ D_yp_nbr .+ eps_face)
+        D_ym = (2.0f0 .* D_gpu .* D_ym_nbr) ./ (D_gpu .+ D_ym_nbr .+ eps_face)
+        D_zp = (2.0f0 .* D_gpu .* D_zp_nbr) ./ (D_gpu .+ D_zp_nbr .+ eps_face)
+        D_zm = (2.0f0 .* D_gpu .* D_zm_nbr) ./ (D_gpu .+ D_zm_nbr .+ eps_face)
         
         # Normalized inverse-squared spacing weights for anisotropic grids
         dx, dy, dz = Float32(spacing[1]), Float32(spacing[2]), Float32(spacing[3])
@@ -1019,6 +1031,8 @@ function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
                    wy .* (D_yp .* (u_yp .- u) .+ D_ym .* (u_ym .- u)) .+
                    wz .* (D_zp .* (u_zp .- u) .+ D_zm .* (u_zm .- u))
             u = u .+ dt .* flux
+            # Maintain continuous Dirichlet heat source at seed (matching Vulkan compute shader)
+            u = max.(u, seed_gpu)
         end
         
         # Extract mask via sigmoid thresholding
