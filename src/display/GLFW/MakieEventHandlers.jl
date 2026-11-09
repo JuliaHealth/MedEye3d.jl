@@ -277,7 +277,7 @@ const _vk_heat_display_steps = Ref{Int}(0)            # Visual catch-up steps di
 const _vk_heat_seed = Ref{Tuple{Int,Int,Int}}((0,0,0))  # 3D seed voxel for current interaction
 const _vk_heat_last_dispatch = Ref{Float64}(0.0)      # Timestamp of last GPU dispatch (for debouncing)
 const _vk_heat_start_time = Ref{Float64}(0.0)         # Wall-clock timestamp of Heat-GDT start (for display theta ramp)
-const HEAT_TICK_MIN_INTERVAL_S = 0.015                 # 15ms minimum interval between GPU dispatches (~66 Hz)
+const HEAT_TICK_MIN_INTERVAL_S = 0.05                  # 50ms interval between GPU dispatches (20 Hz, smooth 20->30->40 pacing)
 # Display theta ramp: theta_display = max(real_theta, RAMP_START * exp(-RAMP_RATE * elapsed_seconds))
 # This makes the lesion appear to grow smoothly from a small dot to the full segmentation
 const HEAT_DISPLAY_RAMP_START = 0.5f0                  # Start display threshold (only show very hot center)
@@ -6896,9 +6896,10 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
         # Adaptive local edge contrast scaling (self-normalizing based on mean frontier gradient)
         diff_vol = InferenceClient._heatgdt_diffusivity[]
         s_boost = 1.0f0
+        K_target = heatgdt_K[]
         if heatgdt_adaptive_contrast[] && diff_vol !== nothing
             mean_sp = (ct_spacing[1] + ct_spacing[2] + ct_spacing[3]) / 3.0
-            R_phys = max(10.0, 3.0 + 2.0 * sqrt(10 * 0.16) * mean_sp)
+            R_phys = max(10.0, 3.0 + 2.0 * sqrt(K_target * 0.16) * mean_sp)
             s_boost = VulkanHeatDiffusion.compute_frontier_edge_scale(
                 diff_vol, cx, cy, cz, R_phys, ct_spacing;
                 sensitivity=heatgdt_sensitivity[]
@@ -6910,14 +6911,14 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
         set_ai_status!("[Heat-GDT GPU] Growing from ($cx,$cy,$cz)...")
         println("[Heat-GDT START] seed_only! SUCCESS — GPU diffusion active (s_boost=$s_boost)"); flush(stdout)
         
-        # Run initial steps immediately so even a very short click produces a visible area
-        theta_val = heatgdt_theta[]
-        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 10; theta=theta_val, copy_box_to_cpu=false, spacing=ct_spacing, s_boost=s_boost)
-        _vk_heat_total_steps[] += 10
+        # Initial step bounded at 20 steps (or min(20, K_target))
+        initial_steps = min(20, K_target)
+        theta_val = Float32(heatgdt_theta[])
+        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, initial_steps; theta=theta_val, copy_box_to_cpu=false, spacing=ct_spacing, s_boost=s_boost)
+        _vk_heat_total_steps[] = initial_steps
+        HEAT_GDT_LAST_DISPLAY_THETA[] = theta_val
         
-        # ── Display theta ramp: at t=0, start with high theta so only hot center shows ──
-        display_theta = Float32(max(theta_val, HEAT_DISPLAY_RAMP_START))  # At t=0, exp(0)=1 so display_theta = RAMP_START = 0.5
-        try; open("/tmp/heatgdt_debug.log", "a") do f; println(f, "[$(round(time(), digits=3))] START: seed+6steps DONE at ($cx,$cy,$cz), display_theta=$display_theta, real_theta=$theta_val, active=$(_vk_heat_active[]), channel=$(main_event_channel[] !== nothing ? "ok" : "nothing")"); end; catch; end
+        try; open("/tmp/heatgdt_debug.log", "a") do f; println(f, "[$(round(time(), digits=3))] START: seed+$initial_steps steps DONE at ($cx,$cy,$cz), theta=$theta_val, active=$(_vk_heat_active[]), channel=$(main_event_channel[] !== nothing ? "ok" : "nothing")"); end; catch; end
         
         active_id = UInt32(current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1)
         for state in stateObjects
@@ -6941,8 +6942,8 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
                         3 # Axial
                     end
                     slice_idx = state.currentlyDispDat.sliceNumber - 1
-                    # Use display_theta (high) so only the seed center shows initially
-                    VulkanHeatDiffusion.render_slice_to_texture!(heat_state, vk_ctx, vk_tex, slice_dim, slice_idx, active_id; theta=display_theta)
+                    # Render with actual theta_val matching 1-Click mode (true WYSIWYG)
+                    VulkanHeatDiffusion.render_slice_to_texture!(heat_state, vk_ctx, vk_tex, slice_dim, slice_idx, active_id; theta=theta_val)
                     if obj.vulkanPipelineState !== nothing
                         obj.vulkanPipelineState.ubo_dirty = true
                     end
@@ -7023,21 +7024,20 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
     end
     
     try
-        # ── Run diffusion steps on GPU — larger batches for faster growth ──
-        steps_per_tick = 15  # Was 5; increased for faster lesion expansion per frame
+        # ── Run diffusion steps on GPU — bounded progression (20 -> 30 -> 40) matching single-click mode ──
+        K_target = heatgdt_K[]
+        if _vk_heat_total_steps[] >= K_target
+            # Target reached: stop diffusion to guarantee zero edge leakage!
+            return
+        end
         
-        theta_val = heatgdt_theta[]
+        steps_per_tick = min(10, K_target - _vk_heat_total_steps[])
+        if steps_per_tick <= 0
+            return
+        end
         
-        # ── Display theta ramp: GPU computes with real theta, display uses ramped theta ──
-        # theta_display = max(real_theta, RAMP_START * exp(-RAMP_RATE * elapsed))
-        # At t=0s: display_theta ≈ 0.5 (only seed center visible)
-        # At t=0.5s: ≈ 0.14 (moderate growth)
-        # At t=1.0s: ≈ 0.04 (significant growth)
-        # At t=2.0s: ≈ 0.003 (nearly full computation visible)
-        # At t=2.5s+: clamped to real_theta (0.001)
-        elapsed = now - _vk_heat_start_time[]
-        display_theta = Float32(max(theta_val, HEAT_DISPLAY_RAMP_START * exp(-HEAT_DISPLAY_RAMP_RATE[] * elapsed)))
-        HEAT_GDT_LAST_DISPLAY_THETA[] = display_theta  # Track for stop-time logging
+        theta_val = Float32(heatgdt_theta[])
+        HEAT_GDT_LAST_DISPLAY_THETA[] = theta_val
         
         ct_spacing = try
             stateObjects[1].onScrollData.dataToScrollDims.voxelSize
@@ -7048,22 +7048,10 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
             ct_spacing = (1.0, 1.0, 1.0)
         end
         
+        # Keep the exact upfront calibrated s_boost from seed_only! (matching single-click mode)
         s_boost = heat_state.current_s_boost
-        if heatgdt_adaptive_contrast[]
-            diff_vol = InferenceClient._heatgdt_diffusivity[]
-            if diff_vol !== nothing
-                mean_sp = (ct_spacing[1] + ct_spacing[2] + ct_spacing[3]) / 3.0
-                tot_steps = _vk_heat_total_steps[] + steps_per_tick
-                R_phys = 3.0 + 2.0 * sqrt(tot_steps * 0.16) * mean_sp
-                cx, cy, cz = _vk_heat_seed[]
-                s_boost = VulkanHeatDiffusion.compute_frontier_edge_scale(
-                    diff_vol, cx, cy, cz, R_phys, ct_spacing;
-                    sensitivity=heatgdt_sensitivity[]
-                )
-            end
-        end
         
-        _dbg("TICK: steps=$steps_per_tick, theta=$theta_val, display_theta=$display_theta, s_boost=$s_boost, elapsed=$(round(elapsed, digits=2))s, accumulated=$(heat_state.accumulated_steps), seed=($(heat_state.seed_x),$(heat_state.seed_y),$(heat_state.seed_z)), ping=$(heat_state.current_buffer_is_ping)")
+        _dbg("TICK: steps=$steps_per_tick, total=$(_vk_heat_total_steps[] + steps_per_tick)/$K_target, theta=$theta_val, s_boost=$s_boost, accumulated=$(heat_state.accumulated_steps)")
         
         t0 = time_ns()
         VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, steps_per_tick;
@@ -7073,7 +7061,7 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
         
         _dbg("  GPU done: $(round((t_gpu - t0) / 1e6, digits=2))ms, new_accumulated=$(heat_state.accumulated_steps), box_min=$(heat_state.current_box_min), box_max=$(heat_state.current_box_max)")
         
-        # ── 100% GPU Overlay Rendering (using display_theta for progressive reveal) ──
+        # ── 100% GPU Overlay Rendering (using theta_val for true WYSIWYG matching 1-Click) ──
         n_panels_rendered = 0
         for state in stateObjects
             obj = state.mainForDisplayObjects
@@ -7103,8 +7091,8 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
                     
                     active_id = UInt32(current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1)
                     
-                    # Use display_theta (ramped) instead of theta_val for progressive display
-                    VulkanHeatDiffusion.render_slice_to_texture!(heat_state, vk_ctx, vk_tex, slice_dim, slice_idx, active_id; theta=display_theta)
+                    # Render with actual theta_val matching 1-Click mode (true WYSIWYG)
+                    VulkanHeatDiffusion.render_slice_to_texture!(heat_state, vk_ctx, vk_tex, slice_dim, slice_idx, active_id; theta=theta_val)
                     
                     if obj.vulkanPipelineState !== nothing
                         obj.vulkanPipelineState.ubo_dirty = true
@@ -7121,9 +7109,9 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
         render_ms = (t_render - t_gpu) / 1e6
         total_ms = (t_render - t0) / 1e6
         
-        _dbg("  Render done: $(n_panels_rendered) panels, display_theta=$(display_theta), total=$(round(total_ms, digits=2))ms (gpu=$(round(gpu_ms, digits=2)), render=$(round(render_ms, digits=2)))")
+        _dbg("  Render done: $(n_panels_rendered) panels, theta=$(theta_val), total=$(round(total_ms, digits=2))ms (gpu=$(round(gpu_ms, digits=2)), render=$(round(render_ms, digits=2)))")
         
-        log_line = "[Heat-GDT GPU Tick] steps=$(steps_per_tick), display_theta=$(round(display_theta, digits=4)), elapsed=$(round(elapsed, digits=2))s, total=$(round(total_ms, digits=2))ms (gpu=$(round(gpu_ms, digits=2)), slice_render=$(round(render_ms, digits=2)))"
+        log_line = "[Heat-GDT GPU Tick] steps=$(steps_per_tick), total_steps=$(_vk_heat_total_steps[]), theta=$(theta_val), total=$(round(total_ms, digits=2))ms (gpu=$(round(gpu_ms, digits=2)), slice_render=$(round(render_ms, digits=2)))"
         if PERF_LOG[]
             println(log_line)
         end
@@ -7195,7 +7183,7 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
             box_max = heat_state.current_box_max
             HEAT_GDT_UNDO_BOX_MIN[] = CartesianIndex(box_min[1], box_min[2], box_min[3])
             HEAT_GDT_UNDO_BOX_MAX[] = CartesianIndex(box_max[1], box_max[2], box_max[3])
-            HEAT_GDT_UNDO_LABELS[] = seg_vol[box_min[1]:box_max[1], box_min[2]:box_max[2], box_min[3]:box_max[3]]
+            HEAT_GDT_UNDO_LABELS[] = copy(seg_vol[box_min[1]:box_max[1], box_min[2]:box_max[2], box_min[3]:box_max[3]])
             HEAT_GDT_LAST_SEG_VOL[] = seg_vol
             HEAT_GDT_LAST_TARGET_ID[] = UInt16(active_id)
             

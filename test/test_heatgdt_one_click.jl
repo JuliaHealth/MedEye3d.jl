@@ -50,6 +50,13 @@ println("=" ^ 70)
 end
 
 @testset "GUI Controls in LesionMetadataWindow" begin
+    # Ensure fresh config for idempotent testing
+    cfg_file = joinpath(homedir(), ".medeye3d_display_config.json")
+    if isfile(cfg_file)
+        try; rm(cfg_file, force=true); catch; end
+    end
+    MakieEventHandlers.heatgdt_one_click_mode[] = true
+
     active_id = Observable("1: Peripheral Zone (PZ)")
     lesion_ids = Observable(["1: Peripheral Zone (PZ)"])
     channel = Channel{Any}(32)

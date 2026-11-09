@@ -181,8 +181,11 @@ The **Segmentation & AI** section is permanently positioned at the top of the si
   4. If fine-tuning is desired, adjust the **Size ±** slider to expand or contract the segmented volume post-hoc.
 - **Wand (Hold) Mode (`[ Wand (Hold) ]`)**:
   1. Click and hold the Left Mouse Button on the lesion center.
-  2. Watch the overlay expand smoothly in real time across all viewing planes at >60 FPS.
-  3. Release the mouse button when the lesion boundary matches the anatomical tumor margin. Discrete commit occurs upon mouse release.
+  2. Bounded Progressive Diffusion engages with identical physics to 1-Click mode:
+     - **Initial press**: Bounded at 20 steps with upfront boundary-calibrated $s_{\text{boost}}$.
+     - **Each tick (~50ms)**: Advances by +10 steps (20 → 30 → 40) at real $\theta = \text{heatgdt\_theta}[]$ (true WYSIWYG).
+     - **Cap at $K$**: Halts cleanly when $K = \text{heatgdt\_K}[]$ (default 40) is reached, eliminating over-diffusion and boundary leakage regardless of how long the button is held.
+  3. Release the mouse button when satisfied. Discrete commit occurs with zero post-release jump.
 
 ---
 
@@ -265,6 +268,13 @@ Verifies observable state (`heatgdt_one_click_mode`), GUI button toggling (`[1-C
 CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_heatgdt_one_click.jl
 ```
 *Expected Result:* `ALL ONE-CLICK HEAT-GDT TESTS PASSED ✓`
+
+#### Test 9: Wand Mode Bounded Progression & 1-Click Parity
+Verifies that Wand mode executes bounded stepping (20 → 30 → 40), halts at $K = \text{heatgdt\_K}[]$, prevents over-diffusion during prolonged holds, and commits bitwise identical voxels to 1-Click mode:
+```bash
+CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_heatgdt_wand_fidelity.jl
+```
+*Expected Result:* `Test Summary: Pass 13, Total 13. All tests PASSED.`
 
 ---
 
