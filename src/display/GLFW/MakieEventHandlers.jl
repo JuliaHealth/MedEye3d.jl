@@ -243,7 +243,7 @@ end
 # Heat-GDT slider parameter refs (written by LesionMetadataWindow, read by inference worker)
 const heatgdt_K = Ref{Int}(40)
 const heatgdt_theta = Ref{Float32}(0.001f0)
-const heatgdt_edge_modality = Ref{Symbol}(:combined)  # :combined, :ct_only, :pet_only
+const heatgdt_edge_modality = Observable{Symbol}(:combined)  # :combined, :ct_only, :pet_only
 const heatgdt_adaptive_contrast = Ref{Bool}(true)
 const heatgdt_sensitivity = Ref{Float32}(1.0f0)
 const heatgdt_current_loaded_modality = Ref{Symbol}(:combined)
@@ -6268,13 +6268,19 @@ function reactToToggleHeatGDTMode(data::MakieEvents.ToggleHeatGDTModeEvent, stat
     set_ai_status!(status_msg)
     if PERF_LOG[]; println(status_msg); flush(stdout); end
     
-    # Also sync the GUI dropdown if available
+    # Also sync the GUI dropdown and open segmentation section if available
     try
         LMW = _get_lmw()
         if LMW !== nothing
             obs_dict = getfield(LMW, :_lmw_observables)
-            if haskey(obs_dict, :algo_combo_selection)
-                if new_state
+            if new_state
+                if haskey(obs_dict, :open_sec_seg!)
+                    obs_dict[:open_sec_seg!]()
+                end
+                if haskey(obs_dict, :scroll_to_top!)
+                    obs_dict[:scroll_to_top!]()
+                end
+                if haskey(obs_dict, :algo_combo_selection)
                     obs_dict[:algo_combo_selection][] = "Heat-GDT"
                 end
             end
@@ -6445,18 +6451,33 @@ function reactToOneShotHeatGDT(data::MakieEvents.OneShotHeatGDTEvent, stateObjec
             
             romcad._heatgdt_mode_active[] = true
             set_ai_status!("[Heat-GDT Wand] Enabled. Click & hold to grow lesion.")
-            println("[Heat-GDT WAND] Mode ON. heat_state=$(_vk_heat_state[] !== nothing), vk_ctx=$(_vk_heat_ctx[] !== nothing), uploaded=$(parentmodule(@__MODULE__)._vk_heat_uploaded[]), diffusivity=$(InferenceClient._heatgdt_diffusivity[] !== nothing)"); flush(stdout)
             
-            # Sync GUI dropdown
+            # Eagerly warm up GPU Heat-GDT pipeline
+            vk_ctx = _vk_heat_ctx[]
+            if vk_ctx !== nothing
+                parentmodule(@__MODULE__).ensure_heatgdt_gpu!(vk_ctx)
+            end
+            
+            println("[Heat-GDT WAND] Mode ON. heat_state=$(_vk_heat_state[] !== nothing), vk_ctx=$(_vk_heat_ctx[] !== nothing), uploaded=$(parentmodule(@__MODULE__)._vk_heat_uploaded[]), diffusivity=$(InferenceClient._heatgdt_diffusivity[] !== nothing), modality=$(heatgdt_edge_modality[])"); flush(stdout)
+            
+            # Sync GUI dropdown, open segmentation section, and scroll to top
             @async try
                 LMW = _get_lmw()
                 if LMW !== nothing
                     obs_dict = getfield(LMW, :_lmw_observables)
+                    if haskey(obs_dict, :open_sec_seg!)
+                        obs_dict[:open_sec_seg!]()
+                    end
+                    if haskey(obs_dict, :scroll_to_top!)
+                        obs_dict[:scroll_to_top!]()
+                    end
                     if haskey(obs_dict, :algo_combo_selection)
                         obs_dict[:algo_combo_selection][] = "Heat-GDT"
                     end
                 end
-            catch; end
+            catch e
+                println("[Heat-GDT WAND] Error syncing GUI: $e"); flush(stdout)
+            end
         end
     end
 end

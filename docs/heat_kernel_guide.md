@@ -131,19 +131,30 @@ When the user selects an edge source from the GUI, [`switch_heatgdt_edge_modalit
 
 ## 4. How to Use Heat-GDT in the MedEye3d GUI
 
-### 4.1 Activation
-1. **Shortcut**: Press the **`W`** key anywhere in the viewer to toggle Wand / Heat-GDT mode.
-2. **GUI Menu**: In the **Lesion Metadata Window** (right-hand panel), open the **AI** dropdown and select **`Heat-GDT`**.
+### 4.1 Activation & Visibility
+The **Segmentation & AI** section is permanently positioned at the top of the sidebar directly beneath **Lesion Navigation**, ensuring all controls are visible and accessible without scrolling through patient metadata or radiological reports.
+
+1. **Shortcut**: Press the **`W`** key anywhere in the 3D viewer. This automatically:
+   - Expands the **Segmentation & AI** accordion section if collapsed.
+   - Scrolls the sidebar to the top so segmentation parameters are in full view.
+   - Sets the algorithm selection to **`Heat-GDT`**.
+   - Primes the GPU Heat-GDT pipeline with the active modality diffusivity.
+   - Enters painting mode with a new or active lesion ID.
+2. **GUI Section**: Alternatively, open the **Segmentation & AI** section and set the **AI** menu to **`Heat-GDT`** (which is selected by default).
 
 ```
 ┌────────────────────────────────────────────────────────┐
+│ [▼ Segmentation & AI]                                  │
+│                   VIEW MODE / EDIT MODE                │
+│ [ New ]  [ Paint ]  [ Erase ]  [ View ]                │
+│ Brush: [───●──────────────────] [ Move ]               │
 │ AI: [ Heat-GDT              ▼ ] [ Run AI ]             │
 │ θ: [───●──────────────────────] K: [──────●──────────] │
 │ Speed: [─────────●────────────]                        │
 │ Size ±: [──────────●───────────] [ Reset ]             │
-│ Edge: [ Combined            ▼ ]                        │
+│ Edge: [ Both (Combined) ] [ CT Only ] [ PET Only ]     │
 │ Adapt: [ON]    Sens: [────●───]                        │
-│ θ controls sensitivity (size). K controls smoothness.  │
+│ θ: sensitivity (size) | K: smoothness | Edge: [Both]   │
 └────────────────────────────────────────────────────────┘
 ```
 
@@ -155,7 +166,7 @@ When the user selects an edge source from the GUI, [`switch_heatgdt_edge_modalit
 | **K** | `heatgdt_K` | `40` | **Diffusion Iterations / Boundary Smoothness**. Number of Euler steps. Higher values yield smoother geodesic boundaries. |
 | **Speed** | `HEAT_DISPLAY_RAMP_RATE` | `12.0` | **Visual Expansion Speed**. Decoupled exponential display ramp rate. Controls how quickly the visual overlay catches up to the underlying GPU computation. |
 | **Size ±** | Post-hoc adjustment | `0.0` | **Live Lesion Resizing**. Allows growing or shrinking the committed lesion mask after mouse release without re-painting. |
-| **Edge** | `heatgdt_edge_modality` | `Combined` | **Edge Guidance Source**. Dropdown options: `Combined`, `CT Only`, or `PET Only`. Immediately switches the active GPU barrier tensor. |
+| **Edge Toggle** | `heatgdt_edge_modality` | `Both` | **Dedicated 3-Button Guidance Toggle**: `[Both]` (dual CT+PET), `[CT Only]` (pure anatomical CT edges), or `[PET Only]` (pure metabolic PET edges). Active mode glows green. Swaps GPU barrier tensors immediately on click. |
 | **Adapt** | `heatgdt_adaptive_contrast`| `true` | **Adaptive Local Contrast Boost**. When enabled, dynamically measures edge strength around the advancing shell and sharpens soft-tissue margins. |
 | **Sens** | `heatgdt_sensitivity` | `1.0` | **Contrast Sensitivity**. Exponent scale (0.5 to 2.0). Increase to 1.5–2.0 for very faint soft-tissue lesions. |
 
@@ -231,6 +242,13 @@ Verifies organ centroid IDW tracking, exclusion organ masking, and heat-kernel l
 CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_organ_heat_lesion_mapping.jl
 ```
 *Expected Result:* `Test Summary: Pass 112, Total 112. All tests PASSED.`
+
+#### Test 7: GUI Segmentation Controls, Modality Toggles & W Key Activation
+Verifies that the Segmentation & AI section is visible at the top of the sidebar, algorithm defaults to Heat-GDT, edge guidance toggle buttons (`[Both]`, `[CT Only]`, `[PET Only]`) cleanly switch active GPU tensors and button highlights, and pressing `W` automatically expands the section and activates Wand mode:
+```bash
+CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_gui_segmentation_controls.jl
+```
+*Expected Result:* `Test Summary: Pass 23, Total 23. All tests PASSED.`
 
 ---
 

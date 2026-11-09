@@ -3784,6 +3784,13 @@ function create_metadata_window(
     channel_ref = Ref{Union{Base.Channel, Nothing}}(channel_arg)
     # Proxy that queues events when channel is not yet connected
     channel = ChannelProxy(channel_ref)
+
+    display_cfg = load_display_config()
+    _display_cfg_save_subject = Subject(Bool)
+    _display_cfg_save_debounced = _display_cfg_save_subject |> debounce_time(500)
+    subscribe!(_display_cfg_save_debounced, lambda(
+        on_next = (_) -> save_display_config(display_cfg)
+    ))
     local _build_match_display!
     local sec_map_lesions = nothing
     schema   = load_schema()
@@ -5290,6 +5297,441 @@ function create_metadata_window(
 
     end_section!(sec_nav)
 
+    # ── Segmentation Mini Manager (compact) ────────────────────────────────
+    sec_seg = begin_section!("Segmentation & AI"; default_open=true)
+    
+    # Mode indicator
+    mode_r = nr!()
+    workflow_mode_obs = Observable("VIEW MODE")
+    _lmw_observables[:workflow_mode] = workflow_mode_obs
+    Label(g[mode_r, 1:4], workflow_mode_obs, halign=:center, fontsize=12, color=ACCENT, font=:bold)
+    rowsize!(g, mode_r, Fixed(20)); register_fixed_row!(mode_r, 20)
+    
+    # Row 1: New Lesion + Paint/Erase/View
+    seg_r1 = nr!()
+    btn_new_lesion = Button(g[seg_r1, 1], label = "New", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    btn_paint      = Button(g[seg_r1, 2], label = "Paint", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_erase      = Button(g[seg_r1, 3], label = "Erase", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    btn_view_mode  = Button(g[seg_r1, 4], label = "View", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, seg_r1, Fixed(28)); register_fixed_row!(seg_r1, 28)
+    
+    current_paint_mode = Observable(:view)
+    
+    on(btn_new_lesion.clicks) do _
+        println("[LMW] btn_new_lesion clicked! Computing new_id..."); flush(stdout)
+        # Flush any pending autosaves for the PREVIOUS lesion before switching
+        if _is_autosaving[] == false && active_lesion_id[] != ""
+            try trigger_autosave(skip_dictation=true) catch; end
+        end
+        
+        max_id = 0
+        for opt in lesion_ids[]
+            cp = findfirst(':', opt)
+            dash = cp === nothing ? findfirst(" - ", opt) : nothing
+            ns = if cp !== nothing
+                strip(opt[1:cp-1])
+            elseif dash !== nothing
+                strip(opt[1:first(dash)-1])
+            else
+                opt
+            end
+            p = tryparse(Int, ns)
+            # Skip sweep IDs (≥ 1000) — those are synthetic match group entries
+            p !== nothing && p < 1000 && (max_id = max(max_id, p))
+        end
+        for k in keys(lesion_db[])
+            p = parse_lesion_id(k)
+            p !== nothing && p < 1000 && (max_id = max(max_id, p))
+        end
+        # Also check actual mask for highest real segment ID
+        try
+            entry = lock(_MEH._tp_cache_lock) do
+                get(_MEH.tp_data_cache, _MEH.current_tp_index[], nothing)
+            end
+            if entry !== nothing && entry.mask_i16 !== nothing
+                mask_max = Int(maximum(entry.mask_i16))
+                if mask_max > 0 && mask_max < 1000
+                    max_id = max(max_id, mask_max)
+                end
+            end
+        catch; end
+        new_id = max_id + 1
+        
+        # Auto-name from anatomy atlas at the CURRENT cursor position
+        display_name = "New Lesion"
+        entry = nothing
+        is_mri_new = false
+        try
+            # In MRI quad view or compare mode, resolve active MRI timepoint
+            tp_idx_new = _MEH.current_tp_index[]
+            if _MEH.mri_main_multimodal_mode[]
+                p_hov = _MEH.current_hovered_panel[]
+                if p_hov in (1, 2, 3, 4) && length(_MEH.mri_compare_tps) >= p_hov
+                    tp_idx_new = _MEH.mri_compare_tps[p_hov]
+                elseif !isempty(_MEH.mri_compare_tps)
+                    tp_idx_new = _MEH.mri_compare_tps[1]
+                end
+            end
+            
+            is_mri_new = uppercase(get(_MEH.tp_modalities, tp_idx_new, "")) in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE") || _MEH.mri_main_multimodal_mode[]
+            
+            # Load TP data to ensure native anatomy is cached
+            tp_entry_new = if isdefined(_MEH, :get_or_load_tp_data)
+                _MEH.get_or_load_tp_data(tp_idx_new)
+            else
+                lock(_MEH._tp_cache_lock) do
+                    get(_MEH.tp_data_cache, tp_idx_new, nothing)
+                end
+            end
+            atlas = if tp_entry_new !== nothing && tp_entry_new.anatomy !== nothing
+                tp_entry_new.anatomy
+            else
+                _MEH.global_ts_atlas[]
+            end
+            
+            prostate_default_labels = Dict{Int,String}(
+                1 => "Peripheral Zone (PZ)", 2 => "Transition Zone (TZ)", 3 => "Central Zone (CZ)",
+                4 => "Anterior Fibromuscular Stroma (AFS)", 5 => "Urethra (UR)", 6 => "Periurethral Glands (PG)",
+                7 => "Seminal Vesicle Left (SV_L)", 8 => "Seminal Vesicle Right (SV_R)"
+            )
+            ts_names = if is_mri_new
+                cached_p = get(_MEH.anatomy_labels_cache, tp_idx_new, Dict{Int,String}())
+                !isempty(cached_p) ? cached_p : prostate_default_labels
+            else
+                get(_MEH.anatomy_labels_cache, tp_idx_new, _MEH.global_ts_names[])
+            end
+            println("[NEW LESION] tp=$tp_idx_new (is_mri=$is_mri_new) atlas=$(atlas !== nothing ? "$(size(atlas))" : "null"), ts_names=$(ts_names !== nothing ? "$(length(ts_names)) entries" : "null")")
+            if atlas !== nothing && ts_names !== nothing
+                # Use the actual viewer cursor position (tracked in ReactOnMouseClickAndDrag)
+                vpos = _MEH.current_viewer_position[]
+                println("[NEW LESION] cursor_pos=$vpos → atlas_size=$(size(atlas))")
+                cx = clamp(vpos[1], 1, size(atlas, 1))
+                cy = clamp(vpos[2], 1, size(atlas, 2))
+                cz = clamp(vpos[3], 1, size(atlas, 3))
+                
+                # Direct lookup at cursor position
+                anat_val = Int(atlas[cx, cy, cz])
+                println("[NEW LESION] atlas[$cx,$cy,$cz]=$anat_val")
+                
+                # If exact voxel is unlabeled, try expanding sphere search with tissue priority
+                if anat_val <= 0
+                    candidates = Dict{Int,Int}()
+                    for radius in [1, 2, 4, 8, 16, 24, 32]
+                        for dz in -radius:radius, dy in -radius:radius, dx in -radius:radius
+                            dx*dx + dy*dy + dz*dz > radius*radius && continue
+                            nx = clamp(cx + dx, 1, size(atlas, 1))
+                            ny = clamp(cy + dy, 1, size(atlas, 2))
+                            nz = clamp(cz + dz, 1, size(atlas, 3))
+                            v = Int(atlas[nx, ny, nz])
+                            if v > 0 && haskey(ts_names, v)
+                                candidates[v] = get(candidates, v, 0) + 1
+                            end
+                        end
+                        if !isempty(candidates)
+                            LA = parentmodule(@__MODULE__).LesionAssociation
+                            best_organ = LA.pick_best_organ(candidates, ts_names)
+                            if !isempty(best_organ)
+                                for (k, v) in ts_names
+                                    if v == best_organ && haskey(candidates, k)
+                                        anat_val = k
+                                        break
+                                    end
+                                end
+                            end
+                            break
+                        end
+                    end
+                end
+                
+                organ_name = ""
+                if anat_val > 0
+                    organ_name = get(ts_names, anat_val, "")
+                elseif is_mri_new
+                    organ_name = "Prostate"
+                end
+                
+                if !isempty(organ_name)
+                    _MEH.global_organ_mapping[][new_id] = organ_name
+                    get!(_MEH.tp_organ_mapping, tp_idx_new, Dict{Int,String}())[new_id] = organ_name
+                    @info "[NEW LESION] Mapped lesion $new_id → '$organ_name' from atlas (is_mri=$is_mri_new)"
+                    entry = lookup_anatomy(organ_name)
+                    if entry !== nothing
+                        detailed = get(entry, "detailed", "")
+                        clean_disp = replace(detailed, r"\s*\(UBERON\)" => "")
+                        clean_disp = titlecase(replace(clean_disp, "_" => " "))
+                        display_name = !isempty(clean_disp) ? clean_disp : organ_name
+                    else
+                        display_name = organ_name
+                    end
+                end
+            end
+        catch e
+            @warn "Anatomy lookup for new lesion failed: $e"
+        end
+        
+        new_name = "$(new_id): $(display_name)"
+        db = copy(lesion_db[])
+        new_annot = Dict{String, Any}(
+            "_display_name" => new_name,
+            "SegmentationOrigin" => "MANUAL"
+        )
+        if entry !== nothing
+            new_annot["BaseAnatomy"] = get(entry, "detailed", "")
+            new_annot["BaseAnatomySide"] = get(entry, "side", "")
+            new_annot["LesionType"] = get(entry, "lesion_type", is_mri_new ? "Prostate" : "Organ Meta")
+            new_annot["Anatomic Location"] = get(entry, "anatomic_location", is_mri_new ? "Prostate Gland" : "")
+            new_annot["Anatomical Sublocation"] = get(entry, "anatomical_sublocation", "")
+        elseif is_mri_new
+            new_annot["BaseAnatomy"] = "prostate gland (UBERON)"
+            new_annot["LesionType"] = "Prostate"
+            new_annot["Anatomic Location"] = "Prostate Gland"
+        end
+        db[string(new_id)] = new_annot
+        lesion_db[] = db
+        opts = copy(lesion_ids[]); push!(opts, new_name)
+        is_syncing_selection[] = true
+        try
+            lesion_ids[] = opts; les_menu.options[] = opts
+            les_menu.selection[] = new_name; les_menu.i_selected[] = length(opts)
+        finally; is_syncing_selection[] = false; end
+        _skip_sync_on_lesion_change[] = true  # prevent SyncLesionEvent → no jump to center
+        active_lesion_id[] = new_name
+        current_paint_mode[] = :paint
+        btn_paint.buttoncolor[] = GRN; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BG_PNL
+        empty!(_MASK_IDS_CACHE)
+        empty!(_cached_lesion_ids)
+        empty!(_organ_classification_cache)
+        # Activate painting and show the new lesion (or all lesions if in multi mode)
+        if _MEH.is_single_lesion_mode[]
+            put!(channel, ShowSingleLesionEvent(new_id))
+        else
+            put!(channel, ShowSingleLesionEvent(0))
+        end
+        _MEH.current_active_lesion_id[] = new_id
+        put!(channel, PaintValEvent(new_id, true))
+        println("[NEW LESION] Created lesion $new_id, paint mode active, val=$new_id (single_mode=$(_MEH.is_single_lesion_mode[]))")
+        flush(stdout)
+    end
+    on(btn_paint.clicks) do _
+        current_paint_mode[] = :paint
+        btn_paint.buttoncolor[] = GRN; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BG_PNL
+        empty!(_MASK_IDS_CACHE)
+        empty!(_cached_lesion_ids)
+        empty!(_organ_classification_cache)
+        val = (p = parse_lesion_id(active_lesion_id[])) !== nothing ? p : 1
+        if _MEH.is_single_lesion_mode[]
+            put!(channel, ShowSingleLesionEvent(val))
+        else
+            put!(channel, ShowSingleLesionEvent(0))
+        end
+        _MEH.current_active_lesion_id[] = val
+        put!(channel, PaintValEvent(val, true))
+        _MEH.set_workflow_state!(_MEH.ScientificWorkflow.WF_EDIT_MASK)
+    end
+    on(btn_erase.clicks) do _
+        current_paint_mode[] = :erase
+        btn_paint.buttoncolor[] = BG_PNL; btn_erase.buttoncolor[] = RED_BTN; btn_view_mode.buttoncolor[] = BG_PNL
+        empty!(_MASK_IDS_CACHE)
+        empty!(_cached_lesion_ids)
+        empty!(_organ_classification_cache)
+        put!(channel, PaintValEvent(0, true))
+        _MEH.set_workflow_state!(_MEH.ScientificWorkflow.WF_EDIT_MASK)
+    end
+    on(btn_view_mode.clicks) do _
+        current_paint_mode[] = :view
+        btn_paint.buttoncolor[] = BG_PNL; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BLU_BTN
+        put!(channel, PaintValEvent(-1, false))
+        _MEH.set_workflow_state!(_MEH.ScientificWorkflow.WF_LESION_REVIEW)
+    end
+    
+    # Row 2: Brush slider + Move button (fixed height to prevent slider overlap)
+    seg_r2 = nr!()
+    Label(g[seg_r2, 1], "Brush:", halign=:right, fontsize=10, color=LBL_FG)
+    slider_brush = Slider(g[seg_r2, 2:3], range = 1:20, startvalue = 1)
+    on(slider_brush.value) do val; put!(channel, ChangeBrushSizeEvent(val)) end
+    btn_move_lesion = Button(g[seg_r2, 4], label = "Move", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, seg_r2, Fixed(30)); register_fixed_row!(seg_r2, 30)
+    move_lesion_active = Ref(false)
+    on(btn_move_lesion.clicks) do _
+        move_lesion_active[] = !move_lesion_active[]
+        btn_move_lesion.buttoncolor[] = move_lesion_active[] ? GRN : BG_PNL
+        put!(channel, ToggleMoveLesionModeEvent(move_lesion_active[]))
+    end
+    
+    # Row 3: Algorithm dropdown (default: Heat-GDT)
+    seg_r3 = nr!()
+    Label(g[seg_r3, 1], "AI:", halign=:right, fontsize=10, color=LBL_FG)
+    algo_combo = Menu(g[seg_r3, 2:3], options = ["Heat-GDT", "HELPNet (AI)", "NNInteractive", "Traditional (PETTumor)"], default = "Heat-GDT", fontsize = 10); _register_menu!(algo_combo)
+    btn_add_ai = Button(g[seg_r3, 4], label = "Run AI", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, seg_r3, Fixed(30)); register_fixed_row!(seg_r3, 30)
+
+    # Row 3b: Heat-GDT parameters (visible by default when Heat-GDT selected)
+    seg_r3b = nr!()
+    Label(g[seg_r3b, 1], "θ:", halign=:right, fontsize=10, color=LBL_FG)
+    slider_heatgdt_theta = Slider(g[seg_r3b, 2], range = 0.0001:0.0001:0.01, startvalue = 0.001)
+    Label(g[seg_r3b, 3], "K:", halign=:right, fontsize=10, color=LBL_FG)
+    slider_heatgdt_K = Slider(g[seg_r3b, 4], range = 10:5:100, startvalue = 40)
+    rowsize!(g, seg_r3b, Fixed(30)); register_fixed_row!(seg_r3b, 30)
+    
+    seg_r3c = nr!()
+    Label(g[seg_r3c, 1], "Speed:", halign=:right, fontsize=10, color=LBL_FG)
+    init_ramp_speed = Float32(get(display_cfg, "heatgdt_ramp_speed", 12.0))
+    _MEH.HEAT_DISPLAY_RAMP_RATE[] = init_ramp_speed
+    slider_heatgdt_ramp = Slider(g[seg_r3c, 2:4], range = 1.0:0.5:25.0, startvalue = init_ramp_speed)
+    rowsize!(g, seg_r3c, Fixed(30)); register_fixed_row!(seg_r3c, 30)
+
+    on(slider_heatgdt_theta.value) do val
+        _MEH.heatgdt_theta[] = Float32(val)
+    end
+    on(slider_heatgdt_K.value) do val
+        _MEH.heatgdt_K[] = Int(val)
+    end
+    on(slider_heatgdt_ramp.value) do val
+        v = Float32(val)
+        _MEH.HEAT_DISPLAY_RAMP_RATE[] = v
+        display_cfg["heatgdt_ramp_speed"] = v
+        next!(_display_cfg_save_subject, true)
+    end
+
+    seg_r3d = nr!()
+    Label(g[seg_r3d, 1], "Size ±:", halign=:right, fontsize=10, color=LBL_FG)
+    slider_heatgdt_posthoc = Slider(g[seg_r3d, 2:3], range = -5:0.1:5, startvalue = 0.0)
+    btn_posthoc_reset = Button(g[seg_r3d, 4], label="Reset", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=10)
+    rowsize!(g, seg_r3d, Fixed(30)); register_fixed_row!(seg_r3d, 30)
+
+    # Row 3e: Edge guidance modality toggle buttons (Both / CT / PET)
+    seg_r3e = nr!()
+    Label(g[seg_r3e, 1], "Edge:", halign=:right, fontsize=10, color=LBL_FG)
+    init_mod = _MEH.heatgdt_edge_modality[]
+    btn_edge_both = Button(g[seg_r3e, 2], label = "Both",
+        buttoncolor = (init_mod === :combined ? GRN : BG_PNL),
+        labelcolor = TXT, fontsize = 10)
+    btn_edge_ct = Button(g[seg_r3e, 3], label = "CT",
+        buttoncolor = (init_mod === :ct_only ? GRN : BG_PNL),
+        labelcolor = TXT, fontsize = 10)
+    btn_edge_pet = Button(g[seg_r3e, 4], label = "PET",
+        buttoncolor = (init_mod === :pet_only ? GRN : BG_PNL),
+        labelcolor = TXT, fontsize = 10)
+    rowsize!(g, seg_r3e, Fixed(30)); register_fixed_row!(seg_r3e, 30)
+
+    function update_edge_btn_colors!(active_mod::Symbol)
+        btn_edge_both.buttoncolor[] = (active_mod === :combined ? GRN : BG_PNL)
+        btn_edge_ct.buttoncolor[]   = (active_mod === :ct_only   ? GRN : BG_PNL)
+        btn_edge_pet.buttoncolor[]  = (active_mod === :pet_only  ? GRN : BG_PNL)
+    end
+
+    on(btn_edge_both.clicks) do _
+        _MEH.switch_heatgdt_edge_modality!(:combined)
+        update_edge_btn_colors!(:combined)
+    end
+    on(btn_edge_ct.clicks) do _
+        _MEH.switch_heatgdt_edge_modality!(:ct_only)
+        update_edge_btn_colors!(:ct_only)
+    end
+    on(btn_edge_pet.clicks) do _
+        _MEH.switch_heatgdt_edge_modality!(:pet_only)
+        update_edge_btn_colors!(:pet_only)
+    end
+
+    if _MEH.heatgdt_edge_modality isa Observable
+        on(_MEH.heatgdt_edge_modality) do mod
+            update_edge_btn_colors!(mod)
+        end
+    end
+
+    # Row 3f: Adaptive local contrast toggle & sensitivity slider
+    seg_r3f = nr!()
+    Label(g[seg_r3f, 1], "Adapt:", halign=:right, fontsize=10, color=LBL_FG)
+    cb_adaptive = Toggle(g[seg_r3f, 2], active = true)
+    Label(g[seg_r3f, 3], "Sens:", halign=:right, fontsize=10, color=LBL_FG)
+    slider_sens = Slider(g[seg_r3f, 4], range = 0.5:0.1:2.0, startvalue = 1.0)
+    rowsize!(g, seg_r3f, Fixed(30)); register_fixed_row!(seg_r3f, 30)
+
+    on(cb_adaptive.active) do is_act
+        _MEH.heatgdt_adaptive_contrast[] = is_act
+    end
+    on(slider_sens.value) do val
+        _MEH.heatgdt_sensitivity[] = Float32(val)
+    end
+
+    seg_r3_tt = nr!()
+    Label(g[seg_r3_tt, 1:4], "θ: sensitivity (size) | K: smoothness | Edge: [Both]/[CT]/[PET]", halign=:center, fontsize=9, color=SUBTXT)
+    rowsize!(g, seg_r3_tt, Fixed(15)); register_fixed_row!(seg_r3_tt, 15)
+
+    on(slider_heatgdt_posthoc.value) do val
+        base_theta = _MEH.heatgdt_theta[]
+        new_theta = Float32(base_theta * (10 ^ (val / 3.0)))
+        
+        @async try
+            put!(channel, MakieEvents.HeatGDTPosthocSizeEvent(new_theta))
+        catch e
+            @warn "Failed to dispatch posthoc size event: $e"
+        end
+    end
+
+    on(btn_posthoc_reset.clicks) do _
+        set_close_to!(slider_heatgdt_posthoc, 0.0)
+    end
+
+    # Show/hide Heat-GDT params based on algorithm selection with proper layout updates
+    heatgdt_rows = (seg_r3b, seg_r3c, seg_r3d, seg_r3e, seg_r3f, seg_r3_tt)
+    function _set_heatgdt_rows_visible!(vis::Bool)
+        g.block_updates = false
+        try
+            for r_idx in heatgdt_rows
+                set_row_visible!(r_idx, vis)
+            end
+            _invalidate_row_cache!()
+            try
+                Makie.GridLayoutBase.update!(fig.layout)
+            catch
+                Makie.GridLayoutBase.update!(g)
+            end
+            _cache_widget_bboxes!()
+        finally
+            g.block_updates = true
+            _apply_scroll!(_scroll_offset_px[])
+        end
+    end
+
+    heatgdt_row_visible = Observable(true)
+    on(algo_combo.selection) do sel
+        is_hg = (sel == "Heat-GDT")
+        heatgdt_row_visible[] = is_hg
+        _set_heatgdt_rows_visible!(is_hg)
+        _ROMCAD._heatgdt_mode_active[] = is_hg
+    end
+
+    on(btn_add_ai.clicks) do _
+        @async try
+            put!(channel, AddAutoPetEvent(algo_combo.selection[], channel))
+        catch e
+            @warn "Failed to dispatch AddAutoPetEvent: $e"
+        end
+    end
+
+    # Row 4: Segmentation origin & Revert to AI button
+    seg_r_rev = nr!()
+    Label(g[seg_r_rev, 1:2], @lift("Origin: $(string($current_seg_origin))"), fontsize = 10, color = SUBTXT, halign = :left)
+    btn_revert_ai = Button(g[seg_r_rev, 3:4], label = "Revert to AI", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
+    rowsize!(g, seg_r_rev, Fixed(28)); register_fixed_row!(seg_r_rev, 28)
+    
+    on(btn_revert_ai.clicks) do _
+        active_str = active_lesion_id[]
+        lid = parse_lesion_id(active_str)
+        if lid !== nothing
+            put!(channel, RevertToAIEvent(lid, _MEH.current_tp_index[]))
+        end
+    end
+
+    # Row 5: AI status (fixed height)
+    seg_r4 = nr!()
+    Label(g[seg_r4, 1:4], @lift(string($(_MEH.ai_status_text))),
+        fontsize=10, color=RGBAf(0.7, 0.9, 0.7, 1.0), halign=:center)
+    rowsize!(g, seg_r4, Fixed(20)); register_fixed_row!(seg_r4, 20)
+
+    end_section!(sec_seg)
+
     # ── Viewport Controls ────────────────────────────────────────────────────
     sec_view = begin_section!("Viewport & Multi-Planar Layout"; default_open=false)
     
@@ -6420,7 +6862,6 @@ function create_metadata_window(
     # ── Dedicated Windowing & Image Offsets Subpanel ─────────────────────────
     sec_win = begin_section!("Windowing & Image Offsets"; default_open=true)
 
-    display_cfg = load_display_config()
     init_blend = Float32(get(display_cfg, "pet_ct_blend", 0.5))
     init_label_opacity = Float32(get(display_cfg, "label_opacity", 0.5))
 
@@ -6432,12 +6873,6 @@ function create_metadata_window(
         fontsize = 10, color = TXT)
     rowsize!(g, blend_r, Fixed(28)); register_fixed_row!(blend_r, 28)
     is_syncing_blend = Ref(false)
-    # Debounced save for display config (avoids disk I/O on every slider drag step)
-    _display_cfg_save_subject = Subject(Bool)
-    _display_cfg_save_debounced = _display_cfg_save_subject |> debounce_time(500)
-    subscribe!(_display_cfg_save_debounced, lambda(
-        on_next = (_) -> save_display_config(display_cfg)
-    ))
 
     on(slider_blend.value) do val
         is_syncing_blend[] && return
@@ -8333,414 +8768,6 @@ function create_metadata_window(
             @warn "Failed to propagate artifact classification: $e"
         end
     end
-
-
-
-
-    # ── Segmentation Mini Manager (compact) ────────────────────────────────
-    sec_seg = begin_section!("Segmentation & AI"; default_open=true)
-    
-    # Mode indicator
-    mode_r = nr!()
-    workflow_mode_obs = Observable("VIEW MODE")
-    _lmw_observables[:workflow_mode] = workflow_mode_obs
-    Label(g[mode_r, 1:4], workflow_mode_obs, halign=:center, fontsize=12, color=ACCENT, font=:bold)
-    rowsize!(g, mode_r, Fixed(20)); register_fixed_row!(mode_r, 20)
-    
-    # Row 1: New Lesion + Paint/Erase/View
-    seg_r1 = nr!()
-    btn_new_lesion = Button(g[seg_r1, 1], label = "New", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
-    btn_paint      = Button(g[seg_r1, 2], label = "Paint", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_erase      = Button(g[seg_r1, 3], label = "Erase", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    btn_view_mode  = Button(g[seg_r1, 4], label = "View", buttoncolor = BLU_BTN, labelcolor = TXT, fontsize = 10)
-    rowsize!(g, seg_r1, Fixed(28)); register_fixed_row!(seg_r1, 28)
-    
-    current_paint_mode = Observable(:view)
-    
-    on(btn_new_lesion.clicks) do _
-        println("[LMW] btn_new_lesion clicked! Computing new_id..."); flush(stdout)
-        # Flush any pending autosaves for the PREVIOUS lesion before switching
-        if _is_autosaving[] == false && active_lesion_id[] != ""
-            try trigger_autosave(skip_dictation=true) catch; end
-        end
-        
-        max_id = 0
-        for opt in lesion_ids[]
-            cp = findfirst(':', opt)
-            dash = cp === nothing ? findfirst(" - ", opt) : nothing
-            ns = if cp !== nothing
-                strip(opt[1:cp-1])
-            elseif dash !== nothing
-                strip(opt[1:first(dash)-1])
-            else
-                opt
-            end
-            p = tryparse(Int, ns)
-            # Skip sweep IDs (≥ 1000) — those are synthetic match group entries
-            p !== nothing && p < 1000 && (max_id = max(max_id, p))
-        end
-        for k in keys(lesion_db[])
-            p = parse_lesion_id(k)
-            p !== nothing && p < 1000 && (max_id = max(max_id, p))
-        end
-        # Also check actual mask for highest real segment ID
-        try
-            entry = lock(_MEH._tp_cache_lock) do
-                get(_MEH.tp_data_cache, _MEH.current_tp_index[], nothing)
-            end
-            if entry !== nothing && entry.mask_i16 !== nothing
-                mask_max = Int(maximum(entry.mask_i16))
-                if mask_max > 0 && mask_max < 1000
-                    max_id = max(max_id, mask_max)
-                end
-            end
-        catch; end
-        new_id = max_id + 1
-        
-        # Auto-name from anatomy atlas at the CURRENT cursor position
-        display_name = "New Lesion"
-        entry = nothing
-        is_mri_new = false
-        try
-            # In MRI quad view or compare mode, resolve active MRI timepoint
-            tp_idx_new = _MEH.current_tp_index[]
-            if _MEH.mri_main_multimodal_mode[]
-                p_hov = _MEH.current_hovered_panel[]
-                if p_hov in (1, 2, 3, 4) && length(_MEH.mri_compare_tps) >= p_hov
-                    tp_idx_new = _MEH.mri_compare_tps[p_hov]
-                elseif !isempty(_MEH.mri_compare_tps)
-                    tp_idx_new = _MEH.mri_compare_tps[1]
-                end
-            end
-            
-            is_mri_new = uppercase(get(_MEH.tp_modalities, tp_idx_new, "")) in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE") || _MEH.mri_main_multimodal_mode[]
-            
-            # Load TP data to ensure native anatomy is cached
-            tp_entry_new = if isdefined(_MEH, :get_or_load_tp_data)
-                _MEH.get_or_load_tp_data(tp_idx_new)
-            else
-                lock(_MEH._tp_cache_lock) do
-                    get(_MEH.tp_data_cache, tp_idx_new, nothing)
-                end
-            end
-            atlas = if tp_entry_new !== nothing && tp_entry_new.anatomy !== nothing
-                tp_entry_new.anatomy
-            else
-                _MEH.global_ts_atlas[]
-            end
-            
-            prostate_default_labels = Dict{Int,String}(
-                1 => "Peripheral Zone (PZ)", 2 => "Transition Zone (TZ)", 3 => "Central Zone (CZ)",
-                4 => "Anterior Fibromuscular Stroma (AFS)", 5 => "Urethra (UR)", 6 => "Periurethral Glands (PG)",
-                7 => "Seminal Vesicle Left (SV_L)", 8 => "Seminal Vesicle Right (SV_R)"
-            )
-            ts_names = if is_mri_new
-                cached_p = get(_MEH.anatomy_labels_cache, tp_idx_new, Dict{Int,String}())
-                !isempty(cached_p) ? cached_p : prostate_default_labels
-            else
-                get(_MEH.anatomy_labels_cache, tp_idx_new, _MEH.global_ts_names[])
-            end
-            println("[NEW LESION] tp=$tp_idx_new (is_mri=$is_mri_new) atlas=$(atlas !== nothing ? "$(size(atlas))" : "null"), ts_names=$(ts_names !== nothing ? "$(length(ts_names)) entries" : "null")")
-            if atlas !== nothing && ts_names !== nothing
-                # Use the actual viewer cursor position (tracked in ReactOnMouseClickAndDrag)
-                vpos = _MEH.current_viewer_position[]
-                println("[NEW LESION] cursor_pos=$vpos → atlas_size=$(size(atlas))")
-                cx = clamp(vpos[1], 1, size(atlas, 1))
-                cy = clamp(vpos[2], 1, size(atlas, 2))
-                cz = clamp(vpos[3], 1, size(atlas, 3))
-                
-                # Direct lookup at cursor position
-                anat_val = Int(atlas[cx, cy, cz])
-                println("[NEW LESION] atlas[$cx,$cy,$cz]=$anat_val")
-                
-                # If exact voxel is unlabeled, try expanding sphere search with tissue priority
-                if anat_val <= 0
-                    candidates = Dict{Int,Int}()
-                    for radius in [1, 2, 4, 8, 16, 24, 32]
-                        for dz in -radius:radius, dy in -radius:radius, dx in -radius:radius
-                            dx*dx + dy*dy + dz*dz > radius*radius && continue
-                            nx = clamp(cx + dx, 1, size(atlas, 1))
-                            ny = clamp(cy + dy, 1, size(atlas, 2))
-                            nz = clamp(cz + dz, 1, size(atlas, 3))
-                            v = Int(atlas[nx, ny, nz])
-                            if v > 0 && haskey(ts_names, v)
-                                candidates[v] = get(candidates, v, 0) + 1
-                            end
-                        end
-                        if !isempty(candidates)
-                            LA = parentmodule(@__MODULE__).LesionAssociation
-                            best_organ = LA.pick_best_organ(candidates, ts_names)
-                            if !isempty(best_organ)
-                                for (k, v) in ts_names
-                                    if v == best_organ && haskey(candidates, k)
-                                        anat_val = k
-                                        break
-                                    end
-                                end
-                            end
-                            break
-                        end
-                    end
-                end
-                
-                organ_name = ""
-                if anat_val > 0
-                    organ_name = get(ts_names, anat_val, "")
-                elseif is_mri_new
-                    organ_name = "Prostate"
-                end
-                
-                if !isempty(organ_name)
-                    _MEH.global_organ_mapping[][new_id] = organ_name
-                    get!(_MEH.tp_organ_mapping, tp_idx_new, Dict{Int,String}())[new_id] = organ_name
-                    @info "[NEW LESION] Mapped lesion $new_id → '$organ_name' from atlas (is_mri=$is_mri_new)"
-                    entry = lookup_anatomy(organ_name)
-                    if entry !== nothing
-                        detailed = get(entry, "detailed", "")
-                        clean_disp = replace(detailed, r"\s*\(UBERON\)" => "")
-                        clean_disp = titlecase(replace(clean_disp, "_" => " "))
-                        display_name = !isempty(clean_disp) ? clean_disp : organ_name
-                    else
-                        display_name = organ_name
-                    end
-                end
-            end
-        catch e
-            @warn "Anatomy lookup for new lesion failed: $e"
-        end
-        
-        new_name = "$(new_id): $(display_name)"
-        db = copy(lesion_db[])
-        new_annot = Dict{String, Any}(
-            "_display_name" => new_name,
-            "SegmentationOrigin" => "MANUAL"
-        )
-        if entry !== nothing
-            new_annot["BaseAnatomy"] = get(entry, "detailed", "")
-            new_annot["BaseAnatomySide"] = get(entry, "side", "")
-            new_annot["LesionType"] = get(entry, "lesion_type", is_mri_new ? "Prostate" : "Organ Meta")
-            new_annot["Anatomic Location"] = get(entry, "anatomic_location", is_mri_new ? "Prostate Gland" : "")
-            new_annot["Anatomical Sublocation"] = get(entry, "anatomical_sublocation", "")
-        elseif is_mri_new
-            new_annot["BaseAnatomy"] = "prostate gland (UBERON)"
-            new_annot["LesionType"] = "Prostate"
-            new_annot["Anatomic Location"] = "Prostate Gland"
-        end
-        db[string(new_id)] = new_annot
-        lesion_db[] = db
-        opts = copy(lesion_ids[]); push!(opts, new_name)
-        is_syncing_selection[] = true
-        try
-            lesion_ids[] = opts; les_menu.options[] = opts
-            les_menu.selection[] = new_name; les_menu.i_selected[] = length(opts)
-        finally; is_syncing_selection[] = false; end
-        _skip_sync_on_lesion_change[] = true  # prevent SyncLesionEvent → no jump to center
-        active_lesion_id[] = new_name
-        current_paint_mode[] = :paint
-        btn_paint.buttoncolor[] = GRN; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BG_PNL
-        empty!(_MASK_IDS_CACHE)
-        empty!(_cached_lesion_ids)
-        empty!(_organ_classification_cache)
-        # Activate painting and show the new lesion (or all lesions if in multi mode)
-        if _MEH.is_single_lesion_mode[]
-            put!(channel, ShowSingleLesionEvent(new_id))
-        else
-            put!(channel, ShowSingleLesionEvent(0))
-        end
-        _MEH.current_active_lesion_id[] = new_id
-        put!(channel, PaintValEvent(new_id, true))
-        println("[NEW LESION] Created lesion $new_id, paint mode active, val=$new_id (single_mode=$(_MEH.is_single_lesion_mode[]))")
-        flush(stdout)
-    end
-    on(btn_paint.clicks) do _
-        current_paint_mode[] = :paint
-        btn_paint.buttoncolor[] = GRN; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BG_PNL
-        empty!(_MASK_IDS_CACHE)
-        empty!(_cached_lesion_ids)
-        empty!(_organ_classification_cache)
-        val = (p = parse_lesion_id(active_lesion_id[])) !== nothing ? p : 1
-        if _MEH.is_single_lesion_mode[]
-            put!(channel, ShowSingleLesionEvent(val))
-        else
-            put!(channel, ShowSingleLesionEvent(0))
-        end
-        _MEH.current_active_lesion_id[] = val
-        put!(channel, PaintValEvent(val, true))
-        _MEH.set_workflow_state!(_MEH.ScientificWorkflow.WF_EDIT_MASK)
-    end
-    on(btn_erase.clicks) do _
-        current_paint_mode[] = :erase
-        btn_paint.buttoncolor[] = BG_PNL; btn_erase.buttoncolor[] = RED_BTN; btn_view_mode.buttoncolor[] = BG_PNL
-        empty!(_MASK_IDS_CACHE)
-        empty!(_cached_lesion_ids)
-        empty!(_organ_classification_cache)
-        put!(channel, PaintValEvent(0, true))
-        _MEH.set_workflow_state!(_MEH.ScientificWorkflow.WF_EDIT_MASK)
-    end
-    on(btn_view_mode.clicks) do _
-        current_paint_mode[] = :view
-        btn_paint.buttoncolor[] = BG_PNL; btn_erase.buttoncolor[] = BG_PNL; btn_view_mode.buttoncolor[] = BLU_BTN
-        put!(channel, PaintValEvent(-1, false))
-        _MEH.set_workflow_state!(_MEH.ScientificWorkflow.WF_LESION_REVIEW)
-    end
-    
-    # Row 2: Brush slider + Move button (fixed height to prevent slider overlap)
-    seg_r2 = nr!()
-    Label(g[seg_r2, 1], "Brush:", halign=:right, fontsize=10, color=LBL_FG)
-    slider_brush = Slider(g[seg_r2, 2:3], range = 1:20, startvalue = 1)
-    on(slider_brush.value) do val; put!(channel, ChangeBrushSizeEvent(val)) end
-    btn_move_lesion = Button(g[seg_r2, 4], label = "Move", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    rowsize!(g, seg_r2, Fixed(30)); register_fixed_row!(seg_r2, 30)
-    move_lesion_active = Ref(false)
-    on(btn_move_lesion.clicks) do _
-        move_lesion_active[] = !move_lesion_active[]
-        btn_move_lesion.buttoncolor[] = move_lesion_active[] ? GRN : BG_PNL
-        put!(channel, ToggleMoveLesionModeEvent(move_lesion_active[]))
-    end
-    
-    # Row 3: Algorithm dropdown (fixed height for Menu dropdown clearance)
-    seg_r3 = nr!()
-    Label(g[seg_r3, 1], "AI:", halign=:right, fontsize=10, color=LBL_FG)
-    algo_combo = Menu(g[seg_r3, 2:3], options = ["HELPNet (AI)", "NNInteractive", "Heat-GDT", "Traditional (PETTumor)"], default = "HELPNet (AI)", fontsize = 10); _register_menu!(algo_combo)
-    btn_add_ai = Button(g[seg_r3, 4], label = "Run AI", buttoncolor = GRN, labelcolor = TXT, fontsize = 10)
-    rowsize!(g, seg_r3, Fixed(30)); register_fixed_row!(seg_r3, 30)
-
-    # Row 3b: Heat-GDT parameters (only visible when Heat-GDT is selected)
-    seg_r3b = nr!()
-    Label(g[seg_r3b, 1], "θ:", halign=:right, fontsize=10, color=LBL_FG)
-    slider_heatgdt_theta = Slider(g[seg_r3b, 2], range = 0.0001:0.0001:0.01, startvalue = 0.001)
-    Label(g[seg_r3b, 3], "K:", halign=:right, fontsize=10, color=LBL_FG)
-    slider_heatgdt_K = Slider(g[seg_r3b, 4], range = 10:5:100, startvalue = 40)
-    rowsize!(g, seg_r3b, Fixed(30)); register_fixed_row!(seg_r3b, 30)
-    
-    seg_r3c = nr!()
-    Label(g[seg_r3c, 1], "Speed:", halign=:right, fontsize=10, color=LBL_FG)
-    init_ramp_speed = Float32(get(display_cfg, "heatgdt_ramp_speed", 12.0))
-    _MEH.HEAT_DISPLAY_RAMP_RATE[] = init_ramp_speed
-    slider_heatgdt_ramp = Slider(g[seg_r3c, 2:4], range = 1.0:0.5:25.0, startvalue = init_ramp_speed)
-    rowsize!(g, seg_r3c, Fixed(30)); register_fixed_row!(seg_r3c, 30)
-
-    on(slider_heatgdt_theta.value) do val
-        _MEH.heatgdt_theta[] = Float32(val)
-    end
-    on(slider_heatgdt_K.value) do val
-        _MEH.heatgdt_K[] = Int(val)
-    end
-    on(slider_heatgdt_ramp.value) do val
-        v = Float32(val)
-        _MEH.HEAT_DISPLAY_RAMP_RATE[] = v
-        display_cfg["heatgdt_ramp_speed"] = v
-        next!(_display_cfg_save_subject, true)
-    end
-
-    seg_r3d = nr!()
-    Label(g[seg_r3d, 1], "Size ±:", halign=:right, fontsize=10, color=LBL_FG)
-    slider_heatgdt_posthoc = Slider(g[seg_r3d, 2:3], range = -5:0.1:5, startvalue = 0.0)
-    btn_posthoc_reset = Button(g[seg_r3d, 4], label="Reset", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=10)
-    rowsize!(g, seg_r3d, Fixed(30)); register_fixed_row!(seg_r3d, 30)
-
-    # Row 3e: Edge guidance modality dropdown
-    seg_r3e = nr!()
-    Label(g[seg_r3e, 1], "Edge:", halign=:right, fontsize=10, color=LBL_FG)
-    menu_heatgdt_edge = Menu(g[seg_r3e, 2:4], options = ["Combined", "CT Only", "PET Only"], default = "Combined", fontsize = 10); _register_menu!(menu_heatgdt_edge)
-    rowsize!(g, seg_r3e, Fixed(30)); register_fixed_row!(seg_r3e, 30)
-
-    on(menu_heatgdt_edge.selection) do sel
-        mod_sym = if sel == "CT Only"
-            :ct_only
-        elseif sel == "PET Only"
-            :pet_only
-        else
-            :combined
-        end
-        _MEH.switch_heatgdt_edge_modality!(mod_sym)
-    end
-
-    # Row 3f: Adaptive local contrast toggle & sensitivity slider
-    seg_r3f = nr!()
-    Label(g[seg_r3f, 1], "Adapt:", halign=:right, fontsize=10, color=LBL_FG)
-    cb_adaptive = Toggle(g[seg_r3f, 2], active = true)
-    Label(g[seg_r3f, 3], "Sens:", halign=:right, fontsize=10, color=LBL_FG)
-    slider_sens = Slider(g[seg_r3f, 4], range = 0.5:0.1:2.0, startvalue = 1.0)
-    rowsize!(g, seg_r3f, Fixed(30)); register_fixed_row!(seg_r3f, 30)
-
-    on(cb_adaptive.active) do is_act
-        _MEH.heatgdt_adaptive_contrast[] = is_act
-    end
-    on(slider_sens.value) do val
-        _MEH.heatgdt_sensitivity[] = Float32(val)
-    end
-
-    seg_r3_tt = nr!()
-    Label(g[seg_r3_tt, 1:4], "θ controls sensitivity (size). K controls boundary smoothness.", halign=:center, fontsize=9, color=SUBTXT)
-    rowsize!(g, seg_r3_tt, Fixed(15)); register_fixed_row!(seg_r3_tt, 15)
-
-    on(slider_heatgdt_posthoc.value) do val
-        # val is in [-5, 5]. We map this to a multiplier for theta
-        # If val > 0, we shrink the lesion by INCREASING theta
-        # If val < 0, we grow the lesion by DECREASING theta
-        base_theta = _MEH.heatgdt_theta[]
-        new_theta = Float32(base_theta * (10 ^ (val / 3.0)))
-        
-        @async try
-            put!(channel, MakieEvents.HeatGDTPosthocSizeEvent(new_theta))
-        catch e
-            @warn "Failed to dispatch posthoc size event: $e"
-        end
-    end
-
-    on(btn_posthoc_reset.clicks) do _
-        set_close_to!(slider_heatgdt_posthoc, 0.0)
-    end
-
-    # Show/hide Heat-GDT params based on algorithm selection
-    heatgdt_row_visible = Observable(false)
-    on(algo_combo.selection) do sel
-        heatgdt_row_visible[] = (sel == "Heat-GDT")
-        rowsize!(g, seg_r3b, Fixed(heatgdt_row_visible[] ? 30 : 0))
-        rowsize!(g, seg_r3c, Fixed(heatgdt_row_visible[] ? 30 : 0))
-        rowsize!(g, seg_r3d, Fixed(heatgdt_row_visible[] ? 30 : 0))
-        rowsize!(g, seg_r3e, Fixed(heatgdt_row_visible[] ? 30 : 0))
-        rowsize!(g, seg_r3f, Fixed(heatgdt_row_visible[] ? 30 : 0))
-        rowsize!(g, seg_r3_tt, Fixed(heatgdt_row_visible[] ? 15 : 0))
-        # Enable/disable Heat-GDT mouse-hold interaction mode
-        _ROMCAD._heatgdt_mode_active[] = (sel == "Heat-GDT")
-    end
-    rowsize!(g, seg_r3b, Fixed(0))  # Hidden by default
-    rowsize!(g, seg_r3c, Fixed(0))  # Hidden by default
-    rowsize!(g, seg_r3d, Fixed(0))  # Hidden by default
-    rowsize!(g, seg_r3e, Fixed(0))  # Hidden by default
-    rowsize!(g, seg_r3f, Fixed(0))  # Hidden by default
-    rowsize!(g, seg_r3_tt, Fixed(0))  # Hidden by default
-    on(btn_add_ai.clicks) do _
-        @async try
-            put!(channel, AddAutoPetEvent(algo_combo.selection[], channel))
-        catch e
-            @warn "Failed to dispatch AddAutoPetEvent: $e"
-        end
-    end
-
-    # Row 4: Segmentation origin & Revert to AI button
-    seg_r_rev = nr!()
-    Label(g[seg_r_rev, 1:2], @lift("Origin: $(string($current_seg_origin))"), fontsize = 10, color = SUBTXT, halign = :left)
-    btn_revert_ai = Button(g[seg_r_rev, 3:4], label = "Revert to AI", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    rowsize!(g, seg_r_rev, Fixed(28)); register_fixed_row!(seg_r_rev, 28)
-    
-    on(btn_revert_ai.clicks) do _
-        active_str = active_lesion_id[]
-        lid = parse_lesion_id(active_str)
-        if lid !== nothing
-            put!(channel, RevertToAIEvent(lid, _MEH.current_tp_index[]))
-        end
-    end
-
-    # Row 5: AI status (fixed height)
-    seg_r4 = nr!()
-    Label(g[seg_r4, 1:4], @lift(string($(_MEH.ai_status_text))),
-        fontsize=10, color=RGBAf(0.7, 0.9, 0.7, 1.0), halign=:center)
-    rowsize!(g, seg_r4, Fixed(20)); register_fixed_row!(seg_r4, 20)
-
-    end_section!(sec_seg)
 
     # ── Measurements Section ─────────────────────────────────────────────────
     sec_meas = begin_section!("Measurements"; default_open=false)
@@ -11952,6 +11979,17 @@ function create_metadata_window(
     _lmw_observables[:btn_paint] = btn_paint
     _lmw_observables[:btn_erase] = btn_erase
     _lmw_observables[:btn_revert_ai] = btn_revert_ai
+    _lmw_observables[:btn_edge_both] = btn_edge_both
+    _lmw_observables[:btn_edge_ct] = btn_edge_ct
+    _lmw_observables[:btn_edge_pet] = btn_edge_pet
+    _lmw_observables[:open_sec_seg!] = () -> begin
+        if !sec_seg[1][]
+            sec_seg[4].clicks[] = sec_seg[4].clicks[] + 1
+        end
+    end
+    _lmw_observables[:scroll_to_top!] = () -> begin
+        _apply_scroll!(0.0f0)
+    end
     _lmw_observables[:menu_tp_single] = menu_tp_single
     _lmw_observables[:obs_tp] = menu_tp_single.selection
     _lmw_observables[:current_tp] = menu_tp_single.selection
@@ -11977,7 +12015,8 @@ function create_metadata_window(
         no_ct_toggle,
         btn_prev, btn_next, btn_next_unreviewed, btn_ln_validation,
         btn_accept, btn_reject, btn_correct,
-        btn_paint, btn_erase, btn_revert_ai,
+        btn_new_lesion, btn_paint, btn_erase, btn_view_mode, btn_revert_ai,
+        btn_edge_both, btn_edge_ct, btn_edge_pet,
         btn_pt, btn_nt, btn_m2, btn_fit, btn_ax, btn_cor, btn_sag, btn_cv, btn_mri_main, btn_mri_comp, btn_ps, btn_ns,
         btn_xnat_login, btn_xnat_prev, btn_xnat_save, btn_xnat_next, btn_xnat_preproc
     ]
