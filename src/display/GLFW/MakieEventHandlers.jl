@@ -401,7 +401,7 @@ function start_inference_worker()
                     mask = InferenceClient.run_heatgdt(
                         job.ct_vol, job.pet_vol, job.points_vol,
                         job.cx, job.cy, job.cz;
-                        K=K_val, theta=theta_val)
+                        K=K_val, theta=theta_val, spacing=job.spacing)
                 else
                     @debug "[AI Worker] WARNING: Unknown algorithm: $(job.algorithm)"
                     set_ai_status!("[Warning] Unknown algorithm: $(job.algorithm)")
@@ -6559,14 +6559,22 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
     
     # Seed the GPU heat field at cursor position (no diffusion steps yet)
     try
-        println("[Heat-GDT START] Calling seed_only! at ($cx,$cy,$cz)..."); flush(stdout)
-        VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, cx, cy, cz; seed_radius=1)
+        ct_spacing = try
+            stateObjects[1].onScrollData.dataToScrollDims.voxelSize
+        catch
+            (1.0, 1.0, 1.0)
+        end
+        if any(s <= 0 for s in ct_spacing)
+            ct_spacing = (1.0, 1.0, 1.0)
+        end
+        println("[Heat-GDT START] Calling seed_only! at ($cx,$cy,$cz) with spacing=$ct_spacing..."); flush(stdout)
+        VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, cx, cy, cz; seed_radius=1, spacing=ct_spacing)
         set_ai_status!("[Heat-GDT GPU] Growing from ($cx,$cy,$cz)...")
         println("[Heat-GDT START] seed_only! SUCCESS — GPU diffusion active"); flush(stdout)
         
         # Run initial steps immediately so even a very short click produces a visible area
         theta_val = heatgdt_theta[]
-        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 10; theta=theta_val, copy_box_to_cpu=false)
+        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 10; theta=theta_val, copy_box_to_cpu=false, spacing=ct_spacing)
         _vk_heat_total_steps[] += 10
         
         # ── Display theta ramp: at t=0, start with high theta so only hot center shows ──

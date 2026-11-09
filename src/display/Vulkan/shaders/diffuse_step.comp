@@ -17,6 +17,7 @@ layout(push_constant) uniform PushConstants {
     int   seed_y;
     ivec4 box_min;    // xyz = min bounding box voxel, w = seed_z
     ivec4 box_max;    // xyz = max bounding box voxel, w = seed_radius
+    vec4  inv_d2;     // xyz = 1/(dx²), 1/(dy²), 1/(dz²) normalized, w = unused
 } pc;
 
 void main() {
@@ -61,23 +62,21 @@ void main() {
     float D_zp = 0.5 * (D_c + imageLoad(img_D, p_zp).r);
     float D_zm = 0.5 * (D_c + imageLoad(img_D, p_zm).r);
 
-    // Net flux divergence (optimized to reduce ALU instructions)
-    float sum_D = D_xp + D_xm + D_yp + D_ym + D_zp + D_zm;
-    float flux = D_xp * u_xp
-               + D_xm * u_xm
-               + D_yp * u_yp
-               + D_ym * u_ym
-               + D_zp * u_zp
-               + D_zm * u_zm
-               - u_c * sum_D;
+    // Net flux divergence weighted by anisotropic voxel spacing (w_x = 1/dx^2, etc.)
+    float wx = pc.inv_d2.x;
+    float wy = pc.inv_d2.y;
+    float wz = pc.inv_d2.z;
+    float flux = wx * (D_xp * (u_xp - u_c) + D_xm * (u_xm - u_c))
+               + wy * (D_yp * (u_yp - u_c) + D_ym * (u_ym - u_c))
+               + wz * (D_zp * (u_zp - u_c) + D_zm * (u_zm - u_c));
 
     // Explicit Euler update
     float u_next = u_c + pc.dt * flux;
 
-    // Continuous heat source: keep seed region at 1.0
+    // Continuous heat source: keep seed region at 1.0 (scaled to physical distance)
     float r = float(pc.box_max.w);
     if (r > 0.0) {
-        vec3 diff = vec3(pos) - vec3(pc.seed_x, pc.seed_y, pc.box_min.w);
+        vec3 diff = (vec3(pos) - vec3(pc.seed_x, pc.seed_y, pc.box_min.w)) * inversesqrt(max(pc.inv_d2.xyz, vec3(1e-6)));
         if (length(diff) <= max(r, 0.5)) {
             u_next = 1.0;
         }

@@ -24,6 +24,21 @@ export seed_only!, run_incremental_steps!
 
 # ─── Push Constants ──────────────────────────────────────────────────────
 
+struct SeedInitPC
+    seed_x::Int32
+    seed_y::Int32
+    seed_z::Int32
+    seed_radius::Int32
+    box_min_x::Int32
+    box_min_y::Int32
+    box_min_z::Int32
+    box_min_w::Int32
+    inv_dx2::Float32
+    inv_dy2::Float32
+    inv_dz2::Float32
+    _pad::Float32
+end
+
 struct DiffuseStepPC
     dt::Float32
     use_box::Int32
@@ -37,6 +52,10 @@ struct DiffuseStepPC
     box_max_y::Int32
     box_max_z::Int32
     box_max_w::Int32
+    inv_dx2::Float32
+    inv_dy2::Float32
+    inv_dz2::Float32
+    _pad::Float32
 end
 
 struct ExtractMaskPC
@@ -142,6 +161,7 @@ mutable struct HeatDiffusionState
     seed_radius::Int
     current_box_min::NTuple{3, Int}
     current_box_max::NTuple{3, Int}
+    spacing::NTuple{3, Float64}
     
     # Dummy sampler for DescriptorImageInfo
     dummy_sampler::Sampler
@@ -168,8 +188,29 @@ mutable struct HeatDiffusionState
         state.seed_radius = 0
         state.current_box_min = (1, 1, 1)
         state.current_box_max = (1, 1, 1)
+        state.spacing = (1.0, 1.0, 1.0)
         return state
     end
+end
+
+"""
+    _compute_spacing_weights(spacing) -> (inv_dx2, inv_dy2, inv_dz2)
+
+Computes normalized inverse-squared spacing weights (w_x, w_y, w_z) such that
+the smallest voxel dimension has weight 1.0 and coarser dimensions (e.g. slice thickness)
+have weights (s_min / s_d)^2 <= 1.0. This guarantees unconditional numerical stability
+for the explicit Euler heat diffusion step while properly scaling cross-slice flux.
+"""
+function _compute_spacing_weights(spacing::NTuple{3, Real})
+    dx, dy, dz = Float32(spacing[1]), Float32(spacing[2]), Float32(spacing[3])
+    if dx <= 0.0f0 || dy <= 0.0f0 || dz <= 0.0f0 || !isfinite(dx) || !isfinite(dy) || !isfinite(dz)
+        return 1.0f0, 1.0f0, 1.0f0
+    end
+    min_sp = min(dx, dy, dz)
+    inv_dx2 = (min_sp / dx)^2
+    inv_dy2 = (min_sp / dy)^2
+    inv_dz2 = (min_sp / dz)^2
+    return inv_dx2, inv_dy2, inv_dz2
 end
 
 # ─── Shader loading ──────────────────────────────────────────────────────
@@ -318,12 +359,12 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     state.dsl_slice = unwrap(create_descriptor_set_layout(dev, DescriptorSetLayoutCreateInfo(bindings_extract)))
     
     # 4. Create pipeline layouts with push constants
-    # seed_init: push 2x ivec4 (32 bytes)
-    pc_seed = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, 32)]
+    # seed_init: push 2x ivec4 + vec4 (48 bytes)
+    pc_seed = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, 48)]
     state.layout_seed_init = unwrap(create_pipeline_layout(dev, PipelineLayoutCreateInfo([state.dsl_seed_init], pc_seed)))
     
-    # diffuse_step: push float dt + box... (48 bytes)
-    pc_diffuse = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, 48)]
+    # diffuse_step: push float dt + box... + inv_d2 (64 bytes)
+    pc_diffuse = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, 64)]
     state.layout_diffuse_step = unwrap(create_pipeline_layout(dev, PipelineLayoutCreateInfo([state.dsl_diffuse_step], pc_diffuse)))
     
     # extract_mask: push float theta + tau + box... (48 bytes)
@@ -612,9 +653,13 @@ Returns nothing — the mask is stored in `state.img_mask` on the GPU.
 Use `read_mask_to_cpu` to retrieve it.
 """
 function run_heat_diffusion!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y::Int, seed_z::Int;
-                              K::Int=200, dt::Float32=0.16f0, theta::Float32=0.001044f0, tau::Float32=0.0001f0)
+                              K::Int=200, dt::Float32=0.16f0, theta::Float32=0.001044f0, tau::Float32=0.0001f0,
+                              spacing::NTuple{3, Real}=state.spacing)
     @assert state.is_initialized "Heat diffusion not initialized"
     @assert state.diffusivity_uploaded "Diffusivity not uploaded"
+    
+    state.spacing = (Float64(spacing[1]), Float64(spacing[2]), Float64(spacing[3]))
+    inv_dx2, inv_dy2, inv_dz2 = _compute_spacing_weights(state.spacing)
     
     dev = ctx.device
     w, h, d = state.width, state.height, state.depth
@@ -650,9 +695,14 @@ function run_heat_diffusion!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y
     cmd_bind_pipeline(cmd, PIPELINE_BIND_POINT_COMPUTE, state.pipeline_seed_init)
     cmd_bind_descriptor_sets(cmd, PIPELINE_BIND_POINT_COMPUTE, state.layout_seed_init, 0, [state.ds_seed_ping], [])
     
-    seed_data = Int32[seed_x - 1, seed_y - 1, seed_z - 1, 0]
-    GC.@preserve seed_data begin
-        cmd_push_constants(cmd, state.layout_seed_init, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(seed_data), Ptr{Cvoid}(pointer(seed_data)))
+    pc_seed = SeedInitPC(
+        Int32(seed_x - 1), Int32(seed_y - 1), Int32(seed_z - 1), Int32(0),
+        Int32(0), Int32(0), Int32(0), Int32(0),
+        inv_dx2, inv_dy2, inv_dz2, 0.0f0
+    )
+    ref_seed = Ref(pc_seed)
+    GC.@preserve ref_seed begin
+        cmd_push_constants(cmd, state.layout_seed_init, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc_seed), Base.unsafe_convert(Ptr{Cvoid}, ref_seed))
     end
     cmd_dispatch(cmd, gx, gy, gz)
     
@@ -668,7 +718,8 @@ function run_heat_diffusion!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y
     pc_diffuse = DiffuseStepPC(
         dt, Int32(0), Int32(seed_x - 1), Int32(seed_y - 1),
         Int32(0), Int32(0), Int32(0), Int32(seed_z - 1),
-        Int32(0), Int32(0), Int32(0), Int32(3) # default seed radius 3
+        Int32(0), Int32(0), Int32(0), Int32(3), # default seed radius 3
+        inv_dx2, inv_dy2, inv_dz2, 0.0f0
     )
     
     for k in 1:K
@@ -821,15 +872,19 @@ end
 # ─── Incremental (interactive) diffusion ─────────────────────────────────
 
 """
-    seed_only!(state, ctx, seed_x, seed_y, seed_z)
+    seed_only!(state, ctx, seed_x, seed_y, seed_z; seed_radius=3, spacing=state.spacing)
 
 Initialize the heat field with a single seed point at (seed_x, seed_y, seed_z)
 without running any diffusion steps. Call `run_incremental_steps!` afterwards
 to add diffusion steps incrementally (e.g., per-frame during a mouse hold).
 """
-function seed_only!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y::Int, seed_z::Int; seed_radius::Int=3)
+function seed_only!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y::Int, seed_z::Int;
+                     seed_radius::Int=3, spacing::NTuple{3, Real}=state.spacing)
     @assert state.is_initialized "Heat diffusion not initialized"
     @assert state.diffusivity_uploaded "Diffusivity not uploaded"
+    
+    state.spacing = (Float64(spacing[1]), Float64(spacing[2]), Float64(spacing[3]))
+    inv_dx2, inv_dy2, inv_dz2 = _compute_spacing_weights(state.spacing)
     
     dev = ctx.device
     w, h, d = state.width, state.height, state.depth
@@ -886,12 +941,14 @@ function seed_only!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y::Int, se
     bh = ymax - ymin + 1
     bd = zmax - zmin + 1
     
-    seed_data = Int32[
-        seed_x - 1, seed_y - 1, seed_z - 1, seed_radius,
-        xmin - 1, ymin - 1, zmin - 1, 0
-    ]
-    GC.@preserve seed_data begin
-        cmd_push_constants(cmd, state.layout_seed_init, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(seed_data), Ptr{Cvoid}(pointer(seed_data)))
+    pc_seed = SeedInitPC(
+        Int32(seed_x - 1), Int32(seed_y - 1), Int32(seed_z - 1), Int32(seed_radius),
+        Int32(xmin - 1), Int32(ymin - 1), Int32(zmin - 1), Int32(0),
+        inv_dx2, inv_dy2, inv_dz2, 0.0f0
+    )
+    ref_seed = Ref(pc_seed)
+    GC.@preserve ref_seed begin
+        cmd_push_constants(cmd, state.layout_seed_init, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc_seed), Base.unsafe_convert(Ptr{Cvoid}, ref_seed))
     end
     cmd_dispatch(cmd, cld(bw, 8), cld(bh, 8), cld(bd, 8))
     
@@ -916,7 +973,7 @@ function seed_only!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y::Int, se
 end
 
 """
-    run_incremental_steps!(state, ctx, n_steps; dt=0.16f0, theta=0.001f0, tau=0.0001f0)
+    run_incremental_steps!(state, ctx, n_steps; dt=0.16f0, theta=0.001f0, tau=0.0001f0, copy_box_to_cpu=false, spacing=state.spacing)
 
 Runs `n_steps` additional diffusion steps on the GPU without re-seeding,
 continuing from whichever ping/pong buffer currently holds the latest data.
@@ -924,10 +981,14 @@ After the diffusion steps, automatically runs the extract_mask shader so
 `read_mask_to_cpu` can be called immediately.
 """
 function run_incremental_steps!(state::HeatDiffusionState, ctx, n_steps::Int;
-                                 dt::Float32=0.16f0, theta::Float32=0.001f0, tau::Float32=0.0001f0, copy_box_to_cpu::Bool=false)
+                                 dt::Float32=0.16f0, theta::Float32=0.001f0, tau::Float32=0.0001f0, copy_box_to_cpu::Bool=false,
+                                 spacing::NTuple{3, Real}=state.spacing)
     @assert state.is_initialized "Heat diffusion not initialized"
     @assert state.diffusivity_uploaded "Diffusivity not uploaded"
     n_steps <= 0 && !copy_box_to_cpu && return
+    
+    state.spacing = (Float64(spacing[1]), Float64(spacing[2]), Float64(spacing[3]))
+    inv_dx2, inv_dy2, inv_dz2 = _compute_spacing_weights(state.spacing)
     
     dev = ctx.device
     w, h, d = state.width, state.height, state.depth
@@ -982,7 +1043,8 @@ function run_incremental_steps!(state::HeatDiffusionState, ctx, n_steps::Int;
     pc_diffuse = DiffuseStepPC(
         dt, Int32(1), Int32(state.seed_x - 1), Int32(state.seed_y - 1),
         box_min_glsl[1], box_min_glsl[2], box_min_glsl[3], Int32(state.seed_z - 1),
-        box_max_glsl[1], box_max_glsl[2], box_max_glsl[3], Int32(state.seed_radius)
+        box_max_glsl[1], box_max_glsl[2], box_max_glsl[3], Int32(state.seed_radius),
+        inv_dx2, inv_dy2, inv_dz2, 0.0f0
     )
     
     # ── Diffusion steps (continue from current ping/pong state) ──

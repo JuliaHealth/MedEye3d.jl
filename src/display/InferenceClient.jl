@@ -901,7 +901,8 @@ Returns a binary `Array{UInt8, 3}` mask (64³ patch coordinates), or `nothing` o
 """
 function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
                      points_vol::Array{Float32,3}, cx::Int, cy::Int, cz::Int;
-                     K::Int=200, dt::Float32=0.16f0, theta::Float32=0.001044f0, tau::Float32=0.0001f0)
+                     K::Int=200, dt::Float32=0.16f0, theta::Float32=0.001044f0, tau::Float32=0.0001f0,
+                     spacing::NTuple{3,Real}=(1.0, 1.0, 1.0))
     
     # Extract 64³ diffusivity patch
     D_patch = if _heatgdt_diffusivity[] !== nothing
@@ -989,6 +990,13 @@ function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
         D_zp = 0.5f0 .* (D_gpu .+ D_zp_nbr)
         D_zm = 0.5f0 .* (D_gpu .+ D_zm_nbr)
         
+        # Normalized inverse-squared spacing weights for anisotropic grids
+        dx, dy, dz = Float32(spacing[1]), Float32(spacing[2]), Float32(spacing[3])
+        min_sp = (dx > 0 && dy > 0 && dz > 0) ? min(dx, dy, dz) : 1.0f0
+        wx = (dx > 0) ? (min_sp / dx)^2 : 1.0f0
+        wy = (dy > 0) ? (min_sp / dy)^2 : 1.0f0
+        wz = (dz > 0) ? (min_sp / dz)^2 : 1.0f0
+
         # Run heat diffusion (K steps of the PDE: ∂u/∂t = ∇·(D∇u))
         u = seed_gpu
         for k in 1:K
@@ -1003,12 +1011,9 @@ function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
             u_zp = u_padded[2:N+1, 2:N+1, 3:N+2, :]
             u_zm = u_padded[2:N+1, 2:N+1, 1:N,   :]
             
-            flux = D_xp .* (u_xp .- u) .+
-                   D_xm .* (u_xm .- u) .+
-                   D_yp .* (u_yp .- u) .+
-                   D_ym .* (u_ym .- u) .+
-                   D_zp .* (u_zp .- u) .+
-                   D_zm .* (u_zm .- u)
+            flux = wx .* (D_xp .* (u_xp .- u) .+ D_xm .* (u_xm .- u)) .+
+                   wy .* (D_yp .* (u_yp .- u) .+ D_ym .* (u_ym .- u)) .+
+                   wz .* (D_zp .* (u_zp .- u) .+ D_zm .* (u_zm .- u))
             u = u .+ dt .* flux
         end
         

@@ -10,6 +10,7 @@ layout(set = 0, binding = 0, r32f) uniform writeonly image3D img_u;
 layout(push_constant) uniform PushConstants {
     ivec4 seed_pos;  // xyz = seed voxel coordinates, w = seed_radius (in voxels)
     ivec4 box_min;   // xyz = min bounding box voxel
+    vec4  inv_d2;    // xyz = 1/(dx²), 1/(dy²), 1/(dz²) normalized, w = unused
 } pc;
 
 void main() {
@@ -20,7 +21,7 @@ void main() {
 
     float r = float(pc.seed_pos.w);
     float val = 0.0;
-    vec3 diff = vec3(pos - pc.seed_pos.xyz);
+    vec3 diff = vec3(pos - pc.seed_pos.xyz) * inversesqrt(max(pc.inv_d2.xyz, vec3(1e-6)));
     float d = length(diff);
     if (d <= max(r, 0.5)) {
         val = 1.0;

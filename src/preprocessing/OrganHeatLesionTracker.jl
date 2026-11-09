@@ -383,7 +383,8 @@ function grow_heat_kernel_lesion(diffusivity::Array{Float32, 3},
                                  target_volume_voxels::Int;
                                  patch_size::Int=64,
                                  K::Union{Int, Nothing}=nothing,
-                                 dt::Float32=0.16f0)
+                                 dt::Float32=0.16f0,
+                                 spacing::NTuple{3, Real}=(1.0, 1.0, 1.0))
     nx_full, ny_full, nz_full = size(diffusivity)
     
     # Choose patch size and K dynamically scaled to target volume (matching optimal K=280 sweep)
@@ -450,6 +451,13 @@ function grow_heat_kernel_lesion(diffusivity::Array{Float32, 3},
     D_zp[(D_patch .== 0.0f0) .| (D_pad[2:px+1, 2:py+1, 3:pz+2] .== 0.0f0)] .= 0.0f0
     D_zm[(D_patch .== 0.0f0) .| (D_pad[2:px+1, 2:py+1, 1:pz]   .== 0.0f0)] .= 0.0f0
 
+    # Normalized inverse-squared spacing weights
+    dx, dy, dz = Float32(spacing[1]), Float32(spacing[2]), Float32(spacing[3])
+    min_sp = (dx > 0 && dy > 0 && dz > 0) ? min(dx, dy, dz) : 1.0f0
+    wx = (dx > 0) ? (min_sp / dx)^2 : 1.0f0
+    wy = (dy > 0) ? (min_sp / dy)^2 : 1.0f0
+    wz = (dz > 0) ? (min_sp / dz)^2 : 1.0f0
+
     # Run diffusion PDE steps
     for k in 1:effective_K
         u_pad = _replicate_pad_3d(u)
@@ -460,12 +468,9 @@ function grow_heat_kernel_lesion(diffusivity::Array{Float32, 3},
         u_zp = u_pad[2:px+1, 2:py+1, 3:pz+2]
         u_zm = u_pad[2:px+1, 2:py+1, 1:pz]
 
-        flux = D_xp .* (u_xp .- u) .+
-               D_xm .* (u_xm .- u) .+
-               D_yp .* (u_yp .- u) .+
-               D_ym .* (u_ym .- u) .+
-               D_zp .* (u_zp .- u) .+
-               D_zm .* (u_zm .- u)
+        flux = wx .* (D_xp .* (u_xp .- u) .+ D_xm .* (u_xm .- u)) .+
+               wy .* (D_yp .* (u_yp .- u) .+ D_ym .* (u_ym .- u)) .+
+               wz .* (D_zp .* (u_zp .- u) .+ D_zm .* (u_zm .- u))
         u .+= dt .* flux
         u[D_patch .== 0.0f0] .= 0.0f0
     end
