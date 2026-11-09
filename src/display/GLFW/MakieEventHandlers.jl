@@ -246,6 +246,7 @@ const heatgdt_K = Ref{Int}(40)
 const heatgdt_theta = Ref{Float32}(0.001f0)
 const heatgdt_edge_modality = Observable{Symbol}(:combined)  # :combined, :ct_only, :pet_only
 const heatgdt_adaptive_contrast = Ref{Bool}(true)
+const heatgdt_directional_normalization = Ref{Bool}(true)
 const heatgdt_sensitivity = Ref{Float32}(1.0f0)
 const heatgdt_current_loaded_modality = Ref{Symbol}(:combined)
 const heatgdt_one_click_mode = Observable{Bool}(true)  # Default: One-Click mode enabled (single click to segment)
@@ -480,6 +481,7 @@ function start_inference_worker()
                     K_val = heatgdt_K[]
                     theta_val = heatgdt_theta[]
                     s_boost = 1.0f0
+                    edge_params = nothing
                     if heatgdt_adaptive_contrast[] && InferenceClient._heatgdt_diffusivity[] !== nothing
                         mean_sp = (job.spacing[1] + job.spacing[2] + job.spacing[3]) / 3.0
                         R_phys = max(10.0, 3.0 + 2.0 * sqrt(K_val * 0.16) * mean_sp)
@@ -487,12 +489,23 @@ function start_inference_worker()
                             InferenceClient._heatgdt_diffusivity[], job.cx, job.cy, job.cz, R_phys, job.spacing;
                             sensitivity=heatgdt_sensitivity[]
                         )
+                        if heatgdt_directional_normalization[]
+                            edge_params = VulkanHeatDiffusion.compute_directional_relative_edge_params(
+                                InferenceClient._heatgdt_diffusivity[], job.cx, job.cy, job.cz, R_phys, job.spacing;
+                                sensitivity=heatgdt_sensitivity[]
+                            )
+                        else
+                            edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
+                                InferenceClient._heatgdt_diffusivity[], job.cx, job.cy, job.cz, R_phys, job.spacing;
+                                sensitivity=heatgdt_sensitivity[]
+                            )
+                        end
                     end
                     set_ai_status!("[Processing] Heat-GDT PDE solver (K=$K_val, θ=$theta_val, s_boost=$(round(s_boost, digits=2)))...")
                     mask = InferenceClient.run_heatgdt(
                         job.ct_vol, job.pet_vol, job.points_vol,
                         job.cx, job.cy, job.cz;
-                        K=K_val, theta=theta_val, spacing=job.spacing, s_boost=s_boost)
+                        K=K_val, theta=theta_val, spacing=job.spacing, s_boost=s_boost, edge_params=edge_params)
                 else
                     @debug "[AI Worker] WARNING: Unknown algorithm: $(job.algorithm)"
                     set_ai_status!("[Warning] Unknown algorithm: $(job.algorithm)")
@@ -6648,10 +6661,24 @@ function execute_one_click_heatgdt!(stateObjects::Vector{StateDataFields}, cx::I
             diff_vol, cx, cy, cz, R_phys, ct_spacing;
             sensitivity=heatgdt_sensitivity[]
         )
-        edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
-            diff_vol, cx, cy, cz, R_phys, ct_spacing;
-            sensitivity=heatgdt_sensitivity[]
-        )
+        if heatgdt_directional_normalization[]
+            edge_params = VulkanHeatDiffusion.compute_directional_relative_edge_params(
+                diff_vol, cx, cy, cz, R_phys, ct_spacing;
+                sensitivity=heatgdt_sensitivity[]
+            )
+        else
+            if heatgdt_directional_normalization[]
+                edge_params = VulkanHeatDiffusion.compute_directional_relative_edge_params(
+                    diff_vol, cx, cy, cz, R_phys, ct_spacing;
+                    sensitivity=heatgdt_sensitivity[]
+                )
+            else
+                edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
+                    diff_vol, cx, cy, cz, R_phys, ct_spacing;
+                    sensitivity=heatgdt_sensitivity[]
+                )
+            end
+        end
     end
 
     # 6. Check GPU readiness
@@ -6929,10 +6956,17 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
                 diff_vol, cx, cy, cz, R_phys, ct_spacing;
                 sensitivity=heatgdt_sensitivity[]
             )
-            edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
-                diff_vol, cx, cy, cz, R_phys, ct_spacing;
-                sensitivity=heatgdt_sensitivity[]
-            )
+            if heatgdt_directional_normalization[]
+                edge_params = VulkanHeatDiffusion.compute_directional_relative_edge_params(
+                    diff_vol, cx, cy, cz, R_phys, ct_spacing;
+                    sensitivity=heatgdt_sensitivity[]
+                )
+            else
+                edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
+                    diff_vol, cx, cy, cz, R_phys, ct_spacing;
+                    sensitivity=heatgdt_sensitivity[]
+                )
+            end
         end
 
         println("[Heat-GDT START] Calling seed_only! at ($cx,$cy,$cz) with spacing=$ct_spacing, s_boost=$s_boost, edge_params=$edge_params..."); flush(stdout)
@@ -7115,10 +7149,17 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
                         diff_vol, px, py, pz, R_phys, ct_spacing;
                         sensitivity=heatgdt_sensitivity[]
                     )
-                    edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
-                        diff_vol, px, py, pz, R_phys, ct_spacing;
-                        sensitivity=heatgdt_sensitivity[]
-                    )
+                    if heatgdt_directional_normalization[]
+                        edge_params = VulkanHeatDiffusion.compute_directional_relative_edge_params(
+                            diff_vol, px, py, pz, R_phys, ct_spacing;
+                            sensitivity=heatgdt_sensitivity[]
+                        )
+                    else
+                        edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
+                            diff_vol, px, py, pz, R_phys, ct_spacing;
+                            sensitivity=heatgdt_sensitivity[]
+                        )
+                    end
                 end
                 
                 VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, px, py, pz; seed_radius=1, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
@@ -7206,7 +7247,8 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
         
         _dbg("  Render done: $(n_panels_rendered) panels, theta=$(theta_val), total=$(round(total_ms, digits=2))ms (gpu=$(round(gpu_ms, digits=2)), render=$(round(render_ms, digits=2)))")
         
-        log_line = "[Heat-GDT GPU Tick] steps=$(steps_per_tick), total_steps=$(_vk_heat_total_steps[]), theta=$(theta_val), total=$(round(total_ms, digits=2))ms (gpu=$(round(gpu_ms, digits=2)), slice_render=$(round(render_ms, digits=2)))"
+        steps_this_tick = (dist_vox >= 2.0) ? burst_steps : steps_per_tick
+        log_line = "[Heat-GDT GPU Tick] steps=$(steps_this_tick), total_steps=$(_vk_heat_total_steps[]), theta=$(theta_val), total=$(round(total_ms, digits=2))ms (gpu=$(round(gpu_ms, digits=2)), slice_render=$(round(render_ms, digits=2)))"
         if PERF_LOG[]
             println(log_line)
         end

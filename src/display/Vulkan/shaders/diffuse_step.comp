@@ -4,8 +4,8 @@
 // Uses replicate (clamped) boundary conditions for zero normal flux.
 // Face conductivities use harmonic mean: D_face = (2 * D_c * D_nbr) / (D_c + D_nbr + 1e-7)
 // to prevent leakage across sharp and relatively strong edge barriers.
-// Local relative edge normalization decouples core diffusion speed from background soft tissue
-// and turns local boundary peaks into firm stopping walls.
+// 6-Sector Directional relative edge normalization prevents strong-edge shadowing
+// (e.g. lung-diaphragm vs liver boundary) and ensures unhindered core diffusion speed.
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
 
@@ -21,12 +21,15 @@ layout(push_constant) uniform PushConstants {
     ivec4 box_min;     // xyz = min bounding box voxel, w = seed_z
     ivec4 box_max;     // xyz = max bounding box voxel, w = seed_radius
     vec4  inv_d2;      // xyz = 1/(dx²), 1/(dy²), 1/(dz²) normalized, w = s_boost
-    vec4  edge_params; // x = E_bg, y = E_scale, z = gamma_eff, w = edge_clip
+    vec4  edge_peaks_xy;     // x=+X, y=-X, z=+Y, w=-Y
+    vec4  edge_peaks_z_meta; // x=+Z, y=-Z, z=E_bg, w=edge_clip
+    vec4  gamma_meta;        // x=gamma_eff, y=is_directional (1.0 = on), z=_pad1, w=_pad2
 } pc;
 
-float compute_effective_D(float raw_D, float u_val, float s_boost) {
+float compute_effective_D(float raw_D, ivec3 voxel_pos, float u_val, float s_boost) {
     float D = raw_D;
-    if (pc.edge_params.y > 0.0) {
+    float gamma_eff = pc.gamma_meta.x;
+    if (gamma_eff > 0.0) {
         // Invert precomputed D in [1e-5, 1.0] to raw edge E in [0, 1]
         // D = exp(-10.1 * E) => E = -ln(D) / 10.095886
         float E = -log(clamp(raw_D, 1.0e-5, 1.0)) * 0.09905025;
@@ -34,12 +37,48 @@ float compute_effective_D(float raw_D, float u_val, float s_boost) {
         if (E >= 0.35) {
             D = 1.0e-5;
         } else {
-            // Local relative edge normalization in immediate vicinity
-            float E_rel = clamp((E - pc.edge_params.x) * pc.edge_params.y, 0.0, 1.0);
-            if (E_rel >= pc.edge_params.w) {
+            float E_bg = pc.edge_peaks_z_meta.z;
+            float E_clip = pc.edge_peaks_z_meta.w;
+            float E_peak_dir;
+
+            if (pc.gamma_meta.y > 0.5) {
+                // Directional mode: quadratic partition of unity on unit sphere
+                vec3 active_seed = vec3(pc.seed_x, pc.seed_y, pc.box_min.w);
+                vec3 disp = (vec3(voxel_pos) - active_seed) * inversesqrt(max(pc.inv_d2.xyz, vec3(1e-6)));
+                float dist2 = dot(disp, disp);
+                if (dist2 < 1e-8) {
+                    // At exact seed location, average cardinal peaks
+                    E_peak_dir = 0.16666667 * (pc.edge_peaks_xy.x + pc.edge_peaks_xy.y +
+                                               pc.edge_peaks_xy.z + pc.edge_peaks_xy.w +
+                                               pc.edge_peaks_z_meta.x + pc.edge_peaks_z_meta.y);
+                } else {
+                    vec3 dir = disp * inversesqrt(dist2);
+                    // Quadratic projection (exact partition of unity: sum of weights == 1.0)
+                    float w_xp = max(dir.x, 0.0) * max(dir.x, 0.0);
+                    float w_xm = max(-dir.x, 0.0) * max(-dir.x, 0.0);
+                    float w_yp = max(dir.y, 0.0) * max(dir.y, 0.0);
+                    float w_ym = max(-dir.y, 0.0) * max(-dir.y, 0.0);
+                    float w_zp = max(dir.z, 0.0) * max(dir.z, 0.0);
+                    float w_zm = max(-dir.z, 0.0) * max(-dir.z, 0.0);
+
+                    E_peak_dir = w_xp * pc.edge_peaks_xy.x +
+                                 w_xm * pc.edge_peaks_xy.y +
+                                 w_yp * pc.edge_peaks_xy.z +
+                                 w_ym * pc.edge_peaks_xy.w +
+                                 w_zp * pc.edge_peaks_z_meta.x +
+                                 w_zm * pc.edge_peaks_z_meta.y;
+                }
+            } else {
+                // Isotropic mode
+                E_peak_dir = pc.edge_peaks_xy.x;
+            }
+
+            float E_scale = 1.0 / max(E_peak_dir - E_bg, 0.02);
+            float E_rel = clamp((E - E_bg) * E_scale, 0.0, 1.0);
+            if (E_rel >= E_clip) {
                 D = 1.0e-5;
             } else {
-                D = clamp(exp(-pc.edge_params.z * E_rel), 1.0e-5, 1.0);
+                D = clamp(exp(-gamma_eff * E_rel), 1.0e-5, 1.0);
             }
         }
     }
@@ -82,7 +121,7 @@ void main() {
     // Load center values
     float u_c = imageLoad(img_u_in, pos).r;
     float s_boost = (pc.inv_d2.w > 0.05) ? pc.inv_d2.w : 1.0;
-    float D_c = compute_effective_D(imageLoad(img_D, pos).r, u_c, s_boost);
+    float D_c = compute_effective_D(imageLoad(img_D, pos).r, pos, u_c, s_boost);
 
     // Load neighbor heat values
     float u_xp = imageLoad(img_u_in, p_xp).r;
@@ -93,12 +132,12 @@ void main() {
     float u_zm = imageLoad(img_u_in, p_zm).r;
 
     // Load neighbor diffusivities and compute effective conductivities
-    float D_xp_val = compute_effective_D(imageLoad(img_D, p_xp).r, u_xp, s_boost);
-    float D_xm_val = compute_effective_D(imageLoad(img_D, p_xm).r, u_xm, s_boost);
-    float D_yp_val = compute_effective_D(imageLoad(img_D, p_yp).r, u_yp, s_boost);
-    float D_ym_val = compute_effective_D(imageLoad(img_D, p_ym).r, u_ym, s_boost);
-    float D_zp_val = compute_effective_D(imageLoad(img_D, p_zp).r, u_zp, s_boost);
-    float D_zm_val = compute_effective_D(imageLoad(img_D, p_zm).r, u_zm, s_boost);
+    float D_xp_val = compute_effective_D(imageLoad(img_D, p_xp).r, p_xp, u_xp, s_boost);
+    float D_xm_val = compute_effective_D(imageLoad(img_D, p_xm).r, p_xm, u_xm, s_boost);
+    float D_yp_val = compute_effective_D(imageLoad(img_D, p_yp).r, p_yp, u_yp, s_boost);
+    float D_ym_val = compute_effective_D(imageLoad(img_D, p_ym).r, p_ym, u_ym, s_boost);
+    float D_zp_val = compute_effective_D(imageLoad(img_D, p_zp).r, p_zp, u_zp, s_boost);
+    float D_zm_val = compute_effective_D(imageLoad(img_D, p_zm).r, p_zm, u_zm, s_boost);
 
     // Face-averaged conductivities using harmonic mean:
     // D_face = (2.0 * D_c * D_nbr) / (D_c + D_nbr + 1.0e-7)

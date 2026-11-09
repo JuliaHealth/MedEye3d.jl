@@ -903,7 +903,7 @@ function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
                      points_vol::Array{Float32,3}, cx::Int, cy::Int, cz::Int;
                      K::Int=200, dt::Float32=0.16f0, theta::Float32=0.001044f0, tau::Float32=0.0001f0,
                      spacing::NTuple{3,Real}=(1.0, 1.0, 1.0), s_boost::Float32=1.0f0,
-                     edge_params::Union{Nothing, NTuple{4, Real}}=nothing)
+                     edge_params::Union{Nothing, NTuple{4, Real}, NTuple{10, Real}, NTuple{12, Real}, AbstractVector{<:Real}}=nothing)
     
     # Extract 64³ diffusivity patch
     D_patch = if _heatgdt_diffusivity[] !== nothing
@@ -914,14 +914,66 @@ function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
         ones(Float32, 64, 64, 64)
     end
 
-    if edge_params !== nothing && edge_params[2] > 0.0f0
-        E_bg, E_scale, gamma_eff, edge_clip = Float32.(edge_params)
+    if edge_params !== nothing
+        ep = Float32.(edge_params)
+        is_directional = length(ep) >= 10 && ep[10] > 0.5f0
+        
         E_raw = -log.(clamp.(D_patch, 1.0f-5, 1.0f0)) .* 0.09905025f0
-        E_rel = clamp.((E_raw .- E_bg) .* E_scale, 0.0f0, 1.0f0)
-        D_eff = clamp.(exp.(-gamma_eff .* E_rel), 1.0f-5, 1.0f0)
-        barrier_mask = (E_rel .>= edge_clip) .| (E_raw .>= 0.35f0)
-        D_eff[barrier_mask] .= 1.0f-5
-        D_patch = D_eff
+        D_eff = similar(D_patch)
+        
+        if is_directional
+            p_xp, p_xm, p_yp, p_ym, p_zp, p_zm = ep[1:6]
+            E_bg = ep[7]
+            edge_clip = ep[8]
+            gamma_eff = ep[9]
+            sx, sy, sz = Float32.(spacing)
+            
+            for z in 1:64, y in 1:64, x in 1:64
+                disp_x = (Float32(x) - 33.0f0) * sx
+                disp_y = (Float32(y) - 33.0f0) * sy
+                disp_z = (Float32(z) - 33.0f0) * sz
+                dist2 = disp_x^2 + disp_y^2 + disp_z^2
+                
+                E_peak_dir = if dist2 < 1.0f-8
+                    (p_xp + p_xm + p_yp + p_ym + p_zp + p_zm) / 6.0f0
+                else
+                    inv_dist = 1.0f0 / sqrt(dist2)
+                    dx = disp_x * inv_dist
+                    dy = disp_y * inv_dist
+                    dz = disp_z * inv_dist
+                    
+                    w_xp = max(dx, 0.0f0)^2
+                    w_xm = max(-dx, 0.0f0)^2
+                    w_yp = max(dy, 0.0f0)^2
+                    w_ym = max(-dy, 0.0f0)^2
+                    w_zp = max(dz, 0.0f0)^2
+                    w_zm = max(-dz, 0.0f0)^2
+                    
+                    w_xp * p_xp + w_xm * p_xm + w_yp * p_yp + w_ym * p_ym + w_zp * p_zp + w_zm * p_zm
+                end
+                
+                e_val = E_raw[x, y, z]
+                if e_val >= 0.35f0
+                    D_eff[x, y, z] = 1.0f-5
+                else
+                    e_scale = 1.0f0 / max(E_peak_dir - E_bg, 0.02f0)
+                    e_rel = clamp((e_val - E_bg) * e_scale, 0.0f0, 1.0f0)
+                    if e_rel >= edge_clip
+                        D_eff[x, y, z] = 1.0f-5
+                    else
+                        D_eff[x, y, z] = clamp(exp(-gamma_eff * e_rel), 1.0f-5, 1.0f0)
+                    end
+                end
+            end
+            D_patch = D_eff
+        elseif ep[2] > 0.0f0  # isotropic mode
+            E_bg, E_scale, gamma_eff, edge_clip = ep[1:4]
+            E_rel = clamp.((E_raw .- E_bg) .* E_scale, 0.0f0, 1.0f0)
+            D_eff = clamp.(exp.(-gamma_eff .* E_rel), 1.0f-5, 1.0f0)
+            barrier_mask = (E_rel .>= edge_clip) .| (E_raw .>= 0.35f0)
+            D_eff[barrier_mask] .= 1.0f-5
+            D_patch = D_eff
+        end
     end
 
     if s_boost != 1.0f0

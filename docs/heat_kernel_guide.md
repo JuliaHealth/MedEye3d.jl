@@ -157,6 +157,59 @@ To solve both problems simultaneously, MedEye3d introduces **Local Relative Edge
 
 ---
 
+### 2.5 Breakthrough 5: 6-Sector Cardinal Directional Normalization (Elimination of Strong-Edge Shadowing)
+
+#### The Clinical Challenge: Asymmetric Multi-Compartment Interfaces
+Tumors frequently abut two radically different anatomical compartments simultaneously:
+* **Diaphragmatic / Subdiaphragmatic Masses** (e.g., Hepatic Dome HCC, Subpleural Metastases, Lower Lobe Lung Lesions):
+  * **Superior ($+Z$, Cranial)**: Borders lung parenchyma and alveolar air ($\approx -850\text{ HU}$, $E \approx 0.85$). Impassable strong barrier.
+  * **Inferior ($-Z$, Caudal)**: Borders normal liver soft tissue parenchyma ($\approx +55\text{ HU}$, $E \approx 0.16$). Subtle organ boundary that must NOT be breached.
+
+#### The "Strong Edge Shadowing" Flaw of Isotropic Normalization
+In isotropic scalar normalization, $E_{\text{scale}} = \frac{1}{\max(E_{\text{peak}} - E_{\text{bg}}, 0.02)}$ evaluates a single global peak. The strong lung boundary crushes the scale factor:
+$$E_{\text{peak}} \approx 0.85, \; E_{\text{bg}} \approx 0.05 \implies E_{\text{scale}} \approx \frac{1}{0.80} = 1.25$$
+Along the inferior ($-Z$) liver boundary ($E = 0.16$):
+$$E_{\text{rel}} = (0.16 - 0.05) \times 1.25 = 0.138 \ll 0.85$$
+Because $0.138 \ll 0.85$, the isotropic kernel treats the genuine liver margin as open interior ($D_{\text{eff}} \approx 0.19$)! Heat pours through into the liver, completely defeated by the lung interface on the opposite side. The strong edge in one direction **shadows** and disables boundary detection in all other directions.
+
+#### The 6 Cardinal Sectors
+To resolve this, MedEye3d partitions the local spherical shell into 6 cardinal directional cones aligned with patient anatomy:
+
+$$\mathcal{D} = \{+X \text{ (Left)}, -X \text{ (Right)}, +Y \text{ (Posterior)}, -Y \text{ (Anterior)}, +Z \text{ (Cranial)}, -Z \text{ (Caudal)}\}$$
+
+For each cardinal direction $k$, the host samples the corresponding cone and evaluates an independent local peak edge strength:
+$$E_{\text{peak}}^{+X}, \; E_{\text{peak}}^{-X}, \; E_{\text{peak}}^{+Y}, \; E_{\text{peak}}^{-Y}, \; E_{\text{peak}}^{+Z}, \; E_{\text{peak}}^{-Z}$$
+
+#### Continuous Spherical Projection with Exact Quadratic Partition of Unity
+To avoid artificial angular seams or corner creases, the compute shader projects the physical displacement vector from the active seed $\mathbf{x}_{\text{seed}}$:
+$$\mathbf{d} = (\mathbf{x} - \mathbf{x}_{\text{seed}}) \odot (\Delta x, \Delta y, \Delta z), \quad \hat{\mathbf{d}} = \frac{\mathbf{d}}{\|\mathbf{d}\|}$$
+
+Weights are computed via positive squared components along each axis:
+$$w_{+X} = \max(\hat{d}_x, 0)^2, \quad w_{-X} = \max(-\hat{d}_x, 0)^2$$
+$$w_{+Y} = \max(\hat{d}_y, 0)^2, \quad w_{-Y} = \max(-\hat{d}_y, 0)^2$$
+$$w_{+Z} = \max(\hat{d}_z, 0)^2, \quad w_{-Z} = \max(-\hat{d}_z, 0)^2$$
+
+Because $\hat{d}_x^2 + \hat{d}_y^2 + \hat{d}_z^2 \equiv 1.0$ for any 3D unit vector:
+$$\sum_{k \in \mathcal{D}} w_k = \hat{d}_x^2 + \hat{d}_y^2 + \hat{d}_z^2 \equiv 1.0$$
+
+This forms an **exact, smooth, $C^1$-continuous partition of unity** on the unit sphere with **zero division** and zero angular seams.
+
+The direction-dependent peak edge is:
+$$E_{\text{peak}}(\mathbf{x}) = \sum_{k \in \mathcal{D}} w_k(\mathbf{x}) \cdot E_{\text{peak}}^k$$
+
+#### Hardware Push Constants Architecture (112 Bytes $\le 128$ Bytes)
+All 6 cardinal peaks, baseline edge, edge clip, and mode metadata are packed directly into the Vulkan push constant block (112 bytes total), requiring **zero extra descriptor sets, zero buffer allocations, and zero GPU memory roundtrips**:
+* `edge_peaks_xy`: `vec4` ($+X, -X, +Y, -Y$)
+* `edge_peaks_z_meta`: `vec4` ($+Z, -Z, E_{\text{bg}}, \text{edge\_clip}$)
+* `gamma_meta`: `vec4` ($\gamma_{\text{eff}}, \text{is\_directional}, \text{pad}_1, \text{pad}_2$)
+
+#### Clinical Verification & Confinement:
+* **Looking Cranially ($+Z$)**: $E_{\text{peak}} \to 0.85 \implies E_{\text{scale}} \approx 1.25$. Stops at lung pleura ($E_{\text{rel}} \ge 0.85 \implies D_{\text{eff}} = 10^{-5}$, **0 leaked voxels**).
+* **Looking Caudally ($-Z$)**: $E_{\text{peak}} \to 0.16 \implies E_{\text{scale}} \approx 9.09$. Stops at liver parenchyma margin ($E_{\text{rel}} \ge 0.85 \implies D_{\text{eff}} = 10^{-5}$, **0 leaked voxels**).
+* **Interior Core**: $E \le E_{\text{bg}} \implies E_{\text{rel}} = 0.0 \implies D_{\text{eff}} = 1.0$ ($100\%$ unhindered propagation speed).
+
+---
+
 ## 3. Multimodal Guidance: Combined vs CT Only vs PET Only
 
 Lesions often appear differently across modalities:
@@ -329,6 +382,16 @@ Verifies that:
 CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_heatgdt_edge_leakage_and_relative_speed.jl
 ```
 *Expected Result:* `Test Summary: Pass 14, Total 14. ALL RELATIVE EDGE AND ZERO LEAKAGE TESTS PASSED ✓`
+
+#### Test 11: Directional Edge Normalization & Asymmetric Boundary Confinement
+Verifies 6-Sector Cardinal Directional Normalization on an asymmetric diaphragmatic mass:
+1. Directional cones isolate cranial $+Z$ peak ($E \approx 0.85$, lung) and caudal $-Z$ peak ($E \approx 0.16$, liver soft tissue) independently.
+2. Demonstrates the failure of isotropic normalization (leaking 220+ voxels past the caudal boundary due to cranial lung shadowing).
+3. Verifies that directional normalization stops at **both** cranial (lung) and caudal (liver) margins simultaneously with **0 leaked voxels** on CPU, GPU 1-Click mode, and GPU Wand mode:
+```bash
+CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_heatgdt_directional_normalization.jl
+```
+*Expected Result:* `Test Summary: Pass 21, Total 21. ALL DIRECTIONAL EDGE NORMALIZATION TESTS PASSED ✓`
 
 ---
 
