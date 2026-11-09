@@ -494,6 +494,10 @@ function start_inference_worker()
                                 InferenceClient._heatgdt_diffusivity[], job.cx, job.cy, job.cz, R_phys, job.spacing;
                                 sensitivity=heatgdt_sensitivity[]
                             )
+                            if length(edge_params) >= 12 && edge_params[12] > 0.5f0
+                                K_val = max(K_val, 80)
+                                s_boost = min(s_boost, 1.25f0)
+                            end
                         else
                             edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
                                 InferenceClient._heatgdt_diffusivity[], job.cx, job.cy, job.cz, R_phys, job.spacing;
@@ -6666,18 +6670,15 @@ function execute_one_click_heatgdt!(stateObjects::Vector{StateDataFields}, cx::I
                 diff_vol, cx, cy, cz, R_phys, ct_spacing;
                 sensitivity=heatgdt_sensitivity[]
             )
-        else
-            if heatgdt_directional_normalization[]
-                edge_params = VulkanHeatDiffusion.compute_directional_relative_edge_params(
-                    diff_vol, cx, cy, cz, R_phys, ct_spacing;
-                    sensitivity=heatgdt_sensitivity[]
-                )
-            else
-                edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
-                    diff_vol, cx, cy, cz, R_phys, ct_spacing;
-                    sensitivity=heatgdt_sensitivity[]
-                )
+            if length(edge_params) >= 12 && edge_params[12] > 0.5f0
+                K_val = max(K_val, 80)
+                s_boost = min(s_boost, 1.25f0)
             end
+        else
+            edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
+                diff_vol, cx, cy, cz, R_phys, ct_spacing;
+                sensitivity=heatgdt_sensitivity[]
+            )
         end
     end
 
@@ -6961,6 +6962,9 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
                     diff_vol, cx, cy, cz, R_phys, ct_spacing;
                     sensitivity=heatgdt_sensitivity[]
                 )
+                if length(edge_params) >= 12 && edge_params[12] > 0.5f0
+                    s_boost = min(s_boost, 1.25f0)
+                end
             else
                 edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
                     diff_vol, cx, cy, cz, R_phys, ct_spacing;
@@ -7154,6 +7158,9 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
                             diff_vol, px, py, pz, R_phys, ct_spacing;
                             sensitivity=heatgdt_sensitivity[]
                         )
+                        if length(edge_params) >= 12 && edge_params[12] > 0.5f0
+                            s_boost = min(s_boost, 1.25f0)
+                        end
                     else
                         edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
                             diff_vol, px, py, pz, R_phys, ct_spacing;

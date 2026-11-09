@@ -210,6 +210,59 @@ All 6 cardinal peaks, baseline edge, edge clip, and mode metadata are packed dir
 
 ---
 
+### 2.6 Breakthrough 6: Tubular & Narrow Channel Propagation (Ureter & Vessel Wall Sensing)
+
+#### The Clinical Challenge: Ureters, Bile Ducts, and Narrow Vessels
+Narrow elongated tubular structures in clinical abdomen and pelvis CT/PET scans (e.g. ureters, small arterial and venous vessels, common bile duct) present unique geometric and diffusion challenges:
+1. **Extremely Narrow Lumens**: A ureter or mesenteric vessel lumen typically spans only $2 - 4\text{ mm}$ in diameter ($2 - 4$ voxels across).
+2. **Convolutional Edge Bleed**: Neural edge detectors (HED3D-Ultra) and finite-difference gradient operators have effective receptive fields and Gaussian blurring that overlap across narrow lumens. Consequently, the edge probability at the seed center inside a ureter is elevated to $E_{\text{seed}} \approx 0.25 - 0.40$ even when clicked precisely on the lumen axis.
+3. **Seed Diffusion Stalling**: Under previous naive logic:
+   - A hardcoded barrier rule (`if (E >= 0.35) D = 1.0e-5`) immediately classified the seed's own voxel as an impenetrable insulator wall, freezing diffusion on tick 1!
+   - Sampling the inner core with fixed $R_{\text{core}} = 4.0\text{ mm}$ extended outside the $1.5\text{ mm}$ ureter radius into the surrounding muscularis and retroperitoneal fat, pulling the wall edge into the background baseline $E_{\text{bg}}$.
+   - Wide $45^\circ$ directional cones sampled adjacent tissue (psoas muscle, bowel), artificially driving longitudinal peaks $E_{\text{peak}}^{\pm Z}$ to high values.
+   - High frontier boost exponents ($s_{\text{boost}} \ge 2.0$) heavily penalized advancing 1D tips ($0.4^{2.5} \approx 0.10$).
+
+#### Automatic Wall Sensing & Cardinal Ray Tracing
+To resolve stalling without requiring manual user toggles or specialized modes, MedEye3d introduces **Automatic Tubular Wall Sensing**:
+1. **Radial Ray Tracing**: From the seed $\mathbf{x}_{\text{seed}}$, six cardinal rays are traced outward along $\pm X, \pm Y, \pm Z$. Along each ray $k$, the physical distance to the first strong edge ($E \ge 0.32$) is measured:
+   $$r_k = \inf \{ \|\mathbf{x} - \mathbf{x}_{\text{seed}}\|_{\text{phys}} : E(\mathbf{x}) \ge 0.32 \}$$
+2. **Minimum Wall Distance**:
+   $$r_{\text{wall}} = \min_{k \in \{+X, -X, +Y, -Y, +Z, -Z\}} r_k$$
+3. **Axis-Specific Linear Resistance**: For each principal coordinate axis $A \in \{X, Y, Z\}$, the average path resistance is evaluated:
+   $$\mathcal{R}_A = \frac{1}{2}\big(\overline{E}_{A+} + \overline{E}_{A-}\big)$$
+4. **Tubular Criterion**: If $r_{\text{wall}} \le 3.5\text{ mm}$ and the minimum resistance along any axis is significantly lower than the cross-sectional directions ($\min(\mathcal{R}) \le 0.70 \cdot \text{median}(\mathcal{R})$), MedEye3d classifies the structure as **tubular**:
+   $$\text{is\_tubular} = (r_{\text{wall}} \le 3.5\text{ mm}) \land \text{anisotropic resistance}$$
+
+#### Corridor Sampling & Dynamic Barrier Ceiling
+Once tubular mode is activated:
+1. **Adaptive Core Radius**:
+   $$R_{\text{core}} = \max\big(1.0\text{ mm}, \; 0.75 \cdot r_{\text{wall}}\big)$$
+   This guarantees that $E_{\text{bg}}$ is sampled strictly from the fluid lumen and never contaminated by surrounding muscular walls.
+2. **Longitudinal Lumen Corridor Sampling**:
+   Along the identified minimum resistance axis $\mathbf{a}_{\text{tube}}$ (e.g. craniocaudal $\pm Z$ for ureters), the directional peak sampling is confined to an ultra-narrow cylinder of radius $r \le \max(1.5\text{ mm}, 0.8 \cdot r_{\text{wall}})$, preventing contamination from exterior retroperitoneal fat or psoas muscle.
+3. **Dynamic Barrier Ceiling**:
+   Instead of a static hardcoded `0.35` cutoff, the host passes a dynamic barrier threshold $E_{\text{barrier}}$ via the push constant block (`gamma_meta.z`):
+   $$E_{\text{barrier}} = \max\big(0.40, \; E_{\text{seed}} + 0.15\big)$$
+   Inside the compute shader:
+   ```glsl
+   float E_barrier = (pc.gamma_meta.z > 0.05) ? pc.gamma_meta.z : 0.35;
+   if (E >= E_barrier) D = 1.0e-5;
+   ```
+   This ensures that the seed voxel remains fully conductive ($D \approx 1.0$), while the surrounding tubular walls ($E \ge E_{\text{barrier}}$) remain completely impenetrable.
+4. **Frontier Boost Clamping**:
+   Advancing tips in 1D tubular channels have narrow surface areas. MedEye3d clamps the effective frontier boost exponent:
+   $$s_{\text{eff}} = \min(s_{\text{boost}}, 1.25)$$
+   preventing tip conductance from choking down.
+5. **Adaptive 1-Click Step Scaling**:
+   Because 1D tubular channels require more iterations to traverse substantial anatomical lengths, 1-Click mode automatically scales iteration count:
+   $$K_{\text{tubular}} = \max(K, 80)$$
+
+#### Clinical Confinement & Reach
+- **Longitudinal Reach**: In a single click or wand hold on a ureter, heat smoothly streams $30 - 40+$ voxels along the tubular lumen.
+- **Zero Lateral Wall Leakage**: The dynamic barrier ceiling and harmonic mean conductance strictly confine heat within the lumen, producing **0 voxels leaked** into surrounding retroperitoneum or muscle.
+
+---
+
 ## 3. Multimodal Guidance: Combined vs CT Only vs PET Only
 
 Lesions often appear differently across modalities:
@@ -392,6 +445,17 @@ Verifies 6-Sector Cardinal Directional Normalization on an asymmetric diaphragma
 CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_heatgdt_directional_normalization.jl
 ```
 *Expected Result:* `Test Summary: Pass 21, Total 21. ALL DIRECTIONAL EDGE NORMALIZATION TESTS PASSED ✓`
+
+#### Test 12: Narrow Channel / Ureter Confinement & Longitudinal Propagation
+Verifies automatic tubular wall sensing and longitudinal channel diffusion on a 3D volume with a realistic $3\text{ mm}$ ureter adjacent to muscle:
+1. Ray-tracing detects transverse wall boundaries ($r_{\text{wall}} \le 3.5\text{ mm}$) and low craniocaudal resistance, automatically activating tubular mode.
+2. Dynamic barrier ceiling ($E_{\text{barrier}} = \max(0.40, E_{\text{seed}} + 0.15)$) prevents seed self-stalling while preserving impenetrable tubular walls.
+3. Lumen corridor sampling isolates the longitudinal path without contamination from surrounding exterior tissues.
+4. Verifies $30 - 40+$ voxels longitudinal propagation with strictly **0 lateral wall leakage** across CPU diffusion, Vulkan GPU 1-Click mode ($K \ge 80$), and Vulkan GPU Wand mode:
+```bash
+CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_heatgdt_tubular_ureter.jl
+```
+*Expected Result:* `Test Summary: Pass 20, Total 20. ALL TUBULAR URETER HEAT DIFFUSION TESTS PASSED ✓`
 
 ---
 

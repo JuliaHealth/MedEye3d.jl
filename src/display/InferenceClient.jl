@@ -917,6 +917,11 @@ function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
     if edge_params !== nothing
         ep = Float32.(edge_params)
         is_directional = length(ep) >= 10 && ep[10] > 0.5f0
+        E_barrier = (length(ep) >= 11 && ep[11] > 0.05f0) ? ep[11] : 0.35f0
+        is_tubular = length(ep) >= 12 && ep[12] > 0.5f0
+        if is_tubular && s_boost > 1.25f0
+            s_boost = 1.25f0
+        end
         
         E_raw = -log.(clamp.(D_patch, 1.0f-5, 1.0f0)) .* 0.09905025f0
         D_eff = similar(D_patch)
@@ -953,7 +958,7 @@ function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
                 end
                 
                 e_val = E_raw[x, y, z]
-                if e_val >= 0.35f0
+                if e_val >= E_barrier
                     D_eff[x, y, z] = 1.0f-5
                 else
                     e_scale = 1.0f0 / max(E_peak_dir - E_bg, 0.02f0)
@@ -970,7 +975,7 @@ function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
             E_bg, E_scale, gamma_eff, edge_clip = ep[1:4]
             E_rel = clamp.((E_raw .- E_bg) .* E_scale, 0.0f0, 1.0f0)
             D_eff = clamp.(exp.(-gamma_eff .* E_rel), 1.0f-5, 1.0f0)
-            barrier_mask = (E_rel .>= edge_clip) .| (E_raw .>= 0.35f0)
+            barrier_mask = (E_rel .>= edge_clip) .| (E_raw .>= E_barrier)
             D_eff[barrier_mask] .= 1.0f-5
             D_patch = D_eff
         end

@@ -23,7 +23,7 @@ layout(push_constant) uniform PushConstants {
     vec4  inv_d2;      // xyz = 1/(dx²), 1/(dy²), 1/(dz²) normalized, w = s_boost
     vec4  edge_peaks_xy;     // x=+X, y=-X, z=+Y, w=-Y
     vec4  edge_peaks_z_meta; // x=+Z, y=-Z, z=E_bg, w=edge_clip
-    vec4  gamma_meta;        // x=gamma_eff, y=is_directional (1.0 = on), z=_pad1, w=_pad2
+    vec4  gamma_meta;        // x=gamma_eff, y=is_directional (1.0 = on), z=E_barrier, w=_pad
 } pc;
 
 float compute_effective_D(float raw_D, ivec3 voxel_pos, float u_val, float s_boost) {
@@ -33,8 +33,9 @@ float compute_effective_D(float raw_D, ivec3 voxel_pos, float u_val, float s_boo
         // Invert precomputed D in [1e-5, 1.0] to raw edge E in [0, 1]
         // D = exp(-10.1 * E) => E = -ln(D) / 10.095886
         float E = -log(clamp(raw_D, 1.0e-5, 1.0)) * 0.09905025;
-        // Any globally strong edge (E >= 0.35, e.g. bone, skin, air) is an absolute barrier
-        if (E >= 0.35) {
+        // Dynamic barrier ceiling (pc.gamma_meta.z = E_barrier, default 0.35)
+        float E_barrier = (pc.gamma_meta.z > 0.05) ? pc.gamma_meta.z : 0.35;
+        if (E >= E_barrier) {
             D = 1.0e-5;
         } else {
             float E_bg = pc.edge_peaks_z_meta.z;
@@ -87,10 +88,12 @@ float compute_effective_D(float raw_D, ivec3 voxel_pos, float u_val, float s_boo
     // Core (u >= u_core) maintains s = 1.0 (free internal flow)
     // Advancing frontier (u < u_core) blends to boosted s
     if (abs(s_boost - 1.0) > 0.01) {
+        // In tubular mode (pc.gamma_meta.w > 0.5), cap frontier boost to 1.25 so 1D longitudinal tips propagate freely
+        float effective_boost = (pc.gamma_meta.w > 0.5) ? min(s_boost, 1.25) : s_boost;
         float u_core = 0.05;
         float u_floor = 0.001; // commit threshold theta
         float w_u = clamp((u_core - u_val) / max(u_core - u_floor, 1e-5), 0.0, 1.0);
-        float s_eff = 1.0 + (s_boost - 1.0) * w_u;
+        float s_eff = 1.0 + (effective_boost - 1.0) * w_u;
         D = clamp(pow(D, s_eff), 1.0e-5, 1.0);
     }
     return D;

@@ -67,8 +67,8 @@ struct DiffuseStepPC
     edge_clip::Float32
     gamma_eff::Float32
     is_directional::Float32
-    _pad1::Float32
-    _pad2::Float32
+    edge_barrier::Float32
+    is_tubular::Float32
 end
 
 struct ExtractMaskPC
@@ -225,7 +225,7 @@ function _normalize_edge_params(edge_params)::NTuple{12, Float32}
         gamma_eff = Float32(edge_params[3])
         edge_clip = Float32(edge_params[4])
         E_peak = (E_scale > 0.0f0) ? (E_bg + 1.0f0 / E_scale) : 0.20f0
-        return (E_peak, E_peak, E_peak, E_peak, E_peak, E_peak, E_bg, edge_clip, gamma_eff, 0.0f0, 0.0f0, 0.0f0)
+        return (E_peak, E_peak, E_peak, E_peak, E_peak, E_peak, E_bg, edge_clip, gamma_eff, 0.0f0, 0.35f0, 0.0f0)
     elseif length(edge_params) >= 10
         p_xp = Float32(edge_params[1])
         p_xm = Float32(edge_params[2])
@@ -237,11 +237,11 @@ function _normalize_edge_params(edge_params)::NTuple{12, Float32}
         edge_clip = Float32(edge_params[8])
         gamma_eff = Float32(edge_params[9])
         is_dir = Float32(edge_params[10])
-        pad1 = length(edge_params) >= 11 ? Float32(edge_params[11]) : 0.0f0
-        pad2 = length(edge_params) >= 12 ? Float32(edge_params[12]) : 0.0f0
-        return (p_xp, p_xm, p_yp, p_ym, p_zp, p_zm, E_bg, edge_clip, gamma_eff, is_dir, pad1, pad2)
+        edge_barrier = length(edge_params) >= 11 && edge_params[11] > 0.05f0 ? Float32(edge_params[11]) : 0.35f0
+        is_tubular = length(edge_params) >= 12 ? Float32(edge_params[12]) : 0.0f0
+        return (p_xp, p_xm, p_yp, p_ym, p_zp, p_zm, E_bg, edge_clip, gamma_eff, is_dir, edge_barrier, is_tubular)
     else
-        return (0.20f0, 0.20f0, 0.20f0, 0.20f0, 0.20f0, 0.20f0, 0.05f0, 0.85f0, 12.0f0, 1.0f0, 0.0f0, 0.0f0)
+        return (0.20f0, 0.20f0, 0.20f0, 0.20f0, 0.20f0, 0.20f0, 0.05f0, 0.85f0, 12.0f0, 1.0f0, 0.35f0, 0.0f0)
     end
 end
 
@@ -477,16 +477,17 @@ end
 
 Analyzes the local 3D neighborhood around the seed (cx, cy, cz) to compute directional
 relative edge normalization parameters across 6 cardinal sectors (+X, -X, +Y, -Y, +Z, -Z):
-1. Samples the inner core (r <= 4.0 mm) to find baseline interior edge E_bg (25th percentile).
-2. Samples the vicinity shell (4.0 mm < r <= R_phys) and bins each voxel into one of 6 cardinal
-   cones based on dominant physical displacement argmax(|dx_mm|, |dy_mm|, |dz_mm|).
-3. Computes 95th percentile peak edge for each sector independently:
-   (peak_+X, peak_-X, peak_+Y, peak_-Y, peak_+Z, peak_-Z).
-4. Returns (peak_+X, peak_-X, peak_+Y, peak_-Y, peak_+Z, peak_-Z, E_bg, edge_clip, gamma_eff, 1.0f0, 0.0f0, 0.0f0).
-
-Resolves "strong edge shadowing" (e.g. at the diaphragm, where strong lung pleura
-(+Z, E ~ 0.85) would otherwise shadow and breach weak liver soft tissue (-Z, E ~ 0.16)).
-Both boundaries stop firmly with 0 leakage, while interior core flow remains at 100% full speed.
+1. Samples E_seed = E(cx, cy, cz) and traces cardinal rays to detect circumferential walls.
+2. If in a narrow tubular structure (r_wall <= 3.5 mm, e.g. ureter, vessel):
+   - Automatically adapts R_core to fit strictly inside the lumen.
+   - Anchors baseline E_bg to the lumen center.
+   - Sets dynamic barrier ceiling E_barrier = max(0.40, E_seed + 0.15), preventing the seed
+     from freezing out while preserving impenetrable circumferential side walls.
+   - Restricts longitudinal sampling to a narrow corridor along the tube axis, preventing
+     wide-angle cone contamination from surrounding exterior tissue.
+3. If in standard rounded tissue/tumor:
+   - Samples 6 cardinal cones to resolve asymmetric interfaces (e.g. diaphragm).
+4. Returns (peak_+X, peak_-X, peak_+Y, peak_-Y, peak_+Z, peak_-Z, E_bg, edge_clip, gamma_eff, is_directional, E_barrier, is_tubular).
 """
 function compute_directional_relative_edge_params(diffusivity::Array{Float32,3}, cx::Int, cy::Int, cz::Int,
                                                   R_phys::Real, spacing::NTuple{3,Real};
@@ -495,8 +496,78 @@ function compute_directional_relative_edge_params(diffusivity::Array{Float32,3},
     w, h, d = size(diffusivity)
     dx, dy, dz = Float64.(spacing)
     
-    R_core_mm = 4.0
+    # 1. Edge at seed location
+    D_seed = diffusivity[cx, cy, cz]
+    E_seed = -log(clamp(D_seed, 1.0f-5, 1.0f0)) * 0.09905025f0
+    
+    # 2. Ray-trace along the 6 cardinal directions to measure wall proximity and axis resistance
+    step_mm = 0.5
+    max_ray_mm = min(14.0, max(8.0, Float64(R_phys)))
+    n_ray_steps = max(4, round(Int, max_ray_mm / step_mm))
+    
+    ray_dirs = (
+        (1.0, 0.0, 0.0), (-1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0), (0.0, -1.0, 0.0),
+        (0.0, 0.0, 1.0), (0.0, 0.0, -1.0)
+    )
+    
+    ray_wall_dist = fill(max_ray_mm, 6)
+    ray_resistances = zeros(Float64, 6)
+    ray_max_edges = zeros(Float32, 6)
+    
+    wall_thresh = max(E_seed + 0.12f0, 0.30f0)
+    
+    for k in 1:6
+        dir = ray_dirs[k]
+        wall_found = false
+        max_e = 0.0f0
+        res = 0.0
+        for s in 1:n_ray_steps
+            dist_mm = s * step_mm
+            px = clamp(round(Int, cx + dir[1] * dist_mm / dx), 1, w)
+            py = clamp(round(Int, cy + dir[2] * dist_mm / dy), 1, h)
+            pz = clamp(round(Int, cz + dir[3] * dist_mm / dz), 1, d)
+            e_val = -log(clamp(diffusivity[px, py, pz], 1.0f-5, 1.0f0)) * 0.09905025f0
+            res += e_val
+            max_e = max(max_e, e_val)
+            if !wall_found && (e_val >= wall_thresh || e_val >= 0.40f0)
+                ray_wall_dist[k] = dist_mm
+                wall_found = true
+            end
+        end
+        ray_resistances[k] = res
+        ray_max_edges[k] = max_e
+    end
+    
+    # Axis resistances: (X, Y, Z)
+    res_x = ray_resistances[1] + ray_resistances[2]
+    res_y = ray_resistances[3] + ray_resistances[4]
+    res_z = ray_resistances[5] + ray_resistances[6]
+    
+    min_res_axis = argmin((res_x, res_y, res_z)) # 1=X, 2=Y, 3=Z
+    max_res = max(res_x, res_y, res_z)
+    min_res = min(res_x, res_y, res_z)
+    
+    # Transverse wall distance relative to candidate tube axis:
+    min_wall_transverse = if min_res_axis == 3
+        min(ray_wall_dist[1], ray_wall_dist[2], ray_wall_dist[3], ray_wall_dist[4])
+    elseif min_res_axis == 1
+        min(ray_wall_dist[3], ray_wall_dist[4], ray_wall_dist[5], ray_wall_dist[6])
+    else
+        min(ray_wall_dist[1], ray_wall_dist[2], ray_wall_dist[5], ray_wall_dist[6])
+    end
+    
+    long_wall_dist = max(ray_wall_dist[2*min_res_axis - 1], ray_wall_dist[2*min_res_axis])
+    
+    # Tubular structure detection:
+    # 1. Close transverse walls (radius <= 3.5 mm)
+    # 2. Longitudinal resistance significantly lower than transverse, or longitudinal reach much longer
+    is_tubular = (min_wall_transverse <= 3.5) && (min_res < 0.75 * max_res || long_wall_dist >= 1.6 * min_wall_transverse)
+    
+    # Adaptive Core Radius & Barrier Ceiling
+    R_core_mm = is_tubular ? max(1.0, 0.75 * min_wall_transverse) : 4.0
     R_outer_mm = max(8.0, Float64(R_phys))
+    E_barrier = is_tubular ? max(0.40f0, E_seed + 0.15f0) : max(0.35f0, E_seed + 0.10f0)
     
     rx_out = max(2, round(Int, R_outer_mm / dx))
     ry_out = max(2, round(Int, R_outer_mm / dy))
@@ -596,10 +667,10 @@ function compute_directional_relative_edge_params(diffusivity::Array{Float32,3},
     
     E_bg = if !isempty(core_samples)
         sort!(core_samples)
-        idx = max(1, round(Int, 0.25 * length(core_samples)))
-        core_samples[idx]
+        idx = is_tubular ? max(1, round(Int, 0.10 * length(core_samples))) : max(1, round(Int, 0.25 * length(core_samples)))
+        min(E_seed, core_samples[idx])
     else
-        0.05f0
+        min(E_seed, 0.05f0)
     end
     
     global_shell_peak = if !isempty(shell_samples)
@@ -627,10 +698,40 @@ function compute_directional_relative_edge_params(diffusivity::Array{Float32,3},
     p_zp = _calc_peak(shell_zp)
     p_zm = _calc_peak(shell_zm)
     
+    # If tubular, adjust longitudinal vs transverse peaks:
+    if is_tubular
+        # For transverse axes: enforce firm wall barrier
+        if min_res_axis == 3 # Tube along Z
+            p_xp = max(p_xp, ray_max_edges[1], 0.35f0)
+            p_xm = max(p_xm, ray_max_edges[2], 0.35f0)
+            p_yp = max(p_yp, ray_max_edges[3], 0.35f0)
+            p_ym = max(p_ym, ray_max_edges[4], 0.35f0)
+            # For longitudinal axis (+Z, -Z): do not let wide cone exterior tissue inflate peak
+            # Along open lumen, peak is bounded by ray edge
+            p_zp = max(E_bg + 0.04f0, ray_max_edges[5])
+            p_zm = max(E_bg + 0.04f0, ray_max_edges[6])
+        elseif min_res_axis == 1 # Tube along X
+            p_yp = max(p_yp, ray_max_edges[3], 0.35f0)
+            p_ym = max(p_ym, ray_max_edges[4], 0.35f0)
+            p_zp = max(p_zp, ray_max_edges[5], 0.35f0)
+            p_zm = max(p_zm, ray_max_edges[6], 0.35f0)
+            p_xp = max(E_bg + 0.04f0, ray_max_edges[1])
+            p_xm = max(E_bg + 0.04f0, ray_max_edges[2])
+        else # Tube along Y
+            p_xp = max(p_xp, ray_max_edges[1], 0.35f0)
+            p_xm = max(p_xm, ray_max_edges[2], 0.35f0)
+            p_zp = max(p_zp, ray_max_edges[5], 0.35f0)
+            p_zm = max(p_zm, ray_max_edges[6], 0.35f0)
+            p_yp = max(E_bg + 0.04f0, ray_max_edges[3])
+            p_ym = max(E_bg + 0.04f0, ray_max_edges[4])
+        end
+    end
+    
     gamma_eff = clamp(12.0f0 * sensitivity, 8.0f0, 24.0f0)
+    is_tubular_val = is_tubular ? 1.0f0 : 0.0f0
     
     return (Float32(p_xp), Float32(p_xm), Float32(p_yp), Float32(p_ym), Float32(p_zp), Float32(p_zm),
-            Float32(E_bg), Float32(edge_clip), Float32(gamma_eff), 1.0f0, 0.0f0, 0.0f0)
+            Float32(E_bg), Float32(edge_clip), Float32(gamma_eff), 1.0f0, Float32(E_barrier), is_tubular_val)
 end
 
 # ─── Shader loading ──────────────────────────────────────────────────────
