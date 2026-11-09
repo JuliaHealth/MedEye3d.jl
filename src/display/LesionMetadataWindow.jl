@@ -8639,6 +8639,38 @@ function create_metadata_window(
     btn_posthoc_reset = Button(g[seg_r3d, 4], label="Reset", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=10)
     rowsize!(g, seg_r3d, Fixed(30)); register_fixed_row!(seg_r3d, 30)
 
+    # Row 3e: Edge guidance modality dropdown
+    seg_r3e = nr!()
+    Label(g[seg_r3e, 1], "Edge:", halign=:right, fontsize=10, color=LBL_FG)
+    menu_heatgdt_edge = Menu(g[seg_r3e, 2:4], options = ["Combined", "CT Only", "PET Only"], default = "Combined", fontsize = 10); _register_menu!(menu_heatgdt_edge)
+    rowsize!(g, seg_r3e, Fixed(30)); register_fixed_row!(seg_r3e, 30)
+
+    on(menu_heatgdt_edge.selection) do sel
+        mod_sym = if sel == "CT Only"
+            :ct_only
+        elseif sel == "PET Only"
+            :pet_only
+        else
+            :combined
+        end
+        _MEH.switch_heatgdt_edge_modality!(mod_sym)
+    end
+
+    # Row 3f: Adaptive local contrast toggle & sensitivity slider
+    seg_r3f = nr!()
+    Label(g[seg_r3f, 1], "Adapt:", halign=:right, fontsize=10, color=LBL_FG)
+    cb_adaptive = Toggle(g[seg_r3f, 2], active = true)
+    Label(g[seg_r3f, 3], "Sens:", halign=:right, fontsize=10, color=LBL_FG)
+    slider_sens = Slider(g[seg_r3f, 4], range = 0.5:0.1:2.0, startvalue = 1.0)
+    rowsize!(g, seg_r3f, Fixed(30)); register_fixed_row!(seg_r3f, 30)
+
+    on(cb_adaptive.active) do is_act
+        _MEH.heatgdt_adaptive_contrast[] = is_act
+    end
+    on(slider_sens.value) do val
+        _MEH.heatgdt_sensitivity[] = Float32(val)
+    end
+
     seg_r3_tt = nr!()
     Label(g[seg_r3_tt, 1:4], "θ controls sensitivity (size). K controls boundary smoothness.", halign=:center, fontsize=9, color=SUBTXT)
     rowsize!(g, seg_r3_tt, Fixed(15)); register_fixed_row!(seg_r3_tt, 15)
@@ -8668,6 +8700,8 @@ function create_metadata_window(
         rowsize!(g, seg_r3b, Fixed(heatgdt_row_visible[] ? 30 : 0))
         rowsize!(g, seg_r3c, Fixed(heatgdt_row_visible[] ? 30 : 0))
         rowsize!(g, seg_r3d, Fixed(heatgdt_row_visible[] ? 30 : 0))
+        rowsize!(g, seg_r3e, Fixed(heatgdt_row_visible[] ? 30 : 0))
+        rowsize!(g, seg_r3f, Fixed(heatgdt_row_visible[] ? 30 : 0))
         rowsize!(g, seg_r3_tt, Fixed(heatgdt_row_visible[] ? 15 : 0))
         # Enable/disable Heat-GDT mouse-hold interaction mode
         _ROMCAD._heatgdt_mode_active[] = (sel == "Heat-GDT")
@@ -8675,6 +8709,8 @@ function create_metadata_window(
     rowsize!(g, seg_r3b, Fixed(0))  # Hidden by default
     rowsize!(g, seg_r3c, Fixed(0))  # Hidden by default
     rowsize!(g, seg_r3d, Fixed(0))  # Hidden by default
+    rowsize!(g, seg_r3e, Fixed(0))  # Hidden by default
+    rowsize!(g, seg_r3f, Fixed(0))  # Hidden by default
     rowsize!(g, seg_r3_tt, Fixed(0))  # Hidden by default
     on(btn_add_ai.clicks) do _
         @async try

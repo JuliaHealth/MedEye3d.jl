@@ -46,6 +46,19 @@ void main() {
     float u_c = imageLoad(img_u_in, pos).r;
     float D_c = imageLoad(img_D, pos).r;
 
+    // Shape-adaptive heat-level transition:
+    // Core (u >= u_core) maintains s = 1.0 (free internal flow)
+    // Advancing frontier (u < u_core) blends to boosted s
+    float s_boost = (pc.inv_d2.w > 0.05) ? pc.inv_d2.w : 1.0;
+    float s_eff = 1.0;
+    if (abs(s_boost - 1.0) > 0.01) {
+        float u_core = 0.05;
+        float u_floor = 0.001; // commit threshold theta
+        float w_u = clamp((u_core - u_c) / max(u_core - u_floor, 1e-5), 0.0, 1.0);
+        s_eff = 1.0 + (s_boost - 1.0) * w_u;
+        D_c = clamp(pow(D_c, s_eff), 1.0e-5, 1.0);
+    }
+
     // Load neighbor heat values
     float u_xp = imageLoad(img_u_in, p_xp).r;
     float u_xm = imageLoad(img_u_in, p_xm).r;
@@ -54,13 +67,30 @@ void main() {
     float u_zp = imageLoad(img_u_in, p_zp).r;
     float u_zm = imageLoad(img_u_in, p_zm).r;
 
+    // Load neighbor diffusivities and apply effective exponent if active
+    float D_xp_raw = imageLoad(img_D, p_xp).r;
+    float D_xm_raw = imageLoad(img_D, p_xm).r;
+    float D_yp_raw = imageLoad(img_D, p_yp).r;
+    float D_ym_raw = imageLoad(img_D, p_ym).r;
+    float D_zp_raw = imageLoad(img_D, p_zp).r;
+    float D_zm_raw = imageLoad(img_D, p_zm).r;
+
+    if (abs(s_eff - 1.0) > 0.01) {
+        D_xp_raw = clamp(pow(D_xp_raw, s_eff), 1.0e-5, 1.0);
+        D_xm_raw = clamp(pow(D_xm_raw, s_eff), 1.0e-5, 1.0);
+        D_yp_raw = clamp(pow(D_yp_raw, s_eff), 1.0e-5, 1.0);
+        D_ym_raw = clamp(pow(D_ym_raw, s_eff), 1.0e-5, 1.0);
+        D_zp_raw = clamp(pow(D_zp_raw, s_eff), 1.0e-5, 1.0);
+        D_zm_raw = clamp(pow(D_zm_raw, s_eff), 1.0e-5, 1.0);
+    }
+
     // Face-averaged conductivities (arithmetic mean of adjacent voxels)
-    float D_xp = 0.5 * (D_c + imageLoad(img_D, p_xp).r);
-    float D_xm = 0.5 * (D_c + imageLoad(img_D, p_xm).r);
-    float D_yp = 0.5 * (D_c + imageLoad(img_D, p_yp).r);
-    float D_ym = 0.5 * (D_c + imageLoad(img_D, p_ym).r);
-    float D_zp = 0.5 * (D_c + imageLoad(img_D, p_zp).r);
-    float D_zm = 0.5 * (D_c + imageLoad(img_D, p_zm).r);
+    float D_xp = 0.5 * (D_c + D_xp_raw);
+    float D_xm = 0.5 * (D_c + D_xm_raw);
+    float D_yp = 0.5 * (D_c + D_yp_raw);
+    float D_ym = 0.5 * (D_c + D_ym_raw);
+    float D_zp = 0.5 * (D_c + D_zp_raw);
+    float D_zm = 0.5 * (D_c + D_zm_raw);
 
     // Net flux divergence weighted by anisotropic voxel spacing (w_x = 1/dx^2, etc.)
     float wx = pc.inv_d2.x;

@@ -243,6 +243,10 @@ end
 # Heat-GDT slider parameter refs (written by LesionMetadataWindow, read by inference worker)
 const heatgdt_K = Ref{Int}(40)
 const heatgdt_theta = Ref{Float32}(0.001f0)
+const heatgdt_edge_modality = Ref{Symbol}(:combined)  # :combined, :ct_only, :pet_only
+const heatgdt_adaptive_contrast = Ref{Bool}(true)
+const heatgdt_sensitivity = Ref{Float32}(1.0f0)
+const heatgdt_current_loaded_modality = Ref{Symbol}(:combined)
 
 # ── Vulkan GPU Heat-GDT interactive state ──────────────────────────────────
 const _vk_heat_state = Ref{Any}(nothing)            # VulkanHeatDiffusion.HeatDiffusionState or nothing
@@ -272,23 +276,27 @@ const HEAT_GDT_LAST_SEG_VOL = Ref{Any}(nothing)
 const HEAT_GDT_LAST_TARGET_ID = Ref{UInt16}(0)
 
 """
-    reload_heatgdt_diffusivity_for_tp!(new_tp::Int)
+    reload_heatgdt_diffusivity_for_tp!(new_tp::Int; force::Bool=false)
 
 Load the per-timepoint diffusivity field from the HDF5 file's TP group
 (e.g. `BASELINE/diffusivity` for tp=0, `TFM_.../diffusivity` for followups).
-If found, re-upload to the GPU heat state. If not found, clear the current
-diffusivity — no gradient or NIfTI fallbacks are used.
+Supports modality selection (`:combined`, `:ct_only`, `:pet_only`) via
+`heatgdt_edge_modality[]`. If the selected modality dataset is missing,
+falls back gracefully to `diffusivity`.
 """
-const _tp_diffusivity_cache = Dict{Int, Array{Float32, 3}}()
+const _tp_diffusivity_cache = Dict{Any, Array{Float32, 3}}()
 
-function reload_heatgdt_diffusivity_for_tp!(new_tp::Int)
-    # Skip if already loaded for this TP
-    if InferenceClient._heatgdt_diffusivity_tp[] == new_tp
+function reload_heatgdt_diffusivity_for_tp!(new_tp::Int; force::Bool=false)
+    mod = heatgdt_edge_modality[]
+    if !force && InferenceClient._heatgdt_diffusivity_tp[] == new_tp && heatgdt_current_loaded_modality[] == mod
         return
     end
     
+    cache_key = (new_tp, mod)
     local diff_vol::Union{Nothing, Array{Float32, 3}} = nothing
-    if haskey(_tp_diffusivity_cache, new_tp)
+    if haskey(_tp_diffusivity_cache, cache_key)
+        diff_vol = _tp_diffusivity_cache[cache_key]
+    elseif mod === :combined && haskey(_tp_diffusivity_cache, new_tp)
         diff_vol = _tp_diffusivity_cache[new_tp]
     else
         h5_path = h5_save_path_ref[]
@@ -307,17 +315,40 @@ function reload_heatgdt_diffusivity_for_tp!(new_tp::Int)
                         tp_idx_1 <= length(study_keys) ? study_keys[tp_idx_1] : ""
                     end
                     
-                    if !isempty(group_name) && haskey(h5, group_name) && haskey(h5[group_name], "diffusivity")
-                        @info "[HeatDiffusion] Loading diffusivity for TP=$new_tp from HDF5 group: $group_name"
-                        diff_vol = Float32.(read(h5[group_name]["diffusivity"]))
-                        
-                        is_preflipped = haskey(h5, "_meta_/preflipped") && read(h5["_meta_/preflipped"]) == 1
-                        if !is_preflipped
-                            diff_vol = reverse(diff_vol, dims=2)
-                        end
-                        _tp_diffusivity_cache[new_tp] = diff_vol
+                    target_dataset = if mod === :ct_only
+                        "diffusivity_ct"
+                    elseif mod === :pet_only
+                        "diffusivity_pet"
                     else
-                        @warn "[HeatDiffusion] 'diffusivity' dataset missing in HDF5 group '$group_name' for TP=$new_tp. No fallback available."
+                        "diffusivity"
+                    end
+                    
+                    if !isempty(group_name) && haskey(h5, group_name)
+                        grp = h5[group_name]
+                        ds_to_read = if haskey(grp, target_dataset)
+                            target_dataset
+                        elseif haskey(grp, "diffusivity")
+                            @info "[HeatDiffusion] '$target_dataset' not found in $group_name, falling back to 'diffusivity'"
+                            "diffusivity"
+                        else
+                            ""
+                        end
+                        
+                        if !isempty(ds_to_read)
+                            @info "[HeatDiffusion] Loading $ds_to_read for TP=$new_tp (modality=$mod) from HDF5 group: $group_name"
+                            diff_vol = Float32.(read(grp[ds_to_read]))
+                            
+                            is_preflipped = haskey(h5, "_meta_/preflipped") && read(h5["_meta_/preflipped"]) == 1
+                            if !is_preflipped
+                                diff_vol = reverse(diff_vol, dims=2)
+                            end
+                            _tp_diffusivity_cache[cache_key] = diff_vol
+                            if mod === :combined
+                                _tp_diffusivity_cache[new_tp] = diff_vol
+                            end
+                        else
+                            @warn "[HeatDiffusion] Neither '$target_dataset' nor 'diffusivity' found in HDF5 group '$group_name' for TP=$new_tp."
+                        end
                     end
                 end
             catch e
@@ -327,8 +358,9 @@ function reload_heatgdt_diffusivity_for_tp!(new_tp::Int)
     end
     
     if diff_vol !== nothing
+        heatgdt_current_loaded_modality[] = mod
         InferenceClient.precompute_heatgdt_diffusivity(diff_vol; tp_index=new_tp)
-        # Re-upload or re-initialize GPU pipeline for new timepoint
+        # Re-upload or re-initialize GPU pipeline for new timepoint / modality
         vk_ctx = _vk_heat_ctx[]
         if vk_ctx !== nothing
             parentmodule(@__MODULE__).ensure_heatgdt_gpu!(vk_ctx; force_reload=true)
@@ -340,6 +372,26 @@ function reload_heatgdt_diffusivity_for_tp!(new_tp::Int)
         InferenceClient._heatgdt_diffusivity_tp[] = -1
         parentmodule(@__MODULE__)._vk_heat_uploaded[] = false
     end
+end
+
+"""
+    switch_heatgdt_edge_modality!(new_mod::Symbol, vk_ctx=nothing)
+
+Switch the edge guidance modality (:combined, :ct_only, or :pet_only)
+and immediately reload the appropriate diffusivity field onto GPU.
+"""
+function switch_heatgdt_edge_modality!(new_mod::Symbol, vk_ctx=nothing)
+    if !(new_mod in (:combined, :ct_only, :pet_only))
+        @warn "[HeatDiffusion] Invalid edge modality: $new_mod (must be :combined, :ct_only, or :pet_only)"
+        return
+    end
+    @info "[HeatDiffusion] Switching edge modality from $(heatgdt_edge_modality[]) to $new_mod"
+    heatgdt_edge_modality[] = new_mod
+    if vk_ctx !== nothing && _vk_heat_ctx[] === nothing
+        _vk_heat_ctx[] = vk_ctx
+    end
+    cur_tp = max(0, current_tp_index[])
+    reload_heatgdt_diffusivity_for_tp!(cur_tp; force=true)
 end
 
 # Internal inference queue — serializes all Docker communication through a single worker thread
@@ -6567,14 +6619,25 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
         if any(s <= 0 for s in ct_spacing)
             ct_spacing = (1.0, 1.0, 1.0)
         end
-        println("[Heat-GDT START] Calling seed_only! at ($cx,$cy,$cz) with spacing=$ct_spacing..."); flush(stdout)
-        VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, cx, cy, cz; seed_radius=1, spacing=ct_spacing)
+
+        # Adaptive local edge contrast scaling
+        diff_vol = InferenceClient._heatgdt_diffusivity[]
+        s_boost = 1.0f0
+        if heatgdt_adaptive_contrast[] && diff_vol !== nothing
+            s_boost = VulkanHeatDiffusion.compute_frontier_edge_scale(
+                diff_vol, cx, cy, cz, 18.0, ct_spacing;
+                sensitivity=heatgdt_sensitivity[]
+            )
+        end
+
+        println("[Heat-GDT START] Calling seed_only! at ($cx,$cy,$cz) with spacing=$ct_spacing, s_boost=$s_boost..."); flush(stdout)
+        VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, cx, cy, cz; seed_radius=1, spacing=ct_spacing, s_boost=s_boost)
         set_ai_status!("[Heat-GDT GPU] Growing from ($cx,$cy,$cz)...")
-        println("[Heat-GDT START] seed_only! SUCCESS — GPU diffusion active"); flush(stdout)
+        println("[Heat-GDT START] seed_only! SUCCESS — GPU diffusion active (s_boost=$s_boost)"); flush(stdout)
         
         # Run initial steps immediately so even a very short click produces a visible area
         theta_val = heatgdt_theta[]
-        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 10; theta=theta_val, copy_box_to_cpu=false, spacing=ct_spacing)
+        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 10; theta=theta_val, copy_box_to_cpu=false, spacing=ct_spacing, s_boost=s_boost)
         _vk_heat_total_steps[] += 10
         
         # ── Display theta ramp: at t=0, start with high theta so only hot center shows ──
@@ -6701,11 +6764,35 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
         display_theta = Float32(max(theta_val, HEAT_DISPLAY_RAMP_START * exp(-HEAT_DISPLAY_RAMP_RATE[] * elapsed)))
         HEAT_GDT_LAST_DISPLAY_THETA[] = display_theta  # Track for stop-time logging
         
-        _dbg("TICK: steps=$steps_per_tick, theta=$theta_val, display_theta=$display_theta, elapsed=$(round(elapsed, digits=2))s, accumulated=$(heat_state.accumulated_steps), seed=($(heat_state.seed_x),$(heat_state.seed_y),$(heat_state.seed_z)), ping=$(heat_state.current_buffer_is_ping)")
+        ct_spacing = try
+            stateObjects[1].onScrollData.dataToScrollDims.voxelSize
+        catch
+            (1.0, 1.0, 1.0)
+        end
+        if any(s <= 0 for s in ct_spacing)
+            ct_spacing = (1.0, 1.0, 1.0)
+        end
+        
+        s_boost = heat_state.current_s_boost
+        if heatgdt_adaptive_contrast[]
+            diff_vol = InferenceClient._heatgdt_diffusivity[]
+            if diff_vol !== nothing
+                mean_sp = (ct_spacing[1] + ct_spacing[2] + ct_spacing[3]) / 3.0
+                tot_steps = _vk_heat_total_steps[] + steps_per_tick
+                R_phys = 3.0 + 2.0 * sqrt(tot_steps * 0.16) * mean_sp
+                cx, cy, cz = _vk_heat_seed[]
+                s_boost = VulkanHeatDiffusion.compute_frontier_edge_scale(
+                    diff_vol, cx, cy, cz, R_phys, ct_spacing;
+                    sensitivity=heatgdt_sensitivity[]
+                )
+            end
+        end
+        
+        _dbg("TICK: steps=$steps_per_tick, theta=$theta_val, display_theta=$display_theta, s_boost=$s_boost, elapsed=$(round(elapsed, digits=2))s, accumulated=$(heat_state.accumulated_steps), seed=($(heat_state.seed_x),$(heat_state.seed_y),$(heat_state.seed_z)), ping=$(heat_state.current_buffer_is_ping)")
         
         t0 = time_ns()
         VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, steps_per_tick;
-            theta=theta_val, copy_box_to_cpu=false)
+            theta=theta_val, copy_box_to_cpu=false, spacing=ct_spacing, s_boost=s_boost)
         t_gpu = time_ns()
         _vk_heat_total_steps[] += steps_per_tick
         

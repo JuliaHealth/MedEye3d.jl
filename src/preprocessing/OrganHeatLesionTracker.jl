@@ -384,7 +384,8 @@ function grow_heat_kernel_lesion(diffusivity::Array{Float32, 3},
                                  patch_size::Int=64,
                                  K::Union{Int, Nothing}=nothing,
                                  dt::Float32=0.16f0,
-                                 spacing::NTuple{3, Real}=(1.0, 1.0, 1.0))
+                                 spacing::NTuple{3, Real}=(1.0, 1.0, 1.0),
+                                 s_boost::Float32=1.0f0)
     nx_full, ny_full, nz_full = size(diffusivity)
     
     # Choose patch size and K dynamically scaled to target volume (matching optimal K=280 sweep)
@@ -408,7 +409,11 @@ function grow_heat_kernel_lesion(diffusivity::Array{Float32, 3},
     py = y_max - y_min + 1
     pz = z_max - z_min + 1
 
-    D_patch = diffusivity[x_min:x_max, y_min:y_max, z_min:z_max]
+    D_patch = copy(diffusivity[x_min:x_max, y_min:y_max, z_min:z_max])
+    if s_boost != 1.0f0
+        mask_nonzero = D_patch .> 0.0f0
+        D_patch[mask_nonzero] .= clamp.(D_patch[mask_nonzero] .^ s_boost, 1.0f-5, 1.0f0)
+    end
     u = zeros(Float32, px, py, pz)
     
     # Seed at relative center

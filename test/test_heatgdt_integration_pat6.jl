@@ -83,13 +83,33 @@ println("  ✓ Active lesion voxels: $vox_count")
 @test vox_count > 0
 
 # Step 5: Test TP switching re-upload
-println("\n[5/5] Testing timepoint switching re-upload (TP=1)...")
+println("\n[5/6] Testing timepoint switching re-upload (TP=1)...")
 MakieEventHandlers.reload_heatgdt_diffusivity_for_tp!(1)
 @test heat_state.diffusivity_uploaded == true
 println("  ✓ TP=1 diffusivity re-uploaded successfully")
 
+# Step 6: Test Modality Switching on live pat_6 HDF5
+println("\n[6/6] Testing edge modality switching on pat_6...")
+MakieEventHandlers.switch_heatgdt_edge_modality!(:ct_only, vk_ctx)
+@test MakieEventHandlers.heatgdt_edge_modality[] == :ct_only
+@test heat_state.diffusivity_uploaded == true
+d_ct = InferenceClient._heatgdt_diffusivity[]
+@test d_ct !== nothing
+println("  ✓ Switched to CT-only edges: mean=$(round(sum(d_ct)/length(d_ct), digits=4))")
+
+MakieEventHandlers.switch_heatgdt_edge_modality!(:pet_only, vk_ctx)
+@test MakieEventHandlers.heatgdt_edge_modality[] == :pet_only
+@test heat_state.diffusivity_uploaded == true
+d_pet = InferenceClient._heatgdt_diffusivity[]
+@test d_pet !== nothing
+println("  ✓ Switched to PET-only edges: mean=$(round(sum(d_pet)/length(d_pet), digits=4))")
+
+@test abs(sum(d_ct)/length(d_ct) - sum(d_pet)/length(d_pet)) > 0.01f0
+println("  ✓ Distinct diffusivity fields between CT and PET verified!")
+
 # Cleanup
 println("\nCleaning up GPU resources...")
+MakieEventHandlers.switch_heatgdt_edge_modality!(:combined, vk_ctx)
 VulkanHeatDiffusion.destroy_heat_diffusion!(heat_state, vk_ctx)
 destroy_vulkan_context!(vk_ctx)
 GLFW.DestroyWindow(win)
