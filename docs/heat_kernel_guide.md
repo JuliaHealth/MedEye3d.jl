@@ -1,0 +1,304 @@
+# Complete Guide to the Heat-GDT GPU Interactive Segmentation Kernel
+
+## 1. Executive Summary & Theoretical Foundations
+
+### 1.1 What is Heat-GDT?
+**Heat-GDT** (*Heat Geodesic Distance Transform*) is an ultra-fast, interactive 3D volumetric lesion segmentation algorithm implemented directly on the GPU using Vulkan compute shaders. It replaces traditional active contours, level sets, and thresholding with a mathematically rigorous, boundary-respecting physical diffusion process.
+
+When an oncologist or radiologist clicks and holds the mouse button on a lesion center in MedEye3d, heat is injected as an initial spatial impulse and diffuses outward through the 3D volume. Diffusion is guided by an anisotropic conductivity field $D(\mathbf{x})$, which acts as an impenetrable barrier at anatomical edges and tumor boundaries while permitting rapid flow within homogeneous parenchyma.
+
+```
+       ┌────────────────────────────────────────────────────────┐
+       │             Learned 3D Edge Map E(x)                   │
+       │       (HED3D-Ultra Champion Checkpoint, [0, 1])        │
+       └───────────────────────────┬────────────────────────────┘
+                                   │
+                                   ▼
+       ┌────────────────────────────────────────────────────────┐
+       │         Diffusivity Field D(x) = exp(-γ · E(x))         │
+       │           (Stored as 3D R32_SFLOAT on GPU)             │
+       └───────────────────────────┬────────────────────────────┘
+                                   │
+                                   ▼
+       ┌────────────────────────────────────────────────────────┐
+       │         Anisotropic Heat Diffusion PDE on GPU:         │
+       │            ∂u/∂t = ∇ · (D(x) ∇u)                      │
+       │    • Anisotropic spacing weights (wx, wy, wz)          │
+       │    • Shape-adaptive frontier contrast boost (s_boost)  │
+       │    • Decoupled progressive visual ramp (θ_display)     │
+       └───────────────────────────┬────────────────────────────┘
+                                   │
+                                   ▼
+       ┌────────────────────────────────────────────────────────┐
+       │             Final Discrete Mask Commit:                │
+       │     seg_vol[x, y, z] = active_id where u(x, y, z) ≥ θ  │
+       └────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 1.2 Mathematical Formulation
+
+The physical diffusion of heat $u(\mathbf{x}, t)$ through an inhomogeneous, edge-aware medium is governed by the parabolic partial differential equation (PDE):
+
+$$\frac{\partial u(\mathbf{x}, t)}{\partial t} = \nabla \cdot \Big( D(\mathbf{x}) \nabla u(\mathbf{x}, t) \Big)$$
+
+subject to Neumann zero-flux (replicate) boundary conditions on the volume boundaries $\partial \Omega$:
+
+$$\nabla u(\mathbf{x}, t) \cdot \mathbf{n} = 0 \quad \text{on } \partial \Omega$$
+
+#### Edge-to-Conductivity Mapping
+The scalar diffusivity $D(\mathbf{x}) \in (0, 1]$ is derived from the learned continuous edge probability field $E(\mathbf{x}) \in [0, 1]$ produced by the champion HED3D-Ultra deep edge network:
+
+$$D(\mathbf{x}) = \exp\big(-\gamma \cdot E(\mathbf{x})\big)$$
+
+where $\gamma = 10.095886$ is the champion edge gain (Epoch 105). This maps:
+- **Homogeneous parenchyma / interior** ($E \approx 0.00$): $D \approx 1.00$ (maximum thermal conductivity, rapid expansion).
+- **Subtle soft-tissue margins** ($E \approx 0.05$): $D \approx 0.60$ (moderate barrier).
+- **Strong anatomical boundaries** ($E \ge 0.40$): $D \le 0.018$ (virtually zero conductivity, stopping propagation).
+
+---
+
+## 2. Core Breakthroughs in the Current Heat Kernel
+
+The current heat kernel in MedEye3d incorporates two critical mathematical breakthroughs designed specifically for clinical PET/CT and multimodal MRI:
+
+### 2.1 Breakthrough 1: Craniocaudal Anisotropic Spacing Compensation
+In clinical PET/CT and MRI, imaging grids are heavily **anisotropic**. A typical volume has in-plane pixel spacing $\Delta x \approx 0.78$ mm, $\Delta y \approx 0.78$ mm, but slice thickness $\Delta z \approx 2.5 - 3.25$ mm ($3\times$ to $4\times$ coarser).
+
+In a naive 6-neighbor finite-difference stencil, each grid step along $Z$ is treated identically to an in-plane step. Consequently, heat travels $3\times - 4\times$ faster in physical space along the craniocaudal axis, blowing past anatomical boundaries and squishing lesions into artificial ellipsoids.
+
+#### Discrete Formulation with Metric Normalization
+To strictly enforce isotropic physical diffusion across non-cubic voxels, the Laplacian flux is weighted by the inverse-squared voxel dimensions normalized by the smallest voxel size $s_{\min} = \min(\Delta x, \Delta y, \Delta z)$:
+
+$$w_x = \left(\frac{s_{\min}}{\Delta x}\right)^2, \quad w_y = \left(\frac{s_{\min}}{\Delta y}\right)^2, \quad w_z = \left(\frac{s_{\min}}{\Delta z}\right)^2$$
+
+For a typical scan with $(\Delta x, \Delta y, \Delta z) = (0.78, 0.78, 3.0)$ mm:
+$$w_x = 1.00, \quad w_y = 1.00, \quad w_z = \left(\frac{0.78}{3.00}\right)^2 \approx 0.0676$$
+
+The cross-slice flux along $Z$ is attenuated by **$14.8\times$**, guaranteeing that heat travels at the exact same physical speed (in mm/s) in all three dimensions. Furthermore, since $\max(w_x, w_y, w_z) = 1.0$, the Courant-Friedrichs-Lewy (CFL) numerical stability condition remains unconditionally satisfied with $\Delta t = 0.16$.
+
+---
+
+### 2.2 Breakthrough 2: Shape-Adaptive Local Edge Contrast
+Subtle anatomical interfaces (such as the prostate capsule, lymph node hilum, or pancreatic margins) often exhibit faint edge probabilities ($E \approx 0.025$). Under standard global gain $\gamma \approx 10$, this produces $D \approx 0.78$, allowing heat to slowly leak into neighboring organs during longer holds.
+
+#### The Mathematical Equivalence: $D^s \equiv \exp(-\gamma \cdot s \cdot E)$
+Rather than re-evaluating the expensive edge neural network or reallocating 3D texture fields, MedEye3d exploits the exponential identity:
+
+$$\exp\big(-\gamma \cdot s \cdot E(\mathbf{x})\big) = \Big(\exp\big(-\gamma E(\mathbf{x})\big)\Big)^s = D(\mathbf{x})^s$$
+
+Scaling the effective edge sharpness by an exponent $s$ is mathematically identical to re-evaluating the edge exponential with a boosted gain $\gamma \cdot s$, requiring **zero memory reallocations** and only **1 hardware ALU cycle** (`pow(D, s)`) in the Vulkan compute shader.
+
+#### The Frontier Shell Sampling Algorithm
+To determine the optimal local boost factor $s_{\text{boost}}$, the CPU samples a dilated outer spherical shell ahead of the advancing lesion boundary:
+1. Estimate current physical radius: $R_{\text{phys}}(t) \approx 3.0 + 2.0 \cdot \sqrt{\text{total\_steps} \cdot \Delta t} \cdot \bar{s}$.
+2. Sample the outer shell band between $[R_{\text{phys}} - 6.0\text{ mm}, R_{\text{phys}}]$ in the diffusivity field.
+3. Invert sampled $D$ to obtain edge strength: $E = -\ln(\max(D, 10^{-7})) / \gamma$.
+4. Compute the mean frontier edge strength $\bar{E}_{\text{frontier}}$ and evaluate the contrast boost exponent:
+   $$s_{\text{boost}} = \text{clamp}\left(\left(\frac{E_{\text{ref}}}{\max(\bar{E}_{\text{frontier}}, 0.01)}\right)^{\text{sensitivity}}, 0.5, 10.0\right)$$
+   where $E_{\text{ref}} = 0.20$ is the nominal reference boundary edge strength.
+
+#### Core-to-Frontier Transition Function
+Applying $s_{\text{boost}}$ uniformly inside the lesion core would prematurely choke heat propagation. MedEye3d resolves this with a smooth, continuous transition function in GLSL:
+
+$$w(u_c) = \text{clamp}\left(\frac{u_{\text{core}} - u_c}{u_{\text{core}} - \theta}, 0.0, 1.0\right), \quad u_{\text{core}} = 0.05$$
+
+$$s_{\text{eff}} = \text{mix}(s_{\text{boost}}, 1.0, w(u_c))$$
+
+$$D_{\text{eff}} = \text{clamp}(D_c^{s_{\text{eff}}}, 10^{-5}, 1.0)$$
+
+- **Hot Core** ($u_c \ge 0.05$): $w(u_c) = 0 \implies s_{\text{eff}} = 1.0$ (maximum flow, rapid volume fill).
+- **Advancing Frontier** ($u_c \to \theta$): $w(u_c) \to 1 \implies s_{\text{eff}} \to s_{\text{boost}}$ (impenetrable barrier at soft-tissue margins).
+
+---
+
+## 3. Multimodal Guidance: Combined vs CT Only vs PET Only
+
+Lesions often appear differently across modalities:
+- **CT Only**: Superior for bony lesions, lung nodules, and high-contrast organ boundaries (liver capsule, kidney cortex).
+- **PET Only**: Superior for metabolic active tumors lacking distinct CT density changes (e.g., peritoneal metastases, subtle lymphadenopathy).
+- **Combined (CT+PET)**: Default fusion combining metabolic activity with anatomical boundaries.
+
+MedEye3d precomputes and caches three distinct 3D diffusivity fields in the case HDF5 file:
+1. `"diffusivity"`: Dual-modality combined CT+PET.
+2. `"diffusivity_ct"`: CT-only guidance (PET channel masked to 0.0).
+3. `"diffusivity_pet"`: PET-only guidance (CT channel masked to air baseline of -1024 HU).
+
+When the user selects an edge source from the GUI, [`switch_heatgdt_edge_modality!`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L358-L373) fetches the desired tensor from the in-memory cache and re-uploads it to the GPU via a staging buffer copy without destroying or recreating the compute pipeline.
+
+---
+
+## 4. How to Use Heat-GDT in the MedEye3d GUI
+
+### 4.1 Activation
+1. **Shortcut**: Press the **`W`** key anywhere in the viewer to toggle Wand / Heat-GDT mode.
+2. **GUI Menu**: In the **Lesion Metadata Window** (right-hand panel), open the **AI** dropdown and select **`Heat-GDT`**.
+
+```
+┌────────────────────────────────────────────────────────┐
+│ AI: [ Heat-GDT              ▼ ] [ Run AI ]             │
+│ θ: [───●──────────────────────] K: [──────●──────────] │
+│ Speed: [─────────●────────────]                        │
+│ Size ±: [──────────●───────────] [ Reset ]             │
+│ Edge: [ Combined            ▼ ]                        │
+│ Adapt: [ON]    Sens: [────●───]                        │
+│ θ controls sensitivity (size). K controls smoothness.  │
+└────────────────────────────────────────────────────────┘
+```
+
+### 4.2 Interactive Controls Explained
+
+| Control | Parameter | Default | Function |
+| :--- | :--- | :--- | :--- |
+| **θ (Theta)** | `heatgdt_theta` | `0.001` | **Base Segmentation Threshold**. Lower values (e.g. 0.0005) produce larger, more inclusive segmentations; higher values (e.g. 0.005) produce tighter, core-only segmentations. |
+| **K** | `heatgdt_K` | `40` | **Diffusion Iterations / Boundary Smoothness**. Number of Euler steps. Higher values yield smoother geodesic boundaries. |
+| **Speed** | `HEAT_DISPLAY_RAMP_RATE` | `12.0` | **Visual Expansion Speed**. Decoupled exponential display ramp rate. Controls how quickly the visual overlay catches up to the underlying GPU computation. |
+| **Size ±** | Post-hoc adjustment | `0.0` | **Live Lesion Resizing**. Allows growing or shrinking the committed lesion mask after mouse release without re-painting. |
+| **Edge** | `heatgdt_edge_modality` | `Combined` | **Edge Guidance Source**. Dropdown options: `Combined`, `CT Only`, or `PET Only`. Immediately switches the active GPU barrier tensor. |
+| **Adapt** | `heatgdt_adaptive_contrast`| `true` | **Adaptive Local Contrast Boost**. When enabled, dynamically measures edge strength around the advancing shell and sharpens soft-tissue margins. |
+| **Sens** | `heatgdt_sensitivity` | `1.0` | **Contrast Sensitivity**. Exponent scale (0.5 to 2.0). Increase to 1.5–2.0 for very faint soft-tissue lesions. |
+
+### 4.3 Click-and-Hold Workflow
+1. Move the cursor over the lesion center in any 2D view (axial, sagittal, coronal, or MRI quadrant).
+2. **Click and hold the Left Mouse Button**.
+3. Watch the green/colored overlay expand smoothly in real time across all viewing planes at >60 FPS.
+4. **Release the mouse button** when the lesion boundary matches the anatomical tumor margin. The continuous heat field is automatically discretized into integer labels in `seg_vol` and autosaved.
+5. If the lesion is slightly too small or large, adjust the **Size ±** slider to expand or contract it post-hoc.
+
+---
+
+## 5. Where is the Code & External Test Scripts
+
+All source code and automated test scripts are located directly within the repository.
+
+### 5.1 Source Code Map
+
+| File Path | Description | Key Functions / Structs |
+| :--- | :--- | :--- |
+| [`src/display/Vulkan/shaders/diffuse_step.comp`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/shaders/diffuse_step.comp) | Vulkan GLSL compute shader | PDE finite difference update, metric weights `inv_d2.xyz`, frontier transition `mix(s_boost, 1.0, w)` |
+| [`src/display/Vulkan/VulkanHeatDiffusion.jl`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl) | Julia Vulkan compute wrapper | [`compute_frontier_edge_scale`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L219), [`seed_only!`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L973), [`run_incremental_steps!`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L1077), [`DiffuseStepPC`](file:///workspaces/MedEye3d.jl/src/display/Vulkan/VulkanHeatDiffusion.jl#L42) |
+| [`src/display/GLFW/MakieEventHandlers.jl`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl) | Event dispatch & async tick loop | [`reactToHeatGDTStart`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6470), [`reactToHeatGDTTick`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6671), [`reactToHeatGDTStop`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L6809), [`switch_heatgdt_edge_modality!`](file:///workspaces/MedEye3d.jl/src/display/GLFW/MakieEventHandlers.jl#L358) |
+| [`src/display/LesionMetadataWindow.jl`](file:///workspaces/MedEye3d.jl/src/display/LesionMetadataWindow.jl) | Makie GUI controls | Menu dropdown, adaptive toggle, sensitivity slider (lines 8620–8665) |
+| [`src/display/InferenceClient.jl`](file:///workspaces/MedEye3d.jl/src/display/InferenceClient.jl) | CPU fallback Heat-GDT | [`run_heatgdt`](file:///workspaces/MedEye3d.jl/src/display/InferenceClient.jl#L938) with anisotropic spacing and `s_boost` |
+| [`src/preprocessing/OrganHeatLesionTracker.jl`](file:///workspaces/MedEye3d.jl/src/preprocessing/OrganHeatLesionTracker.jl) | Multi-timepoint lesion propagation | [`grow_heat_kernel_lesion`](file:///workspaces/MedEye3d.jl/src/preprocessing/OrganHeatLesionTracker.jl#L381) with anisotropic spacing and `s_boost` |
+| [`scripts/preprocessing/generate_modality_diffusivities.jl`](file:///workspaces/MedEye3d.jl/scripts/preprocessing/generate_modality_diffusivities.jl) | Batch precomputation CLI on GPU 1 | Sliding-window HED3D-Ultra inference with channel masking for HDF5 |
+
+---
+
+### 5.2 Standalone External Automated Test Suite
+
+To verify the heat kernel externally in a terminal, CI/CD pipeline, or headless environment, run the following test commands:
+
+#### Test 1: Shape-Adaptive Local Edge Contrast & Barrier Confinement
+Verifies frontier edge sampling and tests that boosted adaptive diffusion ($s=6.0$) strictly confines diffusion at weak soft-tissue boundaries ($D=0.35$) where standard diffusion ($s=1.0$) leaks:
+```bash
+CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_adaptive_local_edges.jl
+```
+*Expected Result:* `Test Summary: Pass 7, Total 7. All tests PASSED.`
+
+#### Test 2: Edge Modality Switching & Caching
+Verifies seamless switching between `Combined`, `CT Only`, and `PET Only` edge tensors, cache hits, and fallback to `"diffusivity"`:
+```bash
+CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_modality_edge_switch.jl
+```
+*Expected Result:* `Test Summary: Pass 13, Total 13. All tests PASSED.`
+
+#### Test 3: Craniocaudal Anisotropic Spacing Verification
+Compares isotropic spacing $(1.0, 1.0, 1.0)$ against clinical anisotropic spacing $(0.78, 0.78, 3.0)$ on GPU and CPU, proving craniocaudal leakage suppression:
+```bash
+CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_anisotropic_heat_diffusion.jl
+```
+*Expected Result:* `Test Summary: Pass 9, Total 9. All tests PASSED.`
+
+#### Test 4: Vulkan Compute Pipeline & Memory Allocation
+Verifies 3D storage image allocation, ping-pong compute buffers, push constant layout, and staging buffer readbacks:
+```bash
+CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_vulkan_heat_pipeline.jl
+```
+*Expected Result:* `Test Summary: Pass 13, Total 13. All tests PASSED.`
+
+#### Test 5: Full Clinical Patient 6 End-to-End Integration Test
+Runs on the full $512 \times 512 \times 326$ clinical patient volume (`pat_6_files/preprocessed_volumes.h5`), tests seeding, incremental stepping, timepoint re-upload, and live switching between `diffusivity_ct` and `diffusivity_pet`:
+```bash
+CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_heatgdt_integration_pat6.jl
+```
+*Expected Result:* `ALL HEAT-GDT INTEGRATION TESTS PASSED ✓`
+
+#### Test 6: Multi-Timepoint Organ & Lesion Tracking Pipeline
+Verifies organ centroid IDW tracking, exclusion organ masking, and heat-kernel lesion growth across multiple timepoints:
+```bash
+CUDA_VISIBLE_DEVICES=0 julia --threads=1 --project=. test/test_organ_heat_lesion_mapping.jl
+```
+*Expected Result:* `Test Summary: Pass 112, Total 112. All tests PASSED.`
+
+---
+
+## 6. How to Run Heat-GDT Programmatically (Headless Example)
+
+You can run the GPU heat kernel in standalone Julia scripts without launching the Makie GUI:
+
+```julia
+using MedEye3d
+using MedEye3d.VulkanBackend
+using MedEye3d.VulkanBackend.VulkanContext
+using MedEye3d.VulkanBackend.VulkanHeatDiffusion
+using GLFW
+
+# 1. Initialize headless Vulkan context
+GLFW.Init()
+GLFW.WindowHint(GLFW.CLIENT_API, GLFW.NO_API)
+GLFW.WindowHint(GLFW.VISIBLE, 0)
+window = GLFW.CreateWindow(256, 256, "Headless Heat Kernel")
+ctx = init_vulkan_context(window, 256, 256)
+
+# 2. Allocate GPU heat diffusion state for volume dimensions (W, H, D)
+w, h, d = 512, 512, 326
+state = HeatDiffusionState()
+init_heat_diffusion!(state, ctx, w, h, d)
+
+# 3. Upload precomputed 3D diffusivity field (Float32)
+# diffusivity = ... (from HDF5: read(h5["BASELINE/diffusivity_ct"]))
+upload_diffusivity!(state, ctx, diffusivity)
+
+# 4. Physical voxel dimensions (dx, dy, dz) in mm
+spacing = (0.9765625, 0.9765625, 3.27)
+
+# 5. Compute adaptive frontier contrast boost for lesion at (cx, cy, cz)
+cx, cy, cz = 256, 256, 160
+s_boost = compute_frontier_edge_scale(diffusivity, cx, cy, cz, 18.0, spacing; sensitivity=1.2f0)
+
+# 6. Seed heat impulse at lesion center
+seed_only!(state, ctx, cx, cy, cz; seed_radius=2, spacing=spacing, s_boost=s_boost)
+
+# 7. Run incremental diffusion steps on GPU
+# K = 40 steps, dt = 0.16, theta = 0.001
+run_incremental_steps!(state, ctx, 40; dt=0.16f0, theta=0.001f0, spacing=spacing, s_boost=s_boost)
+
+# 8. Read extracted binary mask back to CPU memory
+mask = read_mask_to_cpu(state, ctx)
+voxel_count = count(mask .> 0.5f0)
+println("Segmented lesion volume: $voxel_count voxels")
+
+# 9. Clean up GPU resources
+destroy_heat_diffusion!(state, ctx)
+destroy_vulkan_context!(ctx)
+GLFW.DestroyWindow(window)
+GLFW.Terminate()
+```
+
+---
+
+## 7. How to Precompute Modality Diffusivities on GPU 1
+
+To precompute `diffusivity_ct` and `diffusivity_pet` for a new patient or HDF5 case using GPU 1 (`CUDA_VISIBLE_DEVICES=1`), run:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 julia --threads=1 --project=. scripts/preprocessing/generate_modality_diffusivities.jl /path/to/case/preprocessed_volumes.h5
+```
+
+Optional flags:
+- `--ct-only`: Precompute only the CT edge field.
+- `--pet-only`: Precompute only the PET edge field.
+
+The script runs sliding-window inference with the champion HED3D-Ultra model, masks the non-target modality channels, evaluates $D = \exp(-\gamma E)$, and writes datasets directly into the HDF5 study groups.
