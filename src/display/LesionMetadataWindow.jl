@@ -9408,6 +9408,9 @@ function create_metadata_window(
                 end
             catch; end
             put!(db_channel, SaveDBMessage(db, global_app_state, save_path, h5_target))
+            if !isempty(_MEH.dirty_anatomy_tps) || !isempty(_MEH.dirty_mask_tps)
+                _MEH.flush_all_dirty_masks!()
+            end
         catch; end
     end
 
@@ -11045,6 +11048,7 @@ function create_metadata_window(
                 persist_to_active_dataset_h5!(lesion_db[], h5_act)
             end
         end
+        try _MEH.flush_all_dirty_masks!() catch; end
 
         _MEH.lymph_node_validation_mode[] = active
         if active

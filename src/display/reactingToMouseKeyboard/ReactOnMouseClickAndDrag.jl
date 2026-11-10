@@ -2122,7 +2122,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 elseif dat.name == "PET" && checkbounds(Bool, dat.dat, lx, ly, lz)
                     suv = dat.dat[lx, ly, lz]
                     push!(parts, "SUV: $(round(suv, digits=2))")
-                elseif (dat.name == "Mask" || dat.name == "segmentation") && checkbounds(Bool, dat.dat, lx, ly, lz)
+                elseif (dat.name == "Mask" || dat.name == "segmentation") && !MEH.lymph_node_validation_mode[] && checkbounds(Bool, dat.dat, lx, ly, lz)
                     mask_val = dat.dat[lx, ly, lz]
                     if mask_val > 0 && MEH._lesion_active[]
                         lid = Int(round(mask_val))
@@ -2203,7 +2203,7 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                             push!(parts, label)
                         end
                     end
-                elseif dat.name == "Anatomy" && MEH._anatomy_active[] && checkbounds(Bool, dat.dat, lx, ly, lz)
+                elseif dat.name == "Anatomy" && (MEH._anatomy_active[] || MEH.lymph_node_validation_mode[]) && checkbounds(Bool, dat.dat, lx, ly, lz)
                     anat_val = Int(round(dat.dat[lx, ly, lz]))
                     if anat_val > 0
                         is_right_panel = (MEH.compare_mode[] && clickedPanel in (5, 6, 7, 8, 9)) || is_mri_cmp_cur
@@ -2214,21 +2214,58 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                         else
                             MEH.current_tp_index[]
                         end
-                        # Look up anatomy label from per-TP cached names or global
-                        anat_name = try
-                            labels = get(MEH.anatomy_labels_cache, panel_tp, Dict{Int,String}())
-                            lbl = get(labels, anat_val, "")
-                            if isempty(lbl) || occursin("class_", lbl)
-                                # Fallback to global ts_names (actual organ names)
-                                get(MEH.global_ts_names[], anat_val, "")
-                            else
-                                lbl
-                            end
-                        catch
-                            ""
+                        
+                        is_ln_mode = MEH.lymph_node_validation_mode[]
+                        ln_ids = is_ln_mode ? MEH.get_lymph_node_label_ids(panel_tp) : Set{Int}()
+                        
+                        # In single mode, only report the active structure displayed on screen
+                        is_visible_anat = if !is_ln_mode
+                            MEH._anatomy_active[]
+                        elseif MEH.is_single_lesion_mode[]
+                            anat_val == MEH.current_active_lesion_id[]
+                        else
+                            anat_val in ln_ids
                         end
-                        if !isempty(anat_name)
-                            push!(parts, anat_name)
+                        
+                        if is_visible_anat
+                            if is_ln_mode
+                                ts_map = get(MEH.anatomy_labels_cache, panel_tp, MEH.global_ts_names[])
+                                if isempty(ts_map)
+                                    ts_map = MEH.global_ts_names[]
+                                end
+                                raw_ln = get(ts_map, anat_val, "")
+                                ln_name = try
+                                    LA_mod = MEH._get_la()
+                                    if LA_mod !== nothing && !isempty(raw_ln)
+                                        LA_mod.format_clinical_station_name(raw_ln)
+                                    else
+                                        replace(raw_ln, "_" => " ")
+                                    end
+                                catch
+                                    replace(raw_ln, "_" => " ")
+                                end
+                                if isempty(ln_name)
+                                    ln_name = "LN Area $anat_val"
+                                end
+                                push!(parts, "$ln_name (LN $anat_val)")
+                            else
+                                # Look up anatomy label from per-TP cached names or global
+                                anat_name = try
+                                    labels = get(MEH.anatomy_labels_cache, panel_tp, Dict{Int,String}())
+                                    lbl = get(labels, anat_val, "")
+                                    if isempty(lbl) || occursin("class_", lbl)
+                                        # Fallback to global ts_names (actual organ names)
+                                        get(MEH.global_ts_names[], anat_val, "")
+                                    else
+                                        lbl
+                                    end
+                                catch
+                                    ""
+                                end
+                                if !isempty(anat_name)
+                                    push!(parts, anat_name)
+                                end
+                            end
                         end
                     end
                 end
@@ -2261,7 +2298,12 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                 if title != _last_window_title[]
                     _last_window_title[] = title
                     _last_title_update_time[] = now_t
-                    GLFW.SetWindowTitle(panelState.mainForDisplayObjects.window, title)
+                    try
+                        win = panelState.mainForDisplayObjects.window
+                        if win !== nothing && isdefined(win, :handle) && win.handle != C_NULL
+                            GLFW.SetWindowTitle(win, title)
+                        end
+                    catch; end
                 end
             end
         end

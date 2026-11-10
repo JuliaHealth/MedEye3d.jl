@@ -1400,6 +1400,11 @@ function reactToToggleSingleMultiLesion(data::MakieEvents.ToggleSingleMultiLesio
         @warn "Failed to update LesionMetadataWindow UI on M key: $e"
     end
     
+    if lymph_node_validation_mode[]
+        mode_str = is_single_lesion_mode[] ? "Single Lymph Node (LN $(current_active_lesion_id[]))" : "All Lymph Node Areas"
+        set_ai_status!("[LN Mode] $mode_str")
+    end
+    
     # And trigger render
     if changed
         ReactToScroll.reactToScrollMultiPanel!(collect(1:length(stateObjects)), stateObjects)
@@ -2071,25 +2076,44 @@ function reactToDeleteLesion(data::MakieEvents.DeleteLesionEvent, stateObjects::
     lock(_tp_cache_lock) do
         for (tp_i, entry) in tp_data_cache
             changed = false
-            for idx in findall(==(Int16(lid)), entry.mask_i16)
-                entry.mask_i16[idx] = Int16(0)
-                if eltype(entry.mask) == Int8
-                    entry.mask[idx] = Int8(0)
-                else
-                    entry.mask[idx] = zero(eltype(entry.mask))
+            if lymph_node_validation_mode[]
+                if entry.anat_i16 !== nothing
+                    for idx in findall(==(Int16(lid)), entry.anat_i16)
+                        entry.anat_i16[idx] = Int16(0)
+                        changed = true
+                    end
                 end
-                changed = true
-            end
-            if changed
-                mark_tp_mask_dirty!(tp_i)
+                if entry.anatomy !== nothing && entry.anatomy !== entry.anat_i16
+                    for idx in findall(==(UInt16(lid)), entry.anatomy)
+                        entry.anatomy[idx] = UInt16(0)
+                        changed = true
+                    end
+                end
+                if changed
+                    mark_tp_anatomy_dirty!(tp_i)
+                end
+            else
+                for idx in findall(==(Int16(lid)), entry.mask_i16)
+                    entry.mask_i16[idx] = Int16(0)
+                    if eltype(entry.mask) == Int8
+                        entry.mask[idx] = Int8(0)
+                    else
+                        entry.mask[idx] = zero(eltype(entry.mask))
+                    end
+                    changed = true
+                end
+                if changed
+                    mark_tp_mask_dirty!(tp_i)
+                end
             end
         end
     end
 
     # 4b. Zero matching mask voxels directly in stateObjects onScrollData buffers
+    target_scr_names = lymph_node_validation_mode[] ? ("Anatomy",) : ("Mask", "manualModif", "segmentation", "mask")
     for p in 1:length(stateObjects)
         for scrDat in stateObjects[p].onScrollData.dataToScroll
-            if scrDat.name in ("Mask", "manualModif", "segmentation", "mask")
+            if scrDat.name in target_scr_names
                 try
                     for idx in findall(x -> x == lid, scrDat.dat)
                         scrDat.dat[idx] = zero(eltype(scrDat.dat))
@@ -2881,8 +2905,8 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                         textSpec.minAndMaxValue = T_mm.([target_id, target_id])
                     else
                         ln_ids = get_lymph_node_label_ids(panel_tp)
-                        max_ln = isempty(ln_ids) ? 400 : max(400, maximum(ln_ids))
                         min_ln = isempty(ln_ids) ? 1 : minimum(ln_ids)
+                        max_ln = isempty(ln_ids) ? 63 : maximum(ln_ids)
                         textSpec.minAndMaxValue = T_mm.([min_ln, max_ln])
                     end
                     textSpec.isVisible = true
@@ -3411,8 +3435,9 @@ function mark_tp_mask_dirty!(tp_idx::Int)
 end
 
 function mark_tp_anatomy_dirty!(tp_idx::Int)
+    (tp_idx < 0) && return
     _last_paint_event_time[] = time()
-    (tp_idx in dirty_anatomy_tps) && return
+    _ensure_mask_autosave_task!()
     lock(_mask_save_lock) do
         push!(dirty_anatomy_tps, tp_idx)
     end
@@ -3457,20 +3482,34 @@ function save_tp_anatomy_to_h5(tp_i::Int)::Bool
                 end
                 ds_path_expert = "$group/max_anatomy.nii.gz_expert"
                 if haskey(h5_file, ds_path_expert)
-                    HDF5.delete_object(h5_file, ds_path_expert)
+                    try
+                        h5_file[ds_path_expert][:, :, :] = UInt16.(max.(0, anat_to_save))
+                    catch
+                        HDF5.delete_object(h5_file, ds_path_expert)
+                        h5_file[ds_path_expert] = UInt16.(max.(0, anat_to_save))
+                    end
+                else
+                    h5_file[ds_path_expert] = UInt16.(max.(0, anat_to_save))
                 end
-                h5_file[ds_path_expert] = UInt16.(max.(0, anat_to_save))
                 if tp_i == 0
                     if !haskey(h5_file, "ATLAS")
                         HDF5.create_group(h5_file, "ATLAS")
                     end
                     if haskey(h5_file, "ATLAS/max_anatomy_expert")
-                        HDF5.delete_object(h5_file, "ATLAS/max_anatomy_expert")
+                        try
+                            h5_file["ATLAS/max_anatomy_expert"][:, :, :] = UInt16.(max.(0, anat_to_save))
+                        catch
+                            HDF5.delete_object(h5_file, "ATLAS/max_anatomy_expert")
+                            h5_file["ATLAS/max_anatomy_expert"] = UInt16.(max.(0, anat_to_save))
+                        end
+                    else
+                        h5_file["ATLAS/max_anatomy_expert"] = UInt16.(max.(0, anat_to_save))
                     end
-                    h5_file["ATLAS/max_anatomy_expert"] = UInt16.(max.(0, anat_to_save))
                 end
-                # Also persist updated LN centroids in CENTROIDS group
+                # Also recompute & persist updated LN centroids in CENTROIDS group
                 try
+                    node_name = length(study) >= 7 ? String(study[7]) : ""
+                    precompute_anatomy_ln_centroids!(anat_vol, tp_i, node_name)
                     if !haskey(h5_file, "CENTROIDS")
                         HDF5.create_group(h5_file, "CENTROIDS")
                     end
@@ -3481,9 +3520,15 @@ function save_tp_anatomy_to_h5(tp_i::Int)::Bool
                                 aid = k[2]
                                 ckey = "tp$(tp_i)_ln$(aid)"
                                 if haskey(c_grp, ckey)
-                                    HDF5.delete_object(c_grp, ckey)
+                                    try
+                                        c_grp[ckey][:] = Int32.(coords)
+                                    catch
+                                        HDF5.delete_object(c_grp, ckey)
+                                        c_grp[ckey] = Int32.(coords)
+                                    end
+                                else
+                                    c_grp[ckey] = Int32.(coords)
                                 end
-                                c_grp[ckey] = Int32.(coords)
                             end
                         end
                     end
@@ -3823,12 +3868,22 @@ function load_measurements_from_h5!(tp_i::Int, obj)
         @warn "Failed to load measurements from HDF5" exception=e
     end
     
-    if !isempty(serialized)
+    meas_target = if obj isa AbstractVector && !isempty(obj) && hasproperty(obj[1], :mainForDisplayObjects)
+        obj[1].mainForDisplayObjects
+    elseif obj !== nothing && hasproperty(obj, :measurements)
+        obj
+    elseif obj !== nothing && hasproperty(obj, :mainForDisplayObjects)
+        obj.mainForDisplayObjects
+    else
+        nothing
+    end
+
+    if meas_target !== nothing && !isempty(serialized)
         spheres, lines = Meas.deserialize_measurements(serialized)
-        empty!(obj.measurements)
-        append!(obj.measurements, spheres)
-        empty!(obj.line_measurements)
-        append!(obj.line_measurements, lines)
+        empty!(meas_target.measurements)
+        append!(meas_target.measurements, spheres)
+        empty!(meas_target.line_measurements)
+        append!(meas_target.line_measurements, lines)
         println("  [AUTOSAVE-MEAS] Loaded $(length(spheres)) spheres + $(length(lines)) lines from $group"); flush(stdout)
         # Trigger GUI refresh so measurement rows appear
         try
@@ -4841,15 +4896,13 @@ function reactToSetLNValidationMode(data::MakieEvents.SetLNValidationModeEvent, 
                 stateObject.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
             end
         end
-        if stateObject.valueForMasToSet.is_painting_active
-            for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
-                if data.active && textSpec.name == "Anatomy"
-                    stateObject.textureToModifyVec = [textSpec]
-                    break
-                elseif !data.active && textSpec.name == "Mask"
-                    stateObject.textureToModifyVec = [textSpec]
-                    break
-                end
+        for textSpec in stateObject.mainForDisplayObjects.listOfTextSpecifications
+            if data.active && textSpec.name == "Anatomy"
+                stateObject.textureToModifyVec = [textSpec]
+                break
+            elseif !data.active && (textSpec.name == "Mask" || textSpec.name == "segmentation")
+                stateObject.textureToModifyVec = [textSpec]
+                break
             end
         end
         stateObject.isSliceChanged = true
@@ -5110,7 +5163,7 @@ end
 
 function reactToSetTimePoint(data::SetTimePointEvent, stateObjects::Vector{StateDataFields})
     t_total = time_ns()
-    if !isempty(dirty_mask_tps); Threads.@spawn flush_all_dirty_masks!(); end
+    if !isempty(dirty_mask_tps) || !isempty(dirty_anatomy_tps) || !isempty(dirty_bone_subsegs); Threads.@spawn flush_all_dirty_masks!(); end
     # Save measurements before TP switch
     try
         if _measurement_dirty[] && _main_obj_ref[] !== nothing
@@ -7109,7 +7162,7 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
         tp1 = stateObjects[1]
         seg_vol = nothing
         for dat in tp1.onScrollData.dataToScroll
-            if dat.name == "Mask" || dat.name == "segmentation"
+            if (lymph_node_validation_mode[] && dat.name == "Anatomy") || (!lymph_node_validation_mode[] && (dat.name == "Mask" || dat.name == "segmentation"))
                 seg_vol = dat.dat
                 break
             end
@@ -7312,7 +7365,7 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
         tp1 = stateObjects[1]
         seg_vol = nothing
         for dat in tp1.onScrollData.dataToScroll
-            if dat.name == "Mask" || dat.name == "segmentation"
+            if (lymph_node_validation_mode[] && dat.name == "Anatomy") || (!lymph_node_validation_mode[] && (dat.name == "Mask" || dat.name == "segmentation"))
                 seg_vol = dat.dat
                 break
             end
@@ -7370,18 +7423,31 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
                 haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
             end
             if entry !== nothing
-                if entry.mask isa Array{Int8, 3}
-                    entry.mask .= clamp.(seg_vol, Int8(-128), Int8(127))
-                elseif entry.mask !== seg_vol
-                    entry.mask .= seg_vol
+                if lymph_node_validation_mode[]
+                    if entry.anat_i16 !== seg_vol && entry.anat_i16 !== nothing
+                        entry.anat_i16 .= seg_vol
+                    end
+                    if entry.anatomy !== seg_vol && entry.anatomy !== nothing
+                        entry.anatomy .= UInt16.(max.(0, seg_vol))
+                    end
+                    mark_tp_anatomy_dirty!(tp_idx)
+                    active_id_int = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
+                    mark_expert_edit!(active_id_int)
+                    invalidate_and_recompute_lesion_metrics_async!(active_id_int, tp_idx, entry.anat_i16 !== nothing ? entry.anat_i16 : seg_vol)
+                else
+                    if entry.mask isa Array{Int8, 3}
+                        entry.mask .= clamp.(seg_vol, Int8(-128), Int8(127))
+                    elseif entry.mask !== seg_vol
+                        entry.mask .= seg_vol
+                    end
+                    if entry.mask_i16 !== seg_vol
+                        entry.mask_i16 .= seg_vol
+                    end
+                    mark_tp_mask_dirty!(tp_idx)
+                    active_id_int = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
+                    mark_expert_edit!(active_id_int)
+                    invalidate_and_recompute_lesion_metrics_async!(active_id_int, tp_idx, seg_vol)
                 end
-                if entry.mask_i16 !== seg_vol
-                    entry.mask_i16 .= seg_vol
-                end
-                mark_tp_mask_dirty!(tp_idx)
-                active_id_int = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
-                mark_expert_edit!(active_id_int)
-                invalidate_and_recompute_lesion_metrics_async!(active_id_int, tp_idx, seg_vol)
             end
             
             # ── Synchronize Heat-GDT lesion mask across all MRI modalities ──
@@ -7463,19 +7529,34 @@ function reactToHeatGDTPosthocSize(event::MakieEvents.HeatGDTPosthocSizeEvent, s
             haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
         end
         if entry !== nothing
-            if entry.mask isa Array{Int8, 3}
-                entry.mask .= clamp.(seg_vol, Int8(-128), Int8(127))
-            elseif entry.mask !== seg_vol
-                entry.mask .= seg_vol
-            end
-            if entry.mask_i16 !== seg_vol
-                entry.mask_i16 .= seg_vol
-            end
-            mark_tp_mask_dirty!(tp_idx)
-            active_id_int = Int(HEAT_GDT_LAST_TARGET_ID[])
-            if active_id_int > 0
-                mark_expert_edit!(active_id_int)
-                invalidate_and_recompute_lesion_metrics_async!(active_id_int, tp_idx, seg_vol)
+            if lymph_node_validation_mode[]
+                if entry.anat_i16 !== seg_vol && entry.anat_i16 !== nothing
+                    entry.anat_i16 .= seg_vol
+                end
+                if entry.anatomy !== seg_vol && entry.anatomy !== nothing
+                    entry.anatomy .= UInt16.(max.(0, seg_vol))
+                end
+                mark_tp_anatomy_dirty!(tp_idx)
+                active_id_int = Int(HEAT_GDT_LAST_TARGET_ID[])
+                if active_id_int > 0
+                    mark_expert_edit!(active_id_int)
+                    invalidate_and_recompute_lesion_metrics_async!(active_id_int, tp_idx, entry.anat_i16 !== nothing ? entry.anat_i16 : seg_vol)
+                end
+            else
+                if entry.mask isa Array{Int8, 3}
+                    entry.mask .= clamp.(seg_vol, Int8(-128), Int8(127))
+                elseif entry.mask !== seg_vol
+                    entry.mask .= seg_vol
+                end
+                if entry.mask_i16 !== seg_vol
+                    entry.mask_i16 .= seg_vol
+                end
+                mark_tp_mask_dirty!(tp_idx)
+                active_id_int = Int(HEAT_GDT_LAST_TARGET_ID[])
+                if active_id_int > 0
+                    mark_expert_edit!(active_id_int)
+                    invalidate_and_recompute_lesion_metrics_async!(active_id_int, tp_idx, seg_vol)
+                end
             end
             
             # ── Synchronize Heat-GDT lesion mask across all MRI modalities ──

@@ -25,8 +25,9 @@ if [ -f "/etc/vulkan/icd.d/nvidia_icd.json" ]; then
 fi
 
 
-# Performance & multi-threading
-export JULIA_NUM_THREADS=4,1
+# Performance & single-threaded GUI stability
+export JULIA_NUM_THREADS=1
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
 export HDF5_USE_FILE_LOCKING=FALSE
 
 # Ensure we run from repository root
@@ -73,8 +74,4 @@ echo ""
 echo "============================================================"
 echo ""
 
-julia --project=. -e '
-    using MedEye3d
-    using MedEye3d.AppMain
-    AppMain.launch_from_h5(ARGS[1])
-' "$H5_PATH" 2>&1 | tee "$LOG_FILE"
+julia --project=. --threads=1 scripts/app/run_interactive_mrb.jl "$H5_PATH" 2>&1 | tee "$LOG_FILE"
