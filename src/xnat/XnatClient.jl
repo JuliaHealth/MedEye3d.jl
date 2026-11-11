@@ -14,6 +14,7 @@ using ..XnatAuth
 export list_projects,
        list_subjects,
        list_experiments,
+       list_project_experiments,
        list_scans,
        list_subject_resources,
        get_case_status,
@@ -70,10 +71,10 @@ Maps pipeline display names to their actual XNAT project IDs (e.g. `FDM_DPI-2024
 """
 function resolve_project_id(project_id::AbstractString)::String
     p = strip(project_id)
-    if p == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" || p == "Lu177_PSMA"
+    if p == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" || p == "Lu177_PSMA" || p == "FDM_DPI-2024-7-KRN_Lu177_PSMA"
         return "Lu177_PSMA_PIPELINE"
-    elseif p == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" || p == "Prostata_bimodal"
-        return "Prostata_bimodal_PIPELINE"
+    elseif p == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" || p == "Prostata_bimodal_PIPELINE" || p == "Prostata_bimodal" || p == "FDM_DPI-2024-7-KRN_Prostata_bimodal"
+        return "Prostata_bimodal"
     end
     return String(p)
 end
@@ -93,7 +94,7 @@ function resolve_subject_label(creds::XnatCredentials, project_id::AbstractStrin
         lbl = get(subj, "label", "")
         id = get(subj, "ID", "")
         if lbl == s || id == s
-            return lbl
+            return !isempty(lbl) ? lbl : id
         end
     end
     # 2. Case-insensitive suffix or pattern match (e.g. "pat6" or "Pat6")
@@ -102,8 +103,10 @@ function resolve_subject_label(creds::XnatCredentials, project_id::AbstractStrin
     if !isempty(target_num)
         for subj in subjects
             lbl = get(subj, "label", "")
-            if occursin(Regex("[pP]at$(target_num)(?:[\\s_]|\$)"), lbl)
-                return lbl
+            id = get(subj, "ID", "")
+            cand = !isempty(lbl) ? lbl : id
+            if occursin(Regex("[pP]at0*$(target_num)(?:[\\s_]|\$)", "i"), cand)
+                return cand
             end
         end
     end
@@ -140,9 +143,59 @@ function list_subjects(creds::XnatCredentials, project_id::AbstractString)::Vect
     data === nothing && return Dict{String, Any}[]
     try
         res = data["ResultSet"]["Result"]
+        # Check if subject labels are empty (e.g. Prostata_bimodal where label is "")
+        has_labels = any(s -> !isempty(strip(get(s, "label", ""))), res)
+        if !has_labels
+            exp_res = list_project_experiments(creds, clean_proj)
+            if !isempty(exp_res)
+                patient_map = Dict{String, Dict{String, Any}}()
+                for e in exp_res
+                    elbl = get(e, "label", "")
+                    m = match(r"[pP]at\d+", elbl)
+                    if m !== nothing
+                        pat_id = m.match
+                        if !haskey(patient_map, pat_id)
+                            patient_map[pat_id] = Dict{String, Any}(
+                                "ID" => pat_id,
+                                "label" => pat_id,
+                                "project" => clean_proj,
+                                "experiment_id" => get(e, "ID", ""),
+                                "experiment_label" => elbl
+                            )
+                        end
+                    end
+                end
+                if !isempty(patient_map)
+                    sorted_keys = sort(collect(keys(patient_map)), by=k -> begin
+                        m = match(r"\d+", k)
+                        m !== nothing ? parse(Int, m.match) : 0
+                    end)
+                    return [patient_map[k] for k in sorted_keys]
+                end
+            end
+        end
         return Vector{Dict{String, Any}}(res)
     catch e
         @warn "Failed to parse subjects list for $project_id: $e"
+        return Dict{String, Any}[]
+    end
+end
+
+"""
+    list_project_experiments(creds::XnatCredentials, project_id) -> Vector{Dict{String, Any}}
+
+Queries all imaging sessions (experiments) under a project.
+"""
+function list_project_experiments(creds::XnatCredentials, project_id::AbstractString)::Vector{Dict{String, Any}}
+    clean_proj = resolve_project_id(project_id)
+    isempty(clean_proj) && return Dict{String, Any}[]
+    data = _xnat_get_json(creds, "/data/projects/$(clean_proj)/experiments?format=json")
+    data === nothing && return Dict{String, Any}[]
+    try
+        res = data["ResultSet"]["Result"]
+        return Vector{Dict{String, Any}}(res)
+    catch e
+        @warn "Failed to parse experiments list for $project_id: $e"
         return Dict{String, Any}[]
     end
 end
@@ -157,11 +210,21 @@ function list_experiments(creds::XnatCredentials, project_id::AbstractString, su
     s = resolve_subject_label(creds, p, subject_id)
     endpoint = "/data/projects/$p/subjects/$s/experiments?format=json"
     data = _xnat_get_json(creds, endpoint)
-    data === nothing && return Dict{String, Any}[]
-    try
+    if data !== nothing && haskey(data, "ResultSet") && haskey(data["ResultSet"], "Result")
         res = data["ResultSet"]["Result"]
-        return Vector{Dict{String, Any}}(res)
-    catch; return Dict{String, Any}[]; end
+        if !isempty(res)
+            return Vector{Dict{String, Any}}(res)
+        end
+    end
+    # Fallback: query project experiments and filter by patient pattern
+    all_exps = list_project_experiments(creds, p)
+    m_num = match(r"[pP]at_?(\d+)", s)
+    target_pat = m_num !== nothing ? "Pat$(m_num.captures[1])" : s
+    filtered = filter(e -> begin
+        lbl = get(e, "label", "")
+        occursin(Regex("\\b$(target_pat)\\b", "i"), lbl) || occursin(s, lbl)
+    end, all_exps)
+    return filtered
 end
 
 """
@@ -252,6 +315,38 @@ function get_case_status(creds::XnatCredentials, project_id::AbstractString, sub
         catch; end
     end
 
+    # 3. Fallback: Check experiment-level resources (e.g. for Prostata_bimodal)
+    exps = list_experiments(creds, p, s)
+    for exp in exps
+        exp_id = get(exp, "ID", "")
+        isempty(exp_id) && continue
+        
+        # Check experiment ANNOTATIONS
+        exp_status = _xnat_get_json(creds, "/data/experiments/$exp_id/resources/ANNOTATIONS/files/status.json"; timeout=5.0)
+        if exp_status !== nothing
+            st_str = uppercase(get(exp_status, "status", ""))
+            user = get(exp_status, "assigned_user", get(exp_status, "user", ""))
+            ts = get(exp_status, "last_modified", "")
+            summary = get(exp_status, "summary", Dict{String, Any}())
+            n_les = get(summary, "num_lesions", 0)
+            st_sym = st_str in ("PROCESSED", "VALIDATED", "COMPLETED") ? :PROCESSED : (st_str == "IN_PROGRESS" ? :IN_PROGRESS : :PREPROCESSED)
+            return CaseStatusInfo(st_sym, user, ts, n_les, exp_status)
+        end
+        
+        # Check experiment MEDEYE3D
+        exp_medeye = _xnat_get_json(creds, "/data/experiments/$exp_id/resources/MEDEYE3D/files?format=json"; timeout=5.0)
+        if exp_medeye !== nothing
+            try
+                for r in exp_medeye["ResultSet"]["Result"]
+                    fname = get(r, "Name", "")
+                    if endswith(fname, ".h5") || endswith(fname, ".hdf5")
+                        return CaseStatusInfo(:PREPROCESSED)
+                    end
+                end
+            catch; end
+        end
+    end
+
     return CaseStatusInfo(:RAW)
 end
 
@@ -338,7 +433,7 @@ end
 """
     download_preprocessed_hdf5(creds::XnatCredentials, project_id, subject_id, local_dest; force=false) -> Bool
 
-Downloads `{subject_id}_preprocessed.h5` from XNAT subject resource `MEDEYE3D`.
+Downloads preprocessed HDF5 from XNAT subject or experiment resource `MEDEYE3D`.
 Skips download if file already exists locally and `force == false`.
 """
 function download_preprocessed_hdf5(
@@ -355,29 +450,51 @@ function download_preprocessed_hdf5(
 
     p = resolve_project_id(project_id)
     s = resolve_subject_label(creds, p, subject_id)
-    # Search for preprocessed hdf5 in MEDEYE3D resource
+
+    # 1. Search for preprocessed hdf5 in subject MEDEYE3D resource
     medeye_files = _xnat_get_json(creds, "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files?format=json")
-    target_name = "$(s)_preprocessed.h5"
     if medeye_files !== nothing
         try
             for r in medeye_files["ResultSet"]["Result"]
                 fn = get(r, "Name", "")
-                if fn == "$(s)_preprocessed.h5" || fn == "preprocessed_volumes.h5" || occursin("preprocessed", lowercase(fn))
-                    target_name = fn
-                    break
+                if endswith(fn, ".h5") || endswith(fn, ".hdf5")
+                    uri = get(r, "URI", "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files/$fn")
+                    if download_file(creds, uri, dest_path)
+                        return true
+                    end
                 end
             end
         catch; end
     end
 
-    remote_file_url = "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files/$(target_name)"
-    return download_file(creds, remote_file_url, dest_path)
+    # 2. Fallback: Search in experiment MEDEYE3D resources (e.g. for Prostata_bimodal)
+    exps = list_experiments(creds, p, s)
+    for exp in exps
+        exp_id = get(exp, "ID", "")
+        isempty(exp_id) && continue
+        exp_files = _xnat_get_json(creds, "/data/experiments/$exp_id/resources/MEDEYE3D/files?format=json")
+        if exp_files !== nothing && haskey(exp_files, "ResultSet") && haskey(exp_files["ResultSet"], "Result")
+            for r in exp_files["ResultSet"]["Result"]
+                fn = get(r, "Name", "")
+                if endswith(fn, ".h5") || endswith(fn, ".hdf5")
+                    uri = get(r, "URI", "/data/experiments/$exp_id/resources/MEDEYE3D/files/$fn")
+                    println("[XNAT] Downloading preprocessed volume from experiment $exp_id: $fn")
+                    if download_file(creds, uri, dest_path)
+                        return true
+                    end
+                end
+            end
+        end
+    end
+
+    return false
 end
 
 """
     upload_preprocessed_hdf5(creds::XnatCredentials, project_id, subject_id, local_h5) -> Bool
 
-Uploads preprocessed HDF5 to `/data/projects/{proj}/subjects/{subj}/resources/MEDEYE3D/files/{subj}_preprocessed.h5?overwrite=true`.
+Uploads preprocessed HDF5 to `/data/projects/{proj}/subjects/{subj}/resources/MEDEYE3D/files/{subj}_preprocessed.h5?overwrite=true`,
+or falls back to matching imaging session experiment resource if subject-level resource creation is disallowed.
 """
 function upload_preprocessed_hdf5(
     creds::XnatCredentials,
@@ -389,13 +506,35 @@ function upload_preprocessed_hdf5(
     !isfile(h5_path) && return false
     p = resolve_project_id(project_id)
     s = resolve_subject_label(creds, p, subject_id)
-    if !ensure_subject_resource(creds, p, s, "MEDEYE3D")
-        @warn "Cannot access or create MEDEYE3D resource on remote XNAT for $p/$s. Remote upload skipped."
-        return false
-    end
     
-    remote_url = "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files/$(s)_preprocessed.h5?overwrite=true&inbody=true"
-    return upload_file(creds, remote_url, h5_path)
+    # 1. Try subject-level resource
+    if ensure_subject_resource(creds, p, s, "MEDEYE3D")
+        remote_url = "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files/$(s)_preprocessed.h5?overwrite=true&inbody=true"
+        if upload_file(creds, remote_url, h5_path)
+            return true
+        end
+    end
+
+    # 2. Fallback: upload to matching PET/CT experiment
+    exps = list_experiments(creds, p, s)
+    pet_exps = filter(e -> occursin("PET", uppercase(get(e, "label", ""))) || occursin("PET", uppercase(get(e, "xsiType", ""))), exps)
+    target_exp = !isempty(pet_exps) ? first(pet_exps) : (!isempty(exps) ? first(exps) : nothing)
+    if target_exp !== nothing
+        exp_id = get(target_exp, "ID", "")
+        # Ensure resource on experiment
+        res_url = "$(creds.server_url)/data/experiments/$exp_id/resources/MEDEYE3D"
+        headers = XnatAuth.get_auth_headers(creds)
+        try
+            Downloads.request(res_url; method="PUT", headers=headers, timeout=10.0)
+        catch; end
+        
+        fname = basename(local_h5)
+        remote_url = "/data/experiments/$exp_id/resources/MEDEYE3D/files/$(fname)?overwrite=true&inbody=true"
+        return upload_file(creds, remote_url, h5_path)
+    end
+
+    @warn "Cannot access or create MEDEYE3D resource on remote XNAT for $p/$s. Remote upload skipped."
+    return false
 end
 
 """

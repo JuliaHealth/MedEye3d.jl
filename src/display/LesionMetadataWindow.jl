@@ -55,7 +55,9 @@ export create_metadata_window, display_metadata_window, get_active_lesion_db, ge
 const _ALL_MENUS = Makie.Menu[]
 const _last_menu_filter_text = Dict{UInt64, String}()
 const ALLOWED_XNAT_PROJECTS = String[
+    "FDM_DPI-2024-7-KRN_Prostata_bimodal",
     "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE",
+    "FDM_DPI-2024-7-KRN_Lu177_PSMA",
     "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE"
 ]
 
@@ -73,7 +75,7 @@ struct LoadDBMessage <: DBMessage
     LoadDBMessage(path_json::String, reply_channel::Channel{Dict}, path_hdf5::String=DEFAULT_HDF5_PATH) = new(path_json, reply_channel, path_hdf5)
 end
 
-export create_metadata_window, load_annotations, save_annotations, load_annotations_hdf5, save_annotations_hdf5, persist_to_active_dataset_h5!, get_lesion_state, display_metadata_window
+export create_metadata_window, load_annotations, save_annotations, load_annotations_hdf5, save_annotations_hdf5, persist_to_active_dataset_h5!, get_lesion_state, display_metadata_window, parse_lesion_id
 
 # ── Skip no-op Observable updates (each avoided update saves ~1-5ms) ─────────
 """
@@ -9454,6 +9456,7 @@ function create_metadata_window(
                 snap_state = collect_state()
                 snap_state["_display_name"] = snap_id
                 snap_global = Dict{String,String}(
+                    "active_lesion_id" => _safe_strip(active_lesion_id[]),
                     "CT_Min"  => _safe_strip(tb_ct_min.stored_string[]),
                     "CT_Max"  => _safe_strip(tb_ct_max.stored_string[]),
                     "PET_Min" => _safe_strip(tb_pet_min.stored_string[]),
@@ -9606,6 +9609,17 @@ function create_metadata_window(
                 if val_u !== nothing
                     _MEH.mapping_alpha_unlinked[] = val_u
                     set_close_to!(slider_alpha_unlinked, val_u)
+                end
+            end
+            if haskey(gst, "active_lesion_id") && !isempty(gst["active_lesion_id"])
+                req_act = gst["active_lesion_id"]
+                req_lid = parse_lesion_id(req_act)
+                opts = lesion_ids[]
+                for opt in opts
+                    if opt == req_act || (req_lid !== nothing && parse_lesion_id(opt) == req_lid)
+                        active_lesion_id[] = opt
+                        break
+                    end
                 end
             end
         catch e
@@ -11347,6 +11361,7 @@ function create_metadata_window(
         
         # Persist global windowing
         db["_GLOBAL_APP_STATE"] = Dict{String,String}(
+            "active_lesion_id" => _safe_strip(active_lesion_id[]),
             "CT_Min" => _safe_strip(tb_ct_min.stored_string[]),
             "CT_Max" => _safe_strip(tb_ct_max.stored_string[]),
             "PET_Min" => _safe_strip(tb_pet_min.stored_string[]),

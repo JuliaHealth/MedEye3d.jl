@@ -587,12 +587,12 @@ function load_nrrd_labelmap(nrrd_path::String)
 end
 
 """
-    is_lymph_node_structure(name::String)::Bool
+    is_lymph_node_structure(name::AbstractString)::Bool
 
 Determine whether a structure name represents a clinical lymph node area/station.
 Checks known clinical station prefixes, substrings (lymph, node, knoten), and regional definitions.
 """
-function is_lymph_node_structure(name::String)::Bool
+function is_lymph_node_structure(name::AbstractString)::Bool
     isempty(name) && return false
     ln = lowercase(name)
     
@@ -610,14 +610,14 @@ function is_lymph_node_structure(name::String)::Bool
 end
 
 """
-    is_prostate_structure(name::String)::Bool
+    is_prostate_structure(name::AbstractString)::Bool
 
 Determine whether a structure name belongs to the prostate gland or its zones.
 Includes prostate, peripheral zone (pz), transition zone (tz), central zone (cz),
 anterior fibromuscular stroma (afs), urethra (ur), periurethral glands (pg),
 and seminal vesicles.
 """
-function is_prostate_structure(name::String)::Bool
+function is_prostate_structure(name::AbstractString)::Bool
     isempty(name) && return false
     ln = lowercase(strip(name))
     ln in ("pz", "tz", "cz", "afs", "ur", "pg", "sv_l", "sv_r", "svl", "svr") && return true
@@ -641,12 +641,12 @@ function is_prostate_structure(name::String)::Bool
 end
 
 """
-    is_pelvic_lymph_node(name::String)::Bool
+    is_pelvic_lymph_node(name::AbstractString)::Bool
 
 Determine whether a lymph node station is a regional pelvic lymph node (miN1).
 Includes internal iliac, external iliac, obturator, presacral, and pararectal stations.
 """
-function is_pelvic_lymph_node(name::String)::Bool
+function is_pelvic_lymph_node(name::AbstractString)::Bool
     ln = lowercase(name)
     # Check regional pelvic nodal stations
     is_pelv = occursin("obturator", ln) || occursin("presacral", ln) || occursin("pararectal", ln) ||
@@ -660,13 +660,13 @@ function is_pelvic_lymph_node(name::String)::Bool
 end
 
 """
-    classify_lymph_node_location(organ_name::String) -> Tuple{String, String}
+    classify_lymph_node_location(organ_name::AbstractString) -> Tuple{String, String}
 
 Return (anatomic_location, anatomical_sublocation) corresponding to UI dropdown options.
 - Regional pelvic nodes -> ("Pelvic Lymph Node", sublocation)
 - Extra-pelvic distant nodes -> ("Distant Lymph Node (Common Iliac, Retroperitoneal, Inguinal, Supraclavicular, Axillary)", sublocation)
 """
-function classify_lymph_node_location(organ_name::String)::Tuple{String, String}
+function classify_lymph_node_location(organ_name::AbstractString)::Tuple{String, String}
     ln = lowercase(organ_name)
     if is_pelvic_lymph_node(organ_name)
         subloc = if occursin("obturator", ln)

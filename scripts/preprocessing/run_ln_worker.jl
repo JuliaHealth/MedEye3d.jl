@@ -130,13 +130,171 @@ function unpack_masks_and_landmarks_in_ram(raw_dir::String, backend)
         end
         masks[clean_name] = bit_m
 
-        if any(startswith(clean_name, p) for p in ("trachea", "aorta", "iliac_artery", "mandible", "hyoid", "scapula", "rib_"))
-            landmark_u8_masks[clean_name] = UInt8.(bit_m)
+        # Prefix to postfix side normalization: "left_femur" -> "femur_left"
+        m_side = match(r"^(left|right)_(.+)$", clean_name)
+        if m_side !== nothing
+            side_str = m_side.captures[1]
+            base_str = m_side.captures[2]
+            postfix_name = "$(base_str)_$(side_str)"
+            masks[postfix_name] = bit_m
+            
+            # Special rib formats: "left_rib_1" -> "rib_1_left", "rib_left_1"
+            if startswith(base_str, "rib_")
+                rib_num = replace(base_str, "rib_" => "")
+                masks["rib_$(rib_num)_$(side_str)"] = bit_m
+                masks["rib_$(side_str)_$(rib_num)"] = bit_m
+            end
+        end
+
+        # Postfix to prefix side normalization: "femur_left" -> "left_femur"
+        m_post = match(r"^(.+)_(left|right)$", clean_name)
+        if m_post !== nothing
+            base_str = m_post.captures[1]
+            side_str = m_post.captures[2]
+            prefix_name = "$(side_str)_$(base_str)"
+            masks[prefix_name] = bit_m
+        end
+
+        # Vertebrae uppercase normalization: e.g. "vertebrae_l5" -> "vertebrae_L5", "vertebrae_s1" -> "vertebrae_S1"
+        m_vert = match(r"^(vertebrae|lev_vert)_([cslth])(\d+)$", clean_name)
+        if m_vert !== nothing
+            v_pfx = m_vert.captures[1]
+            v_letter = uppercase(m_vert.captures[2])
+            v_num = m_vert.captures[3]
+            masks["$(v_pfx)_$(v_letter)$(v_num)"] = bit_m
         end
     end
 
     packed_data = nothing
     GC.gc(false)
+
+    # Pass 2: Bilateral / Union masks
+    # Femur:
+    f_l = get(masks, "femur_left", get(masks, "left_femur", nothing))
+    f_r = get(masks, "femur_right", get(masks, "right_femur", nothing))
+    if f_l !== nothing && f_r !== nothing
+        masks["femur"] = f_l .| f_r
+    elseif f_l !== nothing
+        masks["femur"] = copy(f_l)
+    elseif f_r !== nothing
+        masks["femur"] = copy(f_r)
+    end
+
+    # Hip / Pelvis:
+    h_l = get(masks, "hip_left", get(masks, "left_hip", nothing))
+    h_r = get(masks, "hip_right", get(masks, "right_hip", nothing))
+    if h_l !== nothing && h_r !== nothing
+        masks["hip"] = h_l .| h_r
+    elseif h_l !== nothing
+        masks["hip"] = copy(h_l)
+    elseif h_r !== nothing
+        masks["hip"] = copy(h_r)
+    end
+    if haskey(masks, "hip")
+        masks["pelvis"] = haskey(masks, "sacrum") ? (masks["hip"] .| masks["sacrum"]) : copy(masks["hip"])
+    end
+
+    # Iliac vessels unions:
+    for vtype in ("artery", "vena")
+        vl = get(masks, "iliac_$(vtype)_left", get(masks, "left_iliac_$(vtype)", nothing))
+        vr = get(masks, "iliac_$(vtype)_right", get(masks, "right_iliac_$(vtype)", nothing))
+        if vl !== nothing && vr !== nothing
+            masks["iliac_$(vtype)"] = vl .| vr
+        elseif vl !== nothing
+            masks["iliac_$(vtype)"] = copy(vl)
+        elseif vr !== nothing
+            masks["iliac_$(vtype)"] = copy(vr)
+        end
+    end
+
+    # Iliopsoas:
+    ip_l = get(masks, "iliopsoas_left", get(masks, "left_iliopsoas", nothing))
+    ip_r = get(masks, "iliopsoas_right", get(masks, "right_iliopsoas", nothing))
+    if ip_l !== nothing && ip_r !== nothing
+        masks["iliopsoas"] = ip_l .| ip_r
+    end
+
+    # Kidneys:
+    k_l = get(masks, "kidney_left", get(masks, "left_kidney", nothing))
+    k_r = get(masks, "kidney_right", get(masks, "right_kidney", nothing))
+    if k_l !== nothing && k_r !== nothing
+        masks["kidneys"] = k_l .| k_r
+    end
+
+    # Fused vertebrae and vertebrae_body:
+    vert_keys = [k for k in keys(masks) if startswith(k, "vertebrae_") && !endswith(k, "_fused") && !endswith(k, "_body")]
+    if !isempty(vert_keys)
+        v_union = falses(dims)
+        for vk in vert_keys
+            v_union .|= masks[vk]
+        end
+        masks["vertebrae"] = BitArray(v_union)
+        masks["vertebrae_body"] = BitArray(v_union)
+    end
+
+    # Helper sacrum fused: sacrum + S1
+    if haskey(masks, "sacrum")
+        s1 = get(masks, "vertebrae_S1", get(masks, "vertebrae_s1", nothing))
+        masks["helper_sacrum_fused"] = (s1 !== nothing) ? (masks["sacrum"] .| s1) : copy(masks["sacrum"])
+    end
+
+    # Pass 3: Iliac vessel splitting into Common and External (L5 bottom & Aorta bottom)
+    l5_m = get(masks, "vertebrae_L5", get(masks, "vertebrae_l5", nothing))
+    if l5_m !== nothing
+        l5_slices = findall([any(view(l5_m, :, :, k)) for k in 1:dims[3]])
+        if !isempty(l5_slices)
+            l5_bottom = minimum(l5_slices)
+            aorta_m = get(masks, "aorta", nothing)
+            aorta_cap = dims[3]
+            if aorta_m !== nothing
+                ao_slices = findall([any(view(aorta_m, :, :, k)) for k in 1:dims[3]])
+                if !isempty(ao_slices)
+                    aorta_cap = minimum(ao_slices)
+                end
+            end
+
+            for vtype in ("artery", "vena"), side in ("left", "right")
+                whole_k = "iliac_$(vtype)_$(side)"
+                if haskey(masks, whole_k)
+                    whole_m = masks[whole_k]
+                    common_m = falses(dims)
+                    external_m = falses(dims)
+                    for k in 1:dims[3]
+                        if k < l5_bottom
+                            view(external_m, :, :, k) .= view(whole_m, :, :, k)
+                        elseif k <= aorta_cap
+                            view(common_m, :, :, k) .= view(whole_m, :, :, k)
+                        end
+                    end
+                    masks["iliac_$(vtype)_common_$(side)"] = BitArray(common_m)
+                    masks["iliac_$(vtype)_external_$(side)"] = BitArray(external_m)
+                    masks["ts_iliac_$(vtype)_$(side)"] = whole_m
+                    masks["nv_iliac_$(vtype)_$(side)"] = whole_m
+                end
+            end
+
+            # Bilateral common/external iliac unions
+            for vtype in ("artery", "vena")
+                c_l = get(masks, "iliac_$(vtype)_common_left", nothing)
+                c_r = get(masks, "iliac_$(vtype)_common_right", nothing)
+                if c_l !== nothing && c_r !== nothing
+                    masks["iliac_$(vtype)_common"] = c_l .| c_r
+                end
+                e_l = get(masks, "iliac_$(vtype)_external_left", nothing)
+                e_r = get(masks, "iliac_$(vtype)_external_right", nothing)
+                if e_l !== nothing && e_r !== nothing
+                    masks["iliac_$(vtype)_external"] = e_l .| e_r
+                end
+            end
+        end
+    end
+
+    # Pass 4: Landmark masks
+    for (k, bit_m) in masks
+        if any(startswith(k, p) for p in ("trachea", "aorta", "iliac_artery", "mandible", "hyoid", "scapula", "rib_"))
+            landmark_u8_masks[k] = UInt8.(bit_m)
+        end
+    end
 
     # Compute anatomical landmarks in RAM (matching PrimaryHDF5 + DagVm.run_pipeline)
     landmarks_dict = Dict{String, Any}()
@@ -180,8 +338,12 @@ function unpack_masks_and_landmarks_in_ram(raw_dir::String, backend)
         end
         if haskey(landmark_u8_masks, art_k)
             p1, p2 = Landmarks.compute_internal_iliac_points(landmark_u8_masks[art_k], spacing, origin, direction)
-            landmarks_dict["internal_iliac_p1_$side"] = p1
-            landmarks_dict["internal_iliac_p2_$side"] = p2
+            if p1 !== nothing
+                landmarks_dict["internal_iliac_p1_$side"] = p1
+                landmarks_dict["internal_iliac_p2_$side"] = p2
+                landmarks_dict["internal_iliac_p1"] = p1
+                landmarks_dict["internal_iliac_p2"] = p2
+            end
         end
     end
 
@@ -260,7 +422,7 @@ end
 
 function process_single_case(primary_h5_path::String, out_h5_path::String)
     t0 = time()
-    raw_dir = dirname(primary_h5_path)
+    raw_dir = isdir(primary_h5_path) ? primary_h5_path : dirname(primary_h5_path)
     backend = CUDA.functional() ? CUDABackend() : CPU()
     json_dir = joinpath(LN_ROOT, "jsons")
 
@@ -404,9 +566,12 @@ function run_queue_daemon(queue_dir::String)
 end
 
 if abspath(PROGRAM_FILE) == @__FILE__
-    if length(ARGS) < 1
-        println("Usage: julia run_ln_worker.jl <queue_dir>")
+    if length(ARGS) == 1
+        run_queue_daemon(ARGS[1])
+    elseif length(ARGS) == 2
+        process_single_case(ARGS[1], ARGS[2])
+    else
+        println("Usage: julia run_ln_worker.jl <queue_dir> OR julia run_ln_worker.jl <raw_dir_or_primary_h5> <out_h5>")
         exit(1)
     end
-    run_queue_daemon(ARGS[1])
 end

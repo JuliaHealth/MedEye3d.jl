@@ -965,10 +965,17 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
         return
     end
 
-    mri_main_multimodal_mode[] = !mri_main_multimodal_mode[]
+    is_mode_active = false
+    if use_m2
+        mri_compare_mode[] = !mri_compare_mode[]
+        is_mode_active = mri_compare_mode[]
+    else
+        mri_main_multimodal_mode[] = !mri_main_multimodal_mode[]
+        is_mode_active = mri_main_multimodal_mode[]
+    end
     
     tp_cur = current_tp_index[]
-    if mri_main_multimodal_mode[]
+    if is_mode_active
         mri_tps = get_mri_comparison_tps(tp_cur)
         empty!(mri_compare_tps)
         append!(mri_compare_tps, mri_tps)
@@ -999,11 +1006,11 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
             
             for ts in stateObjects[p].mainForDisplayObjects.listOfTextSpecifications
                 if ts.name == "CT"
-                    ts.isVisible = (i == 2 ? mri_main_multimodal_mode[] : true)
+                    ts.isVisible = (i == 2 ? is_mode_active : true)
                     ts.maskContribution = 0.0f0
                 elseif ts.name == "PET" || ts.name == "SPECT"
                     if i == 2
-                        ts.isVisible = !mri_main_multimodal_mode[]
+                        ts.isVisible = !is_mode_active
                     end
                     ts.maskContribution = 0.0f0
                 elseif ts.name == "Mask"
@@ -1050,10 +1057,10 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
         end
         
         ref_sl = stateObjects[1 + panel_offset].currentDisplayedSlice
-        # Prostate MRI sequences only cover pelvis/prostate slices (Z ~ 41..60).
-        # If ref_sl is outside this range (e.g. initial CT slice 142), center on active prostate lesion or prostate centroid (Z ~ 48).
-        if ref_sl < 30 || ref_sl > 75
-            prostate_z = 48
+        # Prostate MRI sequences cover pelvis slices (Z ~ 31..115 for T1, 40..67 for T2/ADC/DWI).
+        # If ref_sl is outside this range (e.g. initial whole-body CT slice 142), center on active prostate lesion or prostate centroid (Z ~ 54).
+        if ref_sl < 25 || ref_sl > 115
+            prostate_z = 54
             cur_lid = (current_active_lesion_id[] > 0) ? current_active_lesion_id[] : round(Int, stateObjects[1 + panel_offset].valueForMasToSet.value)
             cent = get(lesion_centroids_cache, (0, cur_lid), get(lesion_centroids_cache, cur_lid, nothing))
             if cent !== nothing && length(cent) >= 3 && cent[3] > 0
@@ -1112,7 +1119,7 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
     end
     update_quad_corner_info!()
     try
-        if !isempty(stateObjects) && stateObjects[1].mainForDisplayObjects !== nothing && stateObjects[1].mainForDisplayObjects.window !== nothing
+        if !use_m2 && !isempty(stateObjects) && stateObjects[1].mainForDisplayObjects !== nothing && stateObjects[1].mainForDisplayObjects.window !== nothing
             title = mri_main_multimodal_mode[] ?
                 "MedEye3d [Quad MRI] - TL: T2 | TR: ADC | BL: DWI | BR: T1" :
                 "MedEye3d [Standard] - TL: Axial CT | TR: Pure PET | BL: Sagittal CT | BR: Coronal CT"

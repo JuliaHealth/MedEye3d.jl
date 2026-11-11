@@ -1675,16 +1675,21 @@ function reactToMouseDrag(mousestr::MouseStruct, mainStates::Vector{StateDataFie
                     push!(targets, (5, origZ))
                 end
             end
-            if length(mainStates) >= 10 && MEH._m2_crosshair_sync[]
+            if length(mainStates) >= 9 && MEH._m2_crosshair_sync[]
                 if is_mri_cmp_jump || is_mri_main_multimodal
                     for p_mri in 6:9
                         dim_mri = mainStates[p_mri].onScrollData.dimensionToScroll
                         sl_mri = dim_mri == 1 ? origX : (dim_mri == 2 ? origY : origZ)
                         push!(targets, (p_mri, sl_mri))
                     end
-                    push!(targets, (10, origZ))
+                    if length(mainStates) >= 10
+                        push!(targets, (10, origZ))
+                    end
                 else
-                    push!(targets, (6, origZ), (7, origZ), (8, origX), (9, origY), (10, origZ))
+                    push!(targets, (6, origZ), (7, origZ), (8, origX), (9, origY))
+                    if length(mainStates) >= 10
+                        push!(targets, (10, origZ))
+                    end
                 end
             end
             

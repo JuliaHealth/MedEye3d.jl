@@ -1580,7 +1580,33 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
 
     active_lesion = Observables.Observable("(none)")
     if !isempty(lesion_list) && lesion_list[1] != "(none)"
-        active_lesion[] = lesion_list[1]
+        pref_id = ""
+        if haskey(persisted_annotations, "_GLOBAL_APP_STATE")
+            gst = persisted_annotations["_GLOBAL_APP_STATE"]
+            if gst isa AbstractDict && haskey(gst, "active_lesion_id") && !isempty(gst["active_lesion_id"])
+                pref_id = string(gst["active_lesion_id"])
+            end
+        end
+        pref_int = LesionMetadataWindow.parse_lesion_id(pref_id)
+        found_idx = 1
+        if pref_int !== nothing
+            for (idx, opt) in enumerate(lesion_list)
+                if LesionMetadataWindow.parse_lesion_id(opt) == pref_int
+                    found_idx = idx
+                    break
+                end
+            end
+        else
+            # If no preference is stored, prefer a prostate lesion if present
+            for (idx, opt) in enumerate(lesion_list)
+                opt_l = lowercase(opt)
+                if occursin("prostate", opt_l)
+                    found_idx = idx
+                    break
+                end
+            end
+        end
+        active_lesion[] = lesion_list[found_idx]
     end
     lesion_ids = Observables.Observable(lesion_list)
 
