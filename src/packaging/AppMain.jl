@@ -765,7 +765,18 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
 
     base_ct_fname = studies[1][4]
     base_mask_fname = studies[1][6]
-    first_spacing = Tuple(Float64.(read(HDF5.attributes(h5_init["BASELINE/$base_ct_fname"])["spacing"])))
+    first_spacing = try
+        ct_attrs = HDF5.attributes(h5_init["BASELINE/$base_ct_fname"])
+        if haskey(ct_attrs, "spacing")
+            Tuple(Float64.(read(ct_attrs["spacing"])))
+        elseif haskey(HDF5.attributes(h5_init["BASELINE"]), "spacing")
+            Tuple(Float64.(read(HDF5.attributes(h5_init["BASELINE"])["spacing"])))
+        else
+            (1.5234375, 1.5234375, 3.0)
+        end
+    catch
+        (1.5234375, 1.5234375, 3.0)
+    end
     display_spacing = first_spacing
 
     is_preflipped = haskey(h5_init, "_meta_/preflipped") && read(h5_init["_meta_/preflipped"]) == 1
@@ -1306,125 +1317,129 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     end
 
     function load_single_tp_from_h5(tp_i::Int)
-        if tp_i < 0 || tp_i >= length(studies)
+        active_h5_path = (!isempty(MEH.h5_path_ref[]) && isfile(MEH.h5_path_ref[])) ? MEH.h5_path_ref[] : h5_path
+        active_studies = !isempty(MEH.studies_ref[]) ? MEH.studies_ref[] : studies
+        if tp_i < 0 || tp_i >= length(active_studies)
             return nothing
         end
-        study = studies[tp_i + 1]
+        study = active_studies[tp_i + 1]
         modality, orig_tp, date_str, ct_fname, pet_fname, mask_fname, node_name, tfm_fname = study[1:8]
         group = tfm_fname == "" ? "BASELINE" : "TFM_" * tfm_fname
         
         try
-            return HDF5.h5open(h5_path, "r") do h5_file
-                if !haskey(h5_file, group)
-                    @warn "[AppMain] Timepoint $tp_i group '$group' not found in $h5_path"
-                    return nothing
-                end
-                is_pf = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
-                ct_vol = Float32.(read(h5_file["$group/$ct_fname"]))
-                pet_vol = Float32.(read(h5_file["$group/$pet_fname"]))
-                if haskey(h5_file, "$group/$(mask_fname)_expert")
-                    try
-                        mask_vol = read(h5_file["$group/$(mask_fname)_expert"])
-                    catch e
-                        @warn "[AppMain] Corrupted _expert mask for $group, falling back to original" exception=(e, catch_backtrace())
+            return lock(MEH._hdf5_io_lock) do
+                HDF5.h5open(active_h5_path, "r") do h5_file
+                    if !haskey(h5_file, group)
+                        @warn "[AppMain] Timepoint $tp_i group '$group' not found in $active_h5_path"
+                        return nothing
+                    end
+                    is_pf = haskey(h5_file, "_meta_/preflipped") && read(h5_file["_meta_/preflipped"]) == 1
+                    ct_vol = Float32.(read(h5_file["$group/$ct_fname"]))
+                    pet_vol = Float32.(read(h5_file["$group/$pet_fname"]))
+                    if haskey(h5_file, "$group/$(mask_fname)_expert")
+                        try
+                            mask_vol = read(h5_file["$group/$(mask_fname)_expert"])
+                        catch e
+                            @warn "[AppMain] Corrupted _expert mask for $group, falling back to original" exception=(e, catch_backtrace())
+                            mask_vol = read(h5_file["$group/$mask_fname"])
+                        end
+                    else
                         mask_vol = read(h5_file["$group/$mask_fname"])
                     end
-                else
-                    mask_vol = read(h5_file["$group/$mask_fname"])
-                end
-                
-                if modality == "SPECT"
-                    pos_dat = pet_vol[pet_vol .> 0]
-                    p99 = isempty(pos_dat) ? 1.0f0 : Float32(quantile(pos_dat, 0.99))
-                    scale_factor = 8.0f0 / max(p99, 1.0f0)
-                    pet_vol = max.(0.0f0, pet_vol .* scale_factor)
-                elseif uppercase(modality) in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC")
-                    ct_vol = max.(0.0f0, ct_vol)
-                    pos_dat = ct_vol[ct_vol .> 0]
-                    if !isempty(pos_dat)
-                        p99 = Float32(quantile(pos_dat, 0.99))
-                        if p99 > 1500.0f0 || p99 < 400.0f0
-                            scale_factor = 1000.0f0 / max(p99, 1.0f0)
-                            ct_vol = ct_vol .* scale_factor
-                            @info "[MRI Normalization] Rescaled $modality TP $orig_tp to [0, 1000] (p99=$p99 -> 1000.0, scale=$scale_factor)"
-                        end
-                    end
-                end
-                
-                needs_reverse = !is_pf
-                if needs_reverse
-                    ct_vol_base = reverse(ct_vol, dims=2)
-                    pet_vol_base = reverse(pet_vol, dims=2)
-                    mask_vol_base = reverse(mask_vol, dims=2)
-                else
-                    ct_vol_base = ct_vol; pet_vol_base = pet_vol; mask_vol_base = mask_vol
-                end
-                
-                lock(MEH._centroids_lock) do
-                    MEH.pet_volumes_cache[tp_i] = pet_vol_base
-                end
-                
-                if eltype(mask_vol_base) == Int16
-                    mask_compact = mask_vol_base
-                elseif eltype(mask_vol_base) <: Integer
-                    mask_compact = Int16.(mask_vol_base)
-                else
-                    mask_vol_base = max.(0.0f0, mask_vol_base)
-                    mask_compact = Int16.(round.(mask_vol_base))
-                end
-
-                sz = size(ct_vol_base)
-                bone_mask = zeros(Int8, sz)
-                
-                anatomy_vol = nothing
-                try
-                    if haskey(h5_file, "$group/max_anatomy.nii.gz_expert")
-                        raw_anat = read(h5_file["$group/max_anatomy.nii.gz_expert"])
-                        if needs_reverse
-                            raw_anat = reverse(Float32.(raw_anat), dims=2)
-                        end
-                        anatomy_vol = eltype(raw_anat) <: Integer ? UInt16.(raw_anat) : UInt16.(round.(max.(0.0f0, Float32.(raw_anat))))
-                    else
-                        for k in keys(h5_file[group])
-                            if k == "max_anatomy.nii.gz" || startswith(k, "max_anatomy")
-                                raw_anat = read(h5_file["$group/$k"])
-                                if needs_reverse
-                                    raw_anat = reverse(Float32.(raw_anat), dims=2)
-                                end
-                                anatomy_vol = eltype(raw_anat) <: Integer ? UInt16.(raw_anat) : UInt16.(round.(max.(0.0f0, Float32.(raw_anat))))
-                                break
+                    
+                    if modality == "SPECT"
+                        pos_dat = pet_vol[pet_vol .> 0]
+                        p99 = isempty(pos_dat) ? 1.0f0 : Float32(quantile(pos_dat, 0.99))
+                        scale_factor = 8.0f0 / max(p99, 1.0f0)
+                        pet_vol = max.(0.0f0, pet_vol .* scale_factor)
+                    elseif uppercase(modality) in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC")
+                        ct_vol = max.(0.0f0, ct_vol)
+                        pos_dat = ct_vol[ct_vol .> 0]
+                        if !isempty(pos_dat)
+                            p99 = Float32(quantile(pos_dat, 0.99))
+                            if p99 > 1500.0f0 || p99 < 400.0f0
+                                scale_factor = 1000.0f0 / max(p99, 1.0f0)
+                                ct_vol = ct_vol .* scale_factor
+                                @info "[MRI Normalization] Rescaled $modality TP $orig_tp to [0, 1000] (p99=$p99 -> 1000.0, scale=$scale_factor)"
                             end
                         end
                     end
-                catch; end
+                    
+                    needs_reverse = !is_pf
+                    if needs_reverse
+                        ct_vol_base = reverse(ct_vol, dims=2)
+                        pet_vol_base = reverse(pet_vol, dims=2)
+                        mask_vol_base = reverse(mask_vol, dims=2)
+                    else
+                        ct_vol_base = ct_vol; pet_vol_base = pet_vol; mask_vol_base = mask_vol
+                    end
+                    
+                    lock(MEH._centroids_lock) do
+                        MEH.pet_volumes_cache[tp_i] = pet_vol_base
+                    end
+                    
+                    if eltype(mask_vol_base) == Int16
+                        mask_compact = mask_vol_base
+                    elseif eltype(mask_vol_base) <: Integer
+                        mask_compact = Int16.(mask_vol_base)
+                    else
+                        mask_vol_base = max.(0.0f0, mask_vol_base)
+                        mask_compact = Int16.(round.(mask_vol_base))
+                    end
 
-                # For non-MRI timepoints without native anatomy, fallback to baseline / atlas anatomy
-                is_mri_tp = uppercase(strip(modality)) in ("T2", "MRI", "MR", "ADC", "DWI", "T1", "DCE", "DYNAMIC", "PROSTATE")
-                if !is_mri_tp && (anatomy_vol === nothing || length(unique(anatomy_vol)) <= 2)
-                    for fallback_path in ["ATLAS/max_anatomy_expert", "BASELINE/max_anatomy.nii.gz_expert", "ATLAS/max_anatomy", "BASELINE/max_anatomy.nii.gz"]
-                        if haskey(h5_file, fallback_path)
-                            try
-                                raw_fallback = read(h5_file[fallback_path])
-                                if needs_reverse
-                                    raw_fallback = reverse(Float32.(raw_fallback), dims=2)
+                    sz = size(ct_vol_base)
+                    bone_mask = zeros(Int8, sz)
+                    
+                    anatomy_vol = nothing
+                    try
+                        if haskey(h5_file, "$group/max_anatomy.nii.gz_expert")
+                            raw_anat = read(h5_file["$group/max_anatomy.nii.gz_expert"])
+                            if needs_reverse
+                                raw_anat = reverse(Float32.(raw_anat), dims=2)
+                            end
+                            anatomy_vol = eltype(raw_anat) <: Integer ? UInt16.(raw_anat) : UInt16.(round.(max.(0.0f0, Float32.(raw_anat))))
+                        else
+                            for k in keys(h5_file[group])
+                                if k == "max_anatomy.nii.gz" || startswith(k, "max_anatomy")
+                                    raw_anat = read(h5_file["$group/$k"])
+                                    if needs_reverse
+                                        raw_anat = reverse(Float32.(raw_anat), dims=2)
+                                    end
+                                    anatomy_vol = eltype(raw_anat) <: Integer ? UInt16.(raw_anat) : UInt16.(round.(max.(0.0f0, Float32.(raw_anat))))
+                                    break
                                 end
-                                base_anat = eltype(raw_fallback) <: Integer ? UInt16.(raw_fallback) : UInt16.(round.(max.(0.0f0, Float32.(raw_fallback))))
-                                anatomy_vol = base_anat
-                                println("  [TP $tp_i] Integrated full baseline anatomy from $fallback_path"); flush(stdout)
-                                break
-                            catch; end
+                            end
+                        end
+                    catch; end
+
+                    # For non-MRI timepoints without native anatomy, fallback to baseline / atlas anatomy
+                    is_mri_tp = uppercase(strip(modality)) in ("T2", "MRI", "MR", "ADC", "DWI", "T1", "DCE", "DYNAMIC", "PROSTATE")
+                    if !is_mri_tp && (anatomy_vol === nothing || length(unique(anatomy_vol)) <= 2)
+                        for fallback_path in ["ATLAS/max_anatomy_expert", "BASELINE/max_anatomy.nii.gz_expert", "ATLAS/max_anatomy", "BASELINE/max_anatomy.nii.gz"]
+                            if haskey(h5_file, fallback_path)
+                                try
+                                    raw_fallback = read(h5_file[fallback_path])
+                                    if needs_reverse
+                                        raw_fallback = reverse(Float32.(raw_fallback), dims=2)
+                                    end
+                                    base_anat = eltype(raw_fallback) <: Integer ? UInt16.(raw_fallback) : UInt16.(round.(max.(0.0f0, Float32.(raw_fallback))))
+                                    anatomy_vol = base_anat
+                                    println("  [TP $tp_i] Integrated full baseline anatomy from $fallback_path"); flush(stdout)
+                                    break
+                                catch; end
+                            end
                         end
                     end
+                    
+                    mask_i16 = Int16.(mask_compact)
+                    anat_i16 = anatomy_vol !== nothing ? Int16.(anatomy_vol) : nothing
+                    MEH.precompute_mask_centroids!(mask_compact, tp_i, node_name)
+                    if anat_i16 !== nothing
+                        try MEH.precompute_anatomy_ln_centroids!(anat_i16, tp_i, node_name) catch; end
+                    end
+                    try; MedEye3d.LesionMetadataWindow.precompute_all_volumes!(mask_compact, tp_i); catch; end
+                    return MEH.TpCacheEntry(ct_vol_base, pet_vol_base, mask_compact, bone_mask, anatomy_vol, mask_i16, anat_i16)
                 end
-                
-                mask_i16 = Int16.(mask_compact)
-                anat_i16 = anatomy_vol !== nothing ? Int16.(anatomy_vol) : nothing
-                MEH.precompute_mask_centroids!(mask_compact, tp_i, node_name)
-                if anat_i16 !== nothing
-                    try MEH.precompute_anatomy_ln_centroids!(anat_i16, tp_i, node_name) catch; end
-                end
-                try; MedEye3d.LesionMetadataWindow.precompute_all_volumes!(mask_compact, tp_i); catch; end
-                return MEH.TpCacheEntry(ct_vol_base, pet_vol_base, mask_compact, bone_mask, anatomy_vol, mask_i16, anat_i16)
             end
         catch e
             @warn "[AppMain] Failed to load timepoint $tp_i ($group) from HDF5: $e" exception=(e, catch_backtrace())
@@ -1738,6 +1753,229 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         end
     end
 
+    # Live Case Switching Listener (triggered when user selects a patient in XNAT GUI)
+    on(makie_win.on_switch_case) do new_h5_path
+        (isempty(new_h5_path) || !isfile(new_h5_path)) && return
+        println(">> [XNAT-SWITCH] Reloading 3D viewer from switched HDF5: $new_h5_path"); flush(stdout)
+        obs_lmw = MedEye3d.LesionMetadataWindow._lmw_observables
+        set_prog = get(obs_lmw, :set_xnat_progress, nothing)
+        case_lbl = basename(dirname(new_h5_path))
+        if case_lbl == "xnat_cache" || isempty(case_lbl)
+            case_lbl = replace(basename(new_h5_path), "_preprocessed.h5" => "")
+        end
+        try
+            set_prog !== nothing && set_prog(68.0, "Parsing scene hierarchy for $case_lbl...")
+            lock(MEH._hdf5_io_lock) do
+                HDF5.h5open(new_h5_path, "r") do h5_new
+                    # 1. Parse studies from new file's scene_hierarchy.json
+                    new_studies = []
+                    if haskey(h5_new, "_meta_/scene_hierarchy.json")
+                        try
+                            hier = JSON.parse(read(h5_new["_meta_/scene_hierarchy.json"]))
+                            function _ext_study(children, tfm_name)
+                                ct_n = ""; pet_n = ""; mask_n = ""; ts_n = ""; max_a = ""; max_l = ""; sk_s = ""; mod = "PET"
+                                for ch in children
+                                    ch["type"] == "vtkMRMLLinearTransformNode" && continue
+                                    nm = ch["name"]
+                                    c_mod = get(ch, "modality", get(ch, "Modality", ""))
+                                    if ch["type"] == "vtkMRMLScalarVolumeNode"
+                                        if occursin("NM", nm) || occursin("PET", nm) || occursin("SUV", nm)
+                                            pet_n = nm * ".nii.gz"
+                                        elseif occursin("CT", nm) || occursin("MR", nm) || occursin("T2", nm) || occursin("ADC", nm) || occursin("DWI", nm) || occursin("T1", nm) || occursin("DCE", nm) || occursin("DYN", nm)
+                                            ct_n = nm * ".nii.gz"
+                                            if !isempty(c_mod) && uppercase(c_mod) != "CT"
+                                                mod = uppercase(c_mod)
+                                            end
+                                        end
+                                    elseif ch["type"] == "vtkMRMLSegmentationNode"
+                                        if occursin("Lesion", nm) || occursin("mask", nm)
+                                            mask_n = nm * ".nii.gz"; ts_n = nm
+                                        elseif occursin("max_anatomy", nm)
+                                            max_a = get(ch, "source", "max_anatomy.nii.gz")
+                                        elseif occursin("skellytour", nm)
+                                            sk_s = get(ch, "source", "skellytour.nii.gz")
+                                        end
+                                    end
+                                end
+                                return (mod, ct_n, pet_n, mask_n, ts_n, tfm_name, max_a, max_l, sk_s)
+                            end
+                            # 1) Extract top-level BASELINE study (whose volume nodes are root entries in scene_hierarchy.json)
+                            b_root = _ext_study(hier, "")
+                            if !isempty(b_root[2]) && !isempty(b_root[3])
+                                m, c, p, k, t, tf, ma, ml, sk = b_root
+                                push!(new_studies, (m, 0, "BASELINE", c, p, k, t, tf, ma, ml, sk, ""))
+                            end
+                            # 2) Extract any nested BASELINE or FollowUp Transform studies
+                            tp_cnt = 0
+                            for node in hier
+                                if get(node, "name", "") == "BASELINE" && haskey(node, "children") && isempty(new_studies)
+                                    m, c, p, k, t, tf, ma, ml, sk = _ext_study(node["children"], "")
+                                    push!(new_studies, (m, 0, "BASELINE", c, p, k, t, tf, ma, ml, sk, ""))
+                                elseif get(node, "type", "") == "vtkMRMLLinearTransformNode" && haskey(node, "children")
+                                    tp_cnt += 1
+                                    m, c, p, k, t, tf, ma, ml, sk = _ext_study(node["children"], node["name"] * ".tfm")
+                                    push!(new_studies, (m, tp_cnt, "$m TP $tp_cnt", c, p, k, t, tf, ma, ml, sk, ""))
+                                end
+                            end
+                        catch e
+                            @warn "[XNAT-SWITCH] Failed parsing scene_hierarchy.json: $e"
+                        end
+                    end
+                    if isempty(new_studies) && haskey(h5_new, "BASELINE")
+                        base_ct = first(filter(k -> occursin("CT", k) || occursin("ct", k), keys(h5_new["BASELINE"])))
+                        base_pet = first(filter(k -> occursin("PET", k) || occursin("SUV", k), keys(h5_new["BASELINE"])))
+                        base_mask = first(filter(k -> occursin("Lesion", k) || occursin("mask", k), keys(h5_new["BASELINE"])))
+                        push!(new_studies, ("PET", 0, "BASELINE", base_ct, base_pet, base_mask, "PET_Lesions_0", "", "", "", "", ""))
+                    end
+
+                    if !isempty(new_studies)
+                        empty!(studies)
+                        append!(studies, new_studies)
+                        MEH.register_h5_mask_saver!(new_h5_path, studies)
+                        empty!(MEH.tp_labels)
+                        empty!(MEH.tp_modalities)
+                        empty!(MEH.tp_node_names)
+                        for (s_i, st) in enumerate(studies)
+                            tp_idx = s_i - 1
+                            lbl = "$(st[1]) $(st[3]) (TP $tp_idx)"
+                            MEH.tp_labels[tp_idx] = lbl
+                            MEH.tp_modalities[tp_idx] = st[1]
+                            MEH.tp_node_names[tp_idx] = st[7]
+                        end
+                    end
+
+                    # 2. Reload diffusivity for TP 0 and upload to GPU Heat-GDT
+                    set_prog !== nothing && set_prog(76.0, "Uploading GPU Heat-GDT diffusivity for $case_lbl...")
+                    empty!(MEH._tp_diffusivity_cache)
+                    is_pf = haskey(h5_new, "_meta_/preflipped") && read(h5_new["_meta_/preflipped"]) == 1
+                    if haskey(h5_new, "BASELINE/diffusivity")
+                        diff_v = Float32.(read(h5_new["BASELINE/diffusivity"]))
+                        if !is_pf
+                            diff_v = reverse(diff_v, dims=2)
+                        end
+                        MEH._tp_diffusivity_cache[0] = diff_v
+                        MedEye3d.InferenceClient.precompute_heatgdt_diffusivity(diff_v; tp_index=0)
+                        MedEye3d.SegmentationDisplay._vk_heat_uploaded[] = false
+                    end
+
+                    # 3. Reload ATLAS, anatomy labels, segment names, and centroids
+                    set_prog !== nothing && set_prog(86.0, "Loading anatomy & bone atlases for $case_lbl...")
+                    if haskey(h5_new, "ATLAS/max_anatomy")
+                        MEH.global_ts_atlas[] = read(h5_new["ATLAS/max_anatomy"])
+                        MEH.volume_z_size[] = size(MEH.global_ts_atlas[], 3)
+                    end
+                    if haskey(h5_new, "ATLAS/skellytour")
+                        MEH.global_bone_atlas[] = read(h5_new["ATLAS/skellytour"])
+                    end
+                    empty!(MEH.tp_segment_names)
+                    empty!(MEH.tp_organ_mapping)
+                    new_global_om = Dict{Int, String}()
+                    if haskey(h5_new, "_meta_/organ_mapping")
+                        try
+                            raw_om = JSON.parse(read(h5_new["_meta_/organ_mapping"]))
+                            if !isempty(raw_om)
+                                first_val = first(values(raw_om))
+                                if first_val isa AbstractDict
+                                    sorted_tps = sort(collect(keys(raw_om)); by = k -> (parse(Int, string(k)) == 0 ? typemax(Int) : parse(Int, string(k))))
+                                    for tp_str in sorted_tps
+                                        tp_map = raw_om[tp_str]
+                                        tp_idx = parse(Int, string(tp_str))
+                                        MEH.tp_organ_mapping[tp_idx] = Dict{Int, String}()
+                                        for (lid_str, organ) in tp_map
+                                            lid = parse(Int, string(lid_str))
+                                            org_s = string(organ)
+                                            MEH.tp_organ_mapping[tp_idx][lid] = org_s
+                                            if tp_idx == 0 || !haskey(new_global_om, lid) || isempty(new_global_om[lid]) || new_global_om[lid] == "Unknown"
+                                                new_global_om[lid] = org_s
+                                            end
+                                        end
+                                    end
+                                else
+                                    for (lid_str, organ) in raw_om
+                                        lid = parse(Int, string(lid_str))
+                                        new_global_om[lid] = string(organ)
+                                    end
+                                end
+                            end
+                        catch; end
+                    end
+                    MEH.global_organ_mapping[] = new_global_om
+                    if haskey(h5_new, "_meta_/segment_names.json")
+                        try
+                            raw_sn = JSON.parse(read(h5_new["_meta_/segment_names.json"]))
+                            for (tp_str, sdict) in raw_sn
+                                tp_i = parse(Int, tp_str)
+                                target = get!(MEH.tp_segment_names, tp_i, Dict{Int, String}())
+                                for (sid_str, sname) in sdict
+                                    target[parse(Int, sid_str)] = string(sname)
+                                end
+                            end
+                        catch; end
+                    end
+                    new_ts_names = Dict{Int, String}()
+                    if haskey(h5_new, "_meta_/max_anatomy_labels.json")
+                        try
+                            raw_labels = JSON.parse(read(h5_new["_meta_/max_anatomy_labels.json"]))
+                            new_ts_names = Dict{Int, String}(parse(Int, k) => v for (k, v) in raw_labels)
+                            MEH.global_ts_names[] = new_ts_names
+                        catch; end
+                    end
+                    for (tp_i, _) in MEH.tp_modalities
+                        MEH.anatomy_labels_cache[tp_i] = copy(new_ts_names)
+                    end
+                    if haskey(h5_new, "_meta_/prostate_anatomy_labels.json")
+                        try
+                            raw_prostate = JSON.parse(read(h5_new["_meta_/prostate_anatomy_labels.json"]))
+                            prostate_labels = Dict{Int, String}(parse(Int, string(k)) => string(v) for (k, v) in raw_prostate)
+                            for (tp_i, mod) in MEH.tp_modalities
+                                if uppercase(strip(mod)) in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE")
+                                    MEH.anatomy_labels_cache[tp_i] = copy(prostate_labels)
+                                end
+                            end
+                        catch; end
+                    end
+                    if haskey(h5_new, "CENTROIDS")
+                        for key in keys(h5_new["CENTROIDS"])
+                            parts = split(key, "_lid")
+                            if length(parts) == 2
+                                tp_idx = tryparse(Int, replace(parts[1], "tp" => ""))
+                                lid = tryparse(Int, parts[2])
+                                if tp_idx !== nothing && lid !== nothing
+                                    coords = read(h5_new["CENTROIDS/$key"])
+                                    c = [Int(coords[1]), Int(coords[2]), Int(coords[3])]
+                                    MEH.lesion_centroids_cache[(tp_idx, lid)] = c
+                                    if tp_idx == 0
+                                        MEH.lesion_centroids_cache[lid] = c
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            try; LesionAssociation.load_matches_from_h5(new_h5_path); catch; end
+
+            # 4. Trigger full TP 0 reload into Vulkan textures & refresh lesion list
+            set_prog !== nothing && set_prog(94.0, "Uploading CT/PET/Lesion 3D textures to GPU...")
+            put!(mainViewer.channel, MedEye3d.MakieEvents.SetTimePointEvent(0, 1))
+            put!(mainViewer.channel, MedEye3d.MakieEvents.ScrollEvent(0, 1))
+            put!(mainViewer.channel, MedEye3d.MakieEvents.SetWindowTitleEvent("MedEye3d - $case_lbl (Ready)"))
+            @async begin
+                for _w in 1:40
+                    sleep(0.05)
+                    if haskey(MEH.tp_data_cache, 0)
+                        break
+                    end
+                end
+                set_prog !== nothing && set_prog(100.0, "READY — $case_lbl loaded & ready for interaction"; state=:ready)
+            end
+            println(">> [XNAT-SWITCH] Successfully switched viewer to $new_h5_path"); flush(stdout)
+        catch e
+            set_prog !== nothing && set_prog(0.0, "Error loading $case_lbl: $(sprint(showerror, e))"; state=:error)
+            @warn "[XNAT-SWITCH] Error switching dataset to $new_h5_path: $e" exception=(e, catch_backtrace())
+        end
+    end
+
 
     # 7. Warmup JIT & initial event synchronization
     put!(mainViewer.channel, CompareTimePointsEvent(false))
@@ -1805,7 +2043,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             end
             
             MEH.app_is_loading[] = false
-            put!(mainViewer.channel, MedEye3d.MakieEvents.RenderRequestEvent())
+            put!(mainViewer.channel, MedEye3d.MakieEvents.ScrollEvent(0, 1))
             t_ms = (time_ns() - t_startup) / 1e6
             println("[STARTUP] App ready in $(round(t_ms, digits=0))ms (all_ready=$all_ready, heat_uploaded=$(MedEye3d.SegmentationDisplay._vk_heat_uploaded[]))"); flush(stdout)
         catch e

@@ -7254,6 +7254,26 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
             
             s_boost = heat_state.current_s_boost
             edge_params = heat_state.current_edge_params
+            # Progressive relative-edge relaxation when holding inside a strong-edge island:
+            # If enclosed by strong edges (min_dir_peak >= 0.45) and user keeps holding past initial burst,
+            # smoothly lift E_bg and edge_clip toward the surrounding ridge peaks so holding fills the region.
+            if _vk_heat_total_steps[] >= 30 && length(edge_params) >= 12 && edge_params[12] < 0.5f0
+                min_p = min(edge_params[1], edge_params[2], edge_params[3], edge_params[4], edge_params[5], edge_params[6])
+                if min_p >= 0.45f0
+                    hold_frac = Float32(clamp((_vk_heat_total_steps[] - 20) / max(1, max_wand_steps - 20), 0.0, 1.0))
+                    e_bg_cur = edge_params[7]
+                    e_bg_target = min_p - 0.04f0
+                    e_bg_relaxed = e_bg_cur + 0.55f0 * hold_frac * max(0.0f0, e_bg_target - e_bg_cur)
+                    e_clip_relaxed = min(0.96f0, edge_params[8] + 0.10f0 * hold_frac)
+                    e_bar_relaxed = max(edge_params[11], e_bg_relaxed + e_clip_relaxed * max(0.02f0, min_p - e_bg_relaxed))
+                    edge_params = (
+                        edge_params[1], edge_params[2], edge_params[3],
+                        edge_params[4], edge_params[5], edge_params[6],
+                        e_bg_relaxed, e_clip_relaxed, edge_params[9],
+                        edge_params[10], e_bar_relaxed, edge_params[12]
+                    )
+                end
+            end
             VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, steps_per_tick;
                 theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
             _vk_heat_total_steps[] += steps_per_tick

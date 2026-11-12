@@ -73,7 +73,9 @@ function resolve_project_id(project_id::AbstractString)::String
     p = strip(project_id)
     if p == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" || p == "Lu177_PSMA" || p == "FDM_DPI-2024-7-KRN_Lu177_PSMA"
         return "Lu177_PSMA_PIPELINE"
-    elseif p == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" || p == "Prostata_bimodal_PIPELINE" || p == "Prostata_bimodal" || p == "FDM_DPI-2024-7-KRN_Prostata_bimodal"
+    elseif p == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" || p == "Prostata_bimodal_PIPELINE"
+        return "Prostata_bimodal_PIPELINE"
+    elseif p == "Prostata_bimodal" || p == "FDM_DPI-2024-7-KRN_Prostata_bimodal"
         return "Prostata_bimodal"
     end
     return String(p)
@@ -351,17 +353,26 @@ function get_case_status(creds::XnatCredentials, project_id::AbstractString, sub
 end
 
 """
-    download_file(creds::XnatCredentials, remote_endpoint_or_url, local_dest) -> Bool
+    download_file(creds::XnatCredentials, remote_endpoint_or_url, local_dest; progress_cb=nothing) -> Bool
 
-Streams a file from XNAT to local disk.
+Streams a file from XNAT to local disk, optionally invoking `progress_cb(total_bytes, dl_bytes)` during download.
 """
-function download_file(creds::XnatCredentials, remote_url_or_endpoint::AbstractString, local_dest::AbstractString)::Bool
+function download_file(
+    creds::XnatCredentials,
+    remote_url_or_endpoint::AbstractString,
+    local_dest::AbstractString;
+    progress_cb::Union{Function, Nothing}=nothing
+)::Bool
     full_url = startswith(remote_url_or_endpoint, "http") ? String(remote_url_or_endpoint) : "$(creds.server_url)$(remote_url_or_endpoint)"
     dest_path = String(local_dest)
     headers = XnatAuth.get_auth_headers(creds)
     try
         mkpath(dirname(dest_path))
-        Downloads.download(full_url, dest_path; headers=headers)
+        if progress_cb !== nothing
+            Downloads.download(full_url, dest_path; headers=headers, progress=progress_cb)
+        else
+            Downloads.download(full_url, dest_path; headers=headers)
+        end
         return isfile(dest_path) && filesize(dest_path) > 0
     catch e
         @warn "Download failed from $full_url: $e"
@@ -431,7 +442,7 @@ function ensure_subject_resource(creds::XnatCredentials, project_id::AbstractStr
 end
 
 """
-    download_preprocessed_hdf5(creds::XnatCredentials, project_id, subject_id, local_dest; force=false) -> Bool
+    download_preprocessed_hdf5(creds::XnatCredentials, project_id, subject_id, local_dest; force=false, progress_cb=nothing) -> Bool
 
 Downloads preprocessed HDF5 from XNAT subject or experiment resource `MEDEYE3D`.
 Skips download if file already exists locally and `force == false`.
@@ -441,7 +452,8 @@ function download_preprocessed_hdf5(
     project_id::AbstractString,
     subject_id::AbstractString,
     local_dest::AbstractString;
-    force::Bool=false
+    force::Bool=false,
+    progress_cb::Union{Function, Nothing}=nothing
 )::Bool
     dest_path = String(local_dest)
     if !force && isfile(dest_path) && filesize(dest_path) > 1024
@@ -455,11 +467,19 @@ function download_preprocessed_hdf5(
     medeye_files = _xnat_get_json(creds, "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files?format=json")
     if medeye_files !== nothing
         try
-            for r in medeye_files["ResultSet"]["Result"]
+            results = medeye_files["ResultSet"]["Result"]
+            if p == "Prostata_bimodal_PIPELINE"
+                has_tfm = any(r -> occursin(".tfm", lowercase(get(r, "Name", ""))), results)
+                if !has_tfm
+                    @warn "[XNAT] Subject $s on $p only has legacy v200 HDF5 (no Transform_FollowUp_to_Baseline_1.tfm yet); skipping legacy download."
+                    return false
+                end
+            end
+            for r in results
                 fn = get(r, "Name", "")
                 if endswith(fn, ".h5") || endswith(fn, ".hdf5")
                     uri = get(r, "URI", "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files/$fn")
-                    if download_file(creds, uri, dest_path)
+                    if download_file(creds, uri, dest_path; progress_cb=progress_cb)
                         return true
                     end
                 end
@@ -479,7 +499,7 @@ function download_preprocessed_hdf5(
                 if endswith(fn, ".h5") || endswith(fn, ".hdf5")
                     uri = get(r, "URI", "/data/experiments/$exp_id/resources/MEDEYE3D/files/$fn")
                     println("[XNAT] Downloading preprocessed volume from experiment $exp_id: $fn")
-                    if download_file(creds, uri, dest_path)
+                    if download_file(creds, uri, dest_path; progress_cb=progress_cb)
                         return true
                     end
                 end

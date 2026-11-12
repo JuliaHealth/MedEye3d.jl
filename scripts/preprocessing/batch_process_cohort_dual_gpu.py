@@ -333,23 +333,23 @@ def download_ac_pet_dicom(xnat, exp_id, out_dcm_dir, pat_id=None, subj_label=Non
         return True
     os.makedirs(out_dcm_dir, exist_ok=True)
 
-    # Check local SSD cache first!
-    if pat_id:
-        local_cands = glob.glob(f"/mnt/big/project_ssd/data/xnat/*{pat_id}/scans/3*/resources/DICOM/files")
-        if subj_label:
-            local_cands += glob.glob(f"/mnt/big/project_ssd/data/xnat/{subj_label}/scans/3*/resources/DICOM/files")
+    # Check local SSD cache first — ONLY match exact subj_label (never wildcard across Lu177_PSMA)!
+    if subj_label:
+        local_cands = glob.glob(f"/mnt/big/project_ssd/data/xnat/{subj_label}/scans/*/resources/DICOM/files")
         for lc in local_cands:
-            if os.path.isdir(lc) and len(os.listdir(lc)) > 50:
-                print(f"    Found local AC PET DICOM files in {lc} ({len(os.listdir(lc))} files)")
-                for f in os.listdir(lc):
-                    src_f = os.path.join(lc, f)
-                    dst_f = os.path.join(out_dcm_dir, f)
-                    if not os.path.exists(dst_f):
-                        try:
-                            os.symlink(src_f, dst_f)
-                        except Exception:
-                            shutil.copyfile(src_f, dst_f)
-                return True
+            scan_dir_name = os.path.basename(os.path.dirname(os.path.dirname(os.path.dirname(lc)))).upper()
+            if "PET_WB" in scan_dir_name and "UNCORRECTED" not in scan_dir_name and "NAC" not in scan_dir_name:
+                if os.path.isdir(lc) and len(os.listdir(lc)) > 50:
+                    print(f"    Found local AC PET DICOM files in {lc} ({len(os.listdir(lc))} files)")
+                    for f in os.listdir(lc):
+                        src_f = os.path.join(lc, f)
+                        dst_f = os.path.join(out_dcm_dir, f)
+                        if not os.path.exists(dst_f):
+                            try:
+                                os.symlink(src_f, dst_f)
+                            except Exception:
+                                shutil.copyfile(src_f, dst_f)
+                    return True
 
     scans_data = xnat.get_json(f"/data/experiments/{exp_id}/scans?format=json")
     scans = scans_data.get("ResultSet", {}).get("Result", [])
@@ -855,7 +855,6 @@ def process_case(pat_id, gpu_id, xnat):
     local_cands = [
         os.path.join(LOCAL_RESTORED_CACHE, subj_label),
         os.path.join(LOCAL_XNAT_CACHE, subj_label),
-        os.path.join(LOCAL_XNAT_CACHE, f"FDM_DPI-2024-7-KRN_Lu177_PSMA__PETPSMA_0__{pat_id}"),
         os.path.join(LOCAL_XNAT_CACHE, f"prostata_{pat_id}"),
     ]
     local_cache_dir = None
@@ -986,14 +985,39 @@ def process_case(pat_id, gpu_id, xnat):
 
     # Step 6: Ground Truth Lesions & Overlap Matches
     ct_lesion_arr = np.zeros(ct_shape, dtype=np.int16)
+    ct_seg_names = {}
     if os.path.isfile(ct_lesions_dest):
         try:
             cl_img = sitk.ReadImage(ct_lesions_dest)
-            cl_arr = sitk.GetArrayFromImage(cl_img).astype(np.int16)
-            if cl_arr.shape == ct_shape:
-                ct_lesion_arr = cl_arr
-        except Exception:
-            pass
+            # Extract segment names from NRRD header metadata
+            for k in cl_img.GetMetaDataKeys():
+                if k.startswith("Segment") and k.endswith("_Name"):
+                    prefix = k[:-5]
+                    val_k = f"{prefix}_LabelValue"
+                    if cl_img.HasMetaDataKey(val_k):
+                        lv = str(int(cl_img.GetMetaData(val_k)))
+                        ct_seg_names[lv] = cl_img.GetMetaData(k)
+            if cl_img.GetNumberOfComponentsPerPixel() > 1:
+                comb_arr = np.zeros(cl_img.GetSize()[::-1], dtype=np.int16)
+                for k in cl_img.GetMetaDataKeys():
+                    if k.startswith("Segment") and k.endswith("_LabelValue"):
+                        prefix = k[:-11]
+                        lv = int(cl_img.GetMetaData(k))
+                        layer_idx = int(cl_img.GetMetaData(f"{prefix}_Layer")) if cl_img.HasMetaDataKey(f"{prefix}_Layer") else 0
+                        comp_img = sitk.VectorIndexSelectionCast(cl_img, layer_idx, sitk.sitkInt16)
+                        comp_arr = sitk.GetArrayFromImage(comp_img)
+                        comb_arr[comp_arr == lv] = lv
+                comb_img = sitk.GetImageFromArray(comb_arr)
+                comb_img.CopyInformation(cl_img)
+                cl_img = comb_img
+            if cl_img.GetSize() == ct_img.GetSize() and np.allclose(cl_img.GetSpacing(), ct_img.GetSpacing(), atol=1e-2) and np.allclose(cl_img.GetOrigin(), ct_img.GetOrigin(), atol=1e-1):
+                ct_lesion_arr = sitk.GetArrayFromImage(cl_img).astype(np.int16)
+            else:
+                res_cl = sitk.Resample(cl_img, ct_img, sitk.Transform(), sitk.sitkNearestNeighbor, 0, sitk.sitkInt16)
+                ct_lesion_arr = sitk.GetArrayFromImage(res_cl).astype(np.int16)
+            print(f"    [CT LESIONS] Loaded {len(np.unique(ct_lesion_arr)) - 1} segments ({(ct_lesion_arr > 0).sum()} voxels) from {os.path.basename(ct_lesions_dest)}")
+        except Exception as e_cl:
+            print(f"    [WARN] Failed to load/resample CT lesions: {e_cl}")
 
     # Step 3: Resample Moving MRI Sequences and Dedicated 8-Zone Prostate Anatomy
     sf_map = xnat.get_files_map(f"/data/projects/{PROJ_ID}/subjects/{subj_id}/resources/slicer_final/files?format=json")
@@ -1073,6 +1097,9 @@ def process_case(pat_id, gpu_id, xnat):
             t2_im = sitk.ReadImage(t2_info["item"])
             res_t2 = sitk.Resample(t2_im, ct_img, sitk.Transform(), sitk.sitkLinear, 0.0, sitk.sitkFloat32) if t2_info["is_reg"] else sitk.Resample(t2_im, ct_img, tfm_obj, sitk.sitkLinear, 0.0, sitk.sitkFloat32)
             t2_arr = sitk.GetArrayFromImage(res_t2).astype(np.float32)
+            if np.max(t2_arr) == 0.0 and t2_info["is_reg"]:
+                res_t2 = sitk.Resample(t2_im, ct_img, tfm_obj, sitk.sitkLinear, 0.0, sitk.sitkFloat32)
+                t2_arr = sitk.GetArrayFromImage(res_t2).astype(np.float32)
             t2_arr = np.maximum(0.0, t2_arr)
             pos = t2_arr[t2_arr > 0]
             if len(pos) > 0:
@@ -1106,6 +1133,9 @@ def process_case(pat_id, gpu_id, xnat):
 
             res_im = sitk.Resample(im, ct_img, sitk.Transform(), sitk.sitkLinear, 0.0, sitk.sitkFloat32) if seq["is_reg"] else sitk.Resample(im, ct_img, tfm_obj, sitk.sitkLinear, 0.0, sitk.sitkFloat32)
             arr = sitk.GetArrayFromImage(res_im).astype(np.float32)
+            if np.max(arr) == 0.0 and seq["is_reg"]:
+                res_im = sitk.Resample(im, ct_img, tfm_obj, sitk.sitkLinear, 0.0, sitk.sitkFloat32)
+                arr = sitk.GetArrayFromImage(res_im).astype(np.float32)
             arr = np.maximum(0.0, arr)
             pos = arr[arr > 0]
             if len(pos) > 0:
@@ -1182,10 +1212,92 @@ def process_case(pat_id, gpu_id, xnat):
         zc, yc, xc = np.mean(np.argwhere(mr_gold_f == 1), axis=0)
         centroids["tp1_lid1"] = np.array([round(xc) + 1, round(yc) + 1, round(zc) + 1], dtype=np.int32)
 
-    # Build Scene Hierarchy
+    # Build Scene Hierarchy, Organ Mapping & Matches
     ct_labels = [int(i) for i in np.unique(ct_les_f) if i > 0]
-    ct_seg_names = {str(i): f"Lesion {i}" for i in ct_labels}
+    for i in ct_labels:
+        if str(i) not in ct_seg_names:
+            ct_seg_names[str(i)] = f"Lesion {i}"
     mr_seg_names = {"1": "Prostate Primary Lesion"} if mr_gold_f.any() else {}
+
+    def _classify_organ_priority(name):
+        ln = name.lower()
+        if any(k in ln for k in ["prostate", "peripheral zone", "(pz)", "transition zone", "(tz)", "central zone", "(cz)", "seminal vesicle"]):
+            return 1
+        if any(k in ln for k in ["lymph", "knoten", "node", "station_"]) or any(ln.startswith(p) for p in ["neck_", "thoracic_", "axillary_", "abdominal_", "deep_inguinal", "superficial_inguinal", "inguinal_"]):
+            return 2
+        bone_kw = ["vertebra", "rib_", "femur", "humerus", "scapula", "hip", "sacrum", "skull", "sternum", "clavicle", "costal", "hyoid", "mandible", "ilium", "ischium", "pubis", "tibia", "bone", "spine"]
+        vessel_excl = ["artery", "vein", "vena", "vessel"]
+        if any(k in ln for k in bone_kw) and not any(v in ln for v in vessel_excl):
+            return 3
+        organ_kw = ["liver", "kidney", "lung", "spleen", "pancreas", "heart", "thyroid", "adrenal", "stomach", "colon", "rectum", "esophagus", "gallbladder", "bladder", "bowel", "duodenum", "trachea", "brain", "spinal_cord"]
+        if any(k in ln for k in organ_kw):
+            return 4
+        if any(k in ln for k in ["aorta", "artery", "vein", "vena", "trunk", "carotid", "jugular"]):
+            return 5
+        return 6
+
+    ct_organs = {}
+    for lid in ct_labels:
+        mask_l = (ct_les_f == lid)
+        avals = max_anat_f[mask_l]
+        avals = avals[avals > 0]
+        best_org = "Unknown"
+        if len(avals) > 0:
+            uvals, ucnts = np.unique(avals, return_counts=True)
+            cands = []
+            for uv, uc in zip(uvals, ucnts):
+                aname = anat_labels.get(str(int(uv)), "")
+                if aname and aname not in ("body_trunc", "body_extremities", "abdominal_cavity", "mediastinum", "thoracic_cavity"):
+                    cands.append((_classify_organ_priority(aname), -int(uc), aname))
+            if cands:
+                cands.sort()
+                best_org = cands[0][2]
+        if best_org == "Unknown":
+            sname = ct_seg_names.get(str(lid), "").lower()
+            if "prostate" in sname:
+                best_org = "Prostate"
+            elif "hip" in sname or "femur" in sname or "vertebra" in sname or "rib" in sname:
+                best_org = "Bone"
+            elif "lung" in sname:
+                best_org = "Lung"
+            elif "liver" in sname:
+                best_org = "Liver"
+        ct_organs[str(lid)] = best_org
+
+    all_mr_tps = [1] + [s["tp_idx"] for s in extra_mri_series]
+    organ_mapping = {"0": ct_organs}
+    segment_names_dict = {"0": ct_seg_names}
+    for tp_i in all_mr_tps:
+        organ_mapping[str(tp_i)] = {"1": "Prostate"} if mr_gold_f.any() else {}
+        segment_names_dict[str(tp_i)] = mr_seg_names if mr_gold_f.any() else {}
+
+    matches = []
+    best_ov_lid = None
+    best_ov_cnt = 0
+    if mr_gold_f.any() and ct_labels:
+        for lid in ct_labels:
+            ov = int(np.sum((mr_gold_f == 1) & (ct_les_f == lid)))
+            if ov > best_ov_cnt:
+                best_ov_cnt = ov
+                best_ov_lid = lid
+    for lid in ct_labels:
+        children = []
+        if mr_gold_f.any() and lid == best_ov_lid:
+            children.append({
+                "name": "PET_Lesions_1",
+                "raw_lesion": "Segment_1",
+                "node": "child",
+                "group_id": int(lid),
+                "lesion": "Prostate Primary Lesion"
+            })
+        matches.append({
+            "name": "PET_Lesions_0",
+            "raw_lesion": f"Segment_{lid}",
+            "node": "parent",
+            "group_id": int(lid),
+            "lesion": ct_seg_names.get(str(lid), f"Lesion {lid}"),
+            "children": children
+        })
 
     scene_hierarchy = [
         {"name": "Fixed_CT_Volume_0", "type": "vtkMRMLScalarVolumeNode", "modality": "CT"},
@@ -1227,38 +1339,48 @@ def process_case(pat_id, gpu_id, xnat):
     if os.path.isfile(tmp_h5):
         os.remove(tmp_h5)
     with h5py.File(tmp_h5, "w", libver="v110") as h5:
+        sp_arr = np.array(ct_img.GetSpacing(), dtype=np.float64)
+        orig_arr = np.array(ct_img.GetOrigin(), dtype=np.float64)
+        dir_arr = np.array(ct_img.GetDirection(), dtype=np.float64)
+
+        def _set_spatial_attrs(ds):
+            ds.attrs["spacing"] = sp_arr
+            ds.attrs["origin"] = orig_arr
+            ds.attrs["direction"] = dir_arr
+
         # BASELINE Group
         b = h5.create_group("BASELINE")
-        b.create_dataset("Fixed_CT_Volume_0.nii.gz", data=ct_arr_f, compression="gzip", compression_opts=4, shuffle=True)
-        b.create_dataset("SUV_PET_Image_0.nii.gz", data=pet_arr_f, compression="gzip", compression_opts=4, shuffle=True)
-        b.create_dataset("PET_Lesions_0.nii.gz", data=ct_les_f, compression="gzip", compression_opts=4, shuffle=True)
-        b.create_dataset("max_anatomy.nii.gz", data=max_anat_f, compression="gzip", compression_opts=4, shuffle=True)
-        b.create_dataset("skellytour.nii.gz", data=skellytour_f, compression="gzip", compression_opts=4, shuffle=True)
-        b.create_dataset("diffusivity", data=diff_comb_f, compression="gzip", compression_opts=4, shuffle=True)
+        _set_spatial_attrs(b)
+        _set_spatial_attrs(b.create_dataset("Fixed_CT_Volume_0.nii.gz", data=ct_arr_f, compression="gzip", compression_opts=4, shuffle=True))
+        _set_spatial_attrs(b.create_dataset("SUV_PET_Image_0.nii.gz", data=pet_arr_f, compression="gzip", compression_opts=4, shuffle=True))
+        _set_spatial_attrs(b.create_dataset("PET_Lesions_0.nii.gz", data=ct_les_f, compression="gzip", compression_opts=4, shuffle=True))
+        _set_spatial_attrs(b.create_dataset("max_anatomy.nii.gz", data=max_anat_f, compression="gzip", compression_opts=4, shuffle=True))
+        _set_spatial_attrs(b.create_dataset("skellytour.nii.gz", data=skellytour_f, compression="gzip", compression_opts=4, shuffle=True))
+        _set_spatial_attrs(b.create_dataset("diffusivity", data=diff_comb_f, compression="gzip", compression_opts=4, shuffle=True))
 
         # ATLAS Group
         a = h5.create_group("ATLAS")
-        a.create_dataset("max_anatomy", data=max_anat_f, compression="gzip", compression_opts=4, shuffle=True)
-        a.create_dataset("bone_atlas", data=bone_atlas_f, compression="gzip", compression_opts=4, shuffle=True)
-        a.create_dataset("skellytour", data=skellytour_f, compression="gzip", compression_opts=4, shuffle=True)
+        _set_spatial_attrs(a.create_dataset("max_anatomy", data=max_anat_f, compression="gzip", compression_opts=4, shuffle=True))
+        _set_spatial_attrs(a.create_dataset("bone_atlas", data=bone_atlas_f, compression="gzip", compression_opts=4, shuffle=True))
+        _set_spatial_attrs(a.create_dataset("skellytour", data=skellytour_f, compression="gzip", compression_opts=4, shuffle=True))
 
         # Timepoint 1: Moving MRI T2
         mri_grp = h5.create_group("TFM_Transform_FollowUp_to_Baseline_1.tfm")
-        mri_grp.create_dataset("Fixed_CT_Volume_1.nii.gz", data=t2_arr_f, compression="gzip", compression_opts=4, shuffle=True)
-        mri_grp.create_dataset("SUV_PET_Image_1.nii.gz", data=pet_arr_f, compression="gzip", compression_opts=4, shuffle=True)
-        mri_grp.create_dataset("PET_Lesions_1.nii.gz", data=mr_gold_f, compression="gzip", compression_opts=4, shuffle=True)
-        mri_grp.create_dataset("max_anatomy.nii.gz", data=mri_anat_f, compression="gzip", compression_opts=4, shuffle=True)
-        mri_grp.create_dataset("diffusivity", data=diff_mri_f, compression="gzip", compression_opts=4, shuffle=True)
+        _set_spatial_attrs(mri_grp.create_dataset("Fixed_CT_Volume_1.nii.gz", data=t2_arr_f, compression="gzip", compression_opts=4, shuffle=True))
+        _set_spatial_attrs(mri_grp.create_dataset("SUV_PET_Image_1.nii.gz", data=pet_arr_f, compression="gzip", compression_opts=4, shuffle=True))
+        _set_spatial_attrs(mri_grp.create_dataset("PET_Lesions_1.nii.gz", data=mr_gold_f, compression="gzip", compression_opts=4, shuffle=True))
+        _set_spatial_attrs(mri_grp.create_dataset("max_anatomy.nii.gz", data=mri_anat_f, compression="gzip", compression_opts=4, shuffle=True))
+        _set_spatial_attrs(mri_grp.create_dataset("diffusivity", data=diff_mri_f, compression="gzip", compression_opts=4, shuffle=True))
 
         # Additional MRI timepoints (2..N)
         for s in extra_mri_series:
             tp_i = s["tp_idx"]
             tp_grp = h5.create_group(f"TFM_Transform_FollowUp_to_Baseline_{tp_i}.tfm")
-            tp_grp.create_dataset(f"Fixed_CT_Volume_{tp_i}.nii.gz", data=s["arr_f"], compression="gzip", compression_opts=4, shuffle=True)
-            tp_grp.create_dataset(f"SUV_PET_Image_{tp_i}.nii.gz", data=pet_arr_f, compression="gzip", compression_opts=4, shuffle=True)
-            tp_grp.create_dataset(f"PET_Lesions_{tp_i}.nii.gz", data=mr_gold_f, compression="gzip", compression_opts=4, shuffle=True)
-            tp_grp.create_dataset("max_anatomy.nii.gz", data=mri_anat_f, compression="gzip", compression_opts=4, shuffle=True)
-            tp_grp.create_dataset("diffusivity", data=s["diff_f"], compression="gzip", compression_opts=4, shuffle=True)
+            _set_spatial_attrs(tp_grp.create_dataset(f"Fixed_CT_Volume_{tp_i}.nii.gz", data=s["arr_f"], compression="gzip", compression_opts=4, shuffle=True))
+            _set_spatial_attrs(tp_grp.create_dataset(f"SUV_PET_Image_{tp_i}.nii.gz", data=pet_arr_f, compression="gzip", compression_opts=4, shuffle=True))
+            _set_spatial_attrs(tp_grp.create_dataset(f"PET_Lesions_{tp_i}.nii.gz", data=mr_gold_f, compression="gzip", compression_opts=4, shuffle=True))
+            _set_spatial_attrs(tp_grp.create_dataset("max_anatomy.nii.gz", data=mri_anat_f, compression="gzip", compression_opts=4, shuffle=True))
+            _set_spatial_attrs(tp_grp.create_dataset("diffusivity", data=s["diff_f"], compression="gzip", compression_opts=4, shuffle=True))
 
         # CENTROIDS Group
         c_grp = h5.create_group("CENTROIDS")
@@ -1275,7 +1397,8 @@ def process_case(pat_id, gpu_id, xnat):
         m_grp.create_dataset("custom_options.json", data=json.dumps({"metadata_version": "2.0"}))
         m_grp.create_dataset("metadata.json", data=json.dumps({"patient_id": pat_id, "case_id": pat_id}))
         m_grp.create_dataset("scene_hierarchy.json", data=json.dumps(scene_hierarchy))
-        m_grp.create_dataset("segment_names.json", data=json.dumps({"0": ct_seg_names, "1": mr_seg_names}))
+        m_grp.create_dataset("organ_mapping", data=json.dumps(organ_mapping))
+        m_grp.create_dataset("segment_names.json", data=json.dumps(segment_names_dict))
 
     os.replace(tmp_h5, out_h5)
 

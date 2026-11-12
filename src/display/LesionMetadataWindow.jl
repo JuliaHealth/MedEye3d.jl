@@ -4450,6 +4450,47 @@ function create_metadata_window(
     btn_xnat_preproc = Button(g[xnat_r4, 4], label = "Preprocess", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     rowsize!(g, xnat_r4, Fixed(28)); register_fixed_row!(xnat_r4, 28)
 
+    # Progress & Status Bar for XNAT Fetch / Load / GPU Upload
+    xnat_load_progress_pct = Observable(0.0)
+    xnat_load_progress_text = Observable("Idle — Select a patient and click Fetch/Load")
+    xnat_load_progress_color = Observable(RGBf(0.55, 0.65, 0.75))
+
+    function _make_progress_bar_str(pct::Real, stage_msg::AbstractString)
+        p = clamp(Float64(pct), 0.0, 100.0)
+        n_bars = 18
+        filled = round(Int, (p / 100.0) * n_bars)
+        bar = repeat("█", filled) * repeat("░", n_bars - filled)
+        pct_int = round(Int, p)
+        return "[$(bar)] $(lpad(pct_int, 3))%  $(stage_msg)"
+    end
+
+    function _set_xnat_progress!(pct::Real, stage_msg::AbstractString; state::Symbol=:active)
+        p = clamp(Float64(pct), 0.0, 100.0)
+        xnat_load_progress_pct[] = p
+        bar_str = _make_progress_bar_str(p, stage_msg)
+        xnat_load_progress_text[] = bar_str
+        save_status_text[] = bar_str
+        col = if state == :ready
+            RGBf(0.3, 0.95, 0.45)
+        elseif state == :error
+            RGBf(0.95, 0.3, 0.3)
+        elseif state == :warn
+            RGBf(0.95, 0.8, 0.25)
+        else
+            RGBf(0.35, 0.80, 1.0)
+        end
+        xnat_load_progress_color[] = col
+        save_status_color[] = col
+    end
+
+    _lmw_observables[:set_xnat_progress] = _set_xnat_progress!
+
+    xnat_r_prog = nr!()
+    box_xnat_prog = Box(g[xnat_r_prog, 1:4], color = RGBf(0.08, 0.10, 0.13), strokecolor = RGBf(0.25, 0.32, 0.42), strokewidth = 1)
+    lbl_xnat_prog = Label(g[xnat_r_prog, 1:4], xnat_load_progress_text, fontsize = 10, font = :bold,
+        color = xnat_load_progress_color, halign = :left, padding = (6, 6, 2, 2), tellwidth = false)
+    rowsize!(g, xnat_r_prog, Fixed(26)); register_fixed_row!(xnat_r_prog, 26)
+
     end_section!(sec_xnat)
 
     function _update_auth_status!(creds::Union{XnatAuth.XnatCredentials, Nothing}; offline::Bool=false)
@@ -4520,7 +4561,13 @@ function create_metadata_window(
     function _switch_to_hdf5!(target_h5::String)
         !isfile(target_h5) && return
         println("[SWITCH-CASE] Switching active dataset to $target_h5"); flush(stdout)
+        _set_xnat_progress!(55.0, "Reading HDF5 metadata & lesion annotations...")
         try
+            empty!(_cached_lesion_ids)
+            empty!(_organ_classification_cache)
+            empty!(_lesion_suv_cache)
+            empty!(_lesion_suv_metrics_cache)
+            empty!(_volume_cache)
             _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
             _MEH_mod.h5_path_ref[] = target_h5
             _MEH_mod.h5_save_path_ref[] = target_h5
@@ -4549,6 +4596,25 @@ function create_metadata_window(
                 !startswith(k, "_") && push!(new_lids, k)
             end
             if isempty(new_lids)
+                try
+                    _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+                    lock(_MEH_mod._hdf5_io_lock) do
+                        HDF5.h5open(target_h5, "r") do h5_f
+                            if haskey(h5_f, "_meta_/segment_names.json")
+                                raw_sn = JSON.parse(read(h5_f["_meta_/segment_names.json"]))
+                                if haskey(raw_sn, "0") && raw_sn["0"] isa AbstractDict
+                                    tp0_d = raw_sn["0"]
+                                    s_keys = sort(collect(keys(tp0_d)); by=k -> (m = match(r"\d+", string(k)); m !== nothing ? parse(Int, m.match) : 0))
+                                    for sk in s_keys
+                                        push!(new_lids, "$(sk): $(tp0_d[sk])")
+                                    end
+                                end
+                            end
+                        end
+                    end
+                catch; end
+            end
+            if isempty(new_lids)
                 new_lids = ["(none)"]
             end
             lesion_ids[] = new_lids
@@ -4557,6 +4623,7 @@ function create_metadata_window(
             @warn "Failed reloading annotations for $target_h5" e
         end
         
+        _set_xnat_progress!(65.0, "Loading 3D volumes & GPU diffusivity...")
         obs_on_switch_case[] = target_h5
         if haskey(ui_hooks, :on_switch_case)
             ui_hooks[:on_switch_case][] = target_h5
@@ -4795,61 +4862,99 @@ function create_metadata_window(
         end
     end
 
-    function _load_patient_direct(proj::String, subj::String)
+    function _load_patient_direct(proj::String, subj::String; force_xnat_download::Bool=false)
         isempty(subj) && return
         (isempty(proj) || proj == "(None)") && return
         
+        _set_xnat_progress!(5.0, "Preparing patient $subj ($proj)...")
         creds = _active_xnat_creds[]
         all_subjs = String[_parse_subject_id(s) for s in menu_xnat_subj.options[] if s != "(No matching patients)"]
-        XnatPreloader.notify_patient_selected(creds, proj, subj, all_subjs)
+        if creds !== nothing
+            XnatPreloader.notify_patient_selected(creds, proj, subj, all_subjs)
+        end
         
         target_dir = XnatPreloader.get_local_cache_dir(proj, subj)
         target_h5 = joinpath(target_dir, "$(subj)_preprocessed.h5")
         
-        # 1. Local cache check
-        if isfile(target_h5) && filesize(target_h5) > 1024
-            println("[XNAT] Patient '$subj' preprocessed HDF5 found locally: $target_h5"); flush(stdout)
-            xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
-            xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
-            _switch_to_hdf5!(target_h5)
-            return
+        # 1. Local cache check (only in ~/.medeye3d/xnat_cache, skipped when force_xnat_download=true)
+        m_pat = match(r"[pP]at\d+", subj)
+        short_pat = m_pat !== nothing ? "Pat" * match(r"\d+", m_pat.match).match : subj
+        flat_cache_h5 = joinpath(dirname(dirname(target_dir)), "$(proj)_$(subj)_preprocessed.h5")
+        flat_short_h5 = joinpath(dirname(dirname(target_dir)), "$(proj)_$(short_pat)_preprocessed.h5")
+        if force_xnat_download
+            for cand_h5 in (target_h5, flat_cache_h5, flat_short_h5)
+                if ispath(cand_h5) || islink(cand_h5)
+                    try rm(cand_h5; force=true) catch; end
+                end
+            end
+        else
+            for cand_h5 in (target_h5, flat_cache_h5, flat_short_h5)
+                if isfile(cand_h5) && !islink(cand_h5) && filesize(cand_h5) > 1024
+                    println("[XNAT] Patient '$subj' preprocessed HDF5 found in local xnat_cache: $cand_h5"); flush(stdout)
+                    xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
+                    xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
+                    _set_xnat_progress!(50.0, "Found cached HDF5 for $short_pat ($(round(filesize(cand_h5)/1048576, digits=1)) MB)...")
+                    _switch_to_hdf5!(cand_h5)
+                    return
+                end
+            end
         end
 
-        # 1b. Check local repository files (e.g. pat6 / pat_6 or pat1 / psma_patient_all_tp)
-        if ((proj == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" || proj == "Lu177_PSMA_PIPELINE") && occursin(r"[pP]at_?6"i, subj))
+        # 1b. Check local repository files (only when offline / no XNAT credentials)
+        if creds === nothing && ((proj == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" || proj == "Lu177_PSMA_PIPELINE") && occursin(r"[pP]at_?6"i, subj))
             repo_pat6 = joinpath(dirname(dirname(@__DIR__)), "data", "pat_6_files", "preprocessed_volumes.h5")
             if isfile(repo_pat6)
                 mkpath(target_dir)
                 try cp(repo_pat6, target_h5, force=true) catch; end
                 if isfile(target_h5) && filesize(target_h5) > 1024
                     println("[XNAT] Linked local repo pat6 file to cache: $target_h5"); flush(stdout)
+                    _set_xnat_progress!(50.0, "Found local repo HDF5 for $subj...")
                     _switch_to_hdf5!(target_h5)
                     return
                 end
             end
-        elseif ((proj == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" || proj == "Prostata_bimodal_PIPELINE") && (occursin(r"[pP]at_?1"i, subj) || subj == "psma_patient_all_tp"))
+        elseif creds === nothing && ((proj == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" || proj == "Prostata_bimodal_PIPELINE") && (occursin(r"[pP]at_?1$"i, subj) || subj == "psma_patient_all_tp"))
             repo_pat1 = joinpath(dirname(dirname(@__DIR__)), "data", "cases", "psma_patient_all_tp", "preprocessed_volumes.h5")
             if isfile(repo_pat1)
                 mkpath(target_dir)
                 try cp(repo_pat1, target_h5, force=true) catch; end
                 if isfile(target_h5) && filesize(target_h5) > 1024
                     println("[XNAT] Linked local repo pat1 (Prostata bimodal) file to cache: $target_h5"); flush(stdout)
+                    _set_xnat_progress!(50.0, "Found local repo HDF5 for $subj...")
                     _switch_to_hdf5!(target_h5)
                     return
                 end
             end
         end
         
-        # 2. Check XNAT for preprocessed HDF5
+        # 2. Check XNAT for preprocessed HDF5 with streaming progress bar
         if creds !== nothing
-            save_status_text[] = "Checking XNAT for $subj preprocessed HDF5..."
-            save_status_color[] = RGBf(0.4, 0.7, 1.0)
+            _set_xnat_progress!(10.0, "Connecting to XNAT for $subj...")
+            xnat_subject_status_text[] = "Status: Fetching [..]"
+            xnat_subject_status_color[] = RGBf(0.35, 0.80, 1.0)
+            last_prog_time = Ref(time())
+            prog_cb = (total_b, now_b) -> begin
+                t_now = time()
+                if t_now - last_prog_time[] >= 0.12 || (total_b > 0 && now_b >= total_b)
+                    last_prog_time[] = t_now
+                    mb_now = round(now_b / 1048576.0, digits=1)
+                    if total_b > 0
+                        mb_tot = round(total_b / 1048576.0, digits=1)
+                        dl_frac = clamp(now_b / total_b, 0.0, 1.0)
+                        ui_pct = 10.0 + 40.0 * dl_frac
+                        @async _set_xnat_progress!(ui_pct, "Downloading $subj: $(mb_now) / $(mb_tot) MB")
+                    else
+                        ui_pct = clamp(10.0 + 40.0 * min(now_b / (220.0 * 1048576.0), 0.98), 10.0, 49.0)
+                        @async _set_xnat_progress!(ui_pct, "Downloading $subj: $(mb_now) MB...")
+                    end
+                end
+            end
             Threads.@spawn begin
-                ok = XnatClient.download_preprocessed_hdf5(creds, proj, subj, target_h5)
+                ok = XnatClient.download_preprocessed_hdf5(creds, proj, subj, target_h5; progress_cb=prog_cb)
                 if ok && isfile(target_h5) && filesize(target_h5) > 1024
                     @async begin
-                        save_status_text[] = "Downloaded $subj from XNAT OK"
-                        save_status_color[] = RGBf(0.4, 0.9, 0.4)
+                        mb_final = round(filesize(target_h5) / 1048576.0, digits=1)
+                        _set_xnat_progress!(50.0, "Downloaded $subj ($(mb_final) MB) — initializing viewer...")
                         xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
                         xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
                         _switch_to_hdf5!(target_h5)
@@ -4858,13 +4963,13 @@ function create_metadata_window(
                     # 3. No preprocessed HDF5 on XNAT: run preprocessing, save local copy, and upload to XNAT!
                     println("[XNAT] No preprocessed HDF5 found on XNAT for $subj. Starting preprocessing pipeline..."); flush(stdout)
                     @async begin
+                        _set_xnat_progress!(15.0, "No .h5 on XNAT for $subj — running preprocessing...", state=:warn)
                         _run_preprocess_and_upload(proj, subj, target_h5; force=false)
                     end
                 end
             end
         else
-            save_status_text[] = "Working Offline: no local HDF5 for $subj"
-            save_status_color[] = RGBf(0.9, 0.7, 0.2)
+            _set_xnat_progress!(0.0, "Offline Mode: no local HDF5 found for $subj", state=:error)
         end
     end
 
@@ -4945,7 +5050,7 @@ function create_metadata_window(
         end
     end
 
-    function _load_patient_by_query(query_str::String)
+    function _load_patient_by_query(query_str::String; force_xnat_download::Bool=false)
         q = String(strip(query_str))
         isempty(q) && return
         clean_id = _parse_subject_id(q)
@@ -4958,22 +5063,46 @@ function create_metadata_window(
         opts = menu_xnat_subj.options[]
         exact_match = findfirst(s -> _parse_subject_id(s) == clean_id, opts)
         if exact_match !== nothing
-            menu_xnat_subj.i_selected[] = exact_match
+            if force_xnat_download && menu_xnat_subj.i_selected[] == exact_match
+                _load_patient_direct(String(strip(proj)), _parse_subject_id(opts[exact_match]); force_xnat_download=true)
+            else
+                menu_xnat_subj.i_selected[] = exact_match
+                if force_xnat_download
+                    _load_patient_direct(String(strip(proj)), _parse_subject_id(opts[exact_match]); force_xnat_download=true)
+                end
+            end
             return
         end
         
         partial = findfirst(s -> occursin(lowercase(clean_id), lowercase(s)), opts)
         if partial !== nothing
-            menu_xnat_subj.i_selected[] = partial
+            if force_xnat_download && menu_xnat_subj.i_selected[] == partial
+                _load_patient_direct(String(strip(proj)), _parse_subject_id(opts[partial]); force_xnat_download=true)
+            else
+                menu_xnat_subj.i_selected[] = partial
+                if force_xnat_download
+                    _load_patient_direct(String(strip(proj)), _parse_subject_id(opts[partial]); force_xnat_download=true)
+                end
+            end
             return
         end
         
         println("[XNAT] Directly requesting patient '$clean_id' from project '$proj'..."); flush(stdout)
-        _load_patient_direct(proj, clean_id)
+        _load_patient_direct(proj, clean_id; force_xnat_download=force_xnat_download)
     end
 
     on(btn_load_patient.clicks) do _
-        _load_patient_by_query(tb_patient_search.displayed_string[])
+        q_txt = strip(tb_patient_search.displayed_string[])
+        if !isempty(q_txt)
+            _load_patient_by_query(String(q_txt); force_xnat_download=true)
+        else
+            subj_sel = menu_xnat_subj.selection[]
+            proj = menu_xnat_proj.selection[]
+            if subj_sel !== nothing && subj_sel != "(Select Project First)" && subj_sel != "(No matching patients)" && proj !== nothing && proj != "(None)"
+                subj = _parse_subject_id(subj_sel)
+                !isempty(subj) && _load_patient_direct(String(strip(proj)), subj; force_xnat_download=true)
+            end
+        end
     end
 
     on(tb_patient_search.stored_string) do q_str

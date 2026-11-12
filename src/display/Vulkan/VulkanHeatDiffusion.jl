@@ -351,8 +351,48 @@ function compute_frontier_edge_scale(diffusivity::Array{Float32,3}, cx::Int, cy:
     mean_E = sum_E / count_vox
     mean_E_clamped = max(mean_E, 0.01f0)
     
+    # Also check immediate local shell (1.5 mm <= r <= min(5.0 mm, R_outer_mm)) around the seed.
+    # If the seed is inside a small high-activity focus surrounded by strong edges (r <= 5 mm)
+    # while the distant frontier shell (R_outer_mm >= 10 mm) lies in calm exterior background,
+    # mean_E at R_outer_mm would be artificially low and produce a huge s_boost (> 3.0) that
+    # crushes diffusivity D^s_eff inside the small high-activity lesion.
+    rx_loc = max(1, round(Int, min(5.0, R_outer_mm) / dx))
+    ry_loc = max(1, round(Int, min(5.0, R_outer_mm) / dy))
+    rz_loc = max(1, round(Int, min(5.0, R_outer_mm) / dz))
+    inv_rx_loc2 = 1.0 / (rx_loc^2)
+    inv_ry_loc2 = 1.0 / (ry_loc^2)
+    inv_rz_loc2 = 1.0 / (rz_loc^2)
+    local_max_E = 0.0f0
+    local_sum_E = 0.0f0
+    local_cnt = 0
+    for z in max(1, cz - rz_loc):min(d, cz + rz_loc)
+        dz2 = (z - cz)^2 * inv_rz_loc2
+        dz2 > 1.0 && continue
+        for y in max(1, cy - ry_loc):min(h, cy + ry_loc)
+            dy2 = (y - cy)^2 * inv_ry_loc2
+            (dz2 + dy2) > 1.0 && continue
+            for x in max(1, cx - rx_loc):min(w, cx + rx_loc)
+                d2 = dz2 + dy2 + (x - cx)^2 * inv_rx_loc2
+                (d2 > 1.0 || d2 < 0.08) && continue
+                e_loc = -log(clamp(diffusivity[x, y, z], 1.0f-7, 1.0f0)) / 10.095886f0
+                local_max_E = max(local_max_E, e_loc)
+                local_sum_E += e_loc
+                local_cnt += 1
+            end
+        end
+    end
+    if local_cnt > 0
+        local_mean_E = local_sum_E / local_cnt
+        # Use the stronger of the distant shell mean and local inner shell mean
+        mean_E_clamped = max(mean_E_clamped, local_mean_E)
+    end
+    
     s_raw = (E_ref / mean_E_clamped)^sensitivity
     s_boost = clamp(s_raw, 0.5f0, 10.0f0)
+    if local_max_E >= 0.45f0
+        # Inside or immediately surrounded by a strong edge ring: prevent frontier boost from crushing interior growth
+        s_boost = min(s_boost, 1.15f0)
+    end
     return Float32(s_boost)
 end
 
@@ -385,8 +425,29 @@ function compute_local_relative_edge_params(diffusivity::Array{Float32,3}, cx::I
     w, h, d = size(diffusivity)
     dx, dy, dz = Float64.(spacing)
     
-    R_core_mm = 4.0
     R_outer_mm = max(8.0, Float64(R_phys))
+    
+    # Detect if a strong bounding ring lies inside 4.0 mm (small high-activity focus)
+    rx_4 = max(1, round(Int, 4.0 / dx))
+    ry_4 = max(1, round(Int, 4.0 / dy))
+    rz_4 = max(1, round(Int, 4.0 / dz))
+    min_ring_r_mm = 8.0
+    for z in max(1, cz - rz_4):min(d, cz + rz_4)
+        dz_mm = (Float64(z) - Float64(cz)) * dz
+        for y in max(1, cy - ry_4):min(h, cy + ry_4)
+            dy_mm = (Float64(y) - Float64(cy)) * dy
+            for x in max(1, cx - rx_4):min(w, cx + rx_4)
+                dx_mm = (Float64(x) - Float64(cx)) * dx
+                r_mm = sqrt(dx_mm^2 + dy_mm^2 + dz_mm^2)
+                (r_mm < 1.2 || r_mm > 4.2) && continue
+                e_v = -log(clamp(diffusivity[x, y, z], 1.0f-5, 1.0f0)) * 0.09905025f0
+                if e_v >= 0.45f0 && r_mm < min_ring_r_mm
+                    min_ring_r_mm = r_mm
+                end
+            end
+        end
+    end
+    R_core_mm = (min_ring_r_mm <= 4.2) ? clamp(0.55 * min_ring_r_mm, 1.0, 4.0) : 4.0
     
     rx_out = max(2, round(Int, R_outer_mm / dx))
     ry_out = max(2, round(Int, R_outer_mm / dy))
@@ -447,20 +508,25 @@ function compute_local_relative_edge_params(diffusivity::Array{Float32,3}, cx::I
         end
     end
     
-    E_bg = if !isempty(core_samples)
-        sort!(core_samples)
-        idx = max(1, round(Int, 0.25 * length(core_samples)))
-        core_samples[idx]
-    else
-        0.05f0
-    end
-    
     E_peak = if !isempty(shell_samples)
         sort!(shell_samples)
         idx = min(length(shell_samples), max(1, round(Int, 0.95 * length(shell_samples))))
         shell_samples[idx]
     else
         0.20f0
+    end
+    
+    E_bg = if !isempty(core_samples)
+        sort!(core_samples)
+        if E_peak >= 0.45f0
+            idx = max(1, round(Int, 0.65 * length(core_samples)))
+            min(core_samples[idx], E_peak - 0.08f0)
+        else
+            idx = max(1, round(Int, 0.25 * length(core_samples)))
+            core_samples[idx]
+        end
+    else
+        0.05f0
     end
     
     delta_E = max(E_peak - E_bg, 0.02f0)
@@ -735,8 +801,30 @@ function compute_directional_relative_edge_params(diffusivity::Array{Float32,3},
                 Float32(E_bg), Float32(edge_clip), Float32(gamma_eff), 1.0f0, Float32(E_barrier), 1.0f0)
     else
         # Standard directional relative edge normalization (Breakthrough 5)
+        # With Adaptive Core Radius & Relative Ridge Scaling for small high-activity regions
         R_outer_mm = max(8.0, Float64(R_phys))
-        R_core_mm = 4.0
+        
+        # 1. Detect if a strong bounding ring lies inside 4.0 mm around the seed
+        rx_4 = max(1, round(Int, 4.0 / dx))
+        ry_4 = max(1, round(Int, 4.0 / dy))
+        rz_4 = max(1, round(Int, 4.0 / dz))
+        min_ring_r_mm = 8.0
+        for z in max(1, cz - rz_4):min(d, cz + rz_4)
+            dz_mm = (Float64(z) - Float64(cz)) * dz
+            for y in max(1, cy - ry_4):min(h, cy + ry_4)
+                dy_mm = (Float64(y) - Float64(cy)) * dy
+                for x in max(1, cx - rx_4):min(w, cx + rx_4)
+                    dx_mm = (Float64(x) - Float64(cx)) * dx
+                    r_mm = sqrt(dx_mm^2 + dy_mm^2 + dz_mm^2)
+                    (r_mm < 1.2 || r_mm > 4.2) && continue
+                    e_v = -log(clamp(diffusivity[x, y, z], 1.0f-5, 1.0f0)) * 0.09905025f0
+                    if e_v >= 0.45f0 && r_mm < min_ring_r_mm
+                        min_ring_r_mm = r_mm
+                    end
+                end
+            end
+        end
+        R_core_mm = (min_ring_r_mm <= 4.2) ? clamp(0.55 * min_ring_r_mm, 1.0, 4.0) : 4.0
         
         rx_out = max(2, round(Int, R_outer_mm / dx))
         ry_out = max(2, round(Int, R_outer_mm / dy))
@@ -815,14 +903,6 @@ function compute_directional_relative_edge_params(diffusivity::Array{Float32,3},
             end
         end
         
-        E_bg = if !isempty(core_samples)
-            sort!(core_samples)
-            idx = max(1, round(Int, 0.25 * length(core_samples)))
-            min(E_seed, core_samples[idx])
-        else
-            min(E_seed, 0.05f0)
-        end
-        
         global_shell_peak = if !isempty(shell_samples)
             sort!(shell_samples)
             idx = min(length(shell_samples), max(1, round(Int, 0.95 * length(shell_samples))))
@@ -831,24 +911,54 @@ function compute_directional_relative_edge_params(diffusivity::Array{Float32,3},
             0.20f0
         end
         
-        function _calc_peak(samples::Vector{Float32})
+        function _calc_raw_peak(samples::Vector{Float32})
             if length(samples) >= 5
                 sort!(samples)
                 idx = min(length(samples), max(1, round(Int, 0.95 * length(samples))))
-                return max(samples[idx], E_bg + 0.02f0)
+                return samples[idx]
             else
-                return max(global_shell_peak, E_bg + 0.02f0)
+                return global_shell_peak
             end
         end
         
-        p_xp = _calc_peak(shell_xp)
-        p_xm = _calc_peak(shell_xm)
-        p_yp = _calc_peak(shell_yp)
-        p_ym = _calc_peak(shell_ym)
-        p_zp = _calc_peak(shell_zp)
-        p_zm = _calc_peak(shell_zm)
+        raw_xp = _calc_raw_peak(shell_xp)
+        raw_xm = _calc_raw_peak(shell_xm)
+        raw_yp = _calc_raw_peak(shell_yp)
+        raw_ym = _calc_raw_peak(shell_ym)
+        raw_zp = _calc_raw_peak(shell_zp)
+        raw_zm = _calc_raw_peak(shell_zm)
+        min_dir_peak = min(raw_xp, raw_xm, raw_yp, raw_ym, raw_zp, raw_zm)
         
-        E_barrier = max(0.35f0, E_seed + 0.10f0)
+        E_bg = if !isempty(core_samples)
+            sort!(core_samples)
+            if min_dir_peak >= 0.45f0
+                # High-activity / strong-edge island: anchor E_bg to the 65th percentile of the
+                # adaptive inner core (capped below min_dir_peak - 0.08) so interior slope gradients
+                # flow freely up to the surrounding strong boundary ridge.
+                idx = max(1, round(Int, 0.65 * length(core_samples)))
+                min(core_samples[idx], min_dir_peak - 0.08f0)
+            else
+                idx = max(1, round(Int, 0.25 * length(core_samples)))
+                min(E_seed, core_samples[idx])
+            end
+        else
+            min(E_seed, 0.05f0)
+        end
+        
+        p_xp = max(raw_xp, E_bg + 0.02f0)
+        p_xm = max(raw_xm, E_bg + 0.02f0)
+        p_yp = max(raw_yp, E_bg + 0.02f0)
+        p_ym = max(raw_ym, E_bg + 0.02f0)
+        p_zp = max(raw_zp, E_bg + 0.02f0)
+        p_zm = max(raw_zm, E_bg + 0.02f0)
+        
+        # Relative barrier ceiling: preserves 0.35 / E_seed+0.10 protection when any weak direction exists,
+        # while lifting proportionally when enclosed in all directions by strong edges (min_dir_peak >= 0.45).
+        E_barrier = if min_dir_peak >= 0.45f0
+            max(0.35f0, E_seed + 0.15f0, E_bg + 0.88f0 * (min_dir_peak - E_bg))
+        else
+            max(0.35f0, E_seed + 0.10f0)
+        end
         gamma_eff = clamp(12.0f0 * sensitivity, 8.0f0, 24.0f0)
         return (Float32(p_xp), Float32(p_xm), Float32(p_yp), Float32(p_ym), Float32(p_zp), Float32(p_zm),
                 Float32(E_bg), Float32(edge_clip), Float32(gamma_eff), 1.0f0, Float32(E_barrier), 0.0f0)
