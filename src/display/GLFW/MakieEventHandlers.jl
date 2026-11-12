@@ -3702,10 +3702,12 @@ function save_tp_mask_to_h5(tp_i::Int)::Bool
                         h5_file[ds_path_expert][:, :, :] = Int16.(raw_to_write)
                     catch
                         HDF5.delete_object(h5_file, ds_path_expert)
-                        h5_file[ds_path_expert] = Int16.(raw_to_write)
+                        HDF5.create_dataset(h5_file, ds_path_expert, Int16, HDF5.dataspace(size(raw_to_write)...); chunk=(64, 64, 64), compress=1)
+                        h5_file[ds_path_expert][:, :, :] = Int16.(raw_to_write)
                     end
                 else
-                    h5_file[ds_path_expert] = Int16.(raw_to_write)
+                    HDF5.create_dataset(h5_file, ds_path_expert, Int16, HDF5.dataspace(size(raw_to_write)...); chunk=(64, 64, 64), compress=1)
+                    h5_file[ds_path_expert][:, :, :] = Int16.(raw_to_write)
                 end
                 # Also persist updated centroids for this TP into CENTROIDS group
                 try

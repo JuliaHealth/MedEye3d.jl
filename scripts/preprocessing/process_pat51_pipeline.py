@@ -31,12 +31,12 @@ CASE_DIR = "/workspaces/MedEye3d.jl/data/cases/Prostata_bimodal/Pat51"
 RAW_DIR = os.path.join(CASE_DIR, "raw")
 OUT_H5 = os.path.join(CASE_DIR, "preprocessed_volumes.h5")
 
-ALIAS = "755f5d1e-2a2a-45da-88a0-8dd543f4a594"
-SECRET = "nn6Y9kDWyRuzlwVMrxH3RM2ooMOKBBM2grcqrhDgfNGd8oWJrjTZkPD27NgwZY0n"
+ALIAS = "0eae53b5-d2e4-4bed-934a-d0540068269b"
+SECRET = "NWGGgbcf4DDLrco30ITFe0E6AuMvjljjtckXPEweO0mI3abO2K1pjg7DPEdF9u0n"
 SERVER = "https://imaging-platform.diz-ag.med.ovgu.de"
 
-PROJ_ID = "Prostata_bimodal"
-SUBJ_ID = "XNATImagingPlatform_S00146"
+PROJ_ID = "Prostata_bimodal_PIPELINE"
+SUBJ_ID = "XNATImagingPlatform_S01009"
 SUBJ_LABEL = "FDM_DPI-2024-7-KRN_Prostata_bimodal__PETPSMA_0__Pat51"
 EXP_ID = "XNATImagingPlatform_E00142"
 
@@ -1039,10 +1039,11 @@ def upload_to_xnat(h5_path):
     sess.put(res_url)
 
     # 2. Upload file
-    upload_url = f"{res_url}/files/{remote_filename}?overwrite=true"
+    upload_url = f"{res_url}/files/{remote_filename}?overwrite=true&inbody=true"
     print(f"  Uploading {h5_path} ({os.path.getsize(h5_path)/(1024*1024):.1f} MB) -> {upload_url}...")
+    headers = {"Content-Type": "application/octet-stream"}
     with open(h5_path, "rb") as f:
-        resp = sess.put(upload_url, data=f, timeout=600)
+        resp = sess.put(upload_url, data=f, headers=headers, timeout=1200)
     if resp.status_code in (200, 201):
         print(f"  ✓ Successfully uploaded to Subject resource: {resp.status_code}")
     else:
@@ -1051,10 +1052,10 @@ def upload_to_xnat(h5_path):
     # 3. Ensure experiment resource MEDEYE3D exists
     exp_res_url = f"{SERVER}/data/projects/{PROJ_ID}/subjects/{SUBJ_ID}/experiments/{EXP_ID}/resources/MEDEYE3D"
     sess.put(exp_res_url)
-    exp_upload_url = f"{exp_res_url}/files/{remote_filename}?overwrite=true"
+    exp_upload_url = f"{exp_res_url}/files/{remote_filename}?overwrite=true&inbody=true"
     print(f"  Uploading to Experiment resource -> {exp_upload_url}...")
     with open(h5_path, "rb") as f:
-        resp2 = sess.put(exp_upload_url, data=f, timeout=600)
+        resp2 = sess.put(exp_upload_url, data=f, headers=headers, timeout=1200)
     if resp2.status_code in (200, 201):
         print(f"  ✓ Successfully uploaded to Experiment resource: {resp2.status_code}")
     else:
