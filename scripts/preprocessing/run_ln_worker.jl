@@ -8,7 +8,7 @@
 # ==============================================================================
 
 using Pkg
-const LN_ROOT = "/mnt/big/project_ssd/project_ssd/lymph_node_rules"
+const LN_ROOT = get(ENV, "LN_RULES_DIR", isdir("/mnt/big/project_ssd/lymph_node_rules") ? "/mnt/big/project_ssd/lymph_node_rules" : "/workspaces/MedEye3d.jl/scripts/preprocessing/lymph_node_rules")
 Pkg.activate(joinpath(LN_ROOT, "src/julia_gpu"))
 
 using Printf
