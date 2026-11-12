@@ -791,6 +791,8 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             end
             MedEye3d.InferenceClient.precompute_heatgdt_diffusivity(diff_vol; tp_index=0)
             MEH._tp_diffusivity_cache[0] = diff_vol
+            # Warm up Heat-GDT so first interaction has zero JIT compilation latency
+            MedEye3d.InferenceClient.warmup_heatgdt!()
         else
             @warn "[HeatDiffusion] 'diffusivity' dataset missing in HDF5 group 'BASELINE'. No fallback available."
         end

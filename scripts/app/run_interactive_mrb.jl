@@ -42,15 +42,18 @@ end
 preprocessed_h5 = resolve_h5_path(raw_arg, repo_root)
 
 if isempty(preprocessed_h5)
-    # Default fallback: Pat23, then pat_6_files
+    # Default fallback: Pat51, then Pat23, then pat_6_files
+    pat51_h5 = joinpath(repo_root, "data", "cases", "Prostata_bimodal", "Pat51", "preprocessed_volumes.h5")
     pat23_h5 = joinpath(repo_root, "data", "cases", "Prostata_bimodal", "Pat23", "preprocessed_volumes.h5")
     pat6_h5 = joinpath(repo_root, "data", "pat_6_files", "preprocessed_volumes.h5")
-    if isfile(pat23_h5)
+    if isfile(pat51_h5)
+        preprocessed_h5 = pat51_h5
+    elseif isfile(pat23_h5)
         preprocessed_h5 = pat23_h5
     elseif isfile(pat6_h5)
         preprocessed_h5 = pat6_h5
     else
-        error("preprocessed_volumes.h5 not found. Specify a patient ID (e.g., 23, Pat23) or a valid file path.")
+        error("preprocessed_volumes.h5 not found. Specify a patient ID (e.g., 23, Pat23, Pat51) or a valid file path.")
     end
 end
 

@@ -165,6 +165,44 @@ function unpack_masks_and_landmarks_in_ram(raw_dir::String, backend)
         end
     end
 
+    # Overlay fresh TotalSegmentator v2 segmentations if present locally (eliminating truncated XNAT vessels/organs)
+    ts_path = joinpath(raw_dir, "totalseg_ct_fast.nii.gz")
+    ts_map_path = "/workspaces/MedEye3d.jl/data/totalseg_class_map.json"
+    if isfile(ts_path) && isfile(ts_map_path)
+        println("[LN_WORKER] Overlaying fresh TotalSegmentator v2 base anatomy from $(basename(ts_path))...")
+        ts_ni = NIfTI.niread(ts_path)
+        ts_arr = ts_ni.raw
+        ts_map = JSON.parsefile(ts_map_path)
+        for (id_str, class_name) in ts_map
+            cls_id = parse(Int, id_str)
+            bit_m = BitArray(ts_arr .== cls_id)
+            if count(bit_m) >= 10
+                masks[class_name] = bit_m
+                m_side = match(r"^(left|right)_(.+)$", class_name)
+                if m_side !== nothing
+                    side_str = m_side.captures[1]
+                    base_str = m_side.captures[2]
+                    masks["$(base_str)_$(side_str)"] = bit_m
+                end
+                m_post = match(r"^(.+)_(left|right)$", class_name)
+                if m_post !== nothing
+                    base_str = m_post.captures[1]
+                    side_str = m_post.captures[2]
+                    masks["$(side_str)_$(base_str)"] = bit_m
+                end
+                m_vert = match(r"^(vertebrae|lev_vert)_([cslth])(\d+)$", class_name)
+                if m_vert !== nothing
+                    v_pfx = m_vert.captures[1]
+                    v_letter = uppercase(m_vert.captures[2])
+                    v_num = m_vert.captures[3]
+                    masks["$(v_pfx)_$(v_letter)$(v_num)"] = bit_m
+                end
+            end
+        end
+        ts_arr = nothing
+        ts_ni = nothing
+    end
+
     packed_data = nothing
     GC.gc(false)
 

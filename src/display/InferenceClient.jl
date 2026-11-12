@@ -15,7 +15,8 @@ export start_python_worker, run_helpnet_inference, run_nninteractive, run_bone_s
        insert_patch!, preload_ct_for_nninteractive, send_json_request,
        prompt_start_ai_models, is_worker_reachable, is_ai_enabled, set_ai_enabled!,
        get_last_ai_error, set_last_ai_error!, find_ai_script, get_inference_dir,
-       run_heatgdt, is_heatgdt_available, precompute_heatgdt_diffusivity, clear_heatgdt_diffusivity!
+       run_heatgdt, is_heatgdt_available, precompute_heatgdt_diffusivity, clear_heatgdt_diffusivity!,
+       warmup_heatgdt!
 
 """
     read_with_timeout(conn::TCPSocket, timeout_s::Real=30.0) -> String
@@ -1177,6 +1178,26 @@ function run_heatgdt(ct_vol::Array{Float32,3}, pet_vol::Array{Float32,3},
         set_last_ai_error!(err_msg)
         println("[InferenceClient ERROR] $err_msg"); flush(stdout)
         return nothing
+    end
+end
+
+"""
+    warmup_heatgdt!()
+
+Precompile/warm up the Heat-GDT PDE solver and connected component extractor
+so the first user click/stroke responds instantaneously without JIT latency.
+"""
+function warmup_heatgdt!()
+    try
+        dummy_ct = zeros(Float32, 64, 64, 64)
+        dummy_pet = zeros(Float32, 64, 64, 64)
+        dummy_pts = zeros(Float32, 64, 64, 64)
+        dummy_pts[33, 33, 33] = 1.0f0
+        # Run a quick 2-step solve to compile all internal kernels, broadcast loops, and BFS queues
+        run_heatgdt(dummy_ct, dummy_pet, dummy_pts, 33, 33, 33; K=2)
+        @info "[InferenceClient] Heat-GDT solver warmed up and precompiled."
+    catch e
+        @debug "[InferenceClient] Heat-GDT warmup skipped: $e"
     end
 end
 

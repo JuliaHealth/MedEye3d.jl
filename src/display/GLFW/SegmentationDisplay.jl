@@ -27,6 +27,7 @@ const _m2_glfw_ref = Ref{Any}(nothing)
 const _m2_vk_ref = Ref{Any}(nothing)
 const _current_m2_mode = Ref("Pure PET (Current TP)")
 const _vk_heat_uploaded = Ref(false)  # GPU heat diffusion init flag (module-level so MakieEventHandlers can read it)
+const _heatgdt_warmed_up = Ref(false)  # Warmup flag to ensure Heat-GDT kernels are precompiled at startup
 
 """
     ensure_heatgdt_gpu!(vk_ctx; force_reload=false)::Bool
@@ -85,6 +86,35 @@ function ensure_heatgdt_gpu!(vk_ctx; force_reload=false)::Bool
         VulkanHeatDiffusion.upload_diffusivity!(heat_state, vk_ctx, diff_vol)
         _vk_heat_uploaded[] = true
         println("[HeatDiffusion INIT] ✅ GPU fully ready — _vk_heat_uploaded=true"); flush(stdout)
+
+        # ── Startup Warmup & JIT Precompilation ──
+        # Executes a dummy 1-step pass on center coordinates so all GPU shaders,
+        # pipelines, and Julia PDE methods are compiled at startup with zero first-click delay.
+        if !_heatgdt_warmed_up[]
+            try
+                println("[HeatDiffusion WARMUP] Precompiling Heat-GDT kernels and GPU compute pipeline..."); flush(stdout)
+                dummy_cx = div(w, 2)
+                dummy_cy = div(h, 2)
+                dummy_cz = div(d, 2)
+                dummy_spacing = (1.0, 1.0, 1.0)
+                
+                # Warm up edge analysis and contrast functions (triggers Julia JIT compilation)
+                s_b = VulkanHeatDiffusion.compute_frontier_edge_scale(diff_vol, dummy_cx, dummy_cy, dummy_cz, 15.0, dummy_spacing; sensitivity=1.0f0)
+                ep = VulkanHeatDiffusion.compute_directional_relative_edge_params(diff_vol, dummy_cx, dummy_cy, dummy_cz, 15.0, dummy_spacing; sensitivity=1.0f0)
+                
+                # Warm up Vulkan compute execution through GPU queue
+                VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, dummy_cx, dummy_cy, dummy_cz; seed_radius=1, spacing=dummy_spacing, s_boost=s_b, edge_params=ep)
+                VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 1; theta=0.001f0, copy_box_to_cpu=true, spacing=dummy_spacing, s_boost=s_b, edge_params=ep)
+                
+                # Reset heat state back to clean initial state
+                heat_state.accumulated_steps = 0
+                _heatgdt_warmed_up[] = true
+                println("[HeatDiffusion WARMUP] ✅ Precompilation complete — first-click latency eliminated!"); flush(stdout)
+            catch e
+                @warn "[HeatDiffusion WARMUP] Warmup pass failed (non-fatal): $e"
+            end
+        end
+
         return true
     catch e
         @warn "[HeatDiffusion] GPU init failed: $e" exception=(e, catch_backtrace())

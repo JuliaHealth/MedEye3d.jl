@@ -85,7 +85,9 @@ fi
 TARGET_ARG="$1"
 
 if [ -z "$TARGET_ARG" ]; then
-    if [ -f "data/cases/Prostata_bimodal/Pat23/preprocessed_volumes.h5" ]; then
+    if [ -f "data/cases/Prostata_bimodal/Pat51/preprocessed_volumes.h5" ]; then
+        TARGET_ARG="Pat51"
+    elif [ -f "data/cases/Prostata_bimodal/Pat23/preprocessed_volumes.h5" ]; then
         TARGET_ARG="Pat23"
     elif [ -f "data/pat_6_files/preprocessed_volumes.h5" ]; then
         TARGET_ARG="data/pat_6_files"
