@@ -329,8 +329,15 @@ def download_ac_pet_dicom(xnat, exp_id, out_dcm_dir, pat_id=None, subj_label=Non
     Verifies modality PT, series_description containing PET/WB and NOT Uncorrected.
     Downloads and extracts DICOM files.
     """
-    if os.path.isdir(out_dcm_dir) and len(os.listdir(out_dcm_dir)) > 50:
-        return True
+    if os.path.isdir(out_dcm_dir):
+        valid_files = [f for f in os.listdir(out_dcm_dir) if os.path.exists(os.path.join(out_dcm_dir, f)) and not f.endswith(".zip")]
+        if len(valid_files) > 50:
+            return True
+        # Purge broken symlinks
+        for f in os.listdir(out_dcm_dir):
+            fp = os.path.join(out_dcm_dir, f)
+            if os.path.islink(fp) and not os.path.exists(fp):
+                os.remove(fp)
     os.makedirs(out_dcm_dir, exist_ok=True)
 
     # Check local SSD cache first — ONLY match exact subj_label (never wildcard across Lu177_PSMA)!
@@ -1194,7 +1201,9 @@ def process_case(pat_id, gpu_id, xnat):
     diff_comb_f = flip_y(diff_comb)
     t2_arr_f = flip_y(t2_arr)
     diff_mri_f = flip_y(diff_mri)
-    mri_anat_f = flip_y(mri_anatomy_arr) if mri_anatomy_arr.any() else max_anat_f
+    # MRI timepoints own their max_anatomy (8-zone prostate). Never fall back to the CT
+    # atlas: CT max_anatomy must not be displayed over MRI (empty if no prostate seg).
+    mri_anat_f = flip_y(mri_anatomy_arr)
 
     for s in extra_mri_series:
         s["arr_f"] = flip_y(s["arr"])

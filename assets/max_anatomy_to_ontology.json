@@ -4523,5 +4523,56 @@
     "anatomic_location": "Bone",
     "lesion_type": "Bone Meta",
     "anatomical_sublocation": "Axial Skeleton"
+  },
+  "sigmoid_colon": {
+    "detailed": "sigmoid colon (UBERON)",
+    "generalized": "colon (UBERON)",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Sigmoid Colon"
+  },
+  "lacrimal_gland_left": {
+    "detailed": "lacrimal gland (UBERON)",
+    "generalized": "lacrimal gland",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Physiological Uptake",
+    "anatomical_sublocation": "Lacrimal Gland",
+    "clinical_significance": "Benign / Physiological PSMA Uptake (Lacrimal Gland)"
+  },
+  "lacrimal_gland_right": {
+    "detailed": "lacrimal gland (UBERON)",
+    "generalized": "lacrimal gland",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Physiological Uptake",
+    "anatomical_sublocation": "Lacrimal Gland",
+    "clinical_significance": "Benign / Physiological PSMA Uptake (Lacrimal Gland)"
+  },
+  "optic_chiasm": {
+    "detailed": "optic chiasm (UBERON)",
+    "generalized": "optic chiasm",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Organ Meta",
+    "anatomical_sublocation": "Optic Chiasm"
+  },
+  "spinal_canal": {
+    "detailed": "vertebral canal (UBERON)",
+    "generalized": "vertebral canal",
+    "side": "",
+    "anatomic_location": "Spine / Bone",
+    "lesion_type": "Bone Meta",
+    "anatomical_sublocation": "Spinal Canal"
+  },
+  "pituitary_gland": {
+    "detailed": "pituitary gland (UBERON)",
+    "generalized": "pituitary gland",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Physiological Uptake",
+    "anatomical_sublocation": "Pituitary Gland",
+    "clinical_significance": "Benign / Physiological PSMA Uptake (Pituitary Gland)"
   }
 }

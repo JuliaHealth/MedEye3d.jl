@@ -14,7 +14,10 @@ import numpy as np
 import SimpleITK as sitk
 
 sys.path.insert(0, "/workspaces/MedEye3d.jl/scripts/preprocessing")
-from batch_process_cohort_dual_gpu import XnatManager, PROJ_ID, OUT_BASE_DIR, CENSUS_PATH
+from batch_process_cohort_dual_gpu import (
+    XnatManager, PROJ_ID, OUT_BASE_DIR, CENSUS_PATH,
+    download_ac_pet_dicom, calibrate_suv_image
+)
 
 
 def classify_organ_priority(name: str) -> int:
@@ -93,13 +96,43 @@ def repair_case_lesions(pat_id: str, subj_info: dict, xnat: XnatManager, upload:
         if str(i) not in ct_seg_names:
             ct_seg_names[str(i)] = f"Lesion {i}"
 
+    # Also verify/repair PET SUV if SUV_PET_Image_0.nii.gz was removed (due to broken Lu177 symlink)
+    suv_path = os.path.join(raw_dir, "SUV_PET_Image_0.nii.gz")
+    dcm_dir = os.path.join(raw_dir, "PET_AC_DICOM")
+    uncorr_pet_dest = os.path.join(raw_dir, "SUV_PET_WB_120min_Uncorrected.nii.gz")
+    pet_arr_f_new = None
+    if not os.path.isfile(suv_path):
+        exp_id = subj_info.get("exp_id", "")
+        print(f"  [{pat_id}] Re-downloading genuine Prostata_bimodal AC PET DICOM and calibrating SUV...")
+        download_ac_pet_dicom(xnat, exp_id, dcm_dir, pat_id=pat_id, subj_label=subj_label)
+        suv_img = calibrate_suv_image(dcm_dir, ct_img, uncorr_pet_dest, suv_path)
+        pet_arr = sitk.GetArrayFromImage(suv_img).astype(np.float32)
+        pet_arr_f_new = np.flip(pet_arr, axis=1)
+
     with h5py.File(h5_path, "r+") as h5:
         sp_arr = np.array(ct_img.GetSpacing(), dtype=np.float64)
         orig_arr = np.array(ct_img.GetOrigin(), dtype=np.float64)
         dir_arr = np.array(ct_img.GetDirection(), dtype=np.float64)
 
-        # 1. Update BASELINE/PET_Lesions_0.nii.gz
         b = h5["BASELINE"]
+        if pet_arr_f_new is not None:
+            if "SUV_PET_Image_0.nii.gz" in b:
+                del b["SUV_PET_Image_0.nii.gz"]
+            ds_p0 = b.create_dataset("SUV_PET_Image_0.nii.gz", data=pet_arr_f_new, compression="gzip", compression_opts=4, shuffle=True)
+            ds_p0.attrs["spacing"] = sp_arr
+            ds_p0.attrs["origin"] = orig_arr
+            ds_p0.attrs["direction"] = dir_arr
+            for tk in [k for k in h5.keys() if k.startswith("TFM_Transform_FollowUp_to_Baseline_")]:
+                tp_num = tk.replace("TFM_Transform_FollowUp_to_Baseline_", "").replace(".tfm", "")
+                p_name = f"SUV_PET_Image_{tp_num}.nii.gz"
+                if p_name in h5[tk]:
+                    del h5[tk][p_name]
+                ds_pt = h5[tk].create_dataset(p_name, data=pet_arr_f_new, compression="gzip", compression_opts=4, shuffle=True)
+                ds_pt.attrs["spacing"] = sp_arr
+                ds_pt.attrs["origin"] = orig_arr
+                ds_pt.attrs["direction"] = dir_arr
+
+        # 1. Update BASELINE/PET_Lesions_0.nii.gz
         if "PET_Lesions_0.nii.gz" in b:
             del b["PET_Lesions_0.nii.gz"]
         ds_l0 = b.create_dataset("PET_Lesions_0.nii.gz", data=ct_les_f, compression="gzip", compression_opts=4, shuffle=True)
@@ -228,17 +261,36 @@ def repair_case_lesions(pat_id: str, subj_info: dict, xnat: XnatManager, upload:
 
 if __name__ == "__main__":
     import re
-    targets = sys.argv[1:]
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("cases", nargs="*", help="Case IDs (e.g. Pat9 Pat4)")
+    parser.add_argument("--no-upload", action="store_true", help="Patch locally without uploading")
+    parser.add_argument("--only-missing", action="store_true", help="Only patch/upload if PET_Lesions_0 max == 0")
+    args = parser.parse_args()
+
     xnat = XnatManager()
     with open(CENSUS_PATH, "r") as cf:
         subj_map = json.load(cf)
 
+    targets = args.cases
     if not targets:
         all_pids = sorted(subj_map.keys(), key=lambda x: int(re.search(r"\d+", x).group()) if re.search(r"\d+", x) else 9999)
         for pid in all_pids:
-            if os.path.isfile(os.path.join(OUT_BASE_DIR, pid, "preprocessed_volumes.h5")):
+            h5_p = os.path.join(OUT_BASE_DIR, pid, "preprocessed_volumes.h5")
+            if os.path.isfile(h5_p):
+                if args.only_missing:
+                    try:
+                        with h5py.File(h5_p, "r") as f:
+                            if int(f["BASELINE/PET_Lesions_0.nii.gz"][()].max()) > 0:
+                                continue
+                    except Exception:
+                        pass
                 targets.append(pid)
 
+    print(f"Repairing {len(targets)} cases (upload={not args.no_upload})...")
     for pid in targets:
         if pid in subj_map:
-            repair_case_lesions(pid, subj_map[pid], xnat, upload=True)
+            try:
+                repair_case_lesions(pid, subj_map[pid], xnat, upload=not args.no_upload)
+            except Exception as e:
+                print(f"  [{pid}] Error during repair: {e}")

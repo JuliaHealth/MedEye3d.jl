@@ -198,11 +198,17 @@ end
             if [ -f "$SUBJ_WORK_DIR/preprocessed_volumes.h5" ]; then
                 cp -l "$SUBJ_WORK_DIR/preprocessed_volumes.h5" "$H5_FILE" 2>/dev/null || cp -f "$SUBJ_WORK_DIR/preprocessed_volumes.h5" "$H5_FILE"
             fi
-        elif ([ "$PROJECT" = "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" ] || [ "$PROJECT" = "Prostata_bimodal_PIPELINE" ]) && ([[ "$SUBJ" =~ [pP]at_?1 ]] || [ "$SUBJ" = "psma_patient_all_tp" ]); then
-            echo "ℹ Seeding workspace from local repository files: data/cases/psma_patient_all_tp..."
-            find "$SCRIPT_DIR/../../data/cases/psma_patient_all_tp" -maxdepth 1 ! -name "*.bak" ! -name "psma_patient_all_tp" -exec cp -r {} "$SUBJ_WORK_DIR/" \; 2>/dev/null || true
-            if [ -f "$SUBJ_WORK_DIR/preprocessed_volumes.h5" ]; then
-                cp -l "$SUBJ_WORK_DIR/preprocessed_volumes.h5" "$H5_FILE" 2>/dev/null || cp -f "$SUBJ_WORK_DIR/preprocessed_volumes.h5" "$H5_FILE"
+        elif ([ "$PROJECT" = "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" ] || [ "$PROJECT" = "Prostata_bimodal_PIPELINE" ] || [ "$PROJECT" = "Prostata_bimodal" ]); then
+            SHORT_PAT=$(echo "$SUBJ" | grep -o -E '[pP]at[0-9]+' || echo "$SUBJ")
+            if [ -f "$SCRIPT_DIR/../../data/cases/Prostata_bimodal/$SHORT_PAT/preprocessed_volumes.h5" ]; then
+                echo "ℹ Seeding workspace from local repository files: data/cases/Prostata_bimodal/$SHORT_PAT..."
+                cp -f "$SCRIPT_DIR/../../data/cases/Prostata_bimodal/$SHORT_PAT/preprocessed_volumes.h5" "$H5_FILE"
+            elif [ -f "$SCRIPT_DIR/../../data/cases/psma_patient_all_tp/preprocessed_volumes.h5" ] && ([[ "$SUBJ" =~ [pP]at_?1 ]] || [ "$SUBJ" = "psma_patient_all_tp" ]); then
+                echo "ℹ Seeding workspace from local repository files: data/cases/psma_patient_all_tp..."
+                find "$SCRIPT_DIR/../../data/cases/psma_patient_all_tp" -maxdepth 1 ! -name "*.bak" ! -name "psma_patient_all_tp" -exec cp -r {} "$SUBJ_WORK_DIR/" \; 2>/dev/null || true
+                if [ -f "$SUBJ_WORK_DIR/preprocessed_volumes.h5" ]; then
+                    cp -l "$SUBJ_WORK_DIR/preprocessed_volumes.h5" "$H5_FILE" 2>/dev/null || cp -f "$SUBJ_WORK_DIR/preprocessed_volumes.h5" "$H5_FILE"
+                fi
             fi
         fi
     fi

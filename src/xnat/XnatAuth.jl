@@ -122,10 +122,10 @@ function load_cached_credentials()::Union{XnatCredentials, Nothing}
         expires_at = Float64(get(raw, "expires_at", issued_at + 86400.0))
         username = get(raw, "username", "")
 
-        # Check if more than 24 hours elapsed since token was first provided
+        # Check if token expiration time has elapsed
         now_sec = time()
-        if (now_sec - issued_at) >= 86400.0 || now_sec >= expires_at
-            @info "[XNAT] 24 hours elapsed since token was first provided. Clearing cached secret and credentials."
+        if now_sec >= expires_at
+            @info "[XNAT] Token expired. Clearing cached secret and credentials."
             clear_cached_credentials()
             return nothing
         end

@@ -1961,12 +1961,15 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             put!(mainViewer.channel, MedEye3d.MakieEvents.ScrollEvent(0, 1))
             put!(mainViewer.channel, MedEye3d.MakieEvents.SetWindowTitleEvent("MedEye3d - $case_lbl (Ready)"))
             @async begin
-                for _w in 1:40
+                for _w in 1:60
                     sleep(0.05)
                     if haskey(MEH.tp_data_cache, 0)
                         break
                     end
                 end
+                try
+                    put!(mainViewer.channel, MedEye3d.MakieEvents.SyncLesionEvent(1, true))
+                catch; end
                 set_prog !== nothing && set_prog(100.0, "READY — $case_lbl loaded & ready for interaction"; state=:ready)
             end
             println(">> [XNAT-SWITCH] Successfully switched viewer to $new_h5_path"); flush(stdout)

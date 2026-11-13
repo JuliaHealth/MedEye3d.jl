@@ -3018,7 +3018,7 @@ function get_mask_ids(tp::Int)::Vector{Int}
         end
     end
     # 3. Check MEH pet_volumes_cache or centroids
-    c_ids = Int[lid for ((tp_i, lid), _) in _MEH.lesion_centroids_cache if tp_i == tp && lid > 0]
+    c_ids = Int[k[2] for (k, _) in _MEH.lesion_centroids_cache if k isa Tuple && length(k) == 2 && k[1] == tp && k[2] isa Integer && k[2] > 0]
     if !isempty(c_ids)
         ids = sort!(unique!(c_ids))
         _MASK_IDS_CACHE[tp] = ids
@@ -4564,10 +4564,12 @@ function create_metadata_window(
         _set_xnat_progress!(55.0, "Reading HDF5 metadata & lesion annotations...")
         try
             empty!(_cached_lesion_ids)
+            empty!(_MASK_IDS_CACHE)
             empty!(_organ_classification_cache)
             empty!(_lesion_suv_cache)
             empty!(_lesion_suv_metrics_cache)
             empty!(_volume_cache)
+            _current_displayed_lid[] = -1
             _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
             _MEH_mod.h5_path_ref[] = target_h5
             _MEH_mod.h5_save_path_ref[] = target_h5
@@ -4591,28 +4593,42 @@ function create_metadata_window(
             end
             lesion_db[] = _migrate_db(new_db)
 
-            new_lids = String[]
-            for k in sort(collect(keys(lesion_db[])))
-                !startswith(k, "_") && push!(new_lids, k)
+            all_lids_set = Set{Int}()
+            for k in keys(lesion_db[])
+                if !startswith(k, "_")
+                    lid = parse_lesion_id(k)
+                    lid !== nothing && lid > 0 && push!(all_lids_set, lid)
+                end
             end
-            if isempty(new_lids)
-                try
-                    _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
-                    lock(_MEH_mod._hdf5_io_lock) do
-                        HDF5.h5open(target_h5, "r") do h5_f
-                            if haskey(h5_f, "_meta_/segment_names.json")
-                                raw_sn = JSON.parse(read(h5_f["_meta_/segment_names.json"]))
-                                if haskey(raw_sn, "0") && raw_sn["0"] isa AbstractDict
-                                    tp0_d = raw_sn["0"]
-                                    s_keys = sort(collect(keys(tp0_d)); by=k -> (m = match(r"\d+", string(k)); m !== nothing ? parse(Int, m.match) : 0))
-                                    for sk in s_keys
-                                        push!(new_lids, "$(sk): $(tp0_d[sk])")
+            tp0_names = Dict{Int, String}()
+            try
+                _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+                lock(_MEH_mod._hdf5_io_lock) do
+                    HDF5.h5open(target_h5, "r") do h5_f
+                        if haskey(h5_f, "_meta_/segment_names.json")
+                            raw_sn = JSON.parse(read(h5_f["_meta_/segment_names.json"]))
+                            if haskey(raw_sn, "0") && raw_sn["0"] isa AbstractDict
+                                for (sk, sv) in raw_sn["0"]
+                                    lid = tryparse(Int, string(sk))
+                                    if lid !== nothing && lid > 0
+                                        tp0_names[lid] = string(sv)
+                                        push!(all_lids_set, lid)
                                     end
                                 end
                             end
                         end
                     end
-                catch; end
+                end
+            catch; end
+
+            new_lids = String[]
+            for lid in sort(collect(all_lids_set))
+                d_name = get(tp0_names, lid, "")
+                if isempty(d_name)
+                    st = get(lesion_db[], string(lid), Dict())
+                    d_name = get(st, "_display_name", get(st, "BaseAnatomy", "Lesion $lid"))
+                end
+                push!(new_lids, "$lid: $d_name")
             end
             if isempty(new_lids)
                 new_lids = ["(none)"]
@@ -4664,6 +4680,8 @@ function create_metadata_window(
 
             # Ensure preprocessed HDF5 is present at target_h5
             if !isfile(target_h5)
+                m_pat_sub = match(r"[pP]at\d+", subj)
+                short_pat_sub = m_pat_sub !== nothing ? "Pat" * match(r"\d+", m_pat_sub.match).match : subj
                 candidate_paths = String[
                     joinpath("/tmp", "medeye3d_xnat_preproc", proj, subj, "$(subj)_preprocessed.h5"),
                     joinpath("/tmp", "medeye3d_xnat_preproc", proj, subj, "preprocessed_volumes.h5"),
@@ -4673,7 +4691,8 @@ function create_metadata_window(
                     ((proj == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" || proj == "Lu177_PSMA_PIPELINE") && occursin(r"[pP]at_?6"i, subj)) ?
                         joinpath(dirname(dirname(@__DIR__)), "data", "pat_6_files", "preprocessed_volumes.h5") : "",
                     ((proj == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" || proj == "Prostata_bimodal_PIPELINE") && (occursin(r"[pP]at_?1"i, subj) || subj == "psma_patient_all_tp")) ?
-                        joinpath(dirname(dirname(@__DIR__)), "data", "cases", "psma_patient_all_tp", "preprocessed_volumes.h5") : ""
+                        joinpath(dirname(dirname(@__DIR__)), "data", "cases", "psma_patient_all_tp", "preprocessed_volumes.h5") : "",
+                    joinpath(dirname(dirname(@__DIR__)), "data", "cases", "Prostata_bimodal", short_pat_sub, "preprocessed_volumes.h5")
                 ]
                 for cp_path in candidate_paths
                     if !isempty(cp_path) && isfile(cp_path)
@@ -4881,13 +4900,43 @@ function create_metadata_window(
         short_pat = m_pat !== nothing ? "Pat" * match(r"\d+", m_pat.match).match : subj
         flat_cache_h5 = joinpath(dirname(dirname(target_dir)), "$(proj)_$(subj)_preprocessed.h5")
         flat_short_h5 = joinpath(dirname(dirname(target_dir)), "$(proj)_$(short_pat)_preprocessed.h5")
+        # Resolve any ground-truth preprocessed HDF5 present in local repository
+        repo_h5 = ""
+        if (proj == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" || proj == "Lu177_PSMA_PIPELINE") && occursin(r"[pP]at_?6"i, subj)
+            cand = joinpath(dirname(dirname(@__DIR__)), "data", "pat_6_files", "preprocessed_volumes.h5")
+            if isfile(cand); repo_h5 = cand; end
+        elseif proj == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" || proj == "Prostata_bimodal_PIPELINE" || proj == "Prostata_bimodal"
+            cand = joinpath(dirname(dirname(@__DIR__)), "data", "cases", "Prostata_bimodal", short_pat, "preprocessed_volumes.h5")
+            if isfile(cand)
+                repo_h5 = cand
+            elseif occursin(r"[pP]at_?1$"i, subj) || subj == "psma_patient_all_tp"
+                cand2 = joinpath(dirname(dirname(@__DIR__)), "data", "cases", "psma_patient_all_tp", "preprocessed_volumes.h5")
+                if isfile(cand2); repo_h5 = cand2; end
+            end
+        end
+
         if force_xnat_download
             for cand_h5 in (target_h5, flat_cache_h5, flat_short_h5)
                 if ispath(cand_h5) || islink(cand_h5)
                     try rm(cand_h5; force=true) catch; end
                 end
             end
-        else
+        elseif creds === nothing
+            # Offline mode: prioritize local repository ground-truth file
+            if !isempty(repo_h5) && isfile(repo_h5) && filesize(repo_h5) > 1024
+                if !isfile(target_h5) || filesize(target_h5) != filesize(repo_h5)
+                    mkpath(target_dir)
+                    try cp(repo_h5, target_h5, force=true) catch; end
+                end
+                if isfile(target_h5) && filesize(target_h5) > 1024
+                    println("[XNAT] Using local repo preprocessed HDF5 for $subj: $target_h5 ($(round(filesize(target_h5)/1048576, digits=1)) MB)"); flush(stdout)
+                    xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
+                    xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
+                    _set_xnat_progress!(50.0, "Found local repo HDF5 for $short_pat ($(round(filesize(target_h5)/1048576, digits=1)) MB)...")
+                    _switch_to_hdf5!(target_h5)
+                    return
+                end
+            end
             for cand_h5 in (target_h5, flat_cache_h5, flat_short_h5)
                 if isfile(cand_h5) && !islink(cand_h5) && filesize(cand_h5) > 1024
                     println("[XNAT] Patient '$subj' preprocessed HDF5 found in local xnat_cache: $cand_h5"); flush(stdout)
@@ -4895,33 +4944,6 @@ function create_metadata_window(
                     xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
                     _set_xnat_progress!(50.0, "Found cached HDF5 for $short_pat ($(round(filesize(cand_h5)/1048576, digits=1)) MB)...")
                     _switch_to_hdf5!(cand_h5)
-                    return
-                end
-            end
-        end
-
-        # 1b. Check local repository files (only when offline / no XNAT credentials)
-        if creds === nothing && ((proj == "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE" || proj == "Lu177_PSMA_PIPELINE") && occursin(r"[pP]at_?6"i, subj))
-            repo_pat6 = joinpath(dirname(dirname(@__DIR__)), "data", "pat_6_files", "preprocessed_volumes.h5")
-            if isfile(repo_pat6)
-                mkpath(target_dir)
-                try cp(repo_pat6, target_h5, force=true) catch; end
-                if isfile(target_h5) && filesize(target_h5) > 1024
-                    println("[XNAT] Linked local repo pat6 file to cache: $target_h5"); flush(stdout)
-                    _set_xnat_progress!(50.0, "Found local repo HDF5 for $subj...")
-                    _switch_to_hdf5!(target_h5)
-                    return
-                end
-            end
-        elseif creds === nothing && ((proj == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" || proj == "Prostata_bimodal_PIPELINE") && (occursin(r"[pP]at_?1$"i, subj) || subj == "psma_patient_all_tp"))
-            repo_pat1 = joinpath(dirname(dirname(@__DIR__)), "data", "cases", "psma_patient_all_tp", "preprocessed_volumes.h5")
-            if isfile(repo_pat1)
-                mkpath(target_dir)
-                try cp(repo_pat1, target_h5, force=true) catch; end
-                if isfile(target_h5) && filesize(target_h5) > 1024
-                    println("[XNAT] Linked local repo pat1 (Prostata bimodal) file to cache: $target_h5"); flush(stdout)
-                    _set_xnat_progress!(50.0, "Found local repo HDF5 for $subj...")
-                    _switch_to_hdf5!(target_h5)
                     return
                 end
             end

@@ -595,7 +595,12 @@ Checks known clinical station prefixes, substrings (lymph, node, knoten), and re
 function is_lymph_node_structure(name::AbstractString)::Bool
     isempty(name) && return false
     ln = lowercase(name)
-    
+
+    # Exclude non-lymph structural/helper labels that share station prefixes
+    for bad in ("_cavity", "exclusion_zone", "chest_wall", "_helper", "_bridge", "_base", "_dilated")
+        occursin(bad, ln) && return false
+    end
+
     # Substring checks
     (occursin("lymph", ln) || occursin("knoten", ln) || occursin("node", ln)) && return true
     
@@ -1223,6 +1228,13 @@ function format_adjacent_structure_name(raw_name::String)::String
         "gallbladder" => "Gallbladder",
         "duodenum" => "Duodenum",
         "colon" => "Colon",
+        "sigmoid_colon" => "Sigmoid Colon",
+        "seminal_vesicle" => "Seminal Vesicle",
+        "lacrimal_gland" => "Lacrimal Gland",
+        "optic_chiasm" => "Optic Chiasm",
+        "optic_nerve" => "Optic Nerve",
+        "spinal_canal" => "Spinal Canal",
+        "pituitary_gland" => "Pituitary Gland",
         "thyroid_gland" => "Thyroid Gland",
         "spinal_cord" => "Spinal Cord",
         "lung" => "Lung",

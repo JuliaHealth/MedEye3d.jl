@@ -352,6 +352,19 @@ function get_case_status(creds::XnatCredentials, project_id::AbstractString, sub
     return CaseStatusInfo(:RAW)
 end
 
+const _xnat_downloader = Ref{Union{Downloads.Downloader, Nothing}}(nothing)
+function get_xnat_downloader()::Downloads.Downloader
+    if _xnat_downloader[] === nothing
+        d = Downloads.Downloader()
+        d.easy_hook = (easy, info) -> begin
+            Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_LOW_SPEED_TIME, 0)
+            Downloads.Curl.setopt(easy, Downloads.Curl.CURLOPT_LOW_SPEED_LIMIT, 0)
+        end
+        _xnat_downloader[] = d
+    end
+    return _xnat_downloader[]
+end
+
 """
     download_file(creds::XnatCredentials, remote_endpoint_or_url, local_dest; progress_cb=nothing) -> Bool
 
@@ -365,17 +378,38 @@ function download_file(
 )::Bool
     full_url = startswith(remote_url_or_endpoint, "http") ? String(remote_url_or_endpoint) : "$(creds.server_url)$(remote_url_or_endpoint)"
     dest_path = String(local_dest)
+    tmp_path = "$(dest_path).tmp.$(getpid())_$(round(Int, time()*1000))"
     headers = XnatAuth.get_auth_headers(creds)
+    downloader = get_xnat_downloader()
+    download_ok = false
     try
         mkpath(dirname(dest_path))
         if progress_cb !== nothing
-            Downloads.download(full_url, dest_path; headers=headers, progress=progress_cb)
+            Downloads.download(full_url, tmp_path; headers=headers, progress=progress_cb, timeout=1800.0, downloader=downloader)
         else
-            Downloads.download(full_url, dest_path; headers=headers)
+            Downloads.download(full_url, tmp_path; headers=headers, timeout=1800.0, downloader=downloader)
         end
-        return isfile(dest_path) && filesize(dest_path) > 0
+        download_ok = isfile(tmp_path) && filesize(tmp_path) > 0
     catch e
-        @warn "Download failed from $full_url: $e"
+        @warn "Downloads.download failed from $full_url: $e; falling back to curl..."
+    end
+
+    if !download_ok
+        try
+            auth_str = "$(creds.alias):$(creds.secret)"
+            cmd = `curl -fSL -u $auth_str --connect-timeout 60 --speed-time 300 --speed-limit 100 -o $tmp_path $full_url`
+            run(cmd)
+            download_ok = isfile(tmp_path) && filesize(tmp_path) > 0
+        catch e2
+            @warn "Curl download also failed: $e2"
+        end
+    end
+
+    if download_ok
+        mv(tmp_path, dest_path; force=true)
+        return true
+    else
+        isfile(tmp_path) && rm(tmp_path; force=true)
         return false
     end
 end
@@ -456,10 +490,6 @@ function download_preprocessed_hdf5(
     progress_cb::Union{Function, Nothing}=nothing
 )::Bool
     dest_path = String(local_dest)
-    if !force && isfile(dest_path) && filesize(dest_path) > 1024
-        return true
-    end
-
     p = resolve_project_id(project_id)
     s = resolve_subject_label(creds, p, subject_id)
 
@@ -468,16 +498,16 @@ function download_preprocessed_hdf5(
     if medeye_files !== nothing
         try
             results = medeye_files["ResultSet"]["Result"]
-            if p == "Prostata_bimodal_PIPELINE"
-                has_tfm = any(r -> occursin(".tfm", lowercase(get(r, "Name", ""))), results)
-                if !has_tfm
-                    @warn "[XNAT] Subject $s on $p only has legacy v200 HDF5 (no Transform_FollowUp_to_Baseline_1.tfm yet); skipping legacy download."
-                    return false
-                end
-            end
             for r in results
                 fn = get(r, "Name", "")
                 if endswith(fn, ".h5") || endswith(fn, ".hdf5")
+                    remote_sz = tryparse(Int64, string(get(r, "Size", "0")))
+                    if !force && isfile(dest_path) && filesize(dest_path) > 1024
+                        if remote_sz === nothing || remote_sz <= 0 || filesize(dest_path) == remote_sz
+                            return true
+                        end
+                        println("[XNAT] Cached HDF5 size ($(filesize(dest_path))) != remote XNAT size ($remote_sz); re-downloading fresh copy...")
+                    end
                     uri = get(r, "URI", "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files/$fn")
                     if download_file(creds, uri, dest_path; progress_cb=progress_cb)
                         return true

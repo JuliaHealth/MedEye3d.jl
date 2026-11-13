@@ -31,7 +31,8 @@ const _preload_active = Ref{Bool}(false)
 Returns the persistent local cache path for an XNAT subject's preprocessed volumes.
 """
 function get_local_cache_dir(project_id::AbstractString, subject_id::AbstractString)::String
-    clean_p = replace(String(project_id), r"[^a-zA-Z0-9_\-]" => "_")
+    canon_p = XnatClient.resolve_project_id(project_id)
+    clean_p = replace(String(canon_p), r"[^a-zA-Z0-9_\-]" => "_")
     clean_s = replace(String(subject_id), r"[^a-zA-Z0-9_\-]" => "_")
     if Sys.iswindows()
         appdata = get(ENV, "APPDATA", "")
