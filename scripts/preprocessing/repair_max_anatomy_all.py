@@ -93,6 +93,7 @@ def layer_and_sanitize_ct_anatomy(ct_shape, raw_dir):
             print(f"    Skipped {skipped_old_ln} old LN stations from packed tensor")
 
     fresh_ln_count = 0
+    skipped_non_ln = 0
     if has_fresh_ln:
         try:
             with h5py.File(ln_h5, "r") as lf:
@@ -100,6 +101,10 @@ def layer_and_sanitize_ct_anatomy(ct_shape, raw_dir):
                     clean = k.lower()
                     if any(bad in clean for bad in ["temp", "helper", "_base", "_dilated", "bridge",
                                                      "exclusion", "cavity", "chest_wall"]):
+                        continue
+                    # ONLY include actual lymph node station masks
+                    if not _is_lymph_station_name(clean):
+                        skipped_non_ln += 1
                         continue
                     arr_ln = lf[k][:]
                     if arr_ln.ndim == 3:
@@ -112,7 +117,7 @@ def layer_and_sanitize_ct_anatomy(ct_shape, raw_dir):
                                 labels_dict[str(lbl_idx)] = clean
                                 fresh_ln_count += 1
                                 lbl_idx += 1
-            print(f"    Integrated {fresh_ln_count} fresh LN stations")
+            print(f"    Integrated {fresh_ln_count} fresh LN stations (skipped {skipped_non_ln} non-LN)")
         except Exception as e_ln:
             print(f"    [WARN] Error reading {ln_h5}: {e_ln}")
 
