@@ -26,6 +26,7 @@ export list_projects,
        save_annotations_to_xnat,
        resolve_project_id,
        resolve_subject_label,
+       prefetch_all_project_hdf5,
        CaseStatusInfo
 
 """
@@ -620,6 +621,99 @@ function save_annotations_to_xnat(
     end
 
     return status_ok
+end
+
+"""
+    prefetch_all_project_hdf5(creds, project_id; cache_base, progress_cb, cancel_ref) -> (ok::Int, skip::Int, fail::Int)
+
+Downloads ALL preprocessed HDF5 files from every subject in a project to local cache.
+Skips subjects whose HDF5 is already locally cached (size match).
+
+* `progress_cb(done, total, subject_id, status_msg)` — called after each subject.
+* `cancel_ref::Ref{Bool}` — set to `true` to abort early.
+
+Returns (downloaded_count, skipped_count, failed_count).
+"""
+function prefetch_all_project_hdf5(
+    creds::XnatCredentials,
+    project_id::AbstractString;
+    cache_base::AbstractString = "",
+    progress_cb::Union{Function, Nothing} = nothing,
+    cancel_ref::Ref{Bool} = Ref(false)
+)::Tuple{Int, Int, Int}
+    p = resolve_project_id(project_id)
+
+    # 1. List all subjects
+    subjects = list_subjects(creds, p)
+    total = length(subjects)
+    if total == 0
+        @info "[XNAT-PREFETCH] No subjects found in project $p"
+        return (0, 0, 0)
+    end
+
+    # Sort subjects by label for deterministic ordering
+    sort!(subjects, by = s -> get(s, "label", get(s, "ID", "")))
+
+    # 2. Determine cache base
+    if isempty(cache_base)
+        if Sys.iswindows()
+            appdata = get(ENV, "APPDATA", "")
+            cache_base = !isempty(appdata) ? joinpath(appdata, "MedEye3D", "xnat_cache") : joinpath(homedir(), "AppData", "Roaming", "MedEye3D", "xnat_cache")
+        else
+            cache_base = joinpath(homedir(), ".medeye3d", "xnat_cache")
+        end
+    end
+
+    clean_p = replace(String(p), r"[^a-zA-Z0-9_\-]" => "_")
+    ok_count = 0
+    skip_count = 0
+    fail_count = 0
+
+    println("[XNAT-PREFETCH] Starting prefetch of $total subjects from $p")
+    flush(stdout)
+
+    for (i, subj_dict) in enumerate(subjects)
+        cancel_ref[] && break
+
+        subj_label = get(subj_dict, "label", get(subj_dict, "ID", ""))
+        clean_s = replace(String(subj_label), r"[^a-zA-Z0-9_\-]" => "_")
+        cache_dir = joinpath(cache_base, clean_p, clean_s)
+        target_h5 = joinpath(cache_dir, "$(clean_s)_preprocessed.h5")
+
+        # Check if already cached
+        if isfile(target_h5) && filesize(target_h5) > 1024
+            skip_count += 1
+            progress_cb !== nothing && progress_cb(i, total, subj_label, "cached")
+            continue
+        end
+
+        # Attempt download
+        try
+            mkpath(cache_dir)
+            dl_ok = download_preprocessed_hdf5(creds, p, subj_label, target_h5; force=false)
+            if dl_ok && isfile(target_h5) && filesize(target_h5) > 1024
+                ok_count += 1
+                sz_mb = round(filesize(target_h5) / 1024 / 1024, digits=1)
+                println("[XNAT-PREFETCH] ($i/$total) ✓ $subj_label ($sz_mb MB)")
+                progress_cb !== nothing && progress_cb(i, total, subj_label, "downloaded")
+            else
+                fail_count += 1
+                println("[XNAT-PREFETCH] ($i/$total) ○ $subj_label — no HDF5 on XNAT")
+                progress_cb !== nothing && progress_cb(i, total, subj_label, "no_hdf5")
+            end
+        catch e
+            fail_count += 1
+            @warn "[XNAT-PREFETCH] ($i/$total) ✗ $subj_label — error" exception=e
+            progress_cb !== nothing && progress_cb(i, total, subj_label, "error")
+        end
+
+        flush(stdout)
+    end
+
+    cancelled = cancel_ref[]
+    println("[XNAT-PREFETCH] $(cancelled ? "Cancelled" : "Complete"): $ok_count downloaded, $skip_count cached, $fail_count no-data (total $total)")
+    flush(stdout)
+    return (ok_count, skip_count, fail_count)
 end
 
 end # module XnatClient

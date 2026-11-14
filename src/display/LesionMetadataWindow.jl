@@ -4450,6 +4450,15 @@ function create_metadata_window(
     btn_xnat_preproc = Button(g[xnat_r4, 4], label = "Preprocess", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     rowsize!(g, xnat_r4, Fixed(28)); register_fixed_row!(xnat_r4, 28)
 
+    # Row 5: Prefetch All Project button
+    xnat_r5 = nr!()
+    btn_xnat_prefetch_all = Button(g[xnat_r5, 1:2], label = "Prefetch All Project", buttoncolor = RGBf(0.18, 0.35, 0.55), labelcolor = LBL_FG, fontsize = 9)
+    btn_xnat_cancel_prefetch = Button(g[xnat_r5, 3], label = "Cancel", buttoncolor = RGBf(0.55, 0.18, 0.18), labelcolor = LBL_FG, fontsize = 9)
+    _xnat_prefetch_cancel = Ref(false)
+    _xnat_prefetch_running = Observable(false)
+    lbl_xnat_prefetch_info = Label(g[xnat_r5, 4], "Idle", fontsize = 9, color = SUBTXT, halign = :center)
+    rowsize!(g, xnat_r5, Fixed(28)); register_fixed_row!(xnat_r5, 28)
+
     # Progress & Status Bar for XNAT Fetch / Load / GPU Upload
     xnat_load_progress_pct = Observable(0.0)
     xnat_load_progress_text = Observable("Idle — Select a patient and click Fetch/Load")
@@ -5204,6 +5213,77 @@ function create_metadata_window(
         target_dir = XnatPreloader.get_local_cache_dir(proj, subj)
         target_h5 = joinpath(target_dir, "$(subj)_preprocessed.h5")
         _run_preprocess_and_upload(proj, subj, target_h5; force=true)
+    end
+
+    # ── Prefetch All Project handler ──
+    on(btn_xnat_prefetch_all.clicks) do _
+        _xnat_prefetch_running[] && return   # already running
+
+        creds = _active_xnat_creds[]
+        proj = menu_xnat_proj.selection[]
+        if creds === nothing
+            _set_xnat_progress!(0, "Connect to XNAT first"; state=:error)
+            return
+        end
+        if proj === nothing || proj == "(None)"
+            _set_xnat_progress!(0, "Select a project first"; state=:error)
+            return
+        end
+
+        _xnat_prefetch_cancel[] = false
+        _xnat_prefetch_running[] = true
+        btn_xnat_prefetch_all.label[] = "Prefetching..."
+        lbl_xnat_prefetch_info.text[] = "Starting..."
+
+        Threads.@spawn begin
+            try
+                function _prefetch_progress(done, total, subj_id, status_msg)
+                    pct = (done / max(total, 1)) * 100.0
+                    tag = if status_msg == "downloaded"
+                        "downloaded"
+                    elseif status_msg == "cached"
+                        "cached"
+                    elseif status_msg == "no_hdf5"
+                        "no data"
+                    else
+                        status_msg
+                    end
+                    @async begin
+                        _set_xnat_progress!(pct, "$done/$total  $subj_id ($tag)"; state=:active)
+                        lbl_xnat_prefetch_info.text[] = "$done/$total"
+                    end
+                end
+
+                ok, skip, fail = XnatClient.prefetch_all_project_hdf5(
+                    creds, proj;
+                    progress_cb = _prefetch_progress,
+                    cancel_ref = _xnat_prefetch_cancel
+                )
+
+                msg = "Prefetch done: $(ok) new, $(skip) cached, $(fail) no-data"
+                @async begin
+                    _set_xnat_progress!(100, msg; state=:ready)
+                    lbl_xnat_prefetch_info.text[] = "$(ok+skip) ready"
+                    btn_xnat_prefetch_all.label[] = "Prefetch All Project"
+                    _xnat_prefetch_running[] = false
+                end
+            catch e
+                @warn "[XNAT-PREFETCH] Error" exception=e
+                @async begin
+                    _set_xnat_progress!(0, "Prefetch error: $(sprint(showerror, e))"; state=:error)
+                    btn_xnat_prefetch_all.label[] = "Prefetch All Project"
+                    _xnat_prefetch_running[] = false
+                end
+            end
+        end
+    end
+
+    on(btn_xnat_cancel_prefetch.clicks) do _
+        if _xnat_prefetch_running[]
+            _xnat_prefetch_cancel[] = true
+            lbl_xnat_prefetch_info.text[] = "Cancelling..."
+            _set_xnat_progress!(0, "Prefetch cancelled by user"; state=:warn)
+        end
     end
 
     # Auto-detection from active HDF5 path (e.g. CLI or preloaded)
@@ -12230,7 +12310,8 @@ function create_metadata_window(
         btn_mode_1click, btn_mode_wand,
         btn_edge_both, btn_edge_ct, btn_edge_pet,
         btn_pt, btn_nt, btn_m2, btn_fit, btn_ax, btn_cor, btn_sag, btn_cv, btn_mri_main, btn_mri_comp, btn_ps, btn_ns,
-        btn_xnat_login, btn_xnat_prev, btn_xnat_save, btn_xnat_next, btn_xnat_preproc
+        btn_xnat_login, btn_xnat_prev, btn_xnat_save, btn_xnat_next, btn_xnat_preproc,
+        btn_xnat_prefetch_all, btn_xnat_cancel_prefetch
     ]
     append!(action_buttons, anat_rm_btns)
     append!(action_buttons, all_section_buttons)
@@ -12249,6 +12330,8 @@ function create_metadata_window(
     _lmw_observables[:xnat_subj_menu] = menu_xnat_subj
     _lmw_observables[:tb_patient_search] = tb_patient_search
     _lmw_observables[:btn_load_patient] = btn_load_patient
+    _lmw_observables[:btn_xnat_prefetch_all] = btn_xnat_prefetch_all
+    _lmw_observables[:xnat_prefetch_running] = _xnat_prefetch_running
     _lmw_observables[:xnat_status_lbl] = lbl_xnat_status
     _lmw_observables[:update_auth_status] = _update_auth_status!
 
