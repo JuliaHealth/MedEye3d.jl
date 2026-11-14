@@ -645,16 +645,16 @@ def run_julia_lymph_node_rules(ct_path, tensor_path, out_ln_path, gpu_id=0):
             print(f"    [WARN] Cached {out_ln_path} is unreadable/corrupted. Recomputing with Julia GPU...")
             os.remove(out_ln_path)
 
-    ln_proj = "/mnt/big/project_ssd/lymph_node_rules/src/julia_gpu"
+    ln_proj = "/mnt/big/project_ssd/project_ssd/lymph_node_rules/src/julia_gpu"
     worker_script = os.path.join(WORKSPACE_DIR, "scripts/preprocessing/run_ln_worker.jl")
 
     raw_dir = os.path.dirname(tensor_path)
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     env["JULIA_NUM_THREADS"] = "4"
-    env["LN_RULES_DIR"] = "/mnt/big/project_ssd/lymph_node_rules"
+    env["LN_RULES_DIR"] = "/mnt/big/project_ssd/project_ssd/lymph_node_rules"
 
-    julia_bin = "/mnt/big/project_ssd/lymph_node_rules/for_joanna/.local/julia-1.12.6/bin/julia" if os.path.isfile("/mnt/big/project_ssd/lymph_node_rules/for_joanna/.local/julia-1.12.6/bin/julia") else "julia"
+    julia_bin = "/mnt/big/project_ssd/project_ssd/lymph_node_rules/for_joanna/.local/julia-1.12.6/bin/julia" if os.path.isfile("/mnt/big/project_ssd/project_ssd/lymph_node_rules/for_joanna/.local/julia-1.12.6/bin/julia") else "julia"
     cmd = [
         julia_bin, f"--project={ln_proj}",
         worker_script,
@@ -671,10 +671,33 @@ def run_julia_lymph_node_rules(ct_path, tensor_path, out_ln_path, gpu_id=0):
     return True
 
 
+def _is_lymph_station_name(name):
+    """Check if a mask name represents a lymph node station (mirrors Julia is_lymph_node_structure)."""
+    ln = name.lower()
+    # Exclude non-lymph structural/helper labels that share station prefixes
+    for bad in ("_cavity", "exclusion_zone", "chest_wall", "_helper", "_bridge", "_base", "_dilated"):
+        if bad in ln:
+            return False
+    # Exclude specific non-LN structures that match prefix patterns
+    if ln in ("thoracic_aorta", "thoracic_duct"):
+        return False
+    # Substring checks
+    if any(w in ln for w in ("lymph", "knoten", "node")):
+        return True
+    # Clinical station prefixes
+    for p in ("neck_", "thoracic_", "axillary_", "abdominal_",
+              "deep_inguinal", "superficial_inguinal", "inguinal_"):
+        if ln.startswith(p):
+            return True
+    return False
+
+
 def layer_and_sanitize_ct_anatomy(ct_shape, raw_dir):
     """
     Step 5: Multi-layer stacking of viscera, vessels, freshly recomputed lymph nodes, and bones.
     Strictly purges 'temp', helper masks, and dilation buffers.
+    When fresh LN results exist (final_results_gpu.h5), old LN stations from the packed
+    tensor are skipped entirely to avoid dead label IDs and label collisions.
     """
     Z, Y, X = ct_shape
     max_anatomy = np.zeros(ct_shape, dtype=np.uint16)
@@ -686,7 +709,12 @@ def layer_and_sanitize_ct_anatomy(ct_shape, raw_dir):
     anat_h5 = os.path.join(raw_dir, "packed_anatomical_tensor.h5")
     reg_path = os.path.join(raw_dir, "packed_anatomical_tensor_registry.json")
 
-    # Layer 0 & 1: VISTA Viscera & Vessels
+    # Check if fresh LN results exist — if so, skip old LN from packed tensor
+    ln_h5 = os.path.join(raw_dir, "final_results_gpu.h5")
+    has_fresh_ln = os.path.isfile(ln_h5)
+    skipped_old_ln = 0
+
+    # Layer 0 & 1: VISTA Viscera & Vessels (skip old LN stations when fresh ones available)
     if os.path.isfile(anat_h5) and os.path.isfile(reg_path):
         with open(reg_path, "r") as rf:
             reg = json.load(rf)
@@ -700,6 +728,10 @@ def layer_and_sanitize_ct_anatomy(ct_shape, raw_dir):
                 # Strict sanitation: purge temp and helper masks
                 if any(bad in clean for bad in ["temp", "helper", "dilation", "buffer"]):
                     continue
+                # Skip old LN stations from packed tensor when fresh results exist
+                if has_fresh_ln and _is_lymph_station_name(clean):
+                    skipped_old_ln += 1
+                    continue
                 ch = meta.get("channel", 1) - 1
                 mid = meta.get("id", 1)
                 if 0 <= ch < pt.shape[0]:
@@ -712,15 +744,19 @@ def layer_and_sanitize_ct_anatomy(ct_shape, raw_dir):
                         if any(u in clean for u in ["bladder", "kidney"]):
                             exclusion_mask[mask] = 1
                         lbl_idx += 1
+        if skipped_old_ln > 0:
+            print(f"    Skipped {skipped_old_ln} old LN stations from packed tensor (fresh LN results available)")
 
-    # Layer 1.5: Fresh Lymph Node Stations (IDs 101-108)
-    ln_h5 = os.path.join(raw_dir, "final_results_gpu.h5")
-    if os.path.isfile(ln_h5):
+    # Layer 1.5: Fresh Lymph Node Stations from Julia GPU DagVm
+    fresh_ln_count = 0
+    if has_fresh_ln:
         try:
             with h5py.File(ln_h5, "r") as lf:
                 for k in sorted(lf.keys()):
                     clean = k.lower()
-                    if any(bad in clean for bad in ["temp", "helper", "_base", "_dilated", "bridge"]):
+                    # Filter out helper/temp/structural masks from LN results
+                    if any(bad in clean for bad in ["temp", "helper", "_base", "_dilated", "bridge",
+                                                     "exclusion", "cavity", "chest_wall"]):
                         continue
                     arr_ln = lf[k][:]
                     if arr_ln.ndim == 3:
@@ -731,9 +767,19 @@ def layer_and_sanitize_ct_anatomy(ct_shape, raw_dir):
                             if m_ln.any():
                                 max_anatomy[m_ln] = lbl_idx
                                 labels_dict[str(lbl_idx)] = clean
+                                fresh_ln_count += 1
                                 lbl_idx += 1
+            print(f"    Integrated {fresh_ln_count} fresh LN stations from final_results_gpu.h5")
         except Exception as e_ln:
             print(f"    [WARN] Error reading {ln_h5}: {e_ln}")
+
+    # Purge any dead labels (IDs that no longer appear in the max_anatomy array)
+    live_ids = set(np.unique(max_anatomy))
+    dead_keys = [k for k in labels_dict if int(k) not in live_ids]
+    for k in dead_keys:
+        del labels_dict[k]
+    if dead_keys:
+        print(f"    Purged {len(dead_keys)} dead label IDs from labels_dict")
 
     bone_atlas = np.isin(max_anatomy, bone_ids).astype(np.float32)
     skellytour = bone_atlas.copy()
@@ -1199,6 +1245,8 @@ def process_case(pat_id, gpu_id, xnat):
     skellytour_f = flip_y(skellytour)
     edge_comb_f = flip_y(edge_comb)
     diff_comb_f = flip_y(diff_comb)
+    diff_ct_f = flip_y(diff_ct)
+    diff_pet_f = flip_y(diff_pet)
     t2_arr_f = flip_y(t2_arr)
     diff_mri_f = flip_y(diff_mri)
     # MRI timepoints own their max_anatomy (8-zone prostate). Never fall back to the CT
@@ -1366,6 +1414,8 @@ def process_case(pat_id, gpu_id, xnat):
         _set_spatial_attrs(b.create_dataset("max_anatomy.nii.gz", data=max_anat_f, compression="gzip", compression_opts=4, shuffle=True))
         _set_spatial_attrs(b.create_dataset("skellytour.nii.gz", data=skellytour_f, compression="gzip", compression_opts=4, shuffle=True))
         _set_spatial_attrs(b.create_dataset("diffusivity", data=diff_comb_f, compression="gzip", compression_opts=4, shuffle=True))
+        _set_spatial_attrs(b.create_dataset("diffusivity_ct", data=diff_ct_f, compression="gzip", compression_opts=4, shuffle=True))
+        _set_spatial_attrs(b.create_dataset("diffusivity_pet", data=diff_pet_f, compression="gzip", compression_opts=4, shuffle=True))
 
         # ATLAS Group
         a = h5.create_group("ATLAS")
