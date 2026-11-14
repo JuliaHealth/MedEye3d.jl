@@ -393,26 +393,42 @@ function resolve_anatomical_location(lid::Integer, state::Union{AbstractDict, No
     end
 
     # 2. If still empty, query max_anatomy atlas via centroid
-    if isempty(raw_organ) && _MEH !== nothing && _MEH.global_ts_atlas[] !== nothing
+    is_mri_report = _MEH !== nothing && uppercase(get(_MEH.tp_modalities, tp_idx, "")) in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE")
+    if isempty(raw_organ) && _MEH !== nothing
+        # For MRI TPs, use per-TP anatomy (prostate zones); for CT TPs, use global CT atlas
+        report_atlas = nothing
+        report_ts_nm = nothing
+        if is_mri_report
+            tp_entry_r = lock(_MEH._tp_cache_lock) do
+                get(_MEH.tp_data_cache, tp_idx, nothing)
+            end
+            if tp_entry_r !== nothing && tp_entry_r.anatomy !== nothing
+                report_atlas = tp_entry_r.anatomy
+                report_ts_nm = get(_MEH.anatomy_labels_cache, tp_idx, Dict{Int,String}())
+            end
+        elseif _MEH.global_ts_atlas[] !== nothing
+            report_atlas = _MEH.global_ts_atlas[]
+            report_ts_nm = _MEH.global_ts_names[]
+        end
+        if report_atlas !== nothing && report_ts_nm !== nothing
         try
-            atlas = _MEH.global_ts_atlas[]
-            ts_nm = _MEH.global_ts_names[]
             centroid = get(_MEH.lesion_centroids_cache, (tp_idx, lid), nothing)
             if centroid === nothing
                 centroid = get(_MEH.lesion_centroids_cache, lid, nothing)
             end
             if centroid !== nothing
-                cx = clamp(round(Int, centroid[1]), 1, size(atlas, 1))
-                cy = clamp(round(Int, centroid[2]), 1, size(atlas, 2))
-                cz = clamp(round(Int, centroid[3]), 1, size(atlas, 3))
-                val = Int(atlas[cx, cy, cz])
-                if val > 0 && haskey(ts_nm, val)
-                    raw_organ = ts_nm[val]
+                cx = clamp(round(Int, centroid[1]), 1, size(report_atlas, 1))
+                cy = clamp(round(Int, centroid[2]), 1, size(report_atlas, 2))
+                cz = clamp(round(Int, centroid[3]), 1, size(report_atlas, 3))
+                val = Int(report_atlas[cx, cy, cz])
+                if val > 0 && haskey(report_ts_nm, val)
+                    raw_organ = report_ts_nm[val]
                     _MEH.global_organ_mapping[][lid] = raw_organ
                 end
             end
         catch e
             @warn "Atlas centroid lookup failed for lesion $lid: $e"
+        end
         end
     end
 

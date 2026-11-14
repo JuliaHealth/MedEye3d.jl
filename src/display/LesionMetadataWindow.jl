@@ -5618,8 +5618,10 @@ function create_metadata_window(
             end
             atlas = if tp_entry_new !== nothing && tp_entry_new.anatomy !== nothing
                 tp_entry_new.anatomy
+            elseif !is_mri_new
+                _MEH.global_ts_atlas[]   # CT atlas fallback only for non-MRI TPs
             else
-                _MEH.global_ts_atlas[]
+                nothing  # MRI TPs must NOT use CT atlas
             end
             
             prostate_default_labels = Dict{Int,String}(
@@ -10009,8 +10011,10 @@ function create_metadata_window(
                     end
                     atlas = if tp_entry !== nothing && tp_entry.anatomy !== nothing
                         tp_entry.anatomy
+                    elseif !is_mri_cur
+                        _MEH.global_ts_atlas[]   # CT atlas fallback only for non-MRI TPs
                     else
-                        _MEH.global_ts_atlas[]
+                        nothing  # MRI TPs must NOT use CT atlas
                     end
                     prostate_default_labels = Dict{Int,String}(
                         1 => "Peripheral Zone (PZ)", 2 => "Transition Zone (TZ)", 3 => "Central Zone (CZ)",

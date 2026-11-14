@@ -4531,10 +4531,13 @@ function invalidate_and_recompute_lesion_metrics_async!(lesion_id::Int, tp_idx::
                             tp_entry_anat = lock(_tp_cache_lock) do
                                 get(tp_data_cache, tp_i, nothing)
                             end
+                            is_mri_tp_i = uppercase(get(tp_modalities, tp_i, "")) in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE")
                             atlas = if tp_entry_anat !== nothing && tp_entry_anat.anatomy !== nothing
                                 tp_entry_anat.anatomy
+                            elseif !is_mri_tp_i
+                                global_ts_atlas[]   # CT atlas fallback only for non-MRI TPs
                             else
-                                global_ts_atlas[]
+                                nothing  # MRI TPs must NOT use CT atlas
                             end
                             ts_nm = get(anatomy_labels_cache, tp_i, global_ts_names[])
                             if atlas !== nothing && ts_nm !== nothing && haskey(lesion_centroids_cache, (tp_i, lid_i))
