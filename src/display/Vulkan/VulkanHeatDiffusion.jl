@@ -22,6 +22,7 @@ using ..VulkanShaders: compile_glsl_to_spirv
 export HeatDiffusionState, init_heat_diffusion!, destroy_heat_diffusion!
 export upload_diffusivity!, run_heat_diffusion!, read_mask_to_cpu
 export seed_only!, run_incremental_steps!, compute_frontier_edge_scale, compute_local_relative_edge_params, compute_directional_relative_edge_params
+export apply_gaussian_smoothing!, redilate_current_mask!, detect_strong_pet_lesion_edges, smooth_diffusivity_local_box
 
 # ─── Push Constants ──────────────────────────────────────────────────────
 
@@ -87,6 +88,32 @@ struct ExtractMaskPC
     box_max_w::Int32
 end
 
+struct DilateMaskPC
+    radius::Int32
+    use_box::Int32
+    _pad0::Int32
+    _pad1::Int32
+    box_min_x::Int32
+    box_min_y::Int32
+    box_min_z::Int32
+    box_min_w::Int32
+    box_max_x::Int32
+    box_max_y::Int32
+    box_max_z::Int32
+    box_max_w::Int32
+end
+
+struct GaussianSmoothPC
+    axis::Int32
+    radius::Int32
+    sigma::Float32
+    gamma::Float32
+    epsilon_D::Float32
+    _pad0::Float32
+    _pad1::Float32
+    _pad2::Float32
+end
+
 # ─── State struct ────────────────────────────────────────────────────────
 
 """
@@ -101,27 +128,35 @@ mutable struct HeatDiffusionState
     depth::Int
     
     # 3D storage images (VK_FORMAT_R32_SFLOAT)
-    img_diffusivity::Image          # Precomputed D(x) field
+    img_diffusivity::Image          # Active D(x) field (raw or GPU-smoothed)
+    img_diffusivity_raw::Image      # Pristine uploaded D(x) field for 100% reversible smoothing
     img_u_ping::Image               # Heat field buffer A
     img_u_pong::Image               # Heat field buffer B
-    img_mask::Image                 # Output binary mask
+    img_mask_raw::Image             # Un-dilated binary mask output from extract_mask
+    img_mask::Image                 # Output binary mask (after optional 0..3 vox dilation)
     
     # Image views
     view_diffusivity::ImageView
+    view_diffusivity_raw::ImageView
     view_u_ping::ImageView
     view_u_pong::ImageView
+    view_mask_raw::ImageView
     view_mask::ImageView
     
     # Device memory allocations
     mem_diffusivity::DeviceMemory
+    mem_diffusivity_raw::DeviceMemory
     mem_u_ping::DeviceMemory
     mem_u_pong::DeviceMemory
+    mem_mask_raw::DeviceMemory
     mem_mask::DeviceMemory
     
     # Compute pipelines
     pipeline_seed_init::Pipeline
     pipeline_diffuse_step::Pipeline
     pipeline_extract_mask::Pipeline
+    pipeline_dilate_mask::Pipeline
+    pipeline_gaussian_smooth::Pipeline
     pipeline_diffusivity::Pipeline
     pipeline_slice::Pipeline
     
@@ -129,6 +164,8 @@ mutable struct HeatDiffusionState
     layout_seed_init::PipelineLayout
     layout_diffuse_step::PipelineLayout
     layout_extract_mask::PipelineLayout
+    layout_dilate_mask::PipelineLayout
+    layout_gaussian_smooth::PipelineLayout
     layout_diffusivity::PipelineLayout
     layout_slice::PipelineLayout
     
@@ -136,6 +173,8 @@ mutable struct HeatDiffusionState
     dsl_seed_init::DescriptorSetLayout
     dsl_diffuse_step::DescriptorSetLayout
     dsl_extract_mask::DescriptorSetLayout
+    dsl_dilate_mask::DescriptorSetLayout
+    dsl_gaussian_smooth::DescriptorSetLayout
     dsl_diffusivity::DescriptorSetLayout
     dsl_slice::DescriptorSetLayout
     
@@ -145,8 +184,12 @@ mutable struct HeatDiffusionState
     ds_seed_pong::DescriptorSet          # seed_init writing to pong
     ds_diffuse_ping_to_pong::DescriptorSet  # diffuse: read ping, write pong
     ds_diffuse_pong_to_ping::DescriptorSet  # diffuse: read pong, write ping
-    ds_extract_from_ping::DescriptorSet     # extract mask from ping
-    ds_extract_from_pong::DescriptorSet     # extract mask from pong
+    ds_extract_from_ping::DescriptorSet     # extract mask from ping -> mask_raw
+    ds_extract_from_pong::DescriptorSet     # extract mask from pong -> mask_raw
+    ds_dilate_mask::DescriptorSet           # dilate mask_raw -> mask
+    ds_gauss_x::DescriptorSet               # gaussian pass 0: diff_raw -> ping
+    ds_gauss_y::DescriptorSet               # gaussian pass 1: ping -> pong
+    ds_gauss_z::DescriptorSet               # gaussian pass 2: pong + diff_raw -> diff
     ds_compute_diffusivity::DescriptorSet   # edge→diffusivity conversion
     ds_slice_ping::DescriptorSet            # slice from ping
     ds_slice_pong::DescriptorSet            # slice from pong
@@ -178,6 +221,8 @@ mutable struct HeatDiffusionState
     spacing::NTuple{3, Float64}
     current_s_boost::Float32
     current_edge_params::NTuple{12, Float32}
+    current_dilation_radius::Int
+    current_smoothing_sigma::Float32
     
     # Dummy sampler for DescriptorImageInfo
     dummy_sampler::Sampler
@@ -207,6 +252,8 @@ mutable struct HeatDiffusionState
         state.spacing = (1.0, 1.0, 1.0)
         state.current_s_boost = 1.0f0
         state.current_edge_params = (0.20f0, 0.20f0, 0.20f0, 0.20f0, 0.20f0, 0.20f0, 0.05f0, 0.85f0, 12.0f0, 1.0f0, 0.0f0, 0.0f0)
+        state.current_dilation_radius = 0
+        state.current_smoothing_sigma = 0.0f0
         return state
     end
 end
@@ -267,11 +314,101 @@ function _compute_spacing_weights(spacing::NTuple{3, Real})
 end
 
 """
+    smooth_diffusivity_local_box(diffusivity::Array{Float32,3}, cx::Int, cy::Int, cz::Int,
+                                 R_phys::Real, spacing::NTuple{3,Real}, sigma::Real)
+
+Applies the exact same 3-pass separable 3D Gaussian edge smoothing + gap bridging as
+`gaussian_smooth.comp` to a small local sub-box around `(cx, cy, cz)`, returning
+`(sub_diff, scx, scy, scz)` without mutating `diffusivity` (or any HDF5/cache data).
+When `sigma <= 0.01`, returns `(diffusivity, cx, cy, cz)` with zero allocation.
+"""
+function smooth_diffusivity_local_box(diffusivity::Array{Float32,3}, cx::Int, cy::Int, cz::Int,
+                                      R_phys::Real, spacing::NTuple{3,Real}, sigma::Real)
+    sigma_f = Float32(sigma)
+    if sigma_f <= 0.01f0
+        return (diffusivity, cx, cy, cz)
+    end
+    w, h, d = size(diffusivity)
+    dx, dy, dz = Float64.(spacing)
+    r = clamp(ceil(Int, 3.0 * Float64(sigma_f)), 1, 9)
+    R_outer_mm = max(12.0, Float64(R_phys))
+
+    rx = max(2, round(Int, R_outer_mm / dx)) + r + 2
+    ry = max(2, round(Int, R_outer_mm / dy)) + r + 2
+    rz = max(2, round(Int, R_outer_mm / dz)) + r + 2
+
+    x1, x2 = max(1, cx - rx), min(w, cx + rx)
+    y1, y2 = max(1, cy - ry), min(h, cy + ry)
+    z1, z2 = max(1, cz - rz), min(d, cz + rz)
+
+    bw = x2 - x1 + 1
+    bh = y2 - y1 + 1
+    bd = z2 - z1 + 1
+
+    gamma = 10.095886f0
+    inv_gamma = 1.0f0 / gamma
+    epsilon_D = 1.0f-5
+
+    inv_2sigma2 = 0.5 / (Float64(sigma_f)^2)
+    weights = Vector{Float32}(undef, 2 * r + 1)
+    @inbounds for i in -r:r
+        weights[i + r + 1] = Float32(exp(-Float64(i * i) * inv_2sigma2))
+    end
+    weights ./= sum(weights)
+
+    E_raw = Array{Float32, 3}(undef, bw, bh, bd)
+    buf_a = Array{Float32, 3}(undef, bw, bh, bd)
+    buf_b = Array{Float32, 3}(undef, bw, bh, bd)
+
+    @inbounds for kz in 1:bd, ky in 1:bh, kx in 1:bw
+        dv = diffusivity[x1 + kx - 1, y1 + ky - 1, z1 + kz - 1]
+        E_raw[kx, ky, kz] = -log(clamp(dv, 1.0f-5, 1.0f0)) * inv_gamma
+    end
+
+    # Pass 0: X
+    @inbounds for kz in 1:bd, ky in 1:bh, kx in 1:bw
+        acc = 0.0f0
+        for off in -r:r
+            nx = clamp(kx + off, 1, bw)
+            acc += weights[off + r + 1] * E_raw[nx, ky, kz]
+        end
+        buf_a[kx, ky, kz] = acc
+    end
+
+    # Pass 1: Y
+    @inbounds for kz in 1:bd, ky in 1:bh, kx in 1:bw
+        acc = 0.0f0
+        for off in -r:r
+            ny = clamp(ky + off, 1, bh)
+            acc += weights[off + r + 1] * buf_a[kx, ny, kz]
+        end
+        buf_b[kx, ky, kz] = acc
+    end
+
+    # Pass 2: Z + gap-bridging conversion back to diffusivity D
+    gain = 1.0f0 + 0.35f0 * sigma_f
+    @inbounds for kz in 1:bd, ky in 1:bh, kx in 1:bw
+        e_smooth = 0.0f0
+        for off in -r:r
+            nz = clamp(kz + off, 1, bd)
+            e_smooth += weights[off + r + 1] * buf_b[kx, ky, nz]
+        end
+        e_raw = E_raw[kx, ky, kz]
+        e_bridged = max(e_raw, gain * e_smooth)
+        e_eff = clamp(0.22f0 * e_smooth + 0.78f0 * e_bridged, 0.0f0, 1.15f0)
+        buf_a[kx, ky, kz] = clamp(epsilon_D + (1.0f0 - epsilon_D) * exp(-gamma * e_eff), epsilon_D, 1.0f0)
+    end
+
+    return (buf_a, cx - x1 + 1, cy - y1 + 1, cz - z1 + 1)
+end
+
+"""
     compute_frontier_edge_scale(diffusivity::Array{Float32,3}, cx::Int, cy::Int, cz::Int,
-                               R_phys::Real, spacing::NTuple{3,Real};
-                               margin_phys::Real=6.0,
-                               E_ref::Float32=0.20f0,
-                               sensitivity::Float32=1.0f0)::Float32
+                                R_phys::Real, spacing::NTuple{3,Real};
+                                margin_phys::Real=6.0,
+                                E_ref::Float32=0.20f0,
+                                sensitivity::Float32=1.0f0,
+                                smoothing_sigma::Float32=0.0f0)::Float32
 
 Samples the dilated frontier shell (outer band of thickness `margin_phys` mm ahead of the
 current lesion boundary at radius `R_phys` mm) from `diffusivity`.
@@ -282,7 +419,11 @@ function compute_frontier_edge_scale(diffusivity::Array{Float32,3}, cx::Int, cy:
                                      R_phys::Real, spacing::NTuple{3,Real};
                                      margin_phys::Real=6.0,
                                      E_ref::Float32=0.20f0,
-                                     sensitivity::Float32=1.0f0)::Float32
+                                     sensitivity::Float32=1.0f0,
+                                     smoothing_sigma::Float32=0.0f0)::Float32
+    if smoothing_sigma > 0.01f0
+        diffusivity, cx, cy, cz = smooth_diffusivity_local_box(diffusivity, cx, cy, cz, max(8.0, Float64(R_phys)), spacing, smoothing_sigma)
+    end
     w, h, d = size(diffusivity)
     dx, dy, dz = Float64.(spacing)
     
@@ -421,7 +562,11 @@ At the strongest edge in the immediate vicinity (E -> E_peak), E_rel -> 1.0 -> D
 function compute_local_relative_edge_params(diffusivity::Array{Float32,3}, cx::Int, cy::Int, cz::Int,
                                             R_phys::Real, spacing::NTuple{3,Real};
                                             sensitivity::Float32=1.0f0,
-                                            edge_clip::Float32=0.85f0)::NTuple{4, Float32}
+                                            edge_clip::Float32=0.85f0,
+                                            smoothing_sigma::Float32=0.0f0)::NTuple{4, Float32}
+    if smoothing_sigma > 0.01f0
+        diffusivity, cx, cy, cz = smooth_diffusivity_local_box(diffusivity, cx, cy, cz, max(8.0, Float64(R_phys)), spacing, smoothing_sigma)
+    end
     w, h, d = size(diffusivity)
     dx, dy, dz = Float64.(spacing)
     
@@ -559,7 +704,11 @@ relative edge normalization parameters across 6 cardinal sectors (+X, -X, +Y, -Y
 function compute_directional_relative_edge_params(diffusivity::Array{Float32,3}, cx::Int, cy::Int, cz::Int,
                                                   R_phys::Real, spacing::NTuple{3,Real};
                                                   sensitivity::Float32=1.0f0,
-                                                  edge_clip::Float32=0.85f0)::NTuple{12, Float32}
+                                                  edge_clip::Float32=0.85f0,
+                                                  smoothing_sigma::Float32=0.0f0)::NTuple{12, Float32}
+    if smoothing_sigma > 0.01f0
+        diffusivity, cx, cy, cz = smooth_diffusivity_local_box(diffusivity, cx, cy, cz, max(35.0, Float64(R_phys)), spacing, smoothing_sigma)
+    end
     w, h, d = size(diffusivity)
     dx, dy, dz = Float64.(spacing)
     
@@ -1160,14 +1309,18 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     
     # 1. Create 3D storage images
     state.img_diffusivity, state.mem_diffusivity, state.view_diffusivity = create_storage_image_3d(dev, pdev, w, h, d)
+    state.img_diffusivity_raw, state.mem_diffusivity_raw, state.view_diffusivity_raw = create_storage_image_3d(dev, pdev, w, h, d)
     state.img_u_ping, state.mem_u_ping, state.view_u_ping = create_storage_image_3d(dev, pdev, w, h, d)
     state.img_u_pong, state.mem_u_pong, state.view_u_pong = create_storage_image_3d(dev, pdev, w, h, d)
+    state.img_mask_raw, state.mem_mask_raw, state.view_mask_raw = create_storage_image_3d(dev, pdev, w, h, d)
     state.img_mask, state.mem_mask, state.view_mask = create_storage_image_3d(dev, pdev, w, h, d)
     
     # 2. Load shader modules
     mod_seed = load_shader_module(dev, "seed_init.spv")
     mod_diffuse = load_shader_module(dev, "diffuse_step.spv")
     mod_extract = load_shader_module(dev, "extract_mask.spv")
+    mod_dilate = load_shader_module(dev, "dilate_mask.spv")
+    mod_gauss = load_shader_module(dev, "gaussian_smooth.spv")
     mod_diff = load_shader_module(dev, "diffusivity.spv")
     mod_slice = load_shader_module(dev, "slice_heat_to_texture.spv")
     
@@ -1184,12 +1337,18 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     ]
     state.dsl_diffuse_step = unwrap(create_descriptor_set_layout(dev, DescriptorSetLayoutCreateInfo(bindings_diffuse)))
     
-    # extract_mask: 2 storage images (u readonly, mask writeonly)
+    # extract_mask: 2 storage images (u readonly, mask_raw writeonly)
     bindings_extract = [
         DescriptorSetLayoutBinding(0, DESCRIPTOR_TYPE_STORAGE_IMAGE, SHADER_STAGE_COMPUTE_BIT; descriptor_count=1),
         DescriptorSetLayoutBinding(1, DESCRIPTOR_TYPE_STORAGE_IMAGE, SHADER_STAGE_COMPUTE_BIT; descriptor_count=1)
     ]
     state.dsl_extract_mask = unwrap(create_descriptor_set_layout(dev, DescriptorSetLayoutCreateInfo(bindings_extract)))
+    
+    # dilate_mask: 2 storage images (mask_raw readonly, mask writeonly)
+    state.dsl_dilate_mask = unwrap(create_descriptor_set_layout(dev, DescriptorSetLayoutCreateInfo(bindings_extract)))
+    
+    # gaussian_smooth: 3 storage images (img_in readonly, img_out writeonly, img_raw readonly)
+    state.dsl_gaussian_smooth = unwrap(create_descriptor_set_layout(dev, DescriptorSetLayoutCreateInfo(bindings_diffuse)))
     
     # diffusivity: 2 storage images (edge readonly, diffusivity writeonly)
     state.dsl_diffusivity = unwrap(create_descriptor_set_layout(dev, DescriptorSetLayoutCreateInfo(bindings_extract)))
@@ -1210,12 +1369,20 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     pc_extract = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, 48)]
     state.layout_extract_mask = unwrap(create_pipeline_layout(dev, PipelineLayoutCreateInfo([state.dsl_extract_mask], pc_extract)))
     
+    # dilate_mask: push int radius + use_box + 2 ivec4 (48 bytes)
+    pc_dilate = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, sizeof(DilateMaskPC))]
+    state.layout_dilate_mask = unwrap(create_pipeline_layout(dev, PipelineLayoutCreateInfo([state.dsl_dilate_mask], pc_dilate)))
+    
+    # gaussian_smooth: push 32 bytes
+    pc_gauss = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, sizeof(GaussianSmoothPC))]
+    state.layout_gaussian_smooth = unwrap(create_pipeline_layout(dev, PipelineLayoutCreateInfo([state.dsl_gaussian_smooth], pc_gauss)))
+    
     # diffusivity: push float epsilon_D + float gamma (8 bytes)
     pc_diff = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, 8)]
     state.layout_diffusivity = unwrap(create_pipeline_layout(dev, PipelineLayoutCreateInfo([state.dsl_diffusivity], pc_diff)))
     
-    # slice: push float theta + int slice_dim + int slice_idx + uint active_id (16 bytes)
-    pc_slice = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, 16)]
+    # slice: push float theta + int slice_dim + int slice_idx + uint active_id + int dilation_radius (20 bytes)
+    pc_slice = [PushConstantRange(SHADER_STAGE_COMPUTE_BIT, 0, 20)]
     state.layout_slice = unwrap(create_pipeline_layout(dev, PipelineLayoutCreateInfo([state.dsl_slice], pc_slice)))
     
     # 5. Create compute pipelines
@@ -1228,6 +1395,12 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     stage_extract = PipelineShaderStageCreateInfo(SHADER_STAGE_COMPUTE_BIT, mod_extract, "main")
     state.pipeline_extract_mask = unwrap(create_compute_pipelines(dev, [ComputePipelineCreateInfo(stage_extract, state.layout_extract_mask, -1)]))[1][1]
     
+    stage_dilate = PipelineShaderStageCreateInfo(SHADER_STAGE_COMPUTE_BIT, mod_dilate, "main")
+    state.pipeline_dilate_mask = unwrap(create_compute_pipelines(dev, [ComputePipelineCreateInfo(stage_dilate, state.layout_dilate_mask, -1)]))[1][1]
+    
+    stage_gauss = PipelineShaderStageCreateInfo(SHADER_STAGE_COMPUTE_BIT, mod_gauss, "main")
+    state.pipeline_gaussian_smooth = unwrap(create_compute_pipelines(dev, [ComputePipelineCreateInfo(stage_gauss, state.layout_gaussian_smooth, -1)]))[1][1]
+    
     stage_diff = PipelineShaderStageCreateInfo(SHADER_STAGE_COMPUTE_BIT, mod_diff, "main")
     state.pipeline_diffusivity = unwrap(create_compute_pipelines(dev, [ComputePipelineCreateInfo(stage_diff, state.layout_diffusivity, -1)]))[1][1]
 
@@ -1238,6 +1411,8 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     # destroy_shader_module(dev, mod_seed)
     # destroy_shader_module(dev, mod_diffuse)
     # destroy_shader_module(dev, mod_extract)
+    # destroy_shader_module(dev, mod_dilate)
+    # destroy_shader_module(dev, mod_gauss)
     # destroy_shader_module(dev, mod_diff)
     # destroy_shader_module(dev, mod_slice)
     
@@ -1265,7 +1440,11 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
         state.dsl_extract_mask,    # ds_extract_from_pong
         state.dsl_diffusivity,     # ds_compute_diffusivity
         state.dsl_slice,           # ds_slice_ping
-        state.dsl_slice            # ds_slice_pong
+        state.dsl_slice,           # ds_slice_pong
+        state.dsl_dilate_mask,     # ds_dilate_mask
+        state.dsl_gaussian_smooth, # ds_gauss_x
+        state.dsl_gaussian_smooth, # ds_gauss_y
+        state.dsl_gaussian_smooth  # ds_gauss_z
     ])
     sets = unwrap(Vulkan.allocate_descriptor_sets(dev, alloc_ds))
     state.ds_seed_ping = sets[1]
@@ -1277,6 +1456,10 @@ function init_heat_diffusion!(state::HeatDiffusionState, ctx, w::Int, h::Int, d:
     state.ds_compute_diffusivity = sets[7]
     state.ds_slice_ping = sets[8]
     state.ds_slice_pong = sets[9]
+    state.ds_dilate_mask = sets[10]
+    state.ds_gauss_x = sets[11]
+    state.ds_gauss_y = sets[12]
+    state.ds_gauss_z = sets[13]
     
     # 8. Write descriptor sets
     _write_descriptors!(state, dev)
@@ -1357,13 +1540,30 @@ function _write_descriptors!(state::HeatDiffusionState, dev::Device)
     push!(writes, WriteDescriptorSet(state.ds_diffuse_pong_to_ping, 1, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_u_pong)], [], []))
     push!(writes, WriteDescriptorSet(state.ds_diffuse_pong_to_ping, 2, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_u_ping)], [], []))
     
-    # extract from ping (u_ping, mask_out)
+    # extract from ping (u_ping, mask_raw_out)
     push!(writes, WriteDescriptorSet(state.ds_extract_from_ping, 0, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_u_ping)], [], []))
-    push!(writes, WriteDescriptorSet(state.ds_extract_from_ping, 1, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_mask)], [], []))
+    push!(writes, WriteDescriptorSet(state.ds_extract_from_ping, 1, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_mask_raw)], [], []))
     
-    # extract from pong (u_pong, mask_out)
+    # extract from pong (u_pong, mask_raw_out)
     push!(writes, WriteDescriptorSet(state.ds_extract_from_pong, 0, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_u_pong)], [], []))
-    push!(writes, WriteDescriptorSet(state.ds_extract_from_pong, 1, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_mask)], [], []))
+    push!(writes, WriteDescriptorSet(state.ds_extract_from_pong, 1, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_mask_raw)], [], []))
+    
+    # dilate mask (mask_raw_in -> mask_out)
+    push!(writes, WriteDescriptorSet(state.ds_dilate_mask, 0, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_mask_raw)], [], []))
+    push!(writes, WriteDescriptorSet(state.ds_dilate_mask, 1, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_mask)], [], []))
+    
+    # gaussian_smooth passes (X: diff_raw -> ping, Y: ping -> pong, Z: pong + diff_raw -> diff)
+    push!(writes, WriteDescriptorSet(state.ds_gauss_x, 0, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_diffusivity_raw)], [], []))
+    push!(writes, WriteDescriptorSet(state.ds_gauss_x, 1, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_u_ping)], [], []))
+    push!(writes, WriteDescriptorSet(state.ds_gauss_x, 2, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_diffusivity_raw)], [], []))
+    
+    push!(writes, WriteDescriptorSet(state.ds_gauss_y, 0, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_u_ping)], [], []))
+    push!(writes, WriteDescriptorSet(state.ds_gauss_y, 1, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_u_pong)], [], []))
+    push!(writes, WriteDescriptorSet(state.ds_gauss_y, 2, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_diffusivity_raw)], [], []))
+    
+    push!(writes, WriteDescriptorSet(state.ds_gauss_z, 0, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_u_pong)], [], []))
+    push!(writes, WriteDescriptorSet(state.ds_gauss_z, 1, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_diffusivity)], [], []))
+    push!(writes, WriteDescriptorSet(state.ds_gauss_z, 2, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_diffusivity_raw)], [], []))
     
     # diffusivity compute: edge_in → diffusivity_out
     push!(writes, WriteDescriptorSet(state.ds_compute_diffusivity, 0, 0, DESCRIPTOR_TYPE_STORAGE_IMAGE, [di(state.view_u_ping)], [], []))  # reuse ping for edge input
@@ -1433,38 +1633,54 @@ function upload_diffusivity!(state::HeatDiffusionState, ctx, diffusivity_data::A
     unsafe_copyto!(Ptr{Float32}(ptr), pointer(diffusivity_data), length(diffusivity_data))
     unmap_memory(dev, staging_mem)
     
-    # Transition image layout and copy
+    # Transition image layouts and copy to both img_diffusivity_raw and img_diffusivity
     one_time_submit!(ctx) do cmd
-        # Transition diffusivity image to TRANSFER_DST
-        barrier = ImageMemoryBarrier(
-            ACCESS_NONE, ACCESS_TRANSFER_WRITE_BIT,
-            IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            0, 0,  # queue family indices (ignored)
-            state.img_diffusivity,
-            ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)
-        )
-        cmd_pipeline_barrier(cmd, MemoryBarrier[], BufferMemoryBarrier[], [barrier];
+        barriers_dst = [
+            ImageMemoryBarrier(
+                ACCESS_NONE, ACCESS_TRANSFER_WRITE_BIT,
+                IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                0, 0,
+                state.img_diffusivity_raw,
+                ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)
+            ),
+            ImageMemoryBarrier(
+                ACCESS_NONE, ACCESS_TRANSFER_WRITE_BIT,
+                IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                0, 0,
+                state.img_diffusivity,
+                ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)
+            )
+        ]
+        cmd_pipeline_barrier(cmd, MemoryBarrier[], BufferMemoryBarrier[], barriers_dst;
                              src_stage_mask=PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                              dst_stage_mask=PIPELINE_STAGE_TRANSFER_BIT)
         
-        # Copy buffer to 3D image
         region = BufferImageCopy(
             0, 0, 0,
             ImageSubresourceLayers(IMAGE_ASPECT_COLOR_BIT, 0, 0, 1),
             Offset3D(0, 0, 0),
             Extent3D(w, h, d)
         )
+        cmd_copy_buffer_to_image(cmd, staging_buf, state.img_diffusivity_raw, IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, [region])
         cmd_copy_buffer_to_image(cmd, staging_buf, state.img_diffusivity, IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, [region])
         
-        # Transition to GENERAL for compute shader access
-        barrier2 = ImageMemoryBarrier(
-            ACCESS_TRANSFER_WRITE_BIT, ACCESS_SHADER_READ_BIT,
-            IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, IMAGE_LAYOUT_GENERAL,
-            0, 0,
-            state.img_diffusivity,
-            ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)
-        )
-        cmd_pipeline_barrier(cmd, MemoryBarrier[], BufferMemoryBarrier[], [barrier2];
+        barriers_gen = [
+            ImageMemoryBarrier(
+                ACCESS_TRANSFER_WRITE_BIT, ACCESS_SHADER_READ_BIT,
+                IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, IMAGE_LAYOUT_GENERAL,
+                0, 0,
+                state.img_diffusivity_raw,
+                ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)
+            ),
+            ImageMemoryBarrier(
+                ACCESS_TRANSFER_WRITE_BIT, ACCESS_SHADER_READ_BIT,
+                IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, IMAGE_LAYOUT_GENERAL,
+                0, 0,
+                state.img_diffusivity,
+                ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)
+            )
+        ]
+        cmd_pipeline_barrier(cmd, MemoryBarrier[], BufferMemoryBarrier[], barriers_gen;
                              src_stage_mask=PIPELINE_STAGE_TRANSFER_BIT,
                              dst_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT)
     end
@@ -1475,7 +1691,109 @@ function upload_diffusivity!(state::HeatDiffusionState, ctx, diffusivity_data::A
     GC.gc(false)
     
     state.diffusivity_uploaded = true
+    if state.current_smoothing_sigma > 0.01f0
+        apply_gaussian_smoothing!(state, ctx, state.current_smoothing_sigma)
+    end
     @info "[HeatDiffusion] Diffusivity upload complete."
+end
+
+"""
+    apply_gaussian_smoothing!(state::HeatDiffusionState, ctx, sigma::Real)
+
+Reversibly applies a 3-pass separable 3D Gaussian edge smoothing + gap-bridging filter on the
+GPU from `state.img_diffusivity_raw` into `state.img_diffusivity`.
+When `sigma <= 0.01`, restores `state.img_diffusivity` bit-for-bit from `state.img_diffusivity_raw`.
+Never mutates any CPU cache or HDF5 file.
+"""
+function apply_gaussian_smoothing!(state::HeatDiffusionState, ctx, sigma::Real)
+    sigma_f = Float32(max(0.0, Float64(sigma)))
+    state.current_smoothing_sigma = sigma_f
+    if !state.is_initialized || !state.diffusivity_uploaded
+        return
+    end
+
+    dev = ctx.device
+    w, h, d = state.width, state.height, state.depth
+    gx, gy, gz = cld(w, 8), cld(h, 8), cld(d, 8)
+    cmd = state.compute_cmd_buffer
+    unwrap(reset_command_buffer(cmd))
+    begin_info = CommandBufferBeginInfo(flags = COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
+    unwrap(begin_command_buffer(cmd, begin_info))
+
+    if sigma_f <= 0.01f0
+        # Exact bit-for-bit reversal: copy img_diffusivity_raw -> img_diffusivity on GPU
+        barriers_xfer = [
+            ImageMemoryBarrier(C_NULL, ACCESS_SHADER_READ_BIT | ACCESS_SHADER_WRITE_BIT, ACCESS_TRANSFER_READ_BIT,
+                IMAGE_LAYOUT_GENERAL, IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 0, 0,
+                state.img_diffusivity_raw, ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)),
+            ImageMemoryBarrier(C_NULL, ACCESS_SHADER_READ_BIT | ACCESS_SHADER_WRITE_BIT, ACCESS_TRANSFER_WRITE_BIT,
+                IMAGE_LAYOUT_GENERAL, IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, 0,
+                state.img_diffusivity, ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1))
+        ]
+        cmd_pipeline_barrier(cmd, MemoryBarrier[], BufferMemoryBarrier[], barriers_xfer;
+                             src_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             dst_stage_mask=PIPELINE_STAGE_TRANSFER_BIT)
+
+        copy_reg = ImageCopy(
+            ImageSubresourceLayers(IMAGE_ASPECT_COLOR_BIT, 0, 0, 1), Offset3D(0, 0, 0),
+            ImageSubresourceLayers(IMAGE_ASPECT_COLOR_BIT, 0, 0, 1), Offset3D(0, 0, 0),
+            Extent3D(w, h, d)
+        )
+        cmd_copy_image(cmd, state.img_diffusivity_raw, IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       state.img_diffusivity, IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, [copy_reg])
+
+        barriers_back = [
+            ImageMemoryBarrier(C_NULL, ACCESS_TRANSFER_READ_BIT, ACCESS_SHADER_READ_BIT,
+                IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, IMAGE_LAYOUT_GENERAL, 0, 0,
+                state.img_diffusivity_raw, ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)),
+            ImageMemoryBarrier(C_NULL, ACCESS_TRANSFER_WRITE_BIT, ACCESS_SHADER_READ_BIT,
+                IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, IMAGE_LAYOUT_GENERAL, 0, 0,
+                state.img_diffusivity, ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1))
+        ]
+        cmd_pipeline_barrier(cmd, MemoryBarrier[], BufferMemoryBarrier[], barriers_back;
+                             src_stage_mask=PIPELINE_STAGE_TRANSFER_BIT,
+                             dst_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT)
+    else
+        # 3-pass separable 3D Gaussian smoothing on GPU (X -> Y -> Z)
+        barriers_init = [
+            ImageMemoryBarrier(C_NULL, ACCESS_NONE, ACCESS_SHADER_READ_BIT | ACCESS_SHADER_WRITE_BIT,
+                IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL, 0, 0,
+                state.img_u_ping, ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)),
+            ImageMemoryBarrier(C_NULL, ACCESS_NONE, ACCESS_SHADER_READ_BIT | ACCESS_SHADER_WRITE_BIT,
+                IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL, 0, 0,
+                state.img_u_pong, ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1))
+        ]
+        cmd_pipeline_barrier(cmd, MemoryBarrier[], BufferMemoryBarrier[], barriers_init;
+                             src_stage_mask=PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             dst_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT)
+
+        r = clamp(ceil(Int, 3.0 * Float64(sigma_f)), 1, 9)
+        gamma = 10.095886f0
+        epsilon_D = 1.0f-5
+        barrier_compute = MemoryBarrier(C_NULL, ACCESS_SHADER_WRITE_BIT, ACCESS_SHADER_READ_BIT)
+
+        cmd_bind_pipeline(cmd, PIPELINE_BIND_POINT_COMPUTE, state.pipeline_gaussian_smooth)
+        for (axis, ds) in ((Int32(0), state.ds_gauss_x), (Int32(1), state.ds_gauss_y), (Int32(2), state.ds_gauss_z))
+            cmd_bind_descriptor_sets(cmd, PIPELINE_BIND_POINT_COMPUTE, state.layout_gaussian_smooth, 0, [ds], [])
+            pc_g = GaussianSmoothPC(axis, Int32(r), sigma_f, gamma, epsilon_D, 0.0f0, 0.0f0, 0.0f0)
+            ref_g = Ref(pc_g)
+            GC.@preserve ref_g begin
+                cmd_push_constants(cmd, state.layout_gaussian_smooth, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc_g), Base.unsafe_convert(Ptr{Cvoid}, ref_g))
+            end
+            cmd_dispatch(cmd, gx, gy, gz)
+            cmd_pipeline_barrier(cmd, [barrier_compute], BufferMemoryBarrier[], ImageMemoryBarrier[];
+                                 src_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                                 dst_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT)
+        end
+    end
+
+    unwrap(end_command_buffer(cmd))
+    submit_info = SubmitInfo([], [], [cmd], [])
+    unwrap(reset_fences(dev, [state.compute_fence]))
+    unwrap(queue_submit(ctx.graphics_queue, [submit_info]; fence=state.compute_fence))
+    unwrap(wait_for_fences(dev, [state.compute_fence], true, typemax(UInt64)))
+    state.current_buffer_is_ping = true
+    state.accumulated_steps = 0
 end
 
 # ─── Run heat diffusion ─────────────────────────────────────────────────
@@ -1494,13 +1812,15 @@ Use `read_mask_to_cpu` to retrieve it.
 function run_heat_diffusion!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y::Int, seed_z::Int;
                               K::Int=200, dt::Float32=0.16f0, theta::Float32=0.001044f0, tau::Float32=0.0001f0,
                               spacing::NTuple{3, Real}=state.spacing, s_boost::Float32=1.0f0,
-                              edge_params::Union{NTuple{4, Real}, NTuple{10, Real}, NTuple{12, Real}, AbstractVector{<:Real}}=state.current_edge_params)
+                              edge_params::Union{NTuple{4, Real}, NTuple{10, Real}, NTuple{12, Real}, AbstractVector{<:Real}}=state.current_edge_params,
+                              dilation_radius::Int=state.current_dilation_radius)
     @assert state.is_initialized "Heat diffusion not initialized"
     @assert state.diffusivity_uploaded "Diffusivity not uploaded"
     
     state.spacing = (Float64(spacing[1]), Float64(spacing[2]), Float64(spacing[3]))
     state.current_s_boost = s_boost
     state.current_edge_params = _normalize_edge_params(edge_params)
+    state.current_dilation_radius = clamp(dilation_radius, 0, 3)
     inv_dx2, inv_dy2, inv_dz2 = _compute_spacing_weights(state.spacing)
     
     dev = ctx.device
@@ -1517,7 +1837,7 @@ function run_heat_diffusion!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y
     begin_info = CommandBufferBeginInfo(flags = COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
     unwrap(begin_command_buffer(cmd, begin_info))
     
-    # --- Step 1: Transition ping/pong images to GENERAL ---
+    # --- Step 1: Transition ping/pong/mask images to GENERAL ---
     barriers_init = [
         ImageMemoryBarrier(C_NULL, ACCESS_NONE, ACCESS_SHADER_WRITE_BIT,
             IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL, 0, 0,
@@ -1525,6 +1845,9 @@ function run_heat_diffusion!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y
         ImageMemoryBarrier(C_NULL, ACCESS_NONE, ACCESS_SHADER_WRITE_BIT,
             IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL, 0, 0,
             state.img_u_pong, ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)),
+        ImageMemoryBarrier(C_NULL, ACCESS_NONE, ACCESS_SHADER_WRITE_BIT,
+            IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL, 0, 0,
+            state.img_mask_raw, ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)),
         ImageMemoryBarrier(C_NULL, ACCESS_NONE, ACCESS_SHADER_WRITE_BIT,
             IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL, 0, 0,
             state.img_mask, ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1))
@@ -1605,6 +1928,19 @@ function run_heat_diffusion!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y
     end
     cmd_dispatch(cmd, gx, gy, gz)
     
+    # --- Step 5: Morphological dilation (img_mask_raw -> img_mask) ---
+    cmd_pipeline_barrier(cmd, [barrier_compute], BufferMemoryBarrier[], ImageMemoryBarrier[];
+                         src_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         dst_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT)
+    cmd_bind_pipeline(cmd, PIPELINE_BIND_POINT_COMPUTE, state.pipeline_dilate_mask)
+    cmd_bind_descriptor_sets(cmd, PIPELINE_BIND_POINT_COMPUTE, state.layout_dilate_mask, 0, [state.ds_dilate_mask], [])
+    pc_dilate = DilateMaskPC(Int32(state.current_dilation_radius), Int32(0), Int32(0), Int32(0), Int32(0), Int32(0), Int32(0), Int32(0), Int32(0), Int32(0), Int32(0), Int32(0))
+    ref_dilate = Ref(pc_dilate)
+    GC.@preserve ref_dilate begin
+        cmd_push_constants(cmd, state.layout_dilate_mask, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc_dilate), Base.unsafe_convert(Ptr{Cvoid}, ref_dilate))
+    end
+    cmd_dispatch(cmd, gx, gy, gz)
+    
     # Final barrier
     cmd_pipeline_barrier(cmd, [barrier_compute], BufferMemoryBarrier[], ImageMemoryBarrier[];
                          src_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT,
@@ -1617,6 +1953,13 @@ function run_heat_diffusion!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y
     unwrap(reset_fences(dev, [state.compute_fence]))
     unwrap(queue_submit(ctx.graphics_queue, [submit_info]; fence=state.compute_fence))
     unwrap(wait_for_fences(dev, [state.compute_fence], true, typemax(UInt64)))
+    state.current_buffer_is_ping = !isodd(K)
+    state.accumulated_steps = K
+    state.seed_x = seed_x
+    state.seed_y = seed_y
+    state.seed_z = seed_z
+    state.current_box_min = (1, 1, 1)
+    state.current_box_max = (w, h, d)
 end
 
 # ─── Read mask back to CPU ───────────────────────────────────────────────
@@ -1743,7 +2086,7 @@ function seed_only!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y::Int, se
     begin_info = CommandBufferBeginInfo(flags = COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
     unwrap(begin_command_buffer(cmd, begin_info))
     
-    # Transition ping, pong, mask images to GENERAL layout
+    # Transition ping, pong, mask_raw, mask images to GENERAL layout
     barriers_init = [
         ImageMemoryBarrier(C_NULL, ACCESS_NONE, ACCESS_SHADER_WRITE_BIT,
             IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL, 0, 0,
@@ -1753,17 +2096,21 @@ function seed_only!(state::HeatDiffusionState, ctx, seed_x::Int, seed_y::Int, se
             state.img_u_pong, ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)),
         ImageMemoryBarrier(C_NULL, ACCESS_NONE, ACCESS_SHADER_WRITE_BIT,
             IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL, 0, 0,
+            state.img_mask_raw, ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)),
+        ImageMemoryBarrier(C_NULL, ACCESS_NONE, ACCESS_SHADER_WRITE_BIT,
+            IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL, 0, 0,
             state.img_mask, ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1))
     ]
     cmd_pipeline_barrier(cmd, MemoryBarrier[], BufferMemoryBarrier[], barriers_init;
                          src_stage_mask=PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                          dst_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT)
     
-    # Clear ping, pong, and mask buffers to 0.0 (fast fixed-function clear)
+    # Clear ping, pong, mask_raw, and mask buffers to 0.0 (fast fixed-function clear)
     clear_color = ClearColorValue((0.0f0, 0.0f0, 0.0f0, 0.0f0))
     subres = ImageSubresourceRange(IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1)
     cmd_clear_color_image(cmd, state.img_u_ping, IMAGE_LAYOUT_GENERAL, clear_color, [subres])
     cmd_clear_color_image(cmd, state.img_u_pong, IMAGE_LAYOUT_GENERAL, clear_color, [subres])
+    cmd_clear_color_image(cmd, state.img_mask_raw, IMAGE_LAYOUT_GENERAL, clear_color, [subres])
     cmd_clear_color_image(cmd, state.img_mask, IMAGE_LAYOUT_GENERAL, clear_color, [subres])
     
     # Barrier after clear
@@ -1831,7 +2178,8 @@ After the diffusion steps, automatically runs the extract_mask shader so
 function run_incremental_steps!(state::HeatDiffusionState, ctx, n_steps::Int;
                                  dt::Float32=0.16f0, theta::Float32=0.001f0, tau::Float32=0.0001f0, copy_box_to_cpu::Bool=false,
                                  spacing::NTuple{3, Real}=state.spacing, s_boost::Float32=state.current_s_boost,
-                                 edge_params::Union{NTuple{4, Real}, NTuple{10, Real}, NTuple{12, Real}, AbstractVector{<:Real}}=state.current_edge_params)
+                                 edge_params::Union{NTuple{4, Real}, NTuple{10, Real}, NTuple{12, Real}, AbstractVector{<:Real}}=state.current_edge_params,
+                                 dilation_radius::Int=state.current_dilation_radius)
     @assert state.is_initialized "Heat diffusion not initialized"
     @assert state.diffusivity_uploaded "Diffusivity not uploaded"
     n_steps <= 0 && !copy_box_to_cpu && return
@@ -1839,16 +2187,15 @@ function run_incremental_steps!(state::HeatDiffusionState, ctx, n_steps::Int;
     state.spacing = (Float64(spacing[1]), Float64(spacing[2]), Float64(spacing[3]))
     state.current_s_boost = s_boost
     state.current_edge_params = _normalize_edge_params(edge_params)
+    state.current_dilation_radius = clamp(dilation_radius, 0, 3)
     inv_dx2, inv_dy2, inv_dz2 = _compute_spacing_weights(state.spacing)
     
     dev = ctx.device
     w, h, d = state.width, state.height, state.depth
     
     total_steps = state.accumulated_steps + n_steps
-    # Expand bounding box based on actual heat diffusion distance (approx 3 std devs)
-    # std_dev = sqrt(2 * D * t) where D <= 1.0 and t = total_steps * dt
-    # 3 * sqrt(2 * 0.16 * total_steps) ≈ 3 * sqrt(0.32 * total_steps) ≈ 1.7 * sqrt(total_steps)
-    R = state.seed_radius + round(Int, 2.0 * sqrt(max(0, total_steps))) + 6
+    # Expand bounding box based on actual heat diffusion distance (approx 3 std devs) + 3 vox dilation margin
+    R = state.seed_radius + round(Int, 2.0 * sqrt(max(0, total_steps))) + 9
     xmin = max(1, state.seed_x - R)
     xmax = min(w, state.seed_x + R)
     ymin = max(1, state.seed_y - R)
@@ -1937,6 +2284,23 @@ function run_incremental_steps!(state::HeatDiffusionState, ctx, n_steps::Int;
         cmd_push_constants(cmd, state.layout_extract_mask, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc_extract), Base.unsafe_convert(Ptr{Cvoid}, ref_extract))
     end
     cmd_dispatch(cmd, gx, gy, gz)
+
+    # ── Dilate mask (img_mask_raw -> img_mask) ──
+    cmd_pipeline_barrier(cmd, [barrier_compute], BufferMemoryBarrier[], ImageMemoryBarrier[];
+                         src_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         dst_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT)
+    cmd_bind_pipeline(cmd, PIPELINE_BIND_POINT_COMPUTE, state.pipeline_dilate_mask)
+    cmd_bind_descriptor_sets(cmd, PIPELINE_BIND_POINT_COMPUTE, state.layout_dilate_mask, 0, [state.ds_dilate_mask], [])
+    pc_dilate = DilateMaskPC(
+        Int32(state.current_dilation_radius), Int32(1), Int32(0), Int32(0),
+        box_min_glsl[1], box_min_glsl[2], box_min_glsl[3], Int32(0),
+        box_max_glsl[1], box_max_glsl[2], box_max_glsl[3], Int32(0)
+    )
+    ref_dilate = Ref(pc_dilate)
+    GC.@preserve ref_dilate begin
+        cmd_push_constants(cmd, state.layout_dilate_mask, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc_dilate), Base.unsafe_convert(Ptr{Cvoid}, ref_dilate))
+    end
+    cmd_dispatch(cmd, gx, gy, gz)
     
     if copy_box_to_cpu && state.staging_box_buf !== nothing
         barrier_comp_to_xfer = MemoryBarrier(C_NULL, ACCESS_SHADER_WRITE_BIT, ACCESS_TRANSFER_READ_BIT)
@@ -1970,6 +2334,194 @@ function run_incremental_steps!(state::HeatDiffusionState, ctx, n_steps::Int;
     
     state.current_buffer_is_ping = is_ping
     state.accumulated_steps += n_steps
+end
+
+"""
+    redilate_current_mask!(state::HeatDiffusionState, ctx, dilation_radius::Int;
+                           theta::Float32=0.001f0, tau::Float32=0.0001f0, copy_box_to_cpu::Bool=true)
+
+Re-extracts `img_mask_raw` from the current GPU heat buffer at `theta` and runs the custom
+Vulkan `dilate_mask.comp` shader with `dilation_radius` in `0:3` into `img_mask`, copying
+the bounding box to `staging_box_buf` without re-running diffusion steps.
+"""
+function redilate_current_mask!(state::HeatDiffusionState, ctx, dilation_radius::Int;
+                                theta::Float32=0.001f0, tau::Float32=0.0001f0, copy_box_to_cpu::Bool=true)
+    @assert state.is_initialized "Heat diffusion not initialized"
+    state.current_dilation_radius = clamp(dilation_radius, 0, 3)
+
+    xmin, ymin, zmin = state.current_box_min
+    xmax, ymax, zmax = state.current_box_max
+    bw = xmax - xmin + 1
+    bh = ymax - ymin + 1
+    bd = zmax - zmin + 1
+    (bw <= 0 || bh <= 0 || bd <= 0) && return
+
+    gx, gy, gz = cld(bw, 8), cld(bh, 8), cld(bd, 8)
+    dev = ctx.device
+    cmd = state.compute_cmd_buffer
+    unwrap(reset_command_buffer(cmd))
+    begin_info = CommandBufferBeginInfo(flags = COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT)
+    unwrap(begin_command_buffer(cmd, begin_info))
+
+    barrier_compute = MemoryBarrier(C_NULL, ACCESS_SHADER_WRITE_BIT, ACCESS_SHADER_READ_BIT)
+    box_min_glsl = Int32[xmin - 1, ymin - 1, zmin - 1, 0]
+    box_max_glsl = Int32[xmax - 1, ymax - 1, zmax - 1, 0]
+
+    # 1. Re-extract un-dilated mask at `theta`
+    cmd_bind_pipeline(cmd, PIPELINE_BIND_POINT_COMPUTE, state.pipeline_extract_mask)
+    ds_extract = state.current_buffer_is_ping ? state.ds_extract_from_ping : state.ds_extract_from_pong
+    cmd_bind_descriptor_sets(cmd, PIPELINE_BIND_POINT_COMPUTE, state.layout_extract_mask, 0, [ds_extract], [])
+    pc_extract = ExtractMaskPC(
+        theta, tau, Int32(1), Int32(1),
+        box_min_glsl[1], box_min_glsl[2], box_min_glsl[3], Int32(0),
+        box_max_glsl[1], box_max_glsl[2], box_max_glsl[3], Int32(0)
+    )
+    ref_extract = Ref(pc_extract)
+    GC.@preserve ref_extract begin
+        cmd_push_constants(cmd, state.layout_extract_mask, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc_extract), Base.unsafe_convert(Ptr{Cvoid}, ref_extract))
+    end
+    cmd_dispatch(cmd, gx, gy, gz)
+
+    # 2. Dilate img_mask_raw -> img_mask
+    cmd_pipeline_barrier(cmd, [barrier_compute], BufferMemoryBarrier[], ImageMemoryBarrier[];
+                         src_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                         dst_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT)
+    cmd_bind_pipeline(cmd, PIPELINE_BIND_POINT_COMPUTE, state.pipeline_dilate_mask)
+    cmd_bind_descriptor_sets(cmd, PIPELINE_BIND_POINT_COMPUTE, state.layout_dilate_mask, 0, [state.ds_dilate_mask], [])
+    pc_dilate = DilateMaskPC(
+        Int32(state.current_dilation_radius), Int32(1), Int32(0), Int32(0),
+        box_min_glsl[1], box_min_glsl[2], box_min_glsl[3], Int32(0),
+        box_max_glsl[1], box_max_glsl[2], box_max_glsl[3], Int32(0)
+    )
+    ref_dilate = Ref(pc_dilate)
+    GC.@preserve ref_dilate begin
+        cmd_push_constants(cmd, state.layout_dilate_mask, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc_dilate), Base.unsafe_convert(Ptr{Cvoid}, ref_dilate))
+    end
+    cmd_dispatch(cmd, gx, gy, gz)
+
+    if copy_box_to_cpu && state.staging_box_buf !== nothing
+        barrier_comp_to_xfer = MemoryBarrier(C_NULL, ACCESS_SHADER_WRITE_BIT, ACCESS_TRANSFER_READ_BIT)
+        cmd_pipeline_barrier(cmd, [barrier_comp_to_xfer], BufferMemoryBarrier[], ImageMemoryBarrier[];
+                             src_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             dst_stage_mask=PIPELINE_STAGE_TRANSFER_BIT)
+        region = BufferImageCopy(
+            0, 0, 0,
+            ImageSubresourceLayers(IMAGE_ASPECT_COLOR_BIT, 0, 0, 1),
+            Offset3D(box_min_glsl[1], box_min_glsl[2], box_min_glsl[3]),
+            Extent3D(bw, bh, bd)
+        )
+        cmd_copy_image_to_buffer(cmd, state.img_mask, IMAGE_LAYOUT_GENERAL, state.staging_box_buf, [region])
+        barrier_xfer_to_host = MemoryBarrier(C_NULL, ACCESS_TRANSFER_WRITE_BIT, ACCESS_HOST_READ_BIT)
+        cmd_pipeline_barrier(cmd, [barrier_xfer_to_host], BufferMemoryBarrier[], ImageMemoryBarrier[];
+                             src_stage_mask=PIPELINE_STAGE_TRANSFER_BIT,
+                             dst_stage_mask=PIPELINE_STAGE_HOST_BIT)
+    else
+        cmd_pipeline_barrier(cmd, [barrier_compute], BufferMemoryBarrier[], ImageMemoryBarrier[];
+                             src_stage_mask=PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             dst_stage_mask=PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT)
+    end
+
+    unwrap(end_command_buffer(cmd))
+    submit_info = SubmitInfo([], [], [cmd], [])
+    unwrap(reset_fences(dev, [state.compute_fence]))
+    unwrap(queue_submit(ctx.graphics_queue, [submit_info]; fence=state.compute_fence))
+    unwrap(wait_for_fences(dev, [state.compute_fence], true, typemax(UInt64)))
+end
+
+"""
+    detect_strong_pet_lesion_edges(state::HeatDiffusionState, diff_vol, pet_vol, cx::Int, cy::Int, cz::Int, edge_params)::Bool
+
+Inspects the current un-dilated lesion boundary (in `state.staging_box_ptr`) together with
+PET diffusivity (`diff_vol`) and PET uptake (`pet_vol`) to detect strong PET edges on the
+boundary of the current lesion. When true, the caller automatically sets morphological
+dilation to 2 voxels so the strong edge rim itself is covered.
+"""
+function detect_strong_pet_lesion_edges(state::HeatDiffusionState, diff_vol::Union{Nothing, Array{Float32,3}},
+                                        pet_vol::Union{Nothing, AbstractArray}, cx::Int, cy::Int, cz::Int, edge_params)::Bool
+    diff_vol === nothing && return false
+    state.staging_box_ptr == C_NULL && return false
+
+    xmin, ymin, zmin = state.current_box_min
+    xmax, ymax, zmax = state.current_box_max
+    bw = xmax - xmin + 1
+    bh = ymax - ymin + 1
+    bd = zmax - zmin + 1
+    (bw <= 2 || bh <= 2 || bd <= 2) && return false
+    w, h, d = size(diff_vol)
+
+    ptr = Ptr{Float32}(state.staging_box_ptr)
+    boundary_edges = Float32[]
+    sizehint!(boundary_edges, 256)
+    pet_in = Float32[]
+    pet_out = Float32[]
+
+    @inline box_mask(kx, ky, kz) = unsafe_load(ptr, kx + (ky - 1) * bw + (kz - 1) * bw * bh) > 0.5f0
+
+    has_pet = pet_vol !== nothing && size(pet_vol) == size(diff_vol)
+    @inbounds for kz in 2:(bd - 1), ky in 2:(bh - 1), kx in 2:(bw - 1)
+        x = xmin + kx - 1
+        y = ymin + ky - 1
+        z = zmin + kz - 1
+        (x < 1 || x > w || y < 1 || y > h || z < 1 || z > d) && continue
+
+        if box_mask(kx, ky, kz)
+            if has_pet
+                push!(pet_in, Float32(pet_vol[x, y, z]))
+            end
+            # Check if this lesion voxel sits on the immediate boundary
+            on_bnd = !(box_mask(kx - 1, ky, kz) && box_mask(kx + 1, ky, kz) &&
+                       box_mask(kx, ky - 1, kz) && box_mask(kx, ky + 1, kz) &&
+                       box_mask(kx, ky, kz - 1) && box_mask(kx, ky, kz + 1))
+            if on_bnd
+                # Sample maximum edge strength & exterior PET across the 1..3 voxel barrier rim
+                best_e = -log(clamp(diff_vol[x, y, z], 1.0f-5, 1.0f0)) * 0.09905025f0
+                for (dx, dy, dz) in ((1,0,0), (-1,0,0), (0,1,0), (0,-1,0), (0,0,1), (0,0,-1))
+                    nkx, nky, nkz = kx + dx, ky + dy, kz + dz
+                    if !box_mask(nkx, nky, nkz)
+                        for s in 1:2
+                            nx = clamp(x + s * dx, 1, w)
+                            ny = clamp(y + s * dy, 1, h)
+                            nz = clamp(z + s * dz, 1, d)
+                            e_n = -log(clamp(diff_vol[nx, ny, nz], 1.0f-5, 1.0f0)) * 0.09905025f0
+                            if e_n > best_e
+                                best_e = e_n
+                            end
+                        end
+                        if has_pet
+                            min_ext_pet = min(
+                                Float32(pet_vol[clamp(x + dx, 1, w), clamp(y + dy, 1, h), clamp(z + dz, 1, d)]),
+                                Float32(pet_vol[clamp(x + 2*dx, 1, w), clamp(y + 2*dy, 1, h), clamp(z + 2*dz, 1, d)]),
+                                Float32(pet_vol[clamp(x + 3*dx, 1, w), clamp(y + 3*dy, 1, h), clamp(z + 3*dz, 1, d)])
+                            )
+                            push!(pet_out, min_ext_pet)
+                        end
+                    end
+                end
+                push!(boundary_edges, best_e)
+            end
+        end
+    end
+
+    isempty(boundary_edges) && return false
+    sort!(boundary_edges)
+    e_bnd_p75 = boundary_edges[min(length(boundary_edges), max(1, round(Int, 0.75 * length(boundary_edges))))]
+    min_dir_peak = length(edge_params) >= 6 ?
+        min(Float32(edge_params[1]), Float32(edge_params[2]), Float32(edge_params[3]),
+            Float32(edge_params[4]), Float32(edge_params[5]), Float32(edge_params[6])) : 0.0f0
+
+    strong_edge = (e_bnd_p75 >= 0.45f0) || (min_dir_peak >= 0.45f0)
+    !strong_edge && return false
+
+    if has_pet && !isempty(pet_in) && !isempty(pet_out)
+        sort!(pet_in)
+        sort!(pet_out)
+        pet_in_85 = pet_in[min(length(pet_in), max(1, round(Int, 0.85 * length(pet_in))))]
+        pet_out_med = pet_out[min(length(pet_out), max(1, round(Int, 0.50 * length(pet_out))))]
+        pet_drop = (pet_in_85 - pet_out_med) / max(abs(pet_in_85), 1.0f-3)
+        return (pet_in_85 > 1.35f0 * max(pet_out_med, 0.0f0)) && (pet_drop >= 0.25f0)
+    end
+
+    return true
 end
 
 # ─── Cleanup ─────────────────────────────────────────────────────────────
@@ -2053,12 +2605,13 @@ end
 # ─── GPU Direct Slice Rendering ──────────────────────────────────────────
 
 """
-    render_slice_to_texture!(state, ctx, tex, slice_dim, slice_idx, active_id; theta=0.001f0)
+    render_slice_to_texture!(state, ctx, tex, slice_dim, slice_idx, active_id; theta=0.001f0, dilation_radius=state.current_dilation_radius)
 
-Directly computes a 2D slice from the 3D heat mask and writes it to `tex.image` (a VkTexture).
-Eliminates CPU roundtrips completely for UI preview rendering.
+Directly computes a 2D slice from the 3D heat mask (including 0..3 voxel morphological dilation)
+and writes it to `tex.image` (a VkTexture). Eliminates CPU roundtrips completely for UI preview rendering.
 """
-function render_slice_to_texture!(state::HeatDiffusionState, ctx, tex::Any, slice_dim::Int, slice_idx::Int, active_id::UInt32; theta::Float32=0.001f0)
+function render_slice_to_texture!(state::HeatDiffusionState, ctx, tex::Any, slice_dim::Int, slice_idx::Int, active_id::UInt32;
+                                  theta::Float32=0.001f0, dilation_radius::Int=state.current_dilation_radius)
     dev = ctx.device
     is_ping = state.current_buffer_is_ping
     ds = is_ping ? state.ds_slice_ping : state.ds_slice_pong
@@ -2086,7 +2639,8 @@ function render_slice_to_texture!(state::HeatDiffusionState, ctx, tex::Any, slic
     cmd_bind_pipeline(cmd, PIPELINE_BIND_POINT_COMPUTE, state.pipeline_slice)
     cmd_bind_descriptor_sets(cmd, PIPELINE_BIND_POINT_COMPUTE, state.layout_slice, 0, [ds], [])
     
-    pc_u32 = UInt32[reinterpret(UInt32, theta), UInt32(slice_dim), UInt32(slice_idx), active_id]
+    dil_r = UInt32(clamp(dilation_radius, 0, 3))
+    pc_u32 = UInt32[reinterpret(UInt32, theta), UInt32(slice_dim), UInt32(slice_idx), active_id, dil_r]
     GC.@preserve pc_u32 begin
         cmd_push_constants(cmd, state.layout_slice, SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc_u32), Ptr{Cvoid}(pointer(pc_u32)))
     end

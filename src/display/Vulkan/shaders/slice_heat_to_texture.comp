@@ -9,6 +9,7 @@ layout(push_constant) uniform PushConstants {
     int slice_dim; // 1=X (sagittal), 2=Y (coronal), 3=Z (axial)
     int slice_idx; // 0-indexed slice coordinate in that dimension
     uint active_id; // the label to write if threshold passed
+    int dilation_radius; // 0, 1, 2, or 3 voxels
 } pc;
 
 void main() {
@@ -25,8 +26,40 @@ void main() {
         vol_pos = ivec3(pos.x, pos.y, pc.slice_idx);
     }
 
-    float heat = imageLoad(img_heat, vol_pos).r;
-    if (heat >= pc.theta) {
+    int r = clamp(pc.dilation_radius, 0, 3);
+    if (r <= 0) {
+        float heat = imageLoad(img_heat, vol_pos).r;
+        if (heat >= pc.theta) {
+            imageStore(img_tex, pos, ivec4(int(pc.active_id), 0, 0, 0));
+        }
+        return;
+    }
+
+    ivec3 dims = imageSize(img_heat);
+    if (imageLoad(img_heat, clamp(vol_pos, ivec3(0), dims - ivec3(1))).r >= pc.theta) {
+        imageStore(img_tex, pos, ivec4(int(pc.active_id), 0, 0, 0));
+        return;
+    }
+
+    int r2 = r * r;
+    bool hit = false;
+    for (int dz = -r; dz <= r && !hit; ++dz) {
+        int nz = clamp(vol_pos.z + dz, 0, dims.z - 1);
+        for (int dy = -r; dy <= r && !hit; ++dy) {
+            int dzy2 = dz * dz + dy * dy;
+            if (dzy2 > r2) continue;
+            int ny = clamp(vol_pos.y + dy, 0, dims.y - 1);
+            for (int dx = -r; dx <= r; ++dx) {
+                if (dzy2 + dx * dx > r2) continue;
+                int nx = clamp(vol_pos.x + dx, 0, dims.x - 1);
+                if (imageLoad(img_heat, ivec3(nx, ny, nz)).r >= pc.theta) {
+                    hit = true;
+                    break;
+                }
+            }
+        }
+    }
+    if (hit) {
         imageStore(img_tex, pos, ivec4(int(pc.active_id), 0, 0, 0));
     }
 }

@@ -5926,8 +5926,78 @@ function create_metadata_window(
         _MEH.heatgdt_sensitivity[] = Float32(val)
     end
 
+    # Row 3g: Morphological Dilation slider (0..3 voxels)
+    seg_r3g = nr!()
+    Label(g[seg_r3g, 1], "Dilate:", halign=:right, fontsize=10, color=LBL_FG)
+    slider_dilate = Slider(g[seg_r3g, 2:3], range = 0:1:3, startvalue = _MEH.heatgdt_dilation[])
+    lbl_dilate_val = Label(g[seg_r3g, 4], "$(_MEH.heatgdt_dilation[]) vox", halign=:left, fontsize=10, color=LBL_FG)
+    rowsize!(g, seg_r3g, Fixed(28)); register_fixed_row!(seg_r3g, 28)
+
+    # Row 3h: Reversible Gaussian Edge Smoothing slider (sigma 0.0..3.0)
+    seg_r3h = nr!()
+    Label(g[seg_r3h, 1], "Smooth:", halign=:right, fontsize=10, color=LBL_FG)
+    slider_smooth = Slider(g[seg_r3h, 2:3], range = 0.0:0.25:3.0, startvalue = Float64(_MEH.heatgdt_smoothing_sigma[]))
+    lbl_smooth_val = Label(g[seg_r3h, 4], "σ=$(round(_MEH.heatgdt_smoothing_sigma[], digits=2))", halign=:left, fontsize=10, color=LBL_FG)
+    rowsize!(g, seg_r3h, Fixed(28)); register_fixed_row!(seg_r3h, 28)
+
+    _syncing_dilate_slider = Ref{Bool}(false)
+    on(slider_dilate.value) do val
+        d_val = round(Int, val)
+        lbl_dilate_val.text = (_MEH.heatgdt_auto_dilation_active[] && d_val == 2) ? "2 vox (Auto)" : "$(d_val) vox"
+        if !_syncing_dilate_slider[]
+            _MEH.heatgdt_auto_dilation_active[] = false
+            _MEH.heatgdt_dilation[] = d_val
+            lbl_dilate_val.text = "$(d_val) vox"
+            @async try
+                put!(channel, MakieEvents.HeatGDTDilationChangeEvent(d_val))
+            catch e
+                @warn "Failed to dispatch dilation change event: $e"
+            end
+        end
+    end
+    if _MEH.heatgdt_dilation isa Observable
+        on(_MEH.heatgdt_dilation) do d_val
+            lbl_dilate_val.text = (_MEH.heatgdt_auto_dilation_active[] && d_val == 2) ? "2 vox (Auto)" : "$(d_val) vox"
+            if round(Int, slider_dilate.value[]) != d_val
+                _syncing_dilate_slider[] = true
+                try
+                    set_close_to!(slider_dilate, d_val)
+                finally
+                    _syncing_dilate_slider[] = false
+                end
+            end
+        end
+    end
+
+    _syncing_smooth_slider = Ref{Bool}(false)
+    on(slider_smooth.value) do val
+        s_val = Float32(val)
+        lbl_smooth_val.text = "σ=$(round(s_val, digits=2))"
+        if !_syncing_smooth_slider[]
+            _MEH.heatgdt_smoothing_sigma[] = s_val
+            @async try
+                put!(channel, MakieEvents.HeatGDTSmoothingChangeEvent(s_val))
+            catch e
+                @warn "Failed to dispatch smoothing change event: $e"
+            end
+        end
+    end
+    if _MEH.heatgdt_smoothing_sigma isa Observable
+        on(_MEH.heatgdt_smoothing_sigma) do s_val
+            lbl_smooth_val.text = "σ=$(round(s_val, digits=2))"
+            if abs(Float32(slider_smooth.value[]) - s_val) > 1.0f-3
+                _syncing_smooth_slider[] = true
+                try
+                    set_close_to!(slider_smooth, Float64(s_val))
+                finally
+                    _syncing_smooth_slider[] = false
+                end
+            end
+        end
+    end
+
     seg_r3_tt = nr!()
-    Label(g[seg_r3_tt, 1:4], "Mode: [1-Click]/[Wand] | θ: size | K: steps | Edge: [Both]/[CT]/[PET]", halign=:center, fontsize=9, color=SUBTXT)
+    Label(g[seg_r3_tt, 1:4], "Mode: [1-Click]/[Wand] | θ: size | K: steps | Edge | Dilate | Smooth", halign=:center, fontsize=9, color=SUBTXT)
     rowsize!(g, seg_r3_tt, Fixed(15)); register_fixed_row!(seg_r3_tt, 15)
 
     on(slider_heatgdt_posthoc.value) do val
@@ -5946,7 +6016,7 @@ function create_metadata_window(
     end
 
     # Show/hide Heat-GDT params based on algorithm selection with proper layout updates
-    heatgdt_rows = (seg_r3_mode, seg_r3b, seg_r3c, seg_r3d, seg_r3e, seg_r3f, seg_r3_tt)
+    heatgdt_rows = (seg_r3_mode, seg_r3b, seg_r3c, seg_r3d, seg_r3e, seg_r3f, seg_r3g, seg_r3h, seg_r3_tt)
     function _set_heatgdt_rows_visible!(vis::Bool)
         g.block_updates = false
         try

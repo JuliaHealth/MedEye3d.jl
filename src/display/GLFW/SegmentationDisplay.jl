@@ -632,6 +632,8 @@ on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.HeatGDTStartEv
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.HeatGDTTickEvent) = reactToHeatGDTTick(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.HeatGDTStopEvent) = reactToHeatGDTStop(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.HeatGDTPosthocSizeEvent) = reactToHeatGDTPosthocSize(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.HeatGDTDilationChangeEvent) = reactToHeatGDTDilationChange(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.HeatGDTSmoothingChangeEvent) = reactToHeatGDTSmoothingChange(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::AIInferenceResultEvent) = reactToAIInferenceResult(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::SyncMissingEvent) = reactToSyncMissing(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::GenManualEvent) = reactToGenManual(data, stateObjects)

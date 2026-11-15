@@ -18,6 +18,7 @@ export reactToWindowing, reactToPaintVal, reactToSyncLesion, reactToChangeBrushS
 export reactToChangeTimePoint, reactToSetTimePoint, reactToToggleLesion, reactToRefreshList
 export reactToAddAutoPet, reactToAIInferenceResult, reactToSyncMissing, reactToGenManual, reactToHeatGDTHold
 export reactToHeatGDTStart, reactToHeatGDTTick, reactToHeatGDTStop, reactToHeatGDTPosthocSize
+export reactToHeatGDTDilationChange, reactToHeatGDTSmoothingChange
 export reactToMapLink, reactToAutoRunPreprocess, reactToRunPreprocess, reactToShowBoneMask, reactToShowMaskLayer, reactToSaveMRB, _anatomy_active
 export register_h5_mask_saver!, mark_tp_mask_dirty!, save_tp_mask_to_h5, flush_all_dirty_masks!, dirty_mask_tps
 export _clinical_phase, get_clinical_phase, set_clinical_phase!, _phase_display_name
@@ -250,6 +251,12 @@ const heatgdt_directional_normalization = Ref{Bool}(true)
 const heatgdt_sensitivity = Ref{Float32}(1.0f0)
 const heatgdt_current_loaded_modality = Ref{Symbol}(:combined)
 const heatgdt_one_click_mode = Observable{Bool}(true)  # Default: One-Click mode enabled (single click to segment)
+const heatgdt_dilation = Observable{Int}(0)
+const heatgdt_auto_dilation_active = Ref{Bool}(false)
+const heatgdt_smoothing_sigma = Observable{Float32}(0.0f0)
+const HEAT_GDT_LAST_SPACING = Ref{Tuple{Float64, Float64, Float64}}((1.0, 1.0, 1.0))
+const HEAT_GDT_LAST_THETA = Ref{Float32}(0.001f0)
+const HEAT_GDT_LAST_K = Ref{Int}(40)
 
 """
     toggle_heatgdt_one_click_mode!(enabled::Union{Bool, Nothing}=nothing)
@@ -487,12 +494,12 @@ function start_inference_worker()
                         R_phys = max(10.0, 3.0 + 2.0 * sqrt(K_val * 0.16) * mean_sp)
                         s_boost = VulkanHeatDiffusion.compute_frontier_edge_scale(
                             InferenceClient._heatgdt_diffusivity[], job.cx, job.cy, job.cz, R_phys, job.spacing;
-                            sensitivity=heatgdt_sensitivity[]
+                            sensitivity=heatgdt_sensitivity[], smoothing_sigma=heatgdt_smoothing_sigma[]
                         )
                         if heatgdt_directional_normalization[]
                             edge_params = VulkanHeatDiffusion.compute_directional_relative_edge_params(
                                 InferenceClient._heatgdt_diffusivity[], job.cx, job.cy, job.cz, R_phys, job.spacing;
-                                sensitivity=heatgdt_sensitivity[]
+                                sensitivity=heatgdt_sensitivity[], smoothing_sigma=heatgdt_smoothing_sigma[]
                             )
                             if length(edge_params) >= 12 && edge_params[12] > 0.5f0
                                 K_val = max(K_val, 140)
@@ -501,7 +508,7 @@ function start_inference_worker()
                         else
                             edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
                                 InferenceClient._heatgdt_diffusivity[], job.cx, job.cy, job.cz, R_phys, job.spacing;
-                                sensitivity=heatgdt_sensitivity[]
+                                sensitivity=heatgdt_sensitivity[], smoothing_sigma=heatgdt_smoothing_sigma[]
                             )
                         end
                     end
@@ -6643,6 +6650,149 @@ function _apply_gpu_mask_to_segvol!(mask_3d::Array{Float32,3}, stateObjects::Vec
     end
 end
 
+function _find_pet_vol(stateObjects::Vector{StateDataFields})
+    isempty(stateObjects) && return nothing
+    for dat in stateObjects[1].onScrollData.dataToScroll
+        if dat.name == "PET"
+            return dat.dat
+        end
+    end
+    return nothing
+end
+
+function _get_pet_diffusivity_for_detect(fallback_diff)
+    cur_tp = InferenceClient._heatgdt_diffusivity_tp[]
+    key = (cur_tp, :pet_only)
+    if haskey(_tp_diffusivity_cache, key)
+        return _tp_diffusivity_cache[key]
+    end
+    return fallback_diff
+end
+
+function _ensure_gpu_smoothing_synced!(heat_state, vk_ctx)
+    if heat_state !== nothing && vk_ctx !== nothing && heat_state.diffusivity_uploaded
+        target_sigma = Float32(heatgdt_smoothing_sigma[])
+        if abs(heat_state.current_smoothing_sigma - target_sigma) > 0.01f0
+            VulkanHeatDiffusion.apply_gaussian_smoothing!(heat_state, vk_ctx, target_sigma)
+        end
+    end
+end
+
+function _compute_heat_edge_controls(diff_vol, cx::Int, cy::Int, cz::Int, K_val::Int, spacing)
+    s_boost = 1.0f0
+    edge_params = (0.0f0, 0.0f0, 12.0f0, 0.85f0)
+    K_out = K_val
+    if heatgdt_adaptive_contrast[] && diff_vol !== nothing
+        mean_sp = (spacing[1] + spacing[2] + spacing[3]) / 3.0
+        R_phys = max(10.0, 3.0 + 2.0 * sqrt(K_val * 0.16) * mean_sp)
+        sigma = heatgdt_smoothing_sigma[]
+        s_boost = VulkanHeatDiffusion.compute_frontier_edge_scale(
+            diff_vol, cx, cy, cz, R_phys, spacing;
+            sensitivity=heatgdt_sensitivity[], smoothing_sigma=sigma
+        )
+        if heatgdt_directional_normalization[]
+            edge_params = VulkanHeatDiffusion.compute_directional_relative_edge_params(
+                diff_vol, cx, cy, cz, R_phys, spacing;
+                sensitivity=heatgdt_sensitivity[], smoothing_sigma=sigma
+            )
+            if length(edge_params) >= 12 && edge_params[12] > 0.5f0
+                K_out = max(K_out, 140)
+                s_boost = min(s_boost, 1.25f0)
+            end
+        else
+            edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
+                diff_vol, cx, cy, cz, R_phys, spacing;
+                sensitivity=heatgdt_sensitivity[], smoothing_sigma=sigma
+            )
+        end
+    end
+    return s_boost, edge_params, K_out
+end
+
+function _maybe_auto_set_pet_dilation!(heat_state, diff_vol, pet_vol, cx::Int, cy::Int, cz::Int, edge_params)::Int
+    pet_diff = _get_pet_diffusivity_for_detect(diff_vol)
+    strong_pet = VulkanHeatDiffusion.detect_strong_pet_lesion_edges(heat_state, pet_diff, pet_vol, cx, cy, cz, edge_params)
+    if strong_pet
+        heatgdt_auto_dilation_active[] = true
+        if heatgdt_dilation[] != 2
+            heatgdt_dilation[] = 2
+        end
+        heat_state.current_dilation_radius = 2
+        @info "[Heat-GDT] Strong PET edges detected near ($cx,$cy,$cz) — auto-setting dilation to 2 voxels"
+    elseif heatgdt_auto_dilation_active[]
+        heatgdt_auto_dilation_active[] = false
+        if heatgdt_dilation[] != 0
+            heatgdt_dilation[] = 0
+        end
+        heat_state.current_dilation_radius = 0
+    else
+        heat_state.current_dilation_radius = heatgdt_dilation[]
+    end
+    return heatgdt_dilation[]
+end
+
+function _sync_heatgdt_mask_state!(stateObjects::Vector{StateDataFields}, seg_vol, target_id::Int, heat_state)
+    for (pi, state) in enumerate(stateObjects)
+        try
+            _force_texture_upload!(stateObjects, pi)
+        catch
+            state.isSliceChanged = true
+        end
+    end
+    seg_vol === nothing && return
+
+    tp_idx = if mri_main_multimodal_mode[]
+        p_act = current_hovered_panel[]
+        (p_act in (1, 2, 3, 4) && stateObjects[p_act].onScrollData.currentTpIndex >= 0) ? stateObjects[p_act].onScrollData.currentTpIndex : (current_tp_index[] > 0 ? current_tp_index[] : 1)
+    else
+        current_tp_index[]
+    end
+    entry = lock(_tp_cache_lock) do
+        haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
+    end
+    if entry !== nothing
+        if lymph_node_validation_mode[]
+            if entry.anat_i16 !== seg_vol && entry.anat_i16 !== nothing
+                entry.anat_i16 .= seg_vol
+            end
+            if entry.anatomy !== seg_vol && entry.anatomy !== nothing
+                entry.anatomy .= UInt16.(max.(0, seg_vol))
+            end
+            mark_tp_anatomy_dirty!(tp_idx)
+            if target_id > 0
+                mark_expert_edit!(target_id)
+                invalidate_and_recompute_lesion_metrics_async!(target_id, tp_idx, entry.anat_i16 !== nothing ? entry.anat_i16 : seg_vol)
+            end
+        else
+            if entry.mask isa Array{Int8, 3}
+                entry.mask .= clamp.(seg_vol, Int8(-128), Int8(127))
+            elseif entry.mask !== seg_vol
+                entry.mask .= seg_vol
+            end
+            if entry.mask_i16 !== seg_vol
+                entry.mask_i16 .= seg_vol
+            end
+            mark_tp_mask_dirty!(tp_idx)
+            if target_id > 0
+                mark_expert_edit!(target_id)
+                invalidate_and_recompute_lesion_metrics_async!(target_id, tp_idx, seg_vol)
+            end
+        end
+
+        if heat_state !== nothing && (tp_idx in mri_compare_tps || mri_main_multimodal_mode[] || mri_compare_mode[])
+            b_min = heat_state.current_box_min
+            b_max = heat_state.current_box_max
+            bbox_heat = (b_min[1]:b_max[1], b_min[2]:b_max[2], b_min[3]:b_max[3])
+            sync_mri_mask_across_modalities!(tp_idx, bbox_heat)
+            for pi in 1:length(stateObjects)
+                try
+                    _force_texture_upload!(stateObjects, pi)
+                catch; end
+            end
+        end
+    end
+end
+
 """
     execute_one_click_heatgdt!(stateObjects::Vector{StateDataFields}, cx::Int, cy::Int, cz::Int;
                                K::Union{Int, Nothing}=nothing,
@@ -6728,12 +6878,12 @@ function execute_one_click_heatgdt!(stateObjects::Vector{StateDataFields}, cx::I
         R_phys = max(10.0, 3.0 + 2.0 * sqrt(K_val * 0.16) * mean_sp)
         s_boost = VulkanHeatDiffusion.compute_frontier_edge_scale(
             diff_vol, cx, cy, cz, R_phys, ct_spacing;
-            sensitivity=heatgdt_sensitivity[]
+            sensitivity=heatgdt_sensitivity[], smoothing_sigma=heatgdt_smoothing_sigma[]
         )
         if heatgdt_directional_normalization[]
             edge_params = VulkanHeatDiffusion.compute_directional_relative_edge_params(
                 diff_vol, cx, cy, cz, R_phys, ct_spacing;
-                sensitivity=heatgdt_sensitivity[]
+                sensitivity=heatgdt_sensitivity[], smoothing_sigma=heatgdt_smoothing_sigma[]
             )
             if length(edge_params) >= 12 && edge_params[12] > 0.5f0
                 K_val = max(K_val, 140)
@@ -6742,7 +6892,7 @@ function execute_one_click_heatgdt!(stateObjects::Vector{StateDataFields}, cx::I
         else
             edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
                 diff_vol, cx, cy, cz, R_phys, ct_spacing;
-                sensitivity=heatgdt_sensitivity[]
+                sensitivity=heatgdt_sensitivity[], smoothing_sigma=heatgdt_smoothing_sigma[]
             )
         end
     end
@@ -6778,12 +6928,23 @@ function execute_one_click_heatgdt!(stateObjects::Vector{StateDataFields}, cx::I
             end
         end
 
-        # Seed and diffuse K steps on GPU
+        HEAT_GDT_LAST_SPACING[] = ct_spacing
+        HEAT_GDT_LAST_K[] = K_val
+        HEAT_GDT_LAST_THETA[] = theta_val
+        _ensure_gpu_smoothing_synced!(heat_state, vk_ctx)
+
+        # Seed and diffuse K steps on GPU (extract un-dilated boundary first for PET edge check)
         VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, cx, cy, cz; seed_radius=1, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
         VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, K_val;
-            theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
+            theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params, dilation_radius=0)
 
-        # Populate undo state for post-hoc size adjustment
+        # Auto-detect strong PET lesion edges -> auto-set dilation=2, then re-dilate on GPU if needed
+        dil_vox = _maybe_auto_set_pet_dilation!(heat_state, diff_vol, pet_vol, cx, cy, cz, edge_params)
+        if dil_vox > 0
+            VulkanHeatDiffusion.redilate_current_mask!(heat_state, vk_ctx, dil_vox; theta=theta_val, copy_box_to_cpu=true)
+        end
+
+        # Populate undo state for post-hoc size / dilation / smoothing adjustment
         box_min = heat_state.current_box_min
         box_max = heat_state.current_box_max
         HEAT_GDT_UNDO_BOX_MIN[] = CartesianIndex(box_min[1], box_min[2], box_min[3])
@@ -7020,12 +7181,12 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
             R_phys = max(10.0, 3.0 + 2.0 * sqrt(K_target * 0.16) * mean_sp)
             s_boost = VulkanHeatDiffusion.compute_frontier_edge_scale(
                 diff_vol, cx, cy, cz, R_phys, ct_spacing;
-                sensitivity=heatgdt_sensitivity[]
+                sensitivity=heatgdt_sensitivity[], smoothing_sigma=heatgdt_smoothing_sigma[]
             )
             if heatgdt_directional_normalization[]
                 edge_params = VulkanHeatDiffusion.compute_directional_relative_edge_params(
                     diff_vol, cx, cy, cz, R_phys, ct_spacing;
-                    sensitivity=heatgdt_sensitivity[]
+                    sensitivity=heatgdt_sensitivity[], smoothing_sigma=heatgdt_smoothing_sigma[]
                 )
                 if length(edge_params) >= 12 && edge_params[12] > 0.5f0
                     s_boost = min(s_boost, 1.25f0)
@@ -7033,10 +7194,14 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
             else
                 edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
                     diff_vol, cx, cy, cz, R_phys, ct_spacing;
-                    sensitivity=heatgdt_sensitivity[]
+                    sensitivity=heatgdt_sensitivity[], smoothing_sigma=heatgdt_smoothing_sigma[]
                 )
             end
         end
+
+        HEAT_GDT_LAST_SPACING[] = ct_spacing
+        HEAT_GDT_LAST_K[] = K_target
+        _ensure_gpu_smoothing_synced!(heat_state, vk_ctx)
 
         println("[Heat-GDT START] Calling seed_only! at ($cx,$cy,$cz) with spacing=$ct_spacing, s_boost=$s_boost, edge_params=$edge_params..."); flush(stdout)
         VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, cx, cy, cz; seed_radius=1, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
@@ -7046,9 +7211,17 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
         # Initial step bounded at 20 steps (or min(20, K_target))
         initial_steps = min(20, K_target)
         theta_val = Float32(heatgdt_theta[])
-        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, initial_steps; theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
+        HEAT_GDT_LAST_THETA[] = theta_val
+        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, initial_steps;
+            theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params, dilation_radius=0)
         _vk_heat_total_steps[] = initial_steps
         HEAT_GDT_LAST_DISPLAY_THETA[] = theta_val
+
+        pet_vol = _find_pet_vol(stateObjects)
+        dil_vox = _maybe_auto_set_pet_dilation!(heat_state, diff_vol, pet_vol, cx, cy, cz, edge_params)
+        if dil_vox > 0
+            VulkanHeatDiffusion.redilate_current_mask!(heat_state, vk_ctx, dil_vox; theta=theta_val, copy_box_to_cpu=true)
+        end
         
         # Commit initial seed to seg_vol immediately
         active_id = UInt32(current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1)
@@ -7079,8 +7252,9 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
                         3 # Axial
                     end
                     slice_idx = state.currentlyDispDat.sliceNumber - 1
-                    # Render with actual theta_val matching 1-Click mode (true WYSIWYG)
-                    VulkanHeatDiffusion.render_slice_to_texture!(heat_state, vk_ctx, vk_tex, slice_dim, slice_idx, active_id; theta=theta_val)
+                    # Render with actual theta_val and active dilation matching 1-Click mode (true WYSIWYG)
+                    VulkanHeatDiffusion.render_slice_to_texture!(heat_state, vk_ctx, vk_tex, slice_dim, slice_idx, active_id;
+                        theta=theta_val, dilation_radius=heatgdt_dilation[])
                     if obj.vulkanPipelineState !== nothing
                         obj.vulkanPipelineState.ubo_dirty = true
                     end
@@ -7216,12 +7390,12 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
                 if heatgdt_adaptive_contrast[] && diff_vol !== nothing
                     s_boost = VulkanHeatDiffusion.compute_frontier_edge_scale(
                         diff_vol, px, py, pz, R_phys, ct_spacing;
-                        sensitivity=heatgdt_sensitivity[]
+                        sensitivity=heatgdt_sensitivity[], smoothing_sigma=heatgdt_smoothing_sigma[]
                     )
                     if heatgdt_directional_normalization[]
                         edge_params = VulkanHeatDiffusion.compute_directional_relative_edge_params(
                             diff_vol, px, py, pz, R_phys, ct_spacing;
-                            sensitivity=heatgdt_sensitivity[]
+                            sensitivity=heatgdt_sensitivity[], smoothing_sigma=heatgdt_smoothing_sigma[]
                         )
                         if length(edge_params) >= 12 && edge_params[12] > 0.5f0
                             s_boost = min(s_boost, 1.25f0)
@@ -7229,14 +7403,14 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
                     else
                         edge_params = VulkanHeatDiffusion.compute_local_relative_edge_params(
                             diff_vol, px, py, pz, R_phys, ct_spacing;
-                            sensitivity=heatgdt_sensitivity[]
+                            sensitivity=heatgdt_sensitivity[], smoothing_sigma=heatgdt_smoothing_sigma[]
                         )
                     end
                 end
                 
                 VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, px, py, pz; seed_radius=1, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
                 VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, burst_steps;
-                    theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
+                    theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params, dilation_radius=heatgdt_dilation[])
                 if seg_vol !== nothing
                     VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)
                 end
@@ -7278,7 +7452,7 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
                 end
             end
             VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, steps_per_tick;
-                theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
+                theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params, dilation_radius=heatgdt_dilation[])
             _vk_heat_total_steps[] += steps_per_tick
             if seg_vol !== nothing
                 VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)
@@ -7319,8 +7493,9 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
                     
                     active_id = UInt32(current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1)
                     
-                    # Render with actual theta_val matching 1-Click mode (true WYSIWYG)
-                    VulkanHeatDiffusion.render_slice_to_texture!(heat_state, vk_ctx, vk_tex, slice_dim, slice_idx, active_id; theta=theta_val)
+                    # Render with actual theta_val and active dilation matching 1-Click mode (true WYSIWYG)
+                    VulkanHeatDiffusion.render_slice_to_texture!(heat_state, vk_ctx, vk_tex, slice_dim, slice_idx, active_id;
+                        theta=theta_val, dilation_radius=heatgdt_dilation[])
                     
                     if obj.vulkanPipelineState !== nothing
                         obj.vulkanPipelineState.ubo_dirty = true
@@ -7416,13 +7591,26 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
             HEAT_GDT_LAST_SEG_VOL[] = seg_vol
             HEAT_GDT_LAST_TARGET_ID[] = UInt16(active_id)
             
-            # Run 0 additional steps but copy the bounding-box to CPU staging buffer
+            # Run 0 additional steps with dilation=0 to inspect un-dilated boundary first
             VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, 0;
-                theta=commit_theta, copy_box_to_cpu=true)
-            
+                theta=commit_theta, copy_box_to_cpu=true, dilation_radius=0)
+
+            diff_vol = InferenceClient._heatgdt_diffusivity[]
+            pet_vol = _find_pet_vol(stateObjects)
+            seed_pos = _vk_heat_seed[]
+            dil_vox = _maybe_auto_set_pet_dilation!(heat_state, diff_vol, pet_vol,
+                seed_pos[1], seed_pos[2], seed_pos[3], heat_state.current_edge_params)
+            if dil_vox > 0
+                VulkanHeatDiffusion.redilate_current_mask!(heat_state, vk_ctx, dil_vox;
+                    theta=commit_theta, copy_box_to_cpu=true)
+            end
+
+            HEAT_GDT_LAST_THETA[] = commit_theta
+            HEAT_GDT_LAST_K[] = max(total_steps, heatgdt_K[])
+
             # ── Discrete mask commit: float heat → integer labels ──
             # apply_box_mask_to_segvol! reads the staging buffer and writes label_val
-            # into seg_vol[x,y,z] wherever the heat value >= commit_theta.
+            # into seg_vol[x,y,z] wherever the (possibly dilated) mask is active.
             vox_count = VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=commit_theta)
             
             println("[Heat-GDT STOP] Committed to seg_vol: commit_theta=$(commit_theta), label=$(active_id), voxels=$(vox_count), total_steps=$(total_steps), elapsed=$(round(elapsed, digits=2))s, last_display_theta=$(last_display_theta)"); flush(stdout)
@@ -7521,6 +7709,7 @@ function reactToHeatGDTPosthocSize(event::MakieEvents.HeatGDTPosthocSizeEvent, s
     end
     
     heat_state = _vk_heat_state[]
+    vk_ctx = _vk_heat_ctx[]
     if heat_state === nothing || heat_state.staging_box_ptr == C_NULL
         @warn "No valid GPU staging buffer found for post-hoc size adjustment."
         return
@@ -7536,75 +7725,128 @@ function reactToHeatGDTPosthocSize(event::MakieEvents.HeatGDTPosthocSizeEvent, s
     # 1. Restore the region to its original pre-commit state
     seg_vol[box_min[1]:box_max[1], box_min[2]:box_max[2], box_min[3]:box_max[3]] .= HEAT_GDT_UNDO_LABELS[]
     
-    # 2. Re-apply the mask with the new threshold
+    # 2. Re-extract + re-dilate on GPU at the new threshold, then apply
+    if vk_ctx !== nothing
+        VulkanHeatDiffusion.redilate_current_mask!(heat_state, vk_ctx, heatgdt_dilation[];
+            theta=new_theta, copy_box_to_cpu=true)
+    end
     vox_count = VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=new_theta)
     
-    println("[Heat-GDT Post-Hoc] Re-applied mask with theta=$(new_theta), voxels=$(vox_count)")
+    println("[Heat-GDT Post-Hoc] Re-applied mask with theta=$(new_theta), dilation=$(heatgdt_dilation[]), voxels=$(vox_count)")
     
-    # Update HEAT_GDT_LAST_DISPLAY_THETA[] and HEAT_GDT_COMMIT_THETA[] so subsequent operations reflect this
+    # Update theta refs so subsequent dilation / smoothing adjustments reuse new_theta
     HEAT_GDT_COMMIT_THETA[] = new_theta
     HEAT_GDT_LAST_DISPLAY_THETA[] = new_theta
+    HEAT_GDT_LAST_THETA[] = new_theta
 
-    # 3. Force texture upload and mark HDF5 dirty
-    for (pi, state) in enumerate(stateObjects)
-        try
-            _force_texture_upload!(stateObjects, pi)
-        catch e
-            state.isSliceChanged = true
-        end
+    # 3. Force texture upload and sync TP cache + MRI views
+    _sync_heatgdt_mask_state!(stateObjects, seg_vol, Int(HEAT_GDT_LAST_TARGET_ID[]), heat_state)
+end
+
+function reactToHeatGDTDilationChange(event::MakieEvents.HeatGDTDilationChangeEvent, stateObjects::Vector{StateDataFields})
+    dil_vox = clamp(event.dilation_vox, 0, 3)
+    heatgdt_auto_dilation_active[] = false
+    if heatgdt_dilation[] != dil_vox
+        heatgdt_dilation[] = dil_vox
     end
-    
-    # ── Sync discrete mask to TP cache (for autosave/HDF5 persistence) ──
-    if seg_vol !== nothing
-        tp_idx = current_tp_index[]
-        entry = lock(_tp_cache_lock) do
-            haskey(tp_data_cache, tp_idx) ? tp_data_cache[tp_idx] : nothing
-        end
-        if entry !== nothing
-            if lymph_node_validation_mode[]
-                if entry.anat_i16 !== seg_vol && entry.anat_i16 !== nothing
-                    entry.anat_i16 .= seg_vol
-                end
-                if entry.anatomy !== seg_vol && entry.anatomy !== nothing
-                    entry.anatomy .= UInt16.(max.(0, seg_vol))
-                end
-                mark_tp_anatomy_dirty!(tp_idx)
-                active_id_int = Int(HEAT_GDT_LAST_TARGET_ID[])
-                if active_id_int > 0
-                    mark_expert_edit!(active_id_int)
-                    invalidate_and_recompute_lesion_metrics_async!(active_id_int, tp_idx, entry.anat_i16 !== nothing ? entry.anat_i16 : seg_vol)
-                end
-            else
-                if entry.mask isa Array{Int8, 3}
-                    entry.mask .= clamp.(seg_vol, Int8(-128), Int8(127))
-                elseif entry.mask !== seg_vol
-                    entry.mask .= seg_vol
-                end
-                if entry.mask_i16 !== seg_vol
-                    entry.mask_i16 .= seg_vol
-                end
-                mark_tp_mask_dirty!(tp_idx)
-                active_id_int = Int(HEAT_GDT_LAST_TARGET_ID[])
-                if active_id_int > 0
-                    mark_expert_edit!(active_id_int)
-                    invalidate_and_recompute_lesion_metrics_async!(active_id_int, tp_idx, seg_vol)
-                end
-            end
-            
-            # ── Synchronize Heat-GDT lesion mask across all MRI modalities ──
-            if (tp_idx in mri_compare_tps || mri_main_multimodal_mode[] || mri_compare_mode[])
-                b_min = heat_state.current_box_min
-                b_max = heat_state.current_box_max
-                bbox_heat = (b_min[1]:b_max[1], b_min[2]:b_max[2], b_min[3]:b_max[3])
-                sync_mri_mask_across_modalities!(tp_idx, bbox_heat)
-                
-                for pi in 1:length(stateObjects)
-                    try
-                        _force_texture_upload!(stateObjects, pi)
-                    catch; end
-                end
-            end
-        end
+
+    heat_state = _vk_heat_state[]
+    vk_ctx = _vk_heat_ctx[]
+    if heat_state === nothing
+        return
+    end
+    heat_state.current_dilation_radius = dil_vox
+
+    if HEAT_GDT_LAST_SEG_VOL[] === nothing || !isassigned(HEAT_GDT_UNDO_LABELS) ||
+       !isassigned(HEAT_GDT_UNDO_BOX_MIN) || !isassigned(HEAT_GDT_UNDO_BOX_MAX) ||
+       vk_ctx === nothing || heat_state.accumulated_steps <= 0
+        try
+            set_ai_status!("[Heat-GDT] Dilation set to $dil_vox vox")
+        catch; end
+        return
+    end
+
+    seg_vol = HEAT_GDT_LAST_SEG_VOL[]
+    target_id = Int(HEAT_GDT_LAST_TARGET_ID[])
+    label_val = eltype(seg_vol)(HEAT_GDT_LAST_TARGET_ID[])
+    theta_val = HEAT_GDT_LAST_THETA[]
+
+    box_min = HEAT_GDT_UNDO_BOX_MIN[]
+    box_max = HEAT_GDT_UNDO_BOX_MAX[]
+
+    # 1. Restore pre-commit background before applying new dilation radius
+    seg_vol[box_min[1]:box_max[1], box_min[2]:box_max[2], box_min[3]:box_max[3]] .= HEAT_GDT_UNDO_LABELS[]
+
+    # 2. Re-dilate on GPU from un-dilated heat field without re-running diffusion steps
+    VulkanHeatDiffusion.redilate_current_mask!(heat_state, vk_ctx, dil_vox; theta=theta_val, copy_box_to_cpu=true)
+    vox_count = VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)
+
+    # 3. Refresh textures and sync TP cache + multimodal MRI
+    _sync_heatgdt_mask_state!(stateObjects, seg_vol, target_id, heat_state)
+    try
+        set_ai_status!("[Heat-GDT] Dilation=$(dil_vox) vox ($(vox_count) voxels)")
+    catch; end
+end
+
+function reactToHeatGDTSmoothingChange(event::MakieEvents.HeatGDTSmoothingChangeEvent, stateObjects::Vector{StateDataFields})
+    sigma = Float32(clamp(event.sigma, 0.0f0, 3.0f0))
+    if abs(heatgdt_smoothing_sigma[] - sigma) > 1.0f-4
+        heatgdt_smoothing_sigma[] = sigma
+    end
+
+    heat_state = _vk_heat_state[]
+    vk_ctx = _vk_heat_ctx[]
+    if heat_state === nothing || vk_ctx === nothing || !heat_state.diffusivity_uploaded
+        try
+            set_ai_status!("[Heat-GDT] Smoothing σ=$(round(sigma, digits=2))")
+        catch; end
+        return
+    end
+
+    # 1. Apply (or bit-for-bit reverse when sigma <= 0.01) Gaussian smoothing on GPU diffusivity only
+    VulkanHeatDiffusion.apply_gaussian_smoothing!(heat_state, vk_ctx, sigma)
+
+    # 2. If a recent Heat-GDT lesion exists, re-run diffusion live from its seed with updated smoothing
+    if HEAT_GDT_LAST_SEG_VOL[] !== nothing && isassigned(HEAT_GDT_UNDO_LABELS) &&
+       isassigned(HEAT_GDT_UNDO_BOX_MIN) && isassigned(HEAT_GDT_UNDO_BOX_MAX) &&
+       heat_state.seed_x > 0 && heat_state.accumulated_steps > 0
+        seg_vol = HEAT_GDT_LAST_SEG_VOL[]
+        target_id = Int(HEAT_GDT_LAST_TARGET_ID[])
+        label_val = eltype(seg_vol)(HEAT_GDT_LAST_TARGET_ID[])
+
+        old_min = HEAT_GDT_UNDO_BOX_MIN[]
+        old_max = HEAT_GDT_UNDO_BOX_MAX[]
+        seg_vol[old_min[1]:old_max[1], old_min[2]:old_max[2], old_min[3]:old_max[3]] .= HEAT_GDT_UNDO_LABELS[]
+
+        sx, sy, sz = heat_state.seed_x, heat_state.seed_y, heat_state.seed_z
+        ct_spacing = HEAT_GDT_LAST_SPACING[]
+        K_val = HEAT_GDT_LAST_K[]
+        theta_val = HEAT_GDT_LAST_THETA[]
+        diff_vol = InferenceClient._heatgdt_diffusivity[]
+        s_boost, edge_params, K_val = _compute_heat_edge_controls(diff_vol, sx, sy, sz, K_val, ct_spacing)
+
+        VulkanHeatDiffusion.seed_only!(heat_state, vk_ctx, sx, sy, sz;
+            seed_radius=1, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params)
+        VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, K_val;
+            theta=theta_val, copy_box_to_cpu=true, spacing=ct_spacing, s_boost=s_boost, edge_params=edge_params,
+            dilation_radius=heatgdt_dilation[])
+
+        # Capture updated undo background for the new bounding box (since old bbox was restored above)
+        new_min = heat_state.current_box_min
+        new_max = heat_state.current_box_max
+        HEAT_GDT_UNDO_BOX_MIN[] = CartesianIndex(new_min[1], new_min[2], new_min[3])
+        HEAT_GDT_UNDO_BOX_MAX[] = CartesianIndex(new_max[1], new_max[2], new_max[3])
+        HEAT_GDT_UNDO_LABELS[] = copy(seg_vol[new_min[1]:new_max[1], new_min[2]:new_max[2], new_min[3]:new_max[3]])
+
+        vox_count = VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)
+        _sync_heatgdt_mask_state!(stateObjects, seg_vol, target_id, heat_state)
+        try
+            set_ai_status!("[Heat-GDT] Smoothing σ=$(round(sigma, digits=2)) ($vox_count voxels)")
+        catch; end
+    else
+        try
+            set_ai_status!("[Heat-GDT] Smoothing σ=$(round(sigma, digits=2))")
+        catch; end
     end
 end
 end # module

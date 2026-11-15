@@ -15,6 +15,7 @@ export NewLesionEvent, EraseModeEvent, ShowOnlyPETEvent, ShowOnlyCTEvent, Toggle
 export ToggleCrosshairEvent, ToggleSingleMultiLesionEvent, ToggleHeatGDTModeEvent, OneShotHeatGDTEvent
 export ToggleMRIMultimodalEvent, DeleteLesionEvent, UndoEvent
 export HeatGDTStartEvent, HeatGDTTickEvent, HeatGDTStopEvent, HeatGDTPosthocSizeEvent, ToggleMapModeEvent
+export HeatGDTDilationChangeEvent, HeatGDTSmoothingChangeEvent
 export ZoomToFitEvent
 
 struct NextPhaseEvent end
@@ -298,6 +299,14 @@ end
 
 struct HeatGDTPosthocSizeEvent
     new_theta::Float32
+end
+
+struct HeatGDTDilationChangeEvent
+    dilation_vox::Int
+end
+
+struct HeatGDTSmoothingChangeEvent
+    sigma::Float32
 end
 
 struct SetLNValidationModeEvent
