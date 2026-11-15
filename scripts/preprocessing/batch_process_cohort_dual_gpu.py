@@ -48,10 +48,26 @@ PROGRESS_JSON = os.path.join(WORKSPACE_DIR, "data/cohort_dual_gpu_progress.json"
 LOCAL_XNAT_CACHE = "/mnt/big/project_ssd/data/xnat"
 LOCAL_RESTORED_CACHE = "/mnt/big/project_ssd/lymph_node_rules/data/processed_cases_restored"
 
-# XNAT Credentials & Endpoints
-ALIAS = "0eae53b5-d2e4-4bed-934a-d0540068269b"
-SECRET = "NWGGgbcf4DDLrco30ITFe0E6AuMvjljjtckXPEweO0mI3abO2K1pjg7DPEdF9u0n"
-SERVER = "https://imaging-platform.diz-ag.med.ovgu.de"
+def _load_dotenv_vars(dotenv_path):
+    if os.path.isfile(dotenv_path):
+        with open(dotenv_path, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k = k.strip()
+                v = v.strip().strip('"').strip("'")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+
+
+_load_dotenv_vars(os.path.join(WORKSPACE_DIR, ".env"))
+
+# XNAT Credentials & Endpoints (loaded from environment / .env)
+ALIAS = os.environ.get("XNAT_ALIAS", os.environ.get("alias", ""))
+SECRET = os.environ.get("XNAT_SECRET", os.environ.get("secret", ""))
+SERVER = os.environ.get("XNAT_SERVER", "https://imaging-platform.diz-ag.med.ovgu.de")
 PROJ_ID = "Prostata_bimodal_PIPELINE"
 RAW_PROJ_ID = "Prostata_bimodal"
 
@@ -284,7 +300,7 @@ class XnatManager:
                 os.remove(tmp_path)
             return False
 
-    def upload_file_streaming(self, uri, local_path):
+    def upload_file_streaming(self, uri, local_path, retry_auth=True):
         """Uploads via curl -T with streaming PUT to handle multi-gigabyte HDF5 archives without buffering."""
         if not os.path.isfile(local_path):
             return False
@@ -293,9 +309,20 @@ class XnatManager:
             sep = "&" if "?" in full_url else "?"
             full_url = f"{full_url}{sep}inbody=true"
 
+        # Get fresh JSESSIONID cookie for curl
+        try:
+            r = self.session.get(f"{SERVER}/data/JSESSION", auth=(ALIAS, SECRET), timeout=30)
+            r.raise_for_status()
+            jsess = r.text.strip()
+            self.session.cookies.set("JSESSIONID", jsess)
+        except Exception as e:
+            print(f"  [WARN] Auth refresh failed: {e}")
+            if not retry_auth:
+                return False
+
         cmd = [
             "curl", "-k", "-s", "-w", "%{http_code}",
-            "-u", f"{ALIAS}:{SECRET}",
+            "-b", f"JSESSIONID={self.session.cookies.get('JSESSIONID', '')}",
             "-H", "Expect:",
             "--connect-timeout", "30",
             "--speed-time", "45",
@@ -307,6 +334,12 @@ class XnatManager:
         ]
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         code = res.stdout.strip()[-3:] if res.stdout else ""
+        
+        # Handle 401 by re-authenticating and retrying once
+        if code == "401" and retry_auth:
+            print(f"  [WARN] Got 401, re-authenticating and retrying...")
+            return self.upload_file_streaming(uri, local_path, retry_auth=False)
+        
         return code in ("200", "201")
 
 

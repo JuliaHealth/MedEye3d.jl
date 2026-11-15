@@ -444,6 +444,10 @@ dist/
 build/
 .docker.xauth
 .env
+.env.*
+*.secret
+secrets.*
+.secrets/
 
 
 scripts/preprocessing/__pycache__/
