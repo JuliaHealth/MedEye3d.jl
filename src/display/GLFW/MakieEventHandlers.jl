@@ -584,12 +584,63 @@ function find_lesion_center(dat::AbstractArray{T, 3}, lesion_id::Float32) where 
     if n == 0
         return nothing
     end
-    return [round(Int, sum_x / n), round(Int, sum_y / n), round(Int, sum_z / n)]
+    cx = clamp(round(Int, sum_x / n), 1, sx)
+    cy = clamp(round(Int, sum_y / n), 1, sy)
+    cz = clamp(round(Int, sum_z / n), 1, sz)
+    v_cent = @inbounds dat[cx, cy, cz]
+    if v_cent == target || abs(Float32(v_cent) - lesion_id) < 0.1f0
+        return [cx, cy, cz]
+    end
+
+    # Arithmetic mean landed on background (hollow, curved, or multi-component lesion):
+    # snap to the voxel on the dominant axial slice closest to its 2D centroid.
+    best_z = cz
+    best_cnt = 0
+    best_sum_x = 0
+    best_sum_y = 0
+    @inbounds for z in 1:sz
+        cnt_z = 0; sx_z = 0; sy_z = 0
+        for y in 1:sy, x in 1:sx
+            v = dat[x, y, z]
+            if v == target || abs(Float32(v) - lesion_id) < 0.1f0
+                cnt_z += 1
+                sx_z += x
+                sy_z += y
+            end
+        end
+        if cnt_z > best_cnt
+            best_cnt = cnt_z
+            best_z = z
+            best_sum_x = sx_z
+            best_sum_y = sy_z
+        end
+    end
+    best_cnt == 0 && return nothing
+    mx = best_sum_x / best_cnt
+    my = best_sum_y / best_cnt
+    v_2d = @inbounds dat[clamp(round(Int, mx), 1, sx), clamp(round(Int, my), 1, sy), best_z]
+    if v_2d == target || abs(Float32(v_2d) - lesion_id) < 0.1f0
+        return [clamp(round(Int, mx), 1, sx), clamp(round(Int, my), 1, sy), best_z]
+    end
+    bx = cx; by = cy
+    best_d2 = Inf
+    @inbounds for y in 1:sy, x in 1:sx
+        v = dat[x, y, best_z]
+        if v == target || abs(Float32(v) - lesion_id) < 0.1f0
+            d2 = (x - mx)^2 + (y - my)^2
+            if d2 < best_d2
+                best_d2 = d2
+                bx = x; by = y
+            end
+        end
+    end
+    return [bx, by, best_z]
 end
 
 """
 Fast single-pass accumulator to precompute centroids for ALL unique lesion IDs in a mask volume.
 Populates lesion_centroids_cache with (tp_idx, lid), (node_name, lid), and lid keys.
+Guarantees every centroid lands on an actual voxel of that lesion ID.
 """
 function precompute_mask_centroids!(mask_vol::AbstractArray{T, 3}, tp_idx::Int, node_name::String="") where T
     sx, sy, sz = size(mask_vol)
@@ -608,10 +659,23 @@ function precompute_mask_centroids!(mask_vol::AbstractArray{T, 3}, tp_idx::Int, 
         end
     end
     
+    # Snap any off-lesion mean centroids outside the cache lock
+    snapped = Dict{Int, Vector{Int}}()
+    for (lid, n) in counts
+        cx = clamp(round(Int, sums_x[lid] / n), 1, sx)
+        cy = clamp(round(Int, sums_y[lid] / n), 1, sy)
+        cz = clamp(round(Int, sums_z[lid] / n), 1, sz)
+        if Int(round(@inbounds mask_vol[cx, cy, cz])) == lid
+            snapped[lid] = [cx, cy, cz]
+        else
+            c_true = find_lesion_center(mask_vol, Float32(lid))
+            snapped[lid] = c_true !== nothing ? c_true : [cx, cy, cz]
+        end
+    end
+
     # Thread-safe write to shared cache (parallel TP loading writes concurrently)
     lock(_centroids_lock) do
-        for (lid, n) in counts
-            c = [round(Int, sums_x[lid] / n), round(Int, sums_y[lid] / n), round(Int, sums_z[lid] / n)]
+        for (lid, c) in snapped
             lesion_centroids_cache[(tp_idx, lid)] = c
             if !isempty(node_name)
                 lesion_centroids_cache[(node_name, lid)] = c
@@ -945,6 +1009,59 @@ function sync_mri_mask_across_modalities!(source_tp::Int, modified_bbox_3d=nothi
 end
 
 """
+    _find_valid_mri_slice(mri_vol::AbstractArray, plane_dim::Int, candidate_sl::Int, mri_tp::Int, cur_lid::Int)::Int
+
+Returns `candidate_sl` if `mri_vol` has non-zero signal (> 0) on that slice along `plane_dim`.
+Otherwise checks active lesion/prostate centroids and overlapping anatomy/mask slices, and finally
+falls back to the midpoint of all non-zero slices in `mri_vol` so MRI views never open on empty slices.
+"""
+function _find_valid_mri_slice(mri_vol::AbstractArray, plane_dim::Int, candidate_sl::Int, mri_tp::Int, cur_lid::Int)::Int
+    max_sl = size(mri_vol, plane_dim)
+    max_sl < 1 && return 1
+    _slice_has_signal(s::Integer) = (1 <= s <= max_sl) && any(x -> x > 0.0f0, selectdim(mri_vol, plane_dim, Int(s)))
+
+    if _slice_has_signal(candidate_sl)
+        return Int(candidate_sl)
+    end
+
+    cent_keys = Any[(mri_tp, cur_lid), (mri_tp, 1), (0, cur_lid), cur_lid]
+    for ck in cent_keys
+        cent = lock(_centroids_lock) do
+            get(lesion_centroids_cache, ck, nothing)
+        end
+        if cent !== nothing && length(cent) >= plane_dim && _slice_has_signal(cent[plane_dim])
+            return Int(cent[plane_dim])
+        end
+    end
+
+    cached_entry = lock(_tp_cache_lock) do
+        haskey(tp_data_cache, mri_tp) ? tp_data_cache[mri_tp] : nothing
+    end
+    if cached_entry !== nothing
+        for ref_arr in (cached_entry.anat_i16, cached_entry.mask_i16)
+            if ref_arr !== nothing && size(ref_arr, plane_dim) == max_sl
+                overlap_slices = Int[]
+                for s in 1:max_sl
+                    if any(x -> x > 0, selectdim(ref_arr, plane_dim, s)) && _slice_has_signal(s)
+                        push!(overlap_slices, s)
+                    end
+                end
+                if !isempty(overlap_slices)
+                    return overlap_slices[(length(overlap_slices) + 1) ÷ 2]
+                end
+            end
+        end
+    end
+
+    nz_slices = Int[s for s in 1:max_sl if _slice_has_signal(s)]
+    if !isempty(nz_slices)
+        return nz_slices[(length(nz_slices) + 1) ÷ 2]
+    end
+
+    return clamp(Int(candidate_sl), 1, max_sl)
+end
+
+"""
     reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, stateObjects::Vector{StateDataFields})
 
 Toggles MRI Multimodal mode. Target routing:
@@ -980,13 +1097,14 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
         mri_main_multimodal_mode[] = !mri_main_multimodal_mode[]
         is_mode_active = mri_main_multimodal_mode[]
     end
-    
+
+    orig_ref_sl = stateObjects[1].currentDisplayedSlice
     tp_cur = current_tp_index[]
     if is_mode_active
         mri_tps = get_mri_comparison_tps(tp_cur)
         empty!(mri_compare_tps)
         append!(mri_compare_tps, mri_tps)
-        
+
         plane_dim = mri_compare_plane[] > 0 ? mri_compare_plane[] : 3
         for slot_idx in 1:min(4, length(mri_tps))
             p_idx = slot_idx + panel_offset
@@ -999,7 +1117,7 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
                 )
             end
         end
-        
+
         base_vox_sz = stateObjects[1 + panel_offset].onScrollData.dataToScrollDims.voxelSize
         for i in 1:4
             p = i + panel_offset
@@ -1010,7 +1128,7 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
             stateObjects[p].onScrollData.slicesNumber = Int32(vol_sz[plane_dim])
             stateObjects[p].calcDimsStruct = StructsManag.getHeightToWidthRatio(stateObjects[p].calcDimsStruct, new_scroll_dims)
             stateObjects[p].displayMode = QuadImage
-            
+
             for ts in stateObjects[p].mainForDisplayObjects.listOfTextSpecifications
                 if ts.name == "CT"
                     ts.isVisible = (i == 2 ? is_mode_active : true)
@@ -1062,19 +1180,11 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
                 stateObjects[p_idx].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
             end
         end
-        
-        ref_sl = stateObjects[1 + panel_offset].currentDisplayedSlice
-        # Prostate MRI sequences cover pelvis slices (Z ~ 31..115 for T1, 40..67 for T2/ADC/DWI).
-        # If ref_sl is outside this range (e.g. initial whole-body CT slice 142), center on active prostate lesion or prostate centroid (Z ~ 54).
-        if ref_sl < 25 || ref_sl > 115
-            prostate_z = 54
-            cur_lid = (current_active_lesion_id[] > 0) ? current_active_lesion_id[] : round(Int, stateObjects[1 + panel_offset].valueForMasToSet.value)
-            cent = get(lesion_centroids_cache, (0, cur_lid), get(lesion_centroids_cache, cur_lid, nothing))
-            if cent !== nothing && length(cent) >= 3 && cent[3] > 0
-                prostate_z = cent[3]
-            end
-            ref_sl = prostate_z
-        end
+
+        cur_lid = (current_active_lesion_id[] > 0) ? current_active_lesion_id[] : round(Int, stateObjects[1 + panel_offset].valueForMasToSet.value)
+        mri_vol = stateObjects[1 + panel_offset].onScrollData.dataToScroll[1].dat
+        mri_tp1 = !isempty(mri_tps) ? mri_tps[1] : tp_cur
+        ref_sl = _find_valid_mri_slice(mri_vol, plane_dim, orig_ref_sl, mri_tp1, cur_lid)
         for i in 1:4
             p = i + panel_offset
             max_sl = max(1, Int(stateObjects[p].onScrollData.slicesNumber))
@@ -1095,36 +1205,81 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
             end
         end
     else
-        entry = get_or_load_tp_data(tp_cur)
+        restore_tp = (use_m2 && compare_mode[] && compare_right_tp[] >= 0) ? compare_right_tp[] : tp_cur
+        entry = get_or_load_tp_data(restore_tp)
         if entry !== nothing
             for i in 1:min(4, length(stateObjects) - panel_offset)
                 p = i + panel_offset
-                _load_tp_from_entry!(stateObjects, entry, p)
-                stateObjects[p].isSliceChanged = true
-                _force_texture_upload!(stateObjects, p)
-                if stateObjects[p].mainForDisplayObjects.vulkanPipelineState !== nothing
-                    stateObjects[p].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
-                end
+                _load_tp_from_entry!(stateObjects, entry, p; force_unpermuted=false, tp_override=restore_tp)
+                stateObjects[p].displayMode = QuadImage
             end
             updateQuadVertices!(stateObjects[1 + panel_offset], :TopLeft)
             updateQuadVertices!(stateObjects[2 + panel_offset], :TopRight)
             updateQuadVertices!(stateObjects[3 + panel_offset], :BottomLeft)
             updateQuadVertices!(stateObjects[4 + panel_offset], :BottomRight)
             if !use_m2
-                _update_quad_layout_for_modality!(stateObjects, tp_cur)
+                _update_quad_layout_for_modality!(stateObjects, restore_tp)
+            end
+
+            restore_mod = uppercase(get(tp_modalities, restore_tp, "PET"))
+            is_restore_mri = restore_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE")
+            axial_sl = is_restore_mri ?
+                _find_valid_mri_slice(entry.ct, 3, orig_ref_sl, restore_tp, current_active_lesion_id[]) :
+                clamp(orig_ref_sl, 1, size(entry.ct, 3))
+
+            for i in 1:min(4, length(stateObjects) - panel_offset)
+                p = i + panel_offset
+                max_sl = max(1, Int(stateObjects[p].onScrollData.slicesNumber))
+                if i == 1 || i == 2
+                    stateObjects[p].currentDisplayedSlice = clamp(axial_sl, 1, max_sl)
+                elseif i == 3
+                    stateObjects[p].currentDisplayedSlice = clamp(stateObjects[3].currentDisplayedSlice, 1, max_sl)
+                elseif i == 4
+                    stateObjects[p].currentDisplayedSlice = clamp(stateObjects[4].currentDisplayedSlice, 1, max_sl)
+                end
+
+                for tex in stateObjects[p].mainForDisplayObjects.listOfTextSpecifications
+                    if tex.name == "CT"
+                        tex.isVisible = is_restore_mri ? true : (i != 2)
+                        tex.maskContribution = 0.0f0
+                    elseif tex.name == "PET" || tex.name == "SPECT" || tex.isNuclearMask
+                        if is_restore_mri
+                            tex.isVisible = (i != 2)
+                            tex.maskContribution = 0.0f0
+                        else
+                            tex.isVisible = true
+                            tex.maskContribution = (i == 2 ? 1.0f0 : 0.5f0)
+                        end
+                    end
+                end
+
+                stateObjects[p].isSliceChanged = true
+                _force_texture_upload!(stateObjects, p)
+                if stateObjects[p].mainForDisplayObjects.vulkanPipelineState !== nothing
+                    stateObjects[p].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                end
             end
         end
         target_str = use_m2 ? "M2 (panels 6-9)" : "Main (panels 1-4)"
         println(">> [MRI-MULTIMODAL] $target_str reverted to standard view."); flush(stdout)
         if !use_m2
             try
-                reload_heatgdt_diffusivity_for_tp!(tp_cur)
+                reload_heatgdt_diffusivity_for_tp!(restore_tp)
             catch e
                 @warn "[HeatDiffusion] Failed to reload diffusivity on MRI quad exit: $e"
             end
         end
     end
     update_quad_corner_info!()
+    if use_m2
+        try
+            p_mod = parentmodule(@__MODULE__)
+            target_m2_str = is_mode_active ? "MRI Comparison" : (compare_mode[] ? "Compare Curr/Next TP" : "Pure PET (Current TP)")
+            if isdefined(p_mod, :_current_m2_mode)
+                p_mod._current_m2_mode[] = target_m2_str
+            end
+        catch; end
+    end
     try
         if !use_m2 && !isempty(stateObjects) && stateObjects[1].mainForDisplayObjects !== nothing && stateObjects[1].mainForDisplayObjects.window !== nothing
             title = mri_main_multimodal_mode[] ?
@@ -1140,6 +1295,24 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
             if haskey(obs_dict, :btn_mri_main)
                 btn = obs_dict[:btn_mri_main]
                 btn.buttoncolor = mri_main_multimodal_mode[] ? RGBf(0.15, 0.45, 0.8) : RGBf(0.18, 0.20, 0.25)
+            end
+            if haskey(obs_dict, :btn_mri_comp)
+                btn_c = obs_dict[:btn_mri_comp]
+                btn_c.buttoncolor = mri_compare_mode[] ? RGBf(0.15, 0.45, 0.8) : RGBf(0.18, 0.20, 0.25)
+            end
+            if use_m2 && haskey(obs_dict, :menu_m2_mode)
+                target_m2_str = is_mode_active ? "MRI Comparison" : (compare_mode[] ? "Compare Curr/Next TP" : "Pure PET (Current TP)")
+                menu = obs_dict[:menu_m2_mode]
+                idx = findfirst(==(target_m2_str), menu.options[])
+                if idx !== nothing && menu.i_selected[] != idx
+                    sync_ref = get(obs_dict, :is_syncing_m2_from_backend, nothing)
+                    if sync_ref !== nothing; sync_ref[] = true; end
+                    try
+                        menu.i_selected[] = idx
+                    finally
+                        if sync_ref !== nothing; sync_ref[] = false; end
+                    end
+                end
             end
         end
     catch; end
@@ -3119,12 +3292,20 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
 
     if PERF_LOG[]; println("[SYNC-LESION] Bone subseg dispatched, centroid..."); flush(stdout); end
     _t_bone = round((time_ns()-t_total)/1e6, digits=1)
-    # 2. Get canonical center
+    # 2. Get canonical center (verified against current TP volume so stale/empty centroids are never used)
     panel_tp_cur = current_tp_index[]
     active_centroids_cache = lymph_node_validation_mode[] ? ln_centroids_cache : lesion_centroids_cache
     target_tex_names = lymph_node_validation_mode[] ? ("Anatomy",) : ("Mask", "segmentation", "manualModif", "mask")
+    vol_search_cur = lock(_tp_cache_lock) do
+        if haskey(tp_data_cache, panel_tp_cur)
+            tp_ent = tp_data_cache[panel_tp_cur]
+            lymph_node_validation_mode[] ? (tp_ent.anat_i16 !== nothing ? tp_ent.anat_i16 : tp_ent.anatomy) : (tp_ent.mask_i16 !== nothing ? tp_ent.mask_i16 : tp_ent.mask)
+        else
+            nothing
+        end
+    end
     canonical_center = if data.jump_to_center && data.lesion_id > 0
-        if haskey(active_centroids_cache, (panel_tp_cur, data.lesion_id))
+        cc = if haskey(active_centroids_cache, (panel_tp_cur, data.lesion_id))
             active_centroids_cache[(panel_tp_cur, data.lesion_id)]
         elseif haskey(active_centroids_cache, (get_node_name_for_tp(panel_tp_cur), data.lesion_id))
             active_centroids_cache[(get_node_name_for_tp(panel_tp_cur), data.lesion_id)]
@@ -3133,8 +3314,11 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
         elseif haskey(active_centroids_cache, data.lesion_id)
             active_centroids_cache[data.lesion_id]
         else
-            cc = nothing
-            # 1. First check in active lesion database / LMW cache (O(1) in-memory lookup, avoids 85M voxel scan)
+            nothing
+        end
+
+        if cc === nothing
+            # 1. Check active lesion database / LMW cache (O(1) in-memory lookup)
             try
                 _LMW = parentmodule(@__MODULE__).LesionMetadataWindow
                 db = _LMW.get_active_lesion_db()
@@ -3145,42 +3329,62 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                             c_raw = st[ck]
                             if (c_raw isa AbstractVector || c_raw isa Tuple) && length(c_raw) >= 3
                                 cc = [round(Int, c_raw[1]), round(Int, c_raw[2]), round(Int, c_raw[3])]
-                                active_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
-                                active_centroids_cache[data.lesion_id] = cc
                                 break
                             end
                         end
                     end
                 end
             catch; end
-
-            # 2. Only if not in DB, search contiguous 3D volume in tp_data_cache for current TP
-            if cc === nothing && haskey(tp_data_cache, panel_tp_cur)
-                tp_ent = tp_data_cache[panel_tp_cur]
-                vol_search = lymph_node_validation_mode[] ? (tp_ent.anat_i16 !== nothing ? tp_ent.anat_i16 : tp_ent.anatomy) : (tp_ent.mask_i16 !== nothing ? tp_ent.mask_i16 : tp_ent.mask)
-                if vol_search !== nothing && !(vol_search isa PermutedDimsArray)
-                    cc = find_lesion_center(vol_search, Float32(data.lesion_id))
-                    if cc !== nothing
-                        active_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
-                        active_centroids_cache[data.lesion_id] = cc
-                    end
-                end
-            end
-
-            # 3. Search baseline (TP 0) if different
-            if cc === nothing && panel_tp_cur != 0 && haskey(tp_data_cache, 0)
-                tp_ent0 = tp_data_cache[0]
-                vol_search0 = lymph_node_validation_mode[] ? (tp_ent0.anat_i16 !== nothing ? tp_ent0.anat_i16 : tp_ent0.anatomy) : (tp_ent0.mask_i16 !== nothing ? tp_ent0.mask_i16 : tp_ent0.mask)
-                if vol_search0 !== nothing && !(vol_search0 isa PermutedDimsArray)
-                    cc = find_lesion_center(vol_search0, Float32(data.lesion_id))
-                    if cc !== nothing
-                        active_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
-                        active_centroids_cache[data.lesion_id] = cc
-                    end
-                end
-            end
-            cc
         end
+
+        if vol_search_cur !== nothing && !(vol_search_cur isa PermutedDimsArray)
+            sx_v, sy_v, sz_v = size(vol_search_cur)
+            target_v = round(eltype(vol_search_cur), data.lesion_id)
+            need_recompute = if cc === nothing
+                true
+            else
+                cx_v = clamp(cc[1], 1, sx_v)
+                cy_v = clamp(cc[2], 1, sy_v)
+                cz_v = clamp(cc[3], 1, sz_v)
+                v_at_cc = @inbounds vol_search_cur[cx_v, cy_v, cz_v]
+                !(v_at_cc == target_v || abs(Float32(v_at_cc) - Float32(data.lesion_id)) < 0.1f0)
+            end
+            if need_recompute
+                cc_true = find_lesion_center(vol_search_cur, Float32(data.lesion_id))
+                lock(_centroids_lock) do
+                    if cc_true !== nothing
+                        active_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc_true
+                        node_nm = get_node_name_for_tp(panel_tp_cur)
+                        !isempty(node_nm) && (active_centroids_cache[(node_nm, data.lesion_id)] = cc_true)
+                        active_centroids_cache[data.lesion_id] = cc_true
+                    else
+                        delete!(active_centroids_cache, (panel_tp_cur, data.lesion_id))
+                        node_nm = get_node_name_for_tp(panel_tp_cur)
+                        !isempty(node_nm) && delete!(active_centroids_cache, (node_nm, data.lesion_id))
+                        delete!(active_centroids_cache, data.lesion_id)
+                    end
+                end
+                cc = cc_true
+            else
+                lock(_centroids_lock) do
+                    active_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
+                    active_centroids_cache[data.lesion_id] = cc
+                end
+            end
+        elseif cc === nothing && panel_tp_cur != 0 && haskey(tp_data_cache, 0)
+            tp_ent0 = tp_data_cache[0]
+            vol_search0 = lymph_node_validation_mode[] ? (tp_ent0.anat_i16 !== nothing ? tp_ent0.anat_i16 : tp_ent0.anatomy) : (tp_ent0.mask_i16 !== nothing ? tp_ent0.mask_i16 : tp_ent0.mask)
+            if vol_search0 !== nothing && !(vol_search0 isa PermutedDimsArray)
+                cc = find_lesion_center(vol_search0, Float32(data.lesion_id))
+                if cc !== nothing
+                    lock(_centroids_lock) do
+                        active_centroids_cache[(panel_tp_cur, data.lesion_id)] = cc
+                        active_centroids_cache[data.lesion_id] = cc
+                    end
+                end
+            end
+        end
+        cc
     else
         nothing
     end
@@ -3716,16 +3920,31 @@ function save_tp_mask_to_h5(tp_i::Int)::Bool
                     HDF5.create_dataset(h5_file, ds_path_expert, Int16, HDF5.dataspace(size(raw_to_write)...); chunk=(64, 64, 64), compress=1)
                     h5_file[ds_path_expert][:, :, :] = Int16.(raw_to_write)
                 end
-                # Also persist updated centroids for this TP into CENTROIDS group
+                # Also persist updated centroids for this TP into CENTROIDS group and prune stale entries
                 try
+                    present_lids = Set{Int}(Int(x) for x in unique(mask_to_save) if x > 0)
                     cent_grp = if !haskey(h5_file, "CENTROIDS")
                         HDF5.create_group(h5_file, "CENTROIDS")
                     else
                         h5_file["CENTROIDS"]
                     end
+                    prefix = "tp$(tp_i)_lid"
+                    for ckey in collect(keys(cent_grp))
+                        if startswith(ckey, prefix)
+                            lid_c = tryparse(Int, ckey[length(prefix)+1:end])
+                            if lid_c !== nothing && !(lid_c in present_lids)
+                                try HDF5.delete_object(cent_grp, ckey) catch; end
+                            end
+                        end
+                    end
                     lock(_centroids_lock) do
+                        for k in collect(keys(lesion_centroids_cache))
+                            if k isa Tuple{Int, Int} && k[1] == tp_i && !(k[2] in present_lids)
+                                delete!(lesion_centroids_cache, k)
+                            end
+                        end
                         for (k, coords) in lesion_centroids_cache
-                            if k isa Tuple{Int, Int} && k[1] == tp_i
+                            if k isa Tuple{Int, Int} && k[1] == tp_i && (k[2] in present_lids)
                                 lid_c = k[2]
                                 ckey = "tp$(tp_i)_lid$(lid_c)"
                                 if haskey(cent_grp, ckey)
@@ -4224,6 +4443,10 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx; forc
         mri_tps = !isempty(mri_compare_tps) ? mri_compare_tps : get_mri_comparison_tps(current_tp_index[])
         slot = min(panel_idx, length(mri_tps))
         mri_tps[slot]
+    elseif mri_compare_mode[] && panel_idx in (6, 7, 8, 9)
+        mri_tps = !isempty(mri_compare_tps) ? mri_compare_tps : get_mri_comparison_tps(current_tp_index[])
+        slot = min(panel_idx - 5, length(mri_tps))
+        mri_tps[slot]
     elseif compare_mode[] && panel_idx in (5, 6, 7, 8, 9)
         compare_right_tp[]
     else
@@ -4349,8 +4572,8 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx; forc
     for tex in stateObjects[panel_idx].mainForDisplayObjects.listOfTextSpecifications
         if tex.name == "CT" || (tex.isMainImage && tex.name != "PET" && tex.name != "SPECT")
             tex.minAndMaxValue = Float32.([main_win[1], main_win[2]])
+            tex.isVisible = (panel_idx == 2 ? mri_main_multimodal_mode[] : true)
             if panel_idx == 2
-                tex.isVisible = mri_main_multimodal_mode[]
                 tex.maskContribution = 0.0f0
             end
         elseif tex.name == "PET" || tex.name == "SPECT" || tex.isNuclearMask
@@ -4359,7 +4582,10 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx; forc
                 tex.isVisible = !mri_main_multimodal_mode[]
                 tex.maskContribution = mri_main_multimodal_mode[] ? 0.0f0 : 1.0f0
             elseif is_mri_active_mode && !tex.isMainImage
+                tex.isVisible = (panel_idx != 7)
                 tex.maskContribution = 0.0f0
+            else
+                tex.isVisible = true
             end
         elseif tex.name == "Mask" || tex.name == "segmentation" || (tex.isMultiDiscreteMask && tex.name != "Anatomy" && tex.name != "Bone_Overlay")
             tex.isVisible = _lesion_active[]

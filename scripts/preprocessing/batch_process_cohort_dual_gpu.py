@@ -43,6 +43,13 @@ from scipy.ndimage import gaussian_filter, label
 # Paths & Settings
 WORKSPACE_DIR = "/workspaces/MedEye3d.jl"
 CENSUS_PATH = os.path.join(WORKSPACE_DIR, "data/xnat_bimodal_census.json")
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from cads_anatomy_wiring import (
+    merge_cads_structures,
+    load_resampled_cads_arrays,
+    filter_lacrimal_lesions,
+)
 OUT_BASE_DIR = os.path.join(WORKSPACE_DIR, "data/cases/Prostata_bimodal")
 PROGRESS_JSON = os.path.join(WORKSPACE_DIR, "data/cohort_dual_gpu_progress.json")
 LOCAL_XNAT_CACHE = "/mnt/big/project_ssd/data/xnat"
@@ -203,6 +210,63 @@ def select_ranked_mri_sequences(all_files_map):
     return ordered
 
 
+def unpack_stacked_mri_volume(im: sitk.Image, mod: str, fn: str, ref_t2: sitk.Image = None, ref_adc: sitk.Image = None) -> sitk.Image:
+    """Unpacks 4D/multi-b-value MRI volumes stacked along Z (with shrunk sp_z) into a single 3D volume."""
+    sz = im.GetSize()
+    sp = im.GetSpacing()
+    tot_z, sp_z = int(sz[2]), float(sp[2])
+    mod_u = (mod or "").upper()
+    fn_l = (fn or "").lower()
+
+    # 1. Stacked multi-b-value DWI (e.g. 4 x 20 slices with sp_z=0.96mm instead of 4.0mm)
+    if mod_u == "DWI" and ref_adc is not None:
+        adc_z = int(ref_adc.GetSize()[2])
+        if adc_z >= 15 and tot_z > adc_z and tot_z % adc_z == 0 and sp_z < 1.5:
+            n_vols = tot_z // adc_z
+            raw_4d = sitk.GetArrayFromImage(im)
+            vol_idx = 1 if n_vols >= 2 else 0  # b=800 standard prostate DWI
+            dwi_3d = sitk.GetImageFromArray(raw_4d[vol_idx * adc_z : (vol_idx + 1) * adc_z])
+            dwi_3d.CopyInformation(ref_adc)
+            return dwi_3d
+
+    # 2. Stacked 4D DCE / LAVA / Dynamik (e.g. 780 slices at sp_z=0.1mm, or 414 at 0.16mm)
+    is_dce = mod_u in ("DCE", "DYNAMIC") or any(k in fn_l for k in ("dyn", "lava", "dce"))
+    if is_dce and tot_z > 100 and (sp_z < 1.0 or tot_z > 250):
+        raw_4d = sitk.GetArrayFromImage(im)
+        t2_z = int(ref_t2.GetSize()[2]) if ref_t2 is not None else 0
+        slices_p = None
+        if 16 <= t2_z <= 45 and tot_z % t2_z == 0:
+            slices_p = t2_z
+        else:
+            # Find slice count in [16..45] dividing tot_z such that n_phases * sp_z is ~3.0mm
+            cands = [s for s in range(16, 46) if tot_z % s == 0]
+            if cands:
+                target_n_ph = max(2.0, 3.0 / max(sp_z, 0.05))
+                slices_p = min(cands, key=lambda s: abs((tot_z / s) - target_n_ph))
+            else:
+                slices_p = 23 if tot_z % 23 == 0 else (18 if tot_z % 18 == 0 else 23)
+        n_ph = max(1, tot_z // slices_p)
+        tgt_ph = min(3, n_ph - 1)
+        dce_c = sitk.GetImageFromArray(raw_4d[tgt_ph * slices_p : (tgt_ph + 1) * slices_p])
+        true_sp_z = float(ref_t2.GetSpacing()[2]) if (ref_t2 is not None and 2.0 <= float(ref_t2.GetSpacing()[2]) <= 5.0 and slices_p == t2_z) else (sp_z * n_ph if sp_z < 1.0 else 3.0)
+        new_sp = (sp[0], sp[1], true_sp_z)
+        dce_c.SetSpacing(new_sp)
+        dce_c.SetDirection(im.GetDirection())
+        orig = np.array(im.GetOrigin(), dtype=np.float64)
+        if ref_t2 is not None:
+            d_mat = np.array(im.GetDirection(), dtype=np.float64).reshape(3, 3)
+            n_vec = d_mat[:, 2]
+            t2_c = np.array(ref_t2.TransformContinuousIndexToPhysicalPoint((ref_t2.GetSize()[0] / 2.0, ref_t2.GetSize()[1] / 2.0, ref_t2.GetSize()[2] / 2.0)))
+            dce_c_pt = orig + d_mat @ (np.array(dce_c.GetSize(), dtype=np.float64) * 0.5 * np.array(new_sp))
+            shift_n = float(np.dot(t2_c - dce_c_pt, n_vec))
+            if abs(shift_n) > 25.0:
+                orig = orig + shift_n * n_vec
+        dce_c.SetOrigin(orig.tolist())
+        return dce_c
+
+    return im
+
+
 def compute_mri_diffusivity(mri_arr, mri_anatomy=None, exclusion_mask=None):
     """
     Computes 3D boundary edge and diffusivity for MRI modalities.
@@ -238,18 +302,33 @@ class XnatManager:
     def __init__(self):
         self.lock = threading.Lock()
         self.session = requests.Session()
+        self.server = SERVER
+        self.alias = ALIAS
+        self.secret = SECRET
+        creds_path = os.path.expanduser("~/.medeye3d/xnat_credentials.json")
+        if os.path.isfile(creds_path):
+            try:
+                with open(creds_path, "r") as cf:
+                    c = json.load(cf)
+                if c.get("alias") and c.get("secret"):
+                    self.alias = c["alias"]
+                    self.secret = c["secret"]
+                if c.get("server_url"):
+                    self.server = c["server_url"].rstrip("/")
+            except Exception:
+                pass
         self._authenticate()
 
     def _authenticate(self):
         with self.lock:
-            r = self.session.get(f"{SERVER}/data/JSESSION", auth=(ALIAS, SECRET), timeout=30)
+            r = self.session.get(f"{self.server}/data/JSESSION", auth=(self.alias, self.secret), timeout=30)
             r.raise_for_status()
             jsess = r.text.strip()
             self.session.cookies.set("JSESSIONID", jsess)
 
     def request(self, method, url, **kwargs):
         if not url.startswith("http"):
-            url = f"{SERVER}{url}"
+            url = f"{self.server}{url}"
         for attempt in range(4):
             try:
                 r = self.session.request(method, url, **kwargs)
@@ -304,17 +383,17 @@ class XnatManager:
         """Uploads via curl -T with streaming PUT to handle multi-gigabyte HDF5 archives without buffering."""
         if not os.path.isfile(local_path):
             return False
-        full_url = uri if uri.startswith("http") else f"{SERVER}{uri}"
+        full_url = uri if uri.startswith("http") else f"{self.server}{uri}"
         if "inbody=true" not in full_url:
             sep = "&" if "?" in full_url else "?"
             full_url = f"{full_url}{sep}inbody=true"
 
         # Get fresh JSESSIONID cookie for curl
+        jsess = ""
         try:
-            r = self.session.get(f"{SERVER}/data/JSESSION", auth=(ALIAS, SECRET), timeout=30)
+            r = self.session.get(f"{self.server}/data/JSESSION", auth=(self.alias, self.secret), timeout=30)
             r.raise_for_status()
             jsess = r.text.strip()
-            self.session.cookies.set("JSESSIONID", jsess)
         except Exception as e:
             print(f"  [WARN] Auth refresh failed: {e}")
             if not retry_auth:
@@ -322,7 +401,7 @@ class XnatManager:
 
         cmd = [
             "curl", "-k", "-s", "-w", "%{http_code}",
-            "-b", f"JSESSIONID={self.session.cookies.get('JSESSIONID', '')}",
+            "-b", f"JSESSIONID={jsess}",
             "-H", "Expect:",
             "--connect-timeout", "30",
             "--speed-time", "45",
@@ -513,154 +592,145 @@ def compute_two_stage_registration(ct_img, raw_dir, device="cuda:0", xnat=None, 
                     except Exception as e_tfm:
                         print(f"    [WARN] Failed to convert downloaded {cand_name}: {e_tfm}")
 
-    import torch
-    import torch.nn as nn
+    docs_dir = os.path.join(WORKSPACE_DIR, "docs")
+    if docs_dir not in sys.path:
+        sys.path.insert(0, docs_dir)
+    import register_ct_mri as reg_mod
 
-    dev = torch.device(device if torch.cuda.is_available() else "cpu")
-    print(f"    Computing Arun SVD + Prostate SWD Registration on {dev}...")
+    print("    Computing 4-Medial-Bone-Landmark (Whole CT, No Bladder) + Centered Prostate SWD Registration...")
 
-    # Load fixed landmarks from packed_anatomical_tensor.h5 or fallback
+    def _pts_from_mask(img, mask):
+        z, y, x = np.where(mask)
+        if len(z) == 0:
+            return np.empty((0, 3), dtype=np.float64)
+        ijk = np.stack([x, y, z], axis=1).astype(np.float64)
+        sp = np.array(img.GetSpacing(), dtype=np.float64)
+        orig = np.array(img.GetOrigin(), dtype=np.float64)
+        d = np.array(img.GetDirection(), dtype=np.float64).reshape(3, 3)
+        return (ijk * sp) @ d.T + orig
+
+    def _medial_centroid(pts, pct=0.02):
+        k = max(10, int(len(pts) * pct))
+        return pts[np.argsort(np.abs(pts[:, 0]))[:k]].mean(axis=0)
+
+    # Load CT pelvic bones (ONLY femur_left, femur_right, hip_left, hip_right) and CT prostate
+    ct_bones = {}
+    ct_prostate_img = None
+    seg_dir = os.path.join(raw_dir, "segmentations")
+    for bname in ["femur_left", "femur_right", "hip_left", "hip_right"]:
+        bp = os.path.join(seg_dir, f"{bname}.nii.gz")
+        if os.path.isfile(bp):
+            c = reg_mod.extract_medial_bone_centroid(bp)
+            if c is not None:
+                ct_bones[bname] = c
+    pros_ct_path = os.path.join(seg_dir, "prostate.nii.gz")
+    if os.path.isfile(pros_ct_path):
+        ct_prostate_img = sitk.ReadImage(pros_ct_path)
+
     anat_h5 = os.path.join(raw_dir, "packed_anatomical_tensor.h5")
-    fixed_pts = []
-    if os.path.isfile(anat_h5):
+    reg_path = os.path.join(raw_dir, "packed_anatomical_tensor_registry.json")
+    if (len(ct_bones) < 4 or ct_prostate_img is None) and os.path.isfile(anat_h5) and os.path.isfile(reg_path):
+        with open(reg_path, "r") as rf:
+            reg_doc = json.load(rf)
+        masks_meta = reg_doc.get("masks", reg_doc)
         with h5py.File(anat_h5, "r") as af:
             pt = af["packed_tensor"][:]
-            # Medial femurs and hip bones (classes 25-28 or TotalSeg pelvic bones)
-            for ch in range(pt.shape[0]):
-                mask = np.isin(pt[ch], [25, 26, 27, 28, 36, 37, 38, 39])
-                if mask.any():
-                    idx = np.argwhere(mask)
-                    if len(idx) > 20000:
-                        idx = idx[np.random.choice(len(idx), 20000, replace=False)]
-                    for z, y, x in idx:
-                        phys = ct_img.TransformIndexToPhysicalPoint((int(x), int(y), int(z)))
-                        fixed_pts.append(phys)
-                    break
+            for bname in ["femur_left", "femur_right", "hip_left", "hip_right"]:
+                if bname not in ct_bones and bname in masks_meta:
+                    m = masks_meta[bname]
+                    arr_b = (pt[m["channel"] - 1] == m["id"])
+                    pts_b = _pts_from_mask(ct_img, arr_b)
+                    if len(pts_b) > 0:
+                        ct_bones[bname] = _medial_centroid(pts_b)
+            if ct_prostate_img is None:
+                for pname in ["prostate", "nvseg_prostate"]:
+                    if pname in masks_meta:
+                        m = masks_meta[pname]
+                        arr_p = (pt[m["channel"] - 1] == m["id"]).astype(np.uint8)
+                        if arr_p.any():
+                            ct_prostate_img = sitk.GetImageFromArray(arr_p)
+                            ct_prostate_img.CopyInformation(ct_img)
+                            break
 
-    # Load moving landmarks from totalseg_mr_ml.nii.gz
+    # Load moving MRI prostate/bones from totalseg_mr_ml.nii.gz and/or prostate_segmentation.nii.gz
     ts_mr_path = os.path.join(raw_dir, "totalseg_mr_ml.nii.gz")
-    moving_pts = []
-    moving_prostate_pts = []
-    moving_img = None
+    if not os.path.isfile(ts_mr_path):
+        t2_cands = [f for f in os.listdir(raw_dir) if f.endswith(".nii.gz") and "t2" in f.lower() and "cor" not in f.lower() and "sag" not in f.lower() and not f.startswith("Fixed_CT")]
+        if t2_cands:
+            ts_bin = next(
+                (p for p in (
+                    "/mnt/big/project_ssd/project_ssd/lymph_node_rules/for_joanna/.local/conda/envs/seg/bin/TotalSegmentator",
+                    "/usr/local/bin/TotalSegmentator",
+                ) if os.path.isfile(p)),
+                None,
+            ) or shutil.which("TotalSegmentator") or "TotalSegmentator"
+            try:
+                env_ts = os.environ.copy()
+                if "cuda:" in str(device):
+                    env_ts["CUDA_VISIBLE_DEVICES"] = str(device).split(":")[-1]
+                subprocess.run([ts_bin, "-i", os.path.join(raw_dir, t2_cands[0]), "-o", ts_mr_path, "-ta", "total_mr", "--ml", "--fast", "--quiet"], env=env_ts, check=True)
+            except Exception as e_ts:
+                print(f"    [WARN] TotalSegmentator MR failed: {e_ts}")
+
+    mr_bones = {}
+    mr_prostate_img = None
     if os.path.isfile(ts_mr_path):
         moving_img = sitk.ReadImage(ts_mr_path)
         mr_arr = sitk.GetArrayFromImage(moving_img)
-        # Pelvic bones in TotalSeg total_mr: 36=femur_left, 37=femur_right, 38=hip_left, 39=hip_right
-        bone_m = np.isin(mr_arr, [36, 37, 38, 39])
-        if bone_m.any():
-            idx = np.argwhere(bone_m)
-            if len(idx) > 20000:
-                idx = idx[np.random.choice(len(idx), 20000, replace=False)]
-            for z, y, x in idx:
-                phys = moving_img.TransformIndexToPhysicalPoint((int(x), int(y), int(z)))
-                moving_pts.append(phys)
+        for lbl_id, bname in [(36, "femur_left"), (37, "femur_right"), (38, "hip_left"), (39, "hip_right")]:
+            pts_m = _pts_from_mask(moving_img, mr_arr == lbl_id)
+            if len(pts_m) > 0:
+                mr_bones[bname] = _medial_centroid(pts_m)
+        p_m = (mr_arr == 17).astype(np.uint8)
+        if p_m.any():
+            mr_prostate_img = sitk.GetImageFromArray(p_m)
+            mr_prostate_img.CopyInformation(moving_img)
 
-        # Prostate in TotalSeg: 17
-        pros_m = (mr_arr == 17)
-        if pros_m.any():
-            idx = np.argwhere(pros_m)
-            if len(idx) > 5000:
-                idx = idx[np.random.choice(len(idx), 5000, replace=False)]
-            for z, y, x in idx:
-                phys = moving_img.TransformIndexToPhysicalPoint((int(x), int(y), int(z)))
-                moving_prostate_pts.append(phys)
-
-    # Check high-precision prostate_segmentation.nii.gz
     pros_nii = os.path.join(raw_dir, "prostate_segmentation.nii.gz")
     if os.path.isfile(pros_nii):
         p_img = sitk.ReadImage(pros_nii)
         p_arr = sitk.GetArrayFromImage(p_img)
-        p_bin = (p_arr > 0)
+        p_bin = np.isin(p_arr, [1, 2, 3, 4, 5, 6, 9]).astype(np.uint8)
+        if p_bin.sum() < 100:
+            p_bin = (p_arr > 0).astype(np.uint8)
         if p_bin.any():
-            idx = np.argwhere(p_bin)
-            if len(idx) > 5000:
-                idx = idx[np.random.choice(len(idx), 5000, replace=False)]
-            moving_prostate_pts = [p_img.TransformIndexToPhysicalPoint((int(x), int(y), int(z))) for z, y, x in idx]
+            mr_prostate_img = sitk.GetImageFromArray(p_bin)
+            mr_prostate_img.CopyInformation(p_img)
 
-    # Stage 1: Arun SVD Rigid Alignment
-    if len(fixed_pts) >= 100 and len(moving_pts) >= 100:
-        P = np.array(moving_pts[:min(len(fixed_pts), len(moving_pts))], dtype=np.float64)
-        Q = np.array(fixed_pts[:min(len(fixed_pts), len(moving_pts))], dtype=np.float64)
-        p_bar = P.mean(axis=0)
-        q_bar = Q.mean(axis=0)
-        H = (P - p_bar).T @ (Q - q_bar)
-        U, S, Vt = np.linalg.svd(H)
-        R = Vt.T @ U.T
-        if np.linalg.det(R) < 0:
-            Vt[-1, :] *= -1
-            R = Vt.T @ U.T
-        t = q_bar - R @ p_bar
+    # Stage 1: ONLY most medial points of hip & femur bones (Arun SVD Procrustes CT -> MRI)
+    common_bones = [k for k in ["femur_left", "femur_right", "hip_left", "hip_right"] if k in ct_bones and k in mr_bones]
+    if len(common_bones) >= 3:
+        lm_tfm, _, _, _ = reg_mod.compute_landmark_rigid_transform(
+            [ct_bones[k] for k in common_bones],
+            [mr_bones[k] for k in common_bones],
+            common_bones
+        )
+    elif ct_prostate_img is not None and mr_prostate_img is not None:
+        ct_kps = reg_mod.extract_prostate_keypoints(ct_prostate_img)
+        mr_kps = reg_mod.extract_prostate_keypoints(mr_prostate_img)
+        kps = sorted(set(ct_kps.keys()) & set(mr_kps.keys()))
+        lm_tfm, _, _, _ = reg_mod.compute_landmark_rigid_transform(
+            [ct_kps[k] for k in kps], [mr_kps[k] for k in kps], kps
+        )
     else:
-        R = np.eye(3, dtype=np.float64)
-        t = np.zeros(3, dtype=np.float64)
+        lm_tfm = sitk.AffineTransform(3)
 
-    # Stage 2: Prostate SWD Optimization
-    if len(moving_prostate_pts) > 50:
-        # Fixed prostate points from CT
-        fixed_pros_pts = []
-        if os.path.isfile(anat_h5):
-            with h5py.File(anat_h5, "r") as af:
-                pt = af["packed_tensor"][:]
-                for ch in range(pt.shape[0]):
-                    m = (pt[ch] == 23)  # prostate ID
-                    if m.any():
-                        idx = np.argwhere(m)
-                        if len(idx) > 5000:
-                            idx = idx[np.random.choice(len(idx), 5000, replace=False)]
-                        fixed_pros_pts = [ct_img.TransformIndexToPhysicalPoint((int(x), int(y), int(z))) for z, y, x in idx]
-                        break
+    # Stage 2: Centered SWD on prostate surface
+    final_tfm = lm_tfm
+    if ct_prostate_img is not None and mr_prostate_img is not None:
+        ct_pts = reg_mod.extract_surface_points(ct_prostate_img, num_points=800, seed=42)
+        mr_pts = reg_mod.extract_surface_points(mr_prostate_img, num_points=800, seed=42)
+        if len(ct_pts) > 10 and len(mr_pts) > 10:
+            min_n = min(len(ct_pts), len(mr_pts))
+            rng = np.random.RandomState(42)
+            ct_eq = ct_pts[rng.choice(len(ct_pts), min_n, replace=False)]
+            mr_eq = mr_pts[rng.choice(len(mr_pts), min_n, replace=False)]
+            final_tfm, _, _, _, _ = reg_mod.swd_optimization_torch(ct_eq, mr_eq, lm_tfm, max_epochs=500, seed=42)
+            res_mr_p = reg_mod.resample_mri(mr_prostate_img, ct_img, final_tfm, sitk.sitkNearestNeighbor)
+            dice = reg_mod.compute_dice(ct_prostate_img, res_mr_p)
+            print(f"    [REGISTRATION] Prostate Dice = {dice:.4f}")
 
-        if len(fixed_pros_pts) > 50:
-            P_pros = torch.tensor(moving_prostate_pts, dtype=torch.float32, device=dev)
-            Q_pros = torch.tensor(fixed_pros_pts, dtype=torch.float32, device=dev)
-            R_init_t = torch.tensor(R, dtype=torch.float32, device=dev)
-            t_init_t = torch.tensor(t, dtype=torch.float32, device=dev)
-
-            # SWD Optimization
-            delta_rot = nn.Parameter(torch.zeros(3, device=dev))
-            delta_t = nn.Parameter(torch.zeros(3, device=dev))
-            optimizer = torch.optim.Adam([delta_rot, delta_t], lr=1e-3)
-
-            for step in range(150):
-                optimizer.zero_grad()
-                # Rodrigues formula for rotation
-                theta = torch.norm(delta_rot)
-                if theta > 1e-6:
-                    k = delta_rot / theta
-                    K = torch.tensor([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]], device=dev)
-                    R_step = torch.eye(3, device=dev) + torch.sin(theta) * K + (1 - torch.cos(theta)) * (K @ K)
-                else:
-                    R_step = torch.eye(3, device=dev)
-
-                R_curr = R_step @ R_init_t
-                t_curr = t_init_t + delta_t
-                P_trans = (P_pros @ R_curr.T) + t_curr
-
-                # 128 random 1D projections
-                projs = torch.randn(128, 3, device=dev)
-                projs = projs / torch.norm(projs, dim=1, keepdim=True)
-                p_proj = torch.sort(P_trans @ projs.T, dim=0)[0]
-                q_proj = torch.sort(Q_pros @ projs.T, dim=0)[0]
-                loss = torch.mean(torch.abs(p_proj - q_proj))
-                loss.backward()
-                optimizer.step()
-
-            # Final R and t
-            theta = torch.norm(delta_rot)
-            if theta > 1e-6:
-                k = delta_rot / theta
-                K = torch.tensor([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]], device=dev)
-                R_step = torch.eye(3, device=dev) + torch.sin(theta) * K + (1 - torch.cos(theta)) * (K @ K)
-            else:
-                R_step = torch.eye(3, device=dev)
-            R = (R_step @ R_init_t).detach().cpu().numpy().astype(np.float64)
-            t = (t_init_t + delta_t).detach().cpu().numpy().astype(np.float64)
-
-    # Save ITK transform
-    sitk_tfm = sitk.AffineTransform(3)
-    sitk_tfm.SetMatrix(R.flatten())
-    sitk_tfm.SetTranslation(t)
-    sitk.WriteTransform(sitk_tfm, tfm_path)
+    sitk.WriteTransform(final_tfm, tfm_path)
     return tfm_path
 
 
@@ -774,7 +844,7 @@ def layer_and_sanitize_ct_anatomy(ct_shape, raw_dir):
                         labels_dict[str(lbl_idx)] = clean
                         if any(b in clean for b in ["bone", "femur", "hip", "sacrum", "vertebra", "rib", "sternum", "ilium", "ischium"]):
                             bone_ids.append(lbl_idx)
-                        if any(u in clean for u in ["bladder", "kidney"]):
+                        if any(u in clean for u in ["bladder", "kidney", "lacrimal", "parotid", "submandibular"]):
                             exclusion_mask[mask] = 1
                         lbl_idx += 1
         if skipped_old_ln > 0:
@@ -1074,6 +1144,19 @@ def process_case(pat_id, gpu_id, xnat):
     # Step 5: Anatomy Layering & Sanitation (purging temp)
     max_anat, anat_labels, bone_ids, bone_atlas, skellytour, excl_mask = layer_and_sanitize_ct_anatomy(ct_shape, raw_dir)
 
+    # Merge CADS Task 556 (seminal_vesicle, sigmoid_colon, spinal_canal) and Task 558 (lacrimal glands, etc.)
+    cads_556_arr, cads_558_arr = load_resampled_cads_arrays(case_dir, ref_img=ct_img)
+    if cads_556_arr is not None or cads_558_arr is not None:
+        max_anat, anat_labels = merge_cads_structures(
+            max_anat,
+            cads_556_arr=cads_556_arr,
+            cads_558_arr=cads_558_arr,
+            labels_dict=anat_labels,
+            flip_y_cads=False
+        )
+        for lac_val in (533, 534):
+            excl_mask[max_anat == lac_val] = 1
+
     # Step 6: Ground Truth Lesions & Overlap Matches
     ct_lesion_arr = np.zeros(ct_shape, dtype=np.int16)
     ct_seg_names = {}
@@ -1186,9 +1269,14 @@ def process_case(pat_id, gpu_id, xnat):
         t2_info = ranked_mri[0]
         try:
             t2_im = sitk.ReadImage(t2_info["item"])
-            res_t2 = sitk.Resample(t2_im, ct_img, sitk.Transform(), sitk.sitkLinear, 0.0, sitk.sitkFloat32) if t2_info["is_reg"] else sitk.Resample(t2_im, ct_img, tfm_obj, sitk.sitkLinear, 0.0, sitk.sitkFloat32)
+            already_on_ct_grid_t2 = (
+                t2_im.GetSize() == ct_img.GetSize()
+                and np.allclose(t2_im.GetSpacing(), ct_img.GetSpacing(), atol=1e-2)
+                and np.allclose(t2_im.GetOrigin(), ct_img.GetOrigin(), atol=1.0)
+            )
+            res_t2 = sitk.Resample(t2_im, ct_img, sitk.Transform() if already_on_ct_grid_t2 else tfm_obj, sitk.sitkLinear, 0.0, sitk.sitkFloat32)
             t2_arr = sitk.GetArrayFromImage(res_t2).astype(np.float32)
-            if np.max(t2_arr) == 0.0 and t2_info["is_reg"]:
+            if np.max(t2_arr) == 0.0 and already_on_ct_grid_t2:
                 res_t2 = sitk.Resample(t2_im, ct_img, tfm_obj, sitk.sitkLinear, 0.0, sitk.sitkFloat32)
                 t2_arr = sitk.GetArrayFromImage(res_t2).astype(np.float32)
             t2_arr = np.maximum(0.0, t2_arr)
@@ -1206,25 +1294,21 @@ def process_case(pat_id, gpu_id, xnat):
     # Resample Additional MRI Sequences (ADC, DWI, T1, DCE)
     extra_mri_series = []
     tp_idx_counter = 2
+    ref_t2_im = sitk.ReadImage(ranked_mri[0]["item"]) if (ranked_mri and ranked_mri[0]["mod"] == "T2") else None
+    ref_adc_im = next((sitk.ReadImage(s["item"]) for s in ranked_mri if s["mod"] == "ADC"), None)
     for seq in (ranked_mri[1:] if (ranked_mri and ranked_mri[0]["mod"] == "T2") else ranked_mri):
         try:
             im = sitk.ReadImage(seq["item"])
-            if (seq["mod"] in ("DCE", "DYNAMIC") or "dyn" in seq["fn"].lower()) and im.GetSize()[2] > 100:
-                raw_4d = sitk.GetArrayFromImage(im)
-                tot_z = raw_4d.shape[0]
-                slices_p = 23 if tot_z % 23 == 0 else (18 if tot_z % 18 == 0 else 23)
-                n_ph = tot_z // slices_p
-                tgt_ph = min(3, n_ph - 1)
-                ph_arr = raw_4d[tgt_ph * slices_p : (tgt_ph + 1) * slices_p]
-                dce_c = sitk.GetImageFromArray(ph_arr)
-                dce_c.SetSpacing((im.GetSpacing()[0], im.GetSpacing()[1], 3.0))
-                dce_c.SetOrigin(im.GetOrigin())
-                dce_c.SetDirection(im.GetDirection())
-                im = dce_c
+            im = unpack_stacked_mri_volume(im, seq["mod"], seq["fn"], ref_t2=ref_t2_im, ref_adc=ref_adc_im)
 
-            res_im = sitk.Resample(im, ct_img, sitk.Transform(), sitk.sitkLinear, 0.0, sitk.sitkFloat32) if seq["is_reg"] else sitk.Resample(im, ct_img, tfm_obj, sitk.sitkLinear, 0.0, sitk.sitkFloat32)
+            already_on_ct_grid = (
+                im.GetSize() == ct_img.GetSize()
+                and np.allclose(im.GetSpacing(), ct_img.GetSpacing(), atol=1e-2)
+                and np.allclose(im.GetOrigin(), ct_img.GetOrigin(), atol=1.0)
+            )
+            res_im = sitk.Resample(im, ct_img, sitk.Transform() if already_on_ct_grid else tfm_obj, sitk.sitkLinear, 0.0, sitk.sitkFloat32)
             arr = sitk.GetArrayFromImage(res_im).astype(np.float32)
-            if np.max(arr) == 0.0 and seq["is_reg"]:
+            if np.max(arr) == 0.0 and already_on_ct_grid:
                 res_im = sitk.Resample(im, ct_img, tfm_obj, sitk.sitkLinear, 0.0, sitk.sitkFloat32)
                 arr = sitk.GetArrayFromImage(res_im).astype(np.float32)
             arr = np.maximum(0.0, arr)
@@ -1295,69 +1379,28 @@ def process_case(pat_id, gpu_id, xnat):
         s["arr_f"] = flip_y(s["arr"])
         s["diff_f"] = flip_y(s["diff"])
 
+    # Filter physiological lacrimal gland uptake lesions & compute anatomical organ mapping
+    for i in [int(x) for x in np.unique(ct_les_f) if x > 0]:
+        if str(i) not in ct_seg_names:
+            ct_seg_names[str(i)] = f"Lesion {i}"
+    removed_lac, ct_labels, ct_organs = filter_lacrimal_lesions(
+        ct_les_f, max_anat_f, anat_labels, seg_names=ct_seg_names
+    )
+    if removed_lac:
+        print(f"    [PHYSIOLOGICAL FILTER] Removed {len(removed_lac)} lacrimal gland lesions: {removed_lac}")
+        for r_lid in removed_lac:
+            ct_seg_names.pop(str(r_lid), None)
+    mr_seg_names = {"1": "Prostate Primary Lesion"} if mr_gold_f.any() else {}
+
     # 1-based centroids
     centroids = {}
-    for lid in np.unique(ct_les_f):
-        if lid == 0:
-            continue
+    for lid in ct_labels:
         zc, yc, xc = np.mean(np.argwhere(ct_les_f == lid), axis=0)
         centroids[f"tp0_lid{lid}"] = np.array([round(xc) + 1, round(yc) + 1, round(zc) + 1], dtype=np.int32)
 
     if mr_gold_f.any():
         zc, yc, xc = np.mean(np.argwhere(mr_gold_f == 1), axis=0)
         centroids["tp1_lid1"] = np.array([round(xc) + 1, round(yc) + 1, round(zc) + 1], dtype=np.int32)
-
-    # Build Scene Hierarchy, Organ Mapping & Matches
-    ct_labels = [int(i) for i in np.unique(ct_les_f) if i > 0]
-    for i in ct_labels:
-        if str(i) not in ct_seg_names:
-            ct_seg_names[str(i)] = f"Lesion {i}"
-    mr_seg_names = {"1": "Prostate Primary Lesion"} if mr_gold_f.any() else {}
-
-    def _classify_organ_priority(name):
-        ln = name.lower()
-        if any(k in ln for k in ["prostate", "peripheral zone", "(pz)", "transition zone", "(tz)", "central zone", "(cz)", "seminal vesicle"]):
-            return 1
-        if any(k in ln for k in ["lymph", "knoten", "node", "station_"]) or any(ln.startswith(p) for p in ["neck_", "thoracic_", "axillary_", "abdominal_", "deep_inguinal", "superficial_inguinal", "inguinal_"]):
-            return 2
-        bone_kw = ["vertebra", "rib_", "femur", "humerus", "scapula", "hip", "sacrum", "skull", "sternum", "clavicle", "costal", "hyoid", "mandible", "ilium", "ischium", "pubis", "tibia", "bone", "spine"]
-        vessel_excl = ["artery", "vein", "vena", "vessel"]
-        if any(k in ln for k in bone_kw) and not any(v in ln for v in vessel_excl):
-            return 3
-        organ_kw = ["liver", "kidney", "lung", "spleen", "pancreas", "heart", "thyroid", "adrenal", "stomach", "colon", "rectum", "esophagus", "gallbladder", "bladder", "bowel", "duodenum", "trachea", "brain", "spinal_cord"]
-        if any(k in ln for k in organ_kw):
-            return 4
-        if any(k in ln for k in ["aorta", "artery", "vein", "vena", "trunk", "carotid", "jugular"]):
-            return 5
-        return 6
-
-    ct_organs = {}
-    for lid in ct_labels:
-        mask_l = (ct_les_f == lid)
-        avals = max_anat_f[mask_l]
-        avals = avals[avals > 0]
-        best_org = "Unknown"
-        if len(avals) > 0:
-            uvals, ucnts = np.unique(avals, return_counts=True)
-            cands = []
-            for uv, uc in zip(uvals, ucnts):
-                aname = anat_labels.get(str(int(uv)), "")
-                if aname and aname not in ("body_trunc", "body_extremities", "abdominal_cavity", "mediastinum", "thoracic_cavity"):
-                    cands.append((_classify_organ_priority(aname), -int(uc), aname))
-            if cands:
-                cands.sort()
-                best_org = cands[0][2]
-        if best_org == "Unknown":
-            sname = ct_seg_names.get(str(lid), "").lower()
-            if "prostate" in sname:
-                best_org = "Prostate"
-            elif "hip" in sname or "femur" in sname or "vertebra" in sname or "rib" in sname:
-                best_org = "Bone"
-            elif "lung" in sname:
-                best_org = "Lung"
-            elif "liver" in sname:
-                best_org = "Liver"
-        ct_organs[str(lid)] = best_org
 
     all_mr_tps = [1] + [s["tp_idx"] for s in extra_mri_series]
     organ_mapping = {"0": ct_organs}

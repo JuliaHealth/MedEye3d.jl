@@ -791,6 +791,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         raw_first_mask = read(h5_init["BASELINE/$base_mask_fname"])
     end
     first_mask = is_preflipped ? Float32.(raw_first_mask) : reverse(Float32.(raw_first_mask), dims=2)
+    valid_tp0_lids = Set{Int}(Int(x) for x in unique(first_mask) if x > 0)
 
     # Auto-load precomputed Heat-GDT diffusivity if available
     try
@@ -821,6 +822,9 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         ts_atlas_aligned = read(h5_init["ATLAS/max_anatomy_expert"])
     elseif haskey(h5_init, "ATLAS/max_anatomy")
         ts_atlas_aligned = read(h5_init["ATLAS/max_anatomy"])
+    end
+    if ts_atlas_aligned !== nothing && !is_preflipped
+        ts_atlas_aligned = reverse(ts_atlas_aligned, dims=2)
     end
 
     persisted_annotations = Dict{String, Any}()
@@ -965,6 +969,44 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 end
             catch; end
         end
+        if haskey(MEH.tp_segment_names, 0)
+            filter!(kv -> kv.first in valid_tp0_lids, MEH.tp_segment_names[0])
+        end
+    end
+
+    # Re-evaluate stale skull/Unknown lesions against max_anatomy (so CADS lacrimal_gland / seminal_vesicle win)
+    # and remove physiological lacrimal gland lesions from active PET lesions.
+    if ts_atlas_aligned !== nothing && !isempty(ts_names) && size(ts_atlas_aligned) == size(first_mask)
+        for lid in collect(valid_tp0_lids)
+            cur_org = lowercase(get(organ_mapping, lid, get(MEH.global_organ_mapping[], lid, "")))
+            if isempty(cur_org) || cur_org == "unknown" || occursin("skull", cur_org)
+                re_org = LesionAssociation.classify_and_pick_best_organ(first_mask, ts_atlas_aligned, ts_names, lid)
+                if !isempty(re_org)
+                    organ_mapping[lid] = re_org
+                    MEH.global_organ_mapping[][lid] = re_org
+                    get!(MEH.tp_organ_mapping, 0, Dict{Int,String}())[lid] = re_org
+                end
+            end
+        end
+    end
+    removed_lacrimal = LesionAssociation.filter_lacrimal_lesions!(first_mask, ts_atlas_aligned, ts_names; organ_mapping=organ_mapping)
+    if !isempty(removed_lacrimal)
+        removed_lac_set = Set{Int}(removed_lacrimal)
+        setdiff!(valid_tp0_lids, removed_lac_set)
+        for r_lid in removed_lacrimal
+            delete!(organ_mapping, r_lid)
+            delete!(MEH.global_organ_mapping[], r_lid)
+            haskey(MEH.tp_organ_mapping, 0) && delete!(MEH.tp_organ_mapping[0], r_lid)
+            haskey(MEH.tp_segment_names, 0) && delete!(MEH.tp_segment_names[0], r_lid)
+        end
+        for k_ann in collect(keys(persisted_annotations))
+            startswith(k_ann, "_") && continue
+            p_lid = LesionMetadataWindow.parse_lesion_id(k_ann)
+            if p_lid !== nothing && (p_lid in removed_lac_set)
+                delete!(persisted_annotations, k_ann)
+            end
+        end
+        println("[AppMain] Removed $(length(removed_lacrimal)) physiological lacrimal gland lesions: $removed_lacrimal"); flush(stdout)
     end
 
     # Sanitize stale lymph-node misclassifications for prostate lesions in persisted annotations
@@ -1018,6 +1060,9 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 tp_str = replace(parts[1], "tp" => "")
                 tp_idx = parse(Int, tp_str)
                 lid = parse(Int, parts[2])
+                if tp_idx == 0 && !(lid in valid_tp0_lids)
+                    continue
+                end
                 coords = read(h5_init["CENTROIDS/$key"])
                 c = [Int(coords[1]), Int(coords[2]), Int(coords[3])]
                 MEH.lesion_centroids_cache[(tp_idx, lid)] = c
@@ -1386,6 +1431,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                         mask_vol_base = max.(0.0f0, mask_vol_base)
                         mask_compact = Int16.(round.(mask_vol_base))
                     end
+                    is_mri_tp_flag = uppercase(strip(modality)) in ("T2", "MRI", "MR", "ADC", "DWI", "T1", "DCE", "DYNAMIC", "PROSTATE")
 
                     sz = size(ct_vol_base)
                     bone_mask = zeros(Int8, sz)
@@ -1413,8 +1459,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                     catch; end
 
                     # For non-MRI timepoints without native anatomy, fallback to baseline / atlas anatomy
-                    is_mri_tp = uppercase(strip(modality)) in ("T2", "MRI", "MR", "ADC", "DWI", "T1", "DCE", "DYNAMIC", "PROSTATE")
-                    if !is_mri_tp && (anatomy_vol === nothing || length(unique(anatomy_vol)) <= 2)
+                    if !is_mri_tp_flag && (anatomy_vol === nothing || length(unique(anatomy_vol)) <= 2)
                         for fallback_path in ["ATLAS/max_anatomy_expert", "BASELINE/max_anatomy.nii.gz_expert", "ATLAS/max_anatomy", "BASELINE/max_anatomy.nii.gz"]
                             if haskey(h5_file, fallback_path)
                                 try
@@ -1428,6 +1473,35 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                                     break
                                 catch; end
                             end
+                        end
+                    end
+
+                    # Remove physiological lacrimal gland uptake lesions on CT baseline/follow-up PET timepoints
+                    if tp_i == 0 && !is_mri_tp_flag
+                        atlas_for_filter = (anatomy_vol !== nothing && size(anatomy_vol) == size(mask_compact)) ? anatomy_vol : MEH.global_ts_atlas[]
+                        names_for_filter = MEH.global_ts_names[]
+                        om_for_filter = get(MEH.tp_organ_mapping, 0, MEH.global_organ_mapping[])
+                        if atlas_for_filter !== nothing && !isempty(names_for_filter) && size(atlas_for_filter) == size(mask_compact)
+                            for lid_f in Int.(unique(mask_compact))
+                                lid_f <= 0 && continue
+                                cur_o = lowercase(get(om_for_filter, lid_f, get(MEH.global_organ_mapping[], lid_f, "")))
+                                if isempty(cur_o) || cur_o == "unknown" || occursin("skull", cur_o)
+                                    re_o = LesionAssociation.classify_and_pick_best_organ(mask_compact, atlas_for_filter, names_for_filter, lid_f)
+                                    if !isempty(re_o)
+                                        MEH.global_organ_mapping[][lid_f] = re_o
+                                        get!(MEH.tp_organ_mapping, 0, Dict{Int,String}())[lid_f] = re_o
+                                    end
+                                end
+                            end
+                        end
+                        removed_tp0_lac = LesionAssociation.filter_lacrimal_lesions!(mask_compact, atlas_for_filter, names_for_filter; organ_mapping=om_for_filter)
+                        if !isempty(removed_tp0_lac)
+                            for r_lid in removed_tp0_lac
+                                delete!(MEH.global_organ_mapping[], r_lid)
+                                haskey(MEH.tp_organ_mapping, 0) && delete!(MEH.tp_organ_mapping[0], r_lid)
+                                haskey(MEH.tp_segment_names, 0) && delete!(MEH.tp_segment_names[0], r_lid)
+                            end
+                            println("  [TP $tp_i] Filtered $(length(removed_tp0_lac)) physiological lacrimal gland lesions: $removed_tp0_lac"); flush(stdout)
                         end
                     end
                     
@@ -1490,15 +1564,9 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     match_groups = LesionAssociation.get_match_groups()
     try; GLFW.PollEvents(); catch; end
 
-    unique_vals = sort(unique(first_mask))
-    lesion_ids_ints = filter(x -> x > 0, unique_vals)
+    MEH.precompute_mask_centroids!(first_mask, 0, get(tp_nodes_map, 0, "PET_Lesions_0"))
+    lesion_ids_ints = sort(collect(valid_tp0_lids))
     tp0_sn = get(MEH.tp_segment_names, 0, Dict{Int, String}())
-    for sid in keys(tp0_sn)
-        if !(sid in lesion_ids_ints)
-            push!(lesion_ids_ints, sid)
-        end
-    end
-    sort!(lesion_ids_ints)
     try; GLFW.PollEvents(); catch; end
 
     lesion_list = if isempty(lesion_ids_ints)
@@ -1832,6 +1900,9 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                         empty!(studies)
                         append!(studies, new_studies)
                         MEH.register_h5_mask_saver!(new_h5_path, studies)
+                        MEH.mri_compare_mode[] = false
+                        MEH.mri_main_multimodal_mode[] = false
+                        empty!(MEH.mri_compare_tps)
                         empty!(MEH.tp_labels)
                         empty!(MEH.tp_modalities)
                         empty!(MEH.tp_node_names)
@@ -1967,9 +2038,39 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                         break
                     end
                 end
+                first_valid_lid = 0
                 try
-                    put!(mainViewer.channel, MedEye3d.MakieEvents.SyncLesionEvent(1, true))
+                    tp0_mask = lock(MEH._tp_cache_lock) do
+                        haskey(MEH.tp_data_cache, 0) ? MEH.tp_data_cache[0].mask : nothing
+                    end
+                    if tp0_mask !== nothing
+                        sw_valid_lids = Set{Int}(Int(x) for x in unique(tp0_mask) if x > 0)
+                        if haskey(MEH.tp_segment_names, 0)
+                            filter!(kv -> kv.first in sw_valid_lids, MEH.tp_segment_names[0])
+                        end
+                        lock(MEH._centroids_lock) do
+                            for k in collect(keys(MEH.lesion_centroids_cache))
+                                if (k isa Tuple && k[1] == 0 && !(k[2] in sw_valid_lids)) || (k isa Integer && !(k in sw_valid_lids))
+                                    delete!(MEH.lesion_centroids_cache, k)
+                                end
+                            end
+                        end
+                        MEH.precompute_mask_centroids!(tp0_mask, 0, MEH.get_node_name_for_tp(0))
+                        if !isempty(sw_valid_lids)
+                            first_valid_lid = minimum(sw_valid_lids)
+                        end
+                        obs_d = MedEye3d.LesionMetadataWindow._lmw_observables
+                        empty!(MedEye3d.LesionMetadataWindow._cached_lesion_ids)
+                        if haskey(obs_d, :refresh_dropdown_tp)
+                            obs_d[:refresh_dropdown_tp][] = 0
+                        end
+                    end
                 catch; end
+                if first_valid_lid > 0
+                    try
+                        put!(mainViewer.channel, MedEye3d.MakieEvents.SyncLesionEvent(first_valid_lid, true))
+                    catch; end
+                end
                 set_prog !== nothing && set_prog(100.0, "READY — $case_lbl loaded & ready for interaction"; state=:ready)
             end
             println(">> [XNAT-SWITCH] Successfully switched viewer to $new_h5_path"); flush(stdout)

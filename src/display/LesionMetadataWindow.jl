@@ -1469,6 +1469,10 @@ const TS_TO_ANATOMY = Dict{String, String}(
     "urethra" => "Prostatic Urethra", "periurethral_glands" => "Periurethral Glands",
     "seminal_vesicle" => "Seminal Vesicle", "seminal_vesicle_left" => "Seminal Vesicle Left",
     "seminal_vesicle_right" => "Seminal Vesicle Right",
+    "lacrimal_gland" => "Lacrimal Gland", "lacrimal_gland_left" => "Lacrimal Gland Left",
+    "lacrimal_gland_right" => "Lacrimal Gland Right",
+    "pituitary_gland" => "Pituitary Gland", "optic_chiasm" => "Optic Chiasm",
+    "sigmoid_colon" => "Sigmoid Colon",
     "urinary_bladder" => "Urinary Bladder", "thyroid_gland" => "Thyroid Gland",
     "adrenal_gland" => "Adrenal Gland",
     # Vasculature
@@ -4932,10 +4936,11 @@ function create_metadata_window(
                     try rm(cand_h5; force=true) catch; end
                 end
             end
-        elseif creds === nothing
-            # Offline mode: prioritize local repository ground-truth file
+        else
+            # Prefer newer local repository ground-truth or cached HDF5 even when logged into XNAT,
+            # so local repairs are not overwritten unless the user explicitly clicks Force Download.
             if !isempty(repo_h5) && isfile(repo_h5) && filesize(repo_h5) > 1024
-                if !isfile(target_h5) || filesize(target_h5) != filesize(repo_h5)
+                if !isfile(target_h5) || filesize(target_h5) != filesize(repo_h5) || mtime(repo_h5) > mtime(target_h5)
                     mkpath(target_dir)
                     try cp(repo_h5, target_h5, force=true) catch; end
                 end
@@ -5528,28 +5533,15 @@ function create_metadata_window(
             is_syncing_selection[] = false
         end
     end
+    local _step_lesion_selection!
     on(btn_prev.clicks) do _
         t = time_ns()
-        opts = lesion_ids[]; isempty(opts) && return
-        idx = _find_lesion_opt_index(active_lesion_id[], opts)
-        cur_idx = idx === nothing ? 1 : idx
-        new_idx = mod1(cur_idx - 1, length(opts))
-        if length(opts) > 1 && opts[new_idx] == "(none)" && any(!=("(none)"), opts)
-            new_idx = mod1(new_idx - 1, length(opts))
-        end
-        active_lesion_id[] = opts[new_idx]
+        _step_lesion_selection!(-1)
         if _MEH.PERF_LOG[]; println("[BENCH] Next/Prev Lesion (UI Update): $(round((time_ns()-t)/1e6, digits=1))ms"); flush(stdout); end
     end
     on(btn_next.clicks) do _
         t = time_ns()
-        opts = lesion_ids[]; isempty(opts) && return
-        idx = _find_lesion_opt_index(active_lesion_id[], opts)
-        cur_idx = idx === nothing ? 1 : idx
-        new_idx = mod1(cur_idx + 1, length(opts))
-        if length(opts) > 1 && opts[new_idx] == "(none)" && any(!=("(none)"), opts)
-            new_idx = mod1(new_idx + 1, length(opts))
-        end
-        active_lesion_id[] = opts[new_idx]
+        _step_lesion_selection!(1)
         if _MEH.PERF_LOG[]; println("[BENCH] Next/Prev Lesion (UI Update): $(round((time_ns()-t)/1e6, digits=1))ms"); flush(stdout); end
     end
 
@@ -6622,6 +6614,11 @@ function create_metadata_window(
         end
         precompute_metrics_for_tp!(tp)
     end
+    obs_refresh_dropdown_tp = Observable(-1)
+    on(obs_refresh_dropdown_tp) do target_tp
+        target_tp >= 0 && refresh_lesion_dropdown_for_tp!(target_tp)
+    end
+    _lmw_observables[:refresh_dropdown_tp] = obs_refresh_dropdown_tp
     update_tp_label()
     update_tp_dropdown_visibility!()
     refresh_tp_dropdown_options!()
@@ -11296,8 +11293,58 @@ function create_metadata_window(
         if new_lid !== nothing && new_lid > 0
             old_lid = _current_displayed_lid[]
             if old_lid > 0 && old_lid != new_lid && !_is_applying_state[]
-                # Synchronously flush leaving lesion's widget state before loading the new lesion
-                _flush_lesion!(old_lid)
+                tp_leave = try _MEH.current_tp_index[] catch; 0 end
+                is_ln_leave = isdefined(_MEH, :lymph_node_validation_mode) && _MEH.lymph_node_validation_mode[]
+                mask_leave = !is_ln_leave && isdefined(_MEH, :tp_data_cache) ? lock(_MEH._tp_cache_lock) do
+                    haskey(_MEH.tp_data_cache, tp_leave) ? _MEH.tp_data_cache[tp_leave].mask : nothing
+                end : nothing
+                if mask_leave !== nothing && !any(==(old_lid), mask_leave)
+                    # Leaving an empty (unpainted / erased) lesion — prune it instead of keeping a ghost entry
+                    db_prune = copy(lesion_db[])
+                    if haskey(db_prune, string(old_lid))
+                        delete!(db_prune, string(old_lid))
+                        _is_autosaving[] = true
+                        try
+                            lesion_db[] = db_prune
+                        finally
+                            _is_autosaving[] = false
+                        end
+                    end
+                    if isdefined(_MEH, :tp_segment_names) && haskey(_MEH.tp_segment_names, tp_leave)
+                        delete!(_MEH.tp_segment_names[tp_leave], old_lid)
+                    end
+                    try
+                        lock(_MEH._centroids_lock) do
+                            delete!(_MEH.lesion_centroids_cache, (tp_leave, old_lid))
+                            if tp_leave == 0
+                                delete!(_MEH.lesion_centroids_cache, old_lid)
+                            end
+                        end
+                    catch; end
+                    delete!(_cached_lesion_ids, tp_leave)
+                    delete!(_MASK_IDS_CACHE, tp_leave)
+                    pruned_opts = filter(o -> parse_lesion_id(o) != old_lid, lesion_ids[])
+                    if isempty(pruned_opts)
+                        pruned_opts = ["(none)"]
+                    end
+                    if length(pruned_opts) != length(lesion_ids[])
+                        is_syncing_selection[] = true
+                        try
+                            lesion_ids[] = pruned_opts
+                            les_menu.options[] = pruned_opts
+                            n_idx = _find_lesion_opt_index(id, pruned_opts)
+                            if n_idx !== nothing
+                                les_menu.i_selected[] = n_idx
+                                les_menu.selection[] = pruned_opts[n_idx]
+                            end
+                        finally
+                            is_syncing_selection[] = false
+                        end
+                    end
+                else
+                    # Synchronously flush leaving lesion's widget state before loading the new lesion
+                    _flush_lesion!(old_lid)
+                end
             end
             _current_displayed_lid[] = new_lid
             
@@ -12484,61 +12531,98 @@ function create_metadata_window(
 
         tp = try _MEH.current_tp_index[] catch; 0 end
         is_ln_mode = isdefined(_MEH, :lymph_node_validation_mode) && _MEH.lymph_node_validation_mode[]
+        mask_ref = !is_ln_mode && isdefined(_MEH, :tp_data_cache) ? lock(_MEH._tp_cache_lock) do
+            haskey(_MEH.tp_data_cache, tp) ? _MEH.tp_data_cache[tp].mask : nothing
+        end : nothing
+
         expected_ids = Int[]
-        cached = get(_cached_lesion_ids, tp, Int[])
-        if !isempty(cached)
-            append!(expected_ids, cached)
-        end
         seg_names = isdefined(_MEH, :tp_segment_names) ? get(_MEH.tp_segment_names, tp, Dict{Int, String}()) : Dict{Int, String}()
-        if !is_ln_mode
-            for sid in keys(seg_names)
-                sid > 0 && !(sid in expected_ids) && push!(expected_ids, sid)
+        if !is_ln_mode && mask_ref !== nothing
+            expected_ids = get!(_cached_lesion_ids, tp) do
+                Int.(filter(x -> x > 0, sort(unique(mask_ref))))
             end
+            if isempty(expected_ids)
+                if lesion_ids[] != ["(none)"]
+                    is_syncing_selection[] = true
+                    try
+                        lesion_ids[] = ["(none)"]
+                        les_menu.options[] = ["(none)"]
+                        les_menu.i_selected[] = 1
+                        les_menu.selection[] = "(none)"
+                        _skip_apply_state[] = true
+                        active_lesion_id[] = "(none)"
+                    finally
+                        is_syncing_selection[] = false
+                    end
+                end
+                return ["(none)"]
+            end
+        else
+            cached = get(_cached_lesion_ids, tp, Int[])
+            if !isempty(cached)
+                append!(expected_ids, cached)
+            end
+            if !is_ln_mode
+                for sid in keys(seg_names)
+                    sid > 0 && !(sid in expected_ids) && push!(expected_ids, sid)
+                end
+            end
+            isempty(expected_ids) && return lesion_ids[]
         end
-        isempty(expected_ids) && return lesion_ids[]
 
         opts = copy(lesion_ids[])
+        changed = false
+        expected_set = Set{Int}(expected_ids)
+        if !is_ln_mode && mask_ref !== nothing
+            len_before = length(opts)
+            filter!(o -> begin
+                olid = parse_lesion_id(o)
+                olid !== nothing && (olid in expected_set)
+            end, opts)
+            if length(opts) != len_before
+                changed = true
+            end
+        end
+
         existing_lids = Set{Int}()
         for opt in opts
             olid = parse_lesion_id(opt)
             olid !== nothing && olid > 0 && push!(existing_lids, olid)
         end
-        if length(existing_lids) >= length(expected_ids) && all(in(existing_lids), expected_ids)
-            return opts
-        end
 
-        db = lesion_db[]
-        added = false
-        for sid in sort(unique(expected_ids))
-            sid > 0 || continue
-            (sid in existing_lids) && continue
-            d_name = ""
-            entry = get_lesion_state(db, string(sid))
-            if !isempty(entry)
-                d_disp = get(entry, "_display_name", "")
-                if !isempty(d_disp) && !startswith(d_disp, "Lesion ")
-                    d_name = replace(d_disp, Regex("^$(sid):\\s*") => "")
-                else
-                    d_anat = get(entry, "BaseAnatomy", "")
-                    d_side = get(entry, "BaseAnatomySide", "")
-                    if !isempty(d_anat)
-                        clean_a = titlecase(replace(replace(d_anat, r"\s*\(UBERON\)" => ""), "_" => " "))
-                        d_name = (isempty(d_side) || d_side == "None" ? "" : "$d_side ") * clean_a
+        if !(length(existing_lids) >= length(expected_ids) && all(in(existing_lids), expected_ids))
+            db = lesion_db[]
+            for sid in sort(unique(expected_ids))
+                sid > 0 || continue
+                (sid in existing_lids) && continue
+                d_name = ""
+                entry = get_lesion_state(db, string(sid))
+                if !isempty(entry)
+                    d_disp = get(entry, "_display_name", "")
+                    if !isempty(d_disp) && !startswith(d_disp, "Lesion ")
+                        d_name = replace(d_disp, Regex("^$(sid):\\s*") => "")
+                    else
+                        d_anat = get(entry, "BaseAnatomy", "")
+                        d_side = get(entry, "BaseAnatomySide", "")
+                        if !isempty(d_anat)
+                            clean_a = titlecase(replace(replace(d_anat, r"\s*\(UBERON\)" => ""), "_" => " "))
+                            d_name = (isempty(d_side) || d_side == "None" ? "" : "$d_side ") * clean_a
+                        end
                     end
                 end
+                if isempty(d_name)
+                    d_name = get(seg_names, sid, "")
+                end
+                if isempty(d_name)
+                    d_name = "Lesion $sid"
+                end
+                push!(opts, "$sid: $d_name")
+                push!(existing_lids, sid)
+                changed = true
             end
-            if isempty(d_name)
-                d_name = get(seg_names, sid, "")
-            end
-            if isempty(d_name)
-                d_name = "Lesion $sid"
-            end
-            push!(opts, "$sid: $d_name")
-            push!(existing_lids, sid)
-            added = true
         end
 
-        if added
+        if changed
             filter!(o -> o != "(none)", opts)
             sort_val = try
                 menu_sort.selection[] === nothing ? "By Index" : String(menu_sort.selection[])
@@ -12569,12 +12653,27 @@ function create_metadata_window(
         _is_stepping_lesion[] && return
         _is_stepping_lesion[] = true
         try
+            prev_str = active_lesion_id[]
             opts = _heal_lesion_options_if_needed!()
             isempty(opts) && return
-            idx = _find_lesion_opt_index(active_lesion_id[], opts)
-            idx = idx === nothing ? 1 : idx
+            idx = _find_lesion_opt_index(prev_str, opts)
             n_opts = length(opts)
-            new_idx = mod1(idx + delta, n_opts)
+            if idx === nothing
+                prev_lid = parse_lesion_id(prev_str)
+                new_idx = if prev_lid !== nothing && prev_lid > 0 && n_opts > 1
+                    if delta > 0
+                        cand = findfirst(o -> (ol = parse_lesion_id(o); ol !== nothing && ol > prev_lid), opts)
+                        cand === nothing ? 1 : cand
+                    else
+                        cand = findlast(o -> (ol = parse_lesion_id(o); ol !== nothing && ol < prev_lid), opts)
+                        cand === nothing ? n_opts : cand
+                    end
+                else
+                    1
+                end
+            else
+                new_idx = mod1(idx + delta, n_opts)
+            end
             if n_opts > 1 && opts[new_idx] == "(none)" && any(!=("(none)"), opts)
                 step_dir = delta >= 0 ? 1 : -1
                 new_idx = mod1(new_idx + step_dir, n_opts)

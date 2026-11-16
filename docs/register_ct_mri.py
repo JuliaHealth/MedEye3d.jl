@@ -45,7 +45,17 @@ import SimpleITK as sitk
 from skimage import measure
 
 # Default TotalSegmentator binary location
-DEFAULT_TOTAL_SEG_BIN = shutil.which("TotalSegmentator") or "/usr/local/bin/TotalSegmentator"
+DEFAULT_TOTAL_SEG_BIN = (
+    next(
+        (p for p in (
+            "/mnt/big/project_ssd/project_ssd/lymph_node_rules/for_joanna/.local/conda/envs/seg/bin/TotalSegmentator",
+            "/usr/local/bin/TotalSegmentator",
+        ) if os.path.isfile(p)),
+        None,
+    )
+    or shutil.which("TotalSegmentator")
+    or "TotalSegmentator"
+)
 
 
 # ==============================================================================
@@ -71,6 +81,25 @@ def parse_fcsv(fcsv_path):
                 except (ValueError, IndexError):
                     continue
     return landmarks
+
+
+def extract_medial_bone_centroid(mask_image_path, pct=0.02, midline_x=0.0):
+    """Compute physical centroid (LPS) of the most medial `pct` voxels (closest to midline_x) of a bone mask."""
+    if not os.path.exists(mask_image_path):
+        return None
+    img = sitk.ReadImage(mask_image_path)
+    arr = sitk.GetArrayViewFromImage(img)
+    z, y, x = np.where(arr > 0)
+    if len(z) == 0:
+        return None
+    ijk = np.stack([x, y, z], axis=1).astype(np.float64)
+    sp = np.array(img.GetSpacing(), dtype=np.float64)
+    orig = np.array(img.GetOrigin(), dtype=np.float64)
+    direction = np.array(img.GetDirection(), dtype=np.float64).reshape(3, 3)
+    pts = (ijk * sp) @ direction.T + orig
+    k = max(10, int(len(pts) * pct))
+    medial_pts = pts[np.argsort(np.abs(pts[:, 0] - midline_x))[:k]]
+    return medial_pts.mean(axis=0)
 
 
 def extract_mask_centroid(mask_image_path):
@@ -183,9 +212,9 @@ def extract_surface_points(label_image, num_points=500, seed=42):
 
 
 def swd_optimization_torch(ct_points, mri_points, initial_transform,
-                           max_epochs=800, lr=0.1, seed=42):
+                           max_epochs=500, lr_rot=0.02, lr_trans=0.5, seed=42, lr=None):
     """
-    SWD rigid registration using PyTorch on CUDA/CPU.
+    Prostate-centroid-centered SWD rigid registration using PyTorch on CUDA/CPU.
     initial_transform maps CT -> MRI.
     Returns a refined sitk.AffineTransform mapping CT -> MRI.
     """
@@ -194,7 +223,7 @@ def swd_optimization_torch(ct_points, mri_points, initial_transform,
         torch.cuda.manual_seed_all(seed)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"  SWD Optimization device: {device} ({max_epochs} epochs, lr={lr})")
+    print(f"  SWD Optimization device: {device} ({max_epochs} epochs, lr_rot={lr_rot}, lr_trans={lr_trans})")
 
     R_init = np.array(initial_transform.GetMatrix()).reshape(3, 3)
     t_init = np.array(initial_transform.GetTranslation())
@@ -204,25 +233,31 @@ def swd_optimization_torch(ct_points, mri_points, initial_transform,
     t_inv = -R_inv @ t_init
     mri_in_ct = (R_inv @ mri_points.T).T + t_inv
 
-    ct_tensor = torch.from_numpy(ct_points).float().to(device)
-    mri_tensor = torch.from_numpy(mri_in_ct).float().to(device)
+    c_ct = ct_points.mean(axis=0)
+    c_mri_in_ct = mri_in_ct.mean(axis=0)
+    init_offset = c_ct - c_mri_in_ct
 
-    # Residual transform parameters: rotation (logit-space, +/-5 deg) + translation
+    ct_tensor = torch.from_numpy(ct_points - c_ct).float().to(device)
+    mri_tensor = torch.from_numpy(mri_in_ct - c_ct).float().to(device)
+
+    # Residual transform parameters centered at c_ct: rotation (+/- ~14 deg) + translation
     rotation_params = torch.zeros(3, device=device, requires_grad=True)
-    translation_params = torch.zeros(3, device=device, requires_grad=True)
+    translation_params = torch.tensor(init_offset, dtype=torch.float32, device=device, requires_grad=True)
 
-    optimizer = torch.optim.Adam([rotation_params, translation_params], lr=lr)
+    optimizer = torch.optim.Adam([
+        {'params': [rotation_params], 'lr': lr_rot},
+        {'params': [translation_params], 'lr': lr_trans}
+    ])
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max_epochs)
 
     best_loss = float('inf')
-    best_R = None
-    best_t = None
+    best_R = np.eye(3, dtype=np.float64)
+    best_t = init_offset.copy()
 
     for epoch in range(max_epochs):
         optimizer.zero_grad()
-        rot_deg = (torch.sigmoid(rotation_params) - 0.5) * 10.0
-        rot_rad = torch.deg2rad(rot_deg)
-        rx, ry, rz = rot_rad
+        rot_rad = torch.tanh(rotation_params) * 0.25  # +/- ~14.3 deg around c_ct
+        rx, ry, rz = rot_rad[0], rot_rad[1], rot_rad[2]
         cx, sx = torch.cos(rx), torch.sin(rx)
         cy, sy = torch.cos(ry), torch.sin(ry)
         cz, sz = torch.cos(rz), torch.sin(rz)
@@ -240,8 +275,8 @@ def swd_optimization_torch(ct_points, mri_points, initial_transform,
         R = Rz @ Ry @ Rx
         mri_xf = (R @ mri_tensor.T).T + translation_params
 
-        # Sliced Wasserstein Distance with 200 random 1D projections
-        n_proj = 200
+        # Sliced Wasserstein Distance with 256 random 1D projections
+        n_proj = 256
         proj = torch.randn(n_proj, 3, device=device)
         proj = proj / torch.norm(proj, dim=1, keepdim=True)
         p_ct = ct_tensor @ proj.T
@@ -260,9 +295,12 @@ def swd_optimization_torch(ct_points, mri_points, initial_transform,
                 best_R = R.cpu().numpy().copy()
                 best_t = translation_params.cpu().numpy().copy()
 
-    # Compose: T_final(p_ct) = R_init @ R_res^T @ p_ct - R_init @ R_res^T @ t_res + t_init
+    # Centered composition:
+    # Forward MRI_in_CT -> CT: x_ct = best_R @ (x_mri_in_ct - c_ct) + c_ct + best_t
+    # Inverse CT -> MRI_in_CT: x_mri_in_ct = best_R.T @ (x_ct - c_ct - best_t) + c_ct
+    # Then MRI_in_CT -> MRI: x_mri = R_init @ x_mri_in_ct + t_init
     R_final = R_init @ best_R.T
-    t_final = -R_init @ best_R.T @ best_t + t_init
+    t_final = R_init @ (c_ct - best_R.T @ (c_ct + best_t)) + t_init
 
     transform = sitk.AffineTransform(3)
     transform.SetMatrix(R_final.flatten().tolist())
@@ -679,16 +717,16 @@ def run_registration(
         ct_landmarks = parse_fcsv(ct_fcsv)
         mri_landmarks = parse_fcsv(mri_fcsv)
 
-    # If no FCSV or incomplete landmarks, compute from TotalSegmentator masks
-    key_labels = ['femur_left', 'femur_right', 'hip_left', 'hip_right', 'prostate', 'urinary_bladder']
+    # Stage 1: ONLY the 4 most medial points of hip and femur bones (NO bladder, whole CT)
+    key_labels = ['femur_left', 'femur_right', 'hip_left', 'hip_right']
     common_landmarks = sorted(set(ct_landmarks.keys()) & set(mri_landmarks.keys()))
     if len(common_landmarks) < 3:
-        print("  Extracting paired anatomical centroids from TotalSegmentator segmentations...")
+        print("  Extracting most medial bone landmarks (femur_left, femur_right, hip_left, hip_right) from TotalSegmentator segmentations...")
         ct_landmarks = {}
         mri_landmarks = {}
         for lbl in key_labels:
-            c_ct = extract_mask_centroid(os.path.join(ct_seg_dir, f"{lbl}.nii.gz"))
-            c_mri = extract_mask_centroid(os.path.join(mri_seg_dir, f"{lbl}.nii.gz"))
+            c_ct = extract_medial_bone_centroid(os.path.join(ct_seg_dir, f"{lbl}.nii.gz"))
+            c_mri = extract_medial_bone_centroid(os.path.join(mri_seg_dir, f"{lbl}.nii.gz"))
             if c_ct is not None and c_mri is not None:
                 ct_landmarks[lbl] = c_ct
                 mri_landmarks[lbl] = c_mri

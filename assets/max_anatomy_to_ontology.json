@@ -4550,6 +4550,42 @@
     "anatomical_sublocation": "Lacrimal Gland",
     "clinical_significance": "Benign / Physiological PSMA Uptake (Lacrimal Gland)"
   },
+  "lacrimal_gland": {
+    "detailed": "lacrimal gland (UBERON)",
+    "generalized": "lacrimal gland",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Physiological Uptake",
+    "anatomical_sublocation": "Lacrimal Gland",
+    "clinical_significance": "Benign / Physiological PSMA Uptake (Lacrimal Gland)"
+  },
+  "lacrimal gland": {
+    "detailed": "lacrimal gland (UBERON)",
+    "generalized": "lacrimal gland",
+    "side": "",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Physiological Uptake",
+    "anatomical_sublocation": "Lacrimal Gland",
+    "clinical_significance": "Benign / Physiological PSMA Uptake (Lacrimal Gland)"
+  },
+  "lacrimal gland left": {
+    "detailed": "lacrimal gland (UBERON)",
+    "generalized": "lacrimal gland",
+    "side": "Left",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Physiological Uptake",
+    "anatomical_sublocation": "Lacrimal Gland",
+    "clinical_significance": "Benign / Physiological PSMA Uptake (Lacrimal Gland)"
+  },
+  "lacrimal gland right": {
+    "detailed": "lacrimal gland (UBERON)",
+    "generalized": "lacrimal gland",
+    "side": "Right",
+    "anatomic_location": "Solid Organ / Viscera",
+    "lesion_type": "Physiological Uptake",
+    "anatomical_sublocation": "Lacrimal Gland",
+    "clinical_significance": "Benign / Physiological PSMA Uptake (Lacrimal Gland)"
+  },
   "optic_chiasm": {
     "detailed": "optic chiasm (UBERON)",
     "generalized": "optic chiasm",

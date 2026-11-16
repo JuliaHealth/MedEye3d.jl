@@ -224,6 +224,16 @@ function filter_exclusion_lesions!(mask::AbstractArray{<:Integer, 3},
         return Int[]
     end
 
+    # Compute total anatomical voxel counts for exclusion organs (so small glands like lacrimal
+    # glands engulfed by a larger PET lesion halo are also caught cleanly).
+    excl_totals = Dict{Int, Int}()
+    @inbounds for av in max_anatomy
+        a = Int(av)
+        if a in excl_ids
+            excl_totals[a] = get(excl_totals, a, 0) + 1
+        end
+    end
+
     removed_lids = Int[]
     all_lids = sort([Int(x) for x in filter(x -> x > 0, unique(mask))])
 
@@ -231,7 +241,14 @@ function filter_exclusion_lesions!(mask::AbstractArray{<:Integer, 3},
         pts = findall(mask .== lid)
         isempty(pts) && continue
         N = length(pts)
-        N_excl = count(p -> max_anatomy[p] in excl_ids, pts)
+        excl_counts = Dict{Int, Int}()
+        @inbounds for p in pts
+            a = Int(max_anatomy[p])
+            if a in excl_ids
+                excl_counts[a] = get(excl_counts, a, 0) + 1
+            end
+        end
+        N_excl = sum(values(excl_counts))
         
         # Centroid calculation
         cx = round(Int, mean([p[1] for p in pts]))
@@ -242,8 +259,12 @@ function filter_exclusion_lesions!(mask::AbstractArray{<:Integer, 3},
                                         clamp(cy, 1, size(max_anatomy, 2)),
                                         clamp(cz, 1, size(max_anatomy, 3))] in excl_ids)
         frac = N_excl / N
+        small_gland_engulfed = any(
+            (ov >= 5) && (get(excl_totals, aid, 0) < 500) && (ov / max(1, get(excl_totals, aid, 1)) >= 0.20)
+            for (aid, ov) in excl_counts
+        )
 
-        if centroid_in_excl || frac > overlap_threshold
+        if centroid_in_excl || frac > overlap_threshold || small_gland_engulfed
             # Entire lesion is physiological uptake in parotid/bladder/lacrimal -> zero out
             mask[mask .== lid] .= 0
             push!(removed_lids, lid)

@@ -641,8 +641,38 @@ function is_prostate_structure(name::AbstractString)::Bool
     occursin("urethra", ln) && return true
     occursin("(ur)", ln) && return true
     occursin("seminal vesicle", ln) && return true
+    occursin("seminal_vesicle", ln) && return true
+    occursin("seminal", ln) && return true
     occursin("(sv_", ln) && return true
     return false
+end
+
+"""
+    is_lacrimal_gland_structure(name::AbstractString)::Bool
+
+Determine whether a structure name refers to a lacrimal gland
+(`lacrimal_gland_left`, `lacrimal_gland_right`, `lacrimal gland`).
+"""
+function is_lacrimal_gland_structure(name::AbstractString)::Bool
+    isempty(name) && return false
+    ln = lowercase(strip(name))
+    return occursin("lacrimal", ln)
+end
+
+"""
+    is_physiological_uptake_organ(name::AbstractString)::Bool
+
+Determine whether a structure is a normal physiological PSMA uptake organ
+whose uptake should be suppressed/excluded from pathological lesions.
+"""
+function is_physiological_uptake_organ(name::AbstractString)::Bool
+    isempty(name) && return false
+    ln = lowercase(strip(name))
+    return occursin("lacrimal", ln) ||
+           occursin("parotid", ln) ||
+           occursin("submandibular", ln) ||
+           occursin("urinary_bladder", ln) ||
+           (occursin("bladder", ln) && !occursin("gall", ln))
 end
 
 """
@@ -743,10 +773,11 @@ function classify_tissue_priority(name::String)::Int
     
     # 4. Solid organs
     organ_kw = ["liver", "kidney", "lung", "spleen", "pancreas", "heart",
-                "thyroid_gland", "adrenal", "stomach", "colon", "rectum",
+                "thyroid_gland", "adrenal", "stomach", "colon", "sigmoid", "rectum",
                 "esophagus", "gallbladder", "bladder", "bowel",
                 "duodenum", "trachea", "brain", "spinal_cord", "eye",
-                "parotid", "submandibular", "optic_nerve"]
+                "lacrimal", "parotid", "submandibular", "pituitary",
+                "optic_nerve", "optic_chiasm", "seminal"]
     any(k -> occursin(k, ln), organ_kw) && return 4  # Solid organ
     
     # 5. Vessels
@@ -762,7 +793,7 @@ end
 Sanity check organ and base anatomy against physical Z position in the body.
 In whole-body CT/PET, Z ranges from inferior (pelvis/thighs at z low) to superior (vertex at z high).
 - Lower limb / pelvis (femur, tibia, fibula, patella, hip, ilium, ischium, pubis, sacrum): physically impossible at z > 200 (or z/total_z > 0.55).
-- Skull, calvarium, brain, eyes, palate, mandible, C1-C3: physically impossible at z < 100 (or z/total_z < 0.30).
+- Skull, calvarium, brain, eyes, lacrimal glands, palate, mandible, C1-C3: physically impossible at z < 100 (or z/total_z < 0.30).
 """
 function sanitize_anatomy_by_z(organ::String, base_anat::String, z::Real, total_z::Real=326)::Tuple{String, String}
     z <= 0 && return (organ, base_anat)
@@ -770,7 +801,7 @@ function sanitize_anatomy_by_z(organ::String, base_anat::String, z::Real, total_
     
     # Superior region (thorax/neck/head, z > 180 or rel_z > 0.50)
     if z > 180 || rel_z > 0.50
-        lower_limb_kws = ["femur", "tibia", "fibula", "patella", "hip", "ilium", "ischium", "pubis", "sacrum", "gluteus", "thigh"]
+        lower_limb_kws = ["femur", "tibia", "fibula", "patella", "hip", "ilium", "ischium", "pubis", "sacrum", "gluteus", "thigh", "prostate", "seminal"]
         org_lc = lowercase(organ)
         base_lc = lowercase(base_anat)
         if any(kw -> occursin(kw, org_lc), lower_limb_kws) || any(kw -> occursin(kw, base_lc), lower_limb_kws)
@@ -780,7 +811,7 @@ function sanitize_anatomy_by_z(organ::String, base_anat::String, z::Real, total_
 
     # Inferior region (pelvis/legs, z < 100 or rel_z < 0.30)
     if z < 100 || rel_z < 0.30
-        head_kws = ["skull", "calvarium", "brain", "eye", "palate", "mandible", "nasopharynx", "temporalis", "cervical"]
+        head_kws = ["skull", "calvarium", "brain", "eye", "lacrimal", "pituitary", "optic", "palate", "mandible", "nasopharynx", "temporalis", "cervical"]
         org_lc = lowercase(organ)
         base_lc = lowercase(base_anat)
         if any(kw -> occursin(kw, org_lc), head_kws) || any(kw -> occursin(kw, base_lc), head_kws)
@@ -868,11 +899,31 @@ function pick_best_organ(counts::Dict{Int,Int}, ts_names::Dict{Int,String})::Str
         return ln_candidates[1][1]
     end
     
+    total_voxels = sum(cnt for (_, cnt) in counts if cnt > 0)
+    total_voxels <= 0 && return ""
+
+    # Rule 2b: Lacrimal glands take priority over adjacent orbital skull/skin/eye
+    # so orbital PSMA physiological uptake touching the orbital rim is named lacrimal_gland_*.
+    lac_cands = Tuple{String, Int}[]
+    for (label_id, cnt) in counts
+        cnt <= 0 && continue
+        name = get(ts_names, label_id, "")
+        if is_lacrimal_gland_structure(name)
+            push!(lac_cands, (name, cnt))
+        end
+    end
+    if !isempty(lac_cands)
+        sort!(lac_cands, by = x -> x[2], rev = true)
+        top_lac, top_lac_cnt = lac_cands[1]
+        if top_lac_cnt >= 2 && (top_lac_cnt >= total_voxels * 0.015 || total_voxels <= 250)
+            return top_lac
+        end
+    end
+
     # Rule 3: General tissue priority fallback (Bone > Solid Organ > Vessel > Muscle)
     # Bone only wins over other tissues if it represents a meaningful fraction (>=10%)
     # of the total voxels. This prevents a single stray bone voxel from overriding
     # hundreds of closer organ/muscle voxels in expanding sphere lookups.
-    total_voxels = sum(cnt for (_, cnt) in counts if cnt > 0)
     
     # Collect all candidates with their priority and count
     candidates = Tuple{String, Int, Int}[]  # (name, priority, count)
@@ -891,6 +942,24 @@ function pick_best_organ(counts::Dict{Int,Int}, ts_names::Dict{Int,String})::Str
     best_name = candidates[1][1]
     best_priority = candidates[1][2]
     best_count = candidates[1][3]
+
+    # Head/orbital gland & globe override: when cranial bone (skull / nvseg_skull / calvarium / mandible)
+    # wins Priority 3 solely by bordering high-uptake physiological head/neck glands or globes,
+    # prefer the gland/globe with higher voxel count or >= 15% of overlapping voxels.
+    best_lc = lowercase(best_name)
+    if best_priority == 3 && (occursin("skull", best_lc) || occursin("mandible", best_lc) || occursin("calvarium", best_lc))
+        head_gland_kws = ["lacrimal", "parotid", "submandibular", "pituitary", "eye_left", "eye_right"]
+        gland_cands = filter(c -> any(kw -> occursin(kw, lowercase(c[1])), head_gland_kws), candidates)
+        if !isempty(gland_cands)
+            sort!(gland_cands, by = c -> c[3], rev = true)
+            top_gland = gland_cands[1]
+            if top_gland[3] > best_count || top_gland[3] >= total_voxels * 0.15
+                best_name = top_gland[1]
+                best_priority = top_gland[2]
+                best_count = top_gland[3]
+            end
+        end
+    end
     
     # If the best-priority candidate has <10% of voxels, check if a lower-priority
     # candidate with much higher count should win instead (majority rule)
@@ -996,6 +1065,138 @@ function map_lesions_to_organs(lesion_mask::AbstractArray, ts_atlas::AbstractArr
     
     @info "Mapped $(length(result))/$(length(lesion_ints)) lesions to organs (volume-based with bone priority)"
     return result
+end
+
+"""
+    filter_lacrimal_lesions!(mask, atlas, ts_names; organ_mapping=nothing) -> Vector{Int}
+
+Removes lesions corresponding to physiological PSMA uptake in lacrimal glands from `mask`
+in-place and returns the sorted list of removed lesion IDs.
+
+A lesion ID `lid > 0` is removed if any of the following hold:
+1. `organ_mapping` explicitly maps `lid` to a lacrimal gland structure.
+2. In `atlas` (same 3D shape as `mask`):
+   a) `pick_best_organ` assigns `lid` to `lacrimal_gland_*`, OR
+   b) Overlap with lacrimal gland labels in `atlas` satisfies `ov_lac >= 5` and
+      (`ov_lac / lesion_voxels >= 0.08` or `ov_lac / gland_total_voxels >= 0.20`), OR
+   c) Fallback when lacrimal gland labels are absent from `atlas`: superior head lesion
+      (`mean_z / size(mask, 3) > 0.72`) with `ov_eye >= 30` and `ov_eye / lesion_voxels >= 0.15`
+      whose overlapping atlas labels are strictly orbital/superficial
+      (`eye_left`, `eye_right`, `skull`, `nvseg_skull`, `head`, `skin`, `lacrimal*`)
+      with zero brain or lymph-node overlap.
+"""
+function filter_lacrimal_lesions!(mask::AbstractArray{<:Real,3},
+                                  atlas::Union{Nothing,AbstractArray{<:Real,3}},
+                                  ts_names::Dict{Int,String};
+                                  organ_mapping::Union{Nothing,Dict{Int,String}}=nothing)::Vector{Int}
+    has_atlas = (atlas !== nothing && size(atlas) == size(mask) && !isempty(ts_names))
+
+    lac_ids = Set{Int}()
+    eye_ids = Set{Int}()
+    orbital_allowed_ids = Set{Int}()
+    if has_atlas
+        for (aid, aname) in ts_names
+            ln = lowercase(strip(aname))
+            if is_lacrimal_gland_structure(ln)
+                push!(lac_ids, aid)
+                push!(orbital_allowed_ids, aid)
+            elseif ln in ("eye_left", "eye_right", "eye_l", "eye_r")
+                push!(eye_ids, aid)
+                push!(orbital_allowed_ids, aid)
+            elseif occursin("skull", ln) || ln in ("head", "skin", "face")
+                push!(orbital_allowed_ids, aid)
+            end
+        end
+    end
+
+    gland_totals = Dict{Int,Int}()
+    lesion_vox = Dict{Int,Int}()
+    lesion_z_sum = Dict{Int,Int}()
+    counts_by_lid = Dict{Int,Dict{Int,Int}}()
+
+    @inbounds for idx in CartesianIndices(mask)
+        av = has_atlas ? Int(atlas[idx]) : 0
+        if has_atlas && (av in lac_ids)
+            gland_totals[av] = get(gland_totals, av, 0) + 1
+        end
+        mv_raw = mask[idx]
+        if mv_raw > 0
+            mv = round(Int, mv_raw)
+            if mv > 0
+                lesion_vox[mv] = get(lesion_vox, mv, 0) + 1
+                lesion_z_sum[mv] = get(lesion_z_sum, mv, 0) + idx[3]
+                if av > 0 && haskey(ts_names, av)
+                    d = get!(counts_by_lid, mv, Dict{Int,Int}())
+                    d[av] = get(d, av, 0) + 1
+                end
+            end
+        end
+    end
+
+    removed_set = Set{Int}()
+    z_dim = size(mask, 3)
+
+    # Check lesions present in mask
+    for (lid, n_vox) in lesion_vox
+        n_vox <= 0 && continue
+        is_lac = false
+
+        # 1. Explicit organ_mapping check
+        if organ_mapping !== nothing && is_lacrimal_gland_structure(get(organ_mapping, lid, ""))
+            is_lac = true
+        end
+
+        # 2. Atlas overlap checks
+        if !is_lac && has_atlas && haskey(counts_by_lid, lid)
+            cnts = counts_by_lid[lid]
+            best_org = pick_best_organ(cnts, ts_names)
+            if is_lacrimal_gland_structure(best_org)
+                is_lac = true
+            end
+
+            if !is_lac && !isempty(lac_ids)
+                for (aid, ov) in cnts
+                    if aid in lac_ids && ov >= 5
+                        gtot = max(1, get(gland_totals, aid, 0))
+                        if (ov / n_vox >= 0.08) || (ov / gtot >= 0.20)
+                            is_lac = true
+                            break
+                        end
+                    end
+                end
+            end
+
+            # 2c. Orbital fallback when CADS lacrimal labels are not present in atlas
+            if !is_lac && isempty(lac_ids) && !isempty(eye_ids)
+                mean_z = lesion_z_sum[lid] / n_vox
+                if z_dim > 0 && (mean_z / z_dim > 0.72)
+                    ov_eye = sum(get(cnts, eid, 0) for eid in eye_ids)
+                    if ov_eye >= 30 && (ov_eye / n_vox >= 0.15)
+                        all_orbital = all(aid -> aid in orbital_allowed_ids, keys(cnts))
+                        if all_orbital
+                            is_lac = true
+                        end
+                    end
+                end
+            end
+        end
+
+        if is_lac
+            push!(removed_set, lid)
+        end
+    end
+
+    if !isempty(removed_set)
+        zval = zero(eltype(mask))
+        @inbounds for i in eachindex(mask)
+            mv_raw = mask[i]
+            if mv_raw > 0 && (round(Int, mv_raw) in removed_set)
+                mask[i] = zval
+            end
+        end
+    end
+
+    return sort!(collect(removed_set))
 end
 
 """
@@ -1361,7 +1562,8 @@ end
 
 export load_nrrd_labelmap, map_lesions_to_organs, classify_organ_to_lesion_type
 export classify_tissue_priority, classify_and_pick_best_organ, count_atlas_overlap, pick_best_organ, lookup_anatomy, sanitize_anatomy_by_z
-export is_prostate_structure, is_lymph_node_structure, is_pelvic_lymph_node, classify_lymph_node_location
+export is_prostate_structure, is_lacrimal_gland_structure, is_physiological_uptake_organ, filter_lacrimal_lesions!
+export is_lymph_node_structure, is_pelvic_lymph_node, classify_lymph_node_location
 export format_clinical_station_name, format_adjacent_structure_name, generate_detailed_anatomy_rows
 
 end # module

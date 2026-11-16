@@ -236,16 +236,17 @@ function classify_mitnm(organ::String, sublocation::String, details::String, les
                        "tongue", "digastric", "thigh_medial", "thigh_posterior",
                        "levator_scapulae", "sterno_thyroid", "thyrohyoid", "transversospinalis", "muscle", "muskel"]
     is_muscle = any(k -> occursin(k, lo), muscle_keywords)
-    if (is_muscle || occursin("artifact", lo) || occursin("artefakt", lo) || occursin("false positive", lo) ||
+    is_physiological = occursin("lacrimal", lo) || ltype_lo == "physiological uptake"
+    if (is_muscle || is_physiological || occursin("artifact", lo) || occursin("artefakt", lo) || occursin("false positive", lo) ||
        ltype_lo == "technical artifact") && ltype_lo != "lymph node" && ltype_lo != "lymph node meta"
         return "Artifact"
     end
     
-    # ── 1. Prostate (from keywords OR LesionType) ──
-    if occursin("prostat", lo) || ltype_lo == "prostate"
+    # ── 1. Prostate & Seminal Vesicles (from keywords OR LesionType) ──
+    if occursin("prostat", lo) || ltype_lo == "prostate" || occursin("seminal", lo) || occursin("bläschen", lo) || occursin("sv_l", lo) || occursin("sv_r", lo)
         if occursin("bed", lo) || occursin("bett", lo) || occursin("recurren", lo) || occursin("rezidiv", lo)
             return "miTr"
-        elseif occursin("seminal", lo) || occursin("bläschen", lo) || occursin("vesic", lo)
+        elseif occursin("seminal", lo) || occursin("bläschen", lo) || occursin("vesic", lo) || occursin("sv_l", lo) || occursin("sv_r", lo)
             return "miT3b"
         elseif occursin("capsul", lo) || occursin("kapsel", lo) || occursin("extracaps", lo)
             return "miT3a"
@@ -539,6 +540,10 @@ function resolve_anatomical_location(lid::Integer, state::Union{AbstractDict, No
             clean_loc = !isempty(clean_side) ? "$clean_side Clavicle" : "Clavicle"
         elseif occursin("prostate", lowercase(raw_organ))
             clean_loc = "Prostate Gland"
+        elseif occursin("seminal", lowercase(raw_organ))
+            clean_loc = !isempty(clean_side) ? "$clean_side Seminal Vesicle" : "Seminal Vesicle"
+        elseif occursin("lacrimal", lowercase(raw_organ))
+            clean_loc = !isempty(clean_side) ? "$clean_side Lacrimal Gland" : "Lacrimal Gland"
         elseif occursin("quadriceps", lowercase(raw_organ))
             clean_loc = !isempty(clean_side) ? "$clean_side Quadriceps Femoris Muscle" : "Quadriceps Femoris Muscle"
         elseif occursin("sartorius", lowercase(raw_organ))
@@ -909,15 +914,19 @@ function build_epsma_data(tp_idx::Int; lang::String = "EN")::EPSMAReport
     else
         Int[]
     end
-    # Always merge with organ_mapping (contains all lesions from preprocessing)
-    if _MEH !== nothing && !isempty(_MEH.global_organ_mapping[])
-        om_ids = collect(keys(_MEH.global_organ_mapping[]))
-        l_ids = sort(unique(vcat(l_ids, om_ids)))
+    has_loaded_mask = _MEH !== nothing && isdefined(_MEH, :tp_data_cache) && lock(_MEH._tp_cache_lock) do
+        haskey(_MEH.tp_data_cache, tp_idx) && _MEH.tp_data_cache[tp_idx].mask !== nothing
     end
-    # Also merge with tp_segment_names (contains segment names from scene_hierarchy)
-    if _MEH !== nothing && haskey(_MEH.tp_segment_names, tp_idx)
-        seg_ids = collect(keys(_MEH.tp_segment_names[tp_idx]))
-        l_ids = sort(unique(vcat(l_ids, seg_ids)))
+    if isempty(l_ids) && !has_loaded_mask
+        # Fallback only when 3D mask for tp_idx is not loaded
+        if _MEH !== nothing && !isempty(_MEH.global_organ_mapping[])
+            om_ids = collect(keys(_MEH.global_organ_mapping[]))
+            l_ids = sort(unique(vcat(l_ids, om_ids)))
+        end
+        if _MEH !== nothing && haskey(_MEH.tp_segment_names, tp_idx)
+            seg_ids = collect(keys(_MEH.tp_segment_names[tp_idx]))
+            l_ids = sort(unique(vcat(l_ids, seg_ids)))
+        end
     end
     @info "[E-PSMA] Discovered $(length(l_ids)) lesion IDs for TP $tp_idx: $l_ids"
     

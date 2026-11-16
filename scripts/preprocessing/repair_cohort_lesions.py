@@ -18,24 +18,9 @@ from batch_process_cohort_dual_gpu import (
     XnatManager, PROJ_ID, OUT_BASE_DIR, CENSUS_PATH,
     download_ac_pet_dicom, calibrate_suv_image
 )
-
-
-def classify_organ_priority(name: str) -> int:
-    ln = name.lower()
-    if any(k in ln for k in ["prostate", "peripheral zone", "(pz)", "transition zone", "(tz)", "central zone", "(cz)", "seminal vesicle"]):
-        return 1
-    if any(k in ln for k in ["lymph", "knoten", "node", "station_"]) or any(ln.startswith(p) for p in ["neck_", "thoracic_", "axillary_", "abdominal_", "deep_inguinal", "superficial_inguinal", "inguinal_"]):
-        return 2
-    bone_kw = ["vertebra", "rib_", "femur", "humerus", "scapula", "hip", "sacrum", "skull", "sternum", "clavicle", "costal", "hyoid", "mandible", "ilium", "ischium", "pubis", "tibia", "bone", "spine"]
-    vessel_excl = ["artery", "vein", "vena", "vessel"]
-    if any(k in ln for k in bone_kw) and not any(v in ln for v in vessel_excl):
-        return 3
-    organ_kw = ["liver", "kidney", "lung", "spleen", "pancreas", "heart", "thyroid", "adrenal", "stomach", "colon", "rectum", "esophagus", "gallbladder", "bladder", "bowel", "duodenum", "trachea", "brain", "spinal_cord"]
-    if any(k in ln for k in organ_kw):
-        return 4
-    if any(k in ln for k in ["aorta", "artery", "vein", "vena", "trunk", "carotid", "jugular"]):
-        return 5
-    return 6
+from cads_anatomy_wiring import (
+    classify_organ_priority, pick_best_organ, filter_lacrimal_lesions
+)
 
 
 def repair_case_lesions(pat_id: str, subj_info: dict, xnat: XnatManager, upload: bool = True) -> bool:
@@ -132,18 +117,28 @@ def repair_case_lesions(pat_id: str, subj_info: dict, xnat: XnatManager, upload:
                 ds_pt.attrs["origin"] = orig_arr
                 ds_pt.attrs["direction"] = dir_arr
 
-        # 1. Update BASELINE/PET_Lesions_0.nii.gz
+        # Read max_anatomy & anat_labels & mr_gold_f BEFORE filtering/writing lesions
+        max_anat_f = h5["ATLAS/max_anatomy"][()]
+        raw_al = h5["_meta_/max_anatomy_labels.json"][()]
+        anat_labels = json.loads(raw_al.decode() if isinstance(raw_al, bytes) else raw_al)
+
+        # Filter physiological lacrimal gland lesions and map remaining lesions to organs
+        removed_lac, remaining_labels, ct_organs = filter_lacrimal_lesions(
+            ct_les_f, max_anat_f, anat_labels, seg_names=ct_seg_names
+        )
+        if removed_lac:
+            print(f"  [{pat_id}] Filtered {len(removed_lac)} physiological lacrimal gland lesions: {removed_lac}")
+            for r_lid in removed_lac:
+                ct_seg_names.pop(str(r_lid), None)
+        ct_labels = remaining_labels
+
+        # 1. Update BASELINE/PET_Lesions_0.nii.gz (after lacrimal filtering)
         if "PET_Lesions_0.nii.gz" in b:
             del b["PET_Lesions_0.nii.gz"]
         ds_l0 = b.create_dataset("PET_Lesions_0.nii.gz", data=ct_les_f, compression="gzip", compression_opts=4, shuffle=True)
         ds_l0.attrs["spacing"] = sp_arr
         ds_l0.attrs["origin"] = orig_arr
         ds_l0.attrs["direction"] = dir_arr
-
-        # Read max_anatomy & anat_labels & mr_gold_f
-        max_anat_f = h5["ATLAS/max_anatomy"][()]
-        raw_al = h5["_meta_/max_anatomy_labels.json"][()]
-        anat_labels = json.loads(raw_al.decode() if isinstance(raw_al, bytes) else raw_al)
 
         mr_gold_f = np.zeros_like(ct_les_f)
         if "TFM_Transform_FollowUp_to_Baseline_1.tfm" in h5 and "PET_Lesions_1.nii.gz" in h5["TFM_Transform_FollowUp_to_Baseline_1.tfm"]:
@@ -162,35 +157,7 @@ def repair_case_lesions(pat_id: str, subj_info: dict, xnat: XnatManager, upload:
             zc, yc, xc = np.mean(np.argwhere(mr_gold_f == 1), axis=0)
             c_grp.create_dataset("tp1_lid1", data=np.array([round(xc) + 1, round(yc) + 1, round(zc) + 1], dtype=np.int32))
 
-        # 3. Compute organ_mapping
-        ct_organs = {}
-        for lid in ct_labels:
-            mask_l = (ct_les_f == lid)
-            avals = max_anat_f[mask_l]
-            avals = avals[avals > 0]
-            best_org = "Unknown"
-            if len(avals) > 0:
-                uvals, ucnts = np.unique(avals, return_counts=True)
-                cands = []
-                for uv, uc in zip(uvals, ucnts):
-                    aname = anat_labels.get(str(int(uv)), "")
-                    if aname and aname not in ("body_trunc", "body_extremities", "abdominal_cavity", "mediastinum", "thoracic_cavity"):
-                        cands.append((classify_organ_priority(aname), -int(uc), aname))
-                if cands:
-                    cands.sort()
-                    best_org = cands[0][2]
-            if best_org == "Unknown":
-                sname = ct_seg_names.get(str(lid), "").lower()
-                if "prostate" in sname:
-                    best_org = "Prostate"
-                elif "hip" in sname or "femur" in sname or "vertebra" in sname or "rib" in sname:
-                    best_org = "Bone"
-                elif "lung" in sname:
-                    best_org = "Lung"
-                elif "liver" in sname:
-                    best_org = "Liver"
-            ct_organs[str(lid)] = best_org
-
+        # 3. Compute organ_mapping & segment_names
         tfm_keys = sorted([k for k in h5.keys() if k.startswith("TFM_Transform_FollowUp_to_Baseline_")])
         organ_mapping = {"0": ct_organs}
         segment_names_dict = {"0": ct_seg_names}

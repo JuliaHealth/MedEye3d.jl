@@ -235,6 +235,7 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
     end
     
     if mode == "Pure PET (Current TP)"
+        MakieEventHandlers.mri_compare_mode[] = false
         for i in 6:10
             stateInstances[i].displayMode = QuadImage
         end
@@ -242,7 +243,7 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
             entry = MakieEventHandlers.get_or_load_tp_data(tp_index)
             if entry !== nothing
                 for i in 6:9
-                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, i)
+                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, i; tp_override=tp_index)
                 end
             end
         end
@@ -262,6 +263,7 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
         end
         ReactToScroll._pet_blend_ref_w2[] = 1.0f0
     elseif mode == "Next TP (Quad View)"
+        MakieEventHandlers.mri_compare_mode[] = false
         for i in 6:10
             stateInstances[i].displayMode = QuadImage
         end
@@ -277,7 +279,7 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
             entry_next = MakieEventHandlers.get_or_load_tp_data(next_tp)
             if entry_next !== nothing
                 for i in 6:9
-                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_next, i)
+                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_next, i; tp_override=next_tp)
                 end
             end
         end
@@ -287,14 +289,15 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
         MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
         MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
     elseif mode == "Left CT, Right PET" || mode == "Left CT, Right PET (Current TP)"
+        MakieEventHandlers.mri_compare_mode[] = false
         for i in 6:10
             stateInstances[i].displayMode = MultiImage
         end
         if load_data
             entry = MakieEventHandlers.get_or_load_tp_data(tp_index)
             if entry !== nothing
-                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 6) # CT/PET (Panel 1)
-                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 7) # PET only (Panel 2)
+                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 6; tp_override=tp_index) # CT/PET (Panel 1)
+                MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, 7; tp_override=tp_index) # PET only (Panel 2)
             end
         end
         MakieEventHandlers.updateQuadVertices!(stateInstances[6], :LeftHalf)
@@ -304,29 +307,28 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
         MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
     elseif mode == "Compare Curr/Next TP"
         MakieEventHandlers.compare_mode[] = true
-        # Reset MRI multimodal mode — Compare replaces M2 panel data
-        MakieEventHandlers.mri_main_multimodal_mode[] = false
+        # Reset M2 MRI multimodal mode — Compare replaces M2 panel data
+        MakieEventHandlers.mri_compare_mode[] = false
         # M2 window shows a QUAD VIEW of the next (compare) TP
         for i in 6:10
             stateInstances[i].displayMode = QuadImage
         end
-        if load_data
-            right_tp = MakieEventHandlers.compare_right_tp[]
-            if right_tp < 0
-                tp_indices = sort(collect(keys(MakieEventHandlers.tp_labels)))
-                if !isempty(tp_indices)
-                    cur_pos = findfirst(==(tp_index), tp_indices)
-                    cur_pos = cur_pos === nothing ? 1 : cur_pos
-                    next_pos = mod1(cur_pos + 1, length(tp_indices))
-                    right_tp = tp_indices[next_pos]
-                    MakieEventHandlers.compare_right_tp[] = right_tp
-                end
+        right_tp = MakieEventHandlers.compare_right_tp[]
+        if right_tp < 0
+            tp_indices = sort(collect(keys(MakieEventHandlers.tp_labels)))
+            if !isempty(tp_indices)
+                cur_pos = findfirst(==(tp_index), tp_indices)
+                cur_pos = cur_pos === nothing ? 1 : cur_pos
+                next_pos = mod1(cur_pos + 1, length(tp_indices))
+                right_tp = tp_indices[next_pos]
+                MakieEventHandlers.compare_right_tp[] = right_tp
             end
-            
+        end
+        if load_data
             entry_right = MakieEventHandlers.get_or_load_tp_data(right_tp)
             if entry_right !== nothing
                 for i in 6:9
-                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_right, i)
+                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_right, i; tp_override=right_tp)
                 end
             end
         end
@@ -336,25 +338,44 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
         MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
         MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
         MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
-        
-        # Set default CT+PET blend for panels 6,8,9 and pure PET for panel 7 (TopRight)
-        default_blend = 0.5f0
-        for i in [6, 8, 9]
-            for tex in stateInstances[i].mainForDisplayObjects.listOfTextSpecifications
-                if tex.isNuclearMask && !tex.isMainImage
-                    tex.maskContribution = default_blend
+
+        right_mod = uppercase(get(MakieEventHandlers.tp_modalities, right_tp, "PET"))
+        is_right_mri = right_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE")
+        if is_right_mri
+            for i in 6:9
+                for tex in stateInstances[i].mainForDisplayObjects.listOfTextSpecifications
+                    if tex.name == "CT"
+                        tex.isVisible = true
+                    elseif tex.isNuclearMask && !tex.isMainImage
+                        tex.maskContribution = 0.0f0
+                        if i == 7
+                            tex.isVisible = false
+                        end
+                    end
                 end
             end
-        end
-        for tex in stateInstances[7].mainForDisplayObjects.listOfTextSpecifications
-            if tex.isNuclearMask && !tex.isMainImage
-                tex.maskContribution = 1.0f0
+        else
+            # Set default CT+PET blend for panels 6,8,9 and pure PET for panel 7 (TopRight)
+            default_blend = 0.5f0
+            for i in [6, 8, 9]
+                for tex in stateInstances[i].mainForDisplayObjects.listOfTextSpecifications
+                    if tex.isNuclearMask && !tex.isMainImage
+                        tex.isVisible = true
+                        tex.maskContribution = default_blend
+                    end
+                end
             end
+            for tex in stateInstances[7].mainForDisplayObjects.listOfTextSpecifications
+                if tex.isNuclearMask && !tex.isMainImage
+                    tex.isVisible = true
+                    tex.maskContribution = 1.0f0
+                end
+            end
+            ReactToScroll._pet_blend_ref_w2[] = default_blend
         end
-        ReactToScroll._pet_blend_ref_w2[] = default_blend
     elseif mode == "Flicker"
-        # Reset MRI multimodal mode — Flicker replaces M2 panel data
-        MakieEventHandlers.mri_main_multimodal_mode[] = false
+        # Reset M2 MRI multimodal mode — Flicker replaces M2 panel data
+        MakieEventHandlers.mri_compare_mode[] = false
         for i in 6:10
             stateInstances[i].displayMode = QuadImage
         end
@@ -368,9 +389,9 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
         MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
         
     elseif mode == "Overlay"
-        # Reset MRI multimodal mode — Overlay mode replaces M2 panel data
+        # Reset M2 MRI multimodal mode — Overlay mode replaces M2 panel data
         # with CT+PET overlay, which conflicts with MRI quad data/permutations
-        MakieEventHandlers.mri_main_multimodal_mode[] = false
+        MakieEventHandlers.mri_compare_mode[] = false
         for i in 6:10
             stateInstances[i].displayMode = QuadImage
         end
@@ -390,7 +411,7 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
             entry_curr = MakieEventHandlers.get_or_load_tp_data(tp_index)
             if entry_curr !== nothing
                 for i in 6:9
-                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_curr, i)
+                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_curr, i; tp_override=tp_index)
                 end
             end
             
@@ -439,10 +460,12 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
         for i in 6:10
             stateInstances[i].displayMode = QuadImage
         end
+        orig_ref_sl_m2 = stateInstances[1].currentDisplayedSlice
         if load_data
             mri_tps = MakieEventHandlers.get_mri_comparison_tps(tp_index)
             empty!(MakieEventHandlers.mri_compare_tps)
             append!(MakieEventHandlers.mri_compare_tps, mri_tps)
+            plane_dim = MakieEventHandlers.mri_compare_plane[] > 0 ? MakieEventHandlers.mri_compare_plane[] : 3
             for slot_idx in 1:min(4, length(mri_tps))
                 p_idx = slot_idx + 5
                 tp_p = mri_tps[slot_idx]
@@ -451,13 +474,91 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
                     MakieEventHandlers._load_tp_from_entry!(stateInstances, entry_mri, p_idx; force_unpermuted=true, tp_override=tp_p)
                 end
             end
+
+            base_vox_sz = stateInstances[6].onScrollData.dataToScrollDims.voxelSize
+            for slot_idx in 1:4
+                p = slot_idx + 5
+                vol_sz = size(stateInstances[p].onScrollData.dataToScroll[1].dat)
+                new_scroll_dims = DataToScrollDims(imageSize=vol_sz, voxelSize=base_vox_sz, dimensionToScroll=plane_dim)
+                stateInstances[p].onScrollData.dataToScrollDims = new_scroll_dims
+                stateInstances[p].onScrollData.dimensionToScroll = plane_dim
+                stateInstances[p].onScrollData.slicesNumber = Int32(vol_sz[plane_dim])
+                stateInstances[p].calcDimsStruct = StructsManag.getHeightToWidthRatio(stateInstances[p].calcDimsStruct, new_scroll_dims)
+                stateInstances[p].displayMode = QuadImage
+
+                for ts in stateInstances[p].mainForDisplayObjects.listOfTextSpecifications
+                    if ts.name == "CT"
+                        ts.isVisible = true
+                        ts.maskContribution = 0.0f0
+                    elseif ts.name == "PET" || ts.name == "SPECT"
+                        ts.isVisible = (slot_idx != 2)
+                        ts.maskContribution = 0.0f0
+                    elseif ts.name == "Mask"
+                        ts.isVisible = MakieEventHandlers._lesion_active[]
+                    elseif ts.name == "Anatomy"
+                        ts.isVisible = MakieEventHandlers._anatomy_active[]
+                    end
+                end
+            end
+
+            MakieEventHandlers.updateQuadVertices!(stateInstances[6], :TopLeft)
+            MakieEventHandlers.updateQuadVertices!(stateInstances[7], :TopRight)
+            MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
+            MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
+            MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
+
+            for slot_idx in 1:min(4, length(mri_tps))
+                p_idx = slot_idx + 5
+                tp_panel = mri_tps[slot_idx]
+                pmod = uppercase(get(MakieEventHandlers.tp_modalities, tp_panel, ""))
+                win = if pmod in ("T2", "MRI", "MR")
+                    get(MakieEventHandlers.current_windowing, "T2", Float32[0.0, 1000.0])
+                elseif pmod == "ADC"
+                    get(MakieEventHandlers.current_windowing, "ADC", Float32[0.0, 2200.0])
+                elseif pmod == "DWI"
+                    get(MakieEventHandlers.current_windowing, "DWI", Float32[0.0, 600.0])
+                elseif pmod == "T1"
+                    get(MakieEventHandlers.current_windowing, "T1", Float32[0.0, 700.0])
+                elseif pmod in ("DCE", "DYNAMIC")
+                    get(MakieEventHandlers.current_windowing, "DCE", Float32[0.0, 500.0])
+                else
+                    Float32[0.0, 1000.0]
+                end
+                for tex in stateInstances[p_idx].mainForDisplayObjects.listOfTextSpecifications
+                    if tex.name == "CT" || tex.isMainImage
+                        tex.minAndMaxValue = Float32.([win[1], win[2]])
+                    end
+                end
+                if stateInstances[p_idx].mainForDisplayObjects.vulkanPipelineState !== nothing
+                    stateInstances[p_idx].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                end
+            end
+
+            cur_lid = (MakieEventHandlers.current_active_lesion_id[] > 0) ? MakieEventHandlers.current_active_lesion_id[] : round(Int, stateInstances[6].valueForMasToSet.value)
+            mri_vol = stateInstances[6].onScrollData.dataToScroll[1].dat
+            mri_tp1 = !isempty(mri_tps) ? mri_tps[1] : tp_index
+            ref_sl = MakieEventHandlers._find_valid_mri_slice(mri_vol, plane_dim, orig_ref_sl_m2, mri_tp1, cur_lid)
+            for slot_idx in 1:4
+                p = slot_idx + 5
+                max_sl = max(1, Int(stateInstances[p].onScrollData.slicesNumber))
+                stateInstances[p].currentDisplayedSlice = clamp(ref_sl, 1, max_sl)
+                stateInstances[p].calcDimsStruct.zoom = stateInstances[1].calcDimsStruct.zoom
+                stateInstances[p].calcDimsStruct.panX = stateInstances[1].calcDimsStruct.panX
+                stateInstances[p].calcDimsStruct.panY = stateInstances[1].calcDimsStruct.panY
+                stateInstances[p].isSliceChanged = true
+                if stateInstances[p].calcDimsStruct.mainQuadVertSize > 0 && !all(iszero, stateInstances[p].calcDimsStruct.mainImageQuadVert)
+                    MakieEventHandlers._force_texture_upload!(stateInstances, p)
+                end
+            end
+        else
+            MakieEventHandlers.updateQuadVertices!(stateInstances[6], :TopLeft)
+            MakieEventHandlers.updateQuadVertices!(stateInstances[7], :TopRight)
+            MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
+            MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
+            MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
         end
-        MakieEventHandlers.updateQuadVertices!(stateInstances[6], :TopLeft)
-        MakieEventHandlers.updateQuadVertices!(stateInstances[7], :TopRight)
-        MakieEventHandlers.updateQuadVertices!(stateInstances[8], :BottomLeft)
-        MakieEventHandlers.updateQuadVertices!(stateInstances[9], :BottomRight)
-        MakieEventHandlers.updateQuadVertices!(stateInstances[10], :Hidden)
     else # "Quad View" or "Current TP (Quad View)"
+        MakieEventHandlers.mri_compare_mode[] = false
         for i in 6:10
             stateInstances[i].displayMode = QuadImage
         end
@@ -465,7 +566,7 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
             entry = MakieEventHandlers.get_or_load_tp_data(tp_index)
             if entry !== nothing
                 for i in 6:9
-                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, i)
+                    MakieEventHandlers._load_tp_from_entry!(stateInstances, entry, i; tp_override=tp_index)
                 end
             end
         end
@@ -478,20 +579,35 @@ function apply_m2_layout!(stateInstances::Vector{StateDataFields}, mode::String,
     
     # Sync base coordinates with main window and upload textures
     if load_data
-        for i in 6:10
-            target_ref = i - 5
-            if target_ref > 1 && stateInstances[target_ref].currentDisplayedSlice <= 0
-                target_ref = 1
-            end
-            stateInstances[i].onScrollData.dimensionToScroll = stateInstances[target_ref].onScrollData.dimensionToScroll
-            stateInstances[i].currentDisplayedSlice = stateInstances[target_ref].currentDisplayedSlice
-            stateInstances[i].onScrollData.slicesNumber = stateInstances[target_ref].onScrollData.slicesNumber
-            stateInstances[i].calcDimsStruct.zoom = stateInstances[target_ref].calcDimsStruct.zoom
-            stateInstances[i].calcDimsStruct.panX = stateInstances[target_ref].calcDimsStruct.panX
-            stateInstances[i].calcDimsStruct.panY = stateInstances[target_ref].calcDimsStruct.panY
+        if mode != "MRI Comparison"
+            orig_sl_1 = stateInstances[1].currentDisplayedSlice
+            cur_lid_sync = MakieEventHandlers.current_active_lesion_id[]
+            for i in 6:10
+                target_ref = i - 5
+                if target_ref > 1 && stateInstances[target_ref].currentDisplayedSlice <= 0
+                    target_ref = 1
+                end
+                stateInstances[i].onScrollData.dimensionToScroll = stateInstances[target_ref].onScrollData.dimensionToScroll
+                panel_tp_i = stateInstances[i].onScrollData.currentTpIndex
+                panel_mod_i = uppercase(get(MakieEventHandlers.tp_modalities, panel_tp_i, "PET"))
+                is_mri_i = panel_mod_i in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE")
+                if i in (6, 7) && is_mri_i && !isempty(stateInstances[i].onScrollData.dataToScroll)
+                    mri_vol_i = stateInstances[i].onScrollData.dataToScroll[1].dat
+                    dim_i = Int(stateInstances[i].onScrollData.dimensionToScroll)
+                    valid_sl = MakieEventHandlers._find_valid_mri_slice(mri_vol_i, dim_i, Int(orig_sl_1), panel_tp_i, cur_lid_sync)
+                    stateInstances[i].onScrollData.slicesNumber = Int32(size(mri_vol_i, dim_i))
+                    stateInstances[i].currentDisplayedSlice = clamp(valid_sl, 1, Int(stateInstances[i].onScrollData.slicesNumber))
+                else
+                    stateInstances[i].currentDisplayedSlice = stateInstances[target_ref].currentDisplayedSlice
+                    stateInstances[i].onScrollData.slicesNumber = stateInstances[target_ref].onScrollData.slicesNumber
+                end
+                stateInstances[i].calcDimsStruct.zoom = stateInstances[target_ref].calcDimsStruct.zoom
+                stateInstances[i].calcDimsStruct.panX = stateInstances[target_ref].calcDimsStruct.panX
+                stateInstances[i].calcDimsStruct.panY = stateInstances[target_ref].calcDimsStruct.panY
 
-            if stateInstances[i].calcDimsStruct.mainQuadVertSize > 0 && !all(iszero, stateInstances[i].calcDimsStruct.mainImageQuadVert)
-                MakieEventHandlers._force_texture_upload!(stateInstances, i)
+                if stateInstances[i].calcDimsStruct.mainQuadVertSize > 0 && !all(iszero, stateInstances[i].calcDimsStruct.mainImageQuadVert)
+                    MakieEventHandlers._force_texture_upload!(stateInstances, i)
+                end
             end
         end
         

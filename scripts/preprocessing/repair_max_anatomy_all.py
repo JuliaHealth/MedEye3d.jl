@@ -25,25 +25,23 @@ import numpy as np
 import h5py
 import argparse
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from cads_anatomy_wiring import (
+    merge_cads_structures, load_resampled_cads_arrays, is_lymph_label_name
+)
+
 MEDEYE_DIR = "/mnt/big/project_ssd/project_ssd/MedEye3d.jl"
+if not os.path.isdir(MEDEYE_DIR):
+    MEDEYE_DIR = "/workspaces/MedEye3d.jl"
 CASES_DIR = os.path.join(MEDEYE_DIR, "data/cases/Prostata_bimodal")
 
 
 def _is_lymph_station_name(name):
     """Check if a mask name represents a lymph node station (mirrors Julia is_lymph_node_structure)."""
     ln = name.lower()
-    for bad in ("_cavity", "exclusion_zone", "chest_wall", "_helper", "_bridge", "_base", "_dilated"):
-        if bad in ln:
-            return False
     if ln in ("thoracic_aorta", "thoracic_duct"):
         return False
-    if any(w in ln for w in ("lymph", "knoten", "node")):
-        return True
-    for p in ("neck_", "thoracic_", "axillary_", "abdominal_",
-              "deep_inguinal", "superficial_inguinal", "inguinal_"):
-        if ln.startswith(p):
-            return True
-    return False
+    return is_lymph_label_name(ln)
 
 
 def layer_and_sanitize_ct_anatomy(ct_shape, raw_dir):
@@ -86,7 +84,7 @@ def layer_and_sanitize_ct_anatomy(ct_shape, raw_dir):
                         labels_dict[str(lbl_idx)] = clean
                         if any(b in clean for b in ["bone", "femur", "hip", "sacrum", "vertebra", "rib", "sternum", "ilium", "ischium"]):
                             bone_ids.append(lbl_idx)
-                        if any(u in clean for u in ["bladder", "kidney"]):
+                        if any(u in clean for u in ["bladder", "kidney", "lacrimal", "parotid", "submandibular"]):
                             exclusion_mask[mask] = 1
                         lbl_idx += 1
         if skipped_old_ln > 0:
@@ -174,6 +172,19 @@ def repair_case(case_name, dry_run=False):
     # Run the fixed layer_and_sanitize_ct_anatomy
     max_anatomy, labels_dict, bone_ids, bone_atlas, skellytour, exclusion_mask = \
         layer_and_sanitize_ct_anatomy(ct_shape, raw_dir)
+
+    # Always preserve/merge CADS Task 556 & 558 structures (seminal_vesicle, lacrimal glands, etc.)
+    cads_556_arr, cads_558_arr = load_resampled_cads_arrays(case_dir)
+    if cads_556_arr is not None or cads_558_arr is not None:
+        max_anatomy, labels_dict = merge_cads_structures(
+            max_anatomy,
+            cads_556_arr=cads_556_arr,
+            cads_558_arr=cads_558_arr,
+            labels_dict=labels_dict,
+            flip_y_cads=False
+        )
+        for lac_val in (533, 534):
+            exclusion_mask[max_anatomy == lac_val] = 1
     
     n_labels = len(labels_dict)
     n_lymph = sum(1 for v in labels_dict.values() if _is_lymph_station_name(v))

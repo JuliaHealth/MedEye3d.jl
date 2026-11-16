@@ -133,7 +133,8 @@ def resolve_cads_label_ids(labels_dict: dict) -> dict:
 def merge_cads_structures(base_anatomy_arr: np.ndarray,
                           cads_556_arr: np.ndarray = None,
                           cads_558_arr: np.ndarray = None,
-                          labels_dict: dict = None) -> tuple:
+                          labels_dict: dict = None,
+                          flip_y_cads: bool = False) -> tuple:
     """
     Merges CADS Task 556 and Task 558 segmentations into max_anatomy array.
 
@@ -145,10 +146,18 @@ def merge_cads_structures(base_anatomy_arr: np.ndarray,
         the colon is kept as colon. It never replaces other organs.
       - Every other CADS structure overwrites non-lymph voxels only.
       - CADS label ids never collide with existing labels (see resolve_cads_label_ids).
+      - When `flip_y_cads=True`, applies np.flip(..., axis=1) to the CADS arrays
+        before merging so they match preflipped HDF5 volumes.
 
     Returns:
       (merged_anatomy_arr, updated_labels_dict)
     """
+    if flip_y_cads:
+        if cads_556_arr is not None:
+            cads_556_arr = np.flip(cads_556_arr, axis=1)
+        if cads_558_arr is not None:
+            cads_558_arr = np.flip(cads_558_arr, axis=1)
+
     out_arr = base_anatomy_arr.copy()
     if labels_dict is None:
         labels_dict = {}
@@ -184,6 +193,204 @@ def merge_cads_structures(base_anatomy_arr: np.ndarray,
             _apply(cads_558_arr == src_idx, target_label)
 
     return out_arr, labels_dict
+
+
+def load_resampled_cads_arrays(case_dir: str, ref_img: sitk.Image = None) -> tuple:
+    """Loads (cads_556_arr, cads_558_arr) for `case_dir`, resampled onto `ref_img` if given."""
+    pred_dir = os.path.join(case_dir, "cads", "Fixed_CT_Volume")
+    p556 = os.path.join(pred_dir, "Fixed_CT_Volume_part_556.nii.gz")
+    p558 = os.path.join(pred_dir, "Fixed_CT_Volume_part_558.nii.gz")
+    if ref_img is None:
+        ref_ct_path = os.path.join(case_dir, "raw", "Fixed_CT_Volume.nii.gz")
+        if os.path.isfile(ref_ct_path):
+            ref_img = sitk.ReadImage(ref_ct_path)
+
+    def _read(path):
+        if not os.path.isfile(path):
+            return None
+        img = sitk.ReadImage(path)
+        return resample_mask_to_reference(img, ref_img) if ref_img is not None else sitk.GetArrayFromImage(img)
+
+    return _read(p556), _read(p558)
+
+
+def classify_organ_priority(name: str) -> int:
+    """Tissue priority for lesion naming (lower = higher priority)."""
+    ln = (name or "").lower().strip()
+    if not ln:
+        return 6
+    if ln in ("pz", "tz", "cz", "afs", "ur", "pg", "sv_l", "sv_r", "svl", "svr"):
+        return 1
+    if any(k in ln for k in ("prostate", "peripheral zone", "(pz)", "transition zone", "(tz)",
+                             "central zone", "(cz)", "seminal_vesicle", "seminal vesicle", "seminal", "(sv_")):
+        return 1
+    if is_lymph_label_name(ln) or "station_" in ln:
+        return 2
+    bone_kw = ["vertebra", "rib_", "femur", "humerus", "scapula", "hip", "sacrum", "skull",
+               "sternum", "clavicle", "costal", "hyoid", "mandible", "ilium", "ischium",
+               "pubis", "tibia", "bone", "spine"]
+    vessel_excl = ["artery", "vein", "vena", "vessel"]
+    muscle_excl = ["levator", "subscapularis", "infraspinatus", "supraspinatus", "teres", "coracobrachial"]
+    if any(k in ln for k in bone_kw) and not any(v in ln for v in vessel_excl) and not any(m in ln for m in muscle_excl):
+        return 3
+    organ_kw = ["liver", "kidney", "lung", "spleen", "pancreas", "heart", "thyroid",
+                "adrenal", "stomach", "colon", "sigmoid", "rectum", "esophagus",
+                "gallbladder", "bladder", "bowel", "duodenum", "trachea", "brain",
+                "spinal_cord", "eye", "lacrimal", "parotid", "submandibular",
+                "pituitary", "optic_nerve", "optic_chiasm", "seminal"]
+    if any(k in ln for k in organ_kw):
+        return 4
+    if any(k in ln for k in ["aorta", "artery", "vein", "vena", "trunk", "carotid", "jugular"]):
+        return 5
+    return 6
+
+
+_EXCLUDED_CONTAINER_LABELS = frozenset(
+    ("body_trunc", "body_extremities", "abdominal_cavity", "mediastinum", "thoracic_cavity")
+)
+
+
+def pick_best_organ(counts: dict, labels_dict: dict) -> str:
+    """Pick the best organ name from {label_id: voxel_count} matching Julia pick_best_organ."""
+    filtered = {
+        int(aid): int(cnt)
+        for aid, cnt in counts.items()
+        if cnt > 0 and labels_dict.get(str(int(aid)), "") not in ("", *_EXCLUDED_CONTAINER_LABELS)
+    }
+    if not filtered:
+        return "Unknown"
+
+    total_vox = sum(filtered.values())
+    cands = []
+    lac_cands = []
+    for aid, cnt in filtered.items():
+        aname = labels_dict[str(aid)]
+        pri = classify_organ_priority(aname)
+        cands.append((pri, -cnt, aname))
+        if "lacrimal" in aname.lower():
+            lac_cands.append((cnt, aname))
+
+    # Rule 1 & 2 (Priority 1 Prostate/Seminal Vesicle, Priority 2 Lymph Node)
+    top_pri_cands = [c for c in cands if c[0] in (1, 2)]
+    if top_pri_cands:
+        top_pri_cands.sort()
+        return top_pri_cands[0][2]
+
+    # Rule 2b: Lacrimal glands take priority over adjacent orbital skull/eye/skin
+    if lac_cands:
+        lac_cands.sort(reverse=True)
+        top_lac_cnt, top_lac_name = lac_cands[0]
+        if top_lac_cnt >= 2 and (top_lac_cnt >= total_vox * 0.015 or total_vox <= 250):
+            return top_lac_name
+
+    cands.sort()
+    best_pri, neg_cnt, best_name = cands[0]
+    best_cnt = -neg_cnt
+    best_lc = best_name.lower()
+
+    # Head/orbital gland & globe override over skull/mandible/calvarium
+    if best_pri == 3 and any(k in best_lc for k in ("skull", "mandible", "calvarium")):
+        head_kws = ("lacrimal", "parotid", "submandibular", "pituitary", "eye_left", "eye_right")
+        gland_cands = [(-nc, nm) for _, nc, nm in cands if any(hk in nm.lower() for hk in head_kws)]
+        if gland_cands:
+            gland_cands.sort(reverse=True)
+            g_cnt, g_name = gland_cands[0]
+            if g_cnt > best_cnt or g_cnt >= total_vox * 0.15:
+                return g_name
+
+    if best_cnt < total_vox * 0.10 and len(cands) > 1:
+        maj = max(cands, key=lambda x: -x[1])
+        if -maj[1] > total_vox * 0.50:
+            return maj[2]
+
+    return best_name
+
+
+def filter_lacrimal_lesions(lesion_arr: np.ndarray,
+                            max_anat_arr: np.ndarray,
+                            labels_dict: dict,
+                            seg_names: dict = None) -> tuple:
+    """Filters physiological lacrimal gland uptake lesions from `lesion_arr` in place.
+
+    Returns (removed_lids_list, remaining_lids_list, ct_organs_dict).
+    `lesion_arr` and `max_anat_arr` are expected in matching (Z, Y, X) numpy order.
+    """
+    lac_ids = {int(k) for k, v in labels_dict.items() if "lacrimal" in v.lower()}
+    eye_ids = {int(k) for k, v in labels_dict.items() if v.lower().strip() in ("eye_left", "eye_right", "eye_l", "eye_r")}
+    orbital_allowed_ids = {
+        int(k) for k, v in labels_dict.items()
+        if "lacrimal" in v.lower()
+        or v.lower().strip() in ("eye_left", "eye_right", "eye_l", "eye_r", "head", "skin", "face")
+        or "skull" in v.lower()
+    }
+
+    gland_totals = {}
+    if lac_ids and max_anat_arr is not None:
+        u_m, c_m = np.unique(max_anat_arr[np.isin(max_anat_arr, list(lac_ids))], return_counts=True)
+        for uv, uc in zip(u_m, c_m):
+            gland_totals[int(uv)] = int(uc)
+    has_lac_voxels = sum(gland_totals.values()) > 0
+
+    all_lids = [int(i) for i in np.unique(lesion_arr) if i > 0]
+    removed_lids = []
+    remaining_lids = []
+    ct_organs = {}
+    z_dim = lesion_arr.shape[0]
+
+    for lid in all_lids:
+        mask_l = (lesion_arr == lid)
+        n_vox = int(mask_l.sum())
+        if n_vox <= 0:
+            continue
+        avals = max_anat_arr[mask_l]
+        avals_nz = avals[avals > 0]
+        counts = {}
+        if len(avals_nz) > 0:
+            uvals, ucnts = np.unique(avals_nz, return_counts=True)
+            counts = {int(uv): int(uc) for uv, uc in zip(uvals, ucnts)}
+
+        best_org = pick_best_organ(counts, labels_dict)
+        if best_org == "Unknown" and seg_names is not None:
+            sname = seg_names.get(str(lid), "").lower()
+            if "prostate" in sname or "seminal" in sname:
+                best_org = "Prostate"
+            elif "lacrimal" in sname:
+                best_org = "lacrimal_gland"
+            elif any(bk in sname for bk in ("hip", "femur", "vertebra", "rib")):
+                best_org = "Bone"
+            elif "lung" in sname:
+                best_org = "Lung"
+            elif "liver" in sname:
+                best_org = "Liver"
+
+        is_lac = ("lacrimal" in best_org.lower())
+        if not is_lac and lac_ids:
+            for aid in lac_ids:
+                ov = counts.get(aid, 0)
+                if ov >= 5:
+                    gtot = max(1, gland_totals.get(aid, 0))
+                    if (ov / n_vox >= 0.08) or (gtot > 0 and ov / gtot >= 0.20):
+                        is_lac = True
+                        break
+
+        if not is_lac and not has_lac_voxels and eye_ids:
+            z_coords = np.where(mask_l)[0]
+            mean_z = float(z_coords.mean()) if len(z_coords) > 0 else 0.0
+            if z_dim > 0 and (mean_z / z_dim > 0.72):
+                ov_eye = sum(counts.get(eid, 0) for eid in eye_ids)
+                if ov_eye >= 30 and (ov_eye / n_vox >= 0.15):
+                    known_cids = [aid for aid in counts if labels_dict.get(str(aid), "") not in ("", *_EXCLUDED_CONTAINER_LABELS)]
+                    if known_cids and all(aid in orbital_allowed_ids for aid in known_cids):
+                        is_lac = True
+
+        if is_lac:
+            lesion_arr[mask_l] = 0
+            removed_lids.append(lid)
+        else:
+            remaining_lids.append(lid)
+            ct_organs[str(lid)] = best_org
+
+    return removed_lids, remaining_lids, ct_organs
 
 
 def run_cads_inference_for_ct(ct_path: str,
@@ -249,8 +456,6 @@ def patch_case_h5_with_cads(h5_path: str,
             cads_556_arr = resample_mask_to_reference(img_556, ref_img)
         else:
             cads_556_arr = sitk.GetArrayFromImage(img_556)
-        # Apply MedEye3d transverse axis-1 pre-flip (flip Y axis)
-        cads_556_arr = np.flip(cads_556_arr, axis=1)
 
     cads_558_arr = None
     if cads_558_path and os.path.exists(cads_558_path):
@@ -259,10 +464,15 @@ def patch_case_h5_with_cads(h5_path: str,
             cads_558_arr = resample_mask_to_reference(img_558, ref_img)
         else:
             cads_558_arr = sitk.GetArrayFromImage(img_558)
-        # Apply MedEye3d transverse axis-1 pre-flip (flip Y axis)
-        cads_558_arr = np.flip(cads_558_arr, axis=1)
 
     with h5py.File(h5_path, "r+") as f:
+        is_preflipped = True
+        if "_meta_/preflipped" in f:
+            try:
+                is_preflipped = int(f["_meta_/preflipped"][()]) == 1
+            except Exception:
+                is_preflipped = True
+
         # 1. Read existing max_anatomy (or the clean rebuilt base when repairing)
         if base_anat_override is not None:
             base_anat = base_anat_override
@@ -284,12 +494,13 @@ def patch_case_h5_with_cads(h5_path: str,
             except Exception:
                 pass
 
-        # 3. Merge CADS structures
+        # 3. Merge CADS structures (flipping CADS along Y iff HDF5 is preflipped)
         merged_anat, updated_labels = merge_cads_structures(
             base_anat,
             cads_556_arr=cads_556_arr,
             cads_558_arr=cads_558_arr,
-            labels_dict=labels_dict
+            labels_dict=labels_dict,
+            flip_y_cads=is_preflipped
         )
 
         # 4. Overwrite ATLAS/max_anatomy
