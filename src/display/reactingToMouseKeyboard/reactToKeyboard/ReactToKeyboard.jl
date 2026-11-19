@@ -79,9 +79,13 @@ function _sync_windowing_gui(modality::String, min_v::Float32, max_v::Float32)
         top = parentmodule(@__MODULE__)
         if isdefined(top, :LesionMetadataWindow)
             obs_dict = getfield(top.LesionMetadataWindow, :_lmw_observables)
-            key = modality == "CT" ? :sync_ct_gui : :sync_pet_gui
-            if haskey(obs_dict, key)
-                obs_dict[key](min_v, max_v)
+            if haskey(obs_dict, :sync_windowing_gui)
+                obs_dict[:sync_windowing_gui](modality, min_v, max_v)
+            else
+                key = modality == "CT" ? :sync_ct_gui : :sync_pet_gui
+                if haskey(obs_dict, key)
+                    obs_dict[key](min_v, max_v)
+                end
             end
             # Force Makie redraw (safe)
             if haskey(obs_dict, :redraw_trigger)

@@ -89,7 +89,7 @@ docker run -d --restart=unless-stopped \
 | [`scripts/xnat/xnat_preproc_worker.jl`](file:///workspaces/MedEye3d.jl/scripts/xnat/xnat_preproc_worker.jl) | Julia | CLI worker for single actions: `download`, `process`, `upload`, `full`. |
 | [`scripts/preprocessing/preprocess_dataset.jl`](file:///workspaces/MedEye3d.jl/scripts/preprocessing/preprocess_dataset.jl) | Julia | Multi-timepoint spatial resampling, scene graph parsing, and HDF5 packager. |
 | [`scripts/preprocessing/recompute_bones.jl`](file:///workspaces/MedEye3d.jl/scripts/preprocessing/recompute_bones.jl) | Julia | Computes cortical bone surface (`surf`) vs bone marrow (`marr`) per skeletal lesion. |
-| [`scripts/preprocessing/lymph_node_rules/.../PrimaryHDF5.jl`](file:///workspaces/MedEye3d.jl/scripts/preprocessing/lymph_node_rules/src/julia_gpu/preprocessing/PrimaryHDF5.jl) | Julia | Anatomical landmark extraction and multi-mask HDF5 aggregation. |
+| External `$LN_RULES_DIR` (`PrimaryHDF5.jl`) | Julia | Anatomical landmark extraction and multi-mask HDF5 aggregation (separate `lymph_node_rules` repo). |
 | [`scripts/registration/rerun_mri_registration.py`](file:///workspaces/MedEye3d.jl/scripts/registration/rerun_mri_registration.py) | Python | Surface-based 11-organ registration of mpMRI to baseline CT. |
 | [`scripts/preprocessing/prepare_psma_case_for_medeye3d.py`](file:///workspaces/MedEye3d.jl/scripts/preprocessing/prepare_psma_case_for_medeye3d.py) | Python | Assembles multi-timepoint PSMA PET/CT + mpMRI directory structure. |
 | [`scripts/preprocessing/reprocess_mri_tps.jl`](file:///workspaces/MedEye3d.jl/scripts/preprocessing/reprocess_mri_tps.jl) | Julia | Resamples MRI timepoints (TP 3-6) into baseline frame using registration transforms. |
@@ -156,7 +156,7 @@ The preprocessor automatically strips pipeline suffixes to match standard ontolo
 
 ### 4.3. Landmark Calculation from Ready Masks
 
-[`Landmarks.jl`](file:///workspaces/MedEye3d.jl/scripts/preprocessing/lymph_node_rules/src/julia_gpu/preprocessing/Landmarks.jl) extracts anatomical coordinate reference points directly from the masks:
+In the separate `lymph_node_rules` repository (`LN_RULES_DIR`, default `/mnt/big/project_ssd/lymph_node_rules`), `src/julia_gpu/preprocessing/Landmarks.jl` extracts anatomical coordinate reference points directly from the masks:
 - **Carina Landmark**: Extracted from the bifurcation of `trachea` into main bronchi (used to separate superior from inferior mediastinal lymph nodes).
 - **Aortic Arch Apex**: Extracted from the highest curvature of `aorta` (used for station 4R/4L/5).
 - **Aortic Bifurcation**: Extracted where `aorta` splits into `iliac_artery_left` and `iliac_artery_right` (separates retroperitoneal/para-aortic from common iliac lymph nodes).
@@ -165,10 +165,10 @@ The preprocessor automatically strips pipeline suffixes to match standard ontolo
 
 ### 4.4. Packaging Ready Masks into HDF5
 
-Run `PrimaryHDF5.build_primary_hdf5`:
+Run `PrimaryHDF5.build_primary_hdf5` from `$LN_RULES_DIR`:
 ```bash
-julia --project=scripts/preprocessing/lymph_node_rules/src/julia_gpu \
-  scripts/preprocessing/lymph_node_rules/src/julia_gpu/preprocessing/preprocess_single.jl \
+julia --project="$LN_RULES_DIR/src/julia_gpu" \
+  "$LN_RULES_DIR/src/julia_gpu/preprocessing/preprocess_single.jl" \
   <case_dir> --output <case_dir>/primary_masks.h5
 ```
 This loads the CT and all NIfTI masks, validates their alignment, extracts the anatomical landmarks, and serializes everything into `primary_masks.h5` with chunks `(64, 64, 32)` and compression level 1.

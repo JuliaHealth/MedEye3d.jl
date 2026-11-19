@@ -28,9 +28,10 @@ Comprehensive reference and verification summary for building, repairing, auditi
 - Label layering order into `BASELINE/max_anatomy.nii.gz`, `ATLAS/max_anatomy`, and `_meta_/max_anatomy_labels.json`:
   1. **Primary Whole-Body Anatomy**: Loaded from `raw/packed_anatomical_tensor.h5` + `packed_anatomical_tensor_registry.json` (or embedded HDF5 `registry` dataset).
   2. **Sanitization (`is_excluded_non_organ_mask`)**: Purges non-organ / helper masks (`body`, `body_trunc`, `body_extremities`, `torso_fat`, `subcutaneous_fat`, `skin`, `skeletal_muscle`, `abdominal_cavity`, `thoracic_cavity`, `thorax_wall`, `nasal_cavity_*`, `lung_airways_wall`, `oblique_hyoid_plane`, `digastric_plane_*`, etc.).
-  3. **Authoritative Lymph Node Stations (`iter_authoritative_lymph_node_masks`)**:
+  3. **Authoritative Lymph Node Stations (`iter_authoritative_lymph_node_masks`, external `lymph_node_rules` repo)**:
+     - Generated externally by the separate `lymph_node_rules` repository (`LN_RULES_DIR` / XNAT `LYMPH_NODE_RESULTS`) and consumed read-only here (no local LN worker or vendored `lymph_node_rules/` ruleset exists in `MedEye3d.jl`).
      - Prioritizes `<case_dir>/lymph_nodes/` (`all_lymph_nodes.nii.gz` + `lymph_node_labels.json`, plus standalone `<station>.nii.gz`),
-     - Falls back to `raw/final_results_gpu.h5` (computed by [`scripts/preprocessing/run_ln_worker.jl`](../../scripts/preprocessing/run_ln_worker.jl) using `DagVm.run_dag_vm_pipeline`).
+     - Falls back to `raw/final_results_gpu.h5` (downloaded from XNAT `LYMPH_NODE_RESULTS` or reused from external cache).
      - Old LN stations inside `packed_anatomical_tensor.h5` are skipped whenever authoritative LN masks exist.
      - **Lung-only override rule**: Lymph node voxels may only be overridden by lung labels (`is_lung_label_name`) or CADS structures (`531..539`).
   4. **CADS Structures (`531..539`)** (`merge_cads_structures`):
@@ -104,7 +105,10 @@ python3 /workspaces/MedEye3d.jl/scripts/preprocessing/repair_max_anatomy_all.py 
 - **Total patient directories in `data/cases/Prostata_bimodal/`**: **133** (`Pat1`–`Pat133`).
 - **Processed cases (`preprocessed_volumes.h5` present)**: **126 / 133**.
   - **Multimodal MRI & `Dataset501` Coverage**: **124 / 126** processed cases have aligned quantitative `ADC`, de-interleaved/unpacked `DWI`, and native `Dataset501_ProstateZonesLesions` (`T2W + ADC + DWI`) 8-zone prostate + `Label 9` tumor segmentations (`Pat46` & `Pat101` lack DWI/ADC acquisitions on XNAT and retain `T2 + T1` only).
-  - **Local HDF5 + CT–MRI Registration Dice Audit (`audit_full_cohort.py`, 2026-11-19)**: **125 / 126** clean locally and in `xnat_cache` via `--no-dice` (`0` low-Dice failures across all 126 cases in the Dice audit: `124/126` before `Pat1` cache sync, with `Pat1` individually re-verified at `issues=[]`, `Dice = 0.7612` after syncing `xnat_cache`). All 7 re-registered `Dataset501` cases pass (`Pat1 = 0.7612`, `Pat24 = 0.7747`, `Pat25 = 0.7719`, `Pat29 = 0.6961`, `Pat66 = 0.8660`, `Pat110 = 0.8470`, `Pat128 = 0.8686`). The sole local/cache flag is **`Pat51`**, which intentionally retains active expert lesion edits (`manually_modified: true`, `modified_by: jm`, `BASELINE/PET_Lesions_0.nii.gz_expert`).
+  - **PSMA PET/CT vs. Native MRI Lesion Coverage**:
+    - **126 / 126** processed cases contain baseline PSMA PET/CT lesions in `BASELINE/PET_Lesions_0.nii.gz` (`0` empty; `4`–`35` lesions per case).
+    - **109 / 126** processed cases have MRI tumor segmentations (`Dataset501_ProstateZonesLesions` `Label 9` -> `TFM_*/PET_Lesions_*`); **`17 / 126`** have `0` MRI lesion voxels (e.g., `Pat1`, confirmed by its `20230504_MRI` radiology report stating *"no tumour mass is discernible in the prostate"*).
+  - **Local HDF5 + CT–MRI Registration Dice Audit (`audit_full_cohort.py`, 2026-11-19)**: `0` low-Dice failures cohort-wide (`124/126` clean with Dice prior to syncing `Pat1` viewer cache; all 7 re-registered `Dataset501` cases pass: `Pat1 = 0.7612`, `Pat24 = 0.7747`, `Pat25 = 0.7719`, `Pat29 = 0.6961`, `Pat66 = 0.8660`, `Pat110 = 0.8470`, `Pat128 = 0.8686`). Under `--no-dice`, `124/126` pass locally and in `xnat_cache` (`Pat1` and `Pat51` caches reflect live interactive viewer autosaves with `manually_modified: true`).
   - **Unit Tests**: [`test/test_preprocessing_invariants.py`](../../test/test_preprocessing_invariants.py) passes **9/9** tests, [`test/test_lesion_navigation_fix.jl`](../../test/test_lesion_navigation_fix.jl) passes **16/16** testsets (including Quad-MRI `KEY_Y` fallback & `Pat1` `T2/ADC/DWI/T1`), and [`test/test_lesion_edits_recorder.jl`](../../test/test_lesion_edits_recorder.jl) passes **4/4** testsets (`76` assertions).
 - **Unprocessed / Incomplete Raw Cases (7 / 133)**:
   - **`Pat8`, `Pat21`**: Census `exp_id` on XNAT contains MRI scans only (no PET/CT or `slicer_final` segmentations; `Pat8` has only a `4,108`-byte stub HDF5 in `Prostata_bimodal_PIPELINE`).

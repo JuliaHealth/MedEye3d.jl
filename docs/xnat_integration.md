@@ -114,7 +114,7 @@ A standalone bash orchestrator and Julia worker automate downloading raw DICOM/N
 2. **Streaming Download**: Pulls DICOM series or NIfTI volumes into a scratch workspace (`/tmp/xnat_work/{proj}/{subj}`).
 3. **Spatial Normalization**: Resamples all secondary timepoints onto the voxel grid of the baseline CT.
 4. **Full Rerun of Skellytour**: Executes `AIInference.run_skellytour_segmentation` to generate trabecular and cortical bone subsegmentations.
-5. **Full Rerun of Lymph Node Rules DAG**: Evaluates landmark-guided rule engines (`scripts/preprocessing/lymph_node_rules/`) across cervical, thoracic, abdominal, and pelvic stations to generate anatomical boundaries in `max_anatomy.nii.gz`.
+5. **Lymph Node Rules DAG (External Repo)**: Precomputed station masks come from the separate `lymph_node_rules` repository (`LN_RULES_DIR`, uploaded under XNAT `LYMPH_NODE_RESULTS`) across cervical, thoracic, abdominal, and pelvic stations for `max_anatomy.nii.gz`.
 6. **Bone Subsegmentation**: Synthesizes cortical bone surface and trabecular marrow layers (`recompute_bones.jl`).
 7. **HDF5 Packaging**: Packs all aligned volumes, textures, labels, and metadata into `{subject}_preprocessed.h5`.
 8. **Upload to XNAT**:

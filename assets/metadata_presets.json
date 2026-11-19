@@ -1,4 +1,11 @@
 {
+    "Test HDF5 Preset": {
+        "BaseAnatomy": "femur",
+        "BaseAnatomySide": "Right",
+        "NoCTCorrelate": "false",
+        "LesionType": "Bone Meta",
+        "Certainty": "3"
+    },
     "Right Lacrimal Gland (Benign)": {
         "Alternative Hypothesis (False Positive)": "Physiological uptake",
         "BaseAnatomy": "lacrimal gland",

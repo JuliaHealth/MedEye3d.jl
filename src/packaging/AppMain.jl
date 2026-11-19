@@ -1172,18 +1172,21 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
 
     # 2. Textures configuration
     colors_mapped = map(c -> RGB(c[1]/255, c[2]/255, c[3]/255), MedEye3d.distinctColorsSaved.listOfColors)
+    MEH.load_persistent_windowing!()
     display_cfg = LesionMetadataWindow.load_display_config()
     init_pet_blend = Float32(get(display_cfg, "pet_ct_blend", 0.5))
     init_label_opacity = Float32(get(display_cfg, "label_opacity", 0.5))
+    init_ct_win = MEH.has_persistent_windowing("CT") ? copy(MEH.current_windowing["CT"]) : Float32[-150.0, 250.0]
+    init_pet_win = MEH.has_persistent_windowing("PET") ? copy(MEH.current_windowing["PET"]) : Float32[0.1, 10.0]
 
-    textureSpec_ct = TextureSpec{Float32}(name="CT", isMainImage=true, studyType="CT", color=RGB(1.0, 1.0, 1.0), minAndMaxValue=Float32.([-150, 250]))
-    textureSpec_pet = TextureSpec{Float32}(name="PET", isMainImage=false, isNuclearMask=true, studyType="PET", color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0.1, 10.0]), maskContribution=init_pet_blend)
+    textureSpec_ct = TextureSpec{Float32}(name="CT", isMainImage=true, studyType="CT", color=RGB(1.0, 1.0, 1.0), minAndMaxValue=copy(init_ct_win))
+    textureSpec_pet = TextureSpec{Float32}(name="PET", isMainImage=false, isNuclearMask=true, studyType="PET", color=RGB(1.0, 0.5, 0.0), minAndMaxValue=copy(init_pet_win), maskContribution=init_pet_blend)
     textureSpec_mask = TextureSpec{Int16}(
         name="Mask", isMainImage=false, isMultiDiscreteMask=true, isIntegerTexture=true,
         colorSet=colors_mapped, minAndMaxValue=Int16.([0, length(colors_mapped)]),
         isEditable=true, maskContribution=init_label_opacity
     )
-    textureSpec_pure_pet = TextureSpec{Float32}(name="PET", isMainImage=true, studyType="PET", color=RGB(1.0, 0.5, 0.0), minAndMaxValue=Float32.([0.1, 10.0]))
+    textureSpec_pure_pet = TextureSpec{Float32}(name="PET", isMainImage=true, studyType="PET", color=RGB(1.0, 0.5, 0.0), minAndMaxValue=copy(init_pet_win))
     textureSpec_bone = TextureSpec{Int8}(
         name="Bone_Overlay", isMainImage=false, isIntegerTexture=true,
         color=RGB(0.0, 1.0, 1.0), minAndMaxValue=Int8.([0, 3]),
@@ -2128,6 +2131,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             # 4. Trigger full TP 0 reload into Vulkan textures & refresh lesion list
             set_prog !== nothing && set_prog(94.0, "Uploading CT/PET/Lesion 3D textures to GPU...")
             put!(mainViewer.channel, MedEye3d.MakieEvents.SetTimePointEvent(0, 1))
+            MEH.apply_current_windowing_to_states!(mainViewer.states)
             put!(mainViewer.channel, MedEye3d.MakieEvents.ScrollEvent(0, 1))
             put!(mainViewer.channel, MedEye3d.MakieEvents.SetWindowTitleEvent("MedEye3d - $case_lbl (Ready)"))
             @async begin

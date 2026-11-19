@@ -17,10 +17,12 @@
         "18F-FDG-CustomH5"
     ],
     "Shape": [
-        "Elongated"
+        "Elongated",
+        "Tubular"
     ],
     "Lesion Shape": [
-        "Elongated"
+        "Elongated",
+        "Tubular"
     ],
     "Orientation": [
         "long axis hour 5",

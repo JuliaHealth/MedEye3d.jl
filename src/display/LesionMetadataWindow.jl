@@ -587,30 +587,70 @@ function _read_meta_json_from_h5(key::String, h5_path::String = _get_active_h5_p
 end
 
 function load_display_config()::Dict{String,Any}
-    h5_cfg = _read_meta_json_from_h5("display_config.json")
-    if h5_cfg isa AbstractDict
-        return Dict{String,Any}(string(k) => v for (k, v) in h5_cfg)
-    end
-    if isfile(GLOBAL_DISPLAY_CONFIG_PATH)
-        try
-            return JSON.parse(read(GLOBAL_DISPLAY_CONFIG_PATH, String))
-        catch e
-            @warn "Failed to parse $GLOBAL_DISPLAY_CONFIG_PATH: $e"
-        end
-    end
-    return Dict{String,Any}(
+    cfg = Dict{String,Any}(
         "label_opacity" => 0.5,
         "pet_ct_blend" => 0.5,
         "heatgdt_ramp_speed" => 5.0
     )
+    h5_cfg = _read_meta_json_from_h5("display_config.json")
+    if h5_cfg isa AbstractDict
+        for (k, v) in h5_cfg
+            string(k) == "windowing" && continue
+            cfg[string(k)] = v
+        end
+    end
+    _MEH_mod = try parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers catch; nothing end
+    g_path = _MEH_mod !== nothing ? _MEH_mod.get_global_display_config_path() : GLOBAL_DISPLAY_CONFIG_PATH
+    if isfile(g_path)
+        try
+            g_cfg = JSON.parse(read(g_path, String))
+            if g_cfg isa AbstractDict
+                for (k, v) in g_cfg
+                    cfg[string(k)] = v
+                end
+            end
+        catch e
+            @warn "Failed to parse $g_path: $e"
+        end
+    end
+    return cfg
 end
 
 function save_display_config(cfg::Dict{String,Any})
     _write_meta_json_to_h5!("display_config.json", cfg)
+    _MEH_mod = try parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers catch; nothing end
+    g_path = _MEH_mod !== nothing ? _MEH_mod.get_global_display_config_path() : GLOBAL_DISPLAY_CONFIG_PATH
+    save_fn = () -> begin
+        merged = Dict{String,Any}()
+        if isfile(g_path)
+            try
+                existing = JSON.parse(read(g_path, String))
+                if existing isa AbstractDict
+                    for (k, v) in existing
+                        merged[string(k)] = v
+                    end
+                end
+            catch; end
+        end
+        for (k, v) in cfg
+            merged[string(k)] = v
+        end
+        if _MEH_mod !== nothing && _MEH_mod isa Module
+            _MEH_mod._write_global_display_config_atomic(g_path, merged)
+        else
+            write(g_path, JSON.json(merged, 4))
+        end
+    end
     try
-        write(GLOBAL_DISPLAY_CONFIG_PATH, JSON.json(cfg, 4))
+        if _MEH_mod !== nothing && isdefined(_MEH_mod, :_windowing_config_lock)
+            lock(_MEH_mod._windowing_config_lock) do
+                save_fn()
+            end
+        else
+            save_fn()
+        end
     catch e
-        @warn "Failed to save $GLOBAL_DISPLAY_CONFIG_PATH: $e"
+        @warn "Failed to save $g_path: $e"
     end
 end
 
@@ -7686,36 +7726,59 @@ function create_metadata_window(
     Label(g[mri_hdr_r, 1:4], "-- MRI Quad Windowing (T2, ADC, DWI, T1) --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
     rowsize!(g, mri_hdr_r, Fixed(20)); register_fixed_row!(mri_hdr_r, 20)
 
+    if _MEH !== nothing && isdefined(_MEH, :load_persistent_windowing!)
+        try; _MEH.load_persistent_windowing!(); catch; end
+    end
+    _win_gui_syncers = Dict{String, Function}()
+
     function build_compact_modality_block(h_row::Int, s_row::Int, col_span, mod_name::String, display_title::String, slider_range, default_range, presets::Vector{Tuple{String, Float32, Float32}})
-        title_obs = Observable("$display_title: [$(round(Int, default_range[1]))-$(round(Int, default_range[2]))]")
+        up_mod = uppercase(mod_name)
+        init_min = Float32(default_range[1])
+        init_max = Float32(default_range[2])
+        if _MEH !== nothing && isdefined(_MEH, :has_persistent_windowing) && _MEH.has_persistent_windowing(up_mod) && haskey(_MEH.current_windowing, up_mod)
+            saved_v = _MEH.current_windowing[up_mod]
+            if length(saved_v) == 2
+                init_min = Float32(saved_v[1])
+                init_max = Float32(saved_v[2])
+            end
+        end
+
+        title_obs = Observable("$display_title: [$(round(Int, init_min))-$(round(Int, init_max))]")
         Label(g[h_row, col_span[1]], title_obs, fontsize = 9, color = ACCENT, halign = :left, tellwidth = false)
         
         sub_p = g[h_row, col_span[2]] = GridLayout()
         colgap!(sub_p, 2)
         
-        islider = IntervalSlider(g[s_row, col_span], range = slider_range, startvalues = (default_range[1], default_range[2]))
+        sr_lo = Float32(first(slider_range))
+        sr_hi = Float32(last(slider_range))
+        sl_start_min = clamp(init_min, sr_lo, sr_hi)
+        sl_start_max = clamp(init_max, sl_start_min, sr_hi)
+        islider = IntervalSlider(g[s_row, col_span], range = slider_range, startvalues = (sl_start_min, sl_start_max))
         
-        tb_min_obs = Observable(string(round(default_range[1], digits=1)))
-        tb_max_obs = Observable(string(round(default_range[2], digits=1)))
+        tb_min_obs = Observable(string(round(init_min, digits=1)))
+        tb_max_obs = Observable(string(round(init_max, digits=1)))
         tb_min = (stored_string = tb_min_obs, displayed_string = tb_min_obs)
         tb_max = (stored_string = tb_max_obs, displayed_string = tb_max_obs)
 
         is_syncing = Ref(false)
-        function apply_win(min_v::Real, max_v::Real)
+        function sync_gui(min_v::Real, max_v::Real)
             is_syncing[] && return
             is_syncing[] = true
             try
-                s_min = string(round(min_v, digits=1))
-                s_max = string(round(max_v, digits=1))
-                tb_min_obs[] = s_min
-                tb_max_obs[] = s_max
-                set_close_to!(islider, Float32(min_v), Float32(max_v))
+                tb_min_obs[] = string(round(min_v, digits=1))
+                tb_max_obs[] = string(round(max_v, digits=1))
+                set_close_to!(islider, clamp(Float32(min_v), sr_lo, sr_hi), clamp(Float32(max_v), sr_lo, sr_hi))
                 title_obs[] = "$display_title: [$(round(Int, min_v))-$(round(Int, max_v))]"
-                put!(channel, WindowingEvent(mod_name, Float32(min_v), Float32(max_v)))
-                println("[GUI-WINDOWING] Sent $(mod_name): [$(Float32(min_v)), $(Float32(max_v))]"); flush(stdout)
             finally
                 is_syncing[] = false
             end
+        end
+
+        function apply_win(min_v::Real, max_v::Real)
+            is_syncing[] && return
+            sync_gui(min_v, max_v)
+            put!(channel, WindowingEvent(mod_name, Float32(min_v), Float32(max_v)))
+            println("[GUI-WINDOWING] Sent $(mod_name): [$(Float32(min_v)), $(Float32(max_v))]"); flush(stdout)
         end
 
         for (pi, (p_lbl, p_min, p_max)) in enumerate(presets[1:min(3, length(presets))])
@@ -7729,6 +7792,14 @@ function create_metadata_window(
             tb_min_obs[] = string(round(min_v, digits=1))
             tb_max_obs[] = string(round(max_v, digits=1))
             put!(channel, WindowingEvent(mod_name, Float32(min_v), Float32(max_v)))
+        end
+
+        _win_gui_syncers[up_mod] = sync_gui
+        if up_mod == "T2"
+            _win_gui_syncers["MRI"] = sync_gui
+            _win_gui_syncers["MR"] = sync_gui
+        elseif up_mod == "DCE"
+            _win_gui_syncers["DYNAMIC"] = sync_gui
         end
         
         return (apply_win, tb_min, tb_max, islider)
@@ -10285,6 +10356,16 @@ function create_metadata_window(
                     "PET_Max" => _safe_strip(tb_pet_max.stored_string[]),
                     "SPECT_Min" => _safe_strip(tb_spect_min.stored_string[]),
                     "SPECT_Max" => _safe_strip(tb_spect_max.stored_string[]),
+                    "T2_Min"  => _safe_strip(tb_t2_min.stored_string[]),
+                    "T2_Max"  => _safe_strip(tb_t2_max.stored_string[]),
+                    "ADC_Min" => _safe_strip(tb_adc_min.stored_string[]),
+                    "ADC_Max" => _safe_strip(tb_adc_max.stored_string[]),
+                    "DWI_Min" => _safe_strip(tb_dwi_min.stored_string[]),
+                    "DWI_Max" => _safe_strip(tb_dwi_max.stored_string[]),
+                    "T1_Min"  => _safe_strip(tb_t1_min.stored_string[]),
+                    "T1_Max"  => _safe_strip(tb_t1_max.stored_string[]),
+                    "DCE_Min" => _safe_strip(tb_dce_min.stored_string[]),
+                    "DCE_Max" => _safe_strip(tb_dce_max.stored_string[]),
                     "vis_lesion"  => string(vis_lesion_active[]),
                     "vis_surface" => string(vis_surface_active[]),
                     "vis_marrow"  => string(vis_marrow_active[]),
@@ -10351,41 +10432,39 @@ function create_metadata_window(
         _is_applying_state[] = true
         is_syncing_selection[] = true
         try
-            # Apply Windowing
-            if haskey(gst, "CT_Min") && haskey(gst, "CT_Max")
-                _set_tb_val!(tb_ct_min, gst["CT_Min"])
-                _set_tb_val!(tb_ct_max, gst["CT_Max"])
-                v_min = tryparse(Float32, gst["CT_Min"])
-                v_max = tryparse(Float32, gst["CT_Max"])
-                if v_min !== nothing && v_max !== nothing
-                    put!(channel, WindowingEvent("CT", v_min, v_max))
+            # Apply Windowing — installation-wide persistent windowing always takes precedence over per-case HDF5 _GLOBAL_APP_STATE
+            function _apply_mod_fallback!(mod_name::String, k_min::String, k_max::String; upgrade_zero_pet::Bool=false)
+                has_pers = _MEH !== nothing && isdefined(_MEH, :has_persistent_windowing) && _MEH.has_persistent_windowing(mod_name)
+                if has_pers && haskey(_MEH.current_windowing, mod_name)
+                    pv = _MEH.current_windowing[mod_name]
+                    if length(pv) == 2 && haskey(_win_gui_syncers, mod_name)
+                        _win_gui_syncers[mod_name](pv[1], pv[2])
+                    end
+                    return
+                end
+                if haskey(gst, k_min) && haskey(gst, k_max)
+                    v_min = tryparse(Float32, string(gst[k_min]))
+                    v_max = tryparse(Float32, string(gst[k_max]))
+                    if upgrade_zero_pet && v_min !== nothing && v_min <= 0.001f0
+                        v_min = 0.1f0
+                        gst[k_min] = "0.1"
+                    end
+                    if v_min !== nothing && v_max !== nothing
+                        if haskey(_win_gui_syncers, mod_name)
+                            _win_gui_syncers[mod_name](v_min, v_max)
+                        end
+                        put!(channel, WindowingEvent(mod_name, v_min, v_max))
+                    end
                 end
             end
-            if haskey(gst, "PET_Min") && haskey(gst, "PET_Max")
-                v_min = tryparse(Float32, gst["PET_Min"])
-                v_max = tryparse(Float32, gst["PET_Max"])
-                
-                # Upgrade old saves that had 0.0 to 0.1 to avoid yellow background
-                if v_min !== nothing && v_min <= 0.001f0
-                    v_min = 0.1f0
-                    gst["PET_Min"] = "0.1"
-                end
-                
-                _set_tb_val!(tb_pet_min, gst["PET_Min"])
-                _set_tb_val!(tb_pet_max, gst["PET_Max"])
-                if v_min !== nothing && v_max !== nothing
-                    put!(channel, WindowingEvent("PET", v_min, v_max))
-                end
-            end
-            if haskey(gst, "SPECT_Min") && haskey(gst, "SPECT_Max")
-                _set_tb_val!(tb_spect_min, gst["SPECT_Min"])
-                _set_tb_val!(tb_spect_max, gst["SPECT_Max"])
-                v_min = tryparse(Float32, gst["SPECT_Min"])
-                v_max = tryparse(Float32, gst["SPECT_Max"])
-                if v_min !== nothing && v_max !== nothing
-                    put!(channel, WindowingEvent("SPECT", v_min, v_max))
-                end
-            end
+            _apply_mod_fallback!("CT", "CT_Min", "CT_Max")
+            _apply_mod_fallback!("PET", "PET_Min", "PET_Max"; upgrade_zero_pet=true)
+            _apply_mod_fallback!("SPECT", "SPECT_Min", "SPECT_Max")
+            _apply_mod_fallback!("T2", "T2_Min", "T2_Max")
+            _apply_mod_fallback!("ADC", "ADC_Min", "ADC_Max")
+            _apply_mod_fallback!("DWI", "DWI_Min", "DWI_Max")
+            _apply_mod_fallback!("T1", "T1_Min", "T1_Max")
+            _apply_mod_fallback!("DCE", "DCE_Min", "DCE_Max")
             
             # Apply Toggles
             if haskey(gst, "vis_lesion")
@@ -12251,6 +12330,16 @@ function create_metadata_window(
             "PET_Max" => _safe_strip(tb_pet_max.stored_string[]),
             "SPECT_Min" => _safe_strip(tb_spect_min.stored_string[]),
             "SPECT_Max" => _safe_strip(tb_spect_max.stored_string[]),
+            "T2_Min"  => _safe_strip(tb_t2_min.stored_string[]),
+            "T2_Max"  => _safe_strip(tb_t2_max.stored_string[]),
+            "ADC_Min" => _safe_strip(tb_adc_min.stored_string[]),
+            "ADC_Max" => _safe_strip(tb_adc_max.stored_string[]),
+            "DWI_Min" => _safe_strip(tb_dwi_min.stored_string[]),
+            "DWI_Max" => _safe_strip(tb_dwi_max.stored_string[]),
+            "T1_Min"  => _safe_strip(tb_t1_min.stored_string[]),
+            "T1_Max"  => _safe_strip(tb_t1_max.stored_string[]),
+            "DCE_Min" => _safe_strip(tb_dce_min.stored_string[]),
+            "DCE_Max" => _safe_strip(tb_dce_max.stored_string[]),
             "vis_lesion" => string(vis_lesion_active[]),
             "vis_surface" => string(vis_surface_active[]),
             "vis_marrow" => string(vis_marrow_active[]),
@@ -12984,30 +13073,21 @@ function create_metadata_window(
     _lmw_observables[:xnat_status_lbl] = lbl_xnat_status
     _lmw_observables[:update_auth_status] = _update_auth_status!
 
-    # CT/PET GUI-only sync functions (update slider/textbox without re-sending event)
-    function _sync_ct_gui(min_v, max_v)
-        is_syncing_ct[] && return; is_syncing_ct[] = true
-        try
-            tb_ct_min.stored_string[] = string(round(min_v, digits=1))
-            tb_ct_min.displayed_string[] = string(round(min_v, digits=1))
-            tb_ct_max.stored_string[] = string(round(max_v, digits=1))
-            tb_ct_max.displayed_string[] = string(round(max_v, digits=1))
-            set_close_to!(islider_ct, Float32(min_v), Float32(max_v))
-        finally; is_syncing_ct[] = false; end
+    # Modality GUI-only sync functions (update slider/textbox/title without re-sending WindowingEvent)
+    function _sync_windowing_gui(mod_name::String, min_v::Real, max_v::Real)
+        up = uppercase(strip(mod_name))
+        haskey(_win_gui_syncers, up) && _win_gui_syncers[up](min_v, max_v)
     end
-    _lmw_observables[:sync_ct_gui] = _sync_ct_gui
-
-    function _sync_pet_gui(min_v, max_v)
-        is_syncing_pet[] && return; is_syncing_pet[] = true
-        try
-            tb_pet_min.stored_string[] = string(round(min_v, digits=1))
-            tb_pet_min.displayed_string[] = string(round(min_v, digits=1))
-            tb_pet_max.stored_string[] = string(round(max_v, digits=1))
-            tb_pet_max.displayed_string[] = string(round(max_v, digits=1))
-            set_close_to!(islider_pet, Float32(min_v), Float32(max_v))
-        finally; is_syncing_pet[] = false; end
-    end
-    _lmw_observables[:sync_pet_gui] = _sync_pet_gui
+    _lmw_observables[:sync_windowing_gui] = _sync_windowing_gui
+    _lmw_observables[:apply_global_state] = apply_global_state
+    _lmw_observables[:sync_ct_gui] = (min_v, max_v) -> _sync_windowing_gui("CT", min_v, max_v)
+    _lmw_observables[:sync_pet_gui] = (min_v, max_v) -> _sync_windowing_gui("PET", min_v, max_v)
+    _lmw_observables[:tb_ct_min] = tb_ct_min
+    _lmw_observables[:tb_ct_max] = tb_ct_max
+    _lmw_observables[:tb_t2_min] = tb_t2_min
+    _lmw_observables[:tb_t2_max] = tb_t2_max
+    _lmw_observables[:tb_adc_min] = tb_adc_min
+    _lmw_observables[:tb_adc_max] = tb_adc_max
 
     _lmw_observables[:slider_brush] = slider_brush
     _lmw_observables[:slider_blend] = slider_blend

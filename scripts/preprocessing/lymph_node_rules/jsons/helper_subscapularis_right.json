@@ -1,9 +1,0 @@
-{
-    "helper_subscapularis_right": {
-        "rule": "SplitConnectedComponents",
-        "side": "right",
-        "input_image": "subscapularis",
-        "group": "Helper",
-        "is_helper": true
-    }
-}

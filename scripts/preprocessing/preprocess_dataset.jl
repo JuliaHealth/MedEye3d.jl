@@ -272,36 +272,21 @@ function main()
             end
 
             if isfile(primary_h5_path)
-                ln_script = joinpath(@__DIR__, "lymph_node_rules", "src", "julia_gpu", "main", "run_pure_julia_pipeline.jl")
+                ln_root = get(ENV, "LN_RULES_DIR", "/mnt/big/project_ssd/lymph_node_rules")
+                ln_script = joinpath(ln_root, "src", "julia_gpu", "main", "run_gpu_single.jl")
                 ln_out_h5 = joinpath(tp_anat_dir, "lymph_node_results.h5")
-                mb_script = joinpath(@__DIR__, "lymph_node_rules", "src", "julia_gpu", "main", "MaxAnatomyBuilder.jl")
                 try
                     if !isfile(ln_out_h5)
-                        println("    Triggering Lymph Node Pipeline on $primary_h5_path...")
-                        json_dir = joinpath(@__DIR__, "lymph_node_rules", "jsons")
-                        run(`julia --project=$(joinpath(@__DIR__, "lymph_node_rules", "src", "julia_gpu")) $ln_script --h5 $primary_h5_path --out $ln_out_h5 --jsons $json_dir`)
-                        println("    ✅ Lymph Node Pipeline completed.")
-                        
-                        # Consolidate JSONs
-                        cons_script = joinpath(dirname(dirname(dirname(@__DIR__))), "lymph_node_rules", "scripts", "consolidate_jsons.py")
-                        used_json = joinpath(tp_anat_dir, "used_lymph_node_rules.json")
-                        if isfile(cons_script)
-                            run(`python3 $cons_script --h5 $ln_out_h5 --jsons $json_dir --out $used_json`)
+                        if isfile(ln_script)
+                            println("    Triggering external lymph_node_rules on $primary_h5_path...")
+                            run(`julia --project=$(joinpath(ln_root, "src", "julia_gpu")) $ln_script $tp_anat_dir`)
+                            println("    ✅ Lymph Node Pipeline completed via external repo ($ln_root).")
+                        else
+                            println("    ⚠️  No precomputed $ln_out_h5 found and external LN_RULES_DIR ($ln_root) unavailable; skipping LN step.")
                         end
                     end
-                    
-                    # Rebuild max_anatomy with lymph nodes
-                    if isfile(mb_script) && isfile(ln_out_h5)
-                        println("    Rebuilding max_anatomy with lymph nodes in $tp_anat_dir...")
-                        run(`julia --project=$(joinpath(@__DIR__, "lymph_node_rules", "src", "julia_gpu")) -e "
-                            include(\"$mb_script\")
-                            using .MaxAnatomyBuilder
-                            MaxAnatomyBuilder.build_and_save_max_anatomy_from_h5(\"$primary_h5_path\", \"$ln_out_h5\", \"$tp_anat_dir\")
-                        "`)
-                        println("    ✅ Rebuilt max_anatomy with lymph nodes.")
-                    end
                 catch e
-                    println("    ⚠️  Lymph Node Pipeline / Max Anatomy rebuild failed: $e")
+                    println("    ⚠️  External Lymph Node Pipeline failed: $e")
                 end
             end
         end

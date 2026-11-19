@@ -515,6 +515,10 @@ end
 @testset "Test 10: F1/F2/F3 CT Windowing Must Affect Only CT (Never PET or MRI)" begin
     old_tp_mods = copy(MEH.tp_modalities)
     old_win = copy(MEH.current_windowing)
+    old_user_mods = copy(MEH._user_windowing_modalities)
+    old_cfg_env = get(ENV, "MEDEYE3D_DISPLAY_CONFIG_PATH", nothing)
+    tmp_cfg = tempname() * "_test10_display_cfg.json"
+    ENV["MEDEYE3D_DISPLAY_CONFIG_PATH"] = tmp_cfg
     old_cur_tp = MEH.current_tp_index[]
     old_cmp = MEH.compare_mode[]
     old_cmp_right = MEH.compare_right_tp[]
@@ -579,6 +583,13 @@ end
     finally
         empty!(MEH.tp_modalities); merge!(MEH.tp_modalities, old_tp_mods)
         empty!(MEH.current_windowing); merge!(MEH.current_windowing, old_win)
+        empty!(MEH._user_windowing_modalities); union!(MEH._user_windowing_modalities, old_user_mods)
+        if old_cfg_env === nothing
+            delete!(ENV, "MEDEYE3D_DISPLAY_CONFIG_PATH")
+        else
+            ENV["MEDEYE3D_DISPLAY_CONFIG_PATH"] = old_cfg_env
+        end
+        try rm(tmp_cfg; force=true) catch; end
         MEH.current_tp_index[] = old_cur_tp
         MEH.compare_mode[] = old_cmp
         MEH.compare_right_tp[] = old_cmp_right
@@ -799,30 +810,24 @@ end
     end
 end
 
-@testset "Test 14: Landmarks.compute_internal_iliac_points Ignores Thoracic False-Positive Specks" begin
-    lm_path = joinpath(dirname(@__DIR__), "scripts", "preprocessing", "lymph_node_rules", "src", "julia_gpu", "preprocessing", "Landmarks.jl")
-    src = read(lm_path, String)
-    # Load compute_internal_iliac_points standalone without external KernelAbstractions/CUDA dependency
-    src_no_gpu = replace(src, "using CUDA\n" => "struct CuArray{T,N} end\n")
-    src_no_gpu = replace(src_no_gpu, "using KernelAbstractions\n" => "")
-    lm_mod = Module(:TestLandmarks)
-    Base.eval(lm_mod, :(using LinearAlgebra, Statistics))
-    Base.include_string(lm_mod, src_no_gpu, lm_path)
-    inner = Base.invokelatest(() -> lm_mod.Landmarks)
-
-    vol = zeros(UInt8, 32, 32, 300)
-    # Main pelvic iliac artery across slices 65..135
-    for z in 65:135
-        vol[14:17, 14:17, z] .= 0x01
-    end
-    # Single stray thoracic speck at slice 252
-    vol[10, 10, 252] = 0x01
-
-    p1, p2 = Base.invokelatest(inner.compute_internal_iliac_points, vol, (1.0, 1.0, 3.0), (0.0, 0.0, -1000.0))
-    @test p1 !== nothing && p2 !== nothing
-    @test isapprox(p1[3], -1000.0 + (135 - 1) * 3.0; atol=1.0)
-    @test isapprox(p2[3], -1000.0 + (65 - 1) * 3.0; atol=1.0)
+@testset "Test 14: External Lymph Node Repository Boundary & Pat1 LN Mask Integrity" begin
+    prep_dir = joinpath(dirname(@__DIR__), "scripts", "preprocessing")
+    @test !isdir(joinpath(prep_dir, "lymph_node_rules"))
+    @test !isfile(joinpath(prep_dir, "run_ln_worker.jl"))
     @test isfile(joinpath(dirname(@__DIR__), "data", "cases", "Prostata_bimodal", "Pat1", "Pat1_Normal_Lymph_Node_Rules.mrb"))
+
+    pat1_h5 = joinpath(dirname(@__DIR__), "data", "cases", "Prostata_bimodal", "Pat1", "preprocessed_volumes.h5")
+    @test isfile(pat1_h5)
+    HDF5.h5open(pat1_h5, "r") do f
+        lbls = Dict{Int, String}(parse(Int, string(k)) => lowercase(string(v)) for (k, v) in JSON.parse(read(f["_meta_/max_anatomy_labels.json"])))
+        ln_ids = [k for (k, v) in lbls if 400 <= k < 500]
+        @test length(ln_ids) >= 50
+        # Ensure non-LN helper/exclusion structures never leak into LN label space
+        @test !any(v -> occursin("exclusion_zone", v) || occursin("torso_fat", v) || occursin("helper", v), values(lbls))
+        # Ensure cervical/thoracic/abdominal/pelvic LN stations exist in BASELINE/max_anatomy.nii.gz
+        anat = read(f["BASELINE/max_anatomy.nii.gz"])
+        @test any(400 .<= anat .< 500)
+    end
 end
 
 @testset "Test 15: Anatomy Display Includes Pat1 Lymph Node IDs (> 400) & Case Switch Clears Stale LN Cache" begin
@@ -1001,5 +1006,216 @@ end
         MedEye3d.SegmentationDisplay._current_m2_mode[] = old_m2_mode
         empty!(MEH.mri_compare_tps)
         lock(MEH._tp_cache_lock) do; empty!(MEH.tp_data_cache); end
+    end
+end
+
+@testset "Test 17: Persistent Installation-Wide Manual Windowing Across Cases & Restarts" begin
+    old_win = deepcopy(MEH.current_windowing)
+    old_user_mods = copy(MEH._user_windowing_modalities)
+    old_tp_mods = copy(MEH.tp_modalities)
+    old_h5_path = MEH.h5_path_ref[]
+    old_h5_save = MEH.h5_save_path_ref[]
+    old_mri_main = MEH.mri_main_multimodal_mode[]
+    old_mri_cmp = MEH.mri_compare_mode[]
+    old_cmp = MEH.compare_mode[]
+    old_cur_tp = MEH.current_tp_index[]
+    old_cfg_env = get(ENV, "MEDEYE3D_DISPLAY_CONFIG_PATH", nothing)
+
+    tmp_cfg = tempname() * "_persist_win_cfg.json"
+    tmp_h5 = tempname() * "_persist_win_case2.h5"
+    tmp_json = replace(tmp_h5, ".h5" => "_annotations.json")
+    ENV["MEDEYE3D_DISPLAY_CONFIG_PATH"] = tmp_cfg
+
+    try
+        empty!(MEH._user_windowing_modalities)
+        empty!(MEH.tp_modalities)
+        MEH.tp_modalities[0] = "PET"
+        MEH.tp_modalities[1] = "T2"
+        MEH.tp_modalities[2] = "ADC"
+        MEH.current_tp_index[] = 0
+        MEH.mri_main_multimodal_mode[] = false
+        MEH.mri_compare_mode[] = false
+        MEH.compare_mode[] = false
+
+        function _mk_state(tp_i, specs)
+            calc = MEH.CalcDimsStruct(mainImageQuadVert = ones(Float32, 32), mainQuadVertSize = 128)
+            scr = MEH.FullScrollableDat(dimensionToScroll=3, slicesNumber=Int32(8), currentTpIndex=tp_i)
+            disp = MEH.forDisplayObjects(listOfTextSpecifications=specs)
+            return MEH.StateDataFields(calcDimsStruct=calc, onScrollData=scr, mainForDisplayObjects=disp, currentDisplayedSlice=1)
+        end
+
+        p1_ct = MEH.TextureSpec{Float32}(name="CT", isMainImage=true, studyType="CT", minAndMaxValue=Float32[-160, 240])
+        p1_pet = MEH.TextureSpec{Float32}(name="PET", isMainImage=false, isNuclearMask=true, studyType="PET", minAndMaxValue=Float32[0.1, 10.0])
+        p2_t2 = MEH.TextureSpec{Float32}(name="CT", isMainImage=true, studyType="CT", minAndMaxValue=Float32[0, 1000])
+        p3_adc = MEH.TextureSpec{Float32}(name="CT", isMainImage=true, studyType="CT", minAndMaxValue=Float32[0, 2200])
+        states = [_mk_state(0, [p1_ct, p1_pet]), _mk_state(1, [p2_t2]), _mk_state(2, [p3_adc])]
+
+        # 1. Manual windowing adjustments must persist immediately to global config
+        MEH.reactToWindowing(MakieEvents.WindowingEvent("CT", -450.0f0, 1050.0f0), states)
+        MEH.reactToWindowing(MakieEvents.WindowingEvent("PET", 0.5f0, 18.0f0), states)
+        MEH.reactToWindowing(MakieEvents.WindowingEvent("T2", 120.0f0, 880.0f0), states)
+        MEH.reactToWindowing(MakieEvents.WindowingEvent("ADC", 500.0f0, 1950.0f0), states)
+        @test isfile(tmp_cfg)
+
+        # 2. Saving non-windowing display settings (e.g. label opacity / pet blend) must NOT clobber windowing
+        LMW.save_display_config(Dict{String, Any}("label_opacity" => 0.65, "pet_ct_blend" => 0.45))
+        saved_raw = JSON.parse(read(tmp_cfg, String))
+        @test saved_raw["label_opacity"] ≈ 0.65
+        @test saved_raw["windowing"]["CT"] == [-450.0, 1050.0]
+        @test saved_raw["windowing"]["PET"] == [0.5, 18.0]
+        @test saved_raw["windowing"]["T2"] == [120.0, 880.0]
+        @test saved_raw["windowing"]["ADC"] == [500.0, 1950.0]
+
+        # 3. Simulated app restart: clear in-memory windowing -> load_persistent_windowing!() restores all values
+        empty!(MEH._user_windowing_modalities)
+        for (k, v) in MEH.DEFAULT_WINDOWING
+            MEH.current_windowing[k] = copy(v)
+        end
+        @test MEH.load_persistent_windowing!() == true
+        @test MEH.has_persistent_windowing("CT")
+        @test MEH.has_persistent_windowing("PET")
+        @test MEH.has_persistent_windowing("T2")
+        @test MEH.has_persistent_windowing("ADC")
+        @test MEH.current_windowing["CT"] == Float32[-450.0, 1050.0]
+        @test MEH.current_windowing["PET"] == Float32[0.5, 18.0]
+        @test MEH.current_windowing["T2"] == Float32[120.0, 880.0]
+        @test MEH.current_windowing["MRI"] == Float32[120.0, 880.0]
+        @test MEH.current_windowing["ADC"] == Float32[500.0, 1950.0]
+
+        # 4. Opening a second case whose HDF5 carries different _GLOBAL_APP_STATE windowing must NOT overwrite saved values
+        #    (Test apply_global_state directly on the live LMW from Test 11 without spawning a duplicate GLMakie window)
+        HDF5.h5open(tmp_h5, "w") do f
+            mg = HDF5.create_group(f, "_meta_")
+            mg["lesion_annotations.json"] = JSON.json(Dict(
+                "_GLOBAL_APP_STATE" => Dict(
+                    "CT_Min" => "-160.0", "CT_Max" => "240.0",
+                    "PET_Min" => "0.1", "PET_Max" => "10.0",
+                    "T2_Min" => "0.0", "T2_Max" => "1000.0",
+                    "ADC_Min" => "0.0", "ADC_Max" => "2200.0"
+                )
+            ))
+        end
+        MEH.h5_path_ref[] = tmp_h5
+        MEH.h5_save_path_ref[] = tmp_h5
+
+        @test haskey(LMW._lmw_observables, :apply_global_state)
+        @test haskey(LMW._lmw_observables, :sync_windowing_gui)
+        LMW._lmw_observables[:apply_global_state](Dict(
+            "CT_Min" => "-160.0", "CT_Max" => "240.0",
+            "PET_Min" => "0.1", "PET_Max" => "10.0",
+            "T2_Min" => "0.0", "T2_Max" => "1000.0",
+            "ADC_Min" => "0.0", "ADC_Max" => "2200.0"
+        ))
+
+        @test MEH.current_windowing["CT"] == Float32[-450.0, 1050.0]
+        @test MEH.current_windowing["PET"] == Float32[0.5, 18.0]
+        @test MEH.current_windowing["T2"] == Float32[120.0, 880.0]
+        @test MEH.current_windowing["ADC"] == Float32[500.0, 1950.0]
+        @test LMW._lmw_observables[:tb_ct_min].stored_string[] == "-450.0"
+        @test LMW._lmw_observables[:tb_ct_max].stored_string[] == "1050.0"
+        @test LMW._lmw_observables[:tb_t2_min].stored_string[] == "120.0"
+        @test LMW._lmw_observables[:tb_adc_min].stored_string[] == "500.0"
+
+        # 5. apply_current_windowing_to_states! applies persisted windowing to fresh case panels
+        p1_ct.minAndMaxValue = Float32[-160, 240]
+        p1_pet.minAndMaxValue = Float32[0.1, 10.0]
+        p2_t2.minAndMaxValue = Float32[0, 1000]
+        p3_adc.minAndMaxValue = Float32[0, 2200]
+        mv_test = MedEye3d.ForDisplayStructs.MainMedEye3d(channel=Channel{Any}(8), states=states)
+        MEH.apply_current_windowing_to_states!(mv_test.states)
+        @test p1_ct.minAndMaxValue == Float32[-450.0, 1050.0]
+        @test p1_pet.minAndMaxValue == Float32[0.5, 18.0]
+        @test p2_t2.minAndMaxValue == Float32[120.0, 880.0]
+        @test p3_adc.minAndMaxValue == Float32[500.0, 1950.0]
+
+        # 6. sync_windowing_gui updates CT/MRI widgets cleanly without errors
+        LMW._lmw_observables[:sync_windowing_gui]("CT", -1350.0f0, 150.0f0)
+        @test LMW._lmw_observables[:tb_ct_min].stored_string[] == "-1350.0"
+        @test LMW._lmw_observables[:tb_ct_max].stored_string[] == "150.0"
+    finally
+        empty!(MEH.tp_modalities); merge!(MEH.tp_modalities, old_tp_mods)
+        empty!(MEH.current_windowing); merge!(MEH.current_windowing, old_win)
+        empty!(MEH._user_windowing_modalities); union!(MEH._user_windowing_modalities, old_user_mods)
+        if haskey(LMW._lmw_observables, :sync_windowing_gui)
+            LMW._lmw_observables[:sync_windowing_gui]("CT", MEH.current_windowing["CT"][1], MEH.current_windowing["CT"][2])
+            LMW._lmw_observables[:sync_windowing_gui]("PET", MEH.current_windowing["PET"][1], MEH.current_windowing["PET"][2])
+            LMW._lmw_observables[:sync_windowing_gui]("T2", MEH.current_windowing["T2"][1], MEH.current_windowing["T2"][2])
+            LMW._lmw_observables[:sync_windowing_gui]("ADC", MEH.current_windowing["ADC"][1], MEH.current_windowing["ADC"][2])
+        end
+        MEH.h5_path_ref[] = old_h5_path
+        MEH.h5_save_path_ref[] = old_h5_save
+        MEH.mri_main_multimodal_mode[] = old_mri_main
+        MEH.mri_compare_mode[] = old_mri_cmp
+        MEH.compare_mode[] = old_cmp
+        MEH.current_tp_index[] = old_cur_tp
+        if old_cfg_env === nothing
+            delete!(ENV, "MEDEYE3D_DISPLAY_CONFIG_PATH")
+        else
+            ENV["MEDEYE3D_DISPLAY_CONFIG_PATH"] = old_cfg_env
+        end
+        try rm(tmp_cfg; force=true) catch; end
+        try rm(tmp_h5; force=true) catch; end
+        try rm(tmp_json; force=true) catch; end
+    end
+end
+
+@testset "Test 18: Main Window MRI Multimodal Zoom-to-Fit Uses Unified T2 Reference Across Panels 1-4" begin
+    old_mri_main = MEH.mri_main_multimodal_mode[]
+    old_mri_cmp = MEH.mri_compare_mode[]
+    old_tp_mods = copy(MEH.tp_modalities)
+    old_cur_tp = MEH.current_tp_index[]
+    try
+        empty!(MEH.tp_modalities)
+        MEH.tp_modalities[1] = "T2"
+        MEH.tp_modalities[2] = "ADC"
+        MEH.tp_modalities[3] = "DWI"
+        MEH.tp_modalities[4] = "T1"
+        MEH.current_tp_index[] = 1
+        MEH.mri_main_multimodal_mode[] = true
+        MEH.mri_compare_mode[] = false
+
+        function _mk_mri_panel(tp_i, x_rng, y_rng)
+            vol = zeros(Float32, 64, 64, 4)
+            vol[x_rng, y_rng, :] .= 500.0f0
+            calc = MEH.CalcDimsStruct(
+                mainImageQuadVert = ones(Float32, 32),
+                mainQuadVertSize = 128,
+                imageTextureWidth = 64,
+                imageTextureHeight = 64,
+                zoom = 1.0f0, panX = 0.0f0, panY = 0.0f0
+            )
+            scr = MEH.FullScrollableDat(
+                dataToScroll = MEH.ThreeDimRawDat[MEH.ThreeDimRawDat{Float32}(Float32, "CT", vol)],
+                dimensionToScroll = 3,
+                slicesNumber = Int32(4),
+                currentTpIndex = tp_i
+            )
+            return MEH.StateDataFields(calcDimsStruct=calc, onScrollData=scr, currentDisplayedSlice=2)
+        end
+
+        # T2/ADC/DWI share smaller pelvic FOV (21..40), while T1 covers wider FOV (5..60)
+        states = [
+            _mk_mri_panel(1, 21:40, 21:40),
+            _mk_mri_panel(2, 21:40, 21:40),
+            _mk_mri_panel(3, 21:40, 21:40),
+            _mk_mri_panel(4, 5:60, 5:60),
+        ]
+
+        MEH.reactToZoomToFit(MakieEvents.ZoomToFitEvent(1), states)
+        @test states[1].calcDimsStruct.zoom > 2.0f0
+        @test states[4].calcDimsStruct.zoom == states[1].calcDimsStruct.zoom
+        @test states[4].calcDimsStruct.panX == states[1].calcDimsStruct.panX
+        @test states[4].calcDimsStruct.panY == states[1].calcDimsStruct.panY
+        @test states[2].calcDimsStruct.zoom == states[1].calcDimsStruct.zoom
+        @test states[3].calcDimsStruct.zoom == states[1].calcDimsStruct.zoom
+
+        # Second Z press resets all 4 panels uniformly back to 1.0x
+        MEH.reactToZoomToFit(MakieEvents.ZoomToFitEvent(1), states)
+        @test all(s -> s.calcDimsStruct.zoom == 1.0f0 && s.calcDimsStruct.panX == 0.0f0 && s.calcDimsStruct.panY == 0.0f0, states)
+    finally
+        MEH.mri_main_multimodal_mode[] = old_mri_main
+        MEH.mri_compare_mode[] = old_mri_cmp
+        empty!(MEH.tp_modalities); merge!(MEH.tp_modalities, old_tp_mods)
+        MEH.current_tp_index[] = old_cur_tp
     end
 end

@@ -1665,7 +1665,7 @@ function reactToShowSingleLesion(data::ShowSingleLesionEvent, stateObjects::Vect
     end
 end
 
-const current_windowing = Dict{String, Vector{Float32}}(
+const DEFAULT_WINDOWING = Dict{String, Vector{Float32}}(
     "CT"      => Float32[-160.0, 240.0],
     "PET"     => Float32[0.0, 10.0],
     "SPECT"   => Float32[0.0, 10.0],
@@ -1678,19 +1678,118 @@ const current_windowing = Dict{String, Vector{Float32}}(
     "DCE"     => Float32[0.0, 500.0],
     "DYNAMIC" => Float32[0.0, 500.0]
 )
+
+const current_windowing = Dict{String, Vector{Float32}}(
+    k => copy(v) for (k, v) in DEFAULT_WINDOWING
+)
+const _windowing_config_lock = ReentrantLock()
+const _user_windowing_modalities = Set{String}()
 export current_windowing
 
-function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFields})
-    target_mod = uppercase(data.modality)
-    current_windowing[target_mod] = Float32.([data.min_val, data.max_val])
-    if target_mod in ("T2", "MRI", "MR")
-        current_windowing["T2"] = Float32.([data.min_val, data.max_val])
-        current_windowing["MRI"] = Float32.([data.min_val, data.max_val])
-        current_windowing["MR"] = Float32.([data.min_val, data.max_val])
-    end
-    
-    println("[WINDOWING-DISPATCH] Received $(target_mod) -> [$(data.min_val), $(data.max_val)] on $(length(stateObjects)) panels (MRI quad: $(mri_main_multimodal_mode[]))"); flush(stdout)
+function get_global_display_config_path()::String
+    env_p = strip(get(ENV, "MEDEYE3D_DISPLAY_CONFIG_PATH", ""))
+    return !isempty(env_p) ? String(env_p) : joinpath(homedir(), ".medeye3d_display_config.json")
+end
 
+function _normalize_windowing_mod(mod::AbstractString)::String
+    m = uppercase(strip(String(mod)))
+    if m in ("MRI", "MR")
+        return "T2"
+    elseif m == "DYNAMIC"
+        return "DCE"
+    end
+    return m
+end
+
+function _set_windowing_dict!(target_mod::String, min_v::Float32, max_v::Float32; mark_user::Bool=true)
+    up = uppercase(strip(target_mod))
+    vals = Float32[min_v, max_v]
+    current_windowing[up] = vals
+    if up in ("T2", "MRI", "MR")
+        current_windowing["T2"] = copy(vals)
+        current_windowing["MRI"] = copy(vals)
+        current_windowing["MR"] = copy(vals)
+    elseif up in ("DCE", "DYNAMIC")
+        current_windowing["DCE"] = copy(vals)
+        current_windowing["DYNAMIC"] = copy(vals)
+    end
+    if mark_user
+        push!(_user_windowing_modalities, _normalize_windowing_mod(up))
+    end
+end
+
+has_persistent_windowing(mod::AbstractString)::Bool = _normalize_windowing_mod(mod) in _user_windowing_modalities
+
+function _read_global_display_config_dict(config_path::String)::Dict{String, Any}
+    if isfile(config_path)
+        try
+            parsed = JSON.parse(read(config_path, String))
+            if parsed isa AbstractDict
+                return Dict{String, Any}(string(k) => v for (k, v) in parsed)
+            end
+        catch e
+            @warn "Failed reading display config from $config_path: $e"
+        end
+    end
+    return Dict{String, Any}()
+end
+
+function _write_global_display_config_atomic(config_path::String, cfg::AbstractDict)
+    dir = dirname(config_path)
+    !isempty(dir) && mkpath(dir)
+    tmp_path = config_path * ".tmp." * string(getpid())
+    write(tmp_path, JSON.json(cfg, 4))
+    mv(tmp_path, config_path; force=true)
+end
+
+function load_persistent_windowing!(; config_path::String = get_global_display_config_path())
+    lock(_windowing_config_lock) do
+        cfg = _read_global_display_config_dict(config_path)
+        win_raw = get(cfg, "windowing", nothing)
+        win_raw isa AbstractDict || return false
+        loaded_any = false
+        for (mod_k, bounds) in win_raw
+            if bounds isa AbstractVector && length(bounds) == 2
+                v1 = tryparse(Float32, string(bounds[1]))
+                v2 = tryparse(Float32, string(bounds[2]))
+                if v1 === nothing && bounds[1] isa Real
+                    v1 = Float32(bounds[1])
+                end
+                if v2 === nothing && bounds[2] isa Real
+                    v2 = Float32(bounds[2])
+                end
+                if v1 !== nothing && v2 !== nothing && isfinite(v1) && isfinite(v2) && v1 < v2
+                    _set_windowing_dict!(string(mod_k), v1, v2; mark_user=true)
+                    loaded_any = true
+                end
+            end
+        end
+        return loaded_any
+    end
+end
+
+function save_persistent_windowing!(; config_path::String = get_global_display_config_path())
+    lock(_windowing_config_lock) do
+        try
+            cfg = _read_global_display_config_dict(config_path)
+            win_out = Dict{String, Vector{Float64}}()
+            for mod_k in ("CT", "PET", "SPECT", "T2", "ADC", "DWI", "T1", "DCE")
+                if haskey(current_windowing, mod_k) && length(current_windowing[mod_k]) == 2
+                    v = current_windowing[mod_k]
+                    win_out[mod_k] = Float64[v[1], v[2]]
+                end
+            end
+            cfg["windowing"] = win_out
+            _write_global_display_config_atomic(config_path, cfg)
+            return true
+        catch e
+            @warn "Failed saving persistent windowing to $config_path: $e"
+            return false
+        end
+    end
+end
+
+function _apply_windowing_to_panel_list!(target_mod::String, min_val::Float32, max_val::Float32, stateObjects::Vector{StateDataFields})
     for (panel_idx, state) in enumerate(stateObjects)
         panel_tp = if mri_main_multimodal_mode[] && panel_idx in (1, 2, 3, 4)
             mri_tps = !isempty(mri_compare_tps) ? mri_compare_tps : get_mri_comparison_tps(current_tp_index[])
@@ -1711,10 +1810,10 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
                        (panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE")) ||
                        occursin("MR", panel_mod) || occursin("T2", panel_mod) || occursin("T1", panel_mod) ||
                        occursin("ADC", panel_mod) || occursin("DWI", panel_mod) || occursin("DCE", panel_mod)
-        
+
         is_main_match = false
         is_nuc_match = false
-        
+
         if target_mod == "CT"
             is_main_match = !is_panel_mri && (panel_mod == "CT" || panel_mod == "PET" || panel_mod == "SPECT")
         elseif target_mod in ("T2", "MRI", "MR")
@@ -1737,7 +1836,7 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
         elseif target_mod == "SPECT"
             is_nuc_match = (panel_mod == "SPECT")
         end
-        
+
         for tex in state.mainForDisplayObjects.listOfTextSpecifications
             tex_name_up = uppercase(strip(tex.name))
             tex_study_up = uppercase(strip(tex.studyType))
@@ -1745,21 +1844,40 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
             # CT textures only: never match PET/SPECT textures (even if isMainImage=true on Panel 2/7 pure PET)
             is_ct_tex = !is_nuc_tex && (tex_study_up == "CT" || tex_name_up == "CT" || (isempty(tex_study_up) && tex.isMainImage))
             if is_main_match && (target_mod == "CT" ? is_ct_tex : (is_ct_tex || (tex.isMainImage && !tex.isNuclearMask)))
-                tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
+                tex.minAndMaxValue = Float32[min_val, max_val]
                 state.isSliceChanged = true
                 if state.mainForDisplayObjects.vulkanPipelineState !== nothing
                     state.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
                 end
-                println("[WINDOWING-DISPATCH] Matched Panel $(panel_idx) ($(panel_mod)) Main/CT texture $(tex.name): [$(data.min_val), $(data.max_val)]"); flush(stdout)
+                println("[WINDOWING-DISPATCH] Matched Panel $(panel_idx) ($(panel_mod)) Main/CT texture $(tex.name): [$(min_val), $(max_val)]"); flush(stdout)
             elseif is_nuc_match && is_nuc_tex
-                tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
+                tex.minAndMaxValue = Float32[min_val, max_val]
                 state.isSliceChanged = true
                 if state.mainForDisplayObjects.vulkanPipelineState !== nothing
                     state.mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
                 end
-                println("[WINDOWING-DISPATCH] Matched Panel $(panel_idx) ($(panel_mod)) Nuc/PET texture $(tex.name): [$(data.min_val), $(data.max_val)]"); flush(stdout)
+                println("[WINDOWING-DISPATCH] Matched Panel $(panel_idx) ($(panel_mod)) Nuc/PET texture $(tex.name): [$(min_val), $(max_val)]"); flush(stdout)
             end
         end
+    end
+end
+
+function apply_current_windowing_to_states!(stateObjects::Vector{StateDataFields})
+    for mod_k in ("CT", "PET", "SPECT", "T2", "ADC", "DWI", "T1", "DCE")
+        haskey(current_windowing, mod_k) || continue
+        v = current_windowing[mod_k]
+        length(v) == 2 || continue
+        _apply_windowing_to_panel_list!(mod_k, Float32(v[1]), Float32(v[2]), stateObjects)
+    end
+end
+
+function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFields}; persist::Bool=true)
+    target_mod = uppercase(data.modality)
+    _set_windowing_dict!(target_mod, Float32(data.min_val), Float32(data.max_val); mark_user=true)
+    println("[WINDOWING-DISPATCH] Received $(target_mod) -> [$(data.min_val), $(data.max_val)] on $(length(stateObjects)) panels (MRI quad: $(mri_main_multimodal_mode[]))"); flush(stdout)
+    _apply_windowing_to_panel_list!(target_mod, Float32(data.min_val), Float32(data.max_val), stateObjects)
+    if persist
+        save_persistent_windowing!()
     end
 end
 
@@ -2130,7 +2248,7 @@ function reactToZoomToFit(data::MakieEvents.ZoomToFitEvent, stateObjects::Vector
         end
 
         thresh = if is_mri_mod
-            max(1e-3f0, min_v + 0.01f0 * (max_v - min_v))
+            max(0.001f0, min_v + 0.01f0 * (max_v - min_v))
         elseif min_v < -500.0f0
             # CT in HU: tissue/body > -500 HU
             -500.0f0
@@ -2172,21 +2290,25 @@ function reactToZoomToFit(data::MakieEvents.ZoomToFitEvent, stateObjects::Vector
         return (fit_zoom, fit_panX, fit_panY)
     end
 
-    # In MRI Comparison mode, compute a unified bounding box fit from panel 6 (T2 reference)
-    # so all 4 synchronized MRI modalities share the exact same zoom and pan!
-    mri_shared_fit = nothing
-    if mri_compare_mode[] && length(stateObjects) >= 9 && (6 in panel_range)
-        f_z, f_px, f_py = _compute_panel_fit(stateObjects[6], 6)
-        cur_z = stateObjects[6].calcDimsStruct.zoom
-        cur_px = stateObjects[6].calcDimsStruct.panX
-        cur_py = stateObjects[6].calcDimsStruct.panY
+    # In MRI Comparison mode (panels 6-9) and Main Window MRI Multimodal mode (panels 1-4),
+    # compute a unified bounding box fit from the T2 reference panel so all 4 synchronized
+    # MRI modalities (including wider-FOV T1) share the exact same zoom and pan.
+    function _compute_shared_mri_fit(ref_panel::Int)
+        f_z, f_px, f_py = _compute_panel_fit(stateObjects[ref_panel], ref_panel)
+        cur_z = stateObjects[ref_panel].calcDimsStruct.zoom
+        cur_px = stateObjects[ref_panel].calcDimsStruct.panX
+        cur_py = stateObjects[ref_panel].calcDimsStruct.panY
         # Toggle: if already at fit_zoom (or if fit_zoom == 1.0), reset to 1.0; otherwise apply fit_zoom
         if abs(cur_z - f_z) < 0.08f0 && abs(cur_px - f_px) < 0.03f0 && abs(cur_py - f_py) < 0.03f0
-            mri_shared_fit = (1.0f0, 0.0f0, 0.0f0)
+            return (1.0f0, 0.0f0, 0.0f0)
         else
-            mri_shared_fit = (f_z, f_px, f_py)
+            return (f_z, f_px, f_py)
         end
     end
+    mri_main_shared_fit = (mri_main_multimodal_mode[] && length(stateObjects) >= 4 && (1 in panel_range)) ?
+        _compute_shared_mri_fit(1) : nothing
+    mri_shared_fit = (mri_compare_mode[] && length(stateObjects) >= 9 && (6 in panel_range)) ?
+        _compute_shared_mri_fit(6) : nothing
 
     for idx in panel_range
         state = stateObjects[idx]
@@ -2196,10 +2318,17 @@ function reactToZoomToFit(data::MakieEvents.ZoomToFitEvent, stateObjects::Vector
             state.calcDimsStruct.panY = 0.0f0
             continue
         end
-        if mri_compare_mode[] && idx in (6, 7, 8, 9) && mri_shared_fit !== nothing
-            state.calcDimsStruct.zoom = mri_shared_fit[1]
-            state.calcDimsStruct.panX = mri_shared_fit[2]
-            state.calcDimsStruct.panY = mri_shared_fit[3]
+        shared_fit = if mri_main_multimodal_mode[] && idx in (1, 2, 3, 4)
+            mri_main_shared_fit
+        elseif mri_compare_mode[] && idx in (6, 7, 8, 9)
+            mri_shared_fit
+        else
+            nothing
+        end
+        if shared_fit !== nothing
+            state.calcDimsStruct.zoom = shared_fit[1]
+            state.calcDimsStruct.panX = shared_fit[2]
+            state.calcDimsStruct.panY = shared_fit[3]
         else
             f_z, f_px, f_py = _compute_panel_fit(state, idx)
             cur_z = state.calcDimsStruct.zoom
@@ -8450,5 +8579,9 @@ function reactToToggleSemanticFilter(data::MakieEvents.ToggleSemanticFilterEvent
         kept = length(_semantic_allowed_set_for_tp(tp))
         set_ai_status!(data.active ? "[Semantic Filter] ON ($kept lesions matching report)" : "[Semantic Filter] OFF (showing all lesions)")
     catch; end
+end
+
+function __init__()
+    load_persistent_windowing!()
 end
 end # module

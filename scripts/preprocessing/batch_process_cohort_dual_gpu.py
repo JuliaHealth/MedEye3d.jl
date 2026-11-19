@@ -7,7 +7,8 @@ Processes all 133 patient cases across GPU 0 and GPU 1 concurrently:
   1. Calibrated AC PET SUV access and conversion (Scan 3 DICOM verification & suvs.py)
   2. Two-stage Arun SVD + prostate SWD registration (Transform_FollowUp_to_Baseline_1.tfm)
   3. Resampling moving MRI sequences + dedicated 8-zone prostate sub-segmentation
-  4. Recalculation of fresh lymph node stations via Julia GPU DagVm engine
+  4. Authoritative lymph node stations consumed from `<case_dir>/lymph_nodes/`,
+     external `lymph_node_rules` cache, or XNAT `LYMPH_NODE_RESULTS` (separate repo)
   5. Whole-body CT anatomy layering & sanitation (purging 'temp' & helper masks)
   6. Modality ground truth lesions (Label 9 -> 1 on MRI; zero mapped CT lesions on MRI)
   7. Champion TotalSegEdgePDE 3D neural edges (CT+PET, CT, PET) & diffusivities on GPU
@@ -812,44 +813,28 @@ def compute_two_stage_registration(ct_img, raw_dir, device="cuda:0", xnat=None, 
     return tfm_path
 
 
-def run_julia_lymph_node_rules(ct_path, tensor_path, out_ln_path, gpu_id=0):
+def verify_external_lymph_node_results(case_dir, out_ln_path):
     """
-    Step 4: Recomputes fresh clinical lymph node stations (101-108) using the Julia GPU DagVm engine.
+    Step 4: Validates precomputed clinical lymph node stations supplied by the separate
+    `lymph_node_rules` repository (`<case_dir>/lymph_nodes/`, XNAT `LYMPH_NODE_RESULTS`,
+    or `raw/final_results_gpu.h5`). Local DagVm LN worker execution is no longer embedded
+    in MedEye3d.jl.
     """
+    ln_dir = os.path.join(case_dir, "lymph_nodes")
+    if os.path.isfile(os.path.join(ln_dir, "all_lymph_nodes.nii.gz")):
+        return True
     if os.path.isfile(out_ln_path) and os.path.getsize(out_ln_path) > 50000:
         try:
             with h5py.File(out_ln_path, "r") as test_f:
                 num_k = len(test_f.keys())
-            print(f"    Reusing verified clinical lymph nodes ({num_k} stations): {out_ln_path}")
+            print(f"    Reusing external clinical lymph nodes ({num_k} stations): {out_ln_path}")
             return True
         except Exception:
-            print(f"    [WARN] Cached {out_ln_path} is unreadable/corrupted. Recomputing with Julia GPU...")
+            print(f"    [WARN] Cached {out_ln_path} is unreadable/corrupted; removing stale file.")
             os.remove(out_ln_path)
-
-    ln_proj = "/mnt/big/project_ssd/project_ssd/lymph_node_rules/src/julia_gpu"
-    worker_script = os.path.join(WORKSPACE_DIR, "scripts/preprocessing/run_ln_worker.jl")
-
-    raw_dir = os.path.dirname(tensor_path)
-    env = os.environ.copy()
-    env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-    env["JULIA_NUM_THREADS"] = "4"
-    env["LN_RULES_DIR"] = "/mnt/big/project_ssd/project_ssd/lymph_node_rules"
-
-    julia_bin = "/mnt/big/project_ssd/project_ssd/lymph_node_rules/for_joanna/.local/julia-1.12.6/bin/julia" if os.path.isfile("/mnt/big/project_ssd/project_ssd/lymph_node_rules/for_joanna/.local/julia-1.12.6/bin/julia") else "julia"
-    cmd = [
-        julia_bin, f"--project={ln_proj}",
-        worker_script,
-        raw_dir,
-        out_ln_path
-    ]
-    print(f"    Running Julia GPU DagVm LN rules on GPU {gpu_id}...")
-    t0 = time.time()
-    res = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    if res.returncode != 0 or not os.path.isfile(out_ln_path):
-        print(f"    [WARN] Julia LN worker failed: {res.stderr[:300]}")
-        return False
-    print(f"    ✓ Lymph node rules completed in {time.time()-t0:.1f}s")
-    return True
+    ln_repo = os.environ.get("LN_RULES_DIR", "/mnt/big/project_ssd/lymph_node_rules")
+    print(f"    [WARN] Missing precomputed lymph nodes ({ln_dir} or {out_ln_path}). Run separate repo: {ln_repo}")
+    return False
 
 
 from cads_anatomy_wiring import (
@@ -1206,7 +1191,7 @@ def process_case(pat_id, gpu_id, xnat):
                 if lk in ln_map:
                     xnat.download_file(ln_map[lk], final_ln_h5)
                     break
-    run_julia_lymph_node_rules(ct_dest, anat_h5, final_ln_h5, gpu_id=gpu_id)
+    verify_external_lymph_node_results(case_dir, final_ln_h5)
 
     # Step 5: Anatomy Layering & Sanitation (purging temp)
     max_anat, anat_labels, bone_ids, bone_atlas, skellytour, excl_mask = layer_and_sanitize_ct_anatomy(ct_shape, raw_dir)
