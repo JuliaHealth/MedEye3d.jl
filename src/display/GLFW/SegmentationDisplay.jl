@@ -726,6 +726,7 @@ on_next!(stateObjects::Vector{StateDataFields}, data::SetPhaseEvent) = reactToSe
 on_next!(stateObjects::Vector{StateDataFields}, data::CompareTimePointsEvent) = reactToCompareTimePoints(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ShowSingleLesionEvent) = reactToShowSingleLesion(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleSingleMultiLesionEvent) = MakieEventHandlers.reactToToggleSingleMultiLesion(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleSemanticFilterEvent) = MakieEventHandlers.reactToToggleSemanticFilter(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::MakieEvents.ToggleMapModeEvent) = MakieEventHandlers.reactToToggleMapMode(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::WindowingEvent) = reactToWindowing(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::PaintValEvent) = reactToPaintVal(data, stateObjects)

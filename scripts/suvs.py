@@ -360,8 +360,12 @@ def resolve_injection_and_acquisition_times(ds, half_life, decay_constant):
 
     # According to the DRO recommendations, long-lived radionuclides require
     # a reliable full administration datetime because uptake can exceed 24 h.
+    # For short-lived clinical isotopes such as Ga-68 (T_1/2 ~ 68 min),
+    # delayed 120-min WB scans routinely start 135-160 min post-injection
+    # (> 2 * half_life), so allow up to max(2 * half_life, 4 hours).
     long_lived_radionuclide = half_life >= 41400
     minimum_reference_offset = 0 if ds.DecayCorrection == "NONE" else -3600
+    maximum_reference_offset = 2 * half_life if long_lived_radionuclide else max(2 * half_life, 4 * 3600)
 
     def validate_reconstructed_times(injection_time, acquisition_time):
         decay_reference_time = get_decay_correction_reference_datetime(
@@ -370,7 +374,7 @@ def resolve_injection_and_acquisition_times(ds, half_life, decay_constant):
             decay_constant,
         )
         reconstructed_offset = (decay_reference_time - injection_time).total_seconds()
-        if not minimum_reference_offset <= reconstructed_offset < 2 * half_life:
+        if not minimum_reference_offset <= reconstructed_offset < maximum_reference_offset:
             raise DataStructureError(
                 "Reconstructed administration and acquisition times are inconsistent "
                 "with the decay-correction reference datetime."
@@ -418,7 +422,7 @@ def resolve_injection_and_acquisition_times(ds, half_life, decay_constant):
 
         datetime_offset = (decay_reference_time - injection_datetime).total_seconds()
 
-        if minimum_reference_offset <= datetime_offset < 2 * half_life:
+        if minimum_reference_offset <= datetime_offset < maximum_reference_offset:
             return injection_datetime, acquisition_time
 
         if ds.DecayCorrection == "NONE" and datetime_offset < 0:
@@ -1227,8 +1231,9 @@ def _enhanced_administration_datetime(ds, reference_datetime, half_life, rph=Non
     reference_datetime, administration = _make_datetimes_comparable(ds, reference_datetime, administration)
     decay_corrected = str(getattr(ds, "DecayCorrected", "")).strip().upper()
     minimum_offset_seconds = 0 if decay_corrected == "NO" else -3600
+    max_offset_seconds = 2 * half_life if half_life >= 41400 else max(2 * half_life, 4 * 3600)
     offset_seconds = (reference_datetime - administration).total_seconds()
-    if minimum_offset_seconds <= offset_seconds < 2 * half_life:
+    if minimum_offset_seconds <= offset_seconds < max_offset_seconds:
         return reference_datetime, administration
 
     if half_life >= 41400:
@@ -1246,7 +1251,7 @@ def _enhanced_administration_datetime(ds, reference_datetime, half_life, rph=Non
         administration -= timedelta(days=1)
 
     reconstructed_offset_seconds = (reference_datetime - administration).total_seconds()
-    if minimum_offset_seconds <= reconstructed_offset_seconds < 2 * half_life:
+    if minimum_offset_seconds <= reconstructed_offset_seconds < max_offset_seconds:
         return reference_datetime, administration
     raise DataStructureError(
         "Radiopharmaceutical Start DateTime remains inconsistent with the decay-correction reference datetime "

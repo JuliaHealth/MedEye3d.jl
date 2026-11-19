@@ -13,7 +13,7 @@ so we modify the data that is the basis of the mouse interaction mask  and we pa
 module ReactOnMouseClickAndDrag
 using Logging, Parameters, Setfield, GLFW, Dates, Parameters, Logging, Base.Threads
 using ..ForDisplayStructs, ..TextureManag, ..OpenGLDisplayUtils
-using ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForLine, ..ReactToScroll, ..DisplayWords, ..StrokeRasterization
+using ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForLine, ..ReactToScroll, ..DisplayWords, ..StrokeRasterization, ..LesionEditsRecorder
 using ..MakieEvents: HeatGDTHoldEvent, HeatGDTStartEvent, HeatGDTTickEvent, HeatGDTStopEvent
 import Logging, Base.Threads
 export registerMouseClickFunctions
@@ -657,6 +657,12 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
         end
     end
 
+    pre_patch_2d = if !is_ln_or_anat && !isempty(LesionEditsRecorder.get_edits_h5_path()) && checkbounds(Bool, twoDimDat.dat, min_bx:max_bx, min_by:max_by)
+        copy(@view twoDimDat.dat[min_bx:max_bx, min_by:max_by])
+    else
+        nothing
+    end
+
     # In-place continuous thick-line interpolation
     StrokeRasterization.rasterize_polyline!(twoDimDat.dat, pointsToRasterize, strokeW, toSet)
 
@@ -726,6 +732,38 @@ function react_to_draw(mouseStructArray::Vector{MouseStruct}, mainStates::Vector
                     end
                 catch e_sync
                     @debug "Failed to sync painted slice to tp_data_cache: $e_sync"
+                end
+
+                # Record manual paint / erase strokes for Heat-GDT lesion edit history
+                if pre_patch_2d !== nothing && !is_ln_or_anat
+                    try
+                        seg_3d = entry.mask_i16 !== nothing ? entry.mask_i16 : entry.mask
+                        if seg_3d !== nothing
+                            painted_coords = NTuple{3, Int}[]
+                            erased_by_id = Dict{Int, Vector{NTuple{3, Int}}}()
+                            @inbounds for jj in 1:(max_by - min_by + 1), ii in 1:(max_bx - min_bx + 1)
+                                gx = min_bx + ii - 1
+                                gy = min_by + jj - 1
+                                old_v = Int(pre_patch_2d[ii, jj])
+                                new_v = Int(twoDimDat.dat[gx, gy])
+                                new_v == old_v && continue
+                                c3 = eff_dim == 1 ? (cur_slice, gx, gy) : (eff_dim == 2 ? (gx, cur_slice, gy) : (gx, gy, cur_slice))
+                                if new_v > 0 && new_v == Int(toSet)
+                                    push!(painted_coords, c3)
+                                elseif new_v == 0 && old_v > 0
+                                    push!(get!(erased_by_id, old_v, NTuple{3, Int}[]), c3)
+                                end
+                            end
+                            if !isempty(painted_coords)
+                                LesionEditsRecorder.record_brush_voxels!(tp_idx, Int(toSet), painted_coords, false, seg_3d; brush_radius=strokeW)
+                            end
+                            for (erased_id, coords) in erased_by_id
+                                LesionEditsRecorder.record_brush_voxels!(tp_idx, erased_id, coords, true, seg_3d; brush_radius=strokeW)
+                            end
+                        end
+                    catch e_rec
+                        @debug "LesionEditsRecorder brush hook failed: $e_rec"
+                    end
                 end
                 
                 # Broadcast painted annotation across all MRI modalities:

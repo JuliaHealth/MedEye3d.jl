@@ -76,17 +76,52 @@ _LYMPH_PREFIXES = ("neck_", "thoracic_", "axillary_", "abdominal_",
                    "deep_inguinal", "superficial_inguinal", "inguinal_")
 
 
+_EXCLUDED_EXACT_MASKS = frozenset({
+    "body", "body_trunc", "body_extremities",
+    "torso_fat", "subcutaneous_fat", "skin", "skeletal_muscle",
+    "abdominal_cavity", "thoracic_cavity", "thorax_wall",
+    "nasal_cavity_left", "nasal_cavity_right", "lung_airways_wall",
+    "oblique_hyoid_plane", "digastric_plane_left", "digastric_plane_right",
+})
+
+
+def is_excluded_non_organ_mask(name: str) -> bool:
+    """Return True for body-envelope, fat/skin/muscle, geometric plane, cavity, or helper masks."""
+    ln = (name or "").strip().lower()
+    if not ln:
+        return True
+    if ln in _EXCLUDED_EXACT_MASKS:
+        return True
+    if ln.endswith("_plane") or "_plane_" in ln:
+        return True
+    if any(bad in ln for bad in ("_temp", "helper", "dilation", "buffer", "_cavity", "chest_wall", "exclusion_zone")):
+        return True
+    if ln == "temp" or ln.startswith("temp_"):
+        return True
+    return False
+
+
+def is_lung_label_name(name: str) -> bool:
+    """Return True for lung structures (the ONLY non-LN anatomy allowed to override LN areas)."""
+    ln = (name or "").strip().lower()
+    if not ln or "airways_wall" in ln:
+        return False
+    return "lung" in ln
+
+
 def is_lymph_label_name(name: str) -> bool:
     """Name-based lymph node area test (mirrors LesionAssociation.is_lymph_node_structure).
 
     Excludes non-lymph helper/structural labels that share station prefixes
     (e.g. 'abdominal_cavity', 'thoracic_cavity', 'thoracic_chest_wall',
-    'thoracic_sternum_exclusion_zone', '*_helper', '*_bridge').
+    'thoracic_sternum_exclusion_zone', 'inguinal_ligament_*', '*_helper', '*_bridge').
     """
     ln = (name or "").lower()
     if not ln:
         return False
-    if any(bad in ln for bad in ("_cavity", "exclusion_zone", "chest_wall", "_helper", "_bridge", "_base", "_dilated")):
+    if any(bad in ln for bad in ("_cavity", "exclusion_zone", "chest_wall", "_helper", "_bridge", "_base", "_dilated", "ligament")):
+        return False
+    if ln in ("thoracic_aorta", "thoracic_duct"):
         return False
     if "lymph" in ln or "knoten" in ln or "node" in ln:
         return True
@@ -304,6 +339,32 @@ def pick_best_organ(counts: dict, labels_dict: dict) -> str:
             return maj[2]
 
     return best_name
+
+
+def remove_edge_slice_lesions(lesion_arr: np.ndarray, edge_slices: int = 2) -> list:
+    """Unconditionally zero out lesion voxels in the first/last `edge_slices` Z slices.
+
+    Those outer axial slices frequently contain scanner end-of-FOV / truncation
+    artifacts regardless of whether the semantic filter is enabled.
+    Returns the sorted list of lesion IDs that had zero remaining voxels after trimming.
+    """
+    if lesion_arr is None or lesion_arr.ndim != 3 or edge_slices <= 0:
+        return []
+    z_dim = lesion_arr.shape[0]
+    if z_dim <= 2 * edge_slices:
+        return []
+
+    edge_mask = np.zeros(z_dim, dtype=bool)
+    edge_mask[:edge_slices] = True
+    edge_mask[-edge_slices:] = True
+    if not np.any(lesion_arr[edge_mask] > 0):
+        return []
+
+    before_ids = {int(x) for x in np.unique(lesion_arr) if x > 0}
+    lesion_arr[:edge_slices, :, :] = 0
+    lesion_arr[-edge_slices:, :, :] = 0
+    after_ids = {int(x) for x in np.unique(lesion_arr) if x > 0}
+    return sorted(before_ids - after_ids)
 
 
 def filter_lacrimal_lesions(lesion_arr: np.ndarray,
@@ -524,6 +585,125 @@ def patch_case_h5_with_cads(h5_path: str,
 
     print(f"[SUCCESS] Patched {h5_path} with CADS structures. Updated labels: {len(updated_labels)}")
     return True
+
+
+def iter_authoritative_lymph_node_masks(ct_shape: tuple, raw_dir: str, ref_img: sitk.Image = None):
+    """Yield (clean_name, bool_mask_zyx, source_tag) from authoritative lymph node segmentations.
+
+    Priority:
+      1. <case_dir>/lymph_nodes/ (or <raw_dir>/lymph_nodes/):
+         Uses `all_lymph_nodes.nii.gz` + `lymph_node_labels.json` when present, plus
+         any standalone `<station>.nii.gz` files not covered by the JSON map.
+      2. Fallback to `<raw_dir>/final_results_gpu.h5`.
+    """
+    Z, Y, X = ct_shape
+    case_dir = os.path.dirname(os.path.abspath(raw_dir))
+    ln_dirs = [os.path.join(case_dir, "lymph_nodes"), os.path.join(raw_dir, "lymph_nodes")]
+    ln_dir = next((d for d in ln_dirs if os.path.isdir(d)), None)
+
+    if ln_dir is not None:
+        all_nii = os.path.join(ln_dir, "all_lymph_nodes.nii.gz")
+        lbl_json = os.path.join(ln_dir, "lymph_node_labels.json")
+        seen_names = set()
+
+        def _read_nii_mask(nii_p: str) -> np.ndarray:
+            im = sitk.ReadImage(nii_p)
+            if im.GetSize() != (X, Y, Z) and ref_img is not None:
+                return resample_mask_to_reference(im, ref_img)
+            return sitk.GetArrayFromImage(im)
+
+        if os.path.isfile(all_nii) and os.path.isfile(lbl_json):
+            try:
+                with open(lbl_json, "r") as jf:
+                    lbl_map = json.load(jf)
+                arr_all = _read_nii_mask(all_nii)
+                if arr_all.shape == ct_shape:
+                    for lid_str, st_name in sorted(lbl_map.items(), key=lambda kv: str(kv[1]).lower()):
+                        clean = str(st_name).strip().lower()
+                        if not clean or not is_lymph_label_name(clean):
+                            continue
+                        seen_names.add(clean)
+                        mask = (arr_all == int(lid_str))
+                        if mask.any():
+                            yield clean, mask, "lymph_nodes/all_lymph_nodes.nii.gz"
+            except Exception as exc:
+                print(f"    [WARN] Error reading {all_nii}: {exc}")
+
+        for fn in sorted(os.listdir(ln_dir)):
+            if not fn.endswith(".nii.gz") or fn == "all_lymph_nodes.nii.gz":
+                continue
+            clean = fn[:-7].strip().lower()
+            if clean in seen_names or not is_lymph_label_name(clean):
+                continue
+            try:
+                arr = _read_nii_mask(os.path.join(ln_dir, fn))
+                if arr.shape == ct_shape:
+                    mask = (arr > 0)
+                    if mask.any():
+                        seen_names.add(clean)
+                        yield clean, mask, f"lymph_nodes/{fn}"
+            except Exception as exc:
+                print(f"    [WARN] Error reading {fn}: {exc}")
+        return
+
+    ln_h5 = os.path.join(raw_dir, "final_results_gpu.h5")
+    if os.path.isfile(ln_h5):
+        try:
+            with h5py.File(ln_h5, "r") as lf:
+                for k in sorted(lf.keys()):
+                    clean = k.lower()
+                    if not is_lymph_label_name(clean):
+                        continue
+                    arr_ln = lf[k][:]
+                    if arr_ln.ndim == 3:
+                        if arr_ln.shape == (X, Y, Z) and arr_ln.shape != (Z, Y, X):
+                            arr_ln = np.transpose(arr_ln, (2, 1, 0))
+                        if arr_ln.shape == ct_shape:
+                            m_ln = (arr_ln > 0)
+                            if m_ln.any():
+                                yield clean, m_ln, "final_results_gpu.h5"
+        except Exception as exc:
+            print(f"    [WARN] Error reading {ln_h5}: {exc}")
+
+
+def parse_seg_nrrd_names(ml_img: sitk.Image) -> dict:
+    """Extract {str(label_value): segment_name} from Slicer .seg.nrrd metadata keys."""
+    names = {}
+    keys = set(ml_img.GetMetaDataKeys())
+    prefixes = sorted({k.split("_")[0] for k in keys if k.startswith("Segment") and "_" in k})
+    for pref in prefixes:
+        lv_k = f"{pref}_LabelValue"
+        nm_k = f"{pref}_Name"
+        if lv_k in keys and nm_k in keys:
+            try:
+                lv = str(int(ml_img.GetMetaData(lv_k)))
+                nm = str(ml_img.GetMetaData(nm_k)).strip()
+                if nm:
+                    names[lv] = nm
+            except Exception:
+                pass
+    return names
+
+
+def resample_mr_lesions_nrrd(ml_img: sitk.Image, ct_img: sitk.Image, tfm_obj: sitk.Transform = None) -> tuple:
+    """Resample Slicer NNUNET_OR_Processed_Lesions_MR.seg.nrrd onto CT grid preserving distinct lesion IDs.
+
+    Slicer exports cropped .seg.nrrd segmentations already in Fixed CT physical space (Identity);
+    only fall back to `tfm_obj` if Identity maps outside `ct_img`.
+    Returns (ml_arr_zyx_int16, mr_seg_names_dict).
+    """
+    res_id = sitk.Resample(ml_img, ct_img, sitk.Transform(), sitk.sitkNearestNeighbor, 0, sitk.sitkInt16)
+    ml_arr = sitk.GetArrayFromImage(res_id).astype(np.int16)
+    if not ml_arr.any() and tfm_obj is not None:
+        res_tfm = sitk.Resample(ml_img, ct_img, tfm_obj, sitk.sitkNearestNeighbor, 0, sitk.sitkInt16)
+        ml_arr = sitk.GetArrayFromImage(res_tfm).astype(np.int16)
+    raw_names = parse_seg_nrrd_names(ml_img)
+    seg_names = {
+        str(int(lid)): raw_names.get(str(int(lid)), f"Lesion {int(lid)}")
+        for lid in np.unique(ml_arr)
+        if int(lid) > 0
+    }
+    return ml_arr, seg_names
 
 
 if __name__ == "__main__":

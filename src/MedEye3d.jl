@@ -88,6 +88,7 @@ using .StrokeRasterization
 export StrokeRasterization
 
 include(joinpath("postprocessing", "ConnectedComponents.jl"))
+include(joinpath("preprocessing", "LesionEditsRecorder.jl"))
 using .ConnectedComponents
 export ConnectedComponents
 

@@ -13,6 +13,7 @@ export NextPhaseEvent, PrevPhaseEvent, SetPhaseEvent
 export EditModeEvent, ViewModeEvent, SetTPFirstEvent, SetTPLastEvent
 export NewLesionEvent, EraseModeEvent, ShowOnlyPETEvent, ShowOnlyCTEvent, ToggleAnatomyEvent, ToggleSyncScrollEvent
 export ToggleCrosshairEvent, ToggleSingleMultiLesionEvent, ToggleHeatGDTModeEvent, OneShotHeatGDTEvent
+export ToggleSemanticFilterEvent
 export ToggleMRIMultimodalEvent, DeleteLesionEvent, UndoEvent
 export HeatGDTStartEvent, HeatGDTTickEvent, HeatGDTStopEvent, HeatGDTPosthocSizeEvent, ToggleMapModeEvent
 export HeatGDTDilationChangeEvent, HeatGDTSmoothingChangeEvent
@@ -52,6 +53,9 @@ struct ShowSingleLesionEvent
 end
 
 struct ToggleSingleMultiLesionEvent end
+struct ToggleSemanticFilterEvent
+    active::Bool
+end
 struct ToggleMapModeEvent end
 
 struct ScrollZoomEvent

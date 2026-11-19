@@ -585,6 +585,11 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
             @warn "Could not parse _meta_/metadata.json: $e"
         end
     end
+    try
+        MEH.load_semantic_filter_from_h5!(h5_init)
+    catch e
+        @warn "Could not load _meta_/semantic_filter.json: $e"
+    end
     if meta_json === nothing
         meta_fallback = joinpath(dirname(h5_path), "metadata.json")
         if isfile(meta_fallback)
@@ -793,16 +798,24 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     first_mask = is_preflipped ? Float32.(raw_first_mask) : reverse(Float32.(raw_first_mask), dims=2)
     valid_tp0_lids = Set{Int}(Int(x) for x in unique(first_mask) if x > 0)
 
-    # Auto-load precomputed Heat-GDT diffusivity if available
+    # Auto-load precomputed Heat-GDT diffusivity matching default heatgdt_edge_modality[]
     try
-        if haskey(h5_init, "BASELINE/diffusivity")
-            @info "[HeatDiffusion] Loading diffusivity tensor from HDF5 (BASELINE/diffusivity)"
-            diff_vol = Float32.(read(h5_init["BASELINE/diffusivity"]))
+        init_mod = MEH.heatgdt_edge_modality[]
+        init_ds = init_mod === :ct_only ? "diffusivity_ct" : (init_mod === :pet_only ? "diffusivity_pet" : "diffusivity")
+        bl_grp = haskey(h5_init, "BASELINE") ? h5_init["BASELINE"] : nothing
+        ds_name = (bl_grp !== nothing && haskey(bl_grp, init_ds)) ? init_ds : ((bl_grp !== nothing && haskey(bl_grp, "diffusivity")) ? "diffusivity" : "")
+        if !isempty(ds_name)
+            @info "[HeatDiffusion] Loading diffusivity tensor from HDF5 (BASELINE/$ds_name, modality=$init_mod)"
+            diff_vol = Float32.(read(bl_grp[ds_name]))
             if !is_preflipped
                 diff_vol = reverse(diff_vol, dims=2)
             end
             MedEye3d.InferenceClient.precompute_heatgdt_diffusivity(diff_vol; tp_index=0)
-            MEH._tp_diffusivity_cache[0] = diff_vol
+            MEH._tp_diffusivity_cache[(0, init_mod)] = diff_vol
+            if ds_name == "diffusivity"
+                MEH._tp_diffusivity_cache[0] = diff_vol
+            end
+            MEH.heatgdt_current_loaded_modality[] = init_mod
             # Warm up Heat-GDT so first interaction has zero JIT compilation latency
             MedEye3d.InferenceClient.warmup_heatgdt!()
         else
@@ -1176,10 +1189,20 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
         color=RGB(0.0, 1.0, 1.0), minAndMaxValue=Int8.([0, 3]),
         isVisible=true, maskContribution=init_label_opacity
     )
-    anatomy_colors = [RGB(rand(), rand(), rand()) for _ in 1:400]
+    anatomy_colors = map(1:1000) do idx
+        h6 = ((idx * 0.618033988749895) % 1.0) * 6.0
+        s = 0.72 + 0.18 * (idx % 2)
+        v = 0.75 + 0.20 * ((idx ÷ 2) % 2)
+        c = v * s
+        x = c * (1.0 - abs((h6 % 2.0) - 1.0))
+        m = v - c
+        sec = floor(Int, h6) % 6
+        r1, g1, b1 = sec == 0 ? (c, x, 0.0) : sec == 1 ? (x, c, 0.0) : sec == 2 ? (0.0, c, x) : sec == 3 ? (0.0, x, c) : sec == 4 ? (x, 0.0, c) : (c, 0.0, x)
+        RGB(r1 + m, g1 + m, b1 + m)
+    end
     textureSpec_anatomy = TextureSpec{Int16}(
         name="Anatomy", isMainImage=false, isMultiDiscreteMask=true, isIntegerTexture=true,
-        colorSet=anatomy_colors, minAndMaxValue=Int16.([0, 400]),
+        colorSet=anatomy_colors, minAndMaxValue=Int16.([1, MEH.ANATOMY_MAX_LABEL_ID]),
         isEditable=true, isVisible=false, maskContribution=init_label_opacity
     )
 
@@ -1289,19 +1312,6 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 end
             catch te
                 @warn "[Translation] Could not translate description for TP $tp_i: $te"
-            end
-        elseif isempty(desc_de) && !isempty(desc_en)
-            try
-                @info "[Translation] Translating English description to German for TP $tp_i ($matched_date_key)..."
-                desc_de = MedEye3d.LLMDictation.translate_report_to_german(desc_en)
-                if !isempty(desc_de) && !startswith(desc_de, "Error") && !startswith(desc_de, "API Error") && !startswith(desc_de, "Connection Error")
-                    matched_info["Description"] = desc_de
-                    @info "[Translation] Successfully translated TP $tp_i ($matched_date_key) to German: $(length(desc_de)) chars"
-                else
-                    desc_de = ""
-                end
-            catch te
-                @warn "[Translation] Could not translate description to German for TP $tp_i: $te"
             end
         end
 
@@ -1523,6 +1533,13 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
 
     MEH.register_tp_loader!(load_single_tp_from_h5)
     MEH.register_h5_mask_saver!(h5_path, studies)
+    try
+        sp_meta = Tuple{Float64, Float64, Float64}(Float64.(first_spacing))
+        or_meta = Tuple{Float64, Float64, Float64}(Float64.(first_origin))
+        MedEye3d.LesionEditsRecorder.set_case_h5_path!(h5_path; spacing=sp_meta, origin=or_meta)
+    catch e
+        @warn "[AppMain] LesionEditsRecorder init failed: $e"
+    end
     first_entry = load_single_tp_from_h5(0)
     lock(MEH._tp_cache_lock) do
         MEH.tp_data_cache[0] = first_entry
@@ -1899,6 +1916,14 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                     if !isempty(new_studies)
                         empty!(studies)
                         append!(studies, new_studies)
+                        try
+                            if MedEye3d.LesionEditsRecorder.has_pending_edits()
+                                MEH.flush_all_dirty_masks!()
+                            end
+                            MedEye3d.LesionEditsRecorder.set_case_h5_path!(new_h5_path)
+                        catch e
+                            @warn "[XNAT-SWITCH] LesionEditsRecorder reset failed: $e"
+                        end
                         MEH.register_h5_mask_saver!(new_h5_path, studies)
                         MEH.mri_compare_mode[] = false
                         MEH.mri_main_multimodal_mode[] = false
@@ -1906,12 +1931,51 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                         empty!(MEH.tp_labels)
                         empty!(MEH.tp_modalities)
                         empty!(MEH.tp_node_names)
+                        empty!(MEH.tp_descriptions)
+                        empty!(MEH.tp_english_descriptions)
+                        try
+                            MEH.load_semantic_filter_from_h5!(h5_new)
+                        catch e
+                            @warn "Could not load _meta_/semantic_filter.json on case switch: $e"
+                        end
+
+                        sw_date_entries = Dict{String, Any}()
+                        if haskey(h5_new, "_meta_/metadata.json")
+                            try
+                                sw_meta = JSON.parse(read(h5_new["_meta_/metadata.json"]))
+                                MEH.global_dicom_metadata[] = sw_meta isa Dict ? sw_meta : Dict("items" => sw_meta)
+                                if sw_meta isa Dict
+                                    for (mk, mv) in sw_meta
+                                        if mv isa Dict && length(mk) >= 8 && all(isdigit, mk[1:8])
+                                            sw_date_entries[mk] = mv
+                                        end
+                                    end
+                                end
+                            catch; end
+                        end
+                        sw_pet_dates = sort([k for (k, v) in sw_date_entries if haskey(v, "PET") || haskey(v, "PT") || occursin("PET", k)])
+                        sw_mri_dates = sort([k for (k, v) in sw_date_entries if haskey(v, "MRI") || haskey(v, "MR") || occursin("MRI", k) || occursin("MR", k)])
+
                         for (s_i, st) in enumerate(studies)
                             tp_idx = s_i - 1
                             lbl = "$(st[1]) $(st[3]) (TP $tp_idx)"
                             MEH.tp_labels[tp_idx] = lbl
                             MEH.tp_modalities[tp_idx] = st[1]
                             MEH.tp_node_names[tp_idx] = st[7]
+                            m_key = ""
+                            if uppercase(st[1]) == "PET" && !isempty(sw_pet_dates)
+                                m_key = sw_pet_dates[min(st[2] + 1, length(sw_pet_dates))]
+                            elseif uppercase(st[1]) in ("T2", "MRI", "MR", "ADC", "DWI", "T1", "DCE", "DYNAMIC") && !isempty(sw_mri_dates)
+                                m_key = sw_mri_dates[1]
+                            end
+                            if !isempty(m_key) && haskey(sw_date_entries, m_key)
+                                minfo = sw_date_entries[m_key]
+                                MEH.tp_descriptions[tp_idx] = get(minfo, "Description", "")
+                                MEH.tp_english_descriptions[tp_idx] = get(minfo, "EnglishDescription", "")
+                            else
+                                MEH.tp_descriptions[tp_idx] = ""
+                                MEH.tp_english_descriptions[tp_idx] = ""
+                            end
                         end
                     end
 
@@ -1919,21 +1983,39 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                     set_prog !== nothing && set_prog(76.0, "Uploading GPU Heat-GDT diffusivity for $case_lbl...")
                     empty!(MEH._tp_diffusivity_cache)
                     is_pf = haskey(h5_new, "_meta_/preflipped") && read(h5_new["_meta_/preflipped"]) == 1
-                    if haskey(h5_new, "BASELINE/diffusivity")
-                        diff_v = Float32.(read(h5_new["BASELINE/diffusivity"]))
+                    sw_mod = MEH.heatgdt_edge_modality[]
+                    sw_ds = sw_mod === :ct_only ? "diffusivity_ct" : (sw_mod === :pet_only ? "diffusivity_pet" : "diffusivity")
+                    sw_bl = haskey(h5_new, "BASELINE") ? h5_new["BASELINE"] : nothing
+                    sw_read = (sw_bl !== nothing && haskey(sw_bl, sw_ds)) ? sw_ds : ((sw_bl !== nothing && haskey(sw_bl, "diffusivity")) ? "diffusivity" : "")
+                    if !isempty(sw_read)
+                        diff_v = Float32.(read(sw_bl[sw_read]))
                         if !is_pf
                             diff_v = reverse(diff_v, dims=2)
                         end
-                        MEH._tp_diffusivity_cache[0] = diff_v
+                        MEH._tp_diffusivity_cache[(0, sw_mod)] = diff_v
+                        if sw_read == "diffusivity"
+                            MEH._tp_diffusivity_cache[0] = diff_v
+                        end
+                        MEH.heatgdt_current_loaded_modality[] = sw_mod
                         MedEye3d.InferenceClient.precompute_heatgdt_diffusivity(diff_v; tp_index=0)
                         MedEye3d.SegmentationDisplay._vk_heat_uploaded[] = false
                     end
 
                     # 3. Reload ATLAS, anatomy labels, segment names, and centroids
                     set_prog !== nothing && set_prog(86.0, "Loading anatomy & bone atlases for $case_lbl...")
-                    if haskey(h5_new, "ATLAS/max_anatomy")
-                        MEH.global_ts_atlas[] = read(h5_new["ATLAS/max_anatomy"])
-                        MEH.volume_z_size[] = size(MEH.global_ts_atlas[], 3)
+                    sw_atlas = if haskey(h5_new, "ATLAS/max_anatomy_expert")
+                        read(h5_new["ATLAS/max_anatomy_expert"])
+                    elseif haskey(h5_new, "ATLAS/max_anatomy")
+                        read(h5_new["ATLAS/max_anatomy"])
+                    else
+                        nothing
+                    end
+                    if sw_atlas !== nothing
+                        if !is_pf
+                            sw_atlas = reverse(sw_atlas, dims=2)
+                        end
+                        MEH.global_ts_atlas[] = sw_atlas
+                        MEH.volume_z_size[] = size(sw_atlas, 3)
                     end
                     if haskey(h5_new, "ATLAS/skellytour")
                         MEH.global_bone_atlas[] = read(h5_new["ATLAS/skellytour"])
@@ -2006,6 +2088,7 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                         catch; end
                     end
                     if haskey(h5_new, "CENTROIDS")
+                        node_map_sw = Dict(s_idx - 1 => st[7] for (s_idx, st) in enumerate(studies))
                         for key in keys(h5_new["CENTROIDS"])
                             parts = split(key, "_lid")
                             if length(parts) == 2
@@ -2017,6 +2100,22 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                                     MEH.lesion_centroids_cache[(tp_idx, lid)] = c
                                     if tp_idx == 0
                                         MEH.lesion_centroids_cache[lid] = c
+                                    end
+                                end
+                                continue
+                            end
+                            parts_ln = split(key, "_ln")
+                            if length(parts_ln) == 2
+                                tp_idx = tryparse(Int, replace(parts_ln[1], "tp" => ""))
+                                aid = tryparse(Int, parts_ln[2])
+                                if tp_idx !== nothing && aid !== nothing
+                                    coords = read(h5_new["CENTROIDS/$key"])
+                                    c = [Int(coords[1]), Int(coords[2]), Int(coords[3])]
+                                    MEH.ln_centroids_cache[(tp_idx, aid)] = c
+                                    nname = get(node_map_sw, tp_idx, "")
+                                    !isempty(nname) && (MEH.ln_centroids_cache[(nname, aid)] = c)
+                                    if tp_idx == 0
+                                        MEH.ln_centroids_cache[aid] = c
                                     end
                                 end
                             end
@@ -2040,9 +2139,11 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                 end
                 first_valid_lid = 0
                 try
-                    tp0_mask = lock(MEH._tp_cache_lock) do
-                        haskey(MEH.tp_data_cache, 0) ? MEH.tp_data_cache[0].mask : nothing
+                    tp0_entry = lock(MEH._tp_cache_lock) do
+                        haskey(MEH.tp_data_cache, 0) ? MEH.tp_data_cache[0] : nothing
                     end
+                    tp0_mask = tp0_entry !== nothing ? tp0_entry.mask : nothing
+                    tp0_anat = tp0_entry !== nothing ? (tp0_entry.anat_i16 !== nothing ? tp0_entry.anat_i16 : tp0_entry.anatomy) : nothing
                     if tp0_mask !== nothing
                         sw_valid_lids = Set{Int}(Int(x) for x in unique(tp0_mask) if x > 0)
                         if haskey(MEH.tp_segment_names, 0)
@@ -2056,6 +2157,9 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                             end
                         end
                         MEH.precompute_mask_centroids!(tp0_mask, 0, MEH.get_node_name_for_tp(0))
+                        if tp0_anat !== nothing && isempty(MEH.ln_centroids_cache)
+                            try MEH.precompute_anatomy_ln_centroids!(tp0_anat, 0, MEH.get_node_name_for_tp(0)) catch; end
+                        end
                         if !isempty(sw_valid_lids)
                             first_valid_lid = minimum(sw_valid_lids)
                         end
@@ -2063,6 +2167,9 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
                         empty!(MedEye3d.LesionMetadataWindow._cached_lesion_ids)
                         if haskey(obs_d, :refresh_dropdown_tp)
                             obs_d[:refresh_dropdown_tp][] = 0
+                        end
+                        if haskey(obs_d, :update_old_report_display)
+                            try obs_d[:update_old_report_display]() catch; end
                         end
                     end
                 catch; end
@@ -2081,7 +2188,15 @@ function launch_from_h5(h5_path::String; quad::Bool=true)
     end
 
 
-    # 7. Warmup JIT & initial event synchronization
+    # 7. Warmup JIT & initial event synchronization (never start in compare mode)
+    if makie_win !== nothing
+        if makie_win.set_compare_mode[]
+            makie_win.set_compare_mode[] = false
+        end
+        if makie_win.m2_mode[] == "Compare Curr/Next TP"
+            makie_win.m2_mode[] = "Pure PET (Current TP)"
+        end
+    end
     put!(mainViewer.channel, CompareTimePointsEvent(false))
     put!(mainViewer.channel, MakieEvents.ScrollEvent(0, 1))
 

@@ -288,9 +288,38 @@ end
 Computes bifurcation point p1 and terminal point p2 for internal iliac artery/vein.
 """
 function compute_internal_iliac_points(vessel_arr::AbstractArray{T, 3}, spacing::NTuple{3, Float64}, origin::NTuple{3, Float64}=(0.0, 0.0, 0.0), direction::NTuple{9, Float64}=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)) where T
-    indices = findall(vessel_arr .> 0)
-    if isempty(indices)
+    host_arr = vessel_arr isa Array ? vessel_arr : Array(vessel_arr)
+    z_counts = vec(sum(host_arr .> 0, dims=(1, 2)))
+    nz_slices = findall(>(0), z_counts)
+    if isempty(nz_slices)
         return (nothing, nothing)
+    end
+
+    # Filter isolated far false-positive specks (e.g., thoracic NV-Segment specks on iliac vessels)
+    # by keeping only the densest contiguous Z-band (allowing small <= 3 slice gaps).
+    peak_z = argmax(z_counts)
+    lo_z, hi_z = peak_z, peak_z
+    gap = 0
+    for z in (peak_z - 1):-1:1
+        if z_counts[z] > 0
+            lo_z = z; gap = 0
+        else
+            gap += 1
+            gap > 3 && break
+        end
+    end
+    gap = 0
+    for z in (peak_z + 1):length(z_counts)
+        if z_counts[z] > 0
+            hi_z = z; gap = 0
+        else
+            gap += 1
+            gap > 3 && break
+        end
+    end
+    indices = filter(idx -> lo_z <= idx[3] <= hi_z, findall(host_arr .> 0))
+    if isempty(indices)
+        indices = findall(host_arr .> 0)
     end
     
     dir_00 = direction[1]

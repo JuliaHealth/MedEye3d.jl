@@ -9,6 +9,7 @@ module XnatClient
 
 using JSON
 using Downloads
+using Dates
 using ..XnatAuth
 
 export list_projects,
@@ -18,11 +19,15 @@ export list_projects,
        list_scans,
        list_subject_resources,
        get_case_status,
+       get_remote_preprocessed_info,
+       is_remote_newer_than_local,
        download_file,
        upload_file,
        ensure_subject_resource,
        download_preprocessed_hdf5,
        upload_preprocessed_hdf5,
+       download_lesion_edits_hdf5,
+       upload_lesion_edits_hdf5,
        save_annotations_to_xnat,
        resolve_project_id,
        resolve_subject_label,
@@ -287,12 +292,13 @@ function get_case_status(creds::XnatCredentials, project_id::AbstractString, sub
     status_json = _xnat_get_json(creds, status_url; timeout=5.0)
     if status_json !== nothing
         st_str = uppercase(get(status_json, "status", ""))
-        user = get(status_json, "assigned_user", get(status_json, "user", ""))
+        user = get(status_json, "modified_by", get(status_json, "assigned_user", get(status_json, "user", "")))
         ts = get(status_json, "last_modified", "")
         summary = get(status_json, "summary", Dict{String, Any}())
         n_les = get(summary, "num_lesions", 0)
+        is_mod = Bool(get(status_json, "manually_modified", st_str in ("PROCESSED", "VALIDATED", "COMPLETED")))
         
-        st_sym = if st_str == "PROCESSED" || st_str == "VALIDATED" || st_str == "COMPLETED"
+        st_sym = if is_mod || st_str == "PROCESSED" || st_str == "VALIDATED" || st_str == "COMPLETED"
             :PROCESSED
         elseif st_str == "IN_PROGRESS"
             :IN_PROGRESS
@@ -328,11 +334,12 @@ function get_case_status(creds::XnatCredentials, project_id::AbstractString, sub
         exp_status = _xnat_get_json(creds, "/data/experiments/$exp_id/resources/ANNOTATIONS/files/status.json"; timeout=5.0)
         if exp_status !== nothing
             st_str = uppercase(get(exp_status, "status", ""))
-            user = get(exp_status, "assigned_user", get(exp_status, "user", ""))
+            user = get(exp_status, "modified_by", get(exp_status, "assigned_user", get(exp_status, "user", "")))
             ts = get(exp_status, "last_modified", "")
             summary = get(exp_status, "summary", Dict{String, Any}())
             n_les = get(summary, "num_lesions", 0)
-            st_sym = st_str in ("PROCESSED", "VALIDATED", "COMPLETED") ? :PROCESSED : (st_str == "IN_PROGRESS" ? :IN_PROGRESS : :PREPROCESSED)
+            is_mod = Bool(get(exp_status, "manually_modified", st_str in ("PROCESSED", "VALIDATED", "COMPLETED")))
+            st_sym = (is_mod || st_str in ("PROCESSED", "VALIDATED", "COMPLETED")) ? :PROCESSED : (st_str == "IN_PROGRESS" ? :IN_PROGRESS : :PREPROCESSED)
             return CaseStatusInfo(st_sym, user, ts, n_les, exp_status)
         end
         
@@ -476,17 +483,253 @@ function ensure_subject_resource(creds::XnatCredentials, project_id::AbstractStr
     end
 end
 
-"""
-    download_preprocessed_hdf5(creds::XnatCredentials, project_id, subject_id, local_dest; force=false, progress_cb=nothing) -> Bool
+@inline function _is_lesion_edits_h5_filename(fn::AbstractString)::Bool
+    low = lowercase(String(fn))
+    return (endswith(low, ".h5") || endswith(low, ".hdf5")) && occursin("lesion_edits", low)
+end
 
-Downloads preprocessed HDF5 from XNAT subject or experiment resource `MEDEYE3D`.
-Skips download if file already exists locally and `force == false`.
+@inline function _is_preprocessed_h5_filename(fn::AbstractString)::Bool
+    low = lowercase(String(fn))
+    return (endswith(low, ".h5") || endswith(low, ".hdf5")) && !occursin("lesion_edits", low)
+end
+
+const _HTTP_MONTHS = Dict{String, Int}(
+    "jan"=>1, "feb"=>2, "mar"=>3, "apr"=>4, "may"=>5, "jun"=>6,
+    "jul"=>7, "aug"=>8, "sep"=>9, "oct"=>10, "nov"=>11, "dec"=>12
+)
+
+function _parse_remote_timestamp_utc(s::AbstractString)::Union{DateTime, Nothing}
+    st = strip(String(s))
+    isempty(st) && return nothing
+    # 1. ISO-8601 (e.g. "2026-11-18T10:15:30Z" or "2026-11-18T10:15:30.123")
+    m_iso = match(r"^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})", st)
+    if m_iso !== nothing
+        try
+            return DateTime(
+                parse(Int, m_iso.captures[1]), parse(Int, m_iso.captures[2]), parse(Int, m_iso.captures[3]),
+                parse(Int, m_iso.captures[4]), parse(Int, m_iso.captures[5]), parse(Int, m_iso.captures[6])
+            )
+        catch; end
+    end
+    # 2. HTTP RFC 7231 Last-Modified (e.g. "Wed, 18 Nov 2026 10:15:30 GMT")
+    m_http = match(r"(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})\s+(\d{2}):(\d{2}):(\d{2})", st)
+    if m_http !== nothing
+        try
+            mon = get(_HTTP_MONTHS, lowercase(m_http.captures[2]), 0)
+            mon > 0 && return DateTime(
+                parse(Int, m_http.captures[3]), mon, parse(Int, m_http.captures[1]),
+                parse(Int, m_http.captures[4]), parse(Int, m_http.captures[5]), parse(Int, m_http.captures[6])
+            )
+        catch; end
+    end
+    return nothing
+end
+
+@inline function _xnat_meta_path(local_h5::AbstractString)::String
+    return string(local_h5) * ".xnat_meta.json"
+end
+
+function _read_local_xnat_baseline(local_h5::AbstractString)
+    mp = _xnat_meta_path(local_h5)
+    if isfile(mp)
+        try
+            meta = JSON.parsefile(mp)
+            d = lowercase(strip(string(get(meta, "digest", ""))))
+            sz = Int64(get(meta, "size", -1))
+            mt = Int64(get(meta, "mtime", -1))
+            return (digest=d, size=sz, mtime=mt)
+        catch; end
+    end
+    return (digest="", size=Int64(-1), mtime=Int64(-1))
+end
+
+function _read_local_xnat_digest(local_h5::AbstractString)::String
+    !isfile(local_h5) && return ""
+    cur_sz = Int64(filesize(local_h5))
+    cur_mt = round(Int64, mtime(local_h5))
+    b = _read_local_xnat_baseline(local_h5)
+    if !isempty(b.digest) && b.size == cur_sz && b.mtime == cur_mt
+        return b.digest
+    end
+    return ""
+end
+
+function _write_local_xnat_meta(local_h5::AbstractString, digest::AbstractString; last_modified::AbstractString="")
+    !isfile(local_h5) && return
+    d = lowercase(strip(String(digest)))
+    try
+        open(_xnat_meta_path(local_h5), "w") do io
+            JSON.print(io, Dict(
+                "size" => Int64(filesize(local_h5)),
+                "mtime" => round(Int64, mtime(local_h5)),
+                "digest" => d,
+                "last_modified" => String(last_modified)
+            ))
+        end
+    catch; end
+end
+
+function _compute_local_md5(local_h5::AbstractString)::String
+    (!isfile(local_h5) || Sys.which("md5sum") === nothing) && return ""
+    try
+        out = read(`md5sum $local_h5`, String)
+        parts = split(strip(out))
+        return !isempty(parts) ? lowercase(parts[1]) : ""
+    catch
+        return ""
+    end
+end
+
 """
-function download_preprocessed_hdf5(
+    get_remote_preprocessed_info(creds, project_id, subject_id)
+
+Returns metadata `(found, size, digest, last_modified_utc, uri)` for the subject's preprocessed HDF5 on XNAT.
+Uses XNAT resource JSON metadata (Size + MD5 digest) and `ANNOTATIONS/files/status.json` timestamp without
+performing HTTP HEAD on multi-GB binary downloads (which can block on XNAT servers).
+"""
+function get_remote_preprocessed_info(
+    creds::XnatCredentials,
+    project_id::AbstractString,
+    subject_id::AbstractString
+)
+    p = resolve_project_id(project_id)
+    s = resolve_subject_label(creds, p, subject_id)
+    if isempty(p) || isempty(s)
+        return (found=false, size=Int64(0), digest="", last_modified_utc=nothing, uri="")
+    end
+
+    function _fetch_status_ts()::Union{DateTime, Nothing}
+        st_j = _xnat_get_json(creds, "/data/projects/$p/subjects/$s/resources/ANNOTATIONS/files/status.json"; timeout=4.0)
+        if st_j !== nothing
+            return _parse_remote_timestamp_utc(string(get(st_j, "updated_at", get(st_j, "last_modified", ""))))
+        end
+        return nothing
+    end
+
+    # 1. Subject-level MEDEYE3D resource
+    medeye_files = _xnat_get_json(creds, "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files?format=json"; timeout=8.0)
+    if medeye_files !== nothing && haskey(medeye_files, "ResultSet") && haskey(medeye_files["ResultSet"], "Result")
+        for r in medeye_files["ResultSet"]["Result"]
+            fn = get(r, "Name", "")
+            if _is_preprocessed_h5_filename(fn)
+                remote_sz = something(tryparse(Int64, string(get(r, "Size", "0"))), Int64(0))
+                remote_digest = lowercase(strip(string(get(r, "digest", ""))))
+                uri = get(r, "URI", "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files/$fn")
+                ts_utc = _fetch_status_ts()
+                return (found=true, size=remote_sz, digest=remote_digest, last_modified_utc=ts_utc, uri=uri)
+            end
+        end
+    end
+
+    # 2. Experiment-level MEDEYE3D fallback
+    for exp in list_experiments(creds, p, s)
+        exp_id = get(exp, "ID", "")
+        isempty(exp_id) && continue
+        exp_files = _xnat_get_json(creds, "/data/experiments/$exp_id/resources/MEDEYE3D/files?format=json"; timeout=8.0)
+        if exp_files !== nothing && haskey(exp_files, "ResultSet") && haskey(exp_files["ResultSet"], "Result")
+            for r in exp_files["ResultSet"]["Result"]
+                fn = get(r, "Name", "")
+                if _is_preprocessed_h5_filename(fn)
+                    remote_sz = something(tryparse(Int64, string(get(r, "Size", "0"))), Int64(0))
+                    remote_digest = lowercase(strip(string(get(r, "digest", ""))))
+                    uri = get(r, "URI", "/data/experiments/$exp_id/resources/MEDEYE3D/files/$fn")
+                    ts_utc = _fetch_status_ts()
+                    return (found=true, size=remote_sz, digest=remote_digest, last_modified_utc=ts_utc, uri=uri)
+                end
+            end
+        end
+    end
+
+    return (found=false, size=Int64(0), digest="", last_modified_utc=nothing, uri="")
+end
+
+"""
+    is_remote_newer_than_local(creds, project_id, subject_id, local_h5) -> (needs_download::Bool, reason::String)
+
+Checks if the remote XNAT HDF5 is newer (by `status.json` timestamp) or differs in byte size / MD5 digest.
+"""
+function _compare_remote_against_local(info, local_h5::AbstractString)::Tuple{Bool, String}
+    if !isfile(local_h5) || filesize(local_h5) <= 1024
+        return (true, "not_cached")
+    end
+    !info.found && return (false, "no_remote")
+
+    local_sz = Int64(filesize(local_h5))
+    local_mtime_utc = unix2datetime(mtime(local_h5))
+    baseline = _read_local_xnat_baseline(local_h5)
+
+    # When sidecar records the synced XNAT baseline digest (and optional size),
+    # local autosaves that grow/touch local_h5 do not make an unchanged XNAT file "newer".
+    if !isempty(info.digest) && !isempty(baseline.digest)
+        remote_unchanged = (baseline.digest == info.digest) &&
+            (info.size <= 0 || baseline.size <= 0 || baseline.size == info.size)
+        if remote_unchanged
+            if info.last_modified_utc !== nothing && info.last_modified_utc > local_mtime_utc + Second(5)
+                return (true, "remote_newer")
+            end
+            return (false, "up_to_date")
+        elseif info.last_modified_utc === nothing || info.last_modified_utc >= local_mtime_utc - Second(5)
+            return (true, "digest_changed")
+        else
+            return (false, "up_to_date")
+        end
+    end
+
+    if info.last_modified_utc !== nothing
+        if info.last_modified_utc > local_mtime_utc + Second(5)
+            return (true, "remote_newer")
+        elseif info.size > 0 && local_sz != info.size && info.last_modified_utc >= local_mtime_utc - Second(5)
+            return (true, "size_changed")
+        end
+    elseif info.size > 0 && local_sz != info.size
+        return (true, "size_changed")
+    end
+
+    # When size matches (and local file is not newer than status.json), verify MD5 digest
+    if !isempty(info.digest)
+        local_dig = _read_local_xnat_digest(local_h5)
+        if !isempty(local_dig)
+            if local_dig != info.digest
+                # Only treat digest mismatch as remote_newer if remote wasn't explicitly older than local edit
+                if info.last_modified_utc === nothing || info.last_modified_utc >= local_mtime_utc - Second(5)
+                    return (true, "digest_changed")
+                end
+            end
+            return (false, "up_to_date")
+        elseif info.last_modified_utc === nothing
+            # No remote timestamp and no cached sidecar digest yet: compute once and cache sidecar
+            comp_dig = _compute_local_md5(local_h5)
+            if !isempty(comp_dig)
+                _write_local_xnat_meta(local_h5, comp_dig)
+                if comp_dig != info.digest
+                    return (true, "digest_changed")
+                end
+            end
+        end
+    end
+
+    return (false, "up_to_date")
+end
+
+function is_remote_newer_than_local(
     creds::XnatCredentials,
     project_id::AbstractString,
     subject_id::AbstractString,
-    local_dest::AbstractString;
+    local_h5::AbstractString
+)::Tuple{Bool, String}
+    if !isfile(local_h5) || filesize(local_h5) <= 1024
+        return (true, "not_cached")
+    end
+    info = get_remote_preprocessed_info(creds, project_id, subject_id)
+    return _compare_remote_against_local(info, local_h5)
+end
+
+function _download_from_medeye3d_resource(
+    creds::XnatCredentials,
+    project_id::AbstractString,
+    subject_id::AbstractString,
+    local_dest::AbstractString,
+    filename_pred::Function;
     force::Bool=false,
     progress_cb::Union{Function, Nothing}=nothing
 )::Bool
@@ -494,23 +737,43 @@ function download_preprocessed_hdf5(
     p = resolve_project_id(project_id)
     s = resolve_subject_label(creds, p, subject_id)
 
-    # 1. Search for preprocessed hdf5 in subject MEDEYE3D resource
+    function _should_skip_existing(remote_sz, remote_digest)::Bool
+        (force || !isfile(dest_path) || filesize(dest_path) <= 1024) && return false
+        local_sz = Int64(filesize(dest_path))
+        rd = lowercase(strip(string(remote_digest)))
+        baseline = _read_local_xnat_baseline(dest_path)
+        if !isempty(rd) && !isempty(baseline.digest) && baseline.digest == rd &&
+           (remote_sz === nothing || remote_sz <= 0 || baseline.size <= 0 || baseline.size == remote_sz)
+            return true
+        end
+        if remote_sz !== nothing && remote_sz > 0 && local_sz != remote_sz
+            println("[XNAT] Cached HDF5 size ($local_sz) != remote XNAT size ($remote_sz); downloading new version..."); flush(stdout)
+            return false
+        end
+        if !isempty(rd)
+            ld = _read_local_xnat_digest(dest_path)
+            if !isempty(ld) && ld != rd
+                println("[XNAT] Cached HDF5 MD5 ($ld) != remote XNAT MD5 ($rd); downloading new version..."); flush(stdout)
+                return false
+            end
+        end
+        return true
+    end
+
+    # 1. Search in subject MEDEYE3D resource
     medeye_files = _xnat_get_json(creds, "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files?format=json")
     if medeye_files !== nothing
         try
             results = medeye_files["ResultSet"]["Result"]
             for r in results
                 fn = get(r, "Name", "")
-                if endswith(fn, ".h5") || endswith(fn, ".hdf5")
+                if filename_pred(fn)
                     remote_sz = tryparse(Int64, string(get(r, "Size", "0")))
-                    if !force && isfile(dest_path) && filesize(dest_path) > 1024
-                        if remote_sz === nothing || remote_sz <= 0 || filesize(dest_path) == remote_sz
-                            return true
-                        end
-                        println("[XNAT] Cached HDF5 size ($(filesize(dest_path))) != remote XNAT size ($remote_sz); re-downloading fresh copy...")
-                    end
+                    remote_dig = string(get(r, "digest", ""))
                     uri = get(r, "URI", "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files/$fn")
+                    _should_skip_existing(remote_sz, remote_dig) && return true
                     if download_file(creds, uri, dest_path; progress_cb=progress_cb)
+                        !isempty(remote_dig) && _write_local_xnat_meta(dest_path, remote_dig)
                         return true
                     end
                 end
@@ -527,10 +790,14 @@ function download_preprocessed_hdf5(
         if exp_files !== nothing && haskey(exp_files, "ResultSet") && haskey(exp_files["ResultSet"], "Result")
             for r in exp_files["ResultSet"]["Result"]
                 fn = get(r, "Name", "")
-                if endswith(fn, ".h5") || endswith(fn, ".hdf5")
+                if filename_pred(fn)
+                    remote_sz = tryparse(Int64, string(get(r, "Size", "0")))
+                    remote_dig = string(get(r, "digest", ""))
                     uri = get(r, "URI", "/data/experiments/$exp_id/resources/MEDEYE3D/files/$fn")
-                    println("[XNAT] Downloading preprocessed volume from experiment $exp_id: $fn")
+                    _should_skip_existing(remote_sz, remote_dig) && return true
+                    println("[XNAT] Downloading $fn from experiment $exp_id")
                     if download_file(creds, uri, dest_path; progress_cb=progress_cb)
+                        !isempty(remote_dig) && _write_local_xnat_meta(dest_path, remote_dig)
                         return true
                     end
                 end
@@ -538,6 +805,80 @@ function download_preprocessed_hdf5(
         end
     end
 
+    return false
+end
+
+"""
+    download_preprocessed_hdf5(creds::XnatCredentials, project_id, subject_id, local_dest; force=false, progress_cb=nothing) -> Bool
+
+Downloads preprocessed HDF5 from XNAT subject or experiment resource `MEDEYE3D`.
+Skips download if file already exists locally and `force == false`.
+"""
+function download_preprocessed_hdf5(
+    creds::XnatCredentials,
+    project_id::AbstractString,
+    subject_id::AbstractString,
+    local_dest::AbstractString;
+    force::Bool=false,
+    progress_cb::Union{Function, Nothing}=nothing
+)::Bool
+    return _download_from_medeye3d_resource(creds, project_id, subject_id, local_dest, _is_preprocessed_h5_filename; force=force, progress_cb=progress_cb)
+end
+
+"""
+    download_lesion_edits_hdf5(creds::XnatCredentials, project_id, subject_id, local_dest; force=false, progress_cb=nothing) -> Bool
+
+Downloads the separate per-lesion edit history HDF5 (`*_lesion_edits.h5`) from XNAT `MEDEYE3D` resource if present.
+"""
+function download_lesion_edits_hdf5(
+    creds::XnatCredentials,
+    project_id::AbstractString,
+    subject_id::AbstractString,
+    local_dest::AbstractString;
+    force::Bool=false,
+    progress_cb::Union{Function, Nothing}=nothing
+)::Bool
+    return _download_from_medeye3d_resource(creds, project_id, subject_id, local_dest, _is_lesion_edits_h5_filename; force=force, progress_cb=progress_cb)
+end
+
+function _upload_to_medeye3d_resource(
+    creds::XnatCredentials,
+    project_id::AbstractString,
+    subject_id::AbstractString,
+    local_h5::AbstractString,
+    subject_remote_fname::AbstractString
+)::Bool
+    h5_path = String(local_h5)
+    !isfile(h5_path) && return false
+    p = resolve_project_id(project_id)
+    s = resolve_subject_label(creds, p, subject_id)
+
+    # 1. Try subject-level resource
+    if ensure_subject_resource(creds, p, s, "MEDEYE3D")
+        remote_url = "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files/$(subject_remote_fname)?overwrite=true&inbody=true"
+        if upload_file(creds, remote_url, h5_path)
+            return true
+        end
+    end
+
+    # 2. Fallback: upload to matching PET/CT experiment
+    exps = list_experiments(creds, p, s)
+    pet_exps = filter(e -> occursin("PET", uppercase(get(e, "label", ""))) || occursin("PET", uppercase(get(e, "xsiType", ""))), exps)
+    target_exp = !isempty(pet_exps) ? first(pet_exps) : (!isempty(exps) ? first(exps) : nothing)
+    if target_exp !== nothing
+        exp_id = get(target_exp, "ID", "")
+        res_url = "$(creds.server_url)/data/experiments/$exp_id/resources/MEDEYE3D"
+        headers = XnatAuth.get_auth_headers(creds)
+        try
+            Downloads.request(res_url; method="PUT", headers=headers, timeout=10.0)
+        catch; end
+
+        fname = basename(h5_path)
+        remote_url = "/data/experiments/$exp_id/resources/MEDEYE3D/files/$(fname)?overwrite=true&inbody=true"
+        return upload_file(creds, remote_url, h5_path)
+    end
+
+    @warn "Cannot access or create MEDEYE3D resource on remote XNAT for $p/$s. Remote upload skipped."
     return false
 end
 
@@ -553,39 +894,25 @@ function upload_preprocessed_hdf5(
     subject_id::AbstractString,
     local_h5::AbstractString
 )::Bool
-    h5_path = String(local_h5)
-    !isfile(h5_path) && return false
     p = resolve_project_id(project_id)
     s = resolve_subject_label(creds, p, subject_id)
-    
-    # 1. Try subject-level resource
-    if ensure_subject_resource(creds, p, s, "MEDEYE3D")
-        remote_url = "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files/$(s)_preprocessed.h5?overwrite=true&inbody=true"
-        if upload_file(creds, remote_url, h5_path)
-            return true
-        end
-    end
+    return _upload_to_medeye3d_resource(creds, p, s, local_h5, "$(s)_preprocessed.h5")
+end
 
-    # 2. Fallback: upload to matching PET/CT experiment
-    exps = list_experiments(creds, p, s)
-    pet_exps = filter(e -> occursin("PET", uppercase(get(e, "label", ""))) || occursin("PET", uppercase(get(e, "xsiType", ""))), exps)
-    target_exp = !isempty(pet_exps) ? first(pet_exps) : (!isempty(exps) ? first(exps) : nothing)
-    if target_exp !== nothing
-        exp_id = get(target_exp, "ID", "")
-        # Ensure resource on experiment
-        res_url = "$(creds.server_url)/data/experiments/$exp_id/resources/MEDEYE3D"
-        headers = XnatAuth.get_auth_headers(creds)
-        try
-            Downloads.request(res_url; method="PUT", headers=headers, timeout=10.0)
-        catch; end
-        
-        fname = basename(local_h5)
-        remote_url = "/data/experiments/$exp_id/resources/MEDEYE3D/files/$(fname)?overwrite=true&inbody=true"
-        return upload_file(creds, remote_url, h5_path)
-    end
+"""
+    upload_lesion_edits_hdf5(creds::XnatCredentials, project_id, subject_id, local_edits_h5) -> Bool
 
-    @warn "Cannot access or create MEDEYE3D resource on remote XNAT for $p/$s. Remote upload skipped."
-    return false
+Uploads the separate lesion-editing HDF5 (`lesion_edits.h5`) to XNAT `MEDEYE3D` resource as `{subj}_lesion_edits.h5`.
+"""
+function upload_lesion_edits_hdf5(
+    creds::XnatCredentials,
+    project_id::AbstractString,
+    subject_id::AbstractString,
+    local_edits_h5::AbstractString
+)::Bool
+    p = resolve_project_id(project_id)
+    s = resolve_subject_label(creds, p, subject_id)
+    return _upload_to_medeye3d_resource(creds, p, s, local_edits_h5, "$(s)_lesion_edits.h5")
 end
 
 """
@@ -680,22 +1007,36 @@ function prefetch_all_project_hdf5(
         cache_dir = joinpath(cache_base, clean_p, clean_s)
         target_h5 = joinpath(cache_dir, "$(clean_s)_preprocessed.h5")
 
-        # Check if already cached
-        if isfile(target_h5) && filesize(target_h5) > 1024
+        # Check remote XNAT freshness: download if missing, newer timestamp, or changed size
+        was_cached = isfile(target_h5) && filesize(target_h5) > 1024
+        needs_dl, dl_reason = try
+            is_remote_newer_than_local(creds, p, subj_label, target_h5)
+        catch
+            (!was_cached, was_cached ? "up_to_date" : "not_cached")
+        end
+        if was_cached && !needs_dl
             skip_count += 1
             progress_cb !== nothing && progress_cb(i, total, subj_label, "cached")
             continue
         end
 
-        # Attempt download
+        # Attempt download (force=true when remote timestamp is newer so updated files are fetched)
         try
             mkpath(cache_dir)
-            dl_ok = download_preprocessed_hdf5(creds, p, subj_label, target_h5; force=false)
+            dl_ok = download_preprocessed_hdf5(creds, p, subj_label, target_h5; force=(dl_reason == "remote_newer"))
             if dl_ok && isfile(target_h5) && filesize(target_h5) > 1024
+                try
+                    edits_dest = joinpath(cache_dir, "$(clean_s)_preprocessed_lesion_edits.h5")
+                    download_lesion_edits_hdf5(creds, p, subj_label, edits_dest; force=false)
+                catch; end
                 ok_count += 1
                 sz_mb = round(filesize(target_h5) / 1024 / 1024, digits=1)
-                println("[XNAT-PREFETCH] ($i/$total) ✓ $subj_label ($sz_mb MB)")
-                progress_cb !== nothing && progress_cb(i, total, subj_label, "downloaded")
+                tag_dl = was_cached ? "updated" : "downloaded"
+                println("[XNAT-PREFETCH] ($i/$total) ✓ $subj_label ($sz_mb MB, $tag_dl: $dl_reason)")
+                progress_cb !== nothing && progress_cb(i, total, subj_label, tag_dl)
+            elseif was_cached
+                skip_count += 1
+                progress_cb !== nothing && progress_cb(i, total, subj_label, "cached")
             else
                 fail_count += 1
                 println("[XNAT-PREFETCH] ($i/$total) ○ $subj_label — no HDF5 on XNAT")

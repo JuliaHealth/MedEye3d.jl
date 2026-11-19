@@ -213,29 +213,25 @@ function setTextureWindow(activeTextur::TextureSpec, stateObject::StateDataField
     displayRange = activeTextur.minAndMaxValue[2] - activeTextur.minAndMaxValue[1]
     activeTexturStudyType = activeTextur.studyType
 
+    is_ct_only = uppercase(strip(activeTexturStudyType)) == "CT" && !(uppercase(strip(activeTexturName)) in ("PET", "SPECT"))
+
     if windowControlStruct.letterCode == "F1"
 
-        if activeTexturStudyType == "CT"
+        if is_ct_only
             #Bone windowing in CT
             activeTextur.minAndMaxValue = Float32.([400, 1000])
-        elseif activeTexturStudyType == "PET"
-            activeTextur.minAndMaxValue[1] += 0.10 * displayRange #windowing for pet, in the case of PET simply increase the minimum by 20% , doing the same in f1,f2 and f3
         end
 
     elseif windowControlStruct.letterCode == "F2"
 
-        if activeTexturStudyType == "CT"
+        if is_ct_only
             activeTextur.minAndMaxValue = Float32.([-40, 350])
-        elseif activeTexturStudyType == "PET"
-            activeTextur.minAndMaxValue[1] += 0.10 * displayRange
         end
 
     elseif windowControlStruct.letterCode == "F3"
 
-        if activeTexturStudyType == "CT"
+        if is_ct_only
             activeTextur.minAndMaxValue = Float32.([-426, 1000])
-        elseif activeTexturStudyType == "PET"
-            activeTextur.minAndMaxValue[1] += 0.10 * displayRange
         end
 
     elseif windowControlStruct.letterCode == "F4"

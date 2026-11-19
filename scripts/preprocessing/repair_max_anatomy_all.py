@@ -27,7 +27,8 @@ import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from cads_anatomy_wiring import (
-    merge_cads_structures, load_resampled_cads_arrays, is_lymph_label_name
+    merge_cads_structures, load_resampled_cads_arrays, is_lymph_label_name,
+    is_excluded_non_organ_mask, is_lung_label_name, iter_authoritative_lymph_node_masks,
 )
 
 MEDEYE_DIR = "/mnt/big/project_ssd/project_ssd/MedEye3d.jl"
@@ -56,68 +57,69 @@ def layer_and_sanitize_ct_anatomy(ct_shape, raw_dir):
     anat_h5 = os.path.join(raw_dir, "packed_anatomical_tensor.h5")
     reg_path = os.path.join(raw_dir, "packed_anatomical_tensor_registry.json")
 
+    case_dir = os.path.dirname(os.path.abspath(raw_dir))
+    ln_dir_exists = os.path.isdir(os.path.join(case_dir, "lymph_nodes")) or os.path.isdir(os.path.join(raw_dir, "lymph_nodes"))
     ln_h5 = os.path.join(raw_dir, "final_results_gpu.h5")
-    has_fresh_ln = os.path.isfile(ln_h5)
+    has_fresh_ln = ln_dir_exists or os.path.isfile(ln_h5)
     skipped_old_ln = 0
 
-    if os.path.isfile(anat_h5) and os.path.isfile(reg_path):
-        with open(reg_path, "r") as rf:
-            reg = json.load(rf)
+    deferred_lungs = []
+    if os.path.isfile(anat_h5):
+        reg = None
+        if os.path.isfile(reg_path):
+            with open(reg_path, "r") as rf:
+                reg = json.load(rf)
         with h5py.File(anat_h5, "r") as af:
-            pt = af["packed_tensor"][:]
-            masks_dict = reg.get("masks", reg)
-            for name, meta in masks_dict.items():
-                if not isinstance(meta, dict):
-                    continue
-                clean = name.lower()
-                if any(bad in clean for bad in ["temp", "helper", "dilation", "buffer"]):
-                    continue
-                if has_fresh_ln and _is_lymph_station_name(clean):
-                    skipped_old_ln += 1
-                    continue
-                ch = meta.get("channel", 1) - 1
-                mid = meta.get("id", 1)
-                if 0 <= ch < pt.shape[0]:
-                    mask = (pt[ch] == mid)
-                    if mask.shape == ct_shape and mask.any():
-                        max_anatomy[mask] = lbl_idx
-                        labels_dict[str(lbl_idx)] = clean
-                        if any(b in clean for b in ["bone", "femur", "hip", "sacrum", "vertebra", "rib", "sternum", "ilium", "ischium"]):
-                            bone_ids.append(lbl_idx)
-                        if any(u in clean for u in ["bladder", "kidney", "lacrimal", "parotid", "submandibular"]):
-                            exclusion_mask[mask] = 1
-                        lbl_idx += 1
+            if reg is None and "registry" in af:
+                raw_reg = af["registry"][()]
+                s_reg = raw_reg.decode() if isinstance(raw_reg, bytes) else (bytes(raw_reg).decode() if hasattr(raw_reg, "tobytes") else str(raw_reg))
+                reg = json.loads(s_reg)
+            if reg is not None:
+                pt = af["packed_tensor"][:]
+                masks_dict = reg.get("masks", reg)
+                for name, meta in masks_dict.items():
+                    if not isinstance(meta, dict):
+                        continue
+                    clean = name.lower()
+                    if is_excluded_non_organ_mask(clean):
+                        continue
+                    if has_fresh_ln and _is_lymph_station_name(clean):
+                        skipped_old_ln += 1
+                        continue
+                    ch = meta.get("channel", 1) - 1
+                    mid = meta.get("id", 1)
+                    if 0 <= ch < pt.shape[0]:
+                        mask = (pt[ch] == mid)
+                        if mask.shape == ct_shape and mask.any():
+                            if is_lung_label_name(clean):
+                                deferred_lungs.append((clean, mask))
+                                continue
+                            max_anatomy[mask] = lbl_idx
+                            labels_dict[str(lbl_idx)] = clean
+                            if any(b in clean for b in ["bone", "femur", "hip", "sacrum", "vertebra", "rib", "sternum", "ilium", "ischium"]):
+                                bone_ids.append(lbl_idx)
+                            if any(u in clean for u in ["bladder", "kidney", "lacrimal", "parotid", "submandibular"]):
+                                exclusion_mask[mask] = 1
+                            lbl_idx += 1
         if skipped_old_ln > 0:
             print(f"    Skipped {skipped_old_ln} old LN stations from packed tensor")
 
     fresh_ln_count = 0
-    skipped_non_ln = 0
+    ln_sources = set()
     if has_fresh_ln:
-        try:
-            with h5py.File(ln_h5, "r") as lf:
-                for k in sorted(lf.keys()):
-                    clean = k.lower()
-                    if any(bad in clean for bad in ["temp", "helper", "_base", "_dilated", "bridge",
-                                                     "exclusion", "cavity", "chest_wall"]):
-                        continue
-                    # ONLY include actual lymph node station masks
-                    if not _is_lymph_station_name(clean):
-                        skipped_non_ln += 1
-                        continue
-                    arr_ln = lf[k][:]
-                    if arr_ln.ndim == 3:
-                        if arr_ln.shape == (X, Y, Z):
-                            arr_ln = np.transpose(arr_ln, (2, 1, 0))
-                        if arr_ln.shape == (Z, Y, X):
-                            m_ln = (arr_ln > 0)
-                            if m_ln.any():
-                                max_anatomy[m_ln] = lbl_idx
-                                labels_dict[str(lbl_idx)] = clean
-                                fresh_ln_count += 1
-                                lbl_idx += 1
-            print(f"    Integrated {fresh_ln_count} fresh LN stations (skipped {skipped_non_ln} non-LN)")
-        except Exception as e_ln:
-            print(f"    [WARN] Error reading {ln_h5}: {e_ln}")
+        for clean, m_ln, src_tag in iter_authoritative_lymph_node_masks(ct_shape, raw_dir):
+            max_anatomy[m_ln] = lbl_idx
+            labels_dict[str(lbl_idx)] = clean
+            fresh_ln_count += 1
+            ln_sources.add(src_tag.split("/")[0])
+            lbl_idx += 1
+        print(f"    Integrated {fresh_ln_count} authoritative LN stations (source={sorted(ln_sources)})")
+
+    # Layer 2: Lungs ONLY — the only anatomy allowed to override lymph node areas
+    for clean, mask in deferred_lungs:
+        max_anatomy[mask] = lbl_idx
+        labels_dict[str(lbl_idx)] = clean
+        lbl_idx += 1
 
     # Purge dead labels
     live_ids = set(np.unique(max_anatomy))
@@ -279,7 +281,21 @@ def repair_case(case_name, dry_run=False):
                 meta.create_dataset("bone_label_ids", data=np.array(bone_ids, dtype=np.int32))
     except Exception as e:
         return f"WRITE_ERROR: {e}"
-    
+
+    # Sync local xnat_cache copies if present
+    cache_root = os.path.expanduser("~/.medeye3d/xnat_cache")
+    if os.path.isdir(cache_root):
+        import glob, shutil
+        for cand in glob.glob(os.path.join(cache_root, "**", f"*__{case_name}_preprocessed*.h5"), recursive=True):
+            if os.path.isfile(cand):
+                try:
+                    shutil.copyfile(h5_path, cand)
+                    meta_p = cand + ".xnat_meta.json"
+                    if os.path.isfile(meta_p):
+                        os.remove(meta_p)
+                except Exception:
+                    pass
+
     return f"OK (labels={n_labels}, lymph_stations={n_lymph}, lymph_voxels={lymph_voxels:,})"
 
 
@@ -287,6 +303,9 @@ def main():
     parser = argparse.ArgumentParser(description="Repair max_anatomy in all preprocessed_volumes.h5")
     parser.add_argument("--cases", type=str, help="Comma-separated list of cases")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--upload-xnat", action="store_true", help="Upload repaired HDF5s to XNAT MEDEYE3D resource")
+    parser.add_argument("--upload-only", action="store_true", help="Skip local rebuild and only upload existing preprocessed_volumes.h5 to XNAT")
+    parser.add_argument("--skip-synced", action="store_true", help="With --upload-only/--upload-xnat, skip cases whose remote XNAT HDF5 size and status.json already match")
     args = parser.parse_args()
     
     if args.cases:
@@ -295,33 +314,108 @@ def main():
         case_names = sorted([
             d for d in os.listdir(CASES_DIR)
             if d.startswith("Pat") and os.path.isdir(os.path.join(CASES_DIR, d))
-            and "_PETCT_" not in d
+            and "_PETCT_" not in d and "_student" not in d
+            and os.path.isfile(os.path.join(CASES_DIR, d, "preprocessed_volumes.h5"))
         ], key=lambda x: int(''.join(filter(str.isdigit, x)) or 0))
     
+    xnat_mgr = None
+    xnat_subjs = {}
+    proj_id = "Prostata_bimodal_PIPELINE"
+    if (args.upload_xnat or args.upload_only) and not args.dry_run:
+        from batch_process_cohort_dual_gpu import XnatManager, CENSUS_PATH
+        with open(CENSUS_PATH, "r") as cf:
+            xnat_subjs = json.load(cf)
+        xnat_mgr = XnatManager()
+        print(f"XNAT upload enabled ({len(xnat_subjs)} subjects indexed from census)")
+
     print(f"Repairing max_anatomy for {len(case_names)} cases...")
     print("=" * 80)
     
     ok = 0
     fail = 0
     skip = 0
+    uploaded = 0
     t0 = time.time()
     
     for cn in case_names:
-        result = repair_case(cn, dry_run=args.dry_run)
+        result = "OK (upload-only)" if args.upload_only else repair_case(cn, dry_run=args.dry_run)
         status = "OK" if result.startswith("OK") else ("SKIP" if result in ("NO_H5", "NO_ANAT", "NO_BASELINE", "NO_CT_DATASET") else "FAIL")
         if status == "OK":
             ok += 1
+            if xnat_mgr is not None and cn in xnat_subjs:
+                sinfo = xnat_subjs[cn]
+                subj_id = sinfo.get("subj_id", "")
+                subj_label = sinfo.get("subj_label", "")
+                h5_p = os.path.join(CASES_DIR, cn, "preprocessed_volumes.h5")
+                if subj_id and subj_label:
+                    loc_sz = os.path.getsize(h5_p)
+                    already_synced = False
+                    if args.skip_synced:
+                        rf = (xnat_mgr.get_json(f"/data/projects/{proj_id}/subjects/{subj_id}/resources/MEDEYE3D/files?format=json") or {}).get("ResultSet", {}).get("Result", [])
+                        rem_sz = next((int(x.get("Size", -1)) for x in rf if x.get("Name") == f"{subj_label}_preprocessed.h5"), -1)
+                        if rem_sz == loc_sz:
+                            st_r = xnat_mgr.request("GET", f"/data/projects/{proj_id}/subjects/{subj_id}/resources/ANNOTATIONS/files/status.json", timeout=15)
+                            if st_r and st_r.status_code == 200:
+                                try:
+                                    sj = st_r.json()
+                                    if sj.get("manually_modified") is False and sj.get("modified_by", "") == "":
+                                        already_synced = True
+                                except Exception:
+                                    pass
+                    if already_synced:
+                        print(f"  [SKIP-SYNCED] {cn}: already matches XNAT ({loc_sz} bytes)", flush=True)
+                    else:
+                        xnat_mgr.request("PUT", f"/data/projects/{proj_id}/subjects/{subj_id}/resources/MEDEYE3D")
+                        h5_uri = f"/data/projects/{proj_id}/subjects/{subj_id}/resources/MEDEYE3D/files/{subj_label}_preprocessed.h5?overwrite=true"
+                        if not xnat_mgr.upload_file_streaming(h5_uri, h5_p):
+                            result = "FAIL_XNAT_UPLOAD"
+                            status = "FAIL"
+                            ok -= 1
+                            fail += 1
+                        else:
+                            uploaded += 1
+                if subj_id and subj_label and status == "OK" and not already_synced:
+                    # Sync XNAT ANNOTATIONS/status.json from HDF5 _meta_/modification_status.json
+                    try:
+                        import tempfile
+                        with h5py.File(h5_p, "r") as hf:
+                            ms = json.loads(hf["_meta_/modification_status.json"][()]) if "_meta_/modification_status.json" in hf else {}
+                        is_mod = bool(ms.get("manually_modified", False))
+                        mod_by = str(ms.get("modified_by", ""))
+                        last_m = str(ms.get("last_modified", ""))
+                        st_payload = {
+                            "project_id": proj_id,
+                            "subject_id": subj_label,
+                            "status": "PROCESSED" if is_mod else "PREPROCESSED",
+                            "manually_modified": is_mod,
+                            "modified_by": mod_by if is_mod else "",
+                            "assigned_user": mod_by if is_mod else "",
+                            "last_modified": last_m,
+                            "summary": {"manually_modified": is_mod, "modified_by": mod_by if is_mod else ""},
+                        }
+                        xnat_mgr.request("PUT", f"/data/projects/{proj_id}/subjects/{subj_id}/resources/ANNOTATIONS")
+                        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as tf:
+                            json.dump(st_payload, tf, indent=2)
+                            tmp_st = tf.name
+                        try:
+                            st_uri = f"/data/projects/{proj_id}/subjects/{subj_id}/resources/ANNOTATIONS/files/status.json?overwrite=true"
+                            xnat_mgr.upload_file_streaming(st_uri, tmp_st)
+                        finally:
+                            if os.path.isfile(tmp_st):
+                                os.remove(tmp_st)
+                    except Exception:
+                        pass
         elif status == "SKIP":
             skip += 1
         else:
             fail += 1
         
         icon = "✓" if status == "OK" else ("⊘" if status == "SKIP" else "✗")
-        print(f"  {icon} {cn}: {result}")
+        print(f"  {icon} {cn}: {result}", flush=True)
     
     elapsed = time.time() - t0
     print("=" * 80)
-    print(f"OK: {ok}  SKIP: {skip}  FAIL: {fail}  ({elapsed:.1f}s)")
+    print(f"OK: {ok}  SKIP: {skip}  FAIL: {fail}  UPLOADED: {uploaded}  ({elapsed:.1f}s)")
 
 
 if __name__ == "__main__":

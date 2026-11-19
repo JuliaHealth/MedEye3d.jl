@@ -72,29 +72,38 @@ function notify_patient_selected(
 
     cache_dir = get_local_cache_dir(project_id, next_subj)
     target_h5 = joinpath(cache_dir, "$(next_subj)_preprocessed.h5")
+    was_cached = isfile(target_h5) && filesize(target_h5) > 1024
 
-    if isfile(target_h5) && filesize(target_h5) > 1024
-        _preloaded_subject[] = next_subj
-        _preloaded_h5_path[] = target_h5
-        return nothing
-    end
-
-    # Launch background preload
+    # Launch background preload (checks if remote XNAT has a newer/changed version even if cached locally)
     cancel_preload!()
     _preload_active[] = true
     _preload_task[] = Threads.@spawn begin
         try
+            if was_cached
+                needs_dl, dl_reason = try
+                    XnatClient.is_remote_newer_than_local(creds, project_id, next_subj, target_h5)
+                catch
+                    (false, "up_to_date")
+                end
+                if !needs_dl
+                    _preloaded_subject[] = next_subj
+                    _preloaded_h5_path[] = target_h5
+                    return nothing
+                end
+                println("[XNAT-PRELOAD] Remote XNAT version for $next_subj is $dl_reason; refreshing cache...")
+                flush(stdout)
+            else
+                println("[XNAT-PRELOAD] Background downloading next case: $project_id / $next_subj...")
+                flush(stdout)
+            end
             mkpath(cache_dir)
-            println("[XNAT-PRELOAD] Background downloading next case: $project_id / $next_subj...")
-            flush(stdout)
-            
-            dl_ok = XnatClient.download_preprocessed_hdf5(creds, project_id, next_subj, target_h5; force=false)
+            dl_ok = XnatClient.download_preprocessed_hdf5(creds, project_id, next_subj, target_h5; force=was_cached)
             if dl_ok && isfile(target_h5) && filesize(target_h5) > 1024
                 _preloaded_subject[] = next_subj
                 _preloaded_h5_path[] = target_h5
                 println("[XNAT-PRELOAD] Ready: $next_subj cached at $target_h5 ($(round(filesize(target_h5)/1024/1024, digits=1)) MB)")
                 flush(stdout)
-            else
+            elseif !was_cached
                 println("[XNAT-PRELOAD] Note: Next case $next_subj has no preprocessed HDF5 on XNAT (raw or uncompleted)")
                 flush(stdout)
             end

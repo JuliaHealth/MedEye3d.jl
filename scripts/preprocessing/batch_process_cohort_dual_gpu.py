@@ -49,6 +49,12 @@ from cads_anatomy_wiring import (
     merge_cads_structures,
     load_resampled_cads_arrays,
     filter_lacrimal_lesions,
+    remove_edge_slice_lesions,
+    resample_mr_lesions_nrrd,
+)
+from apply_edge_slices_and_semantic_filter import (
+    compute_and_store_semantic_filter,
+    get_llm_config,
 )
 OUT_BASE_DIR = os.path.join(WORKSPACE_DIR, "data/cases/Prostata_bimodal")
 PROGRESS_JSON = os.path.join(WORKSPACE_DIR, "data/cohort_dual_gpu_progress.json")
@@ -120,7 +126,7 @@ def classify_mri_modality(fname):
     fl = fname.lower()
     if any(fl.endswith(ext) for ext in [".seg.nrrd", ".nrrd", ".fcsv", ".mrb", ".json", ".tfm"]):
         return None
-    if any(bad in fl for bad in ["lesion", "mask", "totalseg", "segmentation", "seg", "prostate", "mri_registered"]):
+    if any(bad in fl for bad in ["lesion", "mask", "totalseg", "segmentation", "seg", "prostate", "mri_registered", "pareawip", "prewip", "pttpwip"]):
         return None
     if not (fl.endswith(".nii.gz") or fl.endswith(".nii")):
         return None
@@ -129,7 +135,7 @@ def classify_mri_modality(fname):
     if "suv" in fl or "pet" in fl:
         return None
 
-    if any(k in fl for k in ["adc", "ddadc", "eadc"]):
+    if any(k in fl for k in ["adc", "ddadc", "eadc", "isoadc", "ddwi", "dwip"]) or fl.startswith(("s)_", "s):")):
         mod = "ADC"
     elif any(k in fl for k in ["dwi", "dw_", "isodwi", "b1400", "b1500", "b1200", "b-50", "b50", "bval", "diff_", "trace"]):
         mod = "DWI"
@@ -142,9 +148,9 @@ def classify_mri_modality(fname):
     else:
         mod = "MRI"
 
-    if any(k in fl for k in ["cor", "coronal"]):
+    if any(k in fl for k in ["cor", "coronal", "__701", "__901"]):
         plane = "cor"
-    elif any(k in fl for k in ["sag", "sagittal"]):
+    elif any(k in fl for k in ["sag", "sagittal", "_fh"]):
         plane = "sag"
     else:
         plane = "ax"
@@ -181,9 +187,11 @@ def select_ranked_mri_sequences(all_files_map):
             curr = unique_groups[key]
             def _score(x):
                 s = 0
+                fl_n = x["fn"].lower()
                 if x.get("is_reg", False): s += 20
                 if x.get("is_orig", False): s += 10
                 if x.get("is_swd", False): s += 5
+                if "eadc" in fl_n or "edwi" in fl_n: s -= 50
                 return s
             if _score(p) > _score(curr):
                 unique_groups[key] = p
@@ -218,15 +226,43 @@ def unpack_stacked_mri_volume(im: sitk.Image, mod: str, fn: str, ref_t2: sitk.Im
     mod_u = (mod or "").upper()
     fn_l = (fn or "").lower()
 
-    # 1. Stacked multi-b-value DWI (e.g. 4 x 20 slices with sp_z=0.96mm instead of 4.0mm)
-    if mod_u == "DWI" and ref_adc is not None:
-        adc_z = int(ref_adc.GetSize()[2])
+    # 1a. Interleaved multi-b-value DWI (e.g. 90 slices alternating even=b0, odd=b800/b1200 at half sp_z)
+    if mod_u == "DWI" and tot_z >= 40 and tot_z % 2 == 0:
+        raw_arr = sitk.GetArrayFromImage(im)
+        mean_even = float(raw_arr[0::2].mean())
+        mean_odd = float(raw_arr[1::2].mean())
+        hi, lo = max(mean_even, mean_odd), min(mean_even, mean_odd)
+        if lo > 0 and (hi / lo) >= 1.5:
+            high_b_arr = raw_arr[0::2] if mean_even < mean_odd else raw_arr[1::2]
+            dwi_3d = sitk.GetImageFromArray(high_b_arr)
+            dwi_3d.SetSpacing((sp[0], sp[1], sp_z * 2.0))
+            dwi_3d.SetOrigin(im.GetOrigin())
+            dwi_3d.SetDirection(im.GetDirection())
+            return dwi_3d
+
+    # 1b. Stacked multi-b-value DWI (e.g. 4 x 20 slices with sp_z=0.96mm instead of 4.0mm)
+    if mod_u == "DWI":
+        adc_z = int(ref_adc.GetSize()[2]) if ref_adc is not None else 0
+        if adc_z < 15 and tot_z >= 60 and sp_z < 1.5:
+            t2_z_ref = int(ref_t2.GetSize()[2]) if ref_t2 is not None else 0
+            if 15 <= t2_z_ref <= 45 and tot_z > t2_z_ref and tot_z % t2_z_ref == 0:
+                adc_z = t2_z_ref
+            else:
+                cands = [s for s in range(16, 46) if tot_z % s == 0 and tot_z > s]
+                if cands:
+                    target_z = max(2, int(round(3.5 / max(sp_z, 0.2))))
+                    adc_z = min(cands, key=lambda s: abs((tot_z / s) - target_z))
         if adc_z >= 15 and tot_z > adc_z and tot_z % adc_z == 0 and sp_z < 1.5:
             n_vols = tot_z // adc_z
             raw_4d = sitk.GetArrayFromImage(im)
             vol_idx = 1 if n_vols >= 2 else 0  # b=800 standard prostate DWI
             dwi_3d = sitk.GetImageFromArray(raw_4d[vol_idx * adc_z : (vol_idx + 1) * adc_z])
-            dwi_3d.CopyInformation(ref_adc)
+            if ref_adc is not None:
+                dwi_3d.CopyInformation(ref_adc)
+            else:
+                dwi_3d.SetSpacing((sp[0], sp[1], sp_z * n_vols))
+                dwi_3d.SetOrigin(im.GetOrigin())
+                dwi_3d.SetDirection(im.GetDirection())
             return dwi_3d
 
     # 2. Stacked 4D DCE / LAVA / Dynamik (e.g. 780 slices at sp_z=0.1mm, or 414 at 0.16mm)
@@ -329,6 +365,7 @@ class XnatManager:
     def request(self, method, url, **kwargs):
         if not url.startswith("http"):
             url = f"{self.server}{url}"
+        kwargs.setdefault("timeout", 30)
         for attempt in range(4):
             try:
                 r = self.session.request(method, url, **kwargs)
@@ -388,38 +425,29 @@ class XnatManager:
             sep = "&" if "?" in full_url else "?"
             full_url = f"{full_url}{sep}inbody=true"
 
-        # Get fresh JSESSIONID cookie for curl
-        jsess = ""
-        try:
-            r = self.session.get(f"{self.server}/data/JSESSION", auth=(self.alias, self.secret), timeout=30)
-            r.raise_for_status()
-            jsess = r.text.strip()
-        except Exception as e:
-            print(f"  [WARN] Auth refresh failed: {e}")
-            if not retry_auth:
-                return False
-
         cmd = [
             "curl", "-k", "-s", "-w", "%{http_code}",
-            "-b", f"JSESSIONID={jsess}",
+            "-u", f"{self.alias}:{self.secret}",
             "-H", "Expect:",
             "--connect-timeout", "30",
-            "--speed-time", "45",
+            "--speed-time", "60",
             "--speed-limit", "1000",
-            "--retry", "3",
+            "--retry", "2",
             "--retry-delay", "5",
             "-T", local_path,
             full_url
         ]
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=7200)
         code = res.stdout.strip()[-3:] if res.stdout else ""
-        
-        # Handle 401 by re-authenticating and retrying once
+
         if code == "401" and retry_auth:
             print(f"  [WARN] Got 401, re-authenticating and retrying...")
             return self.upload_file_streaming(uri, local_path, retry_auth=False)
-        
-        return code in ("200", "201")
+
+        if code not in ("200", "201"):
+            print(f"  [WARN] Streaming upload failed for {os.path.basename(local_path)}: HTTP {code!r} {res.stderr[-200:]}")
+            return False
+        return True
 
 
 def get_scan_list_for_subject(xnat, subj_label):
@@ -655,8 +683,15 @@ def compute_two_stage_registration(ct_img, raw_dir, device="cuda:0", xnat=None, 
     # Load moving MRI prostate/bones from totalseg_mr_ml.nii.gz and/or prostate_segmentation.nii.gz
     ts_mr_path = os.path.join(raw_dir, "totalseg_mr_ml.nii.gz")
     if not os.path.isfile(ts_mr_path):
-        t2_cands = [f for f in os.listdir(raw_dir) if f.endswith(".nii.gz") and "t2" in f.lower() and "cor" not in f.lower() and "sag" not in f.lower() and not f.startswith("Fixed_CT")]
-        if t2_cands:
+        mri_map = {
+            f: os.path.join(raw_dir, f)
+            for f in os.listdir(raw_dir)
+            if f.endswith(".nii.gz") and not f.startswith(("Fixed_CT", "SUV", "CT", "totalseg"))
+            and classify_mri_modality(f)
+        }
+        ranked = select_ranked_mri_sequences(mri_map)
+        t2_path = next((s["item"] for s in ranked if s["mod"] == "T2"), ranked[0]["item"] if ranked else None)
+        if t2_path and os.path.isfile(t2_path):
             ts_bin = next(
                 (p for p in (
                     "/mnt/big/project_ssd/project_ssd/lymph_node_rules/for_joanna/.local/conda/envs/seg/bin/TotalSegmentator",
@@ -668,7 +703,7 @@ def compute_two_stage_registration(ct_img, raw_dir, device="cuda:0", xnat=None, 
                 env_ts = os.environ.copy()
                 if "cuda:" in str(device):
                     env_ts["CUDA_VISIBLE_DEVICES"] = str(device).split(":")[-1]
-                subprocess.run([ts_bin, "-i", os.path.join(raw_dir, t2_cands[0]), "-o", ts_mr_path, "-ta", "total_mr", "--ml", "--fast", "--quiet"], env=env_ts, check=True)
+                subprocess.run([ts_bin, "-i", t2_path, "-o", ts_mr_path, "-ta", "total_mr", "--ml", "--fast", "--quiet"], env=env_ts, check=True)
             except Exception as e_ts:
                 print(f"    [WARN] TotalSegmentator MR failed: {e_ts}")
 
@@ -686,6 +721,42 @@ def compute_two_stage_registration(ct_img, raw_dir, device="cuda:0", xnat=None, 
             mr_prostate_img = sitk.GetImageFromArray(p_m)
             mr_prostate_img.CopyInformation(moving_img)
 
+    # Fallback: if small-FOV axial T2 missed >= 3 pelvic bones, segment larger-FOV axial T1 for Stage 1 bone landmarks
+    if len(mr_bones) < 3:
+        mri_map = {
+            f: os.path.join(raw_dir, f)
+            for f in os.listdir(raw_dir)
+            if f.endswith(".nii.gz") and not f.startswith(("Fixed_CT", "SUV", "CT", "totalseg"))
+            and classify_mri_modality(f)
+        }
+        ranked = select_ranked_mri_sequences(mri_map)
+        t1_cands = [s["item"] for s in ranked if s["mod"] == "T1" and s["plane"] == "ax"]
+        if t1_cands and os.path.isfile(t1_cands[0]):
+            ts_t1_path = os.path.join(raw_dir, "totalseg_mr_t1_ml.nii.gz")
+            if not os.path.isfile(ts_t1_path):
+                ts_bin = next(
+                    (p for p in (
+                        "/mnt/big/project_ssd/project_ssd/lymph_node_rules/for_joanna/.local/conda/envs/seg/bin/TotalSegmentator",
+                        "/usr/local/bin/TotalSegmentator",
+                    ) if os.path.isfile(p)),
+                    None,
+                ) or shutil.which("TotalSegmentator") or "TotalSegmentator"
+                try:
+                    env_ts = os.environ.copy()
+                    if "cuda:" in str(device):
+                        env_ts["CUDA_VISIBLE_DEVICES"] = str(device).split(":")[-1]
+                    subprocess.run([ts_bin, "-i", t1_cands[0], "-o", ts_t1_path, "-ta", "total_mr", "--ml", "--fast", "--quiet"], env=env_ts, check=True)
+                except Exception as e_ts:
+                    print(f"    [WARN] TotalSegmentator MR T1 fallback failed: {e_ts}")
+            if os.path.isfile(ts_t1_path):
+                t1_im = sitk.ReadImage(ts_t1_path)
+                t1_arr = sitk.GetArrayFromImage(t1_im)
+                for lbl_id, bname in [(36, "femur_left"), (37, "femur_right"), (38, "hip_left"), (39, "hip_right")]:
+                    if bname not in mr_bones:
+                        pts_m = _pts_from_mask(t1_im, t1_arr == lbl_id)
+                        if len(pts_m) > 0:
+                            mr_bones[bname] = _medial_centroid(pts_m)
+
     pros_nii = os.path.join(raw_dir, "prostate_segmentation.nii.gz")
     if os.path.isfile(pros_nii):
         p_img = sitk.ReadImage(pros_nii)
@@ -694,8 +765,15 @@ def compute_two_stage_registration(ct_img, raw_dir, device="cuda:0", xnat=None, 
         if p_bin.sum() < 100:
             p_bin = (p_arr > 0).astype(np.uint8)
         if p_bin.any():
-            mr_prostate_img = sitk.GetImageFromArray(p_bin)
-            mr_prostate_img.CopyInformation(p_img)
+            p_vol = float(p_bin.sum()) * float(np.prod(p_img.GetSpacing()))
+            ts_vol = (
+                float((sitk.GetArrayViewFromImage(mr_prostate_img) > 0).sum()) * float(np.prod(mr_prostate_img.GetSpacing()))
+                if mr_prostate_img is not None
+                else 0.0
+            )
+            if mr_prostate_img is None or (ts_vol > 0 and p_vol >= 0.5 * ts_vol):
+                mr_prostate_img = sitk.GetImageFromArray(p_bin)
+                mr_prostate_img.CopyInformation(p_img)
 
     # Stage 1: ONLY most medial points of hip & femur bones (Arun SVD Procrustes CT -> MRI)
     common_bones = [k for k in ["femur_left", "femur_right", "hip_left", "hip_right"] if k in ct_bones and k in mr_bones]
@@ -774,25 +852,12 @@ def run_julia_lymph_node_rules(ct_path, tensor_path, out_ln_path, gpu_id=0):
     return True
 
 
-def _is_lymph_station_name(name):
-    """Check if a mask name represents a lymph node station (mirrors Julia is_lymph_node_structure)."""
-    ln = name.lower()
-    # Exclude non-lymph structural/helper labels that share station prefixes
-    for bad in ("_cavity", "exclusion_zone", "chest_wall", "_helper", "_bridge", "_base", "_dilated"):
-        if bad in ln:
-            return False
-    # Exclude specific non-LN structures that match prefix patterns
-    if ln in ("thoracic_aorta", "thoracic_duct"):
-        return False
-    # Substring checks
-    if any(w in ln for w in ("lymph", "knoten", "node")):
-        return True
-    # Clinical station prefixes
-    for p in ("neck_", "thoracic_", "axillary_", "abdominal_",
-              "deep_inguinal", "superficial_inguinal", "inguinal_"):
-        if ln.startswith(p):
-            return True
-    return False
+from cads_anatomy_wiring import (
+    is_excluded_non_organ_mask as _is_excluded_non_organ_mask,
+    is_lung_label_name as _is_lung_label_name,
+    is_lymph_label_name as _is_lymph_station_name,
+    iter_authoritative_lymph_node_masks,
+)
 
 
 def layer_and_sanitize_ct_anatomy(ct_shape, raw_dir):
@@ -812,74 +877,73 @@ def layer_and_sanitize_ct_anatomy(ct_shape, raw_dir):
     anat_h5 = os.path.join(raw_dir, "packed_anatomical_tensor.h5")
     reg_path = os.path.join(raw_dir, "packed_anatomical_tensor_registry.json")
 
-    # Check if fresh LN results exist — if so, skip old LN from packed tensor
+    # Check if authoritative LN results exist — if so, skip old LN from packed tensor
+    case_dir = os.path.dirname(os.path.abspath(raw_dir))
+    ln_dir_exists = os.path.isdir(os.path.join(case_dir, "lymph_nodes")) or os.path.isdir(os.path.join(raw_dir, "lymph_nodes"))
     ln_h5 = os.path.join(raw_dir, "final_results_gpu.h5")
-    has_fresh_ln = os.path.isfile(ln_h5)
+    has_fresh_ln = ln_dir_exists or os.path.isfile(ln_h5)
     skipped_old_ln = 0
 
-    # Layer 0 & 1: VISTA Viscera & Vessels (skip old LN stations when fresh ones available)
-    if os.path.isfile(anat_h5) and os.path.isfile(reg_path):
-        with open(reg_path, "r") as rf:
-            reg = json.load(rf)
+    # Layer 0 & 1: VISTA Viscera & Vessels (skip old LN stations when fresh ones available; defer lungs to Layer 2)
+    deferred_lungs = []
+    if os.path.isfile(anat_h5):
+        reg = None
+        if os.path.isfile(reg_path):
+            with open(reg_path, "r") as rf:
+                reg = json.load(rf)
         with h5py.File(anat_h5, "r") as af:
-            pt = af["packed_tensor"][:]
-            masks_dict = reg.get("masks", reg)
-            for name, meta in masks_dict.items():
-                if not isinstance(meta, dict):
-                    continue
-                clean = name.lower()
-                # Strict sanitation: purge temp and helper masks
-                if any(bad in clean for bad in ["temp", "helper", "dilation", "buffer"]):
-                    continue
-                # Skip old LN stations from packed tensor when fresh results exist
-                if has_fresh_ln and _is_lymph_station_name(clean):
-                    skipped_old_ln += 1
-                    continue
-                ch = meta.get("channel", 1) - 1
-                mid = meta.get("id", 1)
-                if 0 <= ch < pt.shape[0]:
-                    mask = (pt[ch] == mid)
-                    if mask.shape == ct_shape and mask.any():
-                        max_anatomy[mask] = lbl_idx
-                        labels_dict[str(lbl_idx)] = clean
-                        if any(b in clean for b in ["bone", "femur", "hip", "sacrum", "vertebra", "rib", "sternum", "ilium", "ischium"]):
-                            bone_ids.append(lbl_idx)
-                        if any(u in clean for u in ["bladder", "kidney", "lacrimal", "parotid", "submandibular"]):
-                            exclusion_mask[mask] = 1
-                        lbl_idx += 1
+            if reg is None and "registry" in af:
+                raw_reg = af["registry"][()]
+                s_reg = raw_reg.decode() if isinstance(raw_reg, bytes) else (bytes(raw_reg).decode() if hasattr(raw_reg, "tobytes") else str(raw_reg))
+                reg = json.loads(s_reg)
+            if reg is not None:
+                pt = af["packed_tensor"][:]
+                masks_dict = reg.get("masks", reg)
+                for name, meta in masks_dict.items():
+                    if not isinstance(meta, dict):
+                        continue
+                    clean = name.lower()
+                    if _is_excluded_non_organ_mask(clean):
+                        continue
+                    # Skip old LN stations from packed tensor when fresh results exist
+                    if has_fresh_ln and _is_lymph_station_name(clean):
+                        skipped_old_ln += 1
+                        continue
+                    ch = meta.get("channel", 1) - 1
+                    mid = meta.get("id", 1)
+                    if 0 <= ch < pt.shape[0]:
+                        mask = (pt[ch] == mid)
+                        if mask.shape == ct_shape and mask.any():
+                            if _is_lung_label_name(clean):
+                                deferred_lungs.append((clean, mask))
+                                continue
+                            max_anatomy[mask] = lbl_idx
+                            labels_dict[str(lbl_idx)] = clean
+                            if any(b in clean for b in ["bone", "femur", "hip", "sacrum", "vertebra", "rib", "sternum", "ilium", "ischium"]):
+                                bone_ids.append(lbl_idx)
+                            if any(u in clean for u in ["bladder", "kidney", "lacrimal", "parotid", "submandibular"]):
+                                exclusion_mask[mask] = 1
+                            lbl_idx += 1
         if skipped_old_ln > 0:
             print(f"    Skipped {skipped_old_ln} old LN stations from packed tensor (fresh LN results available)")
 
-    # Layer 1.5: Fresh Lymph Node Stations from Julia GPU DagVm
+    # Layer 1.5: Authoritative Lymph Node Stations (`lymph_nodes/` preferred, fallback `final_results_gpu.h5`)
     fresh_ln_count = 0
-    skipped_non_ln = 0
+    ln_sources = set()
     if has_fresh_ln:
-        try:
-            with h5py.File(ln_h5, "r") as lf:
-                for k in sorted(lf.keys()):
-                    clean = k.lower()
-                    # Filter out helper/temp/structural masks from LN results
-                    if any(bad in clean for bad in ["temp", "helper", "_base", "_dilated", "bridge",
-                                                     "exclusion", "cavity", "chest_wall"]):
-                        continue
-                    # ONLY include actual lymph node station masks
-                    if not _is_lymph_station_name(clean):
-                        skipped_non_ln += 1
-                        continue
-                    arr_ln = lf[k][:]
-                    if arr_ln.ndim == 3:
-                        if arr_ln.shape == (X, Y, Z):
-                            arr_ln = np.transpose(arr_ln, (2, 1, 0))
-                        if arr_ln.shape == (Z, Y, X):
-                            m_ln = (arr_ln > 0)
-                            if m_ln.any():
-                                max_anatomy[m_ln] = lbl_idx
-                                labels_dict[str(lbl_idx)] = clean
-                                fresh_ln_count += 1
-                                lbl_idx += 1
-            print(f"    Integrated {fresh_ln_count} fresh LN stations from final_results_gpu.h5 (skipped {skipped_non_ln} non-LN)")
-        except Exception as e_ln:
-            print(f"    [WARN] Error reading {ln_h5}: {e_ln}")
+        for clean, m_ln, src_tag in iter_authoritative_lymph_node_masks(ct_shape, raw_dir):
+            max_anatomy[m_ln] = lbl_idx
+            labels_dict[str(lbl_idx)] = clean
+            fresh_ln_count += 1
+            ln_sources.add(src_tag.split("/")[0])
+            lbl_idx += 1
+        print(f"    Integrated {fresh_ln_count} authoritative LN stations (source={sorted(ln_sources)})")
+
+    # Layer 2: Lungs ONLY — only anatomy allowed to override lymph node areas
+    for clean, mask in deferred_lungs:
+        max_anatomy[mask] = lbl_idx
+        labels_dict[str(lbl_idx)] = clean
+        lbl_idx += 1
 
     # Purge any dead labels (IDs that no longer appear in the max_anatomy array)
     live_ids = set(np.unique(max_anatomy))
@@ -898,7 +962,10 @@ def compute_neural_edges(ct_arr, pet_arr, exclusion_mask, device="cuda:0"):
     """
     Step 7: Recomputes 3D neural edge probability maps and diffusivities using champion TotalSegEdgePDE models.
     """
-    sys.path.insert(0, "/mnt/big/project_ssd/semiautomatic")
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+    _model_dir = _script_dir if os.path.isfile(os.path.join(_script_dir, "totalseg_edge_pde_model.py")) else "/mnt/big/project_ssd/semiautomatic"
+    if _model_dir not in sys.path:
+        sys.path.insert(0, _model_dir)
     import torch
     from totalseg_edge_pde_model import TotalSegEdgePDE
     from totalseg_edge_pde_pet_model import TotalSegEdgePDE_PET
@@ -906,14 +973,16 @@ def compute_neural_edges(ct_arr, pet_arr, exclusion_mask, device="cuda:0"):
     dev = torch.device(device if torch.cuda.is_available() else "cpu")
     print(f"    Running TotalSegEdgePDE inference on {dev}...")
 
-    # Load models
-    ckpt_dual = "/mnt/big/project_ssd/semiautomatic/checkpoints/totalseg_edge_pde/best_model.pth"
+    # Load models (prefer self-contained repo assets, fallback to semiautomatic dir)
+    repo_dual = os.path.join(WORKSPACE_DIR, "assets/models/totalseg_edge_pde/best_model.pth")
+    ckpt_dual = repo_dual if os.path.isfile(repo_dual) else "/mnt/big/project_ssd/semiautomatic/checkpoints/totalseg_edge_pde/best_model.pth"
     m_dual = TotalSegEdgePDE().to(dev)
     d_st = torch.load(ckpt_dual, map_location=dev)
     m_dual.load_state_dict(d_st.get("model_state_dict", d_st))
     m_dual.eval()
 
-    ckpt_pet = "/mnt/big/project_ssd/semiautomatic/checkpoints/totalseg_edge_pde_pet/best_model.pth"
+    repo_pet = os.path.join(WORKSPACE_DIR, "assets/models/totalseg_edge_pde_pet/best_model.pth")
+    ckpt_pet = repo_pet if os.path.isfile(repo_pet) else "/mnt/big/project_ssd/semiautomatic/checkpoints/totalseg_edge_pde_pet/best_model.pth"
     m_pet = TotalSegEdgePDE_PET().to(dev)
     p_st = torch.load(ckpt_pet, map_location=dev)
     m_pet.load_state_dict(p_st.get("model_state_dict", p_st))
@@ -960,31 +1029,29 @@ def compute_neural_edges(ct_arr, pet_arr, exclusion_mask, device="cuda:0"):
         torch.cuda.empty_cache()
         return res
 
-    # 1. Combined (PET+CT)
+    # 1. Combined (PET+CT) — keep existing dual model
     inp_dual = torch.from_numpy(np.stack([ct_norm, pet_norm], axis=0)).unsqueeze(0).to(dev)
     edge_comb = run_batched_sliding_window(m_dual, inp_dual, batch_size=8)
-    del inp_dual
+    del inp_dual, m_dual
     torch.cuda.empty_cache()
 
-    # 2. Pure CT
-    inp_ct = torch.from_numpy(np.stack([ct_norm, np.zeros_like(pet_norm)], axis=0)).unsqueeze(0).to(dev)
-    edge_ct = run_batched_sliding_window(m_dual, inp_ct, batch_size=8)
-    del inp_ct, m_dual
-    torch.cuda.empty_cache()
+    # 2. Pure CT — default TotalSegEdgeNet v1 (High LR) model stored in repo
+    from totalseg_edge_v1_model import infer_ct_edge_and_diffusivity_v1
+    edge_ct, diff_ct = infer_ct_edge_and_diffusivity_v1(
+        ct_arr, dev, exclusion_mask=exclusion_mask, patch_size=64, step=48, batch_size=8
+    )
 
-    # 3. Pure PET
+    # 3. Pure PET — keep existing PET model
     inp_pet = torch.from_numpy(pet_norm).unsqueeze(0).unsqueeze(0).to(dev)
     edge_pet = run_batched_sliding_window(m_pet, inp_pet, batch_size=8)
     del inp_pet, m_pet
     torch.cuda.empty_cache()
 
     diff_comb = np.clip(CHAMPION_EPS_D + (1.0 - CHAMPION_EPS_D) * np.exp(-CHAMPION_GAMMA * edge_comb), CHAMPION_EPS_D, 1.0).astype(np.float32)
-    diff_ct = np.clip(CHAMPION_EPS_D + (1.0 - CHAMPION_EPS_D) * np.exp(-CHAMPION_GAMMA * edge_ct), CHAMPION_EPS_D, 1.0).astype(np.float32)
     diff_pet = np.clip(CHAMPION_EPS_D + (1.0 - CHAMPION_EPS_D) * np.exp(-9.4069 * edge_pet), CHAMPION_EPS_D, 1.0).astype(np.float32)
 
     if exclusion_mask is not None:
         diff_comb[exclusion_mask > 0] = 0.0
-        diff_ct[exclusion_mask > 0] = 0.0
 
     return edge_comb, edge_ct, edge_pet, diff_comb, diff_ct, diff_pet
 
@@ -1247,21 +1314,10 @@ def process_case(pat_id, gpu_id, xnat):
         except Exception as e:
             print(f"    [WARN] Prostate segmentation extraction error: {e}")
 
-    # Fallback for MRI lesion if no Label 9 in prostate segmentation
-    if not mr_gold_arr.any():
-        mr_lesions_dest = os.path.join(raw_dir, "NNUNET_OR_Processed_Lesions_MR.seg.nrrd")
-        if not os.path.isfile(mr_lesions_dest) and "NNUNET_OR_Processed_Lesions_MR.seg.nrrd" in sf_map:
-            xnat.download_file(sf_map["NNUNET_OR_Processed_Lesions_MR.seg.nrrd"], mr_lesions_dest)
-        if os.path.isfile(mr_lesions_dest):
-            try:
-                ml_img = sitk.ReadImage(mr_lesions_dest)
-                res_ml = sitk.Resample(ml_img, ct_img, sitk.Transform(), sitk.sitkNearestNeighbor, 0, sitk.sitkInt16) if ml_img.GetSize() == ct_img.GetSize() else sitk.Resample(ml_img, ct_img, tfm_obj, sitk.sitkNearestNeighbor, 0, sitk.sitkInt16)
-                ml_arr = sitk.GetArrayFromImage(res_ml).astype(np.int16)
-                if ml_arr.any():
-                    mr_gold_arr = (ml_arr > 0).astype(np.int16)
-                    print(f"    [GOLD MR LESION] Extracted {mr_gold_arr.sum()} voxels from NNUNET_OR_Processed_Lesions_MR")
-            except Exception as e_ml:
-                print(f"    [WARN] Fallback MR lesion extraction error: {e_ml}")
+    # Native MRI lesion source is strictly Label 9 of prostate_segmentation.nii.gz
+    # (Dataset501_ProstateZonesLesions). Do NOT fall back to NNUNET_OR_Processed_Lesions_MR.seg.nrrd,
+    # which is PET nnUNet projected into CT space rather than native MRI lesion segmentation.
+    mr_seg_names_raw = {}
 
     # Resample Primary T2 (TP 1)
     t2_arr = None
@@ -1366,6 +1422,8 @@ def process_case(pat_id, gpu_id, xnat):
     bone_atlas_f = flip_y(bone_atlas)
     skellytour_f = flip_y(skellytour)
     edge_comb_f = flip_y(edge_comb)
+    edge_ct_f = flip_y(edge_ct)
+    edge_pet_f = flip_y(edge_pet)
     diff_comb_f = flip_y(diff_comb)
     diff_ct_f = flip_y(diff_ct)
     diff_pet_f = flip_y(diff_pet)
@@ -1379,18 +1437,34 @@ def process_case(pat_id, gpu_id, xnat):
         s["arr_f"] = flip_y(s["arr"])
         s["diff_f"] = flip_y(s["diff"])
 
-    # Filter physiological lacrimal gland uptake lesions & compute anatomical organ mapping
+    # Unconditionally remove edge-slice technical artifact lesions (first 2 and last 2 Z slices)
     for i in [int(x) for x in np.unique(ct_les_f) if x > 0]:
         if str(i) not in ct_seg_names:
             ct_seg_names[str(i)] = f"Lesion {i}"
-    removed_lac, ct_labels, ct_organs = filter_lacrimal_lesions(
-        ct_les_f, max_anat_f, anat_labels, seg_names=ct_seg_names
-    )
-    if removed_lac:
-        print(f"    [PHYSIOLOGICAL FILTER] Removed {len(removed_lac)} lacrimal gland lesions: {removed_lac}")
-        for r_lid in removed_lac:
+    rm_edge_ct = remove_edge_slice_lesions(ct_les_f, edge_slices=2)
+    if rm_edge_ct:
+        print(f"    [EDGE SLICE FILTER] Removed {len(rm_edge_ct)} edge-slice CT lesions (first/last 2 Z): {rm_edge_ct}")
+        for r_lid in rm_edge_ct:
             ct_seg_names.pop(str(r_lid), None)
-    mr_seg_names = {"1": "Prostate Primary Lesion"} if mr_gold_f.any() else {}
+    mr_seg_names = (
+        {str(lid): mr_seg_names_raw.get(str(lid), "Prostate Primary Lesion" if lid == 1 else f"Lesion {lid}")
+         for lid in [int(x) for x in np.unique(mr_gold_f) if x > 0]}
+        if mr_gold_f.any() else {}
+    )
+    if mr_gold_f.any():
+        rm_edge_mr = remove_edge_slice_lesions(mr_gold_f, edge_slices=2)
+        for r_mlid in rm_edge_mr:
+            mr_seg_names.pop(str(r_mlid), None)
+        rm_lac_mr, mr_labels, mr_organs = filter_lacrimal_lesions(
+            mr_gold_f, max_anat_f, anat_labels, seg_names=mr_seg_names
+        )
+        for r_mlid in rm_lac_mr:
+            mr_seg_names.pop(str(r_mlid), None)
+        if not mr_seg_names_raw and mr_labels == [1]:
+            mr_organs = {"1": "Prostate"}
+            mr_seg_names = {"1": "Prostate Primary Lesion"}
+    else:
+        mr_labels, mr_organs, mr_seg_names = [], {}, {}
 
     # 1-based centroids
     centroids = {}
@@ -1398,43 +1472,47 @@ def process_case(pat_id, gpu_id, xnat):
         zc, yc, xc = np.mean(np.argwhere(ct_les_f == lid), axis=0)
         centroids[f"tp0_lid{lid}"] = np.array([round(xc) + 1, round(yc) + 1, round(zc) + 1], dtype=np.int32)
 
-    if mr_gold_f.any():
-        zc, yc, xc = np.mean(np.argwhere(mr_gold_f == 1), axis=0)
-        centroids["tp1_lid1"] = np.array([round(xc) + 1, round(yc) + 1, round(zc) + 1], dtype=np.int32)
+    for mlid in mr_labels:
+        zc, yc, xc = np.mean(np.argwhere(mr_gold_f == mlid), axis=0)
+        centroids[f"tp1_lid{mlid}"] = np.array([round(xc) + 1, round(yc) + 1, round(zc) + 1], dtype=np.int32)
 
     all_mr_tps = [1] + [s["tp_idx"] for s in extra_mri_series]
     organ_mapping = {"0": ct_organs}
     segment_names_dict = {"0": ct_seg_names}
     for tp_i in all_mr_tps:
-        organ_mapping[str(tp_i)] = {"1": "Prostate"} if mr_gold_f.any() else {}
-        segment_names_dict[str(tp_i)] = mr_seg_names if mr_gold_f.any() else {}
+        organ_mapping[str(tp_i)] = dict(mr_organs) if mr_labels else {}
+        segment_names_dict[str(tp_i)] = dict(mr_seg_names) if mr_labels else {}
 
     matches = []
-    best_ov_lid = None
-    best_ov_cnt = 0
-    if mr_gold_f.any() and ct_labels:
-        for lid in ct_labels:
-            ov = int(np.sum((mr_gold_f == 1) & (ct_les_f == lid)))
-            if ov > best_ov_cnt:
-                best_ov_cnt = ov
-                best_ov_lid = lid
+    mr_best_parent = {}
+    if mr_labels and ct_labels:
+        for mlid in mr_labels:
+            mr_m = (mr_gold_f == mlid)
+            best_lid, best_cnt = None, 0
+            for lid in ct_labels:
+                ov = int(np.sum(mr_m & (ct_les_f == lid)))
+                if ov > best_cnt:
+                    best_cnt, best_lid = ov, lid
+            if best_lid is not None:
+                mr_best_parent.setdefault(best_lid, []).append(mlid)
     for lid in ct_labels:
-        children = []
-        if mr_gold_f.any() and lid == best_ov_lid:
-            children.append({
+        children = [
+            {
                 "name": "PET_Lesions_1",
-                "raw_lesion": "Segment_1",
+                "raw_lesion": f"Segment_{mlid}",
                 "node": "child",
                 "group_id": int(lid),
-                "lesion": "Prostate Primary Lesion"
-            })
+                "lesion": mr_seg_names.get(str(mlid), "Prostate Primary Lesion"),
+            }
+            for mlid in mr_best_parent.get(lid, [])
+        ]
         matches.append({
             "name": "PET_Lesions_0",
             "raw_lesion": f"Segment_{lid}",
             "node": "parent",
             "group_id": int(lid),
             "lesion": ct_seg_names.get(str(lid), f"Lesion {lid}"),
-            "children": children
+            "children": children,
         })
 
     scene_hierarchy = [
@@ -1495,7 +1573,9 @@ def process_case(pat_id, gpu_id, xnat):
         _set_spatial_attrs(b.create_dataset("max_anatomy.nii.gz", data=max_anat_f, compression="gzip", compression_opts=4, shuffle=True))
         _set_spatial_attrs(b.create_dataset("skellytour.nii.gz", data=skellytour_f, compression="gzip", compression_opts=4, shuffle=True))
         _set_spatial_attrs(b.create_dataset("diffusivity", data=diff_comb_f, compression="gzip", compression_opts=4, shuffle=True))
+        _set_spatial_attrs(b.create_dataset("edge_ct", data=edge_ct_f, compression="gzip", compression_opts=4, shuffle=True))
         _set_spatial_attrs(b.create_dataset("diffusivity_ct", data=diff_ct_f, compression="gzip", compression_opts=4, shuffle=True))
+        _set_spatial_attrs(b.create_dataset("edge_pet", data=edge_pet_f, compression="gzip", compression_opts=4, shuffle=True))
         _set_spatial_attrs(b.create_dataset("diffusivity_pet", data=diff_pet_f, compression="gzip", compression_opts=4, shuffle=True))
 
         # ATLAS Group
@@ -1535,12 +1615,38 @@ def process_case(pat_id, gpu_id, xnat):
         m_grp.create_dataset("max_anatomy_labels.json", data=json.dumps(anat_labels))
         m_grp.create_dataset("prostate_anatomy_labels.json", data=json.dumps(PROSTATE_ZONE_LABELS))
         m_grp.create_dataset("custom_options.json", data=json.dumps({"metadata_version": "2.0"}))
-        m_grp.create_dataset("metadata.json", data=json.dumps({"patient_id": pat_id, "case_id": pat_id}))
+        meta_payload = {"patient_id": pat_id, "case_id": pat_id}
+        try:
+            from populate_radiological_reports import EXCEL_PATH as _RPT_XLSX, load_excel_reports as _load_rpt, build_metadata_dict as _build_rpt
+            _pid_m = re.search(r"\d+", pat_id)
+            if _pid_m and os.path.isfile(_RPT_XLSX):
+                _recs = _load_rpt(_RPT_XLSX)
+                _pid = int(_pid_m.group())
+                if _pid in _recs:
+                    meta_payload = _build_rpt(meta_payload, pat_id, _recs[_pid], {})
+        except Exception as _re:
+            print(f" [GPU {gpu_id}] Note: radiological report metadata skipped for {pat_id}: {_re}")
+        m_grp.create_dataset("metadata.json", data=json.dumps(meta_payload, ensure_ascii=False))
+        m_grp.create_dataset("modification_status.json", data=json.dumps({"manually_modified": False, "modified_by": "", "last_modified": ""}))
         m_grp.create_dataset("scene_hierarchy.json", data=json.dumps(scene_hierarchy))
         m_grp.create_dataset("organ_mapping", data=json.dumps(organ_mapping))
         m_grp.create_dataset("segment_names.json", data=json.dumps(segment_names_dict))
 
+    try:
+        api_base, api_key, llm_model = get_llm_config()
+        if api_key:
+            compute_and_store_semantic_filter(tmp_h5, api_base, api_key, model=llm_model, force=True)
+    except Exception as _sfe:
+        print(f" [GPU {gpu_id}] Note: semantic_filter skipped for {pat_id}: {_sfe}")
+
     os.replace(tmp_h5, out_h5)
+
+    try:
+        cache_dir = os.path.join(os.path.expanduser("~/.medeye3d/xnat_cache/Prostata_bimodal_PIPELINE"), subj_label)
+        os.makedirs(cache_dir, exist_ok=True)
+        shutil.copyfile(out_h5, os.path.join(cache_dir, f"{subj_label}_preprocessed.h5"))
+    except Exception as _ce:
+        print(f"    [WARN] Failed to sync xnat_cache for {pat_id}: {_ce}")
 
     # Step 10: Headless Verification
     with h5py.File(out_h5, "r") as test_h5:
@@ -1587,7 +1693,10 @@ def upload_case_worker(upload_q, xnat, progress, progress_lock):
             "status": "PREPROCESSED",
             "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "patient_id": pat_id,
-            "subject_id": subj_id
+            "subject_id": subj_id,
+            "manually_modified": False,
+            "modified_by": "",
+            "last_modified": ""
         })
         xnat.request("PUT", f"/data/projects/{PROJ_ID}/subjects/{subj_id}/resources/ANNOTATIONS/files/status.json?overwrite=true&inbody=true",
                      data=status_payload, headers={"Content-Type": "application/json"})

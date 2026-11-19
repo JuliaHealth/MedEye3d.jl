@@ -54,6 +54,11 @@ from cads_anatomy_wiring import (
     filter_lacrimal_lesions,
     load_resampled_cads_arrays,
     merge_cads_structures,
+    remove_edge_slice_lesions,
+)
+from apply_edge_slices_and_semantic_filter import (
+    compute_and_store_semantic_filter,
+    get_llm_config,
 )
 import register_ct_mri as reg_mod
 
@@ -176,8 +181,54 @@ def _get_mri_bones_and_prostate(raw_dir: str, gpu_id: int = 1, allow_totalseg: b
         if p_bin.sum() < 100:
             p_bin = (p_arr > 0).astype(np.uint8)
         if p_bin.any():
-            mr_pros_img = sitk.GetImageFromArray(p_bin)
-            mr_pros_img.CopyInformation(p_img)
+            p_vol = float(p_bin.sum()) * float(np.prod(p_img.GetSpacing()))
+            ts_vol = (
+                float((sitk.GetArrayViewFromImage(mr_pros_img) > 0).sum()) * float(np.prod(mr_pros_img.GetSpacing()))
+                if mr_pros_img is not None
+                else 0.0
+            )
+            # Only replace totalseg_mr_ml prostate when totalseg is missing or prostate_segmentation is a full gland (>=50% of totalseg volume)
+            if mr_pros_img is None or (ts_vol > 0 and p_vol >= 0.5 * ts_vol):
+                mr_pros_img = sitk.GetImageFromArray(p_bin)
+                mr_pros_img.CopyInformation(p_img)
+
+    # Fallback: if small-FOV T2 missed >= 3 pelvic bones, segment larger-FOV axial T1 for Stage 1 bone landmarks
+    if len(mr_bones) < 3 and allow_totalseg:
+        m = {
+            fn: os.path.join(raw_dir, fn)
+            for fn in os.listdir(raw_dir)
+            if fn.endswith(".nii.gz") and not fn.startswith(("Fixed_CT", "SUV", "CT", "totalseg"))
+            and classify_mri_modality(fn)
+        }
+        ranked = select_ranked_mri_sequences(m)
+        t1_cands = [s["item"] for s in ranked if s["mod"] == "T1" and s["plane"] == "ax"]
+        if t1_cands and os.path.isfile(t1_cands[0]):
+            ts_t1_path = os.path.join(raw_dir, "totalseg_mr_t1_ml.nii.gz")
+            if not os.path.isfile(ts_t1_path):
+                ts_bin = next(
+                    (p for p in (
+                        "/mnt/big/project_ssd/project_ssd/lymph_node_rules/for_joanna/.local/conda/envs/seg/bin/TotalSegmentator",
+                        "/usr/local/bin/TotalSegmentator",
+                    ) if os.path.isfile(p)),
+                    None,
+                ) or shutil.which("TotalSegmentator") or "TotalSegmentator"
+                env_ts = os.environ.copy()
+                env_ts["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+                env_ts["TOTALSEG_LICENSE_NUMBER"] = os.environ.get("TOTALSEG_LICENSE_NUMBER", os.environ.get("TOTALSEG_LICENSE", ""))
+                print(f"    Running TotalSegmentator MR T1 fallback on {os.path.basename(t1_cands[0])} (GPU {gpu_id})...")
+                subprocess.run(
+                    [ts_bin, "-i", t1_cands[0], "-o", ts_t1_path, "-ta", "total_mr", "--ml", "--fast", "--quiet"],
+                    env=env_ts,
+                    check=True,
+                )
+            if os.path.isfile(ts_t1_path):
+                t1_im = sitk.ReadImage(ts_t1_path)
+                t1_arr = sitk.GetArrayFromImage(t1_im)
+                for lbl_id, bname in ((36, "femur_left"), (37, "femur_right"), (38, "hip_left"), (39, "hip_right")):
+                    if bname not in mr_bones:
+                        pts_m = _pts_from_mask(t1_im, t1_arr == lbl_id)
+                        if len(pts_m) > 0:
+                            mr_bones[bname] = _medial_centroid(pts_m)
 
     return mr_bones, mr_pros_img
 
@@ -333,7 +384,7 @@ def verify_case(pat_id: str) -> dict:
     }
 
 
-def repair_case(pat_id: str, subj_info: dict, xnat: XnatManager, gpu_id: int = 1, upload: bool = True) -> dict:
+def repair_case(pat_id: str, subj_info: dict, xnat: XnatManager, gpu_id: int = 1, upload: bool = True, force_mri: bool = False, force_tfm: bool = False) -> dict:
     case_dir = os.path.join(CASES_DIR, pat_id)
     raw_dir = os.path.join(case_dir, "raw")
     h5_path = os.path.join(case_dir, "preprocessed_volumes.h5")
@@ -357,7 +408,7 @@ def repair_case(pat_id: str, subj_info: dict, xnat: XnatManager, gpu_id: int = 1
         )
 
     tfm_updated = False
-    if cur_tfm_path is None or mr_pros_img is None or (cur_dice is not None and cur_dice < 0.60):
+    if cur_tfm_path is None or force_tfm or mr_pros_img is None or (cur_dice is not None and cur_dice < 0.60):
         # Load/compute totalseg_mr_ml.nii.gz only when registration needs recomputing or verifying
         mr_bones, mr_pros_img = _get_mri_bones_and_prostate(raw_dir, gpu_id=gpu_id, allow_totalseg=True)
         if cur_tfm_path and ct_pros_img is not None and mr_pros_img is not None and cur_dice is None:
@@ -365,7 +416,7 @@ def repair_case(pat_id: str, subj_info: dict, xnat: XnatManager, gpu_id: int = 1
             cur_dice = reg_mod.compute_dice(
                 ct_pros_img, reg_mod.resample_mri(mr_pros_img, ct_img, cur_tfm, sitk.sitkNearestNeighbor)
             )
-    if cur_tfm_path is None or (cur_dice is not None and cur_dice < 0.60):
+    if cur_tfm_path is None or force_tfm or (cur_dice is not None and cur_dice < 0.60):
         if ct_pros_img is not None and mr_pros_img is not None:
             print(f"  [{pat_id}] Recomputing 4-Medial-Bone-Landmark + Centered SWD (prev dice={cur_dice})...")
             final_tfm, new_dice = _compute_centered_swd_registration(
@@ -384,7 +435,7 @@ def repair_case(pat_id: str, subj_info: dict, xnat: XnatManager, gpu_id: int = 1
             sitk.WriteTransform(final_tfm, swd_tfm_path)
 
     # Check if HDF5 MRI needs re-resampling (including stacked DWI/DCE misaligned relative to T2)
-    need_mri_resample = tfm_updated
+    need_mri_resample = tfm_updated or force_mri
     with h5py.File(h5_path, "r") as f:
         pf = int(f["_meta_/preflipped"][()]) if "_meta_/preflipped" in f else 1
         t2_z_mean = None
@@ -422,15 +473,6 @@ def repair_case(pat_id: str, subj_info: dict, xnat: XnatManager, gpu_id: int = 1
             p8_mask = np.isin(p_arr, list(range(1, 9)))
             mri_anat_unflipped[p8_mask] = p_arr[p8_mask]
             mr_gold_unflipped = (p_arr == 9).astype(np.int16)
-        if not mr_gold_unflipped.any():
-            mr_les_p = os.path.join(raw_dir, "NNUNET_OR_Processed_Lesions_MR.seg.nrrd")
-            if os.path.isfile(mr_les_p):
-                ml_img = sitk.ReadImage(mr_les_p)
-                use_t = sitk.Transform() if ml_img.GetSize() == ct_img.GetSize() else final_tfm
-                res_ml = sitk.Resample(ml_img, ct_img, use_t, sitk.sitkNearestNeighbor, 0, sitk.sitkInt16)
-                ml_arr = sitk.GetArrayFromImage(res_ml).astype(np.int16)
-                if ml_arr.any():
-                    mr_gold_unflipped = (ml_arr > 0).astype(np.int16)
 
         mapping, _ = _build_tp_to_raw_map(raw_dir, h5_path)
         ref_t2_im = next((sitk.ReadImage(seq["item"]) for _, _, _, mod, seq in mapping if mod == "T2"), None)
@@ -519,17 +561,22 @@ def repair_case(pat_id: str, subj_info: dict, xnat: XnatManager, gpu_id: int = 1
             del hf["_meta_/max_anatomy_labels.json"]
         hf["_meta_"].create_dataset("max_anatomy_labels.json", data=json.dumps(anat_labels))
 
-        # Re-map lesions & filter physiological lacrimal gland uptake
+        # Re-map lesions, strip first/last 2 Z-slice technical artifacts & filter lacrimal gland uptake
         b = hf["BASELINE"]
         ct_les_f = b["PET_Lesions_0.nii.gz"][:].astype(np.int16)
         sn_raw = hf["_meta_/segment_names.json"][()]
         seg_names_dict = json.loads(sn_raw.decode() if isinstance(sn_raw, bytes) else sn_raw)
         ct_seg_names = seg_names_dict.get("0", {})
 
+        removed_edge = remove_edge_slice_lesions(ct_les_f, edge_slices=2)
+        if removed_edge:
+            for r_lid in removed_edge:
+                ct_seg_names.pop(str(r_lid), None)
+
         removed_lac, ct_labels, ct_organs = filter_lacrimal_lesions(
             ct_les_f, merged_ma, anat_labels, seg_names=ct_seg_names
         )
-        if removed_lac:
+        if removed_lac or removed_edge:
             for r_lid in removed_lac:
                 ct_seg_names.pop(str(r_lid), None)
             del b["PET_Lesions_0.nii.gz"]
@@ -539,8 +586,21 @@ def repair_case(pat_id: str, subj_info: dict, xnat: XnatManager, gpu_id: int = 1
             ds_l0.attrs["direction"] = dir_arr
 
         mr_gold_f = np.zeros_like(ct_les_f)
-        if "TFM_Transform_FollowUp_to_Baseline_1.tfm/PET_Lesions_1.nii.gz" in hf:
-            mr_gold_f = hf["TFM_Transform_FollowUp_to_Baseline_1.tfm/PET_Lesions_1.nii.gz"][:]
+        for tk in sorted([k for k in hf.keys() if k.startswith("TFM_Transform_FollowUp_to_Baseline_")]):
+            tp_num = tk.replace("TFM_Transform_FollowUp_to_Baseline_", "").replace(".tfm", "")
+            lk = f"PET_Lesions_{tp_num}.nii.gz"
+            if lk in hf[tk]:
+                mds = hf[tk][lk]
+                mattrs = {a: mds.attrs[a] for a in ("spacing", "origin", "direction") if a in mds.attrs}
+                marr = mds[:].astype(np.int16)
+                if marr.shape[0] > 4 and (np.any(marr[:2] > 0) or np.any(marr[-2:] > 0)):
+                    remove_edge_slice_lesions(marr, edge_slices=2)
+                    del hf[tk][lk]
+                    new_mds = hf[tk].create_dataset(lk, data=marr, compression="gzip", compression_opts=1)
+                    for ak, av in mattrs.items():
+                        new_mds.attrs[ak] = av
+                if tk.endswith("_1.tfm"):
+                    mr_gold_f = marr
         mr_seg_names = {"1": "Prostate Primary Lesion"} if mr_gold_f.any() else {}
 
         # Update CENTROIDS cleanly
@@ -605,6 +665,13 @@ def repair_case(pat_id: str, subj_info: dict, xnat: XnatManager, gpu_id: int = 1
                 del m_grp[k_meta]
             m_grp.create_dataset(k_meta, data=val_str)
 
+    try:
+        api_base, api_key, llm_model = get_llm_config()
+        if api_key:
+            compute_and_store_semantic_filter(out_h5, api_base, api_key, model=llm_model, force=True)
+    except Exception as _sfe:
+        print(f"    [{pat_id}] Note: semantic_filter update skipped: {_sfe}")
+
     # Sync local xnat_cache if present
     subj_label = subj_info.get("subj_label", "")
     subj_id = subj_info.get("subj_id", "")
@@ -640,6 +707,8 @@ def main():
     parser.add_argument("--cases", nargs="*", help="Specific Pat IDs (e.g. Pat26 Pat51)")
     parser.add_argument("--verify-only", action="store_true", help="Audit without modifying files")
     parser.add_argument("--no-upload", action="store_true", help="Do not upload to XNAT")
+    parser.add_argument("--force-mri", action="store_true", help="Force re-resampling all MRI sequences into HDF5")
+    parser.add_argument("--force-tfm", action="store_true", help="Force recomputing Stage 1+2 CT-MRI transform")
     parser.add_argument("--gpu", type=int, default=1, help="GPU ID for TotalSegmentator/SWD")
     args = parser.parse_args()
 
@@ -674,7 +743,10 @@ def main():
     ok_cnt, err_cnt = 0, 0
     for idx, pat in enumerate(targets, 1):
         try:
-            res = repair_case(pat, census.get(pat, {}), xnat, gpu_id=args.gpu, upload=not args.no_upload)
+            res = repair_case(
+                pat, census.get(pat, {}), xnat, gpu_id=args.gpu,
+                upload=not args.no_upload, force_mri=args.force_mri, force_tfm=args.force_tfm,
+            )
             if res["status"] != "SKIP":
                 ok_cnt += 1
                 print(

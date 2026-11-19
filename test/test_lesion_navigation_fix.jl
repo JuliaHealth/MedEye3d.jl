@@ -376,6 +376,48 @@ import MedEye3d.MakieEvents
         empty!(MEH.mri_compare_tps)
     end
 
+    # Test 5b: Semantic Filter GUI Toggle Button + Dropdown Filtering in Radiological Report Section
+    btn_sf = LMW._lmw_observables[:btn_semantic_filter]
+    lbl_sf = LMW._lmw_observables[:lbl_semantic_filter]
+    @test occursin("OFF", btn_sf.label[])
+    @test MEH.semantic_filter_active[] == false
+
+    prev_sf_mentions = copy(MEH.semantic_mentioned_organs[])
+    prev_sf_allowed = deepcopy(MEH.semantic_allowed_lesion_ids)
+    prev_sf_tp = MEH.current_tp_index[]
+    try
+        lock(MEH._tp_cache_lock) do
+            empty!(MEH.tp_data_cache)
+        end
+        MEH.current_tp_index[] = 0
+        empty!(LMW._cached_lesion_ids)
+        LMW._cached_lesion_ids[0] = collect(1:25)
+        MEH.semantic_mentioned_organs[] = ["prostate"]
+        empty!(MEH.semantic_allowed_lesion_ids)
+        MEH.semantic_allowed_lesion_ids[0] = Set([5])
+
+        # Toggle ON via actual button click -> dropdown filters down to lesion 5 (prostate) only
+        btn_sf.clicks[] = btn_sf.clicks[] + 1
+        @test MEH.semantic_filter_active[] == true
+        @test occursin("ON", btn_sf.label[])
+        @test occursin("1 report organs", lbl_sf.text[])
+        kept_ids = [LMW.parse_lesion_id(o) for o in lesion_ids[]]
+        @test kept_ids == [5]
+
+        # Toggle OFF via actual button click -> all 25 lesions restored in dropdown
+        btn_sf.clicks[] = btn_sf.clicks[] + 1
+        @test MEH.semantic_filter_active[] == false
+        @test occursin("OFF", btn_sf.label[])
+        restored_ids = [LMW.parse_lesion_id(o) for o in lesion_ids[]]
+        @test length(restored_ids) == 25
+    finally
+        MEH.current_tp_index[] = prev_sf_tp
+        MEH.semantic_filter_active[] = false
+        MEH.semantic_mentioned_organs[] = prev_sf_mentions
+        empty!(MEH.semantic_allowed_lesion_ids)
+        merge!(MEH.semantic_allowed_lesion_ids, prev_sf_allowed)
+    end
+
     # Cleanup shared MEH state
     lock(MEH._tp_cache_lock) do
         empty!(MEH.tp_data_cache)
@@ -448,4 +490,516 @@ end
     # 4. E-PSMA TNM staging for seminal_vesicle and lacrimal_gland
     @test ESR.classify_mitnm("seminal_vesicle", "", "") == "miT3b"
     @test ESR.classify_mitnm("lacrimal_gland_left", "", "") == "Artifact"
+end
+
+@testset "Test 9: Non-Compare Startup & Radiological Report Reload" begin
+    lmw_src = read(joinpath(@__DIR__, "..", "src", "display", "LesionMetadataWindow.jl"), String)
+    app_src = read(joinpath(@__DIR__, "..", "src", "packaging", "AppMain.jl"), String)
+
+    # 1. refresh_tp_dropdown_options! must guard menu_tp_right.options[] with is_syncing_tp[] = true
+    m_refresh = match(r"function refresh_tp_dropdown_options!\(\)(.*?)sync_tp_menus_to_current!\(\)"s, lmw_src)
+    @test m_refresh !== nothing
+    @test occursin("is_syncing_tp[] = true", m_refresh.captures[1])
+    @test occursin("is_syncing_tp[] = false", m_refresh.captures[1])
+
+    # 2. AppMain startup must explicitly enforce non-compare mode
+    @test occursin("if makie_win.set_compare_mode[]", app_src)
+    @test occursin("put!(mainViewer.channel, CompareTimePointsEvent(false))", app_src)
+
+    # 3. XNAT case switch must reload tp_descriptions and tp_english_descriptions & refresh report UI
+    @test occursin("empty!(MEH.tp_descriptions)", app_src)
+    @test occursin("empty!(MEH.tp_english_descriptions)", app_src)
+    @test occursin("obs_d[:update_old_report_display]()", app_src)
+end
+
+@testset "Test 10: F1/F2/F3 CT Windowing Must Affect Only CT (Never PET or MRI)" begin
+    old_tp_mods = copy(MEH.tp_modalities)
+    old_win = copy(MEH.current_windowing)
+    old_cur_tp = MEH.current_tp_index[]
+    old_cmp = MEH.compare_mode[]
+    old_cmp_right = MEH.compare_right_tp[]
+    old_mri_cmp = MEH.mri_compare_mode[]
+    old_mri_main = MEH.mri_main_multimodal_mode[]
+
+    try
+        empty!(MEH.tp_modalities)
+        MEH.tp_modalities[0] = "PET"   # Baseline PET/CT
+        MEH.tp_modalities[1] = "T2"    # MRI Follow-Up
+        MEH.current_tp_index[] = 0
+        MEH.compare_mode[] = true
+        MEH.compare_right_tp[] = 1
+        MEH.mri_compare_mode[] = false
+        MEH.mri_main_multimodal_mode[] = false
+
+        function make_win_state(tp_i, specs)
+            calc = MEH.CalcDimsStruct(mainImageQuadVert = ones(Float32, 32), mainQuadVertSize = 128)
+            scr = MEH.FullScrollableDat(dimensionToScroll=3, slicesNumber=Int32(10), currentTpIndex=tp_i)
+            disp = MEH.forDisplayObjects(listOfTextSpecifications=specs)
+            return MEH.StateDataFields(calcDimsStruct=calc, onScrollData=scr, mainForDisplayObjects=disp, currentDisplayedSlice=1)
+        end
+
+        # Panel 1: Fused CT + PET overlay at TP 0
+        p1_ct = MEH.TextureSpec{Float32}(name="CT", isMainImage=true, studyType="CT", minAndMaxValue=Float32[-160, 240])
+        p1_pet = MEH.TextureSpec{Float32}(name="PET", isMainImage=false, isNuclearMask=true, studyType="PET", minAndMaxValue=Float32[0, 10])
+        # Panel 2: Pure PET panel at TP 0 (isMainImage=true, isNuclearMask=false, studyType="" like AppMain)
+        p2_pet = MEH.TextureSpec{Float32}(name="PET", isMainImage=true, isNuclearMask=false, studyType="", minAndMaxValue=Float32[0, 10])
+        # Panel 3: MRI panel at TP 1 (reuses TextureSpec name="CT", studyType="CT" for MRI display!)
+        p3_mri = MEH.TextureSpec{Float32}(name="CT", isMainImage=true, studyType="CT", minAndMaxValue=Float32[0, 1000])
+        p3_pet = MEH.TextureSpec{Float32}(name="PET", isMainImage=false, isNuclearMask=true, studyType="PET", minAndMaxValue=Float32[0, 10])
+
+        states = [
+            make_win_state(0, [p1_ct, p1_pet]),
+            make_win_state(0, [p2_pet]),
+            make_win_state(0, [p1_ct, p1_pet]),
+            make_win_state(0, [p1_ct, p1_pet]),
+            make_win_state(0, [p1_ct, p1_pet]),
+            make_win_state(1, [p3_mri, p3_pet]),  # Panel 6 compares MRI TP 1
+        ]
+
+        # Simulate F2/F3 presets (which ReactToKeyboard dispatches as WindowingEvent("CT", ...))
+        MEH.reactToWindowing(MakieEvents.WindowingEvent("CT", -450.0f0, 1050.0f0), states)
+        @test p1_ct.minAndMaxValue == Float32[-450, 1050]
+        @test p1_pet.minAndMaxValue == Float32[0, 10]
+        @test p2_pet.minAndMaxValue == Float32[0, 10]
+        @test p3_mri.minAndMaxValue == Float32[0, 1000]
+        @test p3_pet.minAndMaxValue == Float32[0, 10]
+
+        MEH.reactToWindowing(MakieEvents.WindowingEvent("CT", -1350.0f0, 150.0f0), states)
+        @test p1_ct.minAndMaxValue == Float32[-1350, 150]
+        @test p1_pet.minAndMaxValue == Float32[0, 10]
+        @test p2_pet.minAndMaxValue == Float32[0, 10]
+        @test p3_mri.minAndMaxValue == Float32[0, 1000]
+
+        # WindowControll legacy F1/F2/F3 path must also never alter PET
+        WC = MedEye3d.WindowControll
+        WC.setTextureWindow(p2_pet, states[2], MedEye3d.DataStructs.WindowControlStruct(letterCode="F1"))
+        WC.setTextureWindow(p2_pet, states[2], MedEye3d.DataStructs.WindowControlStruct(letterCode="F2"))
+        WC.setTextureWindow(p2_pet, states[2], MedEye3d.DataStructs.WindowControlStruct(letterCode="F3"))
+        @test p2_pet.minAndMaxValue == Float32[0, 10]
+    finally
+        empty!(MEH.tp_modalities); merge!(MEH.tp_modalities, old_tp_mods)
+        empty!(MEH.current_windowing); merge!(MEH.current_windowing, old_win)
+        MEH.current_tp_index[] = old_cur_tp
+        MEH.compare_mode[] = old_cmp
+        MEH.compare_right_tp[] = old_cmp_right
+        MEH.mri_compare_mode[] = old_mri_cmp
+        MEH.mri_main_multimodal_mode[] = old_mri_main
+    end
+end
+
+@testset "Test 11: Default Prostata_bimodal_PIPELINE Project & Typeable Patient Picker Overlap Search" begin
+    # 1. Default XNAT project must be Prostata_bimodal_PIPELINE
+    @test LMW.ALLOWED_XNAT_PROJECTS[1] == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE"
+    proj_menu = LMW._lmw_observables[:xnat_proj_menu]
+    @test proj_menu.selection[] == "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE"
+
+    # 2. Best-overlap ranking prefers exact/tightest identifier match first
+    sample_subjs = [
+        "[RAW] FDM_DPI-2024-7-KRN_Prostata_bimodal__PETPSMA_0__Pat127",
+        "[PRE] FDM_DPI-2024-7-KRN_Prostata_bimodal__PETPSMA_0__Pat27",
+        "[OK: alice] FDM_DPI-2024-7-KRN_Prostata_bimodal__PETPSMA_0__Pat2",
+        "[PRE] FDM_DPI-2024-7-KRN_Prostata_bimodal__PETPSMA_0__Pat20",
+        "[PRE] FDM_DPI-2024-7-KRN_Prostata_bimodal__PETPSMA_0__Pat3",
+    ]
+    rank_fn = LMW._lmw_observables[:rank_best_overlap]
+    ranked_27 = rank_fn("Pat27", sample_subjs; limit=10)
+    @test !isempty(ranked_27)
+    @test occursin("__Pat27", ranked_27[1])
+    @test !any(s -> occursin("__Pat3", s), ranked_27)
+
+    ranked_2 = rank_fn("Pat2", sample_subjs; limit=10)
+    @test occursin("__Pat2", ranked_2[1]) && !occursin("__Pat20", ranked_2[1])
+
+    # 2b. Subject ID badge stripping handles [OK: user] colons cleanly
+    @test LMW._parse_subject_id("[OK: jm] FDM_DPI-2024-7-KRN_Prostata_bimodal__PETPSMA_0__Pat1") == "FDM_DPI-2024-7-KRN_Prostata_bimodal__PETPSMA_0__Pat1"
+    @test LMW._parse_subject_id("[PRE] FDM_DPI-2024-7-KRN_Prostata_bimodal__PETPSMA_0__Pat27") == "FDM_DPI-2024-7-KRN_Prostata_bimodal__PETPSMA_0__Pat27"
+    @test LMW._parse_subject_id("[OK] pat6 (PROCESSED)") == "pat6"
+
+    # 3. In-memory FTS5 index + live searchable_menu typing narrows patient dropdown options
+    LMW._build_fts!("patient_fts", sample_subjs)
+    fts_hits = LMW.fts_search("patient_fts", "pat27"; limit=20)
+    @test any(s -> occursin("Pat27", s), fts_hits)
+
+    subj_menu = LMW._lmw_observables[:xnat_subj_menu]
+    cache = LMW._lmw_observables[:raw_subjects_cache]
+    filt_fn = LMW._lmw_observables[:filter_and_set_subjects]
+    prev_cache = get(cache, "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE", nothing)
+    try
+        cache["FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE"] = copy(sample_subjs)
+        filt_fn(query = "")
+        @test length(subj_menu.options[]) == 5
+
+        # Typing in patient search textbox narrows and ranks options
+        filt_fn(query = "Pat27")
+        @test occursin("__Pat27", subj_menu.options[][1])
+        @test length(subj_menu.options[]) <= 2
+
+        # Reset full list, open searchable_menu dropdown and type directly into menu
+        filt_fn(query = "")
+        subj_menu.is_open[] = true
+        for ch in ('p', 'a', 't', '2', '7')
+            events(subj_menu.blockscene).unicode_input[] = ch
+        end
+        sleep(0.25)  # wait past 80ms debounce
+        @test occursin("__Pat27", subj_menu.options[][1])
+        @test length(subj_menu.options[]) <= 2
+        subj_menu.is_open[] = false
+    finally
+        if prev_cache === nothing
+            delete!(cache, "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE")
+        else
+            cache["FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE"] = prev_cache
+        end
+    end
+end
+
+@testset "Test 12: Case Switch Pat51 -> Pat1 Clears Stale Organ Mapping & Keeps Quadriceps Femoris Left" begin
+    import HDF5, JSON
+
+    tmp_pat1_h5 = tempname() * "_Pat1_switch_test.h5"
+    old_h5_path = MEH.h5_path_ref[]
+    old_h5_save = MEH.h5_save_path_ref[]
+    old_pat_id = MEH.patient_id[]
+    try
+        HDF5.h5open(tmp_pat1_h5, "w") do f
+            mg = HDF5.create_group(f, "_meta_")
+            mg["organ_mapping"] = JSON.json(Dict(
+                "0" => Dict("3" => "quadriceps_femoris_left", "4" => "gluteus_maximus_left")
+            ))
+            mg["segment_names.json"] = JSON.json(Dict(
+                "0" => Dict("3" => "NNUNET_OR_TP_unknown_3_CT", "4" => "gluteus_maximus_left")
+            ))
+            mg["max_anatomy_labels.json"] = JSON.json(Dict(
+                "9" => "quadriceps_femoris_left", "51" => "gluteus_maximus_left"
+            ))
+            cg = HDF5.create_group(f, "CENTROIDS")
+            cg["tp0_lid3"] = Int32[120, 140, 12]
+            cg["tp0_lid4"] = Int32[110, 160, 25]
+        end
+
+        # Simulate stale in-memory state from Pat51 where lesion 3 was Prostate
+        MEH.current_tp_index[] = 0
+        MEH.tp_organ_mapping[0] = Dict(3 => "nvseg_prostate", 4 => "prostate")
+        MEH.global_organ_mapping[] = Dict(3 => "nvseg_prostate", 4 => "prostate")
+        MEH.tp_segment_names[0] = Dict(3 => "Prostate Gland", 4 => "Prostate")
+        MEH.tp_descriptions[0] = "2023-02-07 Pat51 stale dictation"
+        MEH.tp_english_descriptions[0] = "Pat51 stale English dictation"
+
+        # Switch to tmp_pat1_h5
+        LMW._lmw_observables[:switch_to_hdf5](tmp_pat1_h5)
+
+        # 1. Stale Pat51 organ_mapping and dictations must be cleared and replaced by Pat1
+        @test MEH.tp_organ_mapping[0][3] == "quadriceps_femoris_left"
+        @test MEH.global_organ_mapping[][3] == "quadriceps_femoris_left"
+        @test !haskey(MEH.tp_descriptions, 0) || isempty(MEH.tp_descriptions[0])
+
+        # 2. First lesion (lid=3) must display Quadriceps Femoris Left, never Prostate
+        act_str = LMW._lmw_observables[:active_lesion_id][]
+        @test LMW.parse_lesion_id(act_str) == 3
+        @test !occursin("prostate", lowercase(act_str))
+        @test occursin("quadriceps", lowercase(act_str))
+
+        # 3. Metadata widgets (BaseAnatomy, LesionType, Anatomic Location) must reflect Quadriceps Femoris Left
+        menu_ba = LMW._lmw_observables[:menu_base_anat]
+        ba_val = lowercase(string(menu_ba.selection[]))
+        @test occursin("quadriceps femoris", ba_val)
+        @test !occursin("prostate", ba_val)
+        @test LMW._lmw_observables[:active_lesion_type][] == "Technical Artifact"
+
+        fw = LMW._lmw_observables[:field_widgets]
+        loc_val = string(fw["Anatomic Location"].selection[])
+        @test occursin("Muscle", loc_val) || occursin("Soft Tissue", loc_val)
+
+        # 4. Wait past autosave debounce and verify target HDF5 was NOT corrupted with Pat51 / Prostate
+        sleep(0.45)
+        HDF5.h5open(tmp_pat1_h5, "r") do f
+            om_after = JSON.parse(read(f["_meta_/organ_mapping"]))
+            @test om_after["0"]["3"] == "quadriceps_femoris_left"
+            if haskey(f, "_meta_/lesion_annotations.json")
+                ann_after = JSON.parse(read(f["_meta_/lesion_annotations.json"]))
+                if haskey(ann_after, "3")
+                    @test !occursin("prostate", lowercase(string(get(ann_after["3"], "BaseAnatomy", ""))))
+                end
+            end
+        end
+    finally
+        MEH.h5_path_ref[] = old_h5_path
+        MEH.h5_save_path_ref[] = old_h5_save
+        MEH.patient_id[] = old_pat_id
+        try rm(tmp_pat1_h5; force=true) catch; end
+    end
+end
+
+@testset "Test 13: XNAT Remote Freshness Comparison & Full Cohort Prefetch Cache" begin
+    import Dates, HDF5, JSON
+    XC = MedEye3d.XnatClient
+    XP = MedEye3d.XnatPreloader
+
+    # 1. Timestamp parser handles both ISO-8601 and RFC-7231 HTTP Last-Modified headers
+    ts_iso = XC._parse_remote_timestamp_utc("2026-11-18T14:30:15Z")
+    ts_http = XC._parse_remote_timestamp_utc("Wed, 18 Nov 2026 14:30:15 GMT")
+    @test ts_iso == Dates.DateTime(2026, 11, 18, 14, 30, 15)
+    @test ts_http == Dates.DateTime(2026, 11, 18, 14, 30, 15)
+    @test XC._parse_remote_timestamp_utc("") === nothing
+
+    # 2. Sidecar XNAT metadata helper round-trip & local autosave preservation
+    tmp_dummy_h5 = tempname() * ".h5"
+    write(tmp_dummy_h5, zeros(UInt8, 4096))
+    try
+        XC._write_local_xnat_meta(tmp_dummy_h5, "8c62c57c69b46590cc9797bc5594cfb2"; last_modified="2026-11-18T14:30:15Z")
+        @test XC._read_local_xnat_digest(tmp_dummy_h5) == "8c62c57c69b46590cc9797bc5594cfb2"
+
+        # Simulate local MedEye3d autosave growing local file size while XNAT baseline stays identical
+        write(tmp_dummy_h5, zeros(UInt8, 8192))
+        same_remote = (found=true, size=Int64(4096), digest="8c62c57c69b46590cc9797bc5594cfb2", last_modified_utc=nothing, uri="/x")
+        @test XC._compare_remote_against_local(same_remote, tmp_dummy_h5) == (false, "up_to_date")
+
+        newer_remote = (found=true, size=Int64(4096), digest="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", last_modified_utc=nothing, uri="/x")
+        @test XC._compare_remote_against_local(newer_remote, tmp_dummy_h5) == (true, "digest_changed")
+    finally
+        rm(tmp_dummy_h5; force=true)
+        rm(XC._xnat_meta_path(tmp_dummy_h5); force=true)
+    end
+
+    # 3. Local Prostata_bimodal cache must contain all 126 repo Pat* cases
+    repo_root = joinpath(dirname(@__DIR__), "data", "cases", "Prostata_bimodal")
+    cache_root = joinpath(homedir(), ".medeye3d", "xnat_cache", "Prostata_bimodal_PIPELINE")
+    repo_pats = sort(filter(d -> occursin(r"^Pat\d+$", d) && isfile(joinpath(repo_root, d, "preprocessed_volumes.h5")), readdir(repo_root));
+        by = d -> parse(Int, d[4:end]))
+    @test length(repo_pats) == 126
+
+    missing_cached = String[]
+    for pat in repo_pats
+        found = false
+        if isdir(cache_root)
+            for sub in readdir(cache_root)
+                if endswith(sub, "__$pat") && isdir(joinpath(cache_root, sub))
+                    for fn in readdir(joinpath(cache_root, sub))
+                        fp = joinpath(cache_root, sub, fn)
+                        if endswith(lowercase(fn), ".h5") && !occursin("lesion_edits", lowercase(fn)) && filesize(fp) > 1_000_000
+                            found = true
+                            break
+                        end
+                    end
+                end
+                found && break
+            end
+        end
+        !found && push!(missing_cached, pat)
+    end
+    @test isempty(missing_cached)
+
+    # 4. Verify ground-truth Pat1 has clean Quadriceps Femoris Left on lid=3 and no stale Prostate annotation
+    pat1_repo_h5 = joinpath(repo_root, "Pat1", "preprocessed_volumes.h5")
+    @test isfile(pat1_repo_h5)
+    HDF5.h5open(pat1_repo_h5, "r") do f
+        om = JSON.parse(read(f["_meta_/organ_mapping"]))
+        @test om["0"]["3"] == "quadriceps_femoris_left"
+        @test !haskey(f, "_meta_/lesion_annotations.json")
+    end
+end
+
+@testset "Test 14: Landmarks.compute_internal_iliac_points Ignores Thoracic False-Positive Specks" begin
+    lm_path = joinpath(dirname(@__DIR__), "scripts", "preprocessing", "lymph_node_rules", "src", "julia_gpu", "preprocessing", "Landmarks.jl")
+    src = read(lm_path, String)
+    # Load compute_internal_iliac_points standalone without external KernelAbstractions/CUDA dependency
+    src_no_gpu = replace(src, "using CUDA\n" => "struct CuArray{T,N} end\n")
+    src_no_gpu = replace(src_no_gpu, "using KernelAbstractions\n" => "")
+    lm_mod = Module(:TestLandmarks)
+    Base.eval(lm_mod, :(using LinearAlgebra, Statistics))
+    Base.include_string(lm_mod, src_no_gpu, lm_path)
+    inner = Base.invokelatest(() -> lm_mod.Landmarks)
+
+    vol = zeros(UInt8, 32, 32, 300)
+    # Main pelvic iliac artery across slices 65..135
+    for z in 65:135
+        vol[14:17, 14:17, z] .= 0x01
+    end
+    # Single stray thoracic speck at slice 252
+    vol[10, 10, 252] = 0x01
+
+    p1, p2 = Base.invokelatest(inner.compute_internal_iliac_points, vol, (1.0, 1.0, 3.0), (0.0, 0.0, -1000.0))
+    @test p1 !== nothing && p2 !== nothing
+    @test isapprox(p1[3], -1000.0 + (135 - 1) * 3.0; atol=1.0)
+    @test isapprox(p2[3], -1000.0 + (65 - 1) * 3.0; atol=1.0)
+    @test isfile(joinpath(dirname(@__DIR__), "data", "cases", "Prostata_bimodal", "Pat1", "Pat1_Normal_Lymph_Node_Rules.mrb"))
+end
+
+@testset "Test 15: Anatomy Display Includes Pat1 Lymph Node IDs (> 400) & Case Switch Clears Stale LN Cache" begin
+    @test MEH.ANATOMY_MAX_LABEL_ID >= 10000
+
+    # Verify Pat1's 69 LN IDs (428..496) are ALL <= ANATOMY_MAX_LABEL_ID
+    pat1_h5 = joinpath(dirname(@__DIR__), "data", "cases", "Prostata_bimodal", "Pat1", "preprocessed_volumes.h5")
+    @test isfile(pat1_h5)
+    pat1_labels = HDF5.h5open(pat1_h5, "r") do f
+        Dict{Int, String}(parse(Int, string(k)) => string(v) for (k, v) in JSON.parse(read(f["_meta_/max_anatomy_labels.json"])))
+    end
+
+    old_anat_labels = deepcopy(MEH.anatomy_labels_cache)
+    old_global_ts = copy(MEH.global_ts_names[])
+    old_ln_val = MEH.lymph_node_validation_mode[]
+    old_anat_vis = MEH._anatomy_active[]
+    old_single = MEH.is_single_lesion_mode[]
+    old_tp = MEH.current_tp_index[]
+    old_cmp = MEH.compare_mode[]
+
+    try
+        MEH.current_tp_index[] = 0
+        MEH.compare_mode[] = false
+        MEH.global_ts_names[] = pat1_labels
+        MEH.anatomy_labels_cache[0] = pat1_labels
+
+        ln_ids = MEH.get_lymph_node_label_ids(0)
+        @test length(ln_ids) == 69
+        @test minimum(ln_ids) == 428
+        @test maximum(ln_ids) == 496
+
+        ts_ct = MEH.TextureSpec{Float32}(name="CT", isMainImage=true, studyType="CT", minAndMaxValue=Float32[-160, 240])
+        ts_mask = MEH.TextureSpec{Int16}(name="Mask", isMainImage=false, isMultiDiscreteMask=true, isIntegerTexture=true, minAndMaxValue=Int16[1, 10000])
+        ts_anat = MEH.TextureSpec{Int16}(name="Anatomy", isMainImage=false, isMultiDiscreteMask=true, isIntegerTexture=true,
+            minAndMaxValue=Int16[1, MEH.ANATOMY_MAX_LABEL_ID], isEditable=true, isVisible=false, maskContribution=0.5f0)
+        calc = MEH.CalcDimsStruct(mainImageQuadVert=ones(Float32, 32), mainQuadVertSize=128)
+        scr = MEH.FullScrollableDat(dimensionToScroll=3, slicesNumber=Int32(4), currentTpIndex=0)
+        disp = MEH.forDisplayObjects(listOfTextSpecifications=MEH.TextureSpec[ts_ct, ts_mask, ts_anat])
+        st = MEH.StateDataFields(calcDimsStruct=calc, onScrollData=scr, mainForDisplayObjects=disp, currentDisplayedSlice=1)
+        states = [st]
+
+        # 1. Anatomy: ON (ShowMaskLayerEvent(4, true)) must keep max >= 496 (Pat1 max LN ID)
+        MEH.reactToShowMaskLayer(MakieEvents.ShowMaskLayerEvent(4, true), states)
+        @test ts_anat.isVisible == true
+        @test ts_anat.minAndMaxValue[1] <= 428
+        @test ts_anat.minAndMaxValue[2] >= 496
+
+        # 2. _load_tp_from_entry! (called on SetTimePointEvent / case switch) must keep max >= 496
+        dummy_ct = zeros(Float32, 4, 4, 4)
+        dummy_mask = zeros(Int16, 4, 4, 4)
+        dummy_bone = zeros(Int8, 4, 4, 4)
+        dummy_anat = zeros(UInt16, 4, 4, 4)
+        dummy_anat[2, 2, 2] = UInt16(435)
+        entry = MEH.TpCacheEntry(dummy_ct, dummy_ct, dummy_mask, dummy_bone, dummy_anat, dummy_mask, Int16.(dummy_anat))
+        MEH._load_tp_from_entry!(states, entry, 1)
+        @test ts_anat.minAndMaxValue[2] >= 496
+
+        # 3. Normal reactToSyncLesion with Anatomy ON must keep max >= 496
+        MEH.lymph_node_validation_mode[] = false
+        MEH.reactToSyncLesion(MakieEvents.SyncLesionEvent(3, true), states)
+        @test ts_anat.minAndMaxValue[2] >= 496
+
+        # 4. LN Validation Mode All-LNs and OFF branch must keep max >= 496
+        MEH.lymph_node_validation_mode[] = true
+        MEH.is_single_lesion_mode[] = false
+        MEH.reactToSyncLesion(MakieEvents.SyncLesionEvent(435, false), states)
+        @test ts_anat.isVisible == true
+        @test ts_anat.minAndMaxValue == Int16[428, 496]
+
+        MEH.reactToSetLNValidationMode(MakieEvents.SetLNValidationModeEvent(false), states)
+        @test ts_anat.isVisible == false
+        @test ts_anat.minAndMaxValue[2] >= 496
+    finally
+        empty!(MEH.anatomy_labels_cache)
+        merge!(MEH.anatomy_labels_cache, old_anat_labels)
+        MEH.global_ts_names[] = old_global_ts
+        MEH.lymph_node_validation_mode[] = old_ln_val
+        MEH._anatomy_active[] = old_anat_vis
+        MEH.is_single_lesion_mode[] = old_single
+        MEH.current_tp_index[] = old_tp
+        MEH.compare_mode[] = old_cmp
+    end
+end
+
+@testset "Test 16: Quad-MRI Fallback CT Windowing (<4 MRIs) & Pat1 T2/ADC/DWI/T1 Modalities" begin
+    old_tp_labels = copy(MEH.tp_labels)
+    old_tp_mods = copy(MEH.tp_modalities)
+    old_mri_cmp = MEH.mri_compare_mode[]
+    old_mri_main = MEH.mri_main_multimodal_mode[]
+    old_cmp = MEH.compare_mode[]
+    old_tp = MEH.current_tp_index[]
+    old_m2_vk = MedEye3d.SegmentationDisplay._m2_vk_ref[]
+    old_m2_mode = MedEye3d.SegmentationDisplay._current_m2_mode[]
+    old_win = deepcopy(MEH.current_windowing)
+    try
+        empty!(MEH.tp_labels)
+        empty!(MEH.tp_modalities)
+        MEH.tp_labels[0] = "PET BASELINE (TP 0)"; MEH.tp_modalities[0] = "PET"
+        MEH.tp_labels[1] = "T2 TP 1";             MEH.tp_modalities[1] = "T2"
+        MEH.tp_labels[2] = "DWI TP 2";            MEH.tp_modalities[2] = "DWI"
+        MEH.tp_labels[3] = "T1 TP 3";             MEH.tp_modalities[3] = "T1"
+
+        mri_sz = (8, 8, 8)
+        function mk_tp(v)
+            m16 = zeros(Int16, mri_sz)
+            a16 = zeros(Int16, mri_sz)
+            MEH.TpCacheEntry(v, zeros(Float32, mri_sz), m16, zeros(Int8, mri_sz), UInt16.(a16), m16, a16)
+        end
+        lock(MEH._tp_cache_lock) do
+            empty!(MEH.tp_data_cache)
+            MEH.tp_data_cache[0] = mk_tp(fill(-500.0f0, mri_sz))
+            MEH.tp_data_cache[1] = mk_tp(fill(500.0f0, mri_sz))
+            MEH.tp_data_cache[2] = mk_tp(fill(300.0f0, mri_sz))
+            MEH.tp_data_cache[3] = mk_tp(fill(400.0f0, mri_sz))
+        end
+
+        function mk_panel()
+            ts_ct = MEH.TextureSpec{Float32}(name="CT", isMainImage=true, minAndMaxValue=Float32[-160.0, 240.0], isVisible=true, maskContribution=0.0f0)
+            ts_pet = MEH.TextureSpec{Float32}(name="PET", isMainImage=false, isNuclearMask=true, minAndMaxValue=Float32[0.1, 10.0], isVisible=true, maskContribution=0.5f0)
+            calc = MEH.CalcDimsStruct(mainImageQuadVert=ones(Float32, 32), mainQuadVertSize=128)
+            scr = MEH.FullScrollableDat(
+                dimensionToScroll=3, slicesNumber=Int32(8), currentTpIndex=0,
+                dataToScrollDims=MEH.DataToScrollDims(imageSize=mri_sz, voxelSize=(1.0, 1.0, 1.0), dimensionToScroll=3),
+                dataToScroll=[
+                    MEH.ThreeDimRawDat{Float32}(type=Float32, name="CT", dat=fill(-500.0f0, mri_sz)),
+                    MEH.ThreeDimRawDat{Float32}(type=Float32, name="PET", dat=zeros(Float32, mri_sz)),
+                ]
+            )
+            MEH.StateDataFields(
+                calcDimsStruct=calc, onScrollData=scr,
+                mainForDisplayObjects=MEH.forDisplayObjects(listOfTextSpecifications=MEH.TextureSpec[ts_ct, ts_pet]),
+                currentDisplayedSlice=4,
+            )
+        end
+
+        states = [mk_panel() for _ in 1:4]
+        MedEye3d.SegmentationDisplay._m2_vk_ref[] = nothing
+        MEH.current_tp_index[] = 0
+        MEH.compare_mode[] = false
+        MEH.mri_compare_mode[] = false
+        MEH.mri_main_multimodal_mode[] = false
+        MEH.current_windowing["CT"] = Float32[-160.0, 240.0]
+
+        @test MEH.get_mri_comparison_tps(0) == [1, 2, 3, 0]
+        MEH.reactToToggleMRIMultimodal(MakieEvents.ToggleMRIMultimodalEvent(true, :auto), states)
+
+        # Panel 4 falls back to TP 0 (CT baseline): must get CT windowing [-160, 240] (not [0, 1000])
+        p4_ct = first(t for t in states[4].mainForDisplayObjects.listOfTextSpecifications if t.name == "CT")
+        @test p4_ct.minAndMaxValue == Float32[-160.0, 240.0]
+        p4_pet = first(t for t in states[4].mainForDisplayObjects.listOfTextSpecifications if t.name == "PET")
+        @test p4_pet.minAndMaxValue == Float32[0.0, 10.0]
+        for p in 1:4
+            p_pet = first(t for t in states[p].mainForDisplayObjects.listOfTextSpecifications if t.name == "PET")
+            @test p_pet.isVisible == false
+            @test p_pet.maskContribution == 0.0f0
+        end
+
+        # Verify repaired Pat1 HDF5 now contains [T2, ADC, DWI, T1]
+        pat1_h5 = joinpath(dirname(@__DIR__), "data", "cases", "Prostata_bimodal", "Pat1", "preprocessed_volumes.h5")
+        @test isfile(pat1_h5)
+        sh = HDF5.h5open(pat1_h5, "r") do f
+            JSON.parse(read(f["_meta_/scene_hierarchy.json"]))
+        end
+        mri_mods = [n["modality"] for n in sh if get(n, "type", "") == "vtkMRMLLinearTransformNode"]
+        @test length(mri_mods) >= 4
+        @test mri_mods[1:4] == ["T2", "ADC", "DWI", "T1"]
+    finally
+        empty!(MEH.tp_labels); merge!(MEH.tp_labels, old_tp_labels)
+        empty!(MEH.tp_modalities); merge!(MEH.tp_modalities, old_tp_mods)
+        empty!(MEH.current_windowing); merge!(MEH.current_windowing, old_win)
+        MEH.mri_compare_mode[] = old_mri_cmp
+        MEH.mri_main_multimodal_mode[] = old_mri_main
+        MEH.compare_mode[] = old_cmp
+        MEH.current_tp_index[] = old_tp
+        MedEye3d.SegmentationDisplay._m2_vk_ref[] = old_m2_vk
+        MedEye3d.SegmentationDisplay._current_m2_mode[] = old_m2_mode
+        empty!(MEH.mri_compare_tps)
+        lock(MEH._tp_cache_lock) do; empty!(MEH.tp_data_cache); end
+    end
 end

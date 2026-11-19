@@ -12,6 +12,7 @@ using ColorTypes
 using Statistics: mean
 using Dates
 using HDF5
+using JSON
 
 export reactToChangePlane, reactToCompareTimePoints, reactToShowSingleLesion
 export reactToWindowing, reactToPaintVal, reactToSyncLesion, reactToChangeBrushSize, reactToPetBlend, reactToLabelOpacity
@@ -27,6 +28,9 @@ export heatgdt_one_click_mode, toggle_heatgdt_one_click_mode!, execute_one_click
 export mri_compare_mode, mri_compare_tps, mri_compare_plane, get_mri_comparison_tps
 export mri_main_multimodal_mode, reactToToggleMRIMultimodal, sync_mri_mask_across_modalities!
 export reactToDeleteLesion, reactToUndo
+export semantic_filter_active, semantic_mentioned_organs, semantic_allowed_lesion_ids, semantic_reasoning, unfiltered_lesion_masks
+export organ_matches_semantic_mentions, is_semantic_lesion_allowed, load_semantic_filter_from_h5!, load_semantic_filter_from_path!
+export apply_semantic_filter!, reactToToggleSemanticFilter, get_unfiltered_mask_for_save
 using ...InferenceClient
 using ...LesionAssociation
 using ...TextureManag
@@ -245,7 +249,7 @@ end
 # Heat-GDT slider parameter refs (written by LesionMetadataWindow, read by inference worker)
 const heatgdt_K = Ref{Int}(40)
 const heatgdt_theta = Ref{Float32}(0.001f0)
-const heatgdt_edge_modality = Observable{Symbol}(:combined)  # :combined, :ct_only, :pet_only
+const heatgdt_edge_modality = Observable{Symbol}(:ct_only)  # :ct_only (default), :combined, :pet_only
 const heatgdt_adaptive_contrast = Ref{Bool}(true)
 const heatgdt_directional_normalization = Ref{Bool}(true)
 const heatgdt_sensitivity = Ref{Float32}(1.0f0)
@@ -285,11 +289,23 @@ const _vk_heat_display_steps = Ref{Int}(0)            # Visual catch-up steps di
 const _vk_heat_seed = Ref{Tuple{Int,Int,Int}}((0,0,0))  # 3D seed voxel for current interaction
 const _vk_heat_last_dispatch = Ref{Float64}(0.0)      # Timestamp of last GPU dispatch (for debouncing)
 const _vk_heat_start_time = Ref{Float64}(0.0)         # Wall-clock timestamp of Heat-GDT start (for display theta ramp)
-const HEAT_TICK_MIN_INTERVAL_S = 0.05                  # 50ms interval between GPU dispatches (20 Hz, smooth 20->30->40 pacing)
+const HEAT_TICK_MIN_INTERVAL_S = 0.05                  # Baseline 50ms interval at speed=12.0
 # Display theta ramp: theta_display = max(real_theta, RAMP_START * exp(-RAMP_RATE * elapsed_seconds))
 # This makes the lesion appear to grow smoothly from a small dot to the full segmentation
 const HEAT_DISPLAY_RAMP_START = 0.5f0                  # Start display threshold (only show very hot center)
-const HEAT_DISPLAY_RAMP_RATE  = Ref{Float32}(12.0f0)                 # Exponential decay rate (larger = faster catch-up, was 5.0)
+const HEAT_DISPLAY_RAMP_RATE  = Ref{Float32}(12.0f0)   # Speed slider value (0.2 .. 25.0)
+const heatgdt_steps_per_frame = Ref{Int}(5)            # Diffusion steps per frame refresh (1 .. 20)
+
+"""Compute minimum interval (seconds) between Wand ticks from `HEAT_DISPLAY_RAMP_RATE[]`."""
+@inline function _current_heat_tick_interval()::Float64
+    spd = clamp(Float64(HEAT_DISPLAY_RAMP_RATE[]), 0.2, 25.0)
+    return clamp(0.60 / spd, 0.024, 1.50)
+end
+
+"""Compute post-hoc commit threshold from `base_theta` and inverted `Size ±` slider (`-` = smaller, `+` = larger)."""
+@inline function _compute_posthoc_theta(base_theta::Real, slider_val::Real)::Float32
+    return clamp(Float32(Float64(base_theta) * (10.0 ^ (-Float64(slider_val) / 3.0))), 1.0f-6, 0.98f0)
+end
 # ── Final Commit Threshold ──
 # When the user releases the mouse, the GPU heat tensor is thresholded at this value
 # to produce discrete integer labels in seg_vol.  Refreshed at each mouse-release
@@ -1129,13 +1145,16 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
             stateObjects[p].calcDimsStruct = StructsManag.getHeightToWidthRatio(stateObjects[p].calcDimsStruct, new_scroll_dims)
             stateObjects[p].displayMode = QuadImage
 
+            tp_for_panel_ts = (i <= length(mri_tps)) ? mri_tps[i] : tp_cur
+            pmod_ts = uppercase(get(tp_modalities, tp_for_panel_ts, ""))
+            is_mri_ts = pmod_ts in ("T2", "MRI", "MR", "ADC", "DWI", "T1", "DCE", "DYNAMIC")
             for ts in stateObjects[p].mainForDisplayObjects.listOfTextSpecifications
                 if ts.name == "CT"
                     ts.isVisible = (i == 2 ? is_mode_active : true)
                     ts.maskContribution = 0.0f0
                 elseif ts.name == "PET" || ts.name == "SPECT"
-                    if i == 2
-                        ts.isVisible = !is_mode_active
+                    if i == 2 || is_mri_ts || is_mode_active
+                        ts.isVisible = false
                     end
                     ts.maskContribution = 0.0f0
                 elseif ts.name == "Mask"
@@ -1168,11 +1187,13 @@ function reactToToggleMRIMultimodal(data::MakieEvents.ToggleMRIMultimodalEvent, 
                 get(current_windowing, "T1", Float32[0.0, 700.0])
             elseif pmod in ("DCE", "DYNAMIC")
                 get(current_windowing, "DCE", Float32[0.0, 500.0])
+            elseif pmod in ("PET", "CT", "SPECT")
+                get(current_windowing, "CT", Float32[-160.0, 240.0])
             else
                 Float32[0.0, 1000.0]
             end
             for tex in stateObjects[p_idx].mainForDisplayObjects.listOfTextSpecifications
-                if tex.name == "CT" || tex.isMainImage
+                if tex.name == "CT" || (tex.isMainImage && tex.name != "PET" && tex.name != "SPECT")
                     tex.minAndMaxValue = Float32.([win[1], win[2]])
                 end
             end
@@ -1682,15 +1703,20 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
         elseif compare_mode[] && panel_idx in (5, 6, 7, 8, 9)
             compare_right_tp[]
         else
-            state.onScrollData.currentTpIndex > 0 ? state.onScrollData.currentTpIndex : current_tp_index[]
+            state.onScrollData.currentTpIndex >= 0 ? state.onScrollData.currentTpIndex : current_tp_index[]
         end
         panel_mod = uppercase(get(tp_modalities, panel_tp, "PET"))
+        is_panel_mri = (mri_main_multimodal_mode[] && panel_idx in (1, 2, 3, 4)) ||
+                       (mri_compare_mode[] && panel_idx in (6, 7, 8, 9)) ||
+                       (panel_mod in ("T2", "MRI", "MR", "T1", "ADC", "DWI", "DCE", "DYNAMIC", "PROSTATE")) ||
+                       occursin("MR", panel_mod) || occursin("T2", panel_mod) || occursin("T1", panel_mod) ||
+                       occursin("ADC", panel_mod) || occursin("DWI", panel_mod) || occursin("DCE", panel_mod)
         
         is_main_match = false
         is_nuc_match = false
         
         if target_mod == "CT"
-            is_main_match = (panel_mod == "CT" || panel_mod == "PET" || panel_mod == "SPECT")
+            is_main_match = !is_panel_mri && (panel_mod == "CT" || panel_mod == "PET" || panel_mod == "SPECT")
         elseif target_mod in ("T2", "MRI", "MR")
             is_main_match = (panel_mod in ("T2", "MRI", "MR"))
             is_nuc_match = (panel_mod in ("T2", "MRI", "MR"))
@@ -1713,11 +1739,12 @@ function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFi
         end
         
         for tex in state.mainForDisplayObjects.listOfTextSpecifications
-            # Match CT textures: studyType=="CT", or fallback to isMainImage when studyType is unset
-            # (but exclude PET/SPECT textures that have isMainImage=true on pure-PET panels)
-            is_ct_tex = tex.studyType == "CT" || (isempty(tex.studyType) && tex.isMainImage && !tex.isNuclearMask && !(uppercase(tex.name) in ("PET", "SPECT")))
-            is_nuc_tex = tex.studyType == "PET" || tex.studyType == "SPECT" || tex.isNuclearMask
-            if is_main_match && (is_ct_tex || tex.name == "CT" || (tex.isMainImage && !tex.isNuclearMask))
+            tex_name_up = uppercase(strip(tex.name))
+            tex_study_up = uppercase(strip(tex.studyType))
+            is_nuc_tex = tex_study_up in ("PET", "SPECT") || tex_name_up in ("PET", "SPECT") || tex.isNuclearMask
+            # CT textures only: never match PET/SPECT textures (even if isMainImage=true on Panel 2/7 pure PET)
+            is_ct_tex = !is_nuc_tex && (tex_study_up == "CT" || tex_name_up == "CT" || (isempty(tex_study_up) && tex.isMainImage))
+            if is_main_match && (target_mod == "CT" ? is_ct_tex : (is_ct_tex || (tex.isMainImage && !tex.isNuclearMask)))
                 tex.minAndMaxValue = Float32.([data.min_val, data.max_val])
                 state.isSliceChanged = true
                 if state.mainForDisplayObjects.vulkanPipelineState !== nothing
@@ -3167,7 +3194,7 @@ function reactToSyncLesion(data::SyncLesionEvent, stateObjects::Vector{StateData
                 end
             elseif textSpec.name == "Anatomy"
                 T_mm = eltype(textSpec.minAndMaxValue)
-                textSpec.minAndMaxValue = T_mm.([1, 400])
+                textSpec.minAndMaxValue = T_mm.([1, ANATOMY_MAX_LABEL_ID])
                 textSpec.allowedIDs = Float32[]
                 textSpec.isVisible = _anatomy_active[]
                 if textSpec.maskContribution <= 0.05f0
@@ -3516,6 +3543,7 @@ const bone_subsegments_cache = Dict{Any, Any}()
 const lesion_centroids_cache = Dict{Any, Vector{Int}}()
 const ln_centroids_cache = Dict{Any, Vector{Int}}()
 const lymph_node_validation_mode = Ref{Bool}(false)
+const ANATOMY_MAX_LABEL_ID = 10000
 const _centroids_lock = ReentrantLock()
 const last_bone_overlay_indices = Dict{Int, Vector{CartesianIndex{3}}}()
 export lymph_node_validation_mode, ln_centroids_cache
@@ -3888,11 +3916,11 @@ function save_tp_mask_to_h5(tp_i::Int)::Bool
     if entry === nothing
         return false
     end
-    mask_to_save = entry.mask_i16 !== nothing ? entry.mask_i16 : entry.mask
+    mask_to_save = get_unfiltered_mask_for_save(tp_i, entry)
     if mask_to_save === nothing
         return false
     end
-    if entry.mask !== nothing && entry.mask !== mask_to_save
+    if !semantic_filter_active[] && entry.mask !== nothing && entry.mask !== mask_to_save
         try entry.mask .= mask_to_save catch; end
     end
     
@@ -3983,6 +4011,30 @@ function flush_all_dirty_masks!()
     end
     flush_all_dirty_anatomy!()
     flush_all_dirty_bone_subsegs!()
+    try
+        LER = parentmodule(parentmodule(@__MODULE__)).LesionEditsRecorder
+        if LER.has_pending_edits()
+            ct_vol, pet_vol = lock(_tp_cache_lock) do
+                e0 = haskey(tp_data_cache, 0) ? tp_data_cache[0] : (isempty(tp_data_cache) ? nothing : first(values(tp_data_cache)))
+                e0 === nothing ? (nothing, nothing) : (e0.ct, e0.pet)
+            end
+            LER.flush_all_edits!(ct_vol=ct_vol, pet_vol=pet_vol)
+        end
+    catch e
+        @warn "LesionEditsRecorder flush failed: $e"
+    end
+end
+
+"""Asynchronously flush all dirty masks, anatomy, bone subsegments, measurements, and lesion edits to HDF5."""
+function flush_all_dirty_masks_async!()::Task
+    return Threads.@spawn begin
+        try
+            flush_all_dirty_masks!()
+            save_measurements_to_h5()
+        catch e
+            @warn "Async HDF5 flush failed" exception=(e, catch_backtrace())
+        end
+    end
 end
 
 const _mask_autosave_task_started = Ref(false)
@@ -3998,7 +4050,12 @@ function _ensure_mask_autosave_task!()
             if time() - _last_paint_event_time[] < 3.0
                 continue
             end
-            if (!isempty(dirty_mask_tps) || !isempty(dirty_anatomy_tps) || !isempty(dirty_bone_subsegs)) && !isempty(h5_save_path_ref[])
+            has_ler_edits = try
+                parentmodule(parentmodule(@__MODULE__)).LesionEditsRecorder.has_pending_edits()
+            catch
+                false
+            end
+            if (!isempty(dirty_mask_tps) || !isempty(dirty_anatomy_tps) || !isempty(dirty_bone_subsegs) || has_ler_edits) && !isempty(h5_save_path_ref[])
                 flush_all_dirty_masks!()
             end
             # Also autosave measurements if dirty
@@ -4289,7 +4346,7 @@ function _ensure_io_task!()
                             end
                             if entry !== nothing
                                 lock(_tp_cache_lock) do
-                                    tp_data_cache[tp] = entry
+                                    _store_tp_cache_entry!(tp, entry)
                                 end
                             end
                         end
@@ -4302,6 +4359,7 @@ function _ensure_io_task!()
                     lock(_tp_cache_lock) do
                         for tp in msg.evict_tps
                             delete!(tp_data_cache, tp)
+                            delete!(unfiltered_lesion_masks, tp)
                         end
                     end
                     if !isempty(msg.evict_tps)
@@ -4324,7 +4382,7 @@ function _ensure_io_task!()
                                 end
                                 if entry !== nothing
                                     lock(_tp_cache_lock) do
-                                        tp_data_cache[tp] = entry
+                                        _store_tp_cache_entry!(tp, entry)
                                     end
                                 end
                             end
@@ -4385,7 +4443,7 @@ function get_or_load_tp_data(idx::Int)
         end
         if entry !== nothing
             lock(_tp_cache_lock) do
-                tp_data_cache[idx] = entry
+                _store_tp_cache_entry!(idx, entry)
             end
             return entry
         end
@@ -4594,7 +4652,7 @@ function _load_tp_from_entry!(stateObjects, entry::TpCacheEntry, panel_idx; forc
             end
         elseif tex.name == "Anatomy"
             T_mm = eltype(tex.minAndMaxValue)
-            tex.minAndMaxValue = T_mm.([1, 400])
+            tex.minAndMaxValue = T_mm.([1, ANATOMY_MAX_LABEL_ID])
             tex.allowedIDs = Float32[]
             tex.isVisible = _anatomy_active[]
             if tex.maskContribution <= 0.0f0
@@ -5113,6 +5171,8 @@ end
 
 function reactToSetLNValidationMode(data::MakieEvents.SetLNValidationModeEvent, stateObjects::Vector{StateDataFields})
     lymph_node_validation_mode[] = data.active
+    _anatomy_active[] = data.active
+    _lesion_active[] = !data.active
     is_single_lesion_mode[] = true
     for (idx, stateObject) in enumerate(stateObjects)
         is_right = compare_mode[] && idx in (5, 6, 7, 8, 9)
@@ -5132,7 +5192,7 @@ function reactToSetLNValidationMode(data::MakieEvents.SetLNValidationModeEvent, 
                 if textSpec.name == "Anatomy"
                     textSpec.isVisible = false
                     T_mm = eltype(textSpec.minAndMaxValue)
-                    textSpec.minAndMaxValue = T_mm.([0, 400])
+                    textSpec.minAndMaxValue = T_mm.([1, ANATOMY_MAX_LABEL_ID])
                 elseif textSpec.name == "Mask" || textSpec.name == "segmentation"
                     textSpec.isVisible = true
                 end
@@ -6255,7 +6315,8 @@ function reactToShowMaskLayer(data::ShowMaskLayerEvent, stateObjects::Vector{Sta
                 if ts.name == "Anatomy"
                     ts.isVisible = data.active
                     if data.active
-                        ts.minAndMaxValue = Int16[1, 400]
+                        T_mm = eltype(ts.minAndMaxValue)
+                        ts.minAndMaxValue = T_mm.([1, ANATOMY_MAX_LABEL_ID])
                         ts.allowedIDs = Float32[]
                         if ts.maskContribution <= 0.05f0
                             ts.maskContribution = 0.35f0
@@ -7227,6 +7288,14 @@ function execute_one_click_heatgdt!(stateObjects::Vector{StateDataFields}, cx::I
         mark_tp_mask_dirty!(tp_idx)
         mark_expert_edit!(target_id)
         invalidate_and_recompute_lesion_metrics_async!(target_id, tp_idx, seg_vol)
+        try
+            LER = parentmodule(parentmodule(@__MODULE__)).LesionEditsRecorder
+            LER.record_heatgdt_event!(tp_idx, Int(target_id), (cx, cy, cz), seg_vol;
+                theta=theta_val, K=K_val, dilation=heatgdt_dilation[],
+                smoothing=heatgdt_smoothing_sigma[], edge_modality=string(heatgdt_edge_modality[]))
+        catch e
+            @warn "LesionEditsRecorder record_heatgdt_event! failed (one-shot): $e"
+        end
     end
 
     # 9. Cross-modality sync for MRI if active
@@ -7434,8 +7503,8 @@ function reactToHeatGDTStart(event::MakieEvents.HeatGDTStartEvent, stateObjects:
         set_ai_status!("[Heat-GDT GPU] Growing from ($cx,$cy,$cz)...")
         println("[Heat-GDT START] seed_only! SUCCESS — GPU diffusion active (s_boost=$s_boost)"); flush(stdout)
         
-        # Initial step bounded at 20 steps (or min(20, K_target))
-        initial_steps = min(20, K_target)
+        # Initial step bounded by user-configured steps per frame refresh
+        initial_steps = min(clamp(heatgdt_steps_per_frame[], 1, 20), K_target)
         theta_val = Float32(heatgdt_theta[])
         HEAT_GDT_LAST_THETA[] = theta_val
         VulkanHeatDiffusion.run_incremental_steps!(heat_state, vk_ctx, initial_steps;
@@ -7546,9 +7615,10 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
 
     # ── Debounce: skip if too soon since last dispatch ──
     now = time()
+    tick_interval = _current_heat_tick_interval()
     debounce_elapsed = now - _vk_heat_last_dispatch[]
-    if debounce_elapsed < HEAT_TICK_MIN_INTERVAL_S
-        _dbg("SKIP: debounce elapsed=$(round(debounce_elapsed*1000, digits=1))ms < $(HEAT_TICK_MIN_INTERVAL_S*1000)ms")
+    if debounce_elapsed < tick_interval
+        _dbg("SKIP: debounce elapsed=$(round(debounce_elapsed*1000, digits=1))ms < $(round(tick_interval*1000, digits=1))ms")
         return
     end
     _vk_heat_last_dispatch[] = now
@@ -7601,7 +7671,7 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
             # ── DRAG MODE: User moved cursor while holding button — continue lesion at new seed ──
             # Interpolate points along the path so rapid mouse motion leaves no gaps
             n_pts = max(1, min(10, round(Int, dist_vox / 2.0)))
-            burst_steps = min(20, max_wand_steps)
+            burst_steps = min(clamp(heatgdt_steps_per_frame[], 1, 20), max_wand_steps)
             mean_sp = (ct_spacing[1] + ct_spacing[2] + ct_spacing[3]) / 3.0
             R_phys = max(10.0, 3.0 + 2.0 * sqrt(heatgdt_K[] * 0.16) * mean_sp)
             
@@ -7650,7 +7720,7 @@ function reactToHeatGDTTick(::MakieEvents.HeatGDTTickEvent, stateObjects::Vector
                 return  # Maximum safe ceiling reached
             end
             
-            steps_per_tick = min(10, max_wand_steps - _vk_heat_total_steps[])
+            steps_per_tick = min(clamp(heatgdt_steps_per_frame[], 1, 20), max_wand_steps - _vk_heat_total_steps[])
             if steps_per_tick <= 0
                 return
             end
@@ -7893,6 +7963,15 @@ function reactToHeatGDTStop(::MakieEvents.HeatGDTStopEvent, stateObjects::Vector
                     active_id_int = current_active_lesion_id[] > 0 ? current_active_lesion_id[] : 1
                     mark_expert_edit!(active_id_int)
                     invalidate_and_recompute_lesion_metrics_async!(active_id_int, tp_idx, seg_vol)
+                    try
+                        LER = parentmodule(parentmodule(@__MODULE__)).LesionEditsRecorder
+                        s_pos = _vk_heat_seed[]
+                        LER.record_heatgdt_event!(tp_idx, Int(active_id_int), s_pos, seg_vol;
+                            theta=commit_theta, K=HEAT_GDT_LAST_K[], dilation=heatgdt_dilation[],
+                            smoothing=heatgdt_smoothing_sigma[], edge_modality=string(heatgdt_edge_modality[]))
+                    catch e
+                        @warn "LesionEditsRecorder record_heatgdt_event! failed (wand): $e"
+                    end
                 end
             end
             
@@ -7967,6 +8046,11 @@ function reactToHeatGDTPosthocSize(event::MakieEvents.HeatGDTPosthocSizeEvent, s
 
     # 3. Force texture upload and sync TP cache + MRI views
     _sync_heatgdt_mask_state!(stateObjects, seg_vol, Int(HEAT_GDT_LAST_TARGET_ID[]), heat_state)
+    try
+        LER = parentmodule(parentmodule(@__MODULE__)).LesionEditsRecorder
+        LER.record_posthoc_event!(current_tp_index[], Int(HEAT_GDT_LAST_TARGET_ID[]), "posthoc_size", seg_vol;
+            theta=new_theta, dilation=heatgdt_dilation[], smoothing=heatgdt_smoothing_sigma[])
+    catch; end
 end
 
 function reactToHeatGDTDilationChange(event::MakieEvents.HeatGDTDilationChangeEvent, stateObjects::Vector{StateDataFields})
@@ -8009,6 +8093,11 @@ function reactToHeatGDTDilationChange(event::MakieEvents.HeatGDTDilationChangeEv
 
     # 3. Refresh textures and sync TP cache + multimodal MRI
     _sync_heatgdt_mask_state!(stateObjects, seg_vol, target_id, heat_state)
+    try
+        LER = parentmodule(parentmodule(@__MODULE__)).LesionEditsRecorder
+        LER.record_posthoc_event!(current_tp_index[], target_id, "posthoc_dilation", seg_vol;
+            theta=theta_val, dilation=dil_vox, smoothing=heatgdt_smoothing_sigma[])
+    catch; end
     try
         set_ai_status!("[Heat-GDT] Dilation=$(dil_vox) vox ($(vox_count) voxels)")
     catch; end
@@ -8067,6 +8156,11 @@ function reactToHeatGDTSmoothingChange(event::MakieEvents.HeatGDTSmoothingChange
         vox_count = VulkanHeatDiffusion.apply_box_mask_to_segvol!(heat_state, seg_vol, label_val; theta=theta_val)
         _sync_heatgdt_mask_state!(stateObjects, seg_vol, target_id, heat_state)
         try
+            LER = parentmodule(parentmodule(@__MODULE__)).LesionEditsRecorder
+            LER.record_posthoc_event!(current_tp_index[], target_id, "posthoc_smoothing", seg_vol;
+                theta=theta_val, dilation=heatgdt_dilation[], smoothing=sigma)
+        catch; end
+        try
             set_ai_status!("[Heat-GDT] Smoothing σ=$(round(sigma, digits=2)) ($vox_count voxels)")
         catch; end
     else
@@ -8074,5 +8168,287 @@ function reactToHeatGDTSmoothingChange(event::MakieEvents.HeatGDTSmoothingChange
             set_ai_status!("[Heat-GDT] Smoothing σ=$(round(sigma, digits=2))")
         catch; end
     end
+end
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Semantic Report-to-Anatomy Filter
+# ══════════════════════════════════════════════════════════════════════════════
+
+const semantic_filter_active = Observable{Bool}(false)
+const semantic_mentioned_organs = Ref{Vector{String}}(String[])
+const semantic_allowed_lesion_ids = Dict{Int, Set{Int}}()
+const semantic_reasoning = Ref{String}("")
+const unfiltered_lesion_masks = Dict{Int, Array{Int16, 3}}()
+
+const _SEMANTIC_STOPWORDS = Set(["of", "the", "and", "in", "area", "station", "level"])
+const _PARENCHYMAL_SINGLETONS = Set(["liver", "spleen", "pancreas", "prostate", "thyroid", "stomach", "esophagus", "heart", "lung", "brain", "sacrum"])
+const _PELVIC_BONE_TOKENS = Set(["hip", "ilium", "ilii", "pubis", "pubic", "ischium", "acetabulum"])
+
+function _normalize_semantic_tokens(name::AbstractString)::Set{String}
+    s = lowercase(strip(String(name)))
+    (isempty(s) || s == "unknown" || s == "background") && return Set{String}()
+    for pfx in ("nvseg_", "skellytour_", "totalseg_", "abdominal_", "pelvic_", "thoracic_", "neck_")
+        s = replace(s, pfx => "")
+    end
+    s = replace(s, r"lymph\s*node[s]?" => "")
+    s = replace(s, r"[^a-z0-9]+" => " ")
+    toks = Set{String}()
+    for t in split(strip(s))
+        isempty(t) && continue
+        (t in _SEMANTIC_STOPWORDS) && continue
+        push!(toks, String(t))
+    end
+    return toks
+end
+
+function organ_matches_semantic_mentions(organ_name::AbstractString, mentioned::Vector{String})::Bool
+    onorm = lowercase(strip(String(organ_name)))
+    (isempty(onorm) || onorm == "unknown" || onorm == "background" || isempty(mentioned)) && return false
+    m_low = [lowercase(strip(String(m))) for m in mentioned if !isempty(strip(String(m)))]
+    isempty(m_low) && return false
+    (onorm in m_low) && return true
+
+    o_core = strip(replace(replace(onorm, r"^nvseg_" => ""), "_" => " "))
+    for m in m_low
+        m_core = strip(replace(replace(m, r"^nvseg_" => ""), "_" => " "))
+        o_core == m_core && return true
+        o_core == "prostatic urethra" && occursin("prostate", m_core) && return true
+        occursin("prostate", m_core) && occursin("prostate", o_core) && return true
+        occursin("seminal vesicle", o_core) && occursin("seminal vesicle", m_core) && return true
+    end
+
+    o_toks = _normalize_semantic_tokens(onorm)
+    isempty(o_toks) && return false
+    o_has_pelvis = !isempty(intersect(o_toks, _PELVIC_BONE_TOKENS)) || (("pelvis" in o_toks) && ("bone" in o_toks))
+    o_sides = intersect(o_toks, ("left", "right"))
+    for m in m_low
+        m_toks = _normalize_semantic_tokens(m)
+        isempty(m_toks) && continue
+        if o_toks == m_toks ||
+           (length(m_toks) >= 2 && issubset(m_toks, o_toks)) ||
+           (length(o_toks) >= 2 && issubset(o_toks, m_toks))
+            return true
+        end
+        if !("cyst" in o_toks) && !("cyst" in m_toks)
+            if length(o_toks) == 1 && (first(o_toks) in _PARENCHYMAL_SINGLETONS) && issubset(o_toks, m_toks)
+                return true
+            end
+            if length(m_toks) == 1 && (first(m_toks) in _PARENCHYMAL_SINGLETONS) && issubset(m_toks, o_toks)
+                return true
+            end
+        end
+        m_has_pelvis = !isempty(intersect(m_toks, _PELVIC_BONE_TOKENS)) || (("pelvis" in m_toks) && ("bone" in m_toks))
+        if o_has_pelvis && m_has_pelvis
+            m_sides = intersect(m_toks, ("left", "right"))
+            if isempty(o_sides) || isempty(m_sides) || o_sides == m_sides
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function is_semantic_lesion_allowed(tp::Int, lid::Int; organ_hint::AbstractString="")::Bool
+    !semantic_filter_active[] && return true
+    allowed = get(semantic_allowed_lesion_ids, tp, nothing)
+    if allowed !== nothing && (lid in allowed)
+        return true
+    end
+    mentioned = semantic_mentioned_organs[]
+    isempty(mentioned) && return false
+    tp_orgs = get(tp_organ_mapping, tp, nothing)
+    if tp_orgs !== nothing && haskey(tp_orgs, lid)
+        organ_matches_semantic_mentions(tp_orgs[lid], mentioned) && return true
+    end
+    if !isempty(organ_hint)
+        organ_matches_semantic_mentions(organ_hint, mentioned) && return true
+    end
+    return false
+end
+
+function _parse_semantic_filter_json!(raw_json::AbstractString)
+    empty!(semantic_allowed_lesion_ids)
+    empty!(unfiltered_lesion_masks)
+    semantic_mentioned_organs[] = String[]
+    semantic_reasoning[] = ""
+
+    parsed = JSON.parse(String(raw_json))
+    if parsed isa AbstractDict
+        mentioned_raw = get(parsed, "mentioned_max_anatomy", Any[])
+        semantic_mentioned_organs[] = String[string(x) for x in mentioned_raw if !isempty(strip(string(x)))]
+        semantic_reasoning[] = string(get(parsed, "reasoning", ""))
+
+        by_tp = get(parsed, "allowed_lesion_ids_by_tp", nothing)
+        if by_tp isa AbstractDict
+            for (tp_k, ids_v) in by_tp
+                tp_i = tryparse(Int, string(tp_k))
+                tp_i === nothing && continue
+                id_set = Set{Int}()
+                if ids_v isa AbstractVector
+                    for x in ids_v
+                        xi = x isa Integer ? Int(x) : tryparse(Int, string(x))
+                        xi !== nothing && push!(id_set, xi)
+                    end
+                end
+                semantic_allowed_lesion_ids[tp_i] = id_set
+            end
+        end
+    end
+
+    # Augment from tp_organ_mapping if already populated
+    if !isempty(semantic_mentioned_organs[]) && !isempty(tp_organ_mapping)
+        for (tp_i, org_map) in tp_organ_mapping
+            id_set = get!(semantic_allowed_lesion_ids, tp_i, Set{Int}())
+            for (lid, org_name) in org_map
+                if organ_matches_semantic_mentions(org_name, semantic_mentioned_organs[])
+                    push!(id_set, lid)
+                end
+            end
+        end
+    end
+end
+
+function load_semantic_filter_from_h5!(h5_file)
+    # Restore any in-memory filtered masks before resetting state on case switch
+    if semantic_filter_active[]
+        try
+            apply_semantic_filter!(false)
+        catch; end
+    else
+        semantic_filter_active[] = false
+    end
+    empty!(semantic_allowed_lesion_ids)
+    empty!(unfiltered_lesion_masks)
+    semantic_mentioned_organs[] = String[]
+    semantic_reasoning[] = ""
+
+    if haskey(h5_file, "_meta_/semantic_filter.json")
+        raw = read(h5_file["_meta_/semantic_filter.json"])
+        raw_str = raw isa AbstractVector{UInt8} ? String(raw) : string(raw)
+        _parse_semantic_filter_json!(raw_str)
+    end
+    return semantic_mentioned_organs[]
+end
+
+function load_semantic_filter_from_path!(h5_path::AbstractString)
+    isempty(h5_path) && return String[]
+    isfile(h5_path) || return String[]
+    return lock(_hdf5_io_lock) do
+        HDF5.h5open(String(h5_path), "r") do f
+            load_semantic_filter_from_h5!(f)
+        end
+    end
+end
+
+function _sync_entry_mask_from_i16!(entry::TpCacheEntry)
+    if entry.mask !== nothing && entry.mask !== entry.mask_i16
+        if eltype(entry.mask) == Int8
+            entry.mask .= clamp.(entry.mask_i16, Int8(-128), Int8(127))
+        else
+            entry.mask .= entry.mask_i16
+        end
+    end
+end
+
+function _merge_unfiltered_with_live(unfiltered::Array{Int16,3}, live::Array{Int16,3}, allowed_set::Set{Int})::Array{Int16,3}
+    out = copy(unfiltered)
+    @inbounds for i in eachindex(out, live)
+        uv = out[i]
+        lv = live[i]
+        if uv == Int16(0) || (Int(uv) in allowed_set)
+            out[i] = lv
+        elseif lv > Int16(0)
+            out[i] = lv
+        end
+    end
+    return out
+end
+
+function get_unfiltered_mask_for_save(tp_i::Int, entry::TpCacheEntry)
+    base_mask = entry.mask_i16 !== nothing ? entry.mask_i16 : entry.mask
+    base_mask === nothing && return nothing
+    if haskey(unfiltered_lesion_masks, tp_i) && entry.mask_i16 !== nothing
+        allowed = get(semantic_allowed_lesion_ids, tp_i, Set{Int}())
+        return _merge_unfiltered_with_live(unfiltered_lesion_masks[tp_i], entry.mask_i16, allowed)
+    end
+    return base_mask
+end
+
+function _semantic_allowed_set_for_tp(tp_i::Int)::Set{Int}
+    allowed = Set{Int}(get(semantic_allowed_lesion_ids, tp_i, Set{Int}()))
+    mentioned = semantic_mentioned_organs[]
+    if !isempty(mentioned)
+        tp_orgs = get(tp_organ_mapping, tp_i, nothing)
+        if tp_orgs !== nothing
+            for (lid, org_name) in tp_orgs
+                if organ_matches_semantic_mentions(org_name, mentioned)
+                    push!(allowed, lid)
+                end
+            end
+        end
+    end
+    return allowed
+end
+
+function _apply_semantic_filter_to_entry!(tp_i::Int, entry::TpCacheEntry, active::Bool)
+    entry.mask_i16 === nothing && return
+    allowed = _semantic_allowed_set_for_tp(tp_i)
+    if active
+        if !haskey(unfiltered_lesion_masks, tp_i)
+            unfiltered_lesion_masks[tp_i] = copy(entry.mask_i16)
+        end
+        src = unfiltered_lesion_masks[tp_i]
+        dst = entry.mask_i16
+        @inbounds for i in eachindex(dst, src)
+            v = src[i]
+            dst[i] = (v > Int16(0) && !(Int(v) in allowed)) ? Int16(0) : v
+        end
+        _sync_entry_mask_from_i16!(entry)
+    else
+        if haskey(unfiltered_lesion_masks, tp_i)
+            unfiltered = pop!(unfiltered_lesion_masks, tp_i)
+            restored = _merge_unfiltered_with_live(unfiltered, entry.mask_i16, allowed)
+            copyto!(entry.mask_i16, restored)
+            _sync_entry_mask_from_i16!(entry)
+        end
+    end
+end
+
+function _store_tp_cache_entry!(tp_i::Int, entry::TpCacheEntry)
+    tp_data_cache[tp_i] = entry
+    if semantic_filter_active[]
+        _apply_semantic_filter_to_entry!(tp_i, entry, true)
+    end
+    return entry
+end
+
+function apply_semantic_filter!(active::Bool; stateObjects=nothing)
+    semantic_filter_active[] = active
+    lock(_tp_cache_lock) do
+        for (tp_i, entry) in tp_data_cache
+            _apply_semantic_filter_to_entry!(tp_i, entry, active)
+        end
+    end
+    if stateObjects !== nothing
+        n_panels = min(length(stateObjects), 10)
+        for p in 1:n_panels
+            try
+                _force_texture_upload!(stateObjects, p)
+                if stateObjects[p].mainForDisplayObjects.vulkanPipelineState !== nothing
+                    stateObjects[p].mainForDisplayObjects.vulkanPipelineState.ubo_dirty = true
+                end
+            catch; end
+        end
+    end
+    return active
+end
+
+function reactToToggleSemanticFilter(data::MakieEvents.ToggleSemanticFilterEvent, stateObjects::Vector{StateDataFields})
+    apply_semantic_filter!(data.active; stateObjects=stateObjects)
+    try
+        tp = current_tp_index[]
+        kept = length(_semantic_allowed_set_for_tp(tp))
+        set_ai_status!(data.active ? "[Semantic Filter] ON ($kept lesions matching report)" : "[Semantic Filter] OFF (showing all lesions)")
+    catch; end
 end
 end # module

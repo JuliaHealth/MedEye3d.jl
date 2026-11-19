@@ -55,10 +55,10 @@ export create_metadata_window, display_metadata_window, get_active_lesion_db, ge
 const _ALL_MENUS = Makie.Menu[]
 const _last_menu_filter_text = Dict{UInt64, String}()
 const ALLOWED_XNAT_PROJECTS = String[
-    "FDM_DPI-2024-7-KRN_Prostata_bimodal",
     "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE",
-    "FDM_DPI-2024-7-KRN_Lu177_PSMA",
-    "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE"
+    "FDM_DPI-2024-7-KRN_Prostata_bimodal",
+    "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE",
+    "FDM_DPI-2024-7-KRN_Lu177_PSMA"
 ]
 
 abstract type DBMessage end
@@ -329,7 +329,7 @@ const _active_xnat_creds = Ref{Union{XnatAuth.XnatCredentials, Nothing}}(nothing
 Extracts clean subject ID from strings with status badges, e.g. "[OK] pat6 (PROCESSED)" -> "pat6".
 """
 function _parse_subject_id(s::AbstractString)::String
-    m = match(r"^(?:(?:\[[a-zA-Z0-9_\.\s\-\!]+\]|[🟢🟡🔴🔵])\s*)*([a-zA-Z0-9_\-]+)", strip(s))
+    m = match(r"^(?:(?:\[[^\]]+\]|[🟢🟡🔴🔵])\s*)*([a-zA-Z0-9_\-]+)", strip(s))
     return m !== nothing ? String(m.captures[1]) : String(strip(s))
 end
 
@@ -342,8 +342,46 @@ function _get_current_username()::String
     if !isempty(_current_user[])
         return _current_user[]
     end
+    creds = _active_xnat_creds[]
+    if creds !== nothing && !isempty(creds.username)
+        return creds.username
+    end
     u = get(ENV, "USER", get(ENV, "LOGNAME", get(ENV, "USERNAME", "")))
     return isempty(u) ? "user" : u
+end
+
+"""Read `_meta_/modification_status.json` from `h5_path`, returning `(manually_modified, modified_by, last_modified)`."""
+function read_h5_modification_status(h5_path::String)::Tuple{Bool, String, String}
+    (!isfile(h5_path) || filesize(h5_path) < 1024) && return (false, "", "")
+    try
+        return HDF5.h5open(h5_path, "r") do f
+            if haskey(f, "_meta_/modification_status.json")
+                d = JSON.parse(String(read(f["_meta_/modification_status.json"])))
+                return (
+                    Bool(get(d, "manually_modified", false)),
+                    String(get(d, "modified_by", "")),
+                    String(get(d, "last_modified", "")),
+                )
+            end
+            has_exp = haskey(f, "BASELINE/PET_Lesions_0.nii.gz_expert") || haskey(f, "_meta_/lesion_annotations.json")
+            return (has_exp, "", "")
+        end
+    catch
+        return (false, "", "")
+    end
+end
+
+"""Write `_meta_/modification_status.json` into an open `_meta_` HDF5 group."""
+function write_h5_modification_status!(meta_grp, modified::Bool, user::String; ts::String=string(Dates.now()))
+    payload = Dict{String, Any}(
+        "manually_modified" => modified,
+        "modified_by" => modified ? user : "",
+        "last_modified" => modified ? ts : "",
+    )
+    if haskey(meta_grp, "modification_status.json")
+        delete_object(meta_grp, "modification_status.json")
+    end
+    meta_grp["modification_status.json"] = JSON.json(payload, 2)
 end
 
 _lmw_observables[:has_expert_edits] = current_has_expert_edits
@@ -2010,9 +2048,12 @@ function persist_to_active_dataset_h5!(db::Dict, h5_path::String)
                     if !startswith(string(k), "_") && v isa AbstractDict
                         lid = parse_lesion_id(string(k))
                         if lid !== nothing
-                            anat = get(v, "BaseAnatomy", "")
-                            if !isempty(anat)
-                                organ = replace(string(anat), r"\s*\(UBERON\)" => "")
+                            anat = strip(string(get(v, "BaseAnatomy", "")))
+                            user_edited = get(v, "_user_edited_anatomy", false) == true
+                            existing_org = strip(string(get(sub_cur, string(lid), "")))
+                            has_valid_existing = !isempty(existing_org) && !(lowercase(existing_org) in ("unknown", "(select)"))
+                            if !isempty(anat) && !(lowercase(anat) in ("unknown", "(select)")) && (user_edited || !has_valid_existing)
+                                organ = replace(anat, r"\s*\(UBERON\)" => "")
                                 sub_cur[string(lid)] = organ
                             end
                         end
@@ -2088,6 +2129,9 @@ function persist_to_active_dataset_h5!(db::Dict, h5_path::String)
                     end
                     meta_grp["custom_fields.json"] = JSON.json(_custom_fields_cache[], 2)
                 end
+
+                # 5. Record explicit manual modification status & user
+                write_h5_modification_status!(meta_grp, true, _get_current_username())
             end
             @debug "[HDF5] Persisted lesion metadata to $h5_path"
         catch e
@@ -3411,20 +3455,123 @@ end
 # When the dropdown is open, typing filters options in real time.
 # Returns the Menu itself so `.i_selected[]` / `.selection[]` code is unchanged.
 
+"""Compute character-bigram Dice + token/substring/prefix overlap score for ranking dropdown options."""
+function _string_overlap_score(query::AbstractString, candidate::AbstractString)::Float64
+    q = lowercase(strip(query))
+    c = lowercase(strip(candidate))
+    (isempty(q) || isempty(c)) && return 0.0
+
+    # Extract trailing identifier token (e.g. "Pat27" from "[PRE] FDM_...__Pat27" or "Pat27")
+    c_clean = replace(c, r"^\[[^\]]+\]\s*" => "")
+    c_tail = occursin("__", c_clean) ? split(c_clean, "__")[end] : c_clean
+
+    (c_tail == q || c_clean == q || c == q) && return 1000.0
+    if startswith(c_tail, q)
+        return 700.0 + length(q) / max(1, length(c_tail))
+    elseif startswith(c_clean, q)
+        return 600.0 + length(q) / max(1, length(c_clean))
+    end
+    if occursin(q, c_tail)
+        return 350.0 + length(q) / max(1, length(c_tail))
+    elseif occursin(q, c_clean)
+        return 250.0 + length(q) / max(1, length(c_clean))
+    elseif occursin(q, c)
+        return 200.0 + length(q) / max(1, length(c))
+    end
+
+    # Plural/suffix tolerance
+    q_norm = replace(q, r"(ae|es|s)$" => "")
+    if q_norm != q && !isempty(q_norm) && occursin(q_norm, c_clean)
+        return 180.0 + length(q_norm) / max(1, length(c_clean))
+    end
+
+    # Multi-token overlap
+    q_toks = [String(t) for t in split(replace(q, r"[^a-z0-9]+" => " ")) if !isempty(t)]
+    c_toks = Set(String(t) for t in split(replace(c_clean, r"[^a-z0-9]+" => " ")) if !isempty(t))
+    tok_hits = 0
+    if !isempty(q_toks) && !isempty(c_toks)
+        for qt in q_toks
+            if qt in c_toks || any(ct -> occursin(qt, ct), c_toks)
+                tok_hits += 1
+            end
+        end
+    end
+    if tok_hits == length(q_toks) && tok_hits > 0
+        return 120.0 + length(q) / max(1, length(c_clean))
+    end
+
+    # If the query contains numeric IDs (e.g. "pat27" -> "27"), don't fuzzy-match unrelated patient numbers (e.g. "pat3")
+    q_nums = [m.match for m in eachmatch(r"\d+", q)]
+    if !isempty(q_nums) && !all(d -> occursin(d, c_clean), q_nums)
+        return 0.0
+    end
+
+    # Character bigram Dice overlap (handles slight typos / partial order)
+    bigram_dice = 0.0
+    if length(q) >= 2 && length(c_clean) >= 2
+        q_bg = Set{SubString{String}}()
+        i = firstindex(q)
+        while i < lastindex(q)
+            ni = nextind(q, i)
+            push!(q_bg, SubString(q, i, ni))
+            i = ni
+        end
+        c_bg = Set{SubString{String}}()
+        j = firstindex(c_clean)
+        while j < lastindex(c_clean)
+            nj = nextind(c_clean, j)
+            push!(c_bg, SubString(c_clean, j, nj))
+            j = nj
+        end
+        if !isempty(q_bg) && !isempty(c_bg)
+            inter = length(intersect(q_bg, c_bg))
+            bigram_dice = (2.0 * inter) / (length(q_bg) + length(c_bg))
+        end
+    end
+
+    if tok_hits > 0 && length(q_toks) > 1
+        return 60.0 * (tok_hits / length(q_toks)) + 25.0 * bigram_dice
+    elseif bigram_dice >= 0.40
+        return 50.0 * bigram_dice
+    end
+    return 0.0
+end
+
+function _rank_best_overlap_matches(query::AbstractString, candidates::Vector{String}; limit::Int=50)::Vector{String}
+    q = strip(String(query))
+    isempty(q) && return length(candidates) > limit ? candidates[1:limit] : copy(candidates)
+    direct = Tuple{Float64, Int, String}[]
+    fuzzy = Tuple{Float64, Int, String}[]
+    for (idx, cand) in enumerate(candidates)
+        sc = _string_overlap_score(q, cand)
+        if sc >= 120.0
+            push!(direct, (sc, idx, cand))
+        elseif sc > 0.0
+            push!(fuzzy, (sc, idx, cand))
+        end
+    end
+    chosen = !isempty(direct) ? direct : fuzzy
+    sort!(chosen; by = x -> (-x[1], x[2]))
+    n_out = min(limit, length(chosen))
+    return String[chosen[k][3] for k in 1:n_out]
+end
+
 """
-    searchable_menu(g, row, cols; options, default=1, fontsize=10)
+    searchable_menu(g, row, cols; options, default=1, fontsize=10, fts_table="anatomy_fts", allow_custom=true, suppress_selection_ref=nothing)
 
 Create a searchable dropdown.  Returns a standard **Menu** widget.
 
-When the dropdown is open, typing characters filters the visible options.
+When the dropdown is open, typing characters filters and ranks the visible options
+by best string overlap (backed by an in-memory option list and SQLite FTS5 index).
 Backspace removes a character from the filter. Escape resets the filter.
-The Menu prompt shows the current filter text ("Filter: query").
-Closing the dropdown restores all options.
+Enter selects the top match. Closing the dropdown restores all options.
 """
 function searchable_menu(g, row, cols;
         options,
         default = 1,
         fts_table = "anatomy_fts",
+        allow_custom::Bool = true,
+        suppress_selection_ref::Union{Nothing, Ref{Bool}} = nothing,
         fontsize = 10)
 
     # Snapshot original full options
@@ -3442,16 +3589,6 @@ function searchable_menu(g, row, cols;
         default  = default,
         fontsize = fontsize)
 
-    # Keep all_opts in sync if options is an Observable
-    if options isa Observable
-        on(options) do updated
-            all_opts[] = copy(updated)
-            if length(all_opts[]) <= 150
-                menu.options[] = copy(all_opts[])
-            end
-        end
-    end
-
     filter_buf = Ref("")
 
     # ── When menu opens → reset filter; when it closes → restore limited options ──
@@ -3464,12 +3601,11 @@ function searchable_menu(g, row, cols;
             end
             sel = menu.selection[]
             
-            # If the user typed something but just clicked away without selecting, auto-commit their typed text
-            if !isempty(filter_buf[]) && (sel === nothing || isempty(string(sel)))
+            # If the user typed something but clicked away without selecting, commit custom text (only when allow_custom=true)
+            if allow_custom && !isempty(filter_buf[]) && (sel === nothing || isempty(string(sel)))
                 typed_str = filter_buf[]
                 current_opts = all_opts[]
                 if !(typed_str in current_opts)
-                    # Custom text: insert into options so it's a valid selection, preserving "" at index 1
                     empty_idx = findfirst(opt -> isempty(strip(string(opt))), current_opts)
                     if empty_idx == 1
                         menu.options[] = vcat([current_opts[1], typed_str], current_opts[2:end])
@@ -3481,7 +3617,6 @@ function searchable_menu(g, row, cols;
                         menu.i_selected[] = 1
                     end
                 else
-                    # Exists in options: select it
                     menu.options[] = current_opts
                     idx = findfirst(==(typed_str), current_opts)
                     sel = typed_str
@@ -3489,13 +3624,18 @@ function searchable_menu(g, row, cols;
                 end
                 filter_buf[] = ""
             else
-                # Standard restore logic if they didn't type anything new (or if they actually clicked an item)
                 if !isempty(filter_buf[])
-                    _apply_searchable_filter!(menu, "", all_opts[], fts_table)
+                    _apply_searchable_filter!(menu, "", all_opts[], fts_table; suppress_selection_ref=suppress_selection_ref)
                 end
-                if sel !== nothing && !isempty(string(sel))
+                if sel !== nothing && !isempty(string(sel)) && !startswith(string(sel), "(no match for ")
                     sel_str = string(sel)
-                    _set_menu_selection_string!(menu, sel_str; all_opts = (options isa Observable ? options : nothing))
+                    prev_sup = suppress_selection_ref === nothing ? false : suppress_selection_ref[]
+                    suppress_selection_ref !== nothing && (suppress_selection_ref[] = true)
+                    try
+                        _set_menu_selection_string!(menu, sel_str; all_opts = (options isa Observable ? options : nothing))
+                    finally
+                        suppress_selection_ref !== nothing && (suppress_selection_ref[] = prev_sup)
+                    end
                 end
                 filter_buf[] = ""
             end
@@ -3512,7 +3652,7 @@ function searchable_menu(g, row, cols;
         @async begin
             sleep(0.08)  # 80ms debounce for rapid typing
             _filter_pending[] = false
-            _apply_searchable_filter!(menu, filter_buf[], all_opts[])
+            _apply_searchable_filter!(menu, filter_buf[], all_opts[], fts_table; suppress_selection_ref=suppress_selection_ref)
         end
     end
 
@@ -3535,21 +3675,30 @@ function searchable_menu(g, row, cols;
             _debounced_filter!()
             return Consume(true)
         elseif event.key == Makie.Keyboard.enter
-            # User hits enter to select the best match
+            # Apply immediately if debounce hasn't run yet, then commit top best-overlap match
+            if !isempty(filter_buf[])
+                _apply_searchable_filter!(menu, filter_buf[], all_opts[], fts_table; suppress_selection_ref=suppress_selection_ref)
+            end
             opts = menu.options[]
-            if !isempty(opts)
-                # Filter down might have put the best match at index 1
+            top_sel = nothing
+            if !isempty(opts) && !startswith(string(opts[1]), "(no match for ") && !startswith(string(opts[1]), "(type to filter")
+                top_sel = opts[1]
+                filter_buf[] = ""
                 menu.i_selected[] = 1
-                # (Makie automatically updates selection when i_selected is updated,
-                #  but if it was already 1, we might need to manually trigger autosave or let it be.)
-                # Force selection to be explicit:
-                # Actually, if we close the menu, the is_open logic will preserve it!
+            else
+                filter_buf[] = ""
             end
             menu.is_open[] = false
+            if top_sel !== nothing && menu.selection[] != top_sel
+                menu.selection[] = top_sel
+            elseif top_sel !== nothing
+                notify(menu.selection)
+            end
             return Consume(true)
         elseif event.key == Makie.Keyboard.escape
             filter_buf[] = ""
-            menu.is_open[] = false   # Close the dropdown (on(is_open) resets filter)
+            _apply_searchable_filter!(menu, "", all_opts[], fts_table; suppress_selection_ref=suppress_selection_ref)
+            menu.is_open[] = false   # Close the dropdown
             return Consume(true)
         end
         return Consume(false)
@@ -3560,7 +3709,7 @@ function searchable_menu(g, row, cols;
         on(options) do new_opts
             all_opts[] = collect(String, new_opts)
             if !menu.is_open[]
-                _apply_searchable_filter!(menu, "", all_opts[], fts_table)
+                _apply_searchable_filter!(menu, "", all_opts[], fts_table; suppress_selection_ref=suppress_selection_ref)
             end
         end
     end
@@ -3613,90 +3762,85 @@ end
 """Apply the current filter text to a searchable menu's options.
 Uses SQLite FTS5 for ranked search with BM25 relevance scoring on large option sets (anatomy).
 Falls back to linear substring scan for small sets or when FTS5 returns empty."""
-function _apply_searchable_filter!(menu, query::String, full_opts::Vector{String}, fts_table="anatomy_fts")
+function _apply_searchable_filter!(menu, query::String, full_opts::Vector{String}, fts_table="anatomy_fts"; suppress_selection_ref::Union{Nothing, Ref{Bool}}=nothing)
     MAX_DISPLAY = 50  # Limit displayed matches to prevent Makie layout rebuild bottleneck
-    if isempty(query)
-        # Show all items if <= 150 items (small schema dropdowns), else first MAX_DISPLAY items
-        if length(full_opts) > 150
-            new_opts = vcat(full_opts[1:MAX_DISPLAY], ["(type to filter $(length(full_opts)) items...)"])
-            # CRITICAL: Preserve current selection in new_opts so Makie does not erase it!
-            cur_sel = menu.selection[]
-            if cur_sel !== nothing && !isempty(string(cur_sel))
-                cur_str = string(cur_sel)
-                if !(cur_str in new_opts)
-                    empty_idx = findfirst(opt -> isempty(strip(string(opt))), new_opts)
-                    if empty_idx == 1
-                        new_opts = vcat([new_opts[1], cur_str], new_opts[2:end])
-                    else
-                        new_opts = vcat([cur_str], new_opts)
+    prev_sup = suppress_selection_ref === nothing ? false : suppress_selection_ref[]
+    suppress_selection_ref !== nothing && (suppress_selection_ref[] = true)
+    try
+        if isempty(query)
+            # Show all items if <= 150 items (small schema dropdowns), else first MAX_DISPLAY items
+            if length(full_opts) > 150
+                new_opts = vcat(full_opts[1:MAX_DISPLAY], ["(type to filter $(length(full_opts)) items...)"])
+                # CRITICAL: Preserve current selection in new_opts so Makie does not erase it!
+                cur_sel = menu.selection[]
+                if cur_sel !== nothing && !isempty(string(cur_sel))
+                    cur_str = string(cur_sel)
+                    if !(cur_str in new_opts)
+                        empty_idx = findfirst(opt -> isempty(strip(string(opt))), new_opts)
+                        if empty_idx == 1
+                            new_opts = vcat([new_opts[1], cur_str], new_opts[2:end])
+                        else
+                            new_opts = vcat([cur_str], new_opts)
+                        end
+                    end
+                end
+            else
+                new_opts = copy(full_opts)
+            end
+            # Skip no-op: avoid Makie layout rebuild if options haven't changed
+            if menu.options[] != new_opts
+                cur_s = menu.selection[]
+                menu.options[] = new_opts
+                if cur_s !== nothing && !isempty(string(cur_s))
+                    idx = findfirst(==(string(cur_s)), new_opts)
+                    if idx !== nothing
+                        _set_menu_idx!(menu, idx)
                     end
                 end
             end
+            if menu.prompt[] != "Select..."
+                menu.prompt[]  = "Select..."
+            end
         else
-            new_opts = copy(full_opts)
-        end
-        # Skip no-op: avoid Makie layout rebuild if options haven't changed
-        if menu.options[] != new_opts
-            cur_s = menu.selection[]
-            menu.options[] = new_opts
-            if cur_s !== nothing && !isempty(string(cur_s))
-                idx = findfirst(==(string(cur_s)), new_opts)
-                if idx !== nothing
-                    _set_menu_idx!(menu, idx)
+            # Combine in-memory FTS5 search (for large sets >= 100 items) with best-overlap ranking
+            use_fts = (fts_table != "") && length(full_opts) >= 100
+            fts_hits = use_fts ? fts_search(fts_table, query; limit = max(MAX_DISPLAY * 2, 100)) : String[]
+            pool = if length(full_opts) <= 2000
+                full_opts
+            elseif !isempty(fts_hits)
+                fts_hits
+            else
+                full_opts
+            end
+            filtered = _rank_best_overlap_matches(query, pool; limit = MAX_DISPLAY)
+            if isempty(filtered) && !isempty(fts_hits)
+                filtered = fts_hits[1:min(MAX_DISPLAY, length(fts_hits))]
+            end
+
+            new_opts = if isempty(filtered)
+                ["(no match for '$query')"]
+            else
+                filtered
+            end
+            # Preserve selection only if not actively narrowing a non-custom picker away from stale selection,
+            # OR keep best overlap at index 1 when query is non-empty!
+            if menu.options[] != new_opts
+                cur_s = menu.selection[]
+                menu.options[] = new_opts
+                if cur_s !== nothing && (string(cur_s) in new_opts)
+                    idx = findfirst(==(string(cur_s)), new_opts)
+                    idx !== nothing && _set_menu_idx!(menu, idx)
+                elseif !isempty(new_opts)
+                    _set_menu_idx!(menu, 1)
                 end
             end
-        end
-        if menu.prompt[] != "Select..."
-            menu.prompt[]  = "Select..."
-        end
-    else
-        # For large option sets (anatomy, 16K+ items), use FTS5 ranked search
-        # For small sets (<100 items), skip FTS5 overhead and use linear scan directly
-        use_fts = (fts_table != "") && length(full_opts) >= 100
-        filtered = use_fts ? fts_search(fts_table, query; limit = MAX_DISPLAY) : String[]
-        
-        # Linear substring scan (primary for small sets, fallback for large)
-        if isempty(filtered)
-            q = lowercase(query)
-            q_norm = replace(q, r"(ae|es|s)$" => "")
-            use_norm = q_norm != q
-            for i in eachindex(full_opts)
-                t = lowercase(full_opts[i])
-                if occursin(q, t) || (use_norm && occursin(q_norm, t))
-                    push!(filtered, full_opts[i])
-                    length(filtered) >= MAX_DISPLAY && break
-                end
+            new_prompt = "Filter: $query"
+            if menu.prompt[] != new_prompt
+                menu.prompt[] = new_prompt
             end
         end
-        
-        new_opts = if isempty(filtered)
-            ["(no match for '$query')"]
-        else
-            filtered
-        end
-        # CRITICAL: Preserve current selection in new_opts during filtering so Makie keeps it valid
-        cur_sel = menu.selection[]
-        if cur_sel !== nothing && !isempty(string(cur_sel))
-            cur_str = string(cur_sel)
-            if !(cur_str in new_opts) && new_opts != ["(no match for '$query')"]
-                new_opts = vcat([cur_str], new_opts)
-            end
-        end
-        # Skip no-op: avoid Makie layout rebuild if options haven't changed
-        if menu.options[] != new_opts
-            cur_s = menu.selection[]
-            menu.options[] = new_opts
-            if cur_s !== nothing && !isempty(string(cur_s))
-                idx = findfirst(==(string(cur_s)), new_opts)
-                if idx !== nothing
-                    _set_menu_idx!(menu, idx)
-                end
-            end
-        end
-        new_prompt = "Filter: $query"
-        if menu.prompt[] != new_prompt
-            menu.prompt[] = new_prompt
-        end
+    finally
+        suppress_selection_ref !== nothing && (suppress_selection_ref[] = prev_sup)
     end
 end
 
@@ -3785,6 +3929,7 @@ function create_metadata_window(
     _lmw_observables[:lesion_ids] = lesion_ids
     _current_displayed_lid = Ref{Int}(-1)
     _skip_apply_state = Ref{Bool}(false)
+    _is_switching_case = Ref{Bool}(false)
     ui_queue = Function[]
     ui_lock = ReentrantLock()
     _safe_ui_update(f::Function) = f()
@@ -4421,6 +4566,7 @@ function create_metadata_window(
     xnat_subject_status_text = Observable("Status: --")
     xnat_subject_status_color = Observable(RGBf(0.7, 0.7, 0.7))
     raw_subjects_cache = Dict{String, Vector{String}}()
+    is_filtering_patients = Ref(false)
 
     xnat_r1 = nr!()
     lbl_xnat_status = Label(g[xnat_r1, 1:3], xnat_server_status_text, fontsize = 10, color = xnat_server_status_color, halign = :left, tellwidth = false)
@@ -4429,14 +4575,14 @@ function create_metadata_window(
 
     xnat_r2 = nr!()
     lbl_proj = Label(g[xnat_r2, 1], "Project:", fontsize = 10, halign = :left, color = SUBTXT)
-    menu_xnat_proj = Menu(g[xnat_r2, 2], options = xnat_projects, default = "FDM_DPI-2024-7-KRN_Lu177_PSMA_PIPELINE", fontsize = 10); _register_menu!(menu_xnat_proj)
+    menu_xnat_proj = searchable_menu(g, xnat_r2, 2; options = xnat_projects, default = "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE", fts_table = "", allow_custom = false, fontsize = 10)
     lbl_filt = Label(g[xnat_r2, 3], "Filter:", fontsize = 10, halign = :right, color = SUBTXT)
-    menu_xnat_filter = Menu(g[xnat_r2, 4], options = xnat_filter_opts, default = "All Cases", fontsize = 9); _register_menu!(menu_xnat_filter)
+    menu_xnat_filter = searchable_menu(g, xnat_r2, 4; options = xnat_filter_opts, default = "All Cases", fts_table = "", allow_custom = false, fontsize = 9)
     rowsize!(g, xnat_r2, Fixed(28)); register_fixed_row!(xnat_r2, 28)
 
     xnat_r3 = nr!()
     lbl_subj = Label(g[xnat_r3, 1], "Patient:", fontsize = 10, halign = :left, color = SUBTXT)
-    menu_xnat_subj = Menu(g[xnat_r3, 2:3], options = xnat_subjects, default = "(Select Project First)", fontsize = 10); _register_menu!(menu_xnat_subj)
+    menu_xnat_subj = searchable_menu(g, xnat_r3, 2:3; options = xnat_subjects, default = "(Select Project First)", fts_table = "patient_fts", allow_custom = false, suppress_selection_ref = is_filtering_patients, fontsize = 10)
     lbl_xnat_subj_status = Label(g[xnat_r3, 4], xnat_subject_status_text, fontsize = 9, color = xnat_subject_status_color, halign = :center)
     rowsize!(g, xnat_r3, Fixed(28)); register_fixed_row!(xnat_r3, 28)
 
@@ -4538,7 +4684,6 @@ function create_metadata_window(
         end
     end
 
-    is_filtering_patients = Ref(false)
     function _filter_and_set_subjects!(; query::AbstractString="")
         proj = menu_xnat_proj.selection[]
         (proj === nothing || !haskey(raw_subjects_cache, proj)) && return
@@ -4548,25 +4693,23 @@ function create_metadata_window(
         filtered = if filt == "Unreviewed (PRE)"
             filter(s -> occursin("[PRE]", s) || occursin("PREPROCESSED", s), all_s)
         elseif filt == "Validated (OK)"
-            filter(s -> occursin("[OK]", s) || occursin("PROCESSED", s), all_s)
+            filter(s -> occursin("[OK", s) || occursin("PROCESSED", s), all_s)
         elseif filt == "Raw Scans (RAW)"
             filter(s -> occursin("[RAW]", s) || occursin("RAW", s), all_s)
         else
             all_s
         end
         
-        q = strip(lowercase(query))
+        q = strip(query)
         if !isempty(q)
-            filtered = filter(s -> occursin(q, lowercase(s)), filtered)
+            filtered = _rank_best_overlap_matches(q, filtered; limit = max(length(filtered), 50))
         end
         
         is_filtering_patients[] = true
         try
-            if isempty(filtered)
-                menu_xnat_subj.options[] = ["(No matching patients)"]
-            else
-                menu_xnat_subj.options[] = filtered
-            end
+            new_subj_list = isempty(filtered) ? ["(No matching patients)"] : filtered
+            xnat_subjects[] = new_subj_list
+            menu_xnat_subj.options[] = new_subj_list
         finally
             is_filtering_patients[] = false
         end
@@ -4577,87 +4720,225 @@ function create_metadata_window(
         !isfile(target_h5) && return
         println("[SWITCH-CASE] Switching active dataset to $target_h5"); flush(stdout)
         _set_xnat_progress!(55.0, "Reading HDF5 metadata & lesion annotations...")
+        _is_switching_case[] = true
         try
-            empty!(_cached_lesion_ids)
-            empty!(_MASK_IDS_CACHE)
-            empty!(_organ_classification_cache)
-            empty!(_lesion_suv_cache)
-            empty!(_lesion_suv_metrics_cache)
-            empty!(_volume_cache)
-            _current_displayed_lid[] = -1
-            _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
-            _MEH_mod.h5_path_ref[] = target_h5
-            _MEH_mod.h5_save_path_ref[] = target_h5
-            _MEH_mod.patient_id[] = basename(target_h5)
-            lock(_MEH_mod._tp_cache_lock) do
-                empty!(_MEH_mod.tp_data_cache)
-            end
-            lock(_MEH_mod._centroids_lock) do
-                empty!(_MEH_mod.lesion_centroids_cache)
-                empty!(_MEH_mod.pet_volumes_cache)
-            end
-        catch; end
-        
-        try
-            new_db = load_annotations_hdf5(target_h5)
-            if isempty(new_db)
-                companion = replace(target_h5, r"\.(h5|hdf5)$"i => "_annotations.json")
-                if isfile(companion)
-                    new_db = load_annotations(companion)
-                end
-            end
-            lesion_db[] = _migrate_db(new_db)
-
-            all_lids_set = Set{Int}()
-            for k in keys(lesion_db[])
-                if !startswith(k, "_")
-                    lid = parse_lesion_id(k)
-                    lid !== nothing && lid > 0 && push!(all_lids_set, lid)
-                end
-            end
-            tp0_names = Dict{Int, String}()
             try
+                empty!(_cached_lesion_ids)
+                empty!(_MASK_IDS_CACHE)
+                empty!(_organ_classification_cache)
+                empty!(_lesion_suv_cache)
+                empty!(_lesion_suv_metrics_cache)
+                empty!(_volume_cache)
+                _current_displayed_lid[] = -1
                 _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
-                lock(_MEH_mod._hdf5_io_lock) do
-                    HDF5.h5open(target_h5, "r") do h5_f
-                        if haskey(h5_f, "_meta_/segment_names.json")
-                            raw_sn = JSON.parse(read(h5_f["_meta_/segment_names.json"]))
-                            if haskey(raw_sn, "0") && raw_sn["0"] isa AbstractDict
-                                for (sk, sv) in raw_sn["0"]
-                                    lid = tryparse(Int, string(sk))
-                                    if lid !== nothing && lid > 0
-                                        tp0_names[lid] = string(sv)
-                                        push!(all_lids_set, lid)
+                _MEH_mod.h5_path_ref[] = target_h5
+                _MEH_mod.h5_save_path_ref[] = target_h5
+                _MEH_mod.patient_id[] = basename(target_h5)
+                lock(_MEH_mod._tp_cache_lock) do
+                    empty!(_MEH_mod.tp_data_cache)
+                end
+                lock(_MEH_mod._centroids_lock) do
+                    empty!(_MEH_mod.lesion_centroids_cache)
+                    empty!(_MEH_mod.ln_centroids_cache)
+                    empty!(_MEH_mod.pet_volumes_cache)
+                end
+                empty!(_MEH_mod.bone_subsegments_cache)
+                if isdefined(_MEH_mod, :unfiltered_lesion_masks)
+                    empty!(_MEH_mod.unfiltered_lesion_masks)
+                end
+                empty!(_MEH_mod.tp_organ_mapping)
+                _MEH_mod.global_organ_mapping[] = Dict{Int, String}()
+                empty!(_MEH_mod.tp_segment_names)
+                empty!(_MEH_mod.anatomy_labels_cache)
+                _MEH_mod.global_ts_atlas[] = nothing
+                _MEH_mod.global_ts_names[] = Dict{Int, String}()
+                _MEH_mod.global_bone_atlas[] = nothing
+                empty!(_MEH_mod.tp_descriptions)
+                empty!(_MEH_mod.tp_english_descriptions)
+                _MEH_mod.volume_z_size[] = 0
+                ln_validation_db[] = Dict{String, Any}()
+                _lesion_only_db_backup[] = Dict{String, Any}()
+            catch; end
+
+            new_lids = String["(none)"]
+            try
+                new_db = load_annotations_hdf5(target_h5)
+                if isempty(new_db)
+                    companion = replace(target_h5, r"\.(h5|hdf5)$"i => "_annotations.json")
+                    if isfile(companion)
+                        new_db = load_annotations(companion)
+                    end
+                end
+                lesion_db[] = _migrate_db(new_db)
+
+                all_lids_set = Set{Int}()
+                for k in keys(lesion_db[])
+                    if !startswith(k, "_")
+                        lid = parse_lesion_id(k)
+                        lid !== nothing && lid > 0 && push!(all_lids_set, lid)
+                    end
+                end
+                tp0_names = Dict{Int, String}()
+                tp0_organs = Dict{Int, String}()
+                try
+                    _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+                    lock(_MEH_mod._hdf5_io_lock) do
+                        HDF5.h5open(target_h5, "r") do h5_f
+                            if haskey(h5_f, "_meta_/organ_mapping")
+                                raw_om = JSON.parse(read(h5_f["_meta_/organ_mapping"]))
+                                new_global_om = Dict{Int, String}()
+                                if !isempty(raw_om)
+                                    first_val = first(values(raw_om))
+                                    if first_val isa AbstractDict
+                                        sorted_tps = sort(collect(keys(raw_om)); by = k -> (parse(Int, string(k)) == 0 ? typemax(Int) : parse(Int, string(k))))
+                                        for tp_str in sorted_tps
+                                            tp_map = raw_om[tp_str]
+                                            tp_idx = parse(Int, string(tp_str))
+                                            tp_dict = Dict{Int, String}()
+                                            for (lid_str, organ) in tp_map
+                                                lid = tryparse(Int, string(lid_str))
+                                                lid === nothing && continue
+                                                org_s = string(organ)
+                                                tp_dict[lid] = org_s
+                                                if tp_idx == 0
+                                                    tp0_organs[lid] = org_s
+                                                    lid > 0 && push!(all_lids_set, lid)
+                                                end
+                                                if tp_idx == 0 || !haskey(new_global_om, lid) || isempty(new_global_om[lid]) || new_global_om[lid] == "Unknown"
+                                                    new_global_om[lid] = org_s
+                                                end
+                                            end
+                                            _MEH_mod.tp_organ_mapping[tp_idx] = tp_dict
+                                        end
+                                    else
+                                        for (lid_str, organ) in raw_om
+                                            lid = tryparse(Int, string(lid_str))
+                                            lid === nothing && continue
+                                            org_s = string(organ)
+                                            tp0_organs[lid] = org_s
+                                            new_global_om[lid] = org_s
+                                            lid > 0 && push!(all_lids_set, lid)
+                                        end
+                                        _MEH_mod.tp_organ_mapping[0] = copy(tp0_organs)
+                                    end
+                                end
+                                _MEH_mod.global_organ_mapping[] = new_global_om
+                            end
+                            if haskey(h5_f, "_meta_/segment_names.json")
+                                raw_sn = JSON.parse(read(h5_f["_meta_/segment_names.json"]))
+                                for (tp_str, sdict) in raw_sn
+                                    tp_i = tryparse(Int, string(tp_str))
+                                    (tp_i !== nothing && sdict isa AbstractDict) || continue
+                                    tdict = get!(_MEH_mod.tp_segment_names, tp_i, Dict{Int, String}())
+                                    for (sk, sv) in sdict
+                                        lid = tryparse(Int, string(sk))
+                                        if lid !== nothing && lid > 0
+                                            sv_s = string(sv)
+                                            tdict[lid] = sv_s
+                                            if tp_i == 0
+                                                tp0_names[lid] = sv_s
+                                                push!(all_lids_set, lid)
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                            if haskey(h5_f, "_meta_/max_anatomy_labels.json")
+                                raw_labels = JSON.parse(read(h5_f["_meta_/max_anatomy_labels.json"]))
+                                _MEH_mod.global_ts_names[] = Dict{Int, String}(parse(Int, string(k)) => string(v) for (k, v) in raw_labels)
+                            end
+                            if haskey(h5_f, "CENTROIDS")
+                                for ckey in keys(h5_f["CENTROIDS"])
+                                    parts = split(ckey, "_lid")
+                                    if length(parts) == 2
+                                        tp_idx = tryparse(Int, replace(parts[1], "tp" => ""))
+                                        lid = tryparse(Int, parts[2])
+                                        if tp_idx !== nothing && lid !== nothing
+                                            coords = read(h5_f["CENTROIDS/$ckey"])
+                                            c = [Int(coords[1]), Int(coords[2]), Int(coords[3])]
+                                            lock(_MEH_mod._centroids_lock) do
+                                                _MEH_mod.lesion_centroids_cache[(tp_idx, lid)] = c
+                                                if tp_idx == 0
+                                                    _MEH_mod.lesion_centroids_cache[lid] = c
+                                                    lid > 0 && push!(all_lids_set, lid)
+                                                end
+                                            end
+                                        end
+                                        continue
+                                    end
+                                    parts_ln = split(ckey, "_ln")
+                                    if length(parts_ln) == 2
+                                        tp_idx = tryparse(Int, replace(parts_ln[1], "tp" => ""))
+                                        aid = tryparse(Int, parts_ln[2])
+                                        if tp_idx !== nothing && aid !== nothing
+                                            coords = read(h5_f["CENTROIDS/$ckey"])
+                                            c = [Int(coords[1]), Int(coords[2]), Int(coords[3])]
+                                            lock(_MEH_mod._centroids_lock) do
+                                                _MEH_mod.ln_centroids_cache[(tp_idx, aid)] = c
+                                                if tp_idx == 0
+                                                    _MEH_mod.ln_centroids_cache[aid] = c
+                                                end
+                                            end
+                                        end
                                     end
                                 end
                             end
                         end
                     end
-                end
-            catch; end
+                catch; end
 
-            new_lids = String[]
-            for lid in sort(collect(all_lids_set))
-                d_name = get(tp0_names, lid, "")
-                if isempty(d_name)
-                    st = get(lesion_db[], string(lid), Dict())
-                    d_name = get(st, "_display_name", get(st, "BaseAnatomy", "Lesion $lid"))
+                LA_sw = try parentmodule(@__MODULE__).LesionAssociation catch; nothing end
+                new_lids = String[]
+                for lid in sort(collect(all_lids_set))
+                    d_name = ""
+                    sn = get(tp0_names, lid, "")
+                    if !isempty(sn)
+                        lc_sn = lowercase(strip(sn))
+                        is_generic = startswith(lc_sn, "unknown_") || occursin("unknown_", lc_sn) || startswith(lc_sn, "segment") || startswith(lc_sn, "artificial_") || startswith(lc_sn, "lesion") || occursin("postprocessed", lc_sn)
+                        if !is_generic
+                            d_name = sn
+                        end
+                    end
+                    if isempty(d_name) && haskey(tp0_organs, lid)
+                        raw_o = tp0_organs[lid]
+                        if !isempty(raw_o) && lowercase(raw_o) != "unknown"
+                            d_name = LA_sw !== nothing ? (try LA_sw.lookup_anatomy(raw_o) catch; "" end) : ""
+                            if isempty(d_name) || d_name == raw_o
+                                d_name = replace(raw_o, "_" => " ")
+                            end
+                        end
+                    end
+                    if isempty(d_name)
+                        st = get(lesion_db[], string(lid), Dict())
+                        d_name = get(st, "_display_name", get(st, "BaseAnatomy", "Lesion $lid"))
+                        if occursin(": ", string(d_name))
+                            d_name = split(string(d_name), ": "; limit=2)[2]
+                        end
+                    end
+                    push!(new_lids, "$lid: $d_name")
                 end
-                push!(new_lids, "$lid: $d_name")
+                if isempty(new_lids)
+                    new_lids = ["(none)"]
+                end
+            catch e
+                @warn "Failed reloading annotations for $target_h5" e
             end
-            if isempty(new_lids)
-                new_lids = ["(none)"]
+
+            _set_xnat_progress!(65.0, "Loading 3D volumes & GPU diffusivity...")
+            obs_on_switch_case[] = target_h5
+            if haskey(ui_hooks, :on_switch_case)
+                ui_hooks[:on_switch_case][] = target_h5
             end
+
+            # Apply lesion list & active lesion AFTER clearing/loading the new case's organ_mapping & firing on_switch_case
             lesion_ids[] = new_lids
-            active_lesion_id[] = new_lids[1]
-        catch e
-            @warn "Failed reloading annotations for $target_h5" e
-        end
-        
-        _set_xnat_progress!(65.0, "Loading 3D volumes & GPU diffusivity...")
-        obs_on_switch_case[] = target_h5
-        if haskey(ui_hooks, :on_switch_case)
-            ui_hooks[:on_switch_case][] = target_h5
+            if active_lesion_id[] == new_lids[1]
+                notify(active_lesion_id)
+            else
+                active_lesion_id[] = new_lids[1]
+            end
+        finally
+            _is_switching_case[] = false
         end
     end
 
@@ -4768,64 +5049,95 @@ function create_metadata_window(
     end
 
     function _do_save_to_xnat(show_status::Bool=true)
-        try
-            _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
-            _MEH_mod.flush_all_dirty_masks!()
-            _MEH_mod.save_measurements_to_h5()
-        catch; end
-        
         h5_active = _get_active_h5_path()
-        if !isempty(h5_active) && isfile(h5_active)
-            try
-                _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
-                if isdefined(_MEH_mod, :lymph_node_validation_mode) && _MEH_mod.lymph_node_validation_mode[]
-                    save_ln_validations(lesion_db[], h5_active)
-                else
-                    persist_to_active_dataset_h5!(lesion_db[], h5_active)
-                end
-            catch e
-                @warn "Failed persisting to active HDF5" e
-            end
-        end
-        
+        _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+        is_ln_val = isdefined(_MEH_mod, :lymph_node_validation_mode) && _MEH_mod.lymph_node_validation_mode[]
+        db_snap = deepcopy(lesion_db[])
+
         creds = _active_xnat_creds[]
         proj = menu_xnat_proj.selection[]
         subj_raw = menu_xnat_subj.selection[]
         subj = subj_raw !== nothing ? _parse_subject_id(subj_raw) : ""
-        
-        if creds !== nothing && !isempty(proj) && proj != "(None)" && !isempty(subj)
-            _MEH_mod = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
-            status_dict = Dict{String, Any}(
-                "project_id" => proj,
-                "subject_id" => subj,
-                "status" => "PROCESSED",
-                "assigned_user" => _get_current_username(),
-                "last_modified" => string(Dates.now()),
-                "software_version" => "0.5.11",
-                "summary" => Dict(
-                    "num_lesions" => length(lesion_ids[]),
-                    "has_expert_mask_edits" => current_has_expert_edits[],
-                    "lymph_nodes_validated" => (isdefined(_MEH_mod, :lymph_node_validation_mode) && _MEH_mod.lymph_node_validation_mode[])
-                )
+        has_xnat = creds !== nothing && !isempty(proj) && proj != "(None)" && !isempty(subj)
+
+        mod_user = _get_current_username()
+        is_mod = current_has_expert_edits[] || isfile(h5_active)
+        status_dict = has_xnat ? Dict{String, Any}(
+            "project_id" => proj,
+            "subject_id" => subj,
+            "status" => is_mod ? "PROCESSED" : "PREPROCESSED",
+            "manually_modified" => is_mod,
+            "modified_by" => is_mod ? mod_user : "",
+            "assigned_user" => mod_user,
+            "last_modified" => string(Dates.now()),
+            "software_version" => "0.5.11",
+            "summary" => Dict(
+                "num_lesions" => length(lesion_ids[]),
+                "has_expert_mask_edits" => is_mod,
+                "manually_modified" => is_mod,
+                "modified_by" => is_mod ? mod_user : "",
+                "lymph_nodes_validated" => is_ln_val
             )
-            Threads.@spawn begin
+        ) : nothing
+
+        edits_h5 = try
+            LER = parentmodule(@__MODULE__).LesionEditsRecorder
+            p = LER.get_edits_h5_path()
+            if isempty(p) && !isempty(h5_active)
+                base = replace(basename(h5_active), r"\.h5$"i => "")
+                fname = base == "preprocessed_volumes" ? "lesion_edits.h5" : "$(base)_lesion_edits.h5"
+                p = joinpath(dirname(h5_active), fname)
+            end
+            p
+        catch
+            ""
+        end
+
+        if show_status
+            save_status_text[] = has_xnat ? "Saving HDF5 & XNAT..." : "Saving HDF5..."
+            save_status_color[] = ACCENT
+        end
+
+        Threads.@spawn begin
+            try
+                _MEH_mod.flush_all_dirty_masks!()
+                _MEH_mod.save_measurements_to_h5()
+            catch e
+                @warn "Async mask/measurement flush failed" e
+            end
+            if !isempty(h5_active) && isfile(h5_active)
+                try
+                    if is_ln_val
+                        save_ln_validations(db_snap, h5_active)
+                    else
+                        persist_to_active_dataset_h5!(db_snap, h5_active)
+                    end
+                catch e
+                    @warn "Failed persisting to active HDF5" e
+                end
+            end
+
+            if has_xnat
                 ok_annot = XnatClient.save_annotations_to_xnat(creds, proj, subj, status_dict; local_expert_h5 = isfile(h5_active) ? h5_active : nothing)
                 ok_h5 = isfile(h5_active) ? XnatClient.upload_preprocessed_hdf5(creds, proj, subj, h5_active) : true
+                ok_edits = (!isempty(edits_h5) && isfile(edits_h5)) ? XnatClient.upload_lesion_edits_hdf5(creds, proj, subj, edits_h5) : true
                 @async begin
-                    if ok_annot
+                    if ok_annot && ok_h5 && ok_edits
                         save_status_text[] = "Saved to XNAT OK $(Dates.format(Dates.now(), "HH:MM:SS"))"
                         save_status_color[] = RGBf(0.4, 0.9, 0.4)
-                        xnat_subject_status_text[] = "Status: PROCESSED [OK]"
-                        xnat_subject_status_color[] = RGBf(0.4, 0.9, 0.4)
+                        xnat_subject_status_text[] = is_mod ? "Status: PROCESSED [Modified by $mod_user]" : "Status: PREPROCESSED [Unmodified]"
+                        xnat_subject_status_color[] = is_mod ? RGBf(0.4, 0.9, 0.4) : RGBf(0.9, 0.8, 0.2)
                     else
                         save_status_text[] = "XNAT Upload Failed"
                         save_status_color[] = RGBf(0.9, 0.2, 0.2)
                     end
                 end
+            else
+                @async begin
+                    save_status_text[] = "Saved Locally $(Dates.format(Dates.now(), "HH:MM:SS"))"
+                    save_status_color[] = RGBf(0.4, 0.9, 0.4)
+                end
             end
-        else
-            save_status_text[] = "Saved Locally $(Dates.format(Dates.now(), "HH:MM:SS"))"
-            save_status_color[] = RGBf(0.4, 0.9, 0.4)
         end
     end
 
@@ -4930,6 +5242,7 @@ function create_metadata_window(
             end
         end
 
+        remote_is_newer = false
         if force_xnat_download
             for cand_h5 in (target_h5, flat_cache_h5, flat_short_h5)
                 if ispath(cand_h5) || islink(cand_h5)
@@ -4937,37 +5250,62 @@ function create_metadata_window(
                 end
             end
         else
-            # Prefer newer local repository ground-truth or cached HDF5 even when logged into XNAT,
-            # so local repairs are not overwritten unless the user explicitly clicks Force Download.
-            if !isempty(repo_h5) && isfile(repo_h5) && filesize(repo_h5) > 1024
-                if !isfile(target_h5) || filesize(target_h5) != filesize(repo_h5) || mtime(repo_h5) > mtime(target_h5)
-                    mkpath(target_dir)
-                    try cp(repo_h5, target_h5, force=true) catch; end
-                end
-                if isfile(target_h5) && filesize(target_h5) > 1024
-                    println("[XNAT] Using local repo preprocessed HDF5 for $subj: $target_h5 ($(round(filesize(target_h5)/1048576, digits=1)) MB)"); flush(stdout)
-                    xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
-                    xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
-                    _set_xnat_progress!(50.0, "Found local repo HDF5 for $short_pat ($(round(filesize(target_h5)/1048576, digits=1)) MB)...")
-                    _switch_to_hdf5!(target_h5)
-                    return
-                end
-            end
+            # Determine freshest available local HDF5 (between repo_h5 and xnat_cache copies)
+            local_cands = String[]
+            !isempty(repo_h5) && isfile(repo_h5) && !islink(repo_h5) && filesize(repo_h5) > 1024 && push!(local_cands, repo_h5)
             for cand_h5 in (target_h5, flat_cache_h5, flat_short_h5)
                 if isfile(cand_h5) && !islink(cand_h5) && filesize(cand_h5) > 1024
-                    println("[XNAT] Patient '$subj' preprocessed HDF5 found in local xnat_cache: $cand_h5"); flush(stdout)
-                    xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
-                    xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
-                    _set_xnat_progress!(50.0, "Found cached HDF5 for $short_pat ($(round(filesize(cand_h5)/1048576, digits=1)) MB)...")
-                    _switch_to_hdf5!(cand_h5)
-                    return
+                    push!(local_cands, cand_h5)
+                end
+            end
+
+            if !isempty(local_cands)
+                freshest_local = local_cands[argmax([mtime(p) for p in local_cands])]
+                if creds !== nothing
+                    remote_is_newer, dl_reason = try
+                        XnatClient.is_remote_newer_than_local(creds, proj, subj, freshest_local)
+                    catch
+                        (false, "check_error")
+                    end
+                    if remote_is_newer
+                        println("[XNAT] Newer version on XNAT for $subj ($dl_reason vs $(basename(freshest_local))) — downloading update..."); flush(stdout)
+                    end
+                end
+
+                if !remote_is_newer
+                    if !isempty(repo_h5) && isfile(repo_h5) && filesize(repo_h5) > 1024 && freshest_local == repo_h5
+                        if !isfile(target_h5) || filesize(target_h5) <= 1024 || mtime(repo_h5) > mtime(target_h5) + 2.0
+                            mkpath(target_dir)
+                            try
+                                cp(repo_h5, target_h5, force=true)
+                                run(`touch -r $repo_h5 $target_h5`)
+                            catch; end
+                        end
+                        use_h5 = (isfile(target_h5) && filesize(target_h5) > 1024) ? target_h5 : repo_h5
+                        println("[XNAT] Using local repo preprocessed HDF5 for $subj: $use_h5 ($(round(filesize(use_h5)/1048576, digits=1)) MB)"); flush(stdout)
+                        xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
+                        xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
+                        _set_xnat_progress!(50.0, "Found local repo HDF5 for $short_pat ($(round(filesize(use_h5)/1048576, digits=1)) MB)...")
+                        _switch_to_hdf5!(use_h5)
+                        return
+                    end
+                    for cand_h5 in (target_h5, flat_cache_h5, flat_short_h5)
+                        if isfile(cand_h5) && !islink(cand_h5) && filesize(cand_h5) > 1024
+                            println("[XNAT] Patient '$subj' preprocessed HDF5 found in local xnat_cache: $cand_h5"); flush(stdout)
+                            xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
+                            xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
+                            _set_xnat_progress!(50.0, "Found cached HDF5 for $short_pat ($(round(filesize(cand_h5)/1048576, digits=1)) MB)...")
+                            _switch_to_hdf5!(cand_h5)
+                            return
+                        end
+                    end
                 end
             end
         end
         
         # 2. Check XNAT for preprocessed HDF5 with streaming progress bar
         if creds !== nothing
-            _set_xnat_progress!(10.0, "Connecting to XNAT for $subj...")
+            _set_xnat_progress!(10.0, remote_is_newer ? "Downloading newer XNAT HDF5 for $subj..." : "Connecting to XNAT for $subj...")
             xnat_subject_status_text[] = "Status: Fetching [..]"
             xnat_subject_status_color[] = RGBf(0.35, 0.80, 1.0)
             last_prog_time = Ref(time())
@@ -4987,9 +5325,15 @@ function create_metadata_window(
                     end
                 end
             end
+            dl_force = force_xnat_download || remote_is_newer
             Threads.@spawn begin
-                ok = XnatClient.download_preprocessed_hdf5(creds, proj, subj, target_h5; progress_cb=prog_cb)
+                ok = XnatClient.download_preprocessed_hdf5(creds, proj, subj, target_h5; force=dl_force, progress_cb=prog_cb)
                 if ok && isfile(target_h5) && filesize(target_h5) > 1024
+                    try
+                        base = replace(basename(target_h5), r"\.h5$"i => "")
+                        edits_dest = joinpath(dirname(target_h5), base == "preprocessed_volumes" ? "lesion_edits.h5" : "$(base)_lesion_edits.h5")
+                        XnatClient.download_lesion_edits_hdf5(creds, proj, subj, edits_dest; force=dl_force)
+                    catch; end
                     @async begin
                         mb_final = round(filesize(target_h5) / 1048576.0, digits=1)
                         _set_xnat_progress!(50.0, "Downloaded $subj ($(mb_final) MB) — initializing viewer...")
@@ -5040,7 +5384,12 @@ function create_metadata_window(
             for s in subjs
                 local_h5 = joinpath(XnatPreloader.get_local_cache_dir(proj, s), "$(s)_preprocessed.h5")
                 badge = if isfile(local_h5) && filesize(local_h5) > 1024
-                    "[PRE]"
+                    is_mod, mod_u, _ = read_h5_modification_status(local_h5)
+                    if is_mod
+                        isempty(mod_u) ? "[OK]" : "[OK: $mod_u]"
+                    else
+                        "[PRE]"
+                    end
                 else
                     "[RAW]"
                 end
@@ -5048,6 +5397,7 @@ function create_metadata_window(
             end
             
             raw_subjects_cache[proj] = formatted
+            _build_fts!("patient_fts", formatted)
             _filter_and_set_subjects!(query = tb_patient_search.displayed_string[])
         end
     end
@@ -5060,7 +5410,8 @@ function create_metadata_window(
                 if !isempty(remote_projs)
                     p_list = String[]
                     for primary in ALLOWED_XNAT_PROJECTS
-                        if any(p -> get(p, "ID", "") == primary || get(p, "name", "") == primary, remote_projs)
+                        resolved_primary = XnatClient.resolve_project_id(primary)
+                        if any(p -> get(p, "ID", "") == primary || get(p, "name", "") == primary || get(p, "ID", "") == resolved_primary, remote_projs)
                             push!(p_list, primary)
                         end
                     end
@@ -5074,7 +5425,11 @@ function create_metadata_window(
                         end
                     end
                     if !isempty(p_list)
+                        xnat_projects[] = p_list
                         menu_xnat_proj.options[] = p_list
+                        if "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE" in p_list && menu_xnat_proj.selection[] != "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE"
+                            _set_menu_selection_string!(menu_xnat_proj, "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE"; all_opts = xnat_projects)
+                        end
                     end
                 end
             catch e
@@ -5101,8 +5456,8 @@ function create_metadata_window(
         opts = menu_xnat_subj.options[]
         exact_match = findfirst(s -> _parse_subject_id(s) == clean_id, opts)
         if exact_match !== nothing
-            if force_xnat_download && menu_xnat_subj.i_selected[] == exact_match
-                _load_patient_direct(String(strip(proj)), _parse_subject_id(opts[exact_match]); force_xnat_download=true)
+            if menu_xnat_subj.i_selected[] == exact_match
+                _load_patient_direct(String(strip(proj)), _parse_subject_id(opts[exact_match]); force_xnat_download=force_xnat_download)
             else
                 menu_xnat_subj.i_selected[] = exact_match
                 if force_xnat_download
@@ -5114,8 +5469,8 @@ function create_metadata_window(
         
         partial = findfirst(s -> occursin(lowercase(clean_id), lowercase(s)), opts)
         if partial !== nothing
-            if force_xnat_download && menu_xnat_subj.i_selected[] == partial
-                _load_patient_direct(String(strip(proj)), _parse_subject_id(opts[partial]); force_xnat_download=true)
+            if menu_xnat_subj.i_selected[] == partial
+                _load_patient_direct(String(strip(proj)), _parse_subject_id(opts[partial]); force_xnat_download=force_xnat_download)
             else
                 menu_xnat_subj.i_selected[] = partial
                 if force_xnat_download
@@ -5132,13 +5487,13 @@ function create_metadata_window(
     on(btn_load_patient.clicks) do _
         q_txt = strip(tb_patient_search.displayed_string[])
         if !isempty(q_txt)
-            _load_patient_by_query(String(q_txt); force_xnat_download=true)
+            _load_patient_by_query(String(q_txt); force_xnat_download=false)
         else
             subj_sel = menu_xnat_subj.selection[]
             proj = menu_xnat_proj.selection[]
             if subj_sel !== nothing && subj_sel != "(Select Project First)" && subj_sel != "(No matching patients)" && proj !== nothing && proj != "(None)"
                 subj = _parse_subject_id(subj_sel)
-                !isempty(subj) && _load_patient_direct(String(strip(proj)), subj; force_xnat_download=true)
+                !isempty(subj) && _load_patient_direct(String(strip(proj)), subj; force_xnat_download=false)
             end
         end
     end
@@ -5173,11 +5528,13 @@ function create_metadata_window(
         subj = _parse_subject_id(subj_sel)
         isempty(subj) && return
         
-        if occursin("[OK]", subj_sel) || occursin("PROCESSED", subj_sel)
-            xnat_subject_status_text[] = "Status: PROCESSED [OK]"
+        if occursin("[OK", subj_sel) || occursin("PROCESSED", subj_sel)
+            m_u = match(r"\[OK:\s*([^\]]+)\]", subj_sel)
+            u_str = m_u !== nothing ? strip(m_u.captures[1]) : ""
+            xnat_subject_status_text[] = isempty(u_str) ? "Status: PROCESSED [Modified]" : "Status: PROCESSED [Modified by $u_str]"
             xnat_subject_status_color[] = RGBf(0.4, 0.9, 0.4)
         elseif occursin("[PRE]", subj_sel) || occursin("PREPROCESSED", subj_sel)
-            xnat_subject_status_text[] = "Status: PREPROCESSED [PRE]"
+            xnat_subject_status_text[] = "Status: PREPROCESSED [Unmodified]"
             xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
         elseif occursin("[..]", subj_sel) || occursin("IN_PROGRESS", subj_sel)
             xnat_subject_status_text[] = "Status: IN PROGRESS [..]"
@@ -5185,6 +5542,28 @@ function create_metadata_window(
         else
             xnat_subject_status_text[] = "Status: RAW [!]"
             xnat_subject_status_color[] = RGBf(0.9, 0.3, 0.3)
+        end
+
+        # Query remote XNAT ANNOTATIONS/status.json asynchronously to reflect remote modification user
+        creds_q = _active_xnat_creds[]
+        if creds_q !== nothing
+            Threads.@spawn begin
+                try
+                    info = XnatClient.get_case_status(creds_q, proj, subj)
+                    raw_j = info.raw_json
+                    rem_mod = Bool(get(raw_j, "manually_modified", info.status == :PROCESSED))
+                    rem_user = String(get(raw_j, "modified_by", info.assigned_user))
+                    @async begin
+                        if rem_mod
+                            xnat_subject_status_text[] = isempty(rem_user) ? "Status: PROCESSED [Modified]" : "Status: PROCESSED [Modified by $rem_user]"
+                            xnat_subject_status_color[] = RGBf(0.4, 0.9, 0.4)
+                        elseif info.status == :PREPROCESSED
+                            xnat_subject_status_text[] = "Status: PREPROCESSED [Unmodified]"
+                            xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
+                        end
+                    end
+                catch; end
+            end
         end
         
         _load_patient_direct(proj, subj)
@@ -5363,9 +5742,9 @@ function create_metadata_window(
     nav_r = nr!()
     btn_prev = Button(g[nav_r, 1], label = "<< Prev",
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
-    les_menu = Menu(g[nav_r, 2:3],
+    les_menu = searchable_menu(g, nav_r, 2:3;
         options = @lift(isempty($lesion_ids) ? ["(none)"] : $lesion_ids),
-        fontsize = 10); _register_menu!(les_menu)
+        fts_table = "", allow_custom = false, fontsize = 10)
     btn_next = Button(g[nav_r, 4], label = "Next >>",
         buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 10)
     rowsize!(g, nav_r, Fixed(28)); register_fixed_row!(nav_r, 28)
@@ -5864,10 +6243,19 @@ function create_metadata_window(
     
     seg_r3c = nr!()
     Label(g[seg_r3c, 1], "Speed:", halign=:right, fontsize=10, color=LBL_FG)
-    init_ramp_speed = Float32(get(display_cfg, "heatgdt_ramp_speed", 12.0))
+    init_ramp_speed = clamp(Float32(get(display_cfg, "heatgdt_ramp_speed", 12.0)), 0.2f0, 25.0f0)
     _MEH.HEAT_DISPLAY_RAMP_RATE[] = init_ramp_speed
-    slider_heatgdt_ramp = Slider(g[seg_r3c, 2:4], range = 1.0:0.5:25.0, startvalue = init_ramp_speed)
+    slider_heatgdt_ramp = Slider(g[seg_r3c, 2:3], range = 0.2:0.2:25.0, startvalue = Float64(init_ramp_speed))
+    lbl_ramp_val = Label(g[seg_r3c, 4], "$(round(init_ramp_speed, digits=1))x", halign=:left, fontsize=10, color=LBL_FG)
     rowsize!(g, seg_r3c, Fixed(30)); register_fixed_row!(seg_r3c, 30)
+
+    seg_r3c_steps = nr!()
+    Label(g[seg_r3c_steps, 1], "Steps/f:", halign=:right, fontsize=10, color=LBL_FG)
+    init_steps_pf = clamp(Int(get(display_cfg, "heatgdt_steps_per_frame", 5)), 1, 20)
+    _MEH.heatgdt_steps_per_frame[] = init_steps_pf
+    slider_heatgdt_steps = Slider(g[seg_r3c_steps, 2:3], range = 1:1:20, startvalue = init_steps_pf)
+    lbl_steps_val = Label(g[seg_r3c_steps, 4], "$(init_steps_pf) st", halign=:left, fontsize=10, color=LBL_FG)
+    rowsize!(g, seg_r3c_steps, Fixed(30)); register_fixed_row!(seg_r3c_steps, 30)
 
     on(slider_heatgdt_theta.value) do val
         _MEH.heatgdt_theta[] = Float32(val)
@@ -5878,13 +6266,21 @@ function create_metadata_window(
     on(slider_heatgdt_ramp.value) do val
         v = Float32(val)
         _MEH.HEAT_DISPLAY_RAMP_RATE[] = v
+        lbl_ramp_val.text = "$(round(v, digits=1))x"
         display_cfg["heatgdt_ramp_speed"] = v
+        next!(_display_cfg_save_subject, true)
+    end
+    on(slider_heatgdt_steps.value) do val
+        st = clamp(round(Int, val), 1, 20)
+        _MEH.heatgdt_steps_per_frame[] = st
+        lbl_steps_val.text = "$(st) st"
+        display_cfg["heatgdt_steps_per_frame"] = st
         next!(_display_cfg_save_subject, true)
     end
 
     seg_r3d = nr!()
     Label(g[seg_r3d, 1], "Size ±:", halign=:right, fontsize=10, color=LBL_FG)
-    slider_heatgdt_posthoc = Slider(g[seg_r3d, 2:3], range = -5:0.1:5, startvalue = 0.0)
+    slider_heatgdt_posthoc = Slider(g[seg_r3d, 2:3], range = -10.0:0.1:6.0, startvalue = 0.0)
     btn_posthoc_reset = Button(g[seg_r3d, 4], label="Reset", buttoncolor=BG_PNL, labelcolor=TXT, fontsize=10)
     rowsize!(g, seg_r3d, Fixed(30)); register_fixed_row!(seg_r3d, 30)
 
@@ -6019,7 +6415,7 @@ function create_metadata_window(
 
     on(slider_heatgdt_posthoc.value) do val
         base_theta = _MEH.heatgdt_theta[]
-        new_theta = Float32(base_theta * (10 ^ (val / 3.0)))
+        new_theta = _MEH._compute_posthoc_theta(base_theta, val)
         
         @async try
             put!(channel, MakieEvents.HeatGDTPosthocSizeEvent(new_theta))
@@ -6033,7 +6429,7 @@ function create_metadata_window(
     end
 
     # Show/hide Heat-GDT params based on algorithm selection with proper layout updates
-    heatgdt_rows = (seg_r3_mode, seg_r3b, seg_r3c, seg_r3d, seg_r3e, seg_r3f, seg_r3g, seg_r3h, seg_r3_tt)
+    heatgdt_rows = (seg_r3_mode, seg_r3b, seg_r3c, seg_r3c_steps, seg_r3d, seg_r3e, seg_r3f, seg_r3g, seg_r3h, seg_r3_tt)
     function _set_heatgdt_rows_visible!(vis::Bool)
         g.block_updates = false
         try
@@ -6292,15 +6688,20 @@ function create_metadata_window(
         else
             ["$idx: $(get(_MEH.tp_labels, idx, "TP $idx"))" for idx in tp_indices]
         end
-        menu_tp_single.options[] = opts
-        menu_m2_ref.options[] = vcat(["Next TP", "Baseline (TP0)"], opts)
-        menu_tp_left.options[] = opts
-        menu_tp_right.options[] = opts
-        if menu_map_tp_left !== nothing
-            menu_map_tp_left.options[] = vcat(["(current)"], opts)
-        end
-        if menu_map_tp_right !== nothing
-            menu_map_tp_right.options[] = vcat(["(compare)"], opts)
+        is_syncing_tp[] = true
+        try
+            menu_tp_single.options[] = opts
+            menu_m2_ref.options[] = vcat(["Next TP", "Baseline (TP0)"], opts)
+            menu_tp_left.options[] = opts
+            menu_tp_right.options[] = opts
+            if menu_map_tp_left !== nothing
+                menu_map_tp_left.options[] = vcat(["(current)"], opts)
+            end
+            if menu_map_tp_right !== nothing
+                menu_map_tp_right.options[] = vcat(["(compare)"], opts)
+            end
+        finally
+            is_syncing_tp[] = false
         end
         sync_tp_menus_to_current!()
     end
@@ -6366,6 +6767,7 @@ function create_metadata_window(
             put!(channel, SetWindowTitleEvent("MedEye3d - Viewing: $label"))
         end
     end
+    update_semantic_filter_ui_ref = Ref{Function}(() -> nothing)
     on(_MEH.tp_switched) do _
         if cv_active[] != _MEH.compare_mode[]
             # Route through apply_compare_mode_ui! to properly show/hide sections
@@ -6400,6 +6802,9 @@ function create_metadata_window(
             if update_old_report_display! !== nothing
                 update_old_report_display!()
             end
+            try
+                update_semantic_filter_ui_ref[]()
+            catch; end
         catch e
             @warn "[tp_switched] Error syncing UI: $e"
         end
@@ -6450,10 +6855,21 @@ function create_metadata_window(
             end
             sort!(l_ints)
         else
+            unfilt_ref = isdefined(_MEH, :unfiltered_lesion_masks) ? lock(_MEH._tp_cache_lock) do
+                get(_MEH.unfiltered_lesion_masks, tp, nothing)
+            end : nothing
             mask_ref = lock(_MEH._tp_cache_lock) do
                 haskey(_MEH.tp_data_cache, tp) ? _MEH.tp_data_cache[tp].mask : nothing
             end
-            if mask_ref !== nothing
+            if unfilt_ref !== nothing
+                l_ints = filter(x -> x > 0, sort(unique(unfilt_ref)))
+                if mask_ref !== nothing
+                    for x in unique(mask_ref)
+                        x > 0 && !(Int(x) in l_ints) && push!(l_ints, Int(x))
+                    end
+                    sort!(l_ints)
+                end
+            elseif mask_ref !== nothing
                 l_ints = get!(_cached_lesion_ids, tp) do
                     filter(x -> x > 0, sort(unique(mask_ref)))
                 end
@@ -6468,6 +6884,7 @@ function create_metadata_window(
         # --- Apply filter & sort ---
         filter_val = menu_filter.selection[] === nothing ? "All" : String(menu_filter.selection[])
         sort_val = menu_sort.selection[] === nothing ? "By Index" : String(menu_sort.selection[])
+        sem_active = !is_ln_mode && isdefined(_MEH, :semantic_filter_active) && _MEH.semantic_filter_active[]
         
         filtered_l_ints = Int[]
         db = lesion_db[]
@@ -6494,6 +6911,9 @@ function create_metadata_window(
                 keep = obs == "NEW"
             elseif filter_val == "Resolved"
                 keep = obs == "RESOLVED"
+            end
+            if keep && sem_active
+                keep = _MEH.is_semantic_lesion_allowed(tp, sid; organ_hint=get(data, "BaseAnatomy", ""))
             end
             if keep
                 push!(filtered_l_ints, sid)
@@ -6532,7 +6952,8 @@ function create_metadata_window(
                 # 1. Try seg_names, but skip generic placeholders
                 if haskey(seg_names, sid) && !isempty(seg_names[sid])
                     sn = seg_names[sid]
-                    if !startswith(sn, "unknown_") && !startswith(sn, "Segment") && !startswith(sn, "artificial_")
+                    lc_sn = lowercase(strip(sn))
+                    if !startswith(lc_sn, "unknown_") && !occursin("unknown_", lc_sn) && !startswith(lc_sn, "segment") && !startswith(lc_sn, "artificial_") && !occursin("postprocessed", lc_sn)
                         d_name = sn
                     end
                 end
@@ -8761,6 +9182,77 @@ function create_metadata_window(
     btn_translate_orig = Button(g[orig_act_r, 4], label = "[T] Translate", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
     rowsize!(g, orig_act_r, Fixed(26)); register_fixed_row!(orig_act_r, 26)
 
+    sem_flt_r = nr!()
+    btn_semantic_filter = Button(g[sem_flt_r, 1:2], label = "[F] Semantic Filter: OFF", buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 9)
+    lbl_semantic_filter = Label(g[sem_flt_r, 3:4], "Filter off", fontsize = 8, color = SUBTXT, halign = :left)
+    rowsize!(g, sem_flt_r, Fixed(26)); register_fixed_row!(sem_flt_r, 26)
+
+    function _ensure_semantic_filter_loaded!()
+        if _MEH !== nothing && isdefined(_MEH, :semantic_mentioned_organs)
+            if isempty(_MEH.semantic_mentioned_organs[]) && isempty(_MEH.semantic_allowed_lesion_ids)
+                h5p = _get_active_h5_path()
+                if !isempty(h5p) && isfile(h5p)
+                    try
+                        _MEH.load_semantic_filter_from_path!(h5p)
+                    catch; end
+                end
+            end
+        end
+    end
+
+    function update_semantic_filter_ui!()
+        if _MEH === nothing || !isdefined(_MEH, :semantic_filter_active)
+            return
+        end
+        _ensure_semantic_filter_loaded!()
+        is_on = _MEH.semantic_filter_active[]
+        tp_cur = try _MEH.current_tp_index[] catch; 0 end
+        n_orgs = length(_MEH.semantic_mentioned_organs[])
+        n_allowed = length(get(_MEH.semantic_allowed_lesion_ids, tp_cur, Set{Int}()))
+        btn_semantic_filter.label[] = is_on ? "[F] Semantic Filter: ON" : "[F] Semantic Filter: OFF"
+        btn_semantic_filter.buttoncolor[] = is_on ? GRN : BG_PNL
+        if is_on
+            lbl_semantic_filter.text[] = "$n_allowed kept ($n_orgs report organs)"
+            lbl_semantic_filter.color[] = GRN
+        else
+            lbl_semantic_filter.text[] = n_orgs > 0 ? "Off ($n_orgs report organs)" : "Off (no report mapping)"
+            lbl_semantic_filter.color[] = SUBTXT
+        end
+    end
+    update_semantic_filter_ui_ref[] = update_semantic_filter_ui!
+
+    if _MEH !== nothing && isdefined(_MEH, :semantic_filter_active)
+        on(_MEH.semantic_filter_active) do _
+            try
+                update_semantic_filter_ui!()
+            catch; end
+        end
+    end
+
+    on(btn_semantic_filter.clicks) do _
+        (_MEH === nothing || !isdefined(_MEH, :semantic_filter_active)) && return
+        _ensure_semantic_filter_loaded!()
+        new_active = !_MEH.semantic_filter_active[]
+        _MEH.semantic_filter_active[] = new_active
+        if channel !== nothing
+            try
+                put!(channel, MakieEvents.ToggleSemanticFilterEvent(new_active))
+            catch
+                _MEH.apply_semantic_filter!(new_active)
+            end
+        else
+            _MEH.apply_semantic_filter!(new_active)
+        end
+        empty!(_cached_lesion_ids)
+        try
+            refresh_lesion_dropdown_for_tp!(_MEH.current_tp_index[])
+        catch; end
+        update_semantic_filter_ui!()
+    end
+    try
+        update_semantic_filter_ui!()
+    catch; end
+
     # Underlying observable kept for state persistence, autosave, and test compatibility
     dict_text = Observable{String}("Loading original radiological report...")
 
@@ -9752,7 +10244,7 @@ function create_metadata_window(
     _autosave_debounced = _autosave_subject |> debounce_time(300)
     
     function trigger_autosave(; skip_dictation=false)
-        _is_applying_state[] && return
+        (_is_applying_state[] || _is_switching_case[]) && return
         cur_id = active_lesion_id[]
         lid = parse_lesion_id(cur_id)
         (lid === nothing || lid <= 0) && return
@@ -9767,15 +10259,15 @@ function create_metadata_window(
             target_lid = args[1]
             skip_dictation_val = args[2]
             
-            # Isolation guard: only save if user is still on the same lesion and not applying state
+            # Isolation guard: only save if user is still on the same lesion and not applying/switching state
             cur_id = active_lesion_id[]
             cur_lid = parse_lesion_id(cur_id)
             if cur_lid != target_lid
                 @debug "Autosave skipped: target lesion $target_lid != active lesion $cur_lid"
                 return
             end
-            if _is_applying_state[]
-                @debug "Autosave skipped: currently applying state"
+            if _is_applying_state[] || _is_switching_case[]
+                @debug "Autosave skipped: currently applying state or switching case"
                 return
             end
 
@@ -11777,17 +12269,25 @@ function create_metadata_window(
         lesion_db[] = db
         _db_dirty[] = false
         h5_target = _get_active_h5_path()
-        if isempty(h5_target)
+        has_active_h5 = !isempty(h5_target)
+        if !has_active_h5
             h5_target = DEFAULT_HDF5_PATH
-        else
-            try persist_to_active_dataset_h5!(db, h5_target) catch; end
         end
         put!(db_channel, SaveDBMessage(db, global_st, save_path, h5_target))
-        try
-            _MEH.flush_all_dirty_masks!()
-            _MEH.save_measurements_to_h5()
-        catch; end
-        status_lbl.text[] = "Saved at $(Dates.format(Dates.now(), "HH:MM:SS"))"
+        db_snap = deepcopy(db)
+        status_lbl.text[] = "Saving..."
+        Threads.@spawn begin
+            if has_active_h5
+                try persist_to_active_dataset_h5!(db_snap, h5_target) catch; end
+            end
+            try
+                _MEH.flush_all_dirty_masks!()
+                _MEH.save_measurements_to_h5()
+            catch; end
+            @async begin
+                status_lbl.text[] = "Saved at $(Dates.format(Dates.now(), "HH:MM:SS"))"
+            end
+        end
     end
 
     on(btn_load.clicks) do _
@@ -12382,6 +12882,8 @@ function create_metadata_window(
     end
 
     # Register observables for MakieEventHandlers / keyboard shortcuts
+    _lmw_observables[:switch_to_hdf5] = _switch_to_hdf5!
+    _lmw_observables[:apply_state] = apply_state
     _lmw_observables[:active_lesion_id] = active_lesion_id
     _lmw_observables[:lesion_ids] = lesion_ids
     _lmw_observables[:menu_base_anat] = menu_base_anat
@@ -12473,6 +12975,9 @@ function create_metadata_window(
     _lmw_observables[:xnat_proj_menu] = menu_xnat_proj
     _lmw_observables[:xnat_subj_menu] = menu_xnat_subj
     _lmw_observables[:tb_patient_search] = tb_patient_search
+    _lmw_observables[:rank_best_overlap] = _rank_best_overlap_matches
+    _lmw_observables[:raw_subjects_cache] = raw_subjects_cache
+    _lmw_observables[:filter_and_set_subjects] = _filter_and_set_subjects!
     _lmw_observables[:btn_load_patient] = btn_load_patient
     _lmw_observables[:btn_xnat_prefetch_all] = btn_xnat_prefetch_all
     _lmw_observables[:xnat_prefetch_running] = _xnat_prefetch_running
@@ -12508,6 +13013,9 @@ function create_metadata_window(
     _lmw_observables[:slider_blend] = slider_blend
     _lmw_observables[:is_syncing_blend] = is_syncing_blend
     _lmw_observables[:menu_m2_mode] = menu_m2_mode
+    _lmw_observables[:btn_semantic_filter] = btn_semantic_filter
+    _lmw_observables[:lbl_semantic_filter] = lbl_semantic_filter
+    _lmw_observables[:refresh_lesion_dropdown_for_tp] = refresh_lesion_dropdown_for_tp!
 
     # Safe redraw trigger — incrementing this marks the Makie scene dirty
     # without toggling visibility (unlike notify(fig.scene.visible))
@@ -12527,6 +13035,7 @@ function create_metadata_window(
             "All"
         end
         filter_val == "All" || return lesion_ids[]
+        (_MEH !== nothing && isdefined(_MEH, :semantic_filter_active) && _MEH.semantic_filter_active[]) && return lesion_ids[]
         _MEH === nothing && return lesion_ids[]
 
         tp = try _MEH.current_tp_index[] catch; 0 end
