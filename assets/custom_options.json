@@ -1,17 +1,13 @@
 {
-    "Alternative Hypothesis (False Positive)": [
-        "Technical Artifact from foreign body",
-        "TEchnical Artifact - Edge of acquisition"
-    ],
-    "Lesion Orientation": [
-        "Anterior-Posterior (AP) Orientation of Long Axis",
-        "anterior posterior orientation of long axis",
-        "long axis hour 5",
-        "long axis hour 7"
-    ],
     "Alt. Hypothesis": [
         "Technical Artifact from foreign body",
-        "TEchnical Artifact - Edge of acquisition"
+        "TEchnical Artifact - Edge of acquisition",
+        "Inflamma",
+        "Inflammation",
+        "Model Error"
+    ],
+    "Inner Texture/HU": [
+        "Heterogenous"
     ],
     "Radiotracer": [
         "18F-FDG-CustomH5"
@@ -19,6 +15,35 @@
     "Shape": [
         "Elongated",
         "Tubular"
+    ],
+    "Anatomic Location": [
+        "Bone",
+        "Seminal Vesicle"
+    ],
+    "Anatomical Sublocation": [
+        "Axial Skeleton",
+        "Abdominal / Mesenteric",
+        "Prostatic Urethra (UR)",
+        "Axillary",
+        "Inguinal",
+        "Obturator",
+        "Seminal Vesicle"
+    ],
+    "Alternative Hypothesis (False Positive)": [
+        "Technical Artifact from foreign body",
+        "TEchnical Artifact - Edge of acquisition",
+        "Inflamma",
+        "Inflammation",
+        "Model Error"
+    ],
+    "Lesion Orientation": [
+        "Anterior-Posterior (AP) Orientation of Long Axis",
+        "anterior posterior orientation of long axis",
+        "long axis hour 5",
+        "long axis hour 7"
+    ],
+    "Inner Texture / Density / Attenuation": [
+        "Heterogenous"
     ],
     "Lesion Shape": [
         "Elongated",

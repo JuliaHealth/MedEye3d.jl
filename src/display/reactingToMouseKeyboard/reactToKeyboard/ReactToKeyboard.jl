@@ -74,6 +74,19 @@ function _get_active_lesion_id()
     return 0
 end
 
+function _get_ct_preset_bounds(preset_key::String, def_min::Float32, def_max::Float32)::Tuple{Float32, Float32}
+    try
+        top = parentmodule(@__MODULE__)
+        if isdefined(top, :SegmentationDisplay) && isdefined(top.SegmentationDisplay, :MakieEventHandlers)
+            MEH = top.SegmentationDisplay.MakieEventHandlers
+            if isdefined(MEH, :get_ct_preset_windowing)
+                return MEH.get_ct_preset_windowing(preset_key)
+            end
+        end
+    catch; end
+    return (def_min, def_max)
+end
+
 function _sync_windowing_gui(modality::String, min_v::Float32, max_v::Float32)
     try
         top = parentmodule(@__MODULE__)
@@ -107,6 +120,9 @@ function registerKeyboardFunctions(window::GLFW.Window, mainChannel::Base.Channe
         end
         if key == GLFW.KEY_LEFT_CONTROL || key == GLFW.KEY_RIGHT_CONTROL
             is_ctrl_down_ref[] = (action != GLFW.RELEASE)
+        end
+        if key == GLFW.KEY_TAB
+            is_tab_down_ref[] = (action != GLFW.RELEASE)
         end
         keyInputInstance = KeyInputFields(scancode=Int32(key), action=action, mods=Int32(mods))
         put!(mainChannel, keyInputInstance)
@@ -191,6 +207,7 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
             scCode = "space"
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_TAB)
+            is_tab_down_ref[] = (keyInputInfo.action != GLFW.RELEASE)
             scCode = "tab"
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_ENTER)
@@ -198,23 +215,26 @@ function reactToKeyInput(keyInputInfo::KeyInputFields, mainStates::Vector{StateD
 
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F1)
             if keyInputInfo.action == GLFW.PRESS
+                wmin, wmax = _get_ct_preset_bounds("CT_SOFT", -160.0f0, 240.0f0)
                 ch = _get_event_channel()
-                ch !== nothing && put!(ch, MakieEvents.WindowingEvent("CT", -160.0f0, 240.0f0))
-                _sync_windowing_gui("CT", -160.0f0, 240.0f0)
+                ch !== nothing && put!(ch, MakieEvents.WindowingEvent("CT", wmin, wmax))
+                _sync_windowing_gui("CT", wmin, wmax)
             end
             return
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F2)
             if keyInputInfo.action == GLFW.PRESS
+                wmin, wmax = _get_ct_preset_bounds("CT_BONE", -450.0f0, 1050.0f0)
                 ch = _get_event_channel()
-                ch !== nothing && put!(ch, MakieEvents.WindowingEvent("CT", -450.0f0, 1050.0f0))
-                _sync_windowing_gui("CT", -450.0f0, 1050.0f0)
+                ch !== nothing && put!(ch, MakieEvents.WindowingEvent("CT", wmin, wmax))
+                _sync_windowing_gui("CT", wmin, wmax)
             end
             return
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F3)
             if keyInputInfo.action == GLFW.PRESS
+                wmin, wmax = _get_ct_preset_bounds("CT_LUNG", -1350.0f0, 150.0f0)
                 ch = _get_event_channel()
-                ch !== nothing && put!(ch, MakieEvents.WindowingEvent("CT", -1350.0f0, 150.0f0))
-                _sync_windowing_gui("CT", -1350.0f0, 150.0f0)
+                ch !== nothing && put!(ch, MakieEvents.WindowingEvent("CT", wmin, wmax))
+                _sync_windowing_gui("CT", wmin, wmax)
             end
             return
         elseif keyInputInfo.scancode == Int32(GLFW.KEY_F4)

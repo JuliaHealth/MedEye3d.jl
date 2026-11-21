@@ -1,5 +1,5 @@
 module MakieEvents
-export ChangePlaneEvent, CompareTimePointsEvent, ShowSingleLesionEvent, ScrollZoomEvent, ScrollEvent
+export ChangePlaneEvent, CompareTimePointsEvent, ShowSingleLesionEvent, ScrollZoomEvent, ScrollEvent, BrushOrSphereScrollEvent
 export WindowingEvent, PaintValEvent, SyncLesionEvent
 export ChangeTimePointEvent, SetTimePointEvent, ToggleLesionEvent, RefreshListEvent, SetM2ReferenceEvent
 export AddAutoPetEvent, AIInferenceResultEvent, AIStatusUpdateEvent, SyncMissingEvent, GenManualEvent, HeatGDTHoldEvent
@@ -68,6 +68,13 @@ struct ScrollEvent
     scroll_delta::Int
     window_id::Int
     ScrollEvent(d::Int, w::Int=1) = new(d, w)
+end
+
+struct BrushOrSphereScrollEvent
+    scroll_delta::Float64
+    window_id::Int
+    coarse::Bool
+    BrushOrSphereScrollEvent(d::Real, w::Int=1, coarse::Bool=false) = new(Float64(d), w, coarse)
 end
 
 struct WindowingEvent

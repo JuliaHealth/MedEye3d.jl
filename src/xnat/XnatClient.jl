@@ -19,6 +19,8 @@ export list_projects,
        list_scans,
        list_subject_resources,
        get_case_status,
+       fetch_project_case_statuses,
+       extract_status_users,
        get_remote_preprocessed_info,
        is_remote_newer_than_local,
        download_file,
@@ -272,33 +274,93 @@ function list_subject_resources(creds::XnatCredentials, project_id::AbstractStri
     catch; return String[]; end
 end
 
+function _push_unique_users!(out::Vector{String}, raw_val)
+    if raw_val isa AbstractVector
+        for item in raw_val
+            _push_unique_users!(out, item)
+        end
+    elseif raw_val !== nothing
+        for tok in split(string(raw_val), r"[,;]+")
+            u = String(strip(tok))
+            isempty(u) && continue
+            lc = lowercase(u)
+            (lc in ("none", "unknown", "null", "nothing", "unmodified", "na", "n/a")) && continue
+            any(x -> lowercase(x) == lc, out) || push!(out, u)
+        end
+    end
+    return out
+end
+
 """
-    get_case_status(creds::XnatCredentials, project_id, subject_id) -> CaseStatusInfo
+    extract_status_users(raw_dict::AbstractDict) -> Vector{String}
+
+Extracts all unique non-empty usernames who modified or uploaded a case from
+XNAT `status.json` (or resource file metadata dictionaries), supporting both
+single-user (`modified_by`, `assigned_user`, `user`) and multi-user (`modified_users`,
+`users`, `contributors`) representations.
+"""
+function extract_status_users(raw_dict::AbstractDict)::Vector{String}
+    out = String[]
+    for k in ("modified_users", "users", "contributors", "uploaded_by", "modified_by", "assigned_user", "user", "created_by", "insert_user")
+        haskey(raw_dict, k) && _push_unique_users!(out, raw_dict[k])
+    end
+    sum_d = get(raw_dict, "summary", nothing)
+    if sum_d isa AbstractDict
+        for k in ("modified_users", "modified_by", "users")
+            haskey(sum_d, k) && _push_unique_users!(out, sum_d[k])
+        end
+    end
+    return out
+end
+
+function _extract_xnat_file_users(files_json)::Vector{String}
+    out = String[]
+    (files_json isa AbstractDict && haskey(files_json, "ResultSet") && haskey(files_json["ResultSet"], "Result")) || return out
+    for r in files_json["ResultSet"]["Result"]
+        r isa AbstractDict || continue
+        for k in ("created_by", "insert_user", "modified_by", "uploaded_by", "user")
+            haskey(r, k) && _push_unique_users!(out, r[k])
+        end
+    end
+    return out
+end
+
+"""
+    get_case_status(creds::XnatCredentials, project_id, subject_id; include_file_users=true, resolve_subject=true) -> CaseStatusInfo
 
 Determines whether a patient's case is:
-- `:PROCESSED`: Validated by expert (`resources/ANNOTATIONS/files/status.json` has `status == "PROCESSED"`)
+- `:PROCESSED`: Validated / modified (`resources/ANNOTATIONS/files/status.json` has `status == "PROCESSED"` or `manually_modified == true`)
 - `:PREPROCESSED`: `{Subject}_preprocessed.h5` exists in `resources/MEDEYE3D/files/`
 - `:RAW`: Only raw DICOM scans exist on XNAT
+
+Collects all modifying/uploading users into `raw_dict["modified_users"]` and joins them in `info.user`.
 """
-function get_case_status(creds::XnatCredentials, project_id::AbstractString, subject_id::AbstractString)::CaseStatusInfo
+function get_case_status(
+    creds::XnatCredentials,
+    project_id::AbstractString,
+    subject_id::AbstractString;
+    include_file_users::Bool=true,
+    resolve_subject::Bool=true
+)::CaseStatusInfo
     p = resolve_project_id(project_id)
-    s = resolve_subject_label(creds, p, subject_id)
+    s = resolve_subject ? resolve_subject_label(creds, p, subject_id) : String(strip(subject_id))
     if isempty(p) || isempty(s)
         return CaseStatusInfo(:RAW)
     end
 
-    # 1. Check if status.json exists in ANNOTATIONS resource
-    status_url = "/data/projects/$p/subjects/$s/resources/ANNOTATIONS/files/status.json"
-    status_json = _xnat_get_json(creds, status_url; timeout=5.0)
-    if status_json !== nothing
-        st_str = uppercase(get(status_json, "status", ""))
-        user = get(status_json, "modified_by", get(status_json, "assigned_user", get(status_json, "user", "")))
-        ts = get(status_json, "last_modified", "")
-        summary = get(status_json, "summary", Dict{String, Any}())
-        n_les = get(summary, "num_lesions", 0)
-        is_mod = Bool(get(status_json, "manually_modified", st_str in ("PROCESSED", "VALIDATED", "COMPLETED")))
-        
-        st_sym = if is_mod || st_str == "PROCESSED" || st_str == "VALIDATED" || st_str == "COMPLETED"
+    function _parse_status_dict(st_d::AbstractDict, file_users::Vector{String})::CaseStatusInfo
+        st_str = uppercase(string(get(st_d, "status", "")))
+        ts = string(get(st_d, "last_modified", ""))
+        summary = get(st_d, "summary", Dict{String, Any}())
+        n_les = summary isa AbstractDict ? Int(get(summary, "num_lesions", 0)) : 0
+        is_mod = Bool(get(st_d, "manually_modified", st_str in ("PROCESSED", "VALIDATED", "COMPLETED")))
+        users = extract_status_users(st_d)
+        for u in file_users
+            any(x -> lowercase(x) == lowercase(u), users) || push!(users, u)
+        end
+        raw_copy = Dict{String, Any}(string(k) => v for (k, v) in st_d)
+        raw_copy["modified_users"] = users
+        st_sym = if is_mod || st_str in ("PROCESSED", "VALIDATED", "COMPLETED")
             :PROCESSED
         elseif st_str == "IN_PROGRESS"
             :IN_PROGRESS
@@ -307,7 +369,21 @@ function get_case_status(creds::XnatCredentials, project_id::AbstractString, sub
         else
             :RAW
         end
-        return CaseStatusInfo(st_sym, user, ts, n_les, status_json)
+        return CaseStatusInfo(st_sym, join(users, ", "), ts, n_les, raw_copy)
+    end
+
+    # 1. Check if status.json exists in ANNOTATIONS resource
+    status_url = "/data/projects/$p/subjects/$s/resources/ANNOTATIONS/files/status.json"
+    status_json = _xnat_get_json(creds, status_url; timeout=5.0)
+    if status_json !== nothing
+        f_users = String[]
+        if include_file_users
+            af = _xnat_get_json(creds, "/data/projects/$p/subjects/$s/resources/ANNOTATIONS/files?format=json"; timeout=4.0)
+            mf = _xnat_get_json(creds, "/data/projects/$p/subjects/$s/resources/MEDEYE3D/files?format=json"; timeout=4.0)
+            append!(f_users, _extract_xnat_file_users(af))
+            append!(f_users, _extract_xnat_file_users(mf))
+        end
+        return _parse_status_dict(status_json, f_users)
     end
 
     # 2. Check if preprocessed HDF5 file exists in MEDEYE3D resource
@@ -318,7 +394,9 @@ function get_case_status(creds::XnatCredentials, project_id::AbstractString, sub
             for r in results
                 fname = get(r, "Name", "")
                 if endswith(fname, ".h5") || endswith(fname, ".hdf5")
-                    return CaseStatusInfo(:PREPROCESSED)
+                    f_users = _extract_xnat_file_users(medeye_files)
+                    raw_d = Dict{String, Any}("modified_users" => f_users)
+                    return CaseStatusInfo(:PREPROCESSED, join(f_users, ", "), "", 0, raw_d)
                 end
             end
         catch; end
@@ -333,14 +411,14 @@ function get_case_status(creds::XnatCredentials, project_id::AbstractString, sub
         # Check experiment ANNOTATIONS
         exp_status = _xnat_get_json(creds, "/data/experiments/$exp_id/resources/ANNOTATIONS/files/status.json"; timeout=5.0)
         if exp_status !== nothing
-            st_str = uppercase(get(exp_status, "status", ""))
-            user = get(exp_status, "modified_by", get(exp_status, "assigned_user", get(exp_status, "user", "")))
-            ts = get(exp_status, "last_modified", "")
-            summary = get(exp_status, "summary", Dict{String, Any}())
-            n_les = get(summary, "num_lesions", 0)
-            is_mod = Bool(get(exp_status, "manually_modified", st_str in ("PROCESSED", "VALIDATED", "COMPLETED")))
-            st_sym = (is_mod || st_str in ("PROCESSED", "VALIDATED", "COMPLETED")) ? :PROCESSED : (st_str == "IN_PROGRESS" ? :IN_PROGRESS : :PREPROCESSED)
-            return CaseStatusInfo(st_sym, user, ts, n_les, exp_status)
+            f_users = String[]
+            if include_file_users
+                af = _xnat_get_json(creds, "/data/experiments/$exp_id/resources/ANNOTATIONS/files?format=json"; timeout=4.0)
+                mf = _xnat_get_json(creds, "/data/experiments/$exp_id/resources/MEDEYE3D/files?format=json"; timeout=4.0)
+                append!(f_users, _extract_xnat_file_users(af))
+                append!(f_users, _extract_xnat_file_users(mf))
+            end
+            return _parse_status_dict(exp_status, f_users)
         end
         
         # Check experiment MEDEYE3D
@@ -350,7 +428,9 @@ function get_case_status(creds::XnatCredentials, project_id::AbstractString, sub
                 for r in exp_medeye["ResultSet"]["Result"]
                     fname = get(r, "Name", "")
                     if endswith(fname, ".h5") || endswith(fname, ".hdf5")
-                        return CaseStatusInfo(:PREPROCESSED)
+                        f_users = _extract_xnat_file_users(exp_medeye)
+                        raw_d = Dict{String, Any}("modified_users" => f_users)
+                        return CaseStatusInfo(:PREPROCESSED, join(f_users, ", "), "", 0, raw_d)
                     end
                 end
             catch; end
@@ -358,6 +438,35 @@ function get_case_status(creds::XnatCredentials, project_id::AbstractString, sub
     end
 
     return CaseStatusInfo(:RAW)
+end
+
+"""
+    fetch_project_case_statuses(creds, project_id, subjects; include_file_users=false) -> Dict{String, CaseStatusInfo}
+
+Concurrently fetches `CaseStatusInfo` (including multi-user modification history) across
+subjects in `project_id` so the XNAT Manager can badge and filter by user / combinations.
+"""
+function fetch_project_case_statuses(
+    creds::XnatCredentials,
+    project_id::AbstractString,
+    subjects::Vector{String};
+    include_file_users::Bool=false
+)::Dict{String, CaseStatusInfo}
+    out = Dict{String, CaseStatusInfo}()
+    isempty(subjects) && return out
+    p = resolve_project_id(project_id)
+    pairs = asyncmap(subjects; ntasks=8) do s
+        info = try
+            get_case_status(creds, p, s; include_file_users=include_file_users, resolve_subject=false)
+        catch
+            CaseStatusInfo(:RAW)
+        end
+        s => info
+    end
+    for (s, info) in pairs
+        out[s] = info
+    end
+    return out
 end
 
 const _xnat_downloader = Ref{Union{Downloads.Downloader, Nothing}}(nothing)
@@ -934,10 +1043,34 @@ function save_annotations_to_xnat(
         return false
     end
 
-    # 1. Upload status.json
+    # 1. Merge prior remote modified_users with current payload so multi-user history is preserved
+    merged_status = deepcopy(status_dict)
+    prior_users = String[]
+    try
+        rem_status = _xnat_get_json(creds, "/data/projects/$p/subjects/$s/resources/ANNOTATIONS/files/status.json"; timeout=4.0)
+        if rem_status !== nothing
+            append!(prior_users, extract_status_users(rem_status))
+        end
+    catch; end
+    cur_users = extract_status_users(merged_status)
+    all_users = copy(prior_users)
+    for u in cur_users
+        any(x -> lowercase(x) == lowercase(u), all_users) || push!(all_users, u)
+    end
+    if !isempty(all_users)
+        merged_status["modified_users"] = all_users
+        if get(merged_status, "manually_modified", false) == true && isempty(strip(string(get(merged_status, "modified_by", ""))))
+            merged_status["modified_by"] = last(all_users)
+        end
+        sum_d = get(merged_status, "summary", nothing)
+        if sum_d isa AbstractDict
+            sum_d["modified_users"] = all_users
+        end
+    end
+
     tmp_json = tempname() * ".json"
     open(tmp_json, "w") do io
-        JSON.print(io, status_dict, 2)
+        JSON.print(io, merged_status, 2)
     end
     status_ok = upload_file(creds, "/data/projects/$p/subjects/$s/resources/ANNOTATIONS/files/status.json?overwrite=true&inbody=true", tmp_json; content_type="application/json")
     try rm(tmp_json, force=true) catch end

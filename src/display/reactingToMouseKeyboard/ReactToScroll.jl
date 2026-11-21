@@ -8,7 +8,7 @@ module ReactToScroll
 using GLFW, Logging
 using ..DisplayWords, ..ForDisplayStructs, ..TextureManag, ..DataStructs, ..StructsManag, ..ShadersAndVerticiesForSupervoxels, ..ShadersAndVerticiesForLine, ..MakieEvents
 
-export reactToScroll, reactToScrollZoom, reactToScrollMultiPanel!
+export reactToScroll, reactToScrollZoom, reactToScrollMultiPanel!, reactToBrushOrSphereScroll
 export registerMouseScrollFunctions
 
 # Module-local PET/CT blend tracking for Ctrl+scroll
@@ -32,15 +32,18 @@ function registerMouseScrollFunctions(window::GLFW.Window, mainChannel::Base.Cha
                       is_shift_down_ref[])
         ctrl_down = GLFW.GetKey(window, GLFW.KEY_LEFT_CONTROL) == GLFW.PRESS || GLFW.GetKey(window, GLFW.KEY_RIGHT_CONTROL) == GLFW.PRESS
         alt_down = GLFW.GetKey(window, GLFW.KEY_LEFT_ALT) == GLFW.PRESS || GLFW.GetKey(window, GLFW.KEY_RIGHT_ALT) == GLFW.PRESS
+        tab_down = (GLFW.GetKey(window, GLFW.KEY_TAB) == GLFW.PRESS || is_tab_down_ref[])
         
-        # NOTE: switchIndex update removed from scroll callback.
-        # The cursor position callback (SetCursorPosCallback) already updates
-        # switchIndex on every mouse move. The synthetic MouseStruct injection
-        # was causing 2× events per scroll tick — the MouseStruct triggered a
-        # full reactToMouseDrag() dispatch (panel detection, pan drag cleanup,
-        # compare mode check) for zero useful work.
-        
-        if ctrl_down && !shift_down && !alt_down
+        if tab_down && !ctrl_down && !alt_down
+            # Tab+scroll: adjust SUV sphere radius in Measurement mode or paint/eraser brush size in Segmentation mode
+            if isready(mainChannel) && length(mainChannel.data) >= 950
+                return
+            end
+            scroll_dir = yoff > 0 ? 1.0 : (yoff < 0 ? -1.0 : 0.0)
+            if scroll_dir != 0.0
+                put!(mainChannel, BrushOrSphereScrollEvent(scroll_dir, window_id, shift_down))
+            end
+        elseif ctrl_down && !shift_down && !alt_down
             # Ctrl+scroll: adjust PET/CT blend (±0.05 per tick)
             delta_blend = Float32(yoff > 0 ? 0.05 : -0.05)
             
@@ -72,6 +75,83 @@ function registerMouseScrollFunctions(window::GLFW.Window, mainChannel::Base.Cha
     end)
 end #registerMouseScrollFunctions
 
+function _resize_measurement_sphere!(MEH, mainStates::Vector{StateDataFields}, delta::Float32)
+    old_val = MEH.active_measurement_radius_mm[]
+    new_val = clamp(old_val + delta, 1.0f0, 100.0f0)
+    MEH.active_measurement_radius_mm[] = new_val
+    if !isempty(mainStates) && mainStates[1].mainForDisplayObjects !== nothing
+        obj = mainStates[1].mainForDisplayObjects
+        active_idx = findfirst(m -> m.is_active, obj.measurements)
+        if active_idx !== nothing
+            obj.measurements[active_idx].radius_mm = new_val
+        end
+    end
+    return new_val
+end
+
+function _adjust_brush_size!(MEH, mainStates::Vector{StateDataFields}, step::Int)
+    cur_width = Int32(1)
+    for st in mainStates
+        if !isempty(st.textureToModifyVec)
+            cur_width = st.textureToModifyVec[1].strokeWidth
+            break
+        end
+        for ts in st.mainForDisplayObjects.listOfTextSpecifications
+            if ts.isEditable || ts.name == "Mask" || ts.name == "manualModif" || ts.isMultiDiscreteMask
+                cur_width = ts.strokeWidth
+                break
+            end
+        end
+        cur_width > 1 && break
+    end
+    new_width = Int32(clamp(Int(cur_width) + step, 1, 20))
+    MEH.reactToChangeBrushSize(MakieEvents.ChangeBrushSizeEvent(Int(new_width)), mainStates)
+    try
+        LMW = MEH._get_lmw()
+        if LMW !== nothing
+            obs_dict = getfield(LMW, :_lmw_observables)
+            if haskey(obs_dict, :slider_brush)
+                sl = obs_dict[:slider_brush]
+                try
+                    sl.selected_index[] = clamp(Int(new_width), 1, length(sl.range[]))
+                catch
+                    try sl.value[] = Int(new_width) catch; end
+                end
+            end
+            if haskey(obs_dict, :redraw_trigger)
+                obs_dict[:redraw_trigger][] = obs_dict[:redraw_trigger][] + 1
+            end
+        end
+    catch; end
+    return new_width
+end
+
+"""
+    reactToBrushOrSphereScroll(data::BrushOrSphereScrollEvent, mainStates::Vector{StateDataFields})
+
+Handles `Tab + Scroll`:
+- In Measurement mode (`MEH.measurements_mode[]`): adjusts `active_measurement_radius_mm[]` (±1 mm, or ±5 mm with Shift).
+- In Segmentation mode (paint or eraser active / `WF_EDIT_MASK`): adjusts paint/eraser `strokeWidth` (1..20 px) and syncs the Brush slider.
+"""
+function reactToBrushOrSphereScroll(data::BrushOrSphereScrollEvent, mainStates::Vector{StateDataFields})
+    MEH = parentmodule(@__MODULE__).SegmentationDisplay.MakieEventHandlers
+    if MEH.measurements_mode[]
+        delta = Float32(data.scroll_delta > 0 ? 1.0f0 : -1.0f0) * (data.coarse ? 5.0f0 : 1.0f0)
+        new_val = _resize_measurement_sphere!(MEH, mainStates, delta)
+        @debug "Tab+Scroll resized SUV measurement sphere radius -> $(new_val) mm"
+        return new_val
+    end
+    is_seg_mode = any(s -> s.valueForMasToSet.is_painting_active, mainStates) ||
+        (isdefined(MEH, :get_workflow_state) && MEH.get_workflow_state() == MEH.ScientificWorkflow.WF_EDIT_MASK)
+    if is_seg_mode
+        step = (data.scroll_delta > 0 ? 1 : -1) * (data.coarse ? 3 : 1)
+        new_w = _adjust_brush_size!(MEH, mainStates, step)
+        @debug "Tab+Scroll resized paint/eraser brush -> $(new_w) px"
+        return new_w
+    end
+    return nothing
+end
+
 """
     reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFields})
 
@@ -86,17 +166,7 @@ function reactToScrollZoom(data::ScrollZoomEvent, mainStates::Vector{StateDataFi
         if is_shift_down_ref[]
             delta *= 5.0f0 # Faster resize
         end
-        old_val = MEH.active_measurement_radius_mm[]
-        new_val = clamp(old_val + delta, 1.0f0, 100.0f0)
-        MEH.active_measurement_radius_mm[] = new_val
-        
-        # Also update the active measurement if any
-        Measurements = parentmodule(@__MODULE__).Measurements
-        obj = mainStates[1].mainForDisplayObjects
-        active_idx = findfirst(m -> m.is_active, obj.measurements)
-        if active_idx !== nothing
-            obj.measurements[active_idx].radius_mm = new_val
-        end
+        _resize_measurement_sphere!(MEH, mainStates, delta)
         return
     end
 

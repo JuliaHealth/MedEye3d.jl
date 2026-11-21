@@ -350,6 +350,61 @@ function _get_current_username()::String
     return isempty(u) ? "user" : u
 end
 
+function _push_unique_user!(out::Vector{String}, val)
+    if val isa AbstractVector
+        for item in val
+            _push_unique_user!(out, item)
+        end
+    elseif val !== nothing
+        for tok in split(string(val), r"[,;]+")
+            u = String(strip(tok))
+            isempty(u) && continue
+            lc = lowercase(u)
+            (lc in ("none", "unknown", "null", "nothing", "unmodified", "na", "n/a")) && continue
+            any(x -> lowercase(x) == lc, out) || push!(out, u)
+        end
+    end
+    return out
+end
+
+"""Read all modifying users recorded in `_meta_/modification_status.json` and `_meta_/lesion_annotations.json`."""
+function read_h5_modification_users(h5_path::String)::Vector{String}
+    users = String[]
+    (!isfile(h5_path) || filesize(h5_path) < 1024) && return users
+    try
+        HDF5.h5open(h5_path, "r") do f
+            if haskey(f, "_meta_/modification_status.json")
+                d = JSON.parse(String(read(f["_meta_/modification_status.json"])))
+                if d isa AbstractDict
+                    _push_unique_user!(users, get(d, "modified_users", nothing))
+                    _push_unique_user!(users, get(d, "modified_by", nothing))
+                end
+            end
+            if haskey(f, "_meta_/lesion_annotations.json")
+                ann = JSON.parse(String(read(f["_meta_/lesion_annotations.json"])))
+                if ann isa AbstractDict
+                    gst = get(ann, "_GLOBAL_APP_STATE", nothing)
+                    gst isa AbstractDict && _push_unique_user!(users, get(gst, "_current_user", nothing))
+                    for (k, v) in ann
+                        startswith(string(k), "_") && continue
+                        v isa AbstractDict || continue
+                        _push_unique_user!(users, get(v, "_last_modified_by", nothing))
+                        eh = get(v, "edit_history", nothing)
+                        if eh isa AbstractVector
+                            for item in eh
+                                item isa AbstractDict || continue
+                                _push_unique_user!(users, get(item, "user", get(item, "editor", nothing)))
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    catch
+    end
+    return users
+end
+
 """Read `_meta_/modification_status.json` from `h5_path`, returning `(manually_modified, modified_by, last_modified)`."""
 function read_h5_modification_status(h5_path::String)::Tuple{Bool, String, String}
     (!isfile(h5_path) || filesize(h5_path) < 1024) && return (false, "", "")
@@ -357,30 +412,47 @@ function read_h5_modification_status(h5_path::String)::Tuple{Bool, String, Strin
         return HDF5.h5open(h5_path, "r") do f
             if haskey(f, "_meta_/modification_status.json")
                 d = JSON.parse(String(read(f["_meta_/modification_status.json"])))
-                return (
-                    Bool(get(d, "manually_modified", false)),
-                    String(get(d, "modified_by", "")),
-                    String(get(d, "last_modified", "")),
-                )
+                users = String[]
+                if d isa AbstractDict
+                    _push_unique_user!(users, get(d, "modified_users", nothing))
+                    _push_unique_user!(users, get(d, "modified_by", nothing))
+                end
+                mod_flag = Bool(get(d, "manually_modified", !isempty(users)))
+                mod_str = mod_flag && !isempty(users) ? join(users, ", ") : String(get(d, "modified_by", ""))
+                return (mod_flag, mod_str, String(get(d, "last_modified", "")))
             end
             has_exp = haskey(f, "BASELINE/PET_Lesions_0.nii.gz_expert") || haskey(f, "_meta_/lesion_annotations.json")
-            return (has_exp, "", "")
+            users = has_exp ? read_h5_modification_users(h5_path) : String[]
+            return (has_exp, join(users, ", "), "")
         end
     catch
         return (false, "", "")
     end
 end
 
-"""Write `_meta_/modification_status.json` into an open `_meta_` HDF5 group."""
-function write_h5_modification_status!(meta_grp, modified::Bool, user::String; ts::String=string(Dates.now()))
-    payload = Dict{String, Any}(
-        "manually_modified" => modified,
-        "modified_by" => modified ? user : "",
-        "last_modified" => modified ? ts : "",
-    )
+"""Write `_meta_/modification_status.json` into an open `_meta_` HDF5 group, preserving prior editors."""
+function write_h5_modification_status!(meta_grp, modified::Bool, user::String; ts::String=string(Dates.now()), extra_users::Vector{String}=String[])
+    users = String[]
     if haskey(meta_grp, "modification_status.json")
+        try
+            old_d = JSON.parse(String(read(meta_grp["modification_status.json"])))
+            if old_d isa AbstractDict
+                _push_unique_user!(users, get(old_d, "modified_users", nothing))
+                _push_unique_user!(users, get(old_d, "modified_by", nothing))
+            end
+        catch; end
         delete_object(meta_grp, "modification_status.json")
     end
+    if modified
+        _push_unique_user!(users, extra_users)
+        _push_unique_user!(users, user)
+    end
+    payload = Dict{String, Any}(
+        "manually_modified" => modified,
+        "modified_by" => modified ? (!isempty(strip(user)) ? strip(user) : join(users, ", ")) : "",
+        "modified_users" => modified ? users : String[],
+        "last_modified" => modified ? ts : "",
+    )
     meta_grp["modification_status.json"] = JSON.json(payload, 2)
 end
 
@@ -654,56 +726,91 @@ function save_display_config(cfg::Dict{String,Any})
     end
 end
 
-function load_custom_options()::Dict{String,Any}
-    h5_opts = _read_meta_json_from_h5("custom_options.json")
-    if !isempty(_custom_opts_cache[]) && h5_opts === nothing
-        return _custom_opts_cache[]
-    end
-    res = Dict{String,Any}()
-    # Merge package/slicer default custom options
-    custom_opts_p = get_custom_opts_path()
-    if isfile(custom_opts_p)
-        try
-            merge!(res, JSON.parse(read(custom_opts_p, String)))
-        catch e
-            @warn "Failed to load custom_options.json: $e"
+function get_global_custom_opts_path()::String
+    env_p = strip(get(ENV, "MEDEYE3D_CUSTOM_OPTIONS_PATH", ""))
+    return !isempty(env_p) ? env_p : GLOBAL_CUSTOM_OPTS_PATH
+end
+
+const _CUSTOM_OPT_SKIP_KEYS = Set(["metadata_version"])
+
+function _is_valid_custom_option_val(v_str::AbstractString)::Bool
+    s = strip(String(v_str))
+    isempty(s) && return false
+    s in ("- select -", "Select...", "(none)") && return false
+    (startswith(s, "(type to filter") || startswith(s, "(no match for ")) && return false
+    return true
+end
+
+"""Merge option lists from `src` into `dest`, checking first that each option is not already present."""
+function _merge_option_lists!(dest::Dict{String,Any}, src::AbstractDict; skip_keys= _CUSTOM_OPT_SKIP_KEYS)::Bool
+    changed = false
+    for (raw_k, raw_v) in src
+        k = string(raw_k)
+        k in skip_keys && continue
+        # Normalize single string only if not a metadata scalar version tag
+        items = raw_v isa AbstractVector ? raw_v : (raw_v isa AbstractString ? Any[raw_v] : Any[])
+        isempty(items) && continue
+        cur_raw = get(dest, k, Any[])
+        cur = cur_raw isa AbstractVector ? Any[string(x) for x in cur_raw if _is_valid_custom_option_val(string(x))] : Any[]
+        for item in items
+            s = String(strip(string(item)))
+            _is_valid_custom_option_val(s) || continue
+            if !(s in cur)
+                push!(cur, s)
+                changed = true
+            end
+        end
+        if !isempty(cur)
+            dest[k] = cur
         end
     end
-    # Merge user global custom options
-    if isfile(GLOBAL_CUSTOM_OPTS_PATH)
-        try
-            g_opts = JSON.parse(read(GLOBAL_CUSTOM_OPTS_PATH, String))
-            for (k, v) in g_opts
-                cur = get(res, k, Any[])
-                res[k] = unique(vcat(cur, v))
+    return changed
+end
+
+function _normalize_custom_opts_dict(raw::AbstractDict)::Dict{String,Any}
+    out = Dict{String,Any}()
+    _merge_option_lists!(out, raw)
+    return out
+end
+
+function _read_user_disk_custom_options()::Dict{String,Any}
+    res = Dict{String,Any}()
+    g_path = get_global_custom_opts_path()
+    # Read package/assets custom options when running without test path override
+    if isempty(strip(get(ENV, "MEDEYE3D_CUSTOM_OPTIONS_PATH", "")))
+        custom_opts_p = get_custom_opts_path()
+        if isfile(custom_opts_p)
+            try
+                parsed = JSON.parse(read(custom_opts_p, String))
+                parsed isa AbstractDict && _merge_option_lists!(res, parsed)
+            catch e
+                @warn "Failed to load custom_options.json: $e"
             end
+        end
+    end
+    if isfile(g_path)
+        try
+            g_opts = JSON.parse(read(g_path, String))
+            g_opts isa AbstractDict && _merge_option_lists!(res, g_opts)
         catch e
             @warn "Failed to load global custom options: $e"
         end
     end
-    # Merge active HDF5 custom options
-    if h5_opts isa AbstractDict
-        for (k, v) in h5_opts
-            cur = get(res, string(k), Any[])
-            res[string(k)] = v isa AbstractVector ? unique(vcat(cur, v)) : unique(vcat(cur, [v]))
-        end
-    end
-    for (k, v) in _custom_opts_cache[]
-        cur = get(res, string(k), Any[])
-        res[string(k)] = v isa AbstractVector ? unique(vcat(cur, v)) : unique(vcat(cur, [v]))
-    end
-    _custom_opts_cache[] = res
-    return _custom_opts_cache[]
+    return res
 end
 
-function save_custom_options!(db::Dict)
-    _custom_opts_cache[] = copy(db)
-    _write_meta_json_to_h5!("custom_options.json", db)
-    for p in [GLOBAL_CUSTOM_OPTS_PATH, get_custom_opts_path()]
+function _save_user_disk_custom_options!(db::AbstractDict)
+    targets = if !isempty(strip(get(ENV, "MEDEYE3D_CUSTOM_OPTIONS_PATH", "")))
+        String[get_global_custom_opts_path()]
+    else
+        unique(String[get_global_custom_opts_path(), get_custom_opts_path()])
+    end
+    clean = _normalize_custom_opts_dict(db)
+    for p in targets
         try
             mkpath(dirname(p))
             open(p, "w") do f
-                JSON.print(f, db, 4)
+                JSON.print(f, clean, 4)
             end
         catch e
             @warn "Failed to save custom options to $p: $e"
@@ -711,16 +818,108 @@ function save_custom_options!(db::Dict)
     end
 end
 
+"""Scan loaded lesion annotations for custom dropdown selections missing from built-in schema options."""
+function _extract_custom_options_from_db(db::AbstractDict, schema_list::AbstractVector)::Dict{String,Any}
+    out = Dict{String,Any}()
+    dropdown_qs = [q for q in schema_list if !isempty(q.options) && q.options[1] != "slider"]
+    isempty(dropdown_qs) && return out
+    builtin_sets = Dict(q.short => Set(String[strip(o) for o in q.options]) for q in dropdown_qs)
+    for (k, v) in db
+        startswith(string(k), "_") && continue
+        v isa AbstractDict || continue
+        for q in dropdown_qs
+            haskey(v, q.short) || continue
+            val_s = String(strip(string(v[q.short])))
+            _is_valid_custom_option_val(val_s) || continue
+            (val_s in builtin_sets[q.short]) && continue
+            cur = get!(out, q.short, Any[])
+            if !(val_s in cur)
+                push!(cur, val_s)
+            end
+            alias_k = get(DISPLAY_LABEL_OVERRIDES, q.short, "")
+            if !isempty(alias_k)
+                cur_a = get!(out, alias_k, Any[])
+                !(val_s in cur_a) && push!(cur_a, val_s)
+            end
+        end
+    end
+    return out
+end
+
+function _canonical_field_options(opts_db::AbstractDict, q_short::String, builtin_opts::Vector{String}=String[])::Vector{String}
+    out = String[]
+    builtin_set = Set(String[strip(o) for o in builtin_opts])
+    for key in (q_short, get(DISPLAY_LABEL_OVERRIDES, q_short, ""))
+        isempty(key) && continue
+        raw_list = get(opts_db, key, Any[])
+        raw_list isa AbstractVector || continue
+        for item in raw_list
+            s = String(strip(string(item)))
+            _is_valid_custom_option_val(s) || continue
+            (s in builtin_set) && continue
+            !(s in out) && push!(out, s)
+        end
+    end
+    return out
+end
+
+function load_custom_options(; h5_path::String = _get_active_h5_path(), persist_new_from_h5::Bool = true)::Dict{String,Any}
+    res = _read_user_disk_custom_options()
+    disk_before = deepcopy(res)
+    h5_opts = _read_meta_json_from_h5("custom_options.json", h5_path)
+    if !isempty(_custom_opts_cache[]) && h5_opts === nothing && isempty(res)
+        return _custom_opts_cache[]
+    end
+    if !isempty(_custom_opts_cache[])
+        _merge_option_lists!(res, _custom_opts_cache[])
+    end
+    if h5_opts isa AbstractDict
+        _merge_option_lists!(res, h5_opts)
+        if persist_new_from_h5
+            if _merge_option_lists!(disk_before, h5_opts)
+                _save_user_disk_custom_options!(disk_before)
+            end
+        end
+    end
+    _custom_opts_cache[] = res
+    return _custom_opts_cache[]
+end
+
+function _prepare_custom_options_for_h5(db::AbstractDict; h5_path::String = "")::Dict{String,Any}
+    merged = Dict{String,Any}()
+    if !isempty(h5_path) && isfile(h5_path)
+        existing_h5 = _read_meta_json_from_h5("custom_options.json", h5_path)
+        existing_h5 isa AbstractDict && _merge_option_lists!(merged, existing_h5)
+    end
+    _merge_option_lists!(merged, load_custom_options(; h5_path=h5_path, persist_new_from_h5=false))
+    if !isempty(_schema_cache[])
+        _merge_option_lists!(merged, _extract_custom_options_from_db(db, _schema_cache[]))
+    else
+        _merge_option_lists!(merged, _extract_custom_options_from_db(db, _builtin_schema()))
+    end
+    return merged
+end
+
+function save_custom_options!(db::Dict)
+    clean = _normalize_custom_opts_dict(db)
+    _custom_opts_cache[] = clean
+    _write_meta_json_to_h5!("custom_options.json", clean)
+    _save_user_disk_custom_options!(clean)
+end
+
 function add_global_custom_option(category::String, option::String)
-    (isempty(category) || isempty(option)) && return
+    cat = String(strip(category))
+    opt = String(strip(option))
+    (isempty(cat) || !_is_valid_custom_option_val(opt)) && return
     opts = load_custom_options()
-    cur = get(opts, category, Any[])
-    if !(option in cur)
-        push!(cur, option)
-        opts[category] = cur
+    cur = get(opts, cat, Any[])
+    cur_vec = cur isa AbstractVector ? Any[string(x) for x in cur] : Any[]
+    if !(opt in cur_vec)
+        push!(cur_vec, opt)
+        opts[cat] = cur_vec
     end
     save_custom_options!(opts)
-    @info "Persisted global custom option: [$category] -> '$option'"
+    @info "Persisted global custom option: [$cat] -> '$opt'"
 end
 
 function load_global_custom_fields()::Dict{String,String}
@@ -2157,11 +2356,16 @@ function persist_to_active_dataset_h5!(db::Dict, h5_path::String)
                     end
                     meta_grp["metadata_presets.json"] = JSON.json(_metadata_presets_cache[], 2)
                 end
-                if !isempty(_custom_opts_cache[])
-                    if haskey(meta_grp, "custom_options.json")
-                        delete_object(meta_grp, "custom_options.json")
-                    end
-                    meta_grp["custom_options.json"] = JSON.json(_custom_opts_cache[], 2)
+                merged_co = _prepare_custom_options_for_h5(db; h5_path="")
+                if haskey(meta_grp, "custom_options.json")
+                    try
+                        raw_co = JSON.parse(String(read(meta_grp["custom_options.json"])))
+                        raw_co isa AbstractDict && _merge_option_lists!(merged_co, raw_co)
+                    catch; end
+                    delete_object(meta_grp, "custom_options.json")
+                end
+                if !isempty(merged_co)
+                    meta_grp["custom_options.json"] = JSON.json(merged_co, 2)
                 end
                 if !isempty(_custom_fields_cache[])
                     if haskey(meta_grp, "custom_fields.json")
@@ -2371,6 +2575,10 @@ function save_annotations_hdf5(db::Dict, path::String=DEFAULT_HDF5_PATH)
             meta_grp = create_group(file, "_meta_")
             clean_db = _sanitize_annotation_db(db)
             meta_grp["lesion_annotations.json"] = JSON.json(clean_db, 2)
+            merged_co = _prepare_custom_options_for_h5(db; h5_path="")
+            if !isempty(merged_co)
+                meta_grp["custom_options.json"] = JSON.json(merged_co, 2)
+            end
         end
         @debug "Annotations saved to HDF5 → $path ($(length(db)) entries)"
     catch e
@@ -4598,15 +4806,123 @@ function create_metadata_window(
     # ── XNAT Case Navigator ──────────────────────────────────────────────────
     sec_xnat = begin_section!("XNAT Case Navigator"; default_open=false)
     
+    function _format_xnat_subject_entry(status::Symbol, users::Vector{String}, subj::AbstractString)::String
+        u_clean = String[]
+        _push_unique_user!(u_clean, users)
+        u_str = join(u_clean, ", ")
+        badge = if status == :PROCESSED
+            isempty(u_str) ? "[OK]" : "[OK: $u_str]"
+        elseif status == :IN_PROGRESS
+            isempty(u_str) ? "[..]" : "[..: $u_str]"
+        elseif status == :PREPROCESSED
+            isempty(u_str) ? "[PRE]" : "[PRE: $u_str]"
+        else
+            "[RAW]"
+        end
+        return "$badge $subj"
+    end
+
+    function build_xnat_filter_options(subject_users::AbstractDict{String, Vector{String}})::Vector{String}
+        opts = String[
+            "All Cases",
+            "Preprocessed (PRE + OK)",
+            "Unreviewed (PRE Only)",
+            "Validated / Modified (OK)",
+            "Multi-User Modified (>=2 Users)",
+            "Raw Scans (RAW)"
+        ]
+        all_users_map = Dict{String, String}()
+        observed_combos = Set{Vector{String}}()
+        for (_, us) in subject_users
+            clean_us = String[]
+            _push_unique_user!(clean_us, us)
+            canonical = String[]
+            for u in clean_us
+                lc = lowercase(u)
+                if !haskey(all_users_map, lc)
+                    all_users_map[lc] = u
+                end
+                canon = all_users_map[lc]
+                !(canon in canonical) && push!(canonical, canon)
+            end
+            if length(canonical) >= 2
+                sort!(canonical, by=lowercase)
+                push!(observed_combos, canonical)
+            end
+        end
+        sorted_users = sort(collect(values(all_users_map)), by=lowercase)
+        for u in sorted_users
+            lbl = "User: $u"
+            !(lbl in opts) && push!(opts, lbl)
+        end
+
+        combo_strs = Set{String}()
+        # Add every observed multi-user combination first
+        for combo in sort(collect(observed_combos), by = c -> (length(c), lowercase(join(c, " + "))))
+            lbl = "Users: " * join(combo, " + ")
+            push!(combo_strs, lbl)
+            push!(opts, lbl)
+        end
+        # Also present all pairwise (and triple when <= 5 users) combinations of discovered users
+        pair_pool = length(sorted_users) <= 8 ? sorted_users : sorted_users[1:8]
+        for i in 1:length(pair_pool)
+            for j in (i+1):length(pair_pool)
+                lbl = "Users: $(pair_pool[i]) + $(pair_pool[j])"
+                if !(lbl in combo_strs)
+                    push!(combo_strs, lbl)
+                    push!(opts, lbl)
+                end
+            end
+        end
+        if length(sorted_users) >= 3 && length(sorted_users) <= 5
+            for i in 1:length(sorted_users), j in (i+1):length(sorted_users), k in (j+1):length(sorted_users)
+                lbl = "Users: $(sorted_users[i]) + $(sorted_users[j]) + $(sorted_users[k])"
+                if !(lbl in combo_strs)
+                    push!(combo_strs, lbl)
+                    push!(opts, lbl)
+                end
+            end
+        end
+        return opts
+    end
+
+    function matches_xnat_filter(entry_str::AbstractString, filt::AbstractString, subj_users::Vector{String})::Bool
+        f = String(strip(filt))
+        if isempty(f) || f == "All Cases"
+            return true
+        elseif f == "Preprocessed (PRE + OK)"
+            return !occursin("[RAW]", entry_str)
+        elseif f == "Unreviewed (PRE Only)" || f == "Unreviewed (PRE)"
+            return occursin("[PRE", entry_str) || occursin("PREPROCESSED", entry_str)
+        elseif f == "Validated / Modified (OK)" || f == "Validated (OK)"
+            return occursin("[OK", entry_str) || occursin("PROCESSED", entry_str)
+        elseif f == "Multi-User Modified (>=2 Users)"
+            return length(subj_users) >= 2
+        elseif f == "Raw Scans (RAW)"
+            return occursin("[RAW]", entry_str) || occursin("RAW", entry_str)
+        elseif startswith(f, "User: ")
+            target_u = lowercase(strip(f[7:end]))
+            return any(u -> lowercase(strip(u)) == target_u, subj_users)
+        elseif startswith(f, "Users: ")
+            req_users = [lowercase(strip(p)) for p in split(f[8:end], "+") if !isempty(strip(p))]
+            isempty(req_users) && return true
+            low_u = [lowercase(strip(u)) for u in subj_users]
+            return all(r -> r in low_u, req_users)
+        end
+        return true
+    end
+
     xnat_server_status_text = Observable("XNAT: Checking...")
     xnat_server_status_color = Observable(RGBf(0.8, 0.7, 0.2))
     xnat_projects = Observable(copy(ALLOWED_XNAT_PROJECTS))
-    xnat_filter_opts = String["All Cases", "Unreviewed (PRE)", "Validated (OK)", "Raw Scans (RAW)"]
+    xnat_filter_opts = Observable(build_xnat_filter_options(Dict{String, Vector{String}}()))
     xnat_subjects = Observable(String["(Select Project First)"])
     xnat_subject_status_text = Observable("Status: --")
     xnat_subject_status_color = Observable(RGBf(0.7, 0.7, 0.7))
     raw_subjects_cache = Dict{String, Vector{String}}()
+    raw_subject_users_cache = Dict{String, Dict{String, Vector{String}}}()
     is_filtering_patients = Ref(false)
+    is_updating_filter_opts = Ref(false)
 
     xnat_r1 = nr!()
     lbl_xnat_status = Label(g[xnat_r1, 1:3], xnat_server_status_text, fontsize = 10, color = xnat_server_status_color, halign = :left, tellwidth = false)
@@ -4617,7 +4933,7 @@ function create_metadata_window(
     lbl_proj = Label(g[xnat_r2, 1], "Project:", fontsize = 10, halign = :left, color = SUBTXT)
     menu_xnat_proj = searchable_menu(g, xnat_r2, 2; options = xnat_projects, default = "FDM_DPI-2024-7-KRN_Prostata_bimodal_PIPELINE", fts_table = "", allow_custom = false, fontsize = 10)
     lbl_filt = Label(g[xnat_r2, 3], "Filter:", fontsize = 10, halign = :right, color = SUBTXT)
-    menu_xnat_filter = searchable_menu(g, xnat_r2, 4; options = xnat_filter_opts, default = "All Cases", fts_table = "", allow_custom = false, fontsize = 9)
+    menu_xnat_filter = searchable_menu(g, xnat_r2, 4; options = xnat_filter_opts, default = "All Cases", fts_table = "", allow_custom = false, suppress_selection_ref = is_updating_filter_opts, fontsize = 9)
     rowsize!(g, xnat_r2, Fixed(28)); register_fixed_row!(xnat_r2, 28)
 
     xnat_r3 = nr!()
@@ -4724,20 +5040,38 @@ function create_metadata_window(
         end
     end
 
+    function _refresh_xnat_filter_options!(proj::AbstractString)
+        users_map = get(raw_subject_users_cache, String(proj), Dict{String, Vector{String}}())
+        new_opts = build_xnat_filter_options(users_map)
+        if xnat_filter_opts[] != new_opts
+            cur_sel = menu_xnat_filter.selection[] === nothing ? "All Cases" : String(menu_xnat_filter.selection[])
+            is_updating_filter_opts[] = true
+            try
+                xnat_filter_opts[] = new_opts
+                target_sel = (cur_sel in new_opts) ? cur_sel : "All Cases"
+                _set_menu_selection_string!(menu_xnat_filter, target_sel; all_opts = xnat_filter_opts)
+            finally
+                is_updating_filter_opts[] = false
+            end
+        end
+    end
+
     function _filter_and_set_subjects!(; query::AbstractString="")
         proj = menu_xnat_proj.selection[]
         (proj === nothing || !haskey(raw_subjects_cache, proj)) && return
         all_s = raw_subjects_cache[proj]
+        users_map = get(raw_subject_users_cache, proj, Dict{String, Vector{String}}())
         filt = menu_xnat_filter.selection[]
-        
-        filtered = if filt == "Unreviewed (PRE)"
-            filter(s -> occursin("[PRE]", s) || occursin("PREPROCESSED", s), all_s)
-        elseif filt == "Validated (OK)"
-            filter(s -> occursin("[OK", s) || occursin("PROCESSED", s), all_s)
-        elseif filt == "Raw Scans (RAW)"
-            filter(s -> occursin("[RAW]", s) || occursin("RAW", s), all_s)
-        else
+        filt_str = filt === nothing ? "All Cases" : String(filt)
+
+        filtered = if filt_str == "All Cases"
             all_s
+        else
+            filter(all_s) do entry_s
+                sid = _parse_subject_id(entry_s)
+                subj_u = get(users_map, sid, String[])
+                matches_xnat_filter(entry_s, filt_str, subj_u)
+            end
         end
         
         q = strip(query)
@@ -4753,6 +5087,49 @@ function create_metadata_window(
         finally
             is_filtering_patients[] = false
         end
+    end
+
+    schema_opts_obs = Dict{String, Observable{Vector{String}}}()
+    schema_builtin_opts = Dict{String, Vector{String}}()
+
+    function _sync_case_custom_options!(h5_path::String = _get_active_h5_path(), db::AbstractDict = lesion_db[])
+        opts = load_custom_options(; h5_path = h5_path, persist_new_from_h5 = true)
+        db_extra = _extract_custom_options_from_db(db, schema)
+        if !isempty(db_extra)
+            disk_cur = _read_user_disk_custom_options()
+            _merge_option_lists!(opts, db_extra)
+            _custom_opts_cache[] = opts
+            if _merge_option_lists!(disk_cur, db_extra)
+                _save_user_disk_custom_options!(disk_cur)
+            end
+        end
+        prev_sync = is_syncing_selection[]
+        is_syncing_selection[] = true
+        try
+            for (q_short, obs) in schema_opts_obs
+                builtins = get(schema_builtin_opts, q_short, String[])
+                custom_for_q = _canonical_field_options(opts, q_short, builtins)
+                merged_opts = String["- select -"]
+                for item in builtins
+                    s = String(item)
+                    !(s in merged_opts) && push!(merged_opts, s)
+                end
+                for item in custom_for_q
+                    !(item in merged_opts) && push!(merged_opts, item)
+                end
+                if obs[] != merged_opts
+                    cur_sel = haskey(field_widgets, q_short) && field_widgets[q_short] isa Menu ?
+                        (field_widgets[q_short].selection[] === nothing ? "" : String(field_widgets[q_short].selection[])) : ""
+                    obs[] = merged_opts
+                    if haskey(field_widgets, q_short) && field_widgets[q_short] isa Menu && !isempty(cur_sel) && cur_sel != "- select -"
+                        _set_menu_selection_string!(field_widgets[q_short], cur_sel; all_opts = obs)
+                    end
+                end
+            end
+        finally
+            is_syncing_selection[] = prev_sync
+        end
+        return opts
     end
 
     local _switch_to_hdf5!
@@ -4810,6 +5187,11 @@ function create_metadata_window(
                     end
                 end
                 lesion_db[] = _migrate_db(new_db)
+                try
+                    _sync_case_custom_options!(target_h5, lesion_db[])
+                catch e
+                    @warn "Failed syncing custom options during case switch" e
+                end
 
                 all_lids_set = Set{Int}()
                 for k in keys(lesion_db[])
@@ -5102,12 +5484,22 @@ function create_metadata_window(
 
         mod_user = _get_current_username()
         is_mod = current_has_expert_edits[] || isfile(h5_active)
+        all_mod_users = String[]
+        if !isempty(proj) && !isempty(subj)
+            proj_u_map = get(raw_subject_users_cache, String(proj), Dict{String, Vector{String}}())
+            _push_unique_user!(all_mod_users, get(proj_u_map, subj, String[]))
+        end
+        isfile(h5_active) && _push_unique_user!(all_mod_users, read_h5_modification_users(h5_active))
+        is_mod && _push_unique_user!(all_mod_users, mod_user)
+        mod_users_display = join(all_mod_users, ", ")
+
         status_dict = has_xnat ? Dict{String, Any}(
             "project_id" => proj,
             "subject_id" => subj,
             "status" => is_mod ? "PROCESSED" : "PREPROCESSED",
             "manually_modified" => is_mod,
             "modified_by" => is_mod ? mod_user : "",
+            "modified_users" => is_mod ? all_mod_users : String[],
             "assigned_user" => mod_user,
             "last_modified" => string(Dates.now()),
             "software_version" => "0.5.11",
@@ -5116,6 +5508,7 @@ function create_metadata_window(
                 "has_expert_mask_edits" => is_mod,
                 "manually_modified" => is_mod,
                 "modified_by" => is_mod ? mod_user : "",
+                "modified_users" => is_mod ? all_mod_users : String[],
                 "lymph_nodes_validated" => is_ln_val
             )
         ) : nothing
@@ -5165,8 +5558,24 @@ function create_metadata_window(
                     if ok_annot && ok_h5 && ok_edits
                         save_status_text[] = "Saved to XNAT OK $(Dates.format(Dates.now(), "HH:MM:SS"))"
                         save_status_color[] = RGBf(0.4, 0.9, 0.4)
-                        xnat_subject_status_text[] = is_mod ? "Status: PROCESSED [Modified by $mod_user]" : "Status: PREPROCESSED [Unmodified]"
+                        u_disp = isempty(mod_users_display) ? mod_user : mod_users_display
+                        xnat_subject_status_text[] = is_mod ? "Status: PROCESSED [Modified by $u_disp]" : "Status: PREPROCESSED [Unmodified]"
                         xnat_subject_status_color[] = is_mod ? RGBf(0.4, 0.9, 0.4) : RGBf(0.9, 0.8, 0.2)
+                        if is_mod && !isempty(proj) && !isempty(subj)
+                            umap = get!(raw_subject_users_cache, String(proj), Dict{String, Vector{String}}())
+                            umap[subj] = copy(all_mod_users)
+                            if haskey(raw_subjects_cache, String(proj))
+                                for (idx_s, es) in enumerate(raw_subjects_cache[String(proj)])
+                                    if _parse_subject_id(es) == subj
+                                        raw_subjects_cache[String(proj)][idx_s] = _format_xnat_subject_entry(:PROCESSED, all_mod_users, subj)
+                                        break
+                                    end
+                                end
+                                _build_fts!("patient_fts", raw_subjects_cache[String(proj)])
+                                _refresh_xnat_filter_options!(String(proj))
+                                _filter_and_set_subjects!(query = tb_patient_search.displayed_string[])
+                            end
+                        end
                     else
                         save_status_text[] = "XNAT Upload Failed"
                         save_status_color[] = RGBf(0.9, 0.2, 0.2)
@@ -5419,26 +5828,66 @@ function create_metadata_window(
                 subjs = occursin(r"Lu177"i, proj) ? ["pat6", "pat7", "pat8"] : ["pat1", "pat2", "pat3"]
             end
             
-            # Instantaneous local cache badging — never blocks the UI with hundreds of remote queries
+            # Instantaneous local cache badging first, then async remote XNAT multi-user status refresh
             formatted = String[]
+            users_map = Dict{String, Vector{String}}()
             for s in subjs
                 local_h5 = joinpath(XnatPreloader.get_local_cache_dir(proj, s), "$(s)_preprocessed.h5")
-                badge = if isfile(local_h5) && filesize(local_h5) > 1024
-                    is_mod, mod_u, _ = read_h5_modification_status(local_h5)
-                    if is_mod
-                        isempty(mod_u) ? "[OK]" : "[OK: $mod_u]"
-                    else
-                        "[PRE]"
-                    end
+                if isfile(local_h5) && filesize(local_h5) > 1024
+                    is_mod, _, _ = read_h5_modification_status(local_h5)
+                    u_vec = read_h5_modification_users(local_h5)
+                    users_map[s] = u_vec
+                    st_sym = is_mod ? :PROCESSED : :PREPROCESSED
+                    push!(formatted, _format_xnat_subject_entry(st_sym, is_mod ? u_vec : String[], s))
                 else
-                    "[RAW]"
+                    users_map[s] = String[]
+                    push!(formatted, _format_xnat_subject_entry(:RAW, String[], s))
                 end
-                push!(formatted, "$badge $s")
             end
-            
+
             raw_subjects_cache[proj] = formatted
+            raw_subject_users_cache[proj] = users_map
             _build_fts!("patient_fts", formatted)
+            _refresh_xnat_filter_options!(proj)
             _filter_and_set_subjects!(query = tb_patient_search.displayed_string[])
+
+            if creds !== nothing && !isempty(subjs)
+                Threads.@spawn begin
+                    try
+                        remote_statuses = XnatClient.fetch_project_case_statuses(creds, proj, subjs; include_file_users=true)
+                        @async begin
+                            cur_proj_now = menu_xnat_proj.selection[] === nothing ? "" : String(strip(menu_xnat_proj.selection[]))
+                            (cur_proj_now == proj || isempty(cur_proj_now)) || return
+                            upd_formatted = String[]
+                            upd_users_map = Dict{String, Vector{String}}()
+                            for s in subjs
+                                local_u = get(users_map, s, String[])
+                                info = get(remote_statuses, s, nothing)
+                                merged_u = String[]
+                                _push_unique_user!(merged_u, local_u)
+                                if info !== nothing
+                                    _push_unique_user!(merged_u, XnatClient.extract_status_users(info.raw_dict))
+                                end
+                                upd_users_map[s] = merged_u
+                                st_sym = if info !== nothing
+                                    info.status
+                                else
+                                    local_h5 = joinpath(XnatPreloader.get_local_cache_dir(proj, s), "$(s)_preprocessed.h5")
+                                    (isfile(local_h5) && filesize(local_h5) > 1024) ? (read_h5_modification_status(local_h5)[1] ? :PROCESSED : :PREPROCESSED) : :RAW
+                                end
+                                push!(upd_formatted, _format_xnat_subject_entry(st_sym, merged_u, s))
+                            end
+                            raw_subjects_cache[proj] = upd_formatted
+                            raw_subject_users_cache[proj] = upd_users_map
+                            _build_fts!("patient_fts", upd_formatted)
+                            _refresh_xnat_filter_options!(proj)
+                            _filter_and_set_subjects!(query = tb_patient_search.displayed_string[])
+                        end
+                    catch e
+                        @debug "Background XNAT multi-user status refresh failed" e
+                    end
+                end
+            end
         end
     end
 
@@ -5554,6 +6003,7 @@ function create_metadata_window(
     end
 
     on(menu_xnat_filter.selection) do _
+        is_updating_filter_opts[] && return
         _filter_and_set_subjects!(query = tb_patient_search.displayed_string[])
     end
 
@@ -5573,32 +6023,53 @@ function create_metadata_window(
             u_str = m_u !== nothing ? strip(m_u.captures[1]) : ""
             xnat_subject_status_text[] = isempty(u_str) ? "Status: PROCESSED [Modified]" : "Status: PROCESSED [Modified by $u_str]"
             xnat_subject_status_color[] = RGBf(0.4, 0.9, 0.4)
-        elseif occursin("[PRE]", subj_sel) || occursin("PREPROCESSED", subj_sel)
-            xnat_subject_status_text[] = "Status: PREPROCESSED [Unmodified]"
+        elseif occursin("[PRE", subj_sel) || occursin("PREPROCESSED", subj_sel)
+            m_u = match(r"\[PRE:\s*([^\]]+)\]", subj_sel)
+            u_str = m_u !== nothing ? strip(m_u.captures[1]) : ""
+            xnat_subject_status_text[] = isempty(u_str) ? "Status: PREPROCESSED [Unmodified]" : "Status: PREPROCESSED [Uploaded by $u_str]"
             xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
-        elseif occursin("[..]", subj_sel) || occursin("IN_PROGRESS", subj_sel)
-            xnat_subject_status_text[] = "Status: IN PROGRESS [..]"
+        elseif occursin("[..", subj_sel) || occursin("IN_PROGRESS", subj_sel)
+            m_u = match(r"\[\.\.:\s*([^\]]+)\]", subj_sel)
+            u_str = m_u !== nothing ? strip(m_u.captures[1]) : ""
+            xnat_subject_status_text[] = isempty(u_str) ? "Status: IN PROGRESS [..]" : "Status: IN PROGRESS [By $u_str]"
             xnat_subject_status_color[] = RGBf(0.4, 0.7, 1.0)
         else
             xnat_subject_status_text[] = "Status: RAW [!]"
             xnat_subject_status_color[] = RGBf(0.9, 0.3, 0.3)
         end
 
-        # Query remote XNAT ANNOTATIONS/status.json asynchronously to reflect remote modification user
+        # Query remote XNAT ANNOTATIONS/status.json + file uploaders asynchronously
         creds_q = _active_xnat_creds[]
         if creds_q !== nothing
             Threads.@spawn begin
                 try
-                    info = XnatClient.get_case_status(creds_q, proj, subj)
-                    raw_j = info.raw_json
-                    rem_mod = Bool(get(raw_j, "manually_modified", info.status == :PROCESSED))
-                    rem_user = String(get(raw_j, "modified_by", info.assigned_user))
+                    info = XnatClient.get_case_status(creds_q, proj, subj; include_file_users=true)
+                    raw_d = info.raw_dict
+                    rem_mod = Bool(get(raw_d, "manually_modified", info.status == :PROCESSED))
+                    rem_users = XnatClient.extract_status_users(raw_d)
+                    rem_user = isempty(rem_users) ? info.user : join(rem_users, ", ")
                     @async begin
+                        umap = get!(raw_subject_users_cache, String(proj), Dict{String, Vector{String}}())
+                        merged_u = String[]
+                        _push_unique_user!(merged_u, get(umap, subj, String[]))
+                        _push_unique_user!(merged_u, rem_users)
+                        umap[subj] = merged_u
+                        if haskey(raw_subjects_cache, String(proj))
+                            new_entry = _format_xnat_subject_entry(info.status, merged_u, subj)
+                            for (i_s, es) in enumerate(raw_subjects_cache[String(proj)])
+                                if _parse_subject_id(es) == subj
+                                    raw_subjects_cache[String(proj)][i_s] = new_entry
+                                    break
+                                end
+                            end
+                            _refresh_xnat_filter_options!(String(proj))
+                        end
+                        disp_u = isempty(merged_u) ? rem_user : join(merged_u, ", ")
                         if rem_mod
-                            xnat_subject_status_text[] = isempty(rem_user) ? "Status: PROCESSED [Modified]" : "Status: PROCESSED [Modified by $rem_user]"
+                            xnat_subject_status_text[] = isempty(disp_u) ? "Status: PROCESSED [Modified]" : "Status: PROCESSED [Modified by $disp_u]"
                             xnat_subject_status_color[] = RGBf(0.4, 0.9, 0.4)
                         elseif info.status == :PREPROCESSED
-                            xnat_subject_status_text[] = "Status: PREPROCESSED [Unmodified]"
+                            xnat_subject_status_text[] = isempty(disp_u) ? "Status: PREPROCESSED [Unmodified]" : "Status: PREPROCESSED [Uploaded by $disp_u]"
                             xnat_subject_status_color[] = RGBf(0.9, 0.8, 0.2)
                         end
                     end
@@ -7783,7 +8254,15 @@ function create_metadata_window(
 
         for (pi, (p_lbl, p_min, p_max)) in enumerate(presets[1:min(3, length(presets))])
             btn_p = Button(sub_p[1, pi], label = p_lbl, buttoncolor = BG_PNL, labelcolor = TXT, fontsize = 8, height = 18)
-            on(btn_p.clicks) do _; apply_win(p_min, p_max); end
+            on(btn_p.clicks) do _
+                if up_mod == "CT" && _MEH !== nothing && isdefined(_MEH, :get_ct_preset_windowing)
+                    pkey = pi == 1 ? "CT_SOFT" : (pi == 2 ? "CT_BONE" : "CT_LUNG")
+                    wmin, wmax = _MEH.get_ct_preset_windowing(pkey)
+                    apply_win(wmin, wmax)
+                else
+                    apply_win(p_min, p_max)
+                end
+            end
         end
         
         on(islider.interval) do (min_v, max_v)
@@ -7840,6 +8319,30 @@ function create_metadata_window(
     (apply_spect_win, tb_spect_min, tb_spect_max, islider_spect) = build_compact_modality_block(r_dcespect_hdr, r_dcespect_sl, 3:4, "SPECT", "SPECT", 0.0:0.1:100.0, (0.0f0, 10.0f0), [("0-5", 0.0f0, 5.0f0), ("0-10", 0.0f0, 10.0f0), ("0-20", 0.0f0, 20.0f0)])
     rowsize!(g, r_dcespect_hdr, Fixed(20)); register_fixed_row!(r_dcespect_hdr, 20)
     rowsize!(g, r_dcespect_sl,  Fixed(22)); register_fixed_row!(r_dcespect_sl,  22)
+
+    # Row pairs 5-6: Dedicated F1 (Soft Tissue), F2 (Bone), F3 (Lung) persistent preset sliders
+    ct_preset_hdr_r = nr!()
+    Label(g[ct_preset_hdr_r, 1:4], "-- CT Presets (F1: Soft Tissue | F2: Bone | F3: Lung) --", fontsize = 10, color = ACCENT, halign = :center, tellwidth = false)
+    rowsize!(g, ct_preset_hdr_r, Fixed(20)); register_fixed_row!(ct_preset_hdr_r, 20)
+
+    r_f1f2_hdr = nr!()
+    r_f1f2_sl  = nr!()
+    (apply_ct_soft_win, tb_ct_soft_min, tb_ct_soft_max, islider_ct_soft) = build_compact_modality_block(
+        r_f1f2_hdr, r_f1f2_sl, 1:2, "CT_SOFT", "Soft (F1)", -1500.0:10.0:3000.0, (-160.0f0, 240.0f0),
+        [("Def [-160,240]", -160.0f0, 240.0f0)])
+    (apply_ct_bone_win, tb_ct_bone_min, tb_ct_bone_max, islider_ct_bone) = build_compact_modality_block(
+        r_f1f2_hdr, r_f1f2_sl, 3:4, "CT_BONE", "Bone (F2)", -1500.0:10.0:3000.0, (-450.0f0, 1050.0f0),
+        [("Def [-450,1050]", -450.0f0, 1050.0f0)])
+    rowsize!(g, r_f1f2_hdr, Fixed(20)); register_fixed_row!(r_f1f2_hdr, 20)
+    rowsize!(g, r_f1f2_sl,  Fixed(22)); register_fixed_row!(r_f1f2_sl,  22)
+
+    r_f3_hdr = nr!()
+    r_f3_sl  = nr!()
+    (apply_ct_lung_win, tb_ct_lung_min, tb_ct_lung_max, islider_ct_lung) = build_compact_modality_block(
+        r_f3_hdr, r_f3_sl, 1:2, "CT_LUNG", "Lung (F3)", -1500.0:10.0:3000.0, (-1350.0f0, 150.0f0),
+        [("Def [-1350,150]", -1350.0f0, 150.0f0)])
+    rowsize!(g, r_f3_hdr, Fixed(20)); register_fixed_row!(r_f3_hdr, 20)
+    rowsize!(g, r_f3_sl,  Fixed(22)); register_fixed_row!(r_f3_sl,  22)
 
     end_section!(sec_win)
 
@@ -8419,8 +8922,8 @@ function create_metadata_window(
 
     section_headers = Dict{String, Int}()
     
-    # Load persistent custom options
-    custom_opts_db = load_custom_options()
+    # Load & persist custom options from active/init HDF5 and existing lesion annotations
+    custom_opts_db = _sync_case_custom_options!(init_h5, lesion_db[])
     
     # Registration QC section
     sec_reg_qc = begin_section!("Registration QC"; default_open=false)
@@ -8764,13 +9267,18 @@ function create_metadata_window(
                 rowsize!(g, q_r, Fixed(28)); register_fixed_row!(q_r, 28)
                 field_widgets[q.short] = cert_sl
             else
-                # Inject saved custom options into dropdown
-                saved_opts = unique(vcat(
-                    String[string(s) for s in get(custom_opts_db, q.short, Any[])],
-                    String[string(s) for s in get(custom_opts_db, get(DISPLAY_LABEL_OVERRIDES, q.short, ""), Any[])]
-                ))
-                all_opts = String["- select -"; q.options; saved_opts]
+                # Inject saved custom options into dropdown (without duplicating built-ins)
+                saved_opts = _canonical_field_options(custom_opts_db, q.short, q.options)
+                all_opts = String["- select -"]
+                for item in q.options
+                    !(item in all_opts) && push!(all_opts, item)
+                end
+                for item in saved_opts
+                    !(item in all_opts) && push!(all_opts, item)
+                end
                 opts_obs = Observable(all_opts)
+                schema_opts_obs[q.short] = opts_obs
+                schema_builtin_opts[q.short] = copy(q.options)
                 def_idx = 1
                 if q.short == "Radioligand Type"
                     ga_idx = findfirst(==("68Ga-PSMA-11"), all_opts)
@@ -10352,6 +10860,12 @@ function create_metadata_window(
                     "active_lesion_id" => _safe_strip(active_lesion_id[]),
                     "CT_Min"  => _safe_strip(tb_ct_min.stored_string[]),
                     "CT_Max"  => _safe_strip(tb_ct_max.stored_string[]),
+                    "CT_SOFT_Min" => _safe_strip(tb_ct_soft_min.stored_string[]),
+                    "CT_SOFT_Max" => _safe_strip(tb_ct_soft_max.stored_string[]),
+                    "CT_BONE_Min" => _safe_strip(tb_ct_bone_min.stored_string[]),
+                    "CT_BONE_Max" => _safe_strip(tb_ct_bone_max.stored_string[]),
+                    "CT_LUNG_Min" => _safe_strip(tb_ct_lung_min.stored_string[]),
+                    "CT_LUNG_Max" => _safe_strip(tb_ct_lung_max.stored_string[]),
                     "PET_Min" => _safe_strip(tb_pet_min.stored_string[]),
                     "PET_Max" => _safe_strip(tb_pet_max.stored_string[]),
                     "SPECT_Min" => _safe_strip(tb_spect_min.stored_string[]),
@@ -10458,6 +10972,9 @@ function create_metadata_window(
                 end
             end
             _apply_mod_fallback!("CT", "CT_Min", "CT_Max")
+            _apply_mod_fallback!("CT_SOFT", "CT_SOFT_Min", "CT_SOFT_Max")
+            _apply_mod_fallback!("CT_BONE", "CT_BONE_Min", "CT_BONE_Max")
+            _apply_mod_fallback!("CT_LUNG", "CT_LUNG_Min", "CT_LUNG_Max")
             _apply_mod_fallback!("PET", "PET_Min", "PET_Max"; upgrade_zero_pet=true)
             _apply_mod_fallback!("SPECT", "SPECT_Min", "SPECT_Max")
             _apply_mod_fallback!("T2", "T2_Min", "T2_Max")
@@ -11486,7 +12003,7 @@ function create_metadata_window(
             elseif w isa Menu
                 if val !== nothing && !isempty(string(val))
                     val_str = string(val)
-                    _set_menu_selection_string!(w, val_str)
+                    _set_menu_selection_string!(w, val_str; all_opts = get(schema_opts_obs, q.short, nothing))
                 else
                     if q.short == "Radioligand Type"
                         opts = w.options[]
@@ -12326,6 +12843,12 @@ function create_metadata_window(
             "active_lesion_id" => _safe_strip(active_lesion_id[]),
             "CT_Min" => _safe_strip(tb_ct_min.stored_string[]),
             "CT_Max" => _safe_strip(tb_ct_max.stored_string[]),
+            "CT_SOFT_Min" => _safe_strip(tb_ct_soft_min.stored_string[]),
+            "CT_SOFT_Max" => _safe_strip(tb_ct_soft_max.stored_string[]),
+            "CT_BONE_Min" => _safe_strip(tb_ct_bone_min.stored_string[]),
+            "CT_BONE_Max" => _safe_strip(tb_ct_bone_max.stored_string[]),
+            "CT_LUNG_Min" => _safe_strip(tb_ct_lung_min.stored_string[]),
+            "CT_LUNG_Max" => _safe_strip(tb_ct_lung_max.stored_string[]),
             "PET_Min" => _safe_strip(tb_pet_min.stored_string[]),
             "PET_Max" => _safe_strip(tb_pet_max.stored_string[]),
             "SPECT_Min" => _safe_strip(tb_spect_min.stored_string[]),
@@ -12393,6 +12916,11 @@ function create_metadata_window(
             raw_db = take!(reply)
             db = _migrate_db(raw_db)
             lesion_db[] = db
+            try
+                _sync_case_custom_options!(load_h5, db)
+            catch e
+                @warn "Failed syncing custom options on load" e
+            end
             
             # Apply global state if found
             if haskey(db, "_GLOBAL_APP_STATE")
@@ -13062,11 +13590,18 @@ function create_metadata_window(
     _lmw_observables[:anat_struct_menus] = anat_struct_menus
     _lmw_observables[:btn_xnat_login] = btn_xnat_login
     _lmw_observables[:xnat_proj_menu] = menu_xnat_proj
+    _lmw_observables[:xnat_filter_menu] = menu_xnat_filter
+    _lmw_observables[:xnat_filter_opts] = xnat_filter_opts
     _lmw_observables[:xnat_subj_menu] = menu_xnat_subj
     _lmw_observables[:tb_patient_search] = tb_patient_search
     _lmw_observables[:rank_best_overlap] = _rank_best_overlap_matches
     _lmw_observables[:raw_subjects_cache] = raw_subjects_cache
+    _lmw_observables[:raw_subject_users_cache] = raw_subject_users_cache
     _lmw_observables[:filter_and_set_subjects] = _filter_and_set_subjects!
+    _lmw_observables[:refresh_xnat_filter_options] = _refresh_xnat_filter_options!
+    _lmw_observables[:build_xnat_filter_options] = build_xnat_filter_options
+    _lmw_observables[:matches_xnat_filter] = matches_xnat_filter
+    _lmw_observables[:format_xnat_subject_entry] = _format_xnat_subject_entry
     _lmw_observables[:btn_load_patient] = btn_load_patient
     _lmw_observables[:btn_xnat_prefetch_all] = btn_xnat_prefetch_all
     _lmw_observables[:xnat_prefetch_running] = _xnat_prefetch_running
@@ -13080,10 +13615,21 @@ function create_metadata_window(
     end
     _lmw_observables[:sync_windowing_gui] = _sync_windowing_gui
     _lmw_observables[:apply_global_state] = apply_global_state
+    _lmw_observables[:sync_custom_options] = _sync_case_custom_options!
+    _lmw_observables[:switch_to_hdf5] = _switch_to_hdf5!
     _lmw_observables[:sync_ct_gui] = (min_v, max_v) -> _sync_windowing_gui("CT", min_v, max_v)
     _lmw_observables[:sync_pet_gui] = (min_v, max_v) -> _sync_windowing_gui("PET", min_v, max_v)
     _lmw_observables[:tb_ct_min] = tb_ct_min
     _lmw_observables[:tb_ct_max] = tb_ct_max
+    _lmw_observables[:tb_ct_soft_min] = tb_ct_soft_min
+    _lmw_observables[:tb_ct_soft_max] = tb_ct_soft_max
+    _lmw_observables[:tb_ct_bone_min] = tb_ct_bone_min
+    _lmw_observables[:tb_ct_bone_max] = tb_ct_bone_max
+    _lmw_observables[:tb_ct_lung_min] = tb_ct_lung_min
+    _lmw_observables[:tb_ct_lung_max] = tb_ct_lung_max
+    _lmw_observables[:islider_ct_soft] = islider_ct_soft
+    _lmw_observables[:islider_ct_bone] = islider_ct_bone
+    _lmw_observables[:islider_ct_lung] = islider_ct_lung
     _lmw_observables[:tb_t2_min] = tb_t2_min
     _lmw_observables[:tb_t2_max] = tb_t2_max
     _lmw_observables[:tb_adc_min] = tb_adc_min

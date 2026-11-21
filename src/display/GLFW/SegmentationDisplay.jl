@@ -701,6 +701,7 @@ configuring consumer function on_next! function using multiple dispatch mechanis
 """
 on_next!(stateObjects::Vector{StateDataFields}, data::ScrollEvent) = ReactToScroll.reactToScroll(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ScrollZoomEvent) = ReactToScroll.reactToScrollZoom(data, stateObjects)
+on_next!(stateObjects::Vector{StateDataFields}, data::BrushOrSphereScrollEvent) = ReactToScroll.reactToBrushOrSphereScroll(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::forDisplayObjects) = setUpMainDisplay(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::ForWordsDispStruct) = setUpWordsDisplay(data, stateObjects)
 on_next!(stateObjects::Vector{StateDataFields}, data::CalcDimsStruct) = setUpCalcDimsStruct(data, stateObjects)

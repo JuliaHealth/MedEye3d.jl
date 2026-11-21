@@ -1667,6 +1667,9 @@ end
 
 const DEFAULT_WINDOWING = Dict{String, Vector{Float32}}(
     "CT"      => Float32[-160.0, 240.0],
+    "CT_SOFT" => Float32[-160.0, 240.0],
+    "CT_BONE" => Float32[-450.0, 1050.0],
+    "CT_LUNG" => Float32[-1350.0, 150.0],
     "PET"     => Float32[0.0, 10.0],
     "SPECT"   => Float32[0.0, 10.0],
     "T2"      => Float32[0.0, 1000.0],
@@ -1678,6 +1681,14 @@ const DEFAULT_WINDOWING = Dict{String, Vector{Float32}}(
     "DCE"     => Float32[0.0, 500.0],
     "DYNAMIC" => Float32[0.0, 500.0]
 )
+
+const _CT_PRESET_MODALITIES = ("CT_SOFT", "CT_BONE", "CT_LUNG")
+
+function get_ct_preset_windowing(preset_mod::AbstractString)::Tuple{Float32, Float32}
+    key = uppercase(strip(String(preset_mod)))
+    v = get(current_windowing, key, get(DEFAULT_WINDOWING, key, Float32[-160.0, 240.0]))
+    return length(v) == 2 ? (Float32(v[1]), Float32(v[2])) : (-160.0f0, 240.0f0)
+end
 
 const current_windowing = Dict{String, Vector{Float32}}(
     k => copy(v) for (k, v) in DEFAULT_WINDOWING
@@ -1773,7 +1784,7 @@ function save_persistent_windowing!(; config_path::String = get_global_display_c
         try
             cfg = _read_global_display_config_dict(config_path)
             win_out = Dict{String, Vector{Float64}}()
-            for mod_k in ("CT", "PET", "SPECT", "T2", "ADC", "DWI", "T1", "DCE")
+            for mod_k in ("CT", "CT_SOFT", "CT_BONE", "CT_LUNG", "PET", "SPECT", "T2", "ADC", "DWI", "T1", "DCE")
                 if haskey(current_windowing, mod_k) && length(current_windowing[mod_k]) == 2
                     v = current_windowing[mod_k]
                     win_out[mod_k] = Float64[v[1], v[2]]
@@ -1872,10 +1883,23 @@ function apply_current_windowing_to_states!(stateObjects::Vector{StateDataFields
 end
 
 function reactToWindowing(data::WindowingEvent, stateObjects::Vector{StateDataFields}; persist::Bool=true)
-    target_mod = uppercase(data.modality)
-    _set_windowing_dict!(target_mod, Float32(data.min_val), Float32(data.max_val); mark_user=true)
-    println("[WINDOWING-DISPATCH] Received $(target_mod) -> [$(data.min_val), $(data.max_val)] on $(length(stateObjects)) panels (MRI quad: $(mri_main_multimodal_mode[]))"); flush(stdout)
-    _apply_windowing_to_panel_list!(target_mod, Float32(data.min_val), Float32(data.max_val), stateObjects)
+    target_mod = uppercase(strip(data.modality))
+    min_v = Float32(data.min_val)
+    max_v = Float32(data.max_val)
+    _set_windowing_dict!(target_mod, min_v, max_v; mark_user=true)
+    apply_mod = target_mod in _CT_PRESET_MODALITIES ? "CT" : target_mod
+    if target_mod in _CT_PRESET_MODALITIES
+        _set_windowing_dict!("CT", min_v, max_v; mark_user=true)
+        try
+            LMW = _get_lmw()
+            if LMW !== nothing
+                obs_dict = getfield(LMW, :_lmw_observables)
+                haskey(obs_dict, :sync_windowing_gui) && obs_dict[:sync_windowing_gui]("CT", min_v, max_v)
+            end
+        catch; end
+    end
+    println("[WINDOWING-DISPATCH] Received $(target_mod) -> [$(min_v), $(max_v)] on $(length(stateObjects)) panels (MRI quad: $(mri_main_multimodal_mode[]))"); flush(stdout)
+    _apply_windowing_to_panel_list!(apply_mod, min_v, max_v, stateObjects)
     if persist
         save_persistent_windowing!()
     end

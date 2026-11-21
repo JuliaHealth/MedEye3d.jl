@@ -2,7 +2,7 @@ module ForDisplayStructs
 using Base: Int32, isvisible
 export MouseStruct, parameter_type, Mask, TextureSpec, forDisplayObjects, StateDataFields, KeyboardStruct, KeyInputFields, TextureUniforms, MaskTextureUniforms, ForWordsDispStruct, MainMedEye3d
 export DisplayedVoxels, CustomDisplayedVoxels, DisplayMode, SingleImage, MultiImage, QuadImage, GlShaderAndBufferFields
-export DoubleClickEvent, QuadZoomState, quadZoomStates, quadZoomState, is_shift_down_ref
+export DoubleClickEvent, QuadZoomState, quadZoomStates, quadZoomState, is_shift_down_ref, is_tab_down_ref
 using ColorTypes, Parameters, Observables, GLFW, Dictionaries, FreeTypeAbstraction, Observables
 using ..DataStructs, ..Measurements
 
@@ -307,8 +307,9 @@ const quadZoomStates = [
 ]
 const quadZoomState = quadZoomStates[1]
 
-# Shared modifier key reference for shift-scroll
+# Shared modifier key references for shift-scroll and tab-scroll
 const is_shift_down_ref = Ref(false)
+const is_tab_down_ref = Ref(false)
 
 
 """

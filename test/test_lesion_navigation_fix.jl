@@ -1219,3 +1219,378 @@ end
         MEH.current_tp_index[] = old_cur_tp
     end
 end
+
+@testset "Test 19: Cross-User Custom Options Propagate Through HDF5 Without Duplicates" begin
+    old_cache = deepcopy(LMW._custom_opts_cache[])
+    old_h5_path = MEH.h5_path_ref[]
+    old_h5_save = MEH.h5_save_path_ref[]
+    old_opt_env = get(ENV, "MEDEYE3D_CUSTOM_OPTIONS_PATH", nothing)
+
+    tmp_user_a_cfg = tempname() * "_userA_opts.json"
+    tmp_user_b_cfg = tempname() * "_userB_opts.json"
+    tmp_h5 = tempname() * "_shared_xnat_case.h5"
+
+    try
+        # --- User A creates case HDF5 (initially only having preprocessing metadata_version) ---
+        HDF5.h5open(tmp_h5, "w") do f
+            mg = HDF5.create_group(f, "_meta_")
+            mg["custom_options.json"] = JSON.json(Dict("metadata_version" => "2.0"))
+        end
+        MEH.h5_path_ref[] = tmp_h5
+        MEH.h5_save_path_ref[] = tmp_h5
+
+        # User A adds custom option on Alternative Hypothesis & Lesion Shape and saves HDF5
+        ENV["MEDEYE3D_CUSTOM_OPTIONS_PATH"] = tmp_user_a_cfg
+        empty!(LMW._custom_opts_cache[])
+        LMW.add_global_custom_option("Alternative Hypothesis (False Positive)", "foreign body contamination")
+        LMW.add_global_custom_option("Alt. Hypothesis", "foreign body contamination")
+        LMW.add_global_custom_option("Lesion Shape", "custom helical shape")
+
+        user_a_db = Dict{String,Any}(
+            "1" => Dict{String,Any}(
+                "BaseAnatomy" => "prostate",
+                "Alternative Hypothesis (False Positive)" => "foreign body contamination",
+                "Macroscopic Pattern" => "custom focal pattern",
+            )
+        )
+        LMW.persist_to_active_dataset_h5!(user_a_db, tmp_h5)
+
+        h5_co = HDF5.h5open(tmp_h5, "r") do f
+            JSON.parse(String(read(f["_meta_/custom_options.json"])))
+        end
+        @test haskey(h5_co, "Alternative Hypothesis (False Positive)")
+        @test "foreign body contamination" in h5_co["Alternative Hypothesis (False Positive)"]
+        @test "custom helical shape" in get(h5_co, "Lesion Shape", String[])
+        # Even custom choices selected inside lesion annotations must be persisted into custom_options.json
+        @test "custom focal pattern" in get(h5_co, "Macroscopic Pattern", String[])
+        @test !("2.0" in get(h5_co, "metadata_version", Any[]))
+
+        # --- User B opens User A's HDF5 from XNAT on a separate installation ---
+        ENV["MEDEYE3D_CUSTOM_OPTIONS_PATH"] = tmp_user_b_cfg
+        open(tmp_user_b_cfg, "w") do f
+            JSON.print(f, Dict(
+                "Alternative Hypothesis (False Positive)" => ["userB existing option"]
+            ), 2)
+        end
+        empty!(LMW._custom_opts_cache[])
+
+        @test haskey(LMW._lmw_observables, :sync_custom_options)
+        merged_b = LMW._lmw_observables[:sync_custom_options](tmp_h5, user_a_db)
+
+        # User B retains their own options AND receives User A's options into memory, live menus, and disk config
+        alt_opts_b = merged_b["Alternative Hypothesis (False Positive)"]
+        @test "userB existing option" in alt_opts_b
+        @test "foreign body contamination" in alt_opts_b
+        @test count(==("foreign body contamination"), alt_opts_b) == 1
+
+        user_b_disk = JSON.parse(read(tmp_user_b_cfg, String))
+        @test "userB existing option" in user_b_disk["Alternative Hypothesis (False Positive)"]
+        @test "foreign body contamination" in user_b_disk["Alternative Hypothesis (False Positive)"]
+        @test "custom helical shape" in user_b_disk["Lesion Shape"]
+        @test "custom focal pattern" in user_b_disk["Macroscopic Pattern"]
+
+        fw = LMW._lmw_observables[:field_widgets]
+        alt_menu = fw["Alternative Hypothesis (False Positive)"]
+        macro_menu = fw["Macroscopic Pattern"]
+        @test "foreign body contamination" in alt_menu.options[]
+        @test "userB existing option" in alt_menu.options[]
+        @test "custom focal pattern" in macro_menu.options[]
+        @test !("2.0" in alt_menu.options[])
+
+        # Re-loading / opening again must check existing options first and NEVER duplicate
+        LMW._lmw_observables[:sync_custom_options](tmp_h5, user_a_db)
+        user_b_disk_2 = JSON.parse(read(tmp_user_b_cfg, String))
+        @test count(==("foreign body contamination"), user_b_disk_2["Alternative Hypothesis (False Positive)"]) == 1
+        @test count(==("userB existing option"), user_b_disk_2["Alternative Hypothesis (False Positive)"]) == 1
+        @test count(==("foreign body contamination"), alt_menu.options[]) == 1
+    finally
+        LMW._custom_opts_cache[] = old_cache
+        MEH.h5_path_ref[] = old_h5_path
+        MEH.h5_save_path_ref[] = old_h5_save
+        if old_opt_env === nothing
+            delete!(ENV, "MEDEYE3D_CUSTOM_OPTIONS_PATH")
+        else
+            ENV["MEDEYE3D_CUSTOM_OPTIONS_PATH"] = old_opt_env
+        end
+        try rm(tmp_user_a_cfg; force=true) catch; end
+        try rm(tmp_user_b_cfg; force=true) catch; end
+        try rm(tmp_h5; force=true) catch; end
+    end
+end
+
+@testset "Test 20: Persistent F1 Soft Tissue / F2 Bone / F3 Lung CT Preset Sliders" begin
+    old_win = deepcopy(MEH.current_windowing)
+    old_user_mods = copy(MEH._user_windowing_modalities)
+    old_tp_mods = copy(MEH.tp_modalities)
+    old_mri_main = MEH.mri_main_multimodal_mode[]
+    old_mri_cmp = MEH.mri_compare_mode[]
+    old_cmp = MEH.compare_mode[]
+    old_cur_tp = MEH.current_tp_index[]
+    old_cfg_env = get(ENV, "MEDEYE3D_DISPLAY_CONFIG_PATH", nothing)
+
+    tmp_cfg = tempname() * "_ct_presets_cfg.json"
+    ENV["MEDEYE3D_DISPLAY_CONFIG_PATH"] = tmp_cfg
+
+    try
+        empty!(MEH._user_windowing_modalities)
+        empty!(MEH.tp_modalities)
+        MEH.tp_modalities[0] = "PET"
+        MEH.tp_modalities[1] = "T2"
+        MEH.current_tp_index[] = 0
+        MEH.mri_main_multimodal_mode[] = false
+        MEH.mri_compare_mode[] = false
+        MEH.compare_mode[] = false
+
+        # 1. Verify sliders & bounds exist in Windowing & Image Offsets
+        for sym in (:tb_ct_soft_min, :tb_ct_soft_max, :tb_ct_bone_min, :tb_ct_bone_max,
+                    :tb_ct_lung_min, :tb_ct_lung_max, :islider_ct_soft, :islider_ct_bone, :islider_ct_lung)
+            @test haskey(LMW._lmw_observables, sym)
+        end
+
+        function _mk_state_p(tp_i, specs)
+            calc = MEH.CalcDimsStruct(mainImageQuadVert = ones(Float32, 32), mainQuadVertSize = 128)
+            scr = MEH.FullScrollableDat(dimensionToScroll=3, slicesNumber=Int32(8), currentTpIndex=tp_i)
+            disp = MEH.forDisplayObjects(listOfTextSpecifications=specs)
+            return MEH.StateDataFields(calcDimsStruct=calc, onScrollData=scr, mainForDisplayObjects=disp, currentDisplayedSlice=1)
+        end
+
+        p1_ct = MEH.TextureSpec{Float32}(name="CT", isMainImage=true, studyType="CT", minAndMaxValue=Float32[-160, 240])
+        p1_pet = MEH.TextureSpec{Float32}(name="PET", isMainImage=false, isNuclearMask=true, studyType="PET", minAndMaxValue=Float32[0.1, 10.0])
+        p2_t2 = MEH.TextureSpec{Float32}(name="CT", isMainImage=true, studyType="CT", minAndMaxValue=Float32[0, 1000])
+        states = [_mk_state_p(0, [p1_ct, p1_pet]), _mk_state_p(1, [p2_t2])]
+
+        # 2. Adjusting F1 Soft, F2 Bone, F3 Lung updates CT live (never PET/MRI) & persists to config
+        MEH.reactToWindowing(MakieEvents.WindowingEvent("CT_SOFT", -140.0f0, 280.0f0), states)
+        @test p1_ct.minAndMaxValue == Float32[-140.0, 280.0]
+        @test p1_pet.minAndMaxValue == Float32[0.1, 10.0]
+        @test p2_t2.minAndMaxValue == Float32[0, 1000]
+
+        MEH.reactToWindowing(MakieEvents.WindowingEvent("CT_BONE", -300.0f0, 1200.0f0), states)
+        @test p1_ct.minAndMaxValue == Float32[-300.0, 1200.0]
+
+        MEH.reactToWindowing(MakieEvents.WindowingEvent("CT_LUNG", -1250.0f0, 50.0f0), states)
+        @test p1_ct.minAndMaxValue == Float32[-1250.0, 50.0]
+
+        saved_cfg = JSON.parse(read(tmp_cfg, String))
+        @test saved_cfg["windowing"]["CT_SOFT"] == [-140.0, 280.0]
+        @test saved_cfg["windowing"]["CT_BONE"] == [-300.0, 1200.0]
+        @test saved_cfg["windowing"]["CT_LUNG"] == [-1250.0, 50.0]
+
+        # 3. Simulated restart reloads custom F1/F2/F3 presets & F1/F2/F3 helper reads them
+        empty!(MEH._user_windowing_modalities)
+        for (k, v) in MEH.DEFAULT_WINDOWING
+            MEH.current_windowing[k] = copy(v)
+        end
+        @test MEH.load_persistent_windowing!() == true
+        @test MEH.get_ct_preset_windowing("CT_SOFT") == (-140.0f0, 280.0f0)
+        @test MEH.get_ct_preset_windowing("CT_BONE") == (-300.0f0, 1200.0f0)
+        @test MEH.get_ct_preset_windowing("CT_LUNG") == (-1250.0f0, 50.0f0)
+
+        # 4. Syncing & protecting against _GLOBAL_APP_STATE fallback on case load
+        LMW._lmw_observables[:apply_global_state](Dict(
+            "CT_SOFT_Min" => "-160.0", "CT_SOFT_Max" => "240.0",
+            "CT_BONE_Min" => "-450.0", "CT_BONE_Max" => "1050.0",
+            "CT_LUNG_Min" => "-1350.0", "CT_LUNG_Max" => "150.0"
+        ))
+        @test LMW._lmw_observables[:tb_ct_soft_min].stored_string[] == "-140.0"
+        @test LMW._lmw_observables[:tb_ct_soft_max].stored_string[] == "280.0"
+        @test LMW._lmw_observables[:tb_ct_bone_min].stored_string[] == "-300.0"
+        @test LMW._lmw_observables[:tb_ct_bone_max].stored_string[] == "1200.0"
+        @test LMW._lmw_observables[:tb_ct_lung_min].stored_string[] == "-1250.0"
+        @test LMW._lmw_observables[:tb_ct_lung_max].stored_string[] == "50.0"
+    finally
+        empty!(MEH.tp_modalities); merge!(MEH.tp_modalities, old_tp_mods)
+        empty!(MEH.current_windowing); merge!(MEH.current_windowing, old_win)
+        empty!(MEH._user_windowing_modalities); union!(MEH._user_windowing_modalities, old_user_mods)
+        if haskey(LMW._lmw_observables, :sync_windowing_gui)
+            for mk in ("CT", "CT_SOFT", "CT_BONE", "CT_LUNG")
+                LMW._lmw_observables[:sync_windowing_gui](mk, MEH.current_windowing[mk][1], MEH.current_windowing[mk][2])
+            end
+        end
+        MEH.mri_main_multimodal_mode[] = old_mri_main
+        MEH.mri_compare_mode[] = old_mri_cmp
+        MEH.compare_mode[] = old_cmp
+        MEH.current_tp_index[] = old_cur_tp
+        if old_cfg_env === nothing
+            delete!(ENV, "MEDEYE3D_DISPLAY_CONFIG_PATH")
+        else
+            ENV["MEDEYE3D_DISPLAY_CONFIG_PATH"] = old_cfg_env
+        end
+        try rm(tmp_cfg; force=true) catch; end
+    end
+end
+
+@testset "Test 21: XNAT Manager Multi-User Discovery, Display Badges & Combination Filtering" begin
+    # 1. XnatClient.extract_status_users handles multi-user lists, comma strings & summary
+    raw_meta = Dict{String,Any}(
+        "status" => "PROCESSED",
+        "modified_by" => "bob",
+        "modified_users" => ["alice", "bob"],
+        "uploaded_by" => "alice, carol",
+        "summary" => Dict{String,Any}("modified_users" => ["bob", "carol"])
+    )
+    u_ext = MedEye3d.XnatClient.extract_status_users(raw_meta)
+    @test Set(u_ext) == Set(["alice", "bob", "carol"])
+
+    # 2. HDF5 modification status accumulates multiple users without duplicates
+    tmp_h5 = tempname() * "_multiuser_mod.h5"
+    try
+        HDF5.h5open(tmp_h5, "w") do f
+            f["timepoint_0"] = zeros(Int16, 2, 2, 2)
+            mg = HDF5.create_group(f, "_meta_")
+            LMW.write_h5_modification_status!(mg, true, "alice")
+        end
+        HDF5.h5open(tmp_h5, "r+") do f
+            LMW.write_h5_modification_status!(f["_meta_"], true, "bob")
+        end
+        HDF5.h5open(tmp_h5, "r+") do f
+            LMW.write_h5_modification_status!(f["_meta_"], true, "alice")  # repeat should not duplicate
+        end
+        m_flag, m_by, _ = LMW.read_h5_modification_status(tmp_h5)
+        @test m_flag == true
+        u_list = LMW.read_h5_modification_users(tmp_h5)
+        @test u_list == ["alice", "bob"]
+        @test occursin("alice", m_by) && occursin("bob", m_by)
+
+        # 3. XNAT Manager dynamic filter options & subject list filtering
+        fmt = LMW._lmw_observables[:format_xnat_subject_entry]
+        @test fmt(:PROCESSED, ["alice", "bob"], "Pat2") == "[OK: alice, bob] Pat2"
+        @test fmt(:PREPROCESSED, String[], "Pat1") == "[PRE] Pat1"
+        @test fmt(:RAW, String[], "Pat4") == "[RAW] Pat4"
+
+        proj_menu = LMW._lmw_observables[:xnat_proj_menu]
+        subj_menu = LMW._lmw_observables[:xnat_subj_menu]
+        filt_menu = LMW._lmw_observables[:xnat_filter_menu]
+        raw_cache = LMW._lmw_observables[:raw_subjects_cache]
+        users_cache = LMW._lmw_observables[:raw_subject_users_cache]
+        filt_opts = LMW._lmw_observables[:xnat_filter_opts]
+        refilter! = LMW._lmw_observables[:filter_and_set_subjects]
+        refresh_opts! = LMW._lmw_observables[:refresh_xnat_filter_options]
+
+        test_proj = "TestMultiUserProj"
+        prev_proj = proj_menu.selection[]
+        prev_proj_opts = copy(proj_menu.options[])
+        try
+            users_cache[test_proj] = Dict(
+                "Pat1" => String[],
+                "Pat2" => ["alice", "bob"],
+                "Pat3" => ["alice"],
+                "Pat4" => String[],
+                "Pat5" => ["carol", "bob"]
+            )
+            raw_cache[test_proj] = [
+                fmt(:PREPROCESSED, String[], "Pat1"),
+                fmt(:PROCESSED, ["alice", "bob"], "Pat2"),
+                fmt(:PROCESSED, ["alice"], "Pat3"),
+                fmt(:RAW, String[], "Pat4"),
+                fmt(:PROCESSED, ["carol", "bob"], "Pat5"),
+            ]
+            proj_menu.options[] = unique(vcat(prev_proj_opts, [test_proj]))
+            LMW._set_menu_selection_string!(proj_menu, test_proj)
+            refresh_opts!(test_proj)
+
+            @test "Preprocessed (PRE + OK)" in filt_opts[]
+            @test "User: alice" in filt_opts[]
+            @test "User: bob" in filt_opts[]
+            @test "User: carol" in filt_opts[]
+            @test "Users: alice + bob" in filt_opts[]
+            @test "Users: bob + carol" in filt_opts[]
+            @test "Users: alice + bob + carol" in filt_opts[]
+
+            LMW._set_menu_selection_string!(filt_menu, "Preprocessed (PRE + OK)"; all_opts = filt_opts)
+            refilter!()
+            @test length(subj_menu.options[]) == 4
+            @test !any(s -> occursin("Pat4", s), subj_menu.options[])
+
+            LMW._set_menu_selection_string!(filt_menu, "User: alice"; all_opts = filt_opts)
+            refilter!()
+            @test length(subj_menu.options[]) == 2
+            @test any(s -> occursin("Pat2", s), subj_menu.options[])
+            @test any(s -> occursin("Pat3", s), subj_menu.options[])
+
+            LMW._set_menu_selection_string!(filt_menu, "Users: alice + bob"; all_opts = filt_opts)
+            refilter!()
+            @test length(subj_menu.options[]) == 1
+            @test occursin("Pat2", subj_menu.options[][1])
+            @test occursin("alice, bob", subj_menu.options[][1])
+
+            LMW._set_menu_selection_string!(filt_menu, "Multi-User Modified (>=2 Users)"; all_opts = filt_opts)
+            refilter!()
+            @test length(subj_menu.options[]) == 2
+        finally
+            delete!(users_cache, test_proj)
+            delete!(raw_cache, test_proj)
+            proj_menu.options[] = prev_proj_opts
+            prev_proj !== nothing && LMW._set_menu_selection_string!(proj_menu, string(prev_proj))
+            LMW._set_menu_selection_string!(filt_menu, "All Cases"; all_opts = filt_opts)
+        end
+    finally
+        try rm(tmp_h5; force=true) catch; end
+    end
+end
+
+@testset "Test 22: Tab+Scroll Resizes Paint/Eraser Brush or Measurement SUV Sphere" begin
+    RTS = MedEye3d.ReactToScroll
+    RTK = MedEye3d.ReactOnKeyboard
+    old_tab = MedEye3d.ForDisplayStructs.is_tab_down_ref[]
+    old_meas = MEH.measurements_mode[]
+    old_rad = MEH.active_measurement_radius_mm[]
+    old_wf = MEH.get_workflow_state()
+
+    try
+        # 1. KEY_TAB tracking updates is_tab_down_ref
+        mask_ts = MEH.TextureSpec{Int16}(name="Mask", isMainImage=false, isEditable=true, isMultiDiscreteMask=true, minAndMaxValue=Int16[0, 5])
+        mask_ts.strokeWidth = Int32(3)
+        calc = MEH.CalcDimsStruct(mainImageQuadVert = ones(Float32, 32), mainQuadVertSize = 128)
+        scr = MEH.FullScrollableDat(dimensionToScroll=3, slicesNumber=Int32(8), currentTpIndex=0)
+        disp = MEH.forDisplayObjects(listOfTextSpecifications=[mask_ts])
+        st = MEH.StateDataFields(calcDimsStruct=calc, onScrollData=scr, mainForDisplayObjects=disp, currentDisplayedSlice=1, textureToModifyVec=[mask_ts])
+        states = [st]
+
+        RTK.GLFW.KEY_TAB; scancode_tab = Int32(RTK.GLFW.KEY_TAB)
+        RTK.reactToKeyInput(MedEye3d.ForDisplayStructs.KeyInputFields(scancode=scancode_tab, action=RTK.GLFW.PRESS), states)
+        @test MedEye3d.ForDisplayStructs.is_tab_down_ref[] == true
+        RTK.reactToKeyInput(MedEye3d.ForDisplayStructs.KeyInputFields(scancode=scancode_tab, action=RTK.GLFW.RELEASE), states)
+        @test MedEye3d.ForDisplayStructs.is_tab_down_ref[] == false
+
+        # 2. Segmentation Paint mode (val > 0, is_painting_active = true): Tab+Scroll resizes brush & syncs slider
+        MEH.measurements_mode[] = false
+        MEH.reactToPaintVal(MakieEvents.PaintValEvent(2, true), states)
+        RTS.reactToBrushOrSphereScroll(MakieEvents.BrushOrSphereScrollEvent(1.0, 1, false), states)
+        @test mask_ts.strokeWidth == Int32(4)
+        @test Int(LMW._lmw_observables[:slider_brush].value[]) == 4
+
+        # 3. Segmentation Eraser mode (val == 0, is_painting_active = true): Tab+Scroll also resizes eraser brush
+        MEH.reactToPaintVal(MakieEvents.PaintValEvent(0, true), states)
+        RTS.reactToBrushOrSphereScroll(MakieEvents.BrushOrSphereScrollEvent(-1.0, 1, false), states)
+        @test mask_ts.strokeWidth == Int32(3)
+        RTS.reactToBrushOrSphereScroll(MakieEvents.BrushOrSphereScrollEvent(1.0, 1, true), states)  # coarse (+3)
+        @test mask_ts.strokeWidth == Int32(6)
+
+        # 4. Measurement mode: Tab+Scroll resizes SUV sphere radius (+1mm / +5mm) and active sphere
+        MEH.reactToPaintVal(MakieEvents.PaintValEvent(-1, false), states)
+        MEH.measurements_mode[] = true
+        MEH.active_measurement_radius_mm[] = 10.0f0
+        sph = MedEye3d.Measurements.SphereMeasurement(id=1, center_idx=(1.0f0, 1.0f0, 1.0f0), radius_mm=10.0f0, suv_mean=0.0f0, suv_max=0.0f0, is_active=true)
+        push!(disp.measurements, sph)
+        RTS.reactToBrushOrSphereScroll(MakieEvents.BrushOrSphereScrollEvent(1.0, 1, false), states)
+        @test MEH.active_measurement_radius_mm[] == 11.0f0
+        @test sph.radius_mm == 11.0f0
+        RTS.reactToBrushOrSphereScroll(MakieEvents.BrushOrSphereScrollEvent(-1.0, 1, true), states)  # coarse (-5mm)
+        @test MEH.active_measurement_radius_mm[] == 6.0f0
+        @test sph.radius_mm == 6.0f0
+        @test mask_ts.strokeWidth == Int32(6)  # brush untouched in measurement mode
+
+        # 5. View mode (neither segmentation nor measurement active): Tab+Scroll leaves both unchanged
+        MEH.measurements_mode[] = false
+        MEH.set_workflow_state!(MEH.ScientificWorkflow.WF_LESION_REVIEW)
+        @test RTS.reactToBrushOrSphereScroll(MakieEvents.BrushOrSphereScrollEvent(1.0, 1, false), states) === nothing
+        @test mask_ts.strokeWidth == Int32(6)
+        @test MEH.active_measurement_radius_mm[] == 6.0f0
+    finally
+        MedEye3d.ForDisplayStructs.is_tab_down_ref[] = old_tab
+        MEH.measurements_mode[] = old_meas
+        MEH.active_measurement_radius_mm[] = old_rad
+        MEH.set_workflow_state!(old_wf)
+    end
+end
